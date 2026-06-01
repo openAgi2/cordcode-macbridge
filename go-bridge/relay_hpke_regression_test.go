@@ -17,7 +17,7 @@ func TestRegressionR1_QRContainsBridgeFingerprint(t *testing.T) {
 	priv, _ := ecdh.X25519().GenerateKey(rand.Reader)
 	pub := priv.PublicKey().Bytes()
 
-	qr, _ := GeneratePairingQR("rt_fp_test", pub, "wss://relay.example.com")
+	qr, _ := GeneratePairingQR("route_fp_test", pub, "wss://relay.example.com")
 
 	h := sha256.Sum256(pub)
 	expectedFP := base64.RawURLEncoding.EncodeToString(h[:])
@@ -41,7 +41,7 @@ func TestRegressionR2_ClaimApproveInterop(t *testing.T) {
 	devicePriv, _ := ecdh.X25519().GenerateKey(rand.Reader)
 	devicePub := devicePriv.PublicKey().Bytes()
 
-	qr, _ := GeneratePairingQR("rt_interop", bridgePub, "wss://relay.example.com")
+	qr, _ := GeneratePairingQR("route_interop", bridgePub, "wss://relay.example.com")
 	claim, _ := CreatePairingClaim("dev_interop", "iPhone", devicePub, bridgePub)
 
 	approve, err := ProcessPairingClaim(claim, bridgePriv.Bytes())

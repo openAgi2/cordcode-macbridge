@@ -26,7 +26,7 @@ func newTestMailboxService() *MailboxService {
 // TestMailboxEnqueueFetchAck 测试基本入队/补取/确认流程。
 func TestMailboxEnqueueFetchAck(t *testing.T) {
 	ms := newTestMailboxService()
-	routeID := "rt_test_001"
+	routeID := "route_test_001"
 	deviceID := "dev_test_001"
 
 	// 入队 3 帧
@@ -63,7 +63,7 @@ func TestMailboxEnqueueFetchAck(t *testing.T) {
 // TestMailboxCursorPagination 测试 cursor 分页。
 func TestMailboxCursorPagination(t *testing.T) {
 	ms := newTestMailboxService()
-	routeID := "rt_test_002"
+	routeID := "route_test_002"
 	deviceID := "dev_test_002"
 
 	// 入队 5 帧
@@ -106,7 +106,7 @@ func TestMailboxCursorPagination(t *testing.T) {
 // 方案 §15.4：TTL 到期后 frame 可被淘汰。
 func TestMailboxTTLExpiry(t *testing.T) {
 	ms := newTestMailboxService()
-	routeID := "rt_test_003"
+	routeID := "route_test_003"
 	deviceID := "dev_test_003"
 
 	// 入队
@@ -138,7 +138,7 @@ func TestMailboxTTLExpiry(t *testing.T) {
 // 方案 §15.4：单设备最大 50MB，超出淘汰最早未 ack 的 frame。
 func TestMailboxCapacityEviction(t *testing.T) {
 	ms := newTestMailboxService()
-	routeID := "rt_test_004"
+	routeID := "route_test_004"
 	deviceID := "dev_test_004"
 
 	// 入队大量数据接近上限
@@ -175,7 +175,7 @@ func TestMailboxCapacityEviction(t *testing.T) {
 // Ack 后的 frame 不应出现在后续 fetch 中。
 func TestMailboxCrashSafeAck(t *testing.T) {
 	ms := newTestMailboxService()
-	routeID := "rt_test_005"
+	routeID := "route_test_005"
 	deviceID := "dev_test_005"
 
 	// 入队 3 帧
@@ -220,7 +220,7 @@ func TestMailboxCrashSafeAck(t *testing.T) {
 // TestMailboxEpochMetadata 测试 opaque epoch 元数据保存。
 func TestMailboxEpochMetadata(t *testing.T) {
 	ms := newTestMailboxService()
-	routeID := "rt_test_006"
+	routeID := "route_test_006"
 	deviceID := "dev_test_006"
 
 	epochIdx := uint64(3)
@@ -266,7 +266,7 @@ func TestMailboxEpochMetadata(t *testing.T) {
 // 方案 §7.3 POST /v1/devices/revoke。
 func TestMailboxDeviceRevokeClear(t *testing.T) {
 	ms := newTestMailboxService()
-	routeID := "rt_test_007"
+	routeID := "route_test_007"
 	deviceID := "dev_test_007"
 
 	// 入队数据
@@ -294,7 +294,7 @@ func TestMailboxDeviceRevokeClear(t *testing.T) {
 // TestMailboxNoCrossDevice 测试设备间 mailbox 隔离。
 func TestMailboxNoCrossDevice(t *testing.T) {
 	ms := newTestMailboxService()
-	routeID := "rt_test_008"
+	routeID := "route_test_008"
 	devA := "dev_a"
 	devB := "dev_b"
 
@@ -327,7 +327,7 @@ func TestMailboxNoCrossDevice(t *testing.T) {
 // TestMailboxStats 测试统计信息。
 func TestMailboxStats(t *testing.T) {
 	ms := newTestMailboxService()
-	routeID := "rt_test_009"
+	routeID := "route_test_009"
 	deviceID := "dev_test_009"
 
 	// 不存在的设备

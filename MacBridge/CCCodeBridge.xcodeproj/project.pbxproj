@@ -313,7 +313,7 @@
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.jacklee.CCCodeBridgeTests;
+				PRODUCT_BUNDLE_IDENTIFIER = org.openagi.cccode.macbridge.tests;
 				SDKROOT = macosx;
 				SUPPORTED_PLATFORMS = macosx;
 				SUPPORTS_MACCATALYST = NO;
@@ -338,7 +338,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.jacklee.CCCodeBridge;
+				PRODUCT_BUNDLE_IDENTIFIER = org.openagi.cccode.macbridge;
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = macosx;
 				SUPPORTS_MACCATALYST = NO;
@@ -480,7 +480,7 @@
 					"@executable_path/../Frameworks",
 					"@loader_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.jacklee.CCCodeBridgeTests;
+				PRODUCT_BUNDLE_IDENTIFIER = org.openagi.cccode.macbridge.tests;
 				SDKROOT = macosx;
 				SUPPORTED_PLATFORMS = macosx;
 				SUPPORTS_MACCATALYST = NO;
@@ -505,7 +505,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.jacklee.CCCodeBridge;
+				PRODUCT_BUNDLE_IDENTIFIER = org.openagi.cccode.macbridge;
 				SDKROOT = auto;
 				SUPPORTED_PLATFORMS = macosx;
 				SUPPORTS_MACCATALYST = NO;

@@ -17,7 +17,7 @@ func newTestRelayEventRouter() *RelayEventRouter {
 	presentation := NewPresentationManager()
 
 	router := NewRelayEventRouter(observation, outbox, prekeys, mailbox, presentation)
-	router.SetRouteID("rt_offline_test")
+	router.SetRouteID("route_offline_test")
 	router.SetDeviceGenerationFunc(func(string) uint64 { return 1 })
 	return router
 }

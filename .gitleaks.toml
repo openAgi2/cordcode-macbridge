@@ -1,0 +1,17 @@
+title = "cccode-macbridge gitleaks config"
+
+[allowlist]
+description = "Allow deterministic fixtures and placeholder documentation, not real credentials."
+paths = [
+  '''go-bridge/testdata/''',
+  '''docs/protocol/samples/''',
+]
+regexes = [
+  '''OPENCODE_SERVER_PASSWORD''',
+  '''<your-password>''',
+  '''route_[A-Za-z0-9_-]+''',
+  '''br_route_[A-Za-z0-9_-]+''',
+  '''pk_fixture''',
+  '''dev_fixture''',
+  '''brg_fixture''',
+]

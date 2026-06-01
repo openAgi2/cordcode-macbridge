@@ -386,7 +386,7 @@ func TestRelayEventsRoutesDurableMilestoneToOfflineRelayDevice(t *testing.T) {
 	defer handlers.observation.Stop()
 
 	bridgeID := "brg_offline_route"
-	routeID := "rt_offline_route"
+	routeID := "route_offline_route"
 	deviceID := "dev_offline_route"
 	channelGeneration := uint64(7)
 

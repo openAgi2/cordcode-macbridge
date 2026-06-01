@@ -144,7 +144,7 @@ func TestPairingQRRoundtrip(t *testing.T) {
 	bridgePriv, _ := ecdh.X25519().GenerateKey(rand.Reader)
 	bridgePub := bridgePriv.PublicKey().Bytes()
 
-	qr, err := GeneratePairingQR("rt_test", bridgePub, "wss://relay.example.com")
+	qr, err := GeneratePairingQR("route_test", bridgePub, "wss://relay.example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestPairingQRRoundtrip(t *testing.T) {
 	if qr.Version != 1 {
 		t.Errorf("version = %d, want 1", qr.Version)
 	}
-	if qr.RouteID != "rt_test" {
+	if qr.RouteID != "route_test" {
 		t.Errorf("routeID = %q", qr.RouteID)
 	}
 	if qr.BridgePubKey != base64.StdEncoding.EncodeToString(bridgePub) {

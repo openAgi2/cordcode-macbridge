@@ -29,6 +29,10 @@ Excluded:
 - `.gitignore`
 - `.github/workflows/ci.yml`
 - `docs/protocol/`
+- `docs/backends-and-config.md`
+- `docs/signing-and-release.md`
+- `config.example.env`
+- `.gitleaks.toml`
 
 ## Secret And Private Marker Scan
 
@@ -48,6 +52,7 @@ Result:
 
 CI is configured for pull requests and pushes to `main`:
 
+- Gitleaks secret scan.
 - `go build ./go-bridge`
 - `go test ./go-bridge/... -count=1`
 - `(cd relay-server && go test ./... -count=1)`

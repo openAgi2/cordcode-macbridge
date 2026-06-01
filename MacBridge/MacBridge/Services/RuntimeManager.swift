@@ -785,7 +785,7 @@ class RuntimeManager: ObservableObject {
 }
 
 enum RelayRouteCredentialStore {
-    private static let service = "com.jacklee.CCCodeBridge.relay"
+    private static let service = "org.openagi.cccode.macbridge.relay"
     private static let account = "route-credential"
 
     static func load() -> String {
@@ -940,7 +940,7 @@ private struct RelayActivationIdentity {
 }
 
 private enum RelayActivationIdentityStore {
-    private static let service = "com.jacklee.CCCodeBridge.relay"
+    private static let service = "org.openagi.cccode.macbridge.relay"
     private static let installIDAccount = "activation-install-id"
     private static let signingKeyAccount = "activation-signing-key"
 

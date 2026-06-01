@@ -11,6 +11,19 @@ bridge runtime, and the optional relay service used by iPhone and iPad clients.
 - `relay-server/`: independent Go module for the public encrypted relay service.
 - `docs/protocol/`: canonical protocol compatibility pack.
 
+## Backend Requirements
+
+MacBridge adapts locally installed agent backends. Users must install and
+authenticate the backends they want to expose:
+
+- Claude Code CLI.
+- OpenCode server.
+- Codex app-server.
+
+See `docs/backends-and-config.md` for configuration surfaces and placeholder
+environment examples. No production relay endpoint, route credential, pairing
+token, management token, or OpenCode password is committed in this repository.
+
 ## Build
 
 ```bash
@@ -36,5 +49,6 @@ new clients.
 ## Release Status
 
 This repository is a clean split candidate. Public release still requires owner
-approval for license, signing identity, relay endpoint policy, and distribution
-process.
+approval for license, signing identity, relay endpoint policy, Task E
+integration validation, and distribution process. See `docs/signing-and-release.md`
+and `docs/public-readiness.md`.

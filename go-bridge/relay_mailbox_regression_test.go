@@ -21,7 +21,7 @@ import (
 // RegressionR1_TTLExpiredFramesNotFetchable TTL 过期后 frame 不可获取。
 func TestRegressionR1_TTLExpiredFramesNotFetchable(t *testing.T) {
 	ms := newTestMailboxService()
-	routeID := "rt_r1"
+	routeID := "route_r1"
 	deviceID := "dev_r1"
 
 	envelope := json.RawMessage(`{"sensitive": "data"}`)
@@ -55,7 +55,7 @@ func TestRegressionR1_TTLExpiredFramesNotFetchable(t *testing.T) {
 // RegressionR2_CapacityEvictionBreaksCursorContinuity 容量淘汰导致 cursor 不连续。
 func TestRegressionR2_CapacityEvictionBreaksCursorContinuity(t *testing.T) {
 	ms := newTestMailboxService()
-	routeID := "rt_r2"
+	routeID := "route_r2"
 	deviceID := "dev_r2"
 
 	// 入队 3 个小 frame
@@ -84,7 +84,7 @@ func TestRegressionR3_TamperRejectedAtEnvelopeLevel(t *testing.T) {
 	rand.Read(macToIosKey)
 
 	plaintext := []byte(`{"type":"event","event":"turn_completed","data":{}}`)
-	aad := []byte(`{"version":1,"routeId":"rt_test","counter":1}`)
+	aad := []byte(`{"version":1,"routeId":"route_test","counter":1}`)
 
 	ciphertext, err := SealEnvelope(macToIosKey, 1, aad, plaintext)
 	if err != nil {
@@ -135,7 +135,7 @@ func TestRegressionR4_MailboxClearDoesNotAffectChainHead(t *testing.T) {
 	ps := NewPrekeyStore("brg_fixture")
 	ps.SetIdentityAuthKeyFactory(testIdentityAuthKeyFactory(authKey))
 
-	routeID := "rt_r4"
+	routeID := "route_r4"
 	deviceID := "dev_r4"
 
 	priv := generateTestPrekeyPrivate(t)
@@ -186,7 +186,7 @@ func TestRegressionR4_MailboxClearDoesNotAffectChainHead(t *testing.T) {
 // RegressionR5_AckedFramesNotRedelivered ack 后的 frame 不被重复投递。
 func TestRegressionR5_AckedFramesNotRedelivered(t *testing.T) {
 	ms := newTestMailboxService()
-	routeID := "rt_r5"
+	routeID := "route_r5"
 	deviceID := "dev_r5"
 
 	for i := 0; i < 5; i++ {
@@ -205,7 +205,7 @@ func TestRegressionR5_AckedFramesNotRedelivered(t *testing.T) {
 // RegressionR6_UnackedFramesRecoverableOnReconnect 未 ack 的 frame 在重连后仍可补取。
 func TestRegressionR6_UnackedFramesRecoverableOnReconnect(t *testing.T) {
 	ms := newTestMailboxService()
-	routeID := "rt_r6"
+	routeID := "route_r6"
 	deviceID := "dev_r6"
 
 	for i := 0; i < 3; i++ {
@@ -228,7 +228,7 @@ func TestRegressionR6_UnackedFramesRecoverableOnReconnect(t *testing.T) {
 // RegressionR7_RevokedDeviceAckIsolation 撤销设备的 ack 不影响其他设备。
 func TestRegressionR7_RevokedDeviceAckIsolation(t *testing.T) {
 	ms := newTestMailboxService()
-	routeID := "rt_r7"
+	routeID := "route_r7"
 
 	devA := "dev_a_r7"
 	devB := "dev_b_r7"
@@ -251,7 +251,7 @@ func TestRegressionR7_RevokedDeviceAckIsolation(t *testing.T) {
 // RegressionR8_StatsNoPayloadLeakage mailbox 统计不暴露 payload 内容。
 func TestRegressionR8_StatsNoPayloadLeakage(t *testing.T) {
 	ms := newTestMailboxService()
-	routeID := "rt_r8"
+	routeID := "route_r8"
 	deviceID := "dev_r8"
 
 	sensitive := json.RawMessage(`{"secret": "this should not appear in stats"}`)

@@ -28,7 +28,7 @@ targets:
           chmod +x "$RUNTIME_OUTPUT"
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.jacklee.CCCodeBridge
+        PRODUCT_BUNDLE_IDENTIFIER: org.openagi.cccode.macbridge
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: "CCCode Bridge"
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.developer-tools"
@@ -47,7 +47,7 @@ targets:
       - target: CCCodeBridge
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.jacklee.CCCodeBridgeTests
+        PRODUCT_BUNDLE_IDENTIFIER: org.openagi.cccode.macbridge.tests
         GENERATE_INFOPLIST_FILE: YES
         ARCHS: arm64
         TEST_HOST: ""
