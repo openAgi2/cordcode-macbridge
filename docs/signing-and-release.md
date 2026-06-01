@@ -22,7 +22,6 @@ settings. Do not commit:
 
 Before release:
 
-- Replace `LICENSE` with the owner-approved license.
 - Set final bundle identifiers.
 - Configure hardened runtime and notarization.
 - Run CI, Gitleaks, and the manual Task E integration checklist.

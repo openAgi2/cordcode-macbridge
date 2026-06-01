@@ -49,6 +49,7 @@ new clients.
 ## Release Status
 
 This repository is a clean split candidate. Public release still requires owner
-approval for license, signing identity, relay endpoint policy, Task E
-integration validation, and distribution process. See `docs/signing-and-release.md`
-and `docs/public-readiness.md`.
+approval for signing identity, relay endpoint policy, Task E integration
+validation, and distribution process. The repository is licensed under
+AGPL-3.0-only. See `docs/signing-and-release.md` and
+`docs/public-readiness.md`.

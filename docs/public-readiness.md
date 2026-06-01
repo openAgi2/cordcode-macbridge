@@ -2,7 +2,7 @@
 
 Date: 2026-06-01
 
-This repository is a public-candidate MacBridge repository created by clean source import. It is not marked ready to publish until the owner confirms licensing, signing, release, and final manual product validation.
+This repository is a public-candidate MacBridge repository created by clean source import. It is not marked ready to publish until the owner confirms signing, release, remote secret scanning, and final manual product validation.
 
 ## Scope
 
@@ -23,7 +23,7 @@ Excluded:
 ## Added Repository Files
 
 - `README.md`
-- `LICENSE`
+- `LICENSE` (`AGPL-3.0-only`)
 - `SECURITY.md`
 - `CONTRIBUTING.md`
 - `.gitignore`
@@ -60,8 +60,7 @@ CI is configured for pull requests and pushes to `main`:
 
 ## Remaining Owner Decisions Before Public Release
 
-- Replace the placeholder license with the intended public license.
 - Decide final bundle identifier, signing identity, hardened runtime, and notarization flow.
 - Decide whether `relay-server` deployment docs should include a concrete public endpoint or only self-hosting guidance.
-- Run a dedicated secret scanner such as Gitleaks on the final repository before flipping visibility.
+- Configure the final remote and run a dedicated secret scanner such as Gitleaks on that remote/default branch before flipping visibility.
 - Complete Task E manual integration validation with real MacBridge and real iOS builds.
