@@ -1,6 +1,6 @@
 # Public Readiness Report
 
-Date: 2026-06-01
+Date: 2026-06-11
 
 This repository is a public-candidate MacBridge repository created by clean source import. It is not marked ready to publish until the owner confirms signing, release, remote secret scanning, and final manual product validation.
 
@@ -58,9 +58,15 @@ CI is configured for pull requests and pushes to `main`:
 - `(cd relay-server && go test ./... -count=1)`
 - MacBridge Debug macOS `xcodebuild`
 
+## Remote Verification
+
+- Private remote: `https://github.com/openAgi2/cccode-macbridge`
+- Default branch: `main`
+- Fresh-clone Gitleaks Git-history scan: passed.
+- Fresh-clone Gitleaks working-tree scan: passed.
+
 ## Remaining Owner Decisions Before Public Release
 
 - Decide final bundle identifier, signing identity, hardened runtime, and notarization flow.
-- Decide whether `relay-server` deployment docs should include a concrete public endpoint or only self-hosting guidance.
-- Configure the final remote and run a dedicated secret scanner such as Gitleaks on that remote/default branch before flipping visibility.
-- Complete Task E manual integration validation with real MacBridge and real iOS builds.
+- Decide the production Relay endpoint release-time injection policy.
+- Decide the notarized direct-download or other distribution release channel.

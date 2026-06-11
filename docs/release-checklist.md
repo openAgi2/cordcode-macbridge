@@ -7,7 +7,12 @@ This checklist is for preparing a MacBridge release from the split repository.
 - Confirm `LICENSE` remains AGPL-3.0-only.
 - Confirm bundle identifier and signing team are correct for the release channel.
 - Confirm no real relay endpoint, token, private path, or deployment secret is committed.
-- Run a dedicated secret scan on the final Git tree.
+- Run a dedicated secret scan on the final remote default branch.
+
+Current private-remote verification (2026-06-11):
+
+- `openAgi2/cccode-macbridge`, default branch `main`.
+- Fresh-clone Gitleaks Git-history and working-tree scans passed.
 
 ## Build Gate
 
