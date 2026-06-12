@@ -14,8 +14,9 @@ device trust failures.
 
 ## Public Release Checklist
 
-- No real relay endpoint, route id, provisioning token, password, or Apple Team
-  identifier is committed.
+- Only the documented public Relay endpoint may be committed. No route ID,
+  provisioning token, password, private key, or Apple Team identifier may be
+  committed.
 - `relay-server` production environment files stay outside the repository.
 - Release builds use explicit signing and notarization owned by the publisher.
 - Protocol changes update `docs/protocol/` and the iOS compatibility notes.

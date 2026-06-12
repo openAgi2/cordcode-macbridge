@@ -1,8 +1,10 @@
 # Public Readiness Report
 
-Date: 2026-06-11
+Date: 2026-06-12
 
-This repository is a public-candidate MacBridge repository created by clean source import. It is not marked ready to publish until the owner confirms signing, release, remote secret scanning, and final manual product validation.
+This repository is public. It was created by clean source import and passed
+working-tree and complete-history secret scanning before public visibility was
+enabled.
 
 ## Scope
 
@@ -61,12 +63,20 @@ CI is configured for pull requests and pushes to `main`:
 
 ## Remote Verification
 
-- Private remote: `https://github.com/openAgi2/cccode-macbridge`
+- Public remote: `https://github.com/openAgi2/cccode-macbridge`
 - Default branch: `main`
-- Fresh-clone Gitleaks Git-history scan: passed.
-- Fresh-clone Gitleaks working-tree scan: passed.
+- Gitleaks Git-history scan on all 10 commits: passed on 2026-06-12.
+- Gitleaks working-tree scan: passed on 2026-06-12.
+- Anonymous GitHub API access returned HTTP 200 after publication.
 
-## Remaining Owner Decisions Before Public Release
+## Available Release Channel
+
+- Ad-hoc signed Apple Silicon preview zip.
+- SHA-256 checksum sidecar.
+- GitHub prerelease workflow.
+- New-user installation and uninstall documentation.
+
+## Remaining Owner Decisions For A Notarized Release
 
 - Decide final bundle identifier, signing identity, hardened runtime, and notarization flow.
 - Decide the notarized direct-download or other distribution release channel.

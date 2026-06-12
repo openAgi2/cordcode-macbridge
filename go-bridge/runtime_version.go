@@ -6,7 +6,7 @@ const runtimeBinaryName = "cccode-bridge-runtime"
 
 // 通过 -ldflags 在 build 时注入：
 //
-//	-ldflags "-X main.runtimeVersion=$(git describe --tags --always --dirty) -X main.runtimeCommit=$(git rev-parse HEAD) -X main.runtimeDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+//	-ldflags "-X github.com/openAgi2/cccode-macbridge/go-bridge.runtimeVersion=... -X github.com/openAgi2/cccode-macbridge/go-bridge.runtimeCommit=... -X github.com/openAgi2/cccode-macbridge/go-bridge.runtimeDate=..."
 var (
 	runtimeVersion = "0.1.0-dev"
 	runtimeCommit  = "unknown"

@@ -254,7 +254,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -euo pipefail\nRUNTIME_OUTPUT=\"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/cccode-bridge-runtime\"\nmkdir -p \"$(dirname \"$RUNTIME_OUTPUT\")\"\ncd \"${SRCROOT}/..\"\ngo build -o \"$RUNTIME_OUTPUT\" ./go-bridge/cmd/cccode-bridge-runtime\nchmod +x \"$RUNTIME_OUTPUT\"\n";
+			shellScript = "set -euo pipefail\nRUNTIME_OUTPUT=\"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/cccode-bridge-runtime\"\nRUNTIME_PACKAGE=\"github.com/openAgi2/cccode-macbridge/go-bridge\"\nRUNTIME_VERSION=\"${CCCODE_RUNTIME_VERSION:-${MARKETING_VERSION:-0.1.0-dev}}\"\nRUNTIME_COMMIT=\"${CCCODE_RUNTIME_COMMIT:-$(git rev-parse --short=12 HEAD 2>/dev/null || printf unknown)}\"\nRUNTIME_DATE=\"${CCCODE_RUNTIME_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}\"\nRUNTIME_LDFLAGS=\"-X ${RUNTIME_PACKAGE}.runtimeVersion=${RUNTIME_VERSION} -X ${RUNTIME_PACKAGE}.runtimeCommit=${RUNTIME_COMMIT} -X ${RUNTIME_PACKAGE}.runtimeDate=${RUNTIME_DATE}\"\nRUNTIME_ARCH=\"${ARCHS%% *}\"\ncase \"$RUNTIME_ARCH\" in\n  arm64) GO_ARCH=arm64 ;;\n  x86_64) GO_ARCH=amd64 ;;\n  *) echo \"Unsupported runtime architecture: $RUNTIME_ARCH\" >&2; exit 1 ;;\nesac\nmkdir -p \"$(dirname \"$RUNTIME_OUTPUT\")\"\ncd \"${SRCROOT}/..\"\nGOOS=darwin GOARCH=\"$GO_ARCH\" go build -trimpath -ldflags \"$RUNTIME_LDFLAGS\" -o \"$RUNTIME_OUTPUT\" ./go-bridge/cmd/cccode-bridge-runtime\nchmod +x \"$RUNTIME_OUTPUT\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

@@ -42,3 +42,11 @@ configuration, not a credential. Users may:
 
 When the selected endpoint changes, MacBridge registers a route with that Relay
 and stores the resulting route ID and credential locally.
+
+## OpenCode First Launch
+
+MacBridge generates a random local OpenCode username and password on first
+launch and writes the matching desktop connection entry. A server process that
+was already running keeps its original environment and may return `401` until
+it is restarted with matching credentials. MacBridge reports that state
+directly instead of treating it as a successful backend connection.

@@ -41,6 +41,19 @@ BUILT_PRODUCTS_DIR=$(xcodebuild -project MacBridge/CCCodeBridge.xcodeproj -schem
 test -x "$BUILT_PRODUCTS_DIR/CCCodeBridge.app/Contents/Resources/cccode-bridge-runtime"
 ```
 
+## Install A Preview Build
+
+Unsigned Apple Silicon preview packages can be produced without a paid Apple
+Developer account:
+
+```bash
+./scripts/build-unsigned-release.sh
+```
+
+The archive and SHA-256 checksum are written to `dist/`. See
+`docs/install-macos.md` for the new-user installation flow and expected
+Gatekeeper warning.
+
 ## Protocol
 
 Direct bridge and relay compatibility are documented in `docs/protocol/`.
@@ -49,7 +62,7 @@ new clients.
 
 ## Release Status
 
-This repository is a clean split candidate. Public release still requires owner
-approval for signing identity and distribution process. The repository is licensed under
-AGPL-3.0-only. See `docs/signing-and-release.md` and
-`docs/public-readiness.md`.
+This repository is public and licensed under AGPL-3.0-only. Unsigned preview
+packages can be distributed through GitHub prereleases. A warning-free public
+release still requires Developer ID signing and Apple notarization. See
+`docs/signing-and-release.md`, `docs/public-readiness.md`, and `PRIVACY.md`.

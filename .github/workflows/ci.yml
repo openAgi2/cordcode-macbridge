@@ -39,3 +39,10 @@ jobs:
         with:
           go-version-file: go.mod
       - run: xcodebuild -project MacBridge/CCCodeBridge.xcodeproj -scheme CCCodeBridge -configuration Debug -destination 'platform=macOS' build
+      - run: ./scripts/build-unsigned-release.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cccode-macbridge-unsigned
+          path: |
+            dist/*.zip
+            dist/*.sha256

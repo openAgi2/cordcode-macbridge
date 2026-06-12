@@ -31,9 +31,20 @@ targets:
         script: |
           set -euo pipefail
           RUNTIME_OUTPUT="${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/cccode-bridge-runtime"
+          RUNTIME_PACKAGE="github.com/openAgi2/cccode-macbridge/go-bridge"
+          RUNTIME_VERSION="${CCCODE_RUNTIME_VERSION:-${MARKETING_VERSION:-0.1.0-dev}}"
+          RUNTIME_COMMIT="${CCCODE_RUNTIME_COMMIT:-$(git rev-parse --short=12 HEAD 2>/dev/null || printf unknown)}"
+          RUNTIME_DATE="${CCCODE_RUNTIME_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+          RUNTIME_LDFLAGS="-X ${RUNTIME_PACKAGE}.runtimeVersion=${RUNTIME_VERSION} -X ${RUNTIME_PACKAGE}.runtimeCommit=${RUNTIME_COMMIT} -X ${RUNTIME_PACKAGE}.runtimeDate=${RUNTIME_DATE}"
+          RUNTIME_ARCH="${ARCHS%% *}"
+          case "$RUNTIME_ARCH" in
+            arm64) GO_ARCH=arm64 ;;
+            x86_64) GO_ARCH=amd64 ;;
+            *) echo "Unsupported runtime architecture: $RUNTIME_ARCH" >&2; exit 1 ;;
+          esac
           mkdir -p "$(dirname "$RUNTIME_OUTPUT")"
           cd "${SRCROOT}/.."
-          go build -o "$RUNTIME_OUTPUT" ./go-bridge/cmd/cccode-bridge-runtime
+          GOOS=darwin GOARCH="$GO_ARCH" go build -trimpath -ldflags "$RUNTIME_LDFLAGS" -o "$RUNTIME_OUTPUT" ./go-bridge/cmd/cccode-bridge-runtime
           chmod +x "$RUNTIME_OUTPUT"
     settings:
       base:
