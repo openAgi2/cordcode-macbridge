@@ -28,11 +28,37 @@ type TrustedDeviceRecord struct {
 // TrustedDeviceStore 定义设备存储的抽象接口。
 type TrustedDeviceStore interface {
 	AddDevice(record TrustedDeviceRecord) error
+	ReplaceDevice(record TrustedDeviceRecord) ([]string, error)
 	LookupByDeviceID(deviceID string) (*TrustedDeviceRecord, error)
 	LookupByTokenHash(hash string) (*TrustedDeviceRecord, error)
 	EnableRelay(deviceID, identityPublicKey string, generation uint64) error
 	RevokeDevice(deviceID string) error
 	ListDevices() ([]TrustedDeviceRecord, error)
+}
+
+// ReplaceDevice 保存最新配对凭据，并删除同一设备的旧记录。
+// 新版客户端使用稳定 deviceID；DisplayName + Platform 用于清理升级前的随机 ID 记录。
+func (s *MemoryDeviceStore) ReplaceDevice(record TrustedDeviceRecord) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	replaced := make([]string, 0)
+	for deviceID, existing := range s.byID {
+		sameDeviceID := deviceID == record.DeviceID
+		sameLegacyIdentity := existing.Platform == record.Platform &&
+			existing.DisplayName == record.DisplayName
+		if !sameDeviceID && !sameLegacyIdentity {
+			continue
+		}
+		delete(s.byID, deviceID)
+		delete(s.byToken, existing.TokenHash)
+		if deviceID != record.DeviceID {
+			replaced = append(replaced, deviceID)
+		}
+	}
+	s.byID[record.DeviceID] = record
+	s.byToken[record.TokenHash] = record.DeviceID
+	return replaced, nil
 }
 
 // MemoryDeviceStore 是基于内存的 TrustedDeviceStore 实现，用于测试。
@@ -167,6 +193,17 @@ func (s *FileDeviceStore) AddDevice(record TrustedDeviceRecord) error {
 		return err
 	}
 	return s.save()
+}
+
+func (s *FileDeviceStore) ReplaceDevice(record TrustedDeviceRecord) ([]string, error) {
+	replaced, err := s.mem.ReplaceDevice(record)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.save(); err != nil {
+		return nil, err
+	}
+	return replaced, nil
 }
 
 func (s *FileDeviceStore) LookupByDeviceID(deviceID string) (*TrustedDeviceRecord, error) {

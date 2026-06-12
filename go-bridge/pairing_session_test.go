@@ -176,8 +176,8 @@ func TestApproveTransition(t *testing.T) {
 	if !strings.HasPrefix(s.DeviceTokenHash, "sha256:") {
 		t.Errorf("DeviceTokenHash 应以 sha256: 开头")
 	}
-	if !strings.HasPrefix(s.DeviceID, "dev_") {
-		t.Errorf("DeviceID 应有 dev_ 前缀，实际: %s", s.DeviceID)
+	if s.DeviceID != "d1" {
+		t.Errorf("DeviceID 应保留客户端稳定 ID，实际: %s", s.DeviceID)
 	}
 }
 

@@ -153,7 +153,10 @@ func (s *PairingSession) Approve() error {
 	}
 	s.DeviceToken = plain
 	s.DeviceTokenHash = hash
-	s.DeviceID = "dev_" + generateRandomString(16)
+	s.DeviceID = s.ClaimingDeviceID
+	if s.DeviceID == "" {
+		s.DeviceID = "dev_" + generateRandomString(16)
+	}
 	s.State = PairingApproved
 	return nil
 }

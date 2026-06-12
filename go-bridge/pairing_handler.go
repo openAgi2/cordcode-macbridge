@@ -285,7 +285,7 @@ func NotifyPairingComplete(pairingID string, bridgeInfo PairingCompleteBridge) (
 		deviceID = fmt.Sprintf("dev-%x", b)
 	}
 
-	globalDeviceStore.AddDevice(TrustedDeviceRecord{
+	_, _ = globalDeviceStore.ReplaceDevice(TrustedDeviceRecord{
 		DeviceID:    deviceID,
 		DisplayName: session.ClaimingDeviceName,
 		Platform:    session.ClaimingPlatform,

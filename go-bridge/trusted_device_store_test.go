@@ -52,6 +52,48 @@ func TestMemoryStore_AddDuplicate(t *testing.T) {
 	}
 }
 
+func TestMemoryStore_ReplaceDeviceReplacesStableIDCredentials(t *testing.T) {
+	store := newTestStore()
+	old := makeTestRecord("dev1")
+	_ = store.AddDevice(old)
+	latest := makeTestRecord("dev1")
+
+	replaced, err := store.ReplaceDevice(latest)
+	if err != nil {
+		t.Fatalf("ReplaceDevice 失败: %v", err)
+	}
+	if len(replaced) != 0 {
+		t.Fatalf("稳定 deviceID 替换不应返回旧 ID: %v", replaced)
+	}
+	if got, _ := store.LookupByTokenHash(old.TokenHash); got != nil {
+		t.Fatal("旧 token 应立即失效")
+	}
+	if got, _ := store.LookupByTokenHash(latest.TokenHash); got == nil {
+		t.Fatal("新 token 应可用")
+	}
+}
+
+func TestMemoryStore_ReplaceDeviceRemovesLegacyRandomID(t *testing.T) {
+	store := newTestStore()
+	old := makeTestRecord("legacy-random-id")
+	old.DisplayName = "iPhone"
+	_ = store.AddDevice(old)
+	latest := makeTestRecord("dev_stable")
+	latest.DisplayName = "iPhone"
+
+	replaced, err := store.ReplaceDevice(latest)
+	if err != nil {
+		t.Fatalf("ReplaceDevice 失败: %v", err)
+	}
+	if len(replaced) != 1 || replaced[0] != old.DeviceID {
+		t.Fatalf("replaced = %v, want [%s]", replaced, old.DeviceID)
+	}
+	devices, _ := store.ListDevices()
+	if len(devices) != 1 || devices[0].DeviceID != latest.DeviceID {
+		t.Fatalf("active devices = %#v", devices)
+	}
+}
+
 func TestMemoryStore_LookupByID_NotFound(t *testing.T) {
 	store := newTestStore()
 	got, err := store.LookupByDeviceID("nonexistent")

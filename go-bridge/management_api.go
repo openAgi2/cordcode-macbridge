@@ -469,12 +469,18 @@ func (s *ManagementServer) handlePairingApprove(w http.ResponseWriter, r *http.R
 		deviceRecord.RelayEnabled = true
 		deviceRecord.RelayChannelGeneration = 1
 	}
-	if err := s.cfg.DeviceStore.AddDevice(deviceRecord); err != nil {
+	replacedDeviceIDs, err := s.cfg.DeviceStore.ReplaceDevice(deviceRecord)
+	if err != nil {
 		writeMgmtJSON(w, http.StatusInternalServerError, map[string]interface{}{
 			"error":   "device_persist_failed",
 			"message": "受信设备持久化失败，配对中止: " + err.Error(),
 		})
 		return
+	}
+	if len(replacedDeviceIDs) > 0 {
+		slog.Info("pairing: replaced previous device records",
+			"deviceID", safeID(deviceRecord.DeviceID),
+			"replaced", len(replacedDeviceIDs))
 	}
 
 	var relayResult *RelayFirstResult
