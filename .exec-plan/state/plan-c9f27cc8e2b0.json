@@ -33,7 +33,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-06-12T14:30:20Z",
+  "updated_at": "2026-06-14T13:10:00Z",
   "todos": [
     {
       "id": "phase1-shell-layout-impl",
@@ -93,7 +93,7 @@
       "id": "phase1-shell-layout-regression",
       "title": "Phase 1 shell layout manual regression",
       "description": "Manually verify default, minimum, and enlarged windows across all five pages without UI automation.",
-      "status": "blocked",
+      "status": "done",
       "phase": "phase1",
       "kind": "regression",
       "depends_on": [
@@ -103,11 +103,11 @@
       "notes": "External validation gate: this phase requires manual visual/interaction verification. Project rules prohibit UI tests, snapshot tests, simulator automation, or other high-cost visual validation without explicit user approval; no automated substitute or fake evidence was introduced.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "manual",
-        "summary": "",
+        "summary": "Manual Mac UI regression passed by user.",
         "artifacts": [],
-        "checked_at": null
+        "checked_at": "2026-06-14T13:10:00Z"
       }
     },
     {
@@ -164,7 +164,7 @@
       "id": "phase2-overview-regression",
       "title": "Phase 2 overview manual regression",
       "description": "Verify overview first-screen visibility and runtime/backend/device/relay state matrices in light and dark appearances.",
-      "status": "blocked",
+      "status": "done",
       "phase": "phase2",
       "kind": "regression",
       "depends_on": [
@@ -174,11 +174,11 @@
       "notes": "External validation gate: this phase requires manual visual/interaction verification. Project rules prohibit UI tests, snapshot tests, simulator automation, or other high-cost visual validation without explicit user approval; no automated substitute or fake evidence was introduced.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "manual",
-        "summary": "",
+        "summary": "Manual Mac UI regression passed by user.",
         "artifacts": [],
-        "checked_at": null
+        "checked_at": "2026-06-14T13:10:00Z"
       }
     },
     {
@@ -235,7 +235,7 @@
       "id": "phase3-devices-pairing-regression",
       "title": "Phase 3 devices and pairing manual regression",
       "description": "Verify waiting, claimed, approved, rejected, expired, error, narrow-window layout, and revoke confirmation flows.",
-      "status": "blocked",
+      "status": "done",
       "phase": "phase3",
       "kind": "regression",
       "depends_on": [
@@ -245,11 +245,11 @@
       "notes": "External validation gate: this phase requires manual visual/interaction verification. Project rules prohibit UI tests, snapshot tests, simulator automation, or other high-cost visual validation without explicit user approval; no automated substitute or fake evidence was introduced.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "manual",
-        "summary": "",
+        "summary": "Manual Mac UI regression passed by user.",
         "artifacts": [],
-        "checked_at": null
+        "checked_at": "2026-06-14T13:10:00Z"
       }
     },
     {
@@ -305,7 +305,7 @@
       "id": "phase4-remote-access-regression",
       "title": "Phase 4 remote connection manual regression",
       "description": "Verify default relay, custom relay, provisioning failure, and advanced connection disclosure flows.",
-      "status": "blocked",
+      "status": "done",
       "phase": "phase4",
       "kind": "regression",
       "depends_on": [
@@ -315,11 +315,11 @@
       "notes": "External validation gate: this phase requires manual visual/interaction verification. Project rules prohibit UI tests, snapshot tests, simulator automation, or other high-cost visual validation without explicit user approval; no automated substitute or fake evidence was introduced.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "manual",
-        "summary": "",
+        "summary": "Manual Mac UI regression passed by user.",
         "artifacts": [],
-        "checked_at": null
+        "checked_at": "2026-06-14T13:10:00Z"
       }
     },
     {
@@ -377,7 +377,7 @@
       "id": "phase5-settings-regression",
       "title": "Phase 5 settings manual regression",
       "description": "Verify aligned groups, appearance modes, automatic/manual OpenCode states, password visibility, generation confirmation, and accurate restart copy.",
-      "status": "blocked",
+      "status": "done",
       "phase": "phase5",
       "kind": "regression",
       "depends_on": [
@@ -387,11 +387,11 @@
       "notes": "External validation gate: this phase requires manual visual/interaction verification. Project rules prohibit UI tests, snapshot tests, simulator automation, or other high-cost visual validation without explicit user approval; no automated substitute or fake evidence was introduced.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "manual",
-        "summary": "",
+        "summary": "Manual Mac UI regression passed by user.",
         "artifacts": [],
-        "checked_at": null
+        "checked_at": "2026-06-14T13:10:00Z"
       }
     },
     {
@@ -451,7 +451,7 @@
       "id": "phase6-diagnostics-consistency-regression",
       "title": "Phase 6 final manual regression",
       "description": "Execute the full manual acceptance matrix for window sizes, appearances, runtime/backend/device/pairing/relay/settings states, localization, and accessibility.",
-      "status": "blocked",
+      "status": "done",
       "phase": "phase6",
       "kind": "regression",
       "depends_on": [
@@ -461,11 +461,11 @@
       "notes": "External validation gate: this phase requires manual visual/interaction verification. Project rules prohibit UI tests, snapshot tests, simulator automation, or other high-cost visual validation without explicit user approval; no automated substitute or fake evidence was introduced.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "manual",
-        "summary": "",
+        "summary": "Manual Mac UI regression passed by user.",
         "artifacts": [],
-        "checked_at": null
+        "checked_at": "2026-06-14T13:10:00Z"
       }
     }
   ]
