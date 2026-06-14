@@ -1,30 +1,42 @@
-import Combine
 import Foundation
 
-/// 设置页面 ViewModel，管理 OpenCode 认证凭据的读写和 Bridge 重启
+enum SaveFeedback: Equatable {
+    case idle
+    case saving
+    case success(String)
+    case failure(String)
+}
+
 @MainActor
 class SettingsViewModel: ObservableObject {
-    @Published var opencodeUser: String = ""
-    @Published var opencodePass: String = ""
-    @Published var isSaving: Bool = false
-    @Published var saveMessage: String? = nil
-    @Published var displayName: String = ""
-    @Published var displayNameMessage: String? = nil
+    @Published var opencodeUser = ""
+    @Published var opencodePass = ""
+    @Published var displayName = ""
+    @Published var displayNameFeedback: SaveFeedback = .idle
+    @Published var credentialsFeedback: SaveFeedback = .idle
 
-    private var dataDir: String
+    private var savedOpenCodeUser = ""
+    private var savedOpenCodePass = ""
+    private var savedDisplayName = ""
+    private let dataDir: String
     var onCredentialsChanged: (() -> Void)
     var managementAPIClient: ManagementAPIClient?
+
+    var isCredentialsDirty: Bool {
+        opencodeUser != savedOpenCodeUser || opencodePass != savedOpenCodePass
+    }
+
+    var isDisplayNameDirty: Bool {
+        let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && trimmed != savedDisplayName
+    }
 
     init(dataDir: String, onCredentialsChanged: @escaping () -> Void) {
         self.dataDir = dataDir
         self.onCredentialsChanged = onCredentialsChanged
         loadCredentials()
-        loadDisplayName()
     }
 
-    // MARK: - 读取凭据
-
-    /// 启动时从 credentials.json 加载
     func loadCredentials() {
         let path = dataDir + "/credentials.json"
         guard let data = FileManager.default.contents(atPath: path),
@@ -33,41 +45,47 @@ class SettingsViewModel: ObservableObject {
         }
         opencodeUser = json["opencode_user"] as? String ?? ""
         opencodePass = json["opencode_pass"] as? String ?? ""
+        savedOpenCodeUser = opencodeUser
+        savedOpenCodePass = opencodePass
     }
 
-    // MARK: - 保存凭据并重启 Bridge
+    func regeneratePassword() {
+        opencodePass = OpenCodeCredentialsGenerator.generatePassword()
+        credentialsFeedback = .idle
+    }
 
     func saveCredentials() {
-        isSaving = true
-        saveMessage = nil
-
-        // 确保目录存在
-        try? FileManager.default.createDirectory(atPath: dataDir, withIntermediateDirectories: true)
-
-        let dict: [String: String] = [
-            "opencode_user": opencodeUser,
-            "opencode_pass": opencodePass,
-        ]
+        guard !opencodeUser.isEmpty, !opencodePass.isEmpty else { return }
+        credentialsFeedback = .saving
 
         do {
-            let data = try JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .sortedKeys])
-            try data.write(to: URL(fileURLWithPath: dataDir + "/credentials.json"), options: .atomic)
-            // 限制文件权限，仅 owner 可读写
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: dataDir + "/credentials.json")
+            try FileManager.default.createDirectory(
+                atPath: dataDir,
+                withIntermediateDirectories: true
+            )
+            let data = try JSONSerialization.data(
+                withJSONObject: [
+                    "opencode_user": opencodeUser,
+                    "opencode_pass": opencodePass,
+                ],
+                options: [.prettyPrinted, .sortedKeys]
+            )
+            let path = dataDir + "/credentials.json"
+            try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: path
+            )
+            savedOpenCodeUser = opencodeUser
+            savedOpenCodePass = opencodePass
+            onCredentialsChanged()
+            credentialsFeedback = .success(L10n.savedRestarting)
         } catch {
-            saveMessage = String(format: L10n.saveFailed, error.localizedDescription)
-            isSaving = false
-            return
+            credentialsFeedback = .failure(
+                String(format: L10n.saveFailed, error.localizedDescription)
+            )
         }
-
-        // 通知 AppDependencies 更新并重启 Bridge
-        onCredentialsChanged()
-
-        saveMessage = L10n.savedRestarting
-        isSaving = false
     }
-
-    // MARK: - Display Name
 
     func loadDisplayName() {
         guard let client = managementAPIClient else { return }
@@ -75,35 +93,29 @@ class SettingsViewModel: ObservableObject {
             do {
                 let status = try await client.getStatus()
                 if let name = status.displayName {
-                    self.displayName = name
+                    displayName = name
+                    savedDisplayName = name
                 }
             } catch {
-                // 静默处理，display name 不是关键路径
+                displayNameFeedback = .failure(error.localizedDescription)
             }
         }
     }
 
     func saveDisplayName() {
-        let trimmed = displayName.trimmingCharacters(in: .whitespaces)
+        let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let client = managementAPIClient else { return }
-        displayNameMessage = nil
+        displayNameFeedback = .saving
         Task {
             do {
-                var req = URLRequest(url: client.baseURL.appendingPathComponent("/internal/settings/display-name"))
-                req.httpMethod = "PUT"
-                req.setValue("Bearer \(client.token)", forHTTPHeaderField: "Authorization")
-                req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                let body = ["displayName": trimmed]
-                req.httpBody = try? JSONSerialization.data(withJSONObject: body)
-                let (_, response) = try await URLSession.shared.data(for: req)
-                let code = (response as? HTTPURLResponse)?.statusCode ?? -1
-                if (200...299).contains(code) {
-                    self.displayNameMessage = L10n.nameUpdated
-                } else {
-                    self.displayNameMessage = String(format: L10n.saveFailedHttp, code)
-                }
+                try await client.updateDisplayName(trimmed)
+                displayName = trimmed
+                savedDisplayName = trimmed
+                displayNameFeedback = .success(L10n.nameUpdated)
             } catch {
-                self.displayNameMessage = String(format: L10n.saveFailed, error.localizedDescription)
+                displayNameFeedback = .failure(
+                    String(format: L10n.saveFailed, error.localizedDescription)
+                )
             }
         }
     }

@@ -1,5 +1,17 @@
 import Foundation
 
+protocol OverviewAPIProviding {
+    func getStatus() async throws -> ManagementStatus
+    func getRemoteStatus() async throws -> RemoteStatus
+}
+
+protocol PairingAPIProviding {
+    func createPairing() async throws -> PairingSessionInfo
+    func getPairingStatus(_ pairingId: String) async throws -> PairingSessionStatus
+    func approvePairing(_ pairingId: String) async throws -> PairingApproval
+    func rejectPairing(_ pairingId: String) async throws
+}
+
 // MARK: - Management API 数据模型
 
 /// GET /internal/status 响应
@@ -101,7 +113,7 @@ struct PairingSessionStatus: Codable {
 // MARK: - Management API 客户端
 
 /// 管理 API 的 HTTP 客户端，所有请求带 Bearer token
-class ManagementAPIClient {
+class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding {
     let baseURL: URL
     let token: String
 
@@ -136,6 +148,19 @@ class ManagementAPIClient {
     func getStatus() async throws -> ManagementStatus {
         let data = try await performRequest("/internal/status")
         return try JSONDecoder().decode(ManagementStatus.self, from: data)
+    }
+
+    func updateDisplayName(_ displayName: String) async throws {
+        var req = request("/internal/settings/display-name", method: "PUT")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(
+            withJSONObject: ["displayName": displayName]
+        )
+        let (_, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode) else {
+            throw ManagementError.httpError((response as? HTTPURLResponse)?.statusCode ?? -1)
+        }
     }
 
     func getAgents() async throws -> [AgentInfo] {

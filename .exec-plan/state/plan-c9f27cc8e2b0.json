@@ -1,0 +1,472 @@
+{
+  "version": 6,
+  "project_root": "/Users/jacklee/Projects/cccode-macbridge",
+  "plan_file": "../opencode-cc-connect/macbridge界面开发规格.md",
+  "state_store": {
+    "canonical_path": ".exec-plan/state/plan-c9f27cc8e2b0.json",
+    "legacy_path": ".claude/exec-plans/plan-c9f27cc8e2b0.json",
+    "origin": "new",
+    "migrated_from": null,
+    "migrated_at": null
+  },
+  "queue_policy": {
+    "todo_md_role": "informational-only",
+    "completion_gate": "proof-carrying-impl-tests-regression",
+    "phase_done_rule": "all-required-todos-done",
+    "audit_rule": "unsupported-done-must-downgrade",
+    "start_exit_rule": "internal-audit-before-success",
+    "audit_failure_policy": "light-repairable-heavy-external-blocker",
+    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+    "session_mirror_policy": "best-effort-host-optional",
+    "invocation_policy": "slash-or-natural-language-equivalent"
+  },
+  "report_policy": {
+    "auto_write_completion_report": true,
+    "report_directory": "docs",
+    "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+    "write_when": "all-required-todos-proven-done",
+    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  },
+  "reports": {
+    "completion_report_path": "docs/2026-06-12-macbridge界面开发规格完成情况.md",
+    "completion_report_status": "missing",
+    "last_generated_at": null,
+    "based_on_queue_hash": null
+  },
+  "updated_at": "2026-06-12T14:30:20Z",
+  "todos": [
+    {
+      "id": "phase1-shell-layout-impl",
+      "title": "Phase 1 application shell and shared layout implementation",
+      "description": "Adjust window sizing, tighten the custom sidebar, add lightweight shared page layout components, and put all five navigation pages on the same 820pt grid.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "Section 5",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Added shared PageContainer/PageHeader layout primitives, set the window to 960x680 with an 820x560 content minimum, tightened the 180pt sidebar, and migrated overview, devices, remote access, settings, and diagnostics to the shared 820pt page grid.",
+        "artifacts": [
+          "MacBridge/MacBridge/Views/Components/PageContainer.swift",
+          "MacBridge/MacBridge/App/MacBridgeApp.swift",
+          "MacBridge/MacBridge/Views/ContentView.swift",
+          "MacBridge/MacBridge/Views/BridgeStatusView.swift",
+          "MacBridge/MacBridge/Views/RemoteAccessView.swift",
+          "MacBridge/MacBridge/Views/SettingsView.swift",
+          "MacBridge/CCCodeBridge.xcodeproj/project.pbxproj"
+        ],
+        "checked_at": "2026-06-12T12:39:41Z"
+      }
+    },
+    {
+      "id": "phase1-shell-layout-tests",
+      "title": "Phase 1 shell layout automated verification",
+      "description": "Run static checks, the targeted macOS Debug build, and existing MacBridge unit tests after the shell changes.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "tests",
+      "depends_on": [
+        "phase1-shell-layout-impl"
+      ],
+      "source": "Sections 2.2, 5, 12",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "git diff --check and state JSON validation passed; macOS Debug build succeeded; all 15 existing MacBridge unit tests passed with zero failures using Xcode beta.",
+        "artifacts": [
+          ".exec-plan/artifacts/phase1/static.log",
+          ".exec-plan/artifacts/phase1/build.log",
+          ".exec-plan/artifacts/phase1/tests.log",
+          "cmd:DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer xcodebuild -project MacBridge/CCCodeBridge.xcodeproj -scheme CCCodeBridge -configuration Debug -destination platform=macOS build",
+          "cmd:DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer xcodebuild -project MacBridge/CCCodeBridge.xcodeproj -scheme CCCodeBridge -configuration Debug -destination platform=macOS test"
+        ],
+        "checked_at": "2026-06-12T12:39:41Z"
+      }
+    },
+    {
+      "id": "phase1-shell-layout-regression",
+      "title": "Phase 1 shell layout manual regression",
+      "description": "Manually verify default, minimum, and enlarged windows across all five pages without UI automation.",
+      "status": "blocked",
+      "phase": "phase1",
+      "kind": "regression",
+      "depends_on": [
+        "phase1-shell-layout-tests"
+      ],
+      "source": "Sections 5, 12",
+      "notes": "External validation gate: this phase requires manual visual/interaction verification. Project rules prohibit UI tests, snapshot tests, simulator automation, or other high-cost visual validation without explicit user approval; no automated substitute or fake evidence was introduced.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "manual",
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase2-overview-impl",
+      "title": "Phase 2 overview status hierarchy implementation",
+      "description": "Extend BridgeStatusViewModel with truthful management status and relay summaries, format uptime, and redesign the overview hierarchy and runtime actions.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase1-shell-layout-tests"
+      ],
+      "source": "Sections 3, 6",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Implemented truthful overview status hierarchy, independently refreshed management and relay data, runtime state actions, configured-port reporting, uptime formatting, and navigation to device/remote detail.",
+        "artifacts": [
+          "MacBridge/MacBridge/ViewModels/BridgeStatusViewModel.swift",
+          "MacBridge/MacBridge/Views/BridgeStatusView.swift",
+          "MacBridge/MacBridge/Services/ManagementAPIClient.swift"
+        ],
+        "checked_at": "2026-06-12T14:30:20Z"
+      }
+    },
+    {
+      "id": "phase2-overview-tests",
+      "title": "Phase 2 overview automated verification",
+      "description": "Cover uptime formatting, bridge port source, independent management/relay failures, and backend status semantics; run build and unit tests.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "phase2-overview-impl"
+      ],
+      "source": "Sections 6, 12",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "Added coverage for Go-duration formatting, configured bridge port, independent overview request results, and backend product semantics; final Debug build and all 23 unit tests passed.",
+        "artifacts": [
+          "MacBridge/MacBridgeTests/MacBridgeBehaviorTests.swift",
+          ".exec-plan/artifacts/final/build.log",
+          ".exec-plan/artifacts/final/tests.log"
+        ],
+        "checked_at": "2026-06-12T14:30:20Z"
+      }
+    },
+    {
+      "id": "phase2-overview-regression",
+      "title": "Phase 2 overview manual regression",
+      "description": "Verify overview first-screen visibility and runtime/backend/device/relay state matrices in light and dark appearances.",
+      "status": "blocked",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "phase2-overview-tests"
+      ],
+      "source": "Sections 6, 12",
+      "notes": "External validation gate: this phase requires manual visual/interaction verification. Project rules prohibit UI tests, snapshot tests, simulator automation, or other high-cost visual validation without explicit user approval; no automated substitute or fake evidence was introduced.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "manual",
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase3-devices-pairing-impl",
+      "title": "Phase 3 devices and pairing implementation",
+      "description": "Add expiry-driven pairing countdown and idempotent expiration, responsive waiting/claimed states, copy feedback, automatic device refresh, and compact revoke actions.",
+      "status": "done",
+      "phase": "phase3",
+      "kind": "impl",
+      "depends_on": [
+        "phase2-overview-tests"
+      ],
+      "source": "Section 7",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Implemented expiry-driven pairing countdown, idempotent expiry and task cancellation, responsive waiting/claimed layouts, copy feedback, approval refresh, scoped device errors, and compact revoke confirmation.",
+        "artifacts": [
+          "MacBridge/MacBridge/ViewModels/PairingViewModel.swift",
+          "MacBridge/MacBridge/Views/PairingView.swift",
+          "MacBridge/MacBridge/Views/ContentView.swift"
+        ],
+        "checked_at": "2026-06-12T14:30:20Z"
+      }
+    },
+    {
+      "id": "phase3-devices-pairing-tests",
+      "title": "Phase 3 devices and pairing automated verification",
+      "description": "Test countdown expiration, task cancellation, shared idempotent expiry handling, and device refresh behavior; run build and unit tests.",
+      "status": "done",
+      "phase": "phase3",
+      "kind": "tests",
+      "depends_on": [
+        "phase3-devices-pairing-impl"
+      ],
+      "source": "Sections 7, 12",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "Added focused pairing tests for expiry idempotence, activity cancellation, and claimed-state cancellation; final Debug build and all 23 unit tests passed.",
+        "artifacts": [
+          "MacBridge/MacBridgeTests/MacBridgeBehaviorTests.swift",
+          ".exec-plan/artifacts/final/build.log",
+          ".exec-plan/artifacts/final/tests.log"
+        ],
+        "checked_at": "2026-06-12T14:30:20Z"
+      }
+    },
+    {
+      "id": "phase3-devices-pairing-regression",
+      "title": "Phase 3 devices and pairing manual regression",
+      "description": "Verify waiting, claimed, approved, rejected, expired, error, narrow-window layout, and revoke confirmation flows.",
+      "status": "blocked",
+      "phase": "phase3",
+      "kind": "regression",
+      "depends_on": [
+        "phase3-devices-pairing-tests"
+      ],
+      "source": "Sections 7, 12",
+      "notes": "External validation gate: this phase requires manual visual/interaction verification. Project rules prohibit UI tests, snapshot tests, simulator automation, or other high-cost visual validation without explicit user approval; no automated substitute or fake evidence was introduced.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "manual",
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase4-remote-access-impl",
+      "title": "Phase 4 remote connection implementation",
+      "description": "Replace disabled checkboxes with truthful rows, consolidate relay state, add explicit custom edit mode, preserve real provisioning errors, and fold advanced paths.",
+      "status": "done",
+      "phase": "phase4",
+      "kind": "impl",
+      "depends_on": [
+        "phase3-devices-pairing-tests"
+      ],
+      "source": "Section 8",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Reworked Remote Connection into truthful LAN and relay rows, explicit custom relay editing, retained provisioning validation/errors, and a collapsed advanced connection section.",
+        "artifacts": [
+          "MacBridge/MacBridge/Views/RemoteAccessView.swift",
+          "MacBridge/MacBridge/ViewModels/BridgeStatusViewModel.swift"
+        ],
+        "checked_at": "2026-06-12T14:30:20Z"
+      }
+    },
+    {
+      "id": "phase4-remote-access-tests",
+      "title": "Phase 4 remote connection automated verification",
+      "description": "Test relay configuration semantics and retained input/error behavior where practical; run build and unit tests.",
+      "status": "done",
+      "phase": "phase4",
+      "kind": "tests",
+      "depends_on": [
+        "phase4-remote-access-impl"
+      ],
+      "source": "Sections 8, 12",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "Verified relay configuration semantics through overview behavior coverage and completed the final Debug build plus all 23 unit tests without failures.",
+        "artifacts": [
+          "MacBridge/MacBridgeTests/MacBridgeBehaviorTests.swift",
+          ".exec-plan/artifacts/final/build.log",
+          ".exec-plan/artifacts/final/tests.log"
+        ],
+        "checked_at": "2026-06-12T14:30:20Z"
+      }
+    },
+    {
+      "id": "phase4-remote-access-regression",
+      "title": "Phase 4 remote connection manual regression",
+      "description": "Verify default relay, custom relay, provisioning failure, and advanced connection disclosure flows.",
+      "status": "blocked",
+      "phase": "phase4",
+      "kind": "regression",
+      "depends_on": [
+        "phase4-remote-access-tests"
+      ],
+      "source": "Sections 8, 12",
+      "notes": "External validation gate: this phase requires manual visual/interaction verification. Project rules prohibit UI tests, snapshot tests, simulator automation, or other high-cost visual validation without explicit user approval; no automated substitute or fake evidence was introduced.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "manual",
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase5-settings-impl",
+      "title": "Phase 5 settings implementation",
+      "description": "Restructure settings into aligned groups, replace string-inferred save feedback, add shared credential generation, and fold manual OpenCode authentication.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "impl",
+      "depends_on": [
+        "phase4-remote-access-tests"
+      ],
+      "source": "Section 9",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Restructured settings into aligned groups, introduced independent typed save feedback, shared secure credential generation, draft-only regeneration, and a disclosed manual OpenCode authentication path.",
+        "artifacts": [
+          "MacBridge/MacBridge/ViewModels/SettingsViewModel.swift",
+          "MacBridge/MacBridge/Views/SettingsView.swift",
+          "MacBridge/MacBridge/App/OpenCodeCredentialsGenerator.swift",
+          "MacBridge/MacBridge/App/AppDependencies.swift"
+        ],
+        "checked_at": "2026-06-12T14:30:20Z"
+      }
+    },
+    {
+      "id": "phase5-settings-tests",
+      "title": "Phase 5 settings automated verification",
+      "description": "Test independent structured feedback and password regeneration draft-only behavior; run build and unit tests.",
+      "status": "done",
+      "phase": "phase5",
+      "kind": "tests",
+      "depends_on": [
+        "phase5-settings-impl"
+      ],
+      "source": "Sections 9, 12",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "Added tests proving regenerated credentials remain draft-only and settings feedback channels are independent; final Debug build and all 23 unit tests passed.",
+        "artifacts": [
+          "MacBridge/MacBridgeTests/MacBridgeBehaviorTests.swift",
+          ".exec-plan/artifacts/final/build.log",
+          ".exec-plan/artifacts/final/tests.log"
+        ],
+        "checked_at": "2026-06-12T14:30:20Z"
+      }
+    },
+    {
+      "id": "phase5-settings-regression",
+      "title": "Phase 5 settings manual regression",
+      "description": "Verify aligned groups, appearance modes, automatic/manual OpenCode states, password visibility, generation confirmation, and accurate restart copy.",
+      "status": "blocked",
+      "phase": "phase5",
+      "kind": "regression",
+      "depends_on": [
+        "phase5-settings-tests"
+      ],
+      "source": "Sections 9, 12",
+      "notes": "External validation gate: this phase requires manual visual/interaction verification. Project rules prohibit UI tests, snapshot tests, simulator automation, or other high-cost visual validation without explicit user approval; no automated substitute or fake evidence was introduced.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "manual",
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase6-diagnostics-consistency-impl",
+      "title": "Phase 6 diagnostics, localization, and consistency implementation",
+      "description": "Finish diagnostics state handling, localize visible strings, and close accessibility, semantic color, and scoped error presentation gaps.",
+      "status": "done",
+      "phase": "phase6",
+      "kind": "impl",
+      "depends_on": [
+        "phase5-settings-tests"
+      ],
+      "source": "Sections 4.6-4.8, 10",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Completed diagnostics loading/empty/error handling, scoped inline errors, shared layout consistency, bilingual localization for new visible copy, semantic status presentation, and generated project updates.",
+        "artifacts": [
+          "MacBridge/MacBridge/Views/ContentView.swift",
+          "MacBridge/MacBridge/Services/Localization.swift",
+          "MacBridge/MacBridge/Views/Components/PageContainer.swift",
+          "MacBridge/project.yml",
+          "MacBridge/CCCodeBridge.xcodeproj/project.pbxproj"
+        ],
+        "checked_at": "2026-06-12T14:30:20Z"
+      }
+    },
+    {
+      "id": "phase6-diagnostics-consistency-tests",
+      "title": "Phase 6 final automated verification",
+      "description": "Run hard-coded copy scans, git diff checks, macOS Debug build, all MacBridge unit tests, and Go tests only if Go API changed.",
+      "status": "done",
+      "phase": "phase6",
+      "kind": "tests",
+      "depends_on": [
+        "phase6-diagnostics-consistency-impl"
+      ],
+      "source": "Sections 10, 12, 15",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "Final static copy scan and git diff check passed, macOS Debug build succeeded, and all 23 MacBridge unit tests passed. No Go API source changed, so separate Go tests were not required.",
+        "artifacts": [
+          ".exec-plan/artifacts/final/hardcoded-scan.log",
+          ".exec-plan/artifacts/final/diff-check.log",
+          ".exec-plan/artifacts/final/build.log",
+          ".exec-plan/artifacts/final/tests.log"
+        ],
+        "checked_at": "2026-06-12T14:30:20Z"
+      }
+    },
+    {
+      "id": "phase6-diagnostics-consistency-regression",
+      "title": "Phase 6 final manual regression",
+      "description": "Execute the full manual acceptance matrix for window sizes, appearances, runtime/backend/device/pairing/relay/settings states, localization, and accessibility.",
+      "status": "blocked",
+      "phase": "phase6",
+      "kind": "regression",
+      "depends_on": [
+        "phase6-diagnostics-consistency-tests"
+      ],
+      "source": "Sections 10, 12, 15",
+      "notes": "External validation gate: this phase requires manual visual/interaction verification. Project rules prohibit UI tests, snapshot tests, simulator automation, or other high-cost visual validation without explicit user approval; no automated substitute or fake evidence was introduced.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "manual",
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    }
+  ]
+}

@@ -60,6 +60,7 @@ targets:
     sources:
       - path: MacBridgeTests
       - path: MacBridge/App/OpenCodeLaunchAgentCredentials.swift
+      - path: MacBridge/App/OpenCodeCredentialsGenerator.swift
     dependencies:
       - target: CCCodeBridge
     settings:
@@ -67,5 +68,5 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: org.openagi.cccode.macbridge.tests
         GENERATE_INFOPLIST_FILE: YES
         ARCHS: arm64
-        TEST_HOST: ""
-        BUNDLE_LOADER: ""
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/CCCodeBridge.app/Contents/MacOS/CCCodeBridge"
+        BUNDLE_LOADER: "$(TEST_HOST)"

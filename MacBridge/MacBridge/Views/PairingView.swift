@@ -3,19 +3,20 @@ import SwiftUI
 
 struct PairingView: View {
     @ObservedObject var viewModel: PairingViewModel
-    @AppStorage("bridgeDisplayName") private var bridgeDisplayName: String = ""
+    @AppStorage("bridgeDisplayName") private var bridgeDisplayName = ""
+    @State private var copiedCode = false
 
-    private struct PairingCandidate: Identifiable, Equatable {
+    private struct PairingCandidate: Identifiable {
         let id: String
         let title: String
-        let status: String
         let url: String
         let icon: String
-        let color: Color
     }
 
     var body: some View {
-        VStack(alignment: .center, spacing: 16) {
+        VStack(alignment: .leading, spacing: 16) {
+            SectionHeader(L10n.pairingNewDevice)
+
             switch viewModel.uiState {
             case .idle:
                 Button(L10n.pairNewDevice) {
@@ -27,225 +28,206 @@ struct PairingView: View {
                 ProgressView(L10n.creatingPairingSession)
 
             case .waitingForClaim(_, let code, let payload):
-                qrAndManualCode(code: code, payload: payload)
+                waitingView(code: code, payload: payload)
 
             case .claimed(let deviceName, let platform):
-                claimedDeviceSection(deviceName: deviceName, platform: platform)
+                claimedView(deviceName: deviceName, platform: platform)
 
             case .approved:
-                approvedSection
+                resultView(
+                    icon: "checkmark.circle.fill",
+                    color: .green,
+                    message: L10n.devicePairedSuccessfully,
+                    button: L10n.pairAnotherDevice
+                )
 
             case .rejected:
-                rejectedSection
+                resultView(
+                    icon: "xmark.circle.fill",
+                    color: .red,
+                    message: L10n.deviceRejected,
+                    button: L10n.pairNewDevice,
+                    startsPairing: true
+                )
 
             case .expired:
-                expiredSection
+                resultView(
+                    icon: "clock",
+                    color: .orange,
+                    message: L10n.pairingSessionExpired,
+                    button: L10n.pairingGenerateAgain,
+                    startsPairing: true
+                )
 
             case .error(let message):
-                errorSection(message: message)
-            }
-        }
-        .padding()
-        .frame(maxWidth: 640)
-    }
-
-    // MARK: - QR + Manual Code
-
-    @ViewBuilder
-    private func qrAndManualCode(code: String, payload: String) -> some View {
-        let candidates = pairingCandidates(from: payload)
-
-        HStack(alignment: .center, spacing: 28) {
-            qrImage(payload: payload)
-                .interpolation(.none)
-                .resizable()
-                .frame(width: 180, height: 180)
-
-            VStack(alignment: .leading, spacing: 14) {
-                Text(L10n.scanWithCCCode)
-                    .font(.headline)
-
-                HStack(spacing: 4) {
-                    Text(L10n.manualCode)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Text(code)
-                        .font(.system(.title3, design: .monospaced))
-                        .fontWeight(.bold)
-                        .textSelection(.enabled)
-                }
-
-                pairingCandidatesSection(candidates)
-
-                Text("手机扫码后先尝试局域网；如果不可用，会同时尝试二维码里的远程方式，谁先连通用谁。")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Label(L10n.securityHint2, systemImage: "hand.raised")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                if !bridgeDisplayName.isEmpty {
-                    Text(String(format: L10n.bridgeLabel, bridgeDisplayName))
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-
-                ProgressView(L10n.waitingForDevice)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            .frame(maxWidth: 300, alignment: .leading)
-        }
-    }
-
-    @ViewBuilder
-    private func pairingCandidatesSection(_ candidates: [PairingCandidate]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("此二维码包含")
-                .font(.system(size: 13, weight: .semibold))
-
-            ForEach(candidates) { candidate in
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: candidate.icon)
-                        .foregroundColor(candidate.color)
-                        .frame(width: 16)
-                        .padding(.top, 1)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
-                            Text(candidate.title)
-                                .font(.caption)
-                                .fontWeight(.medium)
-                            Text(candidate.status)
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                        }
-                        Text(candidate.url)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .textSelection(.enabled)
+                VStack(alignment: .leading, spacing: 10) {
+                    InlineFeedback(style: .error, message: message)
+                    Button(L10n.retry) {
+                        viewModel.reset()
+                        viewModel.startPairing()
                     }
                 }
             }
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.35))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
-    // MARK: - Claimed (approve/reject)
+    private func waitingView(code: String, payload: String) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 28) {
+                qrImage(payload: payload)
+                waitingInstructions(code: code, payload: payload)
+            }
+            VStack(alignment: .leading, spacing: 20) {
+                qrImage(payload: payload)
+                waitingInstructions(code: code, payload: payload)
+            }
+        }
+    }
 
-    @ViewBuilder
-    private func claimedDeviceSection(deviceName: String, platform: String) -> some View {
-        Text(L10n.deviceRequest)
-            .font(.headline)
+    private func qrImage(payload: String) -> some View {
+        makeQRImage(payload: payload)
+            .interpolation(.none)
+            .resizable()
+            .frame(width: 176, height: 176)
+            .accessibilityLabel(L10n.pairingQRCode)
+    }
 
-        HStack(spacing: 8) {
-            Image(systemName: "iphone")
-                .font(.title2)
-            VStack(alignment: .leading) {
-                Text(deviceName)
-                    .fontWeight(.medium)
-                Text(platform)
+    private func waitingInstructions(code: String, payload: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            instruction(1, L10n.pairingStepScan)
+            instruction(2, L10n.pairingStepConfirm)
+            instruction(3, L10n.pairingStepComplete)
+
+            HStack(spacing: 8) {
+                Text(L10n.manualCode)
+                    .foregroundStyle(.secondary)
+                Text(code)
+                    .font(.system(.title3, design: .monospaced).weight(.semibold))
+                    .textSelection(.enabled)
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(code, forType: .string)
+                    copiedCode = true
+                    Task {
+                        try? await Task.sleep(for: .seconds(2))
+                        copiedCode = false
+                    }
+                } label: {
+                    Image(systemName: copiedCode ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.borderless)
+                .help(copiedCode ? L10n.pairingCopied : L10n.pairingCopyCode)
+                .accessibilityLabel(copiedCode ? L10n.pairingCopied : L10n.pairingCopyCode)
+            }
+
+            if let remaining = viewModel.remainingSeconds {
+                Text(String(format: L10n.pairingExpiresIn, formatCountdown(remaining)))
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(remaining < 60 ? .orange : .secondary)
+            }
+
+            ProgressView(L10n.waitingForDevice)
+                .controlSize(.small)
+
+            let candidates = pairingCandidates(from: payload)
+            if !candidates.isEmpty {
+                DisclosureGroup(L10n.pairingConnectionDetails) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(candidates) { candidate in
+                            Label {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(candidate.title)
+                                    Text(candidate.url)
+                                        .font(.system(.caption, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
+                                }
+                            } icon: {
+                                Image(systemName: candidate.icon)
+                            }
+                        }
+                    }
+                    .padding(.top, 8)
+                }
             }
         }
-        .padding()
-        .glassPanel()
+        .frame(maxWidth: 390, alignment: .leading)
+    }
 
-        HStack(spacing: 12) {
-            Button(L10n.reject) {
-                viewModel.reject()
+    private func instruction(_ number: Int, _ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("\(number).")
+                .font(.body.weight(.semibold))
+            Text(text)
+        }
+    }
+
+    private func claimedView(deviceName: String, platform: String) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Image(systemName: platform.lowercased().contains("ios") ? "iphone" : "desktopcomputer")
+                    .font(.title2)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(deviceName)
+                        .font(.headline)
+                    Text(platform)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
-            .buttonStyle(.bordered)
 
-            Button(L10n.approve) {
-                viewModel.approve()
+            if !bridgeDisplayName.isEmpty {
+                Text(String(format: L10n.pairingConnectTo, bridgeDisplayName))
             }
-            .buttonStyle(.borderedProminent)
+            Text(L10n.pairingApprovalExplanation)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 10) {
+                Button(L10n.approve) {
+                    viewModel.approve()
+                }
+                .buttonStyle(.borderedProminent)
+                Button(L10n.reject, role: .destructive) {
+                    viewModel.reject()
+                }
+            }
         }
     }
 
-    // MARK: - Result states
-
-    @ViewBuilder
-    private var approvedSection: some View {
-        Image(systemName: "checkmark.circle.fill")
-            .font(.largeTitle)
-            .foregroundColor(.green)
-        Text(L10n.devicePairedSuccessfully)
-            .font(.headline)
-
-        Button(L10n.pairAnotherDevice) {
-            viewModel.reset()
+    private func resultView(
+        icon: String,
+        color: Color,
+        message: String,
+        button: String,
+        startsPairing: Bool = false
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(message, systemImage: icon)
+                .font(.headline)
+                .foregroundStyle(color)
+            Button(button) {
+                viewModel.reset()
+                if startsPairing {
+                    viewModel.startPairing()
+                }
+            }
         }
-        .buttonStyle(.bordered)
     }
 
-    @ViewBuilder
-    private var rejectedSection: some View {
-        Image(systemName: "xmark.circle.fill")
-            .font(.largeTitle)
-            .foregroundColor(.red)
-        Text(L10n.deviceRejected)
-            .font(.headline)
-
-        Button(L10n.pairNewDevice) {
-            viewModel.reset()
-            viewModel.startPairing()
-        }
-        .buttonStyle(.bordered)
+    private func formatCountdown(_ seconds: Int) -> String {
+        String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
 
-    @ViewBuilder
-    private var expiredSection: some View {
-        Image(systemName: "clock")
-            .font(.largeTitle)
-            .foregroundColor(.orange)
-        Text(L10n.pairingSessionExpired)
-            .font(.headline)
-
-        Button(L10n.tryAgain) {
-            viewModel.reset()
-            viewModel.startPairing()
-        }
-        .buttonStyle(.bordered)
-    }
-
-    @ViewBuilder
-    private func errorSection(message: String) -> some View {
-        Image(systemName: "exclamationmark.triangle")
-            .font(.largeTitle)
-            .foregroundColor(.red)
-        Text(message)
-            .font(.caption)
-            .multilineTextAlignment(.center)
-
-        Button(L10n.retry) {
-            viewModel.reset()
-        }
-        .buttonStyle(.bordered)
-    }
-
-    // MARK: - QR Code Generation
-
-    private func qrImage(payload: String) -> Image {
+    private func makeQRImage(payload: String) -> Image {
         let context = CIContext()
         let filter = CIFilter.qrCodeGenerator()
         filter.message = Data(payload.utf8)
         filter.correctionLevel = "M"
-
         if let outputImage = filter.outputImage {
-            let transform = CGAffineTransform(scaleX: 6, y: 6)
-            let scaled = outputImage.transformed(by: transform)
+            let scaled = outputImage.transformed(by: CGAffineTransform(scaleX: 6, y: 6))
             if let cgImage = context.createCGImage(scaled, from: scaled.extent) {
-                return Image(nsImage: NSImage(cgImage: cgImage, size: NSSize(width: 180, height: 180)))
+                return Image(nsImage: NSImage(cgImage: cgImage, size: NSSize(width: 176, height: 176)))
             }
         }
         return Image(systemName: "qrcode")
@@ -253,93 +235,21 @@ struct PairingView: View {
 
     private func pairingCandidates(from payload: String) -> [PairingCandidate] {
         guard let components = URLComponents(string: payload) else { return [] }
-        let queryItems = components.queryItems ?? []
-        var result: [PairingCandidate] = []
+        var candidates: [PairingCandidate] = []
         var seen = Set<String>()
-
-        if let local = queryItems.first(where: { $0.name == "local" })?.value, !local.isEmpty {
-            appendCandidate(
-                &result,
-                seen: &seen,
-                title: "局域网",
-                status: "优先尝试",
-                url: local,
-                icon: "wifi",
-                color: .blue
-            )
+        for item in components.queryItems ?? [] {
+            guard let value = item.value, !value.isEmpty, seen.insert(value).inserted else { continue }
+            switch item.name {
+            case "local":
+                candidates.append(.init(id: value, title: L10n.pairingLAN, url: value, icon: "wifi"))
+            case "relay":
+                candidates.append(.init(id: value, title: L10n.pairingRelay, url: value, icon: "lock.shield"))
+            case "remote":
+                candidates.append(.init(id: value, title: L10n.pairingAdvancedPath, url: value, icon: "network"))
+            default:
+                break
+            }
         }
-
-        for remote in queryItems.filter({ $0.name == "remote" }).compactMap(\.value) where !remote.isEmpty {
-            let type = remoteCandidateType(remote)
-            appendCandidate(
-                &result,
-                seen: &seen,
-                title: type.title,
-                status: "远程兜底",
-                url: remote,
-                icon: type.icon,
-                color: type.color
-            )
-        }
-
-        if let relay = queryItems.first(where: { $0.name == "relay" })?.value, !relay.isEmpty {
-            appendCandidate(
-                &result,
-                seen: &seen,
-                title: "加密 Relay",
-                status: "无需 FRP",
-                url: relay,
-                icon: "lock.shield",
-                color: .green
-            )
-        }
-
-        return result
+        return candidates
     }
-
-    private func appendCandidate(
-        _ result: inout [PairingCandidate],
-        seen: inout Set<String>,
-        title: String,
-        status: String,
-        url: String,
-        icon: String,
-        color: Color
-    ) {
-        guard seen.insert(url).inserted else { return }
-        result.append(PairingCandidate(
-            id: url,
-            title: title,
-            status: status,
-            url: url,
-            icon: icon,
-            color: color
-        ))
-    }
-
-    private func remoteCandidateType(_ rawURL: String) -> (title: String, icon: String, color: Color) {
-        guard let url = URL(string: rawURL), let host = url.host else {
-            return ("VPS / FRP", "server.rack", .purple)
-        }
-        if isTailscaleHost(host) {
-            return ("Tailscale", "network.badge.shields.half.filled", .cyan)
-        }
-        return ("VPS / FRP", "server.rack", .purple)
-    }
-
-    private func isTailscaleHost(_ host: String) -> Bool {
-        let parts = host.split(separator: ".").compactMap { Int($0) }
-        guard parts.count == 4 else { return false }
-        return parts[0] == 100 && parts[1] >= 64 && parts[1] <= 127
-    }
-}
-
-#Preview {
-    let vm = PairingViewModel()
-    vm.uiState = .waitingForClaim(
-        sessionId: "pair_abc123",
-        manualCode: "123456",
-        qrPayload: "cccode://pair?id=pair_abc123&code=123456&local=ws://172.16.10.211:8777/pairing&remote=wss://100.79.255.127:8778/pairing&remote=wss://bridge.example.com/pairing"
-    )
-    return PairingView(viewModel: vm)
 }

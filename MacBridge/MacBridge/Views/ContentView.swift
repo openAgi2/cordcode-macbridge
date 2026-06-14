@@ -15,10 +15,10 @@ enum NavigationTab: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .overview: return L10n.overview
-        case .devices: return L10n.devicesPairing
+        case .devices: return L10n.devices
         case .remoteAccess: return L10n.remoteAccessTab
         case .settings: return L10n.settings
-        case .diagnostics: return L10n.logsDiagnostics
+        case .diagnostics: return L10n.diagnostics
         }
     }
 
@@ -42,10 +42,10 @@ struct ContentView: View {
     @State private var devices: [TrustedDevice] = []
     @State private var logs: [String] = []
     @State private var isLoadingLogs = false
+    @State private var logsError: String?
     @State private var hasLoadedDevices = false
+    @State private var devicesError: String?
 
-    @State private var errorMessage: String?
-    @State private var showErrorAlert = false
     @State private var selectedTab: NavigationTab = .overview
     @EnvironmentObject private var dependencies: AppDependencies
 
@@ -58,33 +58,42 @@ struct ContentView: View {
             currentTabContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 560, minHeight: 480)
+        .frame(minWidth: 820, minHeight: 560)
         .background(Color(NSColor.windowBackgroundColor))
-        .alert(isPresented: $showErrorAlert) {
-            Alert(
-                title: Text(L10n.error),
-                message: Text(errorMessage ?? L10n.unknownError),
-                dismissButton: .default(Text(L10n.ok))
-            )
+        .onChange(of: dependencies.runtimeManager.managementURL) { _, _ in
+            configureBackendClientIfAvailable()
+        }
+        .onChange(of: dependencies.runtimeManager.managementToken) { _, _ in
+            configureBackendClientIfAvailable()
         }
         .onChange(of: selectedTab) { _, tab in
-            if tab == .overview { Task { await loadDevices() } }
+            if tab == .overview {
+                Task {
+                    await loadDevices()
+                    await viewModel.refreshOverviewData(force: false)
+                }
+            }
             if tab == .devices { Task { await loadDevices() } }
+            if tab == .diagnostics { Task { await loadLogs() } }
         }
         .onAppear {
             configureBackendClientIfAvailable()
+            pairingViewModel.onApproved = {
+                await loadDevices()
+            }
         }
         .task {
             await loadDevices()
             configureBackendClientIfAvailable()
             await backendVM.loadAgents()
+            await viewModel.refreshOverviewData()
         }
     }
 
     // MARK: - Navigation
 
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 3) {
             ForEach(NavigationTab.allCases) { tab in
                 Button {
                     selectedTab = tab
@@ -93,8 +102,8 @@ struct ContentView: View {
                         .labelStyle(.titleAndIcon)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .font(.system(size: 14, weight: selectedTab == tab ? .semibold : .medium))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 9)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -109,10 +118,10 @@ struct ContentView: View {
 
             Spacer()
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 16)
-        .padding(.bottom, 12)
-        .frame(width: 188)
+        .padding(.horizontal, 10)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
+        .frame(width: 180)
         .background(Color(NSColor.controlBackgroundColor).opacity(0.35))
     }
 
@@ -152,6 +161,9 @@ struct ContentView: View {
             onNavigateToDevices: {
                 selectedTab = .devices
             },
+            onNavigateToRemoteAccess: {
+                selectedTab = .remoteAccess
+            },
             onPairDevice: {
                 selectedTab = .devices
                 pairingViewModel.startPairing()
@@ -169,8 +181,10 @@ struct ContentView: View {
     }
 
     private var devicesTab: some View {
-        ScrollView {
+        PageContainer {
             VStack(alignment: .leading, spacing: 16) {
+                PageHeader(L10n.devices, subtitle: L10n.devicesSubtitle)
+
                 // 配对区域
                 PairingView(viewModel: pairingViewModel)
 
@@ -180,7 +194,12 @@ struct ContentView: View {
                 Text(L10n.authorizedDevices)
                     .font(.headline)
 
-                if devices.isEmpty {
+                if let devicesError {
+                    InlineFeedback(style: .error, message: devicesError)
+                    Button(L10n.retry) {
+                        Task { await loadDevices() }
+                    }
+                } else if devices.isEmpty {
                     HStack(spacing: 6) {
                         Image(systemName: "info.circle")
                             .foregroundColor(.secondary)
@@ -194,22 +213,20 @@ struct ContentView: View {
                     }
                 }
             }
-            .padding()
-            .frame(maxWidth: 680)
         }
         .confirmationDialog(
-            String(format: L10n.tr("remove_device_confirm"), deviceToRemove?.displayName ?? "Device"),
+            String(format: L10n.devicesRevokeConfirm, deviceToRemove?.displayName ?? L10n.devicesUnknownDevice),
             isPresented: $showRemoveConfirmation,
             titleVisibility: .visible
         ) {
-            Button(L10n.remove, role: .destructive) {
+            Button(L10n.devicesRevokeAuthorization, role: .destructive) {
                 if let device = deviceToRemove {
                     Task { await revokeDevice(device) }
                 }
             }
             Button(L10n.cancel, role: .cancel) {}
         } message: {
-            Text(L10n.removeDeviceMessage)
+            Text(L10n.devicesRevokeMessage)
         }
     }
 
@@ -251,87 +268,89 @@ struct ContentView: View {
 
             Spacer()
 
-            Button(L10n.remove, role: .destructive) {
-                deviceToRemove = device
-                showRemoveConfirmation = true
+            Menu {
+                Button(L10n.devicesRevokeAuthorization, role: .destructive) {
+                    deviceToRemove = device
+                    showRemoveConfirmation = true
+                }
+            } label: {
+                Image(systemName: "ellipsis")
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+            .menuStyle(.borderlessButton)
+            .help(L10n.devicesActions)
+            .accessibilityLabel(L10n.devicesActions)
         }
         .padding(.vertical, 6)
     }
 
     private static func relativeTimeString(_ isoString: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let date = formatter.date(from: isoString) else { return isoString }
-        let interval = Date().timeIntervalSince(date)
-        if interval < 60 { return L10n.justNow }
-        if interval < 3600 { return String(format: L10n.tr("min_ago"), Int(interval / 60)) }
-        if interval < 86400 { return String(format: L10n.tr("hr_ago"), Int(interval / 3600)) }
-        return String(format: L10n.tr("days_ago"), Int(interval / 86400))
+        RelativeTimeFormatter.string(isoString)
     }
 
     // MARK: - Diagnostics Tab
 
     private var logsTab: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(L10n.rawLogs)
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                Spacer()
-                Button {
-                    Task { await loadLogs() }
-                } label: {
-                    HStack(spacing: 4) {
-                        if isLoadingLogs {
-                            ProgressView()
-                                .controlSize(.small)
+        PageContainer(scrolls: false) {
+            VStack(alignment: .leading, spacing: 8) {
+                PageHeader(L10n.diagnostics, subtitle: L10n.diagnosticsSubtitle) {
+                    Button {
+                        Task { await loadLogs() }
+                    } label: {
+                        HStack(spacing: 4) {
+                            if isLoadingLogs {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Image(systemName: "arrow.clockwise")
+                            Text(L10n.refreshAll)
                         }
-                        Image(systemName: "arrow.clockwise")
-                        Text(L10n.refreshAll)
                     }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(isLoadingLogs)
+
+                    Button(L10n.copyRawLogs) {
+                        let text = logs.joined(separator: "\n")
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(text, forType: .string)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(logs.isEmpty)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(isLoadingLogs)
 
-                Button(L10n.copyRawLogs) {
-                    let text = logs.joined(separator: "\n")
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(text, forType: .string)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(logs.isEmpty)
-            }
+                SectionHeader(L10n.rawLogs)
+                    .padding(.top, 10)
 
-            Text(L10n.last200Lines)
-                .font(.caption)
-                .foregroundColor(.secondary)
-
-            if logs.isEmpty {
-                Text(L10n.noLogsAvailable)
+                Text(L10n.last200Lines)
+                    .font(.caption)
                     .foregroundColor(.secondary)
-            } else {
-                ScrollView(.vertical) {
-                    LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(Array(logs.enumerated()), id: \.offset) { _, line in
-                            Text(Self.displayLogLine(line))
-                                .font(.system(size: 11, design: .monospaced))
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if isLoadingLogs && logs.isEmpty {
+                    ProgressView(L10n.diagnosticsReading)
+                } else if let logsError {
+                    InlineFeedback(style: .error, message: logsError)
+                } else if logs.isEmpty {
+                    Text(L10n.noLogsAvailable)
+                        .foregroundColor(.secondary)
+                } else {
+                    ScrollView(.vertical) {
+                        LazyVStack(alignment: .leading, spacing: 2) {
+                            ForEach(Array(logs.enumerated()), id: \.offset) { _, line in
+                                Text(Self.displayLogLine(line))
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
                         }
+                        .padding(10)
                     }
-                    .padding(10)
+                    .frame(maxHeight: .infinity)
+                    .glassPanel()
                 }
-                .frame(maxHeight: .infinity)
-                .glassPanel()
             }
         }
-        .padding()
     }
 
     // MARK: - Data Loading
@@ -348,19 +367,25 @@ struct ContentView: View {
     private func configureBackendClientIfAvailable() {
         if let client = apiClient {
             backendVM.configure(apiClient: client)
+            viewModel.configure(apiClient: client)
+            settingsViewModel.managementAPIClient = client
+            settingsViewModel.loadDisplayName()
         }
     }
 
     private func loadDevices() async {
         guard let client = apiClient else {
             hasLoadedDevices = false
+            devicesError = L10n.errorCannotConnect
             return
         }
         do {
             devices = try await client.listDevices()
             hasLoadedDevices = true
+            devicesError = nil
         } catch {
             hasLoadedDevices = false
+            devicesError = error.localizedDescription
         }
     }
 
@@ -370,35 +395,44 @@ struct ContentView: View {
         defer { isLoadingLogs = false }
 
         let logPath = dependencies.runtimeManager.config.logFilePath
-        logs = await Task.detached(priority: .utility) {
+        let result = await Task.detached(priority: .utility) {
             Self.readTailLines(at: logPath, maxLines: 200, maxBytes: 1_048_576)
         }.value
+        switch result {
+        case .success(let lines):
+            logs = lines
+            logsError = nil
+        case .failure(let error):
+            logsError = error.localizedDescription
+        }
     }
 
-    private nonisolated static func readTailLines(at path: String, maxLines: Int, maxBytes: UInt64) -> [String] {
-        guard let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path)) else {
-            return []
+    private nonisolated static func readTailLines(
+        at path: String,
+        maxLines: Int,
+        maxBytes: UInt64
+    ) -> Result<[String], Error> {
+        let handle: FileHandle
+        do {
+            handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: path))
+        } catch {
+            return .failure(error)
         }
         defer { try? handle.close() }
 
-        guard let fileSize = try? handle.seekToEnd() else {
-            return []
-        }
-        let bytesToRead = min(fileSize, maxBytes)
-        guard bytesToRead > 0 else {
-            return []
-        }
-
         do {
+            let fileSize = try handle.seekToEnd()
+            let bytesToRead = min(fileSize, maxBytes)
+            guard bytesToRead > 0 else { return .success([]) }
             try handle.seek(toOffset: fileSize - bytesToRead)
             guard let data = try handle.readToEnd(),
                   let text = String(data: data, encoding: .utf8) else {
-                return []
+                return .success([])
             }
             let lines = text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
-            return Array(lines.suffix(maxLines))
+            return .success(Array(lines.suffix(maxLines)))
         } catch {
-            return []
+            return .failure(error)
         }
     }
 
@@ -410,16 +444,14 @@ struct ContentView: View {
 
     private func revokeDevice(_ device: TrustedDevice) async {
         guard let client = apiClient else {
-            errorMessage = L10n.errorCannotConnect
-            showErrorAlert = true
+            devicesError = L10n.errorCannotConnect
             return
         }
         do {
             try await client.revokeDevice(device.deviceId)
             await loadDevices()
         } catch {
-            errorMessage = String(format: L10n.errorRemoveDevice, error.localizedDescription)
-            showErrorAlert = true
+            devicesError = String(format: L10n.errorRemoveDevice, error.localizedDescription)
         }
     }
 }

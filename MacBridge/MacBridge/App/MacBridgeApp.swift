@@ -35,7 +35,8 @@ struct MacBridgeApp: App {
                 dependencies.startBridge()
             }
         }
-        .defaultSize(width: 920, height: 640)
+        .defaultSize(width: 960, height: 680)
+        .windowResizability(.contentMinSize)
 
         // 菜单栏图标及下拉菜单
         MenuBarExtra("CCCode Bridge", systemImage: menuBarIcon) {

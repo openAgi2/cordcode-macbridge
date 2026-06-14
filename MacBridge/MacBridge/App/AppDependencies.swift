@@ -12,6 +12,7 @@ class AppDependencies: ObservableObject {
     let settingsViewModel: SettingsViewModel
 
     private let dataDir: String
+    private var hasStartedBridge = false
 
     init() {
         // 从 Bundle 获取 runtime binary 路径，回退到 /usr/local/bin
@@ -55,7 +56,7 @@ class AppDependencies: ObservableObject {
         // 首次运行或凭据为空时，自动生成随机凭据并保存
         if opencodeUser.isEmpty || opencodePass.isEmpty {
             opencodeUser = "opencode"
-            opencodePass = UUID().uuidString.lowercased()
+            opencodePass = OpenCodeCredentialsGenerator.generatePassword()
             Self.writeCredentials(user: opencodeUser, pass: opencodePass, to: dir)
             NSLog("[AppDependencies] Automatically generated OpenCode credentials for first-time launch.")
         }
@@ -68,7 +69,6 @@ class AppDependencies: ObservableObject {
         let relayRouteID = hasCurrentRelayRoute
             ? UserDefaults.standard.string(forKey: "relayRouteID") ?? ""
             : ""
-        let relayCredential = hasCurrentRelayRoute ? RelayRouteCredentialStore.load() : ""
 
         let config = RuntimeConfig(
             executablePath: executablePath,
@@ -84,7 +84,9 @@ class AppDependencies: ObservableObject {
             includeRemoteInPairing: UserDefaults.standard.object(forKey: "pairingIncludeRemote") as? Bool ?? true,
             relayEndpoint: relayEndpoint,
             relayRouteID: relayRouteID,
-            relayCredential: relayCredential,
+            // Keychain access may require user authorization after an app update.
+            // OfficialRelayProvisioner loads it off the main actor and restarts with the real credential.
+            relayCredential: "",
             relayServiceAddress: UserDefaults.standard.string(forKey: "relayServiceAddress") ?? ""
         )
 
@@ -111,12 +113,20 @@ class AppDependencies: ObservableObject {
                 self?.pairingViewModel.configure(apiClient: client)
             }
             .store(in: &cancellables)
+
+        // Bridge 生命周期属于应用，不应依赖主窗口是否被恢复或显示。
+        Task { @MainActor [weak self] in
+            self?.startBridge()
+        }
     }
 
     private var cancellables = Set<AnyCancellable>()
 
     /// 延迟启动 bridge，给 SwiftUI 足够的时间完成 UI 初始化
     func startBridge() {
+        guard !hasStartedBridge else { return }
+        hasStartedBridge = true
+
         // 监听远程 URL 变更，更新 RuntimeConfig 并重启
         NotificationCenter.default.publisher(for: .remoteURLDidChange)
             .receive(on: DispatchQueue.main)

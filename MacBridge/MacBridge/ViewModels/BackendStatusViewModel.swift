@@ -13,16 +13,7 @@ struct BackendAgentStatus: Identifiable {
 
     /// 用户友好的状态文案
     var displayStatus: String {
-        switch status {
-        case "available": return L10n.statusReady
-        case "not_detected": return L10n.statusNotFound
-        case "not_logged_in": return L10n.statusLoginRequired
-        case "service_not_running": return L10n.statusNotRunning
-        case "port_conflict": return L10n.statusPortConflict
-        case "version_unsupported": return L10n.statusVersionIncompatible
-        case "permission_denied": return L10n.statusPermissionDenied
-        default: return status
-        }
+        BackendStatusText.display(status)
     }
 
     /// 状态是否为可用

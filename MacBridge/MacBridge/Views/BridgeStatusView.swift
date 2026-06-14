@@ -1,8 +1,5 @@
 import SwiftUI
 
-// MARK: - Overview 页面
-
-/// Bridge 运行状态总览：状态摘要 + AI Tools 摘要 + 设备摘要 + 远程访问
 struct BridgeStatusView: View {
     @ObservedObject var viewModel: BridgeStatusViewModel
     @ObservedObject var backendViewModel: BackendStatusViewModel
@@ -11,15 +8,12 @@ struct BridgeStatusView: View {
     let onStartBridge: () -> Void
     let onStopBridge: () -> Void
     let onRestartBridge: () -> Void
-
-    /// 外部注入：切换到 Devices tab 的回调
     var onNavigateToDevices: (() -> Void)?
-    /// 外部注入：触发配对的回调
+    var onNavigateToRemoteAccess: (() -> Void)?
     var onPairDevice: (() -> Void)?
 
-    private var readyAgentCount: Int {
-        overviewAgents.filter { $0.status == "available" }.count
-    }
+    @State private var showStopConfirmation = false
+    @State private var isRestarting = false
 
     private var overviewAgents: [BackendAgentStatus] {
         if !backendViewModel.agents.isEmpty {
@@ -40,347 +34,316 @@ struct BridgeStatusView: View {
 
     private var lastSeenText: String? {
         guard let lastSeen = devices.compactMap(\.lastSeenAt).sorted().last else { return nil }
-        return Self.relativeTimeString(lastSeen)
+        return RelativeTimeFormatter.string(lastSeen)
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
-                headerSection
-
-                sectionBlock {
-                    statusSummarySection
+        PageContainer {
+            VStack(alignment: .leading, spacing: 22) {
+                PageHeader(L10n.overview, subtitle: L10n.overviewSubtitle) {
+                    if let onPairDevice {
+                        Button(action: onPairDevice) {
+                            Label(L10n.pairNewDevice, systemImage: "qrcode")
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
                 }
 
-                sectionBlock {
-                    aiToolsSummarySection
-                }
+                runtimeSection
+                Divider()
+                agentsSection
+                Divider()
+                devicesSection
+                Divider()
+                remoteSection
 
-                sectionBlock {
-                    devicesSummarySection
-                }
-            }
-            .padding(.horizontal, 38)
-            .padding(.top, 34)
-            .padding(.bottom, 48)
-            .frame(maxWidth: 820, alignment: .leading)
-            .frame(maxWidth: .infinity)
-        }
-    }
-
-    // MARK: - Header
-
-    private var headerSection: some View {
-        HStack(alignment: .top, spacing: 14) {
-            statusIconBadge
-
-            VStack(alignment: .leading, spacing: 12) {
-                Text(L10n.ccCodeBridge)
-                    .font(.system(size: 26, weight: .semibold))
-                Text(viewModel.statusText)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-
-                actionsSection
-            }
-
-            Spacer()
-        }
-    }
-
-    // MARK: - 主操作按钮
-
-    private var actionsSection: some View {
-        HStack(spacing: 12) {
-            if let onPair = onPairDevice {
-                Button(action: onPair) {
-                    Label(L10n.pairNewDevice, systemImage: "qrcode")
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-            }
-            if let onDevices = onNavigateToDevices, !devices.isEmpty {
-                Button(action: onDevices) {
-                    Label(L10n.devices, systemImage: "iphone")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-            }
-        }
-    }
-
-    // MARK: - 状态摘要
-
-    private var statusSummarySection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            sectionHeader(L10n.status)
-
-            HStack(spacing: 16) {
-                statusRow(
-                    icon: "checkmark.circle.fill",
-                    color: viewModel.status == .ready ? .green : .orange,
-                    title: viewModel.status == .ready ? L10n.bridgeRunning : viewModel.statusText,
-                    detail: viewModel.lastError
-                )
-                Spacer()
-                runtimeControls
-            }
-        }
-    }
-
-    private var runtimeControls: some View {
-        HStack(spacing: 8) {
-            switch viewModel.status {
-            case .ready, .readyNoAgents:
-                Button(L10n.stop) {
-                    onStopBridge()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-
-                Button(L10n.restart) {
-                    onRestartBridge()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-
-            case .starting:
-                Button(L10n.stop) {
-                    onStopBridge()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-
-            case .idle, .stopped, .crashed, .sleeping:
-                Button(L10n.start) {
-                    onStartBridge()
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-            }
-        }
-    }
-
-    private func statusRow(icon: String, color: Color, title: String, detail: String?) -> some View {
-        HStack(spacing: 9) {
-            Image(systemName: icon)
-                .foregroundColor(color)
-                .font(.system(size: 15, weight: .semibold))
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 15, weight: .medium))
-                if let detail {
-                    Text(detail)
+                if let error = viewModel.overviewDataError {
+                    Label(error, systemImage: "exclamationmark.triangle")
                         .font(.caption)
-                        .foregroundColor(.secondary)
-                        .lineLimit(2)
+                        .foregroundStyle(.orange)
                 }
+            }
+        }
+        .confirmationDialog(
+            L10n.overviewStopConfirmTitle,
+            isPresented: $showStopConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(L10n.stopBridge, role: .destructive, action: onStopBridge)
+            Button(L10n.cancel, role: .cancel) {}
+        } message: {
+            Text(L10n.overviewStopConfirmMessage)
+        }
+        .onChange(of: viewModel.status) { _, status in
+            if status == .ready || status == .readyNoAgents || status == .crashed {
+                isRestarting = false
             }
         }
     }
 
-    // MARK: - AI Tools 摘要
+    private var runtimeSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(L10n.overviewRuntime)
+            HStack(alignment: .center, spacing: 12) {
+                StatusIndicator(
+                    systemImage: runtimeAppearance.icon,
+                    color: runtimeAppearance.color,
+                    showsProgress: viewModel.status == .starting
+                )
 
-    private var aiToolsSummarySection: some View {
-        VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(runtimeAppearance.title)
+                        .font(.body.weight(.medium))
+                    Text(runtimeDetail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if let error = viewModel.lastError, !error.isEmpty {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                Spacer()
+                runtimeActions
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var runtimeActions: some View {
+        switch viewModel.status {
+        case .ready:
+            Button(isRestarting ? L10n.overviewRestarting : L10n.restart) {
+                isRestarting = true
+                onRestartBridge()
+            }
+            .disabled(isRestarting)
+
+            Menu {
+                Button(L10n.stopBridge, role: .destructive) {
+                    showStopConfirmation = true
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+            }
+            .menuStyle(.borderlessButton)
+            .help(L10n.overviewMoreActions)
+            .accessibilityLabel(L10n.overviewMoreActions)
+
+        case .readyNoAgents:
+            Button(L10n.overviewDetectAgain) {
+                Task { await backendViewModel.refreshAgents() }
+            }
+            .disabled(backendViewModel.isLoading)
+
+            Menu {
+                Button(L10n.stopBridge, role: .destructive) {
+                    showStopConfirmation = true
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+            }
+            .menuStyle(.borderlessButton)
+            .help(L10n.overviewMoreActions)
+            .accessibilityLabel(L10n.overviewMoreActions)
+
+        case .starting:
+            Button(L10n.overviewStarting) {}
+                .disabled(true)
+
+        case .idle, .stopped, .sleeping:
+            Button(L10n.start, action: onStartBridge)
+                .buttonStyle(.borderedProminent)
+
+        case .crashed:
+            Button(L10n.overviewRestart, action: onStartBridge)
+                .buttonStyle(.borderedProminent)
+        }
+    }
+
+    private var agentsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
-                sectionHeader(L10n.aiTools)
+                SectionHeader(L10n.aiTools)
                 Spacer()
                 Button {
                     Task { await backendViewModel.refreshAgents() }
                 } label: {
-                    HStack(spacing: 4) {
-                        if backendViewModel.isLoading {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                        Image(systemName: "arrow.clockwise")
-                        Text(L10n.refreshAll)
+                    if backendViewModel.isLoading {
+                        ProgressView()
+                            .controlSize(.small)
                     }
+                    Text(L10n.overviewDetectAgain)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
                 .disabled(backendViewModel.isLoading)
             }
 
             if let error = backendViewModel.errorMessage {
-                Label(error, systemImage: backendViewModel.isShowingStaleResults ? "exclamationmark.triangle" : "xmark.circle")
-                    .font(.caption)
-                    .foregroundColor(backendViewModel.isShowingStaleResults ? .orange : .red)
+                InlineFeedback(
+                    style: backendViewModel.isShowingStaleResults ? .warning : .error,
+                    message: error
+                )
             }
 
             if overviewAgents.isEmpty {
                 Text(L10n.noAiToolsDetected)
-                    .foregroundColor(.secondary)
-                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             } else {
-                VStack(spacing: 0) {
-                    ForEach(overviewAgents) { agent in
-                        aiToolRow(agent)
-                        if agent.id != overviewAgents.last?.id {
-                            Hairline()
-                                .padding(.leading, 22)
-                        }
-                    }
+                ForEach(Array(overviewAgents.enumerated()), id: \.offset) { _, agent in
+                    agentRow(agent)
                 }
             }
         }
     }
 
-    private func aiToolRow(_ agent: BackendAgentStatus) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(agent.isAvailable ? Color.green : Color.orange)
-                    .frame(width: 8, height: 8)
-
+    private func agentRow(_ agent: BackendAgentStatus) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 9) {
+                StatusIndicator(
+                    systemImage: agent.isAvailable
+                        ? "checkmark.circle.fill"
+                        : "exclamationmark.triangle.fill",
+                    color: agent.isAvailable ? .green : .orange
+                )
                 Text(agent.displayName)
-                    .font(.system(size: 15, weight: .medium))
-
+                    .font(.body.weight(.medium))
                 Spacer()
-
-                statusBadge(agent.displayStatus, color: agent.isAvailable ? .green : .orange)
-
-                Button(L10n.test) {
+                Text(agent.displayStatus)
+                    .foregroundStyle(agent.isAvailable ? Color.secondary : Color.orange)
+                Button(L10n.overviewTestConnection) {
                     Task { await backendViewModel.testAgent(id: agent.id) }
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
                 .disabled(agent.isRefreshing)
-
-                if agent.isRefreshing {
-                    ProgressView()
-                        .controlSize(.small)
-                }
             }
-
             if !agent.isAvailable {
                 Text(Self.nextStepGuidance(agent.reason, kind: agent.kind))
                     .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(.leading, 16)
-            }
-
-            if agent.isAvailable && agent.requiresPollingForExternalTurns {
-                Text(L10n.externalTurnsPolling)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .padding(.leading, 16)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 27)
             }
         }
-        .padding(.vertical, 11)
+        .padding(.vertical, 5)
     }
 
-    // MARK: - 设备摘要
-
-    private var devicesSummarySection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            sectionHeader(L10n.devices)
-
-            if !hasLoadedDevices {
-                HStack(spacing: 6) {
-                    Image(systemName: "clock")
-                        .foregroundColor(.secondary)
-                        .frame(width: 16)
-                    Text(L10n.loadingDevices)
-                        .font(.body)
-                        .foregroundColor(.secondary)
+    private var devicesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionHeader(L10n.devices)
+            HStack(spacing: 10) {
+                StatusIndicator(
+                    systemImage: devices.isEmpty ? "iphone.slash" : "iphone",
+                    color: devices.isEmpty ? .secondary : .green
+                )
+                Text(deviceSummary)
+                if let lastSeenText, !devices.isEmpty {
+                    Text(String(format: L10n.overviewRecentlySeen, lastSeenText))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-            } else if !devices.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                        .frame(width: 16)
-                    Text(String(format: L10n.tr("trusted_devices"), devices.count))
-                        .font(.body)
-                    if let last = lastSeenText {
-                        Text(String(format: L10n.lastConnected, last))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-            } else {
-                HStack(spacing: 6) {
-                    Image(systemName: "questionmark.circle")
-                        .foregroundColor(.secondary)
-                        .frame(width: 16)
-                    Text(L10n.noTrustedDevices)
-                        .font(.body)
-                        .foregroundColor(.secondary)
+                Spacer()
+                if let onNavigateToDevices {
+                    Button(L10n.overviewManageDevices, action: onNavigateToDevices)
                 }
             }
         }
     }
 
-    // MARK: - 状态图标
-
-    @ViewBuilder
-    private func sectionBlock<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Hairline()
-                .padding(.bottom, 24)
-            content()
+    private var remoteSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionHeader(L10n.remoteAccessTab)
+            HStack(spacing: 10) {
+                StatusIndicator(
+                    systemImage: relayConfiguredIcon,
+                    color: relayConfiguredColor
+                )
+                Text(relaySummary)
+                Spacer()
+                if let onNavigateToRemoteAccess {
+                    Button(L10n.overviewViewSettings, action: onNavigateToRemoteAccess)
+                }
+            }
         }
     }
 
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundColor(.primary)
-    }
-
-    private func statusBadge(_ text: String, color: Color) -> some View {
-        Text(text)
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundColor(color)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(
-                Capsule()
-                    .fill(color.opacity(0.12))
-            )
-    }
-
-    @ViewBuilder
-    private var statusIconBadge: some View {
-        statusIcon
-            .font(.system(size: 15, weight: .semibold))
-            .frame(width: 28, height: 28)
-            .background(
-                Circle()
-                    .fill(Color.green.opacity(viewModel.status == .ready ? 0.14 : 0))
-            )
-    }
-
-    @ViewBuilder
-    private var statusIcon: some View {
+    private var runtimeAppearance: (title: String, icon: String, color: Color) {
         switch viewModel.status {
-        case .ready:
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(.green)
-        case .readyNoAgents:
-            Image(systemName: "exclamationmark.circle.fill")
-                .foregroundColor(.orange)
-        case .crashed:
-            Image(systemName: "xmark.circle.fill")
-                .foregroundColor(.red)
-        case .starting:
-            ProgressView()
-                .controlSize(.small)
-        case .stopped:
-            Image(systemName: "stop.circle")
-                .foregroundColor(.gray)
-        case .sleeping:
-            Image(systemName: "moon.fill")
-                .foregroundColor(.blue)
-        case .idle:
-            Image(systemName: "pc")
-                .foregroundColor(.orange)
+        case .ready: return (L10n.overviewRunning, "checkmark.circle.fill", .green)
+        case .readyNoAgents: return (L10n.overviewRunningNoAgents, "exclamationmark.circle.fill", .orange)
+        case .starting: return (L10n.overviewStarting, "hourglass", .orange)
+        case .stopped: return (L10n.overviewStopped, "stop.circle", .secondary)
+        case .crashed: return (L10n.overviewStartFailed, "xmark.circle.fill", .red)
+        case .sleeping: return (L10n.overviewSleeping, "moon.fill", .blue)
+        case .idle: return (L10n.overviewIdle, "circle", .secondary)
+        }
+    }
+
+    private var runtimeDetail: String {
+        var details: [String] = []
+        if let port = viewModel.bridgePort {
+            details.append(String(format: L10n.overviewPort, port))
+        }
+        if let uptime = BridgeStatusViewModel.formatUptime(viewModel.managementStatus?.uptime) {
+            details.append(String(format: L10n.overviewUptime, uptime))
+        }
+        if let version = viewModel.managementStatus?.version, !version.isEmpty {
+            details.append(String(format: L10n.overviewVersion, version))
+        }
+        return details.isEmpty ? L10n.overviewDetailsUnavailable : details.joined(separator: " · ")
+    }
+
+    private var deviceSummary: String {
+        guard hasLoadedDevices else { return L10n.loadingDevices }
+        return devices.isEmpty
+            ? L10n.noTrustedDevices
+            : String(format: L10n.tr("trusted_devices"), devices.count)
+    }
+
+    private var relaySummary: String {
+        switch viewModel.relayConfigured {
+        case true:
+            return OfficialRelayConfiguration.isUsingCustomEndpoint
+                ? L10n.overviewCustomRelayConfigured
+                : L10n.overviewOfficialRelayConfigured
+        case false:
+            return L10n.overviewRelayNotConfigured
+        case nil:
+            return L10n.overviewRelayUnavailable
+        }
+    }
+
+    private var relayConfiguredIcon: String {
+        switch viewModel.relayConfigured {
+        case true: return "lock.shield.fill"
+        case false: return "lock.slash"
+        case nil: return "questionmark.circle"
+        }
+    }
+
+    private var relayConfiguredColor: Color {
+        switch viewModel.relayConfigured {
+        case true: return .green
+        case false: return .secondary
+        case nil: return .orange
         }
     }
 
     static func displayStatus(_ status: String) -> String {
+        BackendStatusText.display(status)
+    }
+
+    private static func nextStepGuidance(_ reason: String?, kind: String) -> String {
+        guard let reason, !reason.isEmpty else { return L10n.checkDocsGuidance }
+        if reason.contains("not found in PATH") { return String(format: L10n.notInstalled, kind) }
+        if reason.contains("not running") { return L10n.serviceNotRunning }
+        if reason.contains("not logged in") { return L10n.loginRequired }
+        if reason.contains("timed out") { return L10n.detectionTimedOut }
+        if reason.contains("unreachable") { return L10n.cannotReachService }
+        return reason
+    }
+}
+
+enum BackendStatusText {
+    static func display(_ status: String) -> String {
         switch status {
         case "available": return L10n.statusReady
         case "not_detected": return L10n.statusNotFound
@@ -392,64 +355,86 @@ struct BridgeStatusView: View {
         default: return status
         }
     }
+}
 
-    private static func nextStepGuidance(_ reason: String?, kind: String) -> String {
-        guard let reason, !reason.isEmpty else {
-            return L10n.checkDocsGuidance
-        }
-        if reason.contains("not found in PATH") {
-            return String(format: L10n.notInstalled, kind)
-        }
-        if reason.contains("not running") {
-            return L10n.serviceNotRunning
-        }
-        if reason.contains("not logged in") {
-            return L10n.loginRequired
-        }
-        if reason.contains("timed out") {
-            return L10n.detectionTimedOut
-        }
-        if reason.contains("unreachable") {
-            return L10n.cannotReachService
-        }
-        return reason
+struct SectionHeader: View {
+    let title: String
+
+    init(_ title: String) {
+        self.title = title
     }
 
-    private static func relativeTimeString(_ isoString: String) -> String {
+    var body: some View {
+        Text(title)
+            .font(.headline)
+    }
+}
+
+struct StatusIndicator: View {
+    let systemImage: String
+    let color: Color
+    var showsProgress = false
+
+    var body: some View {
+        Group {
+            if showsProgress {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: systemImage)
+                    .foregroundStyle(color)
+            }
+        }
+        .frame(width: 18)
+        .accessibilityHidden(true)
+    }
+}
+
+struct InlineFeedback: View {
+    enum Style {
+        case success
+        case warning
+        case error
+
+        var color: Color {
+            switch self {
+            case .success: return .green
+            case .warning: return .orange
+            case .error: return .red
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .success: return "checkmark.circle"
+            case .warning: return "exclamationmark.triangle"
+            case .error: return "xmark.circle"
+            }
+        }
+    }
+
+    let style: Style
+    let message: String
+
+    var body: some View {
+        Label(message, systemImage: style.icon)
+            .font(.caption)
+            .foregroundStyle(style.color)
+    }
+}
+
+enum RelativeTimeFormatter {
+    static func string(_ isoString: String) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let date = formatter.date(from: isoString) else { return isoString }
-        let interval = Date().timeIntervalSince(date)
+        let fallback = ISO8601DateFormatter()
+        guard let date = formatter.date(from: isoString) ?? fallback.date(from: isoString) else {
+            return isoString
+        }
+        let interval = max(0, Date().timeIntervalSince(date))
         if interval < 60 { return L10n.justNow }
-        if interval < 3600 { return String(format: L10n.tr("min_ago"), Int(interval / 60)) }
-        if interval < 86400 { return String(format: L10n.tr("hr_ago"), Int(interval / 3600)) }
-        return String(format: L10n.tr("days_ago"), Int(interval / 86400))
+        if interval < 3600 { return String(format: L10n.minAgo, Int(interval / 60)) }
+        if interval < 86400 { return String(format: L10n.hrAgo, Int(interval / 3600)) }
+        return String(format: L10n.daysAgo, Int(interval / 86400))
     }
-}
-
-private struct Hairline: View {
-    var body: some View {
-        Rectangle()
-            .fill(Color(NSColor.separatorColor).opacity(0.55))
-            .frame(height: 0.5)
-    }
-}
-
-#Preview {
-    let vm = BridgeStatusViewModel()
-    vm.status = .ready
-    vm.statusText = "Bridge is ready"
-    vm.agents = [
-        AgentInfo(id: "1", kind: "claude", displayName: "Claude Code", status: "available", reason: nil, liveEvents: "stream", requiresPollingForExternalTurns: true),
-        AgentInfo(id: "2", kind: "codex", displayName: "Codex", status: "available", reason: nil, liveEvents: "stream", requiresPollingForExternalTurns: false),
-    ]
-    return BridgeStatusView(
-        viewModel: vm,
-        backendViewModel: BackendStatusViewModel(),
-        devices: [],
-        hasLoadedDevices: true,
-        onStartBridge: {},
-        onStopBridge: {},
-        onRestartBridge: {}
-    )
 }

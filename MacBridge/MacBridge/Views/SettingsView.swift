@@ -1,189 +1,196 @@
 import SwiftUI
 
-/// 设置页面：编辑后端认证信息
 struct SettingsView: View {
     @ObservedObject var viewModel: SettingsViewModel
-    @AppStorage("appLanguage") private var appLanguage: String = ""
-    @AppStorage("appTheme") private var appTheme: String = ""
+    @AppStorage("appLanguage") private var appLanguage = ""
+    @AppStorage("appTheme") private var appTheme = ""
+    @State private var showManualAuthentication = false
+    @State private var showPassword = false
+    @State private var showRegenerateConfirmation = false
+
+    private let labelWidth: CGFloat = 150
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                Text(L10n.settings)
-                    .font(.title2)
-                    .fontWeight(.semibold)
-
-                Divider()
-
-                // 语言设置
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Image(systemName: "globe")
-                            .foregroundColor(.secondary)
-                        Text(L10n.language)
-                            .font(.headline)
-                    }
-
-                    Picker("", selection: $appLanguage) {
-                        ForEach(AppLanguage.allCases) { lang in
-                            Text(lang.displayName).tag(lang.rawValue)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                }
-                .padding(12)
-                .glassPanel()
-
-                // 外观设置
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Image(systemName: "circle.lefthalf.filled")
-                            .foregroundColor(.secondary)
-                        Text(L10n.appearance)
-                            .font(.headline)
-                    }
-
-                    Picker("", selection: $appTheme) {
-                        ForEach(AppTheme.allCases) { theme in
-                            Text(theme.displayName).tag(theme.rawValue)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 320)
-                }
-                .padding(12)
-                .glassPanel()
-
-                Divider()
-
-                // Bridge 显示名称
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Image(systemName: "desktopcomputer")
-                            .foregroundColor(.secondary)
-                        Text(L10n.bridgeName)
-                            .font(.headline)
-                    }
-
-                    Text(L10n.bridgeNameHint)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-
-                    HStack(spacing: 8) {
-                        TextField("Mac", text: $viewModel.displayName)
-                            .textFieldStyle(.roundedBorder)
-
-                        Button {
-                            viewModel.saveDisplayName()
-                        } label: {
-                            Text(L10n.save)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(viewModel.displayName.trimmingCharacters(in: .whitespaces).isEmpty)
-
-                        if let msg = viewModel.displayNameMessage {
-                            Text(msg)
-                                .font(.caption)
-                                .foregroundColor(msg.contains("failed") ? .red : .green)
-                        }
-                    }
-                }
-                .padding(12)
-                .glassPanel()
-
-                Divider()
-
-                // OpenCode 认证
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Image(systemName: "server.rack")
-                            .foregroundColor(.secondary)
-                        Text(L10n.openCodeAuth)
-                            .font(.headline)
-                    }
-
-                    Text(L10n.openCodeAuthHint)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(L10n.openCodeAuthGuidanceAuto)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        Divider()
-                            .padding(.vertical, 2)
-
-                        Text(L10n.openCodeAuthGuidanceManual)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        Text("opencode serve --port 64667 --hostname 127.0.0.1")
-                            .font(.system(.caption, design: .monospaced))
-                            .padding(6)
-                            .background(Color(NSColor.textBackgroundColor))
-                            .cornerRadius(4)
-                            .textSelection(.enabled)
-                    }
-                    .padding(10)
-                    .background(Color.secondary.opacity(0.06))
-                    .cornerRadius(8)
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(L10n.username)
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                        TextField("opencode", text: $viewModel.opencodeUser)
-                            .textFieldStyle(.roundedBorder)
-                    }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(L10n.password)
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                        SecureField("password", text: $viewModel.opencodePass)
-                            .textFieldStyle(.roundedBorder)
-                    }
-
-                    HStack {
-                        Button {
-                            viewModel.saveCredentials()
-                        } label: {
-                            HStack(spacing: 4) {
-                                if viewModel.isSaving {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                }
-                                Text(L10n.saveAndRestart)
+        PageContainer {
+            VStack(alignment: .leading, spacing: 24) {
+                PageHeader(L10n.settings)
+                settingsGroup(L10n.settingsGeneral) {
+                    settingRow(L10n.language) {
+                        Picker("", selection: $appLanguage) {
+                            ForEach(AppLanguage.allCases) { language in
+                                Text(language.displayName).tag(language.rawValue)
                             }
                         }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(viewModel.isSaving)
-
-                        if let msg = viewModel.saveMessage {
-                            Text(msg)
-                                .font(.caption)
-                                .foregroundColor(msg.contains("failed") ? .red : .green)
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(width: 320, alignment: .leading)
+                    }
+                    settingRow(L10n.appearance) {
+                        Picker("", selection: $appTheme) {
+                            ForEach(AppTheme.allCases) { theme in
+                                Text(theme.displayName).tag(theme.rawValue)
+                            }
                         }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .frame(width: 320, alignment: .leading)
                     }
                 }
-                .padding(12)
-                .glassPanel()
 
-                Spacer()
+                Divider()
+
+                settingsGroup(L10n.settingsMacBridge) {
+                    settingRow(L10n.settingsName) {
+                        HStack {
+                            TextField(L10n.settingsNamePlaceholder, text: $viewModel.displayName)
+                                .textFieldStyle(.roundedBorder)
+                            Button(L10n.save) {
+                                viewModel.saveDisplayName()
+                            }
+                            .disabled(
+                                !viewModel.isDisplayNameDirty ||
+                                viewModel.displayNameFeedback == .saving
+                            )
+                        }
+                    }
+                    feedbackView(viewModel.displayNameFeedback)
+                }
+
+                Divider()
+
+                settingsGroup("OpenCode") {
+                    settingRow(L10n.settingsAuthenticationStatus) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label(L10n.settingsAutomaticallyConfigured, systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                            Text(L10n.settingsCredentialsApplyAfterRestart)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    DisclosureGroup(
+                        L10n.settingsManualAuthentication,
+                        isExpanded: $showManualAuthentication
+                    ) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            settingRow(L10n.username) {
+                                TextField(L10n.username, text: $viewModel.opencodeUser)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                            settingRow(L10n.password) {
+                                HStack {
+                                    Group {
+                                        if showPassword {
+                                            TextField(L10n.password, text: $viewModel.opencodePass)
+                                        } else {
+                                            SecureField(L10n.password, text: $viewModel.opencodePass)
+                                        }
+                                    }
+                                    .textFieldStyle(.roundedBorder)
+
+                                    Button {
+                                        showPassword.toggle()
+                                    } label: {
+                                        Image(systemName: showPassword ? "eye.slash" : "eye")
+                                    }
+                                    .help(showPassword ? L10n.settingsHidePassword : L10n.settingsShowPassword)
+                                    .accessibilityLabel(showPassword ? L10n.settingsHidePassword : L10n.settingsShowPassword)
+
+                                    Button(L10n.settingsRegenerate) {
+                                        showRegenerateConfirmation = true
+                                    }
+                                }
+                            }
+                            settingRow(L10n.settingsLaunchCommand) {
+                                HStack {
+                                    Text(L10n.settingsOpenCodeCommand)
+                                        .font(.system(.caption, design: .monospaced))
+                                        .textSelection(.enabled)
+                                    Button {
+                                        NSPasteboard.general.clearContents()
+                                        NSPasteboard.general.setString(
+                                            L10n.settingsOpenCodeCommand,
+                                            forType: .string
+                                        )
+                                    } label: {
+                                        Image(systemName: "doc.on.doc")
+                                    }
+                                    .help(L10n.settingsCopyCommand)
+                                    .accessibilityLabel(L10n.settingsCopyCommand)
+                                }
+                            }
+
+                            Button(L10n.settingsSaveCredentialsRestart) {
+                                viewModel.saveCredentials()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(
+                                !viewModel.isCredentialsDirty ||
+                                viewModel.credentialsFeedback == .saving
+                            )
+
+                            feedbackView(viewModel.credentialsFeedback)
+                        }
+                        .padding(.top, 12)
+                    }
+                }
             }
-            .padding()
-            .frame(maxWidth: 680)
-            .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .confirmationDialog(
+            L10n.settingsRegenerateConfirmTitle,
+            isPresented: $showRegenerateConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(L10n.settingsRegenerate) {
+                viewModel.regeneratePassword()
+            }
+            Button(L10n.cancel, role: .cancel) {}
+        } message: {
+            Text(L10n.settingsRegenerateConfirmMessage)
         }
     }
-}
 
-#Preview {
-    let vm = SettingsViewModel(dataDir: "/tmp/CCCode Bridge", onCredentialsChanged: {})
-    vm.opencodeUser = "opencode"
-    return SettingsView(viewModel: vm)
+    private func settingsGroup<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SectionHeader(title)
+            content()
+        }
+    }
+
+    private func settingRow<Content: View>(
+        _ label: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 16) {
+            Text(label)
+                .foregroundStyle(.secondary)
+                .frame(width: labelWidth, alignment: .leading)
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private func feedbackView(_ feedback: SaveFeedback) -> some View {
+        switch feedback {
+        case .idle:
+            EmptyView()
+        case .saving:
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text(L10n.settingsSaving)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        case .success(let message):
+            InlineFeedback(style: .success, message: message)
+        case .failure(let message):
+            InlineFeedback(style: .error, message: message)
+        }
+    }
 }
