@@ -81,6 +81,9 @@ func TestClaudeDescriptorRequiresPolling(t *testing.T) {
 	if d.Kind != "claude_code" {
 		t.Fatalf("Kind = %q, want claude_code", d.Kind)
 	}
+	if d.DisplayName != "Claude Code" {
+		t.Fatalf("DisplayName = %q, want Claude Code", d.DisplayName)
+	}
 }
 
 func TestOpenCodeDescriptorBroadcastRequiresPollingProtection(t *testing.T) {

@@ -1,0 +1,12 @@
+{
+  "type": "result",
+  "requestId": "req-msg-page-stale",
+  "backendId": "codex",
+  "ok": false,
+  "error": {
+    "code": "cursor_stale",
+    "message": "cursor_stale: indexed prefix changed",
+    "retryable": false,
+    "recoverBy": "reload-first-page"
+  }
+}

@@ -3,8 +3,10 @@ package codex
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -16,7 +18,8 @@ import (
 	"github.com/openAgi2/cccode-macbridge/core"
 )
 
-const codexSessionScannerMaxTokenSize = 8 * 1024 * 1024
+const codexSessionScannerMaxTokenSize = 64 * 1024 * 1024
+const codexSessionListPrefixBytes int64 = 256 * 1024
 
 // resolveCodexHomeDir returns the effective CODEX_HOME directory.
 // Priority: explicit config value > CODEX_HOME env > ~/.codex
@@ -39,6 +42,7 @@ func resolveCodexHomeDir(explicit string) string {
 // fileEntry 缓存单个 JSONL 文件解析结果和 mtime
 type fileEntry struct {
 	mtime time.Time
+	size  int64
 	info  core.AgentSessionInfo
 }
 
@@ -49,25 +53,36 @@ type sessionListCache struct {
 }
 
 // list 返回 session 列表。只增量重解析 mtime 变了的文件。
-func (c *sessionListCache) list(codexHome string) ([]core.AgentSessionInfo, error) {
+func (c *sessionListCache) list(ctx context.Context, codexHome string) ([]core.AgentSessionInfo, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	sessionsDir := filepath.Join(resolveCodexHomeDir(codexHome), "sessions")
+	metrics := core.SessionLoadMetricsFromContext(ctx)
 
 	// Phase 1: walk 目录收集所有 .jsonl path + mtime（只 stat，不读文件内容）
 	type walkEntry struct {
 		path  string
 		mtime time.Time
+		size  int64
 	}
 	var walked []walkEntry
+	var totalBytes int64
+	var maxFileBytes int64
+	enumerateStarted := time.Now()
 	_ = filepath.Walk(sessionsDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".jsonl") {
 			return nil
 		}
-		walked = append(walked, walkEntry{path: path, mtime: info.ModTime()})
+		size := info.Size()
+		walked = append(walked, walkEntry{path: path, mtime: info.ModTime(), size: size})
+		totalBytes += size
+		if size > maxFileBytes {
+			maxFileBytes = size
+		}
 		return nil
 	})
+	metrics.RecordEnumeration(time.Since(enumerateStarted), len(walked), totalBytes, maxFileBytes)
 
 	if len(walked) == 0 {
 		c.files = nil
@@ -76,14 +91,15 @@ func (c *sessionListCache) list(codexHome string) ([]core.AgentSessionInfo, erro
 	}
 
 	// Phase 2: 对比缓存，找出新增/变更/删除的文件
-	currentSet := make(map[string]time.Time, len(walked))
+	compareStarted := time.Now()
+	currentSet := make(map[string]walkEntry, len(walked))
 	for _, w := range walked {
-		currentSet[w.path] = w.mtime
+		currentSet[w.path] = w
 	}
 
 	var changed []walkEntry
 	for _, w := range walked {
-		if cached, ok := c.files[w.path]; !ok || !cached.mtime.Equal(w.mtime) {
+		if cached, ok := c.files[w.path]; !ok || !cached.mtime.Equal(w.mtime) || cached.size != w.size {
 			changed = append(changed, w)
 		}
 	}
@@ -97,8 +113,10 @@ func (c *sessionListCache) list(codexHome string) ([]core.AgentSessionInfo, erro
 
 	// 完全命中：零开销直接返回
 	if c.files != nil && len(changed) == 0 && deleted == 0 {
+		metrics.RecordStatCompare(time.Since(compareStarted), 0, 0, true)
 		return cloneSessionInfos(c.sorted), nil
 	}
+	metrics.RecordStatCompare(time.Since(compareStarted), len(changed), deleted, false)
 
 	slog.Debug("codex: session cache incremental update", "total", len(walked), "changed", len(changed), "deleted", deleted)
 
@@ -115,20 +133,16 @@ func (c *sessionListCache) list(codexHome string) ([]core.AgentSessionInfo, erro
 	}
 
 	// 解析变更的文件
+	parseStarted := time.Now()
 	for _, w := range changed {
 		info := parseCodexSessionFile(w.path)
 		if info != nil {
-			cacheMtime := w.mtime
-			if patchSessionSourceFile(w.path) {
-				if stat, err := os.Stat(w.path); err == nil {
-					cacheMtime = stat.ModTime()
-				}
-			}
-			c.files[w.path] = &fileEntry{mtime: cacheMtime, info: *info}
+			c.files[w.path] = &fileEntry{mtime: w.mtime, size: w.size, info: *info}
 		} else {
 			delete(c.files, w.path)
 		}
 	}
+	metrics.AddMetadataParse(time.Since(parseStarted))
 
 	// Phase 4: 重建排序列表
 	sessions := make([]core.AgentSessionInfo, 0, len(c.files))
@@ -136,7 +150,10 @@ func (c *sessionListCache) list(codexHome string) ([]core.AgentSessionInfo, erro
 		sessions = append(sessions, entry.info)
 	}
 	sort.Slice(sessions, func(i, j int) bool {
-		return sessions[i].ModifiedAt.After(sessions[j].ModifiedAt)
+		if !sessions[i].ModifiedAt.Equal(sessions[j].ModifiedAt) {
+			return sessions[i].ModifiedAt.After(sessions[j].ModifiedAt)
+		}
+		return sessions[i].ID < sessions[j].ID
 	})
 	c.sorted = sessions
 
@@ -174,6 +191,20 @@ func parseCodexSessionFile(path string) *core.AgentSessionInfo {
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 256*1024), codexSessionScannerMaxTokenSize)
 
+	if scanner.Scan() {
+		parseCodexSessionMetadata(scanner.Bytes(), &sessionID, &sessionCwd)
+	}
+
+	if _, err := f.Seek(0, 0); err != nil {
+		return nil
+	}
+	if stat.Size() > codexSessionListPrefixBytes {
+		scanner = bufio.NewScanner(io.LimitReader(f, codexSessionListPrefixBytes))
+	} else {
+		scanner = bufio.NewScanner(f)
+	}
+	scanner.Buffer(make([]byte, 256*1024), codexSessionScannerMaxTokenSize)
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
@@ -190,14 +221,7 @@ func parseCodexSessionFile(path string) *core.AgentSessionInfo {
 
 		switch entry.Type {
 		case "session_meta":
-			var meta struct {
-				ID  string `json:"id"`
-				Cwd string `json:"cwd"`
-			}
-			if json.Unmarshal(entry.Payload, &meta) == nil {
-				sessionID = meta.ID
-				sessionCwd = meta.Cwd
-			}
+			parseCodexSessionMetadata(scanner.Bytes(), &sessionID, &sessionCwd)
 
 		case "response_item":
 			var item struct {
@@ -241,6 +265,25 @@ func parseCodexSessionFile(path string) *core.AgentSessionInfo {
 		ModifiedAt:   stat.ModTime(),
 		Directory:    sessionCwd,
 	}
+}
+
+func parseCodexSessionMetadata(line []byte, sessionID, sessionCwd *string) {
+	var entry struct {
+		Type    string          `json:"type"`
+		Payload json.RawMessage `json:"payload"`
+	}
+	if json.Unmarshal(line, &entry) != nil || entry.Type != "session_meta" {
+		return
+	}
+	var meta struct {
+		ID  string `json:"id"`
+		Cwd string `json:"cwd"`
+	}
+	if json.Unmarshal(entry.Payload, &meta) != nil {
+		return
+	}
+	*sessionID = meta.ID
+	*sessionCwd = meta.Cwd
 }
 
 // findSessionFile locates the JSONL transcript for a given session ID.
@@ -331,6 +374,9 @@ func getSessionHistory(sessionID, codexHome string, limit int) ([]core.HistoryEn
 		case item.Type == "reasoning" && item.Text != "":
 			// skip reasoning items
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read codex session history: %w", err)
 	}
 
 	if limit > 0 && len(entries) > limit {

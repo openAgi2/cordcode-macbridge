@@ -2069,7 +2069,13 @@ func TestHandleGetSessionReturnsSingleSessionPayload(t *testing.T) {
 }
 
 func TestHandleGetSessionMessagesStoresLargeToolOutputAsContentRef(t *testing.T) {
-	largeOutput := strings.Repeat("x", 60000)
+	largeOutput := strings.Repeat("x", 600000)
+	toolStep := map[string]any{
+		"id":       "tool-large",
+		"toolName": "Read",
+		"status":   "completed",
+		"output":   largeOutput,
+	}
 	agent := &fakeAgent{
 		name: "claudecode",
 		richHistory: []core.RichHistoryEntry{{
@@ -2077,12 +2083,11 @@ func TestHandleGetSessionMessagesStoresLargeToolOutputAsContentRef(t *testing.T)
 			Role:      "assistant",
 			Content:   "完成",
 			Timestamp: time.Unix(1710000800, 0).UTC(),
-			Steps: []map[string]any{{
-				"id":       "tool-large",
-				"toolName": "Read",
-				"status":   "completed",
-				"output":   largeOutput,
+			Parts: []map[string]any{{
+				"type": "tool",
+				"step": toolStep,
 			}},
+			Steps: []map[string]any{toolStep},
 		}},
 	}
 
@@ -2111,6 +2116,23 @@ func TestHandleGetSessionMessagesStoresLargeToolOutputAsContentRef(t *testing.T)
 	contentID, _ := output["contentId"].(string)
 	if contentID == "" {
 		t.Fatal("contentId missing from content_ref output")
+	}
+	parts, _ := entry["parts"].([]any)
+	part, _ := parts[0].(map[string]any)
+	partStep, _ := part["step"].(map[string]any)
+	partOutput, _ := partStep["output"].(map[string]any)
+	if got := partOutput["kind"]; got != "content_ref" {
+		t.Fatalf("parts step output kind = %#v, want content_ref", got)
+	}
+	if got := partOutput["contentId"]; got != contentID {
+		t.Fatalf("parts contentId = %#v, want %#v", got, contentID)
+	}
+	encoded, err := json.Marshal(messages[0])
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+	if len(encoded) >= 512<<10 {
+		t.Fatalf("response size = %d, want below relay frame limit %d", len(encoded), 512<<10)
 	}
 
 	handlers.HandleRPC(serverConn, WireMessage{
@@ -2267,6 +2289,36 @@ func TestOpenCodeGetSessionMessagesUsesAgentRichHistoryProvider(t *testing.T) {
 	}
 	if proxyHistoryCalls != 0 {
 		t.Fatalf("proxy history calls = %d, want 0", proxyHistoryCalls)
+	}
+}
+
+func TestCodexGetSessionMessagesDoesNotResumeSession(t *testing.T) {
+	agent := &fakeAgent{
+		name: "codex",
+		richHistory: []core.RichHistoryEntry{{
+			Role:      "assistant",
+			Content:   "cached history",
+			Timestamp: time.Unix(1710000200, 0).UTC(),
+		}},
+	}
+	handlers := NewHandlers()
+	handlers.RegisterAgent("codex", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "codex",
+		Method:    "get_session_messages",
+		RequestID: "codex-history-no-resume",
+		Params:    mustJSONRaw(t, map[string]any{"sessionId": "ses_1", "directory": "/tmp/project"}),
+	})
+
+	messages := readJSONMaps(t, clientConn, 1)
+	if got := messages[0]["ok"]; got != true {
+		t.Fatalf("ok = %#v, want true", got)
+	}
+	if len(agent.startCalls) != 0 {
+		t.Fatalf("StartSession calls = %v, want none for history read", agent.startCalls)
 	}
 }
 

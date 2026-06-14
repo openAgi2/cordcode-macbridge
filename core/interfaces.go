@@ -85,6 +85,15 @@ type RichHistoryProvider interface {
 	GetRichSessionHistory(ctx context.Context, sessionID string, limit int) ([]RichHistoryEntry, error)
 }
 
+// TranscriptLocator is an optional interface for file-backed agents that can
+// resolve the on-disk JSONL transcript path for a session. The bridge uses it to
+// build a boundary-safe transcript page index (design §6.3) and to replay byte
+// ranges for paginated get_session_messages. Agents that cannot expose a stable
+// file path (e.g. proxied backends) should not implement it.
+type TranscriptLocator interface {
+	TranscriptPath(ctx context.Context, sessionID string) (string, error)
+}
+
 // TodoProvider is an optional interface for agents that can return backend
 // todos for a session without relying on bridge-specific HTTP fallbacks.
 type TodoProvider interface {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -691,8 +692,8 @@ func (b *richHistoryMessageBuilder) build() core.RichHistoryEntry {
 	return entry
 }
 
-func newTranscriptScanner(f *os.File) *bufio.Scanner {
-	scanner := bufio.NewScanner(f)
+func newTranscriptScanner(r io.Reader) *bufio.Scanner {
+	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 256*1024), transcriptScannerMaxBytes)
 	return scanner
 }
@@ -784,8 +785,16 @@ func loadClaudeRichHistory(path string) ([]core.RichHistoryEntry, error) {
 		return nil, fmt.Errorf("claudecode: open session file: %w", err)
 	}
 	defer f.Close()
+	return LoadClaudeRichHistoryFromReader(f, path)
+}
 
-	scanner := newTranscriptScanner(f)
+// LoadClaudeRichHistoryFromReader runs the Claude logical-message grouping
+// builder over r (a transcript or a byte-range section of one) and returns the
+// logical messages in file order. path is used only for debug logging. Exported
+// so the bridge can replay a transcript page index byte range (design §6.3); the
+// boundaries match the claude span extractor in package transcriptindex.
+func LoadClaudeRichHistoryFromReader(r io.Reader, path string) ([]core.RichHistoryEntry, error) {
+	scanner := newTranscriptScanner(r)
 	builders := make([]*richHistoryMessageBuilder, 0)
 	assistantByMessageID := make(map[string]*richHistoryMessageBuilder)
 	toolOwners := make(map[string]*richHistoryMessageBuilder)
@@ -922,7 +931,23 @@ func (a *Agent) GetSessionHistory(_ context.Context, sessionID string, limit int
 	return entries, nil
 }
 
-func (a *Agent) GetRichSessionHistory(_ context.Context, sessionID string, limit int) ([]core.RichHistoryEntry, error) {
+// TranscriptPath resolves the on-disk JSONL transcript path for a Claude Code
+// session under the agent's current work directory, implementing
+// core.TranscriptLocator so the bridge can index and page it.
+func (a *Agent) TranscriptPath(_ context.Context, sessionID string) (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	absWorkDir, _ := filepath.Abs(a.workDir)
+	projectDir := findProjectDir(homeDir, absWorkDir)
+	if projectDir == "" {
+		return "", fmt.Errorf("claudecode: project dir not found")
+	}
+	return filepath.Join(projectDir, sessionID+".jsonl"), nil
+}
+
+func (a *Agent) GetRichSessionHistory(ctx context.Context, sessionID string, limit int) ([]core.RichHistoryEntry, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
@@ -933,7 +958,14 @@ func (a *Agent) GetRichSessionHistory(_ context.Context, sessionID string, limit
 		return nil, fmt.Errorf("claudecode: project dir not found")
 	}
 
-	entries, err := loadClaudeRichHistory(filepath.Join(projectDir, sessionID+".jsonl"))
+	path := filepath.Join(projectDir, sessionID+".jsonl")
+	started := time.Now()
+	entries, err := loadClaudeRichHistory(path)
+	var fileBytes int64
+	if stat, statErr := os.Stat(path); statErr == nil {
+		fileBytes = stat.Size()
+	}
+	core.SessionLoadMetricsFromContext(ctx).AddHistoryParse(time.Since(started), fileBytes)
 	if err != nil {
 		return nil, err
 	}

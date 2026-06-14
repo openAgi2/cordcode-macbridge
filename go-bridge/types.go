@@ -95,9 +95,11 @@ type ResumeSessionParams struct {
 }
 
 type GetSessionMessagesParams struct {
-	SessionID string `json:"sessionId"`
-	Directory string `json:"directory,omitempty"`
-	Limit     int    `json:"limit,omitempty"`
+	SessionID    string `json:"sessionId"`
+	Directory    string `json:"directory,omitempty"`
+	Limit        int    `json:"limit,omitempty"`
+	BeforeCursor string `json:"beforeCursor,omitempty"`
+	Paginate     bool   `json:"paginate,omitempty"`
 }
 
 type DeleteSessionParams struct {

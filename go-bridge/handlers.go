@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand"
 	"os"
@@ -16,11 +17,14 @@ import (
 	"time"
 
 	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cccode-macbridge/transcriptindex"
 )
 
 var hiddenDirectoryBases = map[string]bool{
 	"claudeprobe": true,
 }
+
+const claudeSessionSummaryReadLimit = 512 * 1024
 
 type Handlers struct {
 	mu                      sync.Mutex
@@ -47,6 +51,8 @@ type Handlers struct {
 	relayUpgradeMu          sync.Mutex
 	bridgeID                string
 	relayHelloHandler       func(conn Connection, msg *WireMessage)
+	claudeSessions          *claudeSessionCatalog
+	transcriptIndex         *transcriptindex.Store
 }
 
 type opencodeSessionOptions struct {
@@ -72,7 +78,19 @@ func NewHandlers() *Handlers {
 		relayOutbox:            outbox,
 		presentation:           presentation,
 		relayEventRouter:       NewRelayEventRouter(observation, outbox, prekeys, NewMailboxService(NewRelayHub()), presentation),
+		claudeSessions:         newDefaultClaudeSessionCatalog(),
+		transcriptIndex:        transcriptindex.NewStore(defaultTranscriptIndexDir()),
 	}
+}
+
+// SetTranscriptIndexBaseDir (re)creates the transcript page index store rooted
+// at dir. Called by the server once the Bridge data directory is known so index
+// files persist across restarts; when unset the store falls back to a default
+// directory so pagination still works.
+func (h *Handlers) SetTranscriptIndexBaseDir(dir string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.transcriptIndex = transcriptindex.NewStore(dir)
 }
 
 // SetBridgeID 使 delivery 派生上下文绑定到 server 公布的真实 bridge identity。
@@ -1659,19 +1677,6 @@ func drainHistoryEvents(sess core.AgentSession) {
 	}
 }
 
-// canPassiveJoin 返回 true 表示该后端的 agent session 可以在不发送消息
-// 的情况下加入已有 session 并接收实时事件（共享服务广播模型）。
-func (h *Handlers) canPassiveJoin(backendID string) bool {
-	switch backendID {
-	case "codex":
-		return h.codexBackendMode == "app_server"
-	// opencode 的 opencodeSession.Events() 仅在 Send() 期间产生事件，
-	// 无法通过 StartSession 被动接收。claudecode 走 polling。
-	default:
-		return false
-	}
-}
-
 // startRelayIfNotRunning 为 session 启动事件转发（如果尚未运行）。
 // 用于 iOS 仅调用 get_session_messages 而未调用 send_message 的场景。
 func (h *Handlers) startRelayIfNotRunning(sessionID string, sess core.AgentSession, conn Connection, backendID string) {
@@ -2193,65 +2198,76 @@ func findClaudeSessionFile(sessionID string, optDir string) (projectDir string, 
 }
 
 func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent core.Agent) {
+	limit := extractPositiveInt(msg, "limit")
+	metrics := newSessionLoadRequestMetrics(conn, msg)
+	ctx := core.WithSessionLoadMetrics(context.Background(), metrics.context())
+
 	// 非 claudecode backend：直接用 agent 自己的 ListSessions 实现
 	if agent.Name() != "claudecode" {
-		sessions, err := agent.ListSessions(context.Background())
+		sessions, err := agent.ListSessions(ctx)
 		if err != nil {
-			conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
+			metrics.sendResult(conn, msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
 			return
 		}
-		conn.SendResult(msg.RequestID, map[string]interface{}{"sessions": sessionsToWire(sessions)}, nil)
+		mappingStarted := time.Now()
+		wireSessions := sessionsToWire(sessions)
+		result := paginateSessionList(wireSessions, extractStringParam(msg, "cursor"), limit)
+		metrics.wireMapping += time.Since(mappingStarted)
+		if ws, ok := result["sessions"].([]map[string]interface{}); ok {
+			metrics.resultCount = len(ws)
+		}
+		metrics.sendResult(conn, msg.RequestID, result, nil)
 		return
 	}
 
-	// claudecode: 扫描 ~/.claude/projects/ 目录下的 JSONL 文件
-	// 如果提供了 directory 参数，按 project key 或真实路径定位对应目录
+	// claudecode: refresh the global fingerprinted catalog, then filter its
+	// immutable snapshot instead of reparsing every project transcript.
 	dir := extractDir(msg)
+	projectKey := ""
 	if dir != "" {
-		if projectKey, projectPath := resolveProjectDir(dir); projectPath != "" {
-			sessions := scanSessionsFromProjectDir(projectPath, projectKey)
-			conn.SendResult(msg.RequestID, map[string]interface{}{"sessions": sessions}, nil)
-			return
+		if resolvedKey, projectPath := resolveProjectDir(dir); projectPath != "" {
+			projectKey = resolvedKey
 		}
 	}
-
-	// 无 directory 时扫描所有项目目录，返回全量 sessions
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		sessions, _ := agent.ListSessions(context.Background())
-		conn.SendResult(msg.RequestID, map[string]interface{}{"sessions": sessionsToWire(sessions)}, nil)
-		return
-	}
-	projectsDir := filepath.Join(homeDir, ".claude", "projects")
-	entries, err := os.ReadDir(projectsDir)
-	if err != nil {
-		sessions, _ := agent.ListSessions(context.Background())
-		conn.SendResult(msg.RequestID, map[string]interface{}{"sessions": sessionsToWire(sessions)}, nil)
-		return
+	mappingStarted := time.Now()
+	allSessions := h.claudeSessions.list(projectKey, metrics.context())
+	result := paginateSessionList(allSessions, extractStringParam(msg, "cursor"), limit)
+	metrics.wireMapping += time.Since(mappingStarted)
+	if ws, ok := result["sessions"].([]map[string]interface{}); ok {
+		metrics.resultCount = len(ws)
 	}
 
-	var allSessions []map[string]interface{}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		projectKey := entry.Name()
-		if isHiddenProjectDir(projectKey) {
-			continue
-		}
-		projectPath := filepath.Join(projectsDir, projectKey)
-		sessions := scanSessionsFromProjectDir(projectPath, projectKey)
-		allSessions = append(allSessions, sessions...)
-	}
+	metrics.sendResult(conn, msg.RequestID, result, nil)
+}
 
-	// 按 updatedAtMillis 降序排列
-	sort.Slice(allSessions, func(i, j int) bool {
-		mi, _ := allSessions[i]["updatedAtMillis"].(int64)
-		mj, _ := allSessions[j]["updatedAtMillis"].(int64)
+func extractPositiveInt(msg WireMessage, key string) int {
+	if len(msg.Params) == 0 {
+		return 0
+	}
+	var params map[string]json.RawMessage
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		return 0
+	}
+	var value int
+	if err := json.Unmarshal(params[key], &value); err != nil || value <= 0 {
+		return 0
+	}
+	return value
+}
+
+func sortSessionsByUpdatedAt(sessions []map[string]interface{}) {
+	sort.Slice(sessions, func(i, j int) bool {
+		mi, _ := sessions[i]["updatedAtMillis"].(int64)
+		mj, _ := sessions[j]["updatedAtMillis"].(int64)
 		return mi > mj
 	})
+}
 
-	conn.SendResult(msg.RequestID, map[string]interface{}{"sessions": allSessions}, nil)
+func limitLatestSessions(sessions []map[string]interface{}, limit int) []map[string]interface{} {
+	if limit <= 0 || len(sessions) <= limit {
+		return sessions
+	}
+	return sessions[:limit]
 }
 
 func isHiddenProjectDir(key string) bool {
@@ -2301,14 +2317,24 @@ func encodeProjectKey(absPath string) string {
 }
 
 func scanSessionsFromProjectDir(projectDir, projectKey string) []map[string]interface{} {
+	return scanSessionsFromProjectDirWithMetrics(projectDir, projectKey, nil)
+}
+
+func scanSessionsFromProjectDirWithMetrics(projectDir, projectKey string, metrics *core.SessionLoadMetrics) []map[string]interface{} {
 	realDir := resolveProjectRealDirectory(projectDir)
 	if realDir == "" {
 		realDir = projectKey
 	}
+	enumerateStarted := time.Now()
 	entries, err := os.ReadDir(projectDir)
 	if err != nil {
+		metrics.RecordEnumeration(time.Since(enumerateStarted), 0, 0, 0)
 		return []map[string]interface{}{}
 	}
+	enumerateElapsed := time.Since(enumerateStarted)
+	var fileCount int
+	var totalBytes int64
+	var maxFileBytes int64
 	var result []map[string]interface{}
 	for _, entry := range entries {
 		name := entry.Name()
@@ -2316,13 +2342,22 @@ func scanSessionsFromProjectDir(projectDir, projectKey string) []map[string]inte
 			continue
 		}
 		sessionID := strings.TrimSuffix(name, ".jsonl")
+		statStarted := time.Now()
 		info, err := entry.Info()
+		enumerateElapsed += time.Since(statStarted)
 		if err != nil {
 			continue
 		}
+		fileCount++
+		totalBytes += info.Size()
+		if info.Size() > maxFileBytes {
+			maxFileBytes = info.Size()
+		}
 		// Claude Code 可能在补写 title / last-prompt 等元数据时触碰旧 JSONL 的 mtime。
 		// session 列表应展示会话内容时间，而不是文件系统更新时间。
+		parseStarted := time.Now()
 		title, createdAt, updatedAt := scanClaudeSessionSummary(filepath.Join(projectDir, name), info.ModTime())
+		metrics.AddMetadataParse(time.Since(parseStarted))
 		result = append(result, map[string]interface{}{
 			"id":              sessionID,
 			"title":           title,
@@ -2333,6 +2368,7 @@ func scanSessionsFromProjectDir(projectDir, projectKey string) []map[string]inte
 			"createdAtMillis": createdAt.UnixMilli(),
 		})
 	}
+	metrics.RecordEnumeration(enumerateElapsed, fileCount, totalBytes, maxFileBytes)
 	return result
 }
 
@@ -2345,7 +2381,12 @@ func scanClaudeSessionSummary(path string, fallbackTime time.Time) (string, time
 	var title string
 	var createdAt time.Time
 	var updatedAt time.Time
-	scanner := bufio.NewScanner(f)
+	var reader io.Reader = f
+	if info, statErr := f.Stat(); statErr == nil && info.Size() > claudeSessionSummaryReadLimit {
+		reader = io.LimitReader(f, claudeSessionSummaryReadLimit)
+		updatedAt = fallbackTime
+	}
+	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -2407,18 +2448,21 @@ func scanClaudeSessionSummary(path string, fallbackTime time.Time) (string, time
 }
 
 func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, agent core.Agent) {
+	metrics := newSessionLoadRequestMetrics(conn, msg)
+	ctx := core.WithSessionLoadMetrics(context.Background(), metrics.context())
 	var params GetSessionMessagesParams
 	if msg.Params != nil {
 		json.Unmarshal(msg.Params, &params)
 	}
 	params.SessionID = h.resolveSessionIDForActiveSession(params.SessionID)
 
-	slog.Info("go-bridge: get_session_messages", "backendID", msg.BackendID, "sessionID", params.SessionID, "directory", params.Directory, "canPassiveJoin", h.canPassiveJoin(msg.BackendID))
+	slog.Info("go-bridge: get_session_messages", "backendID", msg.BackendID, "sessionID", params.SessionID, "directory", params.Directory)
 
 	h.subscribeConnToSession(conn, msg, params.SessionID)
 
 	// 如果已经有活跃 session 对象（先前 send_message 创建），启动事件转发。
-	// 避免 iOS 仅调用 get_session_messages 时收不到实时事件。
+	// 外部 Codex turn 由进程级 EventSubscriber 转发。读取历史时不能同步
+	// resume thread，否则纯读取路径会被 app-server 握手阻塞。
 	h.mu.Lock()
 	sess, hasSess := h.getSession(params.SessionID)
 	h.mu.Unlock()
@@ -2426,33 +2470,8 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 	if hasSess && sess != nil {
 		slog.Info("go-bridge: get_session_messages — existing session, starting relay", "backendID", msg.BackendID, "sessionID", params.SessionID)
 		h.startRelayIfNotRunning(params.SessionID, sess, conn, msg.BackendID)
-	} else if !hasSess && params.SessionID != "" && h.canPassiveJoin(msg.BackendID) {
-		slog.Info("go-bridge: get_session_messages — attempting passive join", "backendID", msg.BackendID, "sessionID", params.SessionID)
-		// Mac 端直接通过共享服务发起 turn 时，go-bridge 的 session registry
-		// 中没有对应 session 对象。为共享服务后端（Codex app-server）主动
-		// 加入已有 thread，以便 relayEvents 将实时事件转发给 iOS。
-		if params.Directory != "" {
-			switchDir(agent, params.Directory)
-		}
-		newSess, err := agent.StartSession(context.Background(), params.SessionID)
-		if err != nil {
-			slog.Warn("go-bridge: passive join failed", "backendID", msg.BackendID, "sessionID", params.SessionID, "error", err)
-		} else {
-			h.mu.Lock()
-			existing, exists := h.getSession(params.SessionID)
-			if exists && existing != nil {
-				h.mu.Unlock()
-				_ = newSess.Close()
-				slog.Info("go-bridge: passive join — session already exists after creation, closed duplicate", "backendID", msg.BackendID, "sessionID", params.SessionID)
-			} else {
-				h.putSessionWithMeta(params.SessionID, msg.BackendID, params.Directory, newSess)
-				h.mu.Unlock()
-				h.startRelayIfNotRunning(params.SessionID, newSess, conn, msg.BackendID)
-				slog.Info("go-bridge: passive join started relay", "backendID", msg.BackendID, "sessionID", params.SessionID)
-			}
-		}
 	} else {
-		slog.Info("go-bridge: get_session_messages — no relay started", "backendID", msg.BackendID, "sessionID", params.SessionID, "hasSess", hasSess, "canPassiveJoin", h.canPassiveJoin(msg.BackendID))
+		slog.Info("go-bridge: get_session_messages — using process-level passive subscription", "backendID", msg.BackendID, "sessionID", params.SessionID)
 	}
 
 	// list_sessions 在所有项目目录中扫描，返回的每个 session 都附带 directory 字段
@@ -2462,8 +2481,35 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 		switchDir(agent, params.Directory)
 	}
 
+	slog.Info("go-bridge: get_session_messages pagination request",
+		"backendID", msg.BackendID,
+		"sessionID", params.SessionID,
+		"paginate", params.Paginate,
+		"hasBeforeCursor", params.BeforeCursor != "",
+		"limit", params.Limit,
+	)
+
+	// Pagination path: when the client opts in (paginate) and the backend
+	// exposes a transcript locator, serve a bounded page from the transcript
+	// index. Falls back to the full-parse path below when not applicable, and
+	// reports cursor_stale when a backward cursor references a rewritten prefix.
+	if result, perr, handled := h.servePaginatedMessages(ctx, agent, msg.BackendID, params); handled {
+		if perr != nil {
+			metrics.sendResult(conn, msg.RequestID, nil, &WireError{Code: "cursor_stale", Message: perr.Error()})
+			return
+		}
+		if usage := h.getSessionContextUsage(agent, params.SessionID); usage != nil {
+			result["contextUsage"] = contextUsageToWire(usage)
+		}
+		if msgs, ok := result["messages"].([]map[string]interface{}); ok {
+			metrics.resultCount = len(msgs)
+		}
+		metrics.sendResult(conn, msg.RequestID, result, nil)
+		return
+	}
+
 	if rhp, ok := agent.(core.RichHistoryProvider); ok {
-		entries, err := rhp.GetRichSessionHistory(context.Background(), params.SessionID, params.Limit)
+		entries, err := rhp.GetRichSessionHistory(ctx, params.SessionID, params.Limit)
 		slog.Info("go-bridge: rich history result",
 			"backendID", msg.BackendID,
 			"sessionID", params.SessionID,
@@ -2472,6 +2518,7 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 			"entries", len(entries),
 			"error", err)
 		if err == nil {
+			mappingStarted := time.Now()
 			messages := make([]map[string]interface{}, 0, len(entries))
 			for i, entry := range entries {
 				wireEntry := h.richHistoryEntryToWire(entry)
@@ -2484,27 +2531,32 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 			if usage := h.getSessionContextUsage(agent, params.SessionID); usage != nil {
 				result["contextUsage"] = contextUsageToWire(usage)
 			}
-			conn.SendResult(msg.RequestID, result, nil)
+			metrics.wireMapping += time.Since(mappingStarted)
+			metrics.resultCount = len(messages)
+			metrics.sendResult(conn, msg.RequestID, result, nil)
 			return
 		}
 		if !errors.Is(err, core.ErrNotSupported) {
-			conn.SendResult(msg.RequestID, nil, &WireError{Code: "history_failed", Message: err.Error()})
+			metrics.sendResult(conn, msg.RequestID, nil, &WireError{Code: "history_failed", Message: err.Error()})
 			return
 		}
 	}
 
 	hp, ok := agent.(core.HistoryProvider)
 	if !ok {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "not_supported", Message: "backend does not support session history"})
+		metrics.sendResult(conn, msg.RequestID, nil, &WireError{Code: "not_supported", Message: "backend does not support session history"})
 		return
 	}
 
-	entries, err := hp.GetSessionHistory(context.Background(), params.SessionID, params.Limit)
+	parseStarted := time.Now()
+	entries, err := hp.GetSessionHistory(ctx, params.SessionID, params.Limit)
+	metrics.context().AddHistoryParse(time.Since(parseStarted), 0)
 	if err != nil {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "history_failed", Message: err.Error()})
+		metrics.sendResult(conn, msg.RequestID, nil, &WireError{Code: "history_failed", Message: err.Error()})
 		return
 	}
 
+	mappingStarted := time.Now()
 	var result []map[string]interface{}
 	for _, e := range entries {
 		result = append(result, legacyHistoryEntryToWire(e))
@@ -2514,7 +2566,9 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 	if usage := h.getSessionContextUsage(agent, params.SessionID); usage != nil {
 		payload["contextUsage"] = contextUsageToWire(usage)
 	}
-	conn.SendResult(msg.RequestID, payload, nil)
+	metrics.wireMapping += time.Since(mappingStarted)
+	metrics.resultCount = len(result)
+	metrics.sendResult(conn, msg.RequestID, payload, nil)
 }
 
 func (h *Handlers) getSessionContextUsage(agent core.Agent, sessionID string) *core.ContextUsage {
@@ -2582,7 +2636,16 @@ func legacyHistoryEntryToWire(entry core.HistoryEntry) map[string]interface{} {
 func (h *Handlers) richHistoryEntryToWire(entry core.RichHistoryEntry) map[string]interface{} {
 	parts := make([]interface{}, 0, len(entry.Parts))
 	for _, part := range entry.Parts {
-		parts = append(parts, part)
+		partCopy := cloneStringAnyMap(part)
+		if step, ok := partCopy["step"].(map[string]any); ok {
+			stepCopy := cloneStringAnyMap(step)
+			if rawOutput, ok := stepCopy["output"]; ok {
+				stepID, _ := stepCopy["id"].(string)
+				stepCopy["output"] = h.makeWireToolOutput(entry.ID, stepID, rawOutput)
+			}
+			partCopy["step"] = stepCopy
+		}
+		parts = append(parts, partCopy)
 	}
 	steps := make([]interface{}, 0, len(entry.Steps))
 	for _, step := range entry.Steps {

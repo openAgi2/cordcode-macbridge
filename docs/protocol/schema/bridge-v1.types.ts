@@ -197,3 +197,40 @@ export interface BridgePong {
   type?: "pong";
   ts?: number;
 }
+
+// ── Session pagination (capability: "session_pagination") ─────────────────────
+// See docs/protocol/bridge-v1.md "Session Pagination". All fields are additive:
+// older clients ignore cursor fields and keep using the legacy full-parse path.
+
+/** list_sessions request params (cursor is additive). */
+export interface BridgeListSessionsParams {
+  directory?: string;
+  limit?: number;
+  cursor?: string;
+}
+
+export interface BridgeListSessionsResult {
+  sessions: BridgeSessionInfo[];
+  nextCursor?: string; // present when hasMore is true
+  hasMore: boolean;
+}
+
+/** get_session_messages request params (paginate/beforeCursor are additive). */
+export interface BridgeGetSessionMessagesParams {
+  sessionId: string;
+  directory?: string;
+  limit?: number;
+  paginate?: boolean;
+  beforeCursor?: string;
+}
+
+export interface BridgeGetSessionMessagesResult {
+  messages: unknown[];
+  oldestCursor?: string; // send as beforeCursor for the next (older) page
+  newestCursor?: string; // informational, for client merge/dedup
+  hasMore: boolean;
+  contextUsage?: unknown;
+}
+
+/** Backend capability string advertised for codex/claudecode. */
+export type BridgeSessionPaginationCapability = "session_pagination";

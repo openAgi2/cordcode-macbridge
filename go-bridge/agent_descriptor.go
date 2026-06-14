@@ -53,6 +53,19 @@ func agentKind(id string) string {
 	}
 }
 
+func agentDisplayName(id string, agent core.Agent) string {
+	switch id {
+	case "claude", "claudecode":
+		return "Claude Code"
+	case "codex":
+		return "Codex"
+	case "opencode":
+		return "OpenCode"
+	default:
+		return agent.Name()
+	}
+}
+
 // agentLiveEvents 根据 agent ID 返回实时事件模型。
 // claude 进程模型是 stdin/stdout pipe，无法广播外部 turn 事件；
 // opencode 和 codex 使用服务事件流。
@@ -80,6 +93,9 @@ func deriveCapabilities(id string, agent core.Agent, codexBackendMode string) []
 	}
 	if _, ok := agent.(core.HistoryProvider); ok {
 		caps = append(caps, "session_history")
+	}
+	if _, ok := agent.(core.TranscriptLocator); ok {
+		caps = append(caps, "session_pagination")
 	}
 	if _, ok := agent.(core.MemoryFileReader); ok {
 		caps = append(caps, "memory_read")
@@ -127,7 +143,7 @@ func BuildAgentDescriptor(id string, agent core.Agent, codexBackendMode string, 
 	return AgentProviderDescriptor{
 		ID:                              id,
 		Kind:                            agentKind(id),
-		DisplayName:                     agent.Name(),
+		DisplayName:                     agentDisplayName(id, agent),
 		Status:                          status,
 		Reason:                          reason,
 		Capabilities:                    deriveCapabilities(id, agent, codexBackendMode),

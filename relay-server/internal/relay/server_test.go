@@ -50,6 +50,25 @@ func newTestServer(t *testing.T, rate int) (*Server, *httptest.Server) {
 	return server, httpServer
 }
 
+func TestNewServerDefaultsFrameLimitForEncryptedPagination(t *testing.T) {
+	store, err := OpenStore(filepath.Join(t.TempDir(), "relay.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	server, err := NewServer(store, Config{
+		PublicEndpoint:       "wss://relay.example.test:8443",
+		ProvisionTokenDigest: CredentialDigest(provisionToken),
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if server.config.MaxFrameBytes != 2<<20 {
+		t.Fatalf("default MaxFrameBytes = %d, want %d", server.config.MaxFrameBytes, 2<<20)
+	}
+}
+
 func requestJSON(t *testing.T, method, address, auth string, body any) (*http.Response, []byte) {
 	t.Helper()
 	var reader io.Reader

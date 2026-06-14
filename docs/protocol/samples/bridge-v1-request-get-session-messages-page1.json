@@ -1,0 +1,11 @@
+{
+  "type": "request",
+  "requestId": "req-msg-page-1",
+  "backendId": "codex",
+  "method": "get_session_messages",
+  "params": {
+    "sessionId": "019d1a4c-46f1-7383-9e7e-70c1786f2c30",
+    "limit": 50,
+    "paginate": true
+  }
+}

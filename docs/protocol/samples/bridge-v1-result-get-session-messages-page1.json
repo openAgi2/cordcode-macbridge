@@ -1,0 +1,23 @@
+{
+  "type": "result",
+  "requestId": "req-msg-page-1",
+  "backendId": "codex",
+  "ok": true,
+  "data": {
+    "messages": [
+      {
+        "id": "019d1a4c-...:8:assistant:...",
+        "role": "assistant",
+        "content": "Latest assistant message in the page...",
+        "timestamp": "2026-03-23T18:50:00Z",
+        "timestampMillis": 1774567800000,
+        "parts": [],
+        "steps": [],
+        "files": []
+      }
+    ],
+    "oldestCursor": "eyJ2IjoxLCJzaWQiOiIwMTlkMWE0Yy0...LCJvcmQiOjQzLCJnZW4iOiI4YjY0...In0",
+    "newestCursor": "eyJ2IjoxLCJzaWQiOiIwMTlkMWE0Yy0...LCJvcmQiOjQ3LCJnZW4iOiI4YjY2...In0",
+    "hasMore": true
+  }
+}

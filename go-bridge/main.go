@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -79,6 +80,9 @@ func Main() {
 	defer cancel()
 
 	handlers := NewHandlers()
+	if *dataDirPath != "" {
+		handlers.SetTranscriptIndexBaseDir(*dataDirPath + string(filepath.Separator) + "transcript-index")
+	}
 
 	agentAliases := map[string]string{
 		"claude":   "claudecode",

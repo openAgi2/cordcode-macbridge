@@ -1,0 +1,1263 @@
+{
+  "version": 6,
+  "project_root": "/Users/jacklee/Projects/cccode-macbridge",
+  "plan_file": "docs/2026-06-13-session-loading-systemic-redesign.md",
+  "state_store": {
+    "canonical_path": ".exec-plan/state/plan-36e824e0a9f7.json",
+    "legacy_path": ".claude/exec-plans/plan-36e824e0a9f7.json",
+    "origin": "new",
+    "migrated_from": null,
+    "migrated_at": null
+  },
+  "queue_policy": {
+    "todo_md_role": "informational-only",
+    "completion_gate": "proof-carrying-impl-tests-regression",
+    "phase_done_rule": "all-required-todos-done",
+    "audit_rule": "unsupported-done-must-downgrade",
+    "start_exit_rule": "internal-audit-before-success",
+    "audit_failure_policy": "light-repairable-heavy-external-blocker",
+    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+    "session_mirror_policy": "best-effort-host-optional",
+    "invocation_policy": "slash-or-natural-language-equivalent"
+  },
+  "report_policy": {
+    "auto_write_completion_report": true,
+    "report_directory": "docs",
+    "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+    "write_when": "all-required-todos-proven-done",
+    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  },
+  "reports": {
+    "completion_report_path": "docs/2026-06-13-2026-06-13-session-loading-systemic-redesign完成情况.md",
+    "completion_report_status": "missing",
+    "last_generated_at": null,
+    "based_on_queue_hash": null
+  },
+  "updated_at": "2026-06-14T01:42:30Z",
+  "todos": [
+    {
+      "id": "phase0-bridge-instrumentation-impl",
+      "title": "Phase 0 Bridge request instrumentation implementation",
+      "description": "Add low-overhead trace IDs and production-path timing for list_sessions and get_session_messages, including enumeration, metadata/history parse, wire mapping, JSON encode/send, response bytes, cache counters, dataset size, and direct/relay route.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "Sections 4.1-4.2",
+      "notes": "First ready task selected by start mode. Preserve unrelated dirty-worktree changes.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Added request-scoped session loading metrics propagated through context, instrumented Codex list cache and Codex/Claude history parsing, and added handler-level wire mapping, JSON encoding, synchronous send, response byte, result count, route, and unified trace logging.",
+        "artifacts": [
+          "core/session_load_metrics.go",
+          "go-bridge/session_load_metrics.go",
+          "go-bridge/handlers.go",
+          "agent/codex/list.go",
+          "agent/codex/codex.go",
+          "agent/codex/rich_history.go",
+          "agent/claudecode/claudecode.go"
+        ],
+        "checked_at": "2026-06-13T10:17:07Z"
+      }
+    },
+    {
+      "id": "phase0-bridge-instrumentation-tests",
+      "title": "Phase 0 Bridge instrumentation automated verification",
+      "description": "Add focused Go tests for route classification, response byte accounting, timing emission, and cache/data-set counters; run targeted Go tests and static checks.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-bridge-instrumentation-impl"
+      ],
+      "source": "Sections 4.1-4.2, 9.1",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "Focused Go tests passed for the concurrent request metrics collector, route classification, and encoded response byte accounting. Targeted core, Codex, Claude, and go-bridge packages passed, including a race-enabled collector test and diff check.",
+        "artifacts": [
+          ".exec-plan/artifacts/session-loading/phase0/bridge-tests.log",
+          ".exec-plan/artifacts/session-loading/phase0/diff-check.log",
+          "core/session_load_metrics_test.go",
+          "go-bridge/session_load_metrics_test.go"
+        ],
+        "checked_at": "2026-06-13T10:26:00Z"
+      }
+    },
+    {
+      "id": "phase0-bridge-instrumentation-regression",
+      "title": "Phase 0 Bridge instrumentation regression",
+      "description": "Run representative direct and relay requests and verify emitted metrics reflect the real route and payload without changing RPC behavior.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-bridge-instrumentation-tests"
+      ],
+      "source": "Sections 4.1-4.2, 9.2",
+      "notes": "The direct matrix used a real local WebSocket pair. The relay matrix used the production encrypted RelayDeviceConn; public Relay network latency remains part of the iOS device regression.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "summary": "Executed real local Codex and Claude transcript requests over direct WebSocket and the production relay encryption connection. Cold/hot five-run metrics covered list, small history, and large history; all 124 measured baseline requests completed without Bridge errors.",
+        "artifacts": [
+          "go-bridge/session_loading_baseline_test.go",
+          ".exec-plan/artifacts/session-loading/phase0/real-dataset-metrics.jsonl",
+          ".exec-plan/artifacts/session-loading/phase0/real-dataset-summary.tsv",
+          ".exec-plan/artifacts/session-loading/phase0/real-dataset-run.log"
+        ],
+        "checked_at": "2026-06-13T11:27:00Z"
+      }
+    },
+    {
+      "id": "phase0-ios-instrumentation-impl",
+      "title": "Phase 0 iOS session loading instrumentation implementation",
+      "description": "Instrument register, RPC wait, receive bytes, decode, model mapping, main-actor apply, first-content visibility, memory, endpoint, and direct/relay route in /Users/jacklee/Projects/opencodeIosNew.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-bridge-instrumentation-tests"
+      ],
+      "source": "Section 4.3",
+      "notes": "REPO DISCREPANCY (found 2026-06-13): the active iOS repo is /Users/jacklee/Projects/cccode-ios (CCCodeBridge* architecture), NOT opencodeIosNew. This Phase 0 iOS instrumentation was applied to opencodeIosNew only and does NOT exist in cccode-ios; its \"done\" proof is therefore not present in the active repo. Needs user decision: re-create in cccode-ios, or accept as-is. cccode-ios also has uncommitted CCCodeBridge reconnect WIP (P3-01) overlapping ChatViewModel files.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Added structured session-loading measurements for register/connect reuse, RPC wait, receive and request bytes, decode, model mapping, main-actor apply, first-content visibility, memory footprint, endpoint, and direct/relay route. A signed build was installed successfully on the connected iPhone 16 Pro. [location: opencodeIosNew (superseded 2026-06-01); active repo /Users/jacklee/Projects/cccode-ios does NOT contain this work — re-creation needed for iOS-side Phase 2 measurement. The close-1009 finding itself is repo-independent and recorded in docs/2026-06-13-session-loading-baseline.md.]",
+        "artifacts": [
+          "/Users/jacklee/Projects/opencodeIosNew/OpenCodeiOS/OpenCodeiOS/Utilities/PerformanceTracer.swift",
+          "/Users/jacklee/Projects/opencodeIosNew/OpenCodeiOS/OpenCodeiOS/Services/Backend/UnifiedBridgeTransport.swift",
+          "/Users/jacklee/Projects/opencodeIosNew/OpenCodeiOS/OpenCodeiOS/Services/Backend/UnifiedBridgeAdapter.swift",
+          "/Users/jacklee/Projects/opencodeIosNew/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel+MessageSync.swift",
+          ".exec-plan/artifacts/session-loading/phase0/ios-device-install.log"
+        ],
+        "checked_at": "2026-06-13T10:26:00Z"
+      }
+    },
+    {
+      "id": "phase0-ios-instrumentation-tests",
+      "title": "Phase 0 iOS instrumentation automated verification",
+      "description": "Run Swift targeted unit tests and targeted macOS/iOS builds without UI tests, snapshot tests, or simulator automation.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-ios-instrumentation-impl"
+      ],
+      "source": "Sections 4.3, 9.1",
+      "notes": " See phase0-ios-instrumentation-impl repo-discrepancy note.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "Simulator-target compile and signed physical-device build succeeded. The focused SessionLoadingTracerTests suite executed 2 tests with 0 failures; no UI or snapshot tests were run. [location: opencodeIosNew (superseded 2026-06-01); active repo /Users/jacklee/Projects/cccode-ios does NOT contain this work — re-creation needed for iOS-side Phase 2 measurement. The close-1009 finding itself is repo-independent and recorded in docs/2026-06-13-session-loading-baseline.md.]",
+        "artifacts": [
+          ".exec-plan/artifacts/session-loading/phase0/ios-build.log",
+          ".exec-plan/artifacts/session-loading/phase0/ios-device-build.log",
+          ".exec-plan/artifacts/session-loading/phase0/ios-tests.log",
+          "/Users/jacklee/Projects/opencodeIosNew/OpenCodeiOS/OpenCodeiOSTests/CodexSeamTests.swift"
+        ],
+        "checked_at": "2026-06-13T10:26:00Z"
+      }
+    },
+    {
+      "id": "phase0-ios-instrumentation-regression",
+      "title": "Phase 0 iOS instrumentation device regression",
+      "description": "Install the instrumented app to the connected iPhone and verify signposts, memory observations, crash/jetsam evidence, close codes, endpoint, and route are captured without UI automation.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-ios-instrumentation-tests"
+      ],
+      "source": "Sections 4.3, 9.2",
+      "notes": "The unlocked iPhone completed a direct LAN catalog run. The large Codex session reproduced WebSocket close 1009 / Message too long while the app process remained alive; public Relay was not configured in the fresh app container. See phase0-ios-instrumentation-impl repo-discrepancy note.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "summary": "Launched the installed app on iPhone 16 Pro without UI automation, captured direct endpoint and route, register/list timings, and reproduced the large-session failure. The 12.45MB history response caused close 1009 before decode; the app remained alive and no crash or Jetsam report was observed. [location: opencodeIosNew (superseded 2026-06-01); active repo /Users/jacklee/Projects/cccode-ios does NOT contain this work — re-creation needed for iOS-side Phase 2 measurement. The close-1009 finding itself is repo-independent and recorded in docs/2026-06-13-session-loading-baseline.md.]",
+        "artifacts": [
+          ".exec-plan/artifacts/session-loading/phase0/ios-direct-console.log",
+          ".exec-plan/artifacts/session-loading/phase0/ios-direct-large-session-console.log",
+          ".exec-plan/artifacts/session-loading/phase0/temporary-direct-bridge.log",
+          "docs/2026-06-13-session-loading-baseline.md"
+        ],
+        "checked_at": "2026-06-13T11:39:00Z"
+      }
+    },
+    {
+      "id": "phase0-baseline-report-impl",
+      "title": "Phase 0 reproducible baseline report",
+      "description": "Create docs/2026-06-13-session-loading-baseline.md with commands, environment, sample sizes, cold/hot five-run measurements, Codex cache findings, direct/relay results, crash classification, targets, and Phase 1-3 go/no-go decisions.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-bridge-instrumentation-regression",
+        "phase0-ios-instrumentation-regression"
+      ],
+      "source": "Sections 4.1, 4.4-4.5, 8",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Created the reproducible Phase 0 baseline with environment, commands, data set sizes, five-run cold/hot direct and relay matrices, Codex invalidation findings, iPhone evidence, failure classification, and Phase 1-3 decisions.",
+        "artifacts": [
+          "docs/2026-06-13-session-loading-baseline.md"
+        ],
+        "checked_at": "2026-06-13T11:39:00Z"
+      }
+    },
+    {
+      "id": "phase0-baseline-report-tests",
+      "title": "Phase 0 baseline evidence validation",
+      "description": "Validate the report tables and raw artifacts cover every required scenario, metric, sample count, route, and data-set characteristic.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-baseline-report-impl"
+      ],
+      "source": "Sections 4.1-4.5",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "Validated 124 measured requests across direct/relay, Codex/Claude, list/small/large history, and cold/hot runs. Raw JSONL and TSV summaries contain no Bridge errors and include dataset and response sizes.",
+        "artifacts": [
+          ".exec-plan/artifacts/session-loading/phase0/real-dataset-metrics.jsonl",
+          ".exec-plan/artifacts/session-loading/phase0/real-dataset-summary.tsv",
+          ".exec-plan/artifacts/session-loading/phase0/real-dataset-run.log"
+        ],
+        "checked_at": "2026-06-13T11:39:00Z"
+      }
+    },
+    {
+      "id": "phase0-baseline-report-regression",
+      "title": "Phase 0 gate audit",
+      "description": "Audit that Phase 0 establishes reproducible bottlenecks and explicit go/no-go decisions before any Phase 1-3 implementation starts.",
+      "status": "done",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-baseline-report-tests"
+      ],
+      "source": "Section 8",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "summary": "Phase 0 audit passed: Claude global index and transcript pagination are GO, Codex work is limited hardening, and batched open_session remains NO-GO. The observed blank-session failure is transport close 1009, not crash or Jetsam.",
+        "artifacts": [
+          "docs/2026-06-13-session-loading-baseline.md"
+        ],
+        "checked_at": "2026-06-13T11:39:00Z"
+      }
+    },
+    {
+      "id": "phase1-claude-global-index-impl",
+      "title": "Phase 1 Claude global session index implementation",
+      "description": "Implement the cross-project fingerprinted Claude catalog with stable keys, copy-on-write snapshots, refresh singleflight, directory filtering, and mutation invalidation, wired into the handlers hot path.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-baseline-report-regression"
+      ],
+      "source": "Sections 5.1-5.5",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Added a cross-project Claude catalog keyed by project and session ID, fingerprinted by mtime(ns)+size, with copy-on-write snapshots, in-flight refresh reuse, stable sorting, directory filtering, and handlers hot-path integration.",
+        "artifacts": [
+          "go-bridge/claude_session_catalog.go",
+          "go-bridge/handlers.go"
+        ],
+        "checked_at": "2026-06-13T11:39:00Z"
+      }
+    },
+    {
+      "id": "phase1-claude-global-index-tests",
+      "title": "Phase 1 Claude global index automated verification",
+      "description": "Cover first build, zero-change hit, single-file refresh, same-mtime size change, deletion, project-key collision isolation, nonblocking readers, and filter reuse.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "tests",
+      "depends_on": [
+        "phase1-claude-global-index-impl"
+      ],
+      "source": "Section 5.7",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "Focused tests passed for first build, zero-change hit, same-mtime size change, deletion, project identity collision, directory filtering, and nonblocking readers during refresh.",
+        "artifacts": [
+          "go-bridge/claude_session_catalog_test.go",
+          ".exec-plan/artifacts/session-loading/phase1-real-dataset-run.log"
+        ],
+        "checked_at": "2026-06-13T11:39:00Z"
+      }
+    },
+    {
+      "id": "phase1-claude-global-index-regression",
+      "title": "Phase 1 Claude global index performance regression",
+      "description": "Replay Phase 0 Claude list scenarios and verify hot requests avoid repeated JSONL summary parsing while preserving ordering and filtering.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "regression",
+      "depends_on": [
+        "phase1-claude-global-index-tests"
+      ],
+      "source": "Sections 5.4-5.7, 9.2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "summary": "Real 59.8MB Claude dataset replay reduced hot list requests from approximately 116-125ms to 0.77-1.14ms with zero metadata reparses and cache_hit=true on all measured hot runs.",
+        "artifacts": [
+          ".exec-plan/artifacts/session-loading/phase1-real-dataset-metrics.jsonl",
+          ".exec-plan/artifacts/session-loading/phase1-real-dataset-run.log"
+        ],
+        "checked_at": "2026-06-13T11:39:00Z"
+      }
+    },
+    {
+      "id": "phase1-codex-cache-hardening-impl",
+      "title": "Phase 1 measured Codex cache hardening",
+      "description": "Implement only the Codex cache fixes approved by Phase 0, including deterministic tie-breaking and any measured fingerprint, lock, changed-reason, or title-freshness work.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-baseline-report-regression"
+      ],
+      "source": "Section 5.6",
+      "notes": "Conditional scope: no-op implementation is acceptable only when the baseline explicitly proves no code change is warranted and records that evidence.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Kept the existing Codex cache and added the approved limited hardening: mtime(ns)+size fingerprints and deterministic ModifiedAt DESC, SessionID ASC ordering.",
+        "artifacts": [
+          "agent/codex/list.go"
+        ],
+        "checked_at": "2026-06-13T11:39:00Z"
+      }
+    },
+    {
+      "id": "phase1-codex-cache-hardening-tests",
+      "title": "Phase 1 Codex cache hardening automated verification",
+      "description": "Add focused tests for each baseline-approved hardening change and run targeted Codex and handler tests.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "tests",
+      "depends_on": [
+        "phase1-codex-cache-hardening-impl"
+      ],
+      "source": "Sections 5.6-5.7",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "Codex tests passed for same-mtime size changes, deterministic timestamp ties, bounded prefix parsing, immutable returned snapshots, and existing cache behavior.",
+        "artifacts": [
+          "agent/codex/list_cache_test.go",
+          ".exec-plan/artifacts/session-loading/phase1-real-dataset-run.log"
+        ],
+        "checked_at": "2026-06-13T11:39:00Z"
+      }
+    },
+    {
+      "id": "phase1-codex-cache-hardening-regression",
+      "title": "Phase 1 Codex cache performance regression",
+      "description": "Replay Phase 0 Codex cold/hot list scenarios and verify cache hit rate, ordering, changed-file behavior, and latency against the baseline.",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "regression",
+      "depends_on": [
+        "phase1-codex-cache-hardening-tests"
+      ],
+      "source": "Sections 4.4, 5.6, 9.2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "summary": "Real Codex replay preserved the measured hot-list behavior while active rollout appends changed only the affected files. Stable ordering and size fingerprint behavior are covered by focused tests.",
+        "artifacts": [
+          ".exec-plan/artifacts/session-loading/phase1-real-dataset-metrics.jsonl",
+          "agent/codex/list_cache_test.go"
+        ],
+        "checked_at": "2026-06-13T11:39:00Z"
+      }
+    },
+    {
+      "id": "phase2-transcript-index-impl",
+      "title": "Phase 2 boundary-safe transcript page index implementation",
+      "description": "Implement per-session logical-message spans, tail replay, open tool tracking, interval-union replay, fingerprint and continuity validation, versioned persisted lineage, atomic writes, session singleflight, and bounded global resources for Codex and Claude.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase1-claude-global-index-regression",
+        "phase1-codex-cache-hardening-regression"
+      ],
+      "source": "Sections 6.1-6.4",
+      "notes": "Index package is self-contained (imports core only). Content rebuild is delegated via an injected ContentReplayer and will be wired to the existing grouping builders in phase2-bridge-pagination-impl; this todo is the locator index itself, not the handler/protocol wiring.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Implemented the boundary-safe TranscriptPageIndex as a new transcriptindex package covering design 6.1-6.4 for both backends: LogicalMessageSpan/PageIndex/prefix-generation types; offset-aware SpanExtractor per backend mirroring the existing grouping builders (Codex function_call_output/custom_tool_call_output/event_msg patch_apply_end closures; Claude tool_result attributed to the owning assistant message across downstream lines, plus pending-result handling); Build full-scan; Refresh tail-replay with replay-start fixpoint plus continuity-anchor/file-identity/size checks where truncation or replacement falls back to a fresh rebuild; LastN/PageBefore selection; fixpoint interval-union ByteUnionFor and fail-safe positional Replay via an injected ContentReplayer; atomic versioned persistence with fingerprint+lineage validation and corrupt-discard; per-session singleflight Store with global concurrency and in-flight-byte budgets. Smoke-verified: 8 tests pass under -race (Codex closures + OpenToolUses, append/truncate refresh, Claude owner extension, page union/match, persistence round-trip + corrupt discard, singleflight, byte budget). Full module builds; core/go-bridge/agent tests unchanged and green.",
+        "artifacts": [
+          "transcriptindex/doc.go",
+          "transcriptindex/types.go",
+          "transcriptindex/record.go",
+          "transcriptindex/anchor.go",
+          "transcriptindex/extractor.go",
+          "transcriptindex/index.go",
+          "transcriptindex/lineage.go",
+          "transcriptindex/persist.go",
+          "transcriptindex/store.go",
+          "transcriptindex/identity_unix.go",
+          "transcriptindex/identity_other.go",
+          "transcriptindex/transcriptindex_smoke_test.go"
+        ],
+        "checked_at": "2026-06-13T19:50:00Z"
+      }
+    },
+    {
+      "id": "phase2-transcript-index-tests",
+      "title": "Phase 2 transcript index boundary verification",
+      "description": "Cover tool boundaries, pending results, Codex output variants, append replay, interval overlap, continuity failures, singleflight, restart lineage, lineage folding, one-page decode, response bytes, and memory bounds.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "phase2-transcript-index-impl"
+      ],
+      "source": "Section 6.9",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "Added 15 focused Go tests across two files covering the design 6.9 boundary matrix for both backends: Codex all three closure variants (function_call_output, custom_tool_call_output, event_msg patch_apply_end) and OpenToolUses tracking incl. unclosed-at-EOF; Codex tail-append refresh (child generation, prefix-ordinal preservation) and truncation->fresh rebuild; Codex unclosed tool_use closed on append from the correct ReplayStart; Claude tool_result extending the owning assistant span across downstream lines; Claude pending tool_result resolved when owner appears; continuity-anchor failure on in-place prefix rewrite -> fresh rebuild (not misjudged as append); version-mismatch persisted index discarded; lineage folding bounded at maxLineageDepth and well-formed after 70+ appends; interval-union page replay with overlapping spans expanding to whole-message boundaries and no duplicate/missing messages; 600-message large session decoding only a bounded page byte range (< 1/4 of file); persistence round-trip + corrupt-discard; per-session singleflight; global in-flight-byte budget rejection. All 15 tests pass under -race; go vet and gofmt clean.",
+        "artifacts": [
+          "transcriptindex/transcriptindex_smoke_test.go",
+          "transcriptindex/transcriptindex_boundary_test.go"
+        ],
+        "checked_at": "2026-06-13T19:55:00Z"
+      }
+    },
+    {
+      "id": "phase2-transcript-index-regression",
+      "title": "Phase 2 transcript index performance regression",
+      "description": "Replay large-session scenarios, record page_replay_bytes and worst-page rebuild time, and verify first-open, append, memory, and payload targets against Phase 0.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "phase2-transcript-index-tests"
+      ],
+      "source": "Sections 6.3-6.4, 9.2",
+      "notes": "Real-data finding informs phase2-bridge-pagination-impl: message-count paging alone does not bound payload for sessions with a giant tool output, so page sizing needs a byte budget (split oversized logical messages), not just a message count.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "summary": "Env-gated (CCCODE_SESSION_LOADING_BASELINE=1) regression built the transcript index on the real close-1009 Codex session 019d1a4c (47,825,232 bytes, 48 logical messages). Build 264ms (~200MB alloc, one-time full scan); tail-append Refresh 0ms (only re-parses the last span); all sanity checks pass (page byte union <= full file; refresh grew spans by one). Recorded page_replay_bytes and worst-page rebuild for page sizes 10/20/48 as JSONL. KEY FINDING (design 6.3 anticipated): because this session packs ~47.8MB into only 48 messages, even a 10-message page has worst-case replay 17.51MB and first-page replay 11.16MB, both at/above the ~12.45MB frame that triggered iOS WebSocket close 1009. So logical-message paging bounds build/parse work and fixes normal sessions, but a per-page byte budget that can split an oversized logical message is required to fully defeat close-1009. The index itself is correct and fast; this is a page-sizing input for the bridge-pagination phase, not an index defect.",
+        "artifacts": [
+          "transcriptindex/transcriptindex_regression_test.go",
+          ".exec-plan/artifacts/session-loading/phase2-transcript-index-regression.jsonl"
+        ],
+        "checked_at": "2026-06-13T20:30:00Z"
+      }
+    },
+    {
+      "id": "phase2-bridge-pagination-impl",
+      "title": "Phase 2 Bridge pagination and protocol implementation",
+      "description": "Add stable backend-specific list cursors, prefix-generation message cursors, stale semantics, page metadata, capability advertisement, compatibility behavior, protocol schema, and samples.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase2-transcript-index-tests"
+      ],
+      "source": "Sections 6.5-6.7, 13",
+      "notes": "Resolves the regression finding: message pagination enforces a per-page wire-byte budget (~4MiB) that defers oversized oldest messages to the next page, so a giant tool output cannot reopen the close-1009 frame. A pre-existing data race in agent/codex passive_subscriber_test.go (unmodified by this plan) is out of scope and tracked separately.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Implemented end-to-end cursor pagination for both list_sessions and get_session_messages over the transcript index, with capability advertisement, stale semantics, byte-budget page trimming, and full protocol docs. Added core.TranscriptLocator (codex+claudecode implement TranscriptPath); refactored both grouping builders to be reader-based (codex.ParseRichHistoryFromReader, claudecode.LoadClaudeRichHistoryFromReader) so the bridge replays a page byte union through the EXISTING builders without duplicating grouping logic. go-bridge/pagination.go wires a transcriptindex.Store on Handlers (configured via SetTranscriptIndexBaseDir from main.go), per-backend content replayers, versioned opaque message cursors (version+sessionID+ordinal+prefix-generation) and list cursors (updatedAtMillis DESC + sessionID ASC), generation-ancestry cursor_stale detection, page selection (LastN first page / PageBefore backward), and a ~4MiB per-page wire-byte budget that drops oldest entries when exceeded. handleGetSessionMessages serves the paginated path only when the client opts in (paginate=true) and the backend exposes a locator, and falls back to the legacy full-parse path on any miss; a rewritten prefix returns error code cursor_stale so the client reloads page 1. handleListSessions emits additive nextCursor/hasMore using the composite-key cursor. deriveCapabilities advertises session_pagination for TranscriptLocator backends (codex, claudecode). Verified: 4 new handler tests (first+backward page with no overlap, cursor_stale after rewrite, legacy fallback, list paging) plus the full go-bridge suite pass under -race; transcriptindex, claudecode, core green under -race; full module builds; vet and gofmt clean. Protocol updated: docs/protocol/bridge-v1.md (Session Pagination section), schema/bridge-v1.types.ts, and 4 samples.",
+        "artifacts": [
+          "go-bridge/pagination.go",
+          "go-bridge/pagination_test.go",
+          "go-bridge/handlers.go",
+          "go-bridge/types.go",
+          "go-bridge/agent_descriptor.go",
+          "go-bridge/main.go",
+          "core/interfaces.go",
+          "agent/codex/rich_history.go",
+          "agent/claudecode/claudecode.go",
+          "docs/protocol/bridge-v1.md",
+          "docs/protocol/schema/bridge-v1.types.ts",
+          "docs/protocol/samples/bridge-v1-request-get-session-messages-page1.json",
+          "docs/protocol/samples/bridge-v1-result-get-session-messages-page1.json",
+          "docs/protocol/samples/bridge-v1-request-get-session-messages-page2.json",
+          "docs/protocol/samples/bridge-v1-result-cursor-stale.json"
+        ],
+        "checked_at": "2026-06-13T21:05:00Z"
+      }
+    },
+    {
+      "id": "phase2-bridge-pagination-tests",
+      "title": "Phase 2 Bridge pagination protocol verification",
+      "description": "Add handler, schema, cursor compatibility, ordering collision, append-validity, stale-cursor, and old-client compatibility tests.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "phase2-bridge-pagination-impl"
+      ],
+      "source": "Sections 6.5-6.7, 6.9, 9.1",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "8 focused go-bridge tests cover the design 6.5-6.7/6.9/9.1 pagination matrix: first+backward message page with no overlap; cursor_stale after in-place prefix rewrite; legacy full-parse fallback for old clients (no paginate opt-in); list paging newest-first; backward cursor survives a continuous tail append (generation ancestry) without going stale; list cursor tie-break by sessionID ASC among sessions sharing updatedAtMillis; cursor with an unsupported version yields cursor_stale; and protocol samples parse into the Go wire shapes (GetSessionMessagesParams + paginatedEnvelope). All pass; go-bridge + transcriptindex + core + claudecode green under normal run; vet and gofmt clean. (The pre-existing agent/codex passive_subscriber_test.go data race is unrelated and out of scope.)",
+        "artifacts": [
+          "go-bridge/pagination_test.go"
+        ],
+        "checked_at": "2026-06-13T21:12:00Z"
+      }
+    },
+  {
+    "id": "phase2-bridge-pagination-regression",
+    "title": "Phase 2 Bridge pagination end-to-end regression",
+    "description": "Verify no duplicate or missing sessions/messages across pages and bounded response size over direct and relay paths.",
+    "status": "done",
+    "phase": "phase2",
+    "kind": "regression",
+    "depends_on": [
+      "phase2-bridge-pagination-tests",
+      "phase2-transcript-index-regression",
+      "review-fix-relay-frame-budget-regression"
+    ],
+    "source": "Sections 6.5-6.7, 9.2",
+    "notes": "COMPLETED 2026-06-13: production relay now accepts the bounded encrypted envelopes. Large Claude sessions returned 687,310-byte and 533,299-byte responses repeatedly, and the exact Codex close-1009 target session returned 941,554-byte responses ten times over the authenticated iPhone relay path without disconnect, duplicate-page, or missing-page evidence.",
+    "verification": {
+      "required": true,
+      "status": "present",
+      "method": "mixed",
+      "summary": "Deterministic pagination regression tests pass. Production true-device relay evidence confirms bounded responses on both backend families: Claude responses of 687,310 and 533,299 bytes succeeded repeatedly; Codex session 019ebbd4-a7dc-73f2-aa40-69aa992d2e0d returned two messages in a 941,554-byte response for requests req_186 through req_195, with request_total_ms about 181-195 ms and no close 1009.",
+      "artifacts": [
+        "go-bridge/pagination_regression_test.go",
+        "/tmp/go-bridge.log"
+      ],
+      "checked_at": "2026-06-13T15:45:35Z"
+    }
+  },
+  {
+    "id": "review-fix-relay-frame-budget-impl",
+    "title": "Review fix: align pagination and encrypted relay frame budgets",
+    "description": "Repair oversized pagination responses, invalidate stale extractor indexes, and configure relay frames to carry the encrypted/base64 envelope without data loss.",
+    "status": "done",
+    "phase": "phase2",
+    "kind": "impl",
+    "depends_on": [
+      "phase2-bridge-pagination-impl"
+    ],
+    "source": "True-device close-1009 regression on 2026-06-13",
+    "notes": "Implemented exact duplicate compaction for oversized paginated messages, preserving all content in either ordered parts or top-level fields; iOS reconstructs steps from tool parts. Added backend-specific extractorRevision persistence so extractor logic changes discard stale indexes. Set application page budget to 960 KiB and relay-server envelope default/production example to 2 MiB. Installed iOS Stage 1 on the connected iPhone and deployed the final signed Mac runtime.",
+    "verification": {
+      "required": true,
+      "status": "present",
+      "method": "implementation",
+      "summary": "Implementation is present in go-bridge/pagination.go, transcriptindex persistence/build/refresh, iOS BridgeMessageMapping.swift, and relay-server frame configuration.",
+      "artifacts": [
+        "go-bridge/pagination.go",
+        "transcriptindex/types.go",
+        "transcriptindex/index.go",
+        "transcriptindex/persist.go",
+        "relay-server/internal/relay/server.go",
+        "relay-server/cmd/relay-server/main.go",
+        "/Users/jacklee/Projects/cccode-ios/OpenCodeiOS/OpenCodeiOS/Services/Backend/BridgeMessageMapping.swift"
+      ],
+      "checked_at": "2026-06-13T15:29:00Z"
+    }
+  },
+  {
+    "id": "review-fix-relay-frame-budget-tests",
+    "title": "Review fix: frame budget automated verification",
+    "description": "Verify duplicate compaction, iOS tool-step reconstruction, extractor revision invalidation, relay defaults, and real-session page bounds.",
+    "status": "done",
+    "phase": "phase2",
+    "kind": "tests",
+    "depends_on": [
+      "review-fix-relay-frame-budget-impl"
+    ],
+    "source": "True-device close-1009 regression on 2026-06-13",
+    "notes": "",
+    "verification": {
+      "required": true,
+      "status": "present",
+      "method": "automated",
+      "summary": "go test ./go-bridge ./transcriptindex passed; relay-server go test ./... passed; targeted Swift CCCodeTests/BridgeAdapterTests/testMapMessageFromDict_rebuildsStepsFromToolParts passed. The exact Codex session 019ebbd4-a7dc-73f2-aa40-69aa992d2e0d returned 2 messages / 941,588-byte full response under the 983,040-byte application budget. Extractor revision mismatch tests prove stale persisted indexes are discarded and rebuilt.",
+      "artifacts": [
+        "go-bridge/pagination_test.go",
+        "go-bridge/pagination_regression_test.go",
+        "transcriptindex/transcriptindex_boundary_test.go",
+        "relay-server/internal/relay/server_test.go",
+        "/Users/jacklee/Projects/cccode-ios/OpenCodeiOS/OpenCodeiOSTests/BridgeAdapterTests.swift"
+      ],
+      "checked_at": "2026-06-13T15:29:00Z"
+    }
+  },
+  {
+    "id": "review-fix-relay-frame-budget-regression",
+    "title": "Review fix: production relay true-device regression",
+    "description": "Deploy the 2 MiB relay envelope limit and repeat the large Claude and Codex session requests over the authenticated iPhone relay path with no close 1009.",
+    "status": "done",
+    "phase": "phase2",
+    "kind": "regression",
+    "depends_on": [
+      "review-fix-relay-frame-budget-tests"
+    ],
+    "source": "True-device close-1009 regression on 2026-06-13",
+    "notes": "COMPLETED 2026-06-13: relay-server was deployed with RELAY_MAX_FRAME_BYTES=2097152 and passed authenticated true-device regression. Previously failing Claude sessions returned 687,310-byte and 533,299-byte responses repeatedly. The exact Codex close-1009 target session then returned 941,554-byte responses ten consecutive times with no disconnect.",
+    "verification": {
+      "required": true,
+      "status": "present",
+      "method": "manual",
+      "summary": "Production relay health and iPhone reconnect passed. Requests req_186 through req_195 for Codex session 019ebbd4-a7dc-73f2-aa40-69aa992d2e0d all used transport_route=relay, returned two messages / 941,554 bytes in about 181-195 ms, and produced no close 1009 or message-too-big failure.",
+      "artifacts": [
+        "/tmp/go-bridge.log"
+      ],
+      "checked_at": "2026-06-13T15:45:35Z"
+    }
+  },
+    {
+      "id": "phase2-ios-pagination-impl",
+      "title": "Phase 2 iOS session and history pagination implementation",
+      "description": "Implement capability-gated list and history paging, per-cursor deduplication, stable-ID merge, scroll-anchor preservation, cursor_stale reset, background decode/mapping, and truthful loading state.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase2-bridge-pagination-tests"
+      ],
+      "source": "Section 6.8",
+    "notes": "COMPLETED in /Users/jacklee/Projects/cccode-ios (CCCodeBridge* architecture). Added optional SessionHistoryPaginating capability, bounded first-page metadata retention, per-cursor in-flight dedupe, backward page requests, stable-ID prepend merge, cursor_stale reset/reload, truthful older-page loading state, MessageWeb loadOlder routing, and react-virtuoso firstItemIndex anchor preservation. Rebuilt the MessageWeb production bundle and installed/launched the signed app on the connected iPhone.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Stage 2 implementation is present in the active cccode-ios CCCodeBridge architecture. The MessageWeb top-reached event now invokes cursor pagination rather than a full refresh; pages merge by stable message ID, duplicate cursor requests are rejected, cursor_stale clears the chain and reloads page one, and react-virtuoso adjusts firstItemIndex when older items are prepended.",
+        "artifacts": [
+          "/Users/jacklee/Projects/cccode-ios/OpenCodeiOS/OpenCodeiOS/Services/Backend/BackendClient.swift",
+          "/Users/jacklee/Projects/cccode-ios/OpenCodeiOS/OpenCodeiOS/Services/Backend/BackendModels.swift",
+          "/Users/jacklee/Projects/cccode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/CCCodeBridgeBackendClient.swift",
+          "/Users/jacklee/Projects/cccode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel+MessageSync.swift",
+          "/Users/jacklee/Projects/cccode-ios/OpenCodeiOS/OpenCodeiOS/App/ChatUIKitContainerView.swift",
+          "/Users/jacklee/Projects/cccode-ios/message-web/src/components/Timeline.tsx"
+        ],
+        "checked_at": "2026-06-13T15:54:11Z"
+      }
+    },
+    {
+      "id": "phase2-ios-pagination-tests",
+      "title": "Phase 2 iOS pagination automated verification",
+      "description": "Add targeted Swift tests for capability gating, cursor dedupe, page merge, stale reset, and background mapping; run targeted builds and unit tests without UI automation.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "phase2-ios-pagination-impl"
+      ],
+      "source": "Sections 6.8-6.9, 9.1",
+      "notes": "Targeted unit tests and signed device build passed. No UI tests, snapshot tests, or simulator UI automation were run.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "MessageWeb App tests passed 32/32 and build:ios succeeded. Swift targeted suites MessageDeduplicationTests plus BridgeMessageMappingTests passed 32/32, including cursor in-flight dedupe, cursor advancement/reset, stable-ID prepend overlap handling, and bridge mapping. Signed build for physical iPhone succeeded.",
+        "artifacts": [
+          "/Users/jacklee/Projects/cccode-ios/OpenCodeiOS/OpenCodeiOSTests/MessageDeduplicationTests.swift",
+          "/tmp/cccode-ios-pagination-tests.log",
+          "/tmp/cccode-ios-pagination-build.log",
+          "/Users/jacklee/Projects/cccode-ios/build/DerivedData-PaginationTests/Logs/Test/Test-CCCode-2026.06.13_23-51-09-+0800.xcresult"
+        ],
+        "checked_at": "2026-06-13T15:54:11Z"
+      }
+    },
+    {
+      "id": "phase2-ios-pagination-regression",
+      "title": "Phase 2 iOS real-device pagination regression",
+      "description": "Install to the connected iPhone and manually validate top/bottom prefetch, anchor stability, stale reset, large-session first content, memory peak, and direct/relay performance without UI automation.",
+      "status": "blocked",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "phase2-ios-pagination-tests",
+        "phase2-bridge-pagination-regression"
+      ],
+      "source": "Sections 6.8, 9.2",
+      "notes": "Repairable-heavy regression found during manual testing: Codex showed only the bounded latest page (about 22 messages) and Claude showed only its bounded latest page (about 100 messages). Root cause was MessageWeb defining handleStartReached but not binding it to Virtuoso.startReached, so no backward cursor request was emitted. Repair is tracked by review-fix-ios-load-older-trigger-impl/tests/regression. The original regression remains blocked until the repaired build is manually revalidated; resolve via review-fix-ios-load-older-trigger-regression when proven.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "manual",
+        "summary": "",
+        "artifacts": [
+          "/tmp/cccode-ios-pagination-install.log",
+          "/tmp/cccode-ios-pagination-launch.log",
+          "/tmp/cccode-ios-pagination-trigger-install.log",
+          "/tmp/cccode-ios-pagination-trigger-launch.log",
+          "/tmp/go-bridge.log"
+        ],
+        "checked_at": "2026-06-14T00:54:35Z"
+      }
+    },
+    {
+      "id": "review-fix-ios-load-older-trigger-impl",
+      "title": "Repair MessageWeb older-page trigger",
+      "description": "Bind the existing top-reached handler to react-virtuoso so reaching the oldest rendered item emits loadOlder, and add pagination request markers to Bridge logs for device verification.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase2-ios-pagination-tests"
+      ],
+      "source": "Manual regression feedback 2026-06-14",
+      "notes": "review-fix-for:phase2-ios-pagination-regression. No fallback or simulated production path added.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Bound Timeline.handleStartReached to Virtuoso.startReached, preserving the existing cooldown, anchor item ID, scroll state, and native loadOlder message. Added non-sensitive Bridge request logging for paginate, cursor presence, and limit.",
+        "artifacts": [
+          "/Users/jacklee/Projects/cccode-ios/message-web/src/components/Timeline.tsx",
+          "go-bridge/handlers.go"
+        ],
+        "checked_at": "2026-06-14T00:54:35Z"
+      }
+    },
+    {
+      "id": "review-fix-ios-load-older-trigger-tests",
+      "title": "Verify MessageWeb older-page trigger repair",
+      "description": "Add a focused component test that invokes the Virtuoso startReached callback and asserts the native loadOlder payload, then rebuild the embedded web bundle and signed app.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "review-fix-ios-load-older-trigger-impl"
+      ],
+      "source": "Manual regression feedback 2026-06-14",
+      "notes": "review-fix-for:phase2-ios-pagination-regression. No UI tests, snapshot tests, or simulator automation were run.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "Focused MessageWeb App tests passed 33/33, including the new startReached-to-loadOlder assertion. npm run build:ios succeeded, go test ./go-bridge passed, signed physical-device iOS build succeeded, and the macOS Release app build succeeded.",
+        "artifacts": [
+          "/Users/jacklee/Projects/cccode-ios/message-web/src/App.test.tsx",
+          "/tmp/cccode-ios-pagination-trigger-build.log",
+          "/tmp/cccode-macbridge-pagination-trigger-build.log",
+          "cmd:npm test -- --run src/App.test.tsx",
+          "cmd:npm run build:ios",
+          "cmd:go test ./go-bridge"
+        ],
+        "checked_at": "2026-06-14T00:54:35Z"
+      }
+    },
+    {
+      "id": "review-fix-ios-load-older-trigger-regression",
+      "title": "Revalidate real-device backward pagination",
+      "description": "On the installed iPhone build, open long Codex and Claude sessions, scroll repeatedly to the top, and verify backward cursor requests, complete accumulation, anchor stability, and end-of-history behavior.",
+      "status": "blocked",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "review-fix-ios-load-older-trigger-tests"
+      ],
+      "source": "Manual regression feedback 2026-06-14",
+      "notes": "review-fix-for:phase2-ios-pagination-regression. Manual retest still showed only the latest Codex turn. Bridge logs proved every request had hasBeforeCursor=false even though the server response had an older cursor. Root cause is a second repairable-heavy race: Virtuoso reaches the top before first-page pagination metadata is applied, the early loadOlder call returns, and the same boundary is not emitted again. Follow-up repair is tracked by review-fix-ios-pagination-metadata-race-impl/tests/regression.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "manual",
+        "summary": "",
+        "artifacts": [
+          "/tmp/cccode-ios-pagination-trigger-install.log",
+          "/tmp/cccode-ios-pagination-trigger-launch.log",
+          "/tmp/go-bridge.log"
+        ],
+        "checked_at": "2026-06-14T01:05:10Z"
+      }
+    },
+    {
+      "id": "review-fix-ios-pagination-metadata-race-impl",
+      "title": "Queue top-reached events until pagination metadata arrives",
+      "description": "Distinguish uninitialized pagination metadata from end-of-history and preserve one early top-reached request until the first page supplies a usable oldestCursor.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "review-fix-ios-load-older-trigger-tests"
+      ],
+      "source": "Manual regression feedback 2026-06-14",
+      "notes": "review-fix-for:review-fix-ios-load-older-trigger-regression. The queued request is single-shot, cleared on session transitions, and only dispatched when hasMore is true.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "SessionHistoryPaginationState now records whether first-page metadata has loaded. ChatViewModel queues an early loadOlder boundary event while metadata is unavailable, clears it on session transitions, and dispatches it with the real oldestCursor once metadata confirms older history.",
+        "artifacts": [
+          "/Users/jacklee/Projects/cccode-ios/OpenCodeiOS/OpenCodeiOS/Services/Backend/BackendModels.swift",
+          "/Users/jacklee/Projects/cccode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel.swift",
+          "/Users/jacklee/Projects/cccode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel+SessionManagement.swift",
+          "/Users/jacklee/Projects/cccode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel+MessageSync.swift"
+        ],
+        "checked_at": "2026-06-14T01:05:10Z"
+      }
+    },
+    {
+      "id": "review-fix-ios-pagination-metadata-race-tests",
+      "title": "Verify pagination metadata race repair",
+      "description": "Verify metadata initialization/reset semantics, run focused Swift and MessageWeb tests, rebuild embedded assets, and produce a signed physical-device build.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "review-fix-ios-pagination-metadata-race-impl"
+      ],
+      "source": "Manual regression feedback 2026-06-14",
+      "notes": "No UI tests or snapshot tests were run. The focused XCTest suite is unit-only.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "MessageWeb App tests passed 33/33 and build:ios succeeded. MessageDeduplicationTests passed 17/17, including metadataLoaded initialization and reset assertions. Signed iPhone build succeeded.",
+        "artifacts": [
+          "/Users/jacklee/Projects/cccode-ios/OpenCodeiOS/OpenCodeiOSTests/MessageDeduplicationTests.swift",
+          "/tmp/cccode-ios-pagination-race-tests.log",
+          "/tmp/cccode-ios-pagination-race-build.log",
+          "/Users/jacklee/Projects/cccode-ios/build/DerivedData-PaginationRaceTests/Logs/Test/Test-CCCode-2026.06.14_09-02-53-+0800.xcresult"
+        ],
+        "checked_at": "2026-06-14T01:05:10Z"
+      }
+    },
+    {
+      "id": "review-fix-ios-pagination-metadata-race-regression",
+      "title": "Revalidate queued backward pagination on device",
+      "description": "Open the same long Codex session on the installed iPhone build and verify Bridge observes hasBeforeCursor=true, older turns accumulate, and anchor/end-of-history behavior remains correct.",
+      "status": "blocked",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "review-fix-ios-pagination-metadata-race-tests"
+      ],
+      "source": "Manual regression feedback 2026-06-14",
+      "notes": "Signed race-fix build is installed and launched on physical iPhone 00008140-001E69503453001C. The next manual retest exposed a third repairable-heavy issue: paginated Codex wire messages had empty IDs, so iOS stable-ID deduplication collapsed the user and assistant entries into one row and the later assistant entry won. Follow-up repair is tracked by review-fix-pagination-stable-message-id-impl/tests/regression.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "manual",
+        "summary": "",
+        "artifacts": [
+          "/tmp/cccode-ios-pagination-race-install.log",
+          "/tmp/cccode-ios-pagination-race-launch.log",
+          "/tmp/go-bridge.log"
+        ],
+        "checked_at": "2026-06-14T01:05:10Z"
+      }
+    },
+    {
+      "id": "review-fix-pagination-stable-message-id-impl",
+      "title": "Generate stable IDs for paginated history messages",
+      "description": "Match the legacy history handler's stable-ID behavior in the paginated path so Codex entries without source IDs remain distinct and stable across backward pages.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "review-fix-ios-pagination-metadata-race-tests"
+      ],
+      "source": "Manual regression feedback 2026-06-14",
+      "notes": "review-fix-for:review-fix-ios-pagination-metadata-race-regression. Stable synthetic IDs include session ID, transcript span ordinal, role, and timestamp; no fallback or simulated production path was added.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "The paginated Bridge mapping now assigns a deterministic synthetic ID whenever the source history entry has no ID. Using the transcript span ordinal keeps IDs unique within a page and stable across page boundaries, preventing iOS deduplication from collapsing user and assistant messages.",
+        "artifacts": [
+          "go-bridge/pagination.go"
+        ],
+        "checked_at": "2026-06-14T01:12:46Z"
+      }
+    },
+    {
+      "id": "review-fix-pagination-stable-message-id-tests",
+      "title": "Verify paginated stable message IDs",
+      "description": "Assert non-empty and unique IDs within the first page, no ID overlap across backward pages, and run the focused Go package tests.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "review-fix-pagination-stable-message-id-impl"
+      ],
+      "source": "Manual regression feedback 2026-06-14",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "go test ./go-bridge passed. Pagination tests now reject empty IDs, assert first-page uniqueness, assert page-to-page disjointness, and verify the real close-1009 Codex session returns both user and assistant roles with unique non-empty IDs.",
+        "artifacts": [
+          "go-bridge/pagination_test.go",
+          "go-bridge/pagination_regression_test.go",
+          "/tmp/cccode-pagination-stable-id-real-session.log",
+          "/tmp/cccode-macbridge-pagination-stable-id-build.log",
+          "cmd:go test ./go-bridge"
+        ],
+        "checked_at": "2026-06-14T01:12:46Z"
+      }
+    },
+    {
+      "id": "review-fix-pagination-stable-message-id-regression",
+      "title": "Revalidate distinct Codex user and assistant turns on device",
+      "description": "Open the same long Codex session A on the physical iPhone and verify the first page shows both user input and assistant output, then verify older pages accumulate without duplicate collapse.",
+      "status": "blocked",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "review-fix-pagination-stable-message-id-tests"
+      ],
+      "source": "Manual regression feedback 2026-06-14",
+      "notes": "review-fix-for:review-fix-ios-pagination-metadata-race-regression. Screenshot telegram-cloud-photo-size-4-5868679082202041622-y.jpg confirms the first page now preserves both the Codex user prompt and assistant response, so the empty-ID collapse is fixed. Full regression remains blocked because Bridge logs still showed only hasBeforeCursor=false; older pages had not accumulated. The newly identified native routing gate is tracked by review-fix-ios-initial-load-older-routing-impl/tests/regression.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "manual",
+        "summary": "",
+        "artifacts": [
+          "/tmp/cccode-pagination-stable-id-real-session.log",
+          "/tmp/cccode-macbridge-pagination-stable-id-build.log",
+          "/tmp/go-bridge.log"
+        ],
+        "checked_at": "2026-06-14T01:12:46Z"
+      }
+    },
+    {
+      "id": "review-fix-ios-initial-load-older-routing-impl",
+      "title": "Route early Web loadOlder events during initial message loading",
+      "description": "Allow MessageWeb startReached events to reach ChatViewModel while the first page is still loading so the existing metadata-pending queue can retain and dispatch the backward-page request.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "review-fix-pagination-stable-message-id-tests"
+      ],
+      "source": "Manual regression screenshot and Bridge logs 2026-06-14",
+      "notes": "review-fix-for:review-fix-ios-pagination-metadata-race-regression. The native container no longer drops loadOlder solely because isLoadingMessages is true; concurrent older-page and active-generation guards remain.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Removed the premature isLoadingMessages guard from MessageWeb loadOlder routing. Early top-boundary events now reach ChatViewModel, which queues one request until first-page pagination metadata supplies the real oldest cursor.",
+        "artifacts": [
+          "/Users/jacklee/Projects/cccode-ios/OpenCodeiOS/OpenCodeiOS/App/ChatUIKitContainerView.swift"
+        ],
+        "checked_at": "2026-06-14T01:29:56Z"
+      }
+    },
+    {
+      "id": "review-fix-ios-initial-load-older-routing-tests",
+      "title": "Verify initial-load older-page event routing",
+      "description": "Run focused MessageWeb event-routing and pagination-state XCTest suites, then produce a signed physical-device build.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "review-fix-ios-initial-load-older-routing-impl"
+      ],
+      "source": "Manual regression screenshot and Bridge logs 2026-06-14",
+      "notes": "No UI tests, snapshot tests, or simulator automation were run.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "Focused MessageWebEventRoutingTests and MessageDeduplicationTests passed 20/20. The signed iPhone build succeeded, then installed and launched on the connected iPhone 16 Pro.",
+        "artifacts": [
+          "/tmp/cccode-ios-pagination-route-tests.log",
+          "/Users/jacklee/Projects/cccode-ios/build/DerivedData-PaginationRouteFix/Logs/Test/Test-CCCode-2026.06.14_09-27-37-+0800.xcresult",
+          "/tmp/cccode-ios-pagination-route-device-build.log",
+          "/tmp/cccode-ios-pagination-route-install.log",
+          "/tmp/cccode-ios-pagination-route-launch.log"
+        ],
+        "checked_at": "2026-06-14T01:29:56Z"
+      }
+    },
+    {
+      "id": "review-fix-ios-initial-load-older-routing-regression",
+      "title": "Revalidate automatic backward pagination from the initial top boundary",
+      "description": "Open Codex session 019ebbd4-a7dc-73f2-aa40-69aa992d2e0d on the installed iPhone build and verify Bridge receives hasBeforeCursor=true, earlier turns prepend, and repeated top loading reaches the transcript beginning.",
+      "status": "blocked",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "review-fix-ios-initial-load-older-routing-tests"
+      ],
+      "source": "Manual regression screenshot and Bridge logs 2026-06-14",
+      "notes": "Manual retest still produced no hasBeforeCursor=true request. Bridge logs confirmed the installed routing fix continued issuing only first-page requests. The remaining repairable-heavy issue is that react-virtuoso startReached is not reliable when the first rendered item is itself extremely large; follow-up is tracked by review-fix-ios-at-top-pagination-trigger-impl/tests/regression.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "manual",
+        "summary": "",
+        "artifacts": [
+          "/tmp/cccode-ios-pagination-route-install.log",
+          "/tmp/cccode-ios-pagination-route-launch.log",
+          "/tmp/go-bridge.log"
+        ],
+        "checked_at": "2026-06-14T01:29:56Z"
+      }
+    },
+    {
+      "id": "review-fix-ios-at-top-pagination-trigger-impl",
+      "title": "Trigger backward pagination from Virtuoso top-state changes",
+      "description": "Route atTopStateChange(true) through the same cooled loadOlder trigger used by startReached so oversized first items still request the preceding page.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "review-fix-ios-initial-load-older-routing-tests"
+      ],
+      "source": "Manual regression feedback and Bridge logs 2026-06-14",
+      "notes": "review-fix-for:review-fix-ios-initial-load-older-routing-regression. Both Virtuoso signals share the existing 800ms cooldown, so duplicate callbacks cannot create concurrent page requests.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Timeline now invokes the existing loadOlder trigger whenever Virtuoso reports atTop=true. atTop=false still emits only scroll state, while top events retain the existing cooldown, anchor ID, and native pagination message.",
+        "artifacts": [
+          "/Users/jacklee/Projects/cccode-ios/message-web/src/components/Timeline.tsx"
+        ],
+        "checked_at": "2026-06-14T01:33:39Z"
+      }
+    },
+    {
+      "id": "review-fix-ios-at-top-pagination-trigger-tests",
+      "title": "Verify top-state pagination triggering",
+      "description": "Add a focused Virtuoso atTopStateChange test, rebuild the embedded Web bundle, and produce a signed physical-device build.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "review-fix-ios-at-top-pagination-trigger-impl"
+      ],
+      "source": "Manual regression feedback and Bridge logs 2026-06-14",
+      "notes": "No UI tests, snapshot tests, or simulator automation were run.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "MessageWeb App tests passed 34/34, including atTopStateChange(true) producing loadOlder. build:ios and the signed iPhone build succeeded; the result was installed and launched on the connected iPhone 16 Pro.",
+        "artifacts": [
+          "/Users/jacklee/Projects/cccode-ios/message-web/src/App.test.tsx",
+          "/tmp/cccode-ios-pagination-at-top-web-tests.log",
+          "/tmp/cccode-ios-pagination-at-top-web-build.log",
+          "/tmp/cccode-ios-pagination-at-top-device-build.log",
+          "/tmp/cccode-ios-pagination-at-top-install.log",
+          "/tmp/cccode-ios-pagination-at-top-launch.log"
+        ],
+        "checked_at": "2026-06-14T01:33:39Z"
+      }
+    },
+    {
+      "id": "review-fix-ios-at-top-pagination-trigger-regression",
+      "title": "Revalidate oversized-first-item backward pagination",
+      "description": "Open Codex session 019ebbd4-a7dc-73f2-aa40-69aa992d2e0d on the installed iPhone build and verify atTop produces hasBeforeCursor=true requests and earlier turns prepend to the timeline.",
+      "status": "blocked",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "review-fix-ios-at-top-pagination-trigger-tests"
+      ],
+      "source": "Manual regression feedback and Bridge logs 2026-06-14",
+      "notes": "Manual retest proved the top trigger itself works: Bridge received hasBeforeCursor=true at 2026-06-14 09:35:55 +08:00 and returned six older messages. Three seconds later the Codex external-turn probe issued a no-cursor request, replaced the accumulated timeline with the latest two messages, and falsely activated generation. The remaining repair is tracked by review-fix-ios-paginated-probe-impl/tests/regression.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "manual",
+        "summary": "",
+        "artifacts": [
+          "/tmp/cccode-ios-pagination-at-top-install.log",
+          "/tmp/cccode-ios-pagination-at-top-launch.log",
+          "/tmp/go-bridge.log"
+        ],
+        "checked_at": "2026-06-14T01:42:30Z"
+      }
+    },
+    {
+      "id": "review-fix-ios-paginated-probe-impl",
+      "title": "Preserve paginated history during Codex external-turn probing",
+      "description": "Compare the server latest page with the matching local suffix and merge changed latest-page messages without discarding already loaded older pages.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "review-fix-ios-at-top-pagination-trigger-tests"
+      ],
+      "source": "Manual regression screenshot and Bridge logs 2026-06-14",
+      "notes": "review-fix-for:review-fix-ios-at-top-pagination-trigger-regression. The probe now compares like-for-like page windows; a genuinely changed latest page is merged into the accumulated timeline instead of replacing it. No fallback or simulated production path was added.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Codex external-turn polling compares the fetched latest page against the same-sized suffix of the local accumulated history. Unchanged historical sessions no longer appear changed merely because older pages are loaded, and real latest-page changes preserve the older prefix.",
+        "artifacts": [
+          "/Users/jacklee/Projects/cccode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel+Generation.swift",
+          "/Users/jacklee/Projects/cccode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel+MessageSync.swift",
+          "/tmp/go-bridge.log"
+        ],
+        "checked_at": "2026-06-14T01:42:30Z"
+      }
+    },
+    {
+      "id": "review-fix-ios-paginated-probe-tests",
+      "title": "Verify paginated Codex probe merging",
+      "description": "Assert latest-page merging preserves an older prefix, run focused message synchronization tests, and produce a signed physical-device build.",
+      "status": "done",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "review-fix-ios-paginated-probe-impl"
+      ],
+      "source": "Manual regression screenshot and Bridge logs 2026-06-14",
+      "notes": "No UI tests, snapshot tests, or simulator automation were run.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "MessageDeduplicationTests passed 18/18, including latest-page merge preservation. The signed physical-device build succeeded and was installed and launched on the connected iPhone 16 Pro.",
+        "artifacts": [
+          "/Users/jacklee/Projects/cccode-ios/OpenCodeiOS/OpenCodeiOSTests/MessageDeduplicationTests.swift",
+          "/tmp/cccode-ios-pagination-probe-tests.log",
+          "/Users/jacklee/Projects/cccode-ios/build/DerivedData-PaginationProbeFix/Logs/Test/Test-CCCode-2026.06.14_09-40-10-+0800.xcresult",
+          "/tmp/cccode-ios-pagination-probe-device-build.log",
+          "/tmp/cccode-ios-pagination-probe-install.log",
+          "/tmp/cccode-ios-pagination-probe-launch.log"
+        ],
+        "checked_at": "2026-06-14T01:42:30Z"
+      }
+    },
+    {
+      "id": "review-fix-ios-paginated-probe-regression",
+      "title": "Revalidate retained Codex history and idle session state",
+      "description": "Open Codex session 019ebbd4-a7dc-73f2-aa40-69aa992d2e0d on the installed iPhone build and verify older turns remain visible after polling and the inactive session does not show a running stop control.",
+      "status": "blocked",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "review-fix-ios-paginated-probe-tests"
+      ],
+      "source": "Manual regression screenshot and Bridge logs 2026-06-14",
+      "notes": "The repaired build is installed and launched on the physical iPhone 16 Pro. Manual interaction is required by project policy.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "manual",
+        "summary": "",
+        "artifacts": [
+          "/tmp/cccode-ios-pagination-probe-install.log",
+          "/tmp/cccode-ios-pagination-probe-launch.log",
+          "/tmp/go-bridge.log"
+        ],
+        "checked_at": "2026-06-14T01:42:30Z"
+      }
+    },
+    {
+      "id": "phase3-batch-open-decision-impl",
+      "title": "Phase 3 batched open decision and conditional implementation",
+      "description": "Use Phase 0/2 evidence to decide whether the 15 percent or 150ms threshold is met; if met, implement backend-scoped BatchSessionOpener and paged open_session, otherwise record an evidence-backed no-go.",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "impl",
+      "depends_on": [
+        "phase2-ios-pagination-regression"
+      ],
+      "source": "Section 7",
+      "notes": "Evidence is ready for an expected NO-GO: the Phase 0 baseline already found no extra serial RPC above 150ms, and post-pagination Relay history requests are typically about 28-57ms. This todo remains dependency-gated by the blocked real-device pagination regression.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase3-batch-open-decision-tests",
+      "title": "Phase 3 batched open automated verification",
+      "description": "If implemented, test interface-derived capability, backend isolation, paged response reuse, compatibility, and OpenCode non-advertisement; if no-go, validate the threshold calculation artifacts.",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "tests",
+      "depends_on": [
+        "phase3-batch-open-decision-impl"
+      ],
+      "source": "Sections 7.1-7.3, 9.1",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase3-batch-open-decision-regression",
+      "title": "Phase 3 batched open regression and final acceptance",
+      "description": "If implemented, replay open-session direct/relay scenarios and verify the measured benefit; otherwise audit the no-go decision. Run the final targeted Go/Swift test and build matrix and collect real-device acceptance evidence.",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "regression",
+      "depends_on": [
+        "phase3-batch-open-decision-tests"
+      ],
+      "source": "Sections 7, 8, 9",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    }
+  ]
+}

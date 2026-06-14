@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -15,14 +16,31 @@ import (
 
 // GetRichSessionHistory returns structured history with parts, steps, and
 // thinking blocks parsed from the Codex session JSONL transcript.
-func (a *Agent) GetRichSessionHistory(_ context.Context, sessionID string, limit int) ([]core.RichHistoryEntry, error) {
+func (a *Agent) GetRichSessionHistory(ctx context.Context, sessionID string, limit int) ([]core.RichHistoryEntry, error) {
 	a.mu.RLock()
 	codexHome := a.codexHome
 	a.mu.RUnlock()
-	return getRichSessionHistory(sessionID, codexHome, limit)
+	return getRichSessionHistoryWithContext(ctx, sessionID, codexHome, limit)
+}
+
+// TranscriptPath resolves the on-disk JSONL transcript path for a Codex session,
+// implementing core.TranscriptLocator so the bridge can index and page it.
+func (a *Agent) TranscriptPath(_ context.Context, sessionID string) (string, error) {
+	a.mu.RLock()
+	codexHome := a.codexHome
+	a.mu.RUnlock()
+	path := findSessionFile(sessionID, codexHome)
+	if path == "" {
+		return "", fmt.Errorf("codex: session file not found for %s", sessionID)
+	}
+	return path, nil
 }
 
 func getRichSessionHistory(sessionID, codexHome string, limit int) ([]core.RichHistoryEntry, error) {
+	return getRichSessionHistoryWithContext(context.Background(), sessionID, codexHome, limit)
+}
+
+func getRichSessionHistoryWithContext(ctx context.Context, sessionID, codexHome string, limit int) ([]core.RichHistoryEntry, error) {
 	path := findSessionFile(sessionID, codexHome)
 	if path == "" {
 		return nil, fmt.Errorf("session file not found for %s", sessionID)
@@ -34,14 +52,30 @@ func getRichSessionHistory(sessionID, codexHome string, limit int) ([]core.RichH
 	}
 	defer f.Close()
 
-	return parseRichHistoryFromJSONL(f, limit)
+	started := time.Now()
+	entries, err := parseRichHistoryFromJSONL(f, limit)
+	var fileBytes int64
+	if stat, statErr := f.Stat(); statErr == nil {
+		fileBytes = stat.Size()
+	}
+	core.SessionLoadMetricsFromContext(ctx).AddHistoryParse(time.Since(started), fileBytes)
+	return entries, err
 }
 
 func parseRichHistoryFromJSONL(f *os.File, limit int) ([]core.RichHistoryEntry, error) {
-	scanner := bufio.NewScanner(f)
+	return ParseRichHistoryFromReader(f, limit)
+}
+
+// ParseRichHistoryFromReader runs the Codex logical-message grouping builder
+// over r (one JSONL transcript or a byte-range section of one) and returns the
+// logical messages in file order. It is exported so the bridge can replay a
+// transcript page index byte range (design §6.3); the boundaries match the
+// codex span extractor in package transcriptindex.
+func ParseRichHistoryFromReader(r io.Reader, limit int) ([]core.RichHistoryEntry, error) {
+	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 256*1024), codexSessionScannerMaxTokenSize)
 
-	builder := &richHistoryBuilder{}
+	builder := &richHistoryBuilder{maxEntries: limit}
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -175,6 +209,9 @@ func parseRichHistoryFromJSONL(f *os.File, limit int) ([]core.RichHistoryEntry, 
 		}
 	}
 	builder.flush()
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read codex rich history: %w", err)
+	}
 
 	entries := builder.entries
 	if limit > 0 && len(entries) > limit {
@@ -214,9 +251,10 @@ func extractToolInput(toolName string, raw json.RawMessage) string {
 }
 
 type richHistoryBuilder struct {
-	entries   []core.RichHistoryEntry
-	current   *core.RichHistoryEntry
-	callIDMap map[string]int
+	entries    []core.RichHistoryEntry
+	current    *core.RichHistoryEntry
+	callIDMap  map[string]int
+	maxEntries int
 }
 
 func (b *richHistoryBuilder) addEntry(entry core.RichHistoryEntry) {
@@ -428,6 +466,9 @@ func (b *richHistoryBuilder) flush() {
 			b.current.Parts = []map[string]any{{"type": "text", "content": b.current.Content}}
 		}
 		b.entries = append(b.entries, *b.current)
+		if b.maxEntries > 0 && len(b.entries) > b.maxEntries {
+			b.entries = b.entries[len(b.entries)-b.maxEntries:]
+		}
 		b.current = nil
 		b.callIDMap = nil
 	}

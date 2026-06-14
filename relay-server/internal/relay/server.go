@@ -80,7 +80,7 @@ func NewServer(store *Store, config Config, logger *slog.Logger) (*Server, error
 		config.MaxMailboxBytes = 50 << 20
 	}
 	if config.MaxFrameBytes <= 0 {
-		config.MaxFrameBytes = 512 << 10
+		config.MaxFrameBytes = 2 << 20
 	}
 	if config.RateLimitPerMinute <= 0 {
 		config.RateLimitPerMinute = 120

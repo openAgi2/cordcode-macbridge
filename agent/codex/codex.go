@@ -383,11 +383,11 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	return newCodexSession(ctx, cliBin, cliExtraArgs, workDir, model, reasoningEffort, mode, sessionID, baseURL, extraEnv, provName)
 }
 
-func (a *Agent) ListSessions(_ context.Context) ([]core.AgentSessionInfo, error) {
+func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, error) {
 	a.mu.RLock()
 	codexHome := a.codexHome
 	a.mu.RUnlock()
-	return a.sessionCache.list(codexHome)
+	return a.sessionCache.list(ctx, codexHome)
 }
 
 func (a *Agent) GetSessionHistory(_ context.Context, sessionID string, limit int) ([]core.HistoryEntry, error) {

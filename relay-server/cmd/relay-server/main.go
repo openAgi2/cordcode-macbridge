@@ -22,7 +22,7 @@ func main() {
 	tokenHash := flag.String("provision-token-sha256", envOr("RELAY_PROVISION_TOKEN_SHA256", ""), "SHA-256 hex digest of provisioning token")
 	mailboxTTL := flag.Duration("mailbox-ttl", durationOr("RELAY_MAILBOX_TTL", 24*time.Hour), "offline mailbox TTL")
 	maxMailbox := flag.Int64("max-mailbox-bytes", int64Or("RELAY_MAX_MAILBOX_BYTES", 50<<20), "maximum pending mailbox bytes per device")
-	maxFrame := flag.Int64("max-frame-bytes", int64Or("RELAY_MAX_FRAME_BYTES", 512<<10), "maximum WebSocket envelope bytes")
+	maxFrame := flag.Int64("max-frame-bytes", int64Or("RELAY_MAX_FRAME_BYTES", 2<<20), "maximum WebSocket envelope bytes")
 	rateLimit := flag.Int("rate-limit-per-minute", intOr("RELAY_RATE_LIMIT_PER_MINUTE", 120), "route registrations allowed per IP per minute")
 	activationRateLimit := flag.Int("activation-rate-limit-per-minute", intOr("RELAY_ACTIVATION_RATE_LIMIT_PER_MINUTE", 6), "self-service activation requests allowed per IP per minute")
 	flag.Parse()
