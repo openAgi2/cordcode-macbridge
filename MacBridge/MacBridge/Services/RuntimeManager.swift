@@ -137,6 +137,17 @@ class RuntimeManager: ObservableObject {
     /// Mac 休眠期间为 true，阻止 crash 重试
     private var isSleeping = false
     private var managementFailureCount = 0
+    /// 最近一次状态变化时间，用于判断“卡在 .starting”多久
+    private var lastStatusChangeAt: Date?
+    /// 最近一次进程启动时间，用于定时兜底重启
+    private var lastLaunchedAt: Date?
+    /// 自动重启是否已在排队（防止重启过程中被重复触发）
+    private var autoRestartPending = false
+    /// 卡在 .starting 多久后判定为“卡住”并自动重启
+    private let stuckRestartThreshold: TimeInterval = 60
+    /// 连续卡住自动重启的次数上限，超过则停止自动重启，避免死循环空转
+    private let maxStuckRestarts = 5
+    private var stuckRestartCount = 0
 
     var config: RuntimeConfig
     private var sleepObserver: Any?
@@ -160,6 +171,8 @@ class RuntimeManager: ObservableObject {
     func start() {
         userStopped = false
         crashCount = 0
+        stuckRestartCount = 0
+        autoRestartPending = false
         setStatus(.starting, "正在启动 Bridge...")
         launchBridgeProcess()
     }
@@ -290,6 +303,8 @@ class RuntimeManager: ObservableObject {
             bridgeProcess = process
             lastLaunchedPID = process.processIdentifier
             managementFailureCount = 0
+            lastLaunchedAt = Date()
+            autoRestartPending = false
             NSLog("[RuntimeManager] go-bridge 启动 PID=\(process.processIdentifier)")
         } catch {
             setStatus(.crashed, "启动失败: \(error.localizedDescription)")
@@ -366,10 +381,55 @@ class RuntimeManager: ObservableObject {
             while let self, !Task.isCancelled {
                 if self.bridgeProcess?.isRunning == true {
                     await self.pollManagementAPI()
+                    self.evaluateAutoRestart()
                 }
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
             }
         }
+    }
+
+    /// 自动重启判定：卡在 starting 超阈值 → 重启；定时兜底 → 到点重启。
+    /// 设置随时可改（默认开启、间隔 2 小时）；每 3 秒实时读取，无需重启 App。
+    private func evaluateAutoRestart() {
+        guard !autoRestartPending else { return }
+        // 正在重启/已停止/已崩溃/休眠：交由其他路径处理
+        guard status != .stopped, status != .crashed, status != .sleeping, status != .idle else { return }
+        let now = Date()
+
+        // 1) 卡在 starting：正常启动几秒就 ready，长时间停在 starting 说明卡住了
+        if status == .starting, let changedAt = lastStatusChangeAt {
+            let stuck = now.timeIntervalSince(changedAt)
+            if stuck >= stuckRestartThreshold {
+                triggerAutoRestart(reason: "Bridge 卡在启动状态 \(Int(stuck))s，自动重启")
+                return
+            }
+        }
+
+        // 2) 定时兜底重启：只在工作正常时计时（starting/异常不计入定时窗口）
+        let enabled = UserDefaults.standard.object(forKey: "autoRestartEnabled") as? Bool ?? true
+        guard enabled else { return }
+        let minutes = UserDefaults.standard.object(forKey: "autoRestartIntervalMinutes") as? Int ?? 120
+        // 下限 5 分钟，防止误配成极小值导致频繁重启
+        let interval = max(5, minutes) * 60
+        if status == .ready || status == .readyNoAgents,
+           let launchedAt = lastLaunchedAt,
+           now.timeIntervalSince(launchedAt) >= TimeInterval(interval) {
+            triggerAutoRestart(reason: "到达定时重启周期 \(minutes) 分钟，兜底重启")
+        }
+    }
+
+    private func triggerAutoRestart(reason: String) {
+        // 连续卡住自动重启仍未恢复，停止自动重启，避免死循环空转
+        if stuckRestartCount >= maxStuckRestarts {
+            setStatus(.crashed, "Bridge 多次自动重启仍未恢复，已停止自动重启。请检查日志或手动重启。")
+            lastError = "连续卡住自动重启 \(maxStuckRestarts) 次仍未恢复: \(config.logFilePath)"
+            NSLog("[RuntimeManager] \(reason) 被跳过：已达自动重启上限 \(maxStuckRestarts) 次")
+            return
+        }
+        stuckRestartCount += 1
+        autoRestartPending = true
+        NSLog("[RuntimeManager] \(reason)（第 \(stuckRestartCount)/\(maxStuckRestarts) 次）")
+        restart()
     }
 
     private func pollManagementAPI() async {
@@ -429,6 +489,13 @@ class RuntimeManager: ObservableObject {
 
     private func setStatus(_ s: BridgeStatus, _ text: String) {
         guard status != s || statusText != text else { return }
+        if status != s {
+            lastStatusChangeAt = Date()
+            // 离开 starting 状态且进入 ready/readyNoAgents，说明已自愈，清零计数
+            if s == .ready || s == .readyNoAgents {
+                stuckRestartCount = 0
+            }
+        }
         status = s
         statusText = text
     }

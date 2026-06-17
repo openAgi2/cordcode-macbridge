@@ -267,6 +267,10 @@ enum L10n {
     static var settingsRegenerateConfirmMessage: String { tr("settings_regenerate_confirm_message") }
     static var settingsSaving: String { tr("settings_saving") }
     static var settingsOpenCodeCommand: String { tr("settings_opencode_command") }
+    static var settingsAutoRestartTitle: String { tr("settings_auto_restart_title") }
+    static var settingsAutoRestartEnable: String { tr("settings_auto_restart_enable") }
+    static var settingsAutoRestartInterval: String { tr("settings_auto_restart_interval") }
+    static var settingsAutoRestartHint: String { tr("settings_auto_restart_hint") }
 
     // MARK: - Remote
 
@@ -514,6 +518,10 @@ enum L10n {
             "settings_regenerate_confirm_message": "The old password becomes invalid only after you save and restart MacBridge.",
             "settings_saving": "Saving...",
             "settings_opencode_command": "opencode serve --port 64667 --hostname 127.0.0.1",
+            "settings_auto_restart_title": "Auto Restart",
+            "settings_auto_restart_enable": "Enable auto restart",
+            "settings_auto_restart_interval": "Restart interval",
+            "settings_auto_restart_hint": "Restarts Bridge if it gets stuck, and on a regular schedule to keep connections stable. Changes apply immediately.",
             "remote_title": "Remote Connection",
             "remote_subtitle": "Configure how iPhone connects when it is not on the same network",
             "remote_connection_paths": "Connection Paths",
@@ -749,6 +757,10 @@ enum L10n {
             "settings_regenerate_confirm_message": "重新生成后，旧密码将在保存并重启 MacBridge 后失效。",
             "settings_saving": "正在保存…",
             "settings_opencode_command": "opencode serve --port 64667 --hostname 127.0.0.1",
+            "settings_auto_restart_title": "自动重启",
+            "settings_auto_restart_enable": "启用自动重启",
+            "settings_auto_restart_interval": "重启周期",
+            "settings_auto_restart_hint": "Bridge 卡住时自动重启，并按周期定时兜底重启，保持连接稳定。修改后立即生效。",
             "remote_title": "远程连接",
             "remote_subtitle": "配置 iPhone 不在同一网络时的连接方式",
             "remote_connection_paths": "连接路径",

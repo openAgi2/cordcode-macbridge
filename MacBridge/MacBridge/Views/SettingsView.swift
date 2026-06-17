@@ -4,11 +4,22 @@ struct SettingsView: View {
     @ObservedObject var viewModel: SettingsViewModel
     @AppStorage("appLanguage") private var appLanguage = ""
     @AppStorage("appTheme") private var appTheme = ""
+    @AppStorage("autoRestartEnabled") private var autoRestartEnabled = true
+    @AppStorage("autoRestartIntervalMinutes") private var autoRestartIntervalMinutes = 120
     @State private var showManualAuthentication = false
     @State private var showPassword = false
     @State private var showRegenerateConfirmation = false
 
     private let labelWidth: CGFloat = 150
+
+    /// 可选的定时重启周期（分钟）
+    private let intervalOptions: [(label: String, minutes: Int)] = [
+        ("30 分钟", 30),
+        ("1 小时", 60),
+        ("2 小时", 120),
+        ("4 小时", 240),
+        ("8 小时", 480),
+    ]
 
     var body: some View {
         PageContainer {
@@ -57,6 +68,29 @@ struct SettingsView: View {
                 }
 
                 Divider()
+
+                settingsGroup(L10n.settingsAutoRestartTitle) {
+                    settingRow(L10n.settingsAutoRestartEnable) {
+                        Toggle("", isOn: $autoRestartEnabled)
+                            .labelsHidden()
+                            .frame(width: 320, alignment: .leading)
+                    }
+                    settingRow(L10n.settingsAutoRestartInterval) {
+                        Picker("", selection: $autoRestartIntervalMinutes) {
+                            ForEach(intervalOptions, id: \.minutes) { option in
+                                Text(option.label).tag(option.minutes)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(width: 320, alignment: .leading)
+                        .disabled(!autoRestartEnabled)
+                    }
+                    Text(L10n.settingsAutoRestartHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, labelWidth + 16)
+                }
 
                 settingsGroup("OpenCode") {
                     settingRow(L10n.settingsAuthenticationStatus) {
