@@ -83,6 +83,8 @@ func (r *PairingPendingRegistry) NotifyComplete(pairingID string, push PairingCo
 	defer conn.writeMu.Unlock()
 
 	data, _ := json.Marshal(push)
+	// 写 deadline 紧贴 WriteMessage（SetWriteDeadline 自身并发安全；本处调用方已持 conn.writeMu，正好覆盖写）。
+	_ = conn.conn.SetWriteDeadline(time.Now().Add(bridgeWriteTimeout))
 	if err := conn.conn.WriteMessage(websocket.TextMessage, data); err != nil {
 		slog.Warn("pairing_complete 写入失败", "pairingId", pairingID, "error", err)
 		close(conn.done)
@@ -263,6 +265,9 @@ func sendPairingResult(conn *websocket.Conn, ok bool, errMsg string) {
 		}
 	}
 	msg, _ := json.Marshal(result)
+	// SetWriteDeadline 自身并发安全，紧贴 WriteMessage 即可（sendPairingResult 部分调用点不持锁，
+	// 但都在读 goroutine启动前调用，无写并发；详见根治 spec 评审 §一.1）。
+	_ = conn.SetWriteDeadline(time.Now().Add(bridgeWriteTimeout))
 	conn.WriteMessage(websocket.TextMessage, msg)
 }
 

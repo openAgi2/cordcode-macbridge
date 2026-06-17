@@ -19,6 +19,14 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// relay 连接读写 deadline（与 go-bridge 对齐：10s 写 / 90s 读）。
+// 用 var 而非 const：测试需要覆盖成短值（如 200ms）避免等真实 10s/90s。
+// 详见 docs/2026-06-17-bridge-hang-implementation-spec.md relay-server 落点。
+var (
+	relayWriteDeadline = 10 * time.Second // socketPeer.write 转发写 deadline
+	relayReadDeadline  = 90 * time.Second // readBridgeFrames/readDeviceFrames 读 deadline
+)
+
 type Config struct {
 	PublicEndpoint               string
 	ProvisionTokenDigest         []byte
@@ -484,7 +492,12 @@ func (s *Server) handleDeviceSocket(w http.ResponseWriter, r *http.Request, rout
 }
 
 func (s *Server) readBridgeFrames(ctx context.Context, routeID string, peer *socketPeer) {
+	peer.setReadKeepalive()
 	for {
+		// 每次读前重置读 deadline（90s idle 判死）；收到 bridge ping 时 ping handler 也会重置。
+		if err := peer.conn.SetReadDeadline(time.Now().Add(relayReadDeadline)); err != nil {
+			return
+		}
 		_, payload, err := peer.conn.ReadMessage()
 		if err != nil {
 			return
@@ -527,7 +540,12 @@ func (s *Server) readBridgeFrames(ctx context.Context, routeID string, peer *soc
 }
 
 func (s *Server) readDeviceFrames(_ context.Context, routeID, deviceID string, peer *socketPeer) {
+	peer.setReadKeepalive()
 	for {
+		// 每次读前重置读 deadline（90s idle 判死）；收到 device ping 时 ping handler 也会重置。
+		if err := peer.conn.SetReadDeadline(time.Now().Add(relayReadDeadline)); err != nil {
+			return
+		}
 		_, payload, err := peer.conn.ReadMessage()
 		if err != nil {
 			return
@@ -568,7 +586,25 @@ func isBridgeHandshakeResponse(msgType string) bool {
 func (p *socketPeer) write(payload []byte) error {
 	p.writeMu.Lock()
 	defer p.writeMu.Unlock()
+	// 写 deadline 必须在持 p.writeMu 内紧贴 WriteMessage（gorilla 不允许同 conn 并发写），
+	// 防转发写给半开 peer 卡死 writeMu（对称于 go-bridge 根因 A）。
+	_ = p.conn.SetWriteDeadline(time.Now().Add(relayWriteDeadline))
 	return p.conn.WriteMessage(websocket.TextMessage, payload)
+}
+
+// setReadKeepalive 设 ping handler：收到对端 ping 时重置读 deadline 并回 pong。
+// 这样主动 ping 的一侧（Mac bridge 每 30s ping；device 视客户端实现）驱动双向保活，
+// 健康但数据空闲的连接不会被 90s 读 deadline 误判死；而半开（无 ping 无数据）连接
+// 在 relayReadDeadline 内被读循环判死。对齐 go-bridge 直连路径的 pong-handler-重置-deadline 模式。
+func (p *socketPeer) setReadKeepalive() {
+	// 在调用方 goroutine 读取 deadline 并捕获到闭包：避免 ping handler 子 goroutine
+	// 直接读包级 var 与测试覆盖 var 产生 data race。
+	deadline := relayReadDeadline
+	p.conn.SetPingHandler(func(appData string) error {
+		_ = p.conn.SetReadDeadline(time.Now().Add(deadline))
+		// WriteControl 不需 writeMu（gorilla 允许其与 WriteMessage 并发）。
+		return p.conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(5*time.Second))
+	})
 }
 
 func (s *Server) setBridge(routeID string, peer *socketPeer) {

@@ -17,6 +17,12 @@ var upgrader = websocket.Upgrader{
 
 const bridgeReadTimeout = 90 * time.Second // iOS ping interval 30s + timeout 20s = 最差 50s 检测断连，90s 服务端 deadline 有充足余量
 
+// bridgeWriteTimeout 是所有客户端数据写（WriteJSON/WriteMessage）的写 deadline。
+// 用 var 而非 const：测试需要覆盖成短值（如 200ms）以避免等真实 10s。
+// 取值 10s：远大于正常单帧写（<5ms），远小于 TCP RTO（数十秒），
+// 既能快速发现半开坏连接，又不会误杀慢写。详见 docs/2026-06-17-bridge-hang-implementation-spec.md 坑 2。
+var bridgeWriteTimeout = 10 * time.Second
+
 // Conn wraps a WebSocket connection with thread-safe writes.
 type Conn struct {
 	mu                     sync.Mutex
@@ -97,12 +103,20 @@ func (c *Conn) SendJSON(v interface{}) {
 	if c.closed {
 		return
 	}
+	// 写 deadline 必须在持 c.mu 的情况下紧贴 WriteJSON 调用（gorilla 不允许同 conn 并发写），
+	// 避免另一个写者在 deadline 与实际写之间插入。详见根治 spec 坑 1。
+	_ = c.conn.SetWriteDeadline(time.Now().Add(bridgeWriteTimeout))
 	if err := c.conn.WriteJSON(v); err != nil {
 		c.consecutiveWriteErrors++
 		slog.Debug("go-bridge: write error", "error", err, "consecutive", c.consecutiveWriteErrors)
 		if c.consecutiveWriteErrors >= 5 {
 			slog.Warn("go-bridge: too many write errors, closing connection", "remote", c.remote)
 			c.closed = true
+			// 关闭底层 ws 让读循环退出（加写 deadline 后写失败会更快到来，必须让连接真正关闭）。
+			// ⚠️死锁陷阱：必须是 c.conn.Close()（gorilla *websocket.Conn.Close，不经 c.mu）。
+			// 绝不能用 CloseWithControl 或 c.Close()——后者转调 CloseWithControl，其首行即
+			// c.mu.Lock()，而 SendJSON 已持有 c.mu，会当场死锁。详见根治 spec P0-A 配套段。
+			_ = c.conn.Close()
 			if cleanup := c.onCleanup; cleanup != nil {
 				c.onCleanup = nil
 				c.mu.Unlock()

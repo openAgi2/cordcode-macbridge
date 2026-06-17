@@ -14,6 +14,16 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// relay bridge WebSocket 保活参数（与直接路径 server.go 的 30s ping / 90s 读 deadline 对齐）。
+// 统一用 var 而非 const：测试需要覆盖成短值（如 ping 50ms / 读 200ms）避免等真实 30s/90s。
+var (
+	relayPingPeriod  = 30 * time.Second
+	relayReadTimeout = 90 * time.Second
+
+	// relayWriteTimeout 是 relay bridge WebSocket 所有数据写的写 deadline（对齐 10s）。
+	relayWriteTimeout = 10 * time.Second
+)
+
 // RelayBridgeClient 是 Mac bridge 连接到 Relay 服务的客户端。
 // 它建立 bridge WebSocket 连接，处理设备握手，并为每个已认证
 // 设备创建 RelayDeviceConn 注册到 Broadcaster。
@@ -65,12 +75,28 @@ func (c *RelayBridgeClient) Connect(relayBridgeURL string) error {
 	c.mu.Lock()
 	c.conn = conn
 	c.done = make(chan struct{})
+	done := c.done
 	c.mu.Unlock()
+
+	// 在调用方 goroutine 读取保活参数并捕获到闭包/参数：避免 pingLoop、pong handler 等
+	// 子 goroutine 直接读包级 var 与测试覆盖 var 产生 data race（race detector 不认网络
+	// 回环为同步）。同时保证单次连接生命周期内保活参数一致。
+	readTimeout := relayReadTimeout
+	pingPeriod := relayPingPeriod
+
+	// 保活（P0-B）：读 deadline + pong handler + 主动 ping ticker。
+	// relay WebSocket 不再依赖 OS TCP keepalive（~2h）"假活"。无 pong 时读 deadline 到期
+	// → readLoop 的 ReadMessage 报错 return → Run 收到 c.done 触发重连（backoff 不变）。
+	_ = conn.SetReadDeadline(time.Now().Add(readTimeout))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(readTimeout))
+	})
 
 	slog.Info("relay-bridge-client: connected", "url", relayBridgeURL)
 	if c.handlers != nil {
 		c.handlers.FlushRelayOutboxes()
 	}
+	go c.pingLoop(done, pingPeriod)
 	go c.readLoop()
 	return nil
 }
@@ -195,6 +221,8 @@ func (c *RelayBridgeClient) SendEnvelope(envelope json.RawMessage) error {
 	}
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
+	// 写 deadline 紧贴 WriteMessage（持 c.writeMu 内，gorilla 写并发约束满足）。
+	_ = conn.SetWriteDeadline(time.Now().Add(relayWriteTimeout))
 	return conn.WriteMessage(websocket.TextMessage, envelope)
 }
 
@@ -238,6 +266,34 @@ func (c *RelayBridgeClient) readLoop() {
 
 		// 否则是加密信封（iOS→Mac），解密后分发
 		c.handleInboundEnvelope(payload)
+	}
+}
+
+// pingLoop 周期性向 relay 发 PingMessage 探测半开连接。
+// ⚠️ gorilla 并发约束（根治 spec 坑1）：WriteControl 不套 writeMu——它内部用独立锁，
+// 允许与 WriteMessage 并发。若套 writeMu，ping 会被正在卡住的数据写阻塞，违背加 ping 初衷。
+// done 为当前连接的 c.done，随 readLoop 退出而关闭：保证重连后不泄漏旧 ping goroutine、
+// 不写已关闭的旧 conn。ping 写失败（连接已坏）即 return，由 readLoop 的退出驱动重连。
+// period 由 Connect 在调用方 goroutine 读取传入（避免子 goroutine 读包级 var 与测试覆盖 race）。
+func (c *RelayBridgeClient) pingLoop(done <-chan struct{}, period time.Duration) {
+	ticker := time.NewTicker(period)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			c.mu.Lock()
+			conn := c.conn
+			c.mu.Unlock()
+			if conn == nil {
+				return
+			}
+			// WriteControl 自带短 deadline（第3参），不套 writeMu（见上方注释）。
+			if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
+				return
+			}
+		}
 	}
 }
 
@@ -322,6 +378,8 @@ func (c *RelayBridgeClient) handleClientHello(hello OnlineClientHello) {
 
 	responseBytes, _ := json.Marshal(response)
 	c.writeMu.Lock()
+	// 写 deadline 紧贴 WriteMessage（持 c.writeMu 内）。
+	_ = conn.SetWriteDeadline(time.Now().Add(relayWriteTimeout))
 	err = conn.WriteMessage(websocket.TextMessage, responseBytes)
 	c.writeMu.Unlock()
 	if err != nil {
@@ -428,6 +486,8 @@ func (c *RelayBridgeClient) sendServerHelloError(deviceID, code string) {
 	if conn != nil {
 		c.writeMu.Lock()
 		defer c.writeMu.Unlock()
+		// 写 deadline 紧贴 WriteMessage（持 c.writeMu 内）。
+		_ = conn.SetWriteDeadline(time.Now().Add(relayWriteTimeout))
 		_ = conn.WriteMessage(websocket.TextMessage, data)
 	}
 }
