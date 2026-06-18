@@ -205,4 +205,50 @@ func TestFetchCodexTodosReturnsPlanAfterMultipleTurns(t *testing.T) {
 	}
 }
 
+func TestFetchCodexTodosClearsStalePlanAfterTaskComplete(t *testing.T) {
+	codexHome := filepath.Join(t.TempDir(), ".codex")
+	rolloutDir := filepath.Join(codexHome, "sessions", "2026", "06", "13")
+	if err := os.MkdirAll(rolloutDir, 0o755); err != nil {
+		t.Fatalf("mkdir rollout dir: %v", err)
+	}
+
+	sessionID := "session-completed-stale-plan"
+	rolloutPath := filepath.Join(rolloutDir, "rollout-2026-06-13T12-00-00-"+sessionID+".jsonl")
+	rollout := "" +
+		`{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}` + "\n" +
+		`{"type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"完成步骤\",\"status\":\"completed\"},{\"step\":\"遗留进行中\",\"status\":\"in_progress\"},{\"step\":\"遗留待处理\",\"status\":\"pending\"}]}"}}` + "\n" +
+		`{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1"}}` + "\n"
+	if err := os.WriteFile(rolloutPath, []byte(rollout), 0o644); err != nil {
+		t.Fatalf("write rollout: %v", err)
+	}
+
+	todos, err := fetchCodexTodos(context.Background(), sessionID, codexHome)
+	if err != nil {
+		t.Fatalf("fetchCodexTodos() error = %v", err)
+	}
+	if len(todos) != 0 {
+		t.Fatalf("len(todos) = %d, want 0 after task_complete", len(todos))
+	}
+}
+
+func TestFetchCodexTodosDoesNotReusePreviousTaskPlan(t *testing.T) {
+	data := []byte(
+		`{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}` + "\n" +
+			`{"type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"旧任务\",\"status\":\"in_progress\"}]}"}}` + "\n" +
+			`{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1"}}` + "\n" +
+			`{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-2"}}` + "\n",
+	)
+
+	todos, found, err := parseTodoSnapshotFromRolloutBytes(data)
+	if err != nil {
+		t.Fatalf("parseTodoSnapshotFromRolloutBytes() error = %v", err)
+	}
+	if !found {
+		t.Fatal("found = false, want task boundary to be authoritative")
+	}
+	if len(todos) != 0 {
+		t.Fatalf("len(todos) = %d, want 0 for new task without plan", len(todos))
+	}
+}
+
 var _ core.TodoProvider = (*Agent)(nil)

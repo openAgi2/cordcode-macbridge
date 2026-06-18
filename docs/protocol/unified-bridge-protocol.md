@@ -219,6 +219,7 @@ type UnifiedError = {
 | `share_session` | `backendId`, `sessionId` | `session_mutation` |
 | `delete_session` | `backendId`, `sessionId` | `session_mutation` |
 | `fetch_todos` | `backendId`, `sessionId` | `todos` |
+| `get_workspace_diff` | `backendId`, `directory?` | `workspace_diff` |
 | `get_usage` | `backendId` | `usage_reporting` |
 | `set_directory` | `backendId`, `sessionId`, `directory` | (可选) |
 | `subscribe_sessions` | `backendId` | (可选) |

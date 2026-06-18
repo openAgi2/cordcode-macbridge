@@ -91,6 +91,7 @@ resolve_permission
 list_sessions
 list_projects
 fetch_todos
+get_workspace_diff
 get_usage
 run_diagnostics
 list_memory_files
@@ -258,4 +259,3 @@ When `paginate` is true and the backend supports it, the response data is:
 - A cursor is only valid for the session and backend it was issued for.
 - `cursor_stale` means the history prefix the cursor referenced can no longer be proven continuous;
   reset to the first page.
-

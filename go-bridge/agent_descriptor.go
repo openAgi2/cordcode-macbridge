@@ -94,6 +94,9 @@ func deriveCapabilities(id string, agent core.Agent, codexBackendMode string) []
 	if _, ok := agent.(core.HistoryProvider); ok {
 		caps = append(caps, "session_history")
 	}
+	if _, ok := agent.(core.WorkDirSwitcher); ok {
+		caps = append(caps, "workspace_diff")
+	}
 	// session_pagination capability disabled: 去分页方案。backward paging 在长 session 上
 	// 造成 newest↔backward 自维持振荡（WebView 渲染抖动→顶部哨兵→loadOlder→再渲染→再抖动）。
 	// iOS 在此 capability 缺失时有完整 fallback：fetchMessages 走 getSessionMessagesResult

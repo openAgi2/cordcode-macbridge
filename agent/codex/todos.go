@@ -115,6 +115,9 @@ func parseTodoSnapshotFromRolloutBytes(data []byte) ([]core.Todo, bool, error) {
 		if len(line) == 0 {
 			continue
 		}
+		if isCodexTaskBoundary(line) {
+			return []core.Todo{}, true, nil
+		}
 		todos, found, err := parseTodoSnapshotFromRolloutLine(line)
 		if err != nil {
 			return nil, false, err
@@ -135,6 +138,11 @@ func scanTodosFromRollout(r io.Reader) ([]core.Todo, bool, error) {
 		found bool
 	)
 	for scanner.Scan() {
+		if isCodexTaskBoundary(scanner.Bytes()) {
+			last = []core.Todo{}
+			found = true
+			continue
+		}
 		todos, matched, err := parseTodoSnapshotFromRolloutLine(scanner.Bytes())
 		if err != nil {
 			return nil, false, err
@@ -148,6 +156,28 @@ func scanTodosFromRollout(r io.Reader) ([]core.Todo, bool, error) {
 		return nil, false, err
 	}
 	return last, found, nil
+}
+
+func isCodexTaskBoundary(line []byte) bool {
+	if !bytes.Contains(line, []byte(`"task_`)) {
+		return false
+	}
+
+	var entry struct {
+		Type    string `json:"type"`
+		Payload struct {
+			Type string `json:"type"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(line, &entry); err != nil || entry.Type != "event_msg" {
+		return false
+	}
+	switch entry.Payload.Type {
+	case "task_started", "task_complete":
+		return true
+	default:
+		return false
+	}
 }
 
 func parseTodoSnapshotFromRolloutLine(line []byte) ([]core.Todo, bool, error) {

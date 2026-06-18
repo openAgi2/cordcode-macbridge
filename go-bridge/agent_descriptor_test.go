@@ -131,6 +131,7 @@ func TestFullAgentCapabilities(t *testing.T) {
 	expected := []string{
 		"model_switch", "session_state",
 		"provider_switch", "session_history", "memory_read",
+		"workspace_diff",
 		"diagnostics", "usage_reporting", "permission_mode", "session_mutation",
 		"content_chunking", "session_delete", "permission_resolve", "todos",
 	}

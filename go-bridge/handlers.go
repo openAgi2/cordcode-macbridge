@@ -230,6 +230,9 @@ func (h *Handlers) BackendList() []BackendInfo {
 		if _, ok := agent.(core.HistoryProvider); ok {
 			caps = append(caps, "session_history")
 		}
+		if _, ok := agent.(core.WorkDirSwitcher); ok {
+			caps = append(caps, "workspace_diff")
+		}
 		if _, ok := agent.(core.MemoryFileReader); ok {
 			caps = append(caps, "memory_read")
 		}
@@ -561,6 +564,8 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleListProjects(conn, msg, agent)
 	case "fetch_todos":
 		h.handleFetchTodos(conn, msg, agent)
+	case "get_workspace_diff":
+		h.handleGetWorkspaceDiff(conn, msg, agent)
 	case "get_usage":
 		h.handleGetUsage(conn, msg, agent)
 	case "run_diagnostics":
@@ -619,6 +624,7 @@ func (h *Handlers) handleOpenCodeRPC(conn Connection, msg WireMessage) {
 
 	case "list_providers", "set_provider", "list_agents",
 		"fetch_todos", "get_usage", "run_diagnostics",
+		"get_workspace_diff",
 		"list_memory_files", "read_memory_file", "fetch_content_chunk", "read_file",
 		"rename_session", "archive_session", "compress_context",
 		"delete_session", "list_models", "switch_model",
