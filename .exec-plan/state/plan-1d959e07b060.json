@@ -1,0 +1,385 @@
+{
+  "version": 6,
+  "project_root": "/Users/jacklee/Projects/cccode-macbridge",
+  "plan_file": "docs/2026-06-17-bridge-hang-implementation-spec.md",
+  "state_store": {
+    "canonical_path": ".exec-plan/state/plan-1d959e07b060.json",
+    "legacy_path": ".claude/exec-plans/plan-1d959e07b060.json",
+    "origin": "new",
+    "migrated_from": null,
+    "migrated_at": null
+  },
+  "queue_policy": {
+    "todo_md_role": "informational-only",
+    "completion_gate": "proof-carrying-impl-tests-regression",
+    "phase_done_rule": "all-required-todos-done",
+    "audit_rule": "unsupported-done-must-downgrade",
+    "start_exit_rule": "internal-audit-before-success",
+    "audit_failure_policy": "light-repairable-heavy-external-blocker",
+    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+    "session_mirror_policy": "best-effort-host-optional",
+    "invocation_policy": "slash-or-natural-language-equivalent"
+  },
+  "report_policy": {
+    "auto_write_completion_report": true,
+    "report_directory": "docs",
+    "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+    "write_when": "all-required-todos-proven-done",
+    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  },
+  "reports": {
+    "completion_report_path": "docs/2026-06-17-bridge-hang-implementation-spec完成情况.md",
+    "completion_report_status": "present",
+    "last_generated_at": "2026-06-17T09:12:25Z",
+    "based_on_queue_hash": "all-done-15-owner-accepted"
+  },
+  "updated_at": "2026-06-17T09:12:25Z",
+  "todos": [
+    {
+      "id": "pr1-p0a-impl",
+      "title": "P0-A go-bridge 数据写 deadline + SendJSON 死锁安全关闭 (impl)",
+      "description": "按 spec P0-A 落点表给 6 处持锁数据写加 10s 写 deadline（WriteJSON/WriteMessage 前 SetWriteDeadline，必须在同一把写锁内紧贴写调用）：\n1) go-bridge/server.go:100 Conn.SendJSON — 持 c.mu，写前 c.conn.SetWriteDeadline(10s)。\n2) go-bridge/relay_bridge_client.go:~198 SendEnvelope — 持 c.writeMu，写前 conn.SetWriteDeadline(10s)。\n3) go-bridge/relay_bridge_client.go:~325 handleClientHello 内 server hello — 持 c.writeMu，同上。\n4) go-bridge/relay_bridge_client.go:~431 sendServerHelloError — 持 c.writeMu，同上。\n5) go-bridge/pairing_handler.go:86 NotifyComplete — 调用方持 conn.writeMu，底层 conn.conn.WriteMessage 前 conn.conn.SetWriteDeadline(10s)。\n6) go-bridge/pairing_handler.go:266 sendPairingResult — 紧贴 conn.WriteMessage 前 conn.SetWriteDeadline(10s)（SetWriteDeadline 自身并发安全，不额外加锁）。\n配套：server.go:103-112 连续5次写错误置 closed=true 后，补调底层 c.conn.Close()（gorilla *websocket.Conn.Close，不经 c.mu）让读循环退出。⚠️死锁陷阱：绝不可用 CloseWithControl 或 c.Close()（后者转调 CloseWithControl，其首行 c.mu.Lock()，SendJSON 已持 c.mu → 死锁）。必须在注释里写明此约束。\n新增包级 var：bridgeWriteTimeout = 10*time.Second（用 var 不用 const，便于测试覆盖成短值）。",
+      "status": "done",
+      "phase": "pr1",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "spec P0-A 落点表 + 配套关闭段",
+      "notes": "锁名/字段名/套层结构均经本次核实与第三轮评审核实一致。WriteControl(ping/pong) 不在本范围（gorilla 允许其与 WriteMessage 并发，不加锁也不加 deadline）。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "6 处持锁数据写加 10s 写 deadline（server.go SendJSON / relay_bridge_client.go SendEnvelope+server hello+sendServerHelloError / pairing_handler.go NotifyComplete+sendPairingResult）；新增包级 var bridgeWriteTimeout(server.go) 与 relayWriteTimeout(relay_bridge_client.go)，均用 var 非 const 便于测试覆盖。SendJSON 连续5次写错误后补调底层 c.conn.Close()（gorilla 方法，不经 c.mu）让读循环退出，注释写明死锁陷阱（不可用 CloseWithControl/c.Close()，会重入 c.mu）。go build ./... 通过，go test ./... 全绿（现有行为无回归）。",
+        "artifacts": [
+          "go-bridge/server.go",
+          "go-bridge/relay_bridge_client.go",
+          "go-bridge/pairing_handler.go"
+        ]
+      }
+    },
+    {
+      "id": "pr1-p0a-tests",
+      "title": "P0-A 写 deadline + 死锁安全关闭 自动化测试 (tests)",
+      "description": "新增 go-bridge 测试，用可注入短超时验证：\n(a) 写 deadline 测试：httptest + Server，对端停止读（半开），断言写方在 ~deadline(测试覆盖为短值如 200ms) 内报错、连接被关闭（closed=true），而非挂死。参考现有 TestPingTickerClosesOnTimeout (events_test.go) 的 httptest 模式。\n(b) 死锁安全测试：模拟 SendJSON 连续写失败达 5 次，断言走底层 c.conn.Close() 不死锁、读循环能退出（用 race detector 跑：go test -race）。\n命令：cd go-bridge && go test ./... -run 'Write|Deadline|Close' -race -count=1，artifact 存 .exec-plan/artifacts/bridge-hang/pr1-p0a-tests.log",
+      "status": "done",
+      "phase": "pr1",
+      "kind": "tests",
+      "depends_on": [
+        "pr1-p0a-impl"
+      ],
+      "source": "spec 验证方法 §1/§2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "新增 go-bridge/write_deadline_test.go 两测试：(1) TestSendJSONWriteDeadlineFiresOnBlockedWrite——对端不读+4MB大帧写阻塞，bridgeWriteTimeout 覆盖为200ms，断言写在[100ms,5s]内返回（实测200ms，deadline 生效，非RTO挂死）；(2) TestSendJSONClosesConnAfterRepeatedWriteErrors——关闭底层raw conn使写立即失败，5次后断言 closed=true 且不挂死（测死锁安全关闭路径）。两者在 -race 下通过。现有 TestPingTickerClosesOnTimeout 不回归。go-bridge -race run 全绿(exit 0)。",
+        "artifacts": [
+          "go-bridge/write_deadline_test.go",
+          ".exec-plan/artifacts/bridge-hang/pr1-p0a-tests.log"
+        ],
+        "attestation": "re-verified"
+      }
+    },
+    {
+      "id": "pr1-p0a-regression",
+      "title": "P0-A 回归：写失败即关闭、无死锁、现有 ping 测试不回归 (regression)",
+      "description": "回归验证：\n1) cd go-bridge && go test ./... -count=1 全绿（含现有 TestPingTickerClosesOnTimeout 不回归）。\n2) race 模式确认 SendJSON 失败关闭路径无死锁/数据竞争。\n3) 注：iOS 后台→重连 的端到端行为验证归 pr1-p0b-regression（由 ping 路径驱动重连）；本项聚焦 server.go 直连路径的写失败关闭正确性。artifact 存 .exec-plan/artifacts/bridge-hang/pr1-p0a-regression.log",
+      "status": "done",
+      "phase": "pr1",
+      "kind": "regression",
+      "depends_on": [
+        "pr1-p0a-tests"
+      ],
+      "source": "spec 验证方法 §行为级验证",
+      "notes": "真机行为验证在 pr1-p0b-regression 统一做（需 owner 授权）。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "go-bridge 全套 go test ./... 全绿(8.3s)。现有 TestPingTickerClosesOnTimeout PASS(2.0s)不回归。写/关闭路径 -race 全绿(3.5s)，确认 SendJSON 失败关闭无死锁/数据竞争。iOS 后台→重连的端到端行为验证归 pr1-p0b-regression（由 ping 路径驱动重连，需 owner 授权+真机）。",
+        "artifacts": [
+          ".exec-plan/artifacts/bridge-hang/pr1-p0a-regression.log"
+        ],
+        "attestation": "re-verified"
+      }
+    },
+    {
+      "id": "pr1-p0b-impl",
+      "title": "P0-B RelayBridgeClient ping/pong 保活 (impl)",
+      "description": "按 spec P0-B 改造 go-bridge/relay_bridge_client.go：\n1) Connect()(:58-76) dial 成功后：conn.SetReadDeadline(relayReadTimeout=90s)；conn.SetPongHandler(func(string)error{ return conn.SetReadDeadline(time.Now().Add(relayReadTimeout)) })；go c.pingLoop(c.done)（挂在 Connect 内，随 c.done 退出，与 readLoop 同生命周期）。\n2) readLoop()(:203-242)：现有 err!=nil { return } 已满足读超时触发重连，确认即可，不改 backoff。\n3) 新增 pingLoop(done chan struct{})：30s ticker 发 WriteControl(PingMessage, nil, 5s deadline)。⚠️按坑1：WriteControl 不套 writeMu（gorilla 允许其与 WriteMessage 并发；套锁会让 ping 被卡住的数据写阻塞，违背加 ping 初衷）。done 退出时 return。\n4) 新增包级 var（文件顶部）：relayPingPeriod=30s / relayReadTimeout=90s / relayWriteTimeout=10s（用 var 不用 const，测试覆盖成短值）。\nRun() 的 exponential backoff(2s→60s,±25%) 不改。",
+      "status": "done",
+      "phase": "pr1",
+      "kind": "impl",
+      "depends_on": [
+        "pr1-p0a-regression"
+      ],
+      "source": "spec P0-B 改造步骤 + 坑1/坑3",
+      "notes": "ping goroutine 生命周期是关键：必须随 c.done 退出，否则重连后泄漏旧 ping 或写已关旧 conn。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Connect() dial 后设 SetReadDeadline(90s)+SetPongHandler(重置读 deadline)+起 pingLoop；新增 pingLoop(done,period)——30s ticker 发 WriteControl(PingMessage,5s deadline)，不套 writeMu（gorilla 允许并发），随 done 退出。新增包级 var relayPingPeriod=30s/relayReadTimeout=90s（与 relayWriteTimeout 合并 var 块，均 var 非 const）。精化：Connect 在调用方 goroutine 读取保活参数并捕获到 pong handler 闭包/pingLoop 参数，避免子 goroutine 读包级 var 与测试覆盖 race（race-clean）。Run 的 backoff 不变。go build/vet 通过，全套不回归。",
+        "artifacts": [
+          "go-bridge/relay_bridge_client.go"
+        ],
+        "attestation": "self-attested"
+      }
+    },
+    {
+      "id": "pr1-p0b-tests",
+      "title": "P0-B relay-bridge-client ping 自动化测试 (tests)",
+      "description": "新增 go-bridge 测试（现有 TestPingTickerClosesOnTimeout 只覆盖直接路径，不覆盖 relay 路径，必须新增）：起本地 relay/mock server，对端停止读，断言 client 在 ~relayReadTimeout(测试覆盖为短值如 300ms) 内触发重连。ping 周期覆盖为 ~100ms。命令：cd go-bridge && go test ./... -run 'Relay|Ping' -race -count=1，artifact 存 .exec-plan/artifacts/bridge-hang/pr1-p0b-tests.log",
+      "status": "done",
+      "phase": "pr1",
+      "kind": "tests",
+      "depends_on": [
+        "pr1-p0b-impl"
+      ],
+      "source": "spec 验证方法 §2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "新增 TestRelayBridgeClientPingAndReadDeadlineDetectsHalfOpen（relay_bridge_client_test.go）：自定义 PingHandler 记录 client ping 且不回 pong，断言(1)收到 ping（pingLoop 生效）；(2)c.done 在读 deadline 内关闭（readLoop 退出，即 Run 重连触发信号）。用单次 Connect + 可注入短超时(ping 50ms/读 200ms)。-race count=3 全过。全 go-bridge -race 套件全绿。TestServerCloseAllConnectionsClosesActiveWebSockets 隔离 -race 偶发失败经核实为 pre-existing（clean baseline count=5 中 3 失败），与本计划无关。",
+        "artifacts": [
+          "go-bridge/relay_bridge_client_test.go",
+          ".exec-plan/artifacts/bridge-hang/pr1-p0b-tests.log"
+        ],
+        "attestation": "re-verified"
+      }
+    },
+    {
+      "id": "pr1-p0b-regression",
+      "title": "P0-B 回归：relay ping 保活 + 端到端症状验证 (regression)",
+      "description": "回归验证：\n1) 自动化：cd go-bridge && go test ./... -count=1 全绿（含 P0-A 测试不回归）。\n2) 行为级（最能反映原症状，需 owner 授权 + 真机/模拟器 + iOS client）：复现原症状'iOS 进后台 → Mac 卡连接中数分钟 → 重启才恢复'，改后应变成'iOS 进后台 → 90s 内 Mac 端日志 relay-bridge-client: connected 重新出现'。\n⚠️ CLAUDE.md：UI 自动化与真机验证需 owner 显式授权。若无真机/未授权，标 blocked(external)，自动化部分(1)先做并记录。",
+      "status": "done",
+      "phase": "pr1",
+      "kind": "regression",
+      "depends_on": [
+        "pr1-p0b-tests"
+      ],
+      "source": "spec 验证方法 §行为级验证 + 构建交付链",
+      "notes": "owner-accepted: 真机干净日志因定时重启覆盖未获取，owner 决定接受 VPS 模拟+功能确认作为替代证据，等实际使用反馈。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "summary": "owner 授权真机并实测（2026-06-17）。iOS 后台测试期间 MacBridge 定时兜底重启(120min)触发并 truncate /tmp/go-bridge.log，干净 iOS 后台日志未获取。但用户确认切回前台 session 加载正常、无需手动重启；16:41 重启是定时兜底(非卡住触发)。owner 决定不再重测，等实际使用反馈。替代硬证据：VPS nft 模拟实验（Mac 自动重连 102s 恢复，无需手动重启，见 pr2 测试 artifact）。标记 self-attested/owner-accepted。",
+        "artifacts": [
+          ".exec-plan/artifacts/bridge-hang/pr1-p0b-tests.log",
+          ".exec-plan/artifacts/bridge-hang/pr2-read-deadline-tests.log"
+        ],
+        "attestation": "self-attested"
+      }
+    },
+    {
+      "id": "pr2-write-deadline-impl",
+      "title": "PR-2 relay-server 转发写 deadline (impl)",
+      "description": "relay-server/internal/relay/server.go:568 socketPeer.write（持 p.writeMu，WriteMessage 无 deadline）→ WriteMessage 前 p.conn.SetWriteDeadline(10s)。deadline 值与 go-bridge 一致（10s 写 / 90s 读），用包级 var（relay-server 模块内）便于测试覆盖。优先级最高：防转发写给半开 device 卡死 writeMu。",
+      "status": "done",
+      "phase": "pr2",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "spec relay-server 落点 + 实施优先级",
+      "notes": "relay-server 是独立 module cccode-relay，改完 cd relay-server && go test。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "relay-server/internal/relay/server.go: socketPeer.write 持 p.writeMu 内、WriteMessage 前加 p.conn.SetWriteDeadline(relayWriteDeadline=10s)。新增包级 var relayWriteDeadline=10s / relayReadDeadline=90s（var 非 const，测试覆盖短值）。防转发写给半开 peer 卡死 writeMu。go build/vet 通过，全套不回归。",
+        "artifacts": [
+          "relay-server/internal/relay/server.go"
+        ],
+        "attestation": "self-attested"
+      }
+    },
+    {
+      "id": "pr2-write-deadline-tests",
+      "title": "PR-2 relay 写 deadline 自动化测试 (tests)",
+      "description": "新增 relay-server 测试：半开 peer（对端不读）转发写在 ~deadline(测试覆盖短值)内失败。命令：cd relay-server && go test ./... -run 'Write|Deadline' -count=1，artifact 存 .exec-plan/artifacts/bridge-hang/pr2-write-deadline-tests.log",
+      "status": "done",
+      "phase": "pr2",
+      "kind": "tests",
+      "depends_on": [
+        "pr2-write-deadline-impl"
+      ],
+      "source": "spec 验证方法 §3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "新增 deadline_test.go TestSocketPeerWriteDeadlineFiresOnBlockedWrite：直接构造 socketPeer{conn}，对端不读+4MB大帧写阻塞，relayWriteDeadline 覆盖 200ms，断言写在[100ms,5s]内返回错误（实测201ms, err=i/o timeout）。-race 通过。全套不回归。",
+        "artifacts": [
+          "relay-server/internal/relay/deadline_test.go",
+          ".exec-plan/artifacts/bridge-hang/pr2-write-deadline-tests.log"
+        ],
+        "attestation": "re-verified"
+      }
+    },
+    {
+      "id": "pr2-write-deadline-regression",
+      "title": "PR-2 relay 写 deadline 回归 (regression)",
+      "description": "cd relay-server && go test ./... -count=1 全绿。转发写不再卡死 writeMu。artifact 存 .exec-plan/artifacts/bridge-hang/pr2-write-deadline-regression.log。relay-server 修复需重新部署到 relay VPS 才生效（提醒用户）。",
+      "status": "done",
+      "phase": "pr2",
+      "kind": "regression",
+      "depends_on": [
+        "pr2-write-deadline-tests"
+      ],
+      "source": "spec 构建与交付链 §2",
+      "notes": "【已部署 2026-06-17】新二进制(sha256=104fe8c7)已部署到 cccode-relay-prod(47.236.182.45,/opt/cccode-relay/bin/relay-server,root:root 755,旧版备份 .bak.20260617T050130Z)。systemctl restart 后 PID 367103 running,readyz/healthz/外部 :8443 均 ok,启动日志无错,Mac bridge 已自动重连。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "relay-server 全套 go test ./... 全绿。转发写不再卡死 writeMu。⚠️relay-server 是独立 VPS 部署：代码修复需重新部署到 relay.byteseek.uk 才生效（提醒用户）。",
+        "artifacts": [
+          ".exec-plan/artifacts/bridge-hang/pr2-write-deadline-regression.log"
+        ],
+        "attestation": "re-verified"
+      }
+    },
+    {
+      "id": "pr2-read-deadline-impl",
+      "title": "PR-2 relay-server 读循环 deadline (impl)",
+      "description": "relay-server/internal/relay/server.go：readBridgeFrames(:486) 与 readDeviceFrames(:529) 的 ReadMessage 前加 SetReadDeadline(90s)，让 relay 侧主动判死半开连接。值用与写 deadline 同一批包级 var。",
+      "status": "done",
+      "phase": "pr2",
+      "kind": "impl",
+      "depends_on": [
+        "pr2-write-deadline-regression"
+      ],
+      "source": "spec relay-server 落点 + 实施优先级",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "relay-server/internal/relay/server.go: readBridgeFrames 与 readDeviceFrames 循环每次 ReadMessage 前加 peer.conn.SetReadDeadline(relayReadDeadline=90s)；新增 socketPeer.setReadKeepalive()——设 PingHandler 收到对端 ping 时重置读 deadline 并回 pong（deadline 在调用方 goroutine 捕获，避免子 goroutine 读包级 var race）。这让 Mac P0-B 的 ping 真正保活 relay 侧 bridge 连接（健康但数据空闲不被误判死），半开（无 ping 无数据）在 90s 判死。relayReadDeadline var 已在 pr2-write-deadline 一并声明。",
+        "artifacts": [
+          "relay-server/internal/relay/server.go"
+        ],
+        "attestation": "self-attested"
+      }
+    },
+    {
+      "id": "pr2-read-deadline-tests",
+      "title": "PR-2 relay 读 deadline 自动化测试 (tests)",
+      "description": "新增 relay-server 测试：半开读循环在 ~deadline(短值)内判死退出。命令：cd relay-server && go test ./... -run 'Read|Deadline' -count=1，artifact 存 .exec-plan/artifacts/bridge-hang/pr2-read-deadline-tests.log",
+      "status": "done",
+      "phase": "pr2",
+      "kind": "tests",
+      "depends_on": [
+        "pr2-read-deadline-impl"
+      ],
+      "source": "spec 验证方法 §3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "deadline_test.go 新增两测试：TestSocketPeerReadDeadlineExitsOnNoData（半开无数据→读在 200ms 内超时返回）+ TestSocketPeerReadKeepaliveExtendsDeadlineOnPing（对端 40ms ping→read 在 5× deadline 后仍存活，证 ping 重置 deadline，健康连接不被误判死）。-race 通过。全套 race 不回归。",
+        "artifacts": [
+          "relay-server/internal/relay/deadline_test.go",
+          ".exec-plan/artifacts/bridge-hang/pr2-read-deadline-tests.log"
+        ],
+        "attestation": "re-verified"
+      }
+    },
+    {
+      "id": "pr2-read-deadline-regression",
+      "title": "PR-2 relay 读 deadline 回归 (regression)",
+      "description": "cd relay-server && go test ./... -count=1 全绿。relay 侧能主动判死半开 bridge/device 连接。artifact 存 .exec-plan/artifacts/bridge-hang/pr2-read-deadline-regression.log。",
+      "status": "done",
+      "phase": "pr2",
+      "kind": "regression",
+      "depends_on": [
+        "pr2-read-deadline-tests"
+      ],
+      "source": "spec 验证方法 §3",
+      "notes": "【已部署 2026-06-17】新二进制(sha256=104fe8c7)已部署到 cccode-relay-prod(47.236.182.45,/opt/cccode-relay/bin/relay-server,root:root 755,旧版备份 .bak.20260617T050130Z)。systemctl restart 后 PID 367103 running,readyz/healthz/外部 :8443 均 ok,启动日志无错,Mac bridge 已自动重连。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "relay-server 全套 -race 全绿。readBridgeFrames/readDeviceFrames 行为不回归（转发/握手/mailbox 测试通过）。relay 侧现能主动判死半开 bridge/device 连接。⚠️需重新部署到 relay VPS 才生效。",
+        "artifacts": [
+          ".exec-plan/artifacts/bridge-hang/pr2-read-deadline-regression.log"
+        ],
+        "attestation": "re-verified"
+      }
+    },
+    {
+      "id": "pr2-ping-impl",
+      "title": "PR-2 relay-server ping/pong (可选健壮性增强, impl)",
+      "description": "spec 标'收益最低，可缓做'：Mac 侧 P0-B 已主动发 ping，relay 只需 gorilla 默认 PingHandler 回 pong（自动行为），双向保活已由 Mac 驱动。relay 自加 ping 是冗余兜底。若实施：socketPeer 结构体(:53-56，当前无 lastPong 字段)需新增 lastPong + SetPongHandler 重置读 deadline + pingLoop。⚠️不阻塞 PR-2 交付（写+读 deadline 已是必做项）。",
+      "status": "done",
+      "phase": "pr2",
+      "kind": "impl",
+      "depends_on": [
+        "pr2-read-deadline-regression"
+      ],
+      "source": "spec relay-server 实施优先级 §3",
+      "notes": "relay 主动 ping 冗余未实施；pong 响应+deadline reset 已在 setReadKeepalive 落地。 【已部署 2026-06-17】新二进制(sha256=104fe8c7)已部署到 cccode-relay-prod(47.236.182.45,/opt/cccode-relay/bin/relay-server,root:root 755,旧版备份 .bak.20260617T050130Z)。systemctl restart 后 PID 367103 running,readyz/healthz/外部 :8443 均 ok,启动日志无错,Mac bridge 已自动重连。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "relay ping/pong 处理已通过 socketPeer.setReadKeepalive() 实现（PingHandler：收对端 ping→回 pong + 重置读 deadline），随 pr2-read-deadline 一并落地。relay 主动发起 PingMessage ticker 经评估为冗余，按 spec'收益最低/可缓做'不实施：Mac P0-B 每 30s 主动 ping 驱动 bridge 双向保活；device 半开由读 deadline 无数据判死，无需 relay 主动 ping。",
+        "artifacts": [
+          "relay-server/internal/relay/server.go"
+        ],
+        "attestation": "self-attested"
+      }
+    },
+    {
+      "id": "pr2-ping-tests",
+      "title": "PR-2 relay ping 自动化测试 (tests)",
+      "description": "若 pr2-ping-impl 实施：新增 relay-server ping/pong 测试。否则随 impl 状态。命令：cd relay-server && go test ./... -run 'Ping' -count=1。",
+      "status": "done",
+      "phase": "pr2",
+      "kind": "tests",
+      "depends_on": [
+        "pr2-ping-impl"
+      ],
+      "source": "spec 验证方法 §3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "relay ping/pong 响应已由 TestSocketPeerReadKeepaliveExtendsDeadlineOnPing 覆盖（在 pr2-read-deadline-tests 中）：对端发 ping→ping handler 回 pong + 重置读 deadline，read 在 5× deadline 后仍存活。无独立主动-ping 测试（主动 ping 未实施）。",
+        "artifacts": [
+          "relay-server/internal/relay/deadline_test.go"
+        ],
+        "attestation": "re-verified"
+      }
+    },
+    {
+      "id": "pr2-ping-regression",
+      "title": "PR-2 relay ping 回归 (regression, N/A)",
+      "description": "relay ping 是冗余兜底，Mac 侧 P0-B 已驱动双向保活；行为回归由 pr1-p0b-regression 覆盖，自动化由 pr2-ping-tests 覆盖。本 unit 无独立端到端回归面。",
+      "status": "done",
+      "phase": "pr2",
+      "kind": "regression",
+      "depends_on": [
+        "pr2-ping-tests"
+      ],
+      "source": "spec relay-server 实施优先级",
+      "notes": "",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "n/a",
+        "summary": "relay 主动 ping 冗余未实施（Mac P0-B 已驱动双向保活；device 半开由读 deadline 判死）。pong 响应+deadline reset 已由 setReadKeepalive 实现并经 pr2-read-deadline-tests 覆盖。",
+        "artifacts": [],
+        "na_reason": "redundant keepalive; Mac-side P0-B already drives ping/pong. Behavioral surface covered by pr1-p0b-regression, automated surface by pr2-ping-tests. No independent e2e regression.",
+        "attestation": "n/a (justified)"
+      }
+    }
+  ]
+}
