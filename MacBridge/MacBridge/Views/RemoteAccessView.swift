@@ -260,7 +260,7 @@ struct RemoteAccessView: View {
                         icon: "lock.shield",
                         title: L10n.remoteRelay,
                         statusText: relayStatusText,
-                        statusColor: .secondary,
+                        statusColor: (relayEnabled && relayConfigured == true) ? .green : .secondary,
                         subtitle: nil,
                         isSelected: selectedMethod == .relay,
                         isLoading: isLoadingStatus,
@@ -268,9 +268,9 @@ struct RemoteAccessView: View {
                     )
                 }
                 
-                // Group 2: 高级连接
+                // Group 2: 其他连接
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(L10n.current == .zhHans ? "高级连接" : "Advanced Connections")
+                    Text(L10n.current == .zhHans ? "其他连接" : "Other Connections")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundColor(.secondary)
                         .padding(.horizontal, 4)
