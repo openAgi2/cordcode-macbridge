@@ -70,4 +70,26 @@ final class RuntimeManagerRestartTests: XCTestCase {
         try? await Task.sleep(nanoseconds: 2_000_000_000)
         XCTAssertEqual(manager.launchCount, 2, "间隔较远的第二次 restart 应再次 launch")
     }
+
+    /// 验证 relayEnabled 在配置映射中能正确设置。
+    @MainActor
+    func testRelayEnabledConfigMapping() async {
+        let manager = makeManager()
+        
+        // 默认应当为 true
+        XCTAssertTrue(manager.config.relayEnabled)
+        
+        manager.applyConfigAndRestart { c in
+            c.relayEnabled = false
+        }
+        
+        XCTAssertFalse(manager.config.relayEnabled)
+        
+        manager.applyConfigAndRestart { c in
+            c.relayEnabled = true
+        }
+        
+        XCTAssertTrue(manager.config.relayEnabled)
+    }
 }
+

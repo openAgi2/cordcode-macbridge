@@ -306,6 +306,13 @@ enum L10n {
     static var remoteNoTailscaleIP: String { tr("remote_no_tailscale_ip") }
     static var remoteTailscaleIPDetected: String { tr("remote_tailscale_ip_detected") }
     static var remoteRefreshFailed: String { tr("remote_refresh_failed") }
+    static var remoteRelayEnabled: String { tr("remote_relay_enabled") }
+    static var remoteRelayDisabled: String { tr("remote_relay_disabled") }
+    static var remoteRelaySwitchHint: String { tr("remote_relay_switch_hint") }
+    static var remoteRelayConfirmTitle: String { tr("remote_relay_confirm_title") }
+    static var remoteRelayConfirmMessage: String { tr("remote_relay_confirm_message") }
+    static var remoteRelayEnabling: String { tr("remote_relay_enabling") }
+    static var remoteRelayDisabling: String { tr("remote_relay_disabling") }
 
     // MARK: - Settings messages
 
@@ -561,6 +568,13 @@ enum L10n {
             "remote_no_tailscale_ip": "No available Tailscale address detected",
             "remote_tailscale_ip_detected": "Tailscale address detected",
             "remote_refresh_failed": "Last updated: %@ · Refresh failed",
+            "remote_relay_enabled": "Use Encrypted Relay",
+            "remote_relay_disabled": "Disabled",
+            "remote_relay_switch_hint": "When disabled, this Mac will no longer connect to the Relay. LAN, Tailscale, and custom addresses can still be used.",
+            "remote_relay_confirm_title": "Disable Encrypted Relay?",
+            "remote_relay_confirm_message": "After disabling, you will not be able to connect to this Mac when outside the current local network.",
+            "remote_relay_enabling": "Enabling...",
+            "remote_relay_disabling": "Disabling...",
             "name_updated": "Name updated",
             "save_failed": "Save failed: %@",
             "save_failed_http": "Save failed (HTTP %d)",
@@ -807,6 +821,13 @@ enum L10n {
             "remote_no_tailscale_ip": "未检测到可用的 Tailscale 地址",
             "remote_tailscale_ip_detected": "已检测到 Tailscale 地址",
             "remote_refresh_failed": "上次更新时间：%@ · 刷新未成功",
+            "remote_relay_enabled": "使用加密 Relay",
+            "remote_relay_disabled": "已关闭",
+            "remote_relay_switch_hint": "关闭后，此 Mac 不再连接 Relay。局域网、Tailscale 和自定义地址仍可使用。",
+            "remote_relay_confirm_title": "关闭加密 Relay？",
+            "remote_relay_confirm_message": "关闭后，离开当前局域网将无法连接此 Mac。",
+            "remote_relay_enabling": "正在启用…",
+            "remote_relay_disabling": "正在关闭…",
             "name_updated": "名称已更新",
             "save_failed": "保存失败：%@",
             "save_failed_http": "保存失败 (HTTP %d)",

@@ -49,6 +49,7 @@ func Main() {
 	devInsecureWS := flag.Bool("dev-insecure-ws", envOr("CCCODE_DEV_INSECURE_WS", "") != "", "DEV ONLY: allow plaintext ws:// Tailscale remote when TLS unavailable (fail-open). Product must leave unset.")
 	includeTailscale := flag.Bool("pairing-include-tailscale", true, "Include detected Tailscale URL in pairing QR")
 	includeRemote := flag.Bool("pairing-include-remote", true, "Include manual remote URL in pairing QR")
+	relayEnabled := flag.Bool("relay-enabled", true, "Enable encrypted relay path")
 
 	// Relay 加密通道配置（首版：通过 flags 或环境变量注入，后续由 MacBridge runtime config 驱动）
 	relayEndpoint := flag.String("relay-endpoint", envOr("CCCODE_RELAY_ENDPOINT", ""), "Relay 服务端点（wss://relay.example.com）")
@@ -87,6 +88,7 @@ func Main() {
 	defer cancel()
 
 	handlers := NewHandlersWithContext(ctx)
+	handlers.SetRelayEnabled(*relayEnabled)
 	if *dataDirPath != "" {
 		handlers.SetTranscriptIndexBaseDir(*dataDirPath + string(filepath.Separator) + "transcript-index")
 	}
@@ -182,7 +184,7 @@ func Main() {
 	var managementURL string
 	var mgmtSrv *ManagementServer
 	var relayIdentity *RelayCryptoIdentity
-	relayConfigured := *relayEndpoint != "" && *relayRouteID != "" && *relayCredential != ""
+	relayConfigured := *relayEndpoint != "" && *relayRouteID != "" && *relayCredential != "" && *relayEnabled
 	if relayConfigured {
 		var identityErr error
 		relayIdentity, identityErr = LoadOrCreateRelayCryptoIdentity(*dataDirPath)
@@ -211,6 +213,7 @@ func Main() {
 			RelayRouteID:     *relayRouteID,
 			RelayCredential:  *relayCredential,
 			RelayConfigured:  relayConfigured,
+			RelayEnabled:     *relayEnabled,
 			RelayIdentity:    relayIdentity,
 			Agents:           handlers.agents,
 			CodexBackendMode: *codexBackend,

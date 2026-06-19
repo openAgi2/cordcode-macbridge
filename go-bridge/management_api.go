@@ -40,6 +40,7 @@ type ManagementConfig struct {
 	RelayRouteID     string
 	RelayCredential  string
 	RelayConfigured  bool
+	RelayEnabled     bool
 	RelayIdentity    *RelayCryptoIdentity
 	Agents           map[string]core.Agent
 	CodexBackendMode string
@@ -383,7 +384,7 @@ func (s *ManagementServer) handlePairingCreate(w http.ResponseWriter, _ *http.Re
 		s.remoteURLs(),
 		5*time.Minute,
 	)
-	if s.cfg.RelayConfigured && s.cfg.RelayIdentity != nil {
+	if s.cfg.RelayEnabled && s.cfg.RelayConfigured && s.cfg.RelayIdentity != nil {
 		if err := addRelayFirstPairingPayload(session, s.cfg.RelayEndpoint, s.cfg.RelayRouteID, s.cfg.RelayIdentity); err != nil {
 			writeMgmtJSON(w, http.StatusInternalServerError, map[string]interface{}{
 				"error":   "relay_pairing_create_failed",
@@ -683,6 +684,7 @@ func (s *ManagementServer) handleRemoteStatus(w http.ResponseWriter, _ *http.Req
 		"includeTailscale": s.cfg.IncludeTailscale,
 		"includeRemote":    s.cfg.IncludeRemote,
 		"relay": map[string]interface{}{
+			"enabled":    s.cfg.RelayEnabled,
 			"configured": s.cfg.RelayConfigured,
 			"endpoint":   s.cfg.RelayEndpoint,
 			"routeId":    s.cfg.RelayRouteID,

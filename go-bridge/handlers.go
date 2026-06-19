@@ -55,6 +55,7 @@ type Handlers struct {
 	transcriptIndex         *transcriptindex.Store
 	// capabilityPolicy 是集中式 RPC 授权层（P3 架构演进，§3.2/§8）。
 	capabilityPolicy *CapabilityPolicy
+	relayEnabled     bool
 
 	// ctx is the root context whose cancellation propagates runtime shutdown
 	// to active agent sessions (StartSession uses it instead of
@@ -104,9 +105,16 @@ func newHandlersWithContext(ctx context.Context) *Handlers {
 		claudeSessions:         newDefaultClaudeSessionCatalog(),
 		transcriptIndex:        transcriptindex.NewStore(defaultTranscriptIndexDir()),
 		capabilityPolicy:       NewCapabilityPolicy(),
+		relayEnabled:           true,
 		ctx:                    ctx,
 		cleanupStop:            make(chan struct{}),
 	}
+}
+
+func (h *Handlers) SetRelayEnabled(enabled bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.relayEnabled = enabled
 }
 
 // SetTranscriptIndexBaseDir (re)creates the transcript page index store rooted
@@ -586,6 +594,14 @@ func (h *Handlers) handleDeliveryRPC(conn Connection, msg WireMessage) bool {
 	case "get_delivery_prekey_status", "upload_delivery_prekeys", "get_delivery_chain_head":
 	default:
 		return false
+	}
+
+	h.mu.Lock()
+	enabled := h.relayEnabled
+	h.mu.Unlock()
+	if !enabled {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "relay.not_configured", Message: "encrypted relay is disabled"})
+		return true
 	}
 
 	device := conn.AuthedDevice()

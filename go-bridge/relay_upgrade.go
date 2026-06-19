@@ -82,9 +82,10 @@ func (h *Handlers) handleRelayUpgradeRPC(conn Connection, msg WireMessage) bool 
 	identity := h.relayIdentity
 	provisioner := h.relayUpgradeProvisioner
 	bridgeID := h.bridgeID
+	enabled := h.relayEnabled
 	h.mu.Unlock()
-	if store == nil || identity == nil || provisioner == nil || bridgeID == "" {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "relay.not_configured", Message: "encrypted relay is not configured"})
+	if store == nil || identity == nil || provisioner == nil || bridgeID == "" || !enabled {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "relay.not_configured", Message: "encrypted relay is not configured or disabled"})
 		return true
 	}
 

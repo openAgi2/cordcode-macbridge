@@ -70,6 +70,7 @@ class AppDependencies: ObservableObject {
             ? UserDefaults.standard.string(forKey: "relayRouteID") ?? ""
             : ""
 
+        let relayEnabled = UserDefaults.standard.object(forKey: "relayEnabled") as? Bool ?? true
         let logFilePath = logDir + "/go-bridge.log"
         let config = RuntimeConfig(
             executablePath: executablePath,
@@ -84,8 +85,9 @@ class AppDependencies: ObservableObject {
             remoteURL: UserDefaults.standard.string(forKey: "remoteBridgeURL") ?? "",
             includeTailscaleInPairing: UserDefaults.standard.object(forKey: "pairingIncludeTailscale") as? Bool ?? true,
             includeRemoteInPairing: UserDefaults.standard.object(forKey: "pairingIncludeRemote") as? Bool ?? true,
-            relayEndpoint: relayEndpoint,
-            relayRouteID: relayRouteID,
+            relayEnabled: relayEnabled,
+            relayEndpoint: relayEnabled ? relayEndpoint : "",
+            relayRouteID: relayEnabled ? relayRouteID : "",
             // Keychain access may require user authorization after an app update.
             // OfficialRelayProvisioner loads it off the main actor and restarts with the real credential.
             relayCredential: "",
@@ -138,7 +140,8 @@ class AppDependencies: ObservableObject {
             .store(in: &cancellables)
 
         runtimeManager.start()
-        if OfficialRelayConfiguration.isAvailable {
+        let relayEnabled = UserDefaults.standard.object(forKey: "relayEnabled") as? Bool ?? true
+        if relayEnabled && OfficialRelayConfiguration.isAvailable {
             Task { [weak self] in
                 do {
                     let relay = try await OfficialRelayProvisioner.shared.ensureRoute()
@@ -169,6 +172,7 @@ class AppDependencies: ObservableObject {
         let savedRelayEndpoint = UserDefaults.standard.string(forKey: "relayEndpoint") ?? ""
         let hasCurrentRelayRoute = !configuredRelayEndpoint.isEmpty &&
             savedRelayEndpoint == configuredRelayEndpoint
+        let relayEnabled = UserDefaults.standard.object(forKey: "relayEnabled") as? Bool ?? true
         let relayEndpoint = hasCurrentRelayRoute ? configuredRelayEndpoint : ""
         let relayRouteID = hasCurrentRelayRoute
             ? UserDefaults.standard.string(forKey: "relayRouteID") ?? ""
@@ -183,13 +187,14 @@ class AppDependencies: ObservableObject {
             c.remoteURL = remoteURL
             c.includeTailscaleInPairing = includeTailscaleInPairing
             c.includeRemoteInPairing = includeRemoteInPairing
-            c.relayEndpoint = relayEndpoint
-            c.relayRouteID = relayRouteID
-            c.relayCredential = relayCredential
+            c.relayEnabled = relayEnabled
+            c.relayEndpoint = relayEnabled ? relayEndpoint : ""
+            c.relayRouteID = relayEnabled ? relayRouteID : ""
+            c.relayCredential = relayEnabled ? relayCredential : ""
             c.relayServiceAddress = relayServiceAddress
         }
 
-        if OfficialRelayConfiguration.isAvailable && !hasCurrentRelayRoute {
+        if relayEnabled && OfficialRelayConfiguration.isAvailable && !hasCurrentRelayRoute {
             Task { [weak self] in
                 do {
                     let relay = try await OfficialRelayProvisioner.shared.ensureRoute()

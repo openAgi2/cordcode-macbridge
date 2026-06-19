@@ -411,6 +411,7 @@ func TestMgmtPairingCreateIncludesRelayFirstQRWhenConfigured(t *testing.T) {
 	}
 	srv := newTestMgmtServer(nil)
 	srv.cfg.RelayConfigured = true
+	srv.cfg.RelayEnabled = true
 	srv.cfg.RelayEndpoint = "wss://relay.example.com:8443"
 	srv.cfg.RelayRouteID = "route_123"
 	srv.cfg.RelayIdentity = identity
@@ -508,6 +509,7 @@ func TestMgmtRelayFirstClaimApprovalProducesSealedResult(t *testing.T) {
 		RelayRouteID:    "route_123",
 		RelayCredential: "bridge_auth",
 		RelayConfigured: true,
+		RelayEnabled:    true,
 		RelayIdentity:   identity,
 		Agents:          map[string]core.Agent{"claude": &mgmtFakeAgent{name: "claudecode"}},
 	})
@@ -789,6 +791,7 @@ func TestMgmtRemoteStatus_RelayConfigDoesNotExposeCredential(t *testing.T) {
 	srv.cfg.RelayEndpoint = "wss://relay.example.com"
 	srv.cfg.RelayRouteID = "route_123"
 	srv.cfg.RelayConfigured = true
+	srv.cfg.RelayEnabled = true
 	rec := httptest.NewRecorder()
 	req := authRequest(http.MethodGet, "/internal/remote/status")
 	srv.ServeHTTP(rec, req)
@@ -959,5 +962,40 @@ func TestIsTailscaleCGNAT(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("isTailscaleCGNAT(%s) = %v, want %v", tt.ip, got, tt.want)
 		}
+	}
+}
+
+func TestMgmtRemoteStatus_RelayDisabled(t *testing.T) {
+	srv := newTestMgmtServerWithRemote("")
+	srv.cfg.RelayEndpoint = "wss://relay.example.com"
+	srv.cfg.RelayRouteID = "route_123"
+	srv.cfg.RelayConfigured = true
+	srv.cfg.RelayEnabled = false // Disabled
+	
+	rec := httptest.NewRecorder()
+	req := authRequest(http.MethodGet, "/internal/remote/status")
+	srv.ServeHTTP(rec, req)
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("JSON 解析失败: %v", err)
+	}
+	relay, ok := body["relay"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("relay 字段不是 map: %v", body["relay"])
+	}
+	if relay["enabled"] != false {
+		t.Errorf("enabled = %v, want false", relay["enabled"])
+	}
+	
+	rec2 := httptest.NewRecorder()
+	srv.ServeHTTP(rec2, authRequest(http.MethodPost, "/internal/pairing/create"))
+	var pBody map[string]interface{}
+	if err := json.Unmarshal(rec2.Body.Bytes(), &pBody); err != nil {
+		t.Fatalf("JSON 解析失败: %v", err)
+	}
+	qrPayload, _ := pBody["qrPayload"].(string)
+	if strings.Contains(qrPayload, "relay") {
+		t.Errorf("qrPayload = %s, should not contain relay info when disabled", qrPayload)
 	}
 }

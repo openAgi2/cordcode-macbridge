@@ -52,6 +52,9 @@ func addRelayFirstPairingPayload(session *PairingSession, endpoint, routeID stri
 }
 
 func (s *ManagementServer) syncRelayPairingClaim(ctx context.Context, session *PairingSession) error {
+	if !s.cfg.RelayEnabled {
+		return nil
+	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, s.relayURL("/v1/routes/"+sessionSafePath(s.cfg.RelayRouteID)+"/pairing-claims"), nil)
 	if err != nil {
 		return err
@@ -99,6 +102,9 @@ func (s *ManagementServer) syncRelayPairingClaim(ctx context.Context, session *P
 }
 
 func (s *ManagementServer) approveRelayPairing(ctx context.Context, session *PairingSession, deviceToken string) (*RelayFirstResult, error) {
+	if !s.cfg.RelayEnabled {
+		return nil, fmt.Errorf("relay is disabled")
+	}
 	if session.RelayClaim == nil {
 		return nil, fmt.Errorf("missing relay claim")
 	}

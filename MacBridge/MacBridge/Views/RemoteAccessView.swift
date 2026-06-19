@@ -7,6 +7,8 @@ struct RemoteAccessView: View {
     @AppStorage("customRelayEndpoint") private var savedCustomRelayEndpoint = ""
     @AppStorage("pairingIncludeTailscale") private var includeTailscale = true
     @AppStorage("pairingIncludeRemote") private var includeRemote = true
+    @AppStorage("relayEnabled") private var relayEnabled = true
+    @State private var showDisableConfirmation = false
     
     @State private var selectedMethod: ConnectionMethod = .lan
     @State private var showDetailInNarrow = true
@@ -19,7 +21,7 @@ struct RemoteAccessView: View {
     @State private var isLoadingStatus = false
     @State private var statusError: String?
     @State private var lastUpdatedTime: String?
-
+    
     var apiClient: ManagementAPIClient?
 
     private var localURL: String {
@@ -67,7 +69,7 @@ struct RemoteAccessView: View {
     
     private var isSavingRelay: Bool {
         switch relaySaveState {
-        case .validatingFormat, .provisioning, .applyingConfig, .restartingBridge:
+        case .validatingFormat, .provisioning, .applyingConfig, .restartingBridge, .enabling, .disabling:
             return true
         default:
             return false
@@ -99,6 +101,17 @@ struct RemoteAccessView: View {
     }
     
     private var relayStatusText: String {
+        switch relaySaveState {
+        case .enabling:
+            return L10n.remoteRelayEnabling
+        case .disabling:
+            return L10n.remoteRelayDisabling
+        default:
+            break
+        }
+        if !relayEnabled {
+            return L10n.remoteRelayDisabled
+        }
         if isSavingRelay { return L10n.remoteValidating }
         switch relayConfigured {
         case true: return L10n.configured
@@ -143,6 +156,16 @@ struct RemoteAccessView: View {
         }
         .onChange(of: includeTailscale) { _, _ in notifyPairingConfigChanged() }
         .onChange(of: includeRemote) { _, _ in notifyPairingConfigChanged() }
+        .alert(L10n.remoteRelayConfirmTitle, isPresented: $showDisableConfirmation) {
+            Button(L10n.current == .zhHans ? "确认关闭" : "Confirm Disable", role: .destructive) {
+                performRelayToggle(false)
+            }
+            Button(L10n.cancel, role: .cancel) {
+                relayEnabled = true
+            }
+        } message: {
+            Text(L10n.remoteRelayConfirmMessage)
+        }
     }
     
     // MARK: - Layouts
@@ -381,10 +404,39 @@ struct RemoteAccessView: View {
                 .foregroundColor(.secondary)
             
             VStack(alignment: .leading, spacing: 8) {
+                Toggle(L10n.remoteRelayEnabled, isOn: Binding(
+                    get: { relayEnabled },
+                    set: { newValue in
+                        toggleRelayEnabled(to: newValue)
+                    }
+                ))
+                .disabled(isSavingRelay)
+                
+                Text(L10n.remoteRelaySwitchHint)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.vertical, 8)
+            
+            switch relaySaveState {
+            case .enabling:
+                feedbackRow(text: L10n.remoteRelayEnabling, isProgress: true)
+            case .disabling:
+                feedbackRow(text: L10n.remoteRelayDisabling, isProgress: true)
+            default:
+                EmptyView()
+            }
+            
+            VStack(alignment: .leading, spacing: 8) {
                 Text(L10n.securityLevel)
                     .font(.headline)
-                Text("• " + L10n.secEncrypted)
-                    .foregroundColor(.secondary)
+                if !relayEnabled {
+                    Text("• " + L10n.remoteRelayDisabled)
+                        .foregroundColor(.secondary)
+                } else {
+                    Text("• " + L10n.secEncrypted)
+                        .foregroundColor(.secondary)
+                }
             }
             
             Divider()
@@ -395,14 +447,16 @@ struct RemoteAccessView: View {
                 
                 HStack {
                     Text(L10n.status + "：")
-                    if relayConfigured == true {
+                    if !relayEnabled {
+                        Text("⚪️ " + L10n.remoteRelayDisabled)
+                    } else if relayConfigured == true {
                         Text("🟢 " + L10n.configured)
                     } else {
                         Text("⚪️ " + L10n.notConfigured)
                     }
                 }
                 
-                if relayConfigured == true, let endpoint = remoteStatus?.relay?.endpoint {
+                if relayEnabled && relayConfigured == true, let endpoint = remoteStatus?.relay?.endpoint {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(L10n.current == .zhHans ? "中继地址：" : "Relay Endpoint:")
                             .font(.subheadline)
@@ -414,75 +468,77 @@ struct RemoteAccessView: View {
                 }
             }
             
-            Divider()
-            
-            VStack(alignment: .leading, spacing: 12) {
-                Text(L10n.current == .zhHans ? "设置自定义中继" : "Custom Relay Settings")
-                    .font(.headline)
+            if relayEnabled {
+                Divider()
                 
-                Picker("", selection: $relayMode) {
-                    Text(L10n.current == .zhHans ? "官方默认" : "Official Default").tag(RelayMode.official)
-                    Text(L10n.current == .zhHans ? "自定义中继" : "Custom Relay").tag(RelayMode.custom)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                
-                if relayMode == .custom {
-                    VStack(alignment: .leading, spacing: 6) {
-                        TextField(OfficialRelayConfiguration.bundledEndpoint, text: $customRelayEndpoint)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(.body, design: .monospaced))
-                        
-                        if !normalizedCustomRelayEndpoint.isEmpty && !isValidRelayURL(normalizedCustomRelayEndpoint) {
-                            InlineFeedback(style: .warning, message: L10n.remoteRelayValidation)
-                        }
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(L10n.current == .zhHans ? "官方中继地址：" : "Official Relay Endpoint:")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Text(OfficialRelayConfiguration.bundledEndpoint)
-                            .font(.system(.body, design: .monospaced))
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.vertical, 4)
-                }
-                
-                HStack {
-                    Button(action: saveRelayConfiguration) {
-                        Text(L10n.save)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!canSaveRelay)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(L10n.current == .zhHans ? "设置自定义中继" : "Custom Relay Settings")
+                        .font(.headline)
                     
-                    if isRelayModified {
-                        Button(action: {
-                            customRelayEndpoint = savedCustomRelayEndpoint
-                            relayMode = savedCustomRelayEndpoint.isEmpty ? .official : .custom
-                            relaySaveState = .idle
-                        }) {
-                            Text(L10n.cancel)
+                    Picker("", selection: $relayMode) {
+                        Text(L10n.current == .zhHans ? "官方默认" : "Official Default").tag(RelayMode.official)
+                        Text(L10n.current == .zhHans ? "自定义中继" : "Custom Relay").tag(RelayMode.custom)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    
+                    if relayMode == .custom {
+                        VStack(alignment: .leading, spacing: 6) {
+                            TextField(OfficialRelayConfiguration.bundledEndpoint, text: $customRelayEndpoint)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.body, design: .monospaced))
+                            
+                            if !normalizedCustomRelayEndpoint.isEmpty && !isValidRelayURL(normalizedCustomRelayEndpoint) {
+                                InlineFeedback(style: .warning, message: L10n.remoteRelayValidation)
+                            }
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(L10n.current == .zhHans ? "官方中继地址：" : "Official Relay Endpoint:")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            Text(OfficialRelayConfiguration.bundledEndpoint)
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    
+                    HStack {
+                        Button(action: saveRelayConfiguration) {
+                            Text(L10n.save)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!canSaveRelay)
+                        
+                        if isRelayModified {
+                            Button(action: {
+                                customRelayEndpoint = savedCustomRelayEndpoint
+                                relayMode = savedCustomRelayEndpoint.isEmpty ? .official : .custom
+                                relaySaveState = .idle
+                            }) {
+                                Text(L10n.cancel)
+                            }
                         }
                     }
-                }
-                .padding(.top, 4)
-                
-                switch relaySaveState {
-                case .idle:
-                    EmptyView()
-                case .validatingFormat:
-                    feedbackRow(text: L10n.current == .zhHans ? "正在校验格式..." : "Validating format...", isProgress: true)
-                case .provisioning:
-                    feedbackRow(text: L10n.remoteValidatingRelay, isProgress: true)
-                case .applyingConfig:
-                    feedbackRow(text: L10n.current == .zhHans ? "正在应用配置..." : "Applying configuration...", isProgress: true)
-                case .restartingBridge:
-                    feedbackRow(text: L10n.current == .zhHans ? "Bridge 正在重启..." : "Bridge restarting...", isProgress: true)
-                case .applied:
-                    InlineFeedback(style: .success, message: L10n.current == .zhHans ? "配置已应用" : "Configuration applied")
-                case .failed(let err):
-                    InlineFeedback(style: .error, message: err)
+                    .padding(.top, 4)
+                    
+                    switch relaySaveState {
+                    case .idle, .enabling, .disabling:
+                        EmptyView()
+                    case .validatingFormat:
+                        feedbackRow(text: L10n.current == .zhHans ? "正在校验格式..." : "Validating format...", isProgress: true)
+                    case .provisioning:
+                        feedbackRow(text: L10n.remoteValidatingRelay, isProgress: true)
+                    case .applyingConfig:
+                        feedbackRow(text: L10n.current == .zhHans ? "正在应用配置..." : "Applying configuration...", isProgress: true)
+                    case .restartingBridge:
+                        feedbackRow(text: L10n.current == .zhHans ? "Bridge 正在重启..." : "Bridge restarting...", isProgress: true)
+                    case .applied:
+                        InlineFeedback(style: .success, message: L10n.current == .zhHans ? "配置已应用" : "Configuration applied")
+                    case .failed(let err):
+                        InlineFeedback(style: .error, message: err)
+                    }
                 }
             }
         }
@@ -801,6 +857,28 @@ struct RemoteAccessView: View {
         return true
     }
 
+    private func toggleRelayEnabled(to newValue: Bool) {
+        if !newValue {
+            let noOtherRemote = tailscaleURL.isEmpty && savedRemoteURL.isEmpty
+            if noOtherRemote {
+                showDisableConfirmation = true
+                return
+            }
+        }
+        performRelayToggle(newValue)
+    }
+    
+    private func performRelayToggle(_ enabled: Bool) {
+        relaySaveState = enabled ? .enabling : .disabling
+        Task {
+            UserDefaults.standard.set(enabled, forKey: "relayEnabled")
+            notifyPairingConfigChanged()
+            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            await loadRemoteStatus()
+            relaySaveState = .idle
+        }
+    }
+
     private func loadRemoteStatus() async {
         guard let client = apiClient else {
             statusError = L10n.errorCannotConnect
@@ -879,6 +957,8 @@ enum RelaySaveState {
     case restartingBridge
     case applied
     case failed(String)
+    case enabling
+    case disabling
 }
 
 enum CustomAddressSaveState {

@@ -44,6 +44,7 @@ struct RuntimeConfig {
     var remoteURL: String
     var includeTailscaleInPairing: Bool
     var includeRemoteInPairing: Bool
+    var relayEnabled: Bool
     var relayEndpoint: String
     var relayRouteID: String
     var relayCredential: String
@@ -65,6 +66,7 @@ struct RuntimeConfig {
         remoteURL: String = "",
         includeTailscaleInPairing: Bool = true,
         includeRemoteInPairing: Bool = true,
+        relayEnabled: Bool = true,
         relayEndpoint: String = "",
         relayRouteID: String = "",
         relayCredential: String = "",
@@ -85,6 +87,7 @@ struct RuntimeConfig {
         self.remoteURL = remoteURL
         self.includeTailscaleInPairing = includeTailscaleInPairing
         self.includeRemoteInPairing = includeRemoteInPairing
+        self.relayEnabled = relayEnabled
         self.relayEndpoint = relayEndpoint
         self.relayRouteID = relayRouteID
         self.relayCredential = relayCredential
@@ -291,6 +294,7 @@ class RuntimeManager: ObservableObject {
         }
         arguments += ["-pairing-include-tailscale=\(config.includeTailscaleInPairing ? "true" : "false")"]
         arguments += ["-pairing-include-remote=\(config.includeRemoteInPairing ? "true" : "false")"]
+        arguments += ["-relay-enabled=\(config.relayEnabled ? "true" : "false")"]
         process.arguments = arguments
 
         // 环境变量：OpenCode 凭据
