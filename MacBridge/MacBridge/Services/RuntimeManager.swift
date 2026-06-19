@@ -967,61 +967,104 @@ class RuntimeManager: ObservableObject {
     }
 }
 
-enum RelayRouteCredentialStore {
-    private static let service = "org.openagi.cccode.macbridge.relay"
-    private static let account = "route-credential"
+enum RelaySecretFileStore {
+    // T07: Relay 密钥的文件存储后端。与 OpenCode credentials.json 同目录、同样 0600 权限，
+    // 用以替代钥匙串——后者会在 ad-hoc / 不稳定 Team 签名下每次重装都弹登录密码授权。
+    static var directory: String {
+        NSSearchPathForDirectoriesInDomains(.applicationSupportDirectory, .userDomainMask, true).first!
+            + "/CCCode Bridge/relay-secrets"
+    }
 
-    static func load() -> String {
+    /// 旧版本存在钥匙串的 service 名（迁移用）。
+    private static let legacyKeychainService = "org.openagi.cccode.macbridge.relay"
+
+    static func load(account: String) -> String? {
+        let url = URL(fileURLWithPath: directory).appendingPathComponent(account)
+        if let data = try? Data(contentsOf: url),
+           let value = String(data: data, encoding: .utf8) {
+            return value
+        }
+        // 文件不存在：尝试从旧版钥匙串一次性迁移（仅当旧条目还在）。
+        // 迁移成功后删除钥匙串条目，避免后续再触发钥匙串授权弹窗。
+        if let legacy = migrateFromKeychain(account: account) {
+            return legacy
+        }
+        return nil
+    }
+
+    static func save(_ value: String, account: String) throws {
+        let dir = directory
+        try FileManager.default.createDirectory(
+            atPath: dir,
+            withIntermediateDirectories: true
+        )
+        let url = URL(fileURLWithPath: dir).appendingPathComponent(account)
+        if value.isEmpty {
+            try? FileManager.default.removeItem(at: url)
+            return
+        }
+        try Data(value.utf8).write(to: url, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    /// 一次性迁移：文件 account → 旧钥匙串 account 的映射不同，需显式传入 legacyKeychainAccount。
+    /// 读到旧值则写入文件并删除钥匙串条目；读不到或失败均静默返回 nil（全新安装或已迁移）。
+    private static func migrateFromKeychain(account: String) -> String? {
+        guard let legacyAccount = legacyKeychainAccount(for: account) else { return nil }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrService as String: legacyKeychainService,
+            kSecAttrAccount as String: legacyAccount,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
         var item: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
               let data = item as? Data,
-              let credential = String(data: data, encoding: .utf8) else {
-            return ""
+              let value = String(data: data, encoding: .utf8),
+              !value.isEmpty else {
+            return nil
         }
-        return credential
+        // 迁移到文件成功后删除钥匙串条目，杜绝后续授权弹窗。
+        let deleteQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: legacyKeychainService,
+            kSecAttrAccount as String: legacyAccount,
+        ]
+        SecItemDelete(deleteQuery as CFDictionary)
+        do {
+            try save(value, account: account)
+            NSLog("[RelaySecretFileStore] Migrated '\(account)' from Keychain to file store.")
+            return value
+        } catch {
+            NSLog("[RelaySecretFileStore] Failed to persist migrated '\(account)': \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// 文件 account 名 → 旧钥匙串 account 名的映射。无映射表示该条目旧版未存钥匙串。
+    private static func legacyKeychainAccount(for fileAccount: String) -> String? {
+        switch fileAccount {
+        case "relay-route-credential": return "route-credential"
+        case "activation-install-id": return "activation-install-id"
+        case "activation-signing-key": return "activation-signing-key"
+        default: return nil
+        }
+    }
+}
+
+enum RelayRouteCredentialStore {
+    // T07: Relay 凭据改用文件存储（0600），与 OpenCode credentials.json 同目录。
+    // 钥匙串会因 ad-hoc / 不稳定 Team 签名在每次重装后弹窗要求授权登录密码，
+    // 对"丢了可重新 provisioning"的 route credential 而言不必要，故迁出钥匙串。
+    private static let fileName = "relay-route-credential"
+
+    static func load() -> String {
+        RelaySecretFileStore.load(account: fileName) ?? ""
     }
 
     static func save(_ credential: String) throws {
-        let baseQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
-        if credential.isEmpty {
-            SecItemDelete(baseQuery as CFDictionary)
-            return
-        }
-        let value = Data(credential.utf8)
-        let updateStatus = SecItemUpdate(
-            baseQuery as CFDictionary,
-            [kSecValueData as String: value] as CFDictionary
-        )
-        if updateStatus == errSecSuccess { return }
-        guard updateStatus == errSecItemNotFound else {
-            throw NSError(
-                domain: NSOSStatusErrorDomain,
-                code: Int(updateStatus),
-                userInfo: [NSLocalizedDescriptionKey: "无法更新 Relay route credential"]
-            )
-        }
-        var item = baseQuery
-        item[kSecValueData as String] = value
-        item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        let status = SecItemAdd(item as CFDictionary, nil)
-        guard status == errSecSuccess else {
-            throw NSError(
-                domain: NSOSStatusErrorDomain,
-                code: Int(status),
-                userInfo: [NSLocalizedDescriptionKey: "无法保存 Relay route credential"]
-            )
-        }
+        try RelaySecretFileStore.save(credential, account: fileName)
     }
 }
 
@@ -1161,21 +1204,22 @@ private struct RelayActivationIdentity {
 }
 
 private enum RelayActivationIdentityStore {
-    private static let service = "org.openagi.cccode.macbridge.relay"
+    // T07: 与 RelayRouteCredentialStore 一样改用文件存储，避免钥匙串授权弹窗。
     private static let installIDAccount = "activation-install-id"
     private static let signingKeyAccount = "activation-signing-key"
 
     static func loadOrCreate() throws -> RelayActivationIdentity {
-        let installID = load(account: installIDAccount) ?? "install_\(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased())"
+        let installID = RelaySecretFileStore.load(account: installIDAccount)
+            ?? "install_\(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased())"
         let privateKey: Curve25519.Signing.PrivateKey
-        if let encoded = load(account: signingKeyAccount),
+        if let encoded = RelaySecretFileStore.load(account: signingKeyAccount),
            let raw = Data(base64Encoded: encoded) {
             privateKey = try Curve25519.Signing.PrivateKey(rawRepresentation: raw)
         } else {
             privateKey = Curve25519.Signing.PrivateKey()
         }
-        try save(installID, account: installIDAccount)
-        try save(privateKey.rawRepresentation.base64EncodedString(), account: signingKeyAccount)
+        try RelaySecretFileStore.save(installID, account: installIDAccount)
+        try RelaySecretFileStore.save(privateKey.rawRepresentation.base64EncodedString(), account: signingKeyAccount)
         return RelayActivationIdentity(installID: installID, privateKey: privateKey)
     }
 
@@ -1185,42 +1229,5 @@ private enum RelayActivationIdentityStore {
             throw OfficialRelayProvisioningError.registrationFailed
         }
         return Data(bytes).base64EncodedString()
-    }
-
-    private static func load(account: String) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data else {
-            return nil
-        }
-        return String(data: data, encoding: .utf8)
-    }
-
-    private static func save(_ value: String, account: String) throws {
-        let baseQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
-        let data = Data(value.utf8)
-        let updateStatus = SecItemUpdate(baseQuery as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-        if updateStatus == errSecSuccess { return }
-        guard updateStatus == errSecItemNotFound else {
-            throw NSError(domain: NSOSStatusErrorDomain, code: Int(updateStatus))
-        }
-        var item = baseQuery
-        item[kSecValueData as String] = data
-        item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        let status = SecItemAdd(item as CFDictionary, nil)
-        guard status == errSecSuccess else {
-            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
-        }
     }
 }
