@@ -268,17 +268,10 @@ struct ContentView: View {
 
             Spacer()
 
-            Menu {
-                Button(L10n.devicesRevokeAuthorization, role: .destructive) {
-                    deviceToRemove = device
-                    showRemoveConfirmation = true
-                }
-            } label: {
-                Image(systemName: "ellipsis")
+            Button(L10n.devicesRevokeAuthorization) {
+                deviceToRemove = device
+                showRemoveConfirmation = true
             }
-            .menuStyle(.borderlessButton)
-            .help(L10n.devicesActions)
-            .accessibilityLabel(L10n.devicesActions)
         }
         .padding(.vertical, 6)
     }

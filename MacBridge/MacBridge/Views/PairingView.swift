@@ -5,6 +5,7 @@ struct PairingView: View {
     @ObservedObject var viewModel: PairingViewModel
     @AppStorage("bridgeDisplayName") private var bridgeDisplayName = ""
     @State private var copiedCode = false
+    @State private var isDetailsExpanded = false
 
     private struct PairingCandidate: Identifiable {
         let id: String
@@ -74,12 +75,21 @@ struct PairingView: View {
     private func waitingView(code: String, payload: String) -> some View {
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .top, spacing: 28) {
-                qrImage(payload: payload)
+                qrSection(payload: payload)
                 waitingInstructions(code: code, payload: payload)
             }
             VStack(alignment: .leading, spacing: 20) {
-                qrImage(payload: payload)
+                qrSection(payload: payload)
                 waitingInstructions(code: code, payload: payload)
+            }
+        }
+    }
+
+    private func qrSection(payload: String) -> some View {
+        VStack(alignment: .center, spacing: 12) {
+            qrImage(payload: payload)
+            Button(L10n.back) {
+                viewModel.reset()
             }
         }
     }
@@ -131,23 +141,43 @@ struct PairingView: View {
 
             let candidates = pairingCandidates(from: payload)
             if !candidates.isEmpty {
-                DisclosureGroup(L10n.pairingConnectionDetails) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(candidates) { candidate in
-                            Label {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(candidate.title)
-                                    Text(candidate.url)
-                                        .font(.system(.caption, design: .monospaced))
-                                        .foregroundStyle(.secondary)
-                                        .textSelection(.enabled)
+                VStack(alignment: .leading, spacing: 0) {
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            isDetailsExpanded.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 9, weight: .bold))
+                                .rotationEffect(.degrees(isDetailsExpanded ? 90 : 0))
+                            Text(L10n.pairingConnectionDetails)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.secondary)
+                    
+                    if isDetailsExpanded {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(candidates) { candidate in
+                                Label {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(candidate.title)
+                                        Text(candidate.url)
+                                            .font(.system(.caption, design: .monospaced))
+                                            .foregroundStyle(.secondary)
+                                            .textSelection(.enabled)
+                                    }
+                                } icon: {
+                                    Image(systemName: candidate.icon)
                                 }
-                            } icon: {
-                                Image(systemName: candidate.icon)
                             }
                         }
+                        .padding(.leading, 15)
+                        .padding(.top, 8)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
-                    .padding(.top, 8)
                 }
             }
         }

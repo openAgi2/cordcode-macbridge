@@ -185,6 +185,7 @@ enum L10n {
     static var noAuthorizedDevices: String { tr("no_authorized_devices") }
     static var remove: String { tr("remove") }
     static var cancel: String { tr("cancel") }
+    static var back: String { tr("back") }
     static var removeDeviceConfirm: String { tr("remove_device_confirm") }
     static var removeDeviceMessage: String { tr("remove_device_message") }
     static var paired: String { tr("paired") }
@@ -448,6 +449,7 @@ enum L10n {
             "no_authorized_devices": "No authorized devices. Use the pairing section above to add one.",
             "remove": "Remove",
             "cancel": "Cancel",
+            "back": "Back",
             "remove_device_confirm": "Remove %@?",
             "remove_device_message": "This device will need to be paired again to access this Mac.",
             "paired": "paired %@",
@@ -687,6 +689,7 @@ enum L10n {
             "no_authorized_devices": "暂无已授权设备。使用上方的配对区域添加设备。",
             "remove": "移除",
             "cancel": "取消",
+            "back": "返回",
             "remove_device_confirm": "移除 %@？",
             "remove_device_message": "此设备需要重新配对才能访问此 Mac。",
             "paired": "配对于 %@",

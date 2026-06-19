@@ -185,34 +185,55 @@ struct RemoteAccessView: View {
     }
 
     private var advancedSection: some View {
-        DisclosureGroup(L10n.remoteAdvancedConnections, isExpanded: $showAdvancedConnections) {
-            VStack(alignment: .leading, spacing: 16) {
-                Toggle(isOn: $includeTailscale) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(L10n.remoteTailscale)
-                        Text(tailscaleURL.isEmpty ? L10n.remoteTailscaleUnavailable : tailscaleURL)
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    }
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    showAdvancedConnections.toggle()
                 }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Toggle(L10n.remoteVPS, isOn: $includeRemote)
-                    HStack {
-                        TextField(L10n.remoteVPSPlaceholder, text: $remoteURL)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(.caption, design: .monospaced))
-                        Button(L10n.save) {
-                            saveRemoteURL()
-                        }
-                        .disabled(remoteURL == savedRemoteURL)
-                    }
-                    if !frpURL.isEmpty && !isValidManualRemoteURL(frpURL) {
-                        InlineFeedback(style: .warning, message: L10n.remoteVPSValidation)
-                    }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .bold))
+                        .rotationEffect(.degrees(showAdvancedConnections ? 90 : 0))
+                        .foregroundColor(.secondary)
+                    Text(L10n.remoteAdvancedConnections)
+                        .foregroundColor(.primary)
                 }
+                .contentShape(Rectangle())
             }
-            .padding(.top, 10)
+            .buttonStyle(.plain)
+            
+            if showAdvancedConnections {
+                VStack(alignment: .leading, spacing: 16) {
+                    Toggle(isOn: $includeTailscale) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(L10n.remoteTailscale)
+                            Text(tailscaleURL.isEmpty ? L10n.remoteTailscaleUnavailable : tailscaleURL)
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle(L10n.remoteVPS, isOn: $includeRemote)
+                        HStack {
+                            TextField(L10n.remoteVPSPlaceholder, text: $remoteURL)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.caption, design: .monospaced))
+                            Button(L10n.save) {
+                                saveRemoteURL()
+                            }
+                            .disabled(remoteURL == savedRemoteURL)
+                        }
+                        if !frpURL.isEmpty && !isValidManualRemoteURL(frpURL) {
+                            InlineFeedback(style: .warning, message: L10n.remoteVPSValidation)
+                        }
+                    }
+                }
+                .padding(.leading, 15)
+                .padding(.top, 10)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
     }
 

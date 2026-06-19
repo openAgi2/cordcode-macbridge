@@ -120,16 +120,9 @@ struct BridgeStatusView: View {
             }
             .disabled(isRestarting)
 
-            Menu {
-                Button(L10n.stopBridge, role: .destructive) {
-                    showStopConfirmation = true
-                }
-            } label: {
-                Image(systemName: "ellipsis")
+            Button(L10n.stop) {
+                showStopConfirmation = true
             }
-            .menuStyle(.borderlessButton)
-            .help(L10n.overviewMoreActions)
-            .accessibilityLabel(L10n.overviewMoreActions)
 
         case .readyNoAgents:
             Button(L10n.overviewDetectAgain) {
@@ -137,16 +130,9 @@ struct BridgeStatusView: View {
             }
             .disabled(backendViewModel.isLoading)
 
-            Menu {
-                Button(L10n.stopBridge, role: .destructive) {
-                    showStopConfirmation = true
-                }
-            } label: {
-                Image(systemName: "ellipsis")
+            Button(L10n.stop) {
+                showStopConfirmation = true
             }
-            .menuStyle(.borderlessButton)
-            .help(L10n.overviewMoreActions)
-            .accessibilityLabel(L10n.overviewMoreActions)
 
         case .starting:
             Button(L10n.overviewStarting) {}

@@ -103,70 +103,88 @@ struct SettingsView: View {
                         }
                     }
 
-                    DisclosureGroup(
-                        L10n.settingsManualAuthentication,
-                        isExpanded: $showManualAuthentication
-                    ) {
-                        VStack(alignment: .leading, spacing: 12) {
-                            settingRow(L10n.username) {
-                                TextField(L10n.username, text: $viewModel.opencodeUser)
-                                    .textFieldStyle(.roundedBorder)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Button {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                showManualAuthentication.toggle()
                             }
-                            settingRow(L10n.password) {
-                                HStack {
-                                    Group {
-                                        if showPassword {
-                                            TextField(L10n.password, text: $viewModel.opencodePass)
-                                        } else {
-                                            SecureField(L10n.password, text: $viewModel.opencodePass)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .rotationEffect(.degrees(showManualAuthentication ? 90 : 0))
+                                    .foregroundColor(.secondary)
+                                Text(L10n.settingsManualAuthentication)
+                                    .foregroundColor(.primary)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        
+                        if showManualAuthentication {
+                            VStack(alignment: .leading, spacing: 12) {
+                                settingRow(L10n.username) {
+                                    TextField(L10n.username, text: $viewModel.opencodeUser)
+                                        .textFieldStyle(.roundedBorder)
+                                }
+                                settingRow(L10n.password) {
+                                    HStack {
+                                        Group {
+                                            if showPassword {
+                                                TextField(L10n.password, text: $viewModel.opencodePass)
+                                            } else {
+                                                SecureField(L10n.password, text: $viewModel.opencodePass)
+                                            }
+                                        }
+                                        .textFieldStyle(.roundedBorder)
+
+                                        Button {
+                                            showPassword.toggle()
+                                        } label: {
+                                            Image(systemName: showPassword ? "eye.slash" : "eye")
+                                        }
+                                        .help(showPassword ? L10n.settingsHidePassword : L10n.settingsShowPassword)
+                                        .accessibilityLabel(showPassword ? L10n.settingsHidePassword : L10n.settingsShowPassword)
+
+                                        Button(L10n.settingsRegenerate) {
+                                            showRegenerateConfirmation = true
                                         }
                                     }
-                                    .textFieldStyle(.roundedBorder)
-
-                                    Button {
-                                        showPassword.toggle()
-                                    } label: {
-                                        Image(systemName: showPassword ? "eye.slash" : "eye")
-                                    }
-                                    .help(showPassword ? L10n.settingsHidePassword : L10n.settingsShowPassword)
-                                    .accessibilityLabel(showPassword ? L10n.settingsHidePassword : L10n.settingsShowPassword)
-
-                                    Button(L10n.settingsRegenerate) {
-                                        showRegenerateConfirmation = true
+                                }
+                                settingRow(L10n.settingsLaunchCommand) {
+                                    HStack {
+                                        Text(L10n.settingsOpenCodeCommand)
+                                            .font(.system(.caption, design: .monospaced))
+                                            .textSelection(.enabled)
+                                        Button {
+                                            NSPasteboard.general.clearContents()
+                                            NSPasteboard.general.setString(
+                                                L10n.settingsOpenCodeCommand,
+                                                forType: .string
+                                            )
+                                        } label: {
+                                            Image(systemName: "doc.on.doc")
+                                        }
+                                        .help(L10n.settingsCopyCommand)
+                                        .accessibilityLabel(L10n.settingsCopyCommand)
                                     }
                                 }
-                            }
-                            settingRow(L10n.settingsLaunchCommand) {
-                                HStack {
-                                    Text(L10n.settingsOpenCodeCommand)
-                                        .font(.system(.caption, design: .monospaced))
-                                        .textSelection(.enabled)
-                                    Button {
-                                        NSPasteboard.general.clearContents()
-                                        NSPasteboard.general.setString(
-                                            L10n.settingsOpenCodeCommand,
-                                            forType: .string
-                                        )
-                                    } label: {
-                                        Image(systemName: "doc.on.doc")
-                                    }
-                                    .help(L10n.settingsCopyCommand)
-                                    .accessibilityLabel(L10n.settingsCopyCommand)
+
+                                Button(L10n.settingsSaveCredentialsRestart) {
+                                    viewModel.saveCredentials()
                                 }
-                            }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(
+                                    !viewModel.isCredentialsDirty ||
+                                    viewModel.credentialsFeedback == .saving
+                                )
 
-                            Button(L10n.settingsSaveCredentialsRestart) {
-                                viewModel.saveCredentials()
+                                feedbackView(viewModel.credentialsFeedback)
                             }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(
-                                !viewModel.isCredentialsDirty ||
-                                viewModel.credentialsFeedback == .saving
-                            )
-
-                            feedbackView(viewModel.credentialsFeedback)
+                            .padding(.leading, 15)
+                            .padding(.top, 12)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
                         }
-                        .padding(.top, 12)
                     }
                 }
             }
