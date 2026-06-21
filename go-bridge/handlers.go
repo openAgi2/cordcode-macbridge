@@ -1874,7 +1874,7 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 
 	idleTimer := time.NewTimer(relayInitialTimeout)
 	defer idleTimer.Stop()
-	if backendID == "claude" {
+	if backendID == "claude" || backendID == "claudecode" {
 		idleTimer.Stop()
 	}
 
@@ -1909,7 +1909,7 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 				}
 				return
 			}
-			if backendID != "claude" {
+			if backendID != "claude" && backendID != "claudecode" {
 				idleTimer.Reset(relayActiveTimeout)
 			}
 			eventCount++
@@ -1955,7 +1955,7 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 			if ev.Type == core.EventResult && ev.Done {
 				h.broadcastIdleState(sessionID, backendID)
 				h.recordPendingNotification(sessionID, backendID, "completed", "")
-				if backendID == "claude" {
+				if backendID == "claude" || backendID == "claudecode" {
 					continue
 				}
 				return
@@ -1967,14 +1967,14 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 				}
 				h.broadcastIdleState(sessionID, backendID)
 				h.recordPendingNotification(sessionID, backendID, "error", errMsg)
-				if backendID == "claude" {
+				if backendID == "claude" || backendID == "claudecode" {
 					continue
 				}
 				return
 			}
 
 		case <-idleTimer.C:
-			if backendID == "claude" {
+			if backendID == "claude" || backendID == "claudecode" {
 				continue
 			}
 			slog.Warn("go-bridge: relayEvents idle timeout, auto-completing", "backendID", backendID, "sessionID", sessionID, "eventsSeen", eventCount)
