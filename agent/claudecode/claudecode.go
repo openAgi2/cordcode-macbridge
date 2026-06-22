@@ -487,6 +487,8 @@ func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, erro
 func isSessionExecuting(sessionPath string) bool {
 	f, err := os.Open(sessionPath)
 	if err != nil {
+		slog.Debug("isSessionExecuting: failed to open transcript, assuming idle",
+			"path", sessionPath, "error", err)
 		return false
 	}
 	defer f.Close()
@@ -534,14 +536,24 @@ func isSessionExecuting(sessionPath string) bool {
 	if lastMsg.Role == "user" {
 		trimmed := strings.TrimSpace(lastMsg.Text)
 		if strings.HasPrefix(trimmed, "[Request interrupted by user") {
+			slog.Debug("isSessionExecuting: last message is user interrupt → idle",
+				"path", sessionPath)
 			return false
 		}
+		// Last message is a user message without an assistant response yet →
+		// session may still be executing (Claude is generating a response).
+		slog.Debug("isSessionExecuting: last message is user (not interrupted) → executing",
+			"path", sessionPath)
 		return true
 	}
 
 	if lastMsg.Role == "assistant" {
 		sr := lastMsg.StopReason
 		isFinal := sr == "end_turn" || sr == "stop_limit" || sr == "stop_sequence" || sr == "max_tokens"
+		if !isFinal {
+			slog.Debug("isSessionExecuting: assistant without stop_reason → executing",
+				"path", sessionPath)
+		}
 		return !isFinal
 	}
 
@@ -587,14 +599,29 @@ func (a *Agent) GetRunningSessionIDs(ctx context.Context) (map[string]bool, erro
 			continue
 		}
 		if state.SessionID != "" && isProcessRunning(state.Pid) {
-			isExecuting := true
+			// Default to false: if we cannot locate and inspect the transcript file,
+			// we cannot prove the session is still executing.  The old default of
+			// true caused sessions whose .jsonl was inaccessible (wrong project dir,
+			// missing file, etc.) to be permanently locked as "running".
+			isExecuting := false
 			if state.Cwd != "" {
 				projectDir := findProjectDir(homeDir, state.Cwd)
 				if projectDir != "" {
 					sessionPath := filepath.Join(projectDir, state.SessionID+".jsonl")
 					if _, err := os.Stat(sessionPath); err == nil {
 						isExecuting = isSessionExecuting(sessionPath)
+					} else {
+						slog.Debug("GetRunningSessionIDs: transcript file not found, defaulting to idle",
+							"sessionID", state.SessionID,
+							"cwd", state.Cwd,
+							"projectDir", projectDir,
+							"sessionPath", sessionPath,
+							"statError", err)
 					}
+				} else {
+					slog.Debug("GetRunningSessionIDs: project dir not found for cwd, defaulting to idle",
+						"sessionID", state.SessionID,
+						"cwd", state.Cwd)
 				}
 			}
 			if isExecuting {

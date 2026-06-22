@@ -510,9 +510,24 @@ func TestGetRunningSessionIDs(t *testing.T) {
 		t.Fatalf("failed to create sessions dir: %v", err)
 	}
 
-	// 1. Write an active session file with current process PID (which is guaranteed to be running)
+	// 1. Set up a mock project dir and transcript file for the active session.
+	// The session .json must have a cwd so GetRunningSessionIDs can locate
+	// the .jsonl transcript and inspect the last message.
+	workDir := t.TempDir()
+	projectKey := encodeClaudeProjectKey(workDir)
+	projectsDir := filepath.Join(tempHome, ".claude", "projects", projectKey)
+	if err := os.MkdirAll(projectsDir, 0755); err != nil {
+		t.Fatalf("failed to create projects dir: %v", err)
+	}
+	// Write a transcript file whose last message is a user prompt → executing.
+	transcriptPath := filepath.Join(projectsDir, "ses-active-123.jsonl")
+	activeTranscript := `{"type":"user","message":{"role":"user","content":"hello"}}` + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(activeTranscript), 0644); err != nil {
+		t.Fatalf("failed to write active transcript: %v", err)
+	}
+
 	myPid := os.Getpid()
-	stateData := []byte(fmt.Sprintf(`{"pid":%d,"sessionId":"ses-active-123"}`, myPid))
+	stateData := []byte(fmt.Sprintf(`{"pid":%d,"sessionId":"ses-active-123","cwd":%q}`, myPid, workDir))
 	if err := os.WriteFile(filepath.Join(sessionsDir, fmt.Sprintf("%d.json", myPid)), stateData, 0644); err != nil {
 		t.Fatalf("failed to write active session: %v", err)
 	}
