@@ -1,7 +1,7 @@
 package gobridge
 
 import (
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/core"
 	"encoding/json"
 	"fmt"
 	"log/slog"

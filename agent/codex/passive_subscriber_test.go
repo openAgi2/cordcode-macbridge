@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // fakeAppServer 模拟 Codex app-server 的 JSON-RPC over WebSocket 协议。

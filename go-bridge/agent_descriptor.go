@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // AgentStatus 表示 agent/provider 的检测状态。

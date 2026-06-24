@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // linesBuilder accumulates JSONL lines and records each line's start offset by

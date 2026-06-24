@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 func newTestAppServerSession(t *testing.T) *appServerSession {

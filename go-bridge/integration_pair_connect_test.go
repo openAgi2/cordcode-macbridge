@@ -168,7 +168,7 @@ func TestApproveThenAuthConnect(t *testing.T) {
 	helloMsg := map[string]any{
 		"type": "hello",
 		"client": map[string]string{
-			"app":      "CCCode iOS",
+			"app":      "CordCode iOS",
 			"version":  "1.0.0",
 			"deviceId": receivedDeviceID,
 		},

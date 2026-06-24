@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	ccconfig "github.com/openAgi2/cccode-macbridge/config"
-	"github.com/openAgi2/cccode-macbridge/core"
+	ccconfig "github.com/openAgi2/cordcode-macbridge/config"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 func applyProviderSeed(agent core.Agent, agentType, workDir string) error {

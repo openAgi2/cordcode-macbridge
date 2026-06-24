@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/openAgi2/cccode-macbridge/core"
-	"github.com/openAgi2/cccode-macbridge/transcriptindex"
+	"github.com/openAgi2/cordcode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/transcriptindex"
 )
 
 var hiddenDirectoryBases = map[string]bool{
@@ -2840,6 +2840,9 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 		allSessions[i] = h.enrichSessionStateWithAgent(s, agent)
 	}
 	result := paginateSessionList(allSessions, extractStringParam(msg, "cursor"), limit)
+	if data, err := json.MarshalIndent(result, "", "  "); err == nil {
+		_ = os.WriteFile("/tmp/bridge-sessions.json", data, 0644)
+	}
 	metrics.wireMapping += time.Since(mappingStarted)
 	if ws, ok := result["sessions"].([]map[string]interface{}); ok {
 		metrics.resultCount = len(ws)

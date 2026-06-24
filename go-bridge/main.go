@@ -16,11 +16,11 @@ import (
 	"time"
 
 	// Register cc-connect agents via init()
-	_ "github.com/openAgi2/cccode-macbridge/agent/claudecode"
-	_ "github.com/openAgi2/cccode-macbridge/agent/codex"
-	_ "github.com/openAgi2/cccode-macbridge/agent/opencode"
+	_ "github.com/openAgi2/cordcode-macbridge/agent/claudecode"
+	_ "github.com/openAgi2/cordcode-macbridge/agent/codex"
+	_ "github.com/openAgi2/cordcode-macbridge/agent/opencode"
 
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 func Main() {
@@ -247,7 +247,7 @@ func Main() {
 	}
 
 	server := NewServer(handlers)
-	serverDisplayName := "CCCode Bridge"
+	serverDisplayName := "CordCode Link"
 	if mgmtSrv != nil {
 		serverDisplayName = mgmtSrv.DisplayName()
 	}

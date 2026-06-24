@@ -13,7 +13,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 func init() {
@@ -488,7 +488,7 @@ func (a *Agent) SkillDirs() []string {
 
 // CompressCommand returns "" because Codex native slash commands (/compact, /clear)
 // are not reliably executed in exec/resume mode — they may be treated as plain text.
-// See: https://github.com/openAgi2/cccode-macbridge/issues/378
+// See: https://github.com/openAgi2/cordcode-macbridge/issues/378
 func (a *Agent) CompressCommand() string { return "" }
 
 func codexSkillDirs(workDir, explicitCodexHome string) []string {

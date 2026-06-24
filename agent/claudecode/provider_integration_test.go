@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openAgi2/cccode-macbridge/config"
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/config"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // These integration tests use real provider credentials from ~/.cc-connect/config.toml.

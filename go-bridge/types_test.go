@@ -3,7 +3,7 @@ package gobridge
 import (
 	"testing"
 
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 type testRegistrySession struct {

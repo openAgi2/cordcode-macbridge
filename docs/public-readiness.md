@@ -63,7 +63,7 @@ CI is configured for pull requests and pushes to `main`:
 
 ## Remote Verification
 
-- Public remote: `https://github.com/openAgi2/cccode-macbridge`
+- Public remote: `https://github.com/openAgi2/cordcode-macbridge`
 - Default branch: `main`
 - Gitleaks Git-history scan on all 10 commits: passed on 2026-06-12.
 - Gitleaks working-tree scan: passed on 2026-06-12.

@@ -1,4 +1,4 @@
-name: CCCodeBridge
+name: CordCodeLink
 options:
   minimumXcodeGenVersion: 2.38.0
   deploymentTarget:
@@ -9,7 +9,7 @@ settings:
     MARKETING_VERSION: 0.1.0
     CURRENT_PROJECT_VERSION: 1
 targets:
-  CCCodeBridge:
+  CordCodeLink:
     type: application
     supportedDestinations: [macOS]
     deploymentTarget:
@@ -19,7 +19,7 @@ targets:
     info:
       path: Info.plist
       properties:
-        CFBundleDisplayName: "CCCode Bridge"
+        CFBundleDisplayName: "CordCode Link"
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSApplicationCategoryType: "public.app-category.developer-tools"
@@ -31,7 +31,7 @@ targets:
         script: |
           set -euo pipefail
           RUNTIME_OUTPUT="${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/cccode-bridge-runtime"
-          RUNTIME_PACKAGE="github.com/openAgi2/cccode-macbridge/go-bridge"
+          RUNTIME_PACKAGE="github.com/openAgi2/cordcode-macbridge/go-bridge"
           RUNTIME_VERSION="${CCCODE_RUNTIME_VERSION:-${MARKETING_VERSION:-0.1.0-dev}}"
           RUNTIME_COMMIT="${CCCODE_RUNTIME_COMMIT:-$(git rev-parse --short=12 HEAD 2>/dev/null || printf unknown)}"
           RUNTIME_DATE="${CCCODE_RUNTIME_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
@@ -48,10 +48,10 @@ targets:
           chmod +x "$RUNTIME_OUTPUT"
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: org.openagi.cccode.macbridge
+        PRODUCT_BUNDLE_IDENTIFIER: org.openagi.cordcode.link
         CODE_SIGN_STYLE: Automatic
         ARCHS: arm64
-  CCCodeBridgeTests:
+  CordCodeLinkTests:
     type: bundle.unit-test
     platform: macOS
     supportedDestinations: [macOS]
@@ -62,11 +62,11 @@ targets:
       - path: MacBridge/App/OpenCodeLaunchAgentCredentials.swift
       - path: MacBridge/App/OpenCodeCredentialsGenerator.swift
     dependencies:
-      - target: CCCodeBridge
+      - target: CordCodeLink
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: org.openagi.cccode.macbridge.tests
+        PRODUCT_BUNDLE_IDENTIFIER: org.openagi.cordcode.link.tests
         GENERATE_INFOPLIST_FILE: YES
         ARCHS: arm64
-        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/CCCodeBridge.app/Contents/MacOS/CCCodeBridge"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/CordCodeLink.app/Contents/MacOS/CordCodeLink"
         BUNDLE_LOADER: "$(TEST_HOST)"

@@ -1,6 +1,6 @@
 import XCTest
 import Network
-@testable import CCCodeBridge
+@testable import CordCodeLink
 
 // T07: 验证 ManagementAPIClient 的短超时行为。
 // 纯 unit test：用本地 NWListener server 模拟"接受连接但不返回响应"（半开），不依赖 UI automation。

@@ -1,7 +1,7 @@
 package gobridge
 
 import (
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/core"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -106,7 +106,7 @@ func (d *DataDir) Initialize() error {
 	if _, err := os.Stat(d.IdentityPath()); os.IsNotExist(err) {
 		id := &BridgeIdentity{
 			BridgeID:       GenerateBridgeID(),
-			DisplayName:    "CCCode Bridge",
+			DisplayName:    "CordCode Link",
 			CreatedAt:      time.Now().UTC(),
 			RuntimeVersion: runtimeVersion,
 			Protocol: BridgeIdentityProto{

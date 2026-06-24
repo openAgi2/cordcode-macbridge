@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 func TestGetRichSessionHistory_RebuildsStructuredMessagesAndAppliesLimitAfterMerge(t *testing.T) {

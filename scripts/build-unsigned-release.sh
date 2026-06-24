@@ -9,7 +9,7 @@ build_number="${BUILD_NUMBER:-$(awk '/CURRENT_PROJECT_VERSION:/ {print $2; exit}
 commit="$(git rev-parse --short=12 HEAD)"
 build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 derived_data="$repo_root/build/unsigned-release"
-app="$derived_data/Build/Products/Release/CCCodeBridge.app"
+app="$derived_data/Build/Products/Release/CordCodeLink.app"
 
 if [[ -z "${DEVELOPER_DIR:-}" ]]; then
   if [[ -d /Applications/Xcode.app ]]; then
@@ -23,8 +23,8 @@ rm -rf "$derived_data"
 mkdir -p dist
 
 xcodebuild \
-  -project MacBridge/CCCodeBridge.xcodeproj \
-  -scheme CCCodeBridge \
+  -project MacBridge/CordCodeLink.xcodeproj \
+  -scheme CordCodeLink \
   -configuration Release \
   -destination 'platform=macOS' \
   -derivedDataPath "$derived_data" \
@@ -38,7 +38,7 @@ xcodebuild \
   CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
   build
 
-test -x "$app/Contents/MacOS/CCCodeBridge"
+test -x "$app/Contents/MacOS/CordCodeLink"
 test -x "$app/Contents/Resources/cccode-bridge-runtime"
 codesign --verify --deep --strict "$app"
 if codesign -d --entitlements :- "$app" 2>/dev/null | grep -q 'get-task-allow'; then
@@ -52,7 +52,7 @@ if [[ "$runtime_version" != *"$version"* || "$runtime_version" != *"$commit"* ]]
   exit 1
 fi
 
-app_archs="$(lipo -archs "$app/Contents/MacOS/CCCodeBridge")"
+app_archs="$(lipo -archs "$app/Contents/MacOS/CordCodeLink")"
 runtime_archs="$(lipo -archs "$app/Contents/Resources/cccode-bridge-runtime")"
 if [[ "$app_archs" != "$runtime_archs" ]]; then
   echo "Architecture mismatch: app=$app_archs runtime=$runtime_archs" >&2
@@ -60,7 +60,7 @@ if [[ "$app_archs" != "$runtime_archs" ]]; then
 fi
 
 arch="$(tr ' ' '-' <<<"$app_archs")"
-artifact="CCCodeBridge-${version}-macos-${arch}-unsigned.zip"
+artifact="CordCodeLink-${version}-macos-${arch}-unsigned.zip"
 rm -f "dist/$artifact" "dist/$artifact.sha256"
 ditto -c -k --sequesterRsrc --keepParent "$app" "dist/$artifact"
 (

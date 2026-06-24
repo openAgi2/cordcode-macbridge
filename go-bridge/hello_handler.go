@@ -1,6 +1,6 @@
 package gobridge
 
-import "github.com/openAgi2/cccode-macbridge/core"
+import "github.com/openAgi2/cordcode-macbridge/core"
 
 // HelloMessage 是客户端发送的握手消息。
 type HelloMessage struct {

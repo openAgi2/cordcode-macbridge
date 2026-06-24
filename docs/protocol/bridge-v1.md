@@ -1,6 +1,9 @@
-# CCCode Bridge v1
+# CordCode Bridge v1
 
 Direct bridge protocol between iOS and MacBridge over WebSocket.
+
+> **命名说明：** 本协议的 wire 名称固定为 `cccode-bridge`（见下文协议常量），不随
+> 产品名 CCCode→CordCode 变更。本文标题与说明用新品牌名 CordCode。
 
 ## Envelope
 

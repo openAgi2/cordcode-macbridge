@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // WireMessage is the top-level envelope for all WS messages.

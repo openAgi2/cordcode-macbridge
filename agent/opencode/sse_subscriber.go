@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // sseSubscriber 通过 HTTP SSE /global/event 端点被动订阅 OpenCode 服务端事件。

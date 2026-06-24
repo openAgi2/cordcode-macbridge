@@ -1,9 +1,13 @@
-# CCCode E2E Relay v1 协议冻结
+# CordCode E2E Relay v1 协议冻结
 
-> Schema revision: `2026-05-24-r1`  
-> Status: Phase 0 frozen contract  
-> Applies to: `go-bridge` relay connector, iOS relay frame connection, Relay service  
+> Schema revision: `2026-05-24-r1`
+> Status: Phase 0 frozen contract
+> Applies to: `go-bridge` relay connector, iOS relay frame connection, Relay service
 > Source design: `docs/2026-05-24-CCCode-E2E-Relay与加密离线同步实施方案.md`
+
+> **命名说明：** 本协议的 wire 名称固定为 `cccode-relay`，所有 HKDF info 串
+> （`cccode-relay/identity-auth/v1` 等）与签名域是冻结的密码学契约，不随产品名
+> CCCode→CordCode 变更。本文标题与说明文字用新品牌名 CordCode。
 
 本文档冻结 Relay v1 的 transport 与安全合同。现有 `cccode-bridge` v1
 `hello` / `request` / `result` / `event` 仍是唯一业务协议；Relay 只封装和投递

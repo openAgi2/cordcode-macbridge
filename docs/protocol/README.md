@@ -1,8 +1,12 @@
-# CCCode Protocol Pack
+# CordCode Protocol Pack
 
 Canonical source for protocol compatibility lives in this directory.
 The iOS repository may keep a synchronized copy, but compatibility
 decisions should be reviewed against this MacBridge copy first.
+
+> **命名说明：** 协议名称 `cccode-bridge` / `cccode-relay` 及所有 wire 字面量
+> （HKDF info、HTTP 头、签名域）是冻结的兼容性契约，不随产品名 CCCode→CordCode
+> 变更。本文档标题与说明文字反映新品牌名 CordCode，但 wire 字面量保持原样。
 
 ## Current Versions
 

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // TestPassiveSubscriber_Close_NoPanicOnLateSend verifies the T03 invariant for

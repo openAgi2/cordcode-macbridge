@@ -20,7 +20,7 @@ class AppDependencies: ObservableObject {
             ?? "/usr/local/bin/cccode-bridge-runtime"
 
         let dir = NSSearchPathForDirectoriesInDomains(.applicationSupportDirectory, .userDomainMask, true).first!
-            + "/CCCode Bridge"
+            + "/CordCode Link"
         self.dataDir = dir
         let logDir = dir + "/logs"
 

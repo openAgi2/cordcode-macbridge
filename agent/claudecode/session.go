@@ -19,7 +19,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // claudeSession manages a long-running Claude Code process using

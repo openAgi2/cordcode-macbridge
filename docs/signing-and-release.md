@@ -8,8 +8,8 @@ Apple Developer credentials and a notarization policy.
 
 The project uses placeholder public-candidate bundle identifiers:
 
-- App: `org.openagi.cccode.macbridge`
-- Tests: `org.openagi.cccode.macbridge.tests`
+- App: `org.openagi.cordcode.link`
+- Tests: `org.openagi.cordcode.link.tests`
 
 Use a private Xcode configuration or local project override for team-specific
 settings. Do not commit:

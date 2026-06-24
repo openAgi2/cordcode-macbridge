@@ -7,8 +7,8 @@ import (
 	"os"
 	"testing"
 
-	ccopencode "github.com/openAgi2/cccode-macbridge/agent/opencode"
-	"github.com/openAgi2/cccode-macbridge/core"
+	ccopencode "github.com/openAgi2/cordcode-macbridge/agent/opencode"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 func TestOpencodeAgentGetRichSessionHistoryUsesConfiguredHTTPRuntime(t *testing.T) {

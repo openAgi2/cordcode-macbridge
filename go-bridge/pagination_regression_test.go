@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openAgi2/cccode-macbridge/agent/codex"
+	"github.com/openAgi2/cordcode-macbridge/agent/codex"
 )
 
 // Full backward traversal of a session via cursors must cover every logical

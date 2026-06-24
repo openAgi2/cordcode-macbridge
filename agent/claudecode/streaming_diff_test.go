@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 func collectEvents(cs *claudeSession, n int) []core.Event {

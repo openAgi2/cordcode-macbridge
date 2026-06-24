@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 func TestHandleResultParsesUsage(t *testing.T) {

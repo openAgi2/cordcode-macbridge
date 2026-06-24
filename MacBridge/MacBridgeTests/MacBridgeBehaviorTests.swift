@@ -1,5 +1,5 @@
 import XCTest
-@testable import CCCodeBridge
+@testable import CordCodeLink
 
 final class MacBridgeBehaviorTests: XCTestCase {
     func testGoDurationFormatting() {

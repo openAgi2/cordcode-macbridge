@@ -1,0 +1,584 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		060AAD30FED3CB9F10307692 /* OpenCodeCredentialsGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BE70B669DDB9B3C1522465B /* OpenCodeCredentialsGenerator.swift */; };
+		0A0B7AE785F788173FEA48D0 /* OpenCodeCredentialsGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BE70B669DDB9B3C1522465B /* OpenCodeCredentialsGenerator.swift */; };
+		2E07EDF1D105A17DF1E32E1C /* AppDependencies.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDEFE8AC08BD94B695F061C5 /* AppDependencies.swift */; };
+		3020F78BE7732F1FB21E0F07 /* BackendManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4037A50A11C86B7ADD57AEC7 /* BackendManagementView.swift */; };
+		37846593B76DF639E017EBF9 /* MacBridgeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AC7151BF29E1FD3CAC3A1B4 /* MacBridgeApp.swift */; };
+		447E4F6B2D40906387C480D3 /* ProductCopyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D520B55E2B0291B2A887DD34 /* ProductCopyTests.swift */; };
+		4B50BCF0B76C6FCCD9AEA84C /* ManagementAPIClientTimeoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC2125905A5A283AE86C6A43 /* ManagementAPIClientTimeoutTests.swift */; };
+		5F63A0F080450FF92956997A /* PairingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 383EF14F5096F2F068A24503 /* PairingViewModel.swift */; };
+		630534774DD5F13F50A40FB8 /* MenuBarMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C7D5EABF711F9D1698D2B8E /* MenuBarMenu.swift */; };
+		6488DF459B5AA8758BD052D5 /* AppDependenciesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 925DD08E60CAB8D17159E176 /* AppDependenciesTests.swift */; };
+		71351CD15777887FD222B7D5 /* BridgeStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B458091E2090B6530F3C0468 /* BridgeStatusView.swift */; };
+		786AA7E7D49157B38619003B /* RuntimeManagerRestartTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC22FD66FBF5F720584F8421 /* RuntimeManagerRestartTests.swift */; };
+		7F1302ED24887EA2D603700C /* MacBridgeBehaviorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC64B170A23E565E7D8F8251 /* MacBridgeBehaviorTests.swift */; };
+		8852EA0A22819E2647C2557C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D1F477B62EC84313AF871E41 /* Assets.xcassets */; };
+		89D029E10473B44EAF99CC03 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2DA39E8464033D89C109974 /* SettingsView.swift */; };
+		8B6E4CF29205653096575DD6 /* BackendStatusViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4738E918EA61DF9B9286BDDE /* BackendStatusViewModel.swift */; };
+		8FAE152DB77346F49144328B /* PageContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E2CD60DDE08E86DF4FEB931 /* PageContainer.swift */; };
+		95E15CA13AA174B0BE61FAA5 /* Localization.swift in Sources */ = {isa = PBXBuildFile; fileRef = D524FA3A3584520B5645C83C /* Localization.swift */; };
+		97A80C6E8F2C1E1E5E3B861B /* SettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0981650921FA2296D640F294 /* SettingsViewModel.swift */; };
+		9DCAB02C23C6F97F756A87AC /* OpenCodeLaunchAgentCredentials.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2D28621DF47FFFEA3F80696 /* OpenCodeLaunchAgentCredentials.swift */; };
+		A1813AFBDA386D0DE9E1B84C /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53BCC29BA17D8F56035A8068 /* ContentView.swift */; };
+		C156B2FA00015BBD640265B4 /* BridgeStatusViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F2414D249C8A25F8F5F81D5 /* BridgeStatusViewModel.swift */; };
+		C79D8133ED6E5322FDA50842 /* RuntimeManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAAF39AC99F7BCB4449CD1B1 /* RuntimeManager.swift */; };
+		CF8F96FB45BE884424D61687 /* ManagementAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D63472C43A4F245F5009A40 /* ManagementAPIClient.swift */; };
+		CFDB9CBD55CAF5664B16F62D /* PairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A204996433530BDF7624A227 /* PairingView.swift */; };
+		D75F0766D4679AD85CC83AB9 /* OpenCodeLaunchAgentCredentials.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2D28621DF47FFFEA3F80696 /* OpenCodeLaunchAgentCredentials.swift */; };
+		F58F901D587D8FF0447D960F /* RemoteAccessView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2988639F5FD9CE1DC59A5338 /* RemoteAccessView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		066873F4194E53D5042E900B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D2B18756D8E980B849C0FA49 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 44F56CFE48DD6754FB659071;
+			remoteInfo = CordCodeLink;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		0981650921FA2296D640F294 /* SettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewModel.swift; sourceTree = "<group>"; };
+		0E2CD60DDE08E86DF4FEB931 /* PageContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageContainer.swift; sourceTree = "<group>"; };
+		2988639F5FD9CE1DC59A5338 /* RemoteAccessView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteAccessView.swift; sourceTree = "<group>"; };
+		2BE70B669DDB9B3C1522465B /* OpenCodeCredentialsGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeCredentialsGenerator.swift; sourceTree = "<group>"; };
+		383EF14F5096F2F068A24503 /* PairingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingViewModel.swift; sourceTree = "<group>"; };
+		3C7D5EABF711F9D1698D2B8E /* MenuBarMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarMenu.swift; sourceTree = "<group>"; };
+		3D63472C43A4F245F5009A40 /* ManagementAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementAPIClient.swift; sourceTree = "<group>"; };
+		4037A50A11C86B7ADD57AEC7 /* BackendManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendManagementView.swift; sourceTree = "<group>"; };
+		4738E918EA61DF9B9286BDDE /* BackendStatusViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendStatusViewModel.swift; sourceTree = "<group>"; };
+		4F2414D249C8A25F8F5F81D5 /* BridgeStatusViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeStatusViewModel.swift; sourceTree = "<group>"; };
+		53BCC29BA17D8F56035A8068 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		684E9C0C288ED1ED58423396 /* CordCodeLinkTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CordCodeLinkTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		925DD08E60CAB8D17159E176 /* AppDependenciesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDependenciesTests.swift; sourceTree = "<group>"; };
+		9AC7151BF29E1FD3CAC3A1B4 /* MacBridgeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacBridgeApp.swift; sourceTree = "<group>"; };
+		A204996433530BDF7624A227 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
+		AC64B170A23E565E7D8F8251 /* MacBridgeBehaviorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacBridgeBehaviorTests.swift; sourceTree = "<group>"; };
+		AD99321F01E1E7EF31F4B0C9 /* CordCodeLink.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = CordCodeLink.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B458091E2090B6530F3C0468 /* BridgeStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeStatusView.swift; sourceTree = "<group>"; };
+		BAAF39AC99F7BCB4449CD1B1 /* RuntimeManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeManager.swift; sourceTree = "<group>"; };
+		BC22FD66FBF5F720584F8421 /* RuntimeManagerRestartTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeManagerRestartTests.swift; sourceTree = "<group>"; };
+		C2DA39E8464033D89C109974 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		D1F477B62EC84313AF871E41 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		D520B55E2B0291B2A887DD34 /* ProductCopyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductCopyTests.swift; sourceTree = "<group>"; };
+		D524FA3A3584520B5645C83C /* Localization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Localization.swift; sourceTree = "<group>"; };
+		DC2125905A5A283AE86C6A43 /* ManagementAPIClientTimeoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementAPIClientTimeoutTests.swift; sourceTree = "<group>"; };
+		EDEFE8AC08BD94B695F061C5 /* AppDependencies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDependencies.swift; sourceTree = "<group>"; };
+		F2D28621DF47FFFEA3F80696 /* OpenCodeLaunchAgentCredentials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeLaunchAgentCredentials.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		04CBB18CDD956E196EFF8CA3 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				4738E918EA61DF9B9286BDDE /* BackendStatusViewModel.swift */,
+				4F2414D249C8A25F8F5F81D5 /* BridgeStatusViewModel.swift */,
+				383EF14F5096F2F068A24503 /* PairingViewModel.swift */,
+				0981650921FA2296D640F294 /* SettingsViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		2A9CB52B848189474482F725 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				0E2CD60DDE08E86DF4FEB931 /* PageContainer.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		2B4B5E1AA44FC806DB0CFD4C = {
+			isa = PBXGroup;
+			children = (
+				4DC66DC7310EFDDA80B56F3F /* MacBridge */,
+				9B9B9F383C2797D77EA7B4FD /* MacBridgeTests */,
+				39B5F3FC758C9551AEE2A9B5 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		39B5F3FC758C9551AEE2A9B5 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				AD99321F01E1E7EF31F4B0C9 /* CordCodeLink.app */,
+				684E9C0C288ED1ED58423396 /* CordCodeLinkTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		4DC66DC7310EFDDA80B56F3F /* MacBridge */ = {
+			isa = PBXGroup;
+			children = (
+				B531FA5740D41800EF125F14 /* App */,
+				C8F61FEE247B18A949F4D2E5 /* Resources */,
+				EC3AE166A31877F241E81576 /* Services */,
+				04CBB18CDD956E196EFF8CA3 /* ViewModels */,
+				A97CF74426CE939BB463D310 /* Views */,
+			);
+			path = MacBridge;
+			sourceTree = "<group>";
+		};
+		9B9B9F383C2797D77EA7B4FD /* MacBridgeTests */ = {
+			isa = PBXGroup;
+			children = (
+				925DD08E60CAB8D17159E176 /* AppDependenciesTests.swift */,
+				AC64B170A23E565E7D8F8251 /* MacBridgeBehaviorTests.swift */,
+				DC2125905A5A283AE86C6A43 /* ManagementAPIClientTimeoutTests.swift */,
+				D520B55E2B0291B2A887DD34 /* ProductCopyTests.swift */,
+				BC22FD66FBF5F720584F8421 /* RuntimeManagerRestartTests.swift */,
+			);
+			path = MacBridgeTests;
+			sourceTree = "<group>";
+		};
+		A97CF74426CE939BB463D310 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				4037A50A11C86B7ADD57AEC7 /* BackendManagementView.swift */,
+				B458091E2090B6530F3C0468 /* BridgeStatusView.swift */,
+				53BCC29BA17D8F56035A8068 /* ContentView.swift */,
+				3C7D5EABF711F9D1698D2B8E /* MenuBarMenu.swift */,
+				A204996433530BDF7624A227 /* PairingView.swift */,
+				2988639F5FD9CE1DC59A5338 /* RemoteAccessView.swift */,
+				C2DA39E8464033D89C109974 /* SettingsView.swift */,
+				2A9CB52B848189474482F725 /* Components */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		B531FA5740D41800EF125F14 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				EDEFE8AC08BD94B695F061C5 /* AppDependencies.swift */,
+				9AC7151BF29E1FD3CAC3A1B4 /* MacBridgeApp.swift */,
+				2BE70B669DDB9B3C1522465B /* OpenCodeCredentialsGenerator.swift */,
+				F2D28621DF47FFFEA3F80696 /* OpenCodeLaunchAgentCredentials.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		C8F61FEE247B18A949F4D2E5 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				D1F477B62EC84313AF871E41 /* Assets.xcassets */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		EC3AE166A31877F241E81576 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				D524FA3A3584520B5645C83C /* Localization.swift */,
+				3D63472C43A4F245F5009A40 /* ManagementAPIClient.swift */,
+				BAAF39AC99F7BCB4449CD1B1 /* RuntimeManager.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		44F56CFE48DD6754FB659071 /* CordCodeLink */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C027161C4E68E8CC92503700 /* Build configuration list for PBXNativeTarget "CordCodeLink" */;
+			buildPhases = (
+				CA19C8841D51273D5D9393D6 /* Build go-bridge runtime */,
+				B3D16682D9157C12779396C4 /* Sources */,
+				8E38F585F9F5A371E9C685DC /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CordCodeLink;
+			packageProductDependencies = (
+			);
+			productName = CordCodeLink;
+			productReference = AD99321F01E1E7EF31F4B0C9 /* CordCodeLink.app */;
+			productType = "com.apple.product-type.application";
+		};
+		857CD926B10A40FC72294EAA /* CordCodeLinkTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2C260E83748CEB2716A2D917 /* Build configuration list for PBXNativeTarget "CordCodeLinkTests" */;
+			buildPhases = (
+				6B3CDEC042CEF2D5099A4955 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A5266D37498E1270E38BBCB7 /* PBXTargetDependency */,
+			);
+			name = CordCodeLinkTests;
+			packageProductDependencies = (
+			);
+			productName = CordCodeLinkTests;
+			productReference = 684E9C0C288ED1ED58423396 /* CordCodeLinkTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		D2B18756D8E980B849C0FA49 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					44F56CFE48DD6754FB659071 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 81F51D308F3AD8489B3112E7 /* Build configuration list for PBXProject "CordCodeLink" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 2B4B5E1AA44FC806DB0CFD4C;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				44F56CFE48DD6754FB659071 /* CordCodeLink */,
+				857CD926B10A40FC72294EAA /* CordCodeLinkTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		8E38F585F9F5A371E9C685DC /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8852EA0A22819E2647C2557C /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		CA19C8841D51273D5D9393D6 /* Build go-bridge runtime */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build go-bridge runtime";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\nRUNTIME_OUTPUT=\"${BUILT_PRODUCTS_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/cccode-bridge-runtime\"\nRUNTIME_PACKAGE=\"github.com/openAgi2/cordcode-macbridge/go-bridge\"\nRUNTIME_VERSION=\"${CCCODE_RUNTIME_VERSION:-${MARKETING_VERSION:-0.1.0-dev}}\"\nRUNTIME_COMMIT=\"${CCCODE_RUNTIME_COMMIT:-$(git rev-parse --short=12 HEAD 2>/dev/null || printf unknown)}\"\nRUNTIME_DATE=\"${CCCODE_RUNTIME_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}\"\nRUNTIME_LDFLAGS=\"-X ${RUNTIME_PACKAGE}.runtimeVersion=${RUNTIME_VERSION} -X ${RUNTIME_PACKAGE}.runtimeCommit=${RUNTIME_COMMIT} -X ${RUNTIME_PACKAGE}.runtimeDate=${RUNTIME_DATE}\"\nRUNTIME_ARCH=\"${ARCHS%% *}\"\ncase \"$RUNTIME_ARCH\" in\n  arm64) GO_ARCH=arm64 ;;\n  x86_64) GO_ARCH=amd64 ;;\n  *) echo \"Unsupported runtime architecture: $RUNTIME_ARCH\" >&2; exit 1 ;;\nesac\nmkdir -p \"$(dirname \"$RUNTIME_OUTPUT\")\"\ncd \"${SRCROOT}/..\"\nGOOS=darwin GOARCH=\"$GO_ARCH\" go build -trimpath -ldflags \"$RUNTIME_LDFLAGS\" -o \"$RUNTIME_OUTPUT\" ./go-bridge/cmd/cccode-bridge-runtime\nchmod +x \"$RUNTIME_OUTPUT\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		6B3CDEC042CEF2D5099A4955 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6488DF459B5AA8758BD052D5 /* AppDependenciesTests.swift in Sources */,
+				7F1302ED24887EA2D603700C /* MacBridgeBehaviorTests.swift in Sources */,
+				4B50BCF0B76C6FCCD9AEA84C /* ManagementAPIClientTimeoutTests.swift in Sources */,
+				0A0B7AE785F788173FEA48D0 /* OpenCodeCredentialsGenerator.swift in Sources */,
+				D75F0766D4679AD85CC83AB9 /* OpenCodeLaunchAgentCredentials.swift in Sources */,
+				447E4F6B2D40906387C480D3 /* ProductCopyTests.swift in Sources */,
+				786AA7E7D49157B38619003B /* RuntimeManagerRestartTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B3D16682D9157C12779396C4 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2E07EDF1D105A17DF1E32E1C /* AppDependencies.swift in Sources */,
+				3020F78BE7732F1FB21E0F07 /* BackendManagementView.swift in Sources */,
+				8B6E4CF29205653096575DD6 /* BackendStatusViewModel.swift in Sources */,
+				71351CD15777887FD222B7D5 /* BridgeStatusView.swift in Sources */,
+				C156B2FA00015BBD640265B4 /* BridgeStatusViewModel.swift in Sources */,
+				A1813AFBDA386D0DE9E1B84C /* ContentView.swift in Sources */,
+				95E15CA13AA174B0BE61FAA5 /* Localization.swift in Sources */,
+				37846593B76DF639E017EBF9 /* MacBridgeApp.swift in Sources */,
+				CF8F96FB45BE884424D61687 /* ManagementAPIClient.swift in Sources */,
+				630534774DD5F13F50A40FB8 /* MenuBarMenu.swift in Sources */,
+				060AAD30FED3CB9F10307692 /* OpenCodeCredentialsGenerator.swift in Sources */,
+				9DCAB02C23C6F97F756A87AC /* OpenCodeLaunchAgentCredentials.swift in Sources */,
+				8FAE152DB77346F49144328B /* PageContainer.swift in Sources */,
+				CFDB9CBD55CAF5664B16F62D /* PairingView.swift in Sources */,
+				5F63A0F080450FF92956997A /* PairingViewModel.swift in Sources */,
+				F58F901D587D8FF0447D960F /* RemoteAccessView.swift in Sources */,
+				C79D8133ED6E5322FDA50842 /* RuntimeManager.swift in Sources */,
+				89D029E10473B44EAF99CC03 /* SettingsView.swift in Sources */,
+				97A80C6E8F2C1E1E5E3B861B /* SettingsViewModel.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A5266D37498E1270E38BBCB7 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 44F56CFE48DD6754FB659071 /* CordCodeLink */;
+			targetProxy = 066873F4194E53D5042E900B /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		05CC0DEE03F0E350E056AFFF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = org.openagi.cordcode.link;
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = macosx;
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				TARGETED_DEVICE_FAMILY = "";
+			};
+			name = Release;
+		};
+		66EFB7C4E1F22DA422DE017B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Release;
+		};
+		9A54B0C4574353A25D339DF3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Debug;
+		};
+		9F93807299D17B05BC715518 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = org.openagi.cordcode.link.tests;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				TARGETED_DEVICE_FAMILY = "";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CordCodeLink.app/Contents/MacOS/CordCodeLink";
+			};
+			name = Debug;
+		};
+		CB5BA9FFD765AFDCCD1F2481 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = org.openagi.cordcode.link;
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = macosx;
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				TARGETED_DEVICE_FAMILY = "";
+			};
+			name = Debug;
+		};
+		D6661520CA1B077109107E40 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = org.openagi.cordcode.link.tests;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				TARGETED_DEVICE_FAMILY = "";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CordCodeLink.app/Contents/MacOS/CordCodeLink";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		2C260E83748CEB2716A2D917 /* Build configuration list for PBXNativeTarget "CordCodeLinkTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9F93807299D17B05BC715518 /* Debug */,
+				D6661520CA1B077109107E40 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		81F51D308F3AD8489B3112E7 /* Build configuration list for PBXProject "CordCodeLink" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9A54B0C4574353A25D339DF3 /* Debug */,
+				66EFB7C4E1F22DA422DE017B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C027161C4E68E8CC92503700 /* Build configuration list for PBXNativeTarget "CordCodeLink" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CB5BA9FFD765AFDCCD1F2481 /* Debug */,
+				05CC0DEE03F0E350E056AFFF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = D2B18756D8E980B849C0FA49 /* Project object */;
+}

@@ -12,7 +12,7 @@ This checklist is for preparing a MacBridge release from the split repository.
 
 Current public-remote verification (2026-06-12):
 
-- `openAgi2/cccode-macbridge`, default branch `main`.
+- `openAgi2/cordcode-macbridge`, default branch `main`.
 - Gitleaks Git-history and working-tree scans passed before public visibility
   was enabled.
 
@@ -22,14 +22,14 @@ Current public-remote verification (2026-06-12):
 go build ./go-bridge
 go test ./go-bridge/... -count=1
 (cd relay-server && go test ./... -count=1)
-xcodebuild -project MacBridge/CCCodeBridge.xcodeproj -scheme CCCodeBridge -configuration Debug -destination 'platform=macOS' build
+xcodebuild -project MacBridge/CordCodeLink.xcodeproj -scheme CordCodeLink -configuration Debug -destination 'platform=macOS' build
 ./scripts/build-unsigned-release.sh
 ```
 
 ## Bundle Gate
 
 ```bash
-xcodebuild -project MacBridge/CCCodeBridge.xcodeproj -scheme CCCodeBridge -configuration Debug -destination 'platform=macOS' -showBuildSettings
+xcodebuild -project MacBridge/CordCodeLink.xcodeproj -scheme CordCodeLink -configuration Debug -destination 'platform=macOS' -showBuildSettings
 test -x "$BUILT_PRODUCTS_DIR/CCCodeBridge.app/Contents/Resources/cccode-bridge-runtime"
 ```
 

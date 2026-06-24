@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 func TestNormalizeReasoningEffort_RejectsMinimal(t *testing.T) {

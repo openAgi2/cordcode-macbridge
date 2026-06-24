@@ -6,14 +6,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 func TestHandleHello_MatchingVersion(t *testing.T) {
 	hello := &HelloMessage{
 		Type: "hello",
 		Client: HelloClient{
-			App:      "CCCode",
+			App:      "CordCode",
 			Version:  "1.0",
 			DeviceID: "test-device",
 		},
@@ -74,7 +74,7 @@ func TestHandleHello_WrongVersion(t *testing.T) {
 	hello := &HelloMessage{
 		Type: "hello",
 		Client: HelloClient{
-			App:      "CCCode",
+			App:      "CordCode",
 			Version:  "1.0",
 			DeviceID: "test-device",
 		},
@@ -118,7 +118,7 @@ func TestHandleHello_ContainsAgentDescriptors(t *testing.T) {
 	hello := &HelloMessage{
 		Type: "hello",
 		Client: HelloClient{
-			App:      "CCCode",
+			App:      "CordCode",
 			Version:  "1.0",
 			DeviceID: "test-device",
 		},
@@ -146,7 +146,7 @@ func TestHandleHello_WithAgents(t *testing.T) {
 	hello := &HelloMessage{
 		Type: "hello",
 		Client: HelloClient{
-			App:      "CCCode",
+			App:      "CordCode",
 			Version:  "1.0",
 			DeviceID: "test-device",
 		},
@@ -176,7 +176,7 @@ func TestHelloMessage_JSONRoundTrip(t *testing.T) {
 	original := HelloMessage{
 		Type: "hello",
 		Client: HelloClient{
-			App:      "CCCode",
+			App:      "CordCode",
 			Version:  "2.0",
 			DeviceID: "device-abc",
 		},
@@ -200,7 +200,7 @@ func TestHelloMessage_JSONRoundTrip(t *testing.T) {
 	if decoded.Type != "hello" {
 		t.Errorf("Type 不匹配: got %q", decoded.Type)
 	}
-	if decoded.Client.App != "CCCode" {
+	if decoded.Client.App != "CordCode" {
 		t.Errorf("Client.App 不匹配: got %q", decoded.Client.App)
 	}
 	if decoded.Client.DeviceID != "device-abc" {
@@ -380,7 +380,7 @@ func TestHandleHello_RemoteURL_Propagated(t *testing.T) {
 	hello := &HelloMessage{
 		Type: "hello",
 		Client: HelloClient{
-			App:      "CCCode",
+			App:      "CordCode",
 			Version:  "1.0",
 			DeviceID: "test-device",
 		},
@@ -418,7 +418,7 @@ func TestHandleHello_RemoteURL_Empty(t *testing.T) {
 	hello := &HelloMessage{
 		Type: "hello",
 		Client: HelloClient{
-			App:      "CCCode",
+			App:      "CordCode",
 			Version:  "1.0",
 			DeviceID: "test-device",
 		},
@@ -483,7 +483,7 @@ func TestHelloAckMessage_RemoteURL_JSONRoundTrip(t *testing.T) {
 
 func TestHandleHello_SecurityProfile_LAN(t *testing.T) {
 	ack := HandleHello(&HelloMessage{
-		Type: "hello", Client: HelloClient{App: "CCCode", Version: "1.0", DeviceID: "dev"},
+		Type: "hello", Client: HelloClient{App: "CordCode", Version: "1.0", DeviceID: "dev"},
 		Protocol: HelloProtocol{Name: BridgeProtocolName, Version: BridgeProtocolVersion},
 	}, nil, "bridge-1", "My Bridge", "0.1.0",
 		"ws://192.168.1.100:8777", "", nil, "exec", nil, nil)
@@ -507,7 +507,7 @@ func TestHandleHello_SecurityProfile_LAN(t *testing.T) {
 
 func TestHandleHello_SecurityProfile_Tailscale(t *testing.T) {
 	ack := HandleHello(&HelloMessage{
-		Type: "hello", Client: HelloClient{App: "CCCode", Version: "1.0", DeviceID: "dev"},
+		Type: "hello", Client: HelloClient{App: "CordCode", Version: "1.0", DeviceID: "dev"},
 		Protocol: HelloProtocol{Name: BridgeProtocolName, Version: BridgeProtocolVersion},
 	}, nil, "bridge-1", "My Bridge", "0.1.0",
 		"ws://100.100.50.20:8777", "", nil, "exec", nil, nil)
@@ -525,7 +525,7 @@ func TestHandleHello_SecurityProfile_Tailscale(t *testing.T) {
 
 func TestHandleHello_SecurityProfile_Loopback(t *testing.T) {
 	ack := HandleHello(&HelloMessage{
-		Type: "hello", Client: HelloClient{App: "CCCode", Version: "1.0", DeviceID: "dev"},
+		Type: "hello", Client: HelloClient{App: "CordCode", Version: "1.0", DeviceID: "dev"},
 		Protocol: HelloProtocol{Name: BridgeProtocolName, Version: BridgeProtocolVersion},
 	}, nil, "bridge-1", "My Bridge", "0.1.0",
 		"ws://localhost:8777", "", nil, "exec", nil, nil)
@@ -543,7 +543,7 @@ func TestHandleHello_SecurityProfile_Loopback(t *testing.T) {
 
 func TestHandleHello_SecurityProfile_WSS(t *testing.T) {
 	ack := HandleHello(&HelloMessage{
-		Type: "hello", Client: HelloClient{App: "CCCode", Version: "1.0", DeviceID: "dev"},
+		Type: "hello", Client: HelloClient{App: "CordCode", Version: "1.0", DeviceID: "dev"},
 		Protocol: HelloProtocol{Name: BridgeProtocolName, Version: BridgeProtocolVersion},
 	}, nil, "bridge-1", "My Bridge", "0.1.0",
 		"wss://example.com:8777", "", nil, "exec", nil, nil)
@@ -558,7 +558,7 @@ func TestHandleHello_SecurityProfile_WSS(t *testing.T) {
 
 func TestHandleHello_SecurityProfile_PublicWS(t *testing.T) {
 	ack := HandleHello(&HelloMessage{
-		Type: "hello", Client: HelloClient{App: "CCCode", Version: "1.0", DeviceID: "dev"},
+		Type: "hello", Client: HelloClient{App: "CordCode", Version: "1.0", DeviceID: "dev"},
 		Protocol: HelloProtocol{Name: BridgeProtocolName, Version: BridgeProtocolVersion},
 	}, nil, "bridge-1", "My Bridge", "0.1.0",
 		"ws://203.0.113.10:8777", "", nil, "exec", nil, nil)

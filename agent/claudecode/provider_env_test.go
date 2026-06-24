@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 func TestAgentUsageProbeEnv_AddsHostManagedFlagForCustomProvider(t *testing.T) {

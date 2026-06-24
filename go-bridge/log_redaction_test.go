@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // captureSlogText 将 slog 默认 handler 重定向到 buffer，返回恢复函数。

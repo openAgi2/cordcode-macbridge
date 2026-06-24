@@ -31,8 +31,8 @@ func generateSelfSignedCert(hosts ...string) (*tls.Certificate, error) {
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
 		Subject: pkix.Name{
-			CommonName:   "CCCode Bridge",
-			Organization: []string{"CCCode Self-Signed"},
+			CommonName:   "CordCode Link",
+			Organization: []string{"CordCode Self-Signed"},
 		},
 		NotBefore:             now.Add(-1 * time.Hour),
 		NotAfter:              now.Add(365 * 24 * time.Hour),

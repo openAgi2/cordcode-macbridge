@@ -44,7 +44,7 @@ clients over a direct LAN WebSocket or an end-to-end-encrypted public Relay. Thi
 There are **two independent Go modules** plus one Xcode project:
 
 ```bash
-# go-bridge runtime + shared Go libs (root module: github.com/openAgi2/cccode-macbridge)
+# go-bridge runtime + shared Go libs (root module: github.com/openAgi2/cordcode-macbridge)
 go build ./go-bridge
 go test ./go-bridge/... -count=1
 go test ./go-bridge/... -run TestPaginationStableID -count=1   # single test

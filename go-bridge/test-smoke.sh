@@ -48,7 +48,7 @@ async function main() {
   // Step 1: register
   send(ws, {
     type: 'register',
-    client: { id: 'smoke-test', name: 'CCCode-Smoke', version: '1.0' },
+    client: { id: 'smoke-test', name: 'CordCode-Smoke', version: '1.0' },
     protocol: { name: 'cccode-bridge', version: 1 },
   });
 

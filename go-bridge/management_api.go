@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // httpReadHeaderTimeout 是管理/主 HTTP server 的握手 header 读取超时（P2-1 slowloris 防护）。
@@ -851,7 +851,7 @@ func loadOrCreateDisplayName(dataDir *DataDir) string {
 	if dataDir == nil {
 		hostname, _ := os.Hostname()
 		if hostname == "" {
-			hostname = "CCCode Bridge"
+			hostname = "CordCode Link"
 		}
 		return hostname
 	}
@@ -867,7 +867,7 @@ func loadOrCreateDisplayName(dataDir *DataDir) string {
 	}
 	hostname, _ := os.Hostname()
 	if hostname == "" {
-		hostname = "CCCode Bridge"
+		hostname = "CordCode Link"
 	}
 	saveDisplayNameToDir(dataDir, hostname)
 	return hostname

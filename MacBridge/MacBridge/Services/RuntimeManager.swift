@@ -196,7 +196,7 @@ class RuntimeManager: ObservableObject {
         userStopped = true
         terminateProcess()
         resetRuntimeState()
-        setStatus(.stopped, "CCCode Bridge 已停止")
+        setStatus(.stopped, "CordCode Link 已停止")
     }
 
     func restart() {
@@ -401,12 +401,12 @@ class RuntimeManager: ObservableObject {
         crashCount += 1
 
         if crashCount >= maxCrashRetries {
-            setStatus(.crashed, "CCCode Bridge 连续意外退出，已停止自动重启")
+            setStatus(.crashed, "CordCode Link 连续意外退出，已停止自动重启")
             lastError = "请检查日志: \(config.logFilePath)"
             return
         }
 
-        let statusText = wasRunning ? "CCCode Bridge 意外退出，正在重启..." : "CCCode Bridge 启动失败，正在重试..."
+        let statusText = wasRunning ? "CordCode Link 意外退出，正在重启..." : "CordCode Link 启动失败，正在重试..."
         NSLog("[RuntimeManager] go-bridge 意外退出，第 \(crashCount) 次重启")
         setStatus(.starting, statusText)
 
@@ -615,12 +615,12 @@ class RuntimeManager: ObservableObject {
         switch rawStatus {
         case "ready":
             crashCount = 0
-            setStatus(.ready, "CCCode Bridge 运行中")
+            setStatus(.ready, "CordCode Link 运行中")
         case "ready_no_agents":
             crashCount = 0
             setStatus(.readyNoAgents, "请配置至少一个 AI 工具")
         default:
-            setStatus(.starting, "CCCode Bridge 正在启动...")
+            setStatus(.starting, "CordCode Link 正在启动...")
         }
     }
 
@@ -665,6 +665,9 @@ class RuntimeManager: ObservableObject {
             return true
         }
         if executable.contains("/go-bridge/go-bridge") || command.contains("/go-bridge/go-bridge") {
+            return true
+        }
+        if executable.hasSuffix("/cccode-bridge-runtime") || command.hasSuffix("/cccode-bridge-runtime") || executable.contains("/cccode-bridge-runtime") {
             return true
         }
         return false
@@ -976,7 +979,7 @@ enum RelaySecretFileStore {
     // 用以替代钥匙串——后者会在 ad-hoc / 不稳定 Team 签名下每次重装都弹登录密码授权。
     static var directory: String {
         NSSearchPathForDirectoriesInDomains(.applicationSupportDirectory, .userDomainMask, true).first!
-            + "/CCCode Bridge/relay-secrets"
+            + "/CordCode Link/relay-secrets"
     }
 
     /// 旧版本存在钥匙串的 service 名（迁移用）。

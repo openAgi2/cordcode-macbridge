@@ -1,5 +1,5 @@
 import XCTest
-@testable import CCCodeBridge
+@testable import CordCodeLink
 
 // T05: 验证 restart() 的 launch generation + 可取消 Task 收敛行为。
 // 纯 unit test：用 /usr/bin/false（立即退出）作为可执行文件，观测 launchCount，

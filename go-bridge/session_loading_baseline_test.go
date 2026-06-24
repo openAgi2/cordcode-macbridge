@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openAgi2/cccode-macbridge/agent/claudecode"
-	"github.com/openAgi2/cccode-macbridge/agent/codex"
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/agent/claudecode"
+	"github.com/openAgi2/cordcode-macbridge/agent/codex"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 const sessionLoadingBaselineRuns = 5

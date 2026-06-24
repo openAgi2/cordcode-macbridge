@@ -39,7 +39,7 @@ struct MacBridgeApp: App {
         .windowResizability(.contentMinSize)
 
         // 菜单栏图标及下拉菜单
-        MenuBarExtra("CCCode Bridge", systemImage: menuBarIcon) {
+        MenuBarExtra("CordCode Link", systemImage: menuBarIcon) {
             MenuBarMenu(
                 viewModel: dependencies.statusViewModel,
                 onStart: { dependencies.runtimeManager.start() },

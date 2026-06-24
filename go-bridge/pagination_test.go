@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openAgi2/cccode-macbridge/agent/codex"
-	"github.com/openAgi2/cccode-macbridge/transcriptindex"
+	"github.com/openAgi2/cordcode-macbridge/agent/codex"
+	"github.com/openAgi2/cordcode-macbridge/transcriptindex"
 )
 
 // writeCodexFixture writes an alternating user/assistant Codex transcript under a

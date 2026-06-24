@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 const codexRolloutTailBytes int64 = 1 << 20

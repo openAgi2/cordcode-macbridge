@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openAgi2/cccode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // ── 最小 fakeAgent，仅实现 core.Agent ──
