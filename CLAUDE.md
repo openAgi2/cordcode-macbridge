@@ -112,9 +112,9 @@ The VPS host/user/password live in **environment variables in `~/.zshrc`** (loca
 machine, never committed):
 
 ```bash
-export CCCODE_RELAY_VPS_HOST='<host>'
-export CCCODE_RELAY_VPS_USER='<user>'
-export CCCODE_RELAY_VPS_PASS='<password>'
+export CORDCODE_RELAY_VPS_HOST='<host>'
+export CORDCODE_RELAY_VPS_USER='<user>'
+export CORDCODE_RELAY_VPS_PASS='<password>'
 ```
 
 An ssh alias is also expected in `~/.ssh/config`:
@@ -127,7 +127,7 @@ Host cccode-relay-prod
     PubkeyAuthentication no
 ```
 
-The deploy script reads `CCCODE_RELAY_VPS_PASS` and feeds it via `sshpass -e` (set `SSHPASS`)
+The deploy script reads `CORDCODE_RELAY_VPS_PASS` and feeds it via `sshpass -e` (set `SSHPASS`)
 so deployment is non-interactive. **Never commit the password** or any VPS credential.
 
 > ⚠️ This VPS's sshd has slow banner exchange (UseDNS reverse lookup + intermittent network).
@@ -147,7 +147,7 @@ a Relay deploy.
 ```bash
 # 1. 交叉编译 linux/amd64
 (cd relay-server && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-  go build -trimpath -ldflags='-s -w' -o /tmp/cccode-relay-server ./cmd/relay-server)
+  go build -trimpath -ldflags='-s -w' -o /tmp/cordcode-relay-server ./cmd/relay-server)
 
 # 2. 安全部署：只读核查 → 备份 → 上传 → SHA 校验 → 原子替换 → 重启 → 健康检查
 scripts/deploy-relay-vps.sh
