@@ -1,15 +1,25 @@
-# CCCode MacBridge
+# CordCode MacBridge
 
-MacBridge is the macOS companion for CCCode. It runs the desktop app, the local
-bridge runtime, and the optional relay service used by iPhone and iPad clients.
+This repo is the **Mac-side bridge aggregate** for CordCode: the desktop app,
+its embedded runtime, the public Relay server source, and the agent drivers —
+all in one repo. The macOS app users see is **CordCode Link**; the iOS client
+lives in a separate repo (`cordcode-ios`).
 
 ## Contents
 
-- `MacBridge/`: macOS app project.
-- `go-bridge/`: local WebSocket runtime adapter embedded as `cccode-bridge-runtime`.
-- `core/`, `config/`, `agent/`: product-scoped agent runtime code imported from the former `cc-connect` dependency.
-- `relay-server/`: independent Go module for the public encrypted relay service.
-- `docs/protocol/`: canonical protocol compatibility pack.
+| Subsystem | What it is | Product / deployment |
+| --- | --- | --- |
+| `MacBridge/` | macOS SwiftUI app | **CordCode Link** (display name), `org.openagi.cordcode.link` |
+| `go-bridge/` | local WebSocket runtime + Relay crypto (connector side) | embedded in CordCode Link as `cccode-bridge-runtime` |
+| `relay-server/` | public encrypted Relay **server** (independent Go module `cccode-relay`) | deployed on a VPS, **not** part of the Mac app |
+| `agent/{claudecode,codex,opencode}/` | per-agent drivers | embedded in CordCode Link |
+| `core/`, `config/`, `transcriptindex/` | shared Go libs | imported across subsystems |
+| `docs/protocol/` | canonical protocol compatibility pack | — |
+
+`relay-server/` is a separately deployed server (runs on a VPS at the public
+Relay endpoint) — distinct from CordCode Link which runs on the user's Mac.
+That is why this repo is named `*-macbridge` (the whole Mac-side bridge
+family) rather than `*-link` (which would mislabel the Relay server source).
 
 ## Backend Requirements
 

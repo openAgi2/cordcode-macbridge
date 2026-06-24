@@ -4,10 +4,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-CordCode Link is the **macOS companion** for CordCode. It exposes locally-installed
-AI coding agent backends (Claude Code CLI, OpenCode server, Codex app-server) to iPhone/iPad
-clients over a direct LAN WebSocket or an end-to-end-encrypted public Relay. This repo is the
-**Mac side only**; the iOS client lives in a separate repo.
+This repo is the **Mac-side bridge aggregate** for CordCode: the macOS app,
+its embedded WebSocket runtime, the public Relay server source, and the agent
+drivers. The app users see is **CordCode Link**; the iOS client lives in a
+separate repo (`../cordcode-ios/`).
+
+It exposes locally-installed AI coding agent backends (Claude Code CLI, OpenCode
+server, Codex app-server) to iPhone/iPad clients over a direct LAN WebSocket or
+an end-to-end-encrypted public Relay.
+
+**Two distinct deployment units share this repo:**
+
+- **CordCode Link** (`MacBridge/` + `go-bridge/` + `agent/`): the macOS app that
+  runs on the user's Mac; `go-bridge/` is embedded into the app as
+  `cccode-bridge-runtime`.
+- **Relay server** (`relay-server/`, independent Go module `cccode-relay`): the
+  public encrypted relay deployed on a VPS — **not** part of the Mac app. This
+  is why the repo is named `cordcode-macbridge` (the whole Mac-side bridge
+  family), not `cordcode-link` (which would mislabel the Relay server source).
 
 ## New-session bootstrap
 
