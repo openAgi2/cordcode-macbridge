@@ -1,6 +1,6 @@
 # Privacy
 
-CCCode MacBridge runs coding-agent backends on the user's Mac. The application
+CordCode Link runs coding-agent backends on the user's Mac. The application
 does not include analytics, advertising, or telemetry SDKs.
 
 ## Local Data
