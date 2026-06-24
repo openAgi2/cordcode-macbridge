@@ -1,7 +1,7 @@
 # go-bridge 当前架构与 backend 进程模型
 
 > 本文从原一体仓库 `go-bridge 框架现状.md`、`go_bridge_使用指南.md` 中提炼，
-> 以拆分后的 `cccode-macbridge` 源码为准。旧 Node Unified Bridge、外部 `cc-connect`
+> 以拆分后的 `cordcode-macbridge` 源码为准。旧 Node Unified Bridge、外部 `cc-connect`
 > replace、Copilot sidecar 和 FRP 默认路径均已删除出当前说明。
 
 ## 边界

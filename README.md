@@ -31,14 +31,14 @@ generated or stored locally and are not committed.
 go build ./go-bridge
 go test ./go-bridge/... -count=1
 (cd relay-server && go test ./... -count=1)
-xcodebuild -project MacBridge/CCCodeBridge.xcodeproj -scheme CCCodeBridge -configuration Debug -destination 'platform=macOS' build
+xcodebuild -project MacBridge/CordCodeLink.xcodeproj -scheme CordCodeLink -configuration Debug -destination 'platform=macOS' build
 ```
 
 After the Xcode build, verify the embedded runtime:
 
 ```bash
-BUILT_PRODUCTS_DIR=$(xcodebuild -project MacBridge/CCCodeBridge.xcodeproj -scheme CCCodeBridge -configuration Debug -destination 'platform=macOS' -showBuildSettings | awk -F'= ' '/ BUILT_PRODUCTS_DIR = / {print $2; exit}')
-test -x "$BUILT_PRODUCTS_DIR/CCCodeBridge.app/Contents/Resources/cccode-bridge-runtime"
+BUILT_PRODUCTS_DIR=$(xcodebuild -project MacBridge/CordCodeLink.xcodeproj -scheme CordCodeLink -configuration Debug -destination 'platform=macOS' -showBuildSettings | awk -F'= ' '/ BUILT_PRODUCTS_DIR = / {print $2; exit}')
+test -x "$BUILT_PRODUCTS_DIR/CordCodeLink.app/Contents/Resources/cccode-bridge-runtime"
 ```
 
 ## Install A Preview Build

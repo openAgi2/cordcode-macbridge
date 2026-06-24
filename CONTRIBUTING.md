@@ -19,7 +19,7 @@ Keep changes focused and reviewable.
 go build ./go-bridge
 go test ./go-bridge/... -count=1
 (cd relay-server && go test ./... -count=1)
-xcodebuild -project MacBridge/CCCodeBridge.xcodeproj -scheme CCCodeBridge -configuration Debug -destination 'platform=macOS' build
+xcodebuild -project MacBridge/CordCodeLink.xcodeproj -scheme CordCodeLink -configuration Debug -destination 'platform=macOS' build
 ```
 
 UI automation and real-device validation require explicit owner approval.
