@@ -46,7 +46,8 @@ type claudeSession struct {
 	activeMsgID     atomic.Value // stores string — 当前正在 diff 的 message.id
 	emittedText     atomic.Value // stores string — 当前 message.id 下已发送的累积文本
 	historyDraining atomic.Bool  // --resume 启动后的历史重放期；drain 期间不 emit live 事件
-	toolNameByUseID sync.Map     // tool_use_id → tool_name
+	streamState     streamEventState
+	toolNameByUseID sync.Map // tool_use_id → tool_name
 
 	// gracefulStopTimeout is how long Close() waits for a clean exit
 	// (stdin close → Stop hooks → process exit) before escalating to
@@ -56,20 +57,59 @@ type claudeSession struct {
 	gracefulStopTimeout time.Duration
 }
 
+type streamEventState struct {
+	currentMsgID      string
+	blockTypeByIndex  map[int]string
+	streamedTextByIdx map[int]string
+}
+
+func (s *streamEventState) ensure() {
+	if s.blockTypeByIndex == nil {
+		s.blockTypeByIndex = make(map[int]string)
+	}
+	if s.streamedTextByIdx == nil {
+		s.streamedTextByIdx = make(map[int]string)
+	}
+}
+
+func (s *streamEventState) reset() {
+	s.currentMsgID = ""
+	s.blockTypeByIndex = make(map[int]string)
+	s.streamedTextByIdx = make(map[int]string)
+}
+
+func (s *streamEventState) onMessageStart(id string) {
+	s.ensure()
+	if id == "" {
+		return
+	}
+	if s.currentMsgID != id {
+		s.currentMsgID = id
+		s.blockTypeByIndex = make(map[int]string)
+		s.streamedTextByIdx = make(map[int]string)
+	}
+}
+
+func baseClaudeInnerArgs(disableVerbose bool) []string {
+	innerArgs := []string{
+		"--output-format", "stream-json",
+		"--input-format", "stream-json",
+		"--permission-prompt-tool", "stdio",
+		"--include-partial-messages",
+	}
+	if !disableVerbose {
+		innerArgs = append(innerArgs, "--verbose")
+	}
+	return innerArgs
+}
+
 func newClaudeSession(ctx context.Context, workDir, cliBin string, cliExtraArgs []string, cliArgsFlag string, model, effort, sessionID, mode string, allowedTools, disallowedTools []string, extraEnv []string, platformPrompt string, disableVerbose bool, spawnOpts core.SpawnOptions, maxContextTokens int) (*claudeSession, error) {
 	sessionCtx, cancel := context.WithCancel(ctx)
 
 	// innerArgs are Claude Code CLI flags — when a wrapper is used with
 	// cliArgsFlag these get bundled into a single passthrough string.
 	// outerArgs are flags the wrapper itself understands (e.g. --model).
-	innerArgs := []string{
-		"--output-format", "stream-json",
-		"--input-format", "stream-json",
-		"--permission-prompt-tool", "stdio",
-	}
-	if !disableVerbose {
-		innerArgs = append(innerArgs, "--verbose")
-	}
+	innerArgs := baseClaudeInnerArgs(disableVerbose)
 
 	if mode != "" && mode != "default" {
 		innerArgs = append(innerArgs, "--permission-mode", mode)
@@ -352,6 +392,8 @@ func (cs *claudeSession) handleReadLoopLine(line string) {
 		cs.handleUser(raw)
 	case "result":
 		cs.handleResult(raw)
+	case "stream_event":
+		cs.handleStreamEvent(raw)
 	case "control_request":
 		cs.handleControlRequest(raw)
 	case "control_cancel_request":
@@ -372,6 +414,7 @@ func (cs *claudeSession) handleSystem(raw map[string]any) {
 	}
 	cs.activeMsgID.Store("")
 	cs.emittedText.Store("")
+	cs.streamState.reset()
 }
 
 func (cs *claudeSession) handleAssistant(raw map[string]any) {
@@ -384,21 +427,41 @@ func (cs *claudeSession) handleAssistant(raw map[string]any) {
 		return
 	}
 
-	// 提取 message.id 作为稳定身份
 	msgID, _ := msg["id"].(string)
+	hasStreamState := msgID != "" && cs.streamState.currentMsgID == msgID
 
-	// message.id 变化 → 新消息开始，重置 diff 状态
-	if msgID != "" {
-		prevID, _ := cs.activeMsgID.Load().(string)
-		if msgID != prevID {
-			cs.activeMsgID.Store(msgID)
-			cs.emittedText.Store("")
+	fullText := fullAssistantText(contentArr)
+	divergent := false
+	if hasStreamState {
+		for i, contentItem := range contentArr {
+			item, ok := contentItem.(map[string]any)
+			if !ok {
+				continue
+			}
+			contentType, _ := item["type"].(string)
+			if contentType != "text" {
+				continue
+			}
+			text, _ := item["text"].(string)
+			streamed := cs.streamState.streamedTextByIdx[i]
+			if streamed != "" && text != streamed && !strings.HasPrefix(text, streamed) {
+				divergent = true
+				break
+			}
 		}
 	}
-	hasMsgID := msgID != ""
+	if divergent && !cs.historyDraining.Load() {
+		slog.Warn("claudeSession: checkpoint diverged from streamed text; replacing with full text")
+		evt := core.Event{Type: core.EventTextReplace, Content: fullText}
+		select {
+		case cs.events <- evt:
+		case <-cs.ctx.Done():
+			return
+		}
+	}
 
 	// 单次有序遍历：按原始 content block 顺序 emit thinking/text/tool_use
-	for _, contentItem := range contentArr {
+	for i, contentItem := range contentArr {
 		item, ok := contentItem.(map[string]any)
 		if !ok {
 			continue
@@ -438,19 +501,45 @@ func (cs *claudeSession) handleAssistant(raw map[string]any) {
 			}
 		case "text":
 			if text, ok := item["text"].(string); ok && text != "" {
-				delta := text
-				if hasMsgID {
+				if divergent || cs.historyDraining.Load() {
+					continue
+				}
+				delta := ""
+				if hasStreamState {
+					streamed := cs.streamState.streamedTextByIdx[i]
+					switch {
+					case streamed == text:
+						continue
+					case streamed != "" && strings.HasPrefix(text, streamed):
+						delta = text[len(streamed):]
+						cs.streamState.streamedTextByIdx[i] = text
+					case streamed == "":
+						delta = text
+						cs.streamState.streamedTextByIdx[i] = text
+					default:
+						continue
+					}
+				} else if msgID != "" {
+					prevID, _ := cs.activeMsgID.Load().(string)
+					if msgID != prevID {
+						cs.activeMsgID.Store(msgID)
+						cs.emittedText.Store("")
+					}
 					prev, _ := cs.emittedText.Load().(string)
 					if text == prev {
 						continue // 文本未变，跳过
 					}
 					if prev != "" && strings.HasPrefix(text, prev) {
 						delta = text[len(prev):] // 增量
+					} else {
+						delta = text
 					}
 					// 非前缀匹配时保守发全文，不丢文本
 					cs.emittedText.Store(text)
+				} else {
+					delta = text
 				}
-				if cs.historyDraining.Load() {
+				if delta == "" {
 					continue
 				}
 				evt := core.Event{Type: core.EventText, Content: delta}
@@ -461,6 +550,131 @@ func (cs *claudeSession) handleAssistant(raw map[string]any) {
 				}
 			}
 		}
+	}
+}
+
+func (cs *claudeSession) handleStreamEvent(raw map[string]any) {
+	if cs.historyDraining.Load() {
+		return
+	}
+	ev, ok := raw["event"].(map[string]any)
+	if !ok {
+		return
+	}
+	cs.streamState.ensure()
+	subType, _ := ev["type"].(string)
+	switch subType {
+	case "message_start":
+		id, _ := nestedString(ev, "message", "id")
+		cs.streamState.onMessageStart(id)
+	case "content_block_start":
+		idx, ok := intOf(ev["index"])
+		if !ok {
+			return
+		}
+		blockType, _ := nestedString(ev, "content_block", "type")
+		cs.streamState.blockTypeByIndex[idx] = blockType
+	case "content_block_delta":
+		idx, ok := intOf(ev["index"])
+		if !ok {
+			return
+		}
+		delta, _ := ev["delta"].(map[string]any)
+		deltaType, _ := delta["type"].(string)
+		switch deltaType {
+		case "text_delta":
+			text, _ := delta["text"].(string)
+			cs.emitTextDelta(idx, text)
+		case "thinking_delta":
+			thinking, _ := delta["thinking"].(string)
+			cs.emitThinkingDelta(thinking)
+		case "input_json_delta":
+			// Tool input is emitted from the final assistant tool_use block.
+		}
+	case "content_block_stop":
+		idx, ok := intOf(ev["index"])
+		if ok {
+			delete(cs.streamState.blockTypeByIndex, idx)
+		}
+	case "message_delta", "message_stop":
+		return
+	}
+}
+
+func (cs *claudeSession) emitTextDelta(index int, text string) {
+	if text == "" || cs.historyDraining.Load() {
+		return
+	}
+	cs.streamState.ensure()
+	cs.streamState.streamedTextByIdx[index] += text
+	evt := core.Event{Type: core.EventText, Content: text}
+	select {
+	case cs.events <- evt:
+	case <-cs.ctx.Done():
+		return
+	}
+}
+
+func (cs *claudeSession) emitThinkingDelta(thinking string) {
+	if thinking == "" || cs.historyDraining.Load() {
+		return
+	}
+	evt := core.Event{Type: core.EventThinking, Content: thinking}
+	select {
+	case cs.events <- evt:
+	case <-cs.ctx.Done():
+		return
+	}
+}
+
+func fullAssistantText(contentArr []any) string {
+	var textBlocks []string
+	for _, contentItem := range contentArr {
+		item, ok := contentItem.(map[string]any)
+		if !ok {
+			continue
+		}
+		contentType, _ := item["type"].(string)
+		if contentType != "text" {
+			continue
+		}
+		text, _ := item["text"].(string)
+		if text != "" {
+			textBlocks = append(textBlocks, text)
+		}
+	}
+	return strings.Join(textBlocks, "\n")
+}
+
+func nestedString(m map[string]any, keys ...string) (string, bool) {
+	var cur any = m
+	for _, key := range keys {
+		obj, ok := cur.(map[string]any)
+		if !ok {
+			return "", false
+		}
+		cur, ok = obj[key]
+		if !ok {
+			return "", false
+		}
+	}
+	v, ok := cur.(string)
+	return v, ok
+}
+
+func intOf(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case float64:
+		return int(n), true
+	case json.Number:
+		i, err := n.Int64()
+		return int(i), err == nil
+	default:
+		return 0, false
 	}
 }
 
@@ -522,6 +736,7 @@ func (cs *claudeSession) handleResult(raw map[string]any) {
 		cs.historyDraining.Store(false)
 		cs.activeMsgID.Store("")
 		cs.emittedText.Store("")
+		cs.streamState.reset()
 		return
 	}
 
@@ -550,6 +765,7 @@ func (cs *claudeSession) handleResult(raw map[string]any) {
 	}
 	cs.activeMsgID.Store("")
 	cs.emittedText.Store("")
+	cs.streamState.reset()
 }
 
 func (cs *claudeSession) handleControlRequest(raw map[string]any) {
@@ -878,4 +1094,3 @@ func shellJoinArgs(args []string) string {
 
 // (filterEnv removed: its role is subsumed by core.BuildAgentEnv's deny list,
 // which strips CLAUDECODE / CCCODE_* / OPENCODE_SERVER_* from every env layer.)
-

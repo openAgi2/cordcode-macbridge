@@ -1,0 +1,12 @@
+{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg-fixture-2","type":"message","role":"assistant","content":[]}}}
+{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Before tool."}}}
+{"type":"stream_event","event":{"type":"content_block_stop","index":0}}
+{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tool-1","name":"Read","input":{}}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"file_path\":\"a\"}"}}}
+{"type":"stream_event","event":{"type":"content_block_stop","index":1}}
+{"type":"stream_event","event":{"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"After tool."}}}
+{"type":"stream_event","event":{"type":"content_block_stop","index":2}}
+{"type":"assistant","message":{"id":"msg-fixture-2","type":"message","role":"assistant","content":[{"type":"text","text":"Before tool."},{"type":"tool_use","id":"tool-1","name":"Read","input":{"file_path":"a"}},{"type":"text","text":"After tool."}]}}
+{"type":"result","subtype":"success","result":"After tool."}

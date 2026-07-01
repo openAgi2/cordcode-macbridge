@@ -8,6 +8,13 @@
 
 ## [Unreleased]
 
+### 2026-07-01 — Claude Code 模式支持流式打字机输出
+
+- **修复 Claude Code 后端回复整段出现**：MacBridge 启动 Claude Code CLI 时启用 `--include-partial-messages`，并消费 `stream_event/content_block_delta`，将 token 级文本转成统一 `text_delta` 事件下发给 iOS。
+- **避免 checkpoint 重复与多段文本丢失**：Claude CLI 会在 token delta 后再发完整 assistant checkpoint；driver 现在按 content block index 去重，正常路径不重复，尾部差量会补齐，异常非前缀 checkpoint 通过 `message_updated` 发送完整文本真值。
+- **工具调用与历史重放边界保持真实**：`input_json_delta` 不作为文本重复下发，工具仍由最终 `tool_use` block 产出；`--resume` 历史重放期继续抑制 live 事件，避免把历史内容当作实时流灌给 iOS。
+- **验证**：新增真实形状 JSONL fixture 与 claudecode driver 单测，覆盖首个 checkpoint 不清 partial、多 text block、尾差量、非前缀 reconcile、message id 切换和 historyDraining。Sonnet/GLM-5-Turbo 路径已用真实 Claude CLI 证明 `--include-partial-messages` 会产出 `stream_event`；Opus/GLM-5.2 路径仍返回本地 gateway `529 overloaded`，作为 provider route 问题单独处理。
+
 ### 2026-06-30 — iOS 新建的 Claude Code session 出现在 Mac IDE/桌面会话列表（修复 entrypoint 过滤）
 
 - **现象**：iOS Claude Code 模式**新建** session 发消息，iOS 正常收到回复且消息持续可见；但 Mac 端 VSCode Claude Code 扩展（及 Claude 桌面 App）的会话列表里**找不到这条 session**，重启 Mac App 仍找不到。
