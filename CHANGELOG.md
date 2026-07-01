@@ -10,7 +10,7 @@
 
 ### 2026-07-01 — Codex 外部 session 结束后 iOS 执行态快速收口
 
-- **修复 Mac 端 Codex 任务完成后 iOS 输入框十几秒才恢复**：当 iOS 旁观 Mac 端 Codex session 且 MacBridge 没有内存 `AgentSession` 时，go-bridge 现在会监视 Codex JSONL transcript 中真实的 `task_started` / `task_complete` 事件；`task_complete` 到达后立即广播 `turn_completed` + `session_state_changed: idle`，让 iOS 走 500ms 终态 debounce，而不是等待 history probe 的多轮 unchanged 兜底。
+- **修复 Mac 端 Codex 任务完成后 iOS 输入框十几秒才恢复**：当 iOS 旁观 Mac 端 Codex session 时，go-bridge 现在会监视 Codex JSONL transcript 中真实的 `task_started` / `task_complete` 事件；`task_complete` 到达后立即广播 `turn_completed` + `session_state_changed: idle`，让 iOS 走 500ms 终态 debounce，而不是等待 history probe 的多轮 unchanged 兜底。Codex transcript relay 与标准 `AgentSession` relay 使用独立 lifecycle key，可覆盖 registry 里已有 session 但标准事件流收不到外部最终事件的情况。
 - **保持长工具执行不闪断**：该 relay 只使用 Codex transcript 的真实任务生命周期事件，不把工具静默或历史无变化当成结束；长时间 `sleep` / verify / build 期间仍保持 running。
 - **验证**：新增 go-bridge 单测覆盖 Codex transcript task state 解析。
 

@@ -2051,23 +2051,28 @@ func (h *Handlers) startCodexSessionFileRelay(sessionID string, conn Connection,
 	if !ok {
 		return
 	}
+	relayKey := codexSessionFileRelayKey(sessionID)
 	h.mu.Lock()
-	running := h.relayRunning[sessionID]
+	running := h.relayRunning[relayKey]
 	if !running {
-		h.relayRunning[sessionID] = true
+		h.relayRunning[relayKey] = true
 	}
 	h.mu.Unlock()
 	if running {
 		return
 	}
 
-	go h.codexSessionFileRelayLoop(sessionID, conn, backendID, locator)
+	go h.codexSessionFileRelayLoop(sessionID, conn, backendID, relayKey, locator)
 }
 
-func (h *Handlers) codexSessionFileRelayLoop(sessionID string, conn Connection, backendID string, locator core.TranscriptLocator) {
+func codexSessionFileRelayKey(sessionID string) string {
+	return "codex-file:" + sessionID
+}
+
+func (h *Handlers) codexSessionFileRelayLoop(sessionID string, conn Connection, backendID string, relayKey string, locator core.TranscriptLocator) {
 	defer func() {
 		h.mu.Lock()
-		delete(h.relayRunning, sessionID)
+		delete(h.relayRunning, relayKey)
 		h.mu.Unlock()
 		slog.Info("go-bridge: codexSessionFileRelay exited", "sessionID", sessionID)
 	}()
@@ -3511,8 +3516,11 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 		// 对于没有 AgentSession 的 claudecode session（外部 Desktop 创建），
 		// 启动基于 transcript 文件监视的事件转发。
 		h.startClaudeSessionFileRelay(params.SessionID, conn, msg.BackendID)
-		h.startCodexSessionFileRelay(params.SessionID, conn, msg.BackendID, agent)
 	}
+	// Codex Desktop/共享服务 session 的真实完成信号会落到 JSONL 的 task_complete。
+	// 即使 registry 里已有 AgentSession，标准 relay 也可能收不到外部 turn 的最终事件；
+	// 因此 Codex transcript relay 使用独立 key 与标准 relay 并行。
+	h.startCodexSessionFileRelay(params.SessionID, conn, msg.BackendID, agent)
 
 	// list_sessions 在所有项目目录中扫描，返回的每个 session 都附带 directory 字段
 	// （即 session JSONL 中的 cwd）。如果调用方传回了 directory，在拉取消息前将 agent
@@ -3760,12 +3768,7 @@ func (h *Handlers) handleResumeSession(conn Connection, msg WireMessage, agent c
 		}
 	}
 	if agent.Name() == "codex" {
-		h.mu.Lock()
-		sess, hasSess := h.getSession(params.SessionID)
-		h.mu.Unlock()
-		if !hasSess || sess == nil {
-			h.startCodexSessionFileRelay(params.SessionID, conn, msg.BackendID, agent)
-		}
+		h.startCodexSessionFileRelay(params.SessionID, conn, msg.BackendID, agent)
 	}
 
 	dir := params.Directory
