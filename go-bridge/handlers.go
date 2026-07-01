@@ -2349,6 +2349,25 @@ func (h *Handlers) detectClaudeTranscriptState(sessPath string) string {
 	return "unknown"
 }
 
+var (
+	// relayInitialTimeout 是 passive join 后首次等待事件的超时。
+	// 如果 session 的 turn 已经结束，不会收到 turn/completed，
+	// 需要快速超时让 iOS 退出执行态。
+	relayInitialTimeout = 10 * time.Second
+	// relayActiveTimeout 是收到首个事件后的空闲超时。只适用于不能查询
+	// 权威 runtime state 的后端；Codex/Claude 长工具执行期间可能长期不吐事件。
+	relayActiveTimeout = 60 * time.Second
+)
+
+func disablesRelayIdleTimeout(backendID string) bool {
+	switch backendID {
+	case "claude", "claudecode", "codex":
+		return true
+	default:
+		return false
+	}
+}
+
 // 且事件通道没有跨进程共享事件总线，它的 relayEvents goroutine 在完成一轮（EventResult）或空闲时
 // 绝不能退出（通过 continue 忽略）。这也意味着该 goroutine 和底层 session 会常驻在内存中，
 // 其最终生命周期的释放依赖于 session 显式关闭/删除导致 events channel 关闭。这需要注意潜在的泄漏风险。
@@ -2364,16 +2383,10 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 	slog.Info("go-bridge: relayEvents started", "backendID", backendID, "sessionID", sessionID)
 	events := sess.Events()
 	eventCount := 0
-	// relayInitialTimeout 是 passive join 后首次等待事件的超时。
-	// 如果 session 的 turn 已经结束，不会收到 turn/completed，
-	// 需要快速超时让 iOS 退出执行态。
-	const relayInitialTimeout = 10 * time.Second
-	// relayActiveTimeout 是收到首个事件后的空闲超时。
-	const relayActiveTimeout = 60 * time.Second
 
 	idleTimer := time.NewTimer(relayInitialTimeout)
 	defer idleTimer.Stop()
-	if backendID == "claude" || backendID == "claudecode" {
+	if disablesRelayIdleTimeout(backendID) {
 		idleTimer.Stop()
 	}
 
@@ -2408,7 +2421,7 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 				}
 				return
 			}
-			if backendID != "claude" && backendID != "claudecode" {
+			if !disablesRelayIdleTimeout(backendID) {
 				idleTimer.Reset(relayActiveTimeout)
 			}
 			eventCount++
@@ -2496,7 +2509,7 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 			}
 
 		case <-idleTimer.C:
-			if backendID == "claude" || backendID == "claudecode" {
+			if disablesRelayIdleTimeout(backendID) {
 				continue
 			}
 			slog.Warn("go-bridge: relayEvents idle timeout, auto-completing", "backendID", backendID, "sessionID", sessionID, "eventsSeen", eventCount)

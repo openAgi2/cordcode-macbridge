@@ -616,6 +616,60 @@ func TestRelayEventsClaudeDoesNotExitOnResultOrError(t *testing.T) {
 	}
 }
 
+func TestRelayEventsCodexDoesNotAutoCompleteOnIdleTimeout(t *testing.T) {
+	oldInitialTimeout := relayInitialTimeout
+	oldActiveTimeout := relayActiveTimeout
+	relayInitialTimeout = 200 * time.Millisecond
+	relayActiveTimeout = 25 * time.Millisecond
+	defer func() {
+		relayInitialTimeout = oldInitialTimeout
+		relayActiveTimeout = oldActiveTimeout
+	}()
+
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers := NewHandlers()
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{
+		BackendID: "codex",
+		SessionID: "ses_test",
+	})
+	session := &fakeAgentSession{
+		id:     "ses_test",
+		events: make(chan core.Event, 2),
+	}
+	session.events <- core.Event{Type: core.EventText, Content: "working"}
+
+	done := make(chan struct{})
+	go func() {
+		handlers.relayEvents(serverConn, session, "ses_test", "codex")
+		close(done)
+	}()
+
+	events := readEventNames(t, clientConn, 1)
+	if len(events) != 1 || events[0] != "text_delta" {
+		t.Fatalf("events = %#v, want text_delta", events)
+	}
+
+	time.Sleep(75 * time.Millisecond)
+	select {
+	case <-done:
+		t.Fatal("relayEvents exited on codex idle timeout")
+	default:
+	}
+
+	session.events <- core.Event{Type: core.EventResult, Done: true, Content: "done"}
+	events = readEventNames(t, clientConn, 2)
+	if want := []string{"turn_completed", "session_state_changed"}; len(events) != len(want) || events[0] != want[0] || events[1] != want[1] {
+		t.Fatalf("events after result = %#v, want %#v", events, want)
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("relayEvents did not finish after codex turn completion")
+	}
+}
+
 func TestRelayEventsSendsTurnCompletedOnChannelClose(t *testing.T) {
 	serverConn, clientConn, cleanup := openTestConn(t)
 	defer cleanup()
