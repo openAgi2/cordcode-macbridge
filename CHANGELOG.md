@@ -8,6 +8,12 @@
 
 ## [Unreleased]
 
+### 2026-07-01 — Codex 外部 session 结束后 iOS 执行态快速收口
+
+- **修复 Mac 端 Codex 任务完成后 iOS 输入框十几秒才恢复**：当 iOS 旁观 Mac 端 Codex session 且 MacBridge 没有内存 `AgentSession` 时，go-bridge 现在会监视 Codex JSONL transcript 中真实的 `task_started` / `task_complete` 事件；`task_complete` 到达后立即广播 `turn_completed` + `session_state_changed: idle`，让 iOS 走 500ms 终态 debounce，而不是等待 history probe 的多轮 unchanged 兜底。
+- **保持长工具执行不闪断**：该 relay 只使用 Codex transcript 的真实任务生命周期事件，不把工具静默或历史无变化当成结束；长时间 `sleep` / verify / build 期间仍保持 running。
+- **验证**：新增 go-bridge 单测覆盖 Codex transcript task state 解析。
+
 ### 2026-07-01 — Claude Code 模式支持流式打字机输出
 
 - **修复 Claude Code 后端回复整段出现**：MacBridge 启动 Claude Code CLI 时启用 `--include-partial-messages`，并消费 `stream_event/content_block_delta`，将 token 级文本转成统一 `text_delta` 事件下发给 iOS。

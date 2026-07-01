@@ -2043,6 +2043,96 @@ func (h *Handlers) startClaudeSessionFileRelay(sessionID string, conn Connection
 	go h.claudeSessionFileRelayLoop(sessionID, conn, backendID)
 }
 
+func (h *Handlers) startCodexSessionFileRelay(sessionID string, conn Connection, backendID string, agent core.Agent) {
+	if backendID != "codex" || agent == nil || agent.Name() != "codex" {
+		return
+	}
+	locator, ok := agent.(core.TranscriptLocator)
+	if !ok {
+		return
+	}
+	h.mu.Lock()
+	running := h.relayRunning[sessionID]
+	if !running {
+		h.relayRunning[sessionID] = true
+	}
+	h.mu.Unlock()
+	if running {
+		return
+	}
+
+	go h.codexSessionFileRelayLoop(sessionID, conn, backendID, locator)
+}
+
+func (h *Handlers) codexSessionFileRelayLoop(sessionID string, conn Connection, backendID string, locator core.TranscriptLocator) {
+	defer func() {
+		h.mu.Lock()
+		delete(h.relayRunning, sessionID)
+		h.mu.Unlock()
+		slog.Info("go-bridge: codexSessionFileRelay exited", "sessionID", sessionID)
+	}()
+
+	sessPath, err := locator.TranscriptPath(context.Background(), sessionID)
+	if err != nil || strings.TrimSpace(sessPath) == "" {
+		slog.Debug("go-bridge: codexSessionFileRelay no transcript file found", "sessionID", sessionID, "error", err)
+		return
+	}
+	slog.Info("go-bridge: codexSessionFileRelay started", "sessionID", sessionID, "path", sessPath)
+
+	offset := func() int64 {
+		info, err := os.Stat(sessPath)
+		if err != nil {
+			return 0
+		}
+		return info.Size()
+	}()
+
+	state := h.detectCodexTranscriptTaskState(sessPath)
+	switch state {
+	case "idle":
+		h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"done": true, "reason": "task_complete"})
+		h.broadcastIdleState(sessionID, backendID)
+		return
+	case "running":
+		h.sessions.markRunning(sessionID)
+		h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "running"})
+	}
+
+	const pollInterval = time.Second
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		info, err := os.Stat(sessPath)
+		if err != nil {
+			continue
+		}
+		newSize := info.Size()
+		if newSize <= offset {
+			if newSize < offset {
+				offset = 0
+			}
+			continue
+		}
+
+		events := h.scanCodexTranscriptTaskEvents(sessPath, offset)
+		offset = newSize
+		for _, eventName := range events {
+			switch eventName {
+			case "task_started":
+				h.sessions.markRunning(sessionID)
+				h.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": ""})
+				h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "running"})
+			case "task_complete":
+				h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"done": true, "reason": "task_complete"})
+				h.broadcastIdleState(sessionID, backendID)
+				h.recordPendingNotification(sessionID, backendID, "completed", "task_complete")
+				return
+			}
+		}
+	}
+}
+
 func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection, backendID string) {
 	defer func() {
 		h.mu.Lock()
@@ -2349,6 +2439,63 @@ func (h *Handlers) detectClaudeTranscriptState(sessPath string) string {
 	return "unknown"
 }
 
+func (h *Handlers) detectCodexTranscriptTaskState(sessPath string) string {
+	events := h.scanCodexTranscriptTaskEvents(sessPath, 0)
+	state := "unknown"
+	for _, eventName := range events {
+		switch eventName {
+		case "task_started":
+			state = "running"
+		case "task_complete":
+			state = "idle"
+		}
+	}
+	return state
+}
+
+func (h *Handlers) scanCodexTranscriptTaskEvents(sessPath string, offset int64) []string {
+	f, err := os.Open(sessPath)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	if offset > 0 {
+		if _, err := f.Seek(offset, io.SeekStart); err != nil {
+			return nil
+		}
+	}
+
+	var events []string
+	scanner := bufio.NewScanner(f)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024*16)
+	for scanner.Scan() {
+		var entry struct {
+			Type    string          `json:"type"`
+			Payload json.RawMessage `json:"payload"`
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil || entry.Type != "event_msg" {
+			continue
+		}
+		eventType := codexEventPayloadType(entry.Payload)
+		if eventType == "task_started" || eventType == "task_complete" {
+			events = append(events, eventType)
+		}
+	}
+	return events
+}
+
+func codexEventPayloadType(raw json.RawMessage) string {
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return ""
+	}
+	if nested, ok := payload["payload"].(map[string]any); ok {
+		payload = nested
+	}
+	return strings.TrimSpace(fmt.Sprint(payload["type"]))
+}
+
 var (
 	// relayInitialTimeout 是 passive join 后首次等待事件的超时。
 	// 如果 session 的 turn 已经结束，不会收到 turn/completed，
@@ -2618,6 +2765,29 @@ func (h *Handlers) rebindSessionIDIfResolved(currentID string, sess core.AgentSe
 		h.writeClaudeRuntimeSidecar(realID, directory, selection)
 	}
 	return realID
+}
+
+func (h *Handlers) sendSessionEvent(sessionID, backendID, eventName string, data interface{}) {
+	h.mu.Lock()
+	h.seq++
+	seq := h.seq
+	dir := h.sessions.directoryForSession(sessionID)
+	h.mu.Unlock()
+
+	msg := EventMessage{
+		Type:      "event",
+		SessionID: sessionID,
+		BackendID: backendID,
+		Event:     eventName,
+		Data:      data,
+		Seq:       seq,
+	}
+	h.broadcaster.Send(BroadcastEvent{
+		BackendID: backendID,
+		SessionID: sessionID,
+		Directory: dir,
+		Message:   msg,
+	})
 }
 
 // broadcastIdleState 向订阅者推送 session_state_changed: idle。
@@ -3341,6 +3511,7 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 		// 对于没有 AgentSession 的 claudecode session（外部 Desktop 创建），
 		// 启动基于 transcript 文件监视的事件转发。
 		h.startClaudeSessionFileRelay(params.SessionID, conn, msg.BackendID)
+		h.startCodexSessionFileRelay(params.SessionID, conn, msg.BackendID, agent)
 	}
 
 	// list_sessions 在所有项目目录中扫描，返回的每个 session 都附带 directory 字段
@@ -3586,6 +3757,14 @@ func (h *Handlers) handleResumeSession(conn Connection, msg WireMessage, agent c
 		h.mu.Unlock()
 		if !hasSess || sess == nil {
 			h.startClaudeSessionFileRelay(params.SessionID, conn, msg.BackendID)
+		}
+	}
+	if agent.Name() == "codex" {
+		h.mu.Lock()
+		sess, hasSess := h.getSession(params.SessionID)
+		h.mu.Unlock()
+		if !hasSess || sess == nil {
+			h.startCodexSessionFileRelay(params.SessionID, conn, msg.BackendID, agent)
 		}
 	}
 
