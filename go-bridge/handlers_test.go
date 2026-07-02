@@ -1001,10 +1001,11 @@ func TestOpenCodeListProjectsUsesDesktopVisibleProjectOrder(t *testing.T) {
 	}
 }
 
-func TestOpenCodeListSessionsPassesDirectoryLimitAndCursor(t *testing.T) {
+func TestOpenCodeListSessionsFetchesLargePageAndPaginatesInMemory(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	var gotDirectory string
 	var gotLimit string
-	var gotCursor string
+	var gotRoots string
 	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/session" {
 			http.NotFound(w, r)
@@ -1012,9 +1013,14 @@ func TestOpenCodeListSessionsPassesDirectoryLimitAndCursor(t *testing.T) {
 		}
 		gotDirectory = r.Header.Get("x-opencode-directory")
 		gotLimit = r.URL.Query().Get("limit")
-		gotCursor = r.URL.Query().Get("cursor")
+		gotRoots = r.URL.Query().Get("roots")
+		// Return 3 root sessions; client asks limit=2, so hasMore must be true.
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[{"id":"ses_1","title":"One","projectID":"proj_1","time":{"created":1000,"updated":2000}}]`))
+		_, _ = w.Write([]byte(`[
+			{"id":"ses_1","title":"One","time":{"created":1000,"updated":3000}},
+			{"id":"ses_2","title":"Two","time":{"created":1000,"updated":2000}},
+			{"id":"ses_3","title":"Three","time":{"created":1000,"updated":1000}}
+		]`))
 	}))
 	defer proxyServer.Close()
 
@@ -1035,51 +1041,70 @@ func TestOpenCodeListSessionsPassesDirectoryLimitAndCursor(t *testing.T) {
 		RequestID: "oc-sessions-1",
 		Params: mustJSONRaw(t, map[string]any{
 			"directory": "/tmp/project",
-			"limit":     10,
-			"cursor":    "opaque-cursor",
+			"rootsOnly": true,
+			"limit":     2,
 		}),
 	})
 
 	messages := readJSONMaps(t, clientConn, 1)
 	data, _ := messages[0]["data"].(map[string]any)
 	sessions, _ := data["sessions"].([]any)
-	if len(sessions) != 1 {
-		t.Fatalf("session count = %d, want 1", len(sessions))
+	if len(sessions) != 2 {
+		t.Fatalf("session count = %d, want 2 (client limit sliced in-memory)", len(sessions))
+	}
+	// Upstream must be fetched with the large fetch budget, not the client limit.
+	if gotLimit != "100" {
+		t.Fatalf("upstream limit = %q, want 100", gotLimit)
+	}
+	if gotRoots != "true" {
+		t.Fatalf("upstream roots = %q, want true", gotRoots)
 	}
 	if gotDirectory != "/tmp/project" {
 		t.Fatalf("x-opencode-directory = %q, want /tmp/project", gotDirectory)
 	}
-	if gotLimit != "10" {
-		t.Fatalf("limit query = %q, want 10", gotLimit)
+	if got := data["hasMore"]; got != true {
+		t.Fatalf("hasMore = %#v, want true (3 total > limit 2)", got)
 	}
-	if gotCursor != "opaque-cursor" {
-		t.Fatalf("cursor query = %q, want opaque-cursor", gotCursor)
+	nextCursor, _ := data["nextCursor"].(string)
+	if nextCursor == "" {
+		t.Fatalf("nextCursor must be present when hasMore is true")
 	}
-	if got := data["hasMore"]; got != false {
-		t.Fatalf("hasMore = %#v, want false for array-only response", got)
+
+	// Page 2 with the cursor returns the remaining session and hasMore=false.
+	handlers.handleOpenCodeRPC(serverConn, WireMessage{
+		BackendID: "opencode",
+		Method:    "list_sessions",
+		RequestID: "oc-sessions-2",
+		Params: mustJSONRaw(t, map[string]any{
+			"directory": "/tmp/project",
+			"rootsOnly": true,
+			"limit":     2,
+			"cursor":    nextCursor,
+		}),
+	})
+	messages2 := readJSONMaps(t, clientConn, 1)
+	data2, _ := messages2[0]["data"].(map[string]any)
+	sessions2, _ := data2["sessions"].([]any)
+	if len(sessions2) != 1 {
+		t.Fatalf("page 2 session count = %d, want 1", len(sessions2))
 	}
-	if _, ok := data["nextCursor"]; ok {
-		t.Fatalf("nextCursor present for array-only response: %#v", data["nextCursor"])
+	if got := data2["hasMore"]; got != false {
+		t.Fatalf("page 2 hasMore = %#v, want false", got)
 	}
+
 	logText := logs.String()
-	for _, want := range []string{"msg=\"opencode list_sessions\"", "directory=/tmp/project", "limit=10", "cursor_present=true", "result_count=1", "next_cursor_present=false"} {
+	for _, want := range []string{`msg="opencode list_sessions"`, "directory=/tmp/project", "limit=2", "result_count=2"} {
 		if !strings.Contains(logText, want) {
 			t.Fatalf("diagnostic log missing %q in %s", want, logText)
 		}
 	}
 }
 
-func TestOpenCodeListSessionsPreservesCursorEnvelope(t *testing.T) {
+func TestOpenCodeListSessionsRootsOnlyWithCursorNowSupported(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/session" {
-			http.NotFound(w, r)
-			return
-		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"data": [{"id":"ses_1","title":"One","time":{"created":1000,"updated":2000}}],
-			"cursor": {"next":"next-page", "previous":"prev-page"}
-		}`))
+		_, _ = w.Write([]byte(`[{"id":"ses_1","title":"One","time":{"created":1000,"updated":1000}}]`))
 	}))
 	defer proxyServer.Close()
 
@@ -1089,40 +1114,11 @@ func TestOpenCodeListSessionsPreservesCursorEnvelope(t *testing.T) {
 	serverConn, clientConn, cleanup := openTestConn(t)
 	defer cleanup()
 
+	// rootsOnly + cursor is no longer rejected; it pages the in-memory list.
 	handlers.handleOpenCodeRPC(serverConn, WireMessage{
 		BackendID: "opencode",
 		Method:    "list_sessions",
-		RequestID: "oc-sessions-2",
-		Params:    mustJSONRaw(t, map[string]any{"directory": "/tmp/project", "limit": 10}),
-	})
-
-	messages := readJSONMaps(t, clientConn, 1)
-	data, _ := messages[0]["data"].(map[string]any)
-	if got := data["hasMore"]; got != true {
-		t.Fatalf("hasMore = %#v, want true", got)
-	}
-	if got := data["nextCursor"]; got != "next-page" {
-		t.Fatalf("nextCursor = %#v, want next-page", got)
-	}
-}
-
-func TestOpenCodeListSessionsRejectsRootsOnlyWithCursor(t *testing.T) {
-	var upstreamCalls int
-	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		upstreamCalls++
-		http.NotFound(w, r)
-	}))
-	defer proxyServer.Close()
-
-	handlers := newTestHandlers(t)
-	handlers.RegisterOpenCodeProxy(NewOpenCodeProxy(proxyServer.URL, "", ""))
-	serverConn, clientConn, cleanup := openTestConn(t)
-	defer cleanup()
-
-	handlers.handleOpenCodeRPC(serverConn, WireMessage{
-		BackendID: "opencode",
-		Method:    "list_sessions",
-		RequestID: "oc-sessions-roots",
+		RequestID: "oc-sessions-roots-cursor",
 		Params: mustJSONRaw(t, map[string]any{
 			"directory": "/tmp/project",
 			"rootsOnly": true,
@@ -1132,15 +1128,8 @@ func TestOpenCodeListSessionsRejectsRootsOnlyWithCursor(t *testing.T) {
 	})
 
 	messages := readJSONMaps(t, clientConn, 1)
-	if got := messages[0]["ok"]; got != false {
-		t.Fatalf("ok = %#v, want false", got)
-	}
-	errorPayload, _ := messages[0]["error"].(map[string]any)
-	if got := errorPayload["code"]; got != "invalid_params" {
-		t.Fatalf("error code = %#v, want invalid_params", got)
-	}
-	if upstreamCalls != 0 {
-		t.Fatalf("upstream calls = %d, want 0", upstreamCalls)
+	if got := messages[0]["ok"]; got != true {
+		t.Fatalf("ok = %#v, want true (rootsOnly+cursor now supported)", got)
 	}
 }
 

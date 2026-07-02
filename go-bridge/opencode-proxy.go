@@ -27,6 +27,7 @@ type OpenCodeSessionListOptions struct {
 	Directory string
 	Limit     int
 	Cursor    string
+	Roots     bool
 }
 
 type OpenCodeSessionListResult struct {
@@ -111,6 +112,9 @@ func (p *OpenCodeProxy) listSessions(opts OpenCodeSessionListOptions) (OpenCodeS
 	}
 	if opts.Cursor != "" {
 		query.Set("cursor", opts.Cursor)
+	}
+	if opts.Roots {
+		query.Set("roots", "true")
 	}
 	if encoded := query.Encode(); encoded != "" {
 		path += "?" + encoded

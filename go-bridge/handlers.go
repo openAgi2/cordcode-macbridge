@@ -922,71 +922,60 @@ func (h *Handlers) enrichSessionStateWithAgent(mapped map[string]interface{}, ag
 
 // ── ocProxy: list_sessions ────────────────────────────────────────────────────
 
+// openCodeSessionFetchLimit is the single upstream fetch budget. OpenCode server
+// is array-only in stable (no cursor on /session), so the only way to know the
+// real total is to ask for a large page once. 100 matches the server-side default
+// upper bound and keeps one request bounded; the per-client page is then sliced
+// in-memory by paginateSessionList with a real cursor, exactly like Codex/Claude.
+const openCodeSessionFetchLimit = 100
+
 func (h *Handlers) ocHandleListSessions(conn Connection, msg WireMessage, dir string) {
 	rootsOnly := extractBool(msg, "rootsOnly")
 	limit := extractPositiveInt(msg, "limit")
 	cursor := extractStringParam(msg, "cursor")
-	// Match OpenCode Desktop's sidebar path: directory-scoped roots + a small
-	// growing limit. The server may return either the newer cursor envelope or an
-	// array; for array responses, count==limit is the same "maybe more" signal the
-	// Desktop uses to show Load More.
 	if limit > 1000 {
 		limit = 1000
 	}
 
-	if rootsOnly && cursor != "" {
-		conn.SendResult(msg.RequestID, nil, &WireError{
-			Code:    "invalid_params",
-			Message: "opencode list_sessions does not support rootsOnly with cursor pagination",
-		})
-		return
-	}
-
 	started := time.Now()
+
+	// Fetch a large page from upstream so the in-memory list reflects the real
+	// total. rootsOnly is forwarded as the server-side roots=true SQL filter
+	// (isNull(parent_id)); we no longer discard child sessions client-side, which
+	// used to make hasMore unreliable for small projects.
 	page, err := h.ocProxy.listSessions(OpenCodeSessionListOptions{
 		Directory: dir,
-		Limit:     limit,
-		Cursor:    cursor,
+		Limit:     openCodeSessionFetchLimit,
+		Roots:     rootsOnly,
 	})
 	if err != nil {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
 		return
 	}
 
-	var result []map[string]interface{}
 	agent, _ := h.getAgent(msg.BackendID)
+	mapped := make([]map[string]interface{}, 0, len(page.Sessions))
 	for _, s := range page.Sessions {
-		parentID, _ := s["parentId"].(string)
-		if parentID == "" {
-			parentID, _ = s["parentID"].(string)
-		}
-		if rootsOnly && parentID != "" {
-			continue
-		}
-		result = append(result, h.enrichSessionStateWithAgent(mapSession(s), agent))
+		mapped = append(mapped, h.enrichSessionStateWithAgent(mapSession(s), agent))
 	}
+	sortSessionsByUpdatedAt(mapped)
 
-	slog.Info("opencode list_sessions",
-		"directory", dir,
-		"limit", limit,
-		"cursor_present", cursor != "",
-		"result_count", len(result),
-		"next_cursor_present", page.NextCursor != "",
-		"duration_ms", time.Since(started).Milliseconds(),
-	)
+	// Slice the in-memory list by cursor+limit, identical to Codex/Claude.
+	// paginateSessionList emits a real nextCursor and hasMore derived from the
+	// actual remaining count, so "load more" appears whenever there is more data.
+	result := paginateSessionList(mapped, cursor, limit)
 
-	hasMore := page.NextCursor != ""
-	if page.NextCursor == "" && limit > 0 && len(result) >= limit {
-		hasMore = true
+	if ws, ok := result["sessions"].([]map[string]interface{}); ok {
+		slog.Info("opencode list_sessions",
+			"directory", dir,
+			"limit", limit,
+			"cursor_present", cursor != "",
+			"result_count", len(ws),
+			"next_cursor_present", result["hasMore"] == true,
+			"duration_ms", time.Since(started).Milliseconds(),
+		)
 	}
-	response := map[string]interface{}{
-		"sessions": result,
-		"hasMore":  hasMore,
-	}
-	if page.NextCursor != "" {
-		response["nextCursor"] = page.NextCursor
-	}
-	conn.SendResult(msg.RequestID, response, nil)
+	conn.SendResult(msg.RequestID, result, nil)
 }
 
 // ── ocProxy: get_session ──────────────────────────────────────────────────────
