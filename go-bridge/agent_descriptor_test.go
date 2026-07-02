@@ -221,6 +221,81 @@ func TestOpenCodeAlwaysHasTodos(t *testing.T) {
 	}
 }
 
+func TestDetectOpenCodeServiceUsesGlobalHealth(t *testing.T) {
+	var sawLegacyHealth bool
+	var sawGlobalHealth bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			sawLegacyHealth = true
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte("<html>OpenCode web shell</html>"))
+		case "/global/health":
+			sawGlobalHealth = true
+			user, pass, ok := r.BasicAuth()
+			if !ok || user != "opencode" || pass != "secret" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"healthy":true,"version":"1.17.13"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	status, reason := detectOpenCodeService(srv.URL, "opencode", "secret")
+	if status != AgentStatusAvailable {
+		t.Fatalf("status = %q reason=%q, want available", status, reason)
+	}
+	if !sawGlobalHealth {
+		t.Fatal("did not call /global/health")
+	}
+	if sawLegacyHealth {
+		t.Fatal("called /health; descriptor must use /global/health")
+	}
+}
+
+func TestDetectOpenCodeServiceRejectsBadCredentials(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/global/health" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	status, reason := detectOpenCodeService(srv.URL, "opencode", "wrong")
+	if status != AgentStatusServiceNotRunning {
+		t.Fatalf("status = %q reason=%q, want service_not_running", status, reason)
+	}
+	if !strings.Contains(reason, "401") {
+		t.Fatalf("reason = %q, want mention 401", reason)
+	}
+}
+
+func TestDetectOpenCodeServiceRejectsNonOpenCodeHealthBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/global/health" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<html>not health</html>"))
+	}))
+	defer srv.Close()
+
+	status, reason := detectOpenCodeService(srv.URL, "opencode", "secret")
+	if status != AgentStatusNotDetected {
+		t.Fatalf("status = %q reason=%q, want not_detected", status, reason)
+	}
+	if !strings.Contains(reason, "not valid") {
+		t.Fatalf("reason = %q, want invalid health body", reason)
+	}
+}
+
 func TestBuildAllAgentDescriptors(t *testing.T) {
 	agents := map[string]core.Agent{
 		"codex":    &descriptorFakeAgent{name: "codex"},
@@ -410,6 +485,37 @@ func TestDetectOpenCodeService_NotRunning(t *testing.T) {
 	}
 	if reason == "" {
 		t.Error("expected non-empty reason for unreachable opencode")
+	}
+}
+
+// T05: 未配置 OpenCode URL 时返回 not_configured，绝不隐式 dial 64667。
+func TestDetectAgentStatus_OpenCodeNotConfiguredWhenCfgNil(t *testing.T) {
+	status, reason := detectAgentStatus("opencode", "", nil)
+	if status != AgentStatusNotConfigured {
+		t.Fatalf("status = %q, want not_configured (must not dial 64667)", status)
+	}
+	if reason == "" {
+		t.Error("expected non-empty reason guiding the user to configure an endpoint")
+	}
+}
+
+func TestDetectAgentStatus_OpenCodeNotConfiguredWhenURLEmpty(t *testing.T) {
+	status, _ := detectAgentStatus("opencode", "", &AgentDetectionConfig{
+		OpenCodeURL: "",
+	})
+	if status != AgentStatusNotConfigured {
+		t.Fatalf("status = %q, want not_configured", status)
+	}
+}
+
+func TestDetectAgentStatus_OpenCodeDialsConfiguredURL(t *testing.T) {
+	// 配置了 loopback URL（external_http / legacy_64667）时才探测；空端口必然连不上，
+	// 落到 service_not_running / not_detected，证明它确实在尝试配置的 URL 而非 64667。
+	status, _ := detectAgentStatus("opencode", "", &AgentDetectionConfig{
+		OpenCodeURL: "http://127.0.0.1:1",
+	})
+	if status == AgentStatusNotConfigured {
+		t.Fatal("configured URL must not be reported as not_configured")
 	}
 }
 

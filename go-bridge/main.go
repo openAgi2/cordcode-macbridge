@@ -31,8 +31,9 @@ func Main() {
 	codexBackend := flag.String("codex-backend", envOr("GO_BRIDGE_CODEX_BACKEND", "exec"), "Codex backend mode: exec or app_server")
 	codexAppServerURL := flag.String("codex-app-server-url", envOr("GO_BRIDGE_CODEX_APP_SERVER_URL", ""), "Optional Codex app-server listen URL")
 
-	// opencode direct HTTP API
-	ocBaseURL := flag.String("opencode-url", envOr("OPENCODE_BASE_URL", "http://localhost:64667"), "OpenCode HTTP API URL")
+	// opencode direct HTTP API。默认空 = 未配置（不隐式回落 64667）；显式 loopback URL 时
+	// 连接用户/运维已启动的 stable `opencode serve`。URL 经 MacBridge 校验为 loopback 后传入。
+	ocBaseURL := flag.String("opencode-url", envOr("OPENCODE_BASE_URL", ""), "OpenCode HTTP API URL (loopback, e.g. http://127.0.0.1:<port>). Empty = not configured.")
 	ocUser := flag.String("opencode-user", envOr("OPENCODE_SERVER_USERNAME", ""), "OpenCode auth username")
 	ocPass := flag.String("opencode-pass", envOr("OPENCODE_SERVER_PASSWORD", ""), "OpenCode auth password")
 
@@ -155,7 +156,7 @@ func Main() {
 		}
 		slog.Info("go-bridge: agent registered", "backendId", id, "agent", agentName, "workDir", *workDir)
 
-		if sub, ok := agent.(core.EventSubscriber); ok && shouldStartPassiveSubscription(id, *codexBackend, *codexAppServerURL) {
+		if sub, ok := agent.(core.EventSubscriber); ok && shouldStartPassiveSubscription(id, *codexBackend, *codexAppServerURL, *ocBaseURL) {
 			go startPassiveSubscription(ctx, handlers, id, sub)
 		}
 
@@ -668,9 +669,14 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 	}
 }
 
-func shouldStartPassiveSubscription(backendID, codexBackendMode, codexAppServerURL string) bool {
+func shouldStartPassiveSubscription(backendID, codexBackendMode, codexAppServerURL, openCodeURL string) bool {
 	if backendID == "codex" {
 		return normalizeCodexBackend(codexBackendMode) == "app_server" && strings.TrimSpace(codexAppServerURL) != ""
+	}
+	if backendID == "opencode" {
+		// 无 URL 时 OpenCode backend 处于 not_configured，不启动 SSE 订阅
+		//（Subscribe 也会拒绝空 URL，这里提前避免无意义重连退避）。
+		return strings.TrimSpace(openCodeURL) != ""
 	}
 	return true
 }

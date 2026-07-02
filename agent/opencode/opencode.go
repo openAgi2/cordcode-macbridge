@@ -75,9 +75,10 @@ func New(opts map[string]any) (core.Agent, error) {
 	if baseURL == "" {
 		baseURL = os.Getenv("OPENCODE_BASE_URL")
 	}
-	if baseURL == "" {
-		baseURL = "http://localhost:64667"
-	}
+	// 不再隐式回落 http://localhost:64667。未配置 URL 时 agent 进入 degraded 模式：
+	// CLI 能力（models/session list/StartSession）仍可用，HTTP 数据面（fetchJSON、
+	// diagnostics、SSE）各自返回 ErrNotSupported / 未配置诊断，descriptor 报 not_configured。
+	// 由 caller（go-bridge main）决定是否注册 HTTP proxy / 启动 SSE 订阅。
 	user, _ := opts["opencode_user"].(string)
 	if user == "" {
 		user = os.Getenv("OPENCODE_SERVER_USERNAME")

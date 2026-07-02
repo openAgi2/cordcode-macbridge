@@ -134,6 +134,182 @@ final class MacBridgeBehaviorTests: XCTestCase {
         XCTAssertEqual(viewModel.displayNameFeedback, .success("name"))
         XCTAssertEqual(viewModel.credentialsFeedback, .failure("credentials"))
     }
+
+    // MARK: - T03: RuntimeManager -opencode-url argv/env
+
+    func testProcessArgumentsIncludesOpenCodeURLNotPassword() {
+        let config = RuntimeConfig(
+            executablePath: "/usr/bin/false",
+            dataDir: "/tmp/cccode-t-\(UUID().uuidString)",
+            logDir: "/tmp",
+            opencodeUser: "alice",
+            opencodePass: "super-secret-password",
+            opencodeURL: "http://127.0.0.1:4096",
+            opencodeSource: .externalHttp
+        )
+        let args = RuntimeManager.processArguments(for: config)
+        guard let idx = args.firstIndex(of: "-opencode-url") else {
+            return XCTFail("argv must contain -opencode-url")
+        }
+        XCTAssertEqual(args[idx + 1], "http://127.0.0.1:4096")
+        // password 是 secret，绝不出现在 argv。
+        XCTAssertFalse(args.contains("super-secret-password"))
+        // external_http 不隐式写 64667。
+        XCTAssertFalse(args.contains("64667"))
+    }
+
+    func testProcessArgumentsOmitsOpenCodeURLAndNoImplicit64667WhenEmpty() {
+        // endpoint 不可解析（disabled / not_configured）：argv 不含 -opencode-url，
+        // 也不得隐式回落 64667。
+        let config = RuntimeConfig(
+            executablePath: "/usr/bin/false",
+            dataDir: "/tmp/cccode-t-\(UUID().uuidString)",
+            logDir: "/tmp",
+            opencodeURL: "",
+            opencodeSource: .disabled
+        )
+        let args = RuntimeManager.processArguments(for: config)
+        XCTAssertFalse(args.contains("-opencode-url"))
+        XCTAssertFalse(args.contains("64667"))
+        XCTAssertFalse(args.contains("localhost"))
+    }
+
+    func testProcessEnvironmentCarriesOpenCodeCreds() {
+        let config = RuntimeConfig(
+            executablePath: "/usr/bin/false",
+            dataDir: "/tmp/cccode-t-\(UUID().uuidString)",
+            logDir: "/tmp",
+            opencodeUser: "alice",
+            opencodePass: "super-secret-password",
+            opencodeURL: "http://127.0.0.1:4096",
+            opencodeSource: .externalHttp
+        )
+        let env = RuntimeManager.processEnvironment(
+            for: config,
+            managementToken: "mgmt-token",
+            existingEnvironment: ["PATH": "/usr/bin"]
+        )
+        XCTAssertEqual(env["OPENCODE_SERVER_USERNAME"], "alice")
+        XCTAssertEqual(env["OPENCODE_SERVER_PASSWORD"], "super-secret-password")
+        XCTAssertEqual(env["CORDCODE_MANAGEMENT_TOKEN"], "mgmt-token")
+        XCTAssertNotNil(env["PATH"])
+    }
+
+    func testProcessEnvironmentDropsOpenCodeCredsWhenEmpty() {
+        let config = RuntimeConfig(
+            executablePath: "/usr/bin/false",
+            dataDir: "/tmp/cccode-t-\(UUID().uuidString)",
+            logDir: "/tmp",
+            opencodeUser: "",
+            opencodePass: "",
+            opencodeSource: .disabled
+        )
+        let env = RuntimeManager.processEnvironment(
+            for: config,
+            managementToken: "tok",
+            existingEnvironment: [
+                "PATH": "/usr/bin",
+                "OPENCODE_SERVER_USERNAME": "stale",
+                "OPENCODE_SERVER_PASSWORD": "stale",
+            ]
+        )
+        XCTAssertNil(env["OPENCODE_SERVER_USERNAME"])
+        XCTAssertNil(env["OPENCODE_SERVER_PASSWORD"])
+    }
+
+    // MARK: - T04: Desktop config sync
+
+    private func temporaryDesktopDir() throws -> URL {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cccode-desktop-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        return tmp
+    }
+
+    private func readServerList(in desktopDir: URL) throws -> [[String: Any]] {
+        let globalPath = desktopDir.appendingPathComponent("opencode.global.dat")
+        let data = try Data(contentsOf: globalPath)
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let serverStr = try XCTUnwrap(root["server"] as? String)
+        let serverData = try XCTUnwrap(serverStr.data(using: .utf8))
+        let server = try XCTUnwrap(JSONSerialization.jsonObject(with: serverData) as? [String: Any])
+        let list = (server["list"] as? [Any]) ?? []
+        return list.compactMap { $0 as? [String: Any] }
+    }
+
+    func testDesktopConfigWritesExternalHttpEndpointURL() throws {
+        let desktopDir = try temporaryDesktopDir()
+        defer { try? FileManager.default.removeItem(at: desktopDir) }
+
+        RuntimeManager.configureOpenCodeDesktopSettings(
+            desktopDir: desktopDir,
+            serverURL: "http://127.0.0.1:4096",
+            username: "opencode",
+            password: "p"
+        )
+
+        let list = try readServerList(in: desktopDir)
+        guard let first = list.first,
+              let http = first["http"] as? [String: Any] else {
+            return XCTFail("server list must contain an http entry")
+        }
+        XCTAssertEqual(first["type"] as? String, "http")
+        XCTAssertEqual(http["url"] as? String, "http://127.0.0.1:4096")
+        XCTAssertEqual(http["username"] as? String, "opencode")
+
+        // opencode.settings defaultServerUrl = 同一 endpoint。
+        let settingsData = try Data(contentsOf: desktopDir.appendingPathComponent("opencode.settings"))
+        let settings = try XCTUnwrap(JSONSerialization.jsonObject(with: settingsData) as? [String: Any])
+        XCTAssertEqual(settings["defaultServerUrl"] as? String, "http://127.0.0.1:4096")
+
+        // external_http endpoint 不得是 64667。
+        let listJSON = String(data: try JSONSerialization.data(withJSONObject: list), encoding: .utf8) ?? ""
+        XCTAssertFalse(listJSON.contains("64667"))
+    }
+
+    func testDesktopConfigDedupsAndPreservesOtherServers() throws {
+        let desktopDir = try temporaryDesktopDir()
+        defer { try? FileManager.default.removeItem(at: desktopDir) }
+
+        // 预置：一个用户手动添加的 server + 一个同 URL 旧条目。
+        let userServer: [String: Any] = [
+            "type": "http",
+            "http": ["url": "http://127.0.0.1:9999", "username": "u", "password": "x"],
+        ]
+        let staleDup: [String: Any] = [
+            "type": "http",
+            "http": ["url": "http://127.0.0.1:4096", "username": "old", "password": "old"],
+        ]
+        let server: [String: Any] = ["list": [userServer, staleDup], "currentSidecarUrl": "http://127.0.0.1:9999"]
+        let serverStr = String(data: try JSONSerialization.data(withJSONObject: server), encoding: .utf8)!
+        let globalPath = desktopDir.appendingPathComponent("opencode.global.dat")
+        try JSONSerialization.data(withJSONObject: ["server": serverStr]).write(to: globalPath)
+
+        RuntimeManager.configureOpenCodeDesktopSettings(
+            desktopDir: desktopDir,
+            serverURL: "http://127.0.0.1:4096",
+            username: "opencode",
+            password: "p"
+        )
+
+        let list = try readServerList(in: desktopDir)
+        // endpoint URL 应排在首位。
+        guard let first = list.first,
+              let firstURL = (first["http"] as? [String: Any])?["url"] as? String else {
+            return XCTFail("first entry must be the configured endpoint")
+        }
+        XCTAssertEqual(firstURL, "http://127.0.0.1:4096")
+        // 同 URL 旧条目被去重，只剩一个 4096。
+        let count4096 = list.filter {
+            (($0["http"] as? [String: Any])?["url"] as? String) == "http://127.0.0.1:4096"
+        }.count
+        XCTAssertEqual(count4096, 1, "duplicate endpoint should be removed")
+        // 用户手动的其它 server 不被删除。
+        let count9999 = list.filter {
+            (($0["http"] as? [String: Any])?["url"] as? String) == "http://127.0.0.1:9999"
+        }.count
+        XCTAssertEqual(count9999, 1, "other user servers must be preserved")
+    }
 }
 
 private enum TestError: Error {

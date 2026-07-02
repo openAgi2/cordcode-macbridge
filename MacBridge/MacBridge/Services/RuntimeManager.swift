@@ -39,6 +39,11 @@ struct RuntimeConfig {
     let codexAppServerURL: String
     var opencodeUser: String
     var opencodePass: String
+    /// Resolved OpenCode endpoint URL (loopback, e.g. `http://127.0.0.1:<port>`).
+    /// Empty when source is disabled / unresolved. Passed to go-bridge as `-opencode-url`.
+    var opencodeURL: String
+    /// Selected OpenCode server source. Drives Desktop config sync + diagnostics.
+    var opencodeSource: OpenCodeServerSource
     let logFilePath: String
     let cliSearchPath: [String]
     var remoteURL: String
@@ -61,6 +66,8 @@ struct RuntimeConfig {
         codexAppServerURL: String = "",
         opencodeUser: String = "",
         opencodePass: String = "",
+        opencodeURL: String = "",
+        opencodeSource: OpenCodeServerSource = .disabled,
         logFilePath: String = "",
         cliSearchPath: [String] = Self.defaultCLISearchPath(),
         remoteURL: String = "",
@@ -82,6 +89,8 @@ struct RuntimeConfig {
         self.codexAppServerURL = codexAppServerURL
         self.opencodeUser = opencodeUser
         self.opencodePass = opencodePass
+        self.opencodeURL = opencodeURL
+        self.opencodeSource = opencodeSource
         self.logFilePath = NSString(string: logFilePath).expandingTildeInPath
         self.cliSearchPath = cliSearchPath.map { NSString(string: $0).expandingTildeInPath }
         self.remoteURL = remoteURL
@@ -273,59 +282,15 @@ class RuntimeManager: ObservableObject {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: config.executablePath)
 
-        var arguments = [
-            "-port", "\(config.port)",
-            "-drivers", config.drivers.joined(separator: ","),
-            "-work-dir", config.workDir,
-            "-codex-backend", config.codexBackend,
-            "-management-host", "127.0.0.1",
-            "-management-port", "0",
-            "-data-dir", config.dataDir,
-            "-log-dir", config.logDir,
-        ]
-        if !config.codexAppServerURL.isEmpty {
-            arguments += ["-codex-app-server-url", config.codexAppServerURL]
-        }
-        if !config.remoteURL.isEmpty {
-            arguments += ["-remote-url", config.remoteURL]
-        }
-        if !config.relayServiceAddress.isEmpty {
-            arguments += ["-relay-service-addr", config.relayServiceAddress]
-        }
-        arguments += ["-pairing-include-tailscale=\(config.includeTailscaleInPairing ? "true" : "false")"]
-        arguments += ["-pairing-include-remote=\(config.includeRemoteInPairing ? "true" : "false")"]
-        arguments += ["-relay-enabled=\(config.relayEnabled ? "true" : "false")"]
+        let arguments = Self.processArguments(for: config)
         process.arguments = arguments
 
-        // 环境变量：OpenCode 凭据
-        var environment = ProcessInfo.processInfo.environment
-        environment["PATH"] = mergedCLIPath(existingPath: environment["PATH"])
-        environment["CORDCODE_MANAGEMENT_TOKEN"] = token
-        if !config.opencodeUser.isEmpty {
-            environment["OPENCODE_SERVER_USERNAME"] = config.opencodeUser
-        } else {
-            environment.removeValue(forKey: "OPENCODE_SERVER_USERNAME")
-        }
-        if !config.opencodePass.isEmpty {
-            environment["OPENCODE_SERVER_PASSWORD"] = config.opencodePass
-        } else {
-            environment.removeValue(forKey: "OPENCODE_SERVER_PASSWORD")
-        }
-        if !config.relayEndpoint.isEmpty {
-            environment["CORDCODE_RELAY_ENDPOINT"] = config.relayEndpoint
-        } else {
-            environment.removeValue(forKey: "CORDCODE_RELAY_ENDPOINT")
-        }
-        if !config.relayRouteID.isEmpty {
-            environment["CORDCODE_RELAY_ROUTE_ID"] = config.relayRouteID
-        } else {
-            environment.removeValue(forKey: "CORDCODE_RELAY_ROUTE_ID")
-        }
-        if !config.relayCredential.isEmpty {
-            environment["CORDCODE_RELAY_CREDENTIAL"] = config.relayCredential
-        } else {
-            environment.removeValue(forKey: "CORDCODE_RELAY_CREDENTIAL")
-        }
+        // 环境变量：OpenCode 凭据（password 走 env，绝不进 argv）
+        let environment = Self.processEnvironment(
+            for: config,
+            managementToken: token,
+            existingEnvironment: ProcessInfo.processInfo.environment
+        )
         process.environment = environment
 
         // 日志输出
@@ -726,12 +691,15 @@ class RuntimeManager: ObservableObject {
 
     private func configureOpenCodeDesktopServerIfNeeded() {
         guard config.drivers.contains("opencode"),
+              !config.opencodeURL.isEmpty,
               !config.opencodeUser.isEmpty,
               !config.opencodePass.isEmpty else {
             return
         }
 
-        let url = "http://127.0.0.1:64667"
+        // 使用 resolved endpoint URL（external_http 用户配置或 legacy_64667 的 127.0.0.1:64667），
+        // 不再固定写 http://127.0.0.1:64667。
+        let url = config.opencodeURL
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
         guard let desktopDir = appSupport?.appendingPathComponent("ai.opencode.desktop") else { return }
 
@@ -759,7 +727,7 @@ class RuntimeManager: ObservableObject {
         return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private nonisolated static func configureOpenCodeDesktopSettings(
+    internal nonisolated static func configureOpenCodeDesktopSettings(
         desktopDir: URL,
         serverURL: String,
         username: String,
@@ -895,11 +863,85 @@ class RuntimeManager: ObservableObject {
         }
     }
 
+    /// 构造 go-bridge 进程 argv（可测试，不启动进程）。URL 非 secret 可进 argv；
+    /// password 不在此处出现（走 processEnvironment 的 env）。
+    internal nonisolated static func processArguments(for config: RuntimeConfig) -> [String] {
+        var arguments = [
+            "-port", "\(config.port)",
+            "-drivers", config.drivers.joined(separator: ","),
+            "-work-dir", config.workDir,
+            "-codex-backend", config.codexBackend,
+            "-management-host", "127.0.0.1",
+            "-management-port", "0",
+            "-data-dir", config.dataDir,
+            "-log-dir", config.logDir,
+        ]
+        if !config.codexAppServerURL.isEmpty {
+            arguments += ["-codex-app-server-url", config.codexAppServerURL]
+        }
+        // endpoint 不可解析（disabled / not_configured）时不写 URL，go-bridge 的 OpenCode
+        // descriptor 返回 not_configured，绝不隐式 dial 64667。
+        if !config.opencodeURL.isEmpty {
+            arguments += ["-opencode-url", config.opencodeURL]
+        }
+        if !config.remoteURL.isEmpty {
+            arguments += ["-remote-url", config.remoteURL]
+        }
+        if !config.relayServiceAddress.isEmpty {
+            arguments += ["-relay-service-addr", config.relayServiceAddress]
+        }
+        arguments += ["-pairing-include-tailscale=\(config.includeTailscaleInPairing ? "true" : "false")"]
+        arguments += ["-pairing-include-remote=\(config.includeRemoteInPairing ? "true" : "false")"]
+        arguments += ["-relay-enabled=\(config.relayEnabled ? "true" : "false")"]
+        return arguments
+    }
+
+    /// 构造 go-bridge 进程环境（可测试）。password / 控制面 secret 走 env，不进 argv。
+    internal nonisolated static func processEnvironment(
+        for config: RuntimeConfig,
+        managementToken: String,
+        existingEnvironment: [String: String]
+    ) -> [String: String] {
+        var environment = existingEnvironment
+        environment["PATH"] = mergedCLIPath(cliSearchPath: config.cliSearchPath, existingPath: environment["PATH"])
+        environment["CORDCODE_MANAGEMENT_TOKEN"] = managementToken
+        if !config.opencodeUser.isEmpty {
+            environment["OPENCODE_SERVER_USERNAME"] = config.opencodeUser
+        } else {
+            environment.removeValue(forKey: "OPENCODE_SERVER_USERNAME")
+        }
+        if !config.opencodePass.isEmpty {
+            environment["OPENCODE_SERVER_PASSWORD"] = config.opencodePass
+        } else {
+            environment.removeValue(forKey: "OPENCODE_SERVER_PASSWORD")
+        }
+        if !config.relayEndpoint.isEmpty {
+            environment["CORDCODE_RELAY_ENDPOINT"] = config.relayEndpoint
+        } else {
+            environment.removeValue(forKey: "CORDCODE_RELAY_ENDPOINT")
+        }
+        if !config.relayRouteID.isEmpty {
+            environment["CORDCODE_RELAY_ROUTE_ID"] = config.relayRouteID
+        } else {
+            environment.removeValue(forKey: "CORDCODE_RELAY_ROUTE_ID")
+        }
+        if !config.relayCredential.isEmpty {
+            environment["CORDCODE_RELAY_CREDENTIAL"] = config.relayCredential
+        } else {
+            environment.removeValue(forKey: "CORDCODE_RELAY_CREDENTIAL")
+        }
+        return environment
+    }
+
     private func mergedCLIPath(existingPath: String?) -> String {
+        Self.mergedCLIPath(cliSearchPath: config.cliSearchPath, existingPath: existingPath)
+    }
+
+    private nonisolated static func mergedCLIPath(cliSearchPath: [String], existingPath: String?) -> String {
         var seen = Set<String>()
         var paths: [String] = []
 
-        for path in config.cliSearchPath + (existingPath ?? "").split(separator: ":").map(String.init) {
+        for path in cliSearchPath + (existingPath ?? "").split(separator: ":").map(String.init) {
             guard !path.isEmpty, !seen.contains(path) else { continue }
             seen.insert(path)
             paths.append(path)

@@ -183,46 +183,44 @@ must not reuse an existing event name with incompatible payload semantics.
 
 ## Session Pagination
 
-`list_sessions` and `get_session_messages` support backwards cursor pagination so a session with a
-large history never has to be sent as a single WebSocket frame. This is the fix for iOS WebSocket
-close 1009 ("Message too long") on large Codex/Claude transcripts.
+There are two separate pagination surfaces:
 
-### Capability
-
-A backend advertises `session_pagination` in `capabilities` (per-backend, not server-level) when it
-can expose a stable transcript file path. Currently `codex` and `claudecode` advertise it. Clients
-MUST only send cursor fields to a backend that advertises this capability; otherwise the legacy
-full-parse path is used.
+1. `list_sessions` session-list pagination. These fields are additive and may be used when a backend returns the standard `{ sessions, nextCursor, hasMore }` envelope. Clients MUST treat `cursor` as opaque and scoped to backend, bridge/backend identity, project or directory bucket, and the current backend process lifetime unless a future protocol marks it durable. OpenCode may carry an upstream cursor here; file-backed backends may carry a bridge-owned cursor.
+2. `get_session_messages` message-history pagination. This is gated by the existing `session_pagination` backend capability and is unrelated to OpenCode project bucket list loading.
 
 ### `list_sessions` paging
 
-Request params (additive; `cursor` is new):
+Request params (additive):
 
 ```ts
 {
   "directory"?: string,
+  "rootsOnly"?: boolean,
   "limit"?: number,
   "cursor"?: string  // opaque, from a previous response's nextCursor
 }
 ```
 
-Response data (additive; `nextCursor` and `hasMore` are new):
+Response data (additive):
 
 ```ts
 {
   "sessions": SessionInfo[],
-  "nextCursor"?: string,  // present when hasMore is true
+  "nextCursor"?: string,  // present only when hasMore is true
   "hasMore": boolean
 }
 ```
 
-The cursor is an opaque, versioned encoding of the backend's stable composite sort key
-(`updatedAtMillis` DESC, `sessionId` ASC). It is never just a timestamp. A malformed or stale cursor
-degrades to the first page rather than failing the request, because the list is cheap to re-fetch.
+Rules:
 
-`SessionInfo` may include optional model metadata for clients that want to restore the selector when
-opening history: `modelId`, `providerId`, `effectiveModelId`, `effectiveProviderId`, and
-`reasoningEffort`. Older clients ignore these fields.
+- Clients MUST NOT parse cursor contents or reuse a cursor across backend/project/directory scopes.
+- `hasMore` is authoritative. Do not infer more pages from `sessions.length == limit`.
+- For OpenCode directory-scoped lists, `hasMore` is true only when the upstream server returned a next cursor. Array-only OpenCode server tracks return `hasMore=false`; product pagination is then limited to the first page for that project.
+- `rootsOnly` remains valid for legacy/non-OpenCode list calls. OpenCode may reject `rootsOnly` combined with `limit` or `cursor` because client-side filtering after an upstream-limited page breaks pagination math.
+
+### Capability
+
+A backend advertises `session_pagination` in `capabilities` only for message-history pagination (`get_session_messages`), not for session-list pagination. Clients MUST only send `paginate`/`beforeCursor` history fields to a backend that advertises this capability; otherwise the legacy full-history path is used.
 
 ### `get_session_messages` paging
 

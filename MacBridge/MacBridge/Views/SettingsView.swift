@@ -93,15 +93,53 @@ struct SettingsView: View {
                 }
 
                 settingsGroup("OpenCode") {
-                    settingRow(L10n.settingsAuthenticationStatus) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Label(L10n.settingsAutomaticallyConfigured, systemImage: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                            Text(L10n.settingsCredentialsApplyAfterRestart)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                    settingRow(L10n.opencodeServerSource) {
+                        Picker("", selection: $viewModel.opencodeSource) {
+                            Text(L10n.opencodeSourceExternalHttp).tag(OpenCodeServerSource.externalHttp)
+                            Text(L10n.opencodeSourceLegacy64667).tag(OpenCodeServerSource.legacy64667)
+                            Text(L10n.opencodeSourceDisabled).tag(OpenCodeServerSource.disabled)
                         }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(width: 320, alignment: .leading)
                     }
+                    Text(currentSourceDescription)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, labelWidth + 16)
+
+                    if viewModel.opencodeSource == .externalHttp {
+                        settingRow(L10n.opencodeServerURL) {
+                            TextField(L10n.opencodeServerURLPlaceholder, text: $viewModel.opencodeURL)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        Text(L10n.opencodeBringYourOwnHint)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, labelWidth + 16)
+                    }
+
+                    if viewModel.canValidateEndpoint {
+                        HStack(spacing: 12) {
+                            Button {
+                                viewModel.validateEndpoint()
+                            } label: {
+                                if viewModel.endpointValidation == .validating {
+                                    HStack(spacing: 6) {
+                                        ProgressView().controlSize(.small)
+                                        Text(L10n.opencodeValidating)
+                                    }
+                                } else {
+                                    Text(L10n.opencodeValidateEndpoint)
+                                }
+                            }
+                            .disabled(viewModel.endpointValidation == .validating)
+                            endpointValidationView(viewModel.endpointValidation)
+                        }
+                        .padding(.leading, labelWidth + 16)
+                    }
+
+                    Divider()
 
                     VStack(alignment: .leading, spacing: 0) {
                         Button {
@@ -120,7 +158,7 @@ struct SettingsView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        
+
                         if showManualAuthentication {
                             VStack(alignment: .leading, spacing: 12) {
                                 settingRow(L10n.username) {
@@ -223,6 +261,33 @@ struct SettingsView: View {
                 .frame(width: labelWidth, alignment: .leading)
             content()
                 .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var currentSourceDescription: String {
+        switch viewModel.opencodeSource {
+        case .externalHttp:
+            return L10n.opencodeSourceExternalHttpDesc
+        case .legacy64667:
+            return L10n.opencodeSourceLegacy64667Desc
+        case .serviceDiscoveryFuture:
+            return L10n.opencodeSourceServiceDiscoveryFutureDesc
+        case .disabled:
+            return L10n.opencodeSourceDisabledDesc
+        }
+    }
+
+    @ViewBuilder
+    private func endpointValidationView(_ state: EndpointValidationState) -> some View {
+        switch state {
+        case .idle, .validating:
+            EmptyView()
+        case .valid:
+            InlineFeedback(style: .success, message: L10n.opencodeEndpointValid)
+        case .warning(let message):
+            InlineFeedback(style: .warning, message: message)
+        case .failed(let message):
+            InlineFeedback(style: .error, message: message)
         }
     }
 

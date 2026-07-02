@@ -1,13 +1,16 @@
 package gobridge
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -904,6 +907,280 @@ func TestOpenCodeAbortGenerationCallsHTTPAbortAndCleansSession(t *testing.T) {
 	}
 	if _, ok := handlers.opencodeSessionOptions["ses_1"]; ok {
 		t.Fatal("session config still present after abort")
+	}
+}
+
+func TestOpenCodeListProjectsMapsWorktreeToDirectory(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/project" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"id":"proj_1","worktree":"/Users/test/Project","vcs":"git"}]`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer proxyServer.Close()
+
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("opencode", &fakeAgent{name: "opencode"})
+	handlers.RegisterOpenCodeProxy(NewOpenCodeProxy(proxyServer.URL, "", ""))
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers.handleOpenCodeRPC(serverConn, WireMessage{
+		BackendID: "opencode",
+		Method:    "list_projects",
+		RequestID: "oc-projects-1",
+	})
+
+	messages := readJSONMaps(t, clientConn, 1)
+	data, _ := messages[0]["data"].(map[string]any)
+	projects, _ := data["projects"].([]any)
+	if len(projects) != 1 {
+		t.Fatalf("project count = %d, want 1", len(projects))
+	}
+	project, _ := projects[0].(map[string]any)
+	if got := project["directory"]; got != "/Users/test/Project" {
+		t.Fatalf("directory = %#v, want worktree path", got)
+	}
+	if got := project["name"]; got != "Project" {
+		t.Fatalf("name = %#v, want basename when upstream name is absent", got)
+	}
+}
+
+func TestOpenCodeListProjectsUsesDesktopVisibleProjectOrder(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	appSupport := filepath.Join(home, "Library", "Application Support", "ai.opencode.desktop")
+	if err := os.MkdirAll(appSupport, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	expandedFalse := false
+	serverState := map[string]any{
+		"projects": map[string]any{
+			"local": []map[string]any{
+				{"worktree": "/Users/test/Open", "expanded": true},
+				{"worktree": "/Users/test/Closed", "expanded": expandedFalse},
+				{"worktree": "/Users/test/Second", "expanded": true},
+			},
+		},
+	}
+	serverRaw, _ := json.Marshal(serverState)
+	storeRaw, _ := json.Marshal(map[string]string{"server": string(serverRaw)})
+	if err := os.WriteFile(filepath.Join(appSupport, "opencode.global.dat"), storeRaw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/project" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[
+				{"id":"closed","worktree":"/Users/test/Closed","vcs":"git"},
+				{"id":"second","worktree":"/Users/test/Second","vcs":"git"},
+				{"id":"open","worktree":"/Users/test/Open","vcs":"git"},
+				{"id":"other","worktree":"/Users/test/Other","vcs":"git"}
+			]`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer proxyServer.Close()
+
+	projects, err := NewOpenCodeProxy(proxyServer.URL, "", "").listProjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(projects))
+	for _, project := range projects {
+		got = append(got, project["directory"].(string))
+	}
+	want := []string{"/Users/test/Open", "/Users/test/Closed", "/Users/test/Second"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("visible project order = %#v, want %#v", got, want)
+	}
+}
+
+func TestOpenCodeListSessionsPassesDirectoryLimitAndCursor(t *testing.T) {
+	var gotDirectory string
+	var gotLimit string
+	var gotCursor string
+	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/session" {
+			http.NotFound(w, r)
+			return
+		}
+		gotDirectory = r.Header.Get("x-opencode-directory")
+		gotLimit = r.URL.Query().Get("limit")
+		gotCursor = r.URL.Query().Get("cursor")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":"ses_1","title":"One","projectID":"proj_1","time":{"created":1000,"updated":2000}}]`))
+	}))
+	defer proxyServer.Close()
+
+	var logs bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(previousLogger)
+
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("opencode", &fakeAgent{name: "opencode"})
+	handlers.RegisterOpenCodeProxy(NewOpenCodeProxy(proxyServer.URL, "", ""))
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers.handleOpenCodeRPC(serverConn, WireMessage{
+		BackendID: "opencode",
+		Method:    "list_sessions",
+		RequestID: "oc-sessions-1",
+		Params: mustJSONRaw(t, map[string]any{
+			"directory": "/tmp/project",
+			"limit":     10,
+			"cursor":    "opaque-cursor",
+		}),
+	})
+
+	messages := readJSONMaps(t, clientConn, 1)
+	data, _ := messages[0]["data"].(map[string]any)
+	sessions, _ := data["sessions"].([]any)
+	if len(sessions) != 1 {
+		t.Fatalf("session count = %d, want 1", len(sessions))
+	}
+	if gotDirectory != "/tmp/project" {
+		t.Fatalf("x-opencode-directory = %q, want /tmp/project", gotDirectory)
+	}
+	if gotLimit != "10" {
+		t.Fatalf("limit query = %q, want 10", gotLimit)
+	}
+	if gotCursor != "opaque-cursor" {
+		t.Fatalf("cursor query = %q, want opaque-cursor", gotCursor)
+	}
+	if got := data["hasMore"]; got != false {
+		t.Fatalf("hasMore = %#v, want false for array-only response", got)
+	}
+	if _, ok := data["nextCursor"]; ok {
+		t.Fatalf("nextCursor present for array-only response: %#v", data["nextCursor"])
+	}
+	logText := logs.String()
+	for _, want := range []string{"msg=\"opencode list_sessions\"", "directory=/tmp/project", "limit=10", "cursor_present=true", "result_count=1", "next_cursor_present=false"} {
+		if !strings.Contains(logText, want) {
+			t.Fatalf("diagnostic log missing %q in %s", want, logText)
+		}
+	}
+}
+
+func TestOpenCodeListSessionsPreservesCursorEnvelope(t *testing.T) {
+	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/session" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"data": [{"id":"ses_1","title":"One","time":{"created":1000,"updated":2000}}],
+			"cursor": {"next":"next-page", "previous":"prev-page"}
+		}`))
+	}))
+	defer proxyServer.Close()
+
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("opencode", &fakeAgent{name: "opencode"})
+	handlers.RegisterOpenCodeProxy(NewOpenCodeProxy(proxyServer.URL, "", ""))
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers.handleOpenCodeRPC(serverConn, WireMessage{
+		BackendID: "opencode",
+		Method:    "list_sessions",
+		RequestID: "oc-sessions-2",
+		Params:    mustJSONRaw(t, map[string]any{"directory": "/tmp/project", "limit": 10}),
+	})
+
+	messages := readJSONMaps(t, clientConn, 1)
+	data, _ := messages[0]["data"].(map[string]any)
+	if got := data["hasMore"]; got != true {
+		t.Fatalf("hasMore = %#v, want true", got)
+	}
+	if got := data["nextCursor"]; got != "next-page" {
+		t.Fatalf("nextCursor = %#v, want next-page", got)
+	}
+}
+
+func TestOpenCodeListSessionsRejectsRootsOnlyWithCursor(t *testing.T) {
+	var upstreamCalls int
+	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls++
+		http.NotFound(w, r)
+	}))
+	defer proxyServer.Close()
+
+	handlers := newTestHandlers(t)
+	handlers.RegisterOpenCodeProxy(NewOpenCodeProxy(proxyServer.URL, "", ""))
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers.handleOpenCodeRPC(serverConn, WireMessage{
+		BackendID: "opencode",
+		Method:    "list_sessions",
+		RequestID: "oc-sessions-roots",
+		Params: mustJSONRaw(t, map[string]any{
+			"directory": "/tmp/project",
+			"rootsOnly": true,
+			"limit":     10,
+			"cursor":    "opaque-cursor",
+		}),
+	})
+
+	messages := readJSONMaps(t, clientConn, 1)
+	if got := messages[0]["ok"]; got != false {
+		t.Fatalf("ok = %#v, want false", got)
+	}
+	errorPayload, _ := messages[0]["error"].(map[string]any)
+	if got := errorPayload["code"]; got != "invalid_params" {
+		t.Fatalf("error code = %#v, want invalid_params", got)
+	}
+	if upstreamCalls != 0 {
+		t.Fatalf("upstream calls = %d, want 0", upstreamCalls)
+	}
+}
+
+func TestOpenCodeListDirectoryUsesGenericHandler(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "child"), 0755); err != nil {
+		t.Fatalf("mkdir child: %v", err)
+	}
+
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("opencode", &fakeAgent{name: "opencode"})
+	handlers.RegisterOpenCodeProxy(NewOpenCodeProxy("http://127.0.0.1:1", "", ""))
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers.handleOpenCodeRPC(serverConn, WireMessage{
+		BackendID: "opencode",
+		Method:    "list_directory",
+		RequestID: "oc-list-directory-1",
+		Params:    mustJSONRaw(t, map[string]any{"path": root}),
+	})
+
+	messages := readJSONMaps(t, clientConn, 1)
+	if got := messages[0]["ok"]; got != true {
+		t.Fatalf("ok = %#v, want true; message=%#v", got, messages[0])
+	}
+	data, _ := messages[0]["data"].(map[string]any)
+	if got := data["currentPath"]; got != root {
+		t.Fatalf("currentPath = %#v, want %q", got, root)
+	}
+	items, _ := data["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("item count = %d, want 1", len(items))
+	}
+	item, _ := items[0].(map[string]any)
+	if got := item["name"]; got != "child" {
+		t.Fatalf("item name = %#v, want child", got)
+	}
+	if got := item["isDirectory"]; got != true {
+		t.Fatalf("isDirectory = %#v, want true", got)
 	}
 }
 

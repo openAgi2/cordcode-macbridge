@@ -162,7 +162,7 @@ private final class StubPairingAPIClient: PairingAPIProviding {
     }
 
     func createPairing() async throws -> PairingSessionInfo {
-        PairingSessionInfo(id: "sess-test", qrPayload: "cccode://pair?...", manualCode: "123456", expiresAt: "2099-01-01T00:00:00Z")
+        PairingSessionInfo(id: "sess-test", qrPayload: "cccode://pair?...", webQrPayload: nil, manualCode: "123456", expiresAt: "2099-01-01T00:00:00Z")
     }
 
     func getPairingStatus(_ pairingId: String) async throws -> PairingSessionStatus {

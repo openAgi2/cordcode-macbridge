@@ -28,17 +28,24 @@ class AppDependencies: ObservableObject {
         // OpenCode 凭据：环境变量 → credentials.json 降级
         var opencodeUser = ""
         var opencodePass = ""
+        // 标记凭据是否来自既有来源（file/env/LaunchAgent），用于升级迁移判定。
+        // 仅"全新安装且无任何凭据"才落到 disabled；既有可工作 OpenCode 一律保持 legacy_64667。
+        var opencodeCredsPreExisted = false
         if let envUser = ProcessInfo.processInfo.environment["OPENCODE_SERVER_USERNAME"],
            !envUser.isEmpty {
             opencodeUser = envUser
-        } else {
-            opencodeUser = Self.readCredential("opencode_user", from: dir) ?? ""
+            opencodeCredsPreExisted = true
+        } else if let fileUser = Self.readCredential("opencode_user", from: dir), !fileUser.isEmpty {
+            opencodeUser = fileUser
+            opencodeCredsPreExisted = true
         }
         if let envPass = ProcessInfo.processInfo.environment["OPENCODE_SERVER_PASSWORD"],
            !envPass.isEmpty {
             opencodePass = envPass
-        } else {
-            opencodePass = Self.readCredential("opencode_pass", from: dir) ?? ""
+            opencodeCredsPreExisted = true
+        } else if let filePass = Self.readCredential("opencode_pass", from: dir), !filePass.isEmpty {
+            opencodePass = filePass
+            opencodeCredsPreExisted = true
         }
 
         // 已有常驻 OpenCode 服务时复用其 LaunchAgent 凭据。
@@ -49,6 +56,7 @@ class AppDependencies: ObservableObject {
             if let existing = OpenCodeLaunchAgentCredentials.read(from: launchAgentURL) {
                 if opencodeUser.isEmpty { opencodeUser = existing.user }
                 if opencodePass.isEmpty { opencodePass = existing.password }
+                opencodeCredsPreExisted = true
                 Self.writeCredentials(user: opencodeUser, pass: opencodePass, to: dir)
                 NSLog("[AppDependencies] Reused credentials from the existing OpenCode LaunchAgent.")
             }
@@ -60,6 +68,42 @@ class AppDependencies: ObservableObject {
             opencodePass = OpenCodeCredentialsGenerator.generatePassword()
             Self.writeCredentials(user: opencodeUser, pass: opencodePass, to: dir)
             NSLog("[AppDependencies] Automatically generated OpenCode credentials for first-time launch.")
+        }
+
+        // OpenCode endpoint source（迁移感知）。
+        // - 已显式保存 source → 尊重。
+        // - 无显式 source 但既有凭据 → legacy_64667（升级连续性）。
+        // - 全新安装 → disabled（不自动落 64667）。
+        let explicitSource = Self.readCredential("opencode_source", from: dir)
+            .flatMap { OpenCodeServerSource(rawValue: $0) }
+        let opencodeSource = OpenCodeEndpointResolver.migratedSource(
+            explicit: explicitSource,
+            fileExistedWithCreds: opencodeCredsPreExisted
+        )
+        if OpenCodeEndpointResolver.isLegacyMigration(
+            explicit: explicitSource,
+            fileExistedWithCreds: opencodeCredsPreExisted
+        ) {
+            // 一次性持久化迁移结果，避免每次启动重复判定。
+            Self.writeCredential("opencode_source", OpenCodeServerSource.legacy64667.rawValue, in: dir)
+            NSLog("[AppDependencies] OpenCode source migrated to legacy_64667 for upgrade continuity; configure external_http for a secure shared server.")
+        }
+        let opencodeURLInput = Self.readCredential("opencode_url", from: dir) ?? ""
+
+        // 解析 endpoint（纯逻辑，不触网）。失败（disabled/not_configured/non-loopback 等）
+        // 时 opencodeURL 为空 → RuntimeManager 不传 -opencode-url，descriptor 返回 not_configured。
+        let endpointConfig = OpenCodeEndpointConfig(
+            source: opencodeSource,
+            url: opencodeURLInput,
+            username: opencodeUser,
+            password: opencodePass
+        )
+        var opencodeURL = ""
+        if case .success(let endpoint) = OpenCodeEndpointResolver.resolve(endpointConfig) {
+            opencodeURL = endpoint.url
+        } else if opencodeSource == .externalHttp {
+            // external_http 配置不完整：保留 source，URL 留空，descriptor 报 not_configured。
+            NSLog("[AppDependencies] OpenCode external_http endpoint unresolved; backend will report not_configured until URL/password is set.")
         }
 
         let configuredRelayEndpoint = OfficialRelayConfiguration.endpoint
@@ -82,6 +126,8 @@ class AppDependencies: ObservableObject {
             codexAppServerURL: UserDefaults.standard.string(forKey: "codexAppServerURL") ?? "",
             opencodeUser: opencodeUser,
             opencodePass: opencodePass,
+            opencodeURL: opencodeURL,
+            opencodeSource: opencodeSource,
             logFilePath: logFilePath,
             remoteURL: UserDefaults.standard.string(forKey: "remoteBridgeURL") ?? "",
             includeTailscaleInPairing: UserDefaults.standard.object(forKey: "pairingIncludeTailscale") as? Bool ?? true,
@@ -229,8 +275,21 @@ class AppDependencies: ObservableObject {
         let opencodePass = Self.readCredential("opencode_pass", from: dataDir)
             ?? ProcessInfo.processInfo.environment["OPENCODE_SERVER_PASSWORD"]
             ?? ""
+        let source = Self.readCredential("opencode_source", from: dataDir)
+            .flatMap { OpenCodeServerSource(rawValue: $0) }
+            ?? OpenCodeServerSource.disabled
+        let urlInput = Self.readCredential("opencode_url", from: dataDir) ?? ""
+
+        var resolvedURL = ""
+        if case .success(let endpoint) = OpenCodeEndpointResolver.resolve(
+            OpenCodeEndpointConfig(source: source, url: urlInput, username: opencodeUser, password: opencodePass)
+        ) {
+            resolvedURL = endpoint.url
+        }
 
         runtimeManager.updateOpenCodeCredentials(user: opencodeUser, pass: opencodePass)
+        runtimeManager.config.opencodeURL = resolvedURL
+        runtimeManager.config.opencodeSource = source
         runtimeManager.restart()
     }
 
@@ -259,6 +318,25 @@ class AppDependencies: ObservableObject {
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
         } catch {
             NSLog("[AppDependencies] Failed to write credentials: \(error.localizedDescription)")
+        }
+    }
+
+    /// 读-改-写单条 credential 字段，保留其它键（用于 opencode_source / opencode_url）。
+    static func writeCredential(_ key: String, _ value: String, in dataDir: String) {
+        let path = dataDir + "/credentials.json"
+        var dict: [String: Any] = [:]
+        if let data = FileManager.default.contents(atPath: path),
+           let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            dict = existing
+        }
+        dict[key] = value
+        do {
+            try FileManager.default.createDirectory(atPath: dataDir, withIntermediateDirectories: true)
+            let data = try JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
+        } catch {
+            NSLog("[AppDependencies] Failed to write credential \(key): \(error.localizedDescription)")
         }
     }
 }

@@ -773,6 +773,7 @@ func (h *Handlers) handleOpenCodeRPC(conn Connection, msg WireMessage) {
 		"fetch_todos", "get_usage", "run_diagnostics",
 		"get_workspace_diff",
 		"list_memory_files", "read_memory_file", "fetch_content_chunk", "read_file",
+		"list_directory",
 		"rename_session", "archive_session", "compress_context",
 		"delete_session", "list_models", "switch_model",
 		"get_session_messages":
@@ -923,8 +924,30 @@ func (h *Handlers) enrichSessionStateWithAgent(mapped map[string]interface{}, ag
 
 func (h *Handlers) ocHandleListSessions(conn Connection, msg WireMessage, dir string) {
 	rootsOnly := extractBool(msg, "rootsOnly")
+	limit := extractPositiveInt(msg, "limit")
+	cursor := extractStringParam(msg, "cursor")
+	// Match OpenCode Desktop's sidebar path: directory-scoped roots + a small
+	// growing limit. The server may return either the newer cursor envelope or an
+	// array; for array responses, count==limit is the same "maybe more" signal the
+	// Desktop uses to show Load More.
+	if limit > 1000 {
+		limit = 1000
+	}
 
-	sessions, err := h.ocProxy.listSessions(dir)
+	if rootsOnly && cursor != "" {
+		conn.SendResult(msg.RequestID, nil, &WireError{
+			Code:    "invalid_params",
+			Message: "opencode list_sessions does not support rootsOnly with cursor pagination",
+		})
+		return
+	}
+
+	started := time.Now()
+	page, err := h.ocProxy.listSessions(OpenCodeSessionListOptions{
+		Directory: dir,
+		Limit:     limit,
+		Cursor:    cursor,
+	})
 	if err != nil {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
 		return
@@ -932,7 +955,7 @@ func (h *Handlers) ocHandleListSessions(conn Connection, msg WireMessage, dir st
 
 	var result []map[string]interface{}
 	agent, _ := h.getAgent(msg.BackendID)
-	for _, s := range sessions {
+	for _, s := range page.Sessions {
 		parentID, _ := s["parentId"].(string)
 		if parentID == "" {
 			parentID, _ = s["parentID"].(string)
@@ -942,7 +965,28 @@ func (h *Handlers) ocHandleListSessions(conn Connection, msg WireMessage, dir st
 		}
 		result = append(result, h.enrichSessionStateWithAgent(mapSession(s), agent))
 	}
-	conn.SendResult(msg.RequestID, map[string]interface{}{"sessions": result}, nil)
+
+	slog.Info("opencode list_sessions",
+		"directory", dir,
+		"limit", limit,
+		"cursor_present", cursor != "",
+		"result_count", len(result),
+		"next_cursor_present", page.NextCursor != "",
+		"duration_ms", time.Since(started).Milliseconds(),
+	)
+
+	hasMore := page.NextCursor != ""
+	if page.NextCursor == "" && limit > 0 && len(result) >= limit {
+		hasMore = true
+	}
+	response := map[string]interface{}{
+		"sessions": result,
+		"hasMore":  hasMore,
+	}
+	if page.NextCursor != "" {
+		response["nextCursor"] = page.NextCursor
+	}
+	conn.SendResult(msg.RequestID, response, nil)
 }
 
 // ── ocProxy: get_session ──────────────────────────────────────────────────────

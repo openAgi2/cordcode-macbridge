@@ -2,6 +2,7 @@ package gobridge
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os/exec"
@@ -24,6 +25,9 @@ const (
 	AgentStatusPortConflict       AgentStatus = "port_conflict"
 	AgentStatusVersionUnsupported AgentStatus = "version_unsupported"
 	AgentStatusPermissionDenied   AgentStatus = "permission_denied"
+	// AgentStatusNotConfigured: OpenCode endpoint URL 未配置（source disabled / external_http
+	// 未填 URL）。不 dial 64667，明确告知 iOS 该 backend 当前不可用，需先配置 endpoint。
+	AgentStatusNotConfigured AgentStatus = "not_configured"
 )
 
 // AgentProviderDescriptor 描述单个 agent/provider 的能力和事件模型，
@@ -203,17 +207,19 @@ func detectAgentStatus(id string, codexBackendMode string, cfg *AgentDetectionCo
 	case "claude":
 		return detectClaudeCLI()
 	case "opencode":
-		ocURL := "http://localhost:64667"
+		// URL 未配置 → not_configured，绝不隐式 dial 64667（plan T05）。
+		// MacBridge 在 endpoint disabled / external_http 未填 URL 时不传 -opencode-url，
+		// 此处 cfg.OpenCodeURL 为空。
+		if cfg == nil || strings.TrimSpace(cfg.OpenCodeURL) == "" {
+			return AgentStatusNotConfigured, "OpenCode endpoint not configured; set an external HTTP server URL (e.g. http://127.0.0.1:<port>)"
+		}
 		ocUser := ""
 		ocPass := ""
-		if cfg != nil && cfg.OpenCodeURL != "" {
-			ocURL = cfg.OpenCodeURL
-		}
 		if cfg != nil {
 			ocUser = cfg.OpenCodeUser
 			ocPass = cfg.OpenCodePass
 		}
-		return detectOpenCodeService(ocURL, ocUser, ocPass)
+		return detectOpenCodeService(cfg.OpenCodeURL, ocUser, ocPass)
 	case "codex":
 		codexURL := ""
 		if cfg != nil && cfg.CodexAppServerURL != "" {
@@ -249,17 +255,17 @@ func detectClaudeCLI() (AgentStatus, string) {
 }
 
 // detectOpenCodeService 检测 OpenCode HTTP 服务可用性。
-// healthURL 示例：http://localhost:64667/health
+// healthURL 示例：http://127.0.0.1:4096/global/health
 func detectOpenCodeService(baseURL, username, password string) (AgentStatus, string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	healthURL := strings.TrimRight(baseURL, "/") + "/health"
+	healthURL := strings.TrimRight(baseURL, "/") + "/global/health"
 	req, err := http.NewRequestWithContext(ctx, "GET", healthURL, nil)
 	if err != nil {
 		return AgentStatusNotDetected, "invalid OpenCode health URL"
 	}
-	// 带认证凭据（OpenCode /health 端点需要 auth）
+	// 带认证凭据（OpenCode /global/health 端点需要 auth）
 	if username != "" || password != "" {
 		req.SetBasicAuth(username, password)
 	}
@@ -278,6 +284,13 @@ func detectOpenCodeService(baseURL, username, password string) (AgentStatus, str
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 200 {
+		var health struct {
+			Healthy bool   `json:"healthy"`
+			Version string `json:"version"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&health); err != nil || !health.Healthy || health.Version == "" {
+			return AgentStatusNotDetected, "OpenCode health response is not valid"
+		}
 		return AgentStatusAvailable, ""
 	}
 	return AgentStatusServiceNotRunning, fmt.Sprintf("OpenCode health check returned %d", resp.StatusCode)

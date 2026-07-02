@@ -13,8 +13,10 @@
 		3020F78BE7732F1FB21E0F07 /* BackendManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4037A50A11C86B7ADD57AEC7 /* BackendManagementView.swift */; };
 		37041435E8DF4098E9803090 /* NotificationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2991FD84D19DF3530941541 /* NotificationCoordinator.swift */; };
 		37846593B76DF639E017EBF9 /* MacBridgeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AC7151BF29E1FD3CAC3A1B4 /* MacBridgeApp.swift */; };
+		3E22271B2C9EB6BC61D5824A /* OpenCodeEndpointResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2036DC77D36E009E80B5713D /* OpenCodeEndpointResolver.swift */; };
 		447E4F6B2D40906387C480D3 /* ProductCopyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D520B55E2B0291B2A887DD34 /* ProductCopyTests.swift */; };
 		4B50BCF0B76C6FCCD9AEA84C /* ManagementAPIClientTimeoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC2125905A5A283AE86C6A43 /* ManagementAPIClientTimeoutTests.swift */; };
+		5D0B21799DC704A01C433785 /* OpenCodeEndpointResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8B3652AECFCE53A8D9E40B4 /* OpenCodeEndpointResolverTests.swift */; };
 		5F63A0F080450FF92956997A /* PairingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 383EF14F5096F2F068A24503 /* PairingViewModel.swift */; };
 		630534774DD5F13F50A40FB8 /* MenuBarMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C7D5EABF711F9D1698D2B8E /* MenuBarMenu.swift */; };
 		6488DF459B5AA8758BD052D5 /* AppDependenciesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 925DD08E60CAB8D17159E176 /* AppDependenciesTests.swift */; };
@@ -51,6 +53,7 @@
 /* Begin PBXFileReference section */
 		0981650921FA2296D640F294 /* SettingsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViewModel.swift; sourceTree = "<group>"; };
 		0E2CD60DDE08E86DF4FEB931 /* PageContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageContainer.swift; sourceTree = "<group>"; };
+		2036DC77D36E009E80B5713D /* OpenCodeEndpointResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeEndpointResolver.swift; sourceTree = "<group>"; };
 		2988639F5FD9CE1DC59A5338 /* RemoteAccessView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteAccessView.swift; sourceTree = "<group>"; };
 		2BE70B669DDB9B3C1522465B /* OpenCodeCredentialsGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeCredentialsGenerator.swift; sourceTree = "<group>"; };
 		383EF14F5096F2F068A24503 /* PairingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingViewModel.swift; sourceTree = "<group>"; };
@@ -75,6 +78,7 @@
 		D520B55E2B0291B2A887DD34 /* ProductCopyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductCopyTests.swift; sourceTree = "<group>"; };
 		D524FA3A3584520B5645C83C /* Localization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Localization.swift; sourceTree = "<group>"; };
 		DC2125905A5A283AE86C6A43 /* ManagementAPIClientTimeoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementAPIClientTimeoutTests.swift; sourceTree = "<group>"; };
+		E8B3652AECFCE53A8D9E40B4 /* OpenCodeEndpointResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeEndpointResolverTests.swift; sourceTree = "<group>"; };
 		EDEFE8AC08BD94B695F061C5 /* AppDependencies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDependencies.swift; sourceTree = "<group>"; };
 		F2991FD84D19DF3530941541 /* NotificationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationCoordinator.swift; sourceTree = "<group>"; };
 		F2D28621DF47FFFEA3F80696 /* OpenCodeLaunchAgentCredentials.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeLaunchAgentCredentials.swift; sourceTree = "<group>"; };
@@ -137,6 +141,7 @@
 				AC64B170A23E565E7D8F8251 /* MacBridgeBehaviorTests.swift */,
 				DC2125905A5A283AE86C6A43 /* ManagementAPIClientTimeoutTests.swift */,
 				3F2FC3E11BEA5EE407C00BC1 /* NotificationCoordinatorTests.swift */,
+				E8B3652AECFCE53A8D9E40B4 /* OpenCodeEndpointResolverTests.swift */,
 				D520B55E2B0291B2A887DD34 /* ProductCopyTests.swift */,
 				BC22FD66FBF5F720584F8421 /* RuntimeManagerRestartTests.swift */,
 			);
@@ -183,6 +188,7 @@
 				D524FA3A3584520B5645C83C /* Localization.swift */,
 				3D63472C43A4F245F5009A40 /* ManagementAPIClient.swift */,
 				F2991FD84D19DF3530941541 /* NotificationCoordinator.swift */,
+				2036DC77D36E009E80B5713D /* OpenCodeEndpointResolver.swift */,
 				BAAF39AC99F7BCB4449CD1B1 /* RuntimeManager.swift */,
 			);
 			path = Services;
@@ -305,6 +311,7 @@
 				4B50BCF0B76C6FCCD9AEA84C /* ManagementAPIClientTimeoutTests.swift in Sources */,
 				823404E84CB481A19EA410EB /* NotificationCoordinatorTests.swift in Sources */,
 				0A0B7AE785F788173FEA48D0 /* OpenCodeCredentialsGenerator.swift in Sources */,
+				5D0B21799DC704A01C433785 /* OpenCodeEndpointResolverTests.swift in Sources */,
 				D75F0766D4679AD85CC83AB9 /* OpenCodeLaunchAgentCredentials.swift in Sources */,
 				447E4F6B2D40906387C480D3 /* ProductCopyTests.swift in Sources */,
 				786AA7E7D49157B38619003B /* RuntimeManagerRestartTests.swift in Sources */,
@@ -327,6 +334,7 @@
 				630534774DD5F13F50A40FB8 /* MenuBarMenu.swift in Sources */,
 				37041435E8DF4098E9803090 /* NotificationCoordinator.swift in Sources */,
 				060AAD30FED3CB9F10307692 /* OpenCodeCredentialsGenerator.swift in Sources */,
+				3E22271B2C9EB6BC61D5824A /* OpenCodeEndpointResolver.swift in Sources */,
 				9DCAB02C23C6F97F756A87AC /* OpenCodeLaunchAgentCredentials.swift in Sources */,
 				8FAE152DB77346F49144328B /* PageContainer.swift in Sources */,
 				CFDB9CBD55CAF5664B16F62D /* PairingView.swift in Sources */,
