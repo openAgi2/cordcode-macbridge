@@ -159,12 +159,21 @@ final class OpenCodeEndpointResolverTests: XCTestCase {
         XCTAssertTrue(OpenCodeEndpointResolver.isLegacyMigration(explicit: nil, fileExistedWithCreds: true))
     }
 
-    func testMigrationFreshInstallDefaultsDisabled() {
+    func testMigrationFreshInstallDefaultsManagedLocal() {
         XCTAssertEqual(
             OpenCodeEndpointResolver.migratedSource(explicit: nil, fileExistedWithCreds: false),
-            .disabled
+            .managedLocal
         )
         XCTAssertFalse(OpenCodeEndpointResolver.isLegacyMigration(explicit: nil, fileExistedWithCreds: false))
+    }
+
+    func testResolveManagedLocalIsRuntimeManagedNotPureEndpoint() {
+        let result = OpenCodeEndpointResolver.resolve(.init(
+            source: .managedLocal, url: "", username: "opencode", password: "p"
+        ))
+        if case .failure(let err) = result {
+            XCTAssertEqual(err, .notConfigured)
+        } else { XCTFail("managed_local endpoint must be resolved by OpenCodeManagedServer at runtime") }
     }
 
     func testMigrationExplicitSourceRespected() {

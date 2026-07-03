@@ -73,7 +73,7 @@ class AppDependencies: ObservableObject {
         // OpenCode endpoint source（迁移感知）。
         // - 已显式保存 source → 尊重。
         // - 无显式 source 但既有凭据 → legacy_64667（升级连续性）。
-        // - 全新安装 → disabled（不自动落 64667）。
+        // - 全新安装 → managed_local（CordCode 自动托管本机 OpenCode server）。
         let explicitSource = Self.readCredential("opencode_source", from: dir)
             .flatMap { OpenCodeServerSource(rawValue: $0) }
         let opencodeSource = OpenCodeEndpointResolver.migratedSource(
@@ -104,6 +104,8 @@ class AppDependencies: ObservableObject {
         } else if opencodeSource == .externalHttp {
             // external_http 配置不完整：保留 source，URL 留空，descriptor 报 not_configured。
             NSLog("[AppDependencies] OpenCode external_http endpoint unresolved; backend will report not_configured until URL/password is set.")
+        } else if opencodeSource == .managedLocal {
+            NSLog("[AppDependencies] OpenCode managed_local selected; endpoint will be resolved during runtime launch.")
         }
 
         let configuredRelayEndpoint = OfficialRelayConfiguration.endpoint

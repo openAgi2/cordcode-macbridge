@@ -8,6 +8,22 @@
 
 ## [Unreleased]
 
+### 2026-07-03 — OpenCode Automatic managed local server 实现
+
+- **OpenCode 新装默认改为 Automatic（managed_local）**：CordCode Link 会自动启动并管理一个只绑定 `127.0.0.1` 的 `opencode serve`，选择并持久化 `4096...4196` 范围内的端口和随机 Basic Auth 凭据；iOS 仍只连接 MacBridge，不直连 OpenCode。
+- **Desktop 与 iOS 自动对齐同一 OpenCode scope**：MacBridge 写入 OpenCode Desktop 默认 server、`currentSidecarUrl` 与 `projects[managedURL]`，优先合并 Desktop `local` 项目集合；本机实测确认 Desktop 运行中不热重载配置，因此实现保留 Cocoa graceful quit + reopen fallback，且冷启动会服从写入的 managedURL。
+- **失败保持真实可见**：managed server 启动失败不会阻塞 Bridge，Claude/Codex 继续可用；OpenCode 则保持未配置/不可用诊断。`opencode-managed-server.err.log` 独立脱敏滚动，password 不进入 argv。
+- **验证**：新增 `OpenCodeManagedServerTests`，更新 OpenCode source 迁移与 Go managedURL scope 回归测试；Swift OpenCode 定向测试与 Go OpenCode list_projects/list_sessions 定向测试通过。
+
+### 2026-07-03 — OpenCode 无缝接入 managed local server 方案
+
+- 产出本地 managed local server 开发规格，把 OpenCode 最终目标从手动 `external_http` 配置细化为 CordCode Link 自动托管本机 OpenCode shared server、自动同步 Desktop 默认 server 与项目 scope、iOS 扫码后直接看到 Mac 端 OpenCode Desktop 项目/session 的实现路径。
+
+### 2026-07-02 — 修复 OpenCode Desktop 切到 external_http 后项目列表为空
+
+- **修复重启 OpenCode Desktop 后项目/session 看起来消失**：CordCode 同步 Desktop 默认 server 到 `external_http` endpoint 时，现在会优先把 Desktop `local` scope 下的完整项目集合迁移到新 endpoint key，并用旧 active server / legacy `64667` 只补充缺项，避免 Desktop 重启后进入一个没有项目历史的新 server scope。
+- **保留并合并已有 external_http 项目状态**：如果目标 endpoint 已经有项目列表，会按 worktree 去重后合并 `local`/旧 server 的缺项；`lastProject` 已存在时不覆盖，避免用户手动整理过的 Desktop 状态被回滚。
+
 ### 2026-07-02 — OpenCode 项目列表跟随 Desktop 打开的 workspace
 
 - **修复 iOS OpenCode 模式显示大量已关闭项目目录**：OpenCode `/project` 是历史 catalog,会包含 Desktop 里已经手动关闭的项目；Desktop 侧栏真正打开的项目保存在本机 `opencode.global.dat` 的 `server.projects[scope]` 数组中。MacBridge `list_projects` 现在按 Desktop 源码语义读取该数组,只向 iOS 返回仍在数组里的 opened projects 并保留 Desktop 顺序；`expanded=false` 仅代表 Desktop 侧栏折叠状态,不再被误判为关闭。读不到 Desktop 状态时才保留原 `/project` catalog 作为诊断事实。

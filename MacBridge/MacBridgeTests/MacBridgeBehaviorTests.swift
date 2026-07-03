@@ -227,14 +227,18 @@ final class MacBridgeBehaviorTests: XCTestCase {
     }
 
     private func readServerList(in desktopDir: URL) throws -> [[String: Any]] {
+        let server = try readDesktopServer(in: desktopDir)
+        let list = (server["list"] as? [Any]) ?? []
+        return list.compactMap { $0 as? [String: Any] }
+    }
+
+    private func readDesktopServer(in desktopDir: URL) throws -> [String: Any] {
         let globalPath = desktopDir.appendingPathComponent("opencode.global.dat")
         let data = try Data(contentsOf: globalPath)
         let root = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
         let serverStr = try XCTUnwrap(root["server"] as? String)
         let serverData = try XCTUnwrap(serverStr.data(using: .utf8))
-        let server = try XCTUnwrap(JSONSerialization.jsonObject(with: serverData) as? [String: Any])
-        let list = (server["list"] as? [Any]) ?? []
-        return list.compactMap { $0 as? [String: Any] }
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: serverData) as? [String: Any])
     }
 
     func testDesktopConfigWritesExternalHttpEndpointURL() throws {
@@ -309,6 +313,97 @@ final class MacBridgeBehaviorTests: XCTestCase {
             (($0["http"] as? [String: Any])?["url"] as? String) == "http://127.0.0.1:9999"
         }.count
         XCTAssertEqual(count9999, 1, "other user servers must be preserved")
+    }
+
+    func testDesktopConfigMigratesProjectsToExternalHttpEndpoint() throws {
+        let desktopDir = try temporaryDesktopDir()
+        defer { try? FileManager.default.removeItem(at: desktopDir) }
+
+        let legacyProjects: [[String: Any]] = [
+            ["worktree": "/Users/test/Projects/Chat", "expanded": true],
+        ]
+        let server: [String: Any] = [
+            "list": [
+                [
+                    "type": "http",
+                    "http": ["url": "http://127.0.0.1:64667", "username": "opencode", "password": "old"],
+                ],
+            ],
+            "currentSidecarUrl": "http://127.0.0.1:64667",
+            "projects": [
+                "local": [
+                    ["worktree": "/Users/test/Projects/Local", "expanded": true],
+                    ["worktree": "/Users/test/Projects/Chat", "expanded": false],
+                ],
+                "http://127.0.0.1:64667": legacyProjects,
+            ],
+            "lastProject": [
+                "local": "/Users/test/Projects/Local",
+                "http://127.0.0.1:64667": "/Users/test/Projects/Chat",
+            ],
+        ]
+        let serverStr = String(data: try JSONSerialization.data(withJSONObject: server), encoding: .utf8)!
+        let globalPath = desktopDir.appendingPathComponent("opencode.global.dat")
+        try JSONSerialization.data(withJSONObject: ["server": serverStr]).write(to: globalPath)
+
+        RuntimeManager.configureOpenCodeDesktopSettings(
+            desktopDir: desktopDir,
+            serverURL: "http://127.0.0.1:4096",
+            username: "opencode",
+            password: "p"
+        )
+
+        let updated = try readDesktopServer(in: desktopDir)
+        let projects = try XCTUnwrap(updated["projects"] as? [String: Any])
+        let migrated = try XCTUnwrap(projects["http://127.0.0.1:4096"] as? [[String: Any]])
+        XCTAssertEqual(migrated.compactMap { $0["worktree"] as? String }, [
+            "/Users/test/Projects/Local",
+            "/Users/test/Projects/Chat",
+        ])
+
+        let lastProject = try XCTUnwrap(updated["lastProject"] as? [String: Any])
+        XCTAssertEqual(lastProject["http://127.0.0.1:4096"] as? String, "/Users/test/Projects/Local")
+    }
+
+    func testDesktopConfigMergesExistingExternalHttpProjects() throws {
+        let desktopDir = try temporaryDesktopDir()
+        defer { try? FileManager.default.removeItem(at: desktopDir) }
+
+        let server: [String: Any] = [
+            "currentSidecarUrl": "http://127.0.0.1:64667",
+            "projects": [
+                "http://127.0.0.1:64667": [["worktree": "/Users/test/Projects/Old", "expanded": true]],
+                "local": [["worktree": "/Users/test/Projects/Local", "expanded": true]],
+                "http://127.0.0.1:4096": [["worktree": "/Users/test/Projects/New", "expanded": false]],
+            ],
+            "lastProject": [
+                "http://127.0.0.1:64667": "/Users/test/Projects/Old",
+                "local": "/Users/test/Projects/Local",
+                "http://127.0.0.1:4096": "/Users/test/Projects/New",
+            ],
+        ]
+        let serverStr = String(data: try JSONSerialization.data(withJSONObject: server), encoding: .utf8)!
+        let globalPath = desktopDir.appendingPathComponent("opencode.global.dat")
+        try JSONSerialization.data(withJSONObject: ["server": serverStr]).write(to: globalPath)
+
+        RuntimeManager.configureOpenCodeDesktopSettings(
+            desktopDir: desktopDir,
+            serverURL: "http://127.0.0.1:4096",
+            username: "opencode",
+            password: "p"
+        )
+
+        let updated = try readDesktopServer(in: desktopDir)
+        let projects = try XCTUnwrap(updated["projects"] as? [String: Any])
+        let retained = try XCTUnwrap(projects["http://127.0.0.1:4096"] as? [[String: Any]])
+        XCTAssertEqual(retained.compactMap { $0["worktree"] as? String }, [
+            "/Users/test/Projects/New",
+            "/Users/test/Projects/Local",
+            "/Users/test/Projects/Old",
+        ])
+
+        let lastProject = try XCTUnwrap(updated["lastProject"] as? [String: Any])
+        XCTAssertEqual(lastProject["http://127.0.0.1:4096"] as? String, "/Users/test/Projects/New")
     }
 }
 

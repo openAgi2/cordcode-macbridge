@@ -95,6 +95,7 @@ struct SettingsView: View {
                 settingsGroup("OpenCode") {
                     settingRow(L10n.opencodeServerSource) {
                         Picker("", selection: $viewModel.opencodeSource) {
+                            Text(L10n.opencodeSourceManagedLocal).tag(OpenCodeServerSource.managedLocal)
                             Text(L10n.opencodeSourceExternalHttp).tag(OpenCodeServerSource.externalHttp)
                             Text(L10n.opencodeSourceLegacy64667).tag(OpenCodeServerSource.legacy64667)
                             Text(L10n.opencodeSourceDisabled).tag(OpenCodeServerSource.disabled)
@@ -266,6 +267,8 @@ struct SettingsView: View {
 
     private var currentSourceDescription: String {
         switch viewModel.opencodeSource {
+        case .managedLocal:
+            return L10n.opencodeSourceManagedLocalDesc
         case .externalHttp:
             return L10n.opencodeSourceExternalHttpDesc
         case .legacy64667:

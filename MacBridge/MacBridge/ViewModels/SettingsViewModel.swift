@@ -19,7 +19,7 @@ enum EndpointValidationState: Equatable {
 class SettingsViewModel: ObservableObject {
     @Published var opencodeUser = ""
     @Published var opencodePass = ""
-    @Published var opencodeSource: OpenCodeServerSource = .disabled
+    @Published var opencodeSource: OpenCodeServerSource = .managedLocal
     @Published var opencodeURL = ""
     @Published var endpointValidation: EndpointValidationState = .idle
     @Published var displayName = ""
@@ -28,7 +28,7 @@ class SettingsViewModel: ObservableObject {
 
     private var savedOpenCodeUser = ""
     private var savedOpenCodePass = ""
-    private var savedOpenCodeSource: OpenCodeServerSource = .disabled
+    private var savedOpenCodeSource: OpenCodeServerSource = .managedLocal
     private var savedOpenCodeURL = ""
     private var savedDisplayName = ""
     private let dataDir: String
@@ -52,7 +52,7 @@ class SettingsViewModel: ObservableObject {
         switch opencodeSource {
         case .externalHttp, .legacy64667:
             return true
-        case .disabled, .serviceDiscoveryFuture:
+        case .managedLocal, .disabled, .serviceDiscoveryFuture:
             return false
         }
     }
@@ -67,6 +67,7 @@ class SettingsViewModel: ObservableObject {
         let path = dataDir + "/credentials.json"
         guard let data = FileManager.default.contents(atPath: path),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            savedOpenCodeSource = opencodeSource
             return
         }
         opencodeUser = json["opencode_user"] as? String ?? ""

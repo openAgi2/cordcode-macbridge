@@ -24,7 +24,7 @@ LaunchAgent，也不要让仓库里的开发二进制长期占用 `8777`。
 | Bridge WebSocket | `8777` | `cccode-bridge-runtime` | 是，局域网 `ws://` |
 | Bridge TLS | `8778` | `cccode-bridge-runtime` | 是，仅 Tailscale `wss://` |
 | Management API | 随机 loopback 端口 | runtime，Mac app 调用 | 否 |
-| OpenCode HTTP/SSE | `64667` | 用户/运维启动的 stable `opencode serve`（legacy 兼容默认端口） | 否 |
+| OpenCode HTTP/SSE | `4096...4196`（managed）/ `64667`（legacy） | CordCode Link 默认托管 `opencode serve`；legacy/external 模式可由用户提供 | 否 |
 | Codex app-server | `4141` | Codex app/CLI | 否 |
 | Relay runtime | `8780` loopback | VPS 上的 `relay-server` | 否，外部由 nginx `8443` 终止 TLS |
 
@@ -112,6 +112,7 @@ open /Applications/CordCodeLink.app
 | `runtime.json` | runtime PID、Bridge 端口、Management URL、bridge epoch |
 | `management-token` | Mac app 调 Management API 的本机 token，权限应为 `0600` |
 | `credentials.json` | OpenCode 本地认证配置 |
+| `opencode-managed-server.json` | CordCode 托管 OpenCode server 的 URL、端口、PID 与随机凭据，权限应为 `0600` |
 | `devices.json` | 已授权设备 |
 | `tls-cert.json` | Tailscale 自签名证书与 SPKI pin 的持久状态 |
 | `logs/go-bridge.log` | runtime 主日志 |
@@ -209,16 +210,20 @@ backend 未安装或未登录应保持 Bridge ready，同时在 agent descriptor
 
 ### OpenCode 401 / not_configured / server_unauthenticated
 
-OpenCode 不再隐式硬编码 `64667`。先在 MacBridge 设置中确认 **Server Source**
-（External HTTP / Legacy 64667 / Disabled），再按症状排查：
+OpenCode 不再隐式硬编码 `64667`。新装默认 **Automatic / managed_local**：
+CordCode Link 会启动一个只绑定 `127.0.0.1` 的 `opencode serve`，选择并持久化
+`4096...4196` 范围内的端口，使用 Basic Auth，随后把 OpenCode Desktop 与 go-bridge 都指向
+同一个 URL。先在 MacBridge 设置中确认 **Server Source**（Automatic / External HTTP /
+Legacy 64667 / Disabled），再按症状排查：
 
 ```bash
-# 确认 server 在监听（端口由你启动 opencode serve 时指定）
+# 确认 server 在监听（Automatic 下端口见 opencode-managed-server.json）
 lsof -nP -iTCP:<port> -sTCP:LISTEN
 cat "$HOME/Library/Application Support/CordCode Link/credentials.json"
+cat "$HOME/Library/Application Support/CordCode Link/opencode-managed-server.json"
 ```
 
-- descriptor `not_configured`：未配置 OpenCode endpoint URL。External HTTP 下填一个
+- descriptor `not_configured`：Automatic 下表示 managed server 未能解析/启动；External HTTP 下表示未配置 endpoint URL。External HTTP 下填一个
   loopback URL（`http://127.0.0.1:<port>`）并保存重启。
 - `401`（auth_failed）：server 已响应但凭据不匹配。在设置中重新保存 username/password，
   并确保 `opencode serve` 用同一个 `OPENCODE_SERVER_PASSWORD` 启动，两端一致后重启。
@@ -226,9 +231,9 @@ cat "$HOME/Library/Application Support/CordCode Link/credentials.json"
   Basic Auth（OpenCode 日志会出现 `OPENCODE_SERVER_PASSWORD is not set; server is unsecured`）。
   必须设置 `OPENCODE_SERVER_PASSWORD` 后重启 server；MacCode 拒绝无密码 endpoint
   （`legacy_64667` 例外，但会标 `legacy_insecure_unverified`）。
-- `unreachable`：连接失败/超时，确认 `opencode serve --hostname 127.0.0.1 --port <port>` 在运行。
+- `unreachable`：连接失败/超时。Automatic 下查 `logs/opencode-managed-server.err.log`；External HTTP 下确认 `opencode serve --hostname 127.0.0.1 --port <port>` 在运行。
 
-CordCode 只连接这个 server，不启动也不保活它。不要把密码打印进 issue、日志或文档。
+Automatic 下 CordCode 会保活 managed child process；External HTTP 下 CordCode 只连接用户提供的 server，不启动也不保活它。不要把密码打印进 issue、日志或文档。
 
 ### Codex app-server 没有实时事件
 

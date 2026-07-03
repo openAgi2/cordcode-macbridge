@@ -8,6 +8,9 @@ import Foundation
 /// 不自动制造第二个 server。详见
 /// `docs/2026-07-02-opencode-shared-service-discovery-plan.md`。
 enum OpenCodeServerSource: String, Codable, CaseIterable {
+    /// CordCode Link 自动启动并管理 loopback-only `opencode serve`，同时同步 OpenCode Desktop。
+    case managedLocal = "managed_local"
+
     /// 显式用户/运维启动的 stable `opencode serve` HTTP server（loopback + Basic Auth）。
     /// Phase A 默认可开发目标：bring-your-own-server。
     case externalHttp = "external_http"
@@ -139,6 +142,10 @@ enum OpenCodeEndpointResolver {
     /// 不做网络探测；网络可达性由 `OpenCodeHealthValidator` 负责。
     static func resolve(_ config: OpenCodeEndpointConfig) -> Result<OpenCodeEndpoint, OpenCodeEndpointError> {
         switch config.source {
+        case .managedLocal:
+            // managed_local 的 URL/凭据由 OpenCodeManagedServer 在启动时解析。
+            // 纯 resolver 不制造占位 endpoint。
+            return .failure(.notConfigured)
         case .disabled:
             return .failure(.notConfigured)
         case .serviceDiscoveryFuture:
@@ -198,10 +205,10 @@ enum OpenCodeEndpointResolver {
     /// - 已显式保存 source → 尊重用户配置。
     /// - 无显式 source 但 credentials.json 已有 user/pass（存量安装）→ `legacy_64667`，
     ///   保持现有 OpenCode 行为连续。
-    /// - 否则（全新安装）→ `disabled`，不得自动落到 64667。
+    /// - 否则（全新安装）→ `managed_local`，由 CordCode 自动托管本机 OpenCode server。
     static func migratedSource(explicit: OpenCodeServerSource?, fileExistedWithCreds: Bool) -> OpenCodeServerSource {
         if let explicit { return explicit }
-        return fileExistedWithCreds ? .legacy64667 : .disabled
+        return fileExistedWithCreds ? .legacy64667 : .managedLocal
     }
 
     /// 是否因升级迁移落到 legacy_64667（用于一次性迁移提示）。

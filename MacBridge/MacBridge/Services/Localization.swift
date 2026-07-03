@@ -286,6 +286,8 @@ enum L10n {
 
     static var opencodeServerSource: String { tr("opencode_server_source") }
     static var opencodeServerURL: String { tr("opencode_server_url") }
+    static var opencodeSourceManagedLocal: String { tr("opencode_source_managed_local") }
+    static var opencodeSourceManagedLocalDesc: String { tr("opencode_source_managed_local_desc") }
     static var opencodeSourceExternalHttp: String { tr("opencode_source_external_http") }
     static var opencodeSourceExternalHttpDesc: String { tr("opencode_source_external_http_desc") }
     static var opencodeSourceLegacy64667: String { tr("opencode_source_legacy_64667") }
@@ -588,6 +590,8 @@ enum L10n {
             "settings_auto_restart_hint": "Restarts Bridge if it gets stuck, and on a regular schedule to keep connections stable. Changes apply immediately.",
             "opencode_server_source": "Server Source",
             "opencode_server_url": "Server URL",
+            "opencode_source_managed_local": "Automatic (Recommended)",
+            "opencode_source_managed_local_desc": "CordCode starts a local OpenCode server and connects Desktop and iOS to it.",
             "opencode_source_external_http": "External HTTP server",
             "opencode_source_external_http_desc": "Connect to a stable `opencode serve` you started. Loopback + Basic Auth required. CordCode does not start or keep it alive.",
             "opencode_source_legacy_64667": "Legacy 127.0.0.1:64667",
@@ -875,6 +879,8 @@ enum L10n {
             "settings_auto_restart_hint": "Bridge 卡住时自动重启，并按周期定时兜底重启，保持连接稳定。修改后立即生效。",
             "opencode_server_source": "Server 来源",
             "opencode_server_url": "Server URL",
+            "opencode_source_managed_local": "自动托管（推荐）",
+            "opencode_source_managed_local_desc": "CordCode 自动启动本机 OpenCode server，并把 Desktop 与 iOS 连接到同一个 server。",
             "opencode_source_external_http": "外部 HTTP server",
             "opencode_source_external_http_desc": "连接你已启动的 stable `opencode serve`。要求 loopback + Basic Auth。CordCode 不启动也不保活它。",
             "opencode_source_legacy_64667": "兼容模式 127.0.0.1:64667",

@@ -28,8 +28,10 @@
 		89D029E10473B44EAF99CC03 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2DA39E8464033D89C109974 /* SettingsView.swift */; };
 		8B6E4CF29205653096575DD6 /* BackendStatusViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4738E918EA61DF9B9286BDDE /* BackendStatusViewModel.swift */; };
 		8FAE152DB77346F49144328B /* PageContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E2CD60DDE08E86DF4FEB931 /* PageContainer.swift */; };
+		93F28913A9FF61FF95D071B7 /* OpenCodeManagedServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 907DBA7297AA1E62F927C199 /* OpenCodeManagedServer.swift */; };
 		95E15CA13AA174B0BE61FAA5 /* Localization.swift in Sources */ = {isa = PBXBuildFile; fileRef = D524FA3A3584520B5645C83C /* Localization.swift */; };
 		97A80C6E8F2C1E1E5E3B861B /* SettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0981650921FA2296D640F294 /* SettingsViewModel.swift */; };
+		994A46DC8D86071D4388F8CA /* OpenCodeManagedServerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44FFCCB621A45144903369DD /* OpenCodeManagedServerTests.swift */; };
 		9DCAB02C23C6F97F756A87AC /* OpenCodeLaunchAgentCredentials.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2D28621DF47FFFEA3F80696 /* OpenCodeLaunchAgentCredentials.swift */; };
 		A1813AFBDA386D0DE9E1B84C /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53BCC29BA17D8F56035A8068 /* ContentView.swift */; };
 		C156B2FA00015BBD640265B4 /* BridgeStatusViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F2414D249C8A25F8F5F81D5 /* BridgeStatusViewModel.swift */; };
@@ -61,10 +63,12 @@
 		3D63472C43A4F245F5009A40 /* ManagementAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementAPIClient.swift; sourceTree = "<group>"; };
 		3F2FC3E11BEA5EE407C00BC1 /* NotificationCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationCoordinatorTests.swift; sourceTree = "<group>"; };
 		4037A50A11C86B7ADD57AEC7 /* BackendManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendManagementView.swift; sourceTree = "<group>"; };
+		44FFCCB621A45144903369DD /* OpenCodeManagedServerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeManagedServerTests.swift; sourceTree = "<group>"; };
 		4738E918EA61DF9B9286BDDE /* BackendStatusViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendStatusViewModel.swift; sourceTree = "<group>"; };
 		4F2414D249C8A25F8F5F81D5 /* BridgeStatusViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeStatusViewModel.swift; sourceTree = "<group>"; };
 		53BCC29BA17D8F56035A8068 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		684E9C0C288ED1ED58423396 /* CordCodeLinkTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CordCodeLinkTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		907DBA7297AA1E62F927C199 /* OpenCodeManagedServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeManagedServer.swift; sourceTree = "<group>"; };
 		925DD08E60CAB8D17159E176 /* AppDependenciesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDependenciesTests.swift; sourceTree = "<group>"; };
 		9AC7151BF29E1FD3CAC3A1B4 /* MacBridgeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacBridgeApp.swift; sourceTree = "<group>"; };
 		A204996433530BDF7624A227 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
@@ -142,6 +146,7 @@
 				DC2125905A5A283AE86C6A43 /* ManagementAPIClientTimeoutTests.swift */,
 				3F2FC3E11BEA5EE407C00BC1 /* NotificationCoordinatorTests.swift */,
 				E8B3652AECFCE53A8D9E40B4 /* OpenCodeEndpointResolverTests.swift */,
+				44FFCCB621A45144903369DD /* OpenCodeManagedServerTests.swift */,
 				D520B55E2B0291B2A887DD34 /* ProductCopyTests.swift */,
 				BC22FD66FBF5F720584F8421 /* RuntimeManagerRestartTests.swift */,
 			);
@@ -189,6 +194,7 @@
 				3D63472C43A4F245F5009A40 /* ManagementAPIClient.swift */,
 				F2991FD84D19DF3530941541 /* NotificationCoordinator.swift */,
 				2036DC77D36E009E80B5713D /* OpenCodeEndpointResolver.swift */,
+				907DBA7297AA1E62F927C199 /* OpenCodeManagedServer.swift */,
 				BAAF39AC99F7BCB4449CD1B1 /* RuntimeManager.swift */,
 			);
 			path = Services;
@@ -313,6 +319,7 @@
 				0A0B7AE785F788173FEA48D0 /* OpenCodeCredentialsGenerator.swift in Sources */,
 				5D0B21799DC704A01C433785 /* OpenCodeEndpointResolverTests.swift in Sources */,
 				D75F0766D4679AD85CC83AB9 /* OpenCodeLaunchAgentCredentials.swift in Sources */,
+				994A46DC8D86071D4388F8CA /* OpenCodeManagedServerTests.swift in Sources */,
 				447E4F6B2D40906387C480D3 /* ProductCopyTests.swift in Sources */,
 				786AA7E7D49157B38619003B /* RuntimeManagerRestartTests.swift in Sources */,
 			);
@@ -336,6 +343,7 @@
 				060AAD30FED3CB9F10307692 /* OpenCodeCredentialsGenerator.swift in Sources */,
 				3E22271B2C9EB6BC61D5824A /* OpenCodeEndpointResolver.swift in Sources */,
 				9DCAB02C23C6F97F756A87AC /* OpenCodeLaunchAgentCredentials.swift in Sources */,
+				93F28913A9FF61FF95D071B7 /* OpenCodeManagedServer.swift in Sources */,
 				8FAE152DB77346F49144328B /* PageContainer.swift in Sources */,
 				CFDB9CBD55CAF5664B16F62D /* PairingView.swift in Sources */,
 				5F63A0F080450FF92956997A /* PairingViewModel.swift in Sources */,

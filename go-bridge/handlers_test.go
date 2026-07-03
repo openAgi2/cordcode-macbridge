@@ -1001,6 +1001,78 @@ func TestOpenCodeListProjectsUsesDesktopVisibleProjectOrder(t *testing.T) {
 	}
 }
 
+func TestOpenCodeListProjectsPrefersManagedURLScope(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	appSupport := filepath.Join(home, "Library", "Application Support", "ai.opencode.desktop")
+	if err := os.MkdirAll(appSupport, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	serverState := map[string]any{
+		"currentSidecarUrl": "http://127.0.0.1:4096",
+		"projects": map[string]any{
+			"local": []map[string]any{
+				{"worktree": "/Users/test/Local"},
+			},
+			"http://127.0.0.1:4096": []map[string]any{
+				{"worktree": "/Users/test/ManagedA"},
+				{"worktree": "/Users/test/ManagedB"},
+			},
+		},
+	}
+	serverRaw, _ := json.Marshal(serverState)
+	storeRaw, _ := json.Marshal(map[string]string{"server": string(serverRaw)})
+	if err := os.WriteFile(filepath.Join(appSupport, "opencode.global.dat"), storeRaw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	visible := openCodeDesktopVisibleProjects("http://127.0.0.1:4096/", []map[string]any{
+		{"id": "local", "directory": "/Users/test/Local"},
+		{"id": "a", "directory": "/Users/test/ManagedA"},
+		{"id": "b", "directory": "/Users/test/ManagedB"},
+	})
+	got := []string{}
+	for _, project := range visible {
+		got = append(got, project["directory"].(string))
+	}
+	want := []string{"/Users/test/ManagedA", "/Users/test/ManagedB"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("visible managed projects = %#v, want %#v", got, want)
+	}
+}
+
+func TestOpenCodeListProjectsSlashScopeFallsBackLocal(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	appSupport := filepath.Join(home, "Library", "Application Support", "ai.opencode.desktop")
+	if err := os.MkdirAll(appSupport, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	serverState := map[string]any{
+		"projects": map[string]any{
+			"local": []map[string]any{
+				{"worktree": "/Users/test/Local"},
+			},
+			"http://127.0.0.1:4096/": []map[string]any{
+				{"worktree": "/Users/test/SlashOnly"},
+			},
+		},
+	}
+	serverRaw, _ := json.Marshal(serverState)
+	storeRaw, _ := json.Marshal(map[string]string{"server": string(serverRaw)})
+	if err := os.WriteFile(filepath.Join(appSupport, "opencode.global.dat"), storeRaw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	visible := openCodeDesktopVisibleProjects("http://127.0.0.1:4096", []map[string]any{
+		{"id": "local", "directory": "/Users/test/Local"},
+		{"id": "slash", "directory": "/Users/test/SlashOnly"},
+	})
+	if len(visible) != 1 || visible[0]["directory"] != "/Users/test/Local" {
+		t.Fatalf("visible = %#v, want local fallback when only slash scope exists", visible)
+	}
+}
+
 func TestOpenCodeListSessionsFetchesLargePageAndPaginatesInMemory(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	var gotDirectory string

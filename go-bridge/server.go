@@ -276,19 +276,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	conn := newConn(ws)
 	conn.authedDevice = authedDevice
 	directConnection := adaptDirectConn(conn)
-	if s.activeConns != nil {
-		s.activeConns.Register(conn)
-	}
-	s.handlers.broadcaster.RegisterConn(directConnection)
 
-	slog.Info("go-bridge: client connected", "remote", conn.remote)
-
-	// 注册设备连接，用于 revoke 时主动断开
-	if authedDevice != nil {
-		globalDeviceConnRegistry.Register(authedDevice.DeviceID, conn)
-	}
-
-	// 连接关闭时清理订阅
+	// 先安装 cleanup，再发布到 active/device/broadcaster registries。
+	// Shutdown 可能在连接刚 register 后立即 CloseAllConnections；如果 cleanup 还未安装，
+	// 连接会被关闭但不会从 active registry 移除。
 	conn.mu.Lock()
 	conn.onCleanup = func() {
 		s.handlers.broadcaster.UnsubscribeAll(directConnection)
@@ -300,6 +291,18 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	conn.mu.Unlock()
+
+	if s.activeConns != nil {
+		s.activeConns.Register(conn)
+	}
+	s.handlers.broadcaster.RegisterConn(directConnection)
+
+	slog.Info("go-bridge: client connected", "remote", conn.remote)
+
+	// 注册设备连接，用于 revoke 时主动断开
+	if authedDevice != nil {
+		globalDeviceConnRegistry.Register(authedDevice.DeviceID, conn)
+	}
 
 	// pong handler: 更新 lastPong
 	ws.SetPongHandler(func(appData string) error {

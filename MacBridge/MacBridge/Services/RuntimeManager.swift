@@ -26,6 +26,12 @@ enum BridgeStatus: String {
     case sleeping       // Mac 休眠中
 }
 
+struct OpenCodeDesktopSyncResult: Equatable {
+    let previousSidecarURL: String?
+    let didSidecarChange: Bool
+    let didProjectsMerge: Bool
+}
+
 // MARK: - Runtime 启动配置
 
 struct RuntimeConfig {
@@ -136,6 +142,7 @@ class RuntimeManager: ObservableObject {
     @Published private(set) var agents: [AgentInfo] = []
 
     private var apiClient: ManagementAPIClient?
+    private var openCodeManagedServer: OpenCodeManagedServer?
     private var bridgeProcess: Process?
     /// 当前进程的标准输出 pipe，用于在重启时先清理 readabilityHandler
     private var currentStdoutPipe: Pipe?
@@ -251,6 +258,7 @@ class RuntimeManager: ObservableObject {
         userStopped = true
         monitorTask?.cancel()
         monitorTask = nil
+        openCodeManagedServer?.stop()
         terminateProcess(waitForExit: true)
     }
 
@@ -270,6 +278,7 @@ class RuntimeManager: ObservableObject {
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: config.dataDir)
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: config.logDir)
         try? FileManager.default.removeItem(atPath: config.dataDir + "/runtime.json")
+        resolveManagedOpenCodeIfNeeded()
         configureOpenCodeDesktopServerIfNeeded()
         guard prepareRuntimeOwnershipForLaunch() else { return }
 
@@ -703,11 +712,38 @@ class RuntimeManager: ObservableObject {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
         guard let desktopDir = appSupport?.appendingPathComponent("ai.opencode.desktop") else { return }
 
-        Self.configureOpenCodeDesktopSettings(
+        _ = Self.configureOpenCodeDesktopSettings(
             desktopDir: desktopDir,
             serverURL: url,
             username: config.opencodeUser,
             password: config.opencodePass
+        )
+    }
+
+    private func resolveManagedOpenCodeIfNeeded() {
+        guard config.opencodeSource == .managedLocal else {
+            openCodeManagedServer?.stop()
+            openCodeManagedServer = nil
+            return
+        }
+        if openCodeManagedServer == nil {
+            openCodeManagedServer = OpenCodeManagedServer(
+                dataDir: config.dataDir,
+                logDir: config.logDir,
+                cliSearchPath: config.cliSearchPath
+            )
+        }
+        guard let endpoint = openCodeManagedServer?.ensureRunning(timeout: 5.0) else {
+            config.opencodeURL = ""
+            return
+        }
+        config.opencodeURL = endpoint.url
+        config.opencodeUser = endpoint.username
+        config.opencodePass = endpoint.password
+        _ = openCodeManagedServer?.syncDesktopConfig(
+            url: endpoint.url,
+            username: endpoint.username,
+            password: endpoint.password
         )
     }
 
@@ -727,12 +763,13 @@ class RuntimeManager: ObservableObject {
         return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    @discardableResult
     internal nonisolated static func configureOpenCodeDesktopSettings(
         desktopDir: URL,
         serverURL: String,
         username: String,
         password: String
-    ) {
+    ) -> OpenCodeDesktopSyncResult {
         let globalPath = desktopDir.appendingPathComponent("opencode.global.dat")
         let settingsPath = desktopDir.appendingPathComponent("opencode.settings")
 
@@ -749,6 +786,7 @@ class RuntimeManager: ObservableObject {
             ],
         ]
         let existing = server["list"] as? [Any] ?? []
+        let previousURL = server["currentSidecarUrl"] as? String
         server["list"] = [connection] + existing.filter { item in
             if let value = item as? String {
                 return value != serverURL
@@ -760,6 +798,11 @@ class RuntimeManager: ObservableObject {
             }
             return true
         }
+        let didProjectsMerge = migrateOpenCodeDesktopProjects(
+            in: &server,
+            to: serverURL,
+            preferredSources: ["local", previousURL, "http://127.0.0.1:64667"].compactMap { $0 }
+        )
         server["currentSidecarUrl"] = serverURL
         if let data = try? JSONSerialization.data(withJSONObject: server),
            let encoded = String(data: data, encoding: .utf8) {
@@ -770,6 +813,48 @@ class RuntimeManager: ObservableObject {
         var settings = readJSONObject(settingsPath) ?? [:]
         settings["defaultServerUrl"] = serverURL
         writeJSONObject(settings, to: settingsPath)
+        return OpenCodeDesktopSyncResult(
+            previousSidecarURL: previousURL,
+            didSidecarChange: previousURL != serverURL,
+            didProjectsMerge: didProjectsMerge
+        )
+    }
+
+    private nonisolated static func migrateOpenCodeDesktopProjects(
+        in server: inout [String: Any],
+        to serverURL: String,
+        preferredSources: [String]
+    ) -> Bool {
+        var projects = server["projects"] as? [String: Any] ?? [:]
+        var mergedProjects = projects[serverURL] as? [[String: Any]] ?? []
+        var seenWorktrees = Set(mergedProjects.compactMap { $0["worktree"] as? String })
+        let initialCount = mergedProjects.count
+        for source in preferredSources where source != serverURL {
+            guard let sourceProjects = projects[source] as? [[String: Any]] else { continue }
+            for project in sourceProjects {
+                guard let worktree = project["worktree"] as? String, !worktree.isEmpty else { continue }
+                if seenWorktrees.insert(worktree).inserted {
+                    mergedProjects.append(project)
+                }
+            }
+        }
+        if !mergedProjects.isEmpty {
+            projects[serverURL] = mergedProjects
+        }
+        server["projects"] = projects
+
+        var lastProject = server["lastProject"] as? [String: Any] ?? [:]
+        if !hasProjectPath(lastProject[serverURL]),
+           let source = preferredSources.first(where: { $0 != serverURL && hasProjectPath(lastProject[$0]) }) {
+            lastProject[serverURL] = lastProject[source]
+        }
+        server["lastProject"] = lastProject
+        return mergedProjects.count > initialCount
+    }
+
+    private nonisolated static func hasProjectPath(_ value: Any?) -> Bool {
+        guard let path = value as? String else { return false }
+        return !path.isEmpty
     }
 
     private nonisolated static func readJSONObject(_ url: URL) -> [String: Any]? {
