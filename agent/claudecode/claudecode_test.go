@@ -307,9 +307,9 @@ func TestAgent_SetSessionEnv(t *testing.T) {
 
 func TestAgent_SetPlatformPrompt(t *testing.T) {
 	a := &Agent{}
-	a.SetPlatformPrompt("You are a helpful assistant on Feishu.")
-	if a.platformPrompt != "You are a helpful assistant on Feishu." {
-		t.Errorf("platformPrompt = %q, want %q", a.platformPrompt, "You are a helpful assistant on Feishu.")
+	a.SetPlatformPrompt("You are a helpful assistant on a custom platform.")
+	if a.platformPrompt != "You are a helpful assistant on a custom platform." {
+		t.Errorf("platformPrompt = %q, want %q", a.platformPrompt, "You are a helpful assistant on a custom platform.")
 	}
 }
 

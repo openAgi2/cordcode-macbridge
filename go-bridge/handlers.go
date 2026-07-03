@@ -354,56 +354,11 @@ func (h *Handlers) BackendList() []BackendInfo {
 	defer h.mu.Unlock()
 	var backends []BackendInfo
 	for id, agent := range h.agents {
-		caps := []string{"model_switch", "session_state"}
-		if _, ok := agent.(core.ProviderSwitcher); ok {
-			caps = append(caps, "provider_switch")
-		}
-		if _, ok := agent.(core.HistoryProvider); ok {
-			caps = append(caps, "session_history")
-		}
-		if _, ok := agent.(core.WorkDirSwitcher); ok {
-			caps = append(caps, "workspace_diff")
-		}
-		if _, ok := agent.(core.MemoryFileReader); ok {
-			caps = append(caps, "memory_read")
-		}
-		if _, ok := agent.(core.DiagnosticsProvider); ok {
-			caps = append(caps, "diagnostics")
-		}
-		if _, ok := agent.(core.TokenUsageReporter); ok {
-			caps = append(caps, "usage_reporting")
-		}
-		if _, ok := agent.(core.ModeSwitcher); ok {
-			caps = append(caps, "permission_mode")
-		}
-		if _, ok := agent.(core.SessionRenamer); ok {
-			if _, ok := agent.(core.SessionArchiver); ok {
-				caps = append(caps, "session_mutation")
-			}
-		}
-		if id == "claudecode" {
-			caps = append(caps, "content_chunking")
-		}
-		if _, ok := agent.(core.SessionDeleter); ok {
-			caps = append(caps, "session_delete")
-		}
-		if id != "opencode" && id != "codex" {
-			if _, ok := agent.(core.ToolAuthorizer); ok {
-				caps = append(caps, "permission_resolve")
-			}
-		}
-		if _, ok := agent.(core.TodoProvider); ok || id == "opencode" {
-			caps = append(caps, "todos")
-		}
-		if id == "codex" && h.codexBackendMode == "app_server" {
-			caps = append(caps, "compression")
-			caps = append(caps, "question_reply")
-		}
 		backends = append(backends, BackendInfo{
 			ID:           id,
 			Kind:         backendKindForAgent(agent),
 			DisplayName:  agent.Name(),
-			Capabilities: caps,
+			Capabilities: deriveBackendCapabilities(id, agent, h.codexBackendMode),
 		})
 	}
 	return backends

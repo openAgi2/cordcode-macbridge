@@ -379,6 +379,32 @@ func readJSONMaps(t *testing.T, clientConn *websocket.Conn, count int) []map[str
 	return messages
 }
 
+func hasString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]int, len(a))
+	for _, value := range a {
+		seen[value]++
+	}
+	for _, value := range b {
+		seen[value]--
+		if seen[value] < 0 {
+			return false
+		}
+	}
+	return true
+}
+
 func TestBackendListSkipsPermissionResolveForOpenCode(t *testing.T) {
 	handlers := newTestHandlers(t)
 	handlers.RegisterAgent("opencode", &fakeAgent{name: "opencode"})
@@ -423,6 +449,31 @@ func TestBackendListAdvertisesPermissionMode(t *testing.T) {
 		}
 	}
 	t.Fatalf("capabilities = %#v, want permission_mode", backends[0].Capabilities)
+}
+
+func TestBackendListMatchesBuildAgentDescriptorCapabilities(t *testing.T) {
+	handlers := newTestHandlers(t)
+	handlers.SetCodexBackendMode("app_server")
+	agent := &fakeAgent{name: "codex"}
+	handlers.RegisterAgent("codex", agent)
+
+	backends := handlers.BackendList()
+	if len(backends) != 1 {
+		t.Fatalf("backend count = %d, want 1", len(backends))
+	}
+
+	descriptor := BuildAgentDescriptor("codex", agent, "app_server", nil)
+	if !sameStringSet(backends[0].Capabilities, descriptor.Capabilities) {
+		t.Fatalf("BackendList capabilities = %v, BuildAgentDescriptor capabilities = %v", backends[0].Capabilities, descriptor.Capabilities)
+	}
+	for _, cap := range []string{"compression", "question_reply"} {
+		if !hasString(backends[0].Capabilities, cap) {
+			t.Fatalf("BackendList missing %s: %v", cap, backends[0].Capabilities)
+		}
+		if !hasString(descriptor.Capabilities, cap) {
+			t.Fatalf("BuildAgentDescriptor missing %s: %v", cap, descriptor.Capabilities)
+		}
+	}
 }
 
 func TestListPermissionModesReturnsCurrentMode(t *testing.T) {

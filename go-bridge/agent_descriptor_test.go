@@ -161,15 +161,19 @@ func TestCodexAppServerCompressionCapability(t *testing.T) {
 	agent := &fullFakeAgent{descriptorFakeAgent{name: "codex"}}
 	d := BuildAgentDescriptor("codex", agent, "app_server", nil)
 
-	found := false
-	for _, c := range d.Capabilities {
-		if c == "compression" {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !descriptorHasCapability(d.Capabilities, "compression") {
 		t.Fatal("compression capability missing for codex app_server mode")
+	}
+}
+
+func TestBuildAgentDescriptorCodexAppServerQuestionReplyCapability(t *testing.T) {
+	agent := &fullFakeAgent{descriptorFakeAgent{name: "codex"}}
+	d := BuildAgentDescriptor("codex", agent, "app_server", nil)
+
+	for _, cap := range []string{"compression", "question_reply"} {
+		if !descriptorHasCapability(d.Capabilities, cap) {
+			t.Fatalf("%s capability missing for codex app_server mode: %v", cap, d.Capabilities)
+		}
 	}
 }
 
@@ -181,6 +185,26 @@ func TestCodexExecNoCompressionCapability(t *testing.T) {
 		if c == "compression" {
 			t.Fatal("compression should not appear in exec mode")
 		}
+	}
+}
+
+func TestBuildAgentDescriptorCodexExecNoAppServerCapabilities(t *testing.T) {
+	agent := &fullFakeAgent{descriptorFakeAgent{name: "codex"}}
+	d := BuildAgentDescriptor("codex", agent, "exec", nil)
+
+	for _, cap := range []string{"compression", "question_reply"} {
+		if descriptorHasCapability(d.Capabilities, cap) {
+			t.Fatalf("%s should not appear in exec mode: %v", cap, d.Capabilities)
+		}
+	}
+}
+
+func TestBuildAgentDescriptorDoesNotAdvertiseSessionPagination(t *testing.T) {
+	agent := &fullFakeAgent{descriptorFakeAgent{name: "claudecode"}}
+	d := BuildAgentDescriptor("claudecode", agent, "", nil)
+
+	if descriptorHasCapability(d.Capabilities, "session_pagination") {
+		t.Fatalf("session_pagination should remain disabled: %v", d.Capabilities)
 	}
 }
 
@@ -219,6 +243,15 @@ func TestOpenCodeAlwaysHasTodos(t *testing.T) {
 	if !found {
 		t.Fatal("opencode always has todos capability")
 	}
+}
+
+func descriptorHasCapability(caps []string, target string) bool {
+	for _, cap := range caps {
+		if cap == target {
+			return true
+		}
+	}
+	return false
 }
 
 func TestDetectOpenCodeServiceUsesGlobalHealth(t *testing.T) {

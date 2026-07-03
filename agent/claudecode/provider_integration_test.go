@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openAgi2/cordcode-macbridge/config"
+	"github.com/openAgi2/cordcode-macbridge/agent/providerseedtest"
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
@@ -18,7 +18,7 @@ import (
 //
 // Skip in CI: set CC_SKIP_INTEGRATION=1 or simply don't have the config file.
 
-func skipIfNoConfig(t *testing.T) *config.Config {
+func skipIfNoConfig(t *testing.T) *providerseedtest.Config {
 	t.Helper()
 	if os.Getenv("CC_SKIP_INTEGRATION") == "1" {
 		t.Skip("CC_SKIP_INTEGRATION=1")
@@ -27,39 +27,21 @@ func skipIfNoConfig(t *testing.T) *config.Config {
 	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
 		t.Skipf("config not found at %s", cfgPath)
 	}
-	cfg, err := config.Load(cfgPath)
+	cfg, err := providerseedtest.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("failed to load config: %v", err)
 	}
-	cfg.ResolveProviderRefs()
 	return cfg
 }
 
-func configToCoreProv(p config.ProviderConfig) core.ProviderConfig {
-	cp := core.ProviderConfig{
-		Name:    p.Name,
-		APIKey:  p.APIKey,
-		BaseURL: p.BaseURL,
-		Model:   p.Model,
-		Env:     p.Env,
-	}
-	if p.Thinking != "" {
-		cp.Thinking = p.Thinking
-	}
-	for _, m := range p.Models {
-		cp.Models = append(cp.Models, core.ModelOption{Name: m.Model})
-	}
-	return cp
-}
-
-func findProjectProviders(cfg *config.Config, agentType string) (projName string, providers []core.ProviderConfig, workDir string) {
+func findProjectProviders(cfg *providerseedtest.Config, agentType string) (projName string, providers []core.ProviderConfig, workDir string) {
 	for i := range cfg.Projects {
 		proj := &cfg.Projects[i]
 		if proj.Agent.Type != agentType || len(proj.Agent.Providers) == 0 {
 			continue
 		}
 		for _, p := range proj.Agent.Providers {
-			providers = append(providers, configToCoreProv(p))
+			providers = append(providers, p.CoreConfig())
 		}
 		projName = proj.Name
 		if wd, ok := proj.Agent.Options["work_dir"].(string); ok {
@@ -237,7 +219,7 @@ func TestIntegration_AgentTypeChange_FiltersProviders(t *testing.T) {
 		t.Skip("no global providers in config")
 	}
 
-	globalByName := make(map[string]config.ProviderConfig, len(cfg.Providers))
+	globalByName := make(map[string]providerseedtest.Provider, len(cfg.Providers))
 	for _, p := range cfg.Providers {
 		globalByName[p.Name] = p
 	}

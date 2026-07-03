@@ -8,6 +8,44 @@
 
 ## [Unreleased]
 
+### 2026-07-04 — 架构健康第一轮整体完成（28/28 proven done）
+
+本轮在 B2 删除 legacy config 包后收口，28 个 exec-plan 任务全部 done 且 proven。各批次交付：
+
+- **A 能力单源化**：`backend_capabilities.go` 成为 BackendList 与 agent descriptor 的唯一能力推导源；Codex app_server 一致宣告 compression + question_reply；session_pagination 保持关闭。
+- **B1 provider seed 解耦**：`provider_seed_config.go` 最小 TOML reader，`provider_switch.go` 切断对 legacy config 的生产依赖。
+- **B2-predelete**：新增 `agent/providerseedtest/` 测试专用 loader，把 Claude/Codex 的 provider 测试从 legacy config 迁走。
+- **B2（主项）**：删除 `config/` 包（4 文件，含 Weixin/Feishu/Web 后台等旧业务结构），中性化 `claudecode_test.go` 残留 Feishu fixture。
+- **C web renderer 共享包**：iOS 仓 `shared-message-renderer/`，迁移 DiffViewer + ToolBlock，用 `host.post` 触发 openDetail/permissionAction/questionAction。
+- **D god-object characterization**：iOS 仓加 `GodObjectCharacterizationTests.swift`（连接策略 + 生成周期边界），不拆 god object、只锁现状行为。
+- **E 工程宪法**：`engineering-constitution.md` + `check-architecture-hygiene.sh`，warning-only 存量报告，不阻断 CI。
+
+验证强度：
+
+- **B2 验收**：Weixin/Feishu/业务符号扫描 0 命中、生产 config-import 0 命中、`go build`/`go vet`/全量 `go test ./...`（runtime 等价 PATH）全绿、relay-server 独立 module 绿、活文档无残留引用。
+- **追加验证**（删除后更强确认）：Mac Release 重建+装机成功（commit `ea20d1ab4e0b`，启动 0 ERROR/WARN，8777 是 `/Applications` 内嵌 runtime）；iOS 从 `codex/web-renderer-shared-c1` 分支装到 iPhone 16 Pro；owner 真机功能冒烟通过。
+- **诚实口径**：impl 类标 self-attested，命令类标 re-verified，功能性 UI 标 owner-verified（冒烟级，非穷尽）；Batch D 的 xcodebuild test 未本轮重跑，保留前序 re-verified。完整完成报告见 `docs/2026-07-03-architecture-health-execution-plan完成情况.md`。
+
+### 2026-07-03 — 删除 legacy config 包（架构健康第一轮收口）
+
+- **删除 `config/` 死重包**：移除约 6418 行的 legacy `config` 包（`config.go` / `config_test.go` / `config_repository.go` / `config_repository_test.go`）。删除前已确认它是孤儿包 — 生产代码、测试、cmd 入口均 0 处 import，`config.X()` 调用方为 0；仓内唯一引用是 `go-bridge/provider_switch_test.go` 的静态反回归守卫字符串（非真实 import）。
+- **不再携带与 CordCode Link 无关的历史业务写入能力**：随包移除 Weixin/Feishu 平台凭据写入、Web 管理后台、Cron/Webhook/TTS/Hook/Speech 等旧一体仓（cc-connect）时代的结构，缩小运行路径维护面。owner 已确认这些能力不再维护。
+- **删除后验收全绿**：`go build ./...` / `go vet ./...` / 根 module `go test ./... -count=1`（runtime 等价 PATH）全通过；Weixin/Feishu/业务符号与生产 config-import 扫描零命中；`go.mod` 的 `BurntSushi/toml` 保留（B1 的 provider seed reader 仍在用）。架构健康执行计划第一轮 28/28 todo 全部 proven done，正向完成报告见 `docs/2026-07-03-architecture-health-execution-plan完成情况.md`。
+
+### 2026-07-03 — B2 删除前解除 provider 测试对 legacy config 的依赖
+
+- **provider 集成测试不再 import legacy config 包**：Claude Code / Codex 的 provider 相关测试改为通过轻量 provider seed test helper 读取 `.cc-connect/config.toml`，保留真实配置存在才运行、缺失则 skip 的行为。
+- **删除前证据更清晰**：新增 provider seed test helper 覆盖 provider refs、agent type 过滤、agent-specific endpoint/model、Codex headers 与 `${ENV}` 展开；静态防回归测试扩展到 agent provider 测试文件，避免删除 `config/` 前又引入 test-only 依赖。
+- **仍未删除 `config/` 包**：B2 删除本体继续等待删除前审计和 owner 对旧业务写入能力不再维护的确认。
+
+### 2026-07-03 — 架构健康治理第一轮：能力单源化与 provider seed 瘦身
+
+- **后端 capability 宣告改为单一来源**：Management API 与 `hello_ack.backends[]` 现在共用同一套能力推导，Codex `app_server` 模式会一致宣告 `compression` 与 `question_reply`，避免客户端从不同入口看到不一致能力。
+- **保持风险能力关闭**：`session_pagination` 仍不宣告；OpenCode/Codex 仍不宣告未实现的 `permission_resolve`，避免 UI 误启用不可用路径。
+- **切断 go-bridge 对 legacy config 包的生产依赖**：provider seed 读取改为 go-bridge 内部最小 TOML 结构，保留 `.cc-connect/config.toml` 的 provider refs、work_dir/base_dir 匹配、active provider、models/env/Codex headers 映射，降低旧 Weixin/Feishu 等历史业务结构对运行路径的维护压力。
+- **新增 warning-only 工程卫生检查**：新增工程宪法与 `scripts/check-architecture-hygiene.sh`，把日志、本地化、`ForTesting`、长文件和 protocol 同步规则变成可见的存量报告；当前只提示不阻塞 CI，避免在债务清零前制造硬失败。
+- **补齐 web renderer 共享包施工设计**：新增 batch C 设计实施文档，限定第一轮只迁移 `DiffViewer` / `ToolBlock` 与稳定类型，要求用 host adapter 隔离 iOS WebKit 与 remote-web 宿主差异。
+
 ### 2026-07-03 — 活文档对齐当前 CordCode Link 架构
 
 - **修正文档中的旧品牌与命令**：根活文档、安装说明、release checklist 和 README 统一使用 `CordCodeLink.app`、`cordcode-bridge-runtime`、`cordcode-relay` module 与当前 `/opt/cordcode-relay/bin/relay-server` 部署路径，避免照抄旧命令找不到 runtime 或 Relay 备份。

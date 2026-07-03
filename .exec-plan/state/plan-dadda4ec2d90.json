@@ -1,0 +1,838 @@
+{
+  "version": 6,
+  "project_root": "/Users/jacklee/Projects/cordcode-macbridge",
+  "plan_file": "docs/2026-07-03-architecture-health-execution-plan.md",
+  "state_store": {
+    "canonical_path": ".exec-plan/state/plan-dadda4ec2d90.json",
+    "legacy_path": ".claude/exec-plans/plan-dadda4ec2d90.json",
+    "origin": "new",
+    "migrated_from": null,
+    "migrated_at": null
+  },
+  "queue_policy": {
+    "todo_md_role": "informational-only",
+    "completion_gate": "proof-carrying-impl-tests-regression",
+    "phase_done_rule": "all-required-todos-done",
+    "audit_rule": "unsupported-done-must-downgrade",
+    "start_exit_rule": "internal-audit-before-success",
+    "audit_failure_policy": "light-repairable-heavy-external-blocker",
+    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+    "session_mirror_policy": "host-tracker-optional-mirror",
+    "invocation_policy": "slash-or-natural-language-equivalent",
+    "persistence_rule": "persist-on-every-status-transition"
+  },
+  "report_policy": {
+    "auto_write_completion_report": true,
+    "report_directory": "docs",
+    "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+    "write_when": "all-required-todos-proven-done",
+    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  },
+  "reports": {
+    "completion_report_path": "docs/2026-07-03-architecture-health-execution-plan完成情况.md",
+    "completion_report_status": "current",
+    "last_generated_at": "2026-07-03T16:21:30Z",
+    "based_on_queue_hash": "a6f5d095bf1c1948a670544442a85932e620883c71070dfc45cc3c7f6169591a"
+  },
+  "updated_at": "2026-07-03T16:21:30Z",
+  "todos": [
+    {
+      "id": "batch-a-capability-single-source-impl",
+      "title": "Batch A capability single source implementation",
+      "description": "Create a single capability derivation source for BackendList and BuildAgentDescriptor, preserving capability order, adding Codex app_server question_reply after compression, keeping permission_resolve and session_pagination behavior unchanged.",
+      "status": "done",
+      "phase": "batch-a",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "Section 2 / Section 7",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Added go-bridge/backend_capabilities.go with deriveBackendCapabilities as the single capability derivation source. BackendList and BuildAgentDescriptor now both call it. Codex app_server appends compression then question_reply; session_pagination remains disabled in the single source.",
+        "artifacts": [
+          "go-bridge/backend_capabilities.go",
+          "go-bridge/handlers.go",
+          "go-bridge/agent_descriptor.go"
+        ],
+        "checked_at": "2026-07-03T12:41:00Z"
+      }
+    },
+    {
+      "id": "batch-a-capability-single-source-tests",
+      "title": "Batch A capability targeted tests",
+      "description": "Add or update Go tests proving Codex app_server descriptor includes compression and question_reply, non-app_server Codex excludes them, session_pagination remains disabled, BackendList and BuildAgentDescriptor capabilities match, and OpenCode/Codex do not expose permission_resolve.",
+      "status": "done",
+      "phase": "batch-a",
+      "kind": "tests",
+      "depends_on": [
+        "batch-a-capability-single-source-impl"
+      ],
+      "source": "Section 2.4 / 2.5 / 2.6",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Added descriptor and backend-list capability tests, including TestBuildAgentDescriptorCodexAppServerQuestionReplyCapability, TestBuildAgentDescriptorCodexExecNoAppServerCapabilities, TestBuildAgentDescriptorDoesNotAdvertiseSessionPagination, and TestBackendListMatchesBuildAgentDescriptorCapabilities. Targeted capability filter passed.",
+        "artifacts": [
+          "go-bridge/agent_descriptor_test.go",
+          "go-bridge/handlers_test.go",
+          "cmd:go test ./go-bridge -run 'Test.*Capabilit|TestBackendList|TestBuildAgentDescriptor' -count=1"
+        ],
+        "checked_at": "2026-07-03T12:41:40Z"
+      }
+    },
+    {
+      "id": "batch-a-capability-single-source-regression",
+      "title": "Batch A capability regression gate",
+      "description": "Run the required capability-focused Go filter and full go-bridge test suite, then record evidence that existing capability tests did not regress and no protocol/iOS changes were needed.",
+      "status": "done",
+      "phase": "batch-a",
+      "kind": "regression",
+      "depends_on": [
+        "batch-a-capability-single-source-tests"
+      ],
+      "source": "Section 2.5 / 2.6 / Section 7",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Capability focused filter and full go-bridge suite passed; no protocol or iOS mirror changes were needed because only existing optional capability advertisement was made consistent.",
+        "artifacts": [
+          "cmd:go test ./go-bridge -run 'Test.*Capabilit|TestBackendList|TestBuildAgentDescriptor' -count=1",
+          "cmd:go test ./go-bridge/... -count=1"
+        ],
+        "checked_at": "2026-07-03T12:57:00Z"
+      }
+    },
+    {
+      "id": "batch-b1-provider-seed-decouple-impl",
+      "title": "Batch B1 provider seed decouple implementation",
+      "description": "Add a minimal go-bridge-local TOML provider seed reader using BurntSushi/toml, remove production dependency on the legacy config package from provider_switch.go, and preserve loadProviderSeedForAgent, ccConnectConfigPath, findProviderProject, projectMatchesWorkDir, and providerConfigsToCore semantics.",
+      "status": "done",
+      "phase": "batch-b1",
+      "kind": "impl",
+      "depends_on": [
+        "batch-a-capability-single-source-regression"
+      ],
+      "source": "Section 3.2 / 3.3 / Section 7",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Added go-bridge/provider_seed_config.go with the minimal TOML provider seed model, env placeholder resolution, global provider_refs resolution, per-agent provider overrides, and provider field mapping. provider_switch.go now calls loadProviderSeedConfig and no longer imports the legacy config package.",
+        "artifacts": [
+          "go-bridge/provider_seed_config.go",
+          "go-bridge/provider_switch.go"
+        ],
+        "checked_at": "2026-07-03T13:06:00Z"
+      }
+    },
+    {
+      "id": "batch-b1-provider-seed-decouple-tests",
+      "title": "Batch B1 provider seed targeted tests",
+      "description": "Add or update provider seed tests for missing CC_CONNECT_CONFIG, explicit env path precedence, exact work_dir, multi-workspace base_dir prefix, active provider via agent.options.provider, agent.type filtering, map[string]any optionString equivalence for provider/work_dir, provider mapping for models/env/codex fields, and no production import of legacy config.",
+      "status": "done",
+      "phase": "batch-b1",
+      "kind": "tests",
+      "depends_on": [
+        "batch-b1-provider-seed-decouple-impl"
+      ],
+      "source": "Section 3.4 / 3.5 / 3.7",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Expanded provider seed tests for missing config, env path precedence, exact vs base_dir matching, multi-workspace prefix matching, active provider options, mismatched agent type filtering, mixed map[string]any options, provider mapping fields, and static legacy-config import prevention. Provider-focused filter passed.",
+        "artifacts": [
+          "go-bridge/provider_switch_test.go",
+          "cmd:go test ./go-bridge -run 'Test.*Provider|TestProviderSeed' -count=1"
+        ],
+        "checked_at": "2026-07-03T13:06:40Z"
+      }
+    },
+    {
+      "id": "batch-b1-provider-seed-decouple-regression",
+      "title": "Batch B1 provider seed regression gate",
+      "description": "Run the required provider-focused Go filter, full go-bridge tests, production import rg check, and update CHANGELOG under Unreleased for the first-round architecture governance change.",
+      "status": "done",
+      "phase": "batch-b1",
+      "kind": "regression",
+      "depends_on": [
+        "batch-b1-provider-seed-decouple-tests"
+      ],
+      "source": "Section 3.5 / 3.7 / Section 7",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "First-round capability/provider filter passed, production Go import check for legacy config returned no matches, full go-bridge suite passed, CHANGELOG [Unreleased] documents the architecture governance change, and the Release app was built, installed to /Applications, launched, and verified as the 8777 listener.",
+        "artifacts": [
+          "CHANGELOG.md",
+          "cmd:go test ./go-bridge -run 'Test.*Capabilit|TestBackendList|TestBuildAgentDescriptor|Test.*Provider|TestProviderSeed' -count=1",
+          "cmd:rg 'github.com/openAgi2/cordcode-macbridge/config' --glob '*.go' --glob '!*_test.go' . (no matches)",
+          "cmd:go test ./go-bridge/... -count=1",
+          "cmd:./scripts/build-unsigned-release.sh",
+          "cmd:install /Applications/CordCodeLink.app and verify lsof -nP -iTCP:8777 -sTCP:LISTEN plus runtime_ready log"
+        ],
+        "checked_at": "2026-07-03T13:44:00Z"
+      }
+    },
+    {
+      "id": "batch-b2-config-package-removal-impl",
+      "title": "Batch B2 config package removal implementation",
+      "description": "After B1 review and owner confirmation, delete or archive the legacy config package and adjust test-only dependencies in agent provider tests without breaking migration/debug flows.",
+      "status": "done",
+      "phase": "batch-b2",
+      "kind": "impl",
+      "depends_on": [
+        "batch-b1-provider-seed-decouple-regression"
+      ],
+      "source": "Section 3.6",
+      "notes": "resolved 2026-07-04 (UTC 2026-07-03T16:11Z): owner confirmed legacy .cc-connect/config.toml business write capabilities (Weixin/Feishu/Web admin) are no longer maintained. Pre-delete orphan-package evidence (zero production imports, zero config.X() callers, zero cmd entry imports; only the static guard string in provider_switch_test.go) plus post-delete full-module green and zero business-symbol scan complete the three-way gate (evidence + owner confirmation + pre-delete audit). Verification commands freshly re-run this session.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Deleted the legacy config package (config.go, config_test.go, config_repository.go, config_repository_test.go) after owner confirmation. config/ was an orphan package: pre-delete scan showed zero production imports, zero config.X() callers, zero cmd entry imports. Post-delete: go build ./... clean; full root module go test ./... -count=1 green with runtime-equivalent PATH (Codex.app Resources, matching how CordCodeLink.app launches the runtime); relay-server independent module green; go vet clean. Weixin/Feishu/business-symbol scan zero hits across *.go; production config-import scan (excluding _test.go) zero hits. The only remaining config-package string is the intentional static anti-regression guard in provider_switch_test.go. Neutralized a leftover Feishu test fixture in agent/claudecode/claudecode_test.go so the Weixin/Feishu acceptance scan is unambiguous.",
+        "artifacts": [
+          "config/config.go (deleted)",
+          "config/config_test.go (deleted)",
+          "config/config_repository.go (deleted)",
+          "config/config_repository_test.go (deleted)",
+          "agent/claudecode/claudecode_test.go (Feishu fixture neutralized to custom platform)",
+          "cmd:rg 'Weixin|Feishu|EnsureProjectWithFeishu|EnsureProjectWithWeixin' --glob '*.go' . (0 hits)",
+          "cmd:rg 'github.com/openAgi2/cordcode-macbridge/config' --glob '*.go' --glob '!*_test.go' . (0 hits)",
+          "cmd:go build ./... (ok)",
+          "cmd:PATH=/Applications/Codex.app/Contents/Resources:$PATH CC_SKIP_INTEGRATION=1 go test ./... -count=1 (all 7 root-module packages ok)",
+          "cmd:(cd relay-server && go test ./... -count=1) (ok)",
+          "cmd:go vet ./... (clean)",
+          "cmd:./scripts/build-unsigned-release.sh (** BUILD SUCCEEDED **; embedded runtime 0.1.0 commit ea20d1ab4e0b built 2026-07-03T16:21:16Z; dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip)",
+          "cmd:install /Applications/CordCodeLink.app + open; new runtime PID 48656; lsof 8777 listener = /Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime; runtime_ready emitted; startup log 0 ERROR/WARN; claude/opencode/codex registered; relay-bridge-client connected",
+          "cmd:(cd ../cordcode-ios && scripts/run.sh device --device BFC431AC-C205-56B2-BB4D-9EC0C57A0C05) build+install+launch ok on iPhone 16 Pro from codex/web-renderer-shared-c1 branch (Batch C working tree)"
+        ],
+        "checked_at": "2026-07-03T16:21:30Z"
+      }
+    },
+    {
+      "id": "batch-b2-predelete-test-dependency-impl",
+      "title": "Batch B2 pre-delete provider test dependency removal implementation",
+      "description": "Before deleting the legacy config package, remove agent provider test-only imports of github.com/openAgi2/cordcode-macbridge/config without changing production runtime behavior or deleting config/.",
+      "status": "done",
+      "phase": "batch-b2",
+      "kind": "impl",
+      "depends_on": [
+        "batch-b1-provider-seed-decouple-regression"
+      ],
+      "source": "Section 3.6 B2 pre-delete audit",
+      "notes": "pre-delete only; config/ package intentionally retained and batch-b2-config-package-removal-impl remains blocked.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Added agent/providerseedtest as a test-support provider seed loader and migrated agent/claudecode/provider_integration_test.go plus agent/codex/provider_switch_test.go away from the legacy config package while preserving real-config skip behavior.",
+        "artifacts": [
+          "agent/providerseedtest/provider_seed.go",
+          "agent/providerseedtest/provider_seed_test.go",
+          "agent/claudecode/provider_integration_test.go",
+          "agent/codex/provider_switch_test.go",
+          "go-bridge/provider_switch_test.go",
+          "CHANGELOG.md",
+          "docs/2026-07-03-b2-config-package-removal-predelete-audit-point.md"
+        ],
+        "checked_at": "2026-07-03T16:10:00Z"
+      }
+    },
+    {
+      "id": "batch-b2-predelete-test-dependency-tests",
+      "title": "Batch B2 pre-delete provider test dependency tests",
+      "description": "Verify the new provider seed test helper and migrated agent provider tests no longer depend on the legacy config package.",
+      "status": "done",
+      "phase": "batch-b2",
+      "kind": "tests",
+      "depends_on": [
+        "batch-b2-predelete-test-dependency-impl"
+      ],
+      "source": "Section 3.6 B2 pre-delete audit",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Providerseedtest unit coverage passed; go-bridge provider static/import regression filter passed; Claude Code and Codex provider integration entrypoints compiled and passed or skipped according to real local config availability.",
+        "artifacts": [
+          "cmd:go test ./agent/providerseedtest -count=1",
+          "cmd:go test ./go-bridge -run 'TestProviderSeedDoesNotImportLegacyConfigPackage|Test.*Provider|TestProviderSeed' -count=1",
+          "cmd:go test ./agent/claudecode ./agent/codex -run 'TestIntegration_ProviderSwitch_EnvVars|TestIntegration_AgentTypeChange_FiltersProviders|TestIntegration_Codex_ProviderSwitch_EnvVars|TestIntegration_Codex_ProviderConfig_WrittenCorrectly' -count=1"
+        ],
+        "checked_at": "2026-07-03T16:10:00Z"
+      }
+    },
+    {
+      "id": "batch-b2-predelete-test-dependency-regression",
+      "title": "Batch B2 pre-delete provider test dependency regression",
+      "description": "Confirm agent provider tests have no legacy config import and go-bridge regression remains green while config/ is intentionally retained.",
+      "status": "done",
+      "phase": "batch-b2",
+      "kind": "regression",
+      "depends_on": [
+        "batch-b2-predelete-test-dependency-tests"
+      ],
+      "source": "Section 3.6 B2 pre-delete audit",
+      "notes": "config/ deletion not performed in this regression gate.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Agent provider test directories have zero legacy config imports; go-bridge full test suite and root module go test ./... passed with integration tests skipped. Full-repo config import scan now only hits the static guard string in go-bridge/provider_switch_test.go plus the still-retained config package itself.",
+        "artifacts": [
+          "cmd:! rg -n 'github.com/openAgi2/cordcode-macbridge/config' agent/claudecode agent/codex agent/providerseedtest --glob '*.go'",
+          "cmd:go test ./go-bridge/... -count=1",
+          "cmd:CC_SKIP_INTEGRATION=1 go test ./... -count=1",
+          "docs/2026-07-03-b2-config-package-removal-predelete-audit-point.md"
+        ],
+        "checked_at": "2026-07-03T16:10:00Z"
+      }
+    },
+    {
+      "id": "batch-c1-shared-renderer-package-bootstrap-impl",
+      "title": "Batch C1 shared renderer package bootstrap implementation",
+      "description": "Create shared-message-renderer in cordcode-ios with stable types, host action types, pure diff helpers, and source-level alias wiring in message-web and remote-web without migrating production renderer components.",
+      "status": "done",
+      "phase": "batch-c",
+      "kind": "impl",
+      "depends_on": [
+        "batch-c-web-renderer-design-review-fix-regression"
+      ],
+      "source": "docs/2026-07-03-web-renderer-shared-package-implementation-plan.md Section 5 C1",
+      "notes": "C1 only; DiffViewer/ToolBlock production imports are not migrated yet.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Implemented cordcode-ios shared-message-renderer package with package/tsconfig/lockfile, copied stable Web types plus diffParse/diffStats pure helpers, added RendererHostAction covering openDetail/permissionAction/questionAction, configured message-web and remote-web tsconfig paths plus Vite alias, added alias smoke tests, and ignored shared package local dependency/cache directories. Production renderer components were not migrated in C1.",
+        "artifacts": [
+          "../cordcode-ios/shared-message-renderer/",
+          "../cordcode-ios/message-web/tsconfig.json",
+          "../cordcode-ios/message-web/vite.config.ts",
+          "../cordcode-ios/message-web/src/__tests__/shared-renderer-alias.test.ts",
+          "../cordcode-ios/remote-web/tsconfig.json",
+          "../cordcode-ios/remote-web/vite.config.ts",
+          "../cordcode-ios/remote-web/vitest.config.ts",
+          "../cordcode-ios/remote-web/src/renderer/__tests__/shared-renderer-alias.test.ts",
+          "../cordcode-ios/.gitignore",
+          "../cordcode-ios/CHANGELOG.md"
+        ],
+        "checked_at": "2026-07-03T14:25:00Z"
+      }
+    },
+    {
+      "id": "batch-c1-shared-renderer-package-bootstrap-tests",
+      "title": "Batch C1 shared renderer package bootstrap tests",
+      "description": "Run shared package typecheck/test and targeted alias smoke tests in message-web and remote-web.",
+      "status": "done",
+      "phase": "batch-c",
+      "kind": "tests",
+      "depends_on": [
+        "batch-c1-shared-renderer-package-bootstrap-impl"
+      ],
+      "source": "docs/2026-07-03-web-renderer-shared-package-implementation-plan.md Section 5 C1",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Shared package typecheck/test passed, and both message-web and remote-web targeted shared-renderer-alias Vitest tests passed.",
+        "artifacts": [
+          "cmd:(cd ../cordcode-ios/shared-message-renderer && npm run typecheck && npm run test)",
+          "cmd:(cd ../cordcode-ios/message-web && npm run test:vitest -- shared-renderer-alias)",
+          "cmd:(cd ../cordcode-ios/remote-web && npm run test:vitest -- shared-renderer-alias)"
+        ],
+        "checked_at": "2026-07-03T14:25:00Z"
+      }
+    },
+    {
+      "id": "batch-c1-shared-renderer-package-bootstrap-regression",
+      "title": "Batch C1 shared renderer package bootstrap regression",
+      "description": "Run web typecheck/build, message-web build:ios, iOS build, physical-device install when available, and diff checks.",
+      "status": "done",
+      "phase": "batch-c",
+      "kind": "regression",
+      "depends_on": [
+        "batch-c1-shared-renderer-package-bootstrap-tests"
+      ],
+      "source": "docs/2026-07-03-web-renderer-shared-package-implementation-plan.md Section 5 C1 / iOS CLAUDE.md",
+      "notes": "Physical iPhone was visible via devicectl but scripts/run.sh auto-detection via xctrace returned no device; reran with explicit devicectl identifier.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "message-web typecheck/build and build:ios passed, remote-web typecheck/build passed, iOS Simulator build passed, devicectl listed a physical iPhone, and scripts/run.sh device --device BFC431AC-C205-56B2-BB4D-9EC0C57A0C05 built, installed, and launched the app. git diff whitespace checks passed for both repos.",
+        "artifacts": [
+          "cmd:(cd ../cordcode-ios/message-web && npm run typecheck && npm run build)",
+          "cmd:(cd ../cordcode-ios/remote-web && npm run typecheck && npm run build)",
+          "cmd:(cd ../cordcode-ios/message-web && npm run build:ios)",
+          "cmd:(cd ../cordcode-ios && xcodebuild -project OpenCodeiOS/CordCode.xcodeproj -scheme CordCode -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max' build)",
+          "cmd:(cd ../cordcode-ios && xcrun devicectl list devices)",
+          "cmd:(cd ../cordcode-ios && scripts/run.sh device --device BFC431AC-C205-56B2-BB4D-9EC0C57A0C05)",
+          "cmd:git -C ../cordcode-ios diff --check && git diff --check"
+        ],
+        "checked_at": "2026-07-03T14:25:00Z"
+      }
+    },
+    {
+      "id": "batch-c-web-renderer-design-review-fix-impl",
+      "title": "Batch C design review fix implementation",
+      "description": "Address the web renderer shared package design review by specifying the source-level alias mechanism and completing the host adapter action union.",
+      "status": "done",
+      "phase": "batch-c",
+      "kind": "impl",
+      "depends_on": [
+        "batch-c-web-renderer-shared-package-design"
+      ],
+      "source": "docs/2026-07-03-web-renderer-shared-package-implementation-plan-review.md",
+      "notes": "review-fix-for:batch-c-web-renderer-shared-package-design",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Updated the Batch C design document to pin shared package wiring to tsconfig paths plus Vite resolve.alias, explicitly forbid file:/npm link/workspace detours, add C1 alias validation, expand RendererHostAction to openDetail/permissionAction/questionAction, and mark ReasoningBlock labels as future-only.",
+        "artifacts": [
+          "docs/2026-07-03-web-renderer-shared-package-implementation-plan.md",
+          "docs/2026-07-03-web-renderer-shared-package-implementation-plan-review.md"
+        ],
+        "checked_at": "2026-07-03T14:46:00Z"
+      }
+    },
+    {
+      "id": "batch-c-web-renderer-design-review-fix-tests",
+      "title": "Batch C design review fix validation",
+      "description": "Validate the updated design document contains the required P1/P2 review fixes and remains reviewable.",
+      "status": "done",
+      "phase": "batch-c",
+      "kind": "tests",
+      "depends_on": [
+        "batch-c-web-renderer-design-review-fix-impl"
+      ],
+      "source": "docs/2026-07-03-web-renderer-shared-package-implementation-plan-review.md",
+      "notes": "review-fix-for:batch-c-web-renderer-shared-package-design",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Document grep validation confirmed the presence of tsconfig paths, Vite resolve.alias, permissionAction, questionAction, and future-only ReasoningBlock wording.",
+        "artifacts": [
+          "cmd:rg 'tsconfig paths|resolve alias|permissionAction|questionAction|future|本轮不实现' docs/2026-07-03-web-renderer-shared-package-implementation-plan.md"
+        ],
+        "checked_at": "2026-07-03T14:46:00Z"
+      }
+    },
+    {
+      "id": "batch-c-web-renderer-design-review-fix-regression",
+      "title": "Batch C design review fix regression",
+      "description": "Run repo-level document/state hygiene checks after the design review fix.",
+      "status": "done",
+      "phase": "batch-c",
+      "kind": "regression",
+      "depends_on": [
+        "batch-c-web-renderer-design-review-fix-tests"
+      ],
+      "source": "docs/2026-07-03-web-renderer-shared-package-implementation-plan-review.md",
+      "notes": "review-fix-for:batch-c-web-renderer-shared-package-design",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Exec-plan JSON validation and git diff whitespace checks passed after the design review fix.",
+        "artifacts": [
+          "cmd:python3 -m json.tool .exec-plan/state/plan-dadda4ec2d90.json",
+          "cmd:git diff --check"
+        ],
+        "checked_at": "2026-07-03T14:46:00Z"
+      }
+    },
+    {
+      "id": "batch-c-web-renderer-shared-package-design",
+      "title": "Batch C web renderer shared package design document",
+      "description": "Write a scoped implementation design for the cross-repo message-web/remote-web shared renderer package before modifying iOS web code.",
+      "status": "done",
+      "phase": "batch-c",
+      "kind": "impl",
+      "depends_on": [
+        "batch-b1-provider-seed-decouple-regression",
+        "batch-e-engineering-constitution-regression"
+      ],
+      "source": "Section 4 / owner follow-up",
+      "notes": "design-only C0 step; batch-c implementation remains blocked until the design is reviewed and implementation is explicitly started.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Added docs/2026-07-03-web-renderer-shared-package-implementation-plan.md with scope, host adapter boundary, migration sequence, validation commands, forbidden work, and exit criteria. CHANGELOG and .gitignore were updated so the design is reviewable.",
+        "artifacts": [
+          "docs/2026-07-03-web-renderer-shared-package-implementation-plan.md",
+          "CHANGELOG.md",
+          ".gitignore"
+        ],
+        "checked_at": "2026-07-03T14:32:00Z"
+      }
+    },
+    {
+      "id": "batch-c-web-renderer-shared-package-impl",
+      "title": "Batch C web renderer shared package implementation",
+      "description": "After A/B, create shared-message-renderer in cordcode-ios and migrate only pure display components and stable types within the documented boundary.",
+      "status": "done",
+      "phase": "batch-c",
+      "kind": "impl",
+      "depends_on": [
+        "batch-b1-provider-seed-decouple-regression"
+      ],
+      "source": "Section 4",
+      "notes": "completed-via:batch-c1-shared-renderer-package-bootstrap-regression,batch-c2-diffviewer-shared-migration-regression,batch-c3-toolblock-shared-migration-regression; ReasoningBlock/NarrativeBlock intentionally not migrated per plan boundary.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Implemented the first-round web renderer shared package in cordcode-ios: C1 bootstrapped shared-message-renderer and source aliases, C2 migrated DiffViewer with host adapter wrappers, C3 migrated ToolBlock with host.post actions for openDetail/permissionAction/questionAction, and C4-style build/device validation was completed through the C2/C3 regression todos. NarrativeBlock git directive UI and ReasoningBlock labels were not migrated by design.",
+        "artifacts": [
+          "todo:batch-c1-shared-renderer-package-bootstrap-regression",
+          "todo:batch-c2-diffviewer-shared-migration-regression",
+          "todo:batch-c3-toolblock-shared-migration-regression",
+          "../cordcode-ios/shared-message-renderer/",
+          "../cordcode-ios/message-web/src/components/blocks/DiffViewer.tsx",
+          "../cordcode-ios/message-web/src/components/blocks/ToolBlock.tsx",
+          "../cordcode-ios/remote-web/src/renderer/components/blocks/DiffViewer.tsx",
+          "../cordcode-ios/remote-web/src/renderer/components/blocks/ToolBlock.tsx"
+        ],
+        "checked_at": "2026-07-03T15:08:09Z"
+      }
+    },
+    {
+      "id": "batch-d-god-object-characterization-tests",
+      "title": "Batch D god-object characterization tests",
+      "description": "Before any god-object splitting, add characterization tests for affected inputs, outputs, events, and state changes; no UI automation without explicit authorization.",
+      "status": "done",
+      "phase": "batch-d",
+      "kind": "tests",
+      "depends_on": [
+        "batch-b1-provider-seed-decouple-regression"
+      ],
+      "source": "Section 5",
+      "notes": "first-round characterization only; no god-object splitting performed and no UI automation/snapshot/simulator UI flow was run.",
+      "verification": {
+        "required": true,
+        "status": "passed",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Added scoped characterization coverage for BridgeProvider connection strategy decisions and ChatViewModel generation-cycle settled boundary before any split work. Targeted CCCodeTests/GodObjectCharacterizationTests executed 2 tests with 0 failures.",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/GodObjectCharacterizationTests.swift",
+          "../cordcode-ios/OpenCodeiOS/CordCode.xcodeproj/project.pbxproj",
+          "xcodebuild -project OpenCodeiOS/CordCode.xcodeproj -scheme CordCode -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max' test -only-testing:CCCodeTests/GodObjectCharacterizationTests"
+        ],
+        "checked_at": "2026-07-03T15:13:00Z"
+      }
+    },
+    {
+      "id": "batch-e-engineering-constitution-impl",
+      "title": "Batch E engineering constitution warning gate",
+      "description": "After A/B, add docs/engineering-constitution.md and scripts/check-architecture-hygiene.sh as non-blocking warning checks for logging, localization, ForTesting, long files/methods, and protocol-change rules.",
+      "status": "done",
+      "phase": "batch-e",
+      "kind": "impl",
+      "depends_on": [
+        "batch-b1-provider-seed-decouple-regression"
+      ],
+      "source": "Section 6",
+      "notes": "unblocked-by-owner: after B1 review, proceed with warning-only engineering constitution and hygiene script; keep B2 blocked.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Added docs/engineering-constitution.md and scripts/check-architecture-hygiene.sh as a warning-only governance step. The script reports logging, localization, ForTesting, long-file, and protocol mirror inventory without changing runtime code or CI required gates. CHANGELOG documents the governance addition.",
+        "artifacts": [
+          "docs/engineering-constitution.md",
+          "scripts/check-architecture-hygiene.sh",
+          "CHANGELOG.md",
+          ".gitignore"
+        ],
+        "checked_at": "2026-07-03T14:05:00Z"
+      }
+    },
+    {
+      "id": "batch-e-engineering-constitution-tests",
+      "title": "Batch E engineering constitution script validation",
+      "description": "Run the warning-only architecture hygiene script and verify it reports current inventory without failing on existing debt.",
+      "status": "done",
+      "phase": "batch-e",
+      "kind": "tests",
+      "depends_on": [
+        "batch-e-engineering-constitution-impl"
+      ],
+      "source": "Section 6.3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "The warning-only hygiene script passes bash syntax validation and runs successfully, reporting current inventory while exiting 0 despite existing debt.",
+        "artifacts": [
+          "cmd:bash -n scripts/check-architecture-hygiene.sh",
+          "cmd:scripts/check-architecture-hygiene.sh"
+        ],
+        "checked_at": "2026-07-03T14:10:00Z"
+      }
+    },
+    {
+      "id": "batch-e-engineering-constitution-regression",
+      "title": "Batch E non-runtime regression gate",
+      "description": "Run diff whitespace checks and the final architecture hygiene script. Confirm no production runtime code or CI required gates were changed for this warning-only governance step.",
+      "status": "done",
+      "phase": "batch-e",
+      "kind": "regression",
+      "depends_on": [
+        "batch-e-engineering-constitution-tests"
+      ],
+      "source": "Section 6.3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "git diff whitespace check passed. No production runtime code or CI required gate was changed by the E step; the new gate is a local warning-only script plus documentation.",
+        "artifacts": [
+          "cmd:git diff --check",
+          "docs/engineering-constitution.md",
+          "scripts/check-architecture-hygiene.sh"
+        ],
+        "checked_at": "2026-07-03T14:11:00Z"
+      }
+    },
+    {
+      "id": "batch-c2-diffviewer-shared-migration-impl",
+      "title": "Batch C2 DiffViewer shared migration implementation",
+      "description": "Move DiffViewer into cordcode-ios shared-message-renderer, replace app-specific DiffViewer files with thin host adapters, and keep production DOM/class/test-id behavior unchanged.",
+      "status": "done",
+      "phase": "batch-c",
+      "kind": "impl",
+      "depends_on": [
+        "batch-c1-shared-renderer-package-bootstrap-regression"
+      ],
+      "source": "docs/2026-07-03-web-renderer-shared-package-implementation-plan.md Section 5 C2",
+      "notes": "C2 only; ToolBlock remains app-local except importing the thin DiffViewer wrapper.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Moved DiffViewer implementation into shared-message-renderer, exported it from the shared package, replaced message-web and remote-web DiffViewer files with thin host adapters that call their existing postToNative functions, and added shared DiffViewer unit coverage for inline DOM, overflow DOM, and openDetail action shape. ToolBlock remains app-local and only continues importing the local thin DiffViewer wrapper.",
+        "artifacts": [
+          "../cordcode-ios/shared-message-renderer/src/components/blocks/DiffViewer.tsx",
+          "../cordcode-ios/shared-message-renderer/src/components/blocks/DiffViewer.test.tsx",
+          "../cordcode-ios/shared-message-renderer/src/index.ts",
+          "../cordcode-ios/message-web/src/components/blocks/DiffViewer.tsx",
+          "../cordcode-ios/remote-web/src/renderer/components/blocks/DiffViewer.tsx"
+        ],
+        "checked_at": "2026-07-03T15:00:26Z"
+      }
+    },
+    {
+      "id": "batch-c2-diffviewer-shared-migration-tests",
+      "title": "Batch C2 DiffViewer shared migration tests",
+      "description": "Run shared package tests and targeted DiffViewer/alias Vitest coverage in message-web and remote-web after migration.",
+      "status": "done",
+      "phase": "batch-c",
+      "kind": "tests",
+      "depends_on": [
+        "batch-c2-diffviewer-shared-migration-impl"
+      ],
+      "source": "docs/2026-07-03-web-renderer-shared-package-implementation-plan.md Section 5 C2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Shared package typecheck/test passed, message-web and remote-web DiffViewer Vitest wrapper tests passed, and remote-web shared-renderer alias smoke test passed. An initial message-web file-filter command found no DiffViewer file and remote-web initially exposed duplicate React through shared node_modules; both were corrected by adding wrapper tests and React dedupe in app resolve config before re-running successfully.",
+        "artifacts": [
+          "cmd:(cd ../cordcode-ios/shared-message-renderer && npm run typecheck && npm run test)",
+          "cmd:(cd ../cordcode-ios/message-web && npm run test:vitest -- DiffViewer)",
+          "cmd:(cd ../cordcode-ios/remote-web && npm run test:vitest -- DiffViewer)",
+          "cmd:(cd ../cordcode-ios/remote-web && npm run test:vitest -- shared-renderer-alias)"
+        ],
+        "checked_at": "2026-07-03T15:02:09Z"
+      }
+    },
+    {
+      "id": "batch-c2-diffviewer-shared-migration-regression",
+      "title": "Batch C2 DiffViewer shared migration regression",
+      "description": "Run web typecheck/build, message-web build:ios, iOS build, physical-device install when available, and diff/forbidden-import checks.",
+      "status": "done",
+      "phase": "batch-c",
+      "kind": "regression",
+      "depends_on": [
+        "batch-c2-diffviewer-shared-migration-tests"
+      ],
+      "source": "docs/2026-07-03-web-renderer-shared-package-implementation-plan.md Section 5 C2 / C4",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "message-web and remote-web typecheck/build passed, message-web build:ios passed and updated the tracked MessageWeb JS asset hash, iOS Simulator build passed, physical iPhone was available via devicectl, and scripts/run.sh device --device BFC431AC-C205-56B2-BB4D-9EC0C57A0C05 built, installed, and launched the app. Static checks confirmed shared-message-renderer has no bridge/relay/OpenCodeiOS direct imports and both repos pass git diff whitespace checks.",
+        "artifacts": [
+          "cmd:(cd ../cordcode-ios/message-web && npm run typecheck && npm run build)",
+          "cmd:(cd ../cordcode-ios/remote-web && npm run typecheck && npm run build)",
+          "cmd:(cd ../cordcode-ios/message-web && npm run build:ios)",
+          "cmd:(cd ../cordcode-ios && xcodebuild -project OpenCodeiOS/CordCode.xcodeproj -scheme CordCode -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max' build)",
+          "cmd:(cd ../cordcode-ios && xcrun devicectl list devices)",
+          "cmd:(cd ../cordcode-ios && scripts/run.sh device --device BFC431AC-C205-56B2-BB4D-9EC0C57A0C05)",
+          "cmd:! rg -n -g '!**/node_modules/**' 'postToNative|bridge/native|renderer/bridge|relay/|OpenCodeI?OS' shared-message-renderer/src",
+          "cmd:git -C ../cordcode-ios diff --check && git diff --check"
+        ],
+        "checked_at": "2026-07-03T15:04:07Z"
+      }
+    },
+    {
+      "id": "batch-c3-toolblock-shared-migration-impl",
+      "title": "Batch C3 ToolBlock shared migration implementation",
+      "description": "Move ToolBlock into shared-message-renderer with host.post for openDetail/permissionAction/questionAction, keep two app wrappers host-only, and preserve ToolBlock rendering semantics.",
+      "status": "done",
+      "phase": "batch-c",
+      "kind": "impl",
+      "depends_on": [
+        "batch-c2-diffviewer-shared-migration-regression"
+      ],
+      "source": "docs/2026-07-03-web-renderer-shared-package-implementation-plan.md Section 5 C3",
+      "notes": "C3 only; NarrativeBlock and ReasoningBlock remain app-local.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Moved ToolBlock implementation into shared-message-renderer, replaced direct postToNative calls with host.post for openDetail, permissionAction, and questionAction, reused shared DiffViewer inside ToolBlock, exported statusTone/isCommandTool/commandText/normalizeToolToken from the shared package, and replaced message-web/remote-web ToolBlock files with thin host adapters that preserve the original module API for ProcessGroup imports.",
+        "artifacts": [
+          "../cordcode-ios/shared-message-renderer/src/components/blocks/ToolBlock.tsx",
+          "../cordcode-ios/shared-message-renderer/src/index.ts",
+          "../cordcode-ios/message-web/src/components/blocks/ToolBlock.tsx",
+          "../cordcode-ios/remote-web/src/renderer/components/blocks/ToolBlock.tsx"
+        ],
+        "checked_at": "2026-07-03T15:06:34Z"
+      }
+    },
+    {
+      "id": "batch-c3-toolblock-shared-migration-tests",
+      "title": "Batch C3 ToolBlock shared migration tests",
+      "description": "Run shared package tests and targeted ToolBlock Vitest coverage in message-web and remote-web after migration.",
+      "status": "done",
+      "phase": "batch-c",
+      "kind": "tests",
+      "depends_on": [
+        "batch-c3-toolblock-shared-migration-impl"
+      ],
+      "source": "docs/2026-07-03-web-renderer-shared-package-implementation-plan.md Section 5 C3",
+      "notes": "C3 only; NarrativeBlock and ReasoningBlock remain app-local.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Shared package typecheck/test passed with ToolBlock coverage; message-web and remote-web ToolBlock wrapper Vitest commands passed; message-web App-level filtered tests for permission/tool blocks/DiffViewer passed.",
+        "artifacts": [
+          "cmd:(cd ../cordcode-ios/shared-message-renderer && npm run typecheck && npm run test)",
+          "cmd:(cd ../cordcode-ios/message-web && npm run test:vitest -- ToolBlock)",
+          "cmd:(cd ../cordcode-ios/remote-web && npm run test:vitest -- ToolBlock)",
+          "cmd:(cd ../cordcode-ios/message-web && npm run test:vitest -- src/App.test.tsx -t 'permission|tool blocks|DiffViewer')"
+        ],
+        "checked_at": "2026-07-03T15:06:34Z"
+      }
+    },
+    {
+      "id": "batch-c3-toolblock-shared-migration-regression",
+      "title": "Batch C3 ToolBlock shared migration regression",
+      "description": "Run web typecheck/build, message-web build:ios, iOS build, physical-device install when available, and forbidden import checks.",
+      "status": "done",
+      "phase": "batch-c",
+      "kind": "regression",
+      "depends_on": [
+        "batch-c3-toolblock-shared-migration-tests"
+      ],
+      "source": "docs/2026-07-03-web-renderer-shared-package-implementation-plan.md Section 5 C3",
+      "notes": "C3 only; NarrativeBlock and ReasoningBlock remain app-local.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "message-web and remote-web typecheck/build passed after ToolBlock migration, message-web build:ios passed and updated the tracked MessageWeb JS asset hash, iOS Simulator build passed, physical iPhone install and launch passed, git diff whitespace checks passed, and static checks confirmed shared-message-renderer has no direct bridge/relay/OpenCodeiOS imports while ToolBlock uses host.post for openDetail/permissionAction/questionAction.",
+        "artifacts": [
+          "cmd:(cd ../cordcode-ios/message-web && npm run typecheck && npm run build)",
+          "cmd:(cd ../cordcode-ios/remote-web && npm run typecheck && npm run build)",
+          "cmd:(cd ../cordcode-ios/message-web && npm run build:ios)",
+          "cmd:(cd ../cordcode-ios && xcodebuild -project OpenCodeiOS/CordCode.xcodeproj -scheme CordCode -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max' build)",
+          "cmd:(cd ../cordcode-ios && scripts/run.sh device --device BFC431AC-C205-56B2-BB4D-9EC0C57A0C05)",
+          "cmd:! rg -n -g '!**/node_modules/**' 'postToNative|bridge/native|renderer/bridge|relay/|OpenCodeI?OS' shared-message-renderer/src",
+          "cmd:rg -n -g '!**/node_modules/**' 'host\\.post\\(|permissionAction|questionAction|openDetail' shared-message-renderer/src/components/blocks/ToolBlock.tsx shared-message-renderer/src/host.ts",
+          "cmd:git -C ../cordcode-ios diff --check && git diff --check"
+        ],
+        "checked_at": "2026-07-03T15:08:09Z"
+      }
+    }
+  ]
+}

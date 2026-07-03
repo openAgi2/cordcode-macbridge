@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	ccconfig "github.com/openAgi2/cordcode-macbridge/config"
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
@@ -41,7 +40,7 @@ func loadProviderSeedForAgent(agentType, workDir string) ([]core.ProviderConfig,
 		return nil, "", fmt.Errorf("go-bridge: stat config %q: %w", configPath, err)
 	}
 
-	cfg, err := ccconfig.Load(configPath)
+	cfg, err := loadProviderSeedConfig(configPath)
 	if err != nil {
 		return nil, "", fmt.Errorf("go-bridge: load config %q: %w", configPath, err)
 	}
@@ -65,13 +64,13 @@ func ccConnectConfigPath() string {
 	return filepath.Join(homeDir, ".cc-connect", "config.toml")
 }
 
-func findProviderProject(cfg *ccconfig.Config, agentType, workDir string) *ccconfig.ProjectConfig {
+func findProviderProject(cfg *providerSeedConfig, agentType, workDir string) *providerSeedProject {
 	if cfg == nil {
 		return nil
 	}
 
 	normalizedWorkDir := normalizeProviderPath(workDir)
-	var prefixMatch *ccconfig.ProjectConfig
+	var prefixMatch *providerSeedProject
 	for i := range cfg.Projects {
 		project := &cfg.Projects[i]
 		if project.Agent.Type != agentType {
@@ -91,7 +90,7 @@ func findProviderProject(cfg *ccconfig.Config, agentType, workDir string) *cccon
 	return prefixMatch
 }
 
-func projectMatchesWorkDir(project *ccconfig.ProjectConfig, workDir string) (matches bool, exact bool) {
+func projectMatchesWorkDir(project *providerSeedProject, workDir string) (matches bool, exact bool) {
 	if project == nil || workDir == "" {
 		return false, false
 	}
@@ -150,7 +149,7 @@ func optionString(value any) string {
 	return strings.TrimSpace(text)
 }
 
-func providerConfigsToCore(providers []ccconfig.ProviderConfig) []core.ProviderConfig {
+func providerConfigsToCore(providers []providerSeedProvider) []core.ProviderConfig {
 	result := make([]core.ProviderConfig, 0, len(providers))
 	for _, provider := range providers {
 		mapped := core.ProviderConfig{

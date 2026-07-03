@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openAgi2/cordcode-macbridge/config"
+	"github.com/openAgi2/cordcode-macbridge/agent/providerseedtest"
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
-func skipIfNoConfig(t *testing.T) *config.Config {
+func skipIfNoConfig(t *testing.T) *providerseedtest.Config {
 	t.Helper()
 	if os.Getenv("CC_SKIP_INTEGRATION") == "1" {
 		t.Skip("CC_SKIP_INTEGRATION=1")
@@ -23,30 +23,11 @@ func skipIfNoConfig(t *testing.T) *config.Config {
 	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
 		t.Skipf("config not found at %s", cfgPath)
 	}
-	cfg, err := config.Load(cfgPath)
+	cfg, err := providerseedtest.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("failed to load config: %v", err)
 	}
-	cfg.ResolveProviderRefs()
 	return cfg
-}
-
-func configToCoreProv(p config.ProviderConfig) core.ProviderConfig {
-	cp := core.ProviderConfig{
-		Name:    p.Name,
-		APIKey:  p.APIKey,
-		BaseURL: p.BaseURL,
-		Model:   p.Model,
-		Env:     p.Env,
-	}
-	if p.Codex != nil {
-		cp.CodexWireAPI = p.Codex.WireAPI
-		cp.CodexHTTPHeaders = p.Codex.HTTPHeaders
-	}
-	for _, m := range p.Models {
-		cp.Models = append(cp.Models, core.ModelOption{Name: m.Model})
-	}
-	return cp
 }
 
 func envSliceToMap(env []string) map[string]string {
@@ -61,14 +42,14 @@ func envSliceToMap(env []string) map[string]string {
 	return out
 }
 
-func findCodexProject(cfg *config.Config) (name string, providers []core.ProviderConfig, workDir, codexHome string) {
+func findCodexProject(cfg *providerseedtest.Config) (name string, providers []core.ProviderConfig, workDir, codexHome string) {
 	for i := range cfg.Projects {
 		proj := &cfg.Projects[i]
 		if proj.Agent.Type != "codex" || len(proj.Agent.Providers) == 0 {
 			continue
 		}
 		for _, p := range proj.Agent.Providers {
-			providers = append(providers, configToCoreProv(p))
+			providers = append(providers, p.CoreConfig())
 		}
 		name = proj.Name
 		if wd, ok := proj.Agent.Options["work_dir"].(string); ok {

@@ -24,13 +24,20 @@ xcuserdata/
 # CLAUDE.md is a shared project guide and is tracked with the root live docs.
 AGENTS.md
 
-# docs/ work notes — local-only (plans/specs/reviews/completion reports)
-# All future docs/ additions stay local too. Already-tracked files are
-# unaffected by .gitignore. Re-include docs/protocol/ so the protocol
-# source-of-truth can still be added/updated; project docs (install/
-# release/signing) remain tracked as already-committed.
+# docs/ work notes are local-only by default (plans/specs/reviews/completion
+# reports). Already-tracked files are unaffected. Only explicitly curated
+# governance docs, executable implementation specs, and docs/protocol/ should be
+# re-included below so review-relevant handoff material is not hidden.
 /docs/*
 !/docs/protocol/
+!/docs/engineering-constitution.md
+!/docs/2026-07-03-web-renderer-shared-package-implementation-plan.md
+!/docs/2026-07-03-web-renderer-shared-package-implementation-plan-review.md
+# Per-round completion + audit reports: tracked so the evidence chain is in git
+# (independent audit, completion report, pre-delete audit points, doc-gap audits).
+!/docs/*完成情况*.md
+!/docs/*审计*.md
+!/docs/*audit*.md
 
 # Local-only handoff/exec-plan clutter (untracked; files kept on disk).
 # Precise paths — do NOT ignore the whole handoffs/ or .exec-plan/ trees,
