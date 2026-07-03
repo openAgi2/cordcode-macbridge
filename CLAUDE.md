@@ -99,6 +99,22 @@ tail -n 100 "$HOME/Library/Application Support/CordCode Link/logs/go-bridge.log"
 `8777` 的监听者必须是 `/Applications/CordCodeLink.app` 内嵌的
 `cccode-bridge-runtime`，不能是旧一体仓库或当前源码目录里的开发二进制。
 
+## User-facing communication
+
+面向 owner 汇报进展、阻塞或需要人工验收时，优先让 owner 一眼看懂“现在要做什么”，
+不要把 agent 的内部执行细节、审计状态或排查过程原样抛给用户。
+
+- 先给结论和下一步，再给证据。默认顺序是：已完成什么、卡在哪里、owner 需要做哪几步、
+  owner 做完后应回报什么结果。
+- owner 需要执行的动作必须写成简短、具体、可操作的 checklist；不要写成复杂工程选项，
+  也不要要求 owner 理解 todo id、audit/proven 状态、端口排查、命令输出或协议细节后再决策。
+- 除非选择会改变产品行为、验收标准或用户意图，否则不要让 owner 在实现路径之间做选择；
+  可逆的工程细节由 agent 自行判断并继续推进。
+- 内部细节可以保留在 `Evidence` / `Details` 小节，但只能作为补充。用户不应为了知道下一步
+  要做什么而阅读日志、命令输出、任务队列编号或诊断推理。
+- 优先使用产品语言描述人工动作。例如先说“重启 OpenCode Desktop，并确认 iPhone 上同一个
+  session/history 正常”，再在证据区补充 `active server`、`lsof`、`401` 或 regression id。
+
 ## Deploying relay-server to the VPS
 
 `relay-server/` is the public encrypted relay (`wss://relay.byteseek.uk:8443`, end-to-end
