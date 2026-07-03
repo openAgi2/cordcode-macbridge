@@ -30,7 +30,7 @@ xcodebuild -project MacBridge/CordCodeLink.xcodeproj -scheme CordCodeLink -confi
 
 ```bash
 xcodebuild -project MacBridge/CordCodeLink.xcodeproj -scheme CordCodeLink -configuration Debug -destination 'platform=macOS' -showBuildSettings
-test -x "$BUILT_PRODUCTS_DIR/CCCodeBridge.app/Contents/Resources/cccode-bridge-runtime"
+test -x "$BUILT_PRODUCTS_DIR/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime"
 ```
 
 ## Manual Product Gate

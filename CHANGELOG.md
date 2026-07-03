@@ -8,6 +8,12 @@
 
 ## [Unreleased]
 
+### 2026-07-03 — 活文档对齐当前 CordCode Link 架构
+
+- **修正文档中的旧品牌与命令**：根活文档、安装说明、release checklist 和 README 统一使用 `CordCodeLink.app`、`cordcode-bridge-runtime`、`cordcode-relay` module 与当前 `/opt/cordcode-relay/bin/relay-server` 部署路径，避免照抄旧命令找不到 runtime 或 Relay 备份。
+- **补齐当前运行态说明**：OpenCode 默认 `managed_local`、Codex transcript relay、Claude streaming partial、`transcriptindex` 分页索引、runtime 自愈规则、`hello_ack.currentURLs.locals`、Web QR `/web/` 静态部署和 capability 来源差异已写回活文档。
+- **提升维护可恢复性**：CI、runtime.json `bridgeEpoch`、Relay nginx 要求和 OpenCode 排障路径更新为当前实现，后续 agent 不需要从过程文档反推最新架构。
+
 ### 2026-07-03 — 修复 OpenCode 连续 turn 流式收口抖动
 
 - **OpenCode 连续问答的完成事件按 turn 复位**：OpenCode SSE 订阅在同一 session 进入新 user/running 状态时清除上一轮 completion 去重，避免第二轮开始后 completion 被 session 级状态吞掉。

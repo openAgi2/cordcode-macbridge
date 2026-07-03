@@ -33,7 +33,7 @@ New clients must send:
 ```json
 {
   "type": "hello",
-  "client": {"app": "CCCode iOS", "version": "1.0.0", "deviceId": "dev_..."},
+  "client": {"app": "CordCode iOS", "version": "1.0.0", "deviceId": "dev_..."},
   "protocol": {"name": "cordcode-bridge", "version": 1, "supportedSchemaRevisions": ["2026-05-07"]}
 }
 ```
@@ -181,6 +181,25 @@ movePath
 New fields should be optional and ignored by older clients. New event names should be additive and
 must not reuse an existing event name with incompatible payload semantics.
 
+## Connection URLs
+
+`hello_ack.bridge.currentURLs` may contain:
+
+```ts
+{
+  local: string,       // primary LAN ws:// candidate
+  remote?: string,     // legacy single remote candidate
+  remotes?: string[],  // additional remote candidates
+  locals?: string[]    // additional LAN ws:// candidates
+}
+```
+
+`locals` contains LAN WebSocket candidates other than `local`. It is additive and exists so
+Relay-first pairing can hand iOS both Relay credentials and current LAN candidates. It MUST NOT
+include Tailscale self-signed `wss://100.x` candidates, because those require a separate authenticated
+SPKI pin. Clients should treat `local` as primary, race or fallback across `locals` inside the direct
+phase, and keep Relay as the remote path when available.
+
 ## Session Pagination
 
 There are two separate pagination surfaces:
@@ -215,8 +234,8 @@ Rules:
 
 - Clients MUST NOT parse cursor contents or reuse a cursor across backend/project/directory scopes.
 - `hasMore` is authoritative. Do not infer more pages from `sessions.length == limit`.
-- For OpenCode directory-scoped lists, `hasMore` is true only when the upstream server returned a next cursor. Array-only OpenCode server tracks return `hasMore=false`; product pagination is then limited to the first page for that project.
-- `rootsOnly` remains valid for legacy/non-OpenCode list calls. OpenCode may reject `rootsOnly` combined with `limit` or `cursor` because client-side filtering after an upstream-limited page breaks pagination math.
+- For OpenCode directory-scoped lists, stable upstream servers may still be array-only and omit a cursor. MacBridge fetches a bounded upstream page, then exposes bridge-owned cursor pagination over that in-memory result; `hasMore` reflects the remaining bridge-owned slice for the current request scope.
+- `rootsOnly` remains valid for legacy/non-OpenCode list calls. OpenCode forwards it as the server-side root-session filter; clients must still scope cursors to the same backend/project/directory.
 
 ### Capability
 
@@ -250,7 +269,7 @@ When `paginate` is true and the backend supports it, the response data is:
 
 - No `beforeCursor` returns the newest page.
 - `beforeCursor` returns the page strictly older than the cursor's message.
-- The page is bounded by BOTH `limit` and a per-page wire-byte budget (~4 MiB). If the page would
+- The page is bounded by BOTH `limit` and a per-page wire-byte budget (~256 KiB). If the page would
   exceed the byte budget, the oldest messages in the page are deferred to the next page, so a single
   oversized tool output can never reopen the close-1009 frame on its own.
 - `beforeCursor` pins a message ordinal within a prefix generation. Tail appends to a live session

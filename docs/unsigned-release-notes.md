@@ -1,6 +1,6 @@
 # Unsigned Preview
 
-This prerelease is an Apple Silicon test build of CCCode MacBridge.
+This prerelease is an Apple Silicon test build of CordCode MacBridge.
 
 It is ad-hoc signed for local execution and has not been notarized by Apple.
 macOS will therefore require the user to control-click the app and choose

@@ -13,7 +13,7 @@ iPhone / iPad
   └─ Relay wss://relay... + HPKE
             │
             ▼
-cccode-bridge-runtime
+cordcode-bridge-runtime
   ├─ protocol/auth/pairing/relay: go-bridge/
   ├─ agent interfaces: core/
   ├─ agent implementations: agent/{claudecode,codex,opencode}/
@@ -53,7 +53,7 @@ Relay 是第四条传输路径但复用同一 Bridge RPC/event 语义。Relay se
 ## runtime 生命周期
 
 `MacBridge/MacBridge/Services/RuntimeManager.swift` 启动
-`cccode-bridge-runtime`，读取 stdout bootstrap frame，并交叉验证
+`cordcode-bridge-runtime`，读取 stdout bootstrap frame，并交叉验证
 `runtime.json`、PID、bridge epoch 和 Management URL。
 
 关停顺序为：
@@ -108,11 +108,17 @@ turn 完成时，在线订阅设备收到事件；未在线设备的通知写入
 
 - 每个活跃 session 对应独立 Claude CLI 进程；
 - iOS 发起的 turn 可通过该 session 的 stdout 实时推送；
+- runtime 以 `--include-partial-messages` 启动 Claude CLI，流式 partial 进入 `text_delta` /
+  `message_updated` 路径；
 - Mac 端另一个 Claude 进程发起的外部 turn 不共享事件总线；
 - descriptor 使用 `liveEvents=session_process`，并声明
   `requiresPollingForExternalTurns=true`；
-- 历史来自 `~/.claude/projects` JSONL；支持 rich history、todos、memory、
-  usage、diagnostics 和 session mutation，具体能力由接口断言决定。
+- 历史来自 `~/.claude/projects` JSONL；resume 时用 `historyDraining` 抑制历史重放伪装成新
+  live delta；支持 rich history、todos、memory、usage、diagnostics、session mutation、
+  content chunking 和 permission resolve，具体能力由接口断言决定。
+- 模型/effort 真值优先来自 `~/.claude/settings.json`（`CLAUDE_CONFIG_DIR` 可覆盖）中的
+  `ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS}_MODEL`、`*_MODEL_NAME` 与 effort 设置，mtime 懒重载；
+  iOS 显示名和发送给 Claude 的别名必须按该映射处理。
 
 因此 iOS 不能把“Bridge 有 liveEventStream”误解为“Claude 的所有外部 turn 都会广播”。
 
@@ -136,6 +142,10 @@ thread id。session registry、订阅 key 与 iOS 当前 session 都必须随 re
 默认 stdio app-server 模式下，descriptor 对 Codex 使用 `session_process` 模型，且
 `requiresPollingForExternalTurns=true`，iOS 通过历史变化探测旁观外部 turn。显式共享 URL
 模式下才使用 broadcast/passive event，并可关闭外部 turn 轮询。
+
+Codex 另有 transcript file relay：`get_session_messages` 会并行启动
+`startCodexSessionFileRelay`，从 JSONL 中的 `task_complete` 等持久事件补齐外部/共享服务 session
+的真实完成信号。它使用独立 relay key，不替代标准 agent session relay。
 
 共享 app-server 模式检查：
 
@@ -214,13 +224,28 @@ agent session 等价。
 | `permission_mode` | `ModeSwitcher` |
 | `session_mutation` | rename + archive |
 | `session_delete` | `SessionDeleter` |
+| `content_chunking` | Claude Code 专属，配合 `fetch_content_chunk` |
+| `permission_resolve` | `ToolAuthorizer`，当前不对 OpenCode/Codex 宣告 |
 | `todos` | `TodoProvider`，OpenCode 也显式暴露 |
 | `compression` | Codex app-server |
-| `question_reply` | Codex app-server |
+| `question_reply` | 目前只在 Management API `/internal/agents` 的 `BackendList()` 中出现，不在 `hello_ack.backends[]` 的 `deriveCapabilities()` 中下发 |
 
-`session_pagination` 当前刻意关闭：长会话分页曾造成 newest/backward 振荡；当前由完整历史
-响应配合 8 MiB relay frame 与写 deadline 承载。重新启用必须先解决稳定游标与大内容分片，
-不能只恢复 capability 字符串。
+`session_pagination` 当前仍不向客户端宣告：稳定游标与 transcript-index 分页实现已经存在，
+但 backward paging 曾造成 newest/backward UI 振荡，产品路径仍走完整历史 fallback。重新启用
+不能只恢复 capability 字符串，必须同时证明 iOS 合并/滚动、relay 帧预算和超大内容分片都稳定。
+
+## transcriptindex 与消息分页
+
+`transcriptindex/` 是边界安全的 transcript 页面索引层，被 Claude/Codex 文件历史读取路径使用：
+
+- `core.TranscriptLocator` 让 agent 暴露 session 对应 JSONL 文件；
+- `go-bridge/pagination.go` 用 `MessageCursor{SessionID, Ordinal, Generation}` 做稳定 cursor；
+- 每页同时受 message limit 与约 256 KiB wire-byte budget 约束，避免单页过大导致移动网络或 relay
+  frame 失败；
+- cursor stale 只在前缀被重写/截断/替换时返回，尾部 append 不应使旧 cursor 失效。
+
+当前实现可在客户端显式传 `paginate=true` 时服务页面，但由于 capability 未宣告，生产 iOS 不应默认
+依赖该路径。
 
 ## 事件管线
 
@@ -249,7 +274,7 @@ agent 事件经 `go-bridge/events.go` 统一映射：
 - 公网明文 `ws://` 必须 fail-closed；Tailscale 自签名只允许已配对 SPKI pin。
 - protocol 破坏性变更必须升级 major version 并同步 iOS protocol pack。
 - capability 必须从真实接口推导，不为 UI 显示而声明假阳性。
-- `session_pagination` 在重新设计游标/分片前保持关闭。
+- `session_pagination` 在 UI 合并/滚动、relay 帧预算和超大内容分片重新验收前保持关闭。
 
 ## 测试入口
 

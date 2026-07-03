@@ -10,8 +10,8 @@ lives in a separate repo (`cordcode-ios`).
 | Subsystem | What it is | Product / deployment |
 | --- | --- | --- |
 | `MacBridge/` | macOS SwiftUI app | **CordCode Link** (display name), `org.openagi.cordcode.link` |
-| `go-bridge/` | local WebSocket runtime + Relay crypto (connector side) | embedded in CordCode Link as `cccode-bridge-runtime` |
-| `relay-server/` | public encrypted Relay **server** (independent Go module `cccode-relay`) | deployed on a VPS, **not** part of the Mac app |
+| `go-bridge/` | local WebSocket runtime + Relay crypto (connector side) | embedded in CordCode Link as `cordcode-bridge-runtime` |
+| `relay-server/` | public encrypted Relay **server** (independent Go module `cordcode-relay`) | deployed on a VPS, **not** part of the Mac app |
 | `agent/{claudecode,codex,opencode}/` | per-agent drivers | embedded in CordCode Link |
 | `core/`, `config/`, `transcriptindex/` | shared Go libs | imported across subsystems |
 | `docs/protocol/` | canonical protocol compatibility pack | — |
@@ -48,7 +48,7 @@ After the Xcode build, verify the embedded runtime:
 
 ```bash
 BUILT_PRODUCTS_DIR=$(xcodebuild -project MacBridge/CordCodeLink.xcodeproj -scheme CordCodeLink -configuration Debug -destination 'platform=macOS' -showBuildSettings | awk -F'= ' '/ BUILT_PRODUCTS_DIR = / {print $2; exit}')
-test -x "$BUILT_PRODUCTS_DIR/CordCodeLink.app/Contents/Resources/cccode-bridge-runtime"
+test -x "$BUILT_PRODUCTS_DIR/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime"
 ```
 
 ## Install A Preview Build
