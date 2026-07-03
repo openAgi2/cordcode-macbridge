@@ -14,6 +14,7 @@ import (
 // message exactly once (no duplicates, no gaps) and every page response must
 // stay under the wire-byte budget — the guarantee that defeats close-1009.
 func TestPaginatedMessages_FullBackwardTraversalNoDupesOrGaps(t *testing.T) {
+	requireCodexCLI(t)
 	codexHome := t.TempDir()
 	sessionID := "traversal"
 	const turns = 12 // 24 logical messages

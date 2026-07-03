@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +15,17 @@ import (
 	"github.com/openAgi2/cordcode-macbridge/agent/codex"
 	"github.com/openAgi2/cordcode-macbridge/transcriptindex"
 )
+
+// requireCodexCLI skips the test when the codex CLI is not on PATH. These
+// pagination tests drive the codex agent end-to-end via codex.New, which itself
+// fails fast when the binary is missing; environments without codex installed
+// (some CI slots, dev machines) skip instead of reporting regressions.
+func requireCodexCLI(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("codex"); err != nil {
+		t.Skipf(`codex: "codex" CLI not found in PATH, install with: npm install -g @openai/codex`)
+	}
+}
 
 // writeCodexFixture writes an alternating user/assistant Codex transcript under a
 // temp codex home so the agent's TranscriptPath resolves it. Returns (2*turns)
@@ -92,6 +104,7 @@ func messageTexts(msgs []map[string]interface{}) []string {
 // First page returns the newest slice with cursors; a backward page using the
 // returned oldestCursor returns the next-older slice with no overlap.
 func TestPaginatedMessages_FirstAndBackwardPage(t *testing.T) {
+	requireCodexCLI(t)
 	codexHome := t.TempDir()
 	sessionID := "pagtestabc"
 	writeCodexFixture(t, codexHome, sessionID, 8) // 16 logical messages
@@ -168,6 +181,7 @@ func TestPaginatedMessages_FirstAndBackwardPage(t *testing.T) {
 }
 
 func TestPaginatedMessages_CompactsDuplicateLargeMessageFields(t *testing.T) {
+	requireCodexCLI(t)
 	codexHome := t.TempDir()
 	sessionID := "large-duplicate"
 	sessionDir := filepath.Join(codexHome, "sessions", "2026", "01", "01")
@@ -251,6 +265,7 @@ func TestCompactDuplicateMessageFieldsRemovesExactStepCopy(t *testing.T) {
 // A backward cursor pinned to a prefix that was rewritten must yield cursor_stale,
 // not a silently-stitched page across lineages.
 func TestPaginatedMessages_CursorStaleAfterRewrite(t *testing.T) {
+	requireCodexCLI(t)
 	codexHome := t.TempDir()
 	sessionID := "staletest"
 	path := writeCodexFixture(t, codexHome, sessionID, 8)
@@ -282,6 +297,7 @@ func TestPaginatedMessages_CursorStaleAfterRewrite(t *testing.T) {
 
 // Clients that do not opt into pagination get the legacy full-parse path.
 func TestPaginatedMessages_FallbackWhenNotOptedIn(t *testing.T) {
+	requireCodexCLI(t)
 	codexHome := t.TempDir()
 	sessionID := "fallbacktest"
 	writeCodexFixture(t, codexHome, sessionID, 3) // 6 messages
@@ -326,6 +342,7 @@ func listIDs(data map[string]interface{}) []string {
 // list_sessions pages through sessions newest-first by composite cursor with no
 // duplicates or gaps across pages.
 func TestListSessionsPagination(t *testing.T) {
+	requireCodexCLI(t)
 	codexHome := t.TempDir()
 	sessionsDir := filepath.Join(codexHome, "sessions", "2026", "01", "01")
 	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
@@ -384,6 +401,7 @@ func TestListSessionsPagination(t *testing.T) {
 // A backward cursor stays valid after a continuous tail append (the generation
 // lineage proves ancestry); the client pages older history without a reset.
 func TestPaginatedMessages_CursorSurvivesAppend(t *testing.T) {
+	requireCodexCLI(t)
 	codexHome := t.TempDir()
 	sessionID := "appendtest"
 	writeCodexFixture(t, codexHome, sessionID, 8) // 16 messages
@@ -437,6 +455,7 @@ func TestPaginatedMessages_CursorSurvivesAppend(t *testing.T) {
 
 // List cursor tie-breaks by sessionID ASC when two sessions share updatedAtMillis.
 func TestListSessionsPagination_TieBreakByID(t *testing.T) {
+	requireCodexCLI(t)
 	codexHome := t.TempDir()
 	sessionsDir := filepath.Join(codexHome, "sessions", "2026", "01", "01")
 	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
@@ -482,6 +501,7 @@ func TestListSessionsPagination_TieBreakByID(t *testing.T) {
 // A cursor carrying an unsupported version must yield cursor_stale, not a
 // silently-stitched page.
 func TestPaginatedMessages_CursorVersionMismatch(t *testing.T) {
+	requireCodexCLI(t)
 	codexHome := t.TempDir()
 	sessionID := "vertest"
 	writeCodexFixture(t, codexHome, sessionID, 4)
