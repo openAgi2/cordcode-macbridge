@@ -33,7 +33,7 @@
     "last_generated_at": "2026-07-03T02:17:47Z",
     "based_on_queue_hash": "d11840878a56b389d2e2acc26887035dd062843afb5a59ab2137ab70c14147e1"
   },
-  "updated_at": "2026-07-03T02:17:47Z",
+  "updated_at": "2026-07-03T08:08:34Z",
   "todos": [
     {
       "id": "phase0-cli-facts-impl",
@@ -987,5 +987,11 @@
         "checked_at": "2026-07-03T02:08:57Z"
       }
     }
-  ]
+  ],
+  "closed_at": "2026-07-03T08:08:34Z",
+  "closure": {
+    "status": "done",
+    "basis": "39/39 todos proven done + end-to-end real iOS traffic evidence (get_session_messages entries=10, response_bytes=6981, error empty) + owner manual confirmation of iOS OpenCode mode",
+    "acceptance": "plan §14 双路径验收以真实 iOS 流量证据 + owner 人工确认正式关闭；未做自动化真机留档"
+  }
 }
