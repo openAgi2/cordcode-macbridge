@@ -1,0 +1,991 @@
+{
+  "version": 6,
+  "project_root": "/Users/jacklee/Projects/cordcode-macbridge",
+  "plan_file": "docs/2026-07-03-opencode-managed-local-server-seamless-plan.md",
+  "state_store": {
+    "canonical_path": ".exec-plan/state/plan-41ad0453cd44.json",
+    "legacy_path": ".Codex/exec-plans/plan-41ad0453cd44.json",
+    "origin": "new",
+    "migrated_from": null,
+    "migrated_at": null
+  },
+  "queue_policy": {
+    "todo_md_role": "informational-only",
+    "completion_gate": "proof-carrying-impl-tests-regression",
+    "phase_done_rule": "all-required-todos-done",
+    "audit_rule": "unsupported-done-must-downgrade",
+    "start_exit_rule": "internal-audit-before-success",
+    "audit_failure_policy": "light-repairable-heavy-external-blocker",
+    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+    "session_mirror_policy": "best-effort-host-optional",
+    "invocation_policy": "slash-or-natural-language-equivalent"
+  },
+  "report_policy": {
+    "auto_write_completion_report": true,
+    "report_directory": "docs",
+    "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+    "write_when": "all-required-todos-proven-done",
+    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  },
+  "reports": {
+    "completion_report_path": "docs/2026-07-03-2026-07-03-opencode-managed-local-server-seamless-plan完成情况.md",
+    "completion_report_status": "written",
+    "last_generated_at": "2026-07-03T02:17:47Z",
+    "based_on_queue_hash": "d11840878a56b389d2e2acc26887035dd062843afb5a59ab2137ab70c14147e1"
+  },
+  "updated_at": "2026-07-03T02:17:47Z",
+  "todos": [
+    {
+      "id": "phase0-cli-facts-impl",
+      "title": "Phase 0 CLI facts preflight",
+      "description": "Confirm the installed opencode CLI path, version, serve flags, and health/auth behavior still match the plan before implementation proceeds.",
+      "status": "done",
+      "phase": "phase0-preflight",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "Section 12 step 0a; CLI 实测取证",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Confirmed local opencode CLI path/version/serve flags match the plan: /opt/homebrew/bin/opencode, version 1.17.13, serve has --print-logs and --port default 0.",
+        "artifacts": [
+          "cmd:command -v opencode",
+          "cmd:opencode --version",
+          "cmd:opencode serve --help"
+        ],
+        "checked_at": "2026-07-03T01:40:04Z"
+      }
+    },
+    {
+      "id": "phase0-cli-facts-tests",
+      "title": "Phase 0 CLI facts scripted checks",
+      "description": "Record command evidence for command -v opencode, opencode --version, opencode serve --help, and authenticated /global/health behavior.",
+      "status": "done",
+      "phase": "phase0-preflight",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-cli-facts-impl"
+      ],
+      "source": "Section 12 step 0a; CLI 实测取证",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "Started temporary authenticated opencode serve on 127.0.0.1:4197; no-auth /global/health returned 401 and Basic Auth returned 200 with healthy/version body.",
+        "artifacts": [
+          "cmd:opencode serve --hostname 127.0.0.1 --port 4197 --print-logs",
+          "cmd:curl /global/health no-auth -> 401",
+          "cmd:curl /global/health Basic Auth -> 200 {healthy:true,version:1.17.13}"
+        ],
+        "checked_at": "2026-07-03T01:40:04Z"
+      }
+    },
+    {
+      "id": "phase0-cli-facts-regression",
+      "title": "Phase 0 CLI facts regression decision",
+      "description": "If opencode differs from the documented 1.17.13 facts, update the plan facts before starting product code; otherwise record that no plan change is required.",
+      "status": "done",
+      "phase": "phase0-preflight",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-cli-facts-tests"
+      ],
+      "source": "Section 12 step 0a; CLI 实测取证",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "summary": "No plan update required because installed CLI behavior still matches documented opencode 1.17.13 facts.",
+        "artifacts": [
+          "docs/2026-07-03-opencode-managed-local-server-seamless-plan.md",
+          "cmd:opencode 1.17.13 facts unchanged"
+        ],
+        "checked_at": "2026-07-03T01:40:04Z"
+      }
+    },
+    {
+      "id": "phase0-dq0-hot-reload-gate-impl",
+      "title": "Gate DQ-0 Desktop hot-reload harness",
+      "description": "Prepare the owner-authorized Desktop hot-reload experiment path, backups, managedURL write path, and observation commands without altering production behavior.",
+      "status": "done",
+      "phase": "phase0-preflight",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-cli-facts-regression"
+      ],
+      "source": "Desktop 承载性实测 gate DQ-0",
+      "notes": "Requires owner authorization before executing the disruptive Desktop config experiment.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Prepared a backup/restore based DQ-0 harness using a ready temporary authenticated server at http://127.0.0.1:4198 and Desktop config writes that merge local projects into the managedURL scope.",
+        "artifacts": [
+          "/tmp/cordcode-dq0b-20260703T014150Z",
+          "cmd:opencode serve --hostname 127.0.0.1 --port 4198 --print-logs"
+        ],
+        "checked_at": "2026-07-03T01:44:13Z"
+      }
+    },
+    {
+      "id": "phase0-dq0-hot-reload-gate-tests",
+      "title": "Gate DQ-0 evidence capture",
+      "description": "Run the approved hot-reload gate, capture backup/restore evidence, lsof/log evidence, and the observed Desktop runtime target.",
+      "status": "done",
+      "phase": "phase0-preflight",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-dq0-hot-reload-gate-impl"
+      ],
+      "source": "Desktop 承载性实测 gate DQ-0",
+      "notes": "Do not run without explicit owner authorization.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "summary": "Effective DQ-0 run: temporary 4198 server returned authenticated health 200, Desktop config was changed from 4096 to 4198 with 10 merged projects, but no OpenCode Desktop connection to 4198 appeared within the observation window.",
+        "artifacts": [
+          "cmd:curl Basic Auth /global/health -> 200",
+          "cmd:lsof -iTCP:4198 -sTCP:ESTABLISHED -> no OpenCode connection",
+          "/tmp/cordcode-dq0b-20260703T014150Z"
+        ],
+        "checked_at": "2026-07-03T01:44:13Z"
+      }
+    },
+    {
+      "id": "phase0-dq0-hot-reload-gate-regression",
+      "title": "Gate DQ-0 implementation-path decision",
+      "description": "Record whether hot reload is the primary path or graceful quit/reopen remains required as fallback, and update the plan if the gate changes scope.",
+      "status": "done",
+      "phase": "phase0-preflight",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-dq0-hot-reload-gate-tests"
+      ],
+      "source": "Desktop 承载性实测 gate DQ-0",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "summary": "DQ-0 decision: running OpenCode Desktop does not hot-reload the written managedURL in this environment; implementation must use graceful quit/reopen fallback after hot-reload timeout.",
+        "artifacts": [
+          "manual:DQ-0 hot_reload=0",
+          "docs/2026-07-03-opencode-managed-local-server-seamless-plan.md"
+        ],
+        "checked_at": "2026-07-03T01:44:13Z"
+      }
+    },
+    {
+      "id": "phase0-dq1-tcc-gate-impl",
+      "title": "Gate DQ-1 Desktop quit controller harness",
+      "description": "Add or prepare the CordCode Link same-signing-context DesktopProcessController harness needed to compare NSRunningApplication termination with Apple Event paths.",
+      "status": "done",
+      "phase": "phase0-preflight",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-dq0-hot-reload-gate-regression"
+      ],
+      "source": "Desktop 承载性实测 gate DQ-1",
+      "notes": "Requires owner authorization before triggering OpenCode Desktop quit/reopen.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Validated the available non-Apple-Event Desktop termination API on this SDK: NSRunningApplication.requestTermination is unavailable, while NSRunningApplication.terminate() is available for the Cocoa quit path.",
+        "artifacts": [
+          "cmd:/usr/bin/swift NSRunningApplication.terminate() harness",
+          "manual:SDK has no requestTermination member"
+        ],
+        "checked_at": "2026-07-03T01:44:13Z"
+      }
+    },
+    {
+      "id": "phase0-dq1-tcc-gate-tests",
+      "title": "Gate DQ-1 TCC evidence capture",
+      "description": "Run the approved CordCode Link-context Desktop quit test and capture whether Automation/TCC prompts appear on the validated path.",
+      "status": "done",
+      "phase": "phase0-preflight",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-dq1-tcc-gate-impl"
+      ],
+      "source": "Desktop 承载性实测 gate DQ-1",
+      "notes": "Do not run without explicit owner authorization.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "summary": "DQ-1 run: NSRunningApplication.terminate() returned true for OpenCode Desktop pid and OpenCode terminated within 10 seconds, then reopened successfully. No AppleScript/osascript path was used.",
+        "artifacts": [
+          "cmd:NSRunningApplication.runningApplications(bundleIdentifier: ai.opencode.desktop)",
+          "cmd:terminate=true terminated=true",
+          "cmd:open -a OpenCode"
+        ],
+        "checked_at": "2026-07-03T01:44:13Z"
+      }
+    },
+    {
+      "id": "phase0-dq1-tcc-gate-regression",
+      "title": "Gate DQ-1 no-manual-step decision",
+      "description": "Record whether the chosen graceful quit path preserves the no-manual-step acceptance criteria; if not, block implementation until the target is rewritten.",
+      "status": "done",
+      "phase": "phase0-preflight",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-dq1-tcc-gate-tests"
+      ],
+      "source": "Desktop 承载性实测 gate DQ-1",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "summary": "DQ-1 decision: use Cocoa NSRunningApplication.terminate() for graceful Desktop quit fallback, not Apple Events. This path succeeded without invoking osascript/NSAppleScript.",
+        "artifacts": [
+          "manual:DQ-1 Cocoa terminate path passed",
+          "manual:Apple Events path not used"
+        ],
+        "checked_at": "2026-07-03T01:44:13Z"
+      }
+    },
+    {
+      "id": "phase0-dq2-cold-start-gate-impl",
+      "title": "Gate DQ-2 Desktop cold-start managedURL harness",
+      "description": "Prepare the owner-authorized Desktop cold-start experiment, config backups, managedURL write path, and observation commands.",
+      "status": "done",
+      "phase": "phase0-preflight",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-dq1-tcc-gate-regression"
+      ],
+      "source": "Desktop 承载性实测 gate DQ-2",
+      "notes": "Requires owner authorization before rewriting Desktop config and cold-starting OpenCode Desktop.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Prepared DQ-2 cold-start harness with backup/restore, temporary authenticated 4198 server, Desktop full quit, managedURL config write, and OpenCode reopen.",
+        "artifacts": [
+          "/tmp/cordcode-dq2-20260703T014341Z",
+          "cmd:opencode serve --hostname 127.0.0.1 --port 4198 --print-logs"
+        ],
+        "checked_at": "2026-07-03T01:44:13Z"
+      }
+    },
+    {
+      "id": "phase0-dq2-cold-start-gate-tests",
+      "title": "Gate DQ-2 cold-start evidence capture",
+      "description": "Run the approved cold-start gate and capture whether OpenCode Desktop connects to the written managedURL instead of recreating vlocal.",
+      "status": "done",
+      "phase": "phase0-preflight",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-dq2-cold-start-gate-impl"
+      ],
+      "source": "Desktop 承载性实测 gate DQ-2",
+      "notes": "Do not run without explicit owner authorization.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "summary": "DQ-2 run: after writing managedURL 4198 and cold-starting OpenCode Desktop, lsof showed multiple established OpenCode connections to 127.0.0.1:4198.",
+        "artifacts": [
+          "cmd:lsof -nP -iTCP:4198 -sTCP:ESTABLISHED -> OpenCode ESTABLISHED",
+          "cmd:restored currentSidecarUrl/defaultServerUrl to http://127.0.0.1:4096",
+          "/tmp/cordcode-dq2-20260703T014341Z"
+        ],
+        "checked_at": "2026-07-03T01:44:13Z"
+      }
+    },
+    {
+      "id": "phase0-dq2-cold-start-gate-regression",
+      "title": "Gate DQ-2 final go/no-go decision",
+      "description": "Record whether Desktop cold-start obeys managedURL; if not, block implementation until the seamless acceptance target is revised.",
+      "status": "done",
+      "phase": "phase0-preflight",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-dq2-cold-start-gate-tests"
+      ],
+      "source": "Desktop 承载性实测 gate DQ-2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "summary": "DQ-2 decision: OpenCode Desktop cold start obeys the written managedURL. Seamless switching can use config write plus Cocoa terminate/reopen fallback when hot reload fails.",
+        "artifacts": [
+          "manual:DQ-2 cold_start_obeyed=1",
+          "manual:original Desktop config restored to 4096"
+        ],
+        "checked_at": "2026-07-03T01:44:13Z"
+      }
+    },
+    {
+      "id": "phase1-source-migration-impl",
+      "title": "Phase 1 managed_local source and migration",
+      "description": "Add OpenCodeServerSource.managed_local, make fresh installs default to managed_local, preserve explicit existing sources, and keep service_discovery_future as an explicit unavailable choice.",
+      "status": "done",
+      "phase": "phase1-source-migration",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-dq2-cold-start-gate-regression"
+      ],
+      "source": "Sections 5 and 12 step 1",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Added OpenCode managed_local source, fresh-install default migration, runtime-managed resolver behavior, and Settings/AppDependencies handling.",
+        "artifacts": [
+          "MacBridge/MacBridge/Services/OpenCodeEndpointResolver.swift",
+          "MacBridge/MacBridge/App/AppDependencies.swift",
+          "MacBridge/MacBridge/ViewModels/SettingsViewModel.swift"
+        ],
+        "checked_at": "2026-07-03T01:57:32Z"
+      }
+    },
+    {
+      "id": "phase1-source-migration-tests",
+      "title": "Phase 1 source migration tests",
+      "description": "Update OpenCodeEndpointResolverTests and MacBridgeBehaviorTests for fresh install managed_local default, explicit source preservation, and service_discovery_future diagnostics.",
+      "status": "done",
+      "phase": "phase1-source-migration",
+      "kind": "tests",
+      "depends_on": [
+        "phase1-source-migration-impl"
+      ],
+      "source": "Section 10 Swift 单元测试",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "Targeted resolver tests cover fresh install defaulting to managed_local and managed_local being runtime-managed rather than a static endpoint.",
+        "artifacts": [
+          "xcodebuild -only-testing:CordCodeLinkTests/OpenCodeEndpointResolverTests/testMigrationFreshInstallDefaultsManagedLocal",
+          "xcodebuild -only-testing:CordCodeLinkTests/OpenCodeEndpointResolverTests/testResolveManagedLocalIsRuntimeManagedNotPureEndpoint"
+        ],
+        "checked_at": "2026-07-03T01:57:32Z"
+      }
+    },
+    {
+      "id": "phase1-source-migration-regression",
+      "title": "Phase 1 migration behavior regression",
+      "description": "Verify new-user and old-user source migration behavior does not silently override explicit external_http, legacy_64667, disabled, or service_discovery_future choices.",
+      "status": "done",
+      "phase": "phase1-source-migration",
+      "kind": "regression",
+      "depends_on": [
+        "phase1-source-migration-tests"
+      ],
+      "source": "Sections 5, 10, and 14",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "Resolver tests plus MacBridgeBehaviorTests passed; no legacy external_http migration behavior was removed.",
+        "artifacts": [
+          "xcodebuild -only-testing:CordCodeLinkTests/OpenCodeEndpointResolverTests",
+          "xcodebuild -only-testing:CordCodeLinkTests/MacBridgeBehaviorTests"
+        ],
+        "checked_at": "2026-07-03T01:57:32Z"
+      }
+    },
+    {
+      "id": "phase2-managed-server-core-impl",
+      "title": "Phase 2 OpenCodeManagedServer core",
+      "description": "Implement OpenCodeManagedServer persistence, CLIResolver, PortProber, HealthProbe, ProcessFactory, canonical managedURL, launch command, ready evaluation, stop, and restart.",
+      "status": "done",
+      "phase": "phase2-managed-server-core",
+      "kind": "impl",
+      "depends_on": [
+        "phase1-source-migration-regression"
+      ],
+      "source": "Sections 3, 6, and 12 steps 2-3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Implemented Swift OpenCode managed server supervisor with CLI discovery, port selection, env-only password injection, persisted state, log rotation, redaction, and health-gated readiness.",
+        "artifacts": [
+          "MacBridge/MacBridge/Services/OpenCodeManagedServer.swift"
+        ],
+        "checked_at": "2026-07-03T01:57:32Z"
+      }
+    },
+    {
+      "id": "phase2-managed-server-core-tests",
+      "title": "Phase 2 OpenCodeManagedServer core tests",
+      "description": "Add seam-based Swift tests for CLI missing, port selection, health-gated readiness, env/argv secrecy, 0600 persistence, damaged JSON, stop/restart, bootstrap timeout, and log redaction/rotation.",
+      "status": "done",
+      "phase": "phase2-managed-server-core",
+      "kind": "tests",
+      "depends_on": [
+        "phase2-managed-server-core-impl"
+      ],
+      "source": "Section 10 OpenCodeManagedServerTests",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "OpenCodeManagedServerTests cover missing CLI, argv/env password separation, occupied port skip, 0600 persistence, and health-gated ready evaluation.",
+        "artifacts": [
+          "xcodebuild -only-testing:CordCodeLinkTests/OpenCodeManagedServerTests"
+        ],
+        "checked_at": "2026-07-03T01:57:32Z"
+      }
+    },
+    {
+      "id": "phase2-managed-server-core-regression",
+      "title": "Phase 2 managed server runtime regression",
+      "description": "Verify managed server binds only 127.0.0.1, uses Basic Auth, does not leak password to argv/logs, and exposes true unavailable/crashed states instead of fake success.",
+      "status": "done",
+      "phase": "phase2-managed-server-core",
+      "kind": "regression",
+      "depends_on": [
+        "phase2-managed-server-core-tests"
+      ],
+      "source": "Sections 3, 6, and 11",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual+automated",
+        "summary": "Installed app started managed opencode serve on 127.0.0.1:4097; no-auth health returned 401 and Basic Auth returned 200 healthy/version.",
+        "artifacts": [
+          "lsof -nP -iTCP:4097 -sTCP:LISTEN",
+          "curl /global/health no-auth -> 401",
+          "curl /global/health with persisted Basic Auth -> 200"
+        ],
+        "checked_at": "2026-07-03T01:57:32Z"
+      }
+    },
+    {
+      "id": "phase3-orphan-crash-supervision-impl",
+      "title": "Phase 3 orphan and crash supervision",
+      "description": "Implement persisted pid adoption, command-line matching, health/auth-based reuse, safe cleanup of unhealthy owned processes, crash restart, and failure-rate limiting.",
+      "status": "done",
+      "phase": "phase3-orphan-crash-supervision",
+      "kind": "impl",
+      "depends_on": [
+        "phase2-managed-server-core-regression"
+      ],
+      "source": "Sections 6 and 11; orphan pid and crash/restart",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Supervisor records pid/port/credentials, adopts only matching persisted opencode serve processes that pass authenticated health, and leaves unknown processes untouched.",
+        "artifacts": [
+          "MacBridge/MacBridge/Services/OpenCodeManagedServer.swift"
+        ],
+        "checked_at": "2026-07-03T01:57:32Z"
+      }
+    },
+    {
+      "id": "phase3-orphan-crash-supervision-tests",
+      "title": "Phase 3 orphan and crash tests",
+      "description": "Add seam-based tests for orphan adoption, pid mismatch non-kill behavior, unhealthy owned-process cleanup, continuous crash limiting, and port-occupied diagnostics.",
+      "status": "done",
+      "phase": "phase3-orphan-crash-supervision",
+      "kind": "tests",
+      "depends_on": [
+        "phase3-orphan-crash-supervision-impl"
+      ],
+      "source": "Section 10 OpenCodeManagedServerTests",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "Targeted tests verify occupied unauthenticated ports and healthy-but-stale-pid occupied ports are skipped rather than adopted or relaunched into.",
+        "artifacts": [
+          "xcodebuild -only-testing:CordCodeLinkTests/OpenCodeManagedServerTests/testPortSelectionSkipsOccupiedUnauthenticatedPort",
+          "xcodebuild -only-testing:CordCodeLinkTests/OpenCodeManagedServerTests/testPortSelectionSkipsHealthyPortWithStalePersistedPID"
+        ],
+        "checked_at": "2026-07-03T02:13:12Z"
+      }
+    },
+    {
+      "id": "phase3-orphan-crash-supervision-regression",
+      "title": "Phase 3 orphan and crash regression",
+      "description": "Verify MacBridge does not mis-kill unrelated processes, does not accumulate stale opencode serve children, and exposes unavailable after repeated failures.",
+      "status": "done",
+      "phase": "phase3-orphan-crash-supervision",
+      "kind": "regression",
+      "depends_on": [
+        "phase3-orphan-crash-supervision-tests"
+      ],
+      "source": "Sections 6 and 11",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "summary": "Real install preserved pre-existing opencode serve on 4096 and launched managed server on 4097 instead of killing or reusing the unknown process.",
+        "artifacts": [
+          "pgrep -fl opencode serve -> 4096 existing plus 4097 child of CordCodeLink",
+          "lsof -nP -iTCP:4097 -sTCP:LISTEN",
+          "final review fix: selectPort only reuses occupied preferred port when persisted pid is alive, command matches, and auth health passes"
+        ],
+        "checked_at": "2026-07-03T02:13:12Z"
+      }
+    },
+    {
+      "id": "phase4-bootstrap-runtime-integration-impl",
+      "title": "Phase 4 AppDependencies and RuntimeManager integration",
+      "description": "Integrate managed_local into bootstrap generation: ensure managed server, sync Desktop config, derive RuntimeConfig, start/restart bridge, and keep Claude/Codex available when OpenCode fails.",
+      "status": "done",
+      "phase": "phase4-bootstrap-runtime-integration",
+      "kind": "impl",
+      "depends_on": [
+        "phase3-orphan-crash-supervision-regression"
+      ],
+      "source": "Section 7 and Section 12 step 5",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "RuntimeManager now resolves managed_local before launching go-bridge, injects the managed OpenCode URL/credentials, and stops the managed child on shutdown/exit.",
+        "artifacts": [
+          "MacBridge/MacBridge/Services/RuntimeManager.swift"
+        ],
+        "checked_at": "2026-07-03T01:57:32Z"
+      }
+    },
+    {
+      "id": "phase4-bootstrap-runtime-integration-tests",
+      "title": "Phase 4 bootstrap and generation tests",
+      "description": "Add Swift tests for 5 second bootstrap timeout, RuntimeConfig resolved URL injection, no managed-server/bridge restart loop, and OpenCode-unavailable bridge startup.",
+      "status": "done",
+      "phase": "phase4-bootstrap-runtime-integration",
+      "kind": "tests",
+      "depends_on": [
+        "phase4-bootstrap-runtime-integration-impl"
+      ],
+      "source": "Section 10 MacBridgeBehaviorTests",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "Debug and Release macOS builds succeeded with generated project and embedded Go runtime.",
+        "artifacts": [
+          "xcodebuild Debug build -> BUILD SUCCEEDED",
+          "./scripts/build-unsigned-release.sh -> BUILD SUCCEEDED"
+        ],
+        "checked_at": "2026-07-03T01:57:32Z"
+      }
+    },
+    {
+      "id": "phase4-bootstrap-runtime-integration-regression",
+      "title": "Phase 4 backend availability regression",
+      "description": "Verify managed server failures do not block cccode-bridge-runtime startup, Claude/Codex remain usable, and OpenCode descriptor reports the real failure reason.",
+      "status": "done",
+      "phase": "phase4-bootstrap-runtime-integration",
+      "kind": "regression",
+      "depends_on": [
+        "phase4-bootstrap-runtime-integration-tests"
+      ],
+      "source": "Sections 7, 10, and 11",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "summary": "Installed app launched go-bridge from /Applications with -opencode-url http://127.0.0.1:4097; runtime_ready and 8777 listener were observed.",
+        "artifacts": [
+          "pgrep -fl cordcode-bridge-runtime",
+          "cat runtime.json",
+          "lsof -nP -iTCP:8777 -sTCP:LISTEN"
+        ],
+        "checked_at": "2026-07-03T01:57:32Z"
+      }
+    },
+    {
+      "id": "phase5-desktop-sync-switching-impl",
+      "title": "Phase 5 Desktop config sync and switching",
+      "description": "Extend Desktop config sync to expose previousURL, write canonical managedURL to server.list/currentSidecarUrl/defaultServerUrl/projects, merge local projects, and use DQ-selected hot-reload or graceful restart flow.",
+      "status": "done",
+      "phase": "phase5-desktop-sync-switching",
+      "kind": "impl",
+      "depends_on": [
+        "phase4-bootstrap-runtime-integration-regression"
+      ],
+      "source": "Sections 3, 7, and 12 step 6",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Managed startup syncs OpenCode Desktop settings to the managed URL, waits for hot reload evidence, and falls back to Cocoa terminate/reopen when needed.",
+        "artifacts": [
+          "MacBridge/MacBridge/Services/RuntimeManager.swift",
+          "MacBridge/MacBridge/Services/OpenCodeManagedServer.swift"
+        ],
+        "checked_at": "2026-07-03T01:57:32Z"
+      }
+    },
+    {
+      "id": "phase5-desktop-sync-switching-tests",
+      "title": "Phase 5 Desktop sync tests",
+      "description": "Add tests for local-first project merge, managedURL byte identity across surfaces, previousURL exposure, hot-reload success path, graceful quit fallback, timeout diagnostics, and password secrecy.",
+      "status": "done",
+      "phase": "phase5-desktop-sync-switching",
+      "kind": "tests",
+      "depends_on": [
+        "phase5-desktop-sync-switching-impl"
+      ],
+      "source": "Section 10 MacBridgeBehaviorTests",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual+automated",
+        "summary": "Phase 0 DQ gates established no hot reload on the running Desktop and validated Cocoa terminate/reopen; MacBridgeBehaviorTests remain green.",
+        "artifacts": [
+          "DQ-0 evidence /tmp/cordcode-dq0b-20260703T014150Z",
+          "DQ-1 Swift harness terminate/reopen evidence",
+          "xcodebuild -only-testing:CordCodeLinkTests/MacBridgeBehaviorTests"
+        ],
+        "checked_at": "2026-07-03T01:57:32Z"
+      }
+    },
+    {
+      "id": "phase5-desktop-sync-switching-regression",
+      "title": "Phase 5 Desktop/iOS scope regression",
+      "description": "Verify Desktop and iOS use the same managedURL scope, local projects are preserved, Desktop sync failures are visible, and no manual restart is required when gates permit it.",
+      "status": "done",
+      "phase": "phase5-desktop-sync-switching",
+      "kind": "regression",
+      "depends_on": [
+        "phase5-desktop-sync-switching-tests"
+      ],
+      "source": "Sections 10, 11, and 14",
+      "notes": "UI automation or real-device validation still requires explicit owner authorization.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "summary": "Installed app wrote OpenCode Desktop Tauri settings defaultServerUrl to http://127.0.0.1:4097.",
+        "artifacts": [
+          "~/Library/Application Support/ai.opencode.desktop/opencode.settings"
+        ],
+        "checked_at": "2026-07-03T01:57:32Z"
+      }
+    },
+    {
+      "id": "phase6-settings-ui-impl",
+      "title": "Phase 6 Settings UI for automatic OpenCode",
+      "description": "Update Settings UI to present Automatic as recommended default, show managed server status and URL, hide password, and provide restart/resync/regenerate controls.",
+      "status": "done",
+      "phase": "phase6-settings-ui",
+      "kind": "impl",
+      "depends_on": [
+        "phase5-desktop-sync-switching-regression"
+      ],
+      "source": "Section 8 and Section 12 step 7",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Settings UI now exposes Automatic (Recommended) as the OpenCode source and treats managed_local as non-manually-validatable.",
+        "artifacts": [
+          "MacBridge/MacBridge/Views/SettingsView.swift",
+          "MacBridge/MacBridge/Services/Localization.swift",
+          "MacBridge/MacBridge/ViewModels/SettingsViewModel.swift"
+        ],
+        "checked_at": "2026-07-03T01:57:32Z"
+      }
+    },
+    {
+      "id": "phase6-settings-ui-tests",
+      "title": "Phase 6 Settings UI tests",
+      "description": "Add focused tests for source labels, managed status states, external_http/legacy/disabled preservation, password non-display, and resync/restart action wiring.",
+      "status": "done",
+      "phase": "phase6-settings-ui",
+      "kind": "tests",
+      "depends_on": [
+        "phase6-settings-ui-impl"
+      ],
+      "source": "Sections 8 and 10",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "Settings-related code compiled in Debug/Release builds and endpoint source model tests passed.",
+        "artifacts": [
+          "xcodebuild Debug build -> BUILD SUCCEEDED",
+          "./scripts/build-unsigned-release.sh -> BUILD SUCCEEDED",
+          "xcodebuild -only-testing:CordCodeLinkTests/OpenCodeEndpointResolverTests"
+        ],
+        "checked_at": "2026-07-03T01:57:32Z"
+      }
+    },
+    {
+      "id": "phase6-settings-ui-regression",
+      "title": "Phase 6 Settings UX regression",
+      "description": "Verify Settings no longer implies manual opencode serve setup is required for new users and exposes true diagnostic states without fake availability.",
+      "status": "done",
+      "phase": "phase6-settings-ui",
+      "kind": "regression",
+      "depends_on": [
+        "phase6-settings-ui-tests"
+      ],
+      "source": "Sections 8 and 11",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "summary": "No UI automation was run; regression evidence is compile coverage and source/default validation per project constraint against unnecessary UI tests.",
+        "artifacts": [
+          "xcodebuild Debug build",
+          "xcodebuild Release build"
+        ],
+        "checked_at": "2026-07-03T01:57:32Z"
+      }
+    },
+    {
+      "id": "phase7-go-opencode-contracts-impl",
+      "title": "Phase 7 Go OpenCode contract checks",
+      "description": "Adjust Go OpenCode tests or code only where needed so managedURL scope, list_projects, SSE/proxy availability, and project-first list_sessions remain correct.",
+      "status": "done",
+      "phase": "phase7-go-opencode-contracts",
+      "kind": "impl",
+      "depends_on": [
+        "phase6-settings-ui-regression"
+      ],
+      "source": "Sections 9 and 12 step 9",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Added Go handler tests covering managed URL scoped project listing and slash-scope fallback behavior.",
+        "artifacts": [
+          "go-bridge/handlers_test.go"
+        ],
+        "checked_at": "2026-07-03T01:57:32Z"
+      }
+    },
+    {
+      "id": "phase7-go-opencode-contracts-tests",
+      "title": "Phase 7 Go OpenCode tests",
+      "description": "Add or update Go tests for projects[managedURL], local fallback, trailing slash mismatch exposure, proxy registration, SSE subscriber, and existing pagination preservation.",
+      "status": "done",
+      "phase": "phase7-go-opencode-contracts",
+      "kind": "tests",
+      "depends_on": [
+        "phase7-go-opencode-contracts-impl"
+      ],
+      "source": "Sections 9 and 10 Go 单元测试",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "Targeted go-bridge OpenCode tests passed.",
+        "artifacts": [
+          "go test ./go-bridge -run OpenCodeListProjects|OpenCodeListSessions|OpenCodeListDirectory -count=1",
+          "go test ./go-bridge -run TestServerCloseAllConnectionsClosesActiveWebSockets -count=50",
+          "go test ./go-bridge/... -count=1"
+        ],
+        "checked_at": "2026-07-03T02:17:47Z"
+      }
+    },
+    {
+      "id": "phase7-go-opencode-contracts-regression",
+      "title": "Phase 7 Go backend regression",
+      "description": "Run targeted go-bridge OpenCode tests and verify no fallback to legacy 64667 or project-first pagination regression was introduced.",
+      "status": "done",
+      "phase": "phase7-go-opencode-contracts",
+      "kind": "regression",
+      "depends_on": [
+        "phase7-go-opencode-contracts-tests"
+      ],
+      "source": "Sections 9, 10, and 13",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "go-bridge targeted OpenCode regression suite passed after gofmt.",
+        "artifacts": [
+          "gofmt -w go-bridge/handlers_test.go",
+          "go test ./go-bridge -run OpenCodeListProjects|OpenCodeListSessions|OpenCodeListDirectory -count=1"
+        ],
+        "checked_at": "2026-07-03T01:57:32Z"
+      }
+    },
+    {
+      "id": "phase8-build-install-doc-sync-impl",
+      "title": "Phase 8 living docs and changelog",
+      "description": "Update BUILD_INSTALL_AND_RUNTIME.md, GO_BRIDGE_ARCHITECTURE.md, related backend config docs if present, and CHANGELOG.md for the user-visible managed_local behavior.",
+      "status": "done",
+      "phase": "phase8-build-install-doc-sync",
+      "kind": "impl",
+      "depends_on": [
+        "phase7-go-opencode-contracts-regression"
+      ],
+      "source": "Section 12 step 13; AGENTS.md CHANGELOG rule",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Updated build/runtime docs, backend config docs, architecture doc, and changelog for managed_local default and operations.",
+        "artifacts": [
+          "BUILD_INSTALL_AND_RUNTIME.md",
+          "docs/backends-and-config.md",
+          "GO_BRIDGE_ARCHITECTURE.md",
+          "CHANGELOG.md"
+        ],
+        "checked_at": "2026-07-03T01:57:32Z"
+      }
+    },
+    {
+      "id": "phase8-build-install-doc-sync-tests",
+      "title": "Phase 8 directed build and tests",
+      "description": "Run targeted Swift tests, targeted Go tests, and required builds for modified MacBridge/go-bridge scope according to repository instructions.",
+      "status": "done",
+      "phase": "phase8-build-install-doc-sync",
+      "kind": "tests",
+      "depends_on": [
+        "phase8-build-install-doc-sync-impl"
+      ],
+      "source": "Section 10 定向 build/test; AGENTS.md Build & test",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "Release build script produced unsigned zip and embedded cordcode-bridge-runtime version metadata.",
+        "artifacts": [
+          "./scripts/build-unsigned-release.sh",
+          "dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip"
+        ],
+        "checked_at": "2026-07-03T01:57:32Z"
+      }
+    },
+    {
+      "id": "phase8-build-install-doc-sync-regression",
+      "title": "Phase 8 Release build and local installation",
+      "description": "Run unsigned Release build, replace /Applications/CordCodeLink.app, launch it, and verify 8777 listener, runtime pid, embedded runtime path, runtime.json, and logs.",
+      "status": "done",
+      "phase": "phase8-build-install-doc-sync",
+      "kind": "regression",
+      "depends_on": [
+        "phase8-build-install-doc-sync-tests"
+      ],
+      "source": "Section 10 定向 build/test; AGENTS.md install checks",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "summary": "Release app was copied to /Applications and launched; processes and listeners confirm /Applications runtime is active.",
+        "artifacts": [
+          "cp -R build/unsigned-release/Build/Products/Release/CordCodeLink.app /Applications/",
+          "open /Applications/CordCodeLink.app",
+          "pgrep -fl CordCodeLink|cordcode-bridge-runtime"
+        ],
+        "checked_at": "2026-07-03T01:57:32Z"
+      }
+    },
+    {
+      "id": "phase9-end-to-end-acceptance-impl",
+      "title": "Phase 9 acceptance scenario preparation",
+      "description": "Prepare clean-data and Desktop-running acceptance scenarios, including evidence paths and rollback steps, without substituting mocks for production logic.",
+      "status": "done",
+      "phase": "phase9-end-to-end-acceptance",
+      "kind": "impl",
+      "depends_on": [
+        "phase8-build-install-doc-sync-regression"
+      ],
+      "source": "Sections 10 and 14",
+      "notes": "Real device validation and UI automation require explicit owner authorization.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "summary": "Performed local installed-app end-to-end acceptance for managed OpenCode startup, bridge injection, management API availability, SSE subscription, and Relay reconnect.",
+        "artifacts": [
+          "go-bridge.log runtime_ready",
+          "go-bridge.log opencode SSE subscriber connected",
+          "go-bridge.log relay-bridge-client connected"
+        ],
+        "checked_at": "2026-07-03T01:57:32Z"
+      }
+    },
+    {
+      "id": "phase9-end-to-end-acceptance-tests",
+      "title": "Phase 9 local acceptance checks",
+      "description": "Verify managed server launch, /internal/agents OpenCode availability, Desktop global.dat managedURL/project scope, go-bridge logs, and no OpenCode warnings in local acceptance.",
+      "status": "done",
+      "phase": "phase9-end-to-end-acceptance",
+      "kind": "tests",
+      "depends_on": [
+        "phase9-end-to-end-acceptance-impl"
+      ],
+      "source": "Section 10 manual/真机验收",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual+automated",
+        "summary": "Acceptance commands verified OpenCode auth behavior, 8777 listener, management /internal/agents availability with OpenCode status available, and Desktop settings sync. Full go-bridge CI-equivalent tests also passed after fixing shutdown cleanup ordering.",
+        "artifacts": [
+          "curl managed /global/health 401/200",
+          "lsof :8777",
+          "curl management /internal/agents",
+          "opencode.settings defaultServerUrl 4097",
+          "xcodebuild targeted Swift tests -> 41 tests passed after final review fix",
+          "go test ./go-bridge -run TestServerCloseAllConnectionsClosesActiveWebSockets -count=50",
+          "go test ./go-bridge/... -count=1"
+        ],
+        "checked_at": "2026-07-03T02:17:47Z"
+      }
+    },
+    {
+      "id": "phase9-end-to-end-acceptance-regression",
+      "title": "Phase 9 final clean-user and iOS regression",
+      "description": "With owner authorization, validate the two required acceptance paths: Desktop not running and Desktop running on vlocal; iOS pairing must show Desktop projects/sessions without manual port/command/credential/restart steps.",
+      "status": "done",
+      "phase": "phase9-end-to-end-acceptance",
+      "kind": "regression",
+      "depends_on": [
+        "phase9-end-to-end-acceptance-tests"
+      ],
+      "source": "Section 14 验收判定",
+      "notes": "UI automation, simulator automation, and real-device validation are not run without explicit owner authorization.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual",
+        "summary": "Installed Mac app/runtime/backend validation passed, and owner manually confirmed iOS OpenCode mode works normally with MacBridge set to 自动托管（推荐）.",
+        "artifacts": [
+          "installed /Applications/CordCodeLink.app",
+          "runtime.json pid 88122 managementUrl http://127.0.0.1:53195",
+          "OpenCode backend available in /internal/agents",
+          "owner manual validation: iOS OpenCode mode works normally with MacBridge Automatic managed server UI"
+        ],
+        "checked_at": "2026-07-03T02:08:57Z"
+      }
+    }
+  ]
+}

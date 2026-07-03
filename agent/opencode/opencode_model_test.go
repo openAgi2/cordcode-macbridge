@@ -196,6 +196,28 @@ func waitForModelsInPersistentCache(t *testing.T, cachePath string, want []strin
 	t.Fatalf("persistent cache models = %v, want %v", cache, want)
 }
 
+func waitForModelsInMemory(t *testing.T, a *Agent, want []string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		models := a.persistentModels()
+		if len(models) == len(want) {
+			matches := true
+			for i, model := range models {
+				if model.Name != want[i] {
+					matches = false
+					break
+				}
+			}
+			if matches {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("in-memory persistent models = %v, want %v", a.persistentModels(), want)
+}
+
 func waitForFileContent(t *testing.T, path, want string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -752,6 +774,7 @@ func TestAvailableModels_BackgroundRefreshUpdatesDiskCache(t *testing.T) {
 	if !ok {
 		t.Fatalf("New() agent does not implement core.ModelSwitcher")
 	}
+	a := agent.(*Agent)
 
 	got := switcher.AvailableModels(context.Background())
 	if len(got) != 1 || got[0].Name != "cached/model" {
@@ -763,6 +786,7 @@ func TestAvailableModels_BackgroundRefreshUpdatesDiskCache(t *testing.T) {
 	}
 
 	waitForModelsInPersistentCache(t, cachePath, []string{"fresh/model", "second/model"})
+	waitForModelsInMemory(t, a, []string{"fresh/model", "second/model"})
 
 	got = switcher.AvailableModels(context.Background())
 	if len(got) != 2 || got[0].Name != "fresh/model" || got[1].Name != "second/model" {

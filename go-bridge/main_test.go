@@ -44,17 +44,21 @@ func TestBuildAgentOptions_CodexAppServerUsesFullAuto(t *testing.T) {
 }
 
 func TestShouldStartPassiveSubscription_CodexRequiresExplicitSharedURL(t *testing.T) {
-	if shouldStartPassiveSubscription("codex", "app_server", "") {
+	if shouldStartPassiveSubscription("codex", "app_server", "", "") {
 		t.Fatal("codex implicit app_server should not start process-level passive subscription")
 	}
-	if !shouldStartPassiveSubscription("codex", "app_server", "ws://127.0.0.1:4141") {
+	if !shouldStartPassiveSubscription("codex", "app_server", "ws://127.0.0.1:4141", "") {
 		t.Fatal("codex explicit shared app_server URL should start passive subscription")
 	}
-	if shouldStartPassiveSubscription("codex", "exec", "ws://127.0.0.1:4141") {
+	if shouldStartPassiveSubscription("codex", "exec", "ws://127.0.0.1:4141", "") {
 		t.Fatal("codex exec mode should not start app-server passive subscription")
 	}
-	if !shouldStartPassiveSubscription("opencode", "", "") {
-		t.Fatal("non-codex event subscribers should still start passive subscription")
+	// OpenCode: 无 URL（endpoint 未配置）不得启动 SSE 订阅，避免无意义重连退避。
+	if shouldStartPassiveSubscription("opencode", "", "", "") {
+		t.Fatal("opencode without server URL should not start passive subscription")
+	}
+	if !shouldStartPassiveSubscription("opencode", "", "", "http://127.0.0.1:4096") {
+		t.Fatal("opencode with a configured server URL should start passive subscription")
 	}
 }
 

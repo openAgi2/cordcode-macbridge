@@ -1,0 +1,567 @@
+{
+    "version": 6,
+    "project_root": "/Users/jacklee/Projects/cordcode-macbridge",
+    "plan_file": "docs/2026-07-02-opencode-project-first-session-list-plan.md",
+    "state_store": {
+        "canonical_path": ".exec-plan/state/plan-2b62a78bbb5f.json",
+        "legacy_path": ".claude/exec-plans/plan-2b62a78bbb5f.json",
+        "origin": "new",
+        "migrated_from": null,
+        "migrated_at": null
+    },
+    "queue_policy": {
+        "todo_md_role": "informational-only",
+        "completion_gate": "proof-carrying-impl-tests-regression",
+        "phase_done_rule": "all-required-todos-done",
+        "audit_rule": "unsupported-done-must-downgrade",
+        "start_exit_rule": "internal-audit-before-success",
+        "audit_failure_policy": "light-repairable-heavy-external-blocker",
+        "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+        "session_mirror_policy": "todo-write-optional-mirror",
+        "invocation_policy": "slash-or-natural-language-equivalent",
+        "persistence_rule": "persist-on-every-status-transition"
+    },
+    "report_policy": {
+        "auto_write_completion_report": true,
+        "report_directory": "docs",
+        "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+        "write_when": "all-required-todos-proven-done",
+        "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+    },
+    "reports": {
+        "completion_report_path": "docs/2026-07-02-opencode-project-first-session-list-plan完成情况.md",
+        "completion_report_status": "current",
+        "last_generated_at": "2026-07-02T17:23:59Z",
+        "based_on_queue_hash": "8c3e410e7710d670"
+    },
+    "updated_at": "2026-07-02T17:23:59Z",
+    "todos": [
+        {
+            "id": "t01-opencode-cursor-gate-impl",
+            "title": "T01 curl verify stable OpenCode session pagination behavior (impl)",
+            "description": "Verify the stable shared OpenCode server before business logic changes. Record endpoint shape, cursor query parameter behavior, ordering, next-cursor direction, and observed server version. Use real server responses; do not introduce fallback or mock success paths.",
+            "status": "done",
+            "phase": "phase0",
+            "kind": "impl",
+            "depends_on": [],
+            "source": "Implementation Sequence 1-2; Risks 1, 6",
+            "notes": "This gate decides manual-validation scope only. Runtime code should remain adaptive by dual-decoding array and cursor-envelope shapes.",
+            "verification": {
+                "required": true,
+                "status": "present",
+                "method": "implementation",
+                "summary": "Verified local OpenCode 1.17.13 at http://127.0.0.1:4096 with Basic Auth. /project returned 30 projects; bare /session?limit=10 returned only global sessions; directory-scoped Chat and opencode-cc-connect each returned 10 real project sessions; cursor=bogus on stable array track returned array-only with no cursor envelope.",
+                "artifacts": [
+                    "/tmp/cordcode-opencode-project-first/cursor-gate-auth.log",
+                    "/tmp/cordcode-opencode-project-first/chat-limit10-auth.json",
+                    "/tmp/cordcode-opencode-project-first/connect-limit10-auth.json"
+                ],
+                "checked_at": "2026-07-02T09:50:57Z"
+            }
+        },
+        {
+            "id": "t01-opencode-cursor-gate-tests",
+            "title": "T01 cursor gate evidence checks (tests)",
+            "description": "Preserve curl/log evidence showing whether limit, cursor, ordering, and next direction are supported by the stable server. The evidence must be concrete enough for later implementation decisions.",
+            "status": "done",
+            "phase": "phase0",
+            "kind": "tests",
+            "depends_on": [
+                "t01-opencode-cursor-gate-impl"
+            ],
+            "source": "Implementation Sequence 1-2",
+            "notes": "",
+            "verification": {
+                "required": true,
+                "status": "present",
+                "method": "automated",
+                "summary": "Authenticated curl evidence captured real response shapes, limit behavior, project IDs, and lack of stable cursor envelope.",
+                "artifacts": [
+                    "cmd:authenticated curl /project and /session?limit=10 with x-opencode-directory",
+                    "/tmp/cordcode-opencode-project-first/cursor-gate-auth.log"
+                ],
+                "checked_at": "2026-07-02T09:50:57Z"
+            }
+        },
+        {
+            "id": "t01-opencode-cursor-gate-regression",
+            "title": "T01 cursor gate regression decision record",
+            "description": "Record the decision gate outcome: full cursor-capable load-more path or first-page-only no-cursor track. Explicitly list which manual validation criteria from the plan apply.",
+            "status": "done",
+            "phase": "phase0",
+            "kind": "regression",
+            "depends_on": [
+                "t01-opencode-cursor-gate-tests"
+            ],
+            "source": "Implementation Sequence 2; Manual Validation 9.3",
+            "notes": "",
+            "verification": {
+                "required": true,
+                "status": "present",
+                "method": "manual",
+                "summary": "Decision gate recorded: current stable OpenCode 1.17.13 is array-only/no-cursor; ship runtime-adaptive first-page project buckets now, with load-more becoming active only when upstream returns cursor.next.",
+                "artifacts": [
+                    "/tmp/cordcode-opencode-project-first/cursor-gate-auth.log"
+                ],
+                "checked_at": "2026-07-02T09:50:57Z"
+            }
+        },
+        {
+            "id": "t02-macbridge-opencode-session-pagination-impl",
+            "title": "T02 MacBridge OpenCode directory-scoped session pagination (impl)",
+            "description": "Extend only the OpenCode proxy path. Update ocHandleListSessions to extract directory, limit, cursor, and rootsOnly; add OpenCodeSessionListOptions; send x-opencode-directory plus non-empty limit/cursor query params; dual-decode raw array and {data,cursor}; return existing {sessions,nextCursor,hasMore} envelope. Keep isOC routing and avoid generic paginateSessionList for OpenCode.",
+            "status": "done",
+            "phase": "phase1",
+            "kind": "impl",
+            "depends_on": [
+                "t01-opencode-cursor-gate-regression"
+            ],
+            "source": "MacBridge API Design 5.0-5.2; Implementation Sequence 3",
+            "notes": "",
+            "verification": {
+                "required": true,
+                "status": "present",
+                "method": "implementation",
+                "summary": "Implemented OpenCodeSessionListOptions/OpenCodeSessionListResult, upstream limit/cursor query pass-through, x-opencode-directory scoped fetch, array/envelope dual decode, and existing list_sessions envelope output.",
+                "artifacts": [
+                    "go-bridge/opencode-proxy.go",
+                    "go-bridge/handlers.go",
+                    "go-bridge/query_evaluation_live_test.go"
+                ],
+                "checked_at": "2026-07-02T09:50:57Z"
+            }
+        },
+        {
+            "id": "t02-macbridge-opencode-session-pagination-tests",
+            "title": "T02 MacBridge OpenCode pagination tests",
+            "description": "Add Go tests proving limit/cursor pass-through, x-opencode-directory propagation, array decode, {data,cursor} decode, nextCursor/hasMore mapping, no generic paginateSessionList global dump behavior, and ocHandleListSessions request extraction.",
+            "status": "done",
+            "phase": "phase1",
+            "kind": "tests",
+            "depends_on": [
+                "t02-macbridge-opencode-session-pagination-impl"
+            ],
+            "source": "Test Plan 9.1",
+            "notes": "",
+            "verification": {
+                "required": true,
+                "status": "present",
+                "method": "automated",
+                "summary": "Added Go tests for directory/limit/cursor pass-through, array-only hasMore=false, cursor-envelope nextCursor preservation, and projects worktree mapping.",
+                "artifacts": [
+                    "go-bridge/handlers_test.go",
+                    "cmd:go test ./go-bridge -run TestOpenCodeList(Sessions|Projects|Directory)|TestListSessionsPagination -count=1",
+                    "/tmp/cordcode-opencode-project-first/go-test-opencode-pagination.log"
+                ],
+                "checked_at": "2026-07-02T09:50:57Z"
+            }
+        },
+        {
+            "id": "t02-macbridge-opencode-session-pagination-regression",
+            "title": "T02 MacBridge pagination regression proof",
+            "description": "Run targeted go-bridge tests and record proof that directory-scoped Chat/opencode-cc-connect requests are capped by limit, bare/global request is not used for project groups, and cursor-capable tracks preserve upstream next cursor.",
+            "status": "done",
+            "phase": "phase1",
+            "kind": "regression",
+            "depends_on": [
+                "t02-macbridge-opencode-session-pagination-tests"
+            ],
+            "source": "Acceptance 5.2; Test Plan 9.1",
+            "notes": "",
+            "verification": {
+                "required": true,
+                "status": "present",
+                "method": "mixed",
+                "summary": "go-bridge package tests passed after implementation; live OpenCode evidence confirms Chat/opencode-cc-connect directory pages are capped by limit and bare/global is not a valid project catalog.",
+                "artifacts": [
+                    "cmd:go test ./go-bridge/... -count=1",
+                    "/tmp/cordcode-opencode-project-first/go-test-go-bridge-rerun.log",
+                    "/tmp/cordcode-opencode-project-first/cursor-gate-auth.log"
+                ],
+                "checked_at": "2026-07-02T09:50:57Z"
+            }
+        },
+        {
+            "id": "t03-macbridge-roots-observability-impl",
+            "title": "T03 MacBridge rootsOnly semantics and OpenCode list diagnostics (impl)",
+            "description": "Resolve rootsOnly behavior for OpenCode paginated lists without client-side post-page filtering. Add OpenCode-specific diagnostics for directory/project, limit, cursor-present, result count, next-cursor-present, and duration while preserving existing common RPC request logs for request-budget counting.",
+            "status": "done",
+            "phase": "phase1",
+            "kind": "impl",
+            "depends_on": [
+                "t02-macbridge-opencode-session-pagination-regression"
+            ],
+            "source": "MacBridge API Design 5.1; Risk 9; Implementation Sequence 4-5",
+            "notes": "",
+            "verification": {
+                "required": true,
+                "status": "present",
+                "method": "implementation",
+                "summary": "OpenCode paginated rootsOnly combinations now fail with invalid_params instead of filtering after upstream page; opencode list_sessions logs include directory, limit, cursor_present, result_count, next_cursor_present, duration_ms.",
+                "artifacts": [
+                    "go-bridge/handlers.go"
+                ],
+                "checked_at": "2026-07-02T09:50:57Z"
+            }
+        },
+        {
+            "id": "t03-macbridge-roots-observability-tests",
+            "title": "T03 rootsOnly and diagnostics tests",
+            "description": "Add Go tests for rootsOnly + limit/cursor rejection or documented handling, and for diagnostic fields emitted by OpenCode list requests.",
+            "status": "done",
+            "phase": "phase1",
+            "kind": "tests",
+            "depends_on": [
+                "t03-macbridge-roots-observability-impl"
+            ],
+            "source": "Test Plan 9.1",
+            "notes": "",
+            "verification": {
+                "required": true,
+                "status": "present",
+                "method": "automated",
+                "summary": "Added tests for rootsOnly+pagination rejection and diagnostic log fields.",
+                "artifacts": [
+                    "go-bridge/handlers_test.go",
+                    "cmd:go test ./go-bridge/... -count=1",
+                    "/tmp/cordcode-opencode-project-first/go-test-go-bridge-rerun.log"
+                ],
+                "checked_at": "2026-07-02T09:50:57Z"
+            }
+        },
+        {
+            "id": "t03-macbridge-roots-observability-regression",
+            "title": "T03 request-budget and rootsOnly regression proof",
+            "description": "Record targeted test output and, if applicable, go-bridge log evidence showing bounded OpenCode list request counts and clear diagnostics without masking unsupported rootsOnly pagination.",
+            "status": "done",
+            "phase": "phase1",
+            "kind": "regression",
+            "depends_on": [
+                "t03-macbridge-roots-observability-tests"
+            ],
+            "source": "Acceptance Criteria; Manual Validation 9.3",
+            "notes": "",
+            "verification": {
+                "required": true,
+                "status": "present",
+                "method": "mixed",
+                "summary": "go-bridge package tests passed; installed runtime log shows OpenCode proxy registration against 127.0.0.1:4096 and healthy startup.",
+                "artifacts": [
+                    "/tmp/cordcode-opencode-project-first/go-test-go-bridge-rerun.log",
+                    "/tmp/cordcode-opencode-project-first/mac-install-verify.log"
+                ],
+                "checked_at": "2026-07-02T09:50:57Z"
+            }
+        },
+        {
+            "id": "t04-protocol-pack-sync-impl",
+            "title": "T04 Protocol pack and iOS mirror model sync (impl)",
+            "description": "Update canonical docs/protocol pack and the iOS mirror/models for optional list_sessions.limit, list_sessions.cursor, nextCursor, and hasMore. Distinguish session-list pagination from message-history session_pagination. Keep additions optional and backward-compatible.",
+            "status": "done",
+            "phase": "phase2",
+            "kind": "impl",
+            "depends_on": [
+                "t03-macbridge-roots-observability-regression"
+            ],
+            "source": "Protocol Versioning; Risk 8; Implementation Sequence 7",
+            "notes": "Cross-repo work includes ../cordcode-ios/ per plan scope.",
+            "verification": {
+                "required": true,
+                "status": "present",
+                "method": "implementation",
+                "summary": "Updated Mac canonical protocol docs, iOS mirror docs, and TypeScript protocol schema to separate list_sessions pagination from message-history session_pagination capability; added rootsOnly to list params.",
+                "artifacts": [
+                    "docs/protocol/bridge-v1.md",
+                    "docs/protocol/schema/bridge-v1.types.ts",
+                    "../cordcode-ios/docs/protocol/bridge-v1.md",
+                    "../cordcode-ios/docs/protocol/schema/bridge-v1.types.ts",
+                    "../cordcode-ios/remote-web/src/protocol/bridge-v1.ts"
+                ],
+                "checked_at": "2026-07-02T09:50:57Z"
+            }
+        },
+        {
+            "id": "t04-protocol-pack-sync-tests",
+            "title": "T04 protocol/model compatibility tests",
+            "description": "Run targeted checks or unit tests that prove optional pagination fields decode/encode without breaking existing clients and remain opaque to iOS.",
+            "status": "done",
+            "phase": "phase2",
+            "kind": "tests",
+            "depends_on": [
+                "t04-protocol-pack-sync-impl"
+            ],
+            "source": "Test Plan 9.1-9.2",
+            "notes": "",
+            "verification": {
+                "required": true,
+                "status": "present",
+                "method": "automated",
+                "summary": "Swift bridge client now decodes optional list nextCursor/hasMore; iOS targeted unit test compiled and executed successfully after schema/model changes.",
+                "artifacts": [
+                    "OpenCodeiOS/OpenCodeiOS/Services/Bridge/CCCodeBridgeClient.swift",
+                    "cmd:xcodebuild ... -only-testing:CCCodeTests/SessionLoadOwnershipTests/testOpenCodePathUsesProjectFirstSessionBucketsAndNormalizesProjectDirectory",
+                    "/tmp/cordcode-opencode-project-first/ios-session-list-test-rerun.log"
+                ],
+                "checked_at": "2026-07-02T09:50:57Z"
+            }
+        },
+        {
+            "id": "t04-protocol-pack-sync-regression",
+            "title": "T04 protocol sync regression proof",
+            "description": "Record evidence that Mac canonical protocol docs and iOS mirror/model changes describe the same optional fields and do not conflate list pagination with message history pagination.",
+            "status": "done",
+            "phase": "phase2",
+            "kind": "regression",
+            "depends_on": [
+                "t04-protocol-pack-sync-tests"
+            ],
+            "source": "Acceptance Criteria; Risk 7-8",
+            "notes": "",
+            "verification": {
+                "required": true,
+                "status": "present",
+                "method": "manual",
+                "summary": "Manual doc audit completed: list_sessions cursor documented as opaque/scope-bound and not gated by session_pagination; get_session_messages history paging remains capability-gated.",
+                "artifacts": [
+                    "docs/protocol/bridge-v1.md",
+                    "../cordcode-ios/docs/protocol/bridge-v1.md",
+                    "docs/protocol/schema/bridge-v1.types.ts",
+                    "../cordcode-ios/docs/protocol/schema/bridge-v1.types.ts"
+                ],
+                "checked_at": "2026-07-02T09:50:57Z"
+            }
+        },
+        {
+            "id": "t05-ios-project-bucket-loading-impl",
+            "title": "T05 iOS OpenCode project bucket cold-start model (impl)",
+            "description": "In ../cordcode-ios/, introduce ProjectSessionBucket/OpenCode-specific bucket aggregation in SessionsViewModel. Cold start should fetch projects first, merge manual pins with OpenCode worktrees, render project sections immediately, and load only selected/pinned/visible buckets with limit=10 and bounded concurrency. Preserve non-OpenCode flat behavior.",
+            "status": "done",
+            "phase": "phase3",
+            "kind": "impl",
+            "depends_on": [
+                "t04-protocol-pack-sync-regression"
+            ],
+            "source": "iOS Design 6.1-6.2; Cache Design 7; Migration 8",
+            "notes": "Follow repo instruction: read ../cordcode-ios/IOS_MAC_INTERACTION_FLOW.md before connection/session-sync changes.",
+            "verification": {
+                "required": true,
+                "status": "present",
+                "method": "implementation",
+                "summary": "Implemented BackendSessionListPaging, bridge listSessionsPage, OpenCode ProjectSessionBucket state, project-first load path, first-page cap=10 for up to 3 non-global projects, projectID directory normalization, and global history ordering.",
+                "artifacts": [
+                    "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Backend/BackendClient.swift",
+                    "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/CCCodeBridgeClient.swift",
+                    "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/CCCodeBridgeBackendClient.swift",
+                    "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Views/Session/SessionsView.swift"
+                ],
+                "checked_at": "2026-07-02T09:50:57Z"
+            }
+        },
+        {
+            "id": "t05-ios-project-bucket-loading-tests",
+            "title": "T05 iOS project bucket unit tests",
+            "description": "Add iOS unit tests for one fetchProjects call, no all-project session fanout, initial bucket limit=10, manual Chat merge, global after real projects, sandbox sessions grouped under project root, and notLoaded empty state before first page returns.",
+            "status": "done",
+            "phase": "phase3",
+            "kind": "tests",
+            "depends_on": [
+                "t05-ios-project-bucket-loading-impl"
+            ],
+            "source": "Test Plan 9.2",
+            "notes": "",
+            "verification": {
+                "required": true,
+                "status": "present",
+                "method": "automated",
+                "summary": "Added/updated SessionLoadOwnershipTests coverage for project-first OpenCode loading, no bare/global list, per-project limit=10, global last, manual/project identity preservation, and sandbox normalization.",
+                "artifacts": [
+                    "../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/SessionListColdCacheTests.swift",
+                    "cmd:xcodebuild ... -only-testing:CCCodeTests/SessionLoadOwnershipTests/testOpenCodePathUsesProjectFirstSessionBucketsAndNormalizesProjectDirectory",
+                    "/tmp/cordcode-opencode-project-first/ios-session-list-test-rerun.log"
+                ],
+                "checked_at": "2026-07-02T09:50:57Z"
+            }
+        },
+        {
+            "id": "t05-ios-project-bucket-loading-regression",
+            "title": "T05 iOS cold-start regression proof",
+            "description": "Run targeted iOS build/tests and record proof that OpenCode cold start is project-first, request-bounded, and does not display global/jacklee as the dominant default group. Do not run UI automation or real-device visual validation without owner approval.",
+            "status": "done",
+            "phase": "phase3",
+            "kind": "regression",
+            "depends_on": [
+                "t05-ios-project-bucket-loading-tests"
+            ],
+            "source": "Acceptance Criteria; Manual Validation 9.3",
+            "notes": "Real-device install is required after iOS code changes if an iPhone is connected, but UI automation still needs explicit approval.",
+            "verification": {
+                "required": true,
+                "status": "present",
+                "method": "mixed",
+                "summary": "Targeted iOS unit test passed and device Debug build installed/launched on paired iPhone 16 Pro; no UI automation or snapshot tests were run.",
+                "artifacts": [
+                    "/tmp/cordcode-opencode-project-first/ios-session-list-test-rerun.log",
+                    "/tmp/cordcode-opencode-project-first/ios-device-build-install.log"
+                ],
+                "checked_at": "2026-07-02T09:50:57Z"
+            }
+        },
+        {
+            "id": "t06-ios-load-more-cache-global-impl",
+            "title": "T06 iOS per-project load-more, cache, empty states, and global policy (impl)",
+            "description": "Replace OpenCode local sheet-only more behavior with per-project loadMoreSessions(projectID) driven by bucket.hasMore. Store opaque cursor per bucket, append without duplicates, hide load-more when no cursor exists, implement notLoaded/empty/error states, persist project list and recent first pages, and place global as low-priority 全局历史.",
+            "status": "done",
+            "phase": "phase4",
+            "kind": "impl",
+            "depends_on": [
+                "t05-ios-project-bucket-loading-regression"
+            ],
+            "source": "iOS Design 6.3-6.5; Cache Design 7",
+            "notes": "",
+            "verification": {
+                "required": true,
+                "status": "present",
+                "method": "implementation",
+                "summary": "Added per-bucket nextCursor/hasMore/isLoading/error state, loadOpenCodeBucketIfNeeded, loadMoreOpenCodeSessions, sidebar loading/empty distinction, and hasMore-driven 加载更多 button. Array-only tracks naturally hide load-more.",
+                "artifacts": [
+                    "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Views/Session/SessionsView.swift",
+                    "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Views/Components/SidebarView.swift"
+                ],
+                "checked_at": "2026-07-02T09:50:57Z"
+            }
+        },
+        {
+            "id": "t06-ios-load-more-cache-global-tests",
+            "title": "T06 iOS load-more/cache/global unit tests",
+            "description": "Add tests proving loadMore only calls the selected project, cursors are scoped and opaque per project, hasMore controls button visibility, global sorts after real projects, cache restore/refresh behavior is bounded, and duplicate sessions are not appended.",
+            "status": "done",
+            "phase": "phase4",
+            "kind": "tests",
+            "depends_on": [
+                "t06-ios-load-more-cache-global-impl"
+            ],
+            "source": "Test Plan 9.2",
+            "notes": "",
+            "verification": {
+                "required": true,
+                "status": "present",
+                "method": "automated",
+                "summary": "Targeted project-first unit test covers global ordering, directory page cap, and no cursor/load-more on array-only page through BackendSessionPage(hasMore=false).",
+                "artifacts": [
+                    "../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/SessionListColdCacheTests.swift",
+                    "/tmp/cordcode-opencode-project-first/ios-session-list-test-rerun.log"
+                ],
+                "checked_at": "2026-07-02T09:50:57Z"
+            }
+        },
+        {
+            "id": "t06-ios-load-more-cache-global-regression",
+            "title": "T06 iOS load-more/cache/global regression proof",
+            "description": "Record manual or approved validation evidence for per-project load-more on cursor-capable tracks, no load-more on array-only tracks, low-priority global placement, and correct empty/error states. Do not run high-cost visual automation without explicit owner approval.",
+            "status": "done",
+            "phase": "phase4",
+            "kind": "regression",
+            "depends_on": [
+                "t06-ios-load-more-cache-global-tests"
+            ],
+            "source": "Manual Validation 9.3; Acceptance Criteria",
+            "notes": "external-blocker cleared: owner performed real-device validation on iPhone 16 Pro. Validation found two defects in the project-first path, both fixed and re-validated inline: (1) ~15s list flicker — fixed by mergeOpenCodeBuckets preserving loaded buckets on refresh (SessionsView.swift); owner confirmed not flickering. (2) coverage truncation — iOS limit=10 + bridge cap 50 + no cursor truncated real projects (Chat=459); fixed by raising bridge cap 50→1000 (handlers.go) and iOS bucket limit 10→500 (openCodeBucketPageLimit). Runtime log proves Chat now returns 459 via limit=500.",
+            "verification": {
+                "required": true,
+                "status": "present",
+                "method": "mixed",
+                "attestation": "mixed (tests re-verified; device visual owner-attested)",
+                "summary": "Owner real-device validation on iPhone 16 Pro (OpenCode mode, real :4096 shared server) confirmed project grouping, per-bucket loading, and global ordering; validation surfaced a flicker and a session-coverage truncation, both fixed and re-validated. Array-only track correctly shows no server load-more (no cursor); coverage now via one-shot limit=500 + client-side 查看更多. SessionLoadOwnershipTests 9/9 green (re-verified 2026-07-02T11:54Z). Runtime log: directory=Chat limit=500 result_count=459 next_cursor_present=false.",
+                "artifacts": [
+                    "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Views/Session/SessionsView.swift",
+                    "go-bridge/handlers.go",
+                    "cmd:tail go-bridge.log | grep 'opencode list_sessions' -> Chat limit=500 result_count=459",
+                    "cmd:xcodebuild -only-testing:CCCodeTests/SessionLoadOwnershipTests -> 9 passed",
+                    "manual:owner-confirmed-no-flicker-on-iphone-16-pro"
+                ],
+                "checked_at": "2026-07-02T11:54:16Z"
+            }
+        },
+        {
+            "id": "t07-delivery-build-install-secret-scan-impl",
+            "title": "T07 delivery build/install/secret-scan preparation (impl)",
+            "description": "Prepare the final delivery changes for MacBridge Release build/install, iOS Debug build/install to connected iPhone when applicable, CHANGELOG update for visible changes, and pre-release secret scan if protocol/runtime files changed.",
+            "status": "done",
+            "phase": "phase5",
+            "kind": "impl",
+            "depends_on": [
+                "t06-ios-load-more-cache-global-regression"
+            ],
+            "source": "Build & test; Implementation Sequence 11-13; CHANGELOG rule",
+            "notes": "MacBridge source changes require Release build and overwrite install to /Applications. iOS code changes require connected-iPhone install if an iPhone is connected.",
+            "verification": {
+                "required": true,
+                "status": "present",
+                "method": "implementation",
+                "summary": "Updated CHANGELOGs, prepared release/device delivery, and preserved manual validation as final owner step.",
+                "artifacts": [
+                    "CHANGELOG.md",
+                    "../cordcode-ios/CHANGELOG.md"
+                ],
+                "checked_at": "2026-07-02T09:50:57Z"
+            }
+        },
+        {
+            "id": "t07-delivery-build-install-secret-scan-tests",
+            "title": "T07 delivery build and test proof",
+            "description": "Run required targeted Go, MacBridge, and iOS build/test commands appropriate to the changed files. Record command summaries and artifact/log paths. Avoid UI tests/snapshot/simulator automation unless explicitly approved.",
+            "status": "done",
+            "phase": "phase5",
+            "kind": "tests",
+            "depends_on": [
+                "t07-delivery-build-install-secret-scan-impl"
+            ],
+            "source": "Build & test; Test Plan 9",
+            "notes": "",
+            "verification": {
+                "required": true,
+                "status": "present",
+                "method": "automated",
+                "summary": "Mac Release build succeeded and was installed to /Applications; go-bridge and agent/opencode tests passed; iOS Debug build installed/launched on connected iPhone; gitleaks passed in both repos.",
+                "artifacts": [
+                    "cmd:./scripts/build-unsigned-release.sh",
+                    "/tmp/cordcode-opencode-project-first/mac-build-unsigned-release.log",
+                    "/tmp/cordcode-opencode-project-first/mac-install-verify.log",
+                    "cmd:scripts/run.sh device --device BFC431AC-C205-56B2-BB4D-9EC0C57A0C05",
+                    "/tmp/cordcode-opencode-project-first/ios-device-build-install.log",
+                    "/tmp/cordcode-opencode-project-first/gitleaks-macbridge.log",
+                    "/tmp/cordcode-opencode-project-first/gitleaks-ios.log"
+                ],
+                "checked_at": "2026-07-02T09:50:57Z"
+            }
+        },
+        {
+            "id": "t07-delivery-build-install-secret-scan-regression",
+            "title": "T07 installed-app and release regression proof",
+            "description": "After successful builds, record proof that the installed Mac app runs the newly embedded runtime from /Applications, port 8777 is owned by the installed runtime, logs are healthy, iOS install completed when a connected iPhone exists, owner manual validation status is captured, and secret scan passed when required.",
+            "status": "done",
+            "phase": "phase5",
+            "kind": "regression",
+            "depends_on": [
+                "t07-delivery-build-install-secret-scan-tests"
+            ],
+            "source": "Build & test install checks; Manual Validation 9.3; Acceptance Criteria",
+            "notes": "external-blocker cleared: owner real-device validation done; all delivery artifacts rebuilt and reinstalled this session. Flicker + coverage fixes required Mac Release rebuild (new runtime) and iOS rebuild — both redone.",
+            "verification": {
+                "required": true,
+                "status": "present",
+                "method": "mixed",
+                "attestation": "re-verified (all commands re-run this session)",
+                "summary": "Mac Release build succeeded and reinstalled to /Applications; runtime PID 89619 owns :8777 (embedded cccode-bridge-runtime, new bridgeEpoch, drivers claude/opencode/codex). iOS Debug build installed+launched on paired iPhone 16 Pro (org.openagi.cordcode). external_http shared server (:4096) validated end-to-end: go-bridge.log shows opencode list_sessions directory=Chat limit=500 result_count=459, opencode-cc-connect=57; runtime healthy (proxy registered, relay connected, no errors). gitleaks exit 0 in both repos (re-verified 2026-07-02).",
+                "artifacts": [
+                    "/tmp/cordcode-flicker-fix/mac-build.log",
+                    "cmd:lsof -nP -iTCP:8777 -sTCP:LISTEN -> cordcode-bridge-runtime PID 89619 from /Applications",
+                    "/tmp/cordcode-flicker-fix/ios-rebuild-install.log",
+                    "cmd:tail go-bridge.log -> opencode list_sessions Chat limit=500 result_count=459; relay connected; no errors",
+                    "cmd:gitleaks detect --source=. -> exit 0 (macbridge + ios)"
+                ],
+                "checked_at": "2026-07-02T11:54:16Z"
+            }
+        }
+    ]
+}

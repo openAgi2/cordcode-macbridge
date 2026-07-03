@@ -282,6 +282,40 @@ enum L10n {
     static var settingsAutoRestartInterval: String { tr("settings_auto_restart_interval") }
     static var settingsAutoRestartHint: String { tr("settings_auto_restart_hint") }
 
+    // MARK: - OpenCode endpoint (shared server)
+
+    static var opencodeServerSource: String { tr("opencode_server_source") }
+    static var opencodeServerURL: String { tr("opencode_server_url") }
+    static var opencodeSourceManagedLocal: String { tr("opencode_source_managed_local") }
+    static var opencodeSourceManagedLocalDesc: String { tr("opencode_source_managed_local_desc") }
+    static var opencodeSourceExternalHttp: String { tr("opencode_source_external_http") }
+    static var opencodeSourceExternalHttpDesc: String { tr("opencode_source_external_http_desc") }
+    static var opencodeSourceLegacy64667: String { tr("opencode_source_legacy_64667") }
+    static var opencodeSourceLegacy64667Desc: String { tr("opencode_source_legacy_64667_desc") }
+    static var opencodeSourceServiceDiscoveryFuture: String { tr("opencode_source_service_discovery_future") }
+    static var opencodeSourceServiceDiscoveryFutureDesc: String { tr("opencode_source_service_discovery_future_desc") }
+    static var opencodeSourceDisabled: String { tr("opencode_source_disabled") }
+    static var opencodeSourceDisabledDesc: String { tr("opencode_source_disabled_desc") }
+    static var opencodeServerURLPlaceholder: String { tr("opencode_server_url_placeholder") }
+    static var opencodeValidateEndpoint: String { tr("opencode_validate_endpoint") }
+    static var opencodeValidating: String { tr("opencode_validating") }
+    static var opencodeEndpointValid: String { tr("opencode_endpoint_valid") }
+    static var opencodeBringYourOwnHint: String { tr("opencode_bring_your_own_hint") }
+    static var opencodeLegacyInsecureWarning: String { tr("opencode_legacy_insecure_warning") }
+    static var opencodeMigrationNotice: String { tr("opencode_migration_notice") }
+
+    // MARK: - OpenCode endpoint errors
+
+    static var opencodeErrNotConfigured: String { tr("opencode_err_not_configured") }
+    static var opencodeErrPasswordRequired: String { tr("opencode_err_password_required") }
+    static var opencodeErrNonLoopback: String { tr("opencode_err_non_loopback") }
+    static var opencodeErrMalformedURL: String { tr("opencode_err_malformed_url") }
+    static var opencodeErrServiceDiscoveryUnavailable: String { tr("opencode_err_service_discovery_unavailable") }
+    static var opencodeErrUnreachable: String { tr("opencode_err_unreachable") }
+    static var opencodeErrServerUnauthenticated: String { tr("opencode_err_server_unauthenticated") }
+    static var opencodeErrAuthFailed: String { tr("opencode_err_auth_failed") }
+    static var opencodeErrNotOpencodeServer: String { tr("opencode_err_not_opencode_server") }
+
     // MARK: - Remote
 
     static var remoteTitle: String { tr("remote_title") }
@@ -549,11 +583,39 @@ enum L10n {
             "settings_regenerate_confirm_title": "Regenerate password?",
             "settings_regenerate_confirm_message": "The old password becomes invalid only after you save and restart MacBridge.",
             "settings_saving": "Saving...",
-            "settings_opencode_command": "opencode serve --port 64667 --hostname 127.0.0.1",
+            "settings_opencode_command": "OPENCODE_SERVER_PASSWORD='your-password' opencode serve --hostname 127.0.0.1 --port 64667",
             "settings_auto_restart_title": "Auto Restart",
             "settings_auto_restart_enable": "Enable auto restart",
             "settings_auto_restart_interval": "Restart interval",
             "settings_auto_restart_hint": "Restarts Bridge if it gets stuck, and on a regular schedule to keep connections stable. Changes apply immediately.",
+            "opencode_server_source": "Server Source",
+            "opencode_server_url": "Server URL",
+            "opencode_source_managed_local": "Automatic (Recommended)",
+            "opencode_source_managed_local_desc": "CordCode starts a local OpenCode server and connects Desktop and iOS to it.",
+            "opencode_source_external_http": "External HTTP server",
+            "opencode_source_external_http_desc": "Connect to a stable `opencode serve` you started. Loopback + Basic Auth required. CordCode does not start or keep it alive.",
+            "opencode_source_legacy_64667": "Legacy 127.0.0.1:64667",
+            "opencode_source_legacy_64667_desc": "Compatibility mode for existing setups. Not a secure shared server; may be unverified.",
+            "opencode_source_service_discovery_future": "Service discovery (future)",
+            "opencode_source_service_discovery_future_desc": "Reserved. Current stable opencode does not expose `service` / `--register`; unavailable.",
+            "opencode_source_disabled": "Disabled",
+            "opencode_source_disabled_desc": "OpenCode backend is off. Claude and Codex are unaffected.",
+            "opencode_server_url_placeholder": "http://127.0.0.1:4096",
+            "opencode_validate_endpoint": "Validate",
+            "opencode_validating": "Validating...",
+            "opencode_endpoint_valid": "Endpoint reachable and authenticated.",
+            "opencode_bring_your_own_hint": "CordCode connects to this OpenCode server but does not start or keep it alive. Keep the command running, or install your own local service.",
+            "opencode_legacy_insecure_warning": "⚠️ Legacy endpoint could not prove it requires authentication. It may be a passwordless or 0.0.0.0 listener from an older bridge. Clean it up and switch to External HTTP.",
+            "opencode_migration_notice": "Migrated from the legacy 127.0.0.1:64667 server. Configure an External HTTP server for a secure shared OpenCode.",
+            "opencode_err_not_configured": "OpenCode endpoint is not configured.",
+            "opencode_err_password_required": "Password is required for an External HTTP endpoint.",
+            "opencode_err_non_loopback": "Only loopback HTTP URLs are accepted (127.0.0.1).",
+            "opencode_err_malformed_url": "The server URL is malformed.",
+            "opencode_err_service_discovery_unavailable": "Service discovery needs a newer opencode CLI with `service` / `--register`.",
+            "opencode_err_unreachable": "Could not reach the OpenCode server.",
+            "opencode_err_server_unauthenticated": "Server did not require authentication. Start it with OPENCODE_SERVER_PASSWORD set.",
+            "opencode_err_auth_failed": "Username or password was rejected (401).",
+            "opencode_err_not_opencode_server": "The endpoint did not respond like an OpenCode server.",
             "remote_title": "Remote Connection",
             "remote_subtitle": "Configure how iPhone connects when it is not on the same network",
             "remote_connection_paths": "Connection Paths",
@@ -810,11 +872,39 @@ enum L10n {
             "settings_regenerate_confirm_title": "重新生成密码？",
             "settings_regenerate_confirm_message": "重新生成后，旧密码将在保存并重启 MacBridge 后失效。",
             "settings_saving": "正在保存…",
-            "settings_opencode_command": "opencode serve --port 64667 --hostname 127.0.0.1",
+            "settings_opencode_command": "OPENCODE_SERVER_PASSWORD='your-password' opencode serve --hostname 127.0.0.1 --port 64667",
             "settings_auto_restart_title": "自动重启",
             "settings_auto_restart_enable": "启用自动重启",
             "settings_auto_restart_interval": "重启周期",
             "settings_auto_restart_hint": "Bridge 卡住时自动重启，并按周期定时兜底重启，保持连接稳定。修改后立即生效。",
+            "opencode_server_source": "Server 来源",
+            "opencode_server_url": "Server URL",
+            "opencode_source_managed_local": "自动托管（推荐）",
+            "opencode_source_managed_local_desc": "CordCode 自动启动本机 OpenCode server，并把 Desktop 与 iOS 连接到同一个 server。",
+            "opencode_source_external_http": "外部 HTTP server",
+            "opencode_source_external_http_desc": "连接你已启动的 stable `opencode serve`。要求 loopback + Basic Auth。CordCode 不启动也不保活它。",
+            "opencode_source_legacy_64667": "兼容模式 127.0.0.1:64667",
+            "opencode_source_legacy_64667_desc": "为存量配置保留的兼容模式。不是安全共享 server，可能未经验证。",
+            "opencode_source_service_discovery_future": "服务发现（未来）",
+            "opencode_source_service_discovery_future_desc": "预留。当前 stable opencode 未暴露 `service` / `--register`，不可用。",
+            "opencode_source_disabled": "未启用",
+            "opencode_source_disabled_desc": "关闭 OpenCode backend。Claude 与 Codex 不受影响。",
+            "opencode_server_url_placeholder": "http://127.0.0.1:4096",
+            "opencode_validate_endpoint": "验证",
+            "opencode_validating": "正在验证…",
+            "opencode_endpoint_valid": "Endpoint 可达且认证通过。",
+            "opencode_bring_your_own_hint": "CordCode 只连接这个 OpenCode server，不会启动或保活它。请自行保持命令运行，或安装本地常驻服务。",
+            "opencode_legacy_insecure_warning": "⚠️ 该兼容 endpoint 未能证明其要求认证，可能来自旧 bridge 的无密码或 0.0.0.0 监听进程。请清理后改用外部 HTTP server。",
+            "opencode_migration_notice": "已从旧 127.0.0.1:64667 server 迁移。请配置外部 HTTP server 以获得安全的共享 OpenCode。",
+            "opencode_err_not_configured": "OpenCode endpoint 未配置。",
+            "opencode_err_password_required": "外部 HTTP endpoint 必须填写密码。",
+            "opencode_err_non_loopback": "仅接受 loopback HTTP URL（127.0.0.1）。",
+            "opencode_err_malformed_url": "Server URL 格式无效。",
+            "opencode_err_service_discovery_unavailable": "服务发现需要更新版本的 opencode CLI（带 `service` / `--register`）。",
+            "opencode_err_unreachable": "无法连接 OpenCode server。",
+            "opencode_err_server_unauthenticated": "Server 未要求认证。请设置 OPENCODE_SERVER_PASSWORD 后重新启动它。",
+            "opencode_err_auth_failed": "用户名或密码被拒（401）。",
+            "opencode_err_not_opencode_server": "该 endpoint 的响应不像 OpenCode server。",
             "remote_title": "远程连接",
             "remote_subtitle": "配置 iPhone 不在同一网络时的连接方式",
             "remote_connection_paths": "连接路径",

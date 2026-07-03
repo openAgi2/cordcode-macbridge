@@ -74,7 +74,8 @@ func TestOpenCodeQueryEvaluationMatrix(t *testing.T) {
 	}
 
 	httpSessionsRaw, httpSessionsDuration, err := sampleDuration(func() ([]map[string]interface{}, error) {
-		return proxy.listSessions(workDir)
+		result, err := proxy.listSessions(OpenCodeSessionListOptions{Directory: workDir})
+		return result.Sessions, err
 	})
 	if err != nil {
 		t.Fatalf("proxy.listSessions failed: %v", err)

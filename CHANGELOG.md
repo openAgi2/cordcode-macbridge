@@ -8,6 +8,55 @@
 
 ## [Unreleased]
 
+### 2026-07-03 — OpenCode Automatic managed local server 实现
+
+- **OpenCode 新装默认改为 Automatic（managed_local）**：CordCode Link 会自动启动并管理一个只绑定 `127.0.0.1` 的 `opencode serve`，选择并持久化 `4096...4196` 范围内的端口和随机 Basic Auth 凭据；iOS 仍只连接 MacBridge，不直连 OpenCode。
+- **Desktop 与 iOS 自动对齐同一 OpenCode scope**：MacBridge 写入 OpenCode Desktop 默认 server、`currentSidecarUrl` 与 `projects[managedURL]`，优先合并 Desktop `local` 项目集合；本机实测确认 Desktop 运行中不热重载配置，因此实现保留 Cocoa graceful quit + reopen fallback，且冷启动会服从写入的 managedURL。
+- **失败保持真实可见**：managed server 启动失败不会阻塞 Bridge，Claude/Codex 继续可用；OpenCode 则保持未配置/不可用诊断。`opencode-managed-server.err.log` 独立脱敏滚动，password 不进入 argv。
+- **验证**：新增 `OpenCodeManagedServerTests`，更新 OpenCode source 迁移与 Go managedURL scope 回归测试；Swift OpenCode 定向测试与 Go OpenCode list_projects/list_sessions 定向测试通过。
+
+### 2026-07-03 — OpenCode 无缝接入 managed local server 方案
+
+- 产出本地 managed local server 开发规格，把 OpenCode 最终目标从手动 `external_http` 配置细化为 CordCode Link 自动托管本机 OpenCode shared server、自动同步 Desktop 默认 server 与项目 scope、iOS 扫码后直接看到 Mac 端 OpenCode Desktop 项目/session 的实现路径。
+
+### 2026-07-02 — 修复 OpenCode Desktop 切到 external_http 后项目列表为空
+
+- **修复重启 OpenCode Desktop 后项目/session 看起来消失**：CordCode 同步 Desktop 默认 server 到 `external_http` endpoint 时，现在会优先把 Desktop `local` scope 下的完整项目集合迁移到新 endpoint key，并用旧 active server / legacy `64667` 只补充缺项，避免 Desktop 重启后进入一个没有项目历史的新 server scope。
+- **保留并合并已有 external_http 项目状态**：如果目标 endpoint 已经有项目列表，会按 worktree 去重后合并 `local`/旧 server 的缺项；`lastProject` 已存在时不覆盖，避免用户手动整理过的 Desktop 状态被回滚。
+
+### 2026-07-02 — OpenCode 项目列表跟随 Desktop 打开的 workspace
+
+- **修复 iOS OpenCode 模式显示大量已关闭项目目录**：OpenCode `/project` 是历史 catalog,会包含 Desktop 里已经手动关闭的项目；Desktop 侧栏真正打开的项目保存在本机 `opencode.global.dat` 的 `server.projects[scope]` 数组中。MacBridge `list_projects` 现在按 Desktop 源码语义读取该数组,只向 iOS 返回仍在数组里的 opened projects 并保留 Desktop 顺序；`expanded=false` 仅代表 Desktop 侧栏折叠状态,不再被误判为关闭。读不到 Desktop 状态时才保留原 `/project` catalog 作为诊断事实。
+- **项目名跟随 Desktop 元数据**：返回项目时优先使用 `/project` metadata 里的 `name`,没有元数据时退回目录 basename,对齐 Desktop 的 `displayName(project) = project.name || basename(worktree)`。
+- **OpenCode session 列表对齐 Desktop 加载方式**：目录级 session list 允许 `rootsOnly + limit`,MacBridge 转发为 `x-opencode-directory + ?limit=N`,并按 Desktop 的保守策略在 array response `len == limit` 时标记“可能还有更多”；仍拒绝 `rootsOnly + cursor`,因为 Desktop 当前并不使用 session cursor 做 sidebar 加载。
+
+### 2026-07-02 — OpenCode list_sessions 提高 limit 上限以支持完整项目拉取
+
+- **OpenCode `list_sessions` 的 limit 上限从 50 提高到 1000**：OpenCode server 是 array-only(无 cursor/无 total),一次性返回 `min(limit, total)`,唯一能控制取回量的就是单次 `limit`。原 50 上限会让真实项目(观测到 459 条)被截断且无法翻页。提高到 1000 后客户端可一次拉满整个项目;对小项目无副作用(服务端只返回实际总数)。
+
+### 2026-07-02 — OpenCode project-first session 列表分页协议
+
+- **OpenCode `list_sessions` 改为目录级 page**：go-bridge 的 OpenCode proxy path 现在接收 `directory + limit + cursor`，向 upstream 发送 `x-opencode-directory` 和非空 query 参数，并继续返回既有 `{ sessions, nextCursor, hasMore }` envelope；array-only OpenCode 1.17.13 轨道不伪造 `hasMore`。
+- **避免 global dump 误当全项目 catalog**：bare `/session` 仍只代表 `global`，项目桶必须走目录 scoped 请求；当前实现已按 Desktop 方式允许 `rootsOnly + limit`,但仍拒绝 `rootsOnly + cursor`,避免 cursor page 后再 client-side 过滤造成漏页。
+- **诊断更清楚**：OpenCode list 日志新增 directory、limit、cursor-present、result-count、next-cursor-present、duration，便于从 `go-bridge.log` 验证冷启动请求预算。
+- **协议文档同步**：`list_sessions` 分页与 `get_session_messages` 的 `session_pagination` capability 明确拆开；列表 cursor 是 backend/project/directory scoped opaque 值，客户端不得解析或跨 scope 复用。
+
+### 2026-07-02 — OpenCode 共享本地服务接入（Phase A 显式 external_http）实现
+
+- **移除对固定 `127.0.0.1:64667` 的隐式默认依赖**：OpenCode backend 改为显式 **Server Source** 模型（External HTTP / Legacy 64667 / Service discovery (future) / Disabled）。`go-bridge` 的 `-opencode-url` 默认改为空，`agent/opencode` 不再 fallback `http://localhost:64667`；endpoint 未解析时 descriptor 报 `not_configured`，绝不 dial `64667`。
+- **External HTTP：bring-your-own-server**：CordCode 连接用户/运维启动的 stable `opencode serve`（loopback + Basic Auth），不启动也不保活它。Swift 端 `OpenCodeEndpointResolver` 规范化 URL（`localhost`→`127.0.0.1`，拒绝非 loopback/https），`OpenCodeHealthValidator` 先以 no-auth `/global/health` 证明 server 要求认证（必须 401）再做 authed 校验；无密码 server（no-auth 200）默认拒绝为 `server_unauthenticated`。
+- **RuntimeManager 显式传 URL、凭据走 env**：argv 增加 `-opencode-url <url>`（URL 非 secret），password 仍经 `OPENCODE_SERVER_PASSWORD` 环境变量传递，不进 argv / 日志；argv/env 构造提取为可测试 static。Desktop 默认 server 配置同步到 resolved endpoint URL，不再固定写 `64667`，且去重保留用户其它 server。
+- **升级连续性与新装默认**：存量 `credentials.json` + 无显式 source 自动一次性迁移到 `legacy_64667` 并提示改配 external_http；全新安装默认 Disabled。`legacy_64667` 是唯一允许带 `legacy_insecure_unverified` 警告继续运行的兼容例外。
+- **iOS/Desktop 共享同一 OpenCode server**：消除过去 Desktop `vlocal` 与 iOS 固定 `64667` 分裂成两个项目/session scope 的问题（不修改 OpenCode 源码；不抓取 Desktop sidecar 密码）。
+- **验证**：新增 `OpenCodeEndpointResolverTests`（18 例，URL 规范化/解析/迁移）、`OpenCodeHealthValidatorTests`（10 例，no-auth/authed 区分、schema、timeout、legacy 例外）、`MacBridgeBehaviorTests`（argv/env/Desktop 配置 6 例）、Go `TestDetectAgentStatus_OpenCode*` + `TestShouldStartPassiveSubscription`。Debug 构建 + 全部定向单测通过；既有 9 个 codex pagination 测试因本机未装 `codex` CLI 的环境原因失败（已确认在 clean main 同样失败，非本次回归）。
+
+### 2026-07-02 — OpenCode 共享本地服务接入方案文档
+
+- 新增 `docs/2026-07-02-opencode-shared-service-discovery-plan.md`，明确“不修改 OpenCode 源码”前提下不能直接发现 Desktop `vlocal` sidecar 密码；当前 stable 可开发路线改为显式 `external_http` 共享 server，并保留未来 `opencode service` discovery 的能力门控入口。
+- 方案给出开发任务、失败模式、安全约束和验证清单，目标是移除 CordCode 对固定 `64667` 的默认依赖，避免 OpenCode Desktop 与 iOS 项目/session 分裂；经评审后修订为 stable-compatible 分阶段方案：当前可开发的是显式 `external_http` 共享 server，`opencode service` discovery 因 stable 1.17.13 未暴露 `service`/`--register` 被降级为 future-gated。第二轮补充 Phase A 认证实测、bring-your-own-server 持久化边界、存量用户升级默认迁移到 `legacy_64667` 的连续性规则；第三轮补强 passwordless guard，要求 no-auth `/global/health` 返回 200 的 OpenCode server 默认拒绝，并把 `legacy_64667` 明确为带警告的兼容例外。
+- 修复 OpenCode backend 状态检测仍探测旧 `/health` 的问题；现在 descriptor 与方案一致使用 `/global/health` 并校验 `healthy/version` body，避免 shared server 已可用但 iOS/MacBridge 仍显示 OpenCode 未启动。
+- 修复 OpenCode 模式项目与目录选择回归：`list_projects` 兼容 OpenCode 1.17.13 的 `worktree` 字段并映射为 iOS 需要的 `directory`；`list_directory` 在 OpenCode RPC 分支中重新走通用目录浏览 handler，恢复 iOS 手动添加项目目录能力。
+
 ### 2026-07-01 — Codex 外部 session 结束后 iOS 执行态快速收口
 
 - **修复 Mac 端 Codex 任务完成后 iOS 输入框十几秒才恢复**：当 iOS 旁观 Mac 端 Codex session 时，go-bridge 现在会监视 Codex JSONL transcript 中真实的 `task_started` / `task_complete` 事件；`task_complete` 到达后立即广播 `turn_completed` + `session_state_changed: idle`，让 iOS 走 500ms 终态 debounce，而不是等待 history probe 的多轮 unchanged 兜底。Codex transcript relay 与标准 `AgentSession` relay 使用独立 lifecycle key，可覆盖 registry 里已有 session 但标准事件流收不到外部最终事件的情况。

@@ -8,6 +8,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -17,6 +21,18 @@ import (
 type OpenCodeProxy struct {
 	baseURL    string
 	authHeader string
+}
+
+type OpenCodeSessionListOptions struct {
+	Directory string
+	Limit     int
+	Cursor    string
+	Roots     bool
+}
+
+type OpenCodeSessionListResult struct {
+	Sessions   []map[string]interface{}
+	NextCursor string
 }
 
 func NewOpenCodeProxy(baseURL, username, password string) *OpenCodeProxy {
@@ -88,12 +104,27 @@ func withDir(d string) func(*fetchOpts) {
 
 // ── API methods ───────────────────────────────────────────────────────────────
 
-func (p *OpenCodeProxy) listSessions(directory string) ([]map[string]interface{}, error) {
-	raw, err := p.fetch("/session", withDir(directory))
-	if err != nil {
-		return nil, err
+func (p *OpenCodeProxy) listSessions(opts OpenCodeSessionListOptions) (OpenCodeSessionListResult, error) {
+	path := "/session"
+	query := url.Values{}
+	if opts.Limit > 0 {
+		query.Set("limit", strconv.Itoa(opts.Limit))
 	}
-	return unwrapArray(raw)
+	if opts.Cursor != "" {
+		query.Set("cursor", opts.Cursor)
+	}
+	if opts.Roots {
+		query.Set("roots", "true")
+	}
+	if encoded := query.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+
+	raw, err := p.fetch(path, withDir(opts.Directory))
+	if err != nil {
+		return OpenCodeSessionListResult{}, err
+	}
+	return unwrapSessionList(raw)
 }
 
 func (p *OpenCodeProxy) getSession(sessionID, directory string) (map[string]interface{}, error) {
@@ -238,7 +269,13 @@ func (p *OpenCodeProxy) listProjects() ([]map[string]interface{}, error) {
 		if dir == "" {
 			dir, _ = pr["path"].(string)
 		}
+		if dir == "" {
+			dir, _ = pr["worktree"].(string)
+		}
 		name, _ := pr["name"].(string)
+		if name == "" {
+			name = filepath.Base(cleanOpenCodeProjectDir(dir))
+		}
 		if name == "" {
 			name = id
 		}
@@ -251,7 +288,107 @@ func (p *OpenCodeProxy) listProjects() ([]map[string]interface{}, error) {
 			"name":      name,
 		})
 	}
+	if visible := openCodeDesktopVisibleProjects(p.baseURL, result); len(visible) > 0 {
+		return visible, nil
+	}
 	return result, nil
+}
+
+func openCodeDesktopVisibleProjects(baseURL string, projects []map[string]interface{}) []map[string]interface{} {
+	visibleDirs := readOpenCodeDesktopVisibleProjectDirs(baseURL)
+	if len(visibleDirs) == 0 {
+		return nil
+	}
+
+	byDirectory := make(map[string]map[string]interface{}, len(projects))
+	for _, project := range projects {
+		dir, _ := project["directory"].(string)
+		if dir == "" {
+			continue
+		}
+		byDirectory[cleanOpenCodeProjectDir(dir)] = project
+	}
+
+	var visible []map[string]interface{}
+	for _, dir := range visibleDirs {
+		if project, ok := byDirectory[cleanOpenCodeProjectDir(dir)]; ok {
+			visible = append(visible, project)
+			continue
+		}
+		visible = append(visible, map[string]interface{}{
+			"id":        dir,
+			"directory": dir,
+			"name":      filepath.Base(cleanOpenCodeProjectDir(dir)),
+		})
+	}
+	return visible
+}
+
+func readOpenCodeDesktopVisibleProjectDirs(baseURL string) []string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return nil
+	}
+	path := filepath.Join(home, "Library", "Application Support", "ai.opencode.desktop", "opencode.global.dat")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+
+	var store map[string]string
+	if err := json.Unmarshal(raw, &store); err != nil {
+		return nil
+	}
+	serverRaw := store["server"]
+	if serverRaw == "" {
+		return nil
+	}
+	var server struct {
+		CurrentSidecarURL string `json:"currentSidecarUrl"`
+		Projects          map[string][]struct {
+			Worktree string `json:"worktree"`
+			Expanded *bool  `json:"expanded"`
+		} `json:"projects"`
+	}
+	if err := json.Unmarshal([]byte(serverRaw), &server); err != nil {
+		return nil
+	}
+
+	keys := []string{}
+	if normalized := strings.TrimRight(baseURL, "/"); normalized != "" {
+		keys = append(keys, normalized)
+	}
+	if server.CurrentSidecarURL != "" {
+		keys = append(keys, strings.TrimRight(server.CurrentSidecarURL, "/"))
+	}
+	keys = append(keys, "local")
+
+	seenKeys := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		if key == "" || seenKeys[key] {
+			continue
+		}
+		seenKeys[key] = true
+		entries := server.Projects[key]
+		if len(entries) == 0 {
+			continue
+		}
+		var dirs []string
+		for _, entry := range entries {
+			if entry.Worktree == "" {
+				continue
+			}
+			dirs = append(dirs, entry.Worktree)
+		}
+		if len(dirs) > 0 {
+			return dirs
+		}
+	}
+	return nil
+}
+
+func cleanOpenCodeProjectDir(dir string) string {
+	return strings.TrimRight(strings.TrimSpace(dir), "/")
 }
 
 func (p *OpenCodeProxy) resolvePermission(sessionID, permissionID, response, directory string) error {
@@ -580,6 +717,31 @@ func unwrapArray(raw json.RawMessage) ([]map[string]interface{}, error) {
 		}
 	}
 	return nil, fmt.Errorf("no array found in response")
+}
+
+func unwrapSessionList(raw json.RawMessage) (OpenCodeSessionListResult, error) {
+	var arr []map[string]interface{}
+	if err := json.Unmarshal(raw, &arr); err == nil {
+		return OpenCodeSessionListResult{Sessions: arr}, nil
+	}
+
+	var envelope struct {
+		Data   []map[string]interface{} `json:"data"`
+		Cursor struct {
+			Next     string `json:"next"`
+			Previous string `json:"previous"`
+		} `json:"cursor"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return OpenCodeSessionListResult{}, err
+	}
+	if envelope.Data == nil {
+		return OpenCodeSessionListResult{}, fmt.Errorf("no session data found in response")
+	}
+	return OpenCodeSessionListResult{
+		Sessions:   envelope.Data,
+		NextCursor: envelope.Cursor.Next,
+	}, nil
 }
 
 func basicAuth(username, password string) string {

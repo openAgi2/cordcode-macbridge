@@ -151,17 +151,34 @@ MacBridge Restart 只重启 Bridge runtime，不负责重启外部共享 Codex a
 
 ### OpenCode
 
-- agent session 与历史/模型等通用能力位于 `agent/opencode/`；
+OpenCode 不再隐式硬编码 `127.0.0.1:64667`。MacBridge 在 Swift 端解析出明确的
+**Server Source**（`managed_local` / `external_http` / `legacy_64667` /
+`service_discovery_future` / `disabled`）。新装默认 `managed_local`：CordCode Link 作为
+supervisor 启动 loopback-only `opencode serve`，持久化 `4096...4196` 范围内的端口和随机
+Basic Auth 凭据，health 通过后把 resolved loopback URL 通过 `-opencode-url` 传给
+go-bridge；endpoint 未解析（disabled / external_http 未填 URL / managed server 启动失败）
+时**不传** `-opencode-url`，go-bridge 把该 backend 的 descriptor 状态报为
+`not_configured`，绝不 dial `64667`。
+
+- agent session 与历史/模型等通用能力位于 `agent/opencode/`；`agent/opencode.New` 在
+  无 URL 时进入 degraded（CLI 能力可用，HTTP 数据面返回 `ErrNotSupported` / 未配置诊断），
+  不再 fallback `http://localhost:64667`。
 - OpenCode server 专属的 create/resume/get/abort 等语义仍可走
-  `go-bridge/opencode-proxy.go`；
-- `agent/opencode/sse_subscriber.go` 被动订阅 OpenCode SSE，并把 Mac 发起的 turn
-  映射成统一事件；
+  `go-bridge/opencode-proxy.go`（仅 URL 非空时注册）。
+- `agent/opencode/sse_subscriber.go` 被动订阅 OpenCode SSE；无 URL 时
+  `shouldStartPassiveSubscription` 直接返回 false，避免无意义重连退避（Subscribe 本身也会
+  拒绝空 URL）。
 - descriptor 当前仍声明 `requiresPollingForExternalTurns=true`，iOS 可保留低频历史
   探测兜底，但 SSE 健康时不应同时启动高频 recovery polling。
 
-MacBridge 会为 OpenCode 管理本地 Basic Auth：优先复用现有 server LaunchAgent 凭据，否则
-生成随机凭据写入 app data dir 的 `credentials.json` 并同步 OpenCode Desktop 配置。
-`401` 表示服务已响应但凭据不一致，不能当作 backend available。
+MacBridge 仍为 OpenCode 管理本地 Basic Auth：`managed_local` 的运行态写入独立
+`opencode-managed-server.json`（`0600`，不复用用户配置语义的 `credentials.json`）；
+既有 `credentials.json` 继续保存用户显式 source、外部 URL 和兼容凭据。Swift 端
+`OpenCodeHealthValidator` / managed health probe 先发 no-auth `/global/health`，证明 server
+要求认证（401）后再做 authed 校验；no-auth `200` 的 OpenCode server 判为
+`server_unauthenticated` 必须拒绝（`legacy_64667` 例外，标
+`legacy_insecure_unverified`）。Desktop 默认 server 配置同步到 resolved endpoint URL，并把
+`local` 项目 scope 合并到 `projects[managedURL]`，不再固定写 `64667`。
 
 ### OpenCode hybrid 路由矩阵
 
