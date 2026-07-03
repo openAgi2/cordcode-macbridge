@@ -62,6 +62,12 @@ func TestShouldStartPassiveSubscription_CodexRequiresExplicitSharedURL(t *testin
 	}
 }
 
+func TestDisablesRelayIdleTimeoutIncludesOpenCode(t *testing.T) {
+	if !disablesRelayIdleTimeout("opencode") {
+		t.Fatal("opencode relay idle timeout should be disabled")
+	}
+}
+
 func TestClearOpenCodeServerAuthEnv(t *testing.T) {
 	t.Setenv("OPENCODE_SERVER_USERNAME", "user")
 	t.Setenv("OPENCODE_SERVER_PASSWORD", "pass")

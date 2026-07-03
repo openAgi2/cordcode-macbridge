@@ -2630,7 +2630,7 @@ var (
 
 func disablesRelayIdleTimeout(backendID string) bool {
 	switch backendID {
-	case "claude", "claudecode", "codex":
+	case "claude", "claudecode", "codex", "opencode":
 		return true
 	default:
 		return false

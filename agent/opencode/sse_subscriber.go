@@ -324,6 +324,9 @@ func (s *sseSubscriber) handleSSEMessageUpdated(properties map[string]any, sessi
 		}
 		s.stateMu.Unlock()
 	}
+	if sessionID != "" && role == "user" {
+		s.resetCompletion(sessionID)
+	}
 	if sessionID == "" || role != "assistant" {
 		return
 	}
@@ -482,6 +485,9 @@ func (s *sseSubscriber) handleSSESessionStatus(properties map[string]any, sessio
 	if sessionID == "" {
 		sessionID = extractSSESessionID(firstMap(properties, "status"))
 	}
+	if status == "running" && sessionID != "" {
+		s.resetCompletion(sessionID)
+	}
 	if status == "idle" && sessionID != "" {
 		s.emitResultOnce(sessionID)
 	}
@@ -496,6 +502,9 @@ func (s *sseSubscriber) handleSSESessionUpdated(properties map[string]any, sessi
 		sessionID = extractSSESessionID(info)
 	}
 	status := firstString(info, "status")
+	if status == "running" && sessionID != "" {
+		s.resetCompletion(sessionID)
+	}
 	if status == "idle" && sessionID != "" {
 		s.emitResultOnce(sessionID)
 	}
@@ -569,6 +578,12 @@ func (s *sseSubscriber) emitResultOnce(sessionID string) {
 	s.completed[sessionID] = true
 	s.stateMu.Unlock()
 	s.emit(core.Event{Type: core.EventResult, SessionID: sessionID, Done: true})
+}
+
+func (s *sseSubscriber) resetCompletion(sessionID string) {
+	s.stateMu.Lock()
+	delete(s.completed, sessionID)
+	s.stateMu.Unlock()
 }
 
 func (s *sseSubscriber) kindForPart(sessionID, messageID, partID, field string) string {

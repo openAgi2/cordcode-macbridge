@@ -8,6 +8,11 @@
 
 ## [Unreleased]
 
+### 2026-07-03 — 修复 OpenCode 连续 turn 流式收口抖动
+
+- **OpenCode 连续问答的完成事件按 turn 复位**：OpenCode SSE 订阅在同一 session 进入新 user/running 状态时清除上一轮 completion 去重，避免第二轮开始后 completion 被 session 级状态吞掉。
+- **避免历史轮询后伪造完成造成状态条闪烁**：OpenCode 事件 relay 不再使用空闲超时自动补 `turn_completed`，减少生成结束后的 runtime status strip 重复亮灭和布局抖动。
+
 ### 2026-07-03 — OpenCode Automatic managed local server 实现
 
 - **OpenCode 新装默认改为 Automatic（managed_local）**：CordCode Link 会自动启动并管理一个只绑定 `127.0.0.1` 的 `opencode serve`，选择并持久化 `4096...4196` 范围内的端口和随机 Basic Auth 凭据；iOS 仍只连接 MacBridge，不直连 OpenCode。

@@ -215,6 +215,25 @@ func TestSSESubscriber_ServerPayloadCompletionIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestSSESubscriber_CompletionResetsForNextTurn(t *testing.T) {
+	sub := newTestSSESubscriber()
+	defer sub.cancel()
+
+	sub.handleRawEvent(`{"payload":{"type":"session.status","properties":{"sessionID":"ses_1","type":"idle"}}}`)
+	sub.handleRawEvent(`{"payload":{"type":"message.updated","properties":{"info":{"id":"msg_user_2","sessionID":"ses_1","role":"user"}}}}`)
+	sub.handleRawEvent(`{"payload":{"type":"session.status","properties":{"sessionID":"ses_1","type":"idle"}}}`)
+
+	events := drainSSEEvents(sub)
+	if len(events) != 2 {
+		t.Fatalf("event count = %d, want 2: %#v", len(events), events)
+	}
+	for i, event := range events {
+		if event.Type != core.EventResult || !event.Done || event.SessionID != "ses_1" {
+			t.Fatalf("event[%d] = %#v, want completion for ses_1", i, event)
+		}
+	}
+}
+
 func TestSSESubscriber_StillHandlesCLINDJSONShape(t *testing.T) {
 	sub := newTestSSESubscriber()
 	defer sub.cancel()
