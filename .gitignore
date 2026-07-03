@@ -31,3 +31,14 @@ AGENTS.md
 # release/signing) remain tracked as already-committed.
 /docs/*
 !/docs/protocol/
+
+# Local-only handoff/exec-plan clutter (untracked; files kept on disk).
+# Precise paths — do NOT ignore the whole handoffs/ or .exec-plan/ trees,
+# since both contain tracked files (older handoffs, committed plan states).
+handoffs/handoff-20260702-1511.md
+handoffs/handoff-20260702-1839.md
+handoffs/handoff-20260702-2053.md
+handoffs/handoff-20260703-0132.md
+handoffs/handoff-20260703-1024.md
+handoffs/handoff-20260703-1124.md
+.exec-plan/state/plan-a4ebbe0ec47d.json
