@@ -14,6 +14,7 @@
 - 规定先补 direct/relay attempt、未采纳 transport 清理、adoption 边界三类不变量测试，再提取 `BridgeTransportConnector.swift`；不改 protocol、pairing、Relay crypto、路径选择语义或 recovery ownership。
 - 明确完成标准：`BridgeProvider.swift` 指标必须下降、MacBridge `hygiene-baseline.json` 必须下调并通过 strict gate，iOS 代码改动后按真机连接状态执行构建/安装/启动。
 - 按独立评审修订 brief：修正不存在的 `attemptRelayConnection` 符号，补入 `runDirectRace` / `RaceTransportCollector` / `RaceResult` / `RaceCompletion` 等 transport-creation 层真实切片，定调本轮采用独立 `BridgeTransportConnector` 类型并纳入 direct race，量化目标为 `BridgeProvider.swift` lines ≤1700 / funcs ≤78 / ForTesting ≤30。
+- 按第二轮评审补齐发车前澄清：P1 允许并预期改写现有测试的 factory 注入调用点到 connector 测试入口；`runDirectRace` 边界止于 `applyHelloAckLocalURLRefresh` 前；若 race 迁出阻塞，则 lines 目标挂起并暂停升级 owner，不接受降级提交。
 
 ### 2026-07-04 — 架构健康第二轮：web 共享包收口 5/5 + BridgeProvider 净增长 gate + handlers.go 物理分发
 
