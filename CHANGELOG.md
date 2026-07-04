@@ -10,8 +10,30 @@
 
 ### 2026-07-04 — 修复 Claude Code 冷启动既有 session 首轮流式重复
 
-- 修复冷启动打开既有 Claude Code session 后，首个本地提问可能被 transcript file relay 抢占真实 CLI stdout relay 的问题；现在 `send_message` 会让真实 AgentSession relay 接管，避免 iOS 端在长回复中反复回到 runtime status strip 并从头刷新半截回复。
+> **根因口径修订（2026-07-04 架构健康第四轮）**：本条目原描述把 Mac 侧
+> `relayRunningKind` 拆分当作冷启动重复从头输出的主因。经日志与 `think.md`
+> 复核，Mac runtime 没有重复 `send_message`；**症状主因在 iOS 侧**——iOS 在本地
+> live stream 中途执行普通 `loadMessages` / running polling / todo refresh，把权威
+> 历史覆盖到了本地正在流式增长的 timeline（已由 iOS `e018cb5f Fix Claude local
+> stream history overwrite` 单点修复）。Mac 侧 `relayRunningKind` 拆分属于 **latent
+> bug / 独立 hardening**（transcript file relay 与真实 CLI stdout relay 不应混用为
+> 同一布尔占位），保留为独立加固，不再标记为症状主因。第四轮把 iOS 侧的结构性硬化
+> 完成为 backend-agnostic turn sync policy（见下条）。
+
+- （Mac 侧 latent bug / 独立 hardening）冷启动打开既有 Claude Code session 后，首个本地提问可能被 transcript file relay 抢占真实 CLI stdout relay；现在 `send_message` 会让真实 AgentSession relay 接管。这不是冷启动重复从头输出的主因（主因在 iOS，见上），但两类 relay 混用是 latent bug，独立修复。
 - 新增 go-bridge 回归测试，覆盖“已有 Claude file relay 标记 + 立刻本地发送”的接管路径，防止后续重构再次把两类 relay 混用成同一个布尔占位。
+
+### 2026-07-04 — 架构健康第四轮（最终轮）：Chat turn sync state-model hardening
+
+第四轮（本次专项收口轮）把 iOS `ChatViewModel` 的 local send / live event / history sync / running-session polling / session switch 互斥与优先级规则，从散落在多个 extension 的 Claude-only ad-hoc 条件（`isClaudeCodeLocalSendInProgress` / `allowDuringClaudeLocalSend`）重构为 backend-agnostic 的显式 policy/coordinator，并用定向测试 + strict net-growth gate 防回涨。
+
+- **新增 policy 类型（iOS 仓 `../cordcode-ios`）**：`ChatTurnSyncPolicy`（纯函数 enum：`Ownership` `.none`/`.localSend`/`.remoteLive`/`.reconciling`、`LoadTrigger` 8 case、`LoadDecision` 5 case）+ `ChatTurnSyncState`（`@MainActor` state holder：`decideLoad`/`beginLoadIfAllowed`/`canApply`/`finishLoad`，MainActor 原子读写 + apply 前复核）。policy 不访问 `ChatViewModel`/全局状态/网络。
+- **接入生产调用点（iOS 仓）**：`loadMessages` 入口统一经 `turnSyncState.decideLoad` → `beginLoadIfAllowed`（`.defer*`/`.reject*` 在网络请求前短路）→ fetch → `canApply`（apply 前复核 ownership/session/initializationID/token）→ `finishLoad`；`sendMessage`/`beginGenerationTurn` 设置 ownership，`completeGenerationCycle` 转入 `.reconciling`，final reconcile apply 后清回 `.none`；`switchSession` 清理旧 session ownership。
+- **Backend-aware 差异**：Claude Code 在 `.localSend` 时 defer 普通 load（CLI 无跨 session live bus）；Codex/OpenCode 走 merge-only（app-server/SSE live 权威、merge 幂等）。这是能力判断，不是「Claude 就跳过」粗规则。
+- **定向测试（iOS 仓）**：`ChatTurnSyncPolicyTests` 25 条纯函数单测；`RemoteRunningSessionTests` 新增 `testClaudeCodeInterleave_inFlightHistoryLoadDoesNotOverwriteLivePartialAfterLocalSend`（证明 apply 前复核真实存在）+ `testClaudeCodeSecondTurn_finalReconcileClearsOwnershipForNextTurn`（证明 ownership 清回 .none 不阻塞下一轮）；既有 Claude/Codex/OpenCode/session-switch 相关测试全绿。
+- **strict net-growth gate（本仓）**：`scripts/hygiene-baseline.json` 新增 `chatviewmodel_generation`（2336/56）+ `chatviewmodel_messagesync`（1577/46）两条 baseline；`check-architecture-hygiene.sh` 泛化为遍历所有 baseline 条目；`CORDCODE_HYGIENE_STRICT=1` 下净增即 fail。第三轮 BridgeProvider gate 保留。
+- **文档同步**：`../cordcode-ios/IOS_MAC_INTERACTION_FLOW.md` 新增「Turn ownership / history sync gate / final reconcile」小节；本仓 `GO_BRIDGE_ARCHITECTURE.md` 新增「iOS live event vs history polling 消费边界」小节；本条目修订既有 07-04 Claude 冷启动条目根因口径。
+- **专项收口声明**：本次架构健康专项到第四轮结束（closed）。剩余大文件（`ChatUIKitContainerView`、`claudecode.go`、`appserver_session.go`、`handlers.go`、`BridgeProvider` 下一子域）作为普通维护债进入日常 backlog，不派生「第五轮架构健康」。未来若出现新系统性 gap，需另立专项。完整完成报告见 `docs/2026-07-04-architecture-health-fourth-final-round-development-brief完成情况.md`。
 
 ### 2026-07-04 — 架构健康第三轮：BridgeProvider transport creation 子域提取（BridgeTransportConnector）
 

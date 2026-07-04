@@ -80,53 +80,107 @@ else
 fi
 printf 'Rule: protocol/capability/relay changes must update docs/protocol, iOS mirror/models, targeted tests, and living docs.\n'
 
-print_section "BridgeProvider net-growth gate"
+print_section "Net-growth gates (per-file baselines)"
 BASELINE_FILE="$ROOT/scripts/hygiene-baseline.json"
-BP_PATH="$IOS_ROOT/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift"
 GATE_RAN=0
 GROWTH=0
 
+# 遍历 hygiene-baseline.json 中每个 baseline 条目（除 _comment* 元数据键外），
+# 对每个条目按 path / lines / funcs / forTesting 比对当前实测值，任一净增即记 growth。
+# path 是相对 iOS repo root（或 MacBridge root，以能解析到文件为准）。
+check_baseline_entry() {
+  local key="$1"
+  local relpath="$2"
+  local base_lines="$3"
+  local base_funcs="$4"
+  local base_fortesting="$5"
+
+  # relpath 以 ../cordcode-ios/ 开头时解析到 IOS_ROOT，否则解析到 ROOT（MacBridge）。
+  local target=""
+  case "$relpath" in
+    ../cordcode-ios/*)
+      if [ -z "$IOS_ROOT" ]; then return 0; fi
+      target="$IOS_ROOT/${relpath#../cordcode-ios/}"
+      ;;
+    *)
+      target="$ROOT/$relpath"
+      ;;
+  esac
+  if [ ! -f "$target" ]; then
+    printf '  %s: file not measurable (%s); skipped\n' "$key" "$relpath"
+    return 0
+  fi
+  GATE_RAN=1
+  local cur_lines cur_funcs cur_fortesting
+  cur_lines="$(wc -l < "$target" | tr -d ' ')"
+  cur_funcs="$(grep -wo 'func' "$target" | wc -l | tr -d ' ')"
+  cur_fortesting="$(grep -o 'ForTesting' "$target" | wc -l | tr -d ' ')"
+
+  printf '  %s (%s)\n' "$key" "$relpath"
+  printf '    lines:      %s -> %s\n' "$base_lines" "$cur_lines"
+  printf '    funcs:      %s -> %s\n' "$base_funcs" "$cur_funcs"
+  if [ -n "$base_fortesting" ]; then
+    printf '    forTesting: %s -> %s\n' "$base_fortesting" "$cur_fortesting"
+  fi
+
+  if [ "$cur_lines" -gt "$base_lines" ]; then
+    printf '    ❌ lines net growth (+%s)\n' "$((cur_lines - base_lines))"
+    GROWTH=1
+  fi
+  if [ "$cur_funcs" -gt "$base_funcs" ]; then
+    printf '    ❌ funcs net growth (+%s)\n' "$((cur_funcs - base_funcs))"
+    GROWTH=1
+  fi
+  if [ -n "$base_fortesting" ] && [ "$cur_fortesting" -gt "$base_fortesting" ]; then
+    printf '    ❌ forTesting net growth (+%s)\n' "$((cur_fortesting - base_fortesting))"
+    GROWTH=1
+  fi
+}
+
 if [ ! -f "$BASELINE_FILE" ]; then
   printf 'Result: baseline file missing (%s); gate disabled.\n' "$BASELINE_FILE"
-elif [ -z "$IOS_ROOT" ] || [ ! -f "$BP_PATH" ]; then
-  printf 'Result: BridgeProvider.swift not measurable (iOS repo not co-located); gate skipped.\n'
+elif ! command -v python3 >/dev/null 2>&1; then
+  # 无 python3 时回落到旧 BridgeProvider-only 逻辑（兼容环境）。
+  BP_PATH="$IOS_ROOT/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift"
+  if [ -n "$IOS_ROOT" ] && [ -f "$BP_PATH" ]; then
+    GATE_RAN=1
+    BP_LINES="$(wc -l < "$BP_PATH" | tr -d ' ')"
+    BASE_LINES="$(grep '"lines"' "$BASELINE_FILE" | head -1 | grep -oE '[0-9]+' | head -1)"
+    printf '  BridgeProvider (fallback, no python3): %s lines (baseline %s)\n' "$BP_LINES" "$BASE_LINES"
+    [ "$BP_LINES" -gt "$BASE_LINES" ] && GROWTH=1
+  fi
 else
-  GATE_RAN=1
-  BP_LINES="$(wc -l < "$BP_PATH" | tr -d ' ')"
-  BP_FUNCS="$(grep -wo 'func' "$BP_PATH" | wc -l | tr -d ' ')"
-  BP_FORTESTING="$(grep -o 'ForTesting' "$BP_PATH" | wc -l | tr -d ' ')"
-  BASE_LINES="$(grep '"lines"' "$BASELINE_FILE" | head -1 | grep -oE '[0-9]+' | head -1)"
-  BASE_FUNCS="$(grep '"funcs"' "$BASELINE_FILE" | head -1 | grep -oE '[0-9]+' | head -1)"
-  BASE_FORTESTING="$(grep '"forTesting"' "$BASELINE_FILE" | head -1 | grep -oE '[0-9]+' | head -1)"
-
-  printf 'BridgeProvider.swift baseline -> current:\n'
-  printf '  lines:      %s -> %s\n' "$BASE_LINES" "$BP_LINES"
-  printf '  funcs:      %s -> %s\n' "$BASE_FUNCS" "$BP_FUNCS"
-  printf '  forTesting: %s -> %s\n' "$BASE_FORTESTING" "$BP_FORTESTING"
-
-  if [ "$BP_LINES" -gt "$BASE_LINES" ]; then
-    printf '  ❌ lines net growth (+%s)\n' "$((BP_LINES - BASE_LINES))"
-    GROWTH=1
-  fi
-  if [ "$BP_FUNCS" -gt "$BASE_FUNCS" ]; then
-    printf '  ❌ funcs net growth (+%s)\n' "$((BP_FUNCS - BASE_FUNCS))"
-    GROWTH=1
-  fi
-  if [ "$BP_FORTESTING" -gt "$BASE_FORTESTING" ]; then
-    printf '  ❌ forTesting net growth (+%s)\n' "$((BP_FORTESTING - BASE_FORTESTING))"
-    GROWTH=1
-  fi
+  # 用 python3 解析 JSON 并遍历所有 baseline 条目。
+  while IFS=$'\t' read -r key relpath base_lines base_funcs base_fortesting; do
+    check_baseline_entry "$key" "$relpath" "$base_lines" "$base_funcs" "$base_fortesting"
+  done < <(python3 - "$BASELINE_FILE" <<'PY'
+import json, sys
+data = json.load(open(sys.argv[1]))
+for key, entry in data.items():
+    if key.startswith("_comment"):
+        continue
+    if not isinstance(entry, dict) or "path" not in entry:
+        continue
+    print("\t".join([
+        key,
+        entry.get("path", ""),
+        str(entry.get("lines", 0)),
+        str(entry.get("funcs", 0)),
+        str(entry.get("forTesting", "")) if "forTesting" in entry else "",
+    ]))
+PY
+)
 fi
 
 print_section "Gate status"
 if [ "$GATE_RAN" -eq 1 ] && [ "${CORDCODE_HYGIENE_STRICT:-0}" = "1" ]; then
   if [ "$GROWTH" -eq 1 ]; then
-    printf 'Result: STRICT FAILED — BridgeProvider net growth detected.\n'
-    printf 'Fix: move new logic into a separate responsibility file (round 3 extract-and-test),\n'
+    printf 'Result: STRICT FAILED — net growth detected in one or more baseline files.\n'
+    printf 'Fix: move new logic into a separate responsibility file (e.g. ChatTurnSyncPolicy/State),\n'
     printf 'or update scripts/hygiene-baseline.json with a documented justification in the same PR.\n'
     exit 1
   fi
-  printf 'Result: STRICT passed — no BridgeProvider net growth.\n'
+  printf 'Result: STRICT passed — no net growth across all baseline files.\n'
   exit 0
 fi
 printf 'Result: warning-only (gate_ran=%s, strict=%s).\n' "$GATE_RAN" "${CORDCODE_HYGIENE_STRICT:-0}"

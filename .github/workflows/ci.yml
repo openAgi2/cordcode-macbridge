@@ -50,7 +50,8 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      # P2 BridgeProvider 净增长 strict gate 需要同 org 的 cordcode-ios 同仓测量。
+      # 净增长 strict gate（BridgeProvider 第三轮 + ChatViewModel Generation/MessageSync 第四轮）
+      # 需要同 org 的 cordcode-ios 同仓测量。
       # best-effort：iOS 仓若不可访问（私有/token 不足）则跳过，gate 自身会在缺 iOS 时 graceful skip。
       - name: Checkout adjacent iOS repo (best-effort, for hygiene gate)
         uses: actions/checkout@v6
@@ -58,7 +59,7 @@ jobs:
           repository: openAgi2/cordcode-ios
           path: cordcode-ios
         continue-on-error: true
-      - name: BridgeProvider net-growth gate (P2 strict)
+      - name: Net-growth gate (BridgeProvider + ChatViewModel strict)
         env:
           CORDCODE_HYGIENE_STRICT: "1"
         run: CORDCODE_IOS_ROOT="$GITHUB_WORKSPACE/cordcode-ios" ./scripts/check-architecture-hygiene.sh

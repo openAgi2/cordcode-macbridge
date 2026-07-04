@@ -265,6 +265,29 @@ agent 事件经 `go-bridge/events.go` 统一映射：
 同一 session 的 direct 与 relay 客户端通过 broadcaster 订阅。连接关闭必须注销订阅；
 发送方也走 broadcaster，避免“直接写 + 广播”产生双份事件。
 
+### iOS live event vs history polling 消费边界
+
+第四轮架构健康专项（最终轮）后，iOS 在 `ChatViewModel` 层用一个显式 turn sync
+policy（`ChatTurnSyncPolicy` + `ChatTurnSyncState`）决定 live event、history sync、
+running-session polling、session switch 之间的互斥与优先级。MacBridge 不改变 wire
+语义，但理解 iOS 侧的下列消费边界有助于排查“live 与 history 竞争”类问题：
+
+- **Claude Code**：CLI 子进程的 live stream 只能被本进程 stdout 捕获，没有跨 session
+  共享 live event bus。MacBridge 不会重放其他 Terminal 中 Claude turn 的事件；iOS 只能
+  通过共享 JSONL 历史的 history polling 旁观外部 turn。因此 Claude 在 iOS 本地发送
+  进行中（`.localSend` ownership）时，普通 history sync 会被 policy **defer**
+  （`.deferBecauseLocalLiveTurn`），避免迟到权威历史覆盖正在流式增长的 live partial；
+  只有显式 final reconcile（send completion / turn completion）才允许权威加载。
+- **Codex**：app-server live event 是权威的；iOS 在 `.localSend` 时普通 history sync
+  走 **merge-only**（`.mergeOnlyBecauseRemoteRunning`，以 baseline 为锚幂等合并），
+  不清空 live partial。
+- **OpenCode**：SSE live event 优先，descriptor 决定 polling 兜底；与 Codex 同样走
+  merge-only 直通。
+
+ownership 的读写与 history apply 前复核均在 iOS `@MainActor` 边界内完成，并有定向
+交错测试覆盖（`RemoteRunningSessionTests.testClaudeCodeInterleave_*`）。MacBridge 的
+send/stream 语义不为此做 backend-specific 重复抑制——iOS 侧的 race 由 iOS policy 收敛。
+
 ## 已知风险与不可破坏约束
 
 - WebSocket/auth/relay 是 agent core 之外的额外失败面；先分层定位，不同时改 driver 和客户端。
