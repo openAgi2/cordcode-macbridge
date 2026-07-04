@@ -1,9 +1,9 @@
 {
-  "_comment": "BridgeProvider.swift 冻结基线 — 第二轮 P2 strict gate（scripts/check-architecture-hygiene.sh）。任一指标净增即 CI fail，允许减少。计数法：lines=wc -l；funcs=grep -wo 'func' | wc -l；forTesting=grep -o 'ForTesting' | wc -l。更新条件：把 BridgeProvider 拆出独立职责文件后（第三轮 extract-and-test），下调对应指标并在同 PR 说明拆分入口与不变量测试。r3 评审曾记 forTesting 34，本轮用 grep -o 实测为 36（计数法差异），gate 以当前实测为准。",
+  "_comment": "BridgeProvider.swift 基线 — 第三轮 P2 extract-and-test 后下调（scripts/check-architecture-hygiene.sh）。任一指标净增即 CI fail，允许减少。计数法：lines=wc -l；funcs=grep -wo 'func' | wc -l；forTesting=grep -o 'ForTesting' | wc -l。第三轮把 transport creation / direct+relay attempt / direct race / 未采纳 transport 清理从 BridgeProvider 拆到独立 BridgeTransportConnector.swift（../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeTransportConnector.swift），connector 不写 active state、不持 RecoveryCoordinator。配套定向测试：BridgeLANFirstFallbackTests（黑盒，factory 注入改写到 transportConnectorForTesting）+ BridgeTransportConnectorTests（connector 级，覆盖 connectTransport 非 CCCodeBridgeError 清理、runDirectRace 全失败清理、generation superseded）。目标与实测：lines ≤1700 / funcs ≤78 / forTesting ≤30，实测 1629/71/27 均达标。",
   "bridgeprovider": {
     "path": "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift",
-    "lines": 1967,
-    "funcs": 88,
-    "forTesting": 36
+    "lines": 1629,
+    "funcs": 71,
+    "forTesting": 27
   }
 }

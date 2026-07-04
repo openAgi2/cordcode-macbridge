@@ -8,6 +8,18 @@
 
 ## [Unreleased]
 
+### 2026-07-04 — 架构健康第三轮：BridgeProvider transport creation 子域提取（BridgeTransportConnector）
+
+第三轮按 brief 执行 P0 → P3，目标是让 iOS god-object `BridgeProvider.swift` 实际变薄：把 transport creation 子域（构造 / direct+relay attempt / 多候选 direct race / 未采纳 transport 清理）从 `BridgeProvider` 拆到独立 `BridgeTransportConnector.swift`，不改 protocol、pairing、Relay crypto、路径选择语义或 recovery ownership。12 个 exec-plan 任务全部 proven done。
+
+- **P0 测试保护（iOS 仓 `../cordcode-ios`）**：在未拆代码上确认 `BridgeLANFirstFallbackTests` / `BridgePathSwitchTests` / `GodObjectCharacterizationTests` 全绿（46 用例）；补 brief T1 指明的最小缺口——direct + relay 双失败时暴露 relay 链末端真实错误（`relay.connect_failed`）并记录 `relay-fallback-after-direct-fail` trace，不构造假成功。锁定提取前基线 lines=1967 / funcs=88 / forTesting=36。
+- **P1 提取 BridgeTransportConnector（iOS 仓）**：新增独立 `BridgeTransportConnector.swift`（`@MainActor final class`），迁出 `connectTransport` / `relayCredentials(for:)` / `runDirectSingle` / `runRelay` / `runDirectPhase` / `attemptDirectPhase` / `attemptRelay` / `runDirectRace` 与 `RaceTransportCollector` / `RaceResult` / `RaceCompletion` 及三组测试 factory 注入。`BridgeProvider.connectBridge` 保留策略选择、generation/recovery 协调、adopt；通过注入式 `configure(generationGuard:probeRoundNotifier:taskCountLogger:)` 把 connection coordinator 上下文单向交给 connector。设计约束严格落地：connector 不写 `activeBridge` / `cachedClients` / `connectionStatus` / `activeConnectionKind`，不持 `RecoveryCoordinator`，不持 UI 状态，仅持 `SavedBridgeStore` 作 relayStore；`runDirectRace` 提取边界止于 `applyHelloAckLocalURLRefresh` 之前（后者保留在 BridgeProvider）。`BridgeProvider` 仅新增 1 个窄 forward `transportConnectorForTesting()`，未超过 brief 的 ≤2 上限。
+- **P1 测试（iOS 仓）**：现有黑盒测试 factory 注入调用点改写到 `provider.transportConnectorForTesting().setXxxFactoryForTesting(...)`，断言与对外行为不变；新增 `BridgeTransportConnectorTests.swift` 6 条 connector 级定向测试，覆盖 `connectTransport` 非 CCCodeBridgeError 失败清理、`runDirectRace` 全候选失败聚合错误与 cleanup、relay factory 抛真实错误传播、direct factory 注入返回真实结果、generation superseded 拒绝 attempt。iOS 仓定向 52 用例全绿。
+- **P2 baseline 下调 + strict gate（本仓）**：`scripts/hygiene-baseline.json` 下调为 lines=1629 / funcs=71 / forTesting=27（均低于 brief 目标 ≤1700 / ≤78 / ≤30）；`CORDCODE_IOS_ROOT=../cordcode-ios CORDCODE_HYGIENE_STRICT=1 scripts/check-architecture-hygiene.sh` 通过（STRICT passed — no BridgeProvider net growth）。
+- **P3 build / 真机安装启动（iOS 仓）**：定向 `xcodebuild test`（52 用例）+ Debug 构建在已连接物理设备 iPhone 16 Pro（UDID BFC431AC…）安装并启动成功（`Launched application with org.openagi.cordcode`）；未执行 UI automation / snapshot / 自动点击。
+
+诚实口径：iOS 代码改动与定向测试发生在 `../cordcode-ios` 仓，baseline 下调与 strict gate 发生在 MacBridge 仓；两仓提交边界清晰（iOS 一条提交 + MacBridge 文档/gate baseline 一条提交）。connector 级测试覆盖了 T2/T3 的不变量（清理 + 不写 active state）；真实 socket 握手 / 真机肉眼连接路径核对仍按 brief 第 6 节归到 owner 人工验收清单。完整完成报告见 `docs/2026-07-04-architecture-health-third-round-development-brief完成情况.md`。
+
 ### 2026-07-04 — 架构健康第三轮开发 brief
 
 - 新增第三轮开发 brief，明确第三轮主轴为 iOS `BridgeProvider` 的 `transport creation` 子域 extract-and-test，而不是继续扩大范围或直接拆 ChatViewModel。

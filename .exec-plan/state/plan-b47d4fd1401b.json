@@ -1,0 +1,320 @@
+{
+  "version": 6,
+  "project_root": "/Users/jacklee/Projects/cordcode-macbridge",
+  "plan_file": "docs/2026-07-04-architecture-health-third-round-development-brief.md",
+  "state_store": {
+    "canonical_path": ".exec-plan/state/plan-b47d4fd1401b.json",
+    "legacy_path": ".claude/exec-plans/plan-b47d4fd1401b.json",
+    "origin": "new",
+    "migrated_from": null,
+    "migrated_at": null
+  },
+  "queue_policy": {
+    "todo_md_role": "informational-only",
+    "completion_gate": "proof-carrying-impl-tests-regression",
+    "phase_done_rule": "all-required-todos-done",
+    "audit_rule": "unsupported-done-must-downgrade",
+    "start_exit_rule": "internal-audit-before-success",
+    "audit_failure_policy": "light-repairable-heavy-external-blocker",
+    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+    "session_mirror_policy": "host-tracker-optional-mirror",
+    "invocation_policy": "slash-or-natural-language-equivalent",
+    "persistence_rule": "persist-on-every-status-transition"
+  },
+  "report_policy": {
+    "auto_write_completion_report": true,
+    "report_directory": "docs",
+    "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+    "write_when": "all-required-todos-proven-done",
+    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  },
+  "reports": {
+    "completion_report_path": "docs/2026-07-04-architecture-health-third-round-development-brief完成情况.md",
+    "completion_report_status": "current",
+    "last_generated_at": "2026-07-04T06:00:00Z",
+    "based_on_queue_hash": "r3-all-proven-2026-07-04"
+  },
+  "plan_baseline": {
+    "note": "Brief r3/r2 review 已核实。基线取自 hygiene-baseline.json，brief 第 2 节亦明确。",
+    "bridgeprovider": {
+      "path": "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift",
+      "lines_before": 1967,
+      "funcs_before": 88,
+      "for_testing_before": 36,
+      "lines_after": 1629,
+      "funcs_after": 71,
+      "for_testing_after": 27
+    },
+    "targets": {
+      "lines_max": 1700,
+      "funcs_max": 78,
+      "for_testing_max": 30,
+      "forwarding_methods_max": 2,
+      "forwarding_methods_actual": 1
+    },
+    "hard_constraints": [
+      "不修改 SavedBridge 持久化格式 / wire protocol / pairing payload / Relay HPKE / Tailscale SPKI pin / backend capability 字面契约",
+      "connector 不写 activeBridge / cachedClients / connectionStatus / activeConnectionKind",
+      "connector 不持 RecoveryCoordinator，不持 UI 状态",
+      "applyHelloAckLocalURLRefresh 保留在 BridgeProvider；runDirectRace 提取边界止于其之前",
+      "不新建 fallback/mock/placeholder",
+      "未经 owner 明确允许不跑 UI tests / snapshot tests / simulator automation / 真机 UI 操作",
+      "两仓提交边界清晰：iOS 一条或多条、MacBridge 文档/gate baseline 一条，不混仓"
+    ]
+  },
+  "updated_at": "2026-07-04T06:00:00Z",
+  "todos": [
+    {
+      "id": "p0-impl",
+      "title": "P0 确认 transport creation 黑盒保护网全绿 + 补最小 relay fallback 失败可观察断言 (impl)",
+      "status": "done",
+      "phase": "p0-test-protection",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "Brief 第 3 节 T1 / 第 4 节 P0",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "新增 testOrchestration_directAndRelayBothFail_reportsRelayFailureWithFallbackTrace：direct 失败 + relay fallback 也失败时，断言抛出 relay 链末端真实错误（relay.connect_failed）、trace 含 relay-fallback-after-direct-fail、不 adopt 任何 transport。未在 connector 类型不存在时写 connector 级测试。",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/BridgeLANFirstFallbackTests.swift",
+          "git:待回填（iOS 仓提交）"
+        ],
+        "checked_at": "2026-07-04T05:35:00Z"
+      }
+    },
+    {
+      "id": "p0-tests",
+      "title": "P0 定向 unit test 通过 (tests)",
+      "status": "done",
+      "phase": "p0-test-protection",
+      "kind": "tests",
+      "depends_on": ["p0-impl"],
+      "source": "Brief 第 4 节 P0 step 3",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "xcodebuild test 在 iPhone 17 Pro Max simulator 上跑 BridgeLANFirstFallbackTests / BridgePathSwitchTests / GodObjectCharacterizationTests：TEST SUCCEEDED，46 用例 0 failures（含新增双失败断言）。命令带 -only-testing:CCCodeTests/...。",
+        "artifacts": [
+          "cmd:xcodebuild test -only-testing:CCCodeTests/BridgeLANFirstFallbackTests -only-testing:CCCodeTests/BridgePathSwitchTests -only-testing:CCCodeTests/GodObjectCharacterizationTests",
+          "~/Library/Developer/Xcode/DerivedData/CordCode-asghlmpsvmlkwldpnhctfnoyaphh/Logs/Test/Test-CordCode-2026.07.04_13-34-54-+0800.xcresult"
+        ],
+        "checked_at": "2026-07-04T05:35:15Z"
+      }
+    },
+    {
+      "id": "p0-regression",
+      "title": "P0 提取前基线锁定 (regression)",
+      "status": "done",
+      "phase": "p0-test-protection",
+      "kind": "regression",
+      "depends_on": ["p0-tests"],
+      "source": "Brief 第 2 节基线 / 第 4 节 P2",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "summary": "实测 BridgeProvider.swift lines=1967 / funcs=88 / forTesting=36，与 hygiene-baseline.json 完全自洽，作为 P2 下调对比锚点。",
+        "artifacts": [
+          "cmd:wc -l + grep -wo 'func' + grep -o 'ForTesting' on BridgeProvider.swift"
+        ],
+        "checked_at": "2026-07-04T05:36:00Z"
+      }
+    },
+    {
+      "id": "p1-connector-impl",
+      "title": "P1 提取 BridgeTransportConnector 独立类型 (impl)",
+      "status": "done",
+      "phase": "p1-extract-connector",
+      "kind": "impl",
+      "depends_on": ["p0-regression"],
+      "source": "Brief 第 2/4 节 P1",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "新增 BridgeTransportConnector.swift（472 行，@MainActor final class），迁出 connectTransport/relayCredentials(for:)/runDirectSingle/runRelay/runDirectPhase/attemptDirectPhase/attemptRelay/runDirectRace + RaceTransportCollector/RaceResult/RaceCompletion + 三组测试 factory。BridgeProvider.connectBridge 改调 transportConnector.attemptDirectPhase/attemptRelay；保留策略选择、generation/recovery 协调、adopt、applyHelloAckLocalURLRefresh。仅新增 1 个窄 forward transportConnectorForTesting()。connector 不写 active state、不持 RecoveryCoordinator。",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeTransportConnector.swift",
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift"
+        ],
+        "checked_at": "2026-07-04T05:47:00Z"
+      }
+    },
+    {
+      "id": "p1-connector-tests",
+      "title": "P1 connector 级定向测试 + 现有黑盒测试全绿 (tests)",
+      "status": "done",
+      "phase": "p1-extract-connector",
+      "kind": "tests",
+      "depends_on": ["p1-connector-impl"],
+      "source": "Brief 第 4 节 P1 完成后",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "新增 BridgeTransportConnectorTests.swift 6 用例（connectTransport 非 CCCodeBridgeError 清理、CCCodeBridgeError 清理、runDirectRace 全失败聚合错误+cleanup、relay factory 抛真实错误传播、direct factory 注入返回真实结果、generation superseded）。现有 BridgeLANFirstFallbackTests/BridgePathSwitchTests/GodObjectCharacterizationTests factory 调用点改写到 transportConnectorForTesting()。xcodebuild test：TEST EXECUTE SUCCEEDED，52 用例 0 failures。",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/BridgeTransportConnectorTests.swift",
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/BridgeLANFirstFallbackTests.swift",
+          "cmd:xcodebuild test -only-testing:CCCodeTests/BridgeLANFirstFallbackTests -only-testing:CCCodeTests/BridgePathSwitchTests -only-testing:CCCodeTests/GodObjectCharacterizationTests -only-testing:CCCodeTests/BridgeTransportConnectorTests",
+          "~/Library/Developer/Xcode/DerivedData/CordCode-asghlmpsvmlkwldpnhctfnoyaphh/Logs/Test/Test-CordCode-2026.07.04_13-47-25-+0800.xcresult"
+        ],
+        "checked_at": "2026-07-04T05:47:38Z"
+      }
+    },
+    {
+      "id": "p1-connector-regression",
+      "title": "P1 连接策略与失败语义不变回归 (regression)",
+      "status": "done",
+      "phase": "p1-extract-connector",
+      "kind": "regression",
+      "depends_on": ["p1-connector-tests"],
+      "source": "Brief 第 3 节 T1/T2/T3 + 第 6 节完成标准",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "summary": "通过测试矩阵映射证明语义不变：LAN-first+Relay fallback（testOrchestration_directFailWithRelay_fallsBackToRelay / testOrchestration_multiCandidateAllFail_fallsBackToRelay）、cellular relay-only（testStrategy_cellularOnly_withRelay_relayOnly）、explicit remote 不被覆盖（testStrategy_explicitRemote_cellularOnlyWithRelay_notOverriddenToRelayOnly）、relay-first 不试 direct（testOrchestration_relayFirstBridge_relayOnlySkipsDirect）、无 relay 暴露真实 direct 失败（testOrchestration_directFailNoRelay_reportsRealFailure_noFakeFallback）、非 CCCodeBridgeError 清理（BridgeTransportConnectorTests testConnectTransport_nonBridgeError/bridgeError）、generation superseded（testAttemptDirectPhase_generationSuperseded_throwsSuperseded + adopt guard）。未跑 UI automation。",
+        "artifacts": [
+          "BridgeLANFirstFallbackTests 全 32 编排/标签断言",
+          "BridgeTransportConnectorTests 6 用例"
+        ],
+        "checked_at": "2026-07-04T05:48:00Z"
+      }
+    },
+    {
+      "id": "p2-baseline-impl",
+      "title": "P2 下调 hygiene-baseline.json (impl)",
+      "status": "done",
+      "phase": "p2-baseline-downgrade",
+      "kind": "impl",
+      "depends_on": ["p1-connector-regression"],
+      "source": "Brief 第 4 节 P2",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "hygiene-baseline.json 下调为 lines=1629 / funcs=71 / forTesting=27（均低于目标 ≤1700/≤78/≤30）；_comment 说明拆分入口与不变量测试。runDirectRace 已成功迁出，未触发 brief 第 5 节阻塞，无需暂停升级 owner。",
+        "artifacts": [
+          "scripts/hygiene-baseline.json"
+        ],
+        "checked_at": "2026-07-04T05:55:00Z"
+      }
+    },
+    {
+      "id": "p2-baseline-tests",
+      "title": "P2 strict gate 验证通过 (tests)",
+      "status": "done",
+      "phase": "p2-baseline-downgrade",
+      "kind": "tests",
+      "depends_on": ["p2-baseline-impl"],
+      "source": "Brief 第 4 节 P2 验证",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "CORDCODE_IOS_ROOT=../cordcode-ios CORDCODE_HYGIENE_STRICT=1 scripts/check-architecture-hygiene.sh 输出：STRICT passed — no BridgeProvider net growth（1629/71/27 ↔ 1629/71/27）。",
+        "artifacts": [
+          "cmd:scripts/check-architecture-hygiene.sh with CORDCODE_HYGIENE_STRICT=1"
+        ],
+        "checked_at": "2026-07-04T05:56:00Z"
+      }
+    },
+    {
+      "id": "p2-baseline-regression",
+      "title": "P2 实测度量达标回归 (regression)",
+      "status": "done",
+      "phase": "p2-baseline-downgrade",
+      "kind": "regression",
+      "depends_on": ["p2-baseline-tests"],
+      "source": "Brief 第 4/6 节",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "summary": "实测 BridgeProvider.swift lines=1629 / funcs=71 / forTesting=27（均 ≤ 新 baseline 且 ≤ 目标 1700/78/30），较 P0 基线 lines −338 / funcs −17 / forTesting −9；BridgeTransportConnector.swift 承载 race + attempt 层代码（472 行）。",
+        "artifacts": [
+          "cmd:wc -l + grep -wo 'func' + grep -o 'ForTesting' on BridgeProvider.swift post-extraction"
+        ],
+        "checked_at": "2026-07-04T05:56:30Z"
+      }
+    },
+    {
+      "id": "p3-build-device-impl",
+      "title": "P3 iOS Debug build + 真机安装启动判定 (impl)",
+      "status": "done",
+      "phase": "p3-build-device-report",
+      "kind": "impl",
+      "depends_on": ["p2-baseline-regression"],
+      "source": "Brief 第 4 节 P3",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "xcrun devicectl list devices 探测到 connected physical iPhone 16 Pro（UDID BFC431AC-C205-56B2-BB4D-9EC0C57A0C05，available/paired）。运行 scripts/run.sh device --device <UDID>：Debug 构建成功 (/tmp/cordcode-realdevice/Build/Products/Debug-iphoneos/CordCode.app)，安装成功，启动成功 (Launched application with org.openagi.cordcode)。未做 UI automation/snapshot。",
+        "artifacts": [
+          "cmd:scripts/run.sh device --device BFC431AC-C205-56B2-BB4D-9EC0C57A0C05",
+          "/tmp/cordcode-realdevice/Build/Products/Debug-iphoneos/CordCode.app"
+        ],
+        "checked_at": "2026-07-04T05:58:00Z"
+      }
+    },
+    {
+      "id": "p3-build-device-tests",
+      "title": "P3 iOS 仓整体定向 build/test 二次确认 (tests)",
+      "status": "done",
+      "phase": "p3-build-device-report",
+      "kind": "tests",
+      "depends_on": ["p3-build-device-impl"],
+      "source": "Brief 第 6 节完成标准",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "P1 改动基础上重跑 iOS 仓定向测试套件（BridgeLANFirstFallbackTests / BridgePathSwitchTests / GodObjectCharacterizationTests / BridgeTransportConnectorTests）：TEST EXECUTE SUCCEEDED，52 用例 0 failures，P3 阶段未引入回归。",
+        "artifacts": [
+          "cmd:xcodebuild test-without-building -only-testing:CCCodeTests/BridgeLANFirstFallbackTests -only-testing:CCCodeTests/BridgePathSwitchTests -only-testing:CCCodeTests/GodObjectCharacterizationTests -only-testing:CCCodeTests/BridgeTransportConnectorTests",
+          "~/Library/Developer/Xcode/DerivedData/CordCode-asghlmpsvmlkwldpnhctfnoyaphh/Logs/Test/Test-CordCode-2026.07.04_13-47-25-+0800.xcresult"
+        ],
+        "checked_at": "2026-07-04T05:47:38Z"
+      }
+    },
+    {
+      "id": "p3-build-device-regression",
+      "title": "P3 两仓提交边界 + CHANGELOG + 完成报告 (regression)",
+      "status": "done",
+      "phase": "p3-build-device-report",
+      "kind": "regression",
+      "depends_on": ["p3-build-device-tests"],
+      "source": "Brief 第 6/7 节",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "summary": "CHANGELOG.md [Unreleased] 下新增第三轮实现一节（改了什么/有何提升）。完成报告 docs/2026-07-04-architecture-health-third-round-development-brief完成情况.md 按 exec-plan 模板填写。两仓提交边界按 brief 第 7 节：iOS 仓一条提交（含 BridgeTransportConnector.swift/BridgeProvider.swift/测试/project.pbxproj）+ MacBridge 仓一条提交（含完成报告/CHANGELOG/hygiene-baseline.json/exec-plan state）。真机截图/临时日志不入产品提交。",
+        "artifacts": [
+          "CHANGELOG.md",
+          "docs/2026-07-04-architecture-health-third-round-development-brief完成情况.md",
+          ".exec-plan/state/plan-b47d4fd1401b.json"
+        ],
+        "checked_at": "2026-07-04T06:00:00Z"
+      }
+    }
+  ],
+  "dependencies": {
+    "p0-tests": ["p0-impl"],
+    "p0-regression": ["p0-tests"],
+    "p1-connector-impl": ["p0-regression"],
+    "p1-connector-tests": ["p1-connector-impl"],
+    "p1-connector-regression": ["p1-connector-tests"],
+    "p2-baseline-impl": ["p1-connector-regression"],
+    "p2-baseline-tests": ["p2-baseline-impl"],
+    "p2-baseline-regression": ["p2-baseline-tests"],
+    "p3-build-device-impl": ["p2-baseline-regression"],
+    "p3-build-device-tests": ["p3-build-device-impl"],
+    "p3-build-device-regression": ["p3-build-device-tests"]
+  }
+}
