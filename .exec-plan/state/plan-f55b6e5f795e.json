@@ -124,7 +124,7 @@
         "method": "diff-inventory-and-build-parity",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "差异清单——真实产品差异（label 文案 中/英）通过 host.labels 注入保留，迁移后两 app wrapper 剩余 diff 实测=2 行（仅 labels 值）；意外漂移（remote-web 的 openDetail title '思考过程'、'行思考'、'收起/展开' 仍中文）不顺手收敛，避免变更 openDetail payload/行为，已记为 follow-up。两 app 不再持有完整重复实现（各 19 行薄 wrapper），共享包 exports 覆盖 ReasoningBlock（3/5 目标）。三包构建通过（见 p0a-tests）。视觉/UX 完整性回归为 owner-pending：未经 owner 明确允许未跑 UI/snapshot/simulator/真机。",
+        "summary": "差异清单——真实产品差异（label 文案 中/英）通过 host.labels 注入保留，迁移后两 app wrapper 剩余 diff 实测=2 行（仅 labels 值）；意外漂移（remote-web 的 openDetail title '思考过程'、'行思考'、'收起/展开' 仍中文）不顺手收敛，避免变更 openDetail payload/行为，已记为 follow-up。两 app 不再持有完整重复实现（各 19 行薄 wrapper），共享包 exports 覆盖 ReasoningBlock（3/5 目标）。三包构建通过（见 p0a-tests）。视觉/UX 真机目测 owner-verified（2026-07-04，iPhone 16 Pro 测试通过）；remote-web（web 客户端）未单独目测，靠对称薄 wrapper + typecheck/build。",
         "artifacts": [
           "diff:diff -u message-web/.../ReasoningBlock.tsx remote-web/.../ReasoningBlock.tsx => 2 行（仅 labels 值）",
           "wc: shared impl 85 行 / msg wrapper 19 行 / remote wrapper 19 行",
@@ -189,7 +189,7 @@
     {
       "id": "p0b-process-group-regression",
       "title": "P0 ProcessGroup 差异清单与 turn/group 回归 (regression)",
-      "description": "产出 ProcessGroup 差异清单（统一 vs host/labels 保留），确认两个 app 不再持有完整重复实现、共享包 exports 覆盖。turn/group 组合行为的产品差异归入 host 注入。视觉/UX 完整性回归为 owner-pending，写入完成报告待验收项。",
+      "description": "产出 ProcessGroup 差异清单（统一 vs host/labels 保留），确认两个 app 不再持有完整重复实现、共享包 exports 覆盖。turn/group 组合行为的产品差异归入 host 注入。视觉/UX 原写入完成报告待验收项，后续 message-web 已 owner-verified；remote-web 未单独目测。",
       "status": "done",
       "phase": "p0-web-shared-renderer",
       "kind": "regression",
@@ -202,7 +202,7 @@
         "method": "diff-inventory-and-build-parity",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "差异清单——43 行真实差异全部归类为「真实产品分歧」并保留：tool 摘要文案（中 vs 英）、分类粒度（message-web 含 search/list_files，remote-web 无）、多工具复数语义（中文计数 vs 英文 'Created a file' + 首字母大写）。收敛方式：共享包提供默认（=message-web），remote-web 通过 summarizers 注入自己的策略，两 app 输出逐字不变。turn/group 组合行为（generateGroupSummary 的 thinking/running/pending/completed 状态机 + ProcessGroupComponent JSX）两 app 原本一致，现由共享包单一实现。两 app 不再持有完整重复实现（msg 4 行 re-export；remote 100 行仅含自己的 divergent summarizer + 薄 wrapper，不含 generateGroupSummary/JSX，grep 计 0）。共享包 exports 覆盖 ProcessGroupComponent（4/5 目标）。视觉/UX 为 owner-pending。",
+        "summary": "差异清单——43 行真实差异全部归类为「真实产品分歧」并保留：tool 摘要文案（中 vs 英）、分类粒度（message-web 含 search/list_files，remote-web 无）、多工具复数语义（中文计数 vs 英文 'Created a file' + 首字母大写）。收敛方式：共享包提供默认（=message-web），remote-web 通过 summarizers 注入自己的策略，两 app 输出逐字不变。turn/group 组合行为（generateGroupSummary 的 thinking/running/pending/completed 状态机 + ProcessGroupComponent JSX）两 app 原本一致，现由共享包单一实现。两 app 不再持有完整重复实现（msg 4 行 re-export；remote 100 行仅含自己的 divergent summarizer + 薄 wrapper，不含 generateGroupSummary/JSX，grep 计 0）。共享包 exports 覆盖 ProcessGroupComponent（4/5 目标）。视觉/UX 真机目测 owner-verified（2026-07-04，iPhone 16 Pro 测试通过）；remote-web 未单独目测。",
         "artifacts": [
           "wc: shared turns/ProcessGroup 221 + test 85 / msg wrapper 4 / remote wrapper 100",
           "grep: remote wrapper 'generateGroupSummary|process-group--|turn-process-summary' => 0（JSX 已委托共享）",
@@ -269,7 +269,7 @@
     {
       "id": "p0c-narrative-block-regression",
       "title": "P0 NarrativeBlock 差异清单与宿主语义回归 (regression)",
-      "description": "产出 NarrativeBlock 差异清单（git directive summary 等宿主差异如何保留），确认两个 app 不再持有完整重复实现、共享包 exports 覆盖 5/5 目标组件（DiffViewer, ToolBlock, ReasoningBlock, ProcessGroup, NarrativeBlock）。视觉/UX 完整性回归为 owner-pending，写入完成报告待验收项。",
+      "description": "产出 NarrativeBlock 差异清单（git directive summary 等宿主差异如何保留），确认两个 app 不再持有完整重复实现、共享包 exports 覆盖 5/5 目标组件（DiffViewer, ToolBlock, ReasoningBlock, ProcessGroup, NarrativeBlock）。视觉/UX 原写入完成报告待验收项，后续 message-web 已 owner-verified；remote-web 未单独目测。",
       "status": "done",
       "phase": "p0-web-shared-renderer",
       "kind": "regression",
@@ -282,7 +282,7 @@
         "method": "diff-inventory-and-build-parity",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "差异清单——68 行真实差异全部为 message-web 独有的 git directive summary feature（remote-web 没有）。归类为「真实产品差异」：通过 transformContent 注入保留——message-web 提供（extractGitDirectives 剥离 directive 避免重复展示 + GitDirectiveSummary trailing 节点），remote-web 用共享默认（原样渲染、无 trailing）。markdown 渲染主体（ReactMarkdown + a/input/li 覆写 + todo helper）两 app 原本一致，现由共享包单一实现，message-web 不再 import ReactMarkdown（grep 计 0）。react-markdown 9/10 跨版本分歧经实测化解（peer >=9 <11 + 三包 typecheck/build 全过）。共享包 exports 覆盖 5/5 目标组件（DiffViewer/ToolBlock/ReasoningBlock/ProcessGroup/NarrativeBlock）。两 app 不再持有完整重复实现（msg 85 行仅 git directive feature；remote 13 行薄 wrapper）。视觉/UX 为 owner-pending。",
+        "summary": "差异清单——68 行真实差异全部为 message-web 独有的 git directive summary feature（remote-web 没有）。归类为「真实产品差异」：通过 transformContent 注入保留——message-web 提供（extractGitDirectives 剥离 directive 避免重复展示 + GitDirectiveSummary trailing 节点），remote-web 用共享默认（原样渲染、无 trailing）。markdown 渲染主体（ReactMarkdown + a/input/li 覆写 + todo helper）两 app 原本一致，现由共享包单一实现，message-web 不再 import ReactMarkdown（grep 计 0）。react-markdown 9/10 跨版本分歧经实测化解（peer >=9 <11 + 三包 typecheck/build 全过）。共享包 exports 覆盖 5/5 目标组件（DiffViewer/ToolBlock/ReasoningBlock/ProcessGroup/NarrativeBlock）。两 app 不再持有完整重复实现（msg 85 行仅 git directive feature；remote 13 行薄 wrapper）。视觉/UX 真机目测 owner-verified（2026-07-04，iPhone 16 Pro 测试通过）；remote-web 未单独目测。",
         "artifacts": [
           "wc: shared NarrativeBlock 115 + test 82 / msg wrapper 85 / remote wrapper 13",
           "grep: msg wrapper 'GitDirectiveSummary|extractGitDirectives|git-directive|Git 操作' => 14（feature 保留）；'ReactMarkdown|remark-gfm' => 0（已委托共享）",

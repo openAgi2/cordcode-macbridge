@@ -16,7 +16,7 @@
   - `ReasoningBlock`：2 行文案差异（中/英）通过 `host.labels` 注入；迁移后两 app 剩余 diff 实测仅 labels 值。
   - `ProcessGroup`：43 行真实差异（摘要文案 + 分类粒度 + 复数语义）通过 `summarizers` 注入保留，共享包首次引入 `components/turns/`。
   - `NarrativeBlock`：68 行差异（message-web 独有的 git directive summary）通过 `transformContent` 注入；共享包新增 react-markdown peer `>=9 <11` / remark-gfm peer `>=4 <5`，**9.x 与 10.x 跨大版本兼容经三包 typecheck/build 实测确认**。
-  - 共享包新增 12 条定向 vitest（labels 注入 / summarizers / transformContent / DOM 契约）；三包 typecheck + build 全绿。视觉/UX 完整性回归为 owner-pending（未经 owner 明确授权不跑 UI/snapshot/simulator/真机）。
+  - 共享包新增 12 条定向 vitest（labels 注入 / summarizers / transformContent / DOM 契约）；三包 typecheck + build 全绿。message-web 视觉回归 owner 真机目测通过（2026-07-04，iPhone 16 Pro）；remote-web 靠对称薄 wrapper + typecheck/build。
 - **P2 BridgeProvider 净增长 strict gate（本仓）**：新增 `scripts/hygiene-baseline.json`（冻结基线 lines=1967/funcs=88/forTesting=36）；`check-architecture-hygiene.sh` 增加 `CORDCODE_HYGIENE_STRICT=1` 分支——任一指标净增即 exit 1、允许减少、iOS 仓缺失时 graceful skip（不破坏 CI）；CI macbridge job 接入 best-effort 跨仓 checkout `openAgi2/cordcode-ios` + strict hygiene step。既有 5 个 inventory 段仍 warning-only，未被提升为 fail。
 - **P1 handlers.go 物理分发（本仓）**：4559 行 `handlers.go` 拆出 `handlers_opencode.go`（488 行，OpenCode proxy 簇）+ `handlers_relay.go`（829 行，relay 簇含 brief 指定的 4 个 transcript 探测 helper 整组搬迁），`handlers.go` 降至 3269 行（-1290，-28%）。纯物理 move，不改函数体 / RPC 行为 / session registry / agent driver / protocol 字面契约；`go build` + 定向过滤 + 全量 `go test ./go-bridge/...` 全绿。
 
