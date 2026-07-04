@@ -38,6 +38,9 @@ AGENTS.md
 !/docs/*完成情况*.md
 !/docs/*审计*.md
 !/docs/*audit*.md
+# Third-round completion report is superseded by the fourth-round report;
+# untracked and kept local only.
+/docs/2026-07-04-architecture-health-third-round-development-brief完成情况.md
 
 # Local-only handoff/exec-plan clutter (untracked; files kept on disk).
 # Precise paths — do NOT ignore the whole handoffs/ or .exec-plan/ trees,
@@ -48,4 +51,8 @@ handoffs/handoff-20260702-2053.md
 handoffs/handoff-20260703-0132.md
 handoffs/handoff-20260703-1024.md
 handoffs/handoff-20260703-1124.md
+handoffs/handoff-20260704-1211.md
+handoffs/handoff-20260704-1645.md
+handoffs/handoff-20260704-1954.md
 .exec-plan/state/plan-a4ebbe0ec47d.json
+.exec-plan/state/plan-b47d4fd1401b.json
