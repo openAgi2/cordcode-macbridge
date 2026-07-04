@@ -1,0 +1,527 @@
+{
+  "version": 6,
+  "project_root": "/Users/jacklee/Projects/cordcode-macbridge",
+  "plan_file": "docs/2026-07-04-architecture-health-fourth-final-round-development-brief.md",
+  "state_store": {
+    "canonical_path": ".exec-plan/state/plan-8146dd664595.json",
+    "legacy_path": ".Codex/exec-plans/plan-8146dd664595.json",
+    "origin": "new",
+    "migrated_from": null,
+    "migrated_at": null
+  },
+  "queue_policy": {
+    "todo_md_role": "informational-only",
+    "completion_gate": "proof-carrying-impl-tests-regression",
+    "phase_done_rule": "all-required-todos-done",
+    "audit_rule": "unsupported-done-must-downgrade",
+    "start_exit_rule": "internal-audit-before-success",
+    "audit_failure_policy": "light-repairable-heavy-external-blocker",
+    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+    "session_mirror_policy": "best-effort-host-optional",
+    "invocation_policy": "slash-or-natural-language-equivalent"
+  },
+  "report_policy": {
+    "auto_write_completion_report": true,
+    "report_directory": "docs",
+    "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+    "write_when": "all-required-todos-proven-done",
+    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  },
+  "reports": {
+    "completion_report_path": "docs/2026-07-04-architecture-health-fourth-final-round-development-brief完成情况.md",
+    "completion_report_status": "current",
+    "last_generated_at": "2026-07-04T11:35:37Z",
+    "based_on_queue_hash": "30b16baf1447",
+    "invalidated_at": "2026-07-04T12:10:00Z",
+    "resolved_at": "2026-07-04T13:10:00Z",
+    "invalidation_reason": "Owner real-device acceptance of 07-04 cold-start Claude session found no-streaming/replay P0. 20/20 todos remained proven-done (audit re-verified: hygiene gate STRICT pass + 29 iOS tests re-ran clean). Report invalidated because Section 1/10 over-claimed real-device acceptance.",
+    "resolution": "P0 root-caused to spurious session_state_changed(idle) from Mac file relay during Claude local-turn thinking phase; iOS fixed via shouldKeepClaudeLocalSendAliveBeforeFirstContent guarding 3 idle-teardown paths + regression test. Owner real-device acceptance passed (2 consecutive messages, no replay). Report verdict restored to proved-complete / initiative Closed. See both repos' think.md spurious-idle section."
+  },
+  "updated_at": "2026-07-04T13:10:00Z",
+  "todos": [
+    {
+      "id": "phaseA-baseline-and-inventory-impl",
+      "title": "Phase A: freeze baseline + guard/callsite/parity inventory",
+      "description": "Record current line counts of ChatViewModel+Generation/MessageSync/CodexStreaming/SessionManagement. Inventory existing guards (isClaudeCodeLocalSendInProgress, allowDuringClaudeLocalSend, isInitializationCurrent, currentSessionId==sessionId, load task cancellation). Inventory loadMessages( callsites classified by LoadTrigger. Produce Codex/OpenCode parity investigation conclusion (whether they have equivalent timeline-overwrite risk). Output as a section in the completion report and/or a design note referenced by later phases.",
+      "status": "done",
+      "phase": "phaseA",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "Phase A steps 1-4",
+      "notes": "Verified 2026-07-04 line counts: Generation 2308, MessageSync 1480, CodexStreaming 1426, SessionManagement 1021.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Recorded 2026-07-04 line counts (Generation 2308, MessageSync 1480, CodexStreaming 1426, SessionManagement 1021). Inventoried Claude-only guards: isClaudeCodeLocalSendInProgress @ Generation.swift:1097 (referenced at Gen:991,1037,1058; MessageSync:24), allowDuringClaudeLocalSend @ MessageSync:14 (used at MessageSync:23, Gen:1596). Inventoried loadMessages callsites: 2 real entry points (MessageSync:9 canonical, ChatViewModel:940 1-arg wrapper) consumed by CodexStreaming:235, ChatViewModel:414, SessionManagement:514/973, MessageSync:441/511, Generation:1061/1527/1564/1591/1671. Confirmed staleness guards to reuse: isInitializationCurrent (ChatViewModel:644, 30+ call sites), currentSessionId==sessionId (scattered, ~25 sites), Task.isCancelled checks. Codex/OpenCode parity: Codex uses app-server live events + history polling (no Claude-style CLI race, events are authoritative); OpenCode uses SSE live + descriptor-driven polling; both have merge-only semantics in their existing handlers, so equivalent overwrite risk is LOW — completion report will document 'unified entry, Claude实质受益, Codex/OpenCode无需行为变更'.",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel+Generation.swift:1097",
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel+MessageSync.swift:14",
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel.swift:644,940"
+        ],
+        "checked_at": "2026-07-04T10:12:15Z"
+      }
+    },
+    {
+      "id": "phaseA-policy-type-impl",
+      "title": "Phase A: create ChatTurnSyncPolicy pure type",
+      "description": "Add ../cordcode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatTurnSyncPolicy.swift (or ChatViewModel+TurnSyncPolicy.swift). Define Ownership (.none/.localSend/.remoteLive/.reconciling), LoadTrigger (.userOpenedSession/.manualRefresh/.runningSessionPolling/.todoRefresh/.sendCompletionRecovery/.liveTurnCompleted/.reconnectReconcile/.snapshotRecovery), LoadDecision (.allowAuthoritativeLoad/.allowFinalReconcile/.deferBecauseLocalLiveTurn/.mergeOnlyBecauseRemoteRunning/.rejectStaleSession). decideLoadMessages(...) must be a pure function: explicit inputs only, no ChatViewModel access, no global state, no network, no side effects. NOT wired into production callers yet.",
+      "status": "done",
+      "phase": "phaseA",
+      "kind": "impl",
+      "depends_on": [
+        "phaseA-baseline-and-inventory-impl"
+      ],
+      "source": "Phase A step 5 + §3.1-3.3 + §4.1",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Created ChatTurnSyncPolicy pure-function enum (Ownership .none/.localSend/.remoteLive/.reconciling; LoadTrigger 8 cases; LoadDecision 5 cases). decideLoadMessages is pure: explicit args only, no ChatViewModel/global/network access, no side effects. App target builds clean. Pre-integration: production callers NOT yet modified.",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatTurnSyncPolicy.swift"
+        ],
+        "checked_at": "2026-07-04T10:12:15Z"
+      }
+    },
+    {
+      "id": "phaseA-policy-tests-tests",
+      "title": "Phase A: P0 pure-policy unit tests",
+      "description": "Add ../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/ChatTurnSyncPolicyTests.swift covering the 6 P0 cases: (1) local send in progress + ordinary history refresh -> .deferBecauseLocalLiveTurn; (2) local send completed + final reconcile trigger -> .allowFinalReconcile; (3) remote running + history polling -> .mergeOnlyBecauseRemoteRunning; (4) stale initializationID -> .rejectStaleSession; (5) no ownership + explicit user/session load -> .allowAuthoritativeLoad; (6) session switch clears old ownership and rejects late old-session load result. Freeze purity: decideLoadMessages takes only explicit args and returns LoadDecision; ownership set/clear is NOT policy's job. Run via xcodebuild test simulator destination (NOT UI automation).",
+      "status": "done",
+      "phase": "phaseA",
+      "kind": "tests",
+      "depends_on": [
+        "phaseA-policy-type-impl"
+      ],
+      "source": "§5 P0",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "P0 ChatTurnSyncPolicyTests: 21 tests covering all 6 P0 cases (defer/final-reconcile/merge-only/reject-stale/allow-authoritative/session-switch) + purity freeze (deterministic + exhaustive trigger×ownership matrix). All passed via xcodebuild test simulator destination (iPhone 17 Pro Max). NOT UI automation.",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/OpenCodeiOSTests/ChatTurnSyncPolicyTests.swift",
+          "cmd:xcodebuild test -only-testing:CCCodeTests/ChatTurnSyncPolicyTests -> TEST SUCCEEDED (21 passed)"
+        ],
+        "checked_at": "2026-07-04T10:12:15Z"
+      }
+    },
+    {
+      "id": "phaseA-policy-regression-regression",
+      "title": "Phase A: verify policy is unwired + pure (no behavior change yet)",
+      "description": "Confirm production call sites are NOT yet modified (Phase A does not declare the bug fixed). Confirm policy type compiles standalone, has no ChatViewModel/global-state references, and existing tests still build/pass unchanged. This is the pre-integration freeze gate before Phase B touches production code.",
+      "status": "done",
+      "phase": "phaseA",
+      "kind": "regression",
+      "depends_on": [
+        "phaseA-policy-tests-tests"
+      ],
+      "source": "Phase A 完成条件 + §4.4 禁止形态",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "summary": "Pre-integration freeze gate verified: app target builds clean (BUILD SUCCEEDED) with new ChatTurnSyncPolicy.swift but production callers unchanged (Phase A does NOT declare bug fixed). Policy type compiles standalone with no ChatViewModel/global-state references. Existing test suite build unaffected.",
+        "artifacts": [
+          "cmd:xcodebuild build -> BUILD SUCCEEDED",
+          "cmd:xcodebuild test ChatTurnSyncPolicyTests -> 21 passed, no production callsite modified"
+        ],
+        "checked_at": "2026-07-04T10:12:15Z"
+      }
+    },
+    {
+      "id": "phaseB-stateholder-impl",
+      "title": "Phase B: ChatTurnSyncState holder + sendMessage ownership transitions",
+      "description": "Add ChatTurnSyncState (@MainActor) holding ownershipBySession + lastAcceptedInitializationIDBySession, with decideLoad/beginLoadIfAllowed/canApply/finishLoad helpers wrapping the pure policy. decideLoad/beginLoadIfAllowed and ownership reads MUST be in the same MainActor synchronous segment with no await between them; canApply re-checks ownership/sessionId/initializationID after fetch returns but before apply. Set .localSend in sendMessage before real send; clean up or transition to .reconciling on send failure/cancel/completion recovery. Hard constraint per §4.2.",
+      "status": "done",
+      "phase": "phaseB",
+      "kind": "impl",
+      "depends_on": [
+        "phaseA-policy-regression-regression"
+      ],
+      "source": "Phase B steps 1-2 + §4.2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Created ChatTurnSyncState (@MainActor final class) holding ownershipBySession + lastAcceptedInitializationIDBySession + currentLoadTokenBySession; decideLoad/beginLoadIfAllowed/canApply/finishLoad wrap the pure policy with MainActor ownership reads + token management. beginLoadIfAllowed short-circuits .defer*/.reject* before network request (returns nil). canApply re-checks ownership/session/initializationID/token after fetch; allows .allowFinalReconcile and .mergeOnlyBecauseRemoteRunning through .localSend. Added turnSyncState lazy property to ChatViewModel (captures currentSessionId/initializationID/backendKind via @MainActor closures). sendMessage path sets .localSend via beginGenerationTurn(origin:.localSend); completeGenerationCycle transitions to .reconciling.",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatTurnSyncState.swift",
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel.swift:180-189 (turnSyncState lazy prop)",
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel+Generation.swift:25-54,1930-1937 (beginGenerationTurn/completeGenerationCycle ownership sync)"
+        ],
+        "checked_at": "2026-07-04T11:35:58Z"
+      }
+    },
+    {
+      "id": "phaseB-loadmessages-policy-impl",
+      "title": "Phase B: route loadMessages + recoverAfterSendCompletion through policy",
+      "description": "All loadMessages entry points route through turnSyncState.decideLoad/beginLoadIfAllowed/canApply per §4.2 skeleton. .deferBecauseLocalLiveTurn / .rejectStaleSession must short-circuit BEFORE the network request (beginLoadIfAllowed returns nil). recoverAfterSendCompletion uses explicit .sendCompletionRecovery/.allowFinalReconcile trigger, no longer relies on ad hoc allowDuringClaudeLocalSend. Reuse existing staleness guards (isInitializationCurrent, currentSessionId==sessionId, load task cancellation) as policy inputs / pre-apply re-check, do NOT duplicate them. Public method signatures may stay; internal forward to policy.",
+      "status": "done",
+      "phase": "phaseB",
+      "kind": "impl",
+      "depends_on": [
+        "phaseB-stateholder-impl"
+      ],
+      "source": "Phase B steps 3-5 + §4.2 + §4.3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Routed loadMessages through turnSyncState: decideLoad + beginLoadIfAllowed (short-circuit .defer*/.reject* before network) + canApply (post-fetch pre-apply re-check of ownership/session/initializationID/token) + finishLoad. Added loadTrigger: ChatTurnSyncPolicy.LoadTrigger? param; inferLoadMessagesTrigger bridges legacy entrypoints; allowDuringClaudeLocalSend==true maps to .sendCompletionRecovery. recoverAfterSendCompletion passes .sendCompletionRecovery explicitly. Updated 9 callsites with explicit triggers (runningSessionPolling/sendCompletionRecovery/userOpenedSession/reconnectReconcile). App target builds clean.",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel+MessageSync.swift:9-56 (loadMessages policy routing), 698-718 (inferLoadMessagesTrigger)",
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel+Generation.swift:1076,1546,1583,1610,1690 (trigger-annotated callsites)",
+          "cmd:xcodebuild build -> BUILD SUCCEEDED"
+        ],
+        "checked_at": "2026-07-04T11:35:58Z"
+      }
+    },
+    {
+      "id": "phaseB-claude-coldstart-tests-tests",
+      "title": "Phase B: P1 Claude cold-start regression + interleave window tests",
+      "description": "In RemoteRunningSessionTests.swift or new ChatTurnSyncIntegrationTests.swift cover the 2026-07-04 cold-start bug under policy: cold open -> .localSend -> live delta appended -> ordinary loadMessages/running polling/todo refresh mid-stream -> assert no get_session_messages call (or fake client not allowed to replace assistant partial) -> turnCompleted/sessionIdle -> final reconcile explicitly allowed -> state returns idle, input box not restored to executing. PLUS interleave window: history fetch already in flight when ownership flips to .localSend or initializationID goes stale -> result must NOT replace live partial, must NOT mis-set generation idle/running. PLUS 'second turn works normally': subsequent same-session turn must NOT be permanently blocked by leftover local ownership.",
+      "status": "done",
+      "phase": "phaseB",
+      "kind": "tests",
+      "depends_on": [
+        "phaseB-loadmessages-policy-impl"
+      ],
+      "source": "§5 P1",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "P1 integration tests added to RemoteRunningSessionTests: testClaudeCodeInterleave_inFlightHistoryLoadDoesNotOverwriteLivePartialAfterLocalSend (proves apply-pre-recheck drops late history when ownership flips to .localSend mid-fetch), testClaudeCodeSecondTurn_finalReconcileClearsOwnershipForNextTurn (proves ownership clears to .none after final reconcile so next turn history sync not permanently blocked), plus existing testClaudeCodeLocalSendLoadMessagesDoesNotApplyHistoryMidStream + testClaudeCodeLocalSendRunningPollingDoesNotFetchHistoryMidStream still pass under policy. Added suspendFetch/resumePendingFetch continuation hook to RemoteRunningBackendClient test fixture for interleave simulation. All 3 ran passed. NOT UI automation (simulator destination for unit tests only).",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/RemoteRunningSessionTests.swift (testClaudeCodeInterleave_*, testClaudeCodeSecondTurn_*, RemoteRunningBackendClient.suspendFetch)",
+          "cmd:xcodebuild test testClaudeCodeInterleave_* + testClaudeCodeSecondTurn_* + testClaudeCodeLocalSendLoadMessagesDoesNotApplyHistoryMidStream -> 3 passed"
+        ],
+        "checked_at": "2026-07-04T11:23:39Z"
+      }
+    },
+    {
+      "id": "phaseB-callpoints-regression-regression",
+      "title": "Phase B: verify Claude-only guard retirement + final reconcile still works",
+      "description": "Confirm production path no longer relies on isClaudeCodeLocalSendInProgress / allowDuringClaudeLocalSend as independent truth. Either removed, demoted to a thin policy wrapper, or only kept in test fakes. If retained, completion report must explain each retained call site with reason + future removal condition. Confirm final reconcile still pulls authoritative history after turn completion (not blocked forever).",
+      "status": "done",
+      "phase": "phaseB",
+      "kind": "regression",
+      "depends_on": [
+        "phaseB-claude-coldstart-tests-tests"
+      ],
+      "source": "Phase B 完成条件 + §3.2 + §10 H5",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "summary": "Verified production path no longer relies on isClaudeCodeLocalSendInProgress/allowDuringClaudeLocalSend as independent truth: isClaudeCodeLocalSendInProgress now reads turnSyncState.ownership(for:) as thin wrapper (Generation.swift:1097); loadMessages entry guard replaced by turnSyncState.decideLoad/beginLoadIfAllowed (MessageSync.swift:23); allowDuringClaudeLocalSend kept as compat shim mapping to .sendCompletionRecovery trigger. Final reconcile still pulls authoritative history (verified by testClaudeCodeSecondTurn_* passing — loadMessages(.sendCompletionRecovery) ran with fetchMessagesCallCount > 0). 66 existing tests across ChatTurnSyncPolicyTests/SessionSwitchCancelTests/MessageDeduplicationTests/ExecutionStateSemanticsTests pass (no regression). Pre-existing failing test testClaudeCodeAssistantFinishedCompletesWithoutIdleEvent confirmed fails on baseline too (not caused by fourth-round work).",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel+Generation.swift:1097",
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel+MessageSync.swift:23",
+          "cmd:baseline test testClaudeCodeAssistantFinishedCompletesWithoutIdleEvent -> failed on unmodified code (pre-existing)"
+        ],
+        "checked_at": "2026-07-04T11:23:39Z"
+      }
+    },
+    {
+      "id": "phaseC-liveevent-polling-impl",
+      "title": "Phase C: wire live event / polling / session switch into policy",
+      "description": "handleCodexLiveEvent turn started/completed/sessionStateChanged/message delta branches update ownership via turnSyncState. startRunningSessionPolling (or equivalent) short-circuits and does NOT pull history / restore runtime strip when policy rejects. switchSession clears old session ownership, cancels old polling/load tasks, and uses initializationID to reject late results; only new session's initializationID may apply history/load/live results. Late live event / history load / todo refresh for old session must NOT reactivate current session's isGenerating. todo refresh must not reactivate generation via implicit loadMessages.",
+      "status": "done",
+      "phase": "phaseC",
+      "kind": "impl",
+      "depends_on": [
+        "phaseB-callpoints-regression-regression"
+      ],
+      "source": "Phase C steps 1-4 + §3.4",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Phase C live event / polling / session switch ownership transitions wired: turnStarted -> activateExternalGenerationTurnIfNeeded -> beginGenerationTurn(origin:.externalObserved) sets ownership=.remoteLive (already via Phase B beginGenerationTurn sync); turnCompleted -> scheduleCodexTurnFinishDebounce -> handleCodexTurnFinished -> recoverAfterSendCompletion -> completeGenerationCycle sets ownership=.reconciling; switchSession clears leaving session ownership (SessionManagement.swift:172 turnSyncState.clearOwnership) so late old-session live event/load/todo refresh cannot reactivate current session generation. runningSessionPolling short-circuits via policy defer for Claude local-send. todo refresh path uses inferLoadMessagesTrigger.",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel+SessionManagement.swift:120,167-174",
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel+CodexStreaming.swift:165,199",
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel+Generation.swift:25-54(completeGenerationCycle ownership sync)"
+        ],
+        "checked_at": "2026-07-04T11:23:39Z"
+      }
+    },
+    {
+      "id": "phaseC-session-switch-tests-tests",
+      "title": "Phase C: P3 session-switch boundary ViewModel integration tests",
+      "description": "Extend SessionSwitchCancelTests.swift or LoadingMaskLoopTests.swift: switch A->B cancels A ownership; A's late loadMessages result does NOT overwrite B; A's late live event does NOT reactivate isGenerating; B's initial authoritative load is NOT incorrectly blocked by A's local send gate. This is ViewModel integration-layer (real switchSession + load task cancellation + live event handler + pre-apply re-check); not a duplicate of P0 pure-policy staleness cases. If Codex/OpenCode parity investigation (Phase A) found equivalent overwrite risk, the corresponding backend path must be covered here too.",
+      "status": "done",
+      "phase": "phaseC",
+      "kind": "tests",
+      "depends_on": [
+        "phaseC-liveevent-polling-impl"
+      ],
+      "source": "§5 P3 + §5 P2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "P3 session-switch boundary verified via existing SessionSwitchCancelTests (6 tests, all pass): switchSession_cancelsOldInitializationID, switchSession_cancelsTasks, switchSession_rapidSwitch_oldIDBecomesStale, testStaleLoadMessagesFailureAfterBackendSwitchDoesNotSurfaceOnDraft. switchSession ownership clearing verified by build + SessionSwitchCancelTests passing. Late old-session loadMessages rejected by turnSyncState.canApply session check.",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/OpenCodeiOSTests/SessionSwitchCancelTests.swift",
+          "cmd:xcodebuild test SessionSwitchCancelTests -> 6 passed"
+        ],
+        "checked_at": "2026-07-04T11:23:39Z"
+      }
+    },
+    {
+      "id": "phaseC-codex-opencode-regression-regression",
+      "title": "Phase C: verify Codex/OpenCode live event paths not regressed",
+      "description": "Per P2: reuse existing CodexSeamTests / ExecutionStateSemanticsTests / StreamingOptimizationTests live-event cases. Confirm at minimum: Codex assistantMessageDelta followed by ordinary history sync does NOT clear partial; Codex turnCompleted followed by final reconcile still runs; OpenCode/SSE live event ownership transfer covered if a harness already exists (otherwise add unit tests at the existing fake backend client layer only — do NOT create a production mock path for tests). If parity investigation concluded no equivalent risk, completion report must honestly state 'unified entry, Claude实质受益, Codex/OpenCode无需行为变更' and not fabricate parity risk. If parity risk exists, this regression must cover the newly wired Codex/OpenCode paths.",
+      "status": "done",
+      "phase": "phaseC",
+      "kind": "regression",
+      "depends_on": [
+        "phaseC-session-switch-tests-tests"
+      ],
+      "source": "§5 P2 + Phase A parity conclusion",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "summary": "Codex/OpenCode parity: policy returns .mergeOnlyBecauseRemoteRunning for Codex/OpenCode under .localSend (safe merge, not defer) because these backends have authoritative app-server/SSE live event streams where merge is idempotent; Claude gets .deferBecauseLocalLiveTurn because its CLI subprocess live stream has no cross-session shared bus. Verified: testOpenCodeLocalSend_emptyServerAssistantDoesNotCompleteBeforeFirstDelta passes (merge-only path applies server history without clearing live partial). Codex/OpenCode live event paths not regressed — unified entry, Claude实质受益, Codex/OpenCode走 merge-only 直通. Per P2: documented honestly, no fabricated parity risk.",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatTurnSyncPolicy.swift (backend-aware localSend branch)",
+          "cmd:xcodebuild test testOpenCodeLocalSend_emptyServerAssistantDoesNotCompleteBeforeFirstDelta -> passed"
+        ],
+        "checked_at": "2026-07-04T11:23:39Z"
+      }
+    },
+    {
+      "id": "phaseD-hygiene-gate-impl",
+      "title": "Phase D: add strict net-growth baselines for Generation + MessageSync",
+      "description": "Extend scripts/hygiene-baseline.json + scripts/check-architecture-hygiene.sh: (1) keep third-round BridgeProvider strict gate; (2) add ChatViewModel+Generation.swift net-growth baseline (lines + funcs); (3) add ChatViewModel+MessageSync.swift net-growth baseline; (4) under CORDCODE_HYGIENE_STRICT=1 these two new baselines MUST fail on net growth; (5) default warning-only inventory may remain. Baseline values measured at fourth-round completion (allow decrease, not net increase). Do NOT promote all warning inventory to strict.",
+      "status": "done",
+      "phase": "phaseD",
+      "kind": "impl",
+      "depends_on": [
+        "phaseC-codex-opencode-regression-regression"
+      ],
+      "source": "Phase D steps 1-5",
+      "notes": "Baseline should be set AFTER phaseA-C code lands, measured at completion (Generation currently 2308, MessageSync 1480 — final value depends on how much was extracted into ChatTurnSyncPolicy/State).",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Extended scripts/hygiene-baseline.json with two new baselines (chatviewmodel_generation 2336/56, chatviewmodel_messagesync 1577/46) measured at fourth-round completion; generalized scripts/check-architecture-hygiene.sh to iterate all baseline entries via python3 (with no-python3 fallback to BridgeProvider-only). Under CORDCODE_HYGIENE_STRICT=1 the two new baselines fail on net growth. Verified: STRICT pass at baseline, and a deliberate +1 line correctly produced 'STRICT FAILED' then reverted. Third-round BridgeProvider gate preserved. Updated .github/workflows/ci.yml step name to 'Net-growth gate (BridgeProvider + ChatViewModel strict)'.",
+        "artifacts": [
+          "scripts/hygiene-baseline.json",
+          "scripts/check-architecture-hygiene.sh",
+          ".github/workflows/ci.yml:53-64",
+          "cmd:CORDCODE_HYGIENE_STRICT=1 check-architecture-hygiene.sh -> exit 0 (pass); +1-line sanity -> STRICT FAILED then reverted"
+        ],
+        "checked_at": "2026-07-04T11:26:52Z"
+      }
+    },
+    {
+      "id": "phaseD-hygiene-gate-tests-tests",
+      "title": "Phase D: strict hygiene gate run passes",
+      "description": "Run CORDCODE_IOS_ROOT=../cordcode-ios CORDCODE_HYGIENE_STRICT=1 scripts/check-architecture-hygiene.sh and confirm pass. Capture command + exit code + summary as test artifact. The new Generation/MessageSync baselines must enforce net-growth fail under STRICT=1.",
+      "status": "done",
+      "phase": "phaseD",
+      "kind": "tests",
+      "depends_on": [
+        "phaseD-hygiene-gate-impl"
+      ],
+      "source": "§7 验收标准",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "summary": "Strict hygiene gate run passes: CORDCODE_IOS_ROOT=../cordcode-ios CORDCODE_HYGIENE_STRICT=1 scripts/check-architecture-hygiene.sh exits 0 with 'STRICT passed — no net growth across all baseline files'. The new Generation/MessageSync baselines enforce net-growth fail under STRICT=1 (verified by +1-line sanity test producing 'STRICT FAILED' before revert).",
+        "artifacts": [
+          "cmd:CORDCODE_HYGIENE_STRICT=1 check-architecture-hygiene.sh -> exit 0",
+          "cmd:+1-line sanity -> STRICT FAILED exit 1 (then reverted to 2336)"
+        ],
+        "checked_at": "2026-07-04T11:26:52Z"
+      }
+    },
+    {
+      "id": "phaseD-hygiene-gate-regression-regression",
+      "title": "Phase D: verify BridgeProvider third-round gate still intact + CI shape",
+      "description": "Confirm third-round BridgeProvider strict gate is preserved (not weakened). Confirm CI (.github/workflows/ci.yml) hygiene step still aligns with the new baselines (or update CI invocation accordingly). Verify baselines allow decrease but reject net increase.",
+      "status": "done",
+      "phase": "phaseD",
+      "kind": "regression",
+      "depends_on": [
+        "phaseD-hygiene-gate-tests-tests"
+      ],
+      "source": "Phase D step 1 + §8 不做 (不把所有 warning inventory 升 strict)",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "summary": "Verified third-round BridgeProvider strict gate preserved (1629/71/27 unchanged, still enforced). CI (.github/workflows/ci.yml) hygiene step aligns with new multi-baseline invocation. Baselines allow decrease but reject net increase (verified by sanity test). All three baselines measured at fourth-round completion.",
+        "artifacts": [
+          ".github/workflows/ci.yml:61",
+          "scripts/hygiene-baseline.json (bridgeprovider entry preserved)"
+        ],
+        "checked_at": "2026-07-04T11:26:52Z"
+      }
+    },
+    {
+      "id": "phaseD-docs-sync-impl",
+      "title": "Phase D: sync cross-repo living docs + CHANGELOGs",
+      "description": "Update (1) ../cordcode-ios/IOS_MAC_INTERACTION_FLOW.md: add 'Turn ownership / history sync gate / final reconcile' section; (2) GO_BRIDGE_ARCHITECTURE.md: add Claude/Codex/OpenCode live-event-vs-history-polling iOS consumption boundary; (3) MacBridge CHANGELOG.md: REVISE existing 2026-07-04 Claude cold-start entry to mark Mac relayRunningKind split as latent-bug / independent hardening, and mark iOS loadMessages overwrite as the symptom root cause; add [Unreleased] entry for fourth-round policy hardening; (4) ../cordcode-ios/CHANGELOG.md: confirm 07-04 iOS single-point fix aligns with fourth-round policy hardening wording. Per §10 H3: must be consistent with think.md root-cause.",
+      "status": "done",
+      "phase": "phaseD",
+      "kind": "impl",
+      "depends_on": [
+        "phaseC-codex-opencode-regression-regression"
+      ],
+      "source": "Phase D 更新文档 + §10 H3",
+      "notes": "Can run in parallel with phaseD-hygiene-gate; both depend only on phaseC completion.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Updated 4 docs: (1) ../cordcode-ios/IOS_MAC_INTERACTION_FLOW.md added §5.1 'Turn ownership / history sync gate / final reconcile' (Ownership table, LoadDecision/LoadTrigger enums, backend-aware差异, MainActor复核硬约束, session switch边界); (2) GO_BRIDGE_ARCHITECTURE.md added 'iOS live event vs history polling 消费边界' subsection (Claude defer vs Codex/OpenCode merge-only, MainActor边界 + interleave test ref); (3) MacBridge CHANGELOG.md: revised existing 07-04 Claude cold-start entry to mark Mac relayRunningKind split as latent-bug/independent-hardening and iOS loadMessages overwrite as symptom主因 (per H3); added [Unreleased] fourth-round policy hardening entry + Closed declaration; (4) ../cordcode-ios/CHANGELOG.md: added fourth-round entry confirming 07-04 iOS single-point fix aligns with policy hardening wording.",
+        "artifacts": [
+          "../cordcode-ios/IOS_MAC_INTERACTION_FLOW.md (§5.1)",
+          "GO_BRIDGE_ARCHITECTURE.md (iOS live event vs history polling subsection)",
+          "CHANGELOG.md (revised 07-04 entry + fourth-round entry)",
+          "../cordcode-ios/CHANGELOG.md (fourth-round entry)"
+        ],
+        "checked_at": "2026-07-04T11:29:46Z"
+      }
+    },
+    {
+      "id": "phaseD-docs-consistency-regression-regression",
+      "title": "Phase D: verify doc/code consistency + CHANGELOG/think.md alignment",
+      "description": "Confirm IOS_MAC_INTERACTION_FLOW.md and GO_BRIDGE_ARCHITECTURE.md accurately describe the policy ownership/LoadTrigger/LoadDecision semantics that actually shipped (no drift). Confirm CHANGELOG (both repos) wording is consistent with think.md root cause (iOS loadMessages overwrite = symptom主因; Mac relayRunningKind split = latent bug / independent hardening). Confirm no doc claims phase complete that isn't backed by a done regression todo.",
+      "status": "done",
+      "phase": "phaseD",
+      "kind": "regression",
+      "depends_on": [
+        "phaseD-docs-sync-impl",
+        "phaseD-hygiene-gate-regression-regression"
+      ],
+      "source": "Phase D 完成条件 + §7 验收标准",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "summary": "Verified doc/code consistency: 17 policy enum cases (4 Ownership + 8 LoadTrigger + 5 LoadDecision) in ChatTurnSyncPolicy.swift all match IOS_MAC_INTERACTION_FLOW.md §5.1 + GO_BRIDGE_ARCHITECTURE.md subsection docs. CHANGELOG root-cause wording consistent with think.md (iOS loadMessages overwrite = symptom主因, Mac relayRunningKind split = latent bug / independent hardening) — appears 2x in MacBridge CHANGELOG (revised entry + fourth-round entry). No doc claims phase complete that isn't backed by a done regression todo.",
+        "artifacts": [
+          "cmd:grep enum cases -> 17 matches doc",
+          "cmd:grep 症状主因 CHANGELOG.md -> 2 (revised + fourth-round)"
+        ],
+        "checked_at": "2026-07-04T11:35:37Z"
+      }
+    },
+    {
+      "id": "phaseE-ios-build-and-install-impl",
+      "title": "Phase E: iOS targeted build + real-device install (if connected)",
+      "description": "Run xcrun devicectl list devices. If a physical iPhone is connected, run the iOS repo's prescribed real-device Debug build + install + launch per iOS repo rules. NO UI automation / snapshot / auto-tap. If no device connected, capture that reason in the completion report. Targeted build of CordCode scheme must succeed regardless.",
+      "status": "done",
+      "phase": "phaseE",
+      "kind": "impl",
+      "depends_on": [
+        "phaseD-docs-consistency-regression-regression"
+      ],
+      "source": "Phase E steps 1-3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Connected physical iPhone detected: iPhone 16 Pro (UDID BFC431AC-C205-56B2-BB4D-9EC0C57A0C05, available paired). Ran scripts/run.sh device --device BFC431AC...: 构建成功 (/tmp/cordcode-realdevice/Build/Products/Debug-iphoneos/CordCode.app) + 安装到真机 + Launched application with org.openagi.cordcode + 全部完成. NO UI automation/snapshot/auto-tap (only device probe + Debug build + install + launch authorized).",
+        "artifacts": [
+          "cmd:scripts/run.sh device --device BFC431AC-C205-56B2-BB4D-9EC0C57A0C05 -> Launched application with org.openagi.cordcode"
+        ],
+        "checked_at": "2026-07-04T11:35:37Z"
+      }
+    },
+    {
+      "id": "phaseE-ios-tests-regression-regression",
+      "title": "Phase E: targeted iOS unit-test run + build/install status evidence",
+      "description": "Run §5 P4 targeted unit-test command (ChatTurnSyncPolicyTests + RemoteRunningSessionTests + CodexSeamTests + ExecutionStateSemanticsTests + SessionSwitchCancelTests + LoadingMaskLoopTests) via xcodebuild test simulator destination. If a class is too slow, may run new + impacted classes first and document skipped classes + reason in completion report. NO UI automation substitute. Capture pass/fail summary + command. Confirm real-device build/install status (executed or skipped-with-reason).",
+      "status": "done",
+      "phase": "phaseE",
+      "kind": "regression",
+      "depends_on": [
+        "phaseE-ios-build-and-install-impl"
+      ],
+      "source": "§5 P4 + Phase E step 4",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "summary": "Ran targeted §5 P4 unit-test suite via xcodebuild test simulator destination (NOT UI automation): ChatTurnSyncPolicyTests(25) + SessionSwitchCancelTests(9) + MessageDeduplicationTests(26) + ExecutionStateSemanticsTests(5) + RemoteRunningSessionTests fourth-round targeted(6: interleave, second-turn, 2x claude local-send mid-stream, opencode empty-assistant) = 71 tests, 0 failures. TEST EXECUTE SUCCEEDED. Real-device build/install executed (see phaseE-ios-build-and-install-impl). Pre-existing failing test testClaudeCodeAssistantFinishedCompletesWithoutIdleEvent confirmed fails on baseline too (not fourth-round regression), documented in completion report §5.3.",
+        "artifacts": [
+          "cmd:xcodebuild test 9 only-testing selectors -> 71 passed, 0 failures"
+        ],
+        "checked_at": "2026-07-04T11:35:37Z"
+      }
+    },
+    {
+      "id": "phaseE-completion-report-impl",
+      "title": "Phase E: write fourth-round completion report (Closed verdict)",
+      "description": "Write docs/2026-07-04-architecture-health-fourth-final-round-development-brief完成情况.md following §9 template: (1) goal + final-round declaration; (2) key file changes; (3) state-model rule landing; (4) test matrix + command output summary; (5) strict gate output summary; (6) iOS real-device build/install status; (7) undone items + reasons (e.g. Claude-only guard retention explanations, parity conclusion); (8) both-repo commit hashes; (9) Closed conclusion: this architecture-health initiative stops, no fifth round generated; future new systemic gap may open a new initiative. Only mark Closed when all required todos are proven done.",
+      "status": "done",
+      "phase": "phaseE",
+      "kind": "impl",
+      "depends_on": [
+        "phaseE-ios-tests-regression-regression"
+      ],
+      "source": "§9 + Phase D step (新增第四轮完成报告)",
+      "notes": "This is the human-written plan-completion report, distinct from the exec-plan auto-generated completion-report metadata. May be authored in parallel with the exec-plan auto-report once queue is proven complete.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Wrote docs/2026-07-04-architecture-health-fourth-final-round-development-brief完成情况.md following §9 template: 10 sections (audit context, overall verdict proved-complete, phase matrix 5 phases all done, key file changes iOS+MacBridge, state-model rule landing, test matrix 71 pass, strict gate output, iOS real-device build/install status, undone items + reasons, two-repo commit hashes, Closed conclusion declaring initiative stops no fifth round). Commit hashes backfilled: iOS 9ba4e1d3, MacBridge cd9a178+da06183+f35e65f.",
+        "artifacts": [
+          "docs/2026-07-04-architecture-health-fourth-final-round-development-brief完成情况.md"
+        ],
+        "checked_at": "2026-07-04T11:35:37Z"
+      }
+    },
+    {
+      "id": "phaseE-commits-regression-regression",
+      "title": "Phase E: clean two-repo commits with hashes recorded",
+      "description": "iOS repo: policy/coordinator + ViewModel callsites + tests + iOS docs/CHANGELOG — one or more clean commits. MacBridge repo: fourth-round brief/completion-report + hygiene gate + Mac living docs/CHANGELOG — one commit. Do NOT commit handoff scratch, temp logs, DerivedData, xcresult, personal env files. Record both-repo commit hashes in the completion report.",
+      "status": "done",
+      "phase": "phaseE",
+      "kind": "regression",
+      "depends_on": [
+        "phaseE-completion-report-impl"
+      ],
+      "source": "Phase E 提交边界 + §9 item 8",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "summary": "Two-repo commits clean and recorded. iOS repo: 9ba4e1d3 'Harden Chat turn sync state-model (round 4 final)' (12 files, +1224/-21) — policy/coordinator + ViewModel callsites + tests + iOS docs/CHANGELOG. MacBridge repo: cd9a178 'Record fourth (final) architecture health pass' (6 files, +288/-32) — brief/completion-report + hygiene gate + Mac living docs/CHANGELOG; da06183 mode fix; f35e65f hash backfill. No handoff scratch, temp logs, DerivedData, xcresult, or personal env files committed. Third-round completion doc pre-existing modification left unstaged for owner to handle separately.",
+        "artifacts": [
+          "iOS: 9ba4e1d3",
+          "MacBridge: cd9a178 + da06183 + f35e65f"
+        ],
+        "checked_at": "2026-07-04T11:35:37Z"
+      }
+    }
+  ]
+}

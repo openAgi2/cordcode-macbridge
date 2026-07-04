@@ -159,3 +159,50 @@ instance httpapi 支持 cursor 后可零改动切换到 server-side cursor。
 丢弃。实际读源码后发现 server 默认 limit 50/100 且支持 roots SQL 过滤，改为一口气拉 100
 再内存分页更正确。完成情况文档 §4 的 Known Limits 中「无服务端加载更多是正确行为」
 已被本方案推翻。
+
+## 2026-07-04 追加复盘：冷启动既有 Claude session 的 spurious session_state_changed(idle)
+
+iOS 侧「首轮流式从头重播」再次复现后，跨仓联调定位到一条 Mac 侧的已知 artifact。
+
+### 现象（iOS 侧表现，根因在 Mac）
+
+iPhone 冷启动既有 Claude Code session 并发送消息后，回复输出一段后闪一下、从头重播，重复 3~4 次。
+Mac 日志：单个 turn 内 `get_session_messages` 被调 336 次，但 `send_message` 仅 2 次、`text_delta` 正常生成 ——
+说明 Mac 没有重复执行 prompt，问题在 iOS 反复拉历史覆盖 live timeline（iOS 侧诊断与修复见 ../cordcode-ios/think.md 同节）。
+
+### 真正根因（Mac 侧）
+
+既有 Claude session 的 transcript file relay 与真实 AgentSession stdout relay 共用 `relayRunning` 状态位。
+冷启动既有 session 时，**file relay 抢先基于上一轮已完成的 transcript** 广播 `session_state_changed(idle)`，
+几乎与 iOS 的 `send_message` 同时到达（实测 T+0ms）；真实 agent stdout relay 要等 CLI 首个 stdout 才报
+`session_state_changed(running)`（实测 T+10s）。对 Claude Code 的长 thinking 阶段（首 token 30s+）来说，
+这个 spurious idle 是**假的** —— CLI 正在跑、只是还没出 token。
+
+`7c1d97d "Harden Claude cold-start relay handling"` 的 relay-kind 拆分（agent / claude_file）曾试图修这个窗口，
+让真实 agent relay 能接管 file relay。但实测 Mac 仍会在冷启动时发 spurious idle —— relay-kind 拆分修的是
+「file relay 占位导致 send_message 起不来真实 stdout relay」，没修「file relay 仍会广播基于旧 transcript 的 idle」。
+
+### 本次处理
+
+iOS 侧兜底（已实现）：Claude local turn 首 text_delta 前收到的 `session_state_changed(idle)` 一律忽略，
+ownership 稳住 `.localSend` 直到真实 `turnCompleted`。详见 ../cordcode-ios/think.md「首 token 前 spurious idle 收口」节。
+
+Mac 侧**未**在本轮改：spurious idle 仍会发出，但 iOS 不再据此收口。Mac 侧的正确修法（后续独立清债）应是：
+file relay 不得在「真实 agent relay 未确认 idle」前单方面广播 idle；或 file-relay 的初始状态读取不得用上一轮已完成
+transcript 的终态当作当前 turn 的初态。
+
+### 关键诊断信号（Mac 日志）
+
+- 正常：`send_message` → `relayEvents forwarding event=text_delta` → `turn_completed`（一条 turn 内 send=1, turn_completed=1）。
+- 异常（本次 bug 间接证据）：`get_session_messages` 在单个 turn 内被调数百次（iOS 反复拉历史）。
+- Mac 是否发了 spurious idle：搜 `session_state_changed` / relay-kind 日志，看 send 后是否有先 idle 后 running 的翻转。
+
+### 后续原则
+
+- relay 状态位（file vs agent）的拆分要彻底：file relay 不得在 agent relay 未确认前广播 session 状态翻转。
+- iOS 侧对 Claude local turn 首 token 前的 idle 不信任是必要防御；Mac 侧的根因修复不能让 iOS 撤掉这层兜底
+  （冷启动 / 重连等场景仍可能再次出现 spurious 状态）。
+- 跨仓「流式异常」排查：先看 Mac `relayEvents forwarding` 是否正常生成 text_delta（排除 Mac/CLI 重跑），
+  再看 `get_session_messages` 频率（iOS 是否在 turn 内反复拉历史），最后用 `devicectl --console` 抓 iOS 端 NSLog
+  定位 ownership 翻转时机。
+

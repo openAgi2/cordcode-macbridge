@@ -5,19 +5,52 @@
 - Plan: `docs/2026-07-04-architecture-health-fourth-final-round-development-brief.md`
 - Canonical State File: `/Users/jacklee/Projects/cordcode-macbridge/.exec-plan/state/plan-8146dd664595.json`
 - Legacy State File: 无（首轮 sync，全新队列）
-- Completion Report Verdict: `proved-complete`
-- Queue Summary: 20/20 todos done，20/20 proven
-- Plan Status: `closed`（本次架构健康专项收口轮，不再派生第五轮）
+- Completion Report Verdict: `proved-complete`（P0 已于 2026-07-04 由 iOS spurious-idle follow-up 修复并经 owner 真机验收通过；audit 降级记录见 §0.1，已 resolve）
+- Queue Summary: 20/20 todos done，20/20 proven（audit 复核：未降级任何 todo）
+- Plan Status: `closed`（第四轮技术交付 proven；07-04 冷启动 Claude 真机可用性经 spurious-idle 修复后达标）
 - Related Commits: 提交后回填（iOS 仓 policy/coordinator + ViewModel 调用点 + tests + iOS docs/CHANGELOG；MacBridge 仓 brief/完成报告 + hygiene gate + Mac 活文档/CHANGELOG）
 - Generated At: 2026-07-04T19:30:00Z
+- Audited / Invalidated At: 2026-07-04T20:10:00Z（+08:00）
+
+## 0.1 Audit Invalidation Record（2026-07-04）
+
+> ✅ **RESOLVED（2026-07-04，同日 follow-up）**：P0「冷启动既有 Claude session 无流式输出 / 从头重播」已定位并修复。
+> 真因：冷启动时 Mac file relay 抢先广播 spurious `session_state_changed(idle)`，iOS 在首 `text_delta` 到达前 premature 收口 local turn，
+> ownership 翻转后 running polling 的 history fetch 覆盖 live partial。iOS 侧修复 = 新增 `shouldKeepClaudeLocalSendAliveBeforeFirstContent`
+> 守卫三处 idle 收口路径（与既有 OpenCode 兜底对齐），回归测试 `testClaudeCodeLocalSendIgnoresSpuriousIdleBeforeFirstContent`。
+> owner 真机验收：冷启动连发两问均正常，不再从头重播。详见两仓 `think.md`「首 token 前 spurious idle 收口」节。
+> 20/20 todos 自始至终未降级；第四轮技术交付一直 proven。本 report verdict 恢复 `proved-complete` / 专项 Closed。
+
+**Verdict**：`proved-complete`（初稿 → audit 降级 → P0 修复后恢复）。
+审计降级原委保留如下（历史记录）：
+
+**降级原因（owner 真机验收未通过）**：冷启动既有 Claude Code session，发首条消息，iPhone 一直显示「正在思考」、无任何流式 text delta 输出。Mac 日志关键证据：
+- `transport_route=direct`（iPhone 直连 Mac，session 加载走直连 WebSocket）
+- Claude CLI 子进程正常启动（`--resume <session>`，父进程是 `cordcode-bridge-runtime`），go-bridge 正常产生并 broadcast 事件（`text_delta seq=1,2,3...`，每次 `broadcast targets=1`）
+- `relay-router: prekey exhausted` deviceID=dev_c5ad42a3...，`/internal/relay/delivery-prekeys` 实测 iPhone `availableCount: 0`（prekey 完全耗尽；targetCount 32 / lowWatermark 10 / maxCount 64）
+- `urgentRefill` 信号在 `ConsumePrekey` 耗尽时已置位，但日志无 iPhone 上传 prekey / Mac 发出 refill 信号记录
+- 直连 iPhone 的 text_delta 应通过 `broadcaster.Send` 直推，prekey 耗尽只应影响离线 mailbox；为何直连 iPhone 没收到（或没渲染）broadcast 推送尚需定位
+
+**与第四轮的关系（已排除回归）**：已把 iOS 源码回退到 `e018cb5f`（第四轮之前、07-04 单点修复版）重装真机，无流式症状依然存在 → **P0 不是第四轮 turn sync policy 的回归**，而是 pre-existing 的 relay/prekey + live event 投递链路问题。第四轮的 policy/state 重构、定向测试、strict gate 经 audit 复核依然 proven（见 §5、§6）；本轮 20/20 todos **未降级任何一条**。
+
+**为何仍降级完成报告**：初稿 §1 称 `e018cb5f`「经 owner 真机复测通过」、§10 称专项「Closed」，把 07-04 冷启动场景的真机可用性描述为已解决；但 P0 阻塞了该场景的真机验收，报告对用户可见结果的声明过度。专项技术交付成立，但「Closed」需等 P0 作为独立修复项解决后再下。
+
+**Re-verification（本 audit 实跑，非沿用旧 summary）**：
+- `CORDCODE_IOS_ROOT=../cordcode-ios CORDCODE_HYGIENE_STRICT=1 scripts/check-architecture-hygiene.sh` → exit 0（bridgeprovider 1629/71/27、chatviewmodel_generation 2336/56、chatviewmodel_messagesync 1577/46，三条 baseline 无净增）
+- `xcodebuild test`（simulator iPhone 17 Pro Max）ChatTurnSyncPolicyTests（25）+ RemoteRunningSessionTests 定向 4 条（`testClaudeCodeInterleave_*` / `testClaudeCodeSecondTurn_*` / `testClaudeCodeLocalSendLoadMessagesDoesNotApplyHistoryMidStream` / `testClaudeCodeLocalSendRunningPollingDoesNotFetchHistoryMidStream`）→ 29 tests, 0 failures（`TEST SUCCEEDED`）
+- 两仓 commit 复核：MacBridge `f35e65f`+`da06183`+`cd9a178`、iOS `9ba4e1d3` 均在位；工作树仅第三轮遗留 + xcodegen `project.pbxproj` 等价 diff（非第四轮残留）
+
+**下一步**：P0（relay delivery prekey 自动恢复 + 直连客户端 live event 投递）作为独立修复项推进；通过 owner 真机复测后，再把本完成报告 verdict 改回 `proved-complete` / 专项 Closed。
 
 ## 1. Overall Verdict (总体结论)
 
 第四轮（最终轮）按 brief Phase A → E 全量执行，**判定为 proved-complete**：iOS `ChatViewModel` 的 local send / live event / history sync / running-session polling / session switch 互斥与优先级规则，从散落在多个 extension 的 Claude-only ad-hoc 条件（`isClaudeCodeLocalSendInProgress` / `allowDuringClaudeLocalSend`）重构为 backend-agnostic 的显式 policy/coordinator，并用定向测试 + strict net-growth gate 防回涨。
 
-本轮不修一个仍活跃的 bug——2026-07-04 Claude 冷启动重复从头输出已由 iOS `e018cb5f` 单点修复并经 owner 真机复测通过。本轮把该单点修复背后的结构性 race 泛化为 backend-agnostic policy：`ChatTurnSyncPolicy`（纯函数）+ `ChatTurnSyncState`（`@MainActor` holder），在 MainActor 同步段内做 ownership 读写 + apply 前复核，并用定向交错测试证明复核真实存在。
+本轮不修一个仍活跃的 bug——2026-07-04 Claude 冷启动「重复从头输出」症状（history 覆盖 live partial）已由 iOS `e018cb5f` 单点修复；本轮把该单点修复背后的结构性 race 泛化为 backend-agnostic policy：`ChatTurnSyncPolicy`（纯函数）+ `ChatTurnSyncState`（`@MainActor` holder），在 MainActor 同步段内做 ownership 读写 + apply 前复核，并用定向交错测试证明复核真实存在。
 
-**本次架构健康专项到第四轮结束（Closed）。** 剩余大文件作为普通维护债进入日常 backlog，不派生「第五轮架构健康」；未来若出现新系统性 gap，需另立专项并重新定义范围。
+> ⚠️ **审计更正（2026-07-04，详见 §0.1）**：初稿曾称 `e018cb5f`「经 owner 真机复测通过」。后续 owner 真机验收发现：冷启动 Claude session 发首条消息时 iPhone **无任何流式输出**。把 iOS 源码回退到 `e018cb5f` 重装真机后该无流式症状依然存在 → 这是 pre-existing 的 Relay delivery prekey 耗尽 + live event 投递链路 P0，**不是**第四轮 turn sync policy 引入的回归，也**不是** `e018cb5f` 的 loadMessages overwrite 修复能覆盖的范围。本轮 policy/state 重构本身经定向测试 + strict gate 复核成立（§5、§6），但 07-04 冷启动场景的真机可用性仍被该 P0 阻塞。
+
+**本次架构健康专项的技术交付（policy refactor + 测试 + gate + 文档）已完成且经 audit 复核 proven，但专项暂不 Closed**：07-04 冷启动 Claude session 真机无流式输出的 P0（pre-existing relay/prekey 问题）阻塞 owner 真机验收，需作为独立修复项推进后再收口。剩余大文件作为普通维护债进入日常 backlog，不派生「第五轮架构健康」；未来若出现新系统性 gap，需另立专项并重新定义范围。
 
 ## 2. Phase Completion Matrix (阶段完成矩阵)
 
@@ -138,6 +171,8 @@ CORDCODE_IOS_ROOT=../cordcode-ios CORDCODE_HYGIENE_STRICT=1 scripts/check-archit
 - iOS 仓（`../cordcode-ios`）：`9ba4e1d3` — `Harden Chat turn sync state-model (round 4 final)`（policy/coordinator + ViewModel 调用点 + tests + iOS docs/CHANGELOG，12 files changed, +1224/-21）。
 - MacBridge 仓：`cd9a178` — `Record fourth (final) architecture health pass`（brief/完成报告 + hygiene gate + Mac 活文档/CHANGELOG，6 files changed, +288/-32）+ `da06183` — `Restore executable bit on check-architecture-hygiene.sh`（mode fix）。
 
-## 10. Closed 结论
+## 10. 收口结论（audit-invalidated，暂不 Closed）
 
-**本次架构健康专项停止，不生成第五轮。** 第四轮把 2026-07-04 Claude 冷启动重复从头输出背后的结构性 race 泛化为 backend-agnostic turn sync policy，并用定向测试 + strict gate 防回涨。未来若出现新的系统性事故或新证据，需另立专项并重新定义范围；本文明确不做的事项不得自动续成下一轮架构健康专项。
+**本次架构健康专项的技术交付已完成并经 audit 复核 proven（20/20 todos re-verified：hygiene gate + 29 iOS 定向测试实跑通过），但因 P0 真机回归未通过，专项暂不 Closed。** 第四轮把 2026-07-04 Claude 冷启动结构性 race（history 覆盖 live partial）泛化为 backend-agnostic turn sync policy，并用定向测试 + strict gate 防回涨。
+
+owner 真机验收发现的「冷启动 Claude session 无流式输出」P0（pre-existing relay/prekey 投递问题，已通过回退 `e018cb5f` 重装真机排除第四轮回归）需作为**独立修复项**解决后，才能把本专项标为 Closed，并把本报告 verdict 改回 `proved-complete`。未来若出现新的系统性事故或新证据，需另立专项并重新定义范围；本文明确不做的事项不得自动续成下一轮架构健康专项。

@@ -8,6 +8,16 @@
 
 ## [Unreleased]
 
+### 2026-07-04 — 记录 Claude 冷启动 spurious idle 跨仓结论
+
+- 跨仓联调定位：冷启动既有 Claude session 时，transcript file relay 抢先基于上一轮已完成 transcript 广播 `session_state_changed(idle)`（早于真实 agent stdout relay 报 `running`），是 iOS 侧「首轮流式从头重播」的上游诱因。本轮 Mac 代码未改（relay-kind 拆分 `7c1d97d` 已修 file relay 占位问题但未覆盖 spurious idle 广播），iOS 侧已兜底（忽略 Claude local turn 首 token 前的 idle）。Mac 侧 file-relay/agent-relay 状态收敛为后续独立清债。详见 `think.md` 同节。
+
+### 2026-07-04 — 强化 agent 自主诊断规则
+
+- `CLAUDE.md` 新增“Autonomous diagnosis and evidence collection”规则，明确 bug 排查时 agent 必须先自行读取源码、日志、进程、端口、配置、Management API 和定向测试证据；不得默认让 owner 手动跑命令、复制日志或替 agent 选择实现路径。
+- 明确连接真机时的边界：只读设备探测与日志采集应由 agent 自行完成；点击、输入、滑动、截图、视觉验收和 UI automation 仍需 owner 当前任务明确授权。
+- 把 `think.md` 和相邻 iOS 仓 `think.md` 提升为 session/history/live-stream/执行态等问题的排障入口，要求 agent 先复用既有复盘结论，避免重复调查。
+
 ### 2026-07-04 — 修复 Claude Code 冷启动既有 session 首轮流式重复
 
 > **根因口径修订（2026-07-04 架构健康第四轮）**：本条目原描述把 Mac 侧
