@@ -58,6 +58,13 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 		caps = append(caps, "compression")
 		caps = append(caps, "question_reply")
 	}
+	// claudecode now answers AskUserQuestion via the verified control_response
+	// path (RespondQuestion/RejectQuestion in session.go), so it advertises the
+	// backend-neutral question_reply capability. OpenCode does not resolve
+	// questions over the bridge and must NOT advertise it.
+	if id == "claudecode" {
+		caps = append(caps, "question_reply")
+	}
 
 	return caps
 }

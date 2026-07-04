@@ -152,6 +152,54 @@ question_asked
 question_resolved
 ```
 
+## Semantic Notes — questions vs. permissions
+
+These notes clarify the meaning of method/event names that the name registries
+above do not make explicit. They are non-breaking semantic documentation; no
+field, type, or wire value was changed.
+
+- `question_asked` is the single bridge event for a **structured user-choice
+  prompt**. It carries `questionId`, `questionText`, `options[]` (each
+  `{ id, label, description }`), `required`, and `threadId?`. It is emitted by:
+  - Codex app-server `turn/question` notifications, and
+  - Claude Code `AskUserQuestion` tool requests (MacBridge parses the
+    `can_use_tool` control request, emits `question_asked`, and registers the
+    pending question so a later `question_reply` can build the verified
+    `control_response` answer).
+  Once emitted, iOS does not care which backend produced it.
+- `question_reply` / `question_reject` are **backend-neutral bridge RPCs** for
+  answering or cancelling a structured question. `question_reply` carries
+  `optionIds: string[]`; iOS sends exactly one option id (single-select v1).
+  `question_reject` cancels the question. Both are routed by MacBridge to the
+  backend-specific responder (Codex app-server JSON-RPC, or Claude
+  `control_response`).
+- `permission_request` is for **tool authorization** (e.g. Bash/Write approval),
+  NOT structured user-choice prompts. A Claude `AskUserQuestion` that parses to
+  a valid structured question is emitted as `question_asked`, not
+  `permission_request`. `permission_request` is only used for AskUserQuestion as
+  a fallback when parsing yields zero valid questions, so malformed input still
+  produces a visible block.
+- `resolve_permission.behavior` wire values are exactly `"allow"` / `"deny"`.
+  This is the MacBridge/agent wire contract (`core.PermissionResult.behavior`).
+  Claude's permission responder treats ONLY `behavior == "allow"` as allow; any
+  other value (including legacy `approve`/`approve_always`/`reject`/
+  `reject_always`) is deny.
+- The iOS UI/native action enum (`approve` / `approveAlways` / `reject` /
+  `rejectAlways`) is a **different layer** from the bridge wire `behavior`. iOS
+  translates the UI action to the wire value before calling `resolve_permission`
+  (`approve`/`approveAlways` → `"allow"`, `reject`/`rejectAlways` → `"deny"`).
+  Clients MUST send `allow`/`deny` on the wire; legacy snake_case values are a
+  bug, not an alternate vocabulary.
+- v1 limitations (enforced at MacBridge parse time, never reach iOS):
+  - Only single-question, single-select AskUserQuestion prompts are emitted as
+    `question_asked`.
+  - `AskUserQuestion` with `len(questions) > 1` or any `multiSelect == true` is
+    denied via `RespondPermission(deny)` at parse time and emits no
+    `question_asked`.
+  - Claude `autoApprove` / `dontAsk` / `acceptEditsOnly` modes short-circuit
+    `AskUserQuestion` before event emission, so the iOS question UI does not
+    appear in those modes.
+
 ## Mapping Notes
 
 iOS accepts compatible session directory fields in this priority order:

@@ -51,6 +51,14 @@ type claudeSession struct {
 	streamState      streamEventState
 	toolNameByUseID  sync.Map // tool_use_id → tool_name
 
+	// pendingQuestions holds unanswered Claude AskUserQuestion control requests,
+	// keyed by Claude requestID. claudeSession owns it because it owns the Claude
+	// stdin/control stream — a later question_reply/question_reject needs the
+	// original raw input + option→label map to build the verified control_response.
+	// v1 stores only single-question, single-select prompts; multi-question /
+	// multi-select AskUserQuestion is denied at parse time and never enters here.
+	pendingQuestions sync.Map // requestID -> *pendingClaudeQuestion
+
 	// gracefulStopTimeout is how long Close() waits for a clean exit
 	// (stdin close → Stop hooks → process exit) before escalating to
 	// SIGTERM and then SIGKILL. Default: 120s to match claude-mem's
@@ -825,6 +833,32 @@ func (cs *claudeSession) handleControlRequest(raw map[string]any) {
 		return
 	}
 
+	// AskUserQuestion: v1 supports exactly one single-select question.
+	// - >=1 valid question and single-select/single-question -> emit question_asked
+	//   and register it so a later question_reply/question_reject can answer it.
+	// - multi-question (len>1) or any multiSelect -> deny at parse time, do NOT
+	//   emit, do NOT involve iOS. (The iOS question model is single-select v1.)
+	// - zero valid questions (malformed) -> fall through to the generic
+	//   permission_request so the user still sees a visible permission block.
+	if toolName == "AskUserQuestion" {
+		questions := parseUserQuestions(input)
+		if len(questions) > 0 {
+			if len(questions) > 1 || anyMultiSelect(questions) {
+				slog.Info("claudeSession: denying unsupported AskUserQuestion shape",
+					"request_id", requestID, "questions", len(questions))
+				_ = cs.RespondPermission(requestID, core.PermissionResult{
+					Behavior: "deny",
+					Message:  "AskUserQuestion with multiple or multi-select questions is not supported on this client.",
+				})
+				return
+			}
+			cs.emitAskUserQuestion(requestID, input, questions)
+			return
+		}
+		slog.Warn("claudeSession: AskUserQuestion parsed zero valid questions; falling back to permission_request",
+			"request_id", requestID)
+	}
+
 	slog.Info("claudeSession: permission request", "request_id", requestID, "tool", toolName)
 	evt := core.Event{
 		Type:         core.EventPermissionRequest,
@@ -832,10 +866,6 @@ func (cs *claudeSession) handleControlRequest(raw map[string]any) {
 		ToolName:     toolName,
 		ToolInput:    summarizeInput(toolName, input),
 		ToolInputRaw: input,
-	}
-
-	if toolName == "AskUserQuestion" {
-		evt.Questions = parseUserQuestions(input)
 	}
 
 	select {
@@ -972,12 +1002,191 @@ func (cs *claudeSession) RespondPermission(requestID string, result core.Permiss
 	return cs.writeJSON(controlResponse)
 }
 
-func (cs *claudeSession) RespondQuestion(_ string, _ []string) error {
-	return fmt.Errorf("%s does not support question reply", "claudeSession")
+// RespondQuestion answers a Claude AskUserQuestion that was emitted as
+// question_asked. It looks up the pending question by Claude requestID, validates
+// v1 single-select (exactly one option id), and delivers the answer as a real
+// control_response with {behavior:"allow", updatedInput:{...origInput, answers:{<questionText>:<label>}}}
+// — the verified shape derived from the Claude Code SDK source. It is NOT a fake
+// chat message; option labels are sent only because the verified protocol keys
+// answers by question text and expects the option label as the value.
+func (cs *claudeSession) RespondQuestion(questionID string, optionIDs []string) error {
+	if questionID == "" {
+		return fmt.Errorf("claudeSession: questionID is required")
+	}
+	if !cs.alive.Load() {
+		return fmt.Errorf("session process is not running")
+	}
+	// Validate request shape BEFORE consuming the registry entry, so a malformed
+	// reply (wrong arg count) does not make the question unanswerable.
+	if len(optionIDs) != 1 {
+		return fmt.Errorf("claudeSession: v1 question reply requires exactly one option id (got %d)", len(optionIDs))
+	}
+	val, ok := cs.pendingQuestions.LoadAndDelete(questionID)
+	if !ok {
+		return fmt.Errorf("claudeSession: no pending question for id %s", questionID)
+	}
+	pq, _ := val.(*pendingClaudeQuestion)
+	if pq == nil {
+		return fmt.Errorf("claudeSession: corrupt pending question entry for id %s", questionID)
+	}
+	if len(pq.questions) != 1 {
+		return fmt.Errorf("claudeSession: only single-question prompts are supported (got %d)", len(pq.questions))
+	}
+	opt, ok := pq.optionByID[optionIDs[0]]
+	if !ok {
+		return fmt.Errorf("claudeSession: unknown option id %s for question %s", optionIDs[0], questionID)
+	}
+	questionText := pq.questions[opt.questionIndex].Question
+	updatedInput := copyStringAnyMap(pq.rawInput)
+	if updatedInput == nil {
+		updatedInput = map[string]any{}
+	}
+	updatedInput["answers"] = map[string]any{questionText: opt.label}
+	if err := cs.RespondPermission(questionID, core.PermissionResult{
+		Behavior:     "allow",
+		UpdatedInput: updatedInput,
+	}); err != nil {
+		return fmt.Errorf("claudeSession: question reply failed: %w", err)
+	}
+	cs.emitQuestionResolved(questionID, "replied")
+	return nil
 }
 
-func (cs *claudeSession) RejectQuestion(_ string) error {
-	return fmt.Errorf("%s does not support question reject", "claudeSession")
+// RejectQuestion cancels a pending Claude AskUserQuestion by delivering a real
+// deny control_response with explicit skip wording (approximating the Mac-side
+// "Skip" affordance). Claude treats behavior:"deny" as the user declining the
+// tool use and continues; it does not hang.
+func (cs *claudeSession) RejectQuestion(questionID string) error {
+	if questionID == "" {
+		return fmt.Errorf("claudeSession: questionID is required")
+	}
+	if !cs.alive.Load() {
+		return fmt.Errorf("session process is not running")
+	}
+	if _, ok := cs.pendingQuestions.LoadAndDelete(questionID); !ok {
+		return fmt.Errorf("claudeSession: no pending question for id %s", questionID)
+	}
+	if err := cs.RespondPermission(questionID, core.PermissionResult{
+		Behavior: "deny",
+		Message:  "User skipped the question.",
+	}); err != nil {
+		return fmt.Errorf("claudeSession: question reject failed: %w", err)
+	}
+	cs.emitQuestionResolved(questionID, "rejected")
+	return nil
+}
+
+// pendingClaudeQuestion retains everything needed to build the verified
+// control_response for a later question_reply/question_reject.
+type pendingClaudeQuestion struct {
+	requestID   string
+	toolName    string
+	rawInput    map[string]any          // original AskUserQuestion input (base for updatedInput)
+	questions   []core.UserQuestion      // parsed questions (len==1 for v1)
+	optionByID  map[string]pendingOption // synthesized option id -> option detail
+	optionOrder []string                 // synthesized option ids in display order
+}
+
+// pendingOption maps a synthesized stable option id back to its question + the
+// option label the Claude protocol expects in the answers map.
+type pendingOption struct {
+	questionIndex int    // index into pendingClaudeQuestion.questions
+	label         string // option label delivered to Claude as answers[questionText]
+}
+
+// optionIDForIndex synthesizes a stable, request-namespaced option id.
+// core.UserQuestionOption has no stable id of its own, and option labels may
+// repeat across questions, so ids are namespaced by request id and 1-based index.
+func optionIDForIndex(requestID string, idx int) string {
+	return fmt.Sprintf("%s:option-%d", requestID, idx+1)
+}
+
+func anyMultiSelect(questions []core.UserQuestion) bool {
+	for _, q := range questions {
+		if q.MultiSelect {
+			return true
+		}
+	}
+	return false
+}
+
+// copyStringAnyMap returns a shallow copy of m. A shallow copy is sufficient
+// because the answer path only adds a new top-level "answers" key; it never
+// mutates nested structures (the original questions array is preserved as-is).
+func copyStringAnyMap(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+// emitAskUserQuestion registers the pending question and emits question_asked.
+// Caller must guarantee len(questions)==1 and no multiSelect (v1 single-question).
+func (cs *claudeSession) emitAskUserQuestion(requestID string, input map[string]any, questions []core.UserQuestion) {
+	q := questions[0]
+	questionText := q.Question
+	if header := strings.TrimSpace(q.Header); header != "" {
+		// iOS question model has no separate header field; fold it into the text.
+		questionText = fmt.Sprintf("%s: %s", header, q.Question)
+	}
+
+	pq := &pendingClaudeQuestion{
+		requestID:   requestID,
+		toolName:    "AskUserQuestion",
+		rawInput:    input,
+		questions:   questions,
+		optionByID:  make(map[string]pendingOption, len(q.Options)),
+		optionOrder: make([]string, 0, len(q.Options)),
+	}
+	opts := make([]core.QuestionOption, 0, len(q.Options))
+	for i, o := range q.Options {
+		id := optionIDForIndex(requestID, i)
+		pq.optionByID[id] = pendingOption{questionIndex: 0, label: o.Label}
+		pq.optionOrder = append(pq.optionOrder, id)
+		opts = append(opts, core.QuestionOption{
+			ID:          id,
+			Label:       o.Label,
+			Description: o.Description,
+		})
+	}
+
+	// Insert registry entry immediately before emitting so a racing reply finds it.
+	cs.pendingQuestions.Store(requestID, pq)
+
+	evt := core.Event{
+		Type:         core.EventQuestionAsked,
+		SessionID:    cs.CurrentSessionID(),
+		QuestionID:   requestID,
+		QuestionText: questionText,
+		QuestionOpts: opts,
+		Required:     true, // AskUserQuestion is a blocking prompt; no optional signal.
+		ThreadID:     "",   // Claude has no Codex-style thread id.
+	}
+	slog.Info("claudeSession: AskUserQuestion emitted as question_asked",
+		"request_id", requestID, "options", len(opts))
+	select {
+	case cs.events <- evt:
+	case <-cs.ctx.Done():
+	}
+}
+
+// emitQuestionResolved notifies iOS that a pending question was answered or
+// cancelled, mirroring the Codex question_resolved event.
+func (cs *claudeSession) emitQuestionResolved(questionID, result string) {
+	evt := core.Event{
+		Type:       core.EventQuestionResolved,
+		SessionID:  cs.CurrentSessionID(),
+		QuestionID: questionID,
+		Content:    result,
+	}
+	select {
+	case cs.events <- evt:
+	case <-cs.ctx.Done():
+	}
 }
 
 func (cs *claudeSession) writeJSON(v any) error {
@@ -1055,6 +1264,14 @@ func (cs *claudeSession) Alive() bool {
 }
 
 func (cs *claudeSession) Close() error {
+	// Drop pending AskUserQuestion state so late question_reply/question_reject
+	// calls fail visibly (no pending entry) instead of writing to a dead stdin.
+	// Pending state is per-session and not reusable after close.
+	cs.pendingQuestions.Range(func(k, _ any) bool {
+		cs.pendingQuestions.Delete(k)
+		return true
+	})
+
 	// Phase 1: Close stdin to signal EOF. Claude Code exits cleanly on
 	// stdin close, running Stop hooks (e.g. claude-mem session summary).
 	cs.stdinMu.Lock()

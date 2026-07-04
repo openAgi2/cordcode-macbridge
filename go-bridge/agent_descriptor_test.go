@@ -149,6 +149,7 @@ func TestFullAgentCapabilities(t *testing.T) {
 		"workspace_diff",
 		"diagnostics", "usage_reporting", "permission_mode", "session_mutation",
 		"content_chunking", "session_delete", "permission_resolve", "todos",
+		"question_reply",
 	}
 	for _, e := range expected {
 		if !capSet[e] {
@@ -196,6 +197,27 @@ func TestBuildAgentDescriptorCodexExecNoAppServerCapabilities(t *testing.T) {
 		if descriptorHasCapability(d.Capabilities, cap) {
 			t.Fatalf("%s should not appear in exec mode: %v", cap, d.Capabilities)
 		}
+	}
+}
+
+// claudecode advertises question_reply once RespondQuestion/RejectQuestion are
+// real (S5). This is protocol hygiene / testable backend truth, not the gate
+// that makes the iOS question UI render.
+func TestBuildAgentDescriptorClaudeCodeQuestionReplyCapability(t *testing.T) {
+	agent := &fullFakeAgent{descriptorFakeAgent{name: "claudecode"}}
+	d := BuildAgentDescriptor("claudecode", agent, "", nil)
+	if !descriptorHasCapability(d.Capabilities, "question_reply") {
+		t.Fatalf("question_reply capability missing for claudecode: %v", d.Capabilities)
+	}
+}
+
+// OpenCode must NOT advertise question_reply — it does not resolve questions
+// over the bridge.
+func TestBuildAgentDescriptorOpenCodeDoesNotAdvertiseQuestionReply(t *testing.T) {
+	agent := &fullFakeAgent{descriptorFakeAgent{name: "opencode"}}
+	d := BuildAgentDescriptor("opencode", agent, "", nil)
+	if descriptorHasCapability(d.Capabilities, "question_reply") {
+		t.Fatalf("question_reply must not be advertised for opencode: %v", d.Capabilities)
 	}
 }
 
