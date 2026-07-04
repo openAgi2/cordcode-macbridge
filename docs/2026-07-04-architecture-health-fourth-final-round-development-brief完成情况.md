@@ -135,8 +135,8 @@ CORDCODE_IOS_ROOT=../cordcode-ios CORDCODE_HYGIENE_STRICT=1 scripts/check-archit
 
 ## 9. 两仓 commit hash
 
-- iOS 仓：提交后回填（policy/coordinator + ViewModel 调用点 + tests + iOS docs/CHANGELOG）。
-- MacBridge 仓：提交后回填（brief/完成报告 + hygiene gate + Mac 活文档/CHANGELOG）。
+- iOS 仓（`../cordcode-ios`）：`9ba4e1d3` — `Harden Chat turn sync state-model (round 4 final)`（policy/coordinator + ViewModel 调用点 + tests + iOS docs/CHANGELOG，12 files changed, +1224/-21）。
+- MacBridge 仓：`cd9a178` — `Record fourth (final) architecture health pass`（brief/完成报告 + hygiene gate + Mac 活文档/CHANGELOG，6 files changed, +288/-32）+ `da06183` — `Restore executable bit on check-architecture-hygiene.sh`（mode fix）。
 
 ## 10. Closed 结论
 
