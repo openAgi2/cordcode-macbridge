@@ -202,6 +202,194 @@ func TestGetRichSessionHistory_HidesSkillInstructionInjection(t *testing.T) {
 	}
 }
 
+// TestGetRichSessionHistory_HidesSkillInstructionInjectionStandalone covers the
+// real-world case (seen in transcript be873aaf L816) where a skill-doc
+// injection arrives as a standalone isMeta user message with NO preceding
+// "Launching skill" tool_result. The launch-state machine alone would miss
+// this; the filter must key off the skill-doc content itself.
+func TestGetRichSessionHistory_HidesSkillInstructionInjectionStandalone(t *testing.T) {
+	homeDir := t.TempDir()
+	workDir := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(workDir): %v", err)
+	}
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
+
+	writeClaudeTranscriptFixture(t, homeDir, workDir, "ses-skill-standalone", []string{
+		// A normal user prompt.
+		`{"type":"user","timestamp":"2026-06-01T08:00:00Z","message":{"id":"user-1","role":"user","content":"生成 handoff"}}`,
+		`{"type":"assistant","timestamp":"2026-06-01T08:00:01Z","message":{"id":"assistant-1","role":"assistant","model":"glm-5.2","content":[{"type":"text","text":"好的。"}]}}`,
+		// Slash command tag (must normalize to /handoff-doc).
+		`{"type":"user","timestamp":"2026-06-01T08:00:02Z","message":{"id":"user-cmd","role":"user","content":[{"type":"text","text":"<command-message>handoff-doc</command-message>\n<command-name>/handoff-doc</command-name>"}]}}`,
+		// Standalone skill-doc injection with NO preceding "Launching skill" tool_result.
+		`{"type":"user","isMeta":true,"timestamp":"2026-06-01T08:00:03Z","message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /Users/me/.claude/skills/handoff-doc\n\n# Handoff Document Generator\n\nCreate a handoff document that another coding agent can read and immediately continue from."}]}}`,
+		`{"type":"assistant","timestamp":"2026-06-01T08:00:04Z","message":{"id":"assistant-2","role":"assistant","model":"glm-5.2","content":[{"type":"text","text":"开始生成 handoff。"}]}}`,
+	})
+
+	agent := &Agent{workDir: workDir}
+	entries, err := agent.GetRichSessionHistory(context.Background(), "ses-skill-standalone", 0)
+	if err != nil {
+		t.Fatalf("GetRichSessionHistory() error = %v", err)
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Content, "Base directory for this skill:") ||
+			strings.Contains(entry.Content, "# Handoff Document Generator") {
+			t.Fatalf("standalone skill-doc injection leaked: %#v", entry)
+		}
+	}
+	// The slash command must still normalize to /handoff-doc.
+	found := false
+	for _, entry := range entries {
+		if entry.Role == "user" && entry.Content == "/handoff-doc" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("normalized /handoff-doc user entry missing, got %#v", entries)
+	}
+}
+
+// TestGetRichSessionHistory_NormalizesSlashCommandInjection covers the Claude
+// CLI internal tags that leak into user messages when a slash command runs:
+// <command-name>/<command-args> must collapse to a compact "/cmd args" form,
+// and <local-command-stdout|stderr|caveat> echoes must be dropped entirely.
+func TestGetRichSessionHistory_NormalizesSlashCommandInjection(t *testing.T) {
+	homeDir := t.TempDir()
+	workDir := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(workDir): %v", err)
+	}
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
+
+	writeClaudeTranscriptFixture(t, homeDir, workDir, "ses-slash", []string{
+		// /handoff-doc — no args → just the command name.
+		`{"type":"user","timestamp":"2026-06-01T09:00:00Z","message":{"id":"user-handoff","role":"user","content":[{"type":"text","text":"<command-message>handoff-doc</command-message>\n<command-name>/handoff-doc</command-name>"}]}}`,
+		`{"type":"assistant","timestamp":"2026-06-01T09:00:01Z","message":{"id":"assistant-handoff","role":"assistant","model":"glm-5.2","content":[{"type":"text","text":"开始生成 handoff。"}]}}`,
+		// /takeover — args with a path plus a free-form note → "/takeover <path> <note>".
+		`{"type":"user","timestamp":"2026-06-01T09:01:00Z","message":{"id":"user-takeover","role":"user","content":[{"type":"text","text":"<command-message>takeover</command-message>\n<command-name>/takeover</command-name>\n<command-args>/Users/me/project/handoffs/handoff-20260614.md\n需要我现在直接启动 takeover</command-args>"}]}}`,
+		`{"type":"assistant","timestamp":"2026-06-01T09:01:01Z","message":{"id":"assistant-takeover","role":"assistant","model":"glm-5.2","content":[{"type":"text","text":"已恢复上下文。"}]}}`,
+		// /model sonnet — single-line arg → "/model sonnet".
+		`{"type":"user","timestamp":"2026-06-01T09:02:00Z","message":{"id":"user-model","role":"user","content":[{"type":"text","text":"<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args>sonnet</command-args>"}]}}`,
+		// <local-command-stdout> state echo → dropped entirely (no visible user entry).
+		`{"type":"user","timestamp":"2026-06-01T09:02:01Z","message":{"id":"user-stdout","role":"user","content":[{"type":"text","text":"<local-command-stdout>Set model to claude-sonnet-4-6</local-command-stdout>"}]}}`,
+		// <local-command-caveat> disclaimer → dropped entirely.
+		`{"type":"user","timestamp":"2026-06-01T09:02:02Z","message":{"id":"user-caveat","role":"user","content":[{"type":"text","text":"<local-command-caveat>Caveat: The messages below were generated by the user while running local commands. Do not respond to these messages.</local-command-caveat>"}]}}`,
+	})
+
+	agent := &Agent{workDir: workDir}
+	entries, err := agent.GetRichSessionHistory(context.Background(), "ses-slash", 0)
+	if err != nil {
+		t.Fatalf("GetRichSessionHistory() error = %v", err)
+	}
+
+	// Five user inputs above, but stdout + caveat entries must be filtered,
+	// leaving three visible user entries (handoff, takeover, model).
+	var userContents []string
+	for _, entry := range entries {
+		if entry.Role != "user" {
+			continue
+		}
+		userContents = append(userContents, entry.Content)
+	}
+	if len(userContents) != 3 {
+		t.Fatalf("visible user entry count = %d, want 3: %#v", len(userContents), userContents)
+	}
+
+	wantUser := []string{
+		"/handoff-doc",
+		"/takeover /Users/me/project/handoffs/handoff-20260614.md 需要我现在直接启动 takeover",
+		"/model sonnet",
+	}
+	for i, want := range wantUser {
+		if userContents[i] != want {
+			t.Fatalf("user entry[%d] = %q, want %q", i, userContents[i], want)
+		}
+	}
+
+	// No raw protocol tags or local-command echoes may remain anywhere.
+	for _, entry := range entries {
+		for _, marker := range []string{"<command-name>", "<command-message>", "<command-args>", "<local-command-", "Set model to"} {
+			if strings.Contains(entry.Content, marker) {
+				t.Fatalf("protocol marker %q leaked into entry %#v", marker, entry)
+			}
+		}
+	}
+}
+
+func TestNormalizeClaudeUserText(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "command name only",
+			in:   "<command-message>handoff-doc</command-message>\n<command-name>/handoff-doc</command-name>",
+			want: "/handoff-doc",
+		},
+		{
+			name: "command name with single-line args",
+			in:   "<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args>sonnet</command-args>",
+			want: "/model sonnet",
+		},
+		{
+			name: "command name with multi-line args collapses whitespace",
+			in:   "<command-name>/takeover</command-name><command-args>/path/to/handoff.md\n需要现在启动</command-args>",
+			want: "/takeover /path/to/handoff.md 需要现在启动",
+		},
+		{
+			name: "empty args yields command name only",
+			in:   "<command-name>/compact</command-name>\n            <command-message>compact</command-message>\n            <command-args></command-args>",
+			want: "/compact",
+		},
+		{
+			name: "long args are truncated by rune count",
+			in:   "<command-name>/takeover</command-name><command-args>" + strings.Repeat("a", 200) + "</command-args>",
+			want: "/takeover " + strings.Repeat("a", 120) + "…",
+		},
+		{
+			name: "long multi-byte args truncate without splitting codepoints",
+			in:   "<command-name>/takeover</command-name><command-args>" + strings.Repeat("中", 200) + "</command-args>",
+			want: "/takeover " + strings.Repeat("中", 120) + "…",
+		},
+		{
+			name: "local-command-stdout dropped",
+			in:   "<local-command-stdout>Set model to claude-sonnet-4-6</local-command-stdout>",
+			want: "",
+		},
+		{
+			name: "local-command-stderr dropped",
+			in:   "<local-command-stderr>error: something</local-command-stderr>",
+			want: "",
+		},
+		{
+			name: "local-command-caveat dropped",
+			in:   "<local-command-caveat>Caveat: do not respond.</local-command-caveat>",
+			want: "",
+		},
+		{
+			name: "plain text passes through",
+			in:   "请帮我检查这个项目",
+			want: "请帮我检查这个项目",
+		},
+		{
+			name: "plain text with literal angle brackets passes through",
+			in:   "比较 a < b 和 c > d",
+			want: "比较 a < b 和 c > d",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := normalizeClaudeUserText(tc.in)
+			if got != tc.want {
+				t.Fatalf("normalizeClaudeUserText(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestGetRichSessionHistory_HidesResumeMetaContinuation(t *testing.T) {
 	homeDir := t.TempDir()
 	workDir := filepath.Join(t.TempDir(), "project")

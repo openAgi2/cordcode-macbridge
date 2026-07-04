@@ -8,6 +8,13 @@
 
 ## [Unreleased]
 
+### 2026-07-04 — 清洗 Claude Code 斜杠命令在 iOS 消息页的协议标签泄漏
+
+- **改了什么**：Claude Code 模式下，用户在 Mac 端执行 `/handoff-doc`、`/takeover`、`/model`、`/compact` 等斜杠命令时，Claude CLI 注入的内部协议标签（`<command-message>`、`<command-name>`、`<command-args>`、`<local-command-stdout>`、`<local-command-caveat>`）和 skill 文档全文（`Base directory for this skill: ... # Mission Takeover ...`）原本会原样作为用户消息出现在 iOS 消息页。现在 `agent/claudecode` 的 rich history 与会话列表预览统一清洗：斜杠命令收敛为简洁的 `/cmd args摘要`（args 按 rune 计数截断到 120，不切断多字节字符），`<local-command-stdout|stderr|caveat>` 等纯协议回显整条过滤，skill 文档注入按内容特征可靠过滤。
+- **有何提升**：iOS 消息页和会话列表不再显示 CLI 内部 XML 标签噪声和 skill 全文，斜杠命令以可读的命令名形式呈现；普通文本（含合法的 `<`/`>` 字符）不受影响。已对本机全部 141 个真实 Claude transcript 回归验证 0 泄漏。
+- 关键修正：skill 文档注入的过滤从"launch 状态机驱动"改为"内容特征驱动"。真实 transcript 中 skill 文档注入（`isMeta=true`、以 `Base directory for this skill:` 开头）不总是紧跟在 `Launching skill` tool_result 后面，原状态机会漏掉这种独立出现的注入；现按内容直接判定。
+- 改动范围限于 MacBridge 源头（`agent/claudecode/claudecode.go` 的 user 文本分支与 `extractTextContent`），不动 iOS、wire protocol 或 shared-message-renderer；新增定向测试覆盖五类标签清洗、多字节截断与 skill 文档独立注入场景。
+
 ### 2026-07-04 — 记录 Claude 冷启动 spurious idle 跨仓结论
 
 - 跨仓联调定位：冷启动既有 Claude session 时，transcript file relay 抢先基于上一轮已完成 transcript 广播 `session_state_changed(idle)`（早于真实 agent stdout relay 报 `running`），是 iOS 侧「首轮流式从头重播」的上游诱因。本轮 Mac 代码未改（relay-kind 拆分 `7c1d97d` 已修 file relay 占位问题但未覆盖 spurious idle 广播），iOS 侧已兜底（忽略 Claude local turn 首 token 前的 idle）。Mac 侧 file-relay/agent-relay 状态收敛为后续独立清债。详见 `think.md` 同节。

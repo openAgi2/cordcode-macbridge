@@ -1097,13 +1097,29 @@ func LoadClaudeRichHistoryFromReader(r io.Reader, path string) ([]core.RichHisto
 						pendingToolResults[block.ToolUseID] = result
 					}
 				case "text":
-					if skipNextSkillInstruction && isClaudeSkillInstructionText(block.Text) {
+					// Skill instruction injection (the full SKILL.md body Claude
+					// inserts as an isMeta user message after a Skill tool call) is
+					// filtered by content, not by the launch-state machine: in real
+					// transcripts a skill-doc injection (e.g. line 816) can appear
+					// without a preceding "Launching skill" tool_result, so the
+					// skipNextSkillInstruction flag alone would let it leak.
+					if isClaudeSkillInstructionText(block.Text) {
 						skipNextSkillInstruction = false
 						continue
 					}
-					skipNextSkillInstruction = false
+					if skipNextSkillInstruction {
+						skipNextSkillInstruction = false
+					}
+					// Normalize Claude CLI slash-command injection (<command-name>,
+					// <command-args>, <local-command-stdout|stderr|caveat>) into a
+					// compact user-readable form, or drop it entirely. See
+					// normalizeClaudeUserText.
+					normalized := normalizeClaudeUserText(block.Text)
+					if normalized == "" {
+						continue
+					}
 					hasVisibleContent = true
-					builder.addText(block.Text)
+					builder.addText(normalized)
 				case "":
 					continue
 				default:
@@ -1149,6 +1165,52 @@ func isClaudeSkillInstructionText(text string) bool {
 	trimmed := strings.TrimSpace(text)
 	return strings.HasPrefix(trimmed, "Base directory for this skill:") &&
 		strings.Contains(trimmed, "\n# ")
+}
+
+// commandNameRe / commandArgsRe / localCommandRe match the internal XML tags
+// Claude CLI injects when a user runs a slash command (e.g. /handoff-doc,
+// /model, /compact). These tags are protocol noise, not user-visible content,
+// so they are normalized before a user message enters the visible history.
+var (
+	commandNameRe     = regexp.MustCompile(`(?s)<command-name>\s*(.*?)\s*</command-name>`)
+	commandArgsRe     = regexp.MustCompile(`(?s)<command-args>\s*(.*?)\s*</command-args>`)
+	localCommandRe    = regexp.MustCompile(`(?s)<local-command-(?:stdout|stderr|caveat)>`)
+)
+
+const commandArgsPreviewLimit = 120
+
+// normalizeClaudeUserText converts Claude CLI slash-command injection into a
+// compact, user-readable form, and drops protocol-only echoes entirely:
+//
+//   - <command-name>/X</command-name>[<command-args>...</command-args>] → "/X"
+//     or "/X <args摘要>" when args carry real content.
+//   - <local-command-stdout|stderr|caveat>...</...> → "" (filtered out).
+//
+// Text without any of these tags is returned unchanged.
+func normalizeClaudeUserText(text string) string {
+	if localCommandRe.MatchString(text) {
+		return ""
+	}
+	nameMatch := commandNameRe.FindStringSubmatch(text)
+	if nameMatch == nil {
+		return text
+	}
+	name := strings.TrimSpace(nameMatch[1])
+	args := ""
+	if argsMatch := commandArgsRe.FindStringSubmatch(text); argsMatch != nil {
+		args = strings.TrimSpace(argsMatch[1])
+	}
+	if args == "" {
+		return name
+	}
+	// Collapse intra-arg whitespace/newlines so a multi-line args blob becomes
+	// a single-line preview (e.g. a handoff path plus a trailing comment).
+	flat := strings.Join(strings.Fields(args), " ")
+	// Truncate by rune count so multi-byte (e.g. CJK) args are not split mid-codepoint.
+	if runes := []rune(flat); len(runes) > commandArgsPreviewLimit {
+		flat = string(runes[:commandArgsPreviewLimit]) + "…"
+	}
+	return name + " " + flat
 }
 
 // GetSessionHistory reads the Claude Code JSONL transcript and returns user/assistant messages.
@@ -1330,13 +1392,19 @@ func defaultString(v, fallback string) string {
 }
 
 // extractTextContent extracts readable text from Claude Code message content.
-// Content can be a plain string or an array of content blocks.
+// Content can be a plain string or an array of content blocks. Each text block
+// is normalized via normalizeClaudeUserText so that slash-command injection and
+// local-command echoes do not leak into session-list previews or titles; the
+// helper is a pass-through for plain text, so assistant content is unaffected.
 func extractTextContent(raw json.RawMessage) string {
 	blocks := decodeTranscriptContentBlocks(raw)
 	segments := make([]string, 0, len(blocks))
 	for _, block := range blocks {
-		if block.Type == "text" && block.Text != "" {
-			segments = append(segments, block.Text)
+		if block.Type != "text" || block.Text == "" {
+			continue
+		}
+		if normalized := normalizeClaudeUserText(block.Text); normalized != "" {
+			segments = append(segments, normalized)
 		}
 	}
 	return strings.Join(segments, "\n\n")

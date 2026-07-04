@@ -206,3 +206,63 @@ transcript 的终态当作当前 turn 的初态。
   再看 `get_session_messages` 频率（iOS 是否在 turn 内反复拉历史），最后用 `devicectl --console` 抓 iOS 端 NSLog
   定位 ownership 翻转时机。
 
+# Claude 斜杠命令 / skill 文档泄漏：Mac 已干净、iOS 仍脏 = iOS 本地缓存陈旧
+
+2026-07-04。Mac 源头过滤已上线，用户仍反馈 iOS 消息页显示 skill 全文；最终根因是 iOS
+本地缓存未自愈，冷启动后恢复。记此条防止后续在 Mac 侧空转。
+
+## 现象
+
+iOS Claude Code 模式下，含 `/handoff-doc`、`/takeover` 等 skill 调用的 session 在消息页
+显示 skill 文档全文（`Base directory for this skill: ... # Mission ...`）和 CLI 内部协议标签
+（`<command-name>` / `<command-message>` / `<command-args>` / `<local-command-stdout>` /
+`<local-command-caveat>`）。Mac 侧 `agent/claudecode` 已实现源头过滤并对全机 141 个真实
+transcript 回归 0 泄漏，但 iPhone 仍显示旧内容 —— 表面矛盾。
+
+## 根因（纯 iOS 侧，Mac 已干净）
+
+Mac 源头过滤（`agent/claudecode/claudecode.go` 的 `normalizeClaudeUserText` +
+内容驱动 `isClaudeSkillInstructionText`，`extractTextContent` 同步清洗预览/标题）**已生效**：
+对 iPhone 此刻正在轮询的 `d8bff4fb-8275-4659-b6fe-082559c63d92`（最初泄漏的 9 个之一）
+把真实 transcript 喂给线上同一 parser，输出全部泄漏 marker = 0；`/Applications` 内嵌
+runtime（22:59 构建、pid 38490、8777 监听者）含修复符号；wire 映射 `richHistoryEntryToWire`
+是干净数据的纯变换，不会回污。
+
+iOS 显示的是**修复前持久化的本地缓存**，两层：
+
+- 内存缓存（`MessageCacheManager.getCachedMessages`）：命中时 `ChatViewModel+MessageSync.swift`
+  的 `loadMessages` 用缓存 `replaceMessagesFromServer` 后通常仍会继续 fetch（Phase 4 后
+  `usesBackendLiveEventStream` 全部为 true、Claude 走分页，line 169-173 的早返回不触发），
+  但缓存首屏先显示。
+- 磁盘快照 `~/Library/Application Support/SessionSnapshots/snapshot-<scopeHash>-<sessionHash>.json`
+  （`SessionSnapshotStore.swift`）：**键只含 `(backend identity, sessionId)`，无内容版本号**；
+  `currentSnapshotSchemaVersion=3` 只做「比 app 新才删」的前向校验，**不剔旧**。修复前写入的
+  脏快照在普通重开/冷启动后仍会被 `loadSnapshot` 读出并先渲染。
+
+冷启动清掉内存缓存后，磁盘快照路径 fetch 到 Mac 干净数据、`reconcileServerMessagesAgainstDisplayedSnapshot`
+按内容 diff 自愈，并 `persistSnapshot` 写回干净快照。用户冷启动后所有 skill session 恢复正常。
+
+## 验证
+
+- 字节级取证（临时测试，已删）：对真实 `d8bff4fb….jsonl` 跑 `LoadClaudeRichHistoryFromReader`，
+  118 条 / 1.28MB 输出中 `Base directory for this skill` ×0、五类命令标签 ×0、`## Mission` ×0，
+  仅保留 2 个合法 `Launching skill` tool_result。
+- 线上二进制 = 修复版：`strings` 命中 `isClaudeSkillInstructionText` / `normalizeClaudeUserText`；
+  pid 38490 即 `/Applications/CordCodeLink.app` 内嵌 runtime。
+- 设备验证（owner）：冷启动 iOS App 后打开原 session，skill 全文消失；其他 skill 命令 session
+  亦符合预期。
+
+## 后续原则
+
+- **「Mac 干净但 iOS 脏」排查优先级**：先在 Mac 侧对 iPhone 实际请求的那个 sessionID 做字节级
+  取证（runtime 日志里 `get_session_messages` 的 sessionID + response_bytes），再动 iOS。
+  Mac 干净则问题在 iOS 缓存或传输，不要回头改 Mac。
+- **Mac 内容侧修复对 iOS 不是即时生效**：iOS 有内存缓存 + 磁盘快照两层，磁盘快照键无内容版本。
+  一次冷启动可触发 reconcile 自愈；若需强制清旧脏快照，`SessionSnapshotStore` 没有 min-schema
+  删除逻辑，得 `clearAllData` / 删 SessionSnapshots 目录 / 重装 App。
+- iOS 源头治理（可选清债，本轮未做）：给 `SessionSnapshotStore` 加 min-schema（低于即删）或内容
+  hash 版本键，让 Mac 侧的内容级修复能确定性失效旧快照，而不依赖冷启动 + reconcile 时序。
+- 排查工具：`tail -f ~/Library/Application\ Support/CordCode\ Link/logs/go-bridge.log` 看
+  `get_session_messages` 的 sessionID/response_bytes/result_count；对目标 session 可写临时 Go 测试
+  调 `LoadClaudeRichHistoryFromReader` 对真实 JSONL 取证。
+
