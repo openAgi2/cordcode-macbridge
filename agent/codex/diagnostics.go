@@ -34,13 +34,19 @@ func (a *Agent) RunDiagnostics(ctx context.Context, progress func(core.Diagnosti
 		emitCdxProgress(progress, id, r.Status, r.Message)
 	}
 
-	runCheck("cli", "Codex CLI 可用性", "required", a.diagCLI)
-	runCheck("auth", "认证配置", "required", a.diagAuth)
-	runCheck("workdir", "工作目录", "required", a.diagWorkDir)
-
 	a.mu.RLock()
 	backend := a.backend
 	a.mu.RUnlock()
+
+	// Codex CLI is only spawned in exec mode; app-server mode connects via a
+	// WebSocket URL and never invokes the CLI binary, so its presence is not a
+	// required diagnostic there (would otherwise force OverallStatus=failed in
+	// every app-server-only deployment).
+	if backend != "app_server" {
+		runCheck("cli", "Codex CLI 可用性", "required", a.diagCLI)
+	}
+	runCheck("auth", "认证配置", "required", a.diagAuth)
+	runCheck("workdir", "工作目录", "required", a.diagWorkDir)
 
 	if backend == "app_server" {
 		runCheck("app_server", "app-server 可达性", "recommended", a.diagAppServer)

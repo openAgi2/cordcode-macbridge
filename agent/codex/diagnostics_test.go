@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -10,6 +11,12 @@ import (
 )
 
 func TestRunDiagnostics_EmitsProgressAndAggregates(t *testing.T) {
+	// exec mode spawns the codex CLI binary, so this check needs it on PATH.
+	// App-server-only machines legitimately don't have the CLI installed.
+	if _, err := exec.LookPath("codex"); err != nil {
+		t.Skipf("codex CLI not on PATH; exec-mode diagnostics require it: %v", err)
+	}
+
 	dir := t.TempDir()
 	authPath := filepath.Join(dir, "auth.json")
 	os.WriteFile(authPath, []byte(`{"tokens":{"access_token":"test-token","account_id":"acct-1"}}`), 0644)
@@ -63,9 +70,15 @@ func TestRunDiagnostics_AppServerMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunDiagnostics() error = %v", err)
 	}
-	// app_server mode: cli, auth, workdir, app_server = 4 checks
-	if len(report.Results) != 4 {
-		t.Fatalf("Results length = %d, want 4", len(report.Results))
+	// app_server mode: auth, workdir, app_server = 3 checks (cli check is
+	// exec-only — app-server never spawns the codex CLI binary).
+	if len(report.Results) != 3 {
+		t.Fatalf("Results length = %d, want 3 (app-server mode must not run the cli check): %+v", len(report.Results), report.Results)
+	}
+	for _, r := range report.Results {
+		if r.ID == "cli" {
+			t.Fatalf("cli check must not run in app-server mode, got %+v", r)
+		}
 	}
 
 	// app_server check should fail (nothing listening)

@@ -79,8 +79,13 @@ func New(opts map[string]any) (core.Agent, error) {
 		}
 	}
 
-	if _, err := exec.LookPath(cliBin); err != nil {
-		return nil, fmt.Errorf("codex: %q CLI not found in PATH, install with: npm install -g @openai/codex", cliBin)
+	// Codex CLI is only spawned in exec mode; app-server mode connects via a
+	// WebSocket URL (newAppServerSession) and never uses the CLI binary. Require
+	// the CLI only when it will actually be invoked.
+	if backend != "app_server" {
+		if _, err := exec.LookPath(cliBin); err != nil {
+			return nil, fmt.Errorf("codex: %q CLI not found in PATH, install with: npm install -g @openai/codex", cliBin)
+		}
 	}
 
 	return &Agent{
