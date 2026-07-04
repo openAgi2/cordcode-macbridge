@@ -7,7 +7,7 @@
 - Legacy State File: 无（首轮 sync，未走 legacy 路径）
 - Completion Report Verdict: `proved-complete`
 - Queue Summary: 12/12 todos done，12/12 proven
-- Related Commits: 提交边界按 brief 第 7 节：iOS 仓 `c6ea889`（`Extract Bridge transport connector`）+ MacBridge 仓一条提交（`Record third architecture health pass`；commit hash 待提交后回填）。
+- Related Commits: 提交边界按 brief 第 7 节：iOS 仓 `c6ea889`（`Extract Bridge transport connector`）+ MacBridge 仓 `d6aede1`（`Record third architecture health pass`）。
 - Generated At: 2026-07-04T06:00:00Z
 
 ## 1. Overall Verdict (总体结论)

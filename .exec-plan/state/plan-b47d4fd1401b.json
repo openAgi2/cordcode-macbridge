@@ -294,10 +294,11 @@
         "required": true,
         "status": "present",
         "method": "mixed",
-        "summary": "CHANGELOG.md [Unreleased] 下新增第三轮实现一节（改了什么/有何提升）。完成报告 docs/2026-07-04-architecture-health-third-round-development-brief完成情况.md 按 exec-plan 模板填写。两仓提交边界按 brief 第 7 节：iOS 仓一条提交（含 BridgeTransportConnector.swift/BridgeProvider.swift/测试/project.pbxproj）+ MacBridge 仓一条提交（含完成报告/CHANGELOG/hygiene-baseline.json/exec-plan state）。真机截图/临时日志不入产品提交。",
+        "summary": "CHANGELOG.md [Unreleased] 下新增第三轮实现一节（改了什么/有何提升）。完成报告 docs/2026-07-04-architecture-health-third-round-development-brief完成情况.md 按 exec-plan 模板填写。两仓提交边界按 brief 第 7 节落地：iOS c6ea889 Extract Bridge transport connector（含 BridgeTransportConnector.swift/BridgeProvider.swift/测试/project.pbxproj）+ MacBridge d6aede1 Record third architecture health pass（含完成报告/CHANGELOG/hygiene-baseline.json/exec-plan state/audit）。真机截图/临时日志不入产品提交。",
         "artifacts": [
           "CHANGELOG.md",
           "docs/2026-07-04-architecture-health-third-round-development-brief完成情况.md",
+          "docs/2026-07-04-architecture-health-third-round-completion-audit.md",
           ".exec-plan/state/plan-b47d4fd1401b.json"
         ],
         "checked_at": "2026-07-04T06:00:00Z"
