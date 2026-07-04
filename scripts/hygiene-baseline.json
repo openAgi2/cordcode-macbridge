@@ -8,10 +8,10 @@
     "forTesting": 27
   },
   "chatviewmodel_generation": {
-    "_comment": "ChatViewModel+Generation.swift 基线 — 第四轮 turn sync policy 硬化后实测。第四轮把 sendMessage/loadMessages 的 turn ownership 判决抽出为 ChatTurnSyncPolicy（纯函数）+ ChatTurnSyncState（@MainActor holder），loadMessages 入口的 Claude-only ad-hoc 守卫（isClaudeCodeLocalSendInProgress/allowDuringClaudeLocalSend）被统一 policy 取代。本轮净增来自 policy wiring（decideLoad/beginLoadIfAllowed/canApply/finishLoad）与 ownership 同步（beginGenerationTurn/completeGenerationTurn）；未来若继续增长，应把更多 ad-hoc 条件迁入 policy。实测 2336/56。",
+    "_comment": "ChatViewModel+Generation.swift 基线 — 第四轮 turn sync policy 硬化后实测，并经 2026-07-04 P0 spurious-idle 修复后上调。第四轮把 sendMessage/loadMessages 的 turn ownership 判决抽出为 ChatTurnSyncPolicy（纯函数）+ ChatTurnSyncState（@MainActor holder），loadMessages 入口的 Claude-only ad-hoc 守卫被统一 policy 取代。2026-07-04 P0「冷启动 Claude 从头重播」修复（iOS commit d93d36a5 + 本轮 policy 迁移）：新增三处 idle 收口守卫（sessionStateChanged(.idle) 在 CodexStreaming；startRunningSessionPolling 的 runtimeStateStore-guard / remote-idle 两处在 Generation），Claude local turn 首 text_delta 前不据此收口。守卫判决逻辑已迁入 ChatTurnSyncPolicy.shouldDeferIdleTeardown（纯函数，brief §4.4），Generation 只保留薄 wrapper（shouldKeepClaudeLocalSendAliveBeforeFirstContent）+ 两处调用点；与既有 OpenCode 同语义守卫对齐。本次上调 +24 lines / +1 func 即这三处守卫的调用点与薄 wrapper。实测 2360/57。",
     "path": "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel+Generation.swift",
-    "lines": 2336,
-    "funcs": 56
+    "lines": 2360,
+    "funcs": 57
   },
   "chatviewmodel_messagesync": {
     "_comment": "ChatViewModel+MessageSync.swift 基线 — 第四轮 turn sync policy 硬化后实测。第四轮在 loadMessages 入口增加 policy 路由（decideLoad + beginLoadIfAllowed + canApply + finishLoad），并把 allowDuringClaudeLocalSend 兼容参数映射为 .sendCompletionRecovery trigger；新增 inferLoadMessagesTrigger 桥接旧入口。未来增长应优先把更多 history sync 分支纳入 policy。实测 1577/46。",

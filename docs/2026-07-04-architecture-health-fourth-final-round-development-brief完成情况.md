@@ -22,7 +22,7 @@
 > 20/20 todos 自始至终未降级；第四轮技术交付一直 proven。本 report verdict 恢复 `proved-complete` / 专项 Closed。
 
 **Verdict**：`proved-complete`（初稿 → audit 降级 → P0 修复后恢复）。
-审计降级原委保留如下（历史记录）：
+审计降级原委保留如下（**历史记录；已被上方 RESOLVED 块取代**。其中 prekey 耗尽 / live event 投递链路的归因**后被证伪为红鲱鱼**——`text_delta` 不在 `durableMilestoneWhitelist` 内、不经 relay offline 路径，prekey 与流式无关；真实根因是 Mac file relay 的 spurious idle，见 RESOLVED 块。保留原文只为留痕 audit 当时的判断路径与 re-verification 证据）：
 
 **降级原因（owner 真机验收未通过）**：冷启动既有 Claude Code session，发首条消息，iPhone 一直显示「正在思考」、无任何流式 text delta 输出。Mac 日志关键证据：
 - `transport_route=direct`（iPhone 直连 Mac，session 加载走直连 WebSocket）
@@ -48,9 +48,9 @@
 
 本轮不修一个仍活跃的 bug——2026-07-04 Claude 冷启动「重复从头输出」症状（history 覆盖 live partial）已由 iOS `e018cb5f` 单点修复；本轮把该单点修复背后的结构性 race 泛化为 backend-agnostic policy：`ChatTurnSyncPolicy`（纯函数）+ `ChatTurnSyncState`（`@MainActor` holder），在 MainActor 同步段内做 ownership 读写 + apply 前复核，并用定向交错测试证明复核真实存在。
 
-> ⚠️ **审计更正（2026-07-04，详见 §0.1）**：初稿曾称 `e018cb5f`「经 owner 真机复测通过」。后续 owner 真机验收发现：冷启动 Claude session 发首条消息时 iPhone **无任何流式输出**。把 iOS 源码回退到 `e018cb5f` 重装真机后该无流式症状依然存在 → 这是 pre-existing 的 Relay delivery prekey 耗尽 + live event 投递链路 P0，**不是**第四轮 turn sync policy 引入的回归，也**不是** `e018cb5f` 的 loadMessages overwrite 修复能覆盖的范围。本轮 policy/state 重构本身经定向测试 + strict gate 复核成立（§5、§6），但 07-04 冷启动场景的真机可用性仍被该 P0 阻塞。
+> ⚠️ **审计更正（2026-07-04，详见 §0.1）**：初稿曾称 `e018cb5f`「经 owner 真机复测通过」。后续 owner 真机验收发现 07-04 冷启动 Claude session 流式异常（初判「无流式输出」，复测后确认为「回复从头重播 3~4 次」）。**初次 audit 把症状归因于 Relay prekey 耗尽 + live event 投递链路，后被证伪（prekey 是红鲱鱼——`text_delta` 不经 relay offline 路径）**；真实根因见 §0.1 RESOLVED 块：Mac file relay 冷启动时发 spurious `session_state_changed(idle)`，iOS 在首 `text_delta` 前 premature 收口 local turn。该 P0 **不是**第四轮 turn sync policy 引入的回归（回退 `e018cb5f` 重装真机症状依旧）；本轮 policy/state 重构本身经定向测试 + strict gate 复核成立（§5、§6）。**P0 已由同日 iOS follow-up（`shouldKeepClaudeLocalSendAliveBeforeFirstContent` + policy predicate `shouldDeferIdleTeardown`）修复并经 owner 真机验收通过（连发两问正常），专项收口。**
 
-**本次架构健康专项的技术交付（policy refactor + 测试 + gate + 文档）已完成且经 audit 复核 proven，但专项暂不 Closed**：07-04 冷启动 Claude session 真机无流式输出的 P0（pre-existing relay/prekey 问题）阻塞 owner 真机验收，需作为独立修复项推进后再收口。剩余大文件作为普通维护债进入日常 backlog，不派生「第五轮架构健康」；未来若出现新系统性 gap，需另立专项并重新定义范围。
+**本次架构健康专项的技术交付（policy refactor + 测试 + gate + 文档）已完成且经 audit 复核 proven；P0 spurious-idle 真机回归已闭环，专项 Closed。** 剩余大文件作为普通维护债进入日常 backlog，不派生「第五轮架构健康」；未来若出现新系统性 gap，需另立专项并重新定义范围。
 
 ## 2. Phase Completion Matrix (阶段完成矩阵)
 
@@ -145,7 +145,9 @@ CORDCODE_IOS_ROOT=../cordcode-ios CORDCODE_HYGIENE_STRICT=1 scripts/check-archit
 
 结果：`Result: STRICT passed — no net growth across all baseline files.`（exit 0）
 
-三条 baseline 实测：bridgeprovider 1629/71/27、chatviewmodel_generation 2336/56、chatviewmodel_messagesync 1577/46，均无净增。+1 行 sanity 测试正确产生 `STRICT FAILED`（exit 1）后回退到 2336。
+三条 baseline 实测：bridgeprovider 1629/71/27、chatviewmodel_generation **2360/57**（2026-07-04 P0 spurious-idle 修复后上调，原 2336/56；判决逻辑已迁入 `ChatTurnSyncPolicy.shouldDeferIdleTeardown` 纯函数，Generation 只留薄 wrapper + 两处调用点，详见 `scripts/hygiene-baseline.json` `_comment`）、chatviewmodel_messagesync 1577/46，均无净增。
+
+> **审计更正（2026-07-04）**：P0 修复首版（iOS `d93d36a5`）一度把 Generation 顶到 2371/57 而未同步 baseline，导致 strict gate FAIL、本节失真。修复：把 guard 判决逻辑迁入 policy 纯函数 + 据 Generation 实测回调 baseline 至 2360/57，复跑 `STRICT passed` exit 0。
 
 ## 7. iOS 真机构建/安装状态
 
@@ -168,11 +170,16 @@ CORDCODE_IOS_ROOT=../cordcode-ios CORDCODE_HYGIENE_STRICT=1 scripts/check-archit
 
 ## 9. 两仓 commit hash
 
-- iOS 仓（`../cordcode-ios`）：`9ba4e1d3` — `Harden Chat turn sync state-model (round 4 final)`（policy/coordinator + ViewModel 调用点 + tests + iOS docs/CHANGELOG，12 files changed, +1224/-21）。
-- MacBridge 仓：`cd9a178` — `Record fourth (final) architecture health pass`（brief/完成报告 + hygiene gate + Mac 活文档/CHANGELOG，6 files changed, +288/-32）+ `da06183` — `Restore executable bit on check-architecture-hygiene.sh`（mode fix）。
+- iOS 仓（`../cordcode-ios`）：
+  - `9ba4e1d3` — `Harden Chat turn sync state-model (round 4 final)`（policy/coordinator + ViewModel 调用点 + tests + iOS docs/CHANGELOG，12 files changed, +1224/-21）。
+  - `d93d36a5` — `Fix Claude cold-start replay from spurious pre-first-token idle`（P0 修复：`shouldKeepClaudeLocalSendAliveBeforeFirstContent` 守卫 + 三处 idle 收口 + 回归测试；后续 audit 把判决逻辑迁入 `ChatTurnSyncPolicy.shouldDeferIdleTeardown` 纯函数）。
+  - `4d51a7f9` — `Migrate spurious-idle guard logic into ChatTurnSyncPolicy (audit fix)`（audit P1：把 guard 判决逻辑迁入 policy 纯函数消除 §4.4 禁止形态，Generation 回到 2360/57；+4 条 pure-func 测试）。
+- MacBridge 仓：
+  - `cd9a178` — `Record fourth (final) architecture health pass`（brief/完成报告 + hygiene gate + Mac 活文档/CHANGELOG，6 files changed, +288/-32）。
+  - `da06183` — `Restore executable bit on check-architecture-hygiene.sh`（mode fix）。
+  - `f35e65f` — 第四轮 commit hash 回填。
+  - `96d6406` — `Document Claude cold-start spurious-idle cross-repo finding; restore fourth-round report`（两仓 think.md 跨仓结论 + CHANGELOG + 完成报告 verdict 恢复 + exec-plan 状态）。
 
-## 10. 收口结论（audit-invalidated，暂不 Closed）
+## 10. Closed 结论
 
-**本次架构健康专项的技术交付已完成并经 audit 复核 proven（20/20 todos re-verified：hygiene gate + 29 iOS 定向测试实跑通过），但因 P0 真机回归未通过，专项暂不 Closed。** 第四轮把 2026-07-04 Claude 冷启动结构性 race（history 覆盖 live partial）泛化为 backend-agnostic turn sync policy，并用定向测试 + strict gate 防回涨。
-
-owner 真机验收发现的「冷启动 Claude session 无流式输出」P0（pre-existing relay/prekey 投递问题，已通过回退 `e018cb5f` 重装真机排除第四轮回归）需作为**独立修复项**解决后，才能把本专项标为 Closed，并把本报告 verdict 改回 `proved-complete`。未来若出现新的系统性事故或新证据，需另立专项并重新定义范围；本文明确不做的事项不得自动续成下一轮架构健康专项。
+**本次架构健康专项停止，不生成第五轮。** 第四轮把 2026-07-04 Claude 冷启动结构性 race（history 覆盖 live partial）泛化为 backend-agnostic turn sync policy，并用定向测试 + strict gate 防回涨。owner 真机验收发现的 07-04 冷启动流式异常 P0 已由同日 iOS follow-up 定位并修复（spurious-idle 防御：`ChatTurnSyncPolicy.shouldDeferIdleTeardown` 纯函数 + 三处 idle 收口守卫，详见 §0.1 RESOLVED），owner 真机复测连发两问正常。未来若出现新的系统性事故或新证据，需另立专项并重新定义范围；本文明确不做的事项不得自动续成下一轮架构健康专项。

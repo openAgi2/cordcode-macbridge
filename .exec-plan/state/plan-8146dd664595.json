@@ -37,7 +37,18 @@
     "invalidation_reason": "Owner real-device acceptance of 07-04 cold-start Claude session found no-streaming/replay P0. 20/20 todos remained proven-done (audit re-verified: hygiene gate STRICT pass + 29 iOS tests re-ran clean). Report invalidated because Section 1/10 over-claimed real-device acceptance.",
     "resolution": "P0 root-caused to spurious session_state_changed(idle) from Mac file relay during Claude local-turn thinking phase; iOS fixed via shouldKeepClaudeLocalSendAliveBeforeFirstContent guarding 3 idle-teardown paths + regression test. Owner real-device acceptance passed (2 consecutive messages, no replay). Report verdict restored to proved-complete / initiative Closed. See both repos' think.md spurious-idle section."
   },
-  "updated_at": "2026-07-04T13:10:00Z",
+  "closure": {
+    "plan_status": "closed",
+    "closed_at": "2026-07-04T13:30:00Z",
+    "summary": "Fourth-round architecture-health initiative: 20/20 todos proven-done. P0 (07-04 cold-start Claude streaming/replay) discovered during owner acceptance, root-caused to Mac file-relay spurious session_state_changed(idle) + iOS premature idle-teardown, fixed via iOS shouldKeepClaudeLocalSendAliveBeforeFirstContent (logic migrated to ChatTurnSyncPolicy.shouldDeferIdleTeardown pure function per brief §4.4). Strict hygiene gate re-passed at chatviewmodel_generation 2360/57 baseline. Owner real-device acceptance passed. No fifth round generated.",
+    "audit_trail": [
+      "2026-07-04T11:35Z: auto-report proved-complete (queue_hash 30b16baf1447)",
+      "2026-07-04T12:10Z: audit-invalidated (owner real-device acceptance P0 — prekey framing was initial hypothesis)",
+      "2026-07-04T13:10Z: P0 resolved (real root cause: spurious idle; prekey red herring); report restored to proved-complete",
+      "2026-07-04T13:30Z: closure recorded; plan_status closed"
+    ]
+  },
+  "updated_at": "2026-07-04T13:30:00Z",
   "todos": [
     {
       "id": "phaseA-baseline-and-inventory-impl",
