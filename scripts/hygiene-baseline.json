@@ -1,0 +1,9 @@
+{
+  "_comment": "BridgeProvider.swift 冻结基线 — 第二轮 P2 strict gate（scripts/check-architecture-hygiene.sh）。任一指标净增即 CI fail，允许减少。计数法：lines=wc -l；funcs=grep -wo 'func' | wc -l；forTesting=grep -o 'ForTesting' | wc -l。更新条件：把 BridgeProvider 拆出独立职责文件后（第三轮 extract-and-test），下调对应指标并在同 PR 说明拆分入口与不变量测试。r3 评审曾记 forTesting 34，本轮用 grep -o 实测为 36（计数法差异），gate 以当前实测为准。",
+  "bridgeprovider": {
+    "path": "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift",
+    "lines": 1967,
+    "funcs": 88,
+    "forTesting": 36
+  }
+}

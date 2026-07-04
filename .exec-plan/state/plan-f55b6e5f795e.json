@@ -1,0 +1,472 @@
+{
+  "version": 6,
+  "project_root": "/Users/jacklee/Projects/cordcode-macbridge",
+  "plan_file": "docs/2026-07-04-architecture-health-second-round-development-brief.md",
+  "state_store": {
+    "canonical_path": ".exec-plan/state/plan-f55b6e5f795e.json",
+    "legacy_path": ".claude/exec-plans/plan-f55b6e5f795e.json",
+    "origin": "new",
+    "migrated_from": null,
+    "migrated_at": null
+  },
+  "queue_policy": {
+    "todo_md_role": "informational-only",
+    "completion_gate": "proof-carrying-impl-tests-regression",
+    "phase_done_rule": "all-required-todos-done",
+    "audit_rule": "unsupported-done-must-downgrade",
+    "start_exit_rule": "internal-audit-before-success",
+    "audit_failure_policy": "light-repairable-heavy-external-blocker",
+    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+    "session_mirror_policy": "host-tracker-optional-mirror",
+    "invocation_policy": "slash-or-natural-language-equivalent",
+    "persistence_rule": "persist-on-every-status-transition"
+  },
+  "report_policy": {
+    "auto_write_completion_report": true,
+    "report_directory": "docs",
+    "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+    "write_when": "all-required-todos-proven-done",
+    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  },
+  "reports": {
+    "completion_report_path": "docs/2026-07-04-architecture-health-second-round-development-brief完成情况.md",
+    "completion_report_status": "current",
+    "last_generated_at": "2026-07-04T03:28:02Z",
+    "based_on_queue_hash": "05d359b0b5d5e5b7d28a1e99b9007278fb59cadf5cdd7c77e2cd0ecb8a116d04"
+  },
+  "plan_baseline": {
+    "note": "Brief r3 复核通过的可复现基线；sync 阶段已在本仓核对其当前值仍成立。",
+    "handlers_go_lines": 4559,
+    "bridgeprovider": {
+      "path": "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift",
+      "lines": 1967,
+      "funcs": 88,
+      "for_testing": 34
+    },
+    "web_component_diffs": {
+      "ReasoningBlock": 2,
+      "ProcessGroup": 43,
+      "NarrativeBlock": 68
+    },
+    "hygiene_script": "scripts/check-architecture-hygiene.sh (warning-only, exit 0, no baseline, not wired to CI)",
+    "shared_package_migrated": ["DiffViewer", "ToolBlock"],
+    "shared_package_turns_subdir_exists": false,
+    "p0_code_lands_in_repo": "../cordcode-ios/"
+  },
+  "updated_at": "2026-07-04T03:28:02Z",
+  "todos": [
+    {
+      "id": "p0a-reasoning-block-impl",
+      "title": "P0 迁移 ReasoningBlock 到 shared-message-renderer (impl)",
+      "description": "在相邻 iOS 仓 ../cordcode-ios/ 工作。把 message-web 与 remote-web 中仍重复的 components/blocks/ReasoningBlock.tsx 迁入 shared-message-renderer（建议 shared-message-renderer/src/components/blocks/ReasoningBlock.tsx）。迁移前必须用统一 diff 计数法重测当前差异：`diff -u <message-web copy> <remote-web copy> | grep '^[+-]' | grep -v '^[+-][+-]'`，把实测行数写入完成报告（brief 基线 2 行）。共享包只承载纯展示/纯解析/稳定类型；宿主差异通过 RendererHost / labels / props 注入；共享包不得 import 任一宿主私有 bridge/relay/WebKit/OpenCodeiOS 路径。不改 CSS className、DOM 结构、test id。两个 app 保留薄 wrapper，只负责 host/labels/宿主差异注入。原评估 diff 最小，先验证 labels/host adapter 机制。",
+      "status": "done",
+      "phase": "p0-web-shared-renderer",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "Section 2 P0 / Section 7 step 1",
+      "notes": "代码产物落在 ../cordcode-ios/ 仓。不改 protocol/capability 字面契约。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "新增 shared-message-renderer/src/components/blocks/ReasoningBlock.tsx（85 行，纯展示，host.post 发 openDetail，host.labels 注入 reasoningStreaming/reasoningComplete，缺失回落中文）+ ReasoningBlock.test.tsx（4 个 labels/DOM characterization）；index.ts 增加 ReasoningBlock 导出。message-web 与 remote-web 原 80 行完整重复实现改为 19 行薄 wrapper（Omit<...,'host'>，注入 postToNative + 中/英 labels）。AssistantTurn 调用点不改。迁移前实测两 app diff=2 行（label 文案），与 brief 基线一致。",
+        "artifacts": [
+          "../cordcode-ios/shared-message-renderer/src/components/blocks/ReasoningBlock.tsx",
+          "../cordcode-ios/shared-message-renderer/src/components/blocks/ReasoningBlock.test.tsx",
+          "../cordcode-ios/shared-message-renderer/src/index.ts",
+          "../cordcode-ios/message-web/src/components/blocks/ReasoningBlock.tsx",
+          "../cordcode-ios/remote-web/src/renderer/components/blocks/ReasoningBlock.tsx"
+        ],
+        "checked_at": "2026-07-04T02:47:11Z"
+      }
+    },
+    {
+      "id": "p0a-reasoning-block-tests",
+      "title": "P0 ReasoningBlock typecheck/build + 已有 vitest (tests)",
+      "description": "在 ../cordcode-ios/ 三个包跑最小闭环：`cd shared-message-renderer && npm run typecheck && npm run test`；`cd message-web && npm run typecheck && npm run build`；`cd remote-web && npm run typecheck && npm run build`。如已有组件级 vitest 可补定向组件测试；没有现成测试时不为绕过构建失败制造 fixture 假路径。记录三个包的真实命令输出摘要作为证据。",
+      "status": "done",
+      "phase": "p0-web-shared-renderer",
+      "kind": "tests",
+      "depends_on": ["p0a-reasoning-block-impl"],
+      "source": "Section 2 P0 验证块",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "三包最小闭环全绿：shared-message-renderer typecheck + vitest run（4 个测试文件 12 个测试全过，含新增 ReasoningBlock.test.tsx 4 个）；message-web typecheck + build（305 模块，built in 605ms）；remote-web typecheck + build（341 模块，built in 651ms）。remote-web build 的 keystore 动/静态 import 警告是既有、与本次改动无关。日志 /tmp/p0a-reasoning-verify.log。",
+        "artifacts": [
+          "cmd:cd shared-message-renderer && npm run typecheck && npm run test",
+          "cmd:cd message-web && npm run typecheck && npm run build",
+          "cmd:cd remote-web && npm run typecheck && npm run build",
+          "/tmp/p0a-reasoning-verify.log"
+        ],
+        "checked_at": "2026-07-04T02:47:11Z"
+      }
+    },
+    {
+      "id": "p0a-reasoning-block-regression",
+      "title": "P0 ReasoningBlock 差异清单与宿主语义回归 (regression)",
+      "description": "产出 ReasoningBlock 的差异清单：哪些差异被统一到共享实现、哪些通过 host/labels 保留为真实产品差异。确认 message-web 与 remote-web 不再各自持有 ReasoningBlock 的完整重复实现，且共享包 exports 覆盖该组件。视觉/UX 完整性回归需要 owner 真机或 Desktop 目测（未经 owner 明确允许不跑 UI/snapshot/simulator automation）——把 owner-visual-pending 作为待 owner 验收项明确写入完成报告，不要冒充已验证。",
+      "status": "done",
+      "phase": "p0-web-shared-renderer",
+      "kind": "regression",
+      "depends_on": ["p0a-reasoning-block-tests"],
+      "source": "Section 2 P0 完成标准 / Section 5",
+      "notes": "回归 proof 默认 self-attested（差异清单 + 三个包构建通过）；owner 视觉验收为 pending。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "diff-inventory-and-build-parity",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "差异清单——真实产品差异（label 文案 中/英）通过 host.labels 注入保留，迁移后两 app wrapper 剩余 diff 实测=2 行（仅 labels 值）；意外漂移（remote-web 的 openDetail title '思考过程'、'行思考'、'收起/展开' 仍中文）不顺手收敛，避免变更 openDetail payload/行为，已记为 follow-up。两 app 不再持有完整重复实现（各 19 行薄 wrapper），共享包 exports 覆盖 ReasoningBlock（3/5 目标）。三包构建通过（见 p0a-tests）。视觉/UX 完整性回归为 owner-pending：未经 owner 明确允许未跑 UI/snapshot/simulator/真机。",
+        "artifacts": [
+          "diff:diff -u message-web/.../ReasoningBlock.tsx remote-web/.../ReasoningBlock.tsx => 2 行（仅 labels 值）",
+          "wc: shared impl 85 行 / msg wrapper 19 行 / remote wrapper 19 行",
+          "grep: shared-message-renderer/src/index.ts 导出 ReasoningBlock + ReasoningBlockProps"
+        ],
+        "checked_at": "2026-07-04T02:47:11Z"
+      }
+    },
+    {
+      "id": "p0b-process-group-impl",
+      "title": "P0 迁移 ProcessGroup 到 shared-message-renderer/components/turns/ (impl)",
+      "description": "在 ../cordcode-ios/ 工作。源文件在 message-web/src/components/turns/ProcessGroup.tsx（重复度高，brief 基线 43 行）。迁移前先决定共享包结构：推荐新建 shared-message-renderer/src/components/turn/ProcessGroup.tsx（当前共享包没有 turns/ 子目录），不要为了目录省事把 turn/group 语义塞进 blocks/。迁移前重测当前 diff 并写入报告。注意 turn/group 组合行为；保留宿主差异通过 host/labels 注入；不改 className/DOM/test id 除非有测试证明原结构已错误。remote-web 路径以实测为准（迁移前用 diff 定位真实重复源）。",
+      "status": "done",
+      "phase": "p0-web-shared-renderer",
+      "kind": "impl",
+      "depends_on": ["p0a-reasoning-block-regression"],
+      "source": "Section 2 P0 / Section 7 step 2",
+      "notes": "代码产物落在 ../cordcode-ios/ 仓。共享包首次引入 components/turns/ 子目录。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "新增 shared-message-renderer/src/components/turns/ProcessGroup.tsx（221 行）：ProcessGroup/GroupSummary/ToolSummarizers 类型 + 默认中文全分类摘要（=message-web 原实现）+ generateGroupSummary（status 标签两 app 一致保持中文）+ ProcessGroupComponent JSX。差异通过 summarizers prop 注入：message-web wrapper 4 行纯 re-export 用默认；remote-web wrapper 100 行注入自己的英文/精简分类 summarizer（helper 逐字保留）。迁移前实测两 app diff=43 行（含 search/list_files 分类差异 + 复数语义差异），与 brief 基线一致。差异是真实产品分歧，未强行收敛任一侧。",
+        "artifacts": [
+          "../cordcode-ios/shared-message-renderer/src/components/turns/ProcessGroup.tsx",
+          "../cordcode-ios/shared-message-renderer/src/components/turns/ProcessGroup.test.tsx",
+          "../cordcode-ios/shared-message-renderer/src/index.ts",
+          "../cordcode-ios/message-web/src/components/turns/ProcessGroup.tsx",
+          "../cordcode-ios/remote-web/src/renderer/components/turns/ProcessGroup.tsx"
+        ],
+        "checked_at": "2026-07-04T02:56:48Z"
+      }
+    },
+    {
+      "id": "p0b-process-group-tests",
+      "title": "P0 ProcessGroup typecheck/build + 已有 vitest (tests)",
+      "description": "在 ../cordcode-ios/ 三个包跑最小闭环：shared-message-renderer `npm run typecheck && npm run test`；message-web 与 remote-web 各自 `npm run typecheck && npm run build`。重点确认 turn/group 组合行为编译通过。记录命令输出摘要。",
+      "status": "done",
+      "phase": "p0-web-shared-renderer",
+      "kind": "tests",
+      "depends_on": ["p0b-process-group-impl"],
+      "source": "Section 2 P0 验证块",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "三包最小闭环全绿：shared typecheck + vitest run（5 个测试文件 16 个测试全过，含新增 ProcessGroup.test.tsx 4 个：默认中文摘要 / injected summarizers / 共享 thinking 标签 / DOM 契约）；message-web typecheck + build（305 模块）；remote-web typecheck + build（342 模块，+1 来自新共享 turns）。日志 /tmp/p0b-processgroup-verify.log。",
+        "artifacts": [
+          "cmd:cd shared-message-renderer && npm run typecheck && npm run test",
+          "cmd:cd message-web && npm run typecheck && npm run build",
+          "cmd:cd remote-web && npm run typecheck && npm run build",
+          "/tmp/p0b-processgroup-verify.log"
+        ],
+        "checked_at": "2026-07-04T02:56:48Z"
+      }
+    },
+    {
+      "id": "p0b-process-group-regression",
+      "title": "P0 ProcessGroup 差异清单与 turn/group 回归 (regression)",
+      "description": "产出 ProcessGroup 差异清单（统一 vs host/labels 保留），确认两个 app 不再持有完整重复实现、共享包 exports 覆盖。turn/group 组合行为的产品差异归入 host 注入。视觉/UX 完整性回归为 owner-pending，写入完成报告待验收项。",
+      "status": "done",
+      "phase": "p0-web-shared-renderer",
+      "kind": "regression",
+      "depends_on": ["p0b-process-group-tests"],
+      "source": "Section 2 P0 完成标准 / Section 5",
+      "notes": "回归 proof 默认 self-attested。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "diff-inventory-and-build-parity",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "差异清单——43 行真实差异全部归类为「真实产品分歧」并保留：tool 摘要文案（中 vs 英）、分类粒度（message-web 含 search/list_files，remote-web 无）、多工具复数语义（中文计数 vs 英文 'Created a file' + 首字母大写）。收敛方式：共享包提供默认（=message-web），remote-web 通过 summarizers 注入自己的策略，两 app 输出逐字不变。turn/group 组合行为（generateGroupSummary 的 thinking/running/pending/completed 状态机 + ProcessGroupComponent JSX）两 app 原本一致，现由共享包单一实现。两 app 不再持有完整重复实现（msg 4 行 re-export；remote 100 行仅含自己的 divergent summarizer + 薄 wrapper，不含 generateGroupSummary/JSX，grep 计 0）。共享包 exports 覆盖 ProcessGroupComponent（4/5 目标）。视觉/UX 为 owner-pending。",
+        "artifacts": [
+          "wc: shared turns/ProcessGroup 221 + test 85 / msg wrapper 4 / remote wrapper 100",
+          "grep: remote wrapper 'generateGroupSummary|process-group--|turn-process-summary' => 0（JSX 已委托共享）",
+          "grep: shared index.ts 导出 ProcessGroupComponent/generateGroupSummary/ProcessGroup/ToolSummarizers/GroupSummary"
+        ],
+        "checked_at": "2026-07-04T02:56:48Z"
+      }
+    },
+    {
+      "id": "p0c-narrative-block-impl",
+      "title": "P0 迁移 NarrativeBlock 到 shared-message-renderer (impl)",
+      "description": "在 ../cordcode-ios/ 工作。产品差异最大的组件（brief 基线 68 行，源在 components/blocks/）。重点处理 git directive summary 的宿主差异，必须保留宿主语义。迁移前重测 diff 写入报告。如果执行中发现产品差异比预期更深，不要用 fallback 或双实现冒充迁移完成——保留失败现场，先交付前两个组件与 gate，再把 NarrativeBlock 阻塞写成明确 follow-up（此时把本 impl 标 blocked 并在 notes 说明）。",
+      "status": "done",
+      "phase": "p0-web-shared-renderer",
+      "kind": "impl",
+      "depends_on": ["p0b-process-group-regression"],
+      "source": "Section 2 P0 / Section 7 step 3 / Section 7 末尾阻塞处理",
+      "notes": "代码产物落在 ../cordcode-ios/ 仓。差异最大、风险最高，最后迁。react-markdown 9/10 跨版本分歧经实测化解，未阻塞。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "新增 shared-message-renderer/src/components/blocks/NarrativeBlock.tsx（115 行）：共用 ReactMarkdown 渲染（a/input/li 覆写 + todo helper）+ host.post(linkTap) + transformContent? 注入点。host.ts 增加 linkTap 到 RendererHostAction。message-web wrapper 85 行：持有 message-web 独有的 git directive feature（GitDirectiveSummary + repoName/groupGitDirectives + extractGitDirectives），通过 transformContent 注入（剥离 directive 后的 content + summary trailing 节点）。remote-web wrapper 13 行薄包装（无 git directive，用共享默认）。共享包 package.json 加 react-markdown peer >=9 <11 / dev ^9.0.1 + remark-gfm peer >=4 <5 / dev ^4.0.0。迁移前实测两 app diff=68 行（全部为 message-web 的 git directive feature）。react-markdown 9 vs 10 跨大版本兼容性经三包 typecheck/build 实测确认（覆写 API 稳定）。",
+        "artifacts": [
+          "../cordcode-ios/shared-message-renderer/src/components/blocks/NarrativeBlock.tsx",
+          "../cordcode-ios/shared-message-renderer/src/components/blocks/NarrativeBlock.test.tsx",
+          "../cordcode-ios/shared-message-renderer/src/host.ts",
+          "../cordcode-ios/shared-message-renderer/src/index.ts",
+          "../cordcode-ios/shared-message-renderer/package.json",
+          "../cordcode-ios/message-web/src/components/blocks/NarrativeBlock.tsx",
+          "../cordcode-ios/remote-web/src/renderer/components/blocks/NarrativeBlock.tsx"
+        ],
+        "checked_at": "2026-07-04T03:06:50Z"
+      }
+    },
+    {
+      "id": "p0c-narrative-block-tests",
+      "title": "P0 NarrativeBlock typecheck/build + 已有 vitest (tests)",
+      "description": "在 ../cordcode-ios/ 三个包跑最小闭环（shared-message-renderer typecheck+test；message-web / remote-web typecheck+build）。确认 git directive summary 宿主差异在 host 注入下编译通过。记录命令输出摘要。",
+      "status": "done",
+      "phase": "p0-web-shared-renderer",
+      "kind": "tests",
+      "depends_on": ["p0c-narrative-block-impl"],
+      "source": "Section 2 P0 验证块",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "三包最小闭环全绿：shared typecheck + vitest run（6 个测试文件 20 个测试全过，含新增 NarrativeBlock.test.tsx 4 个：hydration / plain-text deferred / transformContent trailing node / 空内容 guard）；message-web typecheck + build（307 模块）；remote-web typecheck + build（343 模块）。react-markdown 9.x（msg/shared）与 10.x（remote）跨版本编译均通过。初次跑 NarrativeBlock 测试 1 个 assertion 写错（className 空格分隔），已自修断言后全过。日志 /tmp/p0c-narrative-verify.log。",
+        "artifacts": [
+          "cmd:cd shared-message-renderer && npm run typecheck && npm run test",
+          "cmd:cd message-web && npm run typecheck && npm run build",
+          "cmd:cd remote-web && npm run typecheck && npm run build",
+          "/tmp/p0c-narrative-verify.log"
+        ],
+        "checked_at": "2026-07-04T03:06:50Z"
+      }
+    },
+    {
+      "id": "p0c-narrative-block-regression",
+      "title": "P0 NarrativeBlock 差异清单与宿主语义回归 (regression)",
+      "description": "产出 NarrativeBlock 差异清单（git directive summary 等宿主差异如何保留），确认两个 app 不再持有完整重复实现、共享包 exports 覆盖 5/5 目标组件（DiffViewer, ToolBlock, ReasoningBlock, ProcessGroup, NarrativeBlock）。视觉/UX 完整性回归为 owner-pending，写入完成报告待验收项。",
+      "status": "done",
+      "phase": "p0-web-shared-renderer",
+      "kind": "regression",
+      "depends_on": ["p0c-narrative-block-tests"],
+      "source": "Section 2 P0 完成标准 / Section 5",
+      "notes": "P0 收口：共享包 exports 必须达到 5/5。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "diff-inventory-and-build-parity",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "差异清单——68 行真实差异全部为 message-web 独有的 git directive summary feature（remote-web 没有）。归类为「真实产品差异」：通过 transformContent 注入保留——message-web 提供（extractGitDirectives 剥离 directive 避免重复展示 + GitDirectiveSummary trailing 节点），remote-web 用共享默认（原样渲染、无 trailing）。markdown 渲染主体（ReactMarkdown + a/input/li 覆写 + todo helper）两 app 原本一致，现由共享包单一实现，message-web 不再 import ReactMarkdown（grep 计 0）。react-markdown 9/10 跨版本分歧经实测化解（peer >=9 <11 + 三包 typecheck/build 全过）。共享包 exports 覆盖 5/5 目标组件（DiffViewer/ToolBlock/ReasoningBlock/ProcessGroup/NarrativeBlock）。两 app 不再持有完整重复实现（msg 85 行仅 git directive feature；remote 13 行薄 wrapper）。视觉/UX 为 owner-pending。",
+        "artifacts": [
+          "wc: shared NarrativeBlock 115 + test 82 / msg wrapper 85 / remote wrapper 13",
+          "grep: msg wrapper 'GitDirectiveSummary|extractGitDirectives|git-directive|Git 操作' => 14（feature 保留）；'ReactMarkdown|remark-gfm' => 0（已委托共享）",
+          "grep: remote wrapper 'GitDirective|git-directive|extractGit' => 0（feature 不存在，正确）",
+          "grep: shared package.json react-markdown >=9 <11 / remark-gfm >=4 <5"
+        ],
+        "checked_at": "2026-07-04T03:06:50Z"
+      }
+    },
+    {
+      "id": "p2-bridgeprovider-gate-impl",
+      "title": "P2 BridgeProvider 净增长 strict gate (impl)",
+      "description": "本仓工作。greenfield 治理任务（当前 scripts/check-architecture-hygiene.sh 是纯清单报告、固定 exit 0、无基线、未接 CI）。实现：(1) 新增基线存储——用 scripts/hygiene-baseline.json 或脚本内集中常量记录 BridgeProvider.swift 当前 lines/func/ForTesting（r3 复测 1967/88/34），更新条件必须清楚可审计；(2) 给 scripts/check-architecture-hygiene.sh 新增 CORDCODE_HYGIENE_STRICT=1 分支——只在 BridgeProvider.swift 任一指标净增时 exit 1，允许减少，其它现有 hygiene 规则继续 warning-only；(3) 接入 CI 是独立步骤——在 .github/workflows/ci.yml 的 macbridge job 增加 CORDCODE_HYGIENE_STRICT=1 scripts/check-architecture-hygiene.sh，若担心直接 required 过猛至少先接 warning 路径并在同轮说明 strict 接入阻塞点。不通过降低统计准确性让 gate 变绿；不把真实增长藏进字符串/生成文件/test-only path。",
+      "status": "done",
+      "phase": "p2-hygiene-gate",
+      "kind": "impl",
+      "depends_on": ["p0c-narrative-block-regression"],
+      "source": "Section 2 P2 / Section 7 step 4",
+      "notes": "Gate 信号是 BridgeProvider 作为连接特性历史下沉点、当前无门禁；体积冻结比直接拆分成本低。本轮不要求降到理想行数，只阻止净增长。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "新增 scripts/hygiene-baseline.json（BridgeProvider 冻结基线 lines=1967/funcs=88/forTesting=36，计数法 wc -l + grep -wo 'func' + grep -o 'ForTesting'；含更新条件注释；r3 曾记 forTesting 34，本轮实测 36，gate 以当前实测为准）。scripts/check-architecture-hygiene.sh 增加 CORDCODE_IOS_ROOT env override + BridgeProvider net-growth gate 区块：读 baseline JSON（grep 解析，无 jq 依赖）、量当前值、逐指标比（>baseline 即 growth）、strict 分支 exit 1 on growth。CI macbridge job 增 best-effort 跨仓 checkout openAgi2/cordcode-ios（continue-on-error）+ CORDCODE_HYGIENE_STRICT=1 hygiene step。5 个其它 inventory 部分仍 warning-only。",
+        "artifacts": [
+          "scripts/hygiene-baseline.json",
+          "scripts/check-architecture-hygiene.sh",
+          ".github/workflows/ci.yml"
+        ],
+        "checked_at": "2026-07-04T03:16:44Z"
+      }
+    },
+    {
+      "id": "p2-bridgeprovider-gate-tests",
+      "title": "P2 gate 行为：default warn vs strict fail (tests)",
+      "description": "验证 gate 行为可 repeat：默认 `scripts/check-architecture-hygiene.sh` 仍 exit 0（warning-only 路径保留）；`CORDCODE_HYGIENE_STRICT=1 scripts/check-architecture-hygiene.sh` 在基线不变时 exit 0；构造一次模拟净增（例如临时调高基线阈值或注入一行模拟增长）后 strict 模式 exit 1，恢复后 exit 0。记录三条 exit code 证据。文档说明基线更新条件。",
+      "status": "done",
+      "phase": "p2-hygiene-gate",
+      "kind": "tests",
+      "depends_on": ["p2-bridgeprovider-gate-impl"],
+      "source": "Section 2 P2 验证块 / 完成标准",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "5 场景全过：(1) default ./check-architecture-hygiene.sh exit 0 + 打印 baseline→current；(2) CORDCODE_HYGIENE_STRICT=1（current==baseline）exit 0 'STRICT passed'；(3) baseline funcs 临时改 87，strict exit 1 'STRICT FAILED — funcs net growth (+1)'，已恢复 baseline；(4) CORDCODE_IOS_ROOT=/nonexistent exit 0 'gate skipped'；(5) STRICT=1 + iOS 缺失 exit 0（graceful skip，不 break CI）。bash -n 语法 OK。",
+        "artifacts": [
+          "cmd:./scripts/check-architecture-hygiene.sh => exit 0",
+          "cmd:CORDCODE_HYGIENE_STRICT=1 ./scripts/check-architecture-hygiene.sh => exit 0 STRICT passed",
+          "cmd:(baseline funcs=87) CORDCODE_HYGIENE_STRICT=1 ... => exit 1 STRICT FAILED +1",
+          "cmd:CORDCODE_IOS_ROOT=/nonexistent ... => exit 0 skipped",
+          "cmd:CORDCODE_HYGIENE_STRICT=1 CORDCODE_IOS_ROOT=/nonexistent ... => exit 0 skipped",
+          "/tmp/hy1.log /tmp/hy2.log /tmp/hy3.log /tmp/hy4.log /tmp/hy5.log"
+        ],
+        "checked_at": "2026-07-04T03:16:44Z"
+      }
+    },
+    {
+      "id": "p2-bridgeprovider-gate-regression",
+      "title": "P2 gate 不误伤存量债务回归 (regression)",
+      "description": "确认 strict 模式不会把所有现有 warning 一次性变 fail（只针对 BridgeProvider 净增指标），存量债务不把 CI 永久打红。如果接了 CI，验证 macbridge job 本地等价命令的 exit code 行为；如果只接了 warning 路径，明确记录 strict 接入阻塞点。确认基线存储与脚本对齐 1967/88/34。",
+      "status": "done",
+      "phase": "p2-hygiene-gate",
+      "kind": "regression",
+      "depends_on": ["p2-bridgeprovider-gate-tests"],
+      "source": "Section 2 P2 注意事项 / 完成标准",
+      "notes": "回归 proof 可 scriptable（exit code 行为），audit 时已升 re-verified。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "behavior-and-ci-wiring",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "strict 模式只针对 BridgeProvider 三指标净增（lines/funcs/forTesting），不会把其它 warning 一次性变 fail——既有 5 个 inventory 部分（Logging/Localization/Testing injection/Long file/Protocol-change）仍 warning-only（grep 确认 5 段均在、未被提升）。baseline 存储与脚本对齐 1967/88/36（实测一致）。CI 接入：macbridge job 增加 best-effort 跨仓 checkout openAgi2/cordcode-ios（continue-on-error）+ CORDCODE_HYGIENE_STRICT=1 step。CI strict 实际生效条件：iOS 仓对 runner GITHUB_TOKEN 可读（公开仓即可）；若私有/不可达，checkout best-effort 失败 + gate 自身 graceful skip，CI 不会被破坏（已用 scenario 5 验证 strict+iOS缺失仍 exit 0）。本地（双仓并存的开发机）一定 strict 生效。",
+        "artifacts": [
+          "grep: 5 个既有 inventory 段仍 warning-only（未提升为 fail）",
+          "scenario5: STRICT=1 + iOS absent => exit 0（CI 不被破坏）",
+          "ci.yml: macbridge job 含 best-effort iOS checkout + strict hygiene step"
+        ],
+        "checked_at": "2026-07-04T03:16:44Z"
+      }
+    },
+    {
+      "id": "p1-handlers-split-impl",
+      "title": "P1 go-bridge/handlers.go 物理分发 (impl)",
+      "description": "本仓工作。4559 行 handlers.go 物理拆文件，不做行为解耦。推荐拆分（实际以当前源码职责为准）：handlers.go（类型/构造/核心共享工具/路由入口）、handlers_opencode.go（OpenCode proxy / ocHandle* 整簇，约 14–15 函数 / ~809 行，最大凝聚块，首拆目标）、handlers_relay.go（relay / session-file relay / transcript relay 簇 ~790 行，第二目标——该簇除 13 个 relay-by-name 函数外还有 4 个不带 relay 之名的 transcript 探测 helper：detectClaudeTranscriptState / detectCodexTranscriptTaskState / scanCodexTranscriptTaskEvents / codexEventPayloadType，必须整组搬到 handlers_relay.go 防反向依赖）、handlers_sessions.go、handlers_messages.go、handlers_agents.go、handlers_files.go。pairing/device/revoke/prekey 已独立在 pairing_handler.go/pairing_session.go/pairing_hardening.go，本轮不要搅入拆分。Go 同 package 多文件拆分，不改 public API；只移动函数和紧邻 helper，尽量避免同时改函数体；对循环依赖不要新增接口绕开，先重新评估是否移动过头。",
+      "status": "done",
+      "phase": "p1-handlers-split",
+      "kind": "impl",
+      "depends_on": ["p2-bridgeprovider-gate-regression"],
+      "source": "Section 2 P1 / Section 7 step 5",
+      "notes": "物理分发，不是逻辑解耦。不改 RPC 行为/session registry/relay/agent driver/protocol 字段含义；不引入新 abstraction 层。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "go-bridge/handlers.go 物理拆分两块到同 package 文件，纯移动不改函数体。handlers_opencode.go（488 行）：section comment + handleOpenCodeRPC + enrichSessionState/enrichSessionStateWithAgent + 12 个 ocHandle*（717-1191 原行）。handlers_relay.go（829 行）：startRelayIfNotRunning doc → FlushRelayOutboxes（原 2012-2824），含 brief 指定整组搬迁的 4 个 transcript 探测 helper（detectClaudeTranscriptState/detectCodexTranscriptTaskState/scanCodexTranscriptTaskEvents/codexEventPayloadType）。用 goimports 管理 import（新文件加所需、handlers.go 剪枝），gofmt 格式化。handlers.go 4559→3269 行（-1290，-28%），153→121 顶层 func。pairing/device/revoke/prekey 未搅入（已在 pairing_*.go）。",
+        "artifacts": [
+          "go-bridge/handlers_opencode.go",
+          "go-bridge/handlers_relay.go",
+          "go-bridge/handlers.go"
+        ],
+        "checked_at": "2026-07-04T03:25:47Z"
+      }
+    },
+    {
+      "id": "p1-handlers-split-tests",
+      "title": "P1 handlers.go 拆分定向测试 (tests)",
+      "description": "每完成一个主题拆分就跑定向编译/测试定位遗漏。最终跑 brief 推荐定向过滤：`go test ./go-bridge -run 'Test.*Session|Test.*Message|Test.*Backend|Test.*Capability|Test.*Pagination' -count=1`。记录命令输出摘要。",
+      "status": "done",
+      "phase": "p1-handlers-split",
+      "kind": "tests",
+      "depends_on": ["p1-handlers-split-impl"],
+      "source": "Section 2 P1 验证块",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "brief 推荐定向过滤通过：go test ./go-bridge -run 'Test.*Session|Test.*Message|Test.*Backend|Test.*Capability|Test.*Pagination' -count=1 => ok 1.904s。codex CLI 0.142.5 加入 PATH（/Applications/Codex.app/Contents/Resources）供 diagnostics/pagination 测试。日志 /tmp/p1-handlers-tests.log。",
+        "artifacts": [
+          "cmd:go build ./go-bridge => OK",
+          "cmd:go test ./go-bridge -run 'Test.*Session|Test.*Message|Test.*Backend|Test.*Capability|Test.*Pagination' -count=1 => ok 1.904s",
+          "/tmp/p1-handlers-tests.log"
+        ],
+        "checked_at": "2026-07-04T03:25:47Z"
+      }
+    },
+    {
+      "id": "p1-handlers-split-regression",
+      "title": "P1 handlers.go 拆分全量回归 (regression)",
+      "description": "物理拆分的回归面 = 全量编译与测试不回归。跑 `go test ./go-bridge/... -count=1` 与 `go build ./go-bridge`，记录证据 handlers.go 明显变薄、主题 handler 分布到多个同 package 文件、行为测试无回归。完成报告明确说明“物理分发，不是逻辑解耦”。（纯物理 move，无 UI/perf 面；回归 proof = 全量 suite + build 通过，audit 时升 re-verified。）",
+      "status": "done",
+      "phase": "p1-handlers-split",
+      "kind": "regression",
+      "depends_on": ["p1-handlers-split-tests"],
+      "source": "Section 2 P1 完成标准 / Section 5",
+      "notes": "纯物理 move；-tests 的定向过滤 + 本 todo 的全量 suite/build 共同覆盖回归风险。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "full-suite-and-build",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "物理拆分回归面 = 全量编译与测试不回归。go test ./go-bridge/... -count=1 => ok 13.552s；go build ./go-bridge => OK。无重复/遗漏：ocHandle handlers.go=0/opencode=12；4 transcript helper 全在 handlers_relay.go（handlers.go=0）；handleOpenCodeRPC/startRelayIfNotRunning/FlushRelayOutboxes 不在 handlers.go；3 文件同 package gobridge。handlers.go 153→121 func（-32 = 15 oc + 17 relay）。物理分发，不是逻辑解耦（未改函数体、未引入新 abstraction）。",
+        "artifacts": [
+          "cmd:go test ./go-bridge/... -count=1 => ok 13.552s",
+          "cmd:go build ./go-bridge => OK",
+          "wc: handlers.go 4559→3269（-1290，-28%）/ opencode 488 / relay 829"
+        ],
+        "checked_at": "2026-07-04T03:25:47Z"
+      }
+    },
+    {
+      "id": "doc-changelog-sync",
+      "title": "第二轮跨仓架构治理 CHANGELOG 记录 (doc-sync)",
+      "description": "P0 代码产物在相邻 iOS 仓提交；按第一轮先例，本仓 MacBridge/CHANGELOG.md 仍应在 [Unreleased] 下追加一节（日期 — 主题），记录第二轮跨仓架构治理进度（web shared renderer 迁移收口、BridgeProvider 净增长 gate、handlers.go 物理分发）。格式遵循 CLAUDE.md CHANGELOG 规则与现有条目格式。完成报告中明确哪些验证发生在 iOS 仓、哪些发生在 MacBridge 仓。",
+      "status": "done",
+      "phase": "docs",
+      "kind": "doc-sync",
+      "depends_on": ["p1-handlers-split-regression"],
+      "source": "Section 5 交付报告要求 / CLAUDE.md CHANGELOG 规则",
+      "notes": "完成报告（docs/2026-07-04-architecture-health-second-round-development-brief完成情况.md）由 exec-plan skill 在全部 required todo proven done 时自动生成，不在此 todo 范围。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "doc-sync",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "在 CHANGELOG.md [Unreleased] 顶部（brief 条目之上）追加 '2026-07-04 — 架构健康第二轮：web 共享包收口 5/5 + BridgeProvider 净增长 gate + handlers.go 物理分发' 条目，按现有格式 bullet 列 P0/P2/P1 改了什么+提升，附诚实口径（P0 在 iOS 仓 / P2 P1 在 MacBridge 仓；react-markdown 跨版本实测非穷尽；CI gate 生效条件）。引用完成报告路径。",
+        "artifacts": [
+          "CHANGELOG.md"
+        ],
+        "checked_at": "2026-07-04T03:28:02Z"
+      }
+    }
+  ]
+}

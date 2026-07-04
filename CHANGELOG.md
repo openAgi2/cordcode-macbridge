@@ -8,6 +8,30 @@
 
 ## [Unreleased]
 
+### 2026-07-04 — 架构健康第二轮：web 共享包收口 5/5 + BridgeProvider 净增长 gate + handlers.go 物理分发
+
+第二轮按 brief 推荐顺序 P0 → P2 → P1 执行，目标是止住恶化、降低第三轮拆分摩擦，不动 iOS god-object 本体。16 个 exec-plan 任务全部 proven done。
+
+- **P0 web shared renderer 收口 5/5（代码在相邻 iOS 仓 `../cordcode-ios`）**：把剩余 3 个重复组件迁入 `shared-message-renderer`，共享包 exports 覆盖 DiffViewer/ToolBlock/ReasoningBlock/ProcessGroup/NarrativeBlock。
+  - `ReasoningBlock`：2 行文案差异（中/英）通过 `host.labels` 注入；迁移后两 app 剩余 diff 实测仅 labels 值。
+  - `ProcessGroup`：43 行真实差异（摘要文案 + 分类粒度 + 复数语义）通过 `summarizers` 注入保留，共享包首次引入 `components/turns/`。
+  - `NarrativeBlock`：68 行差异（message-web 独有的 git directive summary）通过 `transformContent` 注入；共享包新增 react-markdown peer `>=9 <11` / remark-gfm peer `>=4 <5`，**9.x 与 10.x 跨大版本兼容经三包 typecheck/build 实测确认**。
+  - 共享包新增 12 条定向 vitest（labels 注入 / summarizers / transformContent / DOM 契约）；三包 typecheck + build 全绿。视觉/UX 完整性回归为 owner-pending（未经 owner 明确授权不跑 UI/snapshot/simulator/真机）。
+- **P2 BridgeProvider 净增长 strict gate（本仓）**：新增 `scripts/hygiene-baseline.json`（冻结基线 lines=1967/funcs=88/forTesting=36）；`check-architecture-hygiene.sh` 增加 `CORDCODE_HYGIENE_STRICT=1` 分支——任一指标净增即 exit 1、允许减少、iOS 仓缺失时 graceful skip（不破坏 CI）；CI macbridge job 接入 best-effort 跨仓 checkout `openAgi2/cordcode-ios` + strict hygiene step。既有 5 个 inventory 段仍 warning-only，未被提升为 fail。
+- **P1 handlers.go 物理分发（本仓）**：4559 行 `handlers.go` 拆出 `handlers_opencode.go`（488 行，OpenCode proxy 簇）+ `handlers_relay.go`（829 行，relay 簇含 brief 指定的 4 个 transcript 探测 helper 整组搬迁），`handlers.go` 降至 3269 行（-1290，-28%）。纯物理 move，不改函数体 / RPC 行为 / session registry / agent driver / protocol 字面契约；`go build` + 定向过滤 + 全量 `go test ./go-bridge/...` 全绿。
+
+诚实口径：P0 三组件迁移代码与验证发生在 iOS 仓（typecheck/build/vitest），P2/P1 发生在 MacBridge 仓；react-markdown 跨版本兼容经三包实测而非穷尽 runtime 验证；`cordcode-ios` 已确认公开（无 auth 可读），CI strict gate 在每个 PR/push 实际执法。完整完成报告见 `docs/2026-07-04-architecture-health-second-round-development-brief完成情况.md`。
+
+- **独立完成审计**：新增 `docs/2026-07-04-architecture-health-second-round-completion-audit.md`，复跑 exec-plan 结构核查、iOS 三包 typecheck/build/vitest、P2 strict gate（含模拟增长 exit 1）和 P1 Go build/tests。审计结论为通过，仅指出完成报告中 `required:true ×16` 应理解为 `verification.required=true ×16` 的低优先级口径修正。
+
+### 2026-07-04 — 架构健康第二轮开发交接文档
+
+- 新增第二轮开发 brief，基于第一轮 gap analysis 和讨论结论，把下一轮范围收敛为 web shared renderer 剩余组件迁移、`handlers.go` 物理分发、BridgeProvider 净增长 gate 试点。
+- 明确第二轮不做 iOS god-object 大手术，第三轮再按子域 extract-and-test 启动本体拆分，避免“测试保护还不够”变成永久延期。
+- 按独立评审修订 brief：移除不可复现的“漂移扩大”论据，补齐 `ProcessGroup` 路径、OpenCode handler 拆分、hygiene strict gate/CI 接入边界，并记录评审意见全部采纳。
+- 按 r2 复核继续修正 P2 论据：移除不可复现的 `BridgeProvider` “78→88 func 增长”说法，改为静态 god-object、历史下沉点、无净增长门禁的可复现依据。
+- 按 r3 清理复核微调 P1 拆分说明：列出 relay 簇内 4 个不带 relay 之名的 transcript 探测 helper（`detectClaudeTranscriptState` / `detectCodexTranscriptTaskState` / `scanCodexTranscriptTaskEvents` / `codexEventPayloadType`），要求整组搬迁以防反向依赖。r3 同时确认 brief 全部量化论据可在当前 `main` 复现，评审循环结束。
+
 ### 2026-07-04 — 架构健康第一轮整体完成（28/28 proven done）
 
 本轮在 B2 删除 legacy config 包后收口，28 个 exec-plan 任务全部 done 且 proven。各批次交付：

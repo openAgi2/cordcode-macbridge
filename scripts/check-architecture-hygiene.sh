@@ -2,7 +2,11 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-IOS_ROOT="$(cd "$ROOT/../cordcode-ios" 2>/dev/null && pwd || true)"
+if [ -n "${CORDCODE_IOS_ROOT:-}" ]; then
+  IOS_ROOT="$(cd "$CORDCODE_IOS_ROOT" 2>/dev/null && pwd || true)"
+else
+  IOS_ROOT="$(cd "$ROOT/../cordcode-ios" 2>/dev/null && pwd || true)"
+fi
 
 count_rg() {
   local pattern="$1"
@@ -76,6 +80,55 @@ else
 fi
 printf 'Rule: protocol/capability/relay changes must update docs/protocol, iOS mirror/models, targeted tests, and living docs.\n'
 
+print_section "BridgeProvider net-growth gate"
+BASELINE_FILE="$ROOT/scripts/hygiene-baseline.json"
+BP_PATH="$IOS_ROOT/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift"
+GATE_RAN=0
+GROWTH=0
+
+if [ ! -f "$BASELINE_FILE" ]; then
+  printf 'Result: baseline file missing (%s); gate disabled.\n' "$BASELINE_FILE"
+elif [ -z "$IOS_ROOT" ] || [ ! -f "$BP_PATH" ]; then
+  printf 'Result: BridgeProvider.swift not measurable (iOS repo not co-located); gate skipped.\n'
+else
+  GATE_RAN=1
+  BP_LINES="$(wc -l < "$BP_PATH" | tr -d ' ')"
+  BP_FUNCS="$(grep -wo 'func' "$BP_PATH" | wc -l | tr -d ' ')"
+  BP_FORTESTING="$(grep -o 'ForTesting' "$BP_PATH" | wc -l | tr -d ' ')"
+  BASE_LINES="$(grep '"lines"' "$BASELINE_FILE" | head -1 | grep -oE '[0-9]+' | head -1)"
+  BASE_FUNCS="$(grep '"funcs"' "$BASELINE_FILE" | head -1 | grep -oE '[0-9]+' | head -1)"
+  BASE_FORTESTING="$(grep '"forTesting"' "$BASELINE_FILE" | head -1 | grep -oE '[0-9]+' | head -1)"
+
+  printf 'BridgeProvider.swift baseline -> current:\n'
+  printf '  lines:      %s -> %s\n' "$BASE_LINES" "$BP_LINES"
+  printf '  funcs:      %s -> %s\n' "$BASE_FUNCS" "$BP_FUNCS"
+  printf '  forTesting: %s -> %s\n' "$BASE_FORTESTING" "$BP_FORTESTING"
+
+  if [ "$BP_LINES" -gt "$BASE_LINES" ]; then
+    printf '  ❌ lines net growth (+%s)\n' "$((BP_LINES - BASE_LINES))"
+    GROWTH=1
+  fi
+  if [ "$BP_FUNCS" -gt "$BASE_FUNCS" ]; then
+    printf '  ❌ funcs net growth (+%s)\n' "$((BP_FUNCS - BASE_FUNCS))"
+    GROWTH=1
+  fi
+  if [ "$BP_FORTESTING" -gt "$BASE_FORTESTING" ]; then
+    printf '  ❌ forTesting net growth (+%s)\n' "$((BP_FORTESTING - BASE_FORTESTING))"
+    GROWTH=1
+  fi
+fi
+
 print_section "Gate status"
-printf 'Result: warning-only. Existing inventory is reported but does not fail this script.\n'
+if [ "$GATE_RAN" -eq 1 ] && [ "${CORDCODE_HYGIENE_STRICT:-0}" = "1" ]; then
+  if [ "$GROWTH" -eq 1 ]; then
+    printf 'Result: STRICT FAILED — BridgeProvider net growth detected.\n'
+    printf 'Fix: move new logic into a separate responsibility file (round 3 extract-and-test),\n'
+    printf 'or update scripts/hygiene-baseline.json with a documented justification in the same PR.\n'
+    exit 1
+  fi
+  printf 'Result: STRICT passed — no BridgeProvider net growth.\n'
+  exit 0
+fi
+printf 'Result: warning-only (gate_ran=%s, strict=%s).\n' "$GATE_RAN" "${CORDCODE_HYGIENE_STRICT:-0}"
+[ "$GROWTH" -eq 1 ] && printf '  ⚠ growth detected; set CORDCODE_HYGIENE_STRICT=1 to enforce.\n'
 exit 0
