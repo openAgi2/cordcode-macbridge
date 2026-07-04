@@ -37,9 +37,12 @@ an end-to-end-encrypted public Relay.
   必须先读 [RELAY_SERVER_OPERATIONS.md](RELAY_SERVER_OPERATIONS.md)。
 - 修改与 iOS 的配对、hello、重连、撤销、session/turn 同步：同时读
   `../cordcode-ios/IOS_MAC_INTERACTION_FLOW.md`。
+- 排查 Claude/Codex/OpenCode 的 session、history、live stream、执行态、列表分页或端到端
+  同步异常：必须先检索本仓 `think.md` 和相邻 iOS 仓 `../cordcode-ios/think.md`，复用已有
+  复盘结论；不要在已有结论覆盖的问题上从零重复调查。
 
 这些是持续更新的架构/运维真值；`docs/YYYY-MM-DD-*.md` 主要是方案、评审和完成报告，
-不能代替根目录活文档。
+不能代替根目录活文档。`think.md` 是已知问题与复盘经验库，排障时作为活文档入口的一部分。
 
 涉及 protocol、pairing、加密、Relay 或 connection state 的跨仓库改动，完整交付至少包括：
 
@@ -101,6 +104,28 @@ tail -n 100 "$HOME/Library/Application Support/CordCode Link/logs/go-bridge.log"
 
 `8777` 的监听者必须是 `/Applications/CordCodeLink.app` 内嵌的
 `cordcode-bridge-runtime`，不能是旧一体仓库或当前源码目录里的开发二进制。
+
+## Autonomous diagnosis and evidence collection
+
+排查 bug 时，agent 必须先自行完成本机可执行的调查，再找 owner。owner 不是日志采集器、
+命令转发器或实现路径选择器；除非动作需要真实设备 UI、人类账号、外部权限、视觉判断或
+产品取舍，否则不得把“下一步该做什么”“请你跑命令给我日志”作为默认输出。
+
+- 先读相关源码、活文档、`think.md` 复盘和已有测试，建立端到端事件链路假设；不要先要求
+  owner 复述架构、复制日志或解释内部协议。
+- Mac 侧日志、进程、端口、构建产物、Management API、runtime.json、配置文件和本仓测试，
+  均由 agent 自行读取或运行。常见例子包括 `tail`/`rg`/`lsof`/`pgrep`/`curl`
+  /`go test`/定向 `xcodebuild build`。
+- 连接到 Mac 的 iPhone 只要能通过命令行只读取证，agent 应先自行探测 UDID 并抓取日志；
+  不得默认要求 owner 打开 Terminal 复制 `idevicesyslog` 输出。只读日志采集与设备探测不等于
+  UI automation；点击、输入、滑动、截图、视觉验收、真机 UI test 仍需 owner 明确授权。
+- 跨 MacBridge/iOS 的端到端问题，先在可访问范围内同时对齐 MacBridge 日志、iOS 日志、
+  protocol/event handler 源码和 session/turn 标识；不要只看一侧就让 owner 做人工二分。
+- 只有当证据确实卡在 owner 不可替代的动作时，才向 owner 提一个最短 checklist；必须说明：
+  agent 已经查了什么、还缺哪一个观察、owner 完成后回报什么结果。不得给 owner 多个工程实现
+  选项来替 agent 做判断。
+- 如果真实路径失败，保留失败现场并分析根因；不得用 mock、placeholder、旧日志、缓存快照或
+  单侧成功冒充端到端成功。
 
 ## User-facing communication
 
