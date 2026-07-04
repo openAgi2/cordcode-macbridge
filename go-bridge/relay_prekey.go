@@ -69,6 +69,11 @@ type PrekeyStatusResponse struct {
 	LowWatermark   int `json:"lowWatermark"`
 	TargetCount    int `json:"targetCount"`
 	MaxCount       int `json:"maxCount"`
+	// UrgentRefillNeeded 为 true 表示 Mac 端近期遇到过 prekey 耗尽（availableCount 曾降到 0）
+	// 或已跌破低水位。iOS 看到 true 时应立即上传一批 prekey，而不是等下一个 30min 周期。
+	// Mac 不主动 push（协议契约不变）；此字段是 iOS 下次 get_delivery_prekey_status 时的 urgency 信号，
+	// 读取即清除（消费一次后回到周期补充节奏）。
+	UrgentRefillNeeded bool `json:"urgentRefillNeeded"`
 }
 
 // DeliveryEpoch 是一个 bounded delivery epoch。
@@ -117,6 +122,11 @@ type PrekeyStore struct {
 
 	// identity（用于生成 epochAuthTag）
 	identityAuthKey func(deviceID string) ([]byte, error)
+
+	// per-device 紧急补充标记：ConsumePrekey 触发耗尽（availableCount==0）或跌破低水位时置 true，
+	// GetPrekeyStatus 读取时清除。解决 Mac 不主动 push + iOS 后台冻结/bridge 重启清零期间的空窗：
+	// iOS 重连后第一次 status 查询就能看到 urgency 信号，立即上传一批，不必等 30min 周期。
+	urgentRefill map[string]bool
 }
 
 // NewPrekeyStore 创建绑定到 bridge identity 的 prekey store。
@@ -127,6 +137,7 @@ func NewPrekeyStore(bridgeID string) *PrekeyStore {
 		processedBatches: make(map[string]string),
 		epochs:           make(map[string][]*DeliveryEpoch),
 		epochIndex:       make(map[string]uint64),
+		urgentRefill:     make(map[string]bool),
 	}
 }
 
@@ -230,16 +241,25 @@ func (ps *PrekeyStore) UploadPrekeys(batch PrekeyUploadBatch) PrekeyUploadRespon
 }
 
 // GetPrekeyStatus 返回设备的 prekey 池状态。
+// 读取并清除 urgentRefillNeeded：iOS 看到 true 时应立即上传一批 prekey（不等 30min 周期）。
+// 消费一次后回到周期补充节奏，避免 urgency 信号长期置位。
 func (ps *PrekeyStore) GetPrekeyStatus(deviceID string) PrekeyStatusResponse {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
 	count := ps.availableCountLocked(deviceID)
+	urgent := ps.urgentRefill[deviceID]
+	// 实时状态：当前已达标（≥ targetCount）则不报 urgent，即使历史曾耗尽。
+	if count >= prekeyTargetCount {
+		urgent = false
+	}
+	delete(ps.urgentRefill, deviceID)
 	return PrekeyStatusResponse{
-		AvailableCount: count,
-		LowWatermark:   prekeyLowWatermark,
-		TargetCount:    prekeyTargetCount,
-		MaxCount:       prekeyMaxCount,
+		AvailableCount:     count,
+		LowWatermark:       prekeyLowWatermark,
+		TargetCount:        prekeyTargetCount,
+		MaxCount:           prekeyMaxCount,
+		UrgentRefillNeeded: urgent,
 	}
 }
 
@@ -290,6 +310,8 @@ func (ps *PrekeyStore) ConsumePrekey(deviceID string) (*DeliveryEpoch, error) {
 		}
 	}
 	if prekey == nil {
+		// 耗尽：置 urgent 标记，iOS 下次 status 查询时看到 urgency 信号立即补充。
+		ps.urgentRefill[deviceID] = true
 		return nil, fmt.Errorf("prekey_exhausted: no available delivery prekey for device %s", safeID(deviceID))
 	}
 
@@ -360,6 +382,11 @@ func (ps *PrekeyStore) ConsumePrekey(deviceID string) (*DeliveryEpoch, error) {
 	ps.prekeys[deviceID][prekeyIdx].Consumed = true
 	ps.epochs[deviceID] = append(ps.epochs[deviceID], epoch)
 	ps.epochIndex[deviceID] = epochIdx + 1
+
+	// 消费后剩余未消费数跌破低水位 → 置 urgent，提示 iOS 下次查询时立即补充。
+	if ps.availableCountLocked(deviceID) < prekeyLowWatermark {
+		ps.urgentRefill[deviceID] = true
+	}
 
 	slog.Info("prekey-store: epoch created",
 		"deviceID", safeID(deviceID),
