@@ -38,7 +38,8 @@ type Handlers struct {
 	codexBackendMode        string
 	pendingNotifications    *PendingNotificationStore
 	broadcaster             *Broadcaster
-	relayRunning            map[string]bool // sessionID → relayEvents 是否正在运行
+	relayRunning            map[string]bool   // sessionID/relayKey → 是否已有 relay goroutine
+	relayRunningKind        map[string]string // sessionID → agent/file relay 类型，用于避免 Claude file relay 抢占真实 stdout relay
 	deliveryPrekeys         *PrekeyStore
 	observation             *ObservationManager
 	relayOutbox             *OutboxManager
@@ -101,6 +102,7 @@ func newHandlersWithContext(ctx context.Context) *Handlers {
 		broadcaster:            NewBroadcaster(),
 		pendingNotifications:   NewPendingNotificationStore(),
 		relayRunning:           make(map[string]bool),
+		relayRunningKind:       make(map[string]string),
 		deliveryPrekeys:        prekeys,
 		observation:            observation,
 		relayOutbox:            outbox,
@@ -1544,6 +1546,7 @@ func (h *Handlers) rebindSessionIDIfResolved(currentID string, sess core.AgentSe
 
 	h.sessions.rebind(currentID, realID)
 	h.broadcaster.Rebind(currentID, realID, backendID, directory)
+	h.rebindRelayKind(currentID, realID, relayKindAgent)
 	if backendID == "claude" || backendID == "claudecode" {
 		h.mu.Lock()
 		selection := h.pendingClaudeRuntime[currentID]

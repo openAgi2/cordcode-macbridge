@@ -1241,7 +1241,10 @@ func (a *Agent) FetchTodos(_ context.Context, sessionID string) ([]core.Todo, er
 	defer f.Close()
 
 	var latestTodos []core.Todo
-	scanner := bufio.NewScanner(f)
+	// 与本仓其它 transcript 扫描路径一致（newTranscriptScanner：256KB initial / 16MB max），
+	// 避免 Claude JSONL 单行（如 Read 大文件输出、Bash 长输出、巨型 TodoWrite）超过
+	// bufio 默认 64KB buffer 触发 "token too long"（真机日志 fetch_todos failed）。
+	scanner := newTranscriptScanner(f)
 	for scanner.Scan() {
 		var raw transcriptHistoryEnvelope
 		if err := json.Unmarshal(scanner.Bytes(), &raw); err != nil {

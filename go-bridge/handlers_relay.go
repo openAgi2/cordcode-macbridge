@@ -14,13 +14,19 @@ import (
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
+const (
+	relayKindAgent      = "agent"
+	relayKindClaudeFile = "claude_file"
+)
+
 // startRelayIfNotRunning 为 session 启动事件转发（如果尚未运行）。
 // 用于 iOS 仅调用 get_session_messages 而未调用 send_message 的场景。
 func (h *Handlers) startRelayIfNotRunning(sessionID string, sess core.AgentSession, conn Connection, backendID string) {
 	h.mu.Lock()
-	running := h.relayRunning[sessionID]
+	running := h.relayRunning[sessionID] && h.relayRunningKind[sessionID] == relayKindAgent
 	if !running {
 		h.relayRunning[sessionID] = true
+		h.relayRunningKind[sessionID] = relayKindAgent
 	}
 	h.mu.Unlock()
 	if !running {
@@ -42,6 +48,7 @@ func (h *Handlers) startClaudeSessionFileRelay(sessionID string, conn Connection
 	running := h.relayRunning[sessionID]
 	if !running {
 		h.relayRunning[sessionID] = true
+		h.relayRunningKind[sessionID] = relayKindClaudeFile
 	}
 	h.mu.Unlock()
 	if running {
@@ -148,9 +155,7 @@ func (h *Handlers) codexSessionFileRelayLoop(sessionID string, conn Connection, 
 
 func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection, backendID string) {
 	defer func() {
-		h.mu.Lock()
-		delete(h.relayRunning, sessionID)
-		h.mu.Unlock()
+		h.clearRelayKindIf(sessionID, relayKindClaudeFile)
 		slog.Info("go-bridge: claudeSessionFileRelay exited", "sessionID", sessionID)
 	}()
 
@@ -160,6 +165,10 @@ func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection,
 		return
 	}
 	slog.Info("go-bridge: claudeSessionFileRelay started", "sessionID", sessionID, "path", sessPath)
+	if !h.relayKindIs(sessionID, relayKindClaudeFile) {
+		slog.Info("go-bridge: claudeSessionFileRelay superseded before initial scan", "sessionID", sessionID)
+		return
+	}
 
 	// 读取当前文件大小作为初始偏移，只检测新增内容。
 	offset := func() int64 {
@@ -224,6 +233,10 @@ func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection,
 	}
 
 	for range ticker.C {
+		if !h.relayKindIs(sessionID, relayKindClaudeFile) {
+			slog.Info("go-bridge: claudeSessionFileRelay superseded by agent relay", "sessionID", sessionID)
+			return
+		}
 		info, err := os.Stat(sessPath)
 		if err != nil {
 			continue
@@ -597,16 +610,44 @@ func disablesRelayIdleTimeout(backendID string) bool {
 	}
 }
 
+func (h *Handlers) relayKindIs(sessionID, kind string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.relayRunning[sessionID] && h.relayRunningKind[sessionID] == kind
+}
+
+func (h *Handlers) clearRelayKindIf(sessionID, kind string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.relayRunningKind[sessionID] != kind {
+		return
+	}
+	delete(h.relayRunning, sessionID)
+	delete(h.relayRunningKind, sessionID)
+}
+
+func (h *Handlers) rebindRelayKind(fromID, toID, kind string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.relayRunningKind[fromID] != kind {
+		return
+	}
+	delete(h.relayRunning, fromID)
+	delete(h.relayRunningKind, fromID)
+	if !h.relayRunning[toID] {
+		h.relayRunning[toID] = true
+		h.relayRunningKind[toID] = kind
+	}
+}
+
 // 且事件通道没有跨进程共享事件总线，它的 relayEvents goroutine 在完成一轮（EventResult）或空闲时
 // 绝不能退出（通过 continue 忽略）。这也意味着该 goroutine 和底层 session 会常驻在内存中，
 // 其最终生命周期的释放依赖于 session 显式关闭/删除导致 events channel 关闭。这需要注意潜在的泄漏风险。
 func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionID, backendID string) {
 	origSessionID := sessionID
 	defer func() {
-		h.mu.Lock()
-		delete(h.relayRunning, origSessionID)
-		delete(h.relayRunning, sessionID)
-		h.mu.Unlock()
+		h.clearRelayKindIf(origSessionID, relayKindAgent)
+		h.clearRelayKindIf(sessionID, relayKindAgent)
 		slog.Info("go-bridge: relayEvents exited", "backendID", backendID, "sessionID", sessionID)
 	}()
 	slog.Info("go-bridge: relayEvents started", "backendID", backendID, "sessionID", sessionID)

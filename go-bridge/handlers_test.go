@@ -2108,6 +2108,53 @@ func TestClaudeSendMessageWithNilStubDoesNotPanic(t *testing.T) {
 	}
 }
 
+func TestClaudeSendMessageReplacesFileRelayWithAgentRelay(t *testing.T) {
+	agent := &fakeAgent{name: "claudecode", generateSessionID: true}
+	agent.sendHook = func(sess *fakeAgentSession, _ string) {
+		sess.events <- core.Event{Type: core.EventText, SessionID: sess.id, Content: "partial"}
+		sess.events <- core.Event{Type: core.EventResult, SessionID: sess.id, Done: true}
+	}
+
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("claudecode", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	// 冷启动打开既有 Claude session 时，get_session_messages/resume_session 可能先
+	// 留下 transcript file relay 标记。send_message 必须用真实 AgentSession stdout
+	// relay 接管，否则 iOS 只能靠历史轮询看到从头刷新的 assistant 内容。
+	const sessionID = "b36c6286-2222-4eec-b542-8cdc8a382573"
+	handlers.mu.Lock()
+	handlers.relayRunning[sessionID] = true
+	handlers.relayRunningKind[sessionID] = relayKindClaudeFile
+	handlers.mu.Unlock()
+
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "claudecode",
+		Method:    "send_message",
+		RequestID: "send-replaces-file-relay",
+		Params: mustJSONRaw(t, map[string]any{
+			"sessionId": sessionID,
+			"content":   "hello",
+		}),
+	})
+
+	messages := readJSONMaps(t, clientConn, 5)
+	var sawText, sawCompleted bool
+	for _, message := range messages {
+		switch message["event"] {
+		case "text_delta":
+			data, _ := message["data"].(map[string]any)
+			sawText = data["delta"] == "partial"
+		case "turn_completed":
+			sawCompleted = true
+		}
+	}
+	if !sawText || !sawCompleted {
+		t.Fatalf("agent relay 未接管 file relay：sawText=%v sawCompleted=%v messages=%v", sawText, sawCompleted, messages)
+	}
+}
+
 func TestDrainHistoryEventsWaitsForClaudeResumeDrainSignal(t *testing.T) {
 	drained := make(chan struct{})
 	session := &fakeAgentSession{

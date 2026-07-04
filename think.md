@@ -1,3 +1,75 @@
+# Claude Code 冷启动既有 session 首轮流式从头重播：跨仓排查结论
+
+日期：2026-07-04
+结论：本次 owner 真机复现的主因不在 MacBridge 重复生成，也不在 Claude CLI stdout 中断，而在
+iOS 本地 Claude live stream 期间仍执行普通历史同步并覆盖 timeline。MacBridge 日志用于排除
+重复执行，并暴露 iOS 高频 `get_session_messages` 是关键证据。
+
+## 现象
+
+iOS App 冷启动后，Claude Code 模式打开一个已存在 session，发送“讲个狐狸笑话”。发送后出现
+runtime status strip“正在思考中”，开始流式输出。回复较长时，输出一段后页面闪一下，status strip
+重新出现，回答不是从上次半截继续，而是从头重新流式输出。重复 3 到 4 次后才完整收口。随后
+输入框还会短暂再次进入执行中状态，几十秒后恢复。留在同一个 session 再发第二问时正常。
+
+## MacBridge 侧排查结论
+
+日志窗口内没有看到重复 `send_message`，也没有 Claude CLI 断连重启导致同一 prompt 被重新执行。
+相反，MacBridge 持续收到 iOS 发来的 `get_session_messages`，并返回同一 session 的 persisted
+history；同时夹杂 `fetch_todos`。这说明服务端只是按请求返回 transcript 历史，视觉上的“从头重播”
+来自客户端把历史片段重新应用到当前 live stream。
+
+排查期间曾修过一个真实但非主因的 MacBridge 风险：Claude 既有 session 的 transcript file relay
+和真实 AgentSession stdout relay 共用 `relayRunning` 布尔位。若 file relay 抢先占位，
+`send_message` 可能无法启动真实 stdout relay。修复后改为记录 relay kind（agent / claude_file），
+并允许真实 agent relay 接管 file relay；该修复有回归测试保护，但 owner 复测确认问题依旧，
+因此它不是这次“从头重播”的主因。
+
+## 最终根因
+
+iOS 本地发送 Claude turn 时，本地 user/assistant 使用本地 UUID；MacBridge 返回的 Claude
+transcript 历史使用服务端 id。生成中如果普通 `loadMessages` 把服务端历史套回 UI，就会把当前
+live stream 中的 assistant 替换/合并成服务端较旧或不同 id 的片段。长回复期间这些历史同步多次发生，
+所以用户看到 status strip 闪烁、回答半截消失并从头输出。
+
+最初只挡住 iOS `startRunningSessionPolling` 中的一处 `loadMessages`，但冷启动既有 session 时仍有
+resident probe、后台刷新、session 切换后续刷新等路径会直接调用 `loadMessages`。因此正确边界不是
+“某个轮询入口跳过历史”，而是 iOS 历史同步入口本身必须识别 Claude 本地 live turn ownership。
+
+## 最终修复方案（iOS 仓）
+
+1. `ChatViewModel+MessageSync.loadMessages` 增加入口级保护：Claude Code 本地 turn 进行中时，
+   普通历史同步直接返回，不 fetch、不 apply、不写 cache。
+
+2. `recoverAfterSendCompletion` 显式传 `allowDuringClaudeLocalSend: true`，允许 turn 完成后做一次
+   权威历史同步和快照写入。也就是生成中禁止历史覆盖，完成后仍以服务端历史对账。
+
+3. `startRunningSessionPolling` 在 Claude 本地 turn 看到远端 idle 时进入
+   `recoverAfterSendCompletion`，而不是直接清理执行态。
+
+4. iOS 增加回归：
+   `RemoteRunningSessionTests.testClaudeCodeLocalSendLoadMessagesDoesNotApplyHistoryMidStream`
+   和 `testClaudeCodeLocalSendRunningPollingDoesNotFetchHistoryMidStream`。
+
+## 验证
+
+- iOS 定向测试 3 条通过：
+  `testClaudeCodeLocalSendLoadMessagesDoesNotApplyHistoryMidStream`、
+  `testClaudeCodeLocalSendRunningPollingDoesNotFetchHistoryMidStream`、
+  `testClaudeCodeTurnCompletion_transitionsToIdle`。
+- iOS Debug build 已安装到连接的 iPhone 16 Pro。
+- owner 真机复测确认：同一路径冷启动既有 Claude session 后，首轮长回复不再半截闪烁和从头重播。
+
+## 后续原则
+
+- MacBridge 日志出现高频 `get_session_messages` 但没有重复 `send_message` 时，优先怀疑 iOS
+  timeline 同步覆盖，而不是 Claude CLI 重跑。
+- Claude 本地 live turn 期间，普通历史同步不能作为生成中刷新源，只能在完成后做权威对账。
+- MacBridge 的 file relay / agent relay 状态拆分保留为正确的风险修复，但不要把它当作本次
+  现象的根因。
+
+---
+
 # OpenCode session 列表加载方案（实际实现）
 
 本文记录 CordCode iOS OpenCode 模式 session 列表加载的真实修复路径。

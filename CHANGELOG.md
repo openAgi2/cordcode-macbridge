@@ -8,6 +8,11 @@
 
 ## [Unreleased]
 
+### 2026-07-04 — 修复 Claude Code 冷启动既有 session 首轮流式重复
+
+- 修复冷启动打开既有 Claude Code session 后，首个本地提问可能被 transcript file relay 抢占真实 CLI stdout relay 的问题；现在 `send_message` 会让真实 AgentSession relay 接管，避免 iOS 端在长回复中反复回到 runtime status strip 并从头刷新半截回复。
+- 新增 go-bridge 回归测试，覆盖“已有 Claude file relay 标记 + 立刻本地发送”的接管路径，防止后续重构再次把两类 relay 混用成同一个布尔占位。
+
 ### 2026-07-04 — 架构健康第三轮：BridgeProvider transport creation 子域提取（BridgeTransportConnector）
 
 第三轮按 brief 执行 P0 → P3，目标是让 iOS god-object `BridgeProvider.swift` 实际变薄：把 transport creation 子域（构造 / direct+relay attempt / 多候选 direct race / 未采纳 transport 清理）从 `BridgeProvider` 拆到独立 `BridgeTransportConnector.swift`，不改 protocol、pairing、Relay crypto、路径选择语义或 recovery ownership。12 个 exec-plan 任务全部 proven done。

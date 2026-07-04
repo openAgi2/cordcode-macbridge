@@ -261,9 +261,15 @@ func newClaudeSession(ctx context.Context, workDir, cliBin string, cliExtraArgs 
 	// historyDraining: --resume 启动后的历史重放期。
 	// 仅对明确 resume 已知 session id 时开启；
 	// 空 sessionID 或 ContinueSession 不开启。
+	//
+	// watchdog 时序：go-bridge 侧 drainHistoryEvents 等 WaitForHistoryDrain 最多 10s（handlers.go），
+	// 此处 watchdog 设 12s 作为最后兜底（略高于 go-bridge 的 10s，让 go-bridge 先超时打日志，
+	// session 侧只在真正卡死时强制关闭）。3s 对历史较长的 --resume 过短：CLI 重放完整历史时
+	// 首个 result 帧常在 3s 后才到达，过早 force-close 会让真实 turn 的事件被错误处理（真机症状：
+	// 流式中断 + 从头输出）。正常路径由 handleResult 收到 result 帧时 markHistoryDrained 关闭。
 	if sessionID != "" && sessionID != core.ContinueSession {
 		cs.historyDraining.Store(true)
-		time.AfterFunc(3*time.Second, func() {
+		time.AfterFunc(12*time.Second, func() {
 			if cs.historyDraining.Load() {
 				slog.Warn("claudeSession: historyDraining still true after timeout, forcing exit")
 				cs.markHistoryDrained()
