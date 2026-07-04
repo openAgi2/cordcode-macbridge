@@ -8,6 +8,12 @@
 
 ## [Unreleased]
 
+### 2026-07-04 — 架构健康第三轮开发 brief
+
+- 新增第三轮开发 brief，明确第三轮主轴为 iOS `BridgeProvider` 的 `transport creation` 子域 extract-and-test，而不是继续扩大范围或直接拆 ChatViewModel。
+- 规定先补 direct/relay attempt、未采纳 transport 清理、adoption 边界三类不变量测试，再提取 `BridgeTransportConnector.swift`；不改 protocol、pairing、Relay crypto、路径选择语义或 recovery ownership。
+- 明确完成标准：`BridgeProvider.swift` 指标必须下降、MacBridge `hygiene-baseline.json` 必须下调并通过 strict gate，iOS 代码改动后按真机连接状态执行构建/安装/启动。
+
 ### 2026-07-04 — 架构健康第二轮：web 共享包收口 5/5 + BridgeProvider 净增长 gate + handlers.go 物理分发
 
 第二轮按 brief 推荐顺序 P0 → P2 → P1 执行，目标是止住恶化、降低第三轮拆分摩擦，不动 iOS god-object 本体。16 个 exec-plan 任务全部 proven done。
