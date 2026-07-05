@@ -432,6 +432,22 @@ type AgentDescriptor struct {
 	Description string `json:"description,omitempty"`
 }
 
+// SessionPin is the identity-only pin (置顶) record persisted by a SessionPinner driver.
+// It deliberately carries NO summary fields (title/messageCount/modifiedAt): those remain
+// backend-owned and are resolved on demand by the go-bridge handler when building
+// AgentSessionInfo for list_pinned_sessions / set_session_pinned responses. Keeping the
+// pin store limited to identity + pinnedAt avoids stale pinned-row summaries.
+//
+// Directory is the scope hint the pin was recorded with (the request directory for
+// OpenCode, the resolved project dir for Claude, empty/unused where not meaningful). It
+// is also the input the handler uses to resolve the summary (e.g. OpenCodeProxy.getSession).
+type SessionPin struct {
+	BackendID string
+	SessionID string
+	Directory string
+	PinnedAt  time.Time
+}
+
 // AgentSessionInfo describes one session as reported by the agent backend.
 type AgentSessionInfo struct {
 	ID              string
@@ -439,6 +455,12 @@ type AgentSessionInfo struct {
 	MessageCount    int
 	ModifiedAt      time.Time `json:"modified_at"`
 	ArchivedAt      time.Time `json:"archived_at,omitempty"`
+	// PinnedAt is non-zero when the user pinned (置顶) this session. It is MacBridge-owned
+	// metadata (NOT agent-local state): Claude stores it in the .cc-connect-session-meta
+	// sidecar; Codex/OpenCode store it in the bridge-owned pin index. The wire field is
+	// pinnedAtMillis (emitted by sessionsToWire / mapSession); pin/unpin MUST NOT alter
+	// ModifiedAt. See docs/protocol/bridge-v1.md「Session Pinning」.
+	PinnedAt        time.Time `json:"pinned_at,omitempty"`
 	GitBranch       string
 	Directory       string
 	ModelID         string

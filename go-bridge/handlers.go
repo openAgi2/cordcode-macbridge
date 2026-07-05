@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/pinstore"
 	"github.com/openAgi2/cordcode-macbridge/transcriptindex"
 )
 
@@ -62,6 +63,12 @@ type Handlers struct {
 	// capabilityPolicy 是集中式 RPC 授权层（P3 架构演进，§3.2/§8）。
 	capabilityPolicy *CapabilityPolicy
 	relayEnabled     bool
+
+	// pinStore persists MacBridge-owned session pin (置顶) metadata. Injected from main()
+	// (under the bridge data dir) via SetPinStore; nil in tests that don't exercise pinning.
+	// The set_session_pinned / list_pinned_sessions handlers use it; drivers receive their
+	// own reference via opts["pin_store"] at construction.
+	pinStore *pinstore.Store
 
 	// ctx is the root context whose cancellation propagates runtime shutdown
 	// to active agent sessions (StartSession uses it instead of
@@ -173,6 +180,14 @@ func (h *Handlers) SetDataDir(dir string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.dataDir = dir
+}
+
+// SetPinStore 注入进程级 session pin (置顶) 存储。由 main() 在数据目录确定后、agent
+// 注册前调用；set_session_pinned / list_pinned_sessions 处理器读它。
+func (h *Handlers) SetPinStore(store *pinstore.Store) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.pinStore = store
 }
 
 // ConfigureRelayDelivery 接入 Mac→Relay 离线 milestone 投递路径。
@@ -727,6 +742,10 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		})
 	case "archive_session":
 		h.handleArchiveSession(conn, msg, agent)
+	case "set_session_pinned":
+		h.handleSetSessionPinned(conn, msg, agent)
+	case "list_pinned_sessions":
+		h.handleListPinnedSessions(conn, msg, agent)
 	case "compress_context":
 		h.handleCompressContext(conn, msg)
 	case "check_pending_notifications":
@@ -1932,6 +1951,7 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 		mappingStarted := time.Now()
 		wireSessions := sessionsToWire(sessions)
 		wireSessions = h.enrichSessionStatesForList(wireSessions, agent, h.getRunningMap(ctx, agent))
+		h.overlayPinnedState(wireSessions, agentBackendID(agent))
 		result := paginateSessionList(wireSessions, extractStringParam(msg, "cursor"), limit)
 		metrics.wireMapping += time.Since(mappingStarted)
 		if ws, ok := result["sessions"].([]map[string]interface{}); ok {
@@ -1953,6 +1973,7 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 	mappingStarted := time.Now()
 	allSessions := h.claudeSessions.list(projectKey, metrics.context())
 	allSessions = h.enrichSessionStatesForList(allSessions, agent, h.getRunningMap(ctx, agent))
+	h.overlayPinnedState(allSessions, "claudecode")
 	result := paginateSessionList(allSessions, extractStringParam(msg, "cursor"), limit)
 	metrics.wireMapping += time.Since(mappingStarted)
 	if ws, ok := result["sessions"].([]map[string]interface{}); ok {
@@ -2803,6 +2824,9 @@ func sessionsToWire(sessions []core.AgentSessionInfo) []map[string]interface{} {
 		}
 		if !s.ArchivedAt.IsZero() {
 			wire["archivedAtMillis"] = s.ArchivedAt.UnixMilli()
+		}
+		if !s.PinnedAt.IsZero() {
+			wire["pinnedAtMillis"] = s.PinnedAt.UnixMilli()
 		}
 		result = append(result, wire)
 	}

@@ -146,12 +146,19 @@ type ListModelsParams struct {
 	Directory string `json:"directory,omitempty"`
 }
 
-// Session info returned to iOS.
+// SessionInfo is a legacy stub retained for historical reference. It is NOT the wire
+// truth — list_sessions/get_session serialize through sessionsToWire (handlers.go), which
+// builds an ad-hoc map from core.AgentSessionInfo, not this struct. The canonical field
+// set is docs/protocol/schema/bridge-v1.types.ts BridgeSessionInfo. Do not add new wire
+// fields here expecting them to reach iOS; edit sessionsToWire instead. Kept aligned with
+// the verified wire union (incl. pinnedAtMillis) for documentation only.
 type SessionInfo struct {
-	ID           string `json:"id"`
-	Title        string `json:"title,omitempty"`
-	MessageCount int    `json:"messageCount,omitempty"`
-	ModifiedAt   string `json:"modifiedAt,omitempty"`
+	ID              string `json:"id"`
+	Title           string `json:"title,omitempty"`
+	MessageCount    int    `json:"messageCount,omitempty"`
+	ModifiedAt      string `json:"modifiedAt,omitempty"`
+	PinnedAtMillis  int64  `json:"pinnedAtMillis,omitempty"`
+	ArchivedAtMillis int64 `json:"archivedAtMillis,omitempty"`
 }
 
 // HistoryEntry returned to iOS.

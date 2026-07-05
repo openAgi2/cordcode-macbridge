@@ -34,7 +34,7 @@ New clients must send:
 {
   "type": "hello",
   "client": {"app": "CordCode iOS", "version": "1.0.0", "deviceId": "dev_..."},
-  "protocol": {"name": "cordcode-bridge", "version": 1, "supportedSchemaRevisions": ["2026-05-07"]}
+  "protocol": {"name": "cordcode-bridge", "version": 1, "supportedSchemaRevisions": ["2026-05-07", "2026-07-05"]}
 }
 ```
 
@@ -104,6 +104,8 @@ read_file
 rename_session
 share_session
 archive_session
+set_session_pinned
+list_pinned_sessions
 compress_context
 check_pending_notifications
 question_reply
@@ -331,3 +333,92 @@ When `paginate` is true and the backend supports it, the response data is:
 - A cursor is only valid for the session and backend it was issued for.
 - `cursor_stale` means the history prefix the cursor referenced can no longer be proven continuous;
   reset to the first page.
+
+## Session Pinning
+
+Session pinning (置顶) is a backend-neutral, MacBridge-owned session-metadata capability. iOS does
+NOT read Claude/Codex/OpenCode local storage; it consumes pin state through the same `BackendClient`
+path used for rename/archive/delete.
+
+### Capability
+
+```text
+session_pin
+```
+
+A backend advertises `session_pin` in `capabilities` when its agent implements the `SessionPinner`
+interface (independent of `session_mutation` / `session_delete`). It is advertised for Claude,
+Codex, and OpenCode. Clients MUST gate pin/unpin on `session_pin`, not on `session_mutation`.
+
+### Wire field
+
+`BridgeSessionInfo.pinnedAtMillis?: number` — epoch-ms representing when the user pinned the
+session, present only when pinned. Pin/unpin MUST NOT alter `updatedAtMillis`. See
+`docs/protocol/schema/bridge-v1.types.ts` `BridgeSessionInfo`.
+
+### RPC: `set_session_pinned`
+
+Idempotent mutation. Mirrors the rename/archive shape: iOS sends the request, discards the wire
+response (`requestVoid`), and re-fetches via `get_session` for the returned `BackendThread`.
+
+Request params:
+
+```ts
+{
+  sessionId: string,
+  pinned: boolean,
+  pinnedAtMillis?: number,   // epoch-ms; required when pinned=true, ignored when pinned=false
+  directory?: string         // optional scope hint (same param iOS sends for rename/archive)
+}
+```
+
+MacBridge resolves the backend/session scope from `sessionId` (+ optional `directory`) into the
+same key used during list enrichment before writing pin metadata, and returns the updated session
+summary for symmetry with rename/archive:
+
+```ts
+{
+  session: BridgeSessionInfo   // includes pinnedAtMillis when pinned
+}
+```
+
+### RPC: `list_pinned_sessions`
+
+Backend-neutral, NOT directory-scoped. Returns the global pinned section for the active backend.
+This is what surfaces pinned OpenCode sessions whose project bucket has not been loaded via
+`list_sessions(directory:)` (which stays scoped to the requested directory).
+
+Request params:
+
+```ts
+{ backendId: string }
+```
+
+Response data:
+
+```ts
+{ sessions: BridgeSessionInfo[] }   // each includes pinnedAtMillis
+```
+
+### Summary source and truthfulness
+
+The pin store holds identity + `pinnedAtMillis` only — it does NOT cache title/messageCount/
+updatedAtMillis. `list_pinned_sessions` resolves summaries from the real backend source:
+- Claude: overlay on the existing Claude session catalog.
+- Codex: overlay on `agent/codex/sessionListCache`.
+- OpenCode: resolve each pin via `OpenCodeProxy.getSession(sessionID, directory)` with bounded
+  fan-out, using the pinned entry's stored directory.
+
+Prune-vs-fail rule: if a pinned session is definitively gone (upstream HTTP 404), MacBridge prunes
+that pin and omits it from the response. If the upstream fetch fails transiently (5xx / timeout /
+network), `list_pinned_sessions` fails truthfully — it does NOT return fabricated or stale partial
+summaries. Distinguishing these requires a typed upstream status error from the OpenCode proxy, not
+`strings.Contains(err.Error(), "HTTP 404")`.
+
+### Identity / keying
+
+Pin keys are scoped by backend + backend-instance-scope + session ID, never by sessionId alone, so
+the same session ID discovered under different projects / CODEX_HOME values does not collide. Keys
+are computed by MacBridge, not iOS. Claude pin state lives in the existing `.cc-connect-session-meta`
+sidecar (delete cleanup is automatic); Codex/OpenCode pin state lives in a MacBridge-owned index and
+their `DeleteSession` paths clean the pin entry on delete.

@@ -85,6 +85,20 @@ func (h *Handlers) handleOpenCodeRPC(conn Connection, msg WireMessage) {
 	case "abort_generation":
 		h.ocHandleAbortGeneration(conn, msg, dir)
 
+	case "set_session_pinned", "list_pinned_sessions":
+		// Session pinning is backend-neutral: route to the generic handlers (which type-assert
+		// core.SessionPinner on the opencode agent). OpenCode summaries resolve via ocProxy.
+		agent, ok := h.getAgent(msg.BackendID)
+		if !ok {
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "backend_not_found", Message: "opencode agent not registered"})
+			return
+		}
+		if msg.Method == "set_session_pinned" {
+			h.handleSetSessionPinned(conn, msg, agent)
+		} else {
+			h.handleListPinnedSessions(conn, msg, agent)
+		}
+
 	default:
 		conn.SendResult(msg.RequestID, nil, &WireError{
 			Code:    "method_not_found",
@@ -306,6 +320,7 @@ func (h *Handlers) ocHandleListSessions(conn Connection, msg WireMessage, dir st
 		mapped = append(mapped, mapSession(s))
 	}
 	mapped = h.enrichSessionStatesForList(mapped, agent, h.getRunningMap(context.Background(), agent))
+	h.overlayPinnedState(mapped, "opencode")
 	sortSessionsByUpdatedAt(mapped)
 
 	// Slice the in-memory list by cursor+limit, identical to Codex/Claude.

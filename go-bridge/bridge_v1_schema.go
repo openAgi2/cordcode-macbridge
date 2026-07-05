@@ -3,7 +3,12 @@ package gobridge
 const (
 	BridgeProtocolName           = "cordcode-bridge"
 	BridgeProtocolVersion        = 1
-	BridgeProtocolSchemaRevision = "2026-05-07"
+	// BridgeProtocolSchemaRevision 标记 wire schema 修订。session pinning（pinnedAtMillis
+	// 字段 + set_session_pinned / list_pinned_sessions RPC + session_pin capability）是
+	// 非破坏性可选新增，不 bump major version，只 bump schemaRevision。hello 只在
+	// Protocol.Version 上 gating（hello_handler.go:97），schemaRevision 纯信息字段，
+	// 旧客户端不受影响。见 docs/protocol/bridge-v1.md「Session Pinning」。
+	BridgeProtocolSchemaRevision = "2026-07-05"
 )
 
 type BridgeV1Protocol struct {

@@ -21,6 +21,7 @@ import (
 	_ "github.com/openAgi2/cordcode-macbridge/agent/opencode"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/pinstore"
 )
 
 func Main() {
@@ -95,6 +96,16 @@ func Main() {
 		handlers.SetTranscriptIndexBaseDir(*dataDirPath + string(filepath.Separator) + "transcript-index")
 	}
 
+	// Process-wide session pin store (置顶). Lives under the bridge data dir so it shares
+	// lifetime/backup semantics with identity.json/config.json. Injected into every driver
+	// that implements core.SessionPinner (claudecode/codex/opencode) via opts["pin_store"];
+	// the handler also reads it for set_session_pinned / list_pinned_sessions.
+	var pinStore *pinstore.Store
+	if dir := strings.TrimSpace(*dataDirPath); dir != "" {
+		pinStore = pinstore.New(dir)
+		handlers.SetPinStore(pinStore)
+	}
+
 	agentAliases := map[string]string{
 		"claude":   "claudecode",
 		"opencode": "opencode",
@@ -118,6 +129,7 @@ func Main() {
 			openCodePass:      *ocPass,
 			codexBackend:      *codexBackend,
 			codexAppServerURL: *codexAppServerURL,
+			pinStore:          pinStore,
 		})
 
 		agent, err := core.CreateAgent(agentName, agentOpts)
@@ -688,6 +700,7 @@ type agentOptionsConfig struct {
 	openCodePass      string
 	codexBackend      string
 	codexAppServerURL string
+	pinStore          *pinstore.Store
 }
 
 func buildAgentOptions(id string, cfg agentOptionsConfig) map[string]any {
@@ -697,6 +710,7 @@ func buildAgentOptions(id string, cfg agentOptionsConfig) map[string]any {
 		"opencode_url":  cfg.openCodeURL,
 		"opencode_user": cfg.openCodeUser,
 		"opencode_pass": cfg.openCodePass,
+		"pin_store":     cfg.pinStore,
 	}
 
 	if id == "codex" {

@@ -148,6 +148,8 @@ export type BridgeRPCMethod =
   | "rename_session"
   | "share_session"
   | "archive_session"
+  | "set_session_pinned"
+  | "list_pinned_sessions"
   | "compress_context"
   | "check_pending_notifications"
   | "question_reply"
@@ -230,16 +232,59 @@ export interface BridgeListSessionsParams {
   cursor?: string;
 }
 
-/** Minimal session info returned by list_sessions/get_session. */
+/**
+ * Session info returned by list_sessions/get_session.
+ *
+ * This is the verified union of the two wire producers:
+ *   - sessionsToWire (go-bridge/handlers.go) for Claude/Codex, and
+ *   - mapSession (go-bridge/opencode-proxy.go) for OpenCode.
+ * Fields marked backend-specific are emitted only by the noted backend; all others
+ * are shared. Optional fields are omitted on the wire when unset.
+ */
 export interface BridgeSessionInfo {
   id: string;
   title: string;
+  /** Shared (sessionsToWire emits always; OpenCode emits when upstream provides). */
+  messageCount?: number;
+  /** Claude/Codex only (RFC3339 string from sessionsToWire). OpenCode uses createdAtMillis/updatedAtMillis. */
+  modifiedAt?: string;
+  /** Shared epoch-ms. */
+  updatedAtMillis: number;
+  /** Shared epoch-ms. NOTE: sessionsToWire currently sets createdAtMillis = ModifiedAt (not a real creation time). */
+  createdAtMillis: number;
+  /** Shared epoch-ms; present only when the session is archived. */
+  archivedAtMillis?: number;
+  /**
+   * Shared epoch-ms; present only when the session is pinned (置顶).
+   * Backed by the session_pin capability + set_session_pinned RPC. Represents when the
+   * user pinned the session, NOT the session's updatedAt. Pin/unpin MUST NOT alter
+   * updatedAtMillis. See bridge-v1.md「Session Pinning」.
+   */
+  pinnedAtMillis?: number;
+  /** Shared. OpenCode emits always; Claude/Codex emit when non-empty. */
   directory?: string;
+  /** Claude/Codex only. */
   modelId?: string;
-  providerId?: string;
+  /** Shared. */
   effectiveModelId?: string;
+  /** Claude/Codex only. */
+  providerId?: string;
+  /** Shared. */
   effectiveProviderId?: string;
+  /** Claude/Codex only. */
   reasoningEffort?: string;
+  /** OpenCode only (literal "opencode"). */
+  backendId?: string;
+  /** OpenCode only. */
+  projectId?: string;
+  /** OpenCode only. */
+  parentId?: string;
+  /** OpenCode only ("resumable" | "archived"). */
+  availability?: string;
+  /** OpenCode only (literal false). */
+  isReadOnlyHistory?: boolean;
+  /** OpenCode only (literal "idle", later overwritten by runtime-state enrichment). */
+  runtimeState?: string;
 }
 
 export interface BridgeListSessionsResult {

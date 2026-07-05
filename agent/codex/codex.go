@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/pinstore"
 )
 
 func init() {
@@ -45,6 +46,11 @@ type Agent struct {
 
 	// session list 缓存：walk 目录只做 stat，只重解析 mtime 变了的文件
 	sessionCache sessionListCache
+
+	// pinStore persists MacBridge-owned session pin (置顶) metadata for SessionPinner.
+	// Injected via opts["pin_store"] from go-bridge main; nil in unit tests that do not
+	// exercise pinning.
+	pinStore *pinstore.Store
 }
 
 func New(opts map[string]any) (core.Agent, error) {
@@ -100,6 +106,7 @@ func New(opts map[string]any) (core.Agent, error) {
 		cliBin:          cliBin,
 		cliExtraArgs:    cliExtraArgs,
 		activeIdx:       -1,
+		pinStore:        pinstore.FromOpts(opts),
 	}, nil
 }
 
@@ -427,7 +434,13 @@ func (a *Agent) DeleteSession(_ context.Context, sessionID string) error {
 	if path == "" {
 		return fmt.Errorf("session file not found: %s", sessionID)
 	}
-	return os.Remove(path)
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	// Drop bridge-owned pin metadata (置顶). Best-effort: a leftover entry would be pruned
+	// on the next list_pinned_sessions anyway.
+	a.cleanupPin(sessionID)
+	return nil
 }
 
 func appServerSessionTransport(appServerURLSet bool) string {

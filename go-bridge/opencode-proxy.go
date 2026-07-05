@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,32 @@ import (
 	"strings"
 	"time"
 )
+
+// OCHTTPError is returned by OpenCodeProxy.fetch for upstream HTTP >=400 responses.
+// It carries the status code so callers can distinguish a definitively-missing session
+// (404 → prune the pin) from a transient server error (5xx → fail the RPC). Network and
+// timeout errors from http.DefaultClient.Do remain *url.Error / context.DeadlineExceeded
+// and are distinguishable from OCHTTPError by type assertion. Callers MUST NOT branch on
+// strings.Contains(err.Error(), "HTTP 404"); use IsOpenCodeNotFound.
+type OCHTTPError struct {
+	Code int
+	Body string
+}
+
+func (e *OCHTTPError) Error() string {
+	return fmt.Sprintf("opencode HTTP %d: %s", e.Code, e.Body)
+}
+
+// IsOpenCodeNotFound reports whether err is an upstream OpenCode HTTP 404. Used by the
+// list_pinned_sessions handler to prune definitively-missing pinned sessions (a gone
+// session is pruned and omitted; a 5xx/timeout is a transient failure that fails the RPC).
+func IsOpenCodeNotFound(err error) bool {
+	var httpErr *OCHTTPError
+	if errors.As(err, &httpErr) {
+		return httpErr.Code == http.StatusNotFound
+	}
+	return false
+}
 
 // OpenCodeProxy talks directly to the opencode HTTP API (port 64667).
 // All methods mirror the old Node.js Unified-Bridge opencode-http driver.
@@ -79,7 +106,7 @@ func (p *OpenCodeProxy) fetch(path string, opts ...func(*fetchOpts)) (json.RawMe
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("opencode HTTP %d: %s", resp.StatusCode, string(raw[:minInt(len(raw), 200)]))
+		return nil, &OCHTTPError{Code: resp.StatusCode, Body: string(raw[:minInt(len(raw), 200)])}
 	}
 	return raw, nil
 }
@@ -473,6 +500,12 @@ func mapSession(s map[string]interface{}) map[string]interface{} {
 	}
 	if msgCount, ok := s["message_count"].(float64); ok {
 		result["messageCount"] = int(msgCount)
+	}
+	// pinnedAtMillis: emitted defensively when an upstream/enriched source provides it.
+	// OpenCode upstream sessions have no pin concept; real pin enrichment is applied by the
+	// list handler (ocHandleListSessions) post-mapSession from the bridge pin store.
+	if pinMs, ok := s["pinnedAtMillis"].(float64); ok && pinMs > 0 {
+		result["pinnedAtMillis"] = int64(pinMs)
 	}
 	return result
 }

@@ -359,6 +359,38 @@ type SessionArchiver interface {
 	ArchiveSession(ctx context.Context, sessionID string, archivedAt time.Time) (*AgentSessionInfo, error)
 }
 
+// SessionPinner is an optional interface for agents that support pinning (置顶) sessions.
+// Pin state is MacBridge-owned session metadata (NOT agent-local storage): each driver
+// persists it in its prescribed store (Claude → .cc-connect-session-meta sidecar;
+// Codex/OpenCode → bridge-owned pin index). deriveBackendCapabilities advertises the
+// backend-neutral "session_pin" capability when a driver implements this interface,
+// INDEPENDENT of SessionRenamer/SessionArchiver, so Codex/OpenCode (which lack
+// rename/archive) still advertise pinning.
+//
+// The interface is identity-only on purpose: it does NOT resolve session summaries.
+// Summary fields (title/messageCount/modifiedAt) are resolved by the go-bridge handler
+// from the real backend source (Claude catalog / Codex sessionListCache / OpenCode proxy)
+// when building AgentSessionInfo for the wire. This keeps the catalog/proxy/cache — all
+// of which live in go-bridge — out of the agent packages, and keeps the pin store limited
+// to identity + pinnedAt.
+//
+// SetSessionPinned is idempotent: pinned=true with pinnedAt records/overwrites the pin
+// (storing directory as the scope hint so later enrichment can resolve the summary, e.g.
+// OpenCodeProxy.getSession(id, dir)); pinned=false clears it. directory is the RPC request's
+// scope hint (the workDir/project dir); the driver still computes its own internal scope
+// (Claude sessionID-only, Codex CODEX_HOME, OpenCode normalized directory) for the store key.
+// It returns the resulting pin entry.
+//
+// ListPinnedSessions returns ALL pinned entries for this backend (NOT directory-scoped).
+// The handler enriches each entry and applies the prune-vs-fail rule: a definitively-missing
+// session (e.g. OpenCode upstream 404) is pruned and omitted; a transient upstream failure
+// fails the RPC rather than yielding a fabricated/partial summary. See
+// docs/protocol/bridge-v1.md「Session Pinning」.
+type SessionPinner interface {
+	SetSessionPinned(ctx context.Context, sessionID, directory string, pinned bool, pinnedAt time.Time) (*SessionPin, error)
+	ListPinnedSessions(ctx context.Context) ([]SessionPin, error)
+}
+
 // WorkDirSwitcher is an optional interface for agents that support runtime
 // work directory switching. The change takes effect on the next session start;
 // the current running session is terminated automatically by the engine.

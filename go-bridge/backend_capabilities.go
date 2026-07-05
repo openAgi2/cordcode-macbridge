@@ -46,6 +46,13 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 	if _, ok := agent.(core.SessionDeleter); ok {
 		caps = append(caps, "session_delete")
 	}
+	// session_pin is advertised INDEPENDENT of session_mutation (rename+archive). Codex and
+	// OpenCode do not implement rename/archive but do implement SessionPinner, so folding pin
+	// into session_mutation would silently hide pinning for them. See docs/protocol/bridge-v1.md
+	// 「Session Pinning」.
+	if _, ok := agent.(core.SessionPinner); ok {
+		caps = append(caps, "session_pin")
+	}
 	if id != "opencode" && id != "codex" {
 		if _, ok := agent.(core.ToolAuthorizer); ok {
 			caps = append(caps, "permission_resolve")

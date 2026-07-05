@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/pinstore"
 )
 
 var _ core.TodoProvider = (*Agent)(nil)
@@ -67,6 +68,11 @@ type Agent struct {
 	settingsModelsMtime time.Time
 
 	mu sync.RWMutex
+
+	// pinStore persists MacBridge-owned session pin (置顶) metadata for SessionPinner.
+	// Injected via opts["pin_store"] from go-bridge main. nil in unit tests that do not
+	// exercise pinning; the SessionPinner methods then return ErrPinStoreUnavailable.
+	pinStore *pinstore.Store
 }
 
 var claudeProviderManagedEnvVars = map[string]struct{}{
@@ -209,6 +215,7 @@ func New(opts map[string]any) (core.Agent, error) {
 		routerURL:        routerURL,
 		routerAPIKey:     routerAPIKey,
 		spawnOpts:        spawnOpts,
+		pinStore:         pinstore.FromOpts(opts),
 	}, nil
 }
 
@@ -724,7 +731,13 @@ func (a *Agent) DeleteSession(_ context.Context, sessionID string) error {
 	if err := os.Remove(path); err != nil {
 		return err
 	}
-	return removeClaudeSessionSidecar(projectDir, sessionID)
+	if err := removeClaudeSessionSidecar(projectDir, sessionID); err != nil {
+		return err
+	}
+	// Drop bridge-owned pin metadata (置顶). Best-effort: the transcript is already gone,
+	// so a leftover pin entry would be pruned on the next list_pinned_sessions anyway.
+	a.cleanupPin(sessionID)
+	return nil
 }
 
 func scanSessionMeta(path string) (string, int) {

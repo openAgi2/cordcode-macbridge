@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/pinstore"
 )
 
 func init() {
@@ -42,6 +43,11 @@ type Agent struct {
 	persistentModelCache *opencodePersistentModelCache
 	refreshingModelCache bool
 	mu                   sync.RWMutex
+
+	// pinStore persists MacBridge-owned session pin (置顶) metadata for SessionPinner.
+	// Injected via opts["pin_store"] from go-bridge main; nil in unit tests that do not
+	// exercise pinning.
+	pinStore *pinstore.Store
 }
 
 type opencodePersistentModelCache struct {
@@ -114,6 +120,7 @@ func New(opts map[string]any) (core.Agent, error) {
 		activeIdx:            -1,
 		modelCachePath:       modelCachePath,
 		persistentModelCache: persistentModelCache,
+		pinStore:             pinstore.FromOpts(opts),
 	}, nil
 }
 
@@ -522,6 +529,9 @@ func (a *Agent) DeleteSession(_ context.Context, sessionID string) error {
 	if out, err := c.CombinedOutput(); err != nil {
 		return fmt.Errorf("opencode: delete session %s: %w: %s", sessionID, err, strings.TrimSpace(string(out)))
 	}
+	// Drop bridge-owned pin metadata (置顶). Best-effort: a leftover entry would be pruned
+	// on the next list_pinned_sessions anyway.
+	a.cleanupPin(sessionID)
 	return nil
 }
 

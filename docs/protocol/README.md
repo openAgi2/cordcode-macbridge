@@ -12,7 +12,7 @@ decisions should be reviewed against this MacBridge copy first.
 
 | Protocol | Name | Version | Schema revision |
 | --- | --- | ---: | --- |
-| Direct bridge | `cordcode-bridge` | 1 | `2026-05-07` |
+| Direct bridge | `cordcode-bridge` | 1 | `2026-07-05` |
 | Relay envelope | `cccode-relay` | 1 | `2026-05-24-r1` |
 
 ## Source Of Truth
