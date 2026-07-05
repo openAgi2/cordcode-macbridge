@@ -49,3 +49,12 @@ func isProcessRunning(pid int) bool {
 	return true
 }
 
+// verifyClaudeProcessIdentity is the PID-reuse defence hook on Windows.
+// The CordCode product runs on macOS (relay-server on Linux); Windows is built
+// only for editor/CI portability and has no Claude process to verify against,
+// so this fails open (returns true). Liveness is still checked by the caller
+// via procAlive before this runs.
+func verifyClaudeProcessIdentity(pid int, expectCwd string) bool {
+	return true
+}
+

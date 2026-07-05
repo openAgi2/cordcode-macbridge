@@ -266,3 +266,25 @@ iOS 显示的是**修复前持久化的本地缓存**，两层：
   `get_session_messages` 的 sessionID/response_bytes/result_count；对目标 session 可写临时 Go 测试
   调 `LoadClaudeRichHistoryFromReader` 对真实 JSONL 取证。
 
+## 2026-07-05 Claude session PID 复用 latent bug（已修）
+
+- **现象假设**：某 Claude session 的 stub（`~/.claude/sessions/<pid>.json`，含 `sessionId/pid/cwd`）
+  因 claude 异常退出未清理而残留；OS 把该 PID 复用给无关进程。`GetRunningSessionIDs` / `LiveSessionProcess`
+  原本只用 `kill(pid, 0)` 判活 → stale session 被误判 running → `enrichSessionStateWithAgent` 在
+  `resume_session`/`list_sessions` 响应里报 `runtimeState=running` → iOS 进入 phantom executing
+  （输入框锁"执行中"、status strip 不消失）。
+- **07-05 复现未触发**：那次是 external turn（用户在 Mac Claude 窗口打字），且目标 session `16c63341`
+  的 stub 当时正确缺失（`~/.claude/sessions/` 只有其它 PID），所以 `GetRunningSessionIDs` 正确报 idle。
+  但代码审查发现 `agent/claudecode/proc_unix.go:49 isProcessRunning` 是纯 `kill(pid,0)`，不校验进程身份，
+  是真实 latent bug。
+- **修复**：`agent/claudecode/proc_seam.go` 新增可注入 seam `procIdentityAlive(pid, expectCwd)`，在
+  `procAlive`（liveness）之上叠加 `verifyClaudeProcessIdentity`：`ps -p <pid> -o comm=` 校验可执行名含
+  `claude`，`/proc/<pid>/cwd` readlink（Linux）/ `lsof -a -p <pid> -d cwd -Fn`（macOS）校验 cwd 与 stub 一致；
+  任一强不匹配 → 非 live；平台探测失败 fail-open。`LiveSessionProcess` 和 `GetRunningSessionIDs` 改用该 seam。
+  `IsProcessAlive`（公共契约，`go-bridge/handlers_relay.go:263` file-relay 每 tick 复查 cached PID 用）保留
+  纯活性不动——那时身份已在 relay 启动时确认过一次，复用 PID 顶多多 silent watch 一个 live-idle TTL（90s），
+  不发伪事件。回归测试 `TestGetRunningSessionIDs_PIDReuseNotRunning`。
+- **排查要点**：报告"iOS phantom executing"时，先查 `~/.claude/sessions/*.json` 里目标 sessionId 的 stub
+  是否残留 + 该 PID 现在是否仍是 claude（`ps -p <pid> -o comm,cwd`）。Mac 日志看 `enrichSessionStateWithAgent`
+  返回的 runtimeState 需对照 transcript 是否真在跑（`isSessionExecutingCached`）。
+

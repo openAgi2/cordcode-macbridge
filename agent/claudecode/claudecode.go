@@ -651,7 +651,7 @@ func (a *Agent) LiveSessionProcess(ctx context.Context, sessionID string) (core.
 			return core.LiveSessionProcess{
 				SessionID: stub.SessionID,
 				PID:       stub.PID,
-				Live:      a.IsProcessAlive(ctx, stub.PID),
+				Live:      procIdentityAlive(stub.PID, stub.Cwd),
 			}, nil
 		}
 	}
@@ -682,7 +682,7 @@ func (a *Agent) GetRunningSessionIDs(ctx context.Context) (map[string]bool, erro
 		default:
 		}
 
-		if a.IsProcessAlive(ctx, stub.PID) {
+		if procIdentityAlive(stub.PID, stub.Cwd) {
 			// Default to false: if we cannot locate and inspect the transcript file,
 			// we cannot prove the session is still executing.  The old default of
 			// true caused sessions whose .jsonl was inaccessible (wrong project dir,

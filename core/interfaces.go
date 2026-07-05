@@ -410,6 +410,9 @@ type RunningSessionLister interface {
 }
 
 // LiveSessionProcess describes the backing process for one backend session.
+// Live is identity-verified: true only when PID is alive AND the live process
+// still matches the recorded session (executable is Claude, cwd matches), so a
+// reused PID cannot resurrect a stale session as live.
 type LiveSessionProcess struct {
 	SessionID string
 	PID       int
@@ -417,8 +420,10 @@ type LiveSessionProcess struct {
 }
 
 // LiveSessionLister is the live-only counterpart to RunningSessionLister.
-// It reports PID liveness only, without transcript inspection and without
-// executing-state classification.
+// LiveSessionProcess reports PID liveness AND process identity (executable +
+// cwd), without transcript inspection and without executing-state
+// classification. IsProcessAlive reports PID liveness only and is meant for
+// cheap per-tick rechecks of a PID already identity-verified at relay start.
 type LiveSessionLister interface {
 	LiveSessionProcess(ctx context.Context, sessionID string) (LiveSessionProcess, error)
 	IsProcessAlive(ctx context.Context, pid int) bool

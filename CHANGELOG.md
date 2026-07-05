@@ -8,6 +8,12 @@
 
 ## [Unreleased]
 
+### 2026-07-05 — 修复 Claude session PID 复用导致 stale session 误判 running
+
+- **改了什么**：`agent/claudecode` 判定 Claude session 是否 running 的 PID 活性检查从纯 `kill(pid, 0)` 升级为 PID 身份校验。新增可注入 seam `procIdentityAlive(pid, expectCwd)`：在 PID 存活之上，再用 `ps` 校验可执行名包含 `claude`、用 `/proc/<pid>/cwd`（Linux）或 `lsof`（macOS）校验 cwd 与 stub 记录一致；任一强不匹配（PID 被复用为非 claude 进程，或 cwd 不同）即判非 live。`LiveSessionProcess` 和 `GetRunningSessionIDs` 改用该 seam，`IsProcessAlive`（file-relay 每 tick 的 cached PID 复查）保留纯活性语义不动。身份校验对平台探测失败 fail-open（不因 ps/lsof 暂时不可用而误判 idle），PID-reuse 防线只依赖强不匹配分支。Windows 仅为编辑器/CI 可移植性构建，fail-open 占位。
+- **有何提升**：某个 Claude session 的 stub 残留（claude 异常退出未清理）且该 PID 被 OS 复用给无关进程时，不再被误判为 running——避免 iOS 因此进入 phantom executing（输入框锁"执行中"、status strip 不消失）。本次 07-05 external-turn 复现因 stub 正确缺失未触发，但这是真实 latent bug。新增 `TestGetRunningSessionIDs_PIDReuseNotRunning` 回归（active transcript + 复用 PID → 非 running；身份恢复后 → running 作对照）。
+- 改动限于 MacBridge：`agent/claudecode/proc_seam.go`（新 seam）、`agent/claudecode/proc_unix.go` + `proc_windows.go`（身份校验）、`agent/claudecode/claudecode.go`（两处调用点改用 seam）、`core/interfaces.go`（`LiveSessionLister` 文档说明 `Live` 现为身份校验）。不动 wire protocol、iOS、relay，不改 `IsProcessAlive` 公共契约。
+
 ### 2026-07-05 — 修复 Claude 外部 turn 在 iOS 上滞后一轮显示
 
 - **改了什么**：Claude Code 会话在 Mac 端外部进程（Claude App / Terminal）里继续对话时，MacBridge 的 transcript file relay 不再因为初始 snapshot 看起来 idle 就立即退出。现在 relay 会用 live-only PID 活性判断区分「已完成死进程」和「仍活着但 transcript 暂未增长」：死进程仍立即广播 idle 并退出；活进程进入轮询，看到新 user 行会发 `turn_started`，看到 final assistant 会发 `turn_completed` + idle 并退出。初始扫描改为 reader-based classifier，能在 relay 重启后识别已经写入的 user 行并补发 `turn_started`，避免 live-idle TTL 空窗吞掉 per-turn anchor；中断标记会完成当前 turn 但继续 watch；meta-only 增长不会重复发事件；进程死亡会有界收口。
