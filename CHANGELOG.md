@@ -8,6 +8,12 @@
 
 ## [Unreleased]
 
+### 2026-07-05 — 修复 Claude list_sessions 高 CPU：list 路径不再 per-row 解析 transcript
+
+- **改了什么**：iOS 反复刷新 Claude 会话列表时，`cordcode-bridge-runtime` 会因 `handleListSessions → enrichSessionStateWithAgent → GetRunningSessionIDs` 对每个列出的 session 重复解析 transcript（事件中 `wire_mapping_ms` 一度达 9.5–11.8s、144 session × ~116MB）而逼近单核 100%。现在 list 路径改为 list-safe 批量 enrichment：`getRunningMap(ctx, agent)` 每请求一次性算出 running 集，`enrichSessionStatesForList` 只用 registry + running map 给行打 `runtimeState`，**不再对任何行打开/解析 transcript、不再 `markIdle`、不再写 `/tmp/bridge-sessions.json`**。`GetRunningSessionIDs` 的结果用 2s TTL 缓存（burst 只算一次），MacBridge 拥有的 turn 状态迁移立即失效缓存；外部启动的 Claude turn 在 ≤1 个 TTL 窗口后探测到（仍由 live-PID 有界的 `GetRunningSessionIDs` 负责，未引入后台扫描器）；`isSessionExecuting` 结果按 `sessionID+path+size+mtime`（size 与 mtime 同时比较）缓存，把冷缓存代价收敛到「变化的 live transcript 数」。3 个 list 调用点（Claude / 非 Claude / OpenCode）全部迁移到批量 API；`reasoningEffort` 注入保留；single-session detail 路径（`get_session`/`get_session_messages`）仍保留更深的 transcript 检视。
+- **有何提升**：list_sessions 在 catalog + running-map 缓存命中时不再花数秒在 `wire_mapping_ms`（144 session 的 fixture 实测 cold≈56ms / cache-hit≈42ms / per-row transcript 打开数=0），runtime 不再因 iOS 刷新而逼近单核；completed session 不再因 list 路径的 stale-running 校验被误判；外部 Claude turn 仍能在 TTL 内被发现。新增定向测试覆盖零 per-row transcript 打开、running map 每请求一次、TTL/失效、外部 turn（可注入 PID 活性 seam）、transcript 缓存指纹与 large-K 冷缓存护栏。
+- 改动限于 MacBridge（`go-bridge/handlers.go`、`go-bridge/handlers_opencode.go`、`go-bridge/handlers_relay.go`、`go-bridge/types.go`、新增 `go-bridge/running_map_cache.go` + `go-bridge/transcript_probe.go`、`agent/claudecode/claudecode.go`、新增 `agent/claudecode/transcript_exec_cache.go` + `agent/claudecode/proc_seam.go`），不动 wire protocol、iOS 或 relay。
+
 ### 2026-07-04 — 清洗 Claude Code 斜杠命令在 iOS 消息页的协议标签泄漏
 
 - **改了什么**：Claude Code 模式下，用户在 Mac 端执行 `/handoff-doc`、`/takeover`、`/model`、`/compact` 等斜杠命令时，Claude CLI 注入的内部协议标签（`<command-message>`、`<command-name>`、`<command-args>`、`<local-command-stdout>`、`<local-command-caveat>`）和 skill 文档全文（`Base directory for this skill: ... # Mission Takeover ...`）原本会原样作为用户消息出现在 iOS 消息页。现在 `agent/claudecode` 的 rich history 与会话列表预览统一清洗：斜杠命令收敛为简洁的 `/cmd args摘要`（args 按 rune 计数截断到 120，不切断多字节字符），`<local-command-stdout|stderr|caveat>` 等纯协议回显整条过滤，skill 文档注入按内容特征可靠过滤。

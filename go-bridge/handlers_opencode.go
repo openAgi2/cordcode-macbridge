@@ -112,13 +112,7 @@ func (h *Handlers) enrichSessionStateWithAgent(mapped map[string]interface{}, ag
 		// 若 session 不在结果中（进程已退出、session 文件已清理），回退到直接读取
 		// transcript 文件判定。这修复了进程退出后 registry 旧 "running" 状态泄漏的问题。
 		if agent != nil && agent.Name() == "claudecode" {
-			if effort, _ := mapped["reasoningEffort"].(string); strings.TrimSpace(effort) == "" {
-				if re, ok := agent.(core.ReasoningEffortSwitcher); ok {
-					if effort := normalizeClaudeRuntimeEffort(re.GetReasoningEffort()); effort != "" {
-						mapped["reasoningEffort"] = effort
-					}
-				}
-			}
+			h.injectClaudeReasoningEffort(mapped, agent)
 			usedTranscriptFallback := false
 			if lister, ok := agent.(core.RunningSessionLister); ok {
 				runningMap, err := lister.GetRunningSessionIDs(context.TODO())
@@ -172,6 +166,107 @@ func (h *Handlers) enrichSessionStateWithAgent(mapped map[string]interface{}, ag
 	return mapped
 }
 
+// getRunningMap returns the once-per-request snapshot of running session IDs for
+// agent, or nil when agent is not a core.RunningSessionLister or the lookup
+// errored. List handlers call this once and pass the result to
+// enrichSessionStatesForList so GetRunningSessionIDs is never invoked once per
+// listed session row.
+//
+// For the Claude agent the lookup is served by the short-TTL runningMapCache
+// (Fix 3): within a TTL window a burst of list_sessions requests reuses one
+// GetRunningSessionIDs call, and MacBridge-tracked turn transitions invalidate
+// the cache immediately via the sessionRegistry state-change callback. For any
+// other lister the thin uncached lookup is used (only Claude implements
+// RunningSessionLister in production today).
+func (h *Handlers) getRunningMap(ctx context.Context, agent core.Agent) map[string]bool {
+	if agent == nil {
+		return nil
+	}
+	if agent.Name() == "claudecode" {
+		return h.runningMap.get(ctx)
+	}
+	lister, ok := agent.(core.RunningSessionLister)
+	if !ok {
+		return nil
+	}
+	running, err := lister.GetRunningSessionIDs(ctx)
+	if err != nil || running == nil {
+		return nil
+	}
+	return running
+}
+
+// enrichSessionStatesForList is the list-safe batch enrichment used by every
+// list_sessions handler. It is read-only and side-effect free with respect to
+// both the filesystem and the session registry:
+//   - it never opens/parses transcript files for any listed row (no
+//     findClaudeSessionFile / detectClaudeTranscriptState / isSessionExecuting);
+//   - it never mutates the registry (no h.sessions.markIdle);
+//   - it never writes debug files.
+//
+// Precise running state comes from the precomputed runningMap (itself bounded by
+// live Claude PID count via GetRunningSessionIDs). When runningMap is non-nil it
+// is authoritative: a session absent from it is reported idle even if a stale
+// registry entry claims running, which keeps completed sessions from appearing
+// stuck. When runningMap is nil (non-lister agent, e.g. Codex/OpenCode today, or
+// lookup error) the registry's last-known state is used as a fallback. Deeper
+// per-session inspection belongs to single-session detail paths
+// (enrichSessionStateWithAgent) and to GetRunningSessionIDs — never to per-row
+// list enrichment.
+func (h *Handlers) enrichSessionStatesForList(sessions []map[string]interface{}, agent core.Agent, runningMap map[string]bool) []map[string]interface{} {
+	claude := agent != nil && agent.Name() == "claudecode"
+	for i, s := range sessions {
+		if s == nil {
+			continue
+		}
+		if claude {
+			h.injectClaudeReasoningEffort(s, agent)
+		}
+		sessions[i] = h.applyListRuntimeState(s, runningMap)
+	}
+	return sessions
+}
+
+// applyListRuntimeState sets runtimeState on mapped from the registry and the
+// precomputed runningMap only. It does not touch the filesystem and does not
+// mutate the registry. When runningMap is non-nil it is authoritative.
+func (h *Handlers) applyListRuntimeState(mapped map[string]interface{}, runningMap map[string]bool) map[string]interface{} {
+	if mapped == nil {
+		return nil
+	}
+	state := "idle"
+	if sessionID, _ := mapped["id"].(string); sessionID != "" {
+		if ts, ok := h.sessions.get(sessionID); ok && string(ts.state) != "" {
+			state = string(ts.state)
+		}
+		if runningMap != nil {
+			if runningMap[sessionID] {
+				state = "running"
+			} else {
+				state = "idle"
+			}
+		}
+	}
+	mapped["runtimeState"] = state
+	return mapped
+}
+
+// injectClaudeReasoningEffort fills reasoningEffort from the agent's in-memory
+// switcher when the session metadata did not carry one. Cheap getter only; safe
+// for the list hot path. Mutates mapped in place when non-nil.
+func (h *Handlers) injectClaudeReasoningEffort(mapped map[string]interface{}, agent core.Agent) {
+	if mapped == nil || agent == nil {
+		return
+	}
+	if effort, _ := mapped["reasoningEffort"].(string); strings.TrimSpace(effort) == "" {
+		if re, ok := agent.(core.ReasoningEffortSwitcher); ok {
+			if effort := normalizeClaudeRuntimeEffort(re.GetReasoningEffort()); effort != "" {
+				mapped["reasoningEffort"] = effort
+			}
+		}
+	}
+}
+
 // ── ocProxy: list_sessions ────────────────────────────────────────────────────
 
 // openCodeSessionFetchLimit is the single upstream fetch budget. OpenCode server
@@ -208,8 +303,9 @@ func (h *Handlers) ocHandleListSessions(conn Connection, msg WireMessage, dir st
 	agent, _ := h.getAgent(msg.BackendID)
 	mapped := make([]map[string]interface{}, 0, len(page.Sessions))
 	for _, s := range page.Sessions {
-		mapped = append(mapped, h.enrichSessionStateWithAgent(mapSession(s), agent))
+		mapped = append(mapped, mapSession(s))
 	}
+	mapped = h.enrichSessionStatesForList(mapped, agent, h.getRunningMap(context.Background(), agent))
 	sortSessionsByUpdatedAt(mapped)
 
 	// Slice the in-memory list by cursor+limit, identical to Codex/Claude.

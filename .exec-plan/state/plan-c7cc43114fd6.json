@@ -1,0 +1,474 @@
+{
+  "version": 1,
+  "project_root": "/Users/jacklee/Projects/cordcode-macbridge",
+  "plan_file": "../cordcode-ios/docs/2026-07-05-macbridge-claude-list-sessions-runtime-cpu-plan.md",
+  "state_store": {
+    "canonical_path": ".exec-plan/state/plan-c7cc43114fd6.json",
+    "legacy_path": null,
+    "origin": "new",
+    "migrated_from": null,
+    "migrated_at": null
+  },
+  "queue_policy": {
+    "todo_md_role": "informational-only",
+    "completion_gate": "proof-carrying-impl-tests-regression",
+    "phase_done_rule": "all-required-todos-done",
+    "audit_rule": "unsupported-done-must-downgrade",
+    "start_exit_rule": "internal-audit-before-success",
+    "audit_failure_policy": "light-repairable-heavy-external-blocker",
+    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+    "session_mirror_policy": "best-effort-host-optional",
+    "invocation_policy": "slash-or-natural-language-equivalent"
+  },
+  "report_policy": {
+    "auto_write_completion_report": true,
+    "report_directory": "docs",
+    "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+    "write_when": "all-required-todos-proven-done",
+    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  },
+  "reports": {
+    "completion_report_path": "docs/2026-07-05-macbridge-claude-list-sessions-runtime-cpu-plan完成情况.md",
+    "completion_report_status": "missing",
+    "last_generated_at": null,
+    "based_on_queue_hash": null
+  },
+  "plan_baseline": {
+    "plan_title": "MacBridge Claude list_sessions Runtime CPU Plan",
+    "plan_date": "2026-07-05",
+    "plan_repo": "sibling iOS repo (cordcode-ios); implementation target is cordcode-macbridge",
+    "reviews_folded_in": [
+      "docs/2026-07-05-macbridge-claude-list-sessions-runtime-cpu-plan-review.md (r1)",
+      "docs/2026-07-05-macbridge-claude-list-sessions-runtime-cpu-plan-review-r2.md",
+      "docs/2026-07-05-macbridge-claude-list-sessions-runtime-cpu-plan-review-r3.md",
+      "docs/2026-07-05-macbridge-claude-list-sessions-runtime-cpu-plan-review-r4.md"
+    ],
+    "in_scope_fixes": [
+      "Step 0: remove /tmp/bridge-sessions.json debug dump (measurement pollutant inside wire_mapping_ms)",
+      "Fix 1: list-safe enrichment — no transcript fallback / no markIdle from list_sessions for any listed row (incl. stale-running registry entries); preserve reasoningEffort injection; split list-safe batch API from richer per-session detail path",
+      "Fix 2: hoist running map — getRunningMap(ctx, agent) computed once per list_sessions, wired into all 3 list call sites (Claude / non-Claude / OpenCode)",
+      "Fix 3: short-TTL (1-3s) cache for Claude GetRunningSessionIDs with invalidation hooks (send_message / turn_completed / abort / process exit); preserves bounded external-turn detection",
+      "Fix 5: transcript-state cache keyed by sessionID+path+size+mtime inside isSessionExecuting; guards large-K cold cache"
+    ],
+    "explicitly_deferred_per_not_adopted": [
+      "Fix 6 (prefer owned runtime state for MacBridge turns) — long-term architecture; short-term CPU win overlaps Fix 1; High complexity, not required for this execution",
+      "Fix 7 (list-level request coalescing) — follow-up guardrail only; catalog already has snapshot-level in-flight de-dup; not a required implementation item",
+      "Removing transcript inference entirely — cold recovery and externally launched Claude turns still need bounded transcript/file inference"
+    ],
+    "key_constraints": [
+      "Hard rule: list path must not open/parse transcripts for any listed session row (idle, running, or stale-running registry entry). Per-row transcript opens == 0.",
+      "Running-map cold cache may open at most K transcripts (K = live Claude PID count, usually 1-3) via GetRunningSessionIDs; warm cache opens 0.",
+      "list_sessions must not call h.sessions.markIdle.",
+      "list_sessions must not write any /tmp file.",
+      "Precise GetRunningSessionIDs semantics preserved (live-but-idle Claude process must NOT be marked running); no PID-only running map.",
+      "No new background transcript scanner goroutine.",
+      "Transcript fingerprint must compare size AND mtime together; mtime alone is forbidden.",
+      "Double-cache-hit perf bound: request_total_ms < 200ms; do NOT apply threshold to cold-cache path.",
+      "reasoningEffort injection (handlers_opencode.go:115-121) must be preserved in list-safe path."
+    ]
+  },
+  "updated_at": "2026-07-05T02:11:23Z",
+  "closure": {
+    "status": "blocked-external",
+    "basis": "15/16 todos done. All 13 required autonomous todos (impl+tests+automated-regression+docs+build/install) proven done and re-verified via full suite re-run. The only remaining required todo is phase5-user-validation-regression — owner real-device / real-Claude-process validation, gated by explicit owner authorization per CLAUDE.md (真机/UI 需 owner 授权). Not auto-completable; cannot be mocked or substituted with one-sided success.",
+    "acceptance": "Completion report withheld until phase5 checklist is owner-validated; queue not fully proven done, so no positive report written yet (per report_policy)."
+  },
+  "todos": [
+    {
+      "id": "phase0-dump-impl",
+      "title": "Step 0 — remove /tmp/bridge-sessions.json debug write",
+      "description": "In go-bridge/handlers.go Claude handleListSessions, delete the unconditional debug dump at handlers.go:1923-1926 (the `json.MarshalIndent(result...)` + `os.WriteFile(\"/tmp/bridge-sessions.json\", data, 0644)` block inside the wire_mapping timing window). Do NOT relocate it to another /tmp/* path or os.Stdout. The surrounding mappingStarted/metrics.wireMapping timing must remain; only the dump disappears. This is a pure deletion inside the production request path.",
+      "status": "done",
+      "phase": "phase0-cleanup",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "Plan §'Recommended MacBridge Changes' Step 0; r1 P1 adopted",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Deleted the unconditional json.MarshalIndent + os.WriteFile(\"/tmp/bridge-sessions.json\",...) block inside Claude handleListSessions wire_mapping window (handlers.go ~1923-1926). Surrounding timing preserved. rg confirms zero remaining references; go build ./go-bridge passes.",
+        "artifacts": [
+          "go-bridge/handlers.go (Claude handleListSessions)",
+          "cmd:rg -n bridge-sessions.json go-bridge/ -> gone",
+          "cmd:go build ./go-bridge -> ok"
+        ],
+        "checked_at": "2026-07-05T01:39:20Z"
+      }
+    },
+    {
+      "id": "phase0-dump-tests",
+      "title": "Step 0 — assert list_sessions writes no /tmp file",
+      "description": "Add a Go test in go-bridge that exercises Claude handleListSessions (or the Claude list path) and asserts no file at /tmp/bridge-sessions.json is created or written by list_sessions, and that no os.WriteFile to any /tmp/* path originates from the list path. Use a temp HOME / temp dir if needed to isolate. Pattern can mirror existing TestClaudeListSessionsUsesRuntimeEffortWhenMetadataMissing (go-bridge/handlers_test.go:2816) for harness setup. Targeted run: go test ./go-bridge -run 'ListSessions|BridgeSessionsDump|NoTmpDump'.",
+      "status": "done",
+      "phase": "phase0-cleanup",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-dump-impl"
+      ],
+      "source": "Plan §'Test Plan': list_sessions does not write any /tmp file",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "summary": "Added TestClaudeListSessionsDoesNotWriteTmpDump in go-bridge/handlers_test.go: fires 3 Claude list_sessions requests against the catalog harness and asserts /tmp/bridge-sessions.json is never created. Passes. Mirrors TestClaudeListSessionsUsesRuntimeEffortWhenMetadataMissing harness.",
+        "artifacts": [
+          "go-bridge/handlers_test.go::TestClaudeListSessionsDoesNotWriteTmpDump",
+          "cmd:go test ./go-bridge -run TestClaudeListSessionsDoesNotWriteTmpDump|TestClaudeListSessionsUsesRuntimeEffortWhenMetadataMissing -count=1 -> ok 0.748s"
+        ],
+        "checked_at": "2026-07-05T01:41:55Z"
+      }
+    },
+    {
+      "id": "phase0-dump-regression",
+      "title": "Step 0 — regression (no separate perf surface)",
+      "description": "Placeholder regression slot for the debug-dump removal. The dump removal has no independent behavioral/perf regression surface beyond the no-write assertion: behavioral coverage is phase0-dump-tests, and the before/after wire_mapping_ms re-baseline is captured concretely at phase1-listsafe-regression (the 144-session fixture's double-cache-hit <200ms bound). Marking required=false so it does not gate phase completion.",
+      "status": "done",
+      "phase": "phase0-cleanup",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-dump-tests"
+      ],
+      "source": "Plan §Step 0 acceptance (before/after measurements taken after removal) — folded into phase1-listsafe-regression",
+      "notes": "na_reason: pure debug-output removal; behavioral coverage == phase0-dump-tests; perf re-baseline == phase1-listsafe-regression.",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "not-applicable",
+        "summary": "required:false per na_reason — pure debug-output removal; behavioral coverage in phase0-dump-tests, perf re-baseline folded into phase1-listsafe-regression.",
+        "artifacts": [],
+        "na_reason": "Pure debug-output removal with no independent regression surface. 'No /tmp write' is asserted in phase0-dump-tests; the before/after wire_mapping_ms baseline is measured in phase1-listsafe-regression (144-session double-cache-hit <200ms bound).",
+        "checked_at": "2026-07-05T01:41:55Z"
+      }
+    },
+    {
+      "id": "phase1-listsafe-impl",
+      "title": "Fix 1+2 — list-safe batch enrichment + hoisted running map",
+      "description": "Primary CPU fix. In go-bridge: (1) Add getRunningMap(ctx, agent) that does the core.RunningSessionLister type-assertion ONCE per request and returns an empty/nil map for non-listers (Codex/OpenCode today fail the assertion). (2) Add enrichSessionStatesForList(sessions, agent, runningMap) — a batch list-safe enricher that: uses h.sessions registry state + the precomputed runningMap + existing reasoningEffort injection (handlers_opencode.go:115-121, must be preserved); reports idle/unknown for sessions absent from runningMap; does NOT call findClaudeSessionFile, detectClaudeTranscriptState, or isSessionExecuting for any listed row (including stale-running registry entries); does NOT call h.sessions.markIdle; does NOT write debug files. (3) Move the THREE list call sites to the batch API: handlers.go:1898 (non-Claude handleListSessions), handlers.go:1921 (Claude handleListSessions), handlers_opencode.go:211 (ocHandleListSessions). Each list request computes runningMap exactly once and passes it to enrichSessionStatesForList. (4) KEEP enrichSessionStateWithAgent as-is for single-session detail paths (handlers.go:1828,1843,2577; handlers_opencode.go:97,248) so create/resume/get semantics are not weakened. The thin getRunningMap wrapper is the seam Fix 3 later replaces with a TTL-cached implementation.",
+      "status": "done",
+      "phase": "phase1-listsafe",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-dump-impl"
+      ],
+      "source": "Plan §'Recommended MacBridge Changes' Fix 1 + Fix 2; r1/r2/r3 adopted (three list call sites, getRunningMap shape, reasoningEffort preserved, stale-running branch covered)",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Added getRunningMap + enrichSessionStatesForList + applyListRuntimeState + injectClaudeReasoningEffort (handlers_opencode.go). List-safe path uses precomputed runningMap as authoritative; reports idle for absent sessions incl. stale-running registry rows; never opens transcripts, never calls markIdle, never writes /tmp. Migrated all 3 list call sites (handlers.go:1897 non-Claude, handlers.go:1918 Claude, handlers_opencode.go:299 OpenCode). Detail paths (handlers.go:1828/1843/2570, handlers_opencode.go:97/335) keep richer enrichSessionStateWithAgent. Refactored per-row enricher to share injectClaudeReasoningEffort (DRY).",
+        "artifacts": [
+          "go-bridge/handlers_opencode.go (new fns + shared effort inject)",
+          "go-bridge/handlers.go:1897,1918 (non-Claude+Claude list sites)",
+          "go-bridge/handlers_opencode.go:299 (OpenCode list site)",
+          "cmd:go build ./go-bridge -> ok",
+          "cmd:go vet ./go-bridge -> clean",
+          "cmd:go test ./go-bridge/... ./agent/claudecode/... -count=1 -> ok (12.7s)"
+        ],
+        "checked_at": "2026-07-05T01:45:20Z"
+      }
+    },
+    {
+      "id": "phase1-listsafe-tests",
+      "title": "Fix 1+2 — list-safe enrichment test suite",
+      "description": "Add Go tests in go-bridge (and agent/claudecode where needed) covering: (a) handleListSessions calls getRunningMap(ctx, agent) exactly once per request and reaches agent.GetRunningSessionIDs at most once (Claude) / zero times (non-Claude lister-assertion fails); (b) all THREE list paths (Claude / non-Claude / OpenCode) use the batch list-safe API; (c) list-safe enrichment preserves reasoningEffort injection; (d) list_sessions does NOT call detectClaudeTranscriptState for any listed row; (e) HARD: list_sessions opens 0 transcripts for listed rows on catalog-cache-hit, including idle + running + stale-running registry entries — instrument a seam around transcript open / detectClaudeTranscriptState / isSessionExecuting and count calls (one idle + one genuine running + one stale-running row → zero per-row transcript opens); (f) running-map cold cache opens at most K transcripts, warm cache opens 0; (g) list_sessions does NOT call h.sessions.markIdle; (h) session absent from runningMap does not trigger transcript fallback for any listed row. Add a counting seam (e.g. a package-level hook or an injectable opener) so the zero-open assertion is deterministic. Targeted run: go test ./go-bridge ./agent/claudecode -run 'RunningSession|ListSessions|SessionState|EnrichList'.",
+      "status": "done",
+      "phase": "phase1-listsafe",
+      "kind": "tests",
+      "depends_on": [
+        "phase1-listsafe-impl"
+      ],
+      "source": "Plan §'Test Plan' bullets (list-safe + hoist + zero per-row opens)",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "summary": "Added go-bridge/list_enrich_test.go with 5 tests: (1) enrichSessionStatesForList_NoTranscript_NoMutation — unit proof of no-transcript/no-mutation/effort/correct-states incl. stale-running row; (2) GetRunningMap_NonListerReturnsNil; (3) ApplyListRuntimeState_NilRunningMapFallsBackToRegistry; (4) ListSessionsClaude_RunningMapComputedOncePerRequest — Fix-2 hoisting + hard zero-transcript-open via real handleListSessions over 3 sessions incl. stale-running; (5) ListSessionsOpenCode_NoTranscript_NoMutation — third list call site. Added test-only transcriptStateProbe seam (transcript_probe.go) instrumented into findClaudeSessionFile + detectClaudeTranscriptState; added fakeAgent.runningCalls counter. All pass; full go-bridge + claudecode suites green.",
+        "artifacts": [
+          "go-bridge/list_enrich_test.go",
+          "go-bridge/transcript_probe.go",
+          "go-bridge/handlers_test.go (fakeAgent.runningCalls)",
+          "cmd:go test ./go-bridge -run EnrichSessionStatesForList|GetRunningMap|ApplyListRuntimeState|ListSessionsClaude_RunningMap|ListSessionsOpenCode_NoTranscript -v -> 5 PASS",
+          "cmd:go test ./go-bridge/... ./agent/claudecode/... -count=1 -> ok 12.97s"
+        ],
+        "checked_at": "2026-07-05T01:51:22Z"
+      }
+    },
+    {
+      "id": "phase1-listsafe-regression",
+      "title": "Fix 1+2 — 144-session perf fixture (zero per-row transcript opens; <200ms double-cache-hit)",
+      "description": "Add a regression fixture simulating the observed incident: 144 Claude sessions with large transcript files (>100MB equivalent via temp files). Assert: on catalog-cache-hit + running-map-cache-hit path, list_sessions completes without O(total listed transcript bytes) parsing AND request_total_ms < 200ms. The cold running-map cache path may open at most K live-PID transcripts (do NOT apply the <200ms threshold to cold cache — plan is explicit). Provide a counting seam to assert per-row transcript opens == 0 on the cache-hit path. This fixture also serves as the before/after wire_mapping_ms re-baseline that Step 0 deferred. Targeted run: go test ./go-bridge -run 'ListSessionsPerf|ManySessionsTranscriptScan'. Keep deterministic and bounded; no real Claude credentials, no real iOS UI.",
+      "status": "done",
+      "phase": "phase1-listsafe",
+      "kind": "regression",
+      "depends_on": [
+        "phase1-listsafe-tests"
+      ],
+      "source": "Plan §'Test Plan' fixture (144 sessions, >100MB, double-cache-hit <200ms) + Step 0 before/after re-baseline",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "summary": "Added TestListSessionsClaude_144SessionPerfFixture: 144 sessions × ~700KB sparse transcripts (~100MB reported). Catalog fingerprints by ModTimeUnixNano+SizeBytes so cache-hit reuses entries without content reads. Asserts: catalog-cache-hit request_total < 200ms (measured cold=56ms warm=42ms); zero per-row transcript opens across both requests via probe; stale-running registry row unchanged. <200ms threshold correctly scoped to cache-hit path only; cold-cache ≤K bound deferred to phase3 (isProcessRunning seam).",
+        "artifacts": [
+          "go-bridge/list_enrich_test.go::TestListSessionsClaude_144SessionPerfFixture",
+          "cmd:go test ./go-bridge -run TestListSessionsClaude_144SessionPerfFixture -v -> PASS (cold=56ms warm=42ms opens=0)"
+        ],
+        "checked_at": "2026-07-05T01:53:12Z"
+      }
+    },
+    {
+      "id": "phase2-ttlcache-impl",
+      "title": "Fix 3 — short-TTL cache for Claude GetRunningSessionIDs + invalidation hooks",
+      "description": "Add a short-TTL (1-3 seconds) cache for the Claude running map, global per Claude agent instance (GetRunningSessionIDs already reads active process state across sessions, so a global key is correct). Replace the no-cache thin wrapper inside getRunningMap (created in phase1-listsafe-impl) with the TTL-cached implementation — same call site, so list paths need no further change. Wire invalidation triggers: send_message starts/resumes a Claude session; turn_completed; abort/interrupt; Claude process exit; TTL expiry (preserves detection of Claude turns launched outside MacBridge). Do NOT add a new background goroutine that periodically scans transcripts. Cache must keep precise GetRunningSessionIDs semantics — live-but-idle Claude process must not be marked running.",
+      "status": "done",
+      "phase": "phase2-ttlcache",
+      "kind": "impl",
+      "depends_on": [
+        "phase1-listsafe-impl"
+      ],
+      "source": "Plan §'Recommended MacBridge Changes' Fix 3; r2 P2 external-turn bounded by PID liveness adopted",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Added go-bridge/running_map_cache.go: runningMapCache with 2s TTL, recompute closure, atomic hits/recomputes counters, invalidate(). Wired runningMap field on Handlers in newHandlersWithContext; recompute binds to registered claudecode agent via h.getAgent. sessionRegistry.onStateChange callback (types.go) fires in markRunning/markIdle and invalidates the cache on MacBridge-tracked transitions. getRunningMap routes claude through h.runningMap.get(ctx); non-claude keeps thin lookup. Added procAlive injectable seam (agent/claudecode/proc_seam.go) and switched GetRunningSessionIDs to procAlive(state.Pid) for deterministic external-turn testing. Updated phase1 runningCalls assertion to be cache-compatible.",
+        "artifacts": [
+          "go-bridge/running_map_cache.go",
+          "go-bridge/handlers.go (Handlers.runningMap field + newHandlersWithContext wiring)",
+          "go-bridge/types.go (sessionRegistry.onStateChange + markRunning/markIdle fire)",
+          "go-bridge/handlers_opencode.go (getRunningMap cached route)",
+          "agent/claudecode/proc_seam.go",
+          "agent/claudecode/claudecode.go:625 (procAlive)",
+          "cmd:go build/vet/test -> ok"
+        ],
+        "checked_at": "2026-07-05T02:03:04Z"
+      }
+    },
+    {
+      "id": "phase2-ttlcache-tests",
+      "title": "Fix 3 — TTL cache + external-turn fixture (isProcessRunning seam)",
+      "description": "Add Go tests covering: (a) a burst of N Claude list_sessions requests reuses cached running state (GetRunningSessionIDs reached at most once per TTL window); (b) state invalidates on send_message / turn_completed / abort / process exit; (c) EXTERNAL-TURN compatibility: a fake live Claude PID + session stub whose transcript last meaningful entry indicates an active turn is surfaced as running after TTL/cache refresh WITHOUT requiring a MacBridge-owned turn registry entry. The external-turn fixture MUST use an injectable isProcessRunning seam (agent/claudecode/proc_unix.go:49 / proc_windows.go:40 are package-level funcs — make them injectable, e.g. a swappable variable or a struct field) rather than spawning a timing-sensitive real child process, so CI is deterministic. Targeted run: go test ./go-bridge ./agent/claudecode -run 'RunningMapCache|ExternalTurn|TTL'.",
+      "status": "done",
+      "phase": "phase2-ttlcache",
+      "kind": "tests",
+      "depends_on": [
+        "phase2-ttlcache-impl"
+      ],
+      "source": "Plan §'Test Plan' external-turn TTL fixture + invalidation; r2/r3 P3 isProcessRunning seam adopted",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "summary": "Tests: running_map_cache_test.go (4 — burst collapse, TTL expiry, invalidate, nil fallback); list_enrich_test.go (ListSessionsClaude_StateChangeInvalidatesRunningMap, GetRunningMap_CacheSurfacesExternalSession); agent claudecode_test.go (TestGetRunningSessionIDs_ExternalTurnViaInjectableSeam — deterministic fake PID liveness, dead-PID precise-semantics check). All pass.",
+        "artifacts": [
+          "go-bridge/running_map_cache_test.go",
+          "go-bridge/list_enrich_test.go (2 added)",
+          "agent/claudecode/claudecode_test.go::TestGetRunningSessionIDs_ExternalTurnViaInjectableSeam",
+          "cmd:go test ... -> all PASS"
+        ],
+        "checked_at": "2026-07-05T02:03:04Z"
+      }
+    },
+    {
+      "id": "phase2-ttlcache-regression",
+      "title": "Fix 3 — external-turn end-to-end regression via injected PID liveness",
+      "description": "Validate end-to-end that an externally launched Claude turn (no MacBridge-owned registry entry) is reflected as running after at most one TTL window, using the injected isProcessRunning seam + a fixture transcript whose last entry is an unanswered user message. Assert: (1) before TTL refresh the externally-launched session is not falsely marked running from cached state alone when its PID is dead; (2) after TTL refresh with a live injected PID + active-turn transcript, the session surfaces as running. This is deterministic via the seam (re-verifiable), not a real-process timing check. If for any reason the seam cannot fully cover the end-to-end path, fall back to self-attested manual validation and label it as such — do NOT dress manual checks as re-verified.",
+      "status": "done",
+      "phase": "phase2-ttlcache",
+      "kind": "regression",
+      "depends_on": [
+        "phase2-ttlcache-tests"
+      ],
+      "source": "Plan §'Acceptance Criteria': external turns eventually detected through bounded TTL/cache path; §'Test Plan' external-turn fixture",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "summary": "The external-turn regression IS the seam-based fixture (plan explicitly chose injected PID-liveness over real process timing). Covered by TestGetRunningSessionIDs_ExternalTurnViaInjectableSeam (live PID + active transcript → running; dead PID → not running) + TestGetRunningMap_CacheSurfacesExternalSession (bridge cache surfaces external session, no owned registry entry). Re-verifiable via go test.",
+        "artifacts": [
+          "agent/claudecode/claudecode_test.go::TestGetRunningSessionIDs_ExternalTurnViaInjectableSeam",
+          "go-bridge/list_enrich_test.go::TestGetRunningMap_CacheSurfacesExternalSession",
+          "cmd:go test ./agent/claudecode ./go-bridge -run ExternalTurn|CacheSurfacesExternal -count=1 -> PASS"
+        ],
+        "checked_at": "2026-07-05T02:03:04Z"
+      }
+    },
+    {
+      "id": "phase3-transcript-impl",
+      "title": "Fix 5 — transcript-state cache keyed by sessionID+path+size+mtime",
+      "description": "In agent/claudecode isSessionExecuting (claudecode.go:501) and/or detectClaudeTranscriptState, add a cache keyed by (sessionID + path + size + mtime) storing {state, computedAt}. An unchanged fingerprint (same size AND mtime) hits the cache and skips a full reparse. Fingerprint MUST compare size and mtime TOGETHER — mtime alone is forbidden (timestamp resolution can be too coarse under rapid writes / non-APFS storage). This guards the large-K cold-cache case: even on running-map cold cache with many live Claude processes, an unchanged live-PID transcript hits the cache, so cold cost is bounded by the number of CHANGED live transcripts, not K itself. Note the boundary: for actively-running sessions transcript size/mtime changes continuously, so this cache mainly helps idle / cold-recovery / repeated-list-refresh paths.",
+      "status": "done",
+      "phase": "phase3-transcriptcache",
+      "kind": "impl",
+      "depends_on": [
+        "phase1-listsafe-impl"
+      ],
+      "source": "Plan §'Recommended MacBridge Changes' Fix 5; r1 transcript-cache boundary conditions adopted (size+mtime together, mainly idle/cold); r4 connects Fix 5 to large-K cold-cache guardrail",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "Added agent/claudecode/transcript_exec_cache.go: package-level transcriptExec cache keyed by (sessionID, path, size, mtimeUnixNano) — size AND mtime compared together. isSessionExecutingCached stats the file, returns cached bool on fingerprint hit, calls isSessionExecuting on miss. Switched GetRunningSessionIDs call site (claudecode.go:636) to isSessionExecutingCached(state.SessionID, sessionPath). On stat error falls back to uncached isSessionExecuting (preserves fail-open-idle). Transparent for single-eval existing tests.",
+        "artifacts": [
+          "agent/claudecode/transcript_exec_cache.go",
+          "agent/claudecode/claudecode.go:636",
+          "cmd:go build/vet -> ok"
+        ],
+        "checked_at": "2026-07-05T02:05:58Z"
+      }
+    },
+    {
+      "id": "phase3-transcript-tests",
+      "title": "Fix 5 — transcript-cache unit tests",
+      "description": "Add Go tests in agent/claudecode covering: (a) an unchanged transcript file (same path+size+mtime) is NOT reparsed across repeated list refreshes — second call hits cache; (b) cache key invalidates when size changes, when mtime changes, and when path changes; (c) cache does NOT use mtime alone (construct a case where mtime is identical but size differs, and vice versa, and assert re-evaluation). Targeted run: go test ./agent/claudecode -run 'TranscriptCache|IsSessionExecutingCache'.",
+      "status": "done",
+      "phase": "phase3-transcriptcache",
+      "kind": "tests",
+      "depends_on": [
+        "phase3-transcript-impl"
+      ],
+      "source": "Plan §'Test Plan': unchanged transcript not reparsed; r1 size+mtime boundary",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "summary": "agent/claudecode/transcript_exec_cache_test.go: unchanged→hit/no-reparse; size-change→miss; mtime-alone-forbidden (same-size/diff-mtime AND diff-size/same-mtime both invalidate); path+sessionID keying; large-K guardrail (K live, round2 all-hit, round3 only-changed-misses). All pass.",
+        "artifacts": [
+          "agent/claudecode/transcript_exec_cache_test.go",
+          "cmd:go test ./agent/claudecode -run TranscriptExecCache -v -> 6 PASS"
+        ],
+        "checked_at": "2026-07-05T02:05:58Z"
+      }
+    },
+    {
+      "id": "phase3-transcript-regression",
+      "title": "Fix 5 — large-K cold-cache guardrail (≤ changed-transcript count)",
+      "description": "Add a regression fixture asserting the large-K guardrail: with K live Claude PIDs (simulate via the isProcessRunning seam from phase2), where most live-PID transcripts are unchanged, a running-map cold-cache computation opens/parses at most (number of changed live transcripts) transcripts, not K. Combine with phase1-listsafe-regression's per-row zero-open rule: the only transcript opens in the entire list path come from cold running-map computation over changed live-PID transcripts. Re-verifiable via the seam + counting opener. Targeted run: go test ./agent/claudecode ./go-bridge -run 'LargeK|ColdCacheGuardrail|TranscriptScanBound'.",
+      "status": "done",
+      "phase": "phase3-transcriptcache",
+      "kind": "regression",
+      "depends_on": [
+        "phase3-transcript-tests"
+      ],
+      "source": "Plan §Fix 5 + r4 P3 polish: Fix 5 connected to large-K cold-cache guardrail",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "summary": "Large-K cold-cache guardrail regression IS TestTranscriptExecCache_LargeKGuardrail: K=5 live transcripts, round1=5 misses (cold K), round2=5 hits/0 new misses (unchanged bound), round3=only-1-new-miss after changing one transcript. Proves cold cost bounded by changed-transcript count, not K. Re-verifiable via go test.",
+        "artifacts": [
+          "agent/claudecode/transcript_exec_cache_test.go::TestTranscriptExecCache_LargeKGuardrail",
+          "cmd:go test ./agent/claudecode -run LargeKGuardrail -v -> PASS"
+        ],
+        "checked_at": "2026-07-05T02:05:58Z"
+      }
+    },
+    {
+      "id": "phase4-doc-sync-impl",
+      "title": "Doc sync — GO_BRIDGE_ARCHITECTURE.md + CHANGELOG.md",
+      "description": "Update maintainer docs to reflect the new list-safe enrichment boundary and running-map cache: (1) GO_BRIDGE_ARCHITECTURE.md — document that Claude list_sessions now uses enrichSessionStatesForList + a hoisted/TTL-cached running map, that per-row transcript fallback + markIdle were removed from the list hot path, that transcript inference remains only for cold recovery / single-session detail / bounded K live-PID checks via GetRunningSessionIDs, and the size+mtime transcript-state cache. This is exactly the 'Claude 事件与轮询边界、capability 和调试分层' surface the doc owns. (2) CHANGELOG.md — append a dated entry under [Unreleased] following the existing '改了什么 / 有何提升' format. Do not change the protocol pack (no protocol field changed).",
+      "status": "done",
+      "phase": "phase4-docs-build",
+      "kind": "impl",
+      "depends_on": [
+        "phase2-ttlcache-regression",
+        "phase3-transcript-regression"
+      ],
+      "source": "CLAUDE.md maintainer docs convention + CHANGELOG.md convention",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "summary": "GO_BRIDGE_ARCHITECTURE.md: added Claude list_sessions enrichment-boundary bullet (getRunningMap + enrichSessionStatesForList + 2s TTL runningMapCache + onStateChange invalidation + transcript cache size+mtime + reasoningEffort preserved + detail-vs-list split) and a new invariant in 已知风险与不可破坏约束 (list path: 0 per-row transcript opens, no markIdle, no /tmp; transcript fingerprint size+mtime together). CHANGELOG.md [Unreleased]: new 2026-07-05 dated entry (改了什么/有何提升). All documented symbols cross-checked present in code.",
+        "artifacts": [
+          "GO_BRIDGE_ARCHITECTURE.md",
+          "CHANGELOG.md",
+          "cmd:rg documented symbols -> all present"
+        ],
+        "checked_at": "2026-07-05T02:10:40Z"
+      }
+    },
+    {
+      "id": "phase4-doc-sync-tests",
+      "title": "Doc sync — validation (build/render + cross-ref)",
+      "description": "Validate doc changes: markdown renders without broken internal links, GO_BRIDGE_ARCHITECTURE.md claims match the implemented symbols (enrichSessionStatesForList, getRunningMap, TTL cache, size+mtime fingerprint), and CHANGELOG entry is under [Unreleased]. No behavioral test surface — docs only.",
+      "status": "done",
+      "phase": "phase4-docs-build",
+      "kind": "tests",
+      "depends_on": [
+        "phase4-doc-sync-impl"
+      ],
+      "source": "Doc-only deliverable",
+      "notes": "na_reason: doc-only changes validated by render + cross-reference against implemented symbols; no automated behavioral test applies.",
+      "verification": {
+        "required": false,
+        "status": "present",
+        "method": "not-applicable",
+        "summary": "required:false — doc-only. Validated by render + cross-reference of documented symbols (enrichSessionStatesForList/getRunningMap/runningMapCache/injectClaudeReasoningEffort/isSessionExecutingCached) against code.",
+        "artifacts": [],
+        "na_reason": "Doc-only deliverable. Validated by reading the rendered markdown and cross-referencing documented symbols against the implemented code (enrichSessionStatesForList / getRunningMap / TTL cache / size+mtime fingerprint). No automated behavioral test surface.",
+        "checked_at": "2026-07-05T02:10:40Z"
+      }
+    },
+    {
+      "id": "phase4-build-install-regression",
+      "title": "Release build + reinstall + port 8777 + go-bridge.log health (project-mandated)",
+      "description": "Per CLAUDE.md 'Build & test' / 'Local env prerequisites': after go-bridge source changes, proactively complete a Release build and reinstall to /Applications — do not claim success using an old app or a dev binary in the source tree. Steps: (1) ./scripts/build-unsigned-release.sh produces dist/*.zip + .sha256 (or the documented xcodebuild Release path that embeds cordcode-bridge-runtime); (2) killall CordCodeLink; rm -rf /Applications/CordCodeLink.app; cp -R the freshly built Release .app to /Applications; open it; (3) verify lsof -nP -iTCP:8777 -sTCP:LISTEN shows the listener is the embedded cordcode-bridge-runtime inside /Applications/CordCodeLink.app (NOT a dev binary, NOT the old unified repo); (4) pgrep -fl 'CordCodeLink|cordcode-bridge-runtime' healthy; (5) tail the go-bridge.log at ~/Library/Application Support/CordCode Link/logs/go-bridge.log — confirm no startup errors and that a Claude list_sessions no longer logs the previous 9.5-11.8s wire_mapping_ms / no /tmp/bridge-sessions.json write. The build step itself is re-verifiable; the runtime-under-load observation is self-attested. UI automation / real-device validation still requires explicit owner approval and is NOT in scope here unless owner opts in.",
+      "status": "done",
+      "phase": "phase4-docs-build",
+      "kind": "regression",
+      "depends_on": [
+        "phase4-doc-sync-impl"
+      ],
+      "source": "CLAUDE.md: '改完 go-bridge/ 或 MacBridge/ 源码后，必须主动完成 Release 构建并覆盖安装到 /Applications'",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "build-and-install",
+        "summary": "Release build succeeded (Xcode 27 + Go embed); embedded cordcode-bridge-runtime rebuilt 2026-07-05T02:08:12Z with new symbols (enrichSessionStatesForList/runningMapCache/isSessionExecutingCached confirmed in binary via strings) and /tmp/bridge-sessions.json string absent. Reinstalled to /Applications; port 8777 listener is the new embedded runtime PID 65487 (old 16190 gone); runtime.json bridgeEpoch 1783217347838-65487; clean startup log (agents registered, relay reconnected, no ERROR/WARN); /tmp/bridge-sessions.json not created. Live wire_mapping_ms under real iOS refresh deferred to phase5 (owner real-device).",
+        "artifacts": [
+          "cmd:./scripts/build-unsigned-release.sh -> BUILD SUCCEEDED + dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip",
+          "build/unsigned-release/Build/Products/Release/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime",
+          "cmd:lsof -nP -iTCP:8777 -sTCP:LISTEN -> cordcode-bridge-runtime PID 65487 /Applications/CordCodeLink.app",
+          "cmd:tail go-bridge.log -> runtime_ready, listening :8777, relay connected, 0 ERROR/WARN"
+        ],
+        "checked_at": "2026-07-05T02:10:40Z"
+      }
+    },
+    {
+      "id": "phase5-user-validation-regression",
+      "title": "用户集中验收 — 真机 iOS + 真实 Claude 进程(.owner 手动)",
+      "description": "Concentrated manual validation handed to owner (per CLAUDE.md: 真机/UI 需 owner 明确授权). Runs LAST — all autonomous work (code + automated tests + automated regression + Release build/install/port verify) must be done first. Owner checklist: (1) iPhone 上对含大量 Claude session 的项目反复下拉刷新 session list — sidebar 不再卡顿、之前 half-rendered 的回复能完整渲染; (2) 刷新期间 Mac Activity Monitor 或 `ps -axo pid,pcpu,command | rg cordcode-bridge-runtime` — runtime 不再接近单核 100%; (3) Mac 另开 Terminal 跑一个真实外部 Claude turn(不在 CordCode Link 内启动)— iPhone 上对应 session 在 ≤1 个 TTL 窗口(~1-3s)后显示 running,turn 完成后回 idle; (4) tail go-bridge.log 确认 list_sessions wire_mapping_ms 不再是 9.5-11.8s 量级、且无 /tmp/bridge-sessions.json 写入。回报格式:每条 ✓/✗ + 观察到的 wire_mapping_ms 数值。",
+      "status": "pending",
+      "phase": "phase5-user-validation",
+      "kind": "regression",
+      "depends_on": [
+        "phase4-build-install-regression"
+      ],
+      "source": "Plan §'User-Visible Failure Mode' + §'Acceptance Criteria' 真机/真实进程项;CLAUDE.md 真机需 owner 授权",
+      "notes": "self-attested manual / owner-gated. 真机 iOS 刷新、真实外部 Claude turn、Activity Monitor CPU 都无法由 agent 自动完成。",
+      "verification": {
+        "required": true,
+        "status": "absent",
+        "method": "manual-device-validation",
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    }
+  ]
+}

@@ -463,6 +463,7 @@ func isClaudeResumeNoResponseRelayEntry(entry claudeTranscriptRelayEntry) bool {
 // detectClaudeTranscriptState 扫描 transcript 文件的最后几条消息，
 // 判定 session 当前是否处于执行中。用于文件 relay 的初始状态检测。
 func (h *Handlers) detectClaudeTranscriptState(sessPath string) string {
+	transcriptStateProbe()
 	f, err := os.Open(sessPath)
 	if err != nil {
 		return "unknown"

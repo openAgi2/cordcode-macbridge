@@ -194,6 +194,11 @@ type trackedSession struct {
 type sessionRegistry struct {
 	mu       sync.Mutex
 	sessions map[string]*trackedSession
+	// onStateChange, if set, is invoked after a session transitions to running or
+	// idle. It fires outside the registry mutex. Handlers uses it to invalidate
+	// the cached Claude running map so the next list_sessions reflects owned-turn
+	// transitions immediately instead of after the running-map TTL window.
+	onStateChange func(backendID, sessionID, newState string)
 }
 
 func newSessionRegistry() *sessionRegistry {
@@ -241,10 +246,11 @@ func (r *sessionRegistry) putRaw(sessionID string, sess core.AgentSession) {
 
 func (r *sessionRegistry) markRunning(sessionID string) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	var backendID string
 	if t, ok := r.sessions[sessionID]; ok {
 		t.state = sessionStateRunning
 		t.lastUsedAt = time.Now()
+		backendID = t.backendID
 	} else {
 		r.sessions[sessionID] = &trackedSession{
 			sessionID:   sessionID,
@@ -252,6 +258,11 @@ func (r *sessionRegistry) markRunning(sessionID string) {
 			lastUsedAt:  time.Now(),
 			lastEventAt: time.Now(),
 		}
+	}
+	cb := r.onStateChange
+	r.mu.Unlock()
+	if cb != nil {
+		cb(backendID, sessionID, string(sessionStateRunning))
 	}
 }
 
@@ -265,10 +276,11 @@ func (r *sessionRegistry) touch(sessionID string) {
 
 func (r *sessionRegistry) markIdle(sessionID string) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	var backendID string
 	if t, ok := r.sessions[sessionID]; ok {
 		t.state = sessionStateIdle
 		t.lastEventAt = time.Now()
+		backendID = t.backendID
 	} else {
 		r.sessions[sessionID] = &trackedSession{
 			sessionID:   sessionID,
@@ -276,6 +288,11 @@ func (r *sessionRegistry) markIdle(sessionID string) {
 			lastUsedAt:  time.Now(),
 			lastEventAt: time.Now(),
 		}
+	}
+	cb := r.onStateChange
+	r.mu.Unlock()
+	if cb != nil {
+		cb(backendID, sessionID, string(sessionStateIdle))
 	}
 }
 

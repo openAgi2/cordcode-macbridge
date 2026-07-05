@@ -78,6 +78,7 @@ type fakeAgent struct {
 	nextSessionIndex   int
 	startedProviders   map[string]string
 	runningSessionIDs  map[string]bool
+	runningCalls       int
 }
 
 type unsupportedMutationAgent struct {
@@ -99,6 +100,7 @@ func (u *unsupportedMutationAgent) Stop() error { return nil }
 func (f *fakeAgent) Name() string { return f.name }
 
 func (f *fakeAgent) GetRunningSessionIDs(ctx context.Context) (map[string]bool, error) {
+	f.runningCalls++
 	return f.runningSessionIDs, nil
 }
 
@@ -2863,6 +2865,55 @@ func TestClaudeListSessionsUsesRuntimeEffortWhenMetadataMissing(t *testing.T) {
 	}
 	if got := first["modelId"]; got != "glm-5.2" {
 		t.Fatalf("list session modelId = %#v, want glm-5.2", got)
+	}
+}
+
+// TestClaudeListSessionsDoesNotWriteTmpDump guards the production list_sessions
+// hot path: it must not write /tmp/bridge-sessions.json (or any /tmp debug dump)
+// on any request. The dump previously sat inside the wire_mapping_ms timing
+// window and polluted the runtime-state-enrichment metric.
+func TestClaudeListSessionsDoesNotWriteTmpDump(t *testing.T) {
+	const tmpDump = "/tmp/bridge-sessions.json"
+	os.Remove(tmpDump)
+
+	agent := &fakeAgent{name: "claudecode", reasoningEffort: "high"}
+	projectsDir := t.TempDir()
+	projectDir := filepath.Join(projectsDir, "-tmp-claude-project")
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	sessionPath := filepath.Join(projectDir, "ses_dump.jsonl")
+	if err := os.WriteFile(sessionPath, []byte("{}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	catalog := newClaudeSessionCatalog(projectsDir)
+	catalog.parseSession = func(string, time.Time) claudeSessionScanResult {
+		return claudeSessionScanResult{
+			Title:     "dump guard session",
+			CreatedAt: time.Unix(1710000000, 0).UTC(),
+			UpdatedAt: time.Unix(1710000500, 0).UTC(),
+		}
+	}
+
+	handlers := newTestHandlers(t)
+	handlers.claudeSessions = catalog
+	handlers.RegisterAgent("claudecode", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	// Fire list_sessions repeatedly; the dump previously wrote on every call.
+	for i := 0; i < 3; i++ {
+		handlers.HandleRPC(serverConn, WireMessage{
+			BackendID: "claudecode",
+			Method:    "list_sessions",
+			RequestID: fmt.Sprintf("dump-%d", i),
+			Params:    mustJSONRaw(t, map[string]any{}),
+		})
+	}
+	_ = readJSONMaps(t, clientConn, 3)
+
+	if _, err := os.Stat(tmpDump); err == nil {
+		t.Fatalf("list_sessions wrote debug dump %s; production hot path must not write /tmp files", tmpDump)
 	}
 }
 

@@ -119,6 +119,21 @@ turn 完成时，在线订阅设备收到事件；未在线设备的通知写入
 - 模型/effort 真值优先来自 `~/.claude/settings.json`（`CLAUDE_CONFIG_DIR` 可覆盖）中的
   `ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS}_MODEL`、`*_MODEL_NAME` 与 effort 设置，mtime 懒重载；
   iOS 显示名和发送给 Claude 的别名必须按该映射处理。
+- **list_sessions 的 enrichment 边界（CPU 关键路径）**：`handleListSessions` 用
+  `getRunningMap(ctx, agent)` 一次性算出当前 running 集，再用 list-safe 批量 enricher
+  `enrichSessionStatesForList` 给所有列出的 session 行打 `runtimeState`。该路径**不得**对任何
+  session 行打开/解析 transcript（不调 `findClaudeSessionFile`/`detectClaudeTranscriptState`/
+  `isSessionExecuting`），**不得**调 `h.sessions.markIdle`（read-only），**不得**写 `/tmp` 调试转储。
+  running map 来自 `GetRunningSessionIDs`（精确语义：活但空闲的进程不算 running），经 2s TTL
+  `runningMapCache` 缓存；burst 刷新只触发一次 `GetRunningSessionIDs`，MacBridge 拥有的 turn
+  状态迁移（send_message/turn_completed/abort/process exit，统一走 `sessionRegistry.markRunning/
+  markIdle` 的 `onStateChange` 回调）立即失效缓存。外部启动的 Claude turn（无 owned registry
+  条目）在 ≤1 个 TTL 窗口后被探测到——`GetRunningSessionIDs` 的 K（live Claude PID 数，通常 1-3）
+  次 `isSessionExecuting` 调用结果按 `sessionID+path+size+mtime`（**size 和 mtime 必须同时比较**）
+  缓存，把冷缓存代价收敛到「变化的 live transcript 数」而非 K。`reasoningEffort` 注入是廉价内存
+  getter，list-safe 路径必须保留（`injectClaudeReasoningEffort`）。详细的 single-session 检视
+  （transcript fallback）只属于 `get_session`/`get_session_messages` 等 detail 路径
+  （`enrichSessionStateWithAgent`），不属于 list 热路径。
 
 因此 iOS 不能把“Bridge 有 liveEventStream”误解为“Claude 的所有外部 turn 都会广播”。
 
@@ -298,6 +313,9 @@ send/stream 语义不为此做 backend-specific 重复抑制——iOS 侧的 rac
 - protocol 破坏性变更必须升级 major version 并同步 iOS protocol pack。
 - capability 必须从真实接口推导，不为 UI 显示而声明假阳性。
 - `session_pagination` 在 UI 合并/滚动、relay 帧预算和超大内容分片重新验收前保持关闭。
+- `list_sessions` 是只读 UI 热路径：per-row transcript 打开数必须为 0、不得 `markIdle`、
+  不得写 `/tmp`；transcript 推理只能出现在 detail 路径或 `GetRunningSessionIDs` 的 live-PID
+  有界检查里，不能回到 list 热路径。transcript-state 缓存的指纹必须 size + mtime 同时比较。
 
 ## 测试入口
 

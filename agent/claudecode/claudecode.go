@@ -622,7 +622,7 @@ func (a *Agent) GetRunningSessionIDs(ctx context.Context) (map[string]bool, erro
 		if err := json.Unmarshal(data, &state); err != nil {
 			continue
 		}
-		if state.SessionID != "" && isProcessRunning(state.Pid) {
+		if state.SessionID != "" && procAlive(state.Pid) {
 			// Default to false: if we cannot locate and inspect the transcript file,
 			// we cannot prove the session is still executing.  The old default of
 			// true caused sessions whose .jsonl was inaccessible (wrong project dir,
@@ -633,7 +633,7 @@ func (a *Agent) GetRunningSessionIDs(ctx context.Context) (map[string]bool, erro
 				if projectDir != "" {
 					sessionPath := filepath.Join(projectDir, state.SessionID+".jsonl")
 					if _, err := os.Stat(sessionPath); err == nil {
-						isExecuting = isSessionExecuting(sessionPath)
+						isExecuting = isSessionExecutingCached(state.SessionID, sessionPath)
 					} else {
 						slog.Info("GetRunningSessionIDs: transcript file not found, defaulting to idle",
 							"sessionID", state.SessionID,

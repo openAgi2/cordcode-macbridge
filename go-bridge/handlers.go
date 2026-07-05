@@ -30,6 +30,7 @@ type Handlers struct {
 	mu                      sync.Mutex
 	agents                  map[string]core.Agent
 	sessions                *sessionRegistry
+	runningMap              *runningMapCache
 	opencodeSessionOptions  map[string]opencodeSessionOptions
 	contentRefs             map[string]string
 	contentRefOrder         []string
@@ -94,7 +95,7 @@ func newHandlersWithContext(ctx context.Context) *Handlers {
 	observation := NewObservationManager()
 	outbox := NewOutboxManager(prekeys)
 	presentation := NewPresentationManager()
-	return &Handlers{
+	h := &Handlers{
 		agents:                 make(map[string]core.Agent),
 		sessions:               newSessionRegistry(),
 		opencodeSessionOptions: make(map[string]opencodeSessionOptions),
@@ -116,6 +117,30 @@ func newHandlersWithContext(ctx context.Context) *Handlers {
 		ctx:                    ctx,
 		cleanupStop:            make(chan struct{}),
 	}
+	// TTL cache for the Claude running map (Fix 3). The recompute closure binds to
+	// whatever claudecode agent is currently registered, so the cache is valid
+	// across register/unregister. Invalidated on session-registry state changes.
+	h.runningMap = newRunningMapCache(func(ctx context.Context) (map[string]bool, error) {
+		agent, ok := h.getAgent("claudecode")
+		if !ok {
+			return nil, nil
+		}
+		lister, ok := agent.(core.RunningSessionLister)
+		if !ok {
+			return nil, nil
+		}
+		return lister.GetRunningSessionIDs(ctx)
+	})
+	h.sessions.onStateChange = func(backendID, sessionID, newState string) {
+		// Invalidate the Claude running map on any tracked state transition
+		// (send_message / turn_started / turn_completed / abort / process exit).
+		// The cache holds only Claude state; backendID filtering would miss
+		// resume-markRunning on a not-yet-registered session, so invalidate
+		// unconditionally — the cost is one map nil and at most one extra
+		// GetRunningSessionIDs on the next list_sessions.
+		h.runningMap.invalidate()
+	}
+	return h
 }
 
 func (h *Handlers) SetRelayEnabled(enabled bool) {
@@ -1848,6 +1873,7 @@ func (h *Handlers) handleGetSession(conn Connection, msg WireMessage, agent core
 }
 
 func findClaudeSessionFile(sessionID string, optDir string) (projectDir string, sessionPath string) {
+	transcriptStateProbe()
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", ""
@@ -1894,9 +1920,7 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 		}
 		mappingStarted := time.Now()
 		wireSessions := sessionsToWire(sessions)
-		for i, s := range wireSessions {
-			wireSessions[i] = h.enrichSessionStateWithAgent(s, agent)
-		}
+		wireSessions = h.enrichSessionStatesForList(wireSessions, agent, h.getRunningMap(ctx, agent))
 		result := paginateSessionList(wireSessions, extractStringParam(msg, "cursor"), limit)
 		metrics.wireMapping += time.Since(mappingStarted)
 		if ws, ok := result["sessions"].([]map[string]interface{}); ok {
@@ -1917,13 +1941,8 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 	}
 	mappingStarted := time.Now()
 	allSessions := h.claudeSessions.list(projectKey, metrics.context())
-	for i, s := range allSessions {
-		allSessions[i] = h.enrichSessionStateWithAgent(s, agent)
-	}
+	allSessions = h.enrichSessionStatesForList(allSessions, agent, h.getRunningMap(ctx, agent))
 	result := paginateSessionList(allSessions, extractStringParam(msg, "cursor"), limit)
-	if data, err := json.MarshalIndent(result, "", "  "); err == nil {
-		_ = os.WriteFile("/tmp/bridge-sessions.json", data, 0644)
-	}
 	metrics.wireMapping += time.Since(mappingStarted)
 	if ws, ok := result["sessions"].([]map[string]interface{}); ok {
 		metrics.resultCount = len(ws)

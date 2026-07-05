@@ -557,6 +557,67 @@ func TestGetRunningSessionIDs(t *testing.T) {
 	}
 }
 
+// TestGetRunningSessionIDs_ExternalTurnViaInjectableSeam proves a Claude turn
+// launched outside MacBridge (live PID + active transcript, but no MacBridge-owned
+// registry entry) is detected as running through the bounded GetRunningSessionIDs
+// path. It uses the injectable procAlive seam instead of os.Getpid()/real
+// process timing, so the test is deterministic in CI.
+//
+// Acceptance: external turns are eventually detected through a bounded TTL/cache
+// path without requiring a MacBridge-owned turn registry entry. This test covers
+// the GetRunningSessionIDs half of that path; the bridge TTL-cache half is
+// covered by go-bridge's running_map_cache + list_enrich tests.
+func TestGetRunningSessionIDs_ExternalTurnViaInjectableSeam(t *testing.T) {
+	prev := procAlive
+	procAlive = func(pid int) bool { return pid == 4242 } // deterministic fake liveness
+	t.Cleanup(func() { procAlive = prev })
+
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+	sessionsDir := filepath.Join(tempHome, ".claude", "sessions")
+	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
+		t.Fatalf("sessions dir: %v", err)
+	}
+	workDir := t.TempDir()
+	projectKey := encodeClaudeProjectKey(workDir)
+	projectsDir := filepath.Join(tempHome, ".claude", "projects", projectKey)
+	if err := os.MkdirAll(projectsDir, 0755); err != nil {
+		t.Fatalf("projects dir: %v", err)
+	}
+	// Transcript whose last message is an unanswered user prompt → executing.
+	transcript := `{"type":"user","message":{"role":"user","content":"external turn launched from another terminal"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(projectsDir, "ext-ses.jsonl"), []byte(transcript), 0644); err != nil {
+		t.Fatalf("transcript: %v", err)
+	}
+	// Session stub pointing the fake-alive PID at the external session + cwd.
+	stub := []byte(fmt.Sprintf(`{"pid":4242,"sessionId":"ext-ses","cwd":%q}`, workDir))
+	if err := os.WriteFile(filepath.Join(sessionsDir, "4242.json"), stub, 0644); err != nil {
+		t.Fatalf("stub: %v", err)
+	}
+
+	a, err := New(map[string]any{"work_dir": "/tmp"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ag := a.(*Agent)
+
+	running, err := ag.GetRunningSessionIDs(context.Background())
+	if err != nil {
+		t.Fatalf("GetRunningSessionIDs: %v", err)
+	}
+	if !running["ext-ses"] {
+		t.Fatalf("external turn (live PID + active transcript, no MacBridge-owned entry) must be detected running; got %v", running)
+	}
+
+	// Precise semantics preserved: flip the PID dead → the external session must
+	// NOT be reported running (a live-but-idle/dead process is not "executing").
+	procAlive = func(pid int) bool { return false }
+	running2, _ := ag.GetRunningSessionIDs(context.Background())
+	if running2["ext-ses"] {
+		t.Fatalf("external session with DEAD pid reported running; got %v (precise GetRunningSessionIDs semantics broken)", running2)
+	}
+}
+
 func TestIsSessionExecuting(t *testing.T) {
 	tempDir := t.TempDir()
 	sessionPath := filepath.Join(tempDir, "session.jsonl")
