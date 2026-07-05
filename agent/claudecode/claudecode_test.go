@@ -618,6 +618,90 @@ func TestGetRunningSessionIDs_ExternalTurnViaInjectableSeam(t *testing.T) {
 	}
 }
 
+func TestLiveSessionProcess_LiveButIdleIsNotRunning(t *testing.T) {
+	prev := procAlive
+	procAlive = func(pid int) bool { return pid == 4242 }
+	t.Cleanup(func() { procAlive = prev })
+
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+	sessionsDir := filepath.Join(tempHome, ".claude", "sessions")
+	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
+		t.Fatalf("sessions dir: %v", err)
+	}
+	workDir := t.TempDir()
+	projectKey := encodeClaudeProjectKey(workDir)
+	projectsDir := filepath.Join(tempHome, ".claude", "projects", projectKey)
+	if err := os.MkdirAll(projectsDir, 0755); err != nil {
+		t.Fatalf("projects dir: %v", err)
+	}
+	finalTranscript := `{"type":"assistant","message":{"role":"assistant","content":"done","stop_reason":"end_turn"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(projectsDir, "idle-live-ses.jsonl"), []byte(finalTranscript), 0644); err != nil {
+		t.Fatalf("transcript: %v", err)
+	}
+	stub := []byte(fmt.Sprintf(`{"pid":4242,"sessionId":"idle-live-ses","cwd":%q}`, workDir))
+	if err := os.WriteFile(filepath.Join(sessionsDir, "4242.json"), stub, 0644); err != nil {
+		t.Fatalf("stub: %v", err)
+	}
+
+	a, err := New(map[string]any{"work_dir": "/tmp"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ag := a.(*Agent)
+
+	proc, err := ag.LiveSessionProcess(context.Background(), "idle-live-ses")
+	if err != nil {
+		t.Fatalf("LiveSessionProcess: %v", err)
+	}
+	if proc.SessionID != "idle-live-ses" || proc.PID != 4242 || !proc.Live {
+		t.Fatalf("LiveSessionProcess = %#v, want live pid 4242", proc)
+	}
+	running, err := ag.GetRunningSessionIDs(context.Background())
+	if err != nil {
+		t.Fatalf("GetRunningSessionIDs: %v", err)
+	}
+	if running["idle-live-ses"] {
+		t.Fatalf("live-but-idle session reported executing; running=%v", running)
+	}
+}
+
+func TestLiveSessionProcess_UsesProcAliveAndDoesNotNeedTranscript(t *testing.T) {
+	prev := procAlive
+	procAlive = func(pid int) bool { return pid == 7777 }
+	t.Cleanup(func() { procAlive = prev })
+
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+	sessionsDir := filepath.Join(tempHome, ".claude", "sessions")
+	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
+		t.Fatalf("sessions dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionsDir, "7777.json"), []byte(`{"pid":7777,"sessionId":"stub-only-ses","cwd":"/no/transcript/here"}`), 0644); err != nil {
+		t.Fatalf("stub: %v", err)
+	}
+
+	a, err := New(map[string]any{"work_dir": "/tmp"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ag := a.(*Agent)
+
+	proc, err := ag.LiveSessionProcess(context.Background(), "stub-only-ses")
+	if err != nil {
+		t.Fatalf("LiveSessionProcess: %v", err)
+	}
+	if proc.PID != 7777 || !proc.Live {
+		t.Fatalf("LiveSessionProcess = %#v, want live stub-only pid", proc)
+	}
+	if !ag.IsProcessAlive(context.Background(), 7777) {
+		t.Fatal("IsProcessAlive(7777) = false, want true")
+	}
+	if ag.IsProcessAlive(context.Background(), 1) {
+		t.Fatal("IsProcessAlive(1) = true, want false")
+	}
+}
+
 func TestIsSessionExecuting(t *testing.T) {
 	tempDir := t.TempDir()
 	sessionPath := filepath.Join(tempDir, "session.jsonl")

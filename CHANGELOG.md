@@ -8,6 +8,12 @@
 
 ## [Unreleased]
 
+### 2026-07-05 — 修复 Claude 外部 turn 在 iOS 上滞后一轮显示
+
+- **改了什么**：Claude Code 会话在 Mac 端外部进程（Claude App / Terminal）里继续对话时，MacBridge 的 transcript file relay 不再因为初始 snapshot 看起来 idle 就立即退出。现在 relay 会用 live-only PID 活性判断区分「已完成死进程」和「仍活着但 transcript 暂未增长」：死进程仍立即广播 idle 并退出；活进程进入轮询，看到新 user 行会发 `turn_started`，看到 final assistant 会发 `turn_completed` + idle 并退出。初始扫描改为 reader-based classifier，能在 relay 重启后识别已经写入的 user 行并补发 `turn_started`，避免 live-idle TTL 空窗吞掉 per-turn anchor；中断标记会完成当前 turn 但继续 watch；meta-only 增长不会重复发事件；进程死亡会有界收口。
+- **有何提升**：iOS 旁观 Mac 端发起的 Claude 外部 turn 时，不再只到下一轮才显示上一轮回复的执行锚点；已完成或崩溃残留的 transcript 也不会被误报为 running。同步修复了 2026-07-05 CPU 修复中暴露的生产注册问题：`runningMap` cache 现在能在 `-drivers claude`（agent 注册名为 `"claude"`、`agent.Name()=="claudecode"`）下正确调用 `GetRunningSessionIDs`，不再只在测试里的 `"claudecode"` 注册名下生效。
+- 改动范围限于 MacBridge Go runtime：新增 `core.LiveSessionLister` / `LiveSessionProcess`，`agent/claudecode` 复用 Claude session stub 扫描并暴露 live-only PID 检查；`go-bridge` file relay 增加 live gate、cached PID tick recheck、two-tier idle lifecycle 和定向回归测试。不改 wire protocol、不新增 `hello_ack` capability、不伪造 file-relay `text_delta`；外部 turn 内容仍由 iOS 历史同步渲染。
+
 ### 2026-07-05 — 修复 Claude list_sessions 高 CPU：list 路径不再 per-row 解析 transcript
 
 - **改了什么**：iOS 反复刷新 Claude 会话列表时，`cordcode-bridge-runtime` 会因 `handleListSessions → enrichSessionStateWithAgent → GetRunningSessionIDs` 对每个列出的 session 重复解析 transcript（事件中 `wire_mapping_ms` 一度达 9.5–11.8s、144 session × ~116MB）而逼近单核 100%。现在 list 路径改为 list-safe 批量 enrichment：`getRunningMap(ctx, agent)` 每请求一次性算出 running 集，`enrichSessionStatesForList` 只用 registry + running map 给行打 `runtimeState`，**不再对任何行打开/解析 transcript、不再 `markIdle`、不再写 `/tmp/bridge-sessions.json`**。`GetRunningSessionIDs` 的结果用 2s TTL 缓存（burst 只算一次），MacBridge 拥有的 turn 状态迁移立即失效缓存；外部启动的 Claude turn 在 ≤1 个 TTL 窗口后探测到（仍由 live-PID 有界的 `GetRunningSessionIDs` 负责，未引入后台扫描器）；`isSessionExecuting` 结果按 `sessionID+path+size+mtime`（size 与 mtime 同时比较）缓存，把冷缓存代价收敛到「变化的 live transcript 数」。3 个 list 调用点（Claude / 非 Claude / OpenCode）全部迁移到批量 API；`reasoningEffort` 注入保留；single-session detail 路径（`get_session`/`get_session_messages`）仍保留更深的 transcript 检视。

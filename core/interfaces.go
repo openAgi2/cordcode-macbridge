@@ -409,3 +409,17 @@ type RunningSessionLister interface {
 	GetRunningSessionIDs(ctx context.Context) (map[string]bool, error)
 }
 
+// LiveSessionProcess describes the backing process for one backend session.
+type LiveSessionProcess struct {
+	SessionID string
+	PID       int
+	Live      bool
+}
+
+// LiveSessionLister is the live-only counterpart to RunningSessionLister.
+// It reports PID liveness only, without transcript inspection and without
+// executing-state classification.
+type LiveSessionLister interface {
+	LiveSessionProcess(ctx context.Context, sessionID string) (LiveSessionProcess, error)
+	IsProcessAlive(ctx context.Context, pid int) bool
+}

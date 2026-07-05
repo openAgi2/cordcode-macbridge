@@ -79,6 +79,11 @@ type fakeAgent struct {
 	startedProviders   map[string]string
 	runningSessionIDs  map[string]bool
 	runningCalls       int
+	liveProcesses      map[string]core.LiveSessionProcess
+	alivePIDs          map[int]bool
+	liveProcessCalls   int
+	processAliveCalls  int
+	lastProcessAliveID int
 }
 
 type unsupportedMutationAgent struct {
@@ -102,6 +107,27 @@ func (f *fakeAgent) Name() string { return f.name }
 func (f *fakeAgent) GetRunningSessionIDs(ctx context.Context) (map[string]bool, error) {
 	f.runningCalls++
 	return f.runningSessionIDs, nil
+}
+
+func (f *fakeAgent) LiveSessionProcess(ctx context.Context, sessionID string) (core.LiveSessionProcess, error) {
+	f.liveProcessCalls++
+	if f.liveProcesses == nil {
+		return core.LiveSessionProcess{SessionID: sessionID}, nil
+	}
+	proc := f.liveProcesses[sessionID]
+	if proc.SessionID == "" {
+		proc.SessionID = sessionID
+	}
+	return proc, nil
+}
+
+func (f *fakeAgent) IsProcessAlive(ctx context.Context, pid int) bool {
+	f.processAliveCalls++
+	f.lastProcessAliveID = pid
+	if f.alivePIDs == nil {
+		return false
+	}
+	return f.alivePIDs[pid]
 }
 
 func (f *fakeAgent) StartSession(_ context.Context, sessionID string) (core.AgentSession, error) {

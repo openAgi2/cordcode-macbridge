@@ -21,6 +21,7 @@ import (
 )
 
 var _ core.TodoProvider = (*Agent)(nil)
+var _ core.LiveSessionLister = (*Agent)(nil)
 
 func init() {
 	core.RegisterAgent("claudecode", New)
@@ -584,11 +585,13 @@ func isSessionExecuting(sessionPath string) bool {
 	return false
 }
 
-func (a *Agent) GetRunningSessionIDs(ctx context.Context) (map[string]bool, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
-	}
+type claudeSessionStub struct {
+	PID       int
+	SessionID string
+	Cwd       string
+}
+
+func readSessionStubs(ctx context.Context, homeDir string) ([]claudeSessionStub, error) {
 	sessionsDir := filepath.Join(homeDir, ".claude", "sessions")
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
@@ -598,7 +601,7 @@ func (a *Agent) GetRunningSessionIDs(ctx context.Context) (map[string]bool, erro
 		return nil, err
 	}
 
-	running := make(map[string]bool)
+	stubs := make([]claudeSessionStub, 0, len(entries))
 	for _, entry := range entries {
 		select {
 		case <-ctx.Done():
@@ -622,34 +625,91 @@ func (a *Agent) GetRunningSessionIDs(ctx context.Context) (map[string]bool, erro
 		if err := json.Unmarshal(data, &state); err != nil {
 			continue
 		}
-		if state.SessionID != "" && procAlive(state.Pid) {
+		if state.SessionID == "" || state.Pid <= 0 {
+			continue
+		}
+		stubs = append(stubs, claudeSessionStub{
+			PID:       state.Pid,
+			SessionID: state.SessionID,
+			Cwd:       state.Cwd,
+		})
+	}
+	return stubs, nil
+}
+
+func (a *Agent) LiveSessionProcess(ctx context.Context, sessionID string) (core.LiveSessionProcess, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return core.LiveSessionProcess{SessionID: sessionID}, err
+	}
+	stubs, err := readSessionStubs(ctx, homeDir)
+	if err != nil {
+		return core.LiveSessionProcess{SessionID: sessionID}, err
+	}
+	for _, stub := range stubs {
+		if stub.SessionID == sessionID {
+			return core.LiveSessionProcess{
+				SessionID: stub.SessionID,
+				PID:       stub.PID,
+				Live:      a.IsProcessAlive(ctx, stub.PID),
+			}, nil
+		}
+	}
+	return core.LiveSessionProcess{SessionID: sessionID}, nil
+}
+
+func (a *Agent) IsProcessAlive(_ context.Context, pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	return procAlive(pid)
+}
+
+func (a *Agent) GetRunningSessionIDs(ctx context.Context) (map[string]bool, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	stubs, err := readSessionStubs(ctx, homeDir)
+	if err != nil {
+		return nil, err
+	}
+	running := make(map[string]bool)
+	for _, stub := range stubs {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		if a.IsProcessAlive(ctx, stub.PID) {
 			// Default to false: if we cannot locate and inspect the transcript file,
 			// we cannot prove the session is still executing.  The old default of
 			// true caused sessions whose .jsonl was inaccessible (wrong project dir,
 			// missing file, etc.) to be permanently locked as "running".
 			isExecuting := false
-			if state.Cwd != "" {
-				projectDir := findProjectDir(homeDir, state.Cwd)
+			if stub.Cwd != "" {
+				projectDir := findProjectDir(homeDir, stub.Cwd)
 				if projectDir != "" {
-					sessionPath := filepath.Join(projectDir, state.SessionID+".jsonl")
+					sessionPath := filepath.Join(projectDir, stub.SessionID+".jsonl")
 					if _, err := os.Stat(sessionPath); err == nil {
-						isExecuting = isSessionExecutingCached(state.SessionID, sessionPath)
+						isExecuting = isSessionExecutingCached(stub.SessionID, sessionPath)
 					} else {
 						slog.Info("GetRunningSessionIDs: transcript file not found, defaulting to idle",
-							"sessionID", state.SessionID,
-							"cwd", state.Cwd,
+							"sessionID", stub.SessionID,
+							"cwd", stub.Cwd,
 							"projectDir", projectDir,
 							"sessionPath", sessionPath,
 							"statError", err)
 					}
 				} else {
 					slog.Warn("GetRunningSessionIDs: project dir not found for cwd, defaulting to idle",
-						"sessionID", state.SessionID,
-						"cwd", state.Cwd)
+						"sessionID", stub.SessionID,
+						"cwd", stub.Cwd)
 				}
 			}
 			if isExecuting {
-				running[state.SessionID] = true
+				running[stub.SessionID] = true
 			}
 		}
 	}
@@ -1172,9 +1232,9 @@ func isClaudeSkillInstructionText(text string) bool {
 // /model, /compact). These tags are protocol noise, not user-visible content,
 // so they are normalized before a user message enters the visible history.
 var (
-	commandNameRe     = regexp.MustCompile(`(?s)<command-name>\s*(.*?)\s*</command-name>`)
-	commandArgsRe     = regexp.MustCompile(`(?s)<command-args>\s*(.*?)\s*</command-args>`)
-	localCommandRe    = regexp.MustCompile(`(?s)<local-command-(?:stdout|stderr|caveat)>`)
+	commandNameRe  = regexp.MustCompile(`(?s)<command-name>\s*(.*?)\s*</command-name>`)
+	commandArgsRe  = regexp.MustCompile(`(?s)<command-args>\s*(.*?)\s*</command-args>`)
+	localCommandRe = regexp.MustCompile(`(?s)<local-command-(?:stdout|stderr|caveat)>`)
 )
 
 const commandArgsPreviewLimit = 120

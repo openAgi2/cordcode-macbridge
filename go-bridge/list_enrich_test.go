@@ -423,3 +423,24 @@ func TestGetRunningMap_CacheSurfacesExternalSession(t *testing.T) {
 		t.Fatalf("runningCalls=%d after 6 gets; want 1 (cache collapse)", agent.runningCalls)
 	}
 }
+
+func TestGetRunningMap_ProductionClaudeRegistrationFindsClaudeCodeAgent(t *testing.T) {
+	agent := &fakeAgent{
+		name:              "claudecode",
+		runningSessionIDs: map[string]bool{"prod-claude-ses": true},
+	}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("claude", agent)
+
+	requestAgent, ok := handlers.getAgent("claude")
+	if !ok {
+		t.Fatal("production-style claude agent registration missing")
+	}
+	m := handlers.getRunningMap(context.Background(), requestAgent)
+	if !m["prod-claude-ses"] {
+		t.Fatalf("getRunningMap did not use production-registered claudecode agent; got %v", m)
+	}
+	if agent.runningCalls != 1 {
+		t.Fatalf("runningCalls=%d, want 1 (GetRunningSessionIDs must be invoked through production \"claude\" registration)", agent.runningCalls)
+	}
+}

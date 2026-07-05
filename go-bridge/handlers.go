@@ -121,7 +121,7 @@ func newHandlersWithContext(ctx context.Context) *Handlers {
 	// whatever claudecode agent is currently registered, so the cache is valid
 	// across register/unregister. Invalidated on session-registry state changes.
 	h.runningMap = newRunningMapCache(func(ctx context.Context) (map[string]bool, error) {
-		agent, ok := h.getAgent("claudecode")
+		agent, ok := h.getFirstAgentByName("claudecode")
 		if !ok {
 			return nil, nil
 		}
@@ -396,6 +396,17 @@ func (h *Handlers) getAgent(id string) (core.Agent, bool) {
 	defer h.mu.Unlock()
 	agent, ok := h.agents[id]
 	return agent, ok
+}
+
+func (h *Handlers) getFirstAgentByName(name string) (core.Agent, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, agent := range h.agents {
+		if agent != nil && agent.Name() == name {
+			return agent, true
+		}
+	}
+	return nil, false
 }
 
 func normalizeModelParam(model map[string]interface{}) string {

@@ -19,6 +19,12 @@ const (
 	relayKindClaudeFile = "claude_file"
 )
 
+var (
+	claudeFileRelayPollInterval       = 3 * time.Second
+	claudeFileRelayLiveIdleTTL        = 90 * time.Second
+	claudeFileRelayProcessDeathMisses = 1
+)
+
 // startRelayIfNotRunning 为 session 启动事件转发（如果尚未运行）。
 // 用于 iOS 仅调用 get_session_messages 而未调用 send_message 的场景。
 func (h *Handlers) startRelayIfNotRunning(sessionID string, sess core.AgentSession, conn Connection, backendID string) {
@@ -78,6 +84,37 @@ func (h *Handlers) startCodexSessionFileRelay(sessionID string, conn Connection,
 	}
 
 	go h.codexSessionFileRelayLoop(sessionID, conn, backendID, relayKey, locator)
+}
+
+func (h *Handlers) sessionLiveProcess(ctx context.Context, sessionID, backendID string) (core.LiveSessionProcess, core.LiveSessionLister, error) {
+	seen := make(map[string]bool)
+	for _, id := range []string{backendID, "claude", "claudecode"} {
+		if strings.TrimSpace(id) == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		agent, ok := h.getAgent(id)
+		if !ok {
+			continue
+		}
+		lister, ok := agent.(core.LiveSessionLister)
+		if !ok {
+			continue
+		}
+		proc, err := lister.LiveSessionProcess(ctx, sessionID)
+		return proc, lister, err
+	}
+
+	agent, ok := h.getFirstAgentByName("claudecode")
+	if !ok {
+		return core.LiveSessionProcess{SessionID: sessionID}, nil, nil
+	}
+	lister, ok := agent.(core.LiveSessionLister)
+	if !ok {
+		return core.LiveSessionProcess{SessionID: sessionID}, nil, nil
+	}
+	proc, err := lister.LiveSessionProcess(ctx, sessionID)
+	return proc, lister, err
 }
 
 func codexSessionFileRelayKey(sessionID string) string {
@@ -179,63 +216,60 @@ func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection,
 		return info.Size()
 	}()
 
-	// 检查 transcript 当前最后一条消息，广播当前状态。只有确认最后一条
-	// 表示仍在运行时才初始广播 running；unknown 不能冒充 running，否则
-	// iOS 打开一个已完成的外部 Claude session 后会被卡在执行中。
-	initialState := h.detectClaudeTranscriptState(sessPath)
-	if initialState == "idle" {
-		h.mu.Lock()
-		dir := h.sessions.directoryForSession(sessionID)
-		h.mu.Unlock()
-		h.broadcaster.Send(BroadcastEvent{
-			BackendID: backendID,
-			SessionID: sessionID,
-			Directory: dir,
-			Message: EventMessage{
-				Type:      "event",
-				SessionID: sessionID,
-				BackendID: backendID,
-				Event:     "session_state_changed",
-				Data:      map[string]interface{}{"state": "idle"},
-			},
-		})
-		h.sessions.markIdle(sessionID)
-		slog.Info("go-bridge: claudeSessionFileRelay initial state is idle, broadcasting", "sessionID", sessionID)
-		// 文件 relay 完成初始广播后退出——session 已结束，无需继续监视。
+	initialEntry := h.classifyClaudeTranscriptFile(sessPath)
+	proc, liveLister, err := h.sessionLiveProcess(context.Background(), sessionID, backendID)
+	if err != nil {
+		slog.Warn("go-bridge: claudeSessionFileRelay live process lookup failed", "sessionID", sessionID, "backendID", backendID, "error", err)
+	}
+	live := err == nil && proc.Live
+	cachedPID := proc.PID
+	if !live {
+		h.broadcastIdleState(sessionID, backendID)
+		slog.Info("go-bridge: claudeSessionFileRelay initial process not live, broadcasting idle and exiting", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
 		return
 	}
 
 	// Session 仍在运行中，开始轮询监视新内容。
-	const pollInterval = 3 * time.Second
-	ticker := time.NewTicker(pollInterval)
+	ticker := time.NewTicker(claudeFileRelayPollInterval)
 	defer ticker.Stop()
-	skipNextResumeNoResponse := false
+	lastMeaningfulGrowth := time.Now()
+	runningObserved := false
+	processDeathMisses := 0
 
-	h.mu.Lock()
-	dir := h.sessions.directoryForSession(sessionID)
-	h.mu.Unlock()
-	if initialState == "running" {
+	switch {
+	case !initialEntry.hasMeaningfulEntry || initialEntry.finalAssistant:
+		h.broadcastIdleState(sessionID, backendID)
+		slog.Info("go-bridge: claudeSessionFileRelay initial idle but process live; watching", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
+	case initialEntry.entryType == "user" && initialEntry.interrupt:
+		h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"done": true, "reason": "user_interrupt"})
+		h.broadcastIdleState(sessionID, backendID)
+		slog.Info("go-bridge: claudeSessionFileRelay initial interrupt marker with live process; watching", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
+	case initialEntry.entryType == "user":
 		h.sessions.markRunning(sessionID)
-		h.broadcaster.Send(BroadcastEvent{
-			BackendID: backendID,
-			SessionID: sessionID,
-			Directory: dir,
-			Message: EventMessage{
-				Type:      "event",
-				SessionID: sessionID,
-				BackendID: backendID,
-				Event:     "session_state_changed",
-				Data:      map[string]interface{}{"state": "running"},
-			},
-		})
-	} else {
-		slog.Info("go-bridge: claudeSessionFileRelay initial state unknown, waiting for transcript growth", "sessionID", sessionID)
+		h.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": ""})
+		runningObserved = true
+	case initialEntry.entryType == "assistant":
+		h.sessions.markRunning(sessionID)
+		h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "running"})
+		runningObserved = true
 	}
 
 	for range ticker.C {
 		if !h.relayKindIs(sessionID, relayKindClaudeFile) {
 			slog.Info("go-bridge: claudeSessionFileRelay superseded by agent relay", "sessionID", sessionID)
 			return
+		}
+		if liveLister != nil && cachedPID > 0 {
+			if !liveLister.IsProcessAlive(context.Background(), cachedPID) {
+				processDeathMisses++
+				if processDeathMisses >= claudeFileRelayProcessDeathMisses {
+					h.broadcastIdleState(sessionID, backendID)
+					slog.Info("go-bridge: claudeSessionFileRelay process dead, exiting", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
+					return
+				}
+			} else {
+				processDeathMisses = 0
+			}
 		}
 		info, err := os.Stat(sessPath)
 		if err != nil {
@@ -246,6 +280,15 @@ func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection,
 			// 文件没有增长，可能被截断重写（truncate）。
 			if newSize < offset {
 				offset = 0
+				lastMeaningfulGrowth = time.Now()
+				continue
+			}
+			if !runningObserved && claudeFileRelayLiveIdleTTL > 0 && time.Since(lastMeaningfulGrowth) >= claudeFileRelayLiveIdleTTL {
+				if !h.sessions.isIdle(sessionID) {
+					h.broadcastIdleState(sessionID, backendID)
+				}
+				slog.Info("go-bridge: claudeSessionFileRelay live-idle TTL elapsed, exiting", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
+				return
 			}
 			continue
 		}
@@ -260,147 +303,40 @@ func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection,
 			continue
 		}
 
-		lastEntryType := ""
-		lastStopReason := ""
-		lastUserIsInterrupt := false
-		hasNewContent := false
-
-		scanner := bufio.NewScanner(f)
-		buf := make([]byte, 0, 64*1024)
-		scanner.Buffer(buf, 1024*1024*16)
-		for scanner.Scan() {
-			line := scanner.Bytes()
-			if len(line) == 0 {
-				continue
-			}
-			var entry claudeTranscriptRelayEntry
-			if err := json.Unmarshal(line, &entry); err != nil {
-				continue
-			}
-			if entry.Message == nil {
-				continue
-			}
-			if isClaudeResumeMetaRelayEntry(entry) {
-				skipNextResumeNoResponse = true
-				continue
-			}
-			if skipNextResumeNoResponse {
-				if isClaudeResumeNoResponseRelayEntry(entry) {
-					skipNextResumeNoResponse = false
-					continue
-				}
-				skipNextResumeNoResponse = false
-			}
-			if entry.Type == "user" {
-				lastEntryType = "user"
-				lastStopReason = ""
-				lastUserIsInterrupt = false
-				// 检查是否是用户中断。
-				var contentBlocks []struct {
-					Type string `json:"type"`
-					Text string `json:"text"`
-				}
-				if err := json.Unmarshal(entry.Message.Content, &contentBlocks); err == nil {
-					for _, b := range contentBlocks {
-						if b.Type == "text" && strings.HasPrefix(strings.TrimSpace(b.Text), "[Request interrupted by user") {
-							lastUserIsInterrupt = true
-						}
-					}
-				}
-				hasNewContent = true
-			} else if entry.Type == "assistant" {
-				lastEntryType = "assistant"
-				lastStopReason = entry.Message.StopReason
-				lastUserIsInterrupt = false
-				hasNewContent = true
-			}
-		}
+		entry, err := classifyLastMeaningfulClaudeRelayEntryFromReader(f)
 		f.Close()
-
-		if !hasNewContent {
+		if err != nil {
+			continue
+		}
+		if !entry.hasMeaningfulEntry {
 			offset = newSize
 			continue
 		}
 
 		offset = newSize
+		lastMeaningfulGrowth = time.Now()
 
 		// 广播事件。
-		if lastEntryType == "user" && !lastUserIsInterrupt {
+		if entry.entryType == "user" && !entry.interrupt {
 			// 用户发送新消息 → turn_started
 			h.sessions.markRunning(sessionID)
-			h.broadcaster.Send(BroadcastEvent{
-				BackendID: backendID,
-				SessionID: sessionID,
-				Directory: dir,
-				Message: EventMessage{
-					Type:      "event",
-					SessionID: sessionID,
-					BackendID: backendID,
-					Event:     "turn_started",
-					Data:      map[string]interface{}{"turnId": ""},
-				},
-			})
-		} else if lastUserIsInterrupt {
+			h.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": ""})
+			runningObserved = true
+		} else if entry.interrupt {
 			// 用户中断 → turn_completed(idle)
-			h.sessions.markIdle(sessionID)
-			h.broadcaster.Send(BroadcastEvent{
-				BackendID: backendID,
-				SessionID: sessionID,
-				Directory: dir,
-				Message: EventMessage{
-					Type:      "event",
-					SessionID: sessionID,
-					BackendID: backendID,
-					Event:     "turn_completed",
-					Data:      map[string]interface{}{"done": true, "reason": "user_interrupt"},
-				},
-			})
-			h.broadcaster.Send(BroadcastEvent{
-				BackendID: backendID,
-				SessionID: sessionID,
-				Directory: dir,
-				Message: EventMessage{
-					Type:      "event",
-					SessionID: sessionID,
-					BackendID: backendID,
-					Event:     "session_state_changed",
-					Data:      map[string]interface{}{"state": "idle"},
-				},
-			})
+			h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"done": true, "reason": "user_interrupt"})
+			h.broadcastIdleState(sessionID, backendID)
+			runningObserved = false
 			// 中断后 session 可能还会被继续，继续监视。
-		} else if lastEntryType == "assistant" {
-			isFinal := lastStopReason == "end_turn" || lastStopReason == "stop_limit" ||
-				lastStopReason == "stop_sequence" || lastStopReason == "max_tokens"
-			if isFinal {
+		} else if entry.entryType == "assistant" {
+			if entry.finalAssistant {
 				// 任务完成 → turn_completed(idle)
-				h.sessions.markIdle(sessionID)
-				h.broadcaster.Send(BroadcastEvent{
-					BackendID: backendID,
-					SessionID: sessionID,
-					Directory: dir,
-					Message: EventMessage{
-						Type:      "event",
-						SessionID: sessionID,
-						BackendID: backendID,
-						Event:     "turn_completed",
-						Data:      map[string]interface{}{"done": true, "reason": "end_turn"},
-					},
-				})
-				h.broadcaster.Send(BroadcastEvent{
-					BackendID: backendID,
-					SessionID: sessionID,
-					Directory: dir,
-					Message: EventMessage{
-						Type:      "event",
-						SessionID: sessionID,
-						BackendID: backendID,
-						Event:     "session_state_changed",
-						Data:      map[string]interface{}{"state": "idle"},
-					},
-				})
+				h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"done": true, "reason": "end_turn"})
+				h.broadcastIdleState(sessionID, backendID)
 				slog.Info("go-bridge: claudeSessionFileRelay turn completed, exiting", "sessionID", sessionID)
 				return // 任务完成，退出文件监视。
 			}
+			runningObserved = true
 			// assistant 消息但不是最终（如 tool_use），继续监视。
 		}
 	}
@@ -421,6 +357,13 @@ type claudeTranscriptRelayTextBlock struct {
 	Text string `json:"text"`
 }
 
+type claudeTranscriptRelayMeaningfulEntry struct {
+	hasMeaningfulEntry bool
+	entryType          string
+	interrupt          bool
+	finalAssistant     bool
+}
+
 func claudeTranscriptRelayTextBlocks(raw json.RawMessage) []claudeTranscriptRelayTextBlock {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil
@@ -434,6 +377,92 @@ func claudeTranscriptRelayTextBlocks(raw json.RawMessage) []claudeTranscriptRela
 		return nil
 	}
 	return blocks
+}
+
+func isClaudeUserInterruptRelayEntry(entry claudeTranscriptRelayEntry) bool {
+	if entry.Type != "user" || entry.Message == nil {
+		return false
+	}
+	for _, block := range claudeTranscriptRelayTextBlocks(entry.Message.Content) {
+		if block.Type == "text" && strings.HasPrefix(strings.TrimSpace(block.Text), "[Request interrupted by user") {
+			return true
+		}
+	}
+	return false
+}
+
+func isFinalClaudeStopReason(reason string) bool {
+	switch reason {
+	case "end_turn", "stop_limit", "stop_sequence", "max_tokens":
+		return true
+	default:
+		return false
+	}
+}
+
+func classifyLastMeaningfulClaudeRelayEntryFromReader(r io.Reader) (claudeTranscriptRelayMeaningfulEntry, error) {
+	var last claudeTranscriptRelayMeaningfulEntry
+	skipNextResumeNoResponse := false
+
+	scanner := bufio.NewScanner(r)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024*16)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var entry claudeTranscriptRelayEntry
+		if err := json.Unmarshal(line, &entry); err != nil {
+			continue
+		}
+		if entry.Message == nil {
+			continue
+		}
+		if isClaudeResumeMetaRelayEntry(entry) {
+			skipNextResumeNoResponse = true
+			continue
+		}
+		if skipNextResumeNoResponse {
+			if isClaudeResumeNoResponseRelayEntry(entry) {
+				skipNextResumeNoResponse = false
+				continue
+			}
+			skipNextResumeNoResponse = false
+		}
+		switch entry.Type {
+		case "user":
+			last = claudeTranscriptRelayMeaningfulEntry{
+				hasMeaningfulEntry: true,
+				entryType:          "user",
+				interrupt:          isClaudeUserInterruptRelayEntry(entry),
+			}
+		case "assistant":
+			last = claudeTranscriptRelayMeaningfulEntry{
+				hasMeaningfulEntry: true,
+				entryType:          "assistant",
+				finalAssistant:     isFinalClaudeStopReason(entry.Message.StopReason),
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return claudeTranscriptRelayMeaningfulEntry{}, err
+	}
+	return last, nil
+}
+
+func (h *Handlers) classifyClaudeTranscriptFile(sessPath string) claudeTranscriptRelayMeaningfulEntry {
+	transcriptStateProbe()
+	f, err := os.Open(sessPath)
+	if err != nil {
+		return claudeTranscriptRelayMeaningfulEntry{}
+	}
+	defer f.Close()
+	entry, err := classifyLastMeaningfulClaudeRelayEntryFromReader(f)
+	if err != nil {
+		return claudeTranscriptRelayMeaningfulEntry{}
+	}
+	return entry
 }
 
 func isClaudeResumeMetaRelayEntry(entry claudeTranscriptRelayEntry) bool {
@@ -463,73 +492,20 @@ func isClaudeResumeNoResponseRelayEntry(entry claudeTranscriptRelayEntry) bool {
 // detectClaudeTranscriptState 扫描 transcript 文件的最后几条消息，
 // 判定 session 当前是否处于执行中。用于文件 relay 的初始状态检测。
 func (h *Handlers) detectClaudeTranscriptState(sessPath string) string {
-	transcriptStateProbe()
-	f, err := os.Open(sessPath)
-	if err != nil {
+	last := h.classifyClaudeTranscriptFile(sessPath)
+	if !last.hasMeaningfulEntry {
 		return "unknown"
 	}
-	defer f.Close()
-
-	var lastEntryType, lastStopReason string
-	var lastUserIsInterrupt bool
-	skipNextResumeNoResponse := false
-
-	scanner := bufio.NewScanner(f)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024*16)
-	for scanner.Scan() {
-		var entry claudeTranscriptRelayEntry
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
-			continue
-		}
-		if entry.Message == nil {
-			continue
-		}
-		if isClaudeResumeMetaRelayEntry(entry) {
-			skipNextResumeNoResponse = true
-			continue
-		}
-		if skipNextResumeNoResponse {
-			if isClaudeResumeNoResponseRelayEntry(entry) {
-				skipNextResumeNoResponse = false
-				continue
-			}
-			skipNextResumeNoResponse = false
-		}
-		if entry.Type == "user" {
-			lastEntryType = "user"
-			lastStopReason = ""
-			lastUserIsInterrupt = false
-			var contentBlocks []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			}
-			if err := json.Unmarshal(entry.Message.Content, &contentBlocks); err == nil {
-				for _, b := range contentBlocks {
-					if b.Type == "text" && strings.HasPrefix(strings.TrimSpace(b.Text), "[Request interrupted by user") {
-						lastUserIsInterrupt = true
-					}
-				}
-			}
-		} else if entry.Type == "assistant" {
-			lastEntryType = "assistant"
-			lastStopReason = entry.Message.StopReason
-			lastUserIsInterrupt = false
-		}
-	}
-
-	if lastUserIsInterrupt {
+	if last.interrupt {
 		return "idle"
 	}
-	if lastEntryType == "assistant" {
-		isFinal := lastStopReason == "end_turn" || lastStopReason == "stop_limit" ||
-			lastStopReason == "stop_sequence" || lastStopReason == "max_tokens"
-		if isFinal {
+	if last.entryType == "assistant" {
+		if last.finalAssistant {
 			return "idle"
 		}
 		return "running"
 	}
-	if lastEntryType == "user" {
+	if last.entryType == "user" {
 		return "running"
 	}
 	return "unknown"

@@ -29,9 +29,9 @@
   },
   "reports": {
     "completion_report_path": "docs/2026-07-05-macbridge-claude-list-sessions-runtime-cpu-plan完成情况.md",
-    "completion_report_status": "missing",
-    "last_generated_at": null,
-    "based_on_queue_hash": null
+    "completion_report_status": "written",
+    "last_generated_at": "2026-07-05T03:05:25Z",
+    "based_on_queue_hash": "8bfdaa9e12afbf8bd73c7ed1f4770204b3f251ce2d8374bdc6076d2a4e439ac6"
   },
   "plan_baseline": {
     "plan_title": "MacBridge Claude list_sessions Runtime CPU Plan",
@@ -67,11 +67,11 @@
       "reasoningEffort injection (handlers_opencode.go:115-121) must be preserved in list-safe path."
     ]
   },
-  "updated_at": "2026-07-05T02:11:23Z",
+  "updated_at": "2026-07-05T03:05:25Z",
   "closure": {
-    "status": "blocked-external",
-    "basis": "15/16 todos done. All 13 required autonomous todos (impl+tests+automated-regression+docs+build/install) proven done and re-verified via full suite re-run. The only remaining required todo is phase5-user-validation-regression — owner real-device / real-Claude-process validation, gated by explicit owner authorization per CLAUDE.md (真机/UI 需 owner 授权). Not auto-completable; cannot be mocked or substituted with one-sided success.",
-    "acceptance": "Completion report withheld until phase5 checklist is owner-validated; queue not fully proven done, so no positive report written yet (per report_policy)."
+    "status": "done",
+    "basis": "16/16 todos done (13 required + 2 required:false + 1 owner-manual). All autonomous work proven + re-verified via full suite re-run; owner real-device validation passed all 4 CPU-plan acceptance items (runtime 0.0% CPU, wire_mapping_ms 4-16ms). Streaming-lag separately tracked as a different issue.",
+    "acceptance": "CPU plan acceptance fully met. Separate file-relay external-turn issue tracked in docs/2026-07-05-macbridge-claude-file-relay-external-turn-plan.md (r2)."
   },
   "todos": [
     {
@@ -453,7 +453,7 @@
       "id": "phase5-user-validation-regression",
       "title": "用户集中验收 — 真机 iOS + 真实 Claude 进程(.owner 手动)",
       "description": "Concentrated manual validation handed to owner (per CLAUDE.md: 真机/UI 需 owner 明确授权). Runs LAST — all autonomous work (code + automated tests + automated regression + Release build/install/port verify) must be done first. Owner checklist: (1) iPhone 上对含大量 Claude session 的项目反复下拉刷新 session list — sidebar 不再卡顿、之前 half-rendered 的回复能完整渲染; (2) 刷新期间 Mac Activity Monitor 或 `ps -axo pid,pcpu,command | rg cordcode-bridge-runtime` — runtime 不再接近单核 100%; (3) Mac 另开 Terminal 跑一个真实外部 Claude turn(不在 CordCode Link 内启动)— iPhone 上对应 session 在 ≤1 个 TTL 窗口(~1-3s)后显示 running,turn 完成后回 idle; (4) tail go-bridge.log 确认 list_sessions wire_mapping_ms 不再是 9.5-11.8s 量级、且无 /tmp/bridge-sessions.json 写入。回报格式:每条 ✓/✗ + 观察到的 wire_mapping_ms 数值。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase5-user-validation",
       "kind": "regression",
       "depends_on": [
@@ -463,11 +463,15 @@
       "notes": "self-attested manual / owner-gated. 真机 iOS 刷新、真实外部 Claude turn、Activity Monitor CPU 都无法由 agent 自动完成。",
       "verification": {
         "required": true,
-        "status": "absent",
+        "status": "present",
         "method": "manual-device-validation",
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Owner real-device validation of the CPU plan's 4 acceptance items, all pass: (1) list refresh responsive (log wire_mapping_ms 4-16ms during 147-session refresh); (2) runtime CPU 0.0% (ps -axo pid,pcpu,command | grep cordcode-bridge-runtime → PID 65487 0.0, was ~100% in incident); (3) external Mac-originated Claude turn executing-state reaches iOS (owner confirmed iOS shows 执行中); (4) list_sessions wire_mapping_ms no longer 9.5-11.8s (4-16ms). NOTE: owner separately discovered a one-turn-lag in Mac-originated external-turn rendering — that is a DIFFERENT issue (file relay external-turn gap), out of this plan's scope, tracked in docs/2026-07-05-macbridge-claude-file-relay-external-turn-plan.md (r2).",
+        "artifacts": [
+          "cmd:ps -axo pid,pcpu,command | grep [c]ordcode-bridge-runtime -> 65487 0.0",
+          "~/Library/Application Support/CordCode Link/logs/go-bridge.log (wire_mapping_ms 4-16ms, 147 sessions, cache_hit=true)",
+          "owner real-device confirmation of iOS executing-state"
+        ],
+        "checked_at": "2026-07-05T03:05:25Z"
       }
     }
   ]

@@ -1,0 +1,356 @@
+{
+  "version": 6,
+  "project_root": "/Users/jacklee/Projects/cordcode-macbridge",
+  "plan_file": "docs/2026-07-05-macbridge-claude-file-relay-external-turn-plan.md",
+  "state_store": {
+    "canonical_path": ".exec-plan/state/plan-ffe58249dabc.json",
+    "legacy_path": ".claude/exec-plans/plan-ffe58249dabc.json",
+    "origin": "new",
+    "migrated_from": null,
+    "migrated_at": null
+  },
+  "queue_policy": {
+    "todo_md_role": "informational-only",
+    "completion_gate": "proof-carrying-impl-tests-regression",
+    "phase_done_rule": "all-required-todos-done",
+    "audit_rule": "unsupported-done-must-downgrade",
+    "start_exit_rule": "internal-audit-before-success",
+    "audit_failure_policy": "light-repairable-heavy-external-blocker",
+    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+    "session_mirror_policy": "host-tracker-optional-mirror",
+    "invocation_policy": "slash-or-natural-language-equivalent",
+    "persistence_rule": "persist-on-every-status-transition"
+  },
+  "report_policy": {
+    "auto_write_completion_report": true,
+    "report_directory": "docs",
+    "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+    "write_when": "all-required-todos-proven-done",
+    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  },
+  "reports": {
+    "completion_report_path": "docs/2026-07-05-macbridge-claude-file-relay-external-turn-plan完成情况.md",
+    "completion_report_status": "current",
+    "last_generated_at": "2026-07-05T04:05:21.772891Z",
+    "based_on_queue_hash": "c4ee8b41f6b3"
+  },
+  "updated_at": "2026-07-05T04:05:21.772891Z",
+  "todos": [
+    {
+      "id": "p0-running-map-backendid-hotfix-impl",
+      "title": "Priority 0 runningMap backend-ID hotfix implementation",
+      "description": "Fix go-bridge runningMap cache closure so production Claude registered as \"claude\" resolves the claudecode RunningSessionLister instead of hardcoding h.getAgent(\"claudecode\"). Keep list path read-only and do not change catalog/pagination semantics.",
+      "status": "done",
+      "phase": "priority0",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "Implementation Prerequisite",
+      "notes": "Started Priority 0 production backend-ID runningMap hotfix.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Updated go-bridge runningMap cache recompute path to resolve the registered Claude Code agent by agent.Name()==\"claudecode\" instead of hardcoded registration id \"claudecode\"; added internal getFirstAgentByName helper.",
+        "artifacts": [
+          "go-bridge/handlers.go",
+          "go-bridge/list_enrich_test.go"
+        ],
+        "checked_at": "2026-07-05T03:52:38.951449Z"
+      }
+    },
+    {
+      "id": "p0-running-map-backendid-hotfix-tests",
+      "title": "Priority 0 runningMap backend-ID hotfix tests",
+      "description": "Add/adjust go-bridge tests registering Claude under \"claude\" and asserting getRunningMap/list runtime state invokes GetRunningSessionIDs through the production-style wiring.",
+      "status": "done",
+      "phase": "priority0",
+      "kind": "tests",
+      "depends_on": [
+        "p0-running-map-backendid-hotfix-impl"
+      ],
+      "source": "Implementation Prerequisite",
+      "notes": "Targeted go-bridge runningMap tests executed; recording proof next.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Targeted runningMap tests passed, including production-style RegisterAgent(\"claude\", agent.Name()==\"claudecode\") regression.",
+        "artifacts": [
+          "cmd:go test ./go-bridge -run TestGetRunningMap_ProductionClaudeRegistrationFindsClaudeCodeAgent|TestGetRunningMap_CacheSurfacesExternalSession|TestListSessionsClaude_RunningMapComputedOncePerRequest -count=1",
+          "go-bridge/list_enrich_test.go"
+        ],
+        "checked_at": "2026-07-05T03:52:38.984497Z"
+      }
+    },
+    {
+      "id": "p0-running-map-backendid-hotfix-regression",
+      "title": "Priority 0 runningMap backend-ID hotfix regression",
+      "description": "Run targeted go-bridge regression proving the list running-map path is restored without list hot-path transcript parsing regressions.",
+      "status": "done",
+      "phase": "priority0",
+      "kind": "regression",
+      "depends_on": [
+        "p0-running-map-backendid-hotfix-tests"
+      ],
+      "source": "Implementation Prerequisite",
+      "notes": "Running Priority 0 regression verification.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Broader go-bridge list/running-map regression passed; list enrichment still uses precomputed runningMap and production \"claude\" registration resolves Claude Code running lister.",
+        "artifacts": [
+          "cmd:go test ./go-bridge -run Test.*RunningMap|TestListSessionsClaude|TestEnrichSessionStatesForList_NoTranscript_NoMutation -count=1"
+        ],
+        "checked_at": "2026-07-05T03:52:55.875179Z"
+      }
+    },
+    {
+      "id": "live-session-lister-impl",
+      "title": "Live-only Claude process lister implementation",
+      "description": "Add core.LiveSessionProcess and core.LiveSessionLister; refactor agent/claudecode stub scanning for reuse; implement LiveSessionProcess and IsProcessAlive without reading transcripts or calling isSessionExecuting.",
+      "status": "done",
+      "phase": "fix0",
+      "kind": "impl",
+      "depends_on": [
+        "p0-running-map-backendid-hotfix-regression"
+      ],
+      "source": "Fix 0",
+      "notes": "Started core.LiveSessionLister and agent/claudecode live-only process lister implementation.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Added core.LiveSessionProcess/core.LiveSessionLister and implemented Claude live-only process lookup via shared session stub scanner plus IsProcessAlive procAlive seam; GetRunningSessionIDs now reuses stub scan while preserving executing-only semantics.",
+        "artifacts": [
+          "core/interfaces.go",
+          "agent/claudecode/claudecode.go"
+        ],
+        "checked_at": "2026-07-05T03:54:37.813610Z"
+      }
+    },
+    {
+      "id": "live-session-lister-tests",
+      "title": "Live-only Claude process lister tests",
+      "description": "Add agent/claudecode unit tests proving live-but-idle PID returns Live=true while GetRunningSessionIDs remains executing-only; IsProcessAlive uses procAlive seam and no transcript read.",
+      "status": "done",
+      "phase": "fix0",
+      "kind": "tests",
+      "depends_on": [
+        "live-session-lister-impl"
+      ],
+      "source": "Fix 0",
+      "notes": "Targeted LiveSessionProcess/GetRunningSessionIDs tests passed; recording proof next.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Claude live-only lister tests passed, covering live-but-idle not running and stub-only live process lookup without transcript dependency.",
+        "artifacts": [
+          "cmd:go test ./agent/claudecode -run TestLiveSessionProcess|TestGetRunningSessionIDs -count=1",
+          "agent/claudecode/claudecode_test.go"
+        ],
+        "checked_at": "2026-07-05T03:54:37.849059Z"
+      }
+    },
+    {
+      "id": "live-session-lister-regression",
+      "title": "Live-only Claude process lister regression",
+      "description": "Run targeted agent/claudecode tests for LiveSessionProcess / RunningSessionIDs and record evidence.",
+      "status": "done",
+      "phase": "fix0",
+      "kind": "regression",
+      "depends_on": [
+        "live-session-lister-tests"
+      ],
+      "source": "Fix 0",
+      "notes": "Running Fix 0 regression verification.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Broader agent/claudecode LiveSession/RunningSession regression passed; live-only and executing-only semantics remain separated.",
+        "artifacts": [
+          "cmd:go test ./agent/claudecode -run LiveSession|RunningSession -count=1"
+        ],
+        "checked_at": "2026-07-05T03:54:50.750396Z"
+      }
+    },
+    {
+      "id": "file-relay-lifecycle-impl",
+      "title": "Claude file relay external-turn lifecycle implementation",
+      "description": "Update go-bridge Claude file relay: backendID-aware sessionLiveProcess helper, initial live gate, reader-based classifier, enriched initial scan, two-tier idle lifecycle, cached PID IsProcessAlive tick recheck, dead-PID guard, interrupt-user continues watching, and no fabricated text_delta.",
+      "status": "done",
+      "phase": "fix1-2",
+      "kind": "impl",
+      "depends_on": [
+        "live-session-lister-regression"
+      ],
+      "source": "Fix 1/Fix 1b/Fix 2/Fix 3",
+      "notes": "Started Claude file relay lifecycle implementation.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Implemented Claude file relay lifecycle changes: backendID-aware live process lookup, reader-based classifier, live-gated initial scan, warm-start turn_started, interrupt continues watching, live-idle TTL, process-death bound, cached PID IsProcessAlive recheck, and no file-relay text_delta fabrication.",
+        "artifacts": [
+          "go-bridge/handlers_relay.go",
+          "go-bridge/handlers.go",
+          "go-bridge/handlers_test.go",
+          "go-bridge/claude_file_relay_test.go"
+        ],
+        "checked_at": "2026-07-05T04:00:47.631190Z"
+      }
+    },
+    {
+      "id": "file-relay-lifecycle-tests",
+      "title": "Claude file relay lifecycle tests",
+      "description": "Add go-bridge tests for live idle snapshot, dead PID partial transcript, TTL restart gap, interrupt-user watching, meta-only append, cached PID O(1) recheck, stale registry cleanup, and production \"claude\" agent wiring.",
+      "status": "done",
+      "phase": "fix1-2",
+      "kind": "tests",
+      "depends_on": [
+        "file-relay-lifecycle-impl"
+      ],
+      "source": "Fix 1/Fix 1b/Fix 2/Fix 3",
+      "notes": "Running targeted file relay lifecycle test gate.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Targeted go-bridge file relay tests passed, covering dead PID, warm-start turn_started, live-idle watch, interrupt watch, meta-only growth, cached PID recheck, and process death bound.",
+        "artifacts": [
+          "cmd:go test ./go-bridge -run TestClaudeFileRelay|TestDetectClaudeTranscriptStateIgnoresResumeMetaContinuation|TestGetRunningMap_ProductionClaudeRegistrationFindsClaudeCodeAgent|TestGetRunningMap_CacheSurfacesExternalSession -count=1",
+          "go-bridge/claude_file_relay_test.go"
+        ],
+        "checked_at": "2026-07-05T04:01:08.031352Z"
+      }
+    },
+    {
+      "id": "file-relay-lifecycle-regression",
+      "title": "Claude file relay lifecycle regression",
+      "description": "Run targeted go-bridge file relay regression tests and confirm no use of runningMap as live gate and no per-tick stub scan.",
+      "status": "done",
+      "phase": "fix1-2",
+      "kind": "regression",
+      "depends_on": [
+        "file-relay-lifecycle-tests"
+      ],
+      "source": "Fix 1/Fix 1b/Fix 2/Fix 3",
+      "notes": "Running full go-bridge regression for file relay lifecycle changes.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Full go-bridge package test passed after Claude file relay lifecycle implementation.",
+        "artifacts": [
+          "cmd:go test ./go-bridge -count=1"
+        ],
+        "checked_at": "2026-07-05T04:01:36.302732Z"
+      }
+    },
+    {
+      "id": "final-build-and-docs-impl",
+      "title": "Final build hygiene and documentation sync",
+      "description": "Update CHANGELOG.md under Unreleased for the externally visible MacBridge fix and keep plan/completion docs consistent with implemented behavior.",
+      "status": "done",
+      "phase": "final",
+      "kind": "impl",
+      "depends_on": [
+        "file-relay-lifecycle-regression"
+      ],
+      "source": "Final",
+      "notes": "Updating CHANGELOG and final docs state.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "Updated CHANGELOG.md under Unreleased with the Claude external-turn file relay fix, live-only lister, and production runningMap registration hotfix scope.",
+        "artifacts": [
+          "CHANGELOG.md",
+          "docs/2026-07-05-macbridge-claude-file-relay-external-turn-plan.md"
+        ],
+        "checked_at": "2026-07-05T04:02:14.070119Z"
+      }
+    },
+    {
+      "id": "final-build-and-docs-tests",
+      "title": "Final targeted test/build verification",
+      "description": "Run required targeted Go tests and, if go-bridge source changed, perform the project-required Release build/install validation or record real blocker output.",
+      "status": "done",
+      "phase": "final",
+      "kind": "tests",
+      "depends_on": [
+        "final-build-and-docs-impl"
+      ],
+      "source": "Final",
+      "notes": "Running final Go tests and Release build/install validation.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Final Go tests passed including full root module `go test ./...`; unsigned Release build succeeded; app was installed to /Applications and launched; embedded runtime is listening on TCP 8777.",
+        "artifacts": [
+          "cmd:go test ./agent/claudecode ./go-bridge/... -count=1",
+          "cmd:go test ./... -count=1",
+          "cmd:./scripts/build-unsigned-release.sh",
+          "dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip",
+          "/Applications/CordCodeLink.app",
+          "cmd:lsof -nP -iTCP:8777 -sTCP:LISTEN",
+          "~/Library/Application Support/CordCode Link/runtime.json"
+        ],
+        "checked_at": "2026-07-05T04:05:21.772891Z"
+      }
+    },
+    {
+      "id": "final-build-and-docs-regression",
+      "title": "Final regression and completion report",
+      "description": "Run exit audit, generate completion report only if all required todos are proven, and record residual risk. No UI/simulator automation unless explicitly authorized.",
+      "status": "done",
+      "phase": "final",
+      "kind": "regression",
+      "depends_on": [
+        "final-build-and-docs-tests"
+      ],
+      "source": "Final",
+      "notes": "Running final audit and generating completion report if all proofs are present.",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "mixed",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Exit audit passed: every required exec-plan todo has present proof; final runtime validation confirmed installed /Applications app starts embedded runtime on TCP 8777. No UI/simulator automation was run.",
+        "artifacts": [
+          ".exec-plan/state/plan-ffe58249dabc.json",
+          "docs/2026-07-05-macbridge-claude-file-relay-external-turn-plan完成情况.md",
+          "cmd:git status --short",
+          "cmd:lsof -nP -iTCP:8777 -sTCP:LISTEN"
+        ],
+        "checked_at": "2026-07-05T04:03:51.999643Z"
+      }
+    }
+  ]
+}
