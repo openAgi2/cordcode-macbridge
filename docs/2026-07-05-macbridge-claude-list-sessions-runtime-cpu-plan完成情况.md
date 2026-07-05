@@ -99,6 +99,48 @@ Tracked separately: `docs/2026-07-05-macbridge-claude-file-relay-external-turn-p
 (r2, review-adopted). It reuses this plan's `procAlive` seam and stub-scan
 helper.
 
+## Audit Addendum (2026-07-05) — Fix 3 production wiring caveat
+
+A post-completion audit
+([docs/2026-07-05-macbridge-claude-list-sessions-runtime-cpu-plan完成情况-审计报告.md](2026-07-05-macbridge-claude-list-sessions-runtime-cpu-plan完成情况-审计报告.md))
+found that this report overstates Fix 3's production effect **at the audited
+commit `aec16b8`**. Recorded here as a honest correction:
+
+- **At `aec16b8`, the `runningMapCache` was a production no-op.** Its recompute
+  closure looked up the Claude agent via `h.getAgent("claudecode")` (map key),
+  but production `-drivers claude` registers the agent under the **driver id**
+  `"claude"` (with `agent.Name() == "claudecode"`). So the lookup returned nil,
+  recompute returned nil, the cache never populated, and **`GetRunningSessionIDs`
+  was never called from the list path** in production at that commit. Claude
+  list running-state fell back to registry-only.
+- **This does not affect the CPU primary goal.** The dominant cost (per-row
+  transcript parsing, eliminated by Fix 1+2) was genuinely removed in production
+  at `aec16b8`; the cache no-op made the list path cheaper still. Owner's
+  measured 0.0% CPU is consistent with Fix 1+2 alone — independent of the cache.
+- **The cache wiring was fixed by `16b0e79`** ("Fix Claude file relay external
+  turn lifecycle", the r2 file-relay implementation commit): it replaced the
+  lookup with `getFirstAgentByName("claudecode")` (scan by `agent.Name()`,
+  production-key-safe) and added the regression test
+  `TestGetRunningMap_ProductionClaudeRegistrationFindsClaudeCodeAgent`
+  (registers under key `"claude"`). So Fix 3's full production effect — TTL-cached
+  running map, external-turn detection via `GetRunningSessionIDs` — materializes
+  from `16b0e79` onward, not at `aec16b8`.
+- **Reconciling the overstatement:** the original report's "External turns still
+  detected within one TTL window via the bounded live-PID `GetRunningSessionIDs`
+  path" is accurate for current HEAD (≥ `16b0e79`) but was **not true at
+  `aec16b8`**. Likewise, phase5's "external-turn executing-state reaches iOS"
+  pass at `aec16b8` was real but reached iOS via the **file-relay → registry →
+  list-registry-fallback** path (the path with the documented one-turn lag in
+  Scope Boundary above), not via the then-broken `GetRunningSessionIDs` cache.
+- **Why tests did not catch it:** list / running-map tests registered the agent
+  under key `"claudecode"` (matching the buggy lookup). The test/production
+  registration-key divergence hid the bug. The `16b0e79` regression test (key
+  `"claude"`) closes that gap.
+
+Net: the CPU plan's primary goal is met at `aec16b8`; Fix 3's cache is genuinely
+wired in production only from `16b0e79`. No rollback or rework of the CPU fix is
+needed.
+
 ## Deferred Per Plan §Not Adopted
 
 - Fix 6 (prefer MacBridge-owned runtime state for turns) — long-term architecture;

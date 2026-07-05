@@ -7,7 +7,7 @@
 - Legacy State File: `none`
 - Completion Report Verdict: `proved-complete`
 - Queue Summary: `12/12 todos done, 12/12 proven, 8 re-verified, 4 self-attested implementation proofs`
-- Related Commits: `none`
+- Related Commits: `16b0e79` (file-relay lifecycle + production runningMap registration fix); `b9f4a59` (follow-up PID-reuse identity-check fix found via this work's code review)
 - Generated At: `2026-07-05T04:05:21.772891Z`
 
 ## 1. Overall Verdict (总体结论)
@@ -73,3 +73,8 @@
 - 不添加生产 fallback/mock/placeholder 路径。
 - 不做 file-relay `text_delta` 内容流。
 - 不运行 UI/simulator automation，遵守 owner 约束。
+
+## 8. Post-completion Notes (2026-07-05 收尾)
+- 本计划工作已在 commit `16b0e79` 提交到 main（生成本报告时工作树尚未提交，故原记录为 `none`，现更正）。
+- **后续 streaming 调查结论**：file-relay 计划完成后，owner 复测仍报"iPhone 看不到 Claude 流式"。端到端诊断定性为 **external turn 固有限制**（用户在 Mac 的另一个 Claude 窗口驱动 session，MacBridge 拿不到该进程 stdout；Claude Code 按 message 粒度写 transcript；file-relay 按设计不伪造 text_delta）——非代码 bug，Mac 侧干净。iPhone 端发起发送时流式正常（已 owner 真机确认）。详见 `think.md`「2026-07-05 iOS 无 Claude 流式」与同主题 memory。
+- **PID-reuse latent bug（已修）**：本轮代码审查发现 `agent/claudecode/proc_unix.go:49 isProcessRunning` 是纯 `kill(pid,0)`，不校验进程身份 → PID 复用会让 stale session 误判 running。本次复现因 stub 正确缺失未触发，但属真实隐患。修复在 commit `b9f4a59`（新增 `procIdentityAlive` 身份校验 seam + 回归测试 + live ps/lsof 验证 + 修复前/后对比）。

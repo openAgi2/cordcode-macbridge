@@ -6,6 +6,18 @@ Date: 2026-07-05
 审计范围: 逐项核实完成情况报告中的结构、测试、构建、文档与 scope-boundary 声明；独立复跑关键测试与产物核查。
 审计人: 独立 agent（非实现该计划的 agent）
 
+## ⚠️ 时效更正（2026-07-05 owner 校正后核实）
+
+> 本报告初稿把 `getAgent→getFirstAgentByName` 的 cache 接线修复写成"r2 计划未提交工作区"。**这是审计人的时效误判**，特此更正：
+>
+> - 该修复已提交在 **`16b0e79` "Fix Claude file relay external turn lifecycle"**（位于 `aec16b8` 与 HEAD `0460da8` 之间），同时含生产 key 回归测试 `TestGetRunningMap_ProductionClaudeRegistrationFindsClaudeCodeAgent`（注册 `"claude"`）。
+> - **HEAD（`0460da8`）的 `runningMapCache` 在生产接线良好**，`aec16b8` 的空转缺陷已不复存在于 main。
+> - 下文「建议 #2」担心的"测试全绿但生产空转被 cherry-pick"中间态风险 **已不存在**（修复在 main 上）。建议 #2 仅对"若有人脱离 main 单独 cherry-pick `aec16b8`"这种非主线场景才有意义，可作为历史记录看待。
+> - 凡下文出现"r2（未提交工作区）""r2 工作区改动未提交"等措辞，应读作"r2，已提交于 `16b0e79`"。
+> - 误判根因：审计人用 `git diff aec16b8`（aec16b8→工作树的**累积** diff）推断提交状态，未先跑 `git log` 确认修复 commit 是否已 land，也未标注 git 快照时间点。本审计对 `aec16b8` 空转缺陷本身的分析（因果链、为何测试没发现、为何 CPU 主目标仍成立）不受此更正影响，依然成立。
+>
+> owner 已在完成情况报告加 "Audit Addendum" 节、并在 exec-plan state 记录 `reports.audit`（fix_commit=16b0e79）。完成情况报告与 exec-plan 已闭环；本审计报告仅做上述时效更正。
+
 ## TL;DR（结论先行）
 
 - **计划主目标（消除 list_sessions 高 CPU）达成且在生产有效。** 真正驱动 9.5–11.8s → 4–16ms 改善的是 Fix 1+2（list 路径零 per-row transcript 解析、不再 `markIdle`、删 `/tmp` dump），它们在生产确实生效，且有定向测试与已安装二进制核查背书。

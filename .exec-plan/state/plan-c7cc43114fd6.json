@@ -30,8 +30,16 @@
   "reports": {
     "completion_report_path": "docs/2026-07-05-macbridge-claude-list-sessions-runtime-cpu-plan完成情况.md",
     "completion_report_status": "written",
-    "last_generated_at": "2026-07-05T03:05:25Z",
-    "based_on_queue_hash": "8bfdaa9e12afbf8bd73c7ed1f4770204b3f251ce2d8374bdc6076d2a4e439ac6"
+    "last_generated_at": "2026-07-05T07:04:19Z",
+    "based_on_queue_hash": "8bfdaa9e12afbf8bd73c7ed1f4770204b3f251ce2d8374bdc6076d2a4e439ac6",
+    "audit": {
+      "audit_report": "docs/2026-07-05-macbridge-claude-list-sessions-runtime-cpu-plan完成情况-审计报告.md",
+      "audited_commit": "aec16b8",
+      "verdict": "CPU primary goal met; Fix 3 runningMapCache was a production no-op at aec16b8 (registration-key wiring bug) — not downgrading any todo (all genuinely done at HEAD), but report overstated Fix 3 production effect at aec16b8.",
+      "fix_commit": "16b0e79 (Fix Claude file relay external turn lifecycle) replaced h.getAgent(\"claudecode\") with getFirstAgentByName(\"claudecode\") + added TestGetRunningMap_ProductionClaudeRegistrationFindsClaudeCodeAgent production-key regression test",
+      "report_action": "addendum appended (Audit Addendum section) rather than invalidate — CPU goal met at aec16b8; cache full effect materializes from 16b0e79; no rollback needed.",
+      "audited_at": "2026-07-05T07:04:19Z"
+    }
   },
   "plan_baseline": {
     "plan_title": "MacBridge Claude list_sessions Runtime CPU Plan",
@@ -67,10 +75,10 @@
       "reasoningEffort injection (handlers_opencode.go:115-121) must be preserved in list-safe path."
     ]
   },
-  "updated_at": "2026-07-05T03:05:25Z",
+  "updated_at": "2026-07-05T07:04:19Z",
   "closure": {
     "status": "done",
-    "basis": "16/16 todos done (13 required + 2 required:false + 1 owner-manual). All autonomous work proven + re-verified via full suite re-run; owner real-device validation passed all 4 CPU-plan acceptance items (runtime 0.0% CPU, wire_mapping_ms 4-16ms). Streaming-lag separately tracked as a different issue.",
+    "basis": "16/16 todos done (13 required + 2 required:false + 1 owner-manual). All autonomous work proven + re-verified via full suite re-run; owner real-device validation passed all 4 CPU-plan acceptance items (runtime 0.0% CPU, wire_mapping_ms 4-16ms). Streaming-lag separately tracked as a different issue. Post-completion audit found Fix 3 runningMapCache was a production no-op at aec16b8 (agent registered under driver id \"claude\", closure looked up key \"claudecode\"); fixed by 16b0e79 (getFirstAgentByName). Completion report augmented with an Audit Addendum section. No todo downgraded — CPU primary goal met at aec16b8; cache full effect from 16b0e79.",
     "acceptance": "CPU plan acceptance fully met. Separate file-relay external-turn issue tracked in docs/2026-07-05-macbridge-claude-file-relay-external-turn-plan.md (r2)."
   },
   "todos": [

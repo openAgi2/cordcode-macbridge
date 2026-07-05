@@ -31,10 +31,10 @@
   "reports": {
     "completion_report_path": "docs/2026-07-05-macbridge-claude-file-relay-external-turn-plan完成情况.md",
     "completion_report_status": "current",
-    "last_generated_at": "2026-07-05T04:05:21.772891Z",
+    "last_generated_at": "2026-07-05T09:55:00Z",
     "based_on_queue_hash": "c4ee8b41f6b3"
   },
-  "updated_at": "2026-07-05T04:05:21.772891Z",
+  "updated_at": "2026-07-05T09:55:00Z",
   "todos": [
     {
       "id": "p0-running-map-backendid-hotfix-impl",
@@ -352,5 +352,10 @@
         "checked_at": "2026-07-05T04:03:51.999643Z"
       }
     }
-  ]
+  ],
+  "closure": {
+    "status": "done",
+    "basis": "12/12 todos done (12 proven, 8 re-verified). Committed in 16b0e79. Post-completion: owner-reported streaming lag was diagnosed as the external-turn observation limit (not a code bug; Mac clean), and a PID-reuse latent bug found during this work's code review was fixed in b9f4a59 (procIdentityAlive identity-check seam + regression + live verification).",
+    "acceptance": "All file-relay lifecycle gates met (live-gated initial scan, warm-start turn_started, reader classifier, live-idle TTL, process-death bound, cached PID recheck, interrupt continue-watch, no fabricated text_delta). No wire-protocol change; IsProcessAlive public contract unchanged."
+  }
 }
