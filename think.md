@@ -288,3 +288,35 @@ iOS 显示的是**修复前持久化的本地缓存**，两层：
   是否残留 + 该 PID 现在是否仍是 claude（`ps -p <pid> -o comm,cwd`）。Mac 日志看 `enrichSessionStateWithAgent`
   返回的 runtimeState 需对照 transcript 是否真在跑（`isSessionExecutingCached`）。
 
+
+# OpenCode active turn 流式：批处理 CLI → managed server + SSE（2026-07-06）
+
+## 现象
+iOS OpenCode 模式发消息无流式（等整段答完才出现）；Claude Code 模式正常。owner 测试矩阵：OpenCode（mimo V2.5 free）Mac 流式 / iOS 非流式；Codex 经官方/cliproxyapi 两端都流式；Codex 经 cligate 两端都非流式。
+
+## 根因（OpenCode）
+`agent/opencode/opencode.go` `StartSession` → `newOpencodeSession` 永远 spawn `opencode run --format json`（批处理，一轮 turn 只发 1 帧 `text_delta`），**完全绕过** Swift 已托管的 `opencode serve`（`-opencode-url` 传入的 `httpBaseURL`/`httpAuthHeader` 在 active turn 路径是死字段，只被被动 SSE subscriber + 诊断用）。managed server 本身流式正常（mimo 实测一轮 turn 49~80 帧 `message.part.delta` 分布在数秒内）。整个 opencode agent 改造前没有任何 POST 发消息代码（`providers.go` 只有 GET `fetchJSON`）。
+
+## 修复（commit `330de91`）
+- 新增 `opencodeServerSession`（`agent/opencode/server_session.go`，实现 `core.AgentSession`）：`Send` 时 `POST /session/:id/prompt_async`（204 非阻塞），消费一条 dedicated、按 sessionID client-side 过滤的 `/global/event` SSE。
+- **复用** `sseSubscriber` 全套解析 + dedup + 生命周期翻译（`message.part.delta`→`EventText`、`session.status idle`→`EventResult`、`message.updated`→snapshot diff），只新增 `sessionFilter`（atomic；pending 态 chatID 未定时全丢，避免把别的 session 事件串到当前 iOS turn）。
+- `StartSession` 按 `httpBaseURL` 分流：server 在 → `newOpencodeServerSession`；否则回退 `newOpencodeSession`（批处理 CLI 兜底，不中途切换）。
+- 模型经 `resolveOpencodeModelLocked`（active provider 的 Name/Model）解析，建 session 时用 `{model:{id,providerID}}` 绑定。
+- `providers.go` 加 POST-capable `doRequest`，`fetchJSON` 复用。
+- live 集成测试（`server_session_live_test.go`，env-gated `OPENCODE_LIVE=1`）：80 帧流式 vs 批处理 1 帧。owner iOS mimo 真机验收逐字流式。
+
+## 关键实证（防下次重新摸黑）
+- **prompt body 的 `providerID/modelID` 不生效**（实测 Quotio body 被忽略，仍用 session 默认）。模型必须 **session 级**设定：`POST /session {model:{id,providerID}}`（字段是 `id` 不是 `modelID`）。
+- managed server 上 **xirang 报 ProviderModelNotFoundError、zhipuai-coding-plan retry 5 次失败**（疑似 auth 绑 Mac opencode App 而非 managed server），只有 **opencode/mimo-v2.5-free** 实测跑通。owner 决定只管 mimo，zhipu/xirang 不查。
+- `message.part.delta` = 流式 token 事件（sst/opencode#33397）；`/global/event` server 端**不支持** sessionID 过滤（sst/opencode#9650），**必须 client-side 过滤**（`sse_subscriber.go` 的 `extractSSESessionID` 已这么做）。
+- `opencode serve` 的 SSE 有已知可靠性 bug（静默丢 #28729、不转发 #26866）—— server_session 不能假设 SSE 永远可靠，依赖 `deltaForPartSnapshot` 兜底。
+- `x-opencode-directory` header 在 CJK workDir 有 bug（#13167/#13256），本仓库中文 owner 需留意。
+
+## Codex 流式 —— 甄别 cligate 供应商，不要错查到 appserver_session.go
+codex app-server（`agent/codex/appserver_session.go`）本身发 `item/agentMessage/delta` 完全正常（实测 31~38 帧/turn，通知名经二进制 strings 验证正确，handler/optOut/transport 全对，stdio 和 ws 两种传输都验证过）。**经官方/cliproxyapi 供应商 iOS 本就流式**。**经 cligate 供应商两端都不流式**（Mac codex + cligate 也一样），根因是 cligate 上游：`src/routes/responses-route.js:972` 和 `:1192`（`_responsesToChatBody` / `sendViaNativeResponsesProvider`）把 Responses→Chat Completions 时**硬编码 `stream:false`**，攒满整段再 `sendResponsesSSE()` 假装流式；同文件 `:1423-1441` 的 ChatGPT 账号池路径已是真流式 pipe，可参考修。**排查 codex 流式先确认供应商**，别一头扎进 appserver_session.go（那里没 bug）。
+
+## 诊断 trick
+- 数一轮 turn 的 `text_delta` 帧（go-bridge.log `relayEvents forwarding`）：1=批处理，多=流式。Claude ~1495 帧/turn 是参照。
+- codex app-server 通知名可用 `strings /Applications/Codex.app/Contents/Resources/codex | grep -i agentMessage` 核实（不需 runtime 抓包）。
+- opencode managed server 状态：`cat "$HOME/Library/Application Support/CordCode Link/opencode-managed-server.json"`（url/user/password），curl `http://127.0.0.1:<port>/global/config` 看 providers。
+- codex app-server WS daemon：`codex app-server --listen ws://127.0.0.1:<port>`（CLI 原生支持，加 `--listen` flag）。
