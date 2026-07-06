@@ -106,11 +106,12 @@ type ResumeSessionParams struct {
 }
 
 type GetSessionMessagesParams struct {
-	SessionID    string `json:"sessionId"`
-	Directory    string `json:"directory,omitempty"`
-	Limit        int    `json:"limit,omitempty"`
-	BeforeCursor string `json:"beforeCursor,omitempty"`
-	Paginate     bool   `json:"paginate,omitempty"`
+	SessionID           string `json:"sessionId"`
+	Directory           string `json:"directory,omitempty"`
+	Limit               int    `json:"limit,omitempty"`
+	BeforeCursor        string `json:"beforeCursor,omitempty"`
+	Paginate            bool   `json:"paginate,omitempty"`
+	IfNoneMatchRevision string `json:"ifNoneMatchRevision,omitempty"`
 }
 
 type DeleteSessionParams struct {
@@ -528,7 +529,9 @@ func (b *Broadcaster) Send(ev BroadcastEvent) {
 			targets[conn] = struct{}{}
 		}
 	}
-	slog.Info("go-bridge: broadcast", "backend", ev.BackendID, "session", ev.SessionID, "dir", ev.Directory, "targets", len(targets), "fallback", len(targets) > 0 && len(targets) == len(b.connSubs))
+	// Fix 5: 每 token 一帧的 INFO 日志降级为 Debug（长答时数十~上百帧/秒的 I/O 开销）。
+	// 不影响诊断——广播路径仍可由 Debug 级别观察；relayEvents 关键里程碑（turn_*/error）另 Info 记录。
+	slog.Debug("go-bridge: broadcast", "backend", ev.BackendID, "session", ev.SessionID, "dir", ev.Directory, "targets", len(targets), "fallback", len(targets) > 0 && len(targets) == len(b.connSubs))
 	b.mu.Unlock()
 
 	for conn := range targets {

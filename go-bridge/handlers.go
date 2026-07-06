@@ -40,6 +40,9 @@ type Handlers struct {
 	codexBackendMode        string
 	pendingNotifications    *PendingNotificationStore
 	broadcaster             *Broadcaster
+	// deltaBatcher（Fix 5）：text_delta/reasoning_delta 时间窗攒批，降低上游每 token 一帧
+	// 的 WS/HPKE/日志开销。relayEvents / startPassiveSubscription 通过它下发，而非直接 broadcaster.Send。
+	deltaBatcher            *DeltaBatcher
 	relayRunning            map[string]bool   // sessionID/relayKey → 是否已有 relay goroutine
 	relayRunningKind        map[string]string // sessionID → agent/file relay 类型，用于避免 Claude file relay 抢占真实 stdout relay
 	deliveryPrekeys         *PrekeyStore
@@ -124,6 +127,8 @@ func newHandlersWithContext(ctx context.Context) *Handlers {
 		ctx:                    ctx,
 		cleanupStop:            make(chan struct{}),
 	}
+	// Fix 5：text_delta/reasoning_delta 攒批（在 broadcaster.Send 前按 33ms 窗口合并）。
+	h.deltaBatcher = NewDeltaBatcher(h.broadcaster)
 	// TTL cache for the Claude running map (Fix 3). The recompute closure binds to
 	// whatever claudecode agent is currently registered, so the cache is valid
 	// across register/unregister. Invalidated on session-registry state changes.
@@ -306,6 +311,10 @@ func (h *Handlers) Shutdown(ctx context.Context) error {
 		close(h.cleanupStop)
 		if h.observation != nil {
 			h.observation.Stop()
+		}
+		// Fix 5: 停止 delta 攒批 ticker 并 flush 残留 text（流式末尾的 token 不丢）。
+		if h.deltaBatcher != nil {
+			h.deltaBatcher.Stop()
 		}
 
 		// Snapshot active sessions under the lock and clear the registry so
@@ -2388,7 +2397,7 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 		if msgs, ok := result["messages"].([]map[string]interface{}); ok {
 			metrics.resultCount = len(msgs)
 		}
-		metrics.sendResult(conn, msg.RequestID, result, nil)
+		metrics.sendResult(conn, msg.RequestID, applyIfNoneMatch(result, params.IfNoneMatchRevision), nil)
 		return
 	}
 
@@ -2417,7 +2426,7 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 			}
 			metrics.wireMapping += time.Since(mappingStarted)
 			metrics.resultCount = len(messages)
-			metrics.sendResult(conn, msg.RequestID, result, nil)
+			metrics.sendResult(conn, msg.RequestID, applyIfNoneMatch(result, params.IfNoneMatchRevision), nil)
 			return
 		}
 		if !errors.Is(err, core.ErrNotSupported) {
@@ -2452,7 +2461,7 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 	}
 	metrics.wireMapping += time.Since(mappingStarted)
 	metrics.resultCount = len(result)
-	metrics.sendResult(conn, msg.RequestID, payload, nil)
+	metrics.sendResult(conn, msg.RequestID, applyIfNoneMatch(payload, params.IfNoneMatchRevision), nil)
 }
 
 func (h *Handlers) getSessionContextUsage(agent core.Agent, sessionID string) *core.ContextUsage {

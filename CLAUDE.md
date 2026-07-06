@@ -52,6 +52,22 @@ an end-to-end-encrypted public Relay.
 4. 按改动范围验证 direct、Relay、撤销、重连或 mailbox；
 5. 发布前执行 secret scan。UI automation 和真机操作仍须 owner 明确授权。
 
+### 跨仓修改授权边界
+
+本项目的 MacBridge 仓库 `cordcode-macbridge` 与相邻 iOS 仓库 `../cordcode-ios/`
+共同构成同一个产品系统。凡是 bug 根因、协议定义、session/history/turn/runtime、
+agent driver、Relay 或 capability 行为需要 MacBridge 与 iOS 同步修改时，agent 已被授权在
+当前任务内直接读取、编辑、测试这两个仓库，不需要再次向 owner 请求“是否允许跨仓修改”。
+
+agent 应主动完成双仓 coherent change：MacBridge canonical protocol/source/test、iOS
+mirror/source/test、定向 build/test、以及无法执行项的诚实报告。不要把“这要动 iOS 仓库”
+或“这要跨仓改”作为阻塞问题抛给 owner；除非任务明确限制“只改 MacBridge”，否则跨仓
+协议/运行时修复应直接实施。
+
+需要 owner 额外授权的仍然仅限：UI tests / snapshot tests / simulator automation / 真机 UI
+操作、生产 VPS/Relay 部署、真实账号或外部环境操作、破坏性命令、以及会改变产品语义但
+任务未明确要求的取舍。
+
 ## Build & test
 
 > **Local env prerequisites**: iOS/真机与 macOS app 构建前需选择仓库要求的完整 Xcode。

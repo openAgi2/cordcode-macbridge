@@ -300,6 +300,11 @@ export interface BridgeGetSessionMessagesParams {
   limit?: number;
   paginate?: boolean;
   beforeCursor?: string;
+  /** P3 etag: client's last-known messages revision. When it matches the server's
+   *  current revision, the server returns {unchanged:true} with no messages body,
+   *  cutting the recurring ~685KB transfer to a few bytes (major idle/cellular heat
+   *  win). Additive: old servers ignore it (always return full). */
+  ifNoneMatchRevision?: string;
 }
 
 export interface BridgeGetSessionMessagesResult {
@@ -308,6 +313,12 @@ export interface BridgeGetSessionMessagesResult {
   newestCursor?: string; // informational, for client merge/dedup
   hasMore: boolean;
   contextUsage?: unknown;
+  /** P3 etag: revision of the messages payload (sha256[:16] of marshaled messages).
+   *  Present on full responses; send back as ifNoneMatchRevision next time. */
+  revision?: string;
+  /** P3 etag: true when ifNoneMatchRevision matched → messages omitted. Client MUST
+   *  keep its cached messages and skip merge/signature work. */
+  unchanged?: boolean;
 }
 
 /** Backend capability string for get_session_messages history paging, not list_sessions paging. */

@@ -665,7 +665,7 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 				Data:      data,
 				Seq:       seq,
 			}
-			h.broadcaster.Send(BroadcastEvent{
+			h.deltaBatcher.Send(BroadcastEvent{
 				BackendID: backendID,
 				SessionID: ev.SessionID,
 				Message:   msg,

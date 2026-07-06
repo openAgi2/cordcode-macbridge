@@ -656,7 +656,7 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 						Data:      map[string]interface{}{"done": true, "reason": "events_channel_closed"},
 						Seq:       seq,
 					}
-					h.broadcaster.Send(BroadcastEvent{
+					h.deltaBatcher.Send(BroadcastEvent{
 						BackendID: backendID,
 						SessionID: sessionID,
 						Directory: dir,
@@ -723,7 +723,7 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 				Data:      data,
 				Seq:       seq,
 			}
-			h.broadcaster.Send(BroadcastEvent{
+			h.deltaBatcher.Send(BroadcastEvent{
 				BackendID: backendID,
 				SessionID: sessionID,
 				Directory: directory,
@@ -774,7 +774,7 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 					Data:      map[string]interface{}{"done": true, "text": ""},
 					Seq:       seq,
 				}
-				h.broadcaster.Send(BroadcastEvent{
+				h.deltaBatcher.Send(BroadcastEvent{
 					BackendID: backendID,
 					SessionID: sessionID,
 					Directory: dir,

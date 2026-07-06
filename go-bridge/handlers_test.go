@@ -1573,6 +1573,82 @@ func TestHandleGetSessionMessagesPrefersRichHistoryProvider(t *testing.T) {
 	}
 }
 
+func TestHandleGetSessionMessagesIfNoneMatchShortCircuits(t *testing.T) {
+	agent := &fakeAgent{
+		name: "codex",
+		richHistory: []core.RichHistoryEntry{{
+			ID:        "msg-1",
+			Role:      "assistant",
+			Content:   "stable answer",
+			Timestamp: time.Unix(1710000000, 0).UTC(),
+		}},
+	}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	// 1st call: no ifNoneMatch → full payload + revision.
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "codex",
+		Method:    "get_session_messages",
+		RequestID: "r1",
+		Params: mustJSONRaw(t, map[string]any{
+			"sessionId": "ses_1",
+		}),
+	})
+	resp1 := readJSONMaps(t, clientConn, 1)[0]
+	data1, _ := resp1["data"].(map[string]any)
+	rev, ok := data1["revision"].(string)
+	if !ok || rev == "" {
+		t.Fatalf("first call missing revision: %#v", data1)
+	}
+	if _, hasMsgs := data1["messages"]; !hasMsgs {
+		t.Fatalf("first call should return full messages")
+	}
+
+	// 2nd call: same revision → unchanged, no messages body.
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "codex",
+		Method:    "get_session_messages",
+		RequestID: "r2",
+		Params: mustJSONRaw(t, map[string]any{
+			"sessionId":           "ses_1",
+			"ifNoneMatchRevision": rev,
+		}),
+	})
+	resp2 := readJSONMaps(t, clientConn, 1)[0]
+	data2, _ := resp2["data"].(map[string]any)
+	if data2["unchanged"] != true {
+		t.Fatalf("second call (matching revision) should be unchanged: %#v", data2)
+	}
+	if data2["revision"] != rev {
+		t.Fatalf("unchanged revision mismatch: got %#v want %#v", data2["revision"], rev)
+	}
+	if _, hasMsgs := data2["messages"]; hasMsgs {
+		t.Fatalf("unchanged response must omit messages body")
+	}
+
+	// 3rd call: stale revision → full payload again.
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "codex",
+		Method:    "get_session_messages",
+		RequestID: "r3",
+		Params: mustJSONRaw(t, map[string]any{
+			"sessionId":           "ses_1",
+			"ifNoneMatchRevision": "stale-rev",
+		}),
+	})
+	resp3 := readJSONMaps(t, clientConn, 1)[0]
+	data3, _ := resp3["data"].(map[string]any)
+	if data3["unchanged"] == true {
+		t.Fatalf("stale revision must not be unchanged: %#v", data3)
+	}
+	if _, hasMsgs := data3["messages"]; !hasMsgs {
+		t.Fatalf("stale revision should return full messages")
+	}
+}
+
 func TestHandleGetSessionMessagesSynthesizesMissingRichHistoryIDs(t *testing.T) {
 	agent := &fakeAgent{
 		name: "codex",
