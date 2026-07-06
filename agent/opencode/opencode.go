@@ -497,6 +497,8 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	workDir := a.workDir
 	extraEnv := a.providerEnvLocked()
 	extraEnv = append(extraEnv, a.sessionEnv...)
+	baseURL := a.httpBaseURL
+	providerID, modelID := resolveOpencodeModelLocked(a)
 	if a.activeIdx >= 0 && a.activeIdx < len(a.providers) {
 		if m := a.providers[a.activeIdx].Model; m != "" {
 			model = m
@@ -504,7 +506,29 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	}
 	a.mu.Unlock()
 
+	// Streaming server path: when a managed `opencode serve` URL is configured
+	// (Swift OpenCodeManagedServer), route active turns through the HTTP API
+	// + /global/event SSE so iOS sees incremental message.part.delta during
+	// generation. Falls back to the batch `opencode run --format json` CLI when
+	// no server URL is configured. See docs/2026-07-06-codex-opencode-streaming-fix-plan.md.
+	if baseURL != "" {
+		return newOpencodeServerSession(ctx, a, sessionID, providerID, modelID)
+	}
 	return newOpencodeSession(ctx, cmd, workDir, model, mode, sessionID, extraEnv)
+}
+
+// resolveOpencodeModelLocked returns the (providerID, modelID) pair to bind to
+// a new server-side opencode session. Prefers the active provider; otherwise
+// parses a.model as "provider/id" (or just "id"). Caller must hold a.mu.
+func resolveOpencodeModelLocked(a *Agent) (providerID, modelID string) {
+	if a.activeIdx >= 0 && a.activeIdx < len(a.providers) {
+		p := a.providers[a.activeIdx]
+		return p.Name, p.Model
+	}
+	if i := strings.Index(a.model, "/"); i >= 0 {
+		return a.model[:i], a.model[i+1:]
+	}
+	return "", a.model
 }
 
 // ListSessions runs `opencode session list` and parses the JSON output.

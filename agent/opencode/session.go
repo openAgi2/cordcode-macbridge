@@ -77,7 +77,7 @@ func (s *opencodeSession) Send(prompt string, images []core.ImageAttachment, fil
 		filePaths := core.SaveFilesToDisk(s.workDir, files)
 		prompt = core.AppendFileRefs(prompt, filePaths)
 	}
-	prompt, imagePaths, err := s.stageImages(prompt, images)
+	prompt, imagePaths, err := stageOpencodeImages(s.workDir, prompt, images)
 	if err != nil {
 		return err
 	}
@@ -120,14 +120,14 @@ func (s *opencodeSession) Send(prompt string, images []core.ImageAttachment, fil
 	return nil
 }
 
-func (s *opencodeSession) stageImages(prompt string, images []core.ImageAttachment) (string, []string, error) {
+func stageOpencodeImages(workDir, prompt string, images []core.ImageAttachment) (string, []string, error) {
 	if len(images) == 0 {
 		return prompt, nil, nil
 	}
 
-	imgDir := filepath.Join(s.workDir, ".cc-connect", "images")
+	imgDir := filepath.Join(workDir, ".cc-connect", "images")
 	if err := os.MkdirAll(imgDir, 0o755); err != nil {
-		return "", nil, fmt.Errorf("opencodeSession: create image dir: %w", err)
+		return "", nil, fmt.Errorf("opencode: create image dir: %w", err)
 	}
 
 	imagePaths := make([]string, 0, len(images))
@@ -136,7 +136,7 @@ func (s *opencodeSession) stageImages(prompt string, images []core.ImageAttachme
 		fname := fmt.Sprintf("img_%d_%d%s", time.Now().UnixMilli(), i, ext)
 		fpath := filepath.Join(imgDir, fname)
 		if err := os.WriteFile(fpath, img.Data, 0o644); err != nil {
-			return "", nil, fmt.Errorf("opencodeSession: save image: %w", err)
+			return "", nil, fmt.Errorf("opencode: save image: %w", err)
 		}
 		imagePaths = append(imagePaths, fpath)
 	}

@@ -8,6 +8,12 @@
 
 ## [Unreleased]
 
+### 2026-07-06 — 修复 iOS OpenCode 模式无流式输出（active turn 改走 managed server + SSE）
+
+- **改了什么**：OpenCode 模式下 iOS 发消息时，go-bridge 的 active turn 从批处理 `opencode run --format json`（一轮 turn 只在结束时发 1 帧 `text_delta`，iOS 表现为「等整段答完才一次性出现」）改为走 Swift 已托管的 `opencode serve` HTTP API + `/global/event` SSE。新建 `opencodeServerSession`（实现 `core.AgentSession`）：`Send` 时 `POST /session/:id/prompt_async`（204 非阻塞），消费一条 dedicated、按 sessionID client-side 过滤的 SSE，`message.part.delta` → 增量 `EventText`、`session.status idle` → `EventResult`。复用 `sseSubscriber` 全套事件解析 + dedup + 生命周期翻译，只新增 `sessionFilter`（atomic；pending 态全丢，避免 chatID 未定前把别的 session 事件串到 iOS）。`StartSession` 按 `httpBaseURL` 分流（server 在 → 流式；否则回退原 CLI 批处理，保留兜底）。模型经 `resolveOpencodeModelLocked` 解析，建 session 时用 `{model:{id,providerID}}` 绑定（prompt body 的 `providerID/modelID` 实测不生效，模型必须 session 级设定）。`providers.go` 加 POST-capable `doRequest`，`fetchJSON` 复用。绝不 kill `opencode serve`（全局共享，归 Swift `OpenCodeManagedServer.swift` 管）。
+- **有何提升**：iOS OpenCode 模式（owner 真机实测 opencode/mimo-v2.5-free）发「讲一个1000字的故事」，消息页从「等整段答完才一次性出现」变为**逐字流式增长**，与 Mac opencode App 一致。live 集成测试（`server_session_live_test.go`，env-gated）对着托管 server 实测一轮 turn **80 帧 EventText**（对比批处理 CLI 的 1 帧）+ EventResult 正常收口。Claude/Codex 路径不动。注：Codex 模式经 cligate 供应商的非流式是 **cligate 上游问题**（`responses-route.js` 硬编码 `stream:false`，攒满整段再假装流式），不在本次范围；codex 经流式供应商（官方/cliproxyapi）iOS 本就流式正常。
+- 改动限于 MacBridge `agent/opencode`：新增 `server_session.go` + `server_session_test.go` + `server_session_live_test.go`，改 `opencode.go`（`StartSession` 分流 + `resolveOpencodeModelLocked`）、`providers.go`（`doRequest`）、`sse_subscriber.go`（`sessionFilter`）、`session.go`（`stageImages` 抽成自由函数 `stageOpencodeImages` 供 CLI 和 server session 共用）、`session_test.go`。不动 wire protocol（对 iOS 仍是 `text_delta`，只是帧数从 1 变多）、不动 iOS、不动 relay。
+
 ### 2026-07-05 — 修复 Claude session PID 复用导致 stale session 误判 running
 
 - **改了什么**：`agent/claudecode` 判定 Claude session 是否 running 的 PID 活性检查从纯 `kill(pid, 0)` 升级为 PID 身份校验。新增可注入 seam `procIdentityAlive(pid, expectCwd)`：在 PID 存活之上，再用 `ps` 校验可执行名包含 `claude`、用 `/proc/<pid>/cwd`（Linux）或 `lsof`（macOS）校验 cwd 与 stub 记录一致；任一强不匹配（PID 被复用为非 claude 进程，或 cwd 不同）即判非 live。`LiveSessionProcess` 和 `GetRunningSessionIDs` 改用该 seam，`IsProcessAlive`（file-relay 每 tick 的 cached PID 复查）保留纯活性语义不动。身份校验对平台探测失败 fail-open（不因 ps/lsof 暂时不可用而误判 idle），PID-reuse 防线只依赖强不匹配分支。Windows 仅为编辑器/CI 可移植性构建，fail-open 占位。

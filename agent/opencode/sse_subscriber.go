@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -17,6 +18,10 @@ import (
 
 // sseSubscriber 通过 HTTP SSE /global/event 端点被动订阅 OpenCode 服务端事件。
 // 和 Codex passive subscriber 类似，不需要发送消息就能接收所有 session 的实时事件。
+//
+// 也被 opencodeServerSession 复用为 active-turn 的事件源：构造时通过
+// setSessionFilter 锁定单个 sessionID，emit 只放行该 session 的事件，让 active
+// session 复用全套解析 + dedup + turn 生命周期翻译逻辑，只收自己的事件。
 type sseSubscriber struct {
 	url        string
 	authHeader string
@@ -35,6 +40,12 @@ type sseSubscriber struct {
 	partKinds    map[string]string
 	partContent  map[string]string
 	completed    map[string]bool
+
+	// sessionFilter (active mode): when filterActive is true, emit drops any
+	// event whose SessionID != sessionFilter. Lock-free via atomics so emit
+	// stays cheap. Empty/resume case leaves filterActive false (observe all).
+	filterActive atomic.Bool
+	sessionFilter atomic.Value // string
 }
 
 func newSSESubscriber(ctx context.Context, a *Agent) *sseSubscriber {
@@ -743,12 +754,44 @@ func firstString(raw map[string]any, keys ...string) string {
 }
 
 func (s *sseSubscriber) emit(ev core.Event) {
+	// Active-mode filter: when filterActive, only forward events whose
+	// SessionID exactly matches sessionFilter. sessionFilter == "" means
+	// "pending" (chatID not yet known) — drop everything so no other session's
+	// events leak to the active consumer before the filter is set.
+	if s.filterActive.Load() {
+		f, _ := s.sessionFilter.Load().(string)
+		if f == "" || ev.SessionID != f {
+			return
+		}
+	}
 	select {
 	case s.events <- ev:
 	case <-s.ctx.Done():
 	default:
 		slog.Debug("opencode SSE subscriber: event dropped", "type", ev.Type)
 	}
+}
+
+// setSessionFilter locks the subscriber to a single sessionID (active mode).
+// Subsequent emit calls drop events whose SessionID != id. Used by
+// opencodeServerSession once the server-side session id is known. No-op if id
+// is empty (leaves the pending "" filter in place).
+func (s *sseSubscriber) setSessionFilter(id string) {
+	if id == "" {
+		return
+	}
+	s.sessionFilter.Store(id)
+}
+
+// newFilteredSSESubscriber creates a dedicated subscriber for one active
+// session. filterActive is true from construction so nothing leaks; if
+// sessionID is empty the filter is "pending" (drops all) until the caller
+// resolves the id and calls setSessionFilter.
+func newFilteredSSESubscriber(ctx context.Context, a *Agent, sessionID string) *sseSubscriber {
+	sub := newSSESubscriber(ctx, a)
+	sub.sessionFilter.Store(sessionID)
+	sub.filterActive.Store(true)
+	return sub
 }
 
 // Close 关闭 SSE 连接和事件 channel。

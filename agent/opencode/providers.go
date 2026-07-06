@@ -1,6 +1,7 @@
 package opencode
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -17,7 +18,11 @@ func basicAuth(username, password string) string {
 	return base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
 }
 
-func (a *Agent) fetchJSON(ctx context.Context, path string) (json.RawMessage, error) {
+// doRequest is the shared HTTP helper for the OpenCode server API. method is
+// GET/POST/DELETE etc.; body (if non-nil) is JSON-encoded. Returns status code
+// + raw body. Callers interpret status. Used by fetchJSON (GET) and by the
+// active-turn server_session (POST prompt_async / abort / permissions).
+func (a *Agent) doRequest(ctx context.Context, method, path string, body any) (int, []byte, error) {
 	a.mu.RLock()
 	baseURL := a.httpBaseURL
 	authHeader := a.httpAuthHeader
@@ -25,12 +30,24 @@ func (a *Agent) fetchJSON(ctx context.Context, path string) (json.RawMessage, er
 	a.mu.RUnlock()
 
 	if baseURL == "" {
-		return nil, core.ErrNotSupported
+		return 0, nil, core.ErrNotSupported
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+path, nil)
+	var bodyReader io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return 0, nil, err
+		}
+		bodyReader = bytes.NewReader(b)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, baseURL+path, bodyReader)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
 	if authHeader != "" {
 		req.Header.Set("Authorization", authHeader)
@@ -41,16 +58,24 @@ func (a *Agent) fetchJSON(ctx context.Context, path string) (json.RawMessage, er
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	defer resp.Body.Close()
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
+		return resp.StatusCode, nil, err
+	}
+	return resp.StatusCode, raw, nil
+}
+
+func (a *Agent) fetchJSON(ctx context.Context, path string) (json.RawMessage, error) {
+	code, raw, err := a.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("opencode HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	if code >= 400 {
+		return nil, fmt.Errorf("opencode HTTP %d: %s", code, strings.TrimSpace(string(raw)))
 	}
 	return raw, nil
 }

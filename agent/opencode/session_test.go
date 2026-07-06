@@ -72,14 +72,13 @@ func TestNewOpencodeSession_ContinueSessionTreatedAsFresh(t *testing.T) {
 
 func TestOpencodeSessionStageImages(t *testing.T) {
 	dir := t.TempDir()
-	s := &opencodeSession{workDir: dir}
 
-	prompt, imagePaths, err := s.stageImages("", []core.ImageAttachment{
+	prompt, imagePaths, err := stageOpencodeImages(dir, "", []core.ImageAttachment{
 		{MimeType: "image/jpeg", Data: []byte{0xff, 0xd8, 0xff}},
 		{MimeType: "image/webp", Data: []byte("webp")},
 	})
 	if err != nil {
-		t.Fatalf("stageImages: %v", err)
+		t.Fatalf("stageOpencodeImages: %v", err)
 	}
 	if prompt != "Please analyze the attached image(s)." {
 		t.Fatalf("prompt = %q", prompt)
