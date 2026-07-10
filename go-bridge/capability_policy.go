@@ -27,8 +27,12 @@ func NewCapabilityPolicy() *CapabilityPolicy {
 			// read_file 已在 handleReadFile 内做 workspace 锚点校验（P0-1）。
 			// 这里登记是为了将来把"是否允许该设备读文件"升级为显式 capability，
 			// 并为新增的文件类方法提供一处登记点，避免遗漏。
-			"read_file":      true,
-			"list_directory": true,
+			"read_file":           true,
+			"list_directory":      true,
+			"get_git_context":     true,
+			"checkout_git_branch": true,
+			"create_git_branch":   true,
+			"create_git_worktree": true,
 		},
 	}
 }

@@ -25,7 +25,8 @@ func (h *Handlers) handleOpenCodeRPC(conn Connection, msg WireMessage) {
 		"fetch_todos", "get_usage", "run_diagnostics",
 		"get_workspace_diff",
 		"list_memory_files", "read_memory_file", "fetch_content_chunk", "read_file",
-		"list_directory",
+		"list_directory", "get_git_context", "checkout_git_branch",
+		"create_git_branch", "create_git_worktree",
 		"rename_session", "archive_session", "compress_context",
 		"delete_session", "list_models", "switch_model",
 		"get_session_messages":

@@ -101,6 +101,11 @@ list_memory_files
 read_memory_file
 fetch_content_chunk
 read_file
+list_directory
+get_git_context
+checkout_git_branch
+create_git_branch
+create_git_worktree
 rename_session
 share_session
 archive_session

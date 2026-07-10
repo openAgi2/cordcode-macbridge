@@ -207,6 +207,11 @@ type UnifiedError = {
 | `send_message` | `backendId`, `sessionId`, `content`, `agent?`, `model?`, `reasoningEffort?`, `attachments?`, `directory?` | 发送消息 |
 | `abort_generation` | `backendId`, `sessionId` | 中断生成 |
 | `list_projects` | `backendId` | 列出项目目录 |
+| `list_directory` | `backendId`, `path` | 浏览 Mac 上的远程文件夹 |
+| `get_git_context` | `backendId`, `directory` | 读取仓库根目录、当前分支、工作树与本地分支 |
+| `checkout_git_branch` | `backendId`, `directory`, `branch` | 在指定工作树切换已有本地分支 |
+| `create_git_branch` | `backendId`, `directory`, `branch` | 创建并切换到新分支 |
+| `create_git_worktree` | `backendId`, `directory`, `path`, `branch` | 在明确的绝对路径创建新分支工作树 |
 
 ### 4.2 可选方法（由 driver capabilities 声明）
 

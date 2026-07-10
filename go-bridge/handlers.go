@@ -742,6 +742,14 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleReadFile(conn, msg)
 	case "list_directory":
 		h.handleListDirectory(conn, msg)
+	case "get_git_context":
+		h.handleGetGitContext(conn, msg)
+	case "checkout_git_branch":
+		h.handleCheckoutGitBranch(conn, msg)
+	case "create_git_branch":
+		h.handleCreateGitBranch(conn, msg)
+	case "create_git_worktree":
+		h.handleCreateGitWorktree(conn, msg)
 	case "rename_session":
 		h.handleRenameSession(conn, msg, agent)
 	case "share_session":
