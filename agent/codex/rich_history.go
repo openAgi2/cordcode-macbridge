@@ -482,6 +482,13 @@ func (b *richHistoryBuilder) addPatchResultByCallID(callID string, changes []cor
 	if b.current == nil || len(changes) == 0 {
 		return
 	}
+	// Newer Codex transcripts can emit patch_apply_end before the matching
+	// custom_tool_call has been recorded in the response-item stream. There is
+	// no step to attach it to in that ordering, so leave it unrendered rather
+	// than indexing Steps[-1] and dropping the whole RPC connection.
+	if len(b.current.Steps) == 0 {
+		return
+	}
 	stepIdx := len(b.current.Steps) - 1
 	if callID != "" {
 		idx, ok := b.callIDMap[callID]

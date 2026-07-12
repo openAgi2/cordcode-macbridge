@@ -53,6 +53,28 @@ func TestGetRichSessionHistory_TextOnly(t *testing.T) {
 	}
 }
 
+func TestGetRichSessionHistory_PatchApplyEndWithoutRecordedToolDoesNotPanic(t *testing.T) {
+	codexHome := filepath.Join(t.TempDir(), ".codex")
+	sessionID := "rich-orphan-patch-apply-end"
+	rollout := "" +
+		`{"type":"session_meta","payload":{"id":"` + sessionID + `","cwd":"/tmp"}}` + "\n" +
+		`{"type":"response_item","timestamp":"2026-05-20T12:00:01Z","payload":{"role":"user","content":[{"type":"input_text","text":"update the file"}]}}` + "\n" +
+		`{"type":"event_msg","timestamp":"2026-05-20T12:00:02Z","payload":{"type":"patch_apply_end","call_id":"call_missing","status":"completed","changes":{"updated":[{"path":"main.go","diff":"@@ -1 +1 @@"}]}}}` + "\n" +
+		`{"type":"response_item","timestamp":"2026-05-20T12:00:03Z","payload":{"role":"assistant","content":[{"type":"output_text","text":"done"}]}}` + "\n"
+	writeTestRollout(t, codexHome, sessionID, rollout)
+
+	entries, err := getRichSessionHistory(sessionID, codexHome, 0)
+	if err != nil {
+		t.Fatalf("getRichSessionHistory() error = %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("len(entries) = %d, want 2", len(entries))
+	}
+	if entries[1].Content != "done" {
+		t.Errorf("assistant content = %q, want done", entries[1].Content)
+	}
+}
+
 func TestGetRichSessionHistory_UserInputImageFiles(t *testing.T) {
 	codexHome := filepath.Join(t.TempDir(), ".codex")
 	sessionID := "rich-user-image"

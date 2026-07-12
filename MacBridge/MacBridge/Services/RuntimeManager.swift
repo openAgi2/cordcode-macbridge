@@ -122,6 +122,9 @@ struct RuntimeConfig {
             "/bin",
             "/usr/sbin",
             "/sbin",
+            // Codex desktop was folded into ChatGPT.app. Its bundled CLI is
+            // still named `codex`, but is no longer under /Applications/Codex.app.
+            "/Applications/ChatGPT.app/Contents/Resources",
             "/Applications/Codex.app/Contents/Resources",
         ]
     }

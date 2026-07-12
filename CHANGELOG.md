@@ -8,6 +8,21 @@
 
 ## [Unreleased]
 
+### 2026-07-12 — 兼容 ChatGPT App 内嵌的 Codex runtime
+
+- **改了什么**：CordCode Link 启动 go-bridge 时补入新版 ChatGPT App 的 Codex CLI 目录（`/Applications/ChatGPT.app/Contents/Resources`）。OpenAI 将独立 Codex App 合并为 ChatGPT App 后，该目录中的可执行文件仍名为 `codex`，但旧的 `/Applications/Codex.app/...` 路径已不存在。
+- **有何提升**：使用新版 ChatGPT App 的用户不再被误判为“未安装 Codex”；Bridge 可正常以 app-server stdio 模式启动 Codex、iOS 可恢复加载 Codex session。原独立 Codex App 路径继续保留，兼容未升级用户。
+
+### 2026-07-12 — 修复新版 Codex 会话打开时断连
+
+- **改了什么**：Codex 新版 transcript 可能先写入 `patch_apply_end`、后写入对应的工具调用；rich-history 解析器此前假定已有可挂载的 tool step，错误索引空 steps 并触发 Go panic。现在只忽略无法关联的孤立 patch 完成事件，继续返回该会话的真实消息历史。
+- **有何提升**：iOS 打开新版 Codex 创建且包含文件修改的 session 时，不再因 Bridge 连接被 panic 中断而无限“加载中”；其余消息、已关联 patch 与旧版会话解析保持不变。
+
+### 2026-07-12 — 打开会话时不再显示冗余完成通知
+
+- **改了什么**：iOS 打开某个会话时会撤销该会话已排队或已送达的「任务已完成」本地通知；完成回调也会在当前正在显示该会话时跳过投递。
+- **有何提升**：用户已在消息页阅读该会话时，不会再被同一会话的完成横幅遮挡；切到其他会话或离开 App 后的后台完成通知仍会保留。
+
 ### 2026-07-06 — 修复 iOS OpenCode 模式无流式输出（active turn 改走 managed server + SSE）
 
 - **改了什么**：OpenCode 模式下 iOS 发消息时，go-bridge 的 active turn 从批处理 `opencode run --format json`（一轮 turn 只在结束时发 1 帧 `text_delta`，iOS 表现为「等整段答完才一次性出现」）改为走 Swift 已托管的 `opencode serve` HTTP API + `/global/event` SSE。新建 `opencodeServerSession`（实现 `core.AgentSession`）：`Send` 时 `POST /session/:id/prompt_async`（204 非阻塞），消费一条 dedicated、按 sessionID client-side 过滤的 SSE，`message.part.delta` → 增量 `EventText`、`session.status idle` → `EventResult`。复用 `sseSubscriber` 全套事件解析 + dedup + 生命周期翻译，只新增 `sessionFilter`（atomic；pending 态全丢，避免 chatID 未定前把别的 session 事件串到 iOS）。`StartSession` 按 `httpBaseURL` 分流（server 在 → 流式；否则回退原 CLI 批处理，保留兜底）。模型经 `resolveOpencodeModelLocked` 解析，建 session 时用 `{model:{id,providerID}}` 绑定（prompt body 的 `providerID/modelID` 实测不生效，模型必须 session 级设定）。`providers.go` 加 POST-capable `doRequest`，`fetchJSON` 复用。绝不 kill `opencode serve`（全局共享，归 Swift `OpenCodeManagedServer.swift` 管）。
