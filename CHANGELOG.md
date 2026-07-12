@@ -8,6 +8,11 @@
 
 ## [Unreleased]
 
+### 2026-07-12 — 修复 Codex 会话列表时间被迁移时间覆盖
+
+- **改了什么**：Codex 会话列表不再把 JSONL 文件的系统修改时间直接当作会话更新时间；改为从会话记录末尾的真实事件时间戳推导，只有记录中没有有效时间戳时才回退到文件时间。
+- **有何提升**：新版 Codex/ChatGPT 迁移批量触碰历史记录后，各会话仍显示并按各自真实的最后活动时间排序，不会全部停在同一个迁移时刻。
+
 ### 2026-07-12 — 兼容 ChatGPT App 内嵌的 Codex runtime
 
 - **改了什么**：CordCode Link 启动 go-bridge 时补入新版 ChatGPT App 的 Codex CLI 目录（`/Applications/ChatGPT.app/Contents/Resources`）。OpenAI 将独立 Codex App 合并为 ChatGPT App 后，该目录中的可执行文件仍名为 `codex`，但旧的 `/Applications/Codex.app/...` 路径已不存在。

@@ -115,6 +115,51 @@ func TestSessionListCacheUsesSessionIDAsTimestampTieBreaker(t *testing.T) {
 	}
 }
 
+func TestSessionListCacheUsesTranscriptTimestampWhenMTimesMatch(t *testing.T) {
+	codexHome := filepath.Join(t.TempDir(), ".codex")
+	sessionsDir := filepath.Join(codexHome, "sessions")
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	migrationTime := time.Date(2026, 7, 10, 12, 53, 0, 0, time.UTC)
+	fixtures := []struct {
+		id        string
+		updatedAt time.Time
+	}{
+		{"older-session", time.Date(2026, 7, 6, 12, 45, 0, 0, time.UTC)},
+		{"newer-session", time.Date(2026, 7, 9, 9, 30, 0, 0, time.UTC)},
+	}
+	for _, fixture := range fixtures {
+		path := filepath.Join(sessionsDir, "rollout-"+fixture.id+".jsonl")
+		content := strings.Join([]string{
+			`{"timestamp":"2026-07-01T00:00:00Z","type":"session_meta","payload":{"id":"` + fixture.id + `","cwd":"/tmp/project"}}`,
+			`{"timestamp":"` + fixture.updatedAt.Format(time.RFC3339Nano) + `","type":"event_msg","payload":{"type":"task_complete"}}`,
+		}, "\n")
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, migrationTime, migrationTime); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var cache sessionListCache
+	sessions, err := cache.list(context.Background(), codexHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("sessions length = %d, want 2", len(sessions))
+	}
+	if sessions[0].ID != "newer-session" || !sessions[0].ModifiedAt.Equal(fixtures[1].updatedAt) {
+		t.Fatalf("first session = %#v, want newer transcript timestamp", sessions[0])
+	}
+	if sessions[1].ID != "older-session" || !sessions[1].ModifiedAt.Equal(fixtures[0].updatedAt) {
+		t.Fatalf("second session = %#v, want older transcript timestamp", sessions[1])
+	}
+}
+
 func TestSessionListCacheUsesFirstUserPromptAsSummary(t *testing.T) {
 	codexHome := filepath.Join(t.TempDir(), ".codex")
 	sessionsDir := filepath.Join(codexHome, "sessions")

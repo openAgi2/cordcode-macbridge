@@ -308,12 +308,42 @@ func parseCodexSessionFile(path string) *core.AgentSessionInfo {
 		ID:              sessionID,
 		Summary:         summary,
 		MessageCount:    msgCount,
-		ModifiedAt:      stat.ModTime(),
+		ModifiedAt:      codexTranscriptUpdatedAt(f, stat.Size(), stat.ModTime()),
 		Directory:       sessionCwd,
 		ModelID:         modelID,
 		ProviderID:      providerID,
 		ReasoningEffort: reasoningEffort,
 	}
+}
+
+// codexTranscriptUpdatedAt reads a bounded tail of the transcript for its latest
+// recorded event timestamp. Codex migrations can batch-touch historical JSONL
+// files, making filesystem mtime an inaccurate session update time.
+func codexTranscriptUpdatedAt(f *os.File, size int64, fallback time.Time) time.Time {
+	start := int64(0)
+	if size > codexSessionListPrefixBytes {
+		start = size - codexSessionListPrefixBytes
+	}
+
+	scanner := bufio.NewScanner(io.NewSectionReader(f, start, size-start))
+	scanner.Buffer(make([]byte, 256*1024), codexSessionScannerMaxTokenSize)
+	updatedAt := time.Time{}
+	for scanner.Scan() {
+		var entry struct {
+			Timestamp string `json:"timestamp"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &entry) != nil {
+			continue
+		}
+		timestamp, err := time.Parse(time.RFC3339Nano, entry.Timestamp)
+		if err == nil && timestamp.After(updatedAt) {
+			updatedAt = timestamp
+		}
+	}
+	if updatedAt.IsZero() {
+		return fallback
+	}
+	return updatedAt
 }
 
 func parseCodexSessionMetadata(line []byte, sessionID, sessionCwd, providerID *string) {
