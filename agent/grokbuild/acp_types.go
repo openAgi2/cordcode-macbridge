@@ -147,8 +147,12 @@ type sessionNewResult struct {
 
 // --- session/load ---
 
+// Grok CLI 0.2.93 requires sessionId + cwd + mcpServers (same shape as session/new
+// plus the id). Omitting either cwd or mcpServers returns -32602 Invalid params.
 type sessionLoadParams struct {
-	SessionID string `json:"sessionId"`
+	SessionID  string `json:"sessionId"`
+	CWD        string `json:"cwd"`
+	McpServers []any  `json:"mcpServers"`
 }
 
 // sessionLoadResult mirrors sessionNewResult.

@@ -365,7 +365,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case "hello":
 			s.handleHello(conn, &msg)
 		case "request":
-			s.handlers.HandleRPC(directConnection, msg)
+			// Long-running RPCs (e.g. grokbuild StartSession: spawn CLI +
+			// initialize/auth/load) must not block the WebSocket read loop.
+			// Otherwise client pings/pongs stall and iOS hits the 30s RPC timeout
+			// ("RPC 超时（30s）") while send_message is still starting the agent.
+			msgCopy := msg
+			go s.handlers.HandleRPC(directConnection, msgCopy)
 		case "ping":
 			conn.SendJSON(map[string]string{"type": "pong"})
 		default:

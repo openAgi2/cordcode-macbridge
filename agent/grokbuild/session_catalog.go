@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -27,6 +28,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -81,6 +83,34 @@ func (a *Agent) GetSessionHistory(ctx context.Context, sessionID string, limit i
 	return readSessionHistory(home, sessionID, limit)
 }
 
+// GetRichSessionHistory implements core.RichHistoryProvider.
+//
+// Unlike the legacy HistoryProvider path (which returns core.HistoryEntry
+// without an ID field), this returns RichHistoryEntry with a stable,
+// deterministic ID derived from the sessionID + JSONL physical line number +
+// hash of the raw JSONL line.  The same chat_history.jsonl read twice yields
+// identical IDs, so iOS external-turn probe sees the same message set and does
+// not falsely activate generation.
+//
+// The ID is derived from the physical line number in the JSONL file — NOT the
+// index in the filtered output array.  This makes IDs immune to changes in
+// filtering (system/synthetic/bootstrap lines), limit truncation, or future
+// additions of new record types.
+func (a *Agent) GetRichSessionHistory(ctx context.Context, sessionID string, limit int) ([]core.RichHistoryEntry, error) {
+	_ = ctx
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, fmt.Errorf("grokbuild: empty session id")
+	}
+	a.mu.RLock()
+	home := a.grokHomeLocked()
+	a.mu.RUnlock()
+	if home == "" {
+		return nil, fmt.Errorf("grokbuild: cannot resolve GROK_HOME")
+	}
+	return readRichSessionHistory(home, sessionID, limit)
+}
+
 func listLocalSessions(ctx context.Context, grokHome string) ([]core.AgentSessionInfo, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -92,8 +122,8 @@ func listLocalSessions(ctx context.Context, grokHome string) ([]core.AgentSessio
 
 	byID := map[string]core.AgentSessionInfo{}
 
-	// Optional title index from session_search.sqlite via sqlite3 CLI.
-	titleByID := querySessionTitlesFromSQLite(filepath.Join(sessionsDir, "session_search.sqlite"))
+	// Optional index from session_search.sqlite via sqlite3 CLI (id/cwd/updated_at/title).
+	sqliteByID := querySessionsFromSQLite(filepath.Join(sessionsDir, "session_search.sqlite"))
 
 	// Walk summary.json as the durable catalog source.
 	_ = filepath.WalkDir(sessionsDir, func(path string, d os.DirEntry, err error) error {
@@ -107,8 +137,16 @@ func listLocalSessions(ctx context.Context, grokHome string) ([]core.AgentSessio
 		if !ok || info.ID == "" {
 			return nil
 		}
-		if title, found := titleByID[info.ID]; found && info.Summary == "" {
-			info.Summary = title
+		if sq, found := sqliteByID[info.ID]; found {
+			if info.Summary == "" && sq.Summary != "" {
+				info.Summary = sq.Summary
+			}
+			if info.Directory == "" && sq.Directory != "" {
+				info.Directory = sq.Directory
+			}
+			if sq.ModifiedAt.After(info.ModifiedAt) {
+				info.ModifiedAt = sq.ModifiedAt
+			}
 		}
 		if info.Summary == "" {
 			if t := firstUserTitleFromHistory(filepath.Join(filepath.Dir(path), "chat_history.jsonl")); t != "" {
@@ -122,16 +160,18 @@ func listLocalSessions(ctx context.Context, grokHome string) ([]core.AgentSessio
 		return nil
 	})
 
-	// Sessions present only in sqlite (no summary yet) still surface.
-	for id, title := range titleByID {
+	// Sessions present only in sqlite (no summary yet) still surface with full fields.
+	for id, sq := range sqliteByID {
 		if _, ok := byID[id]; ok {
 			continue
 		}
-		byID[id] = core.AgentSessionInfo{
-			ID:         id,
-			Summary:    title,
-			ModifiedAt: time.Now().UTC(),
+		if sq.Summary == "" {
+			sq.Summary = fallbackSessionTitle(sq)
 		}
+		if sq.ModifiedAt.IsZero() {
+			sq.ModifiedAt = time.Now().UTC()
+		}
+		byID[id] = sq
 	}
 
 	out := make([]core.AgentSessionInfo, 0, len(byID))
@@ -144,10 +184,11 @@ func listLocalSessions(ctx context.Context, grokHome string) ([]core.AgentSessio
 	return out, nil
 }
 
-// querySessionTitlesFromSQLite uses the system sqlite3 CLI when present.
-// Returns id → title. Failures yield an empty map (non-fatal).
-func querySessionTitlesFromSQLite(dbPath string) map[string]string {
-	out := map[string]string{}
+// querySessionsFromSQLite uses the system sqlite3 CLI when present.
+// Returns id → AgentSessionInfo with Directory/ModifiedAt/Summary filled.
+// Failures yield an empty map (non-fatal).
+func querySessionsFromSQLite(dbPath string) map[string]core.AgentSessionInfo {
+	out := map[string]core.AgentSessionInfo{}
 	if _, err := os.Stat(dbPath); err != nil {
 		return out
 	}
@@ -155,16 +196,16 @@ func querySessionTitlesFromSQLite(dbPath string) map[string]string {
 	if err != nil {
 		return out
 	}
-	// Columns: session_id|cwd|updated_at|title  (pipe-separated, never contains newlines in id)
+	// Columns: session_id, cwd, updated_at, title
 	cmd := exec.Command(sqlite3, "-separator", "\t", dbPath,
-		`SELECT session_id, cwd, updated_at, replace(replace(title, char(9), ' '), char(10), ' ') FROM session_docs;`)
+		`SELECT session_id, cwd, updated_at, replace(replace(ifnull(title,''), char(9), ' '), char(10), ' ') FROM session_docs;`)
 	raw, err := cmd.Output()
 	if err != nil {
 		return out
 	}
 	for _, line := range strings.Split(string(raw), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) == "" {
 			continue
 		}
 		parts := strings.SplitN(line, "\t", 4)
@@ -175,15 +216,48 @@ func querySessionTitlesFromSQLite(dbPath string) map[string]string {
 		if id == "" {
 			continue
 		}
+		cwd := ""
+		if len(parts) >= 2 {
+			cwd = strings.TrimSpace(parts[1])
+		}
+		var mod time.Time
+		if len(parts) >= 3 {
+			mod = parseSQLiteUpdatedAt(strings.TrimSpace(parts[2]))
+		}
 		title := ""
 		if len(parts) >= 4 {
 			title = strings.TrimSpace(parts[3])
 		}
-		if title != "" {
-			out[id] = title
+		out[id] = core.AgentSessionInfo{
+			ID:         id,
+			Summary:    title,
+			Directory:  cwd,
+			ModifiedAt: mod,
 		}
 	}
 	return out
+}
+
+func parseSQLiteUpdatedAt(raw string) time.Time {
+	if raw == "" {
+		return time.Time{}
+	}
+	// Integer unix seconds or milliseconds.
+	if n, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		if n > 1_000_000_000_000 {
+			return time.UnixMilli(n).UTC()
+		}
+		if n > 0 {
+			return time.Unix(n, 0).UTC()
+		}
+	}
+	if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+		return t.UTC()
+	}
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return t.UTC()
+	}
+	return time.Time{}
 }
 
 type grokSummaryFile struct {
@@ -388,6 +462,73 @@ func readSessionHistory(grokHome, sessionID string, limit int) ([]core.HistoryEn
 		entries = entries[len(entries)-limit:]
 	}
 	return entries, nil
+}
+
+// readRichSessionHistory reads chat_history.jsonl and returns RichHistoryEntry
+// with stable IDs derived from the physical JSONL line number.
+//
+// The physical line counter (lineNum) increments for every non-blank line in
+// the file — including lines that are filtered out (system, synthetic,
+// bootstrap).  This ensures that adding or removing a filtered line does NOT
+// shift the IDs of subsequent messages, keeping IDs stable across reads even
+// when the file grows or filtering logic changes.
+func readRichSessionHistory(grokHome, sessionID string, limit int) ([]core.RichHistoryEntry, error) {
+	dir := findSessionDir(grokHome, sessionID)
+	if dir == "" {
+		return nil, fmt.Errorf("grokbuild: session not found: %s", sessionID)
+	}
+	path := filepath.Join(dir, "chat_history.jsonl")
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []core.RichHistoryEntry{}, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+
+	var entries []core.RichHistoryEntry
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	lineNum := 0
+	for sc.Scan() {
+		rawLine := bytes.TrimSpace(sc.Bytes())
+		if len(rawLine) == 0 {
+			continue
+		}
+		lineNum++
+		var row grokHistoryLine
+		if err := json.Unmarshal(rawLine, &row); err != nil {
+			continue
+		}
+		role, content := mapHistoryLine(row)
+		if role == "" || content == "" {
+			continue
+		}
+		entries = append(entries, core.RichHistoryEntry{
+			ID:      deriveStableMessageID(sessionID, lineNum, rawLine),
+			Role:    role,
+			Content: content,
+		})
+	}
+	if err := sc.Err(); err != nil {
+		return entries, err
+	}
+	if limit > 0 && len(entries) > limit {
+		entries = entries[len(entries)-limit:]
+	}
+	return entries, nil
+}
+
+// deriveStableMessageID produces a deterministic ID for a Grok history message.
+//
+// The ID is derived from sessionID + physical line number + SHA-256 hash of
+// the raw JSONL line content.  The same file read twice always yields the same
+// IDs.  The full sessionID is hashed (never truncated) to avoid index-out-of-
+// range panics on short session IDs.
+func deriveStableMessageID(sessionID string, lineNum int, rawLine []byte) string {
+	h := sha256.Sum256([]byte(fmt.Sprintf("%s:%d:%s", sessionID, lineNum, rawLine)))
+	return fmt.Sprintf("grok-%x", h[:16])
 }
 
 func mapHistoryLine(row grokHistoryLine) (role, content string) {

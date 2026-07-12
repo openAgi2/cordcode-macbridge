@@ -230,11 +230,10 @@ func TestConvertSessionUpdate_UserMessageChunkIgnored(t *testing.T) {
 func TestConvertSessionUpdate_UnknownType(t *testing.T) {
 	params := json.RawMessage(`{"sessionId":"s1","update":{"sessionUpdate":"future_feature","data":"stuff"}}`)
 	events := convertSessionUpdate(params, "s1")
-	if len(events) != 1 {
-		t.Fatalf("expected 1 event, got %d", len(events))
-	}
-	if events[0].Type != core.EventError {
-		t.Errorf("type = %v, want EventError", events[0].Type)
+	// Unknown update types must NOT produce events — emitting EventError would
+	// abort turns whenever Grok sends an extension type we haven't mapped.
+	if len(events) != 0 {
+		t.Fatalf("expected 0 events for unknown type, got %d: %+v", len(events), events)
 	}
 }
 

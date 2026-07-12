@@ -1425,9 +1425,17 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 		if strings.HasPrefix(resumeID, "pending-") {
 			resumeID = ""
 		}
-		slog.Info("go-bridge: handleSendMessage: session not found in registry. Starting new agent session.", "sessionID", params.SessionID, "resumeID", resumeID)
+		slog.Info("go-bridge: handleSendMessage: session not found in registry. Starting new agent session.", "sessionID", params.SessionID, "resumeID", resumeID, "agent", agent.Name())
+		startAt := time.Now()
 		var err error
 		sess, err = agent.StartSession(h.ctx, resumeID)
+		slog.Info("go-bridge: handleSendMessage: StartSession finished",
+			"sessionID", params.SessionID,
+			"resumeID", resumeID,
+			"agent", agent.Name(),
+			"elapsed_ms", time.Since(startAt).Milliseconds(),
+			"error", err,
+		)
 		if err != nil {
 			slog.Error("go-bridge: handleSendMessage: StartSession failed", "sessionID", params.SessionID, "resumeID", resumeID, "error", err)
 			conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_found", Message: err.Error()})
@@ -1435,9 +1443,15 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 		}
 
 		// resume 时 claude --resume 会输出完整历史，先排空历史事件。
-		// Codex thread/resume 不会重放历史，不应 drain（会阻塞或丢弃初始 plan 事件）。
-		if resumeID != "" && agent.Name() != "codex" {
-			drainHistoryEvents(sess)
+		// Codex / Grok 不重放 transcript 作为事件流（Grok 历史走 HistoryProvider 落盘），
+		// drain 只会空转甚至在有持续 session/update 时占满至 10s，拖垮 send_message 的 RPC 时延。
+		if resumeID != "" {
+			switch agent.Name() {
+			case "codex", "grokbuild":
+				// skip drain
+			default:
+				drainHistoryEvents(sess)
+			}
 		}
 
 		// Double-checked locking: 并发 sendMessage 可能已创建同 ID session
@@ -1459,20 +1473,26 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 		slog.Info("go-bridge: handleSendMessage: found active session in registry", "sessionID", params.SessionID)
 	}
 
-	// 通知 iOS 进入 running 状态
-	conn.SendEvent(params.SessionID, msg.BackendID, "session_state_changed", map[string]interface{}{"state": "running"})
-	h.broadcaster.Send(BroadcastEvent{
-		BackendID: msg.BackendID,
-		SessionID: params.SessionID,
-		Directory: extractDir(msg),
-		Message: EventMessage{
-			Type:      "event",
-			SessionID: params.SessionID,
+	// 通知 iOS 进入 running 状态。
+	// grokbuild 不发 session_state_changed(running)：它的 turn_started 事件已经
+	// 通过 syncRuntimeStateStore(reasoningDelta/toolStarted) 激活 iOS 执行态，
+	// 额外的 running 广播会让 isGenerating 过早激活；如果 turn_completed 的 500ms
+	// debounce 在 session 切换时被取消，isGenerating 会永久残留导致输入框卡"执行中"。
+	if agent.Name() != "grokbuild" {
+		conn.SendEvent(params.SessionID, msg.BackendID, "session_state_changed", map[string]interface{}{"state": "running"})
+		h.broadcaster.Send(BroadcastEvent{
 			BackendID: msg.BackendID,
-			Event:     "session_state_changed",
-			Data:      map[string]interface{}{"state": "running"},
-		},
-	})
+			SessionID: params.SessionID,
+			Directory: extractDir(msg),
+			Message: EventMessage{
+				Type:      "event",
+				SessionID: params.SessionID,
+				BackendID: msg.BackendID,
+				Event:     "session_state_changed",
+				Data:      map[string]interface{}{"state": "running"},
+			},
+		})
+	}
 	h.sessions.markRunning(params.SessionID)
 	if agent.Name() == "claudecode" && !strings.HasPrefix(params.SessionID, "pending-") {
 		h.writeClaudeRuntimeSidecar(params.SessionID, extractDir(msg), claudeRuntime)
@@ -1747,12 +1767,14 @@ func (h *Handlers) handleAbortGeneration(conn Connection, msg WireMessage) {
 	h.mu.Unlock()
 
 	if deleted && sess != nil {
-		if backendID == "codex" && h.codexBackendMode == "app_server" {
-			if tc, ok := sess.(core.TurnCanceler); ok {
-				cancelCtx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
-				_ = tc.CancelTurn(cancelCtx)
-				cancel()
+		// Prefer backend-native cancel (ACP session/cancel, Codex turn/interrupt, …)
+		// before tearing down the process so in-flight turns get a real terminal.
+		if tc, ok := sess.(core.TurnCanceler); ok {
+			cancelCtx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+			if err := tc.CancelTurn(cancelCtx); err != nil {
+				slog.Debug("go-bridge: CancelTurn", "sessionID", sessionID, "backendID", backendID, "error", err)
 			}
+			cancel()
 		}
 		_ = sess.Close()
 	}

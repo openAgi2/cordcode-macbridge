@@ -7,10 +7,12 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,6 +23,7 @@ import (
 )
 
 var _ core.AgentSession = (*grokSession)(nil)
+var _ core.TurnCanceler = (*grokSession)(nil)
 
 type grokSession struct {
 	agent *Agent
@@ -35,6 +38,9 @@ type grokSession struct {
 
 	sessionID atomic.Value // string
 	alive     atomic.Bool
+	// terminalDone is set when a Done event has been emitted so process exit
+	// does not emit a second terminal event.
+	terminalDone atomic.Bool
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -44,8 +50,8 @@ type grokSession struct {
 	idCounter requestIDCounter
 
 	// pending permission requests: requestID -> options (for allow/deny lookup)
-	pendingPermsMu sync.Mutex
-	pendingPerms   map[string][]permissionOption
+	pendingPermsMu  sync.Mutex
+	pendingPerms    map[string][]permissionOption
 	pendingPromptID int // session/prompt request ID for turn-end detection
 
 	// pending response matching: maps request ID → channel for synchronous waits
@@ -65,6 +71,7 @@ func newGrokSession(ctx context.Context, agent *Agent, sessionID string) (*grokS
 
 	cmd := exec.CommandContext(sessionCtx, agent.cliBin, args...)
 	cmd.Dir = agent.workDir
+	prepareCmdForProcessGroup(cmd)
 
 	// Build a clean environment: no control-plane secrets.
 	baseEnv := core.FilterEnvToAllowlist(
@@ -107,8 +114,16 @@ func newGrokSession(ctx context.Context, agent *Agent, sessionID string) (*grokS
 		pendingPerms: make(map[string][]permissionOption),
 		respChannels: make(map[int]chan *jsonrpcResponse),
 	}
+	// Store requested ID early; loadSession keeps it, newSession replaces it.
 	s.sessionID.Store(sessionID)
 	s.alive.Store(true)
+
+	handshakeStart := time.Now()
+	slog.Info("grokbuild: handshake step",
+		"step", "process_started",
+		"pid", cmd.Process.Pid,
+		"session_id_prefix", shortID(sessionID),
+		"elapsed_ms", time.Since(handshakeStart).Milliseconds())
 
 	// Start stderr reader (logs only, no events).
 	go s.readStderr()
@@ -117,32 +132,87 @@ func newGrokSession(ctx context.Context, agent *Agent, sessionID string) (*grokS
 	go s.readLoop()
 
 	// Perform ACP initialization handshake.
+	initStart := time.Now()
 	if err := s.initialize(); err != nil {
 		s.cleanup()
+		slog.Warn("grokbuild: handshake failed at initialize",
+			"elapsed_ms", time.Since(initStart).Milliseconds(),
+			"error_class", rpcErrorClass(err))
 		return nil, fmt.Errorf("grokbuild: initialize: %w", err)
 	}
+	slog.Info("grokbuild: handshake step",
+		"step", "initialize_done",
+		"elapsed_ms", time.Since(initStart).Milliseconds(),
+		"supportsLoadSession", s.supportsLoadSession)
 
 	// Create or load the session.
-	if sessionID != "" && s.supportsLoadSession {
-		if err := s.loadSession(sessionID); err != nil {
-			slog.Warn("grokbuild: session/load failed, creating new", "id", sessionID, "error", err)
-			if err := s.newSession(); err != nil {
-				s.cleanup()
-				return nil, fmt.Errorf("grokbuild: session/new after load failure: %w", err)
-			}
+	// Resume path must not silently create a new session (audit P0-1).
+	loadStart := time.Now()
+	if sessionID != "" {
+		if !s.supportsLoadSession {
+			s.cleanup()
+			return nil, fmt.Errorf("grokbuild: cannot resume session %s: agent did not advertise loadSession", sessionID)
 		}
+		if err := s.loadSession(sessionID); err != nil {
+			s.cleanup()
+			slog.Warn("grokbuild: handshake failed at session/load",
+				"elapsed_ms", time.Since(loadStart).Milliseconds(),
+				"error_class", rpcErrorClass(err))
+			return nil, fmt.Errorf("grokbuild: session/load %s: %w", sessionID, err)
+		}
+		slog.Info("grokbuild: handshake step",
+			"step", "session_loaded",
+			"elapsed_ms", time.Since(loadStart).Milliseconds())
 	} else {
 		if err := s.newSession(); err != nil {
 			s.cleanup()
+			slog.Warn("grokbuild: handshake failed at session/new",
+				"elapsed_ms", time.Since(loadStart).Milliseconds(),
+				"error_class", rpcErrorClass(err))
 			return nil, fmt.Errorf("grokbuild: session/new: %w", err)
 		}
+		slog.Info("grokbuild: handshake step",
+			"step", "session_created",
+			"elapsed_ms", time.Since(loadStart).Milliseconds())
 	}
 
-	// Wait for process exit in background.
+	slog.Info("grokbuild: handshake complete",
+		"total_elapsed_ms", time.Since(handshakeStart).Milliseconds())
+
+	// Drain stale events accumulated during handshake (session/load causes Grok
+	// to replay state via session/update notifications). These are historical
+	// state — not part of the user's current turn. If left in the channel,
+	// relayEvents will forward them to iOS as if they were live turn events,
+	// including any prior error that would abort the turn immediately.
+	drained := 0
+drainLoop:
+	for {
+		select {
+		case <-s.events:
+			drained++
+		default:
+			break drainLoop
+		}
+	}
+	if drained > 0 {
+		// Reset terminalDone so the real turn's terminal event is not suppressed.
+		s.terminalDone.Store(false)
+		slog.Info("grokbuild: drained stale handshake events", "count", drained)
+	}
+
+	// Wait for process exit in background; emit a terminal error if none yet.
 	go func() {
-		_ = cmd.Wait()
+		waitErr := cmd.Wait()
 		close(s.done)
 		s.alive.Store(false)
+		if waitErr != nil && !s.terminalDone.Load() {
+			s.emit(core.Event{
+				Type:    core.EventError,
+				Error:   waitErr,
+				Content: fmt.Sprintf("grok process exited: %v", waitErr),
+				Done:    true,
+			})
+		}
 	}()
 
 	return s, nil
@@ -165,12 +235,7 @@ func (s *grokSession) initialize() error {
 			Version: "1.0",
 		},
 	}
-	if err := s.sendRequest(id, "initialize", params); err != nil {
-		return err
-	}
-
-	// Wait for the response.
-	result, err := s.waitForResponse(id, 10*1e9) // 10s timeout
+	result, err := s.callRPC(id, "initialize", params, 10*time.Second)
 	if err != nil {
 		return err
 	}
@@ -203,10 +268,7 @@ func (s *grokSession) initialize() error {
 
 func (s *grokSession) authenticate(method string) error {
 	id := s.idCounter.next()
-	if err := s.sendRequest(id, "authenticate", authenticateParams{MethodID: method}); err != nil {
-		return err
-	}
-	_, err := s.waitForResponse(id, 30*1e9) // 30s for interactive auth
+	_, err := s.callRPC(id, "authenticate", authenticateParams{MethodID: method}, 30*time.Second)
 	return err
 }
 
@@ -216,10 +278,7 @@ func (s *grokSession) newSession() error {
 		CWD:        s.agent.workDir,
 		McpServers: []any{}, // empty array — no MCP servers
 	}
-	if err := s.sendRequest(id, "session/new", params); err != nil {
-		return err
-	}
-	result, err := s.waitForResponse(id, 15*1e9)
+	result, err := s.callRPC(id, "session/new", params, 15*time.Second)
 	if err != nil {
 		return err
 	}
@@ -227,24 +286,59 @@ func (s *grokSession) newSession() error {
 	if err := json.Unmarshal(result, &resp); err != nil {
 		return fmt.Errorf("decode session/new response: %w", err)
 	}
-	if resp.SessionID != "" {
-		s.sessionID.Store(resp.SessionID)
-		slog.Info("grokbuild: session created", "id", resp.SessionID)
+	sid := strings.TrimSpace(resp.SessionID)
+	if sid == "" {
+		return fmt.Errorf("grokbuild: session/new returned empty sessionId")
 	}
+	s.sessionID.Store(sid)
+	// Log only a short prefix — never the full agent payload.
+	slog.Info("grokbuild: session created", "id_prefix", shortID(sid))
 	return nil
 }
 
 func (s *grokSession) loadSession(sessionID string) error {
+	cwd := ""
+	var grokHome string
+	if s.agent != nil {
+		cwd = strings.TrimSpace(s.agent.GetWorkDir())
+		grokHome = s.agent.grokHome
+	}
+	if cwd == "" || cwd == "." {
+		// Fall back to on-disk catalog when switchDir was not applied.
+		if home := resolveGrokHome(grokHome); home != "" {
+			if dir := findSessionDir(home, sessionID); dir != "" {
+				if info, ok := parseSummaryFile(filepath.Join(dir, "summary.json")); ok && info.Directory != "" {
+					cwd = info.Directory
+				}
+			}
+		}
+	}
+	if cwd == "" || cwd == "." {
+		return fmt.Errorf("grokbuild: session/load requires cwd (work_dir empty and catalog miss)")
+	}
+
 	id := s.idCounter.next()
-	if err := s.sendRequest(id, "session/load", sessionLoadParams{SessionID: sessionID}); err != nil {
+	slog.Info("grokbuild: loadSession calling callRPC",
+		"session_id_prefix", shortID(sessionID),
+		"cwd_base", filepath.Base(cwd))
+	_, err := s.callRPC(id, "session/load", sessionLoadParams{
+		SessionID:  sessionID,
+		CWD:        cwd,
+		McpServers: []any{}, // required empty array (same as session/new)
+	}, 15*time.Second)
+	if err != nil {
 		return err
 	}
-	_, err := s.waitForResponse(id, 15*1e9)
-	if err == nil {
-		s.sessionID.Store(sessionID)
-		slog.Info("grokbuild: session loaded", "id", sessionID)
+	// Align process workDir with the loaded session workspace.
+	if s.agent != nil {
+		s.agent.SetWorkDir(cwd)
 	}
-	return err
+	if s.cmd != nil {
+		s.cmd.Dir = cwd
+	}
+	s.sessionID.Store(sessionID)
+	slog.Info("grokbuild: session loaded", "id_prefix", shortID(sessionID), "cwd_base", filepath.Base(cwd))
+	return nil
 }
 
 // --- core.AgentSession ---
@@ -275,24 +369,49 @@ func (s *grokSession) Send(prompt string, images []core.ImageAttachment, files [
 	}
 
 	id := s.idCounter.next()
-	// Emit turn_started before sending.
-	s.emit(core.Event{Type: core.EventTurnStarted})
-
-	if err := s.sendRequest(id, "session/prompt", sessionPromptParams{
-		SessionID: s.CurrentSessionID(),
-		Prompt:    content,
-	}); err != nil {
-		return err
-	}
-
-	// The response will arrive asynchronously and be handled in readLoop.
-	// We store the pending prompt ID so readLoop can emit EventResult when
-	// the matching response arrives.
+	// Register turn-end ID before write so a fast response cannot be lost (P0-2).
 	s.pendingPermsMu.Lock()
 	s.pendingPromptID = id
 	s.pendingPermsMu.Unlock()
+	// Reset terminal flag for the new turn.
+	s.terminalDone.Store(false)
+
+	// Emit turn_started before sending.
+	s.emit(core.Event{Type: core.EventTurnStarted})
+
+	if err := s.writeRequest(id, "session/prompt", sessionPromptParams{
+		SessionID: s.CurrentSessionID(),
+		Prompt:    content,
+	}); err != nil {
+		s.pendingPermsMu.Lock()
+		if s.pendingPromptID == id {
+			s.pendingPromptID = 0
+		}
+		s.pendingPermsMu.Unlock()
+		return err
+	}
 
 	return nil
+}
+
+// CancelTurn implements core.TurnCanceler by sending ACP session/cancel.
+func (s *grokSession) CancelTurn(ctx context.Context) error {
+	_ = ctx
+	if !s.alive.Load() {
+		return fmt.Errorf("grokbuild: session not alive")
+	}
+	sid := s.CurrentSessionID()
+	if sid == "" {
+		return fmt.Errorf("grokbuild: no session id for cancel")
+	}
+	data, err := encodeNotification("session/cancel", sessionCancelParams{SessionID: sid})
+	if err != nil {
+		return err
+	}
+	s.stdinMu.Lock()
+	_, err = s.stdin.Write(data)
+	s.stdinMu.Unlock()
+	return err
 }
 
 func (s *grokSession) RespondPermission(requestID string, result core.PermissionResult) error {
@@ -377,7 +496,7 @@ func (s *grokSession) Close() error {
 	}
 
 	// Phase 2: SIGTERM the process group.
-	s.signalProcessGroup(sigTERM)
+	_ = signalProcessGroup(s.cmd, sigTERM)
 
 	select {
 	case <-s.done:
@@ -387,7 +506,7 @@ func (s *grokSession) Close() error {
 
 	// Phase 3: SIGKILL.
 	s.cancel()
-	s.signalProcessGroup(sigKILL)
+	_ = signalProcessGroup(s.cmd, sigKILL)
 	<-s.done
 	return nil
 }
@@ -397,20 +516,37 @@ func (s *grokSession) Close() error {
 func (s *grokSession) readLoop() {
 	scanner := bufio.NewScanner(s.stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	msgCount := 0
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
 			continue
 		}
+		msgCount++
 		s.handleMessage(line)
 	}
-	if err := scanner.Err(); err != nil && s.alive.Load() {
-		s.emit(core.Event{
-			Type:    core.EventError,
-			Content: fmt.Sprintf("stdout read error: %v", err),
-			Done:    true,
-		})
+	// scan_err_class: fixed safe category, never the raw scanner error (may
+	// contain agent stdout content).
+	scanErrClass := "none"
+	if err := scanner.Err(); err != nil {
+		switch {
+		case errors.Is(err, context.Canceled):
+			scanErrClass = "context_cancelled"
+		default:
+			scanErrClass = "scanner_error"
+		}
+		if s.alive.Load() {
+			s.emit(core.Event{
+				Type:    core.EventError,
+				Content: fmt.Sprintf("stdout read error: %v", err),
+				Done:    true,
+			})
+		}
 	}
+	slog.Info("grokbuild: readLoop exited",
+		"messages_processed", msgCount,
+		"scan_err_class", scanErrClass,
+		"alive", s.alive.Load())
 	// Process exited or stdout EOF.
 	s.alive.Store(false)
 }
@@ -418,7 +554,11 @@ func (s *grokSession) readLoop() {
 func (s *grokSession) handleMessage(line []byte) {
 	resp, req, notif, err := decodeMessage(line)
 	if err != nil {
-		slog.Warn("grokbuild: decode failed", "error", err, "line", string(line))
+		// Never log agent-controlled payload (may contain prompt / tool args / paths).
+		slog.Warn("grokbuild: decode failed",
+			"error_class", logErrorClass(err),
+			"bytes", len(line),
+		)
 		return
 	}
 
@@ -465,6 +605,9 @@ func (s *grokSession) handleResponse(resp *jsonrpcResponse) {
 	if idNum == promptID && promptID != 0 {
 		// This is the session/prompt response — turn is done.
 		if resp.Error != nil {
+			// Log only the numeric code; message may contain agent payload.
+			slog.Warn("grokbuild: session/prompt returned error",
+				"error_code", resp.Error.Code)
 			s.emit(core.Event{
 				Type:  core.EventError,
 				Error: fmt.Errorf("session/prompt error %d: %s", resp.Error.Code, resp.Error.Message),
@@ -529,31 +672,57 @@ func (s *grokSession) handlePermissionRequest(req *agentRequest) {
 func (s *grokSession) readStderr() {
 	scanner := bufio.NewScanner(s.stderr)
 	scanner.Buffer(make([]byte, 0, 4*1024), 256*1024)
+	var lines, bytes int
 	for scanner.Scan() {
-		slog.Debug("grokbuild: stderr", "line", scanner.Text())
+		// Do not log stderr text: agent may echo prompts, tool args, or paths.
+		lines++
+		bytes += len(scanner.Bytes())
+	}
+	if lines > 0 {
+		slog.Debug("grokbuild: stderr closed", "lines", lines, "bytes", bytes)
+	}
+	if err := scanner.Err(); err != nil {
+		slog.Debug("grokbuild: stderr read error", "error_class", logErrorClass(err))
 	}
 }
 
 // --- helpers ---
 
-// waitForResponse blocks until the response for the given request ID arrives.
-// timeoutNs is in nanoseconds; 0 means no timeout (not recommended).
-func (s *grokSession) waitForResponse(id int, timeoutNs int64) (json.RawMessage, error) {
+// callRPC registers a response waiter *before* writing the request so a fast
+// local stdio agent cannot deliver a response that is dropped (audit P0-2).
+func (s *grokSession) callRPC(id int, method string, params any, timeout time.Duration) (json.RawMessage, error) {
 	ch := make(chan *jsonrpcResponse, 1)
 	s.respMu.Lock()
 	s.respChannels[id] = ch
 	s.respMu.Unlock()
 
+	writeStart := time.Now()
+	if err := s.writeRequest(id, method, params); err != nil {
+		s.respMu.Lock()
+		delete(s.respChannels, id)
+		s.respMu.Unlock()
+		slog.Warn("grokbuild: callRPC writeRequest failed",
+			"method", method,
+			"write_elapsed_ms", time.Since(writeStart).Milliseconds(),
+			"error_class", rpcErrorClass(err))
+		return nil, err
+	}
+	writeElapsed := time.Since(writeStart)
+
 	var timer *time.Timer
 	var timeoutCh <-chan time.Time
-	if timeoutNs > 0 {
-		timer = time.NewTimer(time.Duration(timeoutNs))
+	if timeout > 0 {
+		timer = time.NewTimer(timeout)
 		defer timer.Stop()
 		timeoutCh = timer.C
 	}
 
 	select {
 	case resp := <-ch:
+		slog.Info("grokbuild: callRPC response received",
+			"method", method,
+			"write_elapsed_ms", writeElapsed.Milliseconds(),
+			"wait_elapsed_ms", time.Since(writeStart).Milliseconds())
 		if resp.Error != nil {
 			return nil, fmt.Errorf("rpc error %d: %s", resp.Error.Code, resp.Error.Message)
 		}
@@ -562,22 +731,21 @@ func (s *grokSession) waitForResponse(id int, timeoutNs int64) (json.RawMessage,
 		s.respMu.Lock()
 		delete(s.respChannels, id)
 		s.respMu.Unlock()
+		slog.Warn("grokbuild: callRPC select timeout fired",
+			"method", method,
+			"write_elapsed_ms", writeElapsed.Milliseconds(),
+			"total_elapsed_ms", time.Since(writeStart).Milliseconds())
 		return nil, fmt.Errorf("timeout waiting for response to request %d", id)
 	case <-s.ctx.Done():
 		s.respMu.Lock()
 		delete(s.respChannels, id)
 		s.respMu.Unlock()
+		slog.Warn("grokbuild: callRPC ctx done",
+			"method", method,
+			"write_elapsed_ms", writeElapsed.Milliseconds(),
+			"total_elapsed_ms", time.Since(writeStart).Milliseconds())
 		return nil, s.ctx.Err()
 	}
-}
-
-// signalProcessGroup sends a signal to the entire process group.
-func (s *grokSession) signalProcessGroup(sig syscall.Signal) {
-	if s.cmd == nil || s.cmd.Process == nil {
-		return
-	}
-	// Signal the process group (negative PID).
-	_ = syscall.Kill(-s.cmd.Process.Pid, sig)
 }
 
 // filterOsEnviron returns os.Environ() — separated for testability.
@@ -599,13 +767,57 @@ func (s *grokSession) emit(ev core.Event) {
 	if ev.SessionID == "" {
 		ev.SessionID = s.CurrentSessionID()
 	}
+	// Only one Done terminal event per turn / process lifetime segment.
+	if ev.Done {
+		if !s.terminalDone.CompareAndSwap(false, true) {
+			return
+		}
+	}
+
+	// Diagnostic probe: if the events channel has no consumer (e.g. relayEvents
+	// not yet started during handshake), s.events <- ev blocks here. Without a
+	// timeout this would freeze readLoop and deadlock callRPC waiters.
+	// We start a 100ms side-channel timer; if it fires before send completes,
+	// we log a warning — then continue the original blocking send unchanged.
+	chLen := len(s.events)
+	chCap := cap(s.events)
+	warnTimer := time.NewTimer(100 * time.Millisecond)
+	defer warnTimer.Stop()
+	warned := false
+	delivered := false
+
 	select {
 	case s.events <- ev:
+		delivered = true
+	case <-warnTimer.C:
+		warned = true
+		slog.Warn("grokbuild: emit blocked >100ms (no consumer)",
+			"event_type", ev.Type,
+			"channel_len", chLen,
+			"channel_cap", chCap)
+		// Continue the original blocking wait — behavior unchanged.
+		select {
+		case s.events <- ev:
+			delivered = true
+		case <-s.ctx.Done():
+			delivered = false
+		}
 	case <-s.ctx.Done():
+		delivered = false
+	}
+
+	if warned {
+		outcome := "cancelled"
+		if delivered {
+			outcome = "delivered"
+		}
+		slog.Info("grokbuild: emit resolved after delay",
+			"event_type", ev.Type,
+			"outcome", outcome)
 	}
 }
 
-func (s *grokSession) sendRequest(id int, method string, params any) error {
+func (s *grokSession) writeRequest(id int, method string, params any) error {
 	data, err := encodeRequest(id, method, params)
 	if err != nil {
 		return err
@@ -614,6 +826,11 @@ func (s *grokSession) sendRequest(id int, method string, params any) error {
 	_, err = s.stdin.Write(data)
 	s.stdinMu.Unlock()
 	return err
+}
+
+// sendRequest is retained for tests that only need a fire-and-forget write.
+func (s *grokSession) sendRequest(id int, method string, params any) error {
+	return s.writeRequest(id, method, params)
 }
 
 func (s *grokSession) cleanup() {
@@ -632,3 +849,55 @@ func (s *grokSession) cleanup() {
 // Declared as a field on grokSession — initialized in Send.
 // (Using the mutex for simplicity since permissions and prompt tracking
 // share the same critical section.)
+
+// logErrorClass returns a short, non-sensitive label for logging.
+func logErrorClass(err error) string {
+	if err == nil {
+		return "none"
+	}
+	// Prefer type name; fall back to a truncated error string without payloads.
+	msg := err.Error()
+	if i := strings.Index(msg, ":"); i > 0 && i < 48 {
+		return msg[:i]
+	}
+	if len(msg) > 64 {
+		return msg[:64]
+	}
+	return msg
+}
+
+// rpcErrorClass returns a fixed safe category for RPC errors.
+// The classification is based on our own wrapper text (e.g. "timeout waiting
+// for response"), not on agent payload; only the fixed category constant is
+// written to logs. Long-term this should use sentinel errors + errors.Is.
+func rpcErrorClass(err error) string {
+	if err == nil {
+		return "none"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "context_cancelled"
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "timeout waiting for response"):
+		return "rpc_timeout"
+	case strings.HasPrefix(msg, "rpc error"):
+		return "rpc_error"
+	case strings.Contains(msg, "stdin") || strings.Contains(msg, "write"):
+		return "write_failed"
+	default:
+		return "unknown"
+	}
+}
+
+// shortID returns a log-safe prefix of a session id (or "empty").
+func shortID(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "empty"
+	}
+	if len(id) <= 8 {
+		return id
+	}
+	return id[:8]
+}

@@ -197,24 +197,27 @@ ACP v1 `session/update` notification 包含以下更新类型（来自 [ACP Prom
 
 ## 10. Gate Verdict
 
-### **pass**
+### **technical-pass / release-blocked**
 
-理由：
+> **审计更正（2026-07-12）**：计划把许可/隐私列为 Gate 0 **必查项**。先前把“ToS 待 owner 确认”写成 pass 是错误的。  
+> **技术实现**可继续（结构化流、session、取消、审批接口均成立），但 **产品发布 / proved-complete** 在 xAI 条款未由 owner 正式核对前保持 **external blocker**。
+
+技术理由（仍成立）：
 
 1. ✅ **结构化流式输出**：Grok Build CLI 实现 ACP v1（JSON-RPC 2.0 over stdio），提供 `session/update` 流式事件，可区分文本、思考、计划、工具调用、完成、错误和取消。不是终端文本解析。
-2. ✅ **稳定会话策略**：UUID 标识 session，`session/load` 可恢复，`--resume`/`--continue` 可从 CLI 恢复，`~/.grok/sessions/` 本地持久化。`session/list` 可选但可能支持。
-3. ✅ **取消方式**：`session/cancel` RPC 可取消当前 turn。
-4. ✅ **可回复审批接口**：`session/request_permission` 提供外部可回复的 allow/deny 闭环，`pending_permission` 状态标识需要授权的工具调用。
-5. ✅ **许可与隐私**：CLI 本地运行，ACP stdio 本地通信，会话本地存储。Bridge 不增加额外数据暴露面（prompt 本身已发给 xAI API）。需确认 xAI ToS 桥接条款，但这不阻塞技术实现。
+2. ✅ **稳定会话策略**：UUID 标识 session，`session/load` 可恢复，`--resume`/`--continue` 可从 CLI 恢复，`~/.grok/sessions/` 本地持久化。ACP `session/list` 实测 **Method not found**；v1 用本地 catalog。
+3. ✅ **取消方式**：`session/cancel` notification 可取消当前 turn（Driver 已实现 `TurnCanceler`）。
+4. ✅ **可回复审批接口**：`session/request_permission` 提供外部可回复的 allow/deny 闭环。
+5. ⚠️ **许可与隐私（发布门禁）**：CLI 本地运行 + ACP stdio 本地通信；内容经 Bridge/Relay 传输前会到 xAI API。**第三方远程桥接是否允许须 owner 对照现行 xAI Terms 记录结论、版本与链接**——本文件不提供法律意见。未完成前 **不得** 将 Gate 标为可发布的 `pass`。
 
 ### 前置条件
 
 - Driver 使用 `grok agent stdio` 作为唯一入口，不解析 TUI 或 headless 文本输出。
-- `session/list` 需在 Driver 实现时实测；不支持则返回 `core.ErrNotSupported`。
+- `session/list` 实测不支持时使用本地 `~/.grok/sessions` catalog，不得静默伪造列表。
 - 不声明 `question_reply` capability（ACP 无独立 question 协议）。
-- `permission_resolve` 仅在 Driver 实现 `core.ToolAuthorizer`（封装 `session/request_permission`）后声明。
-- `todos`、`usage_reporting`、`workspace_diff` 需在 ACP session/update 实测中确认对应字段后才声明。
-- xAI ToS 桥接条款需在发布前由 owner 确认。
+- `permission_resolve` 仅在 Driver 实现 `core.ToolAuthorizer` 后声明。
+- `session/load` 失败必须 fail-closed 返回错误，不得静默 `session/new`。
+- xAI ToS 桥接条款：**发布前**由 owner 确认并写入本证据表更新日期与链接。
 
 ### 未验证项（不阻塞 Gate pass，需在 Phase 2/5 补充）
 

@@ -320,3 +320,31 @@ codex app-server（`agent/codex/appserver_session.go`）本身发 `item/agentMes
 - codex app-server 通知名可用 `strings /Applications/Codex.app/Contents/Resources/codex | grep -i agentMessage` 核实（不需 runtime 抓包）。
 - opencode managed server 状态：`cat "$HOME/Library/Application Support/CordCode Link/opencode-managed-server.json"`（url/user/password），curl `http://127.0.0.1:<port>/global/config` 看 providers。
 - codex app-server WS daemon：`codex app-server --listen ws://127.0.0.1:<port>`（CLI 原生支持，加 `--listen` flag）。
+
+## Grok Build 真机疑难排查（2026-07-12，5 个 bug 全部修复）
+
+### Bug 1: StartSession RWMutex read→write 升级死锁 → 30s RPC 超时
+- **现象**：Grok session 发消息后 30s 超时。MacBridge 日志能看到 `initialize_done` 但没有 `session_loaded`。
+- **根因**：`Agent.StartSession` 持 `a.mu.RLock()`，内部 `newGrokSession → loadSession → SetWorkDir` 请求 `a.mu.Lock()`。Go `sync.RWMutex` **不支持 read→write 升级**——永久死锁。
+- **教训**：Go RWMutex 的 RLock→Lock 是永久死锁（不 panic）。StartSession 这类入口方法不要持锁——子方法自己加锁。
+- **修法**：移除 `grokbuild.go` StartSession 的 RLock。
+
+### Bug 2: convertSessionUpdate 未知类型 → EventError → iOS "unknown error"
+- **现象**：turn 完成后弹 "unknown error"。
+- **根因**：`acp_codec.go` `convertSessionUpdate` default 分支把未知 sessionUpdate type 转成 `EventError{Done:true}`。iOS 映射为 `("error", {message:"unknown error"}, done=true)`。
+- **修法**：default → `return nil`（静默跳过未知类型）。
+
+### Bug 3: legacy HistoryProvider 无 ID → iOS probe 误激活 generation
+- **现象**：打开 Grok 历史 session 输入框卡"执行中"。
+- **根因**：Grok 只实现 `core.HistoryProvider`，`core.HistoryEntry` 没有 `ID` 字段。iOS 为缺失 ID 生成随机 UUID → external-turn probe 误判新 turn。
+- **教训**：历史消息 ID 必须稳定。修复路径是 `RichHistoryProvider`（`core.RichHistoryEntry` 有 ID）。ID 从 JSONL **物理行号**（不是过滤后数组索引）+ 原始行 hash 派生。
+- **修法**：`session_catalog.go` 新增 `GetRichSessionHistory` + `deriveStableMessageID`。`grokbuild.go` 加 `var _ core.RichHistoryProvider` 断言。
+- **关键约束**：`legacyHistoryEntryToWire` 是包级函数，没有 sessionID/行号参数——**不能在 legacy 路径补建 ID**。必须走 rich 路径。handler 已优先走 rich（`handlers.go:2442`）。
+
+### Bug 4: handlers.go grokbuild 跳过 session_state_changed(running)
+- **现象/根因**：grokbuild 的 `turn_started` 事件已通过 `syncRuntimeStateStore` 激活 iOS 执行态。额外发 `session_state_changed(running)` 会让 `isGenerating` 过早激活；如果 turn_completed 的 debounce 在 session 切换时被取消，isGenerating 永久残留。
+- **修法**：`handlers.go:1481` `if agent.Name() != "grokbuild"` 跳过 running 广播。
+
+### Bug 5: relayEvents idle timeout 后事件投递正常（非 MacBridge 问题）
+- **排查结论**：5G relay 冷启动发消息卡住的问题，MacBridge 侧完全正常（日志确认 `send_message` → `turn_started` → `turn_completed` 全链路转发，`RelayDeviceConn.SendJSON` 无 dropped）。根因在 iOS 侧的 stale background generation marker（详见 iOS 仓 `think.md`）。
+- **教训**：排查 relay 卡住时，先确认 MacBridge 日志有完整的 `relayEvents forwarding` 链——如果有，问题在 iOS 侧，不要改 MacBridge。

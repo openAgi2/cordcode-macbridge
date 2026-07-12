@@ -274,3 +274,9 @@ func TestAgent_ImplementsHistoryProvider(t *testing.T) {
 		t.Error("Agent must implement core.HistoryProvider so session_history is advertised with local catalog")
 	}
 }
+
+func TestGrokSession_ImplementsTurnCanceler(t *testing.T) {
+	// Compile-time + type assertion on zero value pointer shape.
+	var s *grokSession
+	var _ core.TurnCanceler = s
+}

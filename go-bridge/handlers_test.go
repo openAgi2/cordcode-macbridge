@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/openAgi2/cordcode-macbridge/agent/grokbuild"
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
@@ -1744,6 +1745,94 @@ func TestHandleGetSessionMessagesFallsBackToLegacyHistoryWhenRichHistoryUnsuppor
 	}
 	if _, ok := entry["timestampMillis"].(float64); !ok {
 		t.Fatalf("timestampMillis missing or wrong type: %#v", entry["timestampMillis"])
+	}
+}
+
+// TestGrokBuildGetSessionMessagesStableWireIDs is the wire-level regression
+// guard for the "执行中" stuck state.  A real grokbuild.Agent reads
+// chat_history.jsonl from a temp grok_home.  Two consecutive get_session_messages
+// calls must return identical wire "id" values — otherwise the iOS
+// external-turn probe falsely detects "new" messages and activates generation.
+//
+// This test exercises the full path: Grok RichHistoryProvider →
+// richHistoryEntryToWire → wire JSON, proving that stable IDs survive the
+// wire mapping (not just the Go struct).
+func TestGrokBuildGetSessionMessagesStableWireIDs(t *testing.T) {
+	home := t.TempDir()
+	sessionsDir := filepath.Join(home, "sessions", "tmp")
+	sesDir := filepath.Join(sessionsDir, "grok-stable-wire")
+	if err := os.MkdirAll(sesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Write chat_history.jsonl with system/synthetic lines (filtered) + real messages.
+	history := []string{
+		`{"type":"system","content":"You are Grok"}`,
+		`{"type":"user","synthetic_reason":"system_reminder","content":"bloat"}`,
+		`{"type":"user","content":[{"type":"text","text":"<user_query>\nhello\n</user_query>"}]}`,
+		`{"type":"assistant","content":"hi there"}`,
+		`{"type":"user","content":[{"type":"text","text":"<user_query>\nbye\n</user_query>"}]}`,
+		`{"type":"assistant","content":"goodbye"}`,
+	}
+	historyBytes := strings.Join(history, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(sesDir, "chat_history.jsonl"), []byte(historyBytes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	agent, err := grokbuild.New(map[string]any{"grok_home": home, "cli_path": "true"})
+	if err != nil {
+		t.Fatalf("grokbuild.New: %v", err)
+	}
+
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("grokbuild", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	// First request.
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "grokbuild",
+		Method:    "get_session_messages",
+		RequestID: "r1",
+		Params:    mustJSONRaw(t, map[string]any{"sessionId": "grok-stable-wire"}),
+	})
+	resp1 := readJSONMaps(t, clientConn, 1)
+	if got := resp1[0]["type"]; got != "result" {
+		t.Fatalf("first response type = %#v, want result", got)
+	}
+	data1, _ := resp1[0]["data"].(map[string]any)
+	entries1, _ := data1["messages"].([]any)
+	if len(entries1) != 4 {
+		t.Fatalf("first: message count = %d, want 4 (2 user + 2 assistant)", len(entries1))
+	}
+
+	// Second request — same session, same file.
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "grokbuild",
+		Method:    "get_session_messages",
+		RequestID: "r2",
+		Params:    mustJSONRaw(t, map[string]any{"sessionId": "grok-stable-wire"}),
+	})
+	resp2 := readJSONMaps(t, clientConn, 1)
+	if got := resp2[0]["type"]; got != "result" {
+		t.Fatalf("second response type = %#v, want result", got)
+	}
+	data2, _ := resp2[0]["data"].(map[string]any)
+	entries2, _ := data2["messages"].([]any)
+	if len(entries2) != len(entries1) {
+		t.Fatalf("count drift: first=%d second=%d", len(entries1), len(entries2))
+	}
+
+	for i := range entries1 {
+		e1, _ := entries1[i].(map[string]any)
+		e2, _ := entries2[i].(map[string]any)
+		id1, _ := e1["id"].(string)
+		id2, _ := e2["id"].(string)
+		if id1 == "" {
+			t.Errorf("entry %d: empty wire id", i)
+		}
+		if id1 != id2 {
+			t.Errorf("wire id drift at index %d: first=%q second=%q", i, id1, id2)
+		}
 	}
 }
 

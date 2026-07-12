@@ -25,6 +25,7 @@ var _ core.ModelSwitcher = (*Agent)(nil)
 var _ core.ReasoningEffortSwitcher = (*Agent)(nil)
 var _ core.ToolAuthorizer = (*Agent)(nil)
 var _ core.HistoryProvider = (*Agent)(nil)
+var _ core.RichHistoryProvider = (*Agent)(nil)
 
 // Agent implements core.Agent for the Grok Build CLI.
 type Agent struct {
@@ -96,9 +97,16 @@ func New(opts map[string]any) (core.Agent, error) {
 func (a *Agent) Name() string { return "grokbuild" }
 
 // StartSession creates a new Grok ACP session or loads an existing one.
+//
+// This method must NOT hold a.mu (not even RLock): newGrokSession → loadSession
+// calls s.agent.SetWorkDir which acquires a.mu.Lock(). If StartSession held
+// RLock, that would be a read→write upgrade deadlock — the Lock() blocks
+// forever waiting for the RLock to release, but RLock won't release until
+// newGrokSession returns, which won't happen because it's blocked on
+// SetWorkDir. The agent pointer is stable (registered once at init), so no
+// lock is needed here; individual field access inside newGrokSession uses the
+// getter/setter methods which take their own locks.
 func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentSession, error) {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
 	return newGrokSession(ctx, a, sessionID)
 }
 

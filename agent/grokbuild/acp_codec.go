@@ -5,6 +5,7 @@ package grokbuild
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -275,11 +276,12 @@ func convertSessionUpdate(params json.RawMessage, sessionID string) []core.Event
 		return nil
 
 	default:
-		// Unknown update type — expose as a diagnostic error, don't crash.
-		return []core.Event{{
-			Type:    core.EventError,
-			Content: fmt.Sprintf("unknown sessionUpdate type: %q", p.SessionUpdate),
-		}}
+		// Unknown update type — log for diagnostics but do NOT emit an error
+		// event. Treating unknown notifications as terminal errors would abort
+		// turns whenever Grok emits an extension type we haven't mapped yet.
+		slog.Debug("grokbuild: unmapped sessionUpdate type",
+			"sessionUpdate", p.SessionUpdate)
+		return nil
 	}
 }
 
