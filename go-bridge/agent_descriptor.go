@@ -52,6 +52,8 @@ func agentKind(id string) string {
 		return "opencode"
 	case "codex":
 		return "codex"
+	case "grokbuild":
+		return "grokbuild" // 不转 snake_case，与 iOS fromWireKind 的 case "grokbuild" 对应
 	default:
 		return id
 	}
@@ -65,6 +67,8 @@ func agentDisplayName(id string, agent core.Agent) string {
 		return "Codex"
 	case "opencode":
 		return "OpenCode"
+	case "grokbuild":
+		return "Grok Build"
 	default:
 		return agent.Name()
 	}
@@ -77,6 +81,8 @@ func agentLiveEvents(id string, codexBackendMode string, cfg *AgentDetectionConf
 	switch id {
 	case "claude":
 		return "session_process"
+	case "grokbuild":
+		return "session_process" // grok agent stdio 是 stdin/stdout pipe，与 claude 同为进程模型
 	case "codex":
 		if codexBackendMode == "app_server" && cfg != nil && strings.TrimSpace(cfg.CodexAppServerURL) != "" {
 			return "broadcast"
@@ -89,7 +95,7 @@ func agentLiveEvents(id string, codexBackendMode string, cfg *AgentDetectionConf
 
 // agentRequiresPolling 根据 agent ID 判断是否需要轮询外部 turn。
 func agentRequiresPolling(id string, codexBackendMode string, cfg *AgentDetectionConfig) bool {
-	if id == "claude" || id == "opencode" {
+	if id == "claude" || id == "opencode" || id == "grokbuild" {
 		return true
 	}
 	if id == "codex" && codexBackendMode == "app_server" {
@@ -165,6 +171,8 @@ func detectAgentStatus(id string, codexBackendMode string, cfg *AgentDetectionCo
 			codexURL = cfg.CodexAppServerURL
 		}
 		return detectCodexService(codexBackendMode, codexURL)
+	case "grokbuild":
+		return detectGrokCLI()
 	default:
 		return AgentStatusAvailable, ""
 	}
@@ -188,6 +196,29 @@ func detectClaudeCLI() (AgentStatus, string) {
 			return AgentStatusNotDetected, "claude --version timed out"
 		}
 		return AgentStatusNotDetected, fmt.Sprintf("claude --version failed: %s", strings.TrimSpace(string(output)))
+	}
+
+	return AgentStatusAvailable, ""
+}
+
+// detectGrokCLI 检测 Grok Build CLI 可用性。
+// 使用 exec.LookPath 查找 grok 命令，找到后执行 --version 验证（3秒超时）。
+func detectGrokCLI() (AgentStatus, string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	path, err := exec.LookPath("grok")
+	if err != nil {
+		return AgentStatusNotDetected, "grok CLI not found in PATH"
+	}
+
+	cmd := exec.CommandContext(ctx, path, "--version")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return AgentStatusNotDetected, "grok --version timed out"
+		}
+		return AgentStatusNotDetected, fmt.Sprintf("grok --version failed: %s", strings.TrimSpace(string(output)))
 	}
 
 	return AgentStatusAvailable, ""

@@ -947,6 +947,14 @@ func (h *Handlers) handleListAgents(conn Connection, msg WireMessage, agent core
 }
 
 func (h *Handlers) handleListProjects(conn Connection, msg WireMessage, agent core.Agent) {
+	// Claude-style project scan under ~/.claude/projects is only meaningful for
+	// Claude. Grok Build sessions live under ~/.grok/sessions and are discovered
+	// via agent.ListSessions — do not pollute Grok UI with Claude project folders.
+	if agent != nil && agent.Name() == "grokbuild" {
+		conn.SendResult(msg.RequestID, map[string]interface{}{"projects": []interface{}{}}, nil)
+		return
+	}
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		conn.SendResult(msg.RequestID, map[string]interface{}{"projects": []interface{}{}}, nil)

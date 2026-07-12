@@ -8,6 +8,11 @@
 
 ## [Unreleased]
 
+### 2026-07-12 — Grok Build CLI driver (`grokbuild`)
+
+- **改了什么**：新增 `agent/grokbuild` ACP driver；默认 drivers 注册 `grokbuild`；本地 `~/.grok/sessions` catalog 实现 ListSessions/HistoryProvider（ACP 无 session/list）；`loadSession` 兼容 JSON bool；`list_projects` 不对 Grok 返回 Claude 工程树。
+- **验证**：`go test ./agent/grokbuild/...`；Release 安装；与 iOS 真机联调列表与续聊通过。
+
 ### 2026-07-12 — 修复 Codex 会话列表时间被迁移时间覆盖
 
 - **改了什么**：Codex 会话列表不再把 JSONL 文件的系统修改时间直接当作会话更新时间；改为从会话记录末尾的真实事件时间戳推导，只有记录中没有有效时间戳时才回退到文件时间。
