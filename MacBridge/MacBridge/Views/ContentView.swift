@@ -2,33 +2,25 @@ import SwiftUI
 
 // MARK: - 导航枚举
 
-/// 主窗口 tab 定义，为后续 Sidebar 化准备
+/// 主窗口 sidebar 一级项。UX 重设计（2026-07-13）P0-1：只保留日常任务。
+/// 原来的 remoteAccess / settings / diagnostics 改为 Toolbar 按钮与原生 Settings scene。
 enum NavigationTab: String, CaseIterable, Identifiable {
-    case overview
+    case workspace
     case devices
-    case remoteAccess
-    case settings
-    case diagnostics
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .overview: return L10n.overview
+        case .workspace: return L10n.workspace
         case .devices: return L10n.devices
-        case .remoteAccess: return L10n.remoteAccessTab
-        case .settings: return L10n.settings
-        case .diagnostics: return L10n.diagnostics
         }
     }
 
     var systemImage: String {
         switch self {
-        case .overview: return "circle.hexagonpath"
+        case .workspace: return "circle.hexagonpath"
         case .devices: return "lock.shield"
-        case .remoteAccess: return "antenna.radiowaves.left.and.right"
-        case .settings: return "gearshape"
-        case .diagnostics: return "doc.text"
         }
     }
 }
@@ -39,14 +31,13 @@ struct ContentView: View {
     @ObservedObject var pairingViewModel: PairingViewModel
     @ObservedObject var settingsViewModel: SettingsViewModel
     @StateObject private var backendVM = BackendStatusViewModel()
-    @State private var devices: [TrustedDevice] = []
-    @State private var logs: [String] = []
-    @State private var isLoadingLogs = false
-    @State private var logsError: String?
-    @State private var hasLoadedDevices = false
-    @State private var devicesError: String?
+    @StateObject private var deviceStore = DeviceStore()
+    @StateObject private var diagnosticsVM = DiagnosticsViewModel()
 
-    @State private var selectedTab: NavigationTab = .overview
+    @State private var selectedTab: NavigationTab = .workspace
+    /// 连接状态 Sheet（原 RemoteAccessView）与诊断 Sheet（原 logsTab）由 Toolbar 触发。
+    @State private var showConnectionStatus = false
+    @State private var showDiagnostics = false
     @EnvironmentObject private var dependencies: AppDependencies
 
     var body: some View {
@@ -58,7 +49,7 @@ struct ContentView: View {
             currentTabContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 820, minHeight: 560)
+        .frame(minWidth: LayoutConstants.minWindowWidth, minHeight: LayoutConstants.minWindowHeight)
         .background(Color(NSColor.windowBackgroundColor))
         .onChange(of: dependencies.runtimeManager.managementURL) { _, _ in
             configureBackendClientIfAvailable()
@@ -67,26 +58,64 @@ struct ContentView: View {
             configureBackendClientIfAvailable()
         }
         .onChange(of: selectedTab) { _, tab in
-            if tab == .overview {
+            if tab == .workspace {
                 Task {
-                    await loadDevices()
+                    await deviceStore.loadDevices()
                     await viewModel.refreshOverviewData(force: false)
                 }
             }
-            if tab == .devices { Task { await loadDevices() } }
-            if tab == .diagnostics { Task { await loadLogs() } }
+            if tab == .devices { Task { await deviceStore.loadDevices() } }
         }
         .onAppear {
             configureBackendClientIfAvailable()
+            diagnosticsVM.configure(logFilePath: dependencies.runtimeManager.config.logFilePath)
             pairingViewModel.onApproved = {
-                await loadDevices()
+                await deviceStore.loadDevices()
             }
         }
         .task {
-            await loadDevices()
+            await deviceStore.loadDevices()
             configureBackendClientIfAvailable()
+            diagnosticsVM.configure(logFilePath: dependencies.runtimeManager.config.logFilePath)
             await backendVM.loadAgents()
             await viewModel.refreshOverviewData()
+        }
+        // P2-3：⌘⇧D / ⌘⇧L 键盘命令打开对应工作表。
+        .onReceive(NotificationCenter.default.publisher(for: .openDiagnosticsRequest)) { _ in
+            showDiagnostics = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openConnectionStatusRequest)) { _ in
+            showConnectionStatus = true
+        }
+        .toolbar {
+            // 连接状态与帮助与诊断：不再是一级 sidebar 目的地，而是 Toolbar 一跳可达的 Sheet。
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    showConnectionStatus = true
+                } label: {
+                    Label(L10n.connectionStatus, systemImage: "antenna.radiowaves.left.and.right")
+                }
+                .help(L10n.connectionStatus)
+
+                Button {
+                    showDiagnostics = true
+                } label: {
+                    Label(L10n.helpDiagnostics, systemImage: "stethoscope")
+                }
+                .help(L10n.helpDiagnostics)
+            }
+        }
+        .sheet(isPresented: $showConnectionStatus) {
+            // P0 阶段承载现有 RemoteAccessView；P1-2 将其重做为单页连接状态 Sheet。
+            RemoteAccessView(apiClient: apiClient)
+        }
+        .sheet(isPresented: $showDiagnostics) {
+            // P2-2：抽离为摘要优先的 DiagnosticsSheet（健康结论 → 复制支持信息 → 原始日志）。
+            DiagnosticsSheet(
+                diagnosticsViewModel: diagnosticsVM,
+                bridgeStatus: viewModel,
+                backendStatus: backendVM
+            )
         }
     }
 
@@ -128,27 +157,20 @@ struct ContentView: View {
     @ViewBuilder
     private var currentTabContent: some View {
         switch selectedTab {
-        case .overview:
-            overviewTab
+        case .workspace:
+            workspaceTab
         case .devices:
             devicesTab
-        case .remoteAccess:
-            remoteAccessTab
-        case .settings:
-            SettingsView(viewModel: settingsViewModel)
-        case .diagnostics:
-            logsTab
         }
     }
 
-    // MARK: - Overview Tab
+    // MARK: - Workspace Tab
 
-    private var overviewTab: some View {
-        BridgeStatusView(
+    private var workspaceTab: some View {
+        WorkspaceView(
             viewModel: viewModel,
             backendViewModel: backendVM,
-            devices: devices,
-            hasLoadedDevices: hasLoadedDevices,
+            deviceStore: deviceStore,
             onStartBridge: {
                 dependencies.runtimeManager.start()
             },
@@ -161,8 +183,8 @@ struct ContentView: View {
             onNavigateToDevices: {
                 selectedTab = .devices
             },
-            onNavigateToRemoteAccess: {
-                selectedTab = .remoteAccess
+            onOpenConnectionStatus: {
+                showConnectionStatus = true
             },
             onPairDevice: {
                 selectedTab = .devices
@@ -175,10 +197,6 @@ struct ContentView: View {
 
     @State private var deviceToRemove: TrustedDevice?
     @State private var showRemoveConfirmation = false
-
-    private var remoteAccessTab: some View {
-        RemoteAccessView(apiClient: apiClient)
-    }
 
     private var devicesTab: some View {
         PageContainer {
@@ -194,23 +212,45 @@ struct ContentView: View {
                 Text(L10n.authorizedDevices)
                     .font(.headline)
 
-                if let devicesError {
+                if let devicesError = deviceStore.devicesError {
                     InlineFeedback(style: .error, message: devicesError)
                     Button(L10n.retry) {
-                        Task { await loadDevices() }
+                        Task { await deviceStore.loadDevices() }
                     }
-                } else if devices.isEmpty {
-                    HStack(spacing: 6) {
-                        Image(systemName: "info.circle")
-                            .foregroundColor(.secondary)
-                        Text(L10n.noAuthorizedDevices)
-                            .foregroundColor(.secondary)
-                            .font(.subheadline)
+                } else if deviceStore.devices.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "info.circle")
+                                .foregroundColor(.secondary)
+                            Text(L10n.noAuthorizedDevices)
+                                .foregroundColor(.secondary)
+                                .font(.subheadline)
+                        }
+                        Button(L10n.addDevice) {
+                            // 配对区域已在上方，按钮提示用户使用上方配对
+                            // 如需，可触发通知或直接开始配对
+                            if pairingViewModel.uiState == .idle {
+                                pairingViewModel.startPairing()
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
                     }
                 } else {
-                    ForEach(devices) { device in
-                        deviceRow(device)
+                    VStack(spacing: 0) {
+                        ForEach(deviceStore.devices) { device in
+                            deviceRow(device)
+                            if device.id != deviceStore.devices.last?.id {
+                                Divider()
+                            }
+                        }
                     }
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.3))
+                    .cornerRadius(6)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color(NSColor.separatorColor).opacity(0.2), lineWidth: 1)
+                    )
                 }
             }
         }
@@ -221,7 +261,7 @@ struct ContentView: View {
         ) {
             Button(L10n.devicesRevokeAuthorization, role: .destructive) {
                 if let device = deviceToRemove {
-                    Task { await revokeDevice(device) }
+                    Task { await deviceStore.revokeDevice(device) }
                 }
             }
             Button(L10n.cancel, role: .cancel) {}
@@ -241,7 +281,7 @@ struct ContentView: View {
                     Text(device.displayName ?? device.deviceId)
                         .fontWeight(.medium)
                     // 同名设备显示 ID 后 6 位
-                    if devices.filter({ $0.displayName == device.displayName }).count > 1 {
+                    if deviceStore.devices.filter({ $0.displayName == device.displayName }).count > 1 {
                         Text("(\(String(device.deviceId.suffix(6))))")
                             .font(.caption2)
                             .foregroundColor(.secondary)
@@ -268,82 +308,25 @@ struct ContentView: View {
 
             Spacer()
 
-            Button(L10n.devicesRevokeAuthorization) {
-                deviceToRemove = device
-                showRemoveConfirmation = true
+            // 撤销入口改为行尾 … 菜单（P1-1）。保留既有 confirmationDialog 二次确认与安全行为。
+            Menu {
+                Button(L10n.devicesRevokeAuthorization, role: .destructive) {
+                    deviceToRemove = device
+                    showRemoveConfirmation = true
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .foregroundColor(.secondary)
             }
+            .menuStyle(.borderlessButton)
+            .frame(width: 20)
+            .accessibilityLabel(L10n.devicesActions)
         }
         .padding(.vertical, 6)
     }
 
     private static func relativeTimeString(_ isoString: String) -> String {
         RelativeTimeFormatter.string(isoString)
-    }
-
-    // MARK: - Diagnostics Tab
-
-    private var logsTab: some View {
-        PageContainer(scrolls: false) {
-            VStack(alignment: .leading, spacing: 8) {
-                PageHeader(L10n.diagnostics, subtitle: L10n.diagnosticsSubtitle) {
-                    Button {
-                        Task { await loadLogs() }
-                    } label: {
-                        HStack(spacing: 4) {
-                            if isLoadingLogs {
-                                ProgressView()
-                                    .controlSize(.small)
-                            }
-                            Image(systemName: "arrow.clockwise")
-                            Text(L10n.refreshAll)
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(isLoadingLogs)
-
-                    Button(L10n.copyRawLogs) {
-                        let text = logs.joined(separator: "\n")
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(text, forType: .string)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(logs.isEmpty)
-                }
-
-                SectionHeader(L10n.rawLogs)
-                    .padding(.top, 10)
-
-                Text(L10n.last200Lines)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                if isLoadingLogs && logs.isEmpty {
-                    ProgressView(L10n.diagnosticsReading)
-                } else if let logsError {
-                    InlineFeedback(style: .error, message: logsError)
-                } else if logs.isEmpty {
-                    Text(L10n.noLogsAvailable)
-                        .foregroundColor(.secondary)
-                } else {
-                    ScrollView(.vertical) {
-                        LazyVStack(alignment: .leading, spacing: 2) {
-                            ForEach(Array(logs.enumerated()), id: \.offset) { _, line in
-                                Text(Self.displayLogLine(line))
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                        .padding(10)
-                    }
-                    .frame(maxHeight: .infinity)
-                    .glassPanel()
-                }
-            }
-        }
     }
 
     // MARK: - Data Loading
@@ -361,90 +344,9 @@ struct ContentView: View {
         if let client = apiClient {
             backendVM.configure(apiClient: client)
             viewModel.configure(apiClient: client)
+            deviceStore.configure(apiClient: client)
             settingsViewModel.managementAPIClient = client
             settingsViewModel.loadDisplayName()
-        }
-    }
-
-    private func loadDevices() async {
-        guard let client = apiClient else {
-            hasLoadedDevices = false
-            devicesError = L10n.errorCannotConnect
-            return
-        }
-        do {
-            devices = try await client.listDevices()
-            hasLoadedDevices = true
-            devicesError = nil
-        } catch {
-            hasLoadedDevices = false
-            devicesError = error.localizedDescription
-        }
-    }
-
-    private func loadLogs() async {
-        guard !isLoadingLogs else { return }
-        isLoadingLogs = true
-        defer { isLoadingLogs = false }
-
-        let logPath = dependencies.runtimeManager.config.logFilePath
-        let result = await Task.detached(priority: .utility) {
-            Self.readTailLines(at: logPath, maxLines: 200, maxBytes: 1_048_576)
-        }.value
-        switch result {
-        case .success(let lines):
-            logs = lines
-            logsError = nil
-        case .failure(let error):
-            logsError = error.localizedDescription
-        }
-    }
-
-    private nonisolated static func readTailLines(
-        at path: String,
-        maxLines: Int,
-        maxBytes: UInt64
-    ) -> Result<[String], Error> {
-        let handle: FileHandle
-        do {
-            handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: path))
-        } catch {
-            return .failure(error)
-        }
-        defer { try? handle.close() }
-
-        do {
-            let fileSize = try handle.seekToEnd()
-            let bytesToRead = min(fileSize, maxBytes)
-            guard bytesToRead > 0 else { return .success([]) }
-            try handle.seek(toOffset: fileSize - bytesToRead)
-            guard let data = try handle.readToEnd(),
-                  let text = String(data: data, encoding: .utf8) else {
-                return .success([])
-            }
-            let lines = text.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
-            return .success(Array(lines.suffix(maxLines)))
-        } catch {
-            return .failure(error)
-        }
-    }
-
-    private static func displayLogLine(_ line: String) -> String {
-        let maxCharacters = 500
-        guard line.count > maxCharacters else { return line }
-        return String(line.prefix(maxCharacters)) + " …"
-    }
-
-    private func revokeDevice(_ device: TrustedDevice) async {
-        guard let client = apiClient else {
-            devicesError = L10n.errorCannotConnect
-            return
-        }
-        do {
-            try await client.revokeDevice(device.deviceId)
-            await loadDevices()
-        } catch {
-            devicesError = String(format: L10n.errorRemoveDevice, error.localizedDescription)
         }
     }
 }

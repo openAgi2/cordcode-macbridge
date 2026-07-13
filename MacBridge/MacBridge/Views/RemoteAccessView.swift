@@ -10,9 +10,7 @@ struct RemoteAccessView: View {
     @AppStorage("relayEnabled") private var relayEnabled = true
     @State private var showDisableConfirmation = false
     
-    @State private var selectedMethod: ConnectionMethod = .lan
-    @State private var showDetailInNarrow = true
-    @State private var sidebarWidth: CGFloat = 240
+    @State private var showAdvanced = false
     @State private var relayMode: RelayMode = .official
     @State private var relaySaveState: RelaySaveState = .idle
     @State private var customAddressSaveState: CustomAddressSaveState = .idle
@@ -21,8 +19,22 @@ struct RemoteAccessView: View {
     @State private var isLoadingStatus = false
     @State private var statusError: String?
     @State private var lastUpdatedTime: String?
+
+    @Environment(\.dismiss) private var dismiss
+
+    // 为了让 sheet 感觉上更接近老版左右分栏，在 sheet 内部实现简易 master-detail
+    // 保持入口仍是 sheet（工作站/toolbar 打开），但内容呈现像老版列表+详情。
+    enum ConnectionMethod: String, CaseIterable {
+        case lan = "局域网"
+        case relay = "Relay"
+        case tailscale = "Tailscale"
+        case other = "其他 (VPS/自定义)"
+    }
+    @State private var selectedMethod: ConnectionMethod = .relay
     
     var apiClient: ManagementAPIClient?
+    /// P2-3：Reduce Motion 时取消位移，只保留状态替换。
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var localURL: String {
         remoteStatus?.localURL ?? remoteStatus?.listenStatus?.localURL ?? ""
@@ -85,20 +97,32 @@ struct RemoteAccessView: View {
         }
     }
 
+    private func methodButton(_ method: ConnectionMethod, _ label: String, _ status: String) -> some View {
+        Button {
+            selectedMethod = method
+        } label: {
+            HStack {
+                Text(label)
+                    .font(.body)
+                Spacer()
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 6)
+            .padding(.horizontal, 8)
+            .background(
+                selectedMethod == method ? Color.accentColor.opacity(0.12) : Color.clear
+            )
+            .cornerRadius(4)
+        }
+        .buttonStyle(.plain)
+    }
+
     private var showPublicWSWarning: Bool {
         isPublicWSAddress(remoteURL) || (remoteStatus?.remoteAnalysis?.isPublicWS == true && remoteURL == savedRemoteURL)
     }
     
-    private var leftColumnSubtitles: [ConnectionMethod: String] {
-        var subs: [ConnectionMethod: String] = [:]
-        if includeTailscale && !tailscaleURL.isEmpty {
-            subs[.tailscale] = L10n.current == .zhHans ? "新配对中包含" : "Included in pairing"
-        }
-        if includeRemote && !savedRemoteURL.isEmpty && isValidManualRemoteURL(savedRemoteURL) {
-            subs[.customAddress] = L10n.current == .zhHans ? "新配对中包含" : "Included in pairing"
-        }
-        return subs
-    }
     
     private var relayStatusText: String {
         switch relaySaveState {
@@ -121,32 +145,106 @@ struct RemoteAccessView: View {
     }
 
     var body: some View {
-        PageContainer(scrolls: false) {
+        // P1-2：单页「连接状态」。Relay/LAN 默认可见，Tailscale 与自定义地址收入同页高级展开区。
+        // 不再使用左/右二级导航（GeometryReader wide/narrow 分支）；既有保存状态枚举与配置语义不变。
+        PageContainer(scrolls: false, maxContentWidth: LayoutConstants.connectionSheetWidth) {
             VStack(alignment: .leading, spacing: 0) {
-                PageHeader(L10n.remoteTitle, subtitle: L10n.remoteSubtitle) {
-                    Button {
-                        Task { await loadRemoteStatus() }
-                    } label: {
-                        if isLoadingStatus {
-                            ProgressView()
-                                .controlSize(.small)
+                PageHeader(L10n.connectionStatus, subtitle: L10n.remoteSubtitle) {
+                    HStack(spacing: 12) {
+                        Button {
+                            Task { await loadRemoteStatus() }
+                        } label: {
+                            if isLoadingStatus {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Text(L10n.refreshAll)
                         }
-                        Text(L10n.current == .zhHans ? "刷新状态" : "Refresh Status")
+                        .disabled(isLoadingStatus)
+
+                        Button("完成") {
+                            dismiss()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                     }
-                    .disabled(isLoadingStatus)
                 }
                 .padding(.bottom, 20)
 
-                GeometryReader { geometry in
-                    let isNarrow = geometry.size.width < 680
-                    
-                    if isNarrow {
-                        narrowLayoutView
-                    } else {
-                        wideLayoutView
+                // 恢复左右分栏风格（接近老版），但在 sheet 内
+                HStack(alignment: .top, spacing: 0) {
+                    // 左侧列表 (接近老版)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Button { selectedMethod = .lan } label: {
+                            HStack {
+                                Text("局域网")
+                                Spacer()
+                                Text(localURL.isEmpty ? "未配置" : "可用")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 6).padding(.horizontal, 8)
+                            .background(selectedMethod == .lan ? Color.accentColor.opacity(0.12) : Color.clear)
+                            .cornerRadius(4)
+                        }.buttonStyle(.plain)
+
+                        Button { selectedMethod = .relay } label: {
+                            HStack {
+                                Text("Relay")
+                                Spacer()
+                                Text(relayConfigured == true ? "已配置" : "未配置")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 6).padding(.horizontal, 8)
+                            .background(selectedMethod == .relay ? Color.accentColor.opacity(0.12) : Color.clear)
+                            .cornerRadius(4)
+                        }.buttonStyle(.plain)
+
+                        Button { selectedMethod = .tailscale } label: {
+                            HStack {
+                                Text("Tailscale")
+                                Spacer()
+                                Text(tailscaleURL.isEmpty ? "未配置" : "可用")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 6).padding(.horizontal, 8)
+                            .background(selectedMethod == .tailscale ? Color.accentColor.opacity(0.12) : Color.clear)
+                            .cornerRadius(4)
+                        }.buttonStyle(.plain)
+
+                        Button { selectedMethod = .other } label: {
+                            HStack {
+                                Text("其他 (VPS/自定义)")
+                                Spacer()
+                                Text("按需")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 6).padding(.horizontal, 8)
+                            .background(selectedMethod == .other ? Color.accentColor.opacity(0.12) : Color.clear)
+                            .cornerRadius(4)
+                        }.buttonStyle(.plain)
                     }
+                    .frame(width: 160)
+                    .padding(.trailing, 12)
+
+                    Divider()
+
+                    // 右侧详情
+                    ScrollView {
+                        Group {
+                            switch selectedMethod {
+                            case .lan: lanDetailView
+                            case .relay: relayDetailView
+                            case .tailscale: tailscaleDetailView
+                            case .other: customAddressDetailView
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(.leading, 16)
                 }
+                .padding(.trailing, 8)
             }
+            .frame(minWidth: 1000, minHeight: 680)  // 稳定 sheet 尺寸：防止切换不同连接方式时窗口跳跃。minHeight 覆盖 Relay 最完整配置的高度。
         }
         .task(id: apiClient?.baseURL.absoluteString) {
             customRelayEndpoint = savedCustomRelayEndpoint
@@ -167,169 +265,44 @@ struct RemoteAccessView: View {
             Text(L10n.remoteRelayConfirmMessage)
         }
     }
-    
-    // MARK: - Layouts
-    
-    private var wideLayoutView: some View {
-        HStack(spacing: 0) {
-            leftColumnView
-                .frame(width: sidebarWidth)
-            
-            Rectangle()
-                .fill(Color(NSColor.separatorColor))
-                .frame(width: 1)
-                .frame(maxHeight: .infinity)
-                .contentShape(Rectangle())
-                .onHover { inside in
-                    if inside {
-                        NSCursor.resizeLeftRight.push()
-                    } else {
-                        NSCursor.pop()
+
+    private var advancedConnectionsSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Button {
+                if reduceMotion {
+                    showAdvanced.toggle()
+                } else {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showAdvanced.toggle()
                     }
                 }
-                .gesture(
-                    DragGesture()
-                        .onChanged { value in
-                            let newWidth = sidebarWidth + value.translation.width
-                            sidebarWidth = min(max(newWidth, 200), 260)
-                        }
-                )
-            
-            ScrollView {
-                rightColumnView
-                    .padding(.leading, 24)
-                    .padding(.trailing, 8)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-    }
-    
-    private var narrowLayoutView: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if showDetailInNarrow {
-                HStack {
-                    Button(action: {
-                        showDetailInNarrow = false
-                    }) {
-                        Label(L10n.back, systemImage: "chevron.left")
-                    }
-                    .buttonStyle(.plain)
-                    .font(.body.weight(.medium))
-                    .foregroundColor(.accentColor)
-                    .padding(.vertical, 8)
-                    
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .bold))
+                        .rotationEffect(.degrees(showAdvanced ? 90 : 0))
+                    Text(showAdvanced ? L10n.connectionStatusHideAdvanced : L10n.connectionStatusShowAdvanced)
+                        .font(.body.weight(.medium))
                     Spacer()
                 }
-                .padding(.bottom, 12)
-                
-                ScrollView {
-                    rightColumnView
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(.accentColor)
+
+            if showAdvanced {
+                VStack(alignment: .leading, spacing: 20) {
+                    tailscaleDetailView
+                    Divider()
+                    customAddressDetailView
                 }
-            } else {
-                leftColumnView
+                // Reduce Motion 时只做透明度替换，不产生位移。
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
             }
         }
     }
     
-    // MARK: - Left Column
-    
-    private var leftColumnView: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                // Group 1: 自动连接
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(L10n.current == .zhHans ? "自动连接 (默认使用)" : "Auto Connections")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 4)
-                    
-                    NavigationRow(
-                        method: .lan,
-                        icon: "wifi",
-                        title: L10n.remoteLAN,
-                        statusText: localURL.isEmpty ? L10n.remoteUnavailable : L10n.remoteAutomatic,
-                        statusColor: localURL.isEmpty ? .secondary : .green,
-                        subtitle: nil,
-                        isSelected: selectedMethod == .lan,
-                        isLoading: isLoadingStatus,
-                        action: { selectMethod(.lan) }
-                    )
-                    
-                    NavigationRow(
-                        method: .relay,
-                        icon: "lock.shield",
-                        title: L10n.remoteRelay,
-                        statusText: relayStatusText,
-                        statusColor: (relayEnabled && relayConfigured == true) ? .green : .secondary,
-                        subtitle: nil,
-                        isSelected: selectedMethod == .relay,
-                        isLoading: isLoadingStatus,
-                        action: { selectMethod(.relay) }
-                    )
-                }
-                
-                // Group 2: 其他连接
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(L10n.current == .zhHans ? "其他连接" : "Other Connections")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 4)
-                    
-                    NavigationRow(
-                        method: .tailscale,
-                        icon: "network",
-                        title: L10n.remoteTailscale,
-                        statusText: tailscaleURL.isEmpty ? L10n.remoteTailscaleUnavailable : tailscaleURL,
-                        statusColor: tailscaleURL.isEmpty ? .secondary : .green,
-                        subtitle: leftColumnSubtitles[.tailscale],
-                        isSelected: selectedMethod == .tailscale,
-                        isLoading: isLoadingStatus,
-                        action: { selectMethod(.tailscale) }
-                    )
-                    
-                    NavigationRow(
-                        method: .customAddress,
-                        icon: "server.rack",
-                        title: L10n.remoteVPS,
-                        statusText: savedRemoteURL.isEmpty ? L10n.notConfigured : L10n.configured,
-                        statusColor: savedRemoteURL.isEmpty ? .secondary : .green,
-                        subtitle: leftColumnSubtitles[.customAddress],
-                        isSelected: selectedMethod == .customAddress,
-                        isLoading: isLoadingStatus,
-                        action: { selectMethod(.customAddress) }
-                    )
-                }
-                
-                if let statusError {
-                    Text(statusError)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 4)
-                        .padding(.top, 8)
-                }
-            }
-            .padding(.trailing, 8)
-        }
-    }
-    
-    // MARK: - Right Column Details
-    
-    private var rightColumnView: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            switch selectedMethod {
-            case .lan:
-                lanDetailView
-            case .relay:
-                relayDetailView
-            case .tailscale:
-                tailscaleDetailView
-            case .customAddress:
-                customAddressDetailView
-            }
-        }
-    }
-    
-    private var lanDetailView: some View {
+        private var lanDetailView: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text(L10n.remoteLAN)
                 .font(.title2)
@@ -457,13 +430,16 @@ struct RemoteAccessView: View {
                 }
                 
                 if relayEnabled && relayConfigured == true, let endpoint = remoteStatus?.relay?.endpoint {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(L10n.current == .zhHans ? "中继地址：" : "Relay Endpoint:")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Text(endpoint)
-                            .font(.system(.body, design: .monospaced))
-                            .textSelection(.enabled)
+                    // r5: 官方默认隐藏 endpoint，自定义时必须显示真实值 + 恢复默认
+                    if relayMode == .custom {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(L10n.current == .zhHans ? "中继地址：" : "Relay Endpoint:")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            Text(endpoint)
+                                .font(.system(.body, design: .monospaced))
+                                .textSelection(.enabled)
+                        }
                     }
                 }
             }
@@ -729,10 +705,6 @@ struct RemoteAccessView: View {
     
     // MARK: - Actions / Helpers
     
-    private func selectMethod(_ method: ConnectionMethod) {
-        selectedMethod = method
-        showDetailInNarrow = true
-    }
     
     private func feedbackRow(text: String, isProgress: Bool) -> some View {
         HStack(spacing: 8) {
@@ -935,15 +907,6 @@ struct RemoteAccessView: View {
 
 // MARK: - Nested Types
 
-enum ConnectionMethod: String, CaseIterable, Identifiable {
-    case lan
-    case relay
-    case tailscale
-    case customAddress
-
-    var id: String { rawValue }
-}
-
 enum RelayMode: String {
     case official
     case custom
@@ -968,90 +931,6 @@ enum CustomAddressSaveState {
     case restartingBridge
     case applied
     case failed(String)
-}
-
-// MARK: - Navigation Row Component
-
-struct NavigationRow: View {
-    let method: ConnectionMethod
-    let icon: String
-    let title: String
-    let statusText: String
-    let statusColor: Color
-    let subtitle: String?
-    let isSelected: Bool
-    let isLoading: Bool
-    let action: () -> Void
-    
-    @State private var isHovering = false
-    
-    var body: some View {
-        Button(action: action) {
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: icon)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(isSelected ? .primary : .accentColor)
-                    .frame(width: 18, height: 18)
-                    .padding(4)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.accentColor.opacity(0.1))
-                    )
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(title)
-                            .font(.body)
-                            .fontWeight(.medium)
-                            .foregroundColor(.primary)
-                        
-                        Spacer()
-                        
-                        if isLoading {
-                            ProgressView()
-                                .controlSize(.small)
-                                .scaleEffect(0.6)
-                                .frame(width: 8, height: 8)
-                        } else {
-                            Circle()
-                                .fill(statusColor)
-                                .frame(width: 6, height: 6)
-                        }
-                    }
-                    
-                    Text(statusText)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                    
-                    if let subtitle {
-                        Text(subtitle)
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(isSelected ? .primary : .accentColor)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.accentColor.opacity(0.12))
-                            )
-                            .padding(.top, 2)
-                    }
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(isSelected ? Color.accentColor.opacity(0.18) : (isHovering ? Color.secondary.opacity(0.1) : Color.clear))
-        )
-        .onHover { hover in
-            isHovering = hover
-        }
-    }
 }
 
 // MARK: - URL Formatter
