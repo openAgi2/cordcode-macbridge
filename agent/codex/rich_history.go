@@ -9,6 +9,8 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -123,7 +125,7 @@ func ParseRichHistoryFromReader(r io.Reader, limit int) ([]core.RichHistoryEntry
 			Name      string          `json:"name"`
 			Input     string          `json:"input"`
 			Text      string          `json:"text"`
-			Output    string          `json:"output"`
+			Output    json.RawMessage `json:"output"`
 			Status    string          `json:"status"`
 			Command   string          `json:"command"`
 			CallID    string          `json:"call_id"`
@@ -212,13 +214,16 @@ func ParseRichHistoryFromReader(r io.Reader, limit int) ([]core.RichHistoryEntry
 			builder.addToolUse(ts, "Bash", item.Command, "")
 
 		case item.Type == "function_call_output":
-			builder.addToolResultByCallID(item.CallID, item.Output, item.Status)
+			builder.addToolResultByCallID(item.CallID, codexTranscriptOutput(item.Output), item.Status)
 
-		case item.Type == "custom_tool_call" && item.Name == "apply_patch":
-			builder.addToolUse(ts, "Patch", item.Input, item.CallID)
+		case item.Type == "custom_tool_call":
+			toolName, toolInput := codexCustomToolUse(item.Name, item.Input)
+			if toolName != "" {
+				builder.addToolUse(ts, toolName, toolInput, item.CallID)
+			}
 
 		case item.Type == "custom_tool_call_output":
-			builder.addToolResultByCallID(item.CallID, item.Output, item.Status)
+			builder.addToolResultByCallID(item.CallID, codexTranscriptOutput(item.Output), item.Status)
 
 		default:
 			slog.Debug("codex rich history: unhandled response_item",
@@ -248,6 +253,32 @@ func decodeCodexFunctionCallArgumentsRaw(raw json.RawMessage) (string, error) {
 	return string(raw), nil
 }
 
+// codexTranscriptOutput accepts both legacy string output and the current
+// structured content-item array used by Codex Desktop custom tools. Keeping
+// the text fragments lets history replay restore real tool completion events.
+func codexTranscriptOutput(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	var parts []struct {
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(raw, &parts) == nil {
+		texts := make([]string, 0, len(parts))
+		for _, part := range parts {
+			if strings.TrimSpace(part.Text) != "" {
+				texts = append(texts, part.Text)
+			}
+		}
+		return strings.Join(texts, "\n")
+	}
+	return string(raw)
+}
+
 func extractToolInput(toolName string, raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
@@ -265,6 +296,56 @@ func extractToolInput(toolName string, raw json.RawMessage) string {
 		return s
 	}
 	return string(raw)
+}
+
+var codexExecCommandInputPattern = regexp.MustCompile(`tools\.exec_command\(\s*\{[^{}]*"cmd"\s*:\s*"((?:\\.|[^"\\])*)"`)
+var codexPatchTargetPattern = regexp.MustCompile(`(?m)^\*\*\* (?:Update|Add|Delete) File: ([^\r\n]+)`)
+
+// codexCustomToolUse unwraps the Codex Desktop `exec` wrapper when its source
+// contains exactly one real operation. This preserves the actual command or
+// patch target in history rather than presenting the JavaScript wrapper as a
+// generic tool. Mixed/multi-operation wrappers deliberately remain generic:
+// guessing one operation would make the timeline less truthful.
+func codexCustomToolUse(name, input string) (string, string) {
+	name = strings.TrimSpace(name)
+	if name == "apply_patch" {
+		return "Patch", codexPatchTarget(input)
+	}
+	if name != "exec" {
+		return name, input
+	}
+
+	hasCommand := strings.Count(input, "tools.exec_command")
+	hasPatch := strings.Count(input, "tools.apply_patch")
+	if hasCommand == 1 && hasPatch == 0 {
+		if command := codexWrappedExecCommand(input); command != "" {
+			return "exec_command", command
+		}
+	}
+	if hasPatch == 1 && hasCommand == 0 {
+		return "Patch", codexPatchTarget(input)
+	}
+	return name, input
+}
+
+func codexWrappedExecCommand(input string) string {
+	match := codexExecCommandInputPattern.FindStringSubmatch(input)
+	if len(match) != 2 {
+		return ""
+	}
+	command, err := strconv.Unquote(`"` + match[1] + `"`)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(command)
+}
+
+func codexPatchTarget(input string) string {
+	match := codexPatchTargetPattern.FindStringSubmatch(input)
+	if len(match) == 2 && strings.TrimSpace(match[1]) != "" {
+		return strings.TrimSpace(match[1])
+	}
+	return "编辑文件"
 }
 
 func codexInputImageFile(imageURL string, index int) (map[string]any, bool) {

@@ -568,6 +568,42 @@ func TestGetRichSessionHistory_ExecCommandExtractsCmd(t *testing.T) {
 	}
 }
 
+func TestGetRichSessionHistory_CustomToolCallWithStructuredOutput(t *testing.T) {
+	codexHome := filepath.Join(t.TempDir(), ".codex")
+	sessionID := "rich-custom-tool-output"
+	rollout := "" +
+		`{"type":"session_meta","payload":{"id":"` + sessionID + `","cwd":"/tmp"}}` + "\n" +
+		`{"type":"response_item","timestamp":"2026-05-20T12:00:01Z","payload":{"role":"user","type":"message","content":[{"type":"input_text","text":"run it"}]}}` + "\n" +
+		`{"type":"response_item","timestamp":"2026-05-20T12:00:02Z","payload":{"type":"custom_tool_call","name":"exec","call_id":"call-exec","input":"const r = await tools.exec_command({\"cmd\":\"git status --short\"});"}}` + "\n" +
+		`{"type":"response_item","timestamp":"2026-05-20T12:00:03Z","payload":{"type":"custom_tool_call_output","call_id":"call-exec","output":[{"type":"input_text","text":"first line"},{"type":"input_text","text":"second line"}]}}` + "\n"
+	writeTestRollout(t, codexHome, sessionID, rollout)
+
+	entries, err := getRichSessionHistory(sessionID, codexHome, 0)
+	if err != nil {
+		t.Fatalf("getRichSessionHistory() error = %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("len(entries) = %d, want 2", len(entries))
+	}
+	asst := entries[1]
+	if len(asst.Steps) != 1 {
+		t.Fatalf("len(Steps) = %d, want 1", len(asst.Steps))
+	}
+	if asst.Steps[0]["toolName"] != "exec_command" {
+		t.Errorf("toolName = %v, want exec_command", asst.Steps[0]["toolName"])
+	}
+	if asst.Steps[0]["title"] != "git status --short" {
+		t.Errorf("title = %v, want command", asst.Steps[0]["title"])
+	}
+	if asst.Steps[0]["status"] != "completed" {
+		t.Errorf("status = %v, want completed", asst.Steps[0]["status"])
+	}
+	output, _ := asst.Steps[0]["output"].(map[string]any)
+	if output["text"] != "first line\nsecond line" {
+		t.Errorf("output = %v, want joined structured text", output["text"])
+	}
+}
+
 func TestGetRichSessionHistory_MultiTurnWithMessageAndTools(t *testing.T) {
 	codexHome := filepath.Join(t.TempDir(), ".codex")
 	sessionID := "rich-multi-turn"
