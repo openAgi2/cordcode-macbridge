@@ -50,7 +50,7 @@ struct MacBridgeApp: App {
                 appDelegate.notificationCoordinator?.requestAuthorization()
             }
         }
-        .defaultSize(width: 960, height: 680)
+        .defaultSize(width: 1280, height: 840)
         .windowResizability(.contentMinSize)
         // P2-3：键盘快捷键 ⌘⇧D 打开「帮助与诊断」。Settings 由原生 Settings scene 承接 ⌘,。
         .commands {
@@ -145,6 +145,9 @@ private struct WindowGlassConfigurator: NSViewRepresentable {
         if !window.titlebarAppearsTransparent {
             window.titlebarAppearsTransparent = true
         }
+        if window.titleVisibility != .hidden {
+            window.titleVisibility = .hidden
+        }
         if !window.isMovableByWindowBackground {
             window.isMovableByWindowBackground = true
         }
@@ -152,6 +155,33 @@ private struct WindowGlassConfigurator: NSViewRepresentable {
         let targetAppearance = theme.nsAppearanceName
         if window.appearance?.name != targetAppearance {
             window.appearance = targetAppearance.flatMap(NSAppearance.init(named:))
+        }
+
+        if window.frame.size.width < 1000 {
+            var frame = window.frame
+            let oldSize = frame.size
+            frame.size = CGSize(width: 1280, height: 840)
+            frame.origin.y -= (840 - oldSize.height)
+            window.setFrame(frame, display: true)
+        }
+
+        if let closeButton = window.standardWindowButton(.closeButton),
+           closeButton.frame.origin.x < 15 {
+            let closeX: CGFloat = 24
+            let spacing: CGFloat = 23
+            
+            let closeBtn = window.standardWindowButton(.closeButton)
+            let minBtn = window.standardWindowButton(.miniaturizeButton)
+            let zoomBtn = window.standardWindowButton(.zoomButton)
+            
+            closeBtn?.frame.origin.x = closeX
+            closeBtn?.frame.origin.y -= 9
+            
+            minBtn?.frame.origin.x = closeX + spacing
+            minBtn?.frame.origin.y -= 9
+            
+            zoomBtn?.frame.origin.x = closeX + spacing * 2
+            zoomBtn?.frame.origin.y -= 9
         }
     }
 }

@@ -6,17 +6,12 @@ import XCTest
 final class LayoutConstantsTests: XCTestCase {
 
     func testWindowMinimumMeetsP0Contract() {
-        XCTAssertEqual(LayoutConstants.minWindowWidth, 920, "P0-3: 主窗口最小宽度必须为 920pt")
+        XCTAssertEqual(LayoutConstants.minWindowWidth, 1280, "P0-3: 主窗口最小宽度必须为 1280pt")
         XCTAssertGreaterThanOrEqual(LayoutConstants.minWindowHeight, 560, "最小高度不低于 560pt")
     }
 
     func testWorkColumnWidthMatchesP0Contract() {
         XCTAssertEqual(LayoutConstants.workColumnWidth, 880, "P0-3: 默认工作列最大宽度必须为 880pt")
-    }
-
-    func testWorkspaceHomeColumnIsComfortablyConstrained() {
-        XCTAssertEqual(LayoutConstants.workspaceHomeContentWidth, 820)
-        XCTAssertLessThan(LayoutConstants.workspaceHomeContentWidth, LayoutConstants.workColumnWidth)
     }
 
     func testWorkColumnFitsInsideMinWindow() {
@@ -71,6 +66,19 @@ final class LayoutConstantsTests: XCTestCase {
         let padding = LayoutConstants.pageHorizontalPadding
         XCTAssertEqual(LayoutConstants.workspaceWideContainerWidth, 1164 + 2 * padding)
         XCTAssertEqual(LayoutConstants.workspaceMaxContainerWidth, 1204 + 2 * padding)
+    }
+
+    func testFocusedWorkspaceContainerStaysBetweenDefaultAndWideLayouts() {
+        XCTAssertGreaterThan(
+            LayoutConstants.workspaceFocusedContainerWidth,
+            LayoutConstants.workColumnWidth,
+            "首页聚焦列需要比默认工作列更宽，容纳设备与工具状态"
+        )
+        XCTAssertLessThan(
+            LayoutConstants.workspaceFocusedContainerWidth,
+            LayoutConstants.workspaceMaxContainerWidth,
+            "首页不能采用全宽工作区的最大容器，避免状态行被横向拉散"
+        )
     }
 
     func testDualColumnSizes() {

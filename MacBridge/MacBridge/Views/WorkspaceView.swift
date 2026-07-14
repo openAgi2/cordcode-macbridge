@@ -47,14 +47,13 @@ struct WorkspaceView: View {
     }
 
     var body: some View {
-        PageContainer(maxContentWidth: LayoutConstants.workspaceHomeContentWidth) {
-            VStack(alignment: .leading, spacing: 40) {
+        PageContainer(maxContentWidth: LayoutConstants.workspaceFocusedContainerWidth) {
+            VStack(alignment: .leading, spacing: 24) {
                 headlineSection
+                    .padding(.top, 20)
                 Divider()
+                    .padding(.top, 10)
                 devicesSection
-                if !attentionItems.isEmpty {
-                    attentionSection
-                }
                 toolsAndConnectionSection
             }
         }
@@ -101,7 +100,7 @@ struct WorkspaceView: View {
     }
 
     private var firstUseHeadline: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(spacing: 12) {
             Text(L10n.workspaceFirstDeviceTitle)
                 .font(.title.weight(.semibold))
             Text(L10n.workspaceFirstDeviceSubtitle)
@@ -111,35 +110,37 @@ struct WorkspaceView: View {
             pairDeviceButton
                 .padding(.top, 4)
         }
+        .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }
 
     private var standardHeadline: some View {
-        HStack(alignment: .top, spacing: 28) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    StatusIndicator(
-                        systemImage: conclusionAppearance.icon,
-                        color: conclusionAppearance.color,
-                        showsProgress: viewModel.status == .starting
-                    )
-                    Text(conclusionTitle)
-                        .font(.title2.weight(.semibold))
+        VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                if viewModel.status == .starting {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: conclusionAppearance.icon)
+                        .font(.system(size: 38, weight: .light))
+                        .foregroundStyle(conclusionAppearance.color)
+                        .frame(width: 40, height: 40)
                 }
-                Text(conclusionSubtitle)
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(conclusionTitle)
+                    .font(.system(size: 28, weight: .semibold))
             }
-
-            Spacer(minLength: 20)
-
-            HStack(alignment: .center, spacing: 8) {
-                pairDeviceButton
-                headlineActions
-            }
+            Text(conclusionSubtitle)
+                .font(.system(size: 15.5))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.center)
+            pairDeviceButton
+                .padding(.top, 2)
+            headlineActions
+                .padding(.top, 6)
         }
+        .frame(maxWidth: .infinity)
     }
 
     private var pairDeviceButton: some View {
@@ -152,45 +153,55 @@ struct WorkspaceView: View {
     private var headlineActions: some View {
         switch viewModel.status {
         case .ready:
-            Button(isRestarting ? L10n.overviewRestarting : L10n.restart) {
-                isRestarting = true
-                onRestartBridge()
+            HStack(spacing: 13) {
+                RuntimeControlButton(
+                    title: isRestarting ? L10n.overviewRestarting : L10n.restart,
+                    systemImage: "arrow.clockwise",
+                    width: 113,
+                    isDisabled: isRestarting
+                ) {
+                    isRestarting = true
+                    onRestartBridge()
+                }
+                RuntimeControlButton(
+                    title: L10n.stop,
+                    systemImage: "stop",
+                    width: 118
+                ) {
+                    showStopConfirmation = true
+                }
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(isRestarting)
-            Button(L10n.stop) { showStopConfirmation = true }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
         case .readyNoAgents:
             Button(L10n.workspaceRecheck) {
                 Task { await backendViewModel.refreshAgents() }
             }
             .disabled(backendViewModel.isLoading)
-            .controlSize(.small)
+            .controlSize(.regular)
         case .starting:
-            Button(L10n.overviewStarting) {}.disabled(true).controlSize(.small)
+            Button(L10n.overviewStarting) {}.disabled(true).controlSize(.regular)
         case .idle, .stopped, .sleeping:
             Button(L10n.workspaceStart, action: onStartBridge)
                 .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+                .controlSize(.regular)
         case .crashed:
             Button(L10n.overviewRestart, action: onStartBridge)
                 .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+                .controlSize(.regular)
         }
     }
 
     // MARK: - 设备与配对
 
     private var devicesSection: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .firstTextBaseline) {
-                workspaceSectionHeader(L10n.authorizedDevices)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Text(L10n.authorizedDevices)
+                    .font(.title3.weight(.semibold))
                 if deviceStore.hasLoadedDevices {
-                    Text("\(deviceStore.devices.count)")
-                        .font(.caption)
+                    Text(String(deviceStore.devices.count))
+                        .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(.secondary)
+                        .offset(y: 1.5)
                 }
                 Spacer()
             }
@@ -216,9 +227,6 @@ struct WorkspaceView: View {
                 VStack(spacing: 0) {
                     ForEach(deviceStore.devices) { device in
                         deviceRow(device)
-                        if device.id != deviceStore.devices.last?.id {
-                            Divider()
-                        }
                     }
                 }
             }
@@ -226,186 +234,189 @@ struct WorkspaceView: View {
     }
 
     private func deviceRow(_ device: TrustedDevice) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: device.platform == "ios" ? "iphone" : "desktopcomputer")
-                .foregroundStyle(.secondary)
-                .frame(width: 20)
+        HStack(spacing: 0) {
+            if device.platform == "ios" {
+                Image(systemName: "iphone.gen3")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 23, height: 44)
+                    .foregroundStyle(.primary.opacity(0.85))
+                    .padding(.leading, 15)
+                    .offset(y: 5)
+            } else {
+                Image(systemName: "desktopcomputer")
+                    .font(.title3)
+                    .imageScale(.large)
+                    .foregroundStyle(.primary.opacity(0.85))
+                    .frame(width: 23, height: 44)
+                    .padding(.leading, 15)
+                    .offset(y: 5)
+            }
 
-            VStack(alignment: .leading, spacing: 4) {
+            Spacer().frame(width: 30) // x=200对齐
+
+            VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 4) {
                     Text(device.displayName ?? device.deviceId)
-                        .font(.body.weight(.medium))
+                        .font(.system(size: 18, weight: .semibold))
+                        .padding(.top, 9)
                     if deviceStore.devices.filter({ $0.displayName == device.displayName }).count > 1 {
                         Text("(\(String(device.deviceId.suffix(6))))")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
+                            .padding(.top, 9)
                     }
                 }
-                HStack(spacing: 10) {
-                    if let platform = device.platform {
-                        Text(platform)
-                    }
-                    if let created = device.createdAt {
-                        Text(String(format: L10n.paired, RelativeTimeFormatter.string(created)))
-                    }
-                    if let lastSeen = device.lastSeenAt {
-                        Text(String(format: L10n.lastSeen, RelativeTimeFormatter.string(lastSeen)))
-                    }
-                }
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                Text(deviceDetails(for: device))
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
             }
 
             Spacer()
 
-            Button(L10n.devicesRevokeAuthorization, role: .destructive) {
+            Button(role: .destructive) {
                 deviceToRemove = device
                 showRemoveConfirmation = true
+            } label: {
+                Text("撤销授权")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color(red: 0.92, green: 0.35, blue: 0.35))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color(red: 0.92, green: 0.35, blue: 0.35).opacity(0.10))
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color(red: 0.92, green: 0.35, blue: 0.35).opacity(0.25), lineWidth: 0.7)
+                    }
             }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.red)
+            .buttonStyle(.plain)
+            .offset(y: 7)
+            .padding(.trailing, 25)
             .accessibilityLabel(L10n.devicesActions)
         }
-        .padding(.vertical, 14)
-    }
-
-    // MARK: - 需要留意（仅异常）
-
-    private struct AttentionItem {
-        let title: String
-        let hint: String?
-        let action: () -> Void
-        let actionTitle: String
-    }
-
-    private var attentionItems: [AttentionItem] {
-        var items: [AttentionItem] = []
-        // 无可用 AI 工具
-        if viewModel.status == .readyNoAgents {
-            items.append(AttentionItem(
-                title: L10n.workspaceNoToolsTitle,
-                hint: L10n.workspaceNoToolsSubtitle,
-                action: { Task { await backendViewModel.refreshAgents() } },
-                actionTitle: L10n.workspaceRecheck
-            ))
-        }
-        // 失败的 AI 工具
-        for agent in agents where !agent.isAvailable {
-            items.append(AttentionItem(
-                title: "\(agent.displayName) \(agent.displayStatus)",
-                hint: WorkspaceView.nextStepGuidance(agent.reason, kind: agent.kind),
-                action: { Task { await backendViewModel.testAgent(id: agent.id) } },
-                actionTitle: L10n.workspaceRecheck
-            ))
-        }
-        // Relay 不可用
-        if viewModel.relayConfigured == nil {
-            items.append(AttentionItem(
-                title: L10n.workspaceRelayOff,
-                hint: nil,
-                action: { onOpenConnectionStatus?() },
-                actionTitle: L10n.connectionStatus
-            ))
-        }
-        // 运行时错误
-        if let error = viewModel.overviewDataError, !error.isEmpty {
-            items.append(AttentionItem(
-                title: error,
-                hint: nil,
-                action: { Task { await viewModel.refreshOverviewData(force: true) } },
-                actionTitle: L10n.workspaceRecheck
-            ))
-        }
-        return items
-    }
-
-    private var attentionSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            workspaceSectionHeader(L10n.workspaceNeedsAttention)
-            ForEach(Array(attentionItems.enumerated()), id: \.offset) { _, item in
-                HStack(alignment: .top, spacing: 10) {
-                    StatusIndicator(systemImage: "exclamationmark.triangle.fill", color: .orange)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(item.title)
-                            .font(.body.weight(.medium))
-                            .fixedSize(horizontal: false, vertical: true)
-                        if let hint = item.hint {
-                            Text(hint)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    Spacer()
-                    Button(item.actionTitle) { item.action() }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                }
-                .padding(.vertical, 4)
-            }
+        .padding(.vertical, 16)
+        .padding(.bottom, 4)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.white.opacity(0.15))
+                .frame(height: 0.5)
         }
     }
 
     // MARK: - AI 工具 + 安全连接
 
     private var toolsAndConnectionSection: some View {
-        VStack(alignment: .leading, spacing: 38) {
-            VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 31) { // 缩减 3px 向上拉升
+            VStack(alignment: .leading, spacing: 12) {
                 workspaceSectionHeader(L10n.aiTools)
                 if agents.isEmpty {
                     Text(L10n.noAiToolsDetected)
                         .foregroundStyle(.secondary)
                         .font(.subheadline)
                 } else {
-                    LazyVGrid(
-                        columns: [GridItem(.flexible(), spacing: 28), GridItem(.flexible())],
-                        spacing: 22
-                    ) {
+                    VStack(spacing: 0) {
                         ForEach(agents) { agent in
-                            agentCard(for: agent)
+                            agentRow(for: agent)
                         }
                     }
+                    .padding(.bottom, 12) // OpenCode 底部增加 12px 留白
                 }
             }
 
-            // 安全连接：仅呈现当前 Relay 结果，唯一连接入口指向同一个 Sheet
-            VStack(alignment: .leading, spacing: 10) {
-                workspaceSectionHeader(L10n.workspaceSecureConnection)
-                HStack(spacing: 12) {
-                    StatusIndicator(systemImage: relayIcon, color: relayColor)
+            HStack(alignment: .top, spacing: 28) {
+                Image(systemName: relayIcon)
+                    .font(.system(size: 34, weight: .light))
+                    .foregroundStyle(relayColor)
+                    .frame(width: 34, height: 41)
+                    .offset(y: -3)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L10n.workspaceSecureConnection)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.primary)
                     Text(relaySummary)
-                        .font(.body)
+                        .font(.system(size: 15))
+                        .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Spacer()
+                        .multilineTextAlignment(.leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                
+                Spacer()
+                
+                if viewModel.relayConfigured != true {
+                    Button(L10n.connectionStatus) {
+                        onOpenConnectionStatus?()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .offset(y: 4)
+                }
             }
+            .padding(.leading, 6)
+            .padding(.trailing, 16)
+            .offset(y: -10)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func agentCard(for agent: BackendAgentStatus) -> some View {
-        HStack(spacing: 11) {
-            StatusIndicator(
-                systemImage: agent.isAvailable ? "checkmark.circle.fill" : "exclamationmark.triangle.fill",
-                color: agent.isAvailable ? .green : .orange
-            )
+    private func agentRow(for agent: BackendAgentStatus) -> some View {
+        HStack(spacing: 0) {
+            AgentBrandMark(kind: agent.kind)
+                .padding(.leading, 13)
+            Spacer().frame(width: 27) // 13 + 28 + 27 = 68px. 起点完全锁定在 68px (x≈200)！
+
             Text(agent.displayName)
-                .font(.body.weight(.medium))
+                .font(.system(size: 17, weight: .semibold))
+                .frame(width: 403, alignment: .leading)
+
+            HStack(spacing: 12) {
+                Image(systemName: agent.isAvailable ? "checkmark.circle" : "exclamationmark.circle")
+                    .font(.system(size: 23, weight: .light))
+                    .frame(width: 23, height: 23)
+                Text(agent.displayStatus)
+                    .font(.system(size: 16, weight: .semibold))
+            }
+            .foregroundStyle(agent.isAvailable ? Color.green : Color.orange)
+            .frame(width: 200, alignment: .leading)
+
             Spacer()
-            Text(agent.displayStatus)
-                .font(.subheadline)
-                .foregroundStyle(agent.isAvailable ? Color.secondary : Color.orange)
+
             if !agent.isAvailable {
                 Button(L10n.workspaceRecheck) {
                     Task { await backendViewModel.testAgent(id: agent.id) }
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.bordered)
                 .controlSize(.small)
+                .disabled(agent.isRefreshing)
+                .frame(width: 56, height: 32)
             }
         }
-        .padding(.vertical, 14)
-        .overlay(alignment: .bottom) { Divider() }
+        .frame(height: 52)
+        .padding(.trailing, 16)
+        .offset(y: -3) // 整体上移 3px
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.white.opacity(0.15))
+                .frame(height: 0.5)
+                .offset(y: -3) // 分割线也跟随上移 3px
+        }
+    }
+
+    private func deviceDetails(for device: TrustedDevice) -> String {
+        var details: [String] = []
+        if let platform = device.platform {
+            details.append(platform)
+        }
+        if let created = device.createdAt {
+            details.append(String(format: L10n.paired, RelativeTimeFormatter.string(created)))
+        }
+        if let lastSeen = device.lastSeenAt {
+            details.append(String(format: L10n.lastSeen, RelativeTimeFormatter.string(lastSeen)))
+        }
+        return details.joined(separator: " · ")
     }
 
     // MARK: - 派生状态
@@ -418,8 +429,8 @@ struct WorkspaceView: View {
     /// 健康结论外观（文字+状态点共同表达，不单靠颜色）。
     private var conclusionAppearance: (icon: String, color: Color) {
         switch viewModel.status {
-        case .ready: return ("checkmark.circle.fill", .green)
-        case .readyNoAgents: return ("exclamationmark.circle.fill", .orange)
+        case .ready: return ("checkmark.circle", .green)
+        case .readyNoAgents: return ("exclamationmark.circle", .orange)
         case .starting: return ("hourglass", .orange)
         case .stopped, .idle: return ("stop.circle", .secondary)
         case .crashed: return ("xmark.circle.fill", .red)
@@ -461,7 +472,7 @@ struct WorkspaceView: View {
 
     private var relayIcon: String {
         switch viewModel.relayConfigured {
-        case true: return "lock.shield.fill"
+        case true: return "checkmark.shield"
         case false: return "lock.slash"
         case nil: return "questionmark.circle"
         }
@@ -475,14 +486,76 @@ struct WorkspaceView: View {
         }
     }
 
-    private static func nextStepGuidance(_ reason: String?, kind: String) -> String {
-        guard let reason, !reason.isEmpty else { return L10n.checkDocsGuidance }
-        if reason.contains("not found in PATH") { return String(format: L10n.notInstalled, kind) }
-        if reason.contains("not running") { return L10n.serviceNotRunning }
-        if reason.contains("not logged in") { return L10n.loginRequired }
-        if reason.contains("timed out") { return L10n.detectionTimedOut }
-        if reason.contains("unreachable") { return L10n.cannotReachService }
-        return reason
+}
+
+/// 运行时控制保持为次级操作：有明确轮廓与图标，但不与蓝色配对主操作竞争。
+private struct RuntimeControlButton: View {
+    let title: String
+    let systemImage: String
+    let width: CGFloat
+    var isDisabled = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 18))
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+            }
+            .frame(width: width, height: 40)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.primary)
+        .background {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(.black.opacity(0.12))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(.white.opacity(0.30), lineWidth: 1)
+        }
+        .opacity(isDisabled ? 0.60 : 1)
+        .disabled(isDisabled)
+    }
+}
+
+/// 首页工具行使用稳定、可扫描的品牌化矢量标记；不依赖外部图片资源或网络加载。
+private struct AgentBrandMark: View {
+    let kind: String
+
+    var body: some View {
+        Group {
+            switch kind.lowercased() {
+            case "claude", "claudecode", "claude_code":
+                Image("claude_logo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 25, height: 25)
+            case "codex":
+                Image("codex_logo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 23, height: 23)
+            case "grokbuild":
+                Image("grok_logo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 25, height: 25)
+            case "opencode":
+                Image("opencode_logo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 23, height: 23)
+            default:
+                Image(systemName: "command")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 28, height: 28, alignment: .center)
+        .accessibilityHidden(true)
     }
 }
 
@@ -508,38 +581,41 @@ private struct PairDeviceButton: View {
 
     var body: some View {
         Button(action: action) {
-            Label(title, systemImage: "qrcode.viewfinder")
-                .font(.body.weight(.semibold))
-                .padding(.horizontal, 20)
-                .padding(.vertical, 10)
+            HStack(spacing: 10) {
+                Image(systemName: "qrcode.viewfinder")
+                    .font(.system(size: 18))
+                Text(title)
+                    .font(.system(size: 16, weight: .semibold))
+            }
+            .frame(width: 245, height: 49)
         }
         .buttonStyle(.plain)
         .foregroundStyle(.white)
         .background {
-            Capsule()
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .fill(Color.accentColor)
                 .overlay {
                     GeometryReader { proxy in
                         LinearGradient(
-                            colors: [.clear, .white.opacity(0.28), .clear],
+                            colors: [.clear, .white.opacity(0.18), .clear],
                             startPoint: .leading,
                             endPoint: .trailing
                         )
                         .frame(width: proxy.size.width * 0.38)
                         .offset(x: sweepProgress ? proxy.size.width : -proxy.size.width * 0.38)
                     }
-                    .clipShape(Capsule())
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                     .allowsHitTesting(false)
                 }
         }
         .overlay {
-            Capsule()
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .stroke(.white.opacity(isBreathing ? 0.34 : 0.18), lineWidth: 1)
         }
         .shadow(
-            color: Color.accentColor.opacity(isBreathing ? 0.40 : 0.22),
-            radius: isBreathing ? 15 : 8,
-            y: isBreathing ? 5 : 3
+            color: Color.accentColor.opacity(0.12),
+            radius: isBreathing ? 8 : 4,
+            y: isBreathing ? 3 : 1
         )
         .scaleEffect(isHovering ? 1.02 : (isBreathing ? 1.008 : 1))
         .onHover { hovering in
@@ -561,7 +637,7 @@ private struct PairDeviceButton: View {
         withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
             isBreathing = true
         }
-        withAnimation(.linear(duration: 3.2).repeatForever(autoreverses: false)) {
+        withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
             sweepProgress = true
         }
     }

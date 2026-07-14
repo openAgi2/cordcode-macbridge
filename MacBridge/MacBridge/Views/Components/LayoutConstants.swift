@@ -9,17 +9,13 @@ import Foundation
 /// 注意：这不是样式微调，而是 P0 布局契约——连接状态 Sheet 不再受 820pt 全局上限约束。
 enum LayoutConstants {
     /// 主窗口最小宽度。窄窗口保持单列、标题与主动作同行可见。
-    static let minWindowWidth: CGFloat = 920
+    static let minWindowWidth: CGFloat = 1280
 
     /// 主窗口最小高度。
-    static let minWindowHeight: CGFloat = 560
+    static let minWindowHeight: CGFloat = 840
 
     /// 默认工作列最大宽度。内容左对齐于该列；正常状态不展示端口/版本/endpoint。
     static let workColumnWidth: CGFloat = 880
-
-    /// 工作站首页的外层内容宽度（含两侧 pageHorizontalPadding）。
-    /// 固定阅读宽度，避免宽窗口把状态页拉成稀疏的仪表盘。
-    static let workspaceHomeContentWidth: CGFloat = 820
 
     /// 窗口宽度超过该阈值时，才出现只读的连接健康辅助信息栏；
     /// 不新增独立目的地或操作。
@@ -39,6 +35,10 @@ enum LayoutConstants {
     // MARK: - 第二轮宽屏内容宽度契约 (r5 最终)
     /// PageContainer 水平 padding（两侧各 30pt，总 60pt）。
     static let pageHorizontalPadding: CGFloat = 30
+
+    /// 首页的聚焦容器上限。它比连接状态等宽屏工作区收得更紧，
+    /// 让连接结论、设备与工具状态在普通窗口和全屏窗口里保持同一阅读密度。
+    static let workspaceFocusedContainerWidth: CGFloat = 1016
 
     /// 内层 GeometryReader 看到的可用内容宽度阈值（最小双列触发）。
     /// 1164pt = 900 (main) + 24 (gap) + 240 (inspector)

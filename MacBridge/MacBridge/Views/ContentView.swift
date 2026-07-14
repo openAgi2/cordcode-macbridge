@@ -17,12 +17,77 @@ struct ContentView: View {
 
     var body: some View {
         workspaceTab
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .frame(minWidth: LayoutConstants.minWindowWidth, minHeight: LayoutConstants.minWindowHeight)
+            .frame(minWidth: LayoutConstants.minWindowWidth, minHeight: LayoutConstants.minWindowHeight)
         .background {
-            Rectangle()
-                .fill(.regularMaterial)
-                .overlay(Color(red: 0.16, green: 0.16, blue: 0.145).opacity(0.60))
+            ZStack {
+                Color(red: 0.165, green: 0.170, blue: 0.180)
+                RadialGradient(
+                    colors: [Color(red: 0.15, green: 0.22, blue: 0.30).opacity(0.32), .clear],
+                    center: .topLeading,
+                    startRadius: 80,
+                    endRadius: 860
+                )
+                RadialGradient(
+                    colors: [Color(red: 0.32, green: 0.20, blue: 0.12).opacity(0.30), .clear],
+                    center: .topTrailing,
+                    startRadius: 120,
+                    endRadius: 820
+                )
+                VStack {
+                    Spacer()
+                    LinearGradient(
+                        colors: [.clear, .black.opacity(0.18)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 240)
+                }
+            }
+            .ignoresSafeArea()
+        }
+        .overlay(alignment: .top) {
+            ZStack {
+                Text("CordCode Link")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .padding(.top, 5)
+                    .allowsHitTesting(false)
+                
+                HStack {
+                    Spacer()
+                    HStack(spacing: 14) {
+                        Button {
+                            showConnectionStatus = true
+                        } label: {
+                            Image(systemName: "antenna.radiowaves.left.and.right")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.primary.opacity(0.85))
+                        }
+                        .buttonStyle(.plain)
+                        
+                        Button {
+                            showDiagnostics = true
+                        } label: {
+                            Image(systemName: "stethoscope")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.primary.opacity(0.85))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(height: 28)
+                    .background {
+                        Capsule()
+                            .fill(Color.white.opacity(0.08))
+                    }
+                    .overlay {
+                        Capsule()
+                            .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+                    }
+                }
+                .padding(.top, 5)
+                .padding(.trailing, 25)
+            }
         }
         .onChange(of: dependencies.runtimeManager.managementURL) { _, _ in
             Task { await reloadManagementAPIData() }
@@ -47,24 +112,6 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .openConnectionStatusRequest)) { _ in
             showConnectionStatus = true
-        }
-        .toolbar {
-            // 连接状态与帮助与诊断：不再是一级 sidebar 目的地，而是 Toolbar 一跳可达的 Sheet。
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    showConnectionStatus = true
-                } label: {
-                    Label(L10n.connectionStatus, systemImage: "antenna.radiowaves.left.and.right")
-                }
-                .help(L10n.connectionStatus)
-
-                Button {
-                    showDiagnostics = true
-                } label: {
-                    Label(L10n.helpDiagnostics, systemImage: "stethoscope")
-                }
-                .help(L10n.helpDiagnostics)
-            }
         }
         .sheet(isPresented: $showConnectionStatus) {
             // P0 阶段承载现有 RemoteAccessView；P1-2 将其重做为单页连接状态 Sheet。

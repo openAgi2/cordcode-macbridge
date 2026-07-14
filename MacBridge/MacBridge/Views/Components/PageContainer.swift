@@ -21,7 +21,7 @@ struct PageContainer<Content: View>: View {
             let columnWidth = min(maxContentWidth, proxy.size.width)
             let contentWidth = max(0, columnWidth - 2 * LayoutConstants.pageHorizontalPadding)
             if scrolls {
-                ScrollView {
+                ScrollView(.vertical, showsIndicators: false) {
                     pageContent(contentWidth: contentWidth)
                         .frame(width: columnWidth, alignment: .topLeading)
                         .frame(maxWidth: .infinity, alignment: .top)

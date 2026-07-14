@@ -4,7 +4,6 @@ import SwiftUI
 struct PairingView: View {
     @ObservedObject var viewModel: PairingViewModel
     var showsHeader = true
-    var onExit: (() -> Void)?
     @AppStorage("bridgeDisplayName") private var bridgeDisplayName = ""
     @State private var copiedCode = false
     @State private var copiedLink = false
@@ -170,13 +169,6 @@ struct PairingView: View {
             .buttonStyle(.bordered)
             .help(copiedLink ? L10n.pairingLinkCopied : L10n.copyPairingLink)
 
-            Button(L10n.back) {
-                if let onExit {
-                    onExit()
-                } else {
-                    viewModel.reset()
-                }
-            }
         }
     }
 
@@ -185,7 +177,7 @@ struct PairingView: View {
         makeQRImage(payload: payload)
             .interpolation(.none)
             .resizable()
-            .frame(width: 176, height: 176)
+            .frame(width: 264, height: 264)
             .accessibilityLabel(L10n.pairingQRCode)
     }
 
@@ -386,8 +378,7 @@ struct PairingSheet: View {
                 }
                 PairingView(
                     viewModel: viewModel,
-                    showsHeader: false,
-                    onExit: close
+                    showsHeader: false
                 )
             }
         }
