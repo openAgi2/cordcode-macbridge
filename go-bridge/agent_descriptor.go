@@ -98,8 +98,12 @@ func agentRequiresPolling(id string, codexBackendMode string, cfg *AgentDetectio
 	if id == "claude" || id == "opencode" || id == "grokbuild" {
 		return true
 	}
-	if id == "codex" && codexBackendMode == "app_server" {
-		return cfg == nil || strings.TrimSpace(cfg.CodexAppServerURL) == ""
+	// Codex transcript relay emits authoritative turn_started/turn_completed
+	// events for both implicit and shared app-server sessions. Polling the full
+	// history as a fallback mistakes transcript rewrites for new turns and can
+	// force an idle iOS timeline back to its bottom.
+	if id == "codex" {
+		return false
 	}
 	return false
 }

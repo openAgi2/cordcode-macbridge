@@ -348,3 +348,55 @@ codex app-server（`agent/codex/appserver_session.go`）本身发 `item/agentMes
 ### Bug 5: relayEvents idle timeout 后事件投递正常（非 MacBridge 问题）
 - **排查结论**：5G relay 冷启动发消息卡住的问题，MacBridge 侧完全正常（日志确认 `send_message` → `turn_started` → `turn_completed` 全链路转发，`RelayDeviceConn.SendJSON` 无 dropped）。根因在 iOS 侧的 stale background generation marker（详见 iOS 仓 `think.md`）。
 - **教训**：排查 relay 卡住时，先确认 MacBridge 日志有完整的 `relayEvents forwarding` 链——如果有，问题在 iOS 侧，不要改 MacBridge。
+
+---
+
+## 2026-07-13 Codex 既有 session 的思考过程历史重放
+
+### 现象
+
+Codex Desktop 的旧 session 在 iOS 首次重放时会缺少工具步骤，或只显示「已执行 N 个工具」。即使 iOS
+清除了本地缓存，展示仍不变。
+
+### 根因
+
+Codex transcript 的 `custom_tool_call` 常以 `name=exec` 记录，真实 `tools.exec_command` / `tools.apply_patch`
+嵌在 JavaScript 输入；`custom_tool_call_output` 则可能是结构化 content array。旧 parser 只把
+`apply_patch` 视为有效 custom call，并把 output 当 JSON string 解码，导致数组解码失败后 tool completion
+被丢弃。另一个常见误判是只编译 Debug Mac app：iPhone 的 bridge 实际运行 `/Applications/CordCodeLink.app`
+内嵌 runtime，Debug 产物不会替换它。
+
+### 修复与原则
+
+1. `Output` 使用 `json.RawMessage`，兼容 JSON string 和带 `text` 字段的数组，保留真实 tool output。
+2. 对 `exec` 包装只在其中包含**单一且可解析**的真实操作时还原：`exec_command` 提取 `cmd`，
+   `apply_patch` 显示 patch 目标。多操作/混合包装必须保留 generic，不能杜撰为某一个操作。
+3. parser 改动需要 `go test ./agent/codex -run TestGetRichSessionHistory -count=1`；交付到 iPhone 前还必须
+   Release 构建、覆盖安装 `/Applications/CordCodeLink.app`、重启 app，并比对内嵌 runtime。只重装 iOS App
+   无法部署 Go parser 改动。
+4. 当「清 iOS 缓存后仍旧」时，先核对当前运行 PID 是否来自 `/Applications/CordCodeLink.app`，再检查
+   installed runtime 是否与新 Release 一致；确认这一点前不要把问题归因为 iOS cache 或 renderer。
+
+## 2026-07-14 Codex idle 历史 session 误触发执行态并导致 iOS 滚底
+
+### 现象与证据
+
+iOS 打开已经完成的长 Codex history 时，会周期性拉回底部。MacBridge 日志中该 session 没有 active runtime，
+请求也始终是 `get_session_messages paginate=false limit=0`，所以这不是分页；但 idle 状态反复传输完整 history，单次约 5 MB。
+
+### 根因与修复
+
+Codex transcript file relay 已经是外部 turn 的权威来源，会发送真实的 `turn_started` / `turn_completed`。但
+`agentDescriptor.RequiresPollingForExternalTurns` 仍把 Codex 标为需要 polling，促使 iOS 对已打开 session 做 full-history resident probe。transcript 补全或重写随即被客户端投影为新 turn，进而触发 follow-output 滚动。
+
+因此 Codex descriptor 现在明确返回 `false`，由 transcript relay 负责真实 turn 生命周期；iOS 同时删除自己的 Codex 无条件 fallback。该标记是跨端状态机契约，不能把它当作可随意保留的兼容开关。
+
+### 可复用教训
+
+1. 已支持可靠 `turn_started` / `turn_completed` 的 driver 必须关闭 history polling；两条路径并存会让历史重写伪装成 live turn。
+2. 排查“iOS 自动滚底”先查 `get_session_messages` 参数、active runtime 与 relay event 链路。滚动层通常只是正确响应了错误的 generating 状态。
+3. 对长 transcript，full-history polling 既放大流量也放大误判窗口；完成态 session 不能以 history diff 作为活跃任务证据。
+
+### 验证
+
+`go test ./go-bridge -run TestAgentDescriptorCodex -count=1` 通过，Release runtime 已替换并配合 iOS 重装。owner 于 2026-07-14 手动打开并上滑已完成 Codex history，确认不再跳到底部；未运行 UI 自动化。
