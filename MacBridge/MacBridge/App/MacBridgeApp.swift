@@ -52,6 +52,26 @@ struct MacBridgeApp: App {
         }
         .defaultSize(width: 960, height: 680)
         .windowResizability(.contentMinSize)
+        // P2-3：键盘快捷键 ⌘⇧D 打开「帮助与诊断」。Settings 由原生 Settings scene 承接 ⌘,。
+        .commands {
+            CommandGroup(replacing: .help) {
+                Button(L10n.helpDiagnostics) {
+                    NotificationCenter.default.post(name: .openDiagnosticsRequest, object: nil)
+                }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
+
+                Button(L10n.connectionStatus) {
+                    NotificationCenter.default.post(name: .openConnectionStatusRequest, object: nil)
+                }
+                .keyboardShortcut("l", modifiers: [.command, .shift])
+            }
+        }
+
+        // 原生 Settings 场景（⌘, 打开）。UX 重设计 P0-1：从 sidebar 移入；
+        // P2-1 将按「通用 / 高级」重组内容，此处先承载现有 SettingsView。
+        Settings {
+            SettingsView(viewModel: dependencies.settingsViewModel)
+        }
 
         // 菜单栏图标及下拉菜单
         MenuBarExtra("CordCode Link", systemImage: menuBarIcon) {

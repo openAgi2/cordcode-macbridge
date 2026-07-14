@@ -31,9 +31,26 @@ struct PairingView: View {
         }
     }
 
+    /// 任务式配对的当前步骤（1 扫码 → 2 在 Mac 上确认 → 3 开始使用）。
+    /// 仅从既有 uiState 派生，不改变状态机；idle/error 时返回 nil 表示尚未进入流程。
+    private var currentStep: Int? {
+        switch viewModel.uiState {
+        case .idle, .creating, .error: return nil
+        case .waitingForClaim: return 1
+        case .claimed: return 2
+        case .approved, .rejected, .expired: return 3
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             SectionHeader(L10n.pairingNewDevice)
+
+            // 步骤轨迹：只高亮当前步骤，让二维码不再像没有解释的技术对象。
+            if let currentStep {
+                PairingStepTracker(current: currentStep)
+                    .padding(.bottom, 2)
+            }
 
             switch viewModel.uiState {
             case .idle:
@@ -126,6 +143,11 @@ struct PairingView: View {
             }
 
             qrImage(payload: payload)
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color(NSColor.controlBackgroundColor).opacity(0.4))
+                )
 
             Button {
                 NSPasteboard.general.clearContents()
@@ -338,5 +360,59 @@ struct PairingView: View {
             }
         }
         return candidates
+    }
+}
+
+/// 配对步骤轨迹：1 扫描二维码 → 2 在 Mac 上确认 → 3 开始使用。
+/// 仅高亮当前步骤；已完成步骤弱化，未到步骤保持次要色。VoiceOver 可读。
+struct PairingStepTracker: View {
+    let current: Int
+
+    private var steps: [(number: Int, title: String)] {
+        [
+            (1, L10n.pairingStepScan),
+            (2, L10n.pairingStepConfirm),
+            (3, L10n.pairingStepComplete),
+        ]
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(steps, id: \.number) { step in
+                if step.number > 1 {
+                    connector(active: step.number <= current)
+                }
+                stepNode(step)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(L10n.pairingNewDevice))
+        .accessibilityValue(Text(String(format: L10n.pairingStepProgress, current, steps.count)))
+    }
+
+    private func stepNode(_ step: (number: Int, title: String)) -> some View {
+        let isCurrent = step.number == current
+        let isDone = step.number < current
+        return HStack(spacing: 6) {
+            ZStack {
+                Circle()
+                    .strokeBorder(isCurrent ? Color.accentColor : Color.secondary.opacity(0.4), lineWidth: 1.5)
+                    .background(Circle().fill(isCurrent ? Color.accentColor.opacity(0.18) : Color.clear))
+                    .frame(width: 18, height: 18)
+                Text("\(step.number)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(isCurrent ? Color.accentColor : (isDone ? .secondary : .secondary.opacity(0.7)))
+            }
+            Text(step.title)
+                .font(.caption)
+                .foregroundStyle(isCurrent ? Color.primary : .secondary)
+        }
+    }
+
+    private func connector(active: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 1)
+            .fill(active ? Color.accentColor.opacity(0.5) : Color.secondary.opacity(0.25))
+            .frame(width: 18, height: 2)
+            .padding(.horizontal, 4)
     }
 }

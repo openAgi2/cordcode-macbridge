@@ -10,6 +10,10 @@ import Security
 extension Notification.Name {
     /// 远程 URL 配置变更时触发，RuntimeManager 应更新配置并重启
     static let remoteURLDidChange = Notification.Name("remoteURLDidChange")
+    /// P2-3：键盘命令请求打开「帮助与诊断」工作表。
+    static let openDiagnosticsRequest = Notification.Name("openDiagnosticsRequest")
+    /// P2-3：键盘命令请求打开「连接状态」工作表。
+    static let openConnectionStatusRequest = Notification.Name("openConnectionStatusRequest")
 }
 
 // MARK: - Bridge 状态

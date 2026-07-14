@@ -16,7 +16,7 @@ iPhone / iPad
 cordcode-bridge-runtime
   ├─ protocol/auth/pairing/relay: go-bridge/
   ├─ agent interfaces: core/
-  ├─ agent implementations: agent/{claudecode,codex,opencode}/
+  ├─ agent implementations: agent/{claudecode,codex,grokbuild,opencode}/
   └─ local configuration: config/
 ```
 
@@ -174,6 +174,13 @@ MacBridge Restart 只重启 Bridge runtime，不负责重启外部共享 Codex a
 共享服务的启动归属和本机常驻约束见
 [BUILD_INSTALL_AND_RUNTIME.md](BUILD_INSTALL_AND_RUNTIME.md#codex-app-server-的启动归属)。
 
+### Grok Build
+
+Grok Build 由 `agent/grokbuild` ACP driver 提供，产品 runtime 默认注册名为 `grokbuild`
+（界面显示为 Grok Build）。ACP 当前不提供 session/list，因此会话目录与历史由本机
+`~/.grok/sessions` catalog 提供；其能力与可用状态仍由 `core` 可选接口和 descriptor 推导，
+客户端不得仅按 backend 名称假定能力。
+
 ### OpenCode
 
 OpenCode 不再隐式硬编码 `127.0.0.1:64667`。MacBridge 在 Swift 端解析出明确的
@@ -321,7 +328,7 @@ send/stream 语义不为此做 backend-specific 重复抑制——iOS 侧的 rac
 
 ```bash
 go test ./go-bridge/... -count=1
-go test ./agent/claudecode/... ./agent/codex/... ./agent/opencode/... -count=1
+go test ./agent/claudecode/... ./agent/codex/... ./agent/grokbuild/... ./agent/opencode/... -count=1
 go test ./core/... ./config/... -count=1
 (cd relay-server && go test ./... -count=1)
 ```

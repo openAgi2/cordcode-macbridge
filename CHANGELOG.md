@@ -8,6 +8,11 @@
 
 ## [Unreleased]
 
+### 2026-07-14 — Grok Build rich history 填充 Parts/Steps
+
+- **改了什么**：`readRichSessionHistory` 从只产 ID/Role/Content 空壳升级为填充 Parts/Steps。扩展 `grokHistoryLine` 解析 tool_calls 的 `arguments`/`id`/`name` 和 tool_result 的 `content`/`tool_call_id`。两遍扫描设计：先收集所有 tool_result，再用稳定 call ID 关联到对应 tool step。step status 始终为 `unknown`（Grok 历史无状态字段），output 仅在 tool_call_id 匹配时填充（>500 rune 丢弃），title 从 proven arguments 派生（command/target_file/pattern 等）。entry 准入 guard 改为 role 空或 content/parts/thinking/steps/files 全空才跳过——空内容工具行不再被跳过或合成 `Tool:` 文本。step ID 用 `tool-<lineNum>-<hash8>` 派生，不受过滤/解析变化影响。不归并、不重做 ID 方案、不改 wire 契约。
+- **有何提升**：iOS 消费侧拿到结构化 Parts/Steps，已完成 Grok session 的工具调用显示为 ProcessGroup 卡片而非平铺文本。无 proven result 状态不标 `completed`，无 proven 关联不填 output。稳定 ID/顺序/limit 不漂移。
+
 ### 2026-07-13 — 第二轮界面升级容器宽度复核
 
 - **改了什么**：复核 r4 的 SwiftUI 宽屏实现路径，发现并明确 `PageContainer.maxContentWidth` 包含水平 padding、而内部 GeometryReader 测量内容宽度的层级关系；规定容器宽度必须在双列内容预算之外包含两侧 padding，且在创建容器时固定传入最大宽度。

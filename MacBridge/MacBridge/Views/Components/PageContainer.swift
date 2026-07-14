@@ -2,10 +2,17 @@ import SwiftUI
 
 struct PageContainer<Content: View>: View {
     private let scrolls: Bool
+    private let maxContentWidth: CGFloat
     private let content: Content
 
-    init(scrolls: Bool = true, @ViewBuilder content: () -> Content) {
+    /// - Parameters:
+    ///   - scrolls: 内容是否包裹在 ScrollView 中。
+    ///   - maxContentWidth: 内容列最大宽度（包含两侧 pageHorizontalPadding）。
+    ///     Workspace 宽屏时传入 workspaceMaxContainerWidth（1224/1264）。
+    ///     默认取 workColumnWidth（880pt）。
+    init(scrolls: Bool = true, maxContentWidth: CGFloat = LayoutConstants.workColumnWidth, @ViewBuilder content: () -> Content) {
         self.scrolls = scrolls
+        self.maxContentWidth = maxContentWidth
         self.content = content()
     }
 
@@ -25,10 +32,10 @@ struct PageContainer<Content: View>: View {
     private var pageContent: some View {
         content
             .frame(maxWidth: .infinity, maxHeight: scrolls ? nil : .infinity, alignment: .topLeading)
-            .padding(.horizontal, 30)
+            .padding(.horizontal, LayoutConstants.pageHorizontalPadding)
             .padding(.top, 26)
             .padding(.bottom, 36)
-            .frame(maxWidth: 820, alignment: .top)
+            .frame(maxWidth: maxContentWidth, alignment: .top)
     }
 }
 

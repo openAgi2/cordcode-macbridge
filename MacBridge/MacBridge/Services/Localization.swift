@@ -62,6 +62,8 @@ enum L10n {
     // MARK: - Tab 标题
 
     static var overview: String { tr("overview") }
+    static var workspace: String { tr("workspace") }
+    static var workspaceSubtitle: String { tr("workspace_subtitle") }
     static var devices: String { tr("devices") }
     static var aiTools: String { tr("ai_tools") }
     static var settings: String { tr("settings") }
@@ -69,6 +71,29 @@ enum L10n {
     static var remoteAccessTab: String { tr("remote_access_tab") }
     static var devicesPairing: String { tr("devices_pairing") }
     static var logsDiagnostics: String { tr("logs_diagnostics") }
+    static var connectionStatus: String { tr("connection_status") }
+    static var helpDiagnostics: String { tr("help_diagnostics") }
+    static var general: String { tr("general") }
+    static var advanced: String { tr("advanced") }
+    static var addDevice: String { tr("add_device") }
+    static var viewDevices: String { tr("view_devices") }
+    static var workspaceReadyTitle: String { tr("workspace_ready_title") }
+    static var workspaceReadySubtitle: String { tr("workspace_ready_subtitle") }
+    static var workspaceCanConnect: String { tr("workspace_can_connect") }
+    static var workspaceOneStepAway: String { tr("workspace_one_step_away") }
+    static var workspaceNeedsAttention: String { tr("workspace_needs_attention") }
+    static var workspaceNeedsAttentionHint: String { tr("workspace_needs_attention_hint") }
+    static var workspaceSecureConnection: String { tr("workspace_secure_connection") }
+    static var workspaceSecureRelayOn: String { tr("workspace_secure_relay_on") }
+    static var workspaceRelayOff: String { tr("workspace_relay_off") }
+    static var workspaceFirstDeviceTitle: String { tr("workspace_first_device_title") }
+    static var workspaceFirstDeviceSubtitle: String { tr("workspace_first_device_subtitle") }
+    static var workspacePausedTitle: String { tr("workspace_paused_title") }
+    static var workspacePausedSubtitle: String { tr("workspace_paused_subtitle") }
+    static var workspaceStart: String { tr("workspace_start") }
+    static var workspaceRecheck: String { tr("workspace_recheck") }
+    static var workspaceNoToolsTitle: String { tr("workspace_no_tools_title") }
+    static var workspaceNoToolsSubtitle: String { tr("workspace_no_tools_subtitle") }
 
     // MARK: - Overview
 
@@ -169,6 +194,23 @@ enum L10n {
     static var pairingStepScan: String { tr("pairing_step_scan") }
     static var pairingStepConfirm: String { tr("pairing_step_confirm") }
     static var pairingStepComplete: String { tr("pairing_step_complete") }
+    static var pairingStepProgress: String { tr("pairing_step_progress") }
+    static var connectionStatusSecureRemote: String { tr("connection_secure_remote") }
+    static var connectionStatusSecureRemoteHint: String { tr("connection_secure_remote_hint") }
+    static var connectionStatusLocalNetwork: String { tr("connection_local_network") }
+    static var connectionStatusLocalNetworkHint: String { tr("connection_local_network_hint") }
+    static var connectionStatusAdvanced: String { tr("connection_advanced") }
+    static var connectionStatusShowAdvanced: String { tr("connection_show_advanced") }
+    static var connectionStatusHideAdvanced: String { tr("connection_hide_advanced") }
+    static var opencodeManagedDefault: String { tr("opencode_managed_default") }
+    static var opencodeUseOwnService: String { tr("opencode_use_own_service") }
+    static var diagnosticsHealthSummary: String { tr("diagnostics_health_summary") }
+    static var diagnosticsCopySupportInfo: String { tr("diagnostics_copy_support_info") }
+    static var diagnosticsSupportInfoCopied: String { tr("diagnostics_support_info_copied") }
+    static var diagnosticsHealthBridge: String { tr("diagnostics_health_bridge") }
+    static var diagnosticsHealthConnection: String { tr("diagnostics_health_connection") }
+    static var diagnosticsHealthAiTools: String { tr("diagnostics_health_ai_tools") }
+    static var diagnosticsViewRawLogs: String { tr("diagnostics_view_raw_logs") }
     static var pairingCopyCode: String { tr("pairing_copy_code") }
     static var pairingCopied: String { tr("pairing_copied") }
     static var pairingExpiresIn: String { tr("pairing_expires_in") }
@@ -194,6 +236,8 @@ enum L10n {
     static var noAuthorizedDevices: String { tr("no_authorized_devices") }
     static var remove: String { tr("remove") }
     static var cancel: String { tr("cancel") }
+
+    static var done: String { tr("done") }
     static var back: String { tr("back") }
     static var removeDeviceConfirm: String { tr("remove_device_confirm") }
     static var removeDeviceMessage: String { tr("remove_device_message") }
@@ -389,11 +433,36 @@ enum L10n {
     private static let table: [AppLanguage: [String: String]] = [
         .en: [
             "overview": "Overview",
+            "workspace": "Workstation",
+            "workspace_subtitle": "This Mac is ready for your devices",
             "system_default": "System Default",
             "devices": "Devices",
             "ai_tools": "AI Tools",
             "settings": "Settings",
             "diagnostics": "Diagnostics",
+            "connection_status": "Connection Status",
+            "help_diagnostics": "Help & Diagnostics",
+            "general": "General",
+            "advanced": "Advanced",
+            "add_device": "Add Device",
+            "view_devices": "View Devices",
+            "workspace_ready_title": "This Mac is ready",
+            "workspace_ready_subtitle": "Keep using the AI coding tools on this Mac from iPhone, iPad, or Web.",
+            "workspace_can_connect": "Ready to connect",
+            "workspace_one_step_away": "One step away",
+            "workspace_needs_attention": "Needs attention",
+            "workspace_needs_attention_hint": "Resolve these to reconnect from your devices.",
+            "workspace_secure_connection": "Secure connection",
+            "workspace_secure_relay_on": "Relay is on, so you can keep connecting securely when you leave the local network.",
+            "workspace_relay_off": "Relay is off; connecting away from the local network is unavailable.",
+            "workspace_first_device_title": "Connect your first device",
+            "workspace_first_device_subtitle": "Scan once to keep using this Mac's AI tools from iPhone or iPad.",
+            "workspace_paused_title": "Workstation paused",
+            "workspace_paused_subtitle": "Authorized devices can't reach this Mac right now.",
+            "workspace_start": "Start Workstation",
+            "workspace_recheck": "Recheck",
+            "workspace_no_tools_title": "One step away",
+            "workspace_no_tools_subtitle": "CordCode Link is running, but no AI tools are available yet.",
             "cccode_bridge": "CordCode Link",
             "status": "Status",
             "bridge_running": "Bridge running",
@@ -492,6 +561,23 @@ enum L10n {
             "pairing_step_scan": "Scan with iPhone",
             "pairing_step_confirm": "Confirm the device on this Mac",
             "pairing_step_complete": "Complete the connection",
+            "pairing_step_progress": "Step %d of %d",
+            "connection_secure_remote": "Secure remote connection",
+            "connection_secure_remote_hint": "Relay keeps the connection when you leave the local network. Content is always end-to-end encrypted.",
+            "connection_local_network": "Local network",
+            "connection_local_network_hint": "On the same Wi-Fi, a faster direct connection is used automatically.",
+            "connection_advanced": "Advanced connections",
+            "connection_show_advanced": "Show advanced options",
+            "connection_hide_advanced": "Hide advanced options",
+            "opencode_managed_default": "CordCode Link is managing OpenCode automatically. No action needed.",
+            "opencode_use_own_service": "Use my own OpenCode service",
+            "diagnostics_health_summary": "Health summary",
+            "diagnostics_copy_support_info": "Copy support info",
+            "diagnostics_support_info_copied": "Copied",
+            "diagnostics_health_bridge": "Bridge",
+            "diagnostics_health_connection": "Connection",
+            "diagnostics_health_ai_tools": "AI tools",
+            "diagnostics_view_raw_logs": "View raw logs",
             "pairing_copy_code": "Copy manual code",
             "pairing_copied": "Copied",
             "pairing_expires_in": "QR code expires in %@",
@@ -513,6 +599,7 @@ enum L10n {
             "no_authorized_devices": "No authorized devices. Use the pairing section above to add one.",
             "remove": "Remove",
             "cancel": "Cancel",
+            "done": "Done",
             "back": "Back",
             "remove_device_confirm": "Remove %@?",
             "remove_device_message": "This device will need to be paired again to access this Mac.",
@@ -678,11 +765,36 @@ enum L10n {
         ],
         .zhHans: [
             "overview": "总览",
+            "workspace": "工作站",
+            "workspace_subtitle": "这台 Mac 已准备好",
             "system_default": "跟随系统",
             "devices": "设备",
             "ai_tools": "AI 工具",
             "settings": "设置",
             "diagnostics": "诊断",
+            "connection_status": "连接状态",
+            "help_diagnostics": "帮助与诊断",
+            "general": "通用",
+            "advanced": "高级",
+            "add_device": "添加设备",
+            "view_devices": "查看设备",
+            "workspace_ready_title": "这台 Mac 已准备好",
+            "workspace_ready_subtitle": "从 iPhone、iPad 或 Web 继续使用这台 Mac 上的 AI 编程工具。",
+            "workspace_can_connect": "可以连接",
+            "workspace_one_step_away": "还差一步",
+            "workspace_needs_attention": "需要处理",
+            "workspace_needs_attention_hint": "处理后即可从设备重新连接。",
+            "workspace_secure_connection": "安全连接",
+            "workspace_secure_relay_on": "Relay 已开启，离开局域网后仍可安全使用。",
+            "workspace_relay_off": "Relay 未开启，离开局域网后无法远程使用。",
+            "workspace_first_device_title": "连接你的第一台设备",
+            "workspace_first_device_subtitle": "扫描一次，即可从 iPhone 或 iPad 继续使用这台 Mac 的 AI 工具。",
+            "workspace_paused_title": "工作站已暂停",
+            "workspace_paused_subtitle": "已授权设备暂时无法连接此 Mac。",
+            "workspace_start": "启动工作站",
+            "workspace_recheck": "重新检查",
+            "workspace_no_tools_title": "还差一步才能开始",
+            "workspace_no_tools_subtitle": "CordCode Link 正在运行，但还没有可用的 AI 工具。",
             "cccode_bridge": "CordCode Link",
             "status": "状态",
             "bridge_running": "Bridge 运行中",
@@ -781,6 +893,23 @@ enum L10n {
             "pairing_step_scan": "使用 iPhone 扫码",
             "pairing_step_confirm": "在此 Mac 上确认设备",
             "pairing_step_complete": "完成连接",
+            "pairing_step_progress": "第 %d 步，共 %d 步",
+            "connection_secure_remote": "安全远程连接",
+            "connection_secure_remote_hint": "Relay 在你离开局域网时自动保持连接，内容始终端到端加密。",
+            "connection_local_network": "本地网络",
+            "connection_local_network_hint": "同一 Wi-Fi 下会自动使用更快的直接连接。",
+            "connection_advanced": "高级连接",
+            "connection_show_advanced": "显示高级选项",
+            "connection_hide_advanced": "隐藏高级选项",
+            "opencode_managed_default": "CordCode Link 正在自动管理 OpenCode，无需操作。",
+            "opencode_use_own_service": "使用我自己的 OpenCode 服务",
+            "diagnostics_health_summary": "健康摘要",
+            "diagnostics_copy_support_info": "复制支持信息",
+            "diagnostics_support_info_copied": "已复制",
+            "diagnostics_health_bridge": "Bridge",
+            "diagnostics_health_connection": "连接",
+            "diagnostics_health_ai_tools": "AI 工具",
+            "diagnostics_view_raw_logs": "查看原始日志",
             "pairing_copy_code": "复制手动码",
             "pairing_copied": "已复制",
             "pairing_expires_in": "二维码将在 %@ 后过期",
@@ -802,6 +931,7 @@ enum L10n {
             "no_authorized_devices": "暂无已授权设备。使用上方的配对区域添加设备。",
             "remove": "移除",
             "cancel": "取消",
+            "done": "完成",
             "back": "返回",
             "remove_device_confirm": "移除 %@？",
             "remove_device_message": "此设备需要重新配对才能访问此 Mac。",

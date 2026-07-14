@@ -33,6 +33,18 @@ AGENTS.md
 !/docs/engineering-constitution.md
 !/docs/2026-07-03-web-renderer-shared-package-implementation-plan.md
 !/docs/2026-07-03-web-renderer-shared-package-implementation-plan-review.md
+!/docs/2026-07-13-macbridge-app-ux-redesign-report.md
+!/docs/2026-07-13-第二轮界面升级设计文档.md
+!/docs/2026-07-13-第二轮界面升级设计文档-评审.md
+!/docs/2026-07-13-第二轮界面升级设计文档-评审-r2.md
+!/docs/2026-07-13-第二轮界面升级设计文档-评审-r3.md
+!/docs/2026-07-13-第二轮界面升级设计文档-评审-r4.md
+!/docs/2026-07-13-第二轮界面升级设计文档-评审-r5.md
+!/docs/assets/
+!/docs/assets/workspace-main.jpg
+!/docs/assets/devices-pairing.jpg
+!/docs/assets/diagnostics-sheet.jpg
+!/docs/assets/connection-status-sheet.jpg
 # Per-round completion + audit reports: tracked so the evidence chain is in git
 # (independent audit, completion report, pre-delete audit points, doc-gap audits).
 !/docs/*完成情况*.md

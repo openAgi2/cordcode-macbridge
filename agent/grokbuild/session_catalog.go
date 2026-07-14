@@ -410,13 +410,38 @@ func fileExists(path string) bool {
 	return err == nil && !st.IsDir()
 }
 
+// grokToolCall mirrors the tool_calls element in chat_history.jsonl.
+// Forensic audit (§2) confirmed each element has:
+//   - name      (string)  tool name
+//   - id        (string)  stable call ID, used to correlate with tool_result.tool_call_id
+//   - arguments (string)  JSON-encoded arguments (e.g. {"command":"rg ..."})
+type grokToolCall struct {
+	Name      string `json:"name"`
+	ID        string `json:"id"`
+	Arguments string `json:"arguments"`
+}
+
+// grokToolResult mirrors the tool_result row in chat_history.jsonl.
+// Forensic audit confirmed shape: {content (string), tool_call_id (string), type}.
+// There is NO status field — success/failed cannot be proven, so steps use "unknown".
+type grokToolResult struct {
+	Content    string `json:"content"`
+	ToolCallID string `json:"tool_call_id"`
+}
+
 type grokHistoryLine struct {
 	Type            string          `json:"type"`
 	Content         json.RawMessage `json:"content"`
 	SyntheticReason string          `json:"synthetic_reason"`
-	ToolCalls       []struct {
-		Name string `json:"name"`
-	} `json:"tool_calls"`
+	ToolCalls       []grokToolCall  `json:"tool_calls"`
+	ToolResult      *grokToolResult `json:"tool_result"`
+	ToolCallID      string          `json:"tool_call_id"`
+	ModelID         string          `json:"model_id"`
+	// Summary holds the plaintext reasoning summary for reasoning rows.
+	// Format: [{"type":"summary_text","text":"..."}]. encrypted_content is
+	// opaque ciphertext and cannot be decoded, so summary is the only usable
+	// thinking source.
+	Summary json.RawMessage `json:"summary"`
 }
 
 func readSessionHistory(grokHome, sessionID string, limit int) ([]core.HistoryEntry, error) {
@@ -467,17 +492,34 @@ func readSessionHistory(grokHome, sessionID string, limit int) ([]core.HistoryEn
 // readRichSessionHistory reads chat_history.jsonl and returns RichHistoryEntry
 // with stable IDs derived from the physical JSONL line number.
 //
-// The physical line counter (lineNum) increments for every non-blank line in
-// the file — including lines that are filtered out (system, synthetic,
-// bootstrap).  This ensures that adding or removing a filtered line does NOT
-// shift the IDs of subsequent messages, keeping IDs stable across reads even
-// when the file grows or filtering logic changes.
+// Turn-boundary accumulation: consecutive reasoning/assistant/tool_result rows
+// are accumulated into a single assistant entry (like Codex's richHistoryBuilder),
+// so thinking + tool calls + text appear as one turn. A user row flushes the
+// pending turn and starts a new boundary. This mirrors how Claude Code/Codex
+// present a turn — reasoning and tools grouped together, not as independent
+// messages.
+//
+// The entry ID is derived from the FIRST physical line of the accumulated turn,
+// keeping IDs stable across reads and immune to limit truncation. A turn that
+// has no usable content (all lines filtered) is dropped.
+//
+// Two-pass design: pass 1 collects tool_result content by tool_call_id; pass 2
+// builds entries with correlated output. tool_result rows are consumed in pass
+// 1 and contribute to their calling tool's step output in pass 2.
 func readRichSessionHistory(grokHome, sessionID string, limit int) ([]core.RichHistoryEntry, error) {
 	dir := findSessionDir(grokHome, sessionID)
 	if dir == "" {
 		return nil, fmt.Errorf("grokbuild: session not found: %s", sessionID)
 	}
 	path := filepath.Join(dir, "chat_history.jsonl")
+
+	// Pass 1: collect tool_result content by tool_call_id.
+	resultByCallID, err := collectToolResults(path)
+	if err != nil {
+		return nil, err
+	}
+
+	// Pass 2: build rich entries with turn-boundary accumulation.
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -491,6 +533,17 @@ func readRichSessionHistory(grokHome, sessionID string, limit int) ([]core.RichH
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	lineNum := 0
+
+	// Turn accumulator: accumulates parts/steps/thinking/content for consecutive
+	// non-user rows. Flushed when a user row is encountered or at EOF.
+	var turn turnAccumulator
+	flushTurn := func() {
+		if e := turn.build(sessionID); e != nil {
+			entries = append(entries, *e)
+		}
+		turn = turnAccumulator{}
+	}
+
 	for sc.Scan() {
 		rawLine := bytes.TrimSpace(sc.Bytes())
 		if len(rawLine) == 0 {
@@ -501,16 +554,32 @@ func readRichSessionHistory(grokHome, sessionID string, limit int) ([]core.RichH
 		if err := json.Unmarshal(rawLine, &row); err != nil {
 			continue
 		}
-		role, content := mapHistoryLine(row)
-		if role == "" || content == "" {
+
+		rowType := strings.ToLower(strings.TrimSpace(row.Type))
+
+		// User rows are turn boundaries — flush pending turn, then emit user.
+		if rowType == "user" {
+			flushTurn()
+			if row.SyntheticReason != "" {
+				continue
+			}
+			text := strings.TrimSpace(unwrapUserQuery(extractTextContent(row.Content)))
+			if text == "" || looksLikeFrameworkBootstrap(text) {
+				continue
+			}
+			entries = append(entries, core.RichHistoryEntry{
+				ID:      deriveStableMessageID(sessionID, lineNum, rawLine),
+				Role:    "user",
+				Content: text,
+			})
 			continue
 		}
-		entries = append(entries, core.RichHistoryEntry{
-			ID:      deriveStableMessageID(sessionID, lineNum, rawLine),
-			Role:    role,
-			Content: content,
-		})
+
+		// Accumulate reasoning / assistant / tool_result into the current turn.
+		turn.add(row, sessionID, lineNum, rawLine, resultByCallID)
 	}
+	flushTurn()
+
 	if err := sc.Err(); err != nil {
 		return entries, err
 	}
@@ -518,6 +587,248 @@ func readRichSessionHistory(grokHome, sessionID string, limit int) ([]core.RichH
 		entries = entries[len(entries)-limit:]
 	}
 	return entries, nil
+}
+
+// turnAccumulator collects consecutive non-user rows into one assistant turn.
+type turnAccumulator struct {
+	started         bool
+	firstID         string           // ID of the first line in this turn (stable entry ID)
+	content         string           // assistant text (non-tool)
+	thinking        string           // accumulated reasoning summaries (all merged)
+	parts           []map[string]any // reasoning/tool/text parts, preserved in source order
+	pendingThinking string
+	steps           []map[string]any
+	modelID         string
+}
+
+// add accumulates one row into the current turn. tool_result rows are skipped
+// here (they were consumed in pass 1 via resultByCallID).
+//
+// Consecutive reasoning rows are coalesced, but are flushed before each visible
+// tool or text part. This preserves the actual reasoning → tool → reasoning
+// timeline instead of moving all thinking to the front of a completed turn.
+func (t *turnAccumulator) add(row grokHistoryLine, sessionID string, lineNum int, rawLine []byte, resultByCallID map[string]string) {
+	if !t.started {
+		t.firstID = deriveStableMessageID(sessionID, lineNum, rawLine)
+		t.started = true
+	}
+
+	rowType := strings.ToLower(strings.TrimSpace(row.Type))
+
+	switch rowType {
+	case "system":
+		return
+	case "tool_result":
+		// Consumed in pass 1; nothing to accumulate.
+		return
+	case "reasoning":
+		text := strings.TrimSpace(extractTextContent(row.Content))
+		if text == "" {
+			text = strings.TrimSpace(extractReasoningSummary(row.Summary))
+		}
+		if text == "" {
+			return
+		}
+		t.thinking = appendHistoryText(t.thinking, text)
+		t.pendingThinking = appendHistoryText(t.pendingThinking, text)
+	case "assistant":
+		t.flushReasoning()
+		if row.ModelID != "" && t.modelID == "" {
+			t.modelID = row.ModelID
+		}
+		// Build tool steps/parts first (the actual actions), then the text part (the visible utterance).
+		// This ensures in Parts order: tools before final text, so iOS renders ProcessGroup (reasoning+tools)
+		// before the (often verbose) narrative. Matches Codex presentation where process summaries come first.
+		for i, tc := range row.ToolCalls {
+			name := strings.TrimSpace(tc.Name)
+			if name == "" {
+				continue
+			}
+			stepID := deriveStableStepID(lineNum, i, tc)
+			title := deriveToolTitle(name, tc.Arguments)
+			output := ""
+			if cid := strings.TrimSpace(tc.ID); cid != "" {
+				if result, ok := resultByCallID[cid]; ok {
+					if isGenericSuccessMessage(result) {
+						output = ""
+					} else {
+						output = result
+					}
+				}
+			}
+			step := map[string]any{
+				"id":                             stepID,
+				"toolName":                       name,
+				"status":                         "unknown",
+				"output":                         map[string]any{"kind": "inline", "text": output},
+				"duration":                       nil,
+				"requiresPermissionConfirmation": false,
+				"availablePermissionOptions":     []any{},
+			}
+			if title != "" {
+				step["title"] = title
+			}
+			t.steps = append(t.steps, step)
+			t.parts = append(t.parts, map[string]any{"type": "tool", "step": step})
+		}
+
+		// Preserve real assistant text in both Content and Parts. The text part is the authoritative
+		// boundary between process phases: iOS renders reasoning/tools before it as one process
+		// group, then the narrative, then any following process group. Dropping it collapses every
+		// tool phase in a turn into one undifferentiated process block.
+		text := strings.TrimSpace(extractTextContent(row.Content))
+		if text != "" {
+			if t.content != "" {
+				t.content += "\n"
+			}
+			t.content += text
+			t.parts = append(t.parts, map[string]any{"type": "text", "content": text})
+		}
+	}
+}
+
+func (t *turnAccumulator) flushReasoning() {
+	if t.pendingThinking == "" {
+		return
+	}
+	t.parts = append(t.parts, map[string]any{"type": "reasoning", "content": t.pendingThinking})
+	t.pendingThinking = ""
+}
+
+func appendHistoryText(current, next string) string {
+	if current == "" {
+		return next
+	}
+	return current + "\n" + next
+}
+
+// build produces the final RichHistoryEntry from the accumulated turn.
+// Returns nil if the turn has no usable content (all filtered).
+func (t *turnAccumulator) build(_ string) *core.RichHistoryEntry {
+	if !t.started {
+		return nil
+	}
+	t.flushReasoning()
+	// Entry admission: skip if everything is empty.
+	if t.content == "" && t.thinking == "" && len(t.parts) == 0 && len(t.steps) == 0 {
+		return nil
+	}
+	e := &core.RichHistoryEntry{
+		ID:       t.firstID,
+		Role:     "assistant",
+		Content:  t.content,
+		Thinking: t.thinking,
+		Parts:    t.parts,
+		Steps:    t.steps,
+		Files:    []map[string]any{},
+	}
+	if t.modelID != "" {
+		e.ModelID = t.modelID
+	}
+	return e
+}
+
+// collectToolResults scans chat_history.jsonl once and returns a map of
+// tool_call_id → result content (≤500 runes). Longer results are dropped,
+// matching legacy behavior (§4.2(e) option 1).
+func collectToolResults(path string) (map[string]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]string{}, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+	out := map[string]string{}
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		rawLine := bytes.TrimSpace(sc.Bytes())
+		if len(rawLine) == 0 {
+			continue
+		}
+		var row grokHistoryLine
+		if err := json.Unmarshal(rawLine, &row); err != nil {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(row.Type)) != "tool_result" {
+			continue
+		}
+		cid := strings.TrimSpace(row.ToolCallID)
+		if cid == "" {
+			continue
+		}
+		text := strings.TrimSpace(extractTextContent(row.Content))
+		if text == "" || utf8.RuneCountInString(text) > 500 {
+			continue
+		}
+		out[cid] = text
+	}
+	return out, sc.Err()
+}
+
+// deriveStableStepID produces a deterministic step ID from the physical line
+// number + tool call index + raw-line hash. This is more stable than a simple
+// in-entry index "tool-N" because it survives filtering changes (R1-P1-3).
+func deriveStableStepID(lineNum, callIndex int, tc grokToolCall) string {
+	h := sha256.Sum256([]byte(fmt.Sprintf("%d:%d:%s:%s", lineNum, callIndex, tc.ID, tc.Name)))
+	return fmt.Sprintf("tool-%d-%x", lineNum, h[:8])
+}
+
+// deriveToolTitle extracts a human-readable title from proven tool arguments.
+// Only fields confirmed by the §2 forensic audit are used; no guessing from
+// tool name or model text. Returns "" if no usable argument is found.
+func deriveToolTitle(toolName, argumentsJSON string) string {
+	argumentsJSON = strings.TrimSpace(argumentsJSON)
+	if argumentsJSON == "" {
+		return ""
+	}
+	var args map[string]any
+	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
+		return ""
+	}
+	name := strings.ToLower(strings.TrimSpace(toolName))
+	switch name {
+	case "run_terminal_command", "bash", "execute":
+		// command + description
+		var parts []string
+		if desc, ok := args["description"].(string); ok && strings.TrimSpace(desc) != "" {
+			parts = append(parts, strings.TrimSpace(desc))
+		}
+		if cmd, ok := args["command"].(string); ok && strings.TrimSpace(cmd) != "" {
+			parts = append(parts, strings.TrimSpace(cmd))
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, " — ")
+		}
+	case "read_file", "read":
+		if path, ok := args["target_file"].(string); ok && strings.TrimSpace(path) != "" {
+			return strings.TrimSpace(path)
+		}
+		if path, ok := args["path"].(string); ok && strings.TrimSpace(path) != "" {
+			return strings.TrimSpace(path)
+		}
+	case "grep", "search":
+		if pattern, ok := args["pattern"].(string); ok && strings.TrimSpace(pattern) != "" {
+			return strings.TrimSpace(pattern)
+		}
+	case "list_dir", "glob", "ls":
+		if dir, ok := args["target_directory"].(string); ok && strings.TrimSpace(dir) != "" {
+			return strings.TrimSpace(dir)
+		}
+		if dir, ok := args["path"].(string); ok && strings.TrimSpace(dir) != "" {
+			return strings.TrimSpace(dir)
+		}
+	case "search_replace", "edit", "write", "filechange", "file_change", "patch":
+		for _, key := range []string{"file_path", "path", "target_file", "filename", "file", "target_path"} {
+			if path, ok := args[key].(string); ok && strings.TrimSpace(path) != "" {
+				return strings.TrimSpace(path)
+			}
+		}
+	}
+	// Fallback: no proven title — return empty (do not guess from tool name).
+	return ""
 }
 
 // deriveStableMessageID produces a deterministic ID for a Grok history message.
@@ -576,6 +887,45 @@ func mapHistoryLine(row grokHistoryLine) (role, content string) {
 	default:
 		return "", ""
 	}
+}
+
+// extractReasoningSummary extracts plaintext thinking from a Grok reasoning
+// row's "summary" field. The field is a JSON array of summary segments,
+// typically [{"type":"summary_text","text":"..."}]. We concatenate all
+// summary_text segments. Returns "" if the field is absent or malformed.
+func extractReasoningSummary(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var segments []map[string]any
+	if err := json.Unmarshal(raw, &segments); err != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, seg := range segments {
+		if segType, _ := seg["type"].(string); segType == "summary_text" {
+			if text, _ := seg["text"].(string); strings.TrimSpace(text) != "" {
+				if b.Len() > 0 {
+					b.WriteByte('\n')
+				}
+				b.WriteString(text)
+			}
+		}
+	}
+	return b.String()
+}
+
+// isGenericSuccessMessage detects common low-value success strings from tool results
+// (e.g. "The file X has been updated successfully.") so we can avoid polluting
+// step output. Structured title + status is sufficient for the process UI.
+func isGenericSuccessMessage(s string) bool {
+	t := strings.ToLower(strings.TrimSpace(s))
+	if t == "" {
+		return false
+	}
+	return strings.Contains(t, "has been updated successfully") ||
+		strings.Contains(t, "updated successfully") ||
+		(t == "success" || strings.HasSuffix(t, "successfully"))
 }
 
 func extractTextContent(raw json.RawMessage) string {

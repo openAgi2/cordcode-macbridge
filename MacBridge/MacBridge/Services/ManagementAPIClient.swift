@@ -12,6 +12,13 @@ protocol PairingAPIProviding {
     func rejectPairing(_ pairingId: String) async throws
 }
 
+/// 设备列表与撤销的 API 抽象。`DeviceStore` 依赖此协议以便单元测试注入 stub，
+/// 同时让 `ManagementAPIClient` 在生产中实现。
+protocol DeviceAPIProviding {
+    func listDevices() async throws -> [TrustedDevice]
+    func revokeDevice(_ deviceId: String) async throws
+}
+
 // MARK: - Management API 数据模型
 
 /// GET /internal/status 响应
@@ -116,7 +123,7 @@ struct PairingSessionStatus: Codable {
 // MARK: - Management API 客户端
 
 /// 管理 API 的 HTTP 客户端，所有请求带 Bearer token
-class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding {
+class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIProviding {
     let baseURL: URL
     let token: String
     /// T07: 专用 ephemeral URLSession，短请求/资源超时，防慢响应阻塞监控循环。
