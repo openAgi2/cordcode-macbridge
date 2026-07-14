@@ -150,24 +150,21 @@ struct RemoteAccessView: View {
         PageContainer(scrolls: false, maxContentWidth: LayoutConstants.connectionSheetWidth) {
             VStack(alignment: .leading, spacing: 0) {
                 PageHeader(L10n.connectionStatus, subtitle: L10n.remoteSubtitle) {
-                    HStack(spacing: 12) {
-                        Button {
-                            Task { await loadRemoteStatus() }
-                        } label: {
+                    Button {
+                        Task { await loadRemoteStatus() }
+                    } label: {
+                        HStack(spacing: 4) {
                             if isLoadingStatus {
                                 ProgressView()
                                     .controlSize(.small)
                             }
+                            Image(systemName: "arrow.clockwise")
                             Text(L10n.refreshAll)
                         }
-                        .disabled(isLoadingStatus)
-
-                        Button("完成") {
-                            dismiss()
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
                     }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(isLoadingStatus)
                 }
                 .padding(.bottom, 20)
 
@@ -241,6 +238,17 @@ struct RemoteAccessView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .padding(.leading, 16)
+                }
+                .padding(.trailing, 8)
+                
+                Spacer(minLength: 16)
+                
+                HStack {
+                    Spacer()
+                    Button(L10n.done) {
+                        dismiss()
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
                 .padding(.trailing, 8)
             }

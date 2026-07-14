@@ -34,11 +34,10 @@ final class LayoutConstantsTests: XCTestCase {
     }
 
     func testSheetWidthsAreBounded() {
-        // 连接状态 Sheet 支持双栏内容，配对工作区保持更聚焦。
-        XCTAssertGreaterThan(
+        XCTAssertGreaterThanOrEqual(
             LayoutConstants.connectionSheetWidth,
-            LayoutConstants.workColumnWidth,
-            "连接状态 Sheet 应可容纳比工作列更宽的双栏内容"
+            760,
+            "连接状态 Sheet 宽度需要合适呈现双栏内容"
         )
         XCTAssertLessThan(
             LayoutConstants.pairingSheetWidth,

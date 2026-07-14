@@ -7,9 +7,8 @@ import XCTest
 final class ConnectionStatusSheetTests: XCTestCase {
 
     func testConnectionSheetHasStablePresentableSize() {
-        // 连接状态有左右两栏；显式尺寸避免 GeometryReader 在 macOS sheet 内退化为标题高度。
-        XCTAssertGreaterThan(LayoutConstants.connectionSheetWidth, LayoutConstants.workColumnWidth)
-        XCTAssertGreaterThanOrEqual(LayoutConstants.connectionSheetHeight, 680)
+        XCTAssertEqual(LayoutConstants.connectionSheetWidth, 760)
+        XCTAssertEqual(LayoutConstants.connectionSheetHeight, 580)
     }
 
     func testConnectionSectionCopyKeysPresent() {

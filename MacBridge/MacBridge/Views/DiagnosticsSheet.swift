@@ -71,7 +71,7 @@ struct DiagnosticsSheet: View {
                 }
             }
         }
-        .frame(minWidth: 560, minHeight: 420)
+        .frame(width: LayoutConstants.unifiedSheetWidth, height: LayoutConstants.unifiedSheetHeight)
         .task {
             await diagnosticsViewModel.loadLogs()
         }
