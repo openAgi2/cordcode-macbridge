@@ -505,6 +505,7 @@ private struct RuntimeControlButton: View {
                     .font(.system(size: 15, weight: .semibold))
             }
             .frame(width: width, height: 40)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(.primary)
@@ -588,6 +589,7 @@ private struct PairDeviceButton: View {
                     .font(.system(size: 16, weight: .semibold))
             }
             .frame(width: 245, height: 49)
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.plain)
         .foregroundStyle(.white)
