@@ -402,18 +402,22 @@ type HistoryEntry struct {
 // Callers should continue to honor Role/Content/Timestamp as the minimal
 // compatibility surface and treat the richer fields as optional enhancements.
 type RichHistoryEntry struct {
-	ID         string           `json:"id,omitempty"`
-	Role       string           `json:"role"`
-	Content    string           `json:"content"`
-	Thinking   string           `json:"thinking,omitempty"`
-	Parts      []map[string]any `json:"parts,omitempty"`
-	Steps      []map[string]any `json:"steps,omitempty"`
-	Files      []map[string]any `json:"files,omitempty"`
-	Timestamp  time.Time        `json:"timestamp"`
-	AgentName  string           `json:"agentName,omitempty"`
-	ModelID    string           `json:"modelId,omitempty"`
-	ProviderID string           `json:"providerId,omitempty"`
-	ModelName  string           `json:"modelName,omitempty"`
+	ID        string           `json:"id,omitempty"`
+	Role      string           `json:"role"`
+	Content   string           `json:"content"`
+	Thinking  string           `json:"thinking,omitempty"`
+	Parts     []map[string]any `json:"parts,omitempty"`
+	Steps     []map[string]any `json:"steps,omitempty"`
+	Files     []map[string]any `json:"files,omitempty"`
+	Timestamp time.Time        `json:"timestamp"`
+	// TurnStartedAt / TurnCompletedAt are optional, source-proven wall-clock
+	// boundaries. They are never synthesized from tool durations.
+	TurnStartedAt   *time.Time `json:"turnStartedAt,omitempty"`
+	TurnCompletedAt *time.Time `json:"turnCompletedAt,omitempty"`
+	AgentName       string     `json:"agentName,omitempty"`
+	ModelID         string     `json:"modelId,omitempty"`
+	ProviderID      string     `json:"providerId,omitempty"`
+	ModelName       string     `json:"modelName,omitempty"`
 }
 
 // Todo represents one backend-managed todo item for a session.
@@ -450,11 +454,11 @@ type SessionPin struct {
 
 // AgentSessionInfo describes one session as reported by the agent backend.
 type AgentSessionInfo struct {
-	ID              string
-	Summary         string
-	MessageCount    int
-	ModifiedAt      time.Time `json:"modified_at"`
-	ArchivedAt      time.Time `json:"archived_at,omitempty"`
+	ID           string
+	Summary      string
+	MessageCount int
+	ModifiedAt   time.Time `json:"modified_at"`
+	ArchivedAt   time.Time `json:"archived_at,omitempty"`
 	// PinnedAt is non-zero when the user pinned (置顶) this session. It is MacBridge-owned
 	// metadata (NOT agent-local state): Claude stores it in the .cc-connect-session-meta
 	// sidecar; Codex/OpenCode store it in the bridge-owned pin index. The wire field is

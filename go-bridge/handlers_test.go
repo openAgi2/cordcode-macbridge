@@ -1501,20 +1501,25 @@ func TestOpenCodeSessionMutationsReturnNotSupported(t *testing.T) {
 }
 
 func TestHandleGetSessionMessagesPrefersRichHistoryProvider(t *testing.T) {
+	startedAt := time.Unix(1710000000, 0).UTC()
+	completedAt := startedAt.Add(95 * time.Second)
 	agent := &fakeAgent{
 		name: "codex",
 		richHistory: []core.RichHistoryEntry{{
-			ID:         "msg-1",
-			Role:       "assistant",
-			Content:    "final answer",
-			Thinking:   "chain of thought summary",
-			Timestamp:  time.Unix(1710000000, 0).UTC(),
-			AgentName:  "build",
-			ModelID:    "gpt-5-mini",
-			ProviderID: "github-copilot",
+			ID:              "msg-1",
+			Role:            "assistant",
+			Content:         "final answer",
+			Thinking:        "chain of thought summary",
+			Timestamp:       time.Unix(1710000000, 0).UTC(),
+			TurnStartedAt:   &startedAt,
+			TurnCompletedAt: &completedAt,
+			AgentName:       "build",
+			ModelID:         "gpt-5-mini",
+			ProviderID:      "github-copilot",
 			Parts: []map[string]any{{
-				"type":    "text",
-				"content": "final answer",
+				"type":         "text",
+				"content":      "final answer",
+				"presentation": "final",
 			}},
 			Steps: []map[string]any{{
 				"toolName": "bash",
@@ -1568,6 +1573,16 @@ func TestHandleGetSessionMessagesPrefersRichHistoryProvider(t *testing.T) {
 	}
 	if _, ok := entry["timestampMillis"].(float64); !ok {
 		t.Fatalf("timestampMillis missing or wrong type: %#v", entry["timestampMillis"])
+	}
+	if got := entry["turnStartedAtMillis"]; got != float64(startedAt.UnixMilli()) {
+		t.Fatalf("turnStartedAtMillis = %#v, want %d", got, startedAt.UnixMilli())
+	}
+	if got := entry["turnCompletedAtMillis"]; got != float64(completedAt.UnixMilli()) {
+		t.Fatalf("turnCompletedAtMillis = %#v, want %d", got, completedAt.UnixMilli())
+	}
+	part, _ := parts[0].(map[string]any)
+	if got := part["presentation"]; got != "final" {
+		t.Fatalf("part presentation = %#v, want final", got)
 	}
 	if got := entry["agentName"]; got != "build" {
 		t.Fatalf("agentName = %#v, want build", got)

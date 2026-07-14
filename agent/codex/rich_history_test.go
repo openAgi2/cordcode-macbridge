@@ -217,6 +217,43 @@ func TestGetRichSessionHistory_CommandExecution(t *testing.T) {
 	}
 }
 
+func TestGetRichSessionHistory_ClassifiesProgressAndFinalText(t *testing.T) {
+	codexHome := filepath.Join(t.TempDir(), ".codex")
+	sessionID := "rich-presentation"
+	rollout := "" +
+		`{"type":"session_meta","payload":{"id":"` + sessionID + `","cwd":"/tmp"}}` + "\n" +
+		`{"type":"response_item","timestamp":"2026-05-20T12:00:01Z","payload":{"role":"user","content":[{"type":"input_text","text":"fix it"}]}}` + "\n" +
+		`{"type":"response_item","timestamp":"2026-05-20T12:00:02Z","payload":{"role":"assistant","content":[{"type":"output_text","text":"I will inspect the project."}]}}` + "\n" +
+		`{"type":"response_item","timestamp":"2026-05-20T12:00:03Z","payload":{"type":"command_execution","command":"rg TODO"}}` + "\n" +
+		`{"type":"response_item","timestamp":"2026-05-20T12:00:04Z","payload":{"type":"function_call_output","output":"found one","status":"completed"}}` + "\n" +
+		`{"type":"response_item","timestamp":"2026-05-20T12:00:05Z","payload":{"role":"assistant","content":[{"type":"output_text","text":"The change is complete."}]}}` + "\n"
+	writeTestRollout(t, codexHome, sessionID, rollout)
+
+	entries, err := getRichSessionHistory(sessionID, codexHome, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("entries = %d, want 2", len(entries))
+	}
+	assistant := entries[1]
+	if assistant.Content != "The change is complete." {
+		t.Fatalf("assistant content = %q, want terminal answer", assistant.Content)
+	}
+	if assistant.TurnStartedAt == nil || assistant.TurnCompletedAt == nil {
+		t.Fatalf("missing source-proven turn boundaries: %#v", assistant)
+	}
+	if got := assistant.TurnCompletedAt.Sub(*assistant.TurnStartedAt); got != 3*time.Second {
+		t.Fatalf("turn duration = %s, want 3s", got)
+	}
+	if got := assistant.Parts[0]["presentation"]; got != "progress" {
+		t.Fatalf("first text presentation = %#v, want progress", got)
+	}
+	if got := assistant.Parts[len(assistant.Parts)-1]["presentation"]; got != "final" {
+		t.Fatalf("terminal text presentation = %#v, want final", got)
+	}
+}
+
 func TestGetRichSessionHistory_FunctionCallWithCallID(t *testing.T) {
 	codexHome := filepath.Join(t.TempDir(), ".codex")
 	sessionID := "rich-func-call"

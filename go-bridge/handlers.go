@@ -28,18 +28,18 @@ var hiddenDirectoryBases = map[string]bool{
 const claudeSessionSummaryReadLimit = 512 * 1024
 
 type Handlers struct {
-	mu                      sync.Mutex
-	agents                  map[string]core.Agent
-	sessions                *sessionRegistry
-	runningMap              *runningMapCache
-	opencodeSessionOptions  map[string]opencodeSessionOptions
-	contentRefs             map[string]string
-	contentRefOrder         []string
-	seq                     int
-	ocProxy                 *OpenCodeProxy
-	codexBackendMode        string
-	pendingNotifications    *PendingNotificationStore
-	broadcaster             *Broadcaster
+	mu                     sync.Mutex
+	agents                 map[string]core.Agent
+	sessions               *sessionRegistry
+	runningMap             *runningMapCache
+	opencodeSessionOptions map[string]opencodeSessionOptions
+	contentRefs            map[string]string
+	contentRefOrder        []string
+	seq                    int
+	ocProxy                *OpenCodeProxy
+	codexBackendMode       string
+	pendingNotifications   *PendingNotificationStore
+	broadcaster            *Broadcaster
 	// deltaBatcher（Fix 5）：text_delta/reasoning_delta 时间窗攒批，降低上游每 token 一帧
 	// 的 WS/HPKE/日志开销。relayEvents / startPassiveSubscription 通过它下发，而非直接 broadcaster.Send。
 	deltaBatcher            *DeltaBatcher
@@ -2604,6 +2604,12 @@ func (h *Handlers) richHistoryEntryToWire(entry core.RichHistoryEntry) map[strin
 		"modelId":         entry.ModelID,
 		"providerId":      entry.ProviderID,
 		"modelName":       entry.ModelName,
+	}
+	if entry.TurnStartedAt != nil {
+		result["turnStartedAtMillis"] = entry.TurnStartedAt.UnixMilli()
+	}
+	if entry.TurnCompletedAt != nil {
+		result["turnCompletedAtMillis"] = entry.TurnCompletedAt.UnixMilli()
 	}
 	if entry.Thinking != "" {
 		result["thinking"] = entry.Thinking

@@ -553,6 +553,9 @@ type UnifiedMessage = {
   files: UnifiedMessageFile[]
   parts: UnifiedMessagePart[]
   timestampMillis: number
+  // Present only when the backend can prove the turn boundary.
+  turnStartedAtMillis?: number
+  turnCompletedAtMillis?: number
   agentName?: string
   modelId?: string
   providerId?: string
@@ -567,7 +570,9 @@ type UnifiedMessageFile = {
 }
 
 type UnifiedMessagePart =
-  | { type: 'text', content: string }
+  // `presentation` is optional for backwards compatibility. Codex uses
+  // `progress` for interim agent messages and `final` for the terminal one.
+  | { type: 'text', content: string, presentation?: 'progress' | 'final' }
   | { type: 'reasoning', content: string }
   | { type: 'tool', step: UnifiedToolStep }
   | { type: 'file', file: UnifiedMessageFile }
@@ -586,6 +591,8 @@ type UnifiedMessagePart =
 | `files` | `files` |
 | `parts` | `parts` |
 | `timestampMillis` | `timestamp` (`Date(timeIntervalSince1970: ms / 1000)`) |
+| `turnStartedAtMillis` | `turnStartedAt` |
+| `turnCompletedAtMillis` | `turnCompletedAt` |
 | `agentName` | `agentName` |
 | `modelId` | `modelID` |
 | `providerId` | `providerID` |

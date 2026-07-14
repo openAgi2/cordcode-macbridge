@@ -214,7 +214,7 @@ func ParseRichHistoryFromReader(r io.Reader, limit int) ([]core.RichHistoryEntry
 			builder.addToolUse(ts, "Bash", item.Command, "")
 
 		case item.Type == "function_call_output":
-			builder.addToolResultByCallID(item.CallID, codexTranscriptOutput(item.Output), item.Status)
+			builder.addToolResultByCallID(ts, item.CallID, codexTranscriptOutput(item.Output), item.Status)
 
 		case item.Type == "custom_tool_call":
 			toolName, toolInput := codexCustomToolUse(item.Name, item.Input)
@@ -223,7 +223,7 @@ func ParseRichHistoryFromReader(r io.Reader, limit int) ([]core.RichHistoryEntry
 			}
 
 		case item.Type == "custom_tool_call_output":
-			builder.addToolResultByCallID(item.CallID, codexTranscriptOutput(item.Output), item.Status)
+			builder.addToolResultByCallID(ts, item.CallID, codexTranscriptOutput(item.Output), item.Status)
 
 		default:
 			slog.Debug("codex rich history: unhandled response_item",
@@ -399,10 +399,11 @@ func codexImageExtension(mime string) string {
 }
 
 type richHistoryBuilder struct {
-	entries    []core.RichHistoryEntry
-	current    *core.RichHistoryEntry
-	callIDMap  map[string]int
-	maxEntries int
+	entries     []core.RichHistoryEntry
+	current     *core.RichHistoryEntry
+	callIDMap   map[string]int
+	maxEntries  int
+	lastEventAt time.Time
 }
 
 func (b *richHistoryBuilder) addEntry(entry core.RichHistoryEntry) {
@@ -412,6 +413,7 @@ func (b *richHistoryBuilder) addEntry(entry core.RichHistoryEntry) {
 
 func (b *richHistoryBuilder) addText(ts time.Time, texts []string, parts []map[string]any) {
 	if b.current != nil && b.current.Role == "assistant" {
+		b.touch(ts)
 		fullContent := ""
 		for _, t := range texts {
 			if fullContent != "" {
@@ -439,10 +441,12 @@ func (b *richHistoryBuilder) addText(ts time.Time, texts []string, parts []map[s
 		Files:     []map[string]any{},
 		Timestamp: ts,
 	}
+	b.touch(ts)
 }
 
 func (b *richHistoryBuilder) addReasoning(ts time.Time, text string) {
 	if b.current != nil && b.current.Role == "assistant" {
+		b.touch(ts)
 		if b.current.Thinking != "" {
 			b.current.Thinking += "\n"
 		}
@@ -459,10 +463,12 @@ func (b *richHistoryBuilder) addReasoning(ts time.Time, text string) {
 		Files:     []map[string]any{},
 		Timestamp: ts,
 	}
+	b.touch(ts)
 }
 
 func (b *richHistoryBuilder) addToolUse(ts time.Time, toolName, toolInput, callID string) {
 	if b.current != nil && b.current.Role == "assistant" {
+		b.touch(ts)
 		stepID := fmt.Sprintf("tool-%d", len(b.current.Steps)+1)
 		step := map[string]any{
 			"id":                             stepID,
@@ -507,6 +513,7 @@ func (b *richHistoryBuilder) addToolUse(ts time.Time, toolName, toolInput, callI
 		Files:     []map[string]any{},
 		Timestamp: ts,
 	}
+	b.touch(ts)
 	if callID != "" {
 		if b.callIDMap == nil {
 			b.callIDMap = make(map[string]int)
@@ -537,10 +544,11 @@ func (b *richHistoryBuilder) addToolResult(ts time.Time, toolName, output, statu
 	_ = ts
 }
 
-func (b *richHistoryBuilder) addToolResultByCallID(callID, output, status string) {
+func (b *richHistoryBuilder) addToolResultByCallID(ts time.Time, callID, output, status string) {
 	if b.current == nil {
 		return
 	}
+	b.touch(ts)
 	if callID != "" {
 		idx, ok := b.callIDMap[callID]
 		if !ok || idx >= len(b.current.Steps) {
@@ -617,6 +625,11 @@ func richHistoryFileChanges(changes []core.FileChange) []map[string]any {
 
 func (b *richHistoryBuilder) flush() {
 	if b.current != nil {
+		b.classifyTextPresentation()
+		if !b.lastEventAt.IsZero() {
+			completedAt := b.lastEventAt
+			b.current.TurnCompletedAt = &completedAt
+		}
 		if len(b.current.Parts) == 0 {
 			b.current.Parts = []map[string]any{{"type": "text", "content": b.current.Content}}
 		}
@@ -626,5 +639,45 @@ func (b *richHistoryBuilder) flush() {
 		}
 		b.current = nil
 		b.callIDMap = nil
+		b.lastEventAt = time.Time{}
+	}
+}
+
+func (b *richHistoryBuilder) touch(ts time.Time) {
+	if b.current == nil || ts.IsZero() {
+		return
+	}
+	if b.current.TurnStartedAt == nil {
+		startedAt := ts
+		b.current.TurnStartedAt = &startedAt
+	}
+	if b.lastEventAt.IsZero() || ts.After(b.lastEventAt) {
+		b.lastEventAt = ts
+	}
+}
+
+// classifyTextPresentation retains every transcript text part but marks the
+// terminal assistant message as the final answer. Earlier text remains real
+// progress inside the expandable execution process.
+func (b *richHistoryBuilder) classifyTextPresentation() {
+	lastText := -1
+	for i, part := range b.current.Parts {
+		if part["type"] == "text" && strings.TrimSpace(appServerStringValue(part["content"])) != "" {
+			lastText = i
+		}
+	}
+	if lastText < 0 {
+		return
+	}
+	for i, part := range b.current.Parts {
+		if part["type"] != "text" {
+			continue
+		}
+		if i == lastText {
+			part["presentation"] = "final"
+			b.current.Content = appServerStringValue(part["content"])
+		} else {
+			part["presentation"] = "progress"
+		}
 	}
 }
