@@ -10,7 +10,7 @@ struct DiagnosticsSheet: View {
     @ObservedObject var bridgeStatus: BridgeStatusViewModel
     @ObservedObject var backendStatus: BackendStatusViewModel
 
-    @State private var showRawLogs = false
+    @State private var showRawLogs = true
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
