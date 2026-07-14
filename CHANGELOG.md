@@ -8,6 +8,11 @@
 
 ## [Unreleased]
 
+### 2026-07-14 — 工作站首页整合设备配对与管理
+
+- **改了什么**：将「设备」页面整合进工作站首页，并移除已无目的地价值的侧栏。首页在连接状态行直接提供加大、带扫码图标的「配对新设备」主按钮，并在其后展示已授权设备列表、刷新与撤销授权；AI 工具改为紧凑状态行。首页内容列固定为 820pt 并在窗口中居中，重启/停止保留为可见的次级按钮；现有配对状态机和撤销二次确认保持不变。设备列表改为仅在 Management API 的地址与令牌齐备后加载，并在两者更新时自动重载。工作站背景改用约 40% 透出的暖灰材质，放大正文、标题、行距和工具列间距；撤销授权由设备行直接触发；配对按钮增加蓝色呼吸光晕和扫光动效，并遵循「减少动态效果」系统设置。配对流程改由固定尺寸 sheet 呈现，保留二维码、iOS/Web 切换、步骤、手动码、倒计时、复制与连接详情。
+- **有何提升**：用户打开 CordCode Link 后即可确认连接状态、管理已授权设备并开始配对，无需在工作站与设备页之间切换；宽窗口不再把内容拉散，信息密度更克制，主操作清晰，同时不会因启动阶段 API 尚未就绪而先显示可通过手动重试恢复的错误。Relay、工具与设备状态会在 API 就绪后一起读取；连接状态工作表具有稳定完整的尺寸和可点击的「完成」关闭按钮。较亮的半透明底色和更宽松的文字节奏使首屏更接近设计稿，配对入口有可感知但不喧宾夺主的动感；配对任务不再撑开首页，而在专注窗口中完整完成。
+
 ### 2026-07-14 — Grok Build rich history 填充 Parts/Steps
 
 - **改了什么**：`readRichSessionHistory` 从只产 ID/Role/Content 空壳升级为填充 Parts/Steps。扩展 `grokHistoryLine` 解析 tool_calls 的 `arguments`/`id`/`name` 和 tool_result 的 `content`/`tool_call_id`。两遍扫描设计：先收集所有 tool_result，再用稳定 call ID 关联到对应 tool step。step status 始终为 `unknown`（Grok 历史无状态字段），output 仅在 tool_call_id 匹配时填充（>500 rune 丢弃），title 从 proven arguments 派生（command/target_file/pattern 等）。entry 准入 guard 改为 role 空或 content/parts/thinking/steps/files 全空才跳过——空内容工具行不再被跳过或合成 `Tool:` 文本。step ID 用 `tool-<lineNum>-<hash8>` 派生，不受过滤/解析变化影响。不归并、不重做 ID 方案、不改 wire 契约。

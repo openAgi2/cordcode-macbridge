@@ -3,6 +3,8 @@ import SwiftUI
 
 struct PairingView: View {
     @ObservedObject var viewModel: PairingViewModel
+    var showsHeader = true
+    var onExit: (() -> Void)?
     @AppStorage("bridgeDisplayName") private var bridgeDisplayName = ""
     @State private var copiedCode = false
     @State private var copiedLink = false
@@ -44,7 +46,9 @@ struct PairingView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            SectionHeader(L10n.pairingNewDevice)
+            if showsHeader {
+                SectionHeader(L10n.pairingNewDevice)
+            }
 
             // 步骤轨迹：只高亮当前步骤，让二维码不再像没有解释的技术对象。
             if let currentStep {
@@ -167,7 +171,11 @@ struct PairingView: View {
             .help(copiedLink ? L10n.pairingLinkCopied : L10n.copyPairingLink)
 
             Button(L10n.back) {
-                viewModel.reset()
+                if let onExit {
+                    onExit()
+                } else {
+                    viewModel.reset()
+                }
             }
         }
     }
@@ -360,6 +368,35 @@ struct PairingView: View {
             }
         }
         return candidates
+    }
+}
+
+/// 配对是一次专注任务：使用固定尺寸 sheet 承载既有二维码、流程、手动码、倒计时与连接详情，
+/// 使首页在配对期间继续保持为稳定的设备与运行状态总览。
+struct PairingSheet: View {
+    @ObservedObject var viewModel: PairingViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        PageContainer(maxContentWidth: LayoutConstants.pairingSheetWidth) {
+            VStack(alignment: .leading, spacing: 20) {
+                PageHeader(L10n.pairingNewDevice) {
+                    Button(L10n.done, action: close)
+                        .buttonStyle(.bordered)
+                }
+                PairingView(
+                    viewModel: viewModel,
+                    showsHeader: false,
+                    onExit: close
+                )
+            }
+        }
+        .frame(width: LayoutConstants.pairingSheetWidth, height: LayoutConstants.pairingSheetHeight)
+    }
+
+    private func close() {
+        viewModel.reset()
+        dismiss()
     }
 }
 

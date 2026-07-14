@@ -17,25 +17,31 @@ struct PageContainer<Content: View>: View {
     }
 
     var body: some View {
-        Group {
+        GeometryReader { proxy in
+            let columnWidth = min(maxContentWidth, proxy.size.width)
+            let contentWidth = max(0, columnWidth - 2 * LayoutConstants.pageHorizontalPadding)
             if scrolls {
                 ScrollView {
-                    pageContent
+                    pageContent(contentWidth: contentWidth)
+                        .frame(width: columnWidth, alignment: .topLeading)
+                        .frame(maxWidth: .infinity, alignment: .top)
                 }
             } else {
-                pageContent
+                pageContent(contentWidth: contentWidth)
+                    .frame(width: columnWidth, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, alignment: .top)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var pageContent: some View {
+    private func pageContent(contentWidth: CGFloat) -> some View {
         content
-            .frame(maxWidth: .infinity, maxHeight: scrolls ? nil : .infinity, alignment: .topLeading)
+            .frame(width: contentWidth, alignment: .topLeading)
+            .frame(maxHeight: scrolls ? nil : .infinity, alignment: .topLeading)
             .padding(.horizontal, LayoutConstants.pageHorizontalPadding)
             .padding(.top, 26)
             .padding(.bottom, 36)
-            .frame(maxWidth: maxContentWidth, alignment: .top)
     }
 }
 

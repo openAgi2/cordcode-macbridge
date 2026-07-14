@@ -244,8 +244,11 @@ struct RemoteAccessView: View {
                 }
                 .padding(.trailing, 8)
             }
-            .frame(minWidth: 1000, minHeight: 680)  // 稳定 sheet 尺寸：防止切换不同连接方式时窗口跳跃。minHeight 覆盖 Relay 最完整配置的高度。
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
+        // `GeometryReader` 没有固有尺寸；不给 sheet 明确尺寸时，macOS 会按仅有的
+        // 标题高度创建窗口并裁掉主体和完成按钮，用户只能按 Escape 关闭。
+        .frame(width: LayoutConstants.connectionSheetWidth, height: LayoutConstants.connectionSheetHeight)
         .task(id: apiClient?.baseURL.absoluteString) {
             customRelayEndpoint = savedCustomRelayEndpoint
             remoteURL = savedRemoteURL

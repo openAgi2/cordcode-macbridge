@@ -17,6 +17,10 @@ enum LayoutConstants {
     /// 默认工作列最大宽度。内容左对齐于该列；正常状态不展示端口/版本/endpoint。
     static let workColumnWidth: CGFloat = 880
 
+    /// 工作站首页的外层内容宽度（含两侧 pageHorizontalPadding）。
+    /// 固定阅读宽度，避免宽窗口把状态页拉成稀疏的仪表盘。
+    static let workspaceHomeContentWidth: CGFloat = 820
+
     /// 窗口宽度超过该阈值时，才出现只读的连接健康辅助信息栏；
     /// 不新增独立目的地或操作。
     static let wideSecondaryThreshold: CGFloat = 1180
@@ -25,8 +29,12 @@ enum LayoutConstants {
     /// 为支持内部左右分栏（模拟老版列表+详情），并让右侧配置区有足够空间，设为 1100pt。
     static let connectionSheetWidth: CGFloat = 1100
 
-    /// 配对工作区 / Sheet 的建议最大宽度。
-    static let pairingSheetWidth: CGFloat = 600
+    /// 连接状态 Sheet 的固定呈现高度。避免 GeometryReader 被 macOS 以标题的最小高度展示。
+    static let connectionSheetHeight: CGFloat = 680
+
+    /// 配对 Sheet 的固定尺寸，容纳二维码与流程说明的并列布局。
+    static let pairingSheetWidth: CGFloat = 720
+    static let pairingSheetHeight: CGFloat = 600
 
     // MARK: - 第二轮宽屏内容宽度契约 (r5 最终)
     /// PageContainer 水平 padding（两侧各 30pt，总 60pt）。

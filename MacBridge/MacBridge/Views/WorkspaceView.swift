@@ -16,12 +16,13 @@ struct WorkspaceView: View {
     let onStartBridge: () -> Void
     let onStopBridge: () -> Void
     let onRestartBridge: () -> Void
-    var onNavigateToDevices: (() -> Void)?
     var onOpenConnectionStatus: (() -> Void)?
-    var onPairDevice: (() -> Void)?
+    let onPairDevice: () -> Void
 
     @State private var showStopConfirmation = false
     @State private var isRestarting = false
+    @State private var deviceToRemove: TrustedDevice?
+    @State private var showRemoveConfirmation = false
 
     private var agents: [BackendAgentStatus] {
         if !backendViewModel.agents.isEmpty {
@@ -46,32 +47,15 @@ struct WorkspaceView: View {
     }
 
     var body: some View {
-        PageContainer(maxContentWidth: LayoutConstants.workspaceMaxContainerWidth) {
-            GeometryReader { geometry in
-                let availableContentWidth = geometry.size.width
-                let isWide = availableContentWidth >= LayoutConstants.workspaceWideContentThreshold
-
-                if isWide {
-                    HStack(alignment: .top, spacing: LayoutConstants.dualColumnGap) {
-                        mainContent(availableContentWidth: availableContentWidth)
-                            .frame(maxWidth: availableContentWidth >= LayoutConstants.workspacePreferredContentWidth
-                                   ? LayoutConstants.dualColumnMainPreferred
-                                   : LayoutConstants.dualColumnMainMin)
-
-                        auxiliaryBar(availableContentWidth: availableContentWidth)
-                            .frame(width: availableContentWidth >= LayoutConstants.workspacePreferredContentWidth
-                                   ? LayoutConstants.dualColumnInspectorPreferred
-                                   : LayoutConstants.dualColumnInspectorMin)
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: 28) {
-                        headlineSection
-                        if !attentionItems.isEmpty {
-                            attentionSection
-                        }
-                        toolsAndConnectionSection
-                    }
+        PageContainer(maxContentWidth: LayoutConstants.workspaceHomeContentWidth) {
+            VStack(alignment: .leading, spacing: 40) {
+                headlineSection
+                Divider()
+                devicesSection
+                if !attentionItems.isEmpty {
+                    attentionSection
                 }
+                toolsAndConnectionSection
             }
         }
         .confirmationDialog(
@@ -89,75 +73,20 @@ struct WorkspaceView: View {
                 isRestarting = false
             }
         }
-    }
-
-    @ViewBuilder
-    private func mainContent(availableContentWidth: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            headlineSection
-            if !attentionItems.isEmpty {
-                attentionSection
-            }
-            toolsAndConnectionSection
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    @ViewBuilder
-    private func auxiliaryBar(availableContentWidth: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // 此 Mac
-            HStack(spacing: 6) {
-                Image(systemName: "desktopcomputer")
-                    .foregroundStyle(.secondary)
-                Text(displayNameForAux ?? "此 Mac")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-            }
-
-            // 设备
-            if deviceStore.hasLoadedDevices {
-                HStack(spacing: 6) {
-                    Image(systemName: "person.2")
-                        .foregroundStyle(.secondary)
-                    if deviceStore.devices.isEmpty {
-                        Text(L10n.noTrustedDevices)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text(String(format: L10n.tr("trusted_devices"), deviceStore.devices.count))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+        .confirmationDialog(
+            String(format: L10n.devicesRevokeConfirm, deviceToRemove?.displayName ?? L10n.devicesUnknownDevice),
+            isPresented: $showRemoveConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(L10n.devicesRevokeAuthorization, role: .destructive) {
+                if let device = deviceToRemove {
+                    Task { await deviceStore.revokeDevice(device) }
                 }
             }
-
-            // Relay
-            HStack(spacing: 6) {
-                Image(systemName: "lock.shield")
-                    .foregroundStyle(.secondary)
-                Text(relaySummary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer(minLength: 0)
+            Button(L10n.cancel, role: .cancel) {}
+        } message: {
+            Text(L10n.devicesRevokeMessage)
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color(NSColor.controlBackgroundColor).opacity(0.3))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color(NSColor.separatorColor).opacity(0.2), lineWidth: 1)
-        )
-    }
-
-    @AppStorage("bridgeDisplayName") private var bridgeDisplayName = ""
-
-    private var displayNameForAux: String? {
-        bridgeDisplayName.isEmpty ? nil : bridgeDisplayName
     }
 
     // MARK: - 健康结论
@@ -179,83 +108,59 @@ struct WorkspaceView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Button {
-                onPairDevice?()
-            } label: {
-                Label(L10n.addDevice, systemImage: "qrcode")
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .padding(.top, 4)
+            pairDeviceButton
+                .padding(.top, 4)
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }
 
     private var standardHeadline: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                StatusIndicator(
-                    systemImage: conclusionAppearance.icon,
-                    color: conclusionAppearance.color,
-                    showsProgress: viewModel.status == .starting
-                )
-                VStack(alignment: .leading, spacing: 4) {
+        HStack(alignment: .top, spacing: 28) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    StatusIndicator(
+                        systemImage: conclusionAppearance.icon,
+                        color: conclusionAppearance.color,
+                        showsProgress: viewModel.status == .starting
+                    )
                     Text(conclusionTitle)
                         .font(.title2.weight(.semibold))
-                    Text(conclusionSubtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer(minLength: 12)
-                headlineAction
+                Text(conclusionSubtitle)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            // 设备摘要 + 主动作行
-            if deviceStore.hasLoadedDevices {
-                HStack(spacing: 8) {
-                    if deviceStore.devices.isEmpty {
-                        Text(L10n.noTrustedDevices)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text(String(format: L10n.tr("trusted_devices"), deviceStore.devices.count))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        if let lastSeen = deviceStore.devices.compactMap(\.lastSeenAt).sorted().last {
-                            Text("· " + String(format: L10n.overviewRecentlySeen, RelativeTimeFormatter.string(lastSeen)))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    Spacer()
-                    if let onNavigateToDevices {
-                        Button(L10n.viewDevices, action: onNavigateToDevices)
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                    }
-                    if let onOpenConnectionStatus {
-                        Button(L10n.connectionStatus, action: onOpenConnectionStatus)
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                    }
-                }
+            Spacer(minLength: 20)
+
+            HStack(alignment: .center, spacing: 8) {
+                pairDeviceButton
+                headlineActions
             }
         }
     }
 
+    private var pairDeviceButton: some View {
+        PairDeviceButton(title: L10n.pairNewDevice) {
+            onPairDevice()
+        }
+    }
+
     @ViewBuilder
-    private var headlineAction: some View {
+    private var headlineActions: some View {
         switch viewModel.status {
         case .ready:
             Button(isRestarting ? L10n.overviewRestarting : L10n.restart) {
                 isRestarting = true
                 onRestartBridge()
             }
-            .disabled(isRestarting)
+            .buttonStyle(.bordered)
             .controlSize(.small)
+            .disabled(isRestarting)
             Button(L10n.stop) { showStopConfirmation = true }
+                .buttonStyle(.bordered)
                 .controlSize(.small)
         case .readyNoAgents:
             Button(L10n.workspaceRecheck) {
@@ -274,6 +179,94 @@ struct WorkspaceView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
         }
+    }
+
+    // MARK: - 设备与配对
+
+    private var devicesSection: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .firstTextBaseline) {
+                workspaceSectionHeader(L10n.authorizedDevices)
+                if deviceStore.hasLoadedDevices {
+                    Text("\(deviceStore.devices.count)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+
+            if let devicesError = deviceStore.devicesError {
+                HStack(spacing: 8) {
+                    Image(systemName: "xmark.circle")
+                    Text(devicesError)
+                    Spacer()
+                    Button(L10n.retry) { Task { await deviceStore.loadDevices() } }
+                        .buttonStyle(.borderless)
+                }
+                .font(.subheadline)
+                .foregroundStyle(.red)
+            } else if !deviceStore.hasLoadedDevices {
+                ProgressView(L10n.loadingDevices)
+                    .controlSize(.small)
+            } else if deviceStore.devices.isEmpty {
+                Label(L10n.noAuthorizedDevices, systemImage: "iphone.slash")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(deviceStore.devices) { device in
+                        deviceRow(device)
+                        if device.id != deviceStore.devices.last?.id {
+                            Divider()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func deviceRow(_ device: TrustedDevice) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: device.platform == "ios" ? "iphone" : "desktopcomputer")
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 4) {
+                    Text(device.displayName ?? device.deviceId)
+                        .font(.body.weight(.medium))
+                    if deviceStore.devices.filter({ $0.displayName == device.displayName }).count > 1 {
+                        Text("(\(String(device.deviceId.suffix(6))))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                HStack(spacing: 10) {
+                    if let platform = device.platform {
+                        Text(platform)
+                    }
+                    if let created = device.createdAt {
+                        Text(String(format: L10n.paired, RelativeTimeFormatter.string(created)))
+                    }
+                    if let lastSeen = device.lastSeenAt {
+                        Text(String(format: L10n.lastSeen, RelativeTimeFormatter.string(lastSeen)))
+                    }
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button(L10n.devicesRevokeAuthorization, role: .destructive) {
+                deviceToRemove = device
+                showRemoveConfirmation = true
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.red)
+            .accessibilityLabel(L10n.devicesActions)
+        }
+        .padding(.vertical, 14)
     }
 
     // MARK: - 需要留意（仅异常）
@@ -327,8 +320,8 @@ struct WorkspaceView: View {
     }
 
     private var attentionSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(L10n.workspaceNeedsAttention)
+        VStack(alignment: .leading, spacing: 12) {
+            workspaceSectionHeader(L10n.workspaceNeedsAttention)
             ForEach(Array(attentionItems.enumerated()), id: \.offset) { _, item in
                 HStack(alignment: .top, spacing: 10) {
                     StatusIndicator(systemImage: "exclamationmark.triangle.fill", color: .orange)
@@ -356,16 +349,18 @@ struct WorkspaceView: View {
     // MARK: - AI 工具 + 安全连接
 
     private var toolsAndConnectionSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // AI 工具：卡片样式（借鉴参考图的工具卡片网格）
-            VStack(alignment: .leading, spacing: 8) {
-                SectionHeader(L10n.aiTools)
+        VStack(alignment: .leading, spacing: 38) {
+            VStack(alignment: .leading, spacing: 16) {
+                workspaceSectionHeader(L10n.aiTools)
                 if agents.isEmpty {
                     Text(L10n.noAiToolsDetected)
                         .foregroundStyle(.secondary)
                         .font(.subheadline)
                 } else {
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                    LazyVGrid(
+                        columns: [GridItem(.flexible(), spacing: 28), GridItem(.flexible())],
+                        spacing: 22
+                    ) {
                         ForEach(agents) { agent in
                             agentCard(for: agent)
                         }
@@ -374,12 +369,12 @@ struct WorkspaceView: View {
             }
 
             // 安全连接：仅呈现当前 Relay 结果，唯一连接入口指向同一个 Sheet
-            VStack(alignment: .leading, spacing: 6) {
-                SectionHeader(L10n.workspaceSecureConnection)
-                HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 10) {
+                workspaceSectionHeader(L10n.workspaceSecureConnection)
+                HStack(spacing: 12) {
                     StatusIndicator(systemImage: relayIcon, color: relayColor)
                     Text(relaySummary)
-                        .font(.subheadline)
+                        .font(.body)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer()
                 }
@@ -390,47 +385,35 @@ struct WorkspaceView: View {
     }
 
     private func agentCard(for agent: BackendAgentStatus) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                StatusIndicator(
-                    systemImage: agent.isAvailable ? "checkmark.circle.fill" : "exclamationmark.triangle.fill",
-                    color: agent.isAvailable ? .green : .orange
-                )
-                Text(agent.displayName)
-                    .font(.body.weight(.medium))
-                Spacer()
-                Text("macOS")
-                    .font(.caption2)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.gray.opacity(0.2))
-                    .cornerRadius(4)
-            }
-            HStack {
-                Text(agent.displayStatus)
-                    .font(.caption)
-                    .foregroundStyle(agent.isAvailable ? Color.secondary : Color.orange)
-                Spacer()
-                if !agent.isAvailable {
-                    Button(L10n.workspaceRecheck) {
-                        Task { await backendViewModel.testAgent(id: agent.id) }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .font(.caption)
+        HStack(spacing: 11) {
+            StatusIndicator(
+                systemImage: agent.isAvailable ? "checkmark.circle.fill" : "exclamationmark.triangle.fill",
+                color: agent.isAvailable ? .green : .orange
+            )
+            Text(agent.displayName)
+                .font(.body.weight(.medium))
+            Spacer()
+            Text(agent.displayStatus)
+                .font(.subheadline)
+                .foregroundStyle(agent.isAvailable ? Color.secondary : Color.orange)
+            if !agent.isAvailable {
+                Button(L10n.workspaceRecheck) {
+                    Task { await backendViewModel.testAgent(id: agent.id) }
                 }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
             }
         }
-        .padding(10)
-        .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(8)
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color(NSColor.separatorColor).opacity(0.3), lineWidth: 1)
-        )
+        .padding(.vertical, 14)
+        .overlay(alignment: .bottom) { Divider() }
     }
 
     // MARK: - 派生状态
+
+    private func workspaceSectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.title3.weight(.semibold))
+    }
 
     /// 健康结论外观（文字+状态点共同表达，不单靠颜色）。
     private var conclusionAppearance: (icon: String, color: Color) {
@@ -509,6 +492,77 @@ private extension BridgeStatus {
         switch self {
         case .ready, .readyNoAgents: return true
         default: return false
+        }
+    }
+}
+
+/// 工作站唯一主操作的轻量动效：蓝色底色保持原有状态语义，扫光与呼吸只用于提示可开始配对。
+private struct PairDeviceButton: View {
+    let title: String
+    let action: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isBreathing = false
+    @State private var sweepProgress = false
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: "qrcode.viewfinder")
+                .font(.body.weight(.semibold))
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.white)
+        .background {
+            Capsule()
+                .fill(Color.accentColor)
+                .overlay {
+                    GeometryReader { proxy in
+                        LinearGradient(
+                            colors: [.clear, .white.opacity(0.28), .clear],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: proxy.size.width * 0.38)
+                        .offset(x: sweepProgress ? proxy.size.width : -proxy.size.width * 0.38)
+                    }
+                    .clipShape(Capsule())
+                    .allowsHitTesting(false)
+                }
+        }
+        .overlay {
+            Capsule()
+                .stroke(.white.opacity(isBreathing ? 0.34 : 0.18), lineWidth: 1)
+        }
+        .shadow(
+            color: Color.accentColor.opacity(isBreathing ? 0.40 : 0.22),
+            radius: isBreathing ? 15 : 8,
+            y: isBreathing ? 5 : 3
+        )
+        .scaleEffect(isHovering ? 1.02 : (isBreathing ? 1.008 : 1))
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.16)) {
+                isHovering = hovering
+            }
+        }
+        .onAppear(perform: startMotion)
+        .onChange(of: reduceMotion) { _, _ in startMotion() }
+        .accessibilityHint(L10n.pairNewDevice)
+    }
+
+    private func startMotion() {
+        guard !reduceMotion else {
+            isBreathing = false
+            sweepProgress = false
+            return
+        }
+        withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
+            isBreathing = true
+        }
+        withAnimation(.linear(duration: 3.2).repeatForever(autoreverses: false)) {
+            sweepProgress = true
         }
     }
 }

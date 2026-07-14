@@ -1,32 +1,8 @@
 import XCTest
 @testable import CordCodeLink
 
-// P0-1 信息架构测试：Sidebar 只保留日常任务，技术后台改为原生窗口/Sheet。
-// 锁定 NavigationTab 收敛为两个 case，以及新文案 key 存在且非内部技术语言。
+// 首页整合设备配对与管理后，主窗口不再保留冗余 sidebar；技术后台由原生窗口/Sheet 承载。
 final class SidebarIAInformationArchitectureTests: XCTestCase {
-
-    func testSidebarHasOnlyTwoDailyTabs() {
-        // 只保留日常任务：工作站、设备。remoteAccess/settings/diagnostics 不再是一级 sidebar 项。
-        let cases = NavigationTab.allCases.map(\.rawValue)
-        XCTAssertEqual(Set(cases), Set(["workspace", "devices"]), "Sidebar 应只保留 workstation 与 devices")
-        XCTAssertEqual(NavigationTab.allCases.count, 2)
-    }
-
-    func testEverySidebarTabHasTitleAndImage() {
-        for tab in NavigationTab.allCases {
-            XCTAssertFalse(tab.title.isEmpty, "\(tab.rawValue) 缺少标题")
-            XCTAssertFalse(tab.systemImage.isEmpty, "\(tab.rawValue) 缺少 SF Symbol")
-        }
-    }
-
-    func testRemovedTabsNoLongerExist() {
-        // 这些原 sidebar 项应已从枚举移除（它们改为 Toolbar/原生 Settings）。
-        let raws = Set(NavigationTab.allCases.map(\.rawValue))
-        XCTAssertFalse(raws.contains("overview"))
-        XCTAssertFalse(raws.contains("remoteAccess"))
-        XCTAssertFalse(raws.contains("settings"))
-        XCTAssertFalse(raws.contains("diagnostics"))
-    }
 
     func testNewEntryKeysArePresent() {
         // Toolbar / 原生 Settings 入口的文案 key 必须存在于 L10n。

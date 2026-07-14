@@ -6,13 +6,10 @@ import XCTest
 @MainActor
 final class ConnectionStatusSheetTests: XCTestCase {
 
-    func testConnectionSheetWidthIsWithinWorkColumn() {
-        // 连接状态 Sheet 不应宽于工作列；P0 布局契约允许它独立于默认 880 工作列。
-        XCTAssertLessThanOrEqual(
-            LayoutConstants.connectionSheetWidth,
-            LayoutConstants.workColumnWidth,
-            "连接状态 Sheet 宽度应受工作列约束"
-        )
+    func testConnectionSheetHasStablePresentableSize() {
+        // 连接状态有左右两栏；显式尺寸避免 GeometryReader 在 macOS sheet 内退化为标题高度。
+        XCTAssertGreaterThan(LayoutConstants.connectionSheetWidth, LayoutConstants.workColumnWidth)
+        XCTAssertGreaterThanOrEqual(LayoutConstants.connectionSheetHeight, 680)
     }
 
     func testConnectionSectionCopyKeysPresent() {

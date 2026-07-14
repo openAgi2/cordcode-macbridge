@@ -14,6 +14,11 @@ final class LayoutConstantsTests: XCTestCase {
         XCTAssertEqual(LayoutConstants.workColumnWidth, 880, "P0-3: 默认工作列最大宽度必须为 880pt")
     }
 
+    func testWorkspaceHomeColumnIsComfortablyConstrained() {
+        XCTAssertEqual(LayoutConstants.workspaceHomeContentWidth, 820)
+        XCTAssertLessThan(LayoutConstants.workspaceHomeContentWidth, LayoutConstants.workColumnWidth)
+    }
+
     func testWorkColumnFitsInsideMinWindow() {
         // 工作列必须在最小窗口内放得下（留出 sidebar 与 padding 的余量）。
         // sidebar 180 + 左右 padding，工作列 880 应 < 最小窗口 920。
@@ -34,16 +39,21 @@ final class LayoutConstantsTests: XCTestCase {
     }
 
     func testSheetWidthsAreBounded() {
-        // 连接状态 Sheet 与配对 Sheet 不应超过工作列宽度（承载在主窗口内的模态）。
-        XCTAssertLessThanOrEqual(
+        // 连接状态 Sheet 支持双栏内容，配对工作区保持更聚焦。
+        XCTAssertGreaterThan(
             LayoutConstants.connectionSheetWidth,
             LayoutConstants.workColumnWidth,
-            "连接状态 Sheet 不应宽于工作列"
+            "连接状态 Sheet 应可容纳比工作列更宽的双栏内容"
         )
         XCTAssertLessThan(
             LayoutConstants.pairingSheetWidth,
             LayoutConstants.connectionSheetWidth,
             "配对工作区应比连接状态 Sheet 更聚焦"
+        )
+        XCTAssertGreaterThanOrEqual(
+            LayoutConstants.pairingSheetHeight,
+            600,
+            "配对 Sheet 必须容纳二维码与流程说明"
         )
     }
 
