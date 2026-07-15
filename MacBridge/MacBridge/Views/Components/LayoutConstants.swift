@@ -29,7 +29,7 @@ enum LayoutConstants {
     static let connectionSheetWidth: CGFloat = 760
 
     /// 连接状态 Sheet 的固定呈现高度。避免 GeometryReader 被 macOS 以标题的最小高度展示。
-    static let connectionSheetHeight: CGFloat = 700
+    static let connectionSheetHeight: CGFloat = 740
 
     /// 配对 Sheet 的固定尺寸，容纳二维码与流程说明的并列布局。
     static let pairingSheetWidth: CGFloat = 720

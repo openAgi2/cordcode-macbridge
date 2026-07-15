@@ -48,7 +48,8 @@ enum L10n {
     static var current: AppLanguage {
         let raw = UserDefaults.standard.string(forKey: "appLanguage") ?? ""
         if raw.isEmpty {
-            let preferred = Locale.preferredLanguages.first ?? "en"
+            let languages = UserDefaults.standard.stringArray(forKey: "AppleLanguages") ?? Locale.preferredLanguages
+            let preferred = languages.first ?? "en"
             return preferred.hasPrefix("zh") ? .zhHans : .en
         }
         return AppLanguage(rawValue: raw) ?? .en

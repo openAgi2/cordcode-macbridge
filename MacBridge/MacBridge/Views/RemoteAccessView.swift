@@ -220,7 +220,7 @@ struct RemoteAccessView: View {
 
                     // 右侧详情卡片区
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 20) {
+                        VStack(alignment: .leading, spacing: 16) {
                             switch selectedMethod {
                             case .lan: lanDetailView
                             case .relay: relayDetailView
@@ -597,7 +597,7 @@ struct RemoteAccessView: View {
 
                 if showTechnicalDetails {
                     SettingsCardContainer {
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 6) {
                             technicalInfoRow(label: L10n.current == .zhHans ? "协议版本" : "Protocol Version", value: "WSS (Websocket Secure)")
                             technicalInfoRow(label: L10n.current == .zhHans ? "加密协议" : "Encryption", value: L10n.current == .zhHans ? "端到端 HPKE (X25519 / AES-128-GCM)" : "End-to-End HPKE (X25519 / AES-128-GCM)")
                             technicalInfoRow(label: L10n.current == .zhHans ? "连接状态" : "Status", value: relayConfigured == true ? (L10n.current == .zhHans ? "已接入中继网" : "Connected") : (L10n.current == .zhHans ? "未就绪" : "Not Ready"))

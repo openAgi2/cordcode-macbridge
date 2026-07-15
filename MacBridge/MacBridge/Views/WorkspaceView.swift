@@ -646,7 +646,7 @@ private struct RevokeButton: View {
 
     var body: some View {
         Button(action: action) {
-            Text("撤销授权")
+            Text(L10n.current == .zhHans ? "撤销授权" : "Revoke")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Color(red: 0.92, green: 0.35, blue: 0.35))
                 .padding(.horizontal, 10)

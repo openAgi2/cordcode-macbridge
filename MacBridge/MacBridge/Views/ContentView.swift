@@ -115,6 +115,11 @@ struct ContentView: View {
             Task { await reloadManagementAPIData() }
         }
         .onAppear {
+            if appLanguage.isEmpty {
+                let languages = UserDefaults.standard.stringArray(forKey: "AppleLanguages") ?? Locale.preferredLanguages
+                let preferred = languages.first ?? "en"
+                appLanguage = preferred.hasPrefix("zh") ? "zh-Hans" : "en"
+            }
             configureBackendClientIfAvailable()
             diagnosticsVM.configure(logFilePath: dependencies.runtimeManager.config.logFilePath)
             pairingViewModel.onApproved = {
@@ -122,6 +127,11 @@ struct ContentView: View {
             }
         }
         .task {
+            if appLanguage.isEmpty {
+                let languages = UserDefaults.standard.stringArray(forKey: "AppleLanguages") ?? Locale.preferredLanguages
+                let preferred = languages.first ?? "en"
+                appLanguage = preferred.hasPrefix("zh") ? "zh-Hans" : "en"
+            }
             await reloadManagementAPIData()
             diagnosticsVM.configure(logFilePath: dependencies.runtimeManager.config.logFilePath)
         }

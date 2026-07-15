@@ -8,7 +8,7 @@ final class ConnectionStatusSheetTests: XCTestCase {
 
     func testConnectionSheetHasStablePresentableSize() {
         XCTAssertEqual(LayoutConstants.connectionSheetWidth, 760)
-        XCTAssertEqual(LayoutConstants.connectionSheetHeight, 700)
+        XCTAssertEqual(LayoutConstants.connectionSheetHeight, 740)
     }
 
     func testConnectionSectionCopyKeysPresent() {
