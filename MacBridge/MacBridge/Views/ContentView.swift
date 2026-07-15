@@ -57,15 +57,22 @@ struct ContentView: View {
                 HStack {
                     Spacer()
                     HStack(spacing: 14) {
-                        Button {
-                            let nextLang = (L10n.current == .zhHans) ? "en" : "zh-Hans"
-                            appLanguage = nextLang
+                        Menu {
+                            Button("简体中文") {
+                                appLanguage = "zh-Hans"
+                            }
+                            Button("English") {
+                                appLanguage = "en"
+                            }
                         } label: {
-                            Text(L10n.current == .zhHans ? "EN" : "中")
+                            Text(L10n.current == .zhHans ? "中" : "EN")
                                 .font(.system(size: 11, weight: .bold))
                                 .foregroundStyle(.primary.opacity(0.85))
+                                .padding(.horizontal, 2)
+                                .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .menuStyle(.borderlessButton)
+                        .frame(width: 32)
 
                         Button {
                             showConnectionStatus = true
