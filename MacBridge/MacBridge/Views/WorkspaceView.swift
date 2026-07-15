@@ -274,23 +274,9 @@ struct WorkspaceView: View {
 
             Spacer()
 
-            Button(role: .destructive) {
+            RevokeButton {
                 deviceToRemove = device
                 showRemoveConfirmation = true
-            } label: {
-                Text("撤销授权")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color(red: 0.92, green: 0.35, blue: 0.35))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background {
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color(red: 0.92, green: 0.35, blue: 0.35).opacity(0.10))
-                    }
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color(red: 0.92, green: 0.35, blue: 0.35).opacity(0.25), lineWidth: 0.7)
-                    }
             }
             .buttonStyle(.plain)
             .offset(y: 7)
@@ -495,6 +481,7 @@ private struct RuntimeControlButton: View {
     let width: CGFloat
     var isDisabled = false
     let action: () -> Void
+    @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
@@ -519,6 +506,12 @@ private struct RuntimeControlButton: View {
         }
         .opacity(isDisabled ? 0.60 : 1)
         .disabled(isDisabled)
+        .scaleEffect(isHovering && !isDisabled ? 1.02 : 1)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.16)) {
+                isHovering = hovering
+            }
+        }
     }
 }
 
@@ -641,6 +634,36 @@ private struct PairDeviceButton: View {
         }
         withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
             sweepProgress = true
+        }
+    }
+}
+
+private struct RevokeButton: View {
+    let action: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text("撤销授权")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Color(red: 0.92, green: 0.35, blue: 0.35))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color(red: 0.92, green: 0.35, blue: 0.35).opacity(0.10))
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color(red: 0.92, green: 0.35, blue: 0.35).opacity(0.25), lineWidth: 0.7)
+                }
+        }
+        .buttonStyle(.plain)
+        .scaleEffect(isHovering ? 1.02 : 1)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.16)) {
+                isHovering = hovering
+            }
         }
     }
 }
