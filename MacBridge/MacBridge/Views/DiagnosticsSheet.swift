@@ -11,6 +11,7 @@ struct DiagnosticsSheet: View {
     @ObservedObject var backendStatus: BackendStatusViewModel
 
     @State private var showRawLogs = true
+    @State private var selectedLevelFilter: LogLevelFilter = .all
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -196,6 +197,15 @@ struct DiagnosticsSheet: View {
                 
                 Spacer()
                 
+                Picker("", selection: $selectedLevelFilter) {
+                    ForEach(LogLevelFilter.allCases, id: \.self) { filter in
+                        Text(filter.rawValue).tag(filter)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 180)
+                .padding(.trailing, 4)
+                
                 Button {
                     diagnosticsViewModel.copyRawLogs()
                 } label: {
@@ -235,14 +245,16 @@ struct DiagnosticsSheet: View {
                         .stroke(Color.white.opacity(0.1), lineWidth: 1)
                 }
             } else {
-                let displayed = Array(diagnosticsViewModel.logs.suffix(diagnosticsViewModel.maxDisplayLines))
                 ScrollView(.vertical) {
-                    LazyVStack(alignment: .leading, spacing: 4) {
-                        ForEach(Array(displayed.enumerated()), id: \.offset) { _, line in
-                            formattedLogLine(DiagnosticsViewModel.displayLogLine(line))
+                    LazyVStack(alignment: .leading, spacing: 1) {
+                        ForEach(filteredParsedLogs) { parsedLine in
+                            LogTableRowView(parsed: parsedLine)
+                            Divider()
+                                .background(Color.white.opacity(0.04))
                         }
                     }
-                    .padding(12)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 8)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.black.opacity(0.85))
@@ -328,6 +340,116 @@ struct DiagnosticsSheet: View {
         }
         return (levelStr, levelColor, bodyStr)
     }
+
+    private var filteredParsedLogs: [ParsedLogLine] {
+        let allParsed = diagnosticsViewModel.logs.map { parseLogLine($0) }
+        let displayed = Array(allParsed.suffix(diagnosticsViewModel.maxDisplayLines))
+        
+        switch selectedLevelFilter {
+        case .all:
+            return displayed
+        case .info:
+            return displayed.filter { $0.level == .info }
+        case .warn:
+            return displayed.filter { $0.level == .warn }
+        case .error:
+            return displayed.filter { $0.level == .error }
+        }
+    }
+
+    private func parseLogLine(_ rawLine: String) -> ParsedLogLine {
+        var timeStr = ""
+        var level = ParsedLogLine.LogLevel.unknown
+        var moduleStr = "System"
+        var messageStr = rawLine
+        
+        if rawLine.count >= 19 {
+            if rawLine.hasPrefix("20") {
+                let components = rawLine.components(separatedBy: CharacterSet(charactersIn: " T"))
+                if components.count >= 2 {
+                    let timePart = components[1]
+                    timeStr = String(timePart.prefix(12))
+                } else {
+                    let timestamp = String(rawLine.prefix(23))
+                    if timestamp.count >= 19 {
+                        timeStr = String(timestamp.suffix(12))
+                    }
+                }
+            }
+        }
+        
+        if rawLine.contains("level=INFO") || rawLine.contains(" INFO ") {
+            level = .info
+        } else if rawLine.contains("level=WARN") || rawLine.contains(" WARN ") {
+            level = .warn
+        } else if rawLine.contains("level=ERROR") || rawLine.contains(" ERROR ") {
+            level = .error
+        } else if rawLine.contains("level=DEBG") || rawLine.contains(" DEBG ") || rawLine.contains("level=DEBUG") || rawLine.contains(" DEBUG ") {
+            level = .debug
+        }
+        
+        var cleanLine = rawLine
+        if cleanLine.count >= 23, cleanLine.hasPrefix("20") {
+            cleanLine = String(cleanLine.dropFirst(23)).trimmingCharacters(in: .whitespaces)
+        }
+        
+        let replaceList = ["level=INFO", "level=WARN", "level=ERROR", "level=DEBG", "level=DEBUG", "INFO", "WARN", "ERROR", "DEBG", "DEBUG"]
+        for rep in replaceList {
+            if cleanLine.hasPrefix(rep) {
+                cleanLine = String(cleanLine.dropFirst(rep.count)).trimmingCharacters(in: .whitespaces)
+            }
+        }
+        
+        let modules = [
+            "ms.claudecode": "Claude",
+            "ms.effort": "Effort",
+            "ms.declaude": "Claude",
+            "ms.deopencode": "OpenCode",
+            "ms.opencode": "OpenCode",
+            "ms.grokbuild": "Grok",
+            "ms.codex": "Codex",
+            "ms.bridge": "Bridge",
+            "relay-bridge-client": "Relay",
+            "msg=\"go-bridge": "Bridge"
+        ]
+        
+        for (key, val) in modules {
+            if cleanLine.contains(key) {
+                moduleStr = val
+                if let range = cleanLine.range(of: key) {
+                    var suffix = String(cleanLine[range.upperBound...])
+                    if suffix.hasPrefix(":") {
+                        suffix = String(suffix.dropFirst())
+                    }
+                    messageStr = suffix.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                break
+            }
+        }
+        
+        if moduleStr == "System" {
+            let parts = cleanLine.components(separatedBy: ":")
+            if parts.count >= 2 {
+                let possibleModule = parts[0].trimmingCharacters(in: .whitespaces)
+                if possibleModule.count > 2 && possibleModule.count < 15 && !possibleModule.contains(" ") {
+                    moduleStr = possibleModule.replacingOccurrences(of: "ms.", with: "").capitalized
+                    messageStr = parts[1...].joined(separator: ":").trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+        }
+        
+        if messageStr.hasPrefix("msg=\"") && messageStr.hasSuffix("\"") {
+            messageStr = String(messageStr.dropFirst(5).dropLast())
+        } else if messageStr.hasPrefix("msg=") {
+            messageStr = messageStr.replacingOccurrences(of: "msg=", with: "")
+        }
+        
+        if messageStr.isEmpty {
+            messageStr = rawLine
+        }
+        
+        return ParsedLogLine(rawLine: rawLine, time: timeStr.isEmpty ? "00:00:00.000" : timeStr, level: level, module: moduleStr, message: messageStr)
+    }
 }
 
 private struct HealthSummaryCard: View {
@@ -385,6 +507,139 @@ private struct HealthSummaryCard: View {
             withAnimation(.easeOut(duration: 0.15)) {
                 isHovering = hovering
             }
+        }
+    }
+}
+
+enum LogLevelFilter: String, CaseIterable {
+    case all = "全部"
+    case info = "信息"
+    case warn = "警告"
+    case error = "错误"
+}
+
+struct ParsedLogLine: Identifiable {
+    let id = UUID()
+    let rawLine: String
+    let time: String
+    let level: LogLevel
+    let module: String
+    let message: String
+    
+    enum LogLevel: String {
+        case info = "INFO"
+        case warn = "WARN"
+        case error = "ERROR"
+        case debug = "DEBG"
+        case unknown = ""
+    }
+}
+
+struct LogTableRowView: View {
+    let parsed: ParsedLogLine
+    
+    @State private var isHovering = false
+    @State private var isExpanded = false
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center, spacing: 10) {
+                // 1. 时间列 (固定宽度)
+                Text(parsed.time)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary.opacity(0.8))
+                    .frame(width: 82, alignment: .leading)
+                
+                // 2. 级别列 (小药丸)
+                levelBadge(parsed.level)
+                    .frame(width: 48, alignment: .leading)
+                
+                // 3. 模块列 (淡灰色药丸)
+                Text(parsed.module)
+                    .font(.system(size: 10, weight: .semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.white.opacity(0.06))
+                    .foregroundStyle(.secondary)
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    .frame(width: 60, alignment: .leading)
+                
+                // 4. 内容列 (剩余空间)
+                Text(parsed.message)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.95))
+                    .lineLimit(isExpanded ? nil : 1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                
+                Spacer(minLength: 4)
+                
+                // 右侧的折叠指示器
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.secondary.opacity(0.5))
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+            }
+            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .background {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(isHovering ? Color.white.opacity(0.04) : Color.clear)
+            }
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.12)) {
+                    isHovering = hovering
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    isExpanded.toggle()
+                }
+            }
+            
+            // 展开显示原始行
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 6) {
+                    Divider()
+                        .background(Color.white.opacity(0.1))
+                    
+                    Text(parsed.rawLine)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                }
+                .transition(.opacity)
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private func levelBadge(_ level: ParsedLogLine.LogLevel) -> some View {
+        let (text, textColor, bgColor) = badgeColors(level)
+        Text(text)
+            .font(.system(size: 9, weight: .bold))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(bgColor)
+            .foregroundStyle(textColor)
+            .clipShape(Capsule())
+    }
+    
+    private func badgeColors(_ level: ParsedLogLine.LogLevel) -> (String, Color, Color) {
+        switch level {
+        case .info:
+            return ("INFO", .cyan, .cyan.opacity(0.12))
+        case .warn:
+            return ("WARN", .orange, .orange.opacity(0.12))
+        case .error:
+            return ("ERROR", .red, .red.opacity(0.12))
+        case .debug:
+            return ("DEBG", .gray, .gray.opacity(0.12))
+        case .unknown:
+            return ("LOG", .secondary, .secondary.opacity(0.12))
         }
     }
 }

@@ -160,7 +160,19 @@ export type BridgeRPCMethod =
   // Backfilled (M6): this method is registered in go-bridge handlers.go:699 but was missing from
   // the canonical enum. Now present in all three consumers (iOS/MacBridge/remote-web).
   // Capability string: "workspace_diff".
-  | "get_workspace_diff";
+  | "get_workspace_diff"
+  // R19: Backfilled — these 5 git/directory methods are already registered in the go-bridge
+  // runtime dispatcher (handlers.go:743-751) and listed in the canonical Markdown
+  // (bridge-v1.md:104-108), but were missing from this typed schema (a canonical internal
+  // inconsistency). They are file-scoped per capability_policy.go (no capability *string*;
+  // they have no "foo_bar" capability gate — see R20). Now mirrored across iOS/MacBridge/
+  // remote-web so the typed union matches the runtime + Markdown source of truth.
+  // Ordering matches bridge-v1.md.
+  | "list_directory"
+  | "get_git_context"
+  | "checkout_git_branch"
+  | "create_git_branch"
+  | "create_git_worktree";
 
 export interface BridgeRequest<TParams = Record<string, unknown>> {
   type: "request";
