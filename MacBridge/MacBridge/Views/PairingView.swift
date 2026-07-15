@@ -324,8 +324,6 @@ struct PairingView: View {
         let isNotRunning = lowercasedMessage.contains("could not connect to the server")
             || lowercasedMessage.contains("connection refused")
             || lowercasedMessage.contains("connection was lost")
-        let isTimeout = lowercasedMessage.contains("request timed out")
-
         let icon: String
         let title: String
         let explanation: String
@@ -360,15 +358,6 @@ struct PairingView: View {
                         break
                     }
                 }
-            }
-        } else if isTimeout {
-            icon = "hourglass.badge.xmark"
-            title = L10n.current == .zhHans ? "配对通道已失效" : "Pairing Session Expired"
-            explanation = L10n.current == .zhHans ? "为了保障您的连接安全，配对二维码在 5 分钟内未被扫描会自动过期。请重新生成。" : "For your connection security, the pairing QR code automatically expires if not scanned within 5 minutes."
-            actionButtonTitle = L10n.current == .zhHans ? "重新生成二维码" : "Generate Again"
-            action = {
-                viewModel.reset()
-                viewModel.startPairing()
             }
         } else {
             icon = "exclamationmark.triangle"
