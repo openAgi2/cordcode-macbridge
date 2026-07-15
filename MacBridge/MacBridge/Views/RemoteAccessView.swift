@@ -13,7 +13,7 @@ struct RemoteAccessView: View {
     @State private var showAdvanced = false
     @State private var isEditingRelay = false
     @State private var isEditingCustomURL = false
-    @State private var showTechnicalDetails = false
+    @State private var showTechnicalDetails = true
     @State private var relayMode: RelayMode = .official
     @State private var relaySaveState: RelaySaveState = .idle
     @State private var customAddressSaveState: CustomAddressSaveState = .idle
