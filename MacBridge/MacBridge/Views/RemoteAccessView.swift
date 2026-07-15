@@ -232,6 +232,22 @@ struct RemoteAccessView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
+                
+                Divider()
+                    .padding(.top, 16)
+                    .padding(.bottom, 12)
+                
+                HStack(spacing: 6) {
+                    Image(systemName: "bolt.shield")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                    Text(L10n.current == .zhHans
+                        ? "智能连接策略：优先并行尝试局域网与 Tailscale 直连以实现最低延迟，仅在直连不可达时自动无缝回退至 Relay 加密中继。"
+                        : "Smart Connection: Prioritizes low-latency LAN and Tailscale direct paths, falling back to Relay secure tunnel if unreachable.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.bottom, 4)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
