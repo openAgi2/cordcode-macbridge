@@ -10,6 +10,7 @@ struct PairingView: View {
     @State private var isDetailsExpanded = false
     /// Flow C: which QR to show — the iOS deep-link code or the web https code.
     @State private var qrTarget: PairingQRTarget = .ios
+    var onStartBridge: (() -> Void)? = nil
 
 
     private struct PairingCandidate: Identifiable {
@@ -98,13 +99,7 @@ struct PairingView: View {
                 )
 
             case .error(let message):
-                VStack(alignment: .leading, spacing: 10) {
-                    InlineFeedback(style: .error, message: message)
-                    Button(L10n.retry) {
-                        viewModel.reset()
-                        viewModel.startPairing()
-                    }
-                }
+                errorStateView(message: message)
             }
         }
     }
@@ -324,6 +319,87 @@ struct PairingView: View {
         }
     }
 
+    private func errorStateView(message: String) -> some View {
+        let lowercasedMessage = message.lowercased()
+        let isNotRunning = lowercasedMessage.contains("could not connect to the server") || lowercasedMessage.contains("connection refused")
+        let isTimeout = lowercasedMessage.contains("request timed out")
+
+        let icon: String
+        let title: String
+        let explanation: String
+        let actionButtonTitle: String
+        let action: () -> Void
+
+        if isNotRunning {
+            icon = "play.circle"
+            title = L10n.current == .zhHans ? "工作站服务未运行" : "Link Service Not Running"
+            explanation = L10n.current == .zhHans ? "当前 Link 工作站处于暂停状态。配对新设备前，需要先启动服务。" : "The local Link service is currently stopped. Please start the service before pairing new devices."
+            actionButtonTitle = L10n.current == .zhHans ? "一键启动服务" : "Start Service"
+            action = {
+                onStartBridge?()
+                viewModel.reset()
+                Task {
+                    try? await Task.sleep(for: .milliseconds(1500))
+                    viewModel.startPairing()
+                }
+            }
+        } else if isTimeout {
+            icon = "hourglass.badge.xmark"
+            title = L10n.current == .zhHans ? "配对通道已失效" : "Pairing Session Expired"
+            explanation = L10n.current == .zhHans ? "为了保障您的连接安全，配对二维码在 5 分钟内未被扫描会自动过期。请重新生成。" : "For your connection security, the pairing QR code automatically expires if not scanned within 5 minutes."
+            actionButtonTitle = L10n.current == .zhHans ? "重新生成二维码" : "Generate Again"
+            action = {
+                viewModel.reset()
+                viewModel.startPairing()
+            }
+        } else {
+            icon = "exclamationmark.triangle"
+            title = L10n.current == .zhHans ? "配对发生错误" : "Pairing Error"
+            explanation = message
+            actionButtonTitle = L10n.retry
+            action = {
+                viewModel.reset()
+                viewModel.startPairing()
+            }
+        }
+
+        return VStack(spacing: 0) {
+            Spacer()
+
+            VStack(spacing: 16) {
+                Image(systemName: icon)
+                    .font(.system(size: 52))
+                    .foregroundStyle(.secondary.opacity(0.7))
+                    .frame(width: 80, height: 80)
+
+                Text(title)
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(.primary)
+
+                Text(explanation)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 380)
+                    .lineSpacing(4)
+
+                Button(action: action) {
+                    Text(actionButtonTitle)
+                        .font(.system(size: 15, weight: .semibold))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                .padding(.top, 12)
+            }
+            .frame(maxWidth: .infinity)
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     private func formatCountdown(_ seconds: Int) -> String {
         String(format: "%02d:%02d", seconds / 60, seconds % 60)
     }
@@ -367,6 +443,7 @@ struct PairingView: View {
 /// 使首页在配对期间继续保持为稳定的设备与运行状态总览。
 struct PairingSheet: View {
     @ObservedObject var viewModel: PairingViewModel
+    var onStartBridge: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -378,7 +455,8 @@ struct PairingSheet: View {
                 }
                 PairingView(
                     viewModel: viewModel,
-                    showsHeader: false
+                    showsHeader: false,
+                    onStartBridge: onStartBridge
                 )
             }
         }

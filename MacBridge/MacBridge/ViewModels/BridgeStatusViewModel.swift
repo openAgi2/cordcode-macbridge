@@ -25,6 +25,7 @@ class BridgeStatusViewModel: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
     private var apiClient: OverviewAPIProviding?
+    private var overviewRetryTask: Task<Void, Never>?
 
     var bridgePort: Int? {
         runtimeManager?.config.port
@@ -38,7 +39,7 @@ class BridgeStatusViewModel: ObservableObject {
         self.apiClient = apiClient
     }
 
-    func refreshOverviewData(force: Bool = true) async {
+    func refreshOverviewData(force: Bool = true, isRetry: Bool = false) async {
         guard let apiClient else { return }
         if !force,
            let lastOverviewRefreshAt,
@@ -64,9 +65,14 @@ class BridgeStatusViewModel: ObservableObject {
         switch remote {
         case .success(let value):
             relayConfigured = value.relay?.configured
+            overviewRetryTask?.cancel()
+            overviewRetryTask = nil
         case .failure(let error):
             relayConfigured = nil
             errors.append(String(format: L10n.overviewRelayStatusFailed, error.localizedDescription))
+            if !isRetry {
+                scheduleOverviewRetry()
+            }
         }
 
         if errors.isEmpty {
@@ -75,6 +81,16 @@ class BridgeStatusViewModel: ObservableObject {
             overviewDataError = errors.joined(separator: "\n")
         }
         isLoadingOverviewData = false
+    }
+
+    private func scheduleOverviewRetry() {
+        guard overviewRetryTask == nil else { return }
+        overviewRetryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled, let self else { return }
+            self.overviewRetryTask = nil
+            await self.refreshOverviewData(isRetry: true)
+        }
     }
 
     private func bindToManager() {

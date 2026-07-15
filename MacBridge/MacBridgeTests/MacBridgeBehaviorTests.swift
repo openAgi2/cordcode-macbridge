@@ -35,6 +35,33 @@ final class MacBridgeBehaviorTests: XCTestCase {
     }
 
     @MainActor
+    func testOverviewRetriesTransientRelayStatusFailure() async {
+        let expected = RemoteStatus(
+            localURL: nil,
+            tailscaleURL: nil,
+            remoteURL: nil,
+            remoteURLs: nil,
+            connectionMode: nil,
+            remoteConfigured: nil,
+            includeTailscale: nil,
+            includeRemote: nil,
+            remoteAnalysis: nil,
+            listenStatus: nil,
+            relay: .init(configured: true, endpoint: nil, routeId: nil)
+        )
+        let viewModel = BridgeStatusViewModel()
+        viewModel.configure(apiClient: RetryingOverviewClient(remoteResults: [.failure(TestError.failed), .success(expected)]))
+
+        await viewModel.refreshOverviewData()
+        XCTAssertNil(viewModel.relayConfigured)
+
+        try? await Task.sleep(for: .seconds(3.2))
+
+        XCTAssertEqual(viewModel.relayConfigured, true)
+        XCTAssertNil(viewModel.overviewDataError)
+    }
+
+    @MainActor
     func testOverviewPortComesFromRuntimeConfig() {
         let manager = RuntimeManager(config: RuntimeConfig(
             executablePath: "/usr/bin/false",
@@ -421,5 +448,22 @@ private struct OverviewClientStub: OverviewAPIProviding {
 
     func getRemoteStatus() async throws -> RemoteStatus {
         try remote.get()
+    }
+}
+
+@MainActor
+private final class RetryingOverviewClient: OverviewAPIProviding {
+    private var remoteResults: [Result<RemoteStatus, Error>]
+
+    init(remoteResults: [Result<RemoteStatus, Error>]) {
+        self.remoteResults = remoteResults
+    }
+
+    func getStatus() async throws -> ManagementStatus {
+        ManagementStatus(status: "ready", bridgeId: nil, displayName: nil, iosPort: nil, uptime: nil, version: nil)
+    }
+
+    func getRemoteStatus() async throws -> RemoteStatus {
+        try remoteResults.removeFirst().get()
     }
 }

@@ -126,7 +126,9 @@ struct ContentView: View {
             )
         }
         .sheet(isPresented: $showPairing, onDismiss: pairingViewModel.reset) {
-            PairingSheet(viewModel: pairingViewModel)
+            PairingSheet(viewModel: pairingViewModel) {
+                dependencies.runtimeManager.start()
+            }
         }
     }
 
