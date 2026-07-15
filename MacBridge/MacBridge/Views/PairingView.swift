@@ -321,7 +321,9 @@ struct PairingView: View {
 
     private func errorStateView(message: String) -> some View {
         let lowercasedMessage = message.lowercased()
-        let isNotRunning = lowercasedMessage.contains("could not connect to the server") || lowercasedMessage.contains("connection refused")
+        let isNotRunning = lowercasedMessage.contains("could not connect to the server")
+            || lowercasedMessage.contains("connection refused")
+            || lowercasedMessage.contains("connection was lost")
         let isTimeout = lowercasedMessage.contains("request timed out")
 
         let icon: String
@@ -338,9 +340,25 @@ struct PairingView: View {
             action = {
                 onStartBridge?()
                 viewModel.reset()
+                viewModel.uiState = .creating
                 Task {
                     try? await Task.sleep(for: .milliseconds(1500))
                     viewModel.startPairing()
+                    
+                    for _ in 0..<3 {
+                        try? await Task.sleep(for: .milliseconds(1000))
+                        if case .error(let msg) = viewModel.uiState {
+                            let lower = msg.lowercased()
+                            if lower.contains("connect to the server")
+                                || lower.contains("connection refused")
+                                || lower.contains("connection was lost") {
+                                viewModel.uiState = .creating
+                                viewModel.startPairing()
+                                continue
+                            }
+                        }
+                        break
+                    }
                 }
             }
         } else if isTimeout {
