@@ -15,39 +15,56 @@ struct DiagnosticsSheet: View {
 
     var body: some View {
         PageContainer(scrolls: false) {
-            VStack(alignment: .leading, spacing: 16) {
-                PageHeader(L10n.helpDiagnostics, subtitle: L10n.diagnosticsSubtitle) {
-                    Button {
-                        Task { await diagnosticsViewModel.loadLogs() }
-                    } label: {
-                        HStack(spacing: 4) {
-                            if diagnosticsViewModel.isLoadingLogs {
-                                ProgressView().controlSize(.small)
+            VStack(alignment: .leading, spacing: 20) {
+                // Header 区域
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(L10n.helpDiagnostics)
+                            .font(.system(size: 22, weight: .bold))
+                        Text(L10n.diagnosticsSubtitle)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    
+                    HStack(spacing: 12) {
+                        Button {
+                            Task { await diagnosticsViewModel.loadLogs() }
+                        } label: {
+                            HStack(spacing: 6) {
+                                if diagnosticsViewModel.isLoadingLogs {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Image(systemName: "arrow.clockwise")
+                                }
+                                Text(L10n.refreshAll)
                             }
-                            Image(systemName: "arrow.clockwise")
-                            Text(L10n.refreshAll)
                         }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(diagnosticsViewModel.isLoadingLogs)
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
+                        .disabled(diagnosticsViewModel.isLoadingLogs)
 
-                    Button {
-                        diagnosticsViewModel.copySupportInfo(bridgeStatus: bridgeStatus, backendStatus: backendStatus)
-                    } label: {
-                        Label(
-                            diagnosticsViewModel.supportInfoCopied ? L10n.diagnosticsSupportInfoCopied : L10n.diagnosticsCopySupportInfo,
-                            systemImage: diagnosticsViewModel.supportInfoCopied ? "checkmark" : "doc.on.clipboard"
-                        )
+                        Button {
+                            diagnosticsViewModel.copySupportInfo(bridgeStatus: bridgeStatus, backendStatus: backendStatus)
+                        } label: {
+                            Label(
+                                diagnosticsViewModel.supportInfoCopied ? L10n.diagnosticsSupportInfoCopied : L10n.diagnosticsCopySupportInfo,
+                                systemImage: diagnosticsViewModel.supportInfoCopied ? "checkmark" : "doc.on.clipboard"
+                            )
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
                 }
+                .padding(.bottom, 4)
 
+                // 健康摘要三卡片并排
                 healthSummarySection
 
                 Divider()
+                    .padding(.vertical, 4)
 
+                // 原始日志及终端输出
                 if showRawLogs {
                     rawLogsSection
                 } else {
@@ -59,15 +76,17 @@ struct DiagnosticsSheet: View {
                         Label(L10n.diagnosticsViewRawLogs, systemImage: "doc.text")
                     }
                     .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    .controlSize(.regular)
                 }
 
                 Spacer(minLength: 0)
 
+                // 底部完成按钮
                 HStack {
                     Spacer()
                     Button(L10n.done) { dismiss() }
                         .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
                 }
             }
         }
@@ -80,38 +99,32 @@ struct DiagnosticsSheet: View {
     // MARK: - 健康摘要（结论优先）
 
     private var healthSummarySection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(L10n.diagnosticsHealthSummary)
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L10n.diagnosticsHealthSummary)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(.secondary)
+                .padding(.leading, 4)
 
-            healthRow(
-                title: L10n.diagnosticsHealthBridge,
-                status: bridgeSummaryText,
-                color: bridgeColor
-            )
-            healthRow(
-                title: L10n.diagnosticsHealthConnection,
-                status: connectionSummaryText,
-                color: connectionColor
-            )
-            healthRow(
-                title: L10n.diagnosticsHealthAiTools,
-                status: aiToolsSummaryText,
-                color: aiToolsColor
-            )
-        }
-    }
-
-    private func healthRow(title: String, status: String, color: Color) -> some View {
-        HStack(spacing: 10) {
-            StatusIndicator(
-                systemImage: color == .green ? "checkmark.circle.fill" : "exclamationmark.triangle.fill",
-                color: color
-            )
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.subheadline.weight(.medium))
-                Text(status).font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                HealthSummaryCard(
+                    title: L10n.diagnosticsHealthBridge,
+                    status: bridgeSummaryText,
+                    icon: "waveform.path.ecg",
+                    color: bridgeColor
+                )
+                HealthSummaryCard(
+                    title: L10n.diagnosticsHealthConnection,
+                    status: connectionSummaryText,
+                    icon: "wifi",
+                    color: connectionColor
+                )
+                HealthSummaryCard(
+                    title: L10n.diagnosticsHealthAiTools,
+                    status: aiToolsSummaryText,
+                    icon: "sparkles",
+                    color: aiToolsColor
+                )
             }
-            Spacer()
         }
     }
 
@@ -166,55 +179,211 @@ struct DiagnosticsSheet: View {
     // MARK: - 原始日志（第二段）
 
     private var rawLogsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                SectionHeader(L10n.rawLogs)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 8) {
+                Text(L10n.rawLogs)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 4)
+                
+                Text(diagnosticsViewModel.maxDisplayLines == 30 ? "最近 30 行" : "最近 200 行")
+                    .font(.system(size: 10, weight: .medium))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.white.opacity(0.08))
+                    .foregroundStyle(.secondary)
+                    .clipShape(Capsule())
+                
                 Spacer()
-                Button(L10n.copyRawLogs) {
+                
+                Button {
                     diagnosticsViewModel.copyRawLogs()
+                } label: {
+                    Label(L10n.copyRawLogs, systemImage: "doc.on.clipboard")
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.small)
+                .controlSize(.regular)
                 .disabled(diagnosticsViewModel.logs.isEmpty)
-            }
-            HStack {
-                Text("原始日志")
-                    .font(.headline)
-                Text(diagnosticsViewModel.maxDisplayLines == 30 ? "（最近 30 行）" : "（最近 200 行）")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Spacer()
             }
 
             if diagnosticsViewModel.isLoadingLogs && diagnosticsViewModel.logs.isEmpty {
-                ProgressView(L10n.diagnosticsReading)
+                VStack {
+                    Spacer()
+                    ProgressView(L10n.diagnosticsReading)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, minHeight: 220)
+                .background(Color.black.opacity(0.85))
+                .cornerRadius(10)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                }
             } else if let error = diagnosticsViewModel.logsError {
                 InlineFeedback(style: .error, message: error)
             } else if diagnosticsViewModel.logs.isEmpty {
-                Text(L10n.noLogsAvailable).foregroundColor(.secondary)
+                VStack {
+                    Spacer()
+                    Text(L10n.noLogsAvailable).foregroundColor(.secondary)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, minHeight: 220)
+                .background(Color.black.opacity(0.85))
+                .cornerRadius(10)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                }
             } else {
                 let displayed = Array(diagnosticsViewModel.logs.suffix(diagnosticsViewModel.maxDisplayLines))
                 ScrollView(.vertical) {
-                    LazyVStack(alignment: .leading, spacing: 2) {
+                    LazyVStack(alignment: .leading, spacing: 4) {
                         ForEach(Array(displayed.enumerated()), id: \.offset) { _, line in
-                            Text(DiagnosticsViewModel.displayLogLine(line))
-                                .font(.system(size: 11, design: .monospaced))
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                            formattedLogLine(DiagnosticsViewModel.displayLogLine(line))
                         }
                     }
-                    .padding(10)
+                    .padding(12)
                 }
-                .frame(maxHeight: .infinity)
-                .glassPanel()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black.opacity(0.85))
+                .cornerRadius(10)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                }
 
-                Button(diagnosticsViewModel.maxDisplayLines == 30 ? "查看完整 200 行" : "显示最近 30 行") {
-                    diagnosticsViewModel.toggleFullLogs()
+                HStack {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            diagnosticsViewModel.toggleFullLogs()
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "eye.fill")
+                                .font(.system(size: 11))
+                            Text(diagnosticsViewModel.maxDisplayLines == 30 ? "查看完整 200 行" : "显示最近 30 行")
+                                .font(.system(size: 12))
+                        }
+                        .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                    
+                    Spacer()
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
                 .padding(.top, 4)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func formattedLogLine(_ line: String) -> some View {
+        if line.count >= 23, line.hasPrefix("20") {
+            let timestamp = String(line.prefix(23))
+            let remaining = line.dropFirst(23)
+            let parsed = parseLogLevel(remaining)
+            
+            HStack(spacing: 6) {
+                Text(timestamp)
+                    .foregroundStyle(.secondary.opacity(0.7))
+                if !parsed.level.isEmpty {
+                    Text(parsed.level)
+                        .foregroundStyle(parsed.color)
+                        .fontWeight(.bold)
+                }
+                Text(parsed.body)
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+            .font(.system(size: 11, design: .monospaced))
+            .lineLimit(1)
+            .truncationMode(.middle)
+        } else {
+            Text(line)
+                .foregroundStyle(.white.opacity(0.9))
+                .font(.system(size: 11, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+    }
+
+    private func parseLogLevel(_ remaining: String.SubSequence) -> (level: String, color: Color, body: String) {
+        var levelColor = Color.blue
+        var levelStr = ""
+        var bodyStr = String(remaining)
+        
+        let levels = ["INFO", "ERROR", "WARN", "DEBG", "DEBUG"]
+        for lvl in levels {
+            if remaining.contains(lvl) {
+                levelStr = lvl
+                if lvl == "ERROR" { levelColor = .red }
+                else if lvl == "WARN" { levelColor = .orange }
+                else if lvl == "INFO" { levelColor = .cyan }
+                else { levelColor = .gray }
+                
+                if let range = remaining.range(of: lvl) {
+                    bodyStr = String(remaining[range.upperBound...])
+                }
+                break
+            }
+        }
+        return (levelStr, levelColor, bodyStr)
+    }
+}
+
+private struct HealthSummaryCard: View {
+    let title: String
+    let status: String
+    let icon: String
+    let color: Color
+    
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                color.opacity(0.15)
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(color)
+            }
+            .frame(width: 32, height: 32)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary)
+                HStack(spacing: 4) {
+                    Text("●")
+                        .font(.system(size: 8))
+                        .foregroundStyle(color)
+                    Text(status)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.secondary.opacity(0.5))
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 14)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(isHovering ? Color.white.opacity(0.06) : Color.white.opacity(0.04))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(isHovering ? Color.white.opacity(0.12) : Color.white.opacity(0.08), lineWidth: 1)
+        }
+        .scaleEffect(isHovering ? 1.01 : 1)
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.15)) {
+                isHovering = hovering
             }
         }
     }
