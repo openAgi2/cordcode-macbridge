@@ -115,6 +115,7 @@ struct RemoteAccessView: View {
                 selectedMethod == method ? Color.accentColor.opacity(0.12) : Color.clear
             )
             .cornerRadius(4)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -182,6 +183,7 @@ struct RemoteAccessView: View {
                             .padding(.vertical, 6).padding(.horizontal, 8)
                             .background(selectedMethod == .lan ? Color.accentColor.opacity(0.12) : Color.clear)
                             .cornerRadius(4)
+                            .contentShape(Rectangle())
                         }.buttonStyle(.plain)
 
                         Button { selectedMethod = .relay } label: {
@@ -194,6 +196,7 @@ struct RemoteAccessView: View {
                             .padding(.vertical, 6).padding(.horizontal, 8)
                             .background(selectedMethod == .relay ? Color.accentColor.opacity(0.12) : Color.clear)
                             .cornerRadius(4)
+                            .contentShape(Rectangle())
                         }.buttonStyle(.plain)
 
                         Button { selectedMethod = .tailscale } label: {
@@ -206,6 +209,7 @@ struct RemoteAccessView: View {
                             .padding(.vertical, 6).padding(.horizontal, 8)
                             .background(selectedMethod == .tailscale ? Color.accentColor.opacity(0.12) : Color.clear)
                             .cornerRadius(4)
+                            .contentShape(Rectangle())
                         }.buttonStyle(.plain)
 
                         Button { selectedMethod = .other } label: {
@@ -218,6 +222,7 @@ struct RemoteAccessView: View {
                             .padding(.vertical, 6).padding(.horizontal, 8)
                             .background(selectedMethod == .other ? Color.accentColor.opacity(0.12) : Color.clear)
                             .cornerRadius(4)
+                            .contentShape(Rectangle())
                         }.buttonStyle(.plain)
                     }
                     .frame(width: 160)
