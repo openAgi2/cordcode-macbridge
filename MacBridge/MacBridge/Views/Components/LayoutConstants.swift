@@ -23,13 +23,13 @@ enum LayoutConstants {
 
     /// 连接状态 Sheet 与 帮助诊断 Sheet 的统一呈现大小
     static let unifiedSheetWidth: CGFloat = 760
-    static let unifiedSheetHeight: CGFloat = 580
+    static let unifiedSheetHeight: CGFloat = 640
 
     /// 连接状态 Sheet 的建议最大宽度。
     static let connectionSheetWidth: CGFloat = 760
 
     /// 连接状态 Sheet 的固定呈现高度。避免 GeometryReader 被 macOS 以标题的最小高度展示。
-    static let connectionSheetHeight: CGFloat = 580
+    static let connectionSheetHeight: CGFloat = 640
 
     /// 配对 Sheet 的固定尺寸，容纳二维码与流程说明的并列布局。
     static let pairingSheetWidth: CGFloat = 720

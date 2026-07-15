@@ -162,22 +162,30 @@ struct RemoteAccessView: View {
                     }
                     Spacer()
                     
-                    Button {
-                        Task { await loadRemoteStatus() }
-                    } label: {
-                        HStack(spacing: 6) {
-                            if isLoadingStatus {
-                                ProgressView()
-                                    .controlSize(.small)
-                            } else {
-                                Image(systemName: "arrow.clockwise")
+                    HStack(spacing: 12) {
+                        Button {
+                            Task { await loadRemoteStatus() }
+                        } label: {
+                            HStack(spacing: 6) {
+                                if isLoadingStatus {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else {
+                                    Image(systemName: "arrow.clockwise")
+                                }
+                                Text(L10n.current == .zhHans ? "刷新状态" : "Refresh Status")
                             }
-                            Text(L10n.current == .zhHans ? "刷新状态" : "Refresh Status")
                         }
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
+                        .disabled(isLoadingStatus)
+
+                        Button(L10n.done) {
+                            dismiss()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.regular)
-                    .disabled(isLoadingStatus)
                 }
                 .padding(.bottom, 24)
 
@@ -575,6 +583,7 @@ struct RemoteAccessView: View {
                     SettingsCardContainer {
                         VStack(alignment: .leading, spacing: 8) {
                             technicalInfoRow(label: "协议版本", value: "WSS (Websocket Secure)")
+                            technicalInfoRow(label: "加密协议", value: "端到端 HPKE (X25519 / AES-128-GCM)")
                             technicalInfoRow(label: "连接状态", value: relayConfigured == true ? "已接入中继网" : "未就绪")
                             if let endpoint = remoteStatus?.relay?.endpoint {
                                 technicalInfoRow(label: "服务器地址", value: endpoint)
