@@ -11,6 +11,9 @@ struct RemoteAccessView: View {
     @State private var showDisableConfirmation = false
     
     @State private var showAdvanced = false
+    @State private var isEditingRelay = false
+    @State private var isEditingCustomURL = false
+    @State private var showTechnicalDetails = false
     @State private var relayMode: RelayMode = .official
     @State private var relaySaveState: RelaySaveState = .idle
     @State private var customAddressSaveState: CustomAddressSaveState = .idle
@@ -146,93 +149,70 @@ struct RemoteAccessView: View {
     }
 
     var body: some View {
-        // P1-2：单页「连接状态」。Relay/LAN 默认可见，Tailscale 与自定义地址收入同页高级展开区。
-        // 不再使用左/右二级导航（GeometryReader wide/narrow 分支）；既有保存状态枚举与配置语义不变。
         PageContainer(scrolls: false, maxContentWidth: LayoutConstants.connectionSheetWidth) {
             VStack(alignment: .leading, spacing: 0) {
-                PageHeader(L10n.connectionStatus, subtitle: L10n.remoteSubtitle) {
+                // 统一顶部 Header 区域
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(L10n.connectionStatus)
+                            .font(.system(size: 22, weight: .bold))
+                        Text(L10n.current == .zhHans ? "配置 iPhone 不在同一网络时的连接方式" : "Configure Connection Methods")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    
                     Button {
                         Task { await loadRemoteStatus() }
                     } label: {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 6) {
                             if isLoadingStatus {
                                 ProgressView()
                                     .controlSize(.small)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
                             }
-                            Image(systemName: "arrow.clockwise")
-                            Text(L10n.refreshAll)
+                            Text(L10n.current == .zhHans ? "刷新状态" : "Refresh Status")
                         }
                     }
                     .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    .controlSize(.regular)
                     .disabled(isLoadingStatus)
                 }
-                .padding(.bottom, 20)
+                .padding(.bottom, 24)
 
-                // 恢复左右分栏风格（接近老版），但在 sheet 内
+                // 左右分栏列表与详情
                 HStack(alignment: .top, spacing: 0) {
-                    // 左侧列表 (接近老版)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Button { selectedMethod = .lan } label: {
-                            HStack {
-                                Text("局域网")
-                                Spacer()
-                                Text(localURL.isEmpty ? "未配置" : "可用")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            .padding(.vertical, 6).padding(.horizontal, 8)
-                            .background(selectedMethod == .lan ? Color.accentColor.opacity(0.12) : Color.clear)
-                            .cornerRadius(4)
-                            .contentShape(Rectangle())
-                        }.buttonStyle(.plain)
+                    // 左侧导航列表
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("连接方式")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 8)
+                            .padding(.bottom, 4)
 
-                        Button { selectedMethod = .relay } label: {
-                            HStack {
-                                Text("Relay")
-                                Spacer()
-                                Text(relayConfigured == true ? "已配置" : "未配置")
-                                    .font(.caption).foregroundStyle(.secondary)
+                        ForEach(ConnectionMethod.allCases, id: \.self) { method in
+                            ConnectionSidebarButton(
+                                method: method,
+                                isSelected: selectedMethod == method,
+                                localURL: localURL,
+                                relayConfigured: relayConfigured,
+                                tailscaleURL: tailscaleURL,
+                                relayEnabled: relayEnabled,
+                                savedRemoteURL: savedRemoteURL
+                            ) {
+                                selectedMethod = method
                             }
-                            .padding(.vertical, 6).padding(.horizontal, 8)
-                            .background(selectedMethod == .relay ? Color.accentColor.opacity(0.12) : Color.clear)
-                            .cornerRadius(4)
-                            .contentShape(Rectangle())
-                        }.buttonStyle(.plain)
-
-                        Button { selectedMethod = .tailscale } label: {
-                            HStack {
-                                Text("Tailscale")
-                                Spacer()
-                                Text(tailscaleURL.isEmpty ? "未配置" : "可用")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            .padding(.vertical, 6).padding(.horizontal, 8)
-                            .background(selectedMethod == .tailscale ? Color.accentColor.opacity(0.12) : Color.clear)
-                            .cornerRadius(4)
-                            .contentShape(Rectangle())
-                        }.buttonStyle(.plain)
-
-                        Button { selectedMethod = .other } label: {
-                            HStack {
-                                Text("其他 (VPS/自定义)")
-                                Spacer()
-                                Text("按需")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            .padding(.vertical, 6).padding(.horizontal, 8)
-                            .background(selectedMethod == .other ? Color.accentColor.opacity(0.12) : Color.clear)
-                            .cornerRadius(4)
-                            .contentShape(Rectangle())
-                        }.buttonStyle(.plain)
+                        }
                     }
-                    .frame(width: 160)
-                    .padding(.trailing, 12)
+                    .frame(width: 220)
+                    .padding(.trailing, 16)
 
                     Divider()
 
-                    // 右侧详情
+                    // 右侧详情卡片区
                     ScrollView {
-                        Group {
+                        VStack(alignment: .leading, spacing: 20) {
                             switch selectedMethod {
                             case .lan: lanDetailView
                             case .relay: relayDetailView
@@ -240,27 +220,13 @@ struct RemoteAccessView: View {
                             case .other: customAddressDetailView
                             }
                         }
+                        .padding(.horizontal, 16)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .padding(.leading, 16)
                 }
-                .padding(.trailing, 8)
-                
-                Spacer(minLength: 16)
-                
-                HStack {
-                    Spacer()
-                    Button(L10n.done) {
-                        dismiss()
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-                .padding(.trailing, 8)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        // `GeometryReader` 没有固有尺寸；不给 sheet 明确尺寸时，macOS 会按仅有的
-        // 标题高度创建窗口并裁掉主体和完成按钮，用户只能按 Escape 关闭。
         .frame(width: LayoutConstants.connectionSheetWidth, height: LayoutConstants.connectionSheetHeight)
         .task(id: apiClient?.baseURL.absoluteString) {
             customRelayEndpoint = savedCustomRelayEndpoint
@@ -282,438 +248,601 @@ struct RemoteAccessView: View {
         }
     }
 
-    private var advancedConnectionsSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Button {
-                if reduceMotion {
-                    showAdvanced.toggle()
-                } else {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        showAdvanced.toggle()
-                    }
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .bold))
-                        .rotationEffect(.degrees(showAdvanced ? 90 : 0))
-                    Text(showAdvanced ? L10n.connectionStatusHideAdvanced : L10n.connectionStatusShowAdvanced)
-                        .font(.body.weight(.medium))
-                    Spacer()
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .foregroundColor(.accentColor)
-
-            if showAdvanced {
-                VStack(alignment: .leading, spacing: 20) {
-                    tailscaleDetailView
-                    Divider()
-                    customAddressDetailView
-                }
-                // Reduce Motion 时只做透明度替换，不产生位移。
-                .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
-            }
-        }
-    }
-    
-        private var lanDetailView: some View {
+    private var lanDetailView: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text(L10n.remoteLAN)
-                .font(.title2)
-                .bold()
-            
-            Text(L10n.current == .zhHans
-                ? "当 iPhone 与 Mac 处于同一 Wi-Fi 或局域网下时，使用此方式进行高速直连。数据不离开局域网。"
-                : "When iPhone and Mac are on the same Wi-Fi or local network, this method provides high-speed direct connection. Data does not leave the local network.")
-                .foregroundColor(.secondary)
-            
-            VStack(alignment: .leading, spacing: 8) {
-                Text(L10n.securityLevel)
-                    .font(.headline)
-                Text("• " + L10n.secLan)
-                    .foregroundColor(.secondary)
-                Text(L10n.remoteLANHint)
-                    .font(.caption)
-                    .foregroundColor(.orange)
-            }
-            
-            Divider()
-            
-            VStack(alignment: .leading, spacing: 12) {
-                Text(L10n.diagnosisInfo)
-                    .font(.headline)
-                
-                HStack {
-                    Text(L10n.current == .zhHans ? "本地监听状态：" : "Local Listening:")
-                    if localURL.isEmpty {
-                        Text("🔴 " + (L10n.current == .zhHans ? "未在监听" : "Not Listening"))
-                    } else {
-                        Text("🟢 " + (L10n.current == .zhHans ? "正常监听中" : "Listening"))
+            SettingsCardContainer {
+                HStack(spacing: 16) {
+                    ZStack {
+                        Color.green.opacity(0.15)
+                        Image(systemName: "wifi")
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundStyle(Color.green)
+                    }
+                    .frame(width: 48, height: 48)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(localURL.isEmpty ? "未就绪" : "正常监听中")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.primary)
+                        Text(L10n.current == .zhHans
+                            ? "当 iPhone 与 Mac 处于同一 Wi-Fi 或局域网下时，使用此方式进行高速直连。数据不离开局域网。"
+                            : "When iPhone and Mac are on the same Wi-Fi or local network, this method provides high-speed direct connection. Data does not leave the local network.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .lineSpacing(2)
+                    }
+
+                    Spacer()
+                    
+                    if !localURL.isEmpty {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(Color.green)
+                                .frame(width: 8, height: 8)
+                            Text("正常监听")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(.green)
+                        }
                     }
                 }
-                
-                if !localURL.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(L10n.localURLLabel)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        
-                        HStack {
-                            Text(localURL)
-                                .font(.system(.body, design: .monospaced))
-                                .textSelection(.enabled)
-                                .padding(8)
-                                .background(Color(NSColor.controlBackgroundColor))
-                                .cornerRadius(6)
-                            
-                            Button(action: {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(localURL, forType: .string)
-                            }) {
-                                Label(L10n.current == .zhHans ? "复制" : "Copy", systemImage: "doc.on.doc")
+            }
+
+            if !localURL.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(L10n.diagnosisInfo)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 4)
+
+                    SettingsCardContainer {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("局域网连接地址")
+                                        .font(.system(size: 14, weight: .semibold))
+                                    Text(localURL)
+                                        .font(.system(size: 12, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                
+                                Button(L10n.current == .zhHans ? "复制" : "Copy") {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(localURL, forType: .string)
+                                }
+                                .buttonStyle(.bordered)
                             }
                         }
                     }
                 }
             }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L10n.securityLevel)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 4)
+
+                SettingsCardContainer {
+                    HStack {
+                        ZStack {
+                            Color.green.opacity(0.15)
+                            Image(systemName: "lock.shield.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.green)
+                        }
+                        .frame(width: 24, height: 24)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("局域网内传输")
+                                .font(.system(size: 14, weight: .semibold))
+                            Text(L10n.remoteLANHint)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        Text("已保护")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.green)
+                    }
+                }
+            }
         }
     }
-    
+
     private var relayDetailView: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text(L10n.remoteRelay)
-                .font(.title2)
-                .bold()
-            
-            Text(L10n.current == .zhHans
-                ? "跨公网远程连接时的安全通道。数据包经由端到端加密传输，中继服务无法读取您的代码和消息内容。"
-                : "A secure channel for remote connections across public networks. Data packets are end-to-end encrypted; the relay service cannot read your code or messages.")
-                .foregroundColor(.secondary)
-            
-            VStack(alignment: .leading, spacing: 8) {
-                Toggle(L10n.remoteRelayEnabled, isOn: Binding(
-                    get: { relayEnabled },
-                    set: { newValue in
-                        toggleRelayEnabled(to: newValue)
+            SettingsCardContainer {
+                HStack(spacing: 16) {
+                    ZStack {
+                        Color.blue.opacity(0.15)
+                        Image(systemName: "point.3.connected.trianglepath.dotted")
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundStyle(Color.accentColor)
                     }
-                ))
-                .disabled(isSavingRelay)
-                
-                Text(L10n.remoteRelaySwitchHint)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            .padding(.vertical, 8)
-            
-            switch relaySaveState {
-            case .enabling:
-                feedbackRow(text: L10n.remoteRelayEnabling, isProgress: true)
-            case .disabling:
-                feedbackRow(text: L10n.remoteRelayDisabling, isProgress: true)
-            default:
-                EmptyView()
-            }
-            
-            VStack(alignment: .leading, spacing: 8) {
-                Text(L10n.securityLevel)
-                    .font(.headline)
-                if !relayEnabled {
-                    Text("• " + L10n.remoteRelayDisabled)
-                        .foregroundColor(.secondary)
-                } else {
-                    Text("• " + L10n.secEncrypted)
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            Divider()
-            
-            VStack(alignment: .leading, spacing: 12) {
-                Text(L10n.current == .zhHans ? "配置状态" : "Configuration Status")
-                    .font(.headline)
-                
-                HStack {
-                    Text(L10n.status + "：")
-                    if !relayEnabled {
-                        Text("⚪️ " + L10n.remoteRelayDisabled)
-                    } else if relayConfigured == true {
-                        Text("🟢 " + L10n.configured)
-                    } else {
-                        Text("⚪️ " + L10n.notConfigured)
-                    }
-                }
-                
-                if relayEnabled && relayConfigured == true, let endpoint = remoteStatus?.relay?.endpoint {
-                    // r5: 官方默认隐藏 endpoint，自定义时必须显示真实值 + 恢复默认
-                    if relayMode == .custom {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(L10n.current == .zhHans ? "中继地址：" : "Relay Endpoint:")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            Text(endpoint)
-                                .font(.system(.body, design: .monospaced))
-                                .textSelection(.enabled)
+                    .frame(width: 48, height: 48)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(relayEnabled && relayConfigured == true ? "已启用" : (relayEnabled ? "配置中" : "未启用"))
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.primary)
+                        Text(L10n.current == .zhHans
+                            ? "可在不同网络下安全连接此 Mac"
+                            : "Allows safe connection under different network environments.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 4) {
+                            Image(systemName: "lock.shield")
+                                .font(.system(size: 11))
+                            Text("端到端加密")
+                                .font(.system(size: 11))
                         }
+                        .foregroundStyle(.secondary.opacity(0.8))
                     }
+
+                    Spacer()
+
+                    Toggle("", isOn: Binding(
+                        get: { relayEnabled },
+                        set: { newValue in
+                            toggleRelayEnabled(to: newValue)
+                        }
+                    ))
+                    .toggleStyle(.switch)
+                    .disabled(isSavingRelay)
                 }
             }
-            
-            if relayEnabled {
-                Divider()
-                
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(L10n.current == .zhHans ? "设置自定义中继" : "Custom Relay Settings")
-                        .font(.headline)
-                    
-                    Picker("", selection: $relayMode) {
-                        Text(L10n.current == .zhHans ? "官方默认" : "Official Default").tag(RelayMode.official)
-                        Text(L10n.current == .zhHans ? "自定义中继" : "Custom Relay").tag(RelayMode.custom)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    
-                    if relayMode == .custom {
-                        VStack(alignment: .leading, spacing: 6) {
-                            TextField(OfficialRelayConfiguration.bundledEndpoint, text: $customRelayEndpoint)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(.body, design: .monospaced))
+
+            if isSavingRelay {
+                switch relaySaveState {
+                case .enabling:
+                    feedbackRow(text: L10n.remoteRelayEnabling, isProgress: true)
+                case .disabling:
+                    feedbackRow(text: L10n.remoteRelayDisabling, isProgress: true)
+                default:
+                    EmptyView()
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("中继服务器")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 4)
+
+                SettingsCardContainer {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(relayMode == .official ? "官方中继" : "自定义中继")
+                                    .font(.system(size: 14, weight: .semibold))
+                                Text(relayMode == .official ? "自动选择可用节点" : normalizedCustomRelayEndpoint)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
                             
-                            if !normalizedCustomRelayEndpoint.isEmpty && !isValidRelayURL(normalizedCustomRelayEndpoint) {
-                                InlineFeedback(style: .warning, message: L10n.remoteRelayValidation)
+                            if !isEditingRelay {
+                                Button("更改...") {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        isEditingRelay = true
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.regular)
                             }
                         }
-                    } else {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(L10n.current == .zhHans ? "官方中继地址：" : "Official Relay Endpoint:")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                            Text(OfficialRelayConfiguration.bundledEndpoint)
-                                .font(.system(.body, design: .monospaced))
-                                .foregroundColor(.secondary)
+
+                        if isEditingRelay {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Divider()
+                                    .padding(.vertical, 4)
+
+                                Picker("", selection: $relayMode) {
+                                    Text(L10n.current == .zhHans ? "官方默认" : "Official Default").tag(RelayMode.official)
+                                    Text(L10n.current == .zhHans ? "自定义中继" : "Custom Relay").tag(RelayMode.custom)
+                                }
+                                .pickerStyle(.segmented)
+                                .labelsHidden()
+
+                                if relayMode == .custom {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        TextField(OfficialRelayConfiguration.bundledEndpoint, text: $customRelayEndpoint)
+                                            .textFieldStyle(.roundedBorder)
+                                            .font(.system(.body, design: .monospaced))
+                                        
+                                        if !normalizedCustomRelayEndpoint.isEmpty && !isValidRelayURL(normalizedCustomRelayEndpoint) {
+                                            InlineFeedback(style: .warning, message: L10n.remoteRelayValidation)
+                                        }
+                                    }
+                                } else {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(L10n.current == .zhHans ? "官方中继地址：" : "Official Relay Endpoint:")
+                                            .font(.subheadline)
+                                            .foregroundColor(.secondary)
+                                        Text(OfficialRelayConfiguration.bundledEndpoint)
+                                            .font(.system(.body, design: .monospaced))
+                                            .foregroundColor(.secondary)
+                                    }
+                                    .padding(.vertical, 4)
+                                }
+
+                                HStack(spacing: 8) {
+                                    Button(L10n.save) {
+                                        saveRelayConfiguration()
+                                        withAnimation(.easeInOut(duration: 0.2)) {
+                                            isEditingRelay = false
+                                        }
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .disabled(!canSaveRelay)
+
+                                    Button(L10n.cancel) {
+                                        customRelayEndpoint = savedCustomRelayEndpoint
+                                        relayMode = savedCustomRelayEndpoint.isEmpty ? .official : .custom
+                                        withAnimation(.easeInOut(duration: 0.2)) {
+                                            isEditingRelay = false
+                                        }
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+                            .transition(.opacity)
                         }
-                        .padding(.vertical, 4)
                     }
-                    
+                }
+            }
+
+            switch relaySaveState {
+            case .idle, .enabling, .disabling:
+                EmptyView()
+            case .validatingFormat:
+                feedbackRow(text: L10n.current == .zhHans ? "正在校验格式..." : "Validating format...", isProgress: true)
+            case .provisioning:
+                feedbackRow(text: L10n.remoteValidatingRelay, isProgress: true)
+            case .applyingConfig:
+                feedbackRow(text: L10n.current == .zhHans ? "正在应用配置..." : "Applying configuration...", isProgress: true)
+            case .restartingBridge:
+                feedbackRow(text: L10n.current == .zhHans ? "Bridge 正在重启..." : "Bridge restarting...", isProgress: true)
+            case .applied:
+                InlineFeedback(style: .success, message: L10n.current == .zhHans ? "配置已应用" : "Configuration applied")
+            case .failed(let err):
+                InlineFeedback(style: .error, message: err)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("安全与隐私")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 4)
+
+                SettingsCardContainer {
                     HStack {
-                        Button(action: saveRelayConfiguration) {
-                            Text(L10n.save)
+                        ZStack {
+                            Color.green.opacity(0.15)
+                            Image(systemName: "shield.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.green)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(!canSaveRelay)
-                        
-                        if isRelayModified {
-                            Button(action: {
-                                customRelayEndpoint = savedCustomRelayEndpoint
-                                relayMode = savedCustomRelayEndpoint.isEmpty ? .official : .custom
-                                relaySaveState = .idle
-                            }) {
-                                Text(L10n.cancel)
+                        .frame(width: 24, height: 24)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("端到端加密")
+                                .font(.system(size: 14, weight: .semibold))
+                            Text("中继服务器无法读取传输的代码或消息内容")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        Text("已开启")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.green)
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showTechnicalDetails.toggle()
+                    }
+                } label: {
+                    HStack {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 14))
+                        Text("查看连接技术信息")
+                            .font(.system(size: 13, weight: .medium))
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .bold))
+                            .rotationEffect(.degrees(showTechnicalDetails ? 90 : 0))
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if showTechnicalDetails {
+                    SettingsCardContainer {
+                        VStack(alignment: .leading, spacing: 8) {
+                            technicalInfoRow(label: "协议版本", value: "WSS (Websocket Secure)")
+                            technicalInfoRow(label: "连接状态", value: relayConfigured == true ? "已接入中继网" : "未就绪")
+                            if let endpoint = remoteStatus?.relay?.endpoint {
+                                technicalInfoRow(label: "服务器地址", value: endpoint)
+                            }
+                            if let routeId = remoteStatus?.relay?.routeId {
+                                technicalInfoRow(label: "路由识别码", value: routeId)
                             }
                         }
                     }
-                    .padding(.top, 4)
-                    
-                    switch relaySaveState {
-                    case .idle, .enabling, .disabling:
-                        EmptyView()
-                    case .validatingFormat:
-                        feedbackRow(text: L10n.current == .zhHans ? "正在校验格式..." : "Validating format...", isProgress: true)
-                    case .provisioning:
-                        feedbackRow(text: L10n.remoteValidatingRelay, isProgress: true)
-                    case .applyingConfig:
-                        feedbackRow(text: L10n.current == .zhHans ? "正在应用配置..." : "Applying configuration...", isProgress: true)
-                    case .restartingBridge:
-                        feedbackRow(text: L10n.current == .zhHans ? "Bridge 正在重启..." : "Bridge restarting...", isProgress: true)
-                    case .applied:
-                        InlineFeedback(style: .success, message: L10n.current == .zhHans ? "配置已应用" : "Configuration applied")
-                    case .failed(let err):
-                        InlineFeedback(style: .error, message: err)
-                    }
+                    .transition(.opacity)
                 }
             }
         }
     }
-    
+
     private var tailscaleDetailView: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text(L10n.remoteTailscale)
-                .font(.title2)
-                .bold()
-            
-            Text(L10n.current == .zhHans
-                ? "利用 Tailscale 创建的私有虚拟网进行连接。适用于已安装 Tailscale 客户端的设备之间的直接互通。"
-                : "Connect using a private virtual network created by Tailscale. Ideal for direct communication between devices with the Tailscale client installed.")
-                .foregroundColor(.secondary)
-            
+            SettingsCardContainer {
+                HStack(spacing: 16) {
+                    ZStack {
+                        Color.gray.opacity(0.15)
+                        Image(systemName: "circle.grid.3x3.fill")
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundStyle(Color.gray)
+                    }
+                    .frame(width: 48, height: 48)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(tailscaleURL.isEmpty ? "未激活" : "检测到虚拟网 IP")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.primary)
+                        Text(L10n.current == .zhHans
+                            ? "利用 Tailscale 创建的私有虚拟网进行连接。适用于已安装 Tailscale 客户端的设备之间的直接互通。"
+                            : "Connect using a private virtual network created by Tailscale. Ideal for direct communication between devices with the Tailscale client installed.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .lineSpacing(2)
+                    }
+
+                    Spacer()
+
+                    Toggle("", isOn: $includeTailscale)
+                        .toggleStyle(.switch)
+                        .disabled(tailscaleURL.isEmpty)
+                }
+            }
+
+            if !tailscaleURL.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("检测到的虚拟网地址")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 4)
+
+                    SettingsCardContainer {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Tailscale 地址")
+                                        .font(.system(size: 14, weight: .semibold))
+                                    Text(tailscaleURL)
+                                        .font(.system(size: 12, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                
+                                Button(L10n.current == .zhHans ? "复制" : "Copy") {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(tailscaleURL, forType: .string)
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                    }
+                }
+            }
+
             VStack(alignment: .leading, spacing: 8) {
                 Text(L10n.securityLevel)
-                    .font(.headline)
-                Text("• " + L10n.secTailscaleTunnel)
-                    .foregroundColor(.secondary)
-            }
-            
-            Divider()
-            
-            VStack(alignment: .leading, spacing: 12) {
-                Text(L10n.current == .zhHans ? "配对设置" : "Pairing Settings")
-                    .font(.headline)
-                
-                Toggle(L10n.remotePublishInPairing, isOn: $includeTailscale)
-                    .disabled(tailscaleURL.isEmpty)
-                
-                if tailscaleURL.isEmpty {
-                    HStack(alignment: .top, spacing: 6) {
-                        Text("⚠️")
-                        Text(L10n.current == .zhHans
-                            ? "当前无可用的 Tailscale 虚拟网 IP，新生成的配对二维码中将无法包含此连接方式。"
-                            : "No available Tailscale IP detected. New pairing QR codes cannot include this connection method.")
-                            .font(.caption)
-                            .foregroundColor(.red)
-                    }
-                    .padding(.top, 4)
-                } else {
-                    Text(L10n.current == .zhHans
-                        ? "启用后，未来新生成的配对二维码将包含此 Tailscale 地址。"
-                        : "When enabled, future pairing QR codes will include this Tailscale address.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            Divider()
-            
-            VStack(alignment: .leading, spacing: 12) {
-                Text(L10n.current == .zhHans ? "诊断与检测" : "Diagnostics & Detection")
-                    .font(.headline)
-                
-                HStack {
-                    Text(L10n.status + "：")
-                    if tailscaleURL.isEmpty {
-                        Text("⚪️ " + L10n.remoteTailscaleUnavailable)
-                    } else {
-                        Text("🟢 " + L10n.remoteTailscaleIPDetected)
-                    }
-                }
-                
-                if !tailscaleURL.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(L10n.current == .zhHans ? "检测到的 Tailscale 地址：" : "Detected Tailscale Address:")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Text(tailscaleURL)
-                            .font(.system(.body, design: .monospaced))
-                            .textSelection(.enabled)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 4)
+
+                SettingsCardContainer {
+                    HStack {
+                        ZStack {
+                            Color.green.opacity(0.15)
+                            Image(systemName: "lock.shield.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.green)
+                        }
+                        .frame(width: 24, height: 24)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("WireGuard 加密通道")
+                                .font(.system(size: 14, weight: .semibold))
+                            Text("• " + L10n.secTailscaleTunnel)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+
+                        Text("已保护")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.green)
                     }
                 }
             }
         }
     }
-    
+
     private var customAddressDetailView: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text(L10n.remoteVPS)
-                .font(.title2)
-                .bold()
-            
-            Text(L10n.current == .zhHans
-                ? "允许您通过反向代理、内网穿透（如 FRP）或自建 VPS 暴露的公网端点进行连接。"
-                : "Allows you to connect via public endpoints exposed by reverse proxies, intranets (such as FRP), or self-hosted VPS.")
-                .foregroundColor(.secondary)
-            
-            VStack(alignment: .leading, spacing: 8) {
-                Text(L10n.securityLevel)
-                    .font(.headline)
-                if !savedRemoteURL.isEmpty, showPublicWSWarning {
-                    Text("• " + L10n.secInsecure)
-                        .foregroundColor(.red)
-                } else if !savedRemoteURL.isEmpty {
-                    Text("• " + L10n.secEncrypted)
-                        .foregroundColor(.green)
-                } else {
-                    Text("• " + L10n.secUnknown)
-                        .foregroundColor(.secondary)
+            SettingsCardContainer {
+                HStack(spacing: 16) {
+                    ZStack {
+                        Color.purple.opacity(0.15)
+                        Image(systemName: "globe")
+                            .font(.system(size: 22, weight: .bold))
+                            .foregroundStyle(Color.purple)
+                    }
+                    .frame(width: 48, height: 48)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(savedRemoteURL.isEmpty ? "未配置" : "已配置公网穿透")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.primary)
+                        Text(L10n.current == .zhHans
+                            ? "允许您通过反向代理、内网穿透（如 FRP）或自建 VPS 暴露的公网端点进行连接。"
+                            : "Allows you to connect via public endpoints exposed by reverse proxies, intranets (such as FRP), or self-hosted VPS.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .lineSpacing(2)
+                    }
+
+                    Spacer()
+
+                    Toggle("", isOn: $includeRemote)
+                        .toggleStyle(.switch)
+                        .disabled(savedRemoteURL.isEmpty)
                 }
             }
-            
-            Divider()
-            
-            VStack(alignment: .leading, spacing: 12) {
-                Text(L10n.current == .zhHans ? "配置接入地址" : "Configure Endpoint Address")
-                    .font(.headline)
-                
-                HStack {
-                    TextField(L10n.remoteVPSPlaceholder, text: $remoteURL)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(.body, design: .monospaced))
-                    
-                    Button(action: saveCustomAddressConfiguration) {
-                        Text(L10n.save)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(remoteURL == savedRemoteURL || customAddressSaveStateIsProgress)
-                    
-                    if remoteURL != savedRemoteURL {
-                        Button(action: {
-                            remoteURL = savedRemoteURL
-                        }) {
-                            Text(L10n.cancel)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("公网接入地址")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 4)
+
+                SettingsCardContainer {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("自定义服务 URL")
+                                    .font(.system(size: 14, weight: .semibold))
+                                Text(savedRemoteURL.isEmpty ? "未设置" : savedRemoteURL)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            
+                            if !isEditingCustomURL {
+                                Button("更改...") {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        isEditingCustomURL = true
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.regular)
+                            }
+                        }
+
+                        if isEditingCustomURL {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Divider()
+                                    .padding(.vertical, 4)
+
+                                TextField(L10n.remoteVPSPlaceholder, text: $remoteURL)
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.system(.body, design: .monospaced))
+
+                                if !frpURL.isEmpty && !isValidManualRemoteURL(frpURL) {
+                                    InlineFeedback(style: .warning, message: L10n.remoteVPSValidation)
+                                }
+                                
+                                if showPublicWSWarning {
+                                    InlineFeedback(style: .warning, message: L10n.remoteUnencryptedWarning)
+                                }
+
+                                HStack(spacing: 8) {
+                                    Button(L10n.save) {
+                                        saveCustomAddressConfiguration()
+                                        withAnimation(.easeInOut(duration: 0.2)) {
+                                            isEditingCustomURL = false
+                                        }
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .disabled(remoteURL == savedRemoteURL || customAddressSaveStateIsProgress)
+
+                                    Button(L10n.cancel) {
+                                        remoteURL = savedRemoteURL
+                                        withAnimation(.easeInOut(duration: 0.2)) {
+                                            isEditingCustomURL = false
+                                        }
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+                            .transition(.opacity)
                         }
                     }
                 }
-                
-                if !frpURL.isEmpty && !isValidManualRemoteURL(frpURL) {
-                    InlineFeedback(style: .warning, message: L10n.remoteVPSValidation)
-                }
-                
-                if showPublicWSWarning {
-                    InlineFeedback(style: .warning, message: L10n.remoteUnencryptedWarning)
-                }
-                
-                switch customAddressSaveState {
-                case .idle:
-                    EmptyView()
-                case .validatingFormat:
-                    feedbackRow(text: L10n.current == .zhHans ? "正在校验格式..." : "Validating format...", isProgress: true)
-                case .saving:
-                    feedbackRow(text: L10n.current == .zhHans ? "正在保存..." : "Saving...", isProgress: true)
-                case .restartingBridge:
-                    feedbackRow(text: L10n.current == .zhHans ? "Bridge 正在重启..." : "Bridge restarting...", isProgress: true)
-                case .applied:
-                    InlineFeedback(style: .success, message: L10n.current == .zhHans ? "配置已应用" : "Configuration applied")
-                case .failed(let err):
-                    InlineFeedback(style: .error, message: err)
-                }
             }
-            
-            Divider()
-            
-            VStack(alignment: .leading, spacing: 12) {
-                Text(L10n.current == .zhHans ? "配对设置" : "Pairing Settings")
-                    .font(.headline)
-                
-                let isCustomAddressConfiguredAndValid = !savedRemoteURL.isEmpty && isValidManualRemoteURL(savedRemoteURL)
-                
-                Toggle(L10n.remotePublishInPairing, isOn: $includeRemote)
-                    .disabled(!isCustomAddressConfiguredAndValid)
-                
-                if !isCustomAddressConfiguredAndValid {
-                    HStack(alignment: .top, spacing: 6) {
-                        Text("⚠️")
-                        Text(L10n.current == .zhHans
-                            ? "当前无有效的自定义地址，新生成的配对二维码中将无法包含此连接方式。"
-                            : "No valid custom address configured. New pairing QR codes cannot include this connection method.")
-                            .font(.caption)
-                            .foregroundColor(.red)
+
+            switch customAddressSaveState {
+            case .idle:
+                EmptyView()
+            case .validatingFormat:
+                feedbackRow(text: L10n.current == .zhHans ? "正在校验格式..." : "Validating format...", isProgress: true)
+            case .saving:
+                feedbackRow(text: L10n.current == .zhHans ? "正在保存..." : "Saving...", isProgress: true)
+            case .restartingBridge:
+                feedbackRow(text: L10n.current == .zhHans ? "Bridge 正在重启..." : "Bridge restarting...", isProgress: true)
+            case .applied:
+                InlineFeedback(style: .success, message: L10n.current == .zhHans ? "配置已应用" : "Configuration applied")
+            case .failed(let err):
+                InlineFeedback(style: .error, message: err)
+            }
+
+            if !savedRemoteURL.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("安全分析")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 4)
+
+                    SettingsCardContainer {
+                        HStack {
+                            ZStack {
+                                Color(showPublicWSWarning ? .orange : .green).opacity(0.15)
+                                Image(systemName: showPublicWSWarning ? "exclamationmark.triangle.fill" : "lock.shield.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(showPublicWSWarning ? .orange : .green)
+                            }
+                            .frame(width: 24, height: 24)
+                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(showPublicWSWarning ? "使用非加密协议" : "使用加密传输")
+                                    .font(.system(size: 14, weight: .semibold))
+                                Text(showPublicWSWarning
+                                    ? "未加密的数据可能会被第三方窃听，建议改用 wss/https 协议。"
+                                    : "数据流正在使用 TLS (wss/https) 安全通道进行加密传输。")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
+
+                            Text(showPublicWSWarning ? "不安全" : "安全")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(showPublicWSWarning ? .orange : .green)
+                        }
                     }
-                    .padding(.top, 4)
-                } else {
-                    Text(L10n.current == .zhHans
-                        ? "启用后，未来新生成的配对二维码将包含此自定义地址。"
-                        : "When enabled, future pairing QR codes will include this custom address.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
                 }
             }
         }
@@ -733,6 +862,19 @@ struct RemoteAccessView: View {
                 .foregroundColor(.secondary)
         }
         .padding(.top, 4)
+    }
+
+    private func technicalInfoRow(label: String, value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+        }
     }
 
     private func notifyPairingConfigChanged() {
@@ -958,5 +1100,162 @@ enum BridgeRemoteURLFormatter {
             return "wss" + String(trimmed.dropFirst(5))
         }
         return trimmed
+    }
+}
+
+private struct SettingsCardContainer<Content: View>: View {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            content
+        }
+        .padding(16)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        }
+    }
+}
+
+private struct ConnectionSidebarButton: View {
+    let method: RemoteAccessView.ConnectionMethod
+    let isSelected: Bool
+    let localURL: String
+    let relayConfigured: Bool?
+    let tailscaleURL: String
+    let relayEnabled: Bool
+    let savedRemoteURL: String
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                iconView
+                    .frame(width: 28, height: 28)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    Text(subtitle)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                statusBadge
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+            .background {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isSelected ? Color.accentColor.opacity(0.08) : (isHovering ? Color.white.opacity(0.03) : Color.clear))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(isSelected ? Color.accentColor.opacity(0.35) : Color.clear, lineWidth: 1)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .scaleEffect(isHovering ? 1.01 : 1)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.16)) {
+                isHovering = hovering
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var iconView: some View {
+        switch method {
+        case .lan:
+            ZStack {
+                Color.green.opacity(0.15)
+                Image(systemName: "wifi")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.green)
+            }
+        case .relay:
+            ZStack {
+                Color.blue.opacity(0.15)
+                Image(systemName: "point.3.connected.trianglepath.dotted")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.blue)
+            }
+        case .tailscale:
+            ZStack {
+                Color.gray.opacity(0.15)
+                Image(systemName: "circle.grid.3x3.fill")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.gray)
+            }
+        case .other:
+            ZStack {
+                Color.purple.opacity(0.15)
+                Image(systemName: "globe")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.purple)
+            }
+        }
+    }
+
+    private var title: String {
+        switch method {
+        case .lan: return "局域网"
+        case .relay: return "Relay"
+        case .tailscale: return "Tailscale"
+        case .other: return "自定义连接"
+        }
+    }
+
+    private var subtitle: String {
+        switch method {
+        case .lan: return "同一网络内自动连接"
+        case .relay: return "跨网络安全连接"
+        case .tailscale: return "通过私有网络连接"
+        case .other: return "VPS 或自定义地址"
+        }
+    }
+
+    @ViewBuilder
+    private var statusBadge: some View {
+        let (text, color) = badgeInfo
+        Text(text)
+            .font(.system(size: 10, weight: .medium))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.12))
+            .foregroundStyle(color)
+            .clipShape(Capsule())
+    }
+
+    private var badgeInfo: (String, Color) {
+        switch method {
+        case .lan:
+            return (localURL.isEmpty ? "未配置" : "可用", localURL.isEmpty ? .secondary : .green)
+        case .relay:
+            if !relayEnabled {
+                return ("未启用", .secondary)
+            }
+            return (relayConfigured == true ? "已启用" : "未配置", relayConfigured == true ? .blue : .orange)
+        case .tailscale:
+            return (tailscaleURL.isEmpty ? "未设置" : "可用", tailscaleURL.isEmpty ? .secondary : .green)
+        case .other:
+            return (savedRemoteURL.isEmpty ? "未设置" : "已配置", savedRemoteURL.isEmpty ? .secondary : .purple)
+        }
     }
 }
