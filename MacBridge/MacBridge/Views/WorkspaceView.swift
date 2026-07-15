@@ -526,17 +526,17 @@ private struct AgentBrandMark: View {
                 Image("claude_logo")
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 25, height: 25)
+                    .frame(width: 21, height: 21)
             case "codex":
                 Image("codex_logo")
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 23, height: 23)
+                    .frame(width: 21, height: 21)
             case "grokbuild":
                 Image("grok_logo")
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 25, height: 25)
+                    .frame(width: 23, height: 23)
             case "opencode":
                 Image("opencode_logo")
                     .resizable()
@@ -544,7 +544,9 @@ private struct AgentBrandMark: View {
                     .frame(width: 23, height: 23)
             default:
                 Image(systemName: "command")
-                    .font(.title3)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 21, height: 21)
                     .foregroundStyle(.secondary)
             }
         }
