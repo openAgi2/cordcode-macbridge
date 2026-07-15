@@ -469,7 +469,8 @@ struct PairingSheet: View {
             VStack(alignment: .leading, spacing: 20) {
                 PageHeader(L10n.pairingNewDevice) {
                     Button(L10n.done, action: close)
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
                 }
                 PairingView(
                     viewModel: viewModel,

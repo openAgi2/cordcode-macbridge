@@ -55,6 +55,10 @@ struct DiagnosticsSheet: View {
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.regular)
+
+                        Button(L10n.done) { dismiss() }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.regular)
                     }
                 }
                 .padding(.bottom, 4)
@@ -78,16 +82,6 @@ struct DiagnosticsSheet: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.regular)
-                }
-
-                Spacer(minLength: 0)
-
-                // 底部完成按钮
-                HStack {
-                    Spacer()
-                    Button(L10n.done) { dismiss() }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.regular)
                 }
             }
         }
