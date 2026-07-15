@@ -711,6 +711,22 @@ struct RemoteAccessView: View {
                     }
                 }
             }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L10n.current == .zhHans ? "使用指南" : "Quick Start Guide")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 4)
+
+                SettingsCardContainer {
+                    VStack(alignment: .leading, spacing: 10) {
+                        guideStepRow(num: "1", text: L10n.current == .zhHans ? "在 Mac 和 iPhone 上均下载并运行 Tailscale 客户端" : "Download and run Tailscale client on both Mac and iPhone")
+                        guideStepRow(num: "2", text: L10n.current == .zhHans ? "两端登录同一个账号以加入您私有的 Tailscale 虚拟网" : "Log in to the same Tailscale account to connect your devices")
+                        guideStepRow(num: "3", text: L10n.current == .zhHans ? "在本机检测到 IP 后，开启右上方“包括 Tailscale”开关" : "Enable 'Include Tailscale' switch above once the virtual IP is active")
+                        guideStepRow(num: "4", text: L10n.current == .zhHans ? "iPhone 在 5G 等外网环境保持 Tailscale 开启即可无缝直连" : "Keep Tailscale VPN connected on iPhone to auto-connect via cellular")
+                    }
+                }
+            }
         }
     }
 
@@ -899,6 +915,24 @@ struct RemoteAccessView: View {
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(.primary)
                 .textSelection(.enabled)
+        }
+    }
+
+    private func guideStepRow(num: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(num)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 15, height: 15)
+                .background(Color.accentColor.opacity(0.12))
+                .clipShape(Circle())
+                .padding(.top, 1)
+
+            Text(text)
+                .font(.system(size: 12))
+                .foregroundStyle(.primary)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
