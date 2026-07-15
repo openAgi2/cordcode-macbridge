@@ -19,6 +19,7 @@ struct ContentView: View {
     var body: some View {
         workspaceTab
             .frame(minWidth: LayoutConstants.minWindowWidth, minHeight: LayoutConstants.minWindowHeight)
+            .id(appLanguage)
         .background {
             ZStack {
                 Color(red: 0.165, green: 0.170, blue: 0.180)
