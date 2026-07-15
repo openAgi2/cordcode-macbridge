@@ -13,6 +13,7 @@ struct ContentView: View {
     @State private var showConnectionStatus = false
     @State private var showDiagnostics = false
     @State private var showPairing = false
+    @AppStorage("appLanguage") private var appLanguage = ""
     @EnvironmentObject private var dependencies: AppDependencies
 
     var body: some View {
@@ -56,6 +57,16 @@ struct ContentView: View {
                 HStack {
                     Spacer()
                     HStack(spacing: 14) {
+                        Button {
+                            let nextLang = (L10n.current == .zhHans) ? "en" : "zh-Hans"
+                            appLanguage = nextLang
+                        } label: {
+                            Text(L10n.current == .zhHans ? "EN" : "中")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.primary.opacity(0.85))
+                        }
+                        .buttonStyle(.plain)
+
                         Button {
                             showConnectionStatus = true
                         } label: {
