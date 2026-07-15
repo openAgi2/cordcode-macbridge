@@ -187,7 +187,7 @@ struct DiagnosticsSheet: View {
                     .foregroundStyle(.secondary)
                     .padding(.leading, 4)
                 
-                Text(diagnosticsViewModel.maxDisplayLines == 30 ? "最近 30 行" : "最近 200 行")
+                Text(diagnosticsViewModel.maxDisplayLines == 30 ? (L10n.current == .zhHans ? "最近 30 行" : "Recent 30 Lines") : (L10n.current == .zhHans ? "最近 200 行" : "Recent 200 Lines"))
                     .font(.system(size: 10, weight: .medium))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
@@ -199,7 +199,7 @@ struct DiagnosticsSheet: View {
                 
                 Picker("", selection: $selectedLevelFilter) {
                     ForEach(LogLevelFilter.allCases, id: \.self) { filter in
-                        Text(filter.rawValue).tag(filter)
+                        Text(filter.displayName).tag(filter)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -273,7 +273,7 @@ struct DiagnosticsSheet: View {
                         HStack(spacing: 6) {
                             Image(systemName: "eye.fill")
                                 .font(.system(size: 11))
-                            Text(diagnosticsViewModel.maxDisplayLines == 30 ? "查看完整 200 行" : "显示最近 30 行")
+                            Text(diagnosticsViewModel.maxDisplayLines == 30 ? (L10n.current == .zhHans ? "查看完整 200 行" : "View Full 200 Lines") : (L10n.current == .zhHans ? "显示最近 30 行" : "Show Recent 30 Lines"))
                                 .font(.system(size: 12))
                         }
                         .foregroundStyle(.secondary)
@@ -511,11 +511,22 @@ private struct HealthSummaryCard: View {
     }
 }
 
-enum LogLevelFilter: String, CaseIterable {
-    case all = "全部"
-    case info = "信息"
-    case warn = "警告"
-    case error = "错误"
+enum LogLevelFilter: String, CaseIterable, Identifiable {
+    case all
+    case info
+    case warn
+    case error
+    
+    var id: String { rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .all: return L10n.current == .zhHans ? "全部" : "All"
+        case .info: return L10n.current == .zhHans ? "信息" : "Info"
+        case .warn: return L10n.current == .zhHans ? "警告" : "Warn"
+        case .error: return L10n.current == .zhHans ? "错误" : "Error"
+        }
+    }
 }
 
 struct ParsedLogLine: Identifiable {

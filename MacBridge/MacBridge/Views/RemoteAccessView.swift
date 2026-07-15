@@ -193,7 +193,7 @@ struct RemoteAccessView: View {
                 HStack(alignment: .top, spacing: 0) {
                     // 左侧导航列表
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("连接方式")
+                        Text(L10n.current == .zhHans ? "连接方式" : "Connection Methods")
                             .font(.system(size: 11, weight: .bold))
                             .foregroundStyle(.secondary)
                             .padding(.leading, 8)
@@ -286,7 +286,7 @@ struct RemoteAccessView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(localURL.isEmpty ? "未就绪" : "正常监听中")
+                        Text(localURL.isEmpty ? (L10n.current == .zhHans ? "未就绪" : "Not Ready") : (L10n.current == .zhHans ? "正常监听中" : "Listening"))
                             .font(.system(size: 16, weight: .bold))
                             .foregroundStyle(.primary)
                         Text(L10n.current == .zhHans
@@ -304,7 +304,7 @@ struct RemoteAccessView: View {
                             Circle()
                                 .fill(Color.green)
                                 .frame(width: 8, height: 8)
-                            Text("正常监听")
+                            Text(L10n.current == .zhHans ? "正常监听" : "Listening")
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundStyle(.green)
                         }
@@ -323,7 +323,7 @@ struct RemoteAccessView: View {
                         VStack(alignment: .leading, spacing: 10) {
                             HStack {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("局域网连接地址")
+                                    Text(L10n.current == .zhHans ? "局域网连接地址" : "LAN Connection URL")
                                         .font(.system(size: 14, weight: .semibold))
                                     Text(localURL)
                                         .font(.system(size: 12, design: .monospaced))
@@ -360,7 +360,7 @@ struct RemoteAccessView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("局域网内传输")
+                            Text(L10n.current == .zhHans ? "局域网内传输" : "Local Network Transmission")
                                 .font(.system(size: 14, weight: .semibold))
                             Text(L10n.remoteLANHint)
                                 .font(.system(size: 12))
@@ -369,7 +369,7 @@ struct RemoteAccessView: View {
 
                         Spacer()
 
-                        Text("已保护")
+                        Text(L10n.current == .zhHans ? "已保护" : "Protected")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(.green)
                     }
@@ -392,7 +392,7 @@ struct RemoteAccessView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(relayEnabled && relayConfigured == true ? "已启用" : (relayEnabled ? "配置中" : "未启用"))
+                        Text(relayEnabled && relayConfigured == true ? (L10n.current == .zhHans ? "已启用" : "Enabled") : (relayEnabled ? (L10n.current == .zhHans ? "配置中" : "Configuring") : (L10n.current == .zhHans ? "未启用" : "Disabled")))
                             .font(.system(size: 16, weight: .bold))
                             .foregroundStyle(.primary)
                         Text(L10n.current == .zhHans
@@ -403,7 +403,7 @@ struct RemoteAccessView: View {
                         HStack(spacing: 4) {
                             Image(systemName: "lock.shield")
                                 .font(.system(size: 11))
-                            Text("端到端加密")
+                            Text(L10n.current == .zhHans ? "端到端加密" : "End-to-End Encrypted")
                                 .font(.system(size: 11))
                         }
                         .foregroundStyle(.secondary.opacity(0.8))
@@ -434,7 +434,7 @@ struct RemoteAccessView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("中继服务器")
+                Text(L10n.current == .zhHans ? "中继服务器" : "Relay Server")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(.secondary)
                     .padding(.leading, 4)
@@ -443,16 +443,16 @@ struct RemoteAccessView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(relayMode == .official ? "官方中继" : "自定义中继")
+                                Text(relayMode == .official ? (L10n.current == .zhHans ? "官方中继" : "Official Relay") : (L10n.current == .zhHans ? "自定义中继" : "Custom Relay"))
                                     .font(.system(size: 14, weight: .semibold))
-                                Text(relayMode == .official ? "自动选择可用节点" : normalizedCustomRelayEndpoint)
+                                Text(relayMode == .official ? (L10n.current == .zhHans ? "自动选择可用节点" : "Auto-select available nodes") : normalizedCustomRelayEndpoint)
                                     .font(.system(size: 12))
                                     .foregroundStyle(.secondary)
                             }
                             Spacer()
                             
                             if !isEditingRelay {
-                                Button("更改...") {
+                                Button(L10n.current == .zhHans ? "更改..." : "Change...") {
                                     withAnimation(.easeInOut(duration: 0.2)) {
                                         isEditingRelay = true
                                     }
@@ -540,7 +540,7 @@ struct RemoteAccessView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("安全与隐私")
+                Text(L10n.current == .zhHans ? "安全与隐私" : "Security & Privacy")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(.secondary)
                     .padding(.leading, 4)
@@ -557,16 +557,16 @@ struct RemoteAccessView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("端到端加密")
+                            Text(L10n.current == .zhHans ? "端到端加密" : "End-to-End Encrypted")
                                 .font(.system(size: 14, weight: .semibold))
-                            Text("中继服务器无法读取传输的代码或消息内容")
+                            Text(L10n.current == .zhHans ? "中继服务器无法读取传输的代码或消息内容" : "Relay servers cannot read transmitted code or message content")
                                 .font(.system(size: 12))
                                 .foregroundStyle(.secondary)
                         }
 
                         Spacer()
 
-                        Text("已开启")
+                        Text(L10n.current == .zhHans ? "已开启" : "Enabled")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(.green)
                     }
@@ -582,7 +582,7 @@ struct RemoteAccessView: View {
                     HStack {
                         Image(systemName: "info.circle")
                             .font(.system(size: 14))
-                        Text("查看连接技术信息")
+                        Text(L10n.current == .zhHans ? "查看连接技术信息" : "Technical Information")
                             .font(.system(size: 13, weight: .medium))
                         Spacer()
                         Image(systemName: "chevron.right")
@@ -598,14 +598,14 @@ struct RemoteAccessView: View {
                 if showTechnicalDetails {
                     SettingsCardContainer {
                         VStack(alignment: .leading, spacing: 8) {
-                            technicalInfoRow(label: "协议版本", value: "WSS (Websocket Secure)")
-                            technicalInfoRow(label: "加密协议", value: "端到端 HPKE (X25519 / AES-128-GCM)")
-                            technicalInfoRow(label: "连接状态", value: relayConfigured == true ? "已接入中继网" : "未就绪")
+                            technicalInfoRow(label: L10n.current == .zhHans ? "协议版本" : "Protocol Version", value: "WSS (Websocket Secure)")
+                            technicalInfoRow(label: L10n.current == .zhHans ? "加密协议" : "Encryption", value: L10n.current == .zhHans ? "端到端 HPKE (X25519 / AES-128-GCM)" : "End-to-End HPKE (X25519 / AES-128-GCM)")
+                            technicalInfoRow(label: L10n.current == .zhHans ? "连接状态" : "Status", value: relayConfigured == true ? (L10n.current == .zhHans ? "已接入中继网" : "Connected") : (L10n.current == .zhHans ? "未就绪" : "Not Ready"))
                             if let endpoint = remoteStatus?.relay?.endpoint {
-                                technicalInfoRow(label: "服务器地址", value: endpoint)
+                                technicalInfoRow(label: L10n.current == .zhHans ? "服务器地址" : "Server Endpoint", value: endpoint)
                             }
                             if let routeId = remoteStatus?.relay?.routeId {
-                                technicalInfoRow(label: "路由识别码", value: routeId)
+                                technicalInfoRow(label: L10n.current == .zhHans ? "路由识别码" : "Route ID", value: routeId)
                             }
                         }
                     }
@@ -629,7 +629,7 @@ struct RemoteAccessView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(tailscaleURL.isEmpty ? "未激活" : "检测到虚拟网 IP")
+                        Text(tailscaleURL.isEmpty ? (L10n.current == .zhHans ? "未激活" : "Inactive") : (L10n.current == .zhHans ? "检测到虚拟网 IP" : "Virtual IP Detected"))
                             .font(.system(size: 16, weight: .bold))
                             .foregroundStyle(.primary)
                         Text(L10n.current == .zhHans
@@ -650,7 +650,7 @@ struct RemoteAccessView: View {
 
             if !tailscaleURL.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("检测到的虚拟网地址")
+                    Text(L10n.current == .zhHans ? "检测到的虚拟网地址" : "Detected Virtual Addresses")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(.secondary)
                         .padding(.leading, 4)
@@ -659,7 +659,7 @@ struct RemoteAccessView: View {
                         VStack(alignment: .leading, spacing: 10) {
                             HStack {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("Tailscale 地址")
+                                    Text(L10n.current == .zhHans ? "Tailscale 地址" : "Tailscale IP")
                                         .font(.system(size: 14, weight: .semibold))
                                     Text(tailscaleURL)
                                         .font(.system(size: 12, design: .monospaced))
@@ -696,7 +696,7 @@ struct RemoteAccessView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("WireGuard 加密通道")
+                            Text(L10n.current == .zhHans ? "WireGuard 加密通道" : "WireGuard Secure Tunnel")
                                 .font(.system(size: 14, weight: .semibold))
                             Text("• " + L10n.secTailscaleTunnel)
                                 .font(.system(size: 12))
@@ -705,7 +705,7 @@ struct RemoteAccessView: View {
 
                         Spacer()
 
-                        Text("已保护")
+                        Text(L10n.current == .zhHans ? "已保护" : "Protected")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(.green)
                     }
@@ -744,7 +744,7 @@ struct RemoteAccessView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(savedRemoteURL.isEmpty ? "未配置" : "已配置公网穿透")
+                        Text(savedRemoteURL.isEmpty ? (L10n.current == .zhHans ? "未配置" : "Not Configured") : (L10n.current == .zhHans ? "已配置公网穿透" : "Public Endpoint Configured"))
                             .font(.system(size: 16, weight: .bold))
                             .foregroundStyle(.primary)
                         Text(L10n.current == .zhHans
@@ -764,7 +764,7 @@ struct RemoteAccessView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("公网接入地址")
+                Text(L10n.current == .zhHans ? "公网接入地址" : "Public Access URL")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(.secondary)
                     .padding(.leading, 4)
@@ -773,16 +773,16 @@ struct RemoteAccessView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("自定义服务 URL")
+                                Text(L10n.current == .zhHans ? "自定义服务 URL" : "Custom Service URL")
                                     .font(.system(size: 14, weight: .semibold))
-                                Text(savedRemoteURL.isEmpty ? "未设置" : savedRemoteURL)
+                                Text(savedRemoteURL.isEmpty ? (L10n.current == .zhHans ? "未设置" : "Not Set") : savedRemoteURL)
                                     .font(.system(size: 12, design: .monospaced))
                                     .foregroundStyle(.secondary)
                             }
                             Spacer()
                             
                             if !isEditingCustomURL {
-                                Button("更改...") {
+                                Button(L10n.current == .zhHans ? "更改..." : "Change...") {
                                     withAnimation(.easeInOut(duration: 0.2)) {
                                         isEditingCustomURL = true
                                     }
@@ -1274,19 +1274,19 @@ private struct ConnectionSidebarButton: View {
 
     private var title: String {
         switch method {
-        case .lan: return "局域网"
+        case .lan: return L10n.current == .zhHans ? "局域网" : "Local Network"
         case .relay: return "Relay"
         case .tailscale: return "Tailscale"
-        case .other: return "自定义连接"
+        case .other: return L10n.current == .zhHans ? "自定义连接" : "Custom Access"
         }
     }
 
     private var subtitle: String {
         switch method {
-        case .lan: return "同一网络内自动连接"
-        case .relay: return "跨网络安全连接"
-        case .tailscale: return "通过私有网络连接"
-        case .other: return "VPS 或自定义地址"
+        case .lan: return L10n.current == .zhHans ? "同一网络内自动连接" : "Auto-connect on same Wi-Fi"
+        case .relay: return L10n.current == .zhHans ? "跨网络安全连接" : "Secure remote connection"
+        case .tailscale: return L10n.current == .zhHans ? "通过私有网络连接" : "Connect via private network"
+        case .other: return L10n.current == .zhHans ? "VPS 或自定义地址" : "VPS or custom endpoints"
         }
     }
 
@@ -1303,18 +1303,19 @@ private struct ConnectionSidebarButton: View {
     }
 
     private var badgeInfo: (String, Color) {
+        let isZh = L10n.current == .zhHans
         switch method {
         case .lan:
-            return (localURL.isEmpty ? "未配置" : "可用", localURL.isEmpty ? .secondary : .green)
+            return (localURL.isEmpty ? (isZh ? "未配置" : "Not Configured") : (isZh ? "可用" : "Available"), localURL.isEmpty ? .secondary : .green)
         case .relay:
             if !relayEnabled {
-                return ("未启用", .secondary)
+                return (isZh ? "未启用" : "Disabled", .secondary)
             }
-            return (relayConfigured == true ? "已启用" : "未配置", relayConfigured == true ? .blue : .orange)
+            return (relayConfigured == true ? (isZh ? "已启用" : "Enabled") : (isZh ? "未配置" : "Not Configured"), relayConfigured == true ? .blue : .orange)
         case .tailscale:
-            return (tailscaleURL.isEmpty ? "未设置" : "可用", tailscaleURL.isEmpty ? .secondary : .green)
+            return (tailscaleURL.isEmpty ? (isZh ? "未设置" : "Not Set") : (isZh ? "可用" : "Available"), tailscaleURL.isEmpty ? .secondary : .green)
         case .other:
-            return (savedRemoteURL.isEmpty ? "未设置" : "已配置", savedRemoteURL.isEmpty ? .secondary : .purple)
+            return (savedRemoteURL.isEmpty ? (isZh ? "未设置" : "Not Set") : (isZh ? "已配置" : "Configured"), savedRemoteURL.isEmpty ? .secondary : .purple)
         }
     }
 }
