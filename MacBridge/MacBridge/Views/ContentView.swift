@@ -61,9 +61,11 @@ struct ContentView: View {
                         Menu {
                             Button("简体中文") {
                                 appLanguage = "zh-Hans"
+                                UserDefaults.standard.set(true, forKey: "didUserSetLanguage")
                             }
                             Button("English") {
                                 appLanguage = "en"
+                                UserDefaults.standard.set(true, forKey: "didUserSetLanguage")
                             }
                         } label: {
                             Text(L10n.current == .zhHans ? "中" : "EN")
@@ -115,7 +117,8 @@ struct ContentView: View {
             Task { await reloadManagementAPIData() }
         }
         .onAppear {
-            if appLanguage.isEmpty {
+            let didUserSet = UserDefaults.standard.bool(forKey: "didUserSetLanguage")
+            if !didUserSet {
                 let languages = UserDefaults.standard.stringArray(forKey: "AppleLanguages") ?? Locale.preferredLanguages
                 let preferred = languages.first ?? "en"
                 appLanguage = preferred.hasPrefix("zh") ? "zh-Hans" : "en"
@@ -127,7 +130,8 @@ struct ContentView: View {
             }
         }
         .task {
-            if appLanguage.isEmpty {
+            let didUserSet = UserDefaults.standard.bool(forKey: "didUserSetLanguage")
+            if !didUserSet {
                 let languages = UserDefaults.standard.stringArray(forKey: "AppleLanguages") ?? Locale.preferredLanguages
                 let preferred = languages.first ?? "en"
                 appLanguage = preferred.hasPrefix("zh") ? "zh-Hans" : "en"

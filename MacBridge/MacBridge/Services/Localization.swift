@@ -46,12 +46,13 @@ enum AppTheme: String, CaseIterable, Identifiable {
 /// 语言由 UserDefaults "appLanguage" 控制，默认跟随系统
 enum L10n {
     static var current: AppLanguage {
-        let raw = UserDefaults.standard.string(forKey: "appLanguage") ?? ""
-        if raw.isEmpty {
+        let didUserSet = UserDefaults.standard.bool(forKey: "didUserSetLanguage")
+        if !didUserSet {
             let languages = UserDefaults.standard.stringArray(forKey: "AppleLanguages") ?? Locale.preferredLanguages
             let preferred = languages.first ?? "en"
             return preferred.hasPrefix("zh") ? .zhHans : .en
         }
+        let raw = UserDefaults.standard.string(forKey: "appLanguage") ?? ""
         return AppLanguage(rawValue: raw) ?? .en
     }
 
