@@ -1,7 +1,13 @@
 import SwiftUI
 
+enum SettingsTab {
+    case general
+    case advanced
+}
+
 struct SettingsView: View {
     @ObservedObject var viewModel: SettingsViewModel
+    var selectedTab: SettingsTab? = nil
     @AppStorage("appLanguage") private var appLanguage = ""
     @AppStorage("appTheme") private var appTheme = ""
     @AppStorage("autoRestartEnabled") private var autoRestartEnabled = true
@@ -37,14 +43,24 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        // 原生 Settings 窗口：左侧只使用「通用 / 高级」两项，无嵌套层级。
-        TabView {
-            generalTab
-                .tabItem { Label(L10n.general, systemImage: "gearshape") }
-            advancedTab
-                .tabItem { Label(L10n.advanced, systemImage: "wrench.and.screwdriver") }
+        Group {
+            if let selectedTab = selectedTab {
+                switch selectedTab {
+                case .general:
+                    generalTab
+                case .advanced:
+                    advancedTab
+                }
+            } else {
+                TabView {
+                    generalTab
+                        .tabItem { Label(L10n.general, systemImage: "gearshape") }
+                    advancedTab
+                        .tabItem { Label(L10n.advanced, systemImage: "wrench.and.screwdriver") }
+                }
+                .frame(width: 560, height: 460)
+            }
         }
-        .frame(width: 560, height: 460)
         .confirmationDialog(
             L10n.settingsRegenerateConfirmTitle,
             isPresented: $showRegenerateConfirmation,

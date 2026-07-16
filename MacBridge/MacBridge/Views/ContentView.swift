@@ -13,6 +13,8 @@ struct ContentView: View {
     @State private var showConnectionStatus = false
     @State private var showDiagnostics = false
     @State private var showPairing = false
+    @State private var showGeneralSettings = false
+    @State private var showAdvancedSettings = false
     @AppStorage("appLanguage") private var appLanguage = ""
     @EnvironmentObject private var dependencies: AppDependencies
 
@@ -76,6 +78,26 @@ struct ContentView: View {
                         }
                         .menuStyle(.borderlessButton)
                         .frame(width: 32)
+
+                        Button {
+                            showGeneralSettings = true
+                        } label: {
+                            Image(systemName: "gearshape")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.primary.opacity(0.85))
+                        }
+                        .buttonStyle(.plain)
+                        .help(L10n.settingsGeneral)
+
+                        Button {
+                            showAdvancedSettings = true
+                        } label: {
+                            Image(systemName: "wrench.and.screwdriver")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.primary.opacity(0.85))
+                        }
+                        .buttonStyle(.plain)
+                        .help(L10n.advanced)
 
                         Button {
                             showConnectionStatus = true
@@ -163,6 +185,12 @@ struct ContentView: View {
                 dependencies.runtimeManager.start()
             }
         }
+        .sheet(isPresented: $showGeneralSettings) {
+            GeneralSettingsSheet(viewModel: settingsViewModel)
+        }
+        .sheet(isPresented: $showAdvancedSettings) {
+            AdvancedSettingsSheet(viewModel: settingsViewModel)
+        }
     }
 
     // MARK: - Workspace Tab
@@ -221,5 +249,57 @@ struct ContentView: View {
         async let agents: Void = backendVM.loadAgents()
         async let overview: Void = viewModel.refreshOverviewData()
         _ = await (devices, agents, overview)
+    }
+}
+
+struct GeneralSettingsSheet: View {
+    @ObservedObject var viewModel: SettingsViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(L10n.settingsGeneral)
+                    .font(.title2.weight(.bold))
+                Spacer()
+                Button(L10n.done) {
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+            }
+            .padding(.horizontal, 30)
+            .padding(.top, 24)
+            .padding(.bottom, 12)
+            
+            SettingsView(viewModel: viewModel, selectedTab: .general)
+        }
+        .frame(width: 600, height: 500)
+    }
+}
+
+struct AdvancedSettingsSheet: View {
+    @ObservedObject var viewModel: SettingsViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(L10n.advanced)
+                    .font(.title2.weight(.bold))
+                Spacer()
+                Button(L10n.done) {
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+            }
+            .padding(.horizontal, 30)
+            .padding(.top, 24)
+            .padding(.bottom, 12)
+            
+            SettingsView(viewModel: viewModel, selectedTab: .advanced)
+        }
+        .frame(width: 600, height: 520)
     }
 }

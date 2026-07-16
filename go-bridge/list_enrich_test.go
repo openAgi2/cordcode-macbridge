@@ -289,6 +289,7 @@ func TestListSessionsClaude_144SessionPerfFixture(t *testing.T) {
 	}
 
 	handlers := newTestHandlers(t)
+	handlers.SetSessionListLimit(150)
 	handlers.claudeSessions = catalog
 	handlers.sessions.markRunning("ses_000") // stale-running registry row
 	handlers.RegisterAgent("claudecode", agent)
