@@ -134,6 +134,34 @@ class PairingViewModel: ObservableObject {
         isStarting = false
     }
 
+    func getOrFetchWebPairingURL(isV2: Bool) async -> String? {
+        var payload = webQrPayload
+        if payload.isEmpty || remainingSeconds == nil || remainingSeconds! < 10 {
+            guard let client = apiClient else { return nil }
+            do {
+                let session = try await client.createPairing()
+                guard let parsedExpiry = Self.parseExpiry(session.expiresAt) else { return nil }
+                currentSessionId = session.id
+                manualCode = session.manualCode
+                qrPayload = session.qrPayload
+                webQrPayload = session.webQrPayload ?? ""
+                payload = session.webQrPayload ?? ""
+                beginCountdown(expiresAt: parsedExpiry)
+                startPolling()
+            } catch {
+                return nil
+            }
+        }
+        
+        guard !payload.isEmpty else { return nil }
+        
+        if isV2 {
+            return Self.webV2PairingURL(from: payload)
+        } else {
+            return payload
+        }
+    }
+
     func updateRemainingTime(now: Date = Date()) {
         guard let expiresAt else {
             remainingSeconds = nil

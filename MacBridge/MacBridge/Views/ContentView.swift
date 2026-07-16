@@ -172,6 +172,7 @@ struct ContentView: View {
             viewModel: viewModel,
             backendViewModel: backendVM,
             deviceStore: deviceStore,
+            pairingViewModel: pairingViewModel,
             onStartBridge: {
                 dependencies.runtimeManager.start()
             },

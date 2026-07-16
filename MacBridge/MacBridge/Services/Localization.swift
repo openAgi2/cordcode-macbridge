@@ -183,6 +183,7 @@ enum L10n {
     static var reject: String { tr("reject") }
     static var devicePairedSuccessfully: String { tr("device_paired_successfully") }
     static var pairAnotherDevice: String { tr("pair_another_device") }
+    static var pairingReturnToHome: String { tr("pairing_return_to_home") }
     static var deviceRejected: String { tr("device_rejected") }
     static var pairingSessionExpired: String { tr("pairing_session_expired") }
     static var tryAgain: String { tr("try_again") }
@@ -555,6 +556,7 @@ enum L10n {
             "reject": "Reject",
             "device_paired_successfully": "Device paired successfully",
             "pair_another_device": "Pair Another Device",
+            "pairing_return_to_home": "Return to Homepage",
             "device_rejected": "Device rejected",
             "pairing_session_expired": "Pairing session expired",
             "try_again": "Try Again",
@@ -891,6 +893,7 @@ enum L10n {
             "reject": "拒绝",
             "device_paired_successfully": "设备配对成功",
             "pair_another_device": "配对另一个设备",
+            "pairing_return_to_home": "返回首页",
             "device_rejected": "已拒绝设备",
             "pairing_session_expired": "配对会话已过期",
             "try_again": "重试",

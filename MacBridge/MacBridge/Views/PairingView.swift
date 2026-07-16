@@ -12,6 +12,7 @@ struct PairingView: View {
     /// Flow C: which QR to show — the iOS deep-link code or the web https code.
     @State private var qrTarget: PairingQRTarget = .ios
     var onStartBridge: (() -> Void)? = nil
+    var onClose: (() -> Void)? = nil
 
 
     private struct PairingCandidate: Identifiable {
@@ -78,7 +79,8 @@ struct PairingView: View {
                     icon: "checkmark.circle.fill",
                     color: .green,
                     message: L10n.devicePairedSuccessfully,
-                    button: L10n.pairAnotherDevice
+                    button: L10n.pairingReturnToHome,
+                    onClose: onClose
                 )
 
             case .rejected:
@@ -291,36 +293,82 @@ struct PairingView: View {
     }
 
     private func claimedView(deviceName: String, platform: String) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                Image(systemName: platform.lowercased().contains("ios") ? "iphone" : "desktopcomputer")
-                    .font(.title2)
-                VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .center, spacing: 24) {
+            Spacer()
+                .frame(height: 20)
+            
+            // Device Information Card
+            VStack(spacing: 16) {
+                ZStack {
+                    Circle()
+                        .fill(Color.accentColor.opacity(0.12))
+                        .frame(width: 80, height: 80)
+                    
+                    Image(systemName: platform.lowercased().contains("ios") ? "iphone" : "desktopcomputer")
+                        .font(.system(size: 36))
+                        .foregroundStyle(Color.accentColor)
+                }
+                
+                VStack(spacing: 6) {
                     Text(deviceName)
-                        .font(.headline)
+                        .font(.title2)
+                        .bold()
+                        .foregroundStyle(.primary)
+                    
                     Text(platform)
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
             }
-
-            if !bridgeDisplayName.isEmpty {
-                Text(String(format: L10n.pairingConnectTo, bridgeDisplayName))
+            .padding(.vertical, 24)
+            .padding(.horizontal, 40)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(NSColor.controlBackgroundColor).opacity(0.4))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+                    )
+            )
+            .frame(maxWidth: 360)
+            
+            // Explanation Texts
+            VStack(spacing: 8) {
+                if !bridgeDisplayName.isEmpty {
+                    Text(String(format: L10n.pairingConnectTo, bridgeDisplayName))
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                }
+                
+                Text(L10n.pairingApprovalExplanation)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(4)
+                    .frame(maxWidth: 440)
             }
-            Text(L10n.pairingApprovalExplanation)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 10) {
-                Button(L10n.approve) {
+            
+            // Enlarged Centered Action Buttons
+            HStack(spacing: 16) {
+                Button(role: .destructive) {
+                    viewModel.reject()
+                } label: {
+                    Text(L10n.reject)
+                        .font(.system(size: 15, weight: .semibold))
+                        .frame(minWidth: 100)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                
+                ApproveDeviceButton(title: L10n.approve) {
                     viewModel.approve()
                 }
-                .buttonStyle(.borderedProminent)
-                Button(L10n.reject, role: .destructive) {
-                    viewModel.reject()
-                }
             }
+            .padding(.top, 10)
+            
+            Spacer()
         }
+        .frame(maxWidth: .infinity)
     }
 
     private func resultView(
@@ -328,19 +376,61 @@ struct PairingView: View {
         color: Color,
         message: String,
         button: String,
-        startsPairing: Bool = false
+        startsPairing: Bool = false,
+        onClose: (() -> Void)? = nil
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label(message, systemImage: icon)
-                .font(.headline)
-                .foregroundStyle(color)
-            Button(button) {
-                viewModel.reset()
-                if startsPairing {
-                    viewModel.startPairing()
-                }
-            }
+        let baseIcon: String
+        if icon == "checkmark.circle.fill" {
+            baseIcon = "checkmark"
+        } else if icon == "xmark.circle.fill" {
+            baseIcon = "xmark"
+        } else {
+            baseIcon = icon
         }
+        
+        return VStack(alignment: .center, spacing: 24) {
+            Spacer()
+            
+            VStack(spacing: 20) {
+                ZStack {
+                    Circle()
+                        .fill(color.opacity(0.12))
+                        .frame(width: 88, height: 88)
+                    
+                    Image(systemName: baseIcon)
+                        .font(.system(size: 44))
+                        .foregroundStyle(color)
+                }
+                
+                Text(message)
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.vertical, 30)
+            .padding(.horizontal, 40)
+            .frame(maxWidth: 400)
+            
+            Button {
+                if let onClose = onClose {
+                    onClose()
+                } else {
+                    viewModel.reset()
+                    if startsPairing {
+                        viewModel.startPairing()
+                    }
+                }
+            } label: {
+                Text(button)
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(minWidth: 180)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private func errorStateView(message: String) -> some View {
@@ -488,7 +578,8 @@ struct PairingSheet: View {
                 PairingView(
                     viewModel: viewModel,
                     showsHeader: false,
-                    onStartBridge: onStartBridge
+                    onStartBridge: onStartBridge,
+                    onClose: close
                 )
             }
         }
@@ -552,5 +643,76 @@ struct PairingStepTracker: View {
             .fill(active ? Color.accentColor.opacity(0.5) : Color.secondary.opacity(0.25))
             .frame(width: 18, height: 2)
             .padding(.horizontal, 4)
+    }
+}
+
+private struct ApproveDeviceButton: View {
+    let title: String
+    let action: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isBreathing = false
+    @State private var sweepProgress = false
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(minWidth: 160)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .background {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.accentColor)
+                .overlay {
+                    GeometryReader { proxy in
+                        LinearGradient(
+                            colors: [.clear, .white.opacity(0.18), .clear],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: proxy.size.width * 0.38)
+                        .offset(x: sweepProgress ? proxy.size.width : -proxy.size.width * 0.38)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .allowsHitTesting(false)
+                }
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(.white.opacity(isBreathing ? 0.34 : 0.18), lineWidth: 1)
+        }
+        .shadow(
+            color: Color.accentColor.opacity(0.12),
+            radius: isBreathing ? 8 : 4,
+            y: isBreathing ? 3 : 1
+        )
+        .scaleEffect(isHovering ? 1.02 : (isBreathing ? 1.008 : 1))
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.16)) {
+                isHovering = hovering
+            }
+        }
+        .onAppear(perform: startMotion)
+        .onChange(of: reduceMotion) { _, _ in startMotion() }
+    }
+
+    private func startMotion() {
+        guard !reduceMotion else {
+            isBreathing = false
+            sweepProgress = false
+            return
+        }
+        withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
+            isBreathing = true
+        }
+        withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
+            sweepProgress = true
+        }
     }
 }

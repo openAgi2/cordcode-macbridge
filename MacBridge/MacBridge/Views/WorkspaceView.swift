@@ -13,6 +13,7 @@ struct WorkspaceView: View {
     @ObservedObject var viewModel: BridgeStatusViewModel
     @ObservedObject var backendViewModel: BackendStatusViewModel
     @ObservedObject var deviceStore: DeviceStore
+    @ObservedObject var pairingViewModel: PairingViewModel
     let onStartBridge: () -> Void
     let onStopBridge: () -> Void
     let onRestartBridge: () -> Void
@@ -23,6 +24,10 @@ struct WorkspaceView: View {
     @State private var isRestarting = false
     @State private var deviceToRemove: TrustedDevice?
     @State private var showRemoveConfirmation = false
+    @State private var copiedWebLinkId: String? = nil
+    @State private var copiedWebV2LinkId: String? = nil
+    @State private var generatingWebLinkId: String? = nil
+    @State private var generatingWebV2LinkId: String? = nil
 
     private var agents: [BackendAgentStatus] {
         if !backendViewModel.agents.isEmpty {
@@ -274,6 +279,49 @@ struct WorkspaceView: View {
 
             Spacer()
 
+            // Copy buttons for this specific device
+            HStack(spacing: 8) {
+                let isWebLoading = generatingWebLinkId == device.deviceId
+                let isWebCopied = copiedWebLinkId == device.deviceId
+                Button {
+                    handleCopyLink(isV2: false, forDevice: device)
+                } label: {
+                    HStack(spacing: 4) {
+                        if isWebLoading {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: isWebCopied ? "checkmark" : "doc.on.clipboard")
+                        }
+                        Text(isWebCopied ? L10n.pairingLinkCopied : L10n.copyPairingLink)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(generatingWebLinkId != nil || generatingWebV2LinkId != nil)
+                
+                let isWebV2Loading = generatingWebV2LinkId == device.deviceId
+                let isWebV2Copied = copiedWebV2LinkId == device.deviceId
+                Button {
+                    handleCopyLink(isV2: true, forDevice: device)
+                } label: {
+                    HStack(spacing: 4) {
+                        if isWebV2Loading {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: isWebV2Copied ? "checkmark" : "doc.on.clipboard")
+                        }
+                        Text(isWebV2Copied ? L10n.pairingV2LinkCopied : L10n.copyV2PairingLink)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(generatingWebLinkId != nil || generatingWebV2LinkId != nil)
+            }
+            .offset(y: 7)
+            .padding(.trailing, 12)
+
             RevokeButton {
                 deviceToRemove = device
                 showRemoveConfirmation = true
@@ -289,6 +337,45 @@ struct WorkspaceView: View {
             Rectangle()
                 .fill(Color.white.opacity(0.15))
                 .frame(height: 0.5)
+        }
+    }
+
+    private func handleCopyLink(isV2: Bool, forDevice device: TrustedDevice) {
+        if isV2 {
+            guard generatingWebV2LinkId == nil else { return }
+            generatingWebV2LinkId = device.deviceId
+        } else {
+            guard generatingWebLinkId == nil else { return }
+            generatingWebLinkId = device.deviceId
+        }
+        
+        Task {
+            if let urlString = await pairingViewModel.getOrFetchWebPairingURL(isV2: isV2) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(urlString, forType: .string)
+                if isV2 {
+                    copiedWebV2LinkId = device.deviceId
+                    try? await Task.sleep(for: .seconds(2))
+                    if copiedWebV2LinkId == device.deviceId {
+                        copiedWebV2LinkId = nil
+                    }
+                } else {
+                    copiedWebLinkId = device.deviceId
+                    try? await Task.sleep(for: .seconds(2))
+                    if copiedWebLinkId == device.deviceId {
+                        copiedWebLinkId = nil
+                    }
+                }
+            }
+            if isV2 {
+                if generatingWebV2LinkId == device.deviceId {
+                    generatingWebV2LinkId = nil
+                }
+            } else {
+                if generatingWebLinkId == device.deviceId {
+                    generatingWebLinkId = nil
+                }
+            }
         }
     }
 
