@@ -2,6 +2,20 @@ import XCTest
 @testable import CordCodeLink
 
 final class MacBridgeBehaviorTests: XCTestCase {
+    func testRuntimeArgumentsIncludeSessionListLimit() {
+        let config = RuntimeConfig(
+            executablePath: "/tmp/runtime",
+            dataDir: "/tmp/data",
+            logDir: "/tmp/logs",
+            sessionListLimit: 125
+        )
+
+        let arguments = RuntimeManager.processArguments(for: config)
+        guard let index = arguments.firstIndex(of: "-session-list-limit") else {
+            return XCTFail("missing -session-list-limit")
+        }
+        XCTAssertEqual(arguments[index + 1], "125")
+    }
     func testGoDurationFormatting() {
         XCTAssertEqual(BridgeStatusViewModel.formatUptime("42.381s"), L10n.overviewUptimeUnderMinute)
         XCTAssertEqual(BridgeStatusViewModel.formatUptime("12m4.2s"), String(format: L10n.overviewUptimeMinutes, 12))

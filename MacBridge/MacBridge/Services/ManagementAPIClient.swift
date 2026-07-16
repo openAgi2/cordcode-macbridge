@@ -130,6 +130,9 @@ class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIP
     /// status 轮询 3s 一次，若 management server 半开（accept 连接不返回），URLSession.shared
     /// 的默认超时会让 supervisor 卡住数十秒，期间不执行自动重启判定。
     private let session: URLSession
+    /// Pairing status/approval can synchronously cross the public Relay. Keep those requests
+    /// separate from the 2-second local health-check budget.
+    private let pairingSession: URLSession
 
     init(baseURL: String, token: String) throws {
         guard let url = URL(string: baseURL), !baseURL.isEmpty else {
@@ -144,6 +147,12 @@ class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIP
         config.timeoutIntervalForResource = 5
         config.waitsForConnectivity = false
         self.session = URLSession(configuration: config)
+
+        let pairingConfig = URLSessionConfiguration.ephemeral
+        pairingConfig.timeoutIntervalForRequest = 10
+        pairingConfig.timeoutIntervalForResource = 20
+        pairingConfig.waitsForConnectivity = false
+        self.pairingSession = URLSession(configuration: pairingConfig)
     }
 
     private func request(_ path: String, method: String = "GET") -> URLRequest {
@@ -155,10 +164,14 @@ class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIP
     }
 
     // P1-1: 统一 HTTP 状态码校验
-    private func performRequest(_ path: String, method: String = "GET") async throws -> Data {
+    private func performRequest(
+        _ path: String,
+        method: String = "GET",
+        using requestSession: URLSession? = nil
+    ) async throws -> Data {
         var req = request(path, method: method)
         if method == "POST" { req.httpBody = Data() }
-        let (data, response) = try await session.data(for: req)
+        let (data, response) = try await (requestSession ?? session).data(for: req)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             let code = (response as? HTTPURLResponse)?.statusCode ?? -1
             throw ManagementError.httpError(code)
@@ -196,22 +209,22 @@ class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIP
     // MARK: - Pairing
 
     func createPairing() async throws -> PairingSessionInfo {
-        let data = try await performRequest("/internal/pairing/create", method: "POST")
+        let data = try await performRequest("/internal/pairing/create", method: "POST", using: pairingSession)
         return try JSONDecoder().decode(PairingSessionInfo.self, from: data)
     }
 
     func getPairingStatus(_ pairingId: String) async throws -> PairingSessionStatus {
-        let data = try await performRequest("/internal/pairing/\(pairingId)")
+        let data = try await performRequest("/internal/pairing/\(pairingId)", using: pairingSession)
         return try JSONDecoder().decode(PairingSessionStatus.self, from: data)
     }
 
     func approvePairing(_ pairingId: String) async throws -> PairingApproval {
-        let data = try await performRequest("/internal/pairing/\(pairingId)/approve", method: "POST")
+        let data = try await performRequest("/internal/pairing/\(pairingId)/approve", method: "POST", using: pairingSession)
         return try JSONDecoder().decode(PairingApproval.self, from: data)
     }
 
     func rejectPairing(_ pairingId: String) async throws {
-        _ = try await performRequest("/internal/pairing/\(pairingId)/reject", method: "POST")
+        _ = try await performRequest("/internal/pairing/\(pairingId)/reject", method: "POST", using: pairingSession)
     }
 
     // MARK: - Devices

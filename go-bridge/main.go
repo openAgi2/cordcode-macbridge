@@ -53,6 +53,7 @@ func Main() {
 	includeTailscale := flag.Bool("pairing-include-tailscale", true, "Include detected Tailscale URL in pairing QR")
 	includeRemote := flag.Bool("pairing-include-remote", true, "Include manual remote URL in pairing QR")
 	relayEnabled := flag.Bool("relay-enabled", true, "Enable encrypted relay path")
+	sessionListLimit := flag.Int("session-list-limit", defaultSessionListLimit, "Maximum sessions returned per list request (1-150)")
 
 	// Relay 加密通道配置（首版：通过 flags 或环境变量注入，后续由 MacBridge runtime config 驱动）
 	relayEndpoint := flag.String("relay-endpoint", envOr("CORDCODE_RELAY_ENDPOINT", ""), "Relay 服务端点（wss://relay.example.com）")
@@ -92,6 +93,7 @@ func Main() {
 
 	handlers := NewHandlersWithContext(ctx)
 	handlers.SetRelayEnabled(*relayEnabled)
+	handlers.SetSessionListLimit(*sessionListLimit)
 	handlers.SetDataDir(*dataDirPath)
 	if *dataDirPath != "" {
 		handlers.SetTranscriptIndexBaseDir(*dataDirPath + string(filepath.Separator) + "transcript-index")
@@ -108,10 +110,10 @@ func Main() {
 	}
 
 	agentAliases := map[string]string{
-		"claude":     "claudecode",
-		"opencode":   "opencode",
-		"codex":      "codex",
-		"grokbuild":  "grokbuild",
+		"claude":    "claudecode",
+		"opencode":  "opencode",
+		"codex":     "codex",
+		"grokbuild": "grokbuild",
 	}
 
 	for _, id := range strings.Split(*drivers, ",") {

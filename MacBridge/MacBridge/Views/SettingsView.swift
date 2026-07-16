@@ -6,6 +6,7 @@ struct SettingsView: View {
     @AppStorage("appTheme") private var appTheme = ""
     @AppStorage("autoRestartEnabled") private var autoRestartEnabled = true
     @AppStorage("autoRestartIntervalMinutes") private var autoRestartIntervalMinutes = 120
+    @AppStorage("sessionListLimit") private var sessionListLimit = 50
     @State private var showManualAuthentication = false
     @State private var showPassword = false
     @State private var showRegenerateConfirmation = false
@@ -22,6 +23,8 @@ struct SettingsView: View {
         ("4 小时", 240),
         ("8 小时", 480),
     ]
+
+    private let sessionListLimitOptions = [25, 50, 75, 100, 125, 150]
 
     /// 是否已偏离默认托管态（外部 HTTP / legacy / disabled），用于决定高级表单是否默认展开。
     private var isOpenCodeConfiguredAwayFromManaged: Bool {
@@ -101,6 +104,23 @@ struct SettingsView: View {
                         }
                     }
                     feedbackView(viewModel.displayNameFeedback)
+                    settingRow(L10n.settingsSessionListLimit) {
+                        Picker("", selection: $sessionListLimit) {
+                            ForEach(sessionListLimitOptions, id: \.self) { limit in
+                                Text("\(limit)").tag(limit)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(width: 320, alignment: .leading)
+                        .onChange(of: sessionListLimit) { _, _ in
+                            NotificationCenter.default.post(name: .sessionListLimitDidChange, object: nil)
+                        }
+                    }
+                    Text(L10n.settingsSessionListLimitHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, labelWidth + 16)
                 }
 
                 Divider()

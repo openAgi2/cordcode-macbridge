@@ -36,6 +36,17 @@ class PairingViewModel: ObservableObject {
     private var currentSessionId: String?
     private var expiresAt: Date?
     private var isStarting = false
+    private var isPolling = false
+
+    nonisolated static func webV2PairingURL(from webPairingURL: String) -> String? {
+        guard var components = URLComponents(string: webPairingURL),
+              components.scheme == "https" || components.scheme == "http",
+              components.path == "/web/" || components.path == "/web" else {
+            return nil
+        }
+        components.path = "/web-v2/"
+        return components.string
+    }
 
     func configure(apiClient: ManagementAPIClient) {
         self.apiClient = apiClient
@@ -187,13 +198,23 @@ class PairingViewModel: ObservableObject {
     }
 
     private func pollStatus() async {
-        guard let client = apiClient, let sessionId = currentSessionId else { return }
+        guard !isPolling, let client = apiClient, let sessionId = currentSessionId else { return }
+        isPolling = true
+        defer { isPolling = false }
         do {
             let status = try await client.getPairingStatus(sessionId)
             await applyPairingStatus(status)
+        } catch let error where Self.isTransientPollingError(error) {
+            // A single slow Relay round trip must not destroy the still-valid pairing session.
+            // The next scheduled poll retries while the countdown remains authoritative.
+            return
         } catch {
             transitionToError(error.localizedDescription)
         }
+    }
+
+    nonisolated static func isTransientPollingError(_ error: Error) -> Bool {
+        (error as? URLError)?.code == .timedOut
     }
 
     func applyPairingStatus(_ status: PairingSessionStatus) async {

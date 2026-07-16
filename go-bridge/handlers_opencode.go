@@ -293,7 +293,7 @@ const openCodeSessionFetchLimit = 100
 
 func (h *Handlers) ocHandleListSessions(conn Connection, msg WireMessage, dir string) {
 	rootsOnly := extractBool(msg, "rootsOnly")
-	limit := extractPositiveInt(msg, "limit")
+	limit := h.effectiveSessionListLimit(extractPositiveInt(msg, "limit"))
 	cursor := extractStringParam(msg, "cursor")
 	if limit > 1000 {
 		limit = 1000

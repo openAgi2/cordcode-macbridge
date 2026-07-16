@@ -10,6 +10,7 @@ import Security
 extension Notification.Name {
     /// 远程 URL 配置变更时触发，RuntimeManager 应更新配置并重启
     static let remoteURLDidChange = Notification.Name("remoteURLDidChange")
+    static let sessionListLimitDidChange = Notification.Name("sessionListLimitDidChange")
     /// P2-3：键盘命令请求打开「帮助与诊断」工作表。
     static let openDiagnosticsRequest = Notification.Name("openDiagnosticsRequest")
     /// P2-3：键盘命令请求打开「连接状态」工作表。
@@ -64,6 +65,7 @@ struct RuntimeConfig {
     var relayRouteID: String
     var relayCredential: String
     var relayServiceAddress: String
+    var sessionListLimit: Int
 
     init(
         executablePath: String,
@@ -87,7 +89,8 @@ struct RuntimeConfig {
         relayEndpoint: String = "",
         relayRouteID: String = "",
         relayCredential: String = "",
-        relayServiceAddress: String = ""
+        relayServiceAddress: String = "",
+        sessionListLimit: Int = 50
     ) {
         self.executablePath = NSString(string: executablePath).expandingTildeInPath
         self.port = port
@@ -111,6 +114,7 @@ struct RuntimeConfig {
         self.relayRouteID = relayRouteID
         self.relayCredential = relayCredential
         self.relayServiceAddress = relayServiceAddress
+        self.sessionListLimit = min(max(sessionListLimit, 1), 150)
     }
 
     private static func defaultCLISearchPath() -> [String] {
@@ -967,6 +971,7 @@ class RuntimeManager: ObservableObject {
             "-management-port", "0",
             "-data-dir", config.dataDir,
             "-log-dir", config.logDir,
+            "-session-list-limit", "\(config.sessionListLimit)",
         ]
         if !config.codexAppServerURL.isEmpty {
             arguments += ["-codex-app-server-url", config.codexAppServerURL]

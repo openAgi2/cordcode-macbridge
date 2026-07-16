@@ -1589,6 +1589,51 @@ func TestHandleGetSessionMessagesPrefersRichHistoryProvider(t *testing.T) {
 	}
 }
 
+func TestHandleGetSessionMessagesBoundsPaginatedRichHistoryFallback(t *testing.T) {
+	large := strings.Repeat("x", 180<<10)
+	agent := &fakeAgent{
+		name: "claude",
+		richHistory: []core.RichHistoryEntry{
+			{ID: "old", Role: "assistant", Content: large, Timestamp: time.Unix(1, 0).UTC()},
+			{ID: "new", Role: "assistant", Content: large, Timestamp: time.Unix(2, 0).UTC()},
+		},
+	}
+
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("claude", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "claude",
+		Method:    "get_session_messages",
+		RequestID: "hist-bounded",
+		Params: mustJSONRaw(t, map[string]any{
+			"sessionId": "ses_large",
+			"limit":     50,
+			"paginate":  true,
+		}),
+	})
+
+	response := readJSONMaps(t, clientConn, 1)[0]
+	data, _ := response["data"].(map[string]any)
+	entries, _ := data["messages"].([]any)
+	if len(entries) != 1 {
+		t.Fatalf("message count = %d, want newest message only", len(entries))
+	}
+	entry, _ := entries[0].(map[string]any)
+	if got := entry["id"]; got != "new" {
+		t.Fatalf("message id = %#v, want new", got)
+	}
+	encoded, err := json.Marshal(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > maxPageResponseBytes {
+		t.Fatalf("fallback page encoded %d bytes > budget %d", len(encoded), maxPageResponseBytes)
+	}
+}
+
 func TestHandleGetSessionMessagesIfNoneMatchShortCircuits(t *testing.T) {
 	agent := &fakeAgent{
 		name: "codex",

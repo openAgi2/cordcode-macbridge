@@ -225,6 +225,8 @@ enum L10n {
     static var pairingAdvancedPath: String { tr("pairing_advanced_path") }
     static var copyPairingLink: String { tr("copy_pairing_link") }
     static var pairingLinkCopied: String { tr("pairing_link_copied") }
+    static var copyV2PairingLink: String { tr("copy_v2_pairing_link") }
+    static var pairingV2LinkCopied: String { tr("pairing_v2_link_copied") }
     // Flow C: web QR (https URL) shown alongside the iOS QR.
     static var pairingQRTarget: String { tr("pairing_qr_target") }
     static var pairingQRTargetIOS: String { tr("pairing_qr_target_ios") }
@@ -327,6 +329,8 @@ enum L10n {
     static var settingsAutoRestartEnable: String { tr("settings_auto_restart_enable") }
     static var settingsAutoRestartInterval: String { tr("settings_auto_restart_interval") }
     static var settingsAutoRestartHint: String { tr("settings_auto_restart_hint") }
+    static var settingsSessionListLimit: String { tr("settings_session_list_limit") }
+    static var settingsSessionListLimitHint: String { tr("settings_session_list_limit_hint") }
 
     // MARK: - OpenCode endpoint (shared server)
 
@@ -592,6 +596,8 @@ enum L10n {
             "pairing_advanced_path": "Advanced Connection",
             "copy_pairing_link": "Copy Pairing Link",
             "pairing_link_copied": "Copied",
+            "copy_v2_pairing_link": "Copy V2 Pairing Link",
+            "pairing_v2_link_copied": "V2 Link Copied",
             "pairing_qr_target": "Pairing code",
             "pairing_qr_target_ios": "iOS",
             "pairing_qr_target_web": "Web",
@@ -677,6 +683,8 @@ enum L10n {
             "settings_auto_restart_enable": "Enable auto restart",
             "settings_auto_restart_interval": "Restart interval",
             "settings_auto_restart_hint": "Restarts Bridge if it gets stuck, and on a regular schedule to keep connections stable. Changes apply immediately.",
+            "settings_session_list_limit": "Sessions to load",
+            "settings_session_list_limit_hint": "Loads the newest sessions only. Default 50; maximum 150. Changes restart the Bridge automatically.",
             "opencode_server_source": "Server Source",
             "opencode_server_url": "Server URL",
             "opencode_source_managed_local": "Automatic (Recommended)",
@@ -924,6 +932,8 @@ enum L10n {
             "pairing_advanced_path": "高级连接",
             "copy_pairing_link": "复制配对链接",
             "pairing_link_copied": "已复制",
+            "copy_v2_pairing_link": "复制 V2 版配对链接",
+            "pairing_v2_link_copied": "V2 链接已复制",
             "pairing_qr_target": "配对码",
             "pairing_qr_target_ios": "iOS",
             "pairing_qr_target_web": "Web",
@@ -1009,6 +1019,8 @@ enum L10n {
             "settings_auto_restart_enable": "启用自动重启",
             "settings_auto_restart_interval": "重启周期",
             "settings_auto_restart_hint": "Bridge 卡住时自动重启，并按周期定时兜底重启，保持连接稳定。修改后立即生效。",
+            "settings_session_list_limit": "Session 加载条数",
+            "settings_session_list_limit_hint": "仅加载最新 Session。默认 50 条，最多 150 条；修改后 Bridge 会自动重启。",
             "opencode_server_source": "Server 来源",
             "opencode_server_url": "Server URL",
             "opencode_source_managed_local": "自动托管（推荐）",

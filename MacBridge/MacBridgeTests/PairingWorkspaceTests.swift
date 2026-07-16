@@ -44,6 +44,26 @@ final class PairingWorkspaceTests: XCTestCase {
         XCTAssertTrue(L10n.pairingStepProgress.contains("%d"))
     }
 
+    func testV2PairingURLPreservesTheCompletePairingSessionQuery() throws {
+        let source = "https://relay.example.com:8443/web/?id=pair_123&code=654321&relay=wss%3A%2F%2Frelay.example.com%3A8443&relayRoute=route_1&relayCapability=paircap_abc"
+        let result = try XCTUnwrap(PairingViewModel.webV2PairingURL(from: source))
+        let sourceComponents = try XCTUnwrap(URLComponents(string: source))
+        let resultComponents = try XCTUnwrap(URLComponents(string: result))
+
+        XCTAssertEqual(resultComponents.path, "/web-v2/")
+        XCTAssertEqual(resultComponents.queryItems, sourceComponents.queryItems)
+    }
+
+    func testV2PairingURLRejectsNonWebPairingLinks() {
+        XCTAssertNil(PairingViewModel.webV2PairingURL(from: "cccode://pair?id=pair_123"))
+        XCTAssertNil(PairingViewModel.webV2PairingURL(from: "https://relay.example.com:8443/healthz?id=pair_123"))
+    }
+
+    func testPairingStatusTimeoutRemainsRetryable() {
+        XCTAssertTrue(PairingViewModel.isTransientPollingError(URLError(.timedOut)))
+        XCTAssertFalse(PairingViewModel.isTransientPollingError(URLError(.badServerResponse)))
+    }
+
     func testRevokeMessageDescribesResultAndRecovery() {
         // P1-1 要求撤销确认补齐「将断开此设备、之后需要重新配对」结果与恢复文案。
         let msg = L10n.devicesRevokeMessage

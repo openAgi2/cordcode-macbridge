@@ -339,6 +339,24 @@ func listIDs(data map[string]interface{}) []string {
 	return ids
 }
 
+func TestSessionListLimitUsesConfiguredCap(t *testing.T) {
+	h := NewHandlers()
+	if got := h.effectiveSessionListLimit(150); got != 50 {
+		t.Fatalf("default configured limit = %d, want 50", got)
+	}
+	h.SetSessionListLimit(125)
+	if got := h.effectiveSessionListLimit(150); got != 125 {
+		t.Fatalf("configured limit = %d, want 125", got)
+	}
+	if got := h.effectiveSessionListLimit(25); got != 25 {
+		t.Fatalf("smaller client limit = %d, want 25", got)
+	}
+	h.SetSessionListLimit(999)
+	if got := h.effectiveSessionListLimit(999); got != 150 {
+		t.Fatalf("maximum limit = %d, want 150", got)
+	}
+}
+
 // list_sessions pages through sessions newest-first by composite cursor with no
 // duplicates or gaps across pages.
 func TestListSessionsPagination(t *testing.T) {

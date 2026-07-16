@@ -25,7 +25,11 @@ var hiddenDirectoryBases = map[string]bool{
 	"claudeprobe": true,
 }
 
-const claudeSessionSummaryReadLimit = 512 * 1024
+const (
+	claudeSessionSummaryReadLimit = 512 * 1024
+	defaultSessionListLimit       = 50
+	maxSessionListLimit           = 150
+)
 
 type Handlers struct {
 	mu                     sync.Mutex
@@ -66,6 +70,7 @@ type Handlers struct {
 	// capabilityPolicy 是集中式 RPC 授权层（P3 架构演进，§3.2/§8）。
 	capabilityPolicy *CapabilityPolicy
 	relayEnabled     bool
+	sessionListLimit int
 
 	// pinStore persists MacBridge-owned session pin (置顶) metadata. Injected from main()
 	// (under the bridge data dir) via SetPinStore; nil in tests that don't exercise pinning.
@@ -124,6 +129,7 @@ func newHandlersWithContext(ctx context.Context) *Handlers {
 		transcriptIndex:        transcriptindex.NewStore(defaultTranscriptIndexDir()),
 		capabilityPolicy:       NewCapabilityPolicy(),
 		relayEnabled:           true,
+		sessionListLimit:       defaultSessionListLimit,
 		ctx:                    ctx,
 		cleanupStop:            make(chan struct{}),
 	}
@@ -153,6 +159,31 @@ func newHandlersWithContext(ctx context.Context) *Handlers {
 		h.runningMap.invalidate()
 	}
 	return h
+}
+
+func (h *Handlers) SetSessionListLimit(limit int) {
+	if limit < 1 {
+		limit = defaultSessionListLimit
+	}
+	if limit > maxSessionListLimit {
+		limit = maxSessionListLimit
+	}
+	h.mu.Lock()
+	h.sessionListLimit = limit
+	h.mu.Unlock()
+}
+
+func (h *Handlers) effectiveSessionListLimit(requested int) int {
+	h.mu.Lock()
+	configured := h.sessionListLimit
+	h.mu.Unlock()
+	if configured < 1 {
+		configured = defaultSessionListLimit
+	}
+	if requested > 0 && requested < configured {
+		return requested
+	}
+	return configured
 }
 
 func (h *Handlers) SetRelayEnabled(enabled bool) {
@@ -1984,7 +2015,7 @@ func findClaudeSessionFile(sessionID string, optDir string) (projectDir string, 
 }
 
 func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent core.Agent) {
-	limit := extractPositiveInt(msg, "limit")
+	limit := h.effectiveSessionListLimit(extractPositiveInt(msg, "limit"))
 	metrics := newSessionLoadRequestMetrics(conn, msg)
 	ctx := core.WithSessionLoadMetrics(context.Background(), metrics.context())
 
@@ -2457,6 +2488,9 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 					wireEntry["id"] = fmt.Sprintf("%s:%d:%s:%d", params.SessionID, i, entry.Role, entry.Timestamp.UnixMilli())
 				}
 				messages = append(messages, wireEntry)
+			}
+			if params.Paginate {
+				messages = trimWireToBudget(messages)
 			}
 			result := map[string]interface{}{"messages": messages}
 			if usage := h.getSessionContextUsage(agent, params.SessionID); usage != nil {

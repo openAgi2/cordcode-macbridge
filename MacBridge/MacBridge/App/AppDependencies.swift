@@ -140,7 +140,8 @@ class AppDependencies: ObservableObject {
             // Keychain access may require user authorization after an app update.
             // OfficialRelayProvisioner loads it off the main actor and restarts with the real credential.
             relayCredential: "",
-            relayServiceAddress: UserDefaults.standard.string(forKey: "relayServiceAddress") ?? ""
+            relayServiceAddress: UserDefaults.standard.string(forKey: "relayServiceAddress") ?? "",
+            sessionListLimit: UserDefaults.standard.object(forKey: "sessionListLimit") as? Int ?? 50
         )
 
         self.runtimeManager = RuntimeManager(config: config)
@@ -190,6 +191,16 @@ class AppDependencies: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.handleRemoteURLChange()
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .sessionListLimitDidChange)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                let value = UserDefaults.standard.object(forKey: "sessionListLimit") as? Int ?? 50
+                self?.runtimeManager.applyConfigAndRestart { config in
+                    config.sessionListLimit = min(max(value, 1), 150)
+                }
             }
             .store(in: &cancellables)
 
