@@ -272,6 +272,23 @@ func TestMailboxRequestsAreRateLimitedPerOperation(t *testing.T) {
 	}
 }
 
+func TestEmptyMailboxFetchEncodesFramesAsJSONArray(t *testing.T) {
+	_, httpServer := newTestServer(t, 10)
+	credentials := provisionDevice(t, httpServer.URL)
+	address := httpServer.URL + "/v1/routes/" + credentials.routeID + "/devices/phone-1/mailbox"
+	response, data := requestJSON(t, http.MethodGet, address, credentials.deviceAuth, nil)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("empty mailbox status=%d body=%s", response.StatusCode, data)
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("decode empty mailbox response: %v", err)
+	}
+	if got := string(payload["frames"]); got != "[]" {
+		t.Fatalf("empty mailbox frames=%s, want []", got)
+	}
+}
+
 func TestOnlineForwardingAndStatusDoesNotExposeSecrets(t *testing.T) {
 	_, httpServer := newTestServer(t, 10)
 	credentials := provisionDevice(t, httpServer.URL)
@@ -385,7 +402,7 @@ func TestOfflineMailboxFetchAckAndRevokeAPI(t *testing.T) {
 	_, httpServer := newTestServer(t, 10)
 	credentials := provisionDevice(t, httpServer.URL)
 	bridge := wsDial(t, httpServer.URL, "/v1/routes/"+credentials.routeID+"/bridge", credentials.bridgeAuth)
-	envelope := []byte(`{"routeId":"` + credentials.routeID + `","senderId":"bridge","destinationId":"phone-1","ciphertext":"offline"}`)
+	envelope := []byte(`{"routeId":"` + credentials.routeID + `","senderId":"bridge","destinationId":"phone-1","keyEpochId":"mailbox:0","ciphertext":"offline"}`)
 	if err := bridge.WriteMessage(websocket.TextMessage, envelope); err != nil {
 		t.Fatal(err)
 	}
@@ -451,6 +468,33 @@ func TestMailboxEpochIsStoredWithoutOnlineForward(t *testing.T) {
 	}
 	if len(mailbox.Frames) != 1 || string(mailbox.Frames[0].Envelope) != string(envelope) {
 		t.Fatalf("mailbox body=%s", data)
+	}
+}
+
+func TestConnectionScopedEnvelopeIsNotPersistedForOfflineDevice(t *testing.T) {
+	_, httpServer := newTestServer(t, 10)
+	credentials := provisionDevice(t, httpServer.URL)
+	bridge := wsDial(t, httpServer.URL, "/v1/routes/"+credentials.routeID+"/bridge", credentials.bridgeAuth)
+	defer bridge.Close()
+
+	online := []byte(`{"routeId":"` + credentials.routeID + `","senderId":"bridge","destinationId":"phone-1","keyEpochId":"online:1","ciphertext":"connection-scoped"}`)
+	if err := bridge.WriteMessage(websocket.TextMessage, online); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	var mailbox struct {
+		Frames []MailboxFrame `json:"frames"`
+	}
+	response, data := requestJSON(t, http.MethodGet, httpServer.URL+"/v1/routes/"+credentials.routeID+"/devices/phone-1/mailbox", credentials.deviceAuth, nil)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("mailbox status=%d body=%s", response.StatusCode, data)
+	}
+	if err := json.Unmarshal(data, &mailbox); err != nil {
+		t.Fatal(err)
+	}
+	if len(mailbox.Frames) != 0 {
+		t.Fatalf("connection-scoped envelope must not enter mailbox: %s", data)
 	}
 }
 

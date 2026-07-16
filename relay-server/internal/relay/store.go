@@ -365,7 +365,10 @@ ORDER BY cursor LIMIT ?`, routeID, deviceID, after, now.Unix(), limit)
 		return nil, err
 	}
 	defer rows.Close()
-	var frames []MailboxFrame
+	// The mailbox HTTP contract represents an empty result as `frames: []`, never
+	// JSON null. Browser clients must be able to distinguish a real empty mailbox
+	// from a malformed response without relying on language-specific nil handling.
+	frames := make([]MailboxFrame, 0)
 	for rows.Next() {
 		var frame MailboxFrame
 		if err := rows.Scan(&frame.Cursor, &frame.Envelope, &frame.ExpiresAt); err != nil {
@@ -454,7 +457,6 @@ func (s *Store) SubmitPairingClaim(ctx context.Context, routeID, claimID string,
 	}
 	return tx.Commit()
 }
-
 
 func (s *Store) VerifyPairingCapability(ctx context.Context, routeID, claimID string, capability string) bool {
 	var hash []byte

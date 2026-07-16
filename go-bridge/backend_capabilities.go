@@ -17,8 +17,8 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 	// session_pagination capability disabled: 去分页方案。backward paging 在长 session 上
 	// 造成 newest↔backward 自维持振荡（WebView 渲染抖动→顶部哨兵→loadOlder→再渲染→再抖动）。
 	// iOS 在此 capability 缺失时有完整 fallback：fetchMessages 走 getSessionMessagesResult
-	// 全量返回（不带 paginate/cursor），一次性读完整个 session。配合 relay MaxFrameBytes=8MB
-	// + 写 deadline 60s，全量响应（实测 3-6MB 帧）可单帧传输不超限。重新启用需：relay 帧上限
+	// 全量返回（不带 paginate/cursor），一次性读完整个 session。配合 relay 默认
+	// MaxFrameBytes=32MiB + 写 deadline 120s，全量响应（实测 3-6MB 帧）可单帧传输不超限。重新启用需：relay 帧上限
 	// 足够大 + 或改用 content_chunking 分片策略承载超大 session。
 	// if _, ok := agent.(core.TranscriptLocator); ok {
 	// 	caps = append(caps, "session_pagination")

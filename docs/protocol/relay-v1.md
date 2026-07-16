@@ -415,6 +415,18 @@ connected.
 associate it with an opaque encrypted envelope. It is independent from Bridge event `seq`,
 `keyEpochId` counter and backend-specific event IDs.
 
+`GET .../mailbox` returns `{ "frames": [...] }`. `frames` is always a JSON array; an empty
+mailbox is `{ "frames": [] }`, never `null`. Clients that need compatibility with older Relay
+servers may interpret `frames: null` as the same empty mailbox, but MUST reject every other
+non-array value as `relay.mailbox_invalid`.
+
+Relay MUST persist only mailbox epochs: their `keyEpochId` has the `mailbox:` prefix and the
+envelope's epoch metadata is then verified by the receiving client. Connection-scoped online
+envelopes MUST be delivered only to an active socket and MUST be dropped when that destination
+is unavailable or rejects its bounded queue; they MUST NOT be stored for mailbox replay. A client
+may ack a historic, correctly addressed non-mailbox artifact from an older Relay only after it
+durably records `localReconcileRequired`; arbitrary malformed mailbox payloads remain fail-closed.
+
 For each replayed item, iOS MUST perform one of these durable transitions before ack:
 
 1. durably apply the verified milestone; or

@@ -88,8 +88,8 @@ func TestPerDeviceQueue_RouteLevelIsolation(t *testing.T) {
 		if err := bridge.WriteMessage(websocket.TextMessage, bPayload); err != nil {
 			return
 		}
-		// Then flood A. Once A's queue overflows the relay disconnects A and
-		// mailbox-falls-back; this no longer blocks B (already delivered).
+		// Then flood A. Once A's queue overflows the relay disconnects A; this
+		// no longer blocks B (already delivered).
 		for i := 0; i < perDeviceSendQueueFrames+20; i++ {
 			env := []byte(`{"routeId":"` + credentials.routeID + `","senderId":"bridge","destinationId":"phone-1","keyEpochId":"online-` + itoa(i) + `","ciphertext":"` + bigCiphertext + `"}`)
 			if err := bridge.WriteMessage(websocket.TextMessage, env); err != nil {
@@ -127,11 +127,11 @@ func TestPerDeviceQueue_RouteLevelIsolation(t *testing.T) {
 
 // TestPerDeviceQueue_FullQueueDisconnectsSlowDeviceAndMailboxes verifies that
 // when a device's send queue overflows, the device is disconnected AND the
-// overflowing frame is preserved in the mailbox (so a reconnecting device gets
-// it). To force overflow deterministically without waiting on kernel TCP
+// overflowing durable mailbox epoch is preserved in the mailbox (so a reconnecting device gets
+// it). Connection-scoped frames are intentionally dropped instead. To force overflow deterministically without waiting on kernel TCP
 // buffers, this test shortens relayWriteDeadline so the per-peer writer's
 // WriteMessage fails fast — the queue then fills (writer no longer drains it)
-// and overflows, triggering disconnect + mailbox fallback.
+// and overflows, triggering disconnect + mailbox persistence.
 func TestPerDeviceQueue_FullQueueDisconnectsSlowDeviceAndMailboxes(t *testing.T) {
 	// Shorten the write deadline so the writer goroutine's WriteMessage returns
 	// quickly on a non-reading device, letting the queue fill + overflow fast.
@@ -150,14 +150,14 @@ func TestPerDeviceQueue_FullQueueDisconnectsSlowDeviceAndMailboxes(t *testing.T)
 	// Flood past the queue cap. 256KB frames mean the 8MiB byte-cap is hit at
 	// ~32 frames; combined with the short write deadline the writer can't drain
 	// fast enough (kernel buffers saturate), so the queue overflows and the
-	// device is disconnected. Overflowing frames fall through to mailbox.
+	// device is disconnected. Overflowing mailbox frames persist to mailbox.
 	bigCiphertext := strings.Repeat("x", 256*1024)
 	floodDone := make(chan struct{})
 	go func() {
 		defer close(floodDone)
 		_ = bridge.SetWriteDeadline(time.Now().Add(10 * time.Second))
 		for i := 0; i < perDeviceSendQueueFrames+10; i++ {
-			env := []byte(`{"routeId":"` + credentials.routeID + `","senderId":"bridge","destinationId":"phone-1","keyEpochId":"online-` + itoa(i) + `","ciphertext":"` + bigCiphertext + `"}`)
+			env := []byte(`{"routeId":"` + credentials.routeID + `","senderId":"bridge","destinationId":"phone-1","keyEpochId":"mailbox:` + itoa(i) + `","ciphertext":"` + bigCiphertext + `"}`)
 			if err := bridge.WriteMessage(websocket.TextMessage, env); err != nil {
 				return
 			}

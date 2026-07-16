@@ -1,13 +1,13 @@
 package relay
 
 import (
-	"errors"
 	"context"
 	"crypto/ed25519"
 	"crypto/hmac"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -74,21 +74,21 @@ type socketPeer struct {
 	// read loop now does a non-blocking enqueue; when the queue is full the
 	// device is disconnected (current envelope falls through to mailbox so it
 	// is not lost).
-	sendCh    chan []byte
-	done      chan struct{}
+	sendCh     chan []byte
+	done       chan struct{}
 	queueBytes int64 // atomic — bytes currently queued, for backpressure + metrics
-	drops     int64  // atomic — count of frames dropped due to full queue
-	startOnce sync.Once
-	stopOnce  sync.Once
+	drops      int64 // atomic — count of frames dropped due to full queue
+	startOnce  sync.Once
+	stopOnce   sync.Once
 }
 
 // Per-device bounded send queue limits. Either bound triggers disconnect of
-// the slow device (the bridge read loop falls back to mailbox for the frame
-// that overflowed). Tuned so a healthy device never trips them; only a
+// the slow device. A durable mailbox epoch is persisted separately by the
+// bridge read loop; connection-scoped traffic is never made durable. Tuned so a healthy device never trips them; only a
 // genuinely stuck receiver (full TCP window) does.
 const (
-	perDeviceSendQueueFrames = 256      // single device send-queue frame cap
-	perDeviceSendQueueBytes  = 8 << 20  // 8 MiB byte cap; whichever hits first disconnects
+	perDeviceSendQueueFrames = 256     // single device send-queue frame cap
+	perDeviceSendQueueBytes  = 8 << 20 // 8 MiB byte cap; whichever hits first disconnects
 )
 
 // startWriter launches the per-peer writer goroutine exactly once. Frames
@@ -128,8 +128,9 @@ func (p *socketPeer) shutdownWriter() {
 }
 
 // enqueue attempts a non-blocking send to the device's queue. Returns true if
-// accepted, false if the queue is full (caller should disconnect the device and
-// fall back to mailbox). Enforcing both frame-count and byte-count bounds here
+// accepted, false if the queue is full (caller should disconnect the device).
+// Durable mailbox epochs are persisted separately; connection-scoped frames
+// are intentionally dropped after disconnect. Enforcing both bounds here
 // guarantees the queue can't grow unbounded.
 func (p *socketPeer) enqueue(payload []byte) bool {
 	if p.sendCh == nil {
@@ -599,9 +600,9 @@ func (s *Server) handleDeviceSocket(w http.ResponseWriter, r *http.Request, rout
 	// the same route (head-of-line blocking). The bridge peer stays sync-write
 	// (there is exactly one bridge per route; no cross-device blocking).
 	peer := &socketPeer{
-		conn:    conn,
-		sendCh:  make(chan []byte, perDeviceSendQueueFrames),
-		done:    make(chan struct{}),
+		conn:   conn,
+		sendCh: make(chan []byte, perDeviceSendQueueFrames),
+		done:   make(chan struct{}),
 	}
 	peer.startWriter()
 	defer func() {
@@ -648,20 +649,21 @@ func (s *Server) readBridgeFrames(ctx context.Context, routeID string, peer *soc
 			s.closePeer(peer, websocket.ClosePolicyViolation, "invalid relay envelope")
 			return
 		}
-		// 在线投递（非 mailbox 帧）：非阻塞 enqueue。成功即 continue（不重复入 mailbox，
-		// 保证在线写成功与 mailbox 幂等）。enqueue 失败（队列满→断开）或 device 不在线
-		// 才落入 mailbox，device 重连后补投。
+		// Connection-scoped frames are never durable mailbox input. They may be
+		// delivered only to an active destination socket; if that socket is absent
+		// or its queue is full, drop the frame. Persisting an online envelope here
+		// would later make mailbox replay reject its required epoch metadata.
 		if !strings.HasPrefix(envelope.KeyEpochID, "mailbox:") {
 			if target := s.device(routeID, envelope.DestinationID); target != nil {
 				if target.enqueue(payload) {
 					continue
 				}
-				// Queue full: disconnect the slow device and let this frame fall
-				// through to mailbox so it is not lost (B reconnects → receives it).
 				s.logger.Warn("relay device send queue full, disconnecting", "route", safeID(routeID), "device", safeID(envelope.DestinationID), "drops", atomic.LoadInt64(&target.drops))
 				s.removeDevice(routeID, envelope.DestinationID, target)
 				s.closePeer(target, websocket.CloseTryAgainLater, "send queue full")
 			}
+			s.logger.Warn("relay dropped connection-scoped frame for unavailable device", "route", safeID(routeID), "device", safeID(envelope.DestinationID))
+			continue
 		}
 		if _, evicted, err := s.store.AppendFrame(ctx, routeID, envelope.DestinationID, payload, time.Now(), s.config.MailboxTTL, s.config.MaxMailboxBytes); err != nil {
 			s.logger.Warn("relay mailbox append failed", "route", safeID(routeID), "device", safeID(envelope.DestinationID), "error", err)

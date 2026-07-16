@@ -59,7 +59,7 @@ func TestLiveRelayDeployment(t *testing.T) {
 	}
 	_ = phone.Close()
 
-	offline := []byte(`{"routeId":"` + route.RouteID + `","senderId":"bridge","destinationId":"` + deviceID + `","ciphertext":"public-offline"}`)
+	offline := []byte(`{"routeId":"` + route.RouteID + `","senderId":"bridge","destinationId":"` + deviceID + `","keyEpochId":"mailbox:0","ciphertext":"public-offline"}`)
 	if err := bridge.WriteMessage(websocket.TextMessage, offline); err != nil {
 		t.Fatal(err)
 	}
