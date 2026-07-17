@@ -226,8 +226,6 @@ enum L10n {
     static var pairingAdvancedPath: String { tr("pairing_advanced_path") }
     static var copyPairingLink: String { tr("copy_pairing_link") }
     static var pairingLinkCopied: String { tr("pairing_link_copied") }
-    static var copyV2PairingLink: String { tr("copy_v2_pairing_link") }
-    static var pairingV2LinkCopied: String { tr("pairing_v2_link_copied") }
     // Flow C: web QR (https URL) shown alongside the iOS QR.
     static var pairingQRTarget: String { tr("pairing_qr_target") }
     static var pairingQRTargetIOS: String { tr("pairing_qr_target_ios") }
@@ -598,8 +596,6 @@ enum L10n {
             "pairing_advanced_path": "Advanced Connection",
             "copy_pairing_link": "Copy Pairing Link",
             "pairing_link_copied": "Copied",
-            "copy_v2_pairing_link": "Copy V2 Pairing Link",
-            "pairing_v2_link_copied": "V2 Link Copied",
             "pairing_qr_target": "Pairing code",
             "pairing_qr_target_ios": "iOS",
             "pairing_qr_target_web": "Web",
@@ -935,8 +931,6 @@ enum L10n {
             "pairing_advanced_path": "高级连接",
             "copy_pairing_link": "复制配对链接",
             "pairing_link_copied": "已复制",
-            "copy_v2_pairing_link": "复制 V2 版配对链接",
-            "pairing_v2_link_copied": "V2 链接已复制",
             "pairing_qr_target": "配对码",
             "pairing_qr_target_ios": "iOS",
             "pairing_qr_target_web": "Web",

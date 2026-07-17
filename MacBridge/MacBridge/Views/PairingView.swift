@@ -7,7 +7,6 @@ struct PairingView: View {
     @AppStorage("bridgeDisplayName") private var bridgeDisplayName = ""
     @State private var copiedCode = false
     @State private var copiedLink = false
-    @State private var copiedV2Link = false
     @State private var isDetailsExpanded = false
     /// Flow C: which QR to show — the iOS deep-link code or the web https code.
     @State private var qrTarget: PairingQRTarget = .ios
@@ -150,45 +149,23 @@ struct PairingView: View {
                         .fill(Color(NSColor.controlBackgroundColor).opacity(0.4))
                 )
 
-            HStack(spacing: 8) {
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(payload, forType: .string)
-                    copiedLink = true
-                    Task {
-                        try? await Task.sleep(for: .seconds(2))
-                        copiedLink = false
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: copiedLink ? "checkmark" : "doc.on.clipboard")
-                        Text(copiedLink ? L10n.pairingLinkCopied : L10n.copyPairingLink)
-                    }
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(payload, forType: .string)
+                copiedLink = true
+                Task {
+                    try? await Task.sleep(for: .seconds(2))
+                    copiedLink = false
                 }
-                .buttonStyle(.bordered)
-                .help(copiedLink ? L10n.pairingLinkCopied : L10n.copyPairingLink)
-
-                if qrTarget == .web,
-                   let v2Payload = PairingViewModel.webV2PairingURL(from: webPayload) {
-                    Button {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(v2Payload, forType: .string)
-                        copiedV2Link = true
-                        Task {
-                            try? await Task.sleep(for: .seconds(2))
-                            copiedV2Link = false
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: copiedV2Link ? "checkmark" : "doc.on.clipboard")
-                            Text(copiedV2Link ? L10n.pairingV2LinkCopied : L10n.copyV2PairingLink)
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .help(copiedV2Link ? L10n.pairingV2LinkCopied : L10n.copyV2PairingLink)
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: copiedLink ? "checkmark" : "doc.on.clipboard")
+                    Text(copiedLink ? L10n.pairingLinkCopied : L10n.copyPairingLink)
                 }
             }
+            .buttonStyle(.bordered)
             .controlSize(.small)
+            .help(copiedLink ? L10n.pairingLinkCopied : L10n.copyPairingLink)
 
         }
     }

@@ -38,16 +38,6 @@ class PairingViewModel: ObservableObject {
     private var isStarting = false
     private var isPolling = false
 
-    nonisolated static func webV2PairingURL(from webPairingURL: String) -> String? {
-        guard var components = URLComponents(string: webPairingURL),
-              components.scheme == "https" || components.scheme == "http",
-              components.path == "/web/" || components.path == "/web" else {
-            return nil
-        }
-        components.path = "/web-v2/"
-        return components.string
-    }
-
     func configure(apiClient: ManagementAPIClient) {
         self.apiClient = apiClient
     }
@@ -134,7 +124,9 @@ class PairingViewModel: ObservableObject {
         isStarting = false
     }
 
-    func getOrFetchWebPairingURL(isV2: Bool) async -> String? {
+    /// Returns the official web pairing URL (`https://…/web/?…`). The candidate `/web-v2/`
+    /// path is retired; Mac UI only exposes this single web entry.
+    func getOrFetchWebPairingURL() async -> String? {
         var payload = webQrPayload
         if payload.isEmpty || remainingSeconds == nil || remainingSeconds! < 10 {
             guard let client = apiClient else { return nil }
@@ -152,14 +144,9 @@ class PairingViewModel: ObservableObject {
                 return nil
             }
         }
-        
+
         guard !payload.isEmpty else { return nil }
-        
-        if isV2 {
-            return Self.webV2PairingURL(from: payload)
-        } else {
-            return payload
-        }
+        return payload
     }
 
     func updateRemainingTime(now: Date = Date()) {
