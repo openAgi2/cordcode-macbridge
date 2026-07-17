@@ -2207,6 +2207,15 @@ func scanSessionsFromProjectDirWithMetrics(projectDir, projectKey string, metric
 
 type claudeSessionScanResult struct {
 	Title           string
+	// CustomTitle 仅在 JSONL 里出现 type=custom-title 记录时设值；
+	// assistant 文本回退出的 Title 不算 custom title。fork 检测要求双方都有
+	// custom title，避免把「首条 assistant 恰好相同」的无关会话误判为 fork。
+	CustomTitle string
+	// FirstUserAt 是首条非 meta user 消息的 timestamp。Claude Code fork 时
+	// 会把原始会话的开头（含首条 user 消息）原样复制到新会话，因此 fork 对的
+	// FirstUserAt 完全相同，可作为 fork 配对信号。首条消息在文件开头，LimitReader
+	// 一定能读到。
+	FirstUserAt     time.Time
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	ModelID         string
@@ -2234,7 +2243,9 @@ func scanClaudeSessionMetadata(path string, fallbackTime time.Time) claudeSessio
 	defer f.Close()
 	sidecar := readClaudeBridgeSessionSidecar(filepath.Dir(path), strings.TrimSuffix(filepath.Base(path), ".jsonl"))
 	var title string
+	var customTitle string
 	var assistantTitle string
+	var firstUserAt time.Time
 	var modelID string
 	var createdAt time.Time
 	var updatedAt time.Time
@@ -2270,13 +2281,24 @@ func scanClaudeSessionMetadata(path string, fallbackTime time.Time) claudeSessio
 			continue
 		}
 		if msgType == "custom-title" {
-			var customTitle string
-			if err := json.Unmarshal(raw["customTitle"], &customTitle); err == nil {
-				if trimmed := strings.TrimSpace(customTitle); trimmed != "" {
+			var ct string
+			if err := json.Unmarshal(raw["customTitle"], &ct); err == nil {
+				if trimmed := strings.TrimSpace(ct); trimmed != "" {
 					title = trimmed
+					customTitle = trimmed
 				}
 			}
 			continue
+		}
+		// 记录首条非 meta user 消息的 timestamp，用于 fork 检测配对。
+		// 只需要 timestamp，不需要 message 内容，因此放在解析 message 之前。
+		if msgType == "user" && firstUserAt.IsZero() {
+			var ts string
+			if err := json.Unmarshal(raw["timestamp"], &ts); err == nil && ts != "" {
+				if parsed, perr := time.Parse(time.RFC3339Nano, ts); perr == nil {
+					firstUserAt = parsed
+				}
+			}
 		}
 		if msgType != "assistant" {
 			continue
@@ -2334,6 +2356,8 @@ func scanClaudeSessionMetadata(path string, fallbackTime time.Time) claudeSessio
 	}
 	return claudeSessionScanResult{
 		Title:           title,
+		CustomTitle:     customTitle,
+		FirstUserAt:     firstUserAt,
 		CreatedAt:       createdAt,
 		UpdatedAt:       updatedAt,
 		ModelID:         modelID,

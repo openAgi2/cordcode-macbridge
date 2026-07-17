@@ -2,6 +2,7 @@ package transcriptindex
 
 import (
 	"encoding/json"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -263,6 +264,12 @@ type claudeSpanExtractor struct {
 	toolOwner   map[string]string // tool_use id -> assistant message key
 	pending     map[string]int64  // tool_use id -> result rec.End seen before owner
 	ordinal     int64
+	// skipNextResumeNoResponse mirrors LoadClaudeRichHistoryFromReader: after a
+	// resume-meta user message ("Continue from where you left off."), the next
+	// assistant ("No response requested.") is dropped. These records must NOT
+	// produce spans here, otherwise the span count drifts from the replayer and
+	// PageIndex.Replay reports "matched N of M" mismatches.
+	skipNextResumeNoResponse bool
 }
 
 // assistantSpan returns the span for key, creating it on first sight. Empty
@@ -296,6 +303,7 @@ func (x *claudeSpanExtractor) Process(rec Record) {
 	var env struct {
 		Type    string          `json:"type"`
 		Message json.RawMessage `json:"message"`
+		IsMeta  bool            `json:"isMeta"`
 	}
 	if json.Unmarshal(rec.Bytes, &env) != nil {
 		return
@@ -315,6 +323,22 @@ func (x *claudeSpanExtractor) Process(rec Record) {
 		return
 	}
 	blocks := decodeClaudeContentBlocks(msg.Content)
+
+	// Resume-meta skip logic — MUST mirror LoadClaudeRichHistoryFromReader so the
+	// span count matches the replayer exactly. A resume ("Continue from where you
+	// left off.") is injected as an isMeta user message, immediately followed by
+	// a placeholder assistant ("No response requested."). Both are dropped from
+	// history; without dropping them here, replay reports "matched N of M".
+	if isClaudeResumeMetaUserRecord(env.Type, env.IsMeta, blocks) {
+		x.skipNextResumeNoResponse = true
+		return
+	}
+	if x.skipNextResumeNoResponse {
+		x.skipNextResumeNoResponse = false
+		if isClaudeResumeNoResponseAssistantRecord(env.Type, blocks) {
+			return
+		}
+	}
 
 	if env.Type == "assistant" {
 		msgID := strings.TrimSpace(msg.ID)
@@ -366,6 +390,12 @@ func (x *claudeSpanExtractor) Process(rec Record) {
 				x.pending[id] = rec.End
 			}
 		case "text":
+			if isClaudeSkillInstructionText(b.Text) {
+				continue
+			}
+			if normalizeClaudeUserText(b.Text) == "" {
+				continue
+			}
 			hasVisible = true
 		}
 	}
@@ -401,21 +431,89 @@ type claudeContentBlock struct {
 	Type      string `json:"type"`
 	ID        string `json:"id"`
 	ToolUseID string `json:"tool_use_id"`
+	Text      string `json:"text"`
 }
 
 // decodeClaudeContentBlocks mirrors decodeTranscriptContentBlocks for the block
-// fields the span extractor needs (type, id, tool_use_id).
+// fields the span extractor needs (type, id, tool_use_id, text).
 func decodeClaudeContentBlocks(raw json.RawMessage) []claudeContentBlock {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil
 	}
 	var plain string
 	if json.Unmarshal(raw, &plain) == nil {
-		return []claudeContentBlock{{Type: "text"}}
+		return []claudeContentBlock{{Type: "text", Text: plain}}
 	}
 	var blocks []claudeContentBlock
 	if json.Unmarshal(raw, &blocks) != nil {
 		return nil
 	}
 	return blocks
+}
+
+func isClaudeSkillInstructionText(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	return strings.HasPrefix(trimmed, "Base directory for this skill:") &&
+		strings.Contains(trimmed, "\n# ")
+}
+
+var (
+	commandNameRe  = regexp.MustCompile(`(?s)<command-name>\s*(.*?)\s*</command-name>`)
+	commandArgsRe  = regexp.MustCompile(`(?s)<command-args>\s*(.*?)\s*</command-args>`)
+	localCommandRe = regexp.MustCompile(`(?s)<local-command-(?:stdout|stderr|caveat)>`)
+)
+
+const commandArgsPreviewLimit = 120
+
+func normalizeClaudeUserText(text string) string {
+	if localCommandRe.MatchString(text) {
+		return ""
+	}
+	nameMatch := commandNameRe.FindStringSubmatch(text)
+	if nameMatch == nil {
+		return text
+	}
+	name := strings.TrimSpace(nameMatch[1])
+	args := ""
+	if argsMatch := commandArgsRe.FindStringSubmatch(text); argsMatch != nil {
+		args = strings.TrimSpace(argsMatch[1])
+	}
+	if args == "" {
+		return name
+	}
+	flat := strings.Join(strings.Fields(args), " ")
+	if runes := []rune(flat); len(runes) > commandArgsPreviewLimit {
+		flat = string(runes[:commandArgsPreviewLimit]) + "…"
+	}
+	return name + " " + flat
+}
+
+// isClaudeResumeMetaUserRecord mirrors agent/claudecode.isClaudeResumeMetaUser:
+// an isMeta user message whose text is exactly "Continue from where you left off."
+// signals a Claude Code resume; the following placeholder assistant must be skipped.
+func isClaudeResumeMetaUserRecord(msgType string, isMeta bool, blocks []claudeContentBlock) bool {
+	if !isMeta || msgType != "user" {
+		return false
+	}
+	for _, b := range blocks {
+		if b.Type == "text" && strings.TrimSpace(b.Text) == "Continue from where you left off." {
+			return true
+		}
+	}
+	return false
+}
+
+// isClaudeResumeNoResponseAssistantRecord mirrors
+// agent/claudecode.isClaudeResumeNoResponseAssistant: an assistant message whose
+// text is exactly "No response requested." — the placeholder paired with a resume.
+func isClaudeResumeNoResponseAssistantRecord(msgType string, blocks []claudeContentBlock) bool {
+	if msgType != "assistant" {
+		return false
+	}
+	for _, b := range blocks {
+		if b.Type == "text" && strings.TrimSpace(b.Text) == "No response requested." {
+			return true
+		}
+	}
+	return false
 }
