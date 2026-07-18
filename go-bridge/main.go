@@ -352,6 +352,9 @@ func Main() {
 			handlers.sessions,
 		)
 		ack.BridgeEpoch = bridgeEpoch
+		if ack.Ok && negotiateRelayGzip(conn, hello.Capabilities) {
+			ack.Capabilities[relayGzipCapability] = true
+		}
 		var replay []EventMessage
 		if server.recoveryEnabled && helloSupportsRecovery(&hello) && ack.Ok {
 			plan, events, err := server.prepareRecovery(conn, &hello)

@@ -31,6 +31,7 @@ type relayProtocolContract struct {
 	EnvelopeFields            []string `json:"envelopeFields"`
 	AADFields                 []string `json:"aadFields"`
 	MailboxOnlyEnvelopeFields []string `json:"mailboxOnlyEnvelopeFields"`
+	OptionalEnvelopeFields    []string `json:"optionalEnvelopeFields"`
 	Mailbox                   struct {
 		Direction            string   `json:"direction"`
 		LowWatermark         int      `json:"lowWatermark"`
@@ -102,18 +103,19 @@ func TestRelayProtocolContractAuthenticatesAllReadableEnvelopeMetadata(t *testin
 		"version", "routeId", "senderId", "destinationId", "channelGeneration",
 		"keyEpochId", "prekeyId", "epochIndex", "epochEphemeralPublicKey",
 		"previousEpochDigest", "epochAuthTag", "messageId", "counter",
-		"ciphertext", "createdAt", "expiresAt",
+		"contentEncoding", "ciphertext", "createdAt", "expiresAt",
 	}
 	wantAAD := []string{
 		"version", "routeId", "senderId", "destinationId", "channelGeneration",
 		"keyEpochId", "prekeyId", "epochIndex", "epochEphemeralPublicKey",
 		"previousEpochDigest", "epochAuthTag", "messageId", "counter",
-		"createdAt", "expiresAt",
+		"contentEncoding", "createdAt", "expiresAt",
 	}
 	wantMailboxOnly := []string{
 		"prekeyId", "epochIndex", "epochEphemeralPublicKey",
 		"previousEpochDigest", "epochAuthTag",
 	}
+	wantOptional := []string{"contentEncoding"}
 
 	if !reflect.DeepEqual(contract.EnvelopeFields, wantEnvelope) {
 		t.Fatalf("envelope field contract drift: got %v want %v", contract.EnvelopeFields, wantEnvelope)
@@ -123,6 +125,9 @@ func TestRelayProtocolContractAuthenticatesAllReadableEnvelopeMetadata(t *testin
 	}
 	if !reflect.DeepEqual(contract.MailboxOnlyEnvelopeFields, wantMailboxOnly) {
 		t.Fatalf("mailbox envelope contract drift: got %v want %v", contract.MailboxOnlyEnvelopeFields, wantMailboxOnly)
+	}
+	if !reflect.DeepEqual(contract.OptionalEnvelopeFields, wantOptional) {
+		t.Fatalf("optional envelope contract drift: got %v want %v", contract.OptionalEnvelopeFields, wantOptional)
 	}
 }
 

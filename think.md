@@ -1,5 +1,76 @@
 # Claude Code 冷启动既有 session 首轮流式从头重播：跨仓排查结论
 
+## 2026-07-18 追加复盘：Relay 长 session 的 A/B/D 优化状态与跨端经验
+
+### 最终状态（后续 agent 先看此表）
+
+| 方案 | remote-web | iOS | MacBridge / Relay | 结论 |
+|---|---|---|---|---|
+| A. history ETag / 条件请求 | 已接入 | 早已接入 | MacBridge 早已有 `ifNoneMatchRevision` | 解决重复读取，不解决首次冷加载 |
+| B. gzip 后再加密 | 已接入 | 已接入 | MacBridge 按客户端能力对 Relay 下行压缩 | 解决首次大 history 的传输体积 |
+| D. 大响应分片 + 可抢占优先级队列 | **未实施** | **未实施** | 单 `readLoop` + `writeMu` 架构仍在 | 目前只有客户端编排缓解，不能写成 D 已完成 |
+
+### A：ETag 只能复用“与 revision 配对的真实 history”
+
+MacBridge 的 `get_session_messages` 会在完整响应中返回 `revision`；客户端下次发送
+`ifNoneMatchRevision`，命中后服务端只返回紧凑的 `unchanged: true`。iOS 原本已使用该契约，
+remote-web 此前漏接，导致每次切回看过的 session 仍重复传输数 MB history。
+
+remote-web 的最终实现同时保留 per-session 内存消息 bucket 和对应 revision，并以
+`sessionId + directory` 隔离 revision。收到 `unchanged: true` 时只允许恢复与其配对的真实内存
+bucket；若本地 bucket 不存在则直接报错，不能用空数组、旧快照或 fallback 冒充成功。backend
+切换会清空消息与 revision，完整响应没有 revision 时也会删除旧 revision。
+
+这项优化只覆盖第二次及后续读取。第一次打开 session 没有 revision，仍必须获得完整 history；
+因此不能用 A 的单测命中或切回秒开，声称首次 Relay 冷加载已优化。
+
+### B：压缩必须发生在 padding / AEAD 之前，并由客户端显式协商
+
+正式能力名是 `relay_gzip_v1`，只影响 MacBridge → Relay client 的在线帧：
+
+```text
+Bridge JSON -> gzip -> padding -> ChaCha20-Poly1305
+ChaCha20-Poly1305 -> remove padding -> gzip decode -> Bridge JSON
+```
+
+MacBridge 只在连接是 Relay、认证后的 Bridge hello 声明能力且 hello 被接受时启用；当前 sender
+只考虑至少 32 KiB 的 payload，并且只有 gzip 后确实更小时才发送 `contentEncoding: "gzip"`。
+该字段属于 envelope AAD，攻击者或中间层增删、替换字段都会使认证失败。Web 只有在浏览器提供
+`DecompressionStream` 时才声明能力；iOS 只在 Relay transport 声明，并在解密后使用有上限的流式
+gzip decoder。旧 Web/iOS、不支持能力的客户端、Direct WebSocket、iOS → Mac 上行和 mailbox
+继续使用原格式。
+
+WebSocket `permessage-deflate` 作用在已经加密的高熵 envelope 上，几乎不能压缩，不能替代 B。
+解压失败、未知编码、超出解压上限都必须暴露真实 transport 错误，禁止把压缩帧当普通 JSON
+重试或加入静默 fallback。
+
+### D：当前只有“优先发送小 RPC”的缓解，核心架构没有改
+
+MacBridge Relay 路径仍是单 readLoop 同步处理 RPC，所有出站写共享 `writeMu`。一个大 history
+响应写 socket 时，后到的模型、权限等小 RPC 仍可能在接收缓冲区等待。remote-web 当前在切换
+session 前预取模型和权限，并用 promise dedup 让 Composer 复用结果；soft reconnect 期间还会等待
+新 transport ready 后才允许 session history 请求。这能避免常见的“小 RPC 排在巨帧后面超时”，
+但它不是分片，也不是可抢占队列。iOS 本轮接入 A/B，没有新增 D 协议或队列。
+
+未来真正实施 D 时，行为拥有者主要在 MacBridge / Relay transport，而不是在 Web 或 iOS UI 层。
+至少要同时定义：分片 envelope 与 AAD、每片和整消息大小上限、counter/顺序与重组、取消和超时、
+有界 backpressure、控制帧优先级、公平性，以及旧客户端协商。Relay 服务器现有 per-device queue
+也不等于“大 RPC 已分片且可被小 RPC 抢占”。在这些完成并有跨端测试前，任何 agent 都不得把
+prefetch、gzip 或现有 queue 记为“D 已完成”。
+
+### 诊断与验收经验
+
+- 先看 MacBridge `session loading metrics`：`request_total_ms` 接近 `socket_send_ms` 表示瓶颈在
+  Relay 写入；history parse/encode 很短时不要先改 handler。
+- A 的验收要分别测首次打开与切回：首次仍传全量，切回应命中 `unchanged` 且保留真实消息。
+- B 的验收要确认 hello/ack 能力、Mac 日志里的压缩前后字节数，以及 envelope 在解密后才能解压。
+- Web owner 实测 B 后长 session 明显加快；iOS 已完成定向单测、真机构建安装，但 Relay 长 session
+  的最终加载速度仍需真实 Relay 路径人工验收，不能用 LAN 或单元测试替代。
+- 即使 A/B 已显著缩短时间，单 readLoop + `writeMu` 的 head-of-line blocking 仍是已知架构债；
+  若以后仍出现巨帧阻塞小 RPC，再评估 D，不要回退整页 history 或降低正常大帧写超时。
+
+---
+
 日期：2026-07-04
 结论：本次 owner 真机复现的主因不在 MacBridge 重复生成，也不在 Claude CLI stdout 中断，而在
 iOS 本地 Claude live stream 期间仍执行普通历史同步并覆盖 timeline。MacBridge 日志用于排除
@@ -467,4 +538,3 @@ prepend 为第一个 `reasoning` part；工具和正文则另存 parts。于是�
 
 *   在 macOS 中进行设备检测和语言检测时，优先使用 `UserDefaults.standard.stringArray(forKey: "AppleLanguages")` 来获取真实的系统环境，防止因 App 本地化支持范围不一致而被系统沙盒强行过滤截断。
 *   异常渲染不得将一般的网络状态或动作超时（Network / Request Timeout）和产品业务规则上的时间到期（Business Session Expiration）混为一谈。
-

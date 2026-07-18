@@ -38,6 +38,7 @@ type RelayEnvelope struct {
 	EpochAuthTag            *string `json:"epochAuthTag"`
 	MessageID               string  `json:"messageId"`
 	Counter                 uint64  `json:"counter"`
+	ContentEncoding         string  `json:"contentEncoding,omitempty"`
 	Ciphertext              []byte  `json:"ciphertext"` // base64 in JSON, []byte in memory
 	CreatedAt               string  `json:"createdAt"`
 	ExpiresAt               string  `json:"expiresAt"`
@@ -63,6 +64,9 @@ func (e *RelayEnvelope) AADFields() map[string]interface{} {
 	aad["epochEphemeralPublicKey"] = e.EpochEphemeralPublicKey
 	aad["previousEpochDigest"] = e.PreviousEpochDigest
 	aad["epochAuthTag"] = e.EpochAuthTag
+	if e.ContentEncoding != "" {
+		aad["contentEncoding"] = e.ContentEncoding
+	}
 	return aad
 }
 

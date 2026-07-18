@@ -1,12 +1,16 @@
 package gobridge
 
 import (
+	"bytes"
+	"compress/gzip"
 	"crypto/ecdh"
 	"crypto/hmac"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"strings"
 	"testing"
 )
 
@@ -448,6 +452,9 @@ func TestRelayDeviceConnSendJSON(t *testing.T) {
 	if envelope.Counter != 1 {
 		t.Fatalf("counter should be 1, got %d", envelope.Counter)
 	}
+	if envelope.ContentEncoding != "" {
+		t.Fatalf("legacy relay envelope content encoding = %q, want empty", envelope.ContentEncoding)
+	}
 	if len(envelope.Ciphertext) == 0 {
 		t.Fatal("ciphertext should not be empty")
 	}
@@ -461,6 +468,71 @@ func TestRelayDeviceConnSendJSON(t *testing.T) {
 	}
 	if string(opened) != `{"event":"turn_completed","type":"event"}` {
 		t.Fatalf("opened payload = %s", opened)
+	}
+}
+
+func TestRelayDeviceConnGzipNegotiationCompressesBeforeEncryption(t *testing.T) {
+	var lastEnvelope json.RawMessage
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatalf("random key: %v", err)
+	}
+	conn := NewRelayDeviceConn("web-1", "bridge-1", "route-1", 1, nil, key, nil, func(env json.RawMessage) error {
+		lastEnvelope = env
+		return nil
+	})
+	if !negotiateRelayGzip(conn, []string{"relay_gzip_v1"}) {
+		t.Fatal("relay gzip capability should negotiate for a relay connection")
+	}
+
+	msg := map[string]string{"type": "result", "history": strings.Repeat("compressible-history-entry-", 4096)}
+	raw, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal expected payload: %v", err)
+	}
+	conn.SendJSON(msg)
+
+	var envelope RelayEnvelope
+	if err := json.Unmarshal(lastEnvelope, &envelope); err != nil {
+		t.Fatalf("unmarshal envelope: %v", err)
+	}
+	if envelope.ContentEncoding != "gzip" {
+		t.Fatalf("content encoding = %q, want gzip", envelope.ContentEncoding)
+	}
+	aad, err := envelope.EncodeAAD()
+	if err != nil {
+		t.Fatalf("encode aad: %v", err)
+	}
+	compressed, err := OpenEnvelope(key, envelope.Counter, aad, envelope.Ciphertext)
+	if err != nil {
+		t.Fatalf("open compressed relay payload: %v", err)
+	}
+	if len(compressed) >= len(raw) {
+		t.Fatalf("compressed payload %d bytes is not smaller than raw %d bytes", len(compressed), len(raw))
+	}
+	reader, err := gzip.NewReader(bytes.NewReader(compressed))
+	if err != nil {
+		t.Fatalf("open gzip stream: %v", err)
+	}
+	opened, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read gzip stream: %v", err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatalf("close gzip stream: %v", err)
+	}
+	if !bytes.Equal(opened, raw) {
+		t.Fatal("decompressed payload differs from original JSON")
+	}
+
+	// contentEncoding is authenticated metadata, not an unauthenticated decompression hint.
+	envelope.ContentEncoding = ""
+	tamperedAAD, err := envelope.EncodeAAD()
+	if err != nil {
+		t.Fatalf("encode tampered aad: %v", err)
+	}
+	if _, err := OpenEnvelope(key, envelope.Counter, tamperedAAD, envelope.Ciphertext); err == nil {
+		t.Fatal("removing authenticated contentEncoding should fail decryption")
 	}
 }
 

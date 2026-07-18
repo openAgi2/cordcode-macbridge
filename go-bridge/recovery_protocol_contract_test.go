@@ -14,7 +14,7 @@ func TestRecoveryProtocolContractIsHelloOnlyAndExactCutBased(t *testing.T) {
 	}
 	text := string(schema)
 	for _, required := range []string{
-		`BridgeRecoveryCapability = "recovery_v1"`,
+		`BridgeClientCapability = "recovery_v1" | "relay_gzip_v1"`,
 		"lastSeenBySession?: BridgeSessionCutMap",
 		`type: "recovery_applied"`,
 		"appliedThroughBySession: BridgeSessionCutMap",

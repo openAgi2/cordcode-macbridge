@@ -1,6 +1,8 @@
 package gobridge
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -44,7 +46,8 @@ type RelayDeviceConn struct {
 	sendEnvelope func(envelope json.RawMessage) error
 
 	// 状态
-	closed bool
+	closed       bool
+	outboundGzip bool
 
 	// lastActivity 记录最后一次从该 device 收到有效数据的时间（unix nano）。
 	// 由 handleInboundEnvelope 在解密成功后更新；心跳循环据此做半开检测：
@@ -53,6 +56,11 @@ type RelayDeviceConn struct {
 }
 
 var _ Connection = (*RelayDeviceConn)(nil)
+
+const (
+	relayGzipCapability = "relay_gzip_v1"
+	relayGzipThreshold  = 32 * 1024
+)
 
 // NewRelayDeviceConn 创建一个已认证的 relay device connection。
 // macToIosKey 和 iosToMacKey 分别是 Mac→iOS 和 iOS→Mac 方向的 traffic key。
@@ -92,6 +100,28 @@ func (rc *RelayDeviceConn) lastActivityAt() time.Time {
 	return time.Unix(0, rc.lastActivity.Load())
 }
 
+// enableOutboundGzip is called only after the authenticated Bridge hello declares
+// relay_gzip_v1. Legacy iOS clients never declare it and retain the original wire format.
+func (rc *RelayDeviceConn) enableOutboundGzip() {
+	rc.mu.Lock()
+	rc.outboundGzip = true
+	rc.mu.Unlock()
+}
+
+func negotiateRelayGzip(conn Connection, capabilities []string) bool {
+	rc, ok := conn.(*RelayDeviceConn)
+	if !ok {
+		return false
+	}
+	for _, capability := range capabilities {
+		if capability == relayGzipCapability {
+			rc.enableOutboundGzip()
+			return true
+		}
+	}
+	return false
+}
+
 // SendJSON 将业务消息加密为 relay envelope 并发送。
 func (rc *RelayDeviceConn) SendJSON(v any) {
 	rc.mu.Lock()
@@ -107,6 +137,22 @@ func (rc *RelayDeviceConn) SendJSON(v any) {
 		slog.Error("relay-conn: marshal inner payload", "device", rc.deviceID, "error", err)
 		return
 	}
+	contentEncoding := ""
+	if rc.outboundGzip && len(plaintext) >= relayGzipThreshold {
+		compressed, compressErr := gzipPayload(plaintext)
+		if compressErr != nil {
+			slog.Error("relay-conn: gzip inner payload", "device", rc.deviceID, "error", compressErr)
+			return
+		}
+		if len(compressed) < len(plaintext) {
+			contentEncoding = "gzip"
+			slog.Info("relay-conn: compressed outbound payload",
+				"device", rc.deviceID,
+				"uncompressed_bytes", len(plaintext),
+				"compressed_bytes", len(compressed))
+			plaintext = compressed
+		}
+	}
 
 	// 获取并递增 counter
 	counter := rc.sendCounter.Add(1) - 1 // Add 返回增加后的值，减 1 得到本次使用的值
@@ -121,6 +167,7 @@ func (rc *RelayDeviceConn) SendJSON(v any) {
 		KeyEpochID:        "online:" + strconv.FormatUint(rc.generation, 10),
 		MessageID:         generateRelayID("msg_"),
 		Counter:           counter,
+		ContentEncoding:   contentEncoding,
 		CreatedAt:         now.Format(time.RFC3339),
 		ExpiresAt:         now.Add(24 * time.Hour).Format(time.RFC3339),
 	}
@@ -145,6 +192,22 @@ func (rc *RelayDeviceConn) SendJSON(v any) {
 	if err := rc.sendEnvelope(envelopeJSON); err != nil {
 		slog.Error("relay-conn: send envelope", "device", rc.deviceID, "error", err)
 	}
+}
+
+func gzipPayload(payload []byte) ([]byte, error) {
+	var compressed bytes.Buffer
+	writer, err := gzip.NewWriterLevel(&compressed, gzip.BestSpeed)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := writer.Write(payload); err != nil {
+		_ = writer.Close()
+		return nil, err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+	return compressed.Bytes(), nil
 }
 
 // SendResult 发送带 requestId 的 result 回复。

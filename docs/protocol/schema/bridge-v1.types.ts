@@ -23,7 +23,7 @@ export interface BridgeClientInfo {
   deviceId?: string;
 }
 
-export type BridgeRecoveryCapability = "recovery_v1";
+export type BridgeClientCapability = "recovery_v1" | "relay_gzip_v1";
 
 export interface BridgeSessionCut {
   eventId: string;
@@ -54,7 +54,7 @@ export interface BridgeHello {
     deviceId: string;
   };
   protocol: BridgeProtocol;
-  capabilities?: BridgeRecoveryCapability[];
+  capabilities?: BridgeClientCapability[];
   lastBridgeEpoch?: string;
   /** Compatibility hint only; recovery decisions use lastSeenBySession. */
   lastEventId?: string;
