@@ -886,6 +886,14 @@ func (b *richHistoryMessageBuilder) applyToolResult(toolID string, result transc
 	if result.Output != nil {
 		step["output"] = result.Output
 	}
+	toolName, _ := step["toolName"].(string)
+	matchInput := result.Output
+	if output, ok := result.Output.(map[string]any); ok && output["kind"] == "inline" {
+		matchInput = output["text"]
+	}
+	if matches := parseClaudeToolMatches(toolName, matchInput, result.IsError); matches != nil {
+		step["matches"] = matches
+	}
 	return true
 }
 

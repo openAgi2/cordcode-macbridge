@@ -32,7 +32,7 @@ func (f *fakeCloseSession) Send(string, []core.ImageAttachment, []core.FileAttac
 	return nil
 }
 func (f *fakeCloseSession) RespondPermission(string, core.PermissionResult) error { return nil }
-func (f *fakeCloseSession) Events() <-chan core.Event                              { return nil }
+func (f *fakeCloseSession) Events() <-chan core.Event                             { return nil }
 func (f *fakeCloseSession) CurrentSessionID() string                              { return "" }
 func (f *fakeCloseSession) Alive() bool                                           { return false }
 func (f *fakeCloseSession) Close() error {
@@ -42,7 +42,7 @@ func (f *fakeCloseSession) Close() error {
 	return nil
 }
 func (f *fakeCloseSession) RespondQuestion(string, []string) error { return nil }
-func (f *fakeCloseSession) RejectQuestion(string) error             { return nil }
+func (f *fakeCloseSession) RejectQuestion(string) error            { return nil }
 
 // TestHandlers_Shutdown_ClosesActiveSessions verifies that Shutdown closes every
 // session in the registry, bounded by the ctx deadline.
@@ -208,7 +208,7 @@ func (r *rawProcessSession) Send(string, []core.ImageAttachment, []core.FileAtta
 	return nil
 }
 func (r *rawProcessSession) RespondPermission(string, core.PermissionResult) error { return nil }
-func (r *rawProcessSession) Events() <-chan core.Event                              { return nil }
+func (r *rawProcessSession) Events() <-chan core.Event                             { return nil }
 func (r *rawProcessSession) CurrentSessionID() string                              { return "" }
 func (r *rawProcessSession) Alive() bool                                           { return false }
 func (r *rawProcessSession) Close() error {
@@ -221,4 +221,4 @@ func (r *rawProcessSession) Close() error {
 	return nil
 }
 func (r *rawProcessSession) RespondQuestion(string, []string) error { return nil }
-func (r *rawProcessSession) RejectQuestion(string) error             { return nil }
+func (r *rawProcessSession) RejectQuestion(string) error            { return nil }

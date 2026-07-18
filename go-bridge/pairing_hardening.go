@@ -197,4 +197,3 @@ func hmacEqualString(a, b string) bool {
 	}
 	return v == 0
 }
-

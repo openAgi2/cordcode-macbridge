@@ -35,21 +35,14 @@
     "catalog_invalidation", "tool_output_delta",
     "session_mutation", "usage_reporting",
     "turns", "agent_selection"
-  ],
-  "lastBridgeEpoch": "epoch-20260427-001",
-  "lastEventId": "epoch-20260427-001:12345",
-  "lastSeenBySession": {
-    "claude:sess-1": { "eventId": "epoch-20260427-001:12340", "seq": 12340 },
-    "opencode:sess-2": { "eventId": "epoch-20260427-001:12345", "seq": 12345 }
-  }
+  ]
 }
 ```
 
 **字段说明：**
 - `client.id`: 跨重连稳定的 UUID
-- `lastBridgeEpoch`: 上次连接的 bridge epoch；缺失或无效视为全新连接
-- `lastEventId`: 含 epoch 的事件 ID，格式 `${bridgeEpoch}:${seq}`
-- `lastSeenBySession`: `<backendId>:<sessionId>` 复合 key，避免跨 backend 串线
+- `register` 是旧客户端兼容入口，不承载事件恢复；恢复只通过 `hello/hello_ack` 的
+  `recovery_v1` 可选扩展协商
 
 ### 1.3 注册确认 (Server → Client)
 
@@ -699,20 +692,22 @@ iOS 端用 `permissionId` + `selectedOptionId` 回复：
 ### 8.2 重连流程
 
 1. 客户端指数退避重连（1s → 2s → 4s → ... → 60s）
-2. 发送 `register`，带 `lastBridgeEpoch` / `lastEventId` / `lastSeenBySession`
-3. 服务端判断：
+2. 支持恢复的客户端先安装持久 inbound listener，再发送带 `capabilities: ["recovery_v1"]`、
+   `lastBridgeEpoch` 与 `lastSeenBySession` 的 `hello`；`lastEventId` 仅为兼容提示
+3. 服务端只在双方都声明 `recovery_v1` 时通过 `hello_ack.recovery` 建立 transaction；否则
+   完全保持旧行为并省略 recovery
+4. 同 epoch 且 replay/gap 覆盖完整时回放；任意不可回放 gap、buffer eviction 或 TTL 返回
+   `snapshot_required`；epoch 不同或无效返回 `full_resync`
+5. replay barrier 后客户端完成 apply/persist，发送精确 per-session cut 的
+   `recovery_applied`；服务端验证后原子入队 `recovery_complete` 与 pending live events
 
-| 条件 | 行为 | register_ack.recovery |
-|------|------|-----------------------|
-| `lastBridgeEpoch` == 当前 && `lastEventId` 在 buffer 内 | replay 缓存事件，继续实时推送 | `null` |
-| `lastBridgeEpoch` == 当前 && `lastEventId` 不在 buffer 内 | 返回受影响 session 列表 | `{ "type": "snapshot_required", "affectedSessions": [{ backendId, sessionId }] }` |
-| `lastBridgeEpoch` != 当前（Bridge 重启了） | 全量刷新 | `{ "type": "full_resync" }` |
-| `lastBridgeEpoch` 缺失或无效 | 当作全新连接 | `{ "type": "full_resync" }` |
+完整的 recoveryId、cut vector、snapshot atomic cut、overflow 和超时语义以
+`docs/2026-07-18-event-recovery-rfc.md` 为唯一权威定义。`register/register_ack` 不参与恢复。
 
 ### 8.3 Epoch 安全保障
 
 - `eventId` 格式 `${bridgeEpoch}:${seq}`，重启后 epoch 变化保证全局不重复
-- `lastSeenBySession` 使用 `${backendId}:${sessionId}` 复合 key
+- `lastSeenBySession` 使用 `backendId -> sessionId -> cut` 嵌套 map，避免 key 拼接歧义
 - `affectedSessions` 返回 `{ backendId, sessionId }[]`
 
 ---

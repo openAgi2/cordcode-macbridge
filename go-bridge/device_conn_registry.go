@@ -12,8 +12,15 @@ import (
 // 场景4 修复前 relay 连接未注册到此 registry，导致 Mac 撤销授权时 relay 连接
 // 收不到 device_revoked 事件、不断开，iOS 继续可用。现统一注册。
 type DeviceConnRegistry struct {
-	mu    sync.Mutex
-	conns map[string][]Connection // deviceID → connections（direct 或 relay）
+	mu             sync.Mutex
+	conns          map[string][]Connection // deviceID → connections（direct 或 relay）
+	eventPublisher *EventPublisher
+}
+
+func (r *DeviceConnRegistry) SetEventPublisher(publisher *EventPublisher) {
+	r.mu.Lock()
+	r.eventPublisher = publisher
+	r.mu.Unlock()
 }
 
 var globalDeviceConnRegistry = &DeviceConnRegistry{
@@ -53,6 +60,7 @@ func (r *DeviceConnRegistry) Unregister(deviceID string, conn Connection) {
 func (r *DeviceConnRegistry) DisconnectDevice(deviceID string) {
 	r.mu.Lock()
 	conns := r.conns[deviceID]
+	publisher := r.eventPublisher
 	delete(r.conns, deviceID)
 	r.mu.Unlock()
 
@@ -60,11 +68,14 @@ func (r *DeviceConnRegistry) DisconnectDevice(deviceID string) {
 		slog.Info("go-bridge: marking device revoked", "deviceId", deviceID, "remote", conn.RemoteAddr())
 		// 先下发 device_revoked 事件（iOS 侧据此删 bridge + 清凭证），
 		// 再 Close 确保即使 iOS 未及时处理事件，连接也被强制断开。
-		conn.SendJSON(map[string]interface{}{
-			"type":    "event",
-			"event":   "device_revoked",
-			"message": "设备授权已取消，请重新授权",
-		})
+		if publisher != nil {
+			publisher.PublishLogical(LogicalEvent{
+				Event:       "device_revoked",
+				Message:     "设备授权已取消，请重新授权",
+				Targets:     []Connection{conn},
+				WaitTargets: []Connection{conn},
+			})
+		}
 		if err := conn.Close(); err != nil {
 			slog.Debug("go-bridge: close revoked device conn failed", "deviceId", deviceID, "error", err)
 		}

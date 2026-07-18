@@ -50,6 +50,8 @@ type claudeSession struct {
 	historyDrainOnce sync.Once
 	streamState      streamEventState
 	toolNameByUseID  sync.Map // tool_use_id → tool_name
+	childStreams     *claudeChildStreamTracker
+	currentStream    childStreamScope
 
 	// pendingQuestions holds unanswered Claude AskUserQuestion control requests,
 	// keyed by Claude requestID. claudeSession owns it because it owns the Claude
@@ -261,6 +263,7 @@ func newClaudeSession(ctx context.Context, workDir, cliBin string, cliExtraArgs 
 		done:                make(chan struct{}),
 		historyDrainDone:    make(chan struct{}),
 		gracefulStopTimeout: 120 * time.Second,
+		childStreams:        newClaudeChildStreamTracker(),
 	}
 	cs.setPermissionMode(mode)
 	cs.sessionID.Store(sessionID)
@@ -354,7 +357,7 @@ func (cs *claudeSession) finishReadLoop(waitErrCh <-chan error, stderrBuf *bytes
 			slog.Error("claudeSession: process failed", "error", err, "stderr", redacted)
 			evt := core.Event{Type: core.EventError, Error: fmt.Errorf("%s", redacted)}
 			select {
-			case cs.events <- evt:
+			case cs.events <- cs.scopeEvent(evt):
 			case <-cs.ctx.Done():
 				// INVARIANT: readLoop must close cs.events and cs.done exactly once
 				// on every termination path. Callers (engine event loop) rely on
@@ -382,7 +385,7 @@ func (cs *claudeSession) handleReadLoopScanErr(err error, waitDone <-chan struct
 	slog.Error("claudeSession: scanner error", "error", err)
 	evt := core.Event{Type: core.EventError, Error: fmt.Errorf("read stdout: %w", err)}
 	select {
-	case cs.events <- evt:
+	case cs.events <- cs.scopeEvent(evt):
 	case <-cs.ctx.Done():
 		return
 	}
@@ -398,6 +401,8 @@ func (cs *claudeSession) handleReadLoopLine(line string) {
 		slog.Debug("claudeSession: non-JSON line", "line", line)
 		return
 	}
+	cs.currentStream = cs.childStreams.observe(raw)
+	defer func() { cs.currentStream = childStreamScope{} }()
 
 	eventType, _ := raw["type"].(string)
 	slog.Debug("claudeSession: event", "type", eventType)
@@ -432,7 +437,7 @@ func (cs *claudeSession) handleSystem(raw map[string]any) {
 		}
 		evt := core.Event{Type: core.EventText, SessionID: sid}
 		select {
-		case cs.events <- evt:
+		case cs.events <- cs.scopeEvent(evt):
 		case <-cs.ctx.Done():
 			return
 		}
@@ -479,7 +484,7 @@ func (cs *claudeSession) handleAssistant(raw map[string]any) {
 		slog.Warn("claudeSession: checkpoint diverged from streamed text; replacing with full text")
 		evt := core.Event{Type: core.EventTextReplace, Content: fullText}
 		select {
-		case cs.events <- evt:
+		case cs.events <- cs.scopeEvent(evt):
 		case <-cs.ctx.Done():
 			return
 		}
@@ -503,9 +508,10 @@ func (cs *claudeSession) handleAssistant(raw map[string]any) {
 			}
 			toolUseID, _ := item["id"].(string)
 			inputSummary := summarizeInput(toolName, item["input"])
-			evt := core.Event{Type: core.EventToolUse, ToolName: toolName, ToolInput: inputSummary, RequestID: toolUseID}
+			input, _ := item["input"].(map[string]any)
+			evt := core.Event{Type: core.EventToolUse, ToolName: toolName, ToolInput: inputSummary, ToolInputRaw: input, RequestID: toolUseID}
 			select {
-			case cs.events <- evt:
+			case cs.events <- cs.scopeEvent(evt):
 			case <-cs.ctx.Done():
 				return
 			}
@@ -519,7 +525,7 @@ func (cs *claudeSession) handleAssistant(raw map[string]any) {
 			if thinking, ok := item["thinking"].(string); ok && thinking != "" {
 				evt := core.Event{Type: core.EventThinking, Content: thinking}
 				select {
-				case cs.events <- evt:
+				case cs.events <- cs.scopeEvent(evt):
 				case <-cs.ctx.Done():
 					return
 				}
@@ -569,7 +575,7 @@ func (cs *claudeSession) handleAssistant(raw map[string]any) {
 				}
 				evt := core.Event{Type: core.EventText, Content: delta}
 				select {
-				case cs.events <- evt:
+				case cs.events <- cs.scopeEvent(evt):
 				case <-cs.ctx.Done():
 					return
 				}
@@ -634,7 +640,7 @@ func (cs *claudeSession) emitTextDelta(index int, text string) {
 	cs.streamState.streamedTextByIdx[index] += text
 	evt := core.Event{Type: core.EventText, Content: text}
 	select {
-	case cs.events <- evt:
+	case cs.events <- cs.scopeEvent(evt):
 	case <-cs.ctx.Done():
 		return
 	}
@@ -646,7 +652,7 @@ func (cs *claudeSession) emitThinkingDelta(thinking string) {
 	}
 	evt := core.Event{Type: core.EventThinking, Content: thinking}
 	select {
-	case cs.events <- evt:
+	case cs.events <- cs.scopeEvent(evt):
 	case <-cs.ctx.Done():
 		return
 	}
@@ -720,7 +726,8 @@ func (cs *claudeSession) handleUser(raw map[string]any) {
 		contentType, _ := item["type"].(string)
 		if contentType == "tool_result" {
 			toolUseID, _ := item["tool_use_id"].(string)
-			content, _ := item["content"].(string)
+			contentValue := item["content"]
+			content, _ := contentValue.(string)
 			isError, _ := item["is_error"].(bool)
 			success := !isError
 			toolNameRaw, _ := cs.toolNameByUseID.Load(toolUseID)
@@ -735,9 +742,10 @@ func (cs *claudeSession) handleUser(raw map[string]any) {
 				ToolResult:  resultText,
 				ToolSuccess: &success,
 				RequestID:   toolUseID,
+				ToolMatches: parseClaudeToolMatches(toolName, contentValue, isError),
 			}
 			select {
-			case cs.events <- evt:
+			case cs.events <- cs.scopeEvent(evt):
 			case <-cs.ctx.Done():
 				return
 			}
@@ -784,7 +792,7 @@ func (cs *claudeSession) handleResult(raw map[string]any) {
 		OutputTokens: outputTokens,
 	}
 	select {
-	case cs.events <- evt:
+	case cs.events <- cs.scopeEvent(evt):
 	case <-cs.ctx.Done():
 		return
 	}
@@ -869,7 +877,7 @@ func (cs *claudeSession) handleControlRequest(raw map[string]any) {
 	}
 
 	select {
-	case cs.events <- evt:
+	case cs.events <- cs.scopeEvent(evt):
 	case <-cs.ctx.Done():
 		return
 	}
@@ -1081,7 +1089,7 @@ func (cs *claudeSession) RejectQuestion(questionID string) error {
 type pendingClaudeQuestion struct {
 	requestID   string
 	toolName    string
-	rawInput    map[string]any          // original AskUserQuestion input (base for updatedInput)
+	rawInput    map[string]any           // original AskUserQuestion input (base for updatedInput)
 	questions   []core.UserQuestion      // parsed questions (len==1 for v1)
 	optionByID  map[string]pendingOption // synthesized option id -> option detail
 	optionOrder []string                 // synthesized option ids in display order
@@ -1169,7 +1177,7 @@ func (cs *claudeSession) emitAskUserQuestion(requestID string, input map[string]
 	slog.Info("claudeSession: AskUserQuestion emitted as question_asked",
 		"request_id", requestID, "options", len(opts))
 	select {
-	case cs.events <- evt:
+	case cs.events <- cs.scopeEvent(evt):
 	case <-cs.ctx.Done():
 	}
 }
@@ -1184,7 +1192,7 @@ func (cs *claudeSession) emitQuestionResolved(questionID, result string) {
 		Content:    result,
 	}
 	select {
-	case cs.events <- evt:
+	case cs.events <- cs.scopeEvent(evt):
 	case <-cs.ctx.Done():
 	}
 }

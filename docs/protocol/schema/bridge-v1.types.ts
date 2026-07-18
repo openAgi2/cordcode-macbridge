@@ -23,6 +23,29 @@ export interface BridgeClientInfo {
   deviceId?: string;
 }
 
+export type BridgeRecoveryCapability = "recovery_v1";
+
+export interface BridgeSessionCut {
+  eventId: string;
+  seq: number;
+}
+
+/** backendId -> sessionId -> acknowledged cut. */
+export type BridgeSessionCutMap = Record<string, Record<string, BridgeSessionCut>>;
+
+export type BridgeRecoveryPlan =
+  | {
+      recoveryId: string;
+      mode: "replay";
+      replayThroughBySession: BridgeSessionCutMap;
+    }
+  | {
+      recoveryId: string;
+      mode: "snapshot_required" | "full_resync";
+      affectedSessions: Array<{ backendId: string; sessionId: string }>;
+      cutBySession: BridgeSessionCutMap;
+    };
+
 export interface BridgeHello {
   type: "hello";
   client: {
@@ -31,6 +54,11 @@ export interface BridgeHello {
     deviceId: string;
   };
   protocol: BridgeProtocol;
+  capabilities?: BridgeRecoveryCapability[];
+  lastBridgeEpoch?: string;
+  /** Compatibility hint only; recovery decisions use lastSeenBySession. */
+  lastEventId?: string;
+  lastSeenBySession?: BridgeSessionCutMap;
 }
 
 export interface BridgeRegister {
@@ -41,9 +69,6 @@ export interface BridgeRegister {
     version: string;
   };
   protocol: Pick<BridgeProtocol, "name" | "version">;
-  lastBridgeEpoch?: string;
-  lastEventId?: string;
-  lastSeenBySession?: Record<string, { eventId: string; seq: number }>;
 }
 
 export interface BridgeSecurityProfile {
@@ -94,6 +119,8 @@ export interface BridgeHelloAck {
     security?: BridgeSecurityProfile;
   };
   capabilities?: Record<string, boolean>;
+  bridgeEpoch?: string;
+  recovery?: BridgeRecoveryPlan;
   backends?: BridgeBackendInfo[];
   bridgeStatus?: string;
   runningSessions?: Array<{
@@ -112,11 +139,29 @@ export interface BridgeRegisterAck {
   serverCapabilities?: string[];
   bridgeEpoch?: string;
   backends?: BridgeBackendInfo[];
-  recovery?: {
-    type?: string;
-    affectedSessions?: Array<{ backendId?: string; sessionId?: string }>;
-  };
   error?: BridgeWireError;
+}
+
+export interface BridgeRecoveryBarrier {
+  type: "recovery_barrier";
+  recoveryId: string;
+  replayThroughBySession: BridgeSessionCutMap;
+}
+
+export interface BridgeRecoveryApplied {
+  type: "recovery_applied";
+  recoveryId: string;
+  appliedThroughBySession: BridgeSessionCutMap;
+}
+
+export interface BridgeRecoveryComplete {
+  type: "recovery_complete";
+  recoveryId: string;
+}
+
+export interface BridgeRecoverySnapshotMetadata {
+  recoveryId: string;
+  hwm: BridgeSessionCut;
 }
 
 export type BridgeRPCMethod =
@@ -189,6 +234,24 @@ export interface BridgeResult<TData = unknown> {
   ok?: boolean;
   data?: TData;
   error?: BridgeWireError;
+}
+
+export type ToolMatches =
+  | { kind: "count"; count: number }
+  | { kind: "paths"; paths: string[] }
+  | { kind: "detailed"; items: Array<{ path: string; line?: number; preview?: string }> };
+
+export interface BridgeToolEventData {
+  itemId?: string;
+  toolName?: string;
+  toolInput?: unknown;
+  toolInputRaw?: Record<string, unknown>;
+  toolResult?: unknown;
+  toolStatus?: string;
+  toolExitCode?: number;
+  matches?: ToolMatches;
+  streamId?: string;
+  parentStreamId?: string;
 }
 
 export type BridgeEventName =

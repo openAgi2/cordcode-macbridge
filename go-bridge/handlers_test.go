@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -82,6 +83,7 @@ type fakeAgent struct {
 	runningCalls       int
 	liveProcesses      map[string]core.LiveSessionProcess
 	alivePIDs          map[int]bool
+	processMu          sync.Mutex
 	liveProcessCalls   int
 	processAliveCalls  int
 	lastProcessAliveID int
@@ -123,6 +125,8 @@ func (f *fakeAgent) LiveSessionProcess(ctx context.Context, sessionID string) (c
 }
 
 func (f *fakeAgent) IsProcessAlive(ctx context.Context, pid int) bool {
+	f.processMu.Lock()
+	defer f.processMu.Unlock()
 	f.processAliveCalls++
 	f.lastProcessAliveID = pid
 	if f.alivePIDs == nil {
@@ -1631,6 +1635,53 @@ func TestHandleGetSessionMessagesBoundsPaginatedRichHistoryFallback(t *testing.T
 	}
 	if len(encoded) > maxPageResponseBytes {
 		t.Fatalf("fallback page encoded %d bytes > budget %d", len(encoded), maxPageResponseBytes)
+	}
+}
+
+func TestHandleGetSessionMessagesWholeHistoryPreservesRowsAndTruncatesOversizedMessage(t *testing.T) {
+	agent := &fakeAgent{
+		name: "codex",
+		richHistory: []core.RichHistoryEntry{
+			{ID: "old", Role: "user", Content: "keep old", Timestamp: time.Unix(1, 0).UTC()},
+			{ID: "huge", Role: "assistant", Content: strings.Repeat("x", 1<<20), Timestamp: time.Unix(2, 0).UTC()},
+			{ID: "new", Role: "assistant", Content: "keep new", Timestamp: time.Unix(3, 0).UTC()},
+		},
+	}
+
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "codex",
+		Method:    "get_session_messages",
+		RequestID: "hist-whole",
+		Params: mustJSONRaw(t, map[string]any{
+			"sessionId": "ses_whole",
+			"limit":     0,
+		}),
+	})
+
+	response := readJSONMaps(t, clientConn, 1)[0]
+	data, _ := response["data"].(map[string]any)
+	entries, _ := data["messages"].([]any)
+	if len(entries) != 3 {
+		t.Fatalf("message count = %d, want complete 3-row history", len(entries))
+	}
+	if entries[0].(map[string]any)["id"] != "old" || entries[2].(map[string]any)["id"] != "new" {
+		t.Fatalf("whole-history order changed: %#v", entries)
+	}
+	huge := entries[1].(map[string]any)
+	if marked, _ := huge["truncated"].(bool); !marked {
+		t.Fatalf("oversized whole-history message missing truncated marker: %#v", huge)
+	}
+	encoded, err := json.Marshal(huge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > maxPageResponseBytes {
+		t.Fatalf("oversized whole-history message encoded %d bytes > budget %d", len(encoded), maxPageResponseBytes)
 	}
 }
 

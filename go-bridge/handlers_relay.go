@@ -643,24 +643,17 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 			if !ok {
 				if !h.sessions.isIdle(sessionID) {
 					h.mu.Lock()
-					h.seq++
-					seq := h.seq
 					dir := h.sessions.directoryForSession(sessionID)
 					h.mu.Unlock()
 
-					compMsg := EventMessage{
-						Type:      "event",
+					h.deltaBatcher.Send(LogicalEvent{
 						SessionID: sessionID,
 						BackendID: backendID,
 						Event:     "turn_completed",
 						Data:      map[string]interface{}{"done": true, "reason": "events_channel_closed"},
-						Seq:       seq,
-					}
-					h.deltaBatcher.Send(BroadcastEvent{
-						BackendID: backendID,
-						SessionID: sessionID,
 						Directory: dir,
-						Message:   compMsg,
+						Broadcast: true,
+						Offline:   true,
 					})
 
 					h.broadcastIdleState(sessionID, backendID)
@@ -710,26 +703,18 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 			}
 
 			h.mu.Lock()
-			h.seq++
-			seq := h.seq
 			directory := h.sessions.directoryForSession(sessionID)
 			h.mu.Unlock()
 
-			msg := EventMessage{
-				Type:      "event",
+			h.deltaBatcher.Send(LogicalEvent{
 				SessionID: sessionID,
 				BackendID: backendID,
 				Event:     eventName,
 				Data:      data,
-				Seq:       seq,
-			}
-			h.deltaBatcher.Send(BroadcastEvent{
-				BackendID: backendID,
-				SessionID: sessionID,
 				Directory: directory,
-				Message:   msg,
+				Broadcast: true,
+				Offline:   IsDurableMilestone(eventName),
 			})
-			h.routeRelayOfflineEvent(sessionID, backendID, eventName, data)
 
 			// 持续刷新 lastEventAt，防止 idle cleanup 在长 turn 期间误杀 session。
 			h.sessions.touch(sessionID)
@@ -762,23 +747,16 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 			slog.Warn("go-bridge: relayEvents idle timeout, auto-completing", "backendID", backendID, "sessionID", sessionID, "eventsSeen", eventCount)
 			if !h.sessions.isIdle(sessionID) {
 				h.mu.Lock()
-				h.seq++
-				seq := h.seq
 				dir := h.sessions.directoryForSession(sessionID)
 				h.mu.Unlock()
-				completeMsg := EventMessage{
-					Type:      "event",
+				h.deltaBatcher.Send(LogicalEvent{
 					SessionID: sessionID,
 					BackendID: backendID,
 					Event:     "turn_completed",
 					Data:      map[string]interface{}{"done": true, "text": ""},
-					Seq:       seq,
-				}
-				h.deltaBatcher.Send(BroadcastEvent{
-					BackendID: backendID,
-					SessionID: sessionID,
 					Directory: dir,
-					Message:   completeMsg,
+					Broadcast: true,
+					Offline:   true,
 				})
 				h.broadcastIdleState(sessionID, backendID)
 				h.recordPendingNotification(sessionID, backendID, "completed", "relay_idle_timeout")
@@ -788,8 +766,8 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 	}
 }
 
-func (h *Handlers) routeRelayOfflineEvent(sessionID, backendID, eventName string, data interface{}) {
-	if !IsDurableMilestone(eventName) {
+func (h *Handlers) routeRelayOfflineStampedEvent(eventMsg EventMessage) {
+	if !IsDurableMilestone(eventMsg.Event) {
 		return
 	}
 	h.mu.Lock()
@@ -815,7 +793,7 @@ func (h *Handlers) routeRelayOfflineEvent(sessionID, backendID, eventName string
 	if len(mailboxDevices) == 0 {
 		return
 	}
-	h.relayEventRouter.RouteEvent(sessionID, backendID, eventName, data, onlineDevices, mailboxDevices)
+	h.relayEventRouter.RouteStampedEvent(eventMsg, onlineDevices, mailboxDevices)
 	for _, deviceID := range mailboxDevices {
 		if err := h.relayOutbox.Flush(deviceID, sender); err != nil {
 			slog.Warn("go-bridge: relay offline delivery flush failed", "deviceID", safeID(deviceID), "error", err)

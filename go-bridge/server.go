@@ -2,8 +2,10 @@ package gobridge
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -147,16 +149,6 @@ func (c *Conn) SendResult(requestID string, data interface{}, err *WireError) {
 	c.SendJSON(resp)
 }
 
-func (c *Conn) SendEvent(sessionID, backendID, eventName string, data interface{}) {
-	c.SendJSON(EventMessage{
-		Type:      "event",
-		SessionID: sessionID,
-		BackendID: backendID,
-		Event:     eventName,
-		Data:      data,
-	})
-}
-
 func (c *Conn) Close() error {
 	return c.CloseWithControl(websocket.CloseNormalClosure, "")
 }
@@ -200,7 +192,12 @@ type Server struct {
 	remoteURLs         []string
 	localCandidateURLs []string
 	detectionCfg       *AgentDetectionConfig
+	bridgeEpoch        string
+	eventPublisher     *EventPublisher
+	recoveryEnabled    bool
 }
+
+func (s *Server) SetRecoveryEnabled(enabled bool) { s.recoveryEnabled = enabled }
 
 // SetAuthMiddleware 设置认证中间件，nil 表示不启用认证。
 func (s *Server) SetAuthMiddleware(m *AuthMiddleware) {
@@ -229,7 +226,30 @@ func (s *Server) SetDetectionConfig(cfg *AgentDetectionConfig) {
 }
 
 func NewServer(handlers *Handlers) *Server {
-	return &Server{handlers: handlers, activeConns: NewActiveConnRegistry()}
+	epoch, err := generateBridgeEpoch()
+	if err != nil {
+		panic(err)
+	}
+	return NewServerWithEpoch(handlers, epoch)
+}
+
+func NewServerWithEpoch(handlers *Handlers, bridgeEpoch string) *Server {
+	if bridgeEpoch == "" {
+		panic("bridge epoch must not be empty")
+	}
+	if handlers == nil {
+		panic("handlers must not be nil")
+	}
+	if handlers.eventPublisher == nil || handlers.eventPublisher.BridgeEpoch() != bridgeEpoch {
+		handlers.installEventPublisher(NewEventPublisher(bridgeEpoch, handlers.broadcaster))
+	}
+	globalDeviceConnRegistry.SetEventPublisher(handlers.eventPublisher)
+	return &Server{
+		handlers:       handlers,
+		activeConns:    NewActiveConnRegistry(),
+		bridgeEpoch:    bridgeEpoch,
+		eventPublisher: handlers.eventPublisher,
+	}
 }
 
 func (s *Server) CloseAllConnections(reason string) int {
@@ -282,7 +302,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 连接会被关闭但不会从 active registry 移除。
 	conn.mu.Lock()
 	conn.onCleanup = func() {
-		s.handlers.broadcaster.UnsubscribeAll(directConnection)
+		s.handlers.unregisterConnection(directConnection)
 		if authedDevice != nil {
 			globalDeviceConnRegistry.Unregister(authedDevice.DeviceID, conn)
 		}
@@ -295,7 +315,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.activeConns != nil {
 		s.activeConns.Register(conn)
 	}
-	s.handlers.broadcaster.RegisterConn(directConnection)
+	s.handlers.registerConnection(directConnection)
 
 	slog.Info("go-bridge: client connected", "remote", conn.remote)
 
@@ -363,7 +383,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case "register":
 			s.handleRegister(conn, &msg)
 		case "hello":
-			s.handleHello(conn, &msg)
+			s.handleHello(conn, directConnection, &msg)
 		case "request":
 			// Long-running RPCs (e.g. grokbuild StartSession: spawn CLI +
 			// initialize/auth/load) must not block the WebSocket read loop.
@@ -371,6 +391,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// ("RPC 超时（30s）") while send_message is still starting the agent.
 			msgCopy := msg
 			go s.handlers.HandleRPC(directConnection, msgCopy)
+		case "recovery_applied":
+			if err := s.eventPublisher.CompleteRecovery(directConnection, msg.RecoveryID, msg.AppliedThroughBySession); err != nil {
+				slog.Warn("go-bridge: recovery acknowledgement rejected", "remote", conn.remote, "error", err)
+			}
 		case "ping":
 			conn.SendJSON(map[string]string{"type": "pong"})
 		default:
@@ -389,7 +413,7 @@ func (s *Server) handleRegister(conn *Conn, msg *WireMessage) {
 		"ok":          true,
 		"protocol":    map[string]interface{}{"name": BridgeProtocolName, "version": BridgeProtocolVersion, "schemaRevision": BridgeProtocolSchemaRevision},
 		"backends":    backends,
-		"bridgeEpoch": fmtEpoch(),
+		"bridgeEpoch": s.bridgeEpoch,
 	}
 	conn.SendJSON(ackPayload)
 
@@ -397,7 +421,7 @@ func (s *Server) handleRegister(conn *Conn, msg *WireMessage) {
 	slog.Info("go-bridge: register_ack sent", "payload", string(ackJSON))
 }
 
-func (s *Server) handleHello(conn *Conn, msg *WireMessage) {
+func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage) {
 	if conn.revoked {
 		conn.SendJSON(map[string]interface{}{
 			"type": "hello_ack",
@@ -418,6 +442,10 @@ func (s *Server) handleHello(conn *Conn, msg *WireMessage) {
 		slog.Warn("go-bridge: hello protocol parse error", "error", err)
 	}
 	hello.Type = msg.Type
+	hello.Capabilities = msg.Capabilities
+	hello.LastBridgeEpoch = msg.LastBridgeEpoch
+	hello.LastEventID = msg.LastEventID
+	hello.LastSeenBySession = msg.LastSeenBySession
 
 	codexMode := ""
 	var agents map[string]core.Agent
@@ -441,13 +469,94 @@ func (s *Server) handleHello(conn *Conn, msg *WireMessage) {
 		s.detectionCfg,
 		s.handlers.sessions,
 	)
+	ack.BridgeEpoch = s.bridgeEpoch
+	var replay []EventMessage
+	if s.recoveryEnabled && helloSupportsRecovery(&hello) && ack.Ok {
+		plan, events, err := s.prepareRecovery(connection, &hello)
+		if err != nil {
+			slog.Warn("go-bridge: recovery preparation failed", "remote", conn.remote, "error", err)
+			_ = conn.Close()
+			return
+		}
+		ack.Recovery = plan
+		ack.Capabilities["recovery_v1"] = true
+		replay = events
+	}
 	conn.SendJSON(ack)
+	if ack.Recovery != nil {
+		s.emitRecoveryFrames(connection, ack.Recovery, replay)
+	}
 
 	slog.Info("go-bridge: hello_ack sent", "ok", ack.Ok, "device", hello.Client.DeviceID)
 }
 
-func fmtEpoch() string {
-	return time.Now().Format("20060102-150405")
+func helloSupportsRecovery(hello *HelloMessage) bool {
+	for _, capability := range hello.Capabilities {
+		if capability == "recovery_v1" {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) prepareRecovery(conn Connection, hello *HelloMessage) (*BridgeRecoveryPlan, []EventMessage, error) {
+	recoveryID, err := generateBridgeEpoch()
+	if err != nil {
+		return nil, nil, err
+	}
+	cuts := make(BridgeSessionCutMap)
+	affected := make([]BridgeAffectedSession, 0)
+	replay := make([]EventMessage, 0)
+	mode := "replay"
+	for backendID, sessions := range hello.LastSeenBySession {
+		if cuts[backendID] == nil {
+			cuts[backendID] = make(map[string]BridgeSessionCut)
+		}
+		for sessionID, cursor := range sessions {
+			affected = append(affected, BridgeAffectedSession{BackendID: backendID, SessionID: sessionID})
+			if hello.LastBridgeEpoch != s.bridgeEpoch {
+				if latest, ok := s.eventPublisher.EventBuffer().LatestCut(backendID, sessionID); ok {
+					cuts[backendID][sessionID] = latest
+				} else {
+					cuts[backendID][sessionID] = BridgeSessionCut{EventID: fmt.Sprintf("%s:0", s.bridgeEpoch)}
+				}
+				mode = "full_resync"
+				continue
+			}
+			result := s.eventPublisher.EventBuffer().Replay(backendID, sessionID, cursor)
+			cuts[backendID][sessionID] = result.Through
+			if result.Disposition == ReplaySnapshotRequired {
+				mode = "snapshot_required"
+			} else {
+				replay = append(replay, result.Events...)
+			}
+		}
+	}
+	if hello.LastBridgeEpoch != s.bridgeEpoch {
+		mode = "full_resync"
+	}
+	if _, err := s.eventPublisher.BeginRecovery(conn, recoveryID, cuts); err != nil {
+		return nil, nil, err
+	}
+	sort.Slice(replay, func(i, j int) bool { return replay[i].Seq < replay[j].Seq })
+	plan := &BridgeRecoveryPlan{RecoveryID: recoveryID, Mode: mode}
+	if mode == "replay" {
+		plan.ReplayThroughBySession = cuts
+	} else {
+		plan.AffectedSessions = affected
+		plan.CutBySession = cuts
+		replay = nil
+	}
+	return plan, replay, nil
+}
+
+func (s *Server) emitRecoveryFrames(conn Connection, plan *BridgeRecoveryPlan, replay []EventMessage) {
+	for _, event := range replay {
+		_ = s.eventPublisher.EnqueueControl(conn, event, true)
+	}
+	if plan.Mode == "replay" {
+		_ = s.eventPublisher.EnqueueControl(conn, map[string]interface{}{"type": "recovery_barrier", "recoveryId": plan.RecoveryID, "replayThroughBySession": plan.ReplayThroughBySession}, true)
+	}
 }
 
 // authErrorJSON 将认证错误以 HTTP 401 JSON 响应返回，不升级 WebSocket。

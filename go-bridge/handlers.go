@@ -39,11 +39,11 @@ type Handlers struct {
 	opencodeSessionOptions map[string]opencodeSessionOptions
 	contentRefs            map[string]string
 	contentRefOrder        []string
-	seq                    int
 	ocProxy                *OpenCodeProxy
 	codexBackendMode       string
 	pendingNotifications   *PendingNotificationStore
 	broadcaster            *Broadcaster
+	eventPublisher         *EventPublisher
 	// deltaBatcher（Fix 5）：text_delta/reasoning_delta 时间窗攒批，降低上游每 token 一帧
 	// 的 WS/HPKE/日志开销。relayEvents / startPassiveSubscription 通过它下发，而非直接 broadcaster.Send。
 	deltaBatcher            *DeltaBatcher
@@ -95,17 +95,29 @@ type opencodeSessionOptions struct {
 }
 
 func NewHandlers() *Handlers {
-	return newHandlersWithContext(context.Background())
+	return newHandlersWithContext(context.Background(), mustGenerateBridgeEpoch())
 }
 
 // NewHandlersWithContext creates a Handlers bound to the given root context.
 // Cancelling ctx propagates shutdown to active agent sessions. Prefer this in
 // main() so SIGTERM/management shutdown reaches in-flight turns.
 func NewHandlersWithContext(ctx context.Context) *Handlers {
-	return newHandlersWithContext(ctx)
+	return newHandlersWithContext(ctx, mustGenerateBridgeEpoch())
 }
 
-func newHandlersWithContext(ctx context.Context) *Handlers {
+func NewHandlersWithContextAndEpoch(ctx context.Context, bridgeEpoch string) *Handlers {
+	return newHandlersWithContext(ctx, bridgeEpoch)
+}
+
+func mustGenerateBridgeEpoch() string {
+	epoch, err := generateBridgeEpoch()
+	if err != nil {
+		panic(err)
+	}
+	return epoch
+}
+
+func newHandlersWithContext(ctx context.Context, bridgeEpoch string) *Handlers {
 	prekeys := NewPrekeyStore("")
 	observation := NewObservationManager()
 	outbox := NewOutboxManager(prekeys)
@@ -133,8 +145,7 @@ func newHandlersWithContext(ctx context.Context) *Handlers {
 		ctx:                    ctx,
 		cleanupStop:            make(chan struct{}),
 	}
-	// Fix 5：text_delta/reasoning_delta 攒批（在 broadcaster.Send 前按 33ms 窗口合并）。
-	h.deltaBatcher = NewDeltaBatcher(h.broadcaster)
+	h.installEventPublisher(NewEventPublisher(bridgeEpoch, h.broadcaster))
 	// TTL cache for the Claude running map (Fix 3). The recompute closure binds to
 	// whatever claudecode agent is currently registered, so the cache is valid
 	// across register/unregister. Invalidated on session-registry state changes.
@@ -159,6 +170,38 @@ func newHandlersWithContext(ctx context.Context) *Handlers {
 		h.runningMap.invalidate()
 	}
 	return h
+}
+
+func (h *Handlers) installEventPublisher(publisher *EventPublisher) {
+	if publisher == nil {
+		panic("event publisher must not be nil")
+	}
+	if h.deltaBatcher != nil {
+		h.deltaBatcher.Stop()
+	}
+	h.eventPublisher = publisher
+	h.eventPublisher.SetOfflineRoute(h.routeRelayOfflineStampedEvent)
+	h.deltaBatcher = NewDeltaBatcher(publisher)
+}
+
+func (h *Handlers) publishEvent(logical LogicalEvent) EventMessage {
+	if h.eventPublisher == nil {
+		panic("event publisher is not configured")
+	}
+	if len(logical.Targets) > 0 && len(logical.WaitTargets) == 0 {
+		logical.WaitTargets = logical.Targets
+	}
+	return h.eventPublisher.PublishLogical(logical)
+}
+
+func (h *Handlers) registerConnection(conn Connection) {
+	h.broadcaster.RegisterConn(conn)
+	h.eventPublisher.RegisterConnection(conn)
+}
+
+func (h *Handlers) unregisterConnection(conn Connection) {
+	h.broadcaster.UnsubscribeAll(conn)
+	h.eventPublisher.UnregisterConnection(conn)
 }
 
 func (h *Handlers) SetSessionListLimit(limit int) {
@@ -641,6 +684,10 @@ func (h *Handlers) HandleRelayInbound(conn Connection, rawJSON json.RawMessage) 
 		// iOS 经 relay 的判活改用应用层 ping/pong 后，靠此回包；不依赖被 CF 代理/干扰的
 		// WebSocket control-frame ping/pong。
 		conn.SendJSON(map[string]string{"type": "pong"})
+	case msg.Type == "recovery_applied":
+		if err := h.eventPublisher.CompleteRecovery(conn, msg.RecoveryID, msg.AppliedThroughBySession); err != nil {
+			slog.Warn("handlers: relay recovery acknowledgement rejected", "error", err)
+		}
 	case msg.Type == "request" && msg.Method != "":
 		h.HandleRPC(conn, msg)
 	default:
@@ -1153,12 +1200,12 @@ func (h *Handlers) handleRunDiagnostics(conn Connection, msg WireMessage, agent 
 		defer cancel()
 
 		report, err := provider.RunDiagnostics(ctx, func(progress core.DiagnosticProgress) {
-			conn.SendEvent("", msg.BackendID, "diagnostic_progress", map[string]interface{}{
+			h.publishEvent(LogicalEvent{BackendID: msg.BackendID, Event: "diagnostic_progress", Targets: []Connection{conn}, Data: map[string]interface{}{
 				"diagnosticRunId": runID,
 				"checkId":         progress.CheckID,
 				"status":          progress.Status,
 				"message":         progress.Message,
-			})
+			}})
 		})
 
 		if err != nil {
@@ -1178,11 +1225,11 @@ func (h *Handlers) handleRunDiagnostics(conn Connection, msg WireMessage, agent 
 			report = &core.DiagnosticReport{OverallStatus: "healthy"}
 		}
 
-		conn.SendEvent("", msg.BackendID, "diagnostic_completed", map[string]interface{}{
+		h.publishEvent(LogicalEvent{BackendID: msg.BackendID, Event: "diagnostic_completed", Targets: []Connection{conn}, Data: map[string]interface{}{
 			"diagnosticRunId": runID,
 			"overallStatus":   report.OverallStatus,
 			"results":         diagnosticResultsToWire(report.Results),
-		})
+		}})
 	}()
 }
 
@@ -1379,7 +1426,7 @@ func (h *Handlers) handleCreateSession(conn Connection, msg WireMessage, agent c
 		if params.Directory != "" {
 			result["directory"] = params.Directory
 		}
-		conn.SendEvent(sessionID, msg.BackendID, "session_state_changed", map[string]interface{}{"state": "idle"})
+		h.publishEvent(LogicalEvent{SessionID: sessionID, BackendID: msg.BackendID, Event: "session_state_changed", Data: map[string]interface{}{"state": "idle"}, Targets: []Connection{conn}})
 		conn.SendResult(msg.RequestID, result, nil)
 		return
 	}
@@ -1407,7 +1454,7 @@ func (h *Handlers) handleCreateSession(conn Connection, msg WireMessage, agent c
 		result["directory"] = params.Directory
 	}
 
-	conn.SendEvent(sessionID, msg.BackendID, "session_state_changed", map[string]interface{}{"state": "idle"})
+	h.publishEvent(LogicalEvent{SessionID: sessionID, BackendID: msg.BackendID, Event: "session_state_changed", Data: map[string]interface{}{"state": "idle"}, Targets: []Connection{conn}})
 	conn.SendResult(msg.RequestID, h.enrichSessionState(result), nil)
 }
 
@@ -1510,18 +1557,14 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 	// 额外的 running 广播会让 isGenerating 过早激活；如果 turn_completed 的 500ms
 	// debounce 在 session 切换时被取消，isGenerating 会永久残留导致输入框卡"执行中"。
 	if agent.Name() != "grokbuild" {
-		conn.SendEvent(params.SessionID, msg.BackendID, "session_state_changed", map[string]interface{}{"state": "running"})
-		h.broadcaster.Send(BroadcastEvent{
+		h.publishEvent(LogicalEvent{
 			BackendID: msg.BackendID,
 			SessionID: params.SessionID,
 			Directory: extractDir(msg),
-			Message: EventMessage{
-				Type:      "event",
-				SessionID: params.SessionID,
-				BackendID: msg.BackendID,
-				Event:     "session_state_changed",
-				Data:      map[string]interface{}{"state": "running"},
-			},
+			Event:     "session_state_changed",
+			Data:      map[string]interface{}{"state": "running"},
+			Broadcast: true,
+			Targets:   []Connection{conn},
 		})
 	}
 	h.sessions.markRunning(params.SessionID)
@@ -1677,6 +1720,7 @@ func (h *Handlers) rebindSessionIDIfResolved(currentID string, sess core.AgentSe
 
 	h.sessions.rebind(currentID, realID)
 	h.broadcaster.Rebind(currentID, realID, backendID, directory)
+	h.eventPublisher.EventBuffer().Rebind(backendID, currentID, realID)
 	h.rebindRelayKind(currentID, realID, relayKindAgent)
 	if backendID == "claude" || backendID == "claudecode" {
 		h.mu.Lock()
@@ -1690,24 +1734,16 @@ func (h *Handlers) rebindSessionIDIfResolved(currentID string, sess core.AgentSe
 
 func (h *Handlers) sendSessionEvent(sessionID, backendID, eventName string, data interface{}) {
 	h.mu.Lock()
-	h.seq++
-	seq := h.seq
 	dir := h.sessions.directoryForSession(sessionID)
 	h.mu.Unlock()
-
-	msg := EventMessage{
-		Type:      "event",
+	h.publishEvent(LogicalEvent{
 		SessionID: sessionID,
 		BackendID: backendID,
 		Event:     eventName,
 		Data:      data,
-		Seq:       seq,
-	}
-	h.broadcaster.Send(BroadcastEvent{
-		BackendID: backendID,
-		SessionID: sessionID,
 		Directory: dir,
-		Message:   msg,
+		Broadcast: true,
+		Offline:   IsDurableMilestone(eventName),
 	})
 }
 
@@ -1716,18 +1752,13 @@ func (h *Handlers) broadcastIdleState(sessionID, backendID string) {
 	h.mu.Lock()
 	dir := h.sessions.directoryForSession(sessionID)
 	h.mu.Unlock()
-	stateMsg := EventMessage{
-		Type:      "event",
+	h.publishEvent(LogicalEvent{
 		SessionID: sessionID,
 		BackendID: backendID,
 		Event:     "session_state_changed",
 		Data:      map[string]interface{}{"state": "idle"},
-	}
-	h.broadcaster.Send(BroadcastEvent{
-		BackendID: backendID,
-		SessionID: sessionID,
 		Directory: dir,
-		Message:   stateMsg,
+		Broadcast: true,
 	})
 	h.sessions.markIdle(sessionID)
 }
@@ -1811,36 +1842,23 @@ func (h *Handlers) handleAbortGeneration(conn Connection, msg WireMessage) {
 	}
 
 	if deleted {
-		h.mu.Lock()
-		h.seq++
-		seq := h.seq
-		h.mu.Unlock()
-
-		h.broadcaster.Send(BroadcastEvent{
+		h.publishEvent(LogicalEvent{
 			BackendID: backendID,
 			SessionID: sessionID,
 			Directory: directory,
-			Message: EventMessage{
-				Type:      "event",
-				SessionID: sessionID,
-				BackendID: backendID,
-				Event:     "turn_completed",
-				Data:      map[string]interface{}{"done": true, "reason": "aborted"},
-				Seq:       seq,
-			},
+			Event:     "turn_completed",
+			Data:      map[string]interface{}{"done": true, "reason": "aborted"},
+			Broadcast: true,
+			Offline:   true,
 		})
 
-		h.broadcaster.Send(BroadcastEvent{
+		h.publishEvent(LogicalEvent{
 			BackendID: backendID,
 			SessionID: sessionID,
 			Directory: directory,
-			Message: EventMessage{
-				Type:      "event",
-				SessionID: sessionID,
-				BackendID: backendID,
-				Event:     "session_state_changed",
-				Data:      map[string]interface{}{"state": "idle"},
-			},
+			Event:     "session_state_changed",
+			Data:      map[string]interface{}{"state": "idle"},
+			Broadcast: true,
 		})
 
 		h.recordPendingNotification(sessionID, backendID, "completed", "aborted")
@@ -2206,7 +2224,7 @@ func scanSessionsFromProjectDirWithMetrics(projectDir, projectKey string, metric
 }
 
 type claudeSessionScanResult struct {
-	Title           string
+	Title string
 	// CustomTitle 仅在 JSONL 里出现 type=custom-title 记录时设值；
 	// assistant 文本回退出的 Title 不算 custom title。fork 检测要求双方都有
 	// custom title，避免把「首条 assistant 恰好相同」的无关会话误判为 fork。
@@ -2435,6 +2453,16 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 		json.Unmarshal(msg.Params, &params)
 	}
 	params.SessionID = h.resolveSessionIDForActiveSession(params.SessionID)
+	var recoveryCut *BridgeSessionCut
+	if params.RecoveryID != "" {
+		cut, release, err := h.eventPublisher.FreezeRecoverySnapshot(conn, params.RecoveryID, msg.BackendID, params.SessionID)
+		if err != nil {
+			metrics.sendResult(conn, msg.RequestID, nil, &WireError{Code: "recovery.snapshot_invalid", Message: err.Error()})
+			return
+		}
+		defer release()
+		recoveryCut = &cut
+	}
 
 	slog.Info("go-bridge: get_session_messages", "backendID", msg.BackendID, "sessionID", params.SessionID, "directory", params.Directory)
 
@@ -2490,7 +2518,7 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 		if msgs, ok := result["messages"].([]map[string]interface{}); ok {
 			metrics.resultCount = len(msgs)
 		}
-		metrics.sendResult(conn, msg.RequestID, applyIfNoneMatch(result, params.IfNoneMatchRevision), nil)
+		metrics.sendResult(conn, msg.RequestID, attachRecoverySnapshotMetadata(applyIfNoneMatch(result, params.IfNoneMatchRevision), params.RecoveryID, recoveryCut), nil)
 		return
 	}
 
@@ -2515,6 +2543,8 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 			}
 			if params.Paginate {
 				messages = trimWireToBudget(messages)
+			} else {
+				truncateOversizedMessages(messages)
 			}
 			result := map[string]interface{}{"messages": messages}
 			if usage := h.getSessionContextUsage(agent, params.SessionID); usage != nil {
@@ -2522,7 +2552,7 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 			}
 			metrics.wireMapping += time.Since(mappingStarted)
 			metrics.resultCount = len(messages)
-			metrics.sendResult(conn, msg.RequestID, applyIfNoneMatch(result, params.IfNoneMatchRevision), nil)
+			metrics.sendResult(conn, msg.RequestID, attachRecoverySnapshotMetadata(applyIfNoneMatch(result, params.IfNoneMatchRevision), params.RecoveryID, recoveryCut), nil)
 			return
 		}
 		if !errors.Is(err, core.ErrNotSupported) {
@@ -2550,6 +2580,7 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 	for _, e := range entries {
 		result = append(result, legacyHistoryEntryToWire(e))
 	}
+	truncateOversizedMessages(result)
 
 	payload := map[string]interface{}{"messages": result}
 	if usage := h.getSessionContextUsage(agent, params.SessionID); usage != nil {
@@ -2557,7 +2588,16 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 	}
 	metrics.wireMapping += time.Since(mappingStarted)
 	metrics.resultCount = len(result)
-	metrics.sendResult(conn, msg.RequestID, applyIfNoneMatch(payload, params.IfNoneMatchRevision), nil)
+	metrics.sendResult(conn, msg.RequestID, attachRecoverySnapshotMetadata(applyIfNoneMatch(payload, params.IfNoneMatchRevision), params.RecoveryID, recoveryCut), nil)
+}
+
+func attachRecoverySnapshotMetadata(payload map[string]interface{}, recoveryID string, cut *BridgeSessionCut) map[string]interface{} {
+	if recoveryID == "" || cut == nil {
+		return payload
+	}
+	payload["recoveryId"] = recoveryID
+	payload["eventHighWaterMark"] = *cut
+	return payload
 }
 
 func (h *Handlers) getSessionContextUsage(agent core.Agent, sessionID string) *core.ContextUsage {
@@ -2812,10 +2852,10 @@ func (h *Handlers) handleSetPermissionMode(conn Connection, msg WireMessage, age
 	}
 
 	current := switcher.GetMode()
-	conn.SendEvent(params.SessionID, msg.BackendID, "permission_mode_changed", map[string]interface{}{
+	h.publishEvent(LogicalEvent{SessionID: params.SessionID, BackendID: msg.BackendID, Event: "permission_mode_changed", Targets: []Connection{conn}, Data: map[string]interface{}{
 		"mode":      current,
 		"appliesTo": appliesTo,
-	})
+	}})
 	conn.SendResult(msg.RequestID, map[string]interface{}{
 		"mode":      current,
 		"appliesTo": appliesTo,

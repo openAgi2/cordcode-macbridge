@@ -9,5 +9,16 @@
     "name": "cordcode-bridge",
     "version": 1,
     "supportedSchemaRevisions": ["2026-05-07"]
+  },
+  "capabilities": ["recovery_v1"],
+  "lastBridgeEpoch": "6f5cc72f-8f2f-4bc7-92f5-030351c1569d",
+  "lastEventId": "6f5cc72f-8f2f-4bc7-92f5-030351c1569d:42",
+  "lastSeenBySession": {
+    "codex": {
+      "session_example": {
+        "eventId": "6f5cc72f-8f2f-4bc7-92f5-030351c1569d:42",
+        "seq": 42
+      }
+    }
   }
 }

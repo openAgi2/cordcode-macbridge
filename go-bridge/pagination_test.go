@@ -567,3 +567,99 @@ func TestPaginationSamplesMatchWireShape(t *testing.T) {
 		t.Errorf("oldestOrdinal=2 should mean hasMore=true")
 	}
 }
+
+// TestTrimWireToBudgetSingleOversizedMessage verifies that a single message
+// exceeding the transport budget (observed in production: a 3.75MB Codex turn
+// that exhausted the Relay prekey pool and closed the connection on every
+// loadOlder) is truncated in place rather than sent whole. Without this guard,
+// trimWireToBudget's "keep at least one message" rule let a giant message pass
+// through unbounded.
+func TestTrimWireToBudgetSingleOversizedMessage(t *testing.T) {
+	// Build a single assistant message whose content alone is ~1MB, far above
+	// maxPageResponseBytes (256KB) and maxSingleMessageBytes (192KB).
+	huge := strings.Repeat("x", 1<<20) // 1 MiB
+	wire := []map[string]interface{}{
+		{
+			"id":      "msg-1",
+			"role":    "assistant",
+			"content": huge,
+			"parts": []interface{}{
+				map[string]interface{}{"type": "text", "content": huge},
+			},
+		},
+	}
+
+	out := trimWireToBudget(wire)
+	if len(out) != 1 {
+		t.Fatalf("expected exactly 1 retained message, got %d", len(out))
+	}
+	msg := out[0]
+
+	// The encoded message must now fit within the page budget.
+	encoded, _ := json.Marshal(msg)
+	if len(encoded) > maxPageResponseBytes {
+		t.Fatalf("single message still %d bytes after truncation, budget %d", len(encoded), maxPageResponseBytes)
+	}
+
+	// Truncation must be marked truthfully so the client can show it.
+	if marked, _ := msg["truncated"].(bool); !marked {
+		t.Fatalf("expected message[\"truncated\"]=true after in-place truncation")
+	}
+
+	// compactDuplicateMessageFields runs first and may delete the top-level
+	// "content" when it equals the joined part text. Truncation therefore lands
+	// on whichever text fields survive compaction. At least one surviving text
+	// field (content or a part content) must carry the truncation marker.
+	foundMarker := false
+	if content, ok := msg["content"].(string); ok && strings.Contains(content, "已截断") {
+		foundMarker = true
+	}
+	if parts, ok := msg["parts"].([]interface{}); ok {
+		for _, rawPart := range parts {
+			part, ok := rawPart.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if partContent, _ := part["content"].(string); strings.Contains(partContent, "已截断") {
+				foundMarker = true
+			}
+		}
+	}
+	if !foundMarker {
+		t.Fatalf("expected at least one text field to carry the truncation marker")
+	}
+}
+
+func TestTruncateOversizedMessagesPreservesWholeHistory(t *testing.T) {
+	wire := []map[string]interface{}{
+		{"id": "old", "role": "user", "content": "keep me"},
+		{"id": "huge", "role": "assistant", "content": strings.Repeat("大", 1<<20)},
+		{"id": "new", "role": "assistant", "content": "keep me too"},
+	}
+
+	truncateOversizedMessages(wire)
+
+	if len(wire) != 3 {
+		t.Fatalf("whole-history guard changed message count: got %d, want 3", len(wire))
+	}
+	if wire[0]["id"] != "old" || wire[2]["id"] != "new" {
+		t.Fatalf("whole-history guard changed message order: %#v", wire)
+	}
+	if marked, _ := wire[1]["truncated"].(bool); !marked {
+		t.Fatal("oversized message missing truthful truncated marker")
+	}
+	encoded, err := json.Marshal(wire[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > maxPageResponseBytes {
+		t.Fatalf("oversized message still %d bytes after guard, budget %d", len(encoded), maxPageResponseBytes)
+	}
+}
+
+func tail(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[len(s)-n:]
+}

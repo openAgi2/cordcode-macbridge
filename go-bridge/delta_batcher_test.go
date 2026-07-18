@@ -8,72 +8,49 @@ import (
 
 // captureSender 记录所有 Send 调用，供 DeltaBatcher 测试断言帧数与顺序。
 type captureSender struct {
-	mu      sync.Mutex
-	events  []EventMessage
-	full    []BroadcastEvent // 完整 BroadcastEvent（含 backend/session/dir）
+	mu     sync.Mutex
+	events []LogicalEvent
 }
 
-func (c *captureSender) Send(ev BroadcastEvent) {
+func (c *captureSender) PublishLogical(ev LogicalEvent) EventMessage {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if msg, ok := ev.Message.(EventMessage); ok {
-		c.events = append(c.events, msg)
-	}
-	c.full = append(c.full, ev)
+	c.events = append(c.events, ev)
+	return EventMessage{Event: ev.Event, BackendID: ev.BackendID, SessionID: ev.SessionID, Data: ev.Data}
 }
 
-func (c *captureSender) snapshot() ([]EventMessage, []BroadcastEvent) {
+func (c *captureSender) snapshot() ([]LogicalEvent, []LogicalEvent) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	evs := make([]EventMessage, len(c.events))
+	evs := make([]LogicalEvent, len(c.events))
 	copy(evs, c.events)
-	full := make([]BroadcastEvent, len(c.full))
-	copy(full, c.full)
-	return evs, full
+	return evs, evs
 }
 
-func textDeltaEvent(backend, session, delta string, seq int) BroadcastEvent {
-	return BroadcastEvent{
+func textDeltaEvent(backend, session, delta string, _ int) LogicalEvent {
+	return LogicalEvent{
 		BackendID: backend,
 		SessionID: session,
-		Message: EventMessage{
-			Type:      "event",
-			SessionID: session,
-			BackendID: backend,
-			Event:     "text_delta",
-			Data:      map[string]interface{}{"delta": delta},
-			Seq:       seq,
-		},
+		Event:     "text_delta",
+		Data:      map[string]interface{}{"delta": delta},
 	}
 }
 
-func reasoningDeltaEvent(backend, session, delta string, seq int) BroadcastEvent {
-	return BroadcastEvent{
+func reasoningDeltaEvent(backend, session, delta string, _ int) LogicalEvent {
+	return LogicalEvent{
 		BackendID: backend,
 		SessionID: session,
-		Message: EventMessage{
-			Type:      "event",
-			SessionID: session,
-			BackendID: backend,
-			Event:     "reasoning_delta",
-			Data:      map[string]interface{}{"delta": delta},
-			Seq:       seq,
-		},
+		Event:     "reasoning_delta",
+		Data:      map[string]interface{}{"delta": delta},
 	}
 }
 
-func nonTextEvent(backend, session, event string, seq int) BroadcastEvent {
-	return BroadcastEvent{
+func nonTextEvent(backend, session, event string, _ int) LogicalEvent {
+	return LogicalEvent{
 		BackendID: backend,
 		SessionID: session,
-		Message: EventMessage{
-			Type:      "event",
-			SessionID: session,
-			BackendID: backend,
-			Event:     event,
-			Data:      map[string]interface{}{"foo": "bar"},
-			Seq:       seq,
-		},
+		Event:     event,
+		Data:      map[string]interface{}{"foo": "bar"},
 	}
 }
 
@@ -100,10 +77,8 @@ func TestDeltaBatchMergesConsecutiveTextDeltas(t *testing.T) {
 	if delta != "Hello, world!" {
 		t.Fatalf("merged delta = %q, want %q", delta, "Hello, world!")
 	}
-	// seq 用最后一个（单调递增）。
-	if evs[0].Seq != 4 {
-		t.Fatalf("merged seq = %d, want 4 (last)", evs[0].Seq)
-	}
+	// DeltaBatcher operates before stamping; EventPublisher assigns one new seq
+	// to the merged logical event.
 }
 
 // TestDeltaBatchFlushesOnControlEvent: text_delta 累积后，turn_completed 触发
@@ -221,7 +196,7 @@ func TestDeltaBatchTickerFlushesWithinWindow(t *testing.T) {
 	d.Send(textDeltaEvent("claude", "s1", "tick", 1))
 
 	// 等待 2 个 ticker 周期（~66ms）确保 flush 触发。
-	time.Sleep(2 * deltaBatchFlushInterval + 20*time.Millisecond)
+	time.Sleep(2*deltaBatchFlushInterval + 20*time.Millisecond)
 
 	evs, _ := capture.snapshot()
 	if len(evs) != 1 {

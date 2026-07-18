@@ -163,17 +163,6 @@ func (rc *RelayDeviceConn) SendResult(requestID string, data interface{}, err *W
 	rc.SendJSON(resp)
 }
 
-// SendEvent 发送业务事件。
-func (rc *RelayDeviceConn) SendEvent(sessionID, backendID, eventName string, data interface{}) {
-	rc.SendJSON(EventMessage{
-		Type:      "event",
-		SessionID: sessionID,
-		BackendID: backendID,
-		Event:     eventName,
-		Data:      data,
-	})
-}
-
 // ReceiveJSON 解密入站 relay envelope 并返回业务 JSON。
 // 如果 iosToMacKey 未设置（单向通信模式），返回 nil。
 func (rc *RelayDeviceConn) ReceiveJSON(envelopeBytes []byte) (json.RawMessage, error) {

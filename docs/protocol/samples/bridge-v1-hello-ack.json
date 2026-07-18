@@ -28,7 +28,21 @@
     "trustedDevices": true,
     "offlineSnapshots": true,
     "workspaceList": true,
-    "sessionMutation": true
+    "sessionMutation": true,
+    "recovery_v1": true
+  },
+  "bridgeEpoch": "6f5cc72f-8f2f-4bc7-92f5-030351c1569d",
+  "recovery": {
+    "recoveryId": "948624e8-5463-4628-bad8-40ba35b43a6f",
+    "mode": "replay",
+    "replayThroughBySession": {
+      "codex": {
+        "session_example": {
+          "eventId": "6f5cc72f-8f2f-4bc7-92f5-030351c1569d:51",
+          "seq": 51
+        }
+      }
+    }
   },
   "backends": [],
   "bridgeStatus": "ready",

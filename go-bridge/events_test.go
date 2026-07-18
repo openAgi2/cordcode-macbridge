@@ -220,6 +220,47 @@ func TestMapAgentEventToolFinishedFallsBackToContent(t *testing.T) {
 	}
 }
 
+func TestMapAgentEventToolFinishedCarriesOnlyStructuredMatches(t *testing.T) {
+	paths := []string{"src/a.go", "src/b.go"}
+	_, data, _ := mapAgentEvent(core.Event{
+		Type:        core.EventToolResult,
+		ToolName:    "Glob",
+		ToolResult:  "display text is not parsed by the wire layer",
+		ToolMatches: &core.ToolMatches{Kind: "paths", Paths: paths},
+	})
+	payload := data.(map[string]interface{})
+	matches, ok := payload["matches"].(*core.ToolMatches)
+	if !ok || matches.Kind != "paths" || len(matches.Paths) != 2 {
+		t.Fatalf("matches=%#v", payload["matches"])
+	}
+
+	_, data, _ = mapAgentEvent(core.Event{Type: core.EventToolResult, ToolName: "Grep", ToolResult: "src/a.go:1:text"})
+	if _, exists := data.(map[string]interface{})["matches"]; exists {
+		t.Fatal("wire layer inferred matches from display text")
+	}
+}
+
+func TestMapAgentEventCarriesChildIdentityAcrossAllChildEventKinds(t *testing.T) {
+	success := true
+	events := []core.Event{
+		{Type: core.EventText, Content: "text"},
+		{Type: core.EventThinking, Content: "reasoning"},
+		{Type: core.EventToolUse, ToolName: "Read"},
+		{Type: core.EventToolResult, ToolName: "Read", ToolSuccess: &success},
+		{Type: core.EventError, Error: errors.New("failed")},
+		{Type: core.EventResult, Done: true},
+	}
+	for _, event := range events {
+		event.StreamID = "child-1"
+		event.ParentStreamID = "parent-1"
+		name, data, _ := mapAgentEvent(event)
+		payload := data.(map[string]interface{})
+		if payload["streamId"] != "child-1" || payload["parentStreamId"] != "parent-1" {
+			t.Fatalf("%s payload=%#v", name, payload)
+		}
+	}
+}
+
 func TestMapAgentEventToolFinishedIncludesToolInput(t *testing.T) {
 	success := true
 	name, data, done := mapAgentEvent(core.Event{
@@ -436,8 +477,10 @@ func TestRelayEventsRoutesDurableMilestoneToOfflineRelayDevice(t *testing.T) {
 	handlers.ConfigureRelayUpgrade(store, relayIdentity, nil)
 
 	var sent []json.RawMessage
+	sentCh := make(chan json.RawMessage, 1)
 	handlers.ConfigureRelayDelivery(routeID, func(envelope json.RawMessage) error {
-		sent = append(sent, append(json.RawMessage(nil), envelope...))
+		copy := append(json.RawMessage(nil), envelope...)
+		sentCh <- copy
 		return nil
 	})
 
@@ -472,6 +515,12 @@ func TestRelayEventsRoutesDurableMilestoneToOfflineRelayDevice(t *testing.T) {
 	close(session.events)
 
 	handlers.relayEvents(&relayBroadcastCaptureConn{}, session, "ses_offline_route", "codex")
+	select {
+	case envelope := <-sentCh:
+		sent = append(sent, envelope)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for offline envelope")
+	}
 
 	if len(sent) != 1 {
 		t.Fatalf("offline envelopes = %d, want 1", len(sent))

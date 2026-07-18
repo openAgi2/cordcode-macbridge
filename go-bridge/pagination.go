@@ -214,6 +214,13 @@ func (h *Handlers) servePaginatedMessages(
 // compact duplicate fields first, then drop the oldest (lowest-index) messages
 // until under maxPageResponseBytes. At least one message is always retained.
 //
+// If a single retained message still exceeds the budget on its own (e.g. a Codex
+// assistant turn with a multi-megabyte tool output or reasoning dump), its text
+// fields are truncated to maxSingleMessageBytes so the response cannot exhaust
+// the device's Relay prekey pool and force a disconnect mid-load. The truncation
+// is marked on the message so the client can show a truthful "内容过长已截断"
+// affordance instead of silently losing content.
+//
 // Shared between the paginated path (servePaginatedMessages) and the full-parse
 // fallback (handlers.go). The fallback used to return the entire session history
 // unbounded — e.g. 1.3MB / 77 msgs when transcript-index replay mismatched on a
@@ -236,7 +243,99 @@ func trimWireToBudget(wire []map[string]interface{}) []map[string]interface{} {
 		}
 		wire = wire[1:]
 	}
+	// A single message can still exceed the budget on its own (observed: a 3.75MB
+	// Codex turn exhausting the Relay prekey pool and closing the connection on
+	// every loadOlder). Truncate its oversized text fields in place so the frame
+	// stays within the transport budget; mark it truncated for truthful display.
+	if len(wire) == 1 {
+		if total, _ := json.Marshal(wire[0]); len(total) > maxPageResponseBytes {
+			truncateOversizedMessage(wire[0])
+		}
+	}
 	return wire
+}
+
+// truncateOversizedMessages preserves the full history sequence while ensuring no
+// single message can monopolize the delivery prekey pool. Whole-history clients
+// (iOS and Remote Web) deliberately avoid cursor prepends, so dropping older rows
+// here would violate their authoritative-snapshot contract.
+func truncateOversizedMessages(wire []map[string]interface{}) {
+	for _, message := range wire {
+		if total, _ := json.Marshal(message); len(total) > maxPageResponseBytes {
+			compactDuplicateMessageFields(message)
+			if total, _ = json.Marshal(message); len(total) > maxPageResponseBytes {
+				truncateOversizedMessage(message)
+			}
+		}
+	}
+}
+
+// maxSingleMessageBytes caps how much of a single message's text can be sent in
+// one page. It is deliberately below maxPageResponseBytes to leave room for the
+// wire envelope, cursor metadata, and non-text fields (tool steps, fileChanges).
+const maxSingleMessageBytes = 192 << 10
+
+// truncateOversizedMessage shortens the text-bearing fields of a single message
+// (content, thinking, and each part's content) so the encoded message fits within
+// maxSingleMessageBytes. It sets message["truncated"]=true so the client can show
+// a truthful truncation marker rather than presenting partial content as complete.
+func truncateOversizedMessage(message map[string]interface{}) {
+	alloc := maxSingleMessageBytes
+	if s, _ := message["content"].(string); len(s) > 0 {
+		if len(s) > alloc {
+			message["content"] = truncateTextWithMarker(s, alloc)
+			alloc = 0
+		} else {
+			alloc -= len(s)
+		}
+	}
+	if alloc > 0 {
+		if s, _ := message["thinking"].(string); len(s) > 0 {
+			if len(s) > alloc {
+				message["thinking"] = truncateTextWithMarker(s, alloc)
+				alloc = 0
+			} else {
+				alloc -= len(s)
+			}
+		}
+	}
+	if parts, ok := message["parts"].([]interface{}); ok && alloc > 0 {
+		for _, rawPart := range parts {
+			part, ok := rawPart.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			s, _ := part["content"].(string)
+			if len(s) == 0 {
+				continue
+			}
+			if len(s) > alloc {
+				part["content"] = truncateTextWithMarker(s, alloc)
+				alloc = 0
+				break
+			}
+			alloc -= len(s)
+		}
+	}
+	message["truncated"] = true
+}
+
+// truncateTextWithMarker cuts s to maxLen bytes (on a rune boundary, not mid-byte)
+// and appends a visible marker so the client renders partial content truthfully.
+func truncateTextWithMarker(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	const marker = "\n\n…（内容过长，已截断。完整内容请查看本地 transcript。）"
+	cut := maxLen - len(marker)
+	if cut < 0 {
+		cut = 0
+	}
+	// Back up to a UTF-8 boundary so we never split a multi-byte rune.
+	for cut > 0 && (s[cut]&0xC0) == 0x80 {
+		cut--
+	}
+	return s[:cut] + marker
 }
 
 // compactDuplicateMessageFields removes top-level text copies only when the

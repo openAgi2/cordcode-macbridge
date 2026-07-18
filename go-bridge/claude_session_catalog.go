@@ -23,10 +23,10 @@ type claudeSessionFingerprint struct {
 }
 
 type claudeSessionIndexEntry struct {
-	Key             claudeSessionKey
-	FilePath        string
-	Directory       string
-	Title           string
+	Key       claudeSessionKey
+	FilePath  string
+	Directory string
+	Title     string
 	// CustomTitle 来自 JSONL 的 type=custom-title 记录（assistant 文本回退的 Title 不算）。
 	// 配合 FirstUserAt 用于检测 Claude Code fork 对：fork 时原会话开头被原样复制到新会话，
 	// 因此 fork 对拥有相同的 CustomTitle + FirstUserAt。
@@ -255,6 +255,7 @@ func (c *claudeSessionCatalog) buildSnapshot(
 //  1. 同一 ProjectKey；
 //  2. 双方都有非空 CustomTitle 且相等；
 //  3. 双方 FirstUserAt 非零且相等。
+//
 // 同组多于一个时保留 UpdatedAt 最新的（primary），其余从 byKey 和 sorted 里删除。
 // 同组 UpdatedAt 相同时按 SessionID 排序保留字典序最大者，保证确定性。
 func hideClaudeForkChildren(byKey map[claudeSessionKey]claudeSessionIndexEntry, sorted []claudeSessionIndexEntry) []claudeSessionIndexEntry {

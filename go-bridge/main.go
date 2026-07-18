@@ -66,6 +66,12 @@ func Main() {
 		fmt.Println(runtimeVersionString())
 		return
 	}
+	bridgeEpoch, err := generateBridgeEpoch()
+	if err != nil {
+		slog.Error("go-bridge: bridge epoch generation failed", "error", err)
+		WriteErrorFrame(RuntimeErrorConfigInvalid, err.Error())
+		return
+	}
 	// Strip control-plane secrets from the go-bridge process's own environment
 	// right after they are parsed. This prevents any future fork done by the
 	// bridge itself (including helper goroutines that call os.Environ()) from
@@ -91,7 +97,7 @@ func Main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	handlers := NewHandlersWithContext(ctx)
+	handlers := NewHandlersWithContextAndEpoch(ctx, bridgeEpoch)
 	handlers.SetRelayEnabled(*relayEnabled)
 	handlers.SetSessionListLimit(*sessionListLimit)
 	handlers.SetDataDir(*dataDirPath)
@@ -290,7 +296,8 @@ func Main() {
 		os.Exit(1)
 	}
 
-	server := NewServer(handlers)
+	server := NewServerWithEpoch(handlers, bridgeEpoch)
+	server.SetRecoveryEnabled(true)
 	serverDisplayName := "CordCode Link"
 	if mgmtSrv != nil {
 		serverDisplayName = mgmtSrv.DisplayName()
@@ -325,6 +332,10 @@ func Main() {
 			_ = json.Unmarshal(msg.Protocol, &hello.Protocol)
 		}
 		hello.Type = msg.Type
+		hello.Capabilities = msg.Capabilities
+		hello.LastBridgeEpoch = msg.LastBridgeEpoch
+		hello.LastEventID = msg.LastEventID
+		hello.LastSeenBySession = msg.LastSeenBySession
 		ack := HandleHelloWithRemoteURLs(
 			&hello,
 			device,
@@ -340,7 +351,23 @@ func Main() {
 			server.detectionCfg,
 			handlers.sessions,
 		)
+		ack.BridgeEpoch = bridgeEpoch
+		var replay []EventMessage
+		if server.recoveryEnabled && helloSupportsRecovery(&hello) && ack.Ok {
+			plan, events, err := server.prepareRecovery(conn, &hello)
+			if err != nil {
+				slog.Warn("relay-bridge-client: recovery preparation failed", "error", err)
+				_ = conn.Close()
+				return
+			}
+			ack.Recovery = plan
+			ack.Capabilities["recovery_v1"] = true
+			replay = events
+		}
 		conn.SendJSON(ack)
+		if ack.Recovery != nil {
+			server.emitRecoveryFrames(conn, ack.Recovery, replay)
+		}
 		slog.Info("relay-bridge-client: hello_ack sent via relay", "ok", ack.Ok, "device", hello.Client.DeviceID)
 	})
 
@@ -510,7 +537,7 @@ func Main() {
 	}
 	// T06: WriteReadyFrame 现在返回 runtime.json 写入错误。product 模式下写失败须 fail-fast，
 	// 不得发布 ready（否则磁盘满/权限错误时 UI 永远未就绪，每 60s 重启）。
-	if err := WriteReadyFrame(*port, driverList, managementURL, *dataDirPath); err != nil {
+	if err := WriteReadyFrame(*port, driverList, managementURL, *dataDirPath, bridgeEpoch); err != nil {
 		slog.Error("go-bridge: ready frame 持久化失败，fail-fast 退出", "error", err)
 		WriteErrorFrame(RuntimeErrorBootstrapPersistFailed, err.Error())
 		os.Exit(1)
@@ -656,23 +683,13 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 				}
 			}
 
-			h.mu.Lock()
-			h.seq++
-			seq := h.seq
-			h.mu.Unlock()
-
-			msg := EventMessage{
-				Type:      "event",
+			h.deltaBatcher.Send(LogicalEvent{
 				SessionID: ev.SessionID,
 				BackendID: backendID,
 				Event:     eventName,
 				Data:      data,
-				Seq:       seq,
-			}
-			h.deltaBatcher.Send(BroadcastEvent{
-				BackendID: backendID,
-				SessionID: ev.SessionID,
-				Message:   msg,
+				Broadcast: true,
+				Offline:   IsDurableMilestone(eventName),
 			})
 		}
 		slog.Info("go-bridge: passive subscription ended, reconnecting", "backend", backendID)

@@ -14,10 +14,10 @@ import (
 
 // captureConn records the last SendResult for assertions.
 type pinTestConn struct {
-	mu     sync.Mutex
-	data   interface{}
-	err    *WireError
-	reqID  string
+	mu    sync.Mutex
+	data  interface{}
+	err   *WireError
+	reqID string
 }
 
 func (c *pinTestConn) SendJSON(any) {}
@@ -30,18 +30,18 @@ func (c *pinTestConn) SendResult(reqID string, data interface{}, err *WireError)
 }
 func (c *pinTestConn) SendEvent(string, string, string, interface{}) {}
 func (c *pinTestConn) AuthedDevice() *TrustedDeviceRecord            { return nil }
-func (c *pinTestConn) RemoteAddr() string                             { return "test:pin" }
-func (c *pinTestConn) Close() error                                   { return nil }
+func (c *pinTestConn) RemoteAddr() string                            { return "test:pin" }
+func (c *pinTestConn) Close() error                                  { return nil }
 
 // pinFakeAgent implements core.Agent (Name + StartSession + ListSessions + Stop) plus
 // core.SessionPinner backed by a real pinstore. It does NOT implement SessionRenamer /
 // SessionArchiver, so capability independence can be asserted.
 type pinFakeAgent struct {
-	name     string
-	store    *pinstore.Store
-	scope    string // pin key scope
-	list     []core.AgentSessionInfo
-	listErr  error
+	name    string
+	store   *pinstore.Store
+	scope   string // pin key scope
+	list    []core.AgentSessionInfo
+	listErr error
 }
 
 func (a *pinFakeAgent) Name() string { return a.name }
@@ -227,10 +227,12 @@ func TestSetSessionPinnedUnsupportedBackend(t *testing.T) {
 // bareAgent implements only the core.Agent base surface (no SessionPinner).
 type bareAgent struct{ name string }
 
-func (b *bareAgent) Name() string                                       { return b.name }
-func (b *bareAgent) StartSession(context.Context, string) (core.AgentSession, error) { return nil, errors.New("no") }
-func (b *bareAgent) ListSessions(context.Context) ([]core.AgentSessionInfo, error)   { return nil, nil }
-func (b *bareAgent) Stop() error                                        { return nil }
+func (b *bareAgent) Name() string { return b.name }
+func (b *bareAgent) StartSession(context.Context, string) (core.AgentSession, error) {
+	return nil, errors.New("no")
+}
+func (b *bareAgent) ListSessions(context.Context) ([]core.AgentSessionInfo, error) { return nil, nil }
+func (b *bareAgent) Stop() error                                                   { return nil }
 
 func contains(haystack []string, needle string) bool {
 	for _, s := range haystack {

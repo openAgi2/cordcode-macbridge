@@ -31,6 +31,8 @@ AGENTS.md
 /docs/*
 !/docs/protocol/
 !/docs/engineering-constitution.md
+!/docs/2026-07-18-event-recovery-rfc.md
+!/docs/2026-07-18-event-egress-inventory.md
 !/docs/2026-07-03-web-renderer-shared-package-implementation-plan.md
 !/docs/2026-07-03-web-renderer-shared-package-implementation-plan-review.md
 !/docs/2026-07-13-macbridge-app-ux-redesign-report.md

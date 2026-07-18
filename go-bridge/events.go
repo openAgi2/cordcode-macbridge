@@ -11,19 +11,19 @@ import (
 func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool) {
 	switch ev.Type {
 	case core.EventText:
-		return "text_delta", map[string]interface{}{
+		return "text_delta", eventData(ev, map[string]interface{}{
 			"delta": ev.Content,
-		}, false
+		}), false
 
 	case core.EventTextReplace:
-		return "message_updated", map[string]interface{}{
+		return "message_updated", eventData(ev, map[string]interface{}{
 			"content": ev.Content,
-		}, false
+		}), false
 
 	case core.EventThinking:
-		return "reasoning_delta", map[string]interface{}{
+		return "reasoning_delta", eventData(ev, map[string]interface{}{
 			"delta": ev.Content,
-		}, false
+		}), false
 
 	case core.EventToolUse:
 		payload := map[string]interface{}{
@@ -34,7 +34,10 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 		if ev.RequestID != "" {
 			payload["itemId"] = ev.RequestID
 		}
-		return "tool_started", payload, false
+		if ev.ToolMatches != nil {
+			payload["matches"] = ev.ToolMatches
+		}
+		return "tool_started", eventData(ev, payload), false
 
 	case core.EventToolResult:
 		status := ev.ToolStatus
@@ -64,7 +67,10 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 		if fileChanges := fileChangesToWire(ev.FileChanges); len(fileChanges) > 0 {
 			payload["fileChanges"] = fileChanges
 		}
-		return "tool_finished", payload, false
+		if ev.ToolMatches != nil {
+			payload["matches"] = ev.ToolMatches
+		}
+		return "tool_finished", eventData(ev, payload), false
 
 	case core.EventPlan:
 		return "todos_updated", map[string]interface{}{
@@ -72,31 +78,31 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 		}, false
 
 	case core.EventTurnStarted:
-		return "turn_started", map[string]interface{}{
+		return "turn_started", eventData(ev, map[string]interface{}{
 			"turnId": "",
-		}, false
+		}), false
 
 	case core.EventResult:
 		if ev.Done {
-			return "turn_completed", map[string]interface{}{
+			return "turn_completed", eventData(ev, map[string]interface{}{
 				"done":         true,
 				"text":         ev.Content,
 				"inputTokens":  ev.InputTokens,
 				"outputTokens": ev.OutputTokens,
-			}, true
+			}), true
 		}
-		return "text_delta", map[string]interface{}{
+		return "text_delta", eventData(ev, map[string]interface{}{
 			"delta": ev.Content,
-		}, false
+		}), false
 
 	case core.EventError:
 		msg := "unknown error"
 		if ev.Error != nil {
 			msg = ev.Error.Error()
 		}
-		return "error", map[string]interface{}{
+		return "error", eventData(ev, map[string]interface{}{
 			"message": msg,
-		}, true
+		}), true
 
 	case core.EventPermissionRequest:
 		return "permission_request", map[string]interface{}{
@@ -161,6 +167,16 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 		slog.Debug("go-bridge: unhandled event type", "type", ev.Type)
 		return "", nil, false
 	}
+}
+
+func eventData(ev core.Event, payload map[string]interface{}) map[string]interface{} {
+	if ev.StreamID != "" {
+		payload["streamId"] = ev.StreamID
+	}
+	if ev.ParentStreamID != "" {
+		payload["parentStreamId"] = ev.ParentStreamID
+	}
+	return payload
 }
 
 func fileChangesToWire(changes []core.FileChange) []map[string]interface{} {

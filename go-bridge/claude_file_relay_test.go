@@ -277,7 +277,9 @@ func TestClaudeFileRelayProcessDeathMidTurnBroadcastsIdleAndExits(t *testing.T) 
 	if got := messages[0]["event"]; got != "turn_started" {
 		t.Fatalf("event = %#v, want turn_started", got)
 	}
+	agent.processMu.Lock()
 	agent.alivePIDs[4242] = false
+	agent.processMu.Unlock()
 	messages = client.readEvents(t, 1)
 	if got := messages[0]["event"]; got != "session_state_changed" {
 		t.Fatalf("event after process death = %#v, want idle state", got)

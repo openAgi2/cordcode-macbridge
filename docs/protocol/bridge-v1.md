@@ -15,6 +15,7 @@ Client messages use one of these top-level `type` values:
 | `register` | iOS -> MacBridge | Legacy registration path. |
 | `request` | iOS -> MacBridge | Backend RPC call. |
 | `ping` | iOS -> MacBridge | Keepalive. |
+| `recovery_applied` | Client -> MacBridge | Exact per-session cut acknowledgement for an active recovery transaction. |
 
 Server messages use:
 
@@ -25,6 +26,8 @@ Server messages use:
 | `result` | MacBridge -> iOS | RPC response. |
 | `event` | MacBridge -> iOS | Backend live event. |
 | `pong` | MacBridge -> iOS | Keepalive response. |
+| `recovery_barrier` | MacBridge -> client | Replay input is complete; client must apply/persist and acknowledge. |
+| `recovery_complete` | MacBridge -> client | Recovery is committed; pending live events follow this frame. |
 
 ## Version Negotiation
 
@@ -42,8 +45,17 @@ MacBridge accepts only `protocol.version == 1` for `hello`. The server response 
 `bridge.protocol.version`, `bridge.protocol.schemaRevision`, `bridge.runtimeVersion`, current URLs,
 capabilities, backend descriptors, bridge status, and running sessions.
 
+Recovery is an optional `hello` / `hello_ack` extension. A client opts in with
+`capabilities: ["recovery_v1"]` and may send `lastBridgeEpoch`, compatibility-only `lastEventId`, and
+the authoritative nested `lastSeenBySession` cut map. An opted-in response may include root-level
+`bridgeEpoch` and a `recovery` plan. Every recovery control frame carries the same random
+`recoveryId`; cut acknowledgements are exact per-session maps and never a scalar fallback. See
+`../2026-07-18-event-recovery-rfc.md` for ordering, atomic snapshot, and failure semantics.
+
 `register` is retained as a legacy path. It carries the same `protocol` shape but only reports the
-server protocol in `register_ack`; it is not the compatibility gate for new work.
+server protocol in `register_ack`; it is not the compatibility gate for new work and never starts a
+recovery transaction. Without explicit `recovery_v1`, a new server preserves legacy behavior and
+omits recovery fields.
 
 ## RPC
 
@@ -158,6 +170,27 @@ context_usage_updated
 question_asked
 question_resolved
 ```
+
+`tool_started` / `tool_finished` may carry an optional `data.matches` field. It is the
+single structured truth for explore/search results and has exactly one of these shapes:
+
+```ts
+type ToolMatches =
+  | { kind: "count"; count: number }
+  | { kind: "paths"; paths: string[] }
+  | { kind: "detailed"; items: { path: string; line?: number; preview?: string }[] };
+```
+
+The field is absent when the driver cannot prove the result shape. Consumers MUST NOT infer
+counts or paths from `toolResult` display text. Query fields remain in `toolInput` /
+`toolInputRaw`; execution results belong in `matches`.
+
+Child-agent events may carry optional `data.streamId` and `data.parentStreamId`. The same
+`streamId` is attached to that child's text, reasoning, tool, error, and completion events;
+`parentStreamId` links a nested child to its owning child stream. Absence means the main flat
+stream. Drivers MUST resolve this from stable transcript/tool identities, never from the most
+recent Task invocation; when the relation cannot be proven, they omit both fields and emit only
+sanitized diagnostics.
 
 ## Semantic Notes — questions vs. permissions
 

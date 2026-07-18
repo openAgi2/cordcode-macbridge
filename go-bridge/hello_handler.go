@@ -8,9 +8,13 @@ import (
 
 // HelloMessage 是客户端发送的握手消息。
 type HelloMessage struct {
-	Type     string        `json:"type"`
-	Client   HelloClient   `json:"client"`
-	Protocol HelloProtocol `json:"protocol"`
+	Type              string              `json:"type"`
+	Client            HelloClient         `json:"client"`
+	Protocol          HelloProtocol       `json:"protocol"`
+	Capabilities      []string            `json:"capabilities,omitempty"`
+	LastBridgeEpoch   string              `json:"lastBridgeEpoch,omitempty"`
+	LastEventID       string              `json:"lastEventId,omitempty"`
+	LastSeenBySession BridgeSessionCutMap `json:"lastSeenBySession,omitempty"`
 }
 
 // HelloClient 描述客户端应用信息。
@@ -37,6 +41,21 @@ type HelloAckMessage struct {
 	BridgeStatus    string                    `json:"bridgeStatus,omitempty"`
 	RunningSessions []BridgeV1RunningSession  `json:"runningSessions,omitempty"`
 	Error           *WireError                `json:"error,omitempty"`
+	BridgeEpoch     string                    `json:"bridgeEpoch,omitempty"`
+	Recovery        *BridgeRecoveryPlan       `json:"recovery,omitempty"`
+}
+
+type BridgeAffectedSession struct {
+	BackendID string `json:"backendId"`
+	SessionID string `json:"sessionId"`
+}
+
+type BridgeRecoveryPlan struct {
+	RecoveryID             string                  `json:"recoveryId"`
+	Mode                   string                  `json:"mode"`
+	ReplayThroughBySession BridgeSessionCutMap     `json:"replayThroughBySession,omitempty"`
+	AffectedSessions       []BridgeAffectedSession `json:"affectedSessions,omitempty"`
+	CutBySession           BridgeSessionCutMap     `json:"cutBySession,omitempty"`
 }
 
 // HelloBridgeInfo 包含 bridge 的身份和连接信息，对应 schema BridgeV1BridgeProfile。
