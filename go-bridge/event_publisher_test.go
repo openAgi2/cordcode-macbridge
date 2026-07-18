@@ -12,11 +12,12 @@ import (
 )
 
 type publisherCaptureConn struct {
-	mu     sync.Mutex
-	frames []interface{}
-	notify chan struct{}
-	gate   <-chan struct{}
-	closed bool
+	mu      sync.Mutex
+	frames  []interface{}
+	classes []relayOutboundClass
+	notify  chan struct{}
+	gate    <-chan struct{}
+	closed  bool
 }
 
 func newPublisherCaptureConn(gate <-chan struct{}) *publisherCaptureConn {
@@ -29,6 +30,16 @@ func (c *publisherCaptureConn) SendJSON(frame interface{}) {
 	}
 	c.mu.Lock()
 	c.frames = append(c.frames, frame)
+	c.mu.Unlock()
+	c.notify <- struct{}{}
+}
+func (c *publisherCaptureConn) SendJSONClassified(frame any, class relayOutboundClass) {
+	if c.gate != nil {
+		<-c.gate
+	}
+	c.mu.Lock()
+	c.frames = append(c.frames, frame)
+	c.classes = append(c.classes, class)
 	c.mu.Unlock()
 	c.notify <- struct{}{}
 }
@@ -90,6 +101,18 @@ func TestEventPublisherConcurrentPublishersShareOneOrderedIdentity(t *testing.T)
 				t.Fatalf("frame %d identity = %+v", index, msg)
 			}
 		}
+	}
+}
+
+func TestEventPublisherCarriesCanonicalTypedClassHint(t *testing.T) {
+	publisher := NewEventPublisher("11111111-2222-4333-8444-555555555555")
+	conn := newPublisherCaptureConn(nil)
+	publisher.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "session", Event: "session_updated", Targets: []Connection{conn}})
+	conn.waitCount(t, 1)
+	conn.mu.Lock()
+	defer conn.mu.Unlock()
+	if len(conn.classes) != 1 || conn.classes[0] != relayOutboundMetadata {
+		t.Fatalf("classes=%v want metadata", conn.classes)
 	}
 }
 
@@ -299,9 +322,13 @@ func TestEventPublisherSnapshotFreezeCoversAdmissionToHWMWithoutGap(t *testing.T
 	p := NewEventPublisher("epoch-snapshot")
 	p.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "s", Event: "turn_started"})
 	initial := BridgeSessionCutMap{"codex": {"s": {EventID: "epoch-snapshot:1", Seq: 1}}}
-	if _, err := p.BeginRecovery(conn, "snapshot", initial); err != nil { t.Fatal(err) }
+	if _, err := p.BeginRecovery(conn, "snapshot", initial); err != nil {
+		t.Fatal(err)
+	}
 	cut, release, err := p.FreezeRecoverySnapshot(conn, "snapshot", "codex", "s")
-	if err != nil || cut.Seq != 1 { t.Fatalf("freeze cut=%+v err=%v", cut, err) }
+	if err != nil || cut.Seq != 1 {
+		t.Fatalf("freeze cut=%+v err=%v", cut, err)
+	}
 	started := make(chan struct{})
 	published := make(chan struct{})
 	go func() {
@@ -321,10 +348,14 @@ func TestEventPublisherSnapshotFreezeCoversAdmissionToHWMWithoutGap(t *testing.T
 	case <-time.After(time.Second):
 		t.Fatal("publication did not resume after snapshot release")
 	}
-	if err := p.CompleteRecovery(conn, "snapshot", initial); err != nil { t.Fatal(err) }
+	if err := p.CompleteRecovery(conn, "snapshot", initial); err != nil {
+		t.Fatal(err)
+	}
 	conn.waitCount(t, 2)
 	frames := conn.snapshot()
-	if frames[0].(map[string]interface{})["type"] != "recovery_complete" || frames[1].(EventMessage).Seq != 2 { t.Fatalf("frames=%#v", frames) }
+	if frames[0].(map[string]interface{})["type"] != "recovery_complete" || frames[1].(EventMessage).Seq != 2 {
+		t.Fatalf("frames=%#v", frames)
+	}
 }
 
 func TestBusinessEventConstructionHasNoProductionBypass(t *testing.T) {

@@ -23,7 +23,13 @@ export interface BridgeClientInfo {
   deviceId?: string;
 }
 
-export type BridgeClientCapability = "recovery_v1" | "relay_gzip_v1";
+export type BridgeClientCapability = "recovery_v1" | "relay_gzip_v1" | "relay_chunks_v1";
+
+export interface RelayChunkMetadata {
+  groupId: string;
+  index: number;
+  count: number;
+}
 
 export interface BridgeSessionCut {
   eventId: string;

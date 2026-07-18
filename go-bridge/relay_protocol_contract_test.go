@@ -103,19 +103,19 @@ func TestRelayProtocolContractAuthenticatesAllReadableEnvelopeMetadata(t *testin
 		"version", "routeId", "senderId", "destinationId", "channelGeneration",
 		"keyEpochId", "prekeyId", "epochIndex", "epochEphemeralPublicKey",
 		"previousEpochDigest", "epochAuthTag", "messageId", "counter",
-		"contentEncoding", "ciphertext", "createdAt", "expiresAt",
+		"contentEncoding", "chunk", "ciphertext", "createdAt", "expiresAt",
 	}
 	wantAAD := []string{
 		"version", "routeId", "senderId", "destinationId", "channelGeneration",
 		"keyEpochId", "prekeyId", "epochIndex", "epochEphemeralPublicKey",
 		"previousEpochDigest", "epochAuthTag", "messageId", "counter",
-		"contentEncoding", "createdAt", "expiresAt",
+		"contentEncoding", "chunk", "createdAt", "expiresAt",
 	}
 	wantMailboxOnly := []string{
 		"prekeyId", "epochIndex", "epochEphemeralPublicKey",
 		"previousEpochDigest", "epochAuthTag",
 	}
-	wantOptional := []string{"contentEncoding"}
+	wantOptional := []string{"contentEncoding", "chunk"}
 
 	if !reflect.DeepEqual(contract.EnvelopeFields, wantEnvelope) {
 		t.Fatalf("envelope field contract drift: got %v want %v", contract.EnvelopeFields, wantEnvelope)

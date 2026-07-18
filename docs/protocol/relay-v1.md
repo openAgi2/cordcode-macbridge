@@ -196,6 +196,13 @@ MacBridge-to-client online frame MAY add `"contentEncoding":"gzip"`. The field M
 absent on legacy frames and is not used for mailbox frames. See
 `relay-frame-compression.md` for negotiation and encoding order.
 
+After strict `hello_ack.capabilities.relay_chunks_v1 == true` negotiation, a
+MacBridge-to-client online bulk frame MAY add
+`"chunk":{"groupId":"...","index":0,"count":N}`. The object is added to AAD only
+when present; legacy AAD MUST NOT contain `chunk:null`. Chunking is forbidden for
+Direct, mailbox, and client-to-Mac frames. See `relay-frame-chunking.md` and
+`relay-outbound-classes.md`.
+
 ### 5.2 Inner payload
 
 Decrypted plaintext encodes `uint32_be(innerLength) || innerBytes || randomPadding`.

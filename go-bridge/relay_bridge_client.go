@@ -52,9 +52,10 @@ type RelayBridgeClient struct {
 	routeID    string
 	credential string
 
-	conn    *websocket.Conn
-	done    chan struct{}
-	devices map[string]*RelayDeviceConn // deviceID -> active relay connection
+	conn           *websocket.Conn
+	done           chan struct{}
+	devices        map[string]*RelayDeviceConn // deviceID -> active relay connection
+	outboundWriter *relayOutboundWriter
 }
 
 // NewRelayBridgeClient 创建 relay bridge 客户端。
@@ -87,6 +88,11 @@ func (c *RelayBridgeClient) Connect(relayBridgeURL string) error {
 	c.mu.Lock()
 	c.conn = conn
 	c.done = make(chan struct{})
+	if relayUnifiedWriterV1 {
+		c.outboundWriter = newRelayOutboundWriter()
+	} else {
+		c.outboundWriter = nil
+	}
 	done := c.done
 	c.mu.Unlock()
 
@@ -170,6 +176,10 @@ func (c *RelayBridgeClient) Run(ctx context.Context, relayBridgeURL string) {
 func (c *RelayBridgeClient) closeConn() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.outboundWriter != nil {
+		c.outboundWriter.close()
+		c.outboundWriter = nil
+	}
 
 	if c.conn != nil {
 		c.conn.Close()
@@ -198,6 +208,10 @@ func jitter(d time.Duration) time.Duration {
 func (c *RelayBridgeClient) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.outboundWriter != nil {
+		c.outboundWriter.close()
+		c.outboundWriter = nil
+	}
 
 	if c.conn != nil {
 		c.writeMu.Lock()
@@ -490,6 +504,17 @@ func (c *RelayBridgeClient) handleClientHello(hello OnlineClientHello) {
 		iosToMacKey,
 		c.SendEnvelope,
 	)
+	c.mu.Lock()
+	writer := c.outboundWriter
+	c.mu.Unlock()
+	rc.setOutboundWriter(writer)
+	if c.handlers != nil {
+		rc.setInboundScheduler(newRelayInboundScheduler(
+			func(msg WireMessage) { c.handlers.HandleRelayInboundMessage(rc, msg) },
+			func(sessionID, requestID string) { rc.advanceSessionBulkGeneration(sessionID, requestID) },
+			func(requestID string) { rc.cleanupSupersededRequest(requestID) },
+		))
+	}
 
 	c.mu.Lock()
 	if stale := c.devices[deviceID]; stale != nil {
@@ -558,10 +583,20 @@ func (c *RelayBridgeClient) handleInboundEnvelope(payload []byte) {
 
 	// 更新该 device 的最后活动时间，供心跳循环做半开检测。
 	rc.touchLastActivity()
-
-	// 分发给 handlers 处理
 	if c.handlers != nil {
-		c.handlers.HandleRelayInbound(rc, innerJSON)
+		var inboundHeader WireMessage
+		if err := json.Unmarshal(innerJSON, &inboundHeader); err != nil {
+			slog.Warn("relay-bridge-client: invalid inner message", "deviceID", safeID(deviceID), "error", err)
+			_ = rc.Close()
+			return
+		}
+		if inboundHeader.Type == "request" {
+			rc.registerRequestClass(inboundHeader.RequestID, inboundHeader.Method)
+		}
+		if err := rc.enqueueInbound(innerJSON, inboundHeader); err != nil {
+			slog.Warn("relay-bridge-client: inbound enqueue failed", "deviceID", safeID(deviceID), "error", err)
+			_ = rc.Close()
+		}
 	}
 }
 

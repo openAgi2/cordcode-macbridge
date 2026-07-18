@@ -25,23 +25,33 @@ const (
 // RelayEnvelope 是 Relay 外层信封。
 // 方案 §7.1：Relay 只处理外层信封，内层是原始 Bridge v1 JSON message 的密文。
 type RelayEnvelope struct {
-	Version                 uint8   `json:"version"`
-	RouteID                 string  `json:"routeId"`
-	SenderID                string  `json:"senderId"`
-	DestinationID           string  `json:"destinationId"`
-	ChannelGeneration       uint64  `json:"channelGeneration"`
-	KeyEpochID              string  `json:"keyEpochId"`
-	PrekeyID                *string `json:"prekeyId"`
-	EpochIndex              *uint64 `json:"epochIndex"`
-	EpochEphemeralPublicKey *string `json:"epochEphemeralPublicKey"`
-	PreviousEpochDigest     *string `json:"previousEpochDigest"`
-	EpochAuthTag            *string `json:"epochAuthTag"`
-	MessageID               string  `json:"messageId"`
-	Counter                 uint64  `json:"counter"`
-	ContentEncoding         string  `json:"contentEncoding,omitempty"`
-	Ciphertext              []byte  `json:"ciphertext"` // base64 in JSON, []byte in memory
-	CreatedAt               string  `json:"createdAt"`
-	ExpiresAt               string  `json:"expiresAt"`
+	Version                 uint8               `json:"version"`
+	RouteID                 string              `json:"routeId"`
+	SenderID                string              `json:"senderId"`
+	DestinationID           string              `json:"destinationId"`
+	ChannelGeneration       uint64              `json:"channelGeneration"`
+	KeyEpochID              string              `json:"keyEpochId"`
+	PrekeyID                *string             `json:"prekeyId"`
+	EpochIndex              *uint64             `json:"epochIndex"`
+	EpochEphemeralPublicKey *string             `json:"epochEphemeralPublicKey"`
+	PreviousEpochDigest     *string             `json:"previousEpochDigest"`
+	EpochAuthTag            *string             `json:"epochAuthTag"`
+	MessageID               string              `json:"messageId"`
+	Counter                 uint64              `json:"counter"`
+	ContentEncoding         string              `json:"contentEncoding,omitempty"`
+	Chunk                   *RelayChunkMetadata `json:"chunk,omitempty"`
+	Ciphertext              []byte              `json:"ciphertext"` // base64 in JSON, []byte in memory
+	CreatedAt               string              `json:"createdAt"`
+	ExpiresAt               string              `json:"expiresAt"`
+}
+
+// RelayChunkMetadata identifies one independently authenticated frame in a
+// relay_chunks_v1 logical message. GroupID and Count are fixed for the group;
+// Index advances in wire order.
+type RelayChunkMetadata struct {
+	GroupID string `json:"groupId"`
+	Index   uint32 `json:"index"`
+	Count   uint32 `json:"count"`
 }
 
 // AADFields 返回需要被 AEAD 校验的外层字段。
@@ -66,6 +76,15 @@ func (e *RelayEnvelope) AADFields() map[string]interface{} {
 	aad["epochAuthTag"] = e.EpochAuthTag
 	if e.ContentEncoding != "" {
 		aad["contentEncoding"] = e.ContentEncoding
+	}
+	if e.Chunk != nil {
+		// Keep nested chunk fields canonical too. encoding/json preserves struct
+		// declaration order, while the other clients recursively sort object keys.
+		aad["chunk"] = map[string]interface{}{
+			"groupId": e.Chunk.GroupID,
+			"index":   e.Chunk.Index,
+			"count":   e.Chunk.Count,
+		}
 	}
 	return aad
 }

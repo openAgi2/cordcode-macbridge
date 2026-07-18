@@ -3,6 +3,7 @@ package gobridge
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -29,11 +30,14 @@ type LogicalEvent struct {
 	Targets     []Connection
 	WaitTargets []Connection
 	Offline     bool
+	ClassHint   relayOutboundClass
 }
 
 type eventOutboundFrame struct {
-	value     interface{}
-	delivered chan struct{}
+	value      interface{}
+	delivered  chan struct{}
+	classHint  relayOutboundClass
+	classified bool
 }
 
 type eventDeliveryWait struct {
@@ -64,7 +68,13 @@ func (s *eventOutboundSink) run() {
 		case <-s.stop:
 			return
 		case frame := <-s.queue:
-			s.conn.SendJSON(frame.value)
+			if sender, ok := s.conn.(interface {
+				SendJSONClassified(any, relayOutboundClass)
+			}); ok && frame.classified {
+				sender.SendJSONClassified(frame.value, frame.classHint)
+			} else {
+				s.conn.SendJSON(frame.value)
+			}
 			if frame.delivered != nil {
 				close(frame.delivered)
 			}
@@ -249,9 +259,9 @@ func (p *EventPublisher) CompleteRecovery(conn Connection, recoveryID string, ap
 		_ = conn.Close()
 		return fmt.Errorf("outbound queue cannot accept recovery batch")
 	}
-	sink.queue <- eventOutboundFrame{value: map[string]interface{}{"type": "recovery_complete", "recoveryId": recoveryID}}
+	sink.queue <- eventOutboundFrame{value: map[string]interface{}{"type": "recovery_complete", "recoveryId": recoveryID}, classHint: relayOutboundControl, classified: true}
 	for _, msg := range pending {
-		sink.queue <- eventOutboundFrame{value: msg}
+		sink.queue <- eventOutboundFrame{value: msg, classHint: classifyRelayEvent(msg.Event), classified: true}
 	}
 	delete(p.recoveries, conn)
 	p.completed[conn] = recoveryID
@@ -305,6 +315,10 @@ func (p *EventPublisher) sinkLocked(conn Connection) *eventOutboundSink {
 
 func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
 	p.mu.Lock()
+	logical.ClassHint = classifyRelayEvent(logical.Event)
+	if logical.ClassHint == relayOutboundNormal {
+		slog.Debug("relay outbound event uses normal default", "event", logical.Event)
+	}
 	p.seq++
 	seq := p.seq
 	msg := EventMessage{
@@ -362,7 +376,7 @@ func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
 			waits = append(waits, eventDeliveryWait{conn: conn, delivered: delivered})
 		}
 		select {
-		case sink.queue <- eventOutboundFrame{value: msg, delivered: delivered}:
+		case sink.queue <- eventOutboundFrame{value: msg, delivered: delivered, classHint: logical.ClassHint, classified: true}:
 		default:
 			overflowed = append(overflowed, conn)
 		}

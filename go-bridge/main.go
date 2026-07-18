@@ -355,6 +355,9 @@ func Main() {
 		if ack.Ok && negotiateRelayGzip(conn, hello.Capabilities) {
 			ack.Capabilities[relayGzipCapability] = true
 		}
+		if ack.Ok && negotiateRelayChunks(conn, hello.Capabilities) {
+			ack.Capabilities[relayChunksCapability] = true
+		}
 		var replay []EventMessage
 		if server.recoveryEnabled && helloSupportsRecovery(&hello) && ack.Ok {
 			plan, events, err := server.prepareRecovery(conn, &hello)

@@ -671,6 +671,13 @@ func (h *Handlers) HandleRelayInbound(conn Connection, rawJSON json.RawMessage) 
 		return
 	}
 
+	h.HandleRelayInboundMessage(conn, msg)
+}
+
+// HandleRelayInboundMessage dispatches an already-decoded Relay message. The
+// per-device inbound scheduler uses this entry point so MB-scale params/data
+// are not unmarshaled a second time before handler-specific decoding.
+func (h *Handlers) HandleRelayInboundMessage(conn Connection, msg WireMessage) {
 	switch {
 	case msg.Type == "hello":
 		// relay 加密通道的 hello 握手，走和直连相同的 handleHello 路径。

@@ -33,6 +33,7 @@
     "messageId",
     "counter",
     "contentEncoding",
+    "chunk",
     "ciphertext",
     "createdAt",
     "expiresAt"
@@ -52,6 +53,7 @@
     "messageId",
     "counter",
     "contentEncoding",
+    "chunk",
     "createdAt",
     "expiresAt"
   ],
@@ -63,7 +65,8 @@
     "epochAuthTag"
   ],
   "optionalEnvelopeFields": [
-    "contentEncoding"
+    "contentEncoding",
+    "chunk"
   ],
   "mailbox": {
     "direction": "mac_to_ios_only",

@@ -395,6 +395,43 @@ func TestRelayEnvelopeAADSerialization(t *testing.T) {
 	}
 }
 
+func TestRelayEnvelopeChunkAADIsConditionalAndAuthenticated(t *testing.T) {
+	env := &RelayEnvelope{
+		Version: 1, RouteID: "route-1", SenderID: "bridge", DestinationID: "device-1",
+		ChannelGeneration: 1, KeyEpochID: "online:1", MessageID: "msg-1", Counter: 42,
+		CreatedAt: "2026-05-24T08:00:00Z", ExpiresAt: "2026-05-25T08:00:00Z",
+	}
+	legacy, err := env.EncodeAAD()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacyFields map[string]interface{}
+	if err := json.Unmarshal(legacy, &legacyFields); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := legacyFields["chunk"]; exists {
+		t.Fatal("legacy AAD must omit chunk instead of encoding null")
+	}
+
+	env.Chunk = &RelayChunkMetadata{GroupID: "550e8400-e29b-41d4-a716-446655440000", Index: 2, Count: 7}
+	chunkAAD, err := env.EncodeAAD()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantChunkAAD := `{"channelGeneration":1,"chunk":{"count":7,"groupId":"550e8400-e29b-41d4-a716-446655440000","index":2},"counter":42,"createdAt":"2026-05-24T08:00:00Z","destinationId":"device-1","epochAuthTag":null,"epochEphemeralPublicKey":null,"epochIndex":null,"expiresAt":"2026-05-25T08:00:00Z","keyEpochId":"online:1","messageId":"msg-1","prekeyId":null,"previousEpochDigest":null,"routeId":"route-1","senderId":"bridge","version":1}`
+	if string(chunkAAD) != wantChunkAAD {
+		t.Fatalf("chunk AAD bytes = %s, want %s", chunkAAD, wantChunkAAD)
+	}
+	var fields map[string]interface{}
+	if err := json.Unmarshal(chunkAAD, &fields); err != nil {
+		t.Fatal(err)
+	}
+	chunk, ok := fields["chunk"].(map[string]interface{})
+	if !ok || chunk["groupId"] != env.Chunk.GroupID || chunk["index"] != float64(2) || chunk["count"] != float64(7) {
+		t.Fatalf("unexpected chunk AAD: %#v", fields["chunk"])
+	}
+}
+
 // TestCounterNonceConstruction 验证 nonce 构造符合方案。
 func TestCounterNonceConstruction(t *testing.T) {
 	nonce := CounterNonce(1)
@@ -533,6 +570,26 @@ func TestRelayDeviceConnGzipNegotiationCompressesBeforeEncryption(t *testing.T) 
 	}
 	if _, err := OpenEnvelope(key, envelope.Counter, tamperedAAD, envelope.Ciphertext); err == nil {
 		t.Fatal("removing authenticated contentEncoding should fail decryption")
+	}
+}
+
+func TestRelayChunksNegotiationRequiresRelayUnifiedWriter(t *testing.T) {
+	legacy := NewRelayDeviceConn("legacy", "bridge", "route", 1, nil, make([]byte, 32), nil, func(json.RawMessage) error { return nil })
+	if negotiateRelayChunks(legacy, []string{relayChunksCapability}) {
+		t.Fatal("chunk capability must not ack without the unified writer")
+	}
+	writer := newRelayOutboundWriter()
+	defer writer.close()
+	modern := NewRelayDeviceConn("modern", "bridge", "route", 1, nil, make([]byte, 32), nil, func(json.RawMessage) error { return nil })
+	modern.setOutboundWriter(writer)
+	if !negotiateRelayChunks(modern, []string{relayChunksCapability}) {
+		t.Fatal("chunk capability should ack on a Relay connection with the unified writer")
+	}
+	if negotiateRelayChunks(modern, []string{relayGzipCapability}) {
+		t.Fatal("chunk capability must require an explicit client declaration")
+	}
+	if negotiateRelayChunks(adaptDirectConn(&Conn{}), []string{relayChunksCapability}) {
+		t.Fatal("Direct connection must never negotiate Relay chunks")
 	}
 }
 
