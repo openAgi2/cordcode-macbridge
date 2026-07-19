@@ -252,7 +252,12 @@ func TestClaudeFileRelayTickUsesCachedPID(t *testing.T) {
 	handlers, agent, client := startClaudeFileRelayFixture(t, sessionID, true)
 	_ = client.readEvents(t, 1)
 
-	waitClaudeFileRelayStopped(t, handlers, sessionID)
+	// Process is still live: file-relay must keep watching (not exit on live-idle TTL),
+	// and poll ticks must reuse the cached PID via IsProcessAlive.
+	deadline := time.Now().Add(2 * time.Second)
+	for agent.processAliveCalls == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
 	if agent.liveProcessCalls != 1 {
 		t.Fatalf("LiveSessionProcess calls = %d, want 1", agent.liveProcessCalls)
 	}
@@ -262,6 +267,15 @@ func TestClaudeFileRelayTickUsesCachedPID(t *testing.T) {
 	if agent.lastProcessAliveID != 4242 {
 		t.Fatalf("last IsProcessAlive pid = %d, want cached pid 4242", agent.lastProcessAliveID)
 	}
+	if !handlers.relayKindIs(sessionID, relayKindClaudeFile) {
+		t.Fatal("file relay exited while process is still live")
+	}
+
+	// Process death is the real exit path when transcript stays quiet.
+	agent.processMu.Lock()
+	agent.alivePIDs[4242] = false
+	agent.processMu.Unlock()
+	waitClaudeFileRelayStopped(t, handlers, sessionID)
 }
 
 func TestClaudeFileRelayProcessDeathMidTurnBroadcastsIdleAndExits(t *testing.T) {

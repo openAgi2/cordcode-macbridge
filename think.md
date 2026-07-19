@@ -538,3 +538,71 @@ prepend 为第一个 `reasoning` part；工具和正文则另存 parts。于是�
 
 *   在 macOS 中进行设备检测和语言检测时，优先使用 `UserDefaults.standard.stringArray(forKey: "AppleLanguages")` 来获取真实的系统环境，防止因 App 本地化支持范围不一致而被系统沙盒强行过滤截断。
 *   异常渲染不得将一般的网络状态或动作超时（Network / Request Timeout）和产品业务规则上的时间到期（Business Session Expiration）混为一谈。
+
+## 2026-07-19 Claude 外部 turn file-relay：turn_completed 后不能 return，进程 live 时继续 watch
+
+### 现象（owner 真机复现，iOS+Web 同时）
+
+Mac Desktop/CLI Claude 多轮外部 turn（Mac 端发起、客户端旁观）出现：
+
+- Web 完全收不到回复，必须靠「下一问」才把「上一答」同步出来
+- iOS 历史同步也偶发掉 turn
+- file-relay 日志里频繁出现 `claudeSessionFileRelay turn completed, exiting`，然后该 session 进入
+  「无 relay」状态，直到下一次 `get_session_messages` 才重启
+
+### 根因（go-bridge 侧）
+
+`claudeSessionFileRelayLoop`（`handlers_relay.go`）在检测到 `finalAssistant` 时：
+
+```go
+if entry.finalAssistant {
+    h.sendSessionEvent(sessionID, backendID, "turn_completed", ...)
+    h.broadcastIdleState(sessionID, backendID)
+    slog.Info("go-bridge: claudeSessionFileRelay turn completed, exiting", ...)
+    return  // ← BUG
+}
+```
+
+`return` 让 goroutine 退出，`relayRunning[sessionID]` 标记被清掉。Claude Desktop 在**同一 PID**
+上连续多轮 turn 是常态——下一轮 user 写入 JSONL 时，**没有任何 goroutine 在 watch**，
+`turn_started` 永远不会发出，直到客户端发起下一次 `get_session_messages` 触发重启 relay。
+窗口期内客户端既收不到 `turn_started`，也看不到正在生成的 assistant body（Claude Desktop
+只在 end_turn 才 flush JSONL），表现为「必须等下一问才能看到上一答」。
+
+另一个相关 bug：live-idle TTL 退出条件原本是「90s 无文件增长就退出」，**不管 Claude 进程
+是否仍存活**。Claude 长 thinking 阶段 transcript 静默 90s+ 是正常的，却被误判为「session 已死」。
+
+### 修复（go-bridge）
+
+1. **`finalAssistant` 不再 `return`**：改为 `runningObserved = false; continue`，在 Claude 进程
+   仍 live 时继续 watch。下一轮 user 写入 JSONL 立刻广播 `turn_started`。
+2. **live-idle TTL 仅在进程已不存活时才退出**：进程仍 live 但 transcript 静默时保持 watching，
+   防止长 thinking 被误杀。原退出条件保留作为进程死亡后的清理路径。
+
+### 测试更新
+
+`claude_file_relay_test.go`：
+
+- `TestClaudeFileRelayTickUsesCachedPID`：live 时保持 running，进程死后才停（断言
+  `handlers.relayKindIs(sessionID, relayKindClaudeFile) == true`）。
+- 其它已有用例（WarmStartUser / LiveIdleSnapshot / Interrupt 等）不依赖「turn_completed 后
+  退出」，只读 2 条事件即通过，无需修改。
+
+`go test ./go-bridge/ -run ClaudeFileRelay` 全部通过。
+
+### 配套 Web 侧修复（详见 ../cordcode-ios/think.md 复盘 VII-IX）
+
+Web 端也有一个叠加 bug：`applyExternalTurnHistory` 无脑把 trailing assistant 标成
+`isStreaming:true`，导致安全网 `externalTurnLooksComplete` 永远 false，即使服务端已 flush 出
+完整 body 也永不自动 settle。Mac 修了 file-relay 不退出 + Web 修了不强制 streaming，
+两层叠加的「下一问才同步上一答」才彻底消除。
+
+### 后续原则
+
+- **长生命周期 watcher goroutine 不要在常规完成信号上 `return`**：完成 ≠ session 关闭。
+  只要有可能产生下一轮事件（同 PID、同 socket、同 session），就应该继续 watch，把退出条件
+  严格限制在「真正不可恢复」（进程死亡、socket 关闭、超长 idle + 进程不存活）。
+- **跨客户端 turn 同步需要双端配合**：Mac 端负责广播边界事件，客户端负责在缺事件时也能
+  从权威历史推导 settle；任何一端假设「对方一定会发事件」都会在边界条件下丢 turn。
+- **file-relay 的退出语义**：「finalAssistant 写入」只是 transcript 状态变化，**不是 watcher
+  生命周期事件**；这两个概念必须分开。

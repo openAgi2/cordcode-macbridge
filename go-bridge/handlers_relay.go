@@ -283,7 +283,12 @@ func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection,
 				lastMeaningfulGrowth = time.Now()
 				continue
 			}
-			if !runningObserved && claudeFileRelayLiveIdleTTL > 0 && time.Since(lastMeaningfulGrowth) >= claudeFileRelayLiveIdleTTL {
+			// Only exit on live-idle TTL when the Claude process is no longer alive.
+			// A live process with a quiet transcript is normal during long thinking; exiting
+			// here drops turn_started/turn_completed for the next Mac message until the next
+			// get_session_messages restarts the relay (Web/iOS then miss the external turn).
+			processStillLive := cachedPID > 0 && liveLister != nil && liveLister.IsProcessAlive(context.Background(), cachedPID)
+			if !runningObserved && !processStillLive && claudeFileRelayLiveIdleTTL > 0 && time.Since(lastMeaningfulGrowth) >= claudeFileRelayLiveIdleTTL {
 				if !h.sessions.isIdle(sessionID) {
 					h.broadcastIdleState(sessionID, backendID)
 				}
@@ -330,11 +335,15 @@ func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection,
 			// 中断后 session 可能还会被继续，继续监视。
 		} else if entry.entryType == "assistant" {
 			if entry.finalAssistant {
-				// 任务完成 → turn_completed(idle)
+				// 任务完成 → turn_completed(idle)。进程仍 live 时必须继续监视：
+				// Claude Desktop 多轮外部 turn 会在同一 PID 上连续写 JSONL；若此处 return，
+				// 下一轮 user 写入时无人广播 turn_started，客户端只能等下一次
+				// get_session_messages 才“顺带”看到上一轮回复（owner 复现的“下一问才同步上一答”）。
 				h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"done": true, "reason": "end_turn"})
 				h.broadcastIdleState(sessionID, backendID)
-				slog.Info("go-bridge: claudeSessionFileRelay turn completed, exiting", "sessionID", sessionID)
-				return // 任务完成，退出文件监视。
+				runningObserved = false
+				slog.Info("go-bridge: claudeSessionFileRelay turn completed, keeping watch while process live", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
+				continue
 			}
 			runningObserved = true
 			// assistant 消息但不是最终（如 tool_use），继续监视。
