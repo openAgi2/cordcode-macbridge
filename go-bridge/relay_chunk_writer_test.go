@@ -3,6 +3,7 @@ package gobridge
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -149,13 +150,16 @@ func TestRelayChunkWriterStressCounterAndNonceOrder(t *testing.T) {
 	}
 }
 
-func TestRelayChunkWriterPreemptsAndSupersedesAtChunkBoundary(t *testing.T) {
+func TestRelayChunkWriterPreemptsAndFinishesStartedGroupAfterSupersede(t *testing.T) {
 	key := make([]byte, 32)
 	var mu sync.Mutex
 	requestOrder := []string{}
 	firstChunk := make(chan struct{})
 	releaseFirst := make(chan struct{})
+	groupDone := make(chan struct{})
+	var groupDoneOnce sync.Once
 	chunkWrites := 0
+	expectedChunkWrites := 0
 	var rc *RelayDeviceConn
 	rc = NewRelayDeviceConn("device", "bridge", "route", 1, nil, append([]byte(nil), key...), nil, func(raw json.RawMessage) error {
 		var env RelayEnvelope
@@ -183,6 +187,12 @@ func TestRelayChunkWriterPreemptsAndSupersedesAtChunkBoundary(t *testing.T) {
 		mu.Lock()
 		if label == "chunk" {
 			chunkWrites++
+			if expectedChunkWrites == 0 {
+				expectedChunkWrites = int(env.Chunk.Count)
+			}
+			if chunkWrites == expectedChunkWrites {
+				groupDoneOnce.Do(func() { close(groupDone) })
+			}
 		}
 		currentChunkWrites := chunkWrites
 		requestOrder = append(requestOrder, label)
@@ -229,21 +239,134 @@ func TestRelayChunkWriterPreemptsAndSupersedesAtChunkBoundary(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("metadata result did not complete")
 	}
-	time.Sleep(30 * time.Millisecond)
+	select {
+	case <-groupDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("started chunk group did not finish")
+	}
 	mu.Lock()
 	got := append([]string(nil), requestOrder...)
 	writes := chunkWrites
+	wantWrites := expectedChunkWrites
 	mu.Unlock()
 	if len(got) < 2 || got[0] != "chunk" || got[1] != "models" {
 		t.Fatalf("wire order=%v", got)
 	}
-	if writes != 3 {
-		t.Fatalf("chunks continued after supersede: writes=%d order=%v", writes, got)
+	if writes != wantWrites {
+		t.Fatalf("started chunk group did not finish after supersede: writes=%d want=%d order=%v", writes, wantWrites, got)
 	}
 	rc.mu.Lock()
 	leaked := rc.activeBulkHandles["session"]
 	rc.mu.Unlock()
 	if leaked != nil {
 		t.Fatal("superseded bulk handle leaked")
+	}
+}
+
+func TestRelayChunkWriterSerializesConcurrentGroupsPerDevice(t *testing.T) {
+	key := make([]byte, 32)
+	var mu sync.Mutex
+	groupOrder := []string{}
+	groupCounts := map[string]int{}
+	expectedCounts := map[string]int{}
+	firstChunk := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	delivered := make(chan struct{})
+	var firstOnce sync.Once
+	var deliveredOnce sync.Once
+
+	rc := NewRelayDeviceConn("device", "bridge", "route", 1, nil, key, nil, func(raw json.RawMessage) error {
+		var env RelayEnvelope
+		if err := json.Unmarshal(raw, &env); err != nil {
+			return err
+		}
+		if env.Chunk == nil {
+			return nil
+		}
+		mu.Lock()
+		groupOrder = append(groupOrder, env.Chunk.GroupID)
+		groupCounts[env.Chunk.GroupID]++
+		expectedCounts[env.Chunk.GroupID] = int(env.Chunk.Count)
+		completeGroups := 0
+		for groupID, count := range groupCounts {
+			if count == expectedCounts[groupID] {
+				completeGroups++
+			}
+		}
+		mu.Unlock()
+		firstOnce.Do(func() {
+			close(firstChunk)
+			<-releaseFirst
+		})
+		if completeGroups == 2 {
+			deliveredOnce.Do(func() { close(delivered) })
+		}
+		return nil
+	})
+	w := newRelayOutboundWriter()
+	defer w.close()
+	rc.setOutboundWriter(w)
+	rc.mu.Lock()
+	rc.outboundChunks = true
+	rc.mu.Unlock()
+
+	rc.registerRequestClass("history-a", "get_session_messages")
+	rc.advanceSessionBulkGeneration("session-a", "history-a")
+	rc.SendResult("history-a", map[string]any{"messages": string(make([]byte, 200000))}, nil)
+	select {
+	case <-firstChunk:
+	case <-time.After(time.Second):
+		t.Fatal("first chunk did not start")
+	}
+	rc.registerRequestClass("history-b", "get_session_messages")
+	rc.advanceSessionBulkGeneration("session-b", "history-b")
+	rc.SendResult("history-b", map[string]any{"messages": string(make([]byte, 180000))}, nil)
+	close(releaseFirst)
+	select {
+	case <-delivered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("concurrent chunk groups did not complete")
+	}
+
+	mu.Lock()
+	got := append([]string(nil), groupOrder...)
+	groups := len(groupCounts)
+	mu.Unlock()
+	if groups != 2 {
+		t.Fatalf("groups=%d want=2 order=%v", groups, got)
+	}
+	firstGroup := got[0]
+	seenSwitch := false
+	for _, groupID := range got[1:] {
+		if groupID != firstGroup {
+			seenSwitch = true
+			continue
+		}
+		if seenSwitch {
+			t.Fatalf("same-device chunk groups interleaved: order=%v", got)
+		}
+	}
+}
+
+func TestRelayChunkWriterFailsTransportWhenStartedGroupExpires(t *testing.T) {
+	rc := NewRelayDeviceConn("device", "bridge", "route", 1, nil, make([]byte, 32), nil, nil)
+	job := &relayOutboundJob{
+		conn:    rc,
+		payload: make([]byte, relayChunkTargetBytes*2),
+		cursor: &relayChunkCursor{
+			groupID:           "started-group",
+			nextIndex:         1,
+			count:             2,
+			chunkBytes:        relayChunkTargetBytes,
+			handle:            newOutboundBulkHandle("started-group"),
+			channelGeneration: 1,
+			expiresAt:         time.Now().Add(-time.Second),
+		},
+	}
+	w := newRelayOutboundWriter()
+	defer w.close()
+	err, complete := w.writeSelected(job)
+	if !complete || err == nil || !strings.Contains(err.Error(), "expired after transmission began") {
+		t.Fatalf("complete=%v err=%v", complete, err)
 	}
 }

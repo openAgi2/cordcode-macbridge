@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -23,6 +22,22 @@ var (
 	claudeFileRelayPollInterval       = 3 * time.Second
 	claudeFileRelayLiveIdleTTL        = 90 * time.Second
 	claudeFileRelayProcessDeathMisses = 1
+)
+
+var (
+	// codexFileRelayPollInterval 是 Codex transcript 文件 watch 的轮询间隔。
+	codexFileRelayPollInterval = 1 * time.Second
+	// codexFileRelayNoGrowthTTL 是 transcript 无增长时考虑退出的软 TTL。
+	// Codex 没有 Claude 那样的 live PID 探测，只能用纯时间启发式：太短会在 agent
+	// 长思考间隙（实测 turn 内 agent_reasoning 间隔可达 30–60s+）误退、漏后续事件；
+	// 起步参照 claudeFileRelayLiveIdleTTL（90s），据真实思考间隙分布上调。软 TTL
+	// 触发时会复核 detectCodexTranscriptTaskState，仍 running 则续 watch。
+	codexFileRelayNoGrowthTTL = 90 * time.Second
+	// codexFileRelayNoGrowthHardCap 是即使复核仍 running 也要退出的绝对上限，防止
+	// 「进程已死但 task_started 未配 task_complete」导致 relay 永久滞留。真实 turn 写
+	// 盘间隔远小于此值（§3.1 每 20–40s 一条），长静默工具执行偶发但极少超过此上限；
+	// 超限几乎可判定进程已死。
+	codexFileRelayNoGrowthHardCap = 15 * time.Minute
 )
 
 // startRelayIfNotRunning 为 session 启动事件转发（如果尚未运行）。
@@ -86,8 +101,72 @@ func (h *Handlers) startCodexSessionFileRelay(sessionID string, conn Connection,
 	go h.codexSessionFileRelayLoop(sessionID, conn, backendID, relayKey, locator)
 }
 
-func (h *Handlers) sessionLiveProcess(ctx context.Context, sessionID, backendID string) (core.LiveSessionProcess, core.LiveSessionLister, error) {
-	seen := make(map[string]bool)
+func grokLeaderRelayKey(sessionID string) string {
+	return "grok-leader:" + sessionID
+}
+
+// startGrokLeaderSessionRelay attaches a read-only grok leader-socket subscriber
+// for one session (external grok CLI turn). Mirrors startCodexSessionFileRelay but
+// for the leader-socket path (Phase 1 Grok). Self-gates on backendID == "grokbuild".
+func (h *Handlers) startGrokLeaderSessionRelay(sessionID, backendID string, agent core.Agent, directory string) {
+	if backendID != "grokbuild" {
+		return
+	}
+	sub, ok := agent.(core.SessionEventSubscriber)
+	if !ok {
+		return
+	}
+	cwd := directory
+	if cwd == "" {
+		if wd, ok := agent.(core.WorkDirSwitcher); ok {
+			cwd = wd.GetWorkDir()
+		}
+	}
+	relayKey := grokLeaderRelayKey(sessionID)
+	h.mu.Lock()
+	running := h.relayRunning[relayKey]
+	if !running {
+		h.relayRunning[relayKey] = true
+	}
+	h.mu.Unlock()
+	if running {
+		return
+	}
+	go h.grokLeaderSessionRelayLoop(sessionID, backendID, sub, relayKey, cwd)
+}
+
+// grokLeaderSessionRelayLoop forwards live leader-socket events (already converted
+// to core.Event via convertSessionUpdate) to clients via the same wire path as
+// local turns (mapAgentEvent + sendSessionEvent). Exits when the leader disconnects
+// (channel close); the next session-open restarts it.
+func (h *Handlers) grokLeaderSessionRelayLoop(sessionID, backendID string, sub core.SessionEventSubscriber, relayKey, cwd string) {
+	defer func() {
+		h.mu.Lock()
+		delete(h.relayRunning, relayKey)
+		h.mu.Unlock()
+		slog.Info("go-bridge: grokLeaderSessionRelay exited", "sessionID", sessionID)
+	}()
+	events, err := sub.SubscribeSessionEvents(context.Background(), sessionID, cwd)
+	if err != nil {
+		slog.Debug("go-bridge: grok leader subscribe unavailable", "sessionID", sessionID, "error", err)
+		return
+	}
+	slog.Info("go-bridge: grokLeaderSessionRelay started", "sessionID", sessionID)
+	for ev := range events {
+		eventName, data, _ := mapAgentEvent(ev)
+		if eventName == "" {
+			continue
+		}
+		if eventName == "turn_started" {
+			h.sessions.markRunning(sessionID)
+		} else if eventName == "turn_completed" || eventName == "error" {
+			h.sessions.markIdle(sessionID)
+		}
+		h.sendSessionEvent(sessionID, backendID, eventName, data)
+	}
+}
+
+func (h *Handlers) sessionLiveProcess(ctx context.Context, sessionID, backendID string) (core.LiveSessionProcess, core.LiveSessionLister, error) {	seen := make(map[string]bool)
 	for _, id := range []string{backendID, "claude", "claudecode"} {
 		if strings.TrimSpace(id) == "" || seen[id] {
 			continue
@@ -121,6 +200,17 @@ func codexSessionFileRelayKey(sessionID string) string {
 	return "codex-file:" + sessionID
 }
 
+// codexSessionHasSubscriber reports whether a client (iOS) is currently connected
+// and subscribed to this session — i.e. iOS still has it open. The file relay uses
+// this to keep watching (push model) while iOS is interested, instead of exiting on
+// idle TTL and missing the external turn.
+func (h *Handlers) codexSessionHasSubscriber(sessionID, backendID string) bool {
+	if h.broadcaster == nil {
+		return false
+	}
+	return h.broadcaster.HasSessionSubscriber(backendID, sessionID)
+}
+
 func (h *Handlers) codexSessionFileRelayLoop(sessionID string, conn Connection, backendID string, relayKey string, locator core.TranscriptLocator) {
 	defer func() {
 		h.mu.Lock()
@@ -149,15 +239,28 @@ func (h *Handlers) codexSessionFileRelayLoop(sessionID string, conn Connection, 
 	case "idle":
 		h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"done": true, "reason": "task_complete"})
 		h.broadcastIdleState(sessionID, backendID)
-		return
+		// Phase 0 修复：idle 不再 return。此前 return 导致 relay 连 watch loop 都不进，
+		// 下一轮 task_started 永远到不了客户端（只能等下次 get_session_messages 顺带看到）。
+		// 与 Claude relay 对齐：广播当前态后继续 watch，等下一个 turn。
+		slog.Info("go-bridge: codexSessionFileRelay initial idle; watching for next turn", "sessionID", sessionID)
 	case "running":
 		h.sessions.markRunning(sessionID)
 		h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "running"})
 	}
 
-	const pollInterval = time.Second
-	ticker := time.NewTicker(pollInterval)
+	ticker := time.NewTicker(codexFileRelayPollInterval)
 	defer ticker.Stop()
+	// lastGrowth 在文件增长时刷新；无增长超过软 TTL 时复核 task state（仍 running 续 watch），
+	// 超过硬上限直接退出（死进程兜底）。recheckedAfterTTL 确保软 TTL 每个静默窗口只复核
+	// 一次，避免每个 tick 都全量重扫大 rollout 文件。
+	lastGrowth := time.Now()
+	recheckedAfterTTL := false
+	// seen 是 per-turn 内容去重集合（r2/r3/r5/r6：message 与 reasoning 双源、元素口径、
+	// 按 turn 重置）。同一 turn 内相同文本（双写过渡态 / 跨记录重复）只发一次。
+	seen := make(map[string]bool)
+	// toolNames 记录 call_id → toolName，让 custom_tool_call_output（无 name）的
+	// tool_finished 能带上对应 custom_tool_call 的 name。按 turn 重置。
+	toolNames := make(map[string]string)
 
 	for range ticker.C {
 		info, err := os.Stat(sessPath)
@@ -167,24 +270,104 @@ func (h *Handlers) codexSessionFileRelayLoop(sessionID string, conn Connection, 
 		newSize := info.Size()
 		if newSize <= offset {
 			if newSize < offset {
+				// 文件被截断重写（truncate），重置 offset 从头扫。
 				offset = 0
+				lastGrowth = time.Now()
+				recheckedAfterTTL = false
+				continue
+			}
+			// push 模型：iOS 仍订阅该 session（连接打开）时持续 watch，等 Mac 端外部 turn——
+			// 不因 idle TTL 退出。Phase 2 让 iOS 不再轮询后，relay 若在 idle TTL 退出，会在
+			// 外部 turn 到来前退出而错过整轮（owner 复现：relay 在 turn 前数十秒 TTL 退出）。
+			// 仅 iOS 不再订阅（断开/切走）时才用 idle TTL + running 复核 + hardCap 回收 goroutine。
+			if h.codexSessionHasSubscriber(sessionID, backendID) {
+				continue
+			}
+			since := time.Since(lastGrowth)
+			shouldExit := false
+			switch {
+			case codexFileRelayNoGrowthHardCap > 0 && since >= codexFileRelayNoGrowthHardCap:
+				shouldExit = true
+			case codexFileRelayNoGrowthTTL > 0 && since >= codexFileRelayNoGrowthTTL:
+				if !recheckedAfterTTL {
+					recheckedAfterTTL = true
+					if h.detectCodexTranscriptTaskState(sessPath) == "running" {
+						slog.Info("go-bridge: codexSessionFileRelay no-growth TTL elapsed but task still running; keep watching", "sessionID", sessionID, "idleFor", since.String())
+					} else {
+						shouldExit = true
+					}
+				}
+			}
+			if shouldExit {
+				if !h.sessions.isIdle(sessionID) {
+					h.broadcastIdleState(sessionID, backendID)
+				}
+				slog.Info("go-bridge: codexSessionFileRelay no-growth TTL elapsed, exiting", "sessionID", sessionID, "idleFor", since.String())
+				return
 			}
 			continue
 		}
 
-		events := h.scanCodexTranscriptTaskEvents(sessPath, offset)
+		events := scanCodexTranscriptRelayEvents(sessPath, offset)
+		if len(events) > 0 {
+			slog.Info("go-bridge: codexSessionFileRelay growth", "sessionID", sessionID, "bytes", newSize-offset, "events", len(events), "subscribed", h.codexSessionHasSubscriber(sessionID, backendID))
+		}
 		offset = newSize
-		for _, eventName := range events {
-			switch eventName {
+		lastGrowth = time.Now()
+		recheckedAfterTTL = false
+		for _, ev := range events {
+			switch ev.kind {
 			case "task_started":
+				slog.Info("go-bridge: codexSessionFileRelay EMIT turn_started", "sessionID", sessionID, "subscribed", h.codexSessionHasSubscriber(sessionID, backendID))
+				// per-turn 内容去重 seen-set：turn_started 清空（r5/r6 元素口径去重）。
+				seen = make(map[string]bool)
+				toolNames = make(map[string]string)
 				h.sessions.markRunning(sessionID)
 				h.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": ""})
 				h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "running"})
 			case "task_complete":
+				slog.Info("go-bridge: codexSessionFileRelay EMIT turn_completed", "sessionID", sessionID)
 				h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"done": true, "reason": "task_complete"})
 				h.broadcastIdleState(sessionID, backendID)
 				h.recordPendingNotification(sessionID, backendID, "completed", "task_complete")
-				return
+				// task_complete 后继续 watch 下一轮（Phase 0）；relay 靠无增长 TTL 退出。
+			case "text":
+				if seen[ev.text] {
+					continue
+				}
+				seen[ev.text] = true
+				slog.Info("go-bridge: codexSessionFileRelay EMIT text_delta", "sessionID", sessionID, "len", len(ev.text), "subscribed", h.codexSessionHasSubscriber(sessionID, backendID))
+				h.sendSessionEvent(sessionID, backendID, "text_delta", map[string]interface{}{"delta": ev.text})
+			case "reasoning":
+				if seen[ev.text] {
+					continue
+				}
+				seen[ev.text] = true
+				slog.Info("go-bridge: codexSessionFileRelay EMIT reasoning_delta", "sessionID", sessionID, "len", len(ev.text), "subscribed", h.codexSessionHasSubscriber(sessionID, backendID))
+				h.sendSessionEvent(sessionID, backendID, "reasoning_delta", map[string]interface{}{"delta": ev.text})
+			case "tool_started":
+				if ev.itemId != "" {
+					toolNames[ev.itemId] = ev.toolName
+				}
+				payload := map[string]interface{}{"toolName": ev.toolName, "toolInput": ev.toolInput}
+				if ev.itemId != "" {
+					payload["itemId"] = ev.itemId
+				}
+				h.sendSessionEvent(sessionID, backendID, "tool_started", payload)
+			case "tool_finished":
+				payload := map[string]interface{}{
+					"toolResult": ev.toolResult,
+					"toolStatus": "completed",
+				}
+				if name, ok := toolNames[ev.itemId]; ok && name != "" {
+					payload["toolName"] = name
+				}
+				if ev.itemId != "" {
+					payload["itemId"] = ev.itemId
+				}
+				h.sendSessionEvent(sessionID, backendID, "tool_finished", payload)
+			case "context_usage":
+				h.sendSessionEvent(sessionID, backendID, "context_usage_updated", map[string]interface{}{"context": ev.context})
 			}
 		}
 	}
@@ -308,12 +491,12 @@ func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection,
 			continue
 		}
 
-		entry, err := classifyLastMeaningfulClaudeRelayEntryFromReader(f)
+		entries, err := scanClaudeRelayEntriesFromReader(f)
 		f.Close()
 		if err != nil {
 			continue
 		}
-		if !entry.hasMeaningfulEntry {
+		if len(entries) == 0 {
 			offset = newSize
 			continue
 		}
@@ -321,32 +504,33 @@ func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection,
 		offset = newSize
 		lastMeaningfulGrowth = time.Now()
 
-		// 广播事件。
-		if entry.entryType == "user" && !entry.interrupt {
-			// 用户发送新消息 → turn_started
-			h.sessions.markRunning(sessionID)
-			h.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": ""})
-			runningObserved = true
-		} else if entry.interrupt {
-			// 用户中断 → turn_completed(idle)
-			h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"done": true, "reason": "user_interrupt"})
-			h.broadcastIdleState(sessionID, backendID)
-			runningObserved = false
-			// 中断后 session 可能还会被继续，继续监视。
-		} else if entry.entryType == "assistant" {
-			if entry.finalAssistant {
-				// 任务完成 → turn_completed(idle)。进程仍 live 时必须继续监视：
-				// Claude Desktop 多轮外部 turn 会在同一 PID 上连续写 JSONL；若此处 return，
-				// 下一轮 user 写入时无人广播 turn_started，客户端只能等下一次
-				// get_session_messages 才“顺带”看到上一轮回复（owner 复现的“下一问才同步上一答”）。
-				h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"done": true, "reason": "end_turn"})
-				h.broadcastIdleState(sessionID, backendID)
-				runningObserved = false
-				slog.Info("go-bridge: claudeSessionFileRelay turn completed, keeping watch while process live", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
-				continue
+		// Phase 1：遍历新增区间内所有 meaningful 记录（不再只取最后一条）。
+		// user→turn_started（interrupt→turn_completed）；assistant 按 content block 发
+		// text_delta(text)/reasoning_delta(thinking)/tool_started(tool_use)，最终 end_turn→turn_completed。
+		for _, e := range entries {
+			switch e.Type {
+			case "user":
+				if isClaudeUserInterruptRelayEntry(e) {
+					h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"done": true, "reason": "user_interrupt"})
+					h.broadcastIdleState(sessionID, backendID)
+					runningObserved = false
+				} else {
+					h.sessions.markRunning(sessionID)
+					h.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": ""})
+					runningObserved = true
+				}
+			case "assistant":
+				h.emitClaudeAssistantContent(sessionID, backendID, e)
+				if isFinalClaudeStopReason(e.Message.StopReason) {
+					// 任务完成 → turn_completed(idle)。进程仍 live 时继续监视（同 PID 多轮外部 turn）。
+					h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"done": true, "reason": "end_turn"})
+					h.broadcastIdleState(sessionID, backendID)
+					runningObserved = false
+					slog.Info("go-bridge: claudeSessionFileRelay turn completed, keeping watch while process live", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
+				} else {
+					runningObserved = true
+				}
 			}
-			runningObserved = true
-			// assistant 消息但不是最终（如 tool_use），继续监视。
 		}
 	}
 }
@@ -409,10 +593,11 @@ func isFinalClaudeStopReason(reason string) bool {
 	}
 }
 
-func classifyLastMeaningfulClaudeRelayEntryFromReader(r io.Reader) (claudeTranscriptRelayMeaningfulEntry, error) {
-	var last claudeTranscriptRelayMeaningfulEntry
+// scanClaudeRelayEntriesFromReader 返回新增字节内所有 meaningful user/assistant 记录
+// （按文件顺序），应用 resume meta / no-response 跳过逻辑。
+func scanClaudeRelayEntriesFromReader(r io.Reader) ([]claudeTranscriptRelayEntry, error) {
 	skipNextResumeNoResponse := false
-
+	var entries []claudeTranscriptRelayEntry
 	scanner := bufio.NewScanner(r)
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024*16)
@@ -439,25 +624,87 @@ func classifyLastMeaningfulClaudeRelayEntryFromReader(r io.Reader) (claudeTransc
 			}
 			skipNextResumeNoResponse = false
 		}
-		switch entry.Type {
-		case "user":
-			last = claudeTranscriptRelayMeaningfulEntry{
-				hasMeaningfulEntry: true,
-				entryType:          "user",
-				interrupt:          isClaudeUserInterruptRelayEntry(entry),
-			}
-		case "assistant":
-			last = claudeTranscriptRelayMeaningfulEntry{
-				hasMeaningfulEntry: true,
-				entryType:          "assistant",
-				finalAssistant:     isFinalClaudeStopReason(entry.Message.StopReason),
-			}
+		if entry.Type == "user" || entry.Type == "assistant" {
+			entries = append(entries, entry)
 		}
 	}
 	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func classifyLastMeaningfulClaudeRelayEntryFromReader(r io.Reader) (claudeTranscriptRelayMeaningfulEntry, error) {
+	entries, err := scanClaudeRelayEntriesFromReader(r)
+	if err != nil {
 		return claudeTranscriptRelayMeaningfulEntry{}, err
 	}
+	var last claudeTranscriptRelayMeaningfulEntry
+	for _, e := range entries {
+		switch e.Type {
+		case "user":
+			last = claudeTranscriptRelayMeaningfulEntry{hasMeaningfulEntry: true, entryType: "user", interrupt: isClaudeUserInterruptRelayEntry(e)}
+		case "assistant":
+			last = claudeTranscriptRelayMeaningfulEntry{hasMeaningfulEntry: true, entryType: "assistant", finalAssistant: isFinalClaudeStopReason(e.Message.StopReason)}
+		}
+	}
 	return last, nil
+}
+
+// claudeRelayContentBlock 是 assistant message.content 数组里的一个 block（text/thinking/tool_use）。
+type claudeRelayContentBlock struct {
+	Type     string          `json:"type"`
+	Text     string          `json:"text"`     // text
+	Thinking string          `json:"thinking"` // thinking
+	Name     string          `json:"name"`     // tool_use
+	Input    json.RawMessage `json:"input"`    // tool_use
+	ID       string          `json:"id"`       // tool_use
+}
+
+// claudeRelayContentBlocks 解析 assistant message.content（可能是字符串或 block 数组）。
+func claudeRelayContentBlocks(raw json.RawMessage) []claudeRelayContentBlock {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return []claudeRelayContentBlock{{Type: "text", Text: s}}
+	}
+	var blocks []claudeRelayContentBlock
+	if json.Unmarshal(raw, &blocks) != nil {
+		return nil
+	}
+	return blocks
+}
+
+// emitClaudeAssistantContent 按 content block 发 text_delta(text) / reasoning_delta(thinking)
+// / tool_started(tool_use)。Phase 1：外部 Claude turn 进行中实时推送 reasoning + 文本 + 工具，
+// 而非只在 end_turn 落盘后等重连。payload 形状对齐 mapAgentEvent 的 EventToolUse。
+func (h *Handlers) emitClaudeAssistantContent(sessionID, backendID string, e claudeTranscriptRelayEntry) {
+	if e.Message == nil {
+		return
+	}
+	for _, b := range claudeRelayContentBlocks(e.Message.Content) {
+		switch b.Type {
+		case "text":
+			if strings.TrimSpace(b.Text) != "" {
+				h.sendSessionEvent(sessionID, backendID, "text_delta", map[string]interface{}{"delta": b.Text})
+			}
+		case "thinking":
+			if strings.TrimSpace(b.Thinking) != "" {
+				h.sendSessionEvent(sessionID, backendID, "reasoning_delta", map[string]interface{}{"delta": b.Thinking})
+			}
+		case "tool_use":
+			payload := map[string]interface{}{"toolName": b.Name}
+			if len(b.Input) > 0 && string(b.Input) != "null" {
+				payload["toolInputRaw"] = string(b.Input)
+			}
+			if b.ID != "" {
+				payload["itemId"] = b.ID
+			}
+			h.sendSessionEvent(sessionID, backendID, "tool_started", payload)
+		}
+	}
 }
 
 func (h *Handlers) classifyClaudeTranscriptFile(sessPath string) claudeTranscriptRelayMeaningfulEntry {
@@ -534,7 +781,107 @@ func (h *Handlers) detectCodexTranscriptTaskState(sessPath string) string {
 	return state
 }
 
+// scanCodexTranscriptTaskEvents 提取 lifecycle 事件（task_started/task_complete），
+// 供 detectCodexTranscriptTaskState 判定当前态。委托给统一扫描器后过滤。
 func (h *Handlers) scanCodexTranscriptTaskEvents(sessPath string, offset int64) []string {
+	var names []string
+	for _, ev := range scanCodexTranscriptRelayEvents(sessPath, offset) {
+		if ev.kind == "task_started" || ev.kind == "task_complete" {
+			names = append(names, ev.kind)
+		}
+	}
+	return names
+}
+
+// codexRelayEvent 是 rollout 扫描产出的有序事件。kind 为 lifecycle
+// (task_started/task_complete) 或内容候选 (text/reasoning)，text 字段为明文。
+type codexRelayEvent struct {
+	kind       string
+	text       string // text/reasoning 明文
+	toolName   string // tool_started/tool_finished
+	toolInput  string // tool_started（custom_tool_call.input JS 串）
+	toolResult string // tool_finished（custom_tool_call_output.output 拼接）
+	itemId     string // call_id
+	context    map[string]interface{} // context_usage_updated 的 context 对象
+}
+
+type codexRolloutEntry struct {
+	Type    string          `json:"type"`
+	Payload json.RawMessage `json:"payload"`
+}
+
+// codexEventPayload 对应 event_msg payload（agent_message 的 message 明文 /
+// agent_reasoning 的 text 明文）。某些 event_msg 把真正 payload 嵌套在 payload.payload
+// 下，codexNormalizeEventPayload 两种形态都吃。
+type codexEventPayload struct {
+	Type    string `json:"type"`
+	Message string `json:"message"` // agent_message 明文
+	Text    string `json:"text"`    // agent_reasoning 明文
+}
+
+func codexNormalizeEventPayload(raw json.RawMessage) (codexEventPayload, bool) {
+	var p codexEventPayload
+	if json.Unmarshal(raw, &p) == nil && p.Type != "" {
+		return p, true
+	}
+	var nested struct {
+		Payload json.RawMessage `json:"payload"`
+	}
+	if json.Unmarshal(raw, &nested) == nil && len(nested.Payload) > 0 {
+		if json.Unmarshal(nested.Payload, &p) == nil && p.Type != "" {
+			return p, true
+		}
+	}
+	return codexEventPayload{}, false
+}
+
+type codexResponseItemPayload struct {
+	Type    string                 `json:"type"`
+	Role    string                 `json:"role"`
+	Content []codexResponseContent `json:"content"` // message
+	Summary []codexResponseSummary `json:"summary"` // reasoning
+	// custom_tool_call / custom_tool_call_output（exec-unified：name 恒 "exec"，真实操作在 input JS 串里）。
+	Name   string                 `json:"name"`
+	CallID string                 `json:"call_id"`
+	Input  string                 `json:"input"`
+	Output []codexResponseContent `json:"output"`
+}
+
+type codexResponseContent struct {
+	Type string `json:"type"` // output_text / input_text
+	Text string `json:"text"`
+}
+
+type codexResponseSummary struct {
+	Type string `json:"type"` // summary_text
+	Text string `json:"text"`
+}
+
+// codexTokenCountPayload 对应 event_msg/token_count（运行状态条 token 显示的数据源）。
+type codexTokenCountPayload struct {
+	Type string `json:"type"`
+	Info struct {
+		TotalTokenUsage    codexTokenUsage `json:"total_token_usage"`
+		ModelContextWindow int             `json:"model_context_window"`
+	} `json:"info"`
+}
+
+type codexTokenUsage struct {
+	InputTokens           int `json:"input_tokens"`
+	CachedInputTokens     int `json:"cached_input_tokens"`
+	OutputTokens          int `json:"output_tokens"`
+	ReasoningOutputTokens int `json:"reasoning_output_tokens"`
+	TotalTokens           int `json:"total_tokens"`
+}
+
+// scanCodexTranscriptRelayEvents 扫描 rollout 从 offset 起的新增字节，按文件顺序产出
+// lifecycle + 内容候选事件（§5 wire 映射的数据源）。内容提取口径为「元素」——每个
+// output_text / summary_text block 各一个单元（一条 reasoning 可含多个 summary_text，
+// r5）。空摘要 shape-agnostic 跳过（提取不到非空 summary_text 文本即不发，r3/r4）。message
+// 与 reasoning 两源都解析（event_msg + response_item），由调用方用 per-turn 内容去重合并，
+// 覆盖 Legacy / Paginated / 双写三种 session 模式（policy.rs:108-119，r1/r2/r3）。token 级
+// delta 经 policy.rs:172 不落盘，故天花板为事件/条目级（§2/§3.1 源码实证）。
+func scanCodexTranscriptRelayEvents(sessPath string, offset int64) []codexRelayEvent {
 	f, err := os.Open(sessPath)
 	if err != nil {
 		return nil
@@ -546,35 +893,87 @@ func (h *Handlers) scanCodexTranscriptTaskEvents(sessPath string, offset int64) 
 		}
 	}
 
-	var events []string
+	var out []codexRelayEvent
 	scanner := bufio.NewScanner(f)
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024*16)
 	for scanner.Scan() {
-		var entry struct {
-			Type    string          `json:"type"`
-			Payload json.RawMessage `json:"payload"`
-		}
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil || entry.Type != "event_msg" {
+		var entry codexRolloutEntry
+		if json.Unmarshal(scanner.Bytes(), &entry) != nil {
 			continue
 		}
-		eventType := codexEventPayloadType(entry.Payload)
-		if eventType == "task_started" || eventType == "task_complete" {
-			events = append(events, eventType)
+		switch entry.Type {
+		case "event_msg":
+			p, ok := codexNormalizeEventPayload(entry.Payload)
+			if !ok {
+				continue
+			}
+			switch p.Type {
+			case "task_started":
+				out = append(out, codexRelayEvent{kind: "task_started"})
+			case "task_complete":
+				out = append(out, codexRelayEvent{kind: "task_complete"})
+			case "agent_message":
+				if strings.TrimSpace(p.Message) != "" {
+					out = append(out, codexRelayEvent{kind: "text", text: p.Message})
+				}
+			case "agent_reasoning":
+				if strings.TrimSpace(p.Text) != "" {
+					out = append(out, codexRelayEvent{kind: "reasoning", text: p.Text})
+				}
+			case "token_count":
+				// token 级 delta 不落盘（policy.rs:172），但 token_count 是事件级用量记录，
+				// 映射到 context_usage_updated（运行状态条 token 显示）。
+				var tc codexTokenCountPayload
+				if json.Unmarshal(entry.Payload, &tc) == nil {
+					tu := tc.Info.TotalTokenUsage
+					if tu.TotalTokens > 0 || tc.Info.ModelContextWindow > 0 {
+						out = append(out, codexRelayEvent{kind: "context_usage", context: map[string]interface{}{
+							"usedTokens":            tu.TotalTokens,
+							"totalTokens":           tu.TotalTokens,
+							"inputTokens":           tu.InputTokens,
+							"cachedInputTokens":     tu.CachedInputTokens,
+							"outputTokens":          tu.OutputTokens,
+							"reasoningOutputTokens": tu.ReasoningOutputTokens,
+							"contextWindow":         tc.Info.ModelContextWindow,
+						}})
+					}
+				}
+			}
+		case "response_item":
+			var p codexResponseItemPayload
+			if json.Unmarshal(entry.Payload, &p) != nil {
+				continue
+			}
+			switch p.Type {
+			case "message":
+				if p.Role != "assistant" {
+					continue
+				}
+				for _, b := range p.Content {
+					if b.Type == "output_text" && strings.TrimSpace(b.Text) != "" {
+						out = append(out, codexRelayEvent{kind: "text", text: b.Text})
+					}
+				}
+			case "reasoning":
+				for _, s := range p.Summary {
+					if s.Type == "summary_text" && strings.TrimSpace(s.Text) != "" {
+						out = append(out, codexRelayEvent{kind: "reasoning", text: s.Text})
+					}
+				}
+			case "custom_tool_call":
+				// exec-unified：name 恒 "exec"，真实操作埋在 input JS 串里（非结构化字段）。
+				out = append(out, codexRelayEvent{kind: "tool_started", toolName: p.Name, toolInput: p.Input, itemId: p.CallID})
+			case "custom_tool_call_output":
+				var sb strings.Builder
+				for _, b := range p.Output {
+					sb.WriteString(b.Text)
+				}
+				out = append(out, codexRelayEvent{kind: "tool_finished", itemId: p.CallID, toolResult: sb.String()})
+			}
 		}
 	}
-	return events
-}
-
-func codexEventPayloadType(raw json.RawMessage) string {
-	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return ""
-	}
-	if nested, ok := payload["payload"].(map[string]any); ok {
-		payload = nested
-	}
-	return strings.TrimSpace(fmt.Sprint(payload["type"]))
+	return out
 }
 
 var (

@@ -2494,6 +2494,7 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 	// 即使 registry 里已有 AgentSession，标准 relay 也可能收不到外部 turn 的最终事件；
 	// 因此 Codex transcript relay 使用独立 key 与标准 relay 并行。
 	h.startCodexSessionFileRelay(params.SessionID, conn, msg.BackendID, agent)
+	h.startGrokLeaderSessionRelay(params.SessionID, msg.BackendID, agent, params.Directory)
 
 	// list_sessions 在所有项目目录中扫描，返回的每个 session 都附带 directory 字段
 	// （即 session JSONL 中的 cwd）。如果调用方传回了 directory，在拉取消息前将 agent
@@ -2763,6 +2764,9 @@ func (h *Handlers) handleResumeSession(conn Connection, msg WireMessage, agent c
 	}
 	if agent.Name() == "codex" {
 		h.startCodexSessionFileRelay(params.SessionID, conn, msg.BackendID, agent)
+	}
+	if agent.Name() == "grokbuild" {
+		h.startGrokLeaderSessionRelay(params.SessionID, msg.BackendID, agent, params.Directory)
 	}
 
 	dir := params.Directory

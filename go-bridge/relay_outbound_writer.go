@@ -75,22 +75,27 @@ type relayChunkCursor struct {
 // one MacBridge-to-Relay WebSocket. WebSocket WriteControl and the pre-writer
 // online handshake are intentionally outside this owner.
 type relayOutboundWriter struct {
-	mu            sync.Mutex
-	queues        [relayOutboundClassCount][]*relayOutboundJob
-	queueFrames   int
-	queueBytes    int
-	bulkFrames    int
-	bulkBytes     int
-	lastDevice    [relayOutboundClassCount]string
-	controlBurst  int
-	serviceCursor int
-	wake          chan struct{}
-	stop          chan struct{}
-	once          sync.Once
+	mu                      sync.Mutex
+	queues                  [relayOutboundClassCount][]*relayOutboundJob
+	activeBulkGroupByDevice map[string]string
+	queueFrames             int
+	queueBytes              int
+	bulkFrames              int
+	bulkBytes               int
+	lastDevice              [relayOutboundClassCount]string
+	controlBurst            int
+	serviceCursor           int
+	wake                    chan struct{}
+	stop                    chan struct{}
+	once                    sync.Once
 }
 
 func newRelayOutboundWriter() *relayOutboundWriter {
-	w := &relayOutboundWriter{wake: make(chan struct{}, 1), stop: make(chan struct{})}
+	w := &relayOutboundWriter{
+		activeBulkGroupByDevice: make(map[string]string),
+		wake:                    make(chan struct{}, 1),
+		stop:                    make(chan struct{}),
+	}
 	slog.Info("relay unified writer started",
 		"relay_result_bypass_writer", relayResultBypassWriter.Load(),
 		"relay_outbound_queue_overflow", relayOutboundQueueOverflow.Load(),
@@ -193,6 +198,7 @@ func (w *relayOutboundWriter) run() {
 				}
 				err, complete := w.writeSelected(job)
 				if complete {
+					w.completeBulkGroup(job)
 					if job.cursor != nil && job.cursor.sessionID != "" {
 						job.conn.completeBulkHandle(job.cursor.sessionID, job.cursor.handle)
 					}
@@ -220,7 +226,18 @@ func (w *relayOutboundWriter) writeSelected(job *relayOutboundJob) (error, bool)
 		return err, true
 	}
 	cursor := job.cursor
-	if cursor.handle.Cancelled() || time.Now().After(cursor.expiresAt) || job.conn.channelGeneration() != cursor.channelGeneration || job.conn.isClosed() {
+	if cursor.handle.Cancelled() && cursor.nextIndex == 0 {
+		relayBulkSuperseded.Add(1)
+		return nil, true
+	}
+	if time.Now().After(cursor.expiresAt) {
+		relayBulkSuperseded.Add(1)
+		if cursor.nextIndex > 0 {
+			return fmt.Errorf("relay chunk group expired after transmission began"), true
+		}
+		return nil, true
+	}
+	if job.conn.channelGeneration() != cursor.channelGeneration || job.conn.isClosed() {
 		relayBulkSuperseded.Add(1)
 		return nil, true
 	}
@@ -309,7 +326,12 @@ func (w *relayOutboundWriter) pop() *relayOutboundJob {
 func (w *relayOutboundWriter) popClassLocked(class relayOutboundClass, perDevice bool) *relayOutboundJob {
 	queue := w.queues[class]
 	index := 0
-	if perDevice && len(queue) > 1 && w.lastDevice[class] != "" {
+	if class == relayOutboundBulk {
+		index = w.selectBulkIndexLocked(queue)
+		if index < 0 {
+			return nil
+		}
+	} else if perDevice && len(queue) > 1 && w.lastDevice[class] != "" {
 		for candidate, job := range queue {
 			if job.conn.deviceID != w.lastDevice[class] {
 				index = candidate
@@ -318,6 +340,9 @@ func (w *relayOutboundWriter) popClassLocked(class relayOutboundClass, perDevice
 		}
 	}
 	job := queue[index]
+	if class == relayOutboundBulk && job.cursor != nil && w.activeBulkGroupByDevice[job.conn.deviceID] == "" {
+		w.activeBulkGroupByDevice[job.conn.deviceID] = job.cursor.groupID
+	}
 	w.queues[class] = append(queue[:index], queue[index+1:]...)
 	w.lastDevice[class] = job.conn.deviceID
 	w.queueFrames--
@@ -327,6 +352,38 @@ func (w *relayOutboundWriter) popClassLocked(class relayOutboundClass, perDevice
 		w.bulkBytes -= len(job.payload)
 	}
 	return job
+}
+
+func (w *relayOutboundWriter) selectBulkIndexLocked(queue []*relayOutboundJob) int {
+	eligible := func(job *relayOutboundJob) bool {
+		if job.cursor == nil {
+			return true
+		}
+		active := w.activeBulkGroupByDevice[job.conn.deviceID]
+		return active == "" || active == job.cursor.groupID
+	}
+	for index, job := range queue {
+		if eligible(job) && job.conn.deviceID != w.lastDevice[relayOutboundBulk] {
+			return index
+		}
+	}
+	for index, job := range queue {
+		if eligible(job) {
+			return index
+		}
+	}
+	return -1
+}
+
+func (w *relayOutboundWriter) completeBulkGroup(job *relayOutboundJob) {
+	if job == nil || job.conn == nil || job.cursor == nil {
+		return
+	}
+	w.mu.Lock()
+	if w.activeBulkGroupByDevice[job.conn.deviceID] == job.cursor.groupID {
+		delete(w.activeBulkGroupByDevice, job.conn.deviceID)
+	}
+	w.mu.Unlock()
 }
 
 func (w *relayOutboundWriter) failQueued(err error) {

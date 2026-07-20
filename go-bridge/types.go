@@ -601,12 +601,11 @@ func (s *PendingNotificationStore) Consume(deviceID string) []PendingNotificatio
 	return result
 }
 
-// SubscriberDeviceIDs 返回订阅了指定 session 的所有设备 ID。
+// SubscriberDeviceIDs 返回订阅了指定 session 的所有（已认证）设备 ID。
 func (b *Broadcaster) SubscriberDeviceIDs(backendID, sessionID string) []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	seen := make(map[string]struct{})
-	// 遍历所有 key，匹配 backendID + sessionID
 	for k, conns := range b.subscribers {
 		if k.BackendID != backendID || k.SessionID != sessionID {
 			continue
@@ -622,4 +621,19 @@ func (b *Broadcaster) SubscriberDeviceIDs(backendID, sessionID string) []string 
 		result = append(result, id)
 	}
 	return result
+}
+
+// HasSessionSubscriber reports whether ANY connection is currently subscribed to
+// the given session (any directory; authed or not). Per-session relays use this to
+// keep watching (push model) while a client has the session open, instead of exiting
+// on idle TTL and missing the external turn.
+func (b *Broadcaster) HasSessionSubscriber(backendID, sessionID string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for k, conns := range b.subscribers {
+		if k.BackendID == backendID && k.SessionID == sessionID && len(conns) > 0 {
+			return true
+		}
+	}
+	return false
 }

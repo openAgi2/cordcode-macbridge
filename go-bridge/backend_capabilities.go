@@ -73,5 +73,16 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 		caps = append(caps, "question_reply")
 	}
 
+	// external_turn_streaming（refactor `multi-client-streaming-sync` Phase 1/2）：MacBridge 对该
+	// backend 的外部 turn 已实现 push 流式——file-relay 解析 transcript/rollout 增长，发
+	// text_delta/reasoning_delta/tool_started/context_usage_updated，客户端据此可关闭发现型轮询、
+	// 改用 reconcile-on-event（turn_completed 一次 reconcile + 低频看门狗）。Phase 1 已为 codex
+	// （rollout 流）与 claude/claudecode（transcript 流）实现；opencode 本就 SSE push-native；
+	// grokbuild 待 leader-socket subscriber。capability 是 extensible string，非破坏性新增，无需
+	// 协议大版本 bump。
+	if id == "codex" || id == "claude" || id == "claudecode" {
+		caps = append(caps, "external_turn_streaming")
+	}
+
 	return caps
 }

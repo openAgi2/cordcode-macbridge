@@ -436,6 +436,14 @@ type EventSubscriber interface {
 	Subscribe(ctx context.Context) (<-chan Event, error)
 }
 
+// SessionEventSubscriber is the per-session counterpart: agents that expose ONE
+// session's live events via a subscribe channel (e.g. Grok leader-socket: a
+// read-only subscriber attaches per sessionID). Used by MacBridge's per-session
+// relay for external turns (multi-client-streaming-sync refactor Phase 1 Grok).
+type SessionEventSubscriber interface {
+	SubscribeSessionEvents(ctx context.Context, sessionID, cwd string) (<-chan Event, error)
+}
+
 // RunningSessionLister is an optional interface for agents that can detect running sessions from the OS or filesystem.
 type RunningSessionLister interface {
 	GetRunningSessionIDs(ctx context.Context) (map[string]bool, error)

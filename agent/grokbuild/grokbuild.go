@@ -9,6 +9,8 @@ package grokbuild
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -26,6 +28,7 @@ var _ core.ReasoningEffortSwitcher = (*Agent)(nil)
 var _ core.ToolAuthorizer = (*Agent)(nil)
 var _ core.HistoryProvider = (*Agent)(nil)
 var _ core.RichHistoryProvider = (*Agent)(nil)
+var _ core.SessionEventSubscriber = (*Agent)(nil)
 
 // Agent implements core.Agent for the Grok Build CLI.
 type Agent struct {
@@ -116,6 +119,42 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 // Implementation: session_catalog.go.
 
 func (a *Agent) Stop() error { return nil }
+
+// SubscribeSessionEvents attaches to a running grok leader (~/.grok/leader.sock)
+// as a READ-ONLY subscriber for one session and streams its live session/update
+// notifications as core.Events (via convertSessionUpdate). It does NOT spawn a
+// leader, acquire the flock, or drive the session. Fail-fast when no leader
+// socket exists (grok not running → no external turn to observe). The channel
+// closes when the leader disconnects or ctx is cancelled.
+//
+// grokHome is write-once (set in New), so reading it here without a.mu is safe.
+func (a *Agent) SubscribeSessionEvents(ctx context.Context, sessionID, cwd string) (<-chan core.Event, error) {
+	socketPath := resolveLeaderSocket(a.grokHome)
+	if _, err := os.Stat(socketPath); err != nil {
+		return nil, fmt.Errorf("grokbuild: leader socket not available (%s): %w", socketPath, err)
+	}
+	if strings.TrimSpace(cwd) == "" {
+		cwd = a.GetWorkDir()
+	}
+	ch := make(chan core.Event, 32)
+	sub := NewLeaderSubscriber(socketPath, sessionID, cwd)
+	go func() {
+		defer close(ch)
+		slog.Info("grokbuild: leader subscriber starting", "session", sessionID, "socket", socketPath)
+		if err := sub.Run(ctx, func(ev core.Event) {
+			if ev.SessionID == "" {
+				ev.SessionID = sessionID
+			}
+			select {
+			case ch <- ev:
+			case <-ctx.Done():
+			}
+		}); err != nil {
+			slog.Debug("grokbuild: leader subscriber ended", "session", sessionID, "error", err)
+		}
+	}()
+	return ch, nil
+}
 
 // --- WorkDirSwitcher ---
 

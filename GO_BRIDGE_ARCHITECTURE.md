@@ -154,9 +154,12 @@ turn 完成时，在线订阅设备收到事件；未在线设备的通知写入
 `app_server` 的 create 是 lazy：可能先返回 `pending-*`，首次 send 后再绑定真实
 thread id。session registry、订阅 key 与 iOS 当前 session 都必须随 rebind 更新。
 
-默认 stdio app-server 模式下，descriptor 对 Codex 使用 `session_process` 模型，且
-`requiresPollingForExternalTurns=true`，iOS 通过历史变化探测旁观外部 turn。显式共享 URL
-模式下才使用 broadcast/passive event，并可关闭外部 turn 轮询。
+默认 stdio app-server 模式下，descriptor 对 Codex 使用 `session_process` 模型，
+`requiresPollingForExternalTurns=false`（`go-bridge/agent_descriptor.go:105`，commit `19250fe`
+"fix(codex): stop polling idle history sessions"）——transcript relay 已发权威
+`turn_started`/`turn_completed` milestone，polling 反会把 transcript rewrite 误判为新 turn。iOS 仍通过
+`switchSession` + live-event 驱动 history 变化探测旁观外部 turn，**不依赖**此 flag（codex 无 claude
+那样的 flag 兜底）。显式共享 URL 模式下才使用 broadcast/passive event。
 
 Codex 另有 transcript file relay：`get_session_messages` 会并行启动
 `startCodexSessionFileRelay`，从 JSONL 中的 `task_complete` 等持久事件补齐外部/共享服务 session

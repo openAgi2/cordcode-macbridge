@@ -87,6 +87,8 @@ type fakeAgent struct {
 	liveProcessCalls   int
 	processAliveCalls  int
 	lastProcessAliveID int
+	// transcriptPath 让 fakeAgent 满足 core.TranscriptLocator（Codex file relay 需要）。
+	transcriptPath string
 }
 
 type unsupportedMutationAgent struct {
@@ -133,6 +135,11 @@ func (f *fakeAgent) IsProcessAlive(ctx context.Context, pid int) bool {
 		return false
 	}
 	return f.alivePIDs[pid]
+}
+
+// TranscriptPath 让 fakeAgent 满足 core.TranscriptLocator（Codex file relay 启动需要）。
+func (f *fakeAgent) TranscriptPath(ctx context.Context, sessionID string) (string, error) {
+	return f.transcriptPath, nil
 }
 
 func (f *fakeAgent) StartSession(_ context.Context, sessionID string) (core.AgentSession, error) {

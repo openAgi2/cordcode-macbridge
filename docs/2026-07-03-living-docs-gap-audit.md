@@ -175,4 +175,9 @@
 - **过程文档证据**：6/13 起的 `docs/2026-06-*` / `docs/2026-07-*` 系列，优先采用「完成情况」「审计报告」类文件确认改动落地。
 - **git 提交证据**：通过 `git log --oneline --since=2026-06-13 -- <path>` 拉取主题相关提交，对照活文档描述。
 - **正向发现（已核实仍准确，无需改动）**：`GO_BRIDGE_ARCHITECTURE.md` 事件管线映射表（:228-239）与 `events.go` 一致；polling 边界（Claude/Codex stdio/OpenCode 均 `requiresPollingForExternalTurns=true`）与 `agentRequiresPolling` 一致；三路径/TLS pin 论断；relay-v1 协议字段/schema/HPKE/endpoint；CONTRIBUTING/SECURITY module 边界；iOS `IOS_MAC_INTERACTION_FLOW.md` 的 RecoveryCoordinator/mailbox/snapshot 描述；iOS codemote 改名落地干净。
+
+  > **注（2026-07-19 后续复核）**：本条「Codex stdio…均 `requiresPollingForExternalTurns=true`」在 MacBridge
+  > `19250fe`（2026-07-14 "fix(codex): stop polling idle history sessions"，codex→`false`）后**不再准确**——
+  > codex 现以 `go-bridge/agent_descriptor.go:105` 为准（`return false`），权威描述见 `GO_BRIDGE_ARCHITECTURE.md:157-159`。
+  > 本文件为 2026-07-03 时点快照，原文保留；读 dated 快照前请先看活文档与源码。
 - **本审计的 memory 索引位置**：差距清单的 memory 指针写在 Claude Code 的外部项目记忆 `~/.claude/projects/-Users-jacklee-Projects-cordcode-macbridge/memory/MEMORY.md`（**不在仓库内**，由 harness 自动加载到 session context）。仓库内不会出现 `MEMORY.md`；下一轮 agent 若在仓库根目录找它会扑空——**仓库内的执行清单真值以本文件（`docs/2026-07-03-living-docs-gap-audit.md`）为准**。`docs/upstream-memory/` 与代码里的 agent memory 文件是不同东西，不要混淆。

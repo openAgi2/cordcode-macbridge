@@ -27,6 +27,8 @@ per-chunk AEAD -> remove padding -> bounded reassembly -> optional one-time gzip
 
 For a group, `groupId`, `count`, and `contentEncoding` are fixed. Only `index`, `counter`, and `messageId` vary. Intermediate plaintext never enters JSON/type dispatch. One unfinished group per device is permitted in v1; a second group, duplicate/out-of-order index, inconsistent group fields, overflow, or 15-second idle timeout is a transport-closing protocol failure.
 
+The sender may interleave non-chunk control or interactive frames between chunks, and may schedule chunks for other devices independently. For one device, after index `0` has been written, no chunk from another group may be written until the active group completes or the transport closes. Supersede may discard a group before index `0`; after index `0`, the sender must finish that group or close the transport so the receiver cannot retain an orphaned reassembly state.
+
 Only bulk Relay results may be chunked. Control, recovery, interactive, and metadata frames remain single-envelope and may be scheduled between chunks. The writer assigns counter, nonce, and frame `messageId` only when selecting the next wire frame.
 
 Initial limits: 32 KiB target, 16 KiB minimum, 1,024 chunks, 50 MiB reassembled bytes, one unfinished group per device, and 15 seconds idle timeout. Mailbox envelopes must reject `chunk`.

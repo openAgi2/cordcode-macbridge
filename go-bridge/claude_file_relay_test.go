@@ -185,8 +185,10 @@ func TestClaudeFileRelayMetaOnlyGrowthDoesNotReemitTurnStarted(t *testing.T) {
 		`{"type":"assistant","message":{"role":"assistant","content":"done","stop_reason":"end_turn"}}`,
 	)
 	messages = client.readEvents(t, 2)
-	if got := messages[0]["event"]; got != "turn_completed" {
-		t.Fatalf("event after meta-only growth = %#v, want turn_completed (no repeated turn_started); messages=%v", got, messages)
+	// Phase 1：assistant "done" 现在会先发 text_delta（content streaming），再 turn_completed。
+	// 关键校验：meta-only growth 没有重复触发 turn_started。
+	if messages[0]["event"] != "text_delta" || messages[1]["event"] != "turn_completed" {
+		t.Fatalf("events after meta-only growth = %v, want [text_delta, turn_completed] (no repeated turn_started)", messages)
 	}
 }
 

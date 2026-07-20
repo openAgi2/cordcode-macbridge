@@ -329,6 +329,29 @@ Rules:
 
 A backend advertises `session_pagination` in `capabilities` only for message-history pagination (`get_session_messages`), not for session-list pagination. Clients MUST only send `paginate`/`beforeCursor` history fields to a backend that advertises this capability; otherwise the legacy full-history path is used.
 
+### Capability: `external_turn_streaming`
+
+A backend advertises `external_turn_streaming` in `capabilities` when MacBridge pushes external-turn
+content events over the live stream, so clients can treat push as the primary source and demote
+discovery polling to a reconcile/watchdog. The `multi-client-streaming-sync` refactor Phase 1
+implements file-relay content streaming for **codex** (rollout) and **claude**/`claudecode`
+(transcript): MacBridge parses transcript/rollout growth and emits `text_delta` / `reasoning_delta`
+/ `tool_started` / `context_usage_updated` during the turn — not only at `turn_completed`.
+**opencode** is push-native via its SSE firehose (separate path, not this capability); **grokbuild**
+is pending the leader-socket subscriber. Clients seeing this capability SHOULD NOT start
+discovery/active external-turn probes and SHOULD keep only a `turn_completed` reconcile + a
+low-frequency watchdog; clients on backends without it fall back to current polling. Adding the
+string is non-breaking (extensible `capabilities` array); no protocol major-version bump.
+
+### Event: `sessions_changed`
+
+Optional push (multi-client-streaming-sync §6). MacBridge periodically lists each backend's
+sessions; when a NEW session appears (e.g. a turn opened in a native app while the client sits on
+the session list), it broadcasts `sessions_changed` with `{backendId}`. Clients refresh
+`list_sessions` on receipt. The event carries no `sessionId` and relies on the broadcaster's
+all-backend/all-connections fallback to reach list-viewing clients. Non-breaking/optional: clients
+also refresh on reconnect/foreground/turn-activity, so this is a latency win, not a correctness gate.
+
 ### `get_session_messages` paging
 
 Request params (additive; `paginate`, `beforeCursor` are new):
