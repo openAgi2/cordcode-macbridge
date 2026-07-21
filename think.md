@@ -606,3 +606,18 @@ Web 端也有一个叠加 bug：`applyExternalTurnHistory` 无脑把 trailing as
   从权威历史推导 settle；任何一端假设「对方一定会发事件」都会在边界条件下丢 turn。
 - **file-relay 的退出语义**：「finalAssistant 写入」只是 transcript 状态变化，**不是 watcher
   生命周期事件**；这两个概念必须分开。
+
+---
+
+# 2026-07-21 跨仓指针：iOS 输入框执行中 / 外部 turn 收口（本仓无代码变更）
+
+> **完整复盘在 iOS 仓** `../cordcode-ios/think.md`「2026-07-21 复盘 XI」。  
+> 设计/实现/审计：`../cordcode-ios/docs/2026-07-21-ios-generation-single-authority-*.md`。
+
+## 结论（Mac 侧只需知道）
+
+- **根因在 iOS generation 多权威收口**（expected stale 裸 return、多 poll force-complete、load 内自 complete、Idle 下 delta activate 等），**不是**本轮 go-bridge EMIT 缺失。
+- owner 真机卡住瞬间 `go-bridge.log` 常有 `codexSessionFileRelay EMIT turn_started/turn_completed` + history 增长 → 投递侧可用；排障仍用 EMIT 日志 + LAN/relay 对照。
+- **本仓 2026-07-21 无业务代码 commit**；file-relay「turn_completed 后继续 watch」原则仍见上文 2026-07-19 节。
+- iOS 已收敛：输入框 `isGenerating||requiresAction`、HEAL、`externalTurnLooksComplete`、load post-apply settle、Idle 不 activate；owner 三连 ✅。剩余 G1 poll 函数合一 / G6 recover 结构在 iOS 后续 PR。
+
