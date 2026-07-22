@@ -47,17 +47,23 @@ func newExtractor(backend Backend) SpanExtractor {
 // OpenToolUses count that the three result variants decrement.
 
 type codexSpanExtractor struct {
-	spans   []LogicalMessageSpan
-	current *LogicalMessageSpan
-	ordinal int64
+	spans              []LogicalMessageSpan
+	current            *LogicalMessageSpan
+	ordinal            int64
+	turnStartOffset    int64
+	hasTurnStartOffset bool
 }
 
 // ensureCurrent starts or extends the open assistant entry.
 func (x *codexSpanExtractor) ensureCurrent(rec Record) {
 	if x.current == nil {
+		replayStart := rec.Start
+		if x.hasTurnStartOffset {
+			replayStart = x.turnStartOffset
+		}
 		x.current = &LogicalMessageSpan{
 			Ordinal:     x.ordinal,
-			ReplayStart: rec.Start,
+			ReplayStart: replayStart,
 			EndOffset:   rec.End,
 		}
 		x.ordinal++
@@ -125,7 +131,18 @@ func (x *codexSpanExtractor) Process(rec Record) {
 	}
 
 	if envelope.Type == "event_msg" {
-		if codexEventIsPatchApplyEnd(envelope.Payload) {
+		switch codexEventPayloadType(envelope.Payload) {
+		case "task_started":
+			x.flush()
+			x.turnStartOffset = rec.Start
+			x.hasTurnStartOffset = true
+		case "task_complete":
+			if x.current != nil && rec.End > x.current.EndOffset {
+				x.current.EndOffset = rec.End
+			}
+			x.flush()
+			x.hasTurnStartOffset = false
+		case "patch_apply_end":
 			x.closeTool(rec)
 		}
 		return
@@ -232,21 +249,21 @@ func codexIsUserPrompt(text string) bool {
 	return true
 }
 
-// codexEventIsPatchApplyEnd reports whether an event_msg payload is a Codex
-// patch_apply_end, mirroring the builder's nested-payload handling.
-func codexEventIsPatchApplyEnd(payload json.RawMessage) bool {
+// codexEventPayloadType returns the normalized event_msg payload type,
+// mirroring the builder's nested-payload handling.
+func codexEventPayloadType(payload json.RawMessage) string {
 	var envelope map[string]any
 	if json.Unmarshal(payload, &envelope) != nil {
-		return false
+		return ""
 	}
 	p := envelope
 	if nested, ok := envelope["payload"].(map[string]any); ok {
 		p = nested
 	}
 	if s, ok := p["type"].(string); ok {
-		return strings.TrimSpace(s) == "patch_apply_end"
+		return strings.TrimSpace(s)
 	}
-	return false
+	return ""
 }
 
 // ── Claude ───────────────────────────────────────────────────────────────────

@@ -166,7 +166,8 @@ func (h *Handlers) grokLeaderSessionRelayLoop(sessionID, backendID string, sub c
 	}
 }
 
-func (h *Handlers) sessionLiveProcess(ctx context.Context, sessionID, backendID string) (core.LiveSessionProcess, core.LiveSessionLister, error) {	seen := make(map[string]bool)
+func (h *Handlers) sessionLiveProcess(ctx context.Context, sessionID, backendID string) (core.LiveSessionProcess, core.LiveSessionLister, error) {
+	seen := make(map[string]bool)
 	for _, id := range []string{backendID, "claude", "claudecode"} {
 		if strings.TrimSpace(id) == "" || seen[id] {
 			continue
@@ -234,10 +235,10 @@ func (h *Handlers) codexSessionFileRelayLoop(sessionID string, conn Connection, 
 		return info.Size()
 	}()
 
-	state := h.detectCodexTranscriptTaskState(sessPath)
+	state, currentTurnID := h.detectCodexTranscriptTask(sessPath)
 	switch state {
 	case "idle":
-		h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"done": true, "reason": "task_complete"})
+		h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"turnId": currentTurnID, "done": true, "reason": "task_complete"})
 		h.broadcastIdleState(sessionID, backendID)
 		// Phase 0 修复：idle 不再 return。此前 return 导致 relay 连 watch loop 都不进，
 		// 下一轮 task_started 永远到不了客户端（只能等下次 get_session_messages 顺带看到）。
@@ -245,6 +246,7 @@ func (h *Handlers) codexSessionFileRelayLoop(sessionID string, conn Connection, 
 		slog.Info("go-bridge: codexSessionFileRelay initial idle; watching for next turn", "sessionID", sessionID)
 	case "running":
 		h.sessions.markRunning(sessionID)
+		h.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": currentTurnID})
 		h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "running"})
 	}
 
@@ -318,18 +320,24 @@ func (h *Handlers) codexSessionFileRelayLoop(sessionID string, conn Connection, 
 		for _, ev := range events {
 			switch ev.kind {
 			case "task_started":
+				currentTurnID = ev.turnID
 				slog.Info("go-bridge: codexSessionFileRelay EMIT turn_started", "sessionID", sessionID, "subscribed", h.codexSessionHasSubscriber(sessionID, backendID))
 				// per-turn 内容去重 seen-set：turn_started 清空（r5/r6 元素口径去重）。
 				seen = make(map[string]bool)
 				toolNames = make(map[string]string)
 				h.sessions.markRunning(sessionID)
-				h.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": ""})
+				h.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": currentTurnID})
 				h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "running"})
 			case "task_complete":
+				completedTurnID := ev.turnID
+				if completedTurnID == "" {
+					completedTurnID = currentTurnID
+				}
 				slog.Info("go-bridge: codexSessionFileRelay EMIT turn_completed", "sessionID", sessionID)
-				h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"done": true, "reason": "task_complete"})
+				h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"turnId": completedTurnID, "done": true, "reason": "task_complete"})
 				h.broadcastIdleState(sessionID, backendID)
 				h.recordPendingNotification(sessionID, backendID, "completed", "task_complete")
+				currentTurnID = ""
 				// task_complete 后继续 watch 下一轮（Phase 0）；relay 靠无增长 TTL 退出。
 			case "text":
 				if seen[ev.text] {
@@ -337,14 +345,25 @@ func (h *Handlers) codexSessionFileRelayLoop(sessionID string, conn Connection, 
 				}
 				seen[ev.text] = true
 				slog.Info("go-bridge: codexSessionFileRelay EMIT text_delta", "sessionID", sessionID, "len", len(ev.text), "subscribed", h.codexSessionHasSubscriber(sessionID, backendID))
-				h.sendSessionEvent(sessionID, backendID, "text_delta", map[string]interface{}{"delta": ev.text})
+				h.sendSessionEvent(sessionID, backendID, "text_delta", map[string]interface{}{"itemId": currentTurnID, "delta": ev.text})
 			case "reasoning":
 				if seen[ev.text] {
 					continue
 				}
 				seen[ev.text] = true
 				slog.Info("go-bridge: codexSessionFileRelay EMIT reasoning_delta", "sessionID", sessionID, "len", len(ev.text), "subscribed", h.codexSessionHasSubscriber(sessionID, backendID))
-				h.sendSessionEvent(sessionID, backendID, "reasoning_delta", map[string]interface{}{"delta": ev.text})
+				h.sendSessionEvent(sessionID, backendID, "reasoning_delta", map[string]interface{}{"itemId": currentTurnID, "delta": ev.text})
+			case "user_message":
+				key := "user:" + ev.itemId + ":" + ev.text
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				h.sendSessionEvent(sessionID, backendID, "user_message", map[string]interface{}{
+					"itemId": ev.itemId,
+					"turnId": currentTurnID,
+					"text":   ev.text,
+				})
 			case "tool_started":
 				if ev.itemId != "" {
 					toolNames[ev.itemId] = ev.toolName
@@ -768,40 +787,51 @@ func (h *Handlers) detectClaudeTranscriptState(sessPath string) string {
 }
 
 func (h *Handlers) detectCodexTranscriptTaskState(sessPath string) string {
+	state, _ := h.detectCodexTranscriptTask(sessPath)
+	return state
+}
+
+func (h *Handlers) detectCodexTranscriptTask(sessPath string) (string, string) {
 	events := h.scanCodexTranscriptTaskEvents(sessPath, 0)
 	state := "unknown"
-	for _, eventName := range events {
-		switch eventName {
+	turnID := ""
+	for _, event := range events {
+		switch event.kind {
 		case "task_started":
 			state = "running"
+			turnID = event.turnID
 		case "task_complete":
 			state = "idle"
+			if event.turnID != "" {
+				turnID = event.turnID
+			}
 		}
 	}
-	return state
+	return state, turnID
 }
 
 // scanCodexTranscriptTaskEvents 提取 lifecycle 事件（task_started/task_complete），
 // 供 detectCodexTranscriptTaskState 判定当前态。委托给统一扫描器后过滤。
-func (h *Handlers) scanCodexTranscriptTaskEvents(sessPath string, offset int64) []string {
-	var names []string
+func (h *Handlers) scanCodexTranscriptTaskEvents(sessPath string, offset int64) []codexRelayEvent {
+	var events []codexRelayEvent
 	for _, ev := range scanCodexTranscriptRelayEvents(sessPath, offset) {
 		if ev.kind == "task_started" || ev.kind == "task_complete" {
-			names = append(names, ev.kind)
+			events = append(events, ev)
 		}
 	}
-	return names
+	return events
 }
 
 // codexRelayEvent 是 rollout 扫描产出的有序事件。kind 为 lifecycle
 // (task_started/task_complete) 或内容候选 (text/reasoning)，text 字段为明文。
 type codexRelayEvent struct {
 	kind       string
-	text       string // text/reasoning 明文
-	toolName   string // tool_started/tool_finished
-	toolInput  string // tool_started（custom_tool_call.input JS 串）
-	toolResult string // tool_finished（custom_tool_call_output.output 拼接）
-	itemId     string // call_id
+	turnID     string                 // source-proven rollout task_started/task_complete turn_id
+	text       string                 // text/reasoning 明文
+	toolName   string                 // tool_started/tool_finished
+	toolInput  string                 // tool_started（custom_tool_call.input JS 串）
+	toolResult string                 // tool_finished（custom_tool_call_output.output 拼接）
+	itemId     string                 // call_id
 	context    map[string]interface{} // context_usage_updated 的 context 对象
 }
 
@@ -815,6 +845,7 @@ type codexRolloutEntry struct {
 // 下，codexNormalizeEventPayload 两种形态都吃。
 type codexEventPayload struct {
 	Type    string `json:"type"`
+	TurnID  string `json:"turn_id"`
 	Message string `json:"message"` // agent_message 明文
 	Text    string `json:"text"`    // agent_reasoning 明文
 }
@@ -836,6 +867,7 @@ func codexNormalizeEventPayload(raw json.RawMessage) (codexEventPayload, bool) {
 }
 
 type codexResponseItemPayload struct {
+	ID      string                 `json:"id"`
 	Type    string                 `json:"type"`
 	Role    string                 `json:"role"`
 	Content []codexResponseContent `json:"content"` // message
@@ -910,9 +942,9 @@ func scanCodexTranscriptRelayEvents(sessPath string, offset int64) []codexRelayE
 			}
 			switch p.Type {
 			case "task_started":
-				out = append(out, codexRelayEvent{kind: "task_started"})
+				out = append(out, codexRelayEvent{kind: "task_started", turnID: p.TurnID})
 			case "task_complete":
-				out = append(out, codexRelayEvent{kind: "task_complete"})
+				out = append(out, codexRelayEvent{kind: "task_complete", turnID: p.TurnID})
 			case "agent_message":
 				if strings.TrimSpace(p.Message) != "" {
 					out = append(out, codexRelayEvent{kind: "text", text: p.Message})
@@ -947,12 +979,26 @@ func scanCodexTranscriptRelayEvents(sessPath string, offset int64) []codexRelayE
 			}
 			switch p.Type {
 			case "message":
-				if p.Role != "assistant" {
-					continue
-				}
-				for _, b := range p.Content {
-					if b.Type == "output_text" && strings.TrimSpace(b.Text) != "" {
-						out = append(out, codexRelayEvent{kind: "text", text: b.Text})
+				switch p.Role {
+				case "assistant":
+					for _, b := range p.Content {
+						if b.Type == "output_text" && strings.TrimSpace(b.Text) != "" {
+							out = append(out, codexRelayEvent{kind: "text", text: b.Text})
+						}
+					}
+				case "user":
+					var texts []string
+					for _, b := range p.Content {
+						if b.Type == "input_text" && strings.TrimSpace(b.Text) != "" {
+							texts = append(texts, b.Text)
+						}
+					}
+					if len(texts) > 0 {
+						out = append(out, codexRelayEvent{
+							kind:   "user_message",
+							itemId: strings.TrimSpace(p.ID),
+							text:   strings.Join(texts, "\n"),
+						})
 					}
 				}
 			case "reasoning":

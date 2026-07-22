@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeCodexRolloutFile(t *testing.T, lines ...string) string {
@@ -59,6 +60,46 @@ func TestScanCodexTranscriptRelayEventsPaginated(t *testing.T) {
 	}
 }
 
+func TestScanCodexTranscriptRelayEventsUserMessage(t *testing.T) {
+	path := writeCodexRolloutFile(t,
+		`{"type":"response_item","payload":{"type":"message","id":"msg-user-1","role":"user","content":[{"type":"input_text","text":"测试第五轮\n"}]}}`,
+	)
+	events := scanCodexTranscriptRelayEvents(path, 0)
+	if len(events) != 1 {
+		t.Fatalf("len = %d, want 1: %+v", len(events), events)
+	}
+	if events[0].kind != "user_message" || events[0].itemId != "msg-user-1" || events[0].text != "测试第五轮\n" {
+		t.Fatalf("event = %+v, want stable user_message", events[0])
+	}
+}
+
+func TestCodexFileRelayEmitsUserMessageWithTurnIdentity(t *testing.T) {
+	const sessionID = "user-message"
+	handlers, agent, client, serverConn := startCodexFileRelayFixture(t, sessionID,
+		codexRolloutEvent("task_started"),
+	)
+	_ = readEventNames(t, client, 2)
+
+	appendCodexRollout(t, agent.transcriptPath,
+		`{"type":"response_item","payload":{"type":"message","id":"msg-user-1","role":"user","content":[{"type":"input_text","text":"测试第五轮\n"}]}}`,
+	)
+	if err := client.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]interface{}
+	if err := client.ReadJSON(&payload); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := payload["data"].(map[string]interface{})
+	if payload["event"] != "user_message" || data["itemId"] != "msg-user-1" || data["turnId"] != "turn-1" || data["text"] != "测试第五轮\n" {
+		t.Fatalf("payload = %#v, want user_message with stable message/turn ids", payload)
+	}
+
+	appendCodexRollout(t, agent.transcriptPath, codexRolloutEvent("task_complete"))
+	_ = readEventNames(t, client, 2)
+	waitCodexFileRelayStopped(t, handlers, sessionID, serverConn)
+}
+
 // TestScanCodexTranscriptRelayEventsDoubleWrite：双写过渡态 + 多元素 + 跨记录重复。
 // 扫描器返回所有候选（不去重），验证元素口径提取 + 空 summary 跳过 + 多元素展开。
 func TestScanCodexTranscriptRelayEventsDoubleWrite(t *testing.T) {
@@ -105,7 +146,7 @@ func TestCodexFileRelayDoubleWriteDedupesContentDeltas(t *testing.T) {
 	handlers, agent, client, serverConn := startCodexFileRelayFixture(t, sessionID,
 		codexRolloutEvent("task_started"),
 	)
-	_ = readEventNames(t, client, 1) // running startup: session_state_changed(running)
+	_ = readEventNames(t, client, 2) // running startup: turn_started + session_state_changed
 
 	appendCodexRollout(t, agent.transcriptPath,
 		`{"type":"event_msg","payload":{"type":"agent_message","message":"dup-msg"}}`,
@@ -170,7 +211,7 @@ func TestCodexFileRelayEmitsToolLifecycleAndContextUsage(t *testing.T) {
 	handlers, agent, client, serverConn := startCodexFileRelayFixture(t, sessionID,
 		codexRolloutEvent("task_started"),
 	)
-	_ = readEventNames(t, client, 1) // running startup: session_state_changed(running)
+	_ = readEventNames(t, client, 2) // running startup: turn_started + session_state_changed
 
 	appendCodexRollout(t, agent.transcriptPath,
 		`{"type":"response_item","payload":{"type":"custom_tool_call","call_id":"call_x","name":"exec","input":"ls"}}`,

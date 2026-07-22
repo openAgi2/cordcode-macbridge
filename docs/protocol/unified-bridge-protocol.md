@@ -339,6 +339,7 @@ type AttachmentInput = {
 | `session_state_changed` | `{ state, effectiveModelId?, effectiveProviderId?, providerId? }` | `.sessionStateChanged` |
 | `turn_started` | `{ turnId }` | `.turnStarted` |
 | `turn_completed` | `{ turnId, reason? }` | `.turnCompleted` |
+| `user_message` | `{ itemId, turnId, text }` | `.userMessage` |
 | `assistant_started` | `{ itemId, agentName? }` | `.assistantMessageStarted` |
 | `text_delta` | `{ itemId, delta, agentName? }` | `.assistantMessageDelta` |
 | `text_updated` | `{ itemId, content, agentName?, modelId?, providerId? }` | `.assistantMessageUpdated` |

@@ -156,6 +156,7 @@ Current event names emitted by MacBridge:
 ```text
 text_delta
 message_updated
+user_message
 reasoning_delta
 tool_started
 tool_finished
@@ -336,7 +337,9 @@ content events over the live stream, so clients can treat push as the primary so
 discovery polling to a reconcile/watchdog. The `multi-client-streaming-sync` refactor Phase 1
 implements file-relay content streaming for **codex** (rollout) and **claude**/`claudecode`
 (transcript): MacBridge parses transcript/rollout growth and emits `text_delta` / `reasoning_delta`
-/ `tool_started` / `context_usage_updated` during the turn — not only at `turn_completed`.
+/ `tool_started` / `context_usage_updated` during the turn — not only at `turn_completed`. Codex
+also emits `user_message` with `{ itemId, turnId, text }` when the rollout persists the external
+prompt; `itemId` is the response-item message ID and is reused by rich history reconciliation.
 **opencode** is push-native via its SSE firehose (separate path, not this capability); **grokbuild**
 is pending the leader-socket subscriber. Clients seeing this capability SHOULD NOT start
 discovery/active external-turn probes and SHOULD keep only a `turn_completed` reconcile + a

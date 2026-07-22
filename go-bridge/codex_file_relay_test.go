@@ -27,6 +27,9 @@ func TestDetectCodexTranscriptTaskState(t *testing.T) {
 	if got := h.detectCodexTranscriptTaskState(path); got != "running" {
 		t.Fatalf("state after task_started = %q, want running", got)
 	}
+	if state, turnID := h.detectCodexTranscriptTask(path); state != "running" || turnID != "turn-1" {
+		t.Fatalf("task after task_started = (%q, %q), want (running, turn-1)", state, turnID)
+	}
 
 	writeTranscript(t,
 		`{"timestamp":"2026-07-01T07:37:47.626Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}`+"\n"+
@@ -34,6 +37,9 @@ func TestDetectCodexTranscriptTaskState(t *testing.T) {
 	)
 	if got := h.detectCodexTranscriptTaskState(path); got != "idle" {
 		t.Fatalf("state after task_complete = %q, want idle", got)
+	}
+	if state, turnID := h.detectCodexTranscriptTask(path); state != "idle" || turnID != "turn-1" {
+		t.Fatalf("task after task_complete = (%q, %q), want (idle, turn-1)", state, turnID)
 	}
 }
 
@@ -151,10 +157,10 @@ func TestCodexFileRelayTaskCompleteContinuesWatchingNextTurn(t *testing.T) {
 	handlers, agent, client, serverConn := startCodexFileRelayFixture(t, sessionID,
 		codexRolloutEvent("task_started"),
 	)
-	// running 启动：广播 session_state_changed(running)。
-	events := readEventNames(t, client, 1)
-	if events[0] != "session_state_changed" {
-		t.Fatalf("running startup events = %v, want session_state_changed", events)
+	// running 启动：先广播带稳定 identity 的 turn_started，再广播 running。
+	events := readEventNames(t, client, 2)
+	if events[0] != "turn_started" || events[1] != "session_state_changed" {
+		t.Fatalf("running startup events = %v, want [turn_started session_state_changed]", events)
 	}
 	// task_complete → turn_completed + idle，但不 return。
 	appendCodexRollout(t, agent.transcriptPath, codexRolloutEvent("task_complete"))
@@ -193,7 +199,7 @@ func TestCodexFileRelayNoGrowthTTLKeepsWatchingWhenRunning(t *testing.T) {
 	handlers, agent, client, serverConn := startCodexFileRelayFixture(t, sessionID,
 		codexRolloutEvent("task_started"),
 	)
-	_ = readEventNames(t, client, 1) // running startup 广播
+	_ = readEventNames(t, client, 2) // running startup: turn_started + session_state_changed
 	// 等待超过软 TTL：复核仍 running → 续 watch（不退出）。
 	time.Sleep(150 * time.Millisecond)
 	if !codexFileRelayIsRunning(t, handlers, sessionID) {

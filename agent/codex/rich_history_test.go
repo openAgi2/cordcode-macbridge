@@ -222,11 +222,13 @@ func TestGetRichSessionHistory_ClassifiesProgressAndFinalText(t *testing.T) {
 	sessionID := "rich-presentation"
 	rollout := "" +
 		`{"type":"session_meta","payload":{"id":"` + sessionID + `","cwd":"/tmp"}}` + "\n" +
-		`{"type":"response_item","timestamp":"2026-05-20T12:00:01Z","payload":{"role":"user","content":[{"type":"input_text","text":"fix it"}]}}` + "\n" +
+		`{"type":"response_item","timestamp":"2026-05-20T12:00:01Z","payload":{"id":"msg-user-1","role":"user","content":[{"type":"input_text","text":"fix it"}]}}` + "\n" +
+		`{"type":"event_msg","timestamp":"2026-05-20T12:00:02Z","payload":{"type":"task_started","turn_id":"turn-rich-1"}}` + "\n" +
 		`{"type":"response_item","timestamp":"2026-05-20T12:00:02Z","payload":{"role":"assistant","content":[{"type":"output_text","text":"I will inspect the project."}]}}` + "\n" +
 		`{"type":"response_item","timestamp":"2026-05-20T12:00:03Z","payload":{"type":"command_execution","command":"rg TODO"}}` + "\n" +
 		`{"type":"response_item","timestamp":"2026-05-20T12:00:04Z","payload":{"type":"function_call_output","output":"found one","status":"completed"}}` + "\n" +
-		`{"type":"response_item","timestamp":"2026-05-20T12:00:05Z","payload":{"role":"assistant","content":[{"type":"output_text","text":"The change is complete."}]}}` + "\n"
+		`{"type":"response_item","timestamp":"2026-05-20T12:00:05Z","payload":{"role":"assistant","content":[{"type":"output_text","text":"The change is complete."}]}}` + "\n" +
+		`{"type":"event_msg","timestamp":"2026-05-20T12:00:05Z","payload":{"type":"task_complete","turn_id":"turn-rich-1"}}` + "\n"
 	writeTestRollout(t, codexHome, sessionID, rollout)
 
 	entries, err := getRichSessionHistory(sessionID, codexHome, 0)
@@ -236,7 +238,13 @@ func TestGetRichSessionHistory_ClassifiesProgressAndFinalText(t *testing.T) {
 	if len(entries) != 2 {
 		t.Fatalf("entries = %d, want 2", len(entries))
 	}
+	if entries[0].ID != "msg-user-1" {
+		t.Fatalf("user id = %q, want source message id", entries[0].ID)
+	}
 	assistant := entries[1]
+	if assistant.ID != "turn-rich-1" {
+		t.Fatalf("assistant id = %q, want source turn id", assistant.ID)
+	}
 	if assistant.Content != "The change is complete." {
 		t.Fatalf("assistant content = %q, want terminal answer", assistant.Content)
 	}
@@ -251,6 +259,38 @@ func TestGetRichSessionHistory_ClassifiesProgressAndFinalText(t *testing.T) {
 	}
 	if got := assistant.Parts[len(assistant.Parts)-1]["presentation"]; got != "final" {
 		t.Fatalf("terminal text presentation = %#v, want final", got)
+	}
+}
+
+func TestGetRichSessionHistory_EOFKeepsActiveTurnInProgress(t *testing.T) {
+	codexHome := filepath.Join(t.TempDir(), ".codex")
+	sessionID := "rich-active-presentation"
+	rollout := "" +
+		`{"type":"session_meta","payload":{"id":"` + sessionID + `","cwd":"/tmp"}}` + "\n" +
+		`{"type":"response_item","timestamp":"2026-05-20T12:00:01Z","payload":{"role":"user","content":[{"type":"input_text","text":"fix it"}]}}` + "\n" +
+		`{"type":"event_msg","timestamp":"2026-05-20T12:00:02Z","payload":{"type":"task_started","turn_id":"turn-active-1"}}` + "\n" +
+		`{"type":"response_item","timestamp":"2026-05-20T12:00:03Z","payload":{"role":"assistant","content":[{"type":"output_text","text":"First progress update."}]}}` + "\n" +
+		`{"type":"response_item","timestamp":"2026-05-20T12:00:04Z","payload":{"role":"assistant","content":[{"type":"output_text","text":"Second progress update."}]}}` + "\n"
+	writeTestRollout(t, codexHome, sessionID, rollout)
+
+	entries, err := getRichSessionHistory(sessionID, codexHome, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("entries = %d, want 2", len(entries))
+	}
+	assistant := entries[1]
+	if assistant.ID != "turn-active-1" {
+		t.Fatalf("assistant id = %q, want source turn id", assistant.ID)
+	}
+	if assistant.TurnCompletedAt != nil {
+		t.Fatalf("EOF must not synthesize completion: %s", assistant.TurnCompletedAt)
+	}
+	for i, part := range assistant.Parts {
+		if part["type"] == "text" && part["presentation"] != "progress" {
+			t.Fatalf("text part %d presentation = %#v, want progress", i, part["presentation"])
+		}
 	}
 }
 

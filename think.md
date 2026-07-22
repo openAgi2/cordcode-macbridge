@@ -620,4 +620,12 @@ Web 端也有一个叠加 bug：`applyExternalTurnHistory` 无脑把 trailing as
 - owner 真机卡住瞬间 `go-bridge.log` 常有 `codexSessionFileRelay EMIT turn_started/turn_completed` + history 增长 → 投递侧可用；排障仍用 EMIT 日志 + LAN/relay 对照。
 - **本仓 2026-07-21 无业务代码 commit**；file-relay「turn_completed 后继续 watch」原则仍见上文 2026-07-19 节。
 - iOS 已收敛：输入框 `isGenerating||requiresAction`、HEAL、`externalTurnLooksComplete`、load post-apply settle、Idle 不 activate；owner 三连 ✅。剩余 G1 poll 函数合一 / G6 recover 结构在 iOS 后续 PR。
+# 2026-07-22 Codex rollout identity / completion boundary
 
+Codex file-relay 与 rich history 曾把同一 rollout turn 投影成不同身份：scanner 已读取 `task_started.turn_id`，但 lifecycle payload 的 `turnId` 为空，history entry 又使用独立派生 ID。更严重的是 rich-history reader 在当前文件 EOF 就写 `TurnCompletedAt` 并把最后文本标成 final；活跃 rollout 每次增长都会被客户端观察成一次伪完成。
+
+现在以 rollout 原生信号为唯一真值：`task_started.turn_id` 贯穿 lifecycle、delta `itemId` 与 history entry ID；EOF 保持 progress 且无完成时间，只有 `task_complete` 关闭 turn。transcript index span 同时覆盖 start/complete 记录，分页 replay 不丢这两项证据。消费端因此可以按 exact ID reducer 合并，不需要正文相似度启发式。
+
+第五轮真机回归进一步证明，仅修 assistant 身份仍不够：Codex rollout 会在 `task_started` 后写入 `response_item(role=user)`，旧 file-relay 忽略该记录，导致 Mac 端问题只能随 history 回源迟到。现在 scanner 将它映射为 `user_message`，复用 response-item `id`，并绑定当前 source turn ID；`event_msg.user_message` 不重复解析，避免 rollout 双写造成重复。iOS 的 foreground/history reconcile 同时被约束为活跃 push turn 的 merge-only 校准者，不能凭部分 history 提前结束 turn。
+
+---

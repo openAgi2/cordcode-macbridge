@@ -18,7 +18,7 @@ const (
 func extractorRevision(backend Backend) string {
 	switch backend {
 	case BackendCodex:
-		return "codex-v2"
+		return "codex-v3"
 	case BackendClaude:
 		return "claude-v1"
 	default:

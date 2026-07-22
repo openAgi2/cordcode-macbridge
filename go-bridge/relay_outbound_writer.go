@@ -437,7 +437,7 @@ func classifyRelayEvent(event string) relayOutboundClass {
 	switch event {
 	case "recovery_barrier", "recovery_complete":
 		return relayOutboundControl
-	case "text_delta", "thinking_delta", "tool_content", "message_content", "turn_started", "turn_completed", "permission_asked", "question_asked":
+	case "text_delta", "thinking_delta", "tool_content", "message_content", "user_message", "turn_started", "turn_completed", "permission_asked", "question_asked":
 		return relayOutboundInteractive
 	case "session_updated", "session_state_changed", "session_status", "todos_updated", "permission_mode_changed", "model_changed", "git_branch_changed":
 		return relayOutboundMetadata
