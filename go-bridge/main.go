@@ -198,6 +198,7 @@ func Main() {
 	handlers.Start(ctx) // T09: 显式启动 observation lease loop（构造函数不再自动起 goroutine）
 	handlers.StartCleanupLoop(60 * time.Second)
 	handlers.StartSessionDiscoveryWatcher(ctx) // 可选：新外部 session → "sessions_changed" push
+	handlers.StartCodexRelayWatcher(ctx) // 安全网：订阅中的 codex session 始终有 relay 在跑
 	var dataDir *DataDir
 	if *dataDirPath != "" {
 		dataDir = NewDataDir(*dataDirPath)

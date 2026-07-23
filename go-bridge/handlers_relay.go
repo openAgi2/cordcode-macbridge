@@ -392,6 +392,52 @@ func (h *Handlers) codexSessionFileRelayLoop(sessionID string, conn Connection, 
 	}
 }
 
+// codexRelayWatcherInterval is the safety-net cadence: ensures every codex session a
+// client currently has open (subscribed) has a running file relay. Catches cases where a
+// relay exited (e.g. hardCap after a transient no-subscriber window) or never started
+// despite renewed interest. Layer 2 on top of the relay's own keep-watching logic.
+var codexRelayWatcherInterval = 10 * time.Second
+
+// StartCodexRelayWatcher launches the safety-net that keeps a file relay running for
+// every codex session a client is subscribed to. Mirror of StartSessionDiscoveryWatcher.
+func (h *Handlers) StartCodexRelayWatcher(ctx context.Context) {
+	go h.runCodexRelayWatcher(ctx)
+}
+
+func (h *Handlers) runCodexRelayWatcher(ctx context.Context) {
+	ticker := time.NewTicker(codexRelayWatcherInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			h.ensureRelaysForSubscribedCodexSessions()
+		}
+	}
+}
+
+// ensureRelaysForSubscribedCodexSessions starts a file relay for every codex session a
+// client is subscribed to but that has no running relay. startCodexSessionFileRelay is
+// idempotent (relayRunning guard); conn is nil because codexSessionFileRelayLoop does not
+// use it (events are broadcast to subscribers via the broadcaster).
+func (h *Handlers) ensureRelaysForSubscribedCodexSessions() {
+	agent, ok := h.Agents()["codex"]
+	if !ok || agent == nil || agent.Name() != "codex" {
+		return
+	}
+	for _, sessionID := range h.broadcaster.SubscribedSessionIDs("codex") {
+		h.mu.Lock()
+		running := h.relayRunning[codexSessionFileRelayKey(sessionID)]
+		h.mu.Unlock()
+		if running {
+			continue
+		}
+		slog.Info("go-bridge: codex relay watcher restarting relay for subscribed session", "sessionID", sessionID)
+		h.startCodexSessionFileRelay(sessionID, nil, "codex", agent)
+	}
+}
+
 func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection, backendID string) {
 	defer func() {
 		h.clearRelayKindIf(sessionID, relayKindClaudeFile)

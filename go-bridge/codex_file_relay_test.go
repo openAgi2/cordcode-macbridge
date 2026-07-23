@@ -265,3 +265,42 @@ func TestCodexFileRelayKeepsWatchingPastTTLWithoutSubscriber(t *testing.T) {
 		t.Fatalf("events after late task_started = %v, want turn_started (relay must catch a later external turn)", events)
 	}
 }
+
+// TestCodexRelayWatcherStartsRelayForSubscribedSession 验证 Layer 2 安全网：客户端订阅了
+// codex session 但没有 relay 在跑（已退出/从未启动）时，ensureRelaysForSubscribedCodexSessions
+// 会补启 relay，保证 live 通道不丢。
+func TestCodexRelayWatcherStartsRelayForSubscribedSession(t *testing.T) {
+	withFastCodexFileRelay(t)
+	const sessionID = "watcher-restart"
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "rollout-"+sessionID+".jsonl")
+	init := codexRolloutEvent("task_started") + "\n" + codexRolloutEvent("task_complete") + "\n"
+	if err := os.WriteFile(path, []byte(init), 0o644); err != nil {
+		t.Fatalf("write rollout: %v", err)
+	}
+	handlers := newTestHandlers(t)
+	agent := &fakeAgent{name: "codex", transcriptPath: path}
+	handlers.RegisterAgent("codex", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	t.Cleanup(cleanup)
+
+	// 客户端订阅，但不启动 relay（模拟 relay 已退出/未启动）。
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "codex", SessionID: sessionID})
+	if codexFileRelayIsRunning(t, handlers, sessionID) {
+		t.Fatal("relay should not be running before watcher")
+	}
+
+	// 安全网：为订阅中的 session 补启 relay。
+	handlers.ensureRelaysForSubscribedCodexSessions()
+	if !codexFileRelayIsRunning(t, handlers, sessionID) {
+		t.Fatal("watcher did not start relay for subscribed session")
+	}
+
+	// 补启的 relay 能捕获后续 turn（验证它真活着、能投递到订阅者）。
+	_ = readEventNames(t, clientConn, 2) // idle startup: turn_completed + session_state_changed
+	appendCodexRollout(t, agent.transcriptPath, codexRolloutEvent("task_started"))
+	events := readEventNames(t, clientConn, 2)
+	if events[0] != "turn_started" {
+		t.Fatalf("events after late task_started = %v, want turn_started", events)
+	}
+}

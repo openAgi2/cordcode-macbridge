@@ -638,3 +638,22 @@ func (b *Broadcaster) HasSessionSubscriber(backendID, sessionID string) bool {
 	}
 	return false
 }
+
+// SubscribedSessionIDs returns the set of session IDs that currently have at least one
+// subscriber for the given backend (a client has that session open). Used by the codex
+// relay safety-net watcher to keep a relay running for every open session.
+func (b *Broadcaster) SubscribedSessionIDs(backendID string) []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	seen := make(map[string]struct{})
+	for k, conns := range b.subscribers {
+		if k.BackendID == backendID && len(conns) > 0 {
+			seen[k.SessionID] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for sid := range seen {
+		out = append(out, sid)
+	}
+	return out
+}
