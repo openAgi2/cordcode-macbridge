@@ -181,6 +181,7 @@ func (h *Handlers) installEventPublisher(publisher *EventPublisher) {
 	}
 	h.eventPublisher = publisher
 	h.eventPublisher.SetOfflineRoute(h.routeRelayOfflineStampedEvent)
+	h.eventPublisher.SetObservationManager(h.observation)
 	h.deltaBatcher = NewDeltaBatcher(publisher)
 }
 
@@ -200,8 +201,24 @@ func (h *Handlers) registerConnection(conn Connection) {
 }
 
 func (h *Handlers) unregisterConnection(conn Connection) {
+	deviceID := ""
+	if device := conn.AuthedDevice(); device != nil {
+		deviceID = device.DeviceID
+	}
 	h.broadcaster.UnsubscribeAll(conn)
 	h.eventPublisher.UnregisterConnection(conn)
+	if deviceID != "" {
+		stillConnected := false
+		for _, activeDeviceID := range h.broadcaster.ActiveDeviceIDs() {
+			if activeDeviceID == deviceID {
+				stillConnected = true
+				break
+			}
+		}
+		if !stillConnected {
+			h.observation.RemoveDevice(deviceID)
+		}
+	}
 }
 
 func (h *Handlers) SetSessionListLimit(limit int) {
@@ -640,6 +657,10 @@ func (h *Handlers) HandleRPC(conn Connection, msg WireMessage) {
 	if h.handleRelayUpgradeRPC(conn, msg) {
 		return
 	}
+	if msg.Method == "set_observation_scope" {
+		h.handleSetObservationScope(conn, msg)
+		return
+	}
 
 	h.mu.Lock()
 	agent, ok := h.agents[msg.BackendID]
@@ -660,6 +681,27 @@ func (h *Handlers) HandleRPC(conn Connection, msg WireMessage) {
 	}
 
 	h.dispatchRPC(conn, msg, agent)
+}
+
+func (h *Handlers) handleSetObservationScope(conn Connection, msg WireMessage) {
+	device := conn.AuthedDevice()
+	if device == nil {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "auth.required", Message: "observation scope requires an authenticated device"})
+		return
+	}
+	req, err := ParseSetObservationScopeRequest(msg.Params)
+	if err != nil || req.BackendID != msg.BackendID {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: "invalid observation scope"})
+		return
+	}
+	h.observation.SetScope(device.DeviceID, ObservationScope{
+		BackendID:             req.BackendID,
+		SessionIDs:            req.SessionIDs,
+		DeliveryMode:          req.DeliveryMode,
+		IncludeRunningSignals: req.IncludeRunningSignals,
+		LeaseSeconds:          req.LeaseSeconds,
+	})
+	conn.SendResult(msg.RequestID, &ResultResponse{Ok: true}, nil)
 }
 
 // HandleRelayInbound 处理通过 relay 加密通道收到的 iOS→Mac 业务消息。

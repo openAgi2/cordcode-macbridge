@@ -310,7 +310,8 @@ type AttachmentInput = {
 
 ## 5. 事件推送
 
-所有事件带 `eventId`（含 epoch）、`seq`、`backendId`，支持断线重连。
+所有 session 事件带 `eventId`（含 epoch）、全局 `seq`、session 内单调
+`perSessionSeq`、`backendId`，支持断线重连与真实 session gap 检测。
 
 ### 5.1 事件信封格式
 
@@ -319,6 +320,7 @@ type AttachmentInput = {
   "type": "event",
   "eventId": "epoch-20260427-001:12346",
   "seq": 12346,
+  "perSessionSeq": 87,
   "bridgeEpoch": "epoch-20260427-001",
   "backendId": "claude",
   "sessionId": "sess-123",

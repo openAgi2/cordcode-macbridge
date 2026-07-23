@@ -1,6 +1,7 @@
 package gobridge
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ type publisherCaptureConn struct {
 	notify  chan struct{}
 	gate    <-chan struct{}
 	closed  bool
+	device  *TrustedDeviceRecord
 }
 
 func newPublisherCaptureConn(gate <-chan struct{}) *publisherCaptureConn {
@@ -44,7 +46,7 @@ func (c *publisherCaptureConn) SendJSONClassified(frame any, class relayOutbound
 	c.notify <- struct{}{}
 }
 func (c *publisherCaptureConn) SendResult(string, interface{}, *WireError) {}
-func (c *publisherCaptureConn) AuthedDevice() *TrustedDeviceRecord         { return nil }
+func (c *publisherCaptureConn) AuthedDevice() *TrustedDeviceRecord         { return c.device }
 func (c *publisherCaptureConn) RemoteAddr() string                         { return "capture" }
 func (c *publisherCaptureConn) Close() error                               { c.mu.Lock(); c.closed = true; c.mu.Unlock(); return nil }
 
@@ -70,6 +72,26 @@ func (c *publisherCaptureConn) snapshot() []interface{} {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return append([]interface{}(nil), c.frames...)
+}
+
+func (c *publisherCaptureConn) isClosed() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.closed
+}
+
+func TestEventPublisherStampsIndependentPerSessionSequences(t *testing.T) {
+	publisher := NewEventPublisher("epoch-session-chain")
+	a1 := publisher.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "a", Event: "turn_started"})
+	b1 := publisher.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "b", Event: "turn_started"})
+	a2 := publisher.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "a", Event: "turn_completed"})
+
+	if a1.Seq != 1 || b1.Seq != 2 || a2.Seq != 3 {
+		t.Fatalf("global seq mismatch: a1=%d b1=%d a2=%d", a1.Seq, b1.Seq, a2.Seq)
+	}
+	if a1.PerSessionSeq != 1 || b1.PerSessionSeq != 1 || a2.PerSessionSeq != 2 {
+		t.Fatalf("per-session seq mismatch: a1=%d b1=%d a2=%d", a1.PerSessionSeq, b1.PerSessionSeq, a2.PerSessionSeq)
+	}
 }
 
 func TestEventPublisherConcurrentPublishersShareOneOrderedIdentity(t *testing.T) {
@@ -104,6 +126,35 @@ func TestEventPublisherConcurrentPublishersShareOneOrderedIdentity(t *testing.T)
 	}
 }
 
+func TestEventPublisherEnforcesObservationScopePerAuthenticatedDevice(t *testing.T) {
+	observation := NewObservationManager()
+	observation.SetScope("dev-full", ObservationScope{
+		BackendID: "codex", SessionIDs: []string{"session-a"}, DeliveryMode: scopeFullStream,
+	})
+	observation.SetScope("dev-milestone", ObservationScope{
+		BackendID: "codex", SessionIDs: []string{"session-a"}, DeliveryMode: scopeMilestonesOnly,
+	})
+	full := newPublisherCaptureConn(nil)
+	full.device = &TrustedDeviceRecord{DeviceID: "dev-full"}
+	milestone := newPublisherCaptureConn(nil)
+	milestone.device = &TrustedDeviceRecord{DeviceID: "dev-milestone"}
+	publisher := NewEventPublisher("epoch-observation")
+	publisher.SetObservationManager(observation)
+
+	publisher.PublishLogical(LogicalEvent{
+		BackendID: "codex", SessionID: "session-a", Event: "text_delta", Targets: []Connection{full, milestone},
+	})
+	full.waitCount(t, 1)
+	time.Sleep(50 * time.Millisecond)
+	if got := len(milestone.snapshot()); got != 0 {
+		t.Fatalf("milestone device received text delta: %d", got)
+	}
+	publisher.PublishLogical(LogicalEvent{
+		BackendID: "codex", SessionID: "session-a", Event: "turn_completed", Targets: []Connection{full, milestone},
+	})
+	milestone.waitCount(t, 1)
+}
+
 func TestEventPublisherCarriesCanonicalTypedClassHint(t *testing.T) {
 	publisher := NewEventPublisher("11111111-2222-4333-8444-555555555555")
 	conn := newPublisherCaptureConn(nil)
@@ -130,6 +181,85 @@ func TestEventPublisherSlowConnectionDoesNotBlockFastConnection(t *testing.T) {
 	}
 	close(gate)
 	slow.waitCount(t, 20)
+}
+
+func TestEventPublisherLiveOverflowClosesOnlySlowConnectionAndPreservesRecovery(t *testing.T) {
+	gate := make(chan struct{})
+	slow := newPublisherCaptureConn(gate)
+	fast := newPublisherCaptureConn(nil)
+	publisher := NewEventPublisher("epoch-live-overflow")
+
+	for i := 0; i <= eventOutboundQueueCapacity; i++ {
+		publisher.PublishLogical(LogicalEvent{
+			BackendID: "codex", SessionID: "session", Event: "turn_started", Targets: []Connection{slow, fast},
+		})
+	}
+	fast.waitCount(t, eventOutboundQueueCapacity+1)
+	if !slow.isClosed() {
+		t.Fatal("frame 2049 did not fail-close the slow connection")
+	}
+	if fast.isClosed() {
+		t.Fatal("slow-peer overflow closed an unrelated fast connection")
+	}
+	if got := len(slow.snapshot()); got != 0 {
+		t.Fatalf("slow connection delivered %d frames before its blocked writer was released", got)
+	}
+
+	replay := publisher.EventBuffer().Replay("codex", "session", BridgeSessionCut{})
+	if replay.Disposition != ReplayAvailable || len(replay.Events) != eventOutboundQueueCapacity+1 {
+		t.Fatalf("reconnect replay = disposition %q events %d", replay.Disposition, len(replay.Events))
+	}
+	close(gate)
+}
+
+func TestEventPublisherRelayVirtualOverflowClosesOnlyOldGenerationAndCanRecover(t *testing.T) {
+	gate := make(chan struct{})
+	started := make(chan struct{})
+	var once sync.Once
+	writer := newRelayOutboundWriter()
+	defer writer.close()
+	relay := NewRelayDeviceConn(
+		"device", "bridge", "route", 1, nil, make([]byte, 32), nil,
+		func(json.RawMessage) error {
+			once.Do(func() { close(started) })
+			<-gate
+			return nil
+		},
+	)
+	relay.setOutboundWriter(writer)
+	fast := newPublisherCaptureConn(nil)
+	publisher := NewEventPublisher("epoch-relay-live-overflow")
+
+	publisher.PublishLogical(LogicalEvent{
+		BackendID: "codex", SessionID: "session", Event: "turn_started", Targets: []Connection{relay, fast},
+	})
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("relay virtual connection did not enter its blocked writer")
+	}
+	for i := 1; i <= eventOutboundQueueCapacity; i++ {
+		publisher.PublishLogical(LogicalEvent{
+			BackendID: "codex", SessionID: "session", Event: "turn_started", Targets: []Connection{relay, fast},
+		})
+	}
+	fast.waitCount(t, eventOutboundQueueCapacity+1)
+	if !relay.isClosed() {
+		t.Fatal("relay overflow did not close the old virtual connection generation")
+	}
+	if fast.isClosed() {
+		t.Fatal("relay virtual-connection overflow closed an unrelated direct connection")
+	}
+
+	next := NewRelayDeviceConn("device", "bridge", "route", 2, nil, make([]byte, 32), nil, func(json.RawMessage) error { return nil })
+	if next.isClosed() || next.channelGeneration() != 2 {
+		t.Fatal("replacement relay virtual connection was not independently usable")
+	}
+	replay := publisher.EventBuffer().Replay("codex", "session", BridgeSessionCut{})
+	if replay.Disposition != ReplayAvailable || len(replay.Events) != eventOutboundQueueCapacity+1 {
+		t.Fatalf("relay reconnect replay = disposition %q events %d", replay.Disposition, len(replay.Events))
+	}
+	close(gate)
 }
 
 func TestEventPublisherRecoveryAdmissionAndAtomicCompletionOrder(t *testing.T) {

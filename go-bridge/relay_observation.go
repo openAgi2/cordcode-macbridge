@@ -124,6 +124,9 @@ func (om *ObservationManager) ShouldSendEvent(deviceID, backendID, sessionID, ev
 	if !ok {
 		return IsDurableMilestone(eventType)
 	}
+	if eventType == "sessions_changed" {
+		return true
+	}
 
 	// 检查 session 过滤
 	if len(scope.SessionIDs) > 0 {
@@ -135,7 +138,7 @@ func (om *ObservationManager) ShouldSendEvent(deviceID, backendID, sessionID, ev
 			}
 		}
 		if !found {
-			return false
+			return scope.IncludeRunningSignals && IsDurableMilestone(eventType)
 		}
 	}
 

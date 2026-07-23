@@ -141,6 +141,7 @@ Event envelope:
   type: "event",
   eventId?: string,
   seq?: number,
+  perSessionSeq?: number,
   bridgeEpoch?: string,
   backendId?: string,
   sessionId?: string,
@@ -150,6 +151,9 @@ Event envelope:
   timestamp?: number
 }
 ```
+
+`seq` is process-global. `perSessionSeq` is monotonic within one `(backendId, sessionId)`
+chain and lets clients distinguish a real session gap from unrelated interleaved events.
 
 Current event names emitted by MacBridge:
 

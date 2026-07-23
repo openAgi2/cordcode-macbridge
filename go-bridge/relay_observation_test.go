@@ -34,6 +34,55 @@ func TestObservationSetAndGet(t *testing.T) {
 	}
 }
 
+func TestObservationIncludeRunningSignalsAllowsUnlistedMilestonesOnly(t *testing.T) {
+	om := NewObservationManager()
+	om.SetScope("dev_1", ObservationScope{
+		BackendID: "codex", SessionIDs: []string{"foreground"}, DeliveryMode: scopeFullStream,
+		IncludeRunningSignals: true,
+	})
+	if om.ShouldSendEvent("dev_1", "codex", "background", "text_delta") {
+		t.Fatal("background text delta must not pass foreground scope")
+	}
+	if !om.ShouldSendEvent("dev_1", "codex", "background", "turn_completed") {
+		t.Fatal("background durable milestone should pass when running signals are included")
+	}
+	if !om.ShouldSendEvent("dev_1", "codex", "", "sessions_changed") {
+		t.Fatal("session discovery push should not be filtered by session IDs")
+	}
+}
+
+func TestSetObservationScopeRPCRequiresAuthenticatedDeviceAndStoresScope(t *testing.T) {
+	h := NewHandlers()
+	defer h.Shutdown(context.Background())
+	conn := &relayBroadcastCaptureConn{device: &TrustedDeviceRecord{DeviceID: "dev-rpc"}}
+	params := json.RawMessage(`{"backendId":"codex","sessionIds":["s1"],"deliveryMode":"full_stream","includeRunningSessionSignals":true,"leaseSeconds":45}`)
+	h.handleSetObservationScope(conn, WireMessage{RequestID: "req", BackendID: "codex", Params: params})
+
+	scope := h.observation.GetScope("dev-rpc", "codex")
+	if scope == nil || len(scope.SessionIDs) != 1 || scope.SessionIDs[0] != "s1" {
+		t.Fatalf("scope not stored: %#v", scope)
+	}
+}
+
+func TestObservationCleanupWaitsForLastDeviceConnection(t *testing.T) {
+	h := NewHandlers()
+	defer h.Shutdown(context.Background())
+	first := &relayBroadcastCaptureConn{device: &TrustedDeviceRecord{DeviceID: "dev-multi"}}
+	second := &relayBroadcastCaptureConn{device: &TrustedDeviceRecord{DeviceID: "dev-multi"}}
+	h.registerConnection(first)
+	h.registerConnection(second)
+	h.observation.SetScope("dev-multi", ObservationScope{BackendID: "codex", DeliveryMode: scopeFullStream})
+
+	h.unregisterConnection(first)
+	if h.observation.GetScope("dev-multi", "codex") == nil {
+		t.Fatal("scope removed while another connection remained")
+	}
+	h.unregisterConnection(second)
+	if h.observation.GetScope("dev-multi", "codex") != nil {
+		t.Fatal("scope retained after last connection closed")
+	}
+}
+
 func TestObservationFullStreamSendsAll(t *testing.T) {
 	om := NewObservationManager()
 	om.Start(context.Background()) // T09: 显式启动 lease loop

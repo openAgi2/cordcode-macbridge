@@ -77,17 +77,18 @@ type ResultResponse struct {
 
 // EventMessage is pushed from server to client for agent events.
 type EventMessage struct {
-	Type        string      `json:"type"`
-	EventID     string      `json:"eventId"`
-	Seq         int         `json:"seq"`
-	BridgeEpoch string      `json:"bridgeEpoch"`
-	SessionID   string      `json:"sessionId"`
-	BackendID   string      `json:"backendId"`
-	Event       string      `json:"event"`
-	Data        interface{} `json:"data"`
-	Message     string      `json:"message,omitempty"`
-	Replayable  bool        `json:"replayable"`
-	Timestamp   int64       `json:"timestamp"`
+	Type          string      `json:"type"`
+	EventID       string      `json:"eventId"`
+	Seq           int         `json:"seq"`
+	PerSessionSeq int         `json:"perSessionSeq,omitempty"`
+	BridgeEpoch   string      `json:"bridgeEpoch"`
+	SessionID     string      `json:"sessionId"`
+	BackendID     string      `json:"backendId"`
+	Event         string      `json:"event"`
+	Data          interface{} `json:"data"`
+	Message       string      `json:"message,omitempty"`
+	Replayable    bool        `json:"replayable"`
+	Timestamp     int64       `json:"timestamp"`
 }
 
 // Handler-specific request/response types.

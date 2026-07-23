@@ -131,11 +131,12 @@ type BridgeV1PairedBridge struct {
 }
 
 type BridgeV1EventEnvelope struct {
-	Type        string      `json:"type"`
-	Seq         int         `json:"seq"`
-	BackendID   string      `json:"backendId,omitempty"`
-	WorkspaceID string      `json:"workspaceId,omitempty"`
-	SessionID   string      `json:"sessionId,omitempty"`
-	Event       string      `json:"event"`
-	Data        interface{} `json:"data,omitempty"`
+	Type          string      `json:"type"`
+	Seq           int         `json:"seq"`
+	PerSessionSeq int         `json:"perSessionSeq,omitempty"`
+	BackendID     string      `json:"backendId,omitempty"`
+	WorkspaceID   string      `json:"workspaceId,omitempty"`
+	SessionID     string      `json:"sessionId,omitempty"`
+	Event         string      `json:"event"`
+	Data          interface{} `json:"data,omitempty"`
 }

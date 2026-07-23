@@ -2,6 +2,7 @@
   "type": "event",
   "eventId": "epoch-001:42",
   "seq": 42,
+  "perSessionSeq": 7,
   "bridgeEpoch": "epoch-001",
   "backendId": "claude",
   "sessionId": "session-001",

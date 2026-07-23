@@ -48,6 +48,7 @@ type eventDeliveryWait struct {
 type eventOutboundSink struct {
 	conn  Connection
 	queue chan eventOutboundFrame
+	slots chan struct{}
 	stop  chan struct{}
 	once  sync.Once
 }
@@ -56,6 +57,7 @@ func newEventOutboundSink(conn Connection) *eventOutboundSink {
 	s := &eventOutboundSink{
 		conn:  conn,
 		queue: make(chan eventOutboundFrame, eventOutboundQueueCapacity),
+		slots: make(chan struct{}, eventOutboundQueueCapacity),
 		stop:  make(chan struct{}),
 	}
 	go s.run()
@@ -78,7 +80,18 @@ func (s *eventOutboundSink) run() {
 			if frame.delivered != nil {
 				close(frame.delivered)
 			}
+			<-s.slots
 		}
+	}
+}
+
+func (s *eventOutboundSink) tryEnqueue(frame eventOutboundFrame) bool {
+	select {
+	case s.slots <- struct{}{}:
+		s.queue <- frame
+		return true
+	default:
+		return false
 	}
 }
 
@@ -90,17 +103,19 @@ func (s *eventOutboundSink) close() {
 // publication. Stamping and destination enqueue happen under one lock; actual
 // connection and offline I/O run outside that critical section.
 type EventPublisher struct {
-	mu           sync.Mutex
-	bridgeEpoch  string
-	seq          int
-	broadcaster  *Broadcaster
-	sinks        map[Connection]*eventOutboundSink
-	offlineQueue chan EventMessage
-	offlineRoute func(EventMessage)
-	recoveries   map[Connection]*publisherRecovery
-	buffer       *EventBuffer
-	now          func() time.Time
-	completed    map[Connection]string
+	mu            sync.Mutex
+	bridgeEpoch   string
+	seq           int
+	perSessionSeq map[string]int
+	broadcaster   *Broadcaster
+	sinks         map[Connection]*eventOutboundSink
+	offlineQueue  chan EventMessage
+	offlineRoute  func(EventMessage)
+	recoveries    map[Connection]*publisherRecovery
+	buffer        *EventBuffer
+	now           func() time.Time
+	completed     map[Connection]string
+	observation   *ObservationManager
 }
 
 type RecoveryAdmission struct {
@@ -121,13 +136,14 @@ func NewEventPublisher(bridgeEpoch string, broadcaster ...*Broadcaster) *EventPu
 		panic("event publisher bridge epoch must not be empty")
 	}
 	p := &EventPublisher{
-		bridgeEpoch:  bridgeEpoch,
-		sinks:        make(map[Connection]*eventOutboundSink),
-		offlineQueue: make(chan EventMessage, eventOutboundQueueCapacity),
-		recoveries:   make(map[Connection]*publisherRecovery),
-		buffer:       NewEventBuffer(EventBufferConfig{}),
-		now:          time.Now,
-		completed:    make(map[Connection]string),
+		bridgeEpoch:   bridgeEpoch,
+		perSessionSeq: make(map[string]int),
+		sinks:         make(map[Connection]*eventOutboundSink),
+		offlineQueue:  make(chan EventMessage, eventOutboundQueueCapacity),
+		recoveries:    make(map[Connection]*publisherRecovery),
+		buffer:        NewEventBuffer(EventBufferConfig{}),
+		now:           time.Now,
+		completed:     make(map[Connection]string),
 	}
 	if len(broadcaster) > 0 {
 		p.broadcaster = broadcaster[0]
@@ -143,6 +159,12 @@ func (p *EventPublisher) EventBuffer() *EventBuffer { return p.buffer }
 func (p *EventPublisher) SetOfflineRoute(route func(EventMessage)) {
 	p.mu.Lock()
 	p.offlineRoute = route
+	p.mu.Unlock()
+}
+
+func (p *EventPublisher) SetObservationManager(observation *ObservationManager) {
+	p.mu.Lock()
+	p.observation = observation
 	p.mu.Unlock()
 }
 
@@ -166,7 +188,8 @@ func (p *EventPublisher) EnqueueControl(conn Connection, frame interface{}, wait
 		delivered = make(chan struct{})
 	}
 	select {
-	case sink.queue <- eventOutboundFrame{value: frame, delivered: delivered}:
+	case sink.slots <- struct{}{}:
+		sink.queue <- eventOutboundFrame{value: frame, delivered: delivered}
 		p.mu.Unlock()
 	case <-time.After(bridgeWriteTimeout):
 		p.mu.Unlock()
@@ -253,14 +276,16 @@ func (p *EventPublisher) CompleteRecovery(conn Connection, recoveryID string, ap
 		}
 	}
 	required := 1 + len(pending)
-	if cap(sink.queue)-len(sink.queue) < required {
+	if cap(sink.slots)-len(sink.slots) < required {
 		delete(p.recoveries, conn)
 		p.mu.Unlock()
 		_ = conn.Close()
 		return fmt.Errorf("outbound queue cannot accept recovery batch")
 	}
+	sink.slots <- struct{}{}
 	sink.queue <- eventOutboundFrame{value: map[string]interface{}{"type": "recovery_complete", "recoveryId": recoveryID}, classHint: relayOutboundControl, classified: true}
 	for _, msg := range pending {
+		sink.slots <- struct{}{}
 		sink.queue <- eventOutboundFrame{value: msg, classHint: classifyRelayEvent(msg.Event), classified: true}
 	}
 	delete(p.recoveries, conn)
@@ -321,18 +346,25 @@ func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
 	}
 	p.seq++
 	seq := p.seq
+	perSessionSeq := 0
+	if logical.BackendID != "" && logical.SessionID != "" {
+		key := logical.BackendID + "\x00" + logical.SessionID
+		p.perSessionSeq[key]++
+		perSessionSeq = p.perSessionSeq[key]
+	}
 	msg := EventMessage{
-		Type:        "event",
-		EventID:     fmt.Sprintf("%s:%d", p.bridgeEpoch, seq),
-		Seq:         seq,
-		BridgeEpoch: p.bridgeEpoch,
-		SessionID:   logical.SessionID,
-		BackendID:   logical.BackendID,
-		Event:       logical.Event,
-		Data:        logical.Data,
-		Message:     logical.Message,
-		Replayable:  isReplayableEvent(logical.Event),
-		Timestamp:   time.Now().UTC().UnixMilli(),
+		Type:          "event",
+		EventID:       fmt.Sprintf("%s:%d", p.bridgeEpoch, seq),
+		Seq:           seq,
+		PerSessionSeq: perSessionSeq,
+		BridgeEpoch:   p.bridgeEpoch,
+		SessionID:     logical.SessionID,
+		BackendID:     logical.BackendID,
+		Event:         logical.Event,
+		Data:          logical.Data,
+		Message:       logical.Message,
+		Replayable:    isReplayableEvent(logical.Event),
+		Timestamp:     time.Now().UTC().UnixMilli(),
 	}
 	p.buffer.Append(msg)
 
@@ -358,6 +390,12 @@ func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
 	overflowed := make([]Connection, 0)
 	waits := make([]eventDeliveryWait, 0, len(waitTargets))
 	for conn := range targets {
+		if p.observation != nil {
+			if device := conn.AuthedDevice(); device != nil &&
+				!p.observation.ShouldSendEvent(device.DeviceID, logical.BackendID, logical.SessionID, logical.Event) {
+				continue
+			}
+		}
 		if recovery := p.recoveries[conn]; recovery != nil {
 			encoded, _ := json.Marshal(msg)
 			if p.now().Sub(recovery.startedAt) >= recoveryPendingTimeout || len(recovery.pending)+1 > recoveryPendingMaxEvents || recovery.pendingBytes+len(encoded) > recoveryPendingMaxBytes {
@@ -375,9 +413,7 @@ func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
 			delivered = make(chan struct{})
 			waits = append(waits, eventDeliveryWait{conn: conn, delivered: delivered})
 		}
-		select {
-		case sink.queue <- eventOutboundFrame{value: msg, delivered: delivered, classHint: logical.ClassHint, classified: true}:
-		default:
+		if !sink.tryEnqueue(eventOutboundFrame{value: msg, delivered: delivered, classHint: logical.ClassHint, classified: true}) {
 			overflowed = append(overflowed, conn)
 		}
 	}
