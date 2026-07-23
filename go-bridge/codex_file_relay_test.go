@@ -108,8 +108,8 @@ func codexFileRelayIsRunning(t *testing.T, h *Handlers, sessionID string) bool {
 	return h.relayRunning[codexSessionFileRelayKey(sessionID)]
 }
 
-// waitCodexFileRelayStopped 模拟 iOS 离开（UnsubscribeAll 该 serverConn），再等 relay 因
-// 无订阅者而在 idle TTL 后退出。subscriber-aware 退出是 push 模型的关键（见 codexSessionFileRelayLoop）。
+// waitCodexFileRelayStopped 模拟 iOS 离开（UnsubscribeAll 该 serverConn），再等 relay 在无订阅者时
+// 于 hardCap 后退出（Layer 1 后不再在软 TTL 退出）。hardCap 回收是防 goroutine 泄漏的兜底。
 func waitCodexFileRelayStopped(t *testing.T, h *Handlers, sessionID string, serverConn *Conn) {
 	t.Helper()
 	if serverConn != nil {
@@ -179,8 +179,8 @@ func TestCodexFileRelayTaskCompleteContinuesWatchingNextTurn(t *testing.T) {
 	waitCodexFileRelayStopped(t, handlers, sessionID, serverConn)
 }
 
-// TestCodexFileRelayNoGrowthTTLExitsWhenIdle 验证无增长 TTL：idle 后无增长，
-// 复核为 idle → 退出（不泄漏 goroutine；Codex 无 PID，靠时间启发式）。
+// TestCodexFileRelayNoGrowthTTLExitsWhenIdle 验证无增长回收：idle 后无增长，软 TTL 复核为 idle 不再
+// 退出（见 TestCodexFileRelayKeepsWatchingPastTTLWithoutSubscriber），守到 hardCap 才回收 goroutine。
 func TestCodexFileRelayNoGrowthTTLExitsWhenIdle(t *testing.T) {
 	const sessionID = "ttl-exit-idle"
 	handlers, _, client, serverConn := startCodexFileRelayFixture(t, sessionID,
@@ -188,7 +188,7 @@ func TestCodexFileRelayNoGrowthTTLExitsWhenIdle(t *testing.T) {
 		codexRolloutEvent("task_complete"),
 	)
 	_ = readEventNames(t, client, 2) // idle startup 广播
-	// 无增长：软 TTL 复核为 idle → 退出。
+	// 无增长：软 TTL 复核为 idle → 不退出，守到 hardCap 回收。
 	waitCodexFileRelayStopped(t, handlers, sessionID, serverConn)
 }
 
@@ -232,6 +232,36 @@ func TestCodexFileRelayKeepsWatchingWhileSubscribed(t *testing.T) {
 		t.Fatal("codex file relay exited while session still subscribed (should keep watching for external turns)")
 	}
 
-	// iOS 离开（UnsubscribeAll）→ relay 应在 idle TTL 内退出。
+	// iOS 离开（UnsubscribeAll）→ relay 在 hardCap 内退出（不再在软 TTL 退出）。
 	waitCodexFileRelayStopped(t, handlers, sessionID, serverConn)
+}
+
+// TestCodexFileRelayKeepsWatchingPastTTLWithoutSubscriber 验证 Layer 1 修复：iOS 打开一个
+// idle 外部 session 后常停止轮询（无订阅者），relay 不再因「无订阅者 + 软 TTL」退出，持续守到
+// hardCap，从而能在 Mac 端稍后发 turn 时捕获并投递（owner 复现：打开 idle session → relay 90s
+// 退出 → 后来发任务 → 无 live 同步）。
+func TestCodexFileRelayKeepsWatchingPastTTLWithoutSubscriber(t *testing.T) {
+	const sessionID = "no-sub-keep-watch"
+	handlers, agent, client, serverConn := startCodexFileRelayFixture(t, sessionID,
+		codexRolloutEvent("task_started"),
+		codexRolloutEvent("task_complete"),
+	)
+	_ = readEventNames(t, client, 2) // idle startup: turn_completed + idle
+
+	// iOS 停止轮询（无订阅者）。
+	handlers.broadcaster.UnsubscribeAll(serverConn)
+
+	// 远超软 TTL（80ms）但远未到 hardCap（1s）：relay 必须仍在 watch（不再因无订阅者 TTL 退出）。
+	time.Sleep(300 * time.Millisecond)
+	if !codexFileRelayIsRunning(t, handlers, sessionID) {
+		t.Fatal("codex file relay exited at soft-TTL without subscriber (should keep watching until hardCap for later external turns)")
+	}
+
+	// Mac 端稍后发 turn + iOS 重新关注（重新订阅）→ relay 必须捕获并投递 turn_started。
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "codex", SessionID: sessionID})
+	appendCodexRollout(t, agent.transcriptPath, codexRolloutEvent("task_started"))
+	events := readEventNames(t, client, 2) // turn_started + session_state_changed(running)
+	if events[0] != "turn_started" {
+		t.Fatalf("events after late task_started = %v, want turn_started (relay must catch a later external turn)", events)
+	}
 }

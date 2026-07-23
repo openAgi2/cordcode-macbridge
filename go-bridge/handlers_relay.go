@@ -278,10 +278,10 @@ func (h *Handlers) codexSessionFileRelayLoop(sessionID string, conn Connection, 
 				recheckedAfterTTL = false
 				continue
 			}
-			// push 模型：iOS 仍订阅该 session（连接打开）时持续 watch，等 Mac 端外部 turn——
-			// 不因 idle TTL 退出。Phase 2 让 iOS 不再轮询后，relay 若在 idle TTL 退出，会在
-			// 外部 turn 到来前退出而错过整轮（owner 复现：relay 在 turn 前数十秒 TTL 退出）。
-			// 仅 iOS 不再订阅（断开/切走）时才用 idle TTL + running 复核 + hardCap 回收 goroutine。
+			// iOS 仍订阅该 session 时持续 watch（push 模型）。无订阅者时也不再因软 TTL 退出：iOS 打开
+			// idle 外部 session 后常停轮询，若 relay 在 Mac 端稍后发 turn 前退出会错过整轮（owner
+			// 复现：打开 idle session → relay 90s 退出 → 后来发任务 → 无 live 同步）。subscriber 现仅
+			// 作日志，不再当退出门槛；只用 hardCap 回收 goroutine，running 复核保留。
 			if h.codexSessionHasSubscriber(sessionID, backendID) {
 				continue
 			}
@@ -296,7 +296,7 @@ func (h *Handlers) codexSessionFileRelayLoop(sessionID string, conn Connection, 
 					if h.detectCodexTranscriptTaskState(sessPath) == "running" {
 						slog.Info("go-bridge: codexSessionFileRelay no-growth TTL elapsed but task still running; keep watching", "sessionID", sessionID, "idleFor", since.String())
 					} else {
-						shouldExit = true
+						slog.Info("go-bridge: codexSessionFileRelay no-growth TTL elapsed, idle — keep watching until hardCap (no-subscriber no longer exits)", "sessionID", sessionID, "idleFor", since.String(), "subscribed", h.codexSessionHasSubscriber(sessionID, backendID))
 					}
 				}
 			}
@@ -304,7 +304,7 @@ func (h *Handlers) codexSessionFileRelayLoop(sessionID string, conn Connection, 
 				if !h.sessions.isIdle(sessionID) {
 					h.broadcastIdleState(sessionID, backendID)
 				}
-				slog.Info("go-bridge: codexSessionFileRelay no-growth TTL elapsed, exiting", "sessionID", sessionID, "idleFor", since.String())
+				slog.Info("go-bridge: codexSessionFileRelay no-growth hardCap elapsed, exiting", "sessionID", sessionID, "idleFor", since.String(), "subscribed", h.codexSessionHasSubscriber(sessionID, backendID))
 				return
 			}
 			continue
