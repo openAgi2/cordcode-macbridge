@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
@@ -37,21 +38,31 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 	// Subscribe so the conn receives subsequent projection_patch push frames (WP5 emission).
 	h.subscribeConnToSession(conn, msg, params.SessionID)
 
-	// Cold hydrate is best-effort and MUST NOT block the RPC (owner 2026-07-25:
-	// awaiting a hung hydrate left iOS stuck before get_session_messages → all sessions blank).
-	// Hydrate asynchronously; this response may still be empty head-0, and iOS always
-	// loads history in parallel. A later pull/push will see the hydrated state.
+	// Design §5.3 / §6.3: cold start hydrates disk → reducer, *then* serves pull when
+	// possible. Hard-cap wait so a hung scan cannot block the RPC forever (owner
+	// 2026-07-25 blank-session: unbounded await starved session open). On timeout the
+	// hydrate goroutine continues filling the reducer; a later pull/push sees head.
+	const coldHydrateWait = 750 * time.Millisecond
 	if msg.BackendID == "codex" {
 		if head := h.eventPublisher.ProjectionHeadRev(msg.BackendID, params.SessionID); head == 0 {
 			sid := params.SessionID
 			backendID := msg.BackendID
+			done := make(chan int, 1)
 			go func() {
-				n := h.hydrateCodexProjectionFromDisk(backendID, sid)
-				slog.Info("go-bridge: get_session_projection cold-hydrate async",
+				done <- h.hydrateCodexProjectionFromDisk(backendID, sid)
+			}()
+			select {
+			case n := <-done:
+				slog.Info("go-bridge: get_session_projection cold-hydrate",
 					"sessionID", sid, "events", n,
 					"headRev", h.eventPublisher.ProjectionHeadRev(backendID, sid),
+					"waited", true,
 				)
-			}()
+			case <-time.After(coldHydrateWait):
+				slog.Warn("go-bridge: get_session_projection cold-hydrate timeout; serving current head",
+					"sessionID", sid, "timeout", coldHydrateWait.String(),
+				)
+			}
 		}
 	}
 

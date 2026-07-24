@@ -420,6 +420,13 @@ func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID strin
 		if !p.syncV2[conn] {
 			continue
 		}
+		// Design §6.5: projection push reuses observation filter (same as raw path).
+		if p.observation != nil {
+			if device := conn.AuthedDevice(); device != nil &&
+				!p.observation.ShouldSendEvent(device.DeviceID, backendID, sessionID, "projection_patch") {
+				continue
+			}
+		}
 		sink := p.sinkLocked(conn)
 		if sink == nil {
 			continue
@@ -571,12 +578,14 @@ func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
 	// Session Projection Stream (session_sync_v2): flush + deliver a projection_patch to the
 	// session's v2 observers. The reducer state was already advanced by Apply above; this is the
 	// single outbound projection path, reusing broadcaster targets + sinks (design §6.2 — no
-	// parallel pipe). Phase 1 flushes per-event (proves reduce+delivery correctness); the 80ms
-	// time-coalesce ticker is a Phase 2 bandwidth optimization (design §2.3). Raw events above
-	// still reach legacy conns unchanged; v2 clients ignore raw content (design §9.3).
+	// parallel pipe). Offline hydrate applies into the reducer but must NOT fan out mid-scan
+	// patches (design §5.3 cold hydrate). Phase 1 flushes per-event for live correctness;
+	// timed coalesce remains an optional bandwidth optimization (design §2.3 / §10 item 3).
 	if p.projection != nil && logical.BackendID != "" && logical.SessionID != "" {
 		if patch, ok := p.projection.FlushPatch(logical.BackendID, logical.SessionID); ok {
-			p.deliverProjectionPatchLocked(logical.BackendID, logical.SessionID, patch)
+			if !logical.Offline {
+				p.deliverProjectionPatchLocked(logical.BackendID, logical.SessionID, patch)
+			}
 		}
 	}
 
