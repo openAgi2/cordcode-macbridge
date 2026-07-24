@@ -198,6 +198,63 @@ func (h *Handlers) publishEvent(logical LogicalEvent) EventMessage {
 func (h *Handlers) registerConnection(conn Connection) {
 	h.broadcaster.RegisterConn(conn)
 	h.eventPublisher.RegisterConnection(conn)
+	// Live-frame buffer: replay frames stored while this device had zero targets.
+	h.eventPublisher.FlushLiveFrameBufferForDevice(conn)
+}
+
+// replaceConnection atomically swaps an authenticated device connection during
+// online re-handshake. Subscriptions move to the new Connection; observation
+// scope is device-scoped and is intentionally NOT cleared. Clearing scope here
+// is what turned full_stream reconnect windows into milestones_only (only
+// durable events) until the next iOS set_observation_scope lease renew (~30s).
+func (h *Handlers) replaceConnection(old, new Connection) {
+	if new == nil {
+		return
+	}
+	if old == nil {
+		h.registerConnection(new)
+		// Even on first register after a hard disconnect window, re-bind
+		// observation-scoped sessions so live has targets before the next
+		// set_observation_scope / get_session_messages round-trip.
+		h.resubscribeObservationSessions(new)
+		return
+	}
+	h.eventPublisher.UnregisterConnection(old)
+	h.broadcaster.TransferSubscriptions(old, new)
+	h.eventPublisher.RegisterConnection(new)
+	// Observation is device-scoped and may outlive the connection; session
+	// subscriptions are connection-scoped and can be empty after a true
+	// disconnect. Re-bind from observation so mid-turn live is not stuck at
+	// candidateTargets=0 until iOS happens to RPC again.
+	h.resubscribeObservationSessions(new)
+	h.eventPublisher.FlushLiveFrameBufferForDevice(new)
+}
+
+// resubscribeObservationSessions re-attaches broadcaster session keys for every
+// backend/session still listed in the device's observation scope.
+func (h *Handlers) resubscribeObservationSessions(conn Connection) {
+	if conn == nil || h.observation == nil {
+		return
+	}
+	device := conn.AuthedDevice()
+	if device == nil {
+		return
+	}
+	for _, backendID := range []string{"codex", "claudecode", "opencode", "grokbuild", "claude"} {
+		scope := h.observation.GetScope(device.DeviceID, backendID)
+		if scope == nil {
+			continue
+		}
+		for _, sid := range scope.SessionIDs {
+			if sid == "" {
+				continue
+			}
+			h.broadcaster.Subscribe(conn, SubscriptionKey{
+				BackendID: backendID,
+				SessionID: sid,
+			})
+		}
+	}
 }
 
 func (h *Handlers) unregisterConnection(conn Connection) {
@@ -701,6 +758,38 @@ func (h *Handlers) handleSetObservationScope(conn Connection, msg WireMessage) {
 		IncludeRunningSignals: req.IncludeRunningSignals,
 		LeaseSeconds:          req.LeaseSeconds,
 	})
+	// Track interest for live-frame buffer (survives soft prune RemoveDevice).
+	// Also Subscribe the *current* connection to each observed session: live
+	// delivery uses broadcaster.Targets (session subscription), not observation
+	// alone. After a true disconnect, UnsubscribeAll wiped keys; reconnect only
+	// called set_observation_scope → candidateTargets=0 until the next
+	// get_session_messages (owner 2026-07-24: Mac turn_started + zero online
+	// while iOS had the session open).
+	if h.eventPublisher != nil {
+		for _, sid := range req.SessionIDs {
+			h.eventPublisher.NoteLiveInterest(device.DeviceID, req.BackendID, sid)
+		}
+	}
+	for _, sid := range req.SessionIDs {
+		if sid == "" {
+			continue
+		}
+		h.broadcaster.Subscribe(conn, SubscriptionKey{
+			BackendID: req.BackendID,
+			SessionID: sid,
+		})
+	}
+	// INFO so flapping/delivery-gap forensics can see mode without Debug log level.
+	slog.Info("go-bridge: set_observation_scope applied",
+		"deviceID", safeID(device.DeviceID),
+		"backendID", req.BackendID,
+		"mode", req.DeliveryMode,
+		"sessions", len(req.SessionIDs),
+		"includeRunning", req.IncludeRunningSignals,
+		"leaseSeconds", req.LeaseSeconds,
+	)
+	// After full_stream re-assert (post-reconnect), flush buffered live frames.
+	h.eventPublisher.FlushLiveFrameBufferForDevice(conn)
 	conn.SendResult(msg.RequestID, &ResultResponse{Ok: true}, nil)
 }
 

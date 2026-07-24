@@ -462,6 +462,38 @@ func (b *Broadcaster) UnsubscribeAll(conn Connection) {
 	delete(b.allConns, conn)
 }
 
+// TransferSubscriptions moves every session subscription from old → new under one lock.
+// Used when a Relay device re-handshakes: the new Connection must inherit the old
+// session interest immediately so live text/reasoning deltas keep a target.
+// Observation scope is device-scoped (not connection-scoped) and is left alone.
+func (b *Broadcaster) TransferSubscriptions(old, new Connection) {
+	if old == nil || new == nil || old == new {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	keys := b.connSubs[old]
+	if len(keys) == 0 {
+		delete(b.allConns, old)
+		b.allConns[new] = struct{}{}
+		return
+	}
+	if b.connSubs[new] == nil {
+		b.connSubs[new] = make(map[SubscriptionKey]struct{})
+	}
+	for key := range keys {
+		if b.subscribers[key] == nil {
+			b.subscribers[key] = make(map[Connection]struct{})
+		}
+		delete(b.subscribers[key], old)
+		b.subscribers[key][new] = struct{}{}
+		b.connSubs[new][key] = struct{}{}
+	}
+	delete(b.connSubs, old)
+	delete(b.allConns, old)
+	b.allConns[new] = struct{}{}
+}
+
 func (b *Broadcaster) ActiveDeviceIDs() []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -554,6 +586,11 @@ func (b *Broadcaster) Targets(backendID, sessionID, directory string) []Connecti
 	b.mu.Unlock()
 	result := make([]Connection, 0, len(targets))
 	for conn := range targets {
+		// Never deliver live frames to a replaced/closed relay connection — they
+		// would only produce "drop outbound on closed" and starve the new generation.
+		if closed, ok := conn.(interface{ isClosed() bool }); ok && closed.isClosed() {
+			continue
+		}
 		result = append(result, conn)
 	}
 	return result

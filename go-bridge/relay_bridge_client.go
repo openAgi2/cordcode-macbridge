@@ -354,6 +354,8 @@ func (c *RelayBridgeClient) heartbeatLoop(done <-chan struct{}, period, deadAfte
 
 // sendDeviceHeartbeats 给每个活跃 device 发心跳，并清理长期无活动的死连接。
 // 先快照 devices map 再释放锁，避免发送/关闭（IO）期间持锁。
+// liveness = device→Mac inbound only (touchLastActivity). Mac type:ping does not
+// refresh lastActivity; iOS must reply type:pong (Phase E) or prune opens zero-target.
 func (c *RelayBridgeClient) sendDeviceHeartbeats(deadAfter time.Duration) {
 	c.mu.Lock()
 	snapshot := make([]*RelayDeviceConn, 0, len(c.devices))
@@ -393,8 +395,12 @@ func (c *RelayBridgeClient) pruneDeadDevice(rc *RelayDeviceConn, idle time.Durat
 	// 场景4：同步从 registry 注销，避免 revoke 时对已关闭连接发事件。
 	globalDeviceConnRegistry.Unregister(rc.deviceID, rc)
 	rc.Close()
-	slog.Info("relay-bridge-client: pruned inactive device connection",
-		"deviceID", safeID(rc.deviceID), "idle", idle)
+	slog.Warn("relay-bridge-client: pruned inactive device connection",
+		"deviceID", safeID(rc.deviceID),
+		"idle", idle.String(),
+		"deadAfter", relayDeviceDeadAfter.String(),
+		"hint", "device→Mac silence; iOS must pong Mac type:ping to refresh lastActivity",
+	)
 }
 
 // handleClientHello 处理来自 iOS 设备的在线握手请求。
@@ -517,19 +523,28 @@ func (c *RelayBridgeClient) handleClientHello(hello OnlineClientHello) {
 	}
 
 	c.mu.Lock()
-	if stale := c.devices[deviceID]; stale != nil {
-		if c.handlers != nil {
-			c.handlers.unregisterConnection(stale)
-		}
-		// 旧连接也需从 registry 注销，避免 revoke 时对一个已关闭的连接发事件。
-		globalDeviceConnRegistry.Unregister(deviceID, stale)
-		_ = stale.Close()
-	}
+	stale := c.devices[deviceID]
 	c.devices[deviceID] = rc
 	c.mu.Unlock()
 
-	// 注册到 Broadcaster
-	c.handlers.registerConnection(rc)
+	// Re-handshake: transfer session subscriptions and KEEP observation scope.
+	// Do not unregisterConnection(stale) first — that RemoveDevice wipes full_stream
+	// and drops live text/reasoning until the next set_observation_scope (~30s).
+	if stale != nil {
+		idle := time.Since(stale.lastActivityAt())
+		slog.Info("relay-bridge-client: replacing device connection",
+			"deviceID", safeID(deviceID),
+			"generation", hello.ChannelGeneration,
+			"staleIdle", idle,
+		)
+		if c.handlers != nil {
+			c.handlers.replaceConnection(stale, rc)
+		}
+		globalDeviceConnRegistry.Unregister(deviceID, stale)
+		_ = stale.Close()
+	} else if c.handlers != nil {
+		c.handlers.registerConnection(rc)
+	}
 
 	// 场景4 修复：relay 连接也注册到 DeviceConnRegistry，使 Mac 撤销授权时
 	// 能向 relay 连接下发 device_revoked 事件并断开（此前仅 direct 路径注册）。
@@ -541,6 +556,7 @@ func (c *RelayBridgeClient) handleClientHello(hello OnlineClientHello) {
 	slog.Info("relay-bridge-client: device authenticated and registered",
 		"deviceID", safeID(deviceID),
 		"generation", hello.ChannelGeneration,
+		"replaced", stale != nil,
 	)
 }
 

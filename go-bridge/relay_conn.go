@@ -221,6 +221,12 @@ func (rc *RelayDeviceConn) sendJSON(v any, classHint *relayOutboundClass) {
 	closed := rc.closed
 	rc.mu.Unlock()
 	if closed {
+		// Visible signal for flapping windows: publisher still targets a
+		// Connection pointer that has already been replaced/closed.
+		slog.Warn("relay-conn: drop outbound on closed connection",
+			"device", safeID(rc.deviceID),
+			"payloadBytes", len(plaintext),
+		)
 		return
 	}
 	class := classifyRelayPayload(plaintext)
@@ -498,9 +504,16 @@ func (rc *RelayDeviceConn) RemoteAddr() string {
 // Close 关闭 relay connection，擦除密钥材料。
 func (rc *RelayDeviceConn) Close() error {
 	rc.mu.Lock()
+	already := rc.closed
 	scheduler := rc.inboundScheduler
 	rc.inboundScheduler = nil
 	rc.closed = true
+	if !already {
+		slog.Info("relay-conn: closing device connection",
+			"device", safeID(rc.deviceID),
+			"generation", rc.generation,
+		)
+	}
 	rc.writer = nil
 	clear(rc.requestClasses)
 	for _, handle := range rc.activeBulkHandles {

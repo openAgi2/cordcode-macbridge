@@ -918,11 +918,36 @@ type codexResponseItemPayload struct {
 	Role    string                 `json:"role"`
 	Content []codexResponseContent `json:"content"` // message
 	Summary []codexResponseSummary `json:"summary"` // reasoning
-	// custom_tool_call / custom_tool_call_output（exec-unified：name 恒 "exec"，真实操作在 input JS 串里）。
-	Name   string                 `json:"name"`
-	CallID string                 `json:"call_id"`
-	Input  string                 `json:"input"`
-	Output []codexResponseContent `json:"output"`
+	// Tool lifecycle (custom_tool_call / function_call / local_shell_call / mcp_call / …).
+	// custom_tool_call: name often "exec", real op buried in input JS string.
+	// function_call: name e.g. "exec_command", args in arguments JSON string.
+	Name      string          `json:"name"`
+	CallID    string          `json:"call_id"`
+	Input     string          `json:"input"`
+	Arguments string          `json:"arguments"`
+	// output is a string for function_call_output / local_shell_call_output, or a
+	// content[] array for custom_tool_call_output — parse via extractCodexToolOutput.
+	Output json.RawMessage `json:"output"`
+}
+
+// extractCodexToolOutput accepts either a JSON string or a content[] array.
+func extractCodexToolOutput(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var asString string
+	if err := json.Unmarshal(raw, &asString); err == nil {
+		return asString
+	}
+	var asBlocks []codexResponseContent
+	if err := json.Unmarshal(raw, &asBlocks); err == nil {
+		var sb strings.Builder
+		for _, b := range asBlocks {
+			sb.WriteString(b.Text)
+		}
+		return sb.String()
+	}
+	return strings.TrimSpace(string(raw))
 }
 
 type codexResponseContent struct {
@@ -1057,11 +1082,51 @@ func scanCodexTranscriptRelayEvents(sessPath string, offset int64) []codexRelayE
 				// exec-unified：name 恒 "exec"，真实操作埋在 input JS 串里（非结构化字段）。
 				out = append(out, codexRelayEvent{kind: "tool_started", toolName: p.Name, toolInput: p.Input, itemId: p.CallID})
 			case "custom_tool_call_output":
-				var sb strings.Builder
-				for _, b := range p.Output {
-					sb.WriteString(b.Text)
+				out = append(out, codexRelayEvent{
+					kind:       "tool_finished",
+					itemId:     p.CallID,
+					toolResult: extractCodexToolOutput(p.Output),
+				})
+			// Native Codex tool shapes (session 019f8dd1 / 2026-07: function_call dominates).
+			// Previously only custom_tool_* was mapped → live tool_* EMIT=0 for those turns.
+			case "function_call":
+				input := p.Arguments
+				if input == "" {
+					input = p.Input
 				}
-				out = append(out, codexRelayEvent{kind: "tool_finished", itemId: p.CallID, toolResult: sb.String()})
+				out = append(out, codexRelayEvent{
+					kind:     "tool_started",
+					toolName: p.Name,
+					toolInput: input,
+					itemId:   p.CallID,
+				})
+			case "function_call_output":
+				out = append(out, codexRelayEvent{
+					kind:       "tool_finished",
+					itemId:     p.CallID,
+					toolResult: extractCodexToolOutput(p.Output),
+				})
+			case "local_shell_call", "mcp_call", "web_search_call":
+				input := p.Arguments
+				if input == "" {
+					input = p.Input
+				}
+				name := p.Name
+				if name == "" {
+					name = p.Type
+				}
+				out = append(out, codexRelayEvent{
+					kind:      "tool_started",
+					toolName:  name,
+					toolInput: input,
+					itemId:    p.CallID,
+				})
+			case "local_shell_call_output", "mcp_call_output", "web_search_call_output":
+				out = append(out, codexRelayEvent{
+					kind:       "tool_finished",
+					itemId:     p.CallID,
+					toolResult: extractCodexToolOutput(p.Output),
+				})
 			}
 		}
 	}

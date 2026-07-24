@@ -68,8 +68,29 @@ func (s *eventOutboundSink) run() {
 	for {
 		select {
 		case <-s.stop:
-			return
+			// Drain without I/O so queued frames never hit a replaced/closed conn.
+			for {
+				select {
+				case frame := <-s.queue:
+					if frame.delivered != nil {
+						close(frame.delivered)
+					}
+					select {
+					case <-s.slots:
+					default:
+					}
+				default:
+					return
+				}
+			}
 		case frame := <-s.queue:
+			if closed, ok := s.conn.(interface{ isClosed() bool }); ok && closed.isClosed() {
+				if frame.delivered != nil {
+					close(frame.delivered)
+				}
+				<-s.slots
+				continue
+			}
 			if sender, ok := s.conn.(interface {
 				SendJSONClassified(any, relayOutboundClass)
 			}); ok && frame.classified {
@@ -86,10 +107,23 @@ func (s *eventOutboundSink) run() {
 }
 
 func (s *eventOutboundSink) tryEnqueue(frame eventOutboundFrame) bool {
+	if closed, ok := s.conn.(interface{ isClosed() bool }); ok && closed.isClosed() {
+		return false
+	}
+	select {
+	case <-s.stop:
+		return false
+	default:
+	}
 	select {
 	case s.slots <- struct{}{}:
-		s.queue <- frame
-		return true
+		select {
+		case s.queue <- frame:
+			return true
+		case <-s.stop:
+			<-s.slots
+			return false
+		}
 	default:
 		return false
 	}
@@ -113,6 +147,7 @@ type EventPublisher struct {
 	offlineRoute  func(EventMessage)
 	recoveries    map[Connection]*publisherRecovery
 	buffer        *EventBuffer
+	liveBuffer    *LiveFrameBuffer
 	now           func() time.Time
 	completed     map[Connection]string
 	observation   *ObservationManager
@@ -142,6 +177,7 @@ func NewEventPublisher(bridgeEpoch string, broadcaster ...*Broadcaster) *EventPu
 		offlineQueue:  make(chan EventMessage, eventOutboundQueueCapacity),
 		recoveries:    make(map[Connection]*publisherRecovery),
 		buffer:        NewEventBuffer(EventBufferConfig{}),
+		liveBuffer:    NewLiveFrameBuffer(),
 		now:           time.Now,
 		completed:     make(map[Connection]string),
 	}
@@ -389,10 +425,13 @@ func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
 
 	overflowed := make([]Connection, 0)
 	waits := make([]eventDeliveryWait, 0, len(waitTargets))
+	enqueued := 0
+	observationFiltered := 0
 	for conn := range targets {
 		if p.observation != nil {
 			if device := conn.AuthedDevice(); device != nil &&
 				!p.observation.ShouldSendEvent(device.DeviceID, logical.BackendID, logical.SessionID, logical.Event) {
+				observationFiltered++
 				continue
 			}
 		}
@@ -405,6 +444,7 @@ func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
 			}
 			recovery.pending = append(recovery.pending, msg)
 			recovery.pendingBytes += len(encoded)
+			enqueued++
 			continue
 		}
 		sink := p.sinkLocked(conn)
@@ -415,8 +455,45 @@ func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
 		}
 		if !sink.tryEnqueue(eventOutboundFrame{value: msg, delivered: delivered, classHint: logical.ClassHint, classified: true}) {
 			overflowed = append(overflowed, conn)
+		} else {
+			enqueued++
+			if p.liveBuffer != nil {
+				if d := conn.AuthedDevice(); d != nil && logical.BackendID != "" && logical.SessionID != "" {
+					p.liveBuffer.NoteInterest(d.DeviceID, logical.BackendID, logical.SessionID)
+				}
+			}
 		}
 	}
+
+	// Visibility for "Mac EMIT + iOS no EVT-RECV": zero live targets after
+	// observation filter means the frame will not reach any online device.
+	// Buffer live frames for interested degraded devices so reconnect can flush
+	// instead of permanent jump via history bulk (live-frame-buffer design).
+	if enqueued == 0 && len(overflowed) == 0 && !logical.Offline {
+		switch logical.Event {
+		case "text_delta", "reasoning_delta", "turn_started", "tool_started", "tool_finished":
+			slog.Warn("event-publisher: live event has zero online targets",
+				"event", logical.Event,
+				"backendID", logical.BackendID,
+				"sessionID", logical.SessionID,
+				"candidateTargets", len(targets),
+				"observationFiltered", observationFiltered,
+			)
+		}
+		if p.liveBuffer != nil && isLiveBufferableEvent(logical.Event) {
+			missed := p.degradedDeviceIDsLocked(logical, targets)
+			if len(missed) > 0 {
+				p.liveBuffer.Append(missed, msg)
+				slog.Debug("live-frame-buffer append",
+					"event", logical.Event,
+					"sessionID", logical.SessionID,
+					"devices", len(missed),
+					"perSessionSeq", msg.PerSessionSeq,
+				)
+			}
+		}
+	}
+
 	if logical.Offline {
 		select {
 		case p.offlineQueue <- msg:
@@ -504,3 +581,120 @@ func isReplayableEvent(eventName string) bool {
 		return true
 	}
 }
+
+// degradedDeviceIDsLocked returns device IDs that should receive this session's
+// live events but are not among current online targets.
+// Caller must hold p.mu.
+func (p *EventPublisher) degradedDeviceIDsLocked(logical LogicalEvent, targets map[Connection]struct{}) []string {
+	if logical.BackendID == "" || logical.SessionID == "" {
+		return nil
+	}
+	online := make(map[string]struct{})
+	for conn := range targets {
+		if conn == nil {
+			continue
+		}
+		if d := conn.AuthedDevice(); d != nil {
+			online[d.DeviceID] = struct{}{}
+		}
+	}
+	// Candidate set: observation devices ∪ live-buffer interest for this session.
+	// Interest survives soft prune RemoveDevice so zero-target EMITs still buffer.
+	cand := make(map[string]struct{})
+	if p.observation != nil {
+		for _, id := range p.observation.DeviceIDs() {
+			cand[id] = struct{}{}
+		}
+	}
+	if p.liveBuffer != nil {
+		for _, id := range p.liveBuffer.InterestedDevices(logical.BackendID, logical.SessionID) {
+			cand[id] = struct{}{}
+		}
+	}
+	var missed []string
+	for deviceID := range cand {
+		if _, ok := online[deviceID]; ok {
+			continue
+		}
+		// Prefer observation gate when present; otherwise trust prior interest.
+		if p.observation != nil {
+			if scope := p.observation.GetScope(deviceID, logical.BackendID); scope != nil {
+				interested := len(scope.SessionIDs) == 0
+				for _, sid := range scope.SessionIDs {
+					if sid == logical.SessionID || sid == "*" {
+						interested = true
+						break
+					}
+				}
+				if !interested {
+					continue
+				}
+				if scope.DeliveryMode == scopeFullStream || isLiveControlPlaneEvent(logical.Event) || isLiveBufferableEvent(logical.Event) {
+					// full_stream (or soft-expired) devices get all bufferable live frames
+					if scope.DeliveryMode == scopeFullStream || isLiveControlPlaneEvent(logical.Event) {
+						missed = append(missed, deviceID)
+						continue
+					}
+					// milestones_only: only control-plane into buffer
+					if isLiveControlPlaneEvent(logical.Event) {
+						missed = append(missed, deviceID)
+					}
+					continue
+				}
+				continue
+			}
+		}
+		// No scope row: buffer if interest map says they watched this session.
+		missed = append(missed, deviceID)
+	}
+	return missed
+}
+
+func (p *EventPublisher) NoteLiveInterest(deviceID, backendID, sessionID string) {
+	if p == nil || p.liveBuffer == nil {
+		return
+	}
+	p.liveBuffer.NoteInterest(deviceID, backendID, sessionID)
+}
+
+func (p *EventPublisher) FlushLiveFrameBufferForDevice(conn Connection) {
+	if p == nil || conn == nil || p.liveBuffer == nil {
+		return
+	}
+	device := conn.AuthedDevice()
+	if device == nil {
+		return
+	}
+	frames := p.liveBuffer.Snapshot(device.DeviceID)
+	if len(frames) == 0 {
+		return
+	}
+	first, last := frames[0].Seq, frames[len(frames)-1].Seq
+	LogLiveFrameBufferFlush(device.DeviceID, len(frames), first, last)
+	for _, msg := range frames {
+		// Re-check observation: if still milestones-only, skip pure deltas.
+		if p.observation != nil &&
+			!p.observation.ShouldSendEvent(device.DeviceID, msg.BackendID, msg.SessionID, msg.Event) &&
+			!isLiveControlPlaneEvent(msg.Event) {
+			// Soft: still try full_stream buffers after scope renew; if scope is
+			// milestones, skip non-control live frames.
+			if scope := p.observation.GetScope(device.DeviceID, msg.BackendID); scope == nil || scope.DeliveryMode != scopeFullStream {
+				continue
+			}
+		}
+		p.mu.Lock()
+		sink := p.sinkLocked(conn)
+		ok := sink.tryEnqueue(eventOutboundFrame{value: msg, classHint: classifyRelayEvent(msg.Event), classified: true})
+		p.mu.Unlock()
+		if !ok {
+			slog.Warn("live-frame-buffer flush enqueue failed",
+				"deviceID", safeID(device.DeviceID),
+				"event", msg.Event,
+				"seq", msg.Seq,
+			)
+			// Stop on backpressure; remaining frames stay until next flush/GC.
+			break
+		}
+	}
+}
+

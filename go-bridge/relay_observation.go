@@ -20,7 +20,7 @@ import (
 const (
 	scopeFullStream     = "full_stream"
 	scopeMilestonesOnly = "milestones_only"
-	defaultLeaseSeconds = 45 // 方案 §8.3 observation 合约
+	defaultLeaseSeconds = 90 // iOS renews ~20–30s; 45s too tight under reconnect
 
 	// 有界 outbox 参数（§8.5）
 	outboxMaxFrames = 1000
@@ -105,16 +105,34 @@ func (om *ObservationManager) SetScope(deviceID string, scope ObservationScope) 
 	)
 }
 
+// isLiveControlPlaneEvent is true for events that must reach a watching client
+// even under milestones_only. Without turn_started / session_state_changed,
+// iOS never arms isGenerating and the input bar stays idle for the whole turn
+// (owner symptom: bulk text only after Mac finishes).
+func isLiveControlPlaneEvent(eventType string) bool {
+	switch eventType {
+	case "turn_started", "session_state_changed", "session_running_signal", "user_message":
+		return true
+	default:
+		return false
+	}
+}
+
 // ShouldSendEvent 判断是否应向设备发送指定事件。
 // 方案 §8.3：milestones_only 只投递白名单内的 durable milestone。
+//
+// Extension: when the device has IncludeRunningSignals (or any scope for the
+// backend), control-plane events (turn_started / session_state_changed /
+// user_message) always pass so external turns can arm generation even if the
+// client briefly holds milestones_only.
 func (om *ObservationManager) ShouldSendEvent(deviceID, backendID, sessionID, eventType string) bool {
 	om.mu.RLock()
 	defer om.mu.RUnlock()
 
 	dev, ok := om.devices[deviceID]
 	if !ok {
-		// 无 scope 时默认只发送 durable milestones
-		return IsDurableMilestone(eventType)
+		// 无 scope：control-plane + durable only (cannot assume full_stream)
+		return IsDurableMilestone(eventType) || isLiveControlPlaneEvent(eventType)
 	}
 
 	dev.mu.Lock()
@@ -122,9 +140,26 @@ func (om *ObservationManager) ShouldSendEvent(deviceID, backendID, sessionID, ev
 
 	scope, ok := dev.scopes[backendID]
 	if !ok {
-		return IsDurableMilestone(eventType)
+		return IsDurableMilestone(eventType) || isLiveControlPlaneEvent(eventType)
 	}
 	if eventType == "sessions_changed" {
+		return true
+	}
+	if isLiveControlPlaneEvent(eventType) {
+		// Session filter still applies for control-plane when SessionIDs is non-empty.
+		if len(scope.SessionIDs) > 0 {
+			found := false
+			for _, sid := range scope.SessionIDs {
+				if sid == sessionID || sid == "*" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				// Unlisted session: only if running-signals allow durable/control for background awareness
+				return scope.IncludeRunningSignals
+			}
+		}
 		return true
 	}
 
@@ -142,22 +177,24 @@ func (om *ObservationManager) ShouldSendEvent(deviceID, backendID, sessionID, ev
 		}
 	}
 
-	// 检查租约是否过期
+	// Soft lease: full_stream only while leasedAt is still fresh.
+	// Never permanently rewrite DeliveryMode — a missed renew must not pin the
+	// device on milestones_only until the next SetScope (bulk/completed-bar symptom).
+	effectiveMode := scope.DeliveryMode
 	if scope.DeliveryMode == scopeFullStream {
 		elapsed := time.Since(scope.leasedAt).Seconds()
-		if elapsed > float64(scope.LeaseSeconds) {
-			// 租约过期，自动降级为 milestones_only
-			scope.DeliveryMode = scopeMilestonesOnly
-			slog.Debug("observation: lease expired, downgraded to milestones",
-				"deviceID", safeID(deviceID),
-				"backendID", backendID,
-			)
+		// Soft window = 2× lease so a reconnect that lands just after the
+		// nominal renew cadence does not filter text/reasoning (owner flash).
+		// Tests use 1s leases; production uses 90s → 180s soft window.
+		grace := float64(scope.LeaseSeconds) * 2
+		if elapsed > grace {
+			effectiveMode = scopeMilestonesOnly
 		}
 	}
 
-	switch scope.DeliveryMode {
+	switch effectiveMode {
 	case scopeFullStream:
-		return true // 全部事件
+		return true
 	case scopeMilestonesOnly:
 		return IsDurableMilestone(eventType)
 	default:
@@ -170,6 +207,18 @@ func (om *ObservationManager) RemoveDevice(deviceID string) {
 	om.mu.Lock()
 	defer om.mu.Unlock()
 	delete(om.devices, deviceID)
+}
+
+// DeviceIDs returns a snapshot of device IDs with any observation state.
+// Used by LiveFrameBuffer to find interested devices when targets are empty.
+func (om *ObservationManager) DeviceIDs() []string {
+	om.mu.RLock()
+	defer om.mu.RUnlock()
+	out := make([]string, 0, len(om.devices))
+	for id := range om.devices {
+		out = append(out, id)
+	}
+	return out
 }
 
 // GetScope 返回设备的当前 scope 快照。
@@ -228,9 +277,11 @@ func (om *ObservationManager) checkLeases() {
 			if scope.DeliveryMode == scopeFullStream {
 				elapsed := now.Sub(scope.leasedAt).Seconds()
 				if elapsed > float64(scope.LeaseSeconds) {
-					scope.DeliveryMode = scopeMilestonesOnly
-					slog.Debug("observation: lease expired during check",
+					// Soft expiry only (ShouldSendEvent uses leasedAt). Keep
+					// DeliveryMode so a subsequent SetScope renew stays full_stream.
+					slog.Debug("observation: lease soft-expired (mode kept)",
 						"backendID", scope.BackendID,
+						"elapsedSeconds", int(elapsed),
 					)
 				}
 			}

@@ -62,6 +62,12 @@ func TestSetObservationScopeRPCRequiresAuthenticatedDeviceAndStoresScope(t *test
 	if scope == nil || len(scope.SessionIDs) != 1 || scope.SessionIDs[0] != "s1" {
 		t.Fatalf("scope not stored: %#v", scope)
 	}
+	// Live delivery keys off broadcaster.Targets — observation alone is not enough
+	// after a hard disconnect wiped session subscriptions.
+	targets := h.broadcaster.Targets("codex", "s1", "")
+	if len(targets) != 1 || targets[0] != conn {
+		t.Fatalf("set_observation_scope must Subscribe session for live targets, got %#v", targets)
+	}
 }
 
 func TestObservationCleanupWaitsForLastDeviceConnection(t *testing.T) {
@@ -149,14 +155,19 @@ func TestObservationLeaseExpiry(t *testing.T) {
 	}
 
 	// 等待租约过期
-	time.Sleep(1500 * time.Millisecond)
+	time.Sleep(2500 * time.Millisecond)
 
-	// 过期后应降级为 milestones_only
+	// Soft expiry: text_delta blocked, durable still ok; DeliveryMode stays full_stream
+	// so the next SetScope renew does not fight a permanent milestones_only pin.
 	if om.ShouldSendEvent("dev_1", "codex", "sess_1", "text_delta") {
-		t.Error("should NOT send text_delta after lease expiry")
+		t.Error("should NOT send text_delta after lease soft-expiry")
 	}
 	if !om.ShouldSendEvent("dev_1", "codex", "sess_1", "turn_completed") {
-		t.Error("should still send durable milestone after lease expiry")
+		t.Error("should still send durable milestone after lease soft-expiry")
+	}
+	scope := om.GetScope("dev_1", "codex")
+	if scope == nil || scope.DeliveryMode != scopeFullStream {
+		t.Fatalf("DeliveryMode should stay full_stream (soft expiry), got %#v", scope)
 	}
 }
 
@@ -321,5 +332,29 @@ func TestOutboxDeviceIsolation(t *testing.T) {
 	entriesB := om.Drain("dev_b")
 	if len(entriesB) != 1 {
 		t.Fatalf("dev_b entries = %d, want 1", len(entriesB))
+	}
+}
+
+func TestObservationMilestonesOnlyStillSendsTurnStarted(t *testing.T) {
+	om := NewObservationManager()
+	om.Start(context.Background())
+	defer om.Stop()
+
+	om.SetScope("dev_1", ObservationScope{
+		BackendID:             "codex",
+		SessionIDs:            []string{"sess_1"},
+		DeliveryMode:          scopeMilestonesOnly,
+		IncludeRunningSignals: true,
+		LeaseSeconds:          60,
+	})
+
+	if !om.ShouldSendEvent("dev_1", "codex", "sess_1", "turn_started") {
+		t.Fatal("milestones_only must still send turn_started so clients can arm generation")
+	}
+	if !om.ShouldSendEvent("dev_1", "codex", "sess_1", "session_state_changed") {
+		t.Fatal("milestones_only must still send session_state_changed")
+	}
+	if om.ShouldSendEvent("dev_1", "codex", "sess_1", "text_delta") {
+		t.Fatal("milestones_only must still filter text_delta")
 	}
 }

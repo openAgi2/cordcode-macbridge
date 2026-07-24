@@ -227,3 +227,26 @@ func TestCodexFileRelayEmitsToolLifecycleAndContextUsage(t *testing.T) {
 	_ = readEventNames(t, client, 2)
 	waitCodexFileRelayStopped(t, handlers, sessionID, serverConn)
 }
+
+// TestScanCodexTranscriptRelayEventsFunctionCall：session 019f8dd1 形态 ——
+// function_call / function_call_output 必须变成 tool_started / tool_finished，
+// 否则 live EMIT tool_*=0，iOS 只能等终态 history bulk 才见工具（第十轮铁证）。
+func TestScanCodexTranscriptRelayEventsFunctionCall(t *testing.T) {
+	path := writeCodexRolloutFile(t,
+		`{"type":"response_item","payload":{"type":"function_call","id":"fc_1","name":"exec_command","arguments":"{\"cmd\":\"ls\"}","call_id":"tool-abc"}}`,
+		`{"type":"response_item","payload":{"type":"function_call_output","id":"fco_1","call_id":"tool-abc","output":"file1\nfile2"}}`,
+	)
+	events := scanCodexTranscriptRelayEvents(path, 0)
+	if len(events) != 2 {
+		t.Fatalf("len = %d, want 2: %+v", len(events), events)
+	}
+	if events[0].kind != "tool_started" || events[0].toolName != "exec_command" || events[0].itemId != "tool-abc" {
+		t.Fatalf("events[0] = %+v, want tool_started exec_command tool-abc", events[0])
+	}
+	if events[0].toolInput == "" || !strings.Contains(events[0].toolInput, "ls") {
+		t.Fatalf("events[0].toolInput = %q, want arguments containing ls", events[0].toolInput)
+	}
+	if events[1].kind != "tool_finished" || events[1].itemId != "tool-abc" || events[1].toolResult != "file1\nfile2" {
+		t.Fatalf("events[1] = %+v, want tool_finished tool-abc with string output", events[1])
+	}
+}
