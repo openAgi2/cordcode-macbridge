@@ -1,0 +1,279 @@
+package gobridge
+
+import (
+	"testing"
+)
+
+// ev builds a stamped EventMessage shaped like the Codex rollout path feeds into PublishLogical.
+func ev(seq int, backend, session, event string, data map[string]interface{}) EventMessage {
+	return EventMessage{
+		BackendID:     backend,
+		SessionID:     session,
+		Event:         event,
+		Data:          data,
+		PerSessionSeq: seq,
+		BridgeEpoch:   "epoch-test",
+	}
+}
+
+func newTestReducer() *ProjectionReducer {
+	r := NewProjectionReducer()
+	r.now = func() int64 { return 1700000000000 } // deterministic epoch-ms
+	return r
+}
+
+// TestReducerTurnLifecycleAppendComplete: turn_started + text deltas + turn_completed yields a
+// completed turn whose assistant text is the concatenation of the deltas, and execution=idle.
+func TestReducerTurnLifecycleAppendComplete(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "codex", "s1", "text_delta", map[string]interface{}{"itemId": "T1", "delta": "Hello"}))
+	r.Apply(ev(3, "codex", "s1", "text_delta", map[string]interface{}{"itemId": "T1", "delta": " world"}))
+	r.Apply(ev(4, "codex", "s1", "turn_completed", map[string]interface{}{"turnId": "T1"}))
+
+	proj, ok := r.Snapshot("codex", "s1")
+	if !ok {
+		t.Fatal("no projection")
+	}
+	if proj.SyncRev != 4 {
+		t.Fatalf("SyncRev = %d, want 4", proj.SyncRev)
+	}
+	if len(proj.Turns) != 1 || proj.Turns[0].TurnID != "T1" {
+		t.Fatalf("turns = %+v", proj.Turns)
+	}
+	tu := proj.Turns[0]
+	if tu.Status != "completed" {
+		t.Fatalf("status = %q, want completed", tu.Status)
+	}
+	if tu.Assistant == nil || len(tu.Assistant.Parts) == 0 {
+		t.Fatalf("missing assistant parts: %+v", tu.Assistant)
+	}
+	var text string
+	for _, p := range tu.Assistant.Parts {
+		if p.Type == "text" {
+			text += p.Text
+		}
+	}
+	if text != "Hello world" {
+		t.Fatalf("assistant text = %q, want %q", text, "Hello world")
+	}
+	if proj.Execution.Phase != "idle" {
+		t.Fatalf("execution phase = %q, want idle", proj.Execution.Phase)
+	}
+	if proj.Execution.ActiveTurnID != "" {
+		t.Fatalf("activeTurnId = %q, want empty after completion", proj.Execution.ActiveTurnID)
+	}
+}
+
+// TestReducerRevMonotonicAndIdempotent: SyncRev never decreases, and re-applying a past event
+// does not duplicate content (idempotency at the same per-session seq).
+func TestReducerRevMonotonicAndIdempotent(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "codex", "s1", "text_delta", map[string]interface{}{"itemId": "T1", "delta": "ab"}))
+	// Replay the SAME stamped event (same PerSessionSeq) — must be a no-op.
+	r.Apply(ev(2, "codex", "s1", "text_delta", map[string]interface{}{"itemId": "T1", "delta": "ab"}))
+	r.Apply(ev(3, "codex", "s1", "text_delta", map[string]interface{}{"itemId": "T1", "delta": "c"}))
+
+	proj, _ := r.Snapshot("codex", "s1")
+	if proj.SyncRev != 3 {
+		t.Fatalf("SyncRev = %d, want 3", proj.SyncRev)
+	}
+	var text string
+	for _, p := range proj.Turns[0].Assistant.Parts {
+		if p.Type == "text" {
+			text += p.Text
+		}
+	}
+	if text != "abc" {
+		t.Fatalf("text = %q, want %q (idempotent replay must not duplicate)", text, "abc")
+	}
+	// An older seq arriving out of order is ignored.
+	r.Apply(ev(2, "codex", "s1", "text_delta", map[string]interface{}{"itemId": "T1", "delta": "ZZ"}))
+	proj, _ = r.Snapshot("codex", "s1")
+	if proj.SyncRev != 3 {
+		t.Fatalf("SyncRev changed after stale seq: %d", proj.SyncRev)
+	}
+}
+
+// TestReducerUserMessageAttribution: user_message attributes to the turn via turnId and carries
+// the response_item.id as the user message id.
+func TestReducerUserMessageAttribution(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s1", "user_message", map[string]interface{}{"itemId": "msg_001", "turnId": "T1", "text": "hi"}))
+	proj, _ := r.Snapshot("codex", "s1")
+	if len(proj.Turns) != 1 || proj.Turns[0].TurnID != "T1" {
+		t.Fatalf("turns = %+v", proj.Turns)
+	}
+	u := proj.Turns[0].User
+	if u == nil || u.ID != "msg_001" || u.Role != "user" {
+		t.Fatalf("user msg = %+v", u)
+	}
+	if len(u.Parts) != 1 || u.Parts[0].Type != "text" || u.Parts[0].Text != "hi" {
+		t.Fatalf("user parts = %+v", u.Parts)
+	}
+}
+
+// TestReducerReasoningAccumulates: consecutive reasoning deltas accumulate into one reasoning part.
+func TestReducerReasoningAccumulates(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "codex", "s1", "reasoning_delta", map[string]interface{}{"itemId": "T1", "delta": "think-"}))
+	r.Apply(ev(3, "codex", "s1", "reasoning_delta", map[string]interface{}{"itemId": "T1", "delta": "ing"}))
+	proj, _ := r.Snapshot("codex", "s1")
+	var reasoning string
+	for _, p := range proj.Turns[0].Assistant.Parts {
+		if p.Type == "reasoning" {
+			reasoning = p.Text
+		}
+	}
+	if reasoning != "think-ing" {
+		t.Fatalf("reasoning = %q, want %q", reasoning, "think-ing")
+	}
+}
+
+// TestReducerToolUpsert: tool_started then tool_finished upsert one tool part by call_id, with
+// status progressing running -> completed.
+func TestReducerToolUpsert(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "codex", "s1", "tool_started", map[string]interface{}{"itemId": "call_9", "toolName": "shell", "toolInput": "ls"}))
+	// Mid-flight the tool part should be running.
+	proj, _ := r.Snapshot("codex", "s1")
+	if part := findTool(proj, "call_9"); part == nil || part.ToolStatus != "running" {
+		t.Fatalf("mid-flight tool = %+v", part)
+	}
+	r.Apply(ev(3, "codex", "s1", "tool_finished", map[string]interface{}{"itemId": "call_9", "toolResult": "out"}))
+	proj, _ = r.Snapshot("codex", "s1")
+	part := findTool(proj, "call_9")
+	if part == nil {
+		t.Fatal("tool part missing after finish")
+	}
+	if part.ToolStatus != "completed" {
+		t.Fatalf("tool status = %q, want completed", part.ToolStatus)
+	}
+	if part.ToolName != "shell" {
+		t.Fatalf("tool name not preserved across finish: %q", part.ToolName)
+	}
+	// Exactly one tool part for call_9 (upsert, not append).
+	count := 0
+	for _, p := range proj.Turns[0].Assistant.Parts {
+		if p.Type == "tool" && p.ItemID == "call_9" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("tool part count = %d, want 1 (upsert)", count)
+	}
+}
+
+func findTool(proj SessionProjection, callID string) *ProjectionPart {
+	if len(proj.Turns) == 0 || proj.Turns[0].Assistant == nil {
+		return nil
+	}
+	for i := range proj.Turns[0].Assistant.Parts {
+		if proj.Turns[0].Assistant.Parts[i].Type == "tool" && proj.Turns[0].Assistant.Parts[i].ItemID == callID {
+			return &proj.Turns[0].Assistant.Parts[i]
+		}
+	}
+	return nil
+}
+
+// TestReducerSkipsDriverPathIdentitylessEvents: events without rollout identity (driver/agent-event
+// path: turn_started hardcodes turnId:"", text_delta lacks itemId) MUST NOT create projection
+// state — Phase 1 reduce stays scoped to the rollout path (design §6.3 / §18.3).
+func TestReducerSkipsDriverPathIdentitylessEvents(t *testing.T) {
+	r := newTestReducer()
+	// Driver-path turn_started (events.go hardcodes turnId:"").
+	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": ""}))
+	// Driver-path text_delta (DeltaBatcher.emit strips Data to {"delta":text} — no itemId).
+	r.Apply(ev(2, "codex", "s1", "text_delta", map[string]interface{}{"delta": "no identity"}))
+	proj, ok := r.Snapshot("codex", "s1")
+	if ok && len(proj.Turns) > 0 {
+		t.Fatalf("driver-path events must not produce turns; got %+v", proj.Turns)
+	}
+}
+
+// TestReducerSnapshotIsIndependent: mutating the projection after Snapshot does not alter the
+// returned snapshot (pull must be a stable copy).
+func TestReducerSnapshotIsIndependent(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	snap, _ := r.Snapshot("codex", "s1")
+	r.Apply(ev(2, "codex", "s1", "text_delta", map[string]interface{}{"itemId": "T1", "delta": "more"}))
+	if len(snap.Turns[0].Assistant.Parts) != 0 {
+		t.Fatalf("snapshot mutated after later Apply: %+v", snap.Turns[0].Assistant.Parts)
+	}
+}
+
+// TestReducerFlushPatchCoalescesAndDeltas: FlushPatch emits a coalesced patch whose baseRev
+// advances, and clears pending so the next flush is a clean delta.
+func TestReducerFlushPatchCoalescesAndDeltas(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "codex", "s1", "text_delta", map[string]interface{}{"itemId": "T1", "delta": "a"}))
+	r.Apply(ev(3, "codex", "s1", "text_delta", map[string]interface{}{"itemId": "T1", "delta": "b"}))
+
+	p1, ok := r.FlushPatch("codex", "s1")
+	if !ok {
+		t.Fatal("first flush produced no patch")
+	}
+	if p1.BaseRev != 0 || p1.SyncRev != 3 {
+		t.Fatalf("patch1 base/sync = %d/%d, want 0/3", p1.BaseRev, p1.SyncRev)
+	}
+	// The two text deltas are coalesced into a single append_text op.
+	if len(p1.PartOps) != 1 || p1.PartOps[0].Op != "append_text" || p1.PartOps[0].Text != "ab" {
+		t.Fatalf("patch1 partOps = %+v", p1.PartOps)
+	}
+	// upsertTurns carries the turn-start lifecycle.
+	if len(p1.UpsertTurns) != 1 || p1.UpsertTurns[0].TurnID != "T1" {
+		t.Fatalf("patch1 upsertTurns = %+v", p1.UpsertTurns)
+	}
+
+	// No new activity: second flush is empty.
+	if _, ok := r.FlushPatch("codex", "s1"); ok {
+		t.Fatal("second flush with no activity should be empty")
+	}
+
+	// New activity produces a delta whose baseRev == previous syncRev.
+	r.Apply(ev(4, "codex", "s1", "text_delta", map[string]interface{}{"itemId": "T1", "delta": "c"}))
+	p2, ok := r.FlushPatch("codex", "s1")
+	if !ok {
+		t.Fatal("third flush produced no patch")
+	}
+	if p2.BaseRev != 3 || p2.SyncRev != 4 {
+		t.Fatalf("patch2 base/sync = %d/%d, want 3/4", p2.BaseRev, p2.SyncRev)
+	}
+	if len(p2.PartOps) != 1 || p2.PartOps[0].Text != "c" {
+		t.Fatalf("patch2 partOps = %+v", p2.PartOps)
+	}
+}
+
+// TestPublishLogicalMountsProjectionReducer proves the §6.2 mount: PublishLogical allocates
+// perSessionSeq and the stamped EventMessage reaches the reducer, so SyncRev advances and parts
+// attribute — without the dispatch/buffer layer (that is exercised in WP5/WP6).
+func TestPublishLogicalMountsProjectionReducer(t *testing.T) {
+	ep := NewEventPublisher("epoch-mount")
+	ep.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "s1", Event: "turn_started", Data: map[string]interface{}{"turnId": "T1"}, Broadcast: true})
+	ep.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "s1", Event: "text_delta", Data: map[string]interface{}{"itemId": "T1", "delta": "hi"}, Broadcast: true})
+
+	proj, ok := ep.projection.Snapshot("codex", "s1")
+	if !ok {
+		t.Fatal("PublishLogical did not populate the projection reducer (mount broken)")
+	}
+	if proj.SyncRev != 2 {
+		t.Fatalf("SyncRev = %d, want 2 (perSessionSeq allocated before Apply)", proj.SyncRev)
+	}
+	if len(proj.Turns) != 1 || proj.Turns[0].TurnID != "T1" {
+		t.Fatalf("turns = %+v", proj.Turns)
+	}
+	var text string
+	for _, p := range proj.Turns[0].Assistant.Parts {
+		if p.Type == "text" {
+			text += p.Text
+		}
+	}
+	if text != "hi" {
+		t.Fatalf("assistant text = %q, want %q", text, "hi")
+	}
+}

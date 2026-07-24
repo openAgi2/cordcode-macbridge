@@ -151,6 +151,12 @@ type EventPublisher struct {
 	now           func() time.Time
 	completed     map[Connection]string
 	observation   *ObservationManager
+	projection    *ProjectionReducer
+	syncV2        map[Connection]bool
+	// rebindTargets is invoked (without p.mu) when a live event has zero online
+	// targets. Handlers rebinds broadcaster subscriptions from device registry +
+	// observation so mid-turn EMITs are not permanently dropped after path thrash.
+	rebindTargets func(backendID, sessionID string) int
 }
 
 type RecoveryAdmission struct {
@@ -180,6 +186,8 @@ func NewEventPublisher(bridgeEpoch string, broadcaster ...*Broadcaster) *EventPu
 		liveBuffer:    NewLiveFrameBuffer(),
 		now:           time.Now,
 		completed:     make(map[Connection]string),
+		projection:    NewProjectionReducer(),
+		syncV2:        make(map[Connection]bool),
 	}
 	if len(broadcaster) > 0 {
 		p.broadcaster = broadcaster[0]
@@ -201,6 +209,15 @@ func (p *EventPublisher) SetOfflineRoute(route func(EventMessage)) {
 func (p *EventPublisher) SetObservationManager(observation *ObservationManager) {
 	p.mu.Lock()
 	p.observation = observation
+	p.mu.Unlock()
+}
+
+// SetRebindTargets installs a callback used when live delivery has zero targets.
+// The callback must not call back into PublishLogical under the same stack with
+// p.mu held — PublishLogical releases p.mu before invoking it on retry.
+func (p *EventPublisher) SetRebindTargets(fn func(backendID, sessionID string) int) {
+	p.mu.Lock()
+	p.rebindTargets = fn
 	p.mu.Unlock()
 }
 
@@ -374,6 +391,45 @@ func (p *EventPublisher) sinkLocked(conn Connection) *eventOutboundSink {
 	return sink
 }
 
+// deliverProjectionPatchLocked delivers a projection_patch frame to the v2 (session_sync_v2)
+// observers of a session. Caller MUST hold p.mu. Targets come from the broadcaster — the same
+// target table raw dispatch uses (design §6.5 — no separate delivery network); only conns marked
+// syncV2 receive the patch, so legacy conns are untouched. Best-effort: a dropped patch (sink
+// overflow / no online target) is recoverable via get_session_projection pull (design §8.4 option
+// A — projection frames are NOT durable/live-buffered). This is the single outbound projection
+// path; it reuses sinks + broadcaster, adding no new transport (design §6.2, N8).
+func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID string, patch ProjectionPatch) {
+	if p.broadcaster == nil || len(p.syncV2) == 0 {
+		return
+	}
+	targets := p.broadcaster.Targets(backendID, sessionID, "")
+	if len(targets) == 0 {
+		return
+	}
+	msg := EventMessage{
+		Type:          "event",
+		Event:         "projection_patch",
+		BackendID:     backendID,
+		SessionID:     sessionID,
+		PerSessionSeq: patch.SyncRev,
+		BridgeEpoch:   p.bridgeEpoch,
+		Data:          patch,
+	}
+	classHint := classifyRelayEvent("projection_patch")
+	for _, conn := range targets {
+		if !p.syncV2[conn] {
+			continue
+		}
+		sink := p.sinkLocked(conn)
+		if sink == nil {
+			continue
+		}
+		// Best-effort enqueue; overflow is recoverable via pull. No live-buffer interest note
+		// (projection frames are reconstructable, not live-bufferable).
+		sink.tryEnqueue(eventOutboundFrame{value: msg, classHint: classHint, classified: true})
+	}
+}
+
 func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
 	p.mu.Lock()
 	logical.ClassHint = classifyRelayEvent(logical.Event)
@@ -401,6 +457,13 @@ func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
 		Message:       logical.Message,
 		Replayable:    isReplayableEvent(logical.Event),
 		Timestamp:     time.Now().UTC().UnixMilli(),
+	}
+	// ProjectionReducer mount (design §6.2): reduce the stamped event into the authoritative
+	// SessionProjection under the same p.mu that advanced perSessionSeq, so projection state
+	// advances in seq order with no torn reads by the dispatch loop. Takes r.mu nested under
+	// p.mu; pull (get_session_projection) takes only r.mu. Non-attributable events are no-ops.
+	if p.projection != nil {
+		p.projection.Apply(msg)
 	}
 	p.buffer.Append(msg)
 
@@ -462,6 +525,58 @@ func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
 					p.liveBuffer.NoteInterest(d.DeviceID, logical.BackendID, logical.SessionID)
 				}
 			}
+		}
+	}
+
+	// Zero-target recovery: rebind session subscriptions from device registry +
+	// observation, then retry delivery once for this stamped event (projection
+	// already applied; do not re-Apply). Fixes mid-turn candidateTargets=0 after
+	// path thrash while the device still has an open transport.
+	if enqueued == 0 && len(overflowed) == 0 && !logical.Offline &&
+		p.rebindTargets != nil && logical.BackendID != "" && logical.SessionID != "" {
+		rebind := p.rebindTargets
+		p.mu.Unlock()
+		n := rebind(logical.BackendID, logical.SessionID)
+		p.mu.Lock()
+		if n > 0 {
+			if logical.Broadcast && p.broadcaster != nil {
+				for _, conn := range p.broadcaster.Targets(logical.BackendID, logical.SessionID, logical.Directory) {
+					targets[conn] = struct{}{}
+				}
+			}
+			for conn := range targets {
+				if p.observation != nil {
+					if device := conn.AuthedDevice(); device != nil &&
+						!p.observation.ShouldSendEvent(device.DeviceID, logical.BackendID, logical.SessionID, logical.Event) {
+						observationFiltered++
+						continue
+					}
+				}
+				if recovery := p.recoveries[conn]; recovery != nil {
+					continue
+				}
+				sink := p.sinkLocked(conn)
+				if sink.tryEnqueue(eventOutboundFrame{value: msg, classHint: logical.ClassHint, classified: true}) {
+					enqueued++
+					if p.liveBuffer != nil {
+						if d := conn.AuthedDevice(); d != nil {
+							p.liveBuffer.NoteInterest(d.DeviceID, logical.BackendID, logical.SessionID)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Session Projection Stream (session_sync_v2): flush + deliver a projection_patch to the
+	// session's v2 observers. The reducer state was already advanced by Apply above; this is the
+	// single outbound projection path, reusing broadcaster targets + sinks (design §6.2 — no
+	// parallel pipe). Phase 1 flushes per-event (proves reduce+delivery correctness); the 80ms
+	// time-coalesce ticker is a Phase 2 bandwidth optimization (design §2.3). Raw events above
+	// still reach legacy conns unchanged; v2 clients ignore raw content (design §9.3).
+	if p.projection != nil && logical.BackendID != "" && logical.SessionID != "" {
+		if patch, ok := p.projection.FlushPatch(logical.BackendID, logical.SessionID); ok {
+			p.deliverProjectionPatchLocked(logical.BackendID, logical.SessionID, patch)
 		}
 	}
 

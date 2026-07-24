@@ -300,6 +300,10 @@ func Main() {
 
 	server := NewServerWithEpoch(handlers, bridgeEpoch)
 	server.SetRecoveryEnabled(true)
+	// Session Projection Stream (session_sync_v2): enable server-side advertisement. The
+	// capability is only echoed to clients that opt in via hello; Phase 1 reduce consumes the
+	// Codex rollout path. See docs/protocol/bridge-v1.md「Session Projection Stream」.
+	server.SetSessionSyncV2Enabled(true)
 	serverDisplayName := "CordCode Link"
 	if mgmtSrv != nil {
 		serverDisplayName = mgmtSrv.DisplayName()
@@ -371,6 +375,10 @@ func Main() {
 			ack.Recovery = plan
 			ack.Capabilities["recovery_v1"] = true
 			replay = events
+		}
+		if server.sessionSyncV2Enabled && helloSupportsSessionSyncV2(&hello) && ack.Ok {
+			ack.Capabilities["session_sync_v2"] = true
+			server.eventPublisher.SetConnSyncV2(conn, true)
 		}
 		conn.SendJSON(ack)
 		if ack.Recovery != nil {

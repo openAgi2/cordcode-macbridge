@@ -99,6 +99,7 @@ send_message
 abort_generation
 get_session
 get_session_messages
+get_session_projection
 delete_session
 resume_session
 switch_model
@@ -174,6 +175,9 @@ context_compressed
 context_usage_updated
 question_asked
 question_resolved
+projection_patch
+projection_snapshot
+sync_invalidate
 ```
 
 `tool_started` / `tool_finished` may carry an optional `data.matches` field. It is the
@@ -401,6 +405,85 @@ When `paginate` is true and the backend supports it, the response data is:
 - A cursor is only valid for the session and backend it was issued for.
 - `cursor_stale` means the history prefix the cursor referenced can no longer be proven continuous;
   reset to the first page.
+
+## Session Projection Stream (session_sync_v2)
+
+Single-source multi-device sync. MacBridge reduces its `EventPublisher` output into ONE
+authoritative `SessionProjection` per `(backendId, sessionId)`; clients only apply projection
+patches/snapshots and MUST NOT dual-source merge content against `get_session_messages` or raw
+`text_delta`. Design: `docs/2026-07-24-single-source-multidevice-sync-design.md`.
+
+- **Authority** lives on MacBridge. `syncRev` ≡ `EventPublisher.perSessionSeq` for that session
+  (monotonic under the publisher lock). Push and pull read the SAME in-memory projection state.
+- **Single outbound funnel.** Projection frames leave MacBridge only through the existing
+  `EventPublisher` per-connection dispatch (they reuse `broadcaster` + observation target
+  resolution). There is no parallel projection websocket / SSE pipe.
+- **Phase scope.** Phase 1 consumes the Codex `file-relay/rollout` path only — frames already
+  carry `itemId`/turn_id and bypass `DeltaBatcher`, so parts attribute to the correct turn. The
+  driver/agent-event path (`relayEvents` → `DeltaBatcher`, which strips to `{"delta":text}`) and
+  local-send correlation are Phase 3+. Claude/OpenCode/web are Phase 3+; until then clients keep
+  their existing completion/merge behavior for those backends.
+
+### Capability: `session_sync_v2`
+
+A CLIENT capability (same negotiation shape as `recovery_v1`). The client opts in with
+`capabilities: ["session_sync_v2"]` in `hello`; MacBridge echoes `capabilities["session_sync_v2"]
+= true` in `hello_ack` when its server-side flag is enabled and the client opted in. Adding the
+string is non-breaking (extensible `capabilities` array / map); no protocol major-version bump,
+only a `schemaRevision` bump. A backend still needs `external_turn_streaming` (the push
+prerequisite) for MacBridge to feed its projection; in Phase 1 only Codex feeds the reducer.
+
+### Push frames
+
+All three are `event`-envelope frames (same `seq` / `perSessionSeq` / `bridgeEpoch` envelope as
+other events). `perSessionSeq` on the frame == the patch's `syncRev`.
+
+| Event | `data` shape | Client action |
+| --- | --- | --- |
+| `projection_patch` | `BridgeProjectionPatch` | if `baseRev == appliedRev`, apply `partOps`/`upsertTurns`/`execution` and set `appliedRev = syncRev`; else call `get_session_projection(sinceRev=appliedRev)` |
+| `projection_snapshot` | `BridgeProjectionSnapshot` | if `syncRev > appliedRev`, replace the whole projection and set `appliedRev = syncRev` |
+| `sync_invalidate` | `BridgeSyncInvalidate` | call `get_session_projection` (full) |
+
+`projection_patch` is the main streaming path: MacBridge coalesces consecutive text/thinking
+deltas 50–100ms and emits one patch with `partOps` so the observing client sees incremental
+content during a long turn (not only at `turn_completed`). `upsertTurns` (whole-turn replace)
+is for new-turn appearance, status change, or authoritative correction — not per-token updates.
+Completion is authoritative only when the turn's `status ∈ {completed, aborted, error}`
+(integrating the existing `turnCompletedAt` evidence); clients MUST NOT settle a v2-observed
+turn on a heuristic alone.
+
+Projection frames are reconstructable via `get_session_projection`, so they are NOT durable
+mailbox milestones and are NOT live-buffered; reconnect/recovery aligns via a `get_session_projection`
+pull, not via mailbox replay of patches (design §8.4 option A).
+
+### RPC: `get_session_projection`
+
+Sits beside `get_session_messages` (which remains for legacy clients, paging, and debugging).
+MUST read the ProjectionReducer in-memory state (cold-start may hydrate once from disk into the
+reducer, then serve); it MUST NOT be a thin wrapper that returns `get_session_messages` bodies for
+the client to merge.
+
+Request params (additive):
+
+```ts
+{
+  sessionId: string,
+  directory?: string,
+  sinceRev?: number,   // when set, server MAY return a delta {patches, headRev}
+  limitTurns?: number
+}
+```
+
+Response data — full projection, or a delta when `sinceRev` was honored:
+
+```ts
+| { projection: BridgeSessionProjection }
+| { patches: BridgeProjectionPatch[], headRev: number }
+```
+
+Exact field shapes (`BridgeSessionProjection`, `BridgeTurnProjection`, `BridgeMessageProjection`,
+`BridgeProjectionPart`, `BridgeProjectionPatch`, `BridgePartOp`, `BridgeExecutionView`) are defined
+in `docs/protocol/schema/bridge-v1.types.ts`.
 
 ## Session Pinning
 

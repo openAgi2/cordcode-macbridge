@@ -195,9 +195,27 @@ type Server struct {
 	bridgeEpoch        string
 	eventPublisher     *EventPublisher
 	recoveryEnabled    bool
+	sessionSyncV2Enabled bool
 }
 
 func (s *Server) SetRecoveryEnabled(enabled bool) { s.recoveryEnabled = enabled }
+
+// SetSessionSyncV2Enabled gates the session_sync_v2 capability advertisement
+// (Session Projection Stream). When true and the client opts in via hello
+// capabilities, hello_ack echoes capabilities["session_sync_v2"]=true. See
+// docs/protocol/bridge-v1.md「Session Projection Stream」.
+func (s *Server) SetSessionSyncV2Enabled(enabled bool) { s.sessionSyncV2Enabled = enabled }
+
+// helloSupportsSessionSyncV2 returns true when the client advertised the
+// session_sync_v2 capability in hello (same shape as helloSupportsRecovery).
+func helloSupportsSessionSyncV2(hello *HelloMessage) bool {
+	for _, capability := range hello.Capabilities {
+		if capability == "session_sync_v2" {
+			return true
+		}
+	}
+	return false
+}
 
 // SetAuthMiddleware 设置认证中间件，nil 表示不启用认证。
 func (s *Server) SetAuthMiddleware(m *AuthMiddleware) {
@@ -481,6 +499,10 @@ func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage
 		ack.Recovery = plan
 		ack.Capabilities["recovery_v1"] = true
 		replay = events
+	}
+	if s.sessionSyncV2Enabled && helloSupportsSessionSyncV2(&hello) && ack.Ok {
+		ack.Capabilities["session_sync_v2"] = true
+		s.eventPublisher.SetConnSyncV2(connection, true)
 	}
 	conn.SendJSON(ack)
 	if ack.Recovery != nil {

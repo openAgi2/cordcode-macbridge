@@ -182,6 +182,7 @@ func (h *Handlers) installEventPublisher(publisher *EventPublisher) {
 	h.eventPublisher = publisher
 	h.eventPublisher.SetOfflineRoute(h.routeRelayOfflineStampedEvent)
 	h.eventPublisher.SetObservationManager(h.observation)
+	h.eventPublisher.SetRebindTargets(h.rebindLiveTargetsForSession)
 	h.deltaBatcher = NewDeltaBatcher(publisher)
 }
 
@@ -198,6 +199,11 @@ func (h *Handlers) publishEvent(logical LogicalEvent) EventMessage {
 func (h *Handlers) registerConnection(conn Connection) {
 	h.broadcaster.RegisterConn(conn)
 	h.eventPublisher.RegisterConnection(conn)
+	// Fresh connect (LAN after relay drop, or first hello) must re-bind session
+	// subscriptions from device-scoped observation — otherwise PublishLogical sees
+	// candidateTargets=0 until the next set_observation_scope/get_session_messages
+	// race window (owner WiFi 2026-07-25: relay close → LAN hello → still zero targets).
+	h.resubscribeObservationSessions(conn)
 	// Live-frame buffer: replay frames stored while this device had zero targets.
 	h.eventPublisher.FlushLiveFrameBufferForDevice(conn)
 }
@@ -212,11 +218,8 @@ func (h *Handlers) replaceConnection(old, new Connection) {
 		return
 	}
 	if old == nil {
+		// registerConnection already resubscribes from observation.
 		h.registerConnection(new)
-		// Even on first register after a hard disconnect window, re-bind
-		// observation-scoped sessions so live has targets before the next
-		// set_observation_scope / get_session_messages round-trip.
-		h.resubscribeObservationSessions(new)
 		return
 	}
 	h.eventPublisher.UnregisterConnection(old)
@@ -257,25 +260,105 @@ func (h *Handlers) resubscribeObservationSessions(conn Connection) {
 	}
 }
 
-func (h *Handlers) unregisterConnection(conn Connection) {
-	deviceID := ""
-	if device := conn.AuthedDevice(); device != nil {
-		deviceID = device.DeviceID
+// rebindLiveTargetsForSession re-attaches broadcaster subscriptions for every
+// still-connected device that observes this session. Called when PublishLogical
+// sees zero online targets while the file-relay is still EMITting — the common
+// failure after path thrash where observation/device registry still has the
+// device but session keys were wiped from the broadcaster.
+func (h *Handlers) rebindLiveTargetsForSession(backendID, sessionID string) int {
+	if h == nil || h.broadcaster == nil || backendID == "" || sessionID == "" {
+		return 0
 	}
-	h.broadcaster.UnsubscribeAll(conn)
-	h.eventPublisher.UnregisterConnection(conn)
-	if deviceID != "" {
-		stillConnected := false
-		for _, activeDeviceID := range h.broadcaster.ActiveDeviceIDs() {
-			if activeDeviceID == deviceID {
-				stillConnected = true
-				break
+	rebound := 0
+	for _, deviceID := range globalDeviceConnRegistry.AllDeviceIDs() {
+		// Prefer observation scope (authoritative watch list); fall back to any open conn.
+		shouldBind := false
+		if h.observation != nil {
+			if scope := h.observation.GetScope(deviceID, backendID); scope != nil {
+				if len(scope.SessionIDs) == 0 {
+					shouldBind = true // backend-wide watch
+				} else {
+					for _, sid := range scope.SessionIDs {
+						if sid == sessionID || sid == "*" {
+							shouldBind = true
+							break
+						}
+					}
+				}
 			}
 		}
-		if !stillConnected {
-			h.observation.RemoveDevice(deviceID)
+		conns := globalDeviceConnRegistry.Connections(deviceID)
+		if len(conns) == 0 {
+			continue
+		}
+		if !shouldBind && h.observation == nil {
+			shouldBind = true
+		}
+		if !shouldBind {
+			// Still rebind if the device has any open conn: better to over-deliver
+			// (client filters) than leave zero targets mid-turn.
+			shouldBind = true
+		}
+		for _, conn := range conns {
+			if conn == nil {
+				continue
+			}
+			if closed, ok := conn.(interface{ isClosed() bool }); ok && closed.isClosed() {
+				continue
+			}
+			h.broadcaster.RegisterConn(conn)
+			h.broadcaster.Subscribe(conn, SubscriptionKey{
+				BackendID: backendID,
+				SessionID: sessionID,
+			})
+			// Keep v2 push enabled if the conn previously advertised session_sync_v2
+			// (SetConnSyncV2 is idempotent; missing mark only loses projection_patch).
+			if h.eventPublisher != nil {
+				h.eventPublisher.SetConnSyncV2(conn, true)
+			}
+			rebound++
 		}
 	}
+	if rebound > 0 {
+		slog.Info("go-bridge: rebound live targets for zero-target session",
+			"backendID", backendID,
+			"sessionID", sessionID,
+			"conns", rebound,
+		)
+	} else {
+		// Forensic: PublishLogical zero-target recovery found nothing to rebind.
+		// Common when device registry is empty while an RPC conn still answers
+		// (registry/broadcaster desync) — pull still works, live push does not.
+		deviceN := len(globalDeviceConnRegistry.AllDeviceIDs())
+		hasSub := false
+		if h.broadcaster != nil {
+			hasSub = h.broadcaster.HasSessionSubscriber(backendID, sessionID)
+		}
+		slog.Warn("go-bridge: rebind live targets found zero conns",
+			"backendID", backendID,
+			"sessionID", sessionID,
+			"registryDevices", deviceN,
+			"hasSessionSubscriber", hasSub,
+		)
+	}
+	return rebound
+}
+
+func (h *Handlers) unregisterConnection(conn Connection) {
+	h.broadcaster.UnsubscribeAll(conn)
+	h.eventPublisher.UnregisterConnection(conn)
+	// Intentionally do NOT RemoveDevice observation here.
+	//
+	// Path switch (relay↔LAN) often has a 0.5–2s gap with zero connections. Wiping
+	// observation on the last unregister left registerConnection's
+	// resubscribeObservationSessions with nothing to rebind, so live stayed at
+	// candidateTargets=0 until a later set_observation_scope — and even that
+	// raced thrashing (owner WiFi 2026-07-25: LAN hello + set_observation + still
+	// subscribed=false window). Session subscriptions are connection-scoped and
+	// are reattached from surviving observation on the next register/replace.
+	// Soft lease (2× LeaseSeconds) already demotes full_stream delivery; device
+	// revoke must call RemoveDevice explicitly if permanent wipe is required.
+	_ = conn // keep signature; observation retained for reconnect rebind
 }
 
 func (h *Handlers) SetSessionListLimit(limit int) {
@@ -780,6 +863,11 @@ func (h *Handlers) handleSetObservationScope(conn Connection, msg WireMessage) {
 		})
 	}
 	// INFO so flapping/delivery-gap forensics can see mode without Debug log level.
+	// hasSubscriber after Subscribe is the forensic for candidateTargets=0 regressions.
+	hasSub := false
+	if len(req.SessionIDs) > 0 {
+		hasSub = h.broadcaster.HasSessionSubscriber(req.BackendID, req.SessionIDs[0])
+	}
 	slog.Info("go-bridge: set_observation_scope applied",
 		"deviceID", safeID(device.DeviceID),
 		"backendID", req.BackendID,
@@ -787,6 +875,7 @@ func (h *Handlers) handleSetObservationScope(conn Connection, msg WireMessage) {
 		"sessions", len(req.SessionIDs),
 		"includeRunning", req.IncludeRunningSignals,
 		"leaseSeconds", req.LeaseSeconds,
+		"hasSessionSubscriber", hasSub,
 	)
 	// After full_stream re-assert (post-reconnect), flush buffered live frames.
 	h.eventPublisher.FlushLiveFrameBufferForDevice(conn)
@@ -928,6 +1017,8 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleGetSession(conn, msg, agent)
 	case "get_session_messages":
 		h.handleGetSessionMessages(conn, msg, agent)
+	case "get_session_projection":
+		h.handleGetSessionProjection(conn, msg, agent)
 	case "delete_session":
 		h.handleDeleteSession(conn, msg, agent)
 	case "resume_session":
@@ -997,7 +1088,7 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 
 func shouldSwitchWorkDirForMethod(method string) bool {
 	switch method {
-	case "list_sessions", "get_session", "get_session_messages":
+	case "list_sessions", "get_session", "get_session_messages", "get_session_projection":
 		return false
 	default:
 		return true

@@ -49,7 +49,7 @@ func TestReplaceConnectionPreservesObservationAndTransfersSubscriptions(t *testi
 	}
 }
 
-func TestUnregisterLastConnectionStillClearsObservation(t *testing.T) {
+func TestUnregisterLastConnectionPreservesObservationForPathSwitch(t *testing.T) {
 	h := NewHandlers()
 	defer h.Shutdown(context.Background())
 
@@ -57,11 +57,81 @@ func TestUnregisterLastConnectionStillClearsObservation(t *testing.T) {
 	conn := &relayBroadcastCaptureConn{device: device}
 	h.registerConnection(conn)
 	h.observation.SetScope("dev-gone", ObservationScope{
-		BackendID: "codex", DeliveryMode: scopeFullStream, LeaseSeconds: 45,
+		BackendID: "codex", SessionIDs: []string{"sess-live"}, DeliveryMode: scopeFullStream, LeaseSeconds: 45,
 	})
 	h.unregisterConnection(conn)
-	if h.observation.GetScope("dev-gone", "codex") != nil {
-		t.Fatal("true disconnect must still clear observation")
+	// Observation must survive the zero-connection gap of a path switch so the next
+	// registerConnection can rebind session subscriptions without waiting for RPC.
+	if h.observation.GetScope("dev-gone", "codex") == nil {
+		t.Fatal("last disconnect must preserve observation for reconnect rebind")
+	}
+}
+
+// registerConnection after a hard disconnect must re-Subscribe sessions from the
+// surviving device observation — without requiring set_observation_scope first.
+func TestRegisterConnectionResubscribesFromObservation(t *testing.T) {
+	h := NewHandlers()
+	defer h.Shutdown(context.Background())
+
+	device := &TrustedDeviceRecord{DeviceID: "dev-rebind"}
+	old := &relayBroadcastCaptureConn{device: device}
+	h.registerConnection(old)
+	h.observation.SetScope("dev-rebind", ObservationScope{
+		BackendID:    "codex",
+		SessionIDs:   []string{"sess-a", "sess-b"},
+		DeliveryMode: scopeFullStream,
+		LeaseSeconds: 90,
+	})
+	h.broadcaster.Subscribe(old, SubscriptionKey{BackendID: "codex", SessionID: "sess-a"})
+	h.unregisterConnection(old)
+
+	// Gap: zero connections, observation retained.
+	if h.broadcaster.HasSessionSubscriber("codex", "sess-a") {
+		t.Fatal("old conn unsubscribed; no live subscriber expected in the gap")
+	}
+
+	next := &relayBroadcastCaptureConn{device: device}
+	h.registerConnection(next)
+
+	if !h.broadcaster.HasSessionSubscriber("codex", "sess-a") {
+		t.Fatal("registerConnection must resubscribe sess-a from observation")
+	}
+	if !h.broadcaster.HasSessionSubscriber("codex", "sess-b") {
+		t.Fatal("registerConnection must resubscribe sess-b from observation")
+	}
+	targets := h.broadcaster.Targets("codex", "sess-a", "")
+	if len(targets) != 1 || targets[0] != next {
+		t.Fatalf("targets after register rebind = %#v, want [next]", targets)
+	}
+	// Live text must still pass observation (full_stream retained).
+	if !h.observation.ShouldSendEvent("dev-rebind", "codex", "sess-a", "text_delta") {
+		t.Fatal("text_delta must pass after path-switch rebind")
+	}
+}
+
+// rebindLiveTargetsForSession must re-Subscribe open device conns when the
+// broadcaster lost session keys (zero-target mid-turn recovery).
+func TestRebindLiveTargetsForSessionRestoresSubscriber(t *testing.T) {
+	h := NewHandlers()
+	defer h.Shutdown(context.Background())
+
+	device := &TrustedDeviceRecord{DeviceID: "dev-rebind-zero"}
+	conn := &relayBroadcastCaptureConn{device: device}
+	// Registry has the conn, but broadcaster has no session key (simulates thrash).
+	globalDeviceConnRegistry.Register("dev-rebind-zero", conn)
+	defer globalDeviceConnRegistry.Unregister("dev-rebind-zero", conn)
+	h.observation.SetScope("dev-rebind-zero", ObservationScope{
+		BackendID: "codex", SessionIDs: []string{"sess-z"}, DeliveryMode: scopeFullStream, LeaseSeconds: 90,
+	})
+	if h.broadcaster.HasSessionSubscriber("codex", "sess-z") {
+		t.Fatal("precondition: no subscriber yet")
+	}
+	n := h.rebindLiveTargetsForSession("codex", "sess-z")
+	if n < 1 {
+		t.Fatalf("rebind conns = %d, want >= 1", n)
+	}
+	if !h.broadcaster.HasSessionSubscriber("codex", "sess-z") {
+		t.Fatal("rebind must restore session subscriber")
 	}
 }
 

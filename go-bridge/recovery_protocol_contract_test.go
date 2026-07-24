@@ -14,7 +14,6 @@ func TestRecoveryProtocolContractIsHelloOnlyAndExactCutBased(t *testing.T) {
 	}
 	text := string(schema)
 	for _, required := range []string{
-		`BridgeClientCapability = "recovery_v1" | "relay_gzip_v1" | "relay_chunks_v1"`,
 		"lastSeenBySession?: BridgeSessionCutMap",
 		`type: "recovery_applied"`,
 		"appliedThroughBySession: BridgeSessionCutMap",
@@ -22,6 +21,22 @@ func TestRecoveryProtocolContractIsHelloOnlyAndExactCutBased(t *testing.T) {
 	} {
 		if !strings.Contains(text, required) {
 			t.Errorf("schema missing %q", required)
+		}
+	}
+	// BridgeClientCapability declares the client→server capability opt-ins. Block-extract so
+	// adding a new capability (e.g. session_sync_v2) only requires asserting it is present,
+	// not pinning an exact single-line format.
+	capStart := strings.Index(text, "export type BridgeClientCapability")
+	if capStart < 0 {
+		t.Fatal("BridgeClientCapability declaration not found")
+	}
+	capBlock := text[capStart:]
+	if end := strings.Index(capBlock, "\n\n"); end >= 0 {
+		capBlock = capBlock[:end]
+	}
+	for _, cap := range []string{"recovery_v1", "relay_gzip_v1", "relay_chunks_v1", "session_sync_v2"} {
+		if !strings.Contains(capBlock, `"`+cap+`"`) {
+			t.Errorf("BridgeClientCapability missing %q", cap)
 		}
 	}
 	registerStart := strings.Index(text, "export interface BridgeRegister {")

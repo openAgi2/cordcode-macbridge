@@ -426,7 +426,7 @@ func classifyRelayRequest(method string) relayOutboundClass {
 		return relayOutboundInteractive
 	case "list_models", "list_permission_modes", "get_git_context", "get_todos", "list_agents", "list_providers":
 		return relayOutboundMetadata
-	case "get_session_messages":
+	case "get_session_messages", "get_session_projection":
 		return relayOutboundBulk
 	default:
 		return relayOutboundNormal
@@ -435,9 +435,9 @@ func classifyRelayRequest(method string) relayOutboundClass {
 
 func classifyRelayEvent(event string) relayOutboundClass {
 	switch event {
-	case "recovery_barrier", "recovery_complete":
+	case "recovery_barrier", "recovery_complete", "sync_invalidate":
 		return relayOutboundControl
-	case "text_delta", "thinking_delta", "tool_content", "message_content", "user_message", "turn_started", "turn_completed", "permission_asked", "question_asked":
+	case "text_delta", "thinking_delta", "tool_content", "message_content", "user_message", "turn_started", "turn_completed", "permission_asked", "question_asked", "projection_patch", "projection_snapshot":
 		return relayOutboundInteractive
 	case "session_updated", "session_state_changed", "session_status", "todos_updated", "permission_mode_changed", "model_changed", "git_branch_changed":
 		return relayOutboundMetadata

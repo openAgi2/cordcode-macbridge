@@ -23,7 +23,11 @@ export interface BridgeClientInfo {
   deviceId?: string;
 }
 
-export type BridgeClientCapability = "recovery_v1" | "relay_gzip_v1" | "relay_chunks_v1";
+export type BridgeClientCapability =
+  | "recovery_v1"
+  | "relay_gzip_v1"
+  | "relay_chunks_v1"
+  | "session_sync_v2";
 
 export interface RelayChunkMetadata {
   groupId: string;
@@ -183,6 +187,7 @@ export type BridgeRPCMethod =
   | "abort_generation"
   | "get_session"
   | "get_session_messages"
+  | "get_session_projection"
   | "delete_session"
   | "resume_session"
   | "switch_model"
@@ -275,7 +280,14 @@ export type BridgeEventName =
   | "context_compressed"
   | "context_usage_updated"
   | "question_asked"
-  | "question_resolved";
+  | "question_resolved"
+  // Session Projection Stream (session_sync_v2 capability). Mac reduces EventPublisher
+  // output into one authoritative SessionProjection; clients apply patches/snapshots only
+  // and never dual-source merge. See bridge-v1.md「Session Projection Stream」.
+  // Phase 1 = Codex rollout path only; driver/local-send/web are Phase 3+.
+  | "projection_patch"
+  | "projection_snapshot"
+  | "sync_invalidate";
 
 export interface BridgeEvent<TData = unknown> {
   type: "event";
@@ -404,3 +416,111 @@ export interface BridgeGetSessionMessagesResult {
 
 /** Backend capability string for get_session_messages history paging, not list_sessions paging. */
 export type BridgeSessionPaginationCapability = "session_pagination";
+
+// ── Session Projection Stream (SPS) · session_sync_v2 ────────────────────────
+// Single-source multi-device sync (design docs/2026-07-24-single-source-multidevice-sync-design.md).
+// MacBridge reduces its EventPublisher output into ONE authoritative SessionProjection per
+// (backendId, sessionId); clients only apply patches/snapshots and MUST NOT dual-source merge
+// content. syncRev ≡ EventPublisher.perSessionSeq for that session (monotonic under the publisher
+// lock). Phase 1 consumes the Codex file-relay/rollout path only (itemId/turnId already carried,
+// bypasses DeltaBatcher); driver/local-send/web are Phase 3+.
+
+/** One part of a message projection. `type` mirrors the existing Mapping Notes part vocabulary. */
+export type BridgeProjectionPart =
+  | { type: "text"; text: string }
+  | { type: "reasoning"; text: string }
+  | {
+      type: "tool";
+      itemId?: string; // rollout call_id (authoritative tool identity)
+      toolName?: string;
+      toolInput?: unknown;
+      toolResult?: unknown;
+      toolStatus?: string;
+      matches?: ToolMatches;
+    }
+  | { type: "file"; path?: string; kind?: string; diff?: string; movePath?: string };
+
+export interface BridgeMessageProjection {
+  /** Authoritative source id: rollout response_item.id (user) / call_id (tool) / lifecycle turn_id (assistant text). */
+  id: string;
+  /** Optional echo of a client optimistic id (Phase 3 local-send correlation; absent in Phase 1–2). */
+  clientId?: string;
+  role: "user" | "assistant";
+  parts: BridgeProjectionPart[];
+}
+
+export type BridgeTurnStatus = "pending" | "running" | "completed" | "aborted" | "error";
+
+export interface BridgeTurnProjection {
+  /** Codex rollout: stable lifecycle turn_id (event_msg.turn_id), carried by turn_started/turn_completed. */
+  turnId: string;
+  status: BridgeTurnStatus;
+  startedAt?: number; // epoch-ms
+  /** Integrates the existing turnCompletedAt evidence into a turn-level authoritative state. */
+  completedAt?: number; // epoch-ms
+  user?: BridgeMessageProjection;
+  assistant?: BridgeMessageProjection;
+}
+
+export type BridgeExecutionPhase = "idle" | "running" | "requires_action";
+
+export interface BridgeExecutionView {
+  phase: BridgeExecutionPhase;
+  activeTurnId?: string;
+}
+
+export interface BridgeSessionProjection {
+  sessionId: string;
+  /** Monotonic; ≡ EventPublisher.perSessionSeq for (backendId, sessionId). Same value push and pull read. */
+  syncRev: number;
+  bridgeEpoch?: string;
+  updatedAt?: number; // epoch-ms
+  execution: BridgeExecutionView;
+  turns: BridgeTurnProjection[];
+}
+
+/** Incremental part operation (main streaming path). Applies to a specific (turnId, messageId). */
+export type BridgePartOp =
+  | { turnId: string; messageId: string; op: "append_text"; text: string }
+  | { turnId: string; messageId: string; op: "set_thinking"; text: string }
+  | { turnId: string; messageId: string; op: "upsert_tool"; part: Extract<BridgeProjectionPart, { type: "tool" }> }
+  | { turnId: string; messageId: string; op: "replace_parts"; parts: BridgeProjectionPart[] };
+
+/** Push frame `projection_patch`: baseRev→syncRev incremental delta (coalesced 50–100ms server-side). */
+export interface BridgeProjectionPatch {
+  baseRev: number;
+  syncRev: number;
+  execution?: BridgeExecutionView;
+  /** Whole-turn upsert: new turn appearance, status change, or authoritative correction. */
+  upsertTurns?: BridgeTurnProjection[];
+  /** Main path: incremental part ops. Clients append/replace the named part; never merge with another source. */
+  partOps?: BridgePartOp[];
+  /** Phase 3: authoritative ids that invalidate local optimistic ids (absent in Phase 1–2). */
+  replacesClientIds?: string[];
+}
+
+/** Push frame `projection_snapshot`: full projection at syncRev (epoch mismatch / recovery). */
+export interface BridgeProjectionSnapshot {
+  syncRev: number;
+  projection: BridgeSessionProjection;
+}
+
+/** Push frame `sync_invalidate`: force the client to call get_session_projection. */
+export interface BridgeSyncInvalidate {
+  reason: "epoch_mismatch" | "gap" | "reducer_reset";
+  bridgeEpoch?: string;
+}
+
+/** get_session_projection request params (additive; sits beside get_session_messages). */
+export interface BridgeGetSessionProjectionParams {
+  sessionId: string;
+  directory?: string;
+  /** When set, the server MAY return a delta {patches, headRev} instead of the full projection. */
+  sinceRev?: number;
+  limitTurns?: number;
+}
+
+/** get_session_projection result: full projection (no sinceRev / server chose snapshot) OR delta patches. */
+export type BridgeGetSessionProjectionResult =
+  | { projection: BridgeSessionProjection }
+  | { patches: BridgeProjectionPatch[]; headRev: number };

@@ -84,8 +84,10 @@ func TestObservationCleanupWaitsForLastDeviceConnection(t *testing.T) {
 		t.Fatal("scope removed while another connection remained")
 	}
 	h.unregisterConnection(second)
-	if h.observation.GetScope("dev-multi", "codex") != nil {
-		t.Fatal("scope retained after last connection closed")
+	// Last connection close no longer wipes observation (path-switch rebind).
+	// Soft lease demotes full_stream; permanent wipe is revoke/explicit RemoveDevice.
+	if h.observation.GetScope("dev-multi", "codex") == nil {
+		t.Fatal("scope must survive last connection close for reconnect rebind")
 	}
 }
 

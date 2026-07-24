@@ -1,0 +1,430 @@
+package gobridge
+
+import (
+	"sync"
+	"time"
+)
+
+// ProjectionReducer maintains the authoritative in-memory SessionProjection per
+// (backendId, sessionId), reduced from the EventPublisher funnel. It is the single source
+// both push (projection_patch) and pull (get_session_projection) read — design §6.4 rule 4
+// (pull reads the SAME state push produced).
+//
+// Phase 1 scope: only the Codex file-relay/rollout path feeds meaningful state. Rollout
+// frames carry identity in Data — text/reasoning itemId == lifecycle turn_id (== the turn's
+// turnId), user_message itemId == response_item.id (+ turnId), tools itemId == call_id — and
+// bypass DeltaBatcher, so parts attribute to the correct turn. Driver/agent-event frames lack
+// identity (events.go turn_started is hardcoded turnId:""; DeltaBatcher.emit strips Data to
+// {"delta":text}) and are SKIPPED here until the Phase 3 turnId plumbing lands.
+//
+// Concurrency: Apply is called from EventPublisher.PublishLogical under the publisher lock
+// (p.mu), so it takes r.mu nested under p.mu. Snapshot/FlushPatch take only r.mu — no reverse
+// ordering, no deadlock.
+type ProjectionReducer struct {
+	mu       sync.Mutex
+	sessions map[string]*projectionSession // keyed backendID + "\x00" + sessionID
+	now      func() int64                  // epoch-ms clock, injectable for tests
+}
+
+// projectionSession is the per-session projection plus the pending delta accumulator used by
+// FlushPatch to build coalesced patches.
+type projectionSession struct {
+	projection     SessionProjection
+	lastAppliedRev int // highest PerSessionSeq applied (idempotency guard)
+	lastFlushedRev int // highest rev emitted in a patch (delta base for next patch)
+
+	// pending deltas accumulated since lastFlushedRev; cleared by FlushPatch.
+	textAppends map[string][]string       // assistant messageId -> delta chunks (append_text)
+	thinking    map[string]string         // assistant messageId -> full accumulated reasoning (set_thinking)
+	tools       map[string]ProjectionPart // tool callId -> latest tool part (upsert_tool)
+	upsertTurns map[string]TurnProjection // turnId -> latest whole-turn snapshot (upsertTurns)
+	execution   *ExecutionView            // pending execution change
+}
+
+// NewProjectionReducer creates an empty reducer.
+func NewProjectionReducer() *ProjectionReducer {
+	return &ProjectionReducer{
+		sessions: make(map[string]*projectionSession),
+		now:      func() int64 { return time.Now().UnixMilli() },
+	}
+}
+
+func projectionSessionKey(backendID, sessionID string) string {
+	return backendID + "\x00" + sessionID
+}
+
+// asDataMap extracts the Data payload as a map; returns nil for non-map payloads.
+func asDataMap(v interface{}) map[string]interface{} {
+	if m, ok := v.(map[string]interface{}); ok {
+		return m
+	}
+	return nil
+}
+
+func dataString(m map[string]interface{}, key string) string {
+	if m == nil {
+		return ""
+	}
+	if v, ok := m[key]; ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+func (ps *projectionSession) turnByID(turnID string) *TurnProjection {
+	for i := range ps.projection.Turns {
+		if ps.projection.Turns[i].TurnID == turnID {
+			return &ps.projection.Turns[i]
+		}
+	}
+	return nil
+}
+
+func (ps *projectionSession) upsertTurn(turn TurnProjection) {
+	if turn.TurnID == "" {
+		return
+	}
+	if t := ps.turnByID(turn.TurnID); t != nil {
+		// Merge: keep existing user/assistant if the incoming snapshot omits them.
+		if turn.Status != "" {
+			t.Status = turn.Status
+		}
+		if turn.StartedAt != 0 {
+			t.StartedAt = turn.StartedAt
+		}
+		if turn.CompletedAt != 0 {
+			t.CompletedAt = turn.CompletedAt
+		}
+		if turn.User != nil {
+			t.User = turn.User
+		}
+		if turn.Assistant != nil {
+			t.Assistant = turn.Assistant
+		}
+		if ps.upsertTurns != nil {
+			ps.upsertTurns[turn.TurnID] = *t
+		}
+		return
+	}
+	if turn.Assistant == nil {
+		// An assistant turn always has an assistant message whose id == turnId (rollout
+		// text/reasoning itemId == lifecycle turn_id).
+		turn.Assistant = &MessageProjection{ID: turn.TurnID, Role: "assistant"}
+	}
+	ps.projection.Turns = append(ps.projection.Turns, turn)
+	if ps.upsertTurns != nil {
+		ps.upsertTurns[turn.TurnID] = turn
+	}
+}
+
+// ensureAssistantTextPart returns the assistant message's trailing text part, creating one if
+// the last part is not text. Used by append_text accumulation.
+func (m *MessageProjection) ensureTrailingTextPart() *ProjectionPart {
+	if len(m.Parts) == 0 || m.Parts[len(m.Parts)-1].Type != "text" {
+		m.Parts = append(m.Parts, ProjectionPart{Type: "text"})
+	}
+	return &m.Parts[len(m.Parts)-1]
+}
+
+// Apply reduces one stamped EventMessage into the session projection and records pending
+// deltas for the next FlushPatch. Safe to call for any event; non-attributable events
+// (no identity) are ignored so Phase 1 stays scoped to the rollout path.
+func (r *ProjectionReducer) Apply(msg EventMessage) {
+	if r == nil || msg.BackendID == "" || msg.SessionID == "" || msg.PerSessionSeq == 0 {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	key := projectionSessionKey(msg.BackendID, msg.SessionID)
+	ps := r.sessions[key]
+	if ps == nil {
+		ps = &projectionSession{
+			projection: SessionProjection{
+				SessionID: msg.SessionID,
+				Execution: ExecutionView{Phase: "idle"},
+			},
+			textAppends: make(map[string][]string),
+			thinking:    make(map[string]string),
+			tools:       make(map[string]ProjectionPart),
+			upsertTurns: make(map[string]TurnProjection),
+		}
+		r.sessions[key] = ps
+	}
+
+	// Idempotency: ignore events at or below the last applied per-session rev.
+	if ps.lastAppliedRev > 0 && msg.PerSessionSeq <= ps.lastAppliedRev {
+		return
+	}
+	ps.lastAppliedRev = msg.PerSessionSeq
+	ps.projection.SyncRev = msg.PerSessionSeq
+	if msg.BridgeEpoch != "" {
+		ps.projection.BridgeEpoch = msg.BridgeEpoch
+	}
+	ps.projection.UpdatedAt = r.now()
+
+	data := asDataMap(msg.Data)
+	switch msg.Event {
+	case "turn_started":
+		turnID := dataString(data, "turnId")
+		if turnID == "" {
+			return // driver path (events.go hardcodes turnId:""); skip until Phase 3
+		}
+		ps.upsertTurn(TurnProjection{TurnID: turnID, Status: "running", StartedAt: ps.projection.UpdatedAt})
+		exec := ExecutionView{Phase: "running", ActiveTurnID: turnID}
+		ps.projection.Execution = exec
+		ps.execution = &exec
+
+	case "user_message":
+		turnID := dataString(data, "turnId")
+		itemID := dataString(data, "itemId")
+		text := dataString(data, "text")
+		if turnID == "" {
+			turnID = itemID // fallback: attribute to the message id if no explicit turnId
+		}
+		if turnID == "" {
+			return
+		}
+		ps.upsertTurn(TurnProjection{
+			TurnID: turnID,
+			Status: "running",
+			User:   &MessageProjection{ID: itemID, Role: "user", Parts: []ProjectionPart{{Type: "text", Text: text}}},
+		})
+
+	case "text_delta":
+		// itemId == lifecycle turn_id == the turn's turnId == the assistant message id.
+		turnID := dataString(data, "itemId")
+		delta := dataString(data, "delta")
+		if turnID == "" {
+			return // driver path lacks itemId; skip
+		}
+		t := ps.turnByID(turnID)
+		if t == nil {
+			ps.upsertTurn(TurnProjection{TurnID: turnID, Status: "running"})
+			t = ps.turnByID(turnID)
+		}
+		if t.Assistant == nil {
+			t.Assistant = &MessageProjection{ID: turnID, Role: "assistant"}
+		}
+		tp := t.Assistant.ensureTrailingTextPart()
+		tp.Text += delta
+		ps.textAppends[turnID] = append(ps.textAppends[turnID], delta)
+
+	case "reasoning_delta":
+		turnID := dataString(data, "itemId")
+		delta := dataString(data, "delta")
+		if turnID == "" {
+			return
+		}
+		t := ps.turnByID(turnID)
+		if t == nil {
+			ps.upsertTurn(TurnProjection{TurnID: turnID, Status: "running"})
+			t = ps.turnByID(turnID)
+		}
+		if t.Assistant == nil {
+			t.Assistant = &MessageProjection{ID: turnID, Role: "assistant"}
+		}
+		// Single reasoning part; set_thinking carries the full accumulated text (monotonic).
+		var rpart *ProjectionPart
+		for i := range t.Assistant.Parts {
+			if t.Assistant.Parts[i].Type == "reasoning" {
+				rpart = &t.Assistant.Parts[i]
+				break
+			}
+		}
+		if rpart == nil {
+			t.Assistant.Parts = append(t.Assistant.Parts, ProjectionPart{Type: "reasoning"})
+			rpart = &t.Assistant.Parts[len(t.Assistant.Parts)-1]
+		}
+		rpart.Text += delta
+		ps.thinking[turnID] = rpart.Text
+
+	case "tool_started", "tool_finished":
+		callID := dataString(data, "itemId")
+		if callID == "" {
+			return // cannot attribute/update without a stable tool id
+		}
+		activeTurnID := ps.projection.Execution.ActiveTurnID
+		if activeTurnID == "" {
+			return // no active turn to attach the tool to
+		}
+		t := ps.turnByID(activeTurnID)
+		if t == nil || t.Assistant == nil {
+			return
+		}
+		part := ProjectionPart{Type: "tool", ItemID: callID}
+		if name := dataString(data, "toolName"); name != "" {
+			part.ToolName = name
+		}
+		if v, ok := data["toolInput"]; ok {
+			part.ToolInput = v
+		}
+		if v, ok := data["toolResult"]; ok {
+			part.ToolResult = v
+		}
+		if status := dataString(data, "toolStatus"); status != "" {
+			part.ToolStatus = status
+		} else if msg.Event == "tool_started" {
+			part.ToolStatus = "running"
+		} else {
+			part.ToolStatus = "completed"
+		}
+		// Upsert the tool part within the assistant message (by itemId).
+		found := false
+		for i := range t.Assistant.Parts {
+			if t.Assistant.Parts[i].Type == "tool" && t.Assistant.Parts[i].ItemID == callID {
+				mergeToolPart(&t.Assistant.Parts[i], part)
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Assistant.Parts = append(t.Assistant.Parts, part)
+		}
+		// Record the latest merged part for the pending upsert_tool op.
+		for i := range t.Assistant.Parts {
+			if t.Assistant.Parts[i].Type == "tool" && t.Assistant.Parts[i].ItemID == callID {
+				ps.tools[callID] = t.Assistant.Parts[i]
+				break
+			}
+		}
+
+	case "turn_completed":
+		turnID := dataString(data, "turnId")
+		if turnID == "" {
+			return
+		}
+		ps.upsertTurn(TurnProjection{TurnID: turnID, Status: "completed", CompletedAt: ps.projection.UpdatedAt})
+		exec := ExecutionView{Phase: "idle"}
+		ps.projection.Execution = exec
+		ps.execution = &exec
+	}
+}
+
+// mergeToolPart applies non-zero fields from src onto dst (tool_started then tool_finished).
+func mergeToolPart(dst *ProjectionPart, src ProjectionPart) {
+	if src.ToolName != "" {
+		dst.ToolName = src.ToolName
+	}
+	if src.ToolInput != nil {
+		dst.ToolInput = src.ToolInput
+	}
+	if src.ToolResult != nil {
+		dst.ToolResult = src.ToolResult
+	}
+	if src.ToolStatus != "" {
+		dst.ToolStatus = src.ToolStatus
+	}
+}
+
+// Snapshot returns a deep copy of the session projection (for get_session_projection pull).
+// The copy is independent of later reduce activity.
+func (r *ProjectionReducer) Snapshot(backendID, sessionID string) (SessionProjection, bool) {
+	if r == nil {
+		return SessionProjection{}, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ps := r.sessions[projectionSessionKey(backendID, sessionID)]
+	if ps == nil {
+		return SessionProjection{}, false
+	}
+	return cloneSessionProjection(ps.projection), true
+}
+
+// FlushPatch builds and clears the pending delta accumulated since the last flush, returning a
+// projection_patch {baseRev: lastFlushedRev, syncRev: currentSyncRev, ...}. Returns ok=false
+// when there is nothing pending (no session or no deltas since last flush). Used by the
+// coalesce ticker (WP3) and the emission path (WP5).
+func (r *ProjectionReducer) FlushPatch(backendID, sessionID string) (ProjectionPatch, bool) {
+	if r == nil {
+		return ProjectionPatch{}, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ps := r.sessions[projectionSessionKey(backendID, sessionID)]
+	if ps == nil {
+		return ProjectionPatch{}, false
+	}
+	headRev := ps.projection.SyncRev
+	if headRev == ps.lastFlushedRev && len(ps.textAppends) == 0 && len(ps.thinking) == 0 &&
+		len(ps.tools) == 0 && len(ps.upsertTurns) == 0 && ps.execution == nil {
+		return ProjectionPatch{}, false
+	}
+	patch := ProjectionPatch{BaseRev: ps.lastFlushedRev, SyncRev: headRev}
+	if ps.execution != nil {
+		e := *ps.execution
+		patch.Execution = &e
+	}
+	for _, t := range ps.upsertTurns {
+		patch.UpsertTurns = append(patch.UpsertTurns, cloneTurn(t))
+	}
+	for msgID, chunks := range ps.textAppends {
+		combined := ""
+		for _, c := range chunks {
+			combined += c
+		}
+		patch.PartOps = append(patch.PartOps, PartOp{TurnID: msgID, MessageID: msgID, Op: "append_text", Text: combined})
+	}
+	for msgID, text := range ps.thinking {
+		patch.PartOps = append(patch.PartOps, PartOp{TurnID: msgID, MessageID: msgID, Op: "set_thinking", Text: text})
+	}
+	for _, p := range ps.tools {
+		tool := p
+		turnID := ps.projection.Execution.ActiveTurnID
+		patch.PartOps = append(patch.PartOps, PartOp{TurnID: turnID, MessageID: turnID, Op: "upsert_tool", Part: &tool})
+	}
+	// Clear pending; next patch will be delta from this head.
+	ps.textAppends = make(map[string][]string)
+	ps.thinking = make(map[string]string)
+	ps.tools = make(map[string]ProjectionPart)
+	ps.upsertTurns = make(map[string]TurnProjection)
+	ps.execution = nil
+	ps.lastFlushedRev = headRev
+	return patch, true
+}
+
+// LastAppliedRev exposes the current head syncRev (for diagnostics / RPC headRev).
+func (r *ProjectionReducer) LastAppliedRev(backendID, sessionID string) int {
+	if r == nil {
+		return 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ps := r.sessions[projectionSessionKey(backendID, sessionID)]
+	if ps == nil {
+		return 0
+	}
+	return ps.projection.SyncRev
+}
+
+// --- deep-copy helpers (Snapshot must be independent of later reduce activity) ---
+
+func cloneSessionProjection(s SessionProjection) SessionProjection {
+	out := s
+	if len(s.Turns) > 0 {
+		out.Turns = make([]TurnProjection, len(s.Turns))
+		for i := range s.Turns {
+			out.Turns[i] = cloneTurn(s.Turns[i])
+		}
+	}
+	return out
+}
+
+func cloneTurn(t TurnProjection) TurnProjection {
+	out := t
+	if t.User != nil {
+		u := *t.User
+		out.User = &u
+	}
+	if t.Assistant != nil {
+		a := *t.Assistant
+		if len(t.Assistant.Parts) > 0 {
+			a.Parts = append([]ProjectionPart(nil), t.Assistant.Parts...)
+		}
+		out.Assistant = &a
+	}
+	return out
+}
