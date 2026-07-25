@@ -463,6 +463,15 @@ MUST read the ProjectionReducer in-memory state (cold-start may hydrate once fro
 reducer, then serve); it MUST NOT be a thin wrapper that returns `get_session_messages` bodies for
 the client to merge.
 
+**Cold-start hydrate MUST complete before answering — never serve an empty head-0 shell as success
+(design §10.5 root-cause correction, 2026-07-25).** A fixed short timeout that returns `syncRev=0,
+turns=[]` while the hydrator keeps running in the background is a **contract violation**: it forces
+clients to fall back to `get_session_messages` (defeating the single-source goal) and, for large
+sessions, causes concurrent full-history fetches that reset the connection. The response is either a
+non-empty projection (hydrated, even if it takes a few seconds — clients already carry an 8s cap) or
+an explicit RPC error. Hydrate-on-cold-start is a *must* with a real budget, not a *may* with a
+token timeout.
+
 Request params (additive):
 
 ```ts

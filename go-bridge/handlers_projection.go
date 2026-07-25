@@ -3,8 +3,11 @@ package gobridge
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -19,6 +22,45 @@ type GetSessionProjectionParams struct {
 	LimitTurns int    `json:"limitTurns,omitempty"`
 }
 
+// defaultColdHydrateTimeout is the far-horizon budget for disk→reducer hydrate on a cold
+// pull (design §10.5 ring 1 close-out). Normal huge rollouts finish in hundreds of ms; this
+// bound exists so a stuck/corrupt rollout cannot permanently occupy a single-flight slot or
+// leave the RPC hanging. Distinct from the removed 750ms "serve empty head" path: on expiry
+// we return an explicit RPC error, never an empty success shell.
+const defaultColdHydrateTimeout = 30 * time.Second
+
+// coldHydrateTimeout is the live budget. Tests may lower it; production stays at the default.
+var coldHydrateTimeout = defaultColdHydrateTimeout
+
+// errColdHydrateTimeout is returned when hydrate does not finish within coldHydrateTimeout.
+var errColdHydrateTimeout = errors.New("projection cold-hydrate timed out")
+
+// coldHydrateFlight coalesces concurrent first pulls for the same session so disk→reducer
+// hydrate runs once. Design §10.5 ring 1: pull waits for hydrate completion; never races a
+// short timeout against an in-flight scan and serves an empty head-0 shell.
+type coldHydrateFlight struct {
+	done   chan struct{}
+	finish sync.Once
+	n      int
+	err    error
+}
+
+func (f *coldHydrateFlight) complete(n int, err error) {
+	if f == nil {
+		return
+	}
+	f.finish.Do(func() {
+		f.n = n
+		f.err = err
+		close(f.done)
+	})
+}
+
+// coldHydrateTestHook, when non-nil, runs at the start of hydrateCodexProjectionFromDisk.
+// It receives the hydrate context so tests can block until cancel (hard-timeout path) or
+// inject bounded delay (still-within-budget wait path).
+var coldHydrateTestHook func(context.Context)
+
 // handleGetSessionProjection returns the authoritative SessionProjection for a session, read
 // from the ProjectionReducer's in-memory state — the SAME state push reads (design §6.4 rule 4:
 // pull == push state). It is NOT a wrapper around get_session_messages: it returns projection
@@ -26,7 +68,14 @@ type GetSessionProjectionParams struct {
 //
 // The reducer is fed by the active Codex file-relay. After Mac restart the in-memory projection
 // is empty even when the rollout on disk is complete (file-relay starts at EOF). Cold pulls
-// therefore one-shot hydrate from disk before answering (design §5.3 hydrate-on-cold-start).
+// therefore one-shot hydrate from disk **and wait until hydrate finishes** before answering
+// (design §5.3 hydrate-on-cold-start; §10.5 ring 1: never serve empty head-0 while hydrate is
+// incomplete). Clients already carry an 8s pull cap; a multi-second reduce for a huge rollout
+// is acceptable and far cheaper than concurrent full-history fallback.
+//
+// If hydrate cannot finish within coldHydrateTimeout (default 30s), the RPC returns an explicit
+// error — not an empty projection — and the single-flight slot is released so a later pull can
+// retry.
 func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, agent core.Agent) {
 	var params GetSessionProjectionParams
 	if msg.Params != nil {
@@ -38,31 +87,17 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 	// Subscribe so the conn receives subsequent projection_patch push frames (WP5 emission).
 	h.subscribeConnToSession(conn, msg, params.SessionID)
 
-	// Design §5.3 / §6.3: cold start hydrates disk → reducer, *then* serves pull when
-	// possible. Hard-cap wait so a hung scan cannot block the RPC forever (owner
-	// 2026-07-25 blank-session: unbounded await starved session open). On timeout the
-	// hydrate goroutine continues filling the reducer; a later pull/push sees head.
-	const coldHydrateWait = 750 * time.Millisecond
 	if msg.BackendID == "codex" {
-		if head := h.eventPublisher.ProjectionHeadRev(msg.BackendID, params.SessionID); head == 0 {
-			sid := params.SessionID
-			backendID := msg.BackendID
-			done := make(chan int, 1)
-			go func() {
-				done <- h.hydrateCodexProjectionFromDisk(backendID, sid)
-			}()
-			select {
-			case n := <-done:
-				slog.Info("go-bridge: get_session_projection cold-hydrate",
-					"sessionID", sid, "events", n,
-					"headRev", h.eventPublisher.ProjectionHeadRev(backendID, sid),
-					"waited", true,
-				)
-			case <-time.After(coldHydrateWait):
-				slog.Warn("go-bridge: get_session_projection cold-hydrate timeout; serving current head",
-					"sessionID", sid, "timeout", coldHydrateWait.String(),
-				)
+		if err := h.ensureCodexProjectionHydrated(msg.BackendID, params.SessionID); err != nil {
+			code := "projection.hydrate_failed"
+			if errors.Is(err, errColdHydrateTimeout) {
+				code = "projection.hydrate_timeout"
 			}
+			conn.SendResult(msg.RequestID, nil, &WireError{
+				Code:    code,
+				Message: err.Error(),
+			})
+			return
 		}
 	}
 
@@ -79,8 +114,9 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 
 	proj, ok := h.eventPublisher.ProjectionSnapshot(msg.BackendID, params.SessionID)
 	if !ok {
-		// No reducer state yet — return an empty projection at head 0 rather than fabricating
-		// content. Push will bring the client up to date.
+		// Hydrate completed (or was not needed) and still no reducer state — honest empty
+		// session (no rollout / brand-new). This is NOT the forbidden "timeout, serve empty
+		// while hydrate continues" path (design §10.5).
 		proj = SessionProjection{
 			SessionID: params.SessionID,
 			SyncRev:   0,
@@ -91,33 +127,193 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 	conn.SendResult(msg.RequestID, map[string]interface{}{"projection": proj}, nil)
 }
 
+// ensureCodexProjectionHydrated blocks until the session has reducer state or disk hydrate has
+// finished once (success, honest empty, or hard-timeout error). Concurrent callers for the same
+// session share a single flight. On hard timeout the flight slot is cleared so a later pull can
+// retry; callers receive errColdHydrateTimeout rather than an empty success shell.
+func (h *Handlers) ensureCodexProjectionHydrated(backendID, sessionID string) error {
+	if h == nil || h.eventPublisher == nil || sessionID == "" {
+		return nil
+	}
+	if h.eventPublisher.ProjectionHeadRev(backendID, sessionID) > 0 {
+		return nil
+	}
+
+	h.mu.Lock()
+	if h.coldHydrateFlights == nil {
+		h.coldHydrateFlights = make(map[string]*coldHydrateFlight)
+	}
+	if h.eventPublisher.ProjectionHeadRev(backendID, sessionID) > 0 {
+		h.mu.Unlock()
+		return nil
+	}
+	key := backendID + "\x00" + sessionID
+	flight, exists := h.coldHydrateFlights[key]
+	if !exists {
+		flight = &coldHydrateFlight{done: make(chan struct{})}
+		h.coldHydrateFlights[key] = flight
+		h.mu.Unlock()
+
+		budget := coldHydrateTimeout
+		if budget <= 0 {
+			budget = defaultColdHydrateTimeout
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), budget)
+		start := time.Now()
+
+		type hydrateOutcome struct {
+			n   int
+			err error
+		}
+		outCh := make(chan hydrateOutcome, 1)
+		go func() {
+			n, err := h.hydrateCodexProjectionFromDisk(ctx, backendID, sessionID)
+			outCh <- hydrateOutcome{n: n, err: err}
+		}()
+
+		var (
+			n   int
+			err error
+		)
+		select {
+		case out := <-outCh:
+			n, err = out.n, out.err
+			cancel()
+		case <-ctx.Done():
+			// Hard timeout: do not serve empty head. Release the single-flight slot so a
+			// later pull can retry. The hydrate goroutine observes ctx cancel and exits
+			// (hook / apply loop); cancel is not deferred so joiners can still read flight.
+			err = fmt.Errorf("%w after %s: %v", errColdHydrateTimeout, budget, ctx.Err())
+			n = 0
+			cancel()
+			// Drain outcome without blocking forever so the worker is not stranded on send
+			// if it finishes shortly after timeout.
+			go func() { <-outCh }()
+		}
+
+		flight.complete(n, err)
+		if err != nil {
+			// Free the slot on failure/timeout so the next pull is not joined into a dead flight.
+			h.clearColdHydrateFlight(key)
+		}
+
+		headRev := h.eventPublisher.ProjectionHeadRev(backendID, sessionID)
+		if err != nil {
+			slog.Warn("go-bridge: get_session_projection cold-hydrate failed",
+				"sessionID", sessionID,
+				"events", n,
+				"headRev", headRev,
+				"elapsed", time.Since(start).String(),
+				"error", err.Error(),
+			)
+		} else {
+			slog.Info("go-bridge: get_session_projection cold-hydrate",
+				"sessionID", sessionID,
+				"events", n,
+				"headRev", headRev,
+				"elapsed", time.Since(start).String(),
+				"waited", true,
+			)
+		}
+		return err
+	}
+	h.mu.Unlock()
+
+	<-flight.done
+	slog.Info("go-bridge: get_session_projection cold-hydrate joined in-flight",
+		"sessionID", sessionID,
+		"events", flight.n,
+		"headRev", h.eventPublisher.ProjectionHeadRev(backendID, sessionID),
+		"error", errorString(flight.err),
+	)
+	return flight.err
+}
+
+func (h *Handlers) clearColdHydrateFlight(key string) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.coldHydrateFlights != nil {
+		delete(h.coldHydrateFlights, key)
+	}
+}
+
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
 // hydrateCodexProjectionFromDisk one-shot feeds the rollout JSONL into ProjectionReducer
 // so get_session_projection can answer after Mac restart without waiting for a new turn.
-// Events are published Offline (no live delivery requirement); Apply still runs.
-func (h *Handlers) hydrateCodexProjectionFromDisk(backendID, sessionID string) int {
+// Events are published offline (no live delivery requirement); Apply still runs.
+// Callers must wait for this to return before serving a cold pull (design §10.5).
+// ctx cancel aborts between scan/apply steps so a hard-timeout does not leave work running
+// indefinitely after the RPC has already failed.
+func (h *Handlers) hydrateCodexProjectionFromDisk(ctx context.Context, backendID, sessionID string) (int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if coldHydrateTestHook != nil {
+		coldHydrateTestHook(ctx)
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+	}
 	if h == nil || h.eventPublisher == nil || sessionID == "" {
-		return 0
+		return 0, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
 	}
 	agent, ok := h.getFirstAgentByName("codex")
 	if !ok {
-		return 0
+		return 0, nil
 	}
 	locator, ok := agent.(core.TranscriptLocator)
 	if !ok {
-		return 0
+		return 0, nil
 	}
-	sessPath, err := locator.TranscriptPath(context.Background(), sessionID)
+	sessPath, err := locator.TranscriptPath(ctx, sessionID)
 	if err != nil || strings.TrimSpace(sessPath) == "" {
-		return 0
+		return 0, nil
 	}
-	events := scanCodexTranscriptRelayEvents(sessPath, 0)
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+
+	// Scan can be large; run it so ctx cancel can abandon waiting for the result. The scanner
+	// itself is not mid-cancelable without a full rewrite; abandoning the wait prevents the
+	// RPC path from blocking, and the scan goroutine exits when the file read finishes.
+	type scanOut struct {
+		events []codexRelayEvent
+	}
+	scanCh := make(chan scanOut, 1)
+	go func() {
+		scanCh <- scanOut{events: scanCodexTranscriptRelayEvents(sessPath, 0)}
+	}()
+	var events []codexRelayEvent
+	select {
+	case out := <-scanCh:
+		events = out.events
+	case <-ctx.Done():
+		go func() { <-scanCh }()
+		return 0, ctx.Err()
+	}
 	if len(events) == 0 {
-		return 0
+		return 0, nil
 	}
+
 	currentTurnID := ""
 	toolNames := make(map[string]string)
 	applied := 0
 	for _, ev := range events {
+		if err := ctx.Err(); err != nil {
+			return applied, err
+		}
 		var eventName string
 		var data map[string]interface{}
 		switch ev.kind {
@@ -173,6 +369,9 @@ func (h *Handlers) hydrateCodexProjectionFromDisk(backendID, sessionID string) i
 		})
 		applied++
 	}
+	if err := ctx.Err(); err != nil {
+		return applied, err
+	}
 	// Completed transcript should settle execution to idle.
 	h.publishEvent(LogicalEvent{
 		SessionID: sessionID,
@@ -182,7 +381,7 @@ func (h *Handlers) hydrateCodexProjectionFromDisk(backendID, sessionID string) i
 		Broadcast: false,
 		Offline:   true,
 	})
-	return applied
+	return applied, nil
 }
 
 // ProjectionSnapshot returns a deep copy of the session projection (pull path accessor).

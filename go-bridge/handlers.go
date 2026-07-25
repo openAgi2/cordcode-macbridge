@@ -87,6 +87,10 @@ type Handlers struct {
 	cleanupStop chan struct{}
 	// shutdownOnce makes Handlers.Shutdown idempotent.
 	shutdownOnce sync.Once
+
+	// coldHydrateFlights coalesces concurrent get_session_projection cold pulls so disk
+	// hydrate runs once per session (design §10.5 ring 1). Guarded by mu.
+	coldHydrateFlights map[string]*coldHydrateFlight
 }
 
 type opencodeSessionOptions struct {
