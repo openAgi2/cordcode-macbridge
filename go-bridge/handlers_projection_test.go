@@ -136,6 +136,29 @@ func waitForProjectionTurns(t *testing.T, h *Handlers, backendID, sessionID stri
 	}
 }
 
+// waitForColdHydrateDrained blocks until the background hydrate goroutine has exited (its
+// single-flight slot is cleared). Tests that install coldHydrate*TestHook MUST drain before
+// returning, otherwise a still-running goroutine from test N can call the package-global hook
+// that test N+1 has since overwritten — cross-test contamination via the shared hook var.
+func waitForColdHydrateDrained(t *testing.T, h *Handlers, backendID, sessionID string, deadline time.Duration) {
+	t.Helper()
+	key := backendID + "\x00" + sessionID
+	stop := time.After(deadline)
+	for {
+		h.mu.Lock()
+		_, exists := h.coldHydrateFlights[key]
+		h.mu.Unlock()
+		if !exists {
+			return
+		}
+		select {
+		case <-stop:
+			t.Fatalf("cold-hydrate goroutine did not drain within %s (slot still occupied)", deadline)
+		case <-time.After(2 * time.Millisecond):
+		}
+	}
+}
+
 // TestHandleGetSessionProjectionColdHydrateWaitsPastFormerTimeoutBudget: design §10.5.6 scheme A.
 // Under the segmented model the RPC returns a non-empty PARTIAL once the first content turn
 // lands — it no longer waits for the full scan. A hydrate whose start is delayed (here 2s) must
@@ -404,4 +427,172 @@ func TestHandleGetSessionProjectionColdHydrateReal26MBRollout(t *testing.T) {
 			proj.SyncRev, len(proj.Turns), elapsed)
 	}
 	t.Logf("26MB cold-hydrate ok: events-head syncRev=%d turns=%d elapsed=%s", proj.SyncRev, len(proj.Turns), elapsed)
+}
+
+// TestHandleGetSessionProjectionColdHydrateSegmentedFirstTurnsFirst: design §10.5.6 scheme A.
+// A multi-turn rollout scans in turn-bounded segments; earlier turns MUST enter the reducer
+// BEFORE the full scan completes. Block the goroutine at the end of segment 1 and observe the
+// reducer holds exactly turn 1 (not all turns) — direct evidence of incremental segmentation.
+func TestHandleGetSessionProjectionColdHydrateSegmentedFirstTurnsFirst(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	const turns = 4
+	writeProjectionHydrateRollout(t, path, turns)
+
+	release := make(chan struct{})
+	reachedSeg1 := make(chan struct{}, 1)
+	prev := coldHydrateSegmentTestHook
+	coldHydrateSegmentTestHook = func(ctx context.Context, segmentIdx, contentTurns int) {
+		if segmentIdx >= 1 {
+			select {
+			case reachedSeg1 <- struct{}{}:
+			default:
+			}
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+		}
+	}
+	t.Cleanup(func() { coldHydrateSegmentTestHook = prev })
+
+	handlers := NewHandlers()
+	handlers.RegisterAgent("codex", &fakeAgent{name: "codex", transcriptPath: path})
+
+	conn := &readFileCaptureConn{}
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": "cold-seg"})
+	msg := WireMessage{RequestID: "r-seg", BackendID: "codex", Method: "get_session_projection", Params: params}
+	handlers.handleGetSessionProjection(conn, msg, nil)
+	if conn.err != nil {
+		t.Fatalf("unexpected RPC error: %+v", conn.err)
+	}
+
+	// Wait until the goroutine has finished segment 1 and is blocked before segment 2.
+	select {
+	case <-reachedSeg1:
+	case <-time.After(3 * time.Second):
+		t.Fatal("segment hook never reached segment 1")
+	}
+	// While blocked after segment 1: turn 1 is in the reducer, turns 2..N are NOT yet — proving
+	// earlier turns entered the reducer before the full scan completed (segmented hydrate).
+	if got := handlers.eventPublisher.ProjectionTurnCount("codex", "cold-seg"); got != 1 {
+		t.Fatalf("while blocked after segment 1, reducer turns = %d, want exactly 1 (segmented scan should not have reached later turns)", got)
+	}
+
+	close(release)
+	waitForProjectionTurns(t, handlers, "codex", "cold-seg", turns, 3*time.Second)
+	// Drain the background goroutine BEFORE returning so its trailing segment-hook calls cannot
+	// contaminate a later test via the shared package-global hook var.
+	waitForColdHydrateDrained(t, handlers, "codex", "cold-seg", 3*time.Second)
+}
+
+// TestHandleGetSessionProjectionColdHydratePartialHasContentTurn: design §10.5.6 scheme A
+// contract — the served PARTIAL must contain at least one turn with real user/assistant content,
+// never an empty head-0 shell and never a bare task_started shell. Capture the partial while the
+// background scan is still blocked after segment 1 so the assertion targets the partial itself.
+func TestHandleGetSessionProjectionColdHydratePartialHasContentTurn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	writeProjectionHydrateRollout(t, path, 3)
+
+	release := make(chan struct{})
+	reachedSeg1 := make(chan struct{}, 1)
+	prev := coldHydrateSegmentTestHook
+	coldHydrateSegmentTestHook = func(ctx context.Context, segmentIdx, contentTurns int) {
+		if segmentIdx >= 1 {
+			select {
+			case reachedSeg1 <- struct{}{}:
+			default:
+			}
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+		}
+	}
+	t.Cleanup(func() { coldHydrateSegmentTestHook = prev })
+
+	handlers := NewHandlers()
+	handlers.RegisterAgent("codex", &fakeAgent{name: "codex", transcriptPath: path})
+
+	conn := &readFileCaptureConn{}
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": "cold-partial"})
+	msg := WireMessage{RequestID: "r-partial", BackendID: "codex", Method: "get_session_projection", Params: params}
+	handlers.handleGetSessionProjection(conn, msg, nil)
+	if conn.err != nil {
+		t.Fatalf("unexpected RPC error: %+v", conn.err)
+	}
+	<-reachedSeg1 // freeze the partial so we assert what was actually served
+
+	dataMap, ok := conn.data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("served data not a map: %T (empty shell?)", conn.data)
+	}
+	proj, ok := dataMap["projection"].(SessionProjection)
+	if !ok {
+		t.Fatalf("served partial missing projection: %+v (empty shell?)", dataMap)
+	}
+	if proj.SyncRev <= 0 || len(proj.Turns) == 0 {
+		t.Fatalf("served partial is an empty head-0 shell (forbidden §10.5.6): %+v", proj)
+	}
+	hasContent := false
+	for _, turn := range proj.Turns {
+		if (turn.User != nil && len(turn.User.Parts) > 0) || (turn.Assistant != nil && len(turn.Assistant.Parts) > 0) {
+			hasContent = true
+			break
+		}
+	}
+	if !hasContent {
+		t.Fatalf("served partial turns carry no user/assistant content (bare shells): %+v", proj)
+	}
+
+	close(release)
+	waitForProjectionTurns(t, handlers, "codex", "cold-partial", 3, 3*time.Second)
+	waitForColdHydrateDrained(t, handlers, "codex", "cold-partial", 3*time.Second)
+}
+
+// TestHandleGetSessionProjectionColdHydrateFirstSegmentTimeoutReturnsError: design §10.5.6
+// scheme A — when even the first content turn cannot be produced within the cold-hydrate budget
+// (an extreme rollout whose first segment cannot scan in time), the RPC MUST return
+// projection.hydrate_timeout, NOT an empty success shell. Scheme A never trades honesty for a
+// fast-but-empty answer.
+func TestHandleGetSessionProjectionColdHydrateFirstSegmentTimeoutReturnsError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rollout.jsonl")
+	writeProjectionHydrateRollout(t, path, 3)
+
+	prevTimeout := coldHydrateTimeout
+	coldHydrateTimeout = 150 * time.Millisecond
+	t.Cleanup(func() { coldHydrateTimeout = prevTimeout })
+
+	prevHook := coldHydrateTestHook
+	coldHydrateTestHook = func(ctx context.Context) {
+		<-ctx.Done() // simulate a first segment that cannot complete within budget
+	}
+	t.Cleanup(func() { coldHydrateTestHook = prevHook })
+
+	handlers := NewHandlers()
+	handlers.RegisterAgent("codex", &fakeAgent{name: "codex", transcriptPath: path})
+
+	conn := &readFileCaptureConn{}
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": "cold-first-seg-timeout", "sinceRev": 0})
+	msg := WireMessage{RequestID: "r-fst", BackendID: "codex", Method: "get_session_projection", Params: params}
+
+	start := time.Now()
+	handlers.handleGetSessionProjection(conn, msg, nil)
+	elapsed := time.Since(start)
+
+	if conn.err == nil {
+		t.Fatalf("expected projection.hydrate_timeout when first segment cannot complete; got success data=%T", conn.data)
+	}
+	if conn.err.Code != "projection.hydrate_timeout" {
+		t.Fatalf("error code = %q, want projection.hydrate_timeout (message %q)", conn.err.Code, conn.err.Message)
+	}
+	if conn.data != nil {
+		t.Fatalf("first-segment timeout must not pair data with error (no empty shell): data=%T", conn.data)
+	}
+	// Reducer must still be empty — no content turn was ever produced.
+	if handlers.eventPublisher.ProjectionHasContentTurn("codex", "cold-first-seg-timeout") {
+		t.Fatalf("reducer has a content turn despite first-segment timeout — timeout path is wrong")
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("RPC hung %s; expected to fail near the %s budget", elapsed, coldHydrateTimeout)
+	}
 }
