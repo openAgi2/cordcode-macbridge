@@ -23,12 +23,13 @@ type GetSessionProjectionParams struct {
 }
 
 // defaultColdHydrateTimeout is the budget a cold pull waits for the FIRST hydrate segment to
-// produce a non-empty partial (design §10.5.6 scheme A). The first turn-bounded segment of even
-// a huge rollout reduces in well under this bound, so a cold pull returns a non-empty partial
-// fast; the bound is a worst-case backstop for a stuck/corrupt rollout that cannot produce even
-// one content turn. Distinct from the removed 750ms "serve empty head" path: on expiry we return
-// an explicit RPC error, never an empty success shell.
-const defaultColdHydrateTimeout = 30 * time.Second
+// produce a non-empty partial (design §10.5.6 scheme A + §10.5.7 修法 2). The first turn-bounded
+// segment of even a huge rollout reduces in well under this bound, so a cold pull returns a
+// non-empty partial fast; the bound is a worst-case backstop for a stuck/corrupt source that
+// cannot produce even one content turn. Owner 2026-07-25 拍板 X=15s (protocol cold-pull budget);
+// distinct from the removed 750ms "serve empty head" path: on expiry we return an explicit RPC
+// error, never an empty success shell.
+const defaultColdHydrateTimeout = 15 * time.Second
 
 // coldHydrateTimeout is the live first-segment budget. Tests may lower it; production stays at
 // the default. Scheme A does NOT raise this to "wait longer" — it returns a partial FAST instead.
@@ -160,18 +161,22 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 	// Subscribe so the conn receives subsequent projection_patch push frames (WP5 emission).
 	h.subscribeConnToSession(conn, msg, params.SessionID)
 
-	if msg.BackendID == "codex" {
-		if err := h.ensureCodexProjectionHydrated(msg.BackendID, params.SessionID); err != nil {
-			code := "projection.hydrate_failed"
-			if errors.Is(err, errColdHydrateTimeout) {
-				code = "projection.hydrate_timeout"
-			}
-			conn.SendResult(msg.RequestID, nil, &WireError{
-				Code:    code,
-				Message: err.Error(),
-			})
-			return
+	// ALL backends go through hydrate (design §10.5.7 修法 1 — no codex hardcode). A backend not
+	// yet migrated to projection returns an honest error; it must NEVER fall through to an empty
+	// head-0 shell (§10.5.1).
+	if err := h.ensureProjectionHydrated(msg.BackendID, params.SessionID); err != nil {
+		code := "projection.hydrate_failed"
+		switch {
+		case errors.Is(err, errColdHydrateTimeout):
+			code = "projection.hydrate_timeout"
+		case errors.Is(err, errProjectionBackendNotMigrated):
+			code = "projection.not_migrated"
 		}
+		conn.SendResult(msg.RequestID, nil, &WireError{
+			Code:    code,
+			Message: err.Error(),
+		})
+		return
 	}
 
 	headRev := h.eventPublisher.ProjectionHeadRev(msg.BackendID, params.SessionID)
@@ -200,16 +205,37 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 	conn.SendResult(msg.RequestID, map[string]interface{}{"projection": proj}, nil)
 }
 
-// ensureCodexProjectionHydrated blocks until the session reducer holds a non-empty partial
-// projection (a turn with real user/assistant content) that get_session_projection may serve,
-// or until the first-segment budget elapses (design §10.5.6 scheme A). On success it returns
-// nil EVEN IF the full disk scan is still running in the background — the caller snapshots the
-// reducer (a real partial), and remaining turns stream to subscribed clients as projection_patch
-// deltas. On a stuck rollout that cannot produce even one content turn within coldHydrateTimeout
-// it returns errColdHydrateTimeout so the RPC fails honestly instead of serving an empty shell.
+// errProjectionBackendNotMigrated is returned for a backend that has no projection cold-hydrate
+// producer yet (e.g. opencode, which is HTTP/SQLite-backed with no transcript file). The RPC
+// fails honestly with code projection.not_migrated instead of serving an empty head-0 shell
+// (§10.5.1 / §10.5.7 修法 1).
+var errProjectionBackendNotMigrated = errors.New("backend not yet migrated to session projection")
+
+// selectHydrateProducer returns the cold-hydrate event producer for a backend, or nil if the
+// backend is not yet migrated to projection (design §10.5.7 修法 1). codex + claude are file
+// transcript backends; opencode (HTTP/SQLite) is deferred to a separate sub-task.
+func (h *Handlers) selectHydrateProducer(backendID string) func(ctx context.Context, backendID, sessionID string, emit func(projectionHydrateEvent) bool) error {
+	switch backendID {
+	case "codex":
+		return h.produceCodexHydrateEvents
+	case "claude", "claudecode":
+		return h.produceClaudeHydrateEvents
+	default:
+		return nil // opencode / unknown — not yet migrated to projection
+	}
+}
+
+// ensureProjectionHydrated blocks until the session reducer holds a non-empty partial projection
+// (a turn with real user/assistant content) that get_session_projection may serve, or until the
+// first-segment budget elapses (design §10.5.6 scheme A + §10.5.7 修法 1 full-backend). On success
+// it returns nil EVEN IF the full source scan is still running in the background — the caller
+// snapshots the reducer (a real partial), and remaining turns stream to subscribed clients as
+// projection_patch deltas. On a stuck source that cannot produce even one content turn within
+// coldHydrateTimeout it returns errColdHydrateTimeout; a backend with no hydrate producer returns
+// errProjectionBackendNotMigrated. Either way the RPC fails honestly, never an empty shell.
 //
 // Concurrent cold pulls share a single flight; joiners wait on the leader's partialReady.
-func (h *Handlers) ensureCodexProjectionHydrated(backendID, sessionID string) error {
+func (h *Handlers) ensureProjectionHydrated(backendID, sessionID string) error {
 	if h == nil || h.eventPublisher == nil || sessionID == "" {
 		return nil
 	}
@@ -217,6 +243,10 @@ func (h *Handlers) ensureCodexProjectionHydrated(backendID, sessionID string) er
 	// in-flight background scan). Serve immediately without touching the flight.
 	if h.eventPublisher.ProjectionTurnCount(backendID, sessionID) > 0 {
 		return nil
+	}
+	producer := h.selectHydrateProducer(backendID)
+	if producer == nil {
+		return errProjectionBackendNotMigrated
 	}
 
 	h.mu.Lock()
@@ -239,7 +269,7 @@ func (h *Handlers) ensureCodexProjectionHydrated(backendID, sessionID string) er
 	if exists {
 		return h.joinColdHydrateFlight(backendID, sessionID, flight)
 	}
-	return h.leadColdHydrateFlight(backendID, sessionID, key, flight)
+	return h.leadColdHydrateFlight(backendID, sessionID, key, flight, producer)
 }
 
 // joinColdHydrateFlight waits for a leader's partial (or terminal outcome) without starting a
@@ -277,7 +307,7 @@ func (h *Handlers) joinColdHydrateFlight(backendID, sessionID string, flight *co
 // first non-empty partial within the cold-hydrate budget. The goroutine continues after this
 // returns so remaining turns stream as projection_patch deltas. On first-segment timeout it
 // cancels the goroutine, frees the single-flight slot, and returns errColdHydrateTimeout.
-func (h *Handlers) leadColdHydrateFlight(backendID, sessionID, key string, flight *coldHydrateFlight) error {
+func (h *Handlers) leadColdHydrateFlight(backendID, sessionID, key string, flight *coldHydrateFlight, produce func(ctx context.Context, backendID, sessionID string, emit func(projectionHydrateEvent) bool) error) error {
 	partialBudget := coldHydrateTimeout
 	if partialBudget <= 0 {
 		partialBudget = defaultColdHydrateTimeout
@@ -290,10 +320,9 @@ func (h *Handlers) leadColdHydrateFlight(backendID, sessionID, key string, fligh
 	bgCtx, bgCancel := context.WithTimeout(context.Background(), bgBudget)
 
 	go func() {
-		produce := func(ctx context.Context, emit func(projectionHydrateEvent) bool) error {
-			return h.produceCodexHydrateEvents(ctx, backendID, sessionID, emit)
-		}
-		n, err := h.hydrateProjectionFromSource(partialCtx, bgCtx, backendID, sessionID, flight, produce)
+		n, err := h.hydrateProjectionFromSource(partialCtx, bgCtx, backendID, sessionID, flight, func(ctx context.Context, emit func(projectionHydrateEvent) bool) error {
+			return produce(ctx, backendID, sessionID, emit)
+		})
 		bgCancel()
 		partialCancel()
 		// Free the single-flight slot BEFORE unblocking waiters so a retry that observed the
