@@ -1,8 +1,11 @@
 package gobridge
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -113,6 +116,58 @@ func writeProjectionHydrateRollout(t *testing.T, path string, turns int) {
 		b.WriteString(`{"timestamp":"2026-01-01T00:00:00Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"` + turnID + `"}}` + "\n")
 	}
 	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeClaudeProjectionRollout builds a multi-turn claude session .jsonl with the given number of
+// turns and assistantTextBytes of assistant text per turn (controls total file size). Each turn is
+// a user prompt followed by an assistant response (stop_reason end_turn). Written directly to disk
+// line-by-line so multi-MB fixtures do not allocate one giant string.
+func writeClaudeProjectionRollout(t *testing.T, path string, turns, assistantTextBytes int) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	bw := bufio.NewWriter(f)
+	asstText := strings.Repeat("a", assistantTextBytes)
+	for i := 0; i < turns; i++ {
+		writeClaudeRolloutLine(t, bw, "user", fmt.Sprintf("user-msg-%d", i+1), "user", "",
+			[]claudeRelayContentBlock{{Type: "text", Text: "question " + strconv.Itoa(i+1)}})
+		writeClaudeRolloutLine(t, bw, "assistant", fmt.Sprintf("asst-msg-%d", i+1), "assistant", "end_turn",
+			[]claudeRelayContentBlock{{Type: "text", Text: asstText}})
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeClaudeRolloutLine encodes one claude transcript entry as a JSONL line.
+func writeClaudeRolloutLine(t *testing.T, w io.Writer, entryType, msgID, role, stopReason string, blocks []claudeRelayContentBlock) {
+	t.Helper()
+	contentJSON, err := json.Marshal(blocks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := map[string]interface{}{
+		"id":      msgID,
+		"role":    role,
+		"content": json.RawMessage(contentJSON),
+	}
+	if stopReason != "" {
+		msg["stop_reason"] = stopReason
+	}
+	line := map[string]interface{}{"type": entryType, "message": msg}
+	b, err := json.Marshal(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write(append(b, '\n')); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -594,5 +649,199 @@ func TestHandleGetSessionProjectionColdHydrateFirstSegmentTimeoutReturnsError(t 
 	}
 	if elapsed > 2*time.Second {
 		t.Fatalf("RPC hung %s; expected to fail near the %s budget", elapsed, coldHydrateTimeout)
+	}
+}
+
+// §10.5.7 修法 1 — claude cold-hydrate matrix. Each case registers a claudecode agent whose
+// TranscriptPath points at a generated .jsonl, cold-pulls, and asserts a non-empty partial is
+// served (never an empty head), the full turn count arrives via the background goroutine, and the
+// first segment lands well within the 15s budget.
+func TestClaudeColdHydrateMatrix(t *testing.T) {
+	cases := []struct {
+		name             string
+		turns            int
+		asstTextBytes    int
+		expectTotalBytes string // human label for the coverage matrix (declared, not asserted)
+	}{
+		{"small_lt_1MB", 3, 100, "<1MB"},
+		{"medium_1_to_10MB", 10, 100_000, "1-10MB"},
+		{"large_10_to_100MB", 10, 1_000_000, "10-100MB"},
+		// 超大 (>100MB) is covered by the owner real-device track (§10.5.7.5 owner 真机轨);
+		// a unit test cannot faithfully own-size it (CI disk/time). The partial-return property
+		// validated here (first segment < 15s regardless of total size) scales to 超大 identically.
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "claude-"+tc.name+".jsonl")
+			writeClaudeProjectionRollout(t, path, tc.turns, tc.asstTextBytes)
+
+			handlers := NewHandlers()
+			handlers.RegisterAgent("claudecode", &fakeAgent{name: "claudecode", transcriptPath: path})
+
+			conn := &readFileCaptureConn{}
+			params, _ := json.Marshal(map[string]interface{}{"sessionId": "claude-" + tc.name})
+			msg := WireMessage{RequestID: "r-" + tc.name, BackendID: "claude", Method: "get_session_projection", Params: params}
+
+			start := time.Now()
+			handlers.handleGetSessionProjection(conn, msg, nil)
+			elapsed := time.Since(start)
+
+			if conn.err != nil {
+				t.Fatalf("unexpected RPC error: %+v", conn.err)
+			}
+			dataMap, ok := conn.data.(map[string]interface{})
+			if !ok {
+				t.Fatalf("served data not a map: %T (empty shell?)", conn.data)
+			}
+			proj, ok := dataMap["projection"].(SessionProjection)
+			if !ok || len(proj.Turns) == 0 || proj.SyncRev <= 0 {
+				t.Fatalf("claude %s: served empty head-0 partial (forbidden §10.5.1): %+v", tc.name, dataMap["projection"])
+			}
+			// First segment (the partial) must land within the 15s protocol budget (§10.5.7 修法 2).
+			if elapsed >= defaultColdHydrateTimeout {
+				t.Fatalf("claude %s: partial served after %s, within-budget first segment required (< %s)",
+					tc.name, elapsed, defaultColdHydrateTimeout)
+			}
+			t.Logf("claude %s (%s): partial in %s, turns=%d", tc.name, tc.expectTotalBytes, elapsed, len(proj.Turns))
+			// Background goroutine finishes the remaining turns.
+			waitForProjectionTurns(t, handlers, "claude", "claude-"+tc.name, tc.turns, 30*time.Second)
+			waitForColdHydrateDrained(t, handlers, "claude", "claude-"+tc.name, 10*time.Second)
+		})
+	}
+}
+
+// TestClaudeColdHydrateHonestEmpty: a claude session with a real but content-empty transcript
+// (only resume-meta / non-meaningful entries) returns an honest empty projection — NOT an error,
+// NOT a fake content turn. Distinct from the forbidden empty-head-on-failure.
+func TestClaudeColdHydrateHonestEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "empty.jsonl")
+	// A session_meta-only file (no user/assistant content).
+	if err := os.WriteFile(path, []byte(`{"type":"system","message":null}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	handlers := NewHandlers()
+	handlers.RegisterAgent("claudecode", &fakeAgent{name: "claudecode", transcriptPath: path})
+
+	conn := &readFileCaptureConn{}
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": "claude-empty"})
+	msg := WireMessage{RequestID: "r-empty", BackendID: "claude", Method: "get_session_projection", Params: params}
+	handlers.handleGetSessionProjection(conn, msg, nil)
+
+	if conn.err != nil {
+		t.Fatalf("honest-empty session must NOT error: %+v", conn.err)
+	}
+	dataMap, ok := conn.data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("data not a map: %T", conn.data)
+	}
+	proj, ok := dataMap["projection"].(SessionProjection)
+	if !ok {
+		t.Fatalf("expected honest empty projection, got %+v", dataMap)
+	}
+	if len(proj.Turns) != 0 || proj.SyncRev != 0 {
+		t.Fatalf("honest-empty must be 0 turns / syncRev 0, got %+v", proj)
+	}
+}
+
+// TestClaudeColdHydrateMissingFileHonestError: a transcript path that does not exist must surface
+// as an honest hydrate error (projection.hydrate_failed), NEVER an empty head-0 success shell
+// (§10.5.1). Distinct from honest-empty (which is a real, scanned, content-less session).
+func TestClaudeColdHydrateMissingFileHonestError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "does-not-exist.jsonl")
+	handlers := NewHandlers()
+	handlers.RegisterAgent("claudecode", &fakeAgent{name: "claudecode", transcriptPath: path})
+
+	conn := &readFileCaptureConn{}
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": "claude-missing"})
+	msg := WireMessage{RequestID: "r-missing", BackendID: "claude", Method: "get_session_projection", Params: params}
+	handlers.handleGetSessionProjection(conn, msg, nil)
+
+	if conn.err == nil {
+		t.Fatalf("missing transcript must surface an honest error, got success data=%T", conn.data)
+	}
+	if conn.data != nil {
+		t.Fatalf("error must not pair with data (no empty shell): data=%T", conn.data)
+	}
+	if conn.err.Code != "projection.hydrate_failed" {
+		t.Fatalf("error code = %q, want projection.hydrate_failed", conn.err.Code)
+	}
+}
+
+// TestProjectionNotMigratedForUnsupportedBackend: a backend with no projection cold-hydrate
+// producer (opencode is HTTP/SQLite-backed; deferred to a separate sub-task) MUST return an honest
+// projection.not_migrated error — never fall through to an empty head-0 shell (§10.5.7 修法 1).
+func TestProjectionNotMigratedForUnsupportedBackend(t *testing.T) {
+	for _, backend := range []string{"opencode", "madeup-backend"} {
+		handlers := NewHandlers()
+		conn := &readFileCaptureConn{}
+		params, _ := json.Marshal(map[string]interface{}{"sessionId": "s-" + backend})
+		msg := WireMessage{RequestID: "r-" + backend, BackendID: backend, Method: "get_session_projection", Params: params}
+		handlers.handleGetSessionProjection(conn, msg, nil)
+		if conn.err == nil {
+			t.Fatalf("%s: expected projection.not_migrated, got success data=%T", backend, conn.data)
+		}
+		if conn.data != nil {
+			t.Fatalf("%s: error must not pair with data (no empty shell): %T", backend, conn.data)
+		}
+		if conn.err.Code != "projection.not_migrated" {
+			t.Fatalf("%s: error code = %q, want projection.not_migrated", backend, conn.err.Code)
+		}
+	}
+}
+
+// TestClaudeEntryToProjectionEvents unit-tests the claude transcript → projection-event mapper:
+// user text starts a turn (user_message), assistant blocks emit text_delta/reasoning_delta/
+// tool_started, a user tool_result emits tool_finished, and a final stop_reason emits a
+// segment-boundary turn_completed.
+func TestClaudeEntryToProjectionEvents(t *testing.T) {
+	currentTurnID := ""
+	// user prompt
+	user := claudeTranscriptRelayEntry{Type: "user", Message: &struct {
+		ID         string          `json:"id"`
+		Role       string          `json:"role"`
+		StopReason string          `json:"stop_reason"`
+		Content    json.RawMessage `json:"content"`
+	}{ID: "u1", Role: "user", Content: json.RawMessage(`[{"type":"text","text":"hello"}]`)}}
+	evs := claudeEntryToProjectionEvents(user, &currentTurnID)
+	if len(evs) != 1 || evs[0].Event != "user_message" || evs[0].Data["turnId"] != "u1" {
+		t.Fatalf("user entry → %+v", evs)
+	}
+	if currentTurnID != "u1" {
+		t.Fatalf("currentTurnID = %q, want u1", currentTurnID)
+	}
+	// assistant text + thinking + tool_use + final stop
+	asst := claudeTranscriptRelayEntry{Type: "assistant", Message: &struct {
+		ID         string          `json:"id"`
+		Role       string          `json:"role"`
+		StopReason string          `json:"stop_reason"`
+		Content    json.RawMessage `json:"content"`
+	}{ID: "a1", Role: "assistant", StopReason: "end_turn", Content: json.RawMessage(`[{"type":"text","text":"hi"},{"type":"thinking","thinking":"plan"},{"type":"tool_use","id":"tool-1","name":"Read","input":{"path":"x"}}]`)}}
+	evs = claudeEntryToProjectionEvents(asst, &currentTurnID)
+	// expect: text_delta, reasoning_delta, tool_started, turn_completed (TurnDone)
+	if len(evs) != 4 {
+		t.Fatalf("assistant entry → %d events: %+v", len(evs), evs)
+	}
+	if evs[0].Event != "text_delta" || evs[0].Data["itemId"] != "u1" {
+		t.Fatalf("text_delta must attribute to active turn u1: %+v", evs[0])
+	}
+	if evs[1].Event != "reasoning_delta" {
+		t.Fatalf("want reasoning_delta, got %+v", evs[1])
+	}
+	if evs[2].Event != "tool_started" || evs[2].Data["itemId"] != "tool-1" {
+		t.Fatalf("tool_started with real tool id: %+v", evs[2])
+	}
+	if evs[3].Event != "turn_completed" || !evs[3].TurnDone {
+		t.Fatalf("final stop must emit segment-boundary turn_completed: %+v", evs[3])
+	}
+	// user tool_result → tool_finished matched by tool_use_id
+	tr := claudeTranscriptRelayEntry{Type: "user", Message: &struct {
+		ID         string          `json:"id"`
+		Role       string          `json:"role"`
+		StopReason string          `json:"stop_reason"`
+		Content    json.RawMessage `json:"content"`
+	}{ID: "u2", Role: "user", Content: json.RawMessage(`[{"type":"tool_result","tool_use_id":"tool-1","content":"file body"}]`)}}
+	evs = claudeEntryToProjectionEvents(tr, &currentTurnID)
+	if len(evs) != 1 || evs[0].Event != "tool_finished" || evs[0].Data["itemId"] != "tool-1" {
+		t.Fatalf("tool_result → tool_finished matched by tool_use_id: %+v", evs)
 	}
 }
