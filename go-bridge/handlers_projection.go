@@ -22,44 +22,116 @@ type GetSessionProjectionParams struct {
 	LimitTurns int    `json:"limitTurns,omitempty"`
 }
 
-// defaultColdHydrateTimeout is the far-horizon budget for disk→reducer hydrate on a cold
-// pull (design §10.5 ring 1 close-out). Normal huge rollouts finish in hundreds of ms; this
-// bound exists so a stuck/corrupt rollout cannot permanently occupy a single-flight slot or
-// leave the RPC hanging. Distinct from the removed 750ms "serve empty head" path: on expiry
-// we return an explicit RPC error, never an empty success shell.
+// defaultColdHydrateTimeout is the budget a cold pull waits for the FIRST hydrate segment to
+// produce a non-empty partial (design §10.5.6 scheme A). The first turn-bounded segment of even
+// a huge rollout reduces in well under this bound, so a cold pull returns a non-empty partial
+// fast; the bound is a worst-case backstop for a stuck/corrupt rollout that cannot produce even
+// one content turn. Distinct from the removed 750ms "serve empty head" path: on expiry we return
+// an explicit RPC error, never an empty success shell.
 const defaultColdHydrateTimeout = 30 * time.Second
 
-// coldHydrateTimeout is the live budget. Tests may lower it; production stays at the default.
+// coldHydrateTimeout is the live first-segment budget. Tests may lower it; production stays at
+// the default. Scheme A does NOT raise this to "wait longer" — it returns a partial FAST instead.
 var coldHydrateTimeout = defaultColdHydrateTimeout
 
-// errColdHydrateTimeout is returned when hydrate does not finish within coldHydrateTimeout.
+// defaultColdHydrateBackgroundBudget bounds the background goroutine that finishes the remaining
+// segments AFTER a partial has been served. It is intentionally much larger than
+// coldHydrateTimeout so a multi-second full reduce of a huge rollout can complete and stream the
+// rest as projection_patch deltas, while still bounding a stuck scan so it cannot occupy a
+// goroutine + single-flight slot forever.
+const defaultColdHydrateBackgroundBudget = 5 * time.Minute
+
+// coldHydrateBackgroundBudget is the live background budget. Tests may lower it.
+var coldHydrateBackgroundBudget = defaultColdHydrateBackgroundBudget
+
+// errColdHydrateTimeout is returned when the first hydrate segment cannot be produced within
+// coldHydrateTimeout (the cold pull then fails honestly instead of serving an empty shell).
 var errColdHydrateTimeout = errors.New("projection cold-hydrate timed out")
 
-// coldHydrateFlight coalesces concurrent first pulls for the same session so disk→reducer
-// hydrate runs once. Design §10.5 ring 1: pull waits for hydrate completion; never races a
-// short timeout against an in-flight scan and serves an empty head-0 shell.
+// coldHydrateFlight coalesces concurrent first pulls for the same session and tracks the
+// segmented cold-hydrate lifecycle (design §10.5.6 scheme A). partialReady is closed once the
+// reducer holds a turn with real user/assistant content after a segment — the point at which a
+// cold pull returns a non-empty partial without waiting for the full scan (or, for an honest
+// empty session, once the scan completes with zero content turns). done is closed when the
+// background scan goroutine exits. On a terminal outcome the goroutine closes partialReady with
+// a recorded error so a waiter never blocks forever.
 type coldHydrateFlight struct {
-	done   chan struct{}
-	finish sync.Once
-	n      int
-	err    error
+	partialReady chan struct{}
+	done         chan struct{}
+	partialOnce  sync.Once
+	finish       sync.Once
+
+	mu         sync.Mutex
+	partialErr error // error at the partialReady point (nil = partial ok to serve)
+	finalN     int   // events applied when the goroutine exits
+	finalErr   error // terminal error after the background scan completes
 }
 
-func (f *coldHydrateFlight) complete(n int, err error) {
+func newColdHydrateFlight() *coldHydrateFlight {
+	return &coldHydrateFlight{
+		partialReady: make(chan struct{}),
+		done:         make(chan struct{}),
+	}
+}
+
+// signalPartial marks the flight partial-ready (idempotent). err is recorded so a waiter unblocks
+// with the failure instead of hanging when the goroutine could not produce a partial.
+func (f *coldHydrateFlight) signalPartial(err error) {
+	if f == nil {
+		return
+	}
+	f.partialOnce.Do(func() {
+		if err != nil {
+			f.mu.Lock()
+			f.partialErr = err
+			f.mu.Unlock()
+		}
+		close(f.partialReady)
+	})
+}
+
+func (f *coldHydrateFlight) partialError() error {
+	if f == nil {
+		return nil
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.partialErr
+}
+
+// finishFlight marks the background scan as exited; also unblocks any partialReady waiter that
+// never observed a partial. Idempotent.
+func (f *coldHydrateFlight) finishFlight(n int, err error) {
 	if f == nil {
 		return
 	}
 	f.finish.Do(func() {
-		f.n = n
-		f.err = err
+		f.mu.Lock()
+		f.finalN = n
+		f.finalErr = err
+		f.mu.Unlock()
+		f.partialOnce.Do(func() { close(f.partialReady) })
 		close(f.done)
 	})
 }
 
-// coldHydrateTestHook, when non-nil, runs at the start of hydrateCodexProjectionFromDisk.
-// It receives the hydrate context so tests can block until cancel (hard-timeout path) or
-// inject bounded delay (still-within-budget wait path).
+func (f *coldHydrateFlight) finalOutcome() (int, error) {
+	if f == nil {
+		return 0, nil
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.finalN, f.finalErr
+}
+
+// coldHydrateTestHook, when non-nil, runs once at the start of the hydrate goroutine with the
+// first-segment ctx. Tests block until cancel (hard-timeout path) or inject bounded delay.
 var coldHydrateTestHook func(context.Context)
+
+// coldHydrateSegmentTestHook, when non-nil, runs after each turn-bounded segment (task_complete)
+// is applied to the reducer. Tests use it to observe incremental reducer state mid-scan, proving
+// earlier turns enter the reducer before the full scan completes (design §10.5.6 scheme A).
+var coldHydrateSegmentTestHook func(ctx context.Context, segmentIdx, contentTurns int)
 
 // handleGetSessionProjection returns the authoritative SessionProjection for a session, read
 // from the ProjectionReducer's in-memory state — the SAME state push reads (design §6.4 rule 4:
@@ -68,14 +140,15 @@ var coldHydrateTestHook func(context.Context)
 //
 // The reducer is fed by the active Codex file-relay. After Mac restart the in-memory projection
 // is empty even when the rollout on disk is complete (file-relay starts at EOF). Cold pulls
-// therefore one-shot hydrate from disk **and wait until hydrate finishes** before answering
-// (design §5.3 hydrate-on-cold-start; §10.5 ring 1: never serve empty head-0 while hydrate is
-// incomplete). Clients already carry an 8s pull cap; a multi-second reduce for a huge rollout
-// is acceptable and far cheaper than concurrent full-history fallback.
+// therefore hydrate from disk in turn-bounded segments (design §10.5.6 scheme A): the FIRST
+// segment that yields a content turn is served as a non-empty partial WITHOUT waiting for the
+// full scan, and the remaining segments stream to subscribed clients as projection_patch deltas
+// from a background goroutine. An honest empty session (no rollout) still returns an empty
+// projection at head 0.
 //
-// If hydrate cannot finish within coldHydrateTimeout (default 30s), the RPC returns an explicit
-// error — not an empty projection — and the single-flight slot is released so a later pull can
-// retry.
+// If hydrate cannot produce even one content turn within coldHydrateTimeout (default 30s — a
+// worst-case backstop for a stuck/corrupt rollout), the RPC returns an explicit error, never an
+// empty success shell.
 func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, agent core.Agent) {
 	var params GetSessionProjectionParams
 	if msg.Params != nil {
@@ -127,15 +200,22 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 	conn.SendResult(msg.RequestID, map[string]interface{}{"projection": proj}, nil)
 }
 
-// ensureCodexProjectionHydrated blocks until the session has reducer state or disk hydrate has
-// finished once (success, honest empty, or hard-timeout error). Concurrent callers for the same
-// session share a single flight. On hard timeout the flight slot is cleared so a later pull can
-// retry; callers receive errColdHydrateTimeout rather than an empty success shell.
+// ensureCodexProjectionHydrated blocks until the session reducer holds a non-empty partial
+// projection (a turn with real user/assistant content) that get_session_projection may serve,
+// or until the first-segment budget elapses (design §10.5.6 scheme A). On success it returns
+// nil EVEN IF the full disk scan is still running in the background — the caller snapshots the
+// reducer (a real partial), and remaining turns stream to subscribed clients as projection_patch
+// deltas. On a stuck rollout that cannot produce even one content turn within coldHydrateTimeout
+// it returns errColdHydrateTimeout so the RPC fails honestly instead of serving an empty shell.
+//
+// Concurrent cold pulls share a single flight; joiners wait on the leader's partialReady.
 func (h *Handlers) ensureCodexProjectionHydrated(backendID, sessionID string) error {
 	if h == nil || h.eventPublisher == nil || sessionID == "" {
 		return nil
 	}
-	if h.eventPublisher.ProjectionHeadRev(backendID, sessionID) > 0 {
+	// Fast path: reducer already holds a turn (prior hydrate done, or a partial from an
+	// in-flight background scan). Serve immediately without touching the flight.
+	if h.eventPublisher.ProjectionTurnCount(backendID, sessionID) > 0 {
 		return nil
 	}
 
@@ -143,90 +223,116 @@ func (h *Handlers) ensureCodexProjectionHydrated(backendID, sessionID string) er
 	if h.coldHydrateFlights == nil {
 		h.coldHydrateFlights = make(map[string]*coldHydrateFlight)
 	}
-	if h.eventPublisher.ProjectionHeadRev(backendID, sessionID) > 0 {
+	// Re-check under the lock: a background scan may have just produced a turn.
+	if h.eventPublisher.ProjectionTurnCount(backendID, sessionID) > 0 {
 		h.mu.Unlock()
 		return nil
 	}
 	key := backendID + "\x00" + sessionID
 	flight, exists := h.coldHydrateFlights[key]
 	if !exists {
-		flight = &coldHydrateFlight{done: make(chan struct{})}
+		flight = newColdHydrateFlight()
 		h.coldHydrateFlights[key] = flight
-		h.mu.Unlock()
-
-		budget := coldHydrateTimeout
-		if budget <= 0 {
-			budget = defaultColdHydrateTimeout
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), budget)
-		start := time.Now()
-
-		type hydrateOutcome struct {
-			n   int
-			err error
-		}
-		outCh := make(chan hydrateOutcome, 1)
-		go func() {
-			n, err := h.hydrateCodexProjectionFromDisk(ctx, backendID, sessionID)
-			outCh <- hydrateOutcome{n: n, err: err}
-		}()
-
-		var (
-			n   int
-			err error
-		)
-		select {
-		case out := <-outCh:
-			n, err = out.n, out.err
-			cancel()
-		case <-ctx.Done():
-			// Hard timeout: do not serve empty head. Release the single-flight slot so a
-			// later pull can retry. The hydrate goroutine observes ctx cancel and exits
-			// (hook / apply loop); cancel is not deferred so joiners can still read flight.
-			err = fmt.Errorf("%w after %s: %v", errColdHydrateTimeout, budget, ctx.Err())
-			n = 0
-			cancel()
-			// Drain outcome without blocking forever so the worker is not stranded on send
-			// if it finishes shortly after timeout.
-			go func() { <-outCh }()
-		}
-
-		flight.complete(n, err)
-		if err != nil {
-			// Free the slot on failure/timeout so the next pull is not joined into a dead flight.
-			h.clearColdHydrateFlight(key)
-		}
-
-		headRev := h.eventPublisher.ProjectionHeadRev(backendID, sessionID)
-		if err != nil {
-			slog.Warn("go-bridge: get_session_projection cold-hydrate failed",
-				"sessionID", sessionID,
-				"events", n,
-				"headRev", headRev,
-				"elapsed", time.Since(start).String(),
-				"error", err.Error(),
-			)
-		} else {
-			slog.Info("go-bridge: get_session_projection cold-hydrate",
-				"sessionID", sessionID,
-				"events", n,
-				"headRev", headRev,
-				"elapsed", time.Since(start).String(),
-				"waited", true,
-			)
-		}
-		return err
 	}
 	h.mu.Unlock()
 
-	<-flight.done
-	slog.Info("go-bridge: get_session_projection cold-hydrate joined in-flight",
-		"sessionID", sessionID,
-		"events", flight.n,
-		"headRev", h.eventPublisher.ProjectionHeadRev(backendID, sessionID),
-		"error", errorString(flight.err),
-	)
-	return flight.err
+	if exists {
+		return h.joinColdHydrateFlight(backendID, sessionID, flight)
+	}
+	return h.leadColdHydrateFlight(backendID, sessionID, key, flight)
+}
+
+// joinColdHydrateFlight waits for a leader's partial (or terminal outcome) without starting a
+// second scan. If a content turn has landed by the time it unblocks, it serves that partial.
+func (h *Handlers) joinColdHydrateFlight(backendID, sessionID string, flight *coldHydrateFlight) error {
+	start := time.Now()
+	select {
+	case <-flight.partialReady:
+		if err := flight.partialError(); err != nil {
+			// Leader could not produce a partial; fall back to whatever turns landed since.
+			if h.eventPublisher.ProjectionHasContentTurn(backendID, sessionID) {
+				return nil
+			}
+			return err
+		}
+		return nil
+	case <-flight.done:
+		// Background scan exited before this caller observed a partial.
+		if h.eventPublisher.ProjectionHasContentTurn(backendID, sessionID) {
+			return nil
+		}
+		if _, err := flight.finalOutcome(); err != nil {
+			return err
+		}
+		return fmt.Errorf("%w after %s (joined)", errColdHydrateTimeout, time.Since(start))
+	case <-time.After(coldHydrateTimeout):
+		if h.eventPublisher.ProjectionHasContentTurn(backendID, sessionID) {
+			return nil
+		}
+		return fmt.Errorf("%w after %s (joined)", errColdHydrateTimeout, time.Since(start))
+	}
+}
+
+// leadColdHydrateFlight starts the background segmented hydrate goroutine and waits for the
+// first non-empty partial within the cold-hydrate budget. The goroutine continues after this
+// returns so remaining turns stream as projection_patch deltas. On first-segment timeout it
+// cancels the goroutine, frees the single-flight slot, and returns errColdHydrateTimeout.
+func (h *Handlers) leadColdHydrateFlight(backendID, sessionID, key string, flight *coldHydrateFlight) error {
+	partialBudget := coldHydrateTimeout
+	if partialBudget <= 0 {
+		partialBudget = defaultColdHydrateTimeout
+	}
+	bgBudget := coldHydrateBackgroundBudget
+	if bgBudget <= 0 {
+		bgBudget = defaultColdHydrateBackgroundBudget
+	}
+	partialCtx, partialCancel := context.WithTimeout(context.Background(), partialBudget)
+	bgCtx, bgCancel := context.WithTimeout(context.Background(), bgBudget)
+
+	go func() {
+		n, err := h.hydrateCodexProjectionFromDisk(partialCtx, bgCtx, backendID, sessionID, flight)
+		bgCancel()
+		partialCancel()
+		// Free the single-flight slot BEFORE unblocking waiters so a retry that observed the
+		// timeout sees an empty map (no stranded waiter for a dead flight).
+		h.clearColdHydrateFlight(key)
+		flight.finishFlight(n, err)
+	}()
+
+	start := time.Now()
+	select {
+	case <-flight.partialReady:
+		// Do NOT cancel bgCtx — the background scan continues to stream remaining turns.
+		partialCancel()
+		if err := flight.partialError(); err != nil && !h.eventPublisher.ProjectionHasContentTurn(backendID, sessionID) {
+			return err
+		}
+		slog.Info("go-bridge: get_session_projection cold-hydrate partial served",
+			"sessionID", sessionID,
+			"turns", h.eventPublisher.ProjectionTurnCount(backendID, sessionID),
+			"headRev", h.eventPublisher.ProjectionHeadRev(backendID, sessionID),
+			"elapsed", time.Since(start).String(),
+		)
+		return nil
+	case <-partialCtx.Done():
+		// First segment did not land within budget. Stop the background scan and free the slot.
+		bgCancel()
+		partialCancel()
+		<-flight.done
+		if h.eventPublisher.ProjectionHasContentTurn(backendID, sessionID) {
+			// A content turn landed in the race window — treat as a real partial.
+			return nil
+		}
+		err := fmt.Errorf("%w after %s: %v", errColdHydrateTimeout, partialBudget, partialCtx.Err())
+		slog.Warn("go-bridge: get_session_projection cold-hydrate first-segment timeout",
+			"sessionID", sessionID,
+			"turns", h.eventPublisher.ProjectionTurnCount(backendID, sessionID),
+			"headRev", h.eventPublisher.ProjectionHeadRev(backendID, sessionID),
+			"elapsed", time.Since(start).String(),
+			"error", err.Error(),
+		)
+		return err
+	}
 }
 
 func (h *Handlers) clearColdHydrateFlight(key string) {
@@ -240,148 +346,185 @@ func (h *Handlers) clearColdHydrateFlight(key string) {
 	}
 }
 
-func errorString(err error) string {
-	if err == nil {
-		return ""
+// hydrateCodexProjectionFromDisk streams the rollout JSONL into the ProjectionReducer in
+// turn-bounded segments (design §10.5.6 scheme A). Events before the first non-empty partial are
+// applied with Offline:true (reducer-only, no mid-pull patch fan-out); flight.signalPartial is
+// closed once the reducer holds a turn with real user/assistant content so the leader's RPC can
+// return a non-empty partial without waiting for the full scan. Remaining segments are then
+// applied with Offline:false so they reach subscribed clients as projection_patch deltas over
+// the already-served partial.
+//
+// partialCtx bounds the first-segment wait (coldHydrateTimeout); bgCtx bounds the background
+// completion of remaining segments (coldHydrateBackgroundBudget). Either cancel aborts between
+// events. Returns the total events applied and the terminal error (ctx.Err() on cancel).
+func (h *Handlers) hydrateCodexProjectionFromDisk(partialCtx, bgCtx context.Context, backendID, sessionID string, flight *coldHydrateFlight) (int, error) {
+	if partialCtx == nil {
+		partialCtx = context.Background()
 	}
-	return err.Error()
-}
-
-// hydrateCodexProjectionFromDisk one-shot feeds the rollout JSONL into ProjectionReducer
-// so get_session_projection can answer after Mac restart without waiting for a new turn.
-// Events are published offline (no live delivery requirement); Apply still runs.
-// Callers must wait for this to return before serving a cold pull (design §10.5).
-// ctx cancel aborts between scan/apply steps so a hard-timeout does not leave work running
-// indefinitely after the RPC has already failed.
-func (h *Handlers) hydrateCodexProjectionFromDisk(ctx context.Context, backendID, sessionID string) (int, error) {
-	if ctx == nil {
-		ctx = context.Background()
+	if bgCtx == nil {
+		bgCtx = partialCtx
 	}
 	if coldHydrateTestHook != nil {
-		coldHydrateTestHook(ctx)
-		if err := ctx.Err(); err != nil {
+		coldHydrateTestHook(partialCtx)
+		if err := partialCtx.Err(); err != nil {
+			flight.signalPartial(err)
 			return 0, err
 		}
 	}
 	if h == nil || h.eventPublisher == nil || sessionID == "" {
+		flight.signalPartial(nil)
 		return 0, nil
 	}
-	if err := ctx.Err(); err != nil {
+	if err := partialCtx.Err(); err != nil {
+		flight.signalPartial(err)
 		return 0, err
 	}
 	agent, ok := h.getFirstAgentByName("codex")
 	if !ok {
+		// No codex agent / no transcript — honest empty session, not a hydrate failure.
+		flight.signalPartial(nil)
 		return 0, nil
 	}
 	locator, ok := agent.(core.TranscriptLocator)
 	if !ok {
+		flight.signalPartial(nil)
 		return 0, nil
 	}
-	sessPath, err := locator.TranscriptPath(ctx, sessionID)
+	sessPath, err := locator.TranscriptPath(partialCtx, sessionID)
 	if err != nil || strings.TrimSpace(sessPath) == "" {
+		flight.signalPartial(nil)
 		return 0, nil
 	}
-	if err := ctx.Err(); err != nil {
+	if err := partialCtx.Err(); err != nil {
+		flight.signalPartial(err)
 		return 0, err
 	}
 
-	// Scan can be large; run it so ctx cancel can abandon waiting for the result. The scanner
-	// itself is not mid-cancelable without a full rewrite; abandoning the wait prevents the
-	// RPC path from blocking, and the scan goroutine exits when the file read finishes.
-	type scanOut struct {
-		events []codexRelayEvent
-	}
-	scanCh := make(chan scanOut, 1)
-	go func() {
-		scanCh <- scanOut{events: scanCodexTranscriptRelayEvents(sessPath, 0)}
-	}()
-	var events []codexRelayEvent
-	select {
-	case out := <-scanCh:
-		events = out.events
-	case <-ctx.Done():
-		go func() { <-scanCh }()
-		return 0, ctx.Err()
-	}
-	if len(events) == 0 {
-		return 0, nil
-	}
-
+	// Stream events in file order, applying them one at a time. The scanner runs under bgCtx so
+	// it stays alive through the background phase AFTER a partial is served (the leader does NOT
+	// cancel bgCtx on success). Phase 1 events publish Offline:true (reducer-only, no mid-pull
+	// fan-out); once a content turn lands we flip to Offline:false (Broadcast:true) so subsequent
+	// segments stream to subscribed clients as projection_patch deltas.
+	applied := 0
+	segmentIdx := 0
 	currentTurnID := ""
 	toolNames := make(map[string]string)
-	applied := 0
-	for _, ev := range events {
-		if err := ctx.Err(); err != nil {
-			return applied, err
+	partialSignaled := false
+
+	emit := func(ev codexRelayEvent) bool {
+		if err := bgCtx.Err(); err != nil {
+			return false
 		}
-		var eventName string
-		var data map[string]interface{}
-		switch ev.kind {
-		case "task_started":
-			currentTurnID = ev.turnID
-			eventName = "turn_started"
-			data = map[string]interface{}{"turnId": currentTurnID}
-		case "task_complete":
-			tid := ev.turnID
-			if tid == "" {
-				tid = currentTurnID
-			}
-			eventName = "turn_completed"
-			data = map[string]interface{}{"turnId": tid, "done": true, "reason": "task_complete"}
-			currentTurnID = ""
-		case "text":
-			eventName = "text_delta"
-			data = map[string]interface{}{"itemId": currentTurnID, "delta": ev.text}
-		case "reasoning":
-			eventName = "reasoning_delta"
-			data = map[string]interface{}{"itemId": currentTurnID, "delta": ev.text}
-		case "user_message":
-			eventName = "user_message"
-			data = map[string]interface{}{"itemId": ev.itemId, "turnId": currentTurnID, "text": ev.text}
-		case "tool_started":
-			if ev.itemId != "" {
-				toolNames[ev.itemId] = ev.toolName
-			}
-			eventName = "tool_started"
-			data = map[string]interface{}{"toolName": ev.toolName, "toolInput": ev.toolInput}
-			if ev.itemId != "" {
-				data["itemId"] = ev.itemId
-			}
-		case "tool_finished":
-			eventName = "tool_finished"
-			data = map[string]interface{}{"toolResult": ev.toolResult, "toolStatus": "completed"}
-			if name, ok := toolNames[ev.itemId]; ok && name != "" {
-				data["toolName"] = name
-			}
-			if ev.itemId != "" {
-				data["itemId"] = ev.itemId
-			}
-		default:
-			continue
+		eventName, data, ok := codexRelayEventToProjectionEvent(ev, &currentTurnID, toolNames)
+		if !ok {
+			return true // unhandled kind (e.g. context_usage) — skip, keep scanning
 		}
 		h.publishEvent(LogicalEvent{
 			SessionID: sessionID,
 			BackendID: backendID,
 			Event:     eventName,
 			Data:      data,
-			Broadcast: false, // hydrate only — do not fan out mid-pull
-			Offline:   true,
+			Broadcast: partialSignaled, // phase 2 fans patches out to subscribers
+			Offline:   !partialSignaled,
 		})
 		applied++
+
+		// Once the reducer holds a content turn, the partial is honest — signal the leader once.
+		if !partialSignaled && h.eventPublisher.ProjectionHasContentTurn(backendID, sessionID) {
+			partialSignaled = true
+			flight.signalPartial(nil)
+		}
+		// Segment boundary (completed turn) — test hook observes incremental reducer state.
+		if ev.kind == "task_complete" {
+			segmentIdx++
+			if coldHydrateSegmentTestHook != nil {
+				coldHydrateSegmentTestHook(bgCtx, segmentIdx, h.eventPublisher.ProjectionTurnCount(backendID, sessionID))
+			}
+		}
+		return true
 	}
-	if err := ctx.Err(); err != nil {
-		return applied, err
+
+	scanErr := streamCodexTranscriptRelayEvents(bgCtx, sessPath, 0, emit)
+
+	if !partialSignaled {
+		// No content turn was ever served. Distinguish a phase-1 timeout/cancel from an honest
+		// empty session: partialCtx.Err() is set when the leader's first-segment budget elapsed
+		// (or the leader bgCanceled on timeout); a nil partialCtx + nil scanErr means the scan
+		// simply produced zero content turns (brand-new / empty rollout) — an honest empty.
+		cause := partialCtx.Err()
+		if cause == nil {
+			cause = scanErr
+		}
+		if cause != nil {
+			flight.signalPartial(cause)
+			return applied, cause
+		}
+		flight.signalPartial(nil) // honest empty session — RPC serves the empty idle branch
+	} else if applied > 0 && bgCtx.Err() == nil {
+		// Partial was served; settle execution to idle (fans out in background phase).
+		h.publishEvent(LogicalEvent{
+			SessionID: sessionID,
+			BackendID: backendID,
+			Event:     "session_state_changed",
+			Data:      map[string]interface{}{"state": "idle"},
+			Broadcast: true,
+			Offline:   false,
+		})
 	}
-	// Completed transcript should settle execution to idle.
-	h.publishEvent(LogicalEvent{
-		SessionID: sessionID,
-		BackendID: backendID,
-		Event:     "session_state_changed",
-		Data:      map[string]interface{}{"state": "idle"},
-		Broadcast: false,
-		Offline:   true,
-	})
-	return applied, nil
+
+	// Terminal outcome for finishFlight (informational — the leader already returned on partial).
+	var terminal error
+	if scanErr != nil {
+		terminal = scanErr
+	} else if err := bgCtx.Err(); err != nil {
+		terminal = err
+	}
+	return applied, terminal
+}
+
+// codexRelayEventToProjectionEvent maps a scanned codexRelayEvent to its projection LogicalEvent
+// name + data, threading per-turn state (currentTurnID, toolNames). Returns ok=false for
+// unhandled kinds (caller skips them). Extracted from the former inline hydrate switch so the
+// segmented path preserves the exact mapping (no behavior fork).
+func codexRelayEventToProjectionEvent(ev codexRelayEvent, currentTurnID *string, toolNames map[string]string) (string, map[string]interface{}, bool) {
+	switch ev.kind {
+	case "task_started":
+		*currentTurnID = ev.turnID
+		return "turn_started", map[string]interface{}{"turnId": ev.turnID}, true
+	case "task_complete":
+		tid := ev.turnID
+		if tid == "" {
+			tid = *currentTurnID
+		}
+		*currentTurnID = ""
+		return "turn_completed", map[string]interface{}{"turnId": tid, "done": true, "reason": "task_complete"}, true
+	case "text":
+		return "text_delta", map[string]interface{}{"itemId": *currentTurnID, "delta": ev.text}, true
+	case "reasoning":
+		return "reasoning_delta", map[string]interface{}{"itemId": *currentTurnID, "delta": ev.text}, true
+	case "user_message":
+		return "user_message", map[string]interface{}{"itemId": ev.itemId, "turnId": *currentTurnID, "text": ev.text}, true
+	case "tool_started":
+		if ev.itemId != "" {
+			toolNames[ev.itemId] = ev.toolName
+		}
+		data := map[string]interface{}{"toolName": ev.toolName, "toolInput": ev.toolInput}
+		if ev.itemId != "" {
+			data["itemId"] = ev.itemId
+		}
+		return "tool_started", data, true
+	case "tool_finished":
+		data := map[string]interface{}{"toolResult": ev.toolResult, "toolStatus": "completed"}
+		if name, ok := toolNames[ev.itemId]; ok && name != "" {
+			data["toolName"] = name
+		}
+		if ev.itemId != "" {
+			data["itemId"] = ev.itemId
+		}
+		return "tool_finished", data, true
+	default:
+		return "", nil, false
+	}
 }
 
 // ProjectionSnapshot returns a deep copy of the session projection (pull path accessor).
@@ -407,4 +550,13 @@ func (p *EventPublisher) ProjectionTurnCount(backendID, sessionID string) int {
 		return 0
 	}
 	return p.projection.TurnCount(backendID, sessionID)
+}
+
+// ProjectionHasContentTurn reports whether the reducer holds a turn with real user/assistant
+// content — the honest non-empty-partial boundary for segmented cold-hydrate (§10.5.6 scheme A).
+func (p *EventPublisher) ProjectionHasContentTurn(backendID, sessionID string) bool {
+	if p == nil || p.projection == nil {
+		return false
+	}
+	return p.projection.HasContentTurn(backendID, sessionID)
 }

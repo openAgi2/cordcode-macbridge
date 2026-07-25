@@ -117,9 +117,30 @@ func writeProjectionHydrateRollout(t *testing.T, path string, turns int) {
 	}
 }
 
-// TestHandleGetSessionProjectionColdHydrateWaitsPastFormerTimeoutBudget: design §10.5 ring 1.
-// A hydrate that takes longer than the old 750ms fixed budget must still complete before the
-// RPC answers — never "timeout; serving current head" with empty turns.
+// waitForProjectionTurns polls the reducer until it holds want turns or the deadline elapses
+// (design §10.5.6 scheme A — remaining segments stream in via the background hydrate goroutine
+// after the RPC has already returned a non-empty partial).
+func waitForProjectionTurns(t *testing.T, h *Handlers, backendID, sessionID string, want int, deadline time.Duration) {
+	t.Helper()
+	stop := time.After(deadline)
+	for {
+		if got := h.eventPublisher.ProjectionTurnCount(backendID, sessionID); got >= want {
+			return
+		}
+		select {
+		case <-stop:
+			t.Fatalf("reducer reached %d turns, want %d within %s (background hydrate did not complete)",
+				h.eventPublisher.ProjectionTurnCount(backendID, sessionID), want, deadline)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+// TestHandleGetSessionProjectionColdHydrateWaitsPastFormerTimeoutBudget: design §10.5.6 scheme A.
+// Under the segmented model the RPC returns a non-empty PARTIAL once the first content turn
+// lands — it no longer waits for the full scan. A hydrate whose start is delayed (here 2s) must
+// still serve ≥1 content turn (never the old 750ms empty bail); the remaining turns stream in
+// via the background goroutine.
 func TestHandleGetSessionProjectionColdHydrateWaitsPastFormerTimeoutBudget(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rollout.jsonl")
 	writeProjectionHydrateRollout(t, path, 3)
@@ -153,16 +174,18 @@ func TestHandleGetSessionProjectionColdHydrateWaitsPastFormerTimeoutBudget(t *te
 	if !ok {
 		t.Fatalf("data.projection not SessionProjection: %T", dataMap["projection"])
 	}
+	// Partial contract: ≥1 content turn, never an empty head-0 shell.
 	if proj.SyncRev <= 0 || len(proj.Turns) == 0 {
 		t.Fatalf("served empty head after delayed hydrate (forbidden §10.5): %+v", proj)
 	}
-	if len(proj.Turns) != 3 {
-		t.Fatalf("turns = %d, want 3", len(proj.Turns))
-	}
+	// Background goroutine finishes the remaining turns.
+	waitForProjectionTurns(t, handlers, "codex", "cold-slow", 3, 2*time.Second)
 }
 
-// TestHandleGetSessionProjectionColdHydrateLargeRolloutNonEmpty: design §10.5 contract —
-// a large multi-turn rollout cold-hydrates to non-empty turns (no empty head-0 success).
+// TestHandleGetSessionProjectionColdHydrateLargeRolloutNonEmpty: design §10.5.6 scheme A —
+// a large multi-turn rollout cold-hydrates and the RPC serves a non-empty PARTIAL (≥1 content
+// turn) without waiting for the full scan; the remaining turns stream in via the background
+// goroutine. An empty head-0 success remains a contract violation.
 func TestHandleGetSessionProjectionColdHydrateLargeRolloutNonEmpty(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "large-rollout.jsonl")
 	const turns = 80
@@ -187,12 +210,15 @@ func TestHandleGetSessionProjectionColdHydrateLargeRolloutNonEmpty(t *testing.T)
 	if !ok {
 		t.Fatalf("data.projection not SessionProjection: %T", dataMap["projection"])
 	}
+	// Partial contract: ≥1 content turn (not necessarily all `turns` — the rest stream in).
 	if proj.SyncRev <= 0 {
 		t.Fatalf("syncRev = %d, want > 0 after cold-hydrate", proj.SyncRev)
 	}
-	if len(proj.Turns) != turns {
-		t.Fatalf("turns = %d, want %d (empty head-0 would be a contract violation)", len(proj.Turns), turns)
+	if len(proj.Turns) == 0 {
+		t.Fatalf("served empty head-0 partial (contract violation): %+v", proj)
 	}
+	// Background goroutine finishes the remaining turns.
+	waitForProjectionTurns(t, handlers, "codex", "cold-large", turns, 3*time.Second)
 	head := handlers.eventPublisher.ProjectionHeadRev("codex", "cold-large")
 	if head <= 0 {
 		t.Fatalf("headRev = %d after hydrate, want > 0", head)
@@ -258,10 +284,13 @@ func TestHandleGetSessionProjectionColdHydrateSingleFlight(t *testing.T) {
 			t.Fatalf("conn %d data not map: %T", i, c.data)
 		}
 		proj, ok := dataMap["projection"].(SessionProjection)
-		if !ok || len(proj.Turns) != 2 || proj.SyncRev <= 0 {
-			t.Fatalf("conn %d empty/incomplete projection: %+v", i, dataMap["projection"])
+		// Partial contract: every conn sees ≥1 content turn, never an empty shell.
+		if !ok || len(proj.Turns) == 0 || proj.SyncRev <= 0 {
+			t.Fatalf("conn %d empty projection: %+v", i, dataMap["projection"])
 		}
 	}
+	// All callers shared one hydrate; the background goroutine finishes both turns.
+	waitForProjectionTurns(t, handlers, "codex", "cold-sf", 2, 2*time.Second)
 }
 
 // TestHandleGetSessionProjectionColdHydrateHardTimeoutExplicitError: §10.5 ring-1 close-out.
@@ -333,9 +362,11 @@ func TestHandleGetSessionProjectionColdHydrateHardTimeoutExplicitError(t *testin
 		t.Fatalf("retry data not map: %T", conn2.data)
 	}
 	proj, ok := dataMap["projection"].(SessionProjection)
-	if !ok || len(proj.Turns) != 2 || proj.SyncRev <= 0 {
-		t.Fatalf("retry expected non-empty projection, got %+v", dataMap["projection"])
+	// Partial contract: retry serves ≥1 content turn (slot not poisoned); rest stream in.
+	if !ok || len(proj.Turns) == 0 || proj.SyncRev <= 0 {
+		t.Fatalf("retry expected non-empty partial projection, got %+v", dataMap["projection"])
 	}
+	waitForProjectionTurns(t, handlers, "codex", "cold-hard-timeout", 2, 2*time.Second)
 }
 
 // TestHandleGetSessionProjectionColdHydrateReal26MBRollout exercises the owner exit-criteria

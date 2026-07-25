@@ -460,6 +460,32 @@ func (r *ProjectionReducer) TurnCount(backendID, sessionID string) int {
 	return len(ps.projection.Turns)
 }
 
+// HasContentTurn reports whether the reducer holds at least one turn with real user or assistant
+// content (a non-empty message). This is the precise non-empty-partial boundary for segmented
+// cold-hydrate (design §10.5.6 scheme A): a bare task_started shell with no message content is
+// not yet a partial worth serving; once user/assistant text lands the partial is honest.
+func (r *ProjectionReducer) HasContentTurn(backendID, sessionID string) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ps := r.sessions[projectionSessionKey(backendID, sessionID)]
+	if ps == nil {
+		return false
+	}
+	for i := range ps.projection.Turns {
+		t := &ps.projection.Turns[i]
+		if t.User != nil && len(t.User.Parts) > 0 {
+			return true
+		}
+		if t.Assistant != nil && len(t.Assistant.Parts) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // --- deep-copy helpers (Snapshot must be independent of later reduce activity) ---
 
 func cloneSessionProjection(s SessionProjection) SessionProjection {
