@@ -1005,132 +1005,185 @@ func scanCodexTranscriptRelayEvents(sessPath string, offset int64) []codexRelayE
 		if json.Unmarshal(scanner.Bytes(), &entry) != nil {
 			continue
 		}
-		switch entry.Type {
-		case "event_msg":
-			p, ok := codexNormalizeEventPayload(entry.Payload)
-			if !ok {
-				continue
+		out = append(out, codexRolloutEntryEvents(entry)...)
+	}
+	return out
+}
+
+// codexRolloutEntryEvents extracts the ordered codexRelayEvent(s) a single rollout JSONL line
+// produces (lifecycle + content candidates; see scanCodexTranscriptRelayEvents doc for the
+// extraction口径). Extracted so the batch scanner and the streaming scanner share one parsing
+// path — no behavior fork between full-scan and segmented-scan (design §10.5.6 scheme A).
+func codexRolloutEntryEvents(entry codexRolloutEntry) []codexRelayEvent {
+	var out []codexRelayEvent
+	switch entry.Type {
+	case "event_msg":
+		p, ok := codexNormalizeEventPayload(entry.Payload)
+		if !ok {
+			return out
+		}
+		switch p.Type {
+		case "task_started":
+			out = append(out, codexRelayEvent{kind: "task_started", turnID: p.TurnID})
+		case "task_complete":
+			out = append(out, codexRelayEvent{kind: "task_complete", turnID: p.TurnID})
+		case "agent_message":
+			if strings.TrimSpace(p.Message) != "" {
+				out = append(out, codexRelayEvent{kind: "text", text: p.Message})
 			}
-			switch p.Type {
-			case "task_started":
-				out = append(out, codexRelayEvent{kind: "task_started", turnID: p.TurnID})
-			case "task_complete":
-				out = append(out, codexRelayEvent{kind: "task_complete", turnID: p.TurnID})
-			case "agent_message":
-				if strings.TrimSpace(p.Message) != "" {
-					out = append(out, codexRelayEvent{kind: "text", text: p.Message})
-				}
-			case "agent_reasoning":
-				if strings.TrimSpace(p.Text) != "" {
-					out = append(out, codexRelayEvent{kind: "reasoning", text: p.Text})
-				}
-			case "token_count":
-				// token 级 delta 不落盘（policy.rs:172），但 token_count 是事件级用量记录，
-				// 映射到 context_usage_updated（运行状态条 token 显示）。
-				var tc codexTokenCountPayload
-				if json.Unmarshal(entry.Payload, &tc) == nil {
-					tu := tc.Info.TotalTokenUsage
-					if tu.TotalTokens > 0 || tc.Info.ModelContextWindow > 0 {
-						out = append(out, codexRelayEvent{kind: "context_usage", context: map[string]interface{}{
-							"usedTokens":            tu.TotalTokens,
-							"totalTokens":           tu.TotalTokens,
-							"inputTokens":           tu.InputTokens,
-							"cachedInputTokens":     tu.CachedInputTokens,
-							"outputTokens":          tu.OutputTokens,
-							"reasoningOutputTokens": tu.ReasoningOutputTokens,
-							"contextWindow":         tc.Info.ModelContextWindow,
-						}})
-					}
+		case "agent_reasoning":
+			if strings.TrimSpace(p.Text) != "" {
+				out = append(out, codexRelayEvent{kind: "reasoning", text: p.Text})
+			}
+		case "token_count":
+			// token 级 delta 不落盘（policy.rs:172），但 token_count 是事件级用量记录，
+			// 映射到 context_usage_updated（运行状态条 token 显示）。
+			var tc codexTokenCountPayload
+			if json.Unmarshal(entry.Payload, &tc) == nil {
+				tu := tc.Info.TotalTokenUsage
+				if tu.TotalTokens > 0 || tc.Info.ModelContextWindow > 0 {
+					out = append(out, codexRelayEvent{kind: "context_usage", context: map[string]interface{}{
+						"usedTokens":            tu.TotalTokens,
+						"totalTokens":           tu.TotalTokens,
+						"inputTokens":           tu.InputTokens,
+						"cachedInputTokens":     tu.CachedInputTokens,
+						"outputTokens":          tu.OutputTokens,
+						"reasoningOutputTokens": tu.ReasoningOutputTokens,
+						"contextWindow":         tc.Info.ModelContextWindow,
+					}})
 				}
 			}
-		case "response_item":
-			var p codexResponseItemPayload
-			if json.Unmarshal(entry.Payload, &p) != nil {
-				continue
+		}
+	case "response_item":
+		var p codexResponseItemPayload
+		if json.Unmarshal(entry.Payload, &p) != nil {
+			return out
+		}
+		switch p.Type {
+		case "message":
+			switch p.Role {
+			case "assistant":
+				for _, b := range p.Content {
+					if b.Type == "output_text" && strings.TrimSpace(b.Text) != "" {
+						out = append(out, codexRelayEvent{kind: "text", text: b.Text})
+					}
+				}
+			case "user":
+				var texts []string
+				for _, b := range p.Content {
+					if b.Type == "input_text" && strings.TrimSpace(b.Text) != "" {
+						texts = append(texts, b.Text)
+					}
+				}
+				if len(texts) > 0 {
+					out = append(out, codexRelayEvent{
+						kind:   "user_message",
+						itemId: strings.TrimSpace(p.ID),
+						text:   strings.Join(texts, "\n"),
+					})
+				}
 			}
-			switch p.Type {
-			case "message":
-				switch p.Role {
-				case "assistant":
-					for _, b := range p.Content {
-						if b.Type == "output_text" && strings.TrimSpace(b.Text) != "" {
-							out = append(out, codexRelayEvent{kind: "text", text: b.Text})
-						}
-					}
-				case "user":
-					var texts []string
-					for _, b := range p.Content {
-						if b.Type == "input_text" && strings.TrimSpace(b.Text) != "" {
-							texts = append(texts, b.Text)
-						}
-					}
-					if len(texts) > 0 {
-						out = append(out, codexRelayEvent{
-							kind:   "user_message",
-							itemId: strings.TrimSpace(p.ID),
-							text:   strings.Join(texts, "\n"),
-						})
-					}
+		case "reasoning":
+			for _, s := range p.Summary {
+				if s.Type == "summary_text" && strings.TrimSpace(s.Text) != "" {
+					out = append(out, codexRelayEvent{kind: "reasoning", text: s.Text})
 				}
-			case "reasoning":
-				for _, s := range p.Summary {
-					if s.Type == "summary_text" && strings.TrimSpace(s.Text) != "" {
-						out = append(out, codexRelayEvent{kind: "reasoning", text: s.Text})
-					}
-				}
-			case "custom_tool_call":
-				// exec-unified：name 恒 "exec"，真实操作埋在 input JS 串里（非结构化字段）。
-				out = append(out, codexRelayEvent{kind: "tool_started", toolName: p.Name, toolInput: p.Input, itemId: p.CallID})
-			case "custom_tool_call_output":
-				out = append(out, codexRelayEvent{
-					kind:       "tool_finished",
-					itemId:     p.CallID,
-					toolResult: extractCodexToolOutput(p.Output),
-				})
-			// Native Codex tool shapes (session 019f8dd1 / 2026-07: function_call dominates).
-			// Previously only custom_tool_* was mapped → live tool_* EMIT=0 for those turns.
-			case "function_call":
-				input := p.Arguments
-				if input == "" {
-					input = p.Input
-				}
-				out = append(out, codexRelayEvent{
-					kind:     "tool_started",
-					toolName: p.Name,
-					toolInput: input,
-					itemId:   p.CallID,
-				})
-			case "function_call_output":
-				out = append(out, codexRelayEvent{
-					kind:       "tool_finished",
-					itemId:     p.CallID,
-					toolResult: extractCodexToolOutput(p.Output),
-				})
-			case "local_shell_call", "mcp_call", "web_search_call":
-				input := p.Arguments
-				if input == "" {
-					input = p.Input
-				}
-				name := p.Name
-				if name == "" {
-					name = p.Type
-				}
-				out = append(out, codexRelayEvent{
-					kind:      "tool_started",
-					toolName:  name,
-					toolInput: input,
-					itemId:    p.CallID,
-				})
-			case "local_shell_call_output", "mcp_call_output", "web_search_call_output":
-				out = append(out, codexRelayEvent{
-					kind:       "tool_finished",
-					itemId:     p.CallID,
-					toolResult: extractCodexToolOutput(p.Output),
-				})
 			}
+		case "custom_tool_call":
+			// exec-unified：name 恒 "exec"，真实操作埋在 input JS 串里（非结构化字段）。
+			out = append(out, codexRelayEvent{kind: "tool_started", toolName: p.Name, toolInput: p.Input, itemId: p.CallID})
+		case "custom_tool_call_output":
+			out = append(out, codexRelayEvent{
+				kind:       "tool_finished",
+				itemId:     p.CallID,
+				toolResult: extractCodexToolOutput(p.Output),
+			})
+		// Native Codex tool shapes (session 019f8dd1 / 2026-07: function_call dominates).
+		// Previously only custom_tool_* was mapped → live tool_* EMIT=0 for those turns.
+		case "function_call":
+			input := p.Arguments
+			if input == "" {
+				input = p.Input
+			}
+			out = append(out, codexRelayEvent{
+				kind:     "tool_started",
+				toolName: p.Name,
+				toolInput: input,
+				itemId:   p.CallID,
+			})
+		case "function_call_output":
+			out = append(out, codexRelayEvent{
+				kind:       "tool_finished",
+				itemId:     p.CallID,
+				toolResult: extractCodexToolOutput(p.Output),
+			})
+		case "local_shell_call", "mcp_call", "web_search_call":
+			input := p.Arguments
+			if input == "" {
+				input = p.Input
+			}
+			name := p.Name
+			if name == "" {
+				name = p.Type
+			}
+			out = append(out, codexRelayEvent{
+				kind:      "tool_started",
+				toolName:  name,
+				toolInput: input,
+				itemId:    p.CallID,
+			})
+		case "local_shell_call_output", "mcp_call_output", "web_search_call_output":
+			out = append(out, codexRelayEvent{
+				kind:       "tool_finished",
+				itemId:     p.CallID,
+				toolResult: extractCodexToolOutput(p.Output),
+			})
 		}
 	}
 	return out
+}
+
+// streamCodexTranscriptRelayEvents scans the rollout line-by-line and invokes emit for each
+// parsed event in file order WITHOUT buffering the whole file into memory (design §10.5.6
+// scheme A — segmented cold-hydrate). emit returns false to stop early (e.g. after the first
+// turn-bounded segment, or on ctx cancel). Parsing parity with scanCodexTranscriptRelayEvents
+// is guaranteed by sharing codexRolloutEntryEvents. A read/scan error is returned; a single
+// unparseable line is skipped. ctx cancel is honored between lines.
+func streamCodexTranscriptRelayEvents(ctx context.Context, sessPath string, offset int64, emit func(codexRelayEvent) bool) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	f, err := os.Open(sessPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if offset > 0 {
+		if _, err := f.Seek(offset, io.SeekStart); err != nil {
+			return err
+		}
+	}
+	scanner := bufio.NewScanner(f)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024*16)
+	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var entry codexRolloutEntry
+		if json.Unmarshal(scanner.Bytes(), &entry) != nil {
+			continue
+		}
+		for _, ev := range codexRolloutEntryEvents(entry) {
+			if !emit(ev) {
+				return ctx.Err()
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	return ctx.Err()
 }
 
 var (

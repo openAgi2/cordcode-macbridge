@@ -443,6 +443,23 @@ func (r *ProjectionReducer) LastAppliedRev(backendID, sessionID string) int {
 	return ps.projection.SyncRev
 }
 
+// TurnCount returns the number of turns currently held for the session (lightweight, no deep
+// copy). Used by the segmented cold-hydrate path (design §10.5.6 scheme A) to detect when the
+// reducer has crossed from empty into a non-empty partial that may be served to a cold pull —
+// the boundary that separates an honest non-empty partial from the forbidden empty head-0 shell.
+func (r *ProjectionReducer) TurnCount(backendID, sessionID string) int {
+	if r == nil {
+		return 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ps := r.sessions[projectionSessionKey(backendID, sessionID)]
+	if ps == nil {
+		return 0
+	}
+	return len(ps.projection.Turns)
+}
+
 // --- deep-copy helpers (Snapshot must be independent of later reduce activity) ---
 
 func cloneSessionProjection(s SessionProjection) SessionProjection {

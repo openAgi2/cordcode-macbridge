@@ -399,3 +399,12 @@ func (p *EventPublisher) ProjectionHeadRev(backendID, sessionID string) int {
 	}
 	return p.projection.LastAppliedRev(backendID, sessionID)
 }
+
+// ProjectionTurnCount returns the number of turns the reducer currently holds for the session
+// (design §10.5.6 scheme A — the non-empty partial boundary for segmented cold-hydrate).
+func (p *EventPublisher) ProjectionTurnCount(backendID, sessionID string) int {
+	if p == nil || p.projection == nil {
+		return 0
+	}
+	return p.projection.TurnCount(backendID, sessionID)
+}
