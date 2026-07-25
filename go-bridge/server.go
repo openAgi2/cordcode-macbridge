@@ -23,10 +23,13 @@ const (
 )
 
 // bridgeWriteTimeout 是所有客户端数据写（WriteJSON/WriteMessage）的写 deadline。
-// 用 var 而非 const：测试需要覆盖成短值（如 200ms）以避免等真实 10s。
-// 取值 10s：远大于正常单帧写（<5ms），远小于 TCP RTO（数十秒），
-// 既能快速发现半开坏连接，又不会误杀慢写。详见 docs/2026-06-17-bridge-hang-implementation-spec.md 坑 2。
-var bridgeWriteTimeout = 10 * time.Second
+// 用 var 而非 const：测试需要覆盖成短值（如 200ms）以避免等真实超时。
+//
+// 2026-07-25：从 10s 提到 60s。超大 Codex session 全量 get_session_messages 实测
+// response_bytes≈13MB、socket_send_ms≈10–14s，10s deadline 触发 consecutive write
+// errors → 断连 → iOS 永久「重新连接中」。大包仍应收敛到投影/分页主路径，但 deadline
+// 不能短于真实可写完时间。详见 go-bridge.log: too many write errors + socket_send_ms。
+var bridgeWriteTimeout = 60 * time.Second
 
 // Conn wraps a WebSocket connection with thread-safe writes.
 type Conn struct {
