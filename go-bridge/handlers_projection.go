@@ -290,7 +290,10 @@ func (h *Handlers) leadColdHydrateFlight(backendID, sessionID, key string, fligh
 	bgCtx, bgCancel := context.WithTimeout(context.Background(), bgBudget)
 
 	go func() {
-		n, err := h.hydrateCodexProjectionFromDisk(partialCtx, bgCtx, backendID, sessionID, flight)
+		produce := func(ctx context.Context, emit func(projectionHydrateEvent) bool) error {
+			return h.produceCodexHydrateEvents(ctx, backendID, sessionID, emit)
+		}
+		n, err := h.hydrateProjectionFromSource(partialCtx, bgCtx, backendID, sessionID, flight, produce)
 		bgCancel()
 		partialCancel()
 		// Free the single-flight slot BEFORE unblocking waiters so a retry that observed the
@@ -346,18 +349,30 @@ func (h *Handlers) clearColdHydrateFlight(key string) {
 	}
 }
 
-// hydrateCodexProjectionFromDisk streams the rollout JSONL into the ProjectionReducer in
-// turn-bounded segments (design §10.5.6 scheme A). Events before the first non-empty partial are
-// applied with Offline:true (reducer-only, no mid-pull patch fan-out); flight.signalPartial is
-// closed once the reducer holds a turn with real user/assistant content so the leader's RPC can
-// return a non-empty partial without waiting for the full scan. Remaining segments are then
-// applied with Offline:false so they reach subscribed clients as projection_patch deltas over
-// the already-served partial.
+// projectionHydrateEvent is one logical projection event emitted by a backend's cold-hydrate
+// parser (codex rollout / claude .jsonl). It mirrors the (Event, Data) carried by LogicalEvent
+// minus delivery metadata, so the generic hydrate loop can publish across backends uniformly
+// (design §10.5.7 修法 1 — full-backend reducer). TurnDone marks a turn-completion boundary
+// (codex task_complete / claude final stop_reason): the segment-hook checkpoint and the point at
+// which partial-readiness is re-evaluated.
+type projectionHydrateEvent struct {
+	Event    string
+	Data     map[string]interface{}
+	TurnDone bool
+}
+
+// hydrateProjectionFromSource runs the generic segmented cold-hydrate loop over a backend-specific
+// event producer (design §10.5.6 scheme A + §10.5.7 修法 1). The producer streams
+// projectionHydrateEvents in source order; this loop publishes them, signals a non-empty partial
+// once the reducer holds a turn with real user/assistant content, and settles execution to idle.
 //
-// partialCtx bounds the first-segment wait (coldHydrateTimeout); bgCtx bounds the background
-// completion of remaining segments (coldHydrateBackgroundBudget). Either cancel aborts between
-// events. Returns the total events applied and the terminal error (ctx.Err() on cancel).
-func (h *Handlers) hydrateCodexProjectionFromDisk(partialCtx, bgCtx context.Context, backendID, sessionID string, flight *coldHydrateFlight) (int, error) {
+// Phase-1 events (before the first content turn) publish Offline:true (reducer-only, no mid-pull
+// patch fan-out); once a non-empty partial is signalable, subsequent events flip to Offline:false
+// (Broadcast:true) so they reach subscribed clients as projection_patch deltas over the served
+// partial. partialCtx bounds the first-segment wait (coldHydrateTimeout); bgCtx bounds background
+// completion (coldHydrateBackgroundBudget). The producer receives bgCtx and should honor ctx cancel
+// between events. Returns total events applied + terminal error.
+func (h *Handlers) hydrateProjectionFromSource(partialCtx, bgCtx context.Context, backendID, sessionID string, flight *coldHydrateFlight, produce func(ctx context.Context, emit func(projectionHydrateEvent) bool) error) (int, error) {
 	if partialCtx == nil {
 		partialCtx = context.Background()
 	}
@@ -379,51 +394,20 @@ func (h *Handlers) hydrateCodexProjectionFromDisk(partialCtx, bgCtx context.Cont
 		flight.signalPartial(err)
 		return 0, err
 	}
-	agent, ok := h.getFirstAgentByName("codex")
-	if !ok {
-		// No codex agent / no transcript — honest empty session, not a hydrate failure.
-		flight.signalPartial(nil)
-		return 0, nil
-	}
-	locator, ok := agent.(core.TranscriptLocator)
-	if !ok {
-		flight.signalPartial(nil)
-		return 0, nil
-	}
-	sessPath, err := locator.TranscriptPath(partialCtx, sessionID)
-	if err != nil || strings.TrimSpace(sessPath) == "" {
-		flight.signalPartial(nil)
-		return 0, nil
-	}
-	if err := partialCtx.Err(); err != nil {
-		flight.signalPartial(err)
-		return 0, err
-	}
 
-	// Stream events in file order, applying them one at a time. The scanner runs under bgCtx so
-	// it stays alive through the background phase AFTER a partial is served (the leader does NOT
-	// cancel bgCtx on success). Phase 1 events publish Offline:true (reducer-only, no mid-pull
-	// fan-out); once a content turn lands we flip to Offline:false (Broadcast:true) so subsequent
-	// segments stream to subscribed clients as projection_patch deltas.
 	applied := 0
 	segmentIdx := 0
-	currentTurnID := ""
-	toolNames := make(map[string]string)
 	partialSignaled := false
 
-	emit := func(ev codexRelayEvent) bool {
+	emit := func(ev projectionHydrateEvent) bool {
 		if err := bgCtx.Err(); err != nil {
 			return false
-		}
-		eventName, data, ok := codexRelayEventToProjectionEvent(ev, &currentTurnID, toolNames)
-		if !ok {
-			return true // unhandled kind (e.g. context_usage) — skip, keep scanning
 		}
 		h.publishEvent(LogicalEvent{
 			SessionID: sessionID,
 			BackendID: backendID,
-			Event:     eventName,
-			Data:      data,
+			Event:     ev.Event,
+			Data:      ev.Data,
 			Broadcast: partialSignaled, // phase 2 fans patches out to subscribers
 			Offline:   !partialSignaled,
 		})
@@ -435,7 +419,7 @@ func (h *Handlers) hydrateCodexProjectionFromDisk(partialCtx, bgCtx context.Cont
 			flight.signalPartial(nil)
 		}
 		// Segment boundary (completed turn) — test hook observes incremental reducer state.
-		if ev.kind == "task_complete" {
+		if ev.TurnDone {
 			segmentIdx++
 			if coldHydrateSegmentTestHook != nil {
 				coldHydrateSegmentTestHook(bgCtx, segmentIdx, h.eventPublisher.ProjectionTurnCount(backendID, sessionID))
@@ -444,16 +428,16 @@ func (h *Handlers) hydrateCodexProjectionFromDisk(partialCtx, bgCtx context.Cont
 		return true
 	}
 
-	scanErr := streamCodexTranscriptRelayEvents(bgCtx, sessPath, 0, emit)
+	produceErr := produce(bgCtx, emit)
 
 	if !partialSignaled {
 		// No content turn was ever served. Distinguish a phase-1 timeout/cancel from an honest
 		// empty session: partialCtx.Err() is set when the leader's first-segment budget elapsed
-		// (or the leader bgCanceled on timeout); a nil partialCtx + nil scanErr means the scan
-		// simply produced zero content turns (brand-new / empty rollout) — an honest empty.
+		// (or the leader bgCanceled on timeout); nil partialCtx + nil produceErr means the source
+		// simply produced zero content turns (brand-new / empty rollout / no transcript) — honest empty.
 		cause := partialCtx.Err()
 		if cause == nil {
-			cause = scanErr
+			cause = produceErr
 		}
 		if cause != nil {
 			flight.signalPartial(cause)
@@ -474,12 +458,59 @@ func (h *Handlers) hydrateCodexProjectionFromDisk(partialCtx, bgCtx context.Cont
 
 	// Terminal outcome for finishFlight (informational — the leader already returned on partial).
 	var terminal error
-	if scanErr != nil {
-		terminal = scanErr
+	if produceErr != nil {
+		terminal = produceErr
 	} else if err := bgCtx.Err(); err != nil {
 		terminal = err
 	}
 	return applied, terminal
+}
+
+// produceCodexHydrateEvents is the codex cold-hydrate producer: locate the rollout JSONL via the
+// codex agent's TranscriptLocator and stream it through the codex parser + event mapper. Returns
+// nil (honest empty) when there is no codex agent / transcript; a read/scan error otherwise.
+func (h *Handlers) produceCodexHydrateEvents(ctx context.Context, backendID, sessionID string, emit func(projectionHydrateEvent) bool) error {
+	agent, ok := h.getFirstAgentByName("codex")
+	if !ok {
+		return nil // no codex agent → honest empty session, not a hydrate failure
+	}
+	locator, ok := agent.(core.TranscriptLocator)
+	if !ok {
+		return nil
+	}
+	sessPath, err := locator.TranscriptPath(ctx, sessionID)
+	if err != nil || strings.TrimSpace(sessPath) == "" {
+		return nil
+	}
+	currentTurnID := ""
+	toolNames := make(map[string]string)
+	return streamCodexTranscriptRelayEvents(ctx, sessPath, 0, func(ev codexRelayEvent) bool {
+		eventName, data, ok := codexRelayEventToProjectionEvent(ev, &currentTurnID, toolNames)
+		if !ok {
+			return true // unhandled kind (e.g. context_usage) — skip, keep scanning
+		}
+		return emit(projectionHydrateEvent{Event: eventName, Data: data, TurnDone: ev.kind == "task_complete"})
+	})
+}
+
+// produceClaudeHydrateEvents is the claude cold-hydrate producer: locate the session .jsonl via
+// the claudecode agent's TranscriptLocator and stream it through the claude parser. Returns nil
+// (honest empty) when there is no claude agent / transcript; a read/scan error otherwise.
+// (design §10.5.7 修法 1 — claude joins the projection reducer.)
+func (h *Handlers) produceClaudeHydrateEvents(ctx context.Context, backendID, sessionID string, emit func(projectionHydrateEvent) bool) error {
+	agent, ok := h.getFirstAgentByName("claudecode")
+	if !ok {
+		return nil
+	}
+	locator, ok := agent.(core.TranscriptLocator)
+	if !ok {
+		return nil
+	}
+	sessPath, err := locator.TranscriptPath(ctx, sessionID)
+	if err != nil || strings.TrimSpace(sessPath) == "" {
+		return nil
+	}
+	return streamClaudeTranscriptProjectionEvents(ctx, sessPath, emit)
 }
 
 // codexRelayEventToProjectionEvent maps a scanned codexRelayEvent to its projection LogicalEvent

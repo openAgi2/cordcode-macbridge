@@ -604,6 +604,7 @@ type claudeTranscriptRelayEntry struct {
 	Type    string `json:"type"`
 	IsMeta  bool   `json:"isMeta"`
 	Message *struct {
+		ID         string          `json:"id"`
 		Role       string          `json:"role"`
 		StopReason string          `json:"stop_reason"`
 		Content    json.RawMessage `json:"content"`
@@ -716,14 +717,18 @@ func classifyLastMeaningfulClaudeRelayEntryFromReader(r io.Reader) (claudeTransc
 	return last, nil
 }
 
-// claudeRelayContentBlock 是 assistant message.content 数组里的一个 block（text/thinking/tool_use）。
+// claudeRelayContentBlock 是 assistant/user message.content 数组里的一个 block
+//（text/thinking/tool_use/tool_result）。
 type claudeRelayContentBlock struct {
-	Type     string          `json:"type"`
-	Text     string          `json:"text"`     // text
-	Thinking string          `json:"thinking"` // thinking
-	Name     string          `json:"name"`     // tool_use
-	Input    json.RawMessage `json:"input"`    // tool_use
-	ID       string          `json:"id"`       // tool_use
+	Type      string          `json:"type"`
+	Text      string          `json:"text"`      // text
+	Thinking  string          `json:"thinking"`  // thinking
+	Name      string          `json:"name"`      // tool_use
+	Input     json.RawMessage `json:"input"`     // tool_use
+	ID        string          `json:"id"`        // tool_use
+	ToolUseID string          `json:"tool_use_id"` // tool_result
+	Content   json.RawMessage `json:"content"`   // tool_result (string or block array)
+	IsError   bool            `json:"is_error"`  // tool_result
 }
 
 // claudeRelayContentBlocks 解析 assistant message.content（可能是字符串或 block 数组）。
@@ -740,6 +745,174 @@ func claudeRelayContentBlocks(raw json.RawMessage) []claudeRelayContentBlock {
 		return nil
 	}
 	return blocks
+}
+
+// streamClaudeTranscriptProjectionEvents streams a claude session .jsonl and invokes emit for each
+// derived projectionHydrateEvent in file order (design §10.5.7 修法 1 — claude cold-hydrate). A
+// claude "turn" is a user prompt followed by its assistant response; the user message id owns the
+// turn (used as both turnId and the assistant text itemId so user+assistant land in ONE reducer
+// turn). tool_use → tool_started (real tool id); tool_result → tool_finished (matched by
+// tool_use_id). ctx cancel is honored between lines; a single unparseable line is skipped (parity
+// with the live file-relay scanner).
+func streamClaudeTranscriptProjectionEvents(ctx context.Context, sessPath string, emit func(projectionHydrateEvent) bool) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	f, err := os.Open(sessPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024*16)
+	skipNextResumeNoResponse := false
+	currentTurnID := ""
+	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var e claudeTranscriptRelayEntry
+		if json.Unmarshal(line, &e) != nil {
+			continue
+		}
+		if e.Message == nil {
+			continue
+		}
+		if isClaudeResumeMetaRelayEntry(e) {
+			skipNextResumeNoResponse = true
+			continue
+		}
+		if skipNextResumeNoResponse {
+			if isClaudeResumeNoResponseRelayEntry(e) {
+				skipNextResumeNoResponse = false
+				continue
+			}
+			skipNextResumeNoResponse = false
+		}
+		if e.Type != "user" && e.Type != "assistant" {
+			continue
+		}
+		for _, ev := range claudeEntryToProjectionEvents(e, &currentTurnID) {
+			if !emit(ev) {
+				return ctx.Err()
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	return ctx.Err()
+}
+
+// claudeEntryToProjectionEvents maps one claude transcript entry to its projection events,
+// threading the active turn id (the owning user message id). User text starts a new turn and
+// emits user_message; user tool_result blocks emit tool_finished; assistant blocks emit
+// text_delta / reasoning_delta / tool_started; a final stop_reason emits turn_completed (the
+// segment boundary). Returns nil for entries that carry no projection-meaningful content.
+func claudeEntryToProjectionEvents(e claudeTranscriptRelayEntry, currentTurnID *string) []projectionHydrateEvent {
+	if e.Message == nil {
+		return nil
+	}
+	msgID := e.Message.ID
+	role := e.Message.Role
+	if role == "" {
+		role = e.Type
+	}
+	blocks := claudeRelayContentBlocks(e.Message.Content)
+	var out []projectionHydrateEvent
+	if role == "user" {
+		for _, b := range blocks {
+			if b.Type != "tool_result" {
+				continue
+			}
+			data := map[string]interface{}{"toolResult": claudeToolResultText(b), "toolStatus": "completed"}
+			if b.ToolUseID != "" {
+				data["itemId"] = b.ToolUseID
+			}
+			out = append(out, projectionHydrateEvent{Event: "tool_finished", Data: data})
+		}
+		if isClaudeUserInterruptRelayEntry(e) {
+			return out // interrupt marker — no user_message, no new turn
+		}
+		text := claudeConcatTextBlocks(blocks)
+		if strings.TrimSpace(text) == "" {
+			return out
+		}
+		*currentTurnID = msgID
+		out = append(out, projectionHydrateEvent{Event: "user_message", Data: map[string]interface{}{
+			"itemId": msgID, "turnId": msgID, "text": text,
+		}})
+		return out
+	}
+	// assistant
+	turnID := *currentTurnID
+	if turnID == "" {
+		turnID = msgID // assistant before any user prompt (rare) — self-keyed
+	}
+	for _, b := range blocks {
+		switch b.Type {
+		case "text":
+			if strings.TrimSpace(b.Text) != "" {
+				out = append(out, projectionHydrateEvent{Event: "text_delta", Data: map[string]interface{}{"itemId": turnID, "delta": b.Text}})
+			}
+		case "thinking":
+			if strings.TrimSpace(b.Thinking) != "" {
+				out = append(out, projectionHydrateEvent{Event: "reasoning_delta", Data: map[string]interface{}{"itemId": turnID, "delta": b.Thinking}})
+			}
+		case "tool_use":
+			data := map[string]interface{}{"toolName": b.Name}
+			if len(b.Input) > 0 && string(b.Input) != "null" {
+				data["toolInput"] = json.RawMessage(b.Input)
+			}
+			if b.ID != "" {
+				data["itemId"] = b.ID
+			}
+			out = append(out, projectionHydrateEvent{Event: "tool_started", Data: data})
+		}
+	}
+	if isFinalClaudeStopReason(e.Message.StopReason) {
+		out = append(out, projectionHydrateEvent{
+			Event:    "turn_completed",
+			Data:     map[string]interface{}{"turnId": turnID, "done": true, "reason": e.Message.StopReason},
+			TurnDone: true,
+		})
+	}
+	return out
+}
+
+// claudeConcatTextBlocks joins an entry's text blocks into one string.
+func claudeConcatTextBlocks(blocks []claudeRelayContentBlock) string {
+	var sb strings.Builder
+	for _, b := range blocks {
+		if b.Type == "text" && strings.TrimSpace(b.Text) != "" {
+			if sb.Len() > 0 {
+				sb.WriteString("\n")
+			}
+			sb.WriteString(b.Text)
+		}
+	}
+	return sb.String()
+}
+
+// claudeToolResultText extracts a tool_result block's output as text (string or block array).
+func claudeToolResultText(b claudeRelayContentBlock) string {
+	if len(b.Content) == 0 || string(b.Content) == "null" {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(b.Content, &s) == nil {
+		return s
+	}
+	var textBlocks []claudeRelayContentBlock
+	if json.Unmarshal(b.Content, &textBlocks) == nil {
+		return claudeConcatTextBlocks(textBlocks)
+	}
+	return strings.TrimSpace(string(b.Content))
 }
 
 // emitClaudeAssistantContent 按 content block 发 text_delta(text) / reasoning_delta(thinking)
