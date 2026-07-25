@@ -74,6 +74,26 @@ mirror/source/test、定向 build/test、以及无法执行项的诚实报告。
 > 改完 `go-bridge/` 或 `MacBridge/` 源码后，必须主动完成 Release 构建并覆盖安装到
 > `/Applications`，无需用户提醒；失败时保留真实错误，不得继续使用旧 App 冒充部署成功。
 
+> **禁止用临时构建产物测试 MacBridge（硬约束）。** 用户只跑 `/Applications/CordCodeLink.app`，
+> 因此 agent 改完代码验证时**只能**走「构建 Release → 覆盖安装到 `/Applications` →
+> `killall CordCodeLink` → `open /Applications/CordCodeLink.app` 重启」这条路径（见下方命令块）。
+>
+> **严禁**为了图快而直接启动 `xcodebuild` 的 `build/`、`/tmp/mbbuild/`、DerivedData 或任何
+> 临时目录里的 `CordCodeLink.app` 来"试一下"。原因：临时 app 会和 `/Applications` 里的正式版
+> **同时抢同一个端口 8777 / 同一份 `Application Support` 数据 / 同一套 pairing**，产生两个 GUI
+> 实例 + 两个 runtime 互相打架 —— 用户看到的现象就是「MacBridge 老启动失败 / 行为错乱」，
+> 而 agent 自己的临时测试看似通过，实则污染了用户的正式环境。
+>
+> 这个错误的诱因是阻力差：跑临时 app 5 秒，Release 覆盖安装几分钟。但用户只用正式版，
+> 临时测试的"通过"对用户毫无意义，反而留下残留进程造成后续调查困扰。**速度永远不能凌驾于
+> "测试的就是用户跑的那个 app"之上。**
+>
+> 核对（每次启动 MacBridge 后必做，确认没有临时产物混入）：
+> ```bash
+> # 必须只有 /Applications 路径；任何 /tmp、 DerivedData、 build/ 路径都是违规残留，先杀再继续
+> pgrep -fl "CordCodeLink|cordcode-bridge-runtime" | grep -vE "/Applications/CordCodeLink\.app"
+> ```
+
 There are **two independent Go modules** plus one Xcode project:
 
 ```bash
