@@ -119,6 +119,38 @@ func (ps *projectionSession) upsertTurn(turn TurnProjection) {
 	}
 }
 
+// markRunning sets session execution to running for turnID (design §7.4). Content
+// events must re-arm after a prior turn_completed left phase=idle.
+func (ps *projectionSession) markRunning(turnID string) {
+	if turnID == "" {
+		return
+	}
+	exec := ExecutionView{Phase: "running", ActiveTurnID: turnID}
+	ps.projection.Execution = exec
+	ps.execution = &exec
+	// Keep turn status running unless already settled (do not un-complete).
+	if t := ps.turnByID(turnID); t != nil && t.Status != "completed" && t.Status != "aborted" && t.Status != "error" {
+		t.Status = "running"
+		if ps.upsertTurns != nil {
+			ps.upsertTurns[turnID] = *t
+		}
+	}
+}
+
+// latestRunningTurnID prefers the last turn with status running/pending; else last turn id.
+func (ps *projectionSession) latestRunningTurnID() string {
+	for i := len(ps.projection.Turns) - 1; i >= 0; i-- {
+		st := ps.projection.Turns[i].Status
+		if st == "running" || st == "pending" {
+			return ps.projection.Turns[i].TurnID
+		}
+	}
+	if n := len(ps.projection.Turns); n > 0 {
+		return ps.projection.Turns[n-1].TurnID
+	}
+	return ""
+}
+
 // ensureAssistantTextPart returns the assistant message's trailing text part, creating one if
 // the last part is not text. Used by append_text accumulation.
 func (m *MessageProjection) ensureTrailingTextPart() *ProjectionPart {
@@ -173,9 +205,7 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			return // driver path (events.go hardcodes turnId:""); skip until Phase 3
 		}
 		ps.upsertTurn(TurnProjection{TurnID: turnID, Status: "running", StartedAt: ps.projection.UpdatedAt})
-		exec := ExecutionView{Phase: "running", ActiveTurnID: turnID}
-		ps.projection.Execution = exec
-		ps.execution = &exec
+		ps.markRunning(turnID)
 
 	case "user_message":
 		turnID := dataString(data, "turnId")
@@ -192,6 +222,11 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			Status: "running",
 			User:   &MessageProjection{ID: itemID, Role: "user", Parts: []ProjectionPart{{Type: "text", Text: text}}},
 		})
+		// Design §7.4: any in-flight content must keep execution.running. After cold
+		// hydrate the last completed turn leaves phase=idle; a new user_message without
+		// a re-emitted turn_started must still arm the UI (owner 2026-07-25: reopen app
+		// → prompt+thinking then sticky 完成态 because phase stayed idle).
+		ps.markRunning(turnID)
 
 	case "text_delta":
 		// itemId == lifecycle turn_id == the turn's turnId == the assistant message id.
@@ -211,6 +246,7 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		tp := t.Assistant.ensureTrailingTextPart()
 		tp.Text += delta
 		ps.textAppends[turnID] = append(ps.textAppends[turnID], delta)
+		ps.markRunning(turnID)
 
 	case "reasoning_delta":
 		turnID := dataString(data, "itemId")
@@ -240,6 +276,7 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		}
 		rpart.Text += delta
 		ps.thinking[turnID] = rpart.Text
+		ps.markRunning(turnID)
 
 	case "tool_started", "tool_finished":
 		callID := dataString(data, "itemId")
@@ -248,8 +285,14 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		}
 		activeTurnID := ps.projection.Execution.ActiveTurnID
 		if activeTurnID == "" {
+			// Infer: last non-settled turn, else last turn — tools often arrive after
+			// content without a fresh turn_started in the reduce window.
+			activeTurnID = ps.latestRunningTurnID()
+		}
+		if activeTurnID == "" {
 			return // no active turn to attach the tool to
 		}
+		ps.markRunning(activeTurnID)
 		t := ps.turnByID(activeTurnID)
 		if t == nil || t.Assistant == nil {
 			return

@@ -112,6 +112,27 @@ func TestReducerUserMessageAttribution(t *testing.T) {
 	if len(u.Parts) != 1 || u.Parts[0].Type != "text" || u.Parts[0].Text != "hi" {
 		t.Fatalf("user parts = %+v", u.Parts)
 	}
+	if proj.Execution.Phase != "running" || proj.Execution.ActiveTurnID != "T1" {
+		t.Fatalf("user_message must arm execution.running, got %+v", proj.Execution)
+	}
+}
+
+// TestReducerContentRearmsAfterCompletedIdle: cold hydrate / prior turn_completed leaves
+// phase=idle; a new user_message + reasoning without relying on turn_started must re-arm.
+func TestReducerContentRearmsAfterCompletedIdle(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T0"}))
+	r.Apply(ev(2, "codex", "s1", "turn_completed", map[string]interface{}{"turnId": "T0"}))
+	proj, _ := r.Snapshot("codex", "s1")
+	if proj.Execution.Phase != "idle" {
+		t.Fatalf("after complete phase=%q", proj.Execution.Phase)
+	}
+	r.Apply(ev(3, "codex", "s1", "user_message", map[string]interface{}{"itemId": "u2", "turnId": "T1", "text": "第五轮测试"}))
+	r.Apply(ev(4, "codex", "s1", "reasoning_delta", map[string]interface{}{"itemId": "T1", "delta": "thinking…"}))
+	proj, _ = r.Snapshot("codex", "s1")
+	if proj.Execution.Phase != "running" || proj.Execution.ActiveTurnID != "T1" {
+		t.Fatalf("expected running T1 after new content, got %+v", proj.Execution)
+	}
 }
 
 // TestReducerReasoningAccumulates: consecutive reasoning deltas accumulate into one reasoning part.
