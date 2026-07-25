@@ -463,14 +463,25 @@ MUST read the ProjectionReducer in-memory state (cold-start may hydrate once fro
 reducer, then serve); it MUST NOT be a thin wrapper that returns `get_session_messages` bodies for
 the client to merge.
 
-**Cold-start hydrate MUST complete before answering — never serve an empty head-0 shell as success
-(design §10.5 root-cause correction, 2026-07-25).** A fixed short timeout that returns `syncRev=0,
-turns=[]` while the hydrator keeps running in the background is a **contract violation**: it forces
-clients to fall back to `get_session_messages` (defeating the single-source goal) and, for large
-sessions, causes concurrent full-history fetches that reset the connection. The response is either a
-non-empty projection (hydrated, even if it takes a few seconds — clients already carry an 8s cap) or
-an explicit RPC error. Hydrate-on-cold-start is a *must* with a real budget, not a *may* with a
-token timeout.
+**Cold-pull budget = 15 seconds (owner 2026-07-25 拍板 X=15s; design §10.5.7 修法 2).** A
+`sinceRev=0` cold pull MUST receive a **non-empty partial** projection (containing at least one
+content turn) within 15 seconds, OR an explicit RPC error `projection.hydrate_timeout` — NEVER an
+empty head-0 shell (`syncRev=0, turns=[]`) as success. Serving an empty head while the hydrator is
+still running is a **contract violation**: it forces clients to fall back to `get_session_messages`
+(defeating the single-source goal) and, for large sessions, causes concurrent full-history fetches
+that reset the connection.
+
+The Mac hydrates the transcript in **turn-bounded segments** (design §10.5.6 scheme A + §10.5.7
+修法 1 full-backend): the first segment that yields a content turn is served as the partial
+WITHOUT waiting for the full scan, and the remaining segments stream to the client asynchronously
+as `projection_patch` deltas. The served partial is a **real subset** of the authoritative
+projection, NOT the final state — clients render the partial immediately and incrementally append
+later patches (partial-first UX). Client cold-pull cap MUST be ≥ 15 seconds (iOS
+`ProjectionStore.pullHardCapNanoseconds = 15s`); a late-apply path remains as a worst-case backstop
+but is not the primary contract. If even one content turn cannot be produced within 15 seconds the
+RPC returns `projection.hydrate_timeout` (honest failure, not an empty shell). A backend not yet
+migrated to projection returns `projection.not_migrated`. This replaces the prior "hydrate must
+fully complete before answering" / "clients carry an 8s cap" model.
 
 Request params (additive):
 
