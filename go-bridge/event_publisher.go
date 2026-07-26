@@ -602,6 +602,8 @@ func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID strin
 			slog.Info("go-bridge: [K4Patch] delivered",
 				"sessionPrefix", projectionSessionLogPrefix(sessionID),
 				"syncRev", patch.SyncRev,
+				"remote", conn.RemoteAddr(),
+				"device", func() string { if d := conn.AuthedDevice(); d != nil { return d.DeviceID }; return "" }(),
 			)
 		} else {
 			p.projectionInvalidated[key] = true
