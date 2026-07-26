@@ -509,10 +509,18 @@ func projectionInvalidateEvent(bridgeEpoch, backendID, sessionID string) EventMe
 // path; it reuses sinks + broadcaster, adding no new transport (design §6.2, N8).
 func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID string, patch ProjectionPatch) {
 	if p.broadcaster == nil || len(p.syncV2) == 0 {
+		slog.Info("go-bridge: [K4Patch] drop",
+			"sessionPrefix", projectionSessionLogPrefix(sessionID),
+			"reason", "no_v2_conns", "syncRev", patch.SyncRev,
+		)
 		return
 	}
 	targets := p.broadcaster.Targets(backendID, sessionID, "")
 	if len(targets) == 0 {
+		slog.Info("go-bridge: [K4Patch] drop",
+			"sessionPrefix", projectionSessionLogPrefix(sessionID),
+			"reason", "no_targets", "syncRev", patch.SyncRev,
+		)
 		return
 	}
 	msg := projectionPatchEvent(p.bridgeEpoch, backendID, sessionID, patch)
@@ -535,9 +543,20 @@ func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID strin
 		key := projectionFenceKey{conn: conn, backendID: backendID, sessionID: sessionID}
 		if fence := p.projectionFences[key]; fence != nil {
 			if patch.SyncRev <= fence.expectedRev || fence.invalidated {
+				slog.Info("go-bridge: [K4Patch] drop",
+					"sessionPrefix", projectionSessionLogPrefix(sessionID),
+					"reason", "fence_stale_or_invalidated",
+					"syncRev", patch.SyncRev, "expectedRev", fence.expectedRev,
+					"invalidated", fence.invalidated,
+				)
 				continue
 			}
 			if patch.BaseRev != fence.expectedRev {
+				slog.Info("go-bridge: [K4Patch] drop",
+					"sessionPrefix", projectionSessionLogPrefix(sessionID),
+					"reason", "fence_base_mismatch",
+					"baseRev", patch.BaseRev, "expectedRev", fence.expectedRev,
+				)
 				fence.pending = nil
 				fence.pendingBytes = 0
 				fence.invalidated = true
@@ -546,6 +565,11 @@ func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID strin
 			encoded, _ := json.Marshal(patch)
 			if len(fence.pending)+1 > projectionFenceMaxPatches ||
 				fence.pendingBytes+len(encoded) > projectionFenceMaxBytes {
+				slog.Info("go-bridge: [K4Patch] drop",
+					"sessionPrefix", projectionSessionLogPrefix(sessionID),
+					"reason", "fence_overflow",
+					"pending", len(fence.pending),
+				)
 				fence.pending = nil
 				fence.pendingBytes = 0
 				fence.invalidated = true
@@ -554,6 +578,10 @@ func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID strin
 			fence.pending = append(fence.pending, patch)
 			fence.pendingBytes += len(encoded)
 			fence.expectedRev = patch.SyncRev
+			slog.Info("go-bridge: [K4Patch] held_in_fence",
+				"sessionPrefix", projectionSessionLogPrefix(sessionID),
+				"syncRev", patch.SyncRev, "pending", len(fence.pending),
+			)
 			continue
 		}
 		if p.projectionInvalidated[key] {
@@ -571,8 +599,16 @@ func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID strin
 		// (projection frames are reconstructable, not live-bufferable).
 		if sink.tryEnqueue(eventOutboundFrame{value: msg, classHint: classHint, classified: true}) {
 			p.projectionSnapshotCuts[key] = patch.SyncRev
+			slog.Info("go-bridge: [K4Patch] delivered",
+				"sessionPrefix", projectionSessionLogPrefix(sessionID),
+				"syncRev", patch.SyncRev,
+			)
 		} else {
 			p.projectionInvalidated[key] = true
+			slog.Info("go-bridge: [K4Patch] drop",
+				"sessionPrefix", projectionSessionLogPrefix(sessionID),
+				"reason", "sink_overflow", "syncRev", patch.SyncRev,
+			)
 		}
 	}
 }
@@ -726,10 +762,25 @@ func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
 	// patches (design §5.3 cold hydrate). Phase 1 flushes per-event for live correctness;
 	// timed coalesce remains an optional bandwidth optimization (design §2.3 / §10 item 3).
 	if projectionApplied && p.projection != nil && logical.BackendID != "" && logical.SessionID != "" {
-		if patch, ok := p.projection.FlushPatch(logical.BackendID, logical.SessionID); ok {
+		patch, flushOk := p.projection.FlushPatch(logical.BackendID, logical.SessionID)
+		if flushOk {
+			slog.Info("go-bridge: [K4Patch] flush",
+				"sessionPrefix", projectionSessionLogPrefix(logical.SessionID),
+				"event", logical.Event,
+				"syncRev", patch.SyncRev,
+				"baseRev", patch.BaseRev,
+				"offline", logical.Offline,
+				"kernelMode", p.kernel != nil,
+			)
 			if !logical.Offline {
 				p.deliverProjectionPatchLocked(logical.BackendID, logical.SessionID, patch)
 			}
+		} else {
+			slog.Info("go-bridge: [K4Patch] flush_empty_after_apply",
+				"sessionPrefix", projectionSessionLogPrefix(logical.SessionID),
+				"event", logical.Event,
+				"kernelMode", p.kernel != nil,
+			)
 		}
 	}
 

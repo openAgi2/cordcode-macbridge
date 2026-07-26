@@ -2,6 +2,7 @@ package gobridge
 
 import (
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -66,6 +67,10 @@ func (p *EventPublisher) BeginProjectionSnapshot(
 		expectedRev: projection.SyncRev,
 	}
 	delete(p.projectionInvalidated, key)
+	slog.Info("go-bridge: [K4Patch] fence_begin",
+		"sessionPrefix", projectionSessionLogPrefix(sessionID),
+		"cutRev", projection.SyncRev, "generation", generation,
+	)
 	return projection, ProjectionSnapshotAdmission{
 		BridgeEpoch:          p.bridgeEpoch,
 		ConnectionGeneration: generation,
@@ -105,6 +110,11 @@ func (p *EventPublisher) CompleteProjectionSnapshot(
 	}
 	sink := p.sinkLocked(conn)
 	required := 1 + len(fence.pending)
+	slog.Info("go-bridge: [K4Patch] fence_complete",
+		"sessionPrefix", projectionSessionLogPrefix(admission.SessionID),
+		"pending", len(fence.pending), "invalidated", fence.invalidated,
+		"expectedRev", fence.expectedRev,
+	)
 	if fence.invalidated {
 		required = 2
 	}
