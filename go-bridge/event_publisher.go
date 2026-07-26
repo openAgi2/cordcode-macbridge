@@ -104,6 +104,31 @@ func (s *eventOutboundSink) run() {
 				<-s.slots
 				continue
 			}
+			// K4 probe: projection_patch write instrumentation. Detects where projection frames
+			// vanish between sink dequeue and iOS receipt: marshal failure (json.Marshal the same
+			// value SendJSON/WriteJSON will encode), stale-sink/wrong-conn (sink+remote identity),
+			// or write timeout (elapsedMs near bridgeWriteTimeout). Scoped to projection_patch only.
+			projProbe := false
+			probeRev := 0
+			probeMarshalErr := ""
+			if em, ok := frame.value.(EventMessage); ok && em.Event == "projection_patch" {
+				projProbe = true
+				if patch, perr := em.Data.(ProjectionPatch); perr {
+					probeRev = patch.SyncRev
+				}
+				if _, merr := json.Marshal(frame.value); merr != nil {
+					probeMarshalErr = merr.Error()
+				}
+			}
+			if projProbe {
+				slog.Info("go-bridge: [K4Patch] write_pre",
+					"sink", fmt.Sprintf("%p", s),
+					"remote", s.conn.RemoteAddr(),
+					"syncRev", probeRev,
+					"marshalErr", probeMarshalErr,
+				)
+			}
+			writeStart := time.Now()
 			if frame.isResult {
 				s.conn.SendResult(frame.requestID, frame.resultData, frame.resultErr)
 				if frame.resultDone != nil {
@@ -115,6 +140,14 @@ func (s *eventOutboundSink) run() {
 				sender.SendJSONClassified(frame.value, frame.classHint)
 			} else {
 				s.conn.SendJSON(frame.value)
+			}
+			if projProbe {
+				slog.Info("go-bridge: [K4Patch] write_post",
+					"sink", fmt.Sprintf("%p", s),
+					"remote", s.conn.RemoteAddr(),
+					"syncRev", probeRev,
+					"elapsedMs", time.Since(writeStart).Milliseconds(),
+				)
 			}
 			if frame.delivered != nil {
 				close(frame.delivered)
