@@ -106,10 +106,17 @@ func newConn(ws *websocket.Conn) *Conn {
 }
 
 func (c *Conn) SendJSON(v interface{}) {
+	_ = c.SendJSONReport(v)
+}
+
+// SendJSONReport is the error-returning write used by K4 projection probes so
+// write_post can distinguish closed-conn / WriteJSON failure from real wire success.
+// Plain SendJSON swallows both (historical contract for broadcaster callers).
+func (c *Conn) SendJSONReport(v interface{}) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
-		return
+		return fmt.Errorf("connection closed")
 	}
 	// 写 deadline 必须在持 c.mu 的情况下紧贴 WriteJSON 调用（gorilla 不允许同 conn 并发写），
 	// 避免另一个写者在 deadline 与实际写之间插入。详见根治 spec 坑 1。
@@ -132,9 +139,10 @@ func (c *Conn) SendJSON(v interface{}) {
 				c.mu.Lock()
 			}
 		}
-	} else {
-		c.consecutiveWriteErrors = 0
+		return err
 	}
+	c.consecutiveWriteErrors = 0
+	return nil
 }
 
 func (c *Conn) SendResult(requestID string, data interface{}, err *WireError) {

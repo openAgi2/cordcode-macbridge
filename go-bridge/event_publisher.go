@@ -129,6 +129,7 @@ func (s *eventOutboundSink) run() {
 				)
 			}
 			writeStart := time.Now()
+			var writeErr error
 			if frame.isResult {
 				s.conn.SendResult(frame.requestID, frame.resultData, frame.resultErr)
 				if frame.resultDone != nil {
@@ -138,15 +139,32 @@ func (s *eventOutboundSink) run() {
 				SendJSONClassified(any, relayOutboundClass)
 			}); ok && frame.classified {
 				sender.SendJSONClassified(frame.value, frame.classHint)
+			} else if reporter, ok := s.conn.(interface {
+				SendJSONReport(any) error
+			}); ok {
+				// Prefer error-returning write so write_post can prove wire success
+				// (plain SendJSON swallows closed-conn and WriteJSON errors).
+				writeErr = reporter.SendJSONReport(frame.value)
 			} else {
 				s.conn.SendJSON(frame.value)
 			}
 			if projProbe {
+				errStr := ""
+				if writeErr != nil {
+					errStr = writeErr.Error()
+				}
+				// Also record marshaled payload size so we can correlate with iOS WS-RAW.
+				payloadSize := 0
+				if b, merr := json.Marshal(frame.value); merr == nil {
+					payloadSize = len(b)
+				}
 				slog.Info("go-bridge: [K4Patch] write_post",
 					"sink", fmt.Sprintf("%p", s),
 					"remote", s.conn.RemoteAddr(),
 					"syncRev", probeRev,
 					"elapsedMs", time.Since(writeStart).Milliseconds(),
+					"writeErr", errStr,
+					"payloadBytes", payloadSize,
 				)
 			}
 			if frame.delivered != nil {

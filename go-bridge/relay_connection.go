@@ -39,6 +39,13 @@ func (d *directConnAdapter) SendJSON(v any) {
 	d.inner.SendJSON(v)
 }
 
+// SendJSONReport forwards to the inner *Conn so K4 write_post can observe write errors.
+// Without this method the sink type-assert fails and falls back to plain SendJSON
+// (which swallows closed-conn / WriteJSON failures).
+func (d *directConnAdapter) SendJSONReport(v any) error {
+	return d.inner.SendJSONReport(v)
+}
+
 func (d *directConnAdapter) SendResult(requestID string, data interface{}, err *WireError) {
 	d.inner.SendResult(requestID, data, err)
 }
