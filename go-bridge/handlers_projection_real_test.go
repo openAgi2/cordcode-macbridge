@@ -2,7 +2,7 @@
 
 // Package gobridge (realdata build tag): 监工指令 5 号取证 — against the owner's REAL
 // on-disk transcripts (codex ~/.codex/sessions, claude ~/.claude/projects) through the REAL
-// production hydrate pipeline (produceCodexHydrateEvents / produceClaudeHydrateEvents) and the
+// production Kernel hydrate pipeline and the
 // REAL handleGetSessionProjection dispatch. Not run by default `go test` (needs the owner's
 // machine data); invoke with `-tags realdata`.
 //
@@ -14,12 +14,16 @@ package gobridge
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/openAgi2/cordcode-macbridge/agent/codex"
 )
 
 // largestJSONLUnder walks root and returns the path of the largest *.jsonl file (proxy for a
@@ -47,6 +51,31 @@ func largestJSONLUnder(t *testing.T, root string) string {
 	return files[0].path
 }
 
+func largestJSONLsUnder(t *testing.T, root string, limit int) []string {
+	t.Helper()
+	type entry struct {
+		path string
+		size int64
+	}
+	var files []entry
+	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err == nil && info != nil && !info.IsDir() && info.Size() > 0 &&
+			strings.HasSuffix(path, ".jsonl") {
+			files = append(files, entry{path: path, size: info.Size()})
+		}
+		return nil
+	})
+	sort.Slice(files, func(i, j int) bool { return files[i].size > files[j].size })
+	if limit > 0 && len(files) > limit {
+		files = files[:limit]
+	}
+	result := make([]string, len(files))
+	for index := range files {
+		result[index] = files[index].path
+	}
+	return result
+}
+
 // codexSessionIDFromRollout extracts the trailing uuid from a rollout filename
 // (rollout-<timestamp>-<uuid>.jsonl). Falls back to the basename without extension.
 func codexSessionIDFromRollout(path string) string {
@@ -61,9 +90,8 @@ func codexSessionIDFromRollout(path string) string {
 	return base
 }
 
-// TestRealColdPullCodexLargeSession: §10.5.7 修法 2 exit criterion — a real owner codex "大
-// session" cold pull MUST return a non-empty partial within the 15s budget. Verifies the real
-// produceCodexHydrateEvents pipeline against real owner data (the 1.85GB dataset).
+// TestRealColdPullCodexLargeSession verifies a real owner Codex large session reaches one full
+// committed baseline within the 15s product anchor.
 func TestRealColdPullCodexLargeSession(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -89,7 +117,7 @@ func TestRealColdPullCodexLargeSession(t *testing.T) {
 	elapsed := time.Since(start)
 
 	if conn.err != nil {
-		t.Fatalf("real codex cold pull FAILED (expected non-empty partial within 15s): code=%s msg=%s — %s",
+		t.Fatalf("real codex cold pull FAILED (expected full committed baseline within 15s): code=%s msg=%s — %s",
 			conn.err.Code, conn.err.Message, elapsed)
 	}
 	dataMap, ok := conn.data.(map[string]interface{})
@@ -98,22 +126,401 @@ func TestRealColdPullCodexLargeSession(t *testing.T) {
 	}
 	proj, ok := dataMap["projection"].(SessionProjection)
 	if !ok || len(proj.Turns) == 0 || proj.SyncRev <= 0 {
-		t.Fatalf("real codex: empty head-0 partial (forbidden §10.5.1): %+v — %s", dataMap["projection"], elapsed)
+		t.Fatalf("real codex: empty head-0 snapshot (forbidden): %+v — %s", dataMap["projection"], elapsed)
 	}
 	if elapsed >= defaultColdHydrateTimeout {
-		t.Fatalf("real codex 大 session: partial served after %s, MUST be within %s (§10.5.7 修法 2)",
+		t.Fatalf("real codex large session: committed baseline served after %s, must be within %s",
 			elapsed, defaultColdHydrateTimeout)
 	}
-	t.Logf("REAL CODEX cold pull: partial in %s, turns=%d syncRev=%d (within 15s budget ✅)",
+	t.Logf("REAL CODEX cold pull: full baseline in %s, turns=%d syncRev=%d (within 15s budget)",
 		elapsed, len(proj.Turns), proj.SyncRev)
 	// Drain the background hydrate so the segment-hook global is not contaminated.
 	waitForColdHydrateDrained(t, handlers, "codex", sid, 30*time.Second)
 }
 
-// TestRealColdPullClaudeNonEmpty: §10.5.7 修法 1 core verification — a real owner CLAUDE session
-// cold pull MUST return a non-empty partial (previously .active showed全空白「还没有消息」). Verifies
-// the real produceClaudeHydrateEvents parser + claudeEntryToProjectionEvents mapper against real
-// claude .jsonl history.
+// TestRealProjectionShadowParityCodexLargeSession compares the production projection hydrate
+// with the existing canonical Codex rich-history parser without printing transcript content,
+// paths, or session identifiers. K3 shadow admission requires semantic parity before active
+// timeline ownership can be considered.
+func TestRealProjectionShadowParityCodexLargeSession(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rollout := largestJSONLUnder(t, filepath.Join(home, ".codex", "sessions"))
+	if rollout == "" {
+		t.Skip("no real Codex rollout available")
+	}
+	source, err := os.Open(rollout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := codex.ParseRichHistoryFromReader(source, 0)
+	_ = source.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sessionID := codexSessionIDFromRollout(rollout)
+	handlers := NewHandlers()
+	handlers.RegisterAgent("codex", &fakeAgent{name: "codex", transcriptPath: rollout})
+	conn := &readFileCaptureConn{}
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": sessionID, "sinceRev": 0})
+	handlers.handleGetSessionProjection(conn, WireMessage{
+		RequestID: "real-shadow-parity",
+		BackendID: "codex",
+		Method:    "get_session_projection",
+		Params:    params,
+	}, nil)
+	if conn.err != nil {
+		t.Fatalf("projection hydrate failed: code=%s", conn.err.Code)
+	}
+	waitForColdHydrateDrained(t, handlers, "codex", sessionID, 30*time.Second)
+	projection, ok := handlers.eventPublisher.ProjectionReducer().Snapshot("codex", sessionID)
+	if !ok {
+		t.Fatal("projection hydrate committed no snapshot")
+	}
+
+	type comparableMessage struct {
+		role       string
+		content    string
+		thinking   string
+		tools      []string
+		isComplete bool
+	}
+	projected := make([]comparableMessage, 0, len(projection.Turns)*2)
+	for _, turn := range projection.Turns {
+		appendMessage := func(message *MessageProjection, complete bool) {
+			if message == nil {
+				return
+			}
+			if message.Role == "assistant" && len(message.Parts) == 0 {
+				return
+			}
+			item := comparableMessage{role: message.Role, isComplete: complete}
+			var content, finalContent, thinking []string
+			for _, part := range message.Parts {
+				switch part.Type {
+				case "text":
+					content = append(content, part.Text)
+					if part.Presentation == "final" {
+						finalContent = append(finalContent, part.Text)
+					}
+				case "reasoning":
+					thinking = append(thinking, part.Text)
+				case "tool":
+					item.tools = append(item.tools, part.ToolName+"\x00"+part.ToolStatus)
+				}
+			}
+			if len(finalContent) > 0 {
+				item.content = strings.Join(finalContent, "\n")
+			} else {
+				item.content = strings.Join(content, "\n")
+			}
+			item.thinking = strings.Join(thinking, "\n")
+			projected = append(projected, item)
+		}
+		appendMessage(turn.User, true)
+		appendMessage(turn.Assistant, turn.Status == "completed" || turn.Status == "aborted" || turn.Status == "error")
+	}
+	canonical := make([]comparableMessage, 0, len(legacy))
+	for _, entry := range legacy {
+		item := comparableMessage{
+			role:       entry.Role,
+			content:    entry.Content,
+			thinking:   entry.Thinking,
+			isComplete: entry.Role != "assistant" || entry.TurnCompletedAt != nil,
+		}
+		for _, step := range entry.Steps {
+			name, _ := step["toolName"].(string)
+			status, _ := step["status"].(string)
+			item.tools = append(item.tools, name+"\x00"+status)
+		}
+		canonical = append(canonical, item)
+	}
+
+	roleMismatch, contentMismatch, thinkingMismatch := 0, 0, 0
+	toolMismatch, completionMismatch := 0, 0
+	projectedUsers, canonicalUsers := 0, 0
+	for _, message := range projected {
+		if message.role == "user" {
+			projectedUsers++
+		}
+	}
+	for _, message := range canonical {
+		if message.role == "user" {
+			canonicalUsers++
+		}
+	}
+	loggedMismatch := 0
+	for index := 0; index < len(projected) && index < len(canonical); index++ {
+		if projected[index].role != canonical[index].role {
+			roleMismatch++
+		}
+		if projected[index].content != canonical[index].content {
+			contentMismatch++
+		}
+		if projected[index].thinking != canonical[index].thinking {
+			thinkingMismatch++
+		}
+		if !reflect.DeepEqual(projected[index].tools, canonical[index].tools) {
+			toolMismatch++
+		}
+		if projected[index].isComplete != canonical[index].isComplete {
+			completionMismatch++
+		}
+		if loggedMismatch < 12 && !reflect.DeepEqual(projected[index], canonical[index]) {
+			t.Logf(
+				"shadow parity shape[%d]: projected(role=%s content=%d thinking=%d tools=%d complete=%t) canonical(role=%s content=%d thinking=%d tools=%d complete=%t)",
+				index,
+				projected[index].role, len(projected[index].content), len(projected[index].thinking),
+				len(projected[index].tools), projected[index].isComplete,
+				canonical[index].role, len(canonical[index].content), len(canonical[index].thinking),
+				len(canonical[index].tools), canonical[index].isComplete,
+			)
+			loggedMismatch++
+		}
+		if !reflect.DeepEqual(projected[index].tools, canonical[index].tools) {
+			firstToolMismatch := 0
+			for firstToolMismatch < len(projected[index].tools) &&
+				firstToolMismatch < len(canonical[index].tools) &&
+				projected[index].tools[firstToolMismatch] == canonical[index].tools[firstToolMismatch] {
+				firstToolMismatch++
+			}
+			projectedTool := "<end>"
+			canonicalTool := "<end>"
+			if firstToolMismatch < len(projected[index].tools) {
+				projectedTool = projected[index].tools[firstToolMismatch]
+			}
+			if firstToolMismatch < len(canonical[index].tools) {
+				canonicalTool = canonical[index].tools[firstToolMismatch]
+			}
+			t.Logf(
+				"shadow parity tool-shape[%d]: first=%d projected=%q canonical=%q",
+				index, firstToolMismatch, projectedTool, canonicalTool,
+			)
+		}
+	}
+	t.Logf(
+		"shadow parity aggregate: projected=%d(users=%d) canonical=%d(users=%d) role=%d content=%d thinking=%d tools=%d completion=%d",
+		len(projected), projectedUsers, len(canonical), canonicalUsers, roleMismatch, contentMismatch, thinkingMismatch,
+		toolMismatch, completionMismatch,
+	)
+	if len(projected) != len(canonical) || roleMismatch+contentMismatch+thinkingMismatch+toolMismatch+completionMismatch != 0 {
+		t.Fatalf("projection differs from canonical transcript semantics")
+	}
+}
+
+// TestRealColdPullCodexSLODistribution measures no-checkpoint cold hydrate across the owner's
+// largest persisted Codex sessions. It reports aggregate size/turn/timing only: no path, content,
+// or session identity is emitted.
+func TestRealColdPullCodexSLODistribution(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rollouts := largestJSONLsUnder(t, filepath.Join(home, ".codex", "sessions"), 20)
+	if len(rollouts) < 5 {
+		t.Skipf("need at least five persisted Codex sessions, found %d", len(rollouts))
+	}
+
+	var durations []time.Duration
+	var minBytes, maxBytes int64
+	minTurns, maxTurns := int(^uint(0)>>1), 0
+	for _, rollout := range rollouts {
+		info, statErr := os.Stat(rollout)
+		if statErr != nil {
+			t.Fatal(statErr)
+		}
+		sessionID := codexSessionIDFromRollout(rollout)
+		handlers := NewHandlers()
+		handlers.RegisterAgent("codex", &fakeAgent{name: "codex", transcriptPath: rollout})
+		conn := &readFileCaptureConn{}
+		params, _ := json.Marshal(map[string]interface{}{"sessionId": sessionID, "sinceRev": 0})
+		started := time.Now()
+		handlers.handleGetSessionProjection(conn, WireMessage{
+			RequestID: "real-slo-sample",
+			BackendID: "codex",
+			Method:    "get_session_projection",
+			Params:    params,
+		}, nil)
+		elapsed := time.Since(started)
+		if conn.err != nil {
+			t.Fatalf("no-checkpoint sample failed: code=%s retryable=%v", conn.err.Code, conn.err.Retryable)
+		}
+		waitForColdHydrateDrained(t, handlers, "codex", sessionID, 30*time.Second)
+		projection, ok := handlers.eventPublisher.ProjectionReducer().Snapshot("codex", sessionID)
+		if !ok {
+			t.Fatal("no-checkpoint sample committed no projection")
+		}
+		durations = append(durations, elapsed)
+		if minBytes == 0 || info.Size() < minBytes {
+			minBytes = info.Size()
+		}
+		if info.Size() > maxBytes {
+			maxBytes = info.Size()
+		}
+		if len(projection.Turns) < minTurns {
+			minTurns = len(projection.Turns)
+		}
+		if len(projection.Turns) > maxTurns {
+			maxTurns = len(projection.Turns)
+		}
+	}
+	sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+	nearestRank := func(percentile float64) time.Duration {
+		index := int(float64(len(durations))*percentile+0.999999) - 1
+		if index < 0 {
+			index = 0
+		}
+		if index >= len(durations) {
+			index = len(durations) - 1
+		}
+		return durations[index]
+	}
+	p50, p95, maximum := nearestRank(0.50), nearestRank(0.95), durations[len(durations)-1]
+	t.Logf(
+		"real no-checkpoint SLO: samples=%d sourceBytes=[%d,%d] turns=[%d,%d] p50=%s p95=%s max=%s",
+		len(durations), minBytes, maxBytes, minTurns, maxTurns, p50, p95, maximum,
+	)
+	if p50 > projectionColdOpenP50SLO || p95 > projectionColdOpenP95SLO ||
+		maximum > projectionColdOpenMaximumSLO {
+		t.Fatalf(
+			"no-checkpoint cold-open exceeds F2: p50=%s/%s p95=%s/%s max=%s/%s",
+			p50, projectionColdOpenP50SLO, p95, projectionColdOpenP95SLO,
+			maximum, projectionColdOpenMaximumSLO,
+		)
+	}
+}
+
+// TestRealProjectionCheckpointRestart reduces an owner Codex rollout through the production
+// parser, persists the committed projection, and proves a fresh Kernel restores the identical
+// head. A copied source is then appended after the durable cursor to prove append-only growth
+// preserves admission without moving the persisted cut.
+func TestRealProjectionCheckpointRestart(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rollout := largestJSONLUnder(t, filepath.Join(home, ".codex", "sessions"))
+	if rollout == "" {
+		t.Skip("no real Codex rollout available")
+	}
+	sessionID := codexSessionIDFromRollout(rollout)
+	handlers := NewHandlers()
+	handlers.RegisterAgent("codex", &fakeAgent{name: "codex", transcriptPath: rollout})
+
+	conn := &readFileCaptureConn{}
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": sessionID, "sinceRev": 0})
+	msg := WireMessage{
+		RequestID: "real-checkpoint-restart",
+		BackendID: "codex",
+		Method:    "get_session_projection",
+		Params:    params,
+	}
+	hydrateStarted := time.Now()
+	handlers.handleGetSessionProjection(conn, msg, nil)
+	if conn.err != nil {
+		t.Fatalf("real hydrate failed: code=%s message=%s", conn.err.Code, conn.err.Message)
+	}
+	waitForColdHydrateDrained(t, handlers, "codex", sessionID, 30*time.Second)
+	hydrateElapsed := time.Since(hydrateStarted)
+	projection, ok := handlers.eventPublisher.ProjectionReducer().Snapshot("codex", sessionID)
+	if !ok || projection.SyncRev == 0 {
+		t.Fatalf("real hydrate produced no committed projection: ok=%v rev=%d", ok, projection.SyncRev)
+	}
+	info, err := os.Stat(rollout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := ProjectionSourceDescriptor{
+		Identity: sessionID,
+		Path:     rollout,
+		Cursor:   info.Size(),
+	}
+	sourceCheckpoint, err := BuildProjectionSourceCheckpoint(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewProjectionCheckpointStore(t.TempDir())
+	checkpoint := NewReadyProjectionCheckpoint(
+		"codex", sessionID, sourceCheckpoint, projection, time.Now(),
+	)
+	saveStarted := time.Now()
+	if err := store.Save(checkpoint); err != nil {
+		t.Fatal(err)
+	}
+	saveElapsed := time.Since(saveStarted)
+
+	restarted := NewProjectionKernel(nil, store)
+	restoreStarted := time.Now()
+	restored, err := restarted.RestoreCheckpoint("codex", sessionID, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoreElapsed := time.Since(restoreStarted)
+	if !reflect.DeepEqual(restored.Projection, projection) {
+		t.Fatal("restart projection differs from committed canonical projection")
+	}
+
+	appendedPath := filepath.Join(t.TempDir(), "appended-rollout.jsonl")
+	src, err := os.Open(rollout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst, err := os.OpenFile(appendedPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		_ = src.Close()
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		_ = src.Close()
+		_ = dst.Close()
+		t.Fatal(err)
+	}
+	_ = src.Close()
+	if _, err := dst.WriteString("\n"); err != nil {
+		_ = dst.Close()
+		t.Fatal(err)
+	}
+	if err := dst.Close(); err != nil {
+		t.Fatal(err)
+	}
+	appendedSource := source
+	appendedSource.Path = appendedPath
+	afterAppend := NewProjectionKernel(nil, store)
+	appendedRestore, err := afterAppend.RestoreCheckpoint("codex", sessionID, appendedSource)
+	if err != nil {
+		t.Fatalf("append-only source invalidated durable prefix: %v", err)
+	}
+	if appendedRestore.Source.Cursor != source.Cursor ||
+		!reflect.DeepEqual(appendedRestore.Projection, projection) {
+		t.Fatal("append admission changed the durable cursor or projection")
+	}
+
+	checkpointPath, err := store.checkpointPath("codex", sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkpointInfo, err := os.Stat(checkpointPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf(
+		"real checkpoint: sourceBytes=%d turns=%d rev=%d checkpointBytes=%d hydrate=%s save=%s restore=%s recoveryWindowBytes=%d",
+		info.Size(),
+		len(projection.Turns),
+		projection.SyncRev,
+		checkpointInfo.Size(),
+		hydrateElapsed,
+		saveElapsed,
+		restoreElapsed,
+		int64(1),
+	)
+}
+
+// TestRealColdPullClaudeNonEmpty verifies a real owner Claude session commits a non-empty full
+// baseline through the range-bounded Kernel parser.
 func TestRealColdPullClaudeNonEmpty(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -169,7 +576,7 @@ func TestRealColdPullClaudeNonEmpty(t *testing.T) {
 
 // TestRealColdPullOpencodeNotMigrated: §10.5.7 修法 1 — opencode (HTTP/SQLite, not yet migrated
 // to projection) MUST return projection.not_migrated, NEVER an empty head-0 shell. No agent
-// registered (selectHydrateProducer returns nil for opencode).
+// registered (backendSupportsProjectionHydrate returns false for opencode).
 func TestRealColdPullOpencodeNotMigrated(t *testing.T) {
 	handlers := NewHandlers() // no opencode producer registered
 	conn := &readFileCaptureConn{}

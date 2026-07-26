@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -44,8 +43,8 @@ func TestHandleGetSessionProjectionReturnsReducerState(t *testing.T) {
 	}
 }
 
-// TestHandleGetSessionProjectionEmptyWhenNoState: a session with no reducer state returns an
-// empty projection at head 0 (never fabricated content).
+// TestHandleGetSessionProjectionEmptyWhenNoState: without a source inspection, absence of reducer
+// state is not proof of a real empty session and must never become Ready(empty).
 func TestHandleGetSessionProjectionEmptyWhenNoState(t *testing.T) {
 	handlers := NewHandlers()
 	conn := &readFileCaptureConn{}
@@ -53,16 +52,14 @@ func TestHandleGetSessionProjectionEmptyWhenNoState(t *testing.T) {
 	msg := WireMessage{RequestID: "r1", BackendID: "codex", Method: "get_session_projection", Params: params}
 	handlers.handleGetSessionProjection(conn, msg, nil)
 
-	dataMap, ok := conn.data.(map[string]interface{})
-	if !ok {
-		t.Fatalf("data not a map: %T", conn.data)
+	if conn.data != nil {
+		t.Fatalf("source-unavailable failure must not carry success data: %T", conn.data)
 	}
-	proj, ok := dataMap["projection"].(SessionProjection)
-	if !ok {
-		t.Fatalf("expected empty projection, got %T", dataMap["projection"])
+	if conn.err == nil || conn.err.Code != "projection.hydrate_failed" {
+		t.Fatalf("expected honest projection.hydrate_failed, got %+v", conn.err)
 	}
-	if proj.SyncRev != 0 || proj.Execution.Phase != "idle" || len(proj.Turns) != 0 {
-		t.Fatalf("expected empty idle projection at head 0, got %+v", proj)
+	if conn.err.Retryable == nil || !*conn.err.Retryable {
+		t.Fatalf("source-unavailable failure must be retryable: %+v", conn.err)
 	}
 }
 
@@ -71,9 +68,10 @@ func TestHandleGetSessionProjectionEmptyWhenNoState(t *testing.T) {
 func TestHandleGetSessionProjectionDeltaAtHead(t *testing.T) {
 	handlers := NewHandlers()
 	handlers.eventPublisher.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "s1", Event: "turn_started", Data: map[string]interface{}{"turnId": "T1"}, Broadcast: true})
-	// headRev is now 1.
+	handlers.eventPublisher.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "s1", Event: "text_delta", Data: map[string]interface{}{"itemId": "T1", "delta": "ready"}, Broadcast: true})
+	// headRev is now 2 and contains real content (a bare shell alone is not ready).
 	conn := &readFileCaptureConn{}
-	params, _ := json.Marshal(map[string]interface{}{"sessionId": "s1", "sinceRev": 1})
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": "s1", "sinceRev": 2})
 	msg := WireMessage{RequestID: "r1", BackendID: "codex", Method: "get_session_projection", Params: params}
 	handlers.handleGetSessionProjection(conn, msg, nil)
 
@@ -85,8 +83,8 @@ func TestHandleGetSessionProjectionDeltaAtHead(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected patches delta at head, got %+v", dataMap)
 	}
-	if len(patches) != 0 || dataMap["headRev"].(int) != 1 {
-		t.Fatalf("expected empty patches + headRev 1, got %+v", dataMap)
+	if len(patches) != 0 || dataMap["headRev"].(int) != 2 {
+		t.Fatalf("expected empty patches + headRev 2, got %+v", dataMap)
 	}
 }
 
@@ -191,19 +189,12 @@ func waitForProjectionTurns(t *testing.T, h *Handlers, backendID, sessionID stri
 	}
 }
 
-// waitForColdHydrateDrained blocks until the background hydrate goroutine has exited (its
-// single-flight slot is cleared). Tests that install coldHydrate*TestHook MUST drain before
-// returning, otherwise a still-running goroutine from test N can call the package-global hook
-// that test N+1 has since overwritten — cross-test contamination via the shared hook var.
+// waitForColdHydrateDrained blocks until the Kernel single-flight leaves hydrating.
 func waitForColdHydrateDrained(t *testing.T, h *Handlers, backendID, sessionID string, deadline time.Duration) {
 	t.Helper()
-	key := backendID + "\x00" + sessionID
 	stop := time.After(deadline)
 	for {
-		h.mu.Lock()
-		_, exists := h.coldHydrateFlights[key]
-		h.mu.Unlock()
-		if !exists {
+		if h.projectionKernel.Status(backendID, sessionID).Phase != ProjectionHydrateHydrating {
 			return
 		}
 		select {
@@ -371,9 +362,8 @@ func TestHandleGetSessionProjectionColdHydrateSingleFlight(t *testing.T) {
 	waitForProjectionTurns(t, handlers, "codex", "cold-sf", 2, 2*time.Second)
 }
 
-// TestHandleGetSessionProjectionColdHydrateHardTimeoutExplicitError: §10.5 ring-1 close-out.
-// A stuck hydrate must not hang forever or serve empty success — RPC returns explicit error
-// within the hard budget, frees the single-flight slot, and a later pull can succeed.
+// A healthy long-running hydrate returns an explicit hydrating lifecycle response at the RPC
+// budget while the single-flight continues; a later pull reads the committed full snapshot.
 func TestHandleGetSessionProjectionColdHydrateHardTimeoutExplicitError(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rollout.jsonl")
 	writeProjectionHydrateRollout(t, path, 2)
@@ -382,15 +372,9 @@ func TestHandleGetSessionProjectionColdHydrateHardTimeoutExplicitError(t *testin
 	coldHydrateTimeout = 150 * time.Millisecond
 	t.Cleanup(func() { coldHydrateTimeout = prevTimeout })
 
-	var hang atomic.Bool
-	hang.Store(true)
+	release := make(chan struct{})
 	prevHook := coldHydrateTestHook
-	coldHydrateTestHook = func(ctx context.Context) {
-		if hang.Load() {
-			<-ctx.Done() // stuck until hard-timeout cancel — simulates corrupt/hung scan
-			return
-		}
-	}
+	coldHydrateTestHook = func(context.Context) { <-release }
 	t.Cleanup(func() { coldHydrateTestHook = prevHook })
 
 	handlers := NewHandlers()
@@ -411,24 +395,29 @@ func TestHandleGetSessionProjectionColdHydrateHardTimeoutExplicitError(t *testin
 		t.Fatalf("RPC returned in %s; expected to wait at least hard budget %s", elapsed, coldHydrateTimeout)
 	}
 	if conn.err == nil {
-		t.Fatalf("expected explicit RPC error on hard timeout, got success data=%T", conn.data)
+		t.Fatalf("expected explicit hydrating response at RPC budget, got success data=%T", conn.data)
 	}
-	if conn.err.Code != "projection.hydrate_timeout" {
-		t.Fatalf("error code = %q, want projection.hydrate_timeout (got message %q)", conn.err.Code, conn.err.Message)
+	if conn.err.Code != "projection.hydrating" {
+		t.Fatalf("error code = %q, want projection.hydrating (got message %q)", conn.err.Code, conn.err.Message)
+	}
+	if conn.err.Retryable == nil || !*conn.err.Retryable {
+		t.Fatalf("hydrating must be explicitly retryable: %+v", conn.err)
+	}
+	if conn.err.RetryAfterMillis == nil || *conn.err.RetryAfterMillis <= 0 {
+		t.Fatalf("hydrating must provide a positive retryAfterMillis: %+v", conn.err)
 	}
 	if conn.data != nil {
-		t.Fatalf("hard timeout must not pair data with error; data=%T", conn.data)
+		t.Fatalf("hydrating response must not pair data with error; data=%T", conn.data)
 	}
-	// single-flight slot released: map must not retain a permanent waiter for this key
-	handlers.mu.Lock()
-	_, stuck := handlers.coldHydrateFlights["codex\x00cold-hard-timeout"]
-	handlers.mu.Unlock()
-	if stuck {
-		t.Fatal("single-flight slot still occupied after hard timeout — subsequent pulls would hang")
+	if status := handlers.projectionKernel.Status("codex", "cold-hard-timeout"); status.Phase != ProjectionHydrateHydrating {
+		t.Fatalf("background single-flight did not remain healthy: %+v", status)
+	}
+	if _, ok := handlers.projectionKernel.Snapshot("codex", "cold-hard-timeout"); ok {
+		t.Fatal("hydrating baseline was exposed as a success snapshot")
 	}
 
-	// Retry after unblocking hydrate must succeed (slot not permanently poisoned).
-	hang.Store(false)
+	close(release)
+	waitForProjectionTurns(t, handlers, "codex", "cold-hard-timeout", 2, 2*time.Second)
 	conn2 := &readFileCaptureConn{}
 	msg2 := WireMessage{RequestID: "r-retry", BackendID: "codex", Method: "get_session_projection", Params: params}
 	handlers.handleGetSessionProjection(conn2, msg2, nil)
@@ -442,9 +431,8 @@ func TestHandleGetSessionProjectionColdHydrateHardTimeoutExplicitError(t *testin
 	proj, ok := dataMap["projection"].(SessionProjection)
 	// Partial contract: retry serves ≥1 content turn (slot not poisoned); rest stream in.
 	if !ok || len(proj.Turns) == 0 || proj.SyncRev <= 0 {
-		t.Fatalf("retry expected non-empty partial projection, got %+v", dataMap["projection"])
+		t.Fatalf("retry expected committed full projection, got %+v", dataMap["projection"])
 	}
-	waitForProjectionTurns(t, handlers, "codex", "cold-hard-timeout", 2, 2*time.Second)
 }
 
 // TestHandleGetSessionProjectionColdHydrateReal26MBRollout exercises the owner exit-criteria
@@ -487,7 +475,8 @@ func TestHandleGetSessionProjectionColdHydrateReal26MBRollout(t *testing.T) {
 // TestHandleGetSessionProjectionColdHydrateSegmentedFirstTurnsFirst: design §10.5.6 scheme A.
 // A multi-turn rollout scans in turn-bounded segments; earlier turns MUST enter the reducer
 // BEFORE the full scan completes. Block the goroutine at the end of segment 1 and observe the
-// reducer holds exactly turn 1 (not all turns) — direct evidence of incremental segmentation.
+// the transaction-local reducer may hold turn 1, but no partial becomes authoritative before
+// the complete baseline commits.
 func TestHandleGetSessionProjectionColdHydrateSegmentedFirstTurnsFirst(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rollout.jsonl")
 	const turns = 4
@@ -516,34 +505,45 @@ func TestHandleGetSessionProjectionColdHydrateSegmentedFirstTurnsFirst(t *testin
 	conn := &readFileCaptureConn{}
 	params, _ := json.Marshal(map[string]interface{}{"sessionId": "cold-seg"})
 	msg := WireMessage{RequestID: "r-seg", BackendID: "codex", Method: "get_session_projection", Params: params}
-	handlers.handleGetSessionProjection(conn, msg, nil)
-	if conn.err != nil {
-		t.Fatalf("unexpected RPC error: %+v", conn.err)
-	}
+	done := make(chan struct{})
+	go func() {
+		handlers.handleGetSessionProjection(conn, msg, nil)
+		close(done)
+	}()
 
-	// Wait until the goroutine has finished segment 1 and is blocked before segment 2.
 	select {
 	case <-reachedSeg1:
 	case <-time.After(3 * time.Second):
 		t.Fatal("segment hook never reached segment 1")
 	}
-	// While blocked after segment 1: turn 1 is in the reducer, turns 2..N are NOT yet — proving
-	// earlier turns entered the reducer before the full scan completed (segmented hydrate).
-	if got := handlers.eventPublisher.ProjectionTurnCount("codex", "cold-seg"); got != 1 {
-		t.Fatalf("while blocked after segment 1, reducer turns = %d, want exactly 1 (segmented scan should not have reached later turns)", got)
+	if _, ok := handlers.projectionKernel.Snapshot("codex", "cold-seg"); ok {
+		t.Fatal("partial baseline became authoritative before full hydrate commit")
+	}
+	select {
+	case <-done:
+		t.Fatal("RPC returned an uncommitted partial")
+	default:
 	}
 
 	close(release)
-	waitForProjectionTurns(t, handlers, "codex", "cold-seg", turns, 3*time.Second)
-	// Drain the background goroutine BEFORE returning so its trailing segment-hook calls cannot
-	// contaminate a later test via the shared package-global hook var.
-	waitForColdHydrateDrained(t, handlers, "codex", "cold-seg", 3*time.Second)
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("full hydrate did not commit after release")
+	}
+	if conn.err != nil {
+		t.Fatalf("unexpected RPC error: %+v", conn.err)
+	}
+	data := conn.data.(map[string]interface{})
+	projection := data["projection"].(SessionProjection)
+	if len(projection.Turns) != turns {
+		t.Fatalf("committed turns = %d, want %d", len(projection.Turns), turns)
+	}
 }
 
 // TestHandleGetSessionProjectionColdHydratePartialHasContentTurn: design §10.5.6 scheme A
-// contract — the served PARTIAL must contain at least one turn with real user/assistant content,
-// never an empty head-0 shell and never a bare task_started shell. Capture the partial while the
-// background scan is still blocked after segment 1 so the assertion targets the partial itself.
+// contract — a content-bearing transaction-local partial is still not served; only the complete
+// committed baseline may satisfy the pull.
 func TestHandleGetSessionProjectionColdHydratePartialHasContentTurn(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rollout.jsonl")
 	writeProjectionHydrateRollout(t, path, 3)
@@ -571,44 +571,33 @@ func TestHandleGetSessionProjectionColdHydratePartialHasContentTurn(t *testing.T
 	conn := &readFileCaptureConn{}
 	params, _ := json.Marshal(map[string]interface{}{"sessionId": "cold-partial"})
 	msg := WireMessage{RequestID: "r-partial", BackendID: "codex", Method: "get_session_projection", Params: params}
-	handlers.handleGetSessionProjection(conn, msg, nil)
+	done := make(chan struct{})
+	go func() {
+		handlers.handleGetSessionProjection(conn, msg, nil)
+		close(done)
+	}()
+	<-reachedSeg1
+	if _, ok := handlers.projectionKernel.Snapshot("codex", "cold-partial"); ok {
+		t.Fatal("content partial was exposed before full commit")
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("full hydrate did not return")
+	}
 	if conn.err != nil {
 		t.Fatalf("unexpected RPC error: %+v", conn.err)
 	}
-	<-reachedSeg1 // freeze the partial so we assert what was actually served
-
-	dataMap, ok := conn.data.(map[string]interface{})
-	if !ok {
-		t.Fatalf("served data not a map: %T (empty shell?)", conn.data)
+	dataMap := conn.data.(map[string]interface{})
+	proj := dataMap["projection"].(SessionProjection)
+	if len(proj.Turns) != 3 || proj.SyncRev == 0 {
+		t.Fatalf("served snapshot is not the full committed baseline: %+v", proj)
 	}
-	proj, ok := dataMap["projection"].(SessionProjection)
-	if !ok {
-		t.Fatalf("served partial missing projection: %+v (empty shell?)", dataMap)
-	}
-	if proj.SyncRev <= 0 || len(proj.Turns) == 0 {
-		t.Fatalf("served partial is an empty head-0 shell (forbidden §10.5.6): %+v", proj)
-	}
-	hasContent := false
-	for _, turn := range proj.Turns {
-		if (turn.User != nil && len(turn.User.Parts) > 0) || (turn.Assistant != nil && len(turn.Assistant.Parts) > 0) {
-			hasContent = true
-			break
-		}
-	}
-	if !hasContent {
-		t.Fatalf("served partial turns carry no user/assistant content (bare shells): %+v", proj)
-	}
-
-	close(release)
-	waitForProjectionTurns(t, handlers, "codex", "cold-partial", 3, 3*time.Second)
-	waitForColdHydrateDrained(t, handlers, "codex", "cold-partial", 3*time.Second)
 }
 
-// TestHandleGetSessionProjectionColdHydrateFirstSegmentTimeoutReturnsError: design §10.5.6
-// scheme A — when even the first content turn cannot be produced within the cold-hydrate budget
-// (an extreme rollout whose first segment cannot scan in time), the RPC MUST return
-// projection.hydrate_timeout, NOT an empty success shell. Scheme A never trades honesty for a
-// fast-but-empty answer.
+// When the full baseline cannot commit within the pull budget, the RPC returns hydrating and
+// keeps the background transaction healthy; it never serves an empty or partial success.
 func TestHandleGetSessionProjectionColdHydrateFirstSegmentTimeoutReturnsError(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "rollout.jsonl")
 	writeProjectionHydrateRollout(t, path, 3)
@@ -617,10 +606,9 @@ func TestHandleGetSessionProjectionColdHydrateFirstSegmentTimeoutReturnsError(t 
 	coldHydrateTimeout = 150 * time.Millisecond
 	t.Cleanup(func() { coldHydrateTimeout = prevTimeout })
 
+	release := make(chan struct{})
 	prevHook := coldHydrateTestHook
-	coldHydrateTestHook = func(ctx context.Context) {
-		<-ctx.Done() // simulate a first segment that cannot complete within budget
-	}
+	coldHydrateTestHook = func(context.Context) { <-release }
 	t.Cleanup(func() { coldHydrateTestHook = prevHook })
 
 	handlers := NewHandlers()
@@ -635,21 +623,23 @@ func TestHandleGetSessionProjectionColdHydrateFirstSegmentTimeoutReturnsError(t 
 	elapsed := time.Since(start)
 
 	if conn.err == nil {
-		t.Fatalf("expected projection.hydrate_timeout when first segment cannot complete; got success data=%T", conn.data)
+		t.Fatalf("expected projection.hydrating when baseline cannot commit; got success data=%T", conn.data)
 	}
-	if conn.err.Code != "projection.hydrate_timeout" {
-		t.Fatalf("error code = %q, want projection.hydrate_timeout (message %q)", conn.err.Code, conn.err.Message)
+	if conn.err.Code != "projection.hydrating" {
+		t.Fatalf("error code = %q, want projection.hydrating (message %q)", conn.err.Code, conn.err.Message)
 	}
 	if conn.data != nil {
 		t.Fatalf("first-segment timeout must not pair data with error (no empty shell): data=%T", conn.data)
 	}
 	// Reducer must still be empty — no content turn was ever produced.
-	if handlers.eventPublisher.ProjectionHasContentTurn("codex", "cold-first-seg-timeout") {
-		t.Fatalf("reducer has a content turn despite first-segment timeout — timeout path is wrong")
+	if _, ok := handlers.projectionKernel.Snapshot("codex", "cold-first-seg-timeout"); ok {
+		t.Fatal("uncommitted hydrate became visible")
 	}
 	if elapsed > 2*time.Second {
 		t.Fatalf("RPC hung %s; expected to fail near the %s budget", elapsed, coldHydrateTimeout)
 	}
+	close(release)
+	waitForProjectionTurns(t, handlers, "codex", "cold-first-seg-timeout", 3, 2*time.Second)
 }
 
 // §10.5.7 修法 1 — claude cold-hydrate matrix. Each case registers a claudecode agent whose
@@ -765,6 +755,9 @@ func TestClaudeColdHydrateMissingFileHonestError(t *testing.T) {
 	if conn.err.Code != "projection.hydrate_failed" {
 		t.Fatalf("error code = %q, want projection.hydrate_failed", conn.err.Code)
 	}
+	if conn.err.Retryable == nil {
+		t.Fatalf("hydrate_failed must carry explicit retryability: %+v", conn.err)
+	}
 }
 
 // TestProjectionNotMigratedForUnsupportedBackend: a backend with no projection cold-hydrate
@@ -785,6 +778,9 @@ func TestProjectionNotMigratedForUnsupportedBackend(t *testing.T) {
 		}
 		if conn.err.Code != "projection.not_migrated" {
 			t.Fatalf("%s: error code = %q, want projection.not_migrated", backend, conn.err.Code)
+		}
+		if conn.err.Retryable == nil || *conn.err.Retryable {
+			t.Fatalf("%s: not_migrated must be explicitly nonretryable: %+v", backend, conn.err)
 		}
 	}
 }

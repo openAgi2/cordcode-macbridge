@@ -44,6 +44,8 @@ type Handlers struct {
 	pendingNotifications   *PendingNotificationStore
 	broadcaster            *Broadcaster
 	eventPublisher         *EventPublisher
+	projectionKernel       *ProjectionKernel
+	projectionHydrateSlots chan struct{}
 	// deltaBatcher（Fix 5）：text_delta/reasoning_delta 时间窗攒批，降低上游每 token 一帧
 	// 的 WS/HPKE/日志开销。relayEvents / startPassiveSubscription 通过它下发，而非直接 broadcaster.Send。
 	deltaBatcher            *DeltaBatcher
@@ -87,10 +89,6 @@ type Handlers struct {
 	cleanupStop chan struct{}
 	// shutdownOnce makes Handlers.Shutdown idempotent.
 	shutdownOnce sync.Once
-
-	// coldHydrateFlights coalesces concurrent get_session_projection cold pulls so disk
-	// hydrate runs once per session (design §10.5 ring 1). Guarded by mu.
-	coldHydrateFlights map[string]*coldHydrateFlight
 }
 
 type opencodeSessionOptions struct {
@@ -133,6 +131,7 @@ func newHandlersWithContext(ctx context.Context, bridgeEpoch string) *Handlers {
 		contentRefs:            make(map[string]string),
 		broadcaster:            NewBroadcaster(),
 		pendingNotifications:   NewPendingNotificationStore(),
+		projectionHydrateSlots: make(chan struct{}, projectionHydrateMaxConcurrent),
 		relayRunning:           make(map[string]bool),
 		relayRunningKind:       make(map[string]string),
 		deliveryPrekeys:        prekeys,
@@ -150,6 +149,11 @@ func newHandlersWithContext(ctx context.Context, bridgeEpoch string) *Handlers {
 		cleanupStop:            make(chan struct{}),
 	}
 	h.installEventPublisher(NewEventPublisher(bridgeEpoch, h.broadcaster))
+	h.projectionKernel = NewProjectionKernel(
+		h.eventPublisher.ProjectionReducer(),
+		NewProjectionCheckpointStore(""),
+	)
+	h.eventPublisher.SetProjectionKernel(h.projectionKernel)
 	// TTL cache for the Claude running map (Fix 3). The recompute closure binds to
 	// whatever claudecode agent is currently registered, so the cache is valid
 	// across register/unregister. Invalidated on session-registry state changes.
@@ -188,6 +192,10 @@ func (h *Handlers) installEventPublisher(publisher *EventPublisher) {
 	h.eventPublisher.SetObservationManager(h.observation)
 	h.eventPublisher.SetRebindTargets(h.rebindLiveTargetsForSession)
 	h.deltaBatcher = NewDeltaBatcher(publisher)
+	if h.projectionKernel != nil {
+		h.projectionKernel.SetReducer(publisher.ProjectionReducer())
+		publisher.SetProjectionKernel(h.projectionKernel)
+	}
 }
 
 func (h *Handlers) publishEvent(logical LogicalEvent) EventMessage {
@@ -420,6 +428,9 @@ func (h *Handlers) SetDataDir(dir string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.dataDir = dir
+	if h.projectionKernel != nil {
+		h.projectionKernel.SetCheckpointStore(NewProjectionCheckpointStore(dir))
+	}
 }
 
 // SetPinStore 注入进程级 session pin (置顶) 存储。由 main() 在数据目录确定后、agent

@@ -4,12 +4,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/openAgi2/cordcode-macbridge/agent/codex"
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
@@ -718,17 +720,17 @@ func classifyLastMeaningfulClaudeRelayEntryFromReader(r io.Reader) (claudeTransc
 }
 
 // claudeRelayContentBlock 是 assistant/user message.content 数组里的一个 block
-//（text/thinking/tool_use/tool_result）。
+// （text/thinking/tool_use/tool_result）。
 type claudeRelayContentBlock struct {
 	Type      string          `json:"type"`
-	Text      string          `json:"text"`      // text
-	Thinking  string          `json:"thinking"`  // thinking
-	Name      string          `json:"name"`      // tool_use
-	Input     json.RawMessage `json:"input"`     // tool_use
-	ID        string          `json:"id"`        // tool_use
+	Text      string          `json:"text"`        // text
+	Thinking  string          `json:"thinking"`    // thinking
+	Name      string          `json:"name"`        // tool_use
+	Input     json.RawMessage `json:"input"`       // tool_use
+	ID        string          `json:"id"`          // tool_use
 	ToolUseID string          `json:"tool_use_id"` // tool_result
-	Content   json.RawMessage `json:"content"`   // tool_result (string or block array)
-	IsError   bool            `json:"is_error"`  // tool_result
+	Content   json.RawMessage `json:"content"`     // tool_result (string or block array)
+	IsError   bool            `json:"is_error"`    // tool_result
 }
 
 // claudeRelayContentBlocks 解析 assistant message.content（可能是字符串或 block 数组）。
@@ -755,6 +757,25 @@ func claudeRelayContentBlocks(raw json.RawMessage) []claudeRelayContentBlock {
 // tool_use_id). ctx cancel is honored between lines; a single unparseable line is skipped (parity
 // with the live file-relay scanner).
 func streamClaudeTranscriptProjectionEvents(ctx context.Context, sessPath string, emit func(projectionHydrateEvent) bool) error {
+	return streamClaudeTranscriptProjectionEventsRange(ctx, sessPath, 0, -1, emit)
+}
+
+func streamClaudeTranscriptProjectionEventsRange(
+	ctx context.Context,
+	sessPath string,
+	startOffset, endOffset int64,
+	emit func(projectionHydrateEvent) bool,
+) error {
+	return streamClaudeTranscriptProjectionEventsRangeSeed(ctx, sessPath, startOffset, endOffset, "", emit)
+}
+
+func streamClaudeTranscriptProjectionEventsRangeSeed(
+	ctx context.Context,
+	sessPath string,
+	startOffset, endOffset int64,
+	initialTurnID string,
+	emit func(projectionHydrateEvent) bool,
+) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -763,11 +784,23 @@ func streamClaudeTranscriptProjectionEvents(ctx context.Context, sessPath string
 		return err
 	}
 	defer f.Close()
-	scanner := bufio.NewScanner(f)
+	if startOffset > 0 {
+		if _, err := f.Seek(startOffset, io.SeekStart); err != nil {
+			return err
+		}
+	}
+	var reader io.Reader = f
+	if endOffset >= 0 {
+		if endOffset < startOffset {
+			return fmt.Errorf("invalid transcript range [%d,%d)", startOffset, endOffset)
+		}
+		reader = io.LimitReader(f, endOffset-startOffset)
+	}
+	scanner := bufio.NewScanner(reader)
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024*16)
 	skipNextResumeNoResponse := false
-	currentTurnID := ""
+	currentTurnID := initialTurnID
 	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -1047,9 +1080,12 @@ type codexRelayEvent struct {
 	kind       string
 	turnID     string                 // source-proven rollout task_started/task_complete turn_id
 	text       string                 // text/reasoning 明文
+	canonical  bool                   // canonical rich-history content source (response_item)
+	newPart    bool                   // persisted response block starts a canonical text part
 	toolName   string                 // tool_started/tool_finished
 	toolInput  string                 // tool_started（custom_tool_call.input JS 串）
 	toolResult string                 // tool_finished（custom_tool_call_output.output 拼接）
+	toolStatus string                 // persisted tool completion status
 	itemId     string                 // call_id
 	context    map[string]interface{} // context_usage_updated 的 context 对象
 }
@@ -1097,7 +1133,9 @@ type codexResponseItemPayload struct {
 	Name      string          `json:"name"`
 	CallID    string          `json:"call_id"`
 	Input     string          `json:"input"`
-	Arguments string          `json:"arguments"`
+	Arguments json.RawMessage `json:"arguments"`
+	Status    string          `json:"status"`
+	Command   string          `json:"command"`
 	// output is a string for function_call_output / local_shell_call_output, or a
 	// content[] array for custom_tool_call_output — parse via extractCodexToolOutput.
 	Output json.RawMessage `json:"output"`
@@ -1124,8 +1162,9 @@ func extractCodexToolOutput(raw json.RawMessage) string {
 }
 
 type codexResponseContent struct {
-	Type string `json:"type"` // output_text / input_text
-	Text string `json:"text"`
+	Type     string `json:"type"` // output_text / input_text / input_image
+	Text     string `json:"text"`
+	ImageURL string `json:"image_url"`
 }
 
 type codexResponseSummary struct {
@@ -1238,17 +1277,22 @@ func codexRolloutEntryEvents(entry codexRolloutEntry) []codexRelayEvent {
 			case "assistant":
 				for _, b := range p.Content {
 					if b.Type == "output_text" && strings.TrimSpace(b.Text) != "" {
-						out = append(out, codexRelayEvent{kind: "text", text: b.Text})
+						out = append(out, codexRelayEvent{kind: "text", text: b.Text, canonical: true, newPart: true})
 					}
 				}
 			case "user":
 				var texts []string
+				hasImage := false
 				for _, b := range p.Content {
-					if b.Type == "input_text" && strings.TrimSpace(b.Text) != "" {
+					if b.Type == "input_text" && strings.TrimSpace(b.Text) != "" &&
+						codex.IsTranscriptUserPrompt(b.Text) {
 						texts = append(texts, b.Text)
 					}
+					if b.Type == "input_image" && strings.TrimSpace(b.ImageURL) != "" {
+						hasImage = true
+					}
 				}
-				if len(texts) > 0 {
+				if len(texts) > 0 || hasImage {
 					out = append(out, codexRelayEvent{
 						kind:   "user_message",
 						itemId: strings.TrimSpace(p.ID),
@@ -1259,57 +1303,44 @@ func codexRolloutEntryEvents(entry codexRolloutEntry) []codexRelayEvent {
 		case "reasoning":
 			for _, s := range p.Summary {
 				if s.Type == "summary_text" && strings.TrimSpace(s.Text) != "" {
-					out = append(out, codexRelayEvent{kind: "reasoning", text: s.Text})
+					out = append(out, codexRelayEvent{kind: "reasoning", text: s.Text, canonical: true})
 				}
 			}
 		case "custom_tool_call":
-			// exec-unified：name 恒 "exec"，真实操作埋在 input JS 串里（非结构化字段）。
-			out = append(out, codexRelayEvent{kind: "tool_started", toolName: p.Name, toolInput: p.Input, itemId: p.CallID})
+			if name, input, ok := codex.NormalizeTranscriptCustomToolCall(p.Name, p.Input); ok {
+				out = append(out, codexRelayEvent{kind: "tool_started", toolName: name, toolInput: input, itemId: p.CallID})
+			}
 		case "custom_tool_call_output":
 			out = append(out, codexRelayEvent{
 				kind:       "tool_finished",
 				itemId:     p.CallID,
-				toolResult: extractCodexToolOutput(p.Output),
+				toolResult: codex.TranscriptToolOutput(p.Output),
+				toolStatus: p.Status,
 			})
 		// Native Codex tool shapes (session 019f8dd1 / 2026-07: function_call dominates).
 		// Previously only custom_tool_* was mapped → live tool_* EMIT=0 for those turns.
 		case "function_call":
-			input := p.Arguments
-			if input == "" {
-				input = p.Input
+			if name, input, ok := codex.NormalizeTranscriptFunctionCall(p.Name, p.Arguments); ok {
+				out = append(out, codexRelayEvent{
+					kind:      "tool_started",
+					toolName:  name,
+					toolInput: input,
+					itemId:    p.CallID,
+				})
 			}
-			out = append(out, codexRelayEvent{
-				kind:     "tool_started",
-				toolName: p.Name,
-				toolInput: input,
-				itemId:   p.CallID,
-			})
 		case "function_call_output":
 			out = append(out, codexRelayEvent{
 				kind:       "tool_finished",
 				itemId:     p.CallID,
-				toolResult: extractCodexToolOutput(p.Output),
+				toolResult: codex.TranscriptToolOutput(p.Output),
+				toolStatus: p.Status,
 			})
-		case "local_shell_call", "mcp_call", "web_search_call":
-			input := p.Arguments
-			if input == "" {
-				input = p.Input
-			}
-			name := p.Name
-			if name == "" {
-				name = p.Type
-			}
+		case "command_execution":
 			out = append(out, codexRelayEvent{
 				kind:      "tool_started",
-				toolName:  name,
-				toolInput: input,
+				toolName:  "Bash",
+				toolInput: p.Command,
 				itemId:    p.CallID,
-			})
-		case "local_shell_call_output", "mcp_call_output", "web_search_call_output":
-			out = append(out, codexRelayEvent{
-				kind:       "tool_finished",
-				itemId:     p.CallID,
-				toolResult: extractCodexToolOutput(p.Output),
 			})
 		}
 	}
@@ -1323,6 +1354,15 @@ func codexRolloutEntryEvents(entry codexRolloutEntry) []codexRelayEvent {
 // is guaranteed by sharing codexRolloutEntryEvents. A read/scan error is returned; a single
 // unparseable line is skipped. ctx cancel is honored between lines.
 func streamCodexTranscriptRelayEvents(ctx context.Context, sessPath string, offset int64, emit func(codexRelayEvent) bool) error {
+	return streamCodexTranscriptRelayEventsRange(ctx, sessPath, offset, -1, emit)
+}
+
+func streamCodexTranscriptRelayEventsRange(
+	ctx context.Context,
+	sessPath string,
+	startOffset, endOffset int64,
+	emit func(codexRelayEvent) bool,
+) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -1331,12 +1371,19 @@ func streamCodexTranscriptRelayEvents(ctx context.Context, sessPath string, offs
 		return err
 	}
 	defer f.Close()
-	if offset > 0 {
-		if _, err := f.Seek(offset, io.SeekStart); err != nil {
+	if startOffset > 0 {
+		if _, err := f.Seek(startOffset, io.SeekStart); err != nil {
 			return err
 		}
 	}
-	scanner := bufio.NewScanner(f)
+	var reader io.Reader = f
+	if endOffset >= 0 {
+		if endOffset < startOffset {
+			return fmt.Errorf("invalid transcript range [%d,%d)", startOffset, endOffset)
+		}
+		reader = io.LimitReader(f, endOffset-startOffset)
+	}
+	scanner := bufio.NewScanner(reader)
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024*16)
 	for scanner.Scan() {

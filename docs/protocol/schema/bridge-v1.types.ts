@@ -11,6 +11,8 @@ export interface BridgeWireError {
   code?: string;
   message?: string;
   retryable?: boolean;
+  retryAfterMillis?: number;
+  attempts?: number;
   recoverBy?: string;
   backendId?: string;
 }
@@ -93,6 +95,7 @@ export interface BridgeBackendInfo {
   id: string;
   kind: "claude_code" | "opencode" | "codex" | string;
   displayName?: string;
+  /** Backend-scoped capabilities; session_sync_v2 here (not only hello_ack) selects ownership. */
   capabilities?: string[];
   descriptor?: Record<string, string>;
   permissionMode?: { mode?: string };
@@ -427,7 +430,7 @@ export type BridgeSessionPaginationCapability = "session_pagination";
 
 /** One part of a message projection. `type` mirrors the existing Mapping Notes part vocabulary. */
 export type BridgeProjectionPart =
-  | { type: "text"; text: string }
+  | { type: "text"; text: string; presentation?: "progress" | "final" }
   | { type: "reasoning"; text: string }
   | {
       type: "tool";

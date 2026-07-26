@@ -1,6 +1,7 @@
 package gobridge
 
 import (
+	"strings"
 	"sync"
 	"time"
 )
@@ -30,7 +31,7 @@ type ProjectionReducer struct {
 // FlushPatch to build coalesced patches.
 type projectionSession struct {
 	projection     SessionProjection
-	lastAppliedRev int // highest PerSessionSeq applied (idempotency guard)
+	lastAppliedRev int // highest committed input PerSessionSeq (idempotency guard)
 	lastFlushedRev int // highest rev emitted in a patch (delta base for next patch)
 
 	// pending deltas accumulated since lastFlushedRev; cleared by FlushPatch.
@@ -108,11 +109,6 @@ func (ps *projectionSession) upsertTurn(turn TurnProjection) {
 		}
 		return
 	}
-	if turn.Assistant == nil {
-		// An assistant turn always has an assistant message whose id == turnId (rollout
-		// text/reasoning itemId == lifecycle turn_id).
-		turn.Assistant = &MessageProjection{ID: turn.TurnID, Role: "assistant"}
-	}
 	ps.projection.Turns = append(ps.projection.Turns, turn)
 	if ps.upsertTurns != nil {
 		ps.upsertTurns[turn.TurnID] = turn
@@ -155,9 +151,30 @@ func (ps *projectionSession) latestRunningTurnID() string {
 // the last part is not text. Used by append_text accumulation.
 func (m *MessageProjection) ensureTrailingTextPart() *ProjectionPart {
 	if len(m.Parts) == 0 || m.Parts[len(m.Parts)-1].Type != "text" {
-		m.Parts = append(m.Parts, ProjectionPart{Type: "text"})
+		m.Parts = append(m.Parts, ProjectionPart{Type: "text", Presentation: "progress"})
 	}
 	return &m.Parts[len(m.Parts)-1]
+}
+
+func classifyProjectionTextPresentation(message *MessageProjection, completed bool) {
+	if message == nil {
+		return
+	}
+	lastText := -1
+	for index := range message.Parts {
+		if message.Parts[index].Type == "text" && strings.TrimSpace(message.Parts[index].Text) != "" {
+			lastText = index
+		}
+	}
+	for index := range message.Parts {
+		if message.Parts[index].Type != "text" {
+			continue
+		}
+		message.Parts[index].Presentation = "progress"
+	}
+	if completed && lastText >= 0 {
+		message.Parts[lastText].Presentation = "final"
+	}
 }
 
 // Apply reduces one stamped EventMessage into the session projection and records pending
@@ -186,16 +203,20 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		r.sessions[key] = ps
 	}
 
-	// Idempotency: ignore events at or below the last applied per-session rev.
+	// Idempotency is tracked against the input event sequence, while SyncRev is a
+	// projection-owned revision. Ignored/unattributable live events must not create
+	// holes or false commits in the projection revision domain.
 	if ps.lastAppliedRev > 0 && msg.PerSessionSeq <= ps.lastAppliedRev {
 		return
 	}
-	ps.lastAppliedRev = msg.PerSessionSeq
-	ps.projection.SyncRev = msg.PerSessionSeq
-	if msg.BridgeEpoch != "" {
-		ps.projection.BridgeEpoch = msg.BridgeEpoch
+	commit := func() {
+		ps.lastAppliedRev = msg.PerSessionSeq
+		ps.projection.SyncRev++
+		if msg.BridgeEpoch != "" {
+			ps.projection.BridgeEpoch = msg.BridgeEpoch
+		}
+		ps.projection.UpdatedAt = r.now()
 	}
-	ps.projection.UpdatedAt = r.now()
 
 	data := asDataMap(msg.Data)
 	switch msg.Event {
@@ -204,6 +225,7 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if turnID == "" {
 			return // driver path (events.go hardcodes turnId:""); skip until Phase 3
 		}
+		commit()
 		ps.upsertTurn(TurnProjection{TurnID: turnID, Status: "running", StartedAt: ps.projection.UpdatedAt})
 		ps.markRunning(turnID)
 
@@ -217,6 +239,7 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if turnID == "" {
 			return
 		}
+		commit()
 		ps.upsertTurn(TurnProjection{
 			TurnID: turnID,
 			Status: "running",
@@ -235,6 +258,7 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if turnID == "" {
 			return // driver path lacks itemId; skip
 		}
+		commit()
 		t := ps.turnByID(turnID)
 		if t == nil {
 			ps.upsertTurn(TurnProjection{TurnID: turnID, Status: "running"})
@@ -243,9 +267,20 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if t.Assistant == nil {
 			t.Assistant = &MessageProjection{ID: turnID, Role: "assistant"}
 		}
-		tp := t.Assistant.ensureTrailingTextPart()
+		var tp *ProjectionPart
+		newPart, _ := data["newPart"].(bool)
+		if newPart {
+			t.Assistant.Parts = append(t.Assistant.Parts, ProjectionPart{Type: "text", Presentation: "progress"})
+			tp = &t.Assistant.Parts[len(t.Assistant.Parts)-1]
+		} else {
+			tp = t.Assistant.ensureTrailingTextPart()
+		}
 		tp.Text += delta
-		ps.textAppends[turnID] = append(ps.textAppends[turnID], delta)
+		if newPart {
+			ps.upsertTurns[turnID] = *t
+		} else {
+			ps.textAppends[turnID] = append(ps.textAppends[turnID], delta)
+		}
 		ps.markRunning(turnID)
 
 	case "reasoning_delta":
@@ -254,6 +289,7 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if turnID == "" {
 			return
 		}
+		commit()
 		t := ps.turnByID(turnID)
 		if t == nil {
 			ps.upsertTurn(TurnProjection{TurnID: turnID, Status: "running"})
@@ -292,11 +328,32 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if activeTurnID == "" {
 			return // no active turn to attach the tool to
 		}
-		ps.markRunning(activeTurnID)
 		t := ps.turnByID(activeTurnID)
-		if t == nil || t.Assistant == nil {
+		if t == nil {
 			return
 		}
+		if msg.Event == "tool_finished" {
+			hasMatchingTool := false
+			if t.Assistant != nil {
+				for index := range t.Assistant.Parts {
+					if t.Assistant.Parts[index].Type == "tool" &&
+						t.Assistant.Parts[index].ItemID == callID {
+						hasMatchingTool = true
+						break
+					}
+				}
+			}
+			// Canonical rich history ignores orphan tool results. Materializing an
+			// output-only step would create a tool that never existed in the transcript UI.
+			if !hasMatchingTool {
+				return
+			}
+		}
+		commit()
+		if t.Assistant == nil {
+			t.Assistant = &MessageProjection{ID: activeTurnID, Role: "assistant"}
+		}
+		ps.markRunning(activeTurnID)
 		part := ProjectionPart{Type: "tool", ItemID: callID}
 		if name := dataString(data, "toolName"); name != "" {
 			part.ToolName = name
@@ -339,7 +396,12 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if turnID == "" {
 			return
 		}
+		commit()
 		ps.upsertTurn(TurnProjection{TurnID: turnID, Status: "completed", CompletedAt: ps.projection.UpdatedAt})
+		if turn := ps.turnByID(turnID); turn != nil {
+			classifyProjectionTextPresentation(turn.Assistant, true)
+			ps.upsertTurns[turnID] = *turn
+		}
 		exec := ExecutionView{Phase: "idle"}
 		ps.projection.Execution = exec
 		ps.execution = &exec
@@ -375,6 +437,28 @@ func (r *ProjectionReducer) Snapshot(backendID, sessionID string) (SessionProjec
 		return SessionProjection{}, false
 	}
 	return cloneSessionProjection(ps.projection), true
+}
+
+// Restore installs a committed checkpoint snapshot without producing pending patch state.
+// Input event sequencing is deliberately reset: projection.SyncRev belongs to the projection
+// domain and must not be reused as an EventPublisher per-session sequence after restart.
+func (r *ProjectionReducer) Restore(backendID, sessionID string, projection SessionProjection) {
+	if r == nil || backendID == "" || sessionID == "" {
+		return
+	}
+	projection = cloneSessionProjection(projection)
+	projection.SessionID = sessionID
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.sessions[projectionSessionKey(backendID, sessionID)] = &projectionSession{
+		projection:     projection,
+		lastAppliedRev: 0,
+		lastFlushedRev: projection.SyncRev,
+		textAppends:    make(map[string][]string),
+		thinking:       make(map[string]string),
+		tools:          make(map[string]ProjectionPart),
+		upsertTurns:    make(map[string]TurnProjection),
+	}
 }
 
 // FlushPatch builds and clears the pending delta accumulated since the last flush, returning a
@@ -503,14 +587,50 @@ func cloneTurn(t TurnProjection) TurnProjection {
 	out := t
 	if t.User != nil {
 		u := *t.User
+		if len(t.User.Parts) > 0 {
+			u.Parts = make([]ProjectionPart, len(t.User.Parts))
+			for i := range t.User.Parts {
+				u.Parts[i] = cloneProjectionPart(t.User.Parts[i])
+			}
+		}
 		out.User = &u
 	}
 	if t.Assistant != nil {
 		a := *t.Assistant
 		if len(t.Assistant.Parts) > 0 {
-			a.Parts = append([]ProjectionPart(nil), t.Assistant.Parts...)
+			a.Parts = make([]ProjectionPart, len(t.Assistant.Parts))
+			for i := range t.Assistant.Parts {
+				a.Parts[i] = cloneProjectionPart(t.Assistant.Parts[i])
+			}
 		}
 		out.Assistant = &a
 	}
 	return out
+}
+
+func cloneProjectionPart(part ProjectionPart) ProjectionPart {
+	out := part
+	out.ToolInput = cloneProjectionJSONValue(part.ToolInput)
+	out.ToolResult = cloneProjectionJSONValue(part.ToolResult)
+	out.Matches = cloneProjectionJSONValue(part.Matches)
+	return out
+}
+
+func cloneProjectionJSONValue(value interface{}) interface{} {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(typed))
+		for key, item := range typed {
+			out[key] = cloneProjectionJSONValue(item)
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, len(typed))
+		for i := range typed {
+			out[i] = cloneProjectionJSONValue(typed[i])
+		}
+		return out
+	default:
+		return value
+	}
 }

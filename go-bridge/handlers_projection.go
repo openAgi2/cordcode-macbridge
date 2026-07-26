@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -22,116 +22,29 @@ type GetSessionProjectionParams struct {
 	LimitTurns int    `json:"limitTurns,omitempty"`
 }
 
-// defaultColdHydrateTimeout is the budget a cold pull waits for the FIRST hydrate segment to
-// produce a non-empty partial (design §10.5.6 scheme A + §10.5.7 修法 2). The first turn-bounded
-// segment of even a huge rollout reduces in well under this bound, so a cold pull returns a
-// non-empty partial fast; the bound is a worst-case backstop for a stuck/corrupt source that
-// cannot produce even one content turn. Owner 2026-07-25 拍板 X=15s (protocol cold-pull budget);
-// distinct from the removed 750ms "serve empty head" path: on expiry we return an explicit RPC
-// error, never an empty success shell.
+// defaultColdHydrateTimeout is the RPC budget for a complete committed baseline. If the
+// transaction remains healthy past this budget, the RPC returns projection.hydrating while the
+// single-flight continues; it never serves a partial or empty success shell.
 const defaultColdHydrateTimeout = 15 * time.Second
 
-// coldHydrateTimeout is the live first-segment budget. Tests may lower it; production stays at
-// the default. Scheme A does NOT raise this to "wait longer" — it returns a partial FAST instead.
+// coldHydrateTimeout is the live pull budget. Tests may lower it.
 var coldHydrateTimeout = defaultColdHydrateTimeout
 
-// defaultColdHydrateBackgroundBudget bounds the background goroutine that finishes the remaining
-// segments AFTER a partial has been served. It is intentionally much larger than
-// coldHydrateTimeout so a multi-second full reduce of a huge rollout can complete and stream the
-// rest as projection_patch deltas, while still bounding a stuck scan so it cannot occupy a
-// goroutine + single-flight slot forever.
+// defaultColdHydrateBackgroundBudget bounds the full baseline transaction after an RPC has
+// returned projection.hydrating.
 const defaultColdHydrateBackgroundBudget = 5 * time.Minute
 
 // coldHydrateBackgroundBudget is the live background budget. Tests may lower it.
 var coldHydrateBackgroundBudget = defaultColdHydrateBackgroundBudget
 
-// errColdHydrateTimeout is returned when the first hydrate segment cannot be produced within
-// coldHydrateTimeout (the cold pull then fails honestly instead of serving an empty shell).
-var errColdHydrateTimeout = errors.New("projection cold-hydrate timed out")
+var errProjectionHydrating = errors.New("projection hydration is still in progress")
 
-// coldHydrateFlight coalesces concurrent first pulls for the same session and tracks the
-// segmented cold-hydrate lifecycle (design §10.5.6 scheme A). partialReady is closed once the
-// reducer holds a turn with real user/assistant content after a segment — the point at which a
-// cold pull returns a non-empty partial without waiting for the full scan (or, for an honest
-// empty session, once the scan completes with zero content turns). done is closed when the
-// background scan goroutine exits. On a terminal outcome the goroutine closes partialReady with
-// a recorded error so a waiter never blocks forever.
-type coldHydrateFlight struct {
-	partialReady chan struct{}
-	done         chan struct{}
-	partialOnce  sync.Once
-	finish       sync.Once
+const projectionHydratingRetryAfter = 250 * time.Millisecond
 
-	mu         sync.Mutex
-	partialErr error // error at the partialReady point (nil = partial ok to serve)
-	finalN     int   // events applied when the goroutine exits
-	finalErr   error // terminal error after the background scan completes
-}
-
-func newColdHydrateFlight() *coldHydrateFlight {
-	return &coldHydrateFlight{
-		partialReady: make(chan struct{}),
-		done:         make(chan struct{}),
-	}
-}
-
-// signalPartial marks the flight partial-ready (idempotent). err is recorded so a waiter unblocks
-// with the failure instead of hanging when the goroutine could not produce a partial.
-func (f *coldHydrateFlight) signalPartial(err error) {
-	if f == nil {
-		return
-	}
-	f.partialOnce.Do(func() {
-		if err != nil {
-			f.mu.Lock()
-			f.partialErr = err
-			f.mu.Unlock()
-		}
-		close(f.partialReady)
-	})
-}
-
-func (f *coldHydrateFlight) partialError() error {
-	if f == nil {
-		return nil
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.partialErr
-}
-
-// finishFlight marks the background scan as exited; also unblocks any partialReady waiter that
-// never observed a partial. Idempotent.
-func (f *coldHydrateFlight) finishFlight(n int, err error) {
-	if f == nil {
-		return
-	}
-	f.finish.Do(func() {
-		f.mu.Lock()
-		f.finalN = n
-		f.finalErr = err
-		f.mu.Unlock()
-		f.partialOnce.Do(func() { close(f.partialReady) })
-		close(f.done)
-	})
-}
-
-func (f *coldHydrateFlight) finalOutcome() (int, error) {
-	if f == nil {
-		return 0, nil
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.finalN, f.finalErr
-}
-
-// coldHydrateTestHook, when non-nil, runs once at the start of the hydrate goroutine with the
-// first-segment ctx. Tests block until cancel (hard-timeout path) or inject bounded delay.
+// coldHydrateTestHook, when non-nil, runs once at the start of the hydrate goroutine.
 var coldHydrateTestHook func(context.Context)
 
-// coldHydrateSegmentTestHook, when non-nil, runs after each turn-bounded segment (task_complete)
-// is applied to the reducer. Tests use it to observe incremental reducer state mid-scan, proving
-// earlier turns enter the reducer before the full scan completes (design §10.5.6 scheme A).
+// coldHydrateSegmentTestHook observes the isolated transaction reducer at turn boundaries.
 var coldHydrateSegmentTestHook func(ctx context.Context, segmentIdx, contentTurns int)
 
 // handleGetSessionProjection returns the authoritative SessionProjection for a session, read
@@ -139,24 +52,17 @@ var coldHydrateSegmentTestHook func(ctx context.Context, segmentIdx, contentTurn
 // pull == push state). It is NOT a wrapper around get_session_messages: it returns projection
 // turns, never raw history bodies for the client to merge.
 //
-// The reducer is fed by the active Codex file-relay. After Mac restart the in-memory projection
-// is empty even when the rollout on disk is complete (file-relay starts at EOF). Cold pulls
-// therefore hydrate from disk in turn-bounded segments (design §10.5.6 scheme A): the FIRST
-// segment that yields a content turn is served as a non-empty partial WITHOUT waiting for the
-// full scan, and the remaining segments stream to subscribed clients as projection_patch deltas
-// from a background goroutine. An honest empty session (no rollout) still returns an empty
-// projection at head 0.
-//
-// If hydrate cannot produce even one content turn within coldHydrateTimeout (default 30s — a
-// worst-case backstop for a stuck/corrupt rollout), the RPC returns an explicit error, never an
-// empty success shell.
+// After restart, the Kernel restores a validated checkpoint or reduces exactly
+// [checkpointCursor,startCut) in an isolated transaction. Post-cut live events queue until the
+// baseline commits. A completed source inspection may commit a true empty session; a bare turn
+// shell remains hydrating.
 func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, agent core.Agent) {
 	var params GetSessionProjectionParams
 	if msg.Params != nil {
 		_ = json.Unmarshal(msg.Params, &params)
 	}
 	params.SessionID = h.resolveSessionIDForActiveSession(params.SessionID)
-	slog.Info("go-bridge: get_session_projection", "backendID", msg.BackendID, "sessionID", params.SessionID, "sinceRev", params.SinceRev)
+	logProjectionRPCTrace("mac_receive", msg, params.SessionID, params.SinceRev, -1, "", nil)
 
 	// Subscribe so the conn receives subsequent projection_patch push frames (WP5 emission).
 	h.subscribeConnToSession(conn, msg, params.SessionID)
@@ -166,43 +72,115 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 	// head-0 shell (§10.5.1).
 	if err := h.ensureProjectionHydrated(msg.BackendID, params.SessionID); err != nil {
 		code := "projection.hydrate_failed"
+		retryable := false
+		var retryAfterMillis *int64
+		attempts := 0
 		switch {
-		case errors.Is(err, errColdHydrateTimeout):
-			code = "projection.hydrate_timeout"
+		case errors.Is(err, errProjectionHydrating):
+			code = "projection.hydrating"
+			retryable = true
+			value := projectionHydratingRetryAfter.Milliseconds()
+			retryAfterMillis = &value
 		case errors.Is(err, errProjectionBackendNotMigrated):
 			code = "projection.not_migrated"
+		default:
+			status := h.projectionKernel.Status(msg.BackendID, params.SessionID)
+			if failure := status.Failure; failure != nil {
+				retryable = failure.Retryable
+				attempts = failure.Attempts
+				if failure.Retryable {
+					value := time.Until(failure.RetryAt).Milliseconds()
+					if value < 0 {
+						value = 0
+					}
+					retryAfterMillis = &value
+				}
+			}
 		}
+		logProjectionRPCTrace("response_enqueue", msg, params.SessionID, params.SinceRev, -1, code, nil)
 		conn.SendResult(msg.RequestID, nil, &WireError{
-			Code:    code,
-			Message: err.Error(),
+			Code:             code,
+			Message:          err.Error(),
+			Retryable:        &retryable,
+			RetryAfterMillis: retryAfterMillis,
+			Attempts:         attempts,
 		})
 		return
 	}
 
-	headRev := h.eventPublisher.ProjectionHeadRev(msg.BackendID, params.SessionID)
+	proj, admission, snapshotErr := h.eventPublisher.BeginProjectionSnapshot(
+		conn,
+		msg.BackendID,
+		params.SessionID,
+	)
+	if snapshotErr != nil {
+		logProjectionRPCTrace("response_enqueue", msg, params.SessionID, params.SinceRev, -1, "projection.not_ready", nil)
+		conn.SendResult(msg.RequestID, nil, &WireError{
+			Code:    "projection.not_ready",
+			Message: snapshotErr.Error(),
+		})
+		return
+	}
+	headRev := proj.SyncRev
+	logProjectionRPCTrace("hydrate_ready", msg, params.SessionID, params.SinceRev, headRev, "", &admission)
 
 	// Cheap delta response when the client is already at head: empty patch set.
 	if params.SinceRev != 0 && params.SinceRev == headRev {
-		conn.SendResult(msg.RequestID, map[string]interface{}{
+		logProjectionRPCTrace("response_enqueue", msg, params.SessionID, params.SinceRev, headRev, "delta_at_head", &admission)
+		if err := h.eventPublisher.CompleteProjectionSnapshot(conn, admission, msg.RequestID, map[string]interface{}{
 			"patches": []ProjectionPatch{},
 			"headRev": headRev,
-		}, nil)
+		}); err != nil {
+			slog.Warn("go-bridge: projection snapshot response enqueue failed", "requestId", msg.RequestID, "error", err)
+		}
 		return
 	}
 
-	proj, ok := h.eventPublisher.ProjectionSnapshot(msg.BackendID, params.SessionID)
-	if !ok {
-		// Hydrate completed (or was not needed) and still no reducer state — honest empty
-		// session (no rollout / brand-new). This is NOT the forbidden "timeout, serve empty
-		// while hydrate continues" path (design §10.5).
-		proj = SessionProjection{
-			SessionID: params.SessionID,
-			SyncRev:   0,
-			Execution: ExecutionView{Phase: "idle"},
-			Turns:     []TurnProjection{},
-		}
+	logProjectionRPCTrace("response_enqueue", msg, params.SessionID, params.SinceRev, proj.SyncRev, "snapshot", &admission)
+	if err := h.eventPublisher.CompleteProjectionSnapshot(
+		conn,
+		admission,
+		msg.RequestID,
+		map[string]interface{}{"projection": proj},
+	); err != nil {
+		slog.Warn("go-bridge: projection snapshot response enqueue failed", "requestId", msg.RequestID, "error", err)
 	}
-	conn.SendResult(msg.RequestID, map[string]interface{}{"projection": proj}, nil)
+}
+
+// logProjectionRPCTrace emits the minimal cross-process evidence needed to align one projection
+// pull from iOS send through Mac receive/hydrate/response enqueue. requestId is the correlation
+// key; session/backend/revision fields identify the projection head without logging content.
+// This is observability only: it deliberately does not alter hydrate, reducer, or delivery order.
+func logProjectionRPCTrace(
+	stage string,
+	msg WireMessage,
+	sessionID string,
+	sinceRev, headRev int,
+	outcome string,
+	admission *ProjectionSnapshotAdmission,
+) {
+	attrs := []any{
+		"stage", stage,
+		"requestId", msg.RequestID,
+		"backendID", msg.BackendID,
+		"sessionID", sessionID,
+		"sinceRev", sinceRev,
+	}
+	if headRev >= 0 {
+		attrs = append(attrs, "headRev", headRev)
+	}
+	if outcome != "" {
+		attrs = append(attrs, "outcome", outcome)
+	}
+	if admission != nil {
+		attrs = append(
+			attrs,
+			"bridgeEpoch", admission.BridgeEpoch,
+			"connectionGeneration", admission.ConnectionGeneration,
+			"cutRev", admission.CutRev,
+		)
+	}
+	slog.Info("go-bridge: projection_rpc", attrs...)
 }
 
 // errProjectionBackendNotMigrated is returned for a backend that has no projection cold-hydrate
@@ -210,171 +188,335 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 // fails honestly with code projection.not_migrated instead of serving an empty head-0 shell
 // (§10.5.1 / §10.5.7 修法 1).
 var errProjectionBackendNotMigrated = errors.New("backend not yet migrated to session projection")
+var errProjectionSourceUnavailable = errors.New("projection source is not available for inspection")
 
-// selectHydrateProducer returns the cold-hydrate event producer for a backend, or nil if the
-// backend is not yet migrated to projection (design §10.5.7 修法 1). codex + claude are file
-// transcript backends; opencode (HTTP/SQLite) is deferred to a separate sub-task.
-func (h *Handlers) selectHydrateProducer(backendID string) func(ctx context.Context, backendID, sessionID string, emit func(projectionHydrateEvent) bool) error {
-	switch backendID {
-	case "codex":
-		return h.produceCodexHydrateEvents
-	case "claude", "claudecode":
-		return h.produceClaudeHydrateEvents
-	default:
-		return nil // opencode / unknown — not yet migrated to projection
-	}
+func backendSupportsProjectionHydrate(backendID string) bool {
+	return backendID == "codex"
 }
 
-// ensureProjectionHydrated blocks until the session reducer holds a non-empty partial projection
-// (a turn with real user/assistant content) that get_session_projection may serve, or until the
-// first-segment budget elapses (design §10.5.6 scheme A + §10.5.7 修法 1 full-backend). On success
-// it returns nil EVEN IF the full source scan is still running in the background — the caller
-// snapshots the reducer (a real partial), and remaining turns stream to subscribed clients as
-// projection_patch deltas. On a stuck source that cannot produce even one content turn within
-// coldHydrateTimeout it returns errColdHydrateTimeout; a backend with no hydrate producer returns
-// errProjectionBackendNotMigrated. Either way the RPC fails honestly, never an empty shell.
-//
-// Concurrent cold pulls share a single flight; joiners wait on the leader's partialReady.
+// ensureProjectionHydrated waits for a full committed baseline within the pull budget. Concurrent
+// pulls join the Kernel single-flight. Budget expiry returns projection.hydrating without
+// cancelling a healthy transaction.
 func (h *Handlers) ensureProjectionHydrated(backendID, sessionID string) error {
-	if h == nil || h.eventPublisher == nil || sessionID == "" {
+	if h == nil || h.eventPublisher == nil || h.projectionKernel == nil || sessionID == "" {
 		return nil
 	}
-	// Fast path: reducer already holds a turn (prior hydrate done, or a partial from an
-	// in-flight background scan). Serve immediately without touching the flight.
-	if h.eventPublisher.ProjectionTurnCount(backendID, sessionID) > 0 {
+	if h.projectionKernel.Status(backendID, sessionID).Phase == ProjectionHydrateReady {
 		return nil
 	}
-	producer := h.selectHydrateProducer(backendID)
-	if producer == nil {
+	if !backendSupportsProjectionHydrate(backendID) {
 		return errProjectionBackendNotMigrated
 	}
-
-	h.mu.Lock()
-	if h.coldHydrateFlights == nil {
-		h.coldHydrateFlights = make(map[string]*coldHydrateFlight)
-	}
-	// Re-check under the lock: a background scan may have just produced a turn.
-	if h.eventPublisher.ProjectionTurnCount(backendID, sessionID) > 0 {
-		h.mu.Unlock()
-		return nil
-	}
-	key := backendID + "\x00" + sessionID
-	flight, exists := h.coldHydrateFlights[key]
-	if !exists {
-		flight = newColdHydrateFlight()
-		h.coldHydrateFlights[key] = flight
-	}
-	h.mu.Unlock()
-
-	if exists {
-		return h.joinColdHydrateFlight(backendID, sessionID, flight)
-	}
-	return h.leadColdHydrateFlight(backendID, sessionID, key, flight, producer)
-}
-
-// joinColdHydrateFlight waits for a leader's partial (or terminal outcome) without starting a
-// second scan. If a content turn has landed by the time it unblocks, it serves that partial.
-func (h *Handlers) joinColdHydrateFlight(backendID, sessionID string, flight *coldHydrateFlight) error {
-	start := time.Now()
-	select {
-	case <-flight.partialReady:
-		if err := flight.partialError(); err != nil {
-			// Leader could not produce a partial; fall back to whatever turns landed since.
-			if h.eventPublisher.ProjectionHasContentTurn(backendID, sessionID) {
-				return nil
-			}
-			return err
-		}
-		return nil
-	case <-flight.done:
-		// Background scan exited before this caller observed a partial.
-		if h.eventPublisher.ProjectionHasContentTurn(backendID, sessionID) {
-			return nil
-		}
-		if _, err := flight.finalOutcome(); err != nil {
-			return err
-		}
-		return fmt.Errorf("%w after %s (joined)", errColdHydrateTimeout, time.Since(start))
-	case <-time.After(coldHydrateTimeout):
-		if h.eventPublisher.ProjectionHasContentTurn(backendID, sessionID) {
-			return nil
-		}
-		return fmt.Errorf("%w after %s (joined)", errColdHydrateTimeout, time.Since(start))
-	}
-}
-
-// leadColdHydrateFlight starts the background segmented hydrate goroutine and waits for the
-// first non-empty partial within the cold-hydrate budget. The goroutine continues after this
-// returns so remaining turns stream as projection_patch deltas. On first-segment timeout it
-// cancels the goroutine, frees the single-flight slot, and returns errColdHydrateTimeout.
-func (h *Handlers) leadColdHydrateFlight(backendID, sessionID, key string, flight *coldHydrateFlight, produce func(ctx context.Context, backendID, sessionID string, emit func(projectionHydrateEvent) bool) error) error {
-	partialBudget := coldHydrateTimeout
-	if partialBudget <= 0 {
-		partialBudget = defaultColdHydrateTimeout
-	}
-	bgBudget := coldHydrateBackgroundBudget
-	if bgBudget <= 0 {
-		bgBudget = defaultColdHydrateBackgroundBudget
-	}
-	partialCtx, partialCancel := context.WithTimeout(context.Background(), partialBudget)
-	bgCtx, bgCancel := context.WithTimeout(context.Background(), bgBudget)
-
-	go func() {
-		n, err := h.hydrateProjectionFromSource(partialCtx, bgCtx, backendID, sessionID, flight, func(ctx context.Context, emit func(projectionHydrateEvent) bool) error {
-			return produce(ctx, backendID, sessionID, emit)
-		})
-		bgCancel()
-		partialCancel()
-		// Free the single-flight slot BEFORE unblocking waiters so a retry that observed the
-		// timeout sees an empty map (no stranded waiter for a dead flight).
-		h.clearColdHydrateFlight(key)
-		flight.finishFlight(n, err)
-	}()
-
-	start := time.Now()
-	select {
-	case <-flight.partialReady:
-		// Do NOT cancel bgCtx — the background scan continues to stream remaining turns.
-		partialCancel()
-		if err := flight.partialError(); err != nil && !h.eventPublisher.ProjectionHasContentTurn(backendID, sessionID) {
-			return err
-		}
-		slog.Info("go-bridge: get_session_projection cold-hydrate partial served",
-			"sessionID", sessionID,
-			"turns", h.eventPublisher.ProjectionTurnCount(backendID, sessionID),
-			"headRev", h.eventPublisher.ProjectionHeadRev(backendID, sessionID),
-			"elapsed", time.Since(start).String(),
-		)
-		return nil
-	case <-partialCtx.Done():
-		// First segment did not land within budget. Stop the background scan and free the slot.
-		bgCancel()
-		partialCancel()
-		<-flight.done
-		if h.eventPublisher.ProjectionHasContentTurn(backendID, sessionID) {
-			// A content turn landed in the race window — treat as a real partial.
-			return nil
-		}
-		err := fmt.Errorf("%w after %s: %v", errColdHydrateTimeout, partialBudget, partialCtx.Err())
-		slog.Warn("go-bridge: get_session_projection cold-hydrate first-segment timeout",
-			"sessionID", sessionID,
-			"turns", h.eventPublisher.ProjectionTurnCount(backendID, sessionID),
-			"headRev", h.eventPublisher.ProjectionHeadRev(backendID, sessionID),
-			"elapsed", time.Since(start).String(),
-			"error", err.Error(),
+	source, err := h.prepareProjectionHydrateSource(context.Background(), backendID, sessionID)
+	if err != nil {
+		h.projectionKernel.MarkFailed(
+			backendID, sessionID, "projection.source_inspection_failed", err.Error(), true,
 		)
 		return err
 	}
+	admission, err := h.projectionKernel.BeginHydrateTransaction(
+		backendID, sessionID, source, false, false,
+	)
+	if err != nil {
+		return err
+	}
+	if admission.AlreadyReady {
+		return nil
+	}
+	if admission.Leader {
+		go h.runProjectionHydrateTransaction(backendID, sessionID, admission)
+	}
+	if admission.Done == nil {
+		status := h.projectionKernel.Status(backendID, sessionID)
+		if status.Phase == ProjectionHydrateFailed && status.Failure != nil {
+			return errors.New(status.Failure.Message)
+		}
+		return errProjectionHydrating
+	}
+	budget := coldHydrateTimeout
+	if budget <= 0 {
+		budget = defaultColdHydrateTimeout
+	}
+	select {
+	case <-admission.Done:
+		status := h.projectionKernel.Status(backendID, sessionID)
+		if status.Phase == ProjectionHydrateReady {
+			return nil
+		}
+		if status.Failure != nil {
+			return errors.New(status.Failure.Message)
+		}
+		return errors.New("projection hydrate ended without a committed state")
+	case <-time.After(budget):
+		return fmt.Errorf("%w; retry after hydrate completes", errProjectionHydrating)
+	}
 }
 
-func (h *Handlers) clearColdHydrateFlight(key string) {
-	if h == nil {
+func (h *Handlers) prepareProjectionHydrateSource(
+	ctx context.Context,
+	backendID, sessionID string,
+) (ProjectionSourceDescriptor, error) {
+	agentName := ""
+	switch backendID {
+	case "codex":
+		agentName = "codex"
+	case "claude", "claudecode":
+		agentName = "claudecode"
+	default:
+		return ProjectionSourceDescriptor{}, errProjectionBackendNotMigrated
+	}
+	agent, ok := h.getFirstAgentByName(agentName)
+	if !ok {
+		if h.eventPublisher.ProjectionTurnCount(backendID, sessionID) > 0 {
+			return ProjectionSourceDescriptor{Identity: sessionID}, nil
+		}
+		return ProjectionSourceDescriptor{}, errProjectionSourceUnavailable
+	}
+	locator, ok := agent.(core.TranscriptLocator)
+	if !ok {
+		if h.eventPublisher.ProjectionTurnCount(backendID, sessionID) > 0 {
+			return ProjectionSourceDescriptor{Identity: sessionID}, nil
+		}
+		return ProjectionSourceDescriptor{}, errProjectionSourceUnavailable
+	}
+	path, err := locator.TranscriptPath(ctx, sessionID)
+	if err != nil {
+		return ProjectionSourceDescriptor{}, err
+	}
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ProjectionSourceDescriptor{}, errProjectionSourceUnavailable
+	}
+	cut, err := projectionJSONLStartCut(path)
+	if err != nil {
+		return ProjectionSourceDescriptor{}, err
+	}
+	return ProjectionSourceDescriptor{
+		Identity: sessionID,
+		Path:     path,
+		Cursor:   cut,
+	}, nil
+}
+
+func projectionJSONLStartCut(path string) (int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return 0, err
+	}
+	size := info.Size()
+	if size == 0 {
+		return 0, nil
+	}
+	var one [1]byte
+	if _, err := f.ReadAt(one[:], size-1); err != nil {
+		return 0, err
+	}
+	if one[0] == '\n' {
+		return size, nil
+	}
+	const blockSize = int64(4096)
+	for end := size; end > 0; {
+		start := end - blockSize
+		if start < 0 {
+			start = 0
+		}
+		buf := make([]byte, end-start)
+		if _, err := f.ReadAt(buf, start); err != nil {
+			return 0, err
+		}
+		for i := len(buf) - 1; i >= 0; i-- {
+			if buf[i] == '\n' {
+				return start + int64(i) + 1, nil
+			}
+		}
+		end = start
+	}
+	return 0, nil
+}
+
+func (h *Handlers) runProjectionHydrateTransaction(
+	backendID, sessionID string,
+	admission ProjectionHydrateAdmission,
+) {
+	startedAt := time.Now()
+	budget := coldHydrateBackgroundBudget
+	if budget <= 0 {
+		budget = defaultColdHydrateBackgroundBudget
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
+	select {
+	case h.projectionHydrateSlots <- struct{}{}:
+		defer func() { <-h.projectionHydrateSlots }()
+	case <-ctx.Done():
+		h.projectionKernel.MarkFailed(
+			backendID,
+			sessionID,
+			"projection.hydrate_queue_timeout",
+			ctx.Err().Error(),
+			true,
+		)
 		return
 	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.coldHydrateFlights != nil {
-		delete(h.coldHydrateFlights, key)
+	if coldHydrateTestHook != nil {
+		coldHydrateTestHook(ctx)
+	}
+	source, _ := h.projectionKernel.HydrateSource(backendID, sessionID)
+	base, _ := h.projectionKernel.HydrateSnapshot(backendID, sessionID)
+	segmentIdx := 0
+	err := h.produceProjectionHydrateRange(
+		ctx,
+		backendID,
+		sessionID,
+		source.Path,
+		admission.StartCursor,
+		admission.StartCut,
+		base,
+		func(event projectionHydrateEvent) bool {
+			h.projectionKernel.ApplyHydrateEvent(
+				backendID,
+				sessionID,
+				h.eventPublisher.BridgeEpoch(),
+				event.Event,
+				event.Data,
+			)
+			if event.TurnDone {
+				segmentIdx++
+				if coldHydrateSegmentTestHook != nil {
+					hydrating, _ := h.projectionKernel.HydrateSnapshot(backendID, sessionID)
+					coldHydrateSegmentTestHook(ctx, segmentIdx, len(hydrating.Turns))
+				}
+			}
+			return ctx.Err() == nil
+		},
+	)
+	if err != nil {
+		h.projectionKernel.MarkFailed(
+			backendID, sessionID, "projection.source_read_failed", err.Error(), true,
+		)
+		return
+	}
+	if err := h.projectionKernel.WaitHydrateCommitReady(ctx, backendID, sessionID); err != nil {
+		h.projectionKernel.MarkFailed(
+			backendID, sessionID, "projection.bare_source_wait_failed", err.Error(), true,
+		)
+		return
+	}
+	commit, err := h.projectionKernel.CommitHydrateTransaction(backendID, sessionID)
+	if err != nil {
+		h.projectionKernel.MarkFailed(
+			backendID, sessionID, "projection.commit_failed", err.Error(), true,
+		)
+		return
+	}
+	slog.Info(
+		"go-bridge: projection_shadow",
+		"stage", "hydrate_commit",
+		"policyVersion", SessionSyncV2PolicyVersion,
+		"backendID", backendID,
+		"sessionPrefix", projectionSessionLogPrefix(sessionID),
+		"checkpointHit", admission.CheckpointHit,
+		"startCursor", admission.StartCursor,
+		"startCut", admission.StartCut,
+		"headRev", commit.Projection.SyncRev,
+		"pendingLive", commit.PendingLive,
+		"elapsedMillis", time.Since(startedAt).Milliseconds(),
+	)
+	if commit.PendingPatch != nil {
+		h.eventPublisher.PublishProjectionPatch(backendID, sessionID, *commit.PendingPatch)
+	}
+	if source.Path != "" {
+		source.Cursor = admission.StartCut
+		sourceCheckpoint, checkpointErr := BuildProjectionSourceCheckpoint(source)
+		if checkpointErr != nil {
+			slog.Error("projection checkpoint source build failed",
+				"backendID", backendID, "sessionID", sessionID, "error", checkpointErr)
+			return
+		}
+		checkpoint := NewReadyProjectionCheckpoint(
+			backendID, sessionID, sourceCheckpoint, commit.Projection, time.Now(),
+		)
+		settled := commit.Projection.Execution.Phase != "running"
+		if checkpointErr := h.projectionKernel.StageCheckpoint(checkpoint, settled); checkpointErr != nil &&
+			!errors.Is(checkpointErr, ErrProjectionCheckpointDisabled) {
+			slog.Error("projection checkpoint stage failed",
+				"backendID", backendID, "sessionID", sessionID, "error", checkpointErr)
+		} else if checkpointErr == nil {
+			slog.Info(
+				"go-bridge: projection_shadow",
+				"stage", "checkpoint_stage",
+				"policyVersion", SessionSyncV2PolicyVersion,
+				"backendID", backendID,
+				"sessionPrefix", projectionSessionLogPrefix(sessionID),
+				"headRev", checkpoint.ProjectionRev,
+				"sourceCursor", checkpoint.Source.Cursor,
+				"settled", settled,
+			)
+		}
+	}
+}
+
+func projectionSessionLogPrefix(sessionID string) string {
+	if len(sessionID) <= 8 {
+		return sessionID
+	}
+	return sessionID[:8]
+}
+
+func (h *Handlers) produceProjectionHydrateRange(
+	ctx context.Context,
+	backendID, sessionID, path string,
+	startOffset, endOffset int64,
+	base SessionProjection,
+	emit func(projectionHydrateEvent) bool,
+) error {
+	if path == "" || startOffset == endOffset {
+		return nil
+	}
+	currentTurnID := base.Execution.ActiveTurnID
+	if currentTurnID == "" {
+		for i := len(base.Turns) - 1; i >= 0; i-- {
+			if base.Turns[i].Status == "running" || base.Turns[i].Status == "pending" {
+				currentTurnID = base.Turns[i].TurnID
+				break
+			}
+		}
+	}
+	switch backendID {
+	case "codex":
+		toolNames := make(map[string]string)
+		for i := range base.Turns {
+			if base.Turns[i].Assistant == nil {
+				continue
+			}
+			for _, part := range base.Turns[i].Assistant.Parts {
+				if part.Type == "tool" && part.ItemID != "" && part.ToolName != "" {
+					toolNames[part.ItemID] = part.ToolName
+				}
+			}
+		}
+		return streamCodexTranscriptRelayEventsRange(ctx, path, startOffset, endOffset, func(ev codexRelayEvent) bool {
+			eventName, data, ok := codexRelayEventToProjectionEvent(ev, &currentTurnID, toolNames)
+			if !ok {
+				return true
+			}
+			return emit(projectionHydrateEvent{
+				Event:    eventName,
+				Data:     data,
+				TurnDone: ev.kind == "task_complete",
+			})
+		})
+	case "claude", "claudecode":
+		return streamClaudeTranscriptProjectionEventsRangeSeed(
+			ctx, path, startOffset, endOffset, currentTurnID, emit,
+		)
+	default:
+		return errProjectionBackendNotMigrated
 	}
 }
 
@@ -388,158 +530,6 @@ type projectionHydrateEvent struct {
 	Event    string
 	Data     map[string]interface{}
 	TurnDone bool
-}
-
-// hydrateProjectionFromSource runs the generic segmented cold-hydrate loop over a backend-specific
-// event producer (design §10.5.6 scheme A + §10.5.7 修法 1). The producer streams
-// projectionHydrateEvents in source order; this loop publishes them, signals a non-empty partial
-// once the reducer holds a turn with real user/assistant content, and settles execution to idle.
-//
-// Phase-1 events (before the first content turn) publish Offline:true (reducer-only, no mid-pull
-// patch fan-out); once a non-empty partial is signalable, subsequent events flip to Offline:false
-// (Broadcast:true) so they reach subscribed clients as projection_patch deltas over the served
-// partial. partialCtx bounds the first-segment wait (coldHydrateTimeout); bgCtx bounds background
-// completion (coldHydrateBackgroundBudget). The producer receives bgCtx and should honor ctx cancel
-// between events. Returns total events applied + terminal error.
-func (h *Handlers) hydrateProjectionFromSource(partialCtx, bgCtx context.Context, backendID, sessionID string, flight *coldHydrateFlight, produce func(ctx context.Context, emit func(projectionHydrateEvent) bool) error) (int, error) {
-	if partialCtx == nil {
-		partialCtx = context.Background()
-	}
-	if bgCtx == nil {
-		bgCtx = partialCtx
-	}
-	if coldHydrateTestHook != nil {
-		coldHydrateTestHook(partialCtx)
-		if err := partialCtx.Err(); err != nil {
-			flight.signalPartial(err)
-			return 0, err
-		}
-	}
-	if h == nil || h.eventPublisher == nil || sessionID == "" {
-		flight.signalPartial(nil)
-		return 0, nil
-	}
-	if err := partialCtx.Err(); err != nil {
-		flight.signalPartial(err)
-		return 0, err
-	}
-
-	applied := 0
-	segmentIdx := 0
-	partialSignaled := false
-
-	emit := func(ev projectionHydrateEvent) bool {
-		if err := bgCtx.Err(); err != nil {
-			return false
-		}
-		h.publishEvent(LogicalEvent{
-			SessionID: sessionID,
-			BackendID: backendID,
-			Event:     ev.Event,
-			Data:      ev.Data,
-			Broadcast: partialSignaled, // phase 2 fans patches out to subscribers
-			Offline:   !partialSignaled,
-		})
-		applied++
-
-		// Once the reducer holds a content turn, the partial is honest — signal the leader once.
-		if !partialSignaled && h.eventPublisher.ProjectionHasContentTurn(backendID, sessionID) {
-			partialSignaled = true
-			flight.signalPartial(nil)
-		}
-		// Segment boundary (completed turn) — test hook observes incremental reducer state.
-		if ev.TurnDone {
-			segmentIdx++
-			if coldHydrateSegmentTestHook != nil {
-				coldHydrateSegmentTestHook(bgCtx, segmentIdx, h.eventPublisher.ProjectionTurnCount(backendID, sessionID))
-			}
-		}
-		return true
-	}
-
-	produceErr := produce(bgCtx, emit)
-
-	if !partialSignaled {
-		// No content turn was ever served. Distinguish a phase-1 timeout/cancel from an honest
-		// empty session: partialCtx.Err() is set when the leader's first-segment budget elapsed
-		// (or the leader bgCanceled on timeout); nil partialCtx + nil produceErr means the source
-		// simply produced zero content turns (brand-new / empty rollout / no transcript) — honest empty.
-		cause := partialCtx.Err()
-		if cause == nil {
-			cause = produceErr
-		}
-		if cause != nil {
-			flight.signalPartial(cause)
-			return applied, cause
-		}
-		flight.signalPartial(nil) // honest empty session — RPC serves the empty idle branch
-	} else if applied > 0 && bgCtx.Err() == nil {
-		// Partial was served; settle execution to idle (fans out in background phase).
-		h.publishEvent(LogicalEvent{
-			SessionID: sessionID,
-			BackendID: backendID,
-			Event:     "session_state_changed",
-			Data:      map[string]interface{}{"state": "idle"},
-			Broadcast: true,
-			Offline:   false,
-		})
-	}
-
-	// Terminal outcome for finishFlight (informational — the leader already returned on partial).
-	var terminal error
-	if produceErr != nil {
-		terminal = produceErr
-	} else if err := bgCtx.Err(); err != nil {
-		terminal = err
-	}
-	return applied, terminal
-}
-
-// produceCodexHydrateEvents is the codex cold-hydrate producer: locate the rollout JSONL via the
-// codex agent's TranscriptLocator and stream it through the codex parser + event mapper. Returns
-// nil (honest empty) when there is no codex agent / transcript; a read/scan error otherwise.
-func (h *Handlers) produceCodexHydrateEvents(ctx context.Context, backendID, sessionID string, emit func(projectionHydrateEvent) bool) error {
-	agent, ok := h.getFirstAgentByName("codex")
-	if !ok {
-		return nil // no codex agent → honest empty session, not a hydrate failure
-	}
-	locator, ok := agent.(core.TranscriptLocator)
-	if !ok {
-		return nil
-	}
-	sessPath, err := locator.TranscriptPath(ctx, sessionID)
-	if err != nil || strings.TrimSpace(sessPath) == "" {
-		return nil
-	}
-	currentTurnID := ""
-	toolNames := make(map[string]string)
-	return streamCodexTranscriptRelayEvents(ctx, sessPath, 0, func(ev codexRelayEvent) bool {
-		eventName, data, ok := codexRelayEventToProjectionEvent(ev, &currentTurnID, toolNames)
-		if !ok {
-			return true // unhandled kind (e.g. context_usage) — skip, keep scanning
-		}
-		return emit(projectionHydrateEvent{Event: eventName, Data: data, TurnDone: ev.kind == "task_complete"})
-	})
-}
-
-// produceClaudeHydrateEvents is the claude cold-hydrate producer: locate the session .jsonl via
-// the claudecode agent's TranscriptLocator and stream it through the claude parser. Returns nil
-// (honest empty) when there is no claude agent / transcript; a read/scan error otherwise.
-// (design §10.5.7 修法 1 — claude joins the projection reducer.)
-func (h *Handlers) produceClaudeHydrateEvents(ctx context.Context, backendID, sessionID string, emit func(projectionHydrateEvent) bool) error {
-	agent, ok := h.getFirstAgentByName("claudecode")
-	if !ok {
-		return nil
-	}
-	locator, ok := agent.(core.TranscriptLocator)
-	if !ok {
-		return nil
-	}
-	sessPath, err := locator.TranscriptPath(ctx, sessionID)
-	if err != nil || strings.TrimSpace(sessPath) == "" {
-		return nil
-	}
-	return streamClaudeTranscriptProjectionEvents(ctx, sessPath, emit)
 }
 
 // codexRelayEventToProjectionEvent maps a scanned codexRelayEvent to its projection LogicalEvent
@@ -559,8 +549,14 @@ func codexRelayEventToProjectionEvent(ev codexRelayEvent, currentTurnID *string,
 		*currentTurnID = ""
 		return "turn_completed", map[string]interface{}{"turnId": tid, "done": true, "reason": "task_complete"}, true
 	case "text":
-		return "text_delta", map[string]interface{}{"itemId": *currentTurnID, "delta": ev.text}, true
+		if !ev.canonical {
+			return "", nil, false
+		}
+		return "text_delta", map[string]interface{}{"itemId": *currentTurnID, "delta": ev.text, "newPart": ev.newPart}, true
 	case "reasoning":
+		if !ev.canonical {
+			return "", nil, false
+		}
 		return "reasoning_delta", map[string]interface{}{"itemId": *currentTurnID, "delta": ev.text}, true
 	case "user_message":
 		return "user_message", map[string]interface{}{"itemId": ev.itemId, "turnId": *currentTurnID, "text": ev.text}, true
@@ -574,7 +570,11 @@ func codexRelayEventToProjectionEvent(ev codexRelayEvent, currentTurnID *string,
 		}
 		return "tool_started", data, true
 	case "tool_finished":
-		data := map[string]interface{}{"toolResult": ev.toolResult, "toolStatus": "completed"}
+		status := ev.toolStatus
+		if status == "" {
+			status = "completed"
+		}
+		data := map[string]interface{}{"toolResult": ev.toolResult, "toolStatus": status}
 		if name, ok := toolNames[ev.itemId]; ok && name != "" {
 			data["toolName"] = name
 		}
@@ -603,8 +603,7 @@ func (p *EventPublisher) ProjectionHeadRev(backendID, sessionID string) int {
 	return p.projection.LastAppliedRev(backendID, sessionID)
 }
 
-// ProjectionTurnCount returns the number of turns the reducer currently holds for the session
-// (design §10.5.6 scheme A — the non-empty partial boundary for segmented cold-hydrate).
+// ProjectionTurnCount returns the number of turns in the committed reducer.
 func (p *EventPublisher) ProjectionTurnCount(backendID, sessionID string) int {
 	if p == nil || p.projection == nil {
 		return 0
@@ -612,8 +611,7 @@ func (p *EventPublisher) ProjectionTurnCount(backendID, sessionID string) int {
 	return p.projection.TurnCount(backendID, sessionID)
 }
 
-// ProjectionHasContentTurn reports whether the reducer holds a turn with real user/assistant
-// content — the honest non-empty-partial boundary for segmented cold-hydrate (§10.5.6 scheme A).
+// ProjectionHasContentTurn reports whether the committed reducer holds real message content.
 func (p *EventPublisher) ProjectionHasContentTurn(backendID, sessionID string) bool {
 	if p == nil || p.projection == nil {
 		return false

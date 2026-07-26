@@ -207,30 +207,25 @@ func ParseRichHistoryFromReader(r io.Reader, limit int) ([]core.RichHistoryEntry
 		case item.Type == "function_call" && item.Name == "update_plan":
 
 		case item.Type == "function_call":
-			toolName := item.Name
-			if mapped, ok := codexToolNames[toolName]; ok {
-				toolName = mapped
+			toolName, toolInput, ok := NormalizeTranscriptFunctionCall(item.Name, item.Arguments)
+			if ok {
+				builder.addToolUse(ts, toolName, toolInput, item.CallID)
 			}
-			if toolName == "" {
-				toolName = "Unknown"
-			}
-			toolInput := extractToolInput(item.Name, item.Arguments)
-			builder.addToolUse(ts, toolName, toolInput, item.CallID)
 
 		case item.Type == "command_execution":
 			builder.addToolUse(ts, "Bash", item.Command, "")
 
 		case item.Type == "function_call_output":
-			builder.addToolResultByCallID(ts, item.CallID, codexTranscriptOutput(item.Output), item.Status)
+			builder.addToolResultByCallID(ts, item.CallID, TranscriptToolOutput(item.Output), item.Status)
 
 		case item.Type == "custom_tool_call":
-			toolName, toolInput := codexCustomToolUse(item.Name, item.Input)
-			if toolName != "" {
+			toolName, toolInput, ok := NormalizeTranscriptCustomToolCall(item.Name, item.Input)
+			if ok {
 				builder.addToolUse(ts, toolName, toolInput, item.CallID)
 			}
 
 		case item.Type == "custom_tool_call_output":
-			builder.addToolResultByCallID(ts, item.CallID, codexTranscriptOutput(item.Output), item.Status)
+			builder.addToolResultByCallID(ts, item.CallID, TranscriptToolOutput(item.Output), item.Status)
 
 		default:
 			slog.Debug("codex rich history: unhandled response_item",
@@ -286,6 +281,13 @@ func codexTranscriptOutput(raw json.RawMessage) string {
 	return string(raw)
 }
 
+// TranscriptToolOutput exposes the canonical persisted-history output normalization to the
+// projection hydrate path. Both readers consume the same rollout file and must not disagree on
+// structured custom-tool output.
+func TranscriptToolOutput(raw json.RawMessage) string {
+	return codexTranscriptOutput(raw)
+}
+
 func extractToolInput(toolName string, raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
@@ -303,6 +305,23 @@ func extractToolInput(toolName string, raw json.RawMessage) string {
 		return s
 	}
 	return string(raw)
+}
+
+// NormalizeTranscriptFunctionCall exposes the canonical function-call name/input semantics used
+// by GetRichSessionHistory. The bool is false for transcript-only control calls (currently
+// update_plan) that do not belong in the visible timeline.
+func NormalizeTranscriptFunctionCall(name string, arguments json.RawMessage) (string, string, bool) {
+	if name == "update_plan" {
+		return "", "", false
+	}
+	toolName := name
+	if mapped, ok := codexToolNames[toolName]; ok {
+		toolName = mapped
+	}
+	if toolName == "" {
+		toolName = "Unknown"
+	}
+	return toolName, extractToolInput(name, arguments), true
 }
 
 var codexExecCommandInputPattern = regexp.MustCompile(`tools\.exec_command\(\s*\{[^{}]*"cmd"\s*:\s*"((?:\\.|[^"\\])*)"`)
@@ -333,6 +352,18 @@ func codexCustomToolUse(name, input string) (string, string) {
 		return "Patch", codexPatchTarget(input)
 	}
 	return name, input
+}
+
+// NormalizeTranscriptCustomToolCall exposes the same unwrap rules as canonical rich history.
+func NormalizeTranscriptCustomToolCall(name, input string) (string, string, bool) {
+	toolName, toolInput := codexCustomToolUse(name, input)
+	return toolName, toolInput, toolName != ""
+}
+
+// IsTranscriptUserPrompt keeps projection hydrate aligned with canonical history filtering of
+// injected/system input_text blocks.
+func IsTranscriptUserPrompt(text string) bool {
+	return isUserPrompt(text)
 }
 
 func codexWrappedExecCommand(input string) string {

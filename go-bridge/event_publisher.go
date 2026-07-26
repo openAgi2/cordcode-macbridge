@@ -13,6 +13,8 @@ const (
 	recoveryPendingMaxEvents   = 1000
 	recoveryPendingMaxBytes    = 2 << 20
 	recoveryPendingTimeout     = 30 * time.Second
+	projectionFenceMaxPatches  = 128
+	projectionFenceMaxBytes    = 2 << 20
 )
 
 type BridgeSessionCutMap map[string]map[string]BridgeSessionCut
@@ -35,6 +37,11 @@ type LogicalEvent struct {
 
 type eventOutboundFrame struct {
 	value      interface{}
+	requestID  string
+	resultData interface{}
+	resultErr  *WireError
+	isResult   bool
+	resultDone chan error
 	delivered  chan struct{}
 	classHint  relayOutboundClass
 	classified bool
@@ -72,6 +79,9 @@ func (s *eventOutboundSink) run() {
 			for {
 				select {
 				case frame := <-s.queue:
+					if frame.resultDone != nil {
+						frame.resultDone <- fmt.Errorf("connection closed before result delivery")
+					}
 					if frame.delivered != nil {
 						close(frame.delivered)
 					}
@@ -85,13 +95,21 @@ func (s *eventOutboundSink) run() {
 			}
 		case frame := <-s.queue:
 			if closed, ok := s.conn.(interface{ isClosed() bool }); ok && closed.isClosed() {
+				if frame.resultDone != nil {
+					frame.resultDone <- fmt.Errorf("connection closed before result delivery")
+				}
 				if frame.delivered != nil {
 					close(frame.delivered)
 				}
 				<-s.slots
 				continue
 			}
-			if sender, ok := s.conn.(interface {
+			if frame.isResult {
+				s.conn.SendResult(frame.requestID, frame.resultData, frame.resultErr)
+				if frame.resultDone != nil {
+					frame.resultDone <- nil
+				}
+			} else if sender, ok := s.conn.(interface {
 				SendJSONClassified(any, relayOutboundClass)
 			}); ok && frame.classified {
 				sender.SendJSONClassified(frame.value, frame.classHint)
@@ -137,22 +155,29 @@ func (s *eventOutboundSink) close() {
 // publication. Stamping and destination enqueue happen under one lock; actual
 // connection and offline I/O run outside that critical section.
 type EventPublisher struct {
-	mu            sync.Mutex
-	bridgeEpoch   string
-	seq           int
-	perSessionSeq map[string]int
-	broadcaster   *Broadcaster
-	sinks         map[Connection]*eventOutboundSink
-	offlineQueue  chan EventMessage
-	offlineRoute  func(EventMessage)
-	recoveries    map[Connection]*publisherRecovery
-	buffer        *EventBuffer
-	liveBuffer    *LiveFrameBuffer
-	now           func() time.Time
-	completed     map[Connection]string
-	observation   *ObservationManager
-	projection    *ProjectionReducer
-	syncV2        map[Connection]bool
+	mu                       sync.Mutex
+	bridgeEpoch              string
+	seq                      int
+	perSessionSeq            map[string]int
+	broadcaster              *Broadcaster
+	sinks                    map[Connection]*eventOutboundSink
+	offlineQueue             chan EventMessage
+	offlineRoute             func(EventMessage)
+	recoveries               map[Connection]*publisherRecovery
+	buffer                   *EventBuffer
+	liveBuffer               *LiveFrameBuffer
+	now                      func() time.Time
+	completed                map[Connection]string
+	observation              *ObservationManager
+	projection               *ProjectionReducer
+	kernel                   *ProjectionKernel
+	syncV2                   map[Connection]bool
+	nextConnectionGeneration uint64
+	connectionGenerations    map[Connection]uint64
+	nextProjectionFenceID    uint64
+	projectionFences         map[projectionFenceKey]*projectionSnapshotFence
+	projectionSnapshotCuts   map[projectionFenceKey]int
+	projectionInvalidated    map[projectionFenceKey]bool
 	// rebindTargets is invoked (without p.mu) when a live event has zero online
 	// targets. Handlers rebinds broadcaster subscriptions from device registry +
 	// observation so mid-turn EMITs are not permanently dropped after path thrash.
@@ -177,17 +202,21 @@ func NewEventPublisher(bridgeEpoch string, broadcaster ...*Broadcaster) *EventPu
 		panic("event publisher bridge epoch must not be empty")
 	}
 	p := &EventPublisher{
-		bridgeEpoch:   bridgeEpoch,
-		perSessionSeq: make(map[string]int),
-		sinks:         make(map[Connection]*eventOutboundSink),
-		offlineQueue:  make(chan EventMessage, eventOutboundQueueCapacity),
-		recoveries:    make(map[Connection]*publisherRecovery),
-		buffer:        NewEventBuffer(EventBufferConfig{}),
-		liveBuffer:    NewLiveFrameBuffer(),
-		now:           time.Now,
-		completed:     make(map[Connection]string),
-		projection:    NewProjectionReducer(),
-		syncV2:        make(map[Connection]bool),
+		bridgeEpoch:            bridgeEpoch,
+		perSessionSeq:          make(map[string]int),
+		sinks:                  make(map[Connection]*eventOutboundSink),
+		offlineQueue:           make(chan EventMessage, eventOutboundQueueCapacity),
+		recoveries:             make(map[Connection]*publisherRecovery),
+		buffer:                 NewEventBuffer(EventBufferConfig{}),
+		liveBuffer:             NewLiveFrameBuffer(),
+		now:                    time.Now,
+		completed:              make(map[Connection]string),
+		projection:             NewProjectionReducer(),
+		syncV2:                 make(map[Connection]bool),
+		connectionGenerations:  make(map[Connection]uint64),
+		projectionFences:       make(map[projectionFenceKey]*projectionSnapshotFence),
+		projectionSnapshotCuts: make(map[projectionFenceKey]int),
+		projectionInvalidated:  make(map[projectionFenceKey]bool),
 	}
 	if len(broadcaster) > 0 {
 		p.broadcaster = broadcaster[0]
@@ -199,6 +228,33 @@ func NewEventPublisher(bridgeEpoch string, broadcaster ...*Broadcaster) *EventPu
 func (p *EventPublisher) BridgeEpoch() string { return p.bridgeEpoch }
 
 func (p *EventPublisher) EventBuffer() *EventBuffer { return p.buffer }
+
+// ProjectionReducer exposes the reducer instance owned by this publisher so the Projection
+// Kernel can preserve the existing push/pull single-head invariant while it takes over
+// lifecycle and checkpoint ownership.
+func (p *EventPublisher) ProjectionReducer() *ProjectionReducer {
+	if p == nil {
+		return nil
+	}
+	return p.projection
+}
+
+func (p *EventPublisher) SetProjectionKernel(kernel *ProjectionKernel) {
+	p.mu.Lock()
+	p.kernel = kernel
+	p.mu.Unlock()
+}
+
+// PublishProjectionPatch is the explicit Kernel-to-EventPublisher outlet. Hydrate itself never
+// calls this; only post-cut live events committed after the baseline can produce a patch.
+func (p *EventPublisher) PublishProjectionPatch(backendID, sessionID string, patch ProjectionPatch) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.deliverProjectionPatchLocked(backendID, sessionID, patch)
+	p.mu.Unlock()
+}
 
 func (p *EventPublisher) SetOfflineRoute(route func(EventMessage)) {
 	p.mu.Lock()
@@ -227,6 +283,7 @@ func (p *EventPublisher) RegisterConnection(conn Connection) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.registerConnectionLocked(conn)
 	p.sinkLocked(conn)
 }
 
@@ -266,6 +323,23 @@ func (p *EventPublisher) UnregisterConnection(conn Connection) {
 	delete(p.sinks, conn)
 	delete(p.recoveries, conn)
 	delete(p.completed, conn)
+	delete(p.syncV2, conn)
+	delete(p.connectionGenerations, conn)
+	for key := range p.projectionFences {
+		if key.conn == conn {
+			delete(p.projectionFences, key)
+		}
+	}
+	for key := range p.projectionSnapshotCuts {
+		if key.conn == conn {
+			delete(p.projectionSnapshotCuts, key)
+		}
+	}
+	for key := range p.projectionInvalidated {
+		if key.conn == conn {
+			delete(p.projectionInvalidated, key)
+		}
+	}
 	p.mu.Unlock()
 	if sink != nil {
 		sink.close()
@@ -391,6 +465,41 @@ func (p *EventPublisher) sinkLocked(conn Connection) *eventOutboundSink {
 	return sink
 }
 
+func (p *EventPublisher) registerConnectionLocked(conn Connection) uint64 {
+	if generation := p.connectionGenerations[conn]; generation != 0 {
+		return generation
+	}
+	p.nextConnectionGeneration++
+	p.connectionGenerations[conn] = p.nextConnectionGeneration
+	return p.nextConnectionGeneration
+}
+
+func projectionPatchEvent(bridgeEpoch, backendID, sessionID string, patch ProjectionPatch) EventMessage {
+	return EventMessage{
+		Type:          "event",
+		Event:         "projection_patch",
+		BackendID:     backendID,
+		SessionID:     sessionID,
+		PerSessionSeq: patch.SyncRev,
+		BridgeEpoch:   bridgeEpoch,
+		Data:          patch,
+	}
+}
+
+func projectionInvalidateEvent(bridgeEpoch, backendID, sessionID string) EventMessage {
+	return EventMessage{
+		Type:        "event",
+		Event:       "sync_invalidate",
+		BackendID:   backendID,
+		SessionID:   sessionID,
+		BridgeEpoch: bridgeEpoch,
+		Data: map[string]interface{}{
+			"reason":      "gap",
+			"bridgeEpoch": bridgeEpoch,
+		},
+	}
+}
+
 // deliverProjectionPatchLocked delivers a projection_patch frame to the v2 (session_sync_v2)
 // observers of a session. Caller MUST hold p.mu. Targets come from the broadcaster — the same
 // target table raw dispatch uses (design §6.5 — no separate delivery network); only conns marked
@@ -406,15 +515,7 @@ func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID strin
 	if len(targets) == 0 {
 		return
 	}
-	msg := EventMessage{
-		Type:          "event",
-		Event:         "projection_patch",
-		BackendID:     backendID,
-		SessionID:     sessionID,
-		PerSessionSeq: patch.SyncRev,
-		BridgeEpoch:   p.bridgeEpoch,
-		Data:          patch,
-	}
+	msg := projectionPatchEvent(p.bridgeEpoch, backendID, sessionID, patch)
 	classHint := classifyRelayEvent("projection_patch")
 	for _, conn := range targets {
 		if !p.syncV2[conn] {
@@ -431,9 +532,48 @@ func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID strin
 		if sink == nil {
 			continue
 		}
+		key := projectionFenceKey{conn: conn, backendID: backendID, sessionID: sessionID}
+		if fence := p.projectionFences[key]; fence != nil {
+			if patch.SyncRev <= fence.expectedRev || fence.invalidated {
+				continue
+			}
+			if patch.BaseRev != fence.expectedRev {
+				fence.pending = nil
+				fence.pendingBytes = 0
+				fence.invalidated = true
+				continue
+			}
+			encoded, _ := json.Marshal(patch)
+			if len(fence.pending)+1 > projectionFenceMaxPatches ||
+				fence.pendingBytes+len(encoded) > projectionFenceMaxBytes {
+				fence.pending = nil
+				fence.pendingBytes = 0
+				fence.invalidated = true
+				continue
+			}
+			fence.pending = append(fence.pending, patch)
+			fence.pendingBytes += len(encoded)
+			fence.expectedRev = patch.SyncRev
+			continue
+		}
+		if p.projectionInvalidated[key] {
+			continue
+		}
+		if patch.SyncRev <= p.projectionSnapshotCuts[key] {
+			continue
+		}
+		if cut := p.projectionSnapshotCuts[key]; cut != 0 && patch.BaseRev != cut {
+			p.enqueueProjectionInvalidateLocked(conn, backendID, sessionID)
+			p.projectionInvalidated[key] = true
+			continue
+		}
 		// Best-effort enqueue; overflow is recoverable via pull. No live-buffer interest note
 		// (projection frames are reconstructable, not live-bufferable).
-		sink.tryEnqueue(eventOutboundFrame{value: msg, classHint: classHint, classified: true})
+		if sink.tryEnqueue(eventOutboundFrame{value: msg, classHint: classHint, classified: true}) {
+			p.projectionSnapshotCuts[key] = patch.SyncRev
+		} else {
+			p.projectionInvalidated[key] = true
+		}
 	}
 }
 
@@ -466,11 +606,15 @@ func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
 		Timestamp:     time.Now().UTC().UnixMilli(),
 	}
 	// ProjectionReducer mount (design §6.2): reduce the stamped event into the authoritative
-	// SessionProjection under the same p.mu that advanced perSessionSeq, so projection state
-	// advances in seq order with no torn reads by the dispatch loop. Takes r.mu nested under
-	// p.mu; pull (get_session_projection) takes only r.mu. Non-attributable events are no-ops.
-	if p.projection != nil {
+	// SessionProjection under the publisher ordering lock. Projection revision advances only
+	// when the reducer commits a mutation; it is distinct from transport perSessionSeq.
+	projectionApplied := false
+	if p.kernel != nil {
+		projectionApplied = p.kernel.IngestLive(msg)
+	} else if p.projection != nil {
+		before := p.projection.LastAppliedRev(logical.BackendID, logical.SessionID)
 		p.projection.Apply(msg)
+		projectionApplied = p.projection.LastAppliedRev(logical.BackendID, logical.SessionID) != before
 	}
 	p.buffer.Append(msg)
 
@@ -581,7 +725,7 @@ func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
 	// parallel pipe). Offline hydrate applies into the reducer but must NOT fan out mid-scan
 	// patches (design §5.3 cold hydrate). Phase 1 flushes per-event for live correctness;
 	// timed coalesce remains an optional bandwidth optimization (design §2.3 / §10 item 3).
-	if p.projection != nil && logical.BackendID != "" && logical.SessionID != "" {
+	if projectionApplied && p.projection != nil && logical.BackendID != "" && logical.SessionID != "" {
 		if patch, ok := p.projection.FlushPatch(logical.BackendID, logical.SessionID); ok {
 			if !logical.Offline {
 				p.deliverProjectionPatchLocked(logical.BackendID, logical.SessionID, patch)
@@ -821,4 +965,3 @@ func (p *EventPublisher) FlushLiveFrameBufferForDevice(conn Connection) {
 		}
 	}
 }
-

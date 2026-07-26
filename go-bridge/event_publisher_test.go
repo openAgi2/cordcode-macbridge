@@ -496,9 +496,11 @@ func TestBusinessEventConstructionHasNoProductionBypass(t *testing.T) {
 	banned := []string{"EventMessage{", `Type:      "event"`, `Type: "event"`, `"type":    "event"`, ".SendEvent(", "broadcaster.Send("}
 	for _, entry := range entries {
 		name := entry.Name()
-		// event_buffer.go may build a metadata-only tombstone from an already stamped event; it is
-		// storage, not an egress constructor. Only EventPublisher may create a new business envelope.
-		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") || name == "event_publisher.go" || name == "event_buffer.go" {
+		// event_buffer.go may build a metadata-only tombstone from an already stamped event.
+		// projection_kernel.go builds reducer-only hydrate input that never reaches transport.
+		// Neither is an egress constructor; only EventPublisher may create a business envelope.
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") ||
+			name == "event_publisher.go" || name == "event_buffer.go" || name == "projection_kernel.go" {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Clean(name))

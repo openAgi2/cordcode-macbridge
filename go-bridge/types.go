@@ -32,8 +32,11 @@ type WireMessage struct {
 }
 
 type WireError struct {
-	Code    string `json:"code,omitempty"`
-	Message string `json:"message,omitempty"`
+	Code             string `json:"code,omitempty"`
+	Message          string `json:"message,omitempty"`
+	Retryable        *bool  `json:"retryable,omitempty"`
+	RetryAfterMillis *int64 `json:"retryAfterMillis,omitempty"`
+	Attempts         int    `json:"attempts,omitempty"`
 }
 
 func (e *WireError) Error() string {

@@ -13,7 +13,8 @@ type ProjectionPart struct {
 	Type string `json:"type"` // text | reasoning | tool | file
 
 	// text / reasoning
-	Text string `json:"text,omitempty"`
+	Text         string `json:"text,omitempty"`
+	Presentation string `json:"presentation,omitempty"` // text: progress | final
 
 	// tool
 	ItemID     string      `json:"itemId,omitempty"` // rollout call_id (authoritative tool identity)
@@ -54,8 +55,9 @@ type ExecutionView struct {
 	ActiveTurnID string `json:"activeTurnId,omitempty"`
 }
 
-// SessionProjection is the authoritative per-(backendId,sessionId) projection. syncRev ≡
-// EventPublisher.perSessionSeq. Push and pull read the same in-memory instance (design §6.4).
+// SessionProjection is the authoritative per-(backendId,sessionId) projection. SyncRev belongs
+// to the ProjectionReducer/Kernel commit chain; it is intentionally distinct from transport
+// EventPublisher per-session sequence. Push and pull read the same committed Kernel head.
 type SessionProjection struct {
 	SessionID   string           `json:"sessionId"`
 	SyncRev     int              `json:"syncRev"`
@@ -69,7 +71,7 @@ type SessionProjection struct {
 type PartOp struct {
 	TurnID    string           `json:"turnId"`
 	MessageID string           `json:"messageId"`
-	Op        string           `json:"op"` // append_text | set_thinking | upsert_tool | replace_parts
+	Op        string           `json:"op"`              // append_text | set_thinking | upsert_tool | replace_parts
 	Text      string           `json:"text,omitempty"`  // append_text / set_thinking
 	Part      *ProjectionPart  `json:"part,omitempty"`  // upsert_tool
 	Parts     []ProjectionPart `json:"parts,omitempty"` // replace_parts

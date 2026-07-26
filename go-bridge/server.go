@@ -184,22 +184,26 @@ func (c *Conn) CloseWithControl(code int, reason string) error {
 
 // Server manages WebSocket connections.
 type Server struct {
-	authMiddleware     *AuthMiddleware
-	handlers           *Handlers
-	activeConns        *ActiveConnRegistry
-	bridgeID           string
-	displayName        string
-	runtimeVersion     string
-	localURL           string
-	remoteURL          string
-	remoteURLs         []string
-	localCandidateURLs []string
-	detectionCfg       *AgentDetectionConfig
-	bridgeEpoch        string
-	eventPublisher     *EventPublisher
-	recoveryEnabled    bool
+	authMiddleware       *AuthMiddleware
+	handlers             *Handlers
+	activeConns          *ActiveConnRegistry
+	bridgeID             string
+	displayName          string
+	runtimeVersion       string
+	localURL             string
+	remoteURL            string
+	remoteURLs           []string
+	localCandidateURLs   []string
+	detectionCfg         *AgentDetectionConfig
+	bridgeEpoch          string
+	eventPublisher       *EventPublisher
+	recoveryEnabled      bool
 	sessionSyncV2Enabled bool
 }
+
+// K3 enables the Codex-only shadow data plane. The client still owns UI with legacy history;
+// this flag only permits capability negotiation when a shadow client explicitly opts in.
+const sessionSyncV2ProductionEnabled = true
 
 func (s *Server) SetRecoveryEnabled(enabled bool) { s.recoveryEnabled = enabled }
 
@@ -218,6 +222,29 @@ func helloSupportsSessionSyncV2(hello *HelloMessage) bool {
 		}
 	}
 	return false
+}
+
+func appendUniqueCapability(capabilities []string, capability string) []string {
+	for _, existing := range capabilities {
+		if existing == capability {
+			return capabilities
+		}
+	}
+	return append(capabilities, capability)
+}
+
+// advertiseSessionSyncV2Backend scopes ownership capability to migrated backends. The global
+// hello_ack capability only confirms transport negotiation; clients decide timeline ownership
+// from the selected backend descriptor.
+func advertiseSessionSyncV2Backend(backends []AgentProviderDescriptor) {
+	for i := range backends {
+		if backends[i].ID == "codex" || backends[i].Kind == "codex" {
+			backends[i].Capabilities = appendUniqueCapability(
+				backends[i].Capabilities,
+				"session_sync_v2",
+			)
+		}
+	}
 }
 
 // SetAuthMiddleware 设置认证中间件，nil 表示不启用认证。
@@ -505,6 +532,7 @@ func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage
 	}
 	if s.sessionSyncV2Enabled && helloSupportsSessionSyncV2(&hello) && ack.Ok {
 		ack.Capabilities["session_sync_v2"] = true
+		advertiseSessionSyncV2Backend(ack.Backends)
 		s.eventPublisher.SetConnSyncV2(connection, true)
 	}
 	conn.SendJSON(ack)

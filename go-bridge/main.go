@@ -198,7 +198,7 @@ func Main() {
 	handlers.Start(ctx) // T09: 显式启动 observation lease loop（构造函数不再自动起 goroutine）
 	handlers.StartCleanupLoop(60 * time.Second)
 	handlers.StartSessionDiscoveryWatcher(ctx) // 可选：新外部 session → "sessions_changed" push
-	handlers.StartCodexRelayWatcher(ctx) // 安全网：订阅中的 codex session 始终有 relay 在跑
+	handlers.StartCodexRelayWatcher(ctx)       // 安全网：订阅中的 codex session 始终有 relay 在跑
 	var dataDir *DataDir
 	if *dataDirPath != "" {
 		dataDir = NewDataDir(*dataDirPath)
@@ -300,10 +300,9 @@ func Main() {
 
 	server := NewServerWithEpoch(handlers, bridgeEpoch)
 	server.SetRecoveryEnabled(true)
-	// Session Projection Stream (session_sync_v2): enable server-side advertisement. The
-	// capability is only echoed to clients that opt in via hello; Phase 1 reduce consumes the
-	// Codex rollout path. See docs/protocol/bridge-v1.md「Session Projection Stream」.
-	server.SetSessionSyncV2Enabled(true)
+	// K1 builds the complete dark path while production negotiation remains disabled. A later
+	// controlled shadow rollout must deliberately change the versioned gate.
+	server.SetSessionSyncV2Enabled(sessionSyncV2ProductionEnabled)
 	serverDisplayName := "CordCode Link"
 	if mgmtSrv != nil {
 		serverDisplayName = mgmtSrv.DisplayName()
@@ -378,6 +377,7 @@ func Main() {
 		}
 		if server.sessionSyncV2Enabled && helloSupportsSessionSyncV2(&hello) && ack.Ok {
 			ack.Capabilities["session_sync_v2"] = true
+			advertiseSessionSyncV2Backend(ack.Backends)
 			server.eventPublisher.SetConnSyncV2(conn, true)
 		}
 		conn.SendJSON(ack)

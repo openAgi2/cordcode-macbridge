@@ -57,11 +57,47 @@ func TestReducerTurnLifecycleAppendComplete(t *testing.T) {
 	if text != "Hello world" {
 		t.Fatalf("assistant text = %q, want %q", text, "Hello world")
 	}
+	if tu.Assistant.Parts[0].Presentation != "final" {
+		t.Fatalf("terminal text presentation = %q, want final", tu.Assistant.Parts[0].Presentation)
+	}
 	if proj.Execution.Phase != "idle" {
 		t.Fatalf("execution phase = %q, want idle", proj.Execution.Phase)
 	}
 	if proj.Execution.ActiveTurnID != "" {
 		t.Fatalf("activeTurnId = %q, want empty after completion", proj.Execution.ActiveTurnID)
+	}
+}
+
+func TestReducerCanonicalTextPartsAndOrphanToolResult(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "codex", "s1", "text_delta", map[string]interface{}{
+		"itemId": "T1", "delta": "progress", "newPart": true,
+	}))
+	r.Apply(ev(3, "codex", "s1", "tool_finished", map[string]interface{}{
+		"itemId": "orphan", "toolResult": "ignored",
+	}))
+	r.Apply(ev(4, "codex", "s1", "text_delta", map[string]interface{}{
+		"itemId": "T1", "delta": "final", "newPart": true,
+	}))
+	r.Apply(ev(5, "codex", "s1", "turn_completed", map[string]interface{}{"turnId": "T1"}))
+
+	projection, _ := r.Snapshot("codex", "s1")
+	assistant := projection.Turns[0].Assistant
+	if assistant == nil || len(assistant.Parts) != 2 {
+		t.Fatalf("assistant parts = %+v, want exactly two canonical text parts", assistant)
+	}
+	if assistant.Parts[0].Presentation != "progress" ||
+		assistant.Parts[1].Presentation != "final" {
+		t.Fatalf("text presentations = %+v", assistant.Parts)
+	}
+	for _, part := range assistant.Parts {
+		if part.Type == "tool" {
+			t.Fatalf("orphan tool result materialized a tool part: %+v", part)
+		}
+	}
+	if projection.SyncRev != 4 {
+		t.Fatalf("orphan output must not advance projection revision; rev=%d, want 4", projection.SyncRev)
 	}
 }
 
@@ -222,8 +258,8 @@ func TestReducerSnapshotIsIndependent(t *testing.T) {
 	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
 	snap, _ := r.Snapshot("codex", "s1")
 	r.Apply(ev(2, "codex", "s1", "text_delta", map[string]interface{}{"itemId": "T1", "delta": "more"}))
-	if len(snap.Turns[0].Assistant.Parts) != 0 {
-		t.Fatalf("snapshot mutated after later Apply: %+v", snap.Turns[0].Assistant.Parts)
+	if snap.Turns[0].Assistant != nil {
+		t.Fatalf("snapshot mutated after later Apply: %+v", snap.Turns[0].Assistant)
 	}
 }
 

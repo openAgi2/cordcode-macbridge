@@ -413,8 +413,8 @@ authoritative `SessionProjection` per `(backendId, sessionId)`; clients only app
 patches/snapshots and MUST NOT dual-source merge content against `get_session_messages` or raw
 `text_delta`. Design: `docs/2026-07-24-single-source-multidevice-sync-design.md`.
 
-- **Authority** lives on MacBridge. `syncRev` ≡ `EventPublisher.perSessionSeq` for that session
-  (monotonic under the publisher lock). Push and pull read the SAME in-memory projection state.
+- **Authority** lives on MacBridge. `syncRev` is the projection-owned mutation revision; ignored
+  raw events do not advance it. Push and pull read the SAME committed Kernel head.
 - **Single outbound funnel.** Projection frames leave MacBridge only through the existing
   `EventPublisher` per-connection dispatch (they reuse `broadcaster` + observation target
   resolution). There is no parallel projection websocket / SSE pipe.
@@ -426,17 +426,19 @@ patches/snapshots and MUST NOT dual-source merge content against `get_session_me
 
 ### Capability: `session_sync_v2`
 
-A CLIENT capability (same negotiation shape as `recovery_v1`). The client opts in with
-`capabilities: ["session_sync_v2"]` in `hello`; MacBridge echoes `capabilities["session_sync_v2"]
-= true` in `hello_ack` when its server-side flag is enabled and the client opted in. Adding the
-string is non-breaking (extensible `capabilities` array / map); no protocol major-version bump,
-only a `schemaRevision` bump. A backend still needs `external_turn_streaming` (the push
-prerequisite) for MacBridge to feed its projection; in Phase 1 only Codex feeds the reducer.
+A CLIENT transport capability plus a backend-scoped ownership capability. The client opts in with
+`capabilities: ["session_sync_v2"]` in `hello`; when the server-side rollout flag is enabled,
+MacBridge echoes `capabilities["session_sync_v2"] = true` and adds `session_sync_v2` only to each
+migrated backend descriptor's `capabilities`. Clients MUST decide timeline ownership from the
+selected backend descriptor, not the global hello echo. K1 production keeps the server rollout flag
+disabled; tests may enable it explicitly. Phase 1 migrates Codex only. Adding these fields is
+non-breaking and bumps `schemaRevision`, not the protocol major version.
 
 ### Push frames
 
 All three are `event`-envelope frames (same `seq` / `perSessionSeq` / `bridgeEpoch` envelope as
-other events). `perSessionSeq` on the frame == the patch's `syncRev`.
+other events). Envelope sequence numbers belong to transport/recovery; patch `syncRev` belongs to
+the projection and must be compared only with `appliedRev`.
 
 | Event | `data` shape | Client action |
 | --- | --- | --- |
@@ -452,6 +454,11 @@ Completion is authoritative only when the turn's `status ∈ {completed, aborted
 (integrating the existing `turnCompletedAt` evidence); clients MUST NOT settle a v2-observed
 turn on a heuristic alone.
 
+Codex text parts may carry `presentation: "progress" | "final"`, using the same canonical
+classification as rich history. On a settled turn, only the terminal `final` text contributes to
+the message's final body; progress parts remain ordered timeline evidence. Older snapshots may
+omit the additive field.
+
 Projection frames are reconstructable via `get_session_projection`, so they are NOT durable
 mailbox milestones and are NOT live-buffered; reconnect/recovery aligns via a `get_session_projection`
 pull, not via mailbox replay of patches (design §8.4 option A).
@@ -463,25 +470,25 @@ MUST read the ProjectionReducer in-memory state (cold-start may hydrate once fro
 reducer, then serve); it MUST NOT be a thin wrapper that returns `get_session_messages` bodies for
 the client to merge.
 
-**Cold-pull budget = 15 seconds (owner 2026-07-25 拍板 X=15s; design §10.5.7 修法 2).** A
-`sinceRev=0` cold pull MUST receive a **non-empty partial** projection (containing at least one
-content turn) within 15 seconds, OR an explicit RPC error `projection.hydrate_timeout` — NEVER an
-empty head-0 shell (`syncRev=0, turns=[]`) as success. Serving an empty head while the hydrator is
-still running is a **contract violation**: it forces clients to fall back to `get_session_messages`
-(defeating the single-source goal) and, for large sessions, causes concurrent full-history fetches
-that reset the connection.
+Cold start is a single-flight transaction. MacBridge restores a validated checkpoint or reduces
+`[checkpointCursor,startCut)` in an isolated reducer, queues post-cut live input, then atomically
+commits baseline plus pending live events. Hydrate does not publish ordinary events, consume
+transport sequence numbers, enter recovery/offline/mailbox buffers, or expose partial projections.
+A completed source inspection may commit an honest `ready(empty)`; a bare running shell alone
+MUST remain hydrating.
 
-The Mac hydrates the transcript in **turn-bounded segments** (design §10.5.6 scheme A + §10.5.7
-修法 1 full-backend): the first segment that yields a content turn is served as the partial
-WITHOUT waiting for the full scan, and the remaining segments stream to the client asynchronously
-as `projection_patch` deltas. The served partial is a **real subset** of the authoritative
-projection, NOT the final state — clients render the partial immediately and incrementally append
-later patches (partial-first UX). Client cold-pull cap MUST be ≥ 15 seconds (iOS
-`ProjectionStore.pullHardCapNanoseconds = 15s`); a late-apply path remains as a worst-case backstop
-but is not the primary contract. If even one content turn cannot be produced within 15 seconds the
-RPC returns `projection.hydrate_timeout` (honest failure, not an empty shell). A backend not yet
-migrated to projection returns `projection.not_migrated`. This replaces the prior "hydrate must
-fully complete before answering" / "clients carry an 8s cap" model.
+RPC lifecycle is explicit:
+
+| State | Wire result | Meaning |
+| --- | --- | --- |
+| `hydrating` | error `projection.hydrating`, `retryable=true`, optional `retryAfterMillis` | healthy single-flight continues; client stays loading |
+| `ready` | success `{projection}` or `{patches,headRev}` | complete committed head; only this may map into the active timeline |
+| `failed` | error `projection.hydrate_failed`, `retryable`, optional `retryAfterMillis`/`attempts` | hydrate terminated; retry policy is explicit |
+| not migrated | error `projection.not_migrated`, `retryable=false` | selected backend has no v2 authority |
+
+The RPC response budget is 15 seconds. Budget expiry while the transaction remains healthy returns
+`projection.hydrating`; it never returns head-0 or a partial success. The client may keep its
+independent hard cap and allow a late complete response to apply, but MUST NOT fall back to history.
 
 Request params (additive):
 
