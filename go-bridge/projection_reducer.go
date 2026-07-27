@@ -118,6 +118,11 @@ func (ps *projectionSession) upsertTurn(turn TurnProjection) {
 
 // markRunning sets session execution to running for turnID (design §7.4). Content
 // events must re-arm after a prior turn_completed left phase=idle.
+//
+// Codex rollouts can emit a new task_started without task_complete for the previous
+// turn (owner residual 2026-07-27: idle sessions still had older turns status=running,
+// so iOS turnStillLive kept composer 执行中). A session has at most one live turn: when
+// arming turnID, settle any other non-settled turns as completed.
 func (ps *projectionSession) markRunning(turnID string) {
 	if turnID == "" {
 		return
@@ -130,6 +135,30 @@ func (ps *projectionSession) markRunning(turnID string) {
 		t.Status = "running"
 		if ps.upsertTurns != nil {
 			ps.upsertTurns[turnID] = *t
+		}
+	}
+	ps.settleOtherOpenTurns(turnID, ps.projection.UpdatedAt)
+}
+
+// settleOtherOpenTurns marks every non-settled turn except activeTurnID as completed.
+// Used when a newer turn becomes live or the session returns to idle, so historical
+// supersession cannot leave zombie running turns in the projection SoT.
+func (ps *projectionSession) settleOtherOpenTurns(activeTurnID string, completedAt int64) {
+	for i := range ps.projection.Turns {
+		t := &ps.projection.Turns[i]
+		if t.TurnID == "" || t.TurnID == activeTurnID {
+			continue
+		}
+		if t.Status == "completed" || t.Status == "aborted" || t.Status == "error" {
+			continue
+		}
+		t.Status = "completed"
+		if completedAt != 0 {
+			t.CompletedAt = completedAt
+		}
+		classifyProjectionTextPresentation(t.Assistant, true)
+		if ps.upsertTurns != nil {
+			ps.upsertTurns[t.TurnID] = *t
 		}
 	}
 }
@@ -408,6 +437,9 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			classifyProjectionTextPresentation(turn.Assistant, true)
 			ps.upsertTurns[turnID] = *turn
 		}
+		// Completing the active turn also settles any older zombie running/pending turns
+		// left by missing task_complete boundaries in Codex rollouts.
+		ps.settleOtherOpenTurns(turnID, ps.projection.UpdatedAt)
 		exec := ExecutionView{Phase: "idle"}
 		ps.projection.Execution = exec
 		ps.execution = &exec
@@ -454,6 +486,9 @@ func (r *ProjectionReducer) Restore(backendID, sessionID string, projection Sess
 	}
 	projection = cloneSessionProjection(projection)
 	projection.SessionID = sessionID
+	// Heal pre-settle / missing-task_complete checkpoints: composer SoT is execution.phase,
+	// but zombie running turns still pollute observers and future checkpoint writes.
+	healProjectionTurnConsistency(&projection)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.sessions[projectionSessionKey(backendID, sessionID)] = &projectionSession{
@@ -464,6 +499,36 @@ func (r *ProjectionReducer) Restore(backendID, sessionID string, projection Sess
 		thinking:       make(map[string]string),
 		tools:          make(map[string]ProjectionPart),
 		upsertTurns:    make(map[string]TurnProjection),
+	}
+}
+
+// healProjectionTurnConsistency enforces "at most one live turn" on restored snapshots.
+// Idle sessions settle every non-settled turn; executing sessions settle every turn except ActiveTurnID.
+func healProjectionTurnConsistency(projection *SessionProjection) {
+	if projection == nil {
+		return
+	}
+	activeTurnID := ""
+	switch projection.Execution.Phase {
+	case "running", "requires_action":
+		activeTurnID = projection.Execution.ActiveTurnID
+	default:
+		// idle / unknown: no live turn
+		activeTurnID = ""
+	}
+	for i := range projection.Turns {
+		t := &projection.Turns[i]
+		if t.TurnID == "" || t.TurnID == activeTurnID {
+			continue
+		}
+		if t.Status == "completed" || t.Status == "aborted" || t.Status == "error" {
+			continue
+		}
+		t.Status = "completed"
+		if projection.UpdatedAt != 0 && t.CompletedAt == 0 {
+			t.CompletedAt = projection.UpdatedAt
+		}
+		classifyProjectionTextPresentation(t.Assistant, true)
 	}
 }
 

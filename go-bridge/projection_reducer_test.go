@@ -352,3 +352,65 @@ func TestReducerTurnCompletedFallsBackToActiveTurnID(t *testing.T) {
 		t.Fatalf("activeTurnId = %q, want empty", proj.Execution.ActiveTurnID)
 	}
 }
+
+// TestReducerNewTurnSettlesSupersededRunningTurn: Codex may start turn B without completing
+// turn A. Projection SoT must not keep A status=running, or observers OR turnStillLive forever.
+func TestReducerNewTurnSettlesSupersededRunningTurn(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "A"}))
+	r.Apply(ev(2, "codex", "s1", "text_delta", map[string]interface{}{"itemId": "A", "delta": "partial"}))
+	r.Apply(ev(3, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "B"}))
+	r.Apply(ev(4, "codex", "s1", "text_delta", map[string]interface{}{"itemId": "B", "delta": "next"}))
+	r.Apply(ev(5, "codex", "s1", "turn_completed", map[string]interface{}{"turnId": "B"}))
+
+	proj, ok := r.Snapshot("codex", "s1")
+	if !ok {
+		t.Fatal("missing projection")
+	}
+	if proj.Execution.Phase != "idle" {
+		t.Fatalf("phase = %q, want idle", proj.Execution.Phase)
+	}
+	byID := map[string]TurnProjection{}
+	for _, turn := range proj.Turns {
+		byID[turn.TurnID] = turn
+	}
+	if byID["A"].Status != "completed" {
+		t.Fatalf("superseded turn A status = %q, want completed", byID["A"].Status)
+	}
+	if byID["B"].Status != "completed" {
+		t.Fatalf("turn B status = %q, want completed", byID["B"].Status)
+	}
+	for _, turn := range proj.Turns {
+		if turn.Status == "running" || turn.Status == "pending" {
+			t.Fatalf("zombie non-settled turn after complete: %+v", turn)
+		}
+	}
+}
+
+
+// TestReducerRestoreHealsZombieRunningTurnsWhenIdle: stale checkpoints may restore phase=idle
+// with older turns still status=running. Heal on Restore so rehydrate does not re-poison SoT.
+func TestReducerRestoreHealsZombieRunningTurnsWhenIdle(t *testing.T) {
+	r := newTestReducer()
+	r.Restore("codex", "s1", SessionProjection{
+		SessionID: "s1",
+		SyncRev:   12,
+		Execution: ExecutionView{Phase: "idle"},
+		Turns: []TurnProjection{
+			{TurnID: "A", Status: "running"},
+			{TurnID: "B", Status: "completed"},
+		},
+	})
+	proj, ok := r.Snapshot("codex", "s1")
+	if !ok {
+		t.Fatal("missing projection")
+	}
+	if proj.Execution.Phase != "idle" {
+		t.Fatalf("phase = %q, want idle", proj.Execution.Phase)
+	}
+	for _, turn := range proj.Turns {
+		if turn.Status == "running" || turn.Status == "pending" {
+			t.Fatalf("zombie non-settled turn after idle restore: %+v", turn)
+		}
+	}
+}
