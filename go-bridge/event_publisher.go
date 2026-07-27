@@ -811,9 +811,20 @@ func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
 	// Session Projection Stream (session_sync_v2): flush + deliver a projection_patch to the
 	// session's v2 observers. The reducer state was already advanced by Apply above; this is the
 	// single outbound projection path, reusing broadcaster targets + sinks (design §6.2 — no
-	// parallel pipe). Offline hydrate applies into the reducer but must NOT fan out mid-scan
-	// patches (design §5.3 cold hydrate). Phase 1 flushes per-event for live correctness;
-	// timed coalesce remains an optional bandwidth optimization (design §2.3 / §10 item 3).
+	// parallel pipe).
+	//
+	// Offline flag semantics:
+	// - LogicalEvent.Offline=true means "also route this raw event to durable offline/mailbox".
+	//   Live durable milestones (turn_completed etc.) intentionally set Offline=true via
+	//   IsDurableMilestone so offline devices can catch up later.
+	// - That flag must NOT suppress live projection_patch fanout for online v2 observers.
+	//   Otherwise end-of-turn execution.phase=idle never reaches iOS (K4 G4 evidence:
+	//   turn_completed flush offline=true with no [K4Patch] delivered).
+	// - True cold-hydrate mid-scan still must not fan out: hydrate goes through
+	//   ProjectionKernel.ApplyHydrateEvent / CommitHydrateTransaction and never calls
+	//   PublishLogical, so this live path is not that gate (design §5.3 / D2).
+	// Phase 1 flushes per-event for live correctness; timed coalesce remains an optional
+	// bandwidth optimization (design §2.3 / §10 item 3).
 	if projectionApplied && p.projection != nil && logical.BackendID != "" && logical.SessionID != "" {
 		patch, flushOk := p.projection.FlushPatch(logical.BackendID, logical.SessionID)
 		if flushOk {
@@ -825,9 +836,9 @@ func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
 				"offline", logical.Offline,
 				"kernelMode", p.kernel != nil,
 			)
-			if !logical.Offline {
-				p.deliverProjectionPatchLocked(logical.BackendID, logical.SessionID, patch)
-			}
+			// Always deliver live projection patches from PublishLogical. Offline only
+			// controls raw durable mailbox routing below, not the projection SoT stream.
+			p.deliverProjectionPatchLocked(logical.BackendID, logical.SessionID, patch)
 		} else {
 			slog.Info("go-bridge: [K4Patch] flush_empty_after_apply",
 				"sessionPrefix", projectionSessionLogPrefix(logical.SessionID),

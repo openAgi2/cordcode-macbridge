@@ -139,3 +139,49 @@ func TestSetConnSyncV2TogglesMarking(t *testing.T) {
 		t.Fatalf("downgraded conn received %d projection_patch frames (must be 0)", got)
 	}
 }
+
+// TestDurableOfflineTurnCompletedDeliversIdleProjectionPatch proves the K4 G4 contract:
+// live turn_completed is stamped Offline=true (IsDurableMilestone / mailbox path), but the
+// projection SoT stream must still fan out execution.phase=idle to online v2 observers.
+// Offline only means "also durable-route raw event", not "skip live projection_patch".
+func TestDurableOfflineTurnCompletedDeliversIdleProjectionPatch(t *testing.T) {
+	broadcaster := NewBroadcaster()
+	ep := NewEventPublisher("epoch-idle-contract", broadcaster)
+	v2 := newPublisherCaptureConn(nil)
+	v2.device = &TrustedDeviceRecord{DeviceID: "dev-v2-idle"}
+	broadcaster.Subscribe(v2, SubscriptionKey{BackendID: "codex", SessionID: "s-idle"})
+	ep.SetConnSyncV2(v2, true)
+
+	ep.PublishLogical(LogicalEvent{
+		BackendID: "codex",
+		SessionID: "s-idle",
+		Event:     "turn_started",
+		Data:      map[string]interface{}{"turnId": "T-idle"},
+		Broadcast: true,
+	})
+	ep.PublishLogical(LogicalEvent{
+		BackendID: "codex",
+		SessionID: "s-idle",
+		Event:     "text_delta",
+		Data:      map[string]interface{}{"itemId": "T-idle", "delta": "ok"},
+		Broadcast: true,
+	})
+	// Mirror production sendSessionEvent: durable milestone Offline=true.
+	ep.PublishLogical(LogicalEvent{
+		BackendID: "codex",
+		SessionID: "s-idle",
+		Event:     "turn_completed",
+		Data:      map[string]interface{}{"turnId": "T-idle", "done": true},
+		Broadcast: true,
+		Offline:   true,
+	})
+
+	patches := waitForProjectionPatches(t, v2, 3)
+	last := patches[len(patches)-1].Data.(ProjectionPatch)
+	if last.Execution == nil || last.Execution.Phase != "idle" {
+		t.Fatalf("final patch execution = %+v, want phase idle under Offline durable stamp", last.Execution)
+	}
+	if last.SyncRev < 3 {
+		t.Fatalf("final syncRev = %d, want >= 3", last.SyncRev)
+	}
+}
