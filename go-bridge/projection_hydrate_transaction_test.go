@@ -359,3 +359,93 @@ func normalizeProjectionRuntimeFields(projection *SessionProjection) {
 		projection.Turns[i].CompletedAt = 0
 	}
 }
+
+
+// Ready projection must catch up when the transcript source cut advances past
+// the committed cursor (live relay gap / process-not-live miss).
+func TestProjectionCatchUpWhenSourceAdvancesPastReady(t *testing.T) {
+	kernel := NewProjectionKernel(NewProjectionReducer(), nil)
+	const backendID = "claude"
+	const sessionID = "catch-up-session"
+
+	// First hydrate: empty source cut at 0 commits ready empty baseline.
+	admission, err := kernel.BeginHydrateTransaction(
+		backendID, sessionID,
+		ProjectionSourceDescriptor{Identity: sessionID, Path: "/tmp/unused", Cursor: 10},
+		false, false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !admission.Leader {
+		t.Fatal("want leader for first hydrate")
+	}
+	kernel.ApplyHydrateEvent(backendID, sessionID, "epoch", "user_message", map[string]interface{}{
+		"itemId": "u1", "turnId": "u1", "text": "old",
+	})
+	kernel.ApplyHydrateEvent(backendID, sessionID, "epoch", "text_delta", map[string]interface{}{
+		"itemId": "u1", "delta": "old reply",
+	})
+	kernel.ApplyHydrateEvent(backendID, sessionID, "epoch", "turn_completed", map[string]interface{}{
+		"turnId": "u1", "done": true, "reason": "end_turn",
+	})
+	if _, err := kernel.CommitHydrateTransaction(backendID, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	if st := kernel.Status(backendID, sessionID); st.Phase != ProjectionHydrateReady {
+		t.Fatalf("phase = %s, want ready", st.Phase)
+	}
+
+	// Same cut → AlreadyReady.
+	again, err := kernel.BeginHydrateTransaction(
+		backendID, sessionID,
+		ProjectionSourceDescriptor{Identity: sessionID, Path: "/tmp/unused", Cursor: 10},
+		false, false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !again.AlreadyReady {
+		t.Fatalf("same cut must be AlreadyReady, got %+v", again)
+	}
+
+	// Source advanced → catch-up leader, not AlreadyReady.
+	catchUp, err := kernel.BeginHydrateTransaction(
+		backendID, sessionID,
+		ProjectionSourceDescriptor{Identity: sessionID, Path: "/tmp/unused", Cursor: 50},
+		false, false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if catchUp.AlreadyReady || !catchUp.Leader {
+		t.Fatalf("advanced source must force catch-up leader, got %+v", catchUp)
+	}
+	if catchUp.StartCursor != 10 || catchUp.StartCut != 50 {
+		t.Fatalf("catch-up range = [%d,%d), want [10,50)", catchUp.StartCursor, catchUp.StartCut)
+	}
+	// Base must still contain the old turn.
+	base, ok := kernel.HydrateSnapshot(backendID, sessionID)
+	if !ok || len(base.Turns) != 1 || base.Turns[0].TurnID != "u1" {
+		t.Fatalf("catch-up base turns = %+v", base.Turns)
+	}
+	kernel.ApplyHydrateEvent(backendID, sessionID, "epoch", "user_message", map[string]interface{}{
+		"itemId": "u2", "turnId": "u2", "text": "message 3",
+	})
+	kernel.ApplyHydrateEvent(backendID, sessionID, "epoch", "text_delta", map[string]interface{}{
+		"itemId": "u2", "delta": "reply 3",
+	})
+	kernel.ApplyHydrateEvent(backendID, sessionID, "epoch", "turn_completed", map[string]interface{}{
+		"turnId": "u2", "done": true, "reason": "end_turn",
+	})
+	commit, err := kernel.CommitHydrateTransaction(backendID, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commit.Projection.Turns) != 2 {
+		t.Fatalf("after catch-up turns = %d, want 2", len(commit.Projection.Turns))
+	}
+	if commit.Projection.Turns[1].TurnID != "u2" {
+		t.Fatalf("second turn = %+v", commit.Projection.Turns[1])
+	}
+}

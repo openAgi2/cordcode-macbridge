@@ -338,17 +338,18 @@ func DefaultProjectionCheckpointPolicy() ProjectionCheckpointPolicy {
 }
 
 type projectionKernelSession struct {
-	status           ProjectionHydrationStatus
-	failureAttempts  int
-	hydrate          *projectionHydrateTransaction
-	hydrateDone      chan struct{}
-	lastPersistedRev int
-	pending          *ProjectionCheckpoint
-	writeInFlight    bool
-	timer            *time.Timer
-	forceWrite       bool
-	waiters          []chan struct{}
-	lastWriteErr     error
+	status                ProjectionHydrationStatus
+	failureAttempts       int
+	hydrate               *projectionHydrateTransaction
+	hydrateDone           chan struct{}
+	lastPersistedRev      int
+	committedSourceCursor int64 // last transcript cut committed into SoT; catch-up when source advances
+	pending               *ProjectionCheckpoint
+	writeInFlight         bool
+	timer                 *time.Timer
+	forceWrite            bool
+	waiters               []chan struct{}
+	lastWriteErr          error
 }
 
 type projectionHydrateTransaction struct {
@@ -521,6 +522,12 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 	session := k.sessionLocked(backendID, sessionID)
 	switch session.status.Phase {
 	case ProjectionHydrateReady:
+		// Source advanced past the committed cut (live relay gap / process-not-live miss).
+		// Force a catch-up hydrate of [committedSourceCursor, source.Cursor) instead of
+		// returning a stale AlreadyReady baseline.
+		if source.Path != "" && source.Cursor > session.committedSourceCursor {
+			break
+		}
 		k.mu.Unlock()
 		return ProjectionHydrateAdmission{AlreadyReady: true}, nil
 	case ProjectionHydrateHydrating:
@@ -544,6 +551,8 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 			}
 		}
 	}
+	catchUpFrom := session.committedSourceCursor
+	wasReadyCatchUp := session.status.Phase == ProjectionHydrateReady && source.Path != "" && source.Cursor > catchUpFrom
 	tx := &projectionHydrateTransaction{
 		source:      source,
 		startCut:    source.Cursor,
@@ -551,6 +560,13 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 		liveArrived: make(chan struct{}, 1),
 	}
 	if source.Path == "" {
+		if existing, ok := k.reducer.Snapshot(backendID, sessionID); ok {
+			tx.reducer.Restore(backendID, sessionID, existing)
+		}
+	}
+	// In-memory catch-up: keep the already-committed projection as base and only
+	// reduce the transcript gap after committedSourceCursor.
+	if wasReadyCatchUp {
 		if existing, ok := k.reducer.Snapshot(backendID, sessionID); ok {
 			tx.reducer.Restore(backendID, sessionID, existing)
 		}
@@ -564,7 +580,10 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 
 	checkpointHit := false
 	startCursor := int64(0)
-	if store != nil {
+	if wasReadyCatchUp {
+		startCursor = catchUpFrom
+		checkpointHit = true // base already in memory; only gap remains
+	} else if store != nil {
 		checkpoint, err := store.LoadValidated(backendID, sessionID, source)
 		switch {
 		case err == nil:
@@ -715,6 +734,7 @@ func (k *ProjectionKernel) CommitHydrateTransaction(
 		patch = &pendingPatch
 	}
 	session.status = ProjectionHydrationStatus{Phase: ProjectionHydrateReady}
+	session.committedSourceCursor = tx.startCut
 	session.hydrate = nil
 	k.finishHydrateLocked(session)
 	session.failureAttempts = 0
@@ -766,6 +786,7 @@ func (k *ProjectionKernel) RestoreCheckpoint(
 	session.status = ProjectionHydrationStatus{Phase: ProjectionHydrateReady}
 	session.failureAttempts = 0
 	session.lastPersistedRev = checkpoint.ProjectionRev
+	session.committedSourceCursor = checkpoint.Source.Cursor
 	session.lastWriteErr = nil
 	k.mu.Unlock()
 	checkpoint.Projection = cloneSessionProjection(checkpoint.Projection)

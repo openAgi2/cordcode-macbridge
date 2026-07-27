@@ -472,14 +472,18 @@ func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection,
 		slog.Warn("go-bridge: claudeSessionFileRelay live process lookup failed", "sessionID", sessionID, "backendID", backendID, "error", err)
 	}
 	live := err == nil && proc.Live
-	cachedPID := proc.PID
-	if !live {
+	cachedPID := 0
+	if live {
+		cachedPID = proc.PID
+	} else {
+		// Process not live yet (or not discoverable): still watch the transcript.
+		// Do not cache a non-live PID — IsProcessAlive would immediately treat it as
+		// "process death" and exit. Late-bind when a real live PID appears.
 		h.broadcastIdleState(sessionID, backendID)
-		slog.Info("go-bridge: claudeSessionFileRelay initial process not live, broadcasting idle and exiting", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
-		return
+		slog.Info("go-bridge: claudeSessionFileRelay initial process not live; watching transcript for growth", "sessionID", sessionID, "backendID", backendID, "pid", proc.PID)
 	}
 
-	// Session 仍在运行中，开始轮询监视新内容。
+	// 开始轮询监视新内容（process live 与否都继续；live 只影响 death/TTL 路径）。
 	ticker := time.NewTicker(claudeFileRelayPollInterval)
 	defer ticker.Stop()
 	lastMeaningfulGrowth := time.Now()
@@ -490,34 +494,50 @@ func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection,
 	// attribute subsequent assistant growth without empty turnId frames.
 	currentTurnID := lastClaudeUserIdentityFromPath(sessPath)
 
-	switch {
-	case !initialEntry.hasMeaningfulEntry || initialEntry.finalAssistant:
+	if !live {
+		// No discoverable process: stay idle and watch for future transcript growth.
+		// Do not arm running from historical tail (process may have died mid-turn).
 		h.broadcastIdleState(sessionID, backendID)
-		slog.Info("go-bridge: claudeSessionFileRelay initial idle but process live; watching", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
-	case initialEntry.entryType == "user" && initialEntry.interrupt:
-		h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"turnId": currentTurnID, "done": true, "reason": "user_interrupt"})
-		h.broadcastIdleState(sessionID, backendID)
-		slog.Info("go-bridge: claudeSessionFileRelay initial interrupt marker with live process; watching", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
-	case initialEntry.entryType == "user":
-		h.sessions.markRunning(sessionID)
-		if currentTurnID != "" {
-			h.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": currentTurnID})
-		} else {
-			// No stable identity yet — still arm running so legacy consumers see activity,
-			// but do not emit empty-turnId turn_started (reducer would skip it).
+	} else {
+		switch {
+		case !initialEntry.hasMeaningfulEntry || initialEntry.finalAssistant:
+			h.broadcastIdleState(sessionID, backendID)
+			slog.Info("go-bridge: claudeSessionFileRelay initial idle but process live; watching", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
+		case initialEntry.entryType == "user" && initialEntry.interrupt:
+			h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"turnId": currentTurnID, "done": true, "reason": "user_interrupt"})
+			h.broadcastIdleState(sessionID, backendID)
+			slog.Info("go-bridge: claudeSessionFileRelay initial interrupt marker with live process; watching", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
+		case initialEntry.entryType == "user":
+			h.sessions.markRunning(sessionID)
+			if currentTurnID != "" {
+				h.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": currentTurnID})
+			} else {
+				// No stable identity yet — still arm running so legacy consumers see activity,
+				// but do not emit empty-turnId turn_started (reducer would skip it).
+				h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "running"})
+			}
+			runningObserved = true
+		case initialEntry.entryType == "assistant":
+			h.sessions.markRunning(sessionID)
 			h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "running"})
+			runningObserved = true
 		}
-		runningObserved = true
-	case initialEntry.entryType == "assistant":
-		h.sessions.markRunning(sessionID)
-		h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "running"})
-		runningObserved = true
 	}
 
 	for range ticker.C {
 		if !h.relayKindIs(sessionID, relayKindClaudeFile) {
 			slog.Info("go-bridge: claudeSessionFileRelay superseded by agent relay", "sessionID", sessionID)
 			return
+		}
+		if cachedPID == 0 {
+			// Late bind: process may appear after open (owner opens idle B, then Mac starts turn).
+			if proc2, lister2, err2 := h.sessionLiveProcess(context.Background(), sessionID, backendID); err2 == nil && proc2.Live && proc2.PID > 0 {
+				cachedPID = proc2.PID
+				if lister2 != nil {
+					liveLister = lister2
+				}
+				slog.Info("go-bridge: claudeSessionFileRelay bound live process", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
+			}
 		}
 		if liveLister != nil && cachedPID > 0 {
 			if !liveLister.IsProcessAlive(context.Background(), cachedPID) {

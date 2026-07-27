@@ -129,6 +129,7 @@ func TestClaudeFileRelayDeadPIDWithPartialUserExitsIdle(t *testing.T) {
 	if data["state"] != "idle" {
 		t.Fatalf("state = %#v, want idle", data["state"])
 	}
+	// Process not live still watches; live-idle TTL eventually exits with no growth.
 	waitClaudeFileRelayStopped(t, handlers, sessionID)
 }
 
@@ -339,4 +340,73 @@ func TestClaudeFileRelayProcessDeathMidTurnBroadcastsIdleAndExits(t *testing.T) 
 		t.Fatalf("state after process death = %#v, want idle", idleData["state"])
 	}
 	waitClaudeFileRelayStopped(t, handlers, sessionID)
+}
+
+// Process not live at open must still watch transcript growth (owner A2 multi-session):
+// open idle B → Mac later sends message 3 → relay must emit identity-bearing frames.
+func TestClaudeFileRelayProcessNotLiveStillWatchesGrowth(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	const sessionID = "not-live-then-growth"
+	path := writeClaudeFileRelayTranscript(t, home, sessionID,
+		`{"type":"assistant","uuid":"prev","message":{"id":"msg_prev","role":"assistant","content":[{"type":"text","text":"old"}],"stop_reason":"end_turn"}}`,
+	)
+	handlers, agent, client := startClaudeFileRelayFixture(t, sessionID, false)
+	_ = client.readEvents(t, 1) // idle
+	if !handlers.relayKindIs(sessionID, relayKindClaudeFile) {
+		t.Fatal("relay exited immediately when process not live; must keep watching")
+	}
+	// Later the process becomes live and a new user turn is appended.
+	agent.liveProcesses[sessionID] = core.LiveSessionProcess{SessionID: sessionID, PID: 4242, Live: true}
+	agent.processMu.Lock()
+	agent.alivePIDs[4242] = true
+	agent.processMu.Unlock()
+	appendClaudeFileRelayTranscript(t, path,
+		`{"type":"user","uuid":"growth-user","message":{"role":"user","content":"message 3"}}`,
+	)
+	// Drain until we see the identity-bearing user path (may include a late-bind idle/running frame).
+	var sawTurnStarted, sawUser bool
+	var userData map[string]any
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && !(sawTurnStarted && sawUser) {
+		batch := client.readEvents(t, 1)
+		switch batch[0]["event"] {
+		case "turn_started":
+			sawTurnStarted = true
+			d, _ := batch[0]["data"].(map[string]any)
+			if d["turnId"] != "growth-user" {
+				t.Fatalf("turn_started turnId = %#v", d["turnId"])
+			}
+		case "user_message":
+			sawUser = true
+			userData, _ = batch[0]["data"].(map[string]any)
+		}
+	}
+	if !sawTurnStarted || !sawUser {
+		t.Fatalf("did not see turn_started+user_message from process-not-live growth (started=%v user=%v)", sawTurnStarted, sawUser)
+	}
+	if userData["turnId"] != "growth-user" || userData["text"] != "message 3" {
+		t.Fatalf("user_message = %#v", userData)
+	}
+	appendClaudeFileRelayTranscript(t, path,
+		`{"type":"assistant","uuid":"growth-asst","message":{"id":"msg_g","role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn"}}`,
+	)
+	var sawText, sawCompleted bool
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && !(sawText && sawCompleted) {
+		batch := client.readEvents(t, 1)
+		switch batch[0]["event"] {
+		case "text_delta":
+			sawText = true
+			d, _ := batch[0]["data"].(map[string]any)
+			if d["itemId"] != "growth-user" || d["delta"] != "ok" {
+				t.Fatalf("text_delta = %#v", d)
+			}
+		case "turn_completed":
+			sawCompleted = true
+		}
+	}
+	if !sawText || !sawCompleted {
+		t.Fatalf("completion missing text=%v completed=%v", sawText, sawCompleted)
+	}
 }
