@@ -486,17 +486,27 @@ func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection,
 	runningObserved := false
 	processDeathMisses := 0
 
+	// Seed turn identity from last user on disk so warm-start / mid-turn open can
+	// attribute subsequent assistant growth without empty turnId frames.
+	currentTurnID := lastClaudeUserIdentityFromPath(sessPath)
+
 	switch {
 	case !initialEntry.hasMeaningfulEntry || initialEntry.finalAssistant:
 		h.broadcastIdleState(sessionID, backendID)
 		slog.Info("go-bridge: claudeSessionFileRelay initial idle but process live; watching", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
 	case initialEntry.entryType == "user" && initialEntry.interrupt:
-		h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"done": true, "reason": "user_interrupt"})
+		h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"turnId": currentTurnID, "done": true, "reason": "user_interrupt"})
 		h.broadcastIdleState(sessionID, backendID)
 		slog.Info("go-bridge: claudeSessionFileRelay initial interrupt marker with live process; watching", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
 	case initialEntry.entryType == "user":
 		h.sessions.markRunning(sessionID)
-		h.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": ""})
+		if currentTurnID != "" {
+			h.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": currentTurnID})
+		} else {
+			// No stable identity yet — still arm running so legacy consumers see activity,
+			// but do not emit empty-turnId turn_started (reducer would skip it).
+			h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "running"})
+		}
 		runningObserved = true
 	case initialEntry.entryType == "assistant":
 		h.sessions.markRunning(sessionID)
@@ -571,30 +581,37 @@ func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection,
 		offset = newSize
 		lastMeaningfulGrowth = time.Now()
 
-		// Phase 1：遍历新增区间内所有 meaningful 记录（不再只取最后一条）。
-		// user→turn_started（interrupt→turn_completed）；assistant 按 content block 发
-		// text_delta(text)/reasoning_delta(thinking)/tool_started(tool_use)，最终 end_turn→turn_completed。
+		// Live growth reuses the same hydrate mapper so projection reducer receives
+		// identity-bearing user_message / text_delta / turn_completed frames (not bare
+		// turn_started turnId:"" or itemId-less deltas that reducer skips).
 		for _, e := range entries {
-			switch e.Type {
-			case "user":
-				if isClaudeUserInterruptRelayEntry(e) {
-					h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"done": true, "reason": "user_interrupt"})
-					h.broadcastIdleState(sessionID, backendID)
-					runningObserved = false
-				} else {
+			// Interrupt markers usually emit no projection events from the mapper; keep
+			// legacy interrupt → completed/idle behaviour for live consumers.
+			if e.Type == "user" && isClaudeUserInterruptRelayEntry(e) {
+				h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"turnId": currentTurnID, "done": true, "reason": "user_interrupt"})
+				h.broadcastIdleState(sessionID, backendID)
+				runningObserved = false
+				continue
+			}
+			evs := claudeEntryToProjectionEvents(e, &currentTurnID)
+			for _, ev := range evs {
+				switch ev.Event {
+				case "user_message":
 					h.sessions.markRunning(sessionID)
-					h.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": ""})
+					// Arm lifecycle with stable turnId before content, matching codex relay.
+					if turnID, _ := ev.Data["turnId"].(string); turnID != "" {
+						h.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": turnID})
+					}
+					h.sendSessionEvent(sessionID, backendID, "user_message", ev.Data)
+					h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "running"})
 					runningObserved = true
-				}
-			case "assistant":
-				h.emitClaudeAssistantContent(sessionID, backendID, e)
-				if isFinalClaudeStopReason(e.Message.StopReason) {
-					// 任务完成 → turn_completed(idle)。进程仍 live 时继续监视（同 PID 多轮外部 turn）。
-					h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"done": true, "reason": "end_turn"})
+				case "turn_completed":
+					h.sendSessionEvent(sessionID, backendID, "turn_completed", ev.Data)
 					h.broadcastIdleState(sessionID, backendID)
 					runningObserved = false
-					slog.Info("go-bridge: claudeSessionFileRelay turn completed, keeping watch while process live", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
-				} else {
+					slog.Info("go-bridge: claudeSessionFileRelay turn completed, keeping watch while process live", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID, "turnId", currentTurnID)
+				default:
+					h.sendSessionEvent(sessionID, backendID, ev.Event, ev.Data)
 					runningObserved = true
 				}
 			}
@@ -604,6 +621,7 @@ func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection,
 
 type claudeTranscriptRelayEntry struct {
 	Type    string `json:"type"`
+	UUID    string `json:"uuid"`
 	IsMeta  bool   `json:"isMeta"`
 	Message *struct {
 		ID         string          `json:"id"`
@@ -611,6 +629,42 @@ type claudeTranscriptRelayEntry struct {
 		StopReason string          `json:"stop_reason"`
 		Content    json.RawMessage `json:"content"`
 	} `json:"message"`
+}
+
+// claudeEntryTurnIdentity returns the stable identity for a Claude transcript row.
+// User rows often omit message.id and only carry top-level uuid; assistant rows
+// usually have message.id. Prefer message.id, fall back to entry.uuid.
+func claudeEntryTurnIdentity(e claudeTranscriptRelayEntry) string {
+	if e.Message != nil {
+		if id := strings.TrimSpace(e.Message.ID); id != "" {
+			return id
+		}
+	}
+	return strings.TrimSpace(e.UUID)
+}
+
+// lastClaudeUserIdentityFromPath seeds live relay turnId from the last user
+// prompt already on disk (warm-start / mid-turn open).
+func lastClaudeUserIdentityFromPath(sessPath string) string {
+	f, err := os.Open(sessPath)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	entries, err := scanClaudeRelayEntriesFromReader(f)
+	if err != nil {
+		return ""
+	}
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		if e.Type != "user" || isClaudeUserInterruptRelayEntry(e) {
+			continue
+		}
+		if id := claudeEntryTurnIdentity(e); id != "" {
+			return id
+		}
+	}
+	return ""
 }
 
 type claudeTranscriptRelayTextBlock struct {
@@ -851,7 +905,7 @@ func claudeEntryToProjectionEvents(e claudeTranscriptRelayEntry, currentTurnID *
 	if e.Message == nil {
 		return nil
 	}
-	msgID := e.Message.ID
+	identity := claudeEntryTurnIdentity(e)
 	role := e.Message.Role
 	if role == "" {
 		role = e.Type
@@ -876,16 +930,21 @@ func claudeEntryToProjectionEvents(e claudeTranscriptRelayEntry, currentTurnID *
 		if strings.TrimSpace(text) == "" {
 			return out
 		}
-		*currentTurnID = msgID
+		// Real Claude user rows often lack message.id; fall back to top-level uuid so
+		// hydrate + live growth both produce reducer-acceptable turn/item ids.
+		if identity == "" {
+			return out
+		}
+		*currentTurnID = identity
 		out = append(out, projectionHydrateEvent{Event: "user_message", Data: map[string]interface{}{
-			"itemId": msgID, "turnId": msgID, "text": text,
+			"itemId": identity, "turnId": identity, "text": text,
 		}})
 		return out
 	}
 	// assistant
 	turnID := *currentTurnID
 	if turnID == "" {
-		turnID = msgID // assistant before any user prompt (rare) — self-keyed
+		turnID = identity // assistant before any user prompt (rare) — self-keyed
 	}
 	for _, b := range blocks {
 		switch b.Type {
@@ -948,35 +1007,6 @@ func claudeToolResultText(b claudeRelayContentBlock) string {
 	return strings.TrimSpace(string(b.Content))
 }
 
-// emitClaudeAssistantContent 按 content block 发 text_delta(text) / reasoning_delta(thinking)
-// / tool_started(tool_use)。Phase 1：外部 Claude turn 进行中实时推送 reasoning + 文本 + 工具，
-// 而非只在 end_turn 落盘后等重连。payload 形状对齐 mapAgentEvent 的 EventToolUse。
-func (h *Handlers) emitClaudeAssistantContent(sessionID, backendID string, e claudeTranscriptRelayEntry) {
-	if e.Message == nil {
-		return
-	}
-	for _, b := range claudeRelayContentBlocks(e.Message.Content) {
-		switch b.Type {
-		case "text":
-			if strings.TrimSpace(b.Text) != "" {
-				h.sendSessionEvent(sessionID, backendID, "text_delta", map[string]interface{}{"delta": b.Text})
-			}
-		case "thinking":
-			if strings.TrimSpace(b.Thinking) != "" {
-				h.sendSessionEvent(sessionID, backendID, "reasoning_delta", map[string]interface{}{"delta": b.Thinking})
-			}
-		case "tool_use":
-			payload := map[string]interface{}{"toolName": b.Name}
-			if len(b.Input) > 0 && string(b.Input) != "null" {
-				payload["toolInputRaw"] = string(b.Input)
-			}
-			if b.ID != "" {
-				payload["itemId"] = b.ID
-			}
-			h.sendSessionEvent(sessionID, backendID, "tool_started", payload)
-		}
-	}
-}
 
 func (h *Handlers) classifyClaudeTranscriptFile(sessPath string) claudeTranscriptRelayMeaningfulEntry {
 	transcriptStateProbe()

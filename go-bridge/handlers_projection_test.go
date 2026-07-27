@@ -840,4 +840,47 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 	if len(evs) != 1 || evs[0].Event != "tool_finished" || evs[0].Data["itemId"] != "tool-1" {
 		t.Fatalf("tool_result → tool_finished matched by tool_use_id: %+v", evs)
 	}
+
+	// Real Claude user rows often omit message.id and only carry top-level uuid.
+	currentTurnID = ""
+	userUUID := claudeTranscriptRelayEntry{
+		Type: "user",
+		UUID: "3ad62e62-13af-4371-9d16-ca9ef11ad6c3",
+		Message: &struct {
+			ID         string          `json:"id"`
+			Role       string          `json:"role"`
+			StopReason string          `json:"stop_reason"`
+			Content    json.RawMessage `json:"content"`
+		}{Role: "user", Content: json.RawMessage(`"讲个程序员笑话"`)},
+	}
+	evs = claudeEntryToProjectionEvents(userUUID, &currentTurnID)
+	if len(evs) != 1 || evs[0].Event != "user_message" {
+		t.Fatalf("uuid-only user → %+v", evs)
+	}
+	if evs[0].Data["turnId"] != "3ad62e62-13af-4371-9d16-ca9ef11ad6c3" || evs[0].Data["itemId"] != "3ad62e62-13af-4371-9d16-ca9ef11ad6c3" {
+		t.Fatalf("uuid-only user must fall back to entry.uuid: %+v", evs[0])
+	}
+	if currentTurnID != "3ad62e62-13af-4371-9d16-ca9ef11ad6c3" {
+		t.Fatalf("currentTurnID = %q, want uuid", currentTurnID)
+	}
+	asstUUID := claudeTranscriptRelayEntry{
+		Type: "assistant",
+		UUID: "9271f8e8-f785-44cb-8925-9bfc4c7d119d",
+		Message: &struct {
+			ID         string          `json:"id"`
+			Role       string          `json:"role"`
+			StopReason string          `json:"stop_reason"`
+			Content    json.RawMessage `json:"content"`
+		}{ID: "msg_asst_1", Role: "assistant", StopReason: "end_turn", Content: json.RawMessage(`[{"type":"text","text":"SQL JOIN joke"}]`)},
+	}
+	evs = claudeEntryToProjectionEvents(asstUUID, &currentTurnID)
+	if len(evs) != 2 {
+		t.Fatalf("uuid-turn assistant → %d events: %+v", len(evs), evs)
+	}
+	if evs[0].Event != "text_delta" || evs[0].Data["itemId"] != "3ad62e62-13af-4371-9d16-ca9ef11ad6c3" {
+		t.Fatalf("assistant text must attribute to uuid turn: %+v", evs[0])
+	}
+	if evs[1].Event != "turn_completed" || evs[1].Data["turnId"] != "3ad62e62-13af-4371-9d16-ca9ef11ad6c3" {
+		t.Fatalf("turn_completed must carry uuid turnId: %+v", evs[1])
+	}
 }

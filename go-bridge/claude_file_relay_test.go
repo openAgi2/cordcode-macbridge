@@ -104,6 +104,14 @@ func (c *websocketClient) readEvents(t *testing.T, count int) []map[string]any {
 	return messages
 }
 
+
+func eventNames(messages []map[string]any) []any {
+	out := make([]any, 0, len(messages))
+	for _, m := range messages {
+		out = append(out, m["event"])
+	}
+	return out
+}
 func TestClaudeFileRelayDeadPIDWithPartialUserExitsIdle(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -149,7 +157,7 @@ func TestClaudeFileRelayWarmStartUserEmitsTurnStarted(t *testing.T) {
 	t.Setenv("HOME", home)
 	const sessionID = "warm-start-user"
 	path := writeClaudeFileRelayTranscript(t, home, sessionID,
-		`{"type":"user","message":{"role":"user","content":"external prompt during restart gap"}}`,
+		`{"type":"user","uuid":"warm-user-1","message":{"role":"user","content":"external prompt during restart gap"}}`,
 	)
 	_, _, client := startClaudeFileRelayFixture(t, sessionID, true)
 
@@ -158,9 +166,12 @@ func TestClaudeFileRelayWarmStartUserEmitsTurnStarted(t *testing.T) {
 		t.Fatalf("event = %#v, want turn_started; messages=%v", got, messages)
 	}
 	appendClaudeFileRelayTranscript(t, path,
-		`{"type":"assistant","message":{"role":"assistant","content":"done","stop_reason":"end_turn"}}`,
+		`{"type":"assistant","uuid":"warm-asst-1","message":{"id":"msg_warm","role":"assistant","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn"}}`,
 	)
-	_ = client.readEvents(t, 2)
+	messages = client.readEvents(t, 3) // text_delta + turn_completed + idle
+	if messages[0]["event"] != "text_delta" || messages[1]["event"] != "turn_completed" || messages[2]["event"] != "session_state_changed" {
+		t.Fatalf("completion events = %v", eventNames(messages))
+	}
 }
 
 func TestClaudeFileRelayMetaOnlyGrowthDoesNotReemitTurnStarted(t *testing.T) {
@@ -168,7 +179,7 @@ func TestClaudeFileRelayMetaOnlyGrowthDoesNotReemitTurnStarted(t *testing.T) {
 	t.Setenv("HOME", home)
 	const sessionID = "meta-only-growth"
 	path := writeClaudeFileRelayTranscript(t, home, sessionID,
-		`{"type":"user","message":{"role":"user","content":"external prompt"}}`,
+		`{"type":"user","uuid":"meta-user-1","message":{"role":"user","content":"external prompt"}}`,
 	)
 	_, _, client := startClaudeFileRelayFixture(t, sessionID, true)
 
@@ -182,13 +193,17 @@ func TestClaudeFileRelayMetaOnlyGrowthDoesNotReemitTurnStarted(t *testing.T) {
 	)
 	time.Sleep(80 * time.Millisecond)
 	appendClaudeFileRelayTranscript(t, path,
-		`{"type":"assistant","message":{"role":"assistant","content":"done","stop_reason":"end_turn"}}`,
+		`{"type":"assistant","uuid":"meta-asst-1","message":{"id":"msg_meta","role":"assistant","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn"}}`,
 	)
-	messages = client.readEvents(t, 2)
-	// Phase 1：assistant "done" 现在会先发 text_delta（content streaming），再 turn_completed。
+	messages = client.readEvents(t, 3)
+	// Phase 1：assistant "done" 现在会先发 text_delta（content streaming），再 turn_completed + idle。
 	// 关键校验：meta-only growth 没有重复触发 turn_started。
-	if messages[0]["event"] != "text_delta" || messages[1]["event"] != "turn_completed" {
-		t.Fatalf("events after meta-only growth = %v, want [text_delta, turn_completed] (no repeated turn_started)", messages)
+	if messages[0]["event"] != "text_delta" || messages[1]["event"] != "turn_completed" || messages[2]["event"] != "session_state_changed" {
+		t.Fatalf("events after meta-only growth = %v, want [text_delta, turn_completed, idle] (no repeated turn_started)", eventNames(messages))
+	}
+	textData, _ := messages[0]["data"].(map[string]any)
+	if textData["itemId"] != "meta-user-1" {
+		t.Fatalf("meta growth text_delta itemId = %#v, want meta-user-1", textData["itemId"])
 	}
 }
 
@@ -206,16 +221,31 @@ func TestClaudeFileRelayLiveIdleSnapshotWatchesNextUser(t *testing.T) {
 		t.Fatalf("initial event = %#v, want idle state", got)
 	}
 	appendClaudeFileRelayTranscript(t, path,
-		`{"type":"user","message":{"role":"user","content":"new external prompt"}}`,
+		`{"type":"user","uuid":"live-user-2","message":{"role":"user","content":"new external prompt"}}`,
 	)
-	messages = client.readEvents(t, 1)
-	if got := messages[0]["event"]; got != "turn_started" {
-		t.Fatalf("event after append = %#v, want turn_started", got)
+	messages = client.readEvents(t, 3) // turn_started + user_message + running
+	if messages[0]["event"] != "turn_started" || messages[1]["event"] != "user_message" || messages[2]["event"] != "session_state_changed" {
+		t.Fatalf("events after user append = %v, want [turn_started user_message session_state_changed]", eventNames(messages))
+	}
+	userData, _ := messages[1]["data"].(map[string]any)
+	if userData["turnId"] != "live-user-2" || userData["itemId"] != "live-user-2" || userData["text"] != "new external prompt" {
+		t.Fatalf("user_message data = %#v", userData)
 	}
 	appendClaudeFileRelayTranscript(t, path,
-		`{"type":"assistant","message":{"role":"assistant","content":"done","stop_reason":"end_turn"}}`,
+		`{"type":"assistant","uuid":"live-asst-2","message":{"id":"msg_live_2","role":"assistant","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn"}}`,
 	)
-	_ = client.readEvents(t, 2)
+	messages = client.readEvents(t, 3) // text_delta + turn_completed + idle
+	if messages[0]["event"] != "text_delta" || messages[1]["event"] != "turn_completed" || messages[2]["event"] != "session_state_changed" {
+		t.Fatalf("events after assistant append = %v, want [text_delta turn_completed session_state_changed]", eventNames(messages))
+	}
+	textData, _ := messages[0]["data"].(map[string]any)
+	if textData["itemId"] != "live-user-2" || textData["delta"] != "done" {
+		t.Fatalf("text_delta must carry user turn itemId: %#v", textData)
+	}
+	compData, _ := messages[1]["data"].(map[string]any)
+	if compData["turnId"] != "live-user-2" {
+		t.Fatalf("turn_completed turnId = %#v, want live-user-2", compData["turnId"])
+	}
 }
 
 func TestClaudeFileRelayInterruptInitialScanKeepsWatching(t *testing.T) {
@@ -232,16 +262,16 @@ func TestClaudeFileRelayInterruptInitialScanKeepsWatching(t *testing.T) {
 		t.Fatalf("initial events = %v, want turn_completed + idle", messages)
 	}
 	appendClaudeFileRelayTranscript(t, path,
-		`{"type":"user","message":{"role":"user","content":"prompt after interrupt"}}`,
+		`{"type":"user","uuid":"after-interrupt-user","message":{"role":"user","content":"prompt after interrupt"}}`,
 	)
-	messages = client.readEvents(t, 1)
-	if got := messages[0]["event"]; got != "turn_started" {
-		t.Fatalf("event after interrupt append = %#v, want turn_started", got)
+	messages = client.readEvents(t, 3)
+	if messages[0]["event"] != "turn_started" || messages[1]["event"] != "user_message" {
+		t.Fatalf("events after interrupt append = %v, want turn_started+user_message...", eventNames(messages))
 	}
 	appendClaudeFileRelayTranscript(t, path,
-		`{"type":"assistant","message":{"role":"assistant","content":"done","stop_reason":"end_turn"}}`,
+		`{"type":"assistant","uuid":"after-interrupt-asst","message":{"id":"msg_ai","role":"assistant","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn"}}`,
 	)
-	_ = client.readEvents(t, 2)
+	_ = client.readEvents(t, 3)
 }
 
 func TestClaudeFileRelayTickUsesCachedPID(t *testing.T) {
@@ -285,13 +315,17 @@ func TestClaudeFileRelayProcessDeathMidTurnBroadcastsIdleAndExits(t *testing.T) 
 	t.Setenv("HOME", home)
 	const sessionID = "process-death-mid-turn"
 	writeClaudeFileRelayTranscript(t, home, sessionID,
-		`{"type":"user","message":{"role":"user","content":"external prompt"}}`,
+		`{"type":"user","uuid":"death-user-1","message":{"role":"user","content":"external prompt"}}`,
 	)
 	handlers, agent, client := startClaudeFileRelayFixture(t, sessionID, true)
 
 	messages := client.readEvents(t, 1)
 	if got := messages[0]["event"]; got != "turn_started" {
 		t.Fatalf("event = %#v, want turn_started", got)
+	}
+	data, _ := messages[0]["data"].(map[string]any)
+	if data["turnId"] != "death-user-1" {
+		t.Fatalf("warm-start turnId = %#v, want death-user-1", data["turnId"])
 	}
 	agent.processMu.Lock()
 	agent.alivePIDs[4242] = false
@@ -300,9 +334,9 @@ func TestClaudeFileRelayProcessDeathMidTurnBroadcastsIdleAndExits(t *testing.T) 
 	if got := messages[0]["event"]; got != "session_state_changed" {
 		t.Fatalf("event after process death = %#v, want idle state", got)
 	}
-	data, _ := messages[0]["data"].(map[string]any)
-	if data["state"] != "idle" {
-		t.Fatalf("state after process death = %#v, want idle", data["state"])
+	idleData, _ := messages[0]["data"].(map[string]any)
+	if idleData["state"] != "idle" {
+		t.Fatalf("state after process death = %#v, want idle", idleData["state"])
 	}
 	waitClaudeFileRelayStopped(t, handlers, sessionID)
 }
