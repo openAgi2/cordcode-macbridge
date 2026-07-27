@@ -191,7 +191,14 @@ var errProjectionBackendNotMigrated = errors.New("backend not yet migrated to se
 var errProjectionSourceUnavailable = errors.New("projection source is not available for inspection")
 
 func backendSupportsProjectionHydrate(backendID string) bool {
-	return backendID == "codex"
+	switch backendID {
+	case "codex", "claude", "claudecode":
+		// K5: Claude shares JSONL transcript hydrate (handlers already map claude → projection events).
+		// OpenCode stays out until its HTTP/SQLite source identity lands.
+		return true
+	default:
+		return false
+	}
 }
 
 // ensureProjectionHydrated waits for a full committed baseline within the pull budget. Concurrent

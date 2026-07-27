@@ -46,9 +46,10 @@ func TestSessionSyncV2K3AdmissionPolicyIsVersionedAndBounded(t *testing.T) {
 		t.Fatal("F2 SLO anchors drifted")
 	}
 	if !backendSupportsProjectionHydrate("codex") ||
-		backendSupportsProjectionHydrate("claude") ||
+		!backendSupportsProjectionHydrate("claude") ||
+		!backendSupportsProjectionHydrate("claudecode") ||
 		backendSupportsProjectionHydrate("opencode") {
-		t.Fatal("K3 shadow data plane escaped the Codex-only backend boundary")
+		t.Fatal("K5 migration boundary drifted: codex+claude hydrate, opencode still not migrated")
 	}
 }
 
@@ -66,10 +67,11 @@ func TestSessionSyncV2CapabilityScopedToMigratedBackend(t *testing.T) {
 				hasV2 = true
 			}
 		}
-		if backend.ID == "codex" && !hasV2 {
-			t.Fatal("migrated Codex backend did not advertise session_sync_v2")
+		migrated := backend.ID == "codex" || backend.ID == "claude"
+		if migrated && !hasV2 {
+			t.Fatalf("migrated backend %q did not advertise session_sync_v2", backend.ID)
 		}
-		if backend.ID != "codex" && hasV2 {
+		if !migrated && hasV2 {
 			t.Fatalf("unmigrated backend %q inherited session_sync_v2", backend.ID)
 		}
 	}
