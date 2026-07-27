@@ -629,3 +629,38 @@ Codex file-relay 与 rich history 曾把同一 rollout turn 投影成不同身�
 第五轮真机回归进一步证明，仅修 assistant 身份仍不够：Codex rollout 会在 `task_started` 后写入 `response_item(role=user)`，旧 file-relay 忽略该记录，导致 Mac 端问题只能随 history 回源迟到。现在 scanner 将它映射为 `user_message`，复用 response-item `id`，并绑定当前 source turn ID；`event_msg.user_message` 不重复解析，避免 rollout 双写造成重复。iOS 的 foreground/history reconcile 同时被约束为活跃 push turn 的 merge-only 校准者，不能凭部分 history 提前结束 turn。
 
 ---
+
+---
+
+# 2026-07-27 K5.2 Claude projection SoT（uuid + keep-watch + catch-up）
+
+完整产品复盘在 iOS 仓 `../cordcode-ios/think.md`「复盘 XVIII」。本仓只记 go-bridge 契约。
+
+## 修了什么
+
+1. **`b787975`** — Claude transcript identity  
+   - 结构加顶层 `uuid`  
+   - turn/item：`message.id` 优先，否则 `uuid`  
+   - live file-relay growth 复用 `claudeEntryToProjectionEvents`（带 identity 的 user_message / text_delta / turn_completed）  
+   - 禁止空 `turnId` 的 turn_started / 无 itemId 的 text_delta（reducer 会 skip）
+
+2. **`a39133e`** — multi-session live + reopen  
+   - process 未 live：**继续 watch** transcript，不立即 exit；PID 晚到可 late-bind  
+   - 未 live 时不根据历史 tail 武装 running  
+   - `ProjectionKernel.committedSourceCursor`：Ready 后若 `source.Cursor` 更大，强制 catch-up hydrate，而不是 `AlreadyReady`
+
+## 为何需要
+
+Owner K5.2：A 同步正常，B 打开后 Mac 发消息 3 无 live，切回仍无。日志：B relay `process not live ... exiting`；reopen `headRev` 钉死旧 rev。根因在本仓 SoT，不在 iOS UI。
+
+## 测试
+
+`go test ./go-bridge -run 'TestClaudeFileRelay|TestClaudeEntryToProjectionEvents|TestProjectionCatchUpWhenSourceAdvancesPastReady'`
+
+## 原则
+
+- Claude user 身份以真实 JSONL 为准（常无 message.id）。  
+- file-relay 生命周期 ≠ process 此刻可发现。  
+- Ready projection 必须能对 source 增长 catch-up。  
+- 不把这类洞交给 iOS referee。
+
