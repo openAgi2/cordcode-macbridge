@@ -360,6 +360,34 @@ func TestMapAgentEventPlanTodosUpdated(t *testing.T) {
 	}
 }
 
+func TestMapAgentEventTurnLifecycleCarriesTurnID(t *testing.T) {
+	name, data, done := mapAgentEvent(core.Event{
+		Type:   core.EventTurnStarted,
+		TurnID: "turn-live-1",
+	})
+	if name != "turn_started" || done {
+		t.Fatalf("turn_started name/done = %q/%v", name, done)
+	}
+	payload := data.(map[string]interface{})
+	if payload["turnId"] != "turn-live-1" {
+		t.Fatalf("turn_started turnId = %#v, want turn-live-1", payload["turnId"])
+	}
+
+	name, data, done = mapAgentEvent(core.Event{
+		Type:    core.EventResult,
+		Done:    true,
+		TurnID:  "turn-live-1",
+		Content: "final",
+	})
+	if name != "turn_completed" || !done {
+		t.Fatalf("turn_completed name/done = %q/%v", name, done)
+	}
+	payload = data.(map[string]interface{})
+	if payload["turnId"] != "turn-live-1" {
+		t.Fatalf("turn_completed turnId = %#v, want turn-live-1", payload["turnId"])
+	}
+}
+
 func TestMapAgentEventTurnCompleted(t *testing.T) {
 	name, data, done := mapAgentEvent(core.Event{
 		Type:         core.EventResult,

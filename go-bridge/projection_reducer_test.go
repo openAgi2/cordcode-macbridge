@@ -334,3 +334,21 @@ func TestPublishLogicalMountsProjectionReducer(t *testing.T) {
 		t.Fatalf("assistant text = %q, want %q", text, "hi")
 	}
 }
+
+// TestReducerTurnCompletedFallsBackToActiveTurnID: live driver frames may omit turnId on
+// turn_completed; if ActiveTurnID was armed by turn_started, completion must still flip phase idle.
+func TestReducerTurnCompletedFallsBackToActiveTurnID(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T-live"}))
+	r.Apply(ev(2, "codex", "s1", "turn_completed", map[string]interface{}{"done": true})) // no turnId
+	proj, ok := r.Snapshot("codex", "s1")
+	if !ok {
+		t.Fatal("missing projection")
+	}
+	if proj.Execution.Phase != "idle" {
+		t.Fatalf("phase = %q, want idle after turn_completed fallback", proj.Execution.Phase)
+	}
+	if proj.Execution.ActiveTurnID != "" {
+		t.Fatalf("activeTurnId = %q, want empty", proj.Execution.ActiveTurnID)
+	}
+}

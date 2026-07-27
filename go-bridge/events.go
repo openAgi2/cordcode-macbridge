@@ -78,18 +78,24 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 		}, false
 
 	case core.EventTurnStarted:
+		// Phase-3 turnId plumbing: carry source-proven turn identity so ProjectionReducer
+		// can mark execution.running (design §6.4 / §7.4). Empty turnId remains skipped.
 		return "turn_started", eventData(ev, map[string]interface{}{
-			"turnId": "",
+			"turnId": ev.TurnID,
 		}), false
 
 	case core.EventResult:
 		if ev.Done {
-			return "turn_completed", eventData(ev, map[string]interface{}{
+			payload := map[string]interface{}{
 				"done":         true,
 				"text":         ev.Content,
 				"inputTokens":  ev.InputTokens,
 				"outputTokens": ev.OutputTokens,
-			}), true
+			}
+			if ev.TurnID != "" {
+				payload["turnId"] = ev.TurnID
+			}
+			return "turn_completed", eventData(ev, payload), true
 		}
 		return "text_delta", eventData(ev, map[string]interface{}{
 			"delta": ev.Content,

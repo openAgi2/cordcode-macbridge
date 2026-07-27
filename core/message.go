@@ -391,6 +391,7 @@ type Event struct {
 	ToolSuccess    *bool          // optional success flag for EventToolResult
 	SessionID      string         // agent-managed session ID for conversation continuity
 	RequestID      string         // unique request ID for EventPermissionRequest
+	TurnID         string         // source-proven turn identity (Codex turn id; projection lifecycle)
 	Questions      []UserQuestion // populated when ToolName == "AskUserQuestion"
 	Plan           []Todo         `json:",omitempty"`
 	Done           bool

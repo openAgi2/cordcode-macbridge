@@ -15,8 +15,9 @@ import (
 // frames carry identity in Data — text/reasoning itemId == lifecycle turn_id (== the turn's
 // turnId), user_message itemId == response_item.id (+ turnId), tools itemId == call_id — and
 // bypass DeltaBatcher, so parts attribute to the correct turn. Driver/agent-event frames lack
-// identity (events.go turn_started is hardcoded turnId:""; DeltaBatcher.emit strips Data to
-// {"delta":text}) and are SKIPPED here until the Phase 3 turnId plumbing lands.
+// identity for content deltas (DeltaBatcher.emit strips Data to {"delta":text}) still lacks
+// itemId and is SKIPPED; lifecycle turn_started/turn_completed now carry TurnID from the driver
+// when source-proven (Phase 3 turnId plumbing for execution.phase).
 //
 // Concurrency: Apply is called from EventPublisher.PublishLogical under the publisher lock
 // (p.mu), so it takes r.mu nested under p.mu. Snapshot/FlushPatch take only r.mu — no reverse
@@ -223,7 +224,7 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 	case "turn_started":
 		turnID := dataString(data, "turnId")
 		if turnID == "" {
-			return // driver path (events.go hardcodes turnId:""); skip until Phase 3
+			return // no source-proven turnId; skip identityless lifecycle frames
 		}
 		commit()
 		ps.upsertTurn(TurnProjection{TurnID: turnID, Status: "running", StartedAt: ps.projection.UpdatedAt})
@@ -393,6 +394,11 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 
 	case "turn_completed":
 		turnID := dataString(data, "turnId")
+		if turnID == "" {
+			// Live driver frames historically omitted turnId; if a prior turn_started / content
+			// event already armed ActiveTurnID, still complete that turn (design §6.4 rule 3).
+			turnID = ps.projection.Execution.ActiveTurnID
+		}
 		if turnID == "" {
 			return
 		}
