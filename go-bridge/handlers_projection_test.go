@@ -735,6 +735,40 @@ func TestClaudeColdHydrateHonestEmpty(t *testing.T) {
 	}
 }
 
+// A projection-only web client does not call get_session_messages. Opening a Claude session
+// through get_session_projection must therefore start the transcript relay itself, otherwise
+// later Mac-authored turns never enter the reducer and no projection_patch can be emitted.
+func TestClaudeProjectionPullStartsTranscriptRelay(t *testing.T) {
+	withFastClaudeFileRelay(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	const sessionID = "projection-only-live"
+	path := writeClaudeFileRelayTranscript(t, home, sessionID,
+		`{"type":"user","uuid":"u1","message":{"role":"user","content":"before"}}`,
+		`{"type":"assistant","uuid":"a1","message":{"id":"a1","role":"assistant","content":[{"type":"text","text":"before answer"}],"stop_reason":"end_turn"}}`,
+	)
+	agent := &fakeAgent{name: "claudecode", transcriptPath: path}
+	handlers := NewHandlers()
+	handlers.RegisterAgent("claudecode", agent)
+
+	conn := newPublisherCaptureConn(nil)
+	handlers.eventPublisher.SetConnSyncV2(conn, true)
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": sessionID})
+	msg := WireMessage{RequestID: "r-live", BackendID: "claude", Method: "get_session_projection", Params: params}
+	handlers.handleGetSessionProjection(conn, msg, agent)
+	if !handlers.relayKindIs(sessionID, relayKindClaudeFile) {
+		t.Fatal("projection-only pull did not start Claude transcript relay")
+	}
+
+	appendClaudeFileRelayTranscript(t, path,
+		`{"type":"user","uuid":"u2","message":{"role":"user","content":"after open"}}`,
+	)
+	patches := waitForProjectionPatches(t, conn, 1)
+	if len(patches) == 0 {
+		t.Fatal("Claude transcript growth after projection pull emitted no projection_patch")
+	}
+}
+
 // TestClaudeColdHydrateMissingFileHonestError: a transcript path that does not exist must surface
 // as an honest hydrate error (projection.hydrate_failed), NEVER an empty head-0 success shell
 // (§10.5.1). Distinct from honest-empty (which is a real, scanned, content-less session).
@@ -898,9 +932,9 @@ func TestOpenCodeRichHistoryEntryToProjectionEvents(t *testing.T) {
 		t.Fatalf("currentTurnID = %q", current)
 	}
 	asst := core.RichHistoryEntry{
-		ID:      "a-oc-1",
-		Role:    "assistant",
-		Content: "world",
+		ID:       "a-oc-1",
+		Role:     "assistant",
+		Content:  "world",
 		Thinking: "plan",
 		Parts: []map[string]any{
 			{"type": "reasoning", "content": "plan"},

@@ -66,6 +66,11 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 
 	// Subscribe so the conn receives subsequent projection_patch push frames (WP5 emission).
 	h.subscribeConnToSession(conn, msg, params.SessionID)
+	// Projection-only clients never call get_session_messages, so subscribing alone is not
+	// enough for file-backed external sessions: nothing would be watching Claude/Codex JSONL
+	// growth and the reducer would never receive live events. Start the same read-only relay
+	// ownership used by the legacy history-open path.
+	h.startProjectionLiveRelay(params.SessionID, conn, msg.BackendID, agent, params.Directory)
 
 	// ALL backends go through hydrate (design §10.5.7 修法 1 — no codex hardcode). A backend not
 	// yet migrated to projection returns an honest error; it must NEVER fall through to an empty
@@ -148,6 +153,29 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 	); err != nil {
 		slog.Warn("go-bridge: projection snapshot response enqueue failed", "requestId", msg.RequestID, "error", err)
 	}
+}
+
+// startProjectionLiveRelay attaches the live producer required after a projection-only open.
+// It deliberately mirrors handleGetSessionMessages without reading or merging legacy history:
+// the resulting logical events reduce into SessionProjection, and v2 clients consume only
+// projection_patch.
+func (h *Handlers) startProjectionLiveRelay(
+	sessionID string,
+	conn Connection,
+	backendID string,
+	agent core.Agent,
+	directory string,
+) {
+	h.mu.Lock()
+	sess, hasSess := h.getSession(sessionID)
+	h.mu.Unlock()
+	if hasSess && sess != nil {
+		h.startRelayIfNotRunning(sessionID, sess, conn, backendID)
+	} else {
+		h.startClaudeSessionFileRelay(sessionID, conn, backendID)
+	}
+	h.startCodexSessionFileRelay(sessionID, conn, backendID, agent)
+	h.startGrokLeaderSessionRelay(sessionID, backendID, agent, directory)
 }
 
 // logProjectionRPCTrace emits the minimal cross-process evidence needed to align one projection
