@@ -248,9 +248,11 @@ func advertiseSessionSyncV2Backend(backends []AgentProviderDescriptor) {
 	for i := range backends {
 		id := backends[i].ID
 		kind := backends[i].Kind
-		// Per-backend migration (design §4 / K5): only backends with a projection hydrate
-		// producer advertise ownership capability. OpenCode remains legacy.
-		if id == "codex" || kind == "codex" || id == "claude" || id == "claudecode" || kind == "claude_code" || kind == "claude" {
+	// Per-backend migration (design §4 / K5): only backends with a projection hydrate
+		// producer advertise ownership capability.
+		if id == "codex" || kind == "codex" ||
+			id == "claude" || id == "claudecode" || kind == "claude_code" || kind == "claude" ||
+			id == "opencode" || kind == "opencode" {
 			backends[i].Capabilities = appendUniqueCapability(
 				backends[i].Capabilities,
 				"session_sync_v2",

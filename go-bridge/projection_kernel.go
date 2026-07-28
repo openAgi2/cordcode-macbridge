@@ -528,6 +528,11 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 		if source.Path != "" && source.Cursor > session.committedSourceCursor {
 			break
 		}
+		// Pathless backends (OpenCode): no file cursor. sourceChanged forces a full
+		// rich-history rebuild so re-open can heal live gaps (missing user prompts).
+		if source.Path == "" && sourceChanged {
+			break
+		}
 		k.mu.Unlock()
 		return ProjectionHydrateAdmission{AlreadyReady: true}, nil
 	case ProjectionHydrateHydrating:
@@ -560,8 +565,12 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 		liveArrived: make(chan struct{}, 1),
 	}
 	if source.Path == "" {
-		if existing, ok := k.reducer.Snapshot(backendID, sessionID); ok {
-			tx.reducer.Restore(backendID, sessionID, existing)
+		// Forced pathless rebuild starts empty so rich history is the sole baseline
+		// (avoids duplicating turns on top of a live-polluted Ready projection).
+		if !sourceChanged {
+			if existing, ok := k.reducer.Snapshot(backendID, sessionID); ok {
+				tx.reducer.Restore(backendID, sessionID, existing)
+			}
 		}
 	}
 	// In-memory catch-up: keep the already-committed projection as base and only

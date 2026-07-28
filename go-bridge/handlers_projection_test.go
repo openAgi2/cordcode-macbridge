@@ -13,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // TestHandleGetSessionProjectionReturnsReducerState: a fed reducer is returned verbatim as the
@@ -761,10 +763,10 @@ func TestClaudeColdHydrateMissingFileHonestError(t *testing.T) {
 }
 
 // TestProjectionNotMigratedForUnsupportedBackend: a backend with no projection cold-hydrate
-// producer (opencode is HTTP/SQLite-backed; deferred to a separate sub-task) MUST return an honest
+// producer MUST return an honest
 // projection.not_migrated error — never fall through to an empty head-0 shell (§10.5.7 修法 1).
 func TestProjectionNotMigratedForUnsupportedBackend(t *testing.T) {
-	for _, backend := range []string{"opencode", "madeup-backend"} {
+	for _, backend := range []string{"madeup-backend", "grokbuild"} {
 		handlers := NewHandlers()
 		conn := &readFileCaptureConn{}
 		params, _ := json.Marshal(map[string]interface{}{"sessionId": "s-" + backend})
@@ -882,5 +884,123 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 	}
 	if evs[1].Event != "turn_completed" || evs[1].Data["turnId"] != "3ad62e62-13af-4371-9d16-ca9ef11ad6c3" {
 		t.Fatalf("turn_completed must carry uuid turnId: %+v", evs[1])
+	}
+}
+
+func TestOpenCodeRichHistoryEntryToProjectionEvents(t *testing.T) {
+	current := ""
+	user := core.RichHistoryEntry{ID: "u-oc-1", Role: "user", Content: "hello opencode"}
+	evs := openCodeRichHistoryEntryToProjectionEvents(user, &current)
+	if len(evs) != 1 || evs[0].Event != "user_message" || evs[0].Data["turnId"] != "u-oc-1" {
+		t.Fatalf("user → %+v", evs)
+	}
+	if current != "u-oc-1" {
+		t.Fatalf("currentTurnID = %q", current)
+	}
+	asst := core.RichHistoryEntry{
+		ID:      "a-oc-1",
+		Role:    "assistant",
+		Content: "world",
+		Thinking: "plan",
+		Parts: []map[string]any{
+			{"type": "reasoning", "content": "plan"},
+			{"type": "text", "content": "world"},
+			{"type": "tool", "step": map[string]any{
+				"id": "tool-1", "toolName": "bash", "status": "completed",
+				"output": map[string]any{"kind": "inline", "text": "ok"},
+			}},
+		},
+	}
+	evs = openCodeRichHistoryEntryToProjectionEvents(asst, &current)
+	if len(evs) < 4 {
+		t.Fatalf("assistant → %d events: %+v", len(evs), evs)
+	}
+	if evs[0].Event != "reasoning_delta" || evs[0].Data["itemId"] != "u-oc-1" {
+		t.Fatalf("reasoning must attribute to user turn: %+v", evs[0])
+	}
+	if evs[1].Event != "text_delta" || evs[1].Data["itemId"] != "u-oc-1" {
+		t.Fatalf("text must attribute to user turn: %+v", evs[1])
+	}
+	last := evs[len(evs)-1]
+	if last.Event != "turn_completed" || last.Data["turnId"] != "u-oc-1" || !last.TurnDone {
+		t.Fatalf("turn_completed = %+v", last)
+	}
+}
+
+func TestOpenCodeProjectionHydrateFromRichHistory(t *testing.T) {
+	handlers := NewHandlers()
+	agent := &fakeAgent{
+		name: "opencode",
+		richHistory: []core.RichHistoryEntry{
+			{ID: "u1", Role: "user", Content: "ping"},
+			{ID: "a1", Role: "assistant", Content: "pong"},
+		},
+	}
+	handlers.mu.Lock()
+	handlers.agents = map[string]core.Agent{"opencode": agent}
+	handlers.mu.Unlock()
+
+	conn := &readFileCaptureConn{}
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": "ses-oc-1", "sinceRev": 0})
+	msg := WireMessage{RequestID: "r-oc", BackendID: "opencode", Method: "get_session_projection", Params: params}
+	handlers.handleGetSessionProjection(conn, msg, nil)
+	if conn.err != nil {
+		t.Fatalf("opencode hydrate error: %+v", conn.err)
+	}
+	data, ok := conn.data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("unexpected data type %T", conn.data)
+	}
+	// Accept either snapshot or projection wrapper shapes used by the RPC.
+	raw, _ := json.Marshal(data)
+	if !strings.Contains(string(raw), "pong") {
+		t.Fatalf("projection missing assistant text: %s", string(raw))
+	}
+	if !strings.Contains(string(raw), "ping") {
+		t.Fatalf("projection missing user text: %s", string(raw))
+	}
+}
+
+// TestOpenCodeHandleRPCRoutesGetSessionProjection: production short-circuits opencode
+// through handleOpenCodeRPC when ocProxy is registered. get_session_projection must be
+// on that allowlist and reach handleGetSessionProjection — not method_not_found.
+func TestOpenCodeHandleRPCRoutesGetSessionProjection(t *testing.T) {
+	handlers := newTestHandlers(t)
+	agent := &fakeAgent{
+		name: "opencode",
+		richHistory: []core.RichHistoryEntry{
+			{ID: "u1", Role: "user", Content: "ping"},
+			{ID: "a1", Role: "assistant", Content: "pong"},
+		},
+	}
+	handlers.RegisterAgent("opencode", agent)
+	// Any non-nil ocProxy arms isOC(); URL is unused for projection routing.
+	handlers.RegisterOpenCodeProxy(NewOpenCodeProxy("http://127.0.0.1:1", "", ""))
+
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "opencode",
+		Method:    "get_session_projection",
+		RequestID: "oc-proj-route-1",
+		Params:    mustJSONRaw(t, map[string]any{"sessionId": "ses-oc-route", "sinceRev": 0}),
+	})
+
+	messages := readJSONMaps(t, clientConn, 1)
+	msg0 := messages[0]
+	if errObj, _ := msg0["error"].(map[string]any); errObj != nil {
+		if code, _ := errObj["code"].(string); code == "method_not_found" {
+			t.Fatalf("opencode get_session_projection must not be method_not_found: %+v", errObj)
+		}
+		t.Fatalf("unexpected error: %+v", errObj)
+	}
+	if ok, _ := msg0["ok"].(bool); ok != true {
+		t.Fatalf("ok = %#v, want true; full=%+v", msg0["ok"], msg0)
+	}
+	data, _ := msg0["data"].(map[string]any)
+	raw, _ := json.Marshal(data)
+	if !strings.Contains(string(raw), "pong") || !strings.Contains(string(raw), "ping") {
+		t.Fatalf("routed projection missing history content: %s", string(raw))
 	}
 }

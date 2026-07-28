@@ -48,8 +48,8 @@ func TestSessionSyncV2K3AdmissionPolicyIsVersionedAndBounded(t *testing.T) {
 	if !backendSupportsProjectionHydrate("codex") ||
 		!backendSupportsProjectionHydrate("claude") ||
 		!backendSupportsProjectionHydrate("claudecode") ||
-		backendSupportsProjectionHydrate("opencode") {
-		t.Fatal("K5 migration boundary drifted: codex+claude hydrate, opencode still not migrated")
+		!backendSupportsProjectionHydrate("opencode") {
+		t.Fatal("K5 migration boundary drifted: codex+claude+opencode must hydrate")
 	}
 }
 
@@ -67,7 +67,7 @@ func TestSessionSyncV2CapabilityScopedToMigratedBackend(t *testing.T) {
 				hasV2 = true
 			}
 		}
-		migrated := backend.ID == "codex" || backend.ID == "claude"
+		migrated := backend.ID == "codex" || backend.ID == "claude" || backend.ID == "opencode"
 		if migrated && !hasV2 {
 			t.Fatalf("migrated backend %q did not advertise session_sync_v2", backend.ID)
 		}
@@ -213,7 +213,7 @@ func TestSessionSyncV2DirectTransportResultPrecedesLiveProjectionPatch(t *testin
 		BackendID: "codex", SessionID: "wire-order", Event: "text_delta",
 		Data: map[string]interface{}{"itemId": "T1", "delta": "base"},
 	})
-	if err := handlers.ensureProjectionHydrated("codex", "wire-order"); err != nil {
+	if err := handlers.ensureProjectionHydrated("codex", "wire-order", false); err != nil {
 		t.Fatal(err)
 	}
 	handlers.RegisterAgent("codex", &fakeAgent{name: "codex"})

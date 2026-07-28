@@ -11,9 +11,16 @@ import (
 func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool) {
 	switch ev.Type {
 	case core.EventText:
-		return "text_delta", eventData(ev, map[string]interface{}{
+		payload := map[string]interface{}{
 			"delta": ev.Content,
-		}), false
+		}
+		if ev.ItemID != "" {
+			payload["itemId"] = ev.ItemID
+		} else if ev.TurnID != "" {
+			// OpenCode live: assistant text is attributed to the owning turn identity.
+			payload["itemId"] = ev.TurnID
+		}
+		return "text_delta", eventData(ev, payload), false
 
 	case core.EventTextReplace:
 		return "message_updated", eventData(ev, map[string]interface{}{
@@ -21,9 +28,15 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 		}), false
 
 	case core.EventThinking:
-		return "reasoning_delta", eventData(ev, map[string]interface{}{
+		payload := map[string]interface{}{
 			"delta": ev.Content,
-		}), false
+		}
+		if ev.ItemID != "" {
+			payload["itemId"] = ev.ItemID
+		} else if ev.TurnID != "" {
+			payload["itemId"] = ev.TurnID
+		}
+		return "reasoning_delta", eventData(ev, payload), false
 
 	case core.EventToolUse:
 		payload := map[string]interface{}{
@@ -76,6 +89,22 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 		return "todos_updated", map[string]interface{}{
 			"todos": todosToWire(ev.Plan),
 		}, false
+
+	case core.EventUserMessage:
+		// OpenCode/Claude-style user attribution for projection SoT. turnId/itemId are
+		// source-proven; empty identity is skipped by the reducer.
+		payload := map[string]interface{}{
+			"text": ev.Content,
+		}
+		if ev.TurnID != "" {
+			payload["turnId"] = ev.TurnID
+		}
+		if ev.ItemID != "" {
+			payload["itemId"] = ev.ItemID
+		} else if ev.TurnID != "" {
+			payload["itemId"] = ev.TurnID
+		}
+		return "user_message", eventData(ev, payload), false
 
 	case core.EventTurnStarted:
 		// Phase-3 turnId plumbing: carry source-proven turn identity so ProjectionReducer

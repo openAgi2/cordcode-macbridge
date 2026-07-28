@@ -664,3 +664,17 @@ Owner K5.2：A 同步正常，B 打开后 Mac 发消息 3 无 live，切回仍�
 - Ready projection 必须能对 source 增长 catch-up。  
 - 不把这类洞交给 iOS referee。
 
+
+
+## OpenCode K5.3 (2026-07-28)
+
+OpenCode session_sync_v2 via rich-history hydrate + live TurnID/ItemID.
+
+Follow-on SoT fixes same day (owner matrix green):
+1. `handleOpenCodeRPC` allowlist `get_session_projection` (cold open).
+2. `DeltaBatcher` preserve `itemId` on text/reasoning flush (live content).
+3. SSE `noteUserPrompt` for bare user + part.delta (user bubbles).
+4. Multi-step: do **not** emit EventResult on intermediate assistant `time.completed` / `step_finish`; only `session.status`/`session.updated` idle closes the turn (composer no longer flips idle on tools).
+5. iOS side (sibling repo): v2 allows todos control-plane; discards stale completed plans on new generation.
+
+Tests: `go test ./agent/opencode -run 'TestSSESubscriber_MultiStep|CompletionIsIdempotent|ToolTodoAndIdle'`.

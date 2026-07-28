@@ -70,7 +70,10 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 	// ALL backends go through hydrate (design §10.5.7 修法 1 — no codex hardcode). A backend not
 	// yet migrated to projection returns an honest error; it must NEVER fall through to an empty
 	// head-0 shell (§10.5.1).
-	if err := h.ensureProjectionHydrated(msg.BackendID, params.SessionID); err != nil {
+	// OpenCode pathless: cold pull (sinceRev==0) may force rich-history rebuild to heal
+	// live gaps; incremental pulls keep the cheap Ready short-circuit.
+	forcePathlessRebuild := params.SinceRev == 0 && msg.BackendID == "opencode"
+	if err := h.ensureProjectionHydrated(msg.BackendID, params.SessionID, forcePathlessRebuild); err != nil {
 		code := "projection.hydrate_failed"
 		retryable := false
 		var retryAfterMillis *int64
@@ -192,9 +195,9 @@ var errProjectionSourceUnavailable = errors.New("projection source is not availa
 
 func backendSupportsProjectionHydrate(backendID string) bool {
 	switch backendID {
-	case "codex", "claude", "claudecode":
-		// K5: Claude shares JSONL transcript hydrate (handlers already map claude → projection events).
-		// OpenCode stays out until its HTTP/SQLite source identity lands.
+	case "codex", "claude", "claudecode", "opencode":
+		// K5: Codex/Claude use JSONL transcript hydrate; OpenCode uses HTTP rich-history
+		// full rebuild (no transcript file / no file-prefix checkpoint).
 		return true
 	default:
 		return false
@@ -204,11 +207,14 @@ func backendSupportsProjectionHydrate(backendID string) bool {
 // ensureProjectionHydrated waits for a full committed baseline within the pull budget. Concurrent
 // pulls join the Kernel single-flight. Budget expiry returns projection.hydrating without
 // cancelling a healthy transaction.
-func (h *Handlers) ensureProjectionHydrated(backendID, sessionID string) error {
+func (h *Handlers) ensureProjectionHydrated(backendID, sessionID string, forcePathlessRebuild bool) error {
 	if h == nil || h.eventPublisher == nil || h.projectionKernel == nil || sessionID == "" {
 		return nil
 	}
-	if h.projectionKernel.Status(backendID, sessionID).Phase == ProjectionHydrateReady {
+	ready := h.projectionKernel.Status(backendID, sessionID).Phase == ProjectionHydrateReady
+	// Cheap Ready hit for file-backed backends, and for OpenCode incremental pulls.
+	// Cold OpenCode pulls may force a pathless rich-history rebuild below.
+	if ready && !(forcePathlessRebuild && backendID == "opencode") {
 		return nil
 	}
 	if !backendSupportsProjectionHydrate(backendID) {
@@ -221,8 +227,10 @@ func (h *Handlers) ensureProjectionHydrated(backendID, sessionID string) error {
 		)
 		return err
 	}
+	// Pathless re-open: force full GetRichSessionHistory rebuild when already Ready.
+	sourceChanged := forcePathlessRebuild && ready && backendID == "opencode" && source.Path == ""
 	admission, err := h.projectionKernel.BeginHydrateTransaction(
-		backendID, sessionID, source, false, false,
+		backendID, sessionID, source, false, sourceChanged,
 	)
 	if err != nil {
 		return err
@@ -269,6 +277,8 @@ func (h *Handlers) prepareProjectionHydrateSource(
 		agentName = "codex"
 	case "claude", "claudecode":
 		agentName = "claudecode"
+	case "opencode":
+		agentName = "opencode"
 	default:
 		return ProjectionSourceDescriptor{}, errProjectionBackendNotMigrated
 	}
@@ -278,6 +288,22 @@ func (h *Handlers) prepareProjectionHydrateSource(
 			return ProjectionSourceDescriptor{Identity: sessionID}, nil
 		}
 		return ProjectionSourceDescriptor{}, errProjectionSourceUnavailable
+	}
+	// OpenCode has no JSONL transcript path. Cold hydrate is a full rich-history rebuild
+	// keyed by session identity only (Cursor=0, Path empty). Checkpoint file-prefix validation
+	// does not apply; re-open always rebuilds from GetRichSessionHistory.
+	if backendID == "opencode" {
+		if _, ok := agent.(core.RichHistoryProvider); !ok {
+			if h.eventPublisher.ProjectionTurnCount(backendID, sessionID) > 0 {
+				return ProjectionSourceDescriptor{Identity: sessionID}, nil
+			}
+			return ProjectionSourceDescriptor{}, errProjectionSourceUnavailable
+		}
+		return ProjectionSourceDescriptor{
+			Identity: sessionID,
+			Path:     "",
+			Cursor:   0,
+		}, nil
 	}
 	locator, ok := agent.(core.TranscriptLocator)
 	if !ok {
@@ -482,7 +508,7 @@ func (h *Handlers) produceProjectionHydrateRange(
 	base SessionProjection,
 	emit func(projectionHydrateEvent) bool,
 ) error {
-	if path == "" || startOffset == endOffset {
+	if backendID != "opencode" && (path == "" || startOffset == endOffset) {
 		return nil
 	}
 	currentTurnID := base.Execution.ActiveTurnID
@@ -522,6 +548,8 @@ func (h *Handlers) produceProjectionHydrateRange(
 		return streamClaudeTranscriptProjectionEventsRangeSeed(
 			ctx, path, startOffset, endOffset, currentTurnID, emit,
 		)
+	case "opencode":
+		return h.streamOpenCodeRichHistoryProjectionEvents(ctx, sessionID, emit)
 	default:
 		return errProjectionBackendNotMigrated
 	}
@@ -537,6 +565,221 @@ type projectionHydrateEvent struct {
 	Event    string
 	Data     map[string]interface{}
 	TurnDone bool
+}
+
+// streamOpenCodeRichHistoryProjectionEvents rebuilds a full projection baseline from
+// OpenCode HTTP rich history (GET /session/{id}/message). There is no JSONL cursor:
+// every cold hydrate is a complete ordered rebuild. Turn identity follows the Claude
+// convention — the owning user message id is turnId/itemId for the whole turn.
+func (h *Handlers) streamOpenCodeRichHistoryProjectionEvents(
+	ctx context.Context,
+	sessionID string,
+	emit func(projectionHydrateEvent) bool,
+) error {
+	if h == nil {
+		return errProjectionSourceUnavailable
+	}
+	agent, ok := h.getFirstAgentByName("opencode")
+	if !ok {
+		return errProjectionSourceUnavailable
+	}
+	provider, ok := agent.(core.RichHistoryProvider)
+	if !ok {
+		return errProjectionSourceUnavailable
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	entries, err := provider.GetRichSessionHistory(ctx, sessionID, 0)
+	if err != nil {
+		return err
+	}
+	currentTurnID := ""
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		for _, ev := range openCodeRichHistoryEntryToProjectionEvents(entry, &currentTurnID) {
+			if !emit(ev) {
+				return ctx.Err()
+			}
+		}
+	}
+	return ctx.Err()
+}
+
+func openCodeRichHistoryEntryToProjectionEvents(
+	entry core.RichHistoryEntry,
+	currentTurnID *string,
+) []projectionHydrateEvent {
+	role := strings.ToLower(strings.TrimSpace(entry.Role))
+	identity := strings.TrimSpace(entry.ID)
+	if identity == "" {
+		// Honest identity only: without a source message id the reducer cannot attribute
+		// the turn. Skip rather than inventing a synthetic id.
+		return nil
+	}
+	var out []projectionHydrateEvent
+	switch role {
+	case "user":
+		text := strings.TrimSpace(entry.Content)
+		if text == "" {
+			// Prefer explicit text parts if content was empty.
+			var b strings.Builder
+			for _, part := range entry.Parts {
+				if strings.TrimSpace(fmt.Sprint(part["type"])) != "text" {
+					continue
+				}
+				chunk := strings.TrimSpace(fmt.Sprint(part["content"]))
+				if chunk == "" || chunk == "<nil>" {
+					chunk = strings.TrimSpace(fmt.Sprint(part["text"]))
+				}
+				if chunk == "" || chunk == "<nil>" {
+					continue
+				}
+				if b.Len() > 0 {
+					b.WriteByte('\n')
+				}
+				b.WriteString(chunk)
+			}
+			text = b.String()
+		}
+		if text == "" {
+			return nil
+		}
+		*currentTurnID = identity
+		out = append(out, projectionHydrateEvent{
+			Event: "user_message",
+			Data: map[string]interface{}{
+				"itemId": identity,
+				"turnId": identity,
+				"text":   text,
+			},
+		})
+		return out
+	case "assistant":
+		turnID := *currentTurnID
+		if turnID == "" {
+			turnID = identity
+			*currentTurnID = turnID
+		}
+		emittedContent := false
+		// Prefer structured parts when present.
+		if len(entry.Parts) > 0 {
+			for _, part := range entry.Parts {
+				ptype := strings.TrimSpace(fmt.Sprint(part["type"]))
+				switch ptype {
+				case "text":
+					chunk := strings.TrimSpace(fmt.Sprint(part["content"]))
+					if chunk == "" || chunk == "<nil>" {
+						chunk = strings.TrimSpace(fmt.Sprint(part["text"]))
+					}
+					if chunk == "" || chunk == "<nil>" {
+						continue
+					}
+					out = append(out, projectionHydrateEvent{
+						Event: "text_delta",
+						Data:  map[string]interface{}{"itemId": turnID, "delta": chunk},
+					})
+					emittedContent = true
+				case "reasoning":
+					chunk := strings.TrimSpace(fmt.Sprint(part["content"]))
+					if chunk == "" || chunk == "<nil>" {
+						chunk = strings.TrimSpace(fmt.Sprint(part["text"]))
+					}
+					if chunk == "" || chunk == "<nil>" {
+						continue
+					}
+					out = append(out, projectionHydrateEvent{
+						Event: "reasoning_delta",
+						Data:  map[string]interface{}{"itemId": turnID, "delta": chunk},
+					})
+					emittedContent = true
+				case "tool":
+					step, _ := part["step"].(map[string]any)
+					if step == nil {
+						continue
+					}
+					toolID := strings.TrimSpace(fmt.Sprint(step["id"]))
+					toolName := strings.TrimSpace(fmt.Sprint(step["toolName"]))
+					status := strings.TrimSpace(fmt.Sprint(step["status"]))
+					if status == "" || status == "<nil>" {
+						status = "completed"
+					}
+					if toolID == "" || toolID == "<nil>" {
+						continue
+					}
+					started := map[string]interface{}{"itemId": toolID}
+					if toolName != "" && toolName != "<nil>" {
+						started["toolName"] = toolName
+					}
+					out = append(out, projectionHydrateEvent{Event: "tool_started", Data: started})
+					finished := map[string]interface{}{
+						"itemId":     toolID,
+						"toolStatus": status,
+					}
+					if toolName != "" && toolName != "<nil>" {
+						finished["toolName"] = toolName
+					}
+					if output := step["output"]; output != nil {
+						finished["toolResult"] = output
+					}
+					out = append(out, projectionHydrateEvent{Event: "tool_finished", Data: finished})
+					emittedContent = true
+				}
+			}
+		}
+		if !emittedContent {
+			if thinking := strings.TrimSpace(entry.Thinking); thinking != "" {
+				out = append(out, projectionHydrateEvent{
+					Event: "reasoning_delta",
+					Data:  map[string]interface{}{"itemId": turnID, "delta": thinking},
+				})
+				emittedContent = true
+			}
+			if content := strings.TrimSpace(entry.Content); content != "" {
+				out = append(out, projectionHydrateEvent{
+					Event: "text_delta",
+					Data:  map[string]interface{}{"itemId": turnID, "delta": content},
+				})
+				emittedContent = true
+			}
+			for _, step := range entry.Steps {
+				toolID := strings.TrimSpace(fmt.Sprint(step["id"]))
+				toolName := strings.TrimSpace(fmt.Sprint(step["toolName"]))
+				status := strings.TrimSpace(fmt.Sprint(step["status"]))
+				if status == "" || status == "<nil>" {
+					status = "completed"
+				}
+				if toolID == "" || toolID == "<nil>" {
+					continue
+				}
+				started := map[string]interface{}{"itemId": toolID}
+				if toolName != "" && toolName != "<nil>" {
+					started["toolName"] = toolName
+				}
+				out = append(out, projectionHydrateEvent{Event: "tool_started", Data: started})
+				finished := map[string]interface{}{"itemId": toolID, "toolStatus": status}
+				if toolName != "" && toolName != "<nil>" {
+					finished["toolName"] = toolName
+				}
+				if output := step["output"]; output != nil {
+					finished["toolResult"] = output
+				}
+				out = append(out, projectionHydrateEvent{Event: "tool_finished", Data: finished})
+				emittedContent = true
+			}
+		}
+		// Rich history rows are complete snapshots; always seal the turn.
+		out = append(out, projectionHydrateEvent{
+			Event:    "turn_completed",
+			Data:     map[string]interface{}{"turnId": turnID, "done": true, "reason": "rich_history"},
+			TurnDone: true,
+		})
+		return out
+	default:
+		return nil
+	}
 }
 
 // codexRelayEventToProjectionEvent maps a scanned codexRelayEvent to its projection LogicalEvent

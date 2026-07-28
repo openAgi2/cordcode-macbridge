@@ -43,6 +43,10 @@ type LogicalEventSender interface {
 type deltaChunk struct {
 	eventType string // "text_delta" | "reasoning_delta"
 	text      string
+	// itemId is projection attribution (design §6.4). Batching must preserve it;
+	// OpenCode/Claude live frames carry itemId==turnId. Dropping it makes
+	// ProjectionReducer skip every text_delta (headRev only advances on turn_completed).
+	itemID string
 }
 
 type deltaAccum struct {
@@ -136,10 +140,11 @@ func (d *DeltaBatcher) tryAccumulate(ev LogicalEvent) bool {
 			a = &deltaAccum{backendID: ev.BackendID, sessionID: ev.SessionID, directory: ev.Directory, broadcast: ev.Broadcast, targets: ev.Targets, waitTargets: ev.WaitTargets, offline: ev.Offline}
 			d.accums[key] = a
 		}
-		if n := len(a.chunks); n > 0 && a.chunks[n-1].eventType == ev.Event {
+		itemID := extractDeltaItemID(ev.Data)
+		if n := len(a.chunks); n > 0 && a.chunks[n-1].eventType == ev.Event && a.chunks[n-1].itemID == itemID {
 			a.chunks[n-1].text += deltaStr
 		} else {
-			a.chunks = append(a.chunks, deltaChunk{eventType: ev.Event, text: deltaStr})
+			a.chunks = append(a.chunks, deltaChunk{eventType: ev.Event, text: deltaStr, itemID: itemID})
 		}
 		a.totalBytes += len(deltaStr)
 		overflow = a.totalBytes >= deltaBatchMaxPendingBytes
@@ -187,12 +192,16 @@ func (d *DeltaBatcher) emit(a *deltaAccum) {
 		if c.text == "" {
 			continue
 		}
+		data := map[string]interface{}{"delta": c.text}
+		if c.itemID != "" {
+			data["itemId"] = c.itemID
+		}
 		d.sender.PublishLogical(LogicalEvent{
 			BackendID:   a.backendID,
 			SessionID:   a.sessionID,
 			Directory:   a.directory,
 			Event:       c.eventType,
-			Data:        map[string]interface{}{"delta": c.text},
+			Data:        data,
 			Broadcast:   a.broadcast,
 			Targets:     a.targets,
 			WaitTargets: a.waitTargets,
@@ -210,6 +219,18 @@ func extractDeltaText(data interface{}) string {
 		return ""
 	}
 	if s, ok := m["delta"].(string); ok {
+		return s
+	}
+	return ""
+}
+
+// extractDeltaItemID keeps projection attribution across the batch window.
+func extractDeltaItemID(data interface{}) string {
+	m, ok := data.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	if s, ok := m["itemId"].(string); ok {
 		return s
 	}
 	return ""

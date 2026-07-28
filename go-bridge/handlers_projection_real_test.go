@@ -574,23 +574,22 @@ func TestRealColdPullClaudeNonEmpty(t *testing.T) {
 	waitForColdHydrateDrained(t, handlers, "claude", sid, 30*time.Second)
 }
 
-// TestRealColdPullOpencodeNotMigrated: §10.5.7 修法 1 — opencode (HTTP/SQLite, not yet migrated
-// to projection) MUST return projection.not_migrated, NEVER an empty head-0 shell. No agent
-// registered (backendSupportsProjectionHydrate returns false for opencode).
-func TestRealColdPullOpencodeNotMigrated(t *testing.T) {
-	handlers := NewHandlers() // no opencode producer registered
+// TestRealColdPullOpencodeWithoutAgentIsSourceUnavailable: OpenCode is migrated, but with no
+// registered agent/history provider the pull must fail honestly (source unavailable / not empty shell).
+func TestRealColdPullOpencodeWithoutAgentIsSourceUnavailable(t *testing.T) {
+	handlers := NewHandlers() // no opencode agent registered
 	conn := &readFileCaptureConn{}
 	params, _ := json.Marshal(map[string]interface{}{"sessionId": "any-opencode-sid", "sinceRev": 0})
 	msg := WireMessage{RequestID: "r-real-oc", BackendID: "opencode", Method: "get_session_projection", Params: params}
 	handlers.handleGetSessionProjection(conn, msg, nil)
 	if conn.err == nil {
-		t.Fatalf("real opencode: expected projection.not_migrated, got success data=%T (empty shell?)", conn.data)
+		t.Fatalf("real opencode: expected source failure, got success data=%T", conn.data)
 	}
 	if conn.data != nil {
-		t.Fatalf("real opencode: error must not pair with data (no empty shell): %T", conn.data)
+		t.Fatalf("real opencode: error must not pair with data: %T", conn.data)
 	}
-	if conn.err.Code != "projection.not_migrated" {
-		t.Fatalf("real opencode: error code=%s msg=%s, want projection.not_migrated", conn.err.Code, conn.err.Message)
+	if conn.err.Code == "projection.not_migrated" {
+		t.Fatalf("opencode must be migrated; got not_migrated")
 	}
-	t.Logf("REAL OPENCODE cold pull: projection.not_migrated (honest, not empty head) ✅ — code=%s", conn.err.Code)
+	t.Logf("REAL OPENCODE cold pull without agent: honest failure ✅ — code=%s msg=%s", conn.err.Code, conn.err.Message)
 }

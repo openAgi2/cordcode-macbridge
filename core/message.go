@@ -325,6 +325,7 @@ const (
 	EventPermissionRequest   EventType = "permission_request"    // agent requests permission via stdio protocol
 	EventThinking            EventType = "thinking"              // thinking/processing status
 	EventTurnStarted         EventType = "turn_started"          // new turn started (for passive broadcast)
+	EventUserMessage         EventType = "user_message"          // user prompt attributed to a turn (projection SoT)
 	EventContextCompressing  EventType = "context_compressing"   // context compression started
 	EventContextCompressed   EventType = "context_compressed"    // context compression completed
 	EventContextUsageUpdated EventType = "context_usage_updated" // runtime context usage changed
@@ -391,7 +392,8 @@ type Event struct {
 	ToolSuccess    *bool          // optional success flag for EventToolResult
 	SessionID      string         // agent-managed session ID for conversation continuity
 	RequestID      string         // unique request ID for EventPermissionRequest
-	TurnID         string         // source-proven turn identity (Codex turn id; projection lifecycle)
+	TurnID         string         // source-proven turn identity (Codex/Claude/OpenCode turn id; projection lifecycle)
+	ItemID         string         // source-proven item identity (assistant text/reasoning/tool part id)
 	Questions      []UserQuestion // populated when ToolName == "AskUserQuestion"
 	Plan           []Todo         `json:",omitempty"`
 	Done           bool

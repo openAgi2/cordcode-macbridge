@@ -449,3 +449,73 @@ func TestProjectionCatchUpWhenSourceAdvancesPastReady(t *testing.T) {
 		t.Fatalf("second turn = %+v", commit.Projection.Turns[1])
 	}
 }
+
+// TestOpenCodePathlessForceRebuildOnSourceChanged: pathless Ready + sourceChanged must
+// not return AlreadyReady; rebuild starts from an empty reducer so rich history is sole baseline.
+func TestOpenCodePathlessForceRebuildOnSourceChanged(t *testing.T) {
+	kernel := NewProjectionKernel(NewProjectionReducer(), nil)
+	const backendID = "opencode"
+	const sessionID = "oc-pathless"
+
+	admission, err := kernel.BeginHydrateTransaction(
+		backendID, sessionID,
+		ProjectionSourceDescriptor{Identity: sessionID, Path: "", Cursor: 0},
+		false, false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !admission.Leader {
+		t.Fatal("want leader")
+	}
+	// Live-polluted baseline: assistant only, no user (the bug shape).
+	kernel.ApplyHydrateEvent(backendID, sessionID, "epoch", "text_delta", map[string]interface{}{
+		"itemId": "u1", "delta": "reply only",
+	})
+	kernel.ApplyHydrateEvent(backendID, sessionID, "epoch", "turn_completed", map[string]interface{}{
+		"turnId": "u1", "done": true,
+	})
+	if _, err := kernel.CommitHydrateTransaction(backendID, sessionID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Without sourceChanged → AlreadyReady.
+	again, err := kernel.BeginHydrateTransaction(
+		backendID, sessionID,
+		ProjectionSourceDescriptor{Identity: sessionID, Path: "", Cursor: 0},
+		false, false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !again.AlreadyReady {
+		t.Fatalf("pathless same state must AlreadyReady, got %+v", again)
+	}
+
+	// With sourceChanged → force rebuild leader, empty base.
+	force, err := kernel.BeginHydrateTransaction(
+		backendID, sessionID,
+		ProjectionSourceDescriptor{Identity: sessionID, Path: "", Cursor: 0},
+		false, true,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if force.AlreadyReady || !force.Leader {
+		t.Fatalf("pathless sourceChanged must force rebuild leader, got %+v", force)
+	}
+	// Empty tx reducer has no session row yet; first Apply creates the sole baseline.
+	kernel.ApplyHydrateEvent(backendID, sessionID, "epoch", "user_message", map[string]interface{}{
+		"itemId": "u1", "turnId": "u1", "text": "讲个月球笑话",
+	})
+	kernel.ApplyHydrateEvent(backendID, sessionID, "epoch", "text_delta", map[string]interface{}{
+		"itemId": "u1", "delta": "嫦娥…",
+	})
+	commit, err := kernel.CommitHydrateTransaction(backendID, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commit.Projection.Turns) != 1 || commit.Projection.Turns[0].User == nil {
+		t.Fatalf("rebuilt projection missing user: %+v", commit.Projection.Turns)
+	}
+}

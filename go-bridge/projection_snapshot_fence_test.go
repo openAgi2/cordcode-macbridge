@@ -72,7 +72,7 @@ func readyProjectionPublisher(t *testing.T, epoch string) (*Handlers, *EventPubl
 		BackendID: "codex", SessionID: "s1", Event: "text_delta",
 		Data: map[string]interface{}{"itemId": "T1", "delta": "base"},
 	})
-	if err := handlers.ensureProjectionHydrated("codex", "s1"); err != nil {
+	if err := handlers.ensureProjectionHydrated("codex", "s1", false); err != nil {
 		t.Fatalf("commit pathless live projection: %v", err)
 	}
 	if status := handlers.projectionKernel.Status("codex", "s1"); status.Phase != ProjectionHydrateReady {

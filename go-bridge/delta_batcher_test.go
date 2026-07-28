@@ -242,3 +242,76 @@ func TestDeltaBatchOverflowFlushesImmediately(t *testing.T) {
 		t.Fatalf("overflow should have flushed at least 1 frame immediately, got %d", len(evs))
 	}
 }
+
+
+// TestDeltaBatchPreservesItemID: projection SoT attributes text_delta by itemId.
+// Batching must keep itemId on the merged frame; otherwise OpenCode/Claude live
+// content is skipped by ProjectionReducer and only turn_completed advances headRev.
+func TestDeltaBatchPreservesItemID(t *testing.T) {
+	capture := &captureSender{}
+	d := NewDeltaBatcher(capture)
+	defer d.Stop()
+
+	d.Send(LogicalEvent{
+		BackendID: "opencode",
+		SessionID: "ses_1",
+		Event:     "text_delta",
+		Data:      map[string]interface{}{"delta": "Hel", "itemId": "msg_user_1"},
+		Broadcast: true,
+	})
+	d.Send(LogicalEvent{
+		BackendID: "opencode",
+		SessionID: "ses_1",
+		Event:     "text_delta",
+		Data:      map[string]interface{}{"delta": "lo", "itemId": "msg_user_1"},
+		Broadcast: true,
+	})
+	d.FlushAll()
+
+	evs, _ := capture.snapshot()
+	if len(evs) != 1 {
+		t.Fatalf("expected 1 merged frame, got %d", len(evs))
+	}
+	data, _ := evs[0].Data.(map[string]interface{})
+	if data["delta"] != "Hello" {
+		t.Fatalf("delta = %#v, want Hello", data["delta"])
+	}
+	if data["itemId"] != "msg_user_1" {
+		t.Fatalf("itemId = %#v, want msg_user_1 (must survive batching)", data["itemId"])
+	}
+}
+
+// TestDeltaBatchDoesNotMergeAcrossItemIDs: different owning turns must not be
+// concatenated into one attribution-less or wrong-id frame.
+func TestDeltaBatchDoesNotMergeAcrossItemIDs(t *testing.T) {
+	capture := &captureSender{}
+	d := NewDeltaBatcher(capture)
+	defer d.Stop()
+
+	d.Send(LogicalEvent{
+		BackendID: "opencode",
+		SessionID: "ses_1",
+		Event:     "text_delta",
+		Data:      map[string]interface{}{"delta": "A", "itemId": "t1"},
+	})
+	d.Send(LogicalEvent{
+		BackendID: "opencode",
+		SessionID: "ses_1",
+		Event:     "text_delta",
+		Data:      map[string]interface{}{"delta": "B", "itemId": "t2"},
+	})
+	d.FlushAll()
+
+	evs, _ := capture.snapshot()
+	if len(evs) != 2 {
+		t.Fatalf("expected 2 frames for distinct itemIds, got %d", len(evs))
+	}
+	d0, _ := evs[0].Data.(map[string]interface{})
+	d1, _ := evs[1].Data.(map[string]interface{})
+	if d0["itemId"] != "t1" || d0["delta"] != "A" {
+		t.Fatalf("first = %#v", d0)
+	}
+	if d1["itemId"] != "t2" || d1["delta"] != "B" {
+		t.Fatalf("second = %#v", d1)
+	}
+}
