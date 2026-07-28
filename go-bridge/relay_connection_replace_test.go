@@ -135,6 +135,60 @@ func TestRebindLiveTargetsForSessionRestoresSubscriber(t *testing.T) {
 	}
 }
 
+func TestRebindLiveTargetsForSessionDoesNotSubscribeNonObserver(t *testing.T) {
+	h := NewHandlers()
+	defer h.Shutdown(context.Background())
+
+	device := &TrustedDeviceRecord{DeviceID: "dev-rebind-non-observer"}
+	conn := &relayBroadcastCaptureConn{device: device}
+	globalDeviceConnRegistry.Register(device.DeviceID, conn)
+	defer globalDeviceConnRegistry.Unregister(device.DeviceID, conn)
+	h.observation.SetScope(device.DeviceID, ObservationScope{
+		BackendID: "codex", SessionIDs: []string{"sess-other"}, DeliveryMode: scopeFullStream, LeaseSeconds: 90,
+	})
+
+	if n := h.rebindLiveTargetsForSession("codex", "sess-target"); n != 0 {
+		t.Fatalf("rebound non-observer conns = %d, want 0", n)
+	}
+	if h.broadcaster.HasSessionSubscriber("codex", "sess-target") {
+		t.Fatal("non-observing device must not acquire a session subscription")
+	}
+}
+
+func TestRebindLiveTargetsForSessionPreservesNegotiatedV2Ownership(t *testing.T) {
+	h := NewHandlers()
+	defer h.Shutdown(context.Background())
+
+	legacyDevice := &TrustedDeviceRecord{DeviceID: "dev-rebind-legacy"}
+	legacy := &relayBroadcastCaptureConn{device: legacyDevice}
+	v2Device := &TrustedDeviceRecord{DeviceID: "dev-rebind-v2"}
+	v2 := &relayBroadcastCaptureConn{device: v2Device}
+	for _, item := range []struct {
+		device *TrustedDeviceRecord
+		conn   *relayBroadcastCaptureConn
+	}{
+		{legacyDevice, legacy},
+		{v2Device, v2},
+	} {
+		globalDeviceConnRegistry.Register(item.device.DeviceID, item.conn)
+		defer globalDeviceConnRegistry.Unregister(item.device.DeviceID, item.conn)
+		h.observation.SetScope(item.device.DeviceID, ObservationScope{
+			BackendID: "codex", SessionIDs: []string{"sess-z"}, DeliveryMode: scopeFullStream, LeaseSeconds: 90,
+		})
+	}
+	h.eventPublisher.SetConnSyncV2(v2, true)
+
+	if n := h.rebindLiveTargetsForSession("codex", "sess-z"); n != 2 {
+		t.Fatalf("rebound conns = %d, want 2", n)
+	}
+	if h.eventPublisher.ConnSyncV2(legacy) {
+		t.Fatal("rebind must not upgrade a legacy connection to session_sync_v2")
+	}
+	if !h.eventPublisher.ConnSyncV2(v2) {
+		t.Fatal("rebind must preserve the v2 mark negotiated by hello")
+	}
+}
+
 func TestBroadcasterTransferSubscriptionsMovesKeys(t *testing.T) {
 	b := NewBroadcaster()
 	old := &relayBroadcastCaptureConn{device: &TrustedDeviceRecord{DeviceID: "d1"}}

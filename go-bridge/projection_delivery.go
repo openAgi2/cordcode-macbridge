@@ -33,3 +33,14 @@ func (p *EventPublisher) SetConnSyncV2(conn Connection, enabled bool) {
 	)
 }
 
+// ConnSyncV2 reports the capability negotiated for this exact logical connection.
+// Rebind/recovery code may restore subscriptions, but must never manufacture this
+// ownership bit: only a successful hello negotiation may enable it.
+func (p *EventPublisher) ConnSyncV2(conn Connection) bool {
+	if p == nil || conn == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.syncV2[conn]
+}

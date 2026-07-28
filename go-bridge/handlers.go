@@ -283,7 +283,8 @@ func (h *Handlers) rebindLiveTargetsForSession(backendID, sessionID string) int 
 	}
 	rebound := 0
 	for _, deviceID := range globalDeviceConnRegistry.AllDeviceIDs() {
-		// Prefer observation scope (authoritative watch list); fall back to any open conn.
+		// Observation scope is the authoritative watch list. A connected device that does
+		// not observe this session must not be subscribed as a recovery side effect.
 		shouldBind := false
 		if h.observation != nil {
 			if scope := h.observation.GetScope(deviceID, backendID); scope != nil {
@@ -303,13 +304,8 @@ func (h *Handlers) rebindLiveTargetsForSession(backendID, sessionID string) int 
 		if len(conns) == 0 {
 			continue
 		}
-		if !shouldBind && h.observation == nil {
-			shouldBind = true
-		}
 		if !shouldBind {
-			// Still rebind if the device has any open conn: better to over-deliver
-			// (client filters) than leave zero targets mid-turn.
-			shouldBind = true
+			continue
 		}
 		for _, conn := range conns {
 			if conn == nil {
@@ -323,11 +319,9 @@ func (h *Handlers) rebindLiveTargetsForSession(backendID, sessionID string) int 
 				BackendID: backendID,
 				SessionID: sessionID,
 			})
-			// Keep v2 push enabled if the conn previously advertised session_sync_v2
-			// (SetConnSyncV2 is idempotent; missing mark only loses projection_patch).
-			if h.eventPublisher != nil {
-				h.eventPublisher.SetConnSyncV2(conn, true)
-			}
+			// Capability provenance belongs to hello negotiation. The existing connection's
+			// v2 mark already survives a subscription rebind; a replacement connection must
+			// negotiate its own mark in the hello handler.
 			rebound++
 		}
 	}
