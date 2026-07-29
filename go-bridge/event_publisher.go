@@ -654,7 +654,12 @@ func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID strin
 				"sessionPrefix", projectionSessionLogPrefix(sessionID),
 				"syncRev", patch.SyncRev,
 				"remote", conn.RemoteAddr(),
-				"device", func() string { if d := conn.AuthedDevice(); d != nil { return d.DeviceID }; return "" }(),
+				"device", func() string {
+					if d := conn.AuthedDevice(); d != nil {
+						return d.DeviceID
+					}
+					return ""
+				}(),
 			)
 		} else {
 			p.projectionInvalidated[key] = true
@@ -728,9 +733,14 @@ func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
 
 	overflowed := make([]Connection, 0)
 	waits := make([]eventDeliveryWait, 0, len(waitTargets))
+	rawEligible := make(map[Connection]struct{}, len(targets))
 	enqueued := 0
 	observationFiltered := 0
 	for conn := range targets {
+		if !p.shouldDeliverRawEventLocked(conn, logical.BackendID, logical.SessionID, logical.Event) {
+			continue
+		}
+		rawEligible[conn] = struct{}{}
 		if p.observation != nil {
 			if device := conn.AuthedDevice(); device != nil &&
 				!p.observation.ShouldSendEvent(device.DeviceID, logical.BackendID, logical.SessionID, logical.Event) {
@@ -772,7 +782,7 @@ func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
 	// observation, then retry delivery once for this stamped event (projection
 	// already applied; do not re-Apply). Fixes mid-turn candidateTargets=0 after
 	// path thrash while the device still has an open transport.
-	if enqueued == 0 && len(overflowed) == 0 && !logical.Offline &&
+	if enqueued == 0 && len(overflowed) == 0 && (len(targets) == 0 || len(rawEligible) > 0) && !logical.Offline &&
 		p.rebindTargets != nil && logical.BackendID != "" && logical.SessionID != "" {
 		rebind := p.rebindTargets
 		p.mu.Unlock()
@@ -785,6 +795,10 @@ func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
 				}
 			}
 			for conn := range targets {
+				if !p.shouldDeliverRawEventLocked(conn, logical.BackendID, logical.SessionID, logical.Event) {
+					continue
+				}
+				rawEligible[conn] = struct{}{}
 				if p.observation != nil {
 					if device := conn.AuthedDevice(); device != nil &&
 						!p.observation.ShouldSendEvent(device.DeviceID, logical.BackendID, logical.SessionID, logical.Event) {
@@ -852,7 +866,7 @@ func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
 	// observation filter means the frame will not reach any online device.
 	// Buffer live frames for interested degraded devices so reconnect can flush
 	// instead of permanent jump via history bulk (live-frame-buffer design).
-	if enqueued == 0 && len(overflowed) == 0 && !logical.Offline {
+	if enqueued == 0 && len(overflowed) == 0 && len(rawEligible) > 0 && !logical.Offline {
 		switch logical.Event {
 		case "text_delta", "reasoning_delta", "turn_started", "tool_started", "tool_finished":
 			slog.Warn("event-publisher: live event has zero online targets",

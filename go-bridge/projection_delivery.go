@@ -8,9 +8,9 @@ import "log/slog"
 // See docs/protocol/bridge-v1.md「Session Projection Stream」and design §6.2.
 
 // SetConnSyncV2 marks a connection as a session_sync_v2 client (it advertised session_sync_v2 in
-// hello and the server enabled it). Called from the hello handlers. A v2 conn receives
-// projection_patch frames in addition to raw events; the v2 client ignores raw content
-// (design §9.3 dual-publish transition).
+// hello and the server enabled it). Called from the hello handlers. Since Phase 4, this capability
+// is an unambiguous projection-only ownership promise: timeline-semantic raw events are filtered
+// for this connection while projection frames and non-timeline control-plane events remain.
 func (p *EventPublisher) SetConnSyncV2(conn Connection, enabled bool) {
 	if p == nil || conn == nil {
 		return
@@ -31,6 +31,38 @@ func (p *EventPublisher) SetConnSyncV2(conn Connection, enabled bool) {
 		"remote", remote, "device", device,
 		"enabled", enabled, "syncV2Size", len(p.syncV2),
 	)
+}
+
+// isSessionSyncV2RawTimelineEvent mirrors the content-writer seals in iOS and remote-web.
+// These events have already been reduced into SessionProjection before delivery, so sending the
+// raw frame to a projection-only client would recreate the retired dual-publish path.
+//
+// Keep this an explicit deny-list rather than treating every session-scoped event as content:
+// todos/context/catalog/diagnostic controls are not all represented by SessionProjection yet.
+func isSessionSyncV2RawTimelineEvent(event string) bool {
+	switch event {
+	case "turn_started", "turn_completed",
+		"user_message",
+		"text_delta", "message_updated", "message_content",
+		"reasoning_delta", "thinking_delta",
+		"tool_started", "tool_finished", "tool_content",
+		"permission_request", "permission_asked",
+		"question_asked", "question_resolved",
+		"context_compressing", "context_compressed",
+		"session_state_changed", "session_running_signal",
+		"delivery_reconcile_required",
+		"error":
+		return true
+	default:
+		return false
+	}
+}
+
+// shouldDeliverRawEventLocked reports whether conn remains eligible for the raw envelope.
+// Sessionless errors/control notifications are never projection-owned even if they reuse an event
+// name from the timeline deny-list. Caller must hold p.mu: syncV2 is mutable connection state.
+func (p *EventPublisher) shouldDeliverRawEventLocked(conn Connection, backendID, sessionID, event string) bool {
+	return !p.syncV2[conn] || backendID == "" || sessionID == "" || !isSessionSyncV2RawTimelineEvent(event)
 }
 
 // ConnSyncV2 reports the capability negotiated for this exact logical connection.

@@ -418,21 +418,32 @@ patches/snapshots and MUST NOT dual-source merge content against `get_session_me
 - **Single outbound funnel.** Projection frames leave MacBridge only through the existing
   `EventPublisher` per-connection dispatch (they reuse `broadcaster` + observation target
   resolution). There is no parallel projection websocket / SSE pipe.
-- **Phase scope.** Phase 1 consumes the Codex `file-relay/rollout` path only — frames already
-  carry `itemId`/turn_id and bypass `DeltaBatcher`, so parts attribute to the correct turn. The
-  driver/agent-event path (`relayEvents` → `DeltaBatcher`, which strips to `{"delta":text}`) and
-  local-send correlation are Phase 3+. Claude/OpenCode/web are Phase 3+; until then clients keep
-  their existing completion/merge behavior for those backends.
+- **Production scope.** Codex, Claude and OpenCode project through the same Kernel contract;
+  iOS and remote-web consume the same SPS ownership semantics.
 
 ### Capability: `session_sync_v2`
 
-A CLIENT transport capability plus a backend-scoped ownership capability. The client opts in with
+A CLIENT projection-only transport capability plus a backend-scoped ownership capability. The
+client opts in with
 `capabilities: ["session_sync_v2"]` in `hello`; when the server-side rollout flag is enabled,
 MacBridge echoes `capabilities["session_sync_v2"] = true` and adds `session_sync_v2` only to each
 migrated backend descriptor's `capabilities`. Clients MUST decide timeline ownership from the
-selected backend descriptor, not the global hello echo. K1 production keeps the server rollout flag
-disabled; tests may enable it explicitly. Phase 1 migrates Codex only. Adding these fields is
-non-breaking and bumps `schemaRevision`, not the protocol major version.
+selected backend descriptor, not the global hello echo.
+
+Since Phase 4, advertising `session_sync_v2` is an unambiguous ownership promise, not a shadow
+observation request:
+
+- opted-in connections receive projection frames plus non-timeline control-plane events;
+- MacBridge's live `EventPublisher` fanout does not send raw timeline-semantic events (`turn_*`,
+  user/text/reasoning/tool content, permission/question timeline steps, completion/error state) to
+  that connection. Durable recovery/mailbox storage remains legacy-compatible so a later `.off`
+  client can recover; an active client therefore MUST retain its raw-content writer seal;
+- a legacy client uses the explicit kill-switch by omitting `session_sync_v2`; it continues to
+  receive raw/history behavior;
+- clients MUST NOT advertise the capability while retaining legacy timeline ownership.
+
+The former rollout-only shadow mode is retired. Adding these fields remains non-breaking and uses
+`schemaRevision`, not the protocol major version.
 
 ### Push frames
 

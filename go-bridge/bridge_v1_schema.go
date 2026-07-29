@@ -12,9 +12,12 @@ const (
 	// 2026-07-24: Session Projection Stream（session_sync_v2 client capability + hello_ack echo
 	// + projection_patch/projection_snapshot/sync_invalidate events + get_session_projection RPC
 	// + BridgeSessionProjection 系列类型）。同样是 extensible 非破坏性新增（capability 数组/map、
-	// 新 event 名、新 RPC method），只 bump schemaRevision。Phase 1 仅供 Codex rollout 路径；
-	// driver/local-send/web 为 Phase 3+。见 docs/protocol/bridge-v1.md「Session Projection Stream」。
-	BridgeProtocolSchemaRevision = "2026-07-26"
+	// 新 event 名、新 RPC method），只 bump schemaRevision。
+	//
+	// 2026-07-29 Phase 4: session_sync_v2 opt-in semantics become projection-only; Mac no longer
+	// live-delivers raw timeline content to opted-in connections. Legacy clients omit the
+	// capability and retain the explicit off path.
+	BridgeProtocolSchemaRevision = "2026-07-29"
 )
 
 type BridgeV1Protocol struct {

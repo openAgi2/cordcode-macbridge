@@ -16,6 +16,22 @@ func projectionPatchFrames(frames []interface{}) []EventMessage {
 	return out
 }
 
+func rawEventFrames(frames []interface{}, names ...string) []EventMessage {
+	wanted := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		wanted[name] = struct{}{}
+	}
+	var out []EventMessage
+	for _, frame := range frames {
+		if event, ok := frame.(EventMessage); ok {
+			if _, match := wanted[event.Event]; match {
+				out = append(out, event)
+			}
+		}
+	}
+	return out
+}
+
 // waitForProjectionPatches polls the capture conn until it has at least min projection_patch
 // frames (delivery is async via the sink goroutine), returning them.
 func waitForProjectionPatches(t *testing.T, conn *publisherCaptureConn, min int) []EventMessage {
@@ -35,8 +51,7 @@ func waitForProjectionPatches(t *testing.T, conn *publisherCaptureConn, min int)
 }
 
 // TestProjectionPatchDeliveredToV2ConnOnly: a subscribed syncV2 conn receives projection_patch
-// frames; a subscribed legacy conn receives NONE (raw path unchanged) — the dual-publish model
-// (design §9.3: server emits patch to v2; legacy keeps raw).
+// frames and no raw timeline content; a subscribed legacy conn receives raw and no projection.
 func TestProjectionPatchDeliveredToV2ConnOnly(t *testing.T) {
 	broadcaster := NewBroadcaster()
 	ep := NewEventPublisher("epoch-emit", broadcaster)
@@ -62,12 +77,104 @@ func TestProjectionPatchDeliveredToV2ConnOnly(t *testing.T) {
 	if patches[0].PerSessionSeq != 1 || patches[1].PerSessionSeq != 2 {
 		t.Fatalf("syncRev sequence = %d,%d, want 1,2", patches[0].PerSessionSeq, patches[1].PerSessionSeq)
 	}
+	legacy.waitCount(t, 2)
+	if got := len(rawEventFrames(v2.snapshot(), "turn_started", "text_delta")); got != 0 {
+		t.Fatalf("v2 conn received %d raw timeline frames (must be 0)", got)
+	}
+	if got := len(rawEventFrames(legacy.snapshot(), "turn_started", "text_delta")); got != 2 {
+		t.Fatalf("legacy conn received %d raw timeline frames, want 2", got)
+	}
 
 	// Legacy conn receives zero projection_patch frames (it is never a syncV2 target, so
 	// deliverProjectionPatchLocked skips it — only raw reaches it, via the unchanged path).
 	time.Sleep(150 * time.Millisecond)
 	if got := len(projectionPatchFrames(legacy.snapshot())); got != 0 {
 		t.Fatalf("legacy conn received %d projection_patch frames (must be 0)", got)
+	}
+}
+
+func TestProjectionOnlyConnStillReceivesControlPlaneRawEvents(t *testing.T) {
+	ep := NewEventPublisher("epoch-control")
+	v2 := newPublisherCaptureConn(nil)
+	v2.device = &TrustedDeviceRecord{DeviceID: "dev-v2-control"}
+	ep.SetConnSyncV2(v2, true)
+
+	ep.PublishLogical(LogicalEvent{
+		BackendID: "codex",
+		SessionID: "s-control",
+		Event:     "todos_updated",
+		Targets:   []Connection{v2},
+		Data:      map[string]interface{}{"todos": []interface{}{}},
+	})
+
+	v2.waitCount(t, 1)
+	if got := len(rawEventFrames(v2.snapshot(), "todos_updated")); got != 1 {
+		t.Fatalf("v2 conn received %d todos_updated frames, want 1", got)
+	}
+}
+
+func TestProjectionOnlyConnStillReceivesSessionlessErrors(t *testing.T) {
+	ep := NewEventPublisher("epoch-error")
+	v2 := newPublisherCaptureConn(nil)
+	v2.device = &TrustedDeviceRecord{DeviceID: "dev-v2-error"}
+	ep.SetConnSyncV2(v2, true)
+
+	ep.PublishLogical(LogicalEvent{
+		Event:   "error",
+		Targets: []Connection{v2},
+		Message: "transport unavailable",
+	})
+
+	v2.waitCount(t, 1)
+	if got := len(rawEventFrames(v2.snapshot(), "error")); got != 1 {
+		t.Fatalf("v2 conn received %d sessionless error frames, want 1", got)
+	}
+}
+
+func TestProjectionOnlyRawTimelineEventDoesNotTriggerLegacyRebind(t *testing.T) {
+	ep := NewEventPublisher("epoch-no-rebind")
+	v2 := newPublisherCaptureConn(nil)
+	v2.device = &TrustedDeviceRecord{DeviceID: "dev-v2-no-rebind"}
+	ep.SetConnSyncV2(v2, true)
+	rebinds := 0
+	ep.SetRebindTargets(func(_, _ string) int {
+		rebinds++
+		return 0
+	})
+
+	ep.PublishLogical(LogicalEvent{
+		BackendID: "codex",
+		SessionID: "s-no-rebind",
+		Event:     "text_delta",
+		Targets:   []Connection{v2},
+		Data:      map[string]interface{}{"delta": "projection owned"},
+	})
+
+	if rebinds != 0 {
+		t.Fatalf("projection-only raw event triggered %d legacy rebinds, want 0", rebinds)
+	}
+}
+
+func TestSessionSyncV2RawTimelineClassification(t *testing.T) {
+	for _, event := range []string{
+		"turn_started", "turn_completed", "user_message",
+		"text_delta", "message_updated", "reasoning_delta",
+		"tool_started", "tool_finished",
+		"permission_request", "question_asked", "question_resolved",
+		"context_compressing", "context_compressed",
+		"session_state_changed", "delivery_reconcile_required", "error",
+	} {
+		if !isSessionSyncV2RawTimelineEvent(event) {
+			t.Errorf("%s must be projection-owned raw timeline content", event)
+		}
+	}
+	for _, event := range []string{
+		"todos_updated", "context_usage_updated", "sessions_changed",
+		"diagnostic_progress", "permission_mode_changed",
+	} {
+		if isSessionSyncV2RawTimelineEvent(event) {
+			t.Errorf("%s must remain control-plane", event)
+		}
 	}
 }
 
