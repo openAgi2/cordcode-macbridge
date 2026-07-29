@@ -1,7 +1,7 @@
 # MacBridge Claude list_sessions Runtime CPU — 完成情况审计报告
 
 Date: 2026-07-05
-审计对象: [docs/2026-07-05-macbridge-claude-list-sessions-runtime-cpu-plan完成情况.md](2026-07-05-macbridge-claude-list-sessions-runtime-cpu-plan完成情况.md)
+审计对象: [docs/2026-07-05-macbridge-claude-list-sessions-runtime-cpu-plan完成情况.md](../2026-07-05-macbridge-claude-list-sessions-runtime-cpu-plan完成情况.md)
 被审计 commit: `aec16b8`（main HEAD）
 审计范围: 逐项核实完成情况报告中的结构、测试、构建、文档与 scope-boundary 声明；独立复跑关键测试与产物核查。
 审计人: 独立 agent（非实现该计划的 agent）

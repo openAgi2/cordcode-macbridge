@@ -1,11 +1,11 @@
 # Web Renderer 共享包实施文档 — 评审报告
 
 - **评审日期**：2026-07-03
-- **被评审文档**：[docs/2026-07-03-web-renderer-shared-package-implementation-plan.md](2026-07-03-web-renderer-shared-package-implementation-plan.md)
+- **被评审文档**：[docs/2026-07-03-web-renderer-shared-package-implementation-plan.md](../2026-07-03-web-renderer-shared-package-implementation-plan.md)
 - **评审者**：评审 agent（以代码为唯一真相源）
 - **核验范围**：相邻 iOS 仓库 `../cordcode-ios` 的 `message-web` 与 `remote-web`
 - **方法**：读文档 → 对照代码核验（组件 diff、React/markdown 版本、package.json scripts、native bridge 接口、DiffViewer/ToolBlock 真实依赖与 action 调用、workspace 配置）→ 评估可施工性。**本评审核验"计划可施工性"，非施工结果。**
-- **关联**：被评审文档对应 [执行计划](2026-07-03-architecture-health-execution-plan.md) 的批次 C，是 C 的施工前细化。
+- **关联**：被评审文档对应 [执行计划](../2026-07-03-architecture-health-execution-plan.md) 的批次 C，是 C 的施工前细化。
 
 ---
 

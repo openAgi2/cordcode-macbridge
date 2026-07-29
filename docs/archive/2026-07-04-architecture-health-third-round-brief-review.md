@@ -1,7 +1,7 @@
 # 架构健康第三轮开发交接文档 — 评审报告
 
 日期：2026-07-04
-被评审文档：[docs/2026-07-04-architecture-health-third-round-development-brief.md](2026-07-04-architecture-health-third-round-development-brief.md)（下称“本文”或“brief”）
+被评审文档：[docs/2026-07-04-architecture-health-third-round-development-brief.md](../2026-07-04-architecture-health-third-round-development-brief.md)（下称“本文”或“brief”）
 评审性质：独立 agent 对 brief 做事实核实 + 范围/可执行性评审。**仅评审，不改 brief、不改代码。**
 核实基准：iOS 源码 `../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift`（实测 1967 行）、配套测试、`scripts/hygiene-baseline.json`、`scripts/check-architecture-hygiene.sh`、`../cordcode-ios/OpenCodeiOS/project.yml`、`../cordcode-ios/scripts/run.sh`。所有行号、符号名为本轮 fresh 实测。
 
@@ -13,7 +13,7 @@
 
 必须修的两点：
 
-1. **`attemptRelayConnection` 是不存在的符号。** brief 在第 0 节和第 2 节表格把它列为要提取的核心方法，但源码里实际叫 `attemptRelay`（[BridgeProvider.swift:834](../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift:834)）。全仓 `grep attemptRelayConnection` 零命中。
+1. **`attemptRelayConnection` 是不存在的符号。** brief 在第 0 节和第 2 节表格把它列为要提取的核心方法，但源码里实际叫 `attemptRelay`（[BridgeProvider.swift:834](../../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift:834)）。全仓 `grep attemptRelayConnection` 零命中。
 2. **源码切片遗漏了 transport-creation 层最大的一块——`runDirectRace` 及其三个竞速 actor。** brief 列出的候选拆分片段合计约 ~155 行，但同一层里被漏掉的 `runDirectRace`（162 行）+ `RaceTransportCollector`/`RaceResult`/`RaceCompletion`（~70 行）+ `runDirectSingle`/`runRelay`/`relayCredentials(for:)`（~48 行）合计 ~280 行——**漏列的比已列的还多**。而这恰恰是 brief 第 3 节 T2 “未采纳 transport 清理” 不变量的真实落点（`RaceTransportCollector` 就是收集未 adopt transport 的地方）。
 
 修正这两点之后，brief 的其余部分（子域选择、测试优先序、硬约束、不做清单、提交边界）是成立的，可作为第三轮施工输入。
@@ -40,13 +40,13 @@
 | 基线 lines=1967 / funcs=88 / ForTesting=36 | `wc -l` = 1967；`grep -wo 'func' \| wc -l` = 88；`grep -o 'ForTesting' \| wc -l` = 36。三项与 `hygiene-baseline.json` 完全一致 |
 | 计数法（funcs 用 `grep -wo 'func'`、forTesting 用 `grep -o 'ForTesting'`） | `hygiene-baseline.json` `_comment` 字段与脚本计数法自洽 |
 | `connectBridge` / `connectTransport` / `runDirectPhase` / `attemptDirectPhase` / `adoptSuccessfulConnection` / `selectConnectionStrategy` / `shouldSwitchPath` 均存在 | 逐一命中 |
-| `directPhaseFactoryForTesting` / `relayFactoryForTesting` / `connectTransportConnectForTesting` 三组测试注入存在 | 逐一命中（[806](../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift:806)/[807](../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift:807)/[853](../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift:853)） |
-| `unadoptedTransportCleanupCount` 观测存在 | [855](../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift:855) |
+| `directPhaseFactoryForTesting` / `relayFactoryForTesting` / `connectTransportConnectForTesting` 三组测试注入存在 | 逐一命中（[806](../../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift:806)/[807](../../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift:807)/[853](../../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift:853)） |
+| `unadoptedTransportCleanupCount` 观测存在 | [855](../../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift:855) |
 | 现有测试 `BridgeLANFirstFallbackTests` / `BridgePathSwitchTests` / `GodObjectCharacterizationTests` 存在 | 三文件均在 `OpenCodeiOSTests/` |
-| `testConnectTransport_nonBridgeErrorFailure_disconnectsUnadoptedTransport` 是 T2 起点 | [BridgeLANFirstFallbackTests.swift:469](../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/BridgeLANFirstFallbackTests.swift:469) |
-| `connectTransport` 在非 `CCCodeBridgeError` 失败时也 disconnect 未 adopt transport | [715-721](../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift:715)：catch-all 里 `await transport.disconnect()` + `unadoptedTransportCleanupCount &+= 1` |
-| `adoptSuccessfulConnection` 是唯一写 active connection state 的入口 | [1095-1180+](../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift:1095)：写 `transport`/`activeBridge`/`activeBridgeURLString`/`activeConnectionKind`/`cachedClients`/`connectionStatus`/`connectedBackends`/`runningSessions`；transport-creation 路径不写这些 |
-| generation 过期不 adopt 旧 transport | `connectTransport` [722-728](../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift:722) 与 `adoptSuccessfulConnection` [1097-1106](../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift:1097) 双层 guard |
+| `testConnectTransport_nonBridgeErrorFailure_disconnectsUnadoptedTransport` 是 T2 起点 | [BridgeLANFirstFallbackTests.swift:469](../../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/BridgeLANFirstFallbackTests.swift:469) |
+| `connectTransport` 在非 `CCCodeBridgeError` 失败时也 disconnect 未 adopt transport | [715-721](../../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift:715)：catch-all 里 `await transport.disconnect()` + `unadoptedTransportCleanupCount &+= 1` |
+| `adoptSuccessfulConnection` 是唯一写 active connection state 的入口 | [1095-1180+](../../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift:1095)：写 `transport`/`activeBridge`/`activeBridgeURLString`/`activeConnectionKind`/`cachedClients`/`connectionStatus`/`connectedBackends`/`runningSessions`；transport-creation 路径不写这些 |
+| generation 过期不 adopt 旧 transport | `connectTransport` [722-728](../../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift:722) 与 `adoptSuccessfulConnection` [1097-1106](../../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift:1097) 双层 guard |
 | test target 名 `CCCodeTests` | `project.yml:72,77` 确认 |
 | scheme 名 `CordCode` | `project.yml:1` 确认 |
 | iOS `scripts/run.sh device` | `../cordcode-ios/scripts/run.sh` 存在，接受 `device` 子命令 |
@@ -57,13 +57,13 @@
 
 #### F1（高）：`attemptRelayConnection` 是虚构符号，实际是 `attemptRelay`
 
-**证据**：`grep -rn 'attemptRelayConnection' ../cordcode-ios/` 零命中。实际方法是 [`attemptRelay`](../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift:834)（签名 `attemptRelay(bridge:token:generation:)`）。
+**证据**：`grep -rn 'attemptRelayConnection' ../cordcode-ios/` 零命中。实际方法是 [`attemptRelay`](../../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift:834)（签名 `attemptRelay(bridge:token:generation:)`）。
 
 **brief 出现位置**：
 - 第 0 节 line 29：列举“当前相关代码集中在 `connectBridge`、`connectTransport`、`attemptRelayConnection`、`runDirectPhase`、`attemptDirectPhase` …”
 - 第 2 节表 line 73：行首 `` `attemptRelayConnection(...)` ``，角色“以 relay credentials 创建 relay transport 并连接”，处理“提取”。
 
-**影响**：brief 第 1 节把 [`BridgeProvider.swift`](../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift) 列为“开发前必须读”，施工 agent 真去读时会找不到 `attemptRelayConnection`，要么误判 brief 过时、要么自己揣测对应的是 `attemptRelay` 还是 `runRelay`。一个范围被收窄到“只拆一个子域”的 brief，连子域里核心方法的名字都写错，是不该出现的精度问题。
+**影响**：brief 第 1 节把 [`BridgeProvider.swift`](../../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift) 列为“开发前必须读”，施工 agent 真去读时会找不到 `attemptRelayConnection`，要么误判 brief 过时、要么自己揣测对应的是 `attemptRelay` 还是 `runRelay`。一个范围被收窄到“只拆一个子域”的 brief，连子域里核心方法的名字都写错，是不该出现的精度问题。
 
 **修正**：把 brief 两处 `attemptRelayConnection` 改为 `attemptRelay`，并在第 2 节表格补一行说明 `attemptRelay` 的真实实现委托给 `runRelay`（见 F2）。
 
@@ -133,7 +133,7 @@ brief line 167-170 的要求：“lines 应小于 1967；funcs 应小于 88，�
 
 #### M3：P0“先补测试”与现有黑盒覆盖、与 connector 级测试只能 post-P1 之间存在张力
 
-brief 第 3 节 T1 列了 5 条 direct/relay attempt 不变量，但实测 `BridgeLANFirstFallbackTests` 已覆盖 4 条（[testOrchestration_directSuccess_doesNotAttemptRelay:119](../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/BridgeLANFirstFallbackTests.swift:119)、[testOrchestration_directFailNoRelay_reportsRealFailure_noFakeFallback:161](../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/BridgeLANFirstFallbackTests.swift:161)、[testOrchestration_relayFirstBridge_relayOnlySkipsDirect:184](../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/BridgeLANFirstFallbackTests.swift:184)、[testOrchestration_multiCandidate_factoryReceivesMultipleCandidates:207](../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/BridgeLANFirstFallbackTests.swift:207)）；brief 自己也在 line 106 承认“现有已覆盖大部分”。
+brief 第 3 节 T1 列了 5 条 direct/relay attempt 不变量，但实测 `BridgeLANFirstFallbackTests` 已覆盖 4 条（[testOrchestration_directSuccess_doesNotAttemptRelay:119](../../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/BridgeLANFirstFallbackTests.swift:119)、[testOrchestration_directFailNoRelay_reportsRealFailure_noFakeFallback:161](../../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/BridgeLANFirstFallbackTests.swift:161)、[testOrchestration_relayFirstBridge_relayOnlySkipsDirect:184](../../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/BridgeLANFirstFallbackTests.swift:184)、[testOrchestration_multiCandidate_factoryReceivesMultipleCandidates:207](../../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/BridgeLANFirstFallbackTests.swift:207)）；brief 自己也在 line 106 承认“现有已覆盖大部分”。
 
 同时 T2 line 116 又说“拆分后应迁到 connector 直接测试”——即 connector 级测试只能在 P1 提取之后写，不可能在 P0 先写。
 
@@ -145,7 +145,7 @@ brief 第 3 节 T1 列了 5 条 direct/relay attempt 不变量，但实测 `Brid
 
 - **L1（funcs 逃生舱过松）**：line 168 “funcs 应小于 88，除非提取为了访问控制临时增加极少数 forwarding 方法；若 funcs 未下降，完成报告必须解释为什么”。这个例外几乎可以合理化任何 funcs 不降的结果。建议与 M2 的量化目标绑定：“forwarding 方法不得超过 N 个，否则视为未完成提取”。
 - **L2（验证命令硬编码绝对路径）**：line 175 用 `CORDCODE_IOS_ROOT=/Users/jacklee/Projects/cordcode-ios`。脚本默认就解析 `../cordcode-ios`（第二轮审计与 CI 都用默认/相对路径），无需绝对路径；绝对路径换机器就失效。建议删掉 env 前缀，或改用 `CORDCODE_IOS_ROOT=../cordcode-ios`。
-- **L3（`CCCodeBridgeTransport` 构造依赖 `relayStore`）**：line 160 列 connector 接收项含 `SavedBridgeStore`，方向对；但实际构造（[682-691](../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift:682)）需要 `relayStore: store`，relay 重连时读私钥。建议 brief 显式写明“connector 持有/接收 `SavedBridgeStore` 引用以构造 relay transport”，避免施工 agent 试图做成 store-less connector 后撞墙。
+- **L3（`CCCodeBridgeTransport` 构造依赖 `relayStore`）**：line 160 列 connector 接收项含 `SavedBridgeStore`，方向对；但实际构造（[682-691](../../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift:682)）需要 `relayStore: store`，relay 重连时读私钥。建议 brief 显式写明“connector 持有/接收 `SavedBridgeStore` 引用以构造 relay transport”，避免施工 agent 试图做成 store-less connector 后撞墙。
 
 ---
 

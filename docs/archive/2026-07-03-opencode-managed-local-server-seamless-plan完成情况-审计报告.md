@@ -1,8 +1,8 @@
 # OpenCode managed local server seamless plan 完成情况 — 审计报告
 
 审计日期：2026-07-03
-被审计文件：[docs/2026-07-03-2026-07-03-opencode-managed-local-server-seamless-plan完成情况.md](2026-07-03-2026-07-03-opencode-managed-local-server-seamless-plan完成情况.md)
-对应 plan：[docs/2026-07-03-opencode-managed-local-server-seamless-plan.md](2026-07-03-opencode-managed-local-server-seamless-plan.md)
+被审计文件：[docs/2026-07-03-2026-07-03-opencode-managed-local-server-seamless-plan完成情况.md](../2026-07-03-2026-07-03-opencode-managed-local-server-seamless-plan完成情况.md)
+对应 plan：[docs/2026-07-03-opencode-managed-local-server-seamless-plan.md](../2026-07-03-opencode-managed-local-server-seamless-plan.md)
 exec-plan 状态：`.exec-plan/state/plan-41ad0453cd44.json`
 合并提交：`f2f2cf6`（Merge `eac1ef8` PR #2）
 
@@ -100,7 +100,7 @@ codex: "codex" CLI not found in PATH, install with: npm install -g @openai/codex
 ```
 
 **定性**：这 9 个失败是**已知环境噪音、非本次回归**——上一轮 plan 的记忆
-（[memory: opencode-shared-service-plan-blocker](../../.claude/projects/-Users-jacklee-Projects-cordcode-macbridge/memory/opencode-shared-service-plan-blocker.md)）
+（[memory: opencode-shared-service-plan-blocker](../../../../.claude/projects/-Users-jacklee-Projects-cordcode-macbridge/memory/opencode-shared-service-plan-blocker.md)）
 已记录"clean main 同样失败"，且失败集与 managed_local 改动无关（全部在 codex 分页测试）。
 本次审计实测：所有 OpenCode 定向用例与 shutdown 竞态用例均通过，无回归。
 
@@ -175,7 +175,7 @@ exec-plan phase9-regression 记录 `pid 88122 / managementUrl 53195`；审计当
 
 ### 整改 2（治本 t.Skip）— ✅ 通过
 
-- `requireCodexCLI` helper 定义于 [pagination_test.go:23](../go-bridge/pagination_test.go)，`t.Helper()` + `exec.LookPath("codex")` + `t.Skipf`，
+- `requireCodexCLI` helper 定义于 [pagination_test.go:23](../../go-bridge/pagination_test.go)，`t.Helper()` + `exec.LookPath("codex")` + `t.Skipf`，
   skip 消息与生产 `codex.New` 报错**逐字一致**，doc comment 解释清楚。
 - **放置精确**：`requireCodexCLI(t)` 是下列 9 个原本 FAIL 测试的函数体第一行，逐一核对——
   `TestPaginatedMessages_FullBackwardTraversalNoDupesOrGaps`(回归文件:17)、`_FirstAndBackwardPage`(107)、

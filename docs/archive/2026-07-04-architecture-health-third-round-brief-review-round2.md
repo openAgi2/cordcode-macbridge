@@ -1,7 +1,7 @@
 # 架构健康第三轮开发交接文档 — 第二轮评审报告
 
 日期：2026-07-04
-被评审对象：[docs/2026-07-04-architecture-health-third-round-development-brief.md](2026-07-04-architecture-health-third-round-development-brief.md) 经 commit `5cd16c1 Refine third architecture health brief` 修订后的版本
+被评审对象：[docs/2026-07-04-architecture-health-third-round-development-brief.md](../2026-07-04-architecture-health-third-round-development-brief.md) 经 commit `5cd16c1 Refine third architecture health brief` 修订后的版本
 前序评审：[docs/2026-07-04-architecture-health-third-round-brief-review.md](2026-07-04-architecture-health-third-round-brief-review.md)（第一轮，9 条意见）
 评审性质：核实 9 条意见是否真采纳 + 检查修订是否引入新矛盾。**仅评审，不改 brief、不改代码。**
 核实基准：`git show 5cd16c1` 全量 diff、iOS 源码 fresh 复核、`BridgeLANFirstFallbackTests.swift` 测试调用点实测。
@@ -46,7 +46,7 @@
 2. **(M3 采纳)** P0 的第一目标是“让现有 `BridgeLANFirstFallbackTests` 等 characterization 在当前代码上保持全绿”（line 99、142），且 P1 “provider 黑盒测试继续保留，证明对外行为不变”（line 124）；
 3. **(M2/L1 采纳)** forwarding 方法 ≤2、ForTesting ≤30。
 
-但实测 [`BridgeLANFirstFallbackTests.swift`](../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/BridgeLANFirstFallbackTests.swift) 直接在 `provider`（`BridgeProvider`）上调用这 4 个迁移目标：
+但实测 [`BridgeLANFirstFallbackTests.swift`](../../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/BridgeLANFirstFallbackTests.swift) 直接在 `provider`（`BridgeProvider`）上调用这 4 个迁移目标：
 
 | 测试调用点 | 出现次数 | 是否属迁移集 |
 |---|---|---|
@@ -102,7 +102,7 @@
 
 ### N1（低）：race 区域尾边界——`applyHelloAckLocalURLRefresh` 不属 race，应说明留守
 
-brief line 78 称 `runDirectRace` 是“transport creation 层最大单块”（第一轮评审也沿用了 ~162 行的估算）。但实测 [`BridgeProvider.swift`](../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift)：
+brief line 78 称 `runDirectRace` 是“transport creation 层最大单块”（第一轮评审也沿用了 ~162 行的估算）。但实测 [`BridgeProvider.swift`](../../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/BridgeProvider.swift)：
 
 - `runDirectRace` 起于 line 933，止于 line **~1056**（下一函数是 line 1057 的 `nonisolated static func applyHelloAckLocalURLRefresh`），实际约 **~123 行**，不是 ~162 行；
 - line 1057 `applyHelloAckLocalURLRefresh` 是 hello-ack 后刷新 SavedBridge 的 localURL 字段（adoption 相关），**属 adoption，不属 transport creation，应留守 `BridgeProvider`**。
