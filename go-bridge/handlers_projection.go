@@ -78,7 +78,12 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 	// OpenCode pathless: cold pull (sinceRev==0) may force rich-history rebuild to heal
 	// live gaps; incremental pulls keep the cheap Ready short-circuit.
 	forcePathlessRebuild := params.SinceRev == 0 && msg.BackendID == "opencode"
-	if err := h.ensureProjectionHydrated(msg.BackendID, params.SessionID, forcePathlessRebuild); err != nil {
+	if err := h.ensureProjectionHydrated(
+		msg.BackendID,
+		params.SessionID,
+		params.Directory,
+		forcePathlessRebuild,
+	); err != nil {
 		code := "projection.hydrate_failed"
 		retryable := false
 		var retryAfterMillis *int64
@@ -235,7 +240,10 @@ func backendSupportsProjectionHydrate(backendID string) bool {
 // ensureProjectionHydrated waits for a full committed baseline within the pull budget. Concurrent
 // pulls join the Kernel single-flight. Budget expiry returns projection.hydrating without
 // cancelling a healthy transaction.
-func (h *Handlers) ensureProjectionHydrated(backendID, sessionID string, forcePathlessRebuild bool) error {
+func (h *Handlers) ensureProjectionHydrated(
+	backendID, sessionID, directory string,
+	forcePathlessRebuild bool,
+) error {
 	if h == nil || h.eventPublisher == nil || h.projectionKernel == nil || sessionID == "" {
 		return nil
 	}
@@ -248,7 +256,12 @@ func (h *Handlers) ensureProjectionHydrated(backendID, sessionID string, forcePa
 	if !backendSupportsProjectionHydrate(backendID) {
 		return errProjectionBackendNotMigrated
 	}
-	source, err := h.prepareProjectionHydrateSource(context.Background(), backendID, sessionID)
+	source, err := h.prepareProjectionHydrateSource(
+		context.Background(),
+		backendID,
+		sessionID,
+		directory,
+	)
 	if err != nil {
 		h.projectionKernel.MarkFailed(
 			backendID, sessionID, "projection.source_inspection_failed", err.Error(), true,
@@ -297,7 +310,7 @@ func (h *Handlers) ensureProjectionHydrated(backendID, sessionID string, forcePa
 
 func (h *Handlers) prepareProjectionHydrateSource(
 	ctx context.Context,
-	backendID, sessionID string,
+	backendID, sessionID, directory string,
 ) (ProjectionSourceDescriptor, error) {
 	agentName := ""
 	switch backendID {
@@ -309,6 +322,25 @@ func (h *Handlers) prepareProjectionHydrateSource(
 		agentName = "opencode"
 	default:
 		return ProjectionSourceDescriptor{}, errProjectionBackendNotMigrated
+	}
+	// Claude session lists are global across ~/.claude/projects and each row carries its real
+	// directory. Resolve the transcript from that session identity instead of the agent's mutable
+	// workDir. A projection pull is read-only and multiple observers may cold-open different
+	// projects concurrently, so changing shared agent workDir here would create a cross-device
+	// directory race.
+	if backendID == "claude" || backendID == "claudecode" {
+		_, path := findClaudeSessionFile(sessionID, directory)
+		if path != "" {
+			cut, err := projectionJSONLStartCut(path)
+			if err != nil {
+				return ProjectionSourceDescriptor{}, err
+			}
+			return ProjectionSourceDescriptor{
+				Identity: sessionID,
+				Path:     path,
+				Cursor:   cut,
+			}, nil
+		}
 	}
 	agent, ok := h.getFirstAgentByName(agentName)
 	if !ok {

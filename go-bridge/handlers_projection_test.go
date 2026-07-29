@@ -99,6 +99,52 @@ func TestHandleGetSessionProjectionRoutedByDispatch(t *testing.T) {
 	}
 }
 
+func TestClaudeProjectionPullResolvesRequestedDirectoryWithoutMutatingAgentWorkDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	workDir := filepath.Join(home, "Projects", "requested")
+	projectDir := filepath.Join(home, ".claude", "projects", encodeProjectKey(workDir))
+	sessionID := "claude-requested-directory"
+	transcriptPath := filepath.Join(projectDir, sessionID+".jsonl")
+	writeClaudeProjectionRollout(t, transcriptPath, 1, 64)
+
+	handlers := NewHandlers()
+	agent := &fakeAgent{
+		name:           "claudecode",
+		workDir:        filepath.Join(home, "Projects", "stale"),
+		transcriptPath: filepath.Join(home, "missing.jsonl"),
+	}
+	handlers.RegisterAgent("claudecode", agent)
+
+	conn := &readFileCaptureConn{}
+	params, _ := json.Marshal(map[string]interface{}{
+		"sessionId": sessionID,
+		"directory": workDir,
+	})
+	msg := WireMessage{
+		RequestID: "r-claude-directory",
+		BackendID: "claude",
+		Method:    "get_session_projection",
+		Params:    params,
+	}
+	handlers.handleGetSessionProjection(conn, msg, agent)
+
+	if conn.err != nil {
+		t.Fatalf("directory-scoped projection pull failed: %+v", conn.err)
+	}
+	dataMap, ok := conn.data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("data not a map: %T", conn.data)
+	}
+	proj, ok := dataMap["projection"].(SessionProjection)
+	if !ok || len(proj.Turns) == 0 {
+		t.Fatalf("expected hydrated Claude projection, got %+v", dataMap["projection"])
+	}
+	if got := agent.GetWorkDir(); got != filepath.Join(home, "Projects", "stale") {
+		t.Fatalf("read-only projection pull mutated shared agent workDir: %q", got)
+	}
+}
+
 // writeProjectionHydrateRollout builds a minimal multi-turn Codex rollout JSONL that
 // scanCodexTranscriptRelayEvents + hydrateCodexProjectionFromDisk can reduce into turns.
 func writeProjectionHydrateRollout(t *testing.T, path string, turns int) {

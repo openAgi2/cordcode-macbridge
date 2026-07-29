@@ -678,3 +678,38 @@ Follow-on SoT fixes same day (owner matrix green):
 5. iOS side (sibling repo): v2 allows todos control-plane; discards stale completed plans on new generation.
 
 Tests: `go test ./agent/opencode -run 'TestSSESubscriber_MultiStep|CompletionIsIdempotent|ToolTodoAndIdle'`.
+
+
+# 2026-07-29 remote-web 首开 Claude projection 报 project dir not found
+
+## 现象与证据
+
+web 第一次打开 Claude session，`get_session_projection` 立即
+`projection.hydrate_failed: claudecode: project dir not found`；再打开任意 session 后恢复。
+同一时刻 `claudeSessionFileRelay` 能找到正确 JSONL，说明 session 与 transcript 都存在，失败只在
+cold hydrate source inspection。
+
+## 根因
+
+Claude `prepareProjectionHydrateSource` 通过 agent `TranscriptPath` 查文件；该实现从共享
+`agent.workDir` 推导 `~/.claude/projects/<key>`。首开前 workDir 还是 runtime 启动目录，尚未被其他
+带 directory 的 RPC 更新。后续“自愈”只是别的请求偶然改了共享状态。
+
+直接在 read-only projection handler 上 `SetWorkDir` 也不安全：多设备可能同时冷开不同项目，
+共享 agent workDir 会产生跨 session 竞态。
+
+## 修复
+
+- `get_session_projection` 将 request directory 传入 hydrate source resolver；
+- Claude 用已有 `findClaudeSessionFile(sessionID, directory)` 解析真实 transcript；
+- 不修改 agent workDir；Codex/OpenCode source 路径不变；
+- 测试以 stale agent workDir + 正确 session directory 冷拉，证明投影有内容且 workDir 未变化，
+  `-count=10` 稳定通过。
+
+## 验证边界
+
+- 新增定向测试及相关 projection tests 通过；
+- Release build 通过；
+- 仓库全量 Go 仍有两个独立既有失败：
+  `TestScanCodexTranscriptRelayEventsToolsAndTokens`（Codex itemId）、
+  `TestRegressionR1_LeaseAutoDowngrade`（lease expiry）；单独重跑仍失败，本轮不顺手改。

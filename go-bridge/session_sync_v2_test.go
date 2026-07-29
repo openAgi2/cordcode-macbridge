@@ -213,7 +213,7 @@ func TestSessionSyncV2DirectTransportResultPrecedesLiveProjectionPatch(t *testin
 		BackendID: "codex", SessionID: "wire-order", Event: "text_delta",
 		Data: map[string]interface{}{"itemId": "T1", "delta": "base"},
 	})
-	if err := handlers.ensureProjectionHydrated("codex", "wire-order", false); err != nil {
+	if err := handlers.ensureProjectionHydrated("codex", "wire-order", "", false); err != nil {
 		t.Fatal(err)
 	}
 	handlers.RegisterAgent("codex", &fakeAgent{name: "codex"})
