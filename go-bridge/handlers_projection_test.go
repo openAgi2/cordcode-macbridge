@@ -18,6 +18,91 @@ import (
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
+type fakeCompositeHistoryAgent struct {
+	*fakeAgent
+	segments []core.TranscriptSourceSegment
+	entries  []core.RichHistoryEntry
+	received []core.TranscriptSourceSegment
+}
+
+func (f *fakeCompositeHistoryAgent) RichHistoryTranscriptSegments(
+	context.Context,
+	string,
+) ([]core.TranscriptSourceSegment, error) {
+	return append([]core.TranscriptSourceSegment(nil), f.segments...), nil
+}
+
+func (f *fakeCompositeHistoryAgent) GetRichSessionHistoryAtSegments(
+	_ context.Context,
+	_ string,
+	segments []core.TranscriptSourceSegment,
+) ([]core.RichHistoryEntry, error) {
+	f.received = append([]core.TranscriptSourceSegment(nil), segments...)
+	return append([]core.RichHistoryEntry(nil), f.entries...), nil
+}
+
+func TestPrepareClaudeProjectionSourceFreezesEveryCompositeSegment(t *testing.T) {
+	dir := t.TempDir()
+	parentPath := filepath.Join(dir, "parent.jsonl")
+	childPath := filepath.Join(dir, "child.jsonl")
+	parentComplete := "{\"type\":\"parent\"}\n"
+	childComplete := "{\"type\":\"child\"}\n"
+	if err := os.WriteFile(parentPath, []byte(parentComplete), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(childPath, []byte(childComplete+"{\"partial\":"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	provider := &fakeCompositeHistoryAgent{
+		fakeAgent: &fakeAgent{name: "claudecode"},
+		segments: []core.TranscriptSourceSegment{
+			{Identity: "parent", Path: parentPath},
+			{Identity: "child", Path: childPath},
+		},
+		entries: []core.RichHistoryEntry{{
+			ID:      "user-after",
+			Role:    "user",
+			Content: "after compact",
+		}},
+	}
+	handlers := NewHandlers()
+	handlers.RegisterAgent("claudecode", provider)
+	source, err := handlers.prepareProjectionHydrateSource(
+		context.Background(), "claudecode", "logical-session", "",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(source.Segments) != 2 ||
+		source.Segments[0].Cursor != int64(len(parentComplete)) ||
+		source.Segments[1].Cursor != int64(len(childComplete)) {
+		t.Fatalf("composite cuts = %+v", source.Segments)
+	}
+	var emitted []projectionHydrateEvent
+	if err := handlers.produceProjectionHydrateSource(
+		context.Background(),
+		"claudecode",
+		"logical-session",
+		source,
+		0,
+		source.Cursor,
+		SessionProjection{},
+		func(event projectionHydrateEvent) bool {
+			emitted = append(emitted, event)
+			return true
+		},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.received) != 2 ||
+		provider.received[1].Cursor != int64(len(childComplete)) {
+		t.Fatalf("provider received unfrozen cuts: %+v", provider.received)
+	}
+	if len(emitted) != 1 || emitted[0].Event != "user_message" {
+		t.Fatalf("composite rich history did not enter projection reducer events: %+v", emitted)
+	}
+}
+
 // TestHandleGetSessionProjectionReturnsReducerState: a fed reducer is returned verbatim as the
 // {projection} data — proving pull reads the same in-memory state push produces (design §6.4 r4).
 func TestHandleGetSessionProjectionReturnsReducerState(t *testing.T) {

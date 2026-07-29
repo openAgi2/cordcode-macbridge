@@ -566,6 +566,62 @@ func TestGetRichSessionHistory_HidesInterruptedPromptReplayedByContinuation(t *t
 	}
 }
 
+func TestCompositeRichHistoryProviderReadsOnlyFrozenSegmentCuts(t *testing.T) {
+	homeDir := t.TempDir()
+	workDir := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(workDir): %v", err)
+	}
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
+
+	writeClaudeTranscriptFixture(t, homeDir, workDir, "parent-session", []string{
+		`{"type":"user","timestamp":"2026-07-29T08:00:00Z","message":{"id":"user-before","role":"user","content":"压缩前"}}`,
+		`{"type":"system","subtype":"compact_boundary","timestamp":"2026-07-29T08:17:51Z","uuid":"shared-cut"}`,
+	})
+	childPath := writeClaudeTranscriptFixture(t, homeDir, workDir, "child-session", []string{
+		`{"type":"system","subtype":"compact_boundary","timestamp":"2026-07-29T08:17:51Z","uuid":"shared-cut"}`,
+		`{"type":"assistant","timestamp":"2026-07-29T08:20:00Z","message":{"id":"assistant-at-cut","role":"assistant","content":[{"type":"text","text":"切面内"}]}}`,
+	})
+
+	agent := &Agent{workDir: workDir}
+	segments, err := agent.RichHistoryTranscriptSegments(context.Background(), "child-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := range segments {
+		info, statErr := os.Stat(segments[index].Path)
+		if statErr != nil {
+			t.Fatal(statErr)
+		}
+		segments[index].Cursor = info.Size()
+	}
+	file, err := os.OpenFile(childPath, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString(
+		`{"type":"assistant","timestamp":"2026-07-29T08:21:00Z","message":{"id":"assistant-after-cut","role":"assistant","content":[{"type":"text","text":"切面外"}]}}` + "\n",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := agent.GetRichSessionHistoryAtSegments(
+		context.Background(), "child-session", segments,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.ID == "assistant-after-cut" || strings.Contains(entry.Content, "切面外") {
+			t.Fatalf("post-cut content leaked into frozen baseline: %#v", entries)
+		}
+	}
+}
+
 func writeClaudeTranscriptFixture(t *testing.T, homeDir, workDir, sessionID string, lines []string) string {
 	t.Helper()
 	absWorkDir, err := filepath.Abs(workDir)
@@ -585,3 +641,4 @@ func writeClaudeTranscriptFixture(t *testing.T, homeDir, workDir, sessionID stri
 }
 
 var _ core.RichHistoryProvider = (*Agent)(nil)
+var _ core.CompositeRichHistoryProvider = (*Agent)(nil)

@@ -1446,6 +1446,33 @@ func (a *Agent) RichHistoryIncludesCompactContinuations() bool {
 	return true
 }
 
+func (a *Agent) RichHistoryTranscriptSegments(
+	_ context.Context,
+	sessionID string,
+) ([]core.TranscriptSourceSegment, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	absWorkDir, _ := filepath.Abs(a.workDir)
+	projectDir := resolveClaudeHistoryProjectDir(homeDir, absWorkDir, sessionID)
+	if projectDir == "" {
+		return nil, fmt.Errorf("claudecode: project dir not found")
+	}
+	return richHistoryTranscriptSegments(projectDir, sessionID)
+}
+
+func (a *Agent) GetRichSessionHistoryAtSegments(
+	ctx context.Context,
+	_ string,
+	segments []core.TranscriptSourceSegment,
+) ([]core.RichHistoryEntry, error) {
+	started := time.Now()
+	entries, fileBytes, err := loadClaudeContinuationHistoryAtSegments(ctx, segments)
+	core.SessionLoadMetricsFromContext(ctx).AddHistoryParse(time.Since(started), fileBytes)
+	return entries, err
+}
+
 // FetchTodos implements core.TodoProvider. It reads the session transcript to find
 // the most recent TodoWrite tool_use block and returns the full todo list.
 // Claude Code's TodoWrite always sends the complete list, so the last block is authoritative.

@@ -15,10 +15,9 @@ import (
 	"time"
 )
 
-// Version 3 adds system timeline milestones and filters Claude's internal compact summary.
-// Older checkpoints must be rehydrated because they may contain that private summary as a
-// user message and omit the compact boundary.
-const projectionCheckpointSchemaVersion = 3
+// Version 4 persists every physical segment of a compact-linked Claude session.
+// Older checkpoints cannot prove the complete composite source cut.
+const projectionCheckpointSchemaVersion = 4
 
 var (
 	ErrProjectionCheckpointInvalid  = errors.New("projection checkpoint invalid")
@@ -51,6 +50,13 @@ type ProjectionSourceDescriptor struct {
 	Identity string
 	Path     string
 	Cursor   int64
+	Segments []ProjectionSourceSegment
+}
+
+type ProjectionSourceSegment struct {
+	Identity string
+	Path     string
+	Cursor   int64
 }
 
 type ProjectionSourceCheckpoint struct {
@@ -62,14 +68,15 @@ type ProjectionSourceCheckpoint struct {
 }
 
 type ProjectionCheckpoint struct {
-	SchemaVersion int                        `json:"schemaVersion"`
-	BackendID     string                     `json:"backendId"`
-	SessionID     string                     `json:"sessionId"`
-	Source        ProjectionSourceCheckpoint `json:"source"`
-	Projection    SessionProjection          `json:"projection"`
-	ProjectionRev int                        `json:"projectionRev"`
-	HydrateState  ProjectionHydratePhase     `json:"hydrateState"`
-	UpdatedAt     time.Time                  `json:"updatedAt"`
+	SchemaVersion int                          `json:"schemaVersion"`
+	BackendID     string                       `json:"backendId"`
+	SessionID     string                       `json:"sessionId"`
+	Source        ProjectionSourceCheckpoint   `json:"source"`
+	Sources       []ProjectionSourceCheckpoint `json:"sources,omitempty"`
+	Projection    SessionProjection            `json:"projection"`
+	ProjectionRev int                          `json:"projectionRev"`
+	HydrateState  ProjectionHydratePhase       `json:"hydrateState"`
+	UpdatedAt     time.Time                    `json:"updatedAt"`
 }
 
 type projectionCheckpointPersistence interface {
@@ -139,6 +146,35 @@ func BuildProjectionSourceCheckpoint(source ProjectionSourceDescriptor) (Project
 	}, nil
 }
 
+func buildProjectionSegmentCheckpoint(segment ProjectionSourceSegment) (ProjectionSourceCheckpoint, error) {
+	return BuildProjectionSourceCheckpoint(ProjectionSourceDescriptor{
+		Identity: segment.Identity,
+		Path:     segment.Path,
+		Cursor:   segment.Cursor,
+	})
+}
+
+func BuildProjectionSourceCheckpoints(
+	source ProjectionSourceDescriptor,
+) ([]ProjectionSourceCheckpoint, error) {
+	if len(source.Segments) == 0 {
+		checkpoint, err := BuildProjectionSourceCheckpoint(source)
+		if err != nil {
+			return nil, err
+		}
+		return []ProjectionSourceCheckpoint{checkpoint}, nil
+	}
+	checkpoints := make([]ProjectionSourceCheckpoint, 0, len(source.Segments))
+	for _, segment := range source.Segments {
+		checkpoint, err := buildProjectionSegmentCheckpoint(segment)
+		if err != nil {
+			return nil, err
+		}
+		checkpoints = append(checkpoints, checkpoint)
+	}
+	return checkpoints, nil
+}
+
 func digestProjectionSourcePrefix(r io.Reader, cursor int64) (string, error) {
 	if cursor < 0 {
 		return "", fmt.Errorf("%w: negative source cursor", ErrProjectionCheckpointInvalid)
@@ -177,38 +213,64 @@ func (s *ProjectionCheckpointStore) LoadValidated(
 		checkpoint.ProjectionRev != checkpoint.Projection.SyncRev {
 		return ProjectionCheckpoint{}, fmt.Errorf("%w: schema/identity/state mismatch", ErrProjectionCheckpointInvalid)
 	}
-	if source.Identity == "" || checkpoint.Source.Identity != source.Identity {
+	if source.Identity == "" {
+		return ProjectionCheckpoint{}, fmt.Errorf("%w: source identity mismatch", ErrProjectionCheckpointInvalid)
+	}
+	if len(source.Segments) > 0 {
+		if len(checkpoint.Sources) != len(source.Segments) {
+			return ProjectionCheckpoint{}, fmt.Errorf("%w: composite source membership mismatch", ErrProjectionCheckpointInvalid)
+		}
+		for index, segment := range source.Segments {
+			stored := checkpoint.Sources[index]
+			if stored.Identity != segment.Identity || stored.Cursor != segment.Cursor {
+				return ProjectionCheckpoint{}, fmt.Errorf("%w: composite source cut mismatch", ErrProjectionCheckpointInvalid)
+			}
+			if err := validateProjectionSourceCheckpoint(segment.Path, stored); err != nil {
+				return ProjectionCheckpoint{}, err
+			}
+		}
+		checkpoint.Projection = cloneSessionProjection(checkpoint.Projection)
+		return checkpoint, nil
+	}
+	if checkpoint.Source.Identity != source.Identity {
 		return ProjectionCheckpoint{}, fmt.Errorf("%w: source identity mismatch", ErrProjectionCheckpointInvalid)
 	}
 	if source.Path == "" {
 		return ProjectionCheckpoint{}, fmt.Errorf("%w: source path missing", ErrProjectionCheckpointInvalid)
 	}
-	f, err := os.Open(source.Path)
-	if err != nil {
+	if err := validateProjectionSourceCheckpoint(source.Path, checkpoint.Source); err != nil {
 		return ProjectionCheckpoint{}, err
+	}
+	checkpoint.Projection = cloneSessionProjection(checkpoint.Projection)
+	return checkpoint, nil
+}
+
+func validateProjectionSourceCheckpoint(path string, checkpoint ProjectionSourceCheckpoint) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
-		return ProjectionCheckpoint{}, err
+		return err
 	}
-	if info.Size() < checkpoint.Source.Cursor {
-		return ProjectionCheckpoint{}, fmt.Errorf(
+	if info.Size() < checkpoint.Cursor {
+		return fmt.Errorf(
 			"%w: source truncated size=%d cursor=%d",
 			ErrProjectionCheckpointInvalid,
 			info.Size(),
-			checkpoint.Source.Cursor,
+			checkpoint.Cursor,
 		)
 	}
-	digest, err := digestProjectionSourcePrefix(f, checkpoint.Source.Cursor)
+	digest, err := digestProjectionSourcePrefix(f, checkpoint.Cursor)
 	if err != nil {
-		return ProjectionCheckpoint{}, err
+		return err
 	}
-	if digest != checkpoint.Source.PrefixSHA256 {
-		return ProjectionCheckpoint{}, fmt.Errorf("%w: consumed prefix digest mismatch", ErrProjectionCheckpointInvalid)
+	if digest != checkpoint.PrefixSHA256 {
+		return fmt.Errorf("%w: consumed prefix digest mismatch", ErrProjectionCheckpointInvalid)
 	}
-	checkpoint.Projection = cloneSessionProjection(checkpoint.Projection)
-	return checkpoint, nil
+	return nil
 }
 
 func (s *ProjectionCheckpointStore) Save(checkpoint ProjectionCheckpoint) error {
@@ -219,9 +281,7 @@ func (s *ProjectionCheckpointStore) Save(checkpoint ProjectionCheckpoint) error 
 	if checkpoint.SchemaVersion != projectionCheckpointSchemaVersion ||
 		checkpoint.HydrateState != ProjectionHydrateReady ||
 		checkpoint.Projection.SessionID != checkpoint.SessionID ||
-		checkpoint.Source.Identity == "" ||
-		checkpoint.Source.Cursor < 0 ||
-		checkpoint.Source.PrefixSHA256 == "" ||
+		!projectionCheckpointHasCompleteSource(checkpoint) ||
 		checkpoint.ProjectionRev != checkpoint.Projection.SyncRev {
 		return fmt.Errorf("%w: refused incomplete checkpoint", ErrProjectionCheckpointInvalid)
 	}
@@ -272,6 +332,20 @@ func (s *ProjectionCheckpointStore) Save(checkpoint ProjectionCheckpoint) error 
 	}
 	defer dir.Close()
 	return dir.Sync()
+}
+
+func projectionCheckpointHasCompleteSource(checkpoint ProjectionCheckpoint) bool {
+	if len(checkpoint.Sources) > 0 {
+		for _, source := range checkpoint.Sources {
+			if source.Identity == "" || source.Cursor < 0 || source.PrefixSHA256 == "" {
+				return false
+			}
+		}
+		return true
+	}
+	return checkpoint.Source.Identity != "" &&
+		checkpoint.Source.Cursor >= 0 &&
+		checkpoint.Source.PrefixSHA256 != ""
 }
 
 type ProjectionRetryPolicy struct {
@@ -345,6 +419,7 @@ type projectionKernelSession struct {
 	hydrateDone           chan struct{}
 	lastPersistedRev      int
 	committedSourceCursor int64 // last transcript cut committed into SoT; catch-up when source advances
+	committedSource       ProjectionSourceDescriptor
 	pending               *ProjectionCheckpoint
 	writeInFlight         bool
 	timer                 *time.Timer
@@ -523,6 +598,12 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 	session := k.sessionLocked(backendID, sessionID)
 	switch session.status.Phase {
 	case ProjectionHydrateReady:
+		// A compact-linked transcript is one logical source with multiple
+		// physical cuts. Any membership/order/cut change is rebuilt through a
+		// new private transaction; it never bypasses source inspection.
+		if len(source.Segments) > 0 && !projectionSourceDescriptorsEqual(source, session.committedSource) {
+			break
+		}
 		// Source advanced past the committed cut (live relay gap / process-not-live miss).
 		// Force a catch-up hydrate of [committedSourceCursor, source.Cursor) instead of
 		// returning a stale AlreadyReady baseline.
@@ -598,7 +679,11 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 		switch {
 		case err == nil:
 			tx.reducer.Restore(backendID, sessionID, checkpoint.Projection)
-			startCursor = checkpoint.Source.Cursor
+			if len(source.Segments) > 0 {
+				startCursor = source.Cursor
+			} else {
+				startCursor = checkpoint.Source.Cursor
+			}
 			checkpointHit = true
 		case errors.Is(err, os.ErrNotExist),
 			errors.Is(err, ErrProjectionCheckpointInvalid),
@@ -745,6 +830,7 @@ func (k *ProjectionKernel) CommitHydrateTransaction(
 	}
 	session.status = ProjectionHydrationStatus{Phase: ProjectionHydrateReady}
 	session.committedSourceCursor = tx.startCut
+	session.committedSource = cloneProjectionSourceDescriptor(tx.source)
 	session.hydrate = nil
 	k.finishHydrateLocked(session)
 	session.failureAttempts = 0
@@ -797,10 +883,33 @@ func (k *ProjectionKernel) RestoreCheckpoint(
 	session.failureAttempts = 0
 	session.lastPersistedRev = checkpoint.ProjectionRev
 	session.committedSourceCursor = checkpoint.Source.Cursor
+	if len(source.Segments) > 0 {
+		session.committedSourceCursor = source.Cursor
+	}
+	session.committedSource = cloneProjectionSourceDescriptor(source)
 	session.lastWriteErr = nil
 	k.mu.Unlock()
 	checkpoint.Projection = cloneSessionProjection(checkpoint.Projection)
 	return checkpoint, nil
+}
+
+func cloneProjectionSourceDescriptor(source ProjectionSourceDescriptor) ProjectionSourceDescriptor {
+	cloned := source
+	cloned.Segments = append([]ProjectionSourceSegment(nil), source.Segments...)
+	return cloned
+}
+
+func projectionSourceDescriptorsEqual(lhs, rhs ProjectionSourceDescriptor) bool {
+	if lhs.Identity != rhs.Identity || lhs.Path != rhs.Path || lhs.Cursor != rhs.Cursor ||
+		len(lhs.Segments) != len(rhs.Segments) {
+		return false
+	}
+	for index := range lhs.Segments {
+		if lhs.Segments[index] != rhs.Segments[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func (k *ProjectionKernel) Snapshot(backendID, sessionID string) (SessionProjection, bool) {
@@ -969,6 +1078,25 @@ func NewReadyProjectionCheckpoint(
 		BackendID:     backendID,
 		SessionID:     sessionID,
 		Source:        source,
+		Projection:    projection,
+		ProjectionRev: projection.SyncRev,
+		HydrateState:  ProjectionHydrateReady,
+		UpdatedAt:     now,
+	}
+}
+
+func NewReadyCompositeProjectionCheckpoint(
+	backendID, sessionID string,
+	sources []ProjectionSourceCheckpoint,
+	projection SessionProjection,
+	now time.Time,
+) ProjectionCheckpoint {
+	projection = cloneSessionProjection(projection)
+	return ProjectionCheckpoint{
+		SchemaVersion: projectionCheckpointSchemaVersion,
+		BackendID:     backendID,
+		SessionID:     sessionID,
+		Sources:       append([]ProjectionSourceCheckpoint(nil), sources...),
 		Projection:    projection,
 		ProjectionRev: projection.SyncRev,
 		HydrateState:  ProjectionHydrateReady,

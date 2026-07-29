@@ -103,6 +103,52 @@ func TestProjectionCheckpointRestoreValidAndEmpty(t *testing.T) {
 	}
 }
 
+func TestCompositeProjectionCheckpointValidatesEveryFrozenSegment(t *testing.T) {
+	dir := t.TempDir()
+	parentPath := filepath.Join(dir, "parent.jsonl")
+	childPath := filepath.Join(dir, "child.jsonl")
+	writeProjectionSource(t, parentPath, "parent\n")
+	writeProjectionSource(t, childPath, "child\n")
+	source := ProjectionSourceDescriptor{
+		Identity: "logical-session",
+		Cursor:   int64(len("parent\n") + len("child\n")),
+		Segments: []ProjectionSourceSegment{
+			{Identity: "parent", Path: parentPath, Cursor: int64(len("parent\n"))},
+			{Identity: "child", Path: childPath, Cursor: int64(len("child\n"))},
+		},
+	}
+	checkpoints, err := BuildProjectionSourceCheckpoints(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewProjectionCheckpointStore(dir)
+	checkpoint := NewReadyCompositeProjectionCheckpoint(
+		"claudecode",
+		source.Identity,
+		checkpoints,
+		testProjection(source.Identity, 9),
+		time.Unix(100, 0),
+	)
+	if err := store.Save(checkpoint); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LoadValidated("claudecode", source.Identity, source); err != nil {
+		t.Fatalf("valid composite checkpoint rejected: %v", err)
+	}
+
+	advanced := cloneProjectionSourceDescriptor(source)
+	advanced.Segments[1].Cursor++
+	advanced.Cursor++
+	if _, err := store.LoadValidated("claudecode", source.Identity, advanced); !errors.Is(err, ErrProjectionCheckpointInvalid) {
+		t.Fatalf("advanced composite cut must invalidate checkpoint, got %v", err)
+	}
+
+	writeProjectionSource(t, parentPath, "tamper\n")
+	if _, err := store.LoadValidated("claudecode", source.Identity, source); !errors.Is(err, ErrProjectionCheckpointInvalid) {
+		t.Fatalf("changed parent prefix must invalidate whole checkpoint, got %v", err)
+	}
+}
+
 func TestProjectionCheckpointAdmissionAppendAndInvalidation(t *testing.T) {
 	dir := t.TempDir()
 	sourcePath := filepath.Join(dir, "rollout.jsonl")

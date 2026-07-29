@@ -2,6 +2,7 @@ package claudecode
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -193,17 +194,51 @@ func sharesClaudeBoundary(boundaryIDs []string, known map[string]bool) bool {
 
 func loadClaudeContinuationHistory(projectDir, sessionID string) ([]core.RichHistoryEntry, int64, error) {
 	paths := resolveClaudeContinuationPaths(projectDir, sessionID)
+	segments := make([]core.TranscriptSourceSegment, 0, len(paths))
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, 0, err
+		}
+		segments = append(segments, core.TranscriptSourceSegment{
+			Identity: strings.TrimSuffix(filepath.Base(path), ".jsonl"),
+			Path:     path,
+			Cursor:   info.Size(),
+		})
+	}
+	return loadClaudeContinuationHistoryAtSegments(context.Background(), segments)
+}
+
+func loadClaudeContinuationHistoryAtSegments(
+	ctx context.Context,
+	segments []core.TranscriptSourceSegment,
+) ([]core.RichHistoryEntry, int64, error) {
 	merged := make([]core.RichHistoryEntry, 0)
 	positions := make(map[string]int)
 	var totalBytes int64
-	for _, path := range paths {
-		entries, err := loadClaudeRichHistory(path)
+	for _, segment := range segments {
+		if err := ctx.Err(); err != nil {
+			return nil, totalBytes, err
+		}
+		if segment.Cursor < 0 {
+			return nil, totalBytes, io.ErrUnexpectedEOF
+		}
+		file, err := os.Open(segment.Path)
 		if err != nil {
 			return nil, totalBytes, err
 		}
-		if stat, statErr := os.Stat(path); statErr == nil {
-			totalBytes += stat.Size()
+		entries, parseErr := LoadClaudeRichHistoryFromReader(
+			io.LimitReader(file, segment.Cursor),
+			segment.Path,
+		)
+		closeErr := file.Close()
+		if parseErr != nil {
+			return nil, totalBytes, parseErr
 		}
+		if closeErr != nil {
+			return nil, totalBytes, closeErr
+		}
+		totalBytes += segment.Cursor
 		for _, entry := range entries {
 			key := claudeHistoryDedupKey(entry)
 			if index, exists := positions[key]; exists {
@@ -217,6 +252,21 @@ func loadClaudeContinuationHistory(projectDir, sessionID string) ([]core.RichHis
 		}
 	}
 	return merged, totalBytes, nil
+}
+
+func richHistoryTranscriptSegments(projectDir, sessionID string) ([]core.TranscriptSourceSegment, error) {
+	paths := resolveClaudeContinuationPaths(projectDir, sessionID)
+	segments := make([]core.TranscriptSourceSegment, 0, len(paths))
+	for _, path := range paths {
+		if _, err := os.Stat(path); err != nil {
+			return nil, err
+		}
+		segments = append(segments, core.TranscriptSourceSegment{
+			Identity: strings.TrimSuffix(filepath.Base(path), ".jsonl"),
+			Path:     path,
+		})
+	}
+	return segments, nil
 }
 
 func resolveClaudeHistoryProjectDir(homeDir, preferredWorkDir, sessionID string) string {

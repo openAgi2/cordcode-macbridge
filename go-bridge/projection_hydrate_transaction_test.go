@@ -27,6 +27,44 @@ func TestProjectionJSONLStartCutExcludesIncompleteRecord(t *testing.T) {
 	}
 }
 
+func TestProjectionKernelRehydratesWhenCompositeSourceCutChanges(t *testing.T) {
+	kernel := NewProjectionKernel(nil, nil)
+	source := ProjectionSourceDescriptor{
+		Identity: "logical-session",
+		Cursor:   20,
+		Segments: []ProjectionSourceSegment{
+			{Identity: "parent", Path: "/tmp/parent.jsonl", Cursor: 10},
+			{Identity: "child", Path: "/tmp/child.jsonl", Cursor: 10},
+		},
+	}
+	admission, err := kernel.BeginHydrateTransaction(
+		"claudecode", source.Identity, source, false, false,
+	)
+	if err != nil || !admission.Leader {
+		t.Fatalf("initial admission = %+v err=%v", admission, err)
+	}
+	if _, err := kernel.CommitHydrateTransaction("claudecode", source.Identity); err != nil {
+		t.Fatal(err)
+	}
+
+	unchanged, err := kernel.BeginHydrateTransaction(
+		"claudecode", source.Identity, source, false, false,
+	)
+	if err != nil || !unchanged.AlreadyReady {
+		t.Fatalf("unchanged source must reuse Ready state: %+v err=%v", unchanged, err)
+	}
+
+	advanced := cloneProjectionSourceDescriptor(source)
+	advanced.Segments[1].Cursor = 15
+	advanced.Cursor = 25
+	changed, err := kernel.BeginHydrateTransaction(
+		"claudecode", source.Identity, advanced, false, false,
+	)
+	if err != nil || !changed.Leader || changed.AlreadyReady {
+		t.Fatalf("advanced composite source must start private rebuild: %+v err=%v", changed, err)
+	}
+}
+
 func TestProjectionHydrateGrowingSourceKeepsBaselineAndPendingDisjoint(t *testing.T) {
 	path := t.TempDir() + "/rollout.jsonl"
 	writeProjectionHydrateRollout(t, path, 1)
@@ -359,7 +397,6 @@ func normalizeProjectionRuntimeFields(projection *SessionProjection) {
 		projection.Turns[i].CompletedAt = 0
 	}
 }
-
 
 // Ready projection must catch up when the transcript source cut advances past
 // the committed cursor (live relay gap / process-not-live miss).

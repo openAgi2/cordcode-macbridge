@@ -75,14 +75,16 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 	// ALL backends go through hydrate (design §10.5.7 修法 1 — no codex hardcode). A backend not
 	// yet migrated to projection returns an honest error; it must NEVER fall through to an empty
 	// head-0 shell (§10.5.1).
-	// OpenCode pathless: cold pull (sinceRev==0) may force rich-history rebuild to heal
-	// live gaps; incremental pulls keep the cheap Ready short-circuit.
-	forcePathlessRebuild := params.SinceRev == 0 && msg.BackendID == "opencode"
+	// A cold open inspects sources even when the Kernel is Ready. OpenCode uses
+	// this to heal its pathless HTTP baseline; Claude uses it to detect a new
+	// compact continuation or advanced segment cut.
+	forceColdInspection := params.SinceRev == 0 &&
+		(msg.BackendID == "opencode" || msg.BackendID == "claude" || msg.BackendID == "claudecode")
 	if err := h.ensureProjectionHydrated(
 		msg.BackendID,
 		params.SessionID,
 		params.Directory,
-		forcePathlessRebuild,
+		forceColdInspection,
 	); err != nil {
 		code := "projection.hydrate_failed"
 		retryable := false
@@ -242,7 +244,7 @@ func backendSupportsProjectionHydrate(backendID string) bool {
 // cancelling a healthy transaction.
 func (h *Handlers) ensureProjectionHydrated(
 	backendID, sessionID, directory string,
-	forcePathlessRebuild bool,
+	forceColdInspection bool,
 ) error {
 	if h == nil || h.eventPublisher == nil || h.projectionKernel == nil || sessionID == "" {
 		return nil
@@ -250,7 +252,7 @@ func (h *Handlers) ensureProjectionHydrated(
 	ready := h.projectionKernel.Status(backendID, sessionID).Phase == ProjectionHydrateReady
 	// Cheap Ready hit for file-backed backends, and for OpenCode incremental pulls.
 	// Cold OpenCode pulls may force a pathless rich-history rebuild below.
-	if ready && !(forcePathlessRebuild && backendID == "opencode") {
+	if ready && !forceColdInspection {
 		return nil
 	}
 	if !backendSupportsProjectionHydrate(backendID) {
@@ -269,7 +271,7 @@ func (h *Handlers) ensureProjectionHydrated(
 		return err
 	}
 	// Pathless re-open: force full GetRichSessionHistory rebuild when already Ready.
-	sourceChanged := forcePathlessRebuild && ready && backendID == "opencode" && source.Path == ""
+	sourceChanged := forceColdInspection && ready && backendID == "opencode" && source.Path == ""
 	admission, err := h.projectionKernel.BeginHydrateTransaction(
 		backendID, sessionID, source, false, sourceChanged,
 	)
@@ -331,15 +333,48 @@ func (h *Handlers) prepareProjectionHydrateSource(
 	if backendID == "claude" || backendID == "claudecode" {
 		agent, ok := h.getFirstAgentByName("claudecode")
 		if ok {
-			if provider, rich := agent.(core.RichHistoryProvider); rich {
-				if stitched, marked := provider.(interface {
-					RichHistoryIncludesCompactContinuations() bool
-				}); marked && stitched.RichHistoryIncludesCompactContinuations() {
-					// Claude creates a new physical JSONL after compact. The
-					// production provider stitches that source-proven chain into one
-					// logical session; hydrating one path would expose half of it.
-					return ProjectionSourceDescriptor{Identity: sessionID}, nil
+			if provider, composite := agent.(core.CompositeRichHistoryProvider); composite {
+				physical, err := provider.RichHistoryTranscriptSegments(ctx, sessionID)
+				if err != nil {
+					return ProjectionSourceDescriptor{}, err
 				}
+				if len(physical) == 0 {
+					return ProjectionSourceDescriptor{}, errProjectionSourceUnavailable
+				}
+				segments := make([]ProjectionSourceSegment, 0, len(physical))
+				var totalCut int64
+				for _, physicalSegment := range physical {
+					path := strings.TrimSpace(physicalSegment.Path)
+					identity := strings.TrimSpace(physicalSegment.Identity)
+					if path == "" || identity == "" {
+						return ProjectionSourceDescriptor{}, errProjectionSourceUnavailable
+					}
+					cut, cutErr := projectionJSONLStartCut(path)
+					if cutErr != nil {
+						return ProjectionSourceDescriptor{}, cutErr
+					}
+					segments = append(segments, ProjectionSourceSegment{
+						Identity: identity,
+						Path:     path,
+						Cursor:   cut,
+					})
+					totalCut += cut
+				}
+				confirmed, confirmErr := provider.RichHistoryTranscriptSegments(ctx, sessionID)
+				if confirmErr != nil {
+					return ProjectionSourceDescriptor{}, confirmErr
+				}
+				if !sameTranscriptSegmentMembership(physical, confirmed) {
+					return ProjectionSourceDescriptor{}, fmt.Errorf(
+						"%w: Claude continuation chain changed during hydrate admission",
+						ErrProjectionCheckpointInvalid,
+					)
+				}
+				return ProjectionSourceDescriptor{
+					Identity: sessionID,
+					Cursor:   totalCut,
+					Segments: segments,
+				}, nil
 			}
 		}
 		// Test/custom providers without the explicit stitching guarantee retain
@@ -400,6 +435,21 @@ func (h *Handlers) prepareProjectionHydrateSource(
 		Path:     path,
 		Cursor:   cut,
 	}, nil
+}
+
+func sameTranscriptSegmentMembership(
+	lhs, rhs []core.TranscriptSourceSegment,
+) bool {
+	if len(lhs) != len(rhs) {
+		return false
+	}
+	for index := range lhs {
+		if strings.TrimSpace(lhs[index].Identity) != strings.TrimSpace(rhs[index].Identity) ||
+			strings.TrimSpace(lhs[index].Path) != strings.TrimSpace(rhs[index].Path) {
+			return false
+		}
+	}
+	return true
 }
 
 func projectionJSONLStartCut(path string) (int64, error) {
@@ -473,11 +523,11 @@ func (h *Handlers) runProjectionHydrateTransaction(
 	source, _ := h.projectionKernel.HydrateSource(backendID, sessionID)
 	base, _ := h.projectionKernel.HydrateSnapshot(backendID, sessionID)
 	segmentIdx := 0
-	err := h.produceProjectionHydrateRange(
+	err := h.produceProjectionHydrateSource(
 		ctx,
 		backendID,
 		sessionID,
-		source.Path,
+		source,
 		admission.StartCursor,
 		admission.StartCut,
 		base,
@@ -534,17 +584,24 @@ func (h *Handlers) runProjectionHydrateTransaction(
 	if commit.PendingPatch != nil {
 		h.eventPublisher.PublishProjectionPatch(backendID, sessionID, *commit.PendingPatch)
 	}
-	if source.Path != "" {
+	if source.Path != "" || len(source.Segments) > 0 {
 		source.Cursor = admission.StartCut
-		sourceCheckpoint, checkpointErr := BuildProjectionSourceCheckpoint(source)
+		sourceCheckpoints, checkpointErr := BuildProjectionSourceCheckpoints(source)
 		if checkpointErr != nil {
 			slog.Error("projection checkpoint source build failed",
 				"backendID", backendID, "sessionID", sessionID, "error", checkpointErr)
 			return
 		}
-		checkpoint := NewReadyProjectionCheckpoint(
-			backendID, sessionID, sourceCheckpoint, commit.Projection, time.Now(),
-		)
+		var checkpoint ProjectionCheckpoint
+		if len(source.Segments) > 0 {
+			checkpoint = NewReadyCompositeProjectionCheckpoint(
+				backendID, sessionID, sourceCheckpoints, commit.Projection, time.Now(),
+			)
+		} else {
+			checkpoint = NewReadyProjectionCheckpoint(
+				backendID, sessionID, sourceCheckpoints[0], commit.Projection, time.Now(),
+			)
+		}
 		settled := commit.Projection.Execution.Phase != "running"
 		if checkpointErr := h.projectionKernel.StageCheckpoint(checkpoint, settled); checkpointErr != nil &&
 			!errors.Is(checkpointErr, ErrProjectionCheckpointDisabled) {
@@ -558,11 +615,53 @@ func (h *Handlers) runProjectionHydrateTransaction(
 				"backendID", backendID,
 				"sessionPrefix", projectionSessionLogPrefix(sessionID),
 				"headRev", checkpoint.ProjectionRev,
-				"sourceCursor", checkpoint.Source.Cursor,
+				"sourceCursor", source.Cursor,
 				"settled", settled,
 			)
 		}
 	}
+}
+
+func (h *Handlers) produceProjectionHydrateSource(
+	ctx context.Context,
+	backendID, sessionID string,
+	source ProjectionSourceDescriptor,
+	startOffset, endOffset int64,
+	base SessionProjection,
+	emit func(projectionHydrateEvent) bool,
+) error {
+	if len(source.Segments) == 0 {
+		return h.produceProjectionHydrateRange(
+			ctx, backendID, sessionID, source.Path, startOffset, endOffset, base, emit,
+		)
+	}
+	if startOffset == endOffset {
+		return nil
+	}
+	if backendID != "claude" && backendID != "claudecode" {
+		return errProjectionBackendNotMigrated
+	}
+	agent, ok := h.getFirstAgentByName("claudecode")
+	if !ok {
+		return errProjectionSourceUnavailable
+	}
+	provider, ok := agent.(core.CompositeRichHistoryProvider)
+	if !ok {
+		return errProjectionSourceUnavailable
+	}
+	segments := make([]core.TranscriptSourceSegment, 0, len(source.Segments))
+	for _, segment := range source.Segments {
+		segments = append(segments, core.TranscriptSourceSegment{
+			Identity: segment.Identity,
+			Path:     segment.Path,
+			Cursor:   segment.Cursor,
+		})
+	}
+	entries, err := provider.GetRichSessionHistoryAtSegments(ctx, sessionID, segments)
+	if err != nil {
+		return err
+	}
+	return streamRichHistoryProjectionEntries(ctx, entries, emit)
 }
 
 func projectionSessionLogPrefix(sessionID string) string {
@@ -685,6 +784,14 @@ func (h *Handlers) streamBackendRichHistoryProjectionEvents(
 	if err != nil {
 		return err
 	}
+	return streamRichHistoryProjectionEntries(ctx, entries, emit)
+}
+
+func streamRichHistoryProjectionEntries(
+	ctx context.Context,
+	entries []core.RichHistoryEntry,
+	emit func(projectionHydrateEvent) bool,
+) error {
 	currentTurnID := ""
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {

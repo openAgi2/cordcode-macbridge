@@ -85,6 +85,28 @@ type RichHistoryProvider interface {
 	GetRichSessionHistory(ctx context.Context, sessionID string, limit int) ([]RichHistoryEntry, error)
 }
 
+// TranscriptSourceSegment identifies one physical file in an ordered,
+// source-proven logical transcript. Cursor is filled by the bridge at hydrate
+// admission and is the exclusive complete-line byte cut for that file.
+type TranscriptSourceSegment struct {
+	Identity string
+	Path     string
+	Cursor   int64
+}
+
+// CompositeRichHistoryProvider is an optional contract for file-backed agents
+// whose one logical session can span multiple physical transcripts. The bridge
+// freezes every segment cut, then asks the provider to parse exactly that
+// immutable source descriptor.
+type CompositeRichHistoryProvider interface {
+	RichHistoryTranscriptSegments(ctx context.Context, sessionID string) ([]TranscriptSourceSegment, error)
+	GetRichSessionHistoryAtSegments(
+		ctx context.Context,
+		sessionID string,
+		segments []TranscriptSourceSegment,
+	) ([]RichHistoryEntry, error)
+}
+
 // TranscriptLocator is an optional interface for file-backed agents that can
 // resolve the on-disk JSONL transcript path for a session. The bridge uses it to
 // build a boundary-safe transcript page index (design §6.3) and to replay byte
