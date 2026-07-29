@@ -162,6 +162,7 @@ Current event names emitted by MacBridge:
 text_delta
 message_updated
 user_message
+system_message
 reasoning_delta
 tool_started
 tool_finished
@@ -469,6 +470,12 @@ Codex text parts may carry `presentation: "progress" | "final"`, using the same 
 classification as rich history. On a settled turn, only the terminal `final` text contributes to
 the message's final body; progress parts remain ordered timeline evidence. Older snapshots may
 omit the additive field.
+
+A turn may contain an additive `system` message (`role: "system"`) for a transcript lifecycle
+milestone. Claude `compact_boundary` is projected this way as one short completion summary; the
+following `isCompactSummary` / `isVisibleInTranscriptOnly` transcript payload is internal context
+and MUST NOT be projected as user content. A system milestone is completed content and MUST NOT
+arm `execution`.
 
 Projection frames are reconstructable via `get_session_projection`, so they are NOT durable
 mailbox milestones and are NOT live-buffered; reconnect/recovery aligns via a `get_session_projection`

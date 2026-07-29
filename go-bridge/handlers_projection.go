@@ -329,17 +329,28 @@ func (h *Handlers) prepareProjectionHydrateSource(
 	// projects concurrently, so changing shared agent workDir here would create a cross-device
 	// directory race.
 	if backendID == "claude" || backendID == "claudecode" {
+		agent, ok := h.getFirstAgentByName("claudecode")
+		if ok {
+			if provider, rich := agent.(core.RichHistoryProvider); rich {
+				if stitched, marked := provider.(interface {
+					RichHistoryIncludesCompactContinuations() bool
+				}); marked && stitched.RichHistoryIncludesCompactContinuations() {
+					// Claude creates a new physical JSONL after compact. The
+					// production provider stitches that source-proven chain into one
+					// logical session; hydrating one path would expose half of it.
+					return ProjectionSourceDescriptor{Identity: sessionID}, nil
+				}
+			}
+		}
+		// Test/custom providers without the explicit stitching guarantee retain
+		// the normal single-transcript path and its checkpoint semantics.
 		_, path := findClaudeSessionFile(sessionID, directory)
 		if path != "" {
 			cut, err := projectionJSONLStartCut(path)
 			if err != nil {
 				return ProjectionSourceDescriptor{}, err
 			}
-			return ProjectionSourceDescriptor{
-				Identity: sessionID,
-				Path:     path,
-				Cursor:   cut,
-			}, nil
+			return ProjectionSourceDescriptor{Identity: sessionID, Path: path, Cursor: cut}, nil
 		}
 	}
 	agent, ok := h.getFirstAgentByName(agentName)
@@ -568,7 +579,8 @@ func (h *Handlers) produceProjectionHydrateRange(
 	base SessionProjection,
 	emit func(projectionHydrateEvent) bool,
 ) error {
-	if backendID != "opencode" && (path == "" || startOffset == endOffset) {
+	if backendID != "opencode" && backendID != "claude" && backendID != "claudecode" &&
+		(path == "" || startOffset == endOffset) {
 		return nil
 	}
 	currentTurnID := base.Execution.ActiveTurnID
@@ -605,6 +617,9 @@ func (h *Handlers) produceProjectionHydrateRange(
 			})
 		})
 	case "claude", "claudecode":
+		if path == "" {
+			return h.streamClaudeRichHistoryProjectionEvents(ctx, sessionID, emit)
+		}
 		return streamClaudeTranscriptProjectionEventsRangeSeed(
 			ctx, path, startOffset, endOffset, currentTurnID, emit,
 		)
@@ -636,10 +651,26 @@ func (h *Handlers) streamOpenCodeRichHistoryProjectionEvents(
 	sessionID string,
 	emit func(projectionHydrateEvent) bool,
 ) error {
+	return h.streamBackendRichHistoryProjectionEvents(ctx, "opencode", sessionID, emit)
+}
+
+func (h *Handlers) streamClaudeRichHistoryProjectionEvents(
+	ctx context.Context,
+	sessionID string,
+	emit func(projectionHydrateEvent) bool,
+) error {
+	return h.streamBackendRichHistoryProjectionEvents(ctx, "claudecode", sessionID, emit)
+}
+
+func (h *Handlers) streamBackendRichHistoryProjectionEvents(
+	ctx context.Context,
+	agentName, sessionID string,
+	emit func(projectionHydrateEvent) bool,
+) error {
 	if h == nil {
 		return errProjectionSourceUnavailable
 	}
-	agent, ok := h.getFirstAgentByName("opencode")
+	agent, ok := h.getFirstAgentByName(agentName)
 	if !ok {
 		return errProjectionSourceUnavailable
 	}
@@ -837,6 +868,24 @@ func openCodeRichHistoryEntryToProjectionEvents(
 			TurnDone: true,
 		})
 		return out
+	case "system":
+		text := strings.TrimSpace(entry.Content)
+		if text == "" {
+			return nil
+		}
+		// Compaction can happen in the middle of one long tool-running response.
+		// Seal its attribution boundary so assistant records after compact form a
+		// new continuation turn instead of being merged back before this system row.
+		*currentTurnID = ""
+		data := map[string]interface{}{
+			"itemId": identity,
+			"turnId": identity,
+			"text":   text,
+		}
+		if !entry.Timestamp.IsZero() {
+			data["timestampMillis"] = entry.Timestamp.UnixMilli()
+		}
+		return []projectionHydrateEvent{{Event: "system_message", Data: data}}
 	default:
 		return nil
 	}

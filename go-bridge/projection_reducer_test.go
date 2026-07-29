@@ -153,6 +153,35 @@ func TestReducerUserMessageAttribution(t *testing.T) {
 	}
 }
 
+func TestReducerSystemMessageDoesNotArmExecution(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "claudecode", "s1", "system_message", map[string]interface{}{
+		"itemId":          "compact-1",
+		"turnId":          "compact-1",
+		"text":            "已压缩对话 · 节省 160.7k tokens",
+		"timestampMillis": int64(1_722_244_000_000),
+	}))
+	proj, ok := r.Snapshot("claudecode", "s1")
+	if !ok || len(proj.Turns) != 1 {
+		t.Fatalf("projection = %+v, ok=%v", proj, ok)
+	}
+	turn := proj.Turns[0]
+	if turn.Status != "completed" || turn.StartedAt != 1_722_244_000_000 || turn.CompletedAt != 1_722_244_000_000 {
+		t.Fatalf("system turn lifecycle = %+v", turn)
+	}
+	if turn.System == nil || turn.System.Role != "system" || len(turn.System.Parts) != 1 ||
+		turn.System.Parts[0].Text != "已压缩对话 · 节省 160.7k tokens" ||
+		turn.System.Parts[0].Presentation != "final" {
+		t.Fatalf("system message = %+v", turn.System)
+	}
+	if proj.Execution.Phase != "idle" || proj.Execution.ActiveTurnID != "" {
+		t.Fatalf("system_message must not arm execution: %+v", proj.Execution)
+	}
+	if !r.HasContentTurn("claudecode", "s1") {
+		t.Fatal("system_message must count as projection content")
+	}
+}
+
 // TestReducerContentRearmsAfterCompletedIdle: cold hydrate / prior turn_completed leaves
 // phase=idle; a new user_message + reasoning without relying on turn_started must re-arm.
 func TestReducerContentRearmsAfterCompletedIdle(t *testing.T) {
@@ -386,7 +415,6 @@ func TestReducerNewTurnSettlesSupersededRunningTurn(t *testing.T) {
 		}
 	}
 }
-
 
 // TestReducerRestoreHealsZombieRunningTurnsWhenIdle: stale checkpoints may restore phase=idle
 // with older turns still status=running. Heal on Restore so rehydrate does not re-poison SoT.

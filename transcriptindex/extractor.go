@@ -110,9 +110,9 @@ func (x *codexSpanExtractor) closeTool(rec Record) {
 }
 
 type codexResponseItem struct {
-	Role    string `json:"role"`
-	Type    string `json:"type"`
-	Name    string `json:"name"`
+	Role    string   `json:"role"`
+	Type    string   `json:"type"`
+	Name    string   `json:"name"`
 	Text    string   `json:"text"`
 	Summary []string `json:"summary"`
 	Content []struct {
@@ -318,11 +318,28 @@ func (x *claudeSpanExtractor) assistantSpan(msgID string, rec Record) *LogicalMe
 
 func (x *claudeSpanExtractor) Process(rec Record) {
 	var env struct {
-		Type    string          `json:"type"`
-		Message json.RawMessage `json:"message"`
-		IsMeta  bool            `json:"isMeta"`
+		Type                      string          `json:"type"`
+		Subtype                   string          `json:"subtype"`
+		UUID                      string          `json:"uuid"`
+		Message                   json.RawMessage `json:"message"`
+		IsMeta                    bool            `json:"isMeta"`
+		IsCompactSummary          bool            `json:"isCompactSummary"`
+		IsVisibleInTranscriptOnly bool            `json:"isVisibleInTranscriptOnly"`
 	}
 	if json.Unmarshal(rec.Bytes, &env) != nil {
+		return
+	}
+	if env.Type == "system" && env.Subtype == "compact_boundary" {
+		x.spans = append(x.spans, &LogicalMessageSpan{
+			Ordinal:     x.ordinal,
+			StableID:    strings.TrimSpace(env.UUID),
+			ReplayStart: rec.Start,
+			EndOffset:   rec.End,
+		})
+		x.ordinal++
+		return
+	}
+	if env.IsCompactSummary || env.IsVisibleInTranscriptOnly {
 		return
 	}
 	if env.Type != "user" && env.Type != "assistant" {

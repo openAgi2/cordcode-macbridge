@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openAgi2/cordcode-macbridge/agent/claudecode"
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
@@ -113,6 +114,10 @@ func TestClaudeProjectionPullResolvesRequestedDirectoryWithoutMutatingAgentWorkD
 		name:           "claudecode",
 		workDir:        filepath.Join(home, "Projects", "stale"),
 		transcriptPath: filepath.Join(home, "missing.jsonl"),
+		richHistory: []core.RichHistoryEntry{
+			{ID: "user-1", Role: "user", Content: "question"},
+			{ID: "assistant-1", Role: "assistant", Content: "answer"},
+		},
 	}
 	handlers.RegisterAgent("claudecode", agent)
 
@@ -142,6 +147,62 @@ func TestClaudeProjectionPullResolvesRequestedDirectoryWithoutMutatingAgentWorkD
 	}
 	if got := agent.GetWorkDir(); got != filepath.Join(home, "Projects", "stale") {
 		t.Fatalf("read-only projection pull mutated shared agent workDir: %q", got)
+	}
+}
+
+func TestClaudeProjectionHydrateStitchesCompactContinuation(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	workDir := filepath.Join(home, "Projects", "compact")
+	projectDir := filepath.Join(home, ".claude", "projects", encodeProjectKey(workDir))
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	parent := strings.Join([]string{
+		`{"type":"user","timestamp":"2026-07-29T08:00:00Z","message":{"id":"user-before","role":"user","content":"before question"}}`,
+		`{"type":"assistant","timestamp":"2026-07-29T08:10:00Z","message":{"id":"assistant-before","role":"assistant","content":[{"type":"text","text":"before answer"}]}}`,
+		`{"type":"system","subtype":"compact_boundary","uuid":"shared-compact","timestamp":"2026-07-29T08:17:51Z","compactMetadata":{"preTokens":169352,"postTokens":8605}}`,
+	}, "\n") + "\n"
+	child := strings.Join([]string{
+		`{"type":"system","subtype":"compact_boundary","uuid":"shared-compact","timestamp":"2026-07-29T08:17:51Z","compactMetadata":{"preTokens":169352,"postTokens":8605}}`,
+		`{"type":"user","isVisibleInTranscriptOnly":true,"isCompactSummary":true,"message":{"role":"user","content":"INTERNAL SUMMARY"}}`,
+		`{"type":"assistant","timestamp":"2026-07-29T08:10:00Z","message":{"id":"assistant-before","role":"assistant","content":[{"type":"text","text":"before answer"}]}}`,
+		`{"type":"user","timestamp":"2026-07-29T08:34:00Z","message":{"id":"user-after","role":"user","content":"after question"}}`,
+		`{"type":"assistant","timestamp":"2026-07-29T08:35:00Z","message":{"id":"assistant-after","role":"assistant","content":[{"type":"text","text":"after answer"}]}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(projectDir, "parent-session.jsonl"), []byte(parent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "child-session.jsonl"), []byte(child), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rawAgent, err := claudecode.New(map[string]any{"work_dir": filepath.Join(home, "stale")})
+	if err != nil {
+		t.Fatalf("claudecode.New: %v", err)
+	}
+	handlers := NewHandlers()
+	handlers.RegisterAgent("claudecode", rawAgent)
+	conn := &readFileCaptureConn{}
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": "child-session", "directory": workDir})
+	handlers.handleGetSessionProjection(conn, WireMessage{
+		RequestID: "r-compact-chain",
+		BackendID: "claude",
+		Method:    "get_session_projection",
+		Params:    params,
+	}, rawAgent)
+	if conn.err != nil {
+		t.Fatalf("compact-chain hydrate failed: %+v", conn.err)
+	}
+	raw, _ := json.Marshal(conn.data)
+	text := string(raw)
+	for _, want := range []string{"before question", "before answer", "已压缩对话", "after question", "after answer"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("projection missing %q: %s", want, text)
+		}
+	}
+	if strings.Contains(text, "INTERNAL SUMMARY") {
+		t.Fatalf("projection leaked compact internals: %s", text)
 	}
 }
 
@@ -965,6 +1026,67 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 	if evs[1].Event != "turn_completed" || evs[1].Data["turnId"] != "3ad62e62-13af-4371-9d16-ca9ef11ad6c3" {
 		t.Fatalf("turn_completed must carry uuid turnId: %+v", evs[1])
 	}
+
+	compact := claudeTranscriptRelayEntry{
+		Type:      "system",
+		Subtype:   "compact_boundary",
+		UUID:      "compact-1",
+		Timestamp: "2026-07-29T08:25:27.000Z",
+		CompactMetadata: &claudeRelayCompactMetadata{
+			PreTokens:  169352,
+			PostTokens: 8605,
+		},
+	}
+	evs = claudeEntryToProjectionEvents(compact, &currentTurnID)
+	if len(evs) != 1 || evs[0].Event != "system_message" {
+		t.Fatalf("compact boundary → %+v", evs)
+	}
+	if evs[0].Data["itemId"] != "compact-1" ||
+		evs[0].Data["text"] != "已压缩对话 · 节省 160.7k tokens" ||
+		evs[0].Data["timestampMillis"] == nil {
+		t.Fatalf("compact boundary data = %+v", evs[0].Data)
+	}
+
+	internalSummary := claudeTranscriptRelayEntry{
+		Type:                      "user",
+		UUID:                      "internal-summary",
+		IsCompactSummary:          true,
+		IsVisibleInTranscriptOnly: true,
+		Message: &struct {
+			ID         string          `json:"id"`
+			Role       string          `json:"role"`
+			StopReason string          `json:"stop_reason"`
+			Content    json.RawMessage `json:"content"`
+		}{Role: "user", Content: json.RawMessage(`"internal compact prompt"`)}}
+	if got := claudeEntryToProjectionEvents(internalSummary, &currentTurnID); len(got) != 0 {
+		t.Fatalf("internal compact summary must be filtered, got %+v", got)
+	}
+}
+
+func TestStreamClaudeTranscriptProjectionEventsCompactionBoundaryFiltersInternalSummary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "compact.jsonl")
+	transcript := strings.Join([]string{
+		`{"type":"system","subtype":"compact_boundary","uuid":"compact-1","timestamp":"2026-07-29T08:25:27.000Z","compactMetadata":{"preTokens":169352,"postTokens":8605}}`,
+		`{"type":"user","uuid":"internal-summary","isVisibleInTranscriptOnly":true,"isCompactSummary":true,"message":{"role":"user","content":"internal compact prompt"}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(transcript), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var events []projectionHydrateEvent
+	err := streamClaudeTranscriptProjectionEvents(context.Background(), path, func(event projectionHydrateEvent) bool {
+		events = append(events, event)
+		return true
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Event != "system_message" {
+		t.Fatalf("events = %+v, want one system_message", events)
+	}
+	if events[0].Data["text"] != "已压缩对话 · 节省 160.7k tokens" {
+		t.Fatalf("system summary = %#v", events[0].Data["text"])
+	}
 }
 
 func TestOpenCodeRichHistoryEntryToProjectionEvents(t *testing.T) {
@@ -1004,6 +1126,27 @@ func TestOpenCodeRichHistoryEntryToProjectionEvents(t *testing.T) {
 	last := evs[len(evs)-1]
 	if last.Event != "turn_completed" || last.Data["turnId"] != "u-oc-1" || !last.TurnDone {
 		t.Fatalf("turn_completed = %+v", last)
+	}
+}
+
+func TestRichHistorySystemEntryToProjectionEvent(t *testing.T) {
+	current := "user-before"
+	entry := core.RichHistoryEntry{
+		ID:        "compact-1",
+		Role:      "system",
+		Content:   "已压缩对话 · 节省 160.7k tokens",
+		Timestamp: time.Date(2026, 7, 29, 8, 17, 51, 0, time.UTC),
+	}
+	events := openCodeRichHistoryEntryToProjectionEvents(entry, &current)
+	if len(events) != 1 || events[0].Event != "system_message" {
+		t.Fatalf("system rich history events = %+v", events)
+	}
+	if events[0].Data["itemId"] != "compact-1" ||
+		events[0].Data["text"] != "已压缩对话 · 节省 160.7k tokens" {
+		t.Fatalf("system event data = %+v", events[0].Data)
+	}
+	if current != "" {
+		t.Fatalf("compact must end prior turn attribution, current = %q", current)
 	}
 }
 

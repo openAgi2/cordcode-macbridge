@@ -427,6 +427,145 @@ func TestGetRichSessionHistory_HidesResumeMetaContinuation(t *testing.T) {
 	}
 }
 
+func TestGetRichSessionHistory_CompactionBoundaryReplacesInternalSummary(t *testing.T) {
+	homeDir := t.TempDir()
+	workDir := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(workDir): %v", err)
+	}
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
+
+	writeClaudeTranscriptFixture(t, homeDir, workDir, "ses-compact", []string{
+		`{"type":"assistant","timestamp":"2026-07-29T08:16:00Z","message":{"id":"assistant-before","role":"assistant","content":[{"type":"text","text":"压缩前正文"}]}}`,
+		`{"type":"system","subtype":"compact_boundary","timestamp":"2026-07-29T08:17:51Z","uuid":"compact-1","compactMetadata":{"trigger":"auto","preTokens":169352,"postTokens":8605,"durationMs":76576}}`,
+		`{"type":"user","isVisibleInTranscriptOnly":true,"isCompactSummary":true,"timestamp":"2026-07-29T08:17:51Z","uuid":"summary-1","message":{"role":"user","content":"This session is being continued from a previous conversation. INTERNAL SUMMARY"}}`,
+		`{"type":"assistant","timestamp":"2026-07-29T08:18:00Z","message":{"id":"assistant-after","role":"assistant","content":[{"type":"text","text":"压缩后正文"}]}}`,
+	})
+
+	agent := &Agent{workDir: workDir}
+	entries, err := agent.GetRichSessionHistory(context.Background(), "ses-compact", 0)
+	if err != nil {
+		t.Fatalf("GetRichSessionHistory() error = %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("entry count = %d, want 3: %#v", len(entries), entries)
+	}
+	if entries[1].ID != "compact-1" || entries[1].Role != "system" {
+		t.Fatalf("compaction entry identity = %#v, want stable system boundary", entries[1])
+	}
+	if entries[1].Content != "已压缩对话 · 节省 160.7k tokens" {
+		t.Fatalf("compaction summary = %q", entries[1].Content)
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Content, "INTERNAL SUMMARY") || strings.Contains(entry.Content, "This session is being continued") {
+			t.Fatalf("internal compact summary leaked into visible history: %#v", entry)
+		}
+	}
+}
+
+func TestGetRichSessionHistory_StitchesCompactContinuationIntoOneLogicalSession(t *testing.T) {
+	homeDir := t.TempDir()
+	workDir := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(workDir): %v", err)
+	}
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
+
+	writeClaudeTranscriptFixture(t, homeDir, workDir, "parent-session", []string{
+		`{"type":"user","timestamp":"2026-07-29T08:00:00Z","message":{"id":"user-before","role":"user","content":"压缩前问题"}}`,
+		`{"type":"assistant","timestamp":"2026-07-29T08:10:00Z","message":{"id":"assistant-before","role":"assistant","content":[{"type":"text","text":"压缩前回答"}]}}`,
+		`{"type":"system","subtype":"compact_boundary","timestamp":"2026-07-29T08:17:51Z","uuid":"shared-compact","compactMetadata":{"preTokens":169352,"postTokens":8605}}`,
+		`{"type":"user","isVisibleInTranscriptOnly":true,"isCompactSummary":true,"timestamp":"2026-07-29T08:17:51Z","message":{"role":"user","content":"INTERNAL SUMMARY"}}`,
+	})
+	writeClaudeTranscriptFixture(t, homeDir, workDir, "child-session", []string{
+		`{"type":"system","subtype":"compact_boundary","timestamp":"2026-07-29T08:17:51Z","uuid":"shared-compact","compactMetadata":{"preTokens":169352,"postTokens":8605}}`,
+		`{"type":"user","isVisibleInTranscriptOnly":true,"isCompactSummary":true,"timestamp":"2026-07-29T08:17:51Z","message":{"role":"user","content":"INTERNAL SUMMARY"}}`,
+		`{"type":"assistant","timestamp":"2026-07-29T08:10:00Z","message":{"id":"assistant-before","role":"assistant","content":[{"type":"text","text":"压缩前回答"}]}}`,
+		`{"type":"user","timestamp":"2026-07-29T08:34:00Z","message":{"id":"user-after","role":"user","content":"压缩后问题"}}`,
+		`{"type":"assistant","timestamp":"2026-07-29T08:35:00Z","message":{"id":"assistant-after","role":"assistant","content":[{"type":"text","text":"压缩后回答"}]}}`,
+	})
+
+	agent := &Agent{workDir: workDir}
+	entries, err := agent.GetRichSessionHistory(context.Background(), "child-session", 0)
+	if err != nil {
+		t.Fatalf("GetRichSessionHistory() error = %v", err)
+	}
+	if len(entries) != 5 {
+		t.Fatalf("entry count = %d, want 5: %#v", len(entries), entries)
+	}
+	got := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		got = append(got, entry.Role+":"+entry.ID)
+		if strings.Contains(entry.Content, "INTERNAL SUMMARY") {
+			t.Fatalf("internal summary leaked into stitched history: %#v", entry)
+		}
+	}
+	want := []string{
+		"user:user-before",
+		"assistant:assistant-before",
+		"system:shared-compact",
+		"user:user-after",
+		"assistant:assistant-after",
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("stitched order = %#v, want %#v", got, want)
+	}
+
+	// Projection pulls may open a session from a different project while the
+	// shared agent still points at its previous workDir. Session identity must
+	// resolve globally without mutating that shared workDir.
+	agent.workDir = filepath.Join(t.TempDir(), "stale-project")
+	reloaded, err := agent.GetRichSessionHistory(context.Background(), "child-session", 0)
+	if err != nil {
+		t.Fatalf("global session lookup from stale workDir failed: %v", err)
+	}
+	if len(reloaded) != len(entries) {
+		t.Fatalf("global session lookup returned %d entries, want %d", len(reloaded), len(entries))
+	}
+}
+
+func TestGetRichSessionHistory_HidesInterruptedPromptReplayedByContinuation(t *testing.T) {
+	homeDir := t.TempDir()
+	workDir := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(workDir): %v", err)
+	}
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
+	prompt := "把 docs 全部纳入 Git 管理"
+
+	writeClaudeTranscriptFixture(t, homeDir, workDir, "parent-session", []string{
+		`{"type":"system","subtype":"compact_boundary","timestamp":"2026-07-29T08:17:51Z","uuid":"shared-compact"}`,
+		`{"type":"user","promptId":"abandoned-prompt","timestamp":"2026-07-29T08:33:52Z","message":{"role":"user","content":"` + prompt + `"}}`,
+		`{"type":"user","promptId":"abandoned-prompt","timestamp":"2026-07-29T08:34:17Z","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}`,
+	})
+	writeClaudeTranscriptFixture(t, homeDir, workDir, "child-session", []string{
+		`{"type":"system","subtype":"compact_boundary","timestamp":"2026-07-29T08:17:51Z","uuid":"shared-compact"}`,
+		`{"type":"user","promptId":"continued-prompt","timestamp":"2026-07-29T08:34:28Z","message":{"role":"user","content":"` + prompt + `"}}`,
+		`{"type":"assistant","timestamp":"2026-07-29T08:35:00Z","message":{"id":"assistant-after","role":"assistant","content":[{"type":"text","text":"开始处理"}]}}`,
+	})
+
+	agent := &Agent{workDir: workDir}
+	entries, err := agent.GetRichSessionHistory(context.Background(), "child-session", 0)
+	if err != nil {
+		t.Fatalf("GetRichSessionHistory() error = %v", err)
+	}
+	userCount := 0
+	for _, entry := range entries {
+		if entry.Role == "user" && entry.Content == prompt {
+			userCount++
+		}
+		if strings.Contains(entry.Content, "Request interrupted by user") {
+			t.Fatalf("interrupt marker leaked into history: %#v", entry)
+		}
+	}
+	if userCount != 1 {
+		t.Fatalf("replayed visible prompt count = %d, want 1: %#v", userCount, entries)
+	}
+}
+
 func writeClaudeTranscriptFixture(t *testing.T, homeDir, workDir, sessionID string, lines []string) string {
 	t.Helper()
 	absWorkDir, err := filepath.Abs(workDir)

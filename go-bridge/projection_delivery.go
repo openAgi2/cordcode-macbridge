@@ -42,7 +42,7 @@ func (p *EventPublisher) SetConnSyncV2(conn Connection, enabled bool) {
 func isSessionSyncV2RawTimelineEvent(event string) bool {
 	switch event {
 	case "turn_started", "turn_completed",
-		"user_message",
+		"user_message", "system_message",
 		"text_delta", "message_updated", "message_content",
 		"reasoning_delta", "thinking_delta",
 		"tool_started", "tool_finished", "tool_content",

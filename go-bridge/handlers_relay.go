@@ -630,6 +630,10 @@ func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection,
 					h.broadcastIdleState(sessionID, backendID)
 					runningObserved = false
 					slog.Info("go-bridge: claudeSessionFileRelay turn completed, keeping watch while process live", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID, "turnId", currentTurnID)
+				case "system_message":
+					// Compact boundaries are historical milestones, not new execution.
+					// Preserve the current running/idle observation exactly as-is.
+					h.sendSessionEvent(sessionID, backendID, "system_message", ev.Data)
 				default:
 					h.sendSessionEvent(sessionID, backendID, ev.Event, ev.Data)
 					runningObserved = true
@@ -640,15 +644,52 @@ func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection,
 }
 
 type claudeTranscriptRelayEntry struct {
-	Type    string `json:"type"`
-	UUID    string `json:"uuid"`
-	IsMeta  bool   `json:"isMeta"`
-	Message *struct {
+	Type                      string                      `json:"type"`
+	Subtype                   string                      `json:"subtype"`
+	UUID                      string                      `json:"uuid"`
+	Timestamp                 string                      `json:"timestamp"`
+	IsMeta                    bool                        `json:"isMeta"`
+	IsCompactSummary          bool                        `json:"isCompactSummary"`
+	IsVisibleInTranscriptOnly bool                        `json:"isVisibleInTranscriptOnly"`
+	CompactMetadata           *claudeRelayCompactMetadata `json:"compactMetadata"`
+	Message                   *struct {
 		ID         string          `json:"id"`
 		Role       string          `json:"role"`
 		StopReason string          `json:"stop_reason"`
 		Content    json.RawMessage `json:"content"`
 	} `json:"message"`
+}
+
+type claudeRelayCompactMetadata struct {
+	PreTokens  int64 `json:"preTokens"`
+	PostTokens int64 `json:"postTokens"`
+}
+
+func isClaudeCompactionBoundaryRelayEntry(entry claudeTranscriptRelayEntry) bool {
+	return entry.Type == "system" && entry.Subtype == "compact_boundary"
+}
+
+func isClaudeInternalCompactRelayEntry(entry claudeTranscriptRelayEntry) bool {
+	return entry.IsCompactSummary || entry.IsVisibleInTranscriptOnly
+}
+
+func claudeRelayCompactionSummary(metadata *claudeRelayCompactMetadata) string {
+	if metadata == nil || metadata.PreTokens <= metadata.PostTokens {
+		return "已压缩对话"
+	}
+	saved := metadata.PreTokens - metadata.PostTokens
+	if saved >= 1000 {
+		return fmt.Sprintf("已压缩对话 · 节省 %.1fk tokens", float64(saved)/1000)
+	}
+	return fmt.Sprintf("已压缩对话 · 节省 %d tokens", saved)
+}
+
+func claudeRelayTimestampMillis(raw string) int64 {
+	timestamp, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(raw))
+	if err != nil {
+		return 0
+	}
+	return timestamp.UnixMilli()
 }
 
 // claudeEntryTurnIdentity returns the stable identity for a Claude transcript row.
@@ -735,7 +776,7 @@ func isFinalClaudeStopReason(reason string) bool {
 	}
 }
 
-// scanClaudeRelayEntriesFromReader 返回新增字节内所有 meaningful user/assistant 记录
+// scanClaudeRelayEntriesFromReader 返回新增字节内所有 meaningful user/assistant/system 记录
 // （按文件顺序），应用 resume meta / no-response 跳过逻辑。
 func scanClaudeRelayEntriesFromReader(r io.Reader) ([]claudeTranscriptRelayEntry, error) {
 	skipNextResumeNoResponse := false
@@ -752,7 +793,11 @@ func scanClaudeRelayEntriesFromReader(r io.Reader) ([]claudeTranscriptRelayEntry
 		if err := json.Unmarshal(line, &entry); err != nil {
 			continue
 		}
-		if entry.Message == nil {
+		if isClaudeCompactionBoundaryRelayEntry(entry) {
+			entries = append(entries, entry)
+			continue
+		}
+		if isClaudeInternalCompactRelayEntry(entry) || entry.Message == nil {
 			continue
 		}
 		if isClaudeResumeMetaRelayEntry(entry) {
@@ -788,6 +833,10 @@ func classifyLastMeaningfulClaudeRelayEntryFromReader(r io.Reader) (claudeTransc
 			last = claudeTranscriptRelayMeaningfulEntry{hasMeaningfulEntry: true, entryType: "user", interrupt: isClaudeUserInterruptRelayEntry(e)}
 		case "assistant":
 			last = claudeTranscriptRelayMeaningfulEntry{hasMeaningfulEntry: true, entryType: "assistant", finalAssistant: isFinalClaudeStopReason(e.Message.StopReason)}
+		case "system":
+			if isClaudeCompactionBoundaryRelayEntry(e) {
+				last = claudeTranscriptRelayMeaningfulEntry{hasMeaningfulEntry: true, entryType: "system"}
+			}
 		}
 	}
 	return last, nil
@@ -887,6 +936,17 @@ func streamClaudeTranscriptProjectionEventsRangeSeed(
 		if json.Unmarshal(line, &e) != nil {
 			continue
 		}
+		if isClaudeInternalCompactRelayEntry(e) {
+			continue
+		}
+		if isClaudeCompactionBoundaryRelayEntry(e) {
+			for _, ev := range claudeEntryToProjectionEvents(e, &currentTurnID) {
+				if !emit(ev) {
+					return ctx.Err()
+				}
+			}
+			continue
+		}
 		if e.Message == nil {
 			continue
 		}
@@ -922,6 +982,24 @@ func streamClaudeTranscriptProjectionEventsRangeSeed(
 // text_delta / reasoning_delta / tool_started; a final stop_reason emits turn_completed (the
 // segment boundary). Returns nil for entries that carry no projection-meaningful content.
 func claudeEntryToProjectionEvents(e claudeTranscriptRelayEntry, currentTurnID *string) []projectionHydrateEvent {
+	if isClaudeInternalCompactRelayEntry(e) {
+		return nil
+	}
+	if isClaudeCompactionBoundaryRelayEntry(e) {
+		identity := strings.TrimSpace(e.UUID)
+		if identity == "" {
+			return nil
+		}
+		data := map[string]interface{}{
+			"itemId": identity,
+			"turnId": identity,
+			"text":   claudeRelayCompactionSummary(e.CompactMetadata),
+		}
+		if timestampMillis := claudeRelayTimestampMillis(e.Timestamp); timestampMillis > 0 {
+			data["timestampMillis"] = timestampMillis
+		}
+		return []projectionHydrateEvent{{Event: "system_message", Data: data}}
+	}
 	if e.Message == nil {
 		return nil
 	}
@@ -1027,7 +1105,6 @@ func claudeToolResultText(b claudeRelayContentBlock) string {
 	return strings.TrimSpace(string(b.Content))
 }
 
-
 func (h *Handlers) classifyClaudeTranscriptFile(sessPath string) claudeTranscriptRelayMeaningfulEntry {
 	transcriptStateProbe()
 	f, err := os.Open(sessPath)
@@ -1084,6 +1161,9 @@ func (h *Handlers) detectClaudeTranscriptState(sessPath string) string {
 	}
 	if last.entryType == "user" {
 		return "running"
+	}
+	if last.entryType == "system" {
+		return "idle"
 	}
 	return "unknown"
 }

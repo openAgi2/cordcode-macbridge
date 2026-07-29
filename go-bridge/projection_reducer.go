@@ -1,6 +1,7 @@
 package gobridge
 
 import (
+	"encoding/json"
 	"strings"
 	"sync"
 	"time"
@@ -75,6 +76,25 @@ func dataString(m map[string]interface{}, key string) string {
 	return ""
 }
 
+func dataInt64(m map[string]interface{}, key string) int64 {
+	if m == nil {
+		return 0
+	}
+	switch value := m[key].(type) {
+	case int:
+		return int64(value)
+	case int64:
+		return value
+	case float64:
+		return int64(value)
+	case json.Number:
+		n, _ := value.Int64()
+		return n
+	default:
+		return 0
+	}
+}
+
 func (ps *projectionSession) turnByID(turnID string) *TurnProjection {
 	for i := range ps.projection.Turns {
 		if ps.projection.Turns[i].TurnID == turnID {
@@ -89,7 +109,7 @@ func (ps *projectionSession) upsertTurn(turn TurnProjection) {
 		return
 	}
 	if t := ps.turnByID(turn.TurnID); t != nil {
-		// Merge: keep existing user/assistant if the incoming snapshot omits them.
+		// Merge: keep existing user/assistant/system if the incoming snapshot omits them.
 		if turn.Status != "" {
 			t.Status = turn.Status
 		}
@@ -104,6 +124,9 @@ func (ps *projectionSession) upsertTurn(turn TurnProjection) {
 		}
 		if turn.Assistant != nil {
 			t.Assistant = turn.Assistant
+		}
+		if turn.System != nil {
+			t.System = turn.System
 		}
 		if ps.upsertTurns != nil {
 			ps.upsertTurns[turn.TurnID] = *t
@@ -280,6 +303,37 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		// a re-emitted turn_started must still arm the UI (owner 2026-07-25: reopen app
 		// → prompt+thinking then sticky 完成态 because phase stayed idle).
 		ps.markRunning(turnID)
+
+	case "system_message":
+		turnID := dataString(data, "turnId")
+		itemID := dataString(data, "itemId")
+		text := dataString(data, "text")
+		if turnID == "" {
+			turnID = itemID
+		}
+		if itemID == "" {
+			itemID = turnID
+		}
+		if turnID == "" || strings.TrimSpace(text) == "" {
+			return
+		}
+		commit()
+		timestamp := dataInt64(data, "timestampMillis")
+		ps.upsertTurn(TurnProjection{
+			TurnID:      turnID,
+			Status:      "completed",
+			StartedAt:   timestamp,
+			CompletedAt: timestamp,
+			System: &MessageProjection{
+				ID:   itemID,
+				Role: "system",
+				Parts: []ProjectionPart{{
+					Type:         "text",
+					Text:         text,
+					Presentation: "final",
+				}},
+			},
+		})
 
 	case "text_delta":
 		// itemId == lifecycle turn_id == the turn's turnId == the assistant message id.
@@ -615,7 +669,8 @@ func (r *ProjectionReducer) TurnCount(backendID, sessionID string) int {
 	return len(ps.projection.Turns)
 }
 
-// HasContentTurn reports whether the reducer holds at least one turn with real user or assistant
+// HasContentTurn reports whether the reducer holds at least one turn with real user, assistant,
+// or system
 // content (a non-empty message). This is the precise non-empty-partial boundary for segmented
 // cold-hydrate (design §10.5.6 scheme A): a bare task_started shell with no message content is
 // not yet a partial worth serving; once user/assistant text lands the partial is honest.
@@ -635,6 +690,9 @@ func (r *ProjectionReducer) HasContentTurn(backendID, sessionID string) bool {
 			return true
 		}
 		if t.Assistant != nil && len(t.Assistant.Parts) > 0 {
+			return true
+		}
+		if t.System != nil && len(t.System.Parts) > 0 {
 			return true
 		}
 	}
@@ -675,6 +733,16 @@ func cloneTurn(t TurnProjection) TurnProjection {
 			}
 		}
 		out.Assistant = &a
+	}
+	if t.System != nil {
+		s := *t.System
+		if len(t.System.Parts) > 0 {
+			s.Parts = make([]ProjectionPart, len(t.System.Parts))
+			for i := range t.System.Parts {
+				s.Parts[i] = cloneProjectionPart(t.System.Parts[i])
+			}
+		}
+		out.System = &s
 	}
 	return out
 }

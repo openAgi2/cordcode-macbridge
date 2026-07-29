@@ -31,11 +31,11 @@ type ProjectionPart struct {
 	MovePath string `json:"movePath,omitempty"`
 }
 
-// MessageProjection is one user/assistant message within a turn.
+// MessageProjection is one user/assistant/system message within a turn.
 type MessageProjection struct {
 	ID       string           `json:"id"` // authoritative source id (see bridge-v1.md SPS)
 	ClientID string           `json:"clientId,omitempty"`
-	Role     string           `json:"role"` // user | assistant
+	Role     string           `json:"role"` // user | assistant | system
 	Parts    []ProjectionPart `json:"parts"`
 }
 
@@ -47,6 +47,7 @@ type TurnProjection struct {
 	CompletedAt int64              `json:"completedAt,omitempty"`
 	User        *MessageProjection `json:"user,omitempty"`
 	Assistant   *MessageProjection `json:"assistant,omitempty"`
+	System      *MessageProjection `json:"system,omitempty"`
 }
 
 // ExecutionView is the session-level execution state. isExecuting = phase ∈ {running, requires_action}.

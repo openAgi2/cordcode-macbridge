@@ -15,9 +15,10 @@ import (
 	"time"
 )
 
-// Version 2 adds canonical Codex text presentation and removes assistant/tool-result shells.
-// Version 1 checkpoints must be rehydrated because their mapped timeline semantics differ.
-const projectionCheckpointSchemaVersion = 2
+// Version 3 adds system timeline milestones and filters Claude's internal compact summary.
+// Older checkpoints must be rehydrated because they may contain that private summary as a
+// user message and omit the compact boundary.
+const projectionCheckpointSchemaVersion = 3
 
 var (
 	ErrProjectionCheckpointInvalid  = errors.New("projection checkpoint invalid")

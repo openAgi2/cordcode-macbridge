@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/openAgi2/cordcode-macbridge/agent/claudecode"
 	"github.com/openAgi2/cordcode-macbridge/core"
 	"github.com/openAgi2/cordcode-macbridge/pinstore"
 	"github.com/openAgi2/cordcode-macbridge/transcriptindex"
@@ -2471,12 +2472,13 @@ type claudeSessionScanResult struct {
 	// 会把原始会话的开头（含首条 user 消息）原样复制到新会话，因此 fork 对的
 	// FirstUserAt 完全相同，可作为 fork 配对信号。首条消息在文件开头，LimitReader
 	// 一定能读到。
-	FirstUserAt     time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	ModelID         string
-	ProviderID      string
-	ReasoningEffort string
+	FirstUserAt        time.Time
+	CompactBoundaryIDs []string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	ModelID            string
+	ProviderID         string
+	ReasoningEffort    string
 }
 
 type claudeBridgeSessionSidecar struct {
@@ -2599,6 +2601,7 @@ func scanClaudeSessionMetadata(path string, fallbackTime time.Time) claudeSessio
 		updatedAt = createdAt
 	}
 	providerID := ""
+	continuity := claudecode.InspectTranscriptContinuity(path)
 	if sidecar.ModelID != "" {
 		modelID = sidecar.ModelID
 	}
@@ -2611,14 +2614,15 @@ func scanClaudeSessionMetadata(path string, fallbackTime time.Time) claudeSessio
 		}
 	}
 	return claudeSessionScanResult{
-		Title:           title,
-		CustomTitle:     customTitle,
-		FirstUserAt:     firstUserAt,
-		CreatedAt:       createdAt,
-		UpdatedAt:       updatedAt,
-		ModelID:         modelID,
-		ProviderID:      providerID,
-		ReasoningEffort: normalizeClaudeRuntimeEffort(sidecar.ReasoningEffort),
+		Title:              title,
+		CustomTitle:        customTitle,
+		FirstUserAt:        firstUserAt,
+		CompactBoundaryIDs: continuity.BoundaryIDs,
+		CreatedAt:          createdAt,
+		UpdatedAt:          updatedAt,
+		ModelID:            modelID,
+		ProviderID:         providerID,
+		ReasoningEffort:    normalizeClaudeRuntimeEffort(sidecar.ReasoningEffort),
 	}
 }
 

@@ -448,7 +448,7 @@ export interface BridgeMessageProjection {
   id: string;
   /** Optional echo of a client optimistic id (Phase 3 local-send correlation; absent in Phase 1–2). */
   clientId?: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   parts: BridgeProjectionPart[];
 }
 
@@ -463,6 +463,8 @@ export interface BridgeTurnProjection {
   completedAt?: number; // epoch-ms
   user?: BridgeMessageProjection;
   assistant?: BridgeMessageProjection;
+  /** Transcript lifecycle milestone such as a Claude compact boundary. */
+  system?: BridgeMessageProjection;
 }
 
 export type BridgeExecutionPhase = "idle" | "running" | "requires_action";
