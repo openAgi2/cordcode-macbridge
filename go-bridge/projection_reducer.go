@@ -543,6 +543,54 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			}
 		}
 
+	case "subagent_part":
+		// B4 child-stream: upsert a fully-built subagent ProjectionPart (Type=="subagent")
+		// into the mainstream turn's assistant message, keyed by AgentID. The whole part
+		// (including recursive SubagentBlocks) is constructed upstream by the sidechain
+		// source-read pre-pass (claude_sidechain_subagents.go) during cold hydrate; the
+		// reducer only anchors + upserts — it does not build the tree (guardrail §3/§4: no
+		// consumer referee). Sync-only hydrate (ApplyHydrateEvent → tx.reducer); never a
+		// live event. turnId is the depth-1 mainstream anchor (resolved via SpawnToolUseID
+		// ↔ mainstream Agent tool_use id before emit).
+		turnID := dataString(data, "turnId")
+		agentID := dataString(data, "agentId")
+		if turnID == "" || agentID == "" {
+			return
+		}
+		t := ps.turnByID(turnID)
+		if t == nil {
+			return // mainstream owning turn must already exist (hydrate runs after mainstream scan)
+		}
+		commit()
+		if t.Assistant == nil {
+			t.Assistant = &MessageProjection{ID: turnID, Role: "assistant"}
+		}
+		blocks, _ := data["subagentBlocks"].([]ProjectionPart)
+		part := ProjectionPart{
+			Type:              "subagent",
+			AgentID:           agentID,
+			ParentAgentID:     dataString(data, "parentAgentId"),
+			SpawnToolUseID:    dataString(data, "spawnToolUseId"),
+			SpawnDepth:        int(dataInt64(data, "spawnDepth")),
+			SubagentType:      dataString(data, "subagentType"),
+			SubagentStatus:    dataString(data, "subagentStatus"),
+			SubagentBlocks:    blocks,
+			SubagentError:     dataString(data, "subagentError"),
+			SubagentDiagnostic: dataString(data, "subagentDiagnostic"),
+		}
+		// Upsert by AgentID within the assistant message (mirrors the tool upsert pattern).
+		found := false
+		for i := range t.Assistant.Parts {
+			if t.Assistant.Parts[i].Type == "subagent" && t.Assistant.Parts[i].AgentID == agentID {
+				t.Assistant.Parts[i] = part
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Assistant.Parts = append(t.Assistant.Parts, part)
+		}
+
 	case "turn_completed":
 		turnID := dataString(data, "turnId")
 		if turnID == "" {
@@ -838,6 +886,16 @@ func cloneProjectionPart(part ProjectionPart) ProjectionPart {
 	out.ToolInput = cloneProjectionJSONValue(part.ToolInput)
 	out.ToolResult = cloneProjectionJSONValue(part.ToolResult)
 	out.Matches = cloneProjectionJSONValue(part.Matches)
+	if len(part.SubagentBlocks) > 0 {
+		// SubagentBlocks is a concrete []ProjectionPart (recursive); the shallow `out := part`
+		// above only copies the slice header. Deep-copy each nested part so the reducer's
+		// projection and the delivered patch/freeze do not alias the same subagent blocks
+		// (would race once a later reduce mutates either side).
+		out.SubagentBlocks = make([]ProjectionPart, len(part.SubagentBlocks))
+		for i := range part.SubagentBlocks {
+			out.SubagentBlocks[i] = cloneProjectionPart(part.SubagentBlocks[i])
+		}
+	}
 	return out
 }
 

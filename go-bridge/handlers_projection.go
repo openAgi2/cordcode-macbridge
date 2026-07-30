@@ -601,6 +601,41 @@ func (h *Handlers) runProjectionHydrateTransaction(
 		)
 		return
 	}
+	// B4 child-stream (sync-only hydrate): after the mainstream Claude transcript is reduced
+	// into this transaction, read sibling sidechain files (subagents/agent-*.jsonl + .meta.json)
+	// and emit subagent_part events through the same ApplyHydrateEvent transaction. Claude only —
+	// Codex/OpenCode have no sidechain files. The mainstream anchor map (Agent/Task tool_use id →
+	// owning turnId) is derived from the in-transaction snapshot so depth-1 subagents attach to
+	// the exact turns just scanned, with no re-scan. Fail-open: any read/build error is logged
+	// and the hydrate proceeds without subagent parts (current state preserved, no fabrication,
+	// guardrail §10). See claude_sidechain_subagents.go.
+	if backendID == "claude" || backendID == "claudecode" {
+		if subagentsDir := claudeSubagentsDir(source); subagentsDir != "" {
+			hydrated, _ := h.projectionKernel.HydrateSnapshot(backendID, sessionID)
+			mainstreamToolUseTurn := map[string]string{}
+			for _, turn := range hydrated.Turns {
+				if turn.Assistant == nil {
+					continue
+				}
+				for _, part := range turn.Assistant.Parts {
+					if part.Type == "tool" && (part.ToolName == "Agent" || part.ToolName == "Task") && part.ItemID != "" {
+						mainstreamToolUseTurn[part.ItemID] = turn.TurnID
+					}
+				}
+			}
+			sidechainEmit := func(event projectionHydrateEvent) bool {
+				h.projectionKernel.ApplyHydrateEvent(
+					backendID, sessionID, h.eventPublisher.BridgeEpoch(),
+					event.Event, event.Data,
+				)
+				return ctx.Err() == nil
+			}
+			if err := produceClaudeSidechainSubagentEvents(ctx, subagentsDir, mainstreamToolUseTurn, sidechainEmit); err != nil {
+				slog.Warn("go-bridge: Claude sidechain subagent source-read failed; failing open",
+					"backendID", backendID, "sessionPrefix", projectionSessionLogPrefix(sessionID), "error", err)
+			}
+		}
+	}
 	if err := h.projectionKernel.WaitHydrateCommitReady(ctx, backendID, sessionID); err != nil {
 		h.projectionKernel.MarkFailed(
 			backendID, sessionID, "projection.bare_source_wait_failed", err.Error(), true,

@@ -8,9 +8,9 @@ package gobridge
 // additive over bridge-v1; see bridge-v1_schema.go BridgeProtocolSchemaRevision.
 
 // ProjectionPart is one part of a message projection. Type mirrors the Mapping Notes part
-// vocabulary (text | reasoning | tool | file). Only the fields relevant to a type are set.
+// vocabulary (text | reasoning | tool | file | subagent). Only the fields relevant to a type are set.
 type ProjectionPart struct {
-	Type string `json:"type"` // text | reasoning | tool | file
+	Type string `json:"type"` // text | reasoning | tool | file | subagent
 
 	// text / reasoning
 	Text         string `json:"text,omitempty"`
@@ -29,6 +29,21 @@ type ProjectionPart struct {
 	Kind     string `json:"kind,omitempty"`
 	Diff     string `json:"diff,omitempty"`
 	MovePath string `json:"movePath,omitempty"`
+
+	// subagent (Type=="subagent") — Claude Agent/Task tool nested subagent group.
+	// Populated by the MacBridge projection kernel as the single source of truth (B4 child-stream);
+	// iOS/remote-web map this read-only into WebSubagentGroupBlock. Join keys mirror the real
+	// sidechain `.meta.json` schema (sample-verified): depth-1 anchors to the mainstream turn via
+	// SpawnToolUseID ↔ mainstream Agent tool_use id; depth≥2 nests via ParentAgentID ↔ parent agentId.
+	AgentID           string           `json:"agentId,omitempty"`
+	ParentAgentID     string           `json:"parentAgentId,omitempty"`
+	SpawnToolUseID    string           `json:"spawnToolUseId,omitempty"`
+	SpawnDepth        int              `json:"spawnDepth,omitempty"`
+	SubagentType      string           `json:"subagentType,omitempty"`    // async | sync (from .meta.json agentType)
+	SubagentStatus    string           `json:"subagentStatus,omitempty"`  // running | completed | failed (sample only verified completed)
+	SubagentBlocks    []ProjectionPart `json:"subagentBlocks,omitempty"`  // recursive (text/reasoning/tool/nested subagent)
+	SubagentError     string           `json:"subagentError,omitempty"`
+	SubagentDiagnostic string          `json:"subagentDiagnostic,omitempty"` // orphan_parent | cycle | max_depth
 }
 
 // MessageProjection is one user/assistant/system message within a turn.
