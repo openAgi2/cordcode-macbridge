@@ -1,0 +1,4 @@
+{"uuid":"u-root","type":"user","timestamp":"2026-07-30T00:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"run a tool"}]},"parentUuid":null}
+{"uuid":"tu-1","type":"assistant","timestamp":"2026-07-30T00:00:01.000Z","message":{"id":"m-tu","role":"assistant","content":[{"type":"tool_use","id":"call-1","name":"grep","input":{"pattern":"x"}}]},"parentUuid":"u-root"}
+{"uuid":"tr-1","type":"assistant","timestamp":"2026-07-30T00:00:02.000Z","message":{"id":"m-tr","role":"assistant","content":[{"type":"tool_result","tool_use_id":"call-1","content":[{"type":"text","text":"first result"}]}]},"parentUuid":"tu-1"}
+{"uuid":"tr-1","type":"assistant","timestamp":"2026-07-30T00:00:03.000Z","message":{"id":"m-tr","role":"assistant","content":[{"type":"tool_result","tool_use_id":"call-1","content":[{"type":"text","text":"first result"},{"type":"text","text":"appended result"}]}]},"parentUuid":"tu-1"}

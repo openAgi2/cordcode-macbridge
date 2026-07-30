@@ -1,0 +1,4 @@
+{"uuid":"u-root","type":"user","timestamp":"2026-07-30T00:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"question A"}]},"parentUuid":null}
+{"uuid":"a-text-1","type":"assistant","timestamp":"2026-07-30T00:00:01.000Z","message":{"id":"msg-1","role":"assistant","content":[{"type":"text","text":"answer part 1"}],"stop_reason":"end_turn"},"parentUuid":"u-root"}
+{"uuid":"u-followup","type":"user","timestamp":"2026-07-30T00:00:02.000Z","message":{"role":"user","content":[{"type":"text","text":"question B"}]},"parentUuid":"a-text-1"}
+{"uuid":"a-text-1","type":"assistant","timestamp":"2026-07-30T00:00:01.000Z","message":{"id":"msg-1","role":"assistant","content":[{"type":"text","text":"answer part 1"}],"stop_reason":"end_turn"},"parentUuid":"u-followup"}
