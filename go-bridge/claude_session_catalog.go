@@ -20,6 +20,11 @@ type claudeSessionKey struct {
 type claudeSessionFingerprint struct {
 	ModTimeUnixNano int64
 	SizeBytes       int64
+	// SidecarModTimeUnixNano tracks the .cc-connect-session-meta sidecar mtime.
+	// Archive/unarchive only write the sidecar (the .jsonl transcript is
+	// untouched), so without this the catalog's fingerprint match would reuse a
+	// stale cached entry and ArchivedAt would never update.
+	SidecarModTimeUnixNano int64
 }
 
 type claudeSessionIndexEntry struct {
@@ -39,6 +44,7 @@ type claudeSessionIndexEntry struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	MessageCount       int
+	ArchivedAt         time.Time
 	Fingerprint        claudeSessionFingerprint
 }
 
@@ -174,6 +180,13 @@ func (c *claudeSessionCatalog) buildSnapshot(
 			if size > maxFileBytes {
 				maxFileBytes = size
 			}
+			// Include the sidecar mtime in the fingerprint so an archive/unarchive
+			// (which only writes the sidecar) invalidates the cached entry and the
+			// re-parse picks up the new ArchivedAt.
+			var sidecarModNano int64
+			if si, serr := os.Stat(claudeBridgeSessionSidecarPath(projectPath, strings.TrimSuffix(name, ".jsonl"))); serr == nil {
+				sidecarModNano = si.ModTime().UnixNano()
+			}
 			candidates = append(candidates, fileCandidate{
 				key: claudeSessionKey{
 					ProjectKey: projectKey,
@@ -182,8 +195,9 @@ func (c *claudeSessionCatalog) buildSnapshot(
 				path:      filepath.Join(projectPath, name),
 				directory: realDirectory,
 				fingerprint: claudeSessionFingerprint{
-					ModTimeUnixNano: info.ModTime().UnixNano(),
-					SizeBytes:       size,
+					ModTimeUnixNano:       info.ModTime().UnixNano(),
+					SizeBytes:             size,
+					SidecarModTimeUnixNano: sidecarModNano,
 				},
 				modTime: info.ModTime(),
 			})
@@ -205,21 +219,22 @@ func (c *claudeSessionCatalog) buildSnapshot(
 		parseStarted := time.Now()
 		scan := c.parseSession(candidate.path, candidate.modTime)
 		metrics.AddMetadataParse(time.Since(parseStarted))
-		nextByKey[candidate.key] = claudeSessionIndexEntry{
-			Key:                candidate.key,
-			FilePath:           candidate.path,
-			Directory:          candidate.directory,
-			Title:              scan.Title,
-			CustomTitle:        scan.CustomTitle,
-			FirstUserAt:        scan.FirstUserAt,
-			CompactBoundaryIDs: append([]string(nil), scan.CompactBoundaryIDs...),
-			ModelID:            scan.ModelID,
-			ProviderID:         scan.ProviderID,
-			ReasoningEffort:    scan.ReasoningEffort,
-			CreatedAt:          scan.CreatedAt,
-			UpdatedAt:          scan.UpdatedAt,
-			Fingerprint:        candidate.fingerprint,
-		}
+			nextByKey[candidate.key] = claudeSessionIndexEntry{
+				Key:                candidate.key,
+				FilePath:           candidate.path,
+				Directory:          candidate.directory,
+				Title:              scan.Title,
+				CustomTitle:        scan.CustomTitle,
+				FirstUserAt:        scan.FirstUserAt,
+				CompactBoundaryIDs: append([]string(nil), scan.CompactBoundaryIDs...),
+				ModelID:            scan.ModelID,
+				ProviderID:         scan.ProviderID,
+				ReasoningEffort:    scan.ReasoningEffort,
+				CreatedAt:          scan.CreatedAt,
+				UpdatedAt:          scan.UpdatedAt,
+				ArchivedAt:         scan.ArchivedAt,
+				Fingerprint:        candidate.fingerprint,
+			}
 	}
 	deleted := 0
 	if previous != nil {
@@ -425,6 +440,12 @@ func claudeSessionEntryToWire(entry claudeSessionIndexEntry) map[string]interfac
 	}
 	if entry.ReasoningEffort != "" {
 		wire["reasoningEffort"] = entry.ReasoningEffort
+	}
+	// Surface archivedAtMillis so clients can hide archived sessions (web
+	// session-grouping filters on archivedAtMillis). Matches the agent-layer
+	// wire shape in handlers.go sessionsToWire.
+	if !entry.ArchivedAt.IsZero() {
+		wire["archivedAtMillis"] = entry.ArchivedAt.UnixMilli()
 	}
 	return wire
 }

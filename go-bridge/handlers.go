@@ -52,6 +52,7 @@ type Handlers struct {
 	deltaBatcher            *DeltaBatcher
 	relayRunning            map[string]bool   // sessionID/relayKey → 是否已有 relay goroutine
 	relayRunningKind        map[string]string // sessionID → agent/file relay 类型，用于避免 Claude file relay 抢占真实 stdout relay
+	claudeSourceCorrelation *claudeSourceCorrelationTracker
 	deliveryPrekeys         *PrekeyStore
 	observation             *ObservationManager
 	relayOutbox             *OutboxManager
@@ -126,28 +127,29 @@ func newHandlersWithContext(ctx context.Context, bridgeEpoch string) *Handlers {
 	outbox := NewOutboxManager(prekeys)
 	presentation := NewPresentationManager()
 	h := &Handlers{
-		agents:                 make(map[string]core.Agent),
-		sessions:               newSessionRegistry(),
-		opencodeSessionOptions: make(map[string]opencodeSessionOptions),
-		contentRefs:            make(map[string]string),
-		broadcaster:            NewBroadcaster(),
-		pendingNotifications:   NewPendingNotificationStore(),
-		projectionHydrateSlots: make(chan struct{}, projectionHydrateMaxConcurrent),
-		relayRunning:           make(map[string]bool),
-		relayRunningKind:       make(map[string]string),
-		deliveryPrekeys:        prekeys,
-		observation:            observation,
-		relayOutbox:            outbox,
-		presentation:           presentation,
-		relayEventRouter:       NewRelayEventRouter(observation, outbox, prekeys, NewMailboxService(NewRelayHub()), presentation),
-		claudeSessions:         newDefaultClaudeSessionCatalog(),
-		pendingClaudeRuntime:   make(map[string]claudeRuntimeSelection),
-		transcriptIndex:        transcriptindex.NewStore(defaultTranscriptIndexDir()),
-		capabilityPolicy:       NewCapabilityPolicy(),
-		relayEnabled:           true,
-		sessionListLimit:       defaultSessionListLimit,
-		ctx:                    ctx,
-		cleanupStop:            make(chan struct{}),
+		agents:                  make(map[string]core.Agent),
+		sessions:                newSessionRegistry(),
+		opencodeSessionOptions:  make(map[string]opencodeSessionOptions),
+		contentRefs:             make(map[string]string),
+		broadcaster:             NewBroadcaster(),
+		pendingNotifications:    NewPendingNotificationStore(),
+		projectionHydrateSlots:  make(chan struct{}, projectionHydrateMaxConcurrent),
+		relayRunning:            make(map[string]bool),
+		relayRunningKind:        make(map[string]string),
+		claudeSourceCorrelation: newClaudeSourceCorrelationTracker(),
+		deliveryPrekeys:         prekeys,
+		observation:             observation,
+		relayOutbox:             outbox,
+		presentation:            presentation,
+		relayEventRouter:        NewRelayEventRouter(observation, outbox, prekeys, NewMailboxService(NewRelayHub()), presentation),
+		claudeSessions:          newDefaultClaudeSessionCatalog(),
+		pendingClaudeRuntime:    make(map[string]claudeRuntimeSelection),
+		transcriptIndex:         transcriptindex.NewStore(defaultTranscriptIndexDir()),
+		capabilityPolicy:        NewCapabilityPolicy(),
+		relayEnabled:            true,
+		sessionListLimit:        defaultSessionListLimit,
+		ctx:                     ctx,
+		cleanupStop:             make(chan struct{}),
 	}
 	h.installEventPublisher(NewEventPublisher(bridgeEpoch, h.broadcaster))
 	h.projectionKernel = NewProjectionKernel(
@@ -2479,6 +2481,12 @@ type claudeSessionScanResult struct {
 	ModelID            string
 	ProviderID         string
 	ReasoningEffort    string
+	// ArchivedAt is read from the session sidecar (claudeBridgeSessionSidecar).
+	// The catalog surfaces it as archivedAtMillis so clients can hide archived
+	// sessions (web session-grouping filters on archivedAtMillis). Without it,
+	// archived Claude sessions never disappear from the web list even after the
+	// discovery poller signals sessions_changed.
+	ArchivedAt time.Time
 }
 
 type claudeBridgeSessionSidecar struct {
@@ -2613,6 +2621,10 @@ func scanClaudeSessionMetadata(path string, fallbackTime time.Time) claudeSessio
 			_, _, providerID = parseModelID(modelID)
 		}
 	}
+	var archivedAt time.Time
+	if sidecar.ArchivedAtMillis > 0 {
+		archivedAt = time.UnixMilli(sidecar.ArchivedAtMillis).UTC()
+	}
 	return claudeSessionScanResult{
 		Title:              title,
 		CustomTitle:        customTitle,
@@ -2623,6 +2635,7 @@ func scanClaudeSessionMetadata(path string, fallbackTime time.Time) claudeSessio
 		ModelID:            modelID,
 		ProviderID:         providerID,
 		ReasoningEffort:    normalizeClaudeRuntimeEffort(sidecar.ReasoningEffort),
+		ArchivedAt:         archivedAt,
 	}
 }
 

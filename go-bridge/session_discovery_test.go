@@ -2,6 +2,7 @@ package gobridge
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -206,5 +207,106 @@ func TestSessionDiscoveryClaudeUsesGlobalCatalog(t *testing.T) {
 	data, _ := payload["data"].(map[string]any)
 	if data["backendId"] != "claude" {
 		t.Fatalf("data = %#v, want backendId=claude", data)
+	}
+}
+
+// TestSessionDiscoveryFiresOnArchive: archiving a session (which only writes
+// the sidecar and hides the session from the client's active list) must trigger
+// sessions_changed so the web list refreshes and drops it. This is the Issue 4
+// regression: the old diff only detected additions, so removals/archives never
+// signaled the client to refresh. Also pins that the catalog surfaces
+// archivedAtMillis (so the web archived filter can act on it).
+func TestSessionDiscoveryFiresOnArchive(t *testing.T) {
+	prev := sessionDiscoveryInterval
+	sessionDiscoveryInterval = 10 * time.Millisecond
+	t.Cleanup(func() { sessionDiscoveryInterval = prev })
+
+	handlers := newTestHandlers(t)
+	projectsDir := t.TempDir()
+	projectDir := filepath.Join(projectsDir, "-Users-someuser-work")
+	if err := os.Mkdir(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeClaudeCatalogFixture(t, filepath.Join(projectDir, "claude-xyz.jsonl"),
+		"/Users/someuser/work", "to be archived", "2026-07-30T11:00:00Z")
+	handlers.claudeSessions = newClaudeSessionCatalog(projectsDir)
+	handlers.RegisterAgent("claude", &fakeAgent{name: "claudecode", sessionInfos: nil})
+
+	serverConn, clientConn, cleanup := openTestConn(t)
+	t.Cleanup(cleanup)
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "claude", SessionID: "list-view"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	handlers.StartSessionDiscoveryWatcher(ctx)
+
+	// First, prove the catalog surfaces archivedAtMillis once archived. Directly
+	// write the sidecar the way ArchiveSession does (only the sidecar changes;
+	// the .jsonl is untouched). The fingerprint must include sidecar mtime so the
+	// cached entry is invalidated.
+	time.Sleep(80 * time.Millisecond) // let the watcher seed on the live session
+	sidecarDir := filepath.Join(projectDir, ".cc-connect-session-meta")
+	if err := os.MkdirAll(sidecarDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	archivedMs := time.Now().UnixMilli()
+	sidecarJSON := fmt.Sprintf(`{"archivedAtMillis":%d}`, archivedMs)
+	if err := os.WriteFile(filepath.Join(sidecarDir, "claude-xyz.json"), []byte(sidecarJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// The archive must remove the session from the poller's set (archived excluded)
+	// → diffRemovedSessions fires → sessions_changed reaches the client.
+	if err := clientConn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	var payload map[string]any
+	if err := clientConn.ReadJSON(&payload); err != nil {
+		t.Fatalf("expected sessions_changed after archiving a Claude session: %v", err)
+	}
+	if got := payload["event"]; got != "sessions_changed" {
+		t.Fatalf("event = %#v, want sessions_changed (archive must signal)", got)
+	}
+}
+
+// TestClaudeCatalogSurfacesArchivedAtMillis pins that the global catalog outputs
+// archivedAtMillis (read from the sidecar) so the web session-grouping filter can
+// hide archived sessions. Without it, archived Claude sessions never disappear
+// from the web list even after sessions_changed forces a refresh.
+func TestClaudeCatalogSurfacesArchivedAtMillis(t *testing.T) {
+	projectsDir := t.TempDir()
+	projectDir := filepath.Join(projectsDir, "-Users-someuser-work")
+	if err := os.Mkdir(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeClaudeCatalogFixture(t, filepath.Join(projectDir, "claude-xyz.jsonl"),
+		"/Users/someuser/work", "work session", "2026-07-30T11:00:00Z")
+
+	catalog := newClaudeSessionCatalog(projectsDir)
+
+	// Before archiving: no archivedAtMillis.
+	before := catalog.list("", nil)
+	if len(before) != 1 || before[0]["archivedAtMillis"] != nil {
+		t.Fatalf("before archive: expected 1 session without archivedAtMillis, got %#v", before)
+	}
+
+	// Archive via sidecar (mirrors ArchiveSession which only writes the sidecar).
+	sidecarDir := filepath.Join(projectDir, ".cc-connect-session-meta")
+	if err := os.MkdirAll(sidecarDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	archivedMs := time.Now().UnixMilli()
+	if err := os.WriteFile(filepath.Join(sidecarDir, "claude-xyz.json"),
+		[]byte(fmt.Sprintf(`{"archivedAtMillis":%d}`, archivedMs)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	after := catalog.list("", nil)
+	if len(after) != 1 {
+		t.Fatalf("after archive: expected 1 session, got %d", len(after))
+	}
+	got, ok := after[0]["archivedAtMillis"].(int64)
+	if !ok || got != archivedMs {
+		t.Fatalf("after archive: archivedAtMillis = %#v, want %d (catalog must surface sidecar archived time)", after[0]["archivedAtMillis"], archivedMs)
 	}
 }

@@ -87,10 +87,17 @@ func (h *Handlers) snapshotSessions(ctx context.Context, seen map[string]map[str
 			continue
 		}
 		newIDs := diffNewSessions(prev, current)
+		removedIDs := diffRemovedSessions(prev, current)
 		slog.Info("go-bridge: session discovery snapshot",
-			"backend", id, "prev", len(prev), "current", len(current), "new", len(newIDs))
-		if len(newIDs) > 0 {
-			slog.Info("go-bridge: sessions_changed (new external session detected)", "backend", id, "count", len(newIDs))
+			"backend", id, "prev", len(prev), "current", len(current), "new", len(newIDs), "removed", len(removedIDs))
+		// Fire on ANY catalog change: new sessions OR removals/archives. A
+		// sessions_changed signal means "the client's session list may be stale",
+		// which includes sessions that disappeared (archived/deleted) — the client
+		// refreshes list_sessions and its archived filter removes them. Without
+		// this, archiving a session on Mac never propagated to web.
+		if len(newIDs) > 0 || len(removedIDs) > 0 {
+			slog.Info("go-bridge: sessions_changed (catalog changed)",
+				"backend", id, "new", len(newIDs), "removed", len(removedIDs))
 			h.deltaBatcher.Send(LogicalEvent{
 				BackendID: id,
 				Event:     "sessions_changed",
@@ -117,6 +124,18 @@ func (h *Handlers) discoverySessionIDs(ctx context.Context, id string, agent cor
 		all := h.claudeSessions.list("", nil)
 		set := make(map[string]bool, len(all))
 		for _, wire := range all {
+			// Match what a client sees: archived sessions are hidden from the
+			// active list (web session-grouping filters on archivedAtMillis), so
+			// the poller must exclude them too — otherwise archiving a session
+			// would not change the set and sessions_changed would never fire.
+			if archivedMs, ok := wire["archivedAtMillis"]; ok {
+				if ms, ok := archivedMs.(int64); ok && ms > 0 {
+					continue
+				}
+				if f, ok := archivedMs.(float64); ok && f > 0 {
+					continue
+				}
+			}
 			sid, _ := wire["id"].(string)
 			sid = strings.TrimSpace(sid)
 			if sid != "" {
@@ -151,6 +170,19 @@ func diffNewSessions(prev, current map[string]bool) []string {
 	var out []string
 	for sid := range current {
 		if !prev[sid] {
+			out = append(out, sid)
+		}
+	}
+	return out
+}
+
+// diffRemovedSessions returns IDs present in prev but absent from current
+// (archived/deleted sessions). Used to fire sessions_changed on removals, not
+// just additions, so the client list refresh drops archived sessions.
+func diffRemovedSessions(prev, current map[string]bool) []string {
+	var out []string
+	for sid := range prev {
+		if !current[sid] {
 			out = append(out, sid)
 		}
 	}
