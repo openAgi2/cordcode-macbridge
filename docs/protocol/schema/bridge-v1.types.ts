@@ -284,6 +284,7 @@ export type BridgeEventName =
   | "context_usage_updated"
   | "question_asked"
   | "question_resolved"
+  | "sessions_changed"
   // Session Projection Stream (session_sync_v2 capability). Mac reduces EventPublisher
   // output into one authoritative SessionProjection; clients apply patches/snapshots only
   // and never dual-source merge. See bridge-v1.md「Session Projection Stream」.
