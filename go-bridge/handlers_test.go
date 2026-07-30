@@ -116,6 +116,8 @@ func (f *fakeAgent) GetRunningSessionIDs(ctx context.Context) (map[string]bool, 
 }
 
 func (f *fakeAgent) LiveSessionProcess(ctx context.Context, sessionID string) (core.LiveSessionProcess, error) {
+	f.processMu.Lock()
+	defer f.processMu.Unlock()
 	f.liveProcessCalls++
 	if f.liveProcesses == nil {
 		return core.LiveSessionProcess{SessionID: sessionID}, nil
@@ -127,6 +129,20 @@ func (f *fakeAgent) LiveSessionProcess(ctx context.Context, sessionID string) (c
 	return proc, nil
 }
 
+// LiveProcessCallCount / ProcessAliveStats expose the relay-inspection counters under processMu so
+// tests can read them without racing the relay goroutine's writes (the fakeAgent is touched by the
+// relay goroutine via IsProcessAlive/LiveSessionProcess and by the test goroutine).
+func (f *fakeAgent) LiveProcessCallCount() int {
+	f.processMu.Lock()
+	defer f.processMu.Unlock()
+	return f.liveProcessCalls
+}
+func (f *fakeAgent) ProcessAliveStats() (calls int, lastPID int) {
+	f.processMu.Lock()
+	defer f.processMu.Unlock()
+	return f.processAliveCalls, f.lastProcessAliveID
+}
+
 func (f *fakeAgent) IsProcessAlive(ctx context.Context, pid int) bool {
 	f.processMu.Lock()
 	defer f.processMu.Unlock()
@@ -136,6 +152,17 @@ func (f *fakeAgent) IsProcessAlive(ctx context.Context, pid int) bool {
 		return false
 	}
 	return f.alivePIDs[pid]
+}
+
+// SetLiveProcess sets a liveProcesses entry under processMu so tests can mutate it without racing
+// the relay goroutine's LiveSessionProcess reads.
+func (f *fakeAgent) SetLiveProcess(sessionID string, proc core.LiveSessionProcess) {
+	f.processMu.Lock()
+	defer f.processMu.Unlock()
+	if f.liveProcesses == nil {
+		f.liveProcesses = map[string]core.LiveSessionProcess{}
+	}
+	f.liveProcesses[sessionID] = proc
 }
 
 // TranscriptPath 让 fakeAgent 满足 core.TranscriptLocator（Codex file relay 启动需要）。

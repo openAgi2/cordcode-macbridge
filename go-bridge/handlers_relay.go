@@ -516,15 +516,21 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 		observedSize = offset
 		observedModTime = time.Time{}
 	}
-	var traceCorrelation claudeSourceCorrelation
-	if claudeSourceTraceEnabled() {
-		traceCorrelation, err = h.claudeSourceCorrelation.Observe(
-			backendID, sessionID, sessionID, sessPath, offset,
-		)
-		if err != nil {
-			slog.Warn("go-bridge: Claude source trace correlation unavailable",
-				"backendID", backendID, "sessionPrefix", projectionSessionLogPrefix(sessionID), "error", err)
-		}
+	// Install the Mac-private source ledger at relay startup using the inherited complete-record cut
+	// as the admission cut, so the relay is self-sufficient even when launched without hydrate
+	// (hydrate commit also installs, idempotently). Must precede the Observe so the first batch's
+	// segment generation matches the installed cursor (Session Sync v2 guardrails #1/#5/#6).
+	h.ensureClaudeSourceStateInstalled(backendID, sessionID, sessPath, offset)
+	// Compute the segment correlation once at relay startup. Needed for every live source batch
+	// (the Kernel cursor/gap/generation fence keys on SegmentStableKey/SegmentGeneration) and reused
+	// for the trace label. The startup cut equals the hydrate committed cut, so this matches the
+	// ledger cursor installed above. No per-poll cost: the generation is stable per file incarnation.
+	traceCorrelation, err := h.claudeSourceCorrelation.Observe(
+		backendID, sessionID, sessionID, sessPath, offset,
+	)
+	if err != nil {
+		slog.Warn("go-bridge: Claude source correlation unavailable",
+			"backendID", backendID, "sessionPrefix", projectionSessionLogPrefix(sessionID), "error", err)
 	}
 	var scanState claudeRelayScanState
 	var quarantined *claudeRelayPoisonRecord
@@ -694,6 +700,7 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 		for _, scanned := range scan.Records {
 			e := scanned.Entry
 			if !scanned.Admitted {
+				h.acknowledgeClaudeSourceRow(backendID, sessionID, traceCorrelation, scanned.ByteEnd)
 				emitClaudeSourceTrace(claudeSourceTraceRecord{
 					Phase: "live", IngestDomain: "source_only", BackendID: backendID,
 					SessionID: sessionID, Correlation: traceCorrelation, Record: scanned,
@@ -704,6 +711,7 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 			// Interrupt markers usually emit no projection events from the mapper; keep
 			// legacy interrupt → completed/idle behaviour for live consumers.
 			if e.Type == "user" && isClaudeUserInterruptRelayEntry(e) {
+				h.acknowledgeClaudeSourceRow(backendID, sessionID, traceCorrelation, scanned.ByteEnd)
 				emitClaudeSourceTrace(claudeSourceTraceRecord{
 					Phase: "live", IngestDomain: "live", BackendID: backendID,
 					SessionID: sessionID, Correlation: traceCorrelation, Record: scanned,
@@ -715,44 +723,22 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 				runningObserved = false
 				continue
 			}
-			evs := claudeEntryToProjectionEvents(e, &currentTurnID)
-			projectionTurnID, projectionPartID := claudeProjectionTraceIdentity(evs)
-			ingestDomain := "live"
-			if h.projectionKernel.Status(backendID, sessionID).Phase == ProjectionHydrateHydrating {
-				ingestDomain = "pending_live"
+			// Admitted content rows (user/assistant with UUID+message) route through the Kernel-
+			// private source-batch transaction — the sole projection writer for Claude content
+			// (guardrail #3). H3 exact-replay / H4 graph dedup applies; exact replays mutate nothing
+			// and deliver nothing. currentTurnID is threaded as the file-order fallback turn for rows
+			// whose parent chain has no admitted owner (mapper degrades to file-order attribution,
+			// not content refereeing, guardrail #4).
+			if e.UUID != "" && e.Message != nil && (e.Type == "user" || e.Type == "assistant") {
+				h.applyClaudeLiveSourceRecord(scanned, backendID, sessionID, traceCorrelation, &currentTurnID, &runningObserved, cachedPID)
+				continue
 			}
-			emitClaudeSourceTrace(claudeSourceTraceRecord{
-				Phase: "live", IngestDomain: ingestDomain, BackendID: backendID,
-				SessionID: sessionID, Correlation: traceCorrelation, Record: scanned,
-				FileOrderTurnID: currentTurnID, ProjectionEvents: len(evs),
-				Transition: "legacy_event_ingest", ProjectionTurnID: projectionTurnID,
-				ProjectionPartID: projectionPartID,
-			})
-			for _, ev := range evs {
-				switch ev.Event {
-				case "user_message":
-					h.sessions.markRunning(sessionID)
-					// Arm lifecycle with stable turnId before content, matching codex relay.
-					if turnID, _ := ev.Data["turnId"].(string); turnID != "" {
-						h.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": turnID})
-					}
-					h.sendSessionEvent(sessionID, backendID, "user_message", ev.Data)
-					h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "running"})
-					runningObserved = true
-				case "turn_completed":
-					h.sendSessionEvent(sessionID, backendID, "turn_completed", ev.Data)
-					h.broadcastIdleState(sessionID, backendID)
-					runningObserved = false
-					slog.Info("go-bridge: claudeSessionFileRelay turn completed, keeping watch while process live", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID, "turnId", currentTurnID)
-				case "system_message":
-					// Compact boundaries are historical milestones, not new execution.
-					// Preserve the current running/idle observation exactly as-is.
-					h.sendSessionEvent(sessionID, backendID, "system_message", ev.Data)
-				default:
-					h.sendSessionEvent(sessionID, backendID, ev.Event, ev.Data)
-					runningObserved = true
-				}
-			}
+			// Admitted non-content rows (compaction-boundary system_message, etc.) keep legacy
+			// per-event delivery via the projection writer; historical milestones, not replay
+			// content, so not a dedup concern (guardrail #3). Acknowledge the byte range so the
+			// ledger cursor stays contiguous with the next admitted content row (guardrail #6).
+			h.acknowledgeClaudeSourceRow(backendID, sessionID, traceCorrelation, scanned.ByteEnd)
+			h.deliverClaudeLegacyRow(e, sessionID, backendID, &currentTurnID, &runningObserved, cachedPID)
 		}
 		if scan.Poison != nil {
 			quarantined = scan.Poison
@@ -782,6 +768,215 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 			quarantineBackoff = 0
 			quarantineRetryAt = time.Time{}
 		}
+	}
+}
+
+// acknowledgeClaudeSourceRow advances the Mac-private source ledger cursor past a source-only
+// (non-projected) physical row (non-admitted control rows, interrupts, compaction boundaries) so
+// the cursor stays contiguous with the next admitted content row. Without it the next content row
+// would gap the fence and the transaction would reject (guardrail #6). Never projects or records a
+// logical record (guardrail #1). Failure is logged, not fatal: the transaction is the authority.
+func (h *Handlers) acknowledgeClaudeSourceRow(backendID, sessionID string, correlation claudeSourceCorrelation, byteEnd int64) {
+	if correlation.SegmentStableKey == "" {
+		return
+	}
+	if err := h.projectionKernel.AcknowledgeClaudeSourceRange(
+		backendID, sessionID, correlation.SegmentStableKey, correlation.SegmentGeneration, byteEnd,
+	); err != nil {
+		slog.Warn("go-bridge: Claude source acknowledge failed (cursor may gap)",
+			"backendID", backendID, "sessionPrefix", projectionSessionLogPrefix(sessionID), "error", err)
+	}
+}
+
+// applyClaudeLiveSourceRecord routes one live Claude content record through the Kernel-private
+// source-batch transaction — the sole projection writer for Claude content (guardrail #3). H3
+// exact-replay (graph-only, projection-stable) and H4 parent-chain ownership resolve under the
+// Kernel lock; an exact replay yields no projection mutation and no delivery (dedup). Accepted
+// projection transitions deliver one authoritative projection_patch (flushed after the swap, never
+// re-reduced) plus dual-send raw frames for legacy consumers (guardrail #3). On an un-projectable
+// row the mapper degrades to file-order turn (no content refereeing, #4); only a genuine ledger
+// inconsistency (gap/CAS) or missing ledger surfaces as MarkFailed (guardrail #10 — expose, do not
+// silently legacy-fallback the main path).
+func (h *Handlers) applyClaudeLiveSourceRecord(
+	scanned claudeRelayScannedRecord,
+	backendID, sessionID string,
+	correlation claudeSourceCorrelation,
+	currentTurnID *string,
+	runningObserved *bool,
+	cachedPID int,
+) {
+	ingestDomain := "live"
+	if h.projectionKernel.Status(backendID, sessionID).Phase == ProjectionHydrateHydrating {
+		ingestDomain = "pending_live"
+	}
+	state, ok := h.projectionKernel.ClaudeSourceStateSnapshot(backendID, sessionID)
+	if !ok {
+		slog.Warn("go-bridge: Claude source ledger unavailable for live ingest",
+			"backendID", backendID, "sessionPrefix", projectionSessionLogPrefix(sessionID))
+		emitClaudeSourceTrace(claudeSourceTraceRecord{
+			Phase: "live", IngestDomain: ingestDomain, BackendID: backendID, SessionID: sessionID,
+			Correlation: correlation, Record: scanned, FileOrderTurnID: *currentTurnID,
+			Transition: "source_state_missing",
+		})
+		h.projectionKernel.MarkFailed(backendID, sessionID, "projection.source_state_missing",
+			"Claude source ledger not installed for live ingest", true)
+		return
+	}
+	batch, err := buildClaudeSourceRecordBatch(state, scanned, backendID, sessionID, h.eventPublisher.BridgeEpoch(), correlation, *currentTurnID)
+	if err != nil {
+		// Mapper cannot attribute this content row (no graph-resolved owner AND no file-order
+		// fallback turn — an orphan row with no prior user). Expose honestly rather than auto-
+		// fallback to legacy (guardrail #10: no auto-legacy, no silent degrade); the owning layer
+		// re-syncs via projection pull. The common case (attributable rows, including the file-order
+		// fallback) never reaches here, so this never masks the main path.
+		slog.Warn("go-bridge: Claude source batch build failed; mark failed (orphan/unattributable row)",
+			"backendID", backendID, "sessionPrefix", projectionSessionLogPrefix(sessionID), "error", err)
+		emitClaudeSourceTrace(claudeSourceTraceRecord{
+			Phase: "live", IngestDomain: ingestDomain, BackendID: backendID, SessionID: sessionID,
+			Correlation: correlation, Record: scanned, FileOrderTurnID: *currentTurnID,
+			Transition: "batch_build_failed_marked_failed",
+		})
+		h.projectionKernel.MarkFailed(backendID, sessionID, "projection.source_batch_build_failed", err.Error(), true)
+		return
+	}
+	// Keep the loop's file-order turn tracker in sync with the transaction's resolved turn, so
+	// later rows' file-order fallback (and any legacy degrade) attribute to the correct user owner
+	// — matching the prior claudeEntryToProjectionEvents(&currentTurnID) side effect.
+	if resolved := batch.Record.GraphResolvedTurn; resolved != "" {
+		*currentTurnID = resolved
+	}
+	result, err := h.projectionKernel.ApplyClaudeSourceRecordBatch(batch)
+	if err != nil {
+		// Ledger inconsistency (gap/generation/CAS): expose honestly rather than silently legacy
+		// (guardrail #10). Marks the session failed so the owning layer re-syncs via projection pull.
+		slog.Warn("go-bridge: Claude source batch rejected",
+			"backendID", backendID, "sessionPrefix", projectionSessionLogPrefix(sessionID), "error", err)
+		emitClaudeSourceTrace(claudeSourceTraceRecord{
+			Phase: "live", IngestDomain: ingestDomain, BackendID: backendID, SessionID: sessionID,
+			Correlation: correlation, Record: scanned, FileOrderTurnID: *currentTurnID,
+			ProjectionEvents: len(batch.Events), Transition: "rejected",
+			ProjectionTurnID: batch.Record.GraphResolvedTurn,
+		})
+		h.projectionKernel.MarkFailed(backendID, sessionID, "projection.source_batch_rejected", err.Error(), true)
+		return
+	}
+	delivered := 0
+	if result.Status == ClaudeSourceBatchAcceptedProjection {
+		// Sole projection delivery: flush the authoritative patch the transaction just advanced and
+		// deliver it on the single projection stream. Never sendSessionEvent the content events —
+		// that would reduce them a second time and double-write the timeline (guardrail #3).
+		if patch, flushOk := h.projectionKernel.FlushProjectionPatch(backendID, sessionID); flushOk {
+			h.eventPublisher.PublishProjectionPatch(backendID, sessionID, patch)
+			delivered = 1
+		}
+		// Dual-send (design §9.3): legacy non-syncV2 consumers still get the raw content frames
+		// (deliver-only, never re-reduced). Control-plane running/idle follows.
+		h.deliverClaudeLiveRawFrames(batch, sessionID, backendID)
+		h.deliverClaudeLiveControlPlane(batch, sessionID, backendID, runningObserved, cachedPID)
+	}
+	emitClaudeSourceTrace(claudeSourceTraceRecord{
+		Phase: "live", IngestDomain: ingestDomain, BackendID: backendID, SessionID: sessionID,
+		Correlation: correlation, Record: scanned, FileOrderTurnID: *currentTurnID,
+		ProjectionEvents: len(batch.Events), Transition: string(result.Status),
+		ProjectionTurnID: result.ProjectionTurnID, ProjectionPartID: result.ProjectionPartID,
+		SourceStateRev: result.SourceStateRev, PhysicalRowsAcked: result.PhysicalRowsAcknowledged,
+		LogicalChanged: result.LogicalRecordsChanged, PublicDelivered: delivered,
+	})
+}
+
+// deliverClaudeLegacyRow is the pre-transaction per-event delivery (claudeEntryToProjectionEvents →
+// sendSessionEvent), used for admitted non-content rows (compaction boundary) and for content rows
+// that fall back when the source batch cannot be built. It reduces through the projection writer
+// (PublishLogical), so it is never a second writer (guardrail #3).
+func (h *Handlers) deliverClaudeLegacyRow(
+	e claudeTranscriptRelayEntry,
+	sessionID, backendID string,
+	currentTurnID *string,
+	runningObserved *bool,
+	cachedPID int,
+) {
+	evs := claudeEntryToProjectionEvents(e, currentTurnID)
+	for _, ev := range evs {
+		switch ev.Event {
+		case "user_message":
+			h.sessions.markRunning(sessionID)
+			if turnID, _ := ev.Data["turnId"].(string); turnID != "" {
+				h.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": turnID})
+			}
+			h.sendSessionEvent(sessionID, backendID, "user_message", ev.Data)
+			h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "running"})
+			*runningObserved = true
+		case "turn_completed":
+			h.sendSessionEvent(sessionID, backendID, "turn_completed", ev.Data)
+			h.broadcastIdleState(sessionID, backendID)
+			*runningObserved = false
+			slog.Info("go-bridge: claudeSessionFileRelay turn completed, keeping watch while process live", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID, "turnId", *currentTurnID)
+		case "system_message":
+			h.sendSessionEvent(sessionID, backendID, "system_message", ev.Data)
+		default:
+			h.sendSessionEvent(sessionID, backendID, ev.Event, ev.Data)
+			*runningObserved = true
+		}
+	}
+}
+
+// deliverClaudeLiveRawFrames dual-sends the raw content frames of an accepted live source batch to
+// legacy (non-syncV2) consumers via the deliver-only outlet — never re-reduced (the transaction
+// already reduced them; guardrail #3). Mirrors the prior legacy raw sequence (turn_started arms
+// before user_message). v2 consumers get the projection_patch instead (design §6.5/§9.3).
+func (h *Handlers) deliverClaudeLiveRawFrames(batch ClaudeSourceRecordBatch, sessionID, backendID string) {
+	h.mu.Lock()
+	dir := h.sessions.directoryForSession(sessionID)
+	h.mu.Unlock()
+	publish := func(event string, data map[string]interface{}) {
+		h.eventPublisher.PublishLogicalDeliverOnly(LogicalEvent{
+			SessionID: sessionID, BackendID: backendID, Event: event, Data: data,
+			Directory: dir, Broadcast: true, Offline: IsDurableMilestone(event),
+		})
+	}
+	for _, ev := range batch.Events {
+		switch ev.Event {
+		case "user_message":
+			if turnID, _ := ev.Data["turnId"].(string); turnID != "" {
+				publish("turn_started", map[string]interface{}{"turnId": turnID})
+			}
+			publish("user_message", ev.Data)
+		default:
+			publish(ev.Event, ev.Data)
+		}
+	}
+}
+
+// deliverClaudeLiveControlPlane fires the non-reduced control-plane side-effects of an accepted
+// live source batch: session_state_changed=running when a turn started, idle when completed. The
+// content itself was already delivered as the authoritative projection_patch; these raw control
+// events are absent from the reducer switch, so they cannot double-write the timeline (guardrail #3).
+func (h *Handlers) deliverClaudeLiveControlPlane(
+	batch ClaudeSourceRecordBatch,
+	sessionID, backendID string,
+	runningObserved *bool,
+	cachedPID int,
+) {
+	hasUserMessage, hasTurnCompleted := false, false
+	for _, ev := range batch.Events {
+		switch ev.Event {
+		case "user_message":
+			hasUserMessage = true
+		case "turn_completed":
+			hasTurnCompleted = true
+		}
+	}
+	switch {
+	case hasTurnCompleted:
+		h.broadcastIdleState(sessionID, backendID)
+		*runningObserved = false
+		slog.Info("go-bridge: claudeSessionFileRelay turn completed, keeping watch while process live", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID, "turnId", batch.Record.GraphResolvedTurn)
+	case hasUserMessage:
+		h.sessions.markRunning(sessionID)
+		h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "running"})
+		*runningObserved = true
+	default:
+		*runningObserved = true
 	}
 }
 

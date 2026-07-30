@@ -887,6 +887,18 @@ func (k *ProjectionKernel) CommittedSourceCursor(backendID, sessionID string) (i
 	return session.committedSourceCursor, true
 }
 
+// FlushProjectionPatch drains the authoritative reducer's pending deltas for one session into a
+// single projection patch. Callers use it after a Kernel-private ingest (e.g.
+// ApplyClaudeSourceRecordBatch) advanced the reducer under the Kernel lock, then deliver the patch
+// via EventPublisher.PublishProjectionPatch. Keeps the projection stream the sole active-timeline
+// writer (guardrail #3): the patch is a read-only fan-out of state the transaction already reduced.
+func (k *ProjectionKernel) FlushProjectionPatch(backendID, sessionID string) (ProjectionPatch, bool) {
+	if k == nil {
+		return ProjectionPatch{}, false
+	}
+	return k.reducer.FlushPatch(backendID, sessionID)
+}
+
 func (k *ProjectionKernel) HydrateSnapshot(backendID, sessionID string) (SessionProjection, bool) {
 	k.mu.Lock()
 	defer k.mu.Unlock()

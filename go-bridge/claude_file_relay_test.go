@@ -328,17 +328,22 @@ func TestClaudeFileRelayTickUsesCachedPID(t *testing.T) {
 	// Process is still live: file-relay must keep watching (not exit on live-idle TTL),
 	// and poll ticks must reuse the cached PID via IsProcessAlive.
 	deadline := time.Now().Add(2 * time.Second)
-	for agent.processAliveCalls == 0 && time.Now().Before(deadline) {
+	for {
+		calls, _ := agent.ProcessAliveStats()
+		if calls > 0 || !time.Now().Before(deadline) {
+			break
+		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if agent.liveProcessCalls != 1 {
-		t.Fatalf("LiveSessionProcess calls = %d, want 1", agent.liveProcessCalls)
+	if agent.LiveProcessCallCount() != 1 {
+		t.Fatalf("LiveSessionProcess calls = %d, want 1", agent.LiveProcessCallCount())
 	}
-	if agent.processAliveCalls == 0 {
+	calls, lastPID := agent.ProcessAliveStats()
+	if calls == 0 {
 		t.Fatal("IsProcessAlive was not called on poll ticks")
 	}
-	if agent.lastProcessAliveID != 4242 {
-		t.Fatalf("last IsProcessAlive pid = %d, want cached pid 4242", agent.lastProcessAliveID)
+	if lastPID != 4242 {
+		t.Fatalf("last IsProcessAlive pid = %d, want cached pid 4242", lastPID)
 	}
 	if !handlers.relayKindIs(sessionID, relayKindClaudeFile) {
 		t.Fatal("file relay exited while process is still live")
@@ -397,7 +402,7 @@ func TestClaudeFileRelayProcessNotLiveStillWatchesGrowth(t *testing.T) {
 		t.Fatal("relay exited immediately when process not live; must keep watching")
 	}
 	// Later the process becomes live and a new user turn is appended.
-	agent.liveProcesses[sessionID] = core.LiveSessionProcess{SessionID: sessionID, PID: 4242, Live: true}
+	agent.SetLiveProcess(sessionID, core.LiveSessionProcess{SessionID: sessionID, PID: 4242, Live: true})
 	agent.processMu.Lock()
 	agent.alivePIDs[4242] = true
 	agent.processMu.Unlock()

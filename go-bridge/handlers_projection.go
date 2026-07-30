@@ -505,6 +505,40 @@ func projectionJSONLStartCut(path string) (int64, error) {
 	return 0, nil
 }
 
+// ensureClaudeSourceStateInstalled installs a fresh Mac-private Claude source ledger when one is
+// not already present (hydrate commit or checkpoint restore owns the first install; the live file
+// relay also calls this at startup using its inherited cursor). Cursor identity is taken from
+// claudeSourceCorrelation.Observe at the given admission cut, matching the live reader's Observe at
+// the same cut, so the first live source batch clears the Kernel cursor/gap/generation fence.
+// Idempotent; Mac-private; never enters a wire payload (guardrails #1/#3/#5).
+func (h *Handlers) ensureClaudeSourceStateInstalled(backendID, sessionID, sourcePath string, admissionCut int64) {
+	if backendID != "claude" && backendID != "claudecode" {
+		return
+	}
+	if sourcePath == "" || admissionCut < 0 {
+		return
+	}
+	if _, ok := h.projectionKernel.ClaudeSourceStateSnapshot(backendID, sessionID); ok {
+		return
+	}
+	correlation, err := h.claudeSourceCorrelation.Observe(backendID, sessionID, sessionID, sourcePath, admissionCut)
+	if err != nil {
+		slog.Warn("go-bridge: Claude source-state install correlation unavailable",
+			"backendID", backendID, "sessionPrefix", projectionSessionLogPrefix(sessionID), "error", err)
+		return
+	}
+	state, err := newInitialClaudeSourceState(correlation.SegmentStableKey, correlation.SegmentGeneration, admissionCut)
+	if err != nil {
+		slog.Warn("go-bridge: Claude source-state install build failed",
+			"backendID", backendID, "sessionPrefix", projectionSessionLogPrefix(sessionID), "error", err)
+		return
+	}
+	if err := h.projectionKernel.InstallClaudeSourceState(backendID, sessionID, state); err != nil {
+		slog.Warn("go-bridge: Claude source-state install failed",
+			"backendID", backendID, "sessionPrefix", projectionSessionLogPrefix(sessionID), "error", err)
+	}
+}
+
 func (h *Handlers) runProjectionHydrateTransaction(
 	backendID, sessionID string,
 	admission ProjectionHydrateAdmission,
@@ -595,6 +629,12 @@ func (h *Handlers) runProjectionHydrateTransaction(
 	)
 	if commit.PendingPatch != nil {
 		h.eventPublisher.PublishProjectionPatch(backendID, sessionID, *commit.PendingPatch)
+	}
+	// Install a fresh Mac-private Claude source ledger now that hydrate owns the source cut, so
+	// the live file relay can route content through the source-batch transaction. No-op when a
+	// checkpoint already restored one. Must run before the live relay's startup correlation.
+	if cursor, ok := h.projectionKernel.CommittedSourceCursor(backendID, sessionID); ok {
+		h.ensureClaudeSourceStateInstalled(backendID, sessionID, source.Path, cursor)
 	}
 	if source.Path != "" || len(source.Segments) > 0 {
 		source.Cursor = admission.StartCut

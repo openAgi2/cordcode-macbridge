@@ -307,6 +307,67 @@ func (p *EventPublisher) PublishProjectionPatch(backendID, sessionID string, pat
 	p.mu.Unlock()
 }
 
+// PublishLogicalDeliverOnly stamps and fans out an ALREADY-REDUCED logical event frame to legacy
+// (non-syncV2) subscribers without reducing or flushing a patch. A Kernel-private ingest (e.g.
+// ApplyClaudeSourceRecordBatch) already reduced the event; this preserves the dual-send raw
+// contract (design §9.3) for legacy consumers while v2 (syncV2) consumers receive the authoritative
+// projection_patch via PublishProjectionPatch. It never hands the event back to the reducer, so it
+// cannot double-write the timeline (guardrail #3). The EventMessage is built here, the single
+// blessed site, so TestBusinessEventConstructionHasNoProductionBypass accepts it.
+func (p *EventPublisher) PublishLogicalDeliverOnly(logical LogicalEvent) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	logical.ClassHint = classifyRelayEvent(logical.Event)
+	p.seq++
+	seq := p.seq
+	perSessionSeq := 0
+	if logical.BackendID != "" && logical.SessionID != "" {
+		key := logical.BackendID + "\x00" + logical.SessionID
+		p.perSessionSeq[key]++
+		perSessionSeq = p.perSessionSeq[key]
+	}
+	msg := EventMessage{
+		Type:          "event",
+		EventID:       fmt.Sprintf("%s:%d", p.bridgeEpoch, seq),
+		Seq:           seq,
+		PerSessionSeq: perSessionSeq,
+		BridgeEpoch:   p.bridgeEpoch,
+		SessionID:     logical.SessionID,
+		BackendID:     logical.BackendID,
+		Event:         logical.Event,
+		Data:          logical.Data,
+		Message:       logical.Message,
+		Replayable:    isReplayableEvent(logical.Event),
+		Timestamp:     time.Now().UTC().UnixMilli(),
+	}
+	p.buffer.Append(msg)
+	if p.broadcaster == nil {
+		return
+	}
+	for _, conn := range p.broadcaster.Targets(logical.BackendID, logical.SessionID, logical.Directory) {
+		// v2 (syncV2) consumers receive the projection_patch, not the raw timeline frame — never
+		// dual-publish content to a projection-only client (design §6.5).
+		if p.syncV2[conn] {
+			continue
+		}
+		if !p.shouldDeliverRawEventLocked(conn, logical.BackendID, logical.SessionID, logical.Event) {
+			continue
+		}
+		if p.observation != nil {
+			if device := conn.AuthedDevice(); device != nil &&
+				!p.observation.ShouldSendEvent(device.DeviceID, logical.BackendID, logical.SessionID, logical.Event) {
+				continue
+			}
+		}
+		if sink := p.sinkLocked(conn); sink != nil {
+			sink.tryEnqueue(eventOutboundFrame{value: msg, classHint: logical.ClassHint, classified: true})
+		}
+	}
+}
+
 func (p *EventPublisher) SetOfflineRoute(route func(EventMessage)) {
 	p.mu.Lock()
 	p.offlineRoute = route
