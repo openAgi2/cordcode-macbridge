@@ -219,6 +219,31 @@ func TestObservationNoScopeDefaultsToMilestones(t *testing.T) {
 	}
 }
 
+func TestObservationSessionsChangedAlwaysPassesWithoutScope(t *testing.T) {
+	om := NewObservationManager()
+	om.Start(context.Background())
+	defer om.Stop()
+
+	// Device unknown / no scope at all — web client on session-list view.
+	if !om.ShouldSendEvent("dev_web_noscope", "claude", "", "sessions_changed") {
+		t.Fatal("sessions_changed must reach clients with no observation scope (catalog control-plane, guard #8)")
+	}
+	// text_delta still filtered — this is NOT a timeline bypass.
+	if om.ShouldSendEvent("dev_web_noscope", "claude", "sess_1", "text_delta") {
+		t.Fatal("text_delta must still be filtered for scope-less device")
+	}
+
+	// Device registered but no scope for this backend.
+	om.SetScope("dev_web_partial", ObservationScope{
+		BackendID:    "codex",
+		DeliveryMode: scopeFullStream,
+		LeaseSeconds: 60,
+	})
+	if !om.ShouldSendEvent("dev_web_partial", "claude", "", "sessions_changed") {
+		t.Fatal("sessions_changed must pass for a backend with no scope (catalog control-plane, guard #8)")
+	}
+}
+
 // ─── Outbox 测试 ────────────────────────────────────────────────────────
 
 func TestOutboxEnqueueAndDrain(t *testing.T) {

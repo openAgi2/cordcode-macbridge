@@ -47,6 +47,7 @@ type fakeAgent struct {
 	sessions           []*fakeAgentSession
 	sessionInfos       []core.AgentSessionInfo
 	sessionListErr     error
+	listHook           func() // optional; lets a test inject a panic on ListSessions
 	model              string
 	reasoningEffort    string
 	workDir            string
@@ -165,6 +166,9 @@ func (f *fakeAgent) StartSession(_ context.Context, sessionID string) (core.Agen
 }
 
 func (f *fakeAgent) ListSessions(context.Context) ([]core.AgentSessionInfo, error) {
+	if f.listHook != nil {
+		f.listHook()
+	}
 	if f.sessionListErr != nil {
 		return nil, f.sessionListErr
 	}

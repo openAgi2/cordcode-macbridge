@@ -30,6 +30,23 @@ func (h *Handlers) StartSessionDiscoveryWatcher(ctx context.Context) {
 }
 
 func (h *Handlers) runSessionDiscovery(ctx context.Context) {
+	// Critical: this goroutine must never silently die. snapshotSessions walks
+	// Claude transcript files (209MB datasets, 16MB-per-line JSONL) and has, in
+	// production, produced ZERO sessions_changed events across all logs since 7/5
+	// — consistent with an unrecovered panic killing the watcher with no log line.
+	// recover keeps the loop alive and emits a visible error so a future panic
+	// can no longer hide. Control-plane only (guard #8); does not touch timeline.
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("go-bridge: session discovery watcher recovered from panic — loop continuing",
+				"error", r)
+			// Re-arm by re-entering; ctx still governs exit.
+			go h.runSessionDiscovery(ctx)
+		}
+	}()
+
+	slog.Info("go-bridge: session discovery watcher started",
+		"interval", sessionDiscoveryInterval.String())
 	seen := map[string]map[string]bool{}
 	h.snapshotSessions(ctx, seen, true)
 	ticker := time.NewTicker(sessionDiscoveryInterval)
@@ -37,6 +54,7 @@ func (h *Handlers) runSessionDiscovery(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			slog.Info("go-bridge: session discovery watcher stopped (context done)")
 			return
 		case <-ticker.C:
 			h.snapshotSessions(ctx, seen, false)
@@ -47,20 +65,31 @@ func (h *Handlers) runSessionDiscovery(ctx context.Context) {
 // snapshotSessions lists every backend's sessions once, records the ID set, and
 // broadcasts "sessions_changed" for any backend whose set grew since the last scan.
 func (h *Handlers) snapshotSessions(ctx context.Context, seen map[string]map[string]bool, seed bool) {
+	tag := "poll"
+	if seed {
+		tag = "seed"
+	}
 	for id, agent := range h.Agents() {
-		listCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
-		infos, err := agent.ListSessions(listCtx)
-		cancel()
+		current, err := h.discoverySessionIDs(ctx, id, agent)
 		if err != nil {
+			// Previously this branch was silent. A recurring ListSessions error
+			// leaves seen[id] at the seed snapshot forever → diff is always empty
+			// → sessions_changed never fires, with no log to reveal why.
+			slog.Warn("go-bridge: session discovery enumerate error (no broadcast)",
+				"phase", tag, "backend", id, "error", err.Error())
 			continue
 		}
-		current := sessionIDSet(infos)
 		prev := seen[id]
 		seen[id] = current
 		if seed || prev == nil {
+			slog.Info("go-bridge: session discovery snapshot seeded",
+				"backend", id, "sessionCount", len(current))
 			continue
 		}
-		if newIDs := diffNewSessions(prev, current); len(newIDs) > 0 {
+		newIDs := diffNewSessions(prev, current)
+		slog.Info("go-bridge: session discovery snapshot",
+			"backend", id, "prev", len(prev), "current", len(current), "new", len(newIDs))
+		if len(newIDs) > 0 {
 			slog.Info("go-bridge: sessions_changed (new external session detected)", "backend", id, "count", len(newIDs))
 			h.deltaBatcher.Send(LogicalEvent{
 				BackendID: id,
@@ -70,6 +99,39 @@ func (h *Handlers) snapshotSessions(ctx context.Context, seen map[string]map[str
 			})
 		}
 	}
+}
+
+// discoverySessionIDs returns the set of session IDs for a backend that this
+// watcher diffs against the previous snapshot. It must enumerate the SAME set a
+// client sees on list_sessions, otherwise a new session detected by the client
+// is invisible to the poller and sessions_changed never fires.
+//
+// Claude is the special case: agent.ListSessions() resolves only the agent's
+// single workDir project and returned 0 sessions in production (the workDir's
+// encoded project key has no directory under ~/.claude/projects), so new Claude
+// sessions — which may live under a different project dir — were never detected.
+// The authoritative Claude catalog is h.claudeSessions (the global, all-project,
+// fingerprinted snapshot that list_sessions serves); derive Claude IDs from it.
+func (h *Handlers) discoverySessionIDs(ctx context.Context, id string, agent core.Agent) (map[string]bool, error) {
+	if id == "claude" && h.claudeSessions != nil {
+		all := h.claudeSessions.list("", nil)
+		set := make(map[string]bool, len(all))
+		for _, wire := range all {
+			sid, _ := wire["id"].(string)
+			sid = strings.TrimSpace(sid)
+			if sid != "" {
+				set[sid] = true
+			}
+		}
+		return set, nil
+	}
+	listCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	infos, err := agent.ListSessions(listCtx)
+	if err != nil {
+		return nil, err
+	}
+	return sessionIDSet(infos), nil
 }
 
 // sessionIDSet builds a set of non-empty, trimmed session IDs.

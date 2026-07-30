@@ -129,6 +129,13 @@ func (om *ObservationManager) ShouldSendEvent(deviceID, backendID, sessionID, ev
 	om.mu.RLock()
 	defer om.mu.RUnlock()
 
+	// sessions_changed is a backend-scoped catalog control-plane event (guard #8).
+	// It must reach any connected client regardless of observation scope —
+	// the web client on session-list view has no per-backend scope yet.
+	if eventType == "sessions_changed" {
+		return true
+	}
+
 	dev, ok := om.devices[deviceID]
 	if !ok {
 		// 无 scope：control-plane + durable only (cannot assume full_stream)
@@ -141,9 +148,6 @@ func (om *ObservationManager) ShouldSendEvent(deviceID, backendID, sessionID, ev
 	scope, ok := dev.scopes[backendID]
 	if !ok {
 		return IsDurableMilestone(eventType) || isLiveControlPlaneEvent(eventType)
-	}
-	if eventType == "sessions_changed" {
-		return true
 	}
 	if isLiveControlPlaneEvent(eventType) {
 		// Session filter still applies for control-plane when SessionIDs is non-empty.
