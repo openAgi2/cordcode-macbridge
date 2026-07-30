@@ -508,6 +508,14 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if v, ok := data["toolResult"]; ok {
 			part.ToolResult = v
 		}
+		// P0-1: structured tool matches (Glob/Grep 文件列表). 生产端 = Claude session driver
+		// (session.go EventToolResult.ToolMatches → events.go 写 payload["matches"])。reducer 必须
+		// 填 part.Matches，否则投影 writer 恒空、消费端喂不到（audit2 producer-first 命门）。
+		// 读 map key data["matches"]（同 toolInput/toolResult 模式），不假设 ev 结构体——reducer 拿到的是
+		// EventMessage.Data，不是 core.Event（audit3 双策略核验）。
+		if v, ok := data["matches"]; ok {
+			part.Matches = v
+		}
 		if status := dataString(data, "toolStatus"); status != "" {
 			part.ToolStatus = status
 		} else if msg.Event == "tool_started" {
@@ -570,6 +578,11 @@ func mergeToolPart(dst *ProjectionPart, src ProjectionPart) {
 	}
 	if src.ToolResult != nil {
 		dst.ToolResult = src.ToolResult
+	}
+	// P0-1: matches 随 tool_finished（result）到达，必须经 upsert 存活到 tool_started 创建的 part 上。
+	// 对齐 ToolResult 的 non-nil merge 语义（后到覆盖）。
+	if src.Matches != nil {
+		dst.Matches = src.Matches
 	}
 	if src.ToolStatus != "" {
 		dst.ToolStatus = src.ToolStatus

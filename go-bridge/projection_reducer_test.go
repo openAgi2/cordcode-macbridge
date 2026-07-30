@@ -511,3 +511,122 @@ func TestReducerSkipsIdentitylessAgentRelayContent(t *testing.T) {
 		t.Fatal("identityless agent-relay frames must not register content")
 	}
 }
+
+// TestReducerToolMatchesPopulated (P0-1, 护栏12 owning-仓 G1): the reducer MUST populate
+// part.Matches from data["matches"] for tool events. Producer = Claude session driver
+// (session.go EventToolResult.ToolMatches → events.go payload["matches"]). Before P0-1 the
+// reducer set ToolName/Input/Result/Status but never Matches → projection matches 恒空.
+// This test proves the reducer no longer drops matches, decoupled from any consumer test.
+func TestReducerToolMatchesPopulated(t *testing.T) {
+	// Three wire-decoded ToolMatches shapes (events.go writes payload["matches"] = ev.ToolMatches).
+	shapes := []struct {
+		name    string
+		matches map[string]interface{}
+		kind    string
+	}{
+		{
+			name:    "paths",
+			matches: map[string]interface{}{"kind": "paths", "paths": []interface{}{"src/a.ts", "src/b.go"}},
+			kind:    "paths",
+		},
+		{
+			name:    "count",
+			matches: map[string]interface{}{"kind": "count", "count": int64(42)},
+			kind:    "count",
+		},
+		{
+			name: "detailed",
+			matches: map[string]interface{}{
+				"kind": "detailed",
+				"items": []interface{}{
+					map[string]interface{}{"path": "src/x.ts", "line": int64(10)},
+				},
+			},
+			kind: "detailed",
+		},
+	}
+
+	for _, tc := range shapes {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newTestReducer()
+			r.Apply(ev(1, "claudecode", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+			// tool_started carries matches (some producers attach at start).
+			r.Apply(ev(2, "claudecode", "s1", "tool_started", map[string]interface{}{
+				"itemId":   "call_glob",
+				"toolName": "Glob",
+				"matches":  tc.matches,
+			}))
+			proj, _ := r.Snapshot("claudecode", "s1")
+			part := findTool(proj, "call_glob")
+			if part == nil {
+				t.Fatal("tool part missing")
+			}
+			m, ok := part.Matches.(map[string]interface{})
+			if !ok || m["kind"] != tc.kind {
+				t.Fatalf("tool_started matches = %+v (%T), want kind=%s", part.Matches, part.Matches, tc.kind)
+			}
+
+			// tool_finished WITHOUT matches must NOT clobber the matches set at started
+			// (mergeToolPart carries Matches only when src non-nil; result-only finish keeps prior).
+			r.Apply(ev(3, "claudecode", "s1", "tool_finished", map[string]interface{}{
+				"itemId":     "call_glob",
+				"toolResult": "done",
+			}))
+			proj, _ = r.Snapshot("claudecode", "s1")
+			part = findTool(proj, "call_glob")
+			m, ok = part.Matches.(map[string]interface{})
+			if !ok || m["kind"] != tc.kind {
+				t.Fatalf("matches lost after matches-less tool_finished = %+v (%T)", part.Matches, part.Matches)
+			}
+			if part.ToolStatus != "completed" {
+				t.Fatalf("status = %q, want completed", part.ToolStatus)
+			}
+		})
+	}
+}
+
+// TestReducerToolMatchesOnFinishedUpsert (P0-1, 护栏12): matches arriving on tool_finished
+// (the common Glob result path) must upsert onto the part created at tool_started via
+// mergeToolPart. Without the Matches carry in mergeToolPart, finished-only matches were dropped.
+func TestReducerToolMatchesOnFinishedUpsert(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "claudecode", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "claudecode", "s1", "tool_started", map[string]interface{}{
+		"itemId":   "call_grep",
+		"toolName": "Grep",
+	}))
+	r.Apply(ev(3, "claudecode", "s1", "tool_finished", map[string]interface{}{
+		"itemId":     "call_grep",
+		"toolResult": "3 matches",
+		"matches":    map[string]interface{}{"kind": "count", "count": int64(3)},
+	}))
+	proj, _ := r.Snapshot("claudecode", "s1")
+	part := findTool(proj, "call_grep")
+	if part == nil {
+		t.Fatal("tool part missing")
+	}
+	m, ok := part.Matches.(map[string]interface{})
+	if !ok {
+		t.Fatalf("matches missing after finished-only attach = %+v (%T)", part.Matches, part.Matches)
+	}
+	if m["kind"] != "count" || m["count"] != int64(3) {
+		t.Fatalf("finished-attached matches = %+v, want kind=count count=3", m)
+	}
+}
+
+// TestReducerToolMatchesAbsentIsNil (P0-1): events without a "matches" key (the overwhelming
+// majority of tool/text events) leave part.Matches nil — additive, no spurious empty payload.
+func TestReducerToolMatchesAbsentIsNil(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "codex", "s1", "tool_started", map[string]interface{}{"itemId": "c1", "toolName": "shell"}))
+	r.Apply(ev(3, "codex", "s1", "tool_finished", map[string]interface{}{"itemId": "c1", "toolResult": "ok"}))
+	proj, _ := r.Snapshot("codex", "s1")
+	part := findTool(proj, "c1")
+	if part == nil {
+		t.Fatal("tool part missing")
+	}
+	if part.Matches != nil {
+		t.Fatalf("matches should be nil when no matches key; got %+v", part.Matches)
+	}
+}
