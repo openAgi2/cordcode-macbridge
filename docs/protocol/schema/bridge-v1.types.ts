@@ -442,7 +442,26 @@ export type BridgeProjectionPart =
       toolStatus?: string;
       matches?: ToolMatches;
     }
-  | { type: "file"; path?: string; kind?: string; diff?: string; movePath?: string };
+  | { type: "file"; path?: string; kind?: string; diff?: string; movePath?: string }
+  | {
+      // B4 child-stream (sync-only): a Claude Agent/Task tool nested subagent group. Built
+      // entirely by the MacBridge projection kernel as the single source of truth; clients map
+      // this read-only (no client-side tree building). Join keys mirror the real sidechain
+      // .meta.json schema (sample-verified): depth-1 anchors to the mainstream turn via
+      // spawnToolUseId ↔ mainstream Agent tool_use id; depth≥2 nests via parentAgentId ↔
+      // parent agentId. subagentBlocks is recursive — the subagent's own content (text/reasoning/
+      // tool) plus any nested depth+1 subagent parts.
+      type: "subagent";
+      agentId: string;
+      parentAgentId?: string;
+      spawnToolUseId?: string;
+      spawnDepth?: number;
+      subagentType?: string; // async | sync (from .meta.json agentType)
+      subagentStatus?: string; // running | completed | failed (sample only verified completed)
+      subagentBlocks?: BridgeProjectionPart[];
+      subagentError?: string;
+      subagentDiagnostic?: string; // orphan_parent | cycle | max_depth
+    };
 
 export interface BridgeMessageProjection {
   /** Authoritative source id: rollout response_item.id (user) / call_id (tool) / lifecycle turn_id (assistant text). */

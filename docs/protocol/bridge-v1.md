@@ -530,6 +530,26 @@ Exact field shapes (`BridgeSessionProjection`, `BridgeTurnProjection`, `BridgeMe
 `BridgeProjectionPart`, `BridgeProjectionPatch`, `BridgePartOp`, `BridgeExecutionView`) are defined
 in `docs/protocol/schema/bridge-v1.types.ts`.
 
+#### Part vocabulary: `subagent` (B4 child-stream, sync-only)
+
+`BridgeProjectionPart` gains an additive `type: "subagent"` variant for Claude `Agent`/`Task`
+tool nested subagents. It is populated **only** by the MacBridge projection kernel during cold
+hydrate (sync-only): the kernel reads sibling `subagents/agent-<id>.jsonl` + `.meta.json`
+sidechain files, builds the multi-level tree, and emits one `subagent` part per depth-1 agent
+through the same hydrate transaction. Clients map it **read-only** — no client-side tree
+building, no second writer.
+
+Join keys mirror the real sidechain `.meta.json` schema (sample-verified): depth-1 anchors to the
+mainstream turn via `spawnToolUseId` ↔ the mainstream `Agent` tool_use `itemId`; depth≥2 nests
+via `parentAgentId` ↔ the parent agent's `agentId`. `subagentBlocks` is recursive (the subagent's
+own text/reasoning/tool content plus nested depth+1 subagents). `subagentDiagnostic` carries
+`orphan_parent` / `cycle` / `max_depth` for defensive tree-walk outcomes; a depth-1 agent whose
+mainstream anchor is absent is dropped (fail-open to the current state, never fabricated).
+
+This is distinct from the legacy `streamId`/`parentStreamId` live child-stream fields (Events
+§`child_stream_*`), which describe **live** mid-run delivery. B4 sync-only does not use those:
+async mid-run live delivery is a separate, future enhancement (方案 2).
+
 ## Session Pinning
 
 Session pinning (置顶) is a backend-neutral, MacBridge-owned session-metadata capability. iOS does
