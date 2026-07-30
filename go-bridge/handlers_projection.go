@@ -719,7 +719,6 @@ func (h *Handlers) produceProjectionHydrateRange(
 		if path == "" {
 			return h.streamClaudeRichHistoryProjectionEvents(ctx, sessionID, emit)
 		}
-		emitClaudeSourceHydrateWindow(backendID, sessionID, path, startOffset, endOffset)
 		return streamClaudeTranscriptProjectionEventsRangeSeed(
 			ctx, path, startOffset, endOffset, currentTurnID, emit,
 		)

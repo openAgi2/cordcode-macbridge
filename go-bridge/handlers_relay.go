@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -589,12 +588,12 @@ func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection,
 			continue
 		}
 
-		scanned, err := scanClaudeRelayEntriesWithOffsets(f, offset)
+		entries, err := scanClaudeRelayEntriesFromReader(f)
 		f.Close()
 		if err != nil {
 			continue
 		}
-		if len(scanned) == 0 {
+		if len(entries) == 0 {
 			offset = newSize
 			continue
 		}
@@ -605,19 +604,16 @@ func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection,
 		// Live growth reuses the same hydrate mapper so projection reducer receives
 		// identity-bearing user_message / text_delta / turn_completed frames (not bare
 		// turn_started turnId:"" or itemId-less deltas that reducer skips).
-		for _, s := range scanned {
-			e := s.entry
+		for _, e := range entries {
 			// Interrupt markers usually emit no projection events from the mapper; keep
 			// legacy interrupt → completed/idle behaviour for live consumers.
 			if e.Type == "user" && isClaudeUserInterruptRelayEntry(e) {
-				emitClaudeSourceTrace(filepath.Base(sessPath), "live", s.byteStart, s.byteEnd, e, currentTurnID, 0)
 				h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"turnId": currentTurnID, "done": true, "reason": "user_interrupt"})
 				h.broadcastIdleState(sessionID, backendID)
 				runningObserved = false
 				continue
 			}
 			evs := claudeEntryToProjectionEvents(e, &currentTurnID)
-			emitClaudeSourceTrace(filepath.Base(sessPath), "live", s.byteStart, s.byteEnd, e, currentTurnID, len(evs))
 			for _, ev := range evs {
 				switch ev.Event {
 				case "user_message":
@@ -781,16 +777,46 @@ func isFinalClaudeStopReason(reason string) bool {
 }
 
 // scanClaudeRelayEntriesFromReader 返回新增字节内所有 meaningful user/assistant/system 记录
-// （按文件顺序），应用 resume meta / no-response 跳过逻辑。委托给 byte-range-aware 核心扫描器
-// （scanClaudeRelayEntriesWithOffsets），丢弃字节范围——行为与历史完全一致，仅复用同一过滤逻辑。
+// （按文件顺序），应用 resume meta / no-response 跳过逻辑。
 func scanClaudeRelayEntriesFromReader(r io.Reader) ([]claudeTranscriptRelayEntry, error) {
-	scanned, err := scanClaudeRelayEntriesWithOffsets(r, 0)
-	if err != nil {
-		return nil, err
+	skipNextResumeNoResponse := false
+	var entries []claudeTranscriptRelayEntry
+	scanner := bufio.NewScanner(r)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024*16)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var entry claudeTranscriptRelayEntry
+		if err := json.Unmarshal(line, &entry); err != nil {
+			continue
+		}
+		if isClaudeCompactionBoundaryRelayEntry(entry) {
+			entries = append(entries, entry)
+			continue
+		}
+		if isClaudeInternalCompactRelayEntry(entry) || entry.Message == nil {
+			continue
+		}
+		if isClaudeResumeMetaRelayEntry(entry) {
+			skipNextResumeNoResponse = true
+			continue
+		}
+		if skipNextResumeNoResponse {
+			if isClaudeResumeNoResponseRelayEntry(entry) {
+				skipNextResumeNoResponse = false
+				continue
+			}
+			skipNextResumeNoResponse = false
+		}
+		if entry.Type == "user" || entry.Type == "assistant" {
+			entries = append(entries, entry)
+		}
 	}
-	entries := make([]claudeTranscriptRelayEntry, len(scanned))
-	for i, s := range scanned {
-		entries[i] = s.entry
+	if err := scanner.Err(); err != nil {
+		return nil, err
 	}
 	return entries, nil
 }
@@ -898,15 +924,11 @@ func streamClaudeTranscriptProjectionEventsRangeSeed(
 	scanner.Buffer(buf, 1024*1024*16)
 	skipNextResumeNoResponse := false
 	currentTurnID := initialTurnID
-	pos := startOffset // IR-7: running absolute byte offset for per-record source-row trace
 	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		line := scanner.Bytes()
-		lineStart := pos
-		lineEnd := pos + int64(len(line)) // record content; LF terminator sits at lineEnd
-		pos = lineEnd + 1                 // advance past LF for the next record
 		if len(line) == 0 {
 			continue
 		}
@@ -942,9 +964,7 @@ func streamClaudeTranscriptProjectionEventsRangeSeed(
 		if e.Type != "user" && e.Type != "assistant" {
 			continue
 		}
-		evs := claudeEntryToProjectionEvents(e, &currentTurnID)
-		emitClaudeSourceTrace(filepath.Base(sessPath), "hydrate", lineStart, lineEnd, e, currentTurnID, len(evs))
-		for _, ev := range evs {
+		for _, ev := range claudeEntryToProjectionEvents(e, &currentTurnID) {
 			if !emit(ev) {
 				return ctx.Err()
 			}
