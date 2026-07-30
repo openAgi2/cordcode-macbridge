@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "manifestSchema": "claude-source-shapes/manifest@v1",
   "generatedBy": "recompute_manifest.py (validated by go-bridge TestClaudeSourceShapeFixtures_LoadAllAndValidateManifest)",
-  "samplingTime": "2026-07-30T00:00:00Z (corpus audit snapshot; ~/.claude shifts continuously — recompute_corpus_stats.py binds output to run time)",
+  "fixtureCreatedAt": "2026-07-30T10:59:47+08:00",
   "fixtures": [
     {
       "file": "attachment-replay.jsonl",

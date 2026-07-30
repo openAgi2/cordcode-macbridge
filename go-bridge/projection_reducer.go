@@ -44,6 +44,66 @@ type projectionSession struct {
 	execution   *ExecutionView            // pending execution change
 }
 
+func cloneProjectionSessionState(source *projectionSession) *projectionSession {
+	if source == nil {
+		return nil
+	}
+	cloned := &projectionSession{
+		projection:     cloneSessionProjection(source.projection),
+		lastAppliedRev: source.lastAppliedRev,
+		lastFlushedRev: source.lastFlushedRev,
+		textAppends:    make(map[string][]string, len(source.textAppends)),
+		thinking:       make(map[string]string, len(source.thinking)),
+		tools:          make(map[string]ProjectionPart, len(source.tools)),
+		upsertTurns:    make(map[string]TurnProjection, len(source.upsertTurns)),
+	}
+	for key, chunks := range source.textAppends {
+		cloned.textAppends[key] = append([]string(nil), chunks...)
+	}
+	for key, text := range source.thinking {
+		cloned.thinking[key] = text
+	}
+	for key, part := range source.tools {
+		cloned.tools[key] = cloneProjectionPart(part)
+	}
+	for key, turn := range source.upsertTurns {
+		cloned.upsertTurns[key] = cloneTurn(turn)
+	}
+	if source.execution != nil {
+		execution := *source.execution
+		cloned.execution = &execution
+	}
+	return cloned
+}
+
+func (r *ProjectionReducer) cloneSessionReducer(backendID, sessionID string) *ProjectionReducer {
+	cloned := NewProjectionReducer()
+	cloned.now = r.now
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if session := r.sessions[projectionSessionKey(backendID, sessionID)]; session != nil {
+		cloned.sessions[projectionSessionKey(backendID, sessionID)] = cloneProjectionSessionState(session)
+	}
+	return cloned
+}
+
+func (r *ProjectionReducer) swapSessionFrom(
+	backendID, sessionID string,
+	source *ProjectionReducer,
+) {
+	key := projectionSessionKey(backendID, sessionID)
+	source.mu.Lock()
+	next := cloneProjectionSessionState(source.sessions[key])
+	source.mu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if next == nil {
+		delete(r.sessions, key)
+		return
+	}
+	r.sessions[key] = next
+}
+
 // NewProjectionReducer creates an empty reducer.
 func NewProjectionReducer() *ProjectionReducer {
 	return &ProjectionReducer{
@@ -650,6 +710,19 @@ func (r *ProjectionReducer) LastAppliedRev(backendID, sessionID string) int {
 		return 0
 	}
 	return ps.projection.SyncRev
+}
+
+func (r *ProjectionReducer) lastInputSequence(backendID, sessionID string) int {
+	if r == nil {
+		return 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	session := r.sessions[projectionSessionKey(backendID, sessionID)]
+	if session == nil {
+		return 0
+	}
+	return session.lastAppliedRev
 }
 
 // TurnCount returns the number of turns currently held for the session (lightweight, no deep

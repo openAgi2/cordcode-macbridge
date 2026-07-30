@@ -104,7 +104,6 @@ func (c *websocketClient) readEvents(t *testing.T, count int) []map[string]any {
 	return messages
 }
 
-
 func eventNames(messages []map[string]any) []any {
 	out := make([]any, 0, len(messages))
 	for _, m := range messages {
@@ -131,6 +130,47 @@ func TestClaudeFileRelayDeadPIDWithPartialUserExitsIdle(t *testing.T) {
 	}
 	// Process not live still watches; live-idle TTL eventually exits with no growth.
 	waitClaudeFileRelayStopped(t, handlers, sessionID)
+}
+
+func TestClaudeFileRelayInheritedCursorConsumesPreStartAppend(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	withFastClaudeFileRelay(t)
+	const sessionID = "inherited-cursor-append"
+	user := `{"type":"user","uuid":"cursor-user","message":{"id":"cursor-turn","role":"user","content":"prompt"}}`
+	path := writeClaudeFileRelayTranscript(t, home, sessionID, user)
+	inheritedCursor := int64(len(user) + 1)
+	appendClaudeFileRelayTranscript(t, path,
+		`{"type":"assistant","uuid":"cursor-assistant","message":{"id":"cursor-response","role":"assistant","content":[{"type":"text","text":"after cut"}],"stop_reason":"end_turn"}}`,
+	)
+
+	handlers := newTestHandlers(t)
+	agent := &fakeAgent{
+		name: "claudecode",
+		liveProcesses: map[string]core.LiveSessionProcess{
+			sessionID: {SessionID: sessionID, PID: 4242, Live: true},
+		},
+		alivePIDs: map[int]bool{4242: true},
+	}
+	handlers.RegisterAgent("claude", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	t.Cleanup(cleanup)
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "claude", SessionID: sessionID})
+	handlers.startClaudeSessionFileRelayAt(sessionID, serverConn, "claude", &inheritedCursor)
+	client := &websocketClient{conn: clientConn}
+
+	messages := client.readEvents(t, 4)
+	names := eventNames(messages)
+	if names[0] != "session_state_changed" ||
+		names[1] != "text_delta" ||
+		names[2] != "turn_completed" ||
+		names[3] != "session_state_changed" {
+		t.Fatalf("events = %v, want initial idle then inherited-cursor assistant exactly once", names)
+	}
+	data, _ := messages[1]["data"].(map[string]any)
+	if data["delta"] != "after cut" {
+		t.Fatalf("delta = %#v, want after cut", data["delta"])
+	}
 }
 
 func TestClaudeFileRelayDeadPIDWithNonFinalAssistantExitsIdle(t *testing.T) {

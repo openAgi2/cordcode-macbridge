@@ -70,7 +70,9 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 	// enough for file-backed external sessions: nothing would be watching Claude/Codex JSONL
 	// growth and the reducer would never receive live events. Start the same read-only relay
 	// ownership used by the legacy history-open path.
-	h.startProjectionLiveRelay(params.SessionID, conn, msg.BackendID, agent, params.Directory)
+	if msg.BackendID != "claude" && msg.BackendID != "claudecode" {
+		h.startProjectionLiveRelay(params.SessionID, conn, msg.BackendID, agent, params.Directory)
+	}
 
 	// ALL backends go through hydrate (design §10.5.7 修法 1 — no codex hardcode). A backend not
 	// yet migrated to projection returns an honest error; it must NEVER fall through to an empty
@@ -121,6 +123,12 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 			Attempts:         attempts,
 		})
 		return
+	}
+	if msg.BackendID == "claude" || msg.BackendID == "claudecode" {
+		// Hydrate owns the Claude source first. The live reader then inherits the committed
+		// complete-record cursor, making the baseline/live ranges disjoint without resampling
+		// file size and without adding a second projection writer.
+		h.startProjectionLiveRelay(params.SessionID, conn, msg.BackendID, agent, params.Directory)
 	}
 
 	proj, admission, snapshotErr := h.eventPublisher.BeginProjectionSnapshot(
@@ -179,7 +187,11 @@ func (h *Handlers) startProjectionLiveRelay(
 	if hasSess && sess != nil {
 		h.startRelayIfNotRunning(sessionID, sess, conn, backendID)
 	} else {
-		h.startClaudeSessionFileRelay(sessionID, conn, backendID)
+		if cursor, ok := h.projectionKernel.CommittedSourceCursor(backendID, sessionID); ok {
+			h.startClaudeSessionFileRelayAt(sessionID, conn, backendID, &cursor)
+		} else {
+			h.startClaudeSessionFileRelay(sessionID, conn, backendID)
+		}
 	}
 	h.startCodexSessionFileRelay(sessionID, conn, backendID, agent)
 	h.startGrokLeaderSessionRelay(sessionID, backendID, agent, directory)
@@ -649,6 +661,17 @@ func (h *Handlers) produceProjectionHydrateSource(
 	if !ok {
 		return errProjectionSourceUnavailable
 	}
+	if claudeSourceTraceEnabled() {
+		traceTurnID := ""
+		for _, segment := range source.Segments {
+			if err := h.traceClaudeHydrateRange(
+				ctx, backendID, sessionID, segment.Identity, segment.Path,
+				0, segment.Cursor, &traceTurnID,
+			); err != nil {
+				return err
+			}
+		}
+	}
 	segments := make([]core.TranscriptSourceSegment, 0, len(source.Segments))
 	for _, segment := range source.Segments {
 		segments = append(segments, core.TranscriptSourceSegment{
@@ -719,6 +742,13 @@ func (h *Handlers) produceProjectionHydrateRange(
 		if path == "" {
 			return h.streamClaudeRichHistoryProjectionEvents(ctx, sessionID, emit)
 		}
+		traceTurnID := currentTurnID
+		if err := h.traceClaudeHydrateRange(
+			ctx, backendID, sessionID, sessionID, path,
+			startOffset, endOffset, &traceTurnID,
+		); err != nil {
+			return err
+		}
 		return streamClaudeTranscriptProjectionEventsRangeSeed(
 			ctx, path, startOffset, endOffset, currentTurnID, emit,
 		)
@@ -736,9 +766,10 @@ func (h *Handlers) produceProjectionHydrateRange(
 // (codex task_complete / claude final stop_reason): the segment-hook checkpoint and the point at
 // which partial-readiness is re-evaluated.
 type projectionHydrateEvent struct {
-	Event    string
-	Data     map[string]interface{}
-	TurnDone bool
+	Event              string
+	Data               map[string]interface{}
+	TurnDone           bool
+	SourceBlockOrdinal *int
 }
 
 // streamOpenCodeRichHistoryProjectionEvents rebuilds a full projection baseline from

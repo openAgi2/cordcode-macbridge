@@ -29,9 +29,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 const claudeSourceShapesDir = "testdata/claude-source-shapes"
@@ -42,17 +45,18 @@ type manifestRecord struct {
 }
 
 type manifestFixture struct {
-	File        string          `json:"file"`
-	SHA256      string          `json:"sha256"`
-	Bytes       int             `json:"bytes"`
-	RecordCount int             `json:"recordCount"`
+	File        string           `json:"file"`
+	SHA256      string           `json:"sha256"`
+	Bytes       int              `json:"bytes"`
+	RecordCount int              `json:"recordCount"`
 	Records     []manifestRecord `json:"records"`
-	Provenance  string          `json:"provenance"`
+	Provenance  string           `json:"provenance"`
 }
 
 type manifestDocument struct {
-	ManifestVersion int               `json:"manifestVersion"`
-	Fixtures        []manifestFixture `json:"fixtures"`
+	ManifestVersion  int               `json:"manifestVersion"`
+	FixtureCreatedAt string            `json:"fixtureCreatedAt"`
+	Fixtures         []manifestFixture `json:"fixtures"`
 }
 
 // mapClaudeFixture runs the cold-hydrate mapper over one fixture file and returns every
@@ -102,6 +106,9 @@ func TestClaudeSourceShapeFixtures_LoadAllAndValidateManifest(t *testing.T) {
 	if err := json.Unmarshal(docBytes, &doc); err != nil {
 		t.Fatalf("parse manifest: %v", err)
 	}
+	if _, err := time.Parse(time.RFC3339, doc.FixtureCreatedAt); err != nil {
+		t.Fatalf("manifest fixtureCreatedAt must be a real RFC3339 timestamp: %q (%v)", doc.FixtureCreatedAt, err)
+	}
 
 	// every on-disk *.jsonl must be covered by the manifest
 	actual := map[string]bool{}
@@ -140,6 +147,32 @@ func TestClaudeSourceShapeFixtures_LoadAllAndValidateManifest(t *testing.T) {
 				}
 			}
 		}
+		scan, err := scanCompleteClaudeRelayEntriesFromReader(bytes.NewReader(data), 0, &claudeRelayScanState{})
+		if err != nil {
+			t.Fatalf("%s complete-record scan: %v", fe.File, err)
+		}
+		if scan.Poison != nil || scan.ConsumedBytes != int64(len(data)) || len(scan.Records) != len(fe.Records) {
+			t.Errorf("%s scanner/manifest mismatch: consumed=%d bytes=%d records=%d manifest=%d poison=%+v",
+				fe.File, scan.ConsumedBytes, len(data), len(scan.Records), len(fe.Records), scan.Poison)
+		} else {
+			for index, record := range scan.Records {
+				want := fe.Records[index]
+				if record.ByteStart != int64(want.ByteStart) || record.ByteEnd != int64(want.ByteEnd) {
+					t.Errorf("%s scanner record[%d] range=[%d,%d), manifest=[%d,%d)",
+						fe.File, index, record.ByteStart, record.ByteEnd, want.ByteStart, want.ByteEnd)
+					break
+				}
+			}
+		}
+		admitted := make([]claudeTranscriptRelayEntry, 0, len(scan.Entries))
+		for _, record := range scan.Records {
+			if record.Admitted {
+				admitted = append(admitted, record.Entry)
+			}
+		}
+		if !reflect.DeepEqual(admitted, scan.Entries) {
+			t.Errorf("%s record envelope changed admitted entry sequence", fe.File)
+		}
 		// no fixture may masquerade as containing real user content
 		if fe.Provenance != "observed-derived-synthetic" {
 			t.Errorf("%s provenance must be observed-derived-synthetic, got %q", fe.File, fe.Provenance)
@@ -151,6 +184,29 @@ func TestClaudeSourceShapeFixtures_LoadAllAndValidateManifest(t *testing.T) {
 	for name := range actual {
 		if !seen[name] {
 			t.Errorf("%s on disk but missing from manifest.json", name)
+		}
+	}
+}
+
+func TestClaudeSourceShapeCorpusOracleFixedFixtureCrossCheck(t *testing.T) {
+	command := exec.Command(
+		"python3",
+		filepath.Join(claudeSourceShapesDir, "recompute_corpus_stats.py"),
+		"--root", claudeSourceShapesDir,
+		"--expect-h4", "10,1",
+	)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("corpus oracle: %v\n%s", err, output)
+	}
+	text := string(output)
+	for _, required := range []string{
+		"H3 logicalRecordReuseGroups: 3; physicalOccurrencesInGroups: 6",
+		"H4 resolvableAssistantRows: 10; fileOrderOwnerMismatchRows: 1",
+		"crossCheck: streaming==indexed",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("corpus oracle output missing %q:\n%s", required, text)
 		}
 	}
 }
@@ -253,11 +309,9 @@ func TestClaudeSourceShapeFixture_ControlRowsCurrentlyInert(t *testing.T) {
 	}
 }
 
-// TestClaudeSourceShapeFixture_ServerToolUseOrphansFinish locks the CURRENT gap: the
-// assistant branch handles only text/thinking/tool_use, so a server_tool_use block emits
-// NO tool_started, while the matching user tool_result still emits tool_finished — an
-// orphan finish with no preceding start (F6 gap).
-func TestClaudeSourceShapeFixture_ServerToolUseOrphansFinish(t *testing.T) {
+// TestClaudeSourceShapeFixture_ServerToolUseHasMatchedLifecycle freezes IR-5: server_tool_use
+// starts the same tool lifecycle as tool_use and its matching user tool_result finishes it.
+func TestClaudeSourceShapeFixture_ServerToolUseHasMatchedLifecycle(t *testing.T) {
 	events := mapClaudeFixture(t, "server-tool-use.jsonl")
 	started, finished := 0, 0
 	for _, ev := range events {
@@ -268,11 +322,11 @@ func TestClaudeSourceShapeFixture_ServerToolUseOrphansFinish(t *testing.T) {
 			finished++
 		}
 	}
-	if started != 0 {
-		t.Fatalf("server_tool_use: expected NO tool_started (assistant branch ignores server_tool_use), got %d", started)
+	if started != 1 {
+		t.Fatalf("server_tool_use: expected exactly 1 tool_started, got %d", started)
 	}
 	if finished != 1 {
-		t.Fatalf("server_tool_use: expected exactly 1 orphan tool_finished from the user tool_result, got %d", finished)
+		t.Fatalf("server_tool_use: expected exactly 1 matching tool_finished, got %d", finished)
 	}
 }
 

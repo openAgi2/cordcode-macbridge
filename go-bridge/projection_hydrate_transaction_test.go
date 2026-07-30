@@ -186,6 +186,35 @@ func TestProjectionHydrateGrowingSourceKeepsBaselineAndPendingDisjoint(t *testin
 	}
 }
 
+func TestClaudeProjectionHydrateRejectsUncorrelatedPendingLive(t *testing.T) {
+	kernel := NewProjectionKernel(NewProjectionReducer(), nil)
+	source := ProjectionSourceDescriptor{
+		Identity: "claude-overlap", Path: "/private/source.jsonl", Cursor: 100,
+	}
+	if _, err := kernel.BeginHydrateTransaction(
+		"claude", "claude-overlap", source, false, false,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !kernel.ApplyHydrateEvent(
+		"claude", "claude-overlap", "epoch", "user_message",
+		map[string]interface{}{"turnId": "turn-1", "itemId": "turn-1", "text": "baseline"},
+	) {
+		t.Fatal("baseline event was not applied")
+	}
+	kernel.IngestLive(EventMessage{
+		BackendID: "claude", SessionID: "claude-overlap", BridgeEpoch: "epoch",
+		PerSessionSeq: 1, Event: "text_delta",
+		Data: map[string]interface{}{"itemId": "turn-1", "delta": "unproven overlap"},
+	})
+	if _, err := kernel.CommitHydrateTransaction("claude", "claude-overlap"); !errors.Is(err, ErrProjectionCheckpointInvalid) {
+		t.Fatalf("commit error = %v, want explicit uncorrelated-overlap failure", err)
+	}
+	if projection, ok := kernel.Snapshot("claude", "claude-overlap"); ok {
+		t.Fatalf("failed overlap commit exposed projection: %+v", projection)
+	}
+}
+
 func projectionTurnText(turn TurnProjection) string {
 	text := ""
 	if turn.User != nil {

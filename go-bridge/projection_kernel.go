@@ -68,15 +68,16 @@ type ProjectionSourceCheckpoint struct {
 }
 
 type ProjectionCheckpoint struct {
-	SchemaVersion int                          `json:"schemaVersion"`
-	BackendID     string                       `json:"backendId"`
-	SessionID     string                       `json:"sessionId"`
-	Source        ProjectionSourceCheckpoint   `json:"source"`
-	Sources       []ProjectionSourceCheckpoint `json:"sources,omitempty"`
-	Projection    SessionProjection            `json:"projection"`
-	ProjectionRev int                          `json:"projectionRev"`
-	HydrateState  ProjectionHydratePhase       `json:"hydrateState"`
-	UpdatedAt     time.Time                    `json:"updatedAt"`
+	SchemaVersion     int                          `json:"schemaVersion"`
+	BackendID         string                       `json:"backendId"`
+	SessionID         string                       `json:"sessionId"`
+	Source            ProjectionSourceCheckpoint   `json:"source"`
+	Sources           []ProjectionSourceCheckpoint `json:"sources,omitempty"`
+	Projection        SessionProjection            `json:"projection"`
+	ProjectionRev     int                          `json:"projectionRev"`
+	HydrateState      ProjectionHydratePhase       `json:"hydrateState"`
+	UpdatedAt         time.Time                    `json:"updatedAt"`
+	ClaudeSourceState *ClaudeSourceState           `json:"claudeSourceState,omitempty"`
 }
 
 type projectionCheckpointPersistence interface {
@@ -213,6 +214,11 @@ func (s *ProjectionCheckpointStore) LoadValidated(
 		checkpoint.ProjectionRev != checkpoint.Projection.SyncRev {
 		return ProjectionCheckpoint{}, fmt.Errorf("%w: schema/identity/state mismatch", ErrProjectionCheckpointInvalid)
 	}
+	if checkpoint.ClaudeSourceState != nil {
+		if err := ValidateClaudeSourceState(*checkpoint.ClaudeSourceState); err != nil {
+			return ProjectionCheckpoint{}, err
+		}
+	}
 	if source.Identity == "" {
 		return ProjectionCheckpoint{}, fmt.Errorf("%w: source identity mismatch", ErrProjectionCheckpointInvalid)
 	}
@@ -284,6 +290,11 @@ func (s *ProjectionCheckpointStore) Save(checkpoint ProjectionCheckpoint) error 
 		!projectionCheckpointHasCompleteSource(checkpoint) ||
 		checkpoint.ProjectionRev != checkpoint.Projection.SyncRev {
 		return fmt.Errorf("%w: refused incomplete checkpoint", ErrProjectionCheckpointInvalid)
+	}
+	if checkpoint.ClaudeSourceState != nil {
+		if err := ValidateClaudeSourceState(*checkpoint.ClaudeSourceState); err != nil {
+			return err
+		}
 	}
 	checkpoint.Projection = cloneSessionProjection(checkpoint.Projection)
 	raw, err := json.Marshal(checkpoint)
@@ -420,6 +431,7 @@ type projectionKernelSession struct {
 	lastPersistedRev      int
 	committedSourceCursor int64 // last transcript cut committed into SoT; catch-up when source advances
 	committedSource       ProjectionSourceDescriptor
+	claudeSourceState     *ClaudeSourceState
 	pending               *ProjectionCheckpoint
 	writeInFlight         bool
 	timer                 *time.Timer
@@ -811,6 +823,12 @@ func (k *ProjectionKernel) CommitHydrateTransaction(
 		return ProjectionHydrateCommit{}, errors.New("projection hydrate transaction is not active")
 	}
 	tx := session.hydrate
+	if (backendID == "claude" || backendID == "claudecode") && len(tx.pendingLive) > 0 {
+		return ProjectionHydrateCommit{}, fmt.Errorf(
+			"%w: Claude hydrate received uncorrelated live rows; re-inspect from one source owner",
+			ErrProjectionCheckpointInvalid,
+		)
+	}
 	baseline, ok := tx.reducer.Snapshot(backendID, sessionID)
 	if !ok {
 		baseline = SessionProjection{
@@ -851,6 +869,24 @@ func (k *ProjectionKernel) HydrateSource(backendID, sessionID string) (Projectio
 	return session.hydrate.source, true
 }
 
+func (k *ProjectionKernel) CommittedSourceCursor(backendID, sessionID string) (int64, bool) {
+	if k == nil {
+		return 0, false
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	session := k.sessionLocked(backendID, sessionID)
+	if session.status.Phase != ProjectionHydrateReady || session.committedSource.Identity == "" {
+		return 0, false
+	}
+	if segments := session.committedSource.Segments; len(segments) > 0 {
+		// Claude's live file relay watches the active tail segment, while the descriptor cursor
+		// is the composite sum across the compact-linked chain.
+		return segments[len(segments)-1].Cursor, true
+	}
+	return session.committedSourceCursor, true
+}
+
 func (k *ProjectionKernel) HydrateSnapshot(backendID, sessionID string) (SessionProjection, bool) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -876,6 +912,14 @@ func (k *ProjectionKernel) RestoreCheckpoint(
 	if err != nil {
 		return ProjectionCheckpoint{}, err
 	}
+	var restoredClaudeSourceState *ClaudeSourceState
+	if checkpoint.ClaudeSourceState != nil {
+		cloned, cloneErr := cloneClaudeSourceState(*checkpoint.ClaudeSourceState)
+		if cloneErr != nil {
+			return ProjectionCheckpoint{}, cloneErr
+		}
+		restoredClaudeSourceState = &cloned
+	}
 	reducer.Restore(backendID, sessionID, checkpoint.Projection)
 	k.mu.Lock()
 	session := k.sessionLocked(backendID, sessionID)
@@ -887,6 +931,7 @@ func (k *ProjectionKernel) RestoreCheckpoint(
 		session.committedSourceCursor = source.Cursor
 	}
 	session.committedSource = cloneProjectionSourceDescriptor(source)
+	session.claudeSourceState = restoredClaudeSourceState
 	session.lastWriteErr = nil
 	k.mu.Unlock()
 	checkpoint.Projection = cloneSessionProjection(checkpoint.Projection)

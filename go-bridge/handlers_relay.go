@@ -64,6 +64,15 @@ func (h *Handlers) startRelayIfNotRunning(sessionID string, sess core.AgentSessi
 // 不会启动。本函数通过轮询 .jsonl 文件变化来代替内存事件通道，向 iOS 广播
 // turn_started / turn_completed / session_state_changed 事件。
 func (h *Handlers) startClaudeSessionFileRelay(sessionID string, conn Connection, backendID string) {
+	h.startClaudeSessionFileRelayAt(sessionID, conn, backendID, nil)
+}
+
+func (h *Handlers) startClaudeSessionFileRelayAt(
+	sessionID string,
+	conn Connection,
+	backendID string,
+	initialOffset *int64,
+) {
 	if backendID != "claude" && backendID != "claudecode" {
 		return
 	}
@@ -78,7 +87,7 @@ func (h *Handlers) startClaudeSessionFileRelay(sessionID string, conn Connection
 		return // 已有标准 relay 或文件 relay 在运行
 	}
 
-	go h.claudeSessionFileRelayLoop(sessionID, conn, backendID)
+	go h.claudeSessionFileRelayLoop(sessionID, conn, backendID, initialOffset)
 }
 
 func (h *Handlers) startCodexSessionFileRelay(sessionID string, conn Connection, backendID string, agent core.Agent) {
@@ -440,7 +449,12 @@ func (h *Handlers) ensureRelaysForSubscribedCodexSessions() {
 	}
 }
 
-func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection, backendID string) {
+func (h *Handlers) claudeSessionFileRelayLoop(
+	sessionID string,
+	conn Connection,
+	backendID string,
+	initialOffset *int64,
+) {
 	defer func() {
 		h.clearRelayKindIf(sessionID, relayKindClaudeFile)
 		slog.Info("go-bridge: claudeSessionFileRelay exited", "sessionID", sessionID)
@@ -457,14 +471,55 @@ func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection,
 		return
 	}
 
-	// 读取当前文件大小作为初始偏移，只检测新增内容。
-	offset := func() int64 {
-		info, err := os.Stat(sessPath)
-		if err != nil {
-			return 0
+	// Start at the last complete JSONL record, not raw file size. If Claude currently owns an
+	// unterminated tail, the relay must retain that row and read it from its beginning after the
+	// terminating delimiter arrives.
+	offset, err := projectionJSONLStartCut(sessPath)
+	if err != nil {
+		slog.Error("go-bridge: claudeSessionFileRelay initial complete-record cut failed",
+			"sessionID", sessionID, "backendID", backendID, "error", err)
+		return
+	}
+	if initialOffset != nil {
+		if *initialOffset < 0 || *initialOffset > offset {
+			slog.Error("go-bridge: claudeSessionFileRelay rejected invalid inherited cursor",
+				"sessionID", sessionID, "backendID", backendID,
+				"inheritedCursor", *initialOffset, "completeCut", offset)
+			return
 		}
-		return info.Size()
-	}()
+		offset = *initialOffset
+	}
+	initialInfo, err := os.Stat(sessPath)
+	if err != nil {
+		slog.Error("go-bridge: claudeSessionFileRelay initial stat failed",
+			"sessionID", sessionID, "backendID", backendID, "error", err)
+		return
+	}
+	observedSize := initialInfo.Size()
+	observedModTime := initialInfo.ModTime()
+	if initialOffset != nil && offset < initialInfo.Size() {
+		// Force the first poll to consume bytes appended after hydrate admission/commit. The
+		// continuous reader inherits the committed cursor; it never resamples raw file size.
+		observedSize = offset
+		observedModTime = time.Time{}
+	}
+	var traceCorrelation claudeSourceCorrelation
+	if claudeSourceTraceEnabled() {
+		traceCorrelation, err = h.claudeSourceCorrelation.Observe(
+			backendID, sessionID, sessionID, sessPath, offset,
+		)
+		if err != nil {
+			slog.Warn("go-bridge: Claude source trace correlation unavailable",
+				"backendID", backendID, "sessionPrefix", projectionSessionLogPrefix(sessionID), "error", err)
+		}
+	}
+	var scanState claudeRelayScanState
+	var quarantined *claudeRelayPoisonRecord
+	var quarantineSize int64
+	var quarantineModTime time.Time
+	var quarantineRetryAt time.Time
+	var quarantineBackoff time.Duration
+	var quarantineSourceChanged bool
 
 	initialEntry := h.classifyClaudeTranscriptFile(sessPath)
 	proc, liveLister, err := h.sessionLiveProcess(context.Background(), sessionID, backendID)
@@ -492,7 +547,7 @@ func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection,
 
 	// Seed turn identity from last user on disk so warm-start / mid-turn open can
 	// attribute subsequent assistant growth without empty turnId frames.
-	currentTurnID := lastClaudeUserIdentityFromPath(sessPath)
+	currentTurnID := lastClaudeUserIdentityFromPath(sessPath, offset)
 
 	if !live {
 		// No discoverable process: stay idle and watch for future transcript growth.
@@ -556,17 +611,29 @@ func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection,
 			continue
 		}
 		newSize := info.Size()
-		if newSize <= offset {
-			// 文件没有增长，可能被截断重写（truncate）。
-			if newSize < offset {
-				offset = 0
-				lastMeaningfulGrowth = time.Now()
+		sourceChanged := newSize != observedSize || !info.ModTime().Equal(observedModTime)
+		observedSize = newSize
+		observedModTime = info.ModTime()
+		if quarantined != nil {
+			if sourceChanged {
+				quarantineSourceChanged = true
+			}
+			if !quarantineSourceChanged || time.Now().Before(quarantineRetryAt) {
 				continue
 			}
-			// Only exit on live-idle TTL when the Claude process is no longer alive.
-			// A live process with a quiet transcript is normal during long thinking; exiting
-			// here drops turn_started/turn_completed for the next Mac message until the next
-			// get_session_messages restarts the relay (Web/iOS then miss the external turn).
+			// A byte-level source change is the only automatic retry trigger. Keep the cursor before
+			// the poison row; appends after an unrepaired poison row therefore cannot leapfrog it.
+			quarantined = nil
+			quarantineSourceChanged = false
+			// The triggering change may have happened before the backoff elapsed; retain that
+			// pending rescan even when the current stat tick itself is unchanged.
+			sourceChanged = true
+			slog.Info("go-bridge: claudeSessionFileRelay retrying quarantined source after change",
+				"sessionID", sessionID, "backendID", backendID,
+				"previousSize", quarantineSize, "currentSize", newSize,
+				"previousModTime", quarantineModTime, "currentModTime", info.ModTime())
+		}
+		if !sourceChanged {
 			processStillLive := cachedPID > 0 && liveLister != nil && liveLister.IsProcessAlive(context.Background(), cachedPID)
 			if !runningObserved && !processStillLive && claudeFileRelayLiveIdleTTL > 0 && time.Since(lastMeaningfulGrowth) >= claudeFileRelayLiveIdleTTL {
 				if !h.sessions.isIdle(sessionID) {
@@ -574,6 +641,16 @@ func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection,
 				}
 				slog.Info("go-bridge: claudeSessionFileRelay live-idle TTL elapsed, exiting", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
 				return
+			}
+			continue
+		}
+		if newSize <= offset {
+			// 文件没有增长，可能被截断重写（truncate）。
+			if newSize < offset {
+				offset = 0
+				scanState = claudeRelayScanState{}
+				lastMeaningfulGrowth = time.Now()
+				continue
 			}
 			continue
 		}
@@ -588,32 +665,56 @@ func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection,
 			continue
 		}
 
-		entries, err := scanClaudeRelayEntriesFromReader(f)
+		scan, err := scanCompleteClaudeRelayEntriesFromReader(f, offset, &scanState)
 		f.Close()
 		if err != nil {
 			continue
 		}
-		if len(entries) == 0 {
-			offset = newSize
-			continue
+		offset += scan.ConsumedBytes
+		if len(scan.Entries) > 0 {
+			lastMeaningfulGrowth = time.Now()
 		}
-
-		offset = newSize
-		lastMeaningfulGrowth = time.Now()
 
 		// Live growth reuses the same hydrate mapper so projection reducer receives
 		// identity-bearing user_message / text_delta / turn_completed frames (not bare
 		// turn_started turnId:"" or itemId-less deltas that reducer skips).
-		for _, e := range entries {
+		for _, scanned := range scan.Records {
+			e := scanned.Entry
+			if !scanned.Admitted {
+				emitClaudeSourceTrace(claudeSourceTraceRecord{
+					Phase: "live", IngestDomain: "source_only", BackendID: backendID,
+					SessionID: sessionID, Correlation: traceCorrelation, Record: scanned,
+					FileOrderTurnID: currentTurnID, Transition: "ignored_source_only",
+				})
+				continue
+			}
 			// Interrupt markers usually emit no projection events from the mapper; keep
 			// legacy interrupt → completed/idle behaviour for live consumers.
 			if e.Type == "user" && isClaudeUserInterruptRelayEntry(e) {
+				emitClaudeSourceTrace(claudeSourceTraceRecord{
+					Phase: "live", IngestDomain: "live", BackendID: backendID,
+					SessionID: sessionID, Correlation: traceCorrelation, Record: scanned,
+					FileOrderTurnID: currentTurnID, Transition: "accepted_lifecycle",
+					ProjectionEvents: 1, ProjectionTurnID: currentTurnID,
+				})
 				h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"turnId": currentTurnID, "done": true, "reason": "user_interrupt"})
 				h.broadcastIdleState(sessionID, backendID)
 				runningObserved = false
 				continue
 			}
 			evs := claudeEntryToProjectionEvents(e, &currentTurnID)
+			projectionTurnID, projectionPartID := claudeProjectionTraceIdentity(evs)
+			ingestDomain := "live"
+			if h.projectionKernel.Status(backendID, sessionID).Phase == ProjectionHydrateHydrating {
+				ingestDomain = "pending_live"
+			}
+			emitClaudeSourceTrace(claudeSourceTraceRecord{
+				Phase: "live", IngestDomain: ingestDomain, BackendID: backendID,
+				SessionID: sessionID, Correlation: traceCorrelation, Record: scanned,
+				FileOrderTurnID: currentTurnID, ProjectionEvents: len(evs),
+				Transition: "legacy_event_ingest", ProjectionTurnID: projectionTurnID,
+				ProjectionPartID: projectionPartID,
+			})
 			for _, ev := range evs {
 				switch ev.Event {
 				case "user_message":
@@ -640,6 +741,34 @@ func (h *Handlers) claudeSessionFileRelayLoop(sessionID string, conn Connection,
 				}
 			}
 		}
+		if scan.Poison != nil {
+			quarantined = scan.Poison
+			quarantineSize = newSize
+			quarantineModTime = info.ModTime()
+			if quarantineBackoff == 0 {
+				quarantineBackoff = claudeFileRelayPollInterval
+				if quarantineBackoff < 100*time.Millisecond {
+					quarantineBackoff = 100 * time.Millisecond
+				}
+			} else {
+				quarantineBackoff *= 2
+				if quarantineBackoff > 30*time.Second {
+					quarantineBackoff = 30 * time.Second
+				}
+			}
+			quarantineRetryAt = time.Now().Add(quarantineBackoff)
+			slog.Error("go-bridge: claudeSessionFileRelay quarantined invalid complete record",
+				"sessionID", sessionID, "backendID", backendID,
+				"byteStart", scan.Poison.ByteStart, "byteEnd", scan.Poison.ByteEnd,
+				"retryable", true, "retryAfter", quarantineBackoff)
+			h.projectionKernel.MarkFailed(
+				backendID, sessionID, "projection.source_poison_record",
+				"Claude transcript contains an invalid complete JSONL record", true,
+			)
+		} else {
+			quarantineBackoff = 0
+			quarantineRetryAt = time.Time{}
+		}
 	}
 }
 
@@ -647,6 +776,7 @@ type claudeTranscriptRelayEntry struct {
 	Type                      string                      `json:"type"`
 	Subtype                   string                      `json:"subtype"`
 	UUID                      string                      `json:"uuid"`
+	ParentUUID                string                      `json:"parentUuid"`
 	Timestamp                 string                      `json:"timestamp"`
 	IsMeta                    bool                        `json:"isMeta"`
 	IsCompactSummary          bool                        `json:"isCompactSummary"`
@@ -706,13 +836,13 @@ func claudeEntryTurnIdentity(e claudeTranscriptRelayEntry) string {
 
 // lastClaudeUserIdentityFromPath seeds live relay turnId from the last user
 // prompt already on disk (warm-start / mid-turn open).
-func lastClaudeUserIdentityFromPath(sessPath string) string {
+func lastClaudeUserIdentityFromPath(sessPath string, completeCut int64) string {
 	f, err := os.Open(sessPath)
 	if err != nil {
 		return ""
 	}
 	defer f.Close()
-	entries, err := scanClaudeRelayEntriesFromReader(f)
+	entries, err := scanClaudeRelayEntriesFromReader(io.LimitReader(f, completeCut))
 	if err != nil {
 		return ""
 	}
@@ -819,6 +949,104 @@ func scanClaudeRelayEntriesFromReader(r io.Reader) ([]claudeTranscriptRelayEntry
 		return nil, err
 	}
 	return entries, nil
+}
+
+type claudeRelayScanState struct {
+	skipNextResumeNoResponse bool
+}
+
+type claudeRelayPoisonRecord struct {
+	ByteStart int64
+	ByteEnd   int64
+}
+
+type claudeRelayCompleteScan struct {
+	Entries       []claudeTranscriptRelayEntry
+	Records       []claudeRelayScannedRecord
+	ConsumedBytes int64
+	Poison        *claudeRelayPoisonRecord
+}
+
+// claudeRelayScannedRecord keeps the private, delimiter-inclusive physical identity beside the
+// admitted source row. It is never embedded in EventMessage or sent over Bridge/Relay.
+type claudeRelayScannedRecord struct {
+	Entry     claudeTranscriptRelayEntry
+	ByteStart int64
+	ByteEnd   int64
+	Admitted  bool
+}
+
+// scanCompleteClaudeRelayEntriesFromReader scans newline-terminated physical records only.
+// ConsumedBytes advances through validated or intentionally ignored complete rows, but stops before
+// an invalid complete JSON row and never includes an unterminated tail.
+func scanCompleteClaudeRelayEntriesFromReader(
+	r io.Reader,
+	baseOffset int64,
+	state *claudeRelayScanState,
+) (claudeRelayCompleteScan, error) {
+	if state == nil {
+		state = &claudeRelayScanState{}
+	}
+	var result claudeRelayCompleteScan
+	reader := bufio.NewReaderSize(r, 64*1024)
+	for {
+		raw, readErr := reader.ReadBytes('\n')
+		if readErr == io.EOF {
+			// ReadBytes returns the final unterminated bytes with io.EOF. They remain unconsumed.
+			break
+		}
+		if readErr != nil {
+			return claudeRelayCompleteScan{}, readErr
+		}
+		recordStart := baseOffset + result.ConsumedBytes
+		recordEnd := recordStart + int64(len(raw))
+		if len(raw) > 1024*1024*16 {
+			result.Poison = &claudeRelayPoisonRecord{ByteStart: recordStart, ByteEnd: recordEnd}
+			return result, nil
+		}
+		line := raw[:len(raw)-1] // ReadBytes returned a delimiter-terminated record.
+		if len(line) > 0 && line[len(line)-1] == '\r' {
+			line = line[:len(line)-1]
+		}
+		if len(line) == 0 {
+			result.ConsumedBytes += int64(len(raw))
+			continue
+		}
+		var entry claudeTranscriptRelayEntry
+		if err := json.Unmarshal(line, &entry); err != nil {
+			result.Poison = &claudeRelayPoisonRecord{ByteStart: recordStart, ByteEnd: recordEnd}
+			return result, nil
+		}
+		result.ConsumedBytes += int64(len(raw))
+		recordIndex := len(result.Records)
+		result.Records = append(result.Records, claudeRelayScannedRecord{
+			Entry: entry, ByteStart: recordStart, ByteEnd: recordEnd,
+		})
+		if isClaudeCompactionBoundaryRelayEntry(entry) {
+			result.Entries = append(result.Entries, entry)
+			result.Records[recordIndex].Admitted = true
+			continue
+		}
+		if isClaudeInternalCompactRelayEntry(entry) || entry.Message == nil {
+			continue
+		}
+		if isClaudeResumeMetaRelayEntry(entry) {
+			state.skipNextResumeNoResponse = true
+			continue
+		}
+		if state.skipNextResumeNoResponse {
+			if isClaudeResumeNoResponseRelayEntry(entry) {
+				state.skipNextResumeNoResponse = false
+				continue
+			}
+			state.skipNextResumeNoResponse = false
+		}
+		if entry.Type == "user" || entry.Type == "assistant" {
+			result.Entries = append(result.Entries, entry)
+			result.Records[recordIndex].Admitted = true
+		}
+	}
+	return result, nil
 }
 
 func classifyLastMeaningfulClaudeRelayEntryFromReader(r io.Reader) (claudeTranscriptRelayMeaningfulEntry, error) {
@@ -1054,7 +1282,7 @@ func claudeEntryToProjectionEvents(e claudeTranscriptRelayEntry, currentTurnID *
 			if strings.TrimSpace(b.Thinking) != "" {
 				out = append(out, projectionHydrateEvent{Event: "reasoning_delta", Data: map[string]interface{}{"itemId": turnID, "delta": b.Thinking}})
 			}
-		case "tool_use":
+		case "tool_use", "server_tool_use":
 			data := map[string]interface{}{"toolName": b.Name}
 			if len(b.Input) > 0 && string(b.Input) != "null" {
 				data["toolInput"] = json.RawMessage(b.Input)
@@ -1107,12 +1335,16 @@ func claudeToolResultText(b claudeRelayContentBlock) string {
 
 func (h *Handlers) classifyClaudeTranscriptFile(sessPath string) claudeTranscriptRelayMeaningfulEntry {
 	transcriptStateProbe()
+	completeCut, err := projectionJSONLStartCut(sessPath)
+	if err != nil {
+		return claudeTranscriptRelayMeaningfulEntry{}
+	}
 	f, err := os.Open(sessPath)
 	if err != nil {
 		return claudeTranscriptRelayMeaningfulEntry{}
 	}
 	defer f.Close()
-	entry, err := classifyLastMeaningfulClaudeRelayEntryFromReader(f)
+	entry, err := classifyLastMeaningfulClaudeRelayEntryFromReader(io.LimitReader(f, completeCut))
 	if err != nil {
 		return claudeTranscriptRelayMeaningfulEntry{}
 	}
