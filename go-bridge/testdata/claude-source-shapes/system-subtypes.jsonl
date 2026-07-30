@@ -1,0 +1,7 @@
+{"uuid":"u-root","type":"user","timestamp":"2026-07-30T00:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"long conversation"}]},"parentUuid":null}
+{"uuid":"a-1","type":"assistant","timestamp":"2026-07-30T00:00:01.000Z","message":{"id":"m-1","role":"assistant","content":[{"type":"text","text":"response"}],"stop_reason":"end_turn"},"parentUuid":"u-root"}
+{"parentUuid":null,"logicalParentUuid":"a-1","isSidechain":false,"type":"system","subtype":"compact_boundary","content":"Conversation compacted","isMeta":false,"timestamp":"2026-07-30T00:00:02.000Z","uuid":"sys-cb","level":"info","compactMetadata":{"trigger":"auto","preTokens":12000,"postTokens":4000}}
+{"uuid":"a-1","type":"assistant","timestamp":"2026-07-30T00:00:03.000Z","message":{"id":"m-1","role":"assistant","content":[{"type":"text","text":"response after compact"}],"stop_reason":"end_turn"},"parentUuid":"sys-cb"}
+{"parentUuid":"a-1","isSidechain":false,"type":"system","subtype":"stop_hook_summary","hookCount":1,"hookInfos":[{"command":"/usr/bin/true","durationMs":5}],"timestamp":"2026-07-30T00:00:04.000Z","uuid":"sys-shs"}
+{"parentUuid":"a-1","isSidechain":false,"type":"system","subtype":"api_error","level":"error","error":{"message":"429 rate_limit_error","type":"rate_limit_error"},"timestamp":"2026-07-30T00:00:05.000Z","uuid":"sys-ae"}
+{"parentUuid":"a-1","isSidechain":false,"type":"system","subtype":"informational","content":"Session model could not be restored — using fallback.","isMeta":false,"timestamp":"2026-07-30T00:00:06.000Z","uuid":"sys-inf"}

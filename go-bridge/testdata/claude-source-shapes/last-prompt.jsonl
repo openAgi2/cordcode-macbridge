@@ -1,0 +1,3 @@
+{"uuid":"u-root","type":"user","timestamp":"2026-07-30T00:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"reply with one word: hello"}]},"parentUuid":null}
+{"uuid":"a-1","type":"assistant","timestamp":"2026-07-30T00:00:01.000Z","message":{"id":"m-1","role":"assistant","content":[{"type":"text","text":"hello"}],"stop_reason":"end_turn"},"parentUuid":"u-root"}
+{"type":"last-prompt","lastPrompt":"reply with one word: hello","leafUuid":"a-1","sessionId":"sess-1"}

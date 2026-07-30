@@ -1,0 +1,3 @@
+{"uuid":"u-root","type":"user","timestamp":"2026-07-30T00:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"analyze this image"}]},"parentUuid":null}
+{"uuid":"a-1","type":"assistant","timestamp":"2026-07-30T00:00:01.000Z","message":{"id":"m-1","role":"assistant","content":[{"type":"server_tool_use","id":"call-s1","name":"analyze_image","input":{}}],"stop_reason":"tool_use"},"parentUuid":"u-root"}
+{"uuid":"u-2","type":"user","timestamp":"2026-07-30T00:00:02.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-s1","content":"image depicts a sunset over water"}]},"parentUuid":"a-1"}
