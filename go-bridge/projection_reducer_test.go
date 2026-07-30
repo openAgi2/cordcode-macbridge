@@ -442,3 +442,72 @@ func TestReducerRestoreHealsZombieRunningTurnsWhenIdle(t *testing.T) {
 		}
 	}
 }
+
+// TestReducerToolConvergesByItemIdAcrossRelaySources proves the Issue 3 design property the
+// 3-way review (agent + two independent analysts) converged on: when BOTH the Claude file relay
+// (transcript tool_use.id) and the agent relay sidecar (Anthropic tool_use.id → RequestID) report
+// the SAME tool call for a local turn, the reducer upsert-merges by itemId — exactly ONE tool part
+// results, never a duplicate. Running the agent relay as a sidecar alongside the file relay
+// therefore cannot double-write tool state into the projection (guardrails #3/#4).
+func TestReducerToolConvergesByItemIdAcrossRelaySources(t *testing.T) {
+	r := newTestReducer()
+	const backend, sid, turn = "claudecode", "s-tool-conv", "turn-tool"
+	const tool = "toolu_CONV"
+	r.Apply(ev(1, backend, sid, "turn_started", map[string]interface{}{"turnId": turn}))
+	// Both relay sources report the same tool started (file relay from transcript tool_use.id,
+	// agent relay from driver tool_use.id). Must upsert-merge into one part, not append a duplicate.
+	r.Apply(ev(2, backend, sid, "tool_started", map[string]interface{}{"itemId": tool, "toolName": "bash", "toolInput": map[string]interface{}{"cmd": "ls"}}))
+	r.Apply(ev(3, backend, sid, "tool_started", map[string]interface{}{"itemId": tool, "toolName": "bash"}))
+	// Both relay sources report completion; final status must settle to completed.
+	r.Apply(ev(4, backend, sid, "tool_finished", map[string]interface{}{"itemId": tool, "toolResult": "ok"}))
+	r.Apply(ev(5, backend, sid, "tool_finished", map[string]interface{}{"itemId": tool, "toolResult": "ok"}))
+	r.Apply(ev(6, backend, sid, "turn_completed", map[string]interface{}{"turnId": turn}))
+
+	proj, ok := r.Snapshot(backend, sid)
+	if !ok {
+		t.Fatal("missing projection")
+	}
+	var tools []ProjectionPart
+	for _, tu := range proj.Turns {
+		if tu.Assistant == nil {
+			continue
+		}
+		for _, p := range tu.Assistant.Parts {
+			if p.Type == "tool" && p.ItemID == tool {
+				tools = append(tools, p)
+			}
+		}
+	}
+	if len(tools) != 1 {
+		t.Fatalf("expected exactly 1 tool part for %s across relay sources, got %d: %+v", tool, len(tools), tools)
+	}
+	if tools[0].ToolStatus != "completed" {
+		t.Fatalf("final tool status = %q, want completed", tools[0].ToolStatus)
+	}
+	if proj.Execution.Phase != "idle" {
+		t.Fatalf("execution phase = %q, want idle after turn_completed", proj.Execution.Phase)
+	}
+}
+
+// TestReducerSkipsIdentitylessAgentRelayContent proves the second half of the Issue 3 safety
+// argument: the Claude agent relay's EventText/EventThinking carry NO itemId/turnId (the driver
+// only tracks the Anthropic message.id, not the transcript UUID the reducer keys on), and a
+// turn_completed with no armed ActiveTurnID has nothing to complete. The reducer must SKIP all
+// such identityless frames so the sidecar agent relay cannot inject a phantom turn or content
+// into the projection — the file relay stays the sole UUID-keyed content source (guardrail #3).
+func TestReducerSkipsIdentitylessAgentRelayContent(t *testing.T) {
+	r := newTestReducer()
+	const backend, sid = "claudecode", "s-skip"
+	r.Apply(ev(1, backend, sid, "text_delta", map[string]interface{}{"delta": "no identity"}))      // empty itemId
+	r.Apply(ev(2, backend, sid, "reasoning_delta", map[string]interface{}{"delta": "no identity"})) // empty itemId
+	r.Apply(ev(3, backend, sid, "turn_started", map[string]interface{}{}))                           // empty turnId
+	r.Apply(ev(4, backend, sid, "turn_completed", map[string]interface{}{}))                         // empty turnId, no active turn
+
+	if r.TurnCount(backend, sid) != 0 {
+		proj, _ := r.Snapshot(backend, sid)
+		t.Fatalf("identityless agent-relay frames must not create a turn; TurnCount=%d proj=%+v", r.TurnCount(backend, sid), proj)
+	}
+	if r.HasContentTurn(backend, sid) {
+		t.Fatal("identityless agent-relay frames must not register content")
+	}
+}

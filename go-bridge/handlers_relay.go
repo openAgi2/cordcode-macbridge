@@ -44,17 +44,30 @@ var (
 
 // startRelayIfNotRunning 为 session 启动事件转发（如果尚未运行）。
 // 用于 iOS 仅调用 get_session_messages 而未调用 send_message 的场景。
+//
+// 关键：agent relay（relayEvents）的生命周期与全局 relayRunning/relayRunningKind 槽位解耦。
+// 当 Claude file relay 已持有该槽位（kind=claude_file）时——例如 cold-open 已启动 file relay、
+// 随后用户在本 session 发起本地 turn——我们**不**把 kind 翻成 agent，否则 claudeSessionFileRelayLoop
+// 会在 superseded 检查（见本文件 "superseded by agent relay" 日志）处退出，丢失唯一的 UUID 内容来源；
+// 而 agent relay 的事件缺少 itemId，会被 reducer 跳过（projection_reducer.go text_delta
+// `if turnID == "" { return }`），导致本地发起的 turn 没有 content patch 实时投递（Issue 3）。
+// 改为让 agent relay 作为 sidecar 并行运行（控制面事件 turn_started/completed + 任何带 itemId 的事件），
+// file relay 继续作为 UUID-keyed 内容来源。reducer 跳过 agent relay 无 itemId 的正文，不会重复应用。
 func (h *Handlers) startRelayIfNotRunning(sessionID string, sess core.AgentSession, conn Connection, backendID string) {
 	h.mu.Lock()
-	running := h.relayRunning[sessionID] && h.relayRunningKind[sessionID] == relayKindAgent
-	if !running {
+	if h.agentRelayRunning[sessionID] {
+		h.mu.Unlock()
+		return
+	}
+	h.agentRelayRunning[sessionID] = true
+	// 仅当没有 relay 占用全局槽位时才认领并把 kind 标为 agent；若 file relay (claude_file) 已占用，
+	// 保留其 kind 以免触发 claudeSessionFileRelayLoop 的 supersession 退出。
+	if !h.relayRunning[sessionID] {
 		h.relayRunning[sessionID] = true
 		h.relayRunningKind[sessionID] = relayKindAgent
 	}
 	h.mu.Unlock()
-	if !running {
-		go h.relayEvents(conn, sess, sessionID, backendID)
-	}
+	go h.relayEvents(conn, sess, sessionID, backendID)
 }
 
 // startClaudeSessionFileRelay 为没有 AgentSession 的 Claude Desktop session
@@ -1823,6 +1836,10 @@ func (h *Handlers) rebindRelayKind(fromID, toID, kind string) {
 func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionID, backendID string) {
 	origSessionID := sessionID
 	defer func() {
+		h.mu.Lock()
+		delete(h.agentRelayRunning, origSessionID)
+		delete(h.agentRelayRunning, sessionID)
+		h.mu.Unlock()
 		h.clearRelayKindIf(origSessionID, relayKindAgent)
 		h.clearRelayKindIf(sessionID, relayKindAgent)
 		slog.Info("go-bridge: relayEvents exited", "backendID", backendID, "sessionID", sessionID)

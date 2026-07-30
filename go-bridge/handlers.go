@@ -52,6 +52,11 @@ type Handlers struct {
 	deltaBatcher            *DeltaBatcher
 	relayRunning            map[string]bool   // sessionID/relayKey → 是否已有 relay goroutine
 	relayRunningKind        map[string]string // sessionID → agent/file relay 类型，用于避免 Claude file relay 抢占真实 stdout relay
+	// agentRelayRunning 与 relayRunningKind 解耦：标记 agent relay (relayEvents) goroutine 是否在跑。
+	// 本地发 turn 时若 file relay 已占用全局槽位 (kind=claude_file)，startRelayIfNotRunning 不再把 kind
+	// 翻成 agent，避免 claudeSessionFileRelayLoop 被 superseded 退出而丢失唯一 UUID 内容来源（见
+	// startRelayIfNotRunning 注释与 Issue 3 调查 docs/2026-07-30-remote-web-send-message-not-live-investigation.md）。
+	agentRelayRunning map[string]bool
 	claudeSourceCorrelation *claudeSourceCorrelationTracker
 	deliveryPrekeys         *PrekeyStore
 	observation             *ObservationManager
@@ -136,6 +141,7 @@ func newHandlersWithContext(ctx context.Context, bridgeEpoch string) *Handlers {
 		projectionHydrateSlots:  make(chan struct{}, projectionHydrateMaxConcurrent),
 		relayRunning:            make(map[string]bool),
 		relayRunningKind:        make(map[string]string),
+		agentRelayRunning:       make(map[string]bool),
 		claudeSourceCorrelation: newClaudeSourceCorrelationTracker(),
 		deliveryPrekeys:         prekeys,
 		observation:             observation,
