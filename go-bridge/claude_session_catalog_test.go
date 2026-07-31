@@ -3,6 +3,7 @@ package gobridge
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -349,5 +350,39 @@ func TestClaudeSessionCatalogKeepsSessionsWithoutCustomTitle(t *testing.T) {
 	got := catalog.list("-tmp-notitle-project", &core.SessionLoadMetrics{})
 	if len(got) != 2 {
 		t.Fatalf("sessions without custom-title should not be fork-deduped, got %d: %+v", len(got), got)
+	}
+}
+
+func TestClaudeSessionCatalogCollapsesCompactContinuationByBoundaryUUID(t *testing.T) {
+	projectsDir := t.TempDir()
+	projectDir := filepath.Join(projectsDir, "-tmp-compact-project")
+	if err := os.Mkdir(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	parent := strings.Join([]string{
+		`{"type":"user","timestamp":"2026-07-29T08:00:00Z","cwd":"/tmp/compact-project","message":{"role":"user","content":"original prompt"}}`,
+		`{"type":"custom-title","customTitle":"One logical session","sessionId":"parent-session"}`,
+		`{"type":"system","subtype":"compact_boundary","uuid":"shared-boundary","timestamp":"2026-07-29T08:17:51Z"}`,
+	}, "\n") + "\n"
+	child := strings.Join([]string{
+		`{"type":"custom-title","customTitle":"One logical session","sessionId":"child-session"}`,
+		`{"type":"system","subtype":"compact_boundary","uuid":"shared-boundary","timestamp":"2026-07-29T08:17:51Z"}`,
+		`{"type":"user","timestamp":"2026-07-29T08:34:00Z","cwd":"/tmp/compact-project","message":{"role":"user","content":"continued prompt"}}`,
+		`{"type":"assistant","timestamp":"2026-07-29T08:35:00Z","cwd":"/tmp/compact-project","message":{"role":"assistant","content":"continued answer"}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(projectDir, "parent-session.jsonl"), []byte(parent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectDir, "child-session.jsonl"), []byte(child), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	catalog := newClaudeSessionCatalog(projectsDir)
+	got := catalog.list("-tmp-compact-project", &core.SessionLoadMetrics{})
+	if len(got) != 1 {
+		t.Fatalf("compact continuation should be one logical session, got %d: %+v", len(got), got)
+	}
+	if got[0]["id"] != "child-session" {
+		t.Fatalf("catalog kept %v, want active child-session", got[0]["id"])
 	}
 }

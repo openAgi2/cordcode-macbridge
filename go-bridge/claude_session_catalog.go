@@ -20,25 +20,32 @@ type claudeSessionKey struct {
 type claudeSessionFingerprint struct {
 	ModTimeUnixNano int64
 	SizeBytes       int64
+	// SidecarModTimeUnixNano tracks the .cc-connect-session-meta sidecar mtime.
+	// Archive/unarchive only write the sidecar (the .jsonl transcript is
+	// untouched), so without this the catalog's fingerprint match would reuse a
+	// stale cached entry and ArchivedAt would never update.
+	SidecarModTimeUnixNano int64
 }
 
 type claudeSessionIndexEntry struct {
-	Key             claudeSessionKey
-	FilePath        string
-	Directory       string
-	Title           string
+	Key       claudeSessionKey
+	FilePath  string
+	Directory string
+	Title     string
 	// CustomTitle 来自 JSONL 的 type=custom-title 记录（assistant 文本回退的 Title 不算）。
 	// 配合 FirstUserAt 用于检测 Claude Code fork 对：fork 时原会话开头被原样复制到新会话，
 	// 因此 fork 对拥有相同的 CustomTitle + FirstUserAt。
-	CustomTitle     string
-	FirstUserAt     time.Time
-	ModelID         string
-	ProviderID      string
-	ReasoningEffort string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	MessageCount    int
-	Fingerprint     claudeSessionFingerprint
+	CustomTitle        string
+	FirstUserAt        time.Time
+	CompactBoundaryIDs []string
+	ModelID            string
+	ProviderID         string
+	ReasoningEffort    string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	MessageCount       int
+	ArchivedAt         time.Time
+	Fingerprint        claudeSessionFingerprint
 }
 
 type claudeSessionSnapshot struct {
@@ -173,6 +180,13 @@ func (c *claudeSessionCatalog) buildSnapshot(
 			if size > maxFileBytes {
 				maxFileBytes = size
 			}
+			// Include the sidecar mtime in the fingerprint so an archive/unarchive
+			// (which only writes the sidecar) invalidates the cached entry and the
+			// re-parse picks up the new ArchivedAt.
+			var sidecarModNano int64
+			if si, serr := os.Stat(claudeBridgeSessionSidecarPath(projectPath, strings.TrimSuffix(name, ".jsonl"))); serr == nil {
+				sidecarModNano = si.ModTime().UnixNano()
+			}
 			candidates = append(candidates, fileCandidate{
 				key: claudeSessionKey{
 					ProjectKey: projectKey,
@@ -181,8 +195,9 @@ func (c *claudeSessionCatalog) buildSnapshot(
 				path:      filepath.Join(projectPath, name),
 				directory: realDirectory,
 				fingerprint: claudeSessionFingerprint{
-					ModTimeUnixNano: info.ModTime().UnixNano(),
-					SizeBytes:       size,
+					ModTimeUnixNano:       info.ModTime().UnixNano(),
+					SizeBytes:             size,
+					SidecarModTimeUnixNano: sidecarModNano,
 				},
 				modTime: info.ModTime(),
 			})
@@ -204,20 +219,22 @@ func (c *claudeSessionCatalog) buildSnapshot(
 		parseStarted := time.Now()
 		scan := c.parseSession(candidate.path, candidate.modTime)
 		metrics.AddMetadataParse(time.Since(parseStarted))
-		nextByKey[candidate.key] = claudeSessionIndexEntry{
-			Key:             candidate.key,
-			FilePath:        candidate.path,
-			Directory:       candidate.directory,
-			Title:           scan.Title,
-			CustomTitle:     scan.CustomTitle,
-			FirstUserAt:     scan.FirstUserAt,
-			ModelID:         scan.ModelID,
-			ProviderID:      scan.ProviderID,
-			ReasoningEffort: scan.ReasoningEffort,
-			CreatedAt:       scan.CreatedAt,
-			UpdatedAt:       scan.UpdatedAt,
-			Fingerprint:     candidate.fingerprint,
-		}
+			nextByKey[candidate.key] = claudeSessionIndexEntry{
+				Key:                candidate.key,
+				FilePath:           candidate.path,
+				Directory:          candidate.directory,
+				Title:              scan.Title,
+				CustomTitle:        scan.CustomTitle,
+				FirstUserAt:        scan.FirstUserAt,
+				CompactBoundaryIDs: append([]string(nil), scan.CompactBoundaryIDs...),
+				ModelID:            scan.ModelID,
+				ProviderID:         scan.ProviderID,
+				ReasoningEffort:    scan.ReasoningEffort,
+				CreatedAt:          scan.CreatedAt,
+				UpdatedAt:          scan.UpdatedAt,
+				ArchivedAt:         scan.ArchivedAt,
+				Fingerprint:        candidate.fingerprint,
+			}
 	}
 	deleted := 0
 	if previous != nil {
@@ -247,7 +264,88 @@ func (c *claudeSessionCatalog) buildSnapshot(
 	// 都相同的会话被视为 fork 对（/resume 或中断后续接会产生）。只保留最新的一条，
 	// 较旧的从 ByKey 和 Sorted 同时移除，使 list_sessions / pin 解析等所有调用方一致。
 	sortedEntries = hideClaudeForkChildren(nextByKey, sortedEntries)
+	sortedEntries = hideClaudeCompactContinuationParents(nextByKey, sortedEntries)
 	return &claudeSessionSnapshot{ByKey: nextByKey, Sorted: sortedEntries}
+}
+
+// hideClaudeCompactContinuationParents collapses the physical JSONL files
+// Claude creates around compaction into one logical session. Parent and child
+// carry the same compact_boundary UUID; this is stronger evidence than title
+// or timestamp similarity and supports transitive multi-compaction chains.
+func hideClaudeCompactContinuationParents(
+	byKey map[claudeSessionKey]claudeSessionIndexEntry,
+	sorted []claudeSessionIndexEntry,
+) []claudeSessionIndexEntry {
+	parent := make([]int, len(sorted))
+	for index := range parent {
+		parent[index] = index
+	}
+	var find func(int) int
+	find = func(index int) int {
+		if parent[index] != index {
+			parent[index] = find(parent[index])
+		}
+		return parent[index]
+	}
+	union := func(lhs, rhs int) {
+		leftRoot, rightRoot := find(lhs), find(rhs)
+		if leftRoot != rightRoot {
+			parent[rightRoot] = leftRoot
+		}
+	}
+
+	type boundaryKey struct {
+		ProjectKey string
+		BoundaryID string
+	}
+	firstByBoundary := make(map[boundaryKey]int)
+	for index, entry := range sorted {
+		for _, boundaryID := range entry.CompactBoundaryIDs {
+			boundaryID = strings.TrimSpace(boundaryID)
+			if boundaryID == "" {
+				continue
+			}
+			key := boundaryKey{ProjectKey: entry.Key.ProjectKey, BoundaryID: boundaryID}
+			if first, exists := firstByBoundary[key]; exists {
+				union(first, index)
+			} else {
+				firstByBoundary[key] = index
+			}
+		}
+	}
+
+	primaryByRoot := make(map[int]int)
+	for index := range sorted {
+		root := find(index)
+		primary, exists := primaryByRoot[root]
+		if !exists || sorted[index].UpdatedAt.After(sorted[primary].UpdatedAt) ||
+			(sorted[index].UpdatedAt.Equal(sorted[primary].UpdatedAt) &&
+				sorted[index].Key.SessionID > sorted[primary].Key.SessionID) {
+			primaryByRoot[root] = index
+		}
+	}
+	hide := make(map[int]bool)
+	for index := range sorted {
+		root := find(index)
+		if primaryByRoot[root] == index {
+			continue
+		}
+		// A singleton has itself as primary and never reaches this branch.
+		hide[index] = true
+		delete(byKey, sorted[index].Key)
+	}
+	if len(hide) == 0 {
+		return sorted
+	}
+	result := make([]claudeSessionIndexEntry, 0, len(sorted)-len(hide))
+	for index, entry := range sorted {
+		if !hide[index] {
+			result = append(result, entry)
+		}
+	}
+	slog.Info("claude compact continuation detected: hiding physical parent transcripts",
+		"hidden", len(hide))
+	return result
 }
 
 // hideClaudeForkChildren 在已排序的会话列表里检测 Claude Code fork 对并隐藏较旧的分支。
@@ -255,6 +353,7 @@ func (c *claudeSessionCatalog) buildSnapshot(
 //  1. 同一 ProjectKey；
 //  2. 双方都有非空 CustomTitle 且相等；
 //  3. 双方 FirstUserAt 非零且相等。
+//
 // 同组多于一个时保留 UpdatedAt 最新的（primary），其余从 byKey 和 sorted 里删除。
 // 同组 UpdatedAt 相同时按 SessionID 排序保留字典序最大者，保证确定性。
 func hideClaudeForkChildren(byKey map[claudeSessionKey]claudeSessionIndexEntry, sorted []claudeSessionIndexEntry) []claudeSessionIndexEntry {
@@ -341,6 +440,12 @@ func claudeSessionEntryToWire(entry claudeSessionIndexEntry) map[string]interfac
 	}
 	if entry.ReasoningEffort != "" {
 		wire["reasoningEffort"] = entry.ReasoningEffort
+	}
+	// Surface archivedAtMillis so clients can hide archived sessions (web
+	// session-grouping filters on archivedAtMillis). Matches the agent-layer
+	// wire shape in handlers.go sessionsToWire.
+	if !entry.ArchivedAt.IsZero() {
+		wire["archivedAtMillis"] = entry.ArchivedAt.UnixMilli()
 	}
 	return wire
 }

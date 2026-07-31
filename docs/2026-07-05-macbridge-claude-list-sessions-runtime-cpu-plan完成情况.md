@@ -102,7 +102,7 @@ helper.
 ## Audit Addendum (2026-07-05) — Fix 3 production wiring caveat
 
 A post-completion audit
-([docs/2026-07-05-macbridge-claude-list-sessions-runtime-cpu-plan完成情况-审计报告.md](2026-07-05-macbridge-claude-list-sessions-runtime-cpu-plan完成情况-审计报告.md))
+([docs/2026-07-05-macbridge-claude-list-sessions-runtime-cpu-plan完成情况-审计报告.md](archive/2026-07-05-macbridge-claude-list-sessions-runtime-cpu-plan完成情况-审计报告.md))
 found that this report overstates Fix 3's production effect **at the audited
 commit `aec16b8`**. Recorded here as a honest correction:
 

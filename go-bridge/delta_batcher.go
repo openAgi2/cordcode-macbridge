@@ -35,28 +35,35 @@ const (
 	deltaBatchMaxPendingBytes = 256 * 1024            // 单 key 缓冲上限，超限即 flush
 )
 
-// BroadcastSender 是 DeltaBatcher 的下游（*Broadcaster 满足；测试可注入 capture sender）。
-type BroadcastSender interface {
-	Send(BroadcastEvent)
+// LogicalEventSender is DeltaBatcher's downstream. EventPublisher implements it.
+type LogicalEventSender interface {
+	PublishLogical(LogicalEvent) EventMessage
 }
 
 type deltaChunk struct {
 	eventType string // "text_delta" | "reasoning_delta"
 	text      string
-	seq       int
+	// itemId is projection attribution (design §6.4). Batching must preserve it;
+	// OpenCode/Claude live frames carry itemId==turnId. Dropping it makes
+	// ProjectionReducer skip every text_delta (headRev only advances on turn_completed).
+	itemID string
 }
 
 type deltaAccum struct {
-	backendID  string
-	sessionID  string
-	directory  string
-	chunks     []deltaChunk
-	totalBytes int
+	backendID   string
+	sessionID   string
+	directory   string
+	broadcast   bool
+	targets     []Connection
+	waitTargets []Connection
+	offline     bool
+	chunks      []deltaChunk
+	totalBytes  int
 }
 
 // DeltaBatcher 把 text_delta/reasoning_delta 按 SubscriptionKey 维度攒批后转发给 sender。
 type DeltaBatcher struct {
-	sender BroadcastSender
+	sender LogicalEventSender
 	mu     sync.Mutex
 	accums map[SubscriptionKey]*deltaAccum
 	ticker *time.Ticker
@@ -64,7 +71,7 @@ type DeltaBatcher struct {
 	done   chan struct{}
 }
 
-func NewDeltaBatcher(sender BroadcastSender) *DeltaBatcher {
+func NewDeltaBatcher(sender LogicalEventSender) *DeltaBatcher {
 	d := &DeltaBatcher{
 		sender: sender,
 		accums: make(map[SubscriptionKey]*deltaAccum),
@@ -91,13 +98,13 @@ func (d *DeltaBatcher) Stop() {
 
 // Send: text_delta/reasoning_delta 攒批；其它事件先 flush 该 key 再立即转发（保留顺序）。
 // 与直接调 broadcaster.Send 同签名，调用方只需替换发送入口。
-func (d *DeltaBatcher) Send(ev BroadcastEvent) {
+func (d *DeltaBatcher) Send(ev LogicalEvent) {
 	if d.tryAccumulate(ev) {
 		return
 	}
 	// 控制/非 text 事件：先 flush 该 key 的残留 text，再转发本事件，保证顺序。
 	d.flushKey(ev.BackendID, ev.SessionID, ev.Directory)
-	d.sender.Send(ev)
+	d.sender.PublishLogical(ev)
 }
 
 // FlushAll flush 所有 key 的缓冲（ticker 定期调用；测试可直接调）。
@@ -114,15 +121,11 @@ func (d *DeltaBatcher) FlushAll() {
 	}
 }
 
-func (d *DeltaBatcher) tryAccumulate(ev BroadcastEvent) bool {
-	msg, ok := ev.Message.(EventMessage)
-	if !ok {
+func (d *DeltaBatcher) tryAccumulate(ev LogicalEvent) bool {
+	if ev.Event != "text_delta" && ev.Event != "reasoning_delta" {
 		return false
 	}
-	if msg.Event != "text_delta" && msg.Event != "reasoning_delta" {
-		return false
-	}
-	deltaStr := extractDeltaText(msg.Data)
+	deltaStr := extractDeltaText(ev.Data)
 	if deltaStr == "" {
 		// 无内容：直接转发原事件（保持 idle/heartbeat 类空 delta 的既有行为，不静默丢）。
 		return false
@@ -134,14 +137,14 @@ func (d *DeltaBatcher) tryAccumulate(ev BroadcastEvent) bool {
 		defer d.mu.Unlock()
 		a, exists := d.accums[key]
 		if !exists {
-			a = &deltaAccum{backendID: ev.BackendID, sessionID: ev.SessionID, directory: ev.Directory}
+			a = &deltaAccum{backendID: ev.BackendID, sessionID: ev.SessionID, directory: ev.Directory, broadcast: ev.Broadcast, targets: ev.Targets, waitTargets: ev.WaitTargets, offline: ev.Offline}
 			d.accums[key] = a
 		}
-		if n := len(a.chunks); n > 0 && a.chunks[n-1].eventType == msg.Event {
+		itemID := extractDeltaItemID(ev.Data)
+		if n := len(a.chunks); n > 0 && a.chunks[n-1].eventType == ev.Event && a.chunks[n-1].itemID == itemID {
 			a.chunks[n-1].text += deltaStr
-			a.chunks[n-1].seq = msg.Seq
 		} else {
-			a.chunks = append(a.chunks, deltaChunk{eventType: msg.Event, text: deltaStr, seq: msg.Seq})
+			a.chunks = append(a.chunks, deltaChunk{eventType: ev.Event, text: deltaStr, itemID: itemID})
 		}
 		a.totalBytes += len(deltaStr)
 		overflow = a.totalBytes >= deltaBatchMaxPendingBytes
@@ -189,19 +192,20 @@ func (d *DeltaBatcher) emit(a *deltaAccum) {
 		if c.text == "" {
 			continue
 		}
-		msg := EventMessage{
-			Type:      "event",
-			SessionID: a.sessionID,
-			BackendID: a.backendID,
-			Event:     c.eventType,
-			Data:      map[string]interface{}{"delta": c.text},
-			Seq:       c.seq,
+		data := map[string]interface{}{"delta": c.text}
+		if c.itemID != "" {
+			data["itemId"] = c.itemID
 		}
-		d.sender.Send(BroadcastEvent{
-			BackendID: a.backendID,
-			SessionID: a.sessionID,
-			Directory: a.directory,
-			Message:   msg,
+		d.sender.PublishLogical(LogicalEvent{
+			BackendID:   a.backendID,
+			SessionID:   a.sessionID,
+			Directory:   a.directory,
+			Event:       c.eventType,
+			Data:        data,
+			Broadcast:   a.broadcast,
+			Targets:     a.targets,
+			WaitTargets: a.waitTargets,
+			Offline:     a.offline,
 		})
 	}
 	slog.Debug("go-bridge: delta batch emitted",
@@ -215,6 +219,18 @@ func extractDeltaText(data interface{}) string {
 		return ""
 	}
 	if s, ok := m["delta"].(string); ok {
+		return s
+	}
+	return ""
+}
+
+// extractDeltaItemID keeps projection attribution across the batch window.
+func extractDeltaItemID(data interface{}) string {
+	m, ok := data.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	if s, ok := m["itemId"].(string); ok {
 		return s
 	}
 	return ""

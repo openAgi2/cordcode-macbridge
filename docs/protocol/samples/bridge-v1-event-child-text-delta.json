@@ -1,0 +1,11 @@
+{
+  "type": "event",
+  "event": "text_delta",
+  "sessionId": "session-fixture",
+  "data": {
+    "itemId": "child-item-1",
+    "delta": "sanitized child output",
+    "streamId": "child-stream-1",
+    "parentStreamId": null
+  }
+}

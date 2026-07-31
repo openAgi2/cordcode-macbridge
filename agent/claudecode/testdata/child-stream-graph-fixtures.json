@@ -1,0 +1,7 @@
+[
+  {"name":"single-child","records":[{"uuid":"m1","toolUseId":"task-1","toolName":"Agent"},{"uuid":"m2","toolUseId":"task-1","resultAgentIds":["a1"]},{"uuid":"c1","agentId":"a1","isSidechain":true}]},
+  {"name":"concurrent-children","records":[{"uuid":"m1","toolUseId":"task-1","toolName":"Agent"},{"uuid":"m1","toolUseId":"task-2","toolName":"Agent"},{"uuid":"m2","toolUseId":"task-1","resultAgentIds":["a1"]},{"uuid":"m3","toolUseId":"task-2","resultAgentIds":["a2"]},{"uuid":"c1","agentId":"a1","isSidechain":true},{"uuid":"c2","agentId":"a2","isSidechain":true}]},
+  {"name":"nested-child","records":[{"uuid":"m1","toolUseId":"task-1","toolName":"Agent"},{"uuid":"m2","toolUseId":"task-1","resultAgentIds":["a1"]},{"uuid":"c1","agentId":"a1","isSidechain":true,"toolUseId":"task-2","toolName":"Agent"},{"uuid":"c2","agentId":"a1","isSidechain":true,"toolUseId":"task-2","resultAgentIds":["a2"]},{"uuid":"g1","agentId":"a2","isSidechain":true}]},
+  {"name":"failed-or-cancelled-child","records":[{"uuid":"m1","toolUseId":"task-failed","toolName":"Task"},{"uuid":"m2","toolUseId":"task-failed","resultAgentIds":["failed-agent"]},{"uuid":"c1","agentId":"failed-agent","isSidechain":true}]},
+  {"name":"resume-history-drain-out-of-order","records":[{"uuid":"c1","agentId":"resume-agent","isSidechain":true},{"uuid":"m2","toolUseId":"task-resume","resultAgentIds":["resume-agent"]},{"uuid":"m1","toolUseId":"task-resume","toolName":"Agent"}]}
+]

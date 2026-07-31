@@ -24,6 +24,10 @@ func newTestRelayEventRouter() *RelayEventRouter {
 	return router
 }
 
+func testStampedEvent(sessionID, backendID, event string, data interface{}) EventMessage {
+	return EventMessage{Type: "event", EventID: "test-epoch:1", Seq: 1, BridgeEpoch: "test-epoch", SessionID: sessionID, BackendID: backendID, Event: event, Data: data, Timestamp: 1}
+}
+
 // TestOfflineIntegrationDurableMilestoneQueued 验证 durable milestone 被队列化到离线设备。
 func TestOfflineIntegrationDurableMilestoneQueued(t *testing.T) {
 	router := newTestRelayEventRouter()
@@ -44,8 +48,7 @@ func TestOfflineIntegrationDurableMilestoneQueued(t *testing.T) {
 	})
 
 	// 路由 durable milestone
-	router.RouteEvent("sess_1", "codex", "turn_completed",
-		map[string]interface{}{"done": true},
+	router.RouteStampedEvent(testStampedEvent("sess_1", "codex", "turn_completed", map[string]interface{}{"done": true}),
 		[]string{},         // 无在线设备
 		[]string{deviceID}, // 1 个离线设备
 	)
@@ -71,8 +74,7 @@ func TestOfflineIntegrationNonDurableNotQueued(t *testing.T) {
 	deviceID := "dev_offline_2"
 
 	// 路由非 durable 事件
-	router.RouteEvent("sess_1", "codex", "text_delta",
-		map[string]interface{}{"delta": "hello"},
+	router.RouteStampedEvent(testStampedEvent("sess_1", "codex", "text_delta", map[string]interface{}{"delta": "hello"}),
 		[]string{},
 		[]string{deviceID},
 	)
@@ -93,8 +95,7 @@ func TestOfflineIntegrationPrekeyExhaustionMarksPendingSync(t *testing.T) {
 	router.prekeys.SetIdentityAuthKeyFactory(testIdentityAuthKeyFactory(make([]byte, 32)))
 
 	// 不上传任何 prekey，直接路由 durable milestone
-	router.RouteEvent("sess_1", "codex", "turn_completed",
-		map[string]interface{}{"done": true},
+	router.RouteStampedEvent(testStampedEvent("sess_1", "codex", "turn_completed", map[string]interface{}{"done": true}),
 		[]string{},
 		[]string{deviceID},
 	)

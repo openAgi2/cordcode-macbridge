@@ -47,17 +47,23 @@ func newExtractor(backend Backend) SpanExtractor {
 // OpenToolUses count that the three result variants decrement.
 
 type codexSpanExtractor struct {
-	spans   []LogicalMessageSpan
-	current *LogicalMessageSpan
-	ordinal int64
+	spans              []LogicalMessageSpan
+	current            *LogicalMessageSpan
+	ordinal            int64
+	turnStartOffset    int64
+	hasTurnStartOffset bool
 }
 
 // ensureCurrent starts or extends the open assistant entry.
 func (x *codexSpanExtractor) ensureCurrent(rec Record) {
 	if x.current == nil {
+		replayStart := rec.Start
+		if x.hasTurnStartOffset {
+			replayStart = x.turnStartOffset
+		}
 		x.current = &LogicalMessageSpan{
 			Ordinal:     x.ordinal,
-			ReplayStart: rec.Start,
+			ReplayStart: replayStart,
 			EndOffset:   rec.End,
 		}
 		x.ordinal++
@@ -104,9 +110,9 @@ func (x *codexSpanExtractor) closeTool(rec Record) {
 }
 
 type codexResponseItem struct {
-	Role    string `json:"role"`
-	Type    string `json:"type"`
-	Name    string `json:"name"`
+	Role    string   `json:"role"`
+	Type    string   `json:"type"`
+	Name    string   `json:"name"`
 	Text    string   `json:"text"`
 	Summary []string `json:"summary"`
 	Content []struct {
@@ -125,7 +131,18 @@ func (x *codexSpanExtractor) Process(rec Record) {
 	}
 
 	if envelope.Type == "event_msg" {
-		if codexEventIsPatchApplyEnd(envelope.Payload) {
+		switch codexEventPayloadType(envelope.Payload) {
+		case "task_started":
+			x.flush()
+			x.turnStartOffset = rec.Start
+			x.hasTurnStartOffset = true
+		case "task_complete":
+			if x.current != nil && rec.End > x.current.EndOffset {
+				x.current.EndOffset = rec.End
+			}
+			x.flush()
+			x.hasTurnStartOffset = false
+		case "patch_apply_end":
 			x.closeTool(rec)
 		}
 		return
@@ -232,21 +249,21 @@ func codexIsUserPrompt(text string) bool {
 	return true
 }
 
-// codexEventIsPatchApplyEnd reports whether an event_msg payload is a Codex
-// patch_apply_end, mirroring the builder's nested-payload handling.
-func codexEventIsPatchApplyEnd(payload json.RawMessage) bool {
+// codexEventPayloadType returns the normalized event_msg payload type,
+// mirroring the builder's nested-payload handling.
+func codexEventPayloadType(payload json.RawMessage) string {
 	var envelope map[string]any
 	if json.Unmarshal(payload, &envelope) != nil {
-		return false
+		return ""
 	}
 	p := envelope
 	if nested, ok := envelope["payload"].(map[string]any); ok {
 		p = nested
 	}
 	if s, ok := p["type"].(string); ok {
-		return strings.TrimSpace(s) == "patch_apply_end"
+		return strings.TrimSpace(s)
 	}
-	return false
+	return ""
 }
 
 // ── Claude ───────────────────────────────────────────────────────────────────
@@ -301,11 +318,28 @@ func (x *claudeSpanExtractor) assistantSpan(msgID string, rec Record) *LogicalMe
 
 func (x *claudeSpanExtractor) Process(rec Record) {
 	var env struct {
-		Type    string          `json:"type"`
-		Message json.RawMessage `json:"message"`
-		IsMeta  bool            `json:"isMeta"`
+		Type                      string          `json:"type"`
+		Subtype                   string          `json:"subtype"`
+		UUID                      string          `json:"uuid"`
+		Message                   json.RawMessage `json:"message"`
+		IsMeta                    bool            `json:"isMeta"`
+		IsCompactSummary          bool            `json:"isCompactSummary"`
+		IsVisibleInTranscriptOnly bool            `json:"isVisibleInTranscriptOnly"`
 	}
 	if json.Unmarshal(rec.Bytes, &env) != nil {
+		return
+	}
+	if env.Type == "system" && env.Subtype == "compact_boundary" {
+		x.spans = append(x.spans, &LogicalMessageSpan{
+			Ordinal:     x.ordinal,
+			StableID:    strings.TrimSpace(env.UUID),
+			ReplayStart: rec.Start,
+			EndOffset:   rec.End,
+		})
+		x.ordinal++
+		return
+	}
+	if env.IsCompactSummary || env.IsVisibleInTranscriptOnly {
 		return
 	}
 	if env.Type != "user" && env.Type != "assistant" {

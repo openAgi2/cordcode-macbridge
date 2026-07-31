@@ -8,6 +8,19 @@
 
 ## [Unreleased]
 
+### 2026-07-31 — 修复 iOS/web 端 Claude 已完成 session 重开时消息重复出现两次
+
+- Claude session 经 cold hydrate 重建投影时，不再把上一份投影（live 的 row-UUID turn）作为 baseline 叠加在 rich-history builder 重放之上。此前两套 turn-id 方案（live row-UUID 与 builder `user-line-N`）无法归并，同一份内容在两个 id 下各落一个 turn 并写进 checkpoint，重开经 AlreadyReady 直接返回这份陈旧重复，表现为「切走再切回仍重复两次」。Mac 端渲染本就不消费该投影，故一直正常。
+- pathless rich-history 后端（Claude/OpenCode）现在恒从空 reducer 开始，builder 重放是唯一 baseline；Codex 文件型 pathless 维持原有内存 carry 不变。
+- bump checkpoint schema 4→5，所有已污染 checkpoint 下次重开自动作废重建，历史重复自愈。
+
+### 2026-07-22 — Codex 外部任务保留稳定 turn 身份与真实完成边界
+
+- Codex rollout 的 `task_started.turn_id` 现在贯穿 `turn_started`、内容增量、`turn_completed` 与 rich history；客户端可按同一身份增量归并一轮任务。
+- Codex rollout 写入外部用户问题时会发送 `user_message`，携带 response-item 的稳定消息 ID 与当前 turn ID；客户端不再需要等 history reconcile 才能显示 Mac 端输入。
+- 读取仍在写入的 rollout 到达 EOF 时不再伪造完成时间或把最后一段过程提升为最终回答；只有源文件出现 `task_complete` 才建立完成边界。
+- transcript 分页索引把 `task_started` / `task_complete` 纳入同一 span，分页 replay 不会丢失身份与终态证据。
+
 ### 2026-07-15 — 修复首页安全连接状态停留在暂不可用
 
 - 首页首次读取 Relay 状态遇到启动期短暂失败时，会在三秒后自动重新读取一次；读取成功后立即显示真实状态。

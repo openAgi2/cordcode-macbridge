@@ -33,12 +33,12 @@ const tlsPinRotationWindow = 14 * 24 * time.Hour
 //   - Generation 单调递增，iOS 端 BridgeTLSPinMath.validate(generationAgainst:) 据此拒绝降级。
 //   - PreviousSPKIBase64 / PreviousValidUntil 仅在轮换窗口内非空；窗口结束后 iOS 拒绝 previous。
 type storedTLSCert struct {
-	DER                  []byte     `json:"der"`                    // leaf 证书 DER
-	PrivateKeyPKCS8      []byte     `json:"privateKeyPkcs8"`        // PKCS#8 私钥
-	Generation           uint64     `json:"generation"`             // 单调递增
-	PreviousSPKIBase64   string     `json:"previousSpki,omitempty"` // 轮换窗口内的旧 pin
-	PreviousValidUntil   *time.Time `json:"previousValidUntil,omitempty"`
-	NotAfter             time.Time  `json:"notAfter"` // 证书有效期，用于检测过期触发轮换
+	DER                []byte     `json:"der"`                    // leaf 证书 DER
+	PrivateKeyPKCS8    []byte     `json:"privateKeyPkcs8"`        // PKCS#8 私钥
+	Generation         uint64     `json:"generation"`             // 单调递增
+	PreviousSPKIBase64 string     `json:"previousSpki,omitempty"` // 轮换窗口内的旧 pin
+	PreviousValidUntil *time.Time `json:"previousValidUntil,omitempty"`
+	NotAfter           time.Time  `json:"notAfter"` // 证书有效期，用于检测过期触发轮换
 }
 
 // tlsCertPath 返回 <dataDir>/tls-cert.json 的完整路径。
@@ -160,10 +160,10 @@ func RotateTLSCert(dataDir *DataDir, hosts ...string) (*tls.Certificate, *Bridge
 	}
 
 	pin := &BridgeV1TLSPin{
-		Algorithm:       TLSPinAlgorithm,
-		Value:           newSPI,
-		Generation:      nextGen,
-		PreviousValue:   prevSPKI,
+		Algorithm:     TLSPinAlgorithm,
+		Value:         newSPI,
+		Generation:    nextGen,
+		PreviousValue: prevSPKI,
 	}
 	if prevValidUntil != nil {
 		pin.PreviousValidUntilMillis = prevValidUntil.UnixMilli()
@@ -183,11 +183,13 @@ func RotateTLSCert(dataDir *DataDir, hosts ...string) (*tls.Certificate, *Bridge
 // ComputeSPKIPin 计算一张 DER 证书的 sha256-spki pin。
 //
 // 口径（必须与 iOS 端 BridgeTLSPinMath + OpenSSL 对齐）：
-//   base64(SHA256(SubjectPublicKeyInfo DER))
+//
+//	base64(SHA256(SubjectPublicKeyInfo DER))
 //
 // 等价 OpenSSL：
-//   openssl x509 -pubkey -noout | openssl pkey -pubin -outform DER \
-//     | openssl dgst -sha256 -binary | base64
+//
+//	openssl x509 -pubkey -noout | openssl pkey -pubin -outform DER \
+//	  | openssl dgst -sha256 -binary | base64
 //
 // Go 端用 x509.MarshalPKIXPublicKey(pubkey) 产出与 OpenSSL `-outform DER` 相同的 SPKI DER。
 func ComputeSPKIPin(derCert []byte) (string, error) {

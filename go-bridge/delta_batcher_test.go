@@ -8,72 +8,49 @@ import (
 
 // captureSender 记录所有 Send 调用，供 DeltaBatcher 测试断言帧数与顺序。
 type captureSender struct {
-	mu      sync.Mutex
-	events  []EventMessage
-	full    []BroadcastEvent // 完整 BroadcastEvent（含 backend/session/dir）
+	mu     sync.Mutex
+	events []LogicalEvent
 }
 
-func (c *captureSender) Send(ev BroadcastEvent) {
+func (c *captureSender) PublishLogical(ev LogicalEvent) EventMessage {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if msg, ok := ev.Message.(EventMessage); ok {
-		c.events = append(c.events, msg)
-	}
-	c.full = append(c.full, ev)
+	c.events = append(c.events, ev)
+	return EventMessage{Event: ev.Event, BackendID: ev.BackendID, SessionID: ev.SessionID, Data: ev.Data}
 }
 
-func (c *captureSender) snapshot() ([]EventMessage, []BroadcastEvent) {
+func (c *captureSender) snapshot() ([]LogicalEvent, []LogicalEvent) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	evs := make([]EventMessage, len(c.events))
+	evs := make([]LogicalEvent, len(c.events))
 	copy(evs, c.events)
-	full := make([]BroadcastEvent, len(c.full))
-	copy(full, c.full)
-	return evs, full
+	return evs, evs
 }
 
-func textDeltaEvent(backend, session, delta string, seq int) BroadcastEvent {
-	return BroadcastEvent{
+func textDeltaEvent(backend, session, delta string, _ int) LogicalEvent {
+	return LogicalEvent{
 		BackendID: backend,
 		SessionID: session,
-		Message: EventMessage{
-			Type:      "event",
-			SessionID: session,
-			BackendID: backend,
-			Event:     "text_delta",
-			Data:      map[string]interface{}{"delta": delta},
-			Seq:       seq,
-		},
+		Event:     "text_delta",
+		Data:      map[string]interface{}{"delta": delta},
 	}
 }
 
-func reasoningDeltaEvent(backend, session, delta string, seq int) BroadcastEvent {
-	return BroadcastEvent{
+func reasoningDeltaEvent(backend, session, delta string, _ int) LogicalEvent {
+	return LogicalEvent{
 		BackendID: backend,
 		SessionID: session,
-		Message: EventMessage{
-			Type:      "event",
-			SessionID: session,
-			BackendID: backend,
-			Event:     "reasoning_delta",
-			Data:      map[string]interface{}{"delta": delta},
-			Seq:       seq,
-		},
+		Event:     "reasoning_delta",
+		Data:      map[string]interface{}{"delta": delta},
 	}
 }
 
-func nonTextEvent(backend, session, event string, seq int) BroadcastEvent {
-	return BroadcastEvent{
+func nonTextEvent(backend, session, event string, _ int) LogicalEvent {
+	return LogicalEvent{
 		BackendID: backend,
 		SessionID: session,
-		Message: EventMessage{
-			Type:      "event",
-			SessionID: session,
-			BackendID: backend,
-			Event:     event,
-			Data:      map[string]interface{}{"foo": "bar"},
-			Seq:       seq,
-		},
+		Event:     event,
+		Data:      map[string]interface{}{"foo": "bar"},
 	}
 }
 
@@ -100,10 +77,8 @@ func TestDeltaBatchMergesConsecutiveTextDeltas(t *testing.T) {
 	if delta != "Hello, world!" {
 		t.Fatalf("merged delta = %q, want %q", delta, "Hello, world!")
 	}
-	// seq 用最后一个（单调递增）。
-	if evs[0].Seq != 4 {
-		t.Fatalf("merged seq = %d, want 4 (last)", evs[0].Seq)
-	}
+	// DeltaBatcher operates before stamping; EventPublisher assigns one new seq
+	// to the merged logical event.
 }
 
 // TestDeltaBatchFlushesOnControlEvent: text_delta 累积后，turn_completed 触发
@@ -221,7 +196,7 @@ func TestDeltaBatchTickerFlushesWithinWindow(t *testing.T) {
 	d.Send(textDeltaEvent("claude", "s1", "tick", 1))
 
 	// 等待 2 个 ticker 周期（~66ms）确保 flush 触发。
-	time.Sleep(2 * deltaBatchFlushInterval + 20*time.Millisecond)
+	time.Sleep(2*deltaBatchFlushInterval + 20*time.Millisecond)
 
 	evs, _ := capture.snapshot()
 	if len(evs) != 1 {
@@ -265,5 +240,78 @@ func TestDeltaBatchOverflowFlushesImmediately(t *testing.T) {
 	evs, _ := capture.snapshot()
 	if len(evs) < 1 {
 		t.Fatalf("overflow should have flushed at least 1 frame immediately, got %d", len(evs))
+	}
+}
+
+
+// TestDeltaBatchPreservesItemID: projection SoT attributes text_delta by itemId.
+// Batching must keep itemId on the merged frame; otherwise OpenCode/Claude live
+// content is skipped by ProjectionReducer and only turn_completed advances headRev.
+func TestDeltaBatchPreservesItemID(t *testing.T) {
+	capture := &captureSender{}
+	d := NewDeltaBatcher(capture)
+	defer d.Stop()
+
+	d.Send(LogicalEvent{
+		BackendID: "opencode",
+		SessionID: "ses_1",
+		Event:     "text_delta",
+		Data:      map[string]interface{}{"delta": "Hel", "itemId": "msg_user_1"},
+		Broadcast: true,
+	})
+	d.Send(LogicalEvent{
+		BackendID: "opencode",
+		SessionID: "ses_1",
+		Event:     "text_delta",
+		Data:      map[string]interface{}{"delta": "lo", "itemId": "msg_user_1"},
+		Broadcast: true,
+	})
+	d.FlushAll()
+
+	evs, _ := capture.snapshot()
+	if len(evs) != 1 {
+		t.Fatalf("expected 1 merged frame, got %d", len(evs))
+	}
+	data, _ := evs[0].Data.(map[string]interface{})
+	if data["delta"] != "Hello" {
+		t.Fatalf("delta = %#v, want Hello", data["delta"])
+	}
+	if data["itemId"] != "msg_user_1" {
+		t.Fatalf("itemId = %#v, want msg_user_1 (must survive batching)", data["itemId"])
+	}
+}
+
+// TestDeltaBatchDoesNotMergeAcrossItemIDs: different owning turns must not be
+// concatenated into one attribution-less or wrong-id frame.
+func TestDeltaBatchDoesNotMergeAcrossItemIDs(t *testing.T) {
+	capture := &captureSender{}
+	d := NewDeltaBatcher(capture)
+	defer d.Stop()
+
+	d.Send(LogicalEvent{
+		BackendID: "opencode",
+		SessionID: "ses_1",
+		Event:     "text_delta",
+		Data:      map[string]interface{}{"delta": "A", "itemId": "t1"},
+	})
+	d.Send(LogicalEvent{
+		BackendID: "opencode",
+		SessionID: "ses_1",
+		Event:     "text_delta",
+		Data:      map[string]interface{}{"delta": "B", "itemId": "t2"},
+	})
+	d.FlushAll()
+
+	evs, _ := capture.snapshot()
+	if len(evs) != 2 {
+		t.Fatalf("expected 2 frames for distinct itemIds, got %d", len(evs))
+	}
+	d0, _ := evs[0].Data.(map[string]interface{})
+	d1, _ := evs[1].Data.(map[string]interface{})
+	if d0["itemId"] != "t1" || d0["delta"] != "A" {
+		t.Fatalf("first = %#v", d0)
+	}
+	if d1["itemId"] != "t2" || d1["delta"] != "B" {
+		t.Fatalf("second = %#v", d1)
 	}
 }

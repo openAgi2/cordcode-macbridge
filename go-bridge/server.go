@@ -2,8 +2,10 @@ package gobridge
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -21,10 +23,13 @@ const (
 )
 
 // bridgeWriteTimeout 是所有客户端数据写（WriteJSON/WriteMessage）的写 deadline。
-// 用 var 而非 const：测试需要覆盖成短值（如 200ms）以避免等真实 10s。
-// 取值 10s：远大于正常单帧写（<5ms），远小于 TCP RTO（数十秒），
-// 既能快速发现半开坏连接，又不会误杀慢写。详见 docs/2026-06-17-bridge-hang-implementation-spec.md 坑 2。
-var bridgeWriteTimeout = 10 * time.Second
+// 用 var 而非 const：测试需要覆盖成短值（如 200ms）以避免等真实超时。
+//
+// 2026-07-25：从 10s 提到 60s。超大 Codex session 全量 get_session_messages 实测
+// response_bytes≈13MB、socket_send_ms≈10–14s，10s deadline 触发 consecutive write
+// errors → 断连 → iOS 永久「重新连接中」。大包仍应收敛到投影/分页主路径，但 deadline
+// 不能短于真实可写完时间。详见 go-bridge.log: too many write errors + socket_send_ms。
+var bridgeWriteTimeout = 60 * time.Second
 
 // Conn wraps a WebSocket connection with thread-safe writes.
 type Conn struct {
@@ -101,10 +106,17 @@ func newConn(ws *websocket.Conn) *Conn {
 }
 
 func (c *Conn) SendJSON(v interface{}) {
+	_ = c.SendJSONReport(v)
+}
+
+// SendJSONReport is the error-returning write used by K4 projection probes so
+// write_post can distinguish closed-conn / WriteJSON failure from real wire success.
+// Plain SendJSON swallows both (historical contract for broadcaster callers).
+func (c *Conn) SendJSONReport(v interface{}) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
-		return
+		return fmt.Errorf("connection closed")
 	}
 	// 写 deadline 必须在持 c.mu 的情况下紧贴 WriteJSON 调用（gorilla 不允许同 conn 并发写），
 	// 避免另一个写者在 deadline 与实际写之间插入。详见根治 spec 坑 1。
@@ -127,9 +139,10 @@ func (c *Conn) SendJSON(v interface{}) {
 				c.mu.Lock()
 			}
 		}
-	} else {
-		c.consecutiveWriteErrors = 0
+		return err
 	}
+	c.consecutiveWriteErrors = 0
+	return nil
 }
 
 func (c *Conn) SendResult(requestID string, data interface{}, err *WireError) {
@@ -145,16 +158,6 @@ func (c *Conn) SendResult(requestID string, data interface{}, err *WireError) {
 		resp["data"] = data
 	}
 	c.SendJSON(resp)
-}
-
-func (c *Conn) SendEvent(sessionID, backendID, eventName string, data interface{}) {
-	c.SendJSON(EventMessage{
-		Type:      "event",
-		SessionID: sessionID,
-		BackendID: backendID,
-		Event:     eventName,
-		Data:      data,
-	})
 }
 
 func (c *Conn) Close() error {
@@ -189,17 +192,73 @@ func (c *Conn) CloseWithControl(code int, reason string) error {
 
 // Server manages WebSocket connections.
 type Server struct {
-	authMiddleware     *AuthMiddleware
-	handlers           *Handlers
-	activeConns        *ActiveConnRegistry
-	bridgeID           string
-	displayName        string
-	runtimeVersion     string
-	localURL           string
-	remoteURL          string
-	remoteURLs         []string
-	localCandidateURLs []string
-	detectionCfg       *AgentDetectionConfig
+	authMiddleware       *AuthMiddleware
+	handlers             *Handlers
+	activeConns          *ActiveConnRegistry
+	bridgeID             string
+	displayName          string
+	runtimeVersion       string
+	localURL             string
+	remoteURL            string
+	remoteURLs           []string
+	localCandidateURLs   []string
+	detectionCfg         *AgentDetectionConfig
+	bridgeEpoch          string
+	eventPublisher       *EventPublisher
+	recoveryEnabled      bool
+	sessionSyncV2Enabled bool
+}
+
+// K3 enables the Codex-only shadow data plane. The client still owns UI with legacy history;
+// this flag only permits capability negotiation when a shadow client explicitly opts in.
+const sessionSyncV2ProductionEnabled = true
+
+func (s *Server) SetRecoveryEnabled(enabled bool) { s.recoveryEnabled = enabled }
+
+// SetSessionSyncV2Enabled gates the session_sync_v2 capability advertisement
+// (Session Projection Stream). When true and the client opts in via hello
+// capabilities, hello_ack echoes capabilities["session_sync_v2"]=true. See
+// docs/protocol/bridge-v1.md「Session Projection Stream」.
+func (s *Server) SetSessionSyncV2Enabled(enabled bool) { s.sessionSyncV2Enabled = enabled }
+
+// helloSupportsSessionSyncV2 returns true when the client advertised the
+// session_sync_v2 capability in hello (same shape as helloSupportsRecovery).
+func helloSupportsSessionSyncV2(hello *HelloMessage) bool {
+	for _, capability := range hello.Capabilities {
+		if capability == "session_sync_v2" {
+			return true
+		}
+	}
+	return false
+}
+
+func appendUniqueCapability(capabilities []string, capability string) []string {
+	for _, existing := range capabilities {
+		if existing == capability {
+			return capabilities
+		}
+	}
+	return append(capabilities, capability)
+}
+
+// advertiseSessionSyncV2Backend scopes ownership capability to migrated backends. The global
+// hello_ack capability only confirms transport negotiation; clients decide timeline ownership
+// from the selected backend descriptor.
+func advertiseSessionSyncV2Backend(backends []AgentProviderDescriptor) {
+	for i := range backends {
+		id := backends[i].ID
+		kind := backends[i].Kind
+	// Per-backend migration (design §4 / K5): only backends with a projection hydrate
+		// producer advertise ownership capability.
+		if id == "codex" || kind == "codex" ||
+			id == "claude" || id == "claudecode" || kind == "claude_code" || kind == "claude" ||
+			id == "opencode" || kind == "opencode" {
+			backends[i].Capabilities = appendUniqueCapability(
+				backends[i].Capabilities,
+				"session_sync_v2",
+			)
+		}
+	}
 }
 
 // SetAuthMiddleware 设置认证中间件，nil 表示不启用认证。
@@ -229,7 +288,30 @@ func (s *Server) SetDetectionConfig(cfg *AgentDetectionConfig) {
 }
 
 func NewServer(handlers *Handlers) *Server {
-	return &Server{handlers: handlers, activeConns: NewActiveConnRegistry()}
+	epoch, err := generateBridgeEpoch()
+	if err != nil {
+		panic(err)
+	}
+	return NewServerWithEpoch(handlers, epoch)
+}
+
+func NewServerWithEpoch(handlers *Handlers, bridgeEpoch string) *Server {
+	if bridgeEpoch == "" {
+		panic("bridge epoch must not be empty")
+	}
+	if handlers == nil {
+		panic("handlers must not be nil")
+	}
+	if handlers.eventPublisher == nil || handlers.eventPublisher.BridgeEpoch() != bridgeEpoch {
+		handlers.installEventPublisher(NewEventPublisher(bridgeEpoch, handlers.broadcaster))
+	}
+	globalDeviceConnRegistry.SetEventPublisher(handlers.eventPublisher)
+	return &Server{
+		handlers:       handlers,
+		activeConns:    NewActiveConnRegistry(),
+		bridgeEpoch:    bridgeEpoch,
+		eventPublisher: handlers.eventPublisher,
+	}
 }
 
 func (s *Server) CloseAllConnections(reason string) int {
@@ -282,7 +364,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 连接会被关闭但不会从 active registry 移除。
 	conn.mu.Lock()
 	conn.onCleanup = func() {
-		s.handlers.broadcaster.UnsubscribeAll(directConnection)
+		s.handlers.unregisterConnection(directConnection)
 		if authedDevice != nil {
 			globalDeviceConnRegistry.Unregister(authedDevice.DeviceID, conn)
 		}
@@ -295,7 +377,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.activeConns != nil {
 		s.activeConns.Register(conn)
 	}
-	s.handlers.broadcaster.RegisterConn(directConnection)
+	s.handlers.registerConnection(directConnection)
 
 	slog.Info("go-bridge: client connected", "remote", conn.remote)
 
@@ -363,7 +445,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case "register":
 			s.handleRegister(conn, &msg)
 		case "hello":
-			s.handleHello(conn, &msg)
+			s.handleHello(conn, directConnection, &msg)
 		case "request":
 			// Long-running RPCs (e.g. grokbuild StartSession: spawn CLI +
 			// initialize/auth/load) must not block the WebSocket read loop.
@@ -371,6 +453,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// ("RPC 超时（30s）") while send_message is still starting the agent.
 			msgCopy := msg
 			go s.handlers.HandleRPC(directConnection, msgCopy)
+		case "recovery_applied":
+			if err := s.eventPublisher.CompleteRecovery(directConnection, msg.RecoveryID, msg.AppliedThroughBySession); err != nil {
+				slog.Warn("go-bridge: recovery acknowledgement rejected", "remote", conn.remote, "error", err)
+			}
 		case "ping":
 			conn.SendJSON(map[string]string{"type": "pong"})
 		default:
@@ -389,7 +475,7 @@ func (s *Server) handleRegister(conn *Conn, msg *WireMessage) {
 		"ok":          true,
 		"protocol":    map[string]interface{}{"name": BridgeProtocolName, "version": BridgeProtocolVersion, "schemaRevision": BridgeProtocolSchemaRevision},
 		"backends":    backends,
-		"bridgeEpoch": fmtEpoch(),
+		"bridgeEpoch": s.bridgeEpoch,
 	}
 	conn.SendJSON(ackPayload)
 
@@ -397,7 +483,7 @@ func (s *Server) handleRegister(conn *Conn, msg *WireMessage) {
 	slog.Info("go-bridge: register_ack sent", "payload", string(ackJSON))
 }
 
-func (s *Server) handleHello(conn *Conn, msg *WireMessage) {
+func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage) {
 	if conn.revoked {
 		conn.SendJSON(map[string]interface{}{
 			"type": "hello_ack",
@@ -418,6 +504,10 @@ func (s *Server) handleHello(conn *Conn, msg *WireMessage) {
 		slog.Warn("go-bridge: hello protocol parse error", "error", err)
 	}
 	hello.Type = msg.Type
+	hello.Capabilities = msg.Capabilities
+	hello.LastBridgeEpoch = msg.LastBridgeEpoch
+	hello.LastEventID = msg.LastEventID
+	hello.LastSeenBySession = msg.LastSeenBySession
 
 	codexMode := ""
 	var agents map[string]core.Agent
@@ -441,13 +531,99 @@ func (s *Server) handleHello(conn *Conn, msg *WireMessage) {
 		s.detectionCfg,
 		s.handlers.sessions,
 	)
+	ack.BridgeEpoch = s.bridgeEpoch
+	var replay []EventMessage
+	if s.recoveryEnabled && helloSupportsRecovery(&hello) && ack.Ok {
+		plan, events, err := s.prepareRecovery(connection, &hello)
+		if err != nil {
+			slog.Warn("go-bridge: recovery preparation failed", "remote", conn.remote, "error", err)
+			_ = conn.Close()
+			return
+		}
+		ack.Recovery = plan
+		ack.Capabilities["recovery_v1"] = true
+		replay = events
+	}
+	if s.sessionSyncV2Enabled && helloSupportsSessionSyncV2(&hello) && ack.Ok {
+		ack.Capabilities["session_sync_v2"] = true
+		advertiseSessionSyncV2Backend(ack.Backends)
+		s.eventPublisher.SetConnSyncV2(connection, true)
+	}
 	conn.SendJSON(ack)
+	if ack.Recovery != nil {
+		s.emitRecoveryFrames(connection, ack.Recovery, replay)
+	}
 
 	slog.Info("go-bridge: hello_ack sent", "ok", ack.Ok, "device", hello.Client.DeviceID)
 }
 
-func fmtEpoch() string {
-	return time.Now().Format("20060102-150405")
+func helloSupportsRecovery(hello *HelloMessage) bool {
+	for _, capability := range hello.Capabilities {
+		if capability == "recovery_v1" {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) prepareRecovery(conn Connection, hello *HelloMessage) (*BridgeRecoveryPlan, []EventMessage, error) {
+	recoveryID, err := generateBridgeEpoch()
+	if err != nil {
+		return nil, nil, err
+	}
+	cuts := make(BridgeSessionCutMap)
+	affected := make([]BridgeAffectedSession, 0)
+	replay := make([]EventMessage, 0)
+	mode := "replay"
+	for backendID, sessions := range hello.LastSeenBySession {
+		if cuts[backendID] == nil {
+			cuts[backendID] = make(map[string]BridgeSessionCut)
+		}
+		for sessionID, cursor := range sessions {
+			affected = append(affected, BridgeAffectedSession{BackendID: backendID, SessionID: sessionID})
+			if hello.LastBridgeEpoch != s.bridgeEpoch {
+				if latest, ok := s.eventPublisher.EventBuffer().LatestCut(backendID, sessionID); ok {
+					cuts[backendID][sessionID] = latest
+				} else {
+					cuts[backendID][sessionID] = BridgeSessionCut{EventID: fmt.Sprintf("%s:0", s.bridgeEpoch)}
+				}
+				mode = "full_resync"
+				continue
+			}
+			result := s.eventPublisher.EventBuffer().Replay(backendID, sessionID, cursor)
+			cuts[backendID][sessionID] = result.Through
+			if result.Disposition == ReplaySnapshotRequired {
+				mode = "snapshot_required"
+			} else {
+				replay = append(replay, result.Events...)
+			}
+		}
+	}
+	if hello.LastBridgeEpoch != s.bridgeEpoch {
+		mode = "full_resync"
+	}
+	if _, err := s.eventPublisher.BeginRecovery(conn, recoveryID, cuts); err != nil {
+		return nil, nil, err
+	}
+	sort.Slice(replay, func(i, j int) bool { return replay[i].Seq < replay[j].Seq })
+	plan := &BridgeRecoveryPlan{RecoveryID: recoveryID, Mode: mode}
+	if mode == "replay" {
+		plan.ReplayThroughBySession = cuts
+	} else {
+		plan.AffectedSessions = affected
+		plan.CutBySession = cuts
+		replay = nil
+	}
+	return plan, replay, nil
+}
+
+func (s *Server) emitRecoveryFrames(conn Connection, plan *BridgeRecoveryPlan, replay []EventMessage) {
+	for _, event := range replay {
+		_ = s.eventPublisher.EnqueueControl(conn, event, true)
+	}
+	if plan.Mode == "replay" {
+		_ = s.eventPublisher.EnqueueControl(conn, map[string]interface{}{"type": "recovery_barrier", "recoveryId": plan.RecoveryID, "replayThroughBySession": plan.ReplayThroughBySession}, true)
+	}
 }
 
 // authErrorJSON 将认证错误以 HTTP 401 JSON 响应返回，不升级 WebSocket。

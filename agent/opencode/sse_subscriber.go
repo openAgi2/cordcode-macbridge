@@ -40,6 +40,12 @@ type sseSubscriber struct {
 	partKinds    map[string]string
 	partContent  map[string]string
 	completed    map[string]bool
+	activeTurns  map[string]string // sessionID -> owning user/message turn id
+	// userPrompts accumulates the live user prompt text for a message id so bare
+	// message.updated (role=user, no parts) + later part.delta/updated still become
+	// one projection user_message. userTurnStarted de-dupes turn_started.
+	userPrompts     map[string]string // messageID -> full prompt text so far
+	userTurnStarted map[string]bool   // messageID -> turn_started already emitted
 
 	// sessionFilter (active mode): when filterActive is true, emit drops any
 	// event whose SessionID != sessionFilter. Lock-free via atomics so emit
@@ -67,7 +73,10 @@ func newSSESubscriber(ctx context.Context, a *Agent) *sseSubscriber {
 		messageIDs:   make(map[string]string),
 		partKinds:    make(map[string]string),
 		partContent:  make(map[string]string),
-		completed:    make(map[string]bool),
+		completed:       make(map[string]bool),
+		activeTurns:     make(map[string]string),
+		userPrompts:     make(map[string]string),
+		userTurnStarted: make(map[string]bool),
 	}
 }
 
@@ -245,9 +254,10 @@ func (s *sseSubscriber) handleText(raw map[string]any, sessionID string) {
 	if part == nil {
 		return
 	}
-	text, _ := part["text"].(string)
-	if text != "" {
-		s.emit(core.Event{Type: core.EventText, Content: text, SessionID: sessionID})
+	textVal, _ := part["text"].(string)
+	if textVal != "" {
+		turnID := s.activeTurn(sessionID)
+		s.emit(core.Event{Type: core.EventText, Content: textVal, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
 	}
 }
 
@@ -256,9 +266,10 @@ func (s *sseSubscriber) handleReasoning(raw map[string]any, sessionID string) {
 	if part == nil {
 		return
 	}
-	text, _ := part["text"].(string)
-	if text != "" {
-		s.emit(core.Event{Type: core.EventThinking, Content: text, SessionID: sessionID})
+	textVal, _ := part["text"].(string)
+	if textVal != "" {
+		turnID := s.activeTurn(sessionID)
+		s.emit(core.Event{Type: core.EventThinking, Content: textVal, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
 	}
 }
 
@@ -306,8 +317,10 @@ func (s *sseSubscriber) handleStepFinish(raw map[string]any, sessionID string) {
 	reason, _ := part["reason"].(string)
 	slog.Debug("opencode SSE subscriber: step finished", "reason", reason, "session", sessionID)
 
-	// step_finish 表示一次 turn 完成
-	s.emit(core.Event{Type: core.EventResult, SessionID: sessionID, Done: true})
+	// Multi-step agent loops emit step_finish after each tool/assistant step, not only at
+	// the true turn boundary. Emitting EventResult here prematurely sets projection
+	// execution.phase=idle (composer 完成态) while tools/next steps continue. Turn
+	// completion is owned solely by session.status/session.updated idle below.
 }
 
 func (s *sseSubscriber) handleError(raw map[string]any, sessionID string) {
@@ -337,6 +350,26 @@ func (s *sseSubscriber) handleSSEMessageUpdated(properties map[string]any, sessi
 	}
 	if sessionID != "" && role == "user" {
 		s.resetCompletion(sessionID)
+		if messageID != "" {
+			// Bare role/id still arms activeTurn for later assistant attribution.
+			s.setActiveTurn(sessionID, messageID)
+			userText := ""
+			for _, part := range extractMessageParts(info) {
+				if firstString(part, "type") == "text" {
+					if chunk := firstString(part, "text", "content", "initial"); chunk != "" {
+						if userText != "" {
+							userText += "\n"
+						}
+						userText += chunk
+					}
+				}
+			}
+			// Snapshot text (if any) becomes the projection user bubble. Bare updates
+			// wait for part.delta/updated — those paths call noteUserPrompt too.
+			if strings.TrimSpace(userText) != "" {
+				s.noteUserPrompt(sessionID, messageID, userText, false)
+			}
+		}
 	}
 	if sessionID == "" || role != "assistant" {
 		return
@@ -356,7 +389,8 @@ func (s *sseSubscriber) handleSSEMessageUpdated(properties map[string]any, sessi
 				if d.isComplete {
 					eventType = core.EventTextReplace
 				}
-				s.emit(core.Event{Type: eventType, Content: d.content, SessionID: sessionID})
+				turnID := s.owningTurnID(sessionID, messageID)
+				s.emit(core.Event{Type: eventType, Content: d.content, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
 			}
 		case "reasoning":
 			text := firstString(part, "text", "content")
@@ -365,22 +399,21 @@ func (s *sseSubscriber) handleSSEMessageUpdated(properties map[string]any, sessi
 				if d.isComplete {
 					eventType = core.EventTextReplace
 				}
-				s.emit(core.Event{Type: eventType, Content: d.content, SessionID: sessionID})
+				turnID := s.owningTurnID(sessionID, messageID)
+				s.emit(core.Event{Type: eventType, Content: d.content, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
 			}
 		case "tool":
 			s.handleSSEToolPart(part, sessionID)
 		}
 	}
-	if isCompletedMessage(info) {
-		s.emitResultOnce(sessionID)
-	}
+	// Intentionally no emitResultOnce(isCompletedMessage): OpenCode multi-step turns
+	// mark each tool-bearing assistant message completed (time.completed) before the
+	// next step runs. Treating that as turn_completed flips execution.phase idle mid-turn
+	// (composer 完成态 during tools). True end-of-turn is session.status / session.updated idle.
 }
 
 func (s *sseSubscriber) handleSSEPartDelta(properties map[string]any, sessionID string) {
 	messageID := firstString(properties, "messageID", "messageId")
-	if s.isUserMessage(messageID) {
-		return
-	}
 	if sessionID == "" {
 		sessionID = s.sessionIDForMessage(messageID)
 	}
@@ -389,15 +422,25 @@ func (s *sseSubscriber) handleSSEPartDelta(properties map[string]any, sessionID 
 	if delta == "" {
 		return
 	}
+	// User prompt text often arrives ONLY as part.delta after a bare message.updated.
+	// Dropping it leaves projection turns with assistant text and no user bubble.
+	if s.isUserMessage(messageID) {
+		if field == "" || field == "text" {
+			s.noteUserPrompt(sessionID, messageID, delta, true)
+		}
+		return
+	}
 	partID := firstString(properties, "partID", "partId")
 	kind := s.kindForPart(sessionID, messageID, partID, field)
 	switch kind {
 	case "reasoning":
 		s.appendPartContent(sessionID, messageID, partID, kind, delta)
-		s.emit(core.Event{Type: core.EventThinking, Content: delta, SessionID: sessionID})
+		turnID := s.owningTurnID(sessionID, messageID)
+		s.emit(core.Event{Type: core.EventThinking, Content: delta, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
 	case "text", "":
 		s.appendPartContent(sessionID, messageID, partID, "text", delta)
-		s.emit(core.Event{Type: core.EventText, Content: delta, SessionID: sessionID})
+		turnID := s.owningTurnID(sessionID, messageID)
+		s.emit(core.Event{Type: core.EventText, Content: delta, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
 	default:
 		slog.Debug("opencode SSE subscriber: ignored part delta", "kind", kind, "field", field)
 	}
@@ -412,14 +455,21 @@ func (s *sseSubscriber) handleSSEPartUpdated(properties map[string]any, sessionI
 	if messageID == "" {
 		messageID = firstString(part, "messageID", "messageId")
 	}
-	if s.isUserMessage(messageID) {
-		return
-	}
 	if sessionID == "" {
 		sessionID = firstString(part, "sessionID", "sessionId")
 	}
 	if sessionID == "" {
 		sessionID = s.sessionIDForMessage(messageID)
+	}
+	if s.isUserMessage(messageID) {
+		kind := firstString(part, "type")
+		if kind == "" || kind == "text" {
+			text := firstString(part, "text", "content", "initial")
+			if strings.TrimSpace(text) != "" {
+				s.noteUserPrompt(sessionID, messageID, text, false)
+			}
+		}
+		return
 	}
 	partID := firstString(properties, "partID", "partId")
 	if partID == "" {
@@ -439,7 +489,8 @@ func (s *sseSubscriber) handleSSEPartUpdated(properties map[string]any, sessionI
 			if d.isComplete {
 				eventType = core.EventTextReplace
 			}
-			s.emit(core.Event{Type: eventType, Content: d.content, SessionID: sessionID})
+			turnID := s.owningTurnID(sessionID, messageID)
+			s.emit(core.Event{Type: eventType, Content: d.content, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
 		}
 	case "reasoning":
 		text := firstString(part, "text", "content")
@@ -448,7 +499,8 @@ func (s *sseSubscriber) handleSSEPartUpdated(properties map[string]any, sessionI
 			if d.isComplete {
 				eventType = core.EventTextReplace
 			}
-			s.emit(core.Event{Type: eventType, Content: d.content, SessionID: sessionID})
+			turnID := s.owningTurnID(sessionID, messageID)
+			s.emit(core.Event{Type: eventType, Content: d.content, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
 		}
 	case "tool":
 		s.handleSSEToolPart(part, sessionID)
@@ -562,6 +614,64 @@ func (s *sseSubscriber) handleSSEPermissionAsked(properties map[string]any, sess
 	})
 }
 
+// noteUserPrompt records user prompt text into the projection live stream.
+// isDelta=true appends (part.delta); false replaces/grows from a snapshot (message.updated
+// / part.updated). Emits EventUserMessage with the full accumulated text (reducer replaces
+// the user bubble) and EventTurnStarted once per message id.
+func (s *sseSubscriber) noteUserPrompt(sessionID, messageID, text string, isDelta bool) {
+	text = strings.TrimRight(text, "\r")
+	if sessionID == "" || messageID == "" || strings.TrimSpace(text) == "" {
+		return
+	}
+	s.setActiveTurn(sessionID, messageID)
+
+	s.stateMu.Lock()
+	if s.userPrompts == nil {
+		s.userPrompts = make(map[string]string)
+	}
+	if s.userTurnStarted == nil {
+		s.userTurnStarted = make(map[string]bool)
+	}
+	prev := s.userPrompts[messageID]
+	full := text
+	if isDelta {
+		full = prev + text
+	} else if prev != "" {
+		if text == prev {
+			s.stateMu.Unlock()
+			return
+		}
+		if strings.HasPrefix(text, prev) {
+			full = text
+		} else if strings.HasPrefix(prev, text) {
+			// Stale shorter snapshot — keep the longer prompt already seen.
+			s.stateMu.Unlock()
+			return
+		}
+	}
+	s.userPrompts[messageID] = full
+	startTurn := !s.userTurnStarted[messageID]
+	if startTurn {
+		s.userTurnStarted[messageID] = true
+	}
+	s.stateMu.Unlock()
+
+	s.emit(core.Event{
+		Type:      core.EventUserMessage,
+		Content:   full,
+		SessionID: sessionID,
+		TurnID:    messageID,
+		ItemID:    messageID,
+	})
+	if startTurn {
+		s.emit(core.Event{
+			Type:      core.EventTurnStarted,
+			SessionID: sessionID,
+			TurnID:    messageID,
+		})
+	}
+}
+
 func (s *sseSubscriber) isUserMessage(messageID string) bool {
 	if messageID == "" {
 		return false
@@ -587,14 +697,61 @@ func (s *sseSubscriber) emitResultOnce(sessionID string) {
 		return
 	}
 	s.completed[sessionID] = true
+	turnID := ""
+	if s.activeTurns != nil {
+		turnID = s.activeTurns[sessionID]
+	}
 	s.stateMu.Unlock()
-	s.emit(core.Event{Type: core.EventResult, SessionID: sessionID, Done: true})
+	s.emit(core.Event{Type: core.EventResult, SessionID: sessionID, Done: true, TurnID: turnID})
+	s.clearActiveTurn(sessionID)
 }
 
 func (s *sseSubscriber) resetCompletion(sessionID string) {
 	s.stateMu.Lock()
 	delete(s.completed, sessionID)
 	s.stateMu.Unlock()
+}
+
+func (s *sseSubscriber) setActiveTurn(sessionID, turnID string) {
+	if sessionID == "" || turnID == "" {
+		return
+	}
+	s.stateMu.Lock()
+	if s.activeTurns == nil {
+		s.activeTurns = make(map[string]string)
+	}
+	s.activeTurns[sessionID] = turnID
+	s.stateMu.Unlock()
+}
+
+func (s *sseSubscriber) activeTurn(sessionID string) string {
+	if sessionID == "" {
+		return ""
+	}
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	if s.activeTurns == nil {
+		return ""
+	}
+	return s.activeTurns[sessionID]
+}
+
+func (s *sseSubscriber) clearActiveTurn(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	s.stateMu.Lock()
+	if s.activeTurns != nil {
+		delete(s.activeTurns, sessionID)
+	}
+	s.stateMu.Unlock()
+}
+
+func (s *sseSubscriber) owningTurnID(sessionID, messageID string) string {
+	if turnID := s.activeTurn(sessionID); turnID != "" {
+		return turnID
+	}
+	return messageID
 }
 
 func (s *sseSubscriber) kindForPart(sessionID, messageID, partID, field string) string {

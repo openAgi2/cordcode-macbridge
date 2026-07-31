@@ -267,6 +267,32 @@ func TestOpenCodeAlwaysHasTodos(t *testing.T) {
 	}
 }
 
+// external_turn_streaming (refactor multi-client-streaming-sync Phase 1/2): declared for
+// backends whose external turns MacBridge now streams via push (file-relay content deltas).
+// codex/claude/claudecode 升级了 file-relay 推流；grokbuild 待 leader-socket；opencode 走 SSE。
+func TestExternalTurnStreamingCapability(t *testing.T) {
+	cases := []struct {
+		id   string
+		want bool
+	}{
+		{"codex", true},
+		{"claude", true},
+		{"claudecode", true},
+		{"grokbuild", false},
+		{"opencode", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.id, func(t *testing.T) {
+			agent := &fullFakeAgent{descriptorFakeAgent{name: tc.id}}
+			d := BuildAgentDescriptor(tc.id, agent, "exec", nil)
+			got := descriptorHasCapability(d.Capabilities, "external_turn_streaming")
+			if got != tc.want {
+				t.Fatalf("id=%s external_turn_streaming=%v want %v (caps=%v)", tc.id, got, tc.want, d.Capabilities)
+			}
+		})
+	}
+}
+
 func descriptorHasCapability(caps []string, target string) bool {
 	for _, cap := range caps {
 		if cap == target {

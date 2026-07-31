@@ -242,6 +242,28 @@ func TestClaudeToolResultExtendsOwner(t *testing.T) {
 	}
 }
 
+func TestClaudeCompactionBoundaryIsIndexedAndInternalSummaryIsNot(t *testing.T) {
+	lb := newLinesBuilder().
+		add("before", `{"type":"assistant","timestamp":"2026-07-29T08:16:00Z","message":{"id":"a1","role":"assistant","content":[{"type":"text","text":"before"}]}}`).
+		add("boundary", `{"type":"system","subtype":"compact_boundary","timestamp":"2026-07-29T08:17:51Z","uuid":"compact-1","compactMetadata":{"preTokens":169352,"postTokens":8605}}`).
+		add("summary", `{"type":"user","isVisibleInTranscriptOnly":true,"isCompactSummary":true,"timestamp":"2026-07-29T08:17:51Z","message":{"role":"user","content":"INTERNAL SUMMARY"}}`).
+		add("after", `{"type":"assistant","timestamp":"2026-07-29T08:18:00Z","message":{"id":"a2","role":"assistant","content":[{"type":"text","text":"after"}]}}`)
+	path := lb.write(t, t.TempDir(), "claude-compact.jsonl")
+
+	idx := mustBuild(t, BackendClaude, path)
+	if len(idx.Spans) != 3 {
+		t.Fatalf("expected assistant + compact boundary + assistant, got %d: %+v", len(idx.Spans), idx.Spans)
+	}
+	if idx.Spans[1].StableID != "compact-1" ||
+		idx.Spans[1].ReplayStart != lb.offsets["boundary"] ||
+		idx.Spans[1].EndOffset != lb.offsets["summary"] {
+		t.Fatalf("compact boundary span = %+v", idx.Spans[1])
+	}
+	if idx.Spans[2].ReplayStart != lb.offsets["after"] {
+		t.Fatalf("internal summary unexpectedly produced a span: %+v", idx.Spans)
+	}
+}
+
 // ---- Interval-union replay matches page messages positionally ----
 
 // testReplayer re-runs the extractor over a byte range and emits one entry per

@@ -1,12 +1,16 @@
 package gobridge
 
 import (
+	"bytes"
+	"compress/gzip"
 	"crypto/ecdh"
 	"crypto/hmac"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"strings"
 	"testing"
 )
 
@@ -391,6 +395,43 @@ func TestRelayEnvelopeAADSerialization(t *testing.T) {
 	}
 }
 
+func TestRelayEnvelopeChunkAADIsConditionalAndAuthenticated(t *testing.T) {
+	env := &RelayEnvelope{
+		Version: 1, RouteID: "route-1", SenderID: "bridge", DestinationID: "device-1",
+		ChannelGeneration: 1, KeyEpochID: "online:1", MessageID: "msg-1", Counter: 42,
+		CreatedAt: "2026-05-24T08:00:00Z", ExpiresAt: "2026-05-25T08:00:00Z",
+	}
+	legacy, err := env.EncodeAAD()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacyFields map[string]interface{}
+	if err := json.Unmarshal(legacy, &legacyFields); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := legacyFields["chunk"]; exists {
+		t.Fatal("legacy AAD must omit chunk instead of encoding null")
+	}
+
+	env.Chunk = &RelayChunkMetadata{GroupID: "550e8400-e29b-41d4-a716-446655440000", Index: 2, Count: 7}
+	chunkAAD, err := env.EncodeAAD()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantChunkAAD := `{"channelGeneration":1,"chunk":{"count":7,"groupId":"550e8400-e29b-41d4-a716-446655440000","index":2},"counter":42,"createdAt":"2026-05-24T08:00:00Z","destinationId":"device-1","epochAuthTag":null,"epochEphemeralPublicKey":null,"epochIndex":null,"expiresAt":"2026-05-25T08:00:00Z","keyEpochId":"online:1","messageId":"msg-1","prekeyId":null,"previousEpochDigest":null,"routeId":"route-1","senderId":"bridge","version":1}`
+	if string(chunkAAD) != wantChunkAAD {
+		t.Fatalf("chunk AAD bytes = %s, want %s", chunkAAD, wantChunkAAD)
+	}
+	var fields map[string]interface{}
+	if err := json.Unmarshal(chunkAAD, &fields); err != nil {
+		t.Fatal(err)
+	}
+	chunk, ok := fields["chunk"].(map[string]interface{})
+	if !ok || chunk["groupId"] != env.Chunk.GroupID || chunk["index"] != float64(2) || chunk["count"] != float64(7) {
+		t.Fatalf("unexpected chunk AAD: %#v", fields["chunk"])
+	}
+}
+
 // TestCounterNonceConstruction 验证 nonce 构造符合方案。
 func TestCounterNonceConstruction(t *testing.T) {
 	nonce := CounterNonce(1)
@@ -448,6 +489,9 @@ func TestRelayDeviceConnSendJSON(t *testing.T) {
 	if envelope.Counter != 1 {
 		t.Fatalf("counter should be 1, got %d", envelope.Counter)
 	}
+	if envelope.ContentEncoding != "" {
+		t.Fatalf("legacy relay envelope content encoding = %q, want empty", envelope.ContentEncoding)
+	}
 	if len(envelope.Ciphertext) == 0 {
 		t.Fatal("ciphertext should not be empty")
 	}
@@ -461,6 +505,91 @@ func TestRelayDeviceConnSendJSON(t *testing.T) {
 	}
 	if string(opened) != `{"event":"turn_completed","type":"event"}` {
 		t.Fatalf("opened payload = %s", opened)
+	}
+}
+
+func TestRelayDeviceConnGzipNegotiationCompressesBeforeEncryption(t *testing.T) {
+	var lastEnvelope json.RawMessage
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatalf("random key: %v", err)
+	}
+	conn := NewRelayDeviceConn("web-1", "bridge-1", "route-1", 1, nil, key, nil, func(env json.RawMessage) error {
+		lastEnvelope = env
+		return nil
+	})
+	if !negotiateRelayGzip(conn, []string{"relay_gzip_v1"}) {
+		t.Fatal("relay gzip capability should negotiate for a relay connection")
+	}
+
+	msg := map[string]string{"type": "result", "history": strings.Repeat("compressible-history-entry-", 4096)}
+	raw, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal expected payload: %v", err)
+	}
+	conn.SendJSON(msg)
+
+	var envelope RelayEnvelope
+	if err := json.Unmarshal(lastEnvelope, &envelope); err != nil {
+		t.Fatalf("unmarshal envelope: %v", err)
+	}
+	if envelope.ContentEncoding != "gzip" {
+		t.Fatalf("content encoding = %q, want gzip", envelope.ContentEncoding)
+	}
+	aad, err := envelope.EncodeAAD()
+	if err != nil {
+		t.Fatalf("encode aad: %v", err)
+	}
+	compressed, err := OpenEnvelope(key, envelope.Counter, aad, envelope.Ciphertext)
+	if err != nil {
+		t.Fatalf("open compressed relay payload: %v", err)
+	}
+	if len(compressed) >= len(raw) {
+		t.Fatalf("compressed payload %d bytes is not smaller than raw %d bytes", len(compressed), len(raw))
+	}
+	reader, err := gzip.NewReader(bytes.NewReader(compressed))
+	if err != nil {
+		t.Fatalf("open gzip stream: %v", err)
+	}
+	opened, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read gzip stream: %v", err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatalf("close gzip stream: %v", err)
+	}
+	if !bytes.Equal(opened, raw) {
+		t.Fatal("decompressed payload differs from original JSON")
+	}
+
+	// contentEncoding is authenticated metadata, not an unauthenticated decompression hint.
+	envelope.ContentEncoding = ""
+	tamperedAAD, err := envelope.EncodeAAD()
+	if err != nil {
+		t.Fatalf("encode tampered aad: %v", err)
+	}
+	if _, err := OpenEnvelope(key, envelope.Counter, tamperedAAD, envelope.Ciphertext); err == nil {
+		t.Fatal("removing authenticated contentEncoding should fail decryption")
+	}
+}
+
+func TestRelayChunksNegotiationRequiresRelayUnifiedWriter(t *testing.T) {
+	legacy := NewRelayDeviceConn("legacy", "bridge", "route", 1, nil, make([]byte, 32), nil, func(json.RawMessage) error { return nil })
+	if negotiateRelayChunks(legacy, []string{relayChunksCapability}) {
+		t.Fatal("chunk capability must not ack without the unified writer")
+	}
+	writer := newRelayOutboundWriter()
+	defer writer.close()
+	modern := NewRelayDeviceConn("modern", "bridge", "route", 1, nil, make([]byte, 32), nil, func(json.RawMessage) error { return nil })
+	modern.setOutboundWriter(writer)
+	if !negotiateRelayChunks(modern, []string{relayChunksCapability}) {
+		t.Fatal("chunk capability should ack on a Relay connection with the unified writer")
+	}
+	if negotiateRelayChunks(modern, []string{relayGzipCapability}) {
+		t.Fatal("chunk capability must require an explicit client declaration")
+	}
+	if negotiateRelayChunks(adaptDirectConn(&Conn{}), []string{relayChunksCapability}) {
+		t.Fatal("Direct connection must never negotiate Relay chunks")
 	}
 }
 

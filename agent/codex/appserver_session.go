@@ -926,7 +926,7 @@ func (s *appServerSession) handleNotification(method string, paramsRaw json.RawM
 			s.sawDelta.Clear()
 			threadID := strings.TrimSpace(notif.ThreadID)
 			if threadID != "" {
-				s.emit(core.Event{Type: core.EventTurnStarted, SessionID: threadID})
+				s.emit(core.Event{Type: core.EventTurnStarted, SessionID: threadID, TurnID: strings.TrimSpace(notif.Turn.ID)})
 			}
 		} else {
 			slog.Debug("codex app-server: turn/started parse failed", "error", err)
@@ -978,9 +978,16 @@ func (s *appServerSession) handleNotification(method string, paramsRaw json.RawM
 		if err := json.Unmarshal(paramsRaw, &notif); err == nil {
 			s.flushPendingAsText()
 			s.sawDelta.Clear()
+			turnID := strings.TrimSpace(notif.Turn.ID)
+			if turnID == "" {
+				s.stateMu.Lock()
+				turnID = s.currentTurn
+				s.stateMu.Unlock()
+			}
 			s.emit(core.Event{
 				Type:      core.EventResult,
 				SessionID: s.CurrentSessionID(),
+				TurnID:    turnID,
 				Done:      true,
 			})
 			slog.Info("codex app-server: turn/completed → EventResult emitted", "threadID", notif.ThreadID, "turnStatus", notif.Turn.Status)

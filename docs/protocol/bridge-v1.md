@@ -15,6 +15,7 @@ Client messages use one of these top-level `type` values:
 | `register` | iOS -> MacBridge | Legacy registration path. |
 | `request` | iOS -> MacBridge | Backend RPC call. |
 | `ping` | iOS -> MacBridge | Keepalive. |
+| `recovery_applied` | Client -> MacBridge | Exact per-session cut acknowledgement for an active recovery transaction. |
 
 Server messages use:
 
@@ -25,6 +26,8 @@ Server messages use:
 | `result` | MacBridge -> iOS | RPC response. |
 | `event` | MacBridge -> iOS | Backend live event. |
 | `pong` | MacBridge -> iOS | Keepalive response. |
+| `recovery_barrier` | MacBridge -> client | Replay input is complete; client must apply/persist and acknowledge. |
+| `recovery_complete` | MacBridge -> client | Recovery is committed; pending live events follow this frame. |
 
 ## Version Negotiation
 
@@ -42,8 +45,17 @@ MacBridge accepts only `protocol.version == 1` for `hello`. The server response 
 `bridge.protocol.version`, `bridge.protocol.schemaRevision`, `bridge.runtimeVersion`, current URLs,
 capabilities, backend descriptors, bridge status, and running sessions.
 
+Recovery is an optional `hello` / `hello_ack` extension. A client opts in with
+`capabilities: ["recovery_v1"]` and may send `lastBridgeEpoch`, compatibility-only `lastEventId`, and
+the authoritative nested `lastSeenBySession` cut map. An opted-in response may include root-level
+`bridgeEpoch` and a `recovery` plan. Every recovery control frame carries the same random
+`recoveryId`; cut acknowledgements are exact per-session maps and never a scalar fallback. See
+`../2026-07-18-event-recovery-rfc.md` for ordering, atomic snapshot, and failure semantics.
+
 `register` is retained as a legacy path. It carries the same `protocol` shape but only reports the
-server protocol in `register_ack`; it is not the compatibility gate for new work.
+server protocol in `register_ack`; it is not the compatibility gate for new work and never starts a
+recovery transaction. Without explicit `recovery_v1`, a new server preserves legacy behavior and
+omits recovery fields.
 
 ## RPC
 
@@ -87,6 +99,7 @@ send_message
 abort_generation
 get_session
 get_session_messages
+get_session_projection
 delete_session
 resume_session
 switch_model
@@ -129,6 +142,7 @@ Event envelope:
   type: "event",
   eventId?: string,
   seq?: number,
+  perSessionSeq?: number,
   bridgeEpoch?: string,
   backendId?: string,
   sessionId?: string,
@@ -139,11 +153,16 @@ Event envelope:
 }
 ```
 
+`seq` is process-global. `perSessionSeq` is monotonic within one `(backendId, sessionId)`
+chain and lets clients distinguish a real session gap from unrelated interleaved events.
+
 Current event names emitted by MacBridge:
 
 ```text
 text_delta
 message_updated
+user_message
+system_message
 reasoning_delta
 tool_started
 tool_finished
@@ -157,7 +176,31 @@ context_compressed
 context_usage_updated
 question_asked
 question_resolved
+projection_patch
+projection_snapshot
+sync_invalidate
 ```
+
+`tool_started` / `tool_finished` may carry an optional `data.matches` field. It is the
+single structured truth for explore/search results and has exactly one of these shapes:
+
+```ts
+type ToolMatches =
+  | { kind: "count"; count: number }
+  | { kind: "paths"; paths: string[] }
+  | { kind: "detailed"; items: { path: string; line?: number; preview?: string }[] };
+```
+
+The field is absent when the driver cannot prove the result shape. Consumers MUST NOT infer
+counts or paths from `toolResult` display text. Query fields remain in `toolInput` /
+`toolInputRaw`; execution results belong in `matches`.
+
+Child-agent events may carry optional `data.streamId` and `data.parentStreamId`. The same
+`streamId` is attached to that child's text, reasoning, tool, error, and completion events;
+`parentStreamId` links a nested child to its owning child stream. Absence means the main flat
+stream. Drivers MUST resolve this from stable transcript/tool identities, never from the most
+recent Task invocation; when the relation cannot be proven, they omit both fields and emit only
+sanitized diagnostics.
 
 ## Semantic Notes — questions vs. permissions
 
@@ -296,6 +339,31 @@ Rules:
 
 A backend advertises `session_pagination` in `capabilities` only for message-history pagination (`get_session_messages`), not for session-list pagination. Clients MUST only send `paginate`/`beforeCursor` history fields to a backend that advertises this capability; otherwise the legacy full-history path is used.
 
+### Capability: `external_turn_streaming`
+
+A backend advertises `external_turn_streaming` in `capabilities` when MacBridge pushes external-turn
+content events over the live stream, so clients can treat push as the primary source and demote
+discovery polling to a reconcile/watchdog. The `multi-client-streaming-sync` refactor Phase 1
+implements file-relay content streaming for **codex** (rollout) and **claude**/`claudecode`
+(transcript): MacBridge parses transcript/rollout growth and emits `text_delta` / `reasoning_delta`
+/ `tool_started` / `context_usage_updated` during the turn — not only at `turn_completed`. Codex
+also emits `user_message` with `{ itemId, turnId, text }` when the rollout persists the external
+prompt; `itemId` is the response-item message ID and is reused by rich history reconciliation.
+**opencode** is push-native via its SSE firehose (separate path, not this capability); **grokbuild**
+is pending the leader-socket subscriber. Clients seeing this capability SHOULD NOT start
+discovery/active external-turn probes and SHOULD keep only a `turn_completed` reconcile + a
+low-frequency watchdog; clients on backends without it fall back to current polling. Adding the
+string is non-breaking (extensible `capabilities` array); no protocol major-version bump.
+
+### Event: `sessions_changed`
+
+Optional push (multi-client-streaming-sync §6). MacBridge periodically lists each backend's
+sessions; when a NEW session appears (e.g. a turn opened in a native app while the client sits on
+the session list), it broadcasts `sessions_changed` with `{backendId}`. Clients refresh
+`list_sessions` on receipt. The event carries no `sessionId` and relies on the broadcaster's
+all-backend/all-connections fallback to reach list-viewing clients. Non-breaking/optional: clients
+also refresh on reconnect/foreground/turn-activity, so this is a latency win, not a correctness gate.
+
 ### `get_session_messages` paging
 
 Request params (additive; `paginate`, `beforeCursor` are new):
@@ -338,6 +406,149 @@ When `paginate` is true and the backend supports it, the response data is:
 - A cursor is only valid for the session and backend it was issued for.
 - `cursor_stale` means the history prefix the cursor referenced can no longer be proven continuous;
   reset to the first page.
+
+## Session Projection Stream (session_sync_v2)
+
+Single-source multi-device sync. MacBridge reduces its `EventPublisher` output into ONE
+authoritative `SessionProjection` per `(backendId, sessionId)`; clients only apply projection
+patches/snapshots and MUST NOT dual-source merge content against `get_session_messages` or raw
+`text_delta`. Design: `docs/2026-07-24-single-source-multidevice-sync-design.md`.
+
+- **Authority** lives on MacBridge. `syncRev` is the projection-owned mutation revision; ignored
+  raw events do not advance it. Push and pull read the SAME committed Kernel head.
+- **Single outbound funnel.** Projection frames leave MacBridge only through the existing
+  `EventPublisher` per-connection dispatch (they reuse `broadcaster` + observation target
+  resolution). There is no parallel projection websocket / SSE pipe.
+- **Production scope.** Codex, Claude and OpenCode project through the same Kernel contract;
+  iOS and remote-web consume the same SPS ownership semantics.
+
+### Capability: `session_sync_v2`
+
+A CLIENT projection-only transport capability plus a backend-scoped ownership capability. The
+client opts in with
+`capabilities: ["session_sync_v2"]` in `hello`; when the server-side rollout flag is enabled,
+MacBridge echoes `capabilities["session_sync_v2"] = true` and adds `session_sync_v2` only to each
+migrated backend descriptor's `capabilities`. Clients MUST decide timeline ownership from the
+selected backend descriptor, not the global hello echo.
+
+Since Phase 4, advertising `session_sync_v2` is an unambiguous ownership promise, not a shadow
+observation request:
+
+- opted-in connections receive projection frames plus non-timeline control-plane events;
+- MacBridge's live `EventPublisher` fanout does not send raw timeline-semantic events (`turn_*`,
+  user/text/reasoning/tool content, permission/question timeline steps, completion/error state) to
+  that connection. Durable recovery/mailbox storage remains legacy-compatible so a later `.off`
+  client can recover; an active client therefore MUST retain its raw-content writer seal;
+- a legacy client uses the explicit kill-switch by omitting `session_sync_v2`; it continues to
+  receive raw/history behavior;
+- clients MUST NOT advertise the capability while retaining legacy timeline ownership.
+
+The former rollout-only shadow mode is retired. Adding these fields remains non-breaking and uses
+`schemaRevision`, not the protocol major version.
+
+### Push frames
+
+All three are `event`-envelope frames (same `seq` / `perSessionSeq` / `bridgeEpoch` envelope as
+other events). Envelope sequence numbers belong to transport/recovery; patch `syncRev` belongs to
+the projection and must be compared only with `appliedRev`.
+
+| Event | `data` shape | Client action |
+| --- | --- | --- |
+| `projection_patch` | `BridgeProjectionPatch` | if `baseRev == appliedRev`, apply `partOps`/`upsertTurns`/`execution` and set `appliedRev = syncRev`; else call `get_session_projection(sinceRev=appliedRev)` |
+| `projection_snapshot` | `BridgeProjectionSnapshot` | if `syncRev > appliedRev`, replace the whole projection and set `appliedRev = syncRev` |
+| `sync_invalidate` | `BridgeSyncInvalidate` | call `get_session_projection` (full) |
+
+`projection_patch` is the main streaming path: MacBridge coalesces consecutive text/thinking
+deltas 50–100ms and emits one patch with `partOps` so the observing client sees incremental
+content during a long turn (not only at `turn_completed`). `upsertTurns` (whole-turn replace)
+is for new-turn appearance, status change, or authoritative correction — not per-token updates.
+Completion is authoritative only when the turn's `status ∈ {completed, aborted, error}`
+(integrating the existing `turnCompletedAt` evidence); clients MUST NOT settle a v2-observed
+turn on a heuristic alone.
+
+Codex text parts may carry `presentation: "progress" | "final"`, using the same canonical
+classification as rich history. On a settled turn, only the terminal `final` text contributes to
+the message's final body; progress parts remain ordered timeline evidence. Older snapshots may
+omit the additive field.
+
+A turn may contain an additive `system` message (`role: "system"`) for a transcript lifecycle
+milestone. Claude `compact_boundary` is projected this way as one short completion summary; the
+following `isCompactSummary` / `isVisibleInTranscriptOnly` transcript payload is internal context
+and MUST NOT be projected as user content. A system milestone is completed content and MUST NOT
+arm `execution`.
+
+Projection frames are reconstructable via `get_session_projection`, so they are NOT durable
+mailbox milestones and are NOT live-buffered; reconnect/recovery aligns via a `get_session_projection`
+pull, not via mailbox replay of patches (design §8.4 option A).
+
+### RPC: `get_session_projection`
+
+Sits beside `get_session_messages` (which remains for legacy clients, paging, and debugging).
+MUST read the ProjectionReducer in-memory state (cold-start may hydrate once from disk into the
+reducer, then serve); it MUST NOT be a thin wrapper that returns `get_session_messages` bodies for
+the client to merge.
+
+Cold start is a single-flight transaction. MacBridge restores a validated checkpoint or reduces
+`[checkpointCursor,startCut)` in an isolated reducer, queues post-cut live input, then atomically
+commits baseline plus pending live events. Hydrate does not publish ordinary events, consume
+transport sequence numbers, enter recovery/offline/mailbox buffers, or expose partial projections.
+A completed source inspection may commit an honest `ready(empty)`; a bare running shell alone
+MUST remain hydrating.
+
+RPC lifecycle is explicit:
+
+| State | Wire result | Meaning |
+| --- | --- | --- |
+| `hydrating` | error `projection.hydrating`, `retryable=true`, optional `retryAfterMillis` | healthy single-flight continues; client stays loading |
+| `ready` | success `{projection}` or `{patches,headRev}` | complete committed head; only this may map into the active timeline |
+| `failed` | error `projection.hydrate_failed`, `retryable`, optional `retryAfterMillis`/`attempts` | hydrate terminated; retry policy is explicit |
+| not migrated | error `projection.not_migrated`, `retryable=false` | selected backend has no v2 authority |
+
+The RPC response budget is 15 seconds. Budget expiry while the transaction remains healthy returns
+`projection.hydrating`; it never returns head-0 or a partial success. The client may keep its
+independent hard cap and allow a late complete response to apply, but MUST NOT fall back to history.
+
+Request params (additive):
+
+```ts
+{
+  sessionId: string,
+  directory?: string,
+  sinceRev?: number,   // when set, server MAY return a delta {patches, headRev}
+  limitTurns?: number
+}
+```
+
+Response data — full projection, or a delta when `sinceRev` was honored:
+
+```ts
+| { projection: BridgeSessionProjection }
+| { patches: BridgeProjectionPatch[], headRev: number }
+```
+
+Exact field shapes (`BridgeSessionProjection`, `BridgeTurnProjection`, `BridgeMessageProjection`,
+`BridgeProjectionPart`, `BridgeProjectionPatch`, `BridgePartOp`, `BridgeExecutionView`) are defined
+in `docs/protocol/schema/bridge-v1.types.ts`.
+
+#### Part vocabulary: `subagent` (B4 child-stream, sync-only)
+
+`BridgeProjectionPart` gains an additive `type: "subagent"` variant for Claude `Agent`/`Task`
+tool nested subagents. It is populated **only** by the MacBridge projection kernel during cold
+hydrate (sync-only): the kernel reads sibling `subagents/agent-<id>.jsonl` + `.meta.json`
+sidechain files, builds the multi-level tree, and emits one `subagent` part per depth-1 agent
+through the same hydrate transaction. Clients map it **read-only** — no client-side tree
+building, no second writer.
+
+Join keys mirror the real sidechain `.meta.json` schema (sample-verified): depth-1 anchors to the
+mainstream turn via `spawnToolUseId` ↔ the mainstream `Agent` tool_use `itemId`; depth≥2 nests
+via `parentAgentId` ↔ the parent agent's `agentId`. `subagentBlocks` is recursive (the subagent's
+own text/reasoning/tool content plus nested depth+1 subagents). `subagentDiagnostic` carries
+`orphan_parent` / `cycle` / `max_depth` for defensive tree-walk outcomes; a depth-1 agent whose
+mainstream anchor is absent is dropped (fail-open to the current state, never fabricated).
+
+This is distinct from the legacy `streamId`/`parentStreamId` live child-stream fields (Events
+§`child_stream_*`), which describe **live** mid-run delivery. B4 sync-only does not use those:
+async mid-run live delivery is a separate, future enhancement (方案 2).
 
 ## Session Pinning
 

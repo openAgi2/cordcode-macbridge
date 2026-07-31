@@ -52,9 +52,10 @@ type RelayBridgeClient struct {
 	routeID    string
 	credential string
 
-	conn    *websocket.Conn
-	done    chan struct{}
-	devices map[string]*RelayDeviceConn // deviceID -> active relay connection
+	conn           *websocket.Conn
+	done           chan struct{}
+	devices        map[string]*RelayDeviceConn // deviceID -> active relay connection
+	outboundWriter *relayOutboundWriter
 }
 
 // NewRelayBridgeClient 创建 relay bridge 客户端。
@@ -87,6 +88,11 @@ func (c *RelayBridgeClient) Connect(relayBridgeURL string) error {
 	c.mu.Lock()
 	c.conn = conn
 	c.done = make(chan struct{})
+	if relayUnifiedWriterV1 {
+		c.outboundWriter = newRelayOutboundWriter()
+	} else {
+		c.outboundWriter = nil
+	}
 	done := c.done
 	c.mu.Unlock()
 
@@ -170,6 +176,10 @@ func (c *RelayBridgeClient) Run(ctx context.Context, relayBridgeURL string) {
 func (c *RelayBridgeClient) closeConn() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.outboundWriter != nil {
+		c.outboundWriter.close()
+		c.outboundWriter = nil
+	}
 
 	if c.conn != nil {
 		c.conn.Close()
@@ -179,7 +189,7 @@ func (c *RelayBridgeClient) closeConn() {
 	// 清理所有活跃的 relay device connections
 	for deviceID, rc := range c.devices {
 		if c.handlers != nil {
-			c.handlers.broadcaster.UnsubscribeAll(rc)
+			c.handlers.unregisterConnection(rc)
 		}
 		// 场景4：同步从 registry 注销。
 		globalDeviceConnRegistry.Unregister(deviceID, rc)
@@ -198,6 +208,10 @@ func jitter(d time.Duration) time.Duration {
 func (c *RelayBridgeClient) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.outboundWriter != nil {
+		c.outboundWriter.close()
+		c.outboundWriter = nil
+	}
 
 	if c.conn != nil {
 		c.writeMu.Lock()
@@ -221,7 +235,7 @@ func (c *RelayBridgeClient) Close() {
 	// 清理所有活跃的 relay device connections
 	for deviceID, rc := range c.devices {
 		if c.handlers != nil {
-			c.handlers.broadcaster.UnsubscribeAll(rc)
+			c.handlers.unregisterConnection(rc)
 		}
 		// 场景4：同步从 registry 注销。
 		globalDeviceConnRegistry.Unregister(deviceID, rc)
@@ -340,6 +354,8 @@ func (c *RelayBridgeClient) heartbeatLoop(done <-chan struct{}, period, deadAfte
 
 // sendDeviceHeartbeats 给每个活跃 device 发心跳，并清理长期无活动的死连接。
 // 先快照 devices map 再释放锁，避免发送/关闭（IO）期间持锁。
+// liveness = device→Mac inbound only (touchLastActivity). Mac type:ping does not
+// refresh lastActivity; iOS must reply type:pong (Phase E) or prune opens zero-target.
 func (c *RelayBridgeClient) sendDeviceHeartbeats(deadAfter time.Duration) {
 	c.mu.Lock()
 	snapshot := make([]*RelayDeviceConn, 0, len(c.devices))
@@ -374,13 +390,17 @@ func (c *RelayBridgeClient) pruneDeadDevice(rc *RelayDeviceConn, idle time.Durat
 	c.mu.Unlock()
 
 	if c.handlers != nil {
-		c.handlers.broadcaster.UnsubscribeAll(rc)
+		c.handlers.unregisterConnection(rc)
 	}
 	// 场景4：同步从 registry 注销，避免 revoke 时对已关闭连接发事件。
 	globalDeviceConnRegistry.Unregister(rc.deviceID, rc)
 	rc.Close()
-	slog.Info("relay-bridge-client: pruned inactive device connection",
-		"deviceID", safeID(rc.deviceID), "idle", idle)
+	slog.Warn("relay-bridge-client: pruned inactive device connection",
+		"deviceID", safeID(rc.deviceID),
+		"idle", idle.String(),
+		"deadAfter", relayDeviceDeadAfter.String(),
+		"hint", "device→Mac silence; iOS must pong Mac type:ping to refresh lastActivity",
+	)
 }
 
 // handleClientHello 处理来自 iOS 设备的在线握手请求。
@@ -490,21 +510,41 @@ func (c *RelayBridgeClient) handleClientHello(hello OnlineClientHello) {
 		iosToMacKey,
 		c.SendEnvelope,
 	)
+	c.mu.Lock()
+	writer := c.outboundWriter
+	c.mu.Unlock()
+	rc.setOutboundWriter(writer)
+	if c.handlers != nil {
+		rc.setInboundScheduler(newRelayInboundScheduler(
+			func(msg WireMessage) { c.handlers.HandleRelayInboundMessage(rc, msg) },
+			func(sessionID, requestID string) { rc.advanceSessionBulkGeneration(sessionID, requestID) },
+			func(requestID string) { rc.cleanupSupersededRequest(requestID) },
+		))
+	}
 
 	c.mu.Lock()
-	if stale := c.devices[deviceID]; stale != nil {
-		if c.handlers != nil {
-			c.handlers.broadcaster.UnsubscribeAll(stale)
-		}
-		// 旧连接也需从 registry 注销，避免 revoke 时对一个已关闭的连接发事件。
-		globalDeviceConnRegistry.Unregister(deviceID, stale)
-		_ = stale.Close()
-	}
+	stale := c.devices[deviceID]
 	c.devices[deviceID] = rc
 	c.mu.Unlock()
 
-	// 注册到 Broadcaster
-	c.handlers.broadcaster.RegisterConn(rc)
+	// Re-handshake: transfer session subscriptions and KEEP observation scope.
+	// Do not unregisterConnection(stale) first — that RemoveDevice wipes full_stream
+	// and drops live text/reasoning until the next set_observation_scope (~30s).
+	if stale != nil {
+		idle := time.Since(stale.lastActivityAt())
+		slog.Info("relay-bridge-client: replacing device connection",
+			"deviceID", safeID(deviceID),
+			"generation", hello.ChannelGeneration,
+			"staleIdle", idle,
+		)
+		if c.handlers != nil {
+			c.handlers.replaceConnection(stale, rc)
+		}
+		globalDeviceConnRegistry.Unregister(deviceID, stale)
+		_ = stale.Close()
+	} else if c.handlers != nil {
+		c.handlers.registerConnection(rc)
+	}
 
 	// 场景4 修复：relay 连接也注册到 DeviceConnRegistry，使 Mac 撤销授权时
 	// 能向 relay 连接下发 device_revoked 事件并断开（此前仅 direct 路径注册）。
@@ -516,6 +556,7 @@ func (c *RelayBridgeClient) handleClientHello(hello OnlineClientHello) {
 	slog.Info("relay-bridge-client: device authenticated and registered",
 		"deviceID", safeID(deviceID),
 		"generation", hello.ChannelGeneration,
+		"replaced", stale != nil,
 	)
 }
 
@@ -558,10 +599,20 @@ func (c *RelayBridgeClient) handleInboundEnvelope(payload []byte) {
 
 	// 更新该 device 的最后活动时间，供心跳循环做半开检测。
 	rc.touchLastActivity()
-
-	// 分发给 handlers 处理
 	if c.handlers != nil {
-		c.handlers.HandleRelayInbound(rc, innerJSON)
+		var inboundHeader WireMessage
+		if err := json.Unmarshal(innerJSON, &inboundHeader); err != nil {
+			slog.Warn("relay-bridge-client: invalid inner message", "deviceID", safeID(deviceID), "error", err)
+			_ = rc.Close()
+			return
+		}
+		if inboundHeader.Type == "request" {
+			rc.registerRequestClass(inboundHeader.RequestID, inboundHeader.Method)
+		}
+		if err := rc.enqueueInbound(innerJSON, inboundHeader); err != nil {
+			slog.Warn("relay-bridge-client: inbound enqueue failed", "deviceID", safeID(deviceID), "error", err)
+			_ = rc.Close()
+		}
 	}
 }
 

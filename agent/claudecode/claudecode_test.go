@@ -880,4 +880,16 @@ func TestIsSessionExecuting(t *testing.T) {
 	if !isSessionExecuting(sessionPath) {
 		t.Error("expected true when real user follows hidden Claude resume pair")
 	}
+
+	// Case 11: compact closes the parent physical transcript; its internal
+	// summary must not leave that hidden parent looking permanently active.
+	writeLines([]string{
+		`{"type":"user","message":{"role":"user","content":"long task"}}`,
+		`{"type":"assistant","message":{"role":"assistant","stop_reason":"tool_use","content":[]}}`,
+		`{"type":"system","subtype":"compact_boundary","uuid":"compact-1"}`,
+		`{"type":"user","isVisibleInTranscriptOnly":true,"isCompactSummary":true,"message":{"role":"user","content":"INTERNAL SUMMARY"}}`,
+	})
+	if isSessionExecuting(sessionPath) {
+		t.Error("expected false when physical transcript ends at compact boundary")
+	}
 }

@@ -46,12 +46,12 @@ func TestIsLanCandidateIPv4_AcceptsPrivateLAN(t *testing.T) {
 
 func TestIsLanCandidateIPv4_RejectsNonCandidates(t *testing.T) {
 	cases := map[string]string{
-		"loopback":            "127.0.0.1",
-		"link-local":          "169.254.1.1",
-		"tailscale CGNAT lo":  "100.64.0.1",
-		"tailscale CGNAT hi":  "100.127.255.254",
-		"public":              "8.8.8.8",
-		"non-private 100.x":   "100.128.0.1",
+		"loopback":           "127.0.0.1",
+		"link-local":         "169.254.1.1",
+		"tailscale CGNAT lo": "100.64.0.1",
+		"tailscale CGNAT hi": "100.127.255.254",
+		"public":             "8.8.8.8",
+		"non-private 100.x":  "100.128.0.1",
 	}
 	for name, ip := range cases {
 		if isLanCandidateIPv4(net.ParseIP(ip)) {

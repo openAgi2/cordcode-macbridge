@@ -12,8 +12,15 @@ import (
 // 场景4 修复前 relay 连接未注册到此 registry，导致 Mac 撤销授权时 relay 连接
 // 收不到 device_revoked 事件、不断开，iOS 继续可用。现统一注册。
 type DeviceConnRegistry struct {
-	mu    sync.Mutex
-	conns map[string][]Connection // deviceID → connections（direct 或 relay）
+	mu             sync.Mutex
+	conns          map[string][]Connection // deviceID → connections（direct 或 relay）
+	eventPublisher *EventPublisher
+}
+
+func (r *DeviceConnRegistry) SetEventPublisher(publisher *EventPublisher) {
+	r.mu.Lock()
+	r.eventPublisher = publisher
+	r.mu.Unlock()
 }
 
 var globalDeviceConnRegistry = &DeviceConnRegistry{
@@ -47,12 +54,42 @@ func (r *DeviceConnRegistry) Unregister(deviceID string, conn Connection) {
 	}
 }
 
+// Connections returns a snapshot of live connections for a device (direct and/or relay).
+// Used to rebind broadcaster session subscriptions when live targets go to zero while
+// the device still has an open transport (path-switch / thrash windows).
+func (r *DeviceConnRegistry) Connections(deviceID string) []Connection {
+	if deviceID == "" {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	src := r.conns[deviceID]
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]Connection, len(src))
+	copy(out, src)
+	return out
+}
+
+// AllDeviceIDs returns device IDs that currently have at least one registered connection.
+func (r *DeviceConnRegistry) AllDeviceIDs() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, 0, len(r.conns))
+	for id := range r.conns {
+		out = append(out, id)
+	}
+	return out
+}
+
 // DisconnectDevice 关闭指定设备的所有连接，发送 device_revoked 事件后主动 Close。
 // 修复场景4：补 Close 确保撤销即时生效（原 direct 仅 SendJSON 不 Close，依赖 iOS 侧断开；
 // 现统一发事件 + Close，relay 路径也能即时断开）。
 func (r *DeviceConnRegistry) DisconnectDevice(deviceID string) {
 	r.mu.Lock()
 	conns := r.conns[deviceID]
+	publisher := r.eventPublisher
 	delete(r.conns, deviceID)
 	r.mu.Unlock()
 
@@ -60,11 +97,14 @@ func (r *DeviceConnRegistry) DisconnectDevice(deviceID string) {
 		slog.Info("go-bridge: marking device revoked", "deviceId", deviceID, "remote", conn.RemoteAddr())
 		// 先下发 device_revoked 事件（iOS 侧据此删 bridge + 清凭证），
 		// 再 Close 确保即使 iOS 未及时处理事件，连接也被强制断开。
-		conn.SendJSON(map[string]interface{}{
-			"type":    "event",
-			"event":   "device_revoked",
-			"message": "设备授权已取消，请重新授权",
-		})
+		if publisher != nil {
+			publisher.PublishLogical(LogicalEvent{
+				Event:       "device_revoked",
+				Message:     "设备授权已取消，请重新授权",
+				Targets:     []Connection{conn},
+				WaitTargets: []Connection{conn},
+			})
+		}
 		if err := conn.Close(); err != nil {
 			slog.Debug("go-bridge: close revoked device conn failed", "deviceId", deviceID, "error", err)
 		}

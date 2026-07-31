@@ -1,0 +1,2 @@
+{"uuid":"u-root","type":"user","timestamp":"2026-07-30T00:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"first question"}]},"parentUuid":null}
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-07-30T00:00:01.000Z","sessionId":"sess-1","content":"second question queued while busy"}

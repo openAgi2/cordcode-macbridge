@@ -191,6 +191,18 @@ Mailbox frame 使用：
 必需的 Mac 临时公钥；它将设计方案中已经要求的 epoch metadata 显式固定为 wire
 字段。
 
+After the authenticated inner Bridge `hello` negotiates `relay_gzip_v1`, a
+MacBridge-to-client online frame MAY add `"contentEncoding":"gzip"`. The field MUST be
+absent on legacy frames and is not used for mailbox frames. See
+`relay-frame-compression.md` for negotiation and encoding order.
+
+After strict `hello_ack.capabilities.relay_chunks_v1 == true` negotiation, a
+MacBridge-to-client online bulk frame MAY add
+`"chunk":{"groupId":"...","index":0,"count":N}`. The object is added to AAD only
+when present; legacy AAD MUST NOT contain `chunk:null`. Chunking is forbidden for
+Direct, mailbox, and client-to-Mac frames. See `relay-frame-chunking.md` and
+`relay-outbound-classes.md`.
+
 ### 5.2 Inner payload
 
 Decrypted plaintext encodes `uint32_be(innerLength) || innerBytes || randomPadding`.
@@ -244,8 +256,9 @@ Crypto vectors MUST assert these exact bytes before asserting HMAC or ciphertext
 ### 7.2 Frame AAD
 
 For each encrypted frame, AAD is canonical JSON of all readable envelope fields except
-`ciphertext`. `createdAt` and `expiresAt` are authenticated because Relay must not silently
-modify retention validity or delivery age.
+`ciphertext`. Optional fields such as negotiated `contentEncoding` are included only when
+present. `createdAt` and `expiresAt` are authenticated because Relay must not silently modify
+retention validity or delivery age.
 
 ```json
 {

@@ -1,0 +1,7 @@
+[
+  {"name":"glob-multiple-directories","toolName":"Glob","content":"src/app.ts\nsrc/lib/a.ts\ntests/app.test.ts","want":{"kind":"paths","paths":["src/app.ts","src/lib/a.ts","tests/app.test.ts"]}},
+  {"name":"glob-zero","toolName":"Glob","content":"No files found","want":{"kind":"paths","paths":[]}},
+  {"name":"glob-deduplicates","toolName":"Glob","content":"src/app.ts\nsrc/app.ts","want":{"kind":"paths","paths":["src/app.ts"]}},
+  {"name":"glob-truncated-omits","toolName":"Glob","content":"src/app.ts\n(Results are truncated. Consider using a more specific path or pattern.)","want":null},
+  {"name":"grep-unknown-text-omits","toolName":"Grep","content":"src/app.ts:42:match","want":null}
+]

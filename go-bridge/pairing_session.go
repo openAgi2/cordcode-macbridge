@@ -35,9 +35,9 @@ func (e PairingError) Error() string {
 
 // PairingSession 表示一次 QR/手动码 配对会话的完整状态。
 type PairingSession struct {
-	mu                 sync.Mutex   `json:"-"` // 保护状态变更的互斥锁，序列化时忽略
-	ID                 string       `json:"id"`
-	QRPayload          string       `json:"qrPayload"`
+	mu        sync.Mutex `json:"-"` // 保护状态变更的互斥锁，序列化时忽略
+	ID        string     `json:"id"`
+	QRPayload string     `json:"qrPayload"`
 	// WebQRPayload is the Flow C web-specific QR: the same pairing session re-encoded as an
 	// https URL (https://<relay>/web/?<params>) the phone's system camera opens. Relay-only;
 	// empty when relay is not configured. See docs/protocol/relay-v1.md (web pairing QR).

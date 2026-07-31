@@ -1,0 +1,4 @@
+{"uuid":"u-A","type":"user","timestamp":"2026-07-30T00:00:00.000Z","message":{"role":"user","content":[{"type":"text","text":"turn A question"}]},"parentUuid":null}
+{"uuid":"a-1","type":"assistant","timestamp":"2026-07-30T00:00:01.000Z","message":{"id":"m-A","role":"assistant","content":[{"type":"text","text":"turn A answer"}]},"parentUuid":"u-A"}
+{"uuid":"u-B","type":"user","timestamp":"2026-07-30T00:00:02.000Z","message":{"role":"user","content":[{"type":"text","text":"turn B question"}]},"parentUuid":"a-1"}
+{"uuid":"a-2","type":"assistant","timestamp":"2026-07-30T00:00:03.000Z","message":{"id":"m-A2","role":"assistant","content":[{"type":"text","text":"branched reply under turn A ancestry"}]},"parentUuid":"a-1"}

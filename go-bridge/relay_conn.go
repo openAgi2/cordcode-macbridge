@@ -1,7 +1,10 @@
 package gobridge
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -42,9 +45,20 @@ type RelayDeviceConn struct {
 	// 发送函数：将加密信封通过 relay client 发出。
 	// 由 relay client 注入；签名 func(envelope *RelayEnvelope) error
 	sendEnvelope func(envelope json.RawMessage) error
+	writer       *relayOutboundWriter
+
+	// requestClasses is populated when an inbound Relay RPC is admitted and
+	// consumed exactly once by SendResult, keeping handler call sites unchanged.
+	requestClasses         map[string]relayOutboundClass
+	inboundScheduler       *relayInboundScheduler
+	sessionBulkGenerations map[string]uint64
+	bulkRequestContexts    map[string]relayBulkRequestContext
+	activeBulkHandles      map[string]*OutboundBulkHandle
 
 	// 状态
-	closed bool
+	closed         bool
+	outboundGzip   bool
+	outboundChunks bool
 
 	// lastActivity 记录最后一次从该 device 收到有效数据的时间（unix nano）。
 	// 由 handleInboundEnvelope 在解密成功后更新；心跳循环据此做半开检测：
@@ -53,6 +67,19 @@ type RelayDeviceConn struct {
 }
 
 var _ Connection = (*RelayDeviceConn)(nil)
+
+const (
+	relayGzipCapability   = "relay_gzip_v1"
+	relayChunksCapability = "relay_chunks_v1"
+	relayGzipThreshold    = 32 * 1024
+)
+
+func (rc *RelayDeviceConn) channelGeneration() uint64 {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	return rc.generation
+}
+func (rc *RelayDeviceConn) isClosed() bool { rc.mu.Lock(); defer rc.mu.Unlock(); return rc.closed }
 
 // NewRelayDeviceConn 创建一个已认证的 relay device connection。
 // macToIosKey 和 iosToMacKey 分别是 Mac→iOS 和 iOS→Mac 方向的 traffic key。
@@ -65,20 +92,62 @@ func NewRelayDeviceConn(
 	sendEnvelope func(json.RawMessage) error,
 ) *RelayDeviceConn {
 	rc := &RelayDeviceConn{
-		deviceID:     deviceID,
-		bridgeID:     bridgeID,
-		routeID:      routeID,
-		generation:   generation,
-		device:       device,
-		macToIosKey:  macToIosKey,
-		iosToMacKey:  iosToMacKey,
-		sendEnvelope: sendEnvelope,
+		deviceID:               deviceID,
+		bridgeID:               bridgeID,
+		routeID:                routeID,
+		generation:             generation,
+		device:                 device,
+		macToIosKey:            macToIosKey,
+		iosToMacKey:            iosToMacKey,
+		sendEnvelope:           sendEnvelope,
+		requestClasses:         make(map[string]relayOutboundClass),
+		sessionBulkGenerations: make(map[string]uint64),
+		bulkRequestContexts:    make(map[string]relayBulkRequestContext),
+		activeBulkHandles:      make(map[string]*OutboundBulkHandle),
 	}
 	// 双方向 counter 从 1 开始
 	rc.sendCounter.Store(1)
 	rc.recvCounter.Store(1)
 	rc.lastActivity.Store(time.Now().UnixNano())
 	return rc
+}
+
+func (rc *RelayDeviceConn) setInboundScheduler(scheduler *relayInboundScheduler) {
+	rc.mu.Lock()
+	rc.inboundScheduler = scheduler
+	rc.mu.Unlock()
+}
+
+func (rc *RelayDeviceConn) enqueueInbound(raw json.RawMessage, msg WireMessage) error {
+	rc.mu.Lock()
+	scheduler := rc.inboundScheduler
+	rc.mu.Unlock()
+	if scheduler == nil {
+		return fmt.Errorf("relay inbound scheduler unavailable")
+	}
+	return scheduler.enqueueMessage(raw, msg)
+}
+
+func (rc *RelayDeviceConn) setOutboundWriter(writer *relayOutboundWriter) {
+	rc.mu.Lock()
+	rc.writer = writer
+	rc.mu.Unlock()
+}
+
+func (rc *RelayDeviceConn) registerRequestClass(requestID, method string) {
+	if requestID == "" {
+		return
+	}
+	rc.mu.Lock()
+	rc.requestClasses[requestID] = classifyRelayRequest(method)
+	rc.mu.Unlock()
+}
+
+func (rc *RelayDeviceConn) cleanupSupersededRequest(requestID string) {
+	rc.mu.Lock()
+	delete(rc.requestClasses, requestID)
+	delete(rc.bulkRequestContexts, requestID)
+	rc.mu.Unlock()
 }
 
 // touchLastActivity 记录最后一次从该 device 收到有效数据的时间。
@@ -92,21 +161,121 @@ func (rc *RelayDeviceConn) lastActivityAt() time.Time {
 	return time.Unix(0, rc.lastActivity.Load())
 }
 
+// enableOutboundGzip is called only after the authenticated Bridge hello declares
+// relay_gzip_v1. Legacy iOS clients never declare it and retain the original wire format.
+func (rc *RelayDeviceConn) enableOutboundGzip() {
+	rc.mu.Lock()
+	rc.outboundGzip = true
+	rc.mu.Unlock()
+}
+
+func negotiateRelayGzip(conn Connection, capabilities []string) bool {
+	rc, ok := conn.(*RelayDeviceConn)
+	if !ok {
+		return false
+	}
+	for _, capability := range capabilities {
+		if capability == relayGzipCapability {
+			rc.enableOutboundGzip()
+			return true
+		}
+	}
+	return false
+}
+
+func negotiateRelayChunks(conn Connection, capabilities []string) bool {
+	rc, ok := conn.(*RelayDeviceConn)
+	if !ok {
+		return false
+	}
+	for _, capability := range capabilities {
+		if capability == relayChunksCapability {
+			rc.mu.Lock()
+			rc.outboundChunks = rc.writer != nil
+			enabled := rc.outboundChunks
+			rc.mu.Unlock()
+			return enabled
+		}
+	}
+	return false
+}
+
 // SendJSON 将业务消息加密为 relay envelope 并发送。
 func (rc *RelayDeviceConn) SendJSON(v any) {
-	rc.mu.Lock()
-	defer rc.mu.Unlock()
+	rc.sendJSON(v, nil)
+}
 
-	if rc.closed || rc.sendEnvelope == nil {
-		return
-	}
+func (rc *RelayDeviceConn) SendJSONClassified(v any, class relayOutboundClass) {
+	rc.sendJSON(v, &class)
+}
 
-	// 序列化 inner payload
+func (rc *RelayDeviceConn) sendJSON(v any, classHint *relayOutboundClass) {
 	plaintext, err := json.Marshal(v)
 	if err != nil {
 		slog.Error("relay-conn: marshal inner payload", "device", rc.deviceID, "error", err)
 		return
 	}
+	rc.mu.Lock()
+	outboundGzip := rc.outboundGzip
+	writer := rc.writer
+	closed := rc.closed
+	rc.mu.Unlock()
+	if closed {
+		// Visible signal for flapping windows: publisher still targets a
+		// Connection pointer that has already been replaced/closed.
+		slog.Warn("relay-conn: drop outbound on closed connection",
+			"device", safeID(rc.deviceID),
+			"payloadBytes", len(plaintext),
+		)
+		return
+	}
+	class := classifyRelayPayload(plaintext)
+	if classHint != nil && *classHint < relayOutboundClassCount {
+		class = *classHint
+	}
+	contentEncoding := ""
+	if outboundGzip && len(plaintext) >= relayGzipThreshold {
+		compressed, compressErr := gzipPayload(plaintext)
+		if compressErr != nil {
+			slog.Error("relay-conn: gzip inner payload", "device", rc.deviceID, "error", compressErr)
+			return
+		}
+		if len(compressed) < len(plaintext) {
+			contentEncoding = "gzip"
+			slog.Info("relay-conn: compressed outbound payload",
+				"device", rc.deviceID,
+				"uncompressed_bytes", len(plaintext),
+				"compressed_bytes", len(compressed))
+			plaintext = compressed
+		}
+	}
+	if writer != nil {
+		if err := writer.enqueue(&relayOutboundJob{conn: rc, payload: plaintext, contentEncoding: contentEncoding, class: class}); err != nil {
+			slog.Error("relay-conn: unified writer delivery", "device", rc.deviceID, "error", err)
+			_ = rc.Close()
+		}
+		return
+	}
+	// Temporary release-window path for relayUnifiedWriterV1=false. Production
+	// connections sample the flag once at secure-epoch creation.
+	if err := rc.writeLogicalFrame(plaintext, contentEncoding, nil); err != nil {
+		slog.Error("relay-conn: legacy relay delivery", "device", rc.deviceID, "error", err)
+	}
+}
+
+func (rc *RelayDeviceConn) writeLogicalFrame(plaintext []byte, contentEncoding string, chunk *RelayChunkMetadata) error {
+	rc.mu.Lock()
+	if rc.closed || rc.sendEnvelope == nil {
+		rc.mu.Unlock()
+		return fmt.Errorf("relay connection closed")
+	}
+	key := append([]byte(nil), rc.macToIosKey...)
+	sendEnvelope := rc.sendEnvelope
+	routeID := rc.routeID
+	deviceID := rc.deviceID
+	generation := rc.generation
+	rc.mu.Unlock()
+	defer zeroBytes(key)
 
 	// 获取并递增 counter
 	counter := rc.sendCounter.Add(1) - 1 // Add 返回增加后的值，减 1 得到本次使用的值
@@ -114,37 +283,53 @@ func (rc *RelayDeviceConn) SendJSON(v any) {
 	now := time.Now().UTC()
 	envelope := &RelayEnvelope{
 		Version:           1,
-		RouteID:           rc.routeID,
+		RouteID:           routeID,
 		SenderID:          "bridge",
-		DestinationID:     rc.deviceID,
-		ChannelGeneration: rc.generation,
-		KeyEpochID:        "online:" + strconv.FormatUint(rc.generation, 10),
+		DestinationID:     deviceID,
+		ChannelGeneration: generation,
+		KeyEpochID:        "online:" + strconv.FormatUint(generation, 10),
 		MessageID:         generateRelayID("msg_"),
 		Counter:           counter,
+		ContentEncoding:   contentEncoding,
+		Chunk:             chunk,
 		CreatedAt:         now.Format(time.RFC3339),
 		ExpiresAt:         now.Add(24 * time.Hour).Format(time.RFC3339),
 	}
 	aad, err := envelope.EncodeAAD()
 	if err != nil {
-		slog.Error("relay-conn: encode envelope aad", "device", rc.deviceID, "counter", counter, "error", err)
-		return
+		return fmt.Errorf("encode envelope aad: %w", err)
 	}
-	ciphertext, err := SealEnvelope(rc.macToIosKey, counter, aad, plaintext)
+	ciphertext, err := SealEnvelope(key, counter, aad, plaintext)
 	if err != nil {
-		slog.Error("relay-conn: seal envelope", "device", rc.deviceID, "counter", counter, "error", err)
-		return
+		return fmt.Errorf("seal envelope: %w", err)
 	}
 	envelope.Ciphertext = ciphertext
 
 	envelopeJSON, err := json.Marshal(envelope)
 	if err != nil {
-		slog.Error("relay-conn: marshal envelope", "device", rc.deviceID, "error", err)
-		return
+		return fmt.Errorf("marshal envelope: %w", err)
 	}
 
-	if err := rc.sendEnvelope(envelopeJSON); err != nil {
-		slog.Error("relay-conn: send envelope", "device", rc.deviceID, "error", err)
+	if err := sendEnvelope(envelopeJSON); err != nil {
+		return fmt.Errorf("send envelope: %w", err)
 	}
+	return nil
+}
+
+func gzipPayload(payload []byte) ([]byte, error) {
+	var compressed bytes.Buffer
+	writer, err := gzip.NewWriterLevel(&compressed, gzip.BestSpeed)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := writer.Write(payload); err != nil {
+		_ = writer.Close()
+		return nil, err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+	return compressed.Bytes(), nil
 }
 
 // SendResult 发送带 requestId 的 result 回复。
@@ -160,18 +345,102 @@ func (rc *RelayDeviceConn) SendResult(requestID string, data interface{}, err *W
 		resp["ok"] = true
 		resp["data"] = data
 	}
-	rc.SendJSON(resp)
-}
-
-// SendEvent 发送业务事件。
-func (rc *RelayDeviceConn) SendEvent(sessionID, backendID, eventName string, data interface{}) {
-	rc.SendJSON(EventMessage{
-		Type:      "event",
-		SessionID: sessionID,
-		BackendID: backendID,
-		Event:     eventName,
-		Data:      data,
-	})
+	plaintext, marshalErr := json.Marshal(resp)
+	if marshalErr != nil {
+		slog.Error("relay-conn: marshal result", "device", rc.deviceID, "requestId", requestID, "error", marshalErr)
+		return
+	}
+	rc.mu.Lock()
+	class, ok := rc.requestClasses[requestID]
+	delete(rc.requestClasses, requestID)
+	bulkContext, hasBulkContext := rc.bulkRequestContexts[requestID]
+	delete(rc.bulkRequestContexts, requestID)
+	writer := rc.writer
+	closed := rc.closed
+	outboundGzip := rc.outboundGzip
+	outboundChunks := rc.outboundChunks
+	channelGeneration := rc.generation
+	rc.mu.Unlock()
+	if !ok {
+		class = relayOutboundNormal
+	}
+	if closed {
+		return
+	}
+	contentEncoding := ""
+	if outboundGzip && len(plaintext) >= relayGzipThreshold {
+		compressed, compressErr := gzipPayload(plaintext)
+		if compressErr != nil {
+			slog.Error("relay-conn: gzip result", "device", rc.deviceID, "requestId", requestID, "error", compressErr)
+			return
+		}
+		if len(compressed) < len(plaintext) {
+			plaintext = compressed
+			contentEncoding = "gzip"
+		}
+	}
+	if writer != nil {
+		if outboundChunks && class == relayOutboundBulk && len(plaintext) > relayChunkTargetBytes {
+			if len(plaintext) > relayLogicalMaximumBytes {
+				slog.Error("relay-conn: logical bulk result too large", "device", rc.deviceID, "requestId", requestID, "bytes", len(plaintext))
+				_ = rc.Close()
+				return
+			}
+			chunkBytes := relayChunkTargetBytes
+			if needed := (len(plaintext) + relayChunkMaximumCount - 1) / relayChunkMaximumCount; needed > chunkBytes {
+				chunkBytes = needed
+			}
+			if chunkBytes < relayChunkMinimumBytes {
+				chunkBytes = relayChunkMinimumBytes
+			}
+			count := uint32((len(plaintext) + chunkBytes - 1) / chunkBytes)
+			groupID := generateRelayID("grp_")
+			handle := newOutboundBulkHandle(groupID)
+			if hasBulkContext && !rc.installHandleIfSessionBulkGenerationCurrent(bulkContext.sessionID, bulkContext.generation, handle) {
+				handle.Cancel()
+				relayBulkSuperseded.Add(1)
+				relayBulkSupersededBeforeSubmit.Add(1)
+				slog.Info("relay bulk superseded before submit", "device", rc.deviceID, "requestId", requestID, "sessionId", bulkContext.sessionID, "stale_handler_elapsed_ms", durationMillis(time.Since(bulkContext.startedAt)), "serialized_bytes", len(plaintext))
+				return
+			}
+			job := &relayOutboundJob{
+				conn: rc, payload: plaintext, contentEncoding: contentEncoding,
+				cursor: &relayChunkCursor{
+					groupID: groupID, count: count, chunkBytes: chunkBytes, handle: handle,
+					sessionID: bulkContext.sessionID, sessionGeneration: bulkContext.generation,
+					channelGeneration: channelGeneration, expiresAt: time.Now().Add(relayBulkCursorMaxAge),
+				},
+			}
+			if writeErr := writer.admitBulk(job); writeErr != nil {
+				handle.Cancel()
+				if hasBulkContext {
+					rc.completeBulkHandle(bulkContext.sessionID, handle)
+				}
+				slog.Error("relay-conn: bulk admission failed", "device", rc.deviceID, "requestId", requestID, "error", writeErr)
+				if errors.Is(writeErr, errRelayBulkQueueOverflow) {
+					overload, marshalOverloadErr := json.Marshal(map[string]interface{}{
+						"type": "result", "requestId": requestID, "ok": false,
+						"error": &WireError{Code: "relay.overloaded", Message: "Relay bulk queue is full"},
+					})
+					if marshalOverloadErr == nil {
+						writeErr = writer.enqueue(&relayOutboundJob{conn: rc, payload: overload, class: relayOutboundInteractive})
+					}
+				}
+				if writeErr != nil {
+					_ = rc.Close()
+				}
+			}
+			return
+		}
+		if writeErr := writer.enqueue(&relayOutboundJob{conn: rc, payload: plaintext, contentEncoding: contentEncoding, class: class}); writeErr != nil {
+			slog.Error("relay-conn: unified writer result delivery", "device", rc.deviceID, "requestId", requestID, "error", writeErr)
+			_ = rc.Close()
+		}
+		return
+	}
+	if writeErr := rc.writeLogicalFrame(plaintext, contentEncoding, nil); writeErr != nil {
+		slog.Error("relay-conn: legacy result delivery", "device", rc.deviceID, "requestId", requestID, "error", writeErr)
+	}
 }
 
 // ReceiveJSON 解密入站 relay envelope 并返回业务 JSON。
@@ -235,12 +504,30 @@ func (rc *RelayDeviceConn) RemoteAddr() string {
 // Close 关闭 relay connection，擦除密钥材料。
 func (rc *RelayDeviceConn) Close() error {
 	rc.mu.Lock()
-	defer rc.mu.Unlock()
-
+	already := rc.closed
+	scheduler := rc.inboundScheduler
+	rc.inboundScheduler = nil
 	rc.closed = true
+	if !already {
+		slog.Info("relay-conn: closing device connection",
+			"device", safeID(rc.deviceID),
+			"generation", rc.generation,
+		)
+	}
+	rc.writer = nil
+	clear(rc.requestClasses)
+	for _, handle := range rc.activeBulkHandles {
+		handle.Cancel()
+	}
+	clear(rc.activeBulkHandles)
+	clear(rc.bulkRequestContexts)
 	zeroBytes(rc.macToIosKey)
 	zeroBytes(rc.iosToMacKey)
 	rc.sendEnvelope = nil
+	rc.mu.Unlock()
+	if scheduler != nil {
+		scheduler.close()
+	}
 	return nil
 }
 

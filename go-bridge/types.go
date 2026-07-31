@@ -11,23 +11,32 @@ import (
 
 // WireMessage is the top-level envelope for all WS messages.
 type WireMessage struct {
-	Type      string          `json:"type"`
-	RequestID string          `json:"requestId,omitempty"`
-	BackendID string          `json:"backendId,omitempty"`
-	SessionID string          `json:"sessionId,omitempty"`
-	Method    string          `json:"method,omitempty"`
-	Operation string          `json:"operation,omitempty"`
-	Event     string          `json:"event,omitempty"`
-	Params    json.RawMessage `json:"params,omitempty"`
-	Data      json.RawMessage `json:"data,omitempty"`
-	Client    json.RawMessage `json:"client,omitempty"`
-	Protocol  json.RawMessage `json:"protocol,omitempty"`
-	Error     *WireError      `json:"error,omitempty"`
+	Type                    string              `json:"type"`
+	RequestID               string              `json:"requestId,omitempty"`
+	BackendID               string              `json:"backendId,omitempty"`
+	SessionID               string              `json:"sessionId,omitempty"`
+	Method                  string              `json:"method,omitempty"`
+	Operation               string              `json:"operation,omitempty"`
+	Event                   string              `json:"event,omitempty"`
+	Params                  json.RawMessage     `json:"params,omitempty"`
+	Data                    json.RawMessage     `json:"data,omitempty"`
+	Client                  json.RawMessage     `json:"client,omitempty"`
+	Protocol                json.RawMessage     `json:"protocol,omitempty"`
+	Error                   *WireError          `json:"error,omitempty"`
+	Capabilities            []string            `json:"capabilities,omitempty"`
+	LastBridgeEpoch         string              `json:"lastBridgeEpoch,omitempty"`
+	LastEventID             string              `json:"lastEventId,omitempty"`
+	LastSeenBySession       BridgeSessionCutMap `json:"lastSeenBySession,omitempty"`
+	RecoveryID              string              `json:"recoveryId,omitempty"`
+	AppliedThroughBySession BridgeSessionCutMap `json:"appliedThroughBySession,omitempty"`
 }
 
 type WireError struct {
-	Code    string `json:"code,omitempty"`
-	Message string `json:"message,omitempty"`
+	Code             string `json:"code,omitempty"`
+	Message          string `json:"message,omitempty"`
+	Retryable        *bool  `json:"retryable,omitempty"`
+	RetryAfterMillis *int64 `json:"retryAfterMillis,omitempty"`
+	Attempts         int    `json:"attempts,omitempty"`
 }
 
 func (e *WireError) Error() string {
@@ -71,12 +80,18 @@ type ResultResponse struct {
 
 // EventMessage is pushed from server to client for agent events.
 type EventMessage struct {
-	Type      string      `json:"type"`
-	SessionID string      `json:"sessionId"`
-	BackendID string      `json:"backendId"`
-	Event     string      `json:"event"`
-	Data      interface{} `json:"data"`
-	Seq       int         `json:"seq,omitempty"`
+	Type          string      `json:"type"`
+	EventID       string      `json:"eventId"`
+	Seq           int         `json:"seq"`
+	PerSessionSeq int         `json:"perSessionSeq,omitempty"`
+	BridgeEpoch   string      `json:"bridgeEpoch"`
+	SessionID     string      `json:"sessionId"`
+	BackendID     string      `json:"backendId"`
+	Event         string      `json:"event"`
+	Data          interface{} `json:"data"`
+	Message       string      `json:"message,omitempty"`
+	Replayable    bool        `json:"replayable"`
+	Timestamp     int64       `json:"timestamp"`
 }
 
 // Handler-specific request/response types.
@@ -112,6 +127,7 @@ type GetSessionMessagesParams struct {
 	BeforeCursor        string `json:"beforeCursor,omitempty"`
 	Paginate            bool   `json:"paginate,omitempty"`
 	IfNoneMatchRevision string `json:"ifNoneMatchRevision,omitempty"`
+	RecoveryID          string `json:"recoveryId,omitempty"`
 }
 
 type DeleteSessionParams struct {
@@ -154,12 +170,12 @@ type ListModelsParams struct {
 // fields here expecting them to reach iOS; edit sessionsToWire instead. Kept aligned with
 // the verified wire union (incl. pinnedAtMillis) for documentation only.
 type SessionInfo struct {
-	ID              string `json:"id"`
-	Title           string `json:"title,omitempty"`
-	MessageCount    int    `json:"messageCount,omitempty"`
-	ModifiedAt      string `json:"modifiedAt,omitempty"`
-	PinnedAtMillis  int64  `json:"pinnedAtMillis,omitempty"`
-	ArchivedAtMillis int64 `json:"archivedAtMillis,omitempty"`
+	ID               string `json:"id"`
+	Title            string `json:"title,omitempty"`
+	MessageCount     int    `json:"messageCount,omitempty"`
+	ModifiedAt       string `json:"modifiedAt,omitempty"`
+	PinnedAtMillis   int64  `json:"pinnedAtMillis,omitempty"`
+	ArchivedAtMillis int64  `json:"archivedAtMillis,omitempty"`
 }
 
 // HistoryEntry returned to iOS.
@@ -449,6 +465,38 @@ func (b *Broadcaster) UnsubscribeAll(conn Connection) {
 	delete(b.allConns, conn)
 }
 
+// TransferSubscriptions moves every session subscription from old → new under one lock.
+// Used when a Relay device re-handshakes: the new Connection must inherit the old
+// session interest immediately so live text/reasoning deltas keep a target.
+// Observation scope is device-scoped (not connection-scoped) and is left alone.
+func (b *Broadcaster) TransferSubscriptions(old, new Connection) {
+	if old == nil || new == nil || old == new {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	keys := b.connSubs[old]
+	if len(keys) == 0 {
+		delete(b.allConns, old)
+		b.allConns[new] = struct{}{}
+		return
+	}
+	if b.connSubs[new] == nil {
+		b.connSubs[new] = make(map[SubscriptionKey]struct{})
+	}
+	for key := range keys {
+		if b.subscribers[key] == nil {
+			b.subscribers[key] = make(map[Connection]struct{})
+		}
+		delete(b.subscribers[key], old)
+		b.subscribers[key][new] = struct{}{}
+		b.connSubs[new][key] = struct{}{}
+	}
+	delete(b.connSubs, old)
+	delete(b.allConns, old)
+	b.allConns[new] = struct{}{}
+}
+
 func (b *Broadcaster) ActiveDeviceIDs() []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -483,23 +531,29 @@ func (b *Broadcaster) Rebind(oldID, newID, backendID, directory string) {
 }
 
 func (b *Broadcaster) Send(ev BroadcastEvent) {
+	for _, conn := range b.Targets(ev.BackendID, ev.SessionID, ev.Directory) {
+		conn.SendJSON(ev.Message)
+	}
+}
+
+func (b *Broadcaster) Targets(backendID, sessionID, directory string) []Connection {
 	b.mu.Lock()
 	targets := make(map[Connection]struct{})
 	// 精确匹配
-	key := SubscriptionKey{BackendID: ev.BackendID, SessionID: ev.SessionID, Directory: ev.Directory}
+	key := SubscriptionKey{BackendID: backendID, SessionID: sessionID, Directory: directory}
 	for conn := range b.subscribers[key] {
 		targets[conn] = struct{}{}
 	}
 	// 不带 directory 匹配：event 有 directory 时也尝试匹配无 directory 的订阅者
-	if ev.Directory != "" {
-		noDirKey := SubscriptionKey{BackendID: ev.BackendID, SessionID: ev.SessionID}
+	if directory != "" {
+		noDirKey := SubscriptionKey{BackendID: backendID, SessionID: sessionID}
 		for conn := range b.subscribers[noDirKey] {
 			targets[conn] = struct{}{}
 		}
 	}
 	// event 无 directory 时，匹配该 session 所有 directory 的订阅者
-	if ev.Directory == "" {
-		prefix := SubscriptionKey{BackendID: ev.BackendID, SessionID: ev.SessionID}
+	if directory == "" {
+		prefix := SubscriptionKey{BackendID: backendID, SessionID: sessionID}
 		for k, conns := range b.subscribers {
 			if k.BackendID == prefix.BackendID && k.SessionID == prefix.SessionID && k.Directory != "" {
 				for conn := range conns {
@@ -514,7 +568,7 @@ func (b *Broadcaster) Send(ev BroadcastEvent) {
 	// 与老路径 register 模式的无条件广播行为一致。
 	if len(targets) == 0 {
 		for k, conns := range b.subscribers {
-			if k.BackendID == ev.BackendID {
+			if k.BackendID == backendID {
 				for conn := range conns {
 					targets[conn] = struct{}{}
 				}
@@ -531,12 +585,18 @@ func (b *Broadcaster) Send(ev BroadcastEvent) {
 	}
 	// Fix 5: 每 token 一帧的 INFO 日志降级为 Debug（长答时数十~上百帧/秒的 I/O 开销）。
 	// 不影响诊断——广播路径仍可由 Debug 级别观察；relayEvents 关键里程碑（turn_*/error）另 Info 记录。
-	slog.Debug("go-bridge: broadcast", "backend", ev.BackendID, "session", ev.SessionID, "dir", ev.Directory, "targets", len(targets), "fallback", len(targets) > 0 && len(targets) == len(b.connSubs))
+	slog.Debug("go-bridge: broadcast targets", "backend", backendID, "session", sessionID, "dir", directory, "targets", len(targets), "fallback", len(targets) > 0 && len(targets) == len(b.connSubs))
 	b.mu.Unlock()
-
+	result := make([]Connection, 0, len(targets))
 	for conn := range targets {
-		conn.SendJSON(ev.Message)
+		// Never deliver live frames to a replaced/closed relay connection — they
+		// would only produce "drop outbound on closed" and starve the new generation.
+		if closed, ok := conn.(interface{ isClosed() bool }); ok && closed.isClosed() {
+			continue
+		}
+		result = append(result, conn)
 	}
+	return result
 }
 
 // ── Pending Notification Store ──────────────────────────────────────────────
@@ -582,12 +642,11 @@ func (s *PendingNotificationStore) Consume(deviceID string) []PendingNotificatio
 	return result
 }
 
-// SubscriberDeviceIDs 返回订阅了指定 session 的所有设备 ID。
+// SubscriberDeviceIDs 返回订阅了指定 session 的所有（已认证）设备 ID。
 func (b *Broadcaster) SubscriberDeviceIDs(backendID, sessionID string) []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	seen := make(map[string]struct{})
-	// 遍历所有 key，匹配 backendID + sessionID
 	for k, conns := range b.subscribers {
 		if k.BackendID != backendID || k.SessionID != sessionID {
 			continue
@@ -603,4 +662,38 @@ func (b *Broadcaster) SubscriberDeviceIDs(backendID, sessionID string) []string 
 		result = append(result, id)
 	}
 	return result
+}
+
+// HasSessionSubscriber reports whether ANY connection is currently subscribed to
+// the given session (any directory; authed or not). Per-session relays use this to
+// keep watching (push model) while a client has the session open, instead of exiting
+// on idle TTL and missing the external turn.
+func (b *Broadcaster) HasSessionSubscriber(backendID, sessionID string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for k, conns := range b.subscribers {
+		if k.BackendID == backendID && k.SessionID == sessionID && len(conns) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// SubscribedSessionIDs returns the set of session IDs that currently have at least one
+// subscriber for the given backend (a client has that session open). Used by the codex
+// relay safety-net watcher to keep a relay running for every open session.
+func (b *Broadcaster) SubscribedSessionIDs(backendID string) []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	seen := make(map[string]struct{})
+	for k, conns := range b.subscribers {
+		if k.BackendID == backendID && len(conns) > 0 {
+			seen[k.SessionID] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for sid := range seen {
+		out = append(out, sid)
+	}
+	return out
 }

@@ -1,5 +1,76 @@
 # Claude Code 冷启动既有 session 首轮流式从头重播：跨仓排查结论
 
+## 2026-07-18 追加复盘：Relay 长 session 的 A/B/D 优化状态与跨端经验
+
+### 最终状态（后续 agent 先看此表）
+
+| 方案 | remote-web | iOS | MacBridge / Relay | 结论 |
+|---|---|---|---|---|
+| A. history ETag / 条件请求 | 已接入 | 早已接入 | MacBridge 早已有 `ifNoneMatchRevision` | 解决重复读取，不解决首次冷加载 |
+| B. gzip 后再加密 | 已接入 | 已接入 | MacBridge 按客户端能力对 Relay 下行压缩 | 解决首次大 history 的传输体积 |
+| D. 大响应分片 + 可抢占优先级队列 | **未实施** | **未实施** | 单 `readLoop` + `writeMu` 架构仍在 | 目前只有客户端编排缓解，不能写成 D 已完成 |
+
+### A：ETag 只能复用“与 revision 配对的真实 history”
+
+MacBridge 的 `get_session_messages` 会在完整响应中返回 `revision`；客户端下次发送
+`ifNoneMatchRevision`，命中后服务端只返回紧凑的 `unchanged: true`。iOS 原本已使用该契约，
+remote-web 此前漏接，导致每次切回看过的 session 仍重复传输数 MB history。
+
+remote-web 的最终实现同时保留 per-session 内存消息 bucket 和对应 revision，并以
+`sessionId + directory` 隔离 revision。收到 `unchanged: true` 时只允许恢复与其配对的真实内存
+bucket；若本地 bucket 不存在则直接报错，不能用空数组、旧快照或 fallback 冒充成功。backend
+切换会清空消息与 revision，完整响应没有 revision 时也会删除旧 revision。
+
+这项优化只覆盖第二次及后续读取。第一次打开 session 没有 revision，仍必须获得完整 history；
+因此不能用 A 的单测命中或切回秒开，声称首次 Relay 冷加载已优化。
+
+### B：压缩必须发生在 padding / AEAD 之前，并由客户端显式协商
+
+正式能力名是 `relay_gzip_v1`，只影响 MacBridge → Relay client 的在线帧：
+
+```text
+Bridge JSON -> gzip -> padding -> ChaCha20-Poly1305
+ChaCha20-Poly1305 -> remove padding -> gzip decode -> Bridge JSON
+```
+
+MacBridge 只在连接是 Relay、认证后的 Bridge hello 声明能力且 hello 被接受时启用；当前 sender
+只考虑至少 32 KiB 的 payload，并且只有 gzip 后确实更小时才发送 `contentEncoding: "gzip"`。
+该字段属于 envelope AAD，攻击者或中间层增删、替换字段都会使认证失败。Web 只有在浏览器提供
+`DecompressionStream` 时才声明能力；iOS 只在 Relay transport 声明，并在解密后使用有上限的流式
+gzip decoder。旧 Web/iOS、不支持能力的客户端、Direct WebSocket、iOS → Mac 上行和 mailbox
+继续使用原格式。
+
+WebSocket `permessage-deflate` 作用在已经加密的高熵 envelope 上，几乎不能压缩，不能替代 B。
+解压失败、未知编码、超出解压上限都必须暴露真实 transport 错误，禁止把压缩帧当普通 JSON
+重试或加入静默 fallback。
+
+### D：当前只有“优先发送小 RPC”的缓解，核心架构没有改
+
+MacBridge Relay 路径仍是单 readLoop 同步处理 RPC，所有出站写共享 `writeMu`。一个大 history
+响应写 socket 时，后到的模型、权限等小 RPC 仍可能在接收缓冲区等待。remote-web 当前在切换
+session 前预取模型和权限，并用 promise dedup 让 Composer 复用结果；soft reconnect 期间还会等待
+新 transport ready 后才允许 session history 请求。这能避免常见的“小 RPC 排在巨帧后面超时”，
+但它不是分片，也不是可抢占队列。iOS 本轮接入 A/B，没有新增 D 协议或队列。
+
+未来真正实施 D 时，行为拥有者主要在 MacBridge / Relay transport，而不是在 Web 或 iOS UI 层。
+至少要同时定义：分片 envelope 与 AAD、每片和整消息大小上限、counter/顺序与重组、取消和超时、
+有界 backpressure、控制帧优先级、公平性，以及旧客户端协商。Relay 服务器现有 per-device queue
+也不等于“大 RPC 已分片且可被小 RPC 抢占”。在这些完成并有跨端测试前，任何 agent 都不得把
+prefetch、gzip 或现有 queue 记为“D 已完成”。
+
+### 诊断与验收经验
+
+- 先看 MacBridge `session loading metrics`：`request_total_ms` 接近 `socket_send_ms` 表示瓶颈在
+  Relay 写入；history parse/encode 很短时不要先改 handler。
+- A 的验收要分别测首次打开与切回：首次仍传全量，切回应命中 `unchanged` 且保留真实消息。
+- B 的验收要确认 hello/ack 能力、Mac 日志里的压缩前后字节数，以及 envelope 在解密后才能解压。
+- Web owner 实测 B 后长 session 明显加快；iOS 已完成定向单测、真机构建安装，但 Relay 长 session
+  的最终加载速度仍需真实 Relay 路径人工验收，不能用 LAN 或单元测试替代。
+- 即使 A/B 已显著缩短时间，单 readLoop + `writeMu` 的 head-of-line blocking 仍是已知架构债；
+  若以后仍出现巨帧阻塞小 RPC，再评估 D，不要回退整页 history 或降低正常大帧写超时。
+
+---
+
 日期：2026-07-04
 结论：本次 owner 真机复现的主因不在 MacBridge 重复生成，也不在 Claude CLI stdout 中断，而在
 iOS 本地 Claude live stream 期间仍执行普通历史同步并覆盖 timeline。MacBridge 日志用于排除
@@ -468,3 +539,177 @@ prepend 为第一个 `reasoning` part；工具和正文则另存 parts。于是�
 *   在 macOS 中进行设备检测和语言检测时，优先使用 `UserDefaults.standard.stringArray(forKey: "AppleLanguages")` 来获取真实的系统环境，防止因 App 本地化支持范围不一致而被系统沙盒强行过滤截断。
 *   异常渲染不得将一般的网络状态或动作超时（Network / Request Timeout）和产品业务规则上的时间到期（Business Session Expiration）混为一谈。
 
+## 2026-07-19 Claude 外部 turn file-relay：turn_completed 后不能 return，进程 live 时继续 watch
+
+### 现象（owner 真机复现，iOS+Web 同时）
+
+Mac Desktop/CLI Claude 多轮外部 turn（Mac 端发起、客户端旁观）出现：
+
+- Web 完全收不到回复，必须靠「下一问」才把「上一答」同步出来
+- iOS 历史同步也偶发掉 turn
+- file-relay 日志里频繁出现 `claudeSessionFileRelay turn completed, exiting`，然后该 session 进入
+  「无 relay」状态，直到下一次 `get_session_messages` 才重启
+
+### 根因（go-bridge 侧）
+
+`claudeSessionFileRelayLoop`（`handlers_relay.go`）在检测到 `finalAssistant` 时：
+
+```go
+if entry.finalAssistant {
+    h.sendSessionEvent(sessionID, backendID, "turn_completed", ...)
+    h.broadcastIdleState(sessionID, backendID)
+    slog.Info("go-bridge: claudeSessionFileRelay turn completed, exiting", ...)
+    return  // ← BUG
+}
+```
+
+`return` 让 goroutine 退出，`relayRunning[sessionID]` 标记被清掉。Claude Desktop 在**同一 PID**
+上连续多轮 turn 是常态——下一轮 user 写入 JSONL 时，**没有任何 goroutine 在 watch**，
+`turn_started` 永远不会发出，直到客户端发起下一次 `get_session_messages` 触发重启 relay。
+窗口期内客户端既收不到 `turn_started`，也看不到正在生成的 assistant body（Claude Desktop
+只在 end_turn 才 flush JSONL），表现为「必须等下一问才能看到上一答」。
+
+另一个相关 bug：live-idle TTL 退出条件原本是「90s 无文件增长就退出」，**不管 Claude 进程
+是否仍存活**。Claude 长 thinking 阶段 transcript 静默 90s+ 是正常的，却被误判为「session 已死」。
+
+### 修复（go-bridge）
+
+1. **`finalAssistant` 不再 `return`**：改为 `runningObserved = false; continue`，在 Claude 进程
+   仍 live 时继续 watch。下一轮 user 写入 JSONL 立刻广播 `turn_started`。
+2. **live-idle TTL 仅在进程已不存活时才退出**：进程仍 live 但 transcript 静默时保持 watching，
+   防止长 thinking 被误杀。原退出条件保留作为进程死亡后的清理路径。
+
+### 测试更新
+
+`claude_file_relay_test.go`：
+
+- `TestClaudeFileRelayTickUsesCachedPID`：live 时保持 running，进程死后才停（断言
+  `handlers.relayKindIs(sessionID, relayKindClaudeFile) == true`）。
+- 其它已有用例（WarmStartUser / LiveIdleSnapshot / Interrupt 等）不依赖「turn_completed 后
+  退出」，只读 2 条事件即通过，无需修改。
+
+`go test ./go-bridge/ -run ClaudeFileRelay` 全部通过。
+
+### 配套 Web 侧修复（详见 ../cordcode-ios/think.md 复盘 VII-IX）
+
+Web 端也有一个叠加 bug：`applyExternalTurnHistory` 无脑把 trailing assistant 标成
+`isStreaming:true`，导致安全网 `externalTurnLooksComplete` 永远 false，即使服务端已 flush 出
+完整 body 也永不自动 settle。Mac 修了 file-relay 不退出 + Web 修了不强制 streaming，
+两层叠加的「下一问才同步上一答」才彻底消除。
+
+### 后续原则
+
+- **长生命周期 watcher goroutine 不要在常规完成信号上 `return`**：完成 ≠ session 关闭。
+  只要有可能产生下一轮事件（同 PID、同 socket、同 session），就应该继续 watch，把退出条件
+  严格限制在「真正不可恢复」（进程死亡、socket 关闭、超长 idle + 进程不存活）。
+- **跨客户端 turn 同步需要双端配合**：Mac 端负责广播边界事件，客户端负责在缺事件时也能
+  从权威历史推导 settle；任何一端假设「对方一定会发事件」都会在边界条件下丢 turn。
+- **file-relay 的退出语义**：「finalAssistant 写入」只是 transcript 状态变化，**不是 watcher
+  生命周期事件**；这两个概念必须分开。
+
+---
+
+# 2026-07-21 跨仓指针：iOS 输入框执行中 / 外部 turn 收口（本仓无代码变更）
+
+> **完整复盘在 iOS 仓** `../cordcode-ios/think.md`「2026-07-21 复盘 XI」。  
+> 设计/实现/审计：`../cordcode-ios/docs/2026-07-21-ios-generation-single-authority-*.md`。
+
+## 结论（Mac 侧只需知道）
+
+- **根因在 iOS generation 多权威收口**（expected stale 裸 return、多 poll force-complete、load 内自 complete、Idle 下 delta activate 等），**不是**本轮 go-bridge EMIT 缺失。
+- owner 真机卡住瞬间 `go-bridge.log` 常有 `codexSessionFileRelay EMIT turn_started/turn_completed` + history 增长 → 投递侧可用；排障仍用 EMIT 日志 + LAN/relay 对照。
+- **本仓 2026-07-21 无业务代码 commit**；file-relay「turn_completed 后继续 watch」原则仍见上文 2026-07-19 节。
+- iOS 已收敛：输入框 `isGenerating||requiresAction`、HEAL、`externalTurnLooksComplete`、load post-apply settle、Idle 不 activate；owner 三连 ✅。剩余 G1 poll 函数合一 / G6 recover 结构在 iOS 后续 PR。
+# 2026-07-22 Codex rollout identity / completion boundary
+
+Codex file-relay 与 rich history 曾把同一 rollout turn 投影成不同身份：scanner 已读取 `task_started.turn_id`，但 lifecycle payload 的 `turnId` 为空，history entry 又使用独立派生 ID。更严重的是 rich-history reader 在当前文件 EOF 就写 `TurnCompletedAt` 并把最后文本标成 final；活跃 rollout 每次增长都会被客户端观察成一次伪完成。
+
+现在以 rollout 原生信号为唯一真值：`task_started.turn_id` 贯穿 lifecycle、delta `itemId` 与 history entry ID；EOF 保持 progress 且无完成时间，只有 `task_complete` 关闭 turn。transcript index span 同时覆盖 start/complete 记录，分页 replay 不丢这两项证据。消费端因此可以按 exact ID reducer 合并，不需要正文相似度启发式。
+
+第五轮真机回归进一步证明，仅修 assistant 身份仍不够：Codex rollout 会在 `task_started` 后写入 `response_item(role=user)`，旧 file-relay 忽略该记录，导致 Mac 端问题只能随 history 回源迟到。现在 scanner 将它映射为 `user_message`，复用 response-item `id`，并绑定当前 source turn ID；`event_msg.user_message` 不重复解析，避免 rollout 双写造成重复。iOS 的 foreground/history reconcile 同时被约束为活跃 push turn 的 merge-only 校准者，不能凭部分 history 提前结束 turn。
+
+---
+
+---
+
+# 2026-07-27 K5.2 Claude projection SoT（uuid + keep-watch + catch-up）
+
+完整产品复盘在 iOS 仓 `../cordcode-ios/think.md`「复盘 XVIII」。本仓只记 go-bridge 契约。
+
+## 修了什么
+
+1. **`b787975`** — Claude transcript identity  
+   - 结构加顶层 `uuid`  
+   - turn/item：`message.id` 优先，否则 `uuid`  
+   - live file-relay growth 复用 `claudeEntryToProjectionEvents`（带 identity 的 user_message / text_delta / turn_completed）  
+   - 禁止空 `turnId` 的 turn_started / 无 itemId 的 text_delta（reducer 会 skip）
+
+2. **`a39133e`** — multi-session live + reopen  
+   - process 未 live：**继续 watch** transcript，不立即 exit；PID 晚到可 late-bind  
+   - 未 live 时不根据历史 tail 武装 running  
+   - `ProjectionKernel.committedSourceCursor`：Ready 后若 `source.Cursor` 更大，强制 catch-up hydrate，而不是 `AlreadyReady`
+
+## 为何需要
+
+Owner K5.2：A 同步正常，B 打开后 Mac 发消息 3 无 live，切回仍无。日志：B relay `process not live ... exiting`；reopen `headRev` 钉死旧 rev。根因在本仓 SoT，不在 iOS UI。
+
+## 测试
+
+`go test ./go-bridge -run 'TestClaudeFileRelay|TestClaudeEntryToProjectionEvents|TestProjectionCatchUpWhenSourceAdvancesPastReady'`
+
+## 原则
+
+- Claude user 身份以真实 JSONL 为准（常无 message.id）。  
+- file-relay 生命周期 ≠ process 此刻可发现。  
+- Ready projection 必须能对 source 增长 catch-up。  
+- 不把这类洞交给 iOS referee。
+
+
+
+## OpenCode K5.3 (2026-07-28)
+
+OpenCode session_sync_v2 via rich-history hydrate + live TurnID/ItemID.
+
+Follow-on SoT fixes same day (owner matrix green):
+1. `handleOpenCodeRPC` allowlist `get_session_projection` (cold open).
+2. `DeltaBatcher` preserve `itemId` on text/reasoning flush (live content).
+3. SSE `noteUserPrompt` for bare user + part.delta (user bubbles).
+4. Multi-step: do **not** emit EventResult on intermediate assistant `time.completed` / `step_finish`; only `session.status`/`session.updated` idle closes the turn (composer no longer flips idle on tools).
+5. iOS side (sibling repo): v2 allows todos control-plane; discards stale completed plans on new generation.
+
+Tests: `go test ./agent/opencode -run 'TestSSESubscriber_MultiStep|CompletionIsIdempotent|ToolTodoAndIdle'`.
+
+
+# 2026-07-29 remote-web 首开 Claude projection 报 project dir not found
+
+## 现象与证据
+
+web 第一次打开 Claude session，`get_session_projection` 立即
+`projection.hydrate_failed: claudecode: project dir not found`；再打开任意 session 后恢复。
+同一时刻 `claudeSessionFileRelay` 能找到正确 JSONL，说明 session 与 transcript 都存在，失败只在
+cold hydrate source inspection。
+
+## 根因
+
+Claude `prepareProjectionHydrateSource` 通过 agent `TranscriptPath` 查文件；该实现从共享
+`agent.workDir` 推导 `~/.claude/projects/<key>`。首开前 workDir 还是 runtime 启动目录，尚未被其他
+带 directory 的 RPC 更新。后续“自愈”只是别的请求偶然改了共享状态。
+
+直接在 read-only projection handler 上 `SetWorkDir` 也不安全：多设备可能同时冷开不同项目，
+共享 agent workDir 会产生跨 session 竞态。
+
+## 修复
+
+- `get_session_projection` 将 request directory 传入 hydrate source resolver；
+- Claude 用已有 `findClaudeSessionFile(sessionID, directory)` 解析真实 transcript；
+- 不修改 agent workDir；Codex/OpenCode source 路径不变；
+- 测试以 stale agent workDir + 正确 session directory 冷拉，证明投影有内容且 workDir 未变化，
+  `-count=10` 稳定通过。
+
+## 验证边界
+
+- 新增定向测试及相关 projection tests 通过；
+- Release build 通过；
+- 仓库全量 Go 仍有两个独立既有失败：
+  `TestScanCodexTranscriptRelayEventsToolsAndTokens`（Codex itemId）、
+  `TestRegressionR1_LeaseAutoDowngrade`（lease expiry）；单独重跑仍失败，本轮不顺手改。

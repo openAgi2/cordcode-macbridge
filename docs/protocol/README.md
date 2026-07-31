@@ -47,5 +47,6 @@ new major `protocol.version`.
 
 - `bridge-v1.md`: direct WebSocket envelope, handshake, RPC, events, and compatibility notes.
 - `relay-v1.md`: end-to-end relay envelope and mailbox protocol.
+- `relay-frame-compression.md`: negotiated gzip-before-encryption for MacBridge-to-Web Relay frames.
 - `schema/bridge-v1.types.ts`: TypeScript reference types matching Go JSON tags and iOS Codable fields.
 - `samples/`: representative JSON fixtures for handshake and relay compatibility checks.

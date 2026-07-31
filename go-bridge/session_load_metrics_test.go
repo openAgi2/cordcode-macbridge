@@ -13,7 +13,13 @@ func (c *sessionLoadCaptureConn) SendJSON(value any) {
 	c.sent = value
 }
 
-func (c *sessionLoadCaptureConn) SendResult(string, interface{}, *WireError)    {}
+func (c *sessionLoadCaptureConn) SendResult(requestID string, data interface{}, wireErr *WireError) {
+	c.sent = map[string]interface{}{"type": "result", "requestId": requestID, "ok": wireErr == nil, "data": data}
+	if wireErr != nil {
+		delete(c.sent.(map[string]interface{}), "data")
+		c.sent.(map[string]interface{})["error"] = wireErr
+	}
+}
 func (c *sessionLoadCaptureConn) SendEvent(string, string, string, interface{}) {}
 func (c *sessionLoadCaptureConn) AuthedDevice() *TrustedDeviceRecord            { return nil }
 func (c *sessionLoadCaptureConn) RemoteAddr() string                            { return "test" }

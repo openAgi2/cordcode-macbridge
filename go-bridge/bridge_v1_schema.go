@@ -1,14 +1,23 @@
 package gobridge
 
 const (
-	BridgeProtocolName           = "cordcode-bridge"
-	BridgeProtocolVersion        = 1
+	BridgeProtocolName    = "cordcode-bridge"
+	BridgeProtocolVersion = 1
 	// BridgeProtocolSchemaRevision 标记 wire schema 修订。session pinning（pinnedAtMillis
 	// 字段 + set_session_pinned / list_pinned_sessions RPC + session_pin capability）是
 	// 非破坏性可选新增，不 bump major version，只 bump schemaRevision。hello 只在
 	// Protocol.Version 上 gating（hello_handler.go:97），schemaRevision 纯信息字段，
 	// 旧客户端不受影响。见 docs/protocol/bridge-v1.md「Session Pinning」。
-	BridgeProtocolSchemaRevision = "2026-07-05"
+	//
+	// 2026-07-24: Session Projection Stream（session_sync_v2 client capability + hello_ack echo
+	// + projection_patch/projection_snapshot/sync_invalidate events + get_session_projection RPC
+	// + BridgeSessionProjection 系列类型）。同样是 extensible 非破坏性新增（capability 数组/map、
+	// 新 event 名、新 RPC method），只 bump schemaRevision。
+	//
+	// 2026-07-29 Phase 4: session_sync_v2 opt-in semantics become projection-only; Mac no longer
+	// live-delivers raw timeline content to opted-in connections. Legacy clients omit the
+	// capability and retain the explicit off path.
+	BridgeProtocolSchemaRevision = "2026-07-29"
 )
 
 type BridgeV1Protocol struct {
@@ -131,11 +140,12 @@ type BridgeV1PairedBridge struct {
 }
 
 type BridgeV1EventEnvelope struct {
-	Type        string      `json:"type"`
-	Seq         int         `json:"seq"`
-	BackendID   string      `json:"backendId,omitempty"`
-	WorkspaceID string      `json:"workspaceId,omitempty"`
-	SessionID   string      `json:"sessionId,omitempty"`
-	Event       string      `json:"event"`
-	Data        interface{} `json:"data,omitempty"`
+	Type          string      `json:"type"`
+	Seq           int         `json:"seq"`
+	PerSessionSeq int         `json:"perSessionSeq,omitempty"`
+	BackendID     string      `json:"backendId,omitempty"`
+	WorkspaceID   string      `json:"workspaceId,omitempty"`
+	SessionID     string      `json:"sessionId,omitempty"`
+	Event         string      `json:"event"`
+	Data          interface{} `json:"data,omitempty"`
 }

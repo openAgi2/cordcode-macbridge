@@ -1,12 +1,12 @@
 package gobridge
 
 import (
-	"github.com/openAgi2/cordcode-macbridge/core"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"github.com/openAgi2/cordcode-macbridge/core"
 	"log/slog"
 	"os"
-	"time"
 )
 
 // ── 启动契约帧类型 ──────────────────────────────────────────────────────────
@@ -33,11 +33,11 @@ type RuntimeErrorFrame struct {
 // ── 错误码常量 ───────────────────────────────────────────────────────────────
 
 const (
-	RuntimeErrorPortBindFailed         = "runtime_error.port_bind_failed"
-	RuntimeErrorNoAgents               = "runtime_error.no_agents"
-	RuntimeErrorConfigInvalid          = "runtime_error.config_invalid"
-	RuntimeErrorManagementBindFailed   = "runtime.management_bind_failed" // P1-6: 管理 API 监听失败
-	RuntimeErrorManagementURLMissing   = "runtime.management_url_missing" // P1-6: ready frame 缺少必需 management URL
+	RuntimeErrorPortBindFailed       = "runtime_error.port_bind_failed"
+	RuntimeErrorNoAgents             = "runtime_error.no_agents"
+	RuntimeErrorConfigInvalid        = "runtime_error.config_invalid"
+	RuntimeErrorManagementBindFailed = "runtime.management_bind_failed" // P1-6: 管理 API 监听失败
+	RuntimeErrorManagementURLMissing = "runtime.management_url_missing" // P1-6: ready frame 缺少必需 management URL
 	// RuntimeErrorBootstrapPersistFailed: runtime.json / management-token 等启动持久化文件写失败。
 	// product 模式下 Mac App 据这些文件发现 runtime；写失败时若仍发布 ready 会产生"网络已开放但
 	// UI 永远未就绪"的 runtime（每 60s 重启）。fail-fast：写 error frame + exit，不发布 ready。
@@ -51,11 +51,11 @@ const (
 //
 // 注意：stdout ready frame 在写 runtime.json 之前输出——若 runtime.json 写失败，调用方
 // 仍应覆盖该 ready（写 error frame + exit），而非让父进程消费这个 ready。
-func WriteReadyFrame(port int, drivers []string, managementURL string, dataDirPath string) error {
+func WriteReadyFrame(port int, drivers []string, managementURL string, dataDirPath string, bridgeEpoch string) error {
 	frame := RuntimeReadyFrame{
 		Type:          "runtime_ready",
 		Port:          port,
-		BridgeEpoch:   generateEpoch(),
+		BridgeEpoch:   bridgeEpoch,
 		Drivers:       drivers,
 		ManagementURL: managementURL,
 		PID:           os.Getpid(),
@@ -113,7 +113,16 @@ func ParseErrorFrame(data []byte) (*RuntimeErrorFrame, error) {
 	return &frame, nil
 }
 
-// generateEpoch 生成启动唯一标识（时间戳 + PID）。
-func generateEpoch() string {
-	return fmt.Sprintf("%d-%d", time.Now().UnixMilli(), os.Getpid())
+// generateBridgeEpoch returns a process-unique 128-bit random UUID. Callers must
+// fail startup on entropy failure; a timestamp/PID fallback could silently reuse
+// an epoch and make recovery treat a restarted bridge as the old process.
+func generateBridgeEpoch() (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("generate bridge epoch: %w", err)
+	}
+	raw[6] = (raw[6] & 0x0f) | 0x40
+	raw[8] = (raw[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		raw[0:4], raw[4:6], raw[6:8], raw[8:10], raw[10:16]), nil
 }

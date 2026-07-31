@@ -171,7 +171,7 @@ func TestWriteReadyFrame_ReturnsErrorOnUnwritableDataDir(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(dataDir, 0o755) })
 
-	err := WriteReadyFrame(8777, []string{"claude"}, "http://127.0.0.1:9999", dataDir)
+	err := WriteReadyFrame(8777, []string{"claude"}, "http://127.0.0.1:9999", dataDir, "test-epoch")
 	if err == nil {
 		t.Fatal("WriteReadyFrame returned nil error for unwritable dataDir; expected fail-fast error")
 	}
@@ -188,7 +188,7 @@ func TestWriteReadyFrame_ReturnsErrorOnUnwritableDataDir(t *testing.T) {
 // cross-validation).
 func TestWriteReadyFrame_SuccessWritesRuntimeJSONWithEpoch(t *testing.T) {
 	dataDir := t.TempDir()
-	if err := WriteReadyFrame(8777, []string{"claude", "codex"}, "http://127.0.0.1:9999", dataDir); err != nil {
+	if err := WriteReadyFrame(8777, []string{"claude", "codex"}, "http://127.0.0.1:9999", dataDir, "test-epoch"); err != nil {
 		t.Fatalf("WriteReadyFrame error on writable dataDir: %v", err)
 	}
 
@@ -204,8 +204,8 @@ func TestWriteReadyFrame_SuccessWritesRuntimeJSONWithEpoch(t *testing.T) {
 	if frame.Type != "runtime_ready" {
 		t.Errorf("type = %q, want runtime_ready", frame.Type)
 	}
-	if frame.BridgeEpoch == "" {
-		t.Error("BridgeEpoch empty — T06 requires epoch for Swift cross-validation")
+	if frame.BridgeEpoch != "test-epoch" {
+		t.Errorf("BridgeEpoch = %q, want injected process epoch", frame.BridgeEpoch)
 	}
 	if frame.Port != 8777 {
 		t.Errorf("port = %d, want 8777", frame.Port)
@@ -218,7 +218,7 @@ func TestWriteReadyFrame_SuccessWritesRuntimeJSONWithEpoch(t *testing.T) {
 // TestWriteReadyFrame_EmptyDataDirNoError verifies empty dataDirPath (dev mode)
 // does not error — only product mode persists.
 func TestWriteReadyFrame_EmptyDataDirNoError(t *testing.T) {
-	if err := WriteReadyFrame(8777, []string{"claude"}, "", ""); err != nil {
+	if err := WriteReadyFrame(8777, []string{"claude"}, "", "", "test-epoch"); err != nil {
 		t.Fatalf("WriteReadyFrame with empty dataDir returned error: %v", err)
 	}
 }

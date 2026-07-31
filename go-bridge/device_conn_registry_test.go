@@ -9,11 +9,11 @@ import (
 // 验证场景4：DeviceConnRegistry 现在存 Connection 接口，direct 与 relay（RelayDeviceConn）
 // 都能注册，且 DisconnectDevice 对二者都下发 device_revoked 事件并 Close。
 type fakeRevokableConn struct {
-	mu          sync.Mutex
-	sent        []map[string]interface{}
-	closed      bool
-	device      *TrustedDeviceRecord
-	remoteAddr  string
+	mu         sync.Mutex
+	sent       []map[string]interface{}
+	closed     bool
+	device     *TrustedDeviceRecord
+	remoteAddr string
 }
 
 func (f *fakeRevokableConn) SendJSON(v any) {
@@ -21,12 +21,14 @@ func (f *fakeRevokableConn) SendJSON(v any) {
 	defer f.mu.Unlock()
 	if m, ok := v.(map[string]interface{}); ok {
 		f.sent = append(f.sent, m)
+	} else if event, ok := v.(EventMessage); ok {
+		f.sent = append(f.sent, map[string]interface{}{"type": event.Type, "event": event.Event, "message": event.Message})
 	}
 }
-func (f *fakeRevokableConn) SendResult(string, interface{}, *WireError) {}
+func (f *fakeRevokableConn) SendResult(string, interface{}, *WireError)    {}
 func (f *fakeRevokableConn) SendEvent(string, string, string, interface{}) {}
-func (f *fakeRevokableConn) AuthedDevice() *TrustedDeviceRecord { return f.device }
-func (f *fakeRevokableConn) RemoteAddr() string                  { return f.remoteAddr }
+func (f *fakeRevokableConn) AuthedDevice() *TrustedDeviceRecord            { return f.device }
+func (f *fakeRevokableConn) RemoteAddr() string                            { return f.remoteAddr }
 func (f *fakeRevokableConn) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -38,6 +40,7 @@ func (f *fakeRevokableConn) Close() error {
 // DisconnectDevice 下发 device_revoked 事件并 Close。
 func TestDeviceConnRegistry_DisconnectDevice_SendsEventAndCloses(t *testing.T) {
 	reg := &DeviceConnRegistry{conns: make(map[string][]Connection)}
+	reg.SetEventPublisher(NewEventPublisher("test-epoch"))
 	conn := &fakeRevokableConn{remoteAddr: "fake:1"}
 	reg.Register("dev_fake", conn)
 
@@ -66,6 +69,7 @@ func TestDeviceConnRegistry_DisconnectDevice_SendsEventAndCloses(t *testing.T) {
 // 场景4：多个连接（模拟 direct + relay 并存）都被撤销。
 func TestDeviceConnRegistry_DisconnectDevice_AllConnectionsOfDevice(t *testing.T) {
 	reg := &DeviceConnRegistry{conns: make(map[string][]Connection)}
+	reg.SetEventPublisher(NewEventPublisher("test-epoch"))
 	c1 := &fakeRevokableConn{remoteAddr: "direct:1"}
 	c2 := &fakeRevokableConn{remoteAddr: "relay:1"}
 	reg.Register("dev_multi", c1)

@@ -29,7 +29,7 @@ func (h *Handlers) handleOpenCodeRPC(conn Connection, msg WireMessage) {
 		"create_git_branch", "create_git_worktree",
 		"rename_session", "archive_session", "compress_context",
 		"delete_session", "list_models", "switch_model",
-		"get_session_messages":
+		"get_session_messages", "get_session_projection":
 		agent, ok := h.getAgent(msg.BackendID)
 		if !ok {
 			conn.SendResult(msg.RequestID, nil, &WireError{Code: "backend_not_found", Message: "opencode agent not registered"})
@@ -492,7 +492,7 @@ func (h *Handlers) ocHandleSendMessage(conn Connection, msg WireMessage, dir str
 		return
 	}
 
-	conn.SendEvent(params.SessionID, msg.BackendID, "session_state_changed", map[string]interface{}{"state": "running"})
+	h.publishEvent(LogicalEvent{SessionID: params.SessionID, BackendID: msg.BackendID, Event: "session_state_changed", Data: map[string]interface{}{"state": "running"}, Targets: []Connection{conn}})
 	h.broadcaster.Subscribe(conn, SubscriptionKey{
 		BackendID: msg.BackendID,
 		SessionID: params.SessionID,
@@ -534,8 +534,8 @@ func (h *Handlers) ocHandleAbortGeneration(conn Connection, msg WireMessage, dir
 	conn.SendResult(msg.RequestID, &ResultResponse{Ok: true}, nil)
 	// 只有 session 确实被删除时才发完成事件，避免伪造状态
 	if ok {
-		conn.SendEvent(sessionID, msg.BackendID, "turn_completed", map[string]interface{}{"done": true, "reason": "aborted"})
-		conn.SendEvent(sessionID, msg.BackendID, "session_state_changed", map[string]interface{}{"state": "idle"})
+		h.publishEvent(LogicalEvent{SessionID: sessionID, BackendID: msg.BackendID, Event: "turn_completed", Data: map[string]interface{}{"done": true, "reason": "aborted"}, Targets: []Connection{conn}})
+		h.publishEvent(LogicalEvent{SessionID: sessionID, BackendID: msg.BackendID, Event: "session_state_changed", Data: map[string]interface{}{"state": "idle"}, Targets: []Connection{conn}})
 	}
 }
 

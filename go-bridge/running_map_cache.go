@@ -45,7 +45,7 @@ type runningMapCache struct {
 
 	// hits counts cache satisfactions; recomputes counts recompute invocations.
 	// Atomic for race-free test assertions; informational only.
-	hits      atomic.Int64
+	hits       atomic.Int64
 	recomputes atomic.Int64
 }
 

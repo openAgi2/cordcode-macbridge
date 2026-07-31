@@ -74,7 +74,9 @@ func (m *sessionLoadRequestMetrics) sendResult(conn Connection, requestID string
 	}
 
 	sendStarted := time.Now()
-	conn.SendJSON(response)
+	// Route through Connection.SendResult so Relay requestId classification and
+	// the single data writer cannot be bypassed by the metrics wrapper.
+	conn.SendResult(requestID, data, wireErr)
 	m.socketSend += time.Since(sendStarted)
 	m.log(wireErr)
 }

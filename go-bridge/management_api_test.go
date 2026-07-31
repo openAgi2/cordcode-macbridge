@@ -1009,7 +1009,7 @@ func TestMgmtRemoteStatus_RelayDisabled(t *testing.T) {
 	srv.cfg.RelayRouteID = "route_123"
 	srv.cfg.RelayConfigured = true
 	srv.cfg.RelayEnabled = false // Disabled
-	
+
 	rec := httptest.NewRecorder()
 	req := authRequest(http.MethodGet, "/internal/remote/status")
 	srv.ServeHTTP(rec, req)
@@ -1025,7 +1025,7 @@ func TestMgmtRemoteStatus_RelayDisabled(t *testing.T) {
 	if relay["enabled"] != false {
 		t.Errorf("enabled = %v, want false", relay["enabled"])
 	}
-	
+
 	rec2 := httptest.NewRecorder()
 	srv.ServeHTTP(rec2, authRequest(http.MethodPost, "/internal/pairing/create"))
 	var pBody map[string]interface{}

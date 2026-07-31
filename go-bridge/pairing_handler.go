@@ -29,12 +29,12 @@ type PairingCompleteDevice struct {
 }
 
 type PairingCompleteBridge struct {
-	BridgeID    string           `json:"bridgeId"`
-	DisplayName string           `json:"displayName"`
-	LocalURL    string           `json:"localURL"`
-	RemoteURL   *string          `json:"remoteURL,omitempty"`
-	RemoteURLs  []string         `json:"remoteURLs,omitempty"`
-	TLSPin      *BridgeV1TLSPin  `json:"tlsPin,omitempty"`
+	BridgeID    string          `json:"bridgeId"`
+	DisplayName string          `json:"displayName"`
+	LocalURL    string          `json:"localURL"`
+	RemoteURL   *string         `json:"remoteURL,omitempty"`
+	RemoteURLs  []string        `json:"remoteURLs,omitempty"`
+	TLSPin      *BridgeV1TLSPin `json:"tlsPin,omitempty"`
 }
 
 // PairingPendingConn tracks an iOS device waiting for pairing_complete.
@@ -299,6 +299,7 @@ func sendPairingResult(conn *websocket.Conn, ok bool, errMsg string) {
 	_ = conn.SetWriteDeadline(time.Now().Add(bridgeWriteTimeout))
 	conn.WriteMessage(websocket.TextMessage, msg)
 }
+
 // sendPairingResultCode 发送携带明确错误码的 pairing_result（P1-7 错误码契约）。
 func sendPairingResultCode(conn *websocket.Conn, ok bool, code, message string) {
 	result := map[string]interface{}{

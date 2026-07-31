@@ -13,9 +13,6 @@ type Connection interface {
 	// SendResult 发送带 requestId 的 result 回复。
 	SendResult(requestID string, data interface{}, err *WireError)
 
-	// SendEvent 发送业务事件。
-	SendEvent(sessionID, backendID, eventName string, data interface{})
-
 	// AuthedDevice 返回已认证的设备记录；未认证返回 nil。
 	AuthedDevice() *TrustedDeviceRecord
 
@@ -42,12 +39,15 @@ func (d *directConnAdapter) SendJSON(v any) {
 	d.inner.SendJSON(v)
 }
 
-func (d *directConnAdapter) SendResult(requestID string, data interface{}, err *WireError) {
-	d.inner.SendResult(requestID, data, err)
+// SendJSONReport forwards to the inner *Conn so K4 write_post can observe write errors.
+// Without this method the sink type-assert fails and falls back to plain SendJSON
+// (which swallows closed-conn / WriteJSON failures).
+func (d *directConnAdapter) SendJSONReport(v any) error {
+	return d.inner.SendJSONReport(v)
 }
 
-func (d *directConnAdapter) SendEvent(sessionID, backendID, eventName string, data interface{}) {
-	d.inner.SendEvent(sessionID, backendID, eventName, data)
+func (d *directConnAdapter) SendResult(requestID string, data interface{}, err *WireError) {
+	d.inner.SendResult(requestID, data, err)
 }
 
 func (d *directConnAdapter) AuthedDevice() *TrustedDeviceRecord {

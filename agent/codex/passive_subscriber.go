@@ -30,6 +30,9 @@ type passiveSubscriber struct {
 	pending   map[int64]chan rpcResponseEnvelope
 
 	sawDelta sync.Map // key: threadID:itemID (string), value: bool
+	// lastTurnByThread stores the latest source-proven turn id per thread so turn/completed
+	// can reattach identity when the notification omits turn.ID.
+	lastTurnByThread sync.Map // key: threadID (string), value: turnID (string)
 
 	closeOnce sync.Once
 	wg        sync.WaitGroup
@@ -238,8 +241,12 @@ func (s *passiveSubscriber) handleNotification(method string, paramsRaw json.Raw
 		if err := json.Unmarshal(paramsRaw, &notif); err == nil {
 			s.clearSawDeltaByThread(notif.ThreadID)
 			threadID := strings.TrimSpace(notif.ThreadID)
+			turnID := strings.TrimSpace(notif.Turn.ID)
+			if threadID != "" && turnID != "" {
+				s.lastTurnByThread.Store(threadID, turnID)
+			}
 			if threadID != "" {
-				s.emit(core.Event{Type: core.EventTurnStarted, SessionID: threadID})
+				s.emit(core.Event{Type: core.EventTurnStarted, SessionID: threadID, TurnID: turnID})
 			}
 		}
 	case "item/started":
@@ -280,9 +287,17 @@ func (s *passiveSubscriber) handleNotification(method string, paramsRaw json.Raw
 		var notif turnNotification
 		if err := json.Unmarshal(paramsRaw, &notif); err == nil {
 			s.clearSawDeltaByThread(notif.ThreadID)
+			threadID := strings.TrimSpace(notif.ThreadID)
+			turnID := strings.TrimSpace(notif.Turn.ID)
+			if turnID == "" {
+				if v, ok := s.lastTurnByThread.Load(threadID); ok {
+					turnID, _ = v.(string)
+				}
+			}
 			s.emit(core.Event{
 				Type:      core.EventResult,
-				SessionID: strings.TrimSpace(notif.ThreadID),
+				SessionID: threadID,
+				TurnID:    turnID,
 				Done:      true,
 			})
 		}

@@ -71,32 +71,22 @@ func (rer *RelayEventRouter) SetDeviceGenerationFunc(fn func(deviceID string) ui
 //
 //	Mac 端必须决定向哪些设备发送哪些事件。
 //	full_stream 发全部事件；milestones_only 只发 durable milestones。
-func (rer *RelayEventRouter) RouteEvent(
-	sessionID, backendID, eventName string,
-	data interface{},
+func (rer *RelayEventRouter) RouteStampedEvent(
+	eventMsg EventMessage,
 	connectedDevices []string, // 当前在线的设备 ID 列表
 	offlineDevices []string, // 需要离线投递的设备 ID 列表
 ) {
-	// 序列化事件
-	eventMsg := EventMessage{
-		Type:      "event",
-		SessionID: sessionID,
-		BackendID: backendID,
-		Event:     eventName,
-		Data:      data,
-	}
-
 	eventJSON, err := json.Marshal(eventMsg)
 	if err != nil {
 		slog.Error("relay-router: marshal event", "error", err)
 		return
 	}
 
-	isDurable := IsDurableMilestone(eventName)
+	isDurable := IsDurableMilestone(eventMsg.Event)
 
 	// 在线设备：根据 scope 决定是否发送
 	for _, deviceID := range connectedDevices {
-		shouldSend := rer.observation.ShouldSendEvent(deviceID, backendID, sessionID, eventName)
+		shouldSend := rer.observation.ShouldSendEvent(deviceID, eventMsg.BackendID, eventMsg.SessionID, eventMsg.Event)
 		if !shouldSend {
 			continue
 		}
@@ -104,7 +94,7 @@ func (rer *RelayEventRouter) RouteEvent(
 		// 这里只做决策记录
 		slog.Debug("relay-router: online event",
 			"deviceID", safeID(deviceID),
-			"event", eventName,
+			"event", eventMsg.Event,
 			"durable", isDurable,
 		)
 	}
@@ -112,7 +102,7 @@ func (rer *RelayEventRouter) RouteEvent(
 	// 离线设备：只投递 durable milestones
 	if isDurable {
 		for _, deviceID := range offlineDevices {
-			rer.routeOfflineEvent(deviceID, sessionID, backendID, eventName, eventJSON)
+			rer.routeOfflineEvent(deviceID, eventMsg.SessionID, eventMsg.BackendID, eventMsg.Event, eventJSON)
 		}
 	}
 }

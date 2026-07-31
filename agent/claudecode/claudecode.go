@@ -533,6 +533,19 @@ func isSessionExecuting(sessionPath string) bool {
 		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
 			continue
 		}
+		if entry.Type == "system" && entry.Subtype == "compact_boundary" {
+			// Claude closes the pre-compaction transcript with this source-proven
+			// boundary. The following transcript-only summary is model context,
+			// not a pending user turn.
+			lastMsg.Role = "system"
+			lastMsg.StopReason = ""
+			lastMsg.Text = ""
+			hasMsg = true
+			continue
+		}
+		if entry.IsCompactSummary || entry.IsVisibleInTranscriptOnly {
+			continue
+		}
 		if entry.Message == nil {
 			continue
 		}
@@ -587,6 +600,9 @@ func isSessionExecuting(sessionPath string) bool {
 				"path", sessionPath)
 		}
 		return !isFinal
+	}
+	if lastMsg.Role == "system" {
+		return false
 	}
 
 	return false
@@ -759,11 +775,24 @@ func stripXMLTags(s string) string {
 const transcriptScannerMaxBytes = 16 * 1024 * 1024
 
 type transcriptHistoryEnvelope struct {
-	Type        string                    `json:"type"`
-	Timestamp   string                    `json:"timestamp"`
-	CustomTitle string                    `json:"customTitle"`
-	Message     *transcriptHistoryMessage `json:"message"`
-	IsMeta      bool                      `json:"isMeta"`
+	Type                      string                     `json:"type"`
+	Subtype                   string                     `json:"subtype"`
+	Timestamp                 string                     `json:"timestamp"`
+	UUID                      string                     `json:"uuid"`
+	PromptID                  string                     `json:"promptId"`
+	CustomTitle               string                     `json:"customTitle"`
+	Message                   *transcriptHistoryMessage  `json:"message"`
+	IsMeta                    bool                       `json:"isMeta"`
+	IsCompactSummary          bool                       `json:"isCompactSummary"`
+	IsVisibleInTranscriptOnly bool                       `json:"isVisibleInTranscriptOnly"`
+	CompactMetadata           *transcriptCompactMetadata `json:"compactMetadata"`
+}
+
+type transcriptCompactMetadata struct {
+	Trigger    string `json:"trigger"`
+	PreTokens  int64  `json:"preTokens"`
+	PostTokens int64  `json:"postTokens"`
+	DurationMS int64  `json:"durationMs"`
 }
 
 type transcriptHistoryMessage struct {
@@ -795,6 +824,7 @@ type transcriptToolResult struct {
 type richHistoryMessageBuilder struct {
 	ID               string
 	Role             string
+	Hidden           bool
 	Timestamp        time.Time
 	ContentSegments  []string
 	ThinkingSegments []string
@@ -885,6 +915,14 @@ func (b *richHistoryMessageBuilder) applyToolResult(toolID string, result transc
 	}
 	if result.Output != nil {
 		step["output"] = result.Output
+	}
+	toolName, _ := step["toolName"].(string)
+	matchInput := result.Output
+	if output, ok := result.Output.(map[string]any); ok && output["kind"] == "inline" {
+		matchInput = output["text"]
+	}
+	if matches := parseClaudeToolMatches(toolName, matchInput, result.IsError); matches != nil {
+		step["matches"] = matches
 	}
 	return true
 }
@@ -997,6 +1035,27 @@ func isClaudeResumeNoResponseAssistant(raw transcriptHistoryEnvelope, blocks []t
 	return false
 }
 
+func isClaudeInterruptedUser(blocks []transcriptContentBlock) bool {
+	for _, block := range blocks {
+		if block.Type == "text" &&
+			strings.HasPrefix(strings.TrimSpace(block.Text), "[Request interrupted by user") {
+			return true
+		}
+	}
+	return false
+}
+
+func claudeCompactionSummary(metadata *transcriptCompactMetadata) string {
+	if metadata == nil || metadata.PreTokens <= metadata.PostTokens {
+		return "已压缩对话"
+	}
+	saved := metadata.PreTokens - metadata.PostTokens
+	if saved >= 1000 {
+		return fmt.Sprintf("已压缩对话 · 节省 %.1fk tokens", float64(saved)/1000)
+	}
+	return fmt.Sprintf("已压缩对话 · 节省 %d tokens", saved)
+}
+
 func normalizeToolResultOutput(raw json.RawMessage) any {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil
@@ -1071,6 +1130,7 @@ func LoadClaudeRichHistoryFromReader(r io.Reader, path string) ([]core.RichHisto
 	assistantByMessageID := make(map[string]*richHistoryMessageBuilder)
 	toolOwners := make(map[string]*richHistoryMessageBuilder)
 	pendingToolResults := make(map[string]transcriptToolResult)
+	userByPromptID := make(map[string]*richHistoryMessageBuilder)
 	skipNextSkillInstruction := false
 	skipNextResumeNoResponse := false
 
@@ -1081,6 +1141,22 @@ func LoadClaudeRichHistoryFromReader(r io.Reader, path string) ([]core.RichHisto
 		var raw transcriptHistoryEnvelope
 		if err := json.Unmarshal(scanner.Bytes(), &raw); err != nil {
 			slog.Debug("claudecode: skip invalid transcript line", "path", path, "line", lineNo, "error", err)
+			continue
+		}
+		if raw.Type == "system" && raw.Subtype == "compact_boundary" {
+			id := strings.TrimSpace(raw.UUID)
+			if id == "" {
+				id = fmt.Sprintf("compact-boundary-line-%d", lineNo)
+			}
+			builder := newRichHistoryMessageBuilder(id, "system", parseTranscriptTimestamp(raw.Timestamp))
+			builder.addText(claudeCompactionSummary(raw.CompactMetadata))
+			builders = append(builders, builder)
+			continue
+		}
+		// Claude stores the generated continuation summary as a user message so the model can
+		// resume after compaction. It is explicitly transcript-only and must never enter visible
+		// history as a user-authored bubble.
+		if raw.IsCompactSummary || raw.IsVisibleInTranscriptOnly {
 			continue
 		}
 		if raw.Type != "user" && raw.Type != "assistant" {
@@ -1145,6 +1221,15 @@ func LoadClaudeRichHistoryFromReader(r io.Reader, path string) ([]core.RichHisto
 			}
 
 		case "user":
+			if isClaudeInterruptedUser(blocks) {
+				if prior := userByPromptID[strings.TrimSpace(raw.PromptID)]; prior != nil {
+					// Claude records an accepted prompt and later an interrupt marker
+					// for the same promptId before moving the retry into a compact
+					// continuation file. Desktop hides that abandoned pair.
+					prior.Hidden = true
+				}
+				continue
+			}
 			builder := newRichHistoryMessageBuilder(strings.TrimSpace(raw.Message.ID), "user", timestamp)
 			if builder.ID == "" {
 				builder.ID = fmt.Sprintf("user-line-%d", lineNo)
@@ -1202,6 +1287,9 @@ func LoadClaudeRichHistoryFromReader(r io.Reader, path string) ([]core.RichHisto
 
 			if hasVisibleContent {
 				builders = append(builders, builder)
+				if promptID := strings.TrimSpace(raw.PromptID); promptID != "" {
+					userByPromptID[promptID] = builder
+				}
 			}
 		}
 	}
@@ -1212,6 +1300,9 @@ func LoadClaudeRichHistoryFromReader(r io.Reader, path string) ([]core.RichHisto
 
 	entries := make([]core.RichHistoryEntry, 0, len(builders))
 	for _, builder := range builders {
+		if builder.Hidden {
+			continue
+		}
 		entries = append(entries, builder.build())
 	}
 	return entries, nil
@@ -1332,18 +1423,13 @@ func (a *Agent) GetRichSessionHistory(ctx context.Context, sessionID string, lim
 		return nil, err
 	}
 	absWorkDir, _ := filepath.Abs(a.workDir)
-	projectDir := findProjectDir(homeDir, absWorkDir)
+	projectDir := resolveClaudeHistoryProjectDir(homeDir, absWorkDir, sessionID)
 	if projectDir == "" {
 		return nil, fmt.Errorf("claudecode: project dir not found")
 	}
 
-	path := filepath.Join(projectDir, sessionID+".jsonl")
 	started := time.Now()
-	entries, err := loadClaudeRichHistory(path)
-	var fileBytes int64
-	if stat, statErr := os.Stat(path); statErr == nil {
-		fileBytes = stat.Size()
-	}
+	entries, fileBytes, err := loadClaudeContinuationHistory(projectDir, sessionID)
 	core.SessionLoadMetricsFromContext(ctx).AddHistoryParse(time.Since(started), fileBytes)
 	if err != nil {
 		return nil, err
@@ -1352,6 +1438,39 @@ func (a *Agent) GetRichSessionHistory(ctx context.Context, sessionID string, lim
 		entries = entries[len(entries)-limit:]
 	}
 	return entries, nil
+}
+
+// RichHistoryIncludesCompactContinuations tells the bridge that this provider
+// resolves Claude's compact-linked physical JSONLs as one logical history.
+func (a *Agent) RichHistoryIncludesCompactContinuations() bool {
+	return true
+}
+
+func (a *Agent) RichHistoryTranscriptSegments(
+	_ context.Context,
+	sessionID string,
+) ([]core.TranscriptSourceSegment, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	absWorkDir, _ := filepath.Abs(a.workDir)
+	projectDir := resolveClaudeHistoryProjectDir(homeDir, absWorkDir, sessionID)
+	if projectDir == "" {
+		return nil, fmt.Errorf("claudecode: project dir not found")
+	}
+	return richHistoryTranscriptSegments(projectDir, sessionID)
+}
+
+func (a *Agent) GetRichSessionHistoryAtSegments(
+	ctx context.Context,
+	_ string,
+	segments []core.TranscriptSourceSegment,
+) ([]core.RichHistoryEntry, error) {
+	started := time.Now()
+	entries, fileBytes, err := loadClaudeContinuationHistoryAtSegments(ctx, segments)
+	core.SessionLoadMetricsFromContext(ctx).AddHistoryParse(time.Since(started), fileBytes)
+	return entries, err
 }
 
 // FetchTodos implements core.TodoProvider. It reads the session transcript to find

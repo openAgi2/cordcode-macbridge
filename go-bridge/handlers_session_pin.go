@@ -37,10 +37,10 @@ func (h *Handlers) handleSetSessionPinned(conn Connection, msg WireMessage, agen
 		return
 	}
 	var params struct {
-		SessionID        string  `json:"sessionId"`
-		Pinned           bool    `json:"pinned"`
-		PinnedAtMillis   float64 `json:"pinnedAtMillis"`
-		Directory        string  `json:"directory"`
+		SessionID      string  `json:"sessionId"`
+		Pinned         bool    `json:"pinned"`
+		PinnedAtMillis float64 `json:"pinnedAtMillis"`
+		Directory      string  `json:"directory"`
 	}
 	if msg.Params != nil {
 		_ = json.Unmarshal(msg.Params, &params)
@@ -93,9 +93,9 @@ func (h *Handlers) handleListPinnedSessions(conn Connection, msg WireMessage, ag
 	// lock is NOT held during upstream calls); prune confirmed-gone entries after.
 	out := make([]map[string]interface{}, 0, len(pins))
 	var (
-		pruneMu   sync.Mutex
-		toPrune   []core.SessionPin
-		firstErr  error
+		pruneMu  sync.Mutex
+		toPrune  []core.SessionPin
+		firstErr error
 	)
 	var wg sync.WaitGroup
 	for i := range pins {

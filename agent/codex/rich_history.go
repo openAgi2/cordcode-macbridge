@@ -105,7 +105,12 @@ func ParseRichHistoryFromReader(r io.Reader, limit int) ([]core.RichHistoryEntry
 			if nested, ok := envelope["payload"].(map[string]any); ok {
 				payload = nested
 			}
-			if strings.TrimSpace(appServerStringValue(payload["type"])) == "patch_apply_end" {
+			switch strings.TrimSpace(appServerStringValue(payload["type"])) {
+			case "task_started":
+				builder.startTurn(strings.TrimSpace(appServerStringValue(payload["turn_id"])), ts)
+			case "task_complete":
+				builder.completeTurn(strings.TrimSpace(appServerStringValue(payload["turn_id"])), ts)
+			case "patch_apply_end":
 				builder.addPatchResultByCallID(
 					strings.TrimSpace(appServerStringValue(payload["call_id"])),
 					appServerPatchChanges(payload["changes"]),
@@ -120,6 +125,7 @@ func ParseRichHistoryFromReader(r io.Reader, limit int) ([]core.RichHistoryEntry
 		}
 
 		var item struct {
+			ID        string          `json:"id"`
 			Role      string          `json:"role"`
 			Type      string          `json:"type"`
 			Name      string          `json:"name"`
@@ -143,7 +149,7 @@ func ParseRichHistoryFromReader(r io.Reader, limit int) ([]core.RichHistoryEntry
 
 		switch {
 		case item.Role == "user" && len(item.Content) > 0:
-			builder.flush()
+			builder.flush(nil)
 			var textParts []string
 			parts := make([]map[string]any, 0, len(item.Content))
 			files := make([]map[string]any, 0)
@@ -162,6 +168,7 @@ func ParseRichHistoryFromReader(r io.Reader, limit int) ([]core.RichHistoryEntry
 			}
 			if len(textParts) > 0 || len(files) > 0 {
 				builder.addEntry(core.RichHistoryEntry{
+					ID:        strings.TrimSpace(item.ID),
 					Role:      "user",
 					Content:   strings.Join(textParts, "\n"),
 					Parts:     parts,
@@ -200,37 +207,32 @@ func ParseRichHistoryFromReader(r io.Reader, limit int) ([]core.RichHistoryEntry
 		case item.Type == "function_call" && item.Name == "update_plan":
 
 		case item.Type == "function_call":
-			toolName := item.Name
-			if mapped, ok := codexToolNames[toolName]; ok {
-				toolName = mapped
+			toolName, toolInput, ok := NormalizeTranscriptFunctionCall(item.Name, item.Arguments)
+			if ok {
+				builder.addToolUse(ts, toolName, toolInput, item.CallID)
 			}
-			if toolName == "" {
-				toolName = "Unknown"
-			}
-			toolInput := extractToolInput(item.Name, item.Arguments)
-			builder.addToolUse(ts, toolName, toolInput, item.CallID)
 
 		case item.Type == "command_execution":
 			builder.addToolUse(ts, "Bash", item.Command, "")
 
 		case item.Type == "function_call_output":
-			builder.addToolResultByCallID(ts, item.CallID, codexTranscriptOutput(item.Output), item.Status)
+			builder.addToolResultByCallID(ts, item.CallID, TranscriptToolOutput(item.Output), item.Status)
 
 		case item.Type == "custom_tool_call":
-			toolName, toolInput := codexCustomToolUse(item.Name, item.Input)
-			if toolName != "" {
+			toolName, toolInput, ok := NormalizeTranscriptCustomToolCall(item.Name, item.Input)
+			if ok {
 				builder.addToolUse(ts, toolName, toolInput, item.CallID)
 			}
 
 		case item.Type == "custom_tool_call_output":
-			builder.addToolResultByCallID(ts, item.CallID, codexTranscriptOutput(item.Output), item.Status)
+			builder.addToolResultByCallID(ts, item.CallID, TranscriptToolOutput(item.Output), item.Status)
 
 		default:
 			slog.Debug("codex rich history: unhandled response_item",
 				"role", item.Role, "type", item.Type, "name", item.Name)
 		}
 	}
-	builder.flush()
+	builder.flush(nil)
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("read codex rich history: %w", err)
 	}
@@ -279,6 +281,13 @@ func codexTranscriptOutput(raw json.RawMessage) string {
 	return string(raw)
 }
 
+// TranscriptToolOutput exposes the canonical persisted-history output normalization to the
+// projection hydrate path. Both readers consume the same rollout file and must not disagree on
+// structured custom-tool output.
+func TranscriptToolOutput(raw json.RawMessage) string {
+	return codexTranscriptOutput(raw)
+}
+
 func extractToolInput(toolName string, raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
@@ -296,6 +305,23 @@ func extractToolInput(toolName string, raw json.RawMessage) string {
 		return s
 	}
 	return string(raw)
+}
+
+// NormalizeTranscriptFunctionCall exposes the canonical function-call name/input semantics used
+// by GetRichSessionHistory. The bool is false for transcript-only control calls (currently
+// update_plan) that do not belong in the visible timeline.
+func NormalizeTranscriptFunctionCall(name string, arguments json.RawMessage) (string, string, bool) {
+	if name == "update_plan" {
+		return "", "", false
+	}
+	toolName := name
+	if mapped, ok := codexToolNames[toolName]; ok {
+		toolName = mapped
+	}
+	if toolName == "" {
+		toolName = "Unknown"
+	}
+	return toolName, extractToolInput(name, arguments), true
 }
 
 var codexExecCommandInputPattern = regexp.MustCompile(`tools\.exec_command\(\s*\{[^{}]*"cmd"\s*:\s*"((?:\\.|[^"\\])*)"`)
@@ -326,6 +352,18 @@ func codexCustomToolUse(name, input string) (string, string) {
 		return "Patch", codexPatchTarget(input)
 	}
 	return name, input
+}
+
+// NormalizeTranscriptCustomToolCall exposes the same unwrap rules as canonical rich history.
+func NormalizeTranscriptCustomToolCall(name, input string) (string, string, bool) {
+	toolName, toolInput := codexCustomToolUse(name, input)
+	return toolName, toolInput, toolName != ""
+}
+
+// IsTranscriptUserPrompt keeps projection hydrate aligned with canonical history filtering of
+// injected/system input_text blocks.
+func IsTranscriptUserPrompt(text string) bool {
+	return isUserPrompt(text)
 }
 
 func codexWrappedExecCommand(input string) string {
@@ -399,16 +437,48 @@ func codexImageExtension(mime string) string {
 }
 
 type richHistoryBuilder struct {
-	entries     []core.RichHistoryEntry
-	current     *core.RichHistoryEntry
-	callIDMap   map[string]int
-	maxEntries  int
-	lastEventAt time.Time
+	entries             []core.RichHistoryEntry
+	current             *core.RichHistoryEntry
+	callIDMap           map[string]int
+	maxEntries          int
+	lastEventAt         time.Time
+	activeTurnID        string
+	activeTurnStartedAt time.Time
 }
 
 func (b *richHistoryBuilder) addEntry(entry core.RichHistoryEntry) {
-	b.flush()
+	b.flush(nil)
 	b.entries = append(b.entries, entry)
+}
+
+func (b *richHistoryBuilder) startTurn(turnID string, startedAt time.Time) {
+	b.flush(nil)
+	b.activeTurnID = turnID
+	b.activeTurnStartedAt = startedAt
+}
+
+func (b *richHistoryBuilder) completeTurn(turnID string, completedAt time.Time) {
+	if b.current != nil && b.current.ID == "" && turnID != "" {
+		b.current.ID = turnID
+	}
+	b.flush(&completedAt)
+	b.activeTurnID = ""
+	b.activeTurnStartedAt = time.Time{}
+}
+
+func (b *richHistoryBuilder) newAssistantEntry(ts time.Time) *core.RichHistoryEntry {
+	startedAt := b.activeTurnStartedAt
+	if startedAt.IsZero() {
+		startedAt = ts
+	}
+	return &core.RichHistoryEntry{
+		ID:            b.activeTurnID,
+		Role:          "assistant",
+		Steps:         []map[string]any{},
+		Files:         []map[string]any{},
+		Timestamp:     ts,
+		TurnStartedAt: &startedAt,
+	}
 }
 
 func (b *richHistoryBuilder) addText(ts time.Time, texts []string, parts []map[string]any) {
@@ -425,7 +495,7 @@ func (b *richHistoryBuilder) addText(ts time.Time, texts []string, parts []map[s
 		b.current.Parts = append(b.current.Parts, parts...)
 		return
 	}
-	b.flush()
+	b.flush(nil)
 	content := ""
 	for _, t := range texts {
 		if content != "" {
@@ -433,14 +503,9 @@ func (b *richHistoryBuilder) addText(ts time.Time, texts []string, parts []map[s
 		}
 		content += t
 	}
-	b.current = &core.RichHistoryEntry{
-		Role:      "assistant",
-		Content:   content,
-		Parts:     parts,
-		Steps:     []map[string]any{},
-		Files:     []map[string]any{},
-		Timestamp: ts,
-	}
+	b.current = b.newAssistantEntry(ts)
+	b.current.Content = content
+	b.current.Parts = parts
 	b.touch(ts)
 }
 
@@ -454,15 +519,10 @@ func (b *richHistoryBuilder) addReasoning(ts time.Time, text string) {
 		b.current.Parts = append(b.current.Parts, map[string]any{"type": "reasoning", "content": text})
 		return
 	}
-	b.flush()
-	b.current = &core.RichHistoryEntry{
-		Role:      "assistant",
-		Thinking:  text,
-		Parts:     []map[string]any{{"type": "reasoning", "content": text}},
-		Steps:     []map[string]any{},
-		Files:     []map[string]any{},
-		Timestamp: ts,
-	}
+	b.flush(nil)
+	b.current = b.newAssistantEntry(ts)
+	b.current.Thinking = text
+	b.current.Parts = []map[string]any{{"type": "reasoning", "content": text}}
 	b.touch(ts)
 }
 
@@ -492,7 +552,7 @@ func (b *richHistoryBuilder) addToolUse(ts time.Time, toolName, toolInput, callI
 		}
 		return
 	}
-	b.flush()
+	b.flush(nil)
 	stepID := "tool-1"
 	step := map[string]any{
 		"id":                             stepID,
@@ -506,13 +566,9 @@ func (b *richHistoryBuilder) addToolUse(ts time.Time, toolName, toolInput, callI
 	if toolInput != "" {
 		step["title"] = toolInput
 	}
-	b.current = &core.RichHistoryEntry{
-		Role:      "assistant",
-		Parts:     []map[string]any{{"type": "tool", "step": step}},
-		Steps:     []map[string]any{step},
-		Files:     []map[string]any{},
-		Timestamp: ts,
-	}
+	b.current = b.newAssistantEntry(ts)
+	b.current.Parts = []map[string]any{{"type": "tool", "step": step}}
+	b.current.Steps = []map[string]any{step}
 	b.touch(ts)
 	if callID != "" {
 		if b.callIDMap == nil {
@@ -623,12 +679,12 @@ func richHistoryFileChanges(changes []core.FileChange) []map[string]any {
 	return items
 }
 
-func (b *richHistoryBuilder) flush() {
+func (b *richHistoryBuilder) flush(completedAt *time.Time) {
 	if b.current != nil {
-		b.classifyTextPresentation()
-		if !b.lastEventAt.IsZero() {
-			completedAt := b.lastEventAt
-			b.current.TurnCompletedAt = &completedAt
+		b.classifyTextPresentation(completedAt != nil)
+		if completedAt != nil {
+			completion := *completedAt
+			b.current.TurnCompletedAt = &completion
 		}
 		if len(b.current.Parts) == 0 {
 			b.current.Parts = []map[string]any{{"type": "text", "content": b.current.Content}}
@@ -656,10 +712,10 @@ func (b *richHistoryBuilder) touch(ts time.Time) {
 	}
 }
 
-// classifyTextPresentation retains every transcript text part but marks the
-// terminal assistant message as the final answer. Earlier text remains real
-// progress inside the expandable execution process.
-func (b *richHistoryBuilder) classifyTextPresentation() {
+// classifyTextPresentation keeps every text part in progress while the rollout
+// is still growing. Only a source-proven task_complete promotes the terminal
+// text to final; EOF is merely the current file boundary, not turn completion.
+func (b *richHistoryBuilder) classifyTextPresentation(completed bool) {
 	lastText := -1
 	for i, part := range b.current.Parts {
 		if part["type"] == "text" && strings.TrimSpace(appServerStringValue(part["content"])) != "" {
@@ -673,7 +729,7 @@ func (b *richHistoryBuilder) classifyTextPresentation() {
 		if part["type"] != "text" {
 			continue
 		}
-		if i == lastText {
+		if completed && i == lastText {
 			part["presentation"] = "final"
 			b.current.Content = appServerStringValue(part["content"])
 		} else {

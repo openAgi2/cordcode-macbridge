@@ -1,0 +1,243 @@
+{
+  "manifestVersion": 1,
+  "manifestSchema": "claude-source-shapes/manifest@v1",
+  "generatedBy": "recompute_manifest.py (validated by go-bridge TestClaudeSourceShapeFixtures_LoadAllAndValidateManifest)",
+  "fixtureCreatedAt": "2026-07-30T10:59:47+08:00",
+  "fixtures": [
+    {
+      "file": "attachment-replay.jsonl",
+      "category": "top-level type=attachment replay (no message field)",
+      "provenance": "observed-derived-synthetic",
+      "corpusProvenance": "~/.claude audit: 28,800 top-level type=attachment rows; attachment is a TOP-LEVEL type (not a content block kind); 178 same-UUID attachment replay groups",
+      "sha256": "bdabdb36650d9ef2004877831927542fa2aa865dfe2f29c856108c47cac231ff",
+      "bytes": 1181,
+      "recordCount": 4,
+      "records": [
+        {
+          "byteStart": 0,
+          "byteEnd": 175
+        },
+        {
+          "byteStart": 175,
+          "byteEnd": 427
+        },
+        {
+          "byteStart": 427,
+          "byteEnd": 804
+        },
+        {
+          "byteStart": 804,
+          "byteEnd": 1181
+        }
+      ]
+    },
+    {
+      "file": "branch-fileorder-interleave.jsonl",
+      "category": "H4 file-order ≠ parent-chain turn attribution",
+      "provenance": "observed-derived-synthetic",
+      "corpusProvenance": "~/.claude audit: 119 distinct-UUID records whose file-order currentTurn differs from parent-chain nearest-user owner",
+      "sha256": "b5db750f8bed710ed44dc038087d63777c6cc20e64c414c93303db58aae99ccb",
+      "bytes": 725,
+      "recordCount": 4,
+      "records": [
+        {
+          "byteStart": 0,
+          "byteEnd": 165
+        },
+        {
+          "byteStart": 165,
+          "byteEnd": 350
+        },
+        {
+          "byteStart": 350,
+          "byteEnd": 516
+        },
+        {
+          "byteStart": 516,
+          "byteEnd": 725
+        }
+      ]
+    },
+    {
+      "file": "exact-text-replay.jsonl",
+      "category": "H3 exact text replay (same UUID, same body, different parent)",
+      "provenance": "observed-derived-synthetic",
+      "corpusProvenance": "~/.claude 290-file audit: 235 top-level UUID-reuse groups; exact-replay = same uuid+message.id+timestamp+body, only parentUuid differs",
+      "sha256": "aecfdefd6b2f768b21f8123ec54420883e4d646a8be53b6ec3a62b8afa1def1b",
+      "bytes": 780,
+      "recordCount": 4,
+      "records": [
+        {
+          "byteStart": 0,
+          "byteEnd": 163
+        },
+        {
+          "byteStart": 163,
+          "byteEnd": 383
+        },
+        {
+          "byteStart": 383,
+          "byteEnd": 556
+        },
+        {
+          "byteStart": 556,
+          "byteEnd": 780
+        }
+      ]
+    },
+    {
+      "file": "image-block.jsonl",
+      "category": "image block nested in tool_result content",
+      "provenance": "observed-derived-synthetic",
+      "corpusProvenance": "~/.claude audit: 1 image block observed, nested inside a tool_result content array as {type:image, source:{type:base64,...}}; NOT a top-level row and NOT an attachment",
+      "sha256": "6816565d743cc2dacca5f0c194742fbe284d178eff9bcb3f2ba984f554d82bca",
+      "bytes": 858,
+      "recordCount": 3,
+      "records": [
+        {
+          "byteStart": 0,
+          "byteEnd": 177
+        },
+        {
+          "byteStart": 177,
+          "byteEnd": 443
+        },
+        {
+          "byteStart": 443,
+          "byteEnd": 858
+        }
+      ]
+    },
+    {
+      "file": "last-prompt.jsonl",
+      "category": "top-level type=last-prompt with leafUuid",
+      "provenance": "observed-derived-synthetic",
+      "corpusProvenance": "~/.claude audit: last-prompt rows carry {lastPrompt, leafUuid, sessionId}, no uuid/parent/message; H4 v1 explicitly does NOT use leafUuid for branch hiding",
+      "sha256": "da041065ba429fbf78deee210a62b685ac6f1dcfa81daadd1c8076b4a73431ba",
+      "bytes": 487,
+      "recordCount": 3,
+      "records": [
+        {
+          "byteStart": 0,
+          "byteEnd": 179
+        },
+        {
+          "byteStart": 179,
+          "byteEnd": 384
+        },
+        {
+          "byteStart": 384,
+          "byteEnd": 487
+        }
+      ]
+    },
+    {
+      "file": "queue-operation.jsonl",
+      "category": "top-level type=queue-operation (no uuid/parent)",
+      "provenance": "observed-derived-synthetic",
+      "corpusProvenance": "~/.claude audit: queue-operation rows carry {operation, timestamp, sessionId, content}, no uuid/parent",
+      "sha256": "ad6490cb58890371fb7cdc8770e67f8f4fa2fe044eed165117cf79e7fd4e6ee7",
+      "bytes": 322,
+      "recordCount": 2,
+      "records": [
+        {
+          "byteStart": 0,
+          "byteEnd": 167
+        },
+        {
+          "byteStart": 167,
+          "byteEnd": 322
+        }
+      ]
+    },
+    {
+      "file": "server-tool-use.jsonl",
+      "category": "server_tool_use (assistant) + matching tool_result (user)",
+      "provenance": "observed-derived-synthetic",
+      "corpusProvenance": "~/.claude audit: 20 server_tool_use assistant blocks; result returns as a standard tool_result block (tool_use_id matches), no server_tool_result block type exists",
+      "sha256": "0a61b8aee929630b13e7eec3d3edfeaa32db6055e2531db9ff4ab3ed18403de1",
+      "bytes": 639,
+      "recordCount": 3,
+      "records": [
+        {
+          "byteStart": 0,
+          "byteEnd": 171
+        },
+        {
+          "byteStart": 171,
+          "byteEnd": 421
+        },
+        {
+          "byteStart": 421,
+          "byteEnd": 639
+        }
+      ]
+    },
+    {
+      "file": "system-subtypes.jsonl",
+      "category": "system subtypes (compact_boundary / stop_hook_summary / api_error / informational)",
+      "provenance": "observed-derived-synthetic",
+      "corpusProvenance": "~/.claude audit: real subtypes = stop_hook_summary(854)/api_error(161)/informational(51)/compact_boundary(18); not system.compact/system.stop_hook",
+      "sha256": "13028cd405452d0308b5a43add1f029f4c5f87524d697976c33c72d6914f57d4",
+      "bytes": 1559,
+      "recordCount": 7,
+      "records": [
+        {
+          "byteStart": 0,
+          "byteEnd": 170
+        },
+        {
+          "byteStart": 170,
+          "byteEnd": 378
+        },
+        {
+          "byteStart": 378,
+          "byteEnd": 682
+        },
+        {
+          "byteStart": 682,
+          "byteEnd": 904
+        },
+        {
+          "byteStart": 904,
+          "byteEnd": 1118
+        },
+        {
+          "byteStart": 1118,
+          "byteEnd": 1337
+        },
+        {
+          "byteStart": 1337,
+          "byteEnd": 1559
+        }
+      ]
+    },
+    {
+      "file": "tool-result-extension.jsonl",
+      "category": "tool_result prefix extension (same UUID, user/user, new tool_use_id appended)",
+      "provenance": "observed-derived-synthetic",
+      "corpusProvenance": "~/.claude audit: 50 same-UUID tool_result extension groups, ALL user/user→user/user; real shape = occ2 appends a NEW tool_result block with a new tool_use_id (call-1 preserved, call-2 added)",
+      "sha256": "306f5cc8b1724dd6637d02da764c0f8442f66bd1b70a62a6c2824dac38fddaf3",
+      "bytes": 887,
+      "recordCount": 4,
+      "records": [
+        {
+          "byteStart": 0,
+          "byteEnd": 169
+        },
+        {
+          "byteStart": 169,
+          "byteEnd": 419
+        },
+        {
+          "byteStart": 419,
+          "byteEnd": 617
+        },
+        {
+          "byteStart": 617,
+          "byteEnd": 887
+        }
+      ]
+    }
+  ]
+}

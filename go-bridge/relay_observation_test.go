@@ -34,6 +34,63 @@ func TestObservationSetAndGet(t *testing.T) {
 	}
 }
 
+func TestObservationIncludeRunningSignalsAllowsUnlistedMilestonesOnly(t *testing.T) {
+	om := NewObservationManager()
+	om.SetScope("dev_1", ObservationScope{
+		BackendID: "codex", SessionIDs: []string{"foreground"}, DeliveryMode: scopeFullStream,
+		IncludeRunningSignals: true,
+	})
+	if om.ShouldSendEvent("dev_1", "codex", "background", "text_delta") {
+		t.Fatal("background text delta must not pass foreground scope")
+	}
+	if !om.ShouldSendEvent("dev_1", "codex", "background", "turn_completed") {
+		t.Fatal("background durable milestone should pass when running signals are included")
+	}
+	if !om.ShouldSendEvent("dev_1", "codex", "", "sessions_changed") {
+		t.Fatal("session discovery push should not be filtered by session IDs")
+	}
+}
+
+func TestSetObservationScopeRPCRequiresAuthenticatedDeviceAndStoresScope(t *testing.T) {
+	h := NewHandlers()
+	defer h.Shutdown(context.Background())
+	conn := &relayBroadcastCaptureConn{device: &TrustedDeviceRecord{DeviceID: "dev-rpc"}}
+	params := json.RawMessage(`{"backendId":"codex","sessionIds":["s1"],"deliveryMode":"full_stream","includeRunningSessionSignals":true,"leaseSeconds":45}`)
+	h.handleSetObservationScope(conn, WireMessage{RequestID: "req", BackendID: "codex", Params: params})
+
+	scope := h.observation.GetScope("dev-rpc", "codex")
+	if scope == nil || len(scope.SessionIDs) != 1 || scope.SessionIDs[0] != "s1" {
+		t.Fatalf("scope not stored: %#v", scope)
+	}
+	// Live delivery keys off broadcaster.Targets — observation alone is not enough
+	// after a hard disconnect wiped session subscriptions.
+	targets := h.broadcaster.Targets("codex", "s1", "")
+	if len(targets) != 1 || targets[0] != conn {
+		t.Fatalf("set_observation_scope must Subscribe session for live targets, got %#v", targets)
+	}
+}
+
+func TestObservationCleanupWaitsForLastDeviceConnection(t *testing.T) {
+	h := NewHandlers()
+	defer h.Shutdown(context.Background())
+	first := &relayBroadcastCaptureConn{device: &TrustedDeviceRecord{DeviceID: "dev-multi"}}
+	second := &relayBroadcastCaptureConn{device: &TrustedDeviceRecord{DeviceID: "dev-multi"}}
+	h.registerConnection(first)
+	h.registerConnection(second)
+	h.observation.SetScope("dev-multi", ObservationScope{BackendID: "codex", DeliveryMode: scopeFullStream})
+
+	h.unregisterConnection(first)
+	if h.observation.GetScope("dev-multi", "codex") == nil {
+		t.Fatal("scope removed while another connection remained")
+	}
+	h.unregisterConnection(second)
+	// Last connection close no longer wipes observation (path-switch rebind).
+	// Soft lease demotes full_stream; permanent wipe is revoke/explicit RemoveDevice.
+	if h.observation.GetScope("dev-multi", "codex") == nil {
+		t.Fatal("scope must survive last connection close for reconnect rebind")
+	}
+}
+
 func TestObservationFullStreamSendsAll(t *testing.T) {
 	om := NewObservationManager()
 	om.Start(context.Background()) // T09: 显式启动 lease loop
@@ -100,14 +157,19 @@ func TestObservationLeaseExpiry(t *testing.T) {
 	}
 
 	// 等待租约过期
-	time.Sleep(1500 * time.Millisecond)
+	time.Sleep(2500 * time.Millisecond)
 
-	// 过期后应降级为 milestones_only
+	// Soft expiry: text_delta blocked, durable still ok; DeliveryMode stays full_stream
+	// so the next SetScope renew does not fight a permanent milestones_only pin.
 	if om.ShouldSendEvent("dev_1", "codex", "sess_1", "text_delta") {
-		t.Error("should NOT send text_delta after lease expiry")
+		t.Error("should NOT send text_delta after lease soft-expiry")
 	}
 	if !om.ShouldSendEvent("dev_1", "codex", "sess_1", "turn_completed") {
-		t.Error("should still send durable milestone after lease expiry")
+		t.Error("should still send durable milestone after lease soft-expiry")
+	}
+	scope := om.GetScope("dev_1", "codex")
+	if scope == nil || scope.DeliveryMode != scopeFullStream {
+		t.Fatalf("DeliveryMode should stay full_stream (soft expiry), got %#v", scope)
 	}
 }
 
@@ -154,6 +216,31 @@ func TestObservationNoScopeDefaultsToMilestones(t *testing.T) {
 	}
 	if !om.ShouldSendEvent("dev_unknown", "codex", "sess_1", "turn_completed") {
 		t.Error("no scope should send turn_completed")
+	}
+}
+
+func TestObservationSessionsChangedAlwaysPassesWithoutScope(t *testing.T) {
+	om := NewObservationManager()
+	om.Start(context.Background())
+	defer om.Stop()
+
+	// Device unknown / no scope at all — web client on session-list view.
+	if !om.ShouldSendEvent("dev_web_noscope", "claude", "", "sessions_changed") {
+		t.Fatal("sessions_changed must reach clients with no observation scope (catalog control-plane, guard #8)")
+	}
+	// text_delta still filtered — this is NOT a timeline bypass.
+	if om.ShouldSendEvent("dev_web_noscope", "claude", "sess_1", "text_delta") {
+		t.Fatal("text_delta must still be filtered for scope-less device")
+	}
+
+	// Device registered but no scope for this backend.
+	om.SetScope("dev_web_partial", ObservationScope{
+		BackendID:    "codex",
+		DeliveryMode: scopeFullStream,
+		LeaseSeconds: 60,
+	})
+	if !om.ShouldSendEvent("dev_web_partial", "claude", "", "sessions_changed") {
+		t.Fatal("sessions_changed must pass for a backend with no scope (catalog control-plane, guard #8)")
 	}
 }
 
@@ -272,5 +359,29 @@ func TestOutboxDeviceIsolation(t *testing.T) {
 	entriesB := om.Drain("dev_b")
 	if len(entriesB) != 1 {
 		t.Fatalf("dev_b entries = %d, want 1", len(entriesB))
+	}
+}
+
+func TestObservationMilestonesOnlyStillSendsTurnStarted(t *testing.T) {
+	om := NewObservationManager()
+	om.Start(context.Background())
+	defer om.Stop()
+
+	om.SetScope("dev_1", ObservationScope{
+		BackendID:             "codex",
+		SessionIDs:            []string{"sess_1"},
+		DeliveryMode:          scopeMilestonesOnly,
+		IncludeRunningSignals: true,
+		LeaseSeconds:          60,
+	})
+
+	if !om.ShouldSendEvent("dev_1", "codex", "sess_1", "turn_started") {
+		t.Fatal("milestones_only must still send turn_started so clients can arm generation")
+	}
+	if !om.ShouldSendEvent("dev_1", "codex", "sess_1", "session_state_changed") {
+		t.Fatal("milestones_only must still send session_state_changed")
+	}
+	if om.ShouldSendEvent("dev_1", "codex", "sess_1", "text_delta") {
+		t.Fatal("milestones_only must still filter text_delta")
 	}
 }

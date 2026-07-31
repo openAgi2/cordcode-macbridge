@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,6 +47,7 @@ type fakeAgent struct {
 	sessions           []*fakeAgentSession
 	sessionInfos       []core.AgentSessionInfo
 	sessionListErr     error
+	listHook           func() // optional; lets a test inject a panic on ListSessions
 	model              string
 	reasoningEffort    string
 	workDir            string
@@ -82,9 +84,12 @@ type fakeAgent struct {
 	runningCalls       int
 	liveProcesses      map[string]core.LiveSessionProcess
 	alivePIDs          map[int]bool
+	processMu          sync.Mutex
 	liveProcessCalls   int
 	processAliveCalls  int
 	lastProcessAliveID int
+	// transcriptPath 让 fakeAgent 满足 core.TranscriptLocator（Codex file relay 需要）。
+	transcriptPath string
 }
 
 type unsupportedMutationAgent struct {
@@ -111,6 +116,8 @@ func (f *fakeAgent) GetRunningSessionIDs(ctx context.Context) (map[string]bool, 
 }
 
 func (f *fakeAgent) LiveSessionProcess(ctx context.Context, sessionID string) (core.LiveSessionProcess, error) {
+	f.processMu.Lock()
+	defer f.processMu.Unlock()
 	f.liveProcessCalls++
 	if f.liveProcesses == nil {
 		return core.LiveSessionProcess{SessionID: sessionID}, nil
@@ -122,13 +129,45 @@ func (f *fakeAgent) LiveSessionProcess(ctx context.Context, sessionID string) (c
 	return proc, nil
 }
 
+// LiveProcessCallCount / ProcessAliveStats expose the relay-inspection counters under processMu so
+// tests can read them without racing the relay goroutine's writes (the fakeAgent is touched by the
+// relay goroutine via IsProcessAlive/LiveSessionProcess and by the test goroutine).
+func (f *fakeAgent) LiveProcessCallCount() int {
+	f.processMu.Lock()
+	defer f.processMu.Unlock()
+	return f.liveProcessCalls
+}
+func (f *fakeAgent) ProcessAliveStats() (calls int, lastPID int) {
+	f.processMu.Lock()
+	defer f.processMu.Unlock()
+	return f.processAliveCalls, f.lastProcessAliveID
+}
+
 func (f *fakeAgent) IsProcessAlive(ctx context.Context, pid int) bool {
+	f.processMu.Lock()
+	defer f.processMu.Unlock()
 	f.processAliveCalls++
 	f.lastProcessAliveID = pid
 	if f.alivePIDs == nil {
 		return false
 	}
 	return f.alivePIDs[pid]
+}
+
+// SetLiveProcess sets a liveProcesses entry under processMu so tests can mutate it without racing
+// the relay goroutine's LiveSessionProcess reads.
+func (f *fakeAgent) SetLiveProcess(sessionID string, proc core.LiveSessionProcess) {
+	f.processMu.Lock()
+	defer f.processMu.Unlock()
+	if f.liveProcesses == nil {
+		f.liveProcesses = map[string]core.LiveSessionProcess{}
+	}
+	f.liveProcesses[sessionID] = proc
+}
+
+// TranscriptPath 让 fakeAgent 满足 core.TranscriptLocator（Codex file relay 启动需要）。
+func (f *fakeAgent) TranscriptPath(ctx context.Context, sessionID string) (string, error) {
+	return f.transcriptPath, nil
 }
 
 func (f *fakeAgent) StartSession(_ context.Context, sessionID string) (core.AgentSession, error) {
@@ -154,6 +193,9 @@ func (f *fakeAgent) StartSession(_ context.Context, sessionID string) (core.Agen
 }
 
 func (f *fakeAgent) ListSessions(context.Context) ([]core.AgentSessionInfo, error) {
+	if f.listHook != nil {
+		f.listHook()
+	}
 	if f.sessionListErr != nil {
 		return nil, f.sessionListErr
 	}
@@ -1634,6 +1676,53 @@ func TestHandleGetSessionMessagesBoundsPaginatedRichHistoryFallback(t *testing.T
 	}
 }
 
+func TestHandleGetSessionMessagesWholeHistoryPreservesRowsAndTruncatesOversizedMessage(t *testing.T) {
+	agent := &fakeAgent{
+		name: "codex",
+		richHistory: []core.RichHistoryEntry{
+			{ID: "old", Role: "user", Content: "keep old", Timestamp: time.Unix(1, 0).UTC()},
+			{ID: "huge", Role: "assistant", Content: strings.Repeat("x", 1<<20), Timestamp: time.Unix(2, 0).UTC()},
+			{ID: "new", Role: "assistant", Content: "keep new", Timestamp: time.Unix(3, 0).UTC()},
+		},
+	}
+
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "codex",
+		Method:    "get_session_messages",
+		RequestID: "hist-whole",
+		Params: mustJSONRaw(t, map[string]any{
+			"sessionId": "ses_whole",
+			"limit":     0,
+		}),
+	})
+
+	response := readJSONMaps(t, clientConn, 1)[0]
+	data, _ := response["data"].(map[string]any)
+	entries, _ := data["messages"].([]any)
+	if len(entries) != 3 {
+		t.Fatalf("message count = %d, want complete 3-row history", len(entries))
+	}
+	if entries[0].(map[string]any)["id"] != "old" || entries[2].(map[string]any)["id"] != "new" {
+		t.Fatalf("whole-history order changed: %#v", entries)
+	}
+	huge := entries[1].(map[string]any)
+	if marked, _ := huge["truncated"].(bool); !marked {
+		t.Fatalf("oversized whole-history message missing truncated marker: %#v", huge)
+	}
+	encoded, err := json.Marshal(huge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > maxPageResponseBytes {
+		t.Fatalf("oversized whole-history message encoded %d bytes > budget %d", len(encoded), maxPageResponseBytes)
+	}
+}
+
 func TestHandleGetSessionMessagesIfNoneMatchShortCircuits(t *testing.T) {
 	agent := &fakeAgent{
 		name: "codex",
@@ -2361,7 +2450,7 @@ func TestClaudeSendMessageWithNilStubDoesNotPanic(t *testing.T) {
 	}
 }
 
-func TestClaudeSendMessageReplacesFileRelayWithAgentRelay(t *testing.T) {
+func TestClaudeSendMessageKeepsFileRelayAlongsideAgentRelay(t *testing.T) {
 	agent := &fakeAgent{name: "claudecode", generateSessionID: true}
 	agent.sendHook = func(sess *fakeAgentSession, _ string) {
 		sess.events <- core.Event{Type: core.EventText, SessionID: sess.id, Content: "partial"}
@@ -2374,8 +2463,10 @@ func TestClaudeSendMessageReplacesFileRelayWithAgentRelay(t *testing.T) {
 	defer cleanup()
 
 	// 冷启动打开既有 Claude session 时，get_session_messages/resume_session 可能先
-	// 留下 transcript file relay 标记。send_message 必须用真实 AgentSession stdout
-	// relay 接管，否则 iOS 只能靠历史轮询看到从头刷新的 assistant 内容。
+	// 留下 transcript file relay 标记（kind=claude_file）。send_message 必须启动真实
+	// AgentSession stdout relay，但**不能**把 file relay supersede 掉——file relay 是
+	// 本地 turn 唯一的 UUID-keyed 内容来源（agent relay 事件缺 itemId，会被 reducer 跳过）。
+	// 因此两者应并行：agent relay 作 sidecar 投递控制面/带 itemId 事件，file relay 保留为内容来源。
 	const sessionID = "b36c6286-2222-4eec-b542-8cdc8a382573"
 	handlers.mu.Lock()
 	handlers.relayRunning[sessionID] = true
@@ -2385,7 +2476,7 @@ func TestClaudeSendMessageReplacesFileRelayWithAgentRelay(t *testing.T) {
 	handlers.HandleRPC(serverConn, WireMessage{
 		BackendID: "claudecode",
 		Method:    "send_message",
-		RequestID: "send-replaces-file-relay",
+		RequestID: "send-keeps-file-relay",
 		Params: mustJSONRaw(t, map[string]any{
 			"sessionId": sessionID,
 			"content":   "hello",
@@ -2404,7 +2495,142 @@ func TestClaudeSendMessageReplacesFileRelayWithAgentRelay(t *testing.T) {
 		}
 	}
 	if !sawText || !sawCompleted {
-		t.Fatalf("agent relay 未接管 file relay：sawText=%v sawCompleted=%v messages=%v", sawText, sawCompleted, messages)
+		t.Fatalf("agent relay 未投递事件：sawText=%v sawCompleted=%v messages=%v", sawText, sawCompleted, messages)
+	}
+	// 核心断言：file relay (kind=claude_file) 没有被 send_message supersede，agent relay 作为
+	// sidecar 并行运行（agentRelayRunning=true）。
+	handlers.mu.Lock()
+	fileRelayKept := handlers.relayRunningKind[sessionID] == relayKindClaudeFile
+	agentRelaySidecar := handlers.agentRelayRunning[sessionID]
+	handlers.mu.Unlock()
+	if !fileRelayKept {
+		t.Fatalf("send_message 把 file relay superseded 了：relayRunningKind=%q，应保持 claude_file", handlers.relayRunningKind[sessionID])
+	}
+	if !agentRelaySidecar {
+		t.Fatalf("send_message 未启动 agent relay sidecar：agentRelayRunning=false")
+	}
+}
+
+// readEventOrTimeout reads one JSON event from the websocket; returns nil on timeout or any read
+// error so callers can drain non-fatally within a deadline.
+func readEventOrTimeout(t *testing.T, c *websocket.Conn, timeout time.Duration) map[string]any {
+	t.Helper()
+	if err := c.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		return nil
+	}
+	var m map[string]any
+	if err := c.ReadJSON(&m); err != nil {
+		return nil
+	}
+	return m
+}
+
+// TestClaudeFileRelayAndAgentRelayRunConcurrentlyRaceFree closes the evidence gap flagged in the
+// Issue 3 review: "data-race-free is a lock-design argument, not a concurrent proof." It runs the
+// REAL claudeSessionFileRelayLoop (file relay) AND the REAL relayEvents (agent relay sidecar)
+// concurrently on the SAME session — both touching the shared relayRunning / relayRunningKind /
+// agentRelayRunning maps and the projection reducer. Run under `go test -race` it proves there is
+// no data race; the assertions prove the file relay is never superseded (kind stays claude_file)
+// and both relays deliver their events while overlapping.
+func TestClaudeFileRelayAndAgentRelayRunConcurrentlyRaceFree(t *testing.T) {
+	withFastClaudeFileRelay(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	const sessionID = "concurrent-both-relay"
+	path := writeClaudeFileRelayTranscript(t, home, sessionID,
+		`{"type":"user","uuid":"both-user","message":{"role":"user","content":"local turn"}}`)
+
+	agent := &fakeAgent{
+		name:              "claudecode",
+		generateSessionID: true,
+		liveProcesses: map[string]core.LiveSessionProcess{
+			sessionID: {SessionID: sessionID, PID: 4242, Live: true},
+		},
+		alivePIDs: map[int]bool{4242: true},
+		// Agent-relay sidecar events. EventText carries no itemId (driver path) — its delta is
+		// distinctive from file-relay text (which carries the transcript UUID as itemId).
+		sendHook: func(sess *fakeAgentSession, _ string) {
+			sess.events <- core.Event{Type: core.EventText, SessionID: sess.id, Content: "agent partial"}
+			sess.events <- core.Event{Type: core.EventResult, SessionID: sess.id, Done: true}
+		},
+	}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("claudecode", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	t.Cleanup(cleanup)
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "claudecode", SessionID: sessionID})
+
+	// 1. Start the FILE relay → claims the global slot with kind=claude_file.
+	handlers.startClaudeSessionFileRelay(sessionID, serverConn, "claudecode")
+
+	// Drain the file relay's warm-start turn_started for both-user.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if m := readEventOrTimeout(t, clientConn, 300*time.Millisecond); m != nil && m["event"] == "turn_started" {
+			break
+		}
+	}
+
+	// 2. Local turn → AGENT relay starts as sidecar. Must NOT supersede the file relay.
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "claudecode",
+		Method:    "send_message",
+		RequestID: "send-concurrent",
+		Params:    mustJSONRaw(t, map[string]any{"sessionId": sessionID, "content": "hi"}),
+	})
+
+	handlers.mu.Lock()
+	kindAfterSend := handlers.relayRunningKind[sessionID]
+	handlers.mu.Unlock()
+	if kindAfterSend != relayKindClaudeFile {
+		t.Fatalf("send_message superseded file relay: kind=%q, want claude_file", kindAfterSend)
+	}
+
+	// 3. File relay concurrently emits its assistant completion for the same session/reducer.
+	appendClaudeFileRelayTranscript(t, path,
+		`{"type":"assistant","uuid":"both-asst","message":{"id":"msg_both","role":"assistant","content":[{"type":"text","text":"file done"}],"stop_reason":"end_turn"}}`)
+
+	// 4. Overlap window: collect events until output from BOTH relays is observed.
+	deadline = time.Now().Add(2 * time.Second)
+	var sawAgentText, sawFileText bool
+	for time.Now().Before(deadline) && !(sawAgentText && sawFileText) {
+		m := readEventOrTimeout(t, clientConn, 300*time.Millisecond)
+		if m == nil {
+			continue
+		}
+		if m["event"] == "text_delta" {
+			if d, ok := m["data"].(map[string]any); ok {
+				switch d["delta"] {
+				case "agent partial":
+					sawAgentText = true
+				case "file done":
+					sawFileText = true
+				}
+			}
+		}
+	}
+	if !sawAgentText {
+		t.Fatal("agent relay sidecar did not deliver its event concurrently with the file relay")
+	}
+	if !sawFileText {
+		t.Fatal("file relay did not deliver its text concurrently with the agent relay")
+	}
+
+	handlers.mu.Lock()
+	kindEnd := handlers.relayRunningKind[sessionID]
+	agentSidecar := handlers.agentRelayRunning[sessionID]
+	handlers.mu.Unlock()
+	if kindEnd != relayKindClaudeFile {
+		t.Fatalf("file relay kind changed during overlap: %q, want claude_file", kindEnd)
+	}
+	if !agentSidecar {
+		t.Fatal("agent relay sidecar not running alongside file relay")
+	}
+
+	// Cleanly terminate the agent relay so it exits before teardown (its events channel stays
+	// open otherwise); closing it makes relayEvents hit the channel-closed path and return.
+	if n := len(agent.sessions); n > 0 {
+		_ = agent.sessions[n-1].Close()
 	}
 }
 

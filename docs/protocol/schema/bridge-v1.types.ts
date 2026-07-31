@@ -11,6 +11,8 @@ export interface BridgeWireError {
   code?: string;
   message?: string;
   retryable?: boolean;
+  retryAfterMillis?: number;
+  attempts?: number;
   recoverBy?: string;
   backendId?: string;
 }
@@ -23,6 +25,39 @@ export interface BridgeClientInfo {
   deviceId?: string;
 }
 
+export type BridgeClientCapability =
+  | "recovery_v1"
+  | "relay_gzip_v1"
+  | "relay_chunks_v1"
+  | "session_sync_v2";
+
+export interface RelayChunkMetadata {
+  groupId: string;
+  index: number;
+  count: number;
+}
+
+export interface BridgeSessionCut {
+  eventId: string;
+  seq: number;
+}
+
+/** backendId -> sessionId -> acknowledged cut. */
+export type BridgeSessionCutMap = Record<string, Record<string, BridgeSessionCut>>;
+
+export type BridgeRecoveryPlan =
+  | {
+      recoveryId: string;
+      mode: "replay";
+      replayThroughBySession: BridgeSessionCutMap;
+    }
+  | {
+      recoveryId: string;
+      mode: "snapshot_required" | "full_resync";
+      affectedSessions: Array<{ backendId: string; sessionId: string }>;
+      cutBySession: BridgeSessionCutMap;
+    };
+
 export interface BridgeHello {
   type: "hello";
   client: {
@@ -31,6 +66,11 @@ export interface BridgeHello {
     deviceId: string;
   };
   protocol: BridgeProtocol;
+  capabilities?: BridgeClientCapability[];
+  lastBridgeEpoch?: string;
+  /** Compatibility hint only; recovery decisions use lastSeenBySession. */
+  lastEventId?: string;
+  lastSeenBySession?: BridgeSessionCutMap;
 }
 
 export interface BridgeRegister {
@@ -41,9 +81,6 @@ export interface BridgeRegister {
     version: string;
   };
   protocol: Pick<BridgeProtocol, "name" | "version">;
-  lastBridgeEpoch?: string;
-  lastEventId?: string;
-  lastSeenBySession?: Record<string, { eventId: string; seq: number }>;
 }
 
 export interface BridgeSecurityProfile {
@@ -58,6 +95,7 @@ export interface BridgeBackendInfo {
   id: string;
   kind: "claude_code" | "opencode" | "codex" | string;
   displayName?: string;
+  /** Backend-scoped capabilities; session_sync_v2 here (not only hello_ack) selects ownership. */
   capabilities?: string[];
   descriptor?: Record<string, string>;
   permissionMode?: { mode?: string };
@@ -94,6 +132,8 @@ export interface BridgeHelloAck {
     security?: BridgeSecurityProfile;
   };
   capabilities?: Record<string, boolean>;
+  bridgeEpoch?: string;
+  recovery?: BridgeRecoveryPlan;
   backends?: BridgeBackendInfo[];
   bridgeStatus?: string;
   runningSessions?: Array<{
@@ -112,11 +152,29 @@ export interface BridgeRegisterAck {
   serverCapabilities?: string[];
   bridgeEpoch?: string;
   backends?: BridgeBackendInfo[];
-  recovery?: {
-    type?: string;
-    affectedSessions?: Array<{ backendId?: string; sessionId?: string }>;
-  };
   error?: BridgeWireError;
+}
+
+export interface BridgeRecoveryBarrier {
+  type: "recovery_barrier";
+  recoveryId: string;
+  replayThroughBySession: BridgeSessionCutMap;
+}
+
+export interface BridgeRecoveryApplied {
+  type: "recovery_applied";
+  recoveryId: string;
+  appliedThroughBySession: BridgeSessionCutMap;
+}
+
+export interface BridgeRecoveryComplete {
+  type: "recovery_complete";
+  recoveryId: string;
+}
+
+export interface BridgeRecoverySnapshotMetadata {
+  recoveryId: string;
+  hwm: BridgeSessionCut;
 }
 
 export type BridgeRPCMethod =
@@ -132,6 +190,7 @@ export type BridgeRPCMethod =
   | "abort_generation"
   | "get_session"
   | "get_session_messages"
+  | "get_session_projection"
   | "delete_session"
   | "resume_session"
   | "switch_model"
@@ -191,6 +250,24 @@ export interface BridgeResult<TData = unknown> {
   error?: BridgeWireError;
 }
 
+export type ToolMatches =
+  | { kind: "count"; count: number }
+  | { kind: "paths"; paths: string[] }
+  | { kind: "detailed"; items: Array<{ path: string; line?: number; preview?: string }> };
+
+export interface BridgeToolEventData {
+  itemId?: string;
+  toolName?: string;
+  toolInput?: unknown;
+  toolInputRaw?: Record<string, unknown>;
+  toolResult?: unknown;
+  toolStatus?: string;
+  toolExitCode?: number;
+  matches?: ToolMatches;
+  streamId?: string;
+  parentStreamId?: string;
+}
+
 export type BridgeEventName =
   | "text_delta"
   | "message_updated"
@@ -206,7 +283,15 @@ export type BridgeEventName =
   | "context_compressed"
   | "context_usage_updated"
   | "question_asked"
-  | "question_resolved";
+  | "question_resolved"
+  | "sessions_changed"
+  // Session Projection Stream (session_sync_v2 capability). Mac reduces EventPublisher
+  // output into one authoritative SessionProjection; clients apply patches/snapshots only
+  // and never dual-source merge. See bridge-v1.md「Session Projection Stream」.
+  // Phase 1 = Codex rollout path only; driver/local-send/web are Phase 3+.
+  | "projection_patch"
+  | "projection_snapshot"
+  | "sync_invalidate";
 
 export interface BridgeEvent<TData = unknown> {
   type: "event";
@@ -335,3 +420,132 @@ export interface BridgeGetSessionMessagesResult {
 
 /** Backend capability string for get_session_messages history paging, not list_sessions paging. */
 export type BridgeSessionPaginationCapability = "session_pagination";
+
+// ── Session Projection Stream (SPS) · session_sync_v2 ────────────────────────
+// Single-source multi-device sync (design docs/2026-07-24-single-source-multidevice-sync-design.md).
+// MacBridge reduces its EventPublisher output into ONE authoritative SessionProjection per
+// (backendId, sessionId); clients only apply patches/snapshots and MUST NOT dual-source merge
+// content. syncRev ≡ EventPublisher.perSessionSeq for that session (monotonic under the publisher
+// lock). Phase 1 consumes the Codex file-relay/rollout path only (itemId/turnId already carried,
+// bypasses DeltaBatcher); driver/local-send/web are Phase 3+.
+
+/** One part of a message projection. `type` mirrors the existing Mapping Notes part vocabulary. */
+export type BridgeProjectionPart =
+  | { type: "text"; text: string; presentation?: "progress" | "final" }
+  | { type: "reasoning"; text: string }
+  | {
+      type: "tool";
+      itemId?: string; // rollout call_id (authoritative tool identity)
+      toolName?: string;
+      toolInput?: unknown;
+      toolResult?: unknown;
+      toolStatus?: string;
+      matches?: ToolMatches;
+    }
+  | { type: "file"; path?: string; kind?: string; diff?: string; movePath?: string }
+  | {
+      // B4 child-stream (sync-only): a Claude Agent/Task tool nested subagent group. Built
+      // entirely by the MacBridge projection kernel as the single source of truth; clients map
+      // this read-only (no client-side tree building). Join keys mirror the real sidechain
+      // .meta.json schema (sample-verified): depth-1 anchors to the mainstream turn via
+      // spawnToolUseId ↔ mainstream Agent tool_use id; depth≥2 nests via parentAgentId ↔
+      // parent agentId. subagentBlocks is recursive — the subagent's own content (text/reasoning/
+      // tool) plus any nested depth+1 subagent parts.
+      type: "subagent";
+      agentId: string;
+      parentAgentId?: string;
+      spawnToolUseId?: string;
+      spawnDepth?: number;
+      subagentType?: string; // async | sync (from .meta.json agentType)
+      subagentStatus?: string; // running | completed | failed (sample only verified completed)
+      subagentBlocks?: BridgeProjectionPart[];
+      subagentError?: string;
+      subagentDiagnostic?: string; // orphan_parent | cycle | max_depth
+    };
+
+export interface BridgeMessageProjection {
+  /** Authoritative source id: rollout response_item.id (user) / call_id (tool) / lifecycle turn_id (assistant text). */
+  id: string;
+  /** Optional echo of a client optimistic id (Phase 3 local-send correlation; absent in Phase 1–2). */
+  clientId?: string;
+  role: "user" | "assistant" | "system";
+  parts: BridgeProjectionPart[];
+}
+
+export type BridgeTurnStatus = "pending" | "running" | "completed" | "aborted" | "error";
+
+export interface BridgeTurnProjection {
+  /** Codex rollout: stable lifecycle turn_id (event_msg.turn_id), carried by turn_started/turn_completed. */
+  turnId: string;
+  status: BridgeTurnStatus;
+  startedAt?: number; // epoch-ms
+  /** Integrates the existing turnCompletedAt evidence into a turn-level authoritative state. */
+  completedAt?: number; // epoch-ms
+  user?: BridgeMessageProjection;
+  assistant?: BridgeMessageProjection;
+  /** Transcript lifecycle milestone such as a Claude compact boundary. */
+  system?: BridgeMessageProjection;
+}
+
+export type BridgeExecutionPhase = "idle" | "running" | "requires_action";
+
+export interface BridgeExecutionView {
+  phase: BridgeExecutionPhase;
+  activeTurnId?: string;
+}
+
+export interface BridgeSessionProjection {
+  sessionId: string;
+  /** Monotonic; ≡ EventPublisher.perSessionSeq for (backendId, sessionId). Same value push and pull read. */
+  syncRev: number;
+  bridgeEpoch?: string;
+  updatedAt?: number; // epoch-ms
+  execution: BridgeExecutionView;
+  turns: BridgeTurnProjection[];
+}
+
+/** Incremental part operation (main streaming path). Applies to a specific (turnId, messageId). */
+export type BridgePartOp =
+  | { turnId: string; messageId: string; op: "append_text"; text: string }
+  | { turnId: string; messageId: string; op: "set_thinking"; text: string }
+  | { turnId: string; messageId: string; op: "upsert_tool"; part: Extract<BridgeProjectionPart, { type: "tool" }> }
+  | { turnId: string; messageId: string; op: "replace_parts"; parts: BridgeProjectionPart[] };
+
+/** Push frame `projection_patch`: baseRev→syncRev incremental delta (coalesced 50–100ms server-side). */
+export interface BridgeProjectionPatch {
+  baseRev: number;
+  syncRev: number;
+  execution?: BridgeExecutionView;
+  /** Whole-turn upsert: new turn appearance, status change, or authoritative correction. */
+  upsertTurns?: BridgeTurnProjection[];
+  /** Main path: incremental part ops. Clients append/replace the named part; never merge with another source. */
+  partOps?: BridgePartOp[];
+  /** Phase 3: authoritative ids that invalidate local optimistic ids (absent in Phase 1–2). */
+  replacesClientIds?: string[];
+}
+
+/** Push frame `projection_snapshot`: full projection at syncRev (epoch mismatch / recovery). */
+export interface BridgeProjectionSnapshot {
+  syncRev: number;
+  projection: BridgeSessionProjection;
+}
+
+/** Push frame `sync_invalidate`: force the client to call get_session_projection. */
+export interface BridgeSyncInvalidate {
+  reason: "epoch_mismatch" | "gap" | "reducer_reset";
+  bridgeEpoch?: string;
+}
+
+/** get_session_projection request params (additive; sits beside get_session_messages). */
+export interface BridgeGetSessionProjectionParams {
+  sessionId: string;
+  directory?: string;
+  /** When set, the server MAY return a delta {patches, headRev} instead of the full projection. */
+  sinceRev?: number;
+  limitTurns?: number;
+}
+
+/** get_session_projection result: full projection (no sinceRev / server chose snapshot) OR delta patches. */
+export type BridgeGetSessionProjectionResult =
+  | { projection: BridgeSessionProjection }
+  | { patches: BridgeProjectionPatch[]; headRev: number };

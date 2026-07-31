@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/openAgi2/cordcode-macbridge/agent/claudecode"
 	"github.com/openAgi2/cordcode-macbridge/core"
 	"github.com/openAgi2/cordcode-macbridge/pinstore"
 	"github.com/openAgi2/cordcode-macbridge/transcriptindex"
@@ -39,16 +40,24 @@ type Handlers struct {
 	opencodeSessionOptions map[string]opencodeSessionOptions
 	contentRefs            map[string]string
 	contentRefOrder        []string
-	seq                    int
 	ocProxy                *OpenCodeProxy
 	codexBackendMode       string
 	pendingNotifications   *PendingNotificationStore
 	broadcaster            *Broadcaster
+	eventPublisher         *EventPublisher
+	projectionKernel       *ProjectionKernel
+	projectionHydrateSlots chan struct{}
 	// deltaBatcher（Fix 5）：text_delta/reasoning_delta 时间窗攒批，降低上游每 token 一帧
 	// 的 WS/HPKE/日志开销。relayEvents / startPassiveSubscription 通过它下发，而非直接 broadcaster.Send。
 	deltaBatcher            *DeltaBatcher
 	relayRunning            map[string]bool   // sessionID/relayKey → 是否已有 relay goroutine
 	relayRunningKind        map[string]string // sessionID → agent/file relay 类型，用于避免 Claude file relay 抢占真实 stdout relay
+	// agentRelayRunning 与 relayRunningKind 解耦：标记 agent relay (relayEvents) goroutine 是否在跑。
+	// 本地发 turn 时若 file relay 已占用全局槽位 (kind=claude_file)，startRelayIfNotRunning 不再把 kind
+	// 翻成 agent，避免 claudeSessionFileRelayLoop 被 superseded 退出而丢失唯一 UUID 内容来源（见
+	// startRelayIfNotRunning 注释与 Issue 3 调查 docs/2026-07-30-remote-web-send-message-not-live-investigation.md）。
+	agentRelayRunning map[string]bool
+	claudeSourceCorrelation *claudeSourceCorrelationTracker
 	deliveryPrekeys         *PrekeyStore
 	observation             *ObservationManager
 	relayOutbox             *OutboxManager
@@ -95,46 +104,65 @@ type opencodeSessionOptions struct {
 }
 
 func NewHandlers() *Handlers {
-	return newHandlersWithContext(context.Background())
+	return newHandlersWithContext(context.Background(), mustGenerateBridgeEpoch())
 }
 
 // NewHandlersWithContext creates a Handlers bound to the given root context.
 // Cancelling ctx propagates shutdown to active agent sessions. Prefer this in
 // main() so SIGTERM/management shutdown reaches in-flight turns.
 func NewHandlersWithContext(ctx context.Context) *Handlers {
-	return newHandlersWithContext(ctx)
+	return newHandlersWithContext(ctx, mustGenerateBridgeEpoch())
 }
 
-func newHandlersWithContext(ctx context.Context) *Handlers {
+func NewHandlersWithContextAndEpoch(ctx context.Context, bridgeEpoch string) *Handlers {
+	return newHandlersWithContext(ctx, bridgeEpoch)
+}
+
+func mustGenerateBridgeEpoch() string {
+	epoch, err := generateBridgeEpoch()
+	if err != nil {
+		panic(err)
+	}
+	return epoch
+}
+
+func newHandlersWithContext(ctx context.Context, bridgeEpoch string) *Handlers {
 	prekeys := NewPrekeyStore("")
 	observation := NewObservationManager()
 	outbox := NewOutboxManager(prekeys)
 	presentation := NewPresentationManager()
 	h := &Handlers{
-		agents:                 make(map[string]core.Agent),
-		sessions:               newSessionRegistry(),
-		opencodeSessionOptions: make(map[string]opencodeSessionOptions),
-		contentRefs:            make(map[string]string),
-		broadcaster:            NewBroadcaster(),
-		pendingNotifications:   NewPendingNotificationStore(),
-		relayRunning:           make(map[string]bool),
-		relayRunningKind:       make(map[string]string),
-		deliveryPrekeys:        prekeys,
-		observation:            observation,
-		relayOutbox:            outbox,
-		presentation:           presentation,
-		relayEventRouter:       NewRelayEventRouter(observation, outbox, prekeys, NewMailboxService(NewRelayHub()), presentation),
-		claudeSessions:         newDefaultClaudeSessionCatalog(),
-		pendingClaudeRuntime:   make(map[string]claudeRuntimeSelection),
-		transcriptIndex:        transcriptindex.NewStore(defaultTranscriptIndexDir()),
-		capabilityPolicy:       NewCapabilityPolicy(),
-		relayEnabled:           true,
-		sessionListLimit:       defaultSessionListLimit,
-		ctx:                    ctx,
-		cleanupStop:            make(chan struct{}),
+		agents:                  make(map[string]core.Agent),
+		sessions:                newSessionRegistry(),
+		opencodeSessionOptions:  make(map[string]opencodeSessionOptions),
+		contentRefs:             make(map[string]string),
+		broadcaster:             NewBroadcaster(),
+		pendingNotifications:    NewPendingNotificationStore(),
+		projectionHydrateSlots:  make(chan struct{}, projectionHydrateMaxConcurrent),
+		relayRunning:            make(map[string]bool),
+		relayRunningKind:        make(map[string]string),
+		agentRelayRunning:       make(map[string]bool),
+		claudeSourceCorrelation: newClaudeSourceCorrelationTracker(),
+		deliveryPrekeys:         prekeys,
+		observation:             observation,
+		relayOutbox:             outbox,
+		presentation:            presentation,
+		relayEventRouter:        NewRelayEventRouter(observation, outbox, prekeys, NewMailboxService(NewRelayHub()), presentation),
+		claudeSessions:          newDefaultClaudeSessionCatalog(),
+		pendingClaudeRuntime:    make(map[string]claudeRuntimeSelection),
+		transcriptIndex:         transcriptindex.NewStore(defaultTranscriptIndexDir()),
+		capabilityPolicy:        NewCapabilityPolicy(),
+		relayEnabled:            true,
+		sessionListLimit:        defaultSessionListLimit,
+		ctx:                     ctx,
+		cleanupStop:             make(chan struct{}),
 	}
-	// Fix 5：text_delta/reasoning_delta 攒批（在 broadcaster.Send 前按 33ms 窗口合并）。
-	h.deltaBatcher = NewDeltaBatcher(h.broadcaster)
+	h.installEventPublisher(NewEventPublisher(bridgeEpoch, h.broadcaster))
+	h.projectionKernel = NewProjectionKernel(
+		h.eventPublisher.ProjectionReducer(),
+		NewProjectionCheckpointStore(""),
+	)
+	h.eventPublisher.SetProjectionKernel(h.projectionKernel)
 	// TTL cache for the Claude running map (Fix 3). The recompute closure binds to
 	// whatever claudecode agent is currently registered, so the cache is valid
 	// across register/unregister. Invalidated on session-registry state changes.
@@ -159,6 +187,193 @@ func newHandlersWithContext(ctx context.Context) *Handlers {
 		h.runningMap.invalidate()
 	}
 	return h
+}
+
+func (h *Handlers) installEventPublisher(publisher *EventPublisher) {
+	if publisher == nil {
+		panic("event publisher must not be nil")
+	}
+	if h.deltaBatcher != nil {
+		h.deltaBatcher.Stop()
+	}
+	h.eventPublisher = publisher
+	h.eventPublisher.SetOfflineRoute(h.routeRelayOfflineStampedEvent)
+	h.eventPublisher.SetObservationManager(h.observation)
+	h.eventPublisher.SetRebindTargets(h.rebindLiveTargetsForSession)
+	h.deltaBatcher = NewDeltaBatcher(publisher)
+	if h.projectionKernel != nil {
+		h.projectionKernel.SetReducer(publisher.ProjectionReducer())
+		publisher.SetProjectionKernel(h.projectionKernel)
+	}
+}
+
+func (h *Handlers) publishEvent(logical LogicalEvent) EventMessage {
+	if h.eventPublisher == nil {
+		panic("event publisher is not configured")
+	}
+	if len(logical.Targets) > 0 && len(logical.WaitTargets) == 0 {
+		logical.WaitTargets = logical.Targets
+	}
+	return h.eventPublisher.PublishLogical(logical)
+}
+
+func (h *Handlers) registerConnection(conn Connection) {
+	h.broadcaster.RegisterConn(conn)
+	h.eventPublisher.RegisterConnection(conn)
+	// Fresh connect (LAN after relay drop, or first hello) must re-bind session
+	// subscriptions from device-scoped observation — otherwise PublishLogical sees
+	// candidateTargets=0 until the next set_observation_scope/get_session_messages
+	// race window (owner WiFi 2026-07-25: relay close → LAN hello → still zero targets).
+	h.resubscribeObservationSessions(conn)
+	// Live-frame buffer: replay frames stored while this device had zero targets.
+	h.eventPublisher.FlushLiveFrameBufferForDevice(conn)
+}
+
+// replaceConnection atomically swaps an authenticated device connection during
+// online re-handshake. Subscriptions move to the new Connection; observation
+// scope is device-scoped and is intentionally NOT cleared. Clearing scope here
+// is what turned full_stream reconnect windows into milestones_only (only
+// durable events) until the next iOS set_observation_scope lease renew (~30s).
+func (h *Handlers) replaceConnection(old, new Connection) {
+	if new == nil {
+		return
+	}
+	if old == nil {
+		// registerConnection already resubscribes from observation.
+		h.registerConnection(new)
+		return
+	}
+	h.eventPublisher.UnregisterConnection(old)
+	h.broadcaster.TransferSubscriptions(old, new)
+	h.eventPublisher.RegisterConnection(new)
+	// Observation is device-scoped and may outlive the connection; session
+	// subscriptions are connection-scoped and can be empty after a true
+	// disconnect. Re-bind from observation so mid-turn live is not stuck at
+	// candidateTargets=0 until iOS happens to RPC again.
+	h.resubscribeObservationSessions(new)
+	h.eventPublisher.FlushLiveFrameBufferForDevice(new)
+}
+
+// resubscribeObservationSessions re-attaches broadcaster session keys for every
+// backend/session still listed in the device's observation scope.
+func (h *Handlers) resubscribeObservationSessions(conn Connection) {
+	if conn == nil || h.observation == nil {
+		return
+	}
+	device := conn.AuthedDevice()
+	if device == nil {
+		return
+	}
+	for _, backendID := range []string{"codex", "claudecode", "opencode", "grokbuild", "claude"} {
+		scope := h.observation.GetScope(device.DeviceID, backendID)
+		if scope == nil {
+			continue
+		}
+		for _, sid := range scope.SessionIDs {
+			if sid == "" {
+				continue
+			}
+			h.broadcaster.Subscribe(conn, SubscriptionKey{
+				BackendID: backendID,
+				SessionID: sid,
+			})
+		}
+	}
+}
+
+// rebindLiveTargetsForSession re-attaches broadcaster subscriptions for every
+// still-connected device that observes this session. Called when PublishLogical
+// sees zero online targets while the file-relay is still EMITting — the common
+// failure after path thrash where observation/device registry still has the
+// device but session keys were wiped from the broadcaster.
+func (h *Handlers) rebindLiveTargetsForSession(backendID, sessionID string) int {
+	if h == nil || h.broadcaster == nil || backendID == "" || sessionID == "" {
+		return 0
+	}
+	rebound := 0
+	for _, deviceID := range globalDeviceConnRegistry.AllDeviceIDs() {
+		// Observation scope is the authoritative watch list. A connected device that does
+		// not observe this session must not be subscribed as a recovery side effect.
+		shouldBind := false
+		if h.observation != nil {
+			if scope := h.observation.GetScope(deviceID, backendID); scope != nil {
+				if len(scope.SessionIDs) == 0 {
+					shouldBind = true // backend-wide watch
+				} else {
+					for _, sid := range scope.SessionIDs {
+						if sid == sessionID || sid == "*" {
+							shouldBind = true
+							break
+						}
+					}
+				}
+			}
+		}
+		conns := globalDeviceConnRegistry.Connections(deviceID)
+		if len(conns) == 0 {
+			continue
+		}
+		if !shouldBind {
+			continue
+		}
+		for _, conn := range conns {
+			if conn == nil {
+				continue
+			}
+			if closed, ok := conn.(interface{ isClosed() bool }); ok && closed.isClosed() {
+				continue
+			}
+			h.broadcaster.RegisterConn(conn)
+			h.broadcaster.Subscribe(conn, SubscriptionKey{
+				BackendID: backendID,
+				SessionID: sessionID,
+			})
+			// Capability provenance belongs to hello negotiation. The existing connection's
+			// v2 mark already survives a subscription rebind; a replacement connection must
+			// negotiate its own mark in the hello handler.
+			rebound++
+		}
+	}
+	if rebound > 0 {
+		slog.Info("go-bridge: rebound live targets for zero-target session",
+			"backendID", backendID,
+			"sessionID", sessionID,
+			"conns", rebound,
+		)
+	} else {
+		// Forensic: PublishLogical zero-target recovery found nothing to rebind.
+		// Common when device registry is empty while an RPC conn still answers
+		// (registry/broadcaster desync) — pull still works, live push does not.
+		deviceN := len(globalDeviceConnRegistry.AllDeviceIDs())
+		hasSub := false
+		if h.broadcaster != nil {
+			hasSub = h.broadcaster.HasSessionSubscriber(backendID, sessionID)
+		}
+		slog.Warn("go-bridge: rebind live targets found zero conns",
+			"backendID", backendID,
+			"sessionID", sessionID,
+			"registryDevices", deviceN,
+			"hasSessionSubscriber", hasSub,
+		)
+	}
+	return rebound
+}
+
+func (h *Handlers) unregisterConnection(conn Connection) {
+	h.broadcaster.UnsubscribeAll(conn)
+	h.eventPublisher.UnregisterConnection(conn)
+	// Intentionally do NOT RemoveDevice observation here.
+	//
+	// Path switch (relay↔LAN) often has a 0.5–2s gap with zero connections. Wiping
+	// observation on the last unregister left registerConnection's
+	// resubscribeObservationSessions with nothing to rebind, so live stayed at
+	// candidateTargets=0 until a later set_observation_scope — and even that
+	// raced thrashing (owner WiFi 2026-07-25: LAN hello + set_observation + still
+	// subscribed=false window). Session subscriptions are connection-scoped and
+	// are reattached from surviving observation on the next register/replace.
+	// Soft lease (2× LeaseSeconds) already demotes full_stream delivery; device
+	// revoke must call RemoveDevice explicitly if permanent wipe is required.
+	_ = conn // keep signature; observation retained for reconnect rebind
 }
 
 func (h *Handlers) SetSessionListLimit(limit int) {
@@ -216,6 +431,9 @@ func (h *Handlers) SetDataDir(dir string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.dataDir = dir
+	if h.projectionKernel != nil {
+		h.projectionKernel.SetCheckpointStore(NewProjectionCheckpointStore(dir))
+	}
 }
 
 // SetPinStore 注入进程级 session pin (置顶) 存储。由 main() 在数据目录确定后、agent
@@ -597,6 +815,10 @@ func (h *Handlers) HandleRPC(conn Connection, msg WireMessage) {
 	if h.handleRelayUpgradeRPC(conn, msg) {
 		return
 	}
+	if msg.Method == "set_observation_scope" {
+		h.handleSetObservationScope(conn, msg)
+		return
+	}
 
 	h.mu.Lock()
 	agent, ok := h.agents[msg.BackendID]
@@ -619,6 +841,65 @@ func (h *Handlers) HandleRPC(conn Connection, msg WireMessage) {
 	h.dispatchRPC(conn, msg, agent)
 }
 
+func (h *Handlers) handleSetObservationScope(conn Connection, msg WireMessage) {
+	device := conn.AuthedDevice()
+	if device == nil {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "auth.required", Message: "observation scope requires an authenticated device"})
+		return
+	}
+	req, err := ParseSetObservationScopeRequest(msg.Params)
+	if err != nil || req.BackendID != msg.BackendID {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: "invalid observation scope"})
+		return
+	}
+	h.observation.SetScope(device.DeviceID, ObservationScope{
+		BackendID:             req.BackendID,
+		SessionIDs:            req.SessionIDs,
+		DeliveryMode:          req.DeliveryMode,
+		IncludeRunningSignals: req.IncludeRunningSignals,
+		LeaseSeconds:          req.LeaseSeconds,
+	})
+	// Track interest for live-frame buffer (survives soft prune RemoveDevice).
+	// Also Subscribe the *current* connection to each observed session: live
+	// delivery uses broadcaster.Targets (session subscription), not observation
+	// alone. After a true disconnect, UnsubscribeAll wiped keys; reconnect only
+	// called set_observation_scope → candidateTargets=0 until the next
+	// get_session_messages (owner 2026-07-24: Mac turn_started + zero online
+	// while iOS had the session open).
+	if h.eventPublisher != nil {
+		for _, sid := range req.SessionIDs {
+			h.eventPublisher.NoteLiveInterest(device.DeviceID, req.BackendID, sid)
+		}
+	}
+	for _, sid := range req.SessionIDs {
+		if sid == "" {
+			continue
+		}
+		h.broadcaster.Subscribe(conn, SubscriptionKey{
+			BackendID: req.BackendID,
+			SessionID: sid,
+		})
+	}
+	// INFO so flapping/delivery-gap forensics can see mode without Debug log level.
+	// hasSubscriber after Subscribe is the forensic for candidateTargets=0 regressions.
+	hasSub := false
+	if len(req.SessionIDs) > 0 {
+		hasSub = h.broadcaster.HasSessionSubscriber(req.BackendID, req.SessionIDs[0])
+	}
+	slog.Info("go-bridge: set_observation_scope applied",
+		"deviceID", safeID(device.DeviceID),
+		"backendID", req.BackendID,
+		"mode", req.DeliveryMode,
+		"sessions", len(req.SessionIDs),
+		"includeRunning", req.IncludeRunningSignals,
+		"leaseSeconds", req.LeaseSeconds,
+		"hasSessionSubscriber", hasSub,
+	)
+	// After full_stream re-assert (post-reconnect), flush buffered live frames.
+	h.eventPublisher.FlushLiveFrameBufferForDevice(conn)
+	conn.SendResult(msg.RequestID, &ResultResponse{Ok: true}, nil)
+}
+
 // HandleRelayInbound 处理通过 relay 加密通道收到的 iOS→Mac 业务消息。
 // 解密后的 JSON 应为标准 wire message，解析后走正常 RPC 分发路径。
 func (h *Handlers) HandleRelayInbound(conn Connection, rawJSON json.RawMessage) {
@@ -628,6 +909,13 @@ func (h *Handlers) HandleRelayInbound(conn Connection, rawJSON json.RawMessage) 
 		return
 	}
 
+	h.HandleRelayInboundMessage(conn, msg)
+}
+
+// HandleRelayInboundMessage dispatches an already-decoded Relay message. The
+// per-device inbound scheduler uses this entry point so MB-scale params/data
+// are not unmarshaled a second time before handler-specific decoding.
+func (h *Handlers) HandleRelayInboundMessage(conn Connection, msg WireMessage) {
 	switch {
 	case msg.Type == "hello":
 		// relay 加密通道的 hello 握手，走和直连相同的 handleHello 路径。
@@ -641,6 +929,10 @@ func (h *Handlers) HandleRelayInbound(conn Connection, rawJSON json.RawMessage) 
 		// iOS 经 relay 的判活改用应用层 ping/pong 后，靠此回包；不依赖被 CF 代理/干扰的
 		// WebSocket control-frame ping/pong。
 		conn.SendJSON(map[string]string{"type": "pong"})
+	case msg.Type == "recovery_applied":
+		if err := h.eventPublisher.CompleteRecovery(conn, msg.RecoveryID, msg.AppliedThroughBySession); err != nil {
+			slog.Warn("handlers: relay recovery acknowledgement rejected", "error", err)
+		}
 	case msg.Type == "request" && msg.Method != "":
 		h.HandleRPC(conn, msg)
 	default:
@@ -743,6 +1035,8 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleGetSession(conn, msg, agent)
 	case "get_session_messages":
 		h.handleGetSessionMessages(conn, msg, agent)
+	case "get_session_projection":
+		h.handleGetSessionProjection(conn, msg, agent)
 	case "delete_session":
 		h.handleDeleteSession(conn, msg, agent)
 	case "resume_session":
@@ -812,7 +1106,7 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 
 func shouldSwitchWorkDirForMethod(method string) bool {
 	switch method {
-	case "list_sessions", "get_session", "get_session_messages":
+	case "list_sessions", "get_session", "get_session_messages", "get_session_projection":
 		return false
 	default:
 		return true
@@ -1153,12 +1447,12 @@ func (h *Handlers) handleRunDiagnostics(conn Connection, msg WireMessage, agent 
 		defer cancel()
 
 		report, err := provider.RunDiagnostics(ctx, func(progress core.DiagnosticProgress) {
-			conn.SendEvent("", msg.BackendID, "diagnostic_progress", map[string]interface{}{
+			h.publishEvent(LogicalEvent{BackendID: msg.BackendID, Event: "diagnostic_progress", Targets: []Connection{conn}, Data: map[string]interface{}{
 				"diagnosticRunId": runID,
 				"checkId":         progress.CheckID,
 				"status":          progress.Status,
 				"message":         progress.Message,
-			})
+			}})
 		})
 
 		if err != nil {
@@ -1178,11 +1472,11 @@ func (h *Handlers) handleRunDiagnostics(conn Connection, msg WireMessage, agent 
 			report = &core.DiagnosticReport{OverallStatus: "healthy"}
 		}
 
-		conn.SendEvent("", msg.BackendID, "diagnostic_completed", map[string]interface{}{
+		h.publishEvent(LogicalEvent{BackendID: msg.BackendID, Event: "diagnostic_completed", Targets: []Connection{conn}, Data: map[string]interface{}{
 			"diagnosticRunId": runID,
 			"overallStatus":   report.OverallStatus,
 			"results":         diagnosticResultsToWire(report.Results),
-		})
+		}})
 	}()
 }
 
@@ -1379,7 +1673,7 @@ func (h *Handlers) handleCreateSession(conn Connection, msg WireMessage, agent c
 		if params.Directory != "" {
 			result["directory"] = params.Directory
 		}
-		conn.SendEvent(sessionID, msg.BackendID, "session_state_changed", map[string]interface{}{"state": "idle"})
+		h.publishEvent(LogicalEvent{SessionID: sessionID, BackendID: msg.BackendID, Event: "session_state_changed", Data: map[string]interface{}{"state": "idle"}, Targets: []Connection{conn}})
 		conn.SendResult(msg.RequestID, result, nil)
 		return
 	}
@@ -1407,7 +1701,7 @@ func (h *Handlers) handleCreateSession(conn Connection, msg WireMessage, agent c
 		result["directory"] = params.Directory
 	}
 
-	conn.SendEvent(sessionID, msg.BackendID, "session_state_changed", map[string]interface{}{"state": "idle"})
+	h.publishEvent(LogicalEvent{SessionID: sessionID, BackendID: msg.BackendID, Event: "session_state_changed", Data: map[string]interface{}{"state": "idle"}, Targets: []Connection{conn}})
 	conn.SendResult(msg.RequestID, h.enrichSessionState(result), nil)
 }
 
@@ -1510,18 +1804,14 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 	// 额外的 running 广播会让 isGenerating 过早激活；如果 turn_completed 的 500ms
 	// debounce 在 session 切换时被取消，isGenerating 会永久残留导致输入框卡"执行中"。
 	if agent.Name() != "grokbuild" {
-		conn.SendEvent(params.SessionID, msg.BackendID, "session_state_changed", map[string]interface{}{"state": "running"})
-		h.broadcaster.Send(BroadcastEvent{
+		h.publishEvent(LogicalEvent{
 			BackendID: msg.BackendID,
 			SessionID: params.SessionID,
 			Directory: extractDir(msg),
-			Message: EventMessage{
-				Type:      "event",
-				SessionID: params.SessionID,
-				BackendID: msg.BackendID,
-				Event:     "session_state_changed",
-				Data:      map[string]interface{}{"state": "running"},
-			},
+			Event:     "session_state_changed",
+			Data:      map[string]interface{}{"state": "running"},
+			Broadcast: true,
+			Targets:   []Connection{conn},
 		})
 	}
 	h.sessions.markRunning(params.SessionID)
@@ -1677,6 +1967,7 @@ func (h *Handlers) rebindSessionIDIfResolved(currentID string, sess core.AgentSe
 
 	h.sessions.rebind(currentID, realID)
 	h.broadcaster.Rebind(currentID, realID, backendID, directory)
+	h.eventPublisher.EventBuffer().Rebind(backendID, currentID, realID)
 	h.rebindRelayKind(currentID, realID, relayKindAgent)
 	if backendID == "claude" || backendID == "claudecode" {
 		h.mu.Lock()
@@ -1690,24 +1981,16 @@ func (h *Handlers) rebindSessionIDIfResolved(currentID string, sess core.AgentSe
 
 func (h *Handlers) sendSessionEvent(sessionID, backendID, eventName string, data interface{}) {
 	h.mu.Lock()
-	h.seq++
-	seq := h.seq
 	dir := h.sessions.directoryForSession(sessionID)
 	h.mu.Unlock()
-
-	msg := EventMessage{
-		Type:      "event",
+	h.publishEvent(LogicalEvent{
 		SessionID: sessionID,
 		BackendID: backendID,
 		Event:     eventName,
 		Data:      data,
-		Seq:       seq,
-	}
-	h.broadcaster.Send(BroadcastEvent{
-		BackendID: backendID,
-		SessionID: sessionID,
 		Directory: dir,
-		Message:   msg,
+		Broadcast: true,
+		Offline:   IsDurableMilestone(eventName),
 	})
 }
 
@@ -1716,18 +1999,13 @@ func (h *Handlers) broadcastIdleState(sessionID, backendID string) {
 	h.mu.Lock()
 	dir := h.sessions.directoryForSession(sessionID)
 	h.mu.Unlock()
-	stateMsg := EventMessage{
-		Type:      "event",
+	h.publishEvent(LogicalEvent{
 		SessionID: sessionID,
 		BackendID: backendID,
 		Event:     "session_state_changed",
 		Data:      map[string]interface{}{"state": "idle"},
-	}
-	h.broadcaster.Send(BroadcastEvent{
-		BackendID: backendID,
-		SessionID: sessionID,
 		Directory: dir,
-		Message:   stateMsg,
+		Broadcast: true,
 	})
 	h.sessions.markIdle(sessionID)
 }
@@ -1811,36 +2089,23 @@ func (h *Handlers) handleAbortGeneration(conn Connection, msg WireMessage) {
 	}
 
 	if deleted {
-		h.mu.Lock()
-		h.seq++
-		seq := h.seq
-		h.mu.Unlock()
-
-		h.broadcaster.Send(BroadcastEvent{
+		h.publishEvent(LogicalEvent{
 			BackendID: backendID,
 			SessionID: sessionID,
 			Directory: directory,
-			Message: EventMessage{
-				Type:      "event",
-				SessionID: sessionID,
-				BackendID: backendID,
-				Event:     "turn_completed",
-				Data:      map[string]interface{}{"done": true, "reason": "aborted"},
-				Seq:       seq,
-			},
+			Event:     "turn_completed",
+			Data:      map[string]interface{}{"done": true, "reason": "aborted"},
+			Broadcast: true,
+			Offline:   true,
 		})
 
-		h.broadcaster.Send(BroadcastEvent{
+		h.publishEvent(LogicalEvent{
 			BackendID: backendID,
 			SessionID: sessionID,
 			Directory: directory,
-			Message: EventMessage{
-				Type:      "event",
-				SessionID: sessionID,
-				BackendID: backendID,
-				Event:     "session_state_changed",
-				Data:      map[string]interface{}{"state": "idle"},
-			},
+			Event:     "session_state_changed",
+			Data:      map[string]interface{}{"state": "idle"},
+			Broadcast: true,
 		})
 
 		h.recordPendingNotification(sessionID, backendID, "completed", "aborted")
@@ -2206,7 +2471,7 @@ func scanSessionsFromProjectDirWithMetrics(projectDir, projectKey string, metric
 }
 
 type claudeSessionScanResult struct {
-	Title           string
+	Title string
 	// CustomTitle 仅在 JSONL 里出现 type=custom-title 记录时设值；
 	// assistant 文本回退出的 Title 不算 custom title。fork 检测要求双方都有
 	// custom title，避免把「首条 assistant 恰好相同」的无关会话误判为 fork。
@@ -2215,12 +2480,19 @@ type claudeSessionScanResult struct {
 	// 会把原始会话的开头（含首条 user 消息）原样复制到新会话，因此 fork 对的
 	// FirstUserAt 完全相同，可作为 fork 配对信号。首条消息在文件开头，LimitReader
 	// 一定能读到。
-	FirstUserAt     time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	ModelID         string
-	ProviderID      string
-	ReasoningEffort string
+	FirstUserAt        time.Time
+	CompactBoundaryIDs []string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	ModelID            string
+	ProviderID         string
+	ReasoningEffort    string
+	// ArchivedAt is read from the session sidecar (claudeBridgeSessionSidecar).
+	// The catalog surfaces it as archivedAtMillis so clients can hide archived
+	// sessions (web session-grouping filters on archivedAtMillis). Without it,
+	// archived Claude sessions never disappear from the web list even after the
+	// discovery poller signals sessions_changed.
+	ArchivedAt time.Time
 }
 
 type claudeBridgeSessionSidecar struct {
@@ -2343,6 +2615,7 @@ func scanClaudeSessionMetadata(path string, fallbackTime time.Time) claudeSessio
 		updatedAt = createdAt
 	}
 	providerID := ""
+	continuity := claudecode.InspectTranscriptContinuity(path)
 	if sidecar.ModelID != "" {
 		modelID = sidecar.ModelID
 	}
@@ -2354,15 +2627,21 @@ func scanClaudeSessionMetadata(path string, fallbackTime time.Time) claudeSessio
 			_, _, providerID = parseModelID(modelID)
 		}
 	}
+	var archivedAt time.Time
+	if sidecar.ArchivedAtMillis > 0 {
+		archivedAt = time.UnixMilli(sidecar.ArchivedAtMillis).UTC()
+	}
 	return claudeSessionScanResult{
-		Title:           title,
-		CustomTitle:     customTitle,
-		FirstUserAt:     firstUserAt,
-		CreatedAt:       createdAt,
-		UpdatedAt:       updatedAt,
-		ModelID:         modelID,
-		ProviderID:      providerID,
-		ReasoningEffort: normalizeClaudeRuntimeEffort(sidecar.ReasoningEffort),
+		Title:              title,
+		CustomTitle:        customTitle,
+		FirstUserAt:        firstUserAt,
+		CompactBoundaryIDs: continuity.BoundaryIDs,
+		CreatedAt:          createdAt,
+		UpdatedAt:          updatedAt,
+		ModelID:            modelID,
+		ProviderID:         providerID,
+		ReasoningEffort:    normalizeClaudeRuntimeEffort(sidecar.ReasoningEffort),
+		ArchivedAt:         archivedAt,
 	}
 }
 
@@ -2435,6 +2714,16 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 		json.Unmarshal(msg.Params, &params)
 	}
 	params.SessionID = h.resolveSessionIDForActiveSession(params.SessionID)
+	var recoveryCut *BridgeSessionCut
+	if params.RecoveryID != "" {
+		cut, release, err := h.eventPublisher.FreezeRecoverySnapshot(conn, params.RecoveryID, msg.BackendID, params.SessionID)
+		if err != nil {
+			metrics.sendResult(conn, msg.RequestID, nil, &WireError{Code: "recovery.snapshot_invalid", Message: err.Error()})
+			return
+		}
+		defer release()
+		recoveryCut = &cut
+	}
 
 	slog.Info("go-bridge: get_session_messages", "backendID", msg.BackendID, "sessionID", params.SessionID, "directory", params.Directory)
 
@@ -2459,6 +2748,7 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 	// 即使 registry 里已有 AgentSession，标准 relay 也可能收不到外部 turn 的最终事件；
 	// 因此 Codex transcript relay 使用独立 key 与标准 relay 并行。
 	h.startCodexSessionFileRelay(params.SessionID, conn, msg.BackendID, agent)
+	h.startGrokLeaderSessionRelay(params.SessionID, msg.BackendID, agent, params.Directory)
 
 	// list_sessions 在所有项目目录中扫描，返回的每个 session 都附带 directory 字段
 	// （即 session JSONL 中的 cwd）。如果调用方传回了 directory，在拉取消息前将 agent
@@ -2490,7 +2780,7 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 		if msgs, ok := result["messages"].([]map[string]interface{}); ok {
 			metrics.resultCount = len(msgs)
 		}
-		metrics.sendResult(conn, msg.RequestID, applyIfNoneMatch(result, params.IfNoneMatchRevision), nil)
+		metrics.sendResult(conn, msg.RequestID, attachRecoverySnapshotMetadata(applyIfNoneMatch(result, params.IfNoneMatchRevision), params.RecoveryID, recoveryCut), nil)
 		return
 	}
 
@@ -2515,6 +2805,8 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 			}
 			if params.Paginate {
 				messages = trimWireToBudget(messages)
+			} else {
+				truncateOversizedMessages(messages)
 			}
 			result := map[string]interface{}{"messages": messages}
 			if usage := h.getSessionContextUsage(agent, params.SessionID); usage != nil {
@@ -2522,7 +2814,7 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 			}
 			metrics.wireMapping += time.Since(mappingStarted)
 			metrics.resultCount = len(messages)
-			metrics.sendResult(conn, msg.RequestID, applyIfNoneMatch(result, params.IfNoneMatchRevision), nil)
+			metrics.sendResult(conn, msg.RequestID, attachRecoverySnapshotMetadata(applyIfNoneMatch(result, params.IfNoneMatchRevision), params.RecoveryID, recoveryCut), nil)
 			return
 		}
 		if !errors.Is(err, core.ErrNotSupported) {
@@ -2550,6 +2842,7 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 	for _, e := range entries {
 		result = append(result, legacyHistoryEntryToWire(e))
 	}
+	truncateOversizedMessages(result)
 
 	payload := map[string]interface{}{"messages": result}
 	if usage := h.getSessionContextUsage(agent, params.SessionID); usage != nil {
@@ -2557,7 +2850,16 @@ func (h *Handlers) handleGetSessionMessages(conn Connection, msg WireMessage, ag
 	}
 	metrics.wireMapping += time.Since(mappingStarted)
 	metrics.resultCount = len(result)
-	metrics.sendResult(conn, msg.RequestID, applyIfNoneMatch(payload, params.IfNoneMatchRevision), nil)
+	metrics.sendResult(conn, msg.RequestID, attachRecoverySnapshotMetadata(applyIfNoneMatch(payload, params.IfNoneMatchRevision), params.RecoveryID, recoveryCut), nil)
+}
+
+func attachRecoverySnapshotMetadata(payload map[string]interface{}, recoveryID string, cut *BridgeSessionCut) map[string]interface{} {
+	if recoveryID == "" || cut == nil {
+		return payload
+	}
+	payload["recoveryId"] = recoveryID
+	payload["eventHighWaterMark"] = *cut
+	return payload
 }
 
 func (h *Handlers) getSessionContextUsage(agent core.Agent, sessionID string) *core.ContextUsage {
@@ -2717,6 +3019,9 @@ func (h *Handlers) handleResumeSession(conn Connection, msg WireMessage, agent c
 	if agent.Name() == "codex" {
 		h.startCodexSessionFileRelay(params.SessionID, conn, msg.BackendID, agent)
 	}
+	if agent.Name() == "grokbuild" {
+		h.startGrokLeaderSessionRelay(params.SessionID, msg.BackendID, agent, params.Directory)
+	}
 
 	dir := params.Directory
 	if dir == "" {
@@ -2812,10 +3117,10 @@ func (h *Handlers) handleSetPermissionMode(conn Connection, msg WireMessage, age
 	}
 
 	current := switcher.GetMode()
-	conn.SendEvent(params.SessionID, msg.BackendID, "permission_mode_changed", map[string]interface{}{
+	h.publishEvent(LogicalEvent{SessionID: params.SessionID, BackendID: msg.BackendID, Event: "permission_mode_changed", Targets: []Connection{conn}, Data: map[string]interface{}{
 		"mode":      current,
 		"appliesTo": appliesTo,
-	})
+	}})
 	conn.SendResult(msg.RequestID, map[string]interface{}{
 		"mode":      current,
 		"appliesTo": appliesTo,
