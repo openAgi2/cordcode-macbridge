@@ -138,3 +138,58 @@ func TestProduceClaudeSidechainSubagentEvents_NoSidechainDirIsNoop(t *testing.T)
 		t.Fatalf("expected 0 events for empty sidechain dir, got %d", len(got))
 	}
 }
+
+// TestClaudeSubagentsDirDerivesPerSessionSubdir guards the sidechain path-resolution fix.
+// Claude writes sidechain files to <projectDir>/<sessionUUID>/subagents/ (a per-session
+// subdirectory), while the transcript (main + continuations) is flat at
+// <projectDir>/<segment>.jsonl. The descriptor carries the transcript path (in Segments for
+// production Claude, or Path for single-file) and the session UUID in Identity. The derived dir
+// must insert the <sessionUUID>/ level — the prior <projectDir>/subagents/ derivation read the
+// wrong directory and silently surfaced no subagent content (fail-open hid the bug).
+func TestClaudeSubagentsDirDerivesPerSessionSubdir(t *testing.T) {
+	const sessionID = "5ce8d178-829f-4e14-9cdc-a4a6db9d733f"
+	projectDir := t.TempDir()
+	transcriptPath := filepath.Join(projectDir, sessionID+".jsonl")
+	if err := os.WriteFile(transcriptPath, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	wantSub := filepath.Join(projectDir, sessionID, "subagents")
+	wantWrong := filepath.Join(projectDir, "subagents") // the pre-fix (buggy) derivation
+
+	// Production Claude shape: Identity = sessionID, Segments carry the transcript path(s),
+	// top-level Path empty. This is what prepareProjectionHydrateSource returns and HydrateSource
+	// serves to the hydrate transaction.
+	gotSeg := claudeSubagentsDir(ProjectionSourceDescriptor{
+		Identity: sessionID,
+		Segments: []ProjectionSourceSegment{
+			{Identity: sessionID, Path: transcriptPath, Cursor: 2},
+		},
+	})
+	if gotSeg != wantSub {
+		t.Fatalf("Segments case: derived %q, want %q", gotSeg, wantSub)
+	}
+	if gotSeg == wantWrong {
+		t.Fatalf("Segments case: derived the pre-fix <projectDir>/subagents path %q (missing <sessionUUID>/ level)", gotSeg)
+	}
+
+	// Single-file fallback shape (Identity + Path, no Segments).
+	gotPath := claudeSubagentsDir(ProjectionSourceDescriptor{
+		Identity: sessionID,
+		Path:     transcriptPath,
+	})
+	if gotPath != wantSub {
+		t.Fatalf("Path case: derived %q, want %q", gotPath, wantSub)
+	}
+
+	// Pathless (no Segments, no Path) with Identity → "" (caller no-ops; no transcript to locate
+	// projectDir from). This is acceptable fail-open, not the production Claude hydrate shape
+	// (which always carries Segments via CompositeRichHistoryProvider).
+	if got := claudeSubagentsDir(ProjectionSourceDescriptor{Identity: sessionID}); got != "" {
+		t.Fatalf("pathless case: derived %q, want empty (no transcript path)", got)
+	}
+
+	// Empty Identity → "" even if a Path is present (cannot name the per-session subdir).
+	if got := claudeSubagentsDir(ProjectionSourceDescriptor{Path: transcriptPath}); got != "" {
+		t.Fatalf("empty-Identity case: derived %q, want empty", got)
+	}
+}

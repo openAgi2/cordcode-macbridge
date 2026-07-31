@@ -272,21 +272,31 @@ func produceClaudeSidechainSubagentEvents(
 	return nil
 }
 
-// claudeSubagentsDir derives the sibling subagents/ directory from a hydrate source descriptor.
-// Claude sidechain files live in <projectDir>/subagents/ alongside all of the session's .jsonl
-// files (main + continuations), so one subagents dir serves the whole session regardless of
-// single-file vs multi-segment source.
+// claudeSubagentsDir derives the per-session sidechain directory from a hydrate source
+// descriptor. Claude writes sidechain files to <projectDir>/<sessionUUID>/subagents/ — a
+// per-session subdirectory of the project dir (the transcript itself, main + continuations, is
+// flat at <projectDir>/<segment>.jsonl, NOT alongside subagents/). projectDir is the directory
+// of any transcript segment path; the session UUID is source.Identity. Returns "" when no
+// transcript path or no Identity is available (pathless/test configs) so the caller no-ops
+// (fail-open, guardrail §10).
 func claudeSubagentsDir(source ProjectionSourceDescriptor) string {
+	sessionID := strings.TrimSpace(source.Identity)
+	if sessionID == "" {
+		return ""
+	}
+	transcriptPath := ""
 	if len(source.Segments) > 0 {
 		for _, s := range source.Segments {
 			if p := strings.TrimSpace(s.Path); p != "" {
-				return filepath.Join(filepath.Dir(p), "subagents")
+				transcriptPath = p
+				break
 			}
 		}
+	} else {
+		transcriptPath = strings.TrimSpace(source.Path)
+	}
+	if transcriptPath == "" {
 		return ""
 	}
-	if p := strings.TrimSpace(source.Path); p != "" {
-		return filepath.Join(filepath.Dir(p), "subagents")
-	}
-	return ""
+	return filepath.Join(filepath.Dir(transcriptPath), sessionID, "subagents")
 }
