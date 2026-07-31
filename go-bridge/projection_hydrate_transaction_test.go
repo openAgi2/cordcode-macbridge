@@ -585,3 +585,96 @@ func TestOpenCodePathlessForceRebuildOnSourceChanged(t *testing.T) {
 		t.Fatalf("rebuilt projection missing user: %+v", commit.Projection.Turns)
 	}
 }
+
+// TestPathlessRebuildDoesNotCarryCheckpointBaseline proves a pathless cold hydrate
+// rebuilds the projection SOLELY from the rich-history builder and does NOT carry a
+// prior committed projection as baseline. This is the b6b5a45f regression: the live
+// relay commits a user turn keyed by a row-UUID id (claudeEntryTurnIdentity, used
+// when message.id is empty); a later pathless reopen runs the rich-history builder,
+// which re-emits the SAME content under a builder-style id (user-line-N). If the
+// checkpoint baseline were carried, the reducer (upsert by turnId) could not
+// reconcile the two ids → two turns with duplicated content, persisted in the
+// checkpoint and served stale on every subsequent AlreadyReady reopen.
+//
+// Site B (checkpoint-load Restore) is the dominant real-world vector: a fresh kernel
+// has no in-memory state, so the pathless reopen starts a transaction and loads the
+// checkpoint. The fix makes pathless skip the baseline Restore (rich history is the
+// sole baseline); the rebuild therefore yields exactly one turn.
+func TestPathlessRebuildDoesNotCarryCheckpointBaseline(t *testing.T) {
+	dir := t.TempDir()
+	store := NewProjectionCheckpointStore(dir)
+	const backendID = "claude"
+	const sessionID = "b6b5a45f-pathless-dup"
+
+	const userText = "做一个需要委派的多步任务…"
+	const assistantText = "我先派出两个子 agent"
+
+	// Phase 1 — kernel A commits a "live-style" projection: one user turn keyed by a
+	// row-UUID turnId (what the live relay / claudeEntryTurnIdentity produces when the
+	// transcript row's message.id is empty).
+	kernelA := NewProjectionKernel(NewProjectionReducer(), store)
+	if admission, err := kernelA.BeginHydrateTransaction(backendID, sessionID,
+		ProjectionSourceDescriptor{Identity: sessionID, Path: "", Cursor: 0},
+		false, false); err != nil {
+		t.Fatal(err)
+	} else if !admission.Leader {
+		t.Fatal("phase1: want leader")
+	}
+	const liveTurnID = "a09974d6-9af6-4a32-b70b-7b191889ab30" // row-UUID style
+	kernelA.ApplyHydrateEvent(backendID, sessionID, "epoch", "user_message", map[string]interface{}{
+		"itemId": liveTurnID, "turnId": liveTurnID, "text": userText,
+	})
+	kernelA.ApplyHydrateEvent(backendID, sessionID, "epoch", "text_delta", map[string]interface{}{
+		"itemId": liveTurnID, "delta": assistantText,
+	})
+	kernelA.ApplyHydrateEvent(backendID, sessionID, "epoch", "turn_completed", map[string]interface{}{
+		"turnId": liveTurnID, "done": true,
+	})
+	commitA, err := kernelA.CommitHydrateTransaction(backendID, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commitA.Projection.Turns) != 1 {
+		t.Fatalf("phase1: want 1 turn, got %d", len(commitA.Projection.Turns))
+	}
+
+	// Phase 2 — fresh kernel B (same disk store) reopens the session. No in-memory
+	// state → a pathless hydrate transaction starts and the v5 checkpoint loads.
+	// The builder replay re-emits the SAME content under a builder-style id.
+	kernelB := NewProjectionKernel(NewProjectionReducer(), store)
+	admission2, err := kernelB.BeginHydrateTransaction(backendID, sessionID,
+		ProjectionSourceDescriptor{Identity: sessionID, Path: "", Cursor: 0},
+		false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !admission2.Leader {
+		t.Fatal("pathless reopen on fresh kernel must start a rebuild leader")
+	}
+	const builderTurnID = "user-line-16" // builder fallback id for empty message.id
+	kernelB.ApplyHydrateEvent(backendID, sessionID, "epoch", "user_message", map[string]interface{}{
+		"itemId": builderTurnID, "turnId": builderTurnID, "text": userText,
+	})
+	kernelB.ApplyHydrateEvent(backendID, sessionID, "epoch", "text_delta", map[string]interface{}{
+		"itemId": builderTurnID, "delta": assistantText,
+	})
+	kernelB.ApplyHydrateEvent(backendID, sessionID, "epoch", "turn_completed", map[string]interface{}{
+		"turnId": builderTurnID, "done": true,
+	})
+	commitB, err := kernelB.CommitHydrateTransaction(backendID, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// After fix: pathless rebuild started empty; the builder emitted exactly one turn
+	// and the carried live row-UUID turn is gone. Before fix: baseline Restore brought
+	// the liveTurnID turn forward AND the builder added builderTurnID → 2 turns.
+	if got := len(commitB.Projection.Turns); got != 1 {
+		t.Fatalf("pathless rebuild must yield exactly 1 turn (builder sole baseline), got %d: %+v",
+			got, commitB.Projection.Turns)
+	}
+	if commitB.Projection.Turns[0].TurnID != builderTurnID {
+		t.Fatalf("want sole builder turn %q, got %q (live baseline was carried)",
+			builderTurnID, commitB.Projection.Turns[0].TurnID)
+	}
+}

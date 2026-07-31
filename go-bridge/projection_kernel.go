@@ -17,7 +17,13 @@ import (
 
 // Version 4 persists every physical segment of a compact-linked Claude session.
 // Older checkpoints cannot prove the complete composite source cut.
-const projectionCheckpointSchemaVersion = 4
+// projectionCheckpointSchemaVersion is bumped when the projection reducer's
+// output shape or hydrate baseline semantics change, so stale derived state is
+// invalidated and rebuilt from the canonical source. v5: pathless hydrate no
+// longer carries a prior projection as baseline (see BeginHydrateTransaction),
+// which changes the turn set produced for pathless backends — old checkpoints
+// that mixed live row-UUID turns with builder user-line-N turns must be rebuilt.
+const projectionCheckpointSchemaVersion = 5
 
 var (
 	ErrProjectionCheckpointInvalid  = errors.New("projection checkpoint invalid")
@@ -595,6 +601,22 @@ func (k *ProjectionKernel) finishHydrateLocked(session *projectionKernelSession)
 	}
 }
 
+// pathlessRichHistoryBackend reports whether a backend's pathless hydrate (source.Path
+// == "") replays the full source through a rich-history builder: Claude (pathless or
+// compact-continuation segments) and OpenCode (HTTP rich history). Such a rebuild must
+// start from an empty reducer so the builder is the sole baseline; carrying a prior
+// projection would replay content onto it and duplicate turns. Codex is file-based — a
+// pathless Codex session is a degenerate no-file case with no builder replay, so it is
+// excluded and keeps its carried live baseline.
+func pathlessRichHistoryBackend(backendID string) bool {
+	switch backendID {
+	case "opencode", "claude", "claudecode":
+		return true
+	default:
+		return false
+	}
+}
+
 // BeginHydrateTransaction creates the isolated reducer used for [checkpointCursor,startCut).
 // Live events that arrive after this cut are queued by IngestLive and cannot mutate the
 // authoritative reducer until CommitHydrateTransaction publishes the baseline atomically.
@@ -659,9 +681,20 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 		liveArrived: make(chan struct{}, 1),
 	}
 	if source.Path == "" {
-		// Forced pathless rebuild starts empty so rich history is the sole baseline
-		// (avoids duplicating turns on top of a live-polluted Ready projection).
-		if !sourceChanged {
+		if pathlessRichHistoryBackend(backendID) {
+			// Claude / OpenCode pathless rebuild starts EMPTY. Their rich-history builder
+			// has no file cursor and re-reduces the full source every time, so the projection
+			// must be derived SOLELY from that rebuild. Carrying a prior committed projection
+			// (in-memory here, or from checkpoint below) would replay the builder on top of
+			// already-present content — text_delta appends, never replaces — and, when the
+			// prior baseline used a different turn-id scheme (live/raw row-UUID vs builder
+			// user-line-N), create duplicate turns that persist in the checkpoint across
+			// reopens. See docs/2026-07-31-claude-projection-pathless-hydrate-duplication-fix.md.
+			// tx.reducer is already a fresh NewProjectionReducer(); do NOT Restore.
+		} else if !sourceChanged {
+			// Codex is file-based: a pathless Codex session is a degenerate no-file case
+			// with NO builder replay, so the carried in-memory live state is the sole
+			// content and must be preserved (do not drop it).
 			if existing, ok := k.reducer.Snapshot(backendID, sessionID); ok {
 				tx.reducer.Restore(backendID, sessionID, existing)
 			}
@@ -690,7 +723,12 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 		checkpoint, err := store.LoadValidated(backendID, sessionID, source)
 		switch {
 		case err == nil:
-			tx.reducer.Restore(backendID, sessionID, checkpoint.Projection)
+			if !(source.Path == "" && pathlessRichHistoryBackend(backendID)) {
+				// Carry the checkpoint projection forward as baseline — EXCEPT for a
+				// Claude/OpenCode pathless rebuild, which must start empty so the rich-
+				// history builder is the sole baseline (see Site A comment above).
+				tx.reducer.Restore(backendID, sessionID, checkpoint.Projection)
+			}
 			if len(source.Segments) > 0 {
 				startCursor = source.Cursor
 			} else {
