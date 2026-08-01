@@ -847,6 +847,72 @@ type projectionHydrateEvent struct {
 	SourceBlockOrdinal *int
 }
 
+// hydrateToolEventsFromStep emits the tool_started + tool_finished projection-hydrate events
+// for one rich-history tool step, preserving the structured fields iOS needs for friendly
+// activity rows (fileChanges / title / toolInput). Previously hydration only copied
+// itemId/toolName/toolStatus/toolResult, which dropped Codex structured fileChanges and
+// Claude path-bearing title/toolInput, leaving iOS cold-start with no file path (R2/R5).
+//
+// For Claude cold-start this is necessary but NOT sufficient on its own: the upstream
+// rich-history builder (richHistoryMessageBuilder.addToolUse) must first populate a valid
+// title/toolInput (L-α) — otherwise this passthrough just forwards toolName as the title.
+func hydrateToolEventsFromStep(step map[string]any) []projectionHydrateEvent {
+	toolID := strings.TrimSpace(fmt.Sprint(step["id"]))
+	toolName := strings.TrimSpace(fmt.Sprint(step["toolName"]))
+	status := strings.TrimSpace(fmt.Sprint(step["status"]))
+	if status == "" || status == "<nil>" {
+		status = "completed"
+	}
+	if toolID == "" || toolID == "<nil>" {
+		return nil
+	}
+	started := map[string]interface{}{"itemId": toolID}
+	if toolName != "" && toolName != "<nil>" {
+		started["toolName"] = toolName
+	}
+	// Preserve path-bearing fields on tool_started so iOS can render a friendly title
+	// before completion (e.g. "正在编辑 <file>").
+	copyOptionalStepField(started, step, "title")
+	copyOptionalStepField(started, step, "toolInput")
+	copyOptionalStepField(started, step, "fileChanges")
+
+	finished := map[string]interface{}{
+		"itemId":     toolID,
+		"toolStatus": status,
+	}
+	if toolName != "" && toolName != "<nil>" {
+		finished["toolName"] = toolName
+	}
+	if output := step["output"]; output != nil {
+		finished["toolResult"] = output
+	}
+	// Same structured fields on tool_finished so the completed activity row has path/diff.
+	copyOptionalStepField(finished, step, "title")
+	copyOptionalStepField(finished, step, "toolInput")
+	copyOptionalStepField(finished, step, "fileChanges")
+
+	return []projectionHydrateEvent{
+		{Event: "tool_started", Data: started},
+		{Event: "tool_finished", Data: finished},
+	}
+}
+
+// copyOptionalStepField copies a non-nil, non-empty step field into the target hydration
+// event data under the same key. It deliberately forwards whatever the upstream builder
+// produced (including structured fileChanges []any / toolInput string / title string)
+// without inventing or transforming values.
+func copyOptionalStepField(target map[string]interface{}, step map[string]any, key string) {
+	if v, ok := step[key]; ok && v != nil {
+		// Skip fmt "<nil>" stringified placeholders the upstream may emit.
+		if s, isStr := v.(string); isStr {
+			if strings.TrimSpace(s) == "" || s == "<nil>" {
+				return
+			}
+		}
+		target[key] = v
+	}
+}
+
 // streamOpenCodeRichHistoryProjectionEvents rebuilds a full projection baseline from
 // OpenCode HTTP rich history (GET /session/{id}/message). There is no JSONL cursor:
 // every cold hydrate is a complete ordered rebuild. Turn identity follows the Claude
@@ -1004,31 +1070,7 @@ func openCodeRichHistoryEntryToProjectionEvents(
 					if step == nil {
 						continue
 					}
-					toolID := strings.TrimSpace(fmt.Sprint(step["id"]))
-					toolName := strings.TrimSpace(fmt.Sprint(step["toolName"]))
-					status := strings.TrimSpace(fmt.Sprint(step["status"]))
-					if status == "" || status == "<nil>" {
-						status = "completed"
-					}
-					if toolID == "" || toolID == "<nil>" {
-						continue
-					}
-					started := map[string]interface{}{"itemId": toolID}
-					if toolName != "" && toolName != "<nil>" {
-						started["toolName"] = toolName
-					}
-					out = append(out, projectionHydrateEvent{Event: "tool_started", Data: started})
-					finished := map[string]interface{}{
-						"itemId":     toolID,
-						"toolStatus": status,
-					}
-					if toolName != "" && toolName != "<nil>" {
-						finished["toolName"] = toolName
-					}
-					if output := step["output"]; output != nil {
-						finished["toolResult"] = output
-					}
-					out = append(out, projectionHydrateEvent{Event: "tool_finished", Data: finished})
+					out = append(out, hydrateToolEventsFromStep(step)...)
 					emittedContent = true
 				}
 			}
@@ -1049,28 +1091,7 @@ func openCodeRichHistoryEntryToProjectionEvents(
 				emittedContent = true
 			}
 			for _, step := range entry.Steps {
-				toolID := strings.TrimSpace(fmt.Sprint(step["id"]))
-				toolName := strings.TrimSpace(fmt.Sprint(step["toolName"]))
-				status := strings.TrimSpace(fmt.Sprint(step["status"]))
-				if status == "" || status == "<nil>" {
-					status = "completed"
-				}
-				if toolID == "" || toolID == "<nil>" {
-					continue
-				}
-				started := map[string]interface{}{"itemId": toolID}
-				if toolName != "" && toolName != "<nil>" {
-					started["toolName"] = toolName
-				}
-				out = append(out, projectionHydrateEvent{Event: "tool_started", Data: started})
-				finished := map[string]interface{}{"itemId": toolID, "toolStatus": status}
-				if toolName != "" && toolName != "<nil>" {
-					finished["toolName"] = toolName
-				}
-				if output := step["output"]; output != nil {
-					finished["toolResult"] = output
-				}
-				out = append(out, projectionHydrateEvent{Event: "tool_finished", Data: finished})
+				out = append(out, hydrateToolEventsFromStep(step)...)
 				emittedContent = true
 			}
 		}
