@@ -1,0 +1,30 @@
+{
+  "_comment": "脱敏 Codex apply_patch 文本形态 · *** Delete File (delete)。source: observed-derived-real-shape from ~/.codex rollout jsonl; uuid/call_id/path 已脱敏，保留 *** 结构。对应 Phase 1B iOS patch parser (A 策略 *** Delete File:) + Phase 4 delete 动词。",
+  "_shape": "custom_tool_call (name=apply_patch) + custom_tool_call_output",
+  "toolCall": {
+    "timestamp": "2026-03-03T14:17:10.211Z",
+    "type": "response_item",
+    "payload": {
+      "type": "custom_tool_call",
+      "status": "completed",
+      "call_id": "call_redacted_deletefile_003",
+      "name": "apply_patch",
+      "input": "*** Begin Patch\n*** Delete File: src/legacy/DeprecatedHelper.swift\n*** End Patch"
+    }
+  },
+  "toolOutput": {
+    "timestamp": "2026-03-03T14:17:10.900Z",
+    "type": "response_item",
+    "payload": {
+      "type": "custom_tool_call_output",
+      "call_id": "call_redacted_deletefile_003",
+      "output": "{\"output\":\"Success. Updated the following files:\\nD src/legacy/DeprecatedHelper.swift\\n\",\"metadata\":{\"exit_code\":0,\"duration_seconds\":0.0}}"
+    }
+  },
+  "_expectedParse": {
+    "kind": "delete",
+    "path": "src/legacy/DeprecatedHelper.swift",
+    "additions": 0,
+    "deletions": 0
+  }
+}
