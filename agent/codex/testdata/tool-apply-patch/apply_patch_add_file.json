@@ -24,7 +24,7 @@
   "_expectedParse": {
     "kind": "create",
     "path": "src/services/NotificationService.swift",
-    "additions": 6,
+    "additions": 7,
     "deletions": 0
   }
 }
