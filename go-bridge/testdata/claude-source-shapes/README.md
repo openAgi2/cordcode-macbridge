@@ -29,6 +29,7 @@
 | `server-tool-use.jsonl` | `server_tool_use`(assistant) + 匹配 `tool_result`(user) | server_tool_use 结果以标准 tool_result 返回（tool_use_id 匹配），无 `server_tool_result` block 类型 | **orphan finish**：不发 tool_started，只发 tool_finished（F6 gap） |
 | `image-block.jsonl` | image block 嵌在 tool_result content 内 | `{type:image, source:{type:base64,...}}` 是 block，非顶层 row、非 attachment | image 二进制被丢，只提取兄弟 text block |
 | `system-subtypes.jsonl` | 四种真实 system subtype | `compact_boundary` / `stop_hook_summary` / `api_error` / `informational`（非 `system.compact`/`system.stop_hook`） | 仅 `compact_boundary`→`system_message`；其余 inert |
+| `cold-start-edit-filepath.jsonl` | Claude 冷启动 Edit turn（R3/1D 硬门） | assistant `tool_use` name=Edit，**`input.file_path` 存在** + 匹配 user `tool_result`（英文 success） | **path 丢失**：cold-start hydrate 读此 transcript 回放，`richHistoryMessageBuilder.addToolUse` 把 title 写成 toolName 且丢弃 input → iOS 冷启动无 path（R5）。L-α 修复后期望 builder 保留 input / title=file_path。**provenance: observed-derived-real-shape**，非 IR-6 合成集 |
 
 每条 fixture 均为合法 Claude JSONL（`type`/`uuid`/`message.{id,role,content}`/`parentUuid`/`timestamp`），LF 结尾、完整 record；`manifest.json` 记录每条 record 的精确字节范围。
 

@@ -2,34 +2,42 @@
   "_comment": "脱敏 Codex structured fileChange · list 变体。source: observed-derived-real-shape from ~/.codex; threadId/turnId/itemId/path/diff 已脱敏，保留 changes:[{path,kind,diff}] 结构。对应 macbridge appServerFileChanges (appserver_session.go:1283) + Phase 1A hydration 透传 (C-P0a) + iOS 映射。这是被 hydration 丢弃的 structured FileChanges 的真实 wire 形态。",
   "_shape": "item/started (or item/completed) notification, type=fileChange, changes = list variant",
   "_macbridgePath": "handleItemStarted case fileChange -> appServerFileChanges(item[\"changes\"]) -> []core.FileChange{Path,Kind,Diff,MovePath}",
-  "notification": {
-    "jsonrpc": "2.0",
-    "method": "item/started",
-    "params": {
-      "threadId": "thread_redacted_list_001",
-      "turnId": "turn_redacted_list_001",
-      "item": {
-        "id": "item_fch_list_001",
-        "type": "fileChange",
-        "changes": [
-          {
-            "path": "src/models/UserProfile.swift",
-            "kind": "edit",
-            "diff": "@@ -10,7 +10,9 @@\n struct UserProfile {\n     let id: String\n     var name: String\n-    var email: String\n+    var email: String\n+    var avatarURL: String?\n+    var displayName: String {\n         get { name }\n     }\n }"
-          },
-          {
-            "path": "src/services/UserService.swift",
-            "kind": "create",
-            "diff": "+final class UserService {\n+    func fetch(id: String) -> UserProfile? {\n+        return nil\n+    }\n+}"
-          }
-        ]
-      }
-    }
-  },
   "_expectedParse": {
     "changes": [
-      {"path": "src/models/UserProfile.swift", "kind": "edit", "additions": 3, "deletions": 1},
-      {"path": "src/services/UserService.swift", "kind": "create", "additions": 5, "deletions": 0}
+      {
+        "path": "src/models/UserProfile.swift",
+        "kind": "edit",
+        "additions": 3,
+        "deletions": 1
+      },
+      {
+        "path": "src/services/UserService.swift",
+        "kind": "create",
+        "additions": 5,
+        "deletions": 0
+      }
     ]
+  },
+  "jsonrpc": "2.0",
+  "method": "item/started",
+  "params": {
+    "threadId": "thread_redacted_list_001",
+    "turnId": "turn_redacted_list_001",
+    "item": {
+      "id": "item_fch_list_001",
+      "type": "fileChange",
+      "changes": [
+        {
+          "path": "src/models/UserProfile.swift",
+          "kind": "edit",
+          "diff": "@@ -10,7 +10,9 @@\n struct UserProfile {\n     let id: String\n     var name: String\n-    var email: String\n+    var email: String\n+    var avatarURL: String?\n+    var displayName: String {\n         get { name }\n     }\n }"
+        },
+        {
+          "path": "src/services/UserService.swift",
+          "kind": "create",
+          "diff": "+final class UserService {\n+    func fetch(id: String) -> UserProfile? {\n+        return nil\n+    }\n+}"
+        }
+      ]
+    }
   }
 }

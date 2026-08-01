@@ -173,9 +173,14 @@ func TestClaudeSourceShapeFixtures_LoadAllAndValidateManifest(t *testing.T) {
 		if !reflect.DeepEqual(admitted, scan.Entries) {
 			t.Errorf("%s record envelope changed admitted entry sequence", fe.File)
 		}
-		// no fixture may masquerade as containing real user content
-		if fe.Provenance != "observed-derived-synthetic" {
-			t.Errorf("%s provenance must be observed-derived-synthetic, got %q", fe.File, fe.Provenance)
+		// no fixture may masquerade as containing real user content: provenance must
+		// declare the fixture as either fully synthetic (IR-6 set) or real-shape-but-redacted
+		// (anonymized from a real wire shape, with no real user body/ids/paths).
+		switch fe.Provenance {
+		case "observed-derived-synthetic", "observed-derived-real-shape":
+			// allowed
+		default:
+			t.Errorf("%s provenance must be observed-derived-synthetic or observed-derived-real-shape, got %q", fe.File, fe.Provenance)
 		}
 		// mapper must ingest every fixture without panicking
 		_ = mapClaudeFixture(t, fe.File)

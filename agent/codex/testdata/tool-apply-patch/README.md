@@ -23,10 +23,16 @@ Codex 文件变更在 wire 上有两种独立形态，iOS 必须分别处理：
 | `apply_patch_add_file.json` | A 文本 | `*** Add File:`（create） | input=`*** Begin Patch\n*** Add File: …`；output 含 `A <path>` |
 | `apply_patch_update_file.json` | A 文本 | `*** Update File:`（edit） | input=`*** Update File:` + `@@` hunk；output 含 `M <path>` |
 | `apply_patch_delete_file.json` | A 文本 | `*** Delete File:`（delete） | input=`*** Delete File:`；output 含 `D <path>` |
-| `filechange_list_variant.json` | B structured · list | `changes:[{path,kind,diff}]`（update+add） | `appServerFileChanges` 形态 |
-| `filechange_map_variant.json` | B structured · map | `changes:{path:{type,unified_diff}}` | `appServerPatchChanges` 形态；`update`→`edit` 归一 |
+| `filechange_list_variant.json` | B structured · list | `changes:[{path,kind,diff}]`（update+add） | `appServerFileChanges` 形态；顶层 `{jsonrpc,method,params}` envelope |
+| `filechange_map_variant.json` | B structured · map | `changes:{path:{type,unified_diff}}` | `appServerPatchChanges` 形态；`update`→`edit` 归一；顶层 envelope |
 
 ## 使用
 
-定向测试加载这些 fixture 并断言 path/kind/diffStats 提取（A 形态验证 iOS patch parser；
-B 形态验证 macbridge appserver 解析 + hydration 透传 + iOS 映射）。
+- **A 形态**（apply_patch 文本）：iOS Swift 测试断言 `parsePatchOutputWithDiff` 从 output 解析出
+  path/kind（Add→create / Update→edit / Delete→delete）。fixture 的 `_expectedParse` 字段是期望值 oracle。
+- **B 形态**（structured fileChange）：macbridge Go 测试通过 `runNotification` 加载顶层 envelope，
+  断言 `appServerFileChanges` / `appServerPatchChanges` 正确产出 `core.FileChange{Path,Kind,Diff,MovePath}`。
+  后续 Phase 1A hydration 透传测试复用同 fixture，断言 `tool_finished` 事件保留 `fileChanges`。
+
+> 两个 structured fixture 顶层为 `{jsonrpc, method, params}`（`rpcNotificationEnvelope` 可直接读取），
+> `_comment`/`_shape`/`_macbridgePath`/`_expectedParse` 为说明性元数据（`_` 前缀，测试忽略）。

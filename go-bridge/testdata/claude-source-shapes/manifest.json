@@ -238,6 +238,33 @@
           "byteEnd": 887
         }
       ]
+    },
+    {
+      "file": "cold-start-edit-filepath.jsonl",
+      "category": "Claude cold-start Edit transcript with input.file_path (R3/1D falsification gate)",
+      "provenance": "observed-derived-real-shape",
+      "corpusProvenance": "~/.claude/projects transcript: assistant tool_use name=Edit with input.file_path + matching user tool_result; cold-start hydrate reads this path (richHistoryMessageBuilder), not live kernel. uuid/message.id/call_id/path/strings redacted.",
+      "sha256": "2ac7460c7caa9cd3bf38f449a0fd8bed8745d233cf866b7c92af20e6dc8c3a4d",
+      "bytes": 1429,
+      "recordCount": 4,
+      "records": [
+        {
+          "byteStart": 0,
+          "byteEnd": 195
+        },
+        {
+          "byteStart": 195,
+          "byteEnd": 721
+        },
+        {
+          "byteStart": 721,
+          "byteEnd": 1103
+        },
+        {
+          "byteStart": 1103,
+          "byteEnd": 1429
+        }
+      ]
     }
   ]
 }

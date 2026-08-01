@@ -2,34 +2,44 @@
   "_comment": "脱敏 Codex structured fileChange · map 变体 (apply_patch custom_tool_call completed path)。source: observed-derived-real-shape; threadId/turnId/itemId/path/unified_diff 已脱敏，保留 changes:{path:{type,unified_diff,move_path}} 结构。对应 macbridge appServerPatchChanges (appserver_session.go:1321)：path 作 map key、type/kind 决定动词（update→edit 归一）、unified_diff 作 diff。Phase 1A hydration 透传 + iOS 映射。",
   "_shape": "item/completed notification, custom_tool_call name=apply_patch, changes = map variant (path-keyed)",
   "_macbridgePath": "handleItemCompleted case customToolCall/apply_patch -> appServerPatchChanges(item[\"changes\"]) (reads map[string]any, path=key, {type,unified_diff,move_path})",
-  "notification": {
-    "jsonrpc": "2.0",
-    "method": "item/completed",
-    "params": {
-      "threadId": "thread_redacted_map_002",
-      "turnId": "turn_redacted_map_002",
-      "item": {
-        "id": "item_fch_map_002",
-        "type": "custom_tool_call",
-        "name": "apply_patch",
-        "status": "completed",
-        "changes": {
-          "src/config/Settings.swift": {
-            "type": "update",
-            "unified_diff": "--- a/src/config/Settings.swift\n+++ b/src/config/Settings.swift\n@@ -5,4 +5,5 @@\n struct Settings {\n     var theme: String\n     var fontSize: Int\n+    var reducedMotion: Bool\n }"
-          },
-          "src/utils/Logger.swift": {
-            "type": "add",
-            "unified_diff": "--- /dev/null\n+++ b/src/utils/Logger.swift\n@@ -0,0 +1,4 @@\n+enum Logger {\n+    static func info(_ msg: String) {\n+        print(msg)\n+    }\n+}"
-          }
+  "_expectedParse": {
+    "changes": [
+      {
+        "path": "src/config/Settings.swift",
+        "kind": "edit",
+        "additions": 1,
+        "deletions": 0,
+        "note": "type=update -> appServerPatchChanges 归一为 edit"
+      },
+      {
+        "path": "src/utils/Logger.swift",
+        "kind": "create",
+        "additions": 4,
+        "deletions": 0,
+        "note": "type=add。期望 create；但当前 appServerPatchChanges 只把 update→edit 归一，add 透传为 'add'（未归一 create）。Phase 1A 须修：add/create 归一为 create，否则 iOS kind 非 create 动词"
+      }
+    ]
+  },
+  "jsonrpc": "2.0",
+  "method": "item/completed",
+  "params": {
+    "threadId": "thread_redacted_map_002",
+    "turnId": "turn_redacted_map_002",
+    "item": {
+      "id": "item_fch_map_002",
+      "type": "custom_tool_call",
+      "name": "apply_patch",
+      "status": "completed",
+      "changes": {
+        "src/config/Settings.swift": {
+          "type": "update",
+          "unified_diff": "--- a/src/config/Settings.swift\n+++ b/src/config/Settings.swift\n@@ -5,4 +5,5 @@\n struct Settings {\n     var theme: String\n     var fontSize: Int\n+    var reducedMotion: Bool\n }"
+        },
+        "src/utils/Logger.swift": {
+          "type": "add",
+          "unified_diff": "--- /dev/null\n+++ b/src/utils/Logger.swift\n@@ -0,0 +1,4 @@\n+enum Logger {\n+    static func info(_ msg: String) {\n+        print(msg)\n+    }\n+}"
         }
       }
     }
-  },
-  "_expectedParse": {
-    "changes": [
-      {"path": "src/config/Settings.swift", "kind": "edit", "additions": 1, "deletions": 0, "note": "type=update -> appServerPatchChanges 归一为 edit"},
-      {"path": "src/utils/Logger.swift", "kind": "create", "additions": 4, "deletions": 0, "note": "type=add -> create"}
-    ]
   }
 }
