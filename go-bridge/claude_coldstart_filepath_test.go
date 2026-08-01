@@ -70,53 +70,54 @@ func TestClaudeColdStartFixtures_TranscriptContainsFilePath(t *testing.T) {
 	t.Logf("transcript input.file_path = %q (path source exists on wire)", fp)
 }
 
-// TestClaudeColdStartFixtures_MapperDropsPath_PreLAlpha 锁定当前（有 bug 的）mapper 行为：
-// cold-start hydrate 发出的 tool 事件丢失 path 源。这是 R5 的根因证据。L-α + L-P0a 落地后，
-// 把本测试的「缺失」断言翻转为「保留」，即转为修复守护。
-func TestClaudeColdStartFixtures_MapperDropsPath_PreLAlpha(t *testing.T) {
+// TestClaudeColdStartFixtures_MapperPreservesPath_PostLAlpha 验证 L-α（+ Phase 1A hydration
+// 透传）修复后：cold-start mapper 发出的 tool_started/tool_finished 事件携带 path-bearing title、
+// toolName 与 toolInput。这是 R5 冷启动 path 恢复的关键证据——此前（PRE-Lα）这些字段全部丢失。
+//
+// 修复路径：claudeEntryToProjectionEvents 的 tool_use 分支用 claudeSummarizeToolInput 从 input.file_path
+// 派生 title，并通过 toolUseMeta 把 toolName/title/toolInput 从 assistant tool_use 关联到 user tool_result
+// 的 tool_finished（Phase 1A hydration 再透传到 iOS）。
+func TestClaudeColdStartFixtures_MapperPreservesPath_PostLAlpha(t *testing.T) {
 	events := mapClaudeFixture(t, coldStartEditFilepathFixture)
 
-	// 收集所有 tool_started / tool_finished 事件
-	var toolEvents []map[string]any
+	var started, finished []map[string]any
 	for _, ev := range events {
-		if ev.Event == "tool_started" || ev.Event == "tool_finished" {
-			toolEvents = append(toolEvents, ev.Data)
+		switch ev.Event {
+		case "tool_started":
+			started = append(started, ev.Data)
+		case "tool_finished":
+			finished = append(finished, ev.Data)
 		}
 	}
-	if len(toolEvents) == 0 {
-		t.Fatalf("expected at least 1 tool event from Edit tool_use, got 0")
+	if len(started) == 0 {
+		t.Fatal("expected tool_started for the Edit tool_use, got 0")
 	}
-
-	// 收集所有 tool 事件的 title / toolInput / fileChanges
-	hasValidTitle := false
-	hasToolName := false
-	hasToolInput := false
-	hasFileChanges := false
-	for _, d := range toolEvents {
-		if title, _ := d["title"].(string); title != "" && strings.Contains(title, "/") && title != d["toolName"] {
-			hasValidTitle = true
-		}
-		if tn, _ := d["toolName"].(string); tn != "" {
-			hasToolName = true
-		}
-		if ti, _ := d["toolInput"]; ti != nil {
-			hasToolInput = true
-		}
-		if fc, _ := d["fileChanges"]; fc != nil {
-			hasFileChanges = true
-		}
+	if len(finished) == 0 {
+		t.Fatal("expected tool_finished for the Edit tool_result, got 0")
 	}
 
-	// Characterization (PRE L-α): cold-start mapper 发出的 tool 事件丢失 path 源——
-	// 即便 transcript 侧 input.file_path 存在（前一个测试已证），builder（richHistoryMessageBuilder.addToolUse
-	// claudecode.go:880-903）把 title 写成 toolName、不写 toolInput/fileChanges，且当前 transcript stream
-	// 路径甚至连 toolName 都未透传到 tool_finished 事件。这正是「仅改 hydration 透传 title 对 Claude 冷启动
-	// 是空操作」（§6.2.0）的证据。
-	if hasValidTitle {
-		t.Errorf("PRE-Lα characterization: expected NO tool event with a path-like title (title != toolName, contains '/'), but found one. If L-α landed, flip to assert presence.")
+	// tool_started 必须携带 path-bearing title + toolName + toolInput
+	s0 := started[0]
+	if tn, _ := s0["toolName"].(string); tn != "Edit" {
+		t.Errorf("tool_started toolName = %q, want Edit", tn)
 	}
-	// toolName 当前也未透传到 cold-start tool 事件（更深的丢弃点）；L-α/L-P0a 修复后应出现。
-	// 此断言记录现状；修复后翻转。
-	t.Logf("PRE-Lα: tool events=%d, hasToolName=%v, hasValidTitle=%v, hasToolInput=%v, hasFileChanges=%v",
-		len(toolEvents), hasToolName, hasValidTitle, hasToolInput, hasFileChanges)
+	if title, _ := s0["title"].(string); title != "src/views/SessionListView.swift" {
+		t.Errorf("tool_started title = %q, want src/views/SessionListView.swift (path-bearing, L-α)", title)
+	}
+	if _, ok := s0["toolInput"]; !ok {
+		t.Error("tool_started must carry toolInput (L-α)")
+	}
+
+	// tool_finished 必须也携带（通过 toolUseMeta 关联）
+	f0 := finished[0]
+	if tn, _ := f0["toolName"].(string); tn != "Edit" {
+		t.Errorf("tool_finished toolName = %q, want Edit (correlated via toolUseMeta)", tn)
+	}
+	if title, _ := f0["title"].(string); title != "src/views/SessionListView.swift" {
+		t.Errorf("tool_finished title = %q, want src/views/SessionListView.swift (correlated, L-α)", title)
+	}
+	// fileChanges 仍不期望（Claude driver 从不产出；L-P0b 才会引入）
+	if _, ok := f0["fileChanges"]; ok {
+		t.Error("fileChanges should still be absent (Claude driver never produces; L-P0b is separate)")
+	}
 }

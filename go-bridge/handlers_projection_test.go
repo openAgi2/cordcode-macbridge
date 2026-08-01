@@ -1026,7 +1026,7 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 		StopReason string          `json:"stop_reason"`
 		Content    json.RawMessage `json:"content"`
 	}{ID: "u1", Role: "user", Content: json.RawMessage(`[{"type":"text","text":"hello"}]`)}}
-	evs := claudeEntryToProjectionEvents(user, &currentTurnID)
+	evs := claudeEntryToProjectionEvents(user, &currentTurnID, nil)
 	if len(evs) != 1 || evs[0].Event != "user_message" || evs[0].Data["turnId"] != "u1" {
 		t.Fatalf("user entry → %+v", evs)
 	}
@@ -1040,7 +1040,7 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 		StopReason string          `json:"stop_reason"`
 		Content    json.RawMessage `json:"content"`
 	}{ID: "a1", Role: "assistant", StopReason: "end_turn", Content: json.RawMessage(`[{"type":"text","text":"hi"},{"type":"thinking","thinking":"plan"},{"type":"tool_use","id":"tool-1","name":"Read","input":{"path":"x"}}]`)}}
-	evs = claudeEntryToProjectionEvents(asst, &currentTurnID)
+	evs = claudeEntryToProjectionEvents(asst, &currentTurnID, nil)
 	// expect: text_delta, reasoning_delta, tool_started, turn_completed (TurnDone)
 	if len(evs) != 4 {
 		t.Fatalf("assistant entry → %d events: %+v", len(evs), evs)
@@ -1064,7 +1064,7 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 		StopReason string          `json:"stop_reason"`
 		Content    json.RawMessage `json:"content"`
 	}{ID: "u2", Role: "user", Content: json.RawMessage(`[{"type":"tool_result","tool_use_id":"tool-1","content":"file body"}]`)}}
-	evs = claudeEntryToProjectionEvents(tr, &currentTurnID)
+	evs = claudeEntryToProjectionEvents(tr, &currentTurnID, nil)
 	if len(evs) != 1 || evs[0].Event != "tool_finished" || evs[0].Data["itemId"] != "tool-1" {
 		t.Fatalf("tool_result → tool_finished matched by tool_use_id: %+v", evs)
 	}
@@ -1081,7 +1081,7 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 			Content    json.RawMessage `json:"content"`
 		}{Role: "user", Content: json.RawMessage(`"讲个程序员笑话"`)},
 	}
-	evs = claudeEntryToProjectionEvents(userUUID, &currentTurnID)
+	evs = claudeEntryToProjectionEvents(userUUID, &currentTurnID, nil)
 	if len(evs) != 1 || evs[0].Event != "user_message" {
 		t.Fatalf("uuid-only user → %+v", evs)
 	}
@@ -1101,7 +1101,7 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 			Content    json.RawMessage `json:"content"`
 		}{ID: "msg_asst_1", Role: "assistant", StopReason: "end_turn", Content: json.RawMessage(`[{"type":"text","text":"SQL JOIN joke"}]`)},
 	}
-	evs = claudeEntryToProjectionEvents(asstUUID, &currentTurnID)
+	evs = claudeEntryToProjectionEvents(asstUUID, &currentTurnID, nil)
 	if len(evs) != 2 {
 		t.Fatalf("uuid-turn assistant → %d events: %+v", len(evs), evs)
 	}
@@ -1122,7 +1122,7 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 			PostTokens: 8605,
 		},
 	}
-	evs = claudeEntryToProjectionEvents(compact, &currentTurnID)
+	evs = claudeEntryToProjectionEvents(compact, &currentTurnID, nil)
 	if len(evs) != 1 || evs[0].Event != "system_message" {
 		t.Fatalf("compact boundary → %+v", evs)
 	}
@@ -1143,7 +1143,7 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 			StopReason string          `json:"stop_reason"`
 			Content    json.RawMessage `json:"content"`
 		}{Role: "user", Content: json.RawMessage(`"internal compact prompt"`)}}
-	if got := claudeEntryToProjectionEvents(internalSummary, &currentTurnID); len(got) != 0 {
+	if got := claudeEntryToProjectionEvents(internalSummary, &currentTurnID, nil); len(got) != 0 {
 		t.Fatalf("internal compact summary must be filtered, got %+v", got)
 	}
 }

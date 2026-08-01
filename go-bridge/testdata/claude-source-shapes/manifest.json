@@ -244,8 +244,8 @@
       "category": "Claude cold-start Edit transcript with input.file_path (R3/1D falsification gate)",
       "provenance": "observed-derived-real-shape",
       "corpusProvenance": "~/.claude/projects transcript: assistant tool_use name=Edit with input.file_path + matching user tool_result; cold-start hydrate reads this path (richHistoryMessageBuilder), not live kernel. uuid/message.id/call_id/path/strings redacted.",
-      "sha256": "2ac7460c7caa9cd3bf38f449a0fd8bed8745d233cf866b7c92af20e6dc8c3a4d",
-      "bytes": 1429,
+      "sha256": "16f1298b294093526e87ccdd52dc051b52ae5a8dce08525b2e0b1817db6cdb01",
+      "bytes": 1467,
       "recordCount": 4,
       "records": [
         {
@@ -254,15 +254,15 @@
         },
         {
           "byteStart": 195,
-          "byteEnd": 721
+          "byteEnd": 740
         },
         {
-          "byteStart": 721,
-          "byteEnd": 1103
+          "byteStart": 740,
+          "byteEnd": 1122
         },
         {
-          "byteStart": 1103,
-          "byteEnd": 1429
+          "byteStart": 1122,
+          "byteEnd": 1467
         }
       ]
     }

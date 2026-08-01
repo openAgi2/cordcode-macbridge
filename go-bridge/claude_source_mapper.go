@@ -37,7 +37,7 @@ func buildClaudeSourceRecordBatch(
 		return ClaudeSourceRecordBatch{}, err
 	}
 	currentTurnID := turnID
-	events := claudeEntryToProjectionEvents(entry, &currentTurnID)
+	events := claudeEntryToProjectionEvents(entry, &currentTurnID, nil)
 	claudeTagSourceBlockOrdinals(entry, events)
 	partID := turnID
 	if entry.Type == "user" {

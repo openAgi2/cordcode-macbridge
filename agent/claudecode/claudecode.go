@@ -877,7 +877,7 @@ func (b *richHistoryMessageBuilder) addThinking(thinking string) {
 	})
 }
 
-func (b *richHistoryMessageBuilder) addToolUse(toolID, toolName string) string {
+func (b *richHistoryMessageBuilder) addToolUse(toolID, toolName string, input json.RawMessage) string {
 	toolID = strings.TrimSpace(toolID)
 	if toolID == "" {
 		toolID = fmt.Sprintf("tool-%d", len(b.StepOrder)+1)
@@ -889,13 +889,40 @@ func (b *richHistoryMessageBuilder) addToolUse(toolID, toolName string) string {
 	if toolName == "" {
 		toolName = "unknown"
 	}
+	// L-α (Phase 1C): preserve the tool input and derive a path-bearing title from it so
+	// cold-start hydration (and thus iOS) can show a file path for Edit/Write/Read/MultiEdit.
+	// Previously the title was hardcoded to toolName (claudecode.go:880-903), so even after the
+	// Phase 1A hydration passthrough, iOS extractPrimaryPath branch 2 failed (toolName has no '/').
+	// summarizeInput returns file_path for Edit/Write/Read and command for Bash — matching the
+	// live session.go path. When summarizeInput yields nothing, fall back to toolName (prior behavior).
+	title := toolName
+	toolInputValue := ""
+	var parsedInput any
+	if len(input) > 0 {
+		toolInputValue = string(input)
+		var decoded map[string]any
+		if err := json.Unmarshal(input, &decoded); err == nil {
+			parsedInput = decoded
+			if summarized := summarizeInput(toolName, decoded); strings.TrimSpace(summarized) != "" {
+				title = summarized
+			}
+		}
+	}
 	step := map[string]any{
 		"id":                             toolID,
 		"toolName":                       toolName,
-		"title":                          toolName,
+		"title":                          title,
 		"status":                         "unknown",
 		"requiresPermissionConfirmation": false,
 		"availablePermissionOptions":     []any{},
+	}
+	if toolInputValue != "" {
+		step["toolInput"] = toolInputValue
+	}
+	if parsedInput != nil {
+		// Keep the structured input available for downstream consumers (e.g. permission parsing,
+		// future fileChanges derivation). Hydration forwards toolInput as the string form.
+		step["input"] = parsedInput
 	}
 	b.Steps[toolID] = step
 	b.StepOrder = append(b.StepOrder, toolID)
@@ -1207,7 +1234,7 @@ func LoadClaudeRichHistoryFromReader(r io.Reader, path string) ([]core.RichHisto
 				case "thinking":
 					builder.addThinking(block.Thinking)
 				case "tool_use":
-					toolID := builder.addToolUse(block.ID, block.Name)
+					toolID := builder.addToolUse(block.ID, block.Name, block.Input)
 					toolOwners[toolID] = builder
 					if pending, ok := pendingToolResults[toolID]; ok {
 						builder.applyToolResult(toolID, pending)

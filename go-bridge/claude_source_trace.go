@@ -247,7 +247,7 @@ func (h *Handlers) traceClaudeHydrateRange(
 		events := []projectionHydrateEvent(nil)
 		transition := "ignored_source_only"
 		if record.Admitted {
-			events = claudeEntryToProjectionEvents(record.Entry, currentTurnID)
+			events = claudeEntryToProjectionEvents(record.Entry, currentTurnID, nil)
 			transition = "trace_only_not_kernel_joined"
 		}
 		projectionTurnID, projectionPartID := claudeProjectionTraceIdentity(events)
