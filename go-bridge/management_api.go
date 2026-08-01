@@ -44,6 +44,10 @@ type ManagementConfig struct {
 	RelayConfigured  bool
 	RelayEnabled     bool
 	RelayIdentity    *RelayCryptoIdentity
+	// PreferLocalNetwork 是 control-plane 连接策略:是否在同一局域网时优先直连。默认 false。
+	// 由 main.go 从 -prefer-local-network flag 注入;随 RelayFirstResult / pairing_complete /
+	// hello_ack / /internal/remote/status 下发。SSV2:不进入 timeline/projection。
+	PreferLocalNetwork bool
 	Agents           map[string]core.Agent
 	CodexBackendMode string
 	DetectionCfg     *AgentDetectionConfig
@@ -51,6 +55,24 @@ type ManagementConfig struct {
 }
 
 // ── 管理 API 服务器 ─────────────────────────────────────────────────────────
+// RelayConnectionStatusProvider 暴露 relay 加密通道的真实连接状态,供 /internal/remote/status
+// 渲染 relay.connected。*RelayBridgeClient 凭其现有 Connected()(内部锁)隐式实现该接口。
+//
+// 这是只读状态查询接口,不做连接控制。ManagementServer 在构造期即注入 production
+// disconnectedRelayStatusProvider(真实连接尚未建立时的状态真值),main.go 创建真实
+// RelayBridgeClient 后、Run 前经 SetRelayStatusProvider 原子替换。
+type RelayConnectionStatusProvider interface {
+	Connected() bool
+}
+
+// disconnectedRelayStatusProvider 是「relay 通道尚未建立真实连接」这一事实的真值对象:
+// 它的 Connected() 恒为 false,因为在 ManagementServer.Start() 早于 RelayBridgeClient 构造的
+// 启动窗口里,真实连接状态确实就是 false。这不是 mock、fallback 或假成功路径 —— 它如实
+// 报告「未连接」,与 RelayBridgeClient.Connected()==false 在语义上完全等价。
+type disconnectedRelayStatusProvider struct{}
+
+func (disconnectedRelayStatusProvider) Connected() bool { return false }
+
 // ManagementServer 提供 /internal/* HTTP 管理端点，供 Mac App 本地控制。
 type ManagementServer struct {
 	cfg                         ManagementConfig
@@ -65,14 +87,41 @@ type ManagementServer struct {
 	agentMu                     sync.RWMutex
 	agentDescriptors            []AgentProviderDescriptor
 	agentDescriptorsInitialized bool
+	// relayStatusMu 保护 relayStatusProvider 的并发替换与读取。handler 在锁内取 provider 快照,
+	// 锁外调用 Connected(),避免 management lock 包住 client 内部锁造成死锁。
+	relayStatusMu       sync.RWMutex
+	relayStatusProvider RelayConnectionStatusProvider
 }
 
 // NewManagementServer 创建管理 API 服务器实例。
 func NewManagementServer(cfg ManagementConfig) *ManagementServer {
+	// 构造期即注入 production disconnected provider:ManagementServer.Start() 早于
+	// RelayBridgeClient 构造,该窗口真实连接状态只能是 false。main.go 创建真实 client 后替换。
 	return &ManagementServer{
-		cfg:       cfg,
-		startedAt: time.Now(),
+		cfg:                 cfg,
+		startedAt:           time.Now(),
+		relayStatusProvider: disconnectedRelayStatusProvider{},
 	}
+}
+
+// SetRelayStatusProvider 原子替换 relay 连接状态 provider。main.go 在创建真实
+// RelayBridgeClient 后、启动其 Run 前调用。线程安全:读写受 relayStatusMu 同一把锁保护。
+func (s *ManagementServer) SetRelayStatusProvider(p RelayConnectionStatusProvider) {
+	if p == nil {
+		p = disconnectedRelayStatusProvider{}
+	}
+	s.relayStatusMu.Lock()
+	s.relayStatusProvider = p
+	s.relayStatusMu.Unlock()
+}
+
+// relayStatusConnected 在锁内取 provider 快照,锁外调用 Connected(),返回真实连接状态。
+// provider 未注入(默认 disconnected)、Relay 未启用或未配置时均返回 false。
+func (s *ManagementServer) relayStatusConnected() bool {
+	s.relayStatusMu.RLock()
+	provider := s.relayStatusProvider
+	s.relayStatusMu.RUnlock()
+	return provider.Connected()
 }
 
 // SetShutdownCallback 设置优雅关停回调（由 main 注入）。
@@ -551,12 +600,13 @@ func (s *ManagementServer) handlePairingApprove(w http.ResponseWriter, r *http.R
 				Token:    deviceToken,
 			},
 			Bridge: PairingCompleteBridge{
-				BridgeID:    s.cfg.BridgeID,
-				DisplayName: displayName,
-				LocalURL:    s.cfg.LocalURL,
-				RemoteURL:   s.remoteURL(),
-				RemoteURLs:  s.remoteURLs(),
-				TLSPin:      s.cfg.TLSPin,
+				BridgeID:         s.cfg.BridgeID,
+				DisplayName:      displayName,
+				LocalURL:         s.cfg.LocalURL,
+				RemoteURL:        s.remoteURL(),
+				RemoteURLs:       s.remoteURLs(),
+				TLSPin:           s.cfg.TLSPin,
+				ConnectionPolicy: &ConnectionPolicy{PreferLocalNetwork: s.cfg.PreferLocalNetwork},
 			},
 		}
 		globalPairingRegistry.NotifyComplete(pairID, push)
@@ -677,17 +727,22 @@ func (s *ManagementServer) handleRemoteStatus(w http.ResponseWriter, _ *http.Req
 	tailscaleURL := s.cfg.TailscaleURL
 	remoteURL := s.cfg.RemoteURL
 	remoteURLs := s.remoteURLs()
+	// relay.connected 只认真实 provider 的连接状态;Relay 未启用或未配置时强制 false,
+	// 不从 configured 推导为已连接。provider 未注入(启动窗口)时默认 disconnected 也为 false。
+	relayConnected := s.cfg.RelayEnabled && s.cfg.RelayConfigured && s.relayStatusConnected()
 
 	result := map[string]interface{}{
-		"localURL":         localURL,
-		"tailscaleURL":     tailscaleURL,
-		"remoteURL":        remoteURL,
-		"remoteURLs":       remoteURLs,
-		"includeTailscale": s.cfg.IncludeTailscale,
-		"includeRemote":    s.cfg.IncludeRemote,
+		"localURL":           localURL,
+		"tailscaleURL":       tailscaleURL,
+		"remoteURL":          remoteURL,
+		"remoteURLs":         remoteURLs,
+		"includeTailscale":   s.cfg.IncludeTailscale,
+		"includeRemote":      s.cfg.IncludeRemote,
+		"preferLocalNetwork": s.cfg.PreferLocalNetwork,
 		"relay": map[string]interface{}{
 			"enabled":    s.cfg.RelayEnabled,
 			"configured": s.cfg.RelayConfigured,
+			"connected":  relayConnected,
 			"endpoint":   s.cfg.RelayEndpoint,
 			"routeId":    s.cfg.RelayRouteID,
 		},

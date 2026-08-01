@@ -91,5 +91,24 @@ final class RuntimeManagerRestartTests: XCTestCase {
         
         XCTAssertTrue(manager.config.relayEnabled)
     }
+
+    /// 验证 preferLocalNetwork 默认 false,且通过 applyConfigAndRestart 原子映射(镜像 relayEnabled)。
+    @MainActor
+    func testPreferLocalNetworkConfigMapping() async {
+        let manager = makeManager()
+
+        // 默认必须为 false(Relay 底座)
+        XCTAssertFalse(manager.config.preferLocalNetwork, "preferLocalNetwork 默认必须为 false")
+
+        manager.applyConfigAndRestart { c in
+            c.preferLocalNetwork = true
+        }
+        XCTAssertTrue(manager.config.preferLocalNetwork)
+
+        manager.applyConfigAndRestart { c in
+            c.preferLocalNetwork = false
+        }
+        XCTAssertFalse(manager.config.preferLocalNetwork)
+    }
 }
 

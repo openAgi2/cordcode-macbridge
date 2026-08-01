@@ -53,6 +53,10 @@ func Main() {
 	includeTailscale := flag.Bool("pairing-include-tailscale", true, "Include detected Tailscale URL in pairing QR")
 	includeRemote := flag.Bool("pairing-include-remote", true, "Include manual remote URL in pairing QR")
 	relayEnabled := flag.Bool("relay-enabled", true, "Enable encrypted relay path")
+	// preferLocalNetwork 镜像 -relay-enabled 的 bool flag pattern(argv = 形式由 Mac Swift
+	// RuntimeManager.processArguments 生成)。默认 false:Relay 是稳定连接底座,LAN 是 Mac owner
+	// 显式开启的性能优化。control-plane only,不下发进 timeline。
+	preferLocalNetwork := flag.Bool("prefer-local-network", false, "Prefer same-LAN direct connection when available (opt-in; falls back to relay)")
 	sessionListLimit := flag.Int("session-list-limit", defaultSessionListLimit, "Maximum sessions returned per list request (1-150)")
 
 	// Relay 加密通道配置（首版：通过 flags 或环境变量注入，后续由 MacBridge runtime config 驱动）
@@ -267,6 +271,7 @@ func Main() {
 			RelayConfigured:  relayConfigured,
 			RelayEnabled:     *relayEnabled,
 			RelayIdentity:    relayIdentity,
+			PreferLocalNetwork: *preferLocalNetwork,
 			Agents:           handlers.agents,
 			CodexBackendMode: *codexBackend,
 			DetectionCfg: &AgentDetectionConfig{
@@ -316,6 +321,8 @@ func Main() {
 		remoteIdentityURLs(tailscaleURL, *remoteURL, *includeTailscale, *includeRemote)...,
 	)
 	server.SetLocalCandidateURLs(advertisedLocalURLs)
+	// control-plane 连接策略注入 Server,供 direct 与 relay 两处 hello handler 在 hello_ack 下发。
+	server.SetConnectionPolicy(ConnectionPolicy{PreferLocalNetwork: *preferLocalNetwork})
 	server.SetDetectionConfig(&AgentDetectionConfig{
 		OpenCodeURL:       *ocBaseURL,
 		OpenCodeUser:      *ocUser,
@@ -356,6 +363,10 @@ func Main() {
 			server.detectionCfg,
 			handlers.sessions,
 		)
+		// relay 路径同样权威下发 control-plane 连接策略(与 direct hello 同源 server.connectionPolicy)。
+		if ack.Bridge != nil {
+			ack.Bridge.ConnectionPolicy = &server.connectionPolicy
+		}
 		ack.BridgeEpoch = bridgeEpoch
 		if ack.Ok && negotiateRelayGzip(conn, hello.Capabilities) {
 			ack.Capabilities[relayGzipCapability] = true
@@ -452,6 +463,12 @@ func Main() {
 			// 启动 relay bridge client：连接到 relay service 的 bridge WebSocket，
 			// 处理设备握手，为每个已认证设备创建 RelayDeviceConn 并注册到 Broadcaster。
 			relayBridgeClient = NewRelayBridgeClient(handlers, sharedRelayHub, relayIdentity, bridgeID, *relayRouteID, *relayCredential)
+			// 真实 client 构造后、Run 前,原子替换 management server 的 default disconnected
+			// provider,使 /internal/remote/status 的 relay.connected 反映真实连接状态。
+			// *RelayBridgeClient 凭现有 Connected()(内部锁)隐式满足 RelayConnectionStatusProvider。
+			if mgmtSrv != nil {
+				mgmtSrv.SetRelayStatusProvider(relayBridgeClient)
+			}
 			handlers.ConfigureRelayDelivery(*relayRouteID, relayBridgeClient.SendEnvelope)
 			bridgeWSURL := strings.TrimRight(*relayEndpoint, "/") + "/v1/routes/" + *relayRouteID + "/bridge"
 			if sharedRelayHub != nil {

@@ -53,6 +53,9 @@ struct RemoteStatus: Codable {
     let includeRemote: Bool?
     let remoteAnalysis: RemoteURLAnalysis?
     let listenStatus: ListenStatus?
+    /// control-plane 连接策略:同一局域网时是否优先直连(默认 false=Relay 底座)。
+    /// 可选:旧 go-bridge 响应缺该字段时解码为 nil,UI 按 false 处理。SSV2:不进入 timeline。
+    let preferLocalNetwork: Bool?
     let relay: RelayStatus?
 
     struct RemoteURLAnalysis: Codable {
@@ -71,6 +74,11 @@ struct RemoteStatus: Codable {
 
     struct RelayStatus: Codable {
         let configured: Bool
+        /// enabled/connected 可选:真实 relay 连接状态只在该字段为 true 时显示「已接入中继网」,
+        /// 否则按 enabled/configured/connected 组合显示未启用/配置中/未连接。不从 configured 推导为已连接。
+        /// 旧 go-bridge 响应缺字段时解码为 nil。
+        let enabled: Bool?
+        let connected: Bool?
         let endpoint: String?
         let routeId: String?
     }

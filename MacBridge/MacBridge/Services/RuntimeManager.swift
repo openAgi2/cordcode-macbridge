@@ -11,6 +11,9 @@ extension Notification.Name {
     /// 远程 URL 配置变更时触发，RuntimeManager 应更新配置并重启
     static let remoteURLDidChange = Notification.Name("remoteURLDidChange")
     static let sessionListLimitDidChange = Notification.Name("sessionListLimitDidChange")
+    /// 「同一局域网时优先直连」连接偏好变更（Relay-first + opt-in LAN）。RuntimeManager 应
+    /// 原子更新 RuntimeConfig.preferLocalNetwork 并只 restart 一次。SSV2:control-plane，不进入 timeline。
+    static let preferLocalNetworkDidChange = Notification.Name("preferLocalNetworkDidChange")
     /// P2-3：键盘命令请求打开「帮助与诊断」工作表。
     static let openDiagnosticsRequest = Notification.Name("openDiagnosticsRequest")
     /// P2-3：键盘命令请求打开「连接状态」工作表。
@@ -64,6 +67,11 @@ struct RuntimeConfig {
     var relayEndpoint: String
     var relayRouteID: String
     var relayCredential: String
+    /// 「同一局域网时优先直连」control-plane 连接策略。默认 false（Relay 底座）。
+    /// 由 UserDefaults `preferLocalNetwork` 注入，随 argv `-prefer-local-network` 下发 go-bridge，
+    /// 再随 hello_ack.bridge.connectionPolicy / RelayFirstResult / pairing_complete 下发 iOS。
+    /// SSV2:不进入 timeline/projection。
+    var preferLocalNetwork: Bool
     var relayServiceAddress: String
     var sessionListLimit: Int
 
@@ -89,6 +97,7 @@ struct RuntimeConfig {
         relayEndpoint: String = "",
         relayRouteID: String = "",
         relayCredential: String = "",
+        preferLocalNetwork: Bool = false,
         relayServiceAddress: String = "",
         sessionListLimit: Int = 50
     ) {
@@ -113,6 +122,7 @@ struct RuntimeConfig {
         self.relayEndpoint = relayEndpoint
         self.relayRouteID = relayRouteID
         self.relayCredential = relayCredential
+        self.preferLocalNetwork = preferLocalNetwork
         self.relayServiceAddress = relayServiceAddress
         self.sessionListLimit = min(max(sessionListLimit, 1), 150)
     }
@@ -990,6 +1000,8 @@ class RuntimeManager: ObservableObject {
         arguments += ["-pairing-include-tailscale=\(config.includeTailscaleInPairing ? "true" : "false")"]
         arguments += ["-pairing-include-remote=\(config.includeRemoteInPairing ? "true" : "false")"]
         arguments += ["-relay-enabled=\(config.relayEnabled ? "true" : "false")"]
+        // Relay-first + opt-in LAN:镜像 -relay-enabled 的 argv = 形式，默认 false。
+        arguments += ["-prefer-local-network=\(config.preferLocalNetwork ? "true" : "false")"]
         return arguments
     }
 

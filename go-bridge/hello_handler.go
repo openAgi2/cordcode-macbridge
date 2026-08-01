@@ -60,12 +60,13 @@ type BridgeRecoveryPlan struct {
 
 // HelloBridgeInfo 包含 bridge 的身份和连接信息，对应 schema BridgeV1BridgeProfile。
 type HelloBridgeInfo struct {
-	BridgeID       string                   `json:"bridgeId"`
-	DisplayName    string                   `json:"displayName"`
-	RuntimeVersion string                   `json:"runtimeVersion"`
-	CurrentURLs    HelloURLs                `json:"currentURLs"`
-	Protocol       HelloAckProtocol         `json:"protocol"`
-	Security       *BridgeV1SecurityProfile `json:"security,omitempty"`
+	BridgeID         string                   `json:"bridgeId"`
+	DisplayName      string                   `json:"displayName"`
+	RuntimeVersion   string                   `json:"runtimeVersion"`
+	CurrentURLs      HelloURLs                `json:"currentURLs"`
+	Protocol         HelloAckProtocol         `json:"protocol"`
+	Security         *BridgeV1SecurityProfile `json:"security,omitempty"`
+	ConnectionPolicy *ConnectionPolicy        `json:"connectionPolicy,omitempty"`
 }
 
 // HelloAckProtocol 是 hello_ack 中 bridge 信息携带的协议版本。

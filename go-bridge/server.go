@@ -202,6 +202,7 @@ type Server struct {
 	remoteURL            string
 	remoteURLs           []string
 	localCandidateURLs   []string
+	connectionPolicy     ConnectionPolicy
 	detectionCfg         *AgentDetectionConfig
 	bridgeEpoch          string
 	eventPublisher       *EventPublisher
@@ -280,6 +281,20 @@ func (s *Server) SetBridgeIdentity(bridgeID, displayName, runtimeVersion, localU
 // SetLocalCandidateURLs 设置 LAN 直连候选列表,用于 hello_ack.currentURLs.locals(secondary 候选)。
 func (s *Server) SetLocalCandidateURLs(urls []string) {
 	s.localCandidateURLs = uniqueNonEmptyStrings(urls)
+}
+
+// SetConnectionPolicy 设置 control-plane 连接策略,经 hello_ack.bridge.connectionPolicy 下发。
+// 与 LAN 候选独立:关闭 preferLocalNetwork 时仍发布 LAN 候选,iOS 只是不把它们纳入自动优先。
+// 由 main.go 在启动时从 -prefer-local-network flag 注入一次;config 变更走 applyConfigAndRestart
+// 重启新进程,故运行期内该字段不被并发改写(与 localCandidateURLs/remoteURLs 同为启动期注入)。
+// SSV2:纯 control-plane,不进入 timeline/projection。
+func (s *Server) SetConnectionPolicy(policy ConnectionPolicy) {
+	s.connectionPolicy = policy
+}
+
+// ConnectionPolicy 返回当前 control-plane 连接策略(供 direct 与 relay 两处 hello handler 读取)。
+func (s *Server) ConnectionPolicy() ConnectionPolicy {
+	return s.connectionPolicy
 }
 
 // SetDetectionConfig 设置 agent 检测配置。
@@ -531,6 +546,10 @@ func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage
 		s.detectionCfg,
 		s.handlers.sessions,
 	)
+	// control-plane 连接策略随每次 hello_ack 权威下发(默认 false=Relay 底座)。
+	if ack.Bridge != nil {
+		ack.Bridge.ConnectionPolicy = &s.connectionPolicy
+	}
 	ack.BridgeEpoch = s.bridgeEpoch
 	var replay []EventMessage
 	if s.recoveryEnabled && helloSupportsRecovery(&hello) && ack.Ok {

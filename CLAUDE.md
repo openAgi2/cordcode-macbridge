@@ -1,5 +1,13 @@
 # CLAUDE.md
 
+## Cross-repository instructions (required)
+
+Reading this repository's `CLAUDE.md` also requires reading the adjacent iOS
+repository's `../cordcode-ios/CLAUDE.md`. The two repositories form one CordCode
+product system. For any cross-repository investigation, design, code change,
+test, or delivery, follow both `CLAUDE.md` files; never operate on the other
+repository using only this repository's instructions.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## What this repo is
