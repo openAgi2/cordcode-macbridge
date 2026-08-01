@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -676,5 +677,114 @@ func TestPathlessRebuildDoesNotCarryCheckpointBaseline(t *testing.T) {
 	if commitB.Projection.Turns[0].TurnID != builderTurnID {
 		t.Fatalf("want sole builder turn %q, got %q (live baseline was carried)",
 			builderTurnID, commitB.Projection.Turns[0].TurnID)
+	}
+}
+
+// TestClaudeCompositeCheckpointHitRestoresBaseline_NotEmptyHead0 reproduces the
+// 2026-08-01 owner regression: every Claude session opened empty ("还没有消息").
+//
+// Production Claude hydrate always uses CompositeRichHistoryProvider segments
+// (prepareProjectionHydrateSource Path=="", Segments=[{Cursor:EOF}]). A validated
+// checkpoint hit sets startCursor=source.Cursor (EOF). If Site B skips Restore
+// because Path=="" is treated as pathless full rebuild, produce returns early on
+// startOffset==endOffset and the committed projection is empty (headRev=0).
+//
+// Fix: pathlessFullRebuildSource requires Path=="" AND no Segments — composite
+// Claude must Restore the checkpoint baseline when the gap is empty.
+func TestClaudeCompositeCheckpointHitRestoresBaseline_NotEmptyHead0(t *testing.T) {
+	dir := t.TempDir()
+	store := NewProjectionCheckpointStore(dir)
+	const backendID = "claude"
+	const sessionID = "5054485f-composite-empty-reg"
+	const cut int64 = 5641696 // matches real transcript EOF in go-bridge logs
+
+	// Phase 1 — commit a non-empty projection + composite checkpoint at EOF.
+	kernelA := NewProjectionKernel(NewProjectionReducer(), store)
+	sourceAtEOF := ProjectionSourceDescriptor{
+		Identity: sessionID,
+		Cursor:   cut,
+		Segments: []ProjectionSourceSegment{{
+			Identity: sessionID,
+			Path:     filepath.Join(dir, "transcript.jsonl"),
+			Cursor:   cut,
+		}},
+	}
+	// Write a real file of size `cut` so BuildProjectionSourceCheckpoints / Save work.
+	// Cursor validation only needs size >= cursor; content is irrelevant for this unit.
+	if err := os.WriteFile(sourceAtEOF.Segments[0].Path, make([]byte, cut), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// For checkpoint save we need a simpler path: stage via Commit + StageCheckpoint
+	// through the same helpers production uses. Here we seed via non-composite first,
+	// then overwrite with composite checkpoint matching production schema.
+	admission1, err := kernelA.BeginHydrateTransaction(backendID, sessionID,
+		ProjectionSourceDescriptor{Identity: sessionID, Path: sourceAtEOF.Segments[0].Path, Cursor: cut},
+		false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !admission1.Leader {
+		t.Fatal("phase1 want leader")
+	}
+	const turnID = "turn-seed-1"
+	kernelA.ApplyHydrateEvent(backendID, sessionID, "epoch", "user_message", map[string]interface{}{
+		"itemId": turnID, "turnId": turnID, "text": "hello from checkpoint",
+	})
+	kernelA.ApplyHydrateEvent(backendID, sessionID, "epoch", "text_delta", map[string]interface{}{
+		"itemId": turnID, "delta": "assistant reply",
+	})
+	kernelA.ApplyHydrateEvent(backendID, sessionID, "epoch", "turn_completed", map[string]interface{}{
+		"turnId": turnID, "done": true,
+	})
+	commit1, err := kernelA.CommitHydrateTransaction(backendID, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commit1.Projection.SyncRev == 0 || len(commit1.Projection.Turns) != 1 {
+		t.Fatalf("seed projection empty: rev=%d turns=%d", commit1.Projection.SyncRev, len(commit1.Projection.Turns))
+	}
+	// Persist composite-shaped checkpoint (sources[] at EOF) like production Claude.
+	srcCkpts, err := BuildProjectionSourceCheckpoints(sourceAtEOF)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ckpt := NewReadyCompositeProjectionCheckpoint(
+		backendID, sessionID, srcCkpts, commit1.Projection, time.Now(),
+	)
+	if err := store.Save(ckpt); err != nil {
+		t.Fatal(err)
+	}
+
+	// Phase 2 — fresh kernel, composite source at same EOF cut (checkpoint validates).
+	kernelB := NewProjectionKernel(NewProjectionReducer(), store)
+	admission2, err := kernelB.BeginHydrateTransaction(backendID, sessionID, sourceAtEOF, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !admission2.Leader {
+		t.Fatal("want leader on composite reopen")
+	}
+	if !admission2.CheckpointHit {
+		t.Fatal("want checkpoint hit at unchanged EOF cut")
+	}
+	if admission2.StartCursor != cut || admission2.StartCut != cut {
+		t.Fatalf("want startCursor=startCut=%d (empty gap), got [%d,%d)",
+			cut, admission2.StartCursor, admission2.StartCut)
+	}
+	// Production produce returns nil immediately when startOffset==endOffset — no events.
+	// Commit must still expose the restored baseline (non-zero rev, non-empty turns).
+	commit2, err := kernelB.CommitHydrateTransaction(backendID, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commit2.Projection.SyncRev == 0 {
+		t.Fatal("REGRESSION: composite checkpoint hit produced headRev=0 empty projection " +
+			"(Claude sessions show 还没有消息 on iOS)")
+	}
+	if len(commit2.Projection.Turns) != 1 {
+		t.Fatalf("want 1 restored turn, got %d", len(commit2.Projection.Turns))
+	}
+	if commit2.Projection.Turns[0].TurnID != turnID {
+		t.Fatalf("want restored turn %q, got %q", turnID, commit2.Projection.Turns[0].TurnID)
 	}
 }

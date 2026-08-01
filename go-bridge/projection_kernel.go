@@ -601,13 +601,9 @@ func (k *ProjectionKernel) finishHydrateLocked(session *projectionKernelSession)
 	}
 }
 
-// pathlessRichHistoryBackend reports whether a backend's pathless hydrate (source.Path
-// == "") replays the full source through a rich-history builder: Claude (pathless or
-// compact-continuation segments) and OpenCode (HTTP rich history). Such a rebuild must
-// start from an empty reducer so the builder is the sole baseline; carrying a prior
-// projection would replay content onto it and duplicate turns. Codex is file-based — a
-// pathless Codex session is a degenerate no-file case with no builder replay, so it is
-// excluded and keeps its carried live baseline.
+// pathlessRichHistoryBackend reports whether a backend can perform a pathless hydrate
+// (source.Path == "") that replays content through a rich-history builder: Claude and
+// OpenCode. Codex is file-based and excluded.
 func pathlessRichHistoryBackend(backendID string) bool {
 	switch backendID {
 	case "opencode", "claude", "claudecode":
@@ -615,6 +611,21 @@ func pathlessRichHistoryBackend(backendID string) bool {
 	default:
 		return false
 	}
+}
+
+// pathlessFullRebuildSource is true when hydrate must start from an EMPTY reducer and
+// re-reduce the entire source as sole baseline (OpenCode HTTP; Claude without file/segment
+// cursors). Carrying a prior projection would replay builder output on top of already-
+// present turns and can duplicate content across live row-UUID vs builder turn ids
+// (see docs/2026-07-31-claude-projection-pathless-hydrate-duplication-fix.md).
+//
+// Claude composite segments still carry per-file cursors and validated checkpoints.
+// Those must NOT be treated as full rebuilds: when a checkpoint hit sets startCursor to
+// the segment cut (EOF), produceProjectionHydrateSource returns early on
+// startOffset==endOffset. Without restoring the checkpoint baseline the committed
+// projection is empty (headRev=0) and iOS shows "还没有消息" for every Claude session.
+func pathlessFullRebuildSource(backendID string, source ProjectionSourceDescriptor) bool {
+	return source.Path == "" && len(source.Segments) == 0 && pathlessRichHistoryBackend(backendID)
 }
 
 // BeginHydrateTransaction creates the isolated reducer used for [checkpointCursor,startCut).
@@ -681,20 +692,12 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 		liveArrived: make(chan struct{}, 1),
 	}
 	if source.Path == "" {
-		if pathlessRichHistoryBackend(backendID) {
-			// Claude / OpenCode pathless rebuild starts EMPTY. Their rich-history builder
-			// has no file cursor and re-reduces the full source every time, so the projection
-			// must be derived SOLELY from that rebuild. Carrying a prior committed projection
-			// (in-memory here, or from checkpoint below) would replay the builder on top of
-			// already-present content — text_delta appends, never replaces — and, when the
-			// prior baseline used a different turn-id scheme (live/raw row-UUID vs builder
-			// user-line-N), create duplicate turns that persist in the checkpoint across
-			// reopens. See docs/2026-07-31-claude-projection-pathless-hydrate-duplication-fix.md.
+		if pathlessFullRebuildSource(backendID, source) {
+			// OpenCode / Claude pathless (no Path, no Segments) rebuild starts EMPTY.
 			// tx.reducer is already a fresh NewProjectionReducer(); do NOT Restore.
-		} else if !sourceChanged {
-			// Codex is file-based: a pathless Codex session is a degenerate no-file case
-			// with NO builder replay, so the carried in-memory live state is the sole
-			// content and must be preserved (do not drop it).
+		} else if !sourceChanged && len(source.Segments) == 0 {
+			// Codex pathless degenerate no-file case: keep carried live baseline.
+			// Claude composite Segments are handled via checkpoint Restore below (not here).
 			if existing, ok := k.reducer.Snapshot(backendID, sessionID); ok {
 				tx.reducer.Restore(backendID, sessionID, existing)
 			}
@@ -723,10 +726,12 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 		checkpoint, err := store.LoadValidated(backendID, sessionID, source)
 		switch {
 		case err == nil:
-			if !(source.Path == "" && pathlessRichHistoryBackend(backendID)) {
-				// Carry the checkpoint projection forward as baseline — EXCEPT for a
-				// Claude/OpenCode pathless rebuild, which must start empty so the rich-
-				// history builder is the sole baseline (see Site A comment above).
+			if !pathlessFullRebuildSource(backendID, source) {
+				// Carry the checkpoint projection as baseline.
+				// CRITICAL: Claude composite (Path=="" + Segments) is NOT a full rebuild —
+				// startCursor becomes source.Cursor (EOF cut). Skipping Restore here yields
+				// an empty projection (headRev=0) and empty iOS Claude sessions.
+				// Only true pathless full rebuilds (no Path, no Segments) skip Restore.
 				tx.reducer.Restore(backendID, sessionID, checkpoint.Projection)
 			}
 			if len(source.Segments) > 0 {
