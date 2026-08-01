@@ -130,6 +130,14 @@ export interface BridgeHelloAck {
     };
     protocol: BridgeProtocol;
     security?: BridgeSecurityProfile;
+    /**
+     * Control-plane connection policy (Relay-first + opt-in LAN). Optional; absent or
+     * preferLocalNetwork=false means Relay is the base. Does NOT enter the timeline/projection.
+     * See bridge-v1.md「Connection policy (control-plane)」.
+     */
+    connectionPolicy?: {
+      preferLocalNetwork: boolean; // default false
+    };
   };
   capabilities?: Record<string, boolean>;
   bridgeEpoch?: string;

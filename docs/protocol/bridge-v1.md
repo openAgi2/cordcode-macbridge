@@ -298,6 +298,50 @@ include Tailscale self-signed `wss://100.x` candidates, because those require a 
 SPKI pin. Clients should treat `local` as primary, race or fallback across `locals` inside the direct
 phase, and keep Relay as the remote path when available.
 
+## Connection policy (control-plane)
+
+`connectionPolicy` is a **control-plane** preference delivered over authenticated channels. Product
+mental model: **Relay is the stable connection base; same-LAN direct is an opt-in performance
+optimization.**
+
+```ts
+connectionPolicy?: {
+  preferLocalNetwork: boolean  // default false
+}
+```
+
+It appears in four authenticated payloads only:
+
+- `hello_ack.bridge.connectionPolicy`
+- Relay-first `RelayFirstResult.connectionPolicy`
+- direct `pairing_complete.bridge.connectionPolicy`
+- `GET /internal/remote/status` top-level `preferLocalNetwork`
+
+`preferLocalNetwork` is `false` by default. Only when the Mac owner explicitly enables it does iOS
+prefer ordinary LAN direct (`ws://<lan-ip>`, security level `lan`) on Wi-Fi/mixed networks, falling
+back to Relay on failure. Cellular stays on Relay. It does **not** affect Tailscale TLS pinning, URL
+security classification, or an explicit custom-remote intent.
+
+Candidate discovery is independent of the preference: when `preferLocalNetwork` is `false` the Mac
+still publishes the full LAN candidate set (`currentURLs.locals`, `RelayFirstResult.localUrls`), so
+toggling the switch on later requires no re-pairing and DHCP/address changes still refresh. The
+presence of candidates alone never changes policy.
+
+The field is optional everywhere. A new client decoding an old payload treats a missing
+`connectionPolicy` as `preferLocalNetwork: false`; an old client ignores the new field.
+
+**Session Sync v2 red line:** `connectionPolicy` is control-plane only. It MUST NOT appear in any
+`EventMessage.data`, MUST NOT enter the timeline via publish/ingest, and MUST NOT be added to
+`SessionProjection` or matched in the projection reducer. Path migration (LAN ↔ Relay) only swaps
+transport — it bumps connection generation, invalidates stale in-flight frames, and re-aligns the
+same `SessionProjection` via the unified reconcile path. The preference, URL candidates, and actual
+transport kind do not participate in projection ownership, completion, or the timeline reducer.
+
+`GET /internal/remote/status` also exposes a real `relay.connected` boolean (independent of
+`relay.configured`): the Mac only renders "connected to relay" when the encrypted channel's status
+provider reports connected AND relay is enabled and configured. `configured == true` alone MUST NOT
+be displayed as connected.
+
 ## Session Pagination
 
 There are two separate pagination surfaces:
