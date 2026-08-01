@@ -23,7 +23,11 @@ import (
 // longer carries a prior projection as baseline (see BeginHydrateTransaction),
 // which changes the turn set produced for pathless backends — old checkpoints
 // that mixed live row-UUID turns with builder user-line-N turns must be rebuilt.
-const projectionCheckpointSchemaVersion = 5
+// v6: ProjectionPart tool retains optional title + fileChanges (guardrail 12 / ChatGPT-style
+// activity rows). Bumping invalidates v5 checkpoints so cold hydrate re-reduces with the new
+// fields instead of restoring pre-title baselines (which left iOS activity rows as bare
+// 「已编辑文件」 even after the reducer fix).
+const projectionCheckpointSchemaVersion = 6
 
 var (
 	ErrProjectionCheckpointInvalid  = errors.New("projection checkpoint invalid")
