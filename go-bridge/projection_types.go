@@ -23,6 +23,13 @@ type ProjectionPart struct {
 	ToolResult interface{} `json:"toolResult,omitempty"`
 	ToolStatus string      `json:"toolStatus,omitempty"`
 	Matches    interface{} `json:"matches,omitempty"`
+	// Title is an optional path-bearing display title for tool steps (Claude file_path,
+	// Codex patch target). Additive; see bridge-v1.types.ts BridgeProjectionPart tool.title.
+	Title string `json:"title,omitempty"`
+	// FileChanges is optional structured file mutations for this tool step (Codex Patch).
+	// Wire shape: []{path, kind?, movePath?, diff?}. Additive; see bridge-v1.types.ts
+	// BridgeProjectionPart tool.fileChanges.
+	FileChanges interface{} `json:"fileChanges,omitempty"`
 
 	// file
 	Path     string `json:"path,omitempty"`

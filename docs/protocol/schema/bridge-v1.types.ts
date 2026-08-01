@@ -441,6 +441,23 @@ export type BridgeProjectionPart =
       toolResult?: unknown;
       toolStatus?: string;
       matches?: ToolMatches;
+      /**
+       * Optional display title for the tool step. Path-bearing for file tools
+       * (e.g. Claude Edit/Write `file_path`, Codex patch target). Additive;
+       * absent on older producers — clients fall back to toolInput / toolName.
+       */
+      title?: string;
+      /**
+       * Optional structured file mutations for this tool step (Codex Patch /
+       * apply_patch). Shape matches UnifiedFileChange (path/kind/diff/movePath).
+       * Additive; absent when the producer only has free-form toolResult text.
+       */
+      fileChanges?: Array<{
+        path: string;
+        kind?: string;
+        movePath?: string;
+        diff?: string;
+      }>;
     }
   | { type: "file"; path?: string; kind?: string; diff?: string; movePath?: string }
   | {

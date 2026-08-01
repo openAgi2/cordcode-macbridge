@@ -530,6 +530,20 @@ Exact field shapes (`BridgeSessionProjection`, `BridgeTurnProjection`, `BridgeMe
 `BridgeProjectionPart`, `BridgeProjectionPatch`, `BridgePartOp`, `BridgeExecutionView`) are defined
 in `docs/protocol/schema/bridge-v1.types.ts`.
 
+#### Tool part additive fields: `title` / `fileChanges` (ChatGPT-style activity rows)
+
+`BridgeProjectionPart` tool variant gains two **optional** fields (non-breaking, lowerCamelCase):
+
+| Field | Purpose |
+|-------|---------|
+| `title?: string` | Path-bearing display title (Claude Edit/Write `file_path`, Codex patch target, etc.). Clients use it for activity-row labels and `extractPrimaryPath` when structured file path is otherwise missing. |
+| `fileChanges?: { path, kind?, movePath?, diff? }[]` | Structured file mutations for this tool step (Codex Patch / apply_patch). Same shape as UnifiedFileChange. |
+
+Producers (live `tool_started`/`tool_finished` and cold hydrate) must pass these through the
+Projection Kernel reducer so snapshot/patch parts retain them. Clients map them read-only; when
+absent they fall back to `toolInput` / tool output presentation parsing — never invent paths or
+`+0 −0`. Older clients ignore unknown optional fields.
+
 #### Part vocabulary: `subagent` (B4 child-stream, sync-only)
 
 `BridgeProjectionPart` gains an additive `type: "subagent"` variant for Claude `Agent`/`Task`

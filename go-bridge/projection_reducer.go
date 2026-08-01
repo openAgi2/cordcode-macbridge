@@ -516,6 +516,15 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if v, ok := data["matches"]; ok {
 			part.Matches = v
 		}
+		// Guardrail 12 / ChatGPT-style activity rows: path-bearing title + structured
+		// fileChanges must survive into Snapshot parts (hydrate and live both emit them
+		// on event Data; without this merge they die at the reducer).
+		if title := dataString(data, "title"); title != "" {
+			part.Title = title
+		}
+		if v, ok := data["fileChanges"]; ok {
+			part.FileChanges = v
+		}
 		if status := dataString(data, "toolStatus"); status != "" {
 			part.ToolStatus = status
 		} else if msg.Event == "tool_started" {
@@ -631,6 +640,12 @@ func mergeToolPart(dst *ProjectionPart, src ProjectionPart) {
 	// 对齐 ToolResult 的 non-nil merge 语义（后到覆盖）。
 	if src.Matches != nil {
 		dst.Matches = src.Matches
+	}
+	if src.Title != "" {
+		dst.Title = src.Title
+	}
+	if src.FileChanges != nil {
+		dst.FileChanges = src.FileChanges
 	}
 	if src.ToolStatus != "" {
 		dst.ToolStatus = src.ToolStatus
@@ -886,6 +901,7 @@ func cloneProjectionPart(part ProjectionPart) ProjectionPart {
 	out.ToolInput = cloneProjectionJSONValue(part.ToolInput)
 	out.ToolResult = cloneProjectionJSONValue(part.ToolResult)
 	out.Matches = cloneProjectionJSONValue(part.Matches)
+	out.FileChanges = cloneProjectionJSONValue(part.FileChanges)
 	if len(part.SubagentBlocks) > 0 {
 		// SubagentBlocks is a concrete []ProjectionPart (recursive); the shallow `out := part`
 		// above only copies the slice header. Deep-copy each nested part so the reducer's
