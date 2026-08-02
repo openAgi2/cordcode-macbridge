@@ -73,6 +73,23 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 		caps = append(caps, "question_reply")
 	}
 
+	// structured_user_input_v1（design docs/2026-08-01-codex-claude-structured-user-input-design.md §13）：
+	// 仅当 backend adapter session 实现 core.UserInputResponder（ResolveUserInput）时广告。这是
+	// per-backend descriptor capability；session_sync_v2（Projection Kernel readiness）是独立的
+	// global connection capability，iOS 按 §13.1 step 8 自行 AND 两者，此处不同步耦合、不在 advert
+	// 层 AND Kernel。实现者：Codex app_server（appServerSession）与 Claude Code（claudeSession）；
+	// opencode 与非 app_server codex 不实现 → fail-closed（iOS 不出现提问卡）。
+	// Claude 用 agent.Name()=="claudecode" 判定而非 descriptor id：生产 drivers 默认 "claude"，经
+	// agentAliases["claude"]="claudecode" 创建，descriptor id 为 "claude"、agent.Name() 为
+	// "claudecode"；用 Name() 同时覆盖 "claude" 与 "claudecode" 两种 descriptor id，规避别名差异。
+	// 不用跨 backend 全局 boolean（§13.1：每个 backend 独立由其 adapter readiness 决定）。
+	if id == "codex" && codexBackendMode == "app_server" {
+		caps = append(caps, "structured_user_input_v1")
+	}
+	if agent.Name() == "claudecode" {
+		caps = append(caps, "structured_user_input_v1")
+	}
+
 	// external_turn_streaming（refactor `multi-client-streaming-sync` Phase 1/2）：MacBridge 对该
 	// backend 的外部 turn 已实现 push 流式——file-relay 解析 transcript/rollout 增长，发
 	// text_delta/reasoning_delta/tool_started/context_usage_updated，客户端据此可关闭发现型轮询、

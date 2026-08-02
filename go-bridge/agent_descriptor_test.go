@@ -221,6 +221,62 @@ func TestBuildAgentDescriptorOpenCodeDoesNotAdvertiseQuestionReply(t *testing.T)
 	}
 }
 
+// structured_user_input_v1 (design §13): advertised only by backends whose adapter
+// session implements core.UserInputResponder — Codex app_server (appServerSession) and
+// Claude Code (claudeSession). session_sync_v2 is a separate global connection capability;
+// iOS ANDs the two client-side (§13.1 step 8), so this advert reflects responder readiness only.
+func TestCodexAppServerStructuredUserInputCapability(t *testing.T) {
+	agent := &fullFakeAgent{descriptorFakeAgent{name: "codex"}}
+	d := BuildAgentDescriptor("codex", agent, "app_server", nil)
+	if !descriptorHasCapability(d.Capabilities, "structured_user_input_v1") {
+		t.Fatalf("structured_user_input_v1 missing for codex app_server: %v", d.Capabilities)
+	}
+}
+
+func TestCodexExecNoStructuredUserInputCapability(t *testing.T) {
+	agent := &fullFakeAgent{descriptorFakeAgent{name: "codex"}}
+	d := BuildAgentDescriptor("codex", agent, "exec", nil)
+	if descriptorHasCapability(d.Capabilities, "structured_user_input_v1") {
+		t.Fatalf("structured_user_input_v1 must not appear in codex exec mode: %v", d.Capabilities)
+	}
+}
+
+// Claude Code advertises structured_user_input_v1. Gating uses agent.Name()=="claudecode"
+// (not descriptor id) so it covers BOTH the production descriptor id "claude" (drivers default,
+// aliased to the "claudecode" factory) and the direct "claudecode" id.
+func TestClaudeCodeStructuredUserInputCapability_ProductionAliasID(t *testing.T) {
+	agent := &fullFakeAgent{descriptorFakeAgent{name: "claudecode"}}
+	d := BuildAgentDescriptor("claude", agent, "", nil) // 生产 descriptor id = "claude"
+	if !descriptorHasCapability(d.Capabilities, "structured_user_input_v1") {
+		t.Fatalf("structured_user_input_v1 missing for claude (aliased claudecode): %v", d.Capabilities)
+	}
+}
+
+func TestClaudeCodeStructuredUserInputCapability_DirectID(t *testing.T) {
+	agent := &fullFakeAgent{descriptorFakeAgent{name: "claudecode"}}
+	d := BuildAgentDescriptor("claudecode", agent, "", nil)
+	if !descriptorHasCapability(d.Capabilities, "structured_user_input_v1") {
+		t.Fatalf("structured_user_input_v1 missing for claudecode: %v", d.Capabilities)
+	}
+}
+
+// OpenCode and grokbuild do not implement ResolveUserInput → must NOT advertise (fail-closed).
+func TestOpenCodeNoStructuredUserInputCapability(t *testing.T) {
+	agent := &fullFakeAgent{descriptorFakeAgent{name: "opencode"}}
+	d := BuildAgentDescriptor("opencode", agent, "", nil)
+	if descriptorHasCapability(d.Capabilities, "structured_user_input_v1") {
+		t.Fatalf("structured_user_input_v1 must not be advertised for opencode: %v", d.Capabilities)
+	}
+}
+
+func TestGrokBuildNoStructuredUserInputCapability(t *testing.T) {
+	agent := &fullFakeAgent{descriptorFakeAgent{name: "grokbuild"}}
+	d := BuildAgentDescriptor("grokbuild", agent, "", nil)
+	if descriptorHasCapability(d.Capabilities, "structured_user_input_v1") {
+		t.Fatalf("structured_user_input_v1 must not be advertised for grokbuild: %v", d.Capabilities)
+	}
+}
+
 func TestBuildAgentDescriptorDoesNotAdvertiseSessionPagination(t *testing.T) {
 	agent := &fullFakeAgent{descriptorFakeAgent{name: "claudecode"}}
 	d := BuildAgentDescriptor("claudecode", agent, "", nil)
