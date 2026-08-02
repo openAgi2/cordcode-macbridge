@@ -786,6 +786,7 @@ type transcriptHistoryEnvelope struct {
 	IsCompactSummary          bool                       `json:"isCompactSummary"`
 	IsVisibleInTranscriptOnly bool                       `json:"isVisibleInTranscriptOnly"`
 	CompactMetadata           *transcriptCompactMetadata `json:"compactMetadata"`
+	ToolUseResult             json.RawMessage            `json:"toolUseResult"`
 }
 
 type transcriptCompactMetadata struct {
@@ -830,6 +831,7 @@ type richHistoryMessageBuilder struct {
 	ThinkingSegments []string
 	Parts            []richHistoryPartBuilder
 	Steps            map[string]map[string]any
+	UserInputs       map[string]map[string]any
 	StepOrder        []string
 	ModelID          string
 	AgentName        string
@@ -844,10 +846,11 @@ type richHistoryPartBuilder struct {
 
 func newRichHistoryMessageBuilder(id, role string, timestamp time.Time) *richHistoryMessageBuilder {
 	return &richHistoryMessageBuilder{
-		ID:        id,
-		Role:      role,
-		Timestamp: timestamp,
-		Steps:     make(map[string]map[string]any),
+		ID:         id,
+		Role:       role,
+		Timestamp:  timestamp,
+		Steps:      make(map[string]map[string]any),
+		UserInputs: make(map[string]map[string]any),
 	}
 }
 
@@ -875,6 +878,72 @@ func (b *richHistoryMessageBuilder) addThinking(thinking string) {
 			"content": thinking,
 		},
 	})
+}
+
+func (b *richHistoryMessageBuilder) addStructuredUserInput(toolID string, input json.RawMessage) string {
+	toolID = strings.TrimSpace(toolID)
+	if toolID == "" {
+		return ""
+	}
+	if _, exists := b.UserInputs[toolID]; exists {
+		return toolID
+	}
+	interactionID := deriveClaudeInteractionID(toolID)
+	var decoded map[string]any
+	normalized := []core.UserInputQuestion(nil)
+	normalizeErr := json.Unmarshal(input, &decoded)
+	if normalizeErr == nil {
+		normalized, normalizeErr = normalizeClaudeUserQuestions(interactionID, parseUserQuestions(decoded))
+	}
+	status := string(core.UserInputStatusPending)
+	diagnosticCode := "observe_only"
+	if normalizeErr != nil || len(normalized) == 0 {
+		status = string(core.UserInputStatusFailed)
+		diagnosticCode = "invalid_backend_request"
+	}
+	part := map[string]any{
+		"type":           "user_input",
+		"itemId":         toolID,
+		"interactionId":  interactionID,
+		"status":         status,
+		"questions":      normalized,
+		"canRespond":     false,
+		"canReject":      false,
+		"diagnosticCode": diagnosticCode,
+	}
+	b.UserInputs[toolID] = part
+	b.Parts = append(b.Parts, richHistoryPartBuilder{Value: part})
+	return toolID
+}
+
+func (b *richHistoryMessageBuilder) resolveStructuredUserInput(toolID string, resolvedAt time.Time) bool {
+	part, ok := b.UserInputs[toolID]
+	if !ok {
+		return false
+	}
+	if part["status"] == string(core.UserInputStatusFailed) {
+		return true
+	}
+	part["status"] = string(core.UserInputStatusAnswered)
+	part["resolutionSource"] = "other_client"
+	if !resolvedAt.IsZero() {
+		part["resolvedAt"] = resolvedAt.UnixMilli()
+	}
+	return true
+}
+
+func hasStructuredUserInputAfter(builders []*richHistoryMessageBuilder, prior *richHistoryMessageBuilder) bool {
+	seenPrior := false
+	for _, builder := range builders {
+		if builder == prior {
+			seenPrior = true
+			continue
+		}
+		if seenPrior && len(builder.UserInputs) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *richHistoryMessageBuilder) addToolUse(toolID, toolName string, input json.RawMessage) string {
@@ -1157,6 +1226,8 @@ func LoadClaudeRichHistoryFromReader(r io.Reader, path string) ([]core.RichHisto
 	assistantByMessageID := make(map[string]*richHistoryMessageBuilder)
 	toolOwners := make(map[string]*richHistoryMessageBuilder)
 	pendingToolResults := make(map[string]transcriptToolResult)
+	structuredInputOwners := make(map[string]*richHistoryMessageBuilder)
+	pendingStructuredInputResults := make(map[string]time.Time)
 	userByPromptID := make(map[string]*richHistoryMessageBuilder)
 	skipNextSkillInstruction := false
 	skipNextResumeNoResponse := false
@@ -1234,6 +1305,18 @@ func LoadClaudeRichHistoryFromReader(r io.Reader, path string) ([]core.RichHisto
 				case "thinking":
 					builder.addThinking(block.Thinking)
 				case "tool_use":
+					if strings.EqualFold(strings.TrimSpace(block.Name), "AskUserQuestion") {
+						toolID := builder.addStructuredUserInput(block.ID, block.Input)
+						if toolID == "" {
+							continue
+						}
+						structuredInputOwners[toolID] = builder
+						if resolvedAt, ok := pendingStructuredInputResults[toolID]; ok {
+							builder.resolveStructuredUserInput(toolID, resolvedAt)
+							delete(pendingStructuredInputResults, toolID)
+						}
+						continue
+					}
 					toolID := builder.addToolUse(block.ID, block.Name, block.Input)
 					toolOwners[toolID] = builder
 					if pending, ok := pendingToolResults[toolID]; ok {
@@ -1252,8 +1335,12 @@ func LoadClaudeRichHistoryFromReader(r io.Reader, path string) ([]core.RichHisto
 				if prior := userByPromptID[strings.TrimSpace(raw.PromptID)]; prior != nil {
 					// Claude records an accepted prompt and later an interrupt marker
 					// for the same promptId before moving the retry into a compact
-					// continuation file. Desktop hides that abandoned pair.
-					prior.Hidden = true
+					// continuation file. Desktop hides that abandoned pair. A prompt
+					// that already produced AskUserQuestion is not abandoned: Skip/Stop
+					// may append the same interrupt marker after the question result.
+					if !hasStructuredUserInputAfter(builders, prior) {
+						prior.Hidden = true
+					}
 				}
 				continue
 			}
@@ -1267,6 +1354,14 @@ func LoadClaudeRichHistoryFromReader(r io.Reader, path string) ([]core.RichHisto
 				switch block.Type {
 				case "tool_result":
 					if block.ToolUseID == "" {
+						continue
+					}
+					if HasStructuredUserInputResultEnvelope(raw.ToolUseResult) {
+						if owner, ok := structuredInputOwners[block.ToolUseID]; ok {
+							owner.resolveStructuredUserInput(block.ToolUseID, timestamp)
+						} else {
+							pendingStructuredInputResults[block.ToolUseID] = timestamp
+						}
 						continue
 					}
 					result := transcriptToolResult{

@@ -30,7 +30,11 @@ import (
 // v7: Claude AskUserQuestion transcript tool_use/tool_result rows are projected as structured
 // user-input events instead of ordinary tool activity. Bumping invalidates v6 checkpoints so
 // sessions already hydrated before this mapper change are rebuilt from the canonical transcript.
-const projectionCheckpointSchemaVersion = 7
+// v8: Claude pathless rich-history hydrate now preserves the same structured user-input
+// semantics. v7 checkpoints may still contain AskUserQuestion as ordinary tool parts.
+// v9: an interrupt marker following a resolved AskUserQuestion no longer hides the owning
+// prompt and reattributes the structured part to an older turn.
+const projectionCheckpointSchemaVersion = 9
 
 var (
 	ErrProjectionCheckpointInvalid  = errors.New("projection checkpoint invalid")

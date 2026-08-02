@@ -1004,21 +1004,6 @@ type claudeTranscriptRelayEntry struct {
 	} `json:"message"`
 }
 
-func claudeHasStructuredUserInputResult(e claudeTranscriptRelayEntry) bool {
-	if len(e.ToolUseResult) == 0 || string(e.ToolUseResult) == "null" {
-		return false
-	}
-	var envelope struct {
-		Questions json.RawMessage `json:"questions"`
-		Answers   json.RawMessage `json:"answers"`
-	}
-	if err := json.Unmarshal(e.ToolUseResult, &envelope); err != nil {
-		return false
-	}
-	return len(envelope.Questions) > 0 && string(envelope.Questions) != "null" &&
-		len(envelope.Answers) > 0 && string(envelope.Answers) != "null"
-}
-
 type claudeRelayCompactMetadata struct {
 	PreTokens  int64 `json:"preTokens"`
 	PostTokens int64 `json:"postTokens"`
@@ -1524,7 +1509,7 @@ func claudeEntryToProjectionEvents(e claudeTranscriptRelayEntry, currentTurnID *
 			if b.Type != "tool_result" {
 				continue
 			}
-			if b.ToolUseID != "" && claudeHasStructuredUserInputResult(e) {
+			if b.ToolUseID != "" && claudecode.HasStructuredUserInputResultEnvelope(e.ToolUseResult) {
 				data := map[string]interface{}{
 					"turnId":        *currentTurnID,
 					"itemId":        b.ToolUseID,

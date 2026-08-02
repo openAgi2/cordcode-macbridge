@@ -897,6 +897,51 @@ func hydrateToolEventsFromStep(step map[string]any) []projectionHydrateEvent {
 	}
 }
 
+func hydrateUserInputEventsFromPart(part map[string]any, turnID string) []projectionHydrateEvent {
+	interactionID := dataString(part, "interactionId")
+	if interactionID == "" || turnID == "" {
+		return nil
+	}
+	status := dataString(part, "status")
+	if status == "" {
+		status = "pending"
+	}
+	requestStatus := status
+	if status != "pending" && status != "failed" {
+		requestStatus = "pending"
+	}
+	request := map[string]interface{}{
+		"turnId":         turnID,
+		"interactionId":  interactionID,
+		"status":         requestStatus,
+		"questions":      part["questions"],
+		"canRespond":     dataBool(part, "canRespond"),
+		"canReject":      dataBool(part, "canReject"),
+		"diagnosticCode": dataString(part, "diagnosticCode"),
+	}
+	if itemID := dataString(part, "itemId"); itemID != "" {
+		request["itemId"] = itemID
+	}
+	out := []projectionHydrateEvent{{Event: "user_input_requested", Data: request}}
+	if status == "pending" || status == "failed" {
+		return out
+	}
+	resolved := map[string]interface{}{
+		"turnId":        turnID,
+		"interactionId": interactionID,
+		"status":        status,
+		"source":        dataString(part, "resolutionSource"),
+	}
+	if itemID := dataString(part, "itemId"); itemID != "" {
+		resolved["itemId"] = itemID
+	}
+	if resolvedAt := dataInt64(part, "resolvedAt"); resolvedAt != 0 {
+		resolved["resolvedAt"] = resolvedAt
+	}
+	out = append(out, projectionHydrateEvent{Event: "user_input_resolved", Data: resolved})
+	return out
+}
+
 // copyOptionalStepField copies a non-nil, non-empty step field into the target hydration
 // event data under the same key. It deliberately forwards whatever the upstream builder
 // produced (including structured fileChanges []any / toolInput string / title string)
@@ -1071,6 +1116,13 @@ func openCodeRichHistoryEntryToProjectionEvents(
 						continue
 					}
 					out = append(out, hydrateToolEventsFromStep(step)...)
+					emittedContent = true
+				case "user_input":
+					events := hydrateUserInputEventsFromPart(part, turnID)
+					if len(events) == 0 {
+						continue
+					}
+					out = append(out, events...)
 					emittedContent = true
 				}
 			}

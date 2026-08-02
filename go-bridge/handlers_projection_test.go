@@ -1220,6 +1220,46 @@ func TestClaudeAskUserQuestionTranscriptResolutionProjectsWithoutAnswerBody(t *t
 	}
 }
 
+func TestClaudeRichHistoryAskUserQuestionProjectsStructuredEventsWithoutToolActivity(t *testing.T) {
+	transcript := strings.Join([]string{
+		`{"type":"user","timestamp":"2026-08-02T07:16:35.730Z","message":{"id":"user-ask","role":"user","content":"先问我再继续"}}`,
+		`{"type":"assistant","timestamp":"2026-08-02T07:16:46.671Z","message":{"id":"assistant-ask","role":"assistant","content":[{"type":"tool_use","id":"call-ask","name":"AskUserQuestion","input":{"questions":[{"header":"构建失败策略","multiSelect":false,"options":[{"label":"自动重试 3 次"},{"label":"立即失败并报告"}],"question":"构建失败时,你希望脚本怎么处理?"}]}}]}}`,
+		`{"type":"user","timestamp":"2026-08-02T07:54:57.860Z","toolUseResult":{"questions":[{"header":"构建失败策略","multiSelect":false,"options":[{"label":"自动重试 3 次"},{"label":"立即失败并报告"}],"question":"构建失败时,你希望脚本怎么处理?"}],"answers":{"构建失败时,你希望脚本怎么处理?":["立即失败并报告"]}},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-ask","content":"Your questions have been answered."}]}}`,
+	}, "\n")
+	entries, err := claudecode.LoadClaudeRichHistoryFromReader(strings.NewReader(transcript), "ask-user-rich-history.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var events []projectionHydrateEvent
+	if err := streamRichHistoryProjectionEntries(context.Background(), entries, func(event projectionHydrateEvent) bool {
+		events = append(events, event)
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var requested, resolved *projectionHydrateEvent
+	for i := range events {
+		event := &events[i]
+		if event.Data["itemId"] == "call-ask" && (event.Event == "tool_started" || event.Event == "tool_finished") {
+			t.Fatalf("AskUserQuestion leaked ordinary tool activity: %+v", event)
+		}
+		switch event.Event {
+		case "user_input_requested":
+			requested = event
+		case "user_input_resolved":
+			resolved = event
+		}
+	}
+	if requested == nil || requested.Data["turnId"] != "user-ask" || requested.Data["status"] != "pending" ||
+		requested.Data["canRespond"] != false || requested.Data["diagnosticCode"] != "observe_only" {
+		t.Fatalf("requested = %+v; events=%+v", requested, events)
+	}
+	if resolved == nil || resolved.Data["turnId"] != "user-ask" || resolved.Data["status"] != "answered" ||
+		resolved.Data["source"] != "other_client" || resolved.Data["resolvedAt"] != int64(1785657297860) {
+		t.Fatalf("resolved = %+v; events=%+v", resolved, events)
+	}
+}
+
 func TestStreamClaudeTranscriptProjectionEventsCompactionBoundaryFiltersInternalSummary(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "compact.jsonl")
 	transcript := strings.Join([]string{

@@ -22,6 +22,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -53,6 +54,24 @@ func deriveClaudeInteractionID(requestID string) string {
 // hash here would let cold/live paths disagree silently.
 func DeriveStructuredUserInputInteractionID(requestID string) string {
 	return deriveClaudeInteractionID(requestID)
+}
+
+// HasStructuredUserInputResultEnvelope recognizes the persisted Claude Desktop
+// AskUserQuestion resolution envelope. Callers use presence only: answer values stay out of
+// projection/history so a passive observer never duplicates private response content.
+func HasStructuredUserInputResultEnvelope(raw json.RawMessage) bool {
+	if len(raw) == 0 || string(raw) == "null" {
+		return false
+	}
+	var envelope struct {
+		Questions json.RawMessage `json:"questions"`
+		Answers   json.RawMessage `json:"answers"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return false
+	}
+	return len(envelope.Questions) > 0 && string(envelope.Questions) != "null" &&
+		len(envelope.Answers) > 0 && string(envelope.Answers) != "null"
 }
 
 func claudeQuestionID(interactionID string, questionIndex int) string {
