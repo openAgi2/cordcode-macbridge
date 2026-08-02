@@ -508,12 +508,15 @@ func (cs *claudeSession) resolveUserInput(ctx context.Context, interactionID, cl
 		if dec.status == claudeUIAbsent {
 			return core.UserInputResolution{}, &core.UserInputError{Code: "interaction_not_found", Message: "interaction not found"}
 		}
+		if dec.status == claudeUIClaimed {
+			return core.UserInputResolution{Outcome: core.UserInputOutcomeInProgress, CurrentStatus: core.UserInputStatusPending}, nil
+		}
 		return core.UserInputResolution{Outcome: core.UserInputOutcomeAlreadyResolved, CurrentStatus: core.UserInputStatusAnswered}, nil
 	}
 	snap := dec.snapshot
 
 	if action == core.UserInputActionReject {
-		if err := cs.RespondPermission(snap.requestID, core.PermissionResult{Behavior: "deny", Message: "User skipped the question."}); err != nil {
+		if err := cs.respondPermissionContext(ctx, snap.requestID, core.PermissionResult{Behavior: "deny", Message: "User skipped the question."}); err != nil {
 			cs.claudeUserInputReg.ReleaseClaim(interactionID)
 			return core.UserInputResolution{}, &core.UserInputError{Code: "backend_response_failed", Message: "failed to write claude deny control_response"}
 		}
@@ -532,7 +535,7 @@ func (cs *claudeSession) resolveUserInput(ctx context.Context, interactionID, cl
 		cs.claudeUserInputReg.ReleaseClaim(interactionID)
 		return core.UserInputResolution{}, err
 	}
-	if err := cs.RespondPermission(snap.requestID, core.PermissionResult{Behavior: "allow", UpdatedInput: updatedInput}); err != nil {
+	if err := cs.respondPermissionContext(ctx, snap.requestID, core.PermissionResult{Behavior: "allow", UpdatedInput: updatedInput}); err != nil {
 		cs.claudeUserInputReg.ReleaseClaim(interactionID)
 		return core.UserInputResolution{}, &core.UserInputError{Code: "backend_response_failed", Message: "failed to write claude allow control_response"}
 	}

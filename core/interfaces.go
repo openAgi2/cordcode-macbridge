@@ -105,12 +105,14 @@ type UserInputResolutionOutcome string
 const (
 	UserInputOutcomeAccepted        UserInputResolutionOutcome = "accepted"
 	UserInputOutcomeAlreadyResolved UserInputResolutionOutcome = "already_resolved"
+	UserInputOutcomeInProgress      UserInputResolutionOutcome = "in_progress"
 )
 
 // UserInputResolution 是 ResolveUserInput 的返回。
 type UserInputResolution struct {
 	Outcome       UserInputResolutionOutcome
 	CurrentStatus UserInputStatus
+	HeadRev       int
 }
 
 // UserInputError 是结构化用户输入 resolve 的稳定错误，携带 §7 固定错误码。

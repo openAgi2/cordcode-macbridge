@@ -236,6 +236,26 @@ func (r *sessionRegistry) get(sessionID string) (*trackedSession, bool) {
 	return t, ok
 }
 
+func (r *sessionRegistry) getForBackend(sessionID, backendID string) (*trackedSession, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, ok := r.sessions[sessionID]
+	if !ok || t == nil || !sameBackendIdentity(t.backendID, backendID) {
+		return nil, false
+	}
+	return t, true
+}
+
+func sameBackendIdentity(lhs, rhs string) bool {
+	normalize := func(id string) string {
+		if id == "claudecode" {
+			return "claude"
+		}
+		return id
+	}
+	return lhs != "" && rhs != "" && normalize(lhs) == normalize(rhs)
+}
+
 func (r *sessionRegistry) put(sessionID, backendID, directory string, sess core.AgentSession) *trackedSession {
 	r.mu.Lock()
 	defer r.mu.Unlock()

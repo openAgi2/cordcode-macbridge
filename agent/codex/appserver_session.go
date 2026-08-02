@@ -189,18 +189,18 @@ func newAppServerSession(ctx context.Context, url, transport, workDir, model, ef
 		transport = appServerTransportStdio
 	}
 	s := &appServerSession{
-		url:       url,
-		transport: transport,
-		workDir:   workDir,
-		model:     model,
-		effort:    effort,
-		mode:      mode,
-		extraEnv:  append([]string(nil), extraEnv...),
-		codexHome: strings.TrimSpace(codexHome),
-		events:    make(chan core.Event, 128),
-		ctx:       sessionCtx,
-		cancel:    cancel,
-		pending:   make(map[int64]chan rpcResponseEnvelope),
+		url:          url,
+		transport:    transport,
+		workDir:      workDir,
+		model:        model,
+		effort:       effort,
+		mode:         mode,
+		extraEnv:     append([]string(nil), extraEnv...),
+		codexHome:    strings.TrimSpace(codexHome),
+		events:       make(chan core.Event, 128),
+		ctx:          sessionCtx,
+		cancel:       cancel,
+		pending:      make(map[int64]chan rpcResponseEnvelope),
 		userInputReg: newUserInputRegistry(),
 	}
 	s.alive.Store(true)
@@ -1856,8 +1856,21 @@ func (s *appServerSession) writeJSON(v any) error {
 }
 
 func (s *appServerSession) writeMessage(data []byte) error {
-	s.writeMu.Lock()
+	return s.writeMessageContext(context.Background(), data)
+}
+
+func (s *appServerSession) writeMessageContext(ctx context.Context, data []byte) error {
+	for !s.writeMu.TryLock() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Millisecond):
+		}
+	}
 	defer s.writeMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	s.procMu.Lock()
 	conn := s.conn
@@ -1869,6 +1882,10 @@ func (s *appServerSession) writeMessage(data []byte) error {
 		if conn == nil {
 			return fmt.Errorf("codex app-server websocket is closed")
 		}
+		if deadline, ok := ctx.Deadline(); ok {
+			_ = conn.SetWriteDeadline(deadline)
+			defer conn.SetWriteDeadline(time.Time{})
+		}
 		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 			return fmt.Errorf("codex app-server websocket write: %w", err)
 		}
@@ -1877,6 +1894,12 @@ func (s *appServerSession) writeMessage(data []byte) error {
 
 	if stdin == nil {
 		return fmt.Errorf("codex app-server connection is closed")
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		if deadlineWriter, ok := stdin.(interface{ SetWriteDeadline(time.Time) error }); ok {
+			_ = deadlineWriter.SetWriteDeadline(deadline)
+			defer deadlineWriter.SetWriteDeadline(time.Time{})
+		}
 	}
 
 	if _, err := stdin.Write(append(data, '\n')); err != nil {

@@ -36,20 +36,39 @@ type userInputCaptureConn struct {
 	wireErr *WireError
 }
 
-func (c *userInputCaptureConn) SendJSON(any)                                      {}
-func (c *userInputCaptureConn) SendResult(_ string, data any, err *WireError)     { c.data = data; c.wireErr = err }
-func (c *userInputCaptureConn) SendEvent(string, string, string, any)             {}
-func (c *userInputCaptureConn) AuthedDevice() *TrustedDeviceRecord                { return nil }
-func (c *userInputCaptureConn) RemoteAddr() string                                { return "test" }
-func (c *userInputCaptureConn) Close() error                                      { return nil }
+func (c *userInputCaptureConn) SendJSON(any) {}
+func (c *userInputCaptureConn) SendResult(_ string, data any, err *WireError) {
+	c.data = data
+	c.wireErr = err
+}
+func (c *userInputCaptureConn) SendEvent(string, string, string, any) {}
+func (c *userInputCaptureConn) AuthedDevice() *TrustedDeviceRecord    { return nil }
+func (c *userInputCaptureConn) RemoteAddr() string                    { return "test" }
+func (c *userInputCaptureConn) Close() error                          { return nil }
 
 func resolveMsg(t *testing.T, params map[string]any) WireMessage {
 	t.Helper()
+	if _, ok := params["clientActionId"]; !ok {
+		params["clientActionId"] = "f40f8934-8f3d-4e5f-a9b5-883b6a8f5147"
+	}
 	b, err := json.Marshal(params)
 	if err != nil {
 		t.Fatalf("marshal params: %v", err)
 	}
-	return WireMessage{RequestID: "req-1", Method: "resolve_user_input", Params: b}
+	return WireMessage{RequestID: "req-1", BackendID: "claude", Method: "resolve_user_input", Params: b}
+}
+
+func seedUserInputProjection(h *Handlers, backendID, sessionID, interactionID string, canReject bool) {
+	h.eventPublisher.PublishLogical(LogicalEvent{BackendID: backendID, SessionID: sessionID, Event: "turn_started", Data: map[string]interface{}{"turnId": "turn-1"}})
+	h.eventPublisher.PublishLogical(LogicalEvent{BackendID: backendID, SessionID: sessionID, Event: "user_input_requested", Data: map[string]interface{}{
+		"turnId": "turn-1", "interactionId": interactionID, "status": "pending", "questions": uiQuestionsWire(), "canRespond": true, "canReject": canReject,
+	}})
+}
+
+func resolveProjection(h *Handlers, backendID, sessionID, interactionID, status string) {
+	h.eventPublisher.PublishLogical(LogicalEvent{BackendID: backendID, SessionID: sessionID, Event: "user_input_resolved", Data: map[string]interface{}{
+		"turnId": "turn-1", "interactionId": interactionID, "status": status, "source": "ios",
+	}})
 }
 
 func TestResolveUserInput_SuccessOutcome(t *testing.T) {
@@ -61,13 +80,15 @@ func TestResolveUserInput_SuccessOutcome(t *testing.T) {
 		seenIID = iid
 		seenAction = action
 		seenAnswers = len(ans)
+		resolveProjection(h, "claude", "ses_1", iid, "answered")
 		return core.UserInputResolution{Outcome: core.UserInputOutcomeAccepted, CurrentStatus: core.UserInputStatusAnswered}, nil
 	}}
-	h.putSession("ses_1", sess)
+	h.putSessionWithMeta("ses_1", "claude", "", sess)
+	seedUserInputProjection(h, "claude", "ses_1", "ui_abc", true)
 
 	conn := &userInputCaptureConn{}
 	h.handleResolveUserInput(conn, resolveMsg(t, map[string]any{
-		"sessionId": "ses_1", "interactionId": "ui_abc", "clientActionId": "ca-1", "action": "answer",
+		"sessionId": "ses_1", "interactionId": "ui_abc", "clientActionId": "f40f8934-8f3d-4e5f-a9b5-883b6a8f5147", "action": "answer",
 		"answers": []map[string]any{{"questionId": "ui_abc_q_0", "values": []map[string]any{{"kind": "option", "optionId": "ui_abc_q_0_o_0"}}}},
 	}), nil)
 
@@ -78,8 +99,8 @@ func TestResolveUserInput_SuccessOutcome(t *testing.T) {
 		t.Fatalf("resolver 收到 iid=%q action=%q answers=%d want ui_abc/answer/1", seenIID, seenAction, seenAnswers)
 	}
 	m, _ := conn.data.(map[string]any)
-	if m["outcome"] != core.UserInputOutcomeAccepted || m["status"] != core.UserInputStatusAnswered {
-		t.Fatalf("result = %+v want outcome=accepted status=answered", conn.data)
+	if m["interactionId"] != "ui_abc" || m["outcome"] != core.UserInputOutcomeAccepted || m["currentStatus"] != core.UserInputStatusAnswered || m["headRev"] != 3 {
+		t.Fatalf("result = %+v want canonical four-field result", conn.data)
 	}
 }
 
@@ -88,7 +109,8 @@ func TestResolveUserInput_UserInputErrorCodeMapped(t *testing.T) {
 	sess := &userInputMockSession{resolveFunc: func(context.Context, string, string, core.UserInputAction, []core.UserInputAnswer) (core.UserInputResolution, error) {
 		return core.UserInputResolution{}, &core.UserInputError{Code: "response_not_supported", Message: "codex reject not supported"}
 	}}
-	h.putSession("ses_1", sess)
+	h.putSessionWithMeta("ses_1", "claude", "", sess)
+	seedUserInputProjection(h, "claude", "ses_1", "ui_abc", true)
 
 	conn := &userInputCaptureConn{}
 	h.handleResolveUserInput(conn, resolveMsg(t, map[string]any{"sessionId": "ses_1", "interactionId": "ui_abc", "action": "reject"}), nil)
@@ -106,9 +128,9 @@ func TestResolveUserInput_GenericErrorMapped(t *testing.T) {
 	sess := &userInputMockSession{resolveFunc: func(context.Context, string, string, core.UserInputAction, []core.UserInputAnswer) (core.UserInputResolution, error) {
 		return core.UserInputResolution{}, errors.New("boom")
 	}}
-	h.putSession("ses_1", sess)
+	h.putSessionWithMeta("ses_1", "claude", "", sess)
 	conn := &userInputCaptureConn{}
-	h.handleResolveUserInput(conn, resolveMsg(t, map[string]any{"sessionId": "ses_1", "interactionId": "ui_abc", "action": "answer"}), nil)
+	h.handleResolveUserInput(conn, resolveMsg(t, map[string]any{"sessionId": "ses_1", "interactionId": "ui_abc", "action": "answer", "answers": []map[string]any{{"questionId": "q", "values": []map[string]any{{"kind": "text", "text": "x"}}}}}), nil)
 	if conn.wireErr == nil || conn.wireErr.Code != "resolve_user_input_failed" {
 		t.Fatalf("非 UserInputError 应 resolve_user_input_failed，实际 %+v", conn.wireErr)
 	}
@@ -116,9 +138,9 @@ func TestResolveUserInput_GenericErrorMapped(t *testing.T) {
 
 func TestResolveUserInput_NonResponderNotSupported(t *testing.T) {
 	h := newTestHandlers(t)
-	h.putSession("ses_1", &mockSession{}) // 仅 core.AgentSession，未实现 UserInputResponder
+	h.putSessionWithMeta("ses_1", "claude", "", &mockSession{}) // 仅 core.AgentSession，未实现 UserInputResponder
 	conn := &userInputCaptureConn{}
-	h.handleResolveUserInput(conn, resolveMsg(t, map[string]any{"sessionId": "ses_1", "interactionId": "ui_abc", "action": "answer"}), nil)
+	h.handleResolveUserInput(conn, resolveMsg(t, map[string]any{"sessionId": "ses_1", "interactionId": "ui_abc", "action": "answer", "answers": []map[string]any{{"questionId": "q", "values": []map[string]any{{"kind": "text", "text": "x"}}}}}), nil)
 	if conn.wireErr == nil || conn.wireErr.Code != "response_not_supported" {
 		t.Fatalf("非 responder（未声明能力）应 response_not_supported，实际 %+v", conn.wireErr)
 	}
@@ -127,7 +149,7 @@ func TestResolveUserInput_NonResponderNotSupported(t *testing.T) {
 func TestResolveUserInput_SessionNotFound(t *testing.T) {
 	h := newTestHandlers(t)
 	conn := &userInputCaptureConn{}
-	h.handleResolveUserInput(conn, resolveMsg(t, map[string]any{"sessionId": "missing", "interactionId": "ui_abc", "action": "answer"}), nil)
+	h.handleResolveUserInput(conn, resolveMsg(t, map[string]any{"sessionId": "missing", "interactionId": "ui_abc", "action": "answer", "answers": []map[string]any{{"questionId": "q", "values": []map[string]any{{"kind": "text", "text": "x"}}}}}), nil)
 	if conn.wireErr == nil || conn.wireErr.Code != "session_not_found" {
 		t.Fatalf("应 session_not_found，实际 %+v", conn.wireErr)
 	}
@@ -151,17 +173,98 @@ func TestResolveUserInput_InvalidParamsBadAction(t *testing.T) {
 	}
 }
 
+func TestResolveUserInput_EnvelopeAndBackendScopeValidation(t *testing.T) {
+	t.Run("invalid UUID", func(t *testing.T) {
+		h := newTestHandlers(t)
+		conn := &userInputCaptureConn{}
+		h.handleResolveUserInput(conn, resolveMsg(t, map[string]any{
+			"sessionId": "ses_1", "interactionId": "ui_abc", "clientActionId": "not-a-uuid", "action": "answer",
+			"answers": []map[string]any{{"questionId": "q", "values": []map[string]any{{"kind": "text", "text": "x"}}}},
+		}), nil)
+		if conn.wireErr == nil || conn.wireErr.Code != "invalid_params" {
+			t.Fatalf("invalid UUID accepted: %+v", conn.wireErr)
+		}
+	})
+	t.Run("answer requires answers", func(t *testing.T) {
+		h := newTestHandlers(t)
+		conn := &userInputCaptureConn{}
+		h.handleResolveUserInput(conn, resolveMsg(t, map[string]any{"sessionId": "ses_1", "interactionId": "ui_abc", "action": "answer"}), nil)
+		if conn.wireErr == nil || conn.wireErr.Code != "invalid_params" {
+			t.Fatalf("missing answers accepted: %+v", conn.wireErr)
+		}
+	})
+	t.Run("reject omits answers", func(t *testing.T) {
+		h := newTestHandlers(t)
+		conn := &userInputCaptureConn{}
+		h.handleResolveUserInput(conn, resolveMsg(t, map[string]any{"sessionId": "ses_1", "interactionId": "ui_abc", "action": "reject", "answers": []any{}}), nil)
+		if conn.wireErr == nil || conn.wireErr.Code != "invalid_params" {
+			t.Fatalf("reject answers accepted: %+v", conn.wireErr)
+		}
+	})
+	t.Run("backend mismatch", func(t *testing.T) {
+		h := newTestHandlers(t)
+		h.putSessionWithMeta("shared-id", "codex", "", &userInputMockSession{})
+		conn := &userInputCaptureConn{}
+		h.handleResolveUserInput(conn, resolveMsg(t, map[string]any{
+			"sessionId": "shared-id", "interactionId": "ui_abc", "action": "answer",
+			"answers": []map[string]any{{"questionId": "q", "values": []map[string]any{{"kind": "text", "text": "x"}}}},
+		}), nil)
+		if conn.wireErr == nil || conn.wireErr.Code != "session_not_found" {
+			t.Fatalf("cross-backend route accepted: %+v", conn.wireErr)
+		}
+	})
+}
+
+func TestResolveUserInput_ClaimedReturnsInProgressWithoutFakeTerminalState(t *testing.T) {
+	h := newTestHandlers(t)
+	sess := &userInputMockSession{resolveFunc: func(context.Context, string, string, core.UserInputAction, []core.UserInputAnswer) (core.UserInputResolution, error) {
+		return core.UserInputResolution{Outcome: core.UserInputOutcomeInProgress, CurrentStatus: core.UserInputStatusPending}, nil
+	}}
+	h.putSessionWithMeta("ses_1", "claude", "", sess)
+	seedUserInputProjection(h, "claude", "ses_1", "ui_abc", false)
+	conn := &userInputCaptureConn{}
+	h.handleResolveUserInput(conn, resolveMsg(t, map[string]any{
+		"sessionId": "ses_1", "interactionId": "ui_abc", "action": "answer",
+		"answers": []map[string]any{{"questionId": "q", "values": []map[string]any{{"kind": "text", "text": "x"}}}},
+	}), nil)
+	if conn.wireErr != nil {
+		t.Fatal(conn.wireErr)
+	}
+	result := conn.data.(map[string]any)
+	if result["outcome"] != core.UserInputOutcomeInProgress || result["currentStatus"] != core.UserInputStatusPending || result["headRev"] != 2 {
+		t.Fatalf("claimed result = %+v", result)
+	}
+}
+
+func TestResolveUserInput_RejectRequiresProjectedCanReject(t *testing.T) {
+	h := newTestHandlers(t)
+	called := false
+	sess := &userInputMockSession{resolveFunc: func(context.Context, string, string, core.UserInputAction, []core.UserInputAnswer) (core.UserInputResolution, error) {
+		called = true
+		return core.UserInputResolution{}, nil
+	}}
+	h.putSessionWithMeta("ses_1", "claude", "", sess)
+	seedUserInputProjection(h, "claude", "ses_1", "ui_abc", false)
+	conn := &userInputCaptureConn{}
+	h.handleResolveUserInput(conn, resolveMsg(t, map[string]any{"sessionId": "ses_1", "interactionId": "ui_abc", "action": "reject"}), nil)
+	if conn.wireErr == nil || conn.wireErr.Code != "response_not_supported" || called {
+		t.Fatalf("canReject=false result=%+v called=%v", conn.wireErr, called)
+	}
+}
+
 // dispatch 路由：resolve_user_input 经 dispatchRPC 命中 handler（params 无 directory → 不触碰 nil agent）。
 func TestResolveUserInput_DispatchRouting(t *testing.T) {
 	h := newTestHandlers(t)
 	called := false
 	sess := &userInputMockSession{resolveFunc: func(context.Context, string, string, core.UserInputAction, []core.UserInputAnswer) (core.UserInputResolution, error) {
 		called = true
+		resolveProjection(h, "claude", "ses_1", "ui_abc", "answered")
 		return core.UserInputResolution{Outcome: core.UserInputOutcomeAlreadyResolved, CurrentStatus: core.UserInputStatusAnswered}, nil
 	}}
-	h.putSession("ses_1", sess)
+	h.putSessionWithMeta("ses_1", "claude", "", sess)
+	seedUserInputProjection(h, "claude", "ses_1", "ui_abc", false)
 	conn := &userInputCaptureConn{}
-	h.dispatchRPC(conn, resolveMsg(t, map[string]any{"sessionId": "ses_1", "interactionId": "ui_abc", "action": "answer"}), nil)
+	h.dispatchRPC(conn, resolveMsg(t, map[string]any{"sessionId": "ses_1", "interactionId": "ui_abc", "action": "answer", "answers": []map[string]any{{"questionId": "q", "values": []map[string]any{{"kind": "text", "text": "x"}}}}}), nil)
 	if !called {
 		t.Fatalf("dispatchRPC 应把 resolve_user_input 路由到 handler 并调用 responder")
 	}

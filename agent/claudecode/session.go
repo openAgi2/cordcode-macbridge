@@ -963,6 +963,10 @@ func extFromMime(mime string) string {
 
 // RespondPermission writes a control_response to the Claude process stdin.
 func (cs *claudeSession) RespondPermission(requestID string, result core.PermissionResult) error {
+	return cs.respondPermissionContext(context.Background(), requestID, result)
+}
+
+func (cs *claudeSession) respondPermissionContext(ctx context.Context, requestID string, result core.PermissionResult) error {
 	if !cs.alive.Load() {
 		return fmt.Errorf("session process is not running")
 	}
@@ -998,7 +1002,7 @@ func (cs *claudeSession) RespondPermission(requestID string, result core.Permiss
 	}
 
 	slog.Debug("claudeSession: permission response", "request_id", requestID, "behavior", result.Behavior)
-	return cs.writeJSON(controlResponse)
+	return cs.writeJSONContext(ctx, controlResponse)
 }
 
 // RespondQuestion is the legacy transport adapter over the canonical structured-input registry.
@@ -1143,12 +1147,31 @@ func (cs *claudeSession) emitQuestionResolved(questionID, result string) {
 }
 
 func (cs *claudeSession) writeJSON(v any) error {
-	cs.stdinMu.Lock()
+	return cs.writeJSONContext(context.Background(), v)
+}
+
+func (cs *claudeSession) writeJSONContext(ctx context.Context, v any) error {
+	for !cs.stdinMu.TryLock() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Millisecond):
+		}
+	}
 	defer cs.stdinMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	data, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		if deadlineWriter, ok := cs.stdin.(interface{ SetWriteDeadline(time.Time) error }); ok {
+			_ = deadlineWriter.SetWriteDeadline(deadline)
+			defer deadlineWriter.SetWriteDeadline(time.Time{})
+		}
 	}
 	if _, err := cs.stdin.Write(append(data, '\n')); err != nil {
 		return fmt.Errorf("write stdin: %w", err)

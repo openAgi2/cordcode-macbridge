@@ -160,7 +160,10 @@ func (s *appServerSession) handleRequestUserInput(rawID json.RawMessage, params 
 }
 
 // ResolveUserInput 实现 core.UserInputResponder（§7/§8.2）。go-bridge resolve_user_input 唯一入口。
-func (s *appServerSession) ResolveUserInput(_ context.Context, interactionID, clientActionID string, action core.UserInputAction, answers []core.UserInputAnswer) (core.UserInputResolution, error) {
+func (s *appServerSession) ResolveUserInput(ctx context.Context, interactionID, clientActionID string, action core.UserInputAction, answers []core.UserInputAnswer) (core.UserInputResolution, error) {
+	if err := ctx.Err(); err != nil {
+		return core.UserInputResolution{}, err
+	}
 	if !s.alive.Load() {
 		return core.UserInputResolution{}, &core.UserInputError{Code: "session_not_active", Message: "codex session not active"}
 	}
@@ -184,7 +187,9 @@ func (s *appServerSession) ResolveUserInput(_ context.Context, interactionID, cl
 		if dec.status == registryAbsent {
 			return core.UserInputResolution{}, &core.UserInputError{Code: "interaction_not_found", Message: "interaction not found"}
 		}
-		// claimed（另一 clientAction 并发）或 resolved：另一端在处理/已处理。
+		if dec.status == registryClaimed {
+			return core.UserInputResolution{Outcome: core.UserInputOutcomeInProgress, CurrentStatus: core.UserInputStatusPending}, nil
+		}
 		return core.UserInputResolution{Outcome: core.UserInputOutcomeAlreadyResolved, CurrentStatus: core.UserInputStatusAnswered}, nil
 	}
 
@@ -196,7 +201,7 @@ func (s *appServerSession) ResolveUserInput(_ context.Context, interactionID, cl
 	}
 
 	result := map[string]any{"answers": wireAnswers}
-	if err := s.respondServerRequest(snap.RawRequestID, result); err != nil {
+	if err := s.respondServerRequestContext(ctx, snap.RawRequestID, result); err != nil {
 		slog.Warn("codex app-server: write requestUserInput response failed", "interactionId", interactionID, "error", err)
 		s.userInputReg.ReleaseClaim(interactionID)
 		return core.UserInputResolution{}, &core.UserInputError{Code: "backend_response_failed", Message: "failed to write codex response"}
@@ -311,12 +316,16 @@ type serverErrorFrame struct {
 
 // respondServerRequest 写回 item/tool/requestUserInput 的成功 response（§8.2 envelope）。
 func (s *appServerSession) respondServerRequest(rawID json.RawMessage, result any) error {
+	return s.respondServerRequestContext(context.Background(), rawID, result)
+}
+
+func (s *appServerSession) respondServerRequestContext(ctx context.Context, rawID json.RawMessage, result any) error {
 	frame := serverResponseFrame{JSONRPC: "2.0", ID: rawID, Result: result}
 	b, err := json.Marshal(frame)
 	if err != nil {
 		return fmt.Errorf("encode server response: %w", err)
 	}
-	return s.writeMessage(b)
+	return s.writeMessageContext(ctx, b)
 }
 
 // respondServerError 写回 JSON-RPC error response（用于未知 method / 坏 params，避免 server 挂起）。

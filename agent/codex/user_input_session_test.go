@@ -19,8 +19,10 @@ package codex
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
@@ -29,7 +31,7 @@ import (
 type captureWriteCloser struct{ buf *bytes.Buffer }
 
 func (c *captureWriteCloser) Write(p []byte) (int, error) { return c.buf.Write(p) }
-func (c *captureWriteCloser) Close() error                 { return nil }
+func (c *captureWriteCloser) Close() error                { return nil }
 
 // newCaptureSession 构造一个 alive 的 appServerSession，stdin 指向捕获 buffer，
 // userInputReg 就绪，events channel buffered。
@@ -396,6 +398,67 @@ func TestResolveUserInputDeadSession(t *testing.T) {
 	uie, ok := err.(*core.UserInputError)
 	if !ok || uie.Code != "session_not_active" {
 		t.Fatalf("dead session 应 session_not_active，实际 %T %v", err, err)
+	}
+}
+
+func TestResolveUserInputContextTimeoutReleasesClaimBeforeWrite(t *testing.T) {
+	s, buf := newCaptureSession(t)
+	callRequestUserInput(t, s, `"req-timeout"`, `{
+		"threadId":"th1","turnId":"tu1","itemId":"it1",
+		"questions":[{"id":"qb1","question":"Which color?","options":[{"label":"Red"}]}]
+	}`)
+	drainEvents(s)
+	iid := deriveCodexInteractionID("string", "req-timeout", "th1", "tu1", "it1")
+	qid := deriveQuestionID(iid, 0)
+	optID := deriveOptionID(qid, 0)
+	s.writeMu.Lock()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	_, err := s.ResolveUserInput(ctx, iid, "client-timeout", core.UserInputActionAnswer, []core.UserInputAnswer{{
+		QuestionID: qid, Values: []core.UserInputValue{{Kind: core.UserInputValueOption, OptionID: optID}},
+	}})
+	s.writeMu.Unlock()
+	if err == nil {
+		t.Fatal("context timeout must fail")
+	}
+	if s.userInputReg.Status(iid) != registryPending {
+		t.Fatal("timed-out write must release claim")
+	}
+	if buf.Len() != 0 {
+		t.Fatal("timed-out write must not reach backend")
+	}
+}
+
+func TestResolveUserInputConcurrentClaimReportsInProgress(t *testing.T) {
+	s, buf := newCaptureSession(t)
+	callRequestUserInput(t, s, `"req-race"`, `{
+		"threadId":"th1","turnId":"tu1","itemId":"it1",
+		"questions":[{"id":"qb1","question":"Which color?","options":[{"label":"Red"}]}]
+	}`)
+	drainEvents(s)
+	iid := deriveCodexInteractionID("string", "req-race", "th1", "tu1", "it1")
+	qid := deriveQuestionID(iid, 0)
+	answers := []core.UserInputAnswer{{QuestionID: qid, Values: []core.UserInputValue{{Kind: core.UserInputValueOption, OptionID: deriveOptionID(qid, 0)}}}}
+	s.writeMu.Lock()
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := s.ResolveUserInput(context.Background(), iid, "first", core.UserInputActionAnswer, answers)
+		firstDone <- err
+	}()
+	deadline := time.Now().Add(time.Second)
+	for s.userInputReg.Status(iid) != registryClaimed && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	second, err := s.ResolveUserInput(t.Context(), iid, "second", core.UserInputActionAnswer, answers)
+	if err != nil || second.Outcome != core.UserInputOutcomeInProgress || second.CurrentStatus != core.UserInputStatusPending {
+		t.Fatalf("second writer = %+v, %v; want in_progress/pending", second, err)
+	}
+	s.writeMu.Unlock()
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first writer: %v", err)
+	}
+	if lines := bytes.Count(bytes.TrimSpace(buf.Bytes()), []byte("\n")) + 1; lines != 1 {
+		t.Fatalf("backend writes = %d, want 1", lines)
 	}
 }
 

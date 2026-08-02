@@ -22,6 +22,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
@@ -254,6 +255,65 @@ func TestV2_BypassDoesNotAutoAnswerSemanticQuestion(t *testing.T) {
 	ev := findUserInputEvent(drainAllEvents(cs), core.EventUserInputRequested)
 	if ev == nil || ev.UserInput.Status != core.UserInputStatusPending {
 		t.Fatalf("应发 pending（语义问句不被 bypass 回答），实际 %+v", ev)
+	}
+}
+
+func TestResolveUserInputContextTimeoutReleasesClaimBeforeWrite(t *testing.T) {
+	cs, stdin := newAskV2TestSession(t)
+	cs.handleControlRequest(makeAskControlRequest("req-timeout", []any{
+		singleQuestionMap("Which?", "", false, [2]string{"a", ""}),
+	}))
+	ev := findUserInputEvent(drainAllEvents(cs), core.EventUserInputRequested)
+	if ev == nil {
+		t.Fatal("missing pending interaction")
+	}
+	cs.stdinMu.Lock()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	_, err := cs.ResolveUserInput(ctx, ev.UserInput.InteractionID, "f40f8934-8f3d-4e5f-a9b5-883b6a8f5147", core.UserInputActionAnswer, []core.UserInputAnswer{{
+		QuestionID: ev.UserInput.Questions[0].ID,
+		Values:     []core.UserInputValue{{Kind: core.UserInputValueOption, OptionID: ev.UserInput.Questions[0].Options[0].ID}},
+	}})
+	cs.stdinMu.Unlock()
+	if err == nil {
+		t.Fatal("context timeout must fail")
+	}
+	if cs.claudeUserInputReg.Status(ev.UserInput.InteractionID) != claudeUIPending {
+		t.Fatal("timed-out write must release claim back to pending")
+	}
+	if stdin.linesWritten() != 0 {
+		t.Fatal("timed-out write must not reach backend")
+	}
+}
+
+func TestResolveUserInputConcurrentClaimReportsInProgress(t *testing.T) {
+	cs, stdin := newAskV2TestSession(t)
+	cs.handleControlRequest(makeAskControlRequest("req-race", []any{
+		singleQuestionMap("Which?", "", false, [2]string{"a", ""}),
+	}))
+	ev := findUserInputEvent(drainAllEvents(cs), core.EventUserInputRequested)
+	ui := ev.UserInput
+	answers := []core.UserInputAnswer{{QuestionID: ui.Questions[0].ID, Values: []core.UserInputValue{{Kind: core.UserInputValueOption, OptionID: ui.Questions[0].Options[0].ID}}}}
+	cs.stdinMu.Lock()
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := cs.ResolveUserInput(context.Background(), ui.InteractionID, "first", core.UserInputActionAnswer, answers)
+		firstDone <- err
+	}()
+	deadline := time.Now().Add(time.Second)
+	for cs.claudeUserInputReg.Status(ui.InteractionID) != claudeUIClaimed && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	second, err := cs.ResolveUserInput(t.Context(), ui.InteractionID, "second", core.UserInputActionAnswer, answers)
+	if err != nil || second.Outcome != core.UserInputOutcomeInProgress || second.CurrentStatus != core.UserInputStatusPending {
+		t.Fatalf("second writer = %+v, %v; want in_progress/pending", second, err)
+	}
+	cs.stdinMu.Unlock()
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first writer: %v", err)
+	}
+	if stdin.linesWritten() != 1 {
+		t.Fatalf("backend writes = %d, want 1", stdin.linesWritten())
 	}
 }
 

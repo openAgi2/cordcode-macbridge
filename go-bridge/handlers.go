@@ -49,14 +49,14 @@ type Handlers struct {
 	projectionHydrateSlots chan struct{}
 	// deltaBatcher（Fix 5）：text_delta/reasoning_delta 时间窗攒批，降低上游每 token 一帧
 	// 的 WS/HPKE/日志开销。relayEvents / startPassiveSubscription 通过它下发，而非直接 broadcaster.Send。
-	deltaBatcher            *DeltaBatcher
-	relayRunning            map[string]bool   // sessionID/relayKey → 是否已有 relay goroutine
-	relayRunningKind        map[string]string // sessionID → agent/file relay 类型，用于避免 Claude file relay 抢占真实 stdout relay
+	deltaBatcher     *DeltaBatcher
+	relayRunning     map[string]bool   // sessionID/relayKey → 是否已有 relay goroutine
+	relayRunningKind map[string]string // sessionID → agent/file relay 类型，用于避免 Claude file relay 抢占真实 stdout relay
 	// agentRelayRunning 与 relayRunningKind 解耦：标记 agent relay (relayEvents) goroutine 是否在跑。
 	// 本地发 turn 时若 file relay 已占用全局槽位 (kind=claude_file)，startRelayIfNotRunning 不再把 kind
 	// 翻成 agent，避免 claudeSessionFileRelayLoop 被 superseded 退出而丢失唯一 UUID 内容来源（见
 	// startRelayIfNotRunning 注释与 Issue 3 调查 docs/2026-07-30-remote-web-send-message-not-live-investigation.md）。
-	agentRelayRunning map[string]bool
+	agentRelayRunning       map[string]bool
 	claudeSourceCorrelation *claudeSourceCorrelationTracker
 	deliveryPrekeys         *PrekeyStore
 	observation             *ObservationManager
@@ -3220,32 +3220,53 @@ func (h *Handlers) handleQuestionReject(conn Connection, msg WireMessage) {
 // 把 adapter 返回的 *core.UserInputError 映射为 WireError（保留稳定 code），不回显 secret/答案正文。
 func (h *Handlers) handleResolveUserInput(conn Connection, msg WireMessage, _ core.Agent) {
 	var params struct {
-		SessionID      string                 `json:"sessionId"`
-		InteractionID  string                 `json:"interactionId"`
-		ClientActionID string                 `json:"clientActionId"`
-		Action         core.UserInputAction   `json:"action"`
-		Answers        []core.UserInputAnswer `json:"answers"`
+		SessionID      string                  `json:"sessionId"`
+		InteractionID  string                  `json:"interactionId"`
+		ClientActionID string                  `json:"clientActionId"`
+		Action         core.UserInputAction    `json:"action"`
+		Answers        *[]core.UserInputAnswer `json:"answers"`
 	}
 	if msg.Params != nil {
 		json.Unmarshal(msg.Params, &params)
 	}
 
-	if params.InteractionID == "" {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: "interactionId is required"})
+	if strings.TrimSpace(msg.BackendID) == "" || strings.TrimSpace(params.SessionID) == "" || strings.TrimSpace(params.InteractionID) == "" {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: "backendId, sessionId, and interactionId are required"})
+		return
+	}
+	if !isUUIDv4(params.ClientActionID) {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: "clientActionId must be a UUID v4"})
 		return
 	}
 	if params.Action != core.UserInputActionAnswer && params.Action != core.UserInputActionReject {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: `action must be "answer" or "reject"`})
 		return
 	}
-
-	h.mu.Lock()
-	sess, ok := h.getSession(params.SessionID)
-	h.mu.Unlock()
-
-	if !ok {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_found", Message: "no active session for structured user input"})
+	if params.Action == core.UserInputActionAnswer && (params.Answers == nil || len(*params.Answers) == 0) {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: "answer action requires non-empty answers"})
 		return
+	}
+	if params.Action == core.UserInputActionReject && params.Answers != nil {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: "reject action must omit answers"})
+		return
+	}
+
+	tracked, ok := h.sessions.getForBackend(params.SessionID, msg.BackendID)
+	if !ok {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_found", Message: "no active session for this backend and structured user input"})
+		return
+	}
+	sess := tracked.session
+	if params.Action == core.UserInputActionReject {
+		part, _, found := h.projectedUserInput(msg.BackendID, params.SessionID, params.InteractionID)
+		if !found {
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "interaction_not_found", Message: "interaction not found in current projection"})
+			return
+		}
+		if !part.UserInputCanReject {
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "response_not_supported", Message: "this interaction cannot be rejected"})
+			return
+		}
 	}
 
 	responder, ok := sess.(core.UserInputResponder)
@@ -3255,9 +3276,13 @@ func (h *Handlers) handleResolveUserInput(conn Connection, msg WireMessage, _ co
 		return
 	}
 
-	resolveCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	resolveCtx, cancel := context.WithTimeout(h.ctx, 10*time.Second)
 	defer cancel()
-	resolution, err := responder.ResolveUserInput(resolveCtx, params.InteractionID, params.ClientActionID, params.Action, params.Answers)
+	var answers []core.UserInputAnswer
+	if params.Answers != nil {
+		answers = *params.Answers
+	}
+	resolution, err := responder.ResolveUserInput(resolveCtx, params.InteractionID, params.ClientActionID, params.Action, answers)
 	if err != nil {
 		var uie *core.UserInputError
 		if errors.As(err, &uie) {
@@ -3268,11 +3293,79 @@ func (h *Handlers) handleResolveUserInput(conn Connection, msg WireMessage, _ co
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "resolve_user_input_failed", Message: err.Error()})
 		return
 	}
+	part, headRev, err := h.waitForUserInputResolution(resolveCtx, msg.BackendID, params.SessionID, params.InteractionID, resolution)
+	if err != nil {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "resolve_user_input_failed", Message: err.Error()})
+		return
+	}
+	resolution.CurrentStatus = core.UserInputStatus(part.UserInputStatus)
+	resolution.HeadRev = headRev
 
 	conn.SendResult(msg.RequestID, map[string]any{
-		"outcome": resolution.Outcome,
-		"status":  resolution.CurrentStatus,
+		"interactionId": params.InteractionID,
+		"outcome":       resolution.Outcome,
+		"currentStatus": resolution.CurrentStatus,
+		"headRev":       resolution.HeadRev,
 	}, nil)
+}
+
+func isUUIDv4(value string) bool {
+	if len(value) != 36 || value[8] != '-' || value[13] != '-' || value[18] != '-' || value[23] != '-' || value[14] != '4' {
+		return false
+	}
+	variant := value[19]
+	if variant != '8' && variant != '9' && variant != 'a' && variant != 'b' && variant != 'A' && variant != 'B' {
+		return false
+	}
+	for i, c := range value {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			continue
+		}
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+func (h *Handlers) projectedUserInput(backendID, sessionID, interactionID string) (ProjectionPart, int, bool) {
+	if h.eventPublisher == nil || h.eventPublisher.ProjectionReducer() == nil {
+		return ProjectionPart{}, 0, false
+	}
+	projection, ok := h.eventPublisher.ProjectionReducer().Snapshot(backendID, sessionID)
+	if !ok {
+		return ProjectionPart{}, 0, false
+	}
+	for _, turn := range projection.Turns {
+		if turn.Assistant == nil {
+			continue
+		}
+		for _, part := range turn.Assistant.Parts {
+			if part.Type == "user_input" && part.UserInputInteractionID == interactionID {
+				return part, projection.SyncRev, true
+			}
+		}
+	}
+	return ProjectionPart{}, projection.SyncRev, false
+}
+
+func (h *Handlers) waitForUserInputResolution(ctx context.Context, backendID, sessionID, interactionID string, resolution core.UserInputResolution) (ProjectionPart, int, error) {
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		part, headRev, found := h.projectedUserInput(backendID, sessionID, interactionID)
+		if found {
+			status := core.UserInputStatus(part.UserInputStatus)
+			if resolution.Outcome == core.UserInputOutcomeInProgress || status != core.UserInputStatusPending {
+				return part, headRev, nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ProjectionPart{}, 0, fmt.Errorf("projection did not commit structured input resolution before timeout: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func sessionsToWire(sessions []core.AgentSessionInfo) []map[string]interface{} {
