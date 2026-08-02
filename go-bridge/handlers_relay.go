@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openAgi2/cordcode-macbridge/agent/claudecode"
 	"github.com/openAgi2/cordcode-macbridge/agent/codex"
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
@@ -990,12 +991,32 @@ type claudeTranscriptRelayEntry struct {
 	IsCompactSummary          bool                        `json:"isCompactSummary"`
 	IsVisibleInTranscriptOnly bool                        `json:"isVisibleInTranscriptOnly"`
 	CompactMetadata           *claudeRelayCompactMetadata `json:"compactMetadata"`
-	Message                   *struct {
+	// Claude Desktop persists the complete AskUserQuestion resolution on the user row in
+	// toolUseResult, alongside message.content.tool_result. The relay needs presence and
+	// shape only; answers are never copied into the projection event.
+	ToolUseResult           json.RawMessage `json:"toolUseResult"`
+	SourceToolAssistantUUID string          `json:"sourceToolAssistantUUID"`
+	Message                 *struct {
 		ID         string          `json:"id"`
 		Role       string          `json:"role"`
 		StopReason string          `json:"stop_reason"`
 		Content    json.RawMessage `json:"content"`
 	} `json:"message"`
+}
+
+func claudeHasStructuredUserInputResult(e claudeTranscriptRelayEntry) bool {
+	if len(e.ToolUseResult) == 0 || string(e.ToolUseResult) == "null" {
+		return false
+	}
+	var envelope struct {
+		Questions json.RawMessage `json:"questions"`
+		Answers   json.RawMessage `json:"answers"`
+	}
+	if err := json.Unmarshal(e.ToolUseResult, &envelope); err != nil {
+		return false
+	}
+	return len(envelope.Questions) > 0 && string(envelope.Questions) != "null" &&
+		len(envelope.Answers) > 0 && string(envelope.Answers) != "null"
 }
 
 type claudeRelayCompactMetadata struct {
@@ -1335,7 +1356,6 @@ func claudeSummarizeToolInput(tool string, input map[string]any) string {
 	return ""
 }
 
-
 // claudeRelayContentBlocks 解析 assistant message.content（可能是字符串或 block 数组）。
 func claudeRelayContentBlocks(raw json.RawMessage) []claudeRelayContentBlock {
 	if len(raw) == 0 || string(raw) == "null" {
@@ -1504,6 +1524,22 @@ func claudeEntryToProjectionEvents(e claudeTranscriptRelayEntry, currentTurnID *
 			if b.Type != "tool_result" {
 				continue
 			}
+			if b.ToolUseID != "" && claudeHasStructuredUserInputResult(e) {
+				data := map[string]interface{}{
+					"turnId":        *currentTurnID,
+					"itemId":        b.ToolUseID,
+					"interactionId": claudecode.DeriveStructuredUserInputInteractionID(b.ToolUseID),
+					"status":        "answered",
+					"source":        "other_client",
+				}
+				if timestampMillis := claudeRelayTimestampMillis(e.Timestamp); timestampMillis > 0 {
+					data["resolvedAt"] = timestampMillis
+				}
+				// Do not emit tool_finished for AskUserQuestion. Its resolution is a structured
+				// user_input update; the answer body remains outside projection by contract.
+				out = append(out, projectionHydrateEvent{Event: "user_input_resolved", Data: data})
+				continue
+			}
 			data := map[string]interface{}{"toolResult": claudeToolResultText(b), "toolStatus": "completed"}
 			if b.ToolUseID != "" {
 				data["itemId"] = b.ToolUseID
@@ -1561,6 +1597,39 @@ func claudeEntryToProjectionEvents(e claudeTranscriptRelayEntry, currentTurnID *
 				out = append(out, projectionHydrateEvent{Event: "reasoning_delta", Data: map[string]interface{}{"itemId": turnID, "delta": b.Thinking}})
 			}
 		case "tool_use", "server_tool_use":
+			if b.Name == "AskUserQuestion" && b.ID != "" {
+				interactionID := claudecode.DeriveStructuredUserInputInteractionID(b.ID)
+				var input map[string]any
+				var normalized []core.UserInputQuestion
+				var normalizeErr error
+				if err := json.Unmarshal(b.Input, &input); err != nil {
+					normalizeErr = err
+				} else {
+					normalized, normalizeErr = claudecode.NormalizeStructuredUserInputQuestions(interactionID, input)
+				}
+				status := "pending"
+				diagnosticCode := "observe_only"
+				canRespond := false
+				canReject := false
+				if normalizeErr != nil || len(normalized) == 0 {
+					status = "failed"
+					diagnosticCode = "invalid_backend_request"
+				}
+				out = append(out, projectionHydrateEvent{
+					Event: "user_input_requested",
+					Data: map[string]interface{}{
+						"turnId":         turnID,
+						"itemId":         b.ID,
+						"interactionId":  interactionID,
+						"status":         status,
+						"questions":      userInputQuestionsToWire(normalized),
+						"canRespond":     canRespond,
+						"canReject":      canReject,
+						"diagnosticCode": diagnosticCode,
+					},
+				})
+				continue
+			}
 			data := map[string]interface{}{"toolName": b.Name}
 			// L-α (relay-transcript path): derive a path-bearing title from the tool input
 			// (file_path for Edit/Write/Read, command for Bash) so cold-start activity rows

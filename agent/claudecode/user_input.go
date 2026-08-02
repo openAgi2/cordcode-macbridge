@@ -47,6 +47,14 @@ func deriveClaudeInteractionID(requestID string) string {
 	return claudeSUIPrefix + hex.EncodeToString(sum[:claudeSUIHexLen/2])
 }
 
+// DeriveStructuredUserInputInteractionID exposes the Claude structured-input identity
+// derivation to transcript consumers. Passive transcript projection must derive the same
+// interactionId as the live Claude adapter from the persisted tool_use id; duplicating the
+// hash here would let cold/live paths disagree silently.
+func DeriveStructuredUserInputInteractionID(requestID string) string {
+	return deriveClaudeInteractionID(requestID)
+}
+
 func claudeQuestionID(interactionID string, questionIndex int) string {
 	return fmt.Sprintf("%s_q_%d", interactionID, questionIndex)
 }
@@ -282,6 +290,13 @@ func normalizeClaudeUserQuestions(interactionID string, parsed []core.UserQuesti
 		})
 	}
 	return out, nil
+}
+
+// NormalizeStructuredUserInputQuestions parses and normalizes a Claude AskUserQuestion input
+// using the same rules as the live responder path. It is intentionally exported for the
+// transcript relay, which observes Claude Desktop sessions without owning their responder handle.
+func NormalizeStructuredUserInputQuestions(interactionID string, input map[string]any) ([]core.UserInputQuestion, error) {
+	return normalizeClaudeUserQuestions(interactionID, parseUserQuestions(input))
 }
 
 // buildClaudePendingEntry 把规范化结果组装成 registry entry。

@@ -1148,6 +1148,78 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 	}
 }
 
+// TestClaudeAskUserQuestionTranscriptProjectsAsObserveOnlyUserInput verifies the real Claude
+// Desktop transcript shape: AskUserQuestion is an assistant tool_use block, but this relay does
+// not own the Desktop responder handle. It must produce a structured pending card with disabled
+// response capabilities, never an ordinary tool_started activity row.
+func TestClaudeAskUserQuestionTranscriptProjectsAsObserveOnlyUserInput(t *testing.T) {
+	currentTurnID := "turn-claude-desktop"
+	entry := claudeTranscriptRelayEntry{
+		Type:      "assistant",
+		Timestamp: "2026-08-02T07:16:46.671Z",
+		Message: &struct {
+			ID         string          `json:"id"`
+			Role       string          `json:"role"`
+			StopReason string          `json:"stop_reason"`
+			Content    json.RawMessage `json:"content"`
+		}{
+			ID:      "assistant-ask-user-question",
+			Role:    "assistant",
+			Content: json.RawMessage(`[{"type":"tool_use","id":"call-ask-user-question","name":"AskUserQuestion","input":{"questions":[{"header":"构建失败策略","multiSelect":false,"options":[{"description":"失败后最多重试三次。","label":"自动重试 3 次"},{"description":"首次失败即停止。","label":"立即失败并报告"}],"question":"构建失败时,你希望脚本怎么处理?"}]}}]`),
+		},
+	}
+
+	events := claudeEntryToProjectionEvents(entry, &currentTurnID, nil)
+	if len(events) != 1 || events[0].Event != "user_input_requested" {
+		t.Fatalf("AskUserQuestion must map to one user_input_requested event, got %+v", events)
+	}
+	data := events[0].Data
+	if data["interactionId"] != claudecode.DeriveStructuredUserInputInteractionID("call-ask-user-question") {
+		t.Fatalf("interactionId = %v", data["interactionId"])
+	}
+	if data["turnId"] != "turn-claude-desktop" || data["itemId"] != "call-ask-user-question" {
+		t.Fatalf("attribution = %+v", data)
+	}
+	if data["status"] != "pending" || data["canRespond"] != false || data["canReject"] != false || data["diagnosticCode"] != "observe_only" {
+		t.Fatalf("observe-only capabilities/status = %+v", data)
+	}
+	questions, ok := data["questions"].([]interface{})
+	if !ok || len(questions) != 1 {
+		t.Fatalf("normalized questions = %#v", data["questions"])
+	}
+	question, ok := questions[0].(map[string]interface{})
+	if !ok || question["prompt"] != "构建失败时,你希望脚本怎么处理?" || question["answerMode"] != "single" {
+		t.Fatalf("normalized question = %#v", questions[0])
+	}
+	if _, hasToolStarted := data["toolName"]; hasToolStarted || events[0].Event == "tool_started" {
+		t.Fatalf("AskUserQuestion must not be projected as tool_started: %+v", events[0])
+	}
+}
+
+// TestClaudeAskUserQuestionTranscriptResolutionProjectsWithoutAnswerBody locks the persisted
+// Claude Desktop result envelope (toolUseResult.questions/answers + message tool_result). The
+// relay resolves the same interaction in place and intentionally drops the answer text.
+func TestClaudeAskUserQuestionTranscriptResolutionProjectsWithoutAnswerBody(t *testing.T) {
+	currentTurnID := "turn-claude-desktop"
+	line := []byte(`{"type":"user","uuid":"user-ask-result","timestamp":"2026-08-02T07:17:01.000Z","sourceToolAssistantUUID":"assistant-ask-user-question","toolUseResult":{"questions":[{"header":"构建失败策略","multiSelect":false,"options":[{"label":"自动重试 3 次"},{"label":"立即失败并报告"}],"question":"构建失败时,你希望脚本怎么处理?"}],"answers":{"构建失败时,你希望脚本怎么处理?":["立即失败并报告"]}},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-ask-user-question","content":"Your questions have been answered."}]}}`)
+	var entry claudeTranscriptRelayEntry
+	if err := json.Unmarshal(line, &entry); err != nil {
+		t.Fatalf("unmarshal real Claude result shape: %v", err)
+	}
+	events := claudeEntryToProjectionEvents(entry, &currentTurnID, nil)
+	if len(events) != 1 || events[0].Event != "user_input_resolved" {
+		t.Fatalf("AskUserQuestion result must map to one user_input_resolved event, got %+v", events)
+	}
+	data := events[0].Data
+	if data["interactionId"] != claudecode.DeriveStructuredUserInputInteractionID("call-ask-user-question") ||
+		data["status"] != "answered" || data["source"] != "other_client" || data["resolvedAt"] != int64(1785655021000) {
+		t.Fatalf("resolution = %+v", data)
+	}
+	if _, hasAnswers := data["answers"]; hasAnswers {
+		t.Fatalf("resolved projection must not contain answers: %+v", data)
+	}
+}
+
 func TestStreamClaudeTranscriptProjectionEventsCompactionBoundaryFiltersInternalSummary(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "compact.jsonl")
 	transcript := strings.Join([]string{

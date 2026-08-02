@@ -27,7 +27,10 @@ import (
 // activity rows). Bumping invalidates v5 checkpoints so cold hydrate re-reduces with the new
 // fields instead of restoring pre-title baselines (which left iOS activity rows as bare
 // 「已编辑文件」 even after the reducer fix).
-const projectionCheckpointSchemaVersion = 6
+// v7: Claude AskUserQuestion transcript tool_use/tool_result rows are projected as structured
+// user-input events instead of ordinary tool activity. Bumping invalidates v6 checkpoints so
+// sessions already hydrated before this mapper change are rebuilt from the canonical transcript.
+const projectionCheckpointSchemaVersion = 7
 
 var (
 	ErrProjectionCheckpointInvalid  = errors.New("projection checkpoint invalid")
