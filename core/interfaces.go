@@ -134,6 +134,14 @@ type UserInputResponder interface {
 	ResolveUserInput(ctx context.Context, interactionID string, clientActionID string, action UserInputAction, answers []UserInputAnswer) (UserInputResolution, error)
 }
 
+// StructuredUserInputProvider marks an agent whose production adapter, real
+// responder, and canonical interaction producer are enabled together. Backend
+// capability advertisement must use this readiness instead of backend-name
+// inference so a dormant session flag cannot diverge from the descriptor.
+type StructuredUserInputProvider interface {
+	StructuredUserInputReady() bool
+}
+
 // TurnCanceler is an optional interface for agent sessions that can cancel
 // the currently running turn via an RPC call to the backend service.
 type TurnCanceler interface {

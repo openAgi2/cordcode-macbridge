@@ -2,10 +2,9 @@ package claudecode
 
 // user_input.go 是 Claude Code 结构化用户输入 v2 适配器（设计 §9）。
 //
-// 与 v1（emitAskUserQuestion → EventQuestionAsked）并行存在：仅当 session 的
-// structuredUserInputV2 标志置位（P6 在 capability 协商后置位）时，AskUserQuestion 走 v2 路径
-// ——在 permission-mode bypass 之前拦截（§9.1），emit EventUserInputRequested/Resolved 结构化
-// 事件，并由 core.UserInputResponder.ResolveUserInput 回答/拒绝。v1 路径保留给未声明能力的会话。
+// AskUserQuestion always enters this canonical path before permission-mode bypass. Legacy
+// question_asked/resolved frames are a one-way presentation derived from the same registry;
+// legacy question_reply/question_reject and v2 resolve_user_input compete for one claim.
 //
 // 关键不变量（设计已冻结）：
 //   - Claude AskUserQuestion 支持客户端提供的 Other/custom 文本；该文本仍按 single=string、
@@ -40,6 +39,9 @@ import (
 const (
 	claudeSUIHexLen = 32
 	claudeSUIPrefix = "ui_"
+	// StructuredUserInputReady is the Claude adapter readiness source used by both
+	// the production control-request path and backend capability advertisement.
+	StructuredUserInputReady = true
 )
 
 func deriveClaudeInteractionID(requestID string) string {
@@ -114,6 +116,7 @@ type claudePendingOption struct {
 type claudeUIEntry struct {
 	interactionID      string
 	requestID          string
+	owningTurnID       string
 	rawInput           map[string]any
 	questionMode       map[string]core.UserInputAnswerMode // questionText → single|multiple
 	questionOpts       map[string][]claudePendingOption    // questionText → options
@@ -129,6 +132,7 @@ type claudeUIEntry struct {
 type claudeClaimSnapshot struct {
 	interactionID string
 	requestID     string
+	owningTurnID  string
 	rawInput      map[string]any
 	questionMode  map[string]core.UserInputAnswerMode
 	questionOpts  map[string][]claudePendingOption
@@ -143,12 +147,16 @@ type claudeClaimDecision struct {
 }
 
 type claudeUserInputRegistry struct {
-	mu      sync.Mutex
-	entries map[string]*claudeUIEntry
+	mu        sync.Mutex
+	entries   map[string]*claudeUIEntry
+	byRequest map[string]string
 }
 
 func newClaudeUserInputRegistry() *claudeUserInputRegistry {
-	return &claudeUserInputRegistry{entries: make(map[string]*claudeUIEntry)}
+	return &claudeUserInputRegistry{
+		entries:   make(map[string]*claudeUIEntry),
+		byRequest: make(map[string]string),
+	}
 }
 
 func (r *claudeUserInputRegistry) Register(e claudeUIEntry) bool {
@@ -159,7 +167,28 @@ func (r *claudeUserInputRegistry) Register(e claudeUIEntry) bool {
 	}
 	e.status = claudeEntryPending
 	r.entries[e.interactionID] = &e
+	if e.requestID != "" {
+		r.byRequest[e.requestID] = e.interactionID
+	}
 	return true
+}
+
+func (r *claudeUserInputRegistry) SnapshotByRequest(requestID string) (*claudeClaimSnapshot, claudeUIStatus) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	interactionID := r.byRequest[requestID]
+	e := r.entries[interactionID]
+	if e == nil {
+		return nil, claudeUIAbsent
+	}
+	status := claudeUIPending
+	switch e.status {
+	case claudeEntryClaimed:
+		status = claudeUIClaimed
+	case claudeEntryResolved:
+		status = claudeUIResolved
+	}
+	return claudeSnapshotOf(e), status
 }
 
 func (r *claudeUserInputRegistry) Status(interactionID string) claudeUIStatus {
@@ -242,7 +271,17 @@ func (r *claudeUserInputRegistry) ReleaseClaim(interactionID string) bool {
 func (r *claudeUserInputRegistry) Remove(interactionID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if e := r.entries[interactionID]; e != nil && e.requestID != "" {
+		delete(r.byRequest, e.requestID)
+	}
 	delete(r.entries, interactionID)
+}
+
+func (r *claudeUserInputRegistry) Clear() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.entries = make(map[string]*claudeUIEntry)
+	r.byRequest = make(map[string]string)
 }
 
 func claudeSnapshotOf(e *claudeUIEntry) *claudeClaimSnapshot {
@@ -261,6 +300,7 @@ func claudeSnapshotOf(e *claudeUIEntry) *claudeClaimSnapshot {
 	return &claudeClaimSnapshot{
 		interactionID: e.interactionID,
 		requestID:     e.requestID,
+		owningTurnID:  e.owningTurnID,
 		rawInput:      e.rawInput,
 		questionMode:  mode,
 		questionOpts:  opts,
@@ -322,7 +362,7 @@ func NormalizeStructuredUserInputQuestions(interactionID string, input map[strin
 
 // buildClaudePendingEntry 把规范化结果组装成 registry entry。
 // parsed[i] 与 normalized[i] 一一对应（normalize 成功时不跳过任何题）。
-func buildClaudePendingEntry(interactionID, requestID string, rawInput map[string]any, parsed []core.UserQuestion, normalized []core.UserInputQuestion) claudeUIEntry {
+func buildClaudePendingEntry(interactionID, requestID, owningTurnID string, rawInput map[string]any, parsed []core.UserQuestion, normalized []core.UserInputQuestion) claudeUIEntry {
 	mode := make(map[string]core.UserInputAnswerMode, len(normalized))
 	opts := make(map[string][]claudePendingOption, len(normalized))
 	order := make([]string, 0, len(normalized))
@@ -339,6 +379,7 @@ func buildClaudePendingEntry(interactionID, requestID string, rawInput map[strin
 	return claudeUIEntry{
 		interactionID: interactionID,
 		requestID:     requestID,
+		owningTurnID:  owningTurnID,
 		rawInput:      rawInput,
 		questionMode:  mode,
 		questionOpts:  opts,
@@ -352,6 +393,15 @@ func buildClaudePendingEntry(interactionID, requestID string, rawInput map[strin
 // 在 permission-mode bypass 之前由 handleControlRequest 调用。
 func (cs *claudeSession) handleAskUserQuestionV2(requestID string, input map[string]any) {
 	iid := deriveClaudeInteractionID(requestID)
+	turnID := cs.currentStructuredInputTurnID()
+	if turnID == "" {
+		slog.Error("claudeSession: AskUserQuestion has no attributable turn", "request_id", requestID)
+		_ = cs.RespondPermission(requestID, core.PermissionResult{
+			Behavior: "deny",
+			Message:  "CordCode could not attribute this question to the active turn.",
+		})
+		return
+	}
 	parsed := parseUserQuestions(input)
 	normalized, err := normalizeClaudeUserQuestions(iid, parsed)
 	if err != nil || len(normalized) == 0 {
@@ -359,6 +409,7 @@ func (cs *claudeSession) handleAskUserQuestionV2(requestID string, input map[str
 		cs.emitUserInputEvent(core.Event{
 			Type:      core.EventUserInputRequested,
 			SessionID: cs.CurrentSessionID(),
+			TurnID:    turnID,
 			UserInput: &core.UserInputInteraction{
 				InteractionID:  iid,
 				Status:         core.UserInputStatusFailed,
@@ -371,7 +422,7 @@ func (cs *claudeSession) handleAskUserQuestionV2(requestID string, input map[str
 		return
 	}
 
-	entry := buildClaudePendingEntry(iid, requestID, input, parsed, normalized)
+	entry := buildClaudePendingEntry(iid, requestID, turnID, input, parsed, normalized)
 	if !cs.claudeUserInputReg.Register(entry) {
 		// 重放：只在仍 pending 时重发 pending（幂等 upsert）；已 resolved 不降级。
 		if cs.claudeUserInputReg.Status(iid) != claudeUIPending {
@@ -382,6 +433,8 @@ func (cs *claudeSession) handleAskUserQuestionV2(requestID string, input map[str
 	cs.emitUserInputEvent(core.Event{
 		Type:      core.EventUserInputRequested,
 		SessionID: cs.CurrentSessionID(),
+		TurnID:    turnID,
+		ItemID:    requestID,
 		UserInput: &core.UserInputInteraction{
 			InteractionID: iid,
 			Status:        core.UserInputStatusPending,
@@ -390,6 +443,7 @@ func (cs *claudeSession) handleAskUserQuestionV2(requestID string, input map[str
 			CanReject:     true, // Claude 有真实 deny control_response 路径（§9.3）
 		},
 	})
+	cs.emitLegacyAskUserQuestion(requestID, parsed)
 }
 
 // emitUserInputEvent 把结构化用户输入事件投递到 events channel（与 v1 emit 同语义）。
@@ -402,21 +456,26 @@ func (cs *claudeSession) handleAskUserQuestionV2(requestID string, input map[str
 // turn 派生的身份一致（hydrate 以 user-message identity 作 turnId，assistant 内容共享之；live 与
 // hydrate 的 turn 对齐属 Claude live projection 整体接入范畴，不在本 P3 reducer/events 范围内）。
 func (cs *claudeSession) emitUserInputEvent(ev core.Event) {
-	if ev.TurnID == "" {
-		if id, _ := cs.activeMsgID.Load().(string); id != "" {
-			ev.TurnID = id
-		}
-	}
 	select {
 	case cs.events <- cs.scopeEvent(ev):
 	case <-cs.ctx.Done():
 	}
 }
 
-func (cs *claudeSession) emitUserInputResolved(iid string, status core.UserInputStatus, source string) {
+func (cs *claudeSession) currentStructuredInputTurnID() string {
+	streamID := cs.streamState.currentMsgID
+	if streamID != "" {
+		return streamID
+	}
+	id, _ := cs.activeMsgID.Load().(string)
+	return id
+}
+
+func (cs *claudeSession) emitUserInputResolved(turnID, iid string, status core.UserInputStatus, source string) {
 	cs.emitUserInputEvent(core.Event{
 		Type:      core.EventUserInputResolved,
 		SessionID: cs.CurrentSessionID(),
+		TurnID:    turnID,
 		UserInput: &core.UserInputInteraction{
 			InteractionID:    iid,
 			Status:           status,
@@ -426,7 +485,14 @@ func (cs *claudeSession) emitUserInputResolved(iid string, status core.UserInput
 }
 
 // ResolveUserInput 实现 core.UserInputResponder（§9.3）。
-func (cs *claudeSession) ResolveUserInput(_ context.Context, interactionID, clientActionID string, action core.UserInputAction, answers []core.UserInputAnswer) (core.UserInputResolution, error) {
+func (cs *claudeSession) ResolveUserInput(ctx context.Context, interactionID, clientActionID string, action core.UserInputAction, answers []core.UserInputAnswer) (core.UserInputResolution, error) {
+	return cs.resolveUserInput(ctx, interactionID, clientActionID, action, answers, "ios")
+}
+
+func (cs *claudeSession) resolveUserInput(ctx context.Context, interactionID, clientActionID string, action core.UserInputAction, answers []core.UserInputAnswer, source string) (core.UserInputResolution, error) {
+	if err := ctx.Err(); err != nil {
+		return core.UserInputResolution{}, err
+	}
 	if !cs.alive.Load() {
 		return core.UserInputResolution{}, &core.UserInputError{Code: "session_not_active", Message: "claude session not active"}
 	}
@@ -451,8 +517,8 @@ func (cs *claudeSession) ResolveUserInput(_ context.Context, interactionID, clie
 			cs.claudeUserInputReg.ReleaseClaim(interactionID)
 			return core.UserInputResolution{}, &core.UserInputError{Code: "backend_response_failed", Message: "failed to write claude deny control_response"}
 		}
-		if cs.claudeUserInputReg.ConfirmResolved(interactionID, clientActionID, "ios") {
-			cs.emitUserInputResolved(interactionID, core.UserInputStatusRejected, "ios")
+		if cs.claudeUserInputReg.ConfirmResolved(interactionID, clientActionID, source) {
+			cs.emitUserInputResolved(snap.owningTurnID, interactionID, core.UserInputStatusRejected, source)
 		}
 		return core.UserInputResolution{Outcome: core.UserInputOutcomeAccepted, CurrentStatus: core.UserInputStatusRejected}, nil
 	}
@@ -470,8 +536,8 @@ func (cs *claudeSession) ResolveUserInput(_ context.Context, interactionID, clie
 		cs.claudeUserInputReg.ReleaseClaim(interactionID)
 		return core.UserInputResolution{}, &core.UserInputError{Code: "backend_response_failed", Message: "failed to write claude allow control_response"}
 	}
-	if cs.claudeUserInputReg.ConfirmResolved(interactionID, clientActionID, "ios") {
-		cs.emitUserInputResolved(interactionID, core.UserInputStatusAnswered, "ios")
+	if cs.claudeUserInputReg.ConfirmResolved(interactionID, clientActionID, source) {
+		cs.emitUserInputResolved(snap.owningTurnID, interactionID, core.UserInputStatusAnswered, source)
 	}
 	return core.UserInputResolution{Outcome: core.UserInputOutcomeAccepted, CurrentStatus: core.UserInputStatusAnswered}, nil
 }

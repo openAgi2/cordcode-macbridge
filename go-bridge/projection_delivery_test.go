@@ -178,6 +178,45 @@ func TestSessionSyncV2RawTimelineClassification(t *testing.T) {
 	}
 }
 
+func TestCanonicalUserInputIsProjectionOnlyAndLegacyIsOneWayDerived(t *testing.T) {
+	broadcaster := NewBroadcaster()
+	ep := NewEventPublisher("epoch-user-input", broadcaster)
+	key := SubscriptionKey{BackendID: "claude", SessionID: "s-ui"}
+	v2 := newPublisherCaptureConn(nil)
+	v2.device = &TrustedDeviceRecord{DeviceID: "dev-v2-ui"}
+	legacy := newPublisherCaptureConn(nil)
+	legacy.device = &TrustedDeviceRecord{DeviceID: "dev-legacy-ui"}
+	broadcaster.Subscribe(v2, key)
+	broadcaster.Subscribe(legacy, key)
+	ep.SetConnSyncV2(v2, true)
+
+	ep.PublishLogical(LogicalEvent{BackendID: "claude", SessionID: "s-ui", Event: "turn_started", Data: map[string]interface{}{"turnId": "T1"}, Broadcast: true})
+	ep.PublishLogical(LogicalEvent{BackendID: "claude", SessionID: "s-ui", Event: "user_input_requested", Data: map[string]interface{}{
+		"turnId": "T1", "interactionId": "ui_1", "status": "pending", "questions": uiQuestionsWire(), "canRespond": true, "canReject": true,
+	}, Broadcast: true})
+
+	waitForProjectionPatches(t, v2, 2)
+	if got := len(rawEventFrames(v2.snapshot(), "user_input_requested")); got != 0 {
+		t.Fatalf("v2 received %d raw canonical requests", got)
+	}
+	if got := len(rawEventFrames(legacy.snapshot(), "user_input_requested")); got != 0 {
+		t.Fatalf("legacy received %d raw canonical requests", got)
+	}
+
+	ep.PublishLogical(LogicalEvent{BackendID: "claude", SessionID: "s-ui", Event: "question_asked", Data: map[string]interface{}{"questionId": "req-1"}, Broadcast: true})
+	legacy.waitCount(t, 2) // turn_started + derived question_asked
+	if got := len(rawEventFrames(legacy.snapshot(), "question_asked")); got != 1 {
+		t.Fatalf("legacy received %d derived question_asked frames, want 1", got)
+	}
+	if got := len(rawEventFrames(v2.snapshot(), "question_asked")); got != 0 {
+		t.Fatalf("v2 received %d raw derived question_asked frames", got)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if got := len(projectionPatchFrames(v2.snapshot())); got != 2 {
+		t.Fatalf("derived legacy frame wrote projection; patch count=%d want 2", got)
+	}
+}
+
 // TestProjectionPatchCarriesContent: the text_delta patch carries an append_text partOp with the
 // delta text, and the turn_started patch carries the turn upsert — proving the reduce output is
 // delivered intact over the funnel (Phase 1 "reduce correctness over the live funnel" proof).

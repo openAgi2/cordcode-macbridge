@@ -68,11 +68,13 @@ func newAskTestSession(t *testing.T) (*claudeSession, *captureStdin) {
 	t.Cleanup(cancel)
 	stdin := &captureStdin{}
 	cs := &claudeSession{
-		events: make(chan core.Event, 16),
-		ctx:    ctx,
-		stdin:  stdin,
+		events:             make(chan core.Event, 16),
+		ctx:                ctx,
+		stdin:              stdin,
+		claudeUserInputReg: newClaudeUserInputRegistry(),
 	}
 	cs.sessionID.Store("test-session")
+	cs.activeMsgID.Store("turn-test")
 	cs.alive.Store(true)
 	return cs, stdin
 }
@@ -117,6 +119,21 @@ func drainEvent(t *testing.T, cs *claudeSession) *core.Event {
 	}
 }
 
+func drainLegacyEvent(t *testing.T, cs *claudeSession) *core.Event {
+	t.Helper()
+	deadline := time.After(100 * time.Millisecond)
+	for {
+		select {
+		case ev := <-cs.events:
+			if ev.Type != core.EventUserInputRequested && ev.Type != core.EventUserInputResolved {
+				return &ev
+			}
+		case <-deadline:
+			return nil
+		}
+	}
+}
+
 // ============================================================
 // S4: AskUserQuestion emission as question_asked
 // ============================================================
@@ -127,7 +144,7 @@ func TestAskUserQuestion_ValidSingleQuestion_EmitsQuestionAsked(t *testing.T) {
 		singleQuestionMap("Pick a color", "Color", false, [2]string{"red", "r"}, [2]string{"blue", "b"}),
 	}))
 
-	ev := drainEvent(t, cs)
+	ev := drainLegacyEvent(t, cs)
 	if ev == nil {
 		t.Fatal("expected question_asked event, got none")
 	}
@@ -165,7 +182,7 @@ func TestAskUserQuestion_NoHeader_UsesQuestionOnly(t *testing.T) {
 	cs.handleControlRequest(makeAskControlRequest("req-h", []any{
 		singleQuestionMap("Plain question", "", false, [2]string{"yes", ""}, [2]string{"no", ""}),
 	}))
-	ev := drainEvent(t, cs)
+	ev := drainLegacyEvent(t, cs)
 	if ev == nil || ev.Type != core.EventQuestionAsked {
 		t.Fatalf("expected question_asked, got %v", ev)
 	}
@@ -174,53 +191,50 @@ func TestAskUserQuestion_NoHeader_UsesQuestionOnly(t *testing.T) {
 	}
 }
 
-func TestAskUserQuestion_MultiQuestion_DeniedAndNoEvent(t *testing.T) {
+func TestAskUserQuestion_MultiQuestion_CanonicalOnly(t *testing.T) {
 	cs, stdin := newAskTestSession(t)
 	cs.handleControlRequest(makeAskControlRequest("req-multi", []any{
 		singleQuestionMap("Q1", "", false, [2]string{"a", ""}),
 		singleQuestionMap("Q2", "", false, [2]string{"b", ""}),
 	}))
 
-	// No question_asked / permission_request event should be emitted.
-	if ev := drainEvent(t, cs); ev != nil {
-		t.Fatalf("expected no event for multi-question deny, got %+v", ev)
+	events := drainAllEvents(cs)
+	if ev := findUserInputEvent(events, core.EventUserInputRequested); ev == nil || len(ev.UserInput.Questions) != 2 {
+		t.Fatalf("expected canonical two-question request, got %+v", events)
 	}
-	line := stdin.lastJSONLine(t)
-	resp := nested(t, line, "response", "response")
-	if behavior, _ := resp["behavior"].(string); behavior != "deny" {
-		t.Errorf("multi-question behavior = %q, want deny", behavior)
+	for _, ev := range events {
+		if ev.Type == core.EventQuestionAsked {
+			t.Fatal("multi-question request must not be projected into lossy legacy shape")
+		}
 	}
-	if msg, _ := resp["message"].(string); !strings.Contains(msg, "multiple or multi-select") {
-		t.Errorf("multi-question deny message = %q, want unsupported-shape wording", msg)
+	if stdin.linesWritten() != 0 {
+		t.Fatal("supported multi-question request must not be denied")
 	}
 }
 
-func TestAskUserQuestion_MultiSelect_DeniedAndNoEvent(t *testing.T) {
+func TestAskUserQuestion_MultiSelect_CanonicalOnly(t *testing.T) {
 	cs, stdin := newAskTestSession(t)
 	cs.handleControlRequest(makeAskControlRequest("req-ms", []any{
 		singleQuestionMap("Pick many", "", true, [2]string{"a", ""}, [2]string{"b", ""}, [2]string{"c", ""}),
 	}))
-	if ev := drainEvent(t, cs); ev != nil {
-		t.Fatalf("expected no event for multi-select deny, got %+v", ev)
+	events := drainAllEvents(cs)
+	if ev := findUserInputEvent(events, core.EventUserInputRequested); ev == nil || ev.UserInput.Questions[0].AnswerMode != core.UserInputAnswerModeMultiple {
+		t.Fatalf("expected canonical multiple request, got %+v", events)
 	}
-	resp := nested(t, stdin.lastJSONLine(t), "response", "response")
-	if behavior, _ := resp["behavior"].(string); behavior != "deny" {
-		t.Errorf("multi-select behavior = %q, want deny", behavior)
+	if stdin.linesWritten() != 0 {
+		t.Fatal("supported multi-select request must not be denied")
 	}
 }
 
-func TestAskUserQuestion_ZeroValidQuestions_FallsBackToPermissionRequest(t *testing.T) {
+func TestAskUserQuestion_ZeroValidQuestions_FailsCanonicalRequest(t *testing.T) {
 	cs, _ := newAskTestSession(t)
 	// A question with empty question text parses to zero valid (parseUserQuestions skips empty).
 	cs.handleControlRequest(makeAskControlRequest("req-bad", []any{
 		map[string]any{"question": "", "header": "", "options": []any{}},
 	}))
-	ev := drainEvent(t, cs)
-	if ev == nil || ev.Type != core.EventPermissionRequest {
-		t.Fatalf("expected fallback permission_request for malformed input, got %v", ev)
-	}
-	if ev.ToolName != "AskUserQuestion" {
-		t.Errorf("fallback toolName = %q, want AskUserQuestion", ev.ToolName)
+	ev := findUserInputEvent(drainAllEvents(cs), core.EventUserInputRequested)
+	if ev == nil || ev.UserInput == nil || ev.UserInput.Status != core.UserInputStatusFailed {
+		t.Fatalf("expected fail-visible canonical request, got %v", ev)
 	}
 }
 
@@ -233,7 +247,7 @@ func TestPendingRegistry_ReplyConsumesAndClears(t *testing.T) {
 	cs.handleControlRequest(makeAskControlRequest("req-r1", []any{
 		singleQuestionMap("Which?", "", false, [2]string{"x", ""}, [2]string{"y", ""}),
 	}))
-	if ev := drainEvent(t, cs); ev == nil || ev.Type != core.EventQuestionAsked {
+	if ev := drainLegacyEvent(t, cs); ev == nil || ev.Type != core.EventQuestionAsked {
 		t.Fatalf("setup: expected question_asked, got %v", ev)
 	}
 	if err := cs.RespondQuestion("req-r1", []string{"req-r1:option-2"}); err != nil {
@@ -250,7 +264,7 @@ func TestPendingRegistry_RejectConsumesAndClears(t *testing.T) {
 	cs.handleControlRequest(makeAskControlRequest("req-rj", []any{
 		singleQuestionMap("Which?", "", false, [2]string{"x", ""}),
 	}))
-	drainEvent(t, cs)
+	drainLegacyEvent(t, cs)
 	if err := cs.RejectQuestion("req-rj"); err != nil {
 		t.Fatalf("RejectQuestion: %v", err)
 	}
@@ -264,12 +278,9 @@ func TestPendingRegistry_LateReplyAfterCloseFails(t *testing.T) {
 	cs.handleControlRequest(makeAskControlRequest("req-late", []any{
 		singleQuestionMap("Which?", "", false, [2]string{"x", ""}),
 	}))
-	drainEvent(t, cs)
+	drainLegacyEvent(t, cs)
 	// Clear pending state as Close() does.
-	cs.pendingQuestions.Range(func(k, _ any) bool {
-		cs.pendingQuestions.Delete(k)
-		return true
-	})
+	cs.claudeUserInputReg.Clear()
 	if err := cs.RespondQuestion("req-late", []string{"req-late:option-1"}); err == nil {
 		t.Fatal("late reply after cleanup should fail visibly")
 	}
@@ -280,11 +291,11 @@ func TestPendingRegistry_TwoPendingDoNotCollide(t *testing.T) {
 	cs.handleControlRequest(makeAskControlRequest("req-a", []any{
 		singleQuestionMap("A?", "", false, [2]string{"a1", ""}),
 	}))
-	drainEvent(t, cs)
+	drainLegacyEvent(t, cs)
 	cs.handleControlRequest(makeAskControlRequest("req-b", []any{
 		singleQuestionMap("B?", "", false, [2]string{"b1", ""}),
 	}))
-	drainEvent(t, cs)
+	drainLegacyEvent(t, cs)
 
 	// Answering req-b first must not affect req-a.
 	if err := cs.RespondQuestion("req-b", []string{"req-b:option-1"}); err != nil {
@@ -304,7 +315,7 @@ func TestRespondQuestion_BuildsVerifiedAnswerShape(t *testing.T) {
 	cs.handleControlRequest(makeAskControlRequest("req-ans", []any{
 		singleQuestionMap("Which color?", "Color", false, [2]string{"red", "r"}, [2]string{"blue", "b"}),
 	}))
-	drainEvent(t, cs)
+	drainLegacyEvent(t, cs)
 
 	if err := cs.RespondQuestion("req-ans", []string{"req-ans:option-2"}); err != nil {
 		t.Fatalf("RespondQuestion: %v", err)
@@ -342,7 +353,7 @@ func TestRespondQuestion_BuildsVerifiedAnswerShape(t *testing.T) {
 	}
 
 	// A question_resolved event should follow.
-	ev := drainEvent(t, cs)
+	ev := drainLegacyEvent(t, cs)
 	if ev == nil || ev.Type != core.EventQuestionResolved {
 		t.Fatalf("expected question_resolved (replied), got %v", ev)
 	}
@@ -353,7 +364,7 @@ func TestRespondQuestion_RejectSendsDenyWithSkipWording(t *testing.T) {
 	cs.handleControlRequest(makeAskControlRequest("req-rej", []any{
 		singleQuestionMap("Skip me?", "", false, [2]string{"a", ""}),
 	}))
-	drainEvent(t, cs)
+	drainLegacyEvent(t, cs)
 
 	if err := cs.RejectQuestion("req-rej"); err != nil {
 		t.Fatalf("RejectQuestion: %v", err)
@@ -365,7 +376,7 @@ func TestRespondQuestion_RejectSendsDenyWithSkipWording(t *testing.T) {
 	if msg, _ := resp["message"].(string); !strings.Contains(msg, "skipped") {
 		t.Errorf("reject message = %q, want explicit skip wording", msg)
 	}
-	ev := drainEvent(t, cs)
+	ev := drainLegacyEvent(t, cs)
 	if ev == nil || ev.Type != core.EventQuestionResolved || ev.Content != "rejected" {
 		t.Fatalf("expected question_resolved (rejected), got %v", ev)
 	}
@@ -376,7 +387,7 @@ func TestRespondQuestion_RequiresExactlyOneOptionID(t *testing.T) {
 	cs.handleControlRequest(makeAskControlRequest("req-cnt", []any{
 		singleQuestionMap("Which?", "", false, [2]string{"a", ""}, [2]string{"b", ""}),
 	}))
-	drainEvent(t, cs)
+	drainLegacyEvent(t, cs)
 
 	for _, n := range []int{0, 2} {
 		ids := make([]string, n)

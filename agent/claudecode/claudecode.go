@@ -75,6 +75,10 @@ type Agent struct {
 	pinStore *pinstore.Store
 }
 
+func (a *Agent) StructuredUserInputReady() bool {
+	return StructuredUserInputReady
+}
+
 var claudeProviderManagedEnvVars = map[string]struct{}{
 	"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST":                  {},
 	"CLAUDE_CODE_USE_BEDROCK":                               {},

@@ -53,22 +53,10 @@ type claudeSession struct {
 	childStreams     *claudeChildStreamTracker
 	currentStream    childStreamScope
 
-	// pendingQuestions holds unanswered Claude AskUserQuestion control requests,
-	// keyed by Claude requestID. claudeSession owns it because it owns the Claude
-	// stdin/control stream — a later question_reply/question_reject needs the
-	// original raw input + option→label map to build the verified control_response.
-	// v1 stores only single-question, single-select prompts; multi-question /
-	// multi-select AskUserQuestion is denied at parse time and never enters here.
-	pendingQuestions sync.Map // requestID -> *pendingClaudeQuestion
-
-	// structuredUserInputV2 gates the v2 structured-user-input path (§9). Default
-	// off: until P6 advertises the structured_user_input_v1 capability, AskUserQuestion
-	// keeps using the v1 emitAskUserQuestion path so behavior is unchanged. When on,
-	// handleControlRequest intercepts AskUserQuestion before permission-mode bypass
-	// and emits EventUserInputRequested/Resolved via claudeUserInputReg.
-	structuredUserInputV2 atomic.Bool
-	// claudeUserInputReg is the v2 first-writer-wins registry for structured user
-	// input (pending → claimed → resolved, clientActionID idempotent).
+	// claudeUserInputReg is the single first-writer-wins registry for every
+	// AskUserQuestion interaction (pending → claimed → resolved). Both the v2
+	// resolve_user_input RPC and the legacy question_reply/question_reject RPCs
+	// enter this registry; there is no independently writable v1 registry.
 	claudeUserInputReg *claudeUserInputRegistry
 
 	// gracefulStopTimeout is how long Close() waits for a clean exit
@@ -469,6 +457,13 @@ func (cs *claudeSession) handleAssistant(raw map[string]any) {
 	}
 
 	msgID, _ := msg["id"].(string)
+	// Capture the source-proven assistant identity even when the message contains
+	// only AskUserQuestion tool_use and no text block. The old code updated
+	// activeMsgID only from text, so a tool-only question could be emitted with an
+	// empty turnId and be dropped by the ProjectionReducer.
+	if msgID != "" {
+		cs.activeMsgID.Store(msgID)
+	}
 	hasStreamState := msgID != "" && cs.streamState.currentMsgID == msgID
 
 	fullText := fullAssistantText(contentArr)
@@ -609,6 +604,9 @@ func (cs *claudeSession) handleStreamEvent(raw map[string]any) {
 	case "message_start":
 		id, _ := nestedString(ev, "message", "id")
 		cs.streamState.onMessageStart(id)
+		if id != "" {
+			cs.activeMsgID.Store(id)
+		}
 	case "content_block_start":
 		idx, ok := intOf(ev["index"])
 		if !ok {
@@ -827,10 +825,10 @@ func (cs *claudeSession) handleControlRequest(raw map[string]any) {
 	toolName, _ := request["tool_name"].(string)
 	input, _ := request["input"].(map[string]any)
 
-	// v2 structured-user-input path (§9.1): AskUserQuestion 是语义问句，permission-mode
-	// bypass（autoApprove/dontAsk/acceptEditsOnly）不得替用户回答，故必须在 bypass 之前拦截。
-	// 仅当 structuredUserInputV2 置位（P6 capability 协商后）时启用；未置位时 v1 路径照常。
-	if cs.structuredUserInputV2.Load() && toolName == "AskUserQuestion" {
+	// AskUserQuestion always enters the canonical structured-input engine before
+	// permission-mode bypass. Legacy wire presentation is derived later from the
+	// same interaction; it is not a second adapter/registry path.
+	if StructuredUserInputReady && toolName == "AskUserQuestion" {
 		cs.handleAskUserQuestionV2(requestID, input)
 		return
 	}
@@ -858,32 +856,6 @@ func (cs *claudeSession) handleControlRequest(raw map[string]any) {
 			UpdatedInput: input,
 		})
 		return
-	}
-
-	// AskUserQuestion: v1 supports exactly one single-select question.
-	// - >=1 valid question and single-select/single-question -> emit question_asked
-	//   and register it so a later question_reply/question_reject can answer it.
-	// - multi-question (len>1) or any multiSelect -> deny at parse time, do NOT
-	//   emit, do NOT involve iOS. (The iOS question model is single-select v1.)
-	// - zero valid questions (malformed) -> fall through to the generic
-	//   permission_request so the user still sees a visible permission block.
-	if toolName == "AskUserQuestion" {
-		questions := parseUserQuestions(input)
-		if len(questions) > 0 {
-			if len(questions) > 1 || anyMultiSelect(questions) {
-				slog.Info("claudeSession: denying unsupported AskUserQuestion shape",
-					"request_id", requestID, "questions", len(questions))
-				_ = cs.RespondPermission(requestID, core.PermissionResult{
-					Behavior: "deny",
-					Message:  "AskUserQuestion with multiple or multi-select questions is not supported on this client.",
-				})
-				return
-			}
-			cs.emitAskUserQuestion(requestID, input, questions)
-			return
-		}
-		slog.Warn("claudeSession: AskUserQuestion parsed zero valid questions; falling back to permission_request",
-			"request_id", requestID)
 	}
 
 	slog.Info("claudeSession: permission request", "request_id", requestID, "tool", toolName)
@@ -1029,13 +1001,9 @@ func (cs *claudeSession) RespondPermission(requestID string, result core.Permiss
 	return cs.writeJSON(controlResponse)
 }
 
-// RespondQuestion answers a Claude AskUserQuestion that was emitted as
-// question_asked. It looks up the pending question by Claude requestID, validates
-// v1 single-select (exactly one option id), and delivers the answer as a real
-// control_response with {behavior:"allow", updatedInput:{...origInput, answers:{<questionText>:<label>}}}
-// — the verified shape derived from the Claude Code SDK source. It is NOT a fake
-// chat message; option labels are sent only because the verified protocol keys
-// answers by question text and expects the option label as the value.
+// RespondQuestion is the legacy transport adapter over the canonical structured-input registry.
+// It accepts the historical request-scoped option id and competes for the same first-writer-wins
+// claim as resolve_user_input; it never owns a second pending-question registry.
 func (cs *claudeSession) RespondQuestion(questionID string, optionIDs []string) error {
 	if questionID == "" {
 		return fmt.Errorf("claudeSession: questionID is required")
@@ -1048,31 +1016,28 @@ func (cs *claudeSession) RespondQuestion(questionID string, optionIDs []string) 
 	if len(optionIDs) != 1 {
 		return fmt.Errorf("claudeSession: v1 question reply requires exactly one option id (got %d)", len(optionIDs))
 	}
-	val, ok := cs.pendingQuestions.LoadAndDelete(questionID)
-	if !ok {
+	snap, status := cs.claudeUserInputReg.SnapshotByRequest(questionID)
+	if status != claudeUIPending || snap == nil {
 		return fmt.Errorf("claudeSession: no pending question for id %s", questionID)
 	}
-	pq, _ := val.(*pendingClaudeQuestion)
-	if pq == nil {
-		return fmt.Errorf("claudeSession: corrupt pending question entry for id %s", questionID)
+	if len(snap.questionOrder) != 1 || snap.questionMode[snap.questionOrder[0]] != core.UserInputAnswerModeSingle {
+		return fmt.Errorf("claudeSession: legacy reply only supports one single-select question")
 	}
-	if len(pq.questions) != 1 {
-		return fmt.Errorf("claudeSession: only single-question prompts are supported (got %d)", len(pq.questions))
+	var canonicalOptionID string
+	for i, opt := range snap.questionOpts[snap.questionOrder[0]] {
+		if optionIDForIndex(questionID, i) == optionIDs[0] {
+			canonicalOptionID = opt.id
+			break
+		}
 	}
-	opt, ok := pq.optionByID[optionIDs[0]]
-	if !ok {
+	if canonicalOptionID == "" {
 		return fmt.Errorf("claudeSession: unknown option id %s for question %s", optionIDs[0], questionID)
 	}
-	questionText := pq.questions[opt.questionIndex].Question
-	updatedInput := copyStringAnyMap(pq.rawInput)
-	if updatedInput == nil {
-		updatedInput = map[string]any{}
-	}
-	updatedInput["answers"] = map[string]any{questionText: opt.label}
-	if err := cs.RespondPermission(questionID, core.PermissionResult{
-		Behavior:     "allow",
-		UpdatedInput: updatedInput,
-	}); err != nil {
+	_, err := cs.resolveUserInput(cs.ctx, snap.interactionID, "legacy:"+questionID+":answer", core.UserInputActionAnswer, []core.UserInputAnswer{{
+		QuestionID: claudeQuestionID(snap.interactionID, 0),
+		Values:     []core.UserInputValue{{Kind: core.UserInputValueOption, OptionID: canonicalOptionID}},
+	}}, "mac")
+	if err != nil {
 		return fmt.Errorf("claudeSession: question reply failed: %w", err)
 	}
 	cs.emitQuestionResolved(questionID, "replied")
@@ -1090,35 +1055,15 @@ func (cs *claudeSession) RejectQuestion(questionID string) error {
 	if !cs.alive.Load() {
 		return fmt.Errorf("session process is not running")
 	}
-	if _, ok := cs.pendingQuestions.LoadAndDelete(questionID); !ok {
+	snap, status := cs.claudeUserInputReg.SnapshotByRequest(questionID)
+	if status != claudeUIPending || snap == nil {
 		return fmt.Errorf("claudeSession: no pending question for id %s", questionID)
 	}
-	if err := cs.RespondPermission(questionID, core.PermissionResult{
-		Behavior: "deny",
-		Message:  "User skipped the question.",
-	}); err != nil {
+	if _, err := cs.resolveUserInput(cs.ctx, snap.interactionID, "legacy:"+questionID+":reject", core.UserInputActionReject, nil, "mac"); err != nil {
 		return fmt.Errorf("claudeSession: question reject failed: %w", err)
 	}
 	cs.emitQuestionResolved(questionID, "rejected")
 	return nil
-}
-
-// pendingClaudeQuestion retains everything needed to build the verified
-// control_response for a later question_reply/question_reject.
-type pendingClaudeQuestion struct {
-	requestID   string
-	toolName    string
-	rawInput    map[string]any           // original AskUserQuestion input (base for updatedInput)
-	questions   []core.UserQuestion      // parsed questions (len==1 for v1)
-	optionByID  map[string]pendingOption // synthesized option id -> option detail
-	optionOrder []string                 // synthesized option ids in display order
-}
-
-// pendingOption maps a synthesized stable option id back to its question + the
-// option label the Claude protocol expects in the answers map.
-type pendingOption struct {
-	questionIndex int    // index into pendingClaudeQuestion.questions
-	label         string // option label delivered to Claude as answers[questionText]
 }
 
 // optionIDForIndex synthesizes a stable, request-namespaced option id.
@@ -1126,15 +1071,6 @@ type pendingOption struct {
 // repeat across questions, so ids are namespaced by request id and 1-based index.
 func optionIDForIndex(requestID string, idx int) string {
 	return fmt.Sprintf("%s:option-%d", requestID, idx+1)
-}
-
-func anyMultiSelect(questions []core.UserQuestion) bool {
-	for _, q := range questions {
-		if q.MultiSelect {
-			return true
-		}
-	}
-	return false
 }
 
 // copyStringAnyMap returns a shallow copy of m. A shallow copy is sufficient
@@ -1151,9 +1087,12 @@ func copyStringAnyMap(m map[string]any) map[string]any {
 	return out
 }
 
-// emitAskUserQuestion registers the pending question and emits question_asked.
-// Caller must guarantee len(questions)==1 and no multiSelect (v1 single-question).
-func (cs *claudeSession) emitAskUserQuestion(requestID string, input map[string]any, questions []core.UserQuestion) {
+// emitLegacyAskUserQuestion is a one-way presentation derived after the canonical request has
+// been registered and emitted. Prompts that the v1 shape cannot represent remain v2-only.
+func (cs *claudeSession) emitLegacyAskUserQuestion(requestID string, questions []core.UserQuestion) {
+	if len(questions) != 1 || questions[0].MultiSelect {
+		return
+	}
 	q := questions[0]
 	questionText := q.Question
 	if header := strings.TrimSpace(q.Header); header != "" {
@@ -1161,28 +1100,15 @@ func (cs *claudeSession) emitAskUserQuestion(requestID string, input map[string]
 		questionText = fmt.Sprintf("%s: %s", header, q.Question)
 	}
 
-	pq := &pendingClaudeQuestion{
-		requestID:   requestID,
-		toolName:    "AskUserQuestion",
-		rawInput:    input,
-		questions:   questions,
-		optionByID:  make(map[string]pendingOption, len(q.Options)),
-		optionOrder: make([]string, 0, len(q.Options)),
-	}
 	opts := make([]core.QuestionOption, 0, len(q.Options))
 	for i, o := range q.Options {
 		id := optionIDForIndex(requestID, i)
-		pq.optionByID[id] = pendingOption{questionIndex: 0, label: o.Label}
-		pq.optionOrder = append(pq.optionOrder, id)
 		opts = append(opts, core.QuestionOption{
 			ID:          id,
 			Label:       o.Label,
 			Description: o.Description,
 		})
 	}
-
-	// Insert registry entry immediately before emitting so a racing reply finds it.
-	cs.pendingQuestions.Store(requestID, pq)
 
 	evt := core.Event{
 		Type:         core.EventQuestionAsked,
@@ -1193,7 +1119,7 @@ func (cs *claudeSession) emitAskUserQuestion(requestID string, input map[string]
 		Required:     true, // AskUserQuestion is a blocking prompt; no optional signal.
 		ThreadID:     "",   // Claude has no Codex-style thread id.
 	}
-	slog.Info("claudeSession: AskUserQuestion emitted as question_asked",
+	slog.Info("claudeSession: canonical AskUserQuestion derived as legacy question_asked",
 		"request_id", requestID, "options", len(opts))
 	select {
 	case cs.events <- cs.scopeEvent(evt):
@@ -1246,13 +1172,6 @@ func (cs *claudeSession) setPermissionMode(mode string) {
 	cs.dontAsk.Store(mode == "dontAsk")
 }
 
-// SetStructuredUserInputV2 启用/关闭 v2 结构化用户输入路径（§9）。默认 off；仅 P6 在
-// capability 协商确认对端支持 structured_user_input_v1 后置位。置位后 AskUserQuestion
-// 走 EventUserInputRequested/Resolved 结构化事件并在 permission bypass 之前拦截。
-func (cs *claudeSession) SetStructuredUserInputV2(on bool) {
-	cs.structuredUserInputV2.Store(on)
-}
-
 func (cs *claudeSession) SetLiveMode(mode string) bool {
 	current, _ := cs.permissionMode.Load().(string)
 	if mode == "auto" || mode == "plan" || current == "auto" || current == "plan" {
@@ -1301,10 +1220,9 @@ func (cs *claudeSession) Close() error {
 	// Drop pending AskUserQuestion state so late question_reply/question_reject
 	// calls fail visibly (no pending entry) instead of writing to a dead stdin.
 	// Pending state is per-session and not reusable after close.
-	cs.pendingQuestions.Range(func(k, _ any) bool {
-		cs.pendingQuestions.Delete(k)
-		return true
-	})
+	if cs.claudeUserInputReg != nil {
+		cs.claudeUserInputReg.Clear()
+	}
 
 	// Phase 1: Close stdin to signal EOF. Claude Code exits cleanly on
 	// stdin close, running Stop hooks (e.g. claude-mem session summary).

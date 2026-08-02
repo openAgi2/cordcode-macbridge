@@ -14,7 +14,6 @@ package claudecode
 // 依据：docs/2026-08-01-codex-claude-structured-user-input-design.md §9 / §14 P2。
 
 import (
-	"context"
 	"testing"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -127,57 +126,35 @@ func TestLifecycle_V2_TwoInteractionsDoNotCollide(t *testing.T) {
 	}
 }
 
-// TestLifecycle_V2_FlagToggleCoexistsWithV1：同一 session 运行时翻转 structuredUserInputV2：
-// 初始 OFF → v1（EventQuestionAsked）；翻 ON → v2（EventUserInputRequested）。证明 P6 可安全翻标志，
-// 翻之前未完成的 v1 问句与翻之后的 v2 问句不互相污染。
-func TestLifecycle_V2_FlagToggleCoexistsWithV1(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	stdin := &captureStdin{}
-	cs := &claudeSession{
-		events:             make(chan core.Event, 16),
-		ctx:                ctx,
-		stdin:              stdin,
-		claudeUserInputReg: newClaudeUserInputRegistry(),
-	}
-	cs.sessionID.Store("test-session")
-	cs.alive.Store(true)
-
-	// 阶段 1：v2 OFF → AskUserQuestion 走 v1。
+// TestLifecycle_LegacyAndV2CompeteForOneClaim：单题同时有 canonical 与 legacy presentation，
+// legacy 先回答后，同一个 v2 interaction 必须已终结，不能二次写 Claude stdin。
+func TestLifecycle_LegacyAndV2CompeteForOneClaim(t *testing.T) {
+	cs, stdin := newAskV2TestSession(t)
 	cs.handleControlRequest(makeAskControlRequest("pre-flag", []any{
 		singleQuestionMap("V1 question?", "", false, [2]string{"x", ""}, [2]string{"y", ""}),
 	}))
-	ev := <-cs.events
-	if ev.Type != core.EventQuestionAsked {
-		t.Fatalf("v2 OFF 应 EventQuestionAsked，实际 %s", ev.Type)
+	events := drainAllEvents(cs)
+	if len(events) != 2 || events[0].Type != core.EventUserInputRequested || events[1].Type != core.EventQuestionAsked {
+		t.Fatalf("应先 canonical 后 legacy，实际 %+v", events)
 	}
-	// 回答 v1（用 v1 RespondQuestion）。
+	iid := events[0].UserInput.InteractionID
+	qid := events[0].UserInput.Questions[0].ID
+	optID := events[0].UserInput.Questions[0].Options[0].ID
 	if err := cs.RespondQuestion("pre-flag", []string{"pre-flag:option-1"}); err != nil {
-		t.Fatalf("v1 RespondQuestion 失败: %v", err)
+		t.Fatalf("legacy RespondQuestion 失败: %v", err)
 	}
-	<-cs.events // 清掉 question_resolved
-
-	// 阶段 2：运行时翻 ON。
-	cs.SetStructuredUserInputV2(true)
-	cs.handleControlRequest(makeAskControlRequest("post-flag", []any{
-		singleQuestionMap("V2 question?", "", false, [2]string{"a", ""}, [2]string{"b", ""}),
-	}))
-	reqs, _ := drainUserInputEvents(cs)
-	if len(reqs) != 1 || reqs[0].Type != core.EventUserInputRequested {
-		t.Fatalf("翻 ON 后应走 v2 发 EventUserInputRequested，实际 %+v", reqs)
+	resolvedEvents := drainAllEvents(cs)
+	if len(resolvedEvents) != 2 || resolvedEvents[0].Type != core.EventUserInputResolved || resolvedEvents[1].Type != core.EventQuestionResolved {
+		t.Fatalf("legacy answer 应先 canonical resolved 后 legacy resolved，实际 %+v", resolvedEvents)
 	}
-
-	// v2 问句用 v2 ResolveUserInput 回答。
-	iid := reqs[0].UserInput.InteractionID
-	qid := reqs[0].UserInput.Questions[0].ID
-	optID := reqs[0].UserInput.Questions[0].Options[0].ID
-	if _, err := cs.ResolveUserInput(t.Context(), iid, "client-post", core.UserInputActionAnswer,
-		[]core.UserInputAnswer{{QuestionID: qid, Values: []core.UserInputValue{{Kind: core.UserInputValueOption, OptionID: optID}}}}); err != nil {
-		t.Fatalf("v2 ResolveUserInput 失败: %v", err)
+	writes := stdin.linesWritten()
+	resolution, err := cs.ResolveUserInput(t.Context(), iid, "client-after-legacy", core.UserInputActionAnswer,
+		[]core.UserInputAnswer{{QuestionID: qid, Values: []core.UserInputValue{{Kind: core.UserInputValueOption, OptionID: optID}}}})
+	if err != nil || resolution.Outcome != core.UserInputOutcomeAlreadyResolved {
+		t.Fatalf("v2 second writer = %+v, %v; want already_resolved", resolution, err)
 	}
-	_, resolved := drainUserInputEvents(cs)
-	if len(resolved) != 1 || resolved[0].UserInput.Status != core.UserInputStatusAnswered {
-		t.Fatalf("v2 应 resolved(answered)，实际 %+v", resolved)
+	if stdin.linesWritten() != writes {
+		t.Fatal("second writer must not write another control_response")
 	}
 }
 

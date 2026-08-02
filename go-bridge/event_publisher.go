@@ -764,7 +764,10 @@ func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
 	// SessionProjection under the publisher ordering lock. Projection revision advances only
 	// when the reducer commits a mutation; it is distinct from transport perSessionSeq.
 	projectionApplied := false
-	if p.kernel != nil {
+	if isDerivedLegacyQuestionEvent(logical.Event) {
+		// Strictly one-way: canonical user_input -> legacy question presentation. The derived raw
+		// frame is never allowed to become a second projection writer.
+	} else if p.kernel != nil {
 		projectionApplied = p.kernel.IngestLive(msg)
 	} else if p.projection != nil {
 		before := p.projection.LastAppliedRev(logical.BackendID, logical.SessionID)

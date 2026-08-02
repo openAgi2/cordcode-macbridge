@@ -32,6 +32,13 @@ type fullFakeAgent struct {
 	descriptorFakeAgent
 }
 
+type readyStructuredInputFakeAgent struct {
+	fullFakeAgent
+	ready bool
+}
+
+func (f *readyStructuredInputFakeAgent) StructuredUserInputReady() bool { return f.ready }
+
 func (f *fullFakeAgent) SetModel(string)                                    {}
 func (f *fullFakeAgent) GetModel() string                                   { return "" }
 func (f *fullFakeAgent) AvailableModels(context.Context) []core.ModelOption { return nil }
@@ -241,11 +248,10 @@ func TestCodexExecNoStructuredUserInputCapability(t *testing.T) {
 	}
 }
 
-// Claude Code advertises structured_user_input_v1. Gating uses agent.Name()=="claudecode"
-// (not descriptor id) so it covers BOTH the production descriptor id "claude" (drivers default,
-// aliased to the "claudecode" factory) and the direct "claudecode" id.
+// Claude Code advertises structured_user_input_v1 only through the adapter readiness interface;
+// descriptor aliases do not independently manufacture capability readiness.
 func TestClaudeCodeStructuredUserInputCapability_ProductionAliasID(t *testing.T) {
-	agent := &fullFakeAgent{descriptorFakeAgent{name: "claudecode"}}
+	agent := &readyStructuredInputFakeAgent{fullFakeAgent: fullFakeAgent{descriptorFakeAgent{name: "claudecode"}}, ready: true}
 	d := BuildAgentDescriptor("claude", agent, "", nil) // 生产 descriptor id = "claude"
 	if !descriptorHasCapability(d.Capabilities, "structured_user_input_v1") {
 		t.Fatalf("structured_user_input_v1 missing for claude (aliased claudecode): %v", d.Capabilities)
@@ -253,10 +259,26 @@ func TestClaudeCodeStructuredUserInputCapability_ProductionAliasID(t *testing.T)
 }
 
 func TestClaudeCodeStructuredUserInputCapability_DirectID(t *testing.T) {
-	agent := &fullFakeAgent{descriptorFakeAgent{name: "claudecode"}}
+	agent := &readyStructuredInputFakeAgent{fullFakeAgent: fullFakeAgent{descriptorFakeAgent{name: "claudecode"}}, ready: true}
 	d := BuildAgentDescriptor("claudecode", agent, "", nil)
 	if !descriptorHasCapability(d.Capabilities, "structured_user_input_v1") {
 		t.Fatalf("structured_user_input_v1 missing for claudecode: %v", d.Capabilities)
+	}
+}
+
+func TestClaudeCodeStructuredUserInputCapability_FailsClosedWhenAdapterNotReady(t *testing.T) {
+	agent := &readyStructuredInputFakeAgent{fullFakeAgent: fullFakeAgent{descriptorFakeAgent{name: "claudecode"}}, ready: false}
+	d := BuildAgentDescriptor("claude", agent, "", nil)
+	if descriptorHasCapability(d.Capabilities, "structured_user_input_v1") {
+		t.Fatalf("structured_user_input_v1 advertised while adapter not ready: %v", d.Capabilities)
+	}
+}
+
+func TestClaudeCodeNameAloneDoesNotAdvertiseStructuredUserInput(t *testing.T) {
+	agent := &fullFakeAgent{descriptorFakeAgent{name: "claudecode"}}
+	d := BuildAgentDescriptor("claude", agent, "", nil)
+	if descriptorHasCapability(d.Capabilities, "structured_user_input_v1") {
+		t.Fatalf("agent name alone advertised structured input: %v", d.Capabilities)
 	}
 }
 

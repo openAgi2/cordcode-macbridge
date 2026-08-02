@@ -26,7 +26,7 @@ import (
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
-// newAskV2TestSession 构造一个 structuredUserInputV2=on、registry 就绪的 claudeSession。
+// newAskV2TestSession 构造 production-ready、registry 就绪的 claudeSession。
 // 复用 askuserquestion_test.go 的 captureStdin（线程安全写回断言）。
 func newAskV2TestSession(t *testing.T) (*claudeSession, *captureStdin) {
 	t.Helper()
@@ -40,8 +40,8 @@ func newAskV2TestSession(t *testing.T) (*claudeSession, *captureStdin) {
 		claudeUserInputReg: newClaudeUserInputRegistry(),
 	}
 	cs.sessionID.Store("test-session")
+	cs.activeMsgID.Store("turn-test")
 	cs.alive.Store(true)
-	cs.SetStructuredUserInputV2(true)
 	return cs, stdin
 }
 
@@ -208,9 +208,9 @@ func TestV2_FlagOn_NoOptionsFails(t *testing.T) {
 	}
 }
 
-// TestV2_FlagOff_FallsBackToV1：v2 flag OFF 时 AskUserQuestion 走 v1（EventQuestionAsked）。
-// 关键门控：P6 前 capability 未声明，v1 行为必须原样保留。
-func TestV2_FlagOff_FallsBackToV1(t *testing.T) {
+// TestV2_ProductionPathEmitsCanonicalThenLegacy：生产路径无测试开关；canonical 必须先于
+// 单题 legacy 派生事件进入同一 event stream。
+func TestV2_ProductionPathEmitsCanonicalThenLegacy(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cs := &claudeSession{
@@ -220,19 +220,18 @@ func TestV2_FlagOff_FallsBackToV1(t *testing.T) {
 		claudeUserInputReg: newClaudeUserInputRegistry(),
 	}
 	cs.sessionID.Store("test-session")
+	cs.activeMsgID.Store("turn-production")
 	cs.alive.Store(true)
-	// structuredUserInputV2 保持默认 false。
 
 	cs.handleControlRequest(makeAskControlRequest("req-v1", []any{
 		singleQuestionMap("Which?", "", false, [2]string{"a", ""}, [2]string{"b", ""}),
 	}))
-	ev := drainEvent(t, cs)
-	if ev == nil || ev.Type != core.EventQuestionAsked {
-		t.Fatalf("v2 flag OFF 应走 v1 发 EventQuestionAsked，实际 %v", ev)
+	events := drainAllEvents(cs)
+	if len(events) != 2 || events[0].Type != core.EventUserInputRequested || events[1].Type != core.EventQuestionAsked {
+		t.Fatalf("production path event order = %+v, want canonical then legacy", events)
 	}
-	// v1 单选不被 deny（多选/多题才 deny）。
-	if ev.QuestionID != "req-v1" {
-		t.Fatalf("v1 QuestionID = %q want req-v1", ev.QuestionID)
+	if events[0].TurnID != "turn-production" || events[1].QuestionID != "req-v1" {
+		t.Fatalf("production identities incorrect: %+v", events)
 	}
 }
 

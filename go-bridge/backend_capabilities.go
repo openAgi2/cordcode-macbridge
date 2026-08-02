@@ -79,14 +79,13 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 	// global connection capability，iOS 按 §13.1 step 8 自行 AND 两者，此处不同步耦合、不在 advert
 	// 层 AND Kernel。实现者：Codex app_server（appServerSession）与 Claude Code（claudeSession）；
 	// opencode 与非 app_server codex 不实现 → fail-closed（iOS 不出现提问卡）。
-	// Claude 用 agent.Name()=="claudecode" 判定而非 descriptor id：生产 drivers 默认 "claude"，经
-	// agentAliases["claude"]="claudecode" 创建，descriptor id 为 "claude"、agent.Name() 为
-	// "claudecode"；用 Name() 同时覆盖 "claude" 与 "claudecode" 两种 descriptor id，规避别名差异。
-	// 不用跨 backend 全局 boolean（§13.1：每个 backend 独立由其 adapter readiness 决定）。
+	// Claude capability and production control-request routing share one readiness source through
+	// StructuredUserInputProvider. Descriptor aliases therefore cannot advertise a path that the
+	// instantiated adapter has not enabled. No cross-backend global boolean is used.
 	if id == "codex" && codexBackendMode == "app_server" {
 		caps = append(caps, "structured_user_input_v1")
 	}
-	if agent.Name() == "claudecode" {
+	if ready, ok := agent.(core.StructuredUserInputProvider); ok && ready.StructuredUserInputReady() {
 		caps = append(caps, "structured_user_input_v1")
 	}
 
