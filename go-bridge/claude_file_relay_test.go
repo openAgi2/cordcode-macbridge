@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openAgi2/cordcode-macbridge/agent/claudecode"
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
@@ -60,6 +61,18 @@ func waitClaudeFileRelayStopped(t *testing.T, handlers *Handlers, sessionID stri
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("claude file relay still running for %s", sessionID)
+}
+
+func unsubscribeAllClaudeFileRelayClients(handlers *Handlers) {
+	handlers.broadcaster.mu.Lock()
+	connections := make([]Connection, 0, len(handlers.broadcaster.allConns))
+	for conn := range handlers.broadcaster.allConns {
+		connections = append(connections, conn)
+	}
+	handlers.broadcaster.mu.Unlock()
+	for _, conn := range connections {
+		handlers.broadcaster.UnsubscribeAll(conn)
+	}
 }
 
 func startClaudeFileRelayFixture(t *testing.T, sessionID string, live bool) (*Handlers, *fakeAgent, *websocketClient) {
@@ -128,7 +141,9 @@ func TestClaudeFileRelayDeadPIDWithPartialUserExitsIdle(t *testing.T) {
 	if data["state"] != "idle" {
 		t.Fatalf("state = %#v, want idle", data["state"])
 	}
-	// Process not live still watches; live-idle TTL eventually exits with no growth.
+	// Process not live still watches while subscribed. Once the client leaves, the
+	// live-idle TTL may reclaim the watcher.
+	unsubscribeAllClaudeFileRelayClients(handlers)
 	waitClaudeFileRelayStopped(t, handlers, sessionID)
 }
 
@@ -190,6 +205,7 @@ func TestClaudeFileRelayDeadPIDWithNonFinalAssistantExitsIdle(t *testing.T) {
 	if data["state"] != "idle" {
 		t.Fatalf("state = %#v, want idle", data["state"])
 	}
+	unsubscribeAllClaudeFileRelayClients(handlers)
 	waitClaudeFileRelayStopped(t, handlers, sessionID)
 }
 
@@ -349,7 +365,8 @@ func TestClaudeFileRelayTickUsesCachedPID(t *testing.T) {
 		t.Fatal("file relay exited while process is still live")
 	}
 
-	// Process death is the real exit path when transcript stays quiet.
+	// Once the client leaves, process death is an exit path when transcript stays quiet.
+	unsubscribeAllClaudeFileRelayClients(handlers)
 	agent.processMu.Lock()
 	agent.alivePIDs[4242] = false
 	agent.processMu.Unlock()
@@ -373,18 +390,57 @@ func TestClaudeFileRelayProcessDeathMidTurnBroadcastsIdleAndExits(t *testing.T) 
 	if data["turnId"] != "death-user-1" {
 		t.Fatalf("warm-start turnId = %#v, want death-user-1", data["turnId"])
 	}
+	unsubscribeAllClaudeFileRelayClients(handlers)
 	agent.processMu.Lock()
 	agent.alivePIDs[4242] = false
 	agent.processMu.Unlock()
-	messages = client.readEvents(t, 1)
-	if got := messages[0]["event"]; got != "session_state_changed" {
-		t.Fatalf("event after process death = %#v, want idle state", got)
-	}
-	idleData, _ := messages[0]["data"].(map[string]any)
-	if idleData["state"] != "idle" {
-		t.Fatalf("state after process death = %#v, want idle", idleData["state"])
-	}
 	waitClaudeFileRelayStopped(t, handlers, sessionID)
+}
+
+func TestClaudeFileRelaySubscribedSessionSurvivesProcessDeathAndProjectsLaterQuestion(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	const sessionID = "subscribed-process-replacement-question"
+	path := writeClaudeFileRelayTranscript(t, home, sessionID,
+		`{"type":"assistant","uuid":"previous-assistant","message":{"id":"msg_previous","role":"assistant","content":[{"type":"text","text":"old"}],"stop_reason":"end_turn"}}`,
+	)
+	handlers, agent, client := startClaudeFileRelayFixture(t, sessionID, true)
+	_ = client.readEvents(t, 1) // initial idle
+
+	// The worker that was live when iOS opened the session exits. The subscription
+	// remains, so the transcript watcher must outlive this specific PID.
+	agent.processMu.Lock()
+	agent.alivePIDs[4242] = false
+	agent.processMu.Unlock()
+	time.Sleep(50 * time.Millisecond)
+	if !handlers.relayKindIs(sessionID, relayKindClaudeFile) {
+		t.Fatal("subscribed Claude transcript watcher exited with the old process")
+	}
+
+	appendClaudeFileRelayTranscript(t, path,
+		`{"type":"user","uuid":"question-user","message":{"role":"user","content":"ask before changing the build script"}}`,
+		`{"type":"assistant","uuid":"question-assistant","parentUuid":"question-user","timestamp":"2026-08-02T08:16:12.813Z","message":{"id":"msg_question","role":"assistant","content":[{"type":"tool_use","id":"call-question","name":"AskUserQuestion","input":{"questions":[{"header":"构建失败策略","multiSelect":false,"options":[{"label":"自动重试 3 次"},{"label":"立即失败并报告"}],"question":"构建失败时，你希望脚本如何处理？"}]}}]}}`,
+	)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		projection, _ := handlers.projectionKernel.reducer.Snapshot("claude", sessionID)
+		for _, turn := range projection.Turns {
+			if turn.Assistant == nil {
+				continue
+			}
+			for _, part := range turn.Assistant.Parts {
+				if part.Type == "user_input" &&
+					part.UserInputInteractionID == claudecode.DeriveStructuredUserInputInteractionID("call-question") &&
+					part.UserInputStatus == "pending" && !part.UserInputCanRespond {
+					return
+				}
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	projection, _ := handlers.projectionKernel.reducer.Snapshot("claude", sessionID)
+	t.Fatalf("later AskUserQuestion was not projected after process replacement: %+v", projection)
 }
 
 // Process not live at open must still watch transcript growth (owner A2 multi-session):

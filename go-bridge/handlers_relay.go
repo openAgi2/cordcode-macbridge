@@ -607,11 +607,15 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 		if cachedPID == 0 {
 			// Late bind: process may appear after open (owner opens idle B, then Mac starts turn).
 			if proc2, lister2, err2 := h.sessionLiveProcess(context.Background(), sessionID, backendID); err2 == nil && proc2.Live && proc2.PID > 0 {
-				cachedPID = proc2.PID
-				if lister2 != nil {
-					liveLister = lister2
+				// A process catalog can briefly retain a just-dead worker. Verify the PID before
+				// binding so a subscribed watcher does not churn dead→bind on every poll.
+				if lister2 == nil || lister2.IsProcessAlive(context.Background(), proc2.PID) {
+					cachedPID = proc2.PID
+					if lister2 != nil {
+						liveLister = lister2
+					}
+					slog.Info("go-bridge: claudeSessionFileRelay bound live process", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
 				}
-				slog.Info("go-bridge: claudeSessionFileRelay bound live process", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
 			}
 		}
 		if liveLister != nil && cachedPID > 0 {
@@ -619,8 +623,18 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 				processDeathMisses++
 				if processDeathMisses >= claudeFileRelayProcessDeathMisses {
 					h.broadcastIdleState(sessionID, backendID)
-					slog.Info("go-bridge: claudeSessionFileRelay process dead, exiting", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
-					return
+					if !h.broadcaster.HasSessionSubscriber(backendID, sessionID) {
+						slog.Info("go-bridge: claudeSessionFileRelay process dead with no subscriber, exiting", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
+						return
+					}
+					// Claude Desktop may end one worker and later append another turn to the
+					// same transcript from a replacement process. The open client subscription,
+					// not the lifetime of one PID, owns this watcher. Forget the stale PID and
+					// return to late-binding mode while continuing to observe file growth.
+					slog.Info("go-bridge: claudeSessionFileRelay process dead; keeping subscribed transcript watch", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
+					cachedPID = 0
+					liveLister = nil
+					processDeathMisses = 0
 				}
 			} else {
 				processDeathMisses = 0
@@ -655,7 +669,9 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 		}
 		if !sourceChanged {
 			processStillLive := cachedPID > 0 && liveLister != nil && liveLister.IsProcessAlive(context.Background(), cachedPID)
-			if !runningObserved && !processStillLive && claudeFileRelayLiveIdleTTL > 0 && time.Since(lastMeaningfulGrowth) >= claudeFileRelayLiveIdleTTL {
+			if !runningObserved && !processStillLive &&
+				!h.broadcaster.HasSessionSubscriber(backendID, sessionID) &&
+				claudeFileRelayLiveIdleTTL > 0 && time.Since(lastMeaningfulGrowth) >= claudeFileRelayLiveIdleTTL {
 				if !h.sessions.isIdle(sessionID) {
 					h.broadcastIdleState(sessionID, backendID)
 				}

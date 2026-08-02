@@ -37,12 +37,12 @@ type projectionSession struct {
 	lastFlushedRev int // highest rev emitted in a patch (delta base for next patch)
 
 	// pending deltas accumulated since lastFlushedRev; cleared by FlushPatch.
-	textAppends map[string][]string       // assistant messageId -> delta chunks (append_text)
-	thinking    map[string]string         // assistant messageId -> full accumulated reasoning (set_thinking)
-	tools       map[string]ProjectionPart // tool callId -> latest tool part (upsert_tool)
-	upsertTurns map[string]TurnProjection // turnId -> latest whole-turn snapshot (upsertTurns)
+	textAppends map[string][]string         // assistant messageId -> delta chunks (append_text)
+	thinking    map[string]string           // assistant messageId -> full accumulated reasoning (set_thinking)
+	tools       map[string]ProjectionPart   // tool callId -> latest tool part (upsert_tool)
+	upsertTurns map[string]TurnProjection   // turnId -> latest whole-turn snapshot (upsertTurns)
 	userInputs  map[string]userInputPending // interactionId -> latest user_input part + owning turn (upsert_user_input)
-	execution   *ExecutionView            // pending execution change
+	execution   *ExecutionView              // pending execution change
 }
 
 // userInputPending captures a pending upsert_user_input PartOp: the owning assistant turn/message
@@ -65,6 +65,7 @@ func cloneProjectionSessionState(source *projectionSession) *projectionSession {
 		thinking:       make(map[string]string, len(source.thinking)),
 		tools:          make(map[string]ProjectionPart, len(source.tools)),
 		upsertTurns:    make(map[string]TurnProjection, len(source.upsertTurns)),
+		userInputs:     make(map[string]userInputPending, len(source.userInputs)),
 	}
 	for key, chunks := range source.textAppends {
 		cloned.textAppends[key] = append([]string(nil), chunks...)
@@ -77,6 +78,10 @@ func cloneProjectionSessionState(source *projectionSession) *projectionSession {
 	}
 	for key, turn := range source.upsertTurns {
 		cloned.upsertTurns[key] = cloneTurn(turn)
+	}
+	for key, pending := range source.userInputs {
+		pending.part = cloneProjectionPart(pending.part)
+		cloned.userInputs[key] = pending
 	}
 	if source.execution != nil {
 		execution := *source.execution
@@ -657,15 +662,15 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		}
 		blocks, _ := data["subagentBlocks"].([]ProjectionPart)
 		part := ProjectionPart{
-			Type:              "subagent",
-			AgentID:           agentID,
-			ParentAgentID:     dataString(data, "parentAgentId"),
-			SpawnToolUseID:    dataString(data, "spawnToolUseId"),
-			SpawnDepth:        int(dataInt64(data, "spawnDepth")),
-			SubagentType:      dataString(data, "subagentType"),
-			SubagentStatus:    dataString(data, "subagentStatus"),
-			SubagentBlocks:    blocks,
-			SubagentError:     dataString(data, "subagentError"),
+			Type:               "subagent",
+			AgentID:            agentID,
+			ParentAgentID:      dataString(data, "parentAgentId"),
+			SpawnToolUseID:     dataString(data, "spawnToolUseId"),
+			SpawnDepth:         int(dataInt64(data, "spawnDepth")),
+			SubagentType:       dataString(data, "subagentType"),
+			SubagentStatus:     dataString(data, "subagentStatus"),
+			SubagentBlocks:     blocks,
+			SubagentError:      dataString(data, "subagentError"),
 			SubagentDiagnostic: dataString(data, "subagentDiagnostic"),
 		}
 		// Upsert by AgentID within the assistant message (mirrors the tool upsert pattern).
@@ -701,14 +706,14 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			t.Assistant = &MessageProjection{ID: turnID, Role: "assistant"}
 		}
 		part := ProjectionPart{
-			Type:                      "user_input",
-			UserInputInteractionID:    interactionID,
-			UserInputStatus:           dataString(data, "status"),
-			UserInputQuestions:        data["questions"],
-			UserInputCanRespond:       dataBool(data, "canRespond"),
-			UserInputCanReject:        dataBool(data, "canReject"),
-			UserInputExpiresAt:        dataInt64(data, "expiresAt"),
-			UserInputDiagnosticCode:   dataString(data, "diagnosticCode"),
+			Type:                    "user_input",
+			UserInputInteractionID:  interactionID,
+			UserInputStatus:         dataString(data, "status"),
+			UserInputQuestions:      data["questions"],
+			UserInputCanRespond:     dataBool(data, "canRespond"),
+			UserInputCanReject:      dataBool(data, "canReject"),
+			UserInputExpiresAt:      dataInt64(data, "expiresAt"),
+			UserInputDiagnosticCode: dataString(data, "diagnosticCode"),
 		}
 		if part.UserInputStatus == "" {
 			part.UserInputStatus = "pending"
