@@ -8,6 +8,7 @@ package codex
 // 依据：docs/2026-08-01-codex-claude-structured-user-input-design.md
 
 import (
+	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
@@ -229,12 +230,13 @@ func TestClassifyRPCEnvelopeServerRequestNotResponse(t *testing.T) {
 
 func sampleEntry(iid string) pendingEntry {
 	return pendingEntry{
-		interactionID:  iid,
-		rawRequestID:   "req-1",
-		rawQuestionID:  map[string]string{deriveQuestionID(iid, 0): "backend-q-1"},
-		optionLabel:    map[string]string{deriveOptionID(deriveQuestionID(iid, 0), 0): "Red"},
-		questionMode:   map[string]core.UserInputAnswerMode{deriveQuestionID(iid, 0): core.UserInputAnswerModeSingle},
-		questionOrder:  []string{deriveQuestionID(iid, 0)},
+		interactionID:        iid,
+		requestIDCanonical:   "req-1",
+		rawRequestID:         json.RawMessage(`"req-1"`),
+		rawQuestionID:        map[string]string{deriveQuestionID(iid, 0): "backend-q-1"},
+		optionLabel:          map[string]string{deriveOptionID(deriveQuestionID(iid, 0), 0): "Red"},
+		questionMode:         map[string]core.UserInputAnswerMode{deriveQuestionID(iid, 0): core.UserInputAnswerModeSingle},
+		questionOrder:        []string{deriveQuestionID(iid, 0)},
 	}
 }
 
@@ -253,6 +255,17 @@ func TestRegistryRegisterAndStatus(t *testing.T) {
 	if r.Status("missing") != registryAbsent {
 		t.Fatalf("不存在应 absent")
 	}
+	// 反查索引（serverRequest/resolved 只带 requestId）
+	if got, ok := r.LookupByRequestID("req-1"); !ok || got != iid {
+		t.Fatalf("LookupByRequestID(req-1) = (%q,%v) want (%q,true)", got, ok, iid)
+	}
+	if _, ok := r.LookupByRequestID("unknown"); ok {
+		t.Fatalf("未知 requestId 不应命中")
+	}
+	r.Remove(iid)
+	if _, ok := r.LookupByRequestID("req-1"); ok {
+		t.Fatalf("Remove 后反查索引应清除")
+	}
 }
 
 func TestRegistryClaimFirstWriterWins(t *testing.T) {
@@ -264,8 +277,8 @@ func TestRegistryClaimFirstWriterWins(t *testing.T) {
 	if !d1.claimed || d1.snapshot == nil {
 		t.Fatalf("首个 Claim 应成功并返回 snapshot")
 	}
-	if d1.snapshot.RawRequestID != "req-1" {
-		t.Fatalf("snapshot 应携带原始 request id 供写 wire envelope")
+	if string(d1.snapshot.RawRequestID) != `"req-1"` {
+		t.Fatalf("snapshot 应携带原始 request id 供写 wire envelope，实际 %s", d1.snapshot.RawRequestID)
 	}
 	if r.Status(iid) != registryClaimed {
 		t.Fatalf("Claim 后应为 claimed")

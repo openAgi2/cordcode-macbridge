@@ -1096,6 +1096,8 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleQuestionReply(conn, msg)
 	case "question_reject":
 		h.handleQuestionReject(conn, msg)
+	case "resolve_user_input":
+		h.handleResolveUserInput(conn, msg, agent)
 	default:
 		conn.SendResult(msg.RequestID, nil, &WireError{
 			Code:    "method_not_found",
@@ -3211,6 +3213,66 @@ func (h *Handlers) handleQuestionReject(conn Connection, msg WireMessage) {
 	}
 
 	conn.SendResult(msg.RequestID, &ResultResponse{Ok: true}, nil)
+}
+
+// handleResolveUserInput 是 v2 结构化用户输入回答的唯一入口（设计 §7/§10.1）。
+// 它只调用可选能力 core.UserInputResponder；旧 RespondQuestion/RejectQuestion 不作 fallback。
+// 把 adapter 返回的 *core.UserInputError 映射为 WireError（保留稳定 code），不回显 secret/答案正文。
+func (h *Handlers) handleResolveUserInput(conn Connection, msg WireMessage, _ core.Agent) {
+	var params struct {
+		SessionID      string                 `json:"sessionId"`
+		InteractionID  string                 `json:"interactionId"`
+		ClientActionID string                 `json:"clientActionId"`
+		Action         core.UserInputAction   `json:"action"`
+		Answers        []core.UserInputAnswer `json:"answers"`
+	}
+	if msg.Params != nil {
+		json.Unmarshal(msg.Params, &params)
+	}
+
+	if params.InteractionID == "" {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: "interactionId is required"})
+		return
+	}
+	if params.Action != core.UserInputActionAnswer && params.Action != core.UserInputActionReject {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: `action must be "answer" or "reject"`})
+		return
+	}
+
+	h.mu.Lock()
+	sess, ok := h.getSession(params.SessionID)
+	h.mu.Unlock()
+
+	if !ok {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_found", Message: "no active session for structured user input"})
+		return
+	}
+
+	responder, ok := sess.(core.UserInputResponder)
+	if !ok {
+		// backend 未声明 structured_user_input_v1 能力：fail-closed，明确告知不支持。
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "response_not_supported", Message: "this backend does not support structured user input"})
+		return
+	}
+
+	resolveCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	resolution, err := responder.ResolveUserInput(resolveCtx, params.InteractionID, params.ClientActionID, params.Action, params.Answers)
+	if err != nil {
+		var uie *core.UserInputError
+		if errors.As(err, &uie) {
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: uie.Code, Message: uie.Message})
+			return
+		}
+		slog.Error("go-bridge: ResolveUserInput failed", "interactionId", params.InteractionID, "error", err)
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "resolve_user_input_failed", Message: err.Error()})
+		return
+	}
+
+	conn.SendResult(msg.RequestID, map[string]any{
+		"outcome": resolution.Outcome,
+		"status":  resolution.CurrentStatus,
+	}, nil)
 }
 
 func sessionsToWire(sessions []core.AgentSessionInfo) []map[string]interface{} {

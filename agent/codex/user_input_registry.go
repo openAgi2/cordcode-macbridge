@@ -11,6 +11,7 @@ package codex
 // 外部先解决三类时序都可被单测覆盖，无需真实 app-server 连接。
 
 import (
+	"encoding/json"
 	"sync"
 	"time"
 
@@ -29,9 +30,12 @@ const (
 // pendingEntry 是一次未决（或已决）结构化用户输入的 registry 记录。
 type pendingEntry struct {
 	interactionID string
-	// rawRequestID 是 app-server server request 的原始 JSON-RPC id（string|number）。
-	// 写 response envelope 时必须原样 marshal 回同一 id。
-	rawRequestID any
+	// requestIDCanonical 是 codexRequestIDType(raw) 的规范字符串，用于 serverRequest/resolved
+	// 反查（该 notification 只带 requestId+threadId，不足以重派生 interactionId）。
+	requestIDCanonical string
+	// rawRequestID 是 app-server server request 的原始 JSON-RPC id（string|number）原样字节。
+	// 写 response envelope 时必须原样 marshal 回同一 id（json.RawMessage 避免 int64 精度丢失）。
+	rawRequestID json.RawMessage
 	// rawQuestionID[derivedQuestionID] = backend 原 question id（params.questions[].id），
 	// 写 wire answers map 时作 key。
 	rawQuestionID map[string]string
@@ -39,6 +43,8 @@ type pendingEntry struct {
 	optionLabel map[string]string
 	// questionMode[derivedQuestionID] = single|text（Codex 不产生 multiple）。
 	questionMode map[string]core.UserInputAnswerMode
+	// questionCustom[derivedQuestionID] = 该题 allowsCustomAnswer（single+isOther 才允许 kind=text）。
+	questionCustom map[string]bool
 	// questionOrder 是 derivedQuestionID 的原序，用于稳定序列化与校验。
 	questionOrder []string
 
@@ -65,10 +71,11 @@ const (
 // registrySnapshot 是 Claim 成功时返回给 session 层的只读视图，供其序列化 wire response。
 type registrySnapshot struct {
 	InteractionID  string
-	RawRequestID   any
+	RawRequestID   json.RawMessage
 	RawQuestionID  map[string]string
 	OptionLabel    map[string]string
 	QuestionMode   map[string]core.UserInputAnswerMode
+	QuestionCustom map[string]bool
 	QuestionOrder  []string
 	ResolvedAtUnix int64
 }
@@ -84,27 +91,40 @@ type claimDecision struct {
 // userInputRegistry 是 Codex session 内的 pending interaction 注册表。
 // 并发安全：所有方法在 mu 下完成状态读改写。
 type userInputRegistry struct {
-	mu      sync.Mutex
-	entries map[string]*pendingEntry
+	mu        sync.Mutex
+	entries   map[string]*pendingEntry
+	byRequest map[string]string // requestIDCanonical -> interactionID（serverRequest/resolved 反查）
 }
 
 func newUserInputRegistry() *userInputRegistry {
-	return &userInputRegistry{entries: make(map[string]*pendingEntry)}
+	return &userInputRegistry{
+		entries:   make(map[string]*pendingEntry),
+		byRequest: make(map[string]string),
+	}
 }
 
 // Register 记录一个 pending interaction。若同 interactionID 已存在，不覆盖，返回 false。
+// 同时建立 requestIDCanonical → interactionID 反查索引（供 serverRequest/resolved 使用）。
 func (r *userInputRegistry) Register(e pendingEntry) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.entries[e.interactionID]; ok {
 		return false
 	}
-	if e.status == entryPending {
-		// zero value 就是 pending；显式赋值便于阅读。
-	}
 	e.status = entryPending
 	r.entries[e.interactionID] = &e
+	if e.requestIDCanonical != "" {
+		r.byRequest[e.requestIDCanonical] = e.interactionID
+	}
 	return true
+}
+
+// LookupByRequestID 用规范 request id 反查 interactionID（serverRequest/resolved 只带 requestId）。
+func (r *userInputRegistry) LookupByRequestID(canonicalRequestID string) (string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	iid, ok := r.byRequest[canonicalRequestID]
+	return iid, ok
 }
 
 // Status 返回某 interaction 的当前对外状态。
@@ -224,6 +244,9 @@ func (r *userInputRegistry) MarkExternallyResolved(interactionID string) (change
 func (r *userInputRegistry) Remove(interactionID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if e, ok := r.entries[interactionID]; ok && e.requestIDCanonical != "" {
+		delete(r.byRequest, e.requestIDCanonical)
+	}
 	delete(r.entries, interactionID)
 }
 
@@ -240,6 +263,10 @@ func snapshotOf(e *pendingEntry) *registrySnapshot {
 	for k, v := range e.questionMode {
 		mode[k] = v
 	}
+	custom := make(map[string]bool, len(e.questionCustom))
+	for k, v := range e.questionCustom {
+		custom[k] = v
+	}
 	order := make([]string, len(e.questionOrder))
 	copy(order, e.questionOrder)
 	return &registrySnapshot{
@@ -248,6 +275,7 @@ func snapshotOf(e *pendingEntry) *registrySnapshot {
 		RawQuestionID:  rawQ,
 		OptionLabel:    opt,
 		QuestionMode:   mode,
+		QuestionCustom: custom,
 		QuestionOrder:  order,
 		ResolvedAtUnix: 0,
 	}

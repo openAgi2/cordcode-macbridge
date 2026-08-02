@@ -113,6 +113,20 @@ type UserInputResolution struct {
 	CurrentStatus UserInputStatus
 }
 
+// UserInputError 是结构化用户输入 resolve 的稳定错误，携带 §7 固定错误码。
+// go-bridge resolve_user_input handler 用它映射 WireError；adapter 不得回显 secret/custom answer。
+type UserInputError struct {
+	Code    string
+	Message string
+}
+
+func (e *UserInputError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return e.Message
+}
+
 // UserInputResponder 是 v2 结构化用户输入的唯一回答能力接口。
 // 实现方负责原子 claim（first-writer-wins）、写真实 backend response、
 // 成功后才提交 Kernel resolved event；clientActionID 提供幂等。
