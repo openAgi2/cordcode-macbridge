@@ -2,11 +2,13 @@ package claudecode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
@@ -548,7 +550,7 @@ func TestGetRunningSessionIDs(t *testing.T) {
 	// workDir, and its comm is the go-test binary). Identity is exercised in the
 	// dedicated PID-reuse regression test below.
 	prevIdent := procIdentityAlive
-	procIdentityAlive = func(pid int, _ string) bool { return pid == myPid }
+	procIdentityAlive = func(_ context.Context, pid int, _ string) bool { return pid == myPid }
 	t.Cleanup(func() { procIdentityAlive = prevIdent })
 
 	running, err := ag.GetRunningSessionIDs(context.Background())
@@ -576,7 +578,7 @@ func TestGetRunningSessionIDs(t *testing.T) {
 // covered by go-bridge's running_map_cache + list_enrich tests.
 func TestGetRunningSessionIDs_ExternalTurnViaInjectableSeam(t *testing.T) {
 	prev := procIdentityAlive
-	procIdentityAlive = func(pid int, _ string) bool { return pid == 4242 } // deterministic fake identity
+	procIdentityAlive = func(_ context.Context, pid int, _ string) bool { return pid == 4242 } // deterministic fake identity
 	t.Cleanup(func() { procIdentityAlive = prev })
 
 	tempHome := t.TempDir()
@@ -618,7 +620,7 @@ func TestGetRunningSessionIDs_ExternalTurnViaInjectableSeam(t *testing.T) {
 
 	// Precise semantics preserved: flip the PID dead → the external session must
 	// NOT be reported running (a live-but-idle/dead process is not "executing").
-	procIdentityAlive = func(pid int, _ string) bool { return false }
+	procIdentityAlive = func(_ context.Context, pid int, _ string) bool { return false }
 	running2, _ := ag.GetRunningSessionIDs(context.Background())
 	if running2["ext-ses"] {
 		t.Fatalf("external session with DEAD pid reported running; got %v (precise GetRunningSessionIDs semantics broken)", running2)
@@ -627,7 +629,7 @@ func TestGetRunningSessionIDs_ExternalTurnViaInjectableSeam(t *testing.T) {
 
 func TestLiveSessionProcess_LiveButIdleIsNotRunning(t *testing.T) {
 	prev := procIdentityAlive
-	procIdentityAlive = func(pid int, _ string) bool { return pid == 4242 }
+	procIdentityAlive = func(_ context.Context, pid int, _ string) bool { return pid == 4242 }
 	t.Cleanup(func() { procIdentityAlive = prev })
 
 	tempHome := t.TempDir()
@@ -678,7 +680,7 @@ func TestLiveSessionProcess_UsesProcAliveAndDoesNotNeedTranscript(t *testing.T) 
 	procAlive = func(pid int) bool { return pid == 7777 }
 	t.Cleanup(func() { procAlive = prev })
 	prevIdent := procIdentityAlive
-	procIdentityAlive = func(pid int, _ string) bool { return pid == 7777 }
+	procIdentityAlive = func(_ context.Context, pid int, _ string) bool { return pid == 7777 }
 	t.Cleanup(func() { procIdentityAlive = prevIdent })
 
 	tempHome := t.TempDir()
@@ -712,6 +714,64 @@ func TestLiveSessionProcess_UsesProcAliveAndDoesNotNeedTranscript(t *testing.T) 
 	}
 }
 
+func TestLiveSessionProcess_ScansPastDeadStubForSameSession(t *testing.T) {
+	prev := procIdentityAlive
+	procIdentityAlive = func(_ context.Context, pid int, _ string) bool { return pid == 200 }
+	t.Cleanup(func() { procIdentityAlive = prev })
+
+	t.Setenv("HOME", t.TempDir())
+	sessionsDir := filepath.Join(os.Getenv("HOME"), ".claude", "sessions")
+	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
+		t.Fatalf("sessions dir: %v", err)
+	}
+	for name, stub := range map[string]string{
+		"100.json": `{"pid":100,"sessionId":"duplicate-session","cwd":"/work"}`,
+		"200.json": `{"pid":200,"sessionId":"duplicate-session","cwd":"/work"}`,
+	} {
+		if err := os.WriteFile(filepath.Join(sessionsDir, name), []byte(stub), 0644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	a, err := New(map[string]any{"work_dir": "/tmp"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	proc, err := a.(*Agent).LiveSessionProcess(context.Background(), "duplicate-session")
+	if err != nil {
+		t.Fatalf("LiveSessionProcess: %v", err)
+	}
+	if !proc.Live || proc.PID != 200 {
+		t.Fatalf("LiveSessionProcess = %#v, want live second stub pid=200", proc)
+	}
+}
+
+func TestLiveSessionProcess_PropagatesIdentityContextTimeout(t *testing.T) {
+	prev := procIdentityAlive
+	procIdentityAlive = func(ctx context.Context, _ int, _ string) bool {
+		<-ctx.Done()
+		return true
+	}
+	t.Cleanup(func() { procIdentityAlive = prev })
+
+	t.Setenv("HOME", t.TempDir())
+	sessionsDir := filepath.Join(os.Getenv("HOME"), ".claude", "sessions")
+	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
+		t.Fatalf("sessions dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionsDir, "300.json"), []byte(`{"pid":300,"sessionId":"timeout-session","cwd":"/work"}`), 0644); err != nil {
+		t.Fatalf("stub: %v", err)
+	}
+	a, err := New(map[string]any{"work_dir": "/tmp"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if _, err := a.(*Agent).LiveSessionProcess(ctx, "timeout-session"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("LiveSessionProcess error = %v, want deadline exceeded", err)
+	}
+}
+
 // TestGetRunningSessionIDs_PIDReuseNotRunning is the PID-reuse regression: a
 // session stub points at a PID whose original claude exited and whose PID was
 // reused by an unrelated process. Even when the transcript still looks active
@@ -723,7 +783,7 @@ func TestLiveSessionProcess_UsesProcAliveAndDoesNotNeedTranscript(t *testing.T) 
 // simulate that mismatch deterministically.
 func TestGetRunningSessionIDs_PIDReuseNotRunning(t *testing.T) {
 	prev := procIdentityAlive
-	procIdentityAlive = func(pid int, _ string) bool { return false } // PID reused by non-claude
+	procIdentityAlive = func(_ context.Context, pid int, _ string) bool { return false } // PID reused by non-claude
 	t.Cleanup(func() { procIdentityAlive = prev })
 
 	tempHome := t.TempDir()
@@ -768,7 +828,7 @@ func TestGetRunningSessionIDs_PIDReuseNotRunning(t *testing.T) {
 
 	// Sanity: with identity restored (the PID IS our claude again), the active
 	// transcript makes the session running — proves the fixture is genuinely active.
-	procIdentityAlive = func(pid int, _ string) bool { return pid == 4242 }
+	procIdentityAlive = func(_ context.Context, pid int, _ string) bool { return pid == 4242 }
 	running2, _ := ag.GetRunningSessionIDs(context.Background())
 	if !running2["reuse-ses"] {
 		t.Fatalf("sanity: same active transcript + matching identity should be running; got %v", running2)

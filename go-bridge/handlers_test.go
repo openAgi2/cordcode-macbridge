@@ -2556,6 +2556,16 @@ func TestClaudeFileRelayAndAgentRelayRunConcurrentlyRaceFree(t *testing.T) {
 	}
 	handlers := newTestHandlers(t)
 	handlers.RegisterAgent("claudecode", agent)
+	// This test models a MacBridge-owned session with both its stdout relay and the transcript
+	// watcher active. Install the real session object up front so send_message does not enter the
+	// external-owner resume preflight (a live external-only stub is now intentionally rejected).
+	ownedSession, err := agent.StartSession(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	handlers.mu.Lock()
+	handlers.putSession(sessionID, ownedSession)
+	handlers.mu.Unlock()
 	serverConn, clientConn, cleanup := openTestConn(t)
 	t.Cleanup(cleanup)
 	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "claudecode", SessionID: sessionID})

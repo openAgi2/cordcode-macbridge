@@ -3,6 +3,7 @@
 package claudecode
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"syscall"
@@ -54,7 +55,6 @@ func isProcessRunning(pid int) bool {
 // only for editor/CI portability and has no Claude process to verify against,
 // so this fails open (returns true). Liveness is still checked by the caller
 // via procAlive before this runs.
-func verifyClaudeProcessIdentity(pid int, expectCwd string) bool {
+func verifyClaudeProcessIdentity(_ context.Context, pid int, expectCwd string) bool {
 	return true
 }
-

@@ -1752,6 +1752,12 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 		if strings.HasPrefix(resumeID, "pending-") {
 			resumeID = ""
 		}
+		if resumeID != "" && agent.Name() == "claudecode" {
+			if wireErr := preflightClaudeResume(h.ctx, agent, resumeID); wireErr != nil {
+				conn.SendResult(msg.RequestID, nil, wireErr)
+				return
+			}
+		}
 		slog.Info("go-bridge: handleSendMessage: session not found in registry. Starting new agent session.", "sessionID", params.SessionID, "resumeID", resumeID, "agent", agent.Name())
 		startAt := time.Now()
 		var err error
@@ -1837,6 +1843,45 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 
 	conn.SendResult(msg.RequestID, &ResultResponse{Ok: true}, nil)
 	h.startRelayIfNotRunning(params.SessionID, sess, conn, msg.BackendID)
+}
+
+var claudeResumeOwnerCheckTimeout = 2 * time.Second
+
+func preflightClaudeResume(rootCtx context.Context, agent core.Agent, sessionID string) *WireError {
+	if err := rootCtx.Err(); err != nil {
+		return &WireError{Code: "request.cancelled", Message: err.Error()}
+	}
+	lister, ok := agent.(core.LiveSessionLister)
+	if !ok {
+		return retryableSessionError(
+			"session.owner_check_failed",
+			"无法确认会话进程归属，为避免冲突未发送，请稍后重试。",
+		)
+	}
+	checkCtx, cancel := context.WithTimeout(rootCtx, claudeResumeOwnerCheckTimeout)
+	defer cancel()
+	proc, err := lister.LiveSessionProcess(checkCtx, sessionID)
+	if rootErr := rootCtx.Err(); rootErr != nil {
+		return &WireError{Code: "request.cancelled", Message: rootErr.Error()}
+	}
+	if err != nil || checkCtx.Err() != nil {
+		return retryableSessionError(
+			"session.owner_check_failed",
+			"无法确认会话进程归属，为避免冲突未发送，请稍后重试。",
+		)
+	}
+	if proc.Live {
+		return retryableSessionError(
+			"session.held_by_external_worker",
+			"该会话记录的进程仍在运行。请在启动该会话的客户端中结束会话并退出对应进程，然后重试。",
+		)
+	}
+	return nil
+}
+
+func retryableSessionError(code, message string) *WireError {
+	retryable := true
+	return &WireError{Code: code, Message: message, Retryable: &retryable}
 }
 
 func applySendMessageRuntimeOptions(agent core.Agent, params SendMessageParams, dataDir string) {

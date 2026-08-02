@@ -1,5 +1,7 @@
 package claudecode
 
+import "context"
+
 // procAlive is the PID-liveness hook used by GetRunningSessionIDs. It is a
 // package-level variable so tests can inject a deterministic fake (returning
 // true/false for chosen PIDs) instead of relying on os.Getpid() being alive or
@@ -30,9 +32,9 @@ var procAlive = isProcessRunning
 // by then identity was confirmed once at relay start, and a reused PID only
 // prolongs silent watching (bounded by the live-idle TTL) without emitting
 // false events.
-var procIdentityAlive = func(pid int, expectCwd string) bool {
+var procIdentityAlive = func(ctx context.Context, pid int, expectCwd string) bool {
 	if !procAlive(pid) {
 		return false
 	}
-	return verifyClaudeProcessIdentity(pid, expectCwd)
+	return verifyClaudeProcessIdentity(ctx, pid, expectCwd)
 }
