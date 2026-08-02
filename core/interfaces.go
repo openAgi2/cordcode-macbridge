@@ -66,6 +66,60 @@ type ToolAuthorizer interface {
 	GetAllowedTools() []string
 }
 
+// ── 结构化用户输入 v2 回答能力（设计 §7/§10.1）─────────────────────────────────
+// go-bridge resolve_user_input handler 只调用 UserInputResponder；旧
+// RespondQuestion/RejectQuestion 仅留给明确 `.off` legacy client，不作为 v2 fallback。
+
+// UserInputAction 是提交动作。
+type UserInputAction string
+
+const (
+	UserInputActionAnswer UserInputAction = "answer"
+	UserInputActionReject UserInputAction = "reject"
+)
+
+// UserInputValueKind 表达单个 value 是选项引用还是自定义文本。
+type UserInputValueKind string
+
+const (
+	UserInputValueOption UserInputValueKind = "option"
+	UserInputValueText   UserInputValueKind = "text"
+)
+
+// UserInputValue 是一题答案中的一个值。
+type UserInputValue struct {
+	Kind     UserInputValueKind `json:"kind"`
+	OptionID string             `json:"optionId,omitempty"`
+	Text     string             `json:"text,omitempty"`
+}
+
+// UserInputAnswer 是一题的规范化答案。
+type UserInputAnswer struct {
+	QuestionID string           `json:"questionId"`
+	Values     []UserInputValue `json:"values"`
+}
+
+// UserInputResolutionOutcome 是 resolve RPC 的结果分类。
+type UserInputResolutionOutcome string
+
+const (
+	UserInputOutcomeAccepted        UserInputResolutionOutcome = "accepted"
+	UserInputOutcomeAlreadyResolved UserInputResolutionOutcome = "already_resolved"
+)
+
+// UserInputResolution 是 ResolveUserInput 的返回。
+type UserInputResolution struct {
+	Outcome       UserInputResolutionOutcome
+	CurrentStatus UserInputStatus
+}
+
+// UserInputResponder 是 v2 结构化用户输入的唯一回答能力接口。
+// 实现方负责原子 claim（first-writer-wins）、写真实 backend response、
+// 成功后才提交 Kernel resolved event；clientActionID 提供幂等。
+type UserInputResponder interface {
+	ResolveUserInput(ctx context.Context, interactionID string, clientActionID string, action UserInputAction, answers []UserInputAnswer) (UserInputResolution, error)
+}
+
 // TurnCanceler is an optional interface for agent sessions that can cancel
 // the currently running turn via an RPC call to the backend service.
 type TurnCanceler interface {
