@@ -41,7 +41,16 @@ type projectionSession struct {
 	thinking    map[string]string         // assistant messageId -> full accumulated reasoning (set_thinking)
 	tools       map[string]ProjectionPart // tool callId -> latest tool part (upsert_tool)
 	upsertTurns map[string]TurnProjection // turnId -> latest whole-turn snapshot (upsertTurns)
+	userInputs  map[string]userInputPending // interactionId -> latest user_input part + owning turn (upsert_user_input)
 	execution   *ExecutionView            // pending execution change
+}
+
+// userInputPending captures a pending upsert_user_input PartOp: the owning assistant turn/message
+// and the latest user_input part. Keyed by interactionId so repeated requested/resolved events for
+// the same interaction coalesce into one in-place upsert (design §6.1: no second "answered" card).
+type userInputPending struct {
+	turnID string
+	part   ProjectionPart
 }
 
 func cloneProjectionSessionState(source *projectionSession) *projectionSession {
@@ -155,6 +164,18 @@ func dataInt64(m map[string]interface{}, key string) int64 {
 	}
 }
 
+func dataBool(m map[string]interface{}, key string) bool {
+	if m == nil {
+		return false
+	}
+	if v, ok := m[key]; ok {
+		if b, ok := v.(bool); ok {
+			return b
+		}
+	}
+	return false
+}
+
 func (ps *projectionSession) turnByID(turnID string) *TurnProjection {
 	for i := range ps.projection.Turns {
 		if ps.projection.Turns[i].TurnID == turnID {
@@ -260,6 +281,65 @@ func (ps *projectionSession) latestRunningTurnID() string {
 	return ""
 }
 
+// upsertUserInputPart inserts or replaces (in place, by interactionId) a user_input part in the
+// assistant message. Design §6.1: the same interaction upserts in place — never appends a second
+// "answered" card. Returns the index of the part.
+func upsertUserInputPart(msg *MessageProjection, part ProjectionPart) int {
+	if idx := findUserInputPart(msg, part.UserInputInteractionID); idx >= 0 {
+		msg.Parts[idx] = part
+		return idx
+	}
+	msg.Parts = append(msg.Parts, part)
+	return len(msg.Parts) - 1
+}
+
+// findUserInputPart returns the index of the user_input part with the given interactionId, or -1.
+func findUserInputPart(msg *MessageProjection, interactionID string) int {
+	if msg == nil || interactionID == "" {
+		return -1
+	}
+	for i := range msg.Parts {
+		if msg.Parts[i].Type == "user_input" && msg.Parts[i].UserInputInteractionID == interactionID {
+			return i
+		}
+	}
+	return -1
+}
+
+// hasPendingUserInput reports whether the turn's assistant message has any pending user_input part.
+func (ps *projectionSession) hasPendingUserInput(turnID string) bool {
+	t := ps.turnByID(turnID)
+	if t == nil || t.Assistant == nil {
+		return false
+	}
+	for i := range t.Assistant.Parts {
+		if t.Assistant.Parts[i].Type == "user_input" && t.Assistant.Parts[i].UserInputStatus == "pending" {
+			return true
+		}
+	}
+	return false
+}
+
+// applyUserInputExecution derives execution.phase from user_input state (design §6.2):
+//   - active turn has a pending user_input → requires_action
+//   - no pending user_input and the turn is still running/pending → running
+//     (turn_completed owns the idle transition; we never preemptively idle an active turn)
+//   - turn already settled (completed/aborted/error) → leave phase untouched (idle stays idle)
+func (ps *projectionSession) applyUserInputExecution(turnID string) {
+	if turnID == "" {
+		return
+	}
+	if ps.hasPendingUserInput(turnID) {
+		exec := ExecutionView{Phase: "requires_action", ActiveTurnID: turnID}
+		ps.projection.Execution = exec
+		ps.execution = &exec
+		return
+	}
+	if t := ps.turnByID(turnID); t != nil && (t.Status == "running" || t.Status == "pending") {
+		ps.markRunning(turnID)
+	}
+}
+
 // ensureAssistantTextPart returns the assistant message's trailing text part, creating one if
 // the last part is not text. Used by append_text accumulation.
 func (m *MessageProjection) ensureTrailingTextPart() *ProjectionPart {
@@ -312,6 +392,7 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			thinking:    make(map[string]string),
 			tools:       make(map[string]ProjectionPart),
 			upsertTurns: make(map[string]TurnProjection),
+			userInputs:  make(map[string]userInputPending),
 		}
 		r.sessions[key] = ps
 	}
@@ -600,6 +681,70 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			t.Assistant.Parts = append(t.Assistant.Parts, part)
 		}
 
+	case "user_input_requested":
+		// Structured user input requested (design §10.1/§10.2). The adapter emits a proven
+		// turnId + interactionId; without both the event is identityless and skipped (no
+		// phantom turn, no raw second path). status may be pending (normal) or failed
+		// (malformed questions) — both project once via the same upsert.
+		turnID := dataString(data, "turnId")
+		interactionID := dataString(data, "interactionId")
+		if turnID == "" || interactionID == "" {
+			return
+		}
+		commit()
+		t := ps.turnByID(turnID)
+		if t == nil {
+			ps.upsertTurn(TurnProjection{TurnID: turnID, Status: "running"})
+			t = ps.turnByID(turnID)
+		}
+		if t.Assistant == nil {
+			t.Assistant = &MessageProjection{ID: turnID, Role: "assistant"}
+		}
+		part := ProjectionPart{
+			Type:                      "user_input",
+			UserInputInteractionID:    interactionID,
+			UserInputStatus:           dataString(data, "status"),
+			UserInputQuestions:        data["questions"],
+			UserInputCanRespond:       dataBool(data, "canRespond"),
+			UserInputCanReject:        dataBool(data, "canReject"),
+			UserInputExpiresAt:        dataInt64(data, "expiresAt"),
+			UserInputDiagnosticCode:   dataString(data, "diagnosticCode"),
+		}
+		if part.UserInputStatus == "" {
+			part.UserInputStatus = "pending"
+		}
+		upsertUserInputPart(t.Assistant, part)
+		ps.userInputs[interactionID] = userInputPending{turnID: turnID, part: part}
+		ps.applyUserInputExecution(turnID)
+
+	case "user_input_resolved":
+		// Resolved in place: update the existing part's status/source/resolvedAt (design §10.2).
+		// Projection never stores the answer text. If no matching requested part exists, the
+		// resolution is stale/unattributable — do not fabricate one (no second path).
+		turnID := dataString(data, "turnId")
+		interactionID := dataString(data, "interactionId")
+		if turnID == "" || interactionID == "" {
+			return
+		}
+		t := ps.turnByID(turnID)
+		if t == nil || t.Assistant == nil {
+			return
+		}
+		idx := findUserInputPart(t.Assistant, interactionID)
+		if idx < 0 {
+			return
+		}
+		commit()
+		t.Assistant.Parts[idx].UserInputStatus = dataString(data, "status")
+		t.Assistant.Parts[idx].UserInputResolutionSource = dataString(data, "source")
+		if resolvedAt := dataInt64(data, "resolvedAt"); resolvedAt != 0 {
+			t.Assistant.Parts[idx].UserInputResolvedAt = resolvedAt
+		} else {
+			t.Assistant.Parts[idx].UserInputResolvedAt = ps.projection.UpdatedAt
+		}
+		ps.userInputs[interactionID] = userInputPending{turnID: turnID, part: t.Assistant.Parts[idx]}
+		ps.applyUserInputExecution(turnID)
+
 	case "turn_completed":
 		turnID := dataString(data, "turnId")
 		if turnID == "" {
@@ -738,7 +883,7 @@ func (r *ProjectionReducer) FlushPatch(backendID, sessionID string) (ProjectionP
 	}
 	headRev := ps.projection.SyncRev
 	if headRev == ps.lastFlushedRev && len(ps.textAppends) == 0 && len(ps.thinking) == 0 &&
-		len(ps.tools) == 0 && len(ps.upsertTurns) == 0 && ps.execution == nil {
+		len(ps.tools) == 0 && len(ps.upsertTurns) == 0 && len(ps.userInputs) == 0 && ps.execution == nil {
 		return ProjectionPatch{}, false
 	}
 	patch := ProjectionPatch{BaseRev: ps.lastFlushedRev, SyncRev: headRev}
@@ -764,11 +909,18 @@ func (r *ProjectionReducer) FlushPatch(backendID, sessionID string) (ProjectionP
 		turnID := ps.projection.Execution.ActiveTurnID
 		patch.PartOps = append(patch.PartOps, PartOp{TurnID: turnID, MessageID: turnID, Op: "upsert_tool", Part: &tool})
 	}
+	// user_input upserts: one PartOp per interaction (in-place upsert by interactionId). The owning
+	// message id is the assistant turn/message id (Claude/Codex assistant message id == turn id).
+	for _, u := range ps.userInputs {
+		part := cloneProjectionPart(u.part)
+		patch.PartOps = append(patch.PartOps, PartOp{TurnID: u.turnID, MessageID: u.turnID, Op: "upsert_user_input", Part: &part})
+	}
 	// Clear pending; next patch will be delta from this head.
 	ps.textAppends = make(map[string][]string)
 	ps.thinking = make(map[string]string)
 	ps.tools = make(map[string]ProjectionPart)
 	ps.upsertTurns = make(map[string]TurnProjection)
+	ps.userInputs = make(map[string]userInputPending)
 	ps.execution = nil
 	ps.lastFlushedRev = headRev
 	return patch, true
@@ -902,6 +1054,7 @@ func cloneProjectionPart(part ProjectionPart) ProjectionPart {
 	out.ToolResult = cloneProjectionJSONValue(part.ToolResult)
 	out.Matches = cloneProjectionJSONValue(part.Matches)
 	out.FileChanges = cloneProjectionJSONValue(part.FileChanges)
+	out.UserInputQuestions = cloneProjectionJSONValue(part.UserInputQuestions)
 	if len(part.SubagentBlocks) > 0 {
 		// SubagentBlocks is a concrete []ProjectionPart (recursive); the shallow `out := part`
 		// above only copies the slice header. Deep-copy each nested part so the reducer's

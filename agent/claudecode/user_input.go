@@ -357,7 +357,20 @@ func (cs *claudeSession) handleAskUserQuestionV2(requestID string, input map[str
 }
 
 // emitUserInputEvent 把结构化用户输入事件投递到 events channel（与 v1 emit 同语义）。
+//
+// Turn attribution（设计 §10.2「requested event 必须有可证明的 turn attribution」）：Claude
+// 的 turn 身份取当前正在 diff 的 assistant message id（activeMsgID）。这是 AskUserQuestion 抵达
+// 时唯一可证明的活跃 assistant 身份；reducer 据此 upsert 该 turn 并把 user_input part 挂到其
+// assistant message 上。Claude 的 content 事件当前不经 live reducer 归因（projection 走 cold
+// hydrate source-read），因此 activeMsgID 既是 live 投影的 turn key，也与 hydrate 为同一 assistant
+// turn 派生的身份一致（hydrate 以 user-message identity 作 turnId，assistant 内容共享之；live 与
+// hydrate 的 turn 对齐属 Claude live projection 整体接入范畴，不在本 P3 reducer/events 范围内）。
 func (cs *claudeSession) emitUserInputEvent(ev core.Event) {
+	if ev.TurnID == "" {
+		if id, _ := cs.activeMsgID.Load().(string); id != "" {
+			ev.TurnID = id
+		}
+	}
 	select {
 	case cs.events <- cs.scopeEvent(ev):
 	case <-cs.ctx.Done():

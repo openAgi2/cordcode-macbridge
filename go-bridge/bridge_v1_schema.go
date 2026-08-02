@@ -23,7 +23,16 @@ const (
 	// connectionPolicy.preferLocalNetwork,默认 false(Relay 是默认底座,LAN 是用户主动开启的性能优化)。
 	// 非破坏性可选新增:旧 iOS 忽略该字段;新 iOS 解码旧 payload 取 false。SSV2 红线:纯 control-plane,
 	// 严禁进入 EventMessage.Data / timeline / SessionProjection / ProjectionReducer。
-	BridgeProtocolSchemaRevision = "2026-08-01"
+	//
+	// 2026-08-02: Structured user input (design docs/2026-08-01-codex-claude-structured-user-input-design.md)。
+	// 新增 capability `structured_user_input_v1`、RPC `resolve_user_input`、part variant `user_input`、
+	// part op `upsert_user_input`、live event 名 `user_input_requested`/`user_input_resolved`。仍是
+	// extensible 非破坏性新增（capability 数组/map、新 RPC method、新 event 名、新 part type/op），
+	// 只 bump schemaRevision；hello 只在 Protocol.Version 上 gating，旧客户端忽略未知 event/RPC。
+	// capability 在 P6 由 backend descriptor 独立广告（Codex/Claude 各自 readiness），P3 落地 Kernel
+	// reducer/events/schema 后才广告。MacBridge 本常量与 iOS `CCCodeBridgeProtocol.schemaRevision`
+	// 必须同值（设计 §13）。
+	BridgeProtocolSchemaRevision = "2026-08-02"
 )
 
 type BridgeV1Protocol struct {
