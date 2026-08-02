@@ -61,6 +61,16 @@ type claudeSession struct {
 	// multi-select AskUserQuestion is denied at parse time and never enters here.
 	pendingQuestions sync.Map // requestID -> *pendingClaudeQuestion
 
+	// structuredUserInputV2 gates the v2 structured-user-input path (§9). Default
+	// off: until P6 advertises the structured_user_input_v1 capability, AskUserQuestion
+	// keeps using the v1 emitAskUserQuestion path so behavior is unchanged. When on,
+	// handleControlRequest intercepts AskUserQuestion before permission-mode bypass
+	// and emits EventUserInputRequested/Resolved via claudeUserInputReg.
+	structuredUserInputV2 atomic.Bool
+	// claudeUserInputReg is the v2 first-writer-wins registry for structured user
+	// input (pending → claimed → resolved, clientActionID idempotent).
+	claudeUserInputReg *claudeUserInputRegistry
+
 	// gracefulStopTimeout is how long Close() waits for a clean exit
 	// (stdin close → Stop hooks → process exit) before escalating to
 	// SIGTERM and then SIGKILL. Default: 120s to match claude-mem's
@@ -264,6 +274,7 @@ func newClaudeSession(ctx context.Context, workDir, cliBin string, cliExtraArgs 
 		historyDrainDone:    make(chan struct{}),
 		gracefulStopTimeout: 120 * time.Second,
 		childStreams:        newClaudeChildStreamTracker(),
+		claudeUserInputReg:  newClaudeUserInputRegistry(),
 	}
 	cs.setPermissionMode(mode)
 	cs.sessionID.Store(sessionID)
@@ -816,6 +827,14 @@ func (cs *claudeSession) handleControlRequest(raw map[string]any) {
 	toolName, _ := request["tool_name"].(string)
 	input, _ := request["input"].(map[string]any)
 
+	// v2 structured-user-input path (§9.1): AskUserQuestion 是语义问句，permission-mode
+	// bypass（autoApprove/dontAsk/acceptEditsOnly）不得替用户回答，故必须在 bypass 之前拦截。
+	// 仅当 structuredUserInputV2 置位（P6 capability 协商后）时启用；未置位时 v1 路径照常。
+	if cs.structuredUserInputV2.Load() && toolName == "AskUserQuestion" {
+		cs.handleAskUserQuestionV2(requestID, input)
+		return
+	}
+
 	if cs.autoApprove.Load() {
 		slog.Debug("claudeSession: auto-approving", "request_id", requestID, "tool", toolName)
 		_ = cs.RespondPermission(requestID, core.PermissionResult{
@@ -1225,6 +1244,13 @@ func (cs *claudeSession) setPermissionMode(mode string) {
 	cs.autoApprove.Store(mode == "bypassPermissions")
 	cs.acceptEditsOnly.Store(mode == "acceptEdits")
 	cs.dontAsk.Store(mode == "dontAsk")
+}
+
+// SetStructuredUserInputV2 启用/关闭 v2 结构化用户输入路径（§9）。默认 off；仅 P6 在
+// capability 协商确认对端支持 structured_user_input_v1 后置位。置位后 AskUserQuestion
+// 走 EventUserInputRequested/Resolved 结构化事件并在 permission bypass 之前拦截。
+func (cs *claudeSession) SetStructuredUserInputV2(on bool) {
+	cs.structuredUserInputV2.Store(on)
 }
 
 func (cs *claudeSession) SetLiveMode(mode string) bool {
