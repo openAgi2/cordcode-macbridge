@@ -193,11 +193,15 @@ interface ResolveUserInputParams {
 
 interface ResolveUserInputResult {
   interactionId: string;
-  outcome: "accepted" | "already_resolved";
+  outcome: "accepted" | "already_resolved" | "in_progress";
   currentStatus: BridgeUserInputPart["status"];
   headRev: number;
 }
 ```
+
+`outcome/currentStatus` 是 action acknowledgement：`in_progress/pending` 表示另一 writer 已取得
+claim，不能据此把卡片写成终态。客户端仅以 `headRev` 对应的 Session Projection
+`user_input` part 判定 answered/rejected 等终态；本 RPC 不形成第二个 projection writer。
 
 稳定错误码：`interaction_not_found`、`interaction_already_resolved`、
 `invalid_backend_request`、`invalid_answer_shape`、`response_not_supported`、
@@ -213,9 +217,15 @@ interface ResolveUserInputResult {
 | `bridge.*` | `bridge.not_ready`, `bridge.shutting_down`, `bridge.needs_update` |
 | `agent.*` | `agent.not_detected`, `agent.unavailable`, `agent.version_unsupported` |
 | `workspace.*` | `workspace.not_found`, `workspace.access_denied` |
-| `session.*` | `session.not_found`, `session.not_running`, `session.conflict` |
+| `session.*` | `session.not_found`, `session.not_running`, `session.conflict`, `session.held_by_external_worker`, `session.owner_check_failed` |
 | `permission.*` | `permission.not_found`, `permission.already_resolved` |
 | `network.*` | `network.timeout`, `network.connection_refused` |
+
+Claude `send_message` 在续接一个尚未由当前 MacBridge registry 持有的 session 前执行 best-effort
+进程预检。检测到同 session 的记录进程仍存活时返回
+`session.held_by_external_worker`；无法完成归属检查（能力缺失、检查错误或超时）时 fail-closed
+返回 `session.owner_check_failed`。两者 wire error 均携带 `retryable: true`，表示外部状态变化后可由
+用户重新发送；它不代表客户端必须自动重试。
 
 ## 事件类型冻结
 

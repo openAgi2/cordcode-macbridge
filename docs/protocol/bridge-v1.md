@@ -134,6 +134,20 @@ upload_delivery_prekeys
 get_delivery_chain_head
 ```
 
+### Claude resume ownership preflight
+
+For `send_message`, MacBridge performs a best-effort ownership preflight only when the selected
+backend is `claudecode`, the request resumes a non-empty session id, and that session is not already
+backed by a live entry in the current MacBridge registry. If any matching session stub identifies a
+still-live Claude process, the request fails before `StartSession(--resume)` with
+`session.held_by_external_worker`. If the lister is unavailable or the check errors/times out, it
+fails closed with `session.owner_check_failed`. Both errors carry `retryable: true`; clients surface
+the failure and let the user retry after external state changes rather than automatically retrying.
+
+This is not an ownership lock. Corrupt/unreadable stubs may be skipped, and another client can start
+a process after the check (TOCTOU). New sessions, already registry-owned sessions, and non-Claude
+backends do not use this preflight.
+
 ## Events
 
 Event envelope:
@@ -281,11 +295,15 @@ The v1 and v2 paths MUST NOT be mixed for the same interaction, and v2 MUST NOT 
   answers?: [{ questionId, values: [{ kind: "option"|"text", optionId?, text? }] }] }`. MacBridge
   routes it to the backend-specific `UserInputResponder` (Codex app-server JSON-RPC
   `resolveUserInput`/`interrupt`, or Claude `control_response` allow with `updatedInput.answers` /
-  deny). It returns `{ outcome: "accepted"|"already_resolved", status }` or a
+  deny). It returns `{ interactionId, outcome: "accepted"|"already_resolved"|"in_progress",
+  currentStatus, headRev }` or a
   `UserInputError{ code, message }` (`interaction_not_found`, `invalid_answer_shape`,
-  `backend_response_failed`, `session_not_active`).
-- Claude v1 invariants (adapter-enforced, design §9): `allowsCustomAnswer` is always `false`
-  (even when an option label is `"Other"`); `multiSelect` maps to `single`/`multiple`; empty
+  `backend_response_failed`, `session_not_active`). `outcome/currentStatus` acknowledges the action
+  and may remain `in_progress/pending` when another writer holds the claim. Only the projected
+  `user_input` part at `headRev` establishes terminal UI state; the RPC result never writes card
+  state independently.
+- Claude v1 invariants (adapter-enforced, design §9): `allowsCustomAnswer=true`, matching Claude's
+  real Other/custom-result path; `multiSelect` maps to `single`/`multiple`; empty
   options are malformed (not normalized to text); each question is `required=true`, `isSecret=false`;
   duplicate question text within one interaction is `invalid_backend_request` (it cannot be an
   unambiguous `answers` map key). Codex has no verified reject path (`canReject=false`); Claude has
@@ -296,6 +314,10 @@ The v1 and v2 paths MUST NOT be mixed for the same interaction, and v2 MUST NOT 
   turn status. The reducer is the single consumer for both live and hydrate; identityless frames
   (missing `turnId`/`interactionId`) are dropped without committing a revision, and a `resolved`
   with no matching requested part is dropped (no fabrication, no second writer).
+- One canonical backend interaction registry owns each pending responder. Legacy
+  `question_asked/question_resolved` frames are derived strictly one-way from that Kernel interaction
+  for legacy connections; `session_sync_v2` connections receive only projection updates. Legacy raw
+  events never feed back into the Kernel and never create a second writable registry.
 
 `schemaRevision` is bumped to `2026-08-02` for this additive set (new capability, RPC, part
 variant, part op, event names); the protocol major version is unchanged and old clients ignore

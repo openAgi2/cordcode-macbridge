@@ -517,7 +517,7 @@ export interface BridgeUserInputQuestion {
   prompt: string;
   answerMode: "single" | "multiple" | "text";
   options: BridgeUserInputOption[]; // non-empty (empty is malformed → failed)
-  allowsCustomAnswer: boolean; // Claude v1: always false
+  allowsCustomAnswer: boolean; // Claude AskUserQuestion: true (real Other/custom-result path)
   isSecret: boolean; // Claude v1: always false
   required: boolean; // Claude v1: always true
 }
@@ -527,6 +527,27 @@ export interface BridgeUserInputOption {
   id: string;
   label: string;
   description?: string;
+}
+
+export interface ResolveUserInputParams {
+  sessionId: string;
+  interactionId: string;
+  clientActionId: string; // canonical UUID v4, reused for idempotent retry of the same action
+  action: "answer" | "reject";
+  answers?: Array<{
+    questionId: string;
+    values: Array<
+      | { kind: "option"; optionId: string }
+      | { kind: "text"; text: string }
+    >;
+  }>;
+}
+
+export interface ResolveUserInputResult {
+  interactionId: string;
+  outcome: "accepted" | "already_resolved" | "in_progress";
+  currentStatus: Extract<BridgeProjectionPart, { type: "user_input" }>["status"];
+  headRev: number;
 }
 
 export interface BridgeMessageProjection {

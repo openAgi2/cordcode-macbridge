@@ -8,6 +8,9 @@
 
 ## [Unreleased]
 
+- MacBridge 自有 Claude session 的 AskUserQuestion 已接通生产 responder：iPhone 可回答选项、Other 自定义答案或跳过；同一 interaction 由单一 claim/投影链路收口，多端竞态不会重复写入。
+- `resolve_user_input` 现在返回完整 interaction/status/revision acknowledgement，客户端会等待权威 projection 决定终态；Claude 外部进程仍持有 session 或归属检查失败时，续接会在启动第二个 worker 前明确拒绝并允许人工重试。
+
 ### 2026-08-02 — Claude Desktop AskUserQuestion transcript projection
 
 - Claude Desktop 外部会话的 `AskUserQuestion` transcript 现在按 `structured_user_input_v1` 投影为 `observe_only` 的 `user_input_requested`，不再退化为普通 `tool_started`。
