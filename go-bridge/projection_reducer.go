@@ -696,6 +696,13 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if turnID == "" || interactionID == "" {
 			return
 		}
+		// interactionId is the cross-source identity. Claude live stream attributes the request
+		// to its assistant message while transcript hydrate attributes the same tool_use to the
+		// enclosing user turn. Once either source has established the interaction, keep that
+		// owning turn and update in place instead of creating a phantom second card.
+		if existing, ok := ps.userInputs[interactionID]; ok && existing.turnID != "" {
+			turnID = existing.turnID
+		}
 		commit()
 		t := ps.turnByID(turnID)
 		if t == nil {
@@ -730,6 +737,9 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		interactionID := dataString(data, "interactionId")
 		if turnID == "" || interactionID == "" {
 			return
+		}
+		if existing, ok := ps.userInputs[interactionID]; ok && existing.turnID != "" {
+			turnID = existing.turnID
 		}
 		t := ps.turnByID(turnID)
 		if t == nil || t.Assistant == nil {

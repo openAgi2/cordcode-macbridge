@@ -215,6 +215,29 @@ func TestCanonicalUserInputIsProjectionOnlyAndLegacyIsOneWayDerived(t *testing.T
 	if got := len(projectionPatchFrames(v2.snapshot())); got != 2 {
 		t.Fatalf("derived legacy frame wrote projection; patch count=%d want 2", got)
 	}
+
+	ep.PublishLogical(LogicalEvent{BackendID: "claude", SessionID: "s-ui", Event: "user_input_resolved", Data: map[string]interface{}{
+		"turnId": "T1", "interactionId": "ui_1", "status": "answered", "source": "ios",
+	}, Broadcast: true})
+	waitForProjectionPatches(t, v2, 3)
+	if got := len(rawEventFrames(v2.snapshot(), "user_input_resolved")); got != 0 {
+		t.Fatalf("v2 received %d raw canonical resolutions", got)
+	}
+	if got := len(rawEventFrames(legacy.snapshot(), "user_input_resolved")); got != 0 {
+		t.Fatalf("legacy received %d raw canonical resolutions", got)
+	}
+	ep.PublishLogical(LogicalEvent{BackendID: "claude", SessionID: "s-ui", Event: "question_resolved", Data: map[string]interface{}{"questionId": "req-1", "result": "replied"}, Broadcast: true})
+	legacy.waitCount(t, 3)
+	if got := len(rawEventFrames(legacy.snapshot(), "question_resolved")); got != 1 {
+		t.Fatalf("legacy received %d derived question_resolved frames, want 1", got)
+	}
+	if got := len(rawEventFrames(v2.snapshot(), "question_resolved")); got != 0 {
+		t.Fatalf("v2 received %d raw derived question_resolved frames", got)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if got := len(projectionPatchFrames(v2.snapshot())); got != 3 {
+		t.Fatalf("derived legacy resolution wrote projection; patch count=%d want 3", got)
+	}
 }
 
 // TestProjectionPatchCarriesContent: the text_delta patch carries an append_text partOp with the

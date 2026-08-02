@@ -14,13 +14,13 @@ import "testing"
 func uiQuestionsWire() []interface{} {
 	return []interface{}{
 		map[string]interface{}{
-			"id":           "ui_x_q_0",
-			"prompt":       "Pick a color",
-			"answerMode":   "single",
-			"header":       "Color",
-			"options":      []interface{}{map[string]interface{}{"id": "ui_x_q_0_o_0", "label": "Red"}},
-			"required":     true,
-			"isSecret":     false,
+			"id":                 "ui_x_q_0",
+			"prompt":             "Pick a color",
+			"answerMode":         "single",
+			"header":             "Color",
+			"options":            []interface{}{map[string]interface{}{"id": "ui_x_q_0_o_0", "label": "Red"}},
+			"required":           true,
+			"isSecret":           false,
 			"allowsCustomAnswer": false,
 		},
 	}
@@ -71,6 +71,46 @@ func TestReducerUserInputRequestedProjectsPartAndRequiresAction(t *testing.T) {
 	}
 	if p.UserInputQuestions == nil {
 		t.Fatal("questions not preserved on part")
+	}
+}
+
+func TestReducerUserInputInteractionIdentityPreventsHydrateLivePhantomTurn(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "claude", "s1", "turn_started", map[string]interface{}{"turnId": "hydrate-user-turn"}))
+	r.Apply(ev(2, "claude", "s1", "user_input_requested", map[string]interface{}{
+		"turnId": "hydrate-user-turn", "interactionId": "ui_same", "status": "pending",
+		"questions": uiQuestionsWire(), "canRespond": false, "canReject": false,
+	}))
+	// The pending live event for the same tool_use carries Claude's assistant message id.
+	r.Apply(ev(3, "claude", "s1", "user_input_requested", map[string]interface{}{
+		"turnId": "assistant-message-id", "interactionId": "ui_same", "status": "pending",
+		"questions": uiQuestionsWire(), "canRespond": true, "canReject": true,
+	}))
+	// Resolution reuses the adapter-captured assistant identity, but must close the existing part.
+	r.Apply(ev(4, "claude", "s1", "user_input_resolved", map[string]interface{}{
+		"turnId": "assistant-message-id", "interactionId": "ui_same", "status": "answered", "source": "ios",
+	}))
+
+	projection, ok := r.Snapshot("claude", "s1")
+	if !ok {
+		t.Fatal("missing projection")
+	}
+	parts := 0
+	for _, turn := range projection.Turns {
+		if turn.Assistant == nil {
+			continue
+		}
+		for _, part := range turn.Assistant.Parts {
+			if part.Type == "user_input" && part.UserInputInteractionID == "ui_same" {
+				parts++
+				if turn.TurnID != "hydrate-user-turn" || part.UserInputStatus != "answered" || !part.UserInputCanRespond {
+					t.Fatalf("interaction not updated in place: turn=%s part=%+v", turn.TurnID, part)
+				}
+			}
+		}
+	}
+	if parts != 1 {
+		t.Fatalf("interaction projected %d times, want exactly one", parts)
 	}
 }
 
