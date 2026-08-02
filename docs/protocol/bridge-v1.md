@@ -281,7 +281,7 @@ The v1 and v2 paths MUST NOT be mixed for the same interaction, and v2 MUST NOT 
   answers?: [{ questionId, values: [{ kind: "option"|"text", optionId?, text? }] }] }`. MacBridge
   routes it to the backend-specific `UserInputResponder` (Codex app-server JSON-RPC
   `resolveUserInput`/`interrupt`, or Claude `control_response` allow with `updatedInput.answers` /
-  deny). It returns `{ outcome: "accepted"|"already_resolved", currentStatus }` or a
+  deny). It returns `{ outcome: "accepted"|"already_resolved", status }` or a
   `UserInputError{ code, message }` (`interaction_not_found`, `invalid_answer_shape`,
   `backend_response_failed`, `session_not_active`).
 - Claude v1 invariants (adapter-enforced, design §9): `allowsCustomAnswer` is always `false`
