@@ -128,6 +128,7 @@ compress_context
 check_pending_notifications
 question_reply
 question_reject
+resolve_user_input
 get_delivery_prekey_status
 upload_delivery_prekeys
 get_delivery_chain_head
@@ -176,6 +177,8 @@ context_compressed
 context_usage_updated
 question_asked
 question_resolved
+user_input_requested
+user_input_resolved
 projection_patch
 projection_snapshot
 sync_invalidate
@@ -249,6 +252,54 @@ field, type, or wire value was changed.
   - Claude `autoApprove` / `dontAsk` / `acceptEditsOnly` modes short-circuit
     `AskUserQuestion` before event emission, so the iOS question UI does not
     appear in those modes.
+
+### Structured user input v2 (`structured_user_input_v1`)
+
+`structured_user_input_v1` is the **multi-question, multi-select** successor to the
+single-question `question_asked` / `question_reply` path. It is an additive, non-breaking
+capability: a backend advertises it per-descriptor only when its adapter, responder, and the
+Projection Kernel reducer are all ready; clients that do not see it keep the v1 path verbatim.
+The v1 and v2 paths MUST NOT be mixed for the same interaction, and v2 MUST NOT fall back to
+`question_reply` on failure (`.off` is an explicit legacy mode, not a runtime fallback).
+
+- `user_input_requested` is the bridge event for one structured-input interaction. It carries
+  `turnId`, `interactionId`, `status` (`pending` normal, or `failed` for malformed questions —
+  both project once), `questions[]`, `canRespond`, `canReject`, `expiresAt?`, and
+  `diagnosticCode?` (e.g. `invalid_backend_request`). Each question is
+  `{ id, header?, prompt, answerMode: "single"|"multiple"|"text", options[], allowsCustomAnswer,
+  isSecret, required }`; each option is `{ id, label, description? }`. Stable ids are derived
+  (lowercase SHA-256 prefix `"ui_"`): Codex `interactionId = "ui_"+sha256("codex\0"+requestIdType+
+  "\0"+requestIdValue+"\0"+threadId+"\0"+turnId+"\0"+itemId)[:32]`, Claude
+  `interactionId = "ui_"+sha256("claudecode\0"+requestId)[:32]`; `questionId = interactionId+"_q_"+i`,
+  `optionId = questionId+"_o_"+j`.
+- `user_input_resolved` carries `turnId`, `interactionId`, `status` (`answered`|`rejected`|
+  `auto_resolved`|`unavailable`|`failed`), `source` (`ios`|`mac`|`other_client`|`backend`), and
+  `resolvedAt`. The projection never stores answer text (esp. for `isSecret`); the resolved event
+  only carries status/source/resolvedAt.
+- `resolve_user_input` is the backend-neutral bridge RPC for answering/rejecting a v2
+  interaction. Payload: `{ interactionId, clientActionId, action: "answer"|"reject",
+  answers?: [{ questionId, values: [{ kind: "option"|"text", optionId?, text? }] }] }`. MacBridge
+  routes it to the backend-specific `UserInputResponder` (Codex app-server JSON-RPC
+  `resolveUserInput`/`interrupt`, or Claude `control_response` allow with `updatedInput.answers` /
+  deny). It returns `{ outcome: "accepted"|"already_resolved", currentStatus }` or a
+  `UserInputError{ code, message }` (`interaction_not_found`, `invalid_answer_shape`,
+  `backend_response_failed`, `session_not_active`).
+- Claude v1 invariants (adapter-enforced, design §9): `allowsCustomAnswer` is always `false`
+  (even when an option label is `"Other"`); `multiSelect` maps to `single`/`multiple`; empty
+  options are malformed (not normalized to text); each question is `required=true`, `isSecret=false`;
+  duplicate question text within one interaction is `invalid_backend_request` (it cannot be an
+  unambiguous `answers` map key). Codex has no verified reject path (`canReject=false`); Claude has
+  a real deny `control_response` (`canReject=true`).
+- Projection Kernel (design §10): one `user_input` part per `interactionId`, upserted in place
+  (never a second "answered" card); `execution.phase=requires_action` while any active-turn
+  `user_input` part is `pending`; resolved updates the part in place and reverts phase per active
+  turn status. The reducer is the single consumer for both live and hydrate; identityless frames
+  (missing `turnId`/`interactionId`) are dropped without committing a revision, and a `resolved`
+  with no matching requested part is dropped (no fabrication, no second writer).
+
+`schemaRevision` is bumped to `2026-08-02` for this additive set (new capability, RPC, part
+variant, part op, event names); the protocol major version is unchanged and old clients ignore
+the unknown names.
 
 ## Mapping Notes
 
@@ -607,6 +658,37 @@ mainstream anchor is absent is dropped (fail-open to the current state, never fa
 This is distinct from the legacy `streamId`/`parentStreamId` live child-stream fields (Events
 §`child_stream_*`), which describe **live** mid-run delivery. B4 sync-only does not use those:
 async mid-run live delivery is a separate, future enhancement (方案 2).
+
+#### Part vocabulary: `user_input` (structured user input v2)
+
+`BridgeProjectionPart` gains an additive `type: "user_input"` variant for one structured-input
+interaction (design §6/§10), backend-neutral once projected. The MacBridge Projection Kernel is
+the single writer: it reduces `user_input_requested`/`user_input_resolved` events into exactly one
+part per `interactionId`, upserted **in place** on the owning assistant turn/message (never a
+second "answered" card). Clients map it read-only into a dedicated block; they do not derive
+status, do not write answers back into the projection, and do not synthesize a second card.
+
+Part fields (all lowerCamelCase, optional unless noted):
+
+| Field | Purpose |
+|-------|---------|
+| `interactionId: string` | Stable derived id (`"ui_"+sha256…`); the upsert key. |
+| `status: string` | `pending` \| `answered` \| `rejected` \| `auto_resolved` \| `unavailable` \| `failed`. |
+| `questions` | Canonical question array (see Semantic Notes §Structured user input v2). Absent on `resolved`. |
+| `canRespond: boolean` | Whether the client may answer (`false` for `failed`/`unavailable`). |
+| `canReject: boolean` | Whether the client may reject (Claude `true`, Codex `false`). |
+| `expiresAt?: number` | epoch-ms display hint; clients MUST NOT use a local timer to flip status. |
+| `resolvedAt?: number` | epoch-ms when the interaction reached a terminal status. |
+| `resolutionSource?: string` | `ios` \| `mac` \| `other_client` \| `backend`. |
+| `diagnosticCode?: string` | e.g. `invalid_backend_request` for malformed/`failed`. |
+
+A new part op `upsert_user_input` carries the full part in `BridgePartOp.part` (targeting the
+owning `turnId`/`messageId`). `execution.phase` becomes `requires_action` while any active-turn
+`user_input` part is `pending`; resolving the last pending part reverts phase per the active turn
+status. Snapshot/patch round-trips preserve the part and its `questions` (deep-copied); a
+checkpoint with a `pending` part whose responder handle was lost after process restart is
+recovered to `unavailable` via the Kernel private recovery transaction (design §10.3), never left
+as a clickable-but-unanswerable UI.
 
 ## Session Pinning
 
