@@ -156,11 +156,14 @@ func (k *ProjectionKernel) ApplyClaudeSourceRecordBatch(
 		}
 		nextSeq++
 		before := transactionReducer.LastAppliedRev(batch.BackendID, batch.SessionID)
-		transactionReducer.Apply(EventMessage{
-			BackendID: batch.BackendID, SessionID: batch.SessionID,
-			Event: event.Event, Data: cloneProjectionJSONValue(event.Data),
-			PerSessionSeq: nextSeq, BridgeEpoch: batch.BridgeEpoch,
-		})
+		transactionReducer.Apply(projectionReducerEvent(
+			batch.BackendID,
+			batch.SessionID,
+			event.Event,
+			cloneProjectionJSONValue(event.Data),
+			nextSeq,
+			batch.BridgeEpoch,
+		))
 		if transactionReducer.LastAppliedRev(batch.BackendID, batch.SessionID) != before {
 			applied++
 		}

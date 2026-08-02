@@ -11,7 +11,9 @@
 ### 2026-08-02 — Claude Desktop AskUserQuestion transcript projection
 
 - Claude Desktop 外部会话的 `AskUserQuestion` transcript 现在按 `structured_user_input_v1` 投影为 `observe_only` 的 `user_input_requested`，不再退化为普通 `tool_started`。
+- 外部会话保留 Claude 原生的 Other 自定义答案能力，但明确为只读列表；待回答期间 execution 保持 `requires_action`，iOS 输入区不会再错误显示为已完成。
 - Claude transcript 的 `toolUseResult.questions/answers` 只用于识别原地收口为 `user_input_resolved`，答案正文不进入 projection。
+- checkpoint schema 升级后会丢弃旧的错误投影并从 transcript 重建；同时补齐 canonical Bridge v1 schema，修正 Codex 文本片段拼接和完整 Go 回归暴露的租约测试时序。
 
 ### 2026-07-31 — 修复 iOS/web 端 Claude 已完成 session 重开时消息重复出现两次
 

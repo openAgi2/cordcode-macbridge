@@ -198,7 +198,7 @@ func TestClaudeSourceShapeCorpusOracleFixedFixtureCrossCheck(t *testing.T) {
 		"python3",
 		filepath.Join(claudeSourceShapesDir, "recompute_corpus_stats.py"),
 		"--root", claudeSourceShapesDir,
-		"--expect-h4", "10,1",
+		"--expect-h4", "12,1",
 	)
 	output, err := command.CombinedOutput()
 	if err != nil {
@@ -207,7 +207,7 @@ func TestClaudeSourceShapeCorpusOracleFixedFixtureCrossCheck(t *testing.T) {
 	text := string(output)
 	for _, required := range []string{
 		"H3 logicalRecordReuseGroups: 3; physicalOccurrencesInGroups: 6",
-		"H4 resolvableAssistantRows: 10; fileOrderOwnerMismatchRows: 1",
+		"H4 resolvableAssistantRows: 12; fileOrderOwnerMismatchRows: 1",
 		"crossCheck: streaming==indexed",
 	} {
 		if !strings.Contains(text, required) {

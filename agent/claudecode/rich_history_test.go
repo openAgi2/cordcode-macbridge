@@ -135,7 +135,8 @@ func TestLoadClaudeRichHistory_AskUserQuestionIsObserveOnlyStructuredInput(t *te
 		t.Fatalf("observe-only part = %#v", part)
 	}
 	questions, ok := part["questions"].([]core.UserInputQuestion)
-	if !ok || len(questions) != 1 || questions[0].Prompt != "构建失败时,你希望脚本怎么处理?" || len(questions[0].Options) != 2 {
+	if !ok || len(questions) != 1 || questions[0].Prompt != "构建失败时,你希望脚本怎么处理?" ||
+		len(questions[0].Options) != 2 || !questions[0].AllowsCustomAnswer {
 		t.Fatalf("questions = %#v", part["questions"])
 	}
 }

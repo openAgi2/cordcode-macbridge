@@ -22,7 +22,9 @@ import (
 //   R4: Outbox 溢出后必须重建 epoch 才能继续发送
 //   R5: 设备间 scope 和 outbox 完全隔离
 
-// TestRegressionR1_LeaseAutoDowngrade 验证租约自动降级。
+// TestRegressionR1_LeaseAutoDowngrade 验证租约超过 soft window 后有效降级。
+// DeliveryMode 保留 full_stream，让下一次 SetScope 续租能立即恢复；
+// ShouldSendEvent 的 effective mode 才是真实投递语义。
 func TestRegressionR1_LeaseAutoDowngrade(t *testing.T) {
 	om := NewObservationManager()
 	om.Start(context.Background()) // T09: 显式启动 lease loop
@@ -39,7 +41,8 @@ func TestRegressionR1_LeaseAutoDowngrade(t *testing.T) {
 		t.Error("should send before expiry")
 	}
 
-	time.Sleep(1500 * time.Millisecond)
+	// Soft window is 2x the nominal lease, matching reconnect jitter handling.
+	time.Sleep(2500 * time.Millisecond)
 
 	// 过期后降级
 	if om.ShouldSendEvent("dev_r1", "codex", "s1", "text_delta") {
@@ -49,10 +52,10 @@ func TestRegressionR1_LeaseAutoDowngrade(t *testing.T) {
 		t.Error("should still send durable milestone")
 	}
 
-	// 确认 scope 已降级
+	// Stored intent remains full_stream; effective delivery above is downgraded.
 	scope := om.GetScope("dev_r1", "codex")
-	if scope.DeliveryMode != scopeMilestonesOnly {
-		t.Errorf("mode = %q, want %q", scope.DeliveryMode, scopeMilestonesOnly)
+	if scope.DeliveryMode != scopeFullStream {
+		t.Errorf("mode = %q, want retained %q intent", scope.DeliveryMode, scopeFullStream)
 	}
 }
 

@@ -1188,7 +1188,8 @@ func TestClaudeAskUserQuestionTranscriptProjectsAsObserveOnlyUserInput(t *testin
 		t.Fatalf("normalized questions = %#v", data["questions"])
 	}
 	question, ok := questions[0].(map[string]interface{})
-	if !ok || question["prompt"] != "构建失败时,你希望脚本怎么处理?" || question["answerMode"] != "single" {
+	if !ok || question["prompt"] != "构建失败时,你希望脚本怎么处理?" ||
+		question["answerMode"] != "single" || question["allowsCustomAnswer"] != true {
 		t.Fatalf("normalized question = %#v", questions[0])
 	}
 	if _, hasToolStarted := data["toolName"]; hasToolStarted || events[0].Event == "tool_started" {
@@ -1288,6 +1289,56 @@ func TestPendingClaudeRichHistoryAskUserQuestionKeepsRequiresAction(t *testing.T
 		r.Apply(ev(i+1, "claude", "s1", event.Event, event.Data))
 	}
 	projection, ok := r.Snapshot("claude", "s1")
+	if !ok || projection.Execution.Phase != "requires_action" || projection.Execution.ActiveTurnID != "user-ask" {
+		t.Fatalf("execution = %+v want requires_action/user-ask; events=%+v", projection.Execution, events)
+	}
+}
+
+func TestClaudeDesktopTranscriptPendingQuestionKeepsCustomAndRequiresAction(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "claude-desktop-pending.jsonl")
+	transcript := strings.Join([]string{
+		`{"type":"user","uuid":"user-ask","timestamp":"2026-08-02T10:00:00.000Z","message":{"role":"user","content":"先问我再继续"}}`,
+		`{"type":"assistant","uuid":"assistant-ask","parentUuid":"user-ask","timestamp":"2026-08-02T10:00:01.000Z","message":{"id":"assistant-ask","role":"assistant","content":[{"type":"tool_use","id":"call-ask","name":"AskUserQuestion","input":{"questions":[{"header":"构建失败策略","multiSelect":false,"options":[{"label":"自动重试 3 次"},{"label":"立即失败并报告"}],"question":"构建失败时如何处理？"}]}}]}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(transcript), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var events []projectionHydrateEvent
+	if err := streamClaudeTranscriptProjectionEvents(context.Background(), path, func(event projectionHydrateEvent) bool {
+		events = append(events, event)
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	requested := -1
+	for index, event := range events {
+		if event.Event == "turn_completed" && event.Data["turnId"] == "user-ask" {
+			t.Fatalf("pending external question was incorrectly completed: %+v", events)
+		}
+		if event.Event == "user_input_requested" {
+			requested = index
+			questions, ok := event.Data["questions"].([]interface{})
+			if !ok || len(questions) != 1 {
+				t.Fatalf("questions = %#v", event.Data["questions"])
+			}
+			question, ok := questions[0].(map[string]interface{})
+			if !ok || question["allowsCustomAnswer"] != true || event.Data["canRespond"] != false ||
+				event.Data["canReject"] != false || event.Data["diagnosticCode"] != "observe_only" {
+				t.Fatalf("external question contract = event:%+v question:%#v", event, questions[0])
+			}
+		}
+	}
+	if requested < 0 {
+		t.Fatalf("missing user_input_requested: %+v", events)
+	}
+
+	r := newTestReducer()
+	for index, event := range events {
+		r.Apply(ev(index+1, "claude", "desktop-session", event.Event, event.Data))
+	}
+	projection, ok := r.Snapshot("claude", "desktop-session")
 	if !ok || projection.Execution.Phase != "requires_action" || projection.Execution.ActiveTurnID != "user-ask" {
 		t.Fatalf("execution = %+v want requires_action/user-ask; events=%+v", projection.Execution, events)
 	}

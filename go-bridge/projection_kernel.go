@@ -34,12 +34,32 @@ import (
 // semantics. v7 checkpoints may still contain AskUserQuestion as ordinary tool parts.
 // v9: an interrupt marker following a resolved AskUserQuestion no longer hides the owning
 // prompt and reattributes the structured part to an older turn.
-const projectionCheckpointSchemaVersion = 9
+// v10: Claude AskUserQuestion now advertises its evidence-backed custom-answer capability,
+// and a pending transcript-owned question keeps execution in requires_action. v9 checkpoints
+// can contain allowsCustomAnswer=false and execution.phase=idle, so they must be rebuilt from
+// the canonical transcript instead of being restored as a permanently stale observe-only card.
+const projectionCheckpointSchemaVersion = 10
 
 var (
 	ErrProjectionCheckpointInvalid  = errors.New("projection checkpoint invalid")
 	ErrProjectionCheckpointDisabled = errors.New("projection checkpoint persistence disabled")
 )
+
+// projectionReducerEvent constructs reducer-only input. Keeping this constructor in the
+// projection kernel makes the no-production-bypass guard mechanically distinguish isolated
+// reducer transactions from business-event egress, which must go through EventPublisher.
+func projectionReducerEvent(
+	backendID, sessionID, event string,
+	data interface{},
+	perSessionSeq int,
+	bridgeEpoch string,
+) EventMessage {
+	return EventMessage{
+		BackendID: backendID, SessionID: sessionID,
+		Event: event, Data: data,
+		PerSessionSeq: perSessionSeq, BridgeEpoch: bridgeEpoch,
+	}
+}
 
 type ProjectionHydratePhase string
 
