@@ -8,6 +8,11 @@
 
 ## [Unreleased]
 
+### 2026-08-02 — Claude Desktop AskUserQuestion transcript projection
+
+- Claude Desktop 外部会话的 `AskUserQuestion` transcript 现在按 `structured_user_input_v1` 投影为 `observe_only` 的 `user_input_requested`，不再退化为普通 `tool_started`。
+- Claude transcript 的 `toolUseResult.questions/answers` 只用于识别原地收口为 `user_input_resolved`，答案正文不进入 projection。
+
 ### 2026-07-31 — 修复 iOS/web 端 Claude 已完成 session 重开时消息重复出现两次
 
 - Claude session 经 cold hydrate 重建投影时，不再把上一份投影（live 的 row-UUID turn）作为 baseline 叠加在 rich-history builder 重放之上。此前两套 turn-id 方案（live row-UUID 与 builder `user-line-N`）无法归并，同一份内容在两个 id 下各落一个 turn 并写进 checkpoint，重开经 AlreadyReady 直接返回这份陈旧重复，表现为「切走再切回仍重复两次」。Mac 端渲染本就不消费该投影，故一直正常。
