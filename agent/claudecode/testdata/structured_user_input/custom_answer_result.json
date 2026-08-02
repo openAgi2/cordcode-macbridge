@@ -1,0 +1,25 @@
+{
+  "producer": "Claude Desktop",
+  "producer_version": "2.1.197",
+  "evidence": "sanitized persisted AskUserQuestion toolUseResult",
+  "toolUseResult": {
+    "questions": [
+      {
+        "question": "Choose how to continue.",
+        "header": "Continue",
+        "options": [
+          { "label": "Proceed", "description": "Continue now." },
+          { "label": "Stop", "description": "Stop now." }
+        ],
+        "multiSelect": false
+      }
+    ],
+    "answers": {
+      "Choose how to continue.": "Ask a clarifying question first."
+    }
+  },
+  "verification": {
+    "answer_is_not_an_option_label": true,
+    "source_shape": "toolUseResult.questions + toolUseResult.answers"
+  }
+}

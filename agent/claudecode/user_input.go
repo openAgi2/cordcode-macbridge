@@ -8,7 +8,8 @@ package claudecode
 // 事件，并由 core.UserInputResponder.ResolveUserInput 回答/拒绝。v1 路径保留给未声明能力的会话。
 //
 // 关键不变量（设计已冻结）：
-//   - Claude v1 固定 allowsCustomAnswer=false（即使 option label 是 "Other"，也不展开文本框）；
+//   - Claude AskUserQuestion 支持客户端提供的 Other/custom 文本；该文本仍按 single=string、
+//     multiple=string[] 写入 updatedInput.answers；
 //   - multiSelect false→single、true→multiple；options 缺失属 malformed（SDK 本应在 control_request
 //     前拒绝），不归一化为 text；
 //   - 每题 required=true、isSecret=false；questionId/optionId 由 requestId+index 派生；
@@ -25,6 +26,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -269,7 +271,7 @@ func claudeSnapshotOf(e *claudeUIEntry) *claudeClaimSnapshot {
 // ── 归一化（§9.2）──────────────────────────────────────────────────────────────
 
 // normalizeClaudeUserQuestions 把 parseUserQuestions 的结果映射到 domain UserInputQuestion。
-// multiSelect false→single、true→multiple；allowsCustomAnswer=false（Claude v1）；required=true；
+// multiSelect false→single、true→multiple；allowsCustomAnswer=true（Claude 客户端提供 Other）；required=true；
 // isSecret=false。options 必须非空（SDK 在 control_request 前已拒绝无 options 的调用）。
 // question text 重复 → error（无法作为 answers map key 无歧义表达）。
 func normalizeClaudeUserQuestions(interactionID string, parsed []core.UserQuestion) ([]core.UserInputQuestion, error) {
@@ -303,7 +305,7 @@ func normalizeClaudeUserQuestions(interactionID string, parsed []core.UserQuesti
 			Prompt:             q.Question,
 			AnswerMode:         mode,
 			Options:            opts,
-			AllowsCustomAnswer: false, // Claude v1: 即使 label 是 "Other" 也不接受 custom text
+			AllowsCustomAnswer: true,
 			IsSecret:           false,
 			Required:           true,
 		})
@@ -476,7 +478,7 @@ func (cs *claudeSession) ResolveUserInput(_ context.Context, interactionID, clie
 
 // buildClaudeUpdatedInput 按 §9.3 构建 updatedInput = shallowCopy(originalInput) + answers。
 // single → answers[qText]=label string；multiple → label array；每题恰好一个 entry。
-// Claude v1 allowsCustomAnswer=false：只接受 option value，text value → invalid。
+// option value 映射回 label；custom text 原样写入 answers。
 func buildClaudeUpdatedInput(snap *claudeClaimSnapshot, answers []core.UserInputAnswer) (map[string]any, error) {
 	// questionId → questionText 反查（questionId = claudeQuestionID(interactionID, index)）。
 	qTextByID := make(map[string]string, len(snap.questionOrder))
@@ -525,14 +527,14 @@ func claudeAnswerValue(snap *claudeClaimSnapshot, qText string, mode core.UserIn
 		if len(values) != 1 {
 			return nil, &core.UserInputError{Code: "invalid_answer_shape", Message: "single requires exactly one value"}
 		}
-		return claudeOptionLabel(labelByOptID, values[0])
+		return claudeAnswerString(labelByOptID, values[0])
 	case core.UserInputAnswerModeMultiple:
 		if len(values) < 1 {
 			return nil, &core.UserInputError{Code: "invalid_answer_shape", Message: "multiple requires at least one value"}
 		}
 		labels := make([]string, 0, len(values))
 		for _, v := range values {
-			label, err := claudeOptionLabel(labelByOptID, v)
+			label, err := claudeAnswerString(labelByOptID, v)
 			if err != nil {
 				return nil, err
 			}
@@ -544,14 +546,21 @@ func claudeAnswerValue(snap *claudeClaimSnapshot, qText string, mode core.UserIn
 	}
 }
 
-// claudeOptionLabel 把单个 value 解析为 option label；Claude v1 不接受 custom text。
-func claudeOptionLabel(labelByOptID map[string]string, v core.UserInputValue) (string, error) {
-	if v.Kind != core.UserInputValueOption {
-		return "", &core.UserInputError{Code: "invalid_answer_shape", Message: "Claude v1 does not accept custom text answers"}
+// claudeAnswerString 把 option value 映射回 label，并保留 Claude 客户端允许的非空 custom text。
+func claudeAnswerString(labelByOptID map[string]string, v core.UserInputValue) (string, error) {
+	switch v.Kind {
+	case core.UserInputValueOption:
+		label, ok := labelByOptID[v.OptionID]
+		if !ok {
+			return "", &core.UserInputError{Code: "invalid_answer_shape", Message: "unknown option"}
+		}
+		return label, nil
+	case core.UserInputValueText:
+		if text := strings.TrimSpace(v.Text); text != "" {
+			return v.Text, nil
+		}
+		return "", &core.UserInputError{Code: "invalid_answer_shape", Message: "custom text must not be empty"}
+	default:
+		return "", &core.UserInputError{Code: "invalid_answer_shape", Message: "unsupported answer value"}
 	}
-	label, ok := labelByOptID[v.OptionID]
-	if !ok {
-		return "", &core.UserInputError{Code: "invalid_answer_shape", Message: "unknown option"}
-	}
-	return label, nil
 }

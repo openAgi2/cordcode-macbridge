@@ -1079,6 +1079,7 @@ func openCodeRichHistoryEntryToProjectionEvents(
 			*currentTurnID = turnID
 		}
 		emittedContent := false
+		hasPendingUserInput := false
 		// Prefer structured parts when present.
 		if len(entry.Parts) > 0 {
 			for _, part := range entry.Parts {
@@ -1123,6 +1124,9 @@ func openCodeRichHistoryEntryToProjectionEvents(
 						continue
 					}
 					out = append(out, events...)
+					if strings.TrimSpace(fmt.Sprint(part["status"])) == "pending" {
+						hasPendingUserInput = true
+					}
 					emittedContent = true
 				}
 			}
@@ -1147,7 +1151,13 @@ func openCodeRichHistoryEntryToProjectionEvents(
 				emittedContent = true
 			}
 		}
-		// Rich history rows are complete snapshots; always seal the turn.
+		// AskUserQuestion with no result is a blocking boundary, not a completed turn. Keeping
+		// it open lets the reducer preserve execution.phase=requires_action so every composer
+		// stays in the waiting state while the owning Claude Desktop session awaits an answer.
+		if hasPendingUserInput {
+			return out
+		}
+		// Other rich history rows are complete snapshots; seal the turn.
 		out = append(out, projectionHydrateEvent{
 			Event:    "turn_completed",
 			Data:     map[string]interface{}{"turnId": turnID, "done": true, "reason": "rich_history"},

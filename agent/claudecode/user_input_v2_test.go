@@ -128,8 +128,8 @@ func TestV2_FlagOn_SingleQuestionEmitsPending(t *testing.T) {
 	if q.AnswerMode != core.UserInputAnswerModeSingle {
 		t.Fatalf("single 题 mode = %q want single", q.AnswerMode)
 	}
-	if q.AllowsCustomAnswer {
-		t.Fatalf("Claude v1 allowsCustomAnswer 恒 false")
+	if !q.AllowsCustomAnswer {
+		t.Fatalf("Claude AskUserQuestion 应声明 allowsCustomAnswer=true")
 	}
 	if !q.Required || q.IsSecret {
 		t.Fatalf("required=true isSecret=false，实际 required=%v isSecret=%v", q.Required, q.IsSecret)
@@ -480,9 +480,10 @@ func TestV2_ResolveMultiQuestionMissingOneInvalid(t *testing.T) {
 	}
 }
 
-// TestV2_ResolveCustomTextRejected：Claude v1 allowsCustomAnswer=false → text value 视为非法。
-func TestV2_ResolveCustomTextRejected(t *testing.T) {
-	cs, _ := newAskV2TestSession(t)
+// TestV2_ResolveCustomTextAccepted：真实 Claude Desktop transcript 证明 Other 可返回任意文本；
+// bridge-owned responder 应把该文本原样编码到 updatedInput.answers。
+func TestV2_ResolveCustomTextAccepted(t *testing.T) {
+	cs, stdin := newAskV2TestSession(t)
 	cs.handleControlRequest(makeAskControlRequest("req-ct", []any{
 		singleQuestionMap("Which?", "", false, [2]string{"a", ""}),
 	}))
@@ -492,12 +493,14 @@ func TestV2_ResolveCustomTextRejected(t *testing.T) {
 
 	_, err := cs.ResolveUserInput(t.Context(), iid, "client-A", core.UserInputActionAnswer,
 		[]core.UserInputAnswer{{QuestionID: qid, Values: []core.UserInputValue{{Kind: core.UserInputValueText, Text: "custom"}}}})
-	uie, ok := err.(*core.UserInputError)
-	if !ok || uie.Code != "invalid_answer_shape" {
-		t.Fatalf("Claude v1 不接受 custom text，应 invalid_answer_shape，实际 %T %v", err, err)
+	if err != nil {
+		t.Fatalf("Claude custom text 应可提交，实际 %v", err)
 	}
-	if !strings.Contains(uie.Message, "custom text") {
-		t.Fatalf("错误信息应说明不接受 custom text，实际 %q", uie.Message)
+	response := respInner(t, stdin)
+	updated, _ := response["updatedInput"].(map[string]any)
+	answers, _ := updated["answers"].(map[string]any)
+	if answers["Which?"] != "custom" {
+		t.Fatalf("custom answer = %#v want custom", answers["Which?"])
 	}
 }
 

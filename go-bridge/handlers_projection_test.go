@@ -1260,6 +1260,39 @@ func TestClaudeRichHistoryAskUserQuestionProjectsStructuredEventsWithoutToolActi
 	}
 }
 
+func TestPendingClaudeRichHistoryAskUserQuestionKeepsRequiresAction(t *testing.T) {
+	entries := []core.RichHistoryEntry{
+		{ID: "user-ask", Role: "user", Content: "先问我再继续"},
+		{ID: "assistant-ask", Role: "assistant", Parts: []map[string]any{{
+			"type": "user_input", "itemId": "call-ask", "interactionId": "ui_ask",
+			"status": "pending", "questions": []core.UserInputQuestion{{
+				ID: "ui_ask_q_0", Prompt: "怎么处理?", AnswerMode: core.UserInputAnswerModeSingle,
+				Options: []core.UserInputOption{{ID: "ui_ask_q_0_o_0", Label: "A"}}, Required: true,
+			}}, "canRespond": false, "canReject": false, "diagnosticCode": "observe_only",
+		}}},
+	}
+	var events []projectionHydrateEvent
+	if err := streamRichHistoryProjectionEntries(context.Background(), entries, func(event projectionHydrateEvent) bool {
+		events = append(events, event)
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.Event == "turn_completed" && event.Data["turnId"] == "user-ask" {
+			t.Fatalf("pending AskUserQuestion must not be sealed: %+v", events)
+		}
+	}
+	r := newTestReducer()
+	for i, event := range events {
+		r.Apply(ev(i+1, "claude", "s1", event.Event, event.Data))
+	}
+	projection, ok := r.Snapshot("claude", "s1")
+	if !ok || projection.Execution.Phase != "requires_action" || projection.Execution.ActiveTurnID != "user-ask" {
+		t.Fatalf("execution = %+v want requires_action/user-ask; events=%+v", projection.Execution, events)
+	}
+}
+
 func TestStreamClaudeTranscriptProjectionEventsCompactionBoundaryFiltersInternalSummary(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "compact.jsonl")
 	transcript := strings.Join([]string{

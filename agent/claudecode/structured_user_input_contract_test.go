@@ -139,9 +139,9 @@ func TestClaudeAnswersTypedPerMultiSelect(t *testing.T) {
 	}
 }
 
-// TestClaudeAnswersAreOptionLabelsNotCustom：每个 answer value 都是该题 option label，
-// 证明 Claude v1 永不产生任意 custom 文本（allowsCustomAnswer=false 的产品决定）。
-func TestClaudeAnswersAreOptionLabelsNotCustom(t *testing.T) {
+// TestClaudePairedFixtureAnswersMatchOptionLabels：这三组成对 fixture 选择的是普通 option；
+// 该断言只锁定这些样本，不外推为 Claude 不支持 custom text。
+func TestClaudePairedFixtureAnswersMatchOptionLabels(t *testing.T) {
 	for _, name := range []string{"single_paired.json", "multi_select_paired.json", "multi_question_paired.json"} {
 		paired := loadClaudePaired(t, name)
 		answers := updatedInputAnswers(paired)
@@ -165,10 +165,31 @@ func TestClaudeAnswersAreOptionLabelsNotCustom(t *testing.T) {
 			}
 			for _, v := range values {
 				if !labels[v] {
-					t.Fatalf("%s question %q 的 answer %q 不是 option label → 属 custom，违反 Claude v1 fail-closed", name, qText, v)
+					t.Fatalf("%s question %q 的普通 option answer %q 不在 option labels 中", name, qText, v)
 				}
 			}
 		}
+	}
+}
+
+// TestClaudeDesktopPersistedResultSupportsCustomText locks a real persisted Claude Desktop
+// result shape whose answer is not one of the supplied option labels. The fixture is sanitized
+// but preserves questions/options/answers typing from the owner machine capture.
+func TestClaudeDesktopPersistedResultSupportsCustomText(t *testing.T) {
+	result := loadClaudePaired(t, "custom_answer_result.json")
+	toolResult, _ := result["toolUseResult"].(map[string]any)
+	questions, _ := toolResult["questions"].([]any)
+	answers, _ := toolResult["answers"].(map[string]any)
+	question, _ := questions[0].(map[string]any)
+	questionText, _ := question["question"].(string)
+	answer, _ := answers[questionText].(string)
+	labels := map[string]bool{}
+	for _, raw := range question["options"].([]any) {
+		option, _ := raw.(map[string]any)
+		labels[option["label"].(string)] = true
+	}
+	if answer == "" || labels[answer] {
+		t.Fatalf("custom answer = %q must be non-empty and outside option labels", answer)
 	}
 }
 
