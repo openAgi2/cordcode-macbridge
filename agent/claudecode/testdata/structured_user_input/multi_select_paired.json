@@ -1,0 +1,114 @@
+{
+  "producer": "Claude Code",
+  "producer_version": "2.1.209",
+  "mode": "multi_select",
+  "control_request": {
+    "type": "control_request",
+    "request_id": "request-multi_select-001",
+    "request": {
+      "subtype": "can_use_tool",
+      "tool_name": "AskUserQuestion",
+      "display_name": "AskUserQuestion",
+      "input": {
+        "questions": [
+          {
+            "question": "Which beverages do you want? Pick all that apply.",
+            "header": "Beverages",
+            "options": [
+              {
+                "label": "Tea",
+                "description": "Tea"
+              },
+              {
+                "label": "Coffee",
+                "description": "Coffee"
+              },
+              {
+                "label": "Juice",
+                "description": "Juice"
+              }
+            ],
+            "multiSelect": true
+          }
+        ]
+      },
+      "tool_use_id": "tool-use-multi_select-001",
+      "requires_user_interaction": true
+    }
+  },
+  "control_response": {
+    "type": "control_response",
+    "response": {
+      "subtype": "success",
+      "request_id": "request-multi_select-001",
+      "response": {
+        "behavior": "allow",
+        "updatedInput": {
+          "questions": [
+            {
+              "question": "Which beverages do you want? Pick all that apply.",
+              "header": "Beverages",
+              "options": [
+                {
+                  "label": "Tea",
+                  "description": "Tea"
+                },
+                {
+                  "label": "Coffee",
+                  "description": "Coffee"
+                },
+                {
+                  "label": "Juice",
+                  "description": "Juice"
+                }
+              ],
+              "multiSelect": true
+            }
+          ],
+          "answers": {
+            "Which beverages do you want? Pick all that apply.": [
+              "Tea",
+              "Coffee"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "result_evidence": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "result": "done",
+    "permission_denials": [],
+    "num_turns": 3,
+    "stop_reason": "end_turn",
+    "terminal_reason": "completed"
+  },
+  "verification": {
+    "request_id_linkage_ok": true,
+    "updated_input_preserved_questions": true,
+    "result_subtype": "success",
+    "permission_denials": [],
+    "control_request_sha256": "80307bad1b19a1e8102e0f451ab7790c620f2f96443c1a05661852914f5f1f8f",
+    "control_response_sha256": "0f97c29dee82af5c6f4a773bc3d76a7d748b6e79cf19f17b2a5e949f851e245e",
+    "answers_sha256": "18718e679a416af2595247c6059e6940043a942aa67dfff869d9409ea039ac8a",
+    "result_evidence_sha256": "3830e9d4d087a774d29fec0136217a66a2176d91855d48d163f6c5611d9abac3"
+  },
+  "sanitization": {
+    "replaced_fields": [
+      "control_request.request_id",
+      "request.tool_use_id",
+      "control_response.response.request_id"
+    ],
+    "preserved_fields": [
+      "questions",
+      "headers",
+      "options",
+      "multiSelect",
+      "answers",
+      "value types"
+    ],
+    "raw_capture_sha256": "cf44465f47bf1306722682323845356ead8c0d6c5524396d3ebbf6e58d1edb42"
+  }
+}

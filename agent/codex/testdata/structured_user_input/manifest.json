@@ -1,0 +1,12 @@
+{
+  "producer": "ChatGPT.app bundled Codex app-server",
+  "producer_version": "codex-cli 0.146.0-alpha.9.2",
+  "files": {
+    "codex_ServerRequest.json": "5abe765ff9bd94b88f2f2fb417025ec011eac172925ffdfc74d7ccf2542bc114",
+    "codex_RequestId.json": "a33325d0eca49631bf935e9a30d02ba542b42d563f8c58955d3e8f14ad6d3ab1",
+    "codex_ToolRequestUserInputParams.json": "21e569e32c05d51c1ee5e587730c182b911ede97a4df267f6e4ef24e1717f34e",
+    "codex_ToolRequestUserInputResponse.json": "14ede53c2e51b289fb3c80903292d4b0f0b387eae217dbb257c201b2b7c65bf1",
+    "codex_ServerNotification.json": "89608a4d65d713a85940f8eefb9bf2e87a94cbf2abac3ed069fad7cb6f078872",
+    "codex_JSONRPCResponse.json": "94ecf5e81bdbc2af858afad0044b95c7fb4decf77d7fd7d6321324dad79eef57"
+  }
+}

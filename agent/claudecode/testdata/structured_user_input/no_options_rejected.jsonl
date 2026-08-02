@@ -1,0 +1,2 @@
+{"evidence": "agent_constructed_no_options_question", "tool_use_input": {"questions": [{"header": "Favorite color", "multiSelect": false, "question": "What is your favorite color?"}]}}
+{"evidence": "sdk_rejected_missing_options", "tool_result": "<tool_use_error>InputValidationError: AskUserQuestion failed due to the following issue:\nThe required parameter `questions[0].options` is missing</tool_use_error>"}
