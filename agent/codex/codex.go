@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/BurntSushi/toml"
 	"github.com/openAgi2/cordcode-macbridge/core"
 	"github.com/openAgi2/cordcode-macbridge/pinstore"
 )
@@ -174,7 +175,15 @@ func (a *Agent) SetModel(model string) {
 func (a *Agent) GetModel() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return core.GetProviderModel(a.providers, a.activeIdx, a.model)
+	// 优先级：provider model → bridge 设置的 a.model → config.toml 的 model（ccswitch）。
+	// config 兜底让 isDefault 能正确标记 ccswitch 配置的模型（handleListModels 用 GetModel 判 default）。
+	if m := core.GetProviderModel(a.providers, a.activeIdx, a.model); m != "" {
+		return m
+	}
+	if models := readCodexConfigModels(); len(models) > 0 {
+		return models[0].Name
+	}
+	return ""
 }
 
 func (a *Agent) SetReasoningEffort(effort string) {
@@ -204,6 +213,12 @@ func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
 	if models := a.configuredModels(); len(models) > 0 {
 		return models
 	}
+	// 级 1.5（owner 2026-08-04 拍板：单一模型语义）：ccswitch 写入 ~/.codex/config.toml 的
+	// model 是当前生效模型。短路 2–4 级——iOS 选型器只显示 Mac 实际在用的模型。
+	// 有意不做合并：ccswitch 场景 provider 是 custom 端点，显示 GPT 备选是误导（选了也请求错误端点）。
+	if models := readCodexConfigModels(); len(models) > 0 {
+		return models
+	}
 	if models := readCodexCachedModels(); len(models) > 0 {
 		return models
 	}
@@ -218,6 +233,50 @@ func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
 		{Name: "gpt-4.1-nano", Desc: "GPT-4.1 Nano (fastest)"},
 		{Name: "codex-mini-latest", Desc: "Codex Mini (code-optimized)"},
 	}
+}
+
+// readCodexConfigModels 解析 ~/.codex/config.toml（ccswitch 写入的模型配置），
+// 把顶层 model 字段暴露为可选模型。这是 ccswitch 场景下「当前生效模型」的唯一真相。
+// 只读 model + model_providers 描述，不读任何凭据字段（experimental_bearer_token 等）。
+// 单一模型语义：返回 0 或 1 个模型（有 model 字段 → 1 个；否则 nil）。
+func readCodexConfigModels() []core.ModelOption {
+	codexHome := os.Getenv("CODEX_HOME")
+	if codexHome == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil
+		}
+		codexHome = filepath.Join(home, ".codex")
+	}
+	b, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
+	if err != nil {
+		return nil
+	}
+	var cfg struct {
+		Model          string `toml:"model"`
+		ModelProvider  string `toml:"model_provider"`
+		ModelProviders map[string]struct {
+			Name    string `toml:"name"`
+			BaseURL string `toml:"base_url"`
+		} `toml:"model_providers"`
+	}
+	if err := toml.Unmarshal(b, &cfg); err != nil {
+		return nil
+	}
+	model := strings.TrimSpace(cfg.Model)
+	if model == "" {
+		return nil
+	}
+	desc := "codex config.toml model"
+	if p, ok := cfg.ModelProviders[cfg.ModelProvider]; ok {
+		if p.Name != "" {
+			desc = p.Name
+			if p.BaseURL != "" {
+				desc += " (" + p.BaseURL + ")"
+			}
+		}
+	}
+	return []core.ModelOption{{Name: model, Desc: desc}}
 }
 
 var openaiChatModels = map[string]bool{
