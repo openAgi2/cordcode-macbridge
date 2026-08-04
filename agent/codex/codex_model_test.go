@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -70,24 +69,32 @@ func writeCodexConfig(t *testing.T, content string) string {
 	return dir
 }
 
-func TestReadCodexConfigModels_ReturnsConfiguredModel(t *testing.T) {
-	writeCodexConfig(t, `model = "deepseek-v4-flash"
-model_provider = "custom"
+// writeCodexConfigWithCatalog 写 config.toml(引用 catalog)+ 一个含 pro/flash 的 catalog 文件。
+func writeCodexConfigWithCatalog(t *testing.T, catalogName string) string {
+	t.Helper()
+	dir := writeCodexConfig(t, "model = \"deepseek-v4-flash\"\nmodel_catalog_json = \""+catalogName+"\"\n")
+	catalog := `{"models": [
+		{"slug": "deepseek-v4-flash", "display_name": "DeepSeek V4 Flash"},
+		{"slug": "deepseek-v4-pro", "display_name": "DeepSeek V4 Pro"}
+	]}`
+	if err := os.WriteFile(filepath.Join(dir, catalogName), []byte(catalog), 0o600); err != nil {
+		t.Fatalf("write catalog: %v", err)
+	}
+	return dir
+}
 
-[model_providers.custom]
-name = "deepseek"
-base_url = "https://api.deepseek.com"
-`)
+func TestReadCodexConfigModels_ReturnsCatalogModels(t *testing.T) {
+	writeCodexConfigWithCatalog(t, "cc-switch-model-catalog.json")
 
 	models := readCodexConfigModels()
-	if len(models) != 1 {
-		t.Fatalf("readCodexConfigModels() = %v, want exactly 1 model", models)
+	if len(models) != 2 {
+		t.Fatalf("readCodexConfigModels() = %v, want exactly 2 catalog models", models)
 	}
-	if models[0].Name != "deepseek-v4-flash" {
-		t.Fatalf("model name = %q, want deepseek-v4-flash", models[0].Name)
+	if models[0].Name != "deepseek-v4-flash" || models[0].Desc != "DeepSeek V4 Flash" {
+		t.Fatalf("models[0] = %+v, want flash with display name", models[0])
 	}
-	if !strings.Contains(models[0].Desc, "deepseek") {
-		t.Fatalf("model desc = %q, want provider name", models[0].Desc)
+	if models[1].Name != "deepseek-v4-pro" || models[1].Desc != "DeepSeek V4 Pro" {
+		t.Fatalf("models[1] = %+v, want pro with display name", models[1])
 	}
 }
 
@@ -99,17 +106,24 @@ func TestReadCodexConfigModels_EmptyOrMissingModel(t *testing.T) {
 		}
 	})
 
-	t.Run("empty model field", func(t *testing.T) {
-		writeCodexConfig(t, "model = \"\"\n")
+	t.Run("no model_catalog_json field", func(t *testing.T) {
+		writeCodexConfig(t, "model = \"deepseek-v4-flash\"\n")
 		if models := readCodexConfigModels(); models != nil {
-			t.Fatalf("readCodexConfigModels() = %v, want nil for empty model", models)
+			t.Fatalf("readCodexConfigModels() = %v, want nil without catalog field", models)
 		}
 	})
 
-	t.Run("corrupt file", func(t *testing.T) {
+	t.Run("corrupt config file", func(t *testing.T) {
 		writeCodexConfig(t, "this is not toml [[[")
 		if models := readCodexConfigModels(); models != nil {
-			t.Fatalf("readCodexConfigModels() = %v, want nil for corrupt file", models)
+			t.Fatalf("readCodexConfigModels() = %v, want nil for corrupt config", models)
+		}
+	})
+
+	t.Run("missing catalog file", func(t *testing.T) {
+		writeCodexConfig(t, "model_catalog_json = \"missing-catalog.json\"\n")
+		if models := readCodexConfigModels(); models != nil {
+			t.Fatalf("readCodexConfigModels() = %v, want nil for missing catalog", models)
 		}
 	})
 }
@@ -123,12 +137,15 @@ func TestGetModel_FallsBackToConfigWhenUnset(t *testing.T) {
 	}
 }
 
-func TestAvailableModels_ConfigTierShortCircuits(t *testing.T) {
-	writeCodexConfig(t, "model = \"deepseek-v4-flash\"\n")
+func TestAvailableModels_ConfigCatalogTierShortCircuits(t *testing.T) {
+	writeCodexConfigWithCatalog(t, "cc-switch-model-catalog.json")
 	a := &Agent{}
 
 	models := a.AvailableModels(context.Background())
-	if len(models) != 1 || models[0].Name != "deepseek-v4-flash" {
-		t.Fatalf("AvailableModels() = %v, want exactly [deepseek-v4-flash] (tier 1.5 short-circuit)", models)
+	if len(models) != 2 {
+		t.Fatalf("AvailableModels() = %v, want exactly 2 catalog models (tier 1.5 short-circuit)", models)
+	}
+	if models[0].Name != "deepseek-v4-flash" || models[1].Name != "deepseek-v4-pro" {
+		t.Fatalf("AvailableModels() = %v, want [flash, pro]", models)
 	}
 }
