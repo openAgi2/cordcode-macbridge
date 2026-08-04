@@ -120,36 +120,58 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 
 func (a *Agent) Stop() error { return nil }
 
-// SubscribeSessionEvents attaches to a running grok leader (~/.grok/leader.sock)
-// as a READ-ONLY subscriber for one session and streams its live session/update
-// notifications as core.Events (via convertSessionUpdate). It does NOT spawn a
-// leader, acquire the flock, or drive the session. Fail-fast when no leader
-// socket exists (grok not running → no external turn to observe). The channel
-// closes when the leader disconnects or ctx is cancelled.
+// SubscribeSessionEvents streams a session's live session/update notifications as
+// core.Events (via convertSessionUpdate). It prefers the leader-socket subscriber
+// (push, low-latency) when ~/.grok/leader.sock exists; otherwise it falls back to
+// the updates.jsonl file tailer (poll). grok's leader socket only exists under
+// use_leader=true (default inline embedded agent mode never creates it), so the
+// file fallback is the path most users actually hit — and it works without any
+// requirement on how grok was launched, since grok writes updates.jsonl in all
+// modes. Both sources feed the same codec (convertSessionUpdate), so the downstream
+// relay loop's turn-start synthesis / defer-idle logic is shared unchanged.
+//
+// Neither path spawns a leader, acquires the flock, or drives the session. The
+// channel closes when the source disconnects / tails out or ctx is cancelled.
 //
 // grokHome is write-once (set in New), so reading it here without a.mu is safe.
 func (a *Agent) SubscribeSessionEvents(ctx context.Context, sessionID, cwd string) (<-chan core.Event, error) {
-	socketPath := resolveLeaderSocket(a.grokHome)
-	if _, err := os.Stat(socketPath); err != nil {
-		return nil, fmt.Errorf("grokbuild: leader socket not available (%s): %w", socketPath, err)
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, fmt.Errorf("grokbuild: SubscribeSessionEvents requires a sessionId")
 	}
 	if strings.TrimSpace(cwd) == "" {
 		cwd = a.GetWorkDir()
 	}
 	ch := make(chan core.Event, 32)
+	forward := func(ev core.Event) {
+		if ev.SessionID == "" {
+			ev.SessionID = sessionID
+		}
+		select {
+		case ch <- ev:
+		case <-ctx.Done():
+		}
+	}
+
+	socketPath := resolveLeaderSocket(a.grokHome)
+	if _, err := os.Stat(socketPath); err != nil {
+		// Leader socket absent (默认 inline 模式) —— fallback 到 updates.jsonl file tailer。
+		slog.Info("grokbuild: leader socket absent, falling back to updates.jsonl file tailer",
+			"session", sessionID, "socket", socketPath)
+		tail := newUpdatesFileTailSubscriber(a.grokHome, sessionID)
+		go func() {
+			defer close(ch)
+			if err := tail.Run(ctx, forward); err != nil {
+				slog.Debug("grokbuild: updates file tailer ended", "session", sessionID, "error", err)
+			}
+		}()
+		return ch, nil
+	}
+
 	sub := NewLeaderSubscriber(socketPath, sessionID, cwd)
 	go func() {
 		defer close(ch)
 		slog.Info("grokbuild: leader subscriber starting", "session", sessionID, "socket", socketPath)
-		if err := sub.Run(ctx, func(ev core.Event) {
-			if ev.SessionID == "" {
-				ev.SessionID = sessionID
-			}
-			select {
-			case ch <- ev:
-			case <-ctx.Done():
-			}
-		}); err != nil {
+		if err := sub.Run(ctx, forward); err != nil {
 			slog.Debug("grokbuild: leader subscriber ended", "session", sessionID, "error", err)
 		}
 	}()
