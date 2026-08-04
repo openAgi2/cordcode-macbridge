@@ -262,7 +262,7 @@ func TestSessionSyncV2DirectTransportResultPrecedesLiveProjectionPatch(t *testin
 		t.Fatalf("projection result data = %#v", result["data"])
 	}
 	projection, ok := data["projection"].(map[string]interface{})
-	if !ok || projection["syncRev"] != float64(2) || projection["bridgeEpoch"] != epoch {
+	if !ok || projection["syncRev"] != float64(1) || projection["bridgeEpoch"] != epoch {
 		t.Fatalf("committed projection result lost head/epoch: %#v", data["projection"])
 	}
 
@@ -279,9 +279,9 @@ func TestSessionSyncV2DirectTransportResultPrecedesLiveProjectionPatch(t *testin
 		if frame["event"] == "projection_patch" {
 			patch, ok := frame["data"].(map[string]interface{})
 			if !ok ||
-				patch["baseRev"] != float64(2) ||
-				patch["syncRev"] != float64(3) ||
-				frame["perSessionSeq"] != float64(3) ||
+				patch["baseRev"] != float64(1) ||
+				patch["syncRev"] != float64(2) ||
+				frame["perSessionSeq"] != float64(2) ||
 				frame["bridgeEpoch"] != epoch {
 				t.Fatalf("live patch lost ordered head/epoch evidence: %#v", frame)
 			}

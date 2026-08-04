@@ -126,7 +126,7 @@ func TestHandleGetSessionProjectionReturnsReducerState(t *testing.T) {
 	if !ok {
 		t.Fatalf("data.projection not SessionProjection: %T", dataMap["projection"])
 	}
-	if proj.SessionID != "s1" || proj.SyncRev != 2 || len(proj.Turns) != 1 || proj.Turns[0].TurnID != "T1" {
+	if proj.SessionID != "s1" || proj.SyncRev != 1 || len(proj.Turns) != 1 || proj.Turns[0].TurnID != "T1" {
 		t.Fatalf("projection = %+v", proj)
 	}
 }
@@ -157,9 +157,9 @@ func TestHandleGetSessionProjectionDeltaAtHead(t *testing.T) {
 	handlers := NewHandlers()
 	handlers.eventPublisher.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "s1", Event: "turn_started", Data: map[string]interface{}{"turnId": "T1"}, Broadcast: true})
 	handlers.eventPublisher.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "s1", Event: "text_delta", Data: map[string]interface{}{"itemId": "T1", "delta": "ready"}, Broadcast: true})
-	// headRev is now 2 and contains real content (a bare shell alone is not ready).
+	// headRev is now 1: turn_started does not commit (a bare shell alone is not ready); text_delta carries content.
 	conn := &readFileCaptureConn{}
-	params, _ := json.Marshal(map[string]interface{}{"sessionId": "s1", "sinceRev": 2})
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": "s1", "sinceRev": 1})
 	msg := WireMessage{RequestID: "r1", BackendID: "codex", Method: "get_session_projection", Params: params}
 	handlers.handleGetSessionProjection(conn, msg, nil)
 
@@ -171,7 +171,7 @@ func TestHandleGetSessionProjectionDeltaAtHead(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected patches delta at head, got %+v", dataMap)
 	}
-	if len(patches) != 0 || dataMap["headRev"].(int) != 2 {
+	if len(patches) != 0 || dataMap["headRev"].(int) != 1 {
 		t.Fatalf("expected empty patches + headRev 2, got %+v", dataMap)
 	}
 }

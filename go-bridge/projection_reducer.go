@@ -225,6 +225,47 @@ func (ps *projectionSession) upsertTurn(turn TurnProjection) {
 	}
 }
 
+// upsertTurnPersistOnly merges into projection.Turns without staging a flush delta. Used by
+// turn_started so skeleton frames (running turn without content) never leave the reducer —
+// publishing one breaks client local-send optimistic paint fences (owner 2026-08-04 真机).
+func (ps *projectionSession) upsertTurnPersistOnly(turn TurnProjection) {
+	if turn.TurnID == "" {
+		return
+	}
+	if t := ps.turnByID(turn.TurnID); t != nil {
+		if turn.Status != "" {
+			t.Status = turn.Status
+		}
+		if turn.StartedAt != 0 {
+			t.StartedAt = turn.StartedAt
+		}
+		if turn.CompletedAt != 0 {
+			t.CompletedAt = turn.CompletedAt
+		}
+		if turn.User != nil {
+			t.User = turn.User
+		}
+		if turn.Assistant != nil {
+			t.Assistant = turn.Assistant
+		}
+		if turn.System != nil {
+			t.System = turn.System
+		}
+		return
+	}
+	ps.projection.Turns = append(ps.projection.Turns, turn)
+}
+
+// setActiveTurnPersistOnly arms Execution.ActiveTurnID without staging ps.execution. Content
+// events call markRunning (full path) once they arrive; turn_started alone must not flush a
+// running-execution delta for a content-less turn (see upsertTurnPersistOnly note).
+func (ps *projectionSession) setActiveTurnPersistOnly(turnID string) {
+	if turnID == "" {
+		return
+	}
+	ps.projection.Execution = ExecutionView{Phase: "running", ActiveTurnID: turnID}
+}
+
 // markRunning sets session execution to running for turnID (design §7.4). Content
 // events must re-arm after a prior turn_completed left phase=idle.
 //
@@ -424,9 +465,17 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if turnID == "" {
 			return // no source-proven turnId; skip identityless lifecycle frames
 		}
-		commit()
-		ps.upsertTurn(TurnProjection{TurnID: turnID, Status: "running", StartedAt: ps.projection.UpdatedAt})
-		ps.markRunning(turnID)
+		// No commit / no flush-buffer writes on turn_started: at this point the turn has no
+		// user/assistant content yet. Publishing a skeleton projection (rev advances while the
+		// user part is not in) breaks client local-send optimistic paint fences — a lagging
+		// patch with rev > baseline but no user row blanks the just-sent bubble (owner
+		// 2026-08-04 真机: 发送后 "问题1" 消失几秒再出现). Content events (user_message /
+		// text_delta / reasoning_delta / tool_started) commit the complete frame when they arrive.
+		// Persist-only updates keep Execution.ActiveTurnID armed (tool_started / text_delta attach
+		// point in content-only turns that never carry a user_message) and preserve StartedAt,
+		// without staging a flush delta that FlushPatch would publish.
+		ps.upsertTurnPersistOnly(TurnProjection{TurnID: turnID, Status: "running", StartedAt: ps.projection.UpdatedAt})
+		ps.setActiveTurnPersistOnly(turnID)
 
 	case "user_message":
 		turnID := dataString(data, "turnId")

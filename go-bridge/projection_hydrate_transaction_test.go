@@ -153,7 +153,7 @@ func TestProjectionHydrateGrowingSourceKeepsBaselineAndPendingDisjoint(t *testin
 	if commit.PendingLive != 4 {
 		t.Fatalf("pending live count = %d, want 4", commit.PendingLive)
 	}
-	if len(commit.Projection.Turns) != 2 || commit.Projection.SyncRev != 8 {
+	if len(commit.Projection.Turns) != 2 || commit.Projection.SyncRev != 6 {
 		t.Fatalf("committed projection = %+v", commit.Projection)
 	}
 	if commit.Projection.Turns[0].TurnID != "turn-1" ||
@@ -273,8 +273,8 @@ func TestProjectionKernelPendingLiveRejectsDuplicateAndOutOfOrderInput(t *testin
 	if got := projectionTurnText(commit.Projection.Turns[0]); got != "once" {
 		t.Fatalf("duplicate/out-of-order pending input changed projection: %q", got)
 	}
-	if commit.Projection.SyncRev != 2 {
-		t.Fatalf("projection rev = %d, want two committed mutations", commit.Projection.SyncRev)
+	if commit.Projection.SyncRev != 1 {
+		t.Fatalf("projection rev = %d, want one committed mutation (turn_started no longer commits)", commit.Projection.SyncRev)
 	}
 }
 

@@ -99,7 +99,7 @@ func TestResolveUserInput_SuccessOutcome(t *testing.T) {
 		t.Fatalf("resolver 收到 iid=%q action=%q answers=%d want ui_abc/answer/1", seenIID, seenAction, seenAnswers)
 	}
 	m, _ := conn.data.(map[string]any)
-	if m["interactionId"] != "ui_abc" || m["outcome"] != core.UserInputOutcomeAccepted || m["currentStatus"] != core.UserInputStatusAnswered || m["headRev"] != 3 {
+	if m["interactionId"] != "ui_abc" || m["outcome"] != core.UserInputOutcomeAccepted || m["currentStatus"] != core.UserInputStatusAnswered || m["headRev"] != 2 {
 		t.Fatalf("result = %+v want canonical four-field result", conn.data)
 	}
 }
@@ -231,7 +231,7 @@ func TestResolveUserInput_ClaimedReturnsInProgressWithoutFakeTerminalState(t *te
 		t.Fatal(conn.wireErr)
 	}
 	result := conn.data.(map[string]any)
-	if result["outcome"] != core.UserInputOutcomeInProgress || result["currentStatus"] != core.UserInputStatusPending || result["headRev"] != 2 {
+	if result["outcome"] != core.UserInputOutcomeInProgress || result["currentStatus"] != core.UserInputStatusPending || result["headRev"] != 1 {
 		t.Fatalf("claimed result = %+v", result)
 	}
 }
