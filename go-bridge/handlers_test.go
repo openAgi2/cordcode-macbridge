@@ -4220,3 +4220,43 @@ func TestSessionRuntimeStateEnrichment(t *testing.T) {
 		t.Fatalf("get_session (external) runtimeState = %#v, want running", got)
 	}
 }
+
+func TestShouldListClaudeProjectsAllowlist(t *testing.T) {
+	t.Parallel()
+	if shouldListClaudeProjects(nil) {
+		t.Fatal("nil agent must not scan Claude projects")
+	}
+	if !shouldListClaudeProjects(&fakeAgent{name: "claudecode"}) {
+		t.Fatal("claudecode must scan Claude projects")
+	}
+	if !shouldListClaudeProjects(&fakeAgent{name: "claude"}) {
+		t.Fatal("claude alias must scan Claude projects")
+	}
+	for _, name := range []string{"codex", "grokbuild", "opencode"} {
+		if shouldListClaudeProjects(&fakeAgent{name: name}) {
+			t.Fatalf("%s must not scan Claude projects", name)
+		}
+	}
+}
+
+func TestHandleListProjectsCodexReturnsEmptyEvenIfClaudeProjectsExist(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	claudeProjects := filepath.Join(home, ".claude", "projects", "-Users-jacklee-Projects-fake")
+	if err := os.MkdirAll(claudeProjects, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	handlers := newTestHandlers(t)
+	conn := &readFileCaptureConn{}
+	handlers.handleListProjects(conn, WireMessage{RequestID: "req-codex-projects"}, &fakeAgent{name: "codex"})
+
+	if conn.err != nil {
+		t.Fatalf("unexpected wire error: %+v", conn.err)
+	}
+	data, _ := conn.data.(map[string]interface{})
+	projects, _ := data["projects"].([]interface{})
+	if len(projects) != 0 {
+		t.Fatalf("codex list_projects = %#v, want empty (must not inherit ~/.claude/projects)", projects)
+	}
+}

@@ -1274,10 +1274,11 @@ func (h *Handlers) handleListAgents(conn Connection, msg WireMessage, agent core
 }
 
 func (h *Handlers) handleListProjects(conn Connection, msg WireMessage, agent core.Agent) {
-	// Claude-style project scan under ~/.claude/projects is only meaningful for
-	// Claude. Grok Build sessions live under ~/.grok/sessions and are discovered
-	// via agent.ListSessions — do not pollute Grok UI with Claude project folders.
-	if agent != nil && agent.Name() == "grokbuild" {
+	// ~/.claude/projects is Claude-only (path-encoded keys like -Users-jacklee-Projects-…).
+	// Codex / Grok / others discover workspace via session.directory from ListSessions.
+	// Previously only grokbuild was excluded; Codex still scanned Claude folders → iOS
+	// sidebar seeded dozens of empty "暂无会话" groups under Codex mode.
+	if !shouldListClaudeProjects(agent) {
 		conn.SendResult(msg.RequestID, map[string]interface{}{"projects": []interface{}{}}, nil)
 		return
 	}
@@ -1319,6 +1320,20 @@ func (h *Handlers) handleListProjects(conn Connection, msg WireMessage, agent co
 		projects = []map[string]interface{}{}
 	}
 	conn.SendResult(msg.RequestID, map[string]interface{}{"projects": projects}, nil)
+}
+
+// shouldListClaudeProjects gates the ~/.claude/projects filesystem scan.
+// Only the Claude agent owns that catalog; all other backends must return empty.
+func shouldListClaudeProjects(agent core.Agent) bool {
+	if agent == nil {
+		return false
+	}
+	switch agent.Name() {
+	case "claudecode", "claude":
+		return true
+	default:
+		return false
+	}
 }
 
 func resolveProjectRealDirectory(projectDir string) string {
