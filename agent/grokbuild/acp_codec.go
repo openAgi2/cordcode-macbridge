@@ -275,6 +275,37 @@ func convertSessionUpdate(params json.RawMessage, sessionID string) []core.Event
 		// Internal state updates — not forwarded as events.
 		return nil
 
+	case "turn_completed":
+		// 上游 durable 终态信号 (x.ai/session_notification, 无 isReplay → 进 leader live rail)。
+		// prompt_id 是跨重连的 turn 关联键 (resolvedPromptID 兼容 promptId/prompt_id 两种 key);
+		// stop_reason 区分正常结束与异常。映射成 EventResult{Done:true}, mapAgentEvent 会把它转成
+		// wire turn_completed, grokLeaderSessionRelayLoop 的 markIdle 分支据此收口。
+		promptID := p.resolvedPromptID()
+		switch p.StopReason {
+		case "error":
+			// 上游报错 → 转 wire error (终态), iOS 显示真实失败而非假完成。
+			return []core.Event{{
+				Type:    core.EventError,
+				Content: "grok turn error",
+				Done:    true,
+				TurnID:  promptID,
+			}}
+		case "cancelled":
+			return []core.Event{{
+				Type:    core.EventResult,
+				Done:    true,
+				TurnID:  promptID,
+				Content: "cancelled",
+			}}
+		default:
+			// end_turn / rate_limit / 空 → 正常完成。
+			return []core.Event{{
+				Type:   core.EventResult,
+				Done:   true,
+				TurnID: promptID,
+			}}
+		}
+
 	default:
 		// Unknown update type — log for diagnostics but do NOT emit an error
 		// event. Treating unknown notifications as terminal errors would abort

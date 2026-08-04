@@ -248,6 +248,85 @@ func TestConvertSessionUpdate_TruncatedJSON(t *testing.T) {
 	}
 }
 
+// TestConvertSessionUpdate_TurnCompleted_* 覆盖上游 durable 终态信号映射。
+// 真实 updates.jsonl 样本形状: {"sessionUpdate":"turn_completed","prompt_id":"...","stop_reason":"..."}
+// 上游对 prompt_id 的 JSON key 不一致 (prompt_id 440次 / promptId 289次), 两种都要兼容。
+
+func TestConvertSessionUpdate_TurnCompleted_EndTurn(t *testing.T) {
+	params := json.RawMessage(`{"sessionId":"s1","update":{"sessionUpdate":"turn_completed","prompt_id":"ad68fb4b","stop_reason":"end_turn"}}`)
+	events := convertSessionUpdate(params, "s1")
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d: %+v", len(events), events)
+	}
+	if events[0].Type != core.EventResult {
+		t.Errorf("type = %v, want EventResult", events[0].Type)
+	}
+	if !events[0].Done {
+		t.Error("expected Done=true")
+	}
+	if events[0].TurnID != "ad68fb4b" {
+		t.Errorf("TurnID = %q, want ad68fb4b", events[0].TurnID)
+	}
+}
+
+func TestConvertSessionUpdate_TurnCompleted_PromptIdCamelCase(t *testing.T) {
+	// 上游新版本用 camelCase promptId, 旧版本用 snake_case prompt_id — 两者都要能取到。
+	params := json.RawMessage(`{"sessionId":"s1","update":{"sessionUpdate":"turn_completed","promptId":"camel-id","stop_reason":"end_turn"}}`)
+	events := convertSessionUpdate(params, "s1")
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].TurnID != "camel-id" {
+		t.Errorf("TurnID = %q, want camel-id", events[0].TurnID)
+	}
+}
+
+func TestConvertSessionUpdate_TurnCompleted_Cancelled(t *testing.T) {
+	params := json.RawMessage(`{"sessionId":"s1","update":{"sessionUpdate":"turn_completed","prompt_id":"p-cancel","stop_reason":"cancelled"}}`)
+	events := convertSessionUpdate(params, "s1")
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Type != core.EventResult || !events[0].Done {
+		t.Errorf("expected EventResult Done, got %+v", events[0])
+	}
+	if events[0].TurnID != "p-cancel" {
+		t.Errorf("TurnID = %q, want p-cancel", events[0].TurnID)
+	}
+}
+
+func TestConvertSessionUpdate_TurnCompleted_Error(t *testing.T) {
+	params := json.RawMessage(`{"sessionId":"s1","update":{"sessionUpdate":"turn_completed","prompt_id":"p-err","stop_reason":"error"}}`)
+	events := convertSessionUpdate(params, "s1")
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Type != core.EventError {
+		t.Errorf("type = %v, want EventError for stop_reason=error", events[0].Type)
+	}
+	if !events[0].Done {
+		t.Error("expected Done=true (terminal)")
+	}
+	if events[0].TurnID != "p-err" {
+		t.Errorf("TurnID = %q, want p-err", events[0].TurnID)
+	}
+}
+
+func TestConvertSessionUpdate_TurnCompleted_RateLimit(t *testing.T) {
+	// rate_limit 应映射成正常完成 (EventResult), 不是 error — 限流是可恢复的, 不应显示为失败。
+	params := json.RawMessage(`{"sessionId":"s1","update":{"sessionUpdate":"turn_completed","prompt_id":"p-rl","stop_reason":"rate_limit"}}`)
+	events := convertSessionUpdate(params, "s1")
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Type != core.EventResult {
+		t.Errorf("type = %v, want EventResult (rate_limit is recoverable)", events[0].Type)
+	}
+	if !events[0].Done {
+		t.Error("expected Done=true")
+	}
+}
+
 func TestSelectPermissionOption_Allow(t *testing.T) {
 	options := []permissionOption{
 		{OptionID: "a1", Name: "Allow once", Kind: "allow_once"},

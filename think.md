@@ -1,6 +1,42 @@
 # Claude Code 冷启动既有 session 首轮流式从头重播：跨仓排查结论
 
-## 2026-07-18 追加复盘：Relay 长 session 的 A/B/D 优化状态与跨端经验
+## 2026-08-04 追加复盘：Grok 外部任务 iOS 输入框卡"完成态"
+
+### 现象
+Mac 端发起的 Grok Build 任务正在执行时,iOS 端同步该 session 的过程中输入框一直停在"完成态",没有进入"执行中"。Claude/Codex/OpenCode 无此问题。
+
+### 根因(两层,均在 MacBridge)
+1. **codec 丢弃上游 durable `turn_completed`**:`convertSessionUpdate`(`agent/grokbuild/acp_codec.go`)的 default 分支把 `turn_completed` sessionUpdate 当未知类型丢弃。真实 `~/.grok/sessions/*/updates.jsonl` 证实上游在终态发 durable `turn_completed`(440 次,带 `prompt_id`+`stop_reason`,method `_x.ai/session/update`,无 isReplay → 进 leader live rail),但 codec 不映射它。
+2. **relay loop 不合成 turn-start 信号**:`grokLeaderSessionRelayLoop`(`go-bridge/handlers_relay.go`)只转发内容事件,不合成 `turn_started`/`session_state_changed(running)`。上游 grok-build 不发任何 turn-start sessionUpdate(真实数据 `response_started`=0)。
+
+iOS 进入"执行中"(`isGenerating`)唯一可靠触发是收到 `turn_started` 或 `session_state_changed(running)`。两个都收不到 → 输入框停完成态。
+
+### 诊断方法(autonomous,不依赖 owner)
+- 用本机 `~/.grok/sessions/*/updates.jsonl` 作为真实协议样本(上游持久化的通知 = live rail 同源),grep `sessionUpdate` tag 分布。替代了 audit 报告要求的"真实 leader wire 捕获"。
+- 对照 codex(`handlers_relay.go:347-355`)和 claude(`:586-597`)的 file relay:它们都会在检测到活跃 turn 时合成 `turn_started`+`session_state_changed(running)` —— grok 的 leader relay 缺这步。
+- audit-plan 评审(`docs/2026-08-04-grok-external-turn-completing-state-fix-audit.md`)纠正了 v1 方案的事实错误("upstream 永不发 turn_completed"是错的)。
+
+### 修复(三层,MacBridge 单侧)
+- **改动 A(codec,主收口)**:`convertSessionUpdate` 加 `case "turn_completed"`,映射成 `EventResult{Done:true, TurnID:prompt_id}`;`error` stop_reason 转 `EventError`。`sessionUpdatePayload` 加 `PromptID`/`StopReason` 字段(兼容 `prompt_id`/`promptId` 两种 key)。`mapAgentEvent` 已把它转成 wire `turn_completed`,relay loop markIdle 自然生效。
+- **改动 B(relay,开始信号)**:`grokLeaderSessionRelayLoop` 在首个内容事件(`text_delta`/`reasoning_delta`/`tool_started`/`tool_finished`)前合成 `turn_started`(turnId 空)+ `session_state_changed(running)`,置 `turnArmed`。turnId 解耦(开始信号用空 ID,结束信号用 prompt_id),避免 ID 跳变。
+- **改动 C(relay,兜底)**:`defer` 里若 `turnArmed` 仍为 true(leader 异常断开,未收 turn_completed),补发 `session_state_changed(idle)` + markIdle。
+
+### 关键决策记录
+- **不动 `handlers.go:1824-1839`(Bug 4 补丁)**:它针对 iOS 本地发起路径(那条路径 `session.go:380` 自己 emit turn_started),与 leader relay loop 是独立路径。动它会重新引入 2026-07-12"卡执行中"回归。
+- **不动 iOS** `sessionSyncV2ProjectionBackend`(grok 被排除):grok 尚未迁移到 projection,是已知架构边界。iOS 对 wire 事件是 backend-agnostic 的,Mac 发对事件就能进入执行中。
+- **不动 capability**:保持 `requiresPollingForExternalTurns=true` 的 probe 并行兜底。
+
+### 验证
+- 定向测试:`go test ./agent/grokbuild/... -count=1`(15 通过,含 5 个新 turn_completed 变体)+ `go test ./go-bridge/... -count=1`(含 6 个新 grok leader relay 测试:合成/幂等/error/plan 不触发/defer idle/subscribe error)。
+- Release 构建 + 覆盖安装 `/Applications`(runtime commit `4218327f883a`,built `2026-08-04T13:43:50Z`),8777 监听者核对为正式版。
+- **待 owner 真机验收**:Mac 发起 Grok 任务 → iOS 输入框变"执行中";任务完成 → 恢复"完成态"(不卡执行中)。这是诚实边界——单测和部署不等于端到端成功。
+
+### 后续原则
+- **真实数据样本胜过静态推测**:audit 用上游源码静态分析发现"upstream 发 turn_completed",但本机 `updates.jsonl` 直接证实了 440 次 + 字段形状,是最短路径。排查协议类 bug 先 grep 本机持久化样本。
+- **turn 生命周期合成属 relay 层,不属 codec**:codec 是无状态 ACP→core.Event 映射;turn 开始/结束的 wire 语义合成发生在 relay loop(和 codex/claude 一致)。但 durable 终态信号的**映射**(把上游 turn_completed 转成 core.Event)属 codec——因为它是协议变体到事件的 1:1 转换。
+- **leader channel close ≠ turn 结束**:close 只表示 leader 断开。turn 结束的权威信号是上游 `turn_completed`。收口逻辑必须区分两者。
+
+
 
 ### 最终状态（后续 agent 先看此表）
 

@@ -202,6 +202,21 @@ type sessionUpdatePayload struct {
 	Entries       []planEntry        `json:"entries,omitempty"`
 	Used          *int               `json:"used,omitempty"`
 	Size          *int               `json:"size,omitempty"`
+	// turn_completed 终态字段。上游在不同版本里对 prompt_id 的 JSON key 不一致
+	// (真实 updates.jsonl: "prompt_id" 440 次, "promptId" 289 次), 两个字段都接收,
+	// 取非空者作 durable turn 关联键。stop_reason 区分正常结束 / 取消 / 限流 / 错误。
+	PromptID   string `json:"promptId,omitempty"`
+	PromptIDRaw string `json:"prompt_id,omitempty"` // snake_case 兜底 (旧上游版本)
+	StopReason string `json:"stop_reason,omitempty"`
+}
+
+// resolvedPromptID returns the durable turn correlation key from a turn_completed
+// payload, tolerating upstream's inconsistent key casing ("promptId" vs "prompt_id").
+func (p sessionUpdatePayload) resolvedPromptID() string {
+	if p.PromptID != "" {
+		return p.PromptID
+	}
+	return p.PromptIDRaw
 }
 
 type contentBlock struct {

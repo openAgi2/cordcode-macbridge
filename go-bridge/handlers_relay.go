@@ -164,8 +164,35 @@ func (h *Handlers) startGrokLeaderSessionRelay(sessionID, backendID string, agen
 // to core.Event via convertSessionUpdate) to clients via the same wire path as
 // local turns (mapAgentEvent + sendSessionEvent). Exits when the leader disconnects
 // (channel close); the next session-open restarts it.
+//
+// Turn 生命周期合成 (Mac 发起的外部 turn 没有 iOS 发起路径里的 EventTurnStarted):
+//   - turn_started: 上游 grok-build 不发任何 turn-start sessionUpdate (真实数据
+//     response_started=0), 所以在首个内容事件前合成 turn_started + running, 激活
+//     iOS isGenerating。turnId 留空 (iOS 对 grok 走 activateGenerationIfNeeded,
+//     不依赖 turnId); turn_completed 的 prompt_id 独立收口, 两者解耦避免 ID 跳变。
+//   - turn_completed: 由 convertSessionUpdate 的 case "turn_completed" 映射上游 durable
+//     终态信号产生 (主收口), 这里只负责 markIdle + 重置 turnArmed。
+//   - defer idle: 仅当 leader 异常断开 (channel close) 且未收到 turn_completed 时
+//     兜底, 防止 isGenerating 残留; 正常收口不经过这里。
 func (h *Handlers) grokLeaderSessionRelayLoop(sessionID, backendID string, sub core.SessionEventSubscriber, relayKey, cwd string) {
+	// 内容事件: 首个到达时触发 turn_started 合成。todos_updated (plan) 不算内容,
+	// 因为它可能在 turn 真正开始前就到达, 误触发执行态。
+	isContentEvent := func(eventName string) bool {
+		switch eventName {
+		case "text_delta", "reasoning_delta", "tool_started", "tool_finished":
+			return true
+		}
+		return false
+	}
+
+	var turnArmed bool
 	defer func() {
+		// leader 异常断开且未收 turn_completed → 兜底补 idle, 防 isGenerating 残留。
+		if turnArmed {
+			slog.Info("go-bridge: grokLeaderSessionRelay leader disconnect with armed turn, emitting fallback idle", "sessionID", sessionID)
+			h.sessions.markIdle(sessionID)
+			h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "idle"})
+		}
 		h.mu.Lock()
 		delete(h.relayRunning, relayKey)
 		h.mu.Unlock()
@@ -182,10 +209,21 @@ func (h *Handlers) grokLeaderSessionRelayLoop(sessionID, backendID string, sub c
 		if eventName == "" {
 			continue
 		}
-		if eventName == "turn_started" {
+		// 首个内容事件前合成 turn_started + running (Mac 外部 turn 无上游 start 信号)。
+		if isContentEvent(eventName) && !turnArmed {
+			turnArmed = true
 			h.sessions.markRunning(sessionID)
-		} else if eventName == "turn_completed" || eventName == "error" {
+			slog.Info("go-bridge: grokLeaderSessionRelay SYNTHESIZE turn_started+running", "sessionID", sessionID, "firstContent", eventName)
+			h.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": ""})
+			h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "running"})
+		}
+		if eventName == "turn_completed" || eventName == "error" {
+			// 上游 durable 终态信号到达 (convertSessionUpdate 映射) → 主收口。
 			h.sessions.markIdle(sessionID)
+			turnArmed = false
+			slog.Info("go-bridge: grokLeaderSessionRelay turn terminal", "sessionID", sessionID, "event", eventName)
+		} else if eventName == "turn_started" {
+			h.sessions.markRunning(sessionID)
 		}
 		h.sendSessionEvent(sessionID, backendID, eventName, data)
 	}
