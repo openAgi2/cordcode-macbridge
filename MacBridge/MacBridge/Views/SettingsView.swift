@@ -12,7 +12,7 @@ struct SettingsView: View {
     @AppStorage("appTheme") private var appTheme = ""
     @AppStorage("autoRestartEnabled") private var autoRestartEnabled = true
     @AppStorage("autoRestartIntervalMinutes") private var autoRestartIntervalMinutes = 120
-    @AppStorage("sessionListLimit") private var sessionListLimit = 50
+    @AppStorage("sessionListLimit") private var sessionListLimit = 100
     @State private var showManualAuthentication = false
     @State private var showPassword = false
     @State private var showRegenerateConfirmation = false

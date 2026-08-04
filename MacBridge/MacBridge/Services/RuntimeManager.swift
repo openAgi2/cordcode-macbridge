@@ -99,7 +99,7 @@ struct RuntimeConfig {
         relayCredential: String = "",
         preferLocalNetwork: Bool = false,
         relayServiceAddress: String = "",
-        sessionListLimit: Int = 50
+        sessionListLimit: Int = 100
     ) {
         self.executablePath = NSString(string: executablePath).expandingTildeInPath
         self.port = port

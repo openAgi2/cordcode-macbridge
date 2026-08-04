@@ -28,7 +28,7 @@ var hiddenDirectoryBases = map[string]bool{
 
 const (
 	claudeSessionSummaryReadLimit = 512 * 1024
-	defaultSessionListLimit       = 50
+	defaultSessionListLimit       = 100
 	maxSessionListLimit           = 150
 )
 

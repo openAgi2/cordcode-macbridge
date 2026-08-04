@@ -341,8 +341,8 @@ func listIDs(data map[string]interface{}) []string {
 
 func TestSessionListLimitUsesConfiguredCap(t *testing.T) {
 	h := NewHandlers()
-	if got := h.effectiveSessionListLimit(150); got != 50 {
-		t.Fatalf("default configured limit = %d, want 50", got)
+	if got := h.effectiveSessionListLimit(150); got != 100 {
+		t.Fatalf("default configured limit = %d, want 100", got)
 	}
 	h.SetSessionListLimit(125)
 	if got := h.effectiveSessionListLimit(150); got != 125 {

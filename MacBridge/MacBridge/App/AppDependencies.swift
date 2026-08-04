@@ -143,7 +143,7 @@ class AppDependencies: ObservableObject {
             relayCredential: "",
             preferLocalNetwork: preferLocalNetwork,
             relayServiceAddress: UserDefaults.standard.string(forKey: "relayServiceAddress") ?? "",
-            sessionListLimit: UserDefaults.standard.object(forKey: "sessionListLimit") as? Int ?? 50
+            sessionListLimit: UserDefaults.standard.object(forKey: "sessionListLimit") as? Int ?? 100
         )
 
         self.runtimeManager = RuntimeManager(config: config)
@@ -199,7 +199,7 @@ class AppDependencies: ObservableObject {
         NotificationCenter.default.publisher(for: .sessionListLimitDidChange)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                let value = UserDefaults.standard.object(forKey: "sessionListLimit") as? Int ?? 50
+                let value = UserDefaults.standard.object(forKey: "sessionListLimit") as? Int ?? 100
                 self?.runtimeManager.applyConfigAndRestart { config in
                     config.sessionListLimit = min(max(value, 1), 150)
                 }
