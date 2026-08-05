@@ -110,6 +110,43 @@ func (u *unsupportedMutationAgent) Stop() error { return nil }
 
 func (f *fakeAgent) Name() string { return f.name }
 
+// WireDescriptor (§6.2) makes fakeAgent self-describe by name, mirroring the real
+// driver values in agent/<drv>/wire_descriptor.go. A fakeAgent stands in for a real
+// driver, so after §6.2 it must self-describe the same A-class static capabilities
+// (content_chunking/question_reply/external_turn_streaming for claude, external_turn_streaming
+// for codex, todos 兜底 for opencode) instead of relying on the removed id-keyed checks.
+// "claude" and "claudecode" map to the same descriptor (production alias); unknown names
+// return nil → legacy fallback. Keep these values in sync with the driver files.
+func (f *fakeAgent) WireDescriptor() *core.WireDescriptor {
+	switch f.name {
+	case "claude", "claudecode":
+		return &core.WireDescriptor{
+			Kind: "claude_code", DisplayName: "Claude Code",
+			LiveEventModel: core.LiveEventSessionProcess, RequiresExternalTurnPolling: true,
+			StaticCapabilities: []string{"content_chunking", "question_reply", "external_turn_streaming"},
+		}
+	case "codex":
+		return &core.WireDescriptor{
+			Kind: "codex", DisplayName: "Codex",
+			LiveEventModel: core.LiveEventSessionProcess, RequiresExternalTurnPolling: false,
+			StaticCapabilities: []string{"external_turn_streaming"},
+		}
+	case "opencode":
+		return &core.WireDescriptor{
+			Kind: "opencode", DisplayName: "OpenCode",
+			LiveEventModel: core.LiveEventBroadcast, RequiresExternalTurnPolling: true,
+			StaticCapabilities: []string{"todos"},
+		}
+	case "grokbuild":
+		return &core.WireDescriptor{
+			Kind: "grokbuild", DisplayName: "Grok Build",
+			LiveEventModel: core.LiveEventSessionProcess, RequiresExternalTurnPolling: true,
+		}
+	default:
+		return nil
+	}
+}
+
 func (f *fakeAgent) GetRunningSessionIDs(ctx context.Context) (map[string]bool, error) {
 	f.runningCalls++
 	return f.runningSessionIDs, nil

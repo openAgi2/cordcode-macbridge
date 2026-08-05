@@ -523,6 +523,50 @@ type ConversationRollbackProvider interface {
 	RollbackConversationToTurn(ctx context.Context, sessionID string, turnNumber int) error
 }
 
+// LiveEventModel enumerates how a backend surfaces external-turn progress to MacBridge
+// (and thus to clients). §6.2 driver self-description carries this as a static value;
+// the codex app_server runtime override (session_process → broadcast when a shared
+// app-server URL is configured) still applies in go-bridge on top of the static base.
+type LiveEventModel string
+
+const (
+	// LiveEventSessionProcess: the agent runs as a stdin/stdout pipe (or per-session
+	// process) whose external turns MacBridge can only observe by tailing its output
+	// files. claudecode / codex / grokbuild are process-model by default.
+	LiveEventSessionProcess LiveEventModel = "session_process"
+	// LiveEventBroadcast: the agent exposes a service-level event stream that fans out
+	// external-turn events to multiple observers. opencode is broadcast-native; codex
+	// upgrades to broadcast only when a shared app-server URL is configured.
+	LiveEventBroadcast LiveEventModel = "broadcast"
+)
+
+// WireDescriptor is a driver's self-described static wire attributes (§6.2 provider
+// 零跨层抽象). Each driver returns its own Kind / DisplayName / LiveEventModel /
+// RequiresExternalTurnPolling / StaticCapabilities instead of go-bridge branching on
+// backend id. Only STATIC attributes belong here — anything that depends on runtime
+// state (codex app_server mode, adapter readiness, detection probes) stays in wire.
+//
+// StaticCapabilities is the home for A-class positive capabilities that were
+// previously id-keyed in backend_capabilities.go (content_chunking, claude
+// question_reply, external_turn_streaming, opencode todos 兜底). Mode-conditional
+// capabilities (codex app_server compression/question_reply/structured_user_input_v1)
+// and interface-gated capabilities (TodoProvider/ToolAuthorizer/...) are NOT here.
+type WireDescriptor struct {
+	Kind                        string
+	DisplayName                 string
+	LiveEventModel              LiveEventModel
+	RequiresExternalTurnPolling bool
+	StaticCapabilities          []string
+}
+
+// WireDescriptorProvider is implemented by every driver that self-describes its static
+// wire attributes. go-bridge prefers this self-description and falls back to the
+// pre-§6.2 id-keyed switches only for drivers that have not yet migrated. A nil
+// descriptor is treated as "not provided" so a driver can opt out per-build.
+type WireDescriptorProvider interface {
+	WireDescriptor() *WireDescriptor
+}
+
 // WorkDirSwitcher is an optional interface for agents that support runtime
 // work directory switching. The change takes effect on the next session start;
 // the current running session is terminated automatically by the engine.
