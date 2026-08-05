@@ -168,8 +168,11 @@ func (h *Handlers) startGrokLeaderSessionRelay(sessionID, backendID string, agen
 // Turn 生命周期合成 (Mac 发起的外部 turn 没有 iOS 发起路径里的 EventTurnStarted):
 //   - turn_started: 上游 grok-build 不发任何 turn-start sessionUpdate (真实数据
 //     response_started=0), 所以在首个内容事件前合成 turn_started + running, 激活
-//     iOS isGenerating。turnId 留空 (iOS 对 grok 走 activateGenerationIfNeeded,
-//     不依赖 turnId); turn_completed 的 prompt_id 独立收口, 两者解耦避免 ID 跳变。
+//     iOS isGenerating。turnId 用首个内容事件携带的 _meta.promptId (== 后续
+//     turn_completed 的 prompt_id, convertSessionUpdate 已透传到 ev.TurnID)——SSV2
+//     projection reducer 的 turn_started 分支要求 source-proven turnId 才会 arm
+//     ActiveTurnID (projection_reducer.go:465), 留空会被 skip, 后续 tool_started 无
+//     active turn 可挂。promptId 与 turn_completed 收口键一致, 不跳变。
 //   - turn_completed: 由 convertSessionUpdate 的 case "turn_completed" 映射上游 durable
 //     终态信号产生 (主收口), 这里只负责 markIdle + 重置 turnArmed。
 //   - defer idle: 仅当 leader 异常断开 (channel close) 且未收到 turn_completed 时
@@ -210,11 +213,13 @@ func (h *Handlers) grokLeaderSessionRelayLoop(sessionID, backendID string, sub c
 			continue
 		}
 		// 首个内容事件前合成 turn_started + running (Mac 外部 turn 无上游 start 信号)。
+		// turnId 取自首个内容事件的 ev.TurnID (= convertSessionUpdate 透传的 _meta.promptId),
+		// 让 reducer arm ActiveTurnID 后续 tool/text 才有 turn 可挂。
 		if isContentEvent(eventName) && !turnArmed {
 			turnArmed = true
 			h.sessions.markRunning(sessionID)
-			slog.Info("go-bridge: grokLeaderSessionRelay SYNTHESIZE turn_started+running", "sessionID", sessionID, "firstContent", eventName)
-			h.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": ""})
+			slog.Info("go-bridge: grokLeaderSessionRelay SYNTHESIZE turn_started+running", "sessionID", sessionID, "firstContent", eventName, "turnId", ev.TurnID)
+			h.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": ev.TurnID})
 			h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "running"})
 		}
 		if eventName == "turn_completed" || eventName == "error" {

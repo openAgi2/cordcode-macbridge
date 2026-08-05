@@ -191,10 +191,14 @@ type sessionUpdate struct {
 // sessionUpdatePayload holds all possible fields across variants.
 // Only fields relevant to the active variant are populated.
 type sessionUpdatePayload struct {
-	SessionUpdate string             `json:"sessionUpdate"`
-	MessageID     string             `json:"messageId,omitempty"`
-	Content       *contentBlock      `json:"content,omitempty"` // single block for *_message_chunk
-	ToolCallID    string             `json:"toolCallId,omitempty"`
+	SessionUpdate string          `json:"sessionUpdate"`
+	MessageID     string          `json:"messageId,omitempty"`
+	// Content 保持 raw: grok 的 agent_*_chunk 用单个 text object, 但 tool_call_update
+	// 记录的 content 是数组 (实测 929 条 tool_call_update 里约一半是数组形状,
+	// 见 contentText())。用 *contentBlock 会让整个 outer unmarshal 失败 → EventError →
+	// relay loop 误判终态 → idle/running 振荡。raw + contentText() 同时兼容两种形状。
+	Content    json.RawMessage    `json:"content,omitempty"`
+	ToolCallID string             `json:"toolCallId,omitempty"`
 	Title         string             `json:"title,omitempty"`
 	Kind          string             `json:"kind,omitempty"`
 	Status        string             `json:"status,omitempty"`
@@ -217,6 +221,66 @@ func (p sessionUpdatePayload) resolvedPromptID() string {
 		return p.PromptID
 	}
 	return p.PromptIDRaw
+}
+
+// hasContent reports whether the raw content field is present and non-null.
+// agent_message_chunk / agent_thought_chunk use it to decide whether to emit a chunk.
+func (p sessionUpdatePayload) hasContent() bool {
+	s := strings.TrimSpace(string(p.Content))
+	return s != "" && s != "null"
+}
+
+// contentText extracts concatenated text from the raw content field, tolerating both
+// single-object and array shapes.
+//
+//	grok agent_*_chunk:  content: {"type":"text","text":"..."}
+//	grok tool_call_update: content: [{"type":"content","content":{"type":"text","text":"..."}}]
+//
+// Returns "" when no text is found. Never errors — a malformed block is skipped so the
+// surrounding chunk still decodes (avoids the prior whole-message EventError failure).
+func (p sessionUpdatePayload) contentText() string {
+	s := strings.TrimSpace(string(p.Content))
+	if s == "" || s == "null" {
+		return ""
+	}
+	if s[0] == '[' {
+		var blocks []json.RawMessage
+		if err := json.Unmarshal(p.Content, &blocks); err != nil {
+			return ""
+		}
+		var b strings.Builder
+		for _, raw := range blocks {
+			b.WriteString(extractContentText(raw))
+		}
+		return b.String()
+	}
+	return extractContentText(p.Content)
+}
+
+// extractContentText parses one content block, tolerating both the direct text shape
+// {type:"text", text:"..."} and the nested {type:"content", content:{type:"text",...}}
+// wrapper that grok uses inside tool_call_update content arrays.
+func extractContentText(raw json.RawMessage) string {
+	var probe struct {
+		Type    string          `json:"type"`
+		Text    string          `json:"text"`
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return ""
+	}
+	if probe.Text != "" {
+		return probe.Text
+	}
+	if len(probe.Content) > 0 {
+		var inner struct {
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(probe.Content, &inner); err == nil {
+			return inner.Text
+		}
+	}
+	return ""
 }
 
 type contentBlock struct {

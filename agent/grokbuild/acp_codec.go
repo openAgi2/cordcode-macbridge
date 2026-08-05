@@ -172,11 +172,15 @@ func extractParams(line []byte) json.RawMessage {
 
 // convertSessionUpdate converts an ACP session/update notification params to one or more core.Events.
 // params is the raw "params" field of the session/update notification:
-// {"sessionId":"...", "update": {"sessionUpdate":"agent_message_chunk", "content":{...}}}
+// {"sessionId":"...", "update": {"sessionUpdate":"agent_message_chunk", "content":{...}}, "_meta":{...}}
 func convertSessionUpdate(params json.RawMessage, sessionID string) []core.Event {
-	// First parse the outer wrapper to get the "update" field.
+	// First parse the outer wrapper to get the "update" field and the top-level _meta.
 	var outer struct {
 		Update sessionUpdatePayload `json:"update"`
+		Meta   struct {
+			PromptID    string `json:"promptId,omitempty"`
+			PromptIDRaw string `json:"prompt_id,omitempty"`
+		} `json:"_meta,omitempty"`
 	}
 	if err := json.Unmarshal(params, &outer); err != nil {
 		return []core.Event{{
@@ -187,24 +191,40 @@ func convertSessionUpdate(params json.RawMessage, sessionID string) []core.Event
 
 	p := outer.Update
 
+	// grok 流式 chunk 的稳定 turn/item 关联键 = params._meta.promptId, 与 turn_completed 的
+	// prompt_id 实测同值 (例如 "73494e8f-...")。SSV2 projection reducer 要求 text_delta /
+	// reasoning_delta / tool 携带 source-proven itemId/turnId, 否则 identityless 事件被直接 skip
+	// (projection_reducer.go:465/537/568/598); 同时 iOS 的 syncV2 连接 raw timeline 被 seal
+	// (projection_delivery.go), 只有 projection patch 能到 iOS。因此必须把 promptId 透传成
+	// ItemID/TurnID, reducer 才会接受并 flush patch。tool_call 的 toolCallId 是 per-tool 稳定 id,
+	// 独立作 RequestID (tool_started/tool_finished 的 itemId)。
+	promptID := outer.Meta.PromptID
+	if promptID == "" {
+		promptID = outer.Meta.PromptIDRaw
+	}
+
 	switch p.SessionUpdate {
 	case "agent_message_chunk":
-		if p.Content != nil {
-			return []core.Event{{
-				Type:    core.EventText,
-				Content: p.Content.Text,
-			}}
+		if !p.hasContent() {
+			return nil
 		}
-		return nil
+		return []core.Event{{
+			Type:    core.EventText,
+			Content: p.contentText(),
+			ItemID:  promptID,
+			TurnID:  promptID,
+		}}
 
 	case "agent_thought_chunk":
-		if p.Content != nil {
-			return []core.Event{{
-				Type:    core.EventThinking,
-				Content: p.Content.Text,
-			}}
+		if !p.hasContent() {
+			return nil
 		}
-		return nil
+		return []core.Event{{
+			Type:    core.EventThinking,
+			Content: p.contentText(),
+			ItemID:  promptID,
+			TurnID:  promptID,
+		}}
 
 	case "user_message_chunk":
 		// User message echo — not forwarded to iOS.
@@ -212,8 +232,10 @@ func convertSessionUpdate(params json.RawMessage, sessionID string) []core.Event
 
 	case "tool_call":
 		ev := core.Event{
-			Type:     core.EventToolUse,
-			ToolName: p.Title,
+			Type:      core.EventToolUse,
+			ToolName:  p.Title,
+			TurnID:    promptID,
+			RequestID: p.ToolCallID,
 		}
 		if p.Status == "completed" {
 			success := true
@@ -239,6 +261,8 @@ func convertSessionUpdate(params json.RawMessage, sessionID string) []core.Event
 				ToolName:    p.Title,
 				ToolStatus:  p.Status,
 				ToolSuccess: &success,
+				RequestID:   p.ToolCallID,
+				TurnID:      promptID,
 			}}
 		}
 		return nil
