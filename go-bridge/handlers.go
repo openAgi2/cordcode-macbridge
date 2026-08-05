@@ -3782,59 +3782,180 @@ func (h *Handlers) handleReadFile(conn Connection, msg WireMessage) {
 	}, nil)
 }
 
-// ── list_directory: iOS 端远程选择/浏览 Mac 本地文件夹 ──────────────────────────────
+	// ── list_directory: iOS 端远程选择/浏览 Mac 本地文件夹 (§6.5) ────────────────────
+	//
+	// 两个模式，由可选 workspace_root 参数切换：
+	// 1. workspace_root 传（workspace-bound）：realpath(requested) 必须在 realpath(root) 内，
+	//    symlink 列为 isSymlink:true 叶子不递归；拒 ../ 越界。
+	// 2. workspace_root 不传（广域 picker）：保持现有 expandPath 行为，picker 不受影响。
+	// 同时新增 limit/offset/depth 翻页与子树预取（additive，所有调用方共享）。
+	func (h *Handlers) handleListDirectory(conn Connection, msg WireMessage) {
+		var params struct {
+			Path          string `json:"path"`
+			Limit         int    `json:"limit"`
+			Offset        int    `json:"offset"`
+			Depth         int    `json:"depth"`
+			WorkspaceRoot string `json:"workspace_root"`
+		}
+		if msg.Params != nil {
+			json.Unmarshal(msg.Params, &params)
+		}
 
-func (h *Handlers) handleListDirectory(conn Connection, msg WireMessage) {
-	var params struct {
-		Path string `json:"path"`
-	}
-	if msg.Params != nil {
-		json.Unmarshal(msg.Params, &params)
+		var root string
+		var resolvedPath string
+		workspaceBound := params.WorkspaceRoot != ""
+
+		if workspaceBound {
+			var err error
+			root, err = canonicalExistingDirectory(params.WorkspaceRoot)
+			if err != nil {
+				conn.SendResult(msg.RequestID, nil, &WireError{Code: "file.outside_authorized_root", Message: "invalid workspace root: " + err.Error()})
+				return
+			}
+			if params.Path == "" {
+				resolvedPath = root
+			} else {
+				resolvedPath, err = canonicalExistingDirectory(params.Path)
+				if err != nil {
+					conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_path", Message: err.Error()})
+					return
+				}
+				if !pathIsWithinRoot(root, resolvedPath) {
+					conn.SendResult(msg.RequestID, nil, &WireError{Code: "file.outside_authorized_root", Message: "requested directory is outside the authorized workspace"})
+					return
+				}
+			}
+		} else {
+			// 广域模式（picker）：保持现有行为，通过 expandPath 接受 ~/相对路径。
+			var err error
+			resolvedPath, err = expandPath(params.Path)
+			if err != nil {
+				conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_path", Message: err.Error()})
+				return
+			}
+			root = resolvedPath // 广域模式下 root 不作 symlink 逃逸守卫
+		}
+
+		entries, err := os.ReadDir(resolvedPath)
+		if err != nil {
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "read_failed", Message: err.Error()})
+			return
+		}
+
+		limit := clampInt(params.Limit, 200, 1, 500)
+		offset := max(0, params.Offset)
+		depth := clampInt(params.Depth, 1, 1, 3)
+
+		allEntries := filterAndSortDirEntries(entries)
+		totalTopLevel := len(allEntries)
+
+		end := offset + limit
+		if offset > totalTopLevel {
+			offset = totalTopLevel
+		}
+		if end > totalTopLevel {
+			end = totalTopLevel
+		}
+		topSlice := allEntries[offset:end]
+		hasMore := (offset + limit) < totalTopLevel
+
+		items := collectDirItems(resolvedPath, topSlice, root, workspaceBound, depth, limit)
+		conn.SendResult(msg.RequestID, map[string]interface{}{
+			"currentPath": resolvedPath,
+			"items":       items,
+			"limit":       limit,
+			"offset":      offset,
+			"depth":       depth,
+			"hasMore":     hasMore,
+		}, nil)
 	}
 
-	resolvedPath, err := expandPath(params.Path)
-	if err != nil {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_path", Message: err.Error()})
-		return
+	// ── list_directory helpers ──────────────────────────────────────────────────────────
+
+	func clampInt(v, zeroVal, minVal, maxVal int) int {
+		if v == 0 {
+			return zeroVal
+		}
+		if v < minVal {
+			return minVal
+		}
+		if v > maxVal {
+			return maxVal
+		}
+		return v
 	}
 
-	entries, err := os.ReadDir(resolvedPath)
-	if err != nil {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "read_failed", Message: err.Error()})
-		return
+	func max(a, b int) int {
+		if a > b {
+			return a
+		}
+		return b
 	}
 
+	// filterAndSortDirEntries 过滤隐藏条目（. 开头），并按「目录优先→字母序」排序。
+	func filterAndSortDirEntries(entries []os.DirEntry) []os.DirEntry {
+		var visible []os.DirEntry
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			visible = append(visible, e)
+		}
+		sort.Slice(visible, func(i, j int) bool {
+			aDir, bDir := visible[i].IsDir(), visible[j].IsDir()
+			if aDir != bDir {
+				return aDir // dirs first
+			}
+			return visible[i].Name() < visible[j].Name()
+		})
+		return visible
+	}
+
+	// collectDirItems 把当前层的 entries 转为 []directoryItem，并按 depth 递归子目录（仅真实
+	// 目录，不含 symlink）。limit 参数控制每层递归的子条目上限，防止 depth=3 时响应爆炸。
+	func collectDirItems(parent string, entries []os.DirEntry, workspaceRoot string, workspaceBound bool, depth, limit int) []directoryItem {
+		var items []directoryItem
+		for _, e := range entries {
+			name := e.Name()
+			isSymlink := e.Type()&os.ModeSymlink != 0
+			isDir := e.IsDir()
+			itemPath := filepath.Join(parent, name)
+
+			items = append(items, directoryItem{
+				Name:        name,
+				Path:        itemPath,
+				IsDirectory: isDir,
+				IsSymlink:   isSymlink,
+			})
+
+			// 递归子目录：仅当 depth > 1 且是真实目录（非 symlink）。
+			if depth > 1 && isDir && !isSymlink {
+				childPath := itemPath
+				if workspaceBound && !pathIsWithinRoot(workspaceRoot, childPath) {
+					continue // defense in depth：已由父层校验，补充检查
+				}
+				childEntries, err := os.ReadDir(childPath)
+				if err != nil {
+					continue // 允许权限等读失败（静默跳过，不阻塞整体列表）
+				}
+				childVisible := filterAndSortDirEntries(childEntries)
+				if len(childVisible) > limit {
+					childVisible = childVisible[:limit]
+				}
+				children := collectDirItems(childPath, childVisible, workspaceRoot, workspaceBound, depth-1, limit)
+				items = append(items, children...)
+			}
+		}
+		return items
+	}
+
+	// directoryItem 是 list_directory 响应的单条目；放在 file-level 以在测试中可见。
 	type directoryItem struct {
 		Name        string `json:"name"`
 		Path        string `json:"path"`
 		IsDirectory bool   `json:"isDirectory"`
+		IsSymlink   bool   `json:"isSymlink,omitempty"`
 	}
-
-	var items []directoryItem
-	for _, entry := range entries {
-		name := entry.Name()
-		// 过滤隐藏文件/文件夹 (以 . 开头)
-		if strings.HasPrefix(name, ".") {
-			continue
-		}
-		itemPath := filepath.Join(resolvedPath, name)
-		items = append(items, directoryItem{
-			Name:        name,
-			Path:        itemPath,
-			IsDirectory: entry.IsDir(),
-		})
-
-		// 限制单次返回条数，避免大文件夹内存爆满
-		if len(items) >= 1000 {
-			break
-		}
-	}
-
-	conn.SendResult(msg.RequestID, map[string]interface{}{
-		"currentPath": resolvedPath,
-		"items":       items,
-	}, nil)
-}
 
 func expandPath(path string) (string, error) {
 	if path == "" || path == "~" {

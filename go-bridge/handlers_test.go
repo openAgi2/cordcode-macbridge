@@ -706,6 +706,12 @@ func TestReadFileEnforcesAuthorizedWorkspaceBoundary(t *testing.T) {
 					"directory": workspace,
 				}),
 			})
+			if tt.wantCode == "" {
+				if conn.err != nil {
+					t.Fatalf("expected success, got error: %+v", conn.err)
+				}
+				return
+			}
 			if conn.err == nil || conn.err.Code != tt.wantCode {
 				t.Fatalf("error = %#v, want code %q", conn.err, tt.wantCode)
 			}
@@ -4312,5 +4318,402 @@ func TestHandleListProjectsCodexReturnsEmptyEvenIfClaudeProjectsExist(t *testing
 	projects, _ := data["projects"].([]interface{})
 	if len(projects) != 0 {
 		t.Fatalf("codex list_projects = %#v, want empty (must not inherit ~/.claude/projects)", projects)
+	}
+}
+
+// ── §6.5: list_directory workspace-bound + symlink + pagination + depth ────────────────
+
+func TestListDirectoryWorkspaceBound_RejectsTraversal(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	subDir := filepath.Join(workspace, "src")
+	if err := os.Mkdir(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outsideFile := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("no"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	workspaceFile := filepath.Join(workspace, "ok.txt")
+	if err := os.WriteFile(workspaceFile, []byte("ok"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	h := newTestHandlers(t)
+
+	tests := []struct {
+		name        string
+		path        string
+		workspaceRoot string
+		wantCode    string
+	}{
+		{
+			name:        "absolute outside workspace",
+			path:        outside,
+			workspaceRoot: workspace,
+			wantCode:    "file.outside_authorized_root",
+		},
+		{
+			name:        "traversal relative",
+			path:        filepath.Join(workspace, "..", filepath.Base(outside)),
+			workspaceRoot: workspace,
+			wantCode:    "file.outside_authorized_root", // canonicalExistingDirectory resolves '..' → outside; pathIsWithinRoot catches it
+		},
+		{
+			name:        "valid subdirectory within workspace",
+			path:        subDir,
+			workspaceRoot: workspace,
+			wantCode:    "", // success
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn := &readFileCaptureConn{}
+			h.handleListDirectory(conn, WireMessage{
+				RequestID: "req_" + tt.name,
+				Params:    mustJSONRaw(t, map[string]any{
+					"path":           tt.path,
+					"workspace_root": tt.workspaceRoot,
+				}),
+			})
+			if tt.wantCode == "" {
+				if conn.err != nil {
+					t.Fatalf("expected success, got error: %+v", conn.err)
+				}
+				return
+			}
+			if conn.err == nil || conn.err.Code != tt.wantCode {
+				t.Fatalf("error = %#v, want code %q", conn.err, tt.wantCode)
+			}
+		})
+	}
+
+	// 允许：workspace 内的子目录。
+	conn := &readFileCaptureConn{}
+	h.handleListDirectory(conn, WireMessage{
+		RequestID: "req_allowed_subdir",
+		Params: mustJSONRaw(t, map[string]any{
+			"path":           subDir,
+			"workspace_root": workspace,
+		}),
+	})
+	if conn.err != nil {
+		t.Fatalf("allowed subdir should succeed, got error: %+v", conn.err)
+	}
+}
+
+func TestListDirectoryWorkspaceBound_SymlinkLeaf(t *testing.T) {
+	workspace := t.TempDir()
+	subDir := filepath.Join(workspace, "src")
+	if err := os.Mkdir(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nestedFile := filepath.Join(subDir, "util.go")
+	if err := os.WriteFile(nestedFile, []byte("package util"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// symlink 在 workspace 内，指向子目录
+	linkPath := filepath.Join(workspace, "src-link")
+	if err := os.Symlink(subDir, linkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	h := newTestHandlers(t)
+	conn := &readFileCaptureConn{}
+	h.handleListDirectory(conn, WireMessage{
+		RequestID: "req_symlink_leaf",
+		Params: mustJSONRaw(t, map[string]any{
+			"path":           workspace,
+			"workspace_root": workspace,
+			"depth":          2,
+		}),
+	})
+	if conn.err != nil {
+		t.Fatalf("expected nil error, got %+v", conn.err)
+	}
+	resMap, _ := conn.data.(map[string]interface{})
+	itemsRaw, _ := json.Marshal(resMap["items"])
+
+	type item struct {
+		Name        string `json:"name"`
+		Path        string `json:"path"`
+		IsDirectory bool   `json:"isDirectory"`
+		IsSymlink   bool   `json:"isSymlink,omitempty"`
+	}
+	var items []item
+	json.Unmarshal(itemsRaw, &items)
+
+	if len(items) < 2 {
+		t.Fatalf("expected >=2 items (src + src-link + files under src), got %d: %v", len(items), items)
+	}
+
+	// 找 src-link（symlink 叶节点，不应有子条目）。
+	hasLink := false
+	hasUtilGo := false
+	for _, it := range items {
+		if it.Name == "src-link" {
+			hasLink = true
+			if !it.IsSymlink {
+				t.Error("symlink entry should have isSymlink=true")
+			}
+		}
+		if it.Name == "util.go" {
+			hasUtilGo = true
+		}
+		// symlink 不应有子条目跟随——但 symlink 是 leaf，children 只出现在 real dir 下。
+	}
+	if !hasLink {
+		t.Error("missing symlink entry 'src-link'")
+	}
+	if !hasUtilGo {
+		t.Error("missing nested file 'util.go' under real dir 'src'")
+	}
+}
+
+func TestListDirectoryWorkspaceBound_SymlinkEscape(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "leak.txt")
+	if err := os.WriteFile(outsideFile, []byte("leaked"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// symlink 在 workspace 内，指向 workspace 外的目录
+	escLink := filepath.Join(workspace, "escape-link")
+	if err := os.Symlink(outside, escLink); err != nil {
+		t.Fatal(err)
+	}
+
+	h := newTestHandlers(t)
+
+	// workspace-bound 模式：列出 workspace，symlink 应作为叶节点出现（不跟随，不暴露逃逸）。
+	conn := &readFileCaptureConn{}
+	h.handleListDirectory(conn, WireMessage{
+		RequestID: "req_escape_leaf",
+		Params: mustJSONRaw(t, map[string]any{
+			"path":           workspace,
+			"workspace_root": workspace,
+			"depth":          2,
+		}),
+	})
+	if conn.err != nil {
+		t.Fatalf("expected nil error, got %+v", conn.err)
+	}
+	resMap, _ := conn.data.(map[string]interface{})
+	itemsRaw, _ := json.Marshal(resMap["items"])
+
+	type item struct {
+		Name      string `json:"name"`
+		IsSymlink bool   `json:"isSymlink,omitempty"`
+	}
+	var items []item
+	json.Unmarshal(itemsRaw, &items)
+
+	for _, it := range items {
+		if it.Name == "leak.txt" {
+			t.Fatalf("symlink escape: leaked file from outside dir should NOT appear in listing")
+		}
+		if it.Name == "escape-link" && !it.IsSymlink {
+			t.Error("escape-link should be marked as symlink")
+		}
+	}
+}
+
+func TestListDirectory_Pagination(t *testing.T) {
+	workspace := t.TempDir()
+	// 创建 10 个文件用于分页
+	for i := 0; i < 10; i++ {
+		fname := fmt.Sprintf("file-%02d.txt", i)
+		if err := os.WriteFile(filepath.Join(workspace, fname), []byte("data"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := newTestHandlers(t)
+
+	// 第 1 页：limit=4, offset=0
+	conn := &readFileCaptureConn{}
+	h.handleListDirectory(conn, WireMessage{
+		RequestID: "req_page1",
+		Params: mustJSONRaw(t, map[string]any{
+			"path":  workspace,
+			"limit": 4,
+		}),
+	})
+	if conn.err != nil {
+		t.Fatalf("unexpected error: %+v", conn.err)
+	}
+	resMap := conn.data.(map[string]interface{})
+	page1JSON, _ := json.Marshal(resMap["items"])
+	type item struct{ Name string }
+	var page1 []item
+	json.Unmarshal(page1JSON, &page1)
+	if len(page1) != 4 {
+		t.Fatalf("page1: expected 4 items, got %d", len(page1))
+	}
+	if resMap["hasMore"] != true {
+		t.Error("expected hasMore=true after first page of 4/10")
+	}
+
+	// 第 2 页：limit=4, offset=4
+	conn = &readFileCaptureConn{}
+	h.handleListDirectory(conn, WireMessage{
+		RequestID: "req_page2",
+		Params: mustJSONRaw(t, map[string]any{
+			"path":   workspace,
+			"limit":  4,
+			"offset": 4,
+		}),
+	})
+	resMap = conn.data.(map[string]interface{})
+	page2JSON, _ := json.Marshal(resMap["items"])
+	var page2 []item
+	json.Unmarshal(page2JSON, &page2)
+	if len(page2) != 4 {
+		t.Fatalf("page2: expected 4 items, got %d", len(page2))
+	}
+	if resMap["hasMore"] != true {
+		t.Error("expected hasMore=true after 8/10")
+	}
+
+	// 第 3 页（最后一页）：limit=4, offset=8 → 2 items, hasMore=false
+	conn = &readFileCaptureConn{}
+	h.handleListDirectory(conn, WireMessage{
+		RequestID: "req_page3",
+		Params: mustJSONRaw(t, map[string]any{
+			"path":   workspace,
+			"limit":  4,
+			"offset": 8,
+		}),
+	})
+	resMap = conn.data.(map[string]interface{})
+	page3JSON, _ := json.Marshal(resMap["items"])
+	var page3 []item
+	json.Unmarshal(page3JSON, &page3)
+	if len(page3) != 2 {
+		t.Fatalf("page3: expected 2 items (last page), got %d", len(page3))
+	}
+	if resMap["hasMore"] != false {
+		t.Error("expected hasMore=false on last page (10/10)")
+	}
+
+	// 前两页不应重叠。
+	page1Names := make(map[string]bool)
+	for _, it := range page1 {
+		page1Names[it.Name] = true
+	}
+	for _, it := range page2 {
+		if page1Names[it.Name] {
+			t.Errorf("page2 and page1 overlap on %s", it.Name)
+		}
+	}
+}
+
+func TestListDirectory_DepthRecursion(t *testing.T) {
+	workspace := t.TempDir()
+	sub := filepath.Join(workspace, "src")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	deep := filepath.Join(sub, "internal")
+	if err := os.Mkdir(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(deep, "config.go"), []byte("package config"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "app.go"), []byte("package main"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "main.go"), []byte("package main"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	h := newTestHandlers(t)
+
+	// depth=1：只看到 workspace 的直接子条目（src + main.go），没有孙子条目。
+	conn1 := &readFileCaptureConn{}
+	h.handleListDirectory(conn1, WireMessage{
+		RequestID: "req_depth1",
+		Params: mustJSONRaw(t, map[string]any{
+			"path":           workspace,
+			"workspace_root": workspace,
+			"depth":          1,
+		}),
+	})
+	resMap := conn1.data.(map[string]interface{})
+	itemsJSON, _ := json.Marshal(resMap["items"])
+	type item struct {
+		Name        string `json:"name"`
+		IsDirectory bool   `json:"isDirectory"`
+	}
+	var d1 []item
+	json.Unmarshal(itemsJSON, &d1)
+	if len(d1) != 2 {
+		t.Fatalf("depth=1: expected 2 top-level items (src + main.go), got %d: %v", len(d1), d1)
+	}
+	for _, it := range d1 {
+		if it.Name == "internal" || it.Name == "config.go" || it.Name == "app.go" {
+			t.Errorf("depth=1 should NOT include %s (it is inside src/)", it.Name)
+		}
+	}
+
+	// depth=2：看到 workspace + src 子目录（app.go + internal/）
+	conn2 := &readFileCaptureConn{}
+	h.handleListDirectory(conn2, WireMessage{
+		RequestID: "req_depth2",
+		Params: mustJSONRaw(t, map[string]any{
+			"path":           workspace,
+			"workspace_root": workspace,
+			"depth":          2,
+		}),
+	})
+	resMap2 := conn2.data.(map[string]interface{})
+	itemsJSON2, _ := json.Marshal(resMap2["items"])
+	var d2 []item
+	json.Unmarshal(itemsJSON2, &d2)
+	if len(d2) < 4 {
+		t.Fatalf("depth=2: expected >=4 items (top-level 2 + src children), got %d: %v", len(d2), d2)
+	}
+	hasAppGo := false
+	hasInternal := false
+	hasConfigGo := false
+	for _, it := range d2 {
+		if it.Name == "app.go" { hasAppGo = true }
+		if it.Name == "internal" { hasInternal = true }
+		if it.Name == "config.go" { hasConfigGo = true }
+	}
+	if !hasAppGo {
+		t.Error("depth=2 should include src/app.go")
+	}
+	if !hasInternal {
+		t.Error("depth=2 should include src/internal/ (subdirectory)")
+	}
+	if hasConfigGo {
+		t.Error("depth=2 should NOT include src/internal/config.go (it is depth=3)")
+	}
+}
+
+func TestListDirectory_BroadModeWithHomeDir(t *testing.T) {
+	// 广域模式（无 workspace_root）：保持现有行为——expandPath 展开 ~ 到家目录。
+	h := newTestHandlers(t)
+	conn := &readFileCaptureConn{}
+	h.handleListDirectory(conn, WireMessage{
+		RequestID: "req_home",
+		Params:    mustJSONRaw(t, map[string]any{"path": "~"}),
+	})
+	if conn.err != nil {
+		t.Fatalf("broad mode ~ should succeed, got error: %+v", conn.err)
+	}
+	resMap, _ := conn.data.(map[string]interface{})
+	cp, ok := resMap["currentPath"].(string)
+	if !ok || cp == "" {
+		t.Fatal("broad mode should return currentPath (home dir)")
+	}
+	homeDir, _ := os.UserHomeDir()
+	if homeDir != "" && cp != homeDir {
+		t.Errorf("expected ~ to resolve to %s, got %s", homeDir, cp)
+	}
+	// 验证响应有 hasMore 字段（additive，picker 也带）。
+	if _, ok := resMap["hasMore"]; !ok {
+		t.Error("broad mode response should include hasMore field")
 	}
 }

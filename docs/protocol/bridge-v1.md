@@ -562,6 +562,53 @@ until one does.
 Both are extensible `capabilities` strings; adding them is non-breaking (no major version bump).
 No backend-id hard-branching; derivation is by type assertion on the driver.
 
+### Capability: `supports_workspace_browse` (§6.5)
+
+A backend advertises `supports_workspace_browse` in `capabilities` when its agent driver
+implements the `core.WorkDirSwitcher` interface (claudecode, codex, opencode all do). iOS
+uses this to gate the workspace file browser entry (distinct from the pre-session remote
+directory picker). The capability is additive (extensible string, no major version bump).
+
+### RPC: `list_directory` params (§6.5)
+
+`list_directory` accepts optional fields that refine listing behavior. All are additive
+— clients that do not send them get the previous default behavior unchanged.
+
+| field | type | default | description |
+|-------|------|---------|-------------|
+| `path` | string | (required) | Directory to list; `""` or `~` → home dir |
+| `limit` | number | `200` | Max top-level entries; `0` → default. Capped to `500`. |
+| `offset` | number | `0` | Skip N top-level entries before listing. |
+| `depth` | number | `1` | Recursion depth. `1` = immediate children only; max `3`. Symlink entries are never recursed. |
+| `workspace_root` | string | (absent) | When present, the handler validates `realpath(path)` starts with `realpath(workspace_root)`, rejecting `../` / absolute-outside traversals. Symlink entries are marked `isSymlink:true` and treated as unexpandable leaf nodes. When absent, the RPC retains the existing broad (picker) behavior — `path` is resolved via `expandPath` with no workspace-bound restriction. |
+
+Response shape (all fields except `currentPath` and `items` are additive):
+
+```json
+{
+  "currentPath": "/absolute/resolved/path",
+  "items": [
+    { "name": "main.go",  "path": "/.../main.go",  "isDirectory": false },
+    { "name": "src",      "path": "/.../src",      "isDirectory": true },
+    { "name": "src-link", "path": "/.../src-link", "isDirectory": false, "isSymlink": true }
+  ],
+  "limit": 200,
+  "offset": 0,
+  "depth": 1,
+  "hasMore": false
+}
+```
+
+| response field | description |
+|----------------|-------------|
+| `currentPath` | Canonical absolute path that was actually listed. |
+| `items[].name` | Entry name (hidden files prefixed with `.` are filtered out). |
+| `items[].path` | Full absolute path. |
+| `items[].isDirectory` | `true` for directories (non-symlink). Symlink-to-dir reports `false`. |
+| `items[].isSymlink` | `true` if the entry is a symlink (always a leaf — never recursed). |
+| `limit` / `offset` / `depth` | Echoed for client-side pagination logic. |
+| `hasMore` | `true` when more top-level entries exist beyond `offset + limit`. |
+
 ### Event: `turn_diff_ready`
 
 Optional control-plane push (§6.1). After MacBridge successfully writes a turn's checkpoint

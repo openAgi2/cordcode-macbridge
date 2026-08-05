@@ -112,6 +112,13 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 		caps = append(caps, "supports_conversation_rollback")
 	}
 
+	// §6.5 工作区文件浏览器: 当 backend 有 WorkDirSwitcher 接口时,声明 workspace-browse
+	// 能力。所有三个 agent (claudecode/codex/opencode) 均实现此接口,因此浏览器入口普遍可用。
+	// 为 extensible string,additive,无 major version bump。
+	if _, ok := agent.(core.WorkDirSwitcher); ok {
+		caps = append(caps, "supports_workspace_browse")
+	}
+
 	return dedupCapabilities(caps)
 }
 
