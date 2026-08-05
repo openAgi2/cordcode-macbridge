@@ -8,6 +8,8 @@
 
 ## [Unreleased]
 
+- **RPC 按方法鉴权 scope（§6.3）**：每个后端 RPC 映射到 7 个 scope 之一（`session.read`/`session.write`/`config.read`/`config.write`/`workspace.read`/`workspace.mutate`/`delivery.manage`），`go-bridge/rpc_scopes.go` 为单一真相源。校验落在 `CapabilityPolicy.AuthorizeRPC`（HandleRPC 单一漏斗，先于 dispatchRPC 与所有 switch 外方法路由）。配对设备默认拥有全部 scope（向后兼容，不改变现有授权语义）；受限调用返回稳定错误码 `forbidden`。新增 RPC 必须声明 scope，否则 CI guard `TestEveryDispatchedRPCHasScope` 编译期失败。
+- **hello/hello_ack 携带 scope（§6.3 additive）**：`hello` 增可选 `requestedScopes`，`hello_ack` 增可选 `grantedScopes`（回显设备实际拥有的 scope），供客户端 UI gating；旧 client 不受影响。`TrustedDeviceRecord` 增 `grantedScopes` 字段，nil/空视作默认全集。
 - **Driver 自描述 wire 属性（§6.2 零跨层抽象）**：claudecode/codex/opencode/grokbuild 各自通过 `WireDescriptor()` 自报 Kind/DisplayName/LiveEventModel/Polling/StaticCapabilities，`BuildAgentDescriptor` 优先读自描述、仅未迁移 driver 才回退 id-keyed switch。新增 agent 不再需要改 wire 层 switch。
 - **修正 id drift 致 claude 漏报能力**：迁移前 `backend_capabilities.go` 的 `id=="claudecode"` 判等在生产 backend id（`claude`）下从未命中，claude 实际未广告 `content_chunking` 与 `question_reply`。迁入 driver `StaticCapabilities` 后 claude 按设计恢复广告这两项（与既有注释意图一致），生产 descriptor 与设计/测试假设对齐。
 - MacBridge 自有 Claude session 的 AskUserQuestion 已接通生产 responder：iPhone 可回答选项、Other 自定义答案或跳过；同一 interaction 由单一 claim/投影链路收口，多端竞态不会重复写入。

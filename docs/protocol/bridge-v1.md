@@ -134,7 +134,72 @@ resolve_user_input
 get_delivery_prekey_status
 upload_delivery_prekeys
 get_delivery_chain_head
+set_observation_scope
+enable_relay_pairing
 ```
+
+## RPC Scopes (§6.3)
+
+Every backend RPC is mapped to one of seven scope tokens. The scope table is the single
+source of truth in `go-bridge/rpc_scopes.go` (`rpcScopeTable`); the method-name list above
+and this section are its human-readable mirror. The CI guards
+`TestEveryDispatchedRPCHasScope` / `TestScopeTableCoversAllMethods` keep the table and the
+dispatch surface in sync — any newly dispatched RPC MUST declare a scope or the build breaks.
+
+Scope check lives in `CapabilityPolicy.AuthorizeRPC`, which is the single funnel inside
+`HandleRPC` — it runs before `dispatchRPC` and before every out-of-switch method route
+(`set_observation_scope`, the three delivery RPCs, `enable_relay_pairing`), so all of them
+pass through the same gate. A denied RPC returns a stable error:
+
+```json
+{ "code": "forbidden", "message": "scope <scope> not granted" }
+```
+
+`ping` and `recovery_applied` are connection-level `type` messages (not `method` RPCs); they
+never reach `HandleRPC` method routing and are unconditional by construction. The dispatch
+`case "hello"` is a legacy no-op placeholder (returns `{ok:true}`); the real handshake is the
+`type:"hello"` message handled separately, so `hello` is mapped to an empty (unconditional)
+scope only to keep the CI guard satisfied.
+
+| scope | RPCs | default for a paired device |
+|---|---|---|
+| `session.read` | `get_session`, `get_session_messages`, `get_session_projection`, `list_sessions`, `list_pinned_sessions`, `fetch_todos`, `check_pending_notifications`, `get_turn_diff`, `get_full_thread_diff` | ✅ |
+| `session.write` | `create_session`, `send_message`, `abort_generation`, `resume_session`, `delete_session`, `rename_session`, `archive_session`, `set_session_pinned`, `compress_context`, `resolve_permission`, `question_reply`, `question_reject`, `resolve_user_input`, `share_session`, `set_observation_scope` | ✅ |
+| `config.read` | `list_providers`, `list_models`, `list_agents`, `list_permission_modes`, `get_usage`, `list_memory_files`, `read_memory_file`, `run_diagnostics` | ✅ |
+| `config.write` | `set_provider`, `switch_model`, `set_permission_mode` | ✅ |
+| `workspace.read` | `get_workspace_diff`, `read_file`, `list_directory`, `get_git_context`, `fetch_content_chunk` | ✅ |
+| `workspace.mutate` | `checkout_git_branch`, `create_git_branch`, `create_git_worktree`, `list_projects` | ✅ (recommend an owner per-action confirmation on top) |
+| `delivery.manage` | `get_delivery_prekey_status`, `upload_delivery_prekeys`, `get_delivery_chain_head`, `enable_relay_pairing` | ✅ (own device chain only) |
+| _(empty — unconditional)_ | `hello` (legacy dispatch placeholder) | ✅ (no scope required, else handshake deadlock) |
+
+**Backward compatibility.** A paired device with no `grantedScopes` recorded (every existing
+persisted record) is treated as holding all seven scopes, so this change does not alter the
+current authorization semantics. The value is structural: a future restricted pairing (e.g.
+read-only iPad), a hard gate forcing every new RPC through security review, and client-side
+UI gating off `hello_ack.grantedScopes`.
+
+### Hello scope fields (additive, optional)
+
+`hello` may carry `requestedScopes` and `hello_ack` carries `grantedScopes`. Both are optional
+additive fields; old clients that do not send/parse them are unaffected.
+
+```ts
+// hello (request) — additive
+{
+  ...,
+  requestedScopes?: string[]   // client-declared intent; not enforced yet (forward compat)
+}
+
+// hello_ack — additive
+{
+  ...,
+  grantedScopes?: string[]    // the scopes this device actually holds; client may UI-gate on it
+}
+```
+
+When the device record has explicit `grantedScopes`, `hello_ack.grantedScopes` echoes that
+restricted set; otherwise it echoes the full default set (`DefaultGrantedScopes`), so a normal
+paired client always observes all seven scopes today.
 
 ### Claude resume ownership preflight
 
@@ -521,9 +586,8 @@ Returns the per-file diff for a single completed turn (between the `turnNumber-1
 `turnNumber` checkpoint refs). For `turnNumber == 1` the baseline is git's empty tree, so the
 turn's files appear as additions. Gated on `supports_checkpoint`: returns `checkpoint_unsupported`
 for backends that do not implement it, and `workspace_not_git` when the resolved workspace is
-not a git repository. Both RPCs are scoped to `session.read` (the scope table lands in §6.3;
-until then they pass through with no scope gate, consistent with the existing
-`get_workspace_diff` path).
+not a git repository. Both RPCs are scoped to `session.read` (see the scope table in
+**RPC Scopes (§6.3)**; the scope gate is live, and a paired device holds all scopes by default).
 
 Request:
 

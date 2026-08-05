@@ -40,14 +40,28 @@ func NewCapabilityPolicy() *CapabilityPolicy {
 // AuthorizeRPC 在 RPC dispatch 前对方法做集中授权检查。
 // 返回 nil 表示放行；返回 *WireError 表示拒绝（携带稳定错误码）。
 //
-// 当前：对 fileScopedMethods 不做额外拒绝（workspace 锚点由 handleReadFile 内执行），
-// 但记录"该方法进入了 policy 层"，确立集中入口。后续 capability 字段就绪后，
-// 这里会读取 device capability 并决定是否需要本机确认。
+// §6.3: 这里是 HandleRPC 的单一 scope 漏斗——先于 dispatchRPC 与所有 switch 外方法路由
+// （set_observation_scope / delivery ×3 / enable_relay_pairing）。rpcScopeTable 给每个 RPC
+// 方法声明所属 scope；设备未授予该 scope 时返回 forbidden。默认配对设备拥有全部 scope
+// （deviceHasScope 对 nil/空 GrantedScopes 返回 true），故当前不改变现有授权语义；受限配对
+// 与新 RPC 强制声明 scope 的价值在此挂载。
 //
-// device 可能为 nil（开发模式无认证）；此时放行，由下游 handler 的 workspace 锚点兜底。
+// 紧接着保留 fileScopedMethods 的 debug 记录——那是 P0-1 workspace 锚点的登记点，
+// 未来「该设备是否具备文件读取 capability」判断也挂在这里。
+//
+// device 可能为 nil（开发模式无认证）；此时 deviceHasScope 返回 true（放行），由下游 handler
+// 的 workspace 锚点兜底。
 func (p *CapabilityPolicy) AuthorizeRPC(conn Connection, msg WireMessage) *WireError {
 	if p == nil {
 		return nil
+	}
+	if scope := scopeForMethod(msg.Method); scope != "" {
+		if !deviceHasScope(conn.AuthedDevice(), scope) {
+			return &WireError{
+				Code:    "forbidden",
+				Message: "scope " + scope + " not granted",
+			}
+		}
 	}
 	if _, scoped := p.fileScopedMethods[msg.Method]; !scoped {
 		return nil

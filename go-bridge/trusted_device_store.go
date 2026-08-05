@@ -12,17 +12,22 @@ import (
 
 // TrustedDeviceRecord 存储一台已信任设备的完整信息。
 type TrustedDeviceRecord struct {
-	DeviceID               string     `json:"deviceId"`
-	DisplayName            string     `json:"displayName"`
-	Platform               string     `json:"platform"`
-	TokenHash              string     `json:"tokenHash"`
-	IdentityPublicKey      string     `json:"identityPublicKey,omitempty"`
-	RelayEnabled           bool       `json:"relayEnabled,omitempty"`
-	RelayChannelGeneration uint64     `json:"relayChannelGeneration,omitempty"`
-	CreatedAt              time.Time  `json:"createdAt"`
-	LastSeenAt             time.Time  `json:"lastSeenAt"`
-	LastRemoteAddress      string     `json:"lastRemoteAddress,omitempty"`
-	RevokedAt              *time.Time `json:"revokedAt,omitempty"`
+	DeviceID               string `json:"deviceId"`
+	DisplayName            string `json:"displayName"`
+	Platform               string `json:"platform"`
+	TokenHash              string `json:"tokenHash"`
+	IdentityPublicKey      string `json:"identityPublicKey,omitempty"`
+	RelayEnabled           bool   `json:"relayEnabled,omitempty"`
+	RelayChannelGeneration uint64 `json:"relayChannelGeneration,omitempty"`
+	// GrantedScopes 是该设备被授予的 RPC scope 集合（§6.3）。
+	// nil/空 = 拥有全部默认 scope（DefaultGrantedScopes），向后兼容现有持久化记录
+	// （旧记录没有此字段，不能因字段缺失把已配对设备锁死）。
+	// 未来受限配对（只读 iPad）在此写入受限子集，AuthorizeRPC 据此按方法拒绝。
+	GrantedScopes     []string   `json:"grantedScopes,omitempty"`
+	CreatedAt         time.Time  `json:"createdAt"`
+	LastSeenAt        time.Time  `json:"lastSeenAt"`
+	LastRemoteAddress string     `json:"lastRemoteAddress,omitempty"`
+	RevokedAt         *time.Time `json:"revokedAt,omitempty"`
 }
 
 // Clone 返回记录的深拷贝。*time.Time 指针字段必须单独复制，否则新旧快照

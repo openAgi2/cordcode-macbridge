@@ -53,6 +53,8 @@ struct BridgeV1Hello: Codable, Equatable {
     let type: String
     let client: BridgeV1Client
     let `protocol`: BridgeV1Protocol
+    // §6.3 additive, optional: client-declared scope intent. Not enforced yet (forward compat).
+    let requestedScopes: [String]?
 }
 
 struct BridgeV1CurrentURLs: Codable, Equatable {
@@ -92,6 +94,10 @@ struct BridgeV1HelloAck: Codable, Equatable {
     let bridgeStatus: String?
     let runningSessions: [BridgeV1RunningSession]?
     let error: BridgeV1Error?
+    // §6.3 additive, optional: scopes this device actually holds. A normal paired device
+    // (no explicit grantedScopes on record) observes all seven default scopes. Clients may
+    // UI-gate on this; see bridge-v1.md "RPC Scopes (§6.3)".
+    let grantedScopes: [String]?
 }
 
 struct BridgeV1Error: Codable, Equatable {

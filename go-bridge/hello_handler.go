@@ -15,6 +15,10 @@ type HelloMessage struct {
 	LastBridgeEpoch   string              `json:"lastBridgeEpoch,omitempty"`
 	LastEventID       string              `json:"lastEventId,omitempty"`
 	LastSeenBySession BridgeSessionCutMap `json:"lastSeenBySession,omitempty"`
+	// RequestedScopes 是客户端请求的 RPC scope（§6.3，additive 可选字段）。
+	// 当前不强制约束——配对设备默认拥有全部 scope；此字段为未来受限配对/客户端
+	// 声明意图预留，服务端据 device.GrantedScopes 决定实际授予集。
+	RequestedScopes []string `json:"requestedScopes,omitempty"`
 }
 
 // HelloClient 描述客户端应用信息。
@@ -43,6 +47,9 @@ type HelloAckMessage struct {
 	Error           *WireError                `json:"error,omitempty"`
 	BridgeEpoch     string                    `json:"bridgeEpoch,omitempty"`
 	Recovery        *BridgeRecoveryPlan       `json:"recovery,omitempty"`
+	// GrantedScopes 是服务端授予该设备的 RPC scope 集合（§6.3，additive 可选字段）。
+	// 配对设备默认拥有全部 scope；客户端可据此做 UI gating。与 RequestedScopes 对应。
+	GrantedScopes []string `json:"grantedScopes,omitempty"`
 }
 
 type BridgeAffectedSession struct {
@@ -167,6 +174,7 @@ func HandleHelloWithRemoteURLs(
 		Backends:        backends,
 		BridgeStatus:    "running",
 		RunningSessions: runningSessions,
+		GrantedScopes:   grantedScopesForEcho(device),
 	}
 }
 
