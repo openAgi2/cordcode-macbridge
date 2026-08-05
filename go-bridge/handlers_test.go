@@ -2227,6 +2227,23 @@ func TestModelProviderForAgentKeepsPrefixedProvider(t *testing.T) {
 	}
 }
 
+// TestModelProviderForAgentUsesActiveProviderForGrokbuild 锁死 §5.1 缺口 1（C6 后半）：
+// grokbuild 实现 ProviderSwitcher 后，无前缀模型（如 grok-4.5）在有 active provider 时
+// 标到 active name，而非回落 "default"（修复前 grokbuild 不实现 ProviderSwitcher，100% 走 default）。
+func TestModelProviderForAgentUsesActiveProviderForGrokbuild(t *testing.T) {
+	agent := &fakeAgent{
+		name:           "grokbuild",
+		providers:      []core.ProviderConfig{{Name: "glm"}},
+		activeProvider: "glm",
+	}
+
+	id, provider, providerID := modelProviderForAgent(agent, "grok-4.5")
+
+	if id != "grok-4.5" || provider != "glm" || providerID != "glm" {
+		t.Fatalf("model provider = (%q, %q, %q), want (grok-4.5, glm, glm)", id, provider, providerID)
+	}
+}
+
 func TestCodexProviderSwitchOnlyAffectsNewSessions(t *testing.T) {
 	agent := &fakeAgent{
 		name:              "codex",

@@ -24,6 +24,7 @@ var _ core.DiagnosticsProvider = (*Agent)(nil)
 var _ core.WorkDirSwitcher = (*Agent)(nil)
 var _ core.ModeSwitcher = (*Agent)(nil)
 var _ core.ModelSwitcher = (*Agent)(nil)
+var _ core.ProviderSwitcher = (*Agent)(nil)
 var _ core.ReasoningEffortSwitcher = (*Agent)(nil)
 var _ core.ToolAuthorizer = (*Agent)(nil)
 var _ core.HistoryProvider = (*Agent)(nil)
@@ -39,6 +40,11 @@ type Agent struct {
 	reasoningEffort string
 	mode            string
 	allowedTools    []string
+	// providers / activeIdx 背载 iOS 下发的第三方 Grok provider 配置（GLM/DeepSeek 等
+	// 经 grok 网关）。AvailableModels 优先返 active provider 的 Models，使 custom 模型可见；
+	// modelProviderForAgent 据此把无前缀模型标到 active provider 名下而非 "default"。
+	providers []core.ProviderConfig
+	activeIdx int // -1 = no provider set
 	// grokHome overrides ~/.grok / GROK_HOME for session catalog (tests).
 	grokHome string
 	mu       sync.RWMutex
@@ -51,8 +57,9 @@ func init() {
 // New creates a Grok Build agent from the given options map.
 func New(opts map[string]any) (core.Agent, error) {
 	a := &Agent{
-		workDir: ".",
-		mode:    "default",
+		workDir:  ".",
+		mode:     "default",
+		activeIdx: -1,
 	}
 
 	if v, ok := opts["work_dir"].(string); ok && v != "" {
@@ -228,10 +235,24 @@ func (a *Agent) SetModel(model string) {
 func (a *Agent) GetModel() string {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	return a.model
+	return core.GetProviderModel(a.providers, a.activeIdx, a.model)
+}
+
+// configuredModels returns the model list pre-configured on the active provider
+// (iOS-injected third-party Grok providers). Empty when no provider is set.
+func (a *Agent) configuredModels() []core.ModelOption {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return core.GetProviderModels(a.providers, a.activeIdx)
 }
 
 func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
+	if models := a.configuredModels(); len(models) > 0 {
+		return models
+	}
+	// Grok CLI 走 ACP agent stdio（grok agent stdio），无 `grok models` 子命令（ACP v1 无标准
+	// listModels），故不照搬 opencode 的 exec models 探测；custom provider 模型经
+	// configuredModels 可见，无 provider 时回落默认 Grok 模型。详见 t3code-adoption-plan §5.1。
 	return []core.ModelOption{
 		{Name: "grok-4.5", Desc: "Grok 4.5"},
 		{Name: "grok-4", Desc: "Grok 4"},
@@ -254,6 +275,50 @@ func (a *Agent) GetReasoningEffort() string {
 
 func (a *Agent) AvailableReasoningEfforts() []string {
 	return []string{"low", "medium", "high"}
+}
+
+// --- ProviderSwitcher ---
+
+func (a *Agent) SetProviders(providers []core.ProviderConfig) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.providers = providers
+}
+
+func (a *Agent) SetActiveProvider(name string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if name == "" {
+		a.activeIdx = -1
+		slog.Info("grokbuild: provider cleared")
+		return true
+	}
+	for i, p := range a.providers {
+		if p.Name == name {
+			a.activeIdx = i
+			slog.Info("grokbuild: provider switched", "provider", name)
+			return true
+		}
+	}
+	return false
+}
+
+func (a *Agent) GetActiveProvider() *core.ProviderConfig {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.activeIdx < 0 || a.activeIdx >= len(a.providers) {
+		return nil
+	}
+	p := a.providers[a.activeIdx]
+	return &p
+}
+
+func (a *Agent) ListProviders() []core.ProviderConfig {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	result := make([]core.ProviderConfig, len(a.providers))
+	copy(result, a.providers)
+	return result
 }
 
 // --- ToolAuthorizer ---

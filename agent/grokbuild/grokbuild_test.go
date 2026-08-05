@@ -280,3 +280,85 @@ func TestGrokSession_ImplementsTurnCanceler(t *testing.T) {
 	var s *grokSession
 	var _ core.TurnCanceler = s
 }
+
+func TestAgent_ImplementsProviderSwitcher(t *testing.T) {
+	a, err := New(map[string]any{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, ok := a.(core.ProviderSwitcher); !ok {
+		t.Error("Agent does not implement core.ProviderSwitcher — custom Grok providers cannot be advertised")
+	}
+}
+
+func TestAgent_ProviderSwitcher(t *testing.T) {
+	a, err := New(map[string]any{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	agent := a.(*Agent)
+
+	if agent.GetActiveProvider() != nil {
+		t.Error("expected nil active provider initially")
+	}
+
+	agent.SetProviders([]core.ProviderConfig{
+		{Name: "glm", BaseURL: "https://open.bigmodel.cn/api/paas/v4", Model: "glm-4.7"},
+		{Name: "grok-official", Model: "grok-4.5"},
+	})
+	if !agent.SetActiveProvider("glm") {
+		t.Fatal("SetActiveProvider(glm) returned false")
+	}
+	if active := agent.GetActiveProvider(); active == nil || active.Name != "glm" {
+		t.Errorf("active provider = %+v, want glm", active)
+	}
+	if got := agent.GetModel(); got != "glm-4.7" {
+		t.Errorf("GetModel = %q, want glm-4.7 (active provider model)", got)
+	}
+	if n := len(agent.ListProviders()); n != 2 {
+		t.Errorf("ListProviders len = %d, want 2", n)
+	}
+	if !agent.SetActiveProvider("") {
+		t.Fatal("SetActiveProvider(\"\") returned false")
+	}
+	if agent.GetActiveProvider() != nil {
+		t.Error("expected nil active provider after clear")
+	}
+}
+
+// TestAvailableModels_CustomProviderModels 覆盖 §5.1 缺口 1（C6 前半）：
+// 注入 custom Grok provider + 模型 → AvailableModels 返该 provider 的模型，
+// 而非硬编码 grok-4.5/grok-4；GetModel 返 active provider model 供 handleListModels 标 isDefault。
+func TestAvailableModels_CustomProviderModels(t *testing.T) {
+	a, err := New(map[string]any{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	agent := a.(*Agent)
+
+	// 无 provider：回落默认 2 条。
+	defModels := agent.AvailableModels(context.Background())
+	if len(defModels) != 2 {
+		t.Errorf("default AvailableModels len = %d, want 2", len(defModels))
+	}
+
+	// 注入 custom provider（GLM）+ 模型，设 active。
+	agent.SetProviders([]core.ProviderConfig{
+		{Name: "glm", Model: "glm-4.7", Models: []core.ModelOption{
+			{Name: "glm-4.7", Desc: "GLM 4.7"},
+			{Name: "glm-4-air", Desc: "GLM 4 Air"},
+		}},
+	})
+	agent.SetActiveProvider("glm")
+
+	models := agent.AvailableModels(context.Background())
+	if len(models) != 2 {
+		t.Fatalf("AvailableModels len = %d, want 2 (glm custom)", len(models))
+	}
+	if models[0].Name != "glm-4.7" || models[1].Name != "glm-4-air" {
+		t.Errorf("AvailableModels = %+v, want [glm-4.7, glm-4-air]", models)
+	}
+	if got := agent.GetModel(); got != "glm-4.7" {
+		t.Errorf("GetModel = %q, want glm-4.7 so handleListModels isDefault matches", got)
+	}
+}
