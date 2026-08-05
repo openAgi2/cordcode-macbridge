@@ -210,11 +210,17 @@ func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
 	if models := a.configuredModels(); len(models) > 0 {
 		return models
 	}
-	// 级 1.5（owner 2026-08-04 拍板：单一模型语义）：ccswitch 写入 ~/.codex/config.toml 的
-	// model 是当前生效模型。短路 2–4 级——iOS 选型器只显示 Mac 实际在用的模型。
-	// 有意不做合并：ccswitch 场景 provider 是 custom 端点，显示 GPT 备选是误导（选了也请求错误端点）。
+	// 级 2：ccswitch 写 ~/.codex/config.toml 的 model_catalog_json 指向完整目录——显示目录全部模型，
+	// 当前生效的由 config.toml 顶层 model 经 GetModel 标 isDefault。
 	if models := readCodexConfigModels(); len(models) > 0 {
 		return models
+	}
+	// 级 2.5（owner 2026-08-04 拍板：单一模型语义）：config.toml 顶层 model 存在但无 catalog
+	//（ccswitch 只写了单一 model）——只返该模型，短路 cached/API/兜底。保证 AvailableModels 含
+	// GetModel 返回值，handleListModels isDefault 命中（否则 iOS applyModelSelection 落到 models.first
+	// = 官方模型，发往 custom 端点 404）。有意不合并：custom 端点显示 GPT 备选是误导。
+	if m := readCodexConfigModel(); m != "" {
+		return []core.ModelOption{{Name: m, Desc: m}}
 	}
 	if models := readCodexCachedModels(); len(models) > 0 {
 		return models
@@ -317,13 +323,6 @@ func readCodexConfigModels() []core.ModelOption {
 	return models
 }
 
-var openaiChatModels = map[string]bool{
-	"o4-mini": true, "o3": true, "o3-mini": true, "o1": true, "o1-mini": true,
-	"gpt-4.1": true, "gpt-4.1-mini": true, "gpt-4.1-nano": true,
-	"gpt-4o": true, "gpt-4o-mini": true,
-	"codex-mini-latest": true,
-}
-
 func (a *Agent) fetchModelsFromAPI(ctx context.Context) []core.ModelOption {
 	a.mu.Lock()
 	apiKey := ""
@@ -375,9 +374,7 @@ func (a *Agent) fetchModelsFromAPI(ctx context.Context) []core.ModelOption {
 
 	var models []core.ModelOption
 	for _, m := range result.Data {
-		if openaiChatModels[m.ID] {
-			models = append(models, core.ModelOption{Name: m.ID})
-		}
+		models = append(models, core.ModelOption{Name: m.ID})
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].Name < models[j].Name })
 	return models

@@ -2,6 +2,8 @@ package codex
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -147,5 +149,55 @@ func TestAvailableModels_ConfigCatalogTierShortCircuits(t *testing.T) {
 	}
 	if models[0].Name != "deepseek-v4-flash" || models[1].Name != "deepseek-v4-pro" {
 		t.Fatalf("AvailableModels() = %v, want [flash, pro]", models)
+	}
+}
+
+// TestAvailableModels_APIFetch_NoWhitelist 覆盖 §5.1 缺口 2（C4）：删白名单后 /v1/models 返回的
+// 所有 id（含 GLM/DeepSeek 第三方）都转 ModelOption，不再被 openaiChatModels 过滤。
+func TestAvailableModels_APIFetch_NoWhitelist(t *testing.T) {
+	// CODEX_HOME 指向空 temp dir（无 model/catalog/cache），强制落到 fetchModelsFromAPI。
+	t.Setenv("CODEX_HOME", t.TempDir())
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "" {
+			t.Errorf("request missing Authorization header")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[
+			{"id":"glm-4.7"},
+			{"id":"deepseek-chat"},
+			{"id":"gpt-4.1"}
+		]}`))
+	}))
+	defer srv.Close()
+	t.Setenv("OPENAI_BASE_URL", srv.URL)
+	t.Setenv("OPENAI_API_KEY", "test-key")
+
+	a := &Agent{}
+	models := a.AvailableModels(context.Background())
+
+	got := map[string]bool{}
+	for _, m := range models {
+		got[m.Name] = true
+	}
+	for _, want := range []string{"glm-4.7", "deepseek-chat", "gpt-4.1"} {
+		if !got[want] {
+			t.Errorf("AvailableModels missing %q (whitelist regression?); got %v", want, models)
+		}
+	}
+}
+
+// TestAvailableModels_NativeSingleModel_IsDefault 覆盖 §5.1 缺口 3（C5）：config.toml 顶层 model
+// 存在、无 catalog → AvailableModels 只返该模型 + GetModel()==该模型，handleListModels isDefault 命中
+//（修复前 GetModel 返 native glm-4.7 但 AvailableModels 不含 → 无 isDefault → iOS 落到 models.first）。
+func TestAvailableModels_NativeSingleModel_IsDefault(t *testing.T) {
+	writeCodexConfig(t, "model = \"glm-4.7\"\n") // 无 catalog 字段
+	a := &Agent{}
+
+	models := a.AvailableModels(context.Background())
+	if len(models) != 1 || models[0].Name != "glm-4.7" {
+		t.Fatalf("AvailableModels = %v, want single [glm-4.7] (native single-model semantics)", models)
+	}
+	if got := a.GetModel(); got != "glm-4.7" {
+		t.Errorf("GetModel = %q, want glm-4.7 (so handleListModels isDefault matches)", got)
 	}
 }
