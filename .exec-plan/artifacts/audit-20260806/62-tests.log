@@ -1,0 +1,7 @@
+ok  	github.com/openAgi2/cordcode-macbridge/go-bridge	0.494s
+ok  	github.com/openAgi2/cordcode-macbridge/agent/claudecode	0.013s
+ok  	github.com/openAgi2/cordcode-macbridge/agent/codex	0.014s
+ok  	github.com/openAgi2/cordcode-macbridge/agent/grokbuild	0.017s
+ok  	github.com/openAgi2/cordcode-macbridge/agent/opencode	0.015s
+ok  	github.com/openAgi2/cordcode-macbridge/agent/providerseedtest	0.014s [no tests to run]
+ok  	github.com/openAgi2/cordcode-macbridge/core	0.011s [no tests to run]
