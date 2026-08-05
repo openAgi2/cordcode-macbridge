@@ -168,7 +168,7 @@ scope only to keep the CI guard satisfied.
 | `config.read` | `list_providers`, `list_models`, `list_agents`, `list_permission_modes`, `get_usage`, `list_memory_files`, `read_memory_file`, `run_diagnostics` | ✅ |
 | `config.write` | `set_provider`, `switch_model`, `set_permission_mode` | ✅ |
 | `workspace.read` | `get_workspace_diff`, `read_file`, `list_directory`, `get_git_context`, `fetch_content_chunk` | ✅ |
-| `workspace.mutate` | `checkout_git_branch`, `create_git_branch`, `create_git_worktree`, `list_projects` | ✅ (recommend an owner per-action confirmation on top) |
+| `workspace.mutate` | `checkout_git_branch`, `create_git_branch`, `create_git_worktree`, `create_pull_request`, `list_projects` | ✅ (recommend an owner per-action confirmation on top) |
 | `delivery.manage` | `get_delivery_prekey_status`, `upload_delivery_prekeys`, `get_delivery_chain_head`, `enable_relay_pairing` | ✅ (own device chain only) |
 | _(empty — unconditional)_ | `hello` (legacy dispatch placeholder) | ✅ (no scope required, else handshake deadlock) |
 
@@ -568,6 +568,34 @@ A backend advertises `supports_workspace_browse` in `capabilities` when its agen
 implements the `core.WorkDirSwitcher` interface (claudecode, codex, opencode all do). iOS
 uses this to gate the workspace file browser entry (distinct from the pre-session remote
 directory picker). The capability is additive (extensible string, no major version bump).
+
+### Capability: `supports_pull_requests` (§7.1)
+
+A backend advertises `supports_pull_requests` when all three preconditions are met:
+1. the agent implements `core.WorkDirSwitcher` (has a known workdir);
+2. `git remote get-url origin` returns a URL containing `github.com`;
+3. `gh` CLI is installed and authenticated on the Mac.
+
+When present, iOS may show a "Create PR" entry on the session's checkpoint diff sheet;
+when absent, the entry is hidden. The capability is additive (extensible string, no major
+version bump).
+
+### RPC: `create_pull_request` (§7.1)
+
+Creates a GitHub pull request from the current workspace. All params except `base` are
+required.
+
+| field | type | description |
+|-------|------|-------------|
+| `directory` | string | Git repository root (must pass `validateGitDirectory`). |
+| `title` | string | PR title (`[cordcode] <summary>`, ≤72 chars). |
+| `body` | string | PR body (## Summary + ## Changes + ## Cordcode footer). |
+| `base` | string? | Target branch; absent → repository default. |
+
+Server-side, the handler checks the GitHub remote, generates a sanitised branch name
+`cordcode/<slug>` (whitelist `^cordcode/[a-z0-9][a-z0-9-]{0,60}$`), checks out or
+creates the branch, pushes to origin, and invokes `gh pr create`. The response carries
+`pr_url`, `branch`, `base`, and `remote_url`.
 
 ### RPC: `list_directory` params (§6.5)
 
