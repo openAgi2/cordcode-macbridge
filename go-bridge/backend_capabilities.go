@@ -119,6 +119,14 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 		caps = append(caps, "supports_workspace_browse")
 	}
 
+	// §7.1 PR 集成（GitHub-only）：当 backend 有 WorkDirSwitcher + 工作区是 GitHub remote
+	// + gh CLI 已安装且认证时，声明 supports_pull_requests。
+	if ws, ok := agent.(core.WorkDirSwitcher); ok && ws.GetWorkDir() != "" {
+		if supportsPullRequests(ws.GetWorkDir()) {
+			caps = append(caps, "supports_pull_requests")
+		}
+	}
+
 	return dedupCapabilities(caps)
 }
 

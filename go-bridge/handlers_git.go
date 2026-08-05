@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -335,4 +336,131 @@ func isGitWorkspace(dir string) (root string, ok bool) {
 
 func gitWireError(code string, err error) *WireError {
 	return &WireError{Code: code, Message: err.Error()}
+}
+
+// ── §7.1 PR 集成（GitHub-only） ────────────────────────────────────────────────────────
+
+// snakeCaseRe matches one or more non-alnum/underscore chars for slug generation.
+var snakeCaseRe = regexp.MustCompile(`[^a-z0-9]+`)
+var branchSlugRe = regexp.MustCompile(`^cordcode/[a-z0-9][a-z0-9-]{0,60}$`)
+
+func (h *Handlers) handleCreatePullRequest(conn Connection, msg WireMessage) {
+	var params struct {
+		Directory string `json:"directory"`
+		Title     string `json:"title"`     // PR title (§7.1: [cordcode] <summary>, ≤72 chars)
+		Body      string `json:"body"`      // PR body (## Summary + ## Changes + ## Cordcode)
+		Base      string `json:"base"`      // target branch (default: repo default)
+	}
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: err.Error()})
+		return
+	}
+	if err := validateGitDirectory(params.Directory); err != nil {
+		conn.SendResult(msg.RequestID, nil, gitWireError("invalid_directory", err))
+		return
+	}
+	if strings.TrimSpace(params.Title) == "" {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: "title is required"})
+		return
+	}
+
+	// 1. 检测 GitHub 远端 + gh CLI 可用。
+	remoteURL, err := detectGitHubRemote(params.Directory)
+	if err != nil {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "pr_not_supported", Message: err.Error()})
+		return
+	}
+
+	_, err = exec.LookPath("gh")
+	if err != nil {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "pr_not_supported", Message: "gh CLI not found; install and authenticate gh first"})
+		return
+	}
+
+	// 2. 分支名：从 title 生成 slug，经白名单校验。
+	branchSlug := slugFromTitle(params.Title)
+	if !branchSlugRe.MatchString(branchSlug) {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_branch_name", Message: "generated branch name " + branchSlug + " does not match whitelist"})
+		return
+	}
+
+	// 3. 确保分支存在（若不在该分支上则尝试创建/切换，失败 → 使用已有分支）。
+	currentBranch, _ := runGitInDirectory(params.Directory, "rev-parse", "--abbrev-ref", "HEAD")
+	currentBranch = strings.TrimSpace(currentBranch)
+	if currentBranch != branchSlug {
+		// 尝试创建新分支（若已存在则切换）。
+		if _, err := runGitInDirectory(params.Directory, "checkout", "-b", branchSlug); err != nil {
+			if _, err2 := runGitInDirectory(params.Directory, "checkout", branchSlug); err2 != nil {
+				conn.SendResult(msg.RequestID, nil, &WireError{Code: "git_checkout_failed", Message: "cannot switch to " + branchSlug + ": " + err.Error() + " / " + err2.Error()})
+				return
+			}
+		}
+	}
+
+	// 4. 推送分支到 remote。
+	if _, err := runGitInDirectory(params.Directory, "push", "-u", "origin", branchSlug); err != nil {
+		conn.SendResult(msg.RequestID, nil, gitWireError("git_push_failed", err))
+		return
+	}
+
+	// 5. 调用 gh pr create。
+	ghArgs := []string{"pr", "create",
+		"--title", params.Title,
+		"--body", params.Body,
+		"--head", branchSlug,
+	}
+	if params.Base != "" {
+		ghArgs = append(ghArgs, "--base", params.Base)
+	}
+	cmd := exec.Command("gh", ghArgs...)
+	cmd.Dir = params.Directory
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "gh_pr_create_failed", Message: string(out) + "; " + err.Error()})
+		return
+	}
+	prURL := strings.TrimSpace(string(out))
+	conn.SendResult(msg.RequestID, map[string]interface{}{
+		"pr_url":       prURL,
+		"branch":       branchSlug,
+		"base":         params.Base,
+		"remote_url":   remoteURL,
+	}, nil)
+}
+
+// slugFromTitle 把 PR 标题转成分支 slug：小写→非 alnum 替换为 -→去首尾 -→加 cordcode/ 前缀→截断 60 字符。
+func slugFromTitle(title string) string {
+	slug := strings.ToLower(strings.TrimSpace(title))
+	slug = snakeCaseRe.ReplaceAllString(slug, "-")
+	slug = strings.Trim(slug, "-")
+	if len(slug) > 60 {
+		slug = slug[:60]
+	}
+	slug = strings.TrimRight(slug, "-")
+	return "cordcode/" + slug
+}
+
+// detectGitHubRemote 检查目录的 git remote origin 是否为 GitHub。
+func detectGitHubRemote(directory string) (string, error) {
+	out, err := runGitInDirectory(directory, "remote", "get-url", "origin")
+	if err != nil {
+		return "", fmt.Errorf("no git remote origin found: %w", err)
+	}
+	url := strings.TrimSpace(out)
+	lower := strings.ToLower(url)
+	if !strings.Contains(lower, "github.com") {
+		return "", fmt.Errorf("remote %s is not a GitHub repository; only GitHub PRs are supported", url)
+	}
+	return url, nil
+}
+
+// supportsPullRequests 检测当前环境是否支持 PR 创建（§7.1 capability 派生源）。
+func supportsPullRequests(directory string) bool {
+	if _, err := detectGitHubRemote(directory); err != nil {
+		return false
+	}
+	if _, err := exec.LookPath("gh"); err != nil {
+		return false
+	}
+	return true
 }

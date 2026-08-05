@@ -90,10 +90,11 @@ var rpcScopeTable = map[string]string{
 	"fetch_content_chunk": ScopeWorkspaceRead,
 
 	// workspace.mutate
-	"checkout_git_branch": ScopeWorkspaceMutate,
-	"create_git_branch":   ScopeWorkspaceMutate,
-	"create_git_worktree": ScopeWorkspaceMutate,
-	"list_projects":       ScopeWorkspaceMutate,
+	"checkout_git_branch":   ScopeWorkspaceMutate,
+	"create_git_branch":     ScopeWorkspaceMutate,
+	"create_git_worktree":   ScopeWorkspaceMutate,
+	"create_pull_request":   ScopeWorkspaceMutate, // §7.1 GitHub-only PR 集成
+	"list_projects":         ScopeWorkspaceMutate,
 
 	// delivery.manage
 	"get_delivery_prekey_status": ScopeDeliveryManage,

@@ -23,6 +23,7 @@ var dispatchedRPCMethods = []string{
 	"get_usage", "run_diagnostics", "list_memory_files", "read_memory_file",
 	"fetch_content_chunk", "read_file", "list_directory", "get_git_context",
 	"checkout_git_branch", "create_git_branch", "create_git_worktree",
+		"create_pull_request", // §7.1
 	"rename_session", "share_session", "archive_session", "set_session_pinned",
 	"list_pinned_sessions", "compress_context", "check_pending_notifications",
 	"question_reply", "question_reject", "resolve_user_input",
