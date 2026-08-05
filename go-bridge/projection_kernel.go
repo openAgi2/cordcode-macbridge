@@ -511,6 +511,16 @@ type ProjectionKernel struct {
 	checkpointPolicy ProjectionCheckpointPolicy
 	now              func() time.Time
 	randomUnit       func() float64
+
+	// stageTurnCheckpoint is the §6.1 git-checkpoint hook. When non-nil, IngestLive
+	// invokes it AFTER the reducer applies a turn_completed event, passing the
+	// 1-based TurnCount() of the just-completed turn. The callback ONLY stages
+	// intent (under the coalescer's own mutex); it must NOT perform git I/O on
+	// this stack (IngestLive runs under k.mu holding the event-delivery lock).
+	// Git I/O happens later in the checkpoint coalescer goroutine (checkpoint.go).
+	// Sourced from Handlers via SetTurnCheckpointStager; nil in unit tests that do
+	// not exercise the checkpoint path.
+	stageTurnCheckpoint func(backendID, sessionID string, turnN int)
 }
 
 func NewProjectionKernel(reducer *ProjectionReducer, store projectionCheckpointPersistence) *ProjectionKernel {
@@ -543,6 +553,18 @@ func (k *ProjectionKernel) SetReducer(reducer *ProjectionReducer) {
 	}
 	k.mu.Lock()
 	k.reducer = reducer
+	k.mu.Unlock()
+}
+
+// SetTurnCheckpointStager wires the §6.1 git-checkpoint hook. The stager is
+// invoked from IngestLive after the reducer applies a turn_completed event; it
+// must only register intent (no git I/O). Handlers passes h.checkpointCoalescer.stage.
+func (k *ProjectionKernel) SetTurnCheckpointStager(fn func(backendID, sessionID string, turnN int)) {
+	if k == nil {
+		return
+	}
+	k.mu.Lock()
+	k.stageTurnCheckpoint = fn
 	k.mu.Unlock()
 }
 
@@ -846,7 +868,22 @@ func (k *ProjectionKernel) IngestLive(msg EventMessage) bool {
 	}
 	before := k.reducer.LastAppliedRev(msg.BackendID, msg.SessionID)
 	k.reducer.Apply(msg)
-	return k.reducer.LastAppliedRev(msg.BackendID, msg.SessionID) != before
+	projectionAdvanced := k.reducer.LastAppliedRev(msg.BackendID, msg.SessionID) != before
+
+	// §6.1 checkpoint hook: after the reducer applies turn_completed, read the
+	// 1-based TurnCount() (= the just-completed turn) and stage the git-checkpoint
+	// intent. This is KERNEL-level (not reducer-level — the reducer stays pure and
+	// cannot reference git or the Kernel). We DO NOT self-maintain a counter;
+	// TurnCount() is projection truth. The stager only registers intent under the
+	// coalescer's own mutex; git I/O runs in the coalescer goroutine, NEVER under
+	// k.mu (that would block all session event delivery). Gated on
+	// projectionAdvanced so a no-op/duplicate turn_completed does not capture.
+	if projectionAdvanced && msg.Event == "turn_completed" && k.stageTurnCheckpoint != nil {
+		if turnN := k.reducer.TurnCount(msg.BackendID, msg.SessionID); turnN > 0 {
+			k.stageTurnCheckpoint(msg.BackendID, msg.SessionID, turnN)
+		}
+	}
+	return projectionAdvanced
 }
 
 // WaitHydrateCommitReady distinguishes a truly empty inspected source from a bare turn shell.

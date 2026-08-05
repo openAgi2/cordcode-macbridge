@@ -2,6 +2,7 @@ package gobridge
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,30 @@ import (
 	"path/filepath"
 	"strings"
 )
+
+// gitRunOption configures an extended runGitInDirectoryWith invocation (env override /
+// context-bound execution). It keeps a single git-runner code path: checkpoint capture
+// and any future caller pass options, while the legacy runGitInDirectory wrapper stays
+// zero-opts so existing call sites are unchanged (no third bare exec.Command fork).
+type gitRunOption func(*gitRunConfig)
+
+type gitRunConfig struct {
+	ctx context.Context
+	env []string
+}
+
+// WithEnv appends extra environment variables to the inherited os.Environ() plus
+// GIT_TERMINAL_PROMPT=0. Callers pass e.g. GIT_INDEX_FILE to stage a temp index.
+func WithEnv(env []string) gitRunOption {
+	return func(c *gitRunConfig) { c.env = append(c.env, env...) }
+}
+
+// WithContext bounds the git process; cancellation/timeout kills it (exec.CommandContext).
+// Checkpoint git I/O MUST always pass a context with a timeout so a wedged git cannot hold
+// the coalescer goroutine forever.
+func WithContext(ctx context.Context) gitRunOption {
+	return func(c *gitRunConfig) { c.ctx = ctx }
+}
 
 type gitWorktree struct {
 	Path      string `json:"path"`
@@ -253,13 +278,34 @@ func nonEmptyLines(output string) []string {
 }
 
 func runGitInDirectory(directory string, args ...string) (string, error) {
+	return runGitInDirectoryWith(directory, nil, args...)
+}
+
+// runGitInDirectoryWith is the single extended git runner. It preserves the legacy contract
+// (git -C <resolved>, GIT_TERMINAL_PROMPT=0, combined stderr→error) and adds optional env
+// override + context. Checkpoint capture uses this with a context timeout and a temp
+// GIT_INDEX_FILE; legacy callers go through runGitInDirectory (zero opts).
+func runGitInDirectoryWith(directory string, opts []gitRunOption, args ...string) (string, error) {
 	resolved, err := expandPath(directory)
 	if err != nil {
 		return "", err
 	}
+	cfg := &gitRunConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
 	allArgs := append([]string{"-C", resolved}, args...)
-	cmd := exec.Command("git", allArgs...)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	var cmd *exec.Cmd
+	if cfg.ctx != nil {
+		cmd = exec.CommandContext(cfg.ctx, "git", allArgs...)
+	} else {
+		cmd = exec.Command("git", allArgs...)
+	}
+	env := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if len(cfg.env) > 0 {
+		env = append(env, cfg.env...)
+	}
+	cmd.Env = env
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -271,6 +317,20 @@ func runGitInDirectory(directory string, args ...string) (string, error) {
 		return "", fmt.Errorf("%s", message)
 	}
 	return stdout.String(), nil
+}
+
+// isGitWorkspace reports whether dir is inside a git working tree and returns the
+// resolved repository root (rev-parse --show-toplevel). Any git error ⇒ unsupported,
+// ok=false. Shared by checkpoint capture (checkpoint.go); workspace_diff.go and
+// loadGitContext keep their existing toplevel calls (no forced migration — plan §6.1
+// "don't force"). validateGitDirectory only checks dir exists, NOT git-ness; do not
+// conflate.
+func isGitWorkspace(dir string) (root string, ok bool) {
+	root, err := runGitInDirectory(dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(root), true
 }
 
 func gitWireError(code string, err error) *WireError {

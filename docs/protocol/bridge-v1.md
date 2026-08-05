@@ -108,6 +108,8 @@ list_sessions
 list_projects
 fetch_todos
 get_workspace_diff
+get_turn_diff
+get_full_thread_diff
 get_usage
 run_diagnostics
 list_memory_files
@@ -193,6 +195,7 @@ question_asked
 question_resolved
 user_input_requested
 user_input_resolved
+turn_diff_ready
 projection_patch
 projection_snapshot
 sync_invalidate
@@ -475,6 +478,98 @@ from cold hydrate (`chat_history.jsonl`). Clients seeing this capability SHOULD 
 discovery/active external-turn probes and SHOULD keep only a `turn_completed` reconcile + a
 low-frequency watchdog; clients on backends without it fall back to current polling. Adding the
 string is non-breaking (extensible `capabilities` array); no protocol major-version bump.
+
+### Capability: `supports_checkpoint` / `supports_conversation_rollback`
+
+§6.1 checkpoint 只读 diff. A backend advertises `supports_checkpoint` in `capabilities`
+when its agent driver implements the `core.CheckpointProvider` opt-in interface. MacBridge
+then captures a HIDDEN git ref snapshot of the agent workspace after each completed turn, so
+the client can later fetch a per-turn or full-thread file diff (read-only). The snapshot is a
+workspace FILE snapshot only — it is NOT a session truth source; session truth always stays in
+the official CLI. Capture honestly no-ops on a non-git workspace (`workspace_not_git`); no
+mock/placeholder snapshot is ever written.
+
+`supports_conversation_rollback` is advertised when the driver implements the forward-compat
+`core.ConversationRollbackProvider` interface. No current driver implements it, so the
+capability is absent everywhere today and the (currently hidden) revert entry stays disabled
+until one does.
+
+Both are extensible `capabilities` strings; adding them is non-breaking (no major version bump).
+No backend-id hard-branching; derivation is by type assertion on the driver.
+
+### Event: `turn_diff_ready`
+
+Optional control-plane push (§6.1). After MacBridge successfully writes a turn's checkpoint
+git ref, it emits `turn_diff_ready` so clients can surface a per-turn `+/-` summary without
+polling. It carries NO full patch (plan §6.1). Clients that miss it fall back to the
+`get_turn_diff` / `get_full_thread_diff` RPCs. The event is control-plane only: it never
+mutates the message projection (SSV2 guardrail 8 enumerated exception — not a second timeline
+writer).
+
+```ts
+{
+  checkpointRef: string,            // refs/cordcode/checkpoints/<backendId>/turn/<N>/r<short>
+  turnNumber: number,               // 1-based count of the just-completed turn
+  files: Array<{ path: string; additions: number; deletions: number }>,  // capped (~50)
+  truncated: boolean                // true when the file list hit the event cap; use RPC for full
+}
+```
+
+### RPC: `get_turn_diff`
+
+Returns the per-file diff for a single completed turn (between the `turnNumber-1` and
+`turnNumber` checkpoint refs). For `turnNumber == 1` the baseline is git's empty tree, so the
+turn's files appear as additions. Gated on `supports_checkpoint`: returns `checkpoint_unsupported`
+for backends that do not implement it, and `workspace_not_git` when the resolved workspace is
+not a git repository. Both RPCs are scoped to `session.read` (the scope table lands in §6.3;
+until then they pass through with no scope gate, consistent with the existing
+`get_workspace_diff` path).
+
+Request:
+
+```ts
+{
+  sessionId: string,
+  turnNumber: number,            // 1-based
+  directory?: string             // optional; falls back to the session registry + WorkDirSwitcher
+}
+```
+
+Response:
+
+```ts
+{
+  files: Array<{ path: string; additions: number; deletions: number }>,
+  additions: number,             // totals across files
+  deletions: number,
+  truncated: boolean,            // true when files exceed the server cap (~500)
+  checkpointRef: string,         // the turn's ref (for debugging / client-side caching)
+  fromRef?: string               // the previous turn's ref, or empty when turnNumber == 1
+}
+```
+
+Stable error codes: `checkpoint_unsupported`, `workspace_not_git`, `workspace_missing`,
+`checkpoint_not_found` (no ref for the given turn), `invalid_directory`, `invalid_params`.
+
+### RPC: `get_full_thread_diff`
+
+Returns the aggregate per-file diff from the EARLIEST captured turn to the LATEST for a session.
+When only one turn is captured, or when comparing against the session's first captured state,
+the baseline falls back to git's empty tree so the turn's files appear as additions. Same
+capability gating and error codes as `get_turn_diff`.
+
+Request:
+
+```ts
+{
+  sessionId: string,
+  directory?: string
+}
+```
+
+Response shape is identical to `get_turn_diff` (`files`, `additions`, `deletions`,
+`truncated`, `checkpointRef`, `fromRef`), with `checkpointRef` = the latest turn's ref and
+`fromRef` = the earliest turn's ref (or empty when the empty-tree baseline is used).
 
 ### Event: `sessions_changed`
 

@@ -114,6 +114,8 @@ struct BridgeV1Error: Codable, Equatable {
 | `session.messages` | 是 | session 消息历史 |
 | `session.send` | 是 | 发送消息 |
 | `resolve_user_input` | 是 | 回答 MacBridge 持有 responder 的结构化问题 |
+| `get_turn_diff` | 是 | §6.1 取指定 turn 的只读 workspace diff（per-file +/-）；需 `supports_checkpoint` |
+| `get_full_thread_diff` | 是 | §6.1 取整个 session 聚合 diff（最早→最新 checkpoint ref）；需 `supports_checkpoint` |
 
 ## 结构化用户输入
 
@@ -216,10 +218,11 @@ claim，不能据此把卡片写成终态。客户端仅以 `headRev` 对应的 
 | `pairing.*` | `pairing.expired`, `pairing.rejected`, `pairing.already_claimed` |
 | `bridge.*` | `bridge.not_ready`, `bridge.shutting_down`, `bridge.needs_update` |
 | `agent.*` | `agent.not_detected`, `agent.unavailable`, `agent.version_unsupported` |
-| `workspace.*` | `workspace.not_found`, `workspace.access_denied` |
+| `workspace.*` | `workspace.not_found`, `workspace.access_denied`, `workspace.not_git` |
 | `session.*` | `session.not_found`, `session.not_running`, `session.conflict`, `session.held_by_external_worker`, `session.owner_check_failed` |
 | `permission.*` | `permission.not_found`, `permission.already_resolved` |
 | `network.*` | `network.timeout`, `network.connection_refused` |
+| `checkpoint.*` | `checkpoint_unsupported`, `checkpoint_not_found`（§6.1：driver 未实现 `CheckpointProvider` 或该 turn 无 ref；实际 wire 用下划线，与 `workspace_not_git` 等既有 git handler 错误码一致） |
 
 Claude `send_message` 在续接一个尚未由当前 MacBridge registry 持有的 session 前执行 best-effort
 进程预检。检测到同 session 的记录进程仍存活时返回

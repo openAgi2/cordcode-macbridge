@@ -244,7 +244,13 @@ export type BridgeRPCMethod =
   | "get_git_context"
   | "checkout_git_branch"
   | "create_git_branch"
-  | "create_git_worktree";
+  | "create_git_worktree"
+  // §6.1 checkpoint 只读 diff: per-turn / full-thread read-only workspace diff backed by
+  // hidden git refs. Capability string: "supports_checkpoint" (derived from the driver
+  // implementing core.CheckpointProvider). Scoped to session.read (scope table §6.3).
+  // Canonical doc: docs/protocol/bridge-v1.md「RPC: get_turn_diff / get_full_thread_diff」.
+  | "get_turn_diff"
+  | "get_full_thread_diff";
 
 export interface BridgeRequest<TParams = Record<string, unknown>> {
   type: "request";
@@ -298,6 +304,12 @@ export type BridgeEventName =
   | "question_asked"
   | "question_resolved"
   | "sessions_changed"
+  // §6.1 checkpoint 只读 diff: control-plane push after MacBridge writes a turn's
+  // checkpoint git ref. Carries per-file {path,+/-} (capped, NO full patch) so clients
+  // can surface the summary without polling. Control-plane only: never mutates the
+  // message projection (SSV2 guardrail 8 enumerated exception — not a second writer).
+  // Canonical doc: bridge-v1.md「Event: turn_diff_ready」.
+  | "turn_diff_ready"
   // Session Projection Stream (session_sync_v2 capability). Mac reduces EventPublisher
   // output into one authoritative SessionProjection; clients apply patches/snapshots only
   // and never dual-source merge. See bridge-v1.md「Session Projection Stream」.

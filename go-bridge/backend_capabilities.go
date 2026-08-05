@@ -100,5 +100,18 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 		caps = append(caps, "external_turn_streaming")
 	}
 
+	// §6.1 checkpoint 只读 diff: capability 派生自 CheckpointProvider opt-in 接口（与
+	// SessionPinner 同模板）。snapshot 是 workspace 文件快照（非 session 真相源）；iOS 据此
+	// capability 决定是否展示 turn diff UI。capture 在 non-git workspace 诚实地不写 ref
+	// （workspace_not_git），无 mock/placeholder fallback。ConversationRollbackProvider 当前
+	// 无 driver 实现 → capability 缺省隐藏，revert 入口据此禁用。两条都是 extensible string，
+	// 非破坏性新增，无 major version bump；不做 backend-id 硬分支。
+	if cp, ok := agent.(core.CheckpointProvider); ok && cp.SupportsCheckpoint() {
+		caps = append(caps, "supports_checkpoint")
+	}
+	if _, ok := agent.(core.ConversationRollbackProvider); ok {
+		caps = append(caps, "supports_conversation_rollback")
+	}
+
 	return caps
 }

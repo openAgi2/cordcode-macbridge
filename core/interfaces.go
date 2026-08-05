@@ -491,6 +491,38 @@ type SessionPinner interface {
 	ListPinnedSessions(ctx context.Context) ([]SessionPin, error)
 }
 
+// CheckpointProvider is an opt-in interface for agents whose sessions MacBridge may
+// snapshot into hidden git refs after each completed turn (§6.1 read-only checkpoint
+// diff). The snapshot is a workspace FILE snapshot only — it is NOT a session truth
+// source; session truth always stays in the official CLI (plan §3 防呆, SSV2 guardrail 1).
+//
+// Per-session workspace resolution lives in go-bridge (sessionRegistry.directoryForSession,
+// populated when create_session/send_message carry a directory); the driver does not need
+// to track (sessionID → cwd) itself. The capability therefore gates the feature on
+// "this backend opts in", while capture still no-ops honestly when the resolved workspace
+// is not a git repo (workspace_not_git) — no mock/placeholder snapshot is ever written.
+//
+// deriveBackendCapabilities advertises "supports_checkpoint" when a driver implements
+// this interface; iOS gates the diff UI on that capability string.
+type CheckpointProvider interface {
+	// SupportsCheckpoint is the stable opt-in signal. Returning true means MacBridge
+	// may capture read-only git-ref workspace checkpoints for this backend's sessions.
+	SupportsCheckpoint() bool
+}
+
+// ConversationRollbackProvider is a forward-compatibility opt-in interface for agents
+// that can roll a conversation back to a prior turn. No driver implements it today;
+// the capability "supports_conversation_rollback" stays absent until one does, which
+// keeps the (currently hidden) revert entry gated off (§6.1 "revert 未实现").
+// The signature is intentionally minimal so a future driver can fill it in without
+// reshaping the interface.
+type ConversationRollbackProvider interface {
+	// RollbackConversationToTurn rolls the conversation state of sessionID back to the
+	// given 1-based turn number (as reported by ProjectionReducer.TurnCount). It must
+	// return a non-nil error until a real driver implements it.
+	RollbackConversationToTurn(ctx context.Context, sessionID string, turnNumber int) error
+}
+
 // WorkDirSwitcher is an optional interface for agents that support runtime
 // work directory switching. The change takes effect on the next session start;
 // the current running session is terminated automatically by the engine.

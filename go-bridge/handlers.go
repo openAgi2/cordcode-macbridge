@@ -47,6 +47,11 @@ type Handlers struct {
 	eventPublisher         *EventPublisher
 	projectionKernel       *ProjectionKernel
 	projectionHydrateSlots chan struct{}
+	// checkpointCoalescer owns the §6.1 git-checkpoint write path (parallel to,
+	// but deliberately separate from, the projection coalescer). It is wired to
+	// the kernel via SetTurnCheckpointStager; the kernel calls it from IngestLive
+	// after each turn_completed. nil in unit tests that don't exercise capture.
+	checkpointCoalescer *checkpointCoalescer
 	// deltaBatcher（Fix 5）：text_delta/reasoning_delta 时间窗攒批，降低上游每 token 一帧
 	// 的 WS/HPKE/日志开销。relayEvents / startPassiveSubscription 通过它下发，而非直接 broadcaster.Send。
 	deltaBatcher     *DeltaBatcher
@@ -162,6 +167,20 @@ func newHandlersWithContext(ctx context.Context, bridgeEpoch string) *Handlers {
 		h.eventPublisher.ProjectionReducer(),
 		NewProjectionCheckpointStore(""),
 	)
+	// §6.1 checkpoint 只读 diff: wire the git-checkpoint coalescer. The coalescer
+	// resolves workspace dirs from the session registry and emits turn_diff_ready
+	// via h.publishEvent (EventPublisher.PublishLogical, the single Kernel→
+	// EventPublisher outlet). The kernel calls it from IngestLive after each
+	// turn_completed. Capture is additionally gated on the agent implementing
+	// core.CheckpointProvider (resolver.CheckpointEnabled), so backends that do
+	// not opt in honestly no-op.
+	h.checkpointCoalescer = newCheckpointCoalescer(&handlersCheckpointResolver{h: h}, func(le LogicalEvent) {
+		// The coalescer emits turn_diff_ready (control-plane only) through the
+		// single Kernel→EventPublisher outlet. The return EventMessage is the
+		// stamped fan-out frame; the coalescer does not need it.
+		_ = h.publishEvent(le)
+	})
+	h.projectionKernel.SetTurnCheckpointStager(h.checkpointCoalescer.stage)
 	h.eventPublisher.SetProjectionKernel(h.projectionKernel)
 	// TTL cache for the Claude running map (Fix 3). The recompute closure binds to
 	// whatever claudecode agent is currently registered, so the cache is valid
@@ -1053,6 +1072,10 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleFetchTodos(conn, msg, agent)
 	case "get_workspace_diff":
 		h.handleGetWorkspaceDiff(conn, msg, agent)
+	case "get_turn_diff":
+		h.handleGetTurnDiff(conn, msg, agent)
+	case "get_full_thread_diff":
+		h.handleGetFullThreadDiff(conn, msg, agent)
 	case "get_usage":
 		h.handleGetUsage(conn, msg, agent)
 	case "run_diagnostics":
