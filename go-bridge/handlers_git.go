@@ -428,9 +428,14 @@ func (h *Handlers) handleCreatePullRequest(conn Connection, msg WireMessage) {
 	}, nil)
 }
 
-// slugFromTitle 把 PR 标题转成分支 slug：小写→非 alnum 替换为 -→去首尾 -→加 cordcode/ 前缀→截断 60 字符。
+// slugFromTitle 把 PR 标题转成分支 slug：小写→去 PR 标题约定前缀 `[cordcode]`→
+// 非 alnum 替换为 -→去首尾 -→截断 60 字符→去尾 -→加 cordcode/ 前缀。
+// 去前缀让 plan §7.1 标题模板 `[cordcode] <summary>` 命中时，分支名不出现
+// `cordcode/cordcode-...` 双前缀（PR 标题本身仍保留 [cordcode] 前缀，由调用方原样传 gh）。
 func slugFromTitle(title string) string {
 	slug := strings.ToLower(strings.TrimSpace(title))
+	slug = strings.TrimPrefix(slug, "[cordcode]")
+	slug = strings.TrimLeft(slug, " -")
 	slug = snakeCaseRe.ReplaceAllString(slug, "-")
 	slug = strings.Trim(slug, "-")
 	if len(slug) > 60 {
