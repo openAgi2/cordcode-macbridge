@@ -3787,7 +3787,8 @@ func (h *Handlers) handleReadFile(conn Connection, msg WireMessage) {
 	// 两个模式，由可选 workspace_root 参数切换：
 	// 1. workspace_root 传（workspace-bound）：realpath(requested) 必须在 realpath(root) 内，
 	//    symlink 列为 isSymlink:true 叶子不递归；拒 ../ 越界。
-	// 2. workspace_root 不传（广域 picker）：保持现有 expandPath 行为，picker 不受影响。
+	// 2. workspace_root 不传（广域 picker）：picker 无 workspace 边界、可浏览任意真实目录；
+	//    symlink 仍由 collectDirItems 的 mode-independent 守卫叶子化（不递归 target），见 review①。
 	// 同时新增 limit/offset/depth 翻页与子树预取（additive，所有调用方共享）。
 	func (h *Handlers) handleListDirectory(conn Connection, msg WireMessage) {
 		var params struct {
@@ -3826,14 +3827,17 @@ func (h *Handlers) handleReadFile(conn Connection, msg WireMessage) {
 				}
 			}
 		} else {
-			// 广域模式（picker）：保持现有行为，通过 expandPath 接受 ~/相对路径。
+			// 广域模式（picker）：不设 workspace 边界，通过 expandPath 接受 ~/相对路径，
+			// picker 可浏览任意真实目录。symlink 安全由 collectDirItems 的 mode-independent
+			// 守卫保证（isSymlink → 叶子不递归），故即便 path 下含指向外部的 symlink，也只
+			// 返回叶子标记、不展开 target 内容（review①：TestListDirectory_BroadMode_SymlinkIsLeaf）。
 			var err error
 			resolvedPath, err = expandPath(params.Path)
 			if err != nil {
 				conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_path", Message: err.Error()})
 				return
 			}
-			root = resolvedPath // 广域模式下 root 不作 symlink 逃逸守卫
+			root = resolvedPath // 广域无 workspace 边界：root=resolvedPath 使 pathIsWithinRoot 恒真（picker 预期）
 		}
 
 		entries, err := os.ReadDir(resolvedPath)

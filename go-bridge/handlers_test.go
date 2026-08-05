@@ -4717,3 +4717,60 @@ func TestListDirectory_BroadModeWithHomeDir(t *testing.T) {
 		t.Error("broad mode response should include hasMore field")
 	}
 }
+
+// TestListDirectory_BroadMode_SymlinkIsLeaf 固化 review① 不变量：广域模式（无 workspace_root）
+// 下 symlink 仍是叶子——即便 symlink 指向浏览目录之外（等价 ~/.ssh 等敏感目录），也只返回
+// isSymlink:true 叶子标记，不递归展开 target 内容。picker 可浏览任意真实目录，但不穿越 symlink。
+// 该守卫由 collectDirItems 的 mode-independent `!isSymlink` 递归门保证，与 workspaceBound 无关。
+func TestListDirectory_BroadMode_SymlinkIsLeaf(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "leak.txt")
+	if err := os.WriteFile(outsideFile, []byte("leaked"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// symlink 在广域浏览目录内，指向外部敏感目录（模拟经 symlink 翻到 ~/.ssh 等）。
+	escLink := filepath.Join(workspace, "escape-link")
+	if err := os.Symlink(outside, escLink); err != nil {
+		t.Fatal(err)
+	}
+
+	h := newTestHandlers(t)
+	conn := &readFileCaptureConn{}
+	// 广域模式：不传 workspace_root；depth=3 给足递归空间，若 symlink 被错误展开会暴露 leak.txt。
+	h.handleListDirectory(conn, WireMessage{
+		RequestID: "req_broad_symlink",
+		Params: mustJSONRaw(t, map[string]any{
+			"path":  workspace,
+			"depth": 3,
+		}),
+	})
+	if conn.err != nil {
+		t.Fatalf("broad mode symlink listing should succeed, got error: %+v", conn.err)
+	}
+	resMap, _ := conn.data.(map[string]interface{})
+	itemsRaw, _ := json.Marshal(resMap["items"])
+
+	type item struct {
+		Name      string `json:"name"`
+		IsSymlink bool   `json:"isSymlink,omitempty"`
+	}
+	var items []item
+	json.Unmarshal(itemsRaw, &items)
+
+	hasLink := false
+	for _, it := range items {
+		if it.Name == "leak.txt" {
+			t.Fatalf("broad mode symlink leaf violated: target content '%s' leaked from outside dir", it.Name)
+		}
+		if it.Name == "escape-link" {
+			hasLink = true
+			if !it.IsSymlink {
+				t.Error("escape-link should be marked isSymlink=true in broad mode")
+			}
+		}
+	}
+	if !hasLink {
+		t.Error("missing symlink entry 'escape-link' in broad mode listing")
+	}
+}
