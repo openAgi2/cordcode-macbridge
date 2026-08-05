@@ -253,7 +253,8 @@ func advertiseSessionSyncV2Backend(backends []AgentProviderDescriptor) {
 		// producer advertise ownership capability.
 		if id == "codex" || kind == "codex" ||
 			id == "claude" || id == "claudecode" || kind == "claude_code" || kind == "claude" ||
-			id == "opencode" || kind == "opencode" {
+			id == "opencode" || kind == "opencode" ||
+			id == "grokbuild" || kind == "grokbuild" {
 			backends[i].Capabilities = appendUniqueCapability(
 				backends[i].Capabilities,
 				"session_sync_v2",

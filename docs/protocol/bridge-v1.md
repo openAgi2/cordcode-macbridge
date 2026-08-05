@@ -467,7 +467,8 @@ implements file-relay content streaming for **codex** (rollout) and **claude**/`
 also emits `user_message` with `{ itemId, turnId, text }` when the rollout persists the external
 prompt; `itemId` is the response-item message ID and is reused by rich history reconciliation.
 **opencode** is push-native via its SSE firehose (separate path, not this capability); **grokbuild**
-is pending the leader-socket subscriber. Clients seeing this capability SHOULD NOT start
+streams external-turn content through the projection pipeline (updates.jsonl file-tailer fallback,
+`session_sync_v2`) and does not advertise this capability yet. Clients seeing this capability SHOULD NOT start
 discovery/active external-turn probes and SHOULD keep only a `turn_completed` reconcile + a
 low-frequency watchdog; clients on backends without it fall back to current polling. Adding the
 string is non-breaking (extensible `capabilities` array); no protocol major-version bump.
@@ -536,8 +537,8 @@ patches/snapshots and MUST NOT dual-source merge content against `get_session_me
 - **Single outbound funnel.** Projection frames leave MacBridge only through the existing
   `EventPublisher` per-connection dispatch (they reuse `broadcaster` + observation target
   resolution). There is no parallel projection websocket / SSE pipe.
-- **Production scope.** Codex, Claude and OpenCode project through the same Kernel contract;
-  iOS and remote-web consume the same SPS ownership semantics.
+- **Production scope.** Codex, Claude, OpenCode and Grok Build project through the same Kernel
+  contract; iOS and remote-web consume the same SPS ownership semantics.
 
 ### Capability: `session_sync_v2`
 

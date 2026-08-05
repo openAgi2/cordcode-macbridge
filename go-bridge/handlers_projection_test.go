@@ -992,7 +992,7 @@ func TestClaudeColdHydrateMissingFileHonestError(t *testing.T) {
 // producer MUST return an honest
 // projection.not_migrated error — never fall through to an empty head-0 shell (§10.5.7 修法 1).
 func TestProjectionNotMigratedForUnsupportedBackend(t *testing.T) {
-	for _, backend := range []string{"madeup-backend", "grokbuild"} {
+	for _, backend := range []string{"madeup-backend"} {
 		handlers := NewHandlers()
 		conn := &readFileCaptureConn{}
 		params, _ := json.Marshal(map[string]interface{}{"sessionId": "s-" + backend})
@@ -1010,6 +1010,63 @@ func TestProjectionNotMigratedForUnsupportedBackend(t *testing.T) {
 		if conn.err.Retryable == nil || *conn.err.Retryable {
 			t.Fatalf("%s: not_migrated must be explicitly nonretryable: %+v", backend, conn.err)
 		}
+	}
+}
+
+// TestGrokBuildProjectionHydrateFromRichHistory: grokbuild is migrated as a pathless
+// rich-history projection backend (chat_history.jsonl snapshot). A cold get_session_projection
+// must reduce the entries into a committed projection instead of returning
+// projection.not_migrated.
+func TestGrokBuildProjectionHydrateFromRichHistory(t *testing.T) {
+	handlers := NewHandlers()
+	agent := &fakeAgent{
+		name: "grokbuild",
+		richHistory: []core.RichHistoryEntry{
+			{ID: "u1", Role: "user", Content: "列一下当前目录文件"},
+			{
+				ID:       "a1",
+				Role:     "assistant",
+				Content:  "src/ 下有 main.go",
+				Thinking: "先看目录结构",
+				Parts: []map[string]any{
+					{"type": "reasoning", "content": "先看目录结构"},
+					{"type": "text", "content": "src/ 下有 main.go"},
+					{"type": "tool", "step": map[string]any{
+						"id": "tool-1", "toolName": "list_dir", "status": "completed",
+						"output": map[string]any{"kind": "inline", "text": "main.go"},
+					}},
+				},
+			},
+		},
+	}
+	handlers.mu.Lock()
+	handlers.agents = map[string]core.Agent{"grokbuild": agent}
+	handlers.mu.Unlock()
+
+	if !backendSupportsProjectionHydrate("grokbuild") {
+		t.Fatal("grokbuild must be a projection hydrate backend after migration")
+	}
+
+	conn := &readFileCaptureConn{}
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": "ses-grok-1", "sinceRev": 0})
+	msg := WireMessage{RequestID: "r-grok", BackendID: "grokbuild", Method: "get_session_projection", Params: params}
+	handlers.handleGetSessionProjection(conn, msg, nil)
+	if conn.err != nil {
+		t.Fatalf("grokbuild hydrate error: %+v", conn.err)
+	}
+	data, ok := conn.data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("unexpected data type %T", conn.data)
+	}
+	raw, _ := json.Marshal(data)
+	if !strings.Contains(string(raw), "列一下当前目录文件") {
+		t.Fatalf("projection missing user text: %s", string(raw))
+	}
+	if !strings.Contains(string(raw), "src/ 下有 main.go") {
+		t.Fatalf("projection missing assistant text: %s", string(raw))
+	}
+	if !strings.Contains(string(raw), "tool-1") {
+		t.Fatalf("projection missing tool part: %s", string(raw))
 	}
 }
 

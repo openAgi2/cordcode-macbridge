@@ -58,6 +58,8 @@ func TestSessionSyncV2CapabilityScopedToMigratedBackend(t *testing.T) {
 		{ID: "claude", Kind: "claude_code", Capabilities: []string{"session_mutation"}},
 		{ID: "codex", Kind: "codex", Capabilities: []string{"todos"}},
 		{ID: "opencode", Kind: "opencode", Capabilities: nil},
+		{ID: "grokbuild", Kind: "grokbuild", Capabilities: nil},
+		{ID: "copilot", Kind: "copilot", Capabilities: nil},
 	}
 	advertiseSessionSyncV2Backend(backends)
 	for _, backend := range backends {
@@ -67,7 +69,8 @@ func TestSessionSyncV2CapabilityScopedToMigratedBackend(t *testing.T) {
 				hasV2 = true
 			}
 		}
-		migrated := backend.ID == "codex" || backend.ID == "claude" || backend.ID == "opencode"
+		migrated := backend.ID == "codex" || backend.ID == "claude" ||
+			backend.ID == "opencode" || backend.ID == "grokbuild"
 		if migrated && !hasV2 {
 			t.Fatalf("migrated backend %q did not advertise session_sync_v2", backend.ID)
 		}

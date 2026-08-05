@@ -81,7 +81,8 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 	// this to heal its pathless HTTP baseline; Claude uses it to detect a new
 	// compact continuation or advanced segment cut.
 	forceColdInspection := params.SinceRev == 0 &&
-		(msg.BackendID == "opencode" || msg.BackendID == "claude" || msg.BackendID == "claudecode")
+		(msg.BackendID == "opencode" || msg.BackendID == "grokbuild" ||
+			msg.BackendID == "claude" || msg.BackendID == "claudecode")
 	if err := h.ensureProjectionHydrated(
 		msg.BackendID,
 		params.SessionID,
@@ -242,9 +243,10 @@ var errProjectionSourceUnavailable = errors.New("projection source is not availa
 
 func backendSupportsProjectionHydrate(backendID string) bool {
 	switch backendID {
-	case "codex", "claude", "claudecode", "opencode":
+	case "codex", "claude", "claudecode", "opencode", "grokbuild":
 		// K5: Codex/Claude use JSONL transcript hydrate; OpenCode uses HTTP rich-history
-		// full rebuild (no transcript file / no file-prefix checkpoint).
+		// full rebuild (no transcript file / no file-prefix checkpoint); grokbuild uses the
+		// same pathless rich-history rebuild from local chat_history.jsonl.
 		return true
 	default:
 		return false
@@ -283,7 +285,8 @@ func (h *Handlers) ensureProjectionHydrated(
 		return err
 	}
 	// Pathless re-open: force full GetRichSessionHistory rebuild when already Ready.
-	sourceChanged := forceColdInspection && ready && backendID == "opencode" && source.Path == ""
+	sourceChanged := forceColdInspection && ready &&
+		(backendID == "opencode" || backendID == "grokbuild") && source.Path == ""
 	admission, err := h.projectionKernel.BeginHydrateTransaction(
 		backendID, sessionID, source, false, sourceChanged,
 	)
@@ -334,6 +337,8 @@ func (h *Handlers) prepareProjectionHydrateSource(
 		agentName = "claudecode"
 	case "opencode":
 		agentName = "opencode"
+	case "grokbuild":
+		agentName = "grokbuild"
 	default:
 		return ProjectionSourceDescriptor{}, errProjectionBackendNotMigrated
 	}
@@ -407,10 +412,11 @@ func (h *Handlers) prepareProjectionHydrateSource(
 		}
 		return ProjectionSourceDescriptor{}, errProjectionSourceUnavailable
 	}
-	// OpenCode has no JSONL transcript path. Cold hydrate is a full rich-history rebuild
-	// keyed by session identity only (Cursor=0, Path empty). Checkpoint file-prefix validation
-	// does not apply; re-open always rebuilds from GetRichSessionHistory.
-	if backendID == "opencode" {
+	// OpenCode has no JSONL transcript path; grokbuild's chat_history.jsonl is a structured
+	// turn snapshot, not a raw transcript with stable byte cursors. Both cold-hydrate as a full
+	// rich-history rebuild keyed by session identity only (Cursor=0, Path empty). Checkpoint
+	// file-prefix validation does not apply; re-open always rebuilds from GetRichSessionHistory.
+	if backendID == "opencode" || backendID == "grokbuild" {
 		if _, ok := agent.(core.RichHistoryProvider); !ok {
 			if h.eventPublisher.ProjectionTurnCount(backendID, sessionID) > 0 {
 				return ProjectionSourceDescriptor{Identity: sessionID}, nil
@@ -776,7 +782,8 @@ func (h *Handlers) produceProjectionHydrateRange(
 	base SessionProjection,
 	emit func(projectionHydrateEvent) bool,
 ) error {
-	if backendID != "opencode" && backendID != "claude" && backendID != "claudecode" &&
+	if backendID != "opencode" && backendID != "grokbuild" &&
+		backendID != "claude" && backendID != "claudecode" &&
 		(path == "" || startOffset == endOffset) {
 		return nil
 	}
@@ -829,6 +836,8 @@ func (h *Handlers) produceProjectionHydrateRange(
 		)
 	case "opencode":
 		return h.streamOpenCodeRichHistoryProjectionEvents(ctx, sessionID, emit)
+	case "grokbuild":
+		return h.streamBackendRichHistoryProjectionEvents(ctx, "grokbuild", sessionID, emit)
 	default:
 		return errProjectionBackendNotMigrated
 	}
