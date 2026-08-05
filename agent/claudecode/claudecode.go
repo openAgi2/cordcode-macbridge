@@ -318,8 +318,17 @@ func (a *Agent) configuredModels() []core.ModelOption {
 }
 
 func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
-	// 优先用 ~/.claude/settings.json 的别名映射（owner 网关场景的权威源）。
-	// 详见 docs/2026-06-30-claudecode-models-from-settings-json.md。
+	// custom 网关场景（Claude Code Router 或 ANTHROPIC_BASE_URL 非空）：settingsModels 的 3-slot
+	// 别名只是 owner 子集映射（haiku/sonnet/opus → 当前 *_MODEL_NAME），网关 /v1/models 才是完整模型源
+	//（含 GLM/DeepSeek 等）。故不短路 alias，合并 alias + fetchModelsFromAPI（去重，alias 优先保留 Desc）。
+	// 官方 anthropic 场景（无网关）：settingsModels 是权威源（owner 别名映射），保持短路。
+	// 详见 docs/2026-06-30-claudecode-models-from-settings-json.md + t3code-adoption-plan §5.1 缺口4。
+	if a.usesCustomGateway() {
+		if models := a.mergeGatewayModels(ctx); len(models) > 0 {
+			return models
+		}
+		return defaultClaudeModels()
+	}
 	if models := a.settingsModels(); len(models) > 0 {
 		return models
 	}
@@ -329,6 +338,49 @@ func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
 	if models := a.fetchModelsFromAPI(ctx); len(models) > 0 {
 		return models
 	}
+	return defaultClaudeModels()
+}
+
+// usesCustomGateway 判定是否走 custom 网关：routerURL（Claude Code Router，agent 构造注入）
+// 或 ANTHROPIC_BASE_URL 环境变量非空。此时网关 /v1/models 是完整模型源（非官方默认端点）。
+func (a *Agent) usesCustomGateway() bool {
+	a.mu.RLock()
+	routerURL := a.routerURL
+	a.mu.RUnlock()
+	return routerURL != "" || os.Getenv("ANTHROPIC_BASE_URL") != ""
+}
+
+// mergeGatewayModels 合并 settingsModels（owner 3-slot 别名）与 fetchModelsFromAPI（网关 /v1/models
+// 全量）。按 Name 去重，alias 优先（保留其 Desc，避免被网关同名项覆盖显示名）。fetchModelsFromAPI
+// 无白名单，GLM/DeepSeek 等第三方 id 全可见。
+func (a *Agent) mergeGatewayModels(ctx context.Context) []core.ModelOption {
+	alias := a.settingsModels()
+	api := a.fetchModelsFromAPI(ctx)
+	if len(alias) == 0 {
+		return api
+	}
+	if len(api) == 0 {
+		return alias
+	}
+	seen := make(map[string]bool, len(alias)+len(api))
+	merged := make([]core.ModelOption, 0, len(alias)+len(api))
+	for _, m := range alias {
+		if !seen[m.Name] {
+			seen[m.Name] = true
+			merged = append(merged, m)
+		}
+	}
+	for _, m := range api {
+		if !seen[m.Name] {
+			seen[m.Name] = true
+			merged = append(merged, m)
+		}
+	}
+	return merged
+}
+
+// defaultClaudeModels 是无任何模型源（无 settings alias、无 provider、API 取不到）时的兜底。
+func defaultClaudeModels() []core.ModelOption {
 	return []core.ModelOption{
 		{Name: "sonnet", Desc: "Claude Sonnet (balanced)"},
 		{Name: "opus", Desc: "Claude Opus (most capable)"},
