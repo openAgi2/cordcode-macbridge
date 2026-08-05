@@ -189,6 +189,13 @@ func (h *Handlers) grokLeaderSessionRelayLoop(sessionID, backendID string, sub c
 	}
 
 	var turnArmed bool
+	// armedTurnID 是首个内容事件透传的 promptId —— user_message_chunk 不带 promptId,
+	// 需要用同 turn 的 promptId 补身份 (SSV2 reducer 对 identityless 的 user_message
+	// 直接 skip, iOS 会只看到回复看不到 prompt)。
+	var armedTurnID string
+	// pendingUserText 缓冲外部 turn 的用户 prompt (attach 补扫或 live user_message_chunk),
+	// 等 turn 身份确定后一次性以 user_message 送入投影。
+	var pendingUserText string
 	defer func() {
 		// leader 异常断开且未收 turn_completed → 兜底补 idle, 防 isGenerating 残留。
 		if turnArmed {
@@ -212,17 +219,53 @@ func (h *Handlers) grokLeaderSessionRelayLoop(sessionID, backendID string, sub c
 		if eventName == "" {
 			continue
 		}
+		if eventName == "user_message" && ev.TurnID == "" {
+			// 身份延迟的 user prompt (codec 的 user_message_chunk): 挂起, 等首个
+			// 内容事件用同 turn 的 promptId 补齐后再发, 不在此处猜身份。
+			if text := strings.TrimSpace(ev.Content); text != "" {
+				pendingUserText = text
+			}
+			continue
+		}
 		// 首个内容事件前合成 turn_started + running (Mac 外部 turn 无上游 start 信号)。
 		// turnId 取自首个内容事件的 ev.TurnID (= convertSessionUpdate 透传的 _meta.promptId),
 		// 让 reducer arm ActiveTurnID 后续 tool/text 才有 turn 可挂。
 		if isContentEvent(eventName) && !turnArmed {
 			turnArmed = true
+			armedTurnID = ev.TurnID
 			h.sessions.markRunning(sessionID)
 			slog.Info("go-bridge: grokLeaderSessionRelay SYNTHESIZE turn_started+running", "sessionID", sessionID, "firstContent", eventName, "turnId", ev.TurnID)
 			h.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": ev.TurnID})
+			if pendingUserText != "" {
+				h.sendSessionEvent(sessionID, backendID, "user_message", map[string]interface{}{
+					"itemId": ev.TurnID,
+					"turnId": ev.TurnID,
+					"text":   pendingUserText,
+				})
+				pendingUserText = ""
+			}
 			h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "running"})
+		} else if eventName == "user_message" && turnArmed && armedTurnID != "" {
+			// 内容事件先到、prompt 后到 (异常顺序): 用已 arm 的 turn 身份补发。
+			h.sendSessionEvent(sessionID, backendID, "user_message", map[string]interface{}{
+				"itemId": armedTurnID,
+				"turnId": armedTurnID,
+				"text":   ev.Content,
+			})
+			continue
 		}
 		if eventName == "turn_completed" || eventName == "error" {
+			// 从未收到内容事件的 turn (空回复): 终态自带 promptId, 此时补发挂起的
+			// prompt, 让 iOS 至少看到用户问题 + 完成收口, 而不是只看到空回复。
+			if pendingUserText != "" && ev.TurnID != "" {
+				h.sendSessionEvent(sessionID, backendID, "user_message", map[string]interface{}{
+					"itemId": ev.TurnID,
+					"turnId": ev.TurnID,
+					"text":   pendingUserText,
+				})
+			}
+			pendingUserText = ""
+			armedTurnID = ""
 			// 上游 durable 终态信号到达 (convertSessionUpdate 映射) → 主收口。
 			h.sessions.markIdle(sessionID)
 			turnArmed = false

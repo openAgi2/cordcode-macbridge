@@ -219,11 +219,20 @@ func TestConvertSessionUpdate_UsageUpdate(t *testing.T) {
 	}
 }
 
-func TestConvertSessionUpdate_UserMessageChunkIgnored(t *testing.T) {
-	params := json.RawMessage(`{"sessionId":"s1","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"echo"}}}`)
+func TestConvertSessionUpdate_UserMessageChunk(t *testing.T) {
+	params := json.RawMessage(`{"sessionId":"s1","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"讲个法国笑话"}}}`)
 	events := convertSessionUpdate(params, "s1")
-	if len(events) != 0 {
-		t.Fatalf("expected 0 events, got %d", len(events))
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	ev := events[0]
+	if ev.Type != core.EventUserMessage || ev.Content != "讲个法国笑话" {
+		t.Fatalf("event = %+v, want EventUserMessage with prompt text", ev)
+	}
+	// user_message_chunk 不带 promptId; 身份必须由 relay 用同 turn 首个内容事件的
+	// promptId 补齐, 这里不得合成或猜测身份。
+	if ev.ItemID != "" || ev.TurnID != "" {
+		t.Fatalf("identity must be deferred, got itemId=%q turnId=%q", ev.ItemID, ev.TurnID)
 	}
 }
 

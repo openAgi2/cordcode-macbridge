@@ -468,7 +468,10 @@ also emits `user_message` with `{ itemId, turnId, text }` when the rollout persi
 prompt; `itemId` is the response-item message ID and is reused by rich history reconciliation.
 **opencode** is push-native via its SSE firehose (separate path, not this capability); **grokbuild**
 streams external-turn content through the projection pipeline (updates.jsonl file-tailer fallback,
-`session_sync_v2`) and does not advertise this capability yet. Clients seeing this capability SHOULD NOT start
+`session_sync_v2`) and does not advertise this capability yet. The external prompt
+(`user_message_chunk`) is caught up at relay attach when its turn is still in flight and emitted as
+`user_message` attributed to that turn's source-proven `promptId`; prompts of completed turns come
+from cold hydrate (`chat_history.jsonl`). Clients seeing this capability SHOULD NOT start
 discovery/active external-turn probes and SHOULD keep only a `turn_completed` reconcile + a
 low-frequency watchdog; clients on backends without it fall back to current polling. Adding the
 string is non-breaking (extensible `capabilities` array); no protocol major-version bump.

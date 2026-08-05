@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
@@ -282,4 +283,83 @@ func TestGrokLeaderRelay_SubscribeErrorExitsCleanly(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("relay loop should exit immediately on subscribe error")
 	}
+}
+
+// TestGrokLeaderRelay_FlushesPendingUserMessageWithTurnIdentity: identityless
+// user_message (codec 的 user_message_chunk) 必须挂起, 并在首个内容事件携带同 turn
+// 的 promptId 时以 user_message 送入投影 —— 否则 reducer skip identityless 事件,
+// iOS 只看到回复看不到 prompt。
+func TestGrokLeaderRelay_FlushesPendingUserMessageWithTurnIdentity(t *testing.T) {
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers := NewHandlers()
+	defer handlers.observation.Stop()
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{
+		BackendID: "grokbuild",
+		SessionID: "ses_grok_um",
+	})
+
+	events := make(chan core.Event, 4)
+	events <- core.Event{Type: core.EventUserMessage, Content: "讲个法国笑话"} // identityless
+	events <- core.Event{Type: core.EventText, Content: "bonjour", ItemID: "prompt-um", TurnID: "prompt-um"}
+	events <- core.Event{Type: core.EventText, Content: "!", ItemID: "prompt-um", TurnID: "prompt-um"}
+	events <- core.Event{Type: core.EventResult, Done: true, TurnID: "prompt-um"}
+	close(events)
+	sub := &fakeSessionEventSubscriber{events: events}
+
+	done := make(chan struct{})
+	go func() {
+		handlers.grokLeaderSessionRelayLoop("ses_grok_um", "grokbuild", sub, grokLeaderRelayKey("ses_grok_um"), "/tmp")
+		close(done)
+	}()
+
+	names, payloads := readEventNamesWithPayloads(t, clientConn, 6)
+	want := []string{"turn_started", "user_message", "session_state_changed", "text_delta", "text_delta", "turn_completed"}
+	if len(names) != len(want) {
+		t.Fatalf("got %d events %v, want %d %v", len(names), names, len(want), want)
+	}
+	for i, w := range want {
+		if names[i] != w {
+			t.Fatalf("event[%d] = %q, want %q (full: %v)", i, names[i], w, names)
+		}
+	}
+	um := payloads[1]
+	if um["turnId"] != "prompt-um" || um["itemId"] != "prompt-um" || um["text"] != "讲个法国笑话" {
+		t.Fatalf("user_message payload = %v, want turnId/itemId=prompt-um text=讲个法国笑话", um)
+	}
+	if names[0] != "turn_started" {
+		t.Fatalf("user_message must be emitted AFTER turn_started, got %v", names[:2])
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("relay loop did not exit after channel close")
+	}
+}
+
+// readEventNamesWithPayloads reads count WS frames and returns event names plus
+// their payload maps (payload-only assertions for synthesized user_message).
+func readEventNamesWithPayloads(t *testing.T, clientConn *websocket.Conn, count int) ([]string, []map[string]interface{}) {
+	t.Helper()
+	if err := clientConn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("set read deadline failed: %v", err)
+	}
+	var names []string
+	var payloads []map[string]interface{}
+	for range count {
+		var payload map[string]interface{}
+		if err := clientConn.ReadJSON(&payload); err != nil {
+			t.Fatalf("read json failed: %v", err)
+		}
+		eventName, _ := payload["event"].(string)
+		names = append(names, eventName)
+		if data, ok := payload["data"].(map[string]interface{}); ok {
+			payloads = append(payloads, data)
+		} else {
+			payloads = append(payloads, nil)
+		}
+	}
+	return names, payloads
 }

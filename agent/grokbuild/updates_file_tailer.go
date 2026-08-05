@@ -80,6 +80,13 @@ func (s *updatesFileTailSubscriber) Run(ctx context.Context, onEvent func(core.E
 	if err != nil {
 		return fmt.Errorf("grokbuild: stat updates.jsonl: %w", err)
 	}
+	// Attach 时补一条“未完成 turn 的 user prompt”: iOS 可能在 Mac 已发出 prompt
+	// 之后才打开会话, user_message_chunk 已写在 EOF 之前; chat_history.jsonl 在
+	// turn 结束前也不含该行。只补最后一个终态之后、尚未收到 turn_completed 的那条
+	// prompt——已完成 turn 的 prompt 由冷 hydrate 提供,这里不重放。
+	if pending := latestPendingUserMessage(path); pending != "" {
+		onEvent(core.Event{Type: core.EventUserMessage, Content: pending})
+	}
 	offset := info.Size()
 
 	ticker := time.NewTicker(grokUpdatesRelayPollInterval)
@@ -137,6 +144,57 @@ func (s *updatesFileTailSubscriber) Run(ctx context.Context, onEvent func(core.E
 			sawTerminal = true
 		}
 	}
+}
+
+// latestPendingUserMessage scans updates.jsonl and returns the text of the most
+// recent user_message_chunk that appears after the last turn_completed line.
+// Returns "" when the tail is settled (all turns completed) — completed history is
+// owned by the cold-hydrate path, never replayed here.
+func latestPendingUserMessage(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	pending := ""
+	for sc.Scan() {
+		raw := bytes.TrimSpace(sc.Bytes())
+		if len(raw) == 0 {
+			continue
+		}
+		var head struct {
+			Method string `json:"method"`
+		}
+		if json.Unmarshal(raw, &head) != nil || !isSessionUpdateMethod(head.Method) {
+			continue
+		}
+		params := extractParams(raw)
+		if len(params) == 0 || isReplayUpdate(params) {
+			continue
+		}
+		var upd struct {
+			Update sessionUpdatePayload `json:"update"`
+		}
+		if json.Unmarshal(params, &upd) != nil {
+			continue
+		}
+		switch upd.Update.SessionUpdate {
+		case "turn_completed":
+			// 终态之后的 prompt 才属于未完成 turn; 终态前的 prompt 已由冷 hydrate
+			// / 此前 live 路径覆盖, 不补。
+			pending = ""
+		case "user_message_chunk":
+			if upd.Update.hasContent() {
+				text := strings.TrimSpace(upd.Update.contentText())
+				if text != "" {
+					pending = text
+				}
+			}
+		}
+	}
+	return pending
 }
 
 // waitForFile polls until the session's updates.jsonl exists, returning its path.

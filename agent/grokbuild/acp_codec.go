@@ -227,8 +227,21 @@ func convertSessionUpdate(params json.RawMessage, sessionID string) []core.Event
 		}}
 
 	case "user_message_chunk":
-		// User message echo — not forwarded to iOS.
-		return nil
+		// 外部 turn 的用户 prompt 回显 (真实 updates.jsonl: 只带 promptIndex, 不带
+		// promptId)。必须转成 EventUserMessage 交给 relay loop 缓冲, 否则 iOS 只能
+		// 看到回复看不到 prompt。turn 身份 (promptId) 由同 turn 首个内容事件到达时
+		// 补齐 (见 grokLeaderSessionRelayLoop), 这里不合成任何身份。
+		if !p.hasContent() {
+			return nil
+		}
+		text := strings.TrimSpace(p.contentText())
+		if text == "" {
+			return nil
+		}
+		return []core.Event{{
+			Type:    core.EventUserMessage,
+			Content: text,
+		}}
 
 	case "tool_call":
 		ev := core.Event{

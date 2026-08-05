@@ -150,6 +150,79 @@ func TestUpdatesFileTailForwardsLive(t *testing.T) {
 	}
 }
 
+// TestUpdatesFileTailCatchUpPendingUserMessage: attach 时文件里已有一条“终态之后、
+// 尚未完成”的 user_message_chunk —— iOS 是在 Mac 已发出 prompt 后才打开的会话。
+// tailer 必须补扫出这条 pending prompt (身份延迟, 不合成), 已完成 turn 的 prompt
+// 不重放。
+func TestUpdatesFileTailCatchUpPendingUserMessage(t *testing.T) {
+	fastTailKnobs()
+	home, path := setupUpdatesSession(t, "ses-pending")
+	appendUpdates(t, path,
+		updatesLine("session/update", "ses-pending",
+			map[string]any{"sessionUpdate": "user_message_chunk", "content": map[string]any{"type": "text", "text": "OLD DONE"}}, nil),
+		updatesLine("session/update", "ses-pending",
+			map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "old reply"}}, nil),
+		updatesLine("session/update", "ses-pending",
+			map[string]any{"sessionUpdate": "turn_completed", "prompt_id": "p-old", "stop_reason": "end_turn"}, nil),
+		updatesLine("session/update", "ses-pending",
+			map[string]any{"sessionUpdate": "user_message_chunk", "content": map[string]any{"type": "text", "text": "讲个法国笑话"}}, nil),
+	)
+
+	var got []core.Event
+	var mu sync.Mutex
+	stop := startTailer(home, "ses-pending", func(ev core.Event) {
+		mu.Lock()
+		got = append(got, ev)
+		mu.Unlock()
+	})
+	time.Sleep(120 * time.Millisecond) // attach 补扫 + 首个 live poll
+	stop(200 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 1 {
+		t.Fatalf("got %d events, want 1 pending user message: %+v", len(got), got)
+	}
+	if got[0].Type != core.EventUserMessage || got[0].Content != "讲个法国笑话" {
+		t.Fatalf("pending event = %+v, want EventUserMessage '讲个法国笑话'", got[0])
+	}
+	// 身份必须延迟到 relay 用同 turn 的 promptId 补齐, tailer 不得合成。
+	if got[0].ItemID != "" || got[0].TurnID != "" {
+		t.Fatalf("pending identity must stay deferred, got itemId=%q turnId=%q", got[0].ItemID, got[0].TurnID)
+	}
+}
+
+// TestUpdatesFileTailNoPendingAfterCompletedTurn: 文件末尾已是 turn_completed 的
+// 会话 (全部 turn 完成) —— 历史由冷 hydrate 提供, tailer 不得重放任何 prompt。
+func TestUpdatesFileTailNoPendingAfterCompletedTurn(t *testing.T) {
+	fastTailKnobs()
+	home, path := setupUpdatesSession(t, "ses-settled")
+	appendUpdates(t, path,
+		updatesLine("session/update", "ses-settled",
+			map[string]any{"sessionUpdate": "user_message_chunk", "content": map[string]any{"type": "text", "text": "old prompt"}}, nil),
+		updatesLine("session/update", "ses-settled",
+			map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "old reply"}}, nil),
+		updatesLine("session/update", "ses-settled",
+			map[string]any{"sessionUpdate": "turn_completed", "prompt_id": "p-old", "stop_reason": "end_turn"}, nil),
+	)
+
+	var got []core.Event
+	var mu sync.Mutex
+	stop := startTailer(home, "ses-settled", func(ev core.Event) {
+		mu.Lock()
+		got = append(got, ev)
+		mu.Unlock()
+	})
+	time.Sleep(150 * time.Millisecond)
+	stop(200 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 0 {
+		t.Fatalf("completed history replayed as pending: %+v", got)
+	}
+}
+
 // TestUpdatesFileTailDropsReplay: _meta.isReplay==true lines are dropped (parity
 // with the leader subscriber: iOS already has authoritative history).
 func TestUpdatesFileTailDropsReplay(t *testing.T) {
