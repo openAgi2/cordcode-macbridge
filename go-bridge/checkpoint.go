@@ -26,6 +26,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -65,13 +66,14 @@ const CheckpointIOTimeout = 10 * time.Second
 const gitEmptyTreeSHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 // CheckpointFileSummary is the per-file {path,+/-} tuple carried by turn_diff_ready
-// and returned by get_turn_diff / get_full_thread_diff. It deliberately omits the
-// full patch (plan §6.1: turn_diff_ready "不含 full patch"); clients fetch full
-// per-file diff via get_workspace_diff or read_file on demand.
+// and returned by get_turn_diff / get_full_thread_diff. The RPC responses include
+// the unified patch per file; the control-plane turn_diff_ready event deliberately
+// omits the patch to keep the broadcast frame small (plan §6.1 "不含 full patch").
 type CheckpointFileSummary struct {
 	Path      string `json:"path"`
 	Additions int    `json:"additions"`
 	Deletions int    `json:"deletions"`
+	Diff      string `json:"diff,omitempty"`
 }
 
 // CheckpointDiffResult is the wire shape returned by get_turn_diff and
@@ -200,6 +202,15 @@ func (c *checkpointCoalescer) drain() {
 	// complexity for a per-turn capture path.
 	for _, in := range pending {
 		ref, err := c.captureAndEmit(resolver, publish, in)
+		if err != nil {
+			slog.Error("checkpoint capture failed",
+				"backendID", in.backendID,
+				"sessionID", in.sessionID,
+				"turn", in.turnN,
+				"ref", ref,
+				"error", err,
+			)
+		}
 		if c.onCaptureSync != nil {
 			c.onCaptureSync(in.backendID, in.sessionID, in.turnN, ref, err)
 		}
@@ -253,18 +264,26 @@ func (c *checkpointCoalescer) captureAndEmit(
 
 	// Compute the per-file summary for the just-completed turn (prevRef → ref).
 	files, _, _, _ := diffCheckpoints(ctx, root, prevRef, ref, checkpointMaxEventFiles)
+	eventFiles := make([]CheckpointFileSummary, 0, len(files))
+	for _, f := range files {
+		eventFiles = append(eventFiles, CheckpointFileSummary{
+			Path:      f.Path,
+			Additions: f.Additions,
+			Deletions: f.Deletions,
+		})
+	}
 
 	// Emit turn_diff_ready via PublishLogical — the single Kernel→EventPublisher
 	// outlet. This is control-plane only: it does NOT mutate reducer state
 	// (turn_diff_ready is absent from the reducer switch), so it cannot
 	// double-write the timeline (SSV2 guardrail 3 / 8).
 	if publish != nil {
-		data := map[string]interface{}{
-			"checkpointRef": ref,
-			"turnNumber":    in.turnN,
-			"files":         files,
-			"truncated":     len(files) >= checkpointMaxEventFiles,
-		}
+			data := map[string]interface{}{
+				"checkpointRef": ref,
+				"turnNumber":    in.turnN,
+				"files":         eventFiles,
+				"truncated":     len(eventFiles) >= checkpointMaxEventFiles,
+			}
 		publish(LogicalEvent{
 			BackendID: in.backendID,
 			SessionID: in.sessionID,
@@ -394,10 +413,10 @@ func diffCheckpoints(
 		from = from + "^{commit}"
 	}
 	to := toRef + "^{commit}"
-	// --no-renames keeps the diff path-stable across checkpoints; --numstat
-	// gives "additions\tdeletions\tpath" per file.
+	// -z + core.quotePath=false keeps non-ASCII paths raw instead of Git's
+	// C-style octal escapes; --no-renames keeps paths stable across checkpoints.
 	out, err := runGitInDirectoryWith(root, []gitRunOption{WithContext(ctx)},
-		"diff", "--no-ext-diff", "--no-renames", "--numstat", from, to)
+		"-c", "core.quotePath=false", "diff", "--no-ext-diff", "--no-renames", "--numstat", "-z", from, to)
 	if err != nil {
 		return nil, 0, 0, false
 	}
@@ -405,12 +424,12 @@ func diffCheckpoints(
 	add, del := 0, 0
 	truncated := false
 	count := 0
-	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
-		if line == "" {
+	for _, record := range strings.Split(strings.TrimSuffix(out, "\x00"), "\x00") {
+		if record == "" {
 			continue
 		}
 		// Binary files show "-\t-\tpath"; cap to 0.
-		parts := strings.SplitN(line, "\t", 3)
+		parts := strings.SplitN(record, "\t", 3)
 		if len(parts) != 3 {
 			continue
 		}
@@ -426,8 +445,58 @@ func diffCheckpoints(
 		add += a
 		del += d
 	}
+	patches := unifiedDiffByPath(ctx, root, from, to)
+	for i := range files {
+		if p := patches[files[i].Path]; p != "" {
+			files[i].Diff = p
+		}
+	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
 	return files, add, del, truncated
+}
+
+// unifiedDiffByPath returns one unified patch per changed path between the two
+// git revisions. It uses a single git invocation and splits on diff headers, so
+// large turns do not spawn one git process per file.
+func unifiedDiffByPath(ctx context.Context, root, from, to string) map[string]string {
+	out, err := runGitInDirectoryWith(root, []gitRunOption{WithContext(ctx)},
+		"-c", "core.quotePath=false", "diff", "--no-ext-diff", "--no-renames", "--unified=3", from, to)
+	if err != nil {
+		return nil
+	}
+	patches := make(map[string]string)
+	for _, block := range strings.Split(out, "\ndiff --git ") {
+		if block == "" {
+			continue
+		}
+		// The first split element still starts with "diff --git " because git
+		// output begins with that header; later elements lost it to the split.
+		header := block
+		if !strings.HasPrefix(header, "diff --git ") {
+			header = "diff --git " + header
+		}
+		if strings.Contains(header, "\nBinary files ") {
+			continue
+		}
+		path := checkpointDiffPathFromHeader(header)
+		if path == "" {
+			continue
+		}
+		patches[path] = header
+	}
+	return patches
+}
+
+// checkpointDiffPathFromHeader extracts the new-side path from a "diff --git"
+// header line. With --no-renames the old and new sides share one path, so the
+// last " b/" separator is the boundary between them.
+func checkpointDiffPathFromHeader(header string) string {
+	line := strings.TrimSpace(strings.SplitN(header, "\n", 2)[0])
+	line = strings.TrimPrefix(line, "diff --git ")
+	if i := strings.LastIndex(line, " b/"); i >= 0 {
+		return line[i+3:]
+	}
+	return ""
 }
 
 // pruneCheckpointRefs keeps only the most-recent `keep` turn refs for the session,

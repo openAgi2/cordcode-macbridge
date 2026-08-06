@@ -54,24 +54,24 @@ func loadWorkspaceDiff(ctx context.Context, workDir string) (*workspaceDiffResul
 	}
 	root := strings.TrimSpace(string(rootBytes))
 
-	numstat, err := runGit(ctx, root, "diff", "--no-ext-diff", "--no-renames", "--numstat", "HEAD", "--")
+	numstat, err := runGit(ctx, root, "-c", "core.quotePath=false", "diff", "--no-ext-diff", "--no-renames", "--numstat", "-z", "HEAD", "--")
 	if err != nil {
 		return nil, fmt.Errorf("read tracked diff: %w", err)
 	}
 
 	files := make(map[string]workspaceDiffFile)
-	for _, line := range strings.Split(strings.TrimSuffix(string(numstat), "\n"), "\n") {
-		if line == "" {
+	for _, record := range strings.Split(strings.TrimSuffix(string(numstat), "\x00"), "\x00") {
+		if record == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 3)
+		parts := strings.SplitN(record, "\t", 3)
 		if len(parts) != 3 {
 			continue
 		}
 		additions, _ := strconv.Atoi(parts[0])
 		deletions, _ := strconv.Atoi(parts[1])
 		path := parts[2]
-		diff, diffErr := runGit(ctx, root, "diff", "--no-ext-diff", "--no-renames", "--unified=3", "HEAD", "--", path)
+		diff, diffErr := runGit(ctx, root, "-c", "core.quotePath=false", "diff", "--no-ext-diff", "--no-renames", "--unified=3", "HEAD", "--", path)
 		if diffErr != nil {
 			return nil, fmt.Errorf("read diff for %s: %w", path, diffErr)
 		}

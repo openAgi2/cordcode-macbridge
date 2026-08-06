@@ -678,7 +678,7 @@ Response:
 
 ```ts
 {
-  files: Array<{ path: string; additions: number; deletions: number }>,
+  files: Array<{ path: string; additions: number; deletions: number; diff?: string }>,  // diff = unified patch (RPC only; turn_diff_ready stays patch-free)
   additions: number,             // totals across files
   deletions: number,
   truncated: boolean,            // true when files exceed the server cap (~500)

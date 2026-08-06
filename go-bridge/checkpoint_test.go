@@ -214,6 +214,39 @@ func TestCheckpointCaptureTurn1DiffFromEmptyTree(t *testing.T) {
 	}
 }
 
+// TestCheckpointDiffNonASCIIPathIncludesPatch verifies two fixes at once:
+// non-ASCII paths stay raw UTF-8 instead of Git's octal escapes, and the
+// turn/thread diff carries the unified patch per file.
+func TestCheckpointDiffNonASCIIPathIncludesPatch(t *testing.T) {
+	repo := initCheckpointRepo(t)
+	runTestGit(t, repo, "config", "core.quotePath", "true")
+	writeTurnFileChange(t, repo, "童话故事.txt", "童话故事内容\n第二行\n")
+	ref1, _ := captureTurn(t, repo, "codex", "sess-unicode", 1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), CheckpointIOTimeout)
+	defer cancel()
+	files, _, _, _ := diffCheckpoints(ctx, repo, "", ref1, checkpointMaxDiffFiles)
+
+	var found *CheckpointFileSummary
+	for i := range files {
+		if files[i].Path == "童话故事.txt" {
+			found = &files[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("童话故事.txt missing from diff, got %#v", files)
+	}
+	if found.Additions != 2 || found.Deletions != 0 {
+		t.Fatalf("童话故事.txt = +%d -%d, want +2 -0", found.Additions, found.Deletions)
+	}
+	if !strings.Contains(found.Diff, "童话故事内容") {
+		t.Fatalf("diff missing unified patch content: %q", found.Diff)
+	}
+	if strings.Contains(found.Path, "\\") {
+		t.Fatalf("path still contains git octal escapes: %q", found.Path)
+	}
+}
+
 // TestCheckpointNonGitWorkspaceHonestUnsupported: a non-git workspace produces no
 // ref and no error-masking snapshot. captureAndEmit returns ("", nil) and no ref
 // is written anywhere.
