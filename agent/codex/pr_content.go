@@ -70,12 +70,13 @@ func (a *Agent) GeneratePrContent(ctx context.Context, input core.PrContentInput
 	if err != nil {
 		return core.PrContent{}, fmt.Errorf("codex PR generation: read output: %w", err)
 	}
-	var encoded string
-	if err := json.Unmarshal(raw, &encoded); err != nil {
+	// Same dual envelope as commit messages: object or JSON-string-wrapped object.
+	payload, err := unwrapCodexStructuredOutput(raw)
+	if err != nil {
 		return core.PrContent{}, fmt.Errorf("codex PR generation returned invalid output envelope: %w", err)
 	}
 	var parsed core.PrContent
-	if err := json.Unmarshal([]byte(encoded), &parsed); err != nil {
+	if err := json.Unmarshal(payload, &parsed); err != nil {
 		return core.PrContent{}, fmt.Errorf("codex PR generation returned invalid JSON: %w", err)
 	}
 	parsed.Title = strings.TrimSpace(parsed.Title)
