@@ -2,7 +2,6 @@ package claudecode
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -41,28 +40,11 @@ func (a *Agent) GenerateCommitMessage(ctx context.Context, input core.CommitMess
 		return core.CommitMessage{}, fmt.Errorf("claude commit message generation failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 
-	var envelope struct {
-		Result           json.RawMessage `json:"result"`
-		StructuredOutput json.RawMessage `json:"structured_output"`
-	}
-	if err := json.Unmarshal(out, &envelope); err != nil {
-		return core.CommitMessage{}, fmt.Errorf("claude commit message generation returned invalid JSON: %w", err)
-	}
-	raw := envelope.Result
-	if len(raw) == 0 {
-		raw = envelope.StructuredOutput
-	}
-	if len(raw) > 0 && raw[0] == '"' {
-		var encoded string
-		if err := json.Unmarshal(raw, &encoded); err != nil {
-			return core.CommitMessage{}, fmt.Errorf("claude commit message generation returned invalid structured output: %w", err)
-		}
-		raw = []byte(encoded)
-	}
 	var parsed struct {
 		Message string `json:"message"`
 	}
-	if err := json.Unmarshal(raw, &parsed); err != nil {
+	// Shared envelope handling: result/structured_output × object|string.
+	if err := core.UnmarshalClaudePrintStructured(out, &parsed); err != nil {
 		return core.CommitMessage{}, fmt.Errorf("claude commit message generation returned invalid structured output: %w", err)
 	}
 	message := strings.TrimSpace(parsed.Message)

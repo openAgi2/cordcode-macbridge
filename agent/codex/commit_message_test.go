@@ -2,40 +2,29 @@ package codex
 
 import (
 	"testing"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
-func TestUnwrapCodexStructuredOutput_DirectObject(t *testing.T) {
-	raw := []byte(`{"message":"feat: add file"}`)
-	got, err := unwrapCodexStructuredOutput(raw)
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if string(got) != `{"message":"feat: add file"}` {
-		t.Fatalf("got %s", got)
-	}
-}
+// Driver-level regression: generators must use core.UnmarshalJSONPayload, not
+// string-only envelopes. Parsing is covered in core/structured_output_test.go;
+// this file keeps a thin smoke that codex package still compiles against core.
 
-func TestUnwrapCodexStructuredOutput_DoubleEncodedString(t *testing.T) {
-	// JSON string containing an object (legacy envelope).
-	raw := []byte(`"{\"message\":\"feat: add file\"}"`)
-	got, err := unwrapCodexStructuredOutput(raw)
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
+func TestCodexCommitPayloadShapesViaCore(t *testing.T) {
+	var parsed struct {
+		Message string `json:"message"`
 	}
-	if string(got) != `{"message":"feat: add file"}` {
-		t.Fatalf("got %s", got)
+	if err := core.UnmarshalJSONPayload([]byte(`{"message":"feat: object"}`), &parsed); err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestUnwrapCodexStructuredOutput_ObjectMustNotFailAsString(t *testing.T) {
-	// Regression: old code json.Unmarshal into string →
-	// "cannot unmarshal object into Go value of type string"
-	raw := []byte(`{"message":"fix: blank body on first turn"}`)
-	got, err := unwrapCodexStructuredOutput(raw)
-	if err != nil {
-		t.Fatalf("object envelope must be accepted: %v", err)
+	if parsed.Message != "feat: object" {
+		t.Fatalf("message=%q", parsed.Message)
 	}
-	if len(got) == 0 || got[0] != '{' {
-		t.Fatalf("want object payload, got %q", got)
+	parsed.Message = ""
+	if err := core.UnmarshalJSONPayload([]byte(`"{\"message\":\"feat: string\"}"`), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Message != "feat: string" {
+		t.Fatalf("message=%q", parsed.Message)
 	}
 }

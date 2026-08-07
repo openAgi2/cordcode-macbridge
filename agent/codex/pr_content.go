@@ -2,7 +2,6 @@ package codex
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -70,14 +69,9 @@ func (a *Agent) GeneratePrContent(ctx context.Context, input core.PrContentInput
 	if err != nil {
 		return core.PrContent{}, fmt.Errorf("codex PR generation: read output: %w", err)
 	}
-	// Same dual envelope as commit messages: object or JSON-string-wrapped object.
-	payload, err := unwrapCodexStructuredOutput(raw)
-	if err != nil {
-		return core.PrContent{}, fmt.Errorf("codex PR generation returned invalid output envelope: %w", err)
-	}
 	var parsed core.PrContent
-	if err := json.Unmarshal(payload, &parsed); err != nil {
-		return core.PrContent{}, fmt.Errorf("codex PR generation returned invalid JSON: %w", err)
+	if err := core.UnmarshalJSONPayload(raw, &parsed); err != nil {
+		return core.PrContent{}, fmt.Errorf("codex PR generation returned invalid output: %w", err)
 	}
 	parsed.Title = strings.TrimSpace(parsed.Title)
 	parsed.Body = strings.TrimSpace(parsed.Body)

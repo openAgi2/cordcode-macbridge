@@ -1,9 +1,7 @@
 package codex
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -72,50 +70,16 @@ func (a *Agent) GenerateCommitMessage(ctx context.Context, input core.CommitMess
 	if err != nil {
 		return core.CommitMessage{}, fmt.Errorf("codex commit message generation: read output: %w", err)
 	}
-	// Codex --output-last-message may write either:
-	//   1) a JSON object matching --output-schema: {"message":"..."}
-	//   2) a JSON string containing that object (double-encoded)
-	// Older code only accepted (2) and failed with:
-	//   cannot unmarshal object into Go value of type string
-	payload, err := unwrapCodexStructuredOutput(raw)
-	if err != nil {
-		return core.CommitMessage{}, fmt.Errorf("codex commit message generation returned invalid output envelope: %w", err)
-	}
 	var parsed struct {
 		Message string `json:"message"`
 	}
-	if err := json.Unmarshal(payload, &parsed); err != nil {
-		return core.CommitMessage{}, fmt.Errorf("codex commit message generation returned invalid JSON: %w", err)
+	// Accept object or JSON-string envelope (core.UnwrapJSONPayload).
+	if err := core.UnmarshalJSONPayload(raw, &parsed); err != nil {
+		return core.CommitMessage{}, fmt.Errorf("codex commit message generation returned invalid output: %w", err)
 	}
 	message := strings.TrimSpace(parsed.Message)
 	if message == "" {
 		return core.CommitMessage{}, fmt.Errorf("codex commit message generation returned empty message")
 	}
 	return core.CommitMessage{Message: message}, nil
-}
-
-// unwrapCodexStructuredOutput normalizes codex --output-last-message bytes into
-// a JSON object payload (strips optional outer JSON string encoding).
-func unwrapCodexStructuredOutput(raw []byte) ([]byte, error) {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 {
-		return nil, fmt.Errorf("empty output")
-	}
-	// Direct object / array.
-	if trimmed[0] == '{' || trimmed[0] == '[' {
-		return trimmed, nil
-	}
-	// Double-encoded JSON string.
-	if trimmed[0] == '"' {
-		var encoded string
-		if err := json.Unmarshal(trimmed, &encoded); err != nil {
-			return nil, err
-		}
-		return []byte(encoded), nil
-	}
-	prefix := trimmed
-	if len(prefix) > 16 {
-		prefix = prefix[:16]
-	}
-	return nil, fmt.Errorf("unexpected output prefix %q", string(prefix))
 }

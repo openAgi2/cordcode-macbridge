@@ -223,14 +223,8 @@ func decodeCodexFunctionCallArguments(raw json.RawMessage, out any) error {
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		return nil
 	}
-	if trimmed[0] == '"' {
-		var encoded string
-		if err := json.Unmarshal(trimmed, &encoded); err != nil {
-			return err
-		}
-		return json.Unmarshal([]byte(encoded), out)
-	}
-	return json.Unmarshal(trimmed, out)
+	// Shared dual-envelope path (object or JSON-string).
+	return core.UnmarshalJSONPayload(trimmed, out)
 }
 
 func codexPlanEntriesToTodos(entries []codexPlanEntry) []core.Todo {
