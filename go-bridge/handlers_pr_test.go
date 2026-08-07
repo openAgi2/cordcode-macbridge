@@ -58,15 +58,15 @@ func TestBranchSlugRe(t *testing.T) {
 		}
 	}
 	invalid := []string{
-		"cordcode/",                 // 前缀后为空
-		"cordcode/-abc",             // 首字符为 -
-		"cordcode/ABC",              // 大写
-		"cordcode/abc/def",          // 额外斜杠
+		"cordcode/",                           // 前缀后为空
+		"cordcode/-abc",                       // 首字符为 -
+		"cordcode/ABC",                        // 大写
+		"cordcode/abc/def",                    // 额外斜杠
 		"cordcode/" + strings.Repeat("a", 62), // 超过 regex 上界
-		"feature/abc",               // 错误前缀
-		"evil/../etc",               // 路径穿越
-		"cordcode/$(whoami)",        // 注入：首字符 $ 非 [a-z0-9]
-		"cordcode/a b",              // 空格
+		"feature/abc",                         // 错误前缀
+		"evil/../etc",                         // 路径穿越
+		"cordcode/$(whoami)",                  // 注入：首字符 $ 非 [a-z0-9]
+		"cordcode/a b",                        // 空格
 	}
 	for _, s := range invalid {
 		if branchSlugRe.MatchString(s) {
@@ -156,6 +156,26 @@ func TestSupportsPullRequests_NoRemote(t *testing.T) {
 	dir := initTempGitRepo(t, "")
 	if supportsPullRequests(dir) {
 		t.Error("supportsPullRequests should be false when no remote configured")
+	}
+}
+
+func TestCheckPullRequestSupport_NonGitHubRepo(t *testing.T) {
+	dir := initTempGitRepo(t, "https://gitlab.com/owner/repo.git")
+	handlers := newTestHandlers(t)
+	conn := &readFileCaptureConn{}
+	handlers.handleCheckPullRequestSupport(conn, WireMessage{
+		RequestID: "req_pr_check",
+		Params:    mustJSONRaw(t, map[string]any{"directory": dir}),
+	})
+	if conn.err != nil {
+		t.Fatalf("check_pull_request_support returned error: %v", conn.err)
+	}
+	data, ok := conn.data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("result = %#v, want map with supported", conn.data)
+	}
+	if supported, _ := data["supported"].(bool); supported {
+		t.Error("non-GitHub repo must report supported=false")
 	}
 }
 

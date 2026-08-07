@@ -347,9 +347,9 @@ var branchSlugRe = regexp.MustCompile(`^cordcode/[a-z0-9][a-z0-9-]{0,60}$`)
 func (h *Handlers) handleCreatePullRequest(conn Connection, msg WireMessage) {
 	var params struct {
 		Directory string `json:"directory"`
-		Title     string `json:"title"`     // PR title (§7.1: [cordcode] <summary>, ≤72 chars)
-		Body      string `json:"body"`      // PR body (## Summary + ## Changes + ## Cordcode)
-		Base      string `json:"base"`      // target branch (default: repo default)
+		Title     string `json:"title"` // PR title (§7.1: [cordcode] <summary>, ≤72 chars)
+		Body      string `json:"body"`  // PR body (## Summary + ## Changes + ## Cordcode)
+		Base      string `json:"base"`  // target branch (default: repo default)
 	}
 	if err := json.Unmarshal(msg.Params, &params); err != nil {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: err.Error()})
@@ -431,10 +431,26 @@ func (h *Handlers) handleCreatePullRequest(conn Connection, msg WireMessage) {
 	}
 	prURL := strings.TrimSpace(string(out))
 	conn.SendResult(msg.RequestID, map[string]interface{}{
-		"pr_url":       prURL,
-		"branch":       branchSlug,
-		"base":         params.Base,
-		"remote_url":   remoteURL,
+		"pr_url":     prURL,
+		"branch":     branchSlug,
+		"base":       params.Base,
+		"remote_url": remoteURL,
+	}, nil)
+}
+
+// handleCheckPullRequestSupport returns whether the given directory currently
+// supports PR creation. It is the live, per-directory check iOS calls when
+// opening the diff sheet, instead of relying on a cached hello_ack capability.
+func (h *Handlers) handleCheckPullRequestSupport(conn Connection, msg WireMessage) {
+	var params struct {
+		Directory string `json:"directory"`
+	}
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: err.Error()})
+		return
+	}
+	conn.SendResult(msg.RequestID, map[string]interface{}{
+		"supported": supportsPullRequests(params.Directory),
 	}, nil)
 }
 

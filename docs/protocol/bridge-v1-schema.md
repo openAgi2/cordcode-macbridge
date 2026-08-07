@@ -122,6 +122,7 @@ struct BridgeV1Error: Codable, Equatable {
 | `resolve_user_input` | 是 | 回答 MacBridge 持有 responder 的结构化问题 |
 | `get_turn_diff` | 是 | §6.1 取指定 turn 的只读 workspace diff（per-file +/- + unified patch）；需 `supports_checkpoint` |
 | `get_full_thread_diff` | 是 | §6.1 取整个 session 聚合 diff（最早→最新 checkpoint ref；per-file +/- + unified patch）；需 `supports_checkpoint` |
+| `check_pull_request_support` | 是 | §7.1 实时查询当前 directory 是否支持 PR（GitHub remote + gh CLI） |
 
 ## 结构化用户输入
 

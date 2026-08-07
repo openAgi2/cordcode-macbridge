@@ -220,6 +220,7 @@ type UnifiedError = {
 | `get_workspace_diff` | `backendId`, `directory?` | `workspace_diff` |
 | `get_turn_diff` | `backendId`, `sessionId`, `turnNumber`, `directory?` | `supports_checkpoint`（§6.1；非 git workspace → `workspace_not_git`） |
 | `get_full_thread_diff` | `backendId`, `sessionId`, `directory?` | `supports_checkpoint`（§6.1） |
+| `check_pull_request_support` | `backendId`, `directory` | `workspace.read`（§7.1） |
 | `get_usage` | `backendId` | `usage_reporting` |
 | `set_directory` | `backendId`, `sessionId`, `directory` | (可选) |
 | `subscribe_sessions` | `backendId` | (可选) |

@@ -83,18 +83,19 @@ var rpcScopeTable = map[string]string{
 	"set_permission_mode": ScopeConfigWrite,
 
 	// workspace.read
-	"get_workspace_diff":  ScopeWorkspaceRead,
-	"read_file":           ScopeWorkspaceRead,
-	"list_directory":      ScopeWorkspaceRead, // path 校验在 §6.5 接入 workspace-bound
-	"get_git_context":     ScopeWorkspaceRead,
-	"fetch_content_chunk": ScopeWorkspaceRead,
+	"get_workspace_diff":         ScopeWorkspaceRead,
+	"read_file":                  ScopeWorkspaceRead,
+	"list_directory":             ScopeWorkspaceRead, // path 校验在 §6.5 接入 workspace-bound
+	"get_git_context":            ScopeWorkspaceRead,
+	"fetch_content_chunk":        ScopeWorkspaceRead,
+	"check_pull_request_support": ScopeWorkspaceRead,
 
 	// workspace.mutate
-	"checkout_git_branch":   ScopeWorkspaceMutate,
-	"create_git_branch":     ScopeWorkspaceMutate,
-	"create_git_worktree":   ScopeWorkspaceMutate,
-	"create_pull_request":   ScopeWorkspaceMutate, // §7.1 GitHub-only PR 集成
-	"list_projects":         ScopeWorkspaceMutate,
+	"checkout_git_branch": ScopeWorkspaceMutate,
+	"create_git_branch":   ScopeWorkspaceMutate,
+	"create_git_worktree": ScopeWorkspaceMutate,
+	"create_pull_request": ScopeWorkspaceMutate, // §7.1 GitHub-only PR 集成
+	"list_projects":       ScopeWorkspaceMutate,
 
 	// delivery.manage
 	"get_delivery_prekey_status": ScopeDeliveryManage,

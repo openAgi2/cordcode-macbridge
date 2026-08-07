@@ -167,7 +167,7 @@ scope only to keep the CI guard satisfied.
 | `session.write` | `create_session`, `send_message`, `abort_generation`, `resume_session`, `delete_session`, `rename_session`, `archive_session`, `set_session_pinned`, `compress_context`, `resolve_permission`, `question_reply`, `question_reject`, `resolve_user_input`, `share_session`, `set_observation_scope` | ✅ |
 | `config.read` | `list_providers`, `list_models`, `list_agents`, `list_permission_modes`, `get_usage`, `list_memory_files`, `read_memory_file`, `run_diagnostics` | ✅ |
 | `config.write` | `set_provider`, `switch_model`, `set_permission_mode` | ✅ |
-| `workspace.read` | `get_workspace_diff`, `read_file`, `list_directory`, `get_git_context`, `fetch_content_chunk` | ✅ |
+| `workspace.read` | `get_workspace_diff`, `read_file`, `list_directory`, `get_git_context`, `fetch_content_chunk`, `check_pull_request_support` | ✅ |
 | `workspace.mutate` | `checkout_git_branch`, `create_git_branch`, `create_git_worktree`, `create_pull_request`, `list_projects` | ✅ (recommend an owner per-action confirmation on top) |
 | `delivery.manage` | `get_delivery_prekey_status`, `upload_delivery_prekeys`, `get_delivery_chain_head`, `enable_relay_pairing` | ✅ (own device chain only) |
 | _(empty — unconditional)_ | `hello` (legacy dispatch placeholder) | ✅ (no scope required, else handshake deadlock) |
@@ -611,6 +611,30 @@ the client body (placeholder mode — the template controls layout); otherwise t
 client body is appended after the template, separated by a `---` rule (append mode).
 Missing / empty / oversized / unreadable templates leave the client body unchanged — no
 error, no fabrication. The server never writes the template back to the workspace or git.
+
+### RPC: `check_pull_request_support` (§7.1)
+
+Returns whether the current workspace directory supports PR creation **right now**.
+It re-runs the same checks as `supports_pull_requests`: `git remote get-url origin` must
+contain `github.com`, and `gh` must be installed. Clients call this when opening the diff
+sheet instead of trusting a cached hello_ack capability, because the capability is
+workdir-scoped and becomes stale after switching directories.
+
+Request:
+
+```ts
+{
+  directory: string
+}
+```
+
+Response:
+
+```ts
+{
+  supported: boolean
+}
+```
 
 ### RPC: `list_directory` params (§6.5)
 
