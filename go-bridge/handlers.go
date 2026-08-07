@@ -1093,9 +1093,9 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 	case "get_git_context":
 		h.handleGetGitContext(conn, msg)
 	case "check_pull_request_support":
-		h.handleCheckPullRequestSupport(conn, msg)
+		h.handleCheckPullRequestSupport(conn, msg, agent)
 	case "create_pull_request":
-		h.handleCreatePullRequest(conn, msg)
+		h.handleCreatePullRequest(conn, msg, agent)
 	case "checkout_git_branch":
 		h.handleCheckoutGitBranch(conn, msg)
 	case "create_git_branch":
@@ -3789,10 +3789,11 @@ func (h *Handlers) handleReadFile(conn Connection, msg WireMessage) {
 // ── list_directory: iOS 端远程选择/浏览 Mac 本地文件夹 (§6.5) ────────────────────
 //
 // 两个模式，由可选 workspace_root 参数切换：
-// 1. workspace_root 传（workspace-bound）：realpath(requested) 必须在 realpath(root) 内，
-//    symlink 列为 isSymlink:true 叶子不递归；拒 ../ 越界。
-// 2. workspace_root 不传（广域 picker）：picker 无 workspace 边界、可浏览任意真实目录；
-//    symlink 仍由 collectDirItems 的 mode-independent 守卫叶子化（不递归 target），见 review①。
+//  1. workspace_root 传（workspace-bound）：realpath(requested) 必须在 realpath(root) 内，
+//     symlink 列为 isSymlink:true 叶子不递归；拒 ../ 越界。
+//  2. workspace_root 不传（广域 picker）：picker 无 workspace 边界、可浏览任意真实目录；
+//     symlink 仍由 collectDirItems 的 mode-independent 守卫叶子化（不递归 target），见 review①。
+//
 // 同时新增 limit/offset/depth 翻页与子树预取（additive，所有调用方共享）。
 func (h *Handlers) handleListDirectory(conn Connection, msg WireMessage) {
 	var params struct {

@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // gitRunOption configures an extended runGitInDirectoryWith invocation (env override /
@@ -344,12 +347,10 @@ func gitWireError(code string, err error) *WireError {
 var snakeCaseRe = regexp.MustCompile(`[^a-z0-9]+`)
 var branchSlugRe = regexp.MustCompile(`^cordcode/[a-z0-9][a-z0-9-]{0,60}$`)
 
-func (h *Handlers) handleCreatePullRequest(conn Connection, msg WireMessage) {
+func (h *Handlers) handleCreatePullRequest(conn Connection, msg WireMessage, agent core.Agent) {
 	var params struct {
 		Directory string `json:"directory"`
-		Title     string `json:"title"` // PR title (§7.1: [cordcode] <summary>, ≤72 chars)
-		Body      string `json:"body"`  // PR body (## Summary + ## Changes + ## Cordcode)
-		Base      string `json:"base"`  // target branch (default: repo default)
+		Base      string `json:"base"`
 	}
 	if err := json.Unmarshal(msg.Params, &params); err != nil {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: err.Error()})
@@ -359,36 +360,79 @@ func (h *Handlers) handleCreatePullRequest(conn Connection, msg WireMessage) {
 		conn.SendResult(msg.RequestID, nil, gitWireError("invalid_directory", err))
 		return
 	}
-	if strings.TrimSpace(params.Title) == "" {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: "title is required"})
-		return
-	}
 
-	// 1. 检测 GitHub 远端 + gh CLI 可用。
-	remoteURL, err := detectGitHubRemote(params.Directory)
-	if err != nil {
+	if _, err := detectGitHubRemote(params.Directory); err != nil {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "pr_not_supported", Message: err.Error()})
 		return
 	}
-
-	_, err = exec.LookPath("gh")
-	if err != nil {
+	if _, err := exec.LookPath("gh"); err != nil {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "pr_not_supported", Message: "gh CLI not found; install and authenticate gh first"})
 		return
 	}
 
-	// 2. 分支名：从 title 生成 slug，经白名单校验。
-	branchSlug := slugFromTitle(params.Title)
+	generator, ok := agent.(core.PrContentGenerator)
+	if !ok {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "pr_content_generation_unsupported", Message: "current backend does not support PR content generation"})
+		return
+	}
+	root, ok := isGitWorkspace(params.Directory)
+	if !ok {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "workspace_not_git", Message: "workspace is not a git repository"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+
+	base := params.Base
+	if base == "" {
+		base = defaultPRBaseBranch(ctx, root)
+	}
+	head := strings.TrimSpace(runGitContext(ctx, root, "rev-parse", "--abbrev-ref", "HEAD"))
+	commitSummary, err := runGitInDirectoryWith(root, []gitRunOption{WithContext(ctx)}, "log", "--oneline", "-n", "50", base+"..HEAD")
+	if err != nil {
+		conn.SendResult(msg.RequestID, nil, gitWireError("git_diff_failed", err))
+		return
+	}
+	diffSummary, err := runGitInDirectoryWith(root, []gitRunOption{WithContext(ctx)}, "diff", "--stat", base+"...HEAD")
+	if err != nil {
+		conn.SendResult(msg.RequestID, nil, gitWireError("git_diff_failed", err))
+		return
+	}
+	diffPatch, err := runGitInDirectoryWith(root, []gitRunOption{WithContext(ctx)}, "diff", base+"...HEAD")
+	if err != nil {
+		conn.SendResult(msg.RequestID, nil, gitWireError("git_diff_failed", err))
+		return
+	}
+	template, _ := readPRTemplate(root)
+
+	generated, err := generator.GeneratePrContent(ctx, core.PrContentInput{
+		Cwd:           root,
+		BaseBranch:    base,
+		HeadBranch:    head,
+		CommitSummary: limitPRString(commitSummary, 12_000),
+		DiffSummary:   limitPRString(diffSummary, 12_000),
+		DiffPatch:     limitPRString(diffPatch, 40_000),
+		Template:      template,
+	})
+	if err != nil {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "pr_content_generation_failed", Message: err.Error()})
+		return
+	}
+
+	title := strings.TrimSpace(generated.Title)
+	if title == "" {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: "generated PR title is empty"})
+		return
+	}
+	branchSlug := slugFromTitle(title)
 	if !branchSlugRe.MatchString(branchSlug) {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_branch_name", Message: "generated branch name " + branchSlug + " does not match whitelist"})
 		return
 	}
 
-	// 3. 确保分支存在（若不在该分支上则尝试创建/切换，失败 → 使用已有分支）。
-	currentBranch, _ := runGitInDirectory(params.Directory, "rev-parse", "--abbrev-ref", "HEAD")
-	currentBranch = strings.TrimSpace(currentBranch)
+	currentBranch := head
 	if currentBranch != branchSlug {
-		// 尝试创建新分支（若已存在则切换）。
 		if _, err := runGitInDirectory(params.Directory, "checkout", "-b", branchSlug); err != nil {
 			if _, err2 := runGitInDirectory(params.Directory, "checkout", branchSlug); err2 != nil {
 				conn.SendResult(msg.RequestID, nil, &WireError{Code: "git_checkout_failed", Message: "cannot switch to " + branchSlug + ": " + err.Error() + " / " + err2.Error()})
@@ -397,30 +441,18 @@ func (h *Handlers) handleCreatePullRequest(conn Connection, msg WireMessage) {
 		}
 	}
 
-	// 4. 推送分支到 remote。
 	if _, err := runGitInDirectory(params.Directory, "push", "-u", "origin", branchSlug); err != nil {
 		conn.SendResult(msg.RequestID, nil, gitWireError("git_push_failed", err))
 		return
 	}
 
-	// 4.5 §7.1 PR 模板合并：若仓库根存在 PULL_REQUEST_TEMPLATE.md，与客户端 body 合并
-	//     （占位符替换或 `---` 追加）；无模板/空/超限/读取失败 → 原样使用客户端 body。
-	//     非破坏性服务端行为补充，不改 protocol version。root 由 isGitWorkspace 用
-	//     `git rev-parse --show-toplevel` 解析为受信任绝对路径；模板只拼固定相对名。
-	if root, ok := isGitWorkspace(params.Directory); ok {
-		if merged, err := mergePullRequestBody(root, params.Body); err == nil {
-			params.Body = merged
-		}
-	}
-
-	// 5. 调用 gh pr create。
 	ghArgs := []string{"pr", "create",
-		"--title", params.Title,
-		"--body", params.Body,
+		"--title", title,
+		"--body", generated.Body,
 		"--head", branchSlug,
 	}
-	if params.Base != "" {
-		ghArgs = append(ghArgs, "--base", params.Base)
+	if base != "" {
+		ghArgs = append(ghArgs, "--base", base)
 	}
 	cmd := exec.Command("gh", ghArgs...)
 	cmd.Dir = params.Directory
@@ -431,22 +463,48 @@ func (h *Handlers) handleCreatePullRequest(conn Connection, msg WireMessage) {
 	}
 	prURL := strings.TrimSpace(string(out))
 	conn.SendResult(msg.RequestID, map[string]interface{}{
-		"pr_url":     prURL,
-		"branch":     branchSlug,
-		"base":       params.Base,
-		"remote_url": remoteURL,
+		"pr_url": prURL,
+		"branch": branchSlug,
+		"base":   base,
 	}, nil)
+}
+
+func runGitContext(ctx context.Context, dir string, args ...string) string {
+	out, _ := runGitInDirectoryWith(dir, []gitRunOption{WithContext(ctx)}, args...)
+	return out
+}
+
+func defaultPRBaseBranch(ctx context.Context, root string) string {
+	out, err := runGitInDirectoryWith(root, []gitRunOption{WithContext(ctx)}, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+	if err == nil {
+		branch := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(out), "origin/"))
+		if branch != "" {
+			return branch
+		}
+	}
+	return "main"
+}
+
+func limitPRString(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "\n[truncated]"
 }
 
 // handleCheckPullRequestSupport returns whether the given directory currently
 // supports PR creation. It is the live, per-directory check iOS calls when
 // opening the diff sheet, instead of relying on a cached hello_ack capability.
-func (h *Handlers) handleCheckPullRequestSupport(conn Connection, msg WireMessage) {
+func (h *Handlers) handleCheckPullRequestSupport(conn Connection, msg WireMessage, agent core.Agent) {
 	var params struct {
 		Directory string `json:"directory"`
 	}
 	if err := json.Unmarshal(msg.Params, &params); err != nil {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: err.Error()})
+		return
+	}
+	if _, ok := agent.(core.PrContentGenerator); !ok {
+		conn.SendResult(msg.RequestID, map[string]interface{}{"supported": false}, nil)
 		return
 	}
 	conn.SendResult(msg.RequestID, map[string]interface{}{
@@ -541,56 +599,4 @@ func readPRTemplate(root string) (string, bool) {
 		return string(data), true
 	}
 	return "", false
-}
-
-// prBodySections 把 iOS 客户端生成的 PR body 按 `## <Name>` 标题切成 heading→正文 map。
-// 正文为该标题下、到下一个标题为止的行（首尾空白修剪）。仅供 `{{ summary }}` /
-// `{{ changes }}` 占位符填充使用。对应 iOS 端 buildPullRequestBody
-// (ChatUIKitContainerView.swift) 产出的 `## Summary` / `## Changes` / `## Cordcode` 三段。
-func prBodySections(body string) map[string]string {
-	sections := map[string]string{}
-	var current string
-	var buf strings.Builder
-	flush := func() {
-		if current != "" {
-			sections[current] = strings.TrimSpace(buf.String())
-		}
-		buf.Reset()
-	}
-	for _, line := range strings.Split(body, "\n") {
-		if strings.HasPrefix(line, "## ") {
-			flush()
-			current = strings.TrimSpace(strings.TrimPrefix(line, "## "))
-		} else if current != "" {
-			buf.WriteString(line)
-			buf.WriteByte('\n')
-		}
-	}
-	flush()
-	return sections
-}
-
-// mergePullRequestBody 把客户端生成的 PR body 与仓库 PULL_REQUEST_TEMPLATE.md 合并。
-// 纯函数 + 只读：不写工作区、不回写 git、不执行 HTML。合并规则（plan §2.4）：
-//  1. 模板含 `{{ summary }}` / `{{ changes }}` 占位符 → 用客户端 body 对应段替换（占位符模式）；
-//     未出现的占位符原样保留，模板完全控制布局（Cordcode 署名段由模板作者决定，v1 不自动追加）。
-//  2. 否则把客户端三段 body 追加到模板之后，用 `---` 分隔（追加模式）。
-//
-// 无模板 / 空 / 超限 / 读取失败 → 原样返回 generatedBody，不报错、不伪造（plan §2.5-1）。
-// v1 所有回落路径都不产生 caller 可动作的 error，error 返回保留给后续需要区分的场景。
-func mergePullRequestBody(root, generatedBody string) (string, error) {
-	template, ok := readPRTemplate(root)
-	if !ok {
-		return generatedBody, nil
-	}
-	hasSummarySlot := strings.Contains(template, "{{ summary }}")
-	hasChangesSlot := strings.Contains(template, "{{ changes }}")
-	if hasSummarySlot || hasChangesSlot {
-		sections := prBodySections(generatedBody)
-		merged := template
-		merged = strings.ReplaceAll(merged, "{{ summary }}", sections["Summary"])
-		merged = strings.ReplaceAll(merged, "{{ changes }}", sections["Changes"])
-		return merged, nil
-	}
-	return strings.TrimRight(template, "\n") + "\n\n---\n\n" + generatedBody, nil
 }

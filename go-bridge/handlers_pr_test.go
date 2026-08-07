@@ -11,11 +11,14 @@ package gobridge
 // handler e2e（真 gh pr create + GitHub remote）需 owner Mac gh 认证环境，不在此测。
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 func TestSlugFromTitle(t *testing.T) {
@@ -166,7 +169,7 @@ func TestCheckPullRequestSupport_NonGitHubRepo(t *testing.T) {
 	handlers.handleCheckPullRequestSupport(conn, WireMessage{
 		RequestID: "req_pr_check",
 		Params:    mustJSONRaw(t, map[string]any{"directory": dir}),
-	})
+	}, nil)
 	if conn.err != nil {
 		t.Fatalf("check_pull_request_support returned error: %v", conn.err)
 	}
@@ -179,32 +182,68 @@ func TestCheckPullRequestSupport_NonGitHubRepo(t *testing.T) {
 	}
 }
 
+type stubAgentPRNoGen struct {
+	stubAgentCheckpoint
+	workDir string
+}
+
+func (a *stubAgentPRNoGen) SetWorkDir(dir string) { a.workDir = dir }
+func (a *stubAgentPRNoGen) GetWorkDir() string    { return a.workDir }
+
+type stubAgentPRWithGen struct {
+	stubAgentPRNoGen
+}
+
+func (a *stubAgentPRWithGen) GeneratePrContent(_ context.Context, _ core.PrContentInput) (core.PrContent, error) {
+	return core.PrContent{Title: "t", Body: "b"}, nil
+}
+
+func TestSupportsPullRequestsRequiresGenerator(t *testing.T) {
+	dir := initTempGitRepo(t, "https://github.com/openAgi2/test.git")
+	if _, err := exec.LookPath("gh"); err != nil {
+		t.Skip("gh not installed; generator-gating positive path not testable")
+	}
+
+	without := &stubAgentPRNoGen{stubAgentCheckpoint: stubAgentCheckpoint{name: "x"}, workDir: dir}
+	if caps := deriveBackendCapabilities("x", without, ""); containsCap(caps, "supports_pull_requests") {
+		t.Error("driver without PrContentGenerator must not advertise supports_pull_requests")
+	}
+
+	with := &stubAgentPRWithGen{stubAgentPRNoGen: stubAgentPRNoGen{stubAgentCheckpoint: stubAgentCheckpoint{name: "x"}, workDir: dir}}
+	if caps := deriveBackendCapabilities("x", with, ""); !containsCap(caps, "supports_pull_requests") {
+		t.Error("driver with PrContentGenerator + GitHub remote + gh must advertise supports_pull_requests")
+	}
+}
+
+func TestBuildPrContentPromptIncludesTemplateAndDiff(t *testing.T) {
+	prompt := core.BuildPrContentPrompt(core.PrContentInput{
+		BaseBranch:    "main",
+		HeadBranch:    "cordcode/feature",
+		CommitSummary: "fix: login",
+		DiffSummary:   "1 file changed",
+		DiffPatch:     "diff --git a/a b/a",
+		Template:      "## 背景\n{{ summary }}",
+	})
+	for _, want := range []string{"Base branch: main", "Head branch: cordcode/feature", "fix: login", "Repository change request template:", "## 背景"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func containsCap(caps []string, needle string) bool {
+	for _, c := range caps {
+		if c == needle {
+			return true
+		}
+	}
+	return false
+}
+
 // ── §7.1 PULL_REQUEST_TEMPLATE.md 模板探测单测 ──────────────────────────────────────
 //
-// 覆盖 mergePullRequestBody / readPRTemplate / prBodySections 三个纯函数。全部基于
-// t.TempDir()，不触网、不依赖 gh 认证。handler e2e（真 gh pr create + GitHub PR 上
-// 是否含模板内容）需 owner Mac gh 认证环境，由 owner 真机回归（plan §2.6）。
-
-// samplePRBody 复刻 iOS buildPullRequestBody (ChatUIKitContainerView.swift) 的三段输出，
-// 供占位符替换测试取「对应段」。
-func samplePRBody() string {
-	return strings.Join([]string{
-		"## Summary",
-		"",
-		"Add login flow",
-		"",
-		"## Changes",
-		"",
-		"2 个文件变更（+10 −3）",
-		"",
-		"- `src/a.swift` (+7 −1)",
-		"- `src/b.swift` (+3 −2)",
-		"",
-		"## Cordcode",
-		"",
-		"由 CordCode iOS 创建。",
-	}, "\n")
-}
+// 覆盖 readPRTemplate（模板原文喂给 agent，不再做合并）。handler e2e（真 gh pr create
+// + GitHub PR 上是否含模板内容）需 owner Mac gh 认证环境，由 owner 真机回归。
 
 func writeTemplate(t *testing.T, root, rel, content string) {
 	t.Helper()
@@ -216,159 +255,6 @@ func writeTemplate(t *testing.T, root, rel, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
-	}
-}
-
-func TestMergePRBody_NoTemplate(t *testing.T) {
-	root := t.TempDir()
-	got, err := mergePullRequestBody(root, samplePRBody())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != samplePRBody() {
-		t.Errorf("no template: expected original body unchanged, got diff")
-	}
-}
-
-func TestMergePRBody_RootTemplate_Append(t *testing.T) {
-	root := t.TempDir()
-	writeTemplate(t, root, "PULL_REQUEST_TEMPLATE.md", "## 背景\n这是一个改动。")
-	got, err := mergePullRequestBody(root, samplePRBody())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	want := "## 背景\n这是一个改动。\n\n---\n\n" + samplePRBody()
-	if got != want {
-		t.Errorf("root template append mismatch:\ngot:  %q\nwant: %q", got, want)
-	}
-}
-
-func TestMergePRBody_GitHubDirTemplate_Append(t *testing.T) {
-	root := t.TempDir()
-	// 根目录无模板，仅 .github/ 有 → 命中 .github 候选。
-	writeTemplate(t, root, filepath.Join(".github", "PULL_REQUEST_TEMPLATE.md"), "GH TEMPLATE")
-	got, err := mergePullRequestBody(root, samplePRBody())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	want := "GH TEMPLATE\n\n---\n\n" + samplePRBody()
-	if got != want {
-		t.Errorf(".github template append mismatch:\ngot:  %q\nwant: %q", got, want)
-	}
-}
-
-func TestMergePRBody_RootPreferredOverGitHubDir(t *testing.T) {
-	root := t.TempDir()
-	writeTemplate(t, root, "PULL_REQUEST_TEMPLATE.md", "ROOT")
-	writeTemplate(t, root, filepath.Join(".github", "PULL_REQUEST_TEMPLATE.md"), "GITHUB")
-	got, err := mergePullRequestBody(root, samplePRBody())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.HasPrefix(got, "ROOT\n\n---") || strings.Contains(got, "GITHUB") {
-		t.Errorf("root template must win over .github/: got %q", got)
-	}
-}
-
-func TestMergePRBody_PlaceholderReplace(t *testing.T) {
-	root := t.TempDir()
-	tpl := strings.Join([]string{
-		"## 背景",
-		"{{ summary }}",
-		"",
-		"## 改动",
-		"{{ changes }}",
-		"",
-		"## 备注",
-		"（手填）",
-	}, "\n")
-	writeTemplate(t, root, "PULL_REQUEST_TEMPLATE.md", tpl)
-	got, err := mergePullRequestBody(root, samplePRBody())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if strings.Contains(got, "{{ summary }}") || strings.Contains(got, "{{ changes }}") {
-		t.Errorf("placeholders not replaced: %q", got)
-	}
-	if !strings.Contains(got, "## 背景\nAdd login flow") {
-		t.Errorf("summary not spliced into {{ summary }}: %q", got)
-	}
-	if !strings.Contains(got, "## 改动\n2 个文件变更（+10 −3）") {
-		t.Errorf("changes not spliced into {{ changes }}: %q", got)
-	}
-	// 占位符模式：模板完全控制布局，Cordcode 署名段不自动追加（v1 由模板作者决定）。
-	if strings.Contains(got, "由 CordCode iOS 创建。") {
-		t.Errorf("placeholder mode must not auto-append Cordcode section: %q", got)
-	}
-}
-
-func TestMergePRBody_OnlySummarySlot(t *testing.T) {
-	root := t.TempDir()
-	// 只有 {{ summary }} 没有 {{ changes }}：仍判为占位符模式，未出现的占位符不替换。
-	writeTemplate(t, root, "PULL_REQUEST_TEMPLATE.md", "T: {{ summary }}")
-	got, err := mergePullRequestBody(root, samplePRBody())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(got, "T: Add login flow") {
-		t.Errorf("summary slot not filled: %q", got)
-	}
-	if strings.Contains(got, "---") {
-		t.Errorf("single-placeholder must stay in placeholder mode (no append): %q", got)
-	}
-}
-
-func TestMergePRBody_OversizedFallsBack(t *testing.T) {
-	root := t.TempDir()
-	// > 64 KiB → 视为无模板，原样回落。
-	huge := strings.Repeat("a", prTemplateMaxBytes+1)
-	writeTemplate(t, root, "PULL_REQUEST_TEMPLATE.md", huge)
-	got, err := mergePullRequestBody(root, samplePRBody())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != samplePRBody() {
-		t.Errorf("oversized template must fall back to original body, got len=%d", len(got))
-	}
-}
-
-func TestMergePRBody_EmptyTemplateFallsBack(t *testing.T) {
-	root := t.TempDir()
-	// 纯空白模板 → 视为该候选未配置；无其他候选 → 原样回落。
-	writeTemplate(t, root, "PULL_REQUEST_TEMPLATE.md", "   \n\n  \n")
-	got, err := mergePullRequestBody(root, samplePRBody())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != samplePRBody() {
-		t.Errorf("empty template must fall back to original body, got %q", got)
-	}
-}
-
-func TestMergePRBody_PathEscapeRejected(t *testing.T) {
-	// root 受信任（git-resolved）。函数只拼固定相对名，不会读取 root 之外的文件。
-	// 把「陷阱模板」放进 root 的父目录，确认不被读取。
-	parent := t.TempDir()
-	root := filepath.Join(parent, "repo")
-	if err := os.MkdirAll(filepath.Join(root, ".github"), 0o755); err != nil {
-		t.Fatalf("mkdir repo: %v", err)
-	}
-	writeTemplate(t, parent, "PULL_REQUEST_TEMPLATE.md", "PARENT-TRAP {{ summary }}")
-	// root 内放一个同名陷阱（也会被合法读到），以及一个绝不应被读取的 decoy。
-	writeTemplate(t, root, "README.md", "DECOY-BODY")
-	got, err := mergePullRequestBody(root, samplePRBody())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if strings.Contains(got, "PARENT-TRAP") {
-		t.Errorf("read outside root (parent dir): %q", got)
-	}
-	if strings.Contains(got, "DECOY-BODY") {
-		t.Errorf("read non-template file under root: %q", got)
-	}
-	// root 内无任何合法模板候选 → 原样回落。
-	if got != samplePRBody() {
-		t.Errorf("expected original body when no candidate under root, got %q", got)
 	}
 }
 
@@ -411,18 +297,4 @@ func TestReadPRTemplate(t *testing.T) {
 			t.Errorf("empty root should skip to .github: got %q ok=%v", got, ok)
 		}
 	})
-}
-
-func TestPRBodySections(t *testing.T) {
-	sections := prBodySections(samplePRBody())
-	if sections["Summary"] != "Add login flow" {
-		t.Errorf("Summary section = %q, want %q", sections["Summary"], "Add login flow")
-	}
-	wantChanges := "2 个文件变更（+10 −3）\n\n- `src/a.swift` (+7 −1)\n- `src/b.swift` (+3 −2)"
-	if sections["Changes"] != wantChanges {
-		t.Errorf("Changes section = %q, want %q", sections["Changes"], wantChanges)
-	}
-	if sections["Cordcode"] != "由 CordCode iOS 创建。" {
-		t.Errorf("Cordcode section = %q", sections["Cordcode"])
-	}
 }

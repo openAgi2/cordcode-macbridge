@@ -120,9 +120,9 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 	}
 
 	// §7.1 PR 集成（GitHub-only）：当 backend 有 WorkDirSwitcher + 工作区是 GitHub remote
-	// + gh CLI 已安装且认证时，声明 supports_pull_requests。
+	// + gh CLI 已安装且认证 + driver 实现了非交互式 PR 内容生成器时，声明 supports_pull_requests。
 	if ws, ok := agent.(core.WorkDirSwitcher); ok && ws.GetWorkDir() != "" {
-		if supportsPullRequests(ws.GetWorkDir()) {
+		if _, ok := agent.(core.PrContentGenerator); ok && supportsPullRequests(ws.GetWorkDir()) {
 			caps = append(caps, "supports_pull_requests")
 		}
 	}
