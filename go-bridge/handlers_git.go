@@ -50,6 +50,32 @@ type gitContext struct {
 	CurrentBranch  string        `json:"currentBranch"`
 	Worktrees      []gitWorktree `json:"worktrees"`
 	Branches       []string      `json:"branches"`
+
+	// §4.1 Phase 1 status 扩展字段（全部 optional / omitempty；旧客户端忽略）。
+	// IsRepo / IsDirty / ChangedFileCount / Additions / Deletions 为工作区状态；
+	// HasUpstream / AheadCount / BehindCount 为远端跟踪状态（无 upstream 时 ahead/behind omit）；
+	// DefaultBranch 为远端默认分支（失败 omit，不猜 main）；
+	// OpenPullRequest 为当前分支的 open PR（无 PR → nil；查不了 → nil + 不伪造）。
+	// 失败语义（§4.1.1 定稿）：IsRepo 失败 → 整次 RPC error；IsDirty / ChangedFileCount /
+	// Additions / Deletions 任一失败 → 整次 RPC error（三者同 error，禁止半份 status）。
+	IsRepo           *bool              `json:"isRepo,omitempty"`
+	IsDirty          *bool              `json:"isDirty,omitempty"`
+	ChangedFileCount *int               `json:"changedFileCount,omitempty"`
+	Additions        *int               `json:"additions,omitempty"`
+	Deletions        *int               `json:"deletions,omitempty"`
+	HasUpstream      *bool              `json:"hasUpstream,omitempty"`
+	AheadCount       *int               `json:"aheadCount,omitempty"`
+	BehindCount      *int               `json:"behindCount,omitempty"`
+	DefaultBranch    *string            `json:"defaultBranch,omitempty"`
+	OpenPullRequest  *gitOpenPullRequest `json:"openPullRequest,omitempty"`
+}
+
+// gitOpenPullRequest 描述当前分支的 open PR（§4.1 A openPullRequest）。
+// 无 PR 或查不了时整字段 omit（nil），不伪造。
+type gitOpenPullRequest struct {
+	Number int    `json:"number"`
+	URL    string `json:"url"`
+	State  string `json:"state"`
 }
 
 func (h *Handlers) handleGetGitContext(conn Connection, msg WireMessage) {
@@ -231,12 +257,125 @@ func loadGitContext(directory string) (gitContext, error) {
 	currentPath, _ := filepath.Abs(directory)
 	worktrees := parseGitWorktrees(worktreeOutput, currentPath)
 	branches := nonEmptyLines(branchesOutput)
+	ctx := context.Background()
+
+	// §4.1 Phase 1 status 扩展字段。IsRepo 恒真（走到这里 rev-parse 已成功）。
+	isRepo := true
+
+	// isDirty：porcelain 非空（含 untracked → dirty）。失败 → 整次 error（§4.1.1 三者同 error）。
+	statusOutput, err := runGitInDirectory(root, "status", "--porcelain")
+	if err != nil {
+		return gitContext{}, fmt.Errorf("read git status: %w", err)
+	}
+	isDirty := strings.TrimSpace(statusOutput) != ""
+
+	// changedFileCount / additions / deletions：复用 loadWorkspaceDiff 单次调用（§4.1.1 同源，
+	// 含 untracked）。失败 → 整次 error（三者同 error）。
+	wd, err := loadWorkspaceDiff(ctx, root)
+	if err != nil {
+		return gitContext{}, fmt.Errorf("read workspace diff: %w", err)
+	}
+	changedFileCount := len(wd.Files)
+	additions := wd.Additions
+	deletions := wd.Deletions
+
+	// hasUpstream：rev-parse --abbrev-ref @{u} 成功=有 upstream；无 upstream exit 128 → false（非 error）。
+	hasUpstream := false
+	if _, upstreamErr := runGitInDirectory(root, "rev-parse", "--abbrev-ref", "@{u}"); upstreamErr == nil {
+		hasUpstream = true
+	}
+
+	// ahead/behind：仅当 hasUpstream（无 upstream → omit，不用 0 假装齐平）。
+	var aheadCount, behindCount *int
+	if hasUpstream {
+		ahead, aheadErr := runGitInDirectory(root, "rev-list", "--count", "@{u}..HEAD")
+		if aheadErr != nil {
+			return gitContext{}, fmt.Errorf("read ahead count: %w", aheadErr)
+		}
+		behind, behindErr := runGitInDirectory(root, "rev-list", "--count", "HEAD..@{u}")
+		if behindErr != nil {
+			return gitContext{}, fmt.Errorf("read behind count: %w", behindErr)
+		}
+		a := atoiOrZero(ahead)
+		b := atoiOrZero(behind)
+		aheadCount = &a
+		behindCount = &b
+	}
+
+	// defaultBranch：symbolic-ref origin/HEAD；失败/无 origin → omit（不猜 main）。
+	var defaultBranch *string
+	if ref, refErr := runGitInDirectory(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"); refErr == nil {
+		// 输出形如 "origin/main"，剥掉 "origin/" 前缀。
+		short := strings.TrimSpace(ref)
+		short = strings.TrimPrefix(short, "origin/")
+		if short != "" {
+			defaultBranch = &short
+		}
+	}
+
+	// openPullRequest：仅当 GitHub remote + gh 可用时查当前分支 open PR（gh pr view）。
+	// 无 PR → omit(nil)；gh 未装/非 GitHub/查询失败 → omit(nil)，不伪造。
+	openPR := loadOpenPullRequest(root, strings.TrimSpace(currentBranch))
+
 	return gitContext{
 		RepositoryRoot: root,
 		CurrentBranch:  strings.TrimSpace(currentBranch),
 		Worktrees:      worktrees,
 		Branches:       branches,
+
+		IsRepo:           &isRepo,
+		IsDirty:          &isDirty,
+		ChangedFileCount: &changedFileCount,
+		Additions:        &additions,
+		Deletions:        &deletions,
+		HasUpstream:      &hasUpstream,
+		AheadCount:       aheadCount,
+		BehindCount:      behindCount,
+		DefaultBranch:    defaultBranch,
+		OpenPullRequest:  openPR,
 	}, nil
+}
+
+// loadOpenPullRequest 查询当前分支的 open PR（§4.1 A openPullRequest）。
+// 仅当 GitHub remote + gh CLI 可用时执行 `gh pr view --json number,url,state`。
+// 无 PR / 非GitHub / gh 未装 / 查询失败 → 返回 nil（omit），不伪造。
+// 注意：「没有 PR」与「查不了」都 omit；客户端无法区分二者，但不伪造 PR 对象（§4.1 硬要求）。
+// gh pr view 的联网行为（无 PR exit code / JSON 键名）需真实 GitHub，单元测试用 mock/skip。
+func loadOpenPullRequest(directory, branch string) *gitOpenPullRequest {
+	if _, err := detectGitHubRemote(directory); err != nil {
+		return nil
+	}
+	if _, err := exec.LookPath("gh"); err != nil {
+		return nil
+	}
+	if branch == "" {
+		return nil // detached HEAD，gh pr view 无意义
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gh", "pr", "view", "--json", "number,url,state")
+	cmd.Dir = directory
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil // 无 PR 或查询失败 → omit
+	}
+	var pr gitOpenPullRequest
+	if jsonErr := json.Unmarshal(out, &pr); jsonErr != nil || pr.URL == "" {
+		return nil
+	}
+	return &pr
+}
+
+// atoiOrZero 解析整数字符串，失败返回 0（rev-list --count 正常输出纯数字）。
+func atoiOrZero(s string) int {
+	n := 0
+	for _, c := range strings.TrimSpace(s) {
+		if c < '0' || c > '9' {
+			return 0
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n
 }
 
 func parseGitWorktrees(output, currentPath string) []gitWorktree {

@@ -630,6 +630,57 @@ Response:
 }
 ```
 
+### RPC: `get_git_context` (§6.5 + Phase 1 §4.1)
+
+Returns the git context for a workspace directory: repository root, current branch,
+worktrees, local branches, and (Phase 1 §4.1, all optional / additive) workspace
+status fields. Old clients ignore the optional fields.
+
+Request:
+
+```ts
+{
+  directory: string
+}
+```
+
+Response:
+
+```ts
+{
+  repositoryRoot: string,
+  // detached HEAD → currentBranch is "" (empty string), never the literal "Detached HEAD".
+  currentBranch: string,
+  worktrees: { path: string, branch?: string, isCurrent: boolean }[],
+  branches: string[],
+
+  // Phase 1 §4.1 status extension (all optional; omitted → client degrades gracefully).
+  isRepo?: boolean,            // true when rev-parse reached here; absent → treat as unknown.
+  isDirty?: boolean,           // git status --porcelain non-empty (untracked counts as dirty).
+  changedFileCount?: number,   // len(workspace diff files); INCLUDES untracked (not pure numstat).
+  additions?: number,          // workspace diff additions; same source as changedFileCount.
+  deletions?: number,          // workspace diff deletions; untracked files contribute 0.
+  hasUpstream?: boolean,       // rev-parse --abbrev-ref @{u} success; no upstream → false (NOT error).
+  aheadCount?: number,         // ONLY when hasUpstream; no upstream → omitted (NOT 0).
+  behindCount?: number,        // ONLY when hasUpstream; no upstream → omitted (NOT 0).
+  defaultBranch?: string,      // symbolic-ref origin/HEAD; no origin → omitted (client must NOT guess "main").
+  openPullRequest?: { number: number, url: string, state: string } | null
+                               // gh pr view for current branch; no PR / non-GitHub / no gh → omitted/null.
+}
+```
+
+**Failure semantics (Phase 1 §4.1.1, authoritative):**
+- `isRepo` failure → whole RPC error (no half-status).
+- `isDirty` / `changedFileCount` / `additions` / `deletions`: all three derive from one
+  `loadWorkspaceDiff` call; any failure → whole RPC error (same-error, no half-status, no
+  independent field omission).
+- `hasUpstream` no-upstream → `false` (exit 128), NOT an error.
+- `aheadCount`/`behindCount` no-upstream → omitted (NOT 0).
+- `defaultBranch` no-origin → omitted (client must NOT guess `main`).
+- `openPullRequest`: no-PR and cannot-query are both omitted/null — client cannot distinguish
+  them but must NOT fabricate a PR object. `gh pr view` network behavior needs real GitHub
+  (verify with a fixture during implementation).
+
 ### RPC: `list_directory` params (§6.5)
 
 `list_directory` accepts optional fields that refine listing behavior. All are additive
