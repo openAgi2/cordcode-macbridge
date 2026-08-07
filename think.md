@@ -749,3 +749,9 @@ Claude `prepareProjectionHydrateSource` 通过 agent `TranscriptPath` 查文件�
 - 仓库全量 Go 仍有两个独立既有失败：
   `TestScanCodexTranscriptRelayEventsToolsAndTokens`（Codex itemId）、
   `TestRegressionR1_LeaseAutoDowngrade`（lease expiry）；单独重跑仍失败，本轮不顺手改。
+
+## 2026-08-07：Codex archived session hydrate 失败
+
+`findSessionFile` 只扫 `~/.codex/sessions/`，Desktop archive 物理移动到
+`archived_sessions/` 后 cold hydrate 报 session file not found。
+修复：active 优先，archived fallback（`7baafd8`）。
