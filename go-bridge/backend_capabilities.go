@@ -127,6 +127,13 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 		}
 	}
 
+	// Phase 1 §4.1 B commit_and_push：当 driver 实现了非交互式 commit message 生成器时，
+	// 声明 supports_commit_message（iOS 据此决定是否显示 commit message 编辑/生成 UI）。
+	// 现网仅 claudecode/codex 实现（opencode/grokbuild 无），未实现的 backend 不显示 commit UI。
+	if _, ok := agent.(core.CommitMessageGenerator); ok {
+		caps = append(caps, "supports_commit_message")
+	}
+
 	return dedupCapabilities(caps)
 }
 

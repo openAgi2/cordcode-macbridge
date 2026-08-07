@@ -1096,6 +1096,8 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleCheckPullRequestSupport(conn, msg, agent)
 	case "create_pull_request":
 		h.handleCreatePullRequest(conn, msg, agent)
+	case "commit_and_push":
+		h.handleCommitAndPush(conn, msg, agent)
 	case "checkout_git_branch":
 		h.handleCheckoutGitBranch(conn, msg)
 	case "create_git_branch":

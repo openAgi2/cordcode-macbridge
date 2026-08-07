@@ -168,7 +168,7 @@ scope only to keep the CI guard satisfied.
 | `config.read` | `list_providers`, `list_models`, `list_agents`, `list_permission_modes`, `get_usage`, `list_memory_files`, `read_memory_file`, `run_diagnostics` | ✅ |
 | `config.write` | `set_provider`, `switch_model`, `set_permission_mode` | ✅ |
 | `workspace.read` | `get_workspace_diff`, `read_file`, `list_directory`, `get_git_context`, `fetch_content_chunk`, `check_pull_request_support` | ✅ |
-| `workspace.mutate` | `checkout_git_branch`, `create_git_branch`, `create_git_worktree`, `create_pull_request`, `list_projects` | ✅ (recommend an owner per-action confirmation on top) |
+| `workspace.mutate` | `checkout_git_branch`, `create_git_branch`, `create_git_worktree`, `create_pull_request`, `commit_and_push`, `list_projects` | ✅ (recommend an owner per-action confirmation on top) |
 | `delivery.manage` | `get_delivery_prekey_status`, `upload_delivery_prekeys`, `get_delivery_chain_head`, `enable_relay_pairing` | ✅ (own device chain only) |
 | _(empty — unconditional)_ | `hello` (legacy dispatch placeholder) | ✅ (no scope required, else handshake deadlock) |
 
@@ -576,9 +576,51 @@ A backend advertises `supports_pull_requests` when all three preconditions are m
 2. `git remote get-url origin` returns a URL containing `github.com`;
 3. `gh` CLI is installed and authenticated on the Mac.
 
-When present, iOS may show a "Create PR" entry on the session's checkpoint diff sheet;
+When present, iOS may show a "Create Pull Request" entry on the session Git panel;
 when absent, the entry is hidden. The capability is additive (extensible string, no major
 version bump).
+
+### Capability: `supports_commit_message` (Phase 1 §4.1 B)
+
+A backend advertises `supports_commit_message` when the agent driver implements
+`core.CommitMessageGenerator` (one-off, non-interactive commit message generation).
+Current implementations: `claudecode`, `codex` (`opencode`/`grokbuild` do not implement
+it). When present, iOS may show the "Commit and Push" entry with a generated-message
+option on the session Git panel; when absent, that entry is hidden. Additive (extensible
+string, no major version bump).
+
+### RPC: `commit_and_push` (Phase 1 §4.1 B)
+
+Commits all changes (tracked modifications + new untracked files, honoring `.gitignore`)
+and pushes the current branch. The commit message is either the caller-provided `message`,
+or — when empty — generated non-interactively by the agent (`CommitMessageGenerator`).
+It never touches a chat session or the timeline (SSV2 control-plane). `create_pull_request`
+semantics are unchanged (not split).
+
+Request:
+
+```ts
+{
+  directory: string,   // required; must pass validateGitDirectory
+  message?: string     // optional; empty → agent generates (requires supports_commit_message)
+}
+```
+
+Response:
+
+```ts
+{
+  head: string,        // new HEAD commit sha after commit
+  pushed: boolean,     // true after a successful push
+  remote: string       // upstream ref pushed to, e.g. "origin/main" or "origin/<branch>"
+}
+```
+
+Failure codes: `invalid_params` / `invalid_directory` / `not_a_git_repo` /
+`nothing_to_commit` (clean working tree) / `commit_message_generation_unsupported` (agent
+has no `CommitMessageGenerator`) / `commit_message_generation_failed` /
+`git_status_failed` / `git_add_failed` / `git_diff_failed` / `git_commit_failed` /
+`push_rejected` (no upstream + detached HEAD, or push rejected) + real git stderr summary.
 
 ### RPC: `create_pull_request` (§7.1)
 
