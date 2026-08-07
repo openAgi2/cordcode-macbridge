@@ -324,6 +324,14 @@ func (h *Handlers) rebindLiveTargetsForSession(backendID, sessionID string) int 
 							shouldBind = true
 							break
 						}
+						// Pending alias still listed in scope after lazy create: treat as
+						// observing the resolved real session (first-turn delivery).
+						if strings.HasPrefix(sid, "pending-") {
+							if t, ok := h.sessions.get(sid); ok && t != nil && t.sessionID == sessionID {
+								shouldBind = true
+								break
+							}
+						}
 					}
 				}
 			}
@@ -2057,9 +2065,38 @@ func (h *Handlers) rebindSessionIDIfResolved(currentID string, sess core.AgentSe
 	}
 
 	h.sessions.rebind(currentID, realID)
+	// Broadcaster: move pending subscriptions (any directory variant) → real id.
 	h.broadcaster.Rebind(currentID, realID, backendID, directory)
 	h.eventPublisher.EventBuffer().Rebind(backendID, currentID, realID)
 	h.rebindRelayKind(currentID, realID, relayKindAgent)
+	// Observation: rewrite pending → real so ShouldSendEvent / rebindLiveTargets
+	// accept projection_patch for the real session before the client's next lease renew.
+	if h.observation != nil {
+		h.observation.RebindSessionID(backendID, currentID, realID)
+	}
+	// Ensure the live device conn is subscribed under the real id immediately.
+	// Without this, first-turn text/turn_completed patches flush with zero targets.
+	if n := h.rebindLiveTargetsForSession(backendID, realID); n > 0 {
+		slog.Info("go-bridge: pending→real rebind rebound live targets",
+			"backendID", backendID,
+			"from", currentID,
+			"to", realID,
+			"conns", n,
+		)
+	} else {
+		slog.Warn("go-bridge: pending→real rebind found zero live targets",
+			"backendID", backendID,
+			"from", currentID,
+			"to", realID,
+		)
+	}
+	// Codex file relay is keyed by session id; start under real id so transcript
+	// catch-up does not thrash on the pending ghost subscription.
+	if backendID == "codex" {
+		if agent, ok := h.Agents()["codex"]; ok && agent != nil {
+			h.startCodexSessionFileRelay(realID, nil, backendID, agent)
+		}
+	}
 	if backendID == "claude" || backendID == "claudecode" {
 		h.mu.Lock()
 		selection := h.pendingClaudeRuntime[currentID]
@@ -2067,6 +2104,11 @@ func (h *Handlers) rebindSessionIDIfResolved(currentID string, sess core.AgentSe
 		h.mu.Unlock()
 		h.writeClaudeRuntimeSidecar(realID, directory, selection)
 	}
+	slog.Info("go-bridge: session id rebind complete",
+		"backendID", backendID,
+		"from", currentID,
+		"to", realID,
+	)
 	return realID
 }
 

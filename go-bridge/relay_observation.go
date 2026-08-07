@@ -105,6 +105,68 @@ func (om *ObservationManager) SetScope(deviceID string, scope ObservationScope) 
 	)
 }
 
+// RebindSessionID rewrites oldSessionID → newSessionID inside every device's
+// observation scope for backendID. Used when Codex/Claude lazy-create resolves
+// a pending-* placeholder to a real thread id: clients often still advertise the
+// pending id until their next lease renew, and ShouldSendEvent would otherwise
+// filter projection_patch / text for the real id (first-turn blank body).
+//
+// Returns how many scopes were rewritten.
+func (om *ObservationManager) RebindSessionID(backendID, oldSessionID, newSessionID string) int {
+	if om == nil || backendID == "" || oldSessionID == "" || newSessionID == "" || oldSessionID == newSessionID {
+		return 0
+	}
+	om.mu.Lock()
+	defer om.mu.Unlock()
+
+	rewritten := 0
+	for _, dev := range om.devices {
+		if dev == nil {
+			continue
+		}
+		dev.mu.Lock()
+		scope, ok := dev.scopes[backendID]
+		if !ok || scope == nil || len(scope.SessionIDs) == 0 {
+			dev.mu.Unlock()
+			continue
+		}
+		changed := false
+		for i, sid := range scope.SessionIDs {
+			if sid == oldSessionID {
+				scope.SessionIDs[i] = newSessionID
+				changed = true
+			}
+		}
+		// Dedup if newSessionID was already present.
+		if changed {
+			seen := make(map[string]struct{}, len(scope.SessionIDs))
+			out := make([]string, 0, len(scope.SessionIDs))
+			for _, sid := range scope.SessionIDs {
+				if sid == "" {
+					continue
+				}
+				if _, ok := seen[sid]; ok {
+					continue
+				}
+				seen[sid] = struct{}{}
+				out = append(out, sid)
+			}
+			scope.SessionIDs = out
+			rewritten++
+		}
+		dev.mu.Unlock()
+	}
+	if rewritten > 0 {
+		slog.Info("observation: rebind session id in scopes",
+			"backendID", backendID,
+			"from", oldSessionID,
+			"to", newSessionID,
+			"scopes", rewritten,
+		)
+	}
+	return rewritten
+}
+
 // isLiveControlPlaneEvent is true for events that must reach a watching client
 // even under milestones_only. Without turn_started / session_state_changed,
 // iOS never arms isGenerating and the input bar stays idle for the whole turn

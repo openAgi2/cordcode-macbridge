@@ -1292,6 +1292,39 @@ func TestBroadcasterRebind(t *testing.T) {
 	}
 }
 
+// Directory mismatch used to make Rebind a no-op (subscribe with Directory="" but
+// rebind with workdir) — ghost pending subscription + zero live targets on real id.
+func TestBroadcasterRebindIgnoresDirectoryMismatch(t *testing.T) {
+	b := NewBroadcaster()
+	conn1Server, conn1Client, cleanup1 := openTestConn(t)
+	defer cleanup1()
+
+	// Mimic set_observation_scope: empty Directory.
+	b.Subscribe(conn1Server, SubscriptionKey{BackendID: "codex", SessionID: "pending-xyz"})
+	// Mimic rebindSessionIDIfResolved: non-empty workdir.
+	b.Rebind("pending-xyz", "real-999", "codex", "/Users/me/Project")
+
+	if b.HasSessionSubscriber("codex", "pending-xyz") {
+		t.Fatal("pending subscription must be moved off pending id")
+	}
+	if !b.HasSessionSubscriber("codex", "real-999") {
+		t.Fatal("real id must have subscriber after directory-mismatched rebind")
+	}
+
+	b.Send(BroadcastEvent{
+		BackendID: "codex",
+		SessionID: "real-999",
+		Message:   map[string]string{"type": "event", "event": "text_delta"},
+	})
+	if err := conn1Client.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var msg map[string]interface{}
+	if err := conn1Client.ReadJSON(&msg); err != nil {
+		t.Fatalf("rebound conn should receive on real id: %v", err)
+	}
+}
+
 func TestTwoConnsSubscribeSameSession(t *testing.T) {
 	b := NewBroadcaster()
 	conn1Server, conn1Client, cleanup1 := openTestConn(t)

@@ -534,19 +534,49 @@ func (b *Broadcaster) ActiveDeviceIDs() []string {
 }
 
 func (b *Broadcaster) Rebind(oldID, newID, backendID, directory string) {
-	oldKey := SubscriptionKey{BackendID: backendID, SessionID: oldID, Directory: directory}
-	newKey := SubscriptionKey{BackendID: backendID, SessionID: newID, Directory: directory}
+	// Rebind ALL keys that match backend+oldSession regardless of Directory.
+	// set_observation_scope Subscribes with Directory="", while rebindSessionIDIfResolved
+	// often passes the workdir — a single-key rebind was a no-op and left a ghost
+	// pending-* subscription (codex file relay thrash + zero live targets on real id).
+	_ = directory
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	conns, ok := b.subscribers[oldKey]
-	if !ok {
-		return
+
+	type move struct {
+		oldKey SubscriptionKey
+		newKey SubscriptionKey
+		conns  map[Connection]struct{}
 	}
-	b.subscribers[newKey] = conns
-	delete(b.subscribers, oldKey)
-	for conn := range conns {
-		b.connSubs[conn][newKey] = struct{}{}
-		delete(b.connSubs[conn], oldKey)
+	var moves []move
+	for key, conns := range b.subscribers {
+		if key.BackendID != backendID || key.SessionID != oldID || len(conns) == 0 {
+			continue
+		}
+		// Copy conn set; key is a value type so safe to capture.
+		copied := make(map[Connection]struct{}, len(conns))
+		for c := range conns {
+			copied[c] = struct{}{}
+		}
+		moves = append(moves, move{
+			oldKey: key,
+			newKey: SubscriptionKey{BackendID: backendID, SessionID: newID, Directory: key.Directory},
+			conns:  copied,
+		})
+	}
+	for _, m := range moves {
+		// Merge into existing newKey subscribers if any.
+		if b.subscribers[m.newKey] == nil {
+			b.subscribers[m.newKey] = make(map[Connection]struct{})
+		}
+		for conn := range m.conns {
+			b.subscribers[m.newKey][conn] = struct{}{}
+			if b.connSubs[conn] == nil {
+				b.connSubs[conn] = make(map[SubscriptionKey]struct{})
+			}
+			b.connSubs[conn][m.newKey] = struct{}{}
+			delete(b.connSubs[conn], m.oldKey)
+		}
+		delete(b.subscribers, m.oldKey)
 	}
 }
 

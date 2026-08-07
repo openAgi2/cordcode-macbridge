@@ -538,6 +538,16 @@ func (h *Handlers) ensureRelaysForSubscribedCodexSessions() {
 		return
 	}
 	for _, sessionID := range h.broadcaster.SubscribedSessionIDs("codex") {
+		// Lazy-create placeholders never have a rollout JSONL; restarting a file
+		// relay for pending-* only burns CPU and log noise. Prefer the resolved
+		// real id (registry alias) when available.
+		if strings.HasPrefix(sessionID, "pending-") {
+			if t, ok := h.sessions.get(sessionID); ok && t != nil && t.sessionID != "" && t.sessionID != sessionID {
+				sessionID = t.sessionID
+			} else {
+				continue
+			}
+		}
 		h.mu.Lock()
 		running := h.relayRunning[codexSessionFileRelayKey(sessionID)]
 		h.mu.Unlock()

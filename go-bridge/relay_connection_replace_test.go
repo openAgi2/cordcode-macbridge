@@ -3,6 +3,8 @@ package gobridge
 import (
 	"context"
 	"testing"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // Re-handshake must move session subscriptions to the new Connection and must
@@ -106,6 +108,55 @@ func TestRegisterConnectionResubscribesFromObservation(t *testing.T) {
 	// Live text must still pass observation (full_stream retained).
 	if !h.observation.ShouldSendEvent("dev-rebind", "codex", "sess-a", "text_delta") {
 		t.Fatal("text_delta must pass after path-switch rebind")
+	}
+}
+
+// Pending→real rebind must rewrite observation + broadcaster so live targets
+// exist under the real id (Codex lazy create first-turn blank body).
+func TestRebindSessionIDIfResolvedRewritesObservationAndLiveTargets(t *testing.T) {
+	h := NewHandlers()
+	defer h.Shutdown(context.Background())
+
+	device := &TrustedDeviceRecord{DeviceID: "dev-pending-rebind"}
+	conn := &relayBroadcastCaptureConn{device: device}
+	globalDeviceConnRegistry.Register(device.DeviceID, conn)
+	defer globalDeviceConnRegistry.Unregister(device.DeviceID, conn)
+
+	const pendingID = "pending-first-turn"
+	const realID = "019fdc9f-real-thread"
+
+	// Client still observes the pending id (pre-lease-renew).
+	h.observation.SetScope(device.DeviceID, ObservationScope{
+		BackendID: "codex", SessionIDs: []string{pendingID}, DeliveryMode: scopeFullStream, LeaseSeconds: 90,
+	})
+	h.broadcaster.Subscribe(conn, SubscriptionKey{BackendID: "codex", SessionID: pendingID})
+
+	// Registry entry under pending (as StartSession/put does).
+	// Non-nil events so Handlers.Shutdown closeWithTimeout does not panic.
+	sess := &fakeAgentSession{id: realID, events: make(chan core.Event)}
+	h.sessions.put(pendingID, "codex", "/tmp/ws", sess)
+
+	got := h.rebindSessionIDIfResolved(pendingID, sess, realID, "codex", "/tmp/ws")
+	if got != realID {
+		t.Fatalf("rebind returned %q, want %q", got, realID)
+	}
+
+	scope := h.observation.GetScope(device.DeviceID, "codex")
+	if scope == nil || len(scope.SessionIDs) != 1 || scope.SessionIDs[0] != realID {
+		t.Fatalf("observation scope after rebind = %#v, want [%s]", scope, realID)
+	}
+	if h.broadcaster.HasSessionSubscriber("codex", pendingID) {
+		t.Fatal("broadcaster still has pending subscriber")
+	}
+	if !h.broadcaster.HasSessionSubscriber("codex", realID) {
+		t.Fatal("broadcaster missing real-id subscriber")
+	}
+	if !h.observation.ShouldSendEvent(device.DeviceID, "codex", realID, "projection_patch") {
+		t.Fatal("projection_patch for real id must pass observation after rebind")
+	}
+	targets := h.broadcaster.Targets("codex", realID, "")
+	if len(targets) == 0 {
+		t.Fatal("live targets for real id must be non-empty after rebind")
 	}
 }
 
