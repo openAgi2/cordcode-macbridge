@@ -42,12 +42,16 @@ func (a *Agent) GeneratePrContent(ctx context.Context, input core.PrContentInput
 	}
 
 	var envelope struct {
+		Result           json.RawMessage `json:"result"`
 		StructuredOutput json.RawMessage `json:"structured_output"`
 	}
 	if err := json.Unmarshal(out, &envelope); err != nil {
 		return core.PrContent{}, fmt.Errorf("claude PR generation returned invalid JSON: %w", err)
 	}
-	raw := envelope.StructuredOutput
+	raw := envelope.Result
+	if len(raw) == 0 {
+		raw = envelope.StructuredOutput
+	}
 	if len(raw) > 0 && raw[0] == '"' {
 		var encoded string
 		if err := json.Unmarshal(raw, &encoded); err != nil {
