@@ -595,7 +595,8 @@ required.
 Server-side, the handler checks the GitHub remote, generates a sanitised branch name
 `cordcode/<slug>` (whitelist `^cordcode/[a-z0-9][a-z0-9-]{0,60}$`), checks out or
 creates the branch, pushes to origin, and invokes `gh pr create`. The response carries
-`pr_url`, `branch`, `base`, and `remote_url`.
+`pr_url`, `branch`, and `base` (see `handlers_git.go` `handleCreatePullRequest`; an
+earlier version of this doc also listed `remote_url`, which the handler never sends).
 
 **PR template handling (T3-style).** Before invoking `gh pr create`, the server resolves
 the repo root via `git rev-parse --show-toplevel` and reads the first existing
