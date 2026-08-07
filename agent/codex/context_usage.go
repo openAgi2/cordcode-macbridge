@@ -165,15 +165,36 @@ func findSessionFileInCodexHome(codexHome, sessionID string) string {
 		return ""
 	}
 
+	// Fast path: dated sessions tree (YYYY/MM/DD).
 	pattern := filepath.Join(codexHome, "sessions", "*", "*", "*", "rollout-*"+sessionID+".jsonl")
 	if matches, _ := filepath.Glob(pattern); len(matches) > 0 {
 		sort.Strings(matches)
 		return matches[len(matches)-1]
 	}
 
-	sessionsDir := filepath.Join(codexHome, "sessions")
+	// Slow path: walk active sessions (covers non-dated layouts / tests).
+	if found := walkSessionRollout(filepath.Join(codexHome, "sessions"), sessionID); found != "" {
+		return found
+	}
+
+	// Codex Desktop archive: physical move out of sessions/.
+	// Prefer exact glob under archived_sessions, then walk as fallback.
+	archivedPattern := filepath.Join(codexHome, "archived_sessions", "rollout-*"+sessionID+".jsonl")
+	if matches, _ := filepath.Glob(archivedPattern); len(matches) > 0 {
+		sort.Strings(matches)
+		return matches[len(matches)-1]
+	}
+	return walkSessionRollout(filepath.Join(codexHome, "archived_sessions"), sessionID)
+}
+
+// walkSessionRollout returns the first rollout path under root whose basename
+// contains sessionID. Empty root / missing directory → "".
+func walkSessionRollout(root, sessionID string) string {
+	if strings.TrimSpace(root) == "" || strings.TrimSpace(sessionID) == "" {
+		return ""
+	}
 	var found string
-	_ = filepath.Walk(sessionsDir, func(path string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info == nil || info.IsDir() || found != "" {
 			return nil
 		}
