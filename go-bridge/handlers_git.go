@@ -633,15 +633,19 @@ func limitPRString(s string, max int) string {
 
 // ── Phase 1 §4.1 B commit_and_push（agent 生成 message，不写 timeline） ──────────────────
 
-// handleCommitAndPush commits all changes (tracked modifications + new untracked
-// files, honoring .gitignore) and pushes the current branch. The commit message is
-// either the caller-provided `message`, or — when empty — generated non-interactively
-// by the agent (CommitMessageGenerator). It never touches a chat session or the timeline
-// (SSV2 control-plane). create_pull_request semantics are preserved (not split).
+// handleCommitAndPush supports three actions (Codex Mac-style stacked source control):
+//   - "commit"      : stage + commit only (no push)
+//   - "commit_push" : stage + commit + push (default; backward compatible)
+//   - "push"        : push only (no commit; requires local commits ahead or set upstream)
+//
+// Optional params.action selects the mode. Empty/omitted → commit_push.
+// Commit message is either params.message, or — when empty and a commit is needed —
+// generated non-interactively by CommitMessageGenerator. Never writes timeline (SSV2).
 func (h *Handlers) handleCommitAndPush(conn Connection, msg WireMessage, agent core.Agent) {
 	var params struct {
 		Directory string `json:"directory"`
 		Message   string `json:"message"`
+		Action    string `json:"action"` // "commit" | "commit_push" | "push"
 	}
 	if err := json.Unmarshal(msg.Params, &params); err != nil {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: err.Error()})
@@ -656,16 +660,53 @@ func (h *Handlers) handleCommitAndPush(conn Connection, msg WireMessage, agent c
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "not_a_git_repo", Message: "workspace is not a git repository"})
 		return
 	}
+	action := strings.ToLower(strings.TrimSpace(params.Action))
+	if action == "" {
+		action = "commit_push"
+	}
+	switch action {
+	case "commit", "commit_push", "push":
+	default:
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: "action must be commit, commit_push, or push"})
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
 	defer cancel()
 
-	// nothing_to_commit：clean 工作区（porcelain 非空判断，含 untracked）
 	statusOutput, err := runGitInDirectoryWith(root, []gitRunOption{WithContext(ctx)}, "status", "--porcelain")
 	if err != nil {
 		conn.SendResult(msg.RequestID, nil, gitWireError("git_status_failed", err))
 		return
 	}
-	if strings.TrimSpace(statusOutput) == "" {
+	isDirty := strings.TrimSpace(statusOutput) != ""
+
+	// push-only: no staging/commit; still requires a branch that can push.
+	if action == "push" {
+		if isDirty {
+			conn.SendResult(msg.RequestID, nil, &WireError{
+				Code:    "dirty_worktree",
+				Message: "working tree has uncommitted changes; commit first or discard before push-only",
+			})
+			return
+		}
+		pushed, remote, pushErr := pushCurrentBranch(ctx, root)
+		if pushErr != nil {
+			conn.SendResult(msg.RequestID, nil, pushErr)
+			return
+		}
+		head, _ := runGitInDirectoryWith(root, []gitRunOption{WithContext(ctx)}, "rev-parse", "HEAD")
+		conn.SendResult(msg.RequestID, map[string]interface{}{
+			"head":   strings.TrimSpace(head),
+			"pushed": pushed,
+			"remote": remote,
+			"action": action,
+		}, nil)
+		return
+	}
+
+	// commit or commit_push require dirty worktree
+	if !isDirty {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "nothing_to_commit", Message: "working tree is clean"})
 		return
 	}
@@ -678,7 +719,6 @@ func (h *Handlers) handleCommitAndPush(conn Connection, msg WireMessage, agent c
 
 	message := strings.TrimSpace(params.Message)
 	if message == "" {
-		// 空则 agent 非交互生成（capability 门控）
 		generator, ok := agent.(core.CommitMessageGenerator)
 		if !ok {
 			conn.SendResult(msg.RequestID, nil, &WireError{Code: "commit_message_generation_unsupported", Message: "current backend does not support commit message generation"})
@@ -706,36 +746,20 @@ func (h *Handlers) handleCommitAndPush(conn Connection, msg WireMessage, agent c
 		message = generated.Message
 	}
 
-	// commit（用 -F 从 stdin 读，避免 -m 的引号/shell 转义问题）
 	if err := commitWithMessageFile(ctx, root, message); err != nil {
 		conn.SendResult(msg.RequestID, nil, gitWireError("git_commit_failed", err))
 		return
 	}
 
-	// push：upstream 缺失或被拒都如实报错
 	pushed := false
 	remote := ""
-	if head, err := runGitInDirectoryWith(root, []gitRunOption{WithContext(ctx)}, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"); err == nil && strings.TrimSpace(head) != "" {
-		if _, err := runGitInDirectoryWith(root, []gitRunOption{WithContext(ctx)}, "push"); err != nil {
-			conn.SendResult(msg.RequestID, nil, gitWireError("push_rejected", err))
+	if action == "commit_push" {
+		var pushErr *WireError
+		pushed, remote, pushErr = pushCurrentBranch(ctx, root)
+		if pushErr != nil {
+			conn.SendResult(msg.RequestID, nil, pushErr)
 			return
 		}
-		pushed = true
-		remote = strings.TrimSpace(head)
-	} else {
-		// 无 upstream：尝试 push -u origin <currentbranch>；失败如实报 push_rejected
-		branch, branchErr := runGitInDirectoryWith(root, []gitRunOption{WithContext(ctx)}, "rev-parse", "--abbrev-ref", "HEAD")
-		if branchErr != nil || strings.TrimSpace(branch) == "" || strings.TrimSpace(branch) == "HEAD" {
-			conn.SendResult(msg.RequestID, nil, &WireError{Code: "push_rejected", Message: "no upstream and detached HEAD; cannot push"})
-			return
-		}
-		currentBranch := strings.TrimSpace(branch)
-		if _, err := runGitInDirectoryWith(root, []gitRunOption{WithContext(ctx)}, "push", "-u", "origin", currentBranch); err != nil {
-			conn.SendResult(msg.RequestID, nil, gitWireError("push_rejected", err))
-			return
-		}
-		pushed = true
-		remote = "origin/" + currentBranch
 	}
 
 	head, _ := runGitInDirectoryWith(root, []gitRunOption{WithContext(ctx)}, "rev-parse", "HEAD")
@@ -743,7 +767,27 @@ func (h *Handlers) handleCommitAndPush(conn Connection, msg WireMessage, agent c
 		"head":   strings.TrimSpace(head),
 		"pushed": pushed,
 		"remote": remote,
+		"action": action,
 	}, nil)
+}
+
+// pushCurrentBranch pushes HEAD to its upstream, or `git push -u origin <branch>` when no upstream.
+func pushCurrentBranch(ctx context.Context, root string) (pushed bool, remote string, wireErr *WireError) {
+	if head, err := runGitInDirectoryWith(root, []gitRunOption{WithContext(ctx)}, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"); err == nil && strings.TrimSpace(head) != "" {
+		if _, err := runGitInDirectoryWith(root, []gitRunOption{WithContext(ctx)}, "push"); err != nil {
+			return false, "", gitWireError("push_rejected", err)
+		}
+		return true, strings.TrimSpace(head), nil
+	}
+	branch, branchErr := runGitInDirectoryWith(root, []gitRunOption{WithContext(ctx)}, "rev-parse", "--abbrev-ref", "HEAD")
+	if branchErr != nil || strings.TrimSpace(branch) == "" || strings.TrimSpace(branch) == "HEAD" {
+		return false, "", &WireError{Code: "push_rejected", Message: "no upstream and detached HEAD; cannot push"}
+	}
+	currentBranch := strings.TrimSpace(branch)
+	if _, err := runGitInDirectoryWith(root, []gitRunOption{WithContext(ctx)}, "push", "-u", "origin", currentBranch); err != nil {
+		return false, "", gitWireError("push_rejected", err)
+	}
+	return true, "origin/" + currentBranch, nil
 }
 
 // commitWithMessageFile writes the message to a temp file and commits with -F to avoid

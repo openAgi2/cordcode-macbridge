@@ -14,6 +14,7 @@ import (
 )
 
 // §4.1 B Phase 1 commit_and_push 测试（无需真实 agent CLI / 无需 GitHub 联网）。
+// action: commit | commit_push | push
 //
 // 覆盖：
 //   - clean 工作区 → nothing_to_commit（不 commit/push）。
@@ -89,6 +90,57 @@ func TestCommitAndPush_MessageGenerationUnsupportedWhenNoGenerator(t *testing.T)
 
 	if conn.lastErrCode != "commit_message_generation_unsupported" {
 		t.Fatalf("errCode = %q, want commit_message_generation_unsupported", conn.lastErrCode)
+	}
+}
+
+func TestCommitAndPush_CommitOnlyDoesNotPush(t *testing.T) {
+	repo := makeGitRepository(t)
+	_ = setupLocalBareOrigin(t, repo)
+	if err := os.WriteFile(filepath.Join(repo, "only.txt"), []byte("only\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := &Handlers{}
+	conn := newCaptureConn()
+	msg := WireMessage{RequestID: "r-commit", Params: mustJSON(t, map[string]string{
+		"directory": repo, "message": "chore: commit only", "action": "commit",
+	})}
+	h.handleCommitAndPush(conn, msg, &stubCommitAgent{stubAgentCheckpoint: stubAgentCheckpoint{name: "x"}, generated: "x"})
+	if conn.lastErr != nil {
+		t.Fatalf("unexpected error: %v", conn.lastErr)
+	}
+	var result struct {
+		Pushed bool   `json:"pushed"`
+		Action string `json:"action"`
+	}
+	if err := json.Unmarshal(conn.lastResultJSON, &result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if result.Pushed {
+		t.Fatal("pushed=true for commit-only")
+	}
+	if result.Action != "commit" {
+		t.Fatalf("action=%q, want commit", result.Action)
+	}
+	// Local has the commit
+	latest := runGitCapture(t, repo, "log", "--oneline", "-n", "1")
+	if !strings.Contains(latest, "commit only") {
+		t.Fatalf("local log = %q", latest)
+	}
+}
+
+func TestCommitAndPush_PushOnlyRejectsDirty(t *testing.T) {
+	repo := makeGitRepository(t)
+	if err := os.WriteFile(filepath.Join(repo, "dirty.txt"), []byte("d\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := &Handlers{}
+	conn := newCaptureConn()
+	msg := WireMessage{RequestID: "r-push", Params: mustJSON(t, map[string]string{
+		"directory": repo, "action": "push",
+	})}
+	h.handleCommitAndPush(conn, msg, &stubCommitAgent{stubAgentCheckpoint: stubAgentCheckpoint{name: "x"}, generated: "x"})
+	if conn.lastErrCode != "dirty_worktree" {
+		t.Fatalf("errCode=%q, want dirty_worktree", conn.lastErrCode)
 	}
 }
 
