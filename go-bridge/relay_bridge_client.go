@@ -607,7 +607,7 @@ func (c *RelayBridgeClient) handleInboundEnvelope(payload []byte) {
 			return
 		}
 		if inboundHeader.Type == "request" {
-			rc.registerRequestClass(inboundHeader.RequestID, inboundHeader.Method)
+			rc.registerRequestClass(inboundHeader.RequestID, inboundHeader.Method, inboundHeader.BulkCorrelationID)
 		}
 		if err := rc.enqueueInbound(innerJSON, inboundHeader); err != nil {
 			slog.Warn("relay-bridge-client: inbound enqueue failed", "deviceID", safeID(deviceID), "error", err)

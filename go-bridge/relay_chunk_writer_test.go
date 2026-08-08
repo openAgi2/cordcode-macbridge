@@ -26,7 +26,7 @@ func TestRelayChunkWriterReassemblesAndAuthenticatesEveryChunk(t *testing.T) {
 	rc.mu.Lock()
 	rc.outboundChunks = true
 	rc.mu.Unlock()
-	rc.registerRequestClass("history", "get_session_messages")
+	rc.registerRequestClass("history", "get_session_messages", "")
 	rc.advanceSessionBulkGeneration("session", "history")
 	rc.SendResult("history", map[string]any{"messages": []any{map[string]any{"text": string(make([]byte, 100000))}}}, nil)
 
@@ -213,12 +213,12 @@ func TestRelayChunkWriterPreemptsAndFinishesStartedGroupAfterSupersede(t *testin
 	rc.mu.Lock()
 	rc.outboundChunks = true
 	rc.mu.Unlock()
-	rc.registerRequestClass("history", "get_session_messages")
+	rc.registerRequestClass("history", "get_session_messages", "")
 	rc.advanceSessionBulkGeneration("session", "history")
 	rc.SendResult("history", map[string]any{"messages": string(make([]byte, 100000))}, nil)
 	<-firstChunk
 	done := make(chan struct{})
-	rc.registerRequestClass("models", "list_models")
+	rc.registerRequestClass("models", "list_models", "")
 	go func() { rc.SendResult("models", map[string]any{"models": []any{}}, nil); close(done) }()
 	deadline := time.Now().Add(time.Second)
 	for {
@@ -310,7 +310,7 @@ func TestRelayChunkWriterSerializesConcurrentGroupsPerDevice(t *testing.T) {
 	rc.outboundChunks = true
 	rc.mu.Unlock()
 
-	rc.registerRequestClass("history-a", "get_session_messages")
+	rc.registerRequestClass("history-a", "get_session_messages", "")
 	rc.advanceSessionBulkGeneration("session-a", "history-a")
 	rc.SendResult("history-a", map[string]any{"messages": string(make([]byte, 200000))}, nil)
 	select {
@@ -318,7 +318,7 @@ func TestRelayChunkWriterSerializesConcurrentGroupsPerDevice(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("first chunk did not start")
 	}
-	rc.registerRequestClass("history-b", "get_session_messages")
+	rc.registerRequestClass("history-b", "get_session_messages", "")
 	rc.advanceSessionBulkGeneration("session-b", "history-b")
 	rc.SendResult("history-b", map[string]any{"messages": string(make([]byte, 180000))}, nil)
 	close(releaseFirst)

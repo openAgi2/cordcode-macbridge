@@ -18,6 +18,11 @@ type WireMessage struct {
 	Method                  string              `json:"method,omitempty"`
 	Operation               string              `json:"operation,omitempty"`
 	Event                   string              `json:"event,omitempty"`
+	// BulkCorrelationID 是 R1.4（§3.6.4）read_file_v2 的 request-aware progress correlation，
+	// 由 client 在 writer commit 前预绑定，放在加密 inner RPC envelope 顶层（与 method/requestId/params
+	// 同级）。仅在当前 attempt 走 Relay 且 client 已 ack relay_chunks_v1 + relay_chunk_progress_v1 时存在。
+	// Direct / legacy read_file / 其他 RPC / 非 RPC event 一律不得携带。allowlist 本期只有 read_file_v2。
+	BulkCorrelationID       string              `json:"bulkCorrelationId,omitempty"`
 	Params                  json.RawMessage     `json:"params,omitempty"`
 	Data                    json.RawMessage     `json:"data,omitempty"`
 	Client                  json.RawMessage     `json:"client,omitempty"`

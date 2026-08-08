@@ -374,6 +374,11 @@ func Main() {
 		if ack.Ok && negotiateRelayChunks(conn, hello.Capabilities) {
 			ack.Capabilities[relayChunksCapability] = true
 		}
+		// R1.4：relay_chunk_progress_v1（progress ⇒ chunks；client 保证不同时 ack progress 而不 ack chunks）。
+		// ack 后 Mac 才会对 read_file_v2 correlated chunk stamp bulkCorrelationId。
+		if ack.Ok && negotiateRelayChunkProgress(conn, hello.Capabilities) {
+			ack.Capabilities[relayChunkProgressCapability] = true
+		}
 		var replay []EventMessage
 		if server.recoveryEnabled && helloSupportsRecovery(&hello) && ack.Ok {
 			plan, events, err := server.prepareRecovery(conn, &hello)

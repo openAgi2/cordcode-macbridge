@@ -134,7 +134,7 @@ func TestRelayBulkOverflowReturnsExplicitResult(t *testing.T) {
 	rc.mu.Lock()
 	rc.outboundChunks = true
 	rc.mu.Unlock()
-	rc.registerRequestClass("history", "get_session_messages")
+	rc.registerRequestClass("history", "get_session_messages", "")
 	rc.advanceSessionBulkGeneration("session", "history")
 	writer.mu.Lock()
 	writer.bulkFrames = relayOutboundBulkFrames
@@ -171,7 +171,7 @@ func TestRelayBulkOverflowReturnsExplicitResult(t *testing.T) {
 
 func TestRelayResultClassRegistryIsConsumedOnce(t *testing.T) {
 	rc := NewRelayDeviceConn("device", "bridge", "route", 1, nil, make([]byte, 32), nil, func(json.RawMessage) error { return nil })
-	rc.registerRequestClass("req", "list_models")
+	rc.registerRequestClass("req", "list_models", "")
 	rc.mu.Lock()
 	class, exists := rc.requestClasses["req"]
 	rc.mu.Unlock()

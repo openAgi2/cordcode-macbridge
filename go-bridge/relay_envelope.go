@@ -48,10 +48,16 @@ type RelayEnvelope struct {
 // RelayChunkMetadata identifies one independently authenticated frame in a
 // relay_chunks_v1 logical message. GroupID and Count are fixed for the group;
 // Index advances in wire order.
+//
+// BulkCorrelationID（R1.4，§3.6.4）：correlated chunk group 的 request-aware progress
+// 绑定。空 = base chunk（{groupId,index,count}）；非空 = correlated chunk，且该字段进入
+// canonical AAD（base 与 correlated 的 AAD 不同，防偷换）。只有 client 预绑定 correlation
+// 且 Mac 已 ack relay_chunk_progress_v1 时才非空。
 type RelayChunkMetadata struct {
-	GroupID string `json:"groupId"`
-	Index   uint32 `json:"index"`
-	Count   uint32 `json:"count"`
+	GroupID           string `json:"groupId"`
+	Index             uint32 `json:"index"`
+	Count             uint32 `json:"count"`
+	BulkCorrelationID string `json:"bulkCorrelationId,omitempty"`
 }
 
 // AADFields 返回需要被 AEAD 校验的外层字段。
@@ -80,11 +86,18 @@ func (e *RelayEnvelope) AADFields() map[string]interface{} {
 	if e.Chunk != nil {
 		// Keep nested chunk fields canonical too. encoding/json preserves struct
 		// declaration order, while the other clients recursively sort object keys.
-		aad["chunk"] = map[string]interface{}{
+		chunk := map[string]interface{}{
 			"groupId": e.Chunk.GroupID,
 			"index":   e.Chunk.Index,
 			"count":   e.Chunk.Count,
 		}
+		// R1.4：correlated chunk 把 bulkCorrelationId 绑入 AAD。base chunk（空）不带该字段，
+		// 故 base AAD 与历史部署客户端逐字节一致（relayaad proof 的 base-vs-correlated 区分）。
+		// encoding/json 对 map 按 key 字典序输出，AAD 稳定。
+		if e.Chunk.BulkCorrelationID != "" {
+			chunk["bulkCorrelationId"] = e.Chunk.BulkCorrelationID
+		}
+		aad["chunk"] = chunk
 	}
 	return aad
 }

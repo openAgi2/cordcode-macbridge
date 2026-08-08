@@ -69,6 +69,7 @@ type relayChunkCursor struct {
 	sessionGeneration uint64
 	channelGeneration uint64
 	expiresAt         time.Time
+	bulkCorrelationID string // R1.4：read_file_v2 correlated chunk 的 request-aware 绑定（空 = base chunk）
 }
 
 // relayOutboundWriter is the only owner of Relay application-data writes for
@@ -202,6 +203,11 @@ func (w *relayOutboundWriter) run() {
 					if job.cursor != nil && job.cursor.sessionID != "" {
 						job.conn.completeBulkHandle(job.cursor.sessionID, job.cursor.handle)
 					}
+					// R1.4：correlated chunk group 完成（成功/错误/超时）→ retire correlation，
+					// 进入 retired 窗口（防 reuse）。conn 关闭时整个 registry 随之销毁。
+					if job.cursor != nil && job.cursor.bulkCorrelationID != "" {
+						job.conn.bulkCorrelations.Retire(job.cursor.bulkCorrelationID)
+					}
 					if job.done != nil {
 						job.done <- err
 					}
@@ -249,7 +255,7 @@ func (w *relayOutboundWriter) writeSelected(job *relayOutboundJob) (error, bool)
 	if end > len(job.payload) {
 		end = len(job.payload)
 	}
-	metadata := &RelayChunkMetadata{GroupID: cursor.groupID, Index: cursor.nextIndex, Count: cursor.count}
+	metadata := &RelayChunkMetadata{GroupID: cursor.groupID, Index: cursor.nextIndex, Count: cursor.count, BulkCorrelationID: cursor.bulkCorrelationID}
 	err := job.conn.writeLogicalFrame(job.payload[start:end], job.contentEncoding, metadata)
 	wire := time.Since(writtenAt)
 	slog.Info("relay chunk delivered", "relay_queue_wait_ms", durationMillis(queueWait), "socket_send_ms", durationMillis(wire), "relay_chunk_wire_ms", durationMillis(wire), "relay_outbound_total_ms", durationMillis(time.Since(job.admittedAt)), "relay_chunk_count", cursor.count, "chunk_index", metadata.Index)
