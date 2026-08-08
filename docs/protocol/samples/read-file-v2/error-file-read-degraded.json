@@ -1,0 +1,4 @@
+{
+  "error": "file.read_degraded",
+  "message": "file read pool degraded; retry after management health recovers"
+}

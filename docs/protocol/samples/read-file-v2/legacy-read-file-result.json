@@ -1,0 +1,8 @@
+{
+  "path": "/workspace/src/main.swift",
+  "content": "import Foundation\nprint(\"hi\")\n",
+  "extension": "swift",
+  "sizeBytes": 30,
+  "totalLines": 2,
+  "truncated": false
+}

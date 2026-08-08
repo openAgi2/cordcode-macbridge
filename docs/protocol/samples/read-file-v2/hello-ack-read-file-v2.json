@@ -1,0 +1,17 @@
+{
+  "protocol": {
+    "version": 1
+  },
+  "backends": [
+    {
+      "id": "codex",
+      "capabilities": [
+        "read_file_v2",
+        "relay_chunks_v1",
+        "relay_chunk_progress_v1",
+        "cancel_request_v1"
+      ]
+    }
+  ],
+  "note": "proposed hello_ack advertising v2 capabilities (capability negotiation only; full hello shape stays in bridge-v1 samples)"
+}

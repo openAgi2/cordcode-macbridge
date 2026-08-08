@@ -1,0 +1,231 @@
+{
+  "$schema": "cordcode.bridge-relay-inventory.v1",
+  "schemaVersion": 1,
+  "root": {
+    "name": "bridge-relay-wire",
+    "kind": "cross-repo-wire",
+    "status": "draft",
+    "statusLadder": "draft->proposed->observed->frozen",
+    "canonicalOwner": "macbridge docs/protocol/samples/read-file-v2/ (canonical); iOS mirror byte-equality (A-1.4)",
+    "producerConsumers": {
+      "producer": "go-bridge handlers (read_file, future read_file_v2, cancel, chunking)",
+      "consumers": [
+        "iOS Swift wire decoder",
+        "macbridge relay framing"
+      ]
+    },
+    "scopeNote": "Bridge v1 + read_file_v2 + Relay chunk/correlation wire. Distinct from Mac-local Management root and iOS-internal JSC root. legacy read_file preserved for compat."
+  },
+  "variants": [
+    {
+      "group": "legacy",
+      "name": "legacy-read-file-result",
+      "evidenceStatus": "observed",
+      "expectedFile": "legacy-read-file-result.json",
+      "expectedCount": 1,
+      "producer": "go-bridge handleReadFile (handlers.go:3823)",
+      "consumers": [
+        "iOS legacy decoder"
+      ],
+      "notes": "current 6-field wire {path,content,extension,sizeBytes,totalLines,truncated}"
+    },
+    {
+      "group": "read-file-v2-result",
+      "name": "v2-text",
+      "evidenceStatus": "proposed",
+      "expectedFile": "read-file-v2-text.json",
+      "expectedCount": 1,
+      "producer": "go-bridge (R1.1)",
+      "consumers": [
+        "iOS Swift decoder"
+      ],
+      "notes": "kind:text + exactly one full segment"
+    },
+    {
+      "group": "read-file-v2-result",
+      "name": "v2-text-empty",
+      "evidenceStatus": "proposed",
+      "expectedFile": "read-file-v2-text-empty.json",
+      "expectedCount": 1,
+      "producer": "go-bridge (R1.1)",
+      "consumers": [
+        "iOS Swift decoder"
+      ],
+      "notes": "empty => unique empty full segment; segments:[] forbidden; totalLines=0"
+    },
+    {
+      "group": "read-file-v2-result",
+      "name": "v2-text-truncated",
+      "evidenceStatus": "proposed",
+      "expectedFile": "read-file-v2-text-truncated.json",
+      "expectedCount": 1,
+      "producer": "go-bridge (R1.1)",
+      "consumers": [
+        "iOS Swift decoder"
+      ],
+      "notes": "head+omission+tail; headCount+omittedCount+tailCount==totalLines"
+    },
+    {
+      "group": "read-file-v2-result",
+      "name": "v2-text-session",
+      "evidenceStatus": "proposed",
+      "expectedFile": "read-file-v2-text-session.json",
+      "expectedCount": 1,
+      "producer": "go-bridge (R1.1)",
+      "consumers": [
+        "iOS Swift decoder"
+      ],
+      "notes": "session-owned identity"
+    },
+    {
+      "group": "read-file-v2-result",
+      "name": "v2-unsupported-utf16",
+      "evidenceStatus": "proposed",
+      "expectedFile": "read-file-v2-unsupported-utf16.json",
+      "expectedCount": 1,
+      "producer": "go-bridge (R1.1)",
+      "consumers": [
+        "iOS Swift decoder"
+      ],
+      "notes": "detected non-empty ASCII enum; no encoding/totalLines/segments"
+    },
+    {
+      "group": "read-file-v2-result",
+      "name": "v2-unsupported-unknown",
+      "evidenceStatus": "proposed",
+      "expectedFile": "read-file-v2-unsupported-unknown.json",
+      "expectedCount": 1,
+      "producer": "go-bridge (R1.1)",
+      "consumers": [
+        "iOS Swift decoder"
+      ],
+      "notes": "detected unknown => field OMIT (no JSON null)"
+    },
+    {
+      "group": "read-file-v2-result",
+      "name": "v2-binary",
+      "evidenceStatus": "proposed",
+      "expectedFile": "read-file-v2-binary.json",
+      "expectedCount": 1,
+      "producer": "go-bridge (R1.1)",
+      "consumers": [
+        "iOS Swift decoder"
+      ],
+      "notes": "kind+metadata only"
+    },
+    {
+      "group": "read-file-v2-result",
+      "name": "v2-text-empty-ext",
+      "evidenceStatus": "proposed",
+      "expectedFile": "read-file-v2-text-empty-ext.json",
+      "expectedCount": 1,
+      "producer": "go-bridge (R1.1)",
+      "consumers": [
+        "iOS Swift decoder"
+      ],
+      "notes": "extension always string; empty string when no extension"
+    },
+    {
+      "group": "read-file-v2-request",
+      "name": "v2-request-workspace",
+      "evidenceStatus": "proposed",
+      "expectedFile": "read-file-v2-request-workspace.json",
+      "expectedCount": 1,
+      "producer": "iOS",
+      "consumers": [
+        "go-bridge"
+      ],
+      "notes": "path + owner workspace tagged"
+    },
+    {
+      "group": "read-file-v2-request",
+      "name": "v2-request-session",
+      "evidenceStatus": "proposed",
+      "expectedFile": "read-file-v2-request-session.json",
+      "expectedCount": 1,
+      "producer": "iOS",
+      "consumers": [
+        "go-bridge"
+      ],
+      "notes": "path + owner session tagged"
+    },
+    {
+      "group": "hello-capability",
+      "name": "hello-ack-read-file-v2",
+      "evidenceStatus": "proposed",
+      "expectedFile": "hello-ack-read-file-v2.json",
+      "expectedCount": 1,
+      "producer": "go-bridge",
+      "consumers": [
+        "iOS"
+      ],
+      "notes": "capability negotiation fragment (full hello shape in bridge-v1 samples)"
+    },
+    {
+      "group": "cancel",
+      "name": "cancel-request-v1",
+      "evidenceStatus": "proposed",
+      "expectedFile": "cancel-request-v1.json",
+      "expectedCount": 1,
+      "producer": "iOS",
+      "consumers": [
+        "go-bridge"
+      ],
+      "notes": "control-plane; only after cancel capability ack"
+    },
+    {
+      "group": "relay-chunk",
+      "name": "chunk-base",
+      "evidenceStatus": "proposed",
+      "expectedFile": "relay-chunk-base.json",
+      "expectedCount": 1,
+      "producer": "go-bridge relay",
+      "consumers": [
+        "iOS relay"
+      ],
+      "notes": "{groupId,index,count}"
+    },
+    {
+      "group": "relay-chunk",
+      "name": "chunk-correlated",
+      "evidenceStatus": "proposed",
+      "expectedFile": "relay-chunk-correlated.json",
+      "expectedCount": 1,
+      "producer": "go-bridge relay",
+      "consumers": [
+        "iOS relay"
+      ],
+      "notes": "{groupId,index,count,bulkCorrelationId}; correlation 16-byte hex (not secret; not constant-time)"
+    },
+    {
+      "group": "bridge-error-envelope",
+      "name": "error-runtime-quiescing",
+      "evidenceStatus": "proposed",
+      "expectedFile": "error-runtime-quiescing.json",
+      "expectedCount": 1,
+      "producer": "go-bridge admission",
+      "consumers": [
+        "iOS",
+        "macbridge"
+      ],
+      "notes": "wire-level; also referenced from management-file-read"
+    },
+    {
+      "group": "bridge-error-envelope",
+      "name": "error-file-read-degraded",
+      "evidenceStatus": "proposed",
+      "expectedFile": "error-file-read-degraded.json",
+      "expectedCount": 1,
+      "producer": "go-bridge file RPC",
+      "consumers": [
+        "iOS",
+        "macbridge"
+      ]
+    }
+  ],
+  "deferredToR1": {
+    "AAD/crypto vectors": "A-1.3 deferred — canonical AAD bytes (base/correlated envelope, versioned field order) + Mac<->iOS ciphertext vectors + tamper/case/extra/duplicate rejection. Next batch (R1.4).",
+    "stateMachines": "A-1.5 wire state deferred — progress base/correlated, cancel atomic (queued->...->committedToWriter too_late), registry active/retired, tombstone, three-clock, cancel exactly-once. Next batch (R1.4/R1.5).",
+    "jsonPreflight": "A-1.6 cross-cutting deferred — schema-specific two-pass exact-length preflight == Go encoding/json default escaping; over-cap-before-marshal RSS. Next batch."
+  }
+}

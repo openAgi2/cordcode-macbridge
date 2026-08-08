@@ -1,0 +1,14 @@
+{
+  "kind": "unsupported_encoding",
+  "metadata": {
+    "path": "/workspace/src/main.swift",
+    "extension": "swift",
+    "sizeBytes": 30,
+    "contentRevision": "sha256:b9bb40afe81787f5ded3cba519a6b7e1376a681c3aa39982e6d1de3e7fbdf804",
+    "owningIdentity": {
+      "kind": "workspace",
+      "backendId": "codex",
+      "canonicalWorkspaceRoot": "/workspace"
+    }
+  }
+}
