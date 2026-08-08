@@ -18,6 +18,7 @@ import (
 
 	"github.com/openAgi2/cordcode-macbridge/agent/claudecode"
 	"github.com/openAgi2/cordcode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/go-bridge/readfile"
 	"github.com/openAgi2/cordcode-macbridge/pinstore"
 	"github.com/openAgi2/cordcode-macbridge/transcriptindex"
 )
@@ -1096,6 +1097,8 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleFetchContentChunk(conn, msg)
 	case "read_file":
 		h.handleReadFile(conn, msg)
+	case "read_file_v2":
+		h.handleReadFileV2(conn, msg)
 	case "list_directory":
 		h.handleListDirectory(conn, msg)
 	case "get_git_context":
@@ -3828,6 +3831,103 @@ func (h *Handlers) handleReadFile(conn Connection, msg WireMessage) {
 		"totalLines": totalLines,
 		"truncated":  truncated,
 	}, nil)
+}
+
+// ── read_file_v2: tagged text/unsupported_encoding/binary + segments + identity (plan §3.6) ──
+//
+// 与 legacy read_file 并存（iOS 未声明 read_file_v2 capability 时仍走 legacy）。
+// params exact: path + owner{kind:session|workspace, backendId, sessionId+directory | workspaceRoot}。
+// MacBridge 按 owner 授权并返回 server-canonical owningIdentity（canonicalized root）。
+// 结果经 readfile.BuildReadFileV2Result 构造（encoding 分类 + segments + 行语义），WirePayload 发出。
+func (h *Handlers) handleReadFileV2(conn Connection, msg WireMessage) {
+	var params struct {
+		Path  string `json:"path"`
+		Owner struct {
+			Kind          string `json:"kind"`
+			BackendID     string `json:"backendId"`
+			SessionID     string `json:"sessionId,omitempty"`
+			Directory     string `json:"directory,omitempty"`
+			WorkspaceRoot string `json:"workspaceRoot,omitempty"`
+		} `json:"owner"`
+	}
+	if msg.Params != nil {
+		json.Unmarshal(msg.Params, &params)
+	}
+	if params.Path == "" {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "missing_param", Message: "path required"})
+		return
+	}
+
+	backendID := params.Owner.BackendID
+	if backendID == "" {
+		backendID = msg.BackendID
+	}
+	var requestedDir, sessionID string
+	var identity readfile.OwningIdentity
+	switch params.Owner.Kind {
+	case "session":
+		requestedDir = params.Owner.Directory
+		sessionID = params.Owner.SessionID
+		identity = readfile.OwningIdentity{Kind: "session", BackendID: backendID, SessionID: params.Owner.SessionID}
+	case "workspace":
+		requestedDir = params.Owner.WorkspaceRoot
+		identity = readfile.OwningIdentity{Kind: "workspace", BackendID: backendID}
+	default:
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: "owner.kind must be session|workspace"})
+		return
+	}
+
+	authorizedRoot, err := h.authorizedReadFileRoot(msg, requestedDir, sessionID)
+	if err != nil {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "file.outside_authorized_root", Message: "file is outside the authorized workspace"})
+		return
+	}
+	// server-canonical identity：workspace 用 canonicalized authorizedRoot；session 用 canonical session dir。
+	if identity.Kind == "workspace" {
+		identity.CanonicalWorkspaceRoot = authorizedRoot
+	} else if dir := h.sessions.directoryForSession(sessionID); dir != "" {
+		identity.CanonicalDirectory = dir
+	}
+
+	resolvedPath, info, err := resolveAuthorizedReadFilePath(authorizedRoot, params.Path)
+	if err != nil {
+		var wireErr *WireError
+		if errors.As(err, &wireErr) {
+			conn.SendResult(msg.RequestID, nil, wireErr)
+		} else {
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "file_not_found", Message: "file not found"})
+		}
+		return
+	}
+	if info.Size() > readFileMaxSize {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "file_too_large", Message: fmt.Sprintf("file size %d bytes exceeds limit %d bytes", info.Size(), readFileMaxSize)})
+		return
+	}
+
+	file, err := os.Open(resolvedPath)
+	if err != nil {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "read_failed", Message: "failed to open file"})
+		return
+	}
+	defer file.Close()
+	openedInfo, err := file.Stat()
+	if err != nil || !os.SameFile(info, openedInfo) {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "file.changed_during_read", Message: "file changed during authorization"})
+		return
+	}
+	data, err := io.ReadAll(io.LimitReader(file, readFileMaxSize+1))
+	if err != nil {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "read_failed", Message: "failed to read file"})
+		return
+	}
+	if len(data) > readFileMaxSize {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "file_too_large", Message: "file exceeds size limit"})
+		return
+	}
+
+	ext := strings.TrimPrefix(filepath.Ext(resolvedPath), ".")
+	result := readfile.BuildReadFileV2Result(data, resolvedPath, ext, identity, readfile.DefaultMaxLines, readfile.DefaultTailLines)
+	conn.SendResult(msg.RequestID, result.WirePayload(), nil)
 }
 
 // ── list_directory: iOS 端远程选择/浏览 Mac 本地文件夹 (§6.5) ────────────────────

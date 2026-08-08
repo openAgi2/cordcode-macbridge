@@ -85,6 +85,7 @@ var rpcScopeTable = map[string]string{
 	// workspace.read
 	"get_workspace_diff":         ScopeWorkspaceRead,
 	"read_file":                  ScopeWorkspaceRead,
+	"read_file_v2":               ScopeWorkspaceRead, // tagged text/unsupported/binary + segments + identity (R1.1)
 	"list_directory":             ScopeWorkspaceRead, // path 校验在 §6.5 接入 workspace-bound
 	"get_git_context":            ScopeWorkspaceRead,
 	"fetch_content_chunk":        ScopeWorkspaceRead,

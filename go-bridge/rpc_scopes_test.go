@@ -21,7 +21,7 @@ var dispatchedRPCMethods = []string{
 	"list_sessions", "list_projects", "fetch_todos",
 	"get_workspace_diff", "get_turn_diff", "get_full_thread_diff",
 	"get_usage", "run_diagnostics", "list_memory_files", "read_memory_file",
-	"fetch_content_chunk", "read_file", "list_directory", "get_git_context",
+	"fetch_content_chunk", "read_file", "read_file_v2", "list_directory", "get_git_context",
 	"checkout_git_branch", "create_git_branch", "create_git_worktree",
 	"create_pull_request", // §7.1
 	"check_pull_request_support",

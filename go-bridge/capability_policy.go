@@ -28,6 +28,7 @@ func NewCapabilityPolicy() *CapabilityPolicy {
 			// 这里登记是为了将来把"是否允许该设备读文件"升级为显式 capability，
 			// 并为新增的文件类方法提供一处登记点，避免遗漏。
 			"read_file":           true,
+			"read_file_v2":        true, // tagged union + segments + identity (R1.1)
 			"list_directory":      true,
 			"get_git_context":     true,
 			"checkout_git_branch": true,
