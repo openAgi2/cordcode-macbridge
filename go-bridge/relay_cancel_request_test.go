@@ -173,3 +173,56 @@ func TestWriteSelectedSkipsCancelledGroup(t *testing.T) {
 		// 无帧 = 通过
 	}
 }
+
+// ── R1.10：cancel 的 device/generation 绑定（§3.6.2 ConnectionRequestOwner）──────────
+//
+// requestBulkHandles 是 per-RelayDeviceConn（每个 conn = 一个 device×channel generation）。
+// 因此 device A 的 cancel 找不到 device B 的 handle；新 generation（重连后的新 conn）的
+// cancel 找不到旧 generation 的 handle。这是「跨设备/旧 generation/replay 拒绝」的自然保证。
+
+// TestCancelRequestV1_CrossDeviceIsolation：两个 device 各自的 conn，A cancel 找不到 B 的 handle。
+func TestCancelRequestV1_CrossDeviceIsolation(t *testing.T) {
+	h := newTestHandlers(t)
+	rcA, _ := newReadFileBulkTestConn(t, true, false)
+	rcA.deviceID = "device-A"
+	rcB, outB := newReadFileBulkTestConn(t, true, false)
+	rcB.deviceID = "device-B"
+	rcB.mu.Lock()
+	keyB := append([]byte(nil), rcB.macToIosKey...)
+	rcB.mu.Unlock()
+
+	// A 的 in-flight read_file_v2
+	rcA.installRequestBulkHandle("rf-A1", newOutboundBulkHandle("grp_A"))
+
+	// B 试图 cancel A 的请求 → B 的 conn 上 lookup 返回 nil → not_found
+	params, _ := json.Marshal(map[string]interface{}{"requestId": "rf-A1"})
+	h.handleCancelRequest(rcB, WireMessage{RequestID: "cb", Params: params})
+	if data := decryptSingleResult(t, outB, keyB); data["outcome"] != "not_found" {
+		t.Errorf("cross-device cancel: outcome=%v want not_found", data["outcome"])
+	}
+	// A 的 handle 仍未被 cancel（B 无权触碰）
+	if rcA.lookupRequestBulkHandle("rf-A1") == nil {
+		t.Error("B 的 cancel 不应影响 A 的 handle")
+	}
+}
+
+// TestCancelRequestV1_CrossGenerationIsolation：新 generation（新 conn）cancel 旧 generation 的 handle → not_found。
+func TestCancelRequestV1_CrossGenerationIsolation(t *testing.T) {
+	h := newTestHandlers(t)
+	rcOld, _ := newReadFileBulkTestConn(t, true, false)
+	rcOld.generation = 9
+	rcOld.installRequestBulkHandle("rf-G1", newOutboundBulkHandle("grp_old"))
+
+	// 重连后：新 conn（新 generation），fresh requestBulkHandles
+	rcNew, outNew := newReadFileBulkTestConn(t, true, false)
+	rcNew.generation = 10
+	rcNew.mu.Lock()
+	keyNew := append([]byte(nil), rcNew.macToIosKey...)
+	rcNew.mu.Unlock()
+
+	params, _ := json.Marshal(map[string]interface{}{"requestId": "rf-G1"})
+	h.handleCancelRequest(rcNew, WireMessage{RequestID: "cg", Params: params})
+	if data := decryptSingleResult(t, outNew, keyNew); data["outcome"] != "not_found" {
+		t.Errorf("cross-generation cancel: outcome=%v want not_found", data["outcome"])
+	}
+}
