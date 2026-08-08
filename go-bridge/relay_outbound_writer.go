@@ -428,6 +428,13 @@ func classifyRelayRequest(method string) relayOutboundClass {
 		return relayOutboundMetadata
 	case "get_session_messages", "get_session_projection":
 		return relayOutboundBulk
+	// R1.3（§3.6.4）：read_file_v2 / legacy read_file 的结果可能很大（最高 2 MiB），
+	// 走 bulk 路径以复用 gzip + relay_chunks_v1 公平分块，避免单巨型 Normal 帧在弱网
+	// Relay 上饿死 text_delta/permission 等交互帧。base chunk path（无 correlation）；
+	// request-aware progress（bulkCorrelationId）属于 R1.4。inbound 请求本身很小，
+	// 归为 bulk 仅影响调度优先级（低于 interactive），不延迟其 filepool 派发。
+	case "read_file", "read_file_v2":
+		return relayOutboundBulk
 	default:
 		return relayOutboundNormal
 	}
