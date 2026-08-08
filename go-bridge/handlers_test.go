@@ -650,12 +650,39 @@ func TestSetPermissionModeAppliesToLiveSessionWhenSupported(t *testing.T) {
 type readFileCaptureConn struct {
 	data interface{}
 	err  *WireError
+	// done 由 SendResult 关闭一次，供 async 路径（read_file_v2 经 file pool）等待结果。
+	// nil（裸字面量构造）时 SendResult 不触碰它，保持 legacy 同步测试行为。
+	done chan struct{}
+	once sync.Once
+}
+
+// newReadFileCaptureConn 构造带 done 信号的 conn，用于 read_file_v2 异步路径测试。
+func newReadFileCaptureConn() *readFileCaptureConn {
+	return &readFileCaptureConn{done: make(chan struct{})}
+}
+
+// waitForResult 阻塞直到 SendResult 被调用一次或超时。
+func (c *readFileCaptureConn) waitForResult(t *testing.T) {
+	t.Helper()
+	if c.done == nil {
+		return // 裸字面量（同步路径），无需等待
+	}
+	select {
+	case <-c.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("readFileCaptureConn: SendResult 未在 2s 内调用")
+	}
 }
 
 func (c *readFileCaptureConn) SendJSON(any) {}
 func (c *readFileCaptureConn) SendResult(_ string, data interface{}, err *WireError) {
 	c.data = data
 	c.err = err
+	c.once.Do(func() {
+		if c.done != nil {
+			close(c.done)
+		}
+	})
 }
 func (c *readFileCaptureConn) SendEvent(string, string, string, interface{}) {}
 func (c *readFileCaptureConn) AuthedDevice() *TrustedDeviceRecord            { return nil }

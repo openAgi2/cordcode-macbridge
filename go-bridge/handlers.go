@@ -18,6 +18,8 @@ import (
 
 	"github.com/openAgi2/cordcode-macbridge/agent/claudecode"
 	"github.com/openAgi2/cordcode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/go-bridge/admission"
+	"github.com/openAgi2/cordcode-macbridge/go-bridge/filepool"
 	"github.com/openAgi2/cordcode-macbridge/go-bridge/readfile"
 	"github.com/openAgi2/cordcode-macbridge/pinstore"
 	"github.com/openAgi2/cordcode-macbridge/transcriptindex"
@@ -84,6 +86,10 @@ type Handlers struct {
 	transcriptIndex      *transcriptindex.Store
 	// capabilityPolicy 是集中式 RPC 授权层（P3 架构演进，§3.2/§8）。
 	capabilityPolicy *CapabilityPolicy
+	// filePool 是 §3.6.3 的全局专用 bounded file-read worker pool，把 read_file_v2
+	// 的 I/O 从 per-device inbound scheduler 解耦。nil 时（部分单测）handleReadFileV2
+	// 回退到同步内联读，不阻塞测试。
+	filePool         *filepool.Pool
 	relayEnabled     bool
 	sessionListLimit int
 
@@ -163,6 +169,13 @@ func newHandlersWithContext(ctx context.Context, bridgeEpoch string) *Handlers {
 		ctx:                     ctx,
 		cleanupStop:             make(chan struct{}),
 	}
+	// §3.6.3: 全局专用 bounded file-read worker pool。配置失败属于不可恢复的部署错误，
+	// 直接 panic（与 mustGenerateBridgeEpoch 同一处理级别），避免运行时静默回退到阻塞调度器。
+	filePool, err := filepool.New(defaultFilePoolConfig())
+	if err != nil {
+		panic(fmt.Sprintf("filepool config invalid: %v", err))
+	}
+	h.filePool = filePool
 	h.installEventPublisher(NewEventPublisher(bridgeEpoch, h.broadcaster))
 	h.projectionKernel = NewProjectionKernel(
 		h.eventPublisher.ProjectionReducer(),
@@ -592,6 +605,10 @@ func (h *Handlers) Shutdown(ctx context.Context) error {
 		// Fix 5: 停止 delta 攒批 ticker 并 flush 残留 text（流式末尾的 token 不丢）。
 		if h.deltaBatcher != nil {
 			h.deltaBatcher.Stop()
+		}
+		// §3.6.3: 关闭 file-read worker pool（drain queued、cancel in-flight ctx、等待 workers）。
+		if h.filePool != nil {
+			h.filePool.Close()
 		}
 
 		// Snapshot active sessions under the lock and clear the registry so
@@ -3742,6 +3759,27 @@ const (
 	readFileTailLines = 200
 )
 
+// defaultFilePoolConfig 是 read_file_v2 bounded worker pool 的默认配置（plan §3.6.3 / A0.5）。
+// 最终数值待 A0 冻结；当前选择保守可工作值：4 个 worker、单设备最多 1 并发（保留 3 个
+// global slot）、单设备队列 4、全局队列 32、读超时 10s、stuckAge 5s。
+// degradeAt=1：损失 1 个 slot 即报警（minHealthyFileSlots=3 ⇒ 4-3=1）。
+func defaultFilePoolConfig() filepool.Config {
+	const poolSize uint32 = 4
+	return filepool.Config{
+		PoolSize:          poolSize,
+		PerDeviceInFlight: 1,
+		PerDeviceQueued:   4,
+		GlobalQueued:      32,
+		ReadTimeout:       10 * time.Second,
+		Health: admission.FileReadHealthConfig{
+			PoolSize:            poolSize,
+			MinHealthyFileSlots: 3,
+			DegradeAt:           1,
+			StuckAgeMillis:      5000,
+		},
+	}
+}
+
 func (h *Handlers) handleReadFile(conn Connection, msg WireMessage) {
 	var params struct {
 		Path      string `json:"path"`
@@ -3904,30 +3942,120 @@ func (h *Handlers) handleReadFileV2(conn Connection, msg WireMessage) {
 		return
 	}
 
+	// §3.6.3：授权 + 路径解析 + size gate 保持同步（它们是先于读取的 admission）；
+	// 实际 os.Open/Stat/ReadAll 投递到全局专用 bounded file pool，避免一次卡住的 os.Read
+	// 阻塞本设备 inbound scheduler 上的 permission_response/question_reply/send_message。
+	ext := strings.TrimPrefix(filepath.Ext(resolvedPath), ".")
+	requestID := msg.RequestID
+	infoClone := info
+	identityClone := identity
+	work := func(ctx context.Context) {
+		performReadFileV2Read(ctx, conn, requestID, resolvedPath, infoClone, ext, identityClone)
+	}
+	onCancel := func(err error) {
+		// pool 在 admit 后、Work 前（degrading drain）终结本任务时调用。
+		code := "file.read_degraded"
+		if errors.Is(err, filepool.ErrPoolClosed) {
+			code = "read_failed"
+		}
+		conn.SendResult(requestID, nil, &WireError{Code: code, Message: "file read could not be completed"})
+	}
+
+	if h.filePool == nil {
+		// 测试未注入 pool：内联同步读（不享受解耦/退化保护，保持既有测试行为）。
+		work(context.Background())
+		return
+	}
+	if submitErr := h.filePool.Submit(filepool.Job{DeviceID: stableFileReadDeviceID(conn), Work: work, OnCancel: onCancel}); submitErr != nil {
+		code := "read_failed"
+		switch {
+		case errors.Is(submitErr, filepool.ErrFileBusy):
+			code = "file.read_busy"
+		case errors.Is(submitErr, filepool.ErrFileDegraded):
+			code = "file.read_degraded"
+		}
+		conn.SendResult(requestID, nil, &WireError{Code: code, Message: "file read could not be admitted"})
+		return
+	}
+	// 提交成功：pool 稍后触发 work（成功/失败 SendResult）或 onCancel（degrade），
+	// 本 goroutine 立即返回，inbound scheduler 不被阻塞。
+}
+
+// stableFileReadDeviceID 返回稳定认证设备 ID 作为 file pool 的 fair 身份
+// （plan §3.6.3）。未认证（开发模式）返回空串 → 单一 anonymous bucket。
+func stableFileReadDeviceID(conn Connection) string {
+	if d := conn.AuthedDevice(); d != nil {
+		return d.DeviceID
+	}
+	return ""
+}
+
+// performReadFileV2Read 在 file pool worker 上执行实际的有界读取 + 结果组装 + 回写。
+// ctx 带 ReadTimeout deadline；分块读取间检查 ctx，commit 前再次校验，禁止 late writeback。
+func performReadFileV2Read(ctx context.Context, conn Connection, requestID, resolvedPath string, info os.FileInfo, ext string, identity readfile.OwningIdentity) {
 	file, err := os.Open(resolvedPath)
 	if err != nil {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "read_failed", Message: "failed to open file"})
+		conn.SendResult(requestID, nil, &WireError{Code: "read_failed", Message: "failed to open file"})
 		return
 	}
 	defer file.Close()
 	openedInfo, err := file.Stat()
 	if err != nil || !os.SameFile(info, openedInfo) {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "file.changed_during_read", Message: "file changed during authorization"})
+		conn.SendResult(requestID, nil, &WireError{Code: "file.changed_during_read", Message: "file changed during authorization"})
 		return
 	}
-	data, err := io.ReadAll(io.LimitReader(file, readFileMaxSize+1))
+	data, err := readBoundedCooperative(file, readFileMaxSize, ctx)
 	if err != nil {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "read_failed", Message: "failed to read file"})
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			// 协作取消 / late 读：丢弃，不回写（plan §3.6.3：连接关闭/deadline/cancel 后禁止 late result 写回）。
+			slog.Warn("read_file_v2 discarded after context cancel", "requestId", safeID(requestID), "err", err)
+			return
+		}
+		conn.SendResult(requestID, nil, &WireError{Code: "read_failed", Message: "failed to read file"})
 		return
 	}
 	if len(data) > readFileMaxSize {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "file_too_large", Message: "file exceeds size limit"})
+		conn.SendResult(requestID, nil, &WireError{Code: "file_too_large", Message: "file exceeds size limit"})
 		return
 	}
-
-	ext := strings.TrimPrefix(filepath.Ext(resolvedPath), ".")
+	if ctx.Err() != nil {
+		// commit guard：读取虽完成，但 ctx 已过期/cancel，禁止 late writeback。
+		slog.Warn("read_file_v2 discarded: context done before commit", "requestId", safeID(requestID))
+		return
+	}
 	result := readfile.BuildReadFileV2Result(data, resolvedPath, ext, identity, readfile.DefaultMaxLines, readfile.DefaultTailLines)
-	conn.SendResult(msg.RequestID, result.WirePayload(), nil)
+	conn.SendResult(requestID, result.WirePayload(), nil)
+}
+
+// readBoundedCooperative 以固定块读取 file 至多 maxBytes+1 字节，并在每次 syscall 间
+// 检查 ctx（plan §3.6.3：worker 分块 read 并在每次 syscall 间检查 context）。ctx 无法抢占
+// 阻塞 syscall；真正卡住的 read 由 file pool 的 stuck watchdog（FileReadHealth 退化）处理。
+func readBoundedCooperative(file *os.File, maxBytes int64, ctx context.Context) ([]byte, error) {
+	const chunk = 64 << 10
+	limit := maxBytes + 1 // +1 sentinel 用于探测超限（与 io.LimitReader(+1) 语义一致）
+	buf := make([]byte, 0, chunk)
+	tmp := make([]byte, chunk)
+	for int64(len(buf)) < limit {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		remaining := limit - int64(len(buf))
+		want := int64(chunk)
+		if want > remaining {
+			want = remaining
+		}
+		n, err := file.Read(tmp[:want])
+		if n > 0 {
+			buf = append(buf, tmp[:n]...)
+		}
+		if err == io.EOF {
+			return buf, nil
+		}
+		if err != nil {
+			return buf, err
+		}
+	}
+	return buf, nil
 }
 
 // ── list_directory: iOS 端远程选择/浏览 Mac 本地文件夹 (§6.5) ────────────────────
