@@ -70,6 +70,7 @@ type relayChunkCursor struct {
 	channelGeneration uint64
 	expiresAt         time.Time
 	bulkCorrelationID string // R1.4：read_file_v2 correlated chunk 的 request-aware 绑定（空 = base chunk）
+	requestID         string // R1.5：read_file_v2 chunked result 的 requestId（complete 时清理 cancel handle）
 }
 
 // relayOutboundWriter is the only owner of Relay application-data writes for
@@ -203,6 +204,10 @@ func (w *relayOutboundWriter) run() {
 					if job.cursor != nil && job.cursor.sessionID != "" {
 						job.conn.completeBulkHandle(job.cursor.sessionID, job.cursor.handle)
 					}
+					// R1.5：read_file_v2 chunk group 完成 → 清理 requestId→handle（cancel 不再可命中）。
+					if job.cursor != nil && job.cursor.requestID != "" {
+						job.conn.completeRequestBulkHandle(job.cursor.requestID, job.cursor.handle)
+					}
 					// R1.4：correlated chunk group 完成（成功/错误/超时）→ retire correlation，
 					// 进入 retired 窗口（防 reuse）。conn 关闭时整个 registry 随之销毁。
 					if job.cursor != nil && job.cursor.bulkCorrelationID != "" {
@@ -232,7 +237,10 @@ func (w *relayOutboundWriter) writeSelected(job *relayOutboundJob) (error, bool)
 		return err, true
 	}
 	cursor := job.cursor
-	if cursor.handle.Cancelled() && cursor.nextIndex == 0 {
+	// R1.5：在写 index0 前 CAS active→committed 声明 committedToWriter 边界。若 cancel 已赢得 CAS
+	// （state=cancelled）则 MarkIndex0Committed 返回 false → 跳过 group（cancelled）。这把 cancel 与
+	// index0-commit 在单一 atomic 上线性化（plan §3.6.4「cancel唯一原子状态机」）。
+	if cursor.nextIndex == 0 && !cursor.handle.MarkIndex0Committed() {
 		relayBulkSuperseded.Add(1)
 		return nil, true
 	}

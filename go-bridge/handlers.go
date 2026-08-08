@@ -1116,6 +1116,8 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleReadFile(conn, msg)
 	case "read_file_v2":
 		h.handleReadFileV2(conn, msg)
+	case "cancel_request_v1":
+		h.handleCancelRequest(conn, msg)
 	case "list_directory":
 		h.handleListDirectory(conn, msg)
 	case "get_git_context":
@@ -4056,6 +4058,49 @@ func readBoundedCooperative(file *os.File, maxBytes int64, ctx context.Context) 
 		}
 	}
 	return buf, nil
+}
+
+// ── cancel_request_v1: read_file_v2 bulk cancel control RPC（R1.5，§3.6.4）──────────
+//
+// 独立 connection capability（Mac 在 hello 回显 cancel_request_v1 后 iOS 才发送）。
+// 本期 cancel allowlist 只有 read_file_v2——非 read_file_v2 请求不会在 requestBulkHandles
+// 登记 handle，故 lookup 返回 nil → not_found（隐式 allowlist 门控，不同于 not_cancellable）。
+// device/generation 绑定由 per-conn map 自然保证：A 设备 cancel 找不到 B 设备的 handle，
+// 新 generation（重连）的 cancel 找不到旧 generation 的 handle。
+//
+// too_late 边界 = committedToWriter（plan §3.6.4「cancel唯一原子状态机」）：Relay 为 index0
+// 原子 commit 到 writer。handle.Cancel() 用 CAS active→cancelled 与 writer 的 index0 commit
+// 互斥裁决：cancel 赢 → cancelled（writer 跳过 index0）；writer 已 commit index0 → too_late。
+func (h *Handlers) handleCancelRequest(conn Connection, msg WireMessage) {
+	var params struct {
+		RequestID string `json:"requestId"` // 待 cancel 的原始请求 ID
+	}
+	if msg.Params != nil {
+		json.Unmarshal(msg.Params, &params)
+	}
+	if params.RequestID == "" {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "missing_param", Message: "requestId required"})
+		return
+	}
+	rc, ok := conn.(*RelayDeviceConn)
+	if !ok {
+		// Direct/LAN：read_file_v2 结果是单帧同步发送（无 chunk group），cancel 总是 too_late。
+		// Direct 的 committedToWriter = 首个 response frame 原子 commit 到 socket writer（R1.9 细化）。
+		conn.SendResult(msg.RequestID, map[string]interface{}{"outcome": "too_late", "requestId": params.RequestID}, nil)
+		return
+	}
+	handle := rc.lookupRequestBulkHandle(params.RequestID)
+	if handle == nil {
+		// 未登记 = 非 read_file_v2 / 已完成 / 跨 device·generation / 从未 chunked。
+		conn.SendResult(msg.RequestID, map[string]interface{}{"outcome": "not_found", "requestId": params.RequestID}, nil)
+		return
+	}
+	outcome := "too_late"
+	if handle.Cancel() {
+		outcome = "cancelled"
+		slog.Info("relay cancel_request_v1 cancelled bulk group", "device", rc.deviceID, "originalRequestId", safeID(params.RequestID), "groupID", handle.GroupID())
+	}
+	conn.SendResult(msg.RequestID, map[string]interface{}{"outcome": outcome, "requestId": params.RequestID}, nil)
 }
 
 // ── list_directory: iOS 端远程选择/浏览 Mac 本地文件夹 (§6.5) ────────────────────

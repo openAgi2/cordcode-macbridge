@@ -379,6 +379,10 @@ func Main() {
 		if ack.Ok && negotiateRelayChunkProgress(conn, hello.Capabilities) {
 			ack.Capabilities[relayChunkProgressCapability] = true
 		}
+		// R1.5：cancel_request_v1（read_file_v2 bulk cancel control RPC）。echo 后 iOS 才发送 cancel。
+		if ack.Ok && negotiateRelayCancel(conn, hello.Capabilities) {
+			ack.Capabilities[relayCancelCapability] = true
+		}
 		var replay []EventMessage
 		if server.recoveryEnabled && helloSupportsRecovery(&hello) && ack.Ok {
 			plan, events, err := server.prepareRecovery(conn, &hello)

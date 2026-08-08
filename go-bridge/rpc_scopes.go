@@ -64,6 +64,7 @@ var rpcScopeTable = map[string]string{
 	"question_reply":        ScopeSessionWrite,
 	"question_reject":       ScopeSessionWrite,
 	"resolve_user_input":    ScopeSessionWrite,
+	"cancel_request_v1":     ScopeSessionWrite, // R1.5：read_file_v2 bulk cancel control RPC（control-plane）
 	"share_session":         ScopeSessionWrite, // dispatchRPC 内 not_supported 占位 case
 	"set_observation_scope": ScopeSessionWrite, // switch 外方法（handlers.go:837）
 

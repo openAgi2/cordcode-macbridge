@@ -28,6 +28,7 @@ var dispatchedRPCMethods = []string{
 	"rename_session", "share_session", "archive_session", "set_session_pinned",
 	"list_pinned_sessions", "compress_context", "check_pending_notifications",
 	"question_reply", "question_reject", "resolve_user_input",
+	"cancel_request_v1", // R1.5 read_file_v2 bulk cancel
 }
 
 // outOfSwitchRPCMethods 是 HandleRPC 里在 dispatchRPC 之前路由的方法（不走 dispatchRPC 的
