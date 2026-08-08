@@ -2,6 +2,7 @@ package readfile
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 )
 
@@ -132,5 +133,34 @@ func TestBuildResult_MetadataFields(t *testing.T) {
 	}
 	if r.Metadata.OwningIdentity.Kind != "workspace" {
 		t.Error("identity not carried")
+	}
+}
+
+// round-trip: BuildReadFileV2Result -> WirePayload -> JSON -> DecodeReadFileV2Result
+// 证明 handler 的 wire 输出能被 iOS 侧 strict codec 消费（producer/consumer 同 success bytes）。
+func TestWirePayload_RoundTripsCodec(t *testing.T) {
+	cases := [][]byte{
+		[]byte("let x = 1\nimport Foundation\n"),
+		[]byte{},
+		[]byte{0xEF, 0xBB, 0xBF, 'p', 'l', 'a', 'i', 'n'}, // UTF-8 BOM text
+		[]byte{0xFF, 0xFE, 0x41, 0x00},                     // UTF-16LE -> unsupported
+		bytes.Repeat([]byte{0x00}, 100),                    // binary
+	}
+	for i, data := range cases {
+		r := BuildReadFileV2Result(data, "/ws/a.swift", "swift", ident(), DefaultMaxLines, DefaultTailLines)
+		payload := r.WirePayload()
+		js, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatalf("case %d: marshal WirePayload: %v", i, err)
+		}
+		// strict decode 必须成功（wire shape 合法）
+		decoded, err := DecodeReadFileV2Result(js)
+		if err != nil {
+			t.Errorf("case %d (kind=%s): strict decode failed: %v\nwire=%s", i, r.Kind, err, js)
+			continue
+		}
+		if decoded.Kind != r.Kind {
+			t.Errorf("case %d: kind round-trip %s != %s", i, decoded.Kind, r.Kind)
+		}
 	}
 }

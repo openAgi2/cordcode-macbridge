@@ -99,3 +99,65 @@ func buildTextSegments(display []byte, totalLines uint64, maxLines, tailLines in
 		{Kind: "tail", Content: tail, SourceLineStart: uint64(tailStart + 1), SourceLineCount: uint64(tl - tailStart)},
 	}
 }
+
+// WirePayload 把 ReadFileV2Result 编码为 read_file_v2 wire JSON 的 map（per-kind exact keys）。
+//   - text: kind+metadata+encoding+totalLines+segments（totalLines 即使 0 也带，因 text 必填）。
+//   - unsupported_encoding: kind+metadata+(detected 仅当非空；omit 不发 null)。
+//   - binary: kind+metadata。
+// handler 用它做 conn.SendResult 的 result payload。
+func (r ReadFileV2Result) WirePayload() map[string]interface{} {
+	meta := map[string]interface{}{
+		"path":            r.Metadata.Path,
+		"extension":       r.Metadata.Extension,
+		"sizeBytes":       r.Metadata.SizeBytes,
+		"contentRevision": r.Metadata.ContentRevision,
+		"owningIdentity":  r.Metadata.OwningIdentity.wireMap(),
+	}
+	switch r.Kind {
+	case "text":
+		return map[string]interface{}{
+			"kind": "text", "metadata": meta, "encoding": r.Encoding,
+			"totalLines": r.TotalLines, "segments": segmentsWire(r.Segments),
+		}
+	case "unsupported_encoding":
+		m := map[string]interface{}{"kind": "unsupported_encoding", "metadata": meta}
+		if r.Detected != "" {
+			m["detected"] = r.Detected // detected unknown => omit（不发 null）
+		}
+		return m
+	case "binary":
+		return map[string]interface{}{"kind": "binary", "metadata": meta}
+	}
+	return map[string]interface{}{"kind": r.Kind, "metadata": meta}
+}
+
+func (o OwningIdentity) wireMap() map[string]interface{} {
+	switch o.Kind {
+	case "session":
+		return map[string]interface{}{
+			"kind": "session", "backendId": o.BackendID,
+			"sessionId": o.SessionID, "canonicalDirectory": o.CanonicalDirectory,
+		}
+	case "workspace":
+		return map[string]interface{}{
+			"kind": "workspace", "backendId": o.BackendID,
+			"canonicalWorkspaceRoot": o.CanonicalWorkspaceRoot,
+		}
+	}
+	return map[string]interface{}{"kind": o.Kind, "backendId": o.BackendID}
+}
+
+func segmentsWire(segs []Segment) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(segs))
+	for _, s := range segs {
+		m := map[string]interface{}{
+			"kind": s.Kind, "sourceLineStart": s.SourceLineStart, "sourceLineCount": s.SourceLineCount,
+		}
+		switch s.Kind {
+		case "full", "head", "tail":
+			m["content"] = s.Content
+		}
+		out = append(out, m)
+	}
+	return out
+}
