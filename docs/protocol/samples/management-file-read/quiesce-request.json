@@ -1,0 +1,9 @@
+{
+  "managementSchemaVersion": 1,
+  "operationId": "ffeeddccbbaa99887766554433221100",
+  "expectedRuntime": {
+    "pid": 12345,
+    "bridgeEpoch": 1
+  },
+  "expectedHealthEpoch": 1
+}

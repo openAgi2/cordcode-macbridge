@@ -1,0 +1,14 @@
+{
+  "managementSchemaVersion": 1,
+  "operationId": "ffeeddccbbaa99887766554433221100",
+  "outcome": "safe",
+  "runtimeIdentity": {
+    "pid": 12345,
+    "bridgeEpoch": 1
+  },
+  "healthEpoch": 1,
+  "quiesceEpoch": 1,
+  "token": "00112233445566778899aabbccddeeff",
+  "leaseMillis": 30000,
+  "leaseRemainingMillis": 29000
+}

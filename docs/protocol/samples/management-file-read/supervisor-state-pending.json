@@ -1,0 +1,4 @@
+{
+  "supervisorState": "pending",
+  "reason": "config_change_or_degraded_restart"
+}

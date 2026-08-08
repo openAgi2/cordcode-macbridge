@@ -1,0 +1,4 @@
+{
+  "supervisorState": "restartFailed",
+  "failureReason": "port_not_released_or_launch_failed"
+}

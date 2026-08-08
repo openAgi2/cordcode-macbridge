@@ -77,6 +77,9 @@ func (disconnectedRelayStatusProvider) Connected() bool { return false }
 type ManagementServer struct {
 	cfg                         ManagementConfig
 	startedAt                   time.Time
+	// now 返回当前单调/壁钟时间，供 handleStatus 计算 uptime。默认 time.Now，
+	// 保持生产行为不变；仅用于注入确定性测试时钟生成 v0 observed fixture（不改变运行期语义）。
+	now                         func() time.Time
 	shutdownCb                  func()
 	shutdownOnce                sync.Once
 	mgmtMux                     *http.ServeMux
@@ -100,6 +103,7 @@ func NewManagementServer(cfg ManagementConfig) *ManagementServer {
 	return &ManagementServer{
 		cfg:                 cfg,
 		startedAt:           time.Now(),
+		now:                 time.Now,
 		relayStatusProvider: disconnectedRelayStatusProvider{},
 	}
 }
@@ -299,7 +303,7 @@ func (s *ManagementServer) handleStatus(w http.ResponseWriter, _ *http.Request) 
 		"status":      status,
 		"bridgeId":    s.cfg.BridgeID,
 		"displayName": displayName,
-		"uptime":      time.Since(s.startedAt).String(),
+		"uptime":      s.now().Sub(s.startedAt).String(),
 		"version":     runtimeVersion,
 	})
 }

@@ -1,0 +1,11 @@
+{
+  "managementSchemaVersion": 1,
+  "operationId": "ffeeddccbbaa99887766554433221100",
+  "outcome": "committed",
+  "runtimeIdentity": {
+    "pid": 12345,
+    "bridgeEpoch": 1
+  },
+  "healthEpoch": 1,
+  "quiesceEpoch": 1
+}

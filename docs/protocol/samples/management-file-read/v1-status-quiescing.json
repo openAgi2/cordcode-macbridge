@@ -1,0 +1,29 @@
+{
+  "managementSchemaVersion": 1,
+  "bridgeId": "cordcode-fixture-bridge",
+  "displayName": "CordCode Fixture",
+  "status": "ready",
+  "uptime": "1h0m0s",
+  "version": "0.1.0-dev",
+  "runtimeIdentity": {
+    "pid": 12345,
+    "bridgeEpoch": 1
+  },
+  "fileReadHealth": {
+    "state": "healthy",
+    "stateEpoch": 1,
+    "stuckWorkers": 0,
+    "restartRecommended": false
+  },
+  "activity": {
+    "bridgeOwnedActiveTurns": 0,
+    "pendingInteractions": 0,
+    "admissionState": "quiescing"
+  },
+  "quiesce": {
+    "state": "leased",
+    "operationId": "ffeeddccbbaa99887766554433221100",
+    "quiesceEpoch": 1,
+    "leaseRemainingMillis": 29000
+  }
+}
