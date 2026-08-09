@@ -116,6 +116,7 @@ list_memory_files
 read_memory_file
 fetch_content_chunk
 read_file
+read_file_v2
 list_directory
 get_git_context
 checkout_git_branch
@@ -167,7 +168,7 @@ scope only to keep the CI guard satisfied.
 | `session.write` | `create_session`, `send_message`, `abort_generation`, `resume_session`, `delete_session`, `rename_session`, `archive_session`, `set_session_pinned`, `compress_context`, `resolve_permission`, `question_reply`, `question_reject`, `resolve_user_input`, `share_session`, `set_observation_scope` | ✅ |
 | `config.read` | `list_providers`, `list_models`, `list_agents`, `list_permission_modes`, `get_usage`, `list_memory_files`, `read_memory_file`, `run_diagnostics` | ✅ |
 | `config.write` | `set_provider`, `switch_model`, `set_permission_mode` | ✅ |
-| `workspace.read` | `get_workspace_diff`, `read_file`, `list_directory`, `get_git_context`, `fetch_content_chunk`, `check_pull_request_support` | ✅ |
+| `workspace.read` | `get_workspace_diff`, `read_file`, `read_file_v2`, `list_directory`, `get_git_context`, `fetch_content_chunk`, `check_pull_request_support` | ✅ |
 | `workspace.mutate` | `checkout_git_branch`, `create_git_branch`, `create_git_worktree`, `create_pull_request`, `commit_and_push`, `list_projects` | ✅ (recommend an owner per-action confirmation on top) |
 | `delivery.manage` | `get_delivery_prekey_status`, `upload_delivery_prekeys`, `get_delivery_chain_head`, `enable_relay_pairing` | ✅ (own device chain only) |
 | _(empty — unconditional)_ | `hello` (legacy dispatch placeholder) | ✅ (no scope required, else handshake deadlock) |
