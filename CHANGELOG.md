@@ -8,6 +8,8 @@
 
 ## [Unreleased]
 
+- **文件读取协议硬切为 `read_file_v2`**：CordCode Link 删除旧 `read_file` 的 dispatch、scope、capability、Relay 分类、codec 与 fixture，只保留带 workspace/session owner 的严格授权读取。旧客户端调用旧方法会收到统一 `method_not_found`；Relay 仅将 v2 归入 bulk，并继续支持分块、公平调度与取消。iOS/Web 同步移除 fallback 与旧 API，最低兼容版本随此次变更抬升。
+
 - **RPC 按方法鉴权 scope（§6.3）**：每个后端 RPC 映射到 7 个 scope 之一（`session.read`/`session.write`/`config.read`/`config.write`/`workspace.read`/`workspace.mutate`/`delivery.manage`），`go-bridge/rpc_scopes.go` 为单一真相源。校验落在 `CapabilityPolicy.AuthorizeRPC`（HandleRPC 单一漏斗，先于 dispatchRPC 与所有 switch 外方法路由）。配对设备默认拥有全部 scope（向后兼容，不改变现有授权语义）；受限调用返回稳定错误码 `forbidden`。新增 RPC 必须声明 scope，否则 CI guard `TestEveryDispatchedRPCHasScope` 编译期失败。
 - **hello/hello_ack 携带 scope（§6.3 additive）**：`hello` 增可选 `requestedScopes`，`hello_ack` 增可选 `grantedScopes`（回显设备实际拥有的 scope），供客户端 UI gating；旧 client 不受影响。`TrustedDeviceRecord` 增 `grantedScopes` 字段，nil/空视作默认全集。
 - **Driver 自描述 wire 属性（§6.2 零跨层抽象）**：claudecode/codex/opencode/grokbuild 各自通过 `WireDescriptor()` 自报 Kind/DisplayName/LiveEventModel/Polling/StaticCapabilities，`BuildAgentDescriptor` 优先读自描述、仅未迁移 driver 才回退 id-keyed switch。新增 agent 不再需要改 wire 层 switch。
