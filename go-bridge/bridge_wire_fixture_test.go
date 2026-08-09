@@ -126,55 +126,56 @@ func TestReadFileV2RequiresNegotiatedCapability(t *testing.T) {
 }
 
 func TestFrozenProtocolInventoriesMatchFiles(t *testing.T) {
-	root := "read-file-v2"
-	dir := filepath.Join("..", "docs", "protocol", "samples", root)
-	raw, err := os.ReadFile(filepath.Join(dir, "inventory.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var inventory struct {
-		Root struct {
-			Status string `json:"status"`
-		} `json:"root"`
-		Variants []struct {
-			EvidenceStatus string `json:"evidenceStatus"`
-			ExpectedFile   string `json:"expectedFile"`
-		} `json:"variants"`
-	}
-	if err := json.Unmarshal(raw, &inventory); err != nil {
-		t.Fatalf("%s inventory: %v", root, err)
-	}
-	if inventory.Root.Status != "frozen" {
-		t.Errorf("%s status=%s", root, inventory.Root.Status)
-	}
-	expected := make(map[string]bool)
-	for _, variant := range inventory.Variants {
-		if variant.EvidenceStatus != "observed" {
-			t.Errorf("%s/%s evidence=%s", root, variant.ExpectedFile, variant.EvidenceStatus)
+	for _, root := range []string{"read-file-v2", "management-file-read"} {
+		dir := filepath.Join("..", "docs", "protocol", "samples", root)
+		raw, err := os.ReadFile(filepath.Join(dir, "inventory.json"))
+		if err != nil {
+			t.Fatal(err)
 		}
-		if expected[variant.ExpectedFile] {
-			t.Errorf("%s duplicate expectedFile %s", root, variant.ExpectedFile)
+		var inventory struct {
+			Root struct {
+				Status string `json:"status"`
+			} `json:"root"`
+			Variants []struct {
+				EvidenceStatus string `json:"evidenceStatus"`
+				ExpectedFile   string `json:"expectedFile"`
+			} `json:"variants"`
 		}
-		expected[variant.ExpectedFile] = true
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	actual := make(map[string]bool)
-	for _, entry := range entries {
-		if !entry.IsDir() && entry.Name() != "inventory.json" {
-			actual[entry.Name()] = true
+		if err := json.Unmarshal(raw, &inventory); err != nil {
+			t.Fatalf("%s inventory: %v", root, err)
 		}
-	}
-	for name := range expected {
-		if !actual[name] {
-			t.Errorf("%s missing fixture %s", root, name)
+		if inventory.Root.Status != "frozen" {
+			t.Errorf("%s status=%s", root, inventory.Root.Status)
 		}
-	}
-	for name := range actual {
-		if !expected[name] {
-			t.Errorf("%s unlisted fixture %s", root, name)
+		expected := make(map[string]bool)
+		for _, variant := range inventory.Variants {
+			if variant.EvidenceStatus != "observed" {
+				t.Errorf("%s/%s evidence=%s", root, variant.ExpectedFile, variant.EvidenceStatus)
+			}
+			if expected[variant.ExpectedFile] {
+				t.Errorf("%s duplicate expectedFile %s", root, variant.ExpectedFile)
+			}
+			expected[variant.ExpectedFile] = true
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		actual := make(map[string]bool)
+		for _, entry := range entries {
+			if !entry.IsDir() && entry.Name() != "inventory.json" {
+				actual[entry.Name()] = true
+			}
+		}
+		for name := range expected {
+			if !actual[name] {
+				t.Errorf("%s missing fixture %s", root, name)
+			}
+		}
+		for name := range actual {
+			if !expected[name] {
+				t.Errorf("%s unlisted fixture %s", root, name)
+			}
 		}
 	}
 }

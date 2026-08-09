@@ -1,10 +1,1 @@
-{
-  "managementSchemaVersion": 1,
-  "operationId": "ffeeddccbbaa99887766554433221100",
-  "outcome": "aborted",
-  "runtimeIdentity": {
-    "pid": 12345,
-    "bridgeEpoch": 1
-  },
-  "healthEpoch": 1
-}
+{"healthEpoch":1,"managementSchemaVersion":1,"operationId":"ffeeddccbbaa99887766554433221100","outcome":"aborted","runtimeIdentity":{"bridgeEpoch":1,"pid":12345}}

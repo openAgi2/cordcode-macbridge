@@ -1,8 +1,1 @@
-{
-  "managementSchemaVersion": 1,
-  "operationId": "ffeeddccbbaa99887766554433221100",
-  "outcome": "deferred",
-  "activeTurns": 1,
-  "pendingInteractions": 2,
-  "retryAfterMillis": 2000
-}
+{"activeTurns":1,"managementSchemaVersion":1,"operationId":"ffeeddccbbaa99887766554433221100","outcome":"deferred","pendingInteractions":0,"retryAfterMillis":2000}

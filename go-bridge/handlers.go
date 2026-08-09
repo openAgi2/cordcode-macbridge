@@ -90,6 +90,8 @@ type Handlers struct {
 	// 的 I/O 从 per-device inbound scheduler 解耦。nil 时（部分单测）handleReadFileV2
 	// 回退到同步内联读，不阻塞测试。
 	filePool         *filepool.Pool
+	admission        *admission.AdmissionMachine
+	bridgeOwnedTurns map[string]struct{}
 	relayEnabled     bool
 	sessionListLimit int
 
@@ -166,6 +168,7 @@ func newHandlersWithContext(ctx context.Context, bridgeEpoch string) *Handlers {
 		capabilityPolicy:        NewCapabilityPolicy(),
 		relayEnabled:            true,
 		sessionListLimit:        defaultSessionListLimit,
+		bridgeOwnedTurns:        make(map[string]struct{}),
 		ctx:                     ctx,
 		cleanupStop:             make(chan struct{}),
 	}
@@ -218,8 +221,71 @@ func newHandlersWithContext(ctx context.Context, bridgeEpoch string) *Handlers {
 		// unconditionally — the cost is one map nil and at most one extra
 		// GetRunningSessionIDs on the next list_sessions.
 		h.runningMap.invalidate()
+		if newState == string(sessionStateIdle) {
+			h.completeBridgeTurn(sessionID)
+		}
 	}
 	return h
+}
+
+// SetAdmissionMachine 注入 Management runtime admission。生产 main 在 ManagementServer
+// 构造时安装；无 management API 的开发/测试模式保持 nil，不改变既有行为。
+func (h *Handlers) SetAdmissionMachine(machine *admission.AdmissionMachine) {
+	h.mu.Lock()
+	h.admission = machine
+	h.mu.Unlock()
+}
+
+func (h *Handlers) admitBridgeTurn(sessionID string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.admission == nil {
+		return true
+	}
+	if _, exists := h.bridgeOwnedTurns[sessionID]; exists {
+		return false
+	}
+	if !h.admission.TryBeginBridgeTurn() {
+		return false
+	}
+	h.bridgeOwnedTurns[sessionID] = struct{}{}
+	return true
+}
+
+func (h *Handlers) completeBridgeTurn(sessionID string) {
+	h.mu.Lock()
+	if _, exists := h.bridgeOwnedTurns[sessionID]; !exists {
+		h.mu.Unlock()
+		return
+	}
+	delete(h.bridgeOwnedTurns, sessionID)
+	machine := h.admission
+	h.mu.Unlock()
+	if machine != nil {
+		machine.EndBridgeTurn()
+	}
+}
+
+func (h *Handlers) pendingInteractionCount() uint32 {
+	identities := h.sessions.activityIdentities()
+	var count uint32
+	for _, identity := range identities {
+		projection, ok := h.projectionKernel.Snapshot(identity.backendID, identity.sessionID)
+		if !ok {
+			continue
+		}
+		for _, turn := range projection.Turns {
+			if turn.Assistant == nil {
+				continue
+			}
+			for _, part := range turn.Assistant.Parts {
+				if part.Type == "user_input" && part.UserInputStatus == "pending" && count < ^uint32(0) {
+					count++
+				}
+			}
+		}
+	}
+	return count
 }
 
 func (h *Handlers) installEventPublisher(publisher *EventPublisher) {
@@ -1810,6 +1876,16 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 	if msg.Params != nil {
 		json.Unmarshal(msg.Params, &params)
 	}
+	if !h.admitBridgeTurn(params.SessionID) {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "runtime.quiescing", Message: "Bridge runtime is quiescing"})
+		return
+	}
+	turnCommitted := false
+	defer func() {
+		if !turnCommitted {
+			h.completeBridgeTurn(params.SessionID)
+		}
+	}()
 
 	if params.Directory != "" {
 		switchDir(agent, params.Directory)
@@ -1919,6 +1995,7 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "send_failed", Message: err.Error()})
 		return
 	}
+	turnCommitted = true
 
 	conn.SendResult(msg.RequestID, &ResultResponse{Ok: true}, nil)
 	h.startRelayIfNotRunning(params.SessionID, sess, conn, msg.BackendID)
@@ -3201,7 +3278,7 @@ func (h *Handlers) handleResumeSession(conn Connection, msg WireMessage, agent c
 		"id":        params.SessionID,
 		"directory": dir,
 	}
-	conn.SendResult(msg.RequestID, h.enrichSessionStateWithAgent(result, agent), nil)
+	conn.SendResult(msg.RequestID, h.enrichResumeSessionState(result, agent), nil)
 }
 
 func (h *Handlers) handleSwitchModel(conn Connection, msg WireMessage, agent core.Agent) {

@@ -3960,10 +3960,10 @@ func TestRunDiagnosticsReturnsNotSupportedWhenNoProvider(t *testing.T) {
 	}
 }
 
-// TestReadFileAcceptsSubdirectoryWithinWorkspace 验证 P0-1 review 观察：
+// TestAuthorizedReadFileRootAcceptsSubdirectoryWithinWorkspace 验证授权根解析：
 // requestedDir 是授权 workspace 的子目录时应被接受（不误拒合法子目录调用），
 // workspace 外的目录仍被拒绝。
-func TestReadFileAcceptsSubdirectoryWithinWorkspace(t *testing.T) {
+func TestAuthorizedReadFileRootAcceptsSubdirectoryWithinWorkspace(t *testing.T) {
 	workspace := t.TempDir()
 	subDir := filepath.Join(workspace, "src")
 	if err := os.MkdirAll(subDir, 0o755); err != nil {
@@ -4200,6 +4200,45 @@ func TestSessionRuntimeStateEnrichment(t *testing.T) {
 	}
 }
 
+func TestClaudeResumeSessionUsesRegistryStateWithoutTranscriptScan(t *testing.T) {
+	agent := &fakeAgent{
+		name:              "claudecode",
+		runningSessionIDs: map[string]bool{"large-session": true},
+	}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("claude", agent)
+	handlers.sessions.markRunning("large-session")
+
+	probeCalls := 0
+	previousProbe := transcriptStateProbe
+	transcriptStateProbe = func() { probeCalls++ }
+	t.Cleanup(func() { transcriptStateProbe = previousProbe })
+
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "claude",
+		Method:    "resume_session",
+		RequestID: "req-large-resume",
+		Params: mustJSONRaw(t, map[string]any{
+			"sessionId": "large-session",
+			"directory": "/tmp",
+		}),
+	})
+
+	messages := readJSONMaps(t, clientConn, 1)
+	data, _ := messages[0]["data"].(map[string]any)
+	if got := data["runtimeState"]; got != "running" {
+		t.Fatalf("resume_session runtimeState = %#v, want registry running", got)
+	}
+	if agent.runningCalls != 0 {
+		t.Fatalf("resume_session called GetRunningSessionIDs %d time(s), want 0", agent.runningCalls)
+	}
+	if probeCalls != 0 {
+		t.Fatalf("resume_session scanned transcript %d time(s), want 0", probeCalls)
+	}
+}
+
 func TestShouldListClaudeProjectsAllowlist(t *testing.T) {
 	t.Parallel()
 	if shouldListClaudeProjects(nil) {
@@ -4261,28 +4300,28 @@ func TestListDirectoryWorkspaceBound_RejectsTraversal(t *testing.T) {
 	h := newTestHandlers(t)
 
 	tests := []struct {
-		name        string
-		path        string
+		name          string
+		path          string
 		workspaceRoot string
-		wantCode    string
+		wantCode      string
 	}{
 		{
-			name:        "absolute outside workspace",
-			path:        outside,
+			name:          "absolute outside workspace",
+			path:          outside,
 			workspaceRoot: workspace,
-			wantCode:    "file.outside_authorized_root",
+			wantCode:      "file.outside_authorized_root",
 		},
 		{
-			name:        "traversal relative",
-			path:        filepath.Join(workspace, "..", filepath.Base(outside)),
+			name:          "traversal relative",
+			path:          filepath.Join(workspace, "..", filepath.Base(outside)),
 			workspaceRoot: workspace,
-			wantCode:    "file.outside_authorized_root", // canonicalExistingDirectory resolves '..' → outside; pathIsWithinRoot catches it
+			wantCode:      "file.outside_authorized_root", // canonicalExistingDirectory resolves '..' → outside; pathIsWithinRoot catches it
 		},
 		{
-			name:        "valid subdirectory within workspace",
-			path:        subDir,
+			name:          "valid subdirectory within workspace",
+			path:          subDir,
 			workspaceRoot: workspace,
-			wantCode:    "", // success
+			wantCode:      "", // success
 		},
 	}
 	for _, tt := range tests {
@@ -4290,7 +4329,7 @@ func TestListDirectoryWorkspaceBound_RejectsTraversal(t *testing.T) {
 			conn := &readFileCaptureConn{}
 			h.handleListDirectory(conn, WireMessage{
 				RequestID: "req_" + tt.name,
-				Params:    mustJSONRaw(t, map[string]any{
+				Params: mustJSONRaw(t, map[string]any{
 					"path":           tt.path,
 					"workspace_root": tt.workspaceRoot,
 				}),
@@ -4596,9 +4635,15 @@ func TestListDirectory_DepthRecursion(t *testing.T) {
 	hasInternal := false
 	hasConfigGo := false
 	for _, it := range d2 {
-		if it.Name == "app.go" { hasAppGo = true }
-		if it.Name == "internal" { hasInternal = true }
-		if it.Name == "config.go" { hasConfigGo = true }
+		if it.Name == "app.go" {
+			hasAppGo = true
+		}
+		if it.Name == "internal" {
+			hasInternal = true
+		}
+		if it.Name == "config.go" {
+			hasConfigGo = true
+		}
 	}
 	if !hasAppGo {
 		t.Error("depth=2 should include src/app.go")

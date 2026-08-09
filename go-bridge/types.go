@@ -11,17 +11,17 @@ import (
 
 // WireMessage is the top-level envelope for all WS messages.
 type WireMessage struct {
-	Type                    string              `json:"type"`
-	RequestID               string              `json:"requestId,omitempty"`
-	BackendID               string              `json:"backendId,omitempty"`
-	SessionID               string              `json:"sessionId,omitempty"`
-	Method                  string              `json:"method,omitempty"`
-	Operation               string              `json:"operation,omitempty"`
-	Event                   string              `json:"event,omitempty"`
+	Type      string `json:"type"`
+	RequestID string `json:"requestId,omitempty"`
+	BackendID string `json:"backendId,omitempty"`
+	SessionID string `json:"sessionId,omitempty"`
+	Method    string `json:"method,omitempty"`
+	Operation string `json:"operation,omitempty"`
+	Event     string `json:"event,omitempty"`
 	// BulkCorrelationID 是 R1.4（§3.6.4）read_file_v2 的 request-aware progress correlation，
 	// 由 client 在 writer commit 前预绑定，放在加密 inner RPC envelope 顶层（与 method/requestId/params
 	// 同级）。仅在当前 attempt 走 Relay 且 client 已 ack relay_chunks_v1 + relay_chunk_progress_v1 时存在。
-	// Direct / legacy read_file / 其他 RPC / 非 RPC event 一律不得携带。allowlist 本期只有 read_file_v2。
+	// Direct / 其他 RPC / 非 RPC event 一律不得携带。allowlist 本期只有 read_file_v2。
 	BulkCorrelationID       string              `json:"bulkCorrelationId,omitempty"`
 	Params                  json.RawMessage     `json:"params,omitempty"`
 	Data                    json.RawMessage     `json:"data,omitempty"`
@@ -230,6 +230,11 @@ type sessionRegistry struct {
 	onStateChange func(backendID, sessionID, newState string)
 }
 
+type sessionActivityIdentity struct {
+	backendID string
+	sessionID string
+}
+
 func newSessionRegistry() *sessionRegistry {
 	return &sessionRegistry{sessions: make(map[string]*trackedSession)}
 }
@@ -388,6 +393,48 @@ func (r *sessionRegistry) forEach(fn func(sessionID string, t *trackedSession)) 
 	for id, t := range r.sessions {
 		fn(id, t)
 	}
+}
+
+// activitySnapshot 返回 Bridge-owned 活跃 turn 数。rebind 期间同一 trackedSession
+// 可能同时以 pending/new id 出现在 map，必须按对象身份去重。
+func (r *sessionRegistry) activitySnapshot() uint32 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	seen := make(map[*trackedSession]struct{}, len(r.sessions))
+	var active uint32
+	for _, t := range r.sessions {
+		if t == nil {
+			continue
+		}
+		if _, ok := seen[t]; ok {
+			continue
+		}
+		seen[t] = struct{}{}
+		if t.state == sessionStateRunning {
+			active++
+		}
+	}
+	return active
+}
+
+func (r *sessionRegistry) activityIdentities() []sessionActivityIdentity {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	seen := make(map[*trackedSession]struct{}, len(r.sessions))
+	result := make([]sessionActivityIdentity, 0, len(r.sessions))
+	for _, t := range r.sessions {
+		if t == nil {
+			continue
+		}
+		if _, ok := seen[t]; ok {
+			continue
+		}
+		seen[t] = struct{}{}
+		if t.backendID != "" && t.sessionID != "" {
+			result = append(result, sessionActivityIdentity{backendID: t.backendID, sessionID: t.sessionID})
+		}
+	}
+	return result
 }
 
 // drain empties the registry, returning the sessions that were present. Used by

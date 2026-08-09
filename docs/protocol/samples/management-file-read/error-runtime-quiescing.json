@@ -1,4 +1,1 @@
-{
-  "error": "runtime.quiescing",
-  "message": "runtime is quiescing; retry after new generation/hello"
-}
+{"error":{"code":"runtime.quiescing","message":"Bridge runtime is quiescing"},"ok":false,"requestId":"req-0001-test","type":"result"}

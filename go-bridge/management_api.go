@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/go-bridge/admission"
 )
 
 // httpReadHeaderTimeout 是管理/主 HTTP server 的握手 header 读取超时（P2-1 slowloris 防护）。
@@ -48,10 +50,12 @@ type ManagementConfig struct {
 	// 由 main.go 从 -prefer-local-network flag 注入;随 RelayFirstResult / pairing_complete /
 	// hello_ack / /internal/remote/status 下发。SSV2:不进入 timeline/projection。
 	PreferLocalNetwork bool
-	Agents           map[string]core.Agent
-	CodexBackendMode string
-	DetectionCfg     *AgentDetectionConfig
-	TLSPin           *BridgeV1TLSPin
+	Agents             map[string]core.Agent
+	CodexBackendMode   string
+	DetectionCfg       *AgentDetectionConfig
+	TLSPin             *BridgeV1TLSPin
+	// RuntimeIdentity 非零时启用 additive Management v1；零值保留 observed v0 fixture/旧 runtime。
+	RuntimeIdentity admission.RuntimeIdentity
 }
 
 // ── 管理 API 服务器 ─────────────────────────────────────────────────────────
@@ -75,8 +79,8 @@ func (disconnectedRelayStatusProvider) Connected() bool { return false }
 
 // ManagementServer 提供 /internal/* HTTP 管理端点，供 Mac App 本地控制。
 type ManagementServer struct {
-	cfg                         ManagementConfig
-	startedAt                   time.Time
+	cfg       ManagementConfig
+	startedAt time.Time
 	// now 返回当前单调/壁钟时间，供 handleStatus 计算 uptime。默认 time.Now，
 	// 保持生产行为不变；仅用于注入确定性测试时钟生成 v0 observed fixture（不改变运行期语义）。
 	now                         func() time.Time
@@ -94,18 +98,30 @@ type ManagementServer struct {
 	// 锁外调用 Connected(),避免 management lock 包住 client 内部锁造成死锁。
 	relayStatusMu       sync.RWMutex
 	relayStatusProvider RelayConnectionStatusProvider
+	admission           *admission.AdmissionMachine
 }
 
 // NewManagementServer 创建管理 API 服务器实例。
 func NewManagementServer(cfg ManagementConfig) *ManagementServer {
+	budget := admission.DefaultManagementTimeBudget()
+	if err := budget.Validate(); err != nil {
+		panic(fmt.Sprintf("invalid production management time budget: %v", err))
+	}
 	// 构造期即注入 production disconnected provider:ManagementServer.Start() 早于
 	// RelayBridgeClient 构造,该窗口真实连接状态只能是 false。main.go 创建真实 client 后替换。
-	return &ManagementServer{
+	s := &ManagementServer{
 		cfg:                 cfg,
 		startedAt:           time.Now(),
 		now:                 time.Now,
 		relayStatusProvider: disconnectedRelayStatusProvider{},
 	}
+	if cfg.RuntimeIdentity.PID > 0 && cfg.RuntimeIdentity.BridgeEpoch > 0 {
+		s.admission = admission.NewAdmissionMachine(cfg.RuntimeIdentity, nil, budget.LeaseMax)
+		if cfg.Handlers != nil {
+			cfg.Handlers.SetAdmissionMachine(s.admission)
+		}
+	}
+	return s
 }
 
 // SetRelayStatusProvider 原子替换 relay 连接状态 provider。main.go 在创建真实
@@ -190,6 +206,7 @@ func (s *ManagementServer) Start(host string, port int) (actualPort int, err err
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    16 << 10,
+		WriteTimeout:      2 * time.Second,
 	}
 
 	s.serverMu.Lock()
@@ -230,6 +247,12 @@ func (s *ManagementServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case path == "/internal/status" && r.Method == http.MethodGet:
 		s.handleStatus(w, r)
+	case path == "/internal/runtime/quiesce" && r.Method == http.MethodPost:
+		s.handleRuntimeQuiesce(w, r)
+	case path == "/internal/runtime/commit-quiesced-shutdown" && r.Method == http.MethodPost:
+		s.handleRuntimeCommit(w, r)
+	case path == "/internal/runtime/abort-quiesce" && r.Method == http.MethodPost:
+		s.handleRuntimeAbort(w, r)
 	case path == "/internal/agents" && r.Method == http.MethodGet:
 		s.handleAgents(w, r)
 	case path == "/internal/agents/refresh" && r.Method == http.MethodPost:
@@ -299,13 +322,177 @@ func (s *ManagementServer) handleStatus(w http.ResponseWriter, _ *http.Request) 
 	s.dnMu.RLock()
 	displayName := s.cfg.DisplayName
 	s.dnMu.RUnlock()
-	writeMgmtJSON(w, http.StatusOK, map[string]interface{}{
+	result := map[string]interface{}{
 		"status":      status,
 		"bridgeId":    s.cfg.BridgeID,
 		"displayName": displayName,
 		"uptime":      s.now().Sub(s.startedAt).String(),
 		"version":     runtimeVersion,
-	})
+	}
+	if s.admission != nil {
+		s.syncAdmissionInputs()
+		snapshot := s.admission.Snapshot()
+		poolStatus := s.filePoolStatus()
+		result["managementSchemaVersion"] = admission.ManagementSchemaVersion
+		result["runtimeIdentity"] = runtimeIdentityJSON(snapshot.Identity)
+		result["fileReadHealth"] = map[string]interface{}{
+			"state": snapshot.Health.String(), "stateEpoch": snapshot.HealthEpoch,
+			"stuckWorkers":       poolStatus.stuckWorkers,
+			"restartRecommended": snapshot.Health != admission.HealthHealthy,
+		}
+		result["activity"] = map[string]interface{}{
+			"bridgeOwnedActiveTurns": snapshot.BridgeOwnedActiveTurns,
+			"pendingInteractions":    snapshot.PendingInteractions,
+			"admissionState":         snapshot.State.String(),
+		}
+		quiesce := map[string]interface{}{"state": "none"}
+		if snapshot.HasOperation && snapshot.State == admission.StateQuiescing {
+			quiesce = map[string]interface{}{
+				"state": "leased", "operationId": snapshot.OperationID.EncodeHex(),
+				"quiesceEpoch":         snapshot.QuiesceEpoch,
+				"leaseRemainingMillis": snapshot.LeaseRemainingMillis,
+			}
+		} else if snapshot.HasOperation && snapshot.State == admission.StateShuttingDown {
+			quiesce = map[string]interface{}{
+				"state": "committed", "operationId": snapshot.OperationID.EncodeHex(),
+				"quiesceEpoch": snapshot.QuiesceEpoch,
+			}
+		}
+		result["quiesce"] = quiesce
+	}
+	writeMgmtJSON(w, http.StatusOK, result)
+}
+
+type managementFilePoolStatus struct {
+	state        admission.HealthState
+	epoch        uint64
+	stuckWorkers uint32
+}
+
+func (s *ManagementServer) filePoolStatus() managementFilePoolStatus {
+	if s.cfg.Handlers == nil || s.cfg.Handlers.filePool == nil {
+		return managementFilePoolStatus{state: admission.HealthHealthy, epoch: 1}
+	}
+	snapshot := s.cfg.Handlers.filePool.StatusSnapshot()
+	return managementFilePoolStatus{state: snapshot.Health.State, epoch: snapshot.Health.Epoch, stuckWorkers: snapshot.StuckWorkers}
+}
+
+func (s *ManagementServer) syncAdmissionInputs() {
+	if s.admission == nil {
+		return
+	}
+	pool := s.filePoolStatus()
+	s.admission.SetHealthSnapshot(pool.state, pool.epoch)
+	if s.cfg.Handlers != nil {
+		s.admission.SetPendingInteractions(s.cfg.Handlers.pendingInteractionCount())
+	}
+}
+
+func runtimeIdentityJSON(identity admission.RuntimeIdentity) map[string]interface{} {
+	return map[string]interface{}{"pid": identity.PID, "bridgeEpoch": identity.BridgeEpoch}
+}
+
+func (s *ManagementServer) readManagementBody(w http.ResponseWriter, r *http.Request) (json.RawMessage, bool) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, (64<<10)+1))
+	if err != nil || len(body) == 0 || len(body) > 64<<10 {
+		writeMgmtJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "invalid_request"})
+		return nil, false
+	}
+	return json.RawMessage(body), true
+}
+
+func managementCommon(operationID admission.OperationID, outcome string) map[string]interface{} {
+	return map[string]interface{}{
+		"managementSchemaVersion": admission.ManagementSchemaVersion,
+		"operationId":             operationID.EncodeHex(), "outcome": outcome,
+	}
+}
+
+func (s *ManagementServer) handleRuntimeQuiesce(w http.ResponseWriter, r *http.Request) {
+	if s.admission == nil {
+		writeMgmtJSON(w, http.StatusNotFound, map[string]interface{}{"error": "not_found"})
+		return
+	}
+	body, ok := s.readManagementBody(w, r)
+	if !ok {
+		return
+	}
+	req, err := admission.DecodeQuiesceRequest(body)
+	if err != nil {
+		writeMgmtJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "invalid_request"})
+		return
+	}
+	s.syncAdmissionInputs()
+	result := s.admission.Quiesce(req)
+	response := managementCommon(req.OperationID, string(result.Outcome))
+	switch result.Outcome {
+	case admission.QuiesceSafe:
+		response["runtimeIdentity"] = runtimeIdentityJSON(result.RuntimeIdentity)
+		response["healthEpoch"] = result.HealthEpoch
+		response["quiesceEpoch"] = result.QuiesceEpoch
+		response["token"] = result.Token.EncodeHex()
+		response["leaseMillis"] = result.LeaseMillis
+		response["leaseRemainingMillis"] = result.LeaseRemainingMillis
+	case admission.QuiesceDeferred:
+		response["activeTurns"] = result.ActiveTurns
+		response["pendingInteractions"] = result.PendingInteractions
+		response["retryAfterMillis"] = uint32(2_000)
+	}
+	writeMgmtJSON(w, http.StatusOK, response)
+}
+
+func (s *ManagementServer) decodeCommitRequest(w http.ResponseWriter, r *http.Request) (admission.CommitRequest, bool) {
+	body, ok := s.readManagementBody(w, r)
+	if !ok {
+		return admission.CommitRequest{}, false
+	}
+	req, err := admission.DecodeCommitRequest(body)
+	if err != nil {
+		writeMgmtJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "invalid_request"})
+		return admission.CommitRequest{}, false
+	}
+	s.syncAdmissionInputs()
+	return req, true
+}
+
+func (s *ManagementServer) handleRuntimeCommit(w http.ResponseWriter, r *http.Request) {
+	if s.admission == nil {
+		writeMgmtJSON(w, http.StatusNotFound, map[string]interface{}{"error": "not_found"})
+		return
+	}
+	req, ok := s.decodeCommitRequest(w, r)
+	if !ok {
+		return
+	}
+	result := s.admission.Commit(req)
+	response := managementCommon(req.OperationID, string(result.Outcome))
+	if result.Outcome == admission.OutcomeCommitted || result.Outcome == admission.OutcomeAlreadyCommitted {
+		response["runtimeIdentity"] = runtimeIdentityJSON(result.RuntimeIdentity)
+		response["healthEpoch"] = result.HealthEpoch
+		response["quiesceEpoch"] = result.QuiesceEpoch
+	}
+	writeMgmtJSON(w, http.StatusOK, response)
+	if result.Outcome == admission.OutcomeCommitted && s.shutdownCb != nil {
+		go s.shutdownOnce.Do(s.shutdownCb)
+	}
+}
+
+func (s *ManagementServer) handleRuntimeAbort(w http.ResponseWriter, r *http.Request) {
+	if s.admission == nil {
+		writeMgmtJSON(w, http.StatusNotFound, map[string]interface{}{"error": "not_found"})
+		return
+	}
+	req, ok := s.decodeCommitRequest(w, r)
+	if !ok {
+		return
+	}
+	result := s.admission.Abort(req)
+	response := managementCommon(req.OperationID, string(result.Outcome))
+	if result.Outcome == admission.OutcomeAborted {
+		response["runtimeIdentity"] = runtimeIdentityJSON(result.RuntimeIdentity)
+		response["healthEpoch"] = result.HealthEpoch
+	}
+	writeMgmtJSON(w, http.StatusOK, response)
 }
 
 // ── GET /internal/agents ─────────────────────────────────────────────────────

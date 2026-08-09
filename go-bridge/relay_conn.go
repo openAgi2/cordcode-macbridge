@@ -49,19 +49,19 @@ type RelayDeviceConn struct {
 
 	// requestClasses is populated when an inbound Relay RPC is admitted and
 	// consumed exactly once by SendResult, keeping handler call sites unchanged.
-	requestClasses         map[string]relayOutboundClass
+	requestClasses map[string]relayOutboundClass
 	// requestMethods 存 inbound 请求的 method（R1.5），用于 SendResult 判断是否为 cancelable allowlist
 	// （read_file_v2）以安装 cancel handle。registerRequestClass 记录，SendResult 消费一次。
-	requestMethods         map[string]string
+	requestMethods map[string]string
 	// requestBulkCorrelations 存 read_file_v2 inbound 请求预绑定的 bulkCorrelationId（R1.4），
 	// 由 registerRequestClass 在 admit 时记录，SendResult chunk 路径消费一次。
 	requestBulkCorrelations map[string]string
 	// requestBulkHandles 存 read_file_v2 chunked result 的 OutboundBulkHandle（R1.5），
 	// 由 SendResult 在创建 chunk group 时按 requestId 安装，cancel_request_v1 查找并 Cancel()，
 	// group 完成 / 单帧 result / error 时清理。
-	requestBulkHandles    map[string]*OutboundBulkHandle
+	requestBulkHandles map[string]*OutboundBulkHandle
 	// bulkCorrelations 是该 device/generation 的 correlation registry（active/retired + caps）。
-	bulkCorrelations      *BulkCorrelationRegistry
+	bulkCorrelations       *BulkCorrelationRegistry
 	inboundScheduler       *relayInboundScheduler
 	sessionBulkGenerations map[string]uint64
 	bulkRequestContexts    map[string]relayBulkRequestContext
@@ -84,11 +84,11 @@ type RelayDeviceConn struct {
 var _ Connection = (*RelayDeviceConn)(nil)
 
 const (
-	relayGzipCapability        = "relay_gzip_v1"
-	relayChunksCapability      = "relay_chunks_v1"
+	relayGzipCapability          = "relay_gzip_v1"
+	relayChunksCapability        = "relay_chunks_v1"
 	relayChunkProgressCapability = "relay_chunk_progress_v1" // R1.4 §3.6.4：read_file_v2 request-aware bulk correlation
-	relayCancelCapability      = "cancel_request_v1"          // R1.5 §3.6.4：read_file_v2 bulk cancel control RPC
-	relayGzipThreshold         = 32 * 1024
+	relayCancelCapability        = "cancel_request_v1"       // R1.5 §3.6.4：read_file_v2 bulk cancel control RPC
+	relayGzipThreshold           = 32 * 1024
 	// R1.4 correlation registry caps（A0 冻结前保守值）。
 	relayBulkCorrelationMaxActive  = 32
 	relayBulkCorrelationMaxRetired = 64
@@ -112,22 +112,22 @@ func NewRelayDeviceConn(
 	sendEnvelope func(json.RawMessage) error,
 ) *RelayDeviceConn {
 	rc := &RelayDeviceConn{
-		deviceID:               deviceID,
-		bridgeID:               bridgeID,
-		routeID:                routeID,
-		generation:             generation,
-		device:                 device,
-		macToIosKey:            macToIosKey,
-		iosToMacKey:            iosToMacKey,
-		sendEnvelope:           sendEnvelope,
+		deviceID:                deviceID,
+		bridgeID:                bridgeID,
+		routeID:                 routeID,
+		generation:              generation,
+		device:                  device,
+		macToIosKey:             macToIosKey,
+		iosToMacKey:             iosToMacKey,
+		sendEnvelope:            sendEnvelope,
 		requestClasses:          make(map[string]relayOutboundClass),
 		requestMethods:          make(map[string]string),
 		requestBulkCorrelations: make(map[string]string),
 		requestBulkHandles:      make(map[string]*OutboundBulkHandle),
 		bulkCorrelations:        NewBulkCorrelationRegistry(relayBulkCorrelationMaxActive, relayBulkCorrelationMaxRetired),
 		sessionBulkGenerations:  make(map[string]uint64),
-		bulkRequestContexts:    make(map[string]relayBulkRequestContext),
-		activeBulkHandles:      make(map[string]*OutboundBulkHandle),
+		bulkRequestContexts:     make(map[string]relayBulkRequestContext),
+		activeBulkHandles:       make(map[string]*OutboundBulkHandle),
 	}
 	// 双方向 counter 从 1 开始
 	rc.sendCounter.Store(1)
@@ -394,17 +394,7 @@ func gzipPayload(payload []byte) ([]byte, error) {
 
 // SendResult 发送带 requestId 的 result 回复。
 func (rc *RelayDeviceConn) SendResult(requestID string, data interface{}, err *WireError) {
-	resp := map[string]interface{}{
-		"type":      "result",
-		"requestId": requestID,
-	}
-	if err != nil {
-		resp["ok"] = false
-		resp["error"] = err
-	} else {
-		resp["ok"] = true
-		resp["data"] = data
-	}
+	resp := resultEnvelope(requestID, data, err)
 	plaintext, marshalErr := json.Marshal(resp)
 	if marshalErr != nil {
 		slog.Error("relay-conn: marshal result", "device", rc.deviceID, "requestId", requestID, "error", marshalErr)

@@ -1,10 +1,12 @@
 package gobridge
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdh"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +17,7 @@ import (
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/go-bridge/admission"
 )
 
 // ── 测试用 fake agent ────────────────────────────────────────────────────────
@@ -64,6 +67,22 @@ func authRequest(method, path string) *http.Request {
 
 func noAuthRequest(method, path string) *http.Request {
 	return httptest.NewRequest(method, path, nil)
+}
+
+func authJSONRequest(method, path, body string) *http.Request {
+	req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer "+testMgmtToken)
+	req.Header.Set("Content-Type", "application/json")
+	return req
+}
+
+func newV1TestMgmtServer() *ManagementServer {
+	srv := newTestMgmtServer(nil)
+	identity := admission.RuntimeIdentity{PID: 12345, BridgeEpoch: 7}
+	srv.cfg.RuntimeIdentity = identity
+	srv.admission = admission.NewAdmissionMachine(identity, nil, 30_000)
+	srv.cfg.Handlers.SetAdmissionMachine(srv.admission)
+	return srv
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -140,6 +159,102 @@ func TestMgmtStatus_NoAgents(t *testing.T) {
 	json.Unmarshal(rec.Body.Bytes(), &body)
 	if body["status"] != "ready_no_agents" {
 		t.Errorf("status = %v, want ready_no_agents", body["status"])
+	}
+}
+
+func TestMgmtV1StatusIsAdditiveAndLevelTriggered(t *testing.T) {
+	srv := newV1TestMgmtServer()
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, authRequest(http.MethodGet, "/internal/status"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var body map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["managementSchemaVersion"] != float64(1) || body["status"] != "ready" {
+		t.Fatalf("v1/v0 compatibility fields missing: %#v", body)
+	}
+	identity := body["runtimeIdentity"].(map[string]interface{})
+	if identity["pid"] != float64(12345) || identity["bridgeEpoch"] != float64(7) {
+		t.Fatalf("runtimeIdentity=%#v", identity)
+	}
+	activity := body["activity"].(map[string]interface{})
+	if activity["admissionState"] != "accepting" {
+		t.Fatalf("activity=%#v", activity)
+	}
+	quiesce := body["quiesce"].(map[string]interface{})
+	if quiesce["state"] != "none" {
+		t.Fatalf("quiesce=%#v", quiesce)
+	}
+}
+
+func TestMgmtV1QuiesceCommitAndAbortHandlers(t *testing.T) {
+	const opA = "ffeeddccbbaa99887766554433221100"
+	const opB = "112233445566778899aabbccddeeff00"
+	quiesceBody := func(op string) string {
+		return fmt.Sprintf(`{"managementSchemaVersion":1,"operationId":"%s","expectedRuntime":{"pid":12345,"bridgeEpoch":7},"expectedHealthEpoch":1}`, op)
+	}
+	srv := newV1TestMgmtServer()
+	if !srv.admission.TryBeginBridgeTurn() {
+		t.Fatal("failed to seed active turn")
+	}
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, authJSONRequest(http.MethodPost, "/internal/runtime/quiesce", quiesceBody(opA)))
+	var deferred map[string]interface{}
+	_ = json.Unmarshal(rec.Body.Bytes(), &deferred)
+	if deferred["outcome"] != "deferred" || deferred["retryAfterMillis"] != float64(2000) {
+		t.Fatalf("deferred=%s", rec.Body.String())
+	}
+	srv.admission.EndBridgeTurn()
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, authJSONRequest(http.MethodPost, "/internal/runtime/quiesce", quiesceBody(opA)))
+	var safe map[string]interface{}
+	_ = json.Unmarshal(rec.Body.Bytes(), &safe)
+	if safe["outcome"] != "safe" || safe["token"] == nil {
+		t.Fatalf("safe=%s", rec.Body.String())
+	}
+	commitBody := fmt.Sprintf(`{"managementSchemaVersion":1,"operationId":"%s","expectedRuntime":{"pid":12345,"bridgeEpoch":7},"expectedHealthEpoch":1,"quiesceEpoch":1,"token":"%s"}`, opA, safe["token"])
+	var shutdownCalls atomic.Int32
+	srv.SetShutdownCallback(func() { shutdownCalls.Add(1) })
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, authJSONRequest(http.MethodPost, "/internal/runtime/commit-quiesced-shutdown", commitBody))
+	var committed map[string]interface{}
+	_ = json.Unmarshal(rec.Body.Bytes(), &committed)
+	if committed["outcome"] != "committed" {
+		t.Fatalf("committed=%s", rec.Body.String())
+	}
+	deadline := time.Now().Add(time.Second)
+	for shutdownCalls.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if shutdownCalls.Load() != 1 {
+		t.Fatalf("shutdown callback calls=%d", shutdownCalls.Load())
+	}
+
+	srv = newV1TestMgmtServer()
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, authJSONRequest(http.MethodPost, "/internal/runtime/quiesce", quiesceBody(opB)))
+	safe = nil
+	_ = json.Unmarshal(rec.Body.Bytes(), &safe)
+	abortBody := fmt.Sprintf(`{"managementSchemaVersion":1,"operationId":"%s","expectedRuntime":{"pid":12345,"bridgeEpoch":7},"expectedHealthEpoch":1,"quiesceEpoch":1,"token":"%s"}`, opB, safe["token"])
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, authJSONRequest(http.MethodPost, "/internal/runtime/abort-quiesce", abortBody))
+	var aborted map[string]interface{}
+	_ = json.Unmarshal(rec.Body.Bytes(), &aborted)
+	if aborted["outcome"] != "aborted" || srv.admission.State() != admission.StateAccepting {
+		t.Fatalf("aborted=%s state=%s", rec.Body.String(), srv.admission.State())
+	}
+}
+
+func TestMgmtV1StrictRequestRejectsUnknownField(t *testing.T) {
+	srv := newV1TestMgmtServer()
+	body := `{"managementSchemaVersion":1,"operationId":"ffeeddccbbaa99887766554433221100","expectedRuntime":{"pid":12345,"bridgeEpoch":7},"expectedHealthEpoch":1,"extra":true}`
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, authJSONRequest(http.MethodPost, "/internal/runtime/quiesce", body))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

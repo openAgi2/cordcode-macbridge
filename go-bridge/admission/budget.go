@@ -12,14 +12,30 @@ import (
 //	leaseMin                     >= quiesceHTTPTimeout + safeDecodeBudget + minimumCommitRemainingMillis
 //	leaseMax                     >= leaseMin
 type ManagementTimeBudget struct {
-	QuiesceHTTPTimeout         uint32 // Mac 等待 /internal/runtime/quiesce 响应的最坏超时
-	SafeDecodeBudget           uint32 // safe 响应本地最坏调度/解码预算
-	CommitHTTPTimeout          uint32 // Mac 等待 commit 响应的最坏超时
-	AbortHTTPTimeout           uint32 // Mac 等待 abort 响应的最坏超时
-	ExecutorSchedulingMargin   uint32 // Mac executor 调度裕量
+	QuiesceHTTPTimeout           uint32 // Mac 等待 /internal/runtime/quiesce 响应的最坏超时
+	SafeDecodeBudget             uint32 // safe 响应本地最坏调度/解码预算
+	CommitHTTPTimeout            uint32 // Mac 等待 commit 响应的最坏超时
+	AbortHTTPTimeout             uint32 // Mac 等待 abort 响应的最坏超时
+	ExecutorSchedulingMargin     uint32 // Mac executor 调度裕量
 	MinimumCommitRemainingMillis uint32 // 收到 safe 后剩余不足此值则不得 commit
-	LeaseMin                   uint32 // lease 下限
-	LeaseMax                   uint32 // lease 上限
+	LeaseMin                     uint32 // lease 下限
+	LeaseMax                     uint32 // lease 上限
+}
+
+// DefaultManagementTimeBudget is the single production budget shared by the Go lease
+// owner and the Mac supervisor contract. The 30s lease is intentionally fixed (min=max);
+// HTTP timeout and executor margin match ManagementAPIClient/RuntimeManager.
+func DefaultManagementTimeBudget() ManagementTimeBudget {
+	return ManagementTimeBudget{
+		QuiesceHTTPTimeout:           2_000,
+		SafeDecodeBudget:             500,
+		CommitHTTPTimeout:            2_000,
+		AbortHTTPTimeout:             2_000,
+		ExecutorSchedulingMargin:     500,
+		MinimumCommitRemainingMillis: 2_500,
+		LeaseMin:                     30_000,
+		LeaseMax:                     30_000,
+	}
 }
 
 // ErrBudgetOverflow 表示某次 checked 加法溢出（uint32 域）。

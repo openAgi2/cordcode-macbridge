@@ -6,6 +6,13 @@ import XCTest
 // 不依赖 UI automation / simulator。
 final class RuntimeManagerRestartTests: XCTestCase {
 
+    func testOnlyStartingRuntimeCanRestartBeforeManagementIsReady() {
+        XCTAssertTrue(RuntimeManager.canReplacePreReadyRuntime(status: .starting))
+        XCTAssertFalse(RuntimeManager.canReplacePreReadyRuntime(status: .ready))
+        XCTAssertFalse(RuntimeManager.canReplacePreReadyRuntime(status: .readyNoAgents))
+        XCTAssertFalse(RuntimeManager.canReplacePreReadyRuntime(status: .crashed))
+    }
+
     @MainActor
     private func makeManager() -> RuntimeManager {
         RuntimeManager(config: RuntimeConfig(
@@ -111,4 +118,3 @@ final class RuntimeManagerRestartTests: XCTestCase {
         XCTAssertFalse(manager.config.preferLocalNetwork)
     }
 }
-

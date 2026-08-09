@@ -4,8 +4,8 @@
 //
 // 这是 plan A-1 的 proof artifact：strict codec + 32-char hex ID/token + constant-time
 // token 比较 + token 脱敏 + commit/abort 全状态表 + lease/HTTP/scheduling 时间不等式。
-// 当前仅被定向测试引用（go-bridge/admission/*_test.go），尚未被 management_api.go 的
-// 任何 handler 接线，因此不影响运行期二进制行为；R1.11 才把它接入真实 handler。
+// ManagementServer 与 Bridge-owned turn admission 已在 R1.11 接入这些原语；本包仍保持
+// 独立，以便状态机、strict codec 与资源预算可在不启动 runtime 的情况下穷举验证。
 //
 // 规范来源：docs(本仓)/2026-08-08-syntax-highlighting-shiki-jsc-plan.md §3.6.3 与
 // R11 终止性复核 P1-1/P1-2/P1-3/P2-1。
@@ -63,6 +63,9 @@ func DecodeToken(s string) (Token, error) {
 
 // EncodeHex 输出 32 lowercase hex（仅用于 fixture/调试；真实 token 永不进入日志）。
 func (o OperationID) EncodeHex() string { return hex.EncodeToString(o[:]) }
+
+// EncodeHex 只用于 authenticated Management response；调用方仍不得记录返回值。
+func (t Token) EncodeHex() string { return hex.EncodeToString(t[:]) }
 
 // ConstantTimeCompareToken 用 constant-time 字节比较两个 token。token 是短期授权 secret，
 // 必须用此函数比较；operationId correlation 不应改用 constant-time（见 plan R10 P2-2）。

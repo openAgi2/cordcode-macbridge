@@ -22,13 +22,32 @@ protocol DeviceAPIProviding {
 // MARK: - Management API 数据模型
 
 /// GET /internal/status 响应
-struct ManagementStatus: Codable {
+struct ManagementStatus: Sendable {
     let status: String
     let bridgeId: String?
     let displayName: String?
     let iosPort: Int?
     let uptime: String?
     let version: String?
+    let v1: ManagementV1Status?
+
+    init(
+        status: String,
+        bridgeId: String?,
+        displayName: String?,
+        iosPort: Int?,
+        uptime: String?,
+        version: String?,
+        v1: ManagementV1Status? = nil
+    ) {
+        self.status = status
+        self.bridgeId = bridgeId
+        self.displayName = displayName
+        self.iosPort = iosPort
+        self.uptime = uptime
+        self.version = version
+        self.v1 = v1
+    }
 }
 
 /// GET /internal/devices 响应中的单个设备
@@ -175,10 +194,14 @@ class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIP
     private func performRequest(
         _ path: String,
         method: String = "GET",
+        body: Data? = nil,
         using requestSession: URLSession? = nil
     ) async throws -> Data {
         var req = request(path, method: method)
-        if method == "POST" { req.httpBody = Data() }
+        if method == "POST" {
+            req.httpBody = body ?? Data()
+            if body != nil { req.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        }
         let (data, response) = try await (requestSession ?? session).data(for: req)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             let code = (response as? HTTPURLResponse)?.statusCode ?? -1
@@ -189,7 +212,28 @@ class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIP
 
     func getStatus() async throws -> ManagementStatus {
         let data = try await performRequest("/internal/status")
-        return try JSONDecoder().decode(ManagementStatus.self, from: data)
+        return try ManagementStatusCodec.decode(data)
+    }
+
+    func quiesce(_ request: ManagementQuiesceRequest) async throws -> ManagementRuntimeResult {
+        let data = try await performRequest(
+            "/internal/runtime/quiesce", method: "POST", body: try ManagementRequestCodec.encode(request)
+        )
+        return try ManagementRuntimeResultCodec.decode(data, group: "quiesce")
+    }
+
+    func commitQuiescedShutdown(_ request: ManagementCommitRequest) async throws -> ManagementRuntimeResult {
+        let data = try await performRequest(
+            "/internal/runtime/commit-quiesced-shutdown", method: "POST", body: try ManagementRequestCodec.encode(request)
+        )
+        return try ManagementRuntimeResultCodec.decode(data, group: "commit")
+    }
+
+    func abortQuiesce(_ request: ManagementCommitRequest) async throws -> ManagementRuntimeResult {
+        let data = try await performRequest(
+            "/internal/runtime/abort-quiesce", method: "POST", body: try ManagementRequestCodec.encode(request)
+        )
+        return try ManagementRuntimeResultCodec.decode(data, group: "abort")
     }
 
     func updateDisplayName(_ displayName: String) async throws {

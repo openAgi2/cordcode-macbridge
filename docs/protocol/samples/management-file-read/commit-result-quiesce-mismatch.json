@@ -1,5 +1,1 @@
-{
-  "managementSchemaVersion": 1,
-  "operationId": "ffeeddccbbaa99887766554433221100",
-  "outcome": "quiesce_mismatch"
-}
+{"managementSchemaVersion":1,"operationId":"112233445566778899aabbccddeeff00","outcome":"quiesce_mismatch"}

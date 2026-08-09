@@ -2,6 +2,8 @@ package gobridge
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -22,6 +24,7 @@ import (
 	_ "github.com/openAgi2/cordcode-macbridge/agent/opencode"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/go-bridge/admission"
 	"github.com/openAgi2/cordcode-macbridge/pinstore"
 )
 
@@ -252,28 +255,28 @@ func Main() {
 		displayName := loadOrCreateDisplayName(dataDir)
 
 		mgmtCfg := ManagementConfig{
-			Handlers:         handlers,
-			Token:            *managementToken,
-			DataDir:          dataDir,
-			PairingStore:     func() PairingSessionStore { s := NewMemoryPairingStore(); globalPairingStore = s; return s }(),
-			DeviceStore:      func() TrustedDeviceStore { s := newTrustedDeviceStore(dataDir); globalDeviceStore = s; return s }(),
-			BridgeID:         bridgeID,
-			DisplayName:      displayName,
-			LocalURL:         advertisedLocalURL,
-			LocalURLs:        advertisedLocalURLs,
-			TailscaleURL:     tailscaleURL,
-			RemoteURL:        *remoteURL,
-			IncludeTailscale: *includeTailscale,
-			IncludeRemote:    *includeRemote,
-			RelayEndpoint:    *relayEndpoint,
-			RelayRouteID:     *relayRouteID,
-			RelayCredential:  *relayCredential,
-			RelayConfigured:  relayConfigured,
-			RelayEnabled:     *relayEnabled,
-			RelayIdentity:    relayIdentity,
+			Handlers:           handlers,
+			Token:              *managementToken,
+			DataDir:            dataDir,
+			PairingStore:       func() PairingSessionStore { s := NewMemoryPairingStore(); globalPairingStore = s; return s }(),
+			DeviceStore:        func() TrustedDeviceStore { s := newTrustedDeviceStore(dataDir); globalDeviceStore = s; return s }(),
+			BridgeID:           bridgeID,
+			DisplayName:        displayName,
+			LocalURL:           advertisedLocalURL,
+			LocalURLs:          advertisedLocalURLs,
+			TailscaleURL:       tailscaleURL,
+			RemoteURL:          *remoteURL,
+			IncludeTailscale:   *includeTailscale,
+			IncludeRemote:      *includeRemote,
+			RelayEndpoint:      *relayEndpoint,
+			RelayRouteID:       *relayRouteID,
+			RelayCredential:    *relayCredential,
+			RelayConfigured:    relayConfigured,
+			RelayEnabled:       *relayEnabled,
+			RelayIdentity:      relayIdentity,
 			PreferLocalNetwork: *preferLocalNetwork,
-			Agents:           handlers.agents,
-			CodexBackendMode: *codexBackend,
+			Agents:             handlers.agents,
+			CodexBackendMode:   *codexBackend,
 			DetectionCfg: &AgentDetectionConfig{
 				OpenCodeURL:       *ocBaseURL,
 				OpenCodeUser:      *ocUser,
@@ -281,6 +284,9 @@ func Main() {
 				CodexAppServerURL: *codexAppServerURL,
 			},
 			TLSPin: tlsPin,
+			RuntimeIdentity: admission.RuntimeIdentity{
+				PID: int32(os.Getpid()), BridgeEpoch: managementBridgeEpoch(bridgeEpoch),
+			},
 		}
 		mgmtSrv = NewManagementServer(mgmtCfg)
 
@@ -594,6 +600,15 @@ func Main() {
 		slog.Error("go-bridge: server error", "error", err)
 		os.Exit(1)
 	}
+}
+
+func managementBridgeEpoch(bridgeEpoch string) uint64 {
+	digest := sha256.Sum256([]byte(bridgeEpoch))
+	epoch := binary.BigEndian.Uint64(digest[:8])
+	if epoch == 0 {
+		return 1
+	}
+	return epoch
 }
 
 func localRelayServiceListenAddress(raw string) (string, error) {

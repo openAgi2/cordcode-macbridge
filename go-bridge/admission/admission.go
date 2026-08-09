@@ -38,6 +38,19 @@ const (
 	HealthDegraded
 )
 
+func (s HealthState) String() string {
+	switch s {
+	case HealthHealthy:
+		return "healthy"
+	case HealthDegrading:
+		return "degrading"
+	case HealthDegraded:
+		return "degraded"
+	default:
+		return "unknown"
+	}
+}
+
 type terminalKind int
 
 const (
@@ -71,19 +84,19 @@ type terminalOp struct {
 // AdmissionMachine 是 quiesce/commit/abort 的唯一业务锁拥有者。
 // 所有状态转移在同一锁内原子完成；mismatch 永不改变状态。
 type AdmissionMachine struct {
-	mu                      sync.Mutex
-	state                   AdmissionState
-	identity                RuntimeIdentity
-	health                  HealthState
-	stateEpoch              uint64 // FileReadHealth stateEpoch；healthEpoch 是其同值回显
-	quiesceEpoch            uint64
-	active                  *activeOp
-	lastTerminal            *terminalOp
-	bridgeOwnedActiveTurns  uint32
-	pendingInteractions     uint32
-	now                     func() time.Time
-	tokenGen                func() (Token, error)
-	leaseMillis             uint32
+	mu                     sync.Mutex
+	state                  AdmissionState
+	identity               RuntimeIdentity
+	health                 HealthState
+	stateEpoch             uint64 // FileReadHealth stateEpoch；healthEpoch 是其同值回显
+	quiesceEpoch           uint64
+	active                 *activeOp
+	lastTerminal           *terminalOp
+	bridgeOwnedActiveTurns uint32
+	pendingInteractions    uint32
+	now                    func() time.Time
+	tokenGen               func() (Token, error)
+	leaseMillis            uint32
 }
 
 // NewAdmissionMachine 构造 accepting 态机器。clock/tokenGen 可注入（测试用 fake clock / 固定 RNG）。
@@ -130,6 +143,34 @@ func (m *AdmissionMachine) SetActivity(bridgeOwnedActiveTurns, pendingInteractio
 	m.mu.Unlock()
 }
 
+// TryBeginBridgeTurn 与 Quiesce 使用同一把锁，消除“status 显示 idle 后新 turn 插入”竞态。
+func (m *AdmissionMachine) TryBeginBridgeTurn() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.expireActiveIfDue()
+	if m.state != StateAccepting || m.bridgeOwnedActiveTurns == ^uint32(0) {
+		return false
+	}
+	m.bridgeOwnedActiveTurns++
+	return true
+}
+
+// EndBridgeTurn 终结一个已 admit 的 Bridge-owned turn；重复终结幂等。
+func (m *AdmissionMachine) EndBridgeTurn() {
+	m.mu.Lock()
+	if m.bridgeOwnedActiveTurns > 0 {
+		m.bridgeOwnedActiveTurns--
+	}
+	m.mu.Unlock()
+}
+
+// SetPendingInteractions 同步 projection kernel 的 level-triggered pending 数。
+func (m *AdmissionMachine) SetPendingInteractions(count uint32) {
+	m.mu.Lock()
+	m.pendingInteractions = count
+	m.mu.Unlock()
+}
+
 // State 返回当前 admission state（测试观察用）。
 func (m *AdmissionMachine) State() AdmissionState { m.mu.Lock(); defer m.mu.Unlock(); return m.state }
 
@@ -137,12 +178,63 @@ func (m *AdmissionMachine) State() AdmissionState { m.mu.Lock(); defer m.mu.Unlo
 func (m *AdmissionMachine) Health() HealthState { m.mu.Lock(); defer m.mu.Unlock(); return m.health }
 
 // QuiesceEpoch 返回当前 quiesceEpoch。
-func (m *AdmissionMachine) QuiesceEpoch() uint64 { m.mu.Lock(); defer m.mu.Unlock(); return m.quiesceEpoch }
+func (m *AdmissionMachine) QuiesceEpoch() uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.quiesceEpoch
+}
 
 // SnapshotTerminal 暴露 last-terminal（去 token）用于测试断言终态。
 type TerminalSnapshot struct {
 	Kind        terminalKind
 	HasTerminal bool
+}
+
+// RuntimeSnapshot 是 Management status 使用的无 secret、level-triggered 快照。
+// Token 永远不离开 AdmissionMachine；leased/committed 只暴露 operation correlation 与 epoch。
+type RuntimeSnapshot struct {
+	State                  AdmissionState
+	Identity               RuntimeIdentity
+	Health                 HealthState
+	HealthEpoch            uint64
+	BridgeOwnedActiveTurns uint32
+	PendingInteractions    uint32
+	OperationID            OperationID
+	HasOperation           bool
+	QuiesceEpoch           uint64
+	LeaseRemainingMillis   uint32
+}
+
+// SetHealthSnapshot 把 filepool 拥有的正交 health 状态同步进 admission 的同一把业务锁。
+// expectedHealthEpoch 的比较与 status snapshot 因而观察同一个线性化值。
+func (m *AdmissionMachine) SetHealthSnapshot(state HealthState, epoch uint64) {
+	m.mu.Lock()
+	m.health = state
+	m.stateEpoch = epoch
+	m.mu.Unlock()
+}
+
+// Snapshot 返回当前 level-triggered 状态；读取也会线性化 lease expiry。
+func (m *AdmissionMachine) Snapshot() RuntimeSnapshot {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.expireActiveIfDue()
+	s := RuntimeSnapshot{
+		State: m.state, Identity: m.identity, Health: m.health, HealthEpoch: m.stateEpoch,
+		BridgeOwnedActiveTurns: m.bridgeOwnedActiveTurns,
+		PendingInteractions:    m.pendingInteractions,
+	}
+	if m.active != nil {
+		s.OperationID = m.active.id
+		s.HasOperation = true
+		s.QuiesceEpoch = m.active.quiesceEpoch
+		s.LeaseRemainingMillis = remainingLeaseMillis(m.now(), m.active.expiresAt, m.active.leaseMillis)
+	} else if m.state == StateShuttingDown && m.lastTerminal != nil && m.lastTerminal.kind == terminalCommitted {
+		s.OperationID = m.lastTerminal.id
+		s.HasOperation = true
+		s.QuiesceEpoch = m.lastTerminal.quiesceEpoch
+	}
+	return s
 }
 
 func (m *AdmissionMachine) LastTerminalKind() TerminalSnapshot {
@@ -192,16 +284,16 @@ const (
 )
 
 type QuiesceResult struct {
-	Outcome            QuiesceOutcome
-	RuntimeIdentity    RuntimeIdentity // safe only
-	HealthEpoch        uint64          // safe only
-	QuiesceEpoch       uint64          // safe only
-	Token              Token           // safe only (进程内返回给 Mac；不入日志)
-	LeaseMillis        uint32          // safe only
-	LeaseRemainingMillis uint32        // safe only
-	ActiveTurns        uint32          // deferred only
-	PendingInteractions uint32         // deferred only
-	RetryAfterMillis   uint32          // deferred only
+	Outcome              QuiesceOutcome
+	RuntimeIdentity      RuntimeIdentity // safe only
+	HealthEpoch          uint64          // safe only
+	QuiesceEpoch         uint64          // safe only
+	Token                Token           // safe only (进程内返回给 Mac；不入日志)
+	LeaseMillis          uint32          // safe only
+	LeaseRemainingMillis uint32          // safe only
+	ActiveTurns          uint32          // deferred only
+	PendingInteractions  uint32          // deferred only
+	RetryAfterMillis     uint32          // deferred only
 }
 
 func (m *AdmissionMachine) Quiesce(req QuiesceRequest) QuiesceResult {
@@ -230,7 +322,7 @@ func (m *AdmissionMachine) Quiesce(req QuiesceRequest) QuiesceResult {
 			// active same operation + lease live => 幂等 safe（剩余 lease）
 			leaseRemaining := remainingLeaseMillis(m.now(), m.active.expiresAt, m.active.leaseMillis)
 			return QuiesceResult{
-				Outcome: QuiesceSafe,
+				Outcome:         QuiesceSafe,
 				RuntimeIdentity: m.identity, HealthEpoch: m.stateEpoch,
 				QuiesceEpoch: m.active.quiesceEpoch, Token: m.active.token,
 				LeaseMillis: m.active.leaseMillis, LeaseRemainingMillis: leaseRemaining,
@@ -242,7 +334,7 @@ func (m *AdmissionMachine) Quiesce(req QuiesceRequest) QuiesceResult {
 		// deferred：bridge-owned active turn 或 pending interaction 非零
 		if m.bridgeOwnedActiveTurns > 0 || m.pendingInteractions > 0 {
 			return QuiesceResult{
-				Outcome: QuiesceDeferred,
+				Outcome:     QuiesceDeferred,
 				ActiveTurns: m.bridgeOwnedActiveTurns, PendingInteractions: m.pendingInteractions,
 				RetryAfterMillis: 0, // A0 冻结具体值；模型先置 0 占位由调用方换算
 			}
@@ -261,7 +353,7 @@ func (m *AdmissionMachine) Quiesce(req QuiesceRequest) QuiesceResult {
 		m.active = &activeOp{id: req.OperationID, quiesceEpoch: m.quiesceEpoch, token: tok, expiresAt: expiresAt, leaseMillis: m.leaseMillis}
 		m.state = StateQuiescing
 		return QuiesceResult{
-			Outcome: QuiesceSafe,
+			Outcome:         QuiesceSafe,
 			RuntimeIdentity: m.identity, HealthEpoch: m.stateEpoch,
 			QuiesceEpoch: m.quiesceEpoch, Token: tok,
 			LeaseMillis: m.leaseMillis, LeaseRemainingMillis: m.leaseMillis,
@@ -299,15 +391,15 @@ type CommitRequest struct {
 type CommitOutcome string
 
 const (
-	OutcomeCommitted       CommitOutcome = "committed"
+	OutcomeCommitted        CommitOutcome = "committed"
 	OutcomeAlreadyCommitted CommitOutcome = "already_committed"
-	OutcomeAborted         CommitOutcome = "aborted"
+	OutcomeAborted          CommitOutcome = "aborted"
 	OutcomeAlreadyAccepting CommitOutcome = "already_accepting"
 	OutcomeIdentityMismatch CommitOutcome = "identity_mismatch"
-	OutcomeEpochMismatch   CommitOutcome = "epoch_mismatch"
-	OutcomeQuiesceMismatch CommitOutcome = "quiesce_mismatch"
-	OutcomeTokenMismatch   CommitOutcome = "token_mismatch"
-	OutcomeLeaseExpired    CommitOutcome = "lease_expired"
+	OutcomeEpochMismatch    CommitOutcome = "epoch_mismatch"
+	OutcomeQuiesceMismatch  CommitOutcome = "quiesce_mismatch"
+	OutcomeTokenMismatch    CommitOutcome = "token_mismatch"
+	OutcomeLeaseExpired     CommitOutcome = "lease_expired"
 )
 
 type CommitResult struct {

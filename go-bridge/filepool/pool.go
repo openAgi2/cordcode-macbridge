@@ -73,9 +73,9 @@ type Job struct {
 }
 
 type pendingJob struct {
-	job      Job
-	ctx      context.Context
-	cancel   context.CancelFunc
+	job       Job
+	ctx       context.Context
+	cancel    context.CancelFunc
 	startedAt time.Time // worker 取走时设置（watchdog 用）
 }
 
@@ -94,11 +94,35 @@ type Pool struct {
 	rejecting    bool // degrading 已安装：新 admit 拒绝 + 队列已 drain
 	closed       bool
 
-	wake      chan struct{}
-	stop      chan struct{}
-	once      sync.Once
-	wg        sync.WaitGroup
-	wdStop    chan struct{}
+	wake   chan struct{}
+	stop   chan struct{}
+	once   sync.Once
+	wg     sync.WaitGroup
+	wdStop chan struct{}
+}
+
+// StatusSnapshot 是 Management API 的只读、无任务内容运行时观察值。
+type StatusSnapshot struct {
+	Health       Snapshot
+	StuckWorkers uint32
+}
+
+// StatusSnapshot 在 pool 锁下计算当前 stuck worker 数，再读取正交 health 状态。
+func (p *Pool) StatusSnapshot() StatusSnapshot {
+	if p == nil {
+		return StatusSnapshot{Health: Snapshot{State: admission.HealthHealthy, Epoch: 1}}
+	}
+	now := time.Now()
+	stuckAge := time.Duration(p.cfg.Health.StuckAgeMillis) * time.Millisecond
+	var stuck uint32
+	p.mu.Lock()
+	for pj := range p.inflightJobs {
+		if !pj.startedAt.IsZero() && now.Sub(pj.startedAt) >= stuckAge {
+			stuck++
+		}
+	}
+	p.mu.Unlock()
+	return StatusSnapshot{Health: p.health.Snapshot(), StuckWorkers: stuck}
 }
 
 // New 构造并启动 pool（workers + watchdog）。cfg 必须先 Validate 通过。

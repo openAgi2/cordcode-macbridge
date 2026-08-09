@@ -112,6 +112,27 @@ func (h *Handlers) enrichSessionState(mapped map[string]interface{}) map[string]
 	return h.enrichSessionStateWithAgent(mapped, nil)
 }
 
+// enrichResumeSessionState is the control-plane-only resume response path. Opening an existing
+// session must not synchronously rescan its transcript: projection/history owns content loading,
+// and the file relay updates the registry when new lifecycle evidence arrives. The generic
+// single-session detail enricher intentionally retains its deeper inspection for get_session.
+func (h *Handlers) enrichResumeSessionState(mapped map[string]interface{}, agent core.Agent) map[string]interface{} {
+	if mapped == nil || agent == nil || agent.Name() != "claudecode" {
+		return h.enrichSessionStateWithAgent(mapped, agent)
+	}
+	sessionID, _ := mapped["id"].(string)
+	if sessionID == "" {
+		return mapped
+	}
+	h.injectClaudeReasoningEffort(mapped, agent)
+	state := "idle"
+	if tracked, ok := h.sessions.get(sessionID); ok {
+		state = string(tracked.state)
+	}
+	mapped["runtimeState"] = state
+	return mapped
+}
+
 func (h *Handlers) enrichSessionStateWithAgent(mapped map[string]interface{}, agent core.Agent) map[string]interface{} {
 	if mapped == nil {
 		return nil
@@ -480,6 +501,16 @@ func (h *Handlers) ocHandleSendMessage(conn Connection, msg WireMessage, dir str
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "missing_param", Message: "sessionId required"})
 		return
 	}
+	if !h.admitBridgeTurn(params.SessionID) {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "runtime.quiescing", Message: "Bridge runtime is quiescing"})
+		return
+	}
+	turnCommitted := false
+	defer func() {
+		if !turnCommitted {
+			h.completeBridgeTurn(params.SessionID)
+		}
+	}()
 
 	modelID := normalizeModelParam(params.Model)
 	sess, err := h.ensureOpenCodeSession(agent, params.SessionID, modelID, dir)
@@ -506,6 +537,7 @@ func (h *Handlers) ocHandleSendMessage(conn Connection, msg WireMessage, dir str
 	}
 
 	h.sessions.markRunning(params.SessionID)
+	turnCommitted = true
 	conn.SendResult(msg.RequestID, &ResultResponse{Ok: true}, nil)
 	h.startRelayIfNotRunning(params.SessionID, sess, conn, msg.BackendID)
 }
