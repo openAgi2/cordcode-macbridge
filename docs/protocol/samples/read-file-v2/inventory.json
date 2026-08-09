@@ -14,21 +14,9 @@
         "macbridge relay framing"
       ]
     },
-    "scopeNote": "Bridge v1 + read_file_v2 + Relay chunk/correlation wire. Distinct from Mac-local Management root and iOS-internal JSC root. legacy read_file preserved for compat."
+    "scopeNote": "Bridge v1 read_file_v2 + Relay chunk/correlation wire. Distinct from Mac-local Management root and iOS-internal JSC root. read_file_v2 is the only file source-read RPC."
   },
   "variants": [
-    {
-      "group": "legacy",
-      "name": "legacy-read-file-result",
-      "evidenceStatus": "observed",
-      "expectedFile": "legacy-read-file-result.json",
-      "expectedCount": 1,
-      "producer": "go-bridge handleReadFile (handlers.go:3823)",
-      "consumers": [
-        "iOS legacy decoder"
-      ],
-      "notes": "current 6-field wire {path,content,extension,sizeBytes,totalLines,truncated}"
-    },
     {
       "group": "read-file-v2-result",
       "name": "v2-text",

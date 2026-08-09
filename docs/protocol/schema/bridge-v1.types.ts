@@ -216,7 +216,6 @@ export type BridgeRPCMethod =
   | "list_memory_files"
   | "read_memory_file"
   | "fetch_content_chunk"
-  | "read_file"
   | "read_file_v2"
   | "rename_session"
   | "share_session"
