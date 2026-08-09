@@ -1,8 +1,8 @@
-// Package readfile 实现 CordCode 文件读取 wire（legacy read_file + read_file_v2 + cancel/chunk）
+// Package readfile 实现 CordCode read_file_v2 + cancel/chunk wire
 // 的 strict codec，作为 plan A-1 的 Bridge/Relay wire root proof artifact。
 //
-// 当前仅被定向测试引用（go-bridge/readfile/*_test.go），未被任何 handler 接线，因此不影响
-// 运行期二进制行为；R1.1 才把它接入真实 handler。规范来源：
+// R1.1 起，read_file_v2 handler 已直接使用本包的 strict request codec、result builder 与
+// WirePayload producer。规范来源：
 // docs(cordcode-ios)/2026-08-08-syntax-highlighting-shiki-jsc-plan.md §3.6.1/§3.6.2 + R11。
 //
 // 为避免与 go-bridge/admission 产生语义耦合，本包自带 strict 原语（R1 可抽取共享 wirestrict 包）。
@@ -18,13 +18,14 @@ import (
 	"strings"
 )
 
-// A0.5 named caps（spec-derived；性能相关项 pending A3a/R1）。
+// Wire caps。read_file_v2 的 source admission 是 2 MiB；极端情况下每个 byte 都可能是 LF，
+// 因此 logical-line 上限必须从 byte 上限推导，不能复用 iOS 语法高亮的 5000 行预算。
 const (
 	MaxReadFileSerializedBytes uint64 = 4 * 1024 * 1024 // 4 MiB（>2MiB source + JSON 开销）
+	MaxReadFileSourceBytes     uint64 = 2 * 1024 * 1024
 	MaxPathUTF8Bytes           uint64 = 32 * 1024
 	MaxSegments                uint64 = 8
-	MaxTotalLines              uint64 = 5000
-	MaxSourceLineCount         uint64 = 5000
+	MaxTotalLines              uint64 = MaxReadFileSourceBytes
 )
 
 // sha256RevRegex: contentRevision = sha256:<64 lowercase hex>。
@@ -154,10 +155,10 @@ func decodeStrictString(raw json.RawMessage) (string, error) {
 // ── types ───────────────────────────────────────────────────────────────────────
 
 type OwningIdentity struct {
-	Kind                  string // "session" | "workspace"
-	BackendID             string
-	SessionID             string // session only
-	CanonicalDirectory    string // session only
+	Kind                   string // "session" | "workspace"
+	BackendID              string
+	SessionID              string // session only
+	CanonicalDirectory     string // session only
 	CanonicalWorkspaceRoot string // workspace only
 }
 
@@ -171,26 +172,21 @@ type FileMetadata struct {
 
 type Segment struct {
 	Kind            string // full | head | omission | tail
-	Content         string   // full/head/tail only
+	Content         string // full/head/tail only
 	SourceLineStart uint64
 	SourceLineCount uint64 // full/head/tail: sourceLineCount; omission: omittedLineCount
 }
 
 type ReadFileV2Result struct {
-	Kind      string // text | unsupported_encoding | binary
-	Metadata  FileMetadata
-	Encoding  string   // text only ("utf-8")
-	TotalLines uint64  // text only
-	Detected  string   // unsupported_encoding only; "" when omitted
-	Segments  []Segment // text only
+	Kind       string // text | unsupported_encoding | binary
+	Metadata   FileMetadata
+	Encoding   string    // text only ("utf-8")
+	TotalLines uint64    // text only
+	Detected   string    // unsupported_encoding only; "" when omitted
+	Segments   []Segment // text only
 }
 
 // ── decoders ────────────────────────────────────────────────────────────────────
-
-// DecodeLegacyReadFileResult strict-decode 当前 6 字段 wire（handlers.go:3823）。
-func DecodeLegacyReadFileResult(raw json.RawMessage) (map[string]json.RawMessage, error) {
-	return decodeStrictObject(raw, []string{"path", "content", "extension", "sizeBytes", "totalLines", "truncated"})
-}
 
 // DecodeReadFileV2Request strict-decode path + owner tagged（session|workspace）。
 func DecodeReadFileV2Request(raw json.RawMessage) (path string, owner OwningIdentity, err error) {
@@ -354,7 +350,7 @@ func decodeMetadata(raw json.RawMessage) (FileMetadata, error) {
 	if err != nil {
 		return FileMetadata{}, err
 	}
-	if size > MaxReadFileSerializedBytes {
+	if size > MaxReadFileSourceBytes {
 		return FileMetadata{}, fmt.Errorf("%w: sizeBytes=%d", errNumberOverflow, size)
 	}
 	rev, err := decodeStrictString(m["contentRevision"])

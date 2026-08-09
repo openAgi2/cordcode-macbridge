@@ -383,6 +383,10 @@ func Main() {
 		if ack.Ok && negotiateRelayCancel(conn, hello.Capabilities) {
 			ack.Capabilities[relayCancelCapability] = true
 		}
+		if ack.Ok && helloSupportsReadFileV2(&hello) {
+			ack.Capabilities["read_file_v2"] = true
+			server.eventPublisher.SetConnReadFileV2(conn, true)
+		}
 		var replay []EventMessage
 		if server.recoveryEnabled && helloSupportsRecovery(&hello) && ack.Ok {
 			plan, events, err := server.prepareRecovery(conn, &hello)

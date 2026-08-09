@@ -1,4 +1,1 @@
-{
-  "error": "file.read_degraded",
-  "message": "file read pool degraded; retry after management health recovers"
-}
+{"error":{"code":"file.read_degraded","message":"file read service is degraded; runtime restart required"},"ok":false,"requestId":"req-0002-test","type":"result"}

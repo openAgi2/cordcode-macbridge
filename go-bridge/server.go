@@ -146,10 +146,11 @@ func (c *Conn) SendJSONReport(v interface{}) error {
 }
 
 func (c *Conn) SendResult(requestID string, data interface{}, err *WireError) {
-	resp := map[string]interface{}{
-		"type":      "result",
-		"requestId": requestID,
-	}
+	c.SendJSON(resultEnvelope(requestID, data, err))
+}
+
+func resultEnvelope(requestID string, data interface{}, err *WireError) map[string]interface{} {
+	resp := map[string]interface{}{"type": "result", "requestId": requestID}
 	if err != nil {
 		resp["ok"] = false
 		resp["error"] = err
@@ -157,7 +158,7 @@ func (c *Conn) SendResult(requestID string, data interface{}, err *WireError) {
 		resp["ok"] = true
 		resp["data"] = data
 	}
-	c.SendJSON(resp)
+	return resp
 }
 
 func (c *Conn) Close() error {
@@ -227,6 +228,15 @@ func (s *Server) SetSessionSyncV2Enabled(enabled bool) { s.sessionSyncV2Enabled 
 func helloSupportsSessionSyncV2(hello *HelloMessage) bool {
 	for _, capability := range hello.Capabilities {
 		if capability == "session_sync_v2" {
+			return true
+		}
+	}
+	return false
+}
+
+func helloSupportsReadFileV2(hello *HelloMessage) bool {
+	for _, capability := range hello.Capabilities {
+		if capability == "read_file_v2" {
 			return true
 		}
 	}
@@ -501,7 +511,7 @@ func (s *Server) handleRegister(conn *Conn, msg *WireMessage) {
 
 func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage) {
 	if conn.revoked {
-		conn.SendJSON(map[string]interface{}{
+		connection.SendJSON(map[string]interface{}{
 			"type": "hello_ack",
 			"ok":   false,
 			"error": map[string]string{
@@ -569,7 +579,11 @@ func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage
 		advertiseSessionSyncV2Backend(ack.Backends)
 		s.eventPublisher.SetConnSyncV2(connection, true)
 	}
-	conn.SendJSON(ack)
+	if ack.Ok && helloSupportsReadFileV2(&hello) {
+		ack.Capabilities["read_file_v2"] = true
+		s.eventPublisher.SetConnReadFileV2(connection, true)
+	}
+	connection.SendJSON(ack)
 	if ack.Recovery != nil {
 		s.emitRecoveryFrames(connection, ack.Recovery, replay)
 	}

@@ -1,14 +1,1 @@
-{
-  "kind": "unsupported_encoding",
-  "metadata": {
-    "path": "/workspace/src/main.swift",
-    "extension": "swift",
-    "sizeBytes": 30,
-    "contentRevision": "sha256:b9bb40afe81787f5ded3cba519a6b7e1376a681c3aa39982e6d1de3e7fbdf804",
-    "owningIdentity": {
-      "kind": "workspace",
-      "backendId": "codex",
-      "canonicalWorkspaceRoot": "/workspace"
-    }
-  }
-}
+{"kind":"unsupported_encoding","metadata":{"contentRevision":"sha256:0d7888ac4c94942a108f490f3e016cda6a6a332c59863be2a366e754ee3d7cd9","extension":"swift","owningIdentity":{"backendId":"codex","canonicalWorkspaceRoot":"/workspace","kind":"workspace"},"path":"/workspace/src/main.swift","sizeBytes":5}}

@@ -1,6 +1,1 @@
-{
-  "groupId": "grp-0001-test",
-  "index": 0,
-  "count": 3,
-  "bulkCorrelationId": "0123456789abcdef0123456789abcdef"
-}
+{"groupId":"grp-0001-test","index":1,"count":3,"bulkCorrelationId":"00112233445566778899aabbccddeeff"}

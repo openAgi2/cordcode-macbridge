@@ -1,6 +1,6 @@
 package gobridge
 
-// R1.3（§3.6.4）：read_file_v2 / legacy read_file 结果分类为 relayOutboundBulk，
+// R1.3（§3.6.4）：只有 read_file_v2 文件读取结果分类为 relayOutboundBulk，
 // 复用 gzip + relay_chunks_v1 公平分块。证明：
 //  1. chunks+gzip acked 且结果 > 阈值 → 分块 + gzip，重组后还原 result JSON；
 //  2. 小结果（< 阈值）单帧不 chunk；
@@ -108,6 +108,9 @@ func collectResultFrames(t *testing.T, out chan RelayEnvelope, key []byte) ([]by
 func TestReadFileV2ResultChunkedAndGzipped(t *testing.T) {
 	if got := classifyRelayRequest("read_file_v2"); got != relayOutboundBulk {
 		t.Fatalf("classifyRelayRequest(read_file_v2)=%v want relayOutboundBulk", got)
+	}
+	if got := classifyRelayRequest("read_file"); got != relayOutboundNormal {
+		t.Fatalf("removed read_file must not retain bulk classification, got %v", got)
 	}
 	rc, out := newReadFileBulkTestConn(t, true, true)
 	// 取回真实 macToIosKey：构造时传入的是 zero key copy，OpenEnvelope 需用同一 key。

@@ -1,9 +1,1 @@
-{
-  "path": "/workspace/src/main.swift",
-  "owner": {
-    "kind": "session",
-    "backendId": "codex",
-    "sessionId": "sess-0001-test",
-    "directory": "/workspace/src"
-  }
-}
+{"owner":{"backendId":"codex","directory":"\/workspace\/src","kind":"session","sessionId":"sess-0001-test"},"path":"\/workspace\/src\/main.swift"}

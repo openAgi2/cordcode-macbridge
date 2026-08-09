@@ -97,3 +97,27 @@ func (p *EventPublisher) ConnSyncV2(conn Connection) bool {
 	defer p.mu.Unlock()
 	return p.syncV2[conn]
 }
+
+// SetConnReadFileV2 records the authenticated hello negotiation for this exact connection.
+// Replacement connections must negotiate again; UnregisterConnection clears the mark.
+func (p *EventPublisher) SetConnReadFileV2(conn Connection, enabled bool) {
+	if p == nil || conn == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if enabled {
+		p.readFileV2[conn] = true
+	} else {
+		delete(p.readFileV2, conn)
+	}
+}
+
+func (p *EventPublisher) ConnReadFileV2(conn Connection) bool {
+	if p == nil || conn == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.readFileV2[conn]
+}

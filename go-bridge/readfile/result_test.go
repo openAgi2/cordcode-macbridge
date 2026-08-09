@@ -11,7 +11,7 @@ func ident() OwningIdentity {
 }
 
 func TestBuildResult_TextFull(t *testing.T) {
-	r := BuildReadFileV2Result([]byte("a\nb\nc"), "/x.swift", "swift", ident(), DefaultMaxLines, DefaultTailLines)
+	r := BuildReadFileV2Result([]byte("a\nb\nc"), "/x.swift", "swift", ident(), NoLineTruncation, 0)
 	if r.Kind != "text" || r.Encoding != "utf-8" {
 		t.Fatalf("kind=%s enc=%s want text/utf-8", r.Kind, r.Encoding)
 	}
@@ -27,7 +27,7 @@ func TestBuildResult_TextFull(t *testing.T) {
 }
 
 func TestBuildResult_EmptyUniqueFullSegment(t *testing.T) {
-	r := BuildReadFileV2Result([]byte{}, "/x.swift", "swift", ident(), DefaultMaxLines, DefaultTailLines)
+	r := BuildReadFileV2Result([]byte{}, "/x.swift", "swift", ident(), NoLineTruncation, 0)
 	if r.TotalLines != 0 {
 		t.Errorf("empty totalLines=%d want 0", r.TotalLines)
 	}
@@ -41,7 +41,7 @@ func TestBuildResult_EmptyUniqueFullSegment(t *testing.T) {
 
 func TestBuildResult_TrailingNewline(t *testing.T) {
 	// "a\nb\n": LF=2, last byte \n => totalLines=2（尾换行不产生额外空行）
-	r := BuildReadFileV2Result([]byte("a\nb\n"), "/x.swift", "swift", ident(), DefaultMaxLines, DefaultTailLines)
+	r := BuildReadFileV2Result([]byte("a\nb\n"), "/x.swift", "swift", ident(), NoLineTruncation, 0)
 	if r.TotalLines != 2 {
 		t.Errorf("totalLines=%d want 2", r.TotalLines)
 	}
@@ -49,7 +49,7 @@ func TestBuildResult_TrailingNewline(t *testing.T) {
 
 func TestBuildResult_CRLFCountsAsOneLine(t *testing.T) {
 	// "a\r\nb\r\n": 两个 \n，末字节 \n => totalLines=2（\r 行内）
-	r := BuildReadFileV2Result([]byte("a\r\nb\r\n"), "/x.swift", "swift", ident(), DefaultMaxLines, DefaultTailLines)
+	r := BuildReadFileV2Result([]byte("a\r\nb\r\n"), "/x.swift", "swift", ident(), NoLineTruncation, 0)
 	if r.TotalLines != 2 {
 		t.Errorf("CRLF totalLines=%d want 2", r.TotalLines)
 	}
@@ -82,9 +82,30 @@ func TestBuildResult_TruncatedHeadOmissionTailLineSum(t *testing.T) {
 	}
 }
 
+func TestBuildResult_NoLineTruncationReturnsMoreThan5000LinesInFull(t *testing.T) {
+	src := bytes.Repeat([]byte("line\n"), 5529)
+	r := BuildReadFileV2Result(src, "/x.swift", "swift", ident(), NoLineTruncation, 0)
+	if r.TotalLines != 5529 {
+		t.Fatalf("totalLines=%d want 5529", r.TotalLines)
+	}
+	if len(r.Segments) != 1 || r.Segments[0].Kind != "full" {
+		t.Fatalf("want one full segment, got %+v", r.Segments)
+	}
+	if !bytes.Equal([]byte(r.Segments[0].Content), src) {
+		t.Fatal("full segment did not preserve complete source")
+	}
+	payload, err := json.Marshal(r.WirePayload())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecodeReadFileV2Result(payload); err != nil {
+		t.Fatalf("strict codec rejected >5000-line full result: %v", err)
+	}
+}
+
 func TestBuildResult_UnsupportedEncoding(t *testing.T) {
 	// UTF-16LE BOM
-	r := BuildReadFileV2Result([]byte{0xFF, 0xFE, 0x41, 0x00}, "/x.txt", "txt", ident(), DefaultMaxLines, DefaultTailLines)
+	r := BuildReadFileV2Result([]byte{0xFF, 0xFE, 0x41, 0x00}, "/x.txt", "txt", ident(), NoLineTruncation, 0)
 	if r.Kind != "unsupported_encoding" || r.Detected != "utf-16le" {
 		t.Fatalf("kind=%s detected=%s want unsupported_encoding/utf-16le", r.Kind, r.Detected)
 	}
@@ -95,7 +116,7 @@ func TestBuildResult_UnsupportedEncoding(t *testing.T) {
 
 func TestBuildResult_Binary(t *testing.T) {
 	// high NUL
-	r := BuildReadFileV2Result(bytes.Repeat([]byte{0x00}, 100), "/x.bin", "bin", ident(), DefaultMaxLines, DefaultTailLines)
+	r := BuildReadFileV2Result(bytes.Repeat([]byte{0x00}, 100), "/x.bin", "bin", ident(), NoLineTruncation, 0)
 	if r.Kind != "binary" {
 		t.Fatalf("kind=%s want binary", r.Kind)
 	}
@@ -106,7 +127,7 @@ func TestBuildResult_Binary(t *testing.T) {
 
 func TestBuildResult_RevisionCoversRawWithBOM(t *testing.T) {
 	withBOM := append([]byte{0xEF, 0xBB, 0xBF}, []byte("plain")...)
-	r := BuildReadFileV2Result(withBOM, "/x.swift", "swift", ident(), DefaultMaxLines, DefaultTailLines)
+	r := BuildReadFileV2Result(withBOM, "/x.swift", "swift", ident(), NoLineTruncation, 0)
 	// contentRevision 覆盖含 BOM 的 raw bytes（不是 BOM-stripped display）
 	if r.Metadata.ContentRevision != ContentRevision(withBOM) {
 		t.Error("contentRevision must cover raw bytes incl BOM")
@@ -121,7 +142,7 @@ func TestBuildResult_RevisionCoversRawWithBOM(t *testing.T) {
 }
 
 func TestBuildResult_MetadataFields(t *testing.T) {
-	r := BuildReadFileV2Result([]byte("x"), "/ws/a.swift", "swift", ident(), DefaultMaxLines, DefaultTailLines)
+	r := BuildReadFileV2Result([]byte("x"), "/ws/a.swift", "swift", ident(), NoLineTruncation, 0)
 	if r.Metadata.Path != "/ws/a.swift" || r.Metadata.Extension != "swift" {
 		t.Errorf("metadata path/ext wrong: %+v", r.Metadata)
 	}
@@ -143,11 +164,11 @@ func TestWirePayload_RoundTripsCodec(t *testing.T) {
 		[]byte("let x = 1\nimport Foundation\n"),
 		[]byte{},
 		[]byte{0xEF, 0xBB, 0xBF, 'p', 'l', 'a', 'i', 'n'}, // UTF-8 BOM text
-		[]byte{0xFF, 0xFE, 0x41, 0x00},                     // UTF-16LE -> unsupported
-		bytes.Repeat([]byte{0x00}, 100),                    // binary
+		[]byte{0xFF, 0xFE, 0x41, 0x00},                    // UTF-16LE -> unsupported
+		bytes.Repeat([]byte{0x00}, 100),                   // binary
 	}
 	for i, data := range cases {
-		r := BuildReadFileV2Result(data, "/ws/a.swift", "swift", ident(), DefaultMaxLines, DefaultTailLines)
+		r := BuildReadFileV2Result(data, "/ws/a.swift", "swift", ident(), NoLineTruncation, 0)
 		payload := r.WirePayload()
 		js, err := json.Marshal(payload)
 		if err != nil {

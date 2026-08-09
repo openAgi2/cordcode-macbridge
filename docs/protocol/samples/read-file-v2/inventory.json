@@ -4,11 +4,11 @@
   "root": {
     "name": "bridge-relay-wire",
     "kind": "cross-repo-wire",
-    "status": "draft",
+    "status": "frozen",
     "statusLadder": "draft->proposed->observed->frozen",
     "canonicalOwner": "macbridge docs/protocol/samples/read-file-v2/ (canonical); iOS mirror byte-equality (A-1.4)",
     "producerConsumers": {
-      "producer": "go-bridge handlers (read_file, future read_file_v2, cancel, chunking)",
+      "producer": "go-bridge handlers/readfile/relay framing plus iOS Swift request codec",
       "consumers": [
         "iOS Swift wire decoder",
         "macbridge relay framing"
@@ -20,7 +20,7 @@
     {
       "group": "read-file-v2-result",
       "name": "v2-text",
-      "evidenceStatus": "proposed",
+      "evidenceStatus": "observed",
       "expectedFile": "read-file-v2-text.json",
       "expectedCount": 1,
       "producer": "go-bridge (R1.1)",
@@ -32,7 +32,7 @@
     {
       "group": "read-file-v2-result",
       "name": "v2-text-empty",
-      "evidenceStatus": "proposed",
+      "evidenceStatus": "observed",
       "expectedFile": "read-file-v2-text-empty.json",
       "expectedCount": 1,
       "producer": "go-bridge (R1.1)",
@@ -44,19 +44,19 @@
     {
       "group": "read-file-v2-result",
       "name": "v2-text-truncated",
-      "evidenceStatus": "proposed",
+      "evidenceStatus": "observed",
       "expectedFile": "read-file-v2-text-truncated.json",
       "expectedCount": 1,
       "producer": "go-bridge (R1.1)",
       "consumers": [
         "iOS Swift decoder"
       ],
-      "notes": "head+omission+tail; headCount+omittedCount+tailCount==totalLines"
+      "notes": "explicit partial-result shape only; default read_file_v2 returns full text within the 2 MiB source cap; head+omission+tail counts sum to totalLines"
     },
     {
       "group": "read-file-v2-result",
       "name": "v2-text-session",
-      "evidenceStatus": "proposed",
+      "evidenceStatus": "observed",
       "expectedFile": "read-file-v2-text-session.json",
       "expectedCount": 1,
       "producer": "go-bridge (R1.1)",
@@ -68,7 +68,7 @@
     {
       "group": "read-file-v2-result",
       "name": "v2-unsupported-utf16",
-      "evidenceStatus": "proposed",
+      "evidenceStatus": "observed",
       "expectedFile": "read-file-v2-unsupported-utf16.json",
       "expectedCount": 1,
       "producer": "go-bridge (R1.1)",
@@ -80,7 +80,7 @@
     {
       "group": "read-file-v2-result",
       "name": "v2-unsupported-unknown",
-      "evidenceStatus": "proposed",
+      "evidenceStatus": "observed",
       "expectedFile": "read-file-v2-unsupported-unknown.json",
       "expectedCount": 1,
       "producer": "go-bridge (R1.1)",
@@ -92,7 +92,7 @@
     {
       "group": "read-file-v2-result",
       "name": "v2-binary",
-      "evidenceStatus": "proposed",
+      "evidenceStatus": "observed",
       "expectedFile": "read-file-v2-binary.json",
       "expectedCount": 1,
       "producer": "go-bridge (R1.1)",
@@ -104,7 +104,7 @@
     {
       "group": "read-file-v2-result",
       "name": "v2-text-empty-ext",
-      "evidenceStatus": "proposed",
+      "evidenceStatus": "observed",
       "expectedFile": "read-file-v2-text-empty-ext.json",
       "expectedCount": 1,
       "producer": "go-bridge (R1.1)",
@@ -116,7 +116,7 @@
     {
       "group": "read-file-v2-request",
       "name": "v2-request-workspace",
-      "evidenceStatus": "proposed",
+      "evidenceStatus": "observed",
       "expectedFile": "read-file-v2-request-workspace.json",
       "expectedCount": 1,
       "producer": "iOS",
@@ -128,7 +128,7 @@
     {
       "group": "read-file-v2-request",
       "name": "v2-request-session",
-      "evidenceStatus": "proposed",
+      "evidenceStatus": "observed",
       "expectedFile": "read-file-v2-request-session.json",
       "expectedCount": 1,
       "producer": "iOS",
@@ -140,19 +140,19 @@
     {
       "group": "hello-capability",
       "name": "hello-ack-read-file-v2",
-      "evidenceStatus": "proposed",
+      "evidenceStatus": "observed",
       "expectedFile": "hello-ack-read-file-v2.json",
       "expectedCount": 1,
       "producer": "go-bridge",
       "consumers": [
         "iOS"
       ],
-      "notes": "capability negotiation fragment (full hello shape in bridge-v1 samples)"
+      "notes": "full hello_ack emitted by the real direct hello handler after read_file_v2 opt-in"
     },
     {
       "group": "cancel",
       "name": "cancel-request-v1",
-      "evidenceStatus": "proposed",
+      "evidenceStatus": "observed",
       "expectedFile": "cancel-request-v1.json",
       "expectedCount": 1,
       "producer": "iOS",
@@ -164,7 +164,7 @@
     {
       "group": "relay-chunk",
       "name": "chunk-base",
-      "evidenceStatus": "proposed",
+      "evidenceStatus": "observed",
       "expectedFile": "relay-chunk-base.json",
       "expectedCount": 1,
       "producer": "go-bridge relay",
@@ -176,7 +176,7 @@
     {
       "group": "relay-chunk",
       "name": "chunk-correlated",
-      "evidenceStatus": "proposed",
+      "evidenceStatus": "observed",
       "expectedFile": "relay-chunk-correlated.json",
       "expectedCount": 1,
       "producer": "go-bridge relay",
@@ -188,7 +188,7 @@
     {
       "group": "bridge-error-envelope",
       "name": "error-runtime-quiescing",
-      "evidenceStatus": "proposed",
+      "evidenceStatus": "observed",
       "expectedFile": "error-runtime-quiescing.json",
       "expectedCount": 1,
       "producer": "go-bridge admission",
@@ -201,7 +201,7 @@
     {
       "group": "bridge-error-envelope",
       "name": "error-file-read-degraded",
-      "evidenceStatus": "proposed",
+      "evidenceStatus": "observed",
       "expectedFile": "error-file-read-degraded.json",
       "expectedCount": 1,
       "producer": "go-bridge file RPC",
@@ -211,9 +211,10 @@
       ]
     }
   ],
-  "deferredToR1": {
-    "AAD/crypto vectors": "A-1.3 deferred — canonical AAD bytes (base/correlated envelope, versioned field order) + Mac<->iOS ciphertext vectors + tamper/case/extra/duplicate rejection. Next batch (R1.4).",
-    "stateMachines": "A-1.5 wire state deferred — progress base/correlated, cancel atomic (queued->...->committedToWriter too_late), registry active/retired, tombstone, three-clock, cancel exactly-once. Next batch (R1.4/R1.5).",
-    "jsonPreflight": "A-1.6 cross-cutting deferred — schema-specific two-pass exact-length preflight == Go encoding/json default escaping; over-cap-before-marshal RSS. Next batch."
+  "frozenProofs": {
+    "AAD/crypto vectors": "R1.4 exact base/correlated AAD and tamper/metadata rejection tests pass.",
+    "stateMachines": "R1.4/R1.5 registry, progress, cancel, tombstone and mixed-version tests pass.",
+    "jsonPreflight": "R1.6 exact encoding/json preflight and cap-before-marshal tests pass.",
+    "producerFixtures": "R1.12 exact Go/iOS producer round-trip tests and canonical-to-iOS byte equality pass."
   }
 }

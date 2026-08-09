@@ -1,5 +1,1 @@
-{
-  "method": "cancel_request_v1",
-  "requestId": "req-0001-test",
-  "targetRequestId": "req-0000-test"
-}
+{"requestId":"req-0000-test"}

@@ -853,6 +853,13 @@ func (h *Handlers) HandleRPC(conn Connection, msg WireMessage) {
 		conn.SendResult(msg.RequestID, nil, perr)
 		return
 	}
+	if msg.Method == "read_file_v2" && !h.eventPublisher.ConnReadFileV2(conn) {
+		conn.SendResult(msg.RequestID, nil, &WireError{
+			Code:    "capability_not_negotiated",
+			Message: "read_file_v2 was not negotiated for this connection",
+		})
+		return
+	}
 
 	if h.handleDeliveryRPC(conn, msg) {
 		return
@@ -1112,8 +1119,6 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleReadMemoryFile(conn, msg, agent)
 	case "fetch_content_chunk":
 		h.handleFetchContentChunk(conn, msg)
-	case "read_file":
-		h.handleReadFile(conn, msg)
 	case "read_file_v2":
 		h.handleReadFileV2(conn, msg)
 	case "cancel_request_v1":
@@ -3753,13 +3758,7 @@ func backendKindForAgent(agent core.Agent) string {
 	}
 }
 
-// ── read_file: iOS 端查看消息中引用的文件内容 ──────────────────────────────────
-
-const (
-	readFileMaxSize   = 2 * 1024 * 1024 // 2MB
-	readFileMaxLines  = 5000
-	readFileTailLines = 200
-)
+const readFileMaxSize = 2 * 1024 * 1024 // 2MB
 
 // defaultFilePoolConfig 是 read_file_v2 bounded worker pool 的默认配置（plan §3.6.3 / A0.5）。
 // 最终数值待 A0 冻结；当前选择保守可工作值：4 个 worker、单设备最多 1 并发（保留 3 个
@@ -3782,135 +3781,32 @@ func defaultFilePoolConfig() filepool.Config {
 	}
 }
 
-func (h *Handlers) handleReadFile(conn Connection, msg WireMessage) {
-	var params struct {
-		Path      string `json:"path"`
-		Directory string `json:"directory,omitempty"`
-		SessionID string `json:"sessionId,omitempty"`
-	}
-	if msg.Params != nil {
-		json.Unmarshal(msg.Params, &params)
-	}
-	if params.Path == "" {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "missing_param", Message: "path required"})
-		return
-	}
-
-	authorizedRoot, err := h.authorizedReadFileRoot(msg, params.Directory, params.SessionID)
-	if err != nil {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "file.outside_authorized_root", Message: "file is outside the authorized workspace"})
-		return
-	}
-
-	resolvedPath, info, err := resolveAuthorizedReadFilePath(authorizedRoot, params.Path)
-	if err != nil {
-		var wireErr *WireError
-		if errors.As(err, &wireErr) {
-			conn.SendResult(msg.RequestID, nil, wireErr)
-		} else {
-			conn.SendResult(msg.RequestID, nil, &WireError{Code: "file_not_found", Message: "file not found"})
-		}
-		return
-	}
-
-	if info.Size() > readFileMaxSize {
-		conn.SendResult(msg.RequestID, nil, &WireError{
-			Code:    "file_too_large",
-			Message: fmt.Sprintf("file size %d bytes exceeds limit %d bytes", info.Size(), readFileMaxSize),
-		})
-		return
-	}
-
-	file, err := os.Open(resolvedPath)
-	if err != nil {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "read_failed", Message: "failed to open file"})
-		return
-	}
-	defer file.Close()
-
-	openedInfo, err := file.Stat()
-	if err != nil || !os.SameFile(info, openedInfo) {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "file.changed_during_read", Message: "file changed during authorization"})
-		return
-	}
-
-	data, err := io.ReadAll(io.LimitReader(file, readFileMaxSize+1))
-	if err != nil {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "read_failed", Message: "failed to read file"})
-		return
-	}
-	if len(data) > readFileMaxSize {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "file_too_large", Message: "file exceeds size limit"})
-		return
-	}
-
-	content := string(data)
-	lines := strings.Split(content, "\n")
-	totalLines := len(lines)
-	truncated := false
-
-	// 超过行数限制时截断：保留头部 + 尾部
-	if totalLines > readFileMaxLines {
-		headLines := readFileMaxLines - readFileTailLines
-		head := lines[:headLines]
-		tail := lines[totalLines-readFileTailLines:]
-		content = strings.Join(head, "\n") +
-			fmt.Sprintf("\n\n... (%d lines omitted) ...\n\n", totalLines-headLines-readFileTailLines) +
-			strings.Join(tail, "\n")
-		truncated = true
-	}
-
-	// 推断语言（用于前端高亮）
-	ext := strings.TrimPrefix(filepath.Ext(resolvedPath), ".")
-
-	conn.SendResult(msg.RequestID, map[string]interface{}{
-		"path":       resolvedPath,
-		"content":    content,
-		"extension":  ext,
-		"sizeBytes":  len(data),
-		"totalLines": totalLines,
-		"truncated":  truncated,
-	}, nil)
-}
-
 // ── read_file_v2: tagged text/unsupported_encoding/binary + segments + identity (plan §3.6) ──
 //
-// 与 legacy read_file 并存（iOS 未声明 read_file_v2 capability 时仍走 legacy）。
+// 这是唯一的文件源码读取 RPC；调用方必须在 hello 阶段协商 read_file_v2 capability。
 // params exact: path + owner{kind:session|workspace, backendId, sessionId+directory | workspaceRoot}。
 // MacBridge 按 owner 授权并返回 server-canonical owningIdentity（canonicalized root）。
 // 结果经 readfile.BuildReadFileV2Result 构造（encoding 分类 + segments + 行语义），WirePayload 发出。
 func (h *Handlers) handleReadFileV2(conn Connection, msg WireMessage) {
-	var params struct {
-		Path  string `json:"path"`
-		Owner struct {
-			Kind          string `json:"kind"`
-			BackendID     string `json:"backendId"`
-			SessionID     string `json:"sessionId,omitempty"`
-			Directory     string `json:"directory,omitempty"`
-			WorkspaceRoot string `json:"workspaceRoot,omitempty"`
-		} `json:"owner"`
-	}
-	if msg.Params != nil {
-		json.Unmarshal(msg.Params, &params)
-	}
-	if params.Path == "" {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "missing_param", Message: "path required"})
+	path, owner, decodeErr := readfile.DecodeReadFileV2Request(msg.Params)
+	if decodeErr != nil {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: "read_file_v2 params must match the exact owner schema"})
 		return
 	}
 
-	backendID := params.Owner.BackendID
+	backendID := owner.BackendID
 	if backendID == "" {
 		backendID = msg.BackendID
 	}
 	var requestedDir, sessionID string
 	var identity readfile.OwningIdentity
-	switch params.Owner.Kind {
+	switch owner.Kind {
 	case "session":
-		requestedDir = params.Owner.Directory
-		sessionID = params.Owner.SessionID
-		identity = readfile.OwningIdentity{Kind: "session", BackendID: backendID, SessionID: params.Owner.SessionID}
+		requestedDir = owner.CanonicalDirectory
+		sessionID = owner.SessionID
+		identity = readfile.OwningIdentity{Kind: "session", BackendID: backendID, SessionID: owner.SessionID}
 	case "workspace":
-		requestedDir = params.Owner.WorkspaceRoot
+		requestedDir = owner.CanonicalWorkspaceRoot
 		identity = readfile.OwningIdentity{Kind: "workspace", BackendID: backendID}
 	default:
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: "owner.kind must be session|workspace"})
@@ -3929,7 +3825,7 @@ func (h *Handlers) handleReadFileV2(conn Connection, msg WireMessage) {
 		identity.CanonicalDirectory = dir
 	}
 
-	resolvedPath, info, err := resolveAuthorizedReadFilePath(authorizedRoot, params.Path)
+	resolvedPath, info, err := resolveAuthorizedReadFilePath(authorizedRoot, path)
 	if err != nil {
 		var wireErr *WireError
 		if errors.As(err, &wireErr) {
@@ -4002,7 +3898,7 @@ func performReadFileV2Read(ctx context.Context, conn Connection, requestID, reso
 	}
 	defer file.Close()
 	openedInfo, err := file.Stat()
-	if err != nil || !os.SameFile(info, openedInfo) {
+	if err != nil || !stableFileSnapshot(info, openedInfo) {
 		conn.SendResult(requestID, nil, &WireError{Code: "file.changed_during_read", Message: "file changed during authorization"})
 		return
 	}
@@ -4020,13 +3916,31 @@ func performReadFileV2Read(ctx context.Context, conn Connection, requestID, reso
 		conn.SendResult(requestID, nil, &WireError{Code: "file_too_large", Message: "file exceeds size limit"})
 		return
 	}
+	finalInfo, err := file.Stat()
+	if err != nil || !stableFileSnapshot(openedInfo, finalInfo) {
+		conn.SendResult(requestID, nil, &WireError{Code: "file.changed_during_read", Message: "file changed while being read"})
+		return
+	}
 	if ctx.Err() != nil {
 		// commit guard：读取虽完成，但 ctx 已过期/cancel，禁止 late writeback。
 		slog.Warn("read_file_v2 discarded: context done before commit", "requestId", safeID(requestID))
 		return
 	}
-	result := readfile.BuildReadFileV2Result(data, resolvedPath, ext, identity, readfile.DefaultMaxLines, readfile.DefaultTailLines)
+	// read_file_v2 返回 byte admission（2 MiB）内的完整文本。5000 行只限制 iOS Shiki
+	// 高亮资格，不得在传输层删掉源码。
+	result := readfile.BuildReadFileV2Result(data, resolvedPath, ext, identity, readfile.NoLineTruncation, 0)
 	conn.SendResult(requestID, result.WirePayload(), nil)
+}
+
+// stableFileSnapshot rejects replacement and in-place rewrites, including the
+// common same-size case. The post-read check is intentionally performed on the
+// already-open descriptor so a pathname swap cannot make torn bytes look valid.
+func stableFileSnapshot(before, after os.FileInfo) bool {
+	return before != nil && after != nil &&
+		os.SameFile(before, after) &&
+		before.Size() == after.Size() &&
+		before.Mode() == after.Mode() &&
+		before.ModTime().Equal(after.ModTime())
 }
 
 // readBoundedCooperative 以固定块读取 file 至多 maxBytes+1 字节，并在每次 syscall 间
@@ -4366,6 +4280,90 @@ func resolveAuthorizedReadFilePath(root, requestedPath string) (string, os.FileI
 	if !filepath.IsAbs(candidate) {
 		candidate = filepath.Join(root, candidate)
 	}
+	resolved, info, err := resolveAuthorizedReadFileCandidate(root, candidate)
+	if err == nil {
+		return resolved, info, nil
+	}
+
+	// Markdown produced by coding agents sometimes uses a display filename as the href
+	// (for example [plan.md](plan.md)) even when the file lives below the workspace root.
+	// Preserve normal path semantics first; only a single-component relative basename that
+	// does not exist at root is eligible for a bounded unique-name lookup. Never guess when
+	// multiple files share the name.
+	if filepath.IsAbs(cleanPath) || filepath.Base(cleanPath) != cleanPath || !errors.Is(err, os.ErrNotExist) {
+		return "", nil, err
+	}
+	if isSensitiveReadFilePath(filepath.Join(root, cleanPath)) {
+		return "", nil, &WireError{Code: "file.sensitive_path_denied", Message: "sensitive file access is denied"}
+	}
+	matched, matchErr := findUniqueAuthorizedBasename(root, cleanPath)
+	if matchErr != nil {
+		return "", nil, matchErr
+	}
+	if matched == "" {
+		return "", nil, err
+	}
+	return resolveAuthorizedReadFileCandidate(root, matched)
+}
+
+const maxAuthorizedBasenameSearchEntries = 50_000
+
+var (
+	errAuthorizedBasenameAmbiguous = errors.New("authorized basename is ambiguous")
+	errAuthorizedBasenameLimit     = errors.New("authorized basename search limit exceeded")
+)
+
+func findUniqueAuthorizedBasename(root, basename string) (string, error) {
+	var match string
+	visited := 0
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if entry != nil && entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if path == root {
+			return nil
+		}
+		if entry.IsDir() && shouldSkipBasenameSearchDirectory(entry.Name()) {
+			return filepath.SkipDir
+		}
+		visited++
+		if visited > maxAuthorizedBasenameSearchEntries {
+			return errAuthorizedBasenameLimit
+		}
+		if !entry.Type().IsRegular() || entry.Name() != basename {
+			return nil
+		}
+		if match != "" {
+			return errAuthorizedBasenameAmbiguous
+		}
+		match = path
+		return nil
+	})
+	switch {
+	case errors.Is(err, errAuthorizedBasenameAmbiguous):
+		return "", &WireError{Code: "file.basename_ambiguous", Message: "filename matches multiple files in the authorized workspace"}
+	case errors.Is(err, errAuthorizedBasenameLimit):
+		return "", &WireError{Code: "file.basename_search_limit", Message: "workspace is too large for filename-only lookup; use a relative or absolute path"}
+	case err != nil:
+		return "", err
+	default:
+		return match, nil
+	}
+}
+
+func shouldSkipBasenameSearchDirectory(name string) bool {
+	switch name {
+	case ".git", ".build", "build", "DerivedData", "node_modules", "Pods":
+		return true
+	default:
+		return false
+	}
+}
+
+func resolveAuthorizedReadFileCandidate(root, candidate string) (string, os.FileInfo, error) {
 	candidateAbs, err := filepath.Abs(candidate)
 	if err != nil {
 		return "", nil, &WireError{Code: "file.outside_authorized_root", Message: "file is outside the authorized workspace"}

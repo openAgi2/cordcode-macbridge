@@ -37,10 +37,6 @@ func TestFixtures_DecodeSuccess(t *testing.T) {
 			t.Errorf("%s: %v", f, err)
 		}
 	}
-	// legacy 6-field
-	if _, err := DecodeLegacyReadFileResult(readFixture(t, "legacy-read-file-result.json")); err != nil {
-		t.Errorf("legacy: %v", err)
-	}
 	// requests
 	if _, _, err := DecodeReadFileV2Request(readFixture(t, "read-file-v2-request-workspace.json")); err != nil {
 		t.Errorf("req-workspace: %v", err)

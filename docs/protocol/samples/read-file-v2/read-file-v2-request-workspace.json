@@ -1,8 +1,1 @@
-{
-  "path": "/workspace/src/main.swift",
-  "owner": {
-    "kind": "workspace",
-    "backendId": "codex",
-    "workspaceRoot": "/workspace"
-  }
-}
+{"owner":{"backendId":"codex","kind":"workspace","workspaceRoot":"\/workspace"},"path":"\/workspace\/src\/main.swift"}

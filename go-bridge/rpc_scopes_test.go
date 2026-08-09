@@ -21,7 +21,7 @@ var dispatchedRPCMethods = []string{
 	"list_sessions", "list_projects", "fetch_todos",
 	"get_workspace_diff", "get_turn_diff", "get_full_thread_diff",
 	"get_usage", "run_diagnostics", "list_memory_files", "read_memory_file",
-	"fetch_content_chunk", "read_file", "read_file_v2", "list_directory", "get_git_context",
+	"fetch_content_chunk", "read_file_v2", "list_directory", "get_git_context",
 	"checkout_git_branch", "create_git_branch", "create_git_worktree",
 	"create_pull_request", // §7.1
 	"check_pull_request_support",
@@ -124,7 +124,7 @@ func TestAuthorizeRPCScopeGate(t *testing.T) {
 	policy := NewCapabilityPolicy()
 
 	// nil 设备（dev mode）→ 放行
-	if err := policy.AuthorizeRPC(&scopeTestConn{device: nil}, WireMessage{Method: "read_file"}); err != nil {
+	if err := policy.AuthorizeRPC(&scopeTestConn{device: nil}, WireMessage{Method: "read_file_v2"}); err != nil {
 		t.Fatalf("nil device 应放行（dev mode），got %v", err)
 	}
 
@@ -133,8 +133,8 @@ func TestAuthorizeRPCScopeGate(t *testing.T) {
 	if err := policy.AuthorizeRPC(full, WireMessage{Method: "send_message"}); err != nil {
 		t.Fatalf("默认全权设备应放行 session.write（send_message），got %v", err)
 	}
-	if err := policy.AuthorizeRPC(full, WireMessage{Method: "read_file"}); err != nil {
-		t.Fatalf("默认全权设备应放行 workspace.read（read_file），got %v", err)
+	if err := policy.AuthorizeRPC(full, WireMessage{Method: "read_file_v2"}); err != nil {
+		t.Fatalf("默认全权设备应放行 workspace.read（read_file_v2），got %v", err)
 	}
 
 	// 受限设备：只读 iPad 场景，只授予 session.read
@@ -156,7 +156,7 @@ func TestAuthorizeRPCScopeGate(t *testing.T) {
 	}
 
 	// workspace.read 也应被拒（只读 iPad 不能读文件）
-	if err := policy.AuthorizeRPC(readOnly, WireMessage{Method: "read_file"}); err == nil || err.Code != "forbidden" {
+	if err := policy.AuthorizeRPC(readOnly, WireMessage{Method: "read_file_v2"}); err == nil || err.Code != "forbidden" {
 		t.Errorf("session.read-only 设备读文件应 forbidden，got %v", err)
 	}
 

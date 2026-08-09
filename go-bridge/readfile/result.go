@@ -9,16 +9,15 @@ import (
 // 含 metadata（path/extension/sizeBytes/contentRevision/identity）、text 的 segments 与 totalLines
 // 行语义、truncation head+omission+tail。复用 codec.go 的 wire 类型。
 
-// 行数上限/尾段（与 handlers.go readFileMaxLines/readFileTailLines 对齐；参数化便于测试）。
-const (
-	DefaultMaxLines   = 5000
-	DefaultTailLines  = 200
-)
+// NoLineTruncation 明确表示 read_file_v2 在既有 2 MiB byte admission 内返回完整文本。
+// 语法高亮的 5000 行预算属于 iOS presentation 层，不应改变文件读取结果。
+const NoLineTruncation = 0
 
 // BuildReadFileV2Result 构造 read_file_v2 的 tagged union 结果。
-//   data: 原始 bytes（sizeBytes + contentRevision 覆盖含 BOM 的 raw bytes）；
-//   display 由 ClassifyEncoding 剥 UTF-8 BOM。
-//   maxLines/tailLines: 截断阈值；totalLines > maxLines => head(maxLines-tailLines)+omission+tail(tailLines)。
+//
+//	data: 原始 bytes（sizeBytes + contentRevision 覆盖含 BOM 的 raw bytes）；
+//	display 由 ClassifyEncoding 剥 UTF-8 BOM。
+//	maxLines/tailLines: maxLines > 0 时启用显式分段截断；maxLines == NoLineTruncation 时返回完整文本。
 func BuildReadFileV2Result(data []byte, path, ext string, identity OwningIdentity, maxLines, tailLines int) ReadFileV2Result {
 	class := ClassifyEncoding(data)
 	meta := FileMetadata{
@@ -62,14 +61,14 @@ func countLogicalLines(data []byte) uint64 {
 	return lf
 }
 
-// buildTextSegments: 空 => 唯一空 full；非空 <= maxLines => 一个 full；> maxLines => head+omission+tail。
+// buildTextSegments: 空 => 唯一空 full；未启用截断或 <= maxLines => 一个 full；否则 head+omission+tail。
 // 不变量：headCount + omittedCount + tailCount == totalLines。
 func buildTextSegments(display []byte, totalLines uint64, maxLines, tailLines int) []Segment {
 	if totalLines == 0 {
 		// 空文件：唯一空 full segment（禁止 segments:[]）
 		return []Segment{{Kind: "full", Content: "", SourceLineStart: 1, SourceLineCount: 0}}
 	}
-	if int(totalLines) <= maxLines {
+	if maxLines == NoLineTruncation || int(totalLines) <= maxLines {
 		return []Segment{{Kind: "full", Content: string(display), SourceLineStart: 1, SourceLineCount: totalLines}}
 	}
 	// truncated: head(maxLines-tailLines) + omission + tail(tailLines)
@@ -104,6 +103,7 @@ func buildTextSegments(display []byte, totalLines uint64, maxLines, tailLines in
 //   - text: kind+metadata+encoding+totalLines+segments（totalLines 即使 0 也带，因 text 必填）。
 //   - unsupported_encoding: kind+metadata+(detected 仅当非空；omit 不发 null)。
 //   - binary: kind+metadata。
+//
 // handler 用它做 conn.SendResult 的 result payload。
 func (r ReadFileV2Result) WirePayload() map[string]interface{} {
 	meta := map[string]interface{}{
@@ -151,11 +151,14 @@ func segmentsWire(segs []Segment) []map[string]interface{} {
 	out := make([]map[string]interface{}, 0, len(segs))
 	for _, s := range segs {
 		m := map[string]interface{}{
-			"kind": s.Kind, "sourceLineStart": s.SourceLineStart, "sourceLineCount": s.SourceLineCount,
+			"kind": s.Kind, "sourceLineStart": s.SourceLineStart,
 		}
 		switch s.Kind {
 		case "full", "head", "tail":
 			m["content"] = s.Content
+			m["sourceLineCount"] = s.SourceLineCount
+		case "omission":
+			m["omittedLineCount"] = s.SourceLineCount
 		}
 		out = append(out, m)
 	}

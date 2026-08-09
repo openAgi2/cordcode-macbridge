@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -71,28 +72,225 @@ func TestReadFileV2_TextResult(t *testing.T) {
 	}
 }
 
-func TestReadFileV2_OutsideAuthorizedRoot(t *testing.T) {
+func TestStableFileSnapshotRejectsSameSizeInPlaceRewrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "same-size.swift")
+	if err := os.WriteFile(path, []byte("let a = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stableFileSnapshot(before, before) {
+		t.Fatal("unchanged snapshot must remain stable")
+	}
+	if err := os.WriteFile(path, []byte("let b = 2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	changedTime := before.ModTime().Add(time.Second)
+	if err := os.Chtimes(path, changedTime, changedTime); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Size() != after.Size() {
+		t.Fatal("fixture must preserve byte size")
+	}
+	if stableFileSnapshot(before, after) {
+		t.Fatal("same-size in-place rewrite must invalidate the read snapshot")
+	}
+}
+
+func TestReadFileV2_ReturnsCompleteTextBeyondHighlightLineBudget(t *testing.T) {
 	workspace := t.TempDir()
-	secretDir := t.TempDir()
-	secretPath := filepath.Join(secretDir, "secret")
-	if err := os.WriteFile(secretPath, []byte("do-not-leak"), 0o600); err != nil {
+	allowedPath := filepath.Join(workspace, "large.swift")
+	want := []byte(strings.Repeat("let value = 1\n", 5529))
+	if err := os.WriteFile(allowedPath, want, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex", &fakeAgent{name: "codex", workDir: workspace})
+	params, _ := json.Marshal(map[string]interface{}{
+		"path": allowedPath,
+		"owner": map[string]interface{}{
+			"kind": "workspace", "backendId": "codex", "workspaceRoot": workspace,
+		},
+	})
+	conn := newReadFileCaptureConn()
+	handlers.handleReadFileV2(conn, WireMessage{RequestID: "full-over-highlight-budget", BackendID: "codex", Params: params})
+	conn.waitForResult(t)
+	if conn.err != nil {
+		t.Fatalf("read_file_v2 returned error: %+v", conn.err)
+	}
+	payload := conn.data.(map[string]interface{})
+	if got := payload["totalLines"]; got != uint64(5529) {
+		t.Fatalf("totalLines=%v want 5529", got)
+	}
+	segments := payload["segments"].([]map[string]interface{})
+	if len(segments) != 1 || segments[0]["kind"] != "full" || segments[0]["content"] != string(want) {
+		t.Fatal("read_file_v2 did not return the complete source as one full segment")
+	}
+}
+
+func TestReadFileV2_UniqueFilenameOnlyLinkResolvesBelowWorkspaceRoot(t *testing.T) {
+	workspace := t.TempDir()
+	docsDir := filepath.Join(workspace, "docs")
+	if err := os.MkdirAll(docsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	wantPath := filepath.Join(docsDir, "plan.md")
+	if err := os.WriteFile(wantPath, []byte("# Plan\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	handlers := newTestHandlers(t)
 	handlers.RegisterAgent("codex", &fakeAgent{name: "codex", workDir: workspace})
 
 	params, _ := json.Marshal(map[string]interface{}{
-		"path": secretPath,
+		"path": "plan.md",
 		"owner": map[string]interface{}{
 			"kind": "workspace", "backendId": "codex", "workspaceRoot": workspace,
 		},
 	})
 	conn := newReadFileCaptureConn()
-	handlers.handleReadFileV2(conn, WireMessage{RequestID: "r1", BackendID: "codex", Params: params})
+	handlers.handleReadFileV2(conn, WireMessage{RequestID: "basename-unique", BackendID: "codex", Params: params})
 	conn.waitForResult(t)
 
+	if conn.err != nil {
+		t.Fatalf("filename-only read_file_v2 returned error: %+v", conn.err)
+	}
+	payload, ok := conn.data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("result not a map: %#v", conn.data)
+	}
+	metadata, _ := payload["metadata"].(map[string]interface{})
+	resolvedWant, _ := filepath.EvalSymlinks(wantPath)
+	if got := metadata["path"]; got != resolvedWant {
+		t.Fatalf("metadata.path = %#v, want %#v", got, resolvedWant)
+	}
+}
+
+func TestReadFileV2_AmbiguousFilenameOnlyLinkFailsClosed(t *testing.T) {
+	workspace := t.TempDir()
+	for _, dir := range []string{"docs", "notes"} {
+		path := filepath.Join(workspace, dir)
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(path, "plan.md"), []byte(dir), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex", &fakeAgent{name: "codex", workDir: workspace})
+
+	params, _ := json.Marshal(map[string]interface{}{
+		"path": "plan.md",
+		"owner": map[string]interface{}{
+			"kind": "workspace", "backendId": "codex", "workspaceRoot": workspace,
+		},
+	})
+	conn := newReadFileCaptureConn()
+	handlers.handleReadFileV2(conn, WireMessage{RequestID: "basename-ambiguous", BackendID: "codex", Params: params})
+	conn.waitForResult(t)
+
+	if conn.err == nil || conn.err.Code != "file.basename_ambiguous" {
+		t.Fatalf("want file.basename_ambiguous, got data=%#v err=%+v", conn.data, conn.err)
+	}
+}
+
+func TestReadFileV2_EnforcesAuthorizedWorkspaceBoundary(t *testing.T) {
+	workspace := t.TempDir()
+	secretDir := t.TempDir()
+	allowedPath := filepath.Join(workspace, "main.go")
+	secretPath := filepath.Join(secretDir, "management-token")
+	envPath := filepath.Join(workspace, ".env")
+	linkPath := filepath.Join(workspace, "linked-secret")
+	if err := os.WriteFile(allowedPath, []byte("package main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secretPath, []byte("do-not-leak"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(envPath, []byte("TOKEN=do-not-leak"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secretPath, linkPath); err != nil {
+		t.Fatal(err)
+	}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex", &fakeAgent{name: "codex", workDir: workspace})
+
+	tests := []struct {
+		name     string
+		path     string
+		wantCode string
+	}{
+		{name: "absolute outside", path: secretPath, wantCode: "file.outside_authorized_root"},
+		{name: "relative traversal", path: filepath.Join("..", filepath.Base(secretDir), "management-token"), wantCode: "file.outside_authorized_root"},
+		{name: "symlink escape", path: linkPath, wantCode: "file.symlink_escape"},
+		{name: "sensitive workspace file", path: envPath, wantCode: "file.sensitive_path_denied"},
+		{name: "allowed source", path: allowedPath},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			params, _ := json.Marshal(map[string]interface{}{
+				"path": tt.path,
+				"owner": map[string]interface{}{
+					"kind": "workspace", "backendId": "codex", "workspaceRoot": workspace,
+				},
+			})
+			conn := newReadFileCaptureConn()
+			handlers.handleReadFileV2(conn, WireMessage{RequestID: "r_" + strings.ReplaceAll(tt.name, " ", "_"), BackendID: "codex", Params: params})
+			conn.waitForResult(t)
+			if tt.wantCode != "" {
+				if conn.err == nil || conn.err.Code != tt.wantCode {
+					t.Fatalf("want %s, got data=%#v err=%+v", tt.wantCode, conn.data, conn.err)
+				}
+				encoded, err := json.Marshal(struct {
+					Data interface{}
+					Err  *WireError
+				}{Data: conn.data, Err: conn.err})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(string(encoded), "do-not-leak") {
+					t.Fatalf("response leaked secret content: %s", encoded)
+				}
+				return
+			}
+			if conn.err != nil {
+				t.Fatalf("allowed read error = %#v", conn.err)
+			}
+			payload := conn.data.(map[string]interface{})
+			segments := payload["segments"].([]map[string]interface{})
+			if len(segments) != 1 || segments[0]["content"] != "package main\n" {
+				t.Fatalf("allowed content mismatch: %#v", payload)
+			}
+		})
+	}
+}
+
+func TestReadFileV2_FailsClosedWithoutServerAuthorizedWorkspace(t *testing.T) {
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "main.go")
+	if err := os.WriteFile(path, []byte("package main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex", &unsupportedMutationAgent{name: "codex"})
+	params, _ := json.Marshal(map[string]interface{}{
+		"path": path,
+		"owner": map[string]interface{}{
+			"kind": "workspace", "backendId": "codex", "workspaceRoot": workspace,
+		},
+	})
+	conn := newReadFileCaptureConn()
+	handlers.handleReadFileV2(conn, WireMessage{RequestID: "no-root", BackendID: "codex", Params: params})
+	conn.waitForResult(t)
 	if conn.err == nil || conn.err.Code != "file.outside_authorized_root" {
-		t.Fatalf("want file.outside_authorized_root, got data=%#v err=%+v", conn.data, conn.err)
+		t.Fatalf("error = %#v, want file.outside_authorized_root", conn.err)
 	}
 }
 
