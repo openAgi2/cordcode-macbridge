@@ -393,6 +393,10 @@ func Main() {
 			ack.Capabilities["read_file_v2"] = true
 			server.eventPublisher.SetConnReadFileV2(conn, true)
 		}
+		if ack.Ok && helloSupportsCatalogCursorEpochV2(&hello) {
+			ack.Capabilities["catalog_cursor_epoch_v2"] = true
+			server.eventPublisher.SetConnCatalogCursorEpochV2(conn, true)
+		}
 		var replay []EventMessage
 		if server.recoveryEnabled && helloSupportsRecovery(&hello) && ack.Ok {
 			plan, events, err := server.prepareRecovery(conn, &hello)

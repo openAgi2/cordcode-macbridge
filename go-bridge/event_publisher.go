@@ -224,6 +224,7 @@ type EventPublisher struct {
 	kernel                   *ProjectionKernel
 	syncV2                   map[Connection]bool
 	readFileV2               map[Connection]bool
+	catalogCursorEpochV2     map[Connection]bool
 	nextConnectionGeneration uint64
 	connectionGenerations    map[Connection]uint64
 	nextProjectionFenceID    uint64
@@ -266,6 +267,7 @@ func NewEventPublisher(bridgeEpoch string, broadcaster ...*Broadcaster) *EventPu
 		projection:             NewProjectionReducer(),
 		syncV2:                 make(map[Connection]bool),
 		readFileV2:             make(map[Connection]bool),
+		catalogCursorEpochV2:   make(map[Connection]bool),
 		connectionGenerations:  make(map[Connection]uint64),
 		projectionFences:       make(map[projectionFenceKey]*projectionSnapshotFence),
 		projectionSnapshotCuts: make(map[projectionFenceKey]int),
@@ -439,6 +441,7 @@ func (p *EventPublisher) UnregisterConnection(conn Connection) {
 	delete(p.completed, conn)
 	delete(p.syncV2, conn)
 	delete(p.readFileV2, conn)
+	delete(p.catalogCursorEpochV2, conn)
 	delete(p.connectionGenerations, conn)
 	for key := range p.projectionFences {
 		if key.conn == conn {

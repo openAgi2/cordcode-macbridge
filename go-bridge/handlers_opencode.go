@@ -312,6 +312,39 @@ func (h *Handlers) injectClaudeReasoningEffort(mapped map[string]interface{}, ag
 // in-memory by paginateSessionList with a real cursor, exactly like Codex/Claude.
 const openCodeSessionFetchLimit = 100
 
+// openCodeCatalogWireCache 返回 per-Handlers 的 OpenCode wire-map 快照缓存，首次使用时懒加载。
+// 缓存是进程级 scope 元数据（per-scope enriched wire maps + epoch），跨 list_sessions 调用复用
+//（§4.1.1）。用 sync.Once 而非在 NewHandlers 里初始化，保持既有构造路径不变。
+func (h *Handlers) openCodeCatalogWireCache() *catalogWireSnapshotCache {
+	h.catalogWireInitOnce.Do(func() {
+		h.catalogWireCache = newCatalogWireSnapshotCache(nil)
+	})
+	return h.catalogWireCache
+}
+
+// buildOpenCodeEnrichedSessions 执行 §5.3#3 富 wire 管线：listSessions（上游 ≤100 有界全量读）
+// → mapSession → enrichSessionStatesForList → overlayPinnedState → sortSessionsByUpdatedAt。
+// v1（paginateSessionList）与 v2（catalogWireSnapshotCache）两条路径共用此 builder（DRY）。
+func (h *Handlers) buildOpenCodeEnrichedSessions(backendID, dir string, rootsOnly bool) ([]map[string]interface{}, error) {
+	page, err := h.ocProxy.listSessions(OpenCodeSessionListOptions{
+		Directory: dir,
+		Limit:     openCodeSessionFetchLimit,
+		Roots:     rootsOnly,
+	})
+	if err != nil {
+		return nil, err
+	}
+	agent, _ := h.getAgent(backendID)
+	mapped := make([]map[string]interface{}, 0, len(page.Sessions))
+	for _, s := range page.Sessions {
+		mapped = append(mapped, mapSession(s))
+	}
+	mapped = h.enrichSessionStatesForList(mapped, agent, h.getRunningMap(context.Background(), agent))
+	h.overlayPinnedState(mapped, "opencode")
+	sortSessionsByUpdatedAt(mapped)
+	return mapped, nil
+}
+
 func (h *Handlers) ocHandleListSessions(conn Connection, msg WireMessage, dir string) {
 	rootsOnly := extractBool(msg, "rootsOnly")
 	limit := h.effectiveSessionListLimit(extractPositiveInt(msg, "limit"))
@@ -322,28 +355,51 @@ func (h *Handlers) ocHandleListSessions(conn Connection, msg WireMessage, dir st
 
 	started := time.Now()
 
-	// Fetch a large page from upstream so the in-memory list reflects the real
-	// total. rootsOnly is forwarded as the server-side roots=true SQL filter
-	// (isNull(parent_id)); we no longer discard child sessions client-side, which
-	// used to make hasMore unreliable for small projects.
-	page, err := h.ocProxy.listSessions(OpenCodeSessionListOptions{
-		Directory: dir,
-		Limit:     openCodeSessionFetchLimit,
-		Roots:     rootsOnly,
+	// §10 发布顺序 / capability 门控：仅在 hello 声明 catalog_cursor_epoch_v2 的连接上启用
+	// v2 epoch-bearing cursor + cursor_stale 路径；未声明连接走既有 v1 paginateSessionList，
+	// byte-for-byte 不变。iOS 在 Phase 6 才声明该 capability → 当前 declared 恒为 false → 零行为变化。
+	if !h.eventPublisher.ConnCatalogCursorEpochV2(conn) {
+		h.ocHandleListSessionsV1(conn, msg, dir, rootsOnly, limit, cursor, started)
+		return
+	}
+
+	// DECLARED：v2 快照路径（§4.1.1 / §5.3#3）。page-0：FetchOrReuse(builder) 取/建快照；
+	// page-N：Peek（不重建）→ validateCursorV2 → 切片 / cursor_stale。
+	scopeKey := openCodeCatalogScopeKey(msg.BackendID, dir, rootsOnly)
+	cache := h.openCodeCatalogWireCache()
+	result, staleErr, err := cache.pageV2(scopeKey, cursor, limit, func() ([]map[string]interface{}, error) {
+		return h.buildOpenCodeEnrichedSessions(msg.BackendID, dir, rootsOnly)
 	})
 	if err != nil {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
 		return
 	}
-
-	agent, _ := h.getAgent(msg.BackendID)
-	mapped := make([]map[string]interface{}, 0, len(page.Sessions))
-	for _, s := range page.Sessions {
-		mapped = append(mapped, mapSession(s))
+	if staleErr != nil {
+		conn.SendResult(msg.RequestID, nil, staleErr) // cursor_stale（Retryable）
+		return
 	}
-	mapped = h.enrichSessionStatesForList(mapped, agent, h.getRunningMap(context.Background(), agent))
-	h.overlayPinnedState(mapped, "opencode")
-	sortSessionsByUpdatedAt(mapped)
+	if ws, ok := result["sessions"].([]map[string]interface{}); ok {
+		slog.Info("opencode list_sessions v2",
+			"directory", dir,
+			"limit", limit,
+			"cursor_present", cursor != "",
+			"result_count", len(ws),
+			"next_cursor_present", result["hasMore"] == true,
+			"duration_ms", time.Since(started).Milliseconds(),
+		)
+	}
+	conn.SendResult(msg.RequestID, result, nil)
+}
+
+// ocHandleListSessionsV1 是未声明 catalog_cursor_epoch_v2 连接的既有 list 路径：上游有界全量读
+// → 富 wire 管线 → paginateSessionList（v1 cursor）切片。与 1C 前的行为 byte-for-byte 一致；
+// v2 gate 把它隔离为 undeclared 专用，保证 capability 上线前零行为变化。
+func (h *Handlers) ocHandleListSessionsV1(conn Connection, msg WireMessage, dir string, rootsOnly bool, limit int, cursor string, started time.Time) {
+	mapped, err := h.buildOpenCodeEnrichedSessions(msg.BackendID, dir, rootsOnly)
+	if err != nil {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
+		return
+	}
 
 	// Slice the in-memory list by cursor+limit, identical to Codex/Claude.
 	// paginateSessionList emits a real nextCursor and hasMore derived from the

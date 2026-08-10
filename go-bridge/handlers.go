@@ -44,6 +44,11 @@ type Handlers struct {
 	contentRefs            map[string]string
 	contentRefOrder        []string
 	ocProxy                *OpenCodeProxy
+	// catalogWireCache 缓存 OpenCode list_sessions 的 enriched wire maps（§4.1.1 / §5.3#3，
+	// Phase 1C）。仅对声明 catalog_cursor_epoch_v2 的连接使用；未声明连接走既有 v1
+	// paginateSessionList 路径不变。lazy init（sync.Once），构造路径 NewHandlers 不改。
+	catalogWireCache    *catalogWireSnapshotCache
+	catalogWireInitOnce sync.Once
 	codexBackendMode       string
 	pendingNotifications   *PendingNotificationStore
 	broadcaster            *Broadcaster

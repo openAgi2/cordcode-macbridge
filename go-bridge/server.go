@@ -243,6 +243,18 @@ func helloSupportsReadFileV2(hello *HelloMessage) bool {
 	return false
 }
 
+// helloSupportsCatalogCursorEpochV2 returns true when the client advertised
+// catalog_cursor_epoch_v2 (cross-backend session catalog parity §4.1.1 / §10). Same shape as
+// helloSupportsReadFileV2; the declaration alone gates MacBridge's emission of v2 cursors.
+func helloSupportsCatalogCursorEpochV2(hello *HelloMessage) bool {
+	for _, capability := range hello.Capabilities {
+		if capability == "catalog_cursor_epoch_v2" {
+			return true
+		}
+	}
+	return false
+}
+
 func appendUniqueCapability(capabilities []string, capability string) []string {
 	for _, existing := range capabilities {
 		if existing == capability {
@@ -582,6 +594,10 @@ func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage
 	if ack.Ok && helloSupportsReadFileV2(&hello) {
 		ack.Capabilities["read_file_v2"] = true
 		s.eventPublisher.SetConnReadFileV2(connection, true)
+	}
+	if ack.Ok && helloSupportsCatalogCursorEpochV2(&hello) {
+		ack.Capabilities["catalog_cursor_epoch_v2"] = true
+		s.eventPublisher.SetConnCatalogCursorEpochV2(connection, true)
 	}
 	connection.SendJSON(ack)
 	if ack.Recovery != nil {

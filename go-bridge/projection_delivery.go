@@ -121,3 +121,33 @@ func (p *EventPublisher) ConnReadFileV2(conn Connection) bool {
 	defer p.mu.Unlock()
 	return p.readFileV2[conn]
 }
+
+// SetConnCatalogCursorEpochV2 records that the client advertised catalog_cursor_epoch_v2 in
+// hello (cross-backend session catalog parity §4.1.1 / §10). Only connections marked here may
+// receive v2 (epoch-bearing) list_sessions cursors and cursor_stale; every other connection
+// keeps the legacy v1 cursor path byte-for-byte. This is a pure client-capability gate (no
+// server-side toggle): the capability declaration IS the §10 release gate. Replacement
+// connections must negotiate again; UnregisterConnection clears the mark.
+func (p *EventPublisher) SetConnCatalogCursorEpochV2(conn Connection, enabled bool) {
+	if p == nil || conn == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if enabled {
+		p.catalogCursorEpochV2[conn] = true
+	} else {
+		delete(p.catalogCursorEpochV2, conn)
+	}
+}
+
+// ConnCatalogCursorEpochV2 reports whether this exact connection negotiated catalog_cursor_epoch_v2.
+// The list handler (ocHandleListSessions) consults it to decide v2-snapshot path vs legacy v1.
+func (p *EventPublisher) ConnCatalogCursorEpochV2(conn Connection) bool {
+	if p == nil || conn == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.catalogCursorEpochV2[conn]
+}
