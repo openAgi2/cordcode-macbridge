@@ -450,6 +450,19 @@ func (h *Handlers) codexSessionFileRelayLoop(sessionID string, conn Connection, 
 				h.recordPendingNotification(sessionID, backendID, "completed", "task_complete")
 				currentTurnID = ""
 				// task_complete 后继续 watch 下一轮（Phase 0）；relay 靠无增长 TTL 退出。
+			case "turn_aborted":
+				// §5.1 #7 producer layer 3（live file-relay）：rollout 增长出 turn_aborted
+				// （真实形态 019f5453）→ 收口 active turn（reducer turn_aborted 终态）+ idle。
+				// 不发 completed 通知（用户中断，非完成）。清空 currentTurnID 让 watch-loop 的
+				// detectCodexTranscriptTask 复核判 idle，及时停止 watch 该 stale 文件。
+				abortedTurnID := ev.turnID
+				if abortedTurnID == "" {
+					abortedTurnID = currentTurnID
+				}
+				slog.Info("go-bridge: codexSessionFileRelay EMIT turn_aborted", "sessionID", sessionID)
+				h.sendSessionEvent(sessionID, backendID, "turn_aborted", map[string]interface{}{"turnId": abortedTurnID, "reason": "turn_aborted"})
+				h.broadcastIdleState(sessionID, backendID)
+				currentTurnID = ""
 			case "text":
 				if seen[ev.text] {
 					continue
@@ -1885,17 +1898,26 @@ func (h *Handlers) detectCodexTranscriptTask(sessPath string) (string, string) {
 			if event.turnID != "" {
 				turnID = event.turnID
 			}
+		case "turn_aborted":
+			// §5.1 #7 producer layer 3：rollout 以 turn_aborted 收口（无 task_complete，
+			// 真实形态 019f5453）→ 视同 idle 终态，避免 detectCodexTranscriptTaskState 永久
+			// 判 running 致 file-relay 滞留 watch 一个已死的 turn 文件。
+			state = "idle"
+			if event.turnID != "" {
+				turnID = event.turnID
+			}
 		}
 	}
 	return state, turnID
 }
 
-// scanCodexTranscriptTaskEvents 提取 lifecycle 事件（task_started/task_complete），
-// 供 detectCodexTranscriptTaskState 判定当前态。委托给统一扫描器后过滤。
+// scanCodexTranscriptTaskEvents 提取 lifecycle 事件（task_started/task_complete/turn_aborted），
+// 供 detectCodexTranscriptTaskState 判定当前态。委托给统一扫描器后过滤。turn_aborted 是
+// §5.1 #7 新增的终态（中断收口），与 task_complete 同等进入 state 判定。
 func (h *Handlers) scanCodexTranscriptTaskEvents(sessPath string, offset int64) []codexRelayEvent {
 	var events []codexRelayEvent
 	for _, ev := range scanCodexTranscriptRelayEvents(sessPath, offset) {
-		if ev.kind == "task_started" || ev.kind == "task_complete" {
+		if ev.kind == "task_started" || ev.kind == "task_complete" || ev.kind == "turn_aborted" {
 			events = append(events, ev)
 		}
 	}
@@ -2067,6 +2089,13 @@ func codexRolloutEntryEvents(entry codexRolloutEntry) []codexRelayEvent {
 			out = append(out, codexRelayEvent{kind: "task_started", turnID: p.TurnID})
 		case "task_complete":
 			out = append(out, codexRelayEvent{kind: "task_complete", turnID: p.TurnID})
+		case "turn_aborted":
+			// §5.1 #7 producer layer 3（cold rollout）：真实 rollout 形态见 session
+			// 019f5453（event_msg.payload.type="turn_aborted"，携带 turn_id / reason /
+			// completed_at / duration_ms）。这是 turn 的终态标记——只读 turn_id（reason
+			// 等字段 catalog/projection 不消费），映射到 reducer 的 turn_aborted 终态 case，
+			// 使 content-less aborted turn 不再永久 hydrating（guardrail #6）。
+			out = append(out, codexRelayEvent{kind: "turn_aborted", turnID: p.TurnID})
 		case "agent_message":
 			if strings.TrimSpace(p.Message) != "" {
 				out = append(out, codexRelayEvent{kind: "text", text: p.Message})
@@ -2401,6 +2430,22 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 				errMsg := ""
 				if ev.Error != nil {
 					errMsg = ev.Error.Error()
+				}
+				// §5.1 #7 producer layer 3（live）：进程崩溃 / turn.failed / app-server error 都
+				// 走 core.EventError。若不收口，projection 的 active turn 永久 running（计划
+				// §5.1 #7 line 211）。reducer 的 turn_error case（5df5a28）settle active turn；
+				// turnId 省略时 reducer 回退到 ActiveTurnID。仅对 EventError 即终态的非 claude
+				// backend 合成（claude 的 EventError 可恢复，loop continue 不收口）。
+				if backendID != "claude" && backendID != "claudecode" {
+					h.deltaBatcher.Send(LogicalEvent{
+						SessionID: sessionID,
+						BackendID: backendID,
+						Event:     "turn_error",
+						Data:      map[string]interface{}{"turnId": ev.TurnID, "message": errMsg},
+						Directory: directory,
+						Broadcast: true,
+						Offline:   true,
+					})
 				}
 				h.broadcastIdleState(sessionID, backendID)
 				h.recordPendingNotification(sessionID, backendID, "error", errMsg)

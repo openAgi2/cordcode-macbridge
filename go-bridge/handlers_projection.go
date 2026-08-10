@@ -822,7 +822,7 @@ func (h *Handlers) produceProjectionHydrateRange(
 			return emit(projectionHydrateEvent{
 				Event:    eventName,
 				Data:     data,
-				TurnDone: ev.kind == "task_complete",
+				TurnDone: ev.kind == "task_complete" || ev.kind == "turn_aborted",
 			})
 		})
 	case "claude", "claudecode":
@@ -1217,6 +1217,16 @@ func codexRelayEventToProjectionEvent(ev codexRelayEvent, currentTurnID *string,
 		}
 		*currentTurnID = ""
 		return "turn_completed", map[string]interface{}{"turnId": tid, "done": true, "reason": "task_complete"}, true
+	case "turn_aborted":
+		// §5.1 #7 producer layer 3：cold rollout 的 turn_aborted（真实形态 019f5453）映射到
+		// reducer 的 turn_aborted 终态 case。turnID 回退同 task_complete（driver 可能省略）。
+		// 清空 *currentTurnID——turn 已终态，后续 content 不再挂到它。
+		tid := ev.turnID
+		if tid == "" {
+			tid = *currentTurnID
+		}
+		*currentTurnID = ""
+		return "turn_aborted", map[string]interface{}{"turnId": tid, "reason": "turn_aborted"}, true
 	case "text":
 		if !ev.canonical {
 			return "", nil, false
