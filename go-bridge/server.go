@@ -595,7 +595,11 @@ func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage
 		ack.Capabilities["read_file_v2"] = true
 		s.eventPublisher.SetConnReadFileV2(connection, true)
 	}
-	if ack.Ok && helloSupportsCatalogCursorEpochV2(&hello) {
+	// Phase 7 §446: observe catalog_cursor_epoch_v2 declaration rate. The per-hello boolean is
+	// mineable from logs to decide the future v1-blind-cut retirement threshold ("iOS 全量迁移达阈值后").
+	// Declaration IS the §10 release gate: echo + SetConn happen only when the client opted in.
+	catalogV2 := ack.Ok && helloSupportsCatalogCursorEpochV2(&hello)
+	if catalogV2 {
 		ack.Capabilities["catalog_cursor_epoch_v2"] = true
 		s.eventPublisher.SetConnCatalogCursorEpochV2(connection, true)
 	}
@@ -604,7 +608,7 @@ func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage
 		s.emitRecoveryFrames(connection, ack.Recovery, replay)
 	}
 
-	slog.Info("go-bridge: hello_ack sent", "ok", ack.Ok, "device", hello.Client.DeviceID)
+	slog.Info("go-bridge: hello_ack sent", "ok", ack.Ok, "device", hello.Client.DeviceID, "catalog_cursor_epoch_v2", catalogV2)
 }
 
 func helloSupportsRecovery(hello *HelloMessage) bool {

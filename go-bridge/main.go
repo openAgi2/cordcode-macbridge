@@ -393,7 +393,10 @@ func Main() {
 			ack.Capabilities["read_file_v2"] = true
 			server.eventPublisher.SetConnReadFileV2(conn, true)
 		}
-		if ack.Ok && helloSupportsCatalogCursorEpochV2(&hello) {
+		// Phase 7 §446: observe catalog_cursor_epoch_v2 declaration rate (relay path). Mirrors
+		// server.go direct path; per-hello boolean mineable for v1-blind-cut retirement threshold.
+		catalogV2 := ack.Ok && helloSupportsCatalogCursorEpochV2(&hello)
+		if catalogV2 {
 			ack.Capabilities["catalog_cursor_epoch_v2"] = true
 			server.eventPublisher.SetConnCatalogCursorEpochV2(conn, true)
 		}
@@ -418,7 +421,7 @@ func Main() {
 		if ack.Recovery != nil {
 			server.emitRecoveryFrames(conn, ack.Recovery, replay)
 		}
-		slog.Info("relay-bridge-client: hello_ack sent via relay", "ok", ack.Ok, "device", hello.Client.DeviceID)
+		slog.Info("relay-bridge-client: hello_ack sent via relay", "ok", ack.Ok, "device", hello.Client.DeviceID, "catalog_cursor_epoch_v2", catalogV2)
 	})
 
 	http.Handle("/pairing", http.HandlerFunc(handlePairingWebSocket))
