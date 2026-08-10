@@ -48,6 +48,15 @@ type Agent struct {
 	// grokHome overrides ~/.grok / GROK_HOME for session catalog (tests).
 	grokHome string
 	mu       sync.RWMutex
+
+	// --- catalog subprocess singleton（§5.4 Phase 3）---
+	// catalogClient 是进程级单例 ACP catalog 子进程（grok agent --no-leader stdio），
+	// 与 per-turn grokSession 子进程分开管理、分开回收。catalogClientMu 串行化
+	// create/replace；catalogRegistrar 是 bridge ProcessRegistry 注入句柄。
+	// §10：capability 未声明前 go-bridge 不路由到 FetchSessionList → 当前不可达 = 零行为变化。
+	catalogClient   *grokCatalogClient
+	catalogClientMu sync.Mutex
+	catalogRegistrar CatalogSubprocessRegistrar
 }
 
 func init() {
@@ -121,8 +130,10 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 }
 
 // ListSessions returns sessions from the local Grok session store
-// ($GROK_HOME/sessions). ACP session/list is not available on current CLI
-// versions (Method not found); the on-disk catalog is the v1 discovery path.
+// ($GROK_HOME/sessions). This is the v1 on-disk discovery path (undeclared
+// connections, §10). The catalog main line is FetchSessionList (managed ACP
+// session/list subprocess, catalog_session_list.go) — routed only for connections
+// that declare catalog_cursor_epoch_v2.
 // Implementation: session_catalog.go.
 
 func (a *Agent) Stop() error { return nil }
