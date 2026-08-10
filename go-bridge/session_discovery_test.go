@@ -12,39 +12,11 @@ import (
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
-func TestSessionIDSet(t *testing.T) {
-	set := sessionIDSet([]core.AgentSessionInfo{
-		{ID: "s1"}, {ID: " s2 "}, {ID: ""}, {ID: "s1"}, // dup + empty + trimmed
-	})
-	if len(set) != 2 || !set["s1"] || !set["s2"] {
-		t.Fatalf("set = %v, want {s1, s2} (empty dropped, trimmed, deduped)", set)
-	}
-}
-
-func TestDiffNewSessions(t *testing.T) {
-	prev := map[string]bool{"a": true, "b": true}
-	current := map[string]bool{"a": true, "b": true, "c": true, "d": true}
-	got := diffNewSessions(prev, current)
-	if len(got) != 2 {
-		t.Fatalf("diff = %v, want 2 new (c,d)", got)
-	}
-	for _, id := range got {
-		if id != "c" && id != "d" {
-			t.Fatalf("unexpected new id %q", id)
-		}
-	}
-	// No growth → no diff.
-	if diff := diffNewSessions(current, current); len(diff) != 0 {
-		t.Fatalf("diff of equal sets = %v, want empty", diff)
-	}
-	// Removed sessions are not "new".
-	if diff := diffNewSessions(current, prev); len(diff) != 0 {
-		t.Fatalf("diff on shrink = %v, want empty (removals are not new)", diff)
-	}
-}
-
 // TestSessionDiscoveryBroadcastsOnNewSession: watcher detects a new session ID
 // across snapshots and broadcasts "sessions_changed" to a subscribed client.
+//
+// Phase 7 §442：change detection 现由 catalog fingerprint 驱动（seen 为 backend→fingerprint）。
+// 新增 session 改写 fingerprint → 触发 sessions_changed。
 func TestSessionDiscoveryBroadcastsOnNewSession(t *testing.T) {
 	prev := sessionDiscoveryInterval
 	sessionDiscoveryInterval = 10 * time.Millisecond
@@ -57,10 +29,10 @@ func TestSessionDiscoveryBroadcastsOnNewSession(t *testing.T) {
 	t.Cleanup(cleanup)
 	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "codex", SessionID: "list-view"})
 
-	seen := map[string]map[string]bool{}
+	seen := map[string]string{}
 	// Seed (s1) — no broadcast.
 	handlers.snapshotSessions(context.Background(), seen, true)
-	// New session s2 appears.
+	// New session s2 appears → fingerprint changes.
 	agent.sessionInfos = []core.AgentSessionInfo{{ID: "s1"}, {ID: "s2"}}
 	handlers.snapshotSessions(context.Background(), seen, false)
 
@@ -77,6 +49,69 @@ func TestSessionDiscoveryBroadcastsOnNewSession(t *testing.T) {
 	data, _ := payload["data"].(map[string]any)
 	if data["backendId"] != "codex" {
 		t.Fatalf("data = %#v, want backendId=codex", data)
+	}
+}
+
+// TestSessionDiscoveryFiresOnUpdatedAtOnlyChange：Phase 7 §442 关键新能力——fingerprint 覆盖
+// id|updatedAtMillis，故「既有 session 收到新 turn → updatedAt 变，但 ID 集合不变」也触发
+// sessions_changed。旧 ID-set diff 会漏掉这种情况（列表 recency 不刷新）。本测试钉死：相同 ID
+// 集合 {s1}，仅 s1 的 ModifiedAt 前进 → 必须 broadcast。
+func TestSessionDiscoveryFiresOnUpdatedAtOnlyChange(t *testing.T) {
+	prev := sessionDiscoveryInterval
+	sessionDiscoveryInterval = 10 * time.Millisecond
+	t.Cleanup(func() { sessionDiscoveryInterval = prev })
+
+	handlers := newTestHandlers(t)
+	t0 := time.Unix(1_700_000_000, 0).UTC()
+	agent := &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1", ModifiedAt: t0}}}
+	handlers.RegisterAgent("codex", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	t.Cleanup(cleanup)
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "codex", SessionID: "list-view"})
+
+	seen := map[string]string{}
+	handlers.snapshotSessions(context.Background(), seen, true)
+	// Same ID set {s1}, only ModifiedAt advances. ID-set diff would see no change;
+	// fingerprint (id|updatedAtMillis) must change → sessions_changed.
+	agent.sessionInfos = []core.AgentSessionInfo{{ID: "s1", ModifiedAt: t0.Add(1 * time.Hour)}}
+	handlers.snapshotSessions(context.Background(), seen, false)
+
+	if err := clientConn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	var payload map[string]any
+	if err := clientConn.ReadJSON(&payload); err != nil {
+		t.Fatalf("expected sessions_changed on updatedAt-only change (§442 fingerprint): %v", err)
+	}
+	if got := payload["event"]; got != "sessions_changed" {
+		t.Fatalf("event = %#v, want sessions_changed (updatedAt change must fire via fingerprint)", got)
+	}
+}
+
+// TestSessionDiscoveryDoesNotBroadcastOnNoChange：fingerprint 未变 → 不广播（无新/删除/更新）。
+func TestSessionDiscoveryDoesNotBroadcastOnNoChange(t *testing.T) {
+	prev := sessionDiscoveryInterval
+	sessionDiscoveryInterval = 10 * time.Millisecond
+	t.Cleanup(func() { sessionDiscoveryInterval = prev })
+
+	handlers := newTestHandlers(t)
+	agent := &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1"}}}
+	handlers.RegisterAgent("codex", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	t.Cleanup(cleanup)
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "codex", SessionID: "list-view"})
+
+	seen := map[string]string{}
+	handlers.snapshotSessions(context.Background(), seen, true)
+	// Same sessions, same ModifiedAt → identical fingerprint → no broadcast.
+	handlers.snapshotSessions(context.Background(), seen, false)
+
+	if err := clientConn.SetReadDeadline(time.Now().Add(200 * time.Millisecond)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	var payload map[string]any
+	if err := clientConn.ReadJSON(&payload); err == nil {
+		t.Fatalf("unexpected sessions_changed on no-change snapshot (fingerprint stable): %#v", payload)
 	}
 }
 
@@ -255,8 +290,9 @@ func TestSessionDiscoveryFiresOnArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The archive must remove the session from the poller's set (archived excluded)
-	// → diffRemovedSessions fires → sessions_changed reaches the client.
+	// The archive must remove the session from the poller's visible set (archived
+	// excluded) → fingerprint changes → sessions_changed reaches the client.
+	// (Phase 7 §442: fingerprint-over-visible; archive shrinks visible → fingerprint 变。)
 	if err := clientConn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
 		t.Fatalf("set read deadline: %v", err)
 	}
