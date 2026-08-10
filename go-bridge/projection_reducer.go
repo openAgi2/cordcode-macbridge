@@ -831,6 +831,41 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		exec := ExecutionView{Phase: "idle"}
 		ps.projection.Execution = exec
 		ps.execution = &exec
+
+	case "turn_aborted", "turn_error":
+		// §5.1 #7: an aborted or failed turn is a terminal state, not a forever-hydrating
+		// shell. Without these cases a content-less aborted/crashed turn never satisfied the
+		// old hydrate-commit gate (HasContentTurn=false, turnCount!=0 → waited indefinitely),
+		// so empty/aborted/archived sessions stuck on "hydrating" forever. The turn keeps
+		// whatever user/assistant content already landed (upsertTurn merges non-zero fields);
+		// only status + CompletedAt change. The producer side (codex rollout abort/crash →
+		// turn_aborted / turn_error events) lands in Phase 2; the reducer contract is defined
+		// and unit-tested here so Phase 2 only needs to emit the events.
+		turnID := dataString(data, "turnId")
+		if turnID == "" {
+			// Live driver frames may omit turnId; fall back to the armed active turn, mirroring
+			// turn_completed (design §6.4 rule 3).
+			turnID = ps.projection.Execution.ActiveTurnID
+		}
+		if turnID == "" {
+			return
+		}
+		status := "aborted"
+		if msg.Event == "turn_error" {
+			status = "error"
+		}
+		commit()
+		ps.upsertTurn(TurnProjection{TurnID: turnID, Status: status, CompletedAt: ps.projection.UpdatedAt})
+		if turn := ps.turnByID(turnID); turn != nil {
+			classifyProjectionTextPresentation(turn.Assistant, true)
+			ps.upsertTurns[turnID] = *turn
+		}
+		// Settling other open turns mirrors turn_completed: at most one live turn, so a
+		// terminal event also retires any older non-settled zombie turns.
+		ps.settleOtherOpenTurns(turnID, ps.projection.UpdatedAt)
+		exec := ExecutionView{Phase: "idle"}
+		ps.projection.Execution = exec
+		ps.execution = &exec
 	}
 }
 
@@ -1062,6 +1097,38 @@ func (r *ProjectionReducer) HasContentTurn(backendID, sessionID string) bool {
 		}
 	}
 	return false
+}
+
+// NonTerminalTurnCountInSet returns how many of the given turn IDs are NOT yet in a terminal
+// state (status other than completed/aborted/error). This is the §5.1 #7 hydrate-commit
+// readiness signal, scoped to turns armed by cold-source ingest (see projectionHydrateTransaction.
+// coldArmedTurnIDs). Turns carried from a committed/live baseline are authoritative live truth,
+// not cold-source half-seen guesses, so they are excluded from the gate — a live in-progress
+// session cold-pulled returns its current state instead of blocking until the in-flight turn
+// completes. Guardrail #6: readiness is decided from authoritative cold-source-EOF + terminal
+// state, never from content shape or turn count; the live baseline is authoritative, not guessed.
+func (r *ProjectionReducer) NonTerminalTurnCountInSet(backendID, sessionID string, ids map[string]struct{}) int {
+	if r == nil || len(ids) == 0 {
+		return 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ps := r.sessions[projectionSessionKey(backendID, sessionID)]
+	if ps == nil {
+		return 0
+	}
+	count := 0
+	for i := range ps.projection.Turns {
+		t := &ps.projection.Turns[i]
+		if _, ok := ids[t.TurnID]; !ok {
+			continue
+		}
+		st := t.Status
+		if st != "completed" && st != "aborted" && st != "error" {
+			count++
+		}
+	}
+	return count
 }
 
 // --- deep-copy helpers (Snapshot must be independent of later reduce activity) ---

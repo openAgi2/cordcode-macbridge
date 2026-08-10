@@ -642,6 +642,11 @@ func (h *Handlers) runProjectionHydrateTransaction(
 			}
 		}
 	}
+	// §5.1 #7: cold-source ingest (mainstream + Claude sidechain) is now complete — no more
+	// ApplyHydrateEvent calls will be made from the cold source. Arm the commit gate so
+	// WaitHydrateCommitReady decides readiness from authoritative source-EOF + turn terminal
+	// state instead of content-shape/turn-count guessing (guardrail #6).
+	h.projectionKernel.MarkHydrateSourceIngestComplete(backendID, sessionID)
 	if err := h.projectionKernel.WaitHydrateCommitReady(ctx, backendID, sessionID); err != nil {
 		h.projectionKernel.MarkFailed(
 			backendID, sessionID, "projection.bare_source_wait_failed", err.Error(), true,

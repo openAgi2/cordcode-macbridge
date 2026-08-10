@@ -302,6 +302,11 @@ func TestProjectionKernelBareShellWaitsForRealContent(t *testing.T) {
 		t.Fatal("bare shell became ready")
 	}
 
+	// §5.1 #7: content alone no longer satisfies the commit gate. The bare shell must reach a
+	// terminal turn state AND the cold source must be marked fully ingested — mirroring the
+	// handler path (runProjectionHydrateTransaction marks source-complete after ingest, then
+	// waits). Here real content lands, then the turn is sealed, then source-complete arms the
+	// gate; only then is the transaction committable.
 	kernel.IngestLive(EventMessage{
 		EventID:       "epoch:1",
 		Seq:           1,
@@ -312,6 +317,17 @@ func TestProjectionKernelBareShellWaitsForRealContent(t *testing.T) {
 		Event:         "text_delta",
 		Data:          map[string]interface{}{"itemId": "turn-bare", "delta": "content"},
 	})
+	kernel.IngestLive(EventMessage{
+		EventID:       "epoch:2",
+		Seq:           2,
+		PerSessionSeq: 2,
+		BridgeEpoch:   "epoch",
+		BackendID:     "codex",
+		SessionID:     "bare-wait",
+		Event:         "turn_completed",
+		Data:          map[string]interface{}{"turnId": "turn-bare"},
+	})
+	kernel.MarkHydrateSourceIngestComplete("codex", "bare-wait")
 	if err := kernel.WaitHydrateCommitReady(context.Background(), "codex", "bare-wait"); err != nil {
 		t.Fatal(err)
 	}
@@ -786,5 +802,109 @@ func TestClaudeCompositeCheckpointHitRestoresBaseline_NotEmptyHead0(t *testing.T
 	}
 	if commit2.Projection.Turns[0].TurnID != turnID {
 		t.Fatalf("want restored turn %q, got %q", turnID, commit2.Projection.Turns[0].TurnID)
+	}
+}
+
+// TestProjectionHydrateAbortedTurnWithoutSourceCompleteNotReady is the §5.1 #7 RED baseline.
+// A content-less aborted turn whose cold source is NOT yet marked fully ingested must NOT be
+// committable. This encodes the boundary as a permanent contract: source-EOF is the
+// authoritative readiness signal, not turn shape. Before the §5.1 #7 fix this stayed not-ready
+// for the wrong reason (HasContentTurn=false on a content-less turn); after the fix it stays
+// not-ready for the right reason (source not yet complete). Either way: no commit without the
+// source-complete signal.
+func TestProjectionHydrateAbortedTurnWithoutSourceCompleteNotReady(t *testing.T) {
+	kernel := NewProjectionKernel(nil, nil)
+	admission, err := kernel.BeginHydrateTransaction(
+		"codex", "aborted-no-src",
+		ProjectionSourceDescriptor{Identity: "aborted-no-src"},
+		false, false,
+	)
+	if err != nil || !admission.Leader {
+		t.Fatalf("admission=%+v err=%v", admission, err)
+	}
+	kernel.ApplyHydrateEvent("codex", "aborted-no-src", "epoch", "turn_started",
+		map[string]interface{}{"turnId": "turn-aborted"})
+	kernel.ApplyHydrateEvent("codex", "aborted-no-src", "epoch", "turn_aborted",
+		map[string]interface{}{"turnId": "turn-aborted"})
+
+	short, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if err := kernel.WaitHydrateCommitReady(short, "codex", "aborted-no-src"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("aborted turn without source-complete must stay not-ready, got err=%v", err)
+	}
+	if _, ok := kernel.Snapshot("codex", "aborted-no-src"); ok {
+		t.Fatal("aborted turn without source-complete became ready")
+	}
+}
+
+// TestProjectionHydrateAbortedTurnWithSourceCompleteReady is the §5.1 #7 GREEN target. A
+// content-less aborted turn that has reached a terminal state, once the cold source is fully
+// ingested, IS committable. This is exactly the case the old gate (HasContentTurn) could never
+// satisfy — an aborted/empty session with no assistant content would hydrate forever — and the
+// reason §5.1 #7 replaces content-shape guessing with authoritative source-EOF + terminal state.
+func TestProjectionHydrateAbortedTurnWithSourceCompleteReady(t *testing.T) {
+	kernel := NewProjectionKernel(nil, nil)
+	admission, err := kernel.BeginHydrateTransaction(
+		"codex", "aborted-src",
+		ProjectionSourceDescriptor{Identity: "aborted-src"},
+		false, false,
+	)
+	if err != nil || !admission.Leader {
+		t.Fatalf("admission=%+v err=%v", admission, err)
+	}
+	kernel.ApplyHydrateEvent("codex", "aborted-src", "epoch", "turn_started",
+		map[string]interface{}{"turnId": "turn-aborted"})
+	kernel.ApplyHydrateEvent("codex", "aborted-src", "epoch", "turn_aborted",
+		map[string]interface{}{"turnId": "turn-aborted"})
+	kernel.MarkHydrateSourceIngestComplete("codex", "aborted-src")
+
+	if err := kernel.WaitHydrateCommitReady(context.Background(), "codex", "aborted-src"); err != nil {
+		t.Fatalf("aborted terminal turn + source-complete must be ready, got err=%v", err)
+	}
+	commit, err := kernel.CommitHydrateTransaction("codex", "aborted-src")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commit.Projection.Turns) != 1 {
+		t.Fatalf("want 1 aborted turn committed, got %d turns", len(commit.Projection.Turns))
+	}
+	if got := commit.Projection.Turns[0].Status; got != "aborted" {
+		t.Fatalf("aborted turn status=%q, want \"aborted\"", got)
+	}
+}
+
+// TestProjectionHydrateErrorTurnWithSourceCompleteReady covers the crash sibling of the aborted
+// case (§5.1 #7). A turn_error event must settle the turn to status=error and satisfy the
+// commit gate once the source is fully ingested. Crash and abort are distinct terminal states;
+// covering both prevents a "only aborted works" regression (the historical failure mode where
+// fixing one terminal kind left the crash sibling stuck hydrating).
+func TestProjectionHydrateErrorTurnWithSourceCompleteReady(t *testing.T) {
+	kernel := NewProjectionKernel(nil, nil)
+	admission, err := kernel.BeginHydrateTransaction(
+		"codex", "error-src",
+		ProjectionSourceDescriptor{Identity: "error-src"},
+		false, false,
+	)
+	if err != nil || !admission.Leader {
+		t.Fatalf("admission=%+v err=%v", admission, err)
+	}
+	kernel.ApplyHydrateEvent("codex", "error-src", "epoch", "turn_started",
+		map[string]interface{}{"turnId": "turn-err"})
+	kernel.ApplyHydrateEvent("codex", "error-src", "epoch", "turn_error",
+		map[string]interface{}{"turnId": "turn-err"})
+	kernel.MarkHydrateSourceIngestComplete("codex", "error-src")
+
+	if err := kernel.WaitHydrateCommitReady(context.Background(), "codex", "error-src"); err != nil {
+		t.Fatalf("error terminal turn + source-complete must be ready, got err=%v", err)
+	}
+	commit, err := kernel.CommitHydrateTransaction("codex", "error-src")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commit.Projection.Turns) != 1 {
+		t.Fatalf("want 1 error turn committed, got %d turns", len(commit.Projection.Turns))
+	}
+	if got := commit.Projection.Turns[0].Status; got != "error" {
+		t.Fatalf("error turn status=%q, want \"error\"", got)
 	}
 }

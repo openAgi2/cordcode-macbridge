@@ -485,6 +485,17 @@ type projectionHydrateTransaction struct {
 	nextInput   int
 	pendingLive []EventMessage
 	liveArrived chan struct{}
+	// sourceIngestComplete is set true once cold-source ingest finishes (design §5.1 #7,
+	// guardrail #6). WaitHydrateCommitReady will not commit until this is true, so readiness
+	// is decided from authoritative source-EOF + turn terminal state rather than content
+	// shape or turn-count guessing.
+	sourceIngestComplete bool
+	// coldArmedTurnIDs records every turn ID the cold-source ingest referenced (turnId or
+	// itemId). The commit gate checks terminal state only for these turns — turns carried
+	// from a committed/live baseline are authoritative live truth, not cold-source half-seen
+	// guesses, so a live in-progress session cold-pulled commits its current state instead of
+	// blocking until the in-flight turn completes.
+	coldArmedTurnIDs map[string]struct{}
 }
 
 type ProjectionHydrateAdmission struct {
@@ -739,10 +750,11 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 	catchUpFrom := session.committedSourceCursor
 	wasReadyCatchUp := session.status.Phase == ProjectionHydrateReady && source.Path != "" && source.Cursor > catchUpFrom
 	tx := &projectionHydrateTransaction{
-		source:      source,
-		startCut:    source.Cursor,
-		reducer:     NewProjectionReducer(),
-		liveArrived: make(chan struct{}, 1),
+		source:           source,
+		startCut:         source.Cursor,
+		reducer:          NewProjectionReducer(),
+		liveArrived:      make(chan struct{}, 1),
+		coldArmedTurnIDs: make(map[string]struct{}),
 	}
 	if source.Path == "" {
 		if pathlessFullRebuildSource(backendID, source) {
@@ -834,6 +846,15 @@ func (k *ProjectionKernel) ApplyHydrateEvent(
 		return false
 	}
 	tx := session.hydrate
+	// Record every turn the cold source references (turnId, else itemId), so the commit gate
+	// checks terminal state only for cold-source-armed turns (design §5.1 #7). Turns carried
+	// from a committed/live baseline are never referenced here and thus never gate — live
+	// in-progress sessions cold-pulled commit their current state instead of blocking.
+	if tid, ok := data["turnId"].(string); ok && tid != "" {
+		tx.coldArmedTurnIDs[tid] = struct{}{}
+	} else if iid, ok := data["itemId"].(string); ok && iid != "" {
+		tx.coldArmedTurnIDs[iid] = struct{}{}
+	}
 	tx.nextInput++
 	before := tx.reducer.LastAppliedRev(backendID, sessionID)
 	tx.reducer.Apply(EventMessage{
@@ -886,8 +907,38 @@ func (k *ProjectionKernel) IngestLive(msg EventMessage) bool {
 	return projectionAdvanced
 }
 
-// WaitHydrateCommitReady distinguishes a truly empty inspected source from a bare turn shell.
-// A bare shell remains hydrating until a post-cut live event contributes real content.
+// MarkHydrateSourceIngestComplete signals that cold-source ingest feeding this hydrate
+// transaction has finished — no further ApplyHydrateEvent calls will be made from the cold
+// source (mainstream transcript + Claude sidechain). WaitHydrateCommitReady will not commit
+// until this is set, so readiness is decided from authoritative source-EOF + turn terminal
+// state rather than content shape or turn-count guessing (design §5.1 #7, guardrail #6).
+// Also nudges liveArrived so a waiter re-evaluates immediately. Idempotent; no-op if the
+// transaction is no longer active (already committed/failed/superseded).
+func (k *ProjectionKernel) MarkHydrateSourceIngestComplete(backendID, sessionID string) {
+	if k == nil {
+		return
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	session := k.sessionLocked(backendID, sessionID)
+	if session.status.Phase != ProjectionHydrateHydrating || session.hydrate == nil {
+		return
+	}
+	session.hydrate.sourceIngestComplete = true
+	select {
+	case session.hydrate.liveArrived <- struct{}{}:
+	default:
+	}
+}
+
+// WaitHydrateCommitReady blocks until the hydrate transaction is committable, then returns
+// nil. Commit readiness is authoritative (design §5.1 #7, guardrail #6): the cold source must
+// be fully ingested (MarkHydrateSourceIngestComplete) AND every turn armed by the source must
+// have reached a terminal state (completed/aborted/error). This replaces the earlier
+// turnCount==0 || HasContentTurn gate, which guessed from count/content shape and left
+// empty/aborted/crashed sessions stuck hydrating forever. A bare turn_started with no
+// terminal event stays not-ready (correct); a live in-flight turn cold-opened mid-flight
+// waits for its terminal event instead of committing on partial content.
 func (k *ProjectionKernel) WaitHydrateCommitReady(
 	ctx context.Context,
 	backendID, sessionID string,
@@ -907,8 +958,15 @@ func (k *ProjectionKernel) WaitHydrateCommitReady(
 		for _, msg := range tx.pendingLive {
 			preview.Apply(msg)
 		}
-		turnCount := preview.TurnCount(backendID, sessionID)
-		ready := turnCount == 0 || preview.HasContentTurn(backendID, sessionID)
+		// §5.1 #7 / guardrail #6: readiness is authoritative, not guessed. Commit only after
+		// the cold source is fully ingested AND every turn the cold source armed has reached a
+		// terminal state (completed/aborted/error). Scoped to cold-armed turns: turns carried
+		// from a committed/live baseline are live truth and do not gate, so a live in-progress
+		// session cold-pulled commits its current state instead of blocking. The old
+		// `turnCount == 0 || HasContentTurn(...)` gate guessed from count/content shape; it left
+		// empty/aborted/crashed sessions stuck hydrating forever and could commit a half-seen
+		// in-flight turn on partial content.
+		ready := tx.sourceIngestComplete && preview.NonTerminalTurnCountInSet(backendID, sessionID, tx.coldArmedTurnIDs) == 0
 		liveArrived := tx.liveArrived
 		k.mu.Unlock()
 		if ready {
