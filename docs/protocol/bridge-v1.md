@@ -487,7 +487,7 @@ be displayed as connected.
 
 There are two separate pagination surfaces:
 
-1. `list_sessions` session-list pagination. These fields are additive and may be used when a backend returns the standard `{ sessions, nextCursor, hasMore }` envelope. Clients MUST treat `cursor` as opaque and scoped to backend, bridge/backend identity, project or directory bucket, and the current backend process lifetime unless a future protocol marks it durable. OpenCode may carry an upstream cursor here; file-backed backends may carry a bridge-owned cursor.
+1. `list_sessions` session-list pagination. These fields are additive and may be used when a backend returns the standard `{ sessions, nextCursor, hasMore }` envelope. The `cursor`/`nextCursor` exposed to clients is always **bridge-owned**: MacBridge never forwards an upstream catalog cursor across the bridge boundary (upstream cursors from Codex `thread/list` or Grok ACP are used only for MacBridge's internal bounded read). Clients MUST treat `cursor` as opaque and scoped to backend, bridge/backend identity, and project or directory bucket. The bridge-owned cursor is **durable across catalog subprocess/connection restarts**: it is NOT invalidated when the backend catalog process or the bridge connection restarts, as long as the catalog data fingerprint is unchanged. Only a fingerprint change (new/updated/removed sessions) or page-0 snapshot TTL expiry invalidates it, reported via `cursor_stale` (see § Cursor invalidity below). OpenCode `/session` is array-only and exposes no upstream cursor; MacBridge synthesizes the bridge-owned cursor over the bounded in-memory fetch.
 2. `get_session_messages` message-history pagination. This is gated by the existing `session_pagination` backend capability and is unrelated to OpenCode project bucket list loading.
 
 ### `list_sessions` paging
@@ -517,8 +517,30 @@ Rules:
 
 - Clients MUST NOT parse cursor contents or reuse a cursor across backend/project/directory scopes.
 - `hasMore` is authoritative. Do not infer more pages from `sessions.length == limit`.
-- For OpenCode directory-scoped lists, stable upstream servers may still be array-only and omit a cursor. MacBridge fetches a bounded upstream page, then exposes bridge-owned cursor pagination over that in-memory result; `hasMore` reflects the remaining bridge-owned slice for the current request scope.
+- For OpenCode directory-scoped lists, the upstream `/session` endpoint is array-only (no upstream cursor). MacBridge fetches a bounded upstream page (≤100, the upstream API's hard cap), then synthesizes bridge-owned cursor pagination over that in-memory result; `hasMore` reflects the remaining bridge-owned slice for the current request scope. If the workspace has more than 100 sessions, the excess is silently invisible at the upstream boundary — a known ceiling imposed by the upstream API shape, not a bridge choice.
 - `rootsOnly` remains valid for legacy/non-OpenCode list calls. OpenCode forwards it as the server-side root-session filter; clients must still scope cursors to the same backend/project/directory.
+
+### Cursor invalidity (`cursor_stale`)
+
+`cursor_stale` is the shared, generic cursor-invalidity error code for BOTH pagination surfaces — `list_sessions` session-list paging and `get_session_messages` history paging. It is a pagination-negotiation result, NOT a catalog live/stale state and NOT a UI error: clients MUST NOT surface it as an error. On receipt, the client discards the current cursor chain and reloads from page-0 (list) / the first page (history), merging the fresh result with unchanged local state by id.
+
+Trigger reasons differ per surface:
+
+- `list_sessions` (bridge-owned snapshot cursor, v2): the cursor's snapshot epoch no longer matches the current catalog fingerprint (sessions added/updated/removed); the page-0 snapshot has passed TTL with no fresh snapshot rebuilt; or no snapshot exists for the scope. A v1 cursor received from a connection that declared `catalog_cursor_epoch_v2` is also treated as stale (it carries no epoch).
+- `get_session_messages` (history): the indexed transcript prefix the cursor referenced was rewritten, truncated, or replaced, so ancestry can no longer be proven continuous (see § Cursor semantics below).
+
+The client rebuild contract is identical for both: drop the cursor chain, suppress error display, reload page-0 / first page.
+
+### Capability: `catalog_cursor_epoch_v2`
+
+A CLIENT opt-in capability for the bridge-owned session-list snapshot cursor (design `docs/2026-08-09-cross-backend-session-catalog-parity-implementation-plan.md` §4.1.1). The client declares `capabilities: ["catalog_cursor_epoch_v2"]` in `hello`; MacBridge echoes `capabilities["catalog_cursor_epoch_v2"] = true` in `hello_ack`.
+
+- **Declared**: MacBridge emits the v2 bridge-owned cursor (opaque; carries a snapshot epoch derived from the catalog fingerprint, plus the v1 content position) and returns `cursor_stale` (per § Cursor invalidity) when the epoch mismatches, the snapshot expired, or a stale v1 cursor arrives. The client implements the `cursor_stale → discard chain + resend page-0` contract.
+- **Undeclared**: MacBridge keeps the legacy v1 behavior (content-based cursor; a malformed cursor degrades to the first page) and does NOT emit `cursor_stale` for the list surface. Existing client behavior is unchanged — no regression.
+
+Advertising `catalog_cursor_epoch_v2` is an explicit promise that the client has implemented `cursor_stale → resend page-0`; clients MUST NOT advertise the capability while still treating `cursor_stale` as a fatal/unexpected error. This mirrors the `session_sync_v2` MUST-NOT-advertise contract: the capability is a versioned opt-in/out, not a runtime fallback.
+
+**Release ordering**: MacBridge MUST NOT emit a v2 cursor or a list-surface `cursor_stale` to any connection before this capability gate is live. Once the gate is live, declared connections receive v2; undeclared connections keep v1, so there is never a window where a client sees `cursor_stale` as an ordinary/unexpected error.
 
 ### Capability
 
@@ -886,7 +908,9 @@ When `paginate` is true and the backend supports it, the response data is:
 - Cursors are opaque and versioned. Clients must not introspect or construct them.
 - A cursor is only valid for the session and backend it was issued for.
 - `cursor_stale` means the history prefix the cursor referenced can no longer be proven continuous;
-  reset to the first page.
+  reset to the first page. `cursor_stale` is the shared generic invalidity code for both this
+  history surface and the `list_sessions` snapshot cursor — see § Cursor invalidity for the full
+  trigger-reason / rebuild-contract enumeration.
 
 ## Session Projection Stream (session_sync_v2)
 
