@@ -1,0 +1,124 @@
+{
+  "_comment": "Sanitized REAL codex app-server thread/list capture (codex-cli 0.147.0-alpha.6.5). Field names/types/order are verbatim from the live app-server; only sensitive values (session ids, titles, previews, paths, cwd, gitInfo) are replaced with stable fixture values. Captured against the live app-server with the frozen Phase 0 request params (see request). Do NOT hand-edit field names — they are the frozen wire schema.",
+  "codexCliVersion": "0.147.0-alpha.6.5",
+  "request": {
+    "archived": false,
+    "cwd": "/tmp/fixture-workspace",
+    "limit": 3,
+    "sortDirection": "desc",
+    "sortKey": "recency_at",
+    "source": "interactive"
+  },
+  "response": {
+    "jsonrpc": "2.0",
+    "id": 2,
+    "result": {
+      "data": [
+        {
+          "id": "019f0000-0000-7000-8000-000000000001",
+          "extra": null,
+          "sessionId": "019f0000-0000-7000-8000-000000000001",
+          "forkedFromId": null,
+          "parentThreadId": null,
+          "preview": "Fixture preview: first user prompt of session alpha, sanitized.",
+          "ephemeral": false,
+          "section": null,
+          "sectionEnteredAt": null,
+          "historyMode": "legacy",
+          "modelProvider": "custom",
+          "createdAt": 1784025236,
+          "updatedAt": 1784082325,
+          "recencyAt": 1784082307,
+          "status": {
+            "type": "notLoaded"
+          },
+          "path": "/tmp/fixture-workspace/.codex/sessions/2026/07/14/rollout-2026-07-14T00-00-00-019f0000-0000-7000-8000-000000000001.jsonl",
+          "cwd": "/tmp/fixture-workspace",
+          "cliVersion": "0.144.2",
+          "source": "vscode",
+          "canAcceptDirectInput": null,
+          "threadSource": null,
+          "agentNickname": null,
+          "agentRole": null,
+          "gitInfo": {
+            "sha": "0000000000000000000000000000000000000001",
+            "branch": "main",
+            "originUrl": "https://example.invalid/fixture-repo.git"
+          },
+          "name": "Fixture session alpha",
+          "turns": []
+        },
+        {
+          "id": "019f0000-0000-7000-8000-000000000002",
+          "extra": null,
+          "sessionId": "019f0000-0000-7000-8000-000000000002",
+          "forkedFromId": null,
+          "parentThreadId": null,
+          "preview": "Fixture preview: first user prompt of session beta, sanitized.",
+          "ephemeral": false,
+          "section": null,
+          "sectionEnteredAt": null,
+          "historyMode": "legacy",
+          "modelProvider": "custom",
+          "createdAt": 1783900000,
+          "updatedAt": 1784040000,
+          "recencyAt": 1784039000,
+          "status": {
+            "type": "notLoaded"
+          },
+          "path": "/tmp/fixture-workspace/.codex/sessions/2026/07/13/rollout-2026-07-13T00-00-00-019f0000-0000-7000-8000-000000000002.jsonl",
+          "cwd": "/tmp/fixture-workspace",
+          "cliVersion": "0.144.2",
+          "source": "vscode",
+          "canAcceptDirectInput": null,
+          "threadSource": null,
+          "agentNickname": null,
+          "agentRole": null,
+          "gitInfo": {
+            "sha": "0000000000000000000000000000000000000001",
+            "branch": "main",
+            "originUrl": "https://example.invalid/fixture-repo.git"
+          },
+          "name": "Fixture session beta",
+          "turns": []
+        },
+        {
+          "id": "019f0000-0000-7000-8000-000000000003",
+          "extra": null,
+          "sessionId": "019f0000-0000-7000-8000-000000000003",
+          "forkedFromId": null,
+          "parentThreadId": null,
+          "preview": "Fixture preview: first user prompt of session gamma, sanitized.",
+          "ephemeral": false,
+          "section": null,
+          "sectionEnteredAt": null,
+          "historyMode": "legacy",
+          "modelProvider": "custom",
+          "createdAt": 1783800000,
+          "updatedAt": 1784000000,
+          "recencyAt": 1783999000,
+          "status": {
+            "type": "notLoaded"
+          },
+          "path": "/tmp/fixture-workspace/.codex/sessions/2026/07/12/rollout-2026-07-12T00-00-00-019f0000-0000-7000-8000-000000000003.jsonl",
+          "cwd": "/tmp/fixture-workspace",
+          "cliVersion": "0.144.0-alpha.4",
+          "source": "vscode",
+          "canAcceptDirectInput": null,
+          "threadSource": null,
+          "agentNickname": null,
+          "agentRole": null,
+          "gitInfo": {
+            "sha": "0000000000000000000000000000000000000001",
+            "branch": "main",
+            "originUrl": "https://example.invalid/fixture-repo.git"
+          },
+          "name": "Fixture session gamma",
+          "turns": []
+        }
+      ],
+      "nextCursor": "2026-07-13T07:44:47.555Z|019f0000-0000-7000-8000-000000000003",
+      "backwardsCursor": "2026-07-15T02:25:07.242Z"
+    }
+  }
+}
