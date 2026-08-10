@@ -237,12 +237,13 @@ func (a *Agent) SetCatalogSubprocessRegistrar(r CatalogSubprocessRegistrar) {
 	a.mu.Unlock()
 }
 
-// fetchThreadList 是 go-bridge catalog provider 适配器的入口：取单例 catalog client，
+// FetchThreadList 是 go-bridge catalog 适配器的入口：取单例 catalog client，
 // 用冻结 scope 参数（cwd=dir）调 thread/list，映射成 core.AgentSessionInfo。dir 为空时
 // 用 Agent workDir（与 thread/list cwd 精确过滤语义一致）。
 //
 // 失败必须显式返回 error（§5.1 step 6：删除 catalog 失败时静默回退 JSONL 的路径）。
-func (a *Agent) fetchThreadList(ctx context.Context, dir string) ([]core.AgentSessionInfo, error) {
+// 导出以供 go-bridge 经 codexThreadLister 接口（结构化满足）调用。
+func (a *Agent) FetchThreadList(ctx context.Context, dir string) ([]core.AgentSessionInfo, error) {
 	if dir == "" {
 		a.mu.RLock()
 		dir = a.workDir
