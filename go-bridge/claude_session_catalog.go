@@ -1,3 +1,23 @@
+// claude_session_catalog.go 是 Claude Code 的 session catalog 实现，属于「跨后端 Session Catalog
+// 同源改造」（docs/2026-08-09-cross-backend-session-catalog-parity-implementation-plan.md §5.2）的
+// **明确标注的 compatibility catalog**——不是 Claude Desktop / Claude Code 原生 catalog 同源。
+//
+// §5.2 诚实边界（honest boundary）：Claude Code CLI（claude --version 2.1.209）目前**没有**公开的
+// session 列表 / catalog 子命令，也没有 `ccd_session_mgmt__list_sessions` 能力；该能力只存在于
+// Claude Desktop 的私有 Electron 层（app.asar，§5.2 P0 #4 明确禁止复用）。因此 Claude 的 catalog
+// 只能从 `~/.claude/projects/` 下的 JSONL transcript 文件派生（本文件做的事），与 codex thread/list、
+// grok session/list、opencode /session 这些**后端原生 catalog API** 不同源。
+//
+// 这意味着（与已迁移 backend 的关键差异）：
+//   - 本 catalog **不**走 catalog_cursor_epoch_v2 v2 主线（无原生 catalog → 无 pageV2 快照 → 无 v2
+//     epoch cursor）。handlers.go 的 list_sessions dispatch 对 claudecode 没有 v2 分支（只有 codex /
+//     grokbuild 在 ConnCatalogCursorEpochV2 时路由到各自 *HandleListSessions），即使连接声明了
+//     catalog_cursor_epoch_v2，claudecode 也继续走 paginateSessionList 的 v1 盲切路径——这是「不
+//     宣称 false parity」的结构保证（见 handlers_claude_catalog_guardrail_test.go）。
+//   - 等 Claude Code 上游暴露稳定 catalog 接口后，再把 claude 迁移到原生同源主线（届时新增 v2
+//     分支 + provider adapter + 定向测试），不要在本文件里伪造一致。
+//
+// upstream blocker 证据见 docs/2026-08-10-claude-catalog-supported-interface-investigation.md。
 package gobridge
 
 import (
