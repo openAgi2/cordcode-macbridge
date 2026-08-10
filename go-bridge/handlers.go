@@ -613,6 +613,8 @@ func (h *Handlers) RegisterAgent(id string, agent core.Agent) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.agents[id] = agent
+	// §4.3：codex catalog stdio 子进程注册到 bridge ProcessRegistry，Shutdown 时确定性进程组回收。
+	h.injectCodexCatalogRegistrar(agent)
 }
 
 // session access helpers — bridge h.mu and sessionRegistry
@@ -2535,6 +2537,15 @@ func findClaudeSessionFile(sessionID string, optDir string) (projectDir string, 
 }
 
 func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent core.Agent) {
+	// Codex catalog 主线（thread/list + v2 epoch cursor，§5.1 Stream A）：仅当该连接 hello
+	// 声明 catalog_cursor_epoch_v2（iOS Phase 6 才声明）。未声明 → 落到下面既有 generic
+	// disk-scan（agent.ListSessions）路径 byte-for-byte 不变（§10 发布顺序：capability 上线前
+	// MacBridge 不得对任何连接发射 v2 cursor，且数据源 disk-scan→thread/list 同样只对 declared 生效）。
+	if agent.Name() == "codex" && h.eventPublisher.ConnCatalogCursorEpochV2(conn) {
+		h.codexHandleListSessions(conn, msg, agent)
+		return
+	}
+
 	limit := h.effectiveSessionListLimit(extractPositiveInt(msg, "limit"))
 	metrics := newSessionLoadRequestMetrics(conn, msg)
 	ctx := core.WithSessionLoadMetrics(context.Background(), metrics.context())
