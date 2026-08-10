@@ -52,6 +52,14 @@ type Agent struct {
 	// Injected via opts["pin_store"] from go-bridge main; nil in unit tests that do not
 	// exercise pinning.
 	pinStore *pinstore.Store
+
+	// catalogClient 是长寿命 thread-unbound app-server catalog client（Phase 2 §5.1）。
+	// 单例：首次 fetchThreadList 懒构造，已死则重建。catalogRegistrar 由 go-bridge 经
+	// SetCatalogSubprocessRegistrar 注入（bridge ProcessRegistry），供 stdio 子进程注册到
+	// bridge shutdown 回收链。ws 传输无子进程，registrar 不参与。
+	catalogClient   *catalogClient
+	catalogClientMu sync.Mutex
+	catalogRegistrar CatalogSubprocessRegistrar
 }
 
 func New(opts map[string]any) (core.Agent, error) {
