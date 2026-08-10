@@ -49,6 +49,11 @@ type Handlers struct {
 	// paginateSessionList 路径不变。lazy init（sync.Once），构造路径 NewHandlers 不改。
 	catalogWireCache    *catalogWireSnapshotCache
 	catalogWireInitOnce sync.Once
+	// catalogProcRegistry 跟踪 catalog 子进程（§4.3/§11，Phase 1E）。Phase 2-5 catalog client 经
+	// h.catalogProcessRegistry() Register 其 stdio 单例子进程；handlers.Shutdown 经其 Shutdown 确定性
+	// 回收。OpenCode 无子进程不经此。lazy init（sync.Once），构造路径不改。
+	catalogProcRegistry *ProcessRegistry
+	catalogProcInitOnce sync.Once
 	codexBackendMode       string
 	pendingNotifications   *PendingNotificationStore
 	broadcaster            *Broadcaster
@@ -680,6 +685,14 @@ func (h *Handlers) Shutdown(ctx context.Context) error {
 		// §3.6.3: 关闭 file-read worker pool（drain queued、cancel in-flight ctx、等待 workers）。
 		if h.filePool != nil {
 			h.filePool.Close()
+		}
+		// §4.3/§11: catalog 子进程独立回收（不进 sessionRegistry.drain）。进程组 SIGKILL + 确定性
+		// 总超时（catalogShutdownTimeout）。Phase 1 registry 恒空（无 catalog 子进程）；Phase 2-5
+		// catalog client Register 后生效。直读字段（不经 getter）避免 shutdown 时无谓初始化。
+		if h.catalogProcRegistry != nil {
+			if remaining := h.catalogProcRegistry.Shutdown(catalogShutdownTimeout); len(remaining) > 0 {
+				slog.Warn("go-bridge: catalog subprocesses remained after shutdown", "pids", remaining)
+			}
 		}
 
 		// Snapshot active sessions under the lock and clear the registry so
