@@ -323,8 +323,19 @@ func (h *Handlers) openCodeCatalogWireCache() *catalogWireSnapshotCache {
 }
 
 // buildOpenCodeEnrichedSessions 执行 §5.3#3 富 wire 管线：listSessions（上游 ≤100 有界全量读）
-// → mapSession → enrichSessionStatesForList → overlayPinnedState → sortSessionsByUpdatedAt。
-// v1（paginateSessionList）与 v2（catalogWireSnapshotCache）两条路径共用此 builder（DRY）。
+// → mapSession → enrichSessionStatesForList → overlayPinnedState。
+//
+// Phase 4 收敛（§5.3#3 / Phase 4 §421）：**不再在此处 sortSessionsByUpdatedAt 覆盖**。
+// 上游 /session 已按 time.updated desc 返回（frozen fixture testdata/opencode/catalog_sanitized.json
+// + TestOpenCodeCatalog_SessionDescByTimeUpdated 锁定该不变量）。re-sort 既冗余（同 key desc ==
+// 上游序），又是未来分歧源（若上游改排序语义，本地覆盖会让 iOS 偏离 Mac native）。故 builder
+// 透传上游真实顺序，由调用方决定是否需要本地排序。
+//
+//   - v2 DECLARED 路径（ocHandleListSessions）：直接消费上游序 + pageV2 快照（page-N 切同一
+//     page-0 快照，杜绝 §3.3 跨页漂移）。
+//   - v1 UNDECLARED 路径（ocHandleListSessionsV1）：paginateSessionList 的值过滤产出的 page
+//     顺序镜像输入序，故 v1 在 builder 后显式 sortSessionsByUpdatedAt，保证 §10 byte-for-byte
+//     不变（legacy 路径不上行「信任上游」收敛）。
 func (h *Handlers) buildOpenCodeEnrichedSessions(backendID, dir string, rootsOnly bool) ([]map[string]interface{}, error) {
 	page, err := h.ocProxy.listSessions(OpenCodeSessionListOptions{
 		Directory: dir,
@@ -341,7 +352,6 @@ func (h *Handlers) buildOpenCodeEnrichedSessions(backendID, dir string, rootsOnl
 	}
 	mapped = h.enrichSessionStatesForList(mapped, agent, h.getRunningMap(context.Background(), agent))
 	h.overlayPinnedState(mapped, "opencode")
-	sortSessionsByUpdatedAt(mapped)
 	return mapped, nil
 }
 
@@ -400,6 +410,11 @@ func (h *Handlers) ocHandleListSessionsV1(conn Connection, msg WireMessage, dir 
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
 		return
 	}
+
+	// v1 是 UNDECLARED legacy 路径：paginateSessionList 的值过滤产出 page 顺序镜像输入序，
+	// 故必须在此显式 sortSessionsByUpdatedAt 保证 §10 byte-for-byte 不变（Phase 4 的「信任
+	// 上游序」收敛只对 v2 DECLARED 路径生效，不上行到 v1）。builder 已不再 tail-sort。
+	sortSessionsByUpdatedAt(mapped)
 
 	// Slice the in-memory list by cursor+limit, identical to Codex/Claude.
 	// paginateSessionList emits a real nextCursor and hasMore derived from the
