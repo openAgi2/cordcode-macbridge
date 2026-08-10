@@ -613,8 +613,9 @@ func (h *Handlers) RegisterAgent(id string, agent core.Agent) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.agents[id] = agent
-	// §4.3：codex catalog stdio 子进程注册到 bridge ProcessRegistry，Shutdown 时确定性进程组回收。
+	// §4.3：codex/grokbuild catalog stdio 子进程注册到 bridge ProcessRegistry，Shutdown 时确定性进程组回收。
 	h.injectCodexCatalogRegistrar(agent)
+	h.injectGrokCatalogRegistrar(agent)
 }
 
 // session access helpers — bridge h.mu and sessionRegistry
@@ -2543,6 +2544,13 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 	// MacBridge 不得对任何连接发射 v2 cursor，且数据源 disk-scan→thread/list 同样只对 declared 生效）。
 	if agent.Name() == "codex" && h.eventPublisher.ConnCatalogCursorEpochV2(conn) {
 		h.codexHandleListSessions(conn, msg, agent)
+		return
+	}
+	// Grok catalog 主线（managed ACP session/list subprocess + v2 epoch cursor，§5.4 Phase 3）：
+	// 同样的 declared-only 门控。Grok session/list 非 cwd-scoped → 不取 dir（与 codex 不同）。
+	// undeclared → 落到下面 generic disk-scan（agent.ListSessions）路径不变。
+	if agent.Name() == "grokbuild" && h.eventPublisher.ConnCatalogCursorEpochV2(conn) {
+		h.grokHandleListSessions(conn, msg, agent)
 		return
 	}
 
