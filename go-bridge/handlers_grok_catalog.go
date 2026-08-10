@@ -66,8 +66,10 @@ func grokCatalogScopeKey(backendID string) string {
 
 // buildGrokEnrichedSessions 执行 §5.1 step 2-3 的富 wire 管线：FetchSessionList（managed ACP
 // subprocess session/list，跨 cwd，recency 排序）→ sessionsToWire → enrichSessionStatesForList
-// → overlayPinnedState → sortSessionsByUpdatedAt。v1（paginateSessionList）与 v2
-// （catalogWireSnapshotCache）两条路径共用此 builder（DRY）。
+// → overlayPinnedState。Phase 7 §445 收敛（与 OpenCode Phase 4 / codex 同形）：**不再
+// sortSessionsByUpdatedAt 覆盖**——session/list 的 recency 是权威上游序，本地 updatedAt 重排会改写它。
+// v1（undeclared → generic disk-scan agent.ListSessions）不经此 builder，故移除 sort 只影响 v2 主线。
+// builder 仅由 grokHandleListSessions（v2 DECLARED）调用。
 //
 // 失败必须显式返回 error（§5.1 step 6 / §5.4 #5：删除 catalog 失败时静默回退 JSONL 的路径；
 // 握手缺 session/list 能力时 FetchSessionList 已 fail-closed，此处不再二次 fallback）。
@@ -87,7 +89,6 @@ func (h *Handlers) buildGrokEnrichedSessions(backendID string) ([]map[string]int
 	mapped := sessionsToWire(sessions)
 	mapped = h.enrichSessionStatesForList(mapped, agent, h.getRunningMap(context.Background(), agent))
 	h.overlayPinnedState(mapped, "grokbuild")
-	sortSessionsByUpdatedAt(mapped)
 	return mapped, nil
 }
 

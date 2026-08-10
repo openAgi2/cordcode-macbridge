@@ -69,8 +69,11 @@ func codexCatalogScopeKey(backendID, dir string) string {
 
 // buildCodexEnrichedSessions 执行 §5.1 step 2-3 的富 wire 管线：FetchThreadList（app-server
 // thread/list，cwd=dir 精确过滤，recency_at desc）→ sessionsToWire → enrichSessionStatesForList
-// → overlayPinnedState → sortSessionsByUpdatedAt。v1（paginateSessionList）与 v2
-// （catalogWireSnapshotCache）两条路径共用此 builder（DRY）。
+// → overlayPinnedState。Phase 7 §445 收敛（与 OpenCode Phase 4 / handlers_opencode.go 同形）：
+// **不再 sortSessionsByUpdatedAt 覆盖**——thread/list 的 recency_at desc 是权威上游序，本地
+// updatedAt 重排会改写它（"Mac native 显示什么，iOS 就显示什么"）。v1（undeclared → generic
+// disk-scan agent.ListSessions）不经此 builder，故移除 sort 只影响 v2 主线，byte-for-byte 不动 v1。
+// builder 仅由 codexHandleListSessions（v2 DECLARED）调用。
 //
 // 失败必须显式返回 error（§5.1 step 6：删除 catalog 失败时静默回退 JSONL 的路径）。
 func (h *Handlers) buildCodexEnrichedSessions(backendID, dir string) ([]map[string]interface{}, error) {
@@ -89,7 +92,6 @@ func (h *Handlers) buildCodexEnrichedSessions(backendID, dir string) ([]map[stri
 	mapped := sessionsToWire(sessions)
 	mapped = h.enrichSessionStatesForList(mapped, agent, h.getRunningMap(context.Background(), agent))
 	h.overlayPinnedState(mapped, "codex")
-	sortSessionsByUpdatedAt(mapped)
 	return mapped, nil
 }
 

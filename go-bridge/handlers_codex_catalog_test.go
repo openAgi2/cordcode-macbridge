@@ -98,15 +98,47 @@ func TestCodexCatalog_V2Declared_RoutesToFetchThreadList(t *testing.T) {
 	})
 	msgs := readJSONMaps(t, clientConn, 1)
 	ids := resultSessionIDs(t, msgs[0])
+	// v2 结果序由 catalogWireSnapshotCache.sortWireMapsForCursor 规范化为 (updatedAt DESC, id ASC)
+	// （cursor 严格后继切片的稳定序）。Phase 7 §445 移除了 builder 内冗余的 sortSessionsByUpdatedAt
+	// （scanner-era 残留，与 OpenCode Phase 4 同形）——cache 是序的唯一权威，builder 不再预排序。
+	// builder 自身「不排序、保留上游序」由 TestCodexBuildEnrichedSessions_PreservesUpstreamOrder 直接断言。
 	if len(ids) != 2 || ids[0] != "thread_b" || ids[1] != "thread_a" {
-		// sortSessionsByUpdatedAt: thread_b(200) newer than thread_a(100) → DESC [b, a]
-		t.Fatalf("DECLARED sessions = %v, want [thread_b thread_a]（thread/list 经 FetchThreadList）", ids)
+		t.Fatalf("DECLARED sessions = %v, want [thread_b thread_a]（cache 规范序 updatedAt DESC）", ids)
 	}
 	if agent.fetchN != 1 {
 		t.Fatalf("FetchThreadList calls = %d, want 1", agent.fetchN)
 	}
 	if len(agent.fetchDirs) != 1 || agent.fetchDirs[0] != "/tmp/codex-ws" {
 		t.Fatalf("FetchThreadList dir = %v, want [/tmp/codex-ws]（cwd=workDir）", agent.fetchDirs)
+	}
+}
+
+// TestCodexBuildEnrichedSessions_PreservesUpstreamOrder：直接调用 buildCodexEnrichedSessions
+// （绕过 catalogWireSnapshotCache 的 sortWireMapsForCursor 规范化），断言 builder 自身**不再**
+// sortSessionsByUpdatedAt——保留 FetchThreadList 的上游输入序。这是 Phase 7 §445 的直接验证：
+// fixture 故意返回非 updatedAt-DESC 序 [thread_a(100), thread_b(200)]（本地排序会给 [b,a]），
+// builder 输出仍为 [a,b] 即证明未本地重排。cache 层的规范化由 integration 测试 + cache 专项测试覆盖。
+func TestCodexBuildEnrichedSessions_PreservesUpstreamOrder(t *testing.T) {
+	agent := &fakeCodexCatalogAgent{
+		fakeAgent: &fakeAgent{name: "codex"},
+		fetchFn:  func(context.Context, string) ([]core.AgentSessionInfo, error) { return threadFixtureSessions(), nil },
+		workDirV: "/tmp/codex-ws",
+	}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex", agent)
+
+	mapped, err := handlers.buildCodexEnrichedSessions("codex", "/tmp/codex-ws")
+	if err != nil {
+		t.Fatalf("buildCodexEnrichedSessions failed: %v", err)
+	}
+	if len(mapped) != 2 {
+		t.Fatalf("mapped len = %d, want 2", len(mapped))
+	}
+	id0, _ := mapped[0]["id"].(string)
+	id1, _ := mapped[1]["id"].(string)
+	// fixture 输入序 [thread_a, thread_b]；builder 保留原样（不再 sortSessionsByUpdatedAt）。
+	if id0 != "thread_a" || id1 != "thread_b" {
+		t.Fatalf("builder order = [%s %s], want [thread_a thread_b]（保留 FetchThreadList 上游序，Phase 7 §445 不本地重排）", id0, id1)
 	}
 }
 
