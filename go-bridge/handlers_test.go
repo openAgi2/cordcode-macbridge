@@ -1249,10 +1249,15 @@ func TestOpenCodeListSessionsFetchesLargePageAndPaginatesInMemory(t *testing.T) 
 	}
 
 	logText := logs.String()
-	for _, want := range []string{`msg="opencode list_sessions"`, "directory=/tmp/project", "limit=2", "result_count=2"} {
+	for _, want := range []string{`msg="opencode list_sessions"`, "directory=project", "limit=2", "result_count=2"} {
 		if !strings.Contains(logText, want) {
 			t.Fatalf("diagnostic log missing %q in %s", want, logText)
 		}
+	}
+	// Phase 7 §444：catalog 日志的 directory 已脱敏为 basename（project）。绝对路径 /tmp/project
+	// 不得出现在日志中——此负向断言锁定脱敏契约，防止回归到直接打 workDir/cwd。
+	if strings.Contains(logText, "/tmp/project") {
+		t.Fatalf("diagnostic log leaks absolute directory path (§444 redaction): %s", logText)
 	}
 }
 

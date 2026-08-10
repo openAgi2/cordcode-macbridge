@@ -385,16 +385,24 @@ func (h *Handlers) ocHandleListSessions(conn Connection, msg WireMessage, dir st
 		return
 	}
 	if staleErr != nil {
+		// Phase 7 §443 可观测性：cursor_stale 是 live/stale 协商结果（非错误），记录脱敏指标便于
+		// 统计 stale 触发率（epoch mismatch / TTL 无快照 / v1 cursor）。dir 脱敏（§444）。
+		slog.Info("opencode list_sessions cursor_stale",
+			"directory", redactDirForLog(dir),
+			"cursor_present", cursor != "",
+			"duration_ms", time.Since(started).Milliseconds(),
+		)
 		conn.SendResult(msg.RequestID, nil, staleErr) // cursor_stale（Retryable）
 		return
 	}
 	if ws, ok := result["sessions"].([]map[string]interface{}); ok {
 		slog.Info("opencode list_sessions v2",
-			"directory", dir,
+			"directory", redactDirForLog(dir),
 			"limit", limit,
 			"cursor_present", cursor != "",
 			"result_count", len(ws),
 			"next_cursor_present", result["hasMore"] == true,
+			"catalog_alive_procs", len(h.catalogProcessRegistry().AlivePIDs()), // Phase 7 §443 活跃 catalog 子进程数
 			"duration_ms", time.Since(started).Milliseconds(),
 		)
 	}
@@ -423,7 +431,7 @@ func (h *Handlers) ocHandleListSessionsV1(conn Connection, msg WireMessage, dir 
 
 	if ws, ok := result["sessions"].([]map[string]interface{}); ok {
 		slog.Info("opencode list_sessions",
-			"directory", dir,
+			"directory", redactDirForLog(dir),
 			"limit", limit,
 			"cursor_present", cursor != "",
 			"result_count", len(ws),

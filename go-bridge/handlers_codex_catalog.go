@@ -124,16 +124,24 @@ func (h *Handlers) codexHandleListSessions(conn Connection, msg WireMessage, age
 		return
 	}
 	if staleErr != nil {
+		// Phase 7 §443 可观测性：cursor_stale 是 live/stale 协商结果（非错误），记录脱敏指标便于
+		// 统计 stale 触发率。dir 脱敏（§444）。
+		slog.Info("codex list_sessions cursor_stale",
+			"directory", redactDirForLog(dir),
+			"cursor_present", cursor != "",
+			"duration_ms", time.Since(started).Milliseconds(),
+		)
 		conn.SendResult(msg.RequestID, nil, staleErr) // cursor_stale（Retryable）
 		return
 	}
 	if ws, ok := result["sessions"].([]map[string]interface{}); ok {
 		slog.Info("codex list_sessions v2 (thread/list)",
-			"directory", dir,
+			"directory", redactDirForLog(dir),
 			"limit", limit,
 			"cursor_present", cursor != "",
 			"result_count", len(ws),
 			"next_cursor_present", result["hasMore"] == true,
+			"catalog_alive_procs", len(h.catalogProcessRegistry().AlivePIDs()), // Phase 7 §443 活跃 catalog 子进程数
 			"duration_ms", time.Since(started).Milliseconds(),
 		)
 	}

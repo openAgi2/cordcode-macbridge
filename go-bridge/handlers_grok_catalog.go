@@ -121,6 +121,12 @@ func (h *Handlers) grokHandleListSessions(conn Connection, msg WireMessage, agen
 		return
 	}
 	if staleErr != nil {
+		// Phase 7 §443 可观测性：cursor_stale 是 live/stale 协商结果（非错误），记录脱敏指标便于
+		// 统计 stale 触发率。Grok session/list 非 cwd-scoped，无 dir 维度。
+		slog.Info("grokbuild list_sessions cursor_stale",
+			"cursor_present", cursor != "",
+			"duration_ms", time.Since(started).Milliseconds(),
+		)
 		conn.SendResult(msg.RequestID, nil, staleErr) // cursor_stale（Retryable）
 		return
 	}
@@ -130,6 +136,7 @@ func (h *Handlers) grokHandleListSessions(conn Connection, msg WireMessage, agen
 			"cursor_present", cursor != "",
 			"result_count", len(ws),
 			"next_cursor_present", result["hasMore"] == true,
+			"catalog_alive_procs", len(h.catalogProcessRegistry().AlivePIDs()), // Phase 7 §443 活跃 catalog 子进程数
 			"duration_ms", time.Since(started).Milliseconds(),
 		)
 	}
