@@ -1,0 +1,310 @@
+{
+  "_comment": "Sanitized REAL opencode 1.17.20 HTTP API capture. Field names/types/nesting/order are VERBATIM from the live `opencode serve` (127.0.0.1:4097, HTTP Basic auth, realm 'Secure Area'); only sensitive values (session ids, slugs, titles, directory/path, projectIDs, model ids, timestamps) are replaced with stable fixture values. Captured by reusing MacBridge's auth context (opencode-managed-server.json creds). Do NOT hand-edit field names — they are the frozen wire schema (plan §3.3/§5.3 Phase 0).",
+  "opencodeVersion": "1.17.20",
+  "auth": {
+    "scheme": "HTTP Basic",
+    "wwwAuthenticateRealm": "Secure Area",
+    "authContextSource": "MacBridge opencode-managed-server.json (Swift-managed persisted state; username+password injected as OPENCODE_SERVER_USERNAME/PASSWORD env to `opencode serve`, and as -opencode-user/-opencode-pass to go-bridge)",
+    "passwordlessRejected": true,
+    "_comment": "Health readiness requires unauth probe -> 401 AND authed -> 200 (OpenCodeManagedServer.swift). Passwordless servers are rejected."
+  },
+  "sessionEndpointCeiling": {
+    "arrayOnly": true,
+    "hardCap": 100,
+    "evidence": {
+      "limit100": "returns up to 100 (array)",
+      "limit200": "HTTP 500 UnknownError 'Unexpected server error' — server rejects limit>100",
+      "noLimitDefault": "returns up to 100 (server default)"
+    },
+    "workspaceExceedsCeiling": true,
+    "_comment": "Captured workspace returns exactly 100 for BOTH roots=true and roots=false, i.e. >=100 sessions exist; the excess beyond 100 is SILENTLY INVISIBLE. This is the documented 既有天花板 (plan §5.3.4/§11), confirmed live. No upstream cursor exists on /session to page past it."
+  },
+  "requests": {
+    "session_roots": {
+      "method": "GET",
+      "path": "/session",
+      "query": {
+        "limit": 100,
+        "roots": "true"
+      },
+      "headers": {
+        "Authorization": "Basic <redacted>",
+        "Content-Type": "application/json"
+      }
+    },
+    "session_scoped": {
+      "method": "GET",
+      "path": "/session",
+      "query": {
+        "limit": 100
+      },
+      "headers": {
+        "Authorization": "Basic <redacted>",
+        "Content-Type": "application/json",
+        "x-opencode-directory": "/tmp/fixture-workspace"
+      }
+    },
+    "project": {
+      "method": "GET",
+      "path": "/project",
+      "headers": {
+        "Authorization": "Basic <redacted>",
+        "Content-Type": "application/json"
+      }
+    }
+  },
+  "responses": {
+    "session_roots": {
+      "_shape": "bare JSON array (array-only; NO envelope, NO upstream cursor)",
+      "_capturedTotalReturned": 100,
+      "_capturedTotalIsCapped": true,
+      "sessions": [
+        {
+          "id": "ses_fixt00000000000000000001",
+          "slug": "fixture-01",
+          "projectID": "fixt01",
+          "directory": "/tmp/fixture-workspace",
+          "path": "",
+          "summary": {
+            "additions": 10,
+            "deletions": 2,
+            "files": 1
+          },
+          "cost": 100,
+          "tokens": {
+            "input": 1000,
+            "output": 500,
+            "reasoning": 50,
+            "cache": {
+              "read": 200,
+              "write": 100
+            }
+          },
+          "title": "Fixture OpenCode session a",
+          "agent": "build",
+          "model": {
+            "id": "fixture-model-1",
+            "providerID": "provider-1",
+            "variant": "stable"
+          },
+          "version": "local",
+          "time": {
+            "created": 1784000000000,
+            "updated": 1784000030000
+          }
+        },
+        {
+          "id": "ses_fixt00000000000000000002",
+          "slug": "fixture-02",
+          "projectID": "fixt01",
+          "directory": "/tmp/fixture-workspace",
+          "path": "",
+          "summary": {
+            "additions": 20,
+            "deletions": 4,
+            "files": 2
+          },
+          "cost": 200,
+          "tokens": {
+            "input": 2000,
+            "output": 1000,
+            "reasoning": 100,
+            "cache": {
+              "read": 400,
+              "write": 200
+            }
+          },
+          "title": "Fixture OpenCode session b",
+          "agent": "build",
+          "model": {
+            "id": "fixture-model-2",
+            "providerID": "provider-2",
+            "variant": "stable"
+          },
+          "version": "local",
+          "time": {
+            "created": 1783999940000,
+            "updated": 1783999970000
+          }
+        },
+        {
+          "id": "ses_fixt00000000000000000003",
+          "slug": "fixture-03",
+          "projectID": "fixt01",
+          "directory": "/tmp/fixture-workspace",
+          "path": "",
+          "summary": {
+            "additions": 30,
+            "deletions": 6,
+            "files": 3
+          },
+          "cost": 300,
+          "tokens": {
+            "input": 3000,
+            "output": 1500,
+            "reasoning": 150,
+            "cache": {
+              "read": 600,
+              "write": 300
+            }
+          },
+          "title": "Fixture OpenCode session c",
+          "agent": "build",
+          "model": {
+            "id": "fixture-model-3",
+            "providerID": "provider-3",
+            "variant": "stable"
+          },
+          "version": "local",
+          "time": {
+            "created": 1783999880000,
+            "updated": 1783999910000
+          }
+        }
+      ]
+    },
+    "session_scoped": {
+      "_shape": "bare JSON array, scoped to one directory via x-opencode-directory header",
+      "sessions": [
+        {
+          "id": "ses_fixt00000000000000000001",
+          "slug": "fixture-01",
+          "projectID": "fixt01",
+          "directory": "/tmp/fixture-workspace",
+          "path": "",
+          "summary": {
+            "additions": 10,
+            "deletions": 2,
+            "files": 1
+          },
+          "cost": 100,
+          "tokens": {
+            "input": 1000,
+            "output": 500,
+            "reasoning": 50,
+            "cache": {
+              "read": 200,
+              "write": 100
+            }
+          },
+          "title": "Fixture OpenCode session a",
+          "agent": "build",
+          "model": {
+            "id": "fixture-model-1",
+            "providerID": "provider-1",
+            "variant": "stable"
+          },
+          "version": "local",
+          "time": {
+            "created": 1784000000000,
+            "updated": 1784000030000
+          }
+        },
+        {
+          "id": "ses_fixt00000000000000000002",
+          "slug": "fixture-02",
+          "projectID": "fixt01",
+          "directory": "/tmp/fixture-workspace",
+          "path": "",
+          "summary": {
+            "additions": 20,
+            "deletions": 4,
+            "files": 2
+          },
+          "cost": 200,
+          "tokens": {
+            "input": 2000,
+            "output": 1000,
+            "reasoning": 100,
+            "cache": {
+              "read": 400,
+              "write": 200
+            }
+          },
+          "title": "Fixture OpenCode session b",
+          "agent": "build",
+          "model": {
+            "id": "fixture-model-2",
+            "providerID": "provider-2",
+            "variant": "stable"
+          },
+          "version": "local",
+          "time": {
+            "created": 1783999940000,
+            "updated": 1783999970000
+          }
+        },
+        {
+          "id": "ses_fixt00000000000000000003",
+          "slug": "fixture-03",
+          "projectID": "fixt01",
+          "directory": "/tmp/fixture-workspace",
+          "path": "",
+          "summary": {
+            "additions": 30,
+            "deletions": 6,
+            "files": 3
+          },
+          "cost": 300,
+          "tokens": {
+            "input": 3000,
+            "output": 1500,
+            "reasoning": 150,
+            "cache": {
+              "read": 600,
+              "write": 300
+            }
+          },
+          "title": "Fixture OpenCode session c",
+          "agent": "build",
+          "model": {
+            "id": "fixture-model-3",
+            "providerID": "provider-3",
+            "variant": "stable"
+          },
+          "version": "local",
+          "time": {
+            "created": 1783999880000,
+            "updated": 1783999910000
+          }
+        }
+      ]
+    },
+    "project": {
+      "_shape": "bare JSON array",
+      "_capturedTotalReturned": 31,
+      "projects": [
+        {
+          "id": "fixtp01",
+          "worktree": "/tmp/fixture-workspace",
+          "vcs": "git",
+          "time": {
+            "created": 1783000000000,
+            "updated": 1783003600000
+          },
+          "sandboxes": []
+        },
+        {
+          "id": "fixtp02",
+          "worktree": "/tmp/fixture-workspace-2",
+          "vcs": "git",
+          "time": {
+            "created": 1782913600000,
+            "updated": 1782917200000
+          },
+          "sandboxes": []
+        },
+        {
+          "id": "fixtp03",
+          "worktree": "/tmp/fixture-workspace-3",
+          "vcs": "git",
+          "time": {
+            "created": 1782827200000,
+            "updated": 1782830800000
+          },
+          "sandboxes": []
+        }
+      ]
+    }
+  }
+}
