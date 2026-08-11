@@ -799,3 +799,7 @@ Claude Desktop archive/delete 后，iOS 列表仍显示这些 session，重启 i
 Desktop 存储格式是私有且可能随版本变化；这是兼容 catalog 的 best-effort，不是
 Claude 原生 catalog 同源。等 Claude 上游暴露稳定 catalog 接口后再迁移，不要把它
 当成 exact parity。
+
+### owner 复测（2026-08-12）
+真机复测反馈「基本符合预期」：Desktop archive/delete 后 iOS 列表能及时消失，
+unarchive 也能恢复；本轮修复闭环。
