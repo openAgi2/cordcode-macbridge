@@ -4223,6 +4223,10 @@ func TestClaudeResumeSessionUsesRegistryStateWithoutTranscriptScan(t *testing.T)
 	handlers := newTestHandlers(t)
 	handlers.RegisterAgent("claude", agent)
 	handlers.sessions.markRunning("large-session")
+	// This test isolates synchronous resume enrichment. Model the normal already-watching
+	// state so the independently asynchronous file relay does not perform its own source scan.
+	handlers.relayRunning["large-session"] = true
+	handlers.relayRunningKind["large-session"] = relayKindClaudeFile
 
 	probeCalls := 0
 	handlers.transcriptStateProbe = func() { probeCalls++ }
