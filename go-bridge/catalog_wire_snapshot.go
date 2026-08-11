@@ -1,12 +1,12 @@
 package gobridge
 
-// catalog_wire_snapshot.go 是 OpenCode 专用 wire-map 快照缓存（跨后端 session catalog
-// 同源改造 §4.1.1 / §5.3#3，Phase 1 chunk 1C）。它与 catalog_snapshot_cache.go（1B，
+// catalog_wire_snapshot.go 是 Codex/Grok/OpenCode declared catalog 共用的 wire-map 快照缓存。
+// 它与 catalog_snapshot_cache.go（1B，
 // NormalizedSession，面向 Phase 2-5 全新 provider）刻意分开：
 //
 //   - §5.3#3 明确要求 OpenCode「复用既有 paginateSessionList 富 wire 管线」，因此本缓存
 //     直接缓存 enriched wire maps（[]map[string]interface{}，即 mapSession+enrich+
-//     overlayPinned+sortSessionsByUpdatedAt 的产物），而不是 NormalizedSession；
+//     overlayPinned 的产物），而不是 NormalizedSession；
 //   - 切片时复用 catalog_cursor_v2.go 的全部原语（encodeListCursorV2/decodeListCursorV2
 //     /validateCursorV2/deriveSnapshotEpoch/snapshotExpired + cursorStale* 原因码），
 //     仅把 nextCursor 换成 epoch-bearing v2 形式；
@@ -23,6 +23,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -31,8 +32,8 @@ import (
 	"time"
 )
 
-// catalogWireSnapshot 是一个 OpenCode scope 的缓存快照：enriched wire maps + epoch +
-// createdAt。maps 已按 (updatedAtMillis DESC, id ASC) 排序，切片与派生 cursor 直接复用。
+// catalogWireSnapshot 是一个结构化 scope 的缓存快照：enriched wire maps + epoch +
+// createdAt。maps 保留 builder/upstream relative order，切片与派生 cursor 直接复用。
 type catalogWireSnapshot struct {
 	scope      catalogWireScope
 	generation uint64
@@ -151,24 +152,7 @@ func wireFingerprint(maps []map[string]interface{}) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// wireListFingerprint is order-sensitive because declared snapshots preserve native provider
-// order. A pure reordering must rotate the epoch even when membership is unchanged.
-func wireListFingerprint(maps []map[string]interface{}) string {
-	var b strings.Builder
-	for _, item := range maps {
-		id, _ := item["id"].(string)
-		ts, _ := item["updatedAtMillis"].(int64)
-		b.WriteString(id)
-		b.WriteByte('|')
-		b.WriteString(strconv.FormatInt(ts, 10))
-		b.WriteByte('\n')
-	}
-	sum := sha256.Sum256([]byte(b.String()))
-	return hex.EncodeToString(sum[:])
-}
-
-// sortWireMapsForCursor 把 enriched wire maps 排成 cursor 切片所需的序：
-// updatedAtMillis DESC，id ASC（与 sortSessionsByUpdatedAt / paginateSessionList 一致）。
+// validateCatalogWireMaps enforces provider identity invariants before a snapshot can commit.
 func validateCatalogWireMaps(maps []map[string]interface{}) error {
 	seen := make(map[string]struct{}, len(maps))
 	for index, item := range maps {
@@ -220,17 +204,26 @@ func (c *catalogWireSnapshotCache) FenceBackend(backendID string) uint64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.generations[backendID]++
+	committedInvalidated := 0
 	for scope := range c.scopes {
 		if scope.BackendID == backendID {
 			delete(c.scopes, scope)
+			committedInvalidated++
 		}
 	}
+	inFlightInvalidated := 0
 	for scope := range c.inFlight {
 		if scope.BackendID == backendID {
 			c.inFlight[scope].complete()
 			delete(c.inFlight, scope)
+			inFlightInvalidated++
 		}
 	}
+	slog.Info("catalog wire cache backend fenced",
+		"backend", backendID,
+		"generation", c.generations[backendID],
+		"committedInvalidated", committedInvalidated,
+		"inFlightInvalidated", inFlightInvalidated)
 	return c.generations[backendID]
 }
 
@@ -256,6 +249,11 @@ func (c *catalogWireSnapshotCache) FetchOrReuseContext(ctx context.Context, scop
 			c.mu.Unlock()
 			select {
 			case <-ctx.Done():
+				slog.Debug("catalog wire cache waiter context aborted",
+					"backend", scope.BackendID,
+					"global", scope.Global,
+					"rootsOnly", scope.RootsOnly,
+					"error", ctx.Err())
 				return nil, ctx.Err()
 			case <-build.done:
 			}
@@ -281,7 +279,7 @@ func (c *catalogWireSnapshotCache) FetchOrReuseContext(ctx context.Context, scop
 		current := c.generations[scope.BackendID]
 		if current == generation {
 			if err == nil {
-				build.snapshot = &catalogWireSnapshot{scope: scope, generation: generation, epoch: deriveSnapshotEpoch(scope.identity() + "\x00" + wireListFingerprint(cp)), createdAt: c.now(), maps: cp}
+				build.snapshot = &catalogWireSnapshot{scope: scope, generation: generation, epoch: deriveSnapshotEpoch(scope.identity() + "\x00" + listSemanticFingerprint(cp)), createdAt: c.now(), maps: cp}
 				c.scopes[scope] = build.snapshot
 			} else {
 				build.err = err
@@ -293,6 +291,12 @@ func (c *catalogWireSnapshotCache) FetchOrReuseContext(ctx context.Context, scop
 		build.complete()
 		c.mu.Unlock()
 		if current != generation {
+			slog.Debug("catalog wire cache fenced completion dropped",
+				"backend", scope.BackendID,
+				"global", scope.Global,
+				"rootsOnly", scope.RootsOnly,
+				"builderGeneration", generation,
+				"currentGeneration", current)
 			continue
 		}
 		return build.snapshot, build.err
@@ -314,8 +318,12 @@ func (c *catalogWireSnapshotCache) Peek(scope catalogWireScope) *catalogWireSnap
 // 或 cursor_stale WireError（staleErr）或硬错误（err：list_failed / 损坏 cursor）。
 // page-0 不会 stale（刚建/复用未过期快照）；page-N 的 stale 由 validateCursorV2 判定。
 func (c *catalogWireSnapshotCache) pageV2(scope catalogWireScope, cursor string, limit int, builder func() ([]map[string]interface{}, error)) (map[string]interface{}, *WireError, error) {
+	return c.pageV2Context(context.Background(), scope, cursor, limit, builder)
+}
+
+func (c *catalogWireSnapshotCache) pageV2Context(ctx context.Context, scope catalogWireScope, cursor string, limit int, builder func() ([]map[string]interface{}, error)) (map[string]interface{}, *WireError, error) {
 	if cursor == "" {
-		snap, err := c.FetchOrReuse(scope, builder)
+		snap, err := c.FetchOrReuseContext(ctx, scope, builder)
 		if err != nil {
 			return nil, nil, err
 		}

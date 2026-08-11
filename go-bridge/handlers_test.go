@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -48,6 +49,7 @@ type fakeAgent struct {
 	sessionInfos       []core.AgentSessionInfo
 	sessionListErr     error
 	listHook           func() // optional; lets a test inject a panic on ListSessions
+	listSessionsCalls  atomic.Int64
 	model              string
 	reasoningEffort    string
 	workDir            string
@@ -230,6 +232,7 @@ func (f *fakeAgent) StartSession(_ context.Context, sessionID string) (core.Agen
 }
 
 func (f *fakeAgent) ListSessions(context.Context) ([]core.AgentSessionInfo, error) {
+	f.listSessionsCalls.Add(1)
 	if f.listHook != nil {
 		f.listHook()
 	}
@@ -238,6 +241,8 @@ func (f *fakeAgent) ListSessions(context.Context) ([]core.AgentSessionInfo, erro
 	}
 	return append([]core.AgentSessionInfo(nil), f.sessionInfos...), nil
 }
+
+func (f *fakeAgent) ListSessionsCallCount() int64 { return f.listSessionsCalls.Load() }
 
 func (f *fakeAgent) GetSessionHistory(context.Context, string, int) ([]core.HistoryEntry, error) {
 	if f.historyErr != nil {

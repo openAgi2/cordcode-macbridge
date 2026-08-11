@@ -971,6 +971,15 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 		}
 	}
 	p.mu.Unlock()
+	if mode == publishControlPlaneEvent {
+		slog.Info("event-publisher: control-plane delivery outcome",
+			"event", logical.Event,
+			"backendID", logical.BackendID,
+			"candidateTargets", len(targets),
+			"enqueued", enqueued,
+			"observationFiltered", observationFiltered,
+			"overflowed", len(overflowed))
+	}
 
 	for _, conn := range overflowed {
 		if conn != nil {

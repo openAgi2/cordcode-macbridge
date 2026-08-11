@@ -17,7 +17,6 @@ package gobridge
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"time"
 
@@ -68,23 +67,12 @@ func codexCatalogScopeKey(backendID, dir string) catalogWireScope {
 // builder 仅由 codexHandleListSessions（v2 DECLARED）调用。
 //
 // 失败必须显式返回 error（§5.1 step 6：删除 catalog 失败时静默回退 JSONL 的路径）。
-func (h *Handlers) buildCodexEnrichedSessions(backendID, dir string) ([]map[string]interface{}, error) {
-	agent, ok := h.getAgent(backendID)
-	if !ok {
-		return nil, fmt.Errorf("codex agent not registered for backend %q", backendID)
-	}
-	lister, ok := agent.(codexThreadLister)
-	if !ok {
-		return nil, fmt.Errorf("codex agent %q does not support thread/list catalog", backendID)
-	}
-	sessions, err := lister.FetchThreadList(context.Background(), dir)
+func (h *Handlers) buildCodexEnrichedSessions(ctx context.Context, backendID, dir string) ([]map[string]interface{}, error) {
+	mapped, agent, err := h.codexVisibleMembership(ctx, backendID, dir)
 	if err != nil {
 		return nil, err
 	}
-	mapped := sessionsToWire(sessions)
-	// 对齐 Mac Codex 侧栏：缺路径 + 非工程 cwd + saved workspace roots 白名单。
-	mapped = filterCodexCatalogSessions(mapped)
-	mapped = h.enrichSessionStatesForList(mapped, agent, h.getRunningMap(context.Background(), agent))
+	mapped = h.enrichSessionStatesForList(mapped, agent, h.getRunningMap(ctx, agent))
 	h.overlayPinnedState(mapped, "codex")
 	return mapped, nil
 }
@@ -101,6 +89,8 @@ func (h *Handlers) buildCodexEnrichedSessions(backendID, dir string) ([]map[stri
 //   - 若 wire 带 directory，则 cwd 精确过滤到该 workspace（§3.1）。
 //   - 绝不使用 agent.workDir：workDir 会随 start/resume 漂移，会把全局列表压成单工程。
 func (h *Handlers) codexHandleListSessions(conn Connection, msg WireMessage, agent core.Agent) {
+	ctx, cancel := context.WithTimeout(h.ctx, catalogRequestTimeout)
+	defer cancel()
 	limit := h.effectiveSessionListLimit(extractPositiveInt(msg, "limit"))
 	cursor := extractStringParam(msg, "cursor")
 	if limit > 1000 {
@@ -121,8 +111,8 @@ func (h *Handlers) codexHandleListSessions(conn Connection, msg WireMessage, age
 	// workspace 存在性在 fair-home 出站时再滤一次：thread/list 快照可复用（贵），
 	// 但磁盘删除必须立刻反映，不能被 10m wire TTL 冻住幽灵目录。
 	if dir == "" && cursor == "" {
-		snap, err := cache.FetchOrReuse(scopeKey, func() ([]map[string]interface{}, error) {
-			return h.buildCodexEnrichedSessions(msg.BackendID, dir)
+		snap, err := cache.FetchOrReuseContext(ctx, scopeKey, func() ([]map[string]interface{}, error) {
+			return h.buildCodexEnrichedSessions(ctx, msg.BackendID, dir)
 		})
 		if err != nil {
 			conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
@@ -148,8 +138,8 @@ func (h *Handlers) codexHandleListSessions(conn Connection, msg WireMessage, age
 		return
 	}
 
-	result, staleErr, err := cache.pageV2(scopeKey, cursor, limit, func() ([]map[string]interface{}, error) {
-		return h.buildCodexEnrichedSessions(msg.BackendID, dir)
+	result, staleErr, err := cache.pageV2Context(ctx, scopeKey, cursor, limit, func() ([]map[string]interface{}, error) {
+		return h.buildCodexEnrichedSessions(ctx, msg.BackendID, dir)
 	})
 	if err != nil {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})

@@ -21,7 +21,6 @@ package gobridge
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -79,26 +78,12 @@ func grokCatalogDirectoryScope(backendID, dir string) catalogWireScope {
 //
 // 失败必须显式返回 error（§5.1 step 6 / §5.4 #5：删除 catalog 失败时静默回退 JSONL 的路径；
 // 握手缺 session/list 能力时 FetchSessionList 已 fail-closed，此处不再二次 fallback）。
-func (h *Handlers) buildGrokEnrichedSessions(backendID string) ([]map[string]interface{}, error) {
-	agent, ok := h.getAgent(backendID)
-	if !ok {
-		return nil, fmt.Errorf("grokbuild agent not registered for backend %q", backendID)
-	}
-	lister, ok := agent.(grokSessionLister)
-	if !ok {
-		return nil, fmt.Errorf("grokbuild agent %q does not support session/list catalog", backendID)
-	}
-	sessions, err := lister.FetchSessionList(context.Background())
+func (h *Handlers) buildGrokEnrichedSessions(ctx context.Context, backendID string) ([]map[string]interface{}, error) {
+	mapped, agent, err := h.grokVisibleMembership(ctx, backendID)
 	if err != nil {
 		return nil, err
 	}
-	mapped := sessionsToWire(sessions)
-	// 过滤占位 session：title 为空，或 title 仅等于 cwd basename（如 home 目录下
-	// title=jacklee / directory=/Users/jacklee）——Desktop 侧栏通常不展示这类空壳。
-	mapped = filterGrokPlaceholderSessions(mapped)
-	// 与 Codex 一致：cwd 已删除的 workspace 不进列表。
-	mapped = filterSessionsMissingWorkspace(mapped)
-	mapped = h.enrichSessionStatesForList(mapped, agent, h.getRunningMap(context.Background(), agent))
+	mapped = h.enrichSessionStatesForList(mapped, agent, h.getRunningMap(ctx, agent))
 	h.overlayPinnedState(mapped, "grokbuild")
 	return mapped, nil
 }
@@ -136,6 +121,8 @@ func filterGrokPlaceholderSessions(sessions []map[string]interface{}) []map[stri
 // Grok session/list 非 cwd-scoped → builder 不取 dir（与 codexHandleListSessions 的 cwd=workDir
 // 不同）。
 func (h *Handlers) grokHandleListSessions(conn Connection, msg WireMessage, agent core.Agent) {
+	ctx, cancel := context.WithTimeout(h.ctx, catalogRequestTimeout)
+	defer cancel()
 	limit := h.effectiveSessionListLimit(extractPositiveInt(msg, "limit"))
 	cursor := extractStringParam(msg, "cursor")
 	if limit > 1000 {
@@ -153,8 +140,8 @@ func (h *Handlers) grokHandleListSessions(conn Connection, msg WireMessage, agen
 	// 全局首页：B2 公平切片。directory-scoped：从全量快照按 directory 过滤后普通分页。
 	// 出站再滤 missing workspace，覆盖快照 TTL 窗口内的磁盘删除。
 	if dir == "" && cursor == "" {
-		snap, err := cache.FetchOrReuse(scopeKey, func() ([]map[string]interface{}, error) {
-			return h.buildGrokEnrichedSessions(msg.BackendID)
+		snap, err := cache.FetchOrReuseContext(ctx, scopeKey, func() ([]map[string]interface{}, error) {
+			return h.buildGrokEnrichedSessions(ctx, msg.BackendID)
 		})
 		if err != nil {
 			conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
@@ -178,9 +165,9 @@ func (h *Handlers) grokHandleListSessions(conn Connection, msg WireMessage, agen
 	}
 	if dir != "" {
 		directoryScope := grokCatalogDirectoryScope(msg.BackendID, dir)
-		result, staleErr, err := cache.pageV2(directoryScope, cursor, limit, func() ([]map[string]interface{}, error) {
-			global, err := cache.FetchOrReuse(scopeKey, func() ([]map[string]interface{}, error) {
-				return h.buildGrokEnrichedSessions(msg.BackendID)
+		result, staleErr, err := cache.pageV2Context(ctx, directoryScope, cursor, limit, func() ([]map[string]interface{}, error) {
+			global, err := cache.FetchOrReuseContext(ctx, scopeKey, func() ([]map[string]interface{}, error) {
+				return h.buildGrokEnrichedSessions(ctx, msg.BackendID)
 			})
 			if err != nil {
 				return nil, err
@@ -214,8 +201,8 @@ func (h *Handlers) grokHandleListSessions(conn Connection, msg WireMessage, agen
 		return
 	}
 
-	result, staleErr, err := cache.pageV2(scopeKey, cursor, limit, func() ([]map[string]interface{}, error) {
-		return h.buildGrokEnrichedSessions(msg.BackendID)
+	result, staleErr, err := cache.pageV2Context(ctx, scopeKey, cursor, limit, func() ([]map[string]interface{}, error) {
+		return h.buildGrokEnrichedSessions(ctx, msg.BackendID)
 	})
 	if err != nil {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})

@@ -52,8 +52,8 @@ type Handlers struct {
 	// catalogProcRegistry 跟踪 catalog 子进程（§4.3/§11，Phase 1E）。Phase 2-5 catalog client 经
 	// h.catalogProcessRegistry() Register 其 stdio 单例子进程；handlers.Shutdown 经其 Shutdown 确定性
 	// 回收。OpenCode 无子进程不经此。lazy init（sync.Once），构造路径不改。
-	catalogProcRegistry *ProcessRegistry
-	catalogProcInitOnce sync.Once
+	catalogProcRegistry    *ProcessRegistry
+	catalogProcInitOnce    sync.Once
 	codexBackendMode       string
 	pendingNotifications   *PendingNotificationStore
 	broadcaster            *Broadcaster
@@ -2580,17 +2580,13 @@ func findClaudeSessionFile(sessionID string, optDir string) (projectDir string, 
 }
 
 func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent core.Agent) {
-	// Codex catalog 主线（thread/list + v2 epoch cursor，§5.1 Stream A）：仅当该连接 hello
-	// 声明 catalog_cursor_epoch_v2（iOS Phase 6 才声明）。未声明 → 落到下面既有 generic
-	// disk-scan（agent.ListSessions）路径 byte-for-byte 不变（§10 发布顺序：capability 上线前
-	// MacBridge 不得对任何连接发射 v2 cursor，且数据源 disk-scan→thread/list 同样只对 declared 生效）。
+	// Declared Codex/Grok use v2 snapshots. Undeclared connections share the same native visible
+	// membership below but retain the v1 cursor/comparator wire contract.
 	if agent.Name() == "codex" && h.eventPublisher.ConnCatalogCursorEpochV2(conn) {
 		h.codexHandleListSessions(conn, msg, agent)
 		return
 	}
-	// Grok catalog 主线（managed ACP session/list subprocess + v2 epoch cursor，§5.4 Phase 3）：
-	// 同样的 declared-only 门控。Grok session/list 非 cwd-scoped → 不取 dir（与 codex 不同）。
-	// undeclared → 落到下面 generic disk-scan（agent.ListSessions）路径不变。
+	// Grok session/list is backend-global; declared directory views are bridge-filtered v2 scopes.
 	if agent.Name() == "grokbuild" && h.eventPublisher.ConnCatalogCursorEpochV2(conn) {
 		h.grokHandleListSessions(conn, msg, agent)
 		return
@@ -2598,7 +2594,41 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 
 	limit := h.effectiveSessionListLimit(extractPositiveInt(msg, "limit"))
 	metrics := newSessionLoadRequestMetrics(conn, msg)
-	ctx := core.WithSessionLoadMetrics(context.Background(), metrics.context())
+	ctx := core.WithSessionLoadMetrics(h.ctx, metrics.context())
+
+	// Codex/Grok undeclared compatibility keeps the v1 cursor/comparator, but membership comes
+	// from the same native source and visibility helper as declared v2 and discovery.
+	if agent.Name() == "codex" || agent.Name() == "grokbuild" {
+		listCtx, cancel := context.WithTimeout(ctx, catalogRequestTimeout)
+		defer cancel()
+		dir := extractDir(msg)
+		var wireSessions []map[string]interface{}
+		var err error
+		if agent.Name() == "codex" {
+			wireSessions, _, err = h.codexVisibleMembership(listCtx, msg.BackendID, dir)
+		} else {
+			wireSessions, _, err = h.grokVisibleMembership(listCtx, msg.BackendID)
+			if err == nil && dir != "" {
+				wireSessions = filterWireSessionsByDirectory(wireSessions, newCatalogWireScope(msg.BackendID, dir, false).Directory)
+			}
+		}
+		if err != nil {
+			metrics.sendResult(conn, msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
+			return
+		}
+		mappingStarted := time.Now()
+		wireSessions = copyWireMaps(wireSessions)
+		sortSessionsByUpdatedAt(wireSessions)
+		wireSessions = h.enrichSessionStatesForList(wireSessions, agent, h.getRunningMap(listCtx, agent))
+		h.overlayPinnedState(wireSessions, agentBackendID(agent))
+		result := paginateSessionList(wireSessions, extractStringParam(msg, "cursor"), limit)
+		metrics.wireMapping += time.Since(mappingStarted)
+		if ws, ok := result["sessions"].([]map[string]interface{}); ok {
+			metrics.resultCount = len(ws)
+		}
+		metrics.sendResult(conn, msg.RequestID, result, nil)
+		return
+	}
 
 	// 非 claudecode backend：直接用 agent 自己的 ListSessions 实现
 	if agent.Name() != "claudecode" {
@@ -2685,7 +2715,12 @@ func sortSessionsByUpdatedAt(sessions []map[string]interface{}) {
 	sort.Slice(sessions, func(i, j int) bool {
 		mi, _ := sessions[i]["updatedAtMillis"].(int64)
 		mj, _ := sessions[j]["updatedAtMillis"].(int64)
-		return mi > mj
+		if mi != mj {
+			return mi > mj
+		}
+		idi, _ := sessions[i]["id"].(string)
+		idj, _ := sessions[j]["id"].(string)
+		return idi < idj
 	})
 }
 

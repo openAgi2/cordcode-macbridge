@@ -13,6 +13,27 @@ import (
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
+func discoveryCodexAgent(t *testing.T, base *fakeAgent) *fakeCodexCatalogAgent {
+	t.Helper()
+	withCodexRootsDisabled(t)
+	workspace := t.TempDir()
+	return &fakeCodexCatalogAgent{fakeAgent: base, fetchFn: func(_ context.Context, _ string) ([]core.AgentSessionInfo, error) {
+		if base.listHook != nil {
+			base.listHook()
+		}
+		if base.sessionListErr != nil {
+			return nil, base.sessionListErr
+		}
+		infos := append([]core.AgentSessionInfo(nil), base.sessionInfos...)
+		for index := range infos {
+			if infos[index].Directory == "" {
+				infos[index].Directory = workspace
+			}
+		}
+		return infos, nil
+	}}
+}
+
 // TestSessionDiscoveryBroadcastsOnNewSession: watcher detects a new session ID
 // across snapshots and broadcasts "sessions_changed" to a subscribed client.
 //
@@ -24,7 +45,7 @@ func TestSessionDiscoveryBroadcastsOnNewSession(t *testing.T) {
 	t.Cleanup(func() { sessionDiscoveryInterval = prev })
 
 	handlers := newTestHandlers(t)
-	agent := &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1"}}}
+	agent := discoveryCodexAgent(t, &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1"}}})
 	handlers.RegisterAgent("codex", agent)
 	serverConn, clientConn, cleanup := openTestConn(t)
 	t.Cleanup(cleanup)
@@ -55,7 +76,7 @@ func TestSessionDiscoveryBroadcastsOnNewSession(t *testing.T) {
 
 func TestSessionDiscoveryControlPlanePublisherCapabilityMatrix(t *testing.T) {
 	handlers := newTestHandlers(t)
-	agent := &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1"}}}
+	agent := discoveryCodexAgent(t, &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1"}}})
 	handlers.RegisterAgent("codex", agent)
 
 	type capabilityCase struct {
@@ -115,7 +136,7 @@ func TestSessionDiscoveryControlPlanePublisherCapabilityMatrix(t *testing.T) {
 
 func TestSessionDiscoveryFencesCatalogBeforeBroadcastAndForcesRebuild(t *testing.T) {
 	handlers := newTestHandlers(t)
-	agent := &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1"}}}
+	agent := discoveryCodexAgent(t, &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1"}}})
 	handlers.RegisterAgent("codex", agent)
 	cache := handlers.codexCatalogWireCache()
 	scope := codexCatalogScopeKey("codex", "")
@@ -158,7 +179,7 @@ func TestSessionDiscoveryFencesCatalogBeforeBroadcastAndForcesRebuild(t *testing
 
 func TestSessionDiscoveryErrorSkipsFenceButSuccessEmptyFences(t *testing.T) {
 	handlers := newTestHandlers(t)
-	agent := &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1"}}}
+	agent := discoveryCodexAgent(t, &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1"}}})
 	handlers.RegisterAgent("codex", agent)
 	cache := handlers.codexCatalogWireCache()
 	scope := codexCatalogScopeKey("codex", "")
@@ -198,7 +219,7 @@ func TestSessionDiscoveryFiresOnUpdatedAtOnlyChange(t *testing.T) {
 
 	handlers := newTestHandlers(t)
 	t0 := time.Unix(1_700_000_000, 0).UTC()
-	agent := &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1", ModifiedAt: t0}}}
+	agent := discoveryCodexAgent(t, &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1", ModifiedAt: t0}}})
 	handlers.RegisterAgent("codex", agent)
 	serverConn, clientConn, cleanup := openTestConn(t)
 	t.Cleanup(cleanup)
@@ -230,7 +251,7 @@ func TestSessionDiscoveryDoesNotBroadcastOnNoChange(t *testing.T) {
 	t.Cleanup(func() { sessionDiscoveryInterval = prev })
 
 	handlers := newTestHandlers(t)
-	agent := &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1"}}}
+	agent := discoveryCodexAgent(t, &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1"}}})
 	handlers.RegisterAgent("codex", agent)
 	serverConn, clientConn, cleanup := openTestConn(t)
 	t.Cleanup(cleanup)
@@ -267,7 +288,7 @@ func TestSessionDiscoverySurvivesPanicAndStillBroadcasts(t *testing.T) {
 	// still broadcast sessions_changed once s2 appears — proving it did not die.
 	callCount := 0
 	var mu sync.Mutex
-	agent := &fakeAgent{
+	agent := discoveryCodexAgent(t, &fakeAgent{
 		name:         "codex",
 		sessionInfos: []core.AgentSessionInfo{{ID: "s1"}},
 		listHook: func() {
@@ -279,7 +300,7 @@ func TestSessionDiscoverySurvivesPanicAndStillBroadcasts(t *testing.T) {
 				panic("simulated transcript parse failure")
 			}
 		},
-	}
+	})
 	handlers.RegisterAgent("codex", agent)
 	serverConn, clientConn, cleanup := openTestConn(t)
 	t.Cleanup(cleanup)

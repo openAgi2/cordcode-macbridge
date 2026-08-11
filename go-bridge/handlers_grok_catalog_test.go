@@ -102,7 +102,7 @@ func TestGrokBuildEnrichedSessions_PreservesUpstreamOrder(t *testing.T) {
 	handlers := newTestHandlers(t)
 	handlers.RegisterAgent("grokbuild", agent)
 
-	mapped, err := handlers.buildGrokEnrichedSessions("grokbuild")
+	mapped, err := handlers.buildGrokEnrichedSessions(context.Background(), "grokbuild")
 	if err != nil {
 		t.Fatalf("buildGrokEnrichedSessions failed: %v", err)
 	}
@@ -117,10 +117,8 @@ func TestGrokBuildEnrichedSessions_PreservesUpstreamOrder(t *testing.T) {
 	}
 }
 
-// TestGrokCatalog_Undeclared_RoutesToGenericDiskScan：UNDECLARED 连接 → 既有 generic
-// disk-scan（agent.ListSessions）路径 byte-for-byte 不变（§10）。FetchSessionList 不可达，
-// 返回 disk_* ID 证明走了 disk-scan 而非 session/list。
-func TestGrokCatalog_Undeclared_RoutesToGenericDiskScan(t *testing.T) {
+// Undeclared keeps v1 presentation while sharing native membership with declared/poller.
+func TestGrokCatalog_UndeclaredUsesNativeMembershipWithV1(t *testing.T) {
 	ws := t.TempDir()
 	agent := &fakeGrokCatalogAgent{
 		fakeAgent: &fakeAgent{name: "grokbuild", sessionInfos: []core.AgentSessionInfo{
@@ -140,11 +138,11 @@ func TestGrokCatalog_Undeclared_RoutesToGenericDiskScan(t *testing.T) {
 	})
 	msgs := readJSONMaps(t, clientConn, 1)
 	ids := resultSessionIDs(t, msgs[0])
-	if len(ids) != 1 || ids[0] != "disk_only" {
-		t.Fatalf("UNDECLARED sessions = %v, want [disk_only]（generic disk-scan，不触 session/list）", ids)
+	if len(ids) != 2 || ids[0] != "session_b" || ids[1] != "session_a" {
+		t.Fatalf("UNDECLARED sessions = %v, want v1-sorted native membership", ids)
 	}
-	if agent.fetchN != 0 {
-		t.Fatalf("FetchSessionList calls = %d, want 0（undeclared 不可达 catalog 主线）", agent.fetchN)
+	if agent.fetchN != 1 {
+		t.Fatalf("FetchSessionList calls = %d, want 1", agent.fetchN)
 	}
 }
 
@@ -275,10 +273,15 @@ func TestGrokCatalog_DirectoryV2FenceAndCrossScopeStale(t *testing.T) {
 
 func TestGrokCatalog_UndeclaredDirectoryRemainsV1(t *testing.T) {
 	dir := t.TempDir()
-	agent := &fakeGrokCatalogAgent{fakeAgent: &fakeAgent{name: "grokbuild", sessionInfos: []core.AgentSessionInfo{
-		{ID: "disk-a", Directory: dir, ModifiedAt: time.Unix(2, 0)},
-		{ID: "disk-b", Directory: dir, ModifiedAt: time.Unix(1, 0)},
-	}}}
+	agent := &fakeGrokCatalogAgent{
+		fakeAgent: &fakeAgent{name: "grokbuild", sessionInfos: []core.AgentSessionInfo{{ID: "disk-must-not-appear", Directory: dir}}},
+		fetchFn: func(context.Context) ([]core.AgentSessionInfo, error) {
+			return []core.AgentSessionInfo{
+				{ID: "native-a", Summary: "native A", Directory: dir, ModifiedAt: time.Unix(2, 0)},
+				{ID: "native-b", Summary: "native B", Directory: dir, ModifiedAt: time.Unix(1, 0)},
+			}, nil
+		},
+	}
 	handlers := newTestHandlers(t)
 	handlers.RegisterAgent("grokbuild", agent)
 	serverConn, clientConn, cleanup := openTestConn(t)
@@ -291,7 +294,7 @@ func TestGrokCatalog_UndeclaredDirectoryRemainsV1(t *testing.T) {
 	if err != nil || !isV1 {
 		t.Fatalf("undeclared directory cursor isV1=%v err=%v", isV1, err)
 	}
-	if agent.fetchN != 0 {
-		t.Fatalf("undeclared directory called native catalog %d times", agent.fetchN)
+	if agent.fetchN != 1 {
+		t.Fatalf("undeclared directory native catalog calls=%d want 1", agent.fetchN)
 	}
 }

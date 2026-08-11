@@ -12,15 +12,11 @@ package gobridge
 // backend-scoped broadcast with empty SessionID to list-viewing clients.
 //
 // Phase 7 §442 / §335：sessions_changed 由 catalog fingerprint 驱动（不再是 ID-set diff）。
-// fingerprint 覆盖有序成员的 id|updatedAtMillis，故新增/删除/更新（recency 变化）任一都改写
-// fingerprint → 触发 sessions_changed。这比 ID-set diff 更准（ID-set 漏掉「既有 session 收到新
-// turn → updatedAt 变化」的情况，列表 recency 不刷新）。
+// fingerprint 覆盖 native relative order 与每个成员的 id/updatedAt/title/normalized directory/
+// projectId；新增、删除、recency、标题、可见目录或原生排序变化都会触发 sessions_changed。
 //
-// 数据源对齐（§10）：fingerprint 取自每个 backend「list_sessions 当前实际服务的同一数据源」
-// —— Claude 取 h.claudeSessions.list()（全局 catalog，已排除 archived），其余取 agent.ListSessions()
-// （disk-scan）。codex/grok 的 native catalog（FetchThreadList/FetchSessionList）数据源切换随 iOS
-// v2 迁移一并落地：poller 与 list_sessions 必须同源切换，否则 v2 未上线时 poller 看到的 native
-// 变化与 iOS 看到的 disk-scan 不一致（§10 发布顺序）。当前 iOS 仍在 v1 → poller 同样走 disk-scan。
+// 数据源对齐（§10）：Claude 取全局 catalog；Codex/Grok 取与 declared/undeclared list_sessions
+// 共用的 native visible membership；其它 backend 仍取 agent.ListSessions。
 
 import (
 	"context"
@@ -81,7 +77,9 @@ func (h *Handlers) snapshotSessions(ctx context.Context, seen map[string]string,
 		tag = "seed"
 	}
 	for id, agent := range h.Agents() {
+		started := time.Now()
 		current, count, err := h.discoveryFingerprint(ctx, id, agent)
+		duration := time.Since(started)
 		if err != nil {
 			// Previously this branch was silent. A recurring enumerate error leaves
 			// seen[id] at the seed fingerprint forever → fingerprint never changes →
@@ -89,14 +87,14 @@ func (h *Handlers) snapshotSessions(ctx context.Context, seen map[string]string,
 			// updating seen (preserve last good fingerprint so a later successful
 			// poll can still detect change).
 			slog.Warn("go-bridge: session discovery fingerprint error (no broadcast)",
-				"phase", tag, "backend", id, "error", err.Error())
+				"phase", tag, "backend", id, "durationMs", duration.Milliseconds(), "error", err.Error())
 			continue
 		}
 		prev, hadPrev := seen[id]
 		if seed || !hadPrev {
 			seen[id] = current
 			slog.Info("go-bridge: session discovery snapshot seeded",
-				"backend", id, "sessionCount", count)
+				"backend", id, "sessionCount", count, "durationMs", duration.Milliseconds())
 			continue
 		}
 		// Phase 7 §442：fingerprint 变化即 catalog 变化（新增/删除/更新任一）→ 触发 sessions_changed。
@@ -110,7 +108,7 @@ func (h *Handlers) snapshotSessions(ctx context.Context, seen map[string]string,
 			h.openCodeCatalogWireCache().FenceBackend(id)
 			seen[id] = current
 			slog.Info("go-bridge: sessions_changed (catalog fingerprint changed)",
-				"backend", id, "sessionCount", count)
+				"backend", id, "sessionCount", count, "durationMs", duration.Milliseconds())
 			if _, err := h.eventPublisher.PublishControlPlane(LogicalEvent{
 				BackendID: id,
 				Event:     "sessions_changed",
@@ -128,12 +126,13 @@ func (h *Handlers) snapshotSessions(ctx context.Context, seen map[string]string,
 
 // discoveryFingerprint returns the catalog fingerprint for a backend, computed from
 // the SAME data source list_sessions currently serves (Phase 7 §442). It derives
-// wireFingerprint (id|updatedAtMillis, sorted by id) over the visible session set;
-// new/removed/updated sessions all change the fingerprint.
+// Codex/Grok use listSemanticFingerprint over native relative order and the frozen
+// membership tuple. Claude/other compatibility sources retain wireFingerprint.
 //
 // 数据源（对齐 list_sessions 当前服务的源）：
 //   - Claude：h.claudeSessions.list()（全局 catalog，archived 排除——归档须改写 fingerprint）。
-//   - 其余：agent.ListSessions()（disk-scan）。codex/grok native catalog 切换随 v2 迁移（§10）。
+//   - Codex/Grok：ctx-aware native visible membership（不 enrich/pin、不走 disk scan）。
+//   - 其余：agent.ListSessions()。
 //
 // It must sample the SAME set a client sees on list_sessions, otherwise a change
 // detected by the client is invisible to the poller and sessions_changed never fires.
@@ -163,8 +162,22 @@ func (h *Handlers) discoveryFingerprint(ctx context.Context, id string, agent co
 		}
 		return wireFingerprint(visible), len(visible), nil
 	}
-	listCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	listCtx, cancel := context.WithTimeout(ctx, catalogRequestTimeout)
 	defer cancel()
+	if agent.Name() == "codex" {
+		wire, _, err := h.codexVisibleMembership(listCtx, id, "")
+		if err != nil {
+			return "", 0, err
+		}
+		return listSemanticFingerprint(wire), len(wire), nil
+	}
+	if agent.Name() == "grokbuild" {
+		wire, _, err := h.grokVisibleMembership(listCtx, id)
+		if err != nil {
+			return "", 0, err
+		}
+		return listSemanticFingerprint(wire), len(wire), nil
+	}
 	infos, err := agent.ListSessions(listCtx)
 	if err != nil {
 		return "", 0, err
