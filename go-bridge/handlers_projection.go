@@ -396,7 +396,7 @@ func (h *Handlers) prepareProjectionHydrateSource(
 		}
 		// Test/custom providers without the explicit stitching guarantee retain
 		// the normal single-transcript path and its checkpoint semantics.
-		_, path := findClaudeSessionFile(sessionID, directory)
+		_, path := h.findClaudeSessionFile(sessionID, directory)
 		if path != "" {
 			cut, err := projectionJSONLStartCut(path)
 			if err != nil {

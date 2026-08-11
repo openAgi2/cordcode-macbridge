@@ -598,7 +598,7 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 		slog.Info("go-bridge: claudeSessionFileRelay exited", "sessionID", sessionID)
 	}()
 
-	_, sessPath := findClaudeSessionFile(sessionID, "")
+	_, sessPath := h.findClaudeSessionFile(sessionID, "")
 	if sessPath == "" {
 		slog.Debug("go-bridge: claudeSessionFileRelay no transcript file found", "sessionID", sessionID)
 		return
@@ -1828,7 +1828,7 @@ func claudeToolResultText(b claudeRelayContentBlock) string {
 }
 
 func (h *Handlers) classifyClaudeTranscriptFile(sessPath string) claudeTranscriptRelayMeaningfulEntry {
-	transcriptStateProbe()
+	h.noteTranscriptStateProbe()
 	completeCut, err := projectionJSONLStartCut(sessPath)
 	if err != nil {
 		return claudeTranscriptRelayMeaningfulEntry{}

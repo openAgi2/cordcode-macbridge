@@ -4225,9 +4225,7 @@ func TestClaudeResumeSessionUsesRegistryStateWithoutTranscriptScan(t *testing.T)
 	handlers.sessions.markRunning("large-session")
 
 	probeCalls := 0
-	previousProbe := transcriptStateProbe
-	transcriptStateProbe = func() { probeCalls++ }
-	t.Cleanup(func() { transcriptStateProbe = previousProbe })
+	handlers.transcriptStateProbe = func() { probeCalls++ }
 
 	serverConn, clientConn, cleanup := openTestConn(t)
 	defer cleanup()

@@ -158,7 +158,7 @@ func (h *Handlers) enrichSessionStateWithAgent(mapped map[string]interface{}, ag
 					} else {
 						// 不在 runningMap 中——进程可能已退出。
 						// 回退到直接读取 transcript 文件判定。
-						_, sessPath := findClaudeSessionFile(sessionID, "")
+						_, sessPath := h.findClaudeSessionFile(sessionID, "")
 						if sessPath != "" {
 							state = h.detectClaudeTranscriptState(sessPath)
 							if state == "unknown" {
@@ -175,7 +175,7 @@ func (h *Handlers) enrichSessionStateWithAgent(mapped map[string]interface{}, ag
 			if !usedTranscriptFallback && state == "running" {
 				// registry 说 running 但 GetRunningSessionIDs 出错，
 				// 也用 transcript 校验。
-				_, sessPath := findClaudeSessionFile(sessionID, "")
+				_, sessPath := h.findClaudeSessionFile(sessionID, "")
 				if sessPath != "" {
 					fileState := h.detectClaudeTranscriptState(sessPath)
 					if fileState == "idle" {
@@ -314,7 +314,7 @@ const openCodeSessionFetchLimit = 100
 
 // openCodeCatalogWireCache 返回 per-Handlers 的 OpenCode wire-map 快照缓存，首次使用时懒加载。
 // 缓存是进程级 scope 元数据（per-scope enriched wire maps + epoch），跨 list_sessions 调用复用
-//（§4.1.1）。用 sync.Once 而非在 NewHandlers 里初始化，保持既有构造路径不变。
+// （§4.1.1）。用 sync.Once 而非在 NewHandlers 里初始化，保持既有构造路径不变。
 func (h *Handlers) openCodeCatalogWireCache() *catalogWireSnapshotCache {
 	h.catalogWireInitOnce.Do(func() {
 		h.catalogWireCache = newCatalogWireSnapshotCache(nil)

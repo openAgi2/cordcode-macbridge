@@ -11,14 +11,11 @@ import (
 	"time"
 )
 
-// withTranscriptProbe swaps the package-level transcriptStateProbe for a counter
-// and restores it at test cleanup. Returns the *counter so callers can assert.
-func withTranscriptProbe(t *testing.T) *int {
+// withTranscriptProbe installs a counter on one Handlers instance.
+func withTranscriptProbe(t *testing.T, handlers *Handlers) *int {
 	t.Helper()
 	ticks := 0
-	prev := transcriptStateProbe
-	transcriptStateProbe = func() { ticks++ }
-	t.Cleanup(func() { transcriptStateProbe = prev })
+	handlers.transcriptStateProbe = func() { ticks++ }
 	return &ticks
 }
 
@@ -28,9 +25,8 @@ func withTranscriptProbe(t *testing.T) *int {
 // REPORT ONLY without mutating the registry, (c) preserve reasoningEffort
 // injection, and (d) never touch transcript functions.
 func TestEnrichSessionStatesForList_NoTranscript_NoMutation(t *testing.T) {
-	ticks := withTranscriptProbe(t)
-
 	handlers := newTestHandlers(t)
+	ticks := withTranscriptProbe(t, handlers)
 	agent := &fakeAgent{name: "claudecode", reasoningEffort: "ultra"}
 
 	// Registry setup:
@@ -120,8 +116,6 @@ func TestApplyListRuntimeState_NilRunningMapFallsBackToRegistry(t *testing.T) {
 // proof plus the hard zero-transcript-open rule, driven through the real
 // handleListSessions Claude branch with a stale-running registry row present.
 func TestListSessionsClaude_RunningMapComputedOncePerRequest(t *testing.T) {
-	ticks := withTranscriptProbe(t)
-
 	agent := &fakeAgent{
 		name:              "claudecode",
 		reasoningEffort:   "high",
@@ -149,6 +143,7 @@ func TestListSessionsClaude_RunningMapComputedOncePerRequest(t *testing.T) {
 	}
 
 	handlers := newTestHandlers(t)
+	ticks := withTranscriptProbe(t, handlers)
 	handlers.claudeSessions = catalog
 	handlers.sessions.markRunning("ses_stale") // stale-running registry row
 	handlers.RegisterAgent("claudecode", agent)
@@ -205,7 +200,6 @@ func TestListSessionsClaude_RunningMapComputedOncePerRequest(t *testing.T) {
 // TestListSessionsOpenCode_NoTranscript_NoMutation proves the third list call
 // site (ocHandleListSessions) also uses list-safe batch enrichment.
 func TestListSessionsOpenCode_NoTranscript_NoMutation(t *testing.T) {
-	ticks := withTranscriptProbe(t)
 	t.Setenv("HOME", t.TempDir())
 
 	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -215,6 +209,7 @@ func TestListSessionsOpenCode_NoTranscript_NoMutation(t *testing.T) {
 	defer proxyServer.Close()
 
 	handlers := newTestHandlers(t)
+	ticks := withTranscriptProbe(t, handlers)
 	handlers.RegisterAgent("opencode", &fakeAgent{name: "opencode"})
 	handlers.RegisterOpenCodeProxy(NewOpenCodeProxy(proxyServer.URL, "", ""))
 	serverConn, clientConn, cleanup := openTestConn(t)
@@ -253,8 +248,6 @@ func TestListSessionsOpenCode_NoTranscript_NoMutation(t *testing.T) {
 // GetRunningSessionIDs (live-PID-bounded) and is covered by phase3's large-K
 // guardrail fixture with the isProcessRunning seam, not here.
 func TestListSessionsClaude_144SessionPerfFixture(t *testing.T) {
-	ticks := withTranscriptProbe(t)
-
 	const (
 		sessionCount = 144
 		perFileSize  = 700 * 1024 // ~700KB × 144 ≈ 100MB reported total (sparse)
@@ -296,6 +289,7 @@ func TestListSessionsClaude_144SessionPerfFixture(t *testing.T) {
 	}
 
 	handlers := newTestHandlers(t)
+	ticks := withTranscriptProbe(t, handlers)
 	handlers.SetSessionListLimit(150)
 	handlers.claudeSessions = catalog
 	handlers.sessions.markRunning("ses_000") // stale-running registry row

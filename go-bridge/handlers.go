@@ -92,6 +92,7 @@ type Handlers struct {
 	dataDir              string
 	relayHelloHandler    func(conn Connection, msg *WireMessage)
 	claudeSessions       *claudeSessionCatalog
+	transcriptStateProbe func()
 	pendingClaudeRuntime map[string]claudeRuntimeSelection
 	transcriptIndex      *transcriptindex.Store
 	// capabilityPolicy 是集中式 RPC 授权层（P3 架构演进，§3.2/§8）。
@@ -173,6 +174,7 @@ func newHandlersWithContext(ctx context.Context, bridgeEpoch string) *Handlers {
 		presentation:            presentation,
 		relayEventRouter:        NewRelayEventRouter(observation, outbox, prekeys, NewMailboxService(NewRelayHub()), presentation),
 		claudeSessions:          newDefaultClaudeSessionCatalog(),
+		transcriptStateProbe:    func() {},
 		pendingClaudeRuntime:    make(map[string]claudeRuntimeSelection),
 		transcriptIndex:         transcriptindex.NewStore(defaultTranscriptIndexDir()),
 		capabilityPolicy:        NewCapabilityPolicy(),
@@ -2525,7 +2527,7 @@ func (h *Handlers) handleGetSession(conn Connection, msg WireMessage, agent core
 
 	dir := extractDir(msg)
 	if agent.Name() == "claudecode" {
-		projDir, sessPath := findClaudeSessionFile(params.SessionID, dir)
+		projDir, sessPath := h.findClaudeSessionFile(params.SessionID, dir)
 		if sessPath != "" {
 			info, err := os.Stat(sessPath)
 			if err == nil {
@@ -2568,8 +2570,8 @@ func (h *Handlers) handleGetSession(conn Connection, msg WireMessage, agent core
 	conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_found", Message: fmt.Sprintf("session %q not found", params.SessionID)})
 }
 
-func findClaudeSessionFile(sessionID string, optDir string) (projectDir string, sessionPath string) {
-	transcriptStateProbe()
+func (h *Handlers) findClaudeSessionFile(sessionID string, optDir string) (projectDir string, sessionPath string) {
+	h.noteTranscriptStateProbe()
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", ""
@@ -3066,7 +3068,7 @@ func (h *Handlers) writeClaudeRuntimeSidecar(sessionID, directory string, select
 	if selection.ModelID == "" && selection.ProviderID == "" && selection.ReasoningEffort == "" {
 		return
 	}
-	projectDir, _ := findClaudeSessionFile(sessionID, directory)
+	projectDir, _ := h.findClaudeSessionFile(sessionID, directory)
 	if projectDir == "" && strings.TrimSpace(directory) != "" {
 		_, projectDir = resolveProjectDir(directory)
 	}
