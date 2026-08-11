@@ -129,12 +129,13 @@ func TestListSessionsClaude_RunningMapComputedOncePerRequest(t *testing.T) {
 	}
 
 	projectsDir := t.TempDir()
+	workspace := catalogFixtureWorkspace(t, projectsDir, "list-enrich-running-map")
 	projectDir := filepath.Join(projectsDir, "-tmp-claude-project")
 	if err := os.MkdirAll(projectDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"ses_running", "ses_idle", "ses_stale"} {
-		if err := os.WriteFile(filepath.Join(projectDir, id+".jsonl"), []byte("{}\n"), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(projectDir, id+".jsonl"), []byte(`{"cwd":"`+workspace+`"}`+"\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -154,6 +155,7 @@ func TestListSessionsClaude_RunningMapComputedOncePerRequest(t *testing.T) {
 
 	serverConn, clientConn, cleanup := openTestConn(t)
 	defer cleanup()
+	handlers.eventPublisher.SetConnCatalogCursorEpochV2(serverConn, true)
 
 	handlers.HandleRPC(serverConn, WireMessage{
 		BackendID: "claudecode",
@@ -261,6 +263,7 @@ func TestListSessionsClaude_144SessionPerfFixture(t *testing.T) {
 	agent := &fakeAgent{name: "claudecode", reasoningEffort: "high", runningSessionIDs: map[string]bool{}}
 
 	projectsDir := t.TempDir()
+	workspace := catalogFixtureWorkspace(t, projectsDir, "list-enrich-perf")
 	projectDir := filepath.Join(projectsDir, "-tmp-claude-project")
 	if err := os.MkdirAll(projectDir, 0755); err != nil {
 		t.Fatal(err)
@@ -271,7 +274,11 @@ func TestListSessionsClaude_144SessionPerfFixture(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// Sparse truncate: stat reports perFileSize, but no bytes are written.
+		if _, err := f.WriteString(`{"cwd":"` + workspace + `"}` + "\n"); err != nil {
+			f.Close()
+			t.Fatal(err)
+		}
+		// Sparse truncate: stat reports perFileSize while only the visibility header is written.
 		if err := f.Truncate(perFileSize); err != nil {
 			f.Close()
 			t.Fatal(err)
@@ -296,6 +303,7 @@ func TestListSessionsClaude_144SessionPerfFixture(t *testing.T) {
 
 	serverConn, clientConn, cleanup := openTestConn(t)
 	defer cleanup()
+	handlers.eventPublisher.SetConnCatalogCursorEpochV2(serverConn, true)
 
 	// Request 1: catalog cold build (stats + parseSession stub). Timed but no
 	// threshold — cold catalog cost is not what list-safe enrichment changes.
@@ -304,7 +312,7 @@ func TestListSessionsClaude_144SessionPerfFixture(t *testing.T) {
 		BackendID: "claudecode",
 		Method:    "list_sessions",
 		RequestID: "perf-cold",
-		Params:    mustJSONRaw(t, map[string]any{}),
+		Params:    mustJSONRaw(t, map[string]any{"directory": workspace}),
 	})
 	msgs := readJSONMaps(t, clientConn, 1)
 	coldMS := time.Since(start).Milliseconds()
@@ -321,7 +329,7 @@ func TestListSessionsClaude_144SessionPerfFixture(t *testing.T) {
 		BackendID: "claudecode",
 		Method:    "list_sessions",
 		RequestID: "perf-warm",
-		Params:    mustJSONRaw(t, map[string]any{}),
+		Params:    mustJSONRaw(t, map[string]any{"directory": workspace}),
 	})
 	_ = readJSONMaps(t, clientConn, 1)
 	warmMS := time.Since(start).Milliseconds()
@@ -349,11 +357,12 @@ func TestListSessionsClaude_StateChangeInvalidatesRunningMap(t *testing.T) {
 	agent := &fakeAgent{name: "claudecode", reasoningEffort: "high", runningSessionIDs: map[string]bool{}}
 
 	projectsDir := t.TempDir()
+	workspace := catalogFixtureWorkspace(t, projectsDir, "list-enrich-state-change")
 	projectDir := filepath.Join(projectsDir, "-tmp-claude-project")
 	if err := os.MkdirAll(projectDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, "ses_x.jsonl"), []byte("{}\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, "ses_x.jsonl"), []byte(`{"cwd":"`+workspace+`"}`+"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	catalog := newClaudeSessionCatalog(projectsDir)
@@ -370,6 +379,7 @@ func TestListSessionsClaude_StateChangeInvalidatesRunningMap(t *testing.T) {
 	handlers.RegisterAgent("claudecode", agent)
 	serverConn, clientConn, cleanup := openTestConn(t)
 	defer cleanup()
+	handlers.eventPublisher.SetConnCatalogCursorEpochV2(serverConn, true)
 
 	listOnce := func() {
 		handlers.HandleRPC(serverConn, WireMessage{

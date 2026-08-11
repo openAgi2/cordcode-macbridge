@@ -650,8 +650,8 @@ func TestRelayEventsSendsIdleAfterError(t *testing.T) {
 		close(done)
 	}()
 
-	events := readEventNames(t, clientConn, 2)
-	if want := []string{"error", "session_state_changed"}; len(events) != len(want) || events[0] != want[0] || events[1] != want[1] {
+	events := readEventNames(t, clientConn, 3)
+	if want := []string{"error", "turn_error", "session_state_changed"}; len(events) != len(want) || events[0] != want[0] || events[1] != want[1] || events[2] != want[2] {
 		t.Fatalf("events = %#v, want %#v", events, want)
 	}
 	select {

@@ -147,7 +147,7 @@ func mapsClone(input map[string]interface{}) map[string]interface{} {
 	return out
 }
 
-func TestUndeclaredNativeV1SameTimestampPagination(t *testing.T) {
+func TestRollbackNativeV1SameTimestampPagination(t *testing.T) {
 	for _, backend := range []string{"codex", "grokbuild"} {
 		for _, scope := range []string{"global", "directory"} {
 			t.Run(backend+"/"+scope, func(t *testing.T) {
@@ -168,6 +168,10 @@ func TestUndeclaredNativeV1SameTimestampPagination(t *testing.T) {
 				}
 				server, client, cleanup := openTestConn(t)
 				defer cleanup()
+				agent, ok := h.getAgent(backend)
+				if !ok {
+					t.Fatal("registered rollback agent missing")
+				}
 				cursor := ""
 				var got []string
 				for page := 0; page < 3; page++ {
@@ -178,7 +182,7 @@ func TestUndeclaredNativeV1SameTimestampPagination(t *testing.T) {
 					if cursor != "" {
 						params["cursor"] = cursor
 					}
-					h.HandleRPC(server, WireMessage{BackendID: backend, Method: "list_sessions", RequestID: backend, Params: mustJSONRaw(t, params)})
+					h.handleListSessions(server, WireMessage{BackendID: backend, Method: "list_sessions", RequestID: backend, Params: mustJSONRaw(t, params)}, agent)
 					msg := readJSONMaps(t, client, 1)[0]
 					got = append(got, resultSessionIDs(t, msg)...)
 					data := msg["data"].(map[string]any)
@@ -219,6 +223,7 @@ func TestNativeListAndPollerPropagateCancellationAndDeadline(t *testing.T) {
 	h.RegisterAgent("codex", agent)
 	server, client, cleanup := openTestConn(t)
 	defer cleanup()
+	h.eventPublisher.SetConnCatalogCursorEpochV2(server, true)
 	cancelRoot()
 	h.HandleRPC(server, WireMessage{BackendID: "codex", Method: "list_sessions", RequestID: "canceled-list", Params: mustJSONRaw(t, map[string]any{})})
 	msg := readJSONMaps(t, client, 1)[0]

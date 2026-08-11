@@ -975,7 +975,7 @@ func (h *Handlers) HandleRPC(conn Connection, msg WireMessage) {
 	// contract for every backend. This gate intentionally lives before both the generic and
 	// OpenCode dispatchers so Codex, Grok, OpenCode and Claude share one wire error. The stage-1
 	// rollout keeps the old v1 implementations below unreachable for an immediate code revert.
-	if msg.Method == "list_sessions" && !h.eventPublisher.ConnCatalogCursorEpochV2(conn) {
+	if msg.Method == "list_sessions" && catalogCapabilityRequiredFor(agent.Name()) && !h.eventPublisher.ConnCatalogCursorEpochV2(conn) {
 		retryable := false
 		conn.SendResult(msg.RequestID, nil, &WireError{
 			Code:      "protocol.capability_required",
@@ -992,6 +992,15 @@ func (h *Handlers) HandleRPC(conn Connection, msg WireMessage) {
 	}
 
 	h.dispatchRPC(conn, msg, agent)
+}
+
+func catalogCapabilityRequiredFor(agentName string) bool {
+	switch agentName {
+	case "codex", "grokbuild", "opencode", "claude", "claudecode":
+		return true
+	default:
+		return false
+	}
 }
 
 func (h *Handlers) handleSetObservationScope(conn Connection, msg WireMessage) {

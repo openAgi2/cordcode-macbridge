@@ -3324,6 +3324,7 @@ func TestClaudeListSessionsUsesRuntimeEffortWhenMetadataMissing(t *testing.T) {
 	handlers.RegisterAgent("claudecode", agent)
 	serverConn, clientConn, cleanup := openTestConn(t)
 	defer cleanup()
+	handlers.eventPublisher.SetConnCatalogCursorEpochV2(serverConn, true)
 
 	handlers.HandleRPC(serverConn, WireMessage{
 		BackendID: "claudecode",
@@ -3379,6 +3380,7 @@ func TestClaudeListSessionsDoesNotWriteTmpDump(t *testing.T) {
 	handlers.RegisterAgent("claudecode", agent)
 	serverConn, clientConn, cleanup := openTestConn(t)
 	defer cleanup()
+	handlers.eventPublisher.SetConnCatalogCursorEpochV2(serverConn, true)
 
 	// Fire list_sessions repeatedly; the dump previously wrote on every call.
 	for i := 0; i < 3; i++ {
