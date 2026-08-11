@@ -107,6 +107,9 @@ type threadListResult struct {
 // listThreads 调用 thread/list 并返回有序 thread 集合 + 上游 cursor（仅 MacBridge 内部
 // 有界读取用，不越过 bridge 边界）。ctx 控制本次请求寿命；底层连接由 catalogClient 持有。
 func (c *catalogClient) listThreads(ctx context.Context, params threadListParams) (threadListResult, error) {
+	if err := ctx.Err(); err != nil {
+		return threadListResult{}, err
+	}
 	// 把 caller ctx 的超时/取消叠加到 request：request 用 c.ctx（连接寿命），这里用一个
 	// 合成 deadline 兜底，避免单次 thread/list 挂满 catalogRequestTimeout。
 	if _, ok := ctx.Deadline(); !ok {
@@ -249,7 +252,9 @@ func (a *Agent) catalogClientInstance(ctx context.Context) (*catalogClient, erro
 	// 需要它以访问 app-server（与 StartSession 同源）。
 	cfg.extraEnv = append(cfg.extraEnv, a.providerEnvLocked()...)
 
-	cli, err := newCatalogClient(ctx, cfg)
+	// The caller context bounds this construction and its initialize request, but must not own the
+	// singleton process/WebSocket after FetchThreadList returns.
+	cli, err := newCatalogClientWithRequestContext(context.WithoutCancel(ctx), ctx, cfg)
 	if err != nil {
 		return nil, err
 	}

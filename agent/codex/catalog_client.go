@@ -51,12 +51,12 @@ type CatalogSubprocessRegistrar interface {
 // 派生（appServerURL/appServerURLSet/workDir/codexHome/cliBin/extraEnv）+ bridge 注入的
 // registrar。
 type catalogClientConfig struct {
-	appServerURL    string // ws URL（appServerURLSet=true 时用）
-	appServerURLSet bool   // -codex-app-server-url 是否配置（传输选型开关）
-	workDir         string // stdio 子进程 cwd（catalog 不以此过滤；thread/list 的 cwd 是请求参数）
-	codexHome       string // CODEX_HOME（stdio 子进程 env）
-	cliBin          string // codex 二进制名（默认 "codex"）
-	extraEnv        []string // provider/session env（auth.json 等）
+	appServerURL    string                     // ws URL（appServerURLSet=true 时用）
+	appServerURLSet bool                       // -codex-app-server-url 是否配置（传输选型开关）
+	workDir         string                     // stdio 子进程 cwd（catalog 不以此过滤；thread/list 的 cwd 是请求参数）
+	codexHome       string                     // CODEX_HOME（stdio 子进程 env）
+	cliBin          string                     // codex 二进制名（默认 "codex"）
+	extraEnv        []string                   // provider/session env（auth.json 等）
 	registrar       CatalogSubprocessRegistrar // stdio 子进程注册器（nil=ws 或单测）
 }
 
@@ -98,6 +98,17 @@ const catalogReadMaxLineSize = 10 * 1024 * 1024
 // newCatalogClient 建立并初始化一个 catalog client（connect → initialize）。
 // 传输：appServerURLSet→ws；否则→stdio 单例子进程（进程组模式 + 注册 registry）。
 func newCatalogClient(ctx context.Context, cfg catalogClientConfig) (*catalogClient, error) {
+	return newCatalogClientWithRequestContext(ctx, ctx, cfg)
+}
+
+// newCatalogClientWithRequestContext separates the singleton transport lifetime from the bounded
+// request that caused its lazy creation. The transport owns lifetimeCtx; connection initialization
+// still honors requestCtx. Binding both to the first list request created a live-process/dead-context
+// zombie as soon as that request's defer cancel ran.
+func newCatalogClientWithRequestContext(lifetimeCtx, requestCtx context.Context, cfg catalogClientConfig) (*catalogClient, error) {
+	if err := requestCtx.Err(); err != nil {
+		return nil, err
+	}
 	if cfg.cliBin == "" {
 		cfg.cliBin = "codex"
 	}
@@ -106,7 +117,7 @@ func newCatalogClient(ctx context.Context, cfg catalogClientConfig) (*catalogCli
 		transport = appServerTransportWebSocket
 	}
 
-	sessionCtx, cancel := context.WithCancel(ctx)
+	sessionCtx, cancel := context.WithCancel(lifetimeCtx)
 	c := &catalogClient{
 		cfg:       cfg,
 		transport: transport,
@@ -126,7 +137,11 @@ func newCatalogClient(ctx context.Context, cfg catalogClientConfig) (*catalogCli
 		cancel()
 		return nil, err
 	}
-	if err := c.initialize(); err != nil {
+	if err := requestCtx.Err(); err != nil {
+		_ = c.Close()
+		return nil, err
+	}
+	if err := c.initializeContext(requestCtx); err != nil {
 		_ = c.Close()
 		return nil, err
 	}
@@ -227,6 +242,10 @@ func (c *catalogClient) connectWebSocket() error {
 // appServerSession.initialize 同形：clientInfo + experimentalApi capabilities + optOut
 // 高频 delta notification（catalog 不消费 turn/item delta，opt out 降低噪音）。
 func (c *catalogClient) initialize() error {
+	return c.initializeContext(c.ctx)
+}
+
+func (c *catalogClient) initializeContext(ctx context.Context) error {
 	params := map[string]any{
 		"clientInfo": map[string]any{
 			"name":    "cc-connect-codex-catalog",
@@ -244,13 +263,17 @@ func (c *catalogClient) initialize() error {
 		},
 	}
 	var resp initResponse
-	if err := c.request("initialize", params, &resp); err != nil {
+	if err := c.requestWithContext(ctx, "initialize", params, &resp); err != nil {
 		return fmt.Errorf("codex catalog initialize: %w", err)
 	}
 	if err := c.notify("initialized", nil); err != nil {
 		return fmt.Errorf("codex catalog initialized notify: %w", err)
 	}
 	return nil
+}
+
+func (c *catalogClient) requestWithContext(ctx context.Context, method string, params any, out any) error {
+	return c.requestWithTimeoutContext(ctx, method, params, out, catalogRequestTimeout)
 }
 
 // ── JSON-RPC 收发骨架（复用 appServerSession 模式，精简：只处理 response） ───────
@@ -260,6 +283,13 @@ func (c *catalogClient) request(method string, params any, out any) error {
 }
 
 func (c *catalogClient) requestWithTimeout(method string, params any, out any, timeout time.Duration) error {
+	return c.requestWithTimeoutContext(c.ctx, method, params, out, timeout)
+}
+
+func (c *catalogClient) requestWithTimeoutContext(ctx context.Context, method string, params any, out any, timeout time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	id := c.nextID.Add(1)
 	ch := make(chan rpcResponseEnvelope, 1)
 
@@ -296,6 +326,8 @@ func (c *catalogClient) requestWithTimeout(method string, params any, out any, t
 		return nil
 	case <-c.ctx.Done():
 		return c.ctx.Err()
+	case <-ctx.Done():
+		return ctx.Err()
 	case <-time.After(timeout):
 		c.pendingMu.Lock()
 		delete(c.pending, id)

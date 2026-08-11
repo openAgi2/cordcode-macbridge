@@ -18,6 +18,7 @@ package codex
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -407,6 +408,38 @@ func TestFetchThreadListHead_UsesSingleBoundedNativePage(t *testing.T) {
 	}
 	if got[0].ID != threads[0].ID || got[1].ID != threads[1].ID {
 		t.Fatalf("head order=[%s %s], want native recency head=[%s %s]", got[0].ID, got[1].ID, threads[0].ID, threads[1].ID)
+	}
+	if err := a.catalogClient.Close(); err != nil {
+		t.Fatalf("close catalog client: %v", err)
+	}
+}
+
+func TestCatalogSingletonOutlivesFirstRequestContext(t *testing.T) {
+	threads := mapFrozenFixtureThreads(t)
+	url, stop := fakeCatalogWSServerPaging(t, threads, 2)
+	defer stop()
+	a := &Agent{appServerURL: url, appServerURLSet: true, cliBin: "codex"}
+
+	firstCtx, cancelFirst := context.WithCancel(context.Background())
+	if _, err := a.FetchThreadListHead(firstCtx, "", 2); err != nil {
+		t.Fatalf("first head: %v", err)
+	}
+	cancelFirst() // exact production shape: bounded creator request completes/cancels
+
+	secondCtx, cancelSecond := context.WithTimeout(context.Background(), time.Second)
+	defer cancelSecond()
+	got, err := a.FetchThreadList(secondCtx, "")
+	if err != nil {
+		t.Fatalf("later full fetch reused context-canceled zombie: %v", err)
+	}
+	if len(got) != len(threads) {
+		t.Fatalf("later full count=%d, want %d", len(got), len(threads))
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := a.FetchThreadListHead(canceledCtx, "", 2); !errors.Is(err, context.Canceled) {
+		t.Fatalf("per-call cancellation err=%v, want context.Canceled", err)
 	}
 	if err := a.catalogClient.Close(); err != nil {
 		t.Fatalf("close catalog client: %v", err)
