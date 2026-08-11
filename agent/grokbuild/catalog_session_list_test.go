@@ -18,12 +18,63 @@ package grokbuild
 // 形态敏感。
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+const grokCatalogHelperArg = "--grok-catalog-lifetime-test-helper"
+
+// Re-exec this test binary as a tiny ACP catalog process. This stays strictly in the test target;
+// production still launches the configured Grok CLI and has no mock/fallback branch.
+func init() {
+	for _, arg := range os.Args[1:] {
+		if arg != grokCatalogHelperArg {
+			continue
+		}
+		scanner := bufio.NewScanner(os.Stdin)
+		encoder := json.NewEncoder(os.Stdout)
+		for scanner.Scan() {
+			var req struct {
+				ID     json.RawMessage `json:"id"`
+				Method string          `json:"method"`
+			}
+			if json.Unmarshal(scanner.Bytes(), &req) != nil {
+				continue
+			}
+			var result any
+			switch req.Method {
+			case "initialize":
+				result = map[string]any{
+					"protocolVersion": 1,
+					"agentCapabilities": map[string]any{
+						"sessionCapabilities": map[string]any{"list": true},
+					},
+				}
+			case "session/list":
+				result = map[string]any{"sessions": []map[string]any{{
+					"sessionId": "session_lifetime",
+					"cwd":       "/tmp/catalog-lifetime",
+					"title":     "lifetime proof",
+					"updatedAt": "2026-08-11T08:00:00Z",
+				}}}
+			default:
+				result = map[string]any{}
+			}
+			_ = encoder.Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req.ID,
+				"result":  result,
+			})
+		}
+		os.Exit(0)
+	}
+}
 
 // loadFrozenSessionListResult 从 testdata/session_list_sanitized.json 取出 response.result，
 // 反序列化为 grokSessionListResult。fixture 结构：{"request":{...},"response":{...,"result":{...}}}。
@@ -152,5 +203,48 @@ func TestGrokSessionItemToAgentSessionInfo_EmptyMeta(t *testing.T) {
 	}
 	if !info.ModifiedAt.IsZero() {
 		t.Fatalf("ModifiedAt = %v, want zero（无 updatedAt）", info.ModifiedAt)
+	}
+}
+
+func TestGrokCatalogSingletonOutlivesFirstRequestContext(t *testing.T) {
+	a := &Agent{
+		cliBin:       os.Args[0],
+		cliExtraArgs: []string{grokCatalogHelperArg},
+		workDir:      t.TempDir(),
+	}
+
+	firstCtx, cancelFirst := context.WithCancel(context.Background())
+	first, err := a.FetchSessionList(firstCtx)
+	if err != nil {
+		t.Fatalf("first session/list: %v", err)
+	}
+	if len(first) != 1 || first[0].ID != "session_lifetime" {
+		t.Fatalf("first session/list = %+v", first)
+	}
+	client := a.catalogClient
+	pid := client.cmd.Process.Pid
+	cancelFirst() // exact production shape: discovery/request scope ends after lazy creation
+	time.Sleep(20 * time.Millisecond)
+
+	secondCtx, cancelSecond := context.WithTimeout(context.Background(), time.Second)
+	defer cancelSecond()
+	second, err := a.FetchSessionList(secondCtx)
+	if err != nil {
+		t.Fatalf("later session/list reused context-canceled zombie: %v", err)
+	}
+	if len(second) != 1 || second[0].ID != "session_lifetime" {
+		t.Fatalf("later session/list = %+v", second)
+	}
+	if a.catalogClient != client || a.catalogClient.cmd.Process.Pid != pid {
+		t.Fatalf("catalog transport rebuilt after creator cancellation: old_pid=%d new_pid=%d", pid, a.catalogClient.cmd.Process.Pid)
+	}
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := a.FetchSessionList(canceledCtx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("per-call cancellation err=%v, want context.Canceled", err)
+	}
+	if err := a.catalogClient.Close(); err != nil {
+		t.Fatalf("close catalog client: %v", err)
 	}
 }

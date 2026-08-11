@@ -144,6 +144,12 @@ func (h *Handlers) grokHandleListSessions(conn Connection, msg WireMessage, agen
 			return h.buildGrokEnrichedSessions(ctx, msg.BackendID)
 		})
 		if err != nil {
+			slog.Info("grokbuild list_sessions failed",
+				"scope", "global-home",
+				"cursor_present", false,
+				"error", err,
+				"duration_ms", time.Since(started).Milliseconds(),
+			)
 			conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
 			return
 		}
@@ -175,6 +181,13 @@ func (h *Handlers) grokHandleListSessions(conn Connection, msg WireMessage, agen
 			return filterWireSessionsByDirectory(global.maps, directoryScope.Directory), nil
 		})
 		if err != nil {
+			slog.Info("grokbuild list_sessions failed",
+				"scope", "directory",
+				"directory", redactDirForLog(dir),
+				"cursor_present", cursor != "",
+				"error", err,
+				"duration_ms", time.Since(started).Milliseconds(),
+			)
 			conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
 			return
 		}
@@ -205,6 +218,12 @@ func (h *Handlers) grokHandleListSessions(conn Connection, msg WireMessage, agen
 		return h.buildGrokEnrichedSessions(ctx, msg.BackendID)
 	})
 	if err != nil {
+		slog.Info("grokbuild list_sessions failed",
+			"scope", "global-page",
+			"cursor_present", cursor != "",
+			"error", err,
+			"duration_ms", time.Since(started).Milliseconds(),
+		)
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
 		return
 	}

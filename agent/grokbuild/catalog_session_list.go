@@ -87,8 +87,8 @@ type grokCatalogClient struct {
 	respMu       sync.Mutex
 	respChannels map[int]chan *jsonrpcResponse
 
-	alive     atomic.Bool
-	closeOnce sync.Once
+	alive      atomic.Bool
+	closeOnce  sync.Once
 	unregister func() // bridge ProcessRegistry 反注册句柄（nil=未注册）
 }
 
@@ -96,7 +96,18 @@ type grokCatalogClient struct {
 // 握手成功后即可调用 listSessions。握手失败（含未声明 session/list 能力）返回 error，
 // 调用方负责清理（Close）。
 func newGrokCatalogClient(ctx context.Context, cfg catalogClientConfig) (*grokCatalogClient, error) {
-	sessionCtx, cancel := context.WithCancel(ctx)
+	return newGrokCatalogClientWithRequestContext(ctx, ctx, cfg)
+}
+
+// newGrokCatalogClientWithRequestContext separates the process-level catalog lifetime from the
+// bounded list request that caused lazy creation. The process owns lifetimeCtx; initialize and
+// authenticate still honor requestCtx. Otherwise the first request's deferred cancel leaves a
+// live-process/dead-context singleton that makes every later session/list fail context canceled.
+func newGrokCatalogClientWithRequestContext(lifetimeCtx, requestCtx context.Context, cfg catalogClientConfig) (*grokCatalogClient, error) {
+	if err := requestCtx.Err(); err != nil {
+		return nil, err
+	}
+	sessionCtx, cancel := context.WithCancel(lifetimeCtx)
 
 	args := []string{"agent", "--no-leader", "stdio"}
 	args = append(args, cfg.cliExtraArgs...)
@@ -161,7 +172,11 @@ func newGrokCatalogClient(ctx context.Context, cfg catalogClientConfig) (*grokCa
 		}
 	}()
 
-	if err := c.initialize(); err != nil {
+	if err := requestCtx.Err(); err != nil {
+		_ = c.Close()
+		return nil, err
+	}
+	if err := c.initializeContext(requestCtx); err != nil {
 		_ = c.Close()
 		return nil, fmt.Errorf("grokbuild catalog: initialize: %w", err)
 	}
@@ -172,6 +187,10 @@ func newGrokCatalogClient(ctx context.Context, cfg catalogClientConfig) (*grokCa
 // sessionCapabilities.list → 显式 error（§5.4 #5），绝不静默退回旧 scanner。
 // 声明 authMethods 时调用 authenticate（Grok 1.0.0 要求，位于 initialize 与 session/list 之间）。
 func (c *grokCatalogClient) initialize() error {
+	return c.initializeContext(c.ctx)
+}
+
+func (c *grokCatalogClient) initializeContext(ctx context.Context) error {
 	id := c.idCounter.next()
 	params := initializeParams{
 		ProtocolVersion: 1,
@@ -186,7 +205,7 @@ func (c *grokCatalogClient) initialize() error {
 			Version: "1.0",
 		},
 	}
-	result, err := c.callRPC(id, "initialize", params, 10*time.Second)
+	result, err := c.callRPCWithCtx(ctx, id, "initialize", params, 10*time.Second)
 	if err != nil {
 		return err
 	}
@@ -206,7 +225,7 @@ func (c *grokCatalogClient) initialize() error {
 	}
 
 	if len(initResp.AuthMethods) > 0 {
-		if err := c.authenticate(initResp.AuthMethods[0].ID); err != nil {
+		if err := c.authenticateContext(ctx, initResp.AuthMethods[0].ID); err != nil {
 			return fmt.Errorf("authenticate: %w", err)
 		}
 	}
@@ -214,8 +233,12 @@ func (c *grokCatalogClient) initialize() error {
 }
 
 func (c *grokCatalogClient) authenticate(method string) error {
+	return c.authenticateContext(c.ctx, method)
+}
+
+func (c *grokCatalogClient) authenticateContext(ctx context.Context, method string) error {
 	id := c.idCounter.next()
-	_, err := c.callRPC(id, "authenticate", authenticateParams{MethodID: method}, 30*time.Second)
+	_, err := c.callRPCWithCtx(ctx, id, "authenticate", authenticateParams{MethodID: method}, 30*time.Second)
 	return err
 }
 
@@ -308,6 +331,9 @@ func (c *grokCatalogClient) callRPC(id int, method string, params any, timeout t
 }
 
 func (c *grokCatalogClient) callRPCWithCtx(ctx context.Context, id int, method string, params any, timeout time.Duration) (json.RawMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	ch := make(chan *jsonrpcResponse, 1)
 	c.respMu.Lock()
 	c.respChannels[id] = ch
@@ -484,7 +510,9 @@ func (a *Agent) catalogClientInstance(ctx context.Context) (*grokCatalogClient, 
 		workDir:      a.workDir,
 		registrar:    a.catalogRegistrar,
 	}
-	client, err := newGrokCatalogClient(ctx, cfg)
+	// The caller bounds construction and handshake, but must not own the singleton process after
+	// FetchSessionList returns. Each later operation still carries its own request context.
+	client, err := newGrokCatalogClientWithRequestContext(context.WithoutCancel(ctx), ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
