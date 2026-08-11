@@ -362,6 +362,6 @@ func (a *Agent) FetchThreadListHead(ctx context.Context, dir string, limit int) 
 	for _, thread := range result.Data {
 		out = append(out, codexThreadToAgentSessionInfo(thread))
 	}
-	slog.Info("codex catalog: thread/list head probe", "cwd", dir, "count", len(out), "limit", limit)
+	slog.Debug("codex catalog: thread/list head probe", "cwd", dir, "count", len(out), "limit", limit)
 	return out, nil
 }

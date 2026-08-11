@@ -109,9 +109,12 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 			if !h.broadcaster.HasConnections() {
 				continue
 			}
+			probeStarted := time.Now()
 			current, err := h.codexDiscoveryHintFingerprint(ctx, agent)
+			probeDuration := time.Since(probeStarted)
 			if err != nil {
-				slog.Warn("go-bridge: Codex discovery head probe error (no full refresh)", "error", err.Error())
+				slog.Warn("go-bridge: Codex discovery head probe error (no full refresh)",
+					"durationMs", probeDuration.Milliseconds(), "error", err.Error())
 				continue
 			}
 			if !hintSeeded {
@@ -122,7 +125,8 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 			if current == hintSeen {
 				continue
 			}
-			slog.Info("go-bridge: Codex discovery head changed; running authoritative full refresh")
+			slog.Info("go-bridge: Codex discovery head changed; running authoritative full refresh",
+				"headProbeDurationMs", probeDuration.Milliseconds())
 			if h.snapshotBackendSession(ctx, seen, false, id, agent) {
 				hintSeen = current
 			}
