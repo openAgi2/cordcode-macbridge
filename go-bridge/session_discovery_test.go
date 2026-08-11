@@ -50,6 +50,37 @@ type discoveryHintCodexAgent struct {
 	state *discoveryHintState
 }
 
+type discoveryFastGrokState struct {
+	mu        sync.Mutex
+	expanded  bool
+	errors    int
+	calls     int
+	seeded    chan struct{}
+	seedOnce  sync.Once
+	workspace string
+}
+
+type discoveryFastGrokAgent struct {
+	*fakeAgent
+	state *discoveryFastGrokState
+}
+
+func (a *discoveryFastGrokAgent) FetchSessionList(context.Context) ([]core.AgentSessionInfo, error) {
+	a.state.mu.Lock()
+	defer a.state.mu.Unlock()
+	a.state.calls++
+	a.state.seedOnce.Do(func() { close(a.state.seeded) })
+	if a.state.errors > 0 {
+		a.state.errors--
+		return nil, errors.New("transient Grok native catalog failure")
+	}
+	infos := []core.AgentSessionInfo{{ID: "g1", Summary: "one", Directory: a.state.workspace}}
+	if a.state.expanded {
+		infos = append([]core.AgentSessionInfo{{ID: "g2", Summary: "two", Directory: a.state.workspace}}, infos...)
+	}
+	return infos, nil
+}
+
 func (a *discoveryHintCodexAgent) FetchThreadListHead(context.Context, string, int) ([]core.AgentSessionInfo, error) {
 	a.state.mu.Lock()
 	defer a.state.mu.Unlock()
@@ -255,6 +286,123 @@ func TestSessionDiscoveryCodexHeadHintTriggersAuthoritativeRefresh(t *testing.T)
 	state.mu.Unlock()
 	if fullAfterChange != 2 {
 		t.Fatalf("head change full fetches=%d, want seed + one authoritative refresh", fullAfterChange)
+	}
+}
+
+func TestSessionDiscoveryGrokFastCadencePublishesAfterErrorsAndFences(t *testing.T) {
+	previousInterval := sessionDiscoveryInterval
+	previousFastInterval := grokDiscoveryFastInterval
+	sessionDiscoveryInterval = time.Hour
+	grokDiscoveryFastInterval = 10 * time.Millisecond
+
+	state := &discoveryFastGrokState{seeded: make(chan struct{}), workspace: t.TempDir()}
+	agent := &discoveryFastGrokAgent{fakeAgent: &fakeAgent{name: "grokbuild"}, state: state}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("grokbuild", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	t.Cleanup(cleanup)
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "grokbuild", SessionID: "list-view"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		handlers.runSessionDiscovery(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-watcherDone:
+		case <-time.After(time.Second):
+			t.Error("session discovery watcher did not stop")
+		}
+		sessionDiscoveryInterval = previousInterval
+		grokDiscoveryFastInterval = previousFastInterval
+	})
+
+	select {
+	case <-state.seeded:
+	case <-time.After(time.Second):
+		t.Fatal("Grok discovery did not seed")
+	}
+	// Warm a declared snapshot so the fast change path must fence it before publishing.
+	cache := handlers.grokCatalogWireCache()
+	scope := grokCatalogScopeKey("grokbuild")
+	calls := 0
+	if _, err := cache.FetchOrReuse(scope, builderFromMaps(synthWireMaps(2), &calls)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Stable fast scans do not publish. Two transient errors must preserve the last-good
+	// fingerprint/cache; the first successful recovery observes g2 and publishes exactly once.
+	time.Sleep(20 * time.Millisecond)
+	state.mu.Lock()
+	state.errors = 2
+	state.expanded = true
+	state.mu.Unlock()
+	msg := readJSONMaps(t, clientConn, 1)[0]
+	if msg["event"] != "sessions_changed" || msg["backendId"] != "grokbuild" {
+		t.Fatalf("Grok fast refresh event=%#v", msg)
+	}
+	if cache.Peek(scope) != nil {
+		t.Fatal("Grok fast refresh published before fencing the old snapshot")
+	}
+	state.mu.Lock()
+	gotCalls := state.calls
+	state.mu.Unlock()
+	if gotCalls < 5 { // seed + stable + two errors + recovery
+		t.Fatalf("Grok native calls=%d, want seed/stable/errors/recovery chain", gotCalls)
+	}
+
+	if err := clientConn.SetReadDeadline(time.Now().Add(50 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	var duplicate map[string]any
+	if err := clientConn.ReadJSON(&duplicate); err == nil {
+		t.Fatalf("stable Grok membership published duplicate event: %#v", duplicate)
+	}
+}
+
+func TestSessionDiscoveryGrokFastCadenceRequiresActiveConnection(t *testing.T) {
+	previousInterval := sessionDiscoveryInterval
+	previousFastInterval := grokDiscoveryFastInterval
+	sessionDiscoveryInterval = time.Hour
+	grokDiscoveryFastInterval = 10 * time.Millisecond
+
+	state := &discoveryFastGrokState{seeded: make(chan struct{}), workspace: t.TempDir()}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("grokbuild", &discoveryFastGrokAgent{
+		fakeAgent: &fakeAgent{name: "grokbuild"},
+		state:     state,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		handlers.runSessionDiscovery(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-watcherDone:
+		case <-time.After(time.Second):
+			t.Error("session discovery watcher did not stop")
+		}
+		sessionDiscoveryInterval = previousInterval
+		grokDiscoveryFastInterval = previousFastInterval
+	})
+
+	select {
+	case <-state.seeded:
+	case <-time.After(time.Second):
+		t.Fatal("Grok discovery did not seed")
+	}
+	time.Sleep(40 * time.Millisecond)
+	state.mu.Lock()
+	gotCalls := state.calls
+	state.mu.Unlock()
+	if gotCalls != 1 {
+		t.Fatalf("disconnected Grok fast cadence made %d calls, want seed only", gotCalls)
 	}
 }
 

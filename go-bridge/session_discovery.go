@@ -38,6 +38,12 @@ var codexDiscoveryHintInterval = 3 * time.Second
 
 const codexDiscoveryHeadLimit = 25
 
+// Grok ACP session/list has no bounded head/page parameter, but the production catalog is small
+// and the managed singleton answers a full native membership request in sub-millisecond time. Run
+// that authoritative fingerprint on a backend-local cadence only while a client is connected; the
+// 60-second scan remains the disconnected/error-recovery safety net.
+var grokDiscoveryFastInterval = 5 * time.Second
+
 // StartSessionDiscoveryWatcher launches the background new-session watcher. The
 // first scan seeds the snapshot without broadcasting (no startup burst).
 func (h *Handlers) StartSessionDiscoveryWatcher(ctx context.Context) {
@@ -46,7 +52,8 @@ func (h *Handlers) StartSessionDiscoveryWatcher(ctx context.Context) {
 
 func (h *Handlers) runSessionDiscovery(ctx context.Context) {
 	interval := sessionDiscoveryInterval
-	hintInterval := codexDiscoveryHintInterval
+	codexHintInterval := codexDiscoveryHintInterval
+	grokFastInterval := grokDiscoveryFastInterval
 	slog.Info("go-bridge: session discovery watcher started",
 		"interval", interval.String(),
 		"backends", len(h.Agents()))
@@ -55,7 +62,7 @@ func (h *Handlers) runSessionDiscovery(ctx context.Context) {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			h.runBackendSessionDiscovery(ctx, id, agent, interval, hintInterval)
+			h.runBackendSessionDiscovery(ctx, id, agent, interval, codexHintInterval, grokFastInterval)
 		}()
 	}
 	<-ctx.Done()
@@ -66,17 +73,17 @@ func (h *Handlers) runSessionDiscovery(ctx context.Context) {
 // runBackendSessionDiscovery owns one backend's cadence and last-good fingerprint. Backends are
 // deliberately isolated: a provider that blocks despite ctx cancellation must not starve native
 // refresh for every other backend (owner A-O1 production failure, 2026-08-11).
-func (h *Handlers) runBackendSessionDiscovery(ctx context.Context, id string, agent core.Agent, interval, hintInterval time.Duration) {
+func (h *Handlers) runBackendSessionDiscovery(ctx context.Context, id string, agent core.Agent, interval, codexHintInterval, grokFastInterval time.Duration) {
 	// Keep panic recovery inside this tracked worker. Re-arming via an untracked goroutine would
 	// let runSessionDiscovery report stopped while the replacement still accessed handler state.
 	for ctx.Err() == nil {
-		if !h.runBackendSessionDiscoveryLoop(ctx, id, agent, interval, hintInterval) {
+		if !h.runBackendSessionDiscoveryLoop(ctx, id, agent, interval, codexHintInterval, grokFastInterval) {
 			return
 		}
 	}
 }
 
-func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string, agent core.Agent, interval, hintInterval time.Duration) (panicked bool) {
+func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string, agent core.Agent, interval, codexHintInterval, grokFastInterval time.Duration) (panicked bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			panicked = true
@@ -91,8 +98,14 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 	var hintTicker *time.Ticker
 	var hintC <-chan time.Time
 	if id == "codex" {
-		if _, ok := agent.(codexThreadHeadLister); ok && hintInterval > 0 {
-			hintTicker = time.NewTicker(hintInterval)
+		if _, ok := agent.(codexThreadHeadLister); ok && codexHintInterval > 0 {
+			hintTicker = time.NewTicker(codexHintInterval)
+			hintC = hintTicker.C
+			defer hintTicker.Stop()
+		}
+	} else if id == "grokbuild" {
+		if _, ok := agent.(grokSessionLister); ok && grokFastInterval > 0 {
+			hintTicker = time.NewTicker(grokFastInterval)
 			hintC = hintTicker.C
 			defer hintTicker.Stop()
 		}
@@ -107,6 +120,13 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 			h.snapshotBackendSession(ctx, seen, false, id, agent)
 		case <-hintC:
 			if !h.broadcaster.HasConnections() {
+				continue
+			}
+			if id == "grokbuild" {
+				// Unlike Codex, Grok has no cheap bounded head RPC. This call is already the
+				// authoritative native fingerprint, so it directly owns fence/seen/publish and
+				// must not be followed by a duplicate full fetch.
+				h.snapshotBackendSession(ctx, seen, false, id, agent)
 				continue
 			}
 			probeStarted := time.Now()
