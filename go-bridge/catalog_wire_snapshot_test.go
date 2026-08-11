@@ -15,6 +15,8 @@ package gobridge
 // （undeclared → v1 路径，结构上不可能到达 pageV2）。
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -458,6 +460,85 @@ func TestCatalogWireSnapshot_Singleflight(t *testing.T) {
 		if !ok || len(ws) != 2 {
 			t.Errorf("results[%d] sessions len = %d, want 2", i, len(ws))
 		}
+	}
+}
+
+func TestCatalogWireSnapshot_GenerationFenceDropsOldBuildAndRebuildsOnce(t *testing.T) {
+	cache, _ := newWireCacheWithFakeNow(time.UnixMilli(2_000_000))
+	scope := codexCatalogScopeKey("codex", "")
+	oldStarted, releaseOld := make(chan struct{}), make(chan struct{})
+	var mu sync.Mutex
+	calls := 0
+	builder := func() ([]map[string]interface{}, error) {
+		mu.Lock()
+		calls++
+		call := calls
+		mu.Unlock()
+		if call == 1 {
+			close(oldStarted)
+			<-releaseOld
+			return []map[string]interface{}{{"id": "old", "updatedAtMillis": int64(1)}}, nil
+		}
+		return []map[string]interface{}{{"id": "current", "updatedAtMillis": int64(2)}}, nil
+	}
+	results := make(chan *catalogWireSnapshot, 2)
+	for i := 0; i < 2; i++ {
+		go func() { snap, _ := cache.FetchOrReuseContext(context.Background(), scope, builder); results <- snap }()
+	}
+	<-oldStarted
+	cache.FenceBackend("codex")
+	close(releaseOld)
+	for i := 0; i < 2; i++ {
+		snap := <-results
+		if snap == nil || snap.maps[0]["id"] != "current" {
+			t.Fatalf("old generation escaped fence: %#v", snap)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 2 {
+		t.Fatalf("builder calls=%d want old+one current", calls)
+	}
+}
+
+func TestCatalogWireSnapshot_SameGenerationErrorFanoutAndContextExit(t *testing.T) {
+	cache, _ := newWireCacheWithFakeNow(time.UnixMilli(2_000_000))
+	scope := grokCatalogScopeKey("grokbuild")
+	started, release := make(chan struct{}), make(chan struct{})
+	wantErr := errors.New("native catalog failed")
+	calls := 0
+	var callsMu sync.Mutex
+	var startedOnce sync.Once
+	builder := func() ([]map[string]interface{}, error) {
+		callsMu.Lock()
+		calls++
+		callsMu.Unlock()
+		startedOnce.Do(func() { close(started) })
+		<-release
+		return nil, wantErr
+	}
+	errCh := make(chan error, 3)
+	go func() { _, err := cache.FetchOrReuseContext(context.Background(), scope, builder); errCh <- err }()
+	<-started
+	for i := 0; i < 2; i++ {
+		go func() { _, err := cache.FetchOrReuseContext(context.Background(), scope, builder); errCh <- err }()
+	}
+	time.Sleep(20 * time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := cache.FetchOrReuseContext(ctx, scope, builder); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled waiter err=%v", err)
+	}
+	close(release)
+	for i := 0; i < 3; i++ {
+		if err := <-errCh; !errors.Is(err, wantErr) {
+			t.Fatalf("waiter err=%v want real builder error", err)
+		}
+	}
+	callsMu.Lock()
+	defer callsMu.Unlock()
+	if calls != 1 {
+		t.Fatalf("error fanout retried builder: calls=%d", calls)
 	}
 }
 

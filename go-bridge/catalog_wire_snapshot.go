@@ -19,6 +19,7 @@ package gobridge
 // 该 scope 无快照 / v1 cursor → cursor_stale（不盲切、不静默回 page-0）。
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -33,29 +34,42 @@ import (
 // catalogWireSnapshot 是一个 OpenCode scope 的缓存快照：enriched wire maps + epoch +
 // createdAt。maps 已按 (updatedAtMillis DESC, id ASC) 排序，切片与派生 cursor 直接复用。
 type catalogWireSnapshot struct {
-	scope     catalogWireScope
-	epoch     string
-	createdAt time.Time
-	maps      []map[string]interface{}
+	scope      catalogWireScope
+	generation uint64
+	epoch      string
+	createdAt  time.Time
+	maps       []map[string]interface{}
 }
 
 // catalogWireSnapshotCache 按 scope 缓存 enriched wire maps（§4.1.1 快照模型）。
 // now 注入便于 TTL 测试；inFlight 提供 page-0 singleflight（§11）。
 type catalogWireSnapshotCache struct {
-	now      func() time.Time
-	mu       sync.Mutex
-	scopes   map[catalogWireScope]*catalogWireSnapshot
-	inFlight map[catalogWireScope]chan struct{}
+	now         func() time.Time
+	mu          sync.Mutex
+	scopes      map[catalogWireScope]*catalogWireSnapshot
+	inFlight    map[catalogWireScope]*catalogWireBuild
+	generations map[string]uint64
 }
+
+type catalogWireBuild struct {
+	generation uint64
+	done       chan struct{}
+	once       sync.Once
+	snapshot   *catalogWireSnapshot
+	err        error
+}
+
+func (b *catalogWireBuild) complete() { b.once.Do(func() { close(b.done) }) }
 
 func newCatalogWireSnapshotCache(now func() time.Time) *catalogWireSnapshotCache {
 	if now == nil {
 		now = time.Now
 	}
 	return &catalogWireSnapshotCache{
-		now:      now,
-		scopes:   make(map[catalogWireScope]*catalogWireSnapshot),
-		inFlight: make(map[catalogWireScope]chan struct{}),
+		now:         now,
+		scopes:      make(map[catalogWireScope]*catalogWireSnapshot),
+		inFlight:    make(map[catalogWireScope]*catalogWireBuild),
+		generations: make(map[string]uint64),
 	}
 }
 
@@ -200,59 +214,88 @@ func (c *catalogWireSnapshotCache) Invalidate(scope catalogWireScope) {
 	c.mu.Unlock()
 }
 
+// FenceBackend advances one backend-wide generation under the same lock that owns committed and
+// in-flight snapshots. Old builders may finish, but can neither commit nor satisfy waiters.
+func (c *catalogWireSnapshotCache) FenceBackend(backendID string) uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.generations[backendID]++
+	for scope := range c.scopes {
+		if scope.BackendID == backendID {
+			delete(c.scopes, scope)
+		}
+	}
+	for scope := range c.inFlight {
+		if scope.BackendID == backendID {
+			delete(c.inFlight, scope)
+		}
+	}
+	return c.generations[backendID]
+}
+
 // FetchOrReuse 是 page-0 路径：缓存命中且未过期 → 复用；否则 singleflight 调 builder 构造
 // enriched wire maps 并缓存。builder 只在 miss/expiry 时调用。返回的快照的 maps 是缓存内
 // 副本的可读引用（切片元素仍共享 map；调用方只读不写，handler 不再 mutate）。
 func (c *catalogWireSnapshotCache) FetchOrReuse(scope catalogWireScope, builder func() ([]map[string]interface{}, error)) (*catalogWireSnapshot, error) {
+	return c.FetchOrReuseContext(context.Background(), scope, builder)
+}
+
+func (c *catalogWireSnapshotCache) FetchOrReuseContext(ctx context.Context, scope catalogWireScope, builder func() ([]map[string]interface{}, error)) (*catalogWireSnapshot, error) {
 	if err := scope.validate(); err != nil {
 		return nil, err
 	}
-	c.mu.Lock()
-	if snap, ok := c.scopes[scope]; ok && !wireSnapshotExpired(snap, c.now()) {
-		c.mu.Unlock()
-		return snap, nil
-	}
-	// 已有 page-0 在飞 → 等它完成，复用其结果（不重复打上游）。
-	if wait, ok := c.inFlight[scope]; ok {
-		c.mu.Unlock()
-		<-wait
+	for {
 		c.mu.Lock()
-		snap := c.scopes[scope]
-		c.mu.Unlock()
-		if snap != nil && !wireSnapshotExpired(snap, c.now()) {
+		generation := c.generations[scope.BackendID]
+		if snap := c.scopes[scope]; snap != nil && snap.generation == generation && !wireSnapshotExpired(snap, c.now()) {
+			c.mu.Unlock()
 			return snap, nil
 		}
-		return nil, fmt.Errorf("catalog snapshot unavailable for scope %q", scope.identity())
-	}
-	wait := make(chan struct{})
-	c.inFlight[scope] = wait
-	c.mu.Unlock()
-
-	maps, err := builder()
-
-	c.mu.Lock()
-	delete(c.inFlight, scope)
-	if err != nil {
-		close(wait)
+		if build := c.inFlight[scope]; build != nil && build.generation == generation {
+			c.mu.Unlock()
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-build.done:
+			}
+			c.mu.Lock()
+			current := c.generations[scope.BackendID]
+			snapshot, buildErr := build.snapshot, build.err
+			c.mu.Unlock()
+			if current != generation {
+				continue
+			}
+			return snapshot, buildErr
+		}
+		build := &catalogWireBuild{generation: generation, done: make(chan struct{})}
+		c.inFlight[scope] = build
 		c.mu.Unlock()
-		return nil, err
-	}
-	cp := append([]map[string]interface{}(nil), maps...)
-	if err := validateCatalogWireMaps(cp); err != nil {
-		close(wait)
+
+		maps, err := builder()
+		cp := append([]map[string]interface{}(nil), maps...)
+		if err == nil {
+			err = validateCatalogWireMaps(cp)
+		}
+		c.mu.Lock()
+		current := c.generations[scope.BackendID]
+		if current == generation {
+			if err == nil {
+				build.snapshot = &catalogWireSnapshot{scope: scope, generation: generation, epoch: deriveSnapshotEpoch(scope.identity() + "\x00" + wireListFingerprint(cp)), createdAt: c.now(), maps: cp}
+				c.scopes[scope] = build.snapshot
+			} else {
+				build.err = err
+			}
+		}
+		if c.inFlight[scope] == build {
+			delete(c.inFlight, scope)
+		}
+		build.complete()
 		c.mu.Unlock()
-		return nil, err
+		if current != generation {
+			continue
+		}
+		return build.snapshot, build.err
 	}
-	snap := &catalogWireSnapshot{
-		scope:     scope,
-		epoch:     deriveSnapshotEpoch(scope.identity() + "\x00" + wireListFingerprint(cp)),
-		createdAt: c.now(),
-		maps:      cp,
-	}
-	c.scopes[scope] = snap
-	close(wait)
-	c.mu.Unlock()
-	return snap, nil
 }
 
 // Peek 是 page-N 路径：返回缓存快照（不重建、不打上游）。可能返回 nil（该 scope 无快照）。
