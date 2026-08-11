@@ -535,12 +535,17 @@ The client rebuild contract is identical for both: drop the cursor chain, suppre
 
 A CLIENT opt-in capability for the bridge-owned session-list snapshot cursor (design `docs/2026-08-09-cross-backend-session-catalog-parity-implementation-plan.md` §4.1.1). The client declares `capabilities: ["catalog_cursor_epoch_v2"]` in `hello`; MacBridge echoes `capabilities["catalog_cursor_epoch_v2"] = true` in `hello_ack`.
 
-- **Declared**: MacBridge emits the v2 bridge-owned cursor (opaque; carries a snapshot epoch derived from the catalog fingerprint, plus the v1 content position) and returns `cursor_stale` (per § Cursor invalidity) when the epoch mismatches, the snapshot expired, or a stale v1 cursor arrives. The client implements the `cursor_stale → discard chain + resend page-0` contract.
-- **Undeclared**: MacBridge keeps the legacy v1 behavior (content-based cursor; a malformed cursor degrades to the first page) and does NOT emit `cursor_stale` for the list surface. Existing client behavior is unchanged — no regression.
+- **Declared, non-Claude backend**: MacBridge emits the v2 bridge-owned cursor (opaque; carries a snapshot epoch derived from the catalog fingerprint, plus the v1 content position) and returns `cursor_stale` (per § Cursor invalidity) when the epoch mismatches, the snapshot expired, or a stale v1 cursor arrives. The client implements the `cursor_stale → discard chain + resend page-0` contract.
+- **Declared, Claude backend**: declaration proves the client satisfies the minimum-client capability contract, but Claude has no supported native catalog. MacBridge therefore continues the dedicated Claude compatibility catalog successfully; its cursor remains v1-shaped and MUST NOT be presented as an epoch-v2 cursor.
+- **Undeclared**: `list_sessions` fails with a stable wire error: `code = "protocol.capability_required"`, `retryable = false`, and a message containing `catalog_cursor_epoch_v2`. The error response MUST NOT contain a success-shaped `sessions` field, including an empty array. This applies to Codex, Grok, OpenCode, and Claude; undeclared clients have no generic v1 success path.
 
 Advertising `catalog_cursor_epoch_v2` is an explicit promise that the client has implemented `cursor_stale → resend page-0`; clients MUST NOT advertise the capability while still treating `cursor_stale` as a fatal/unexpected error. This mirrors the `session_sync_v2` MUST-NOT-advertise contract: the capability is a versioned opt-in/out, not a runtime fallback.
 
-**Release ordering**: MacBridge MUST NOT emit a v2 cursor or a list-surface `cursor_stale` to any connection before this capability gate is live. Once the gate is live, declared connections receive v2; undeclared connections keep v1, so there is never a window where a client sees `cursor_stale` as an ordinary/unexpected error.
+**Intentional same-major minimum-client retirement**: the undeclared error is an intentional breaking deprecation under protocol major 1, approved as a minimum-client retirement. It MUST NOT be described as a non-breaking additive change. A runtime failure on a declared v2 path MUST NOT fall back to v1.
+
+**Push semantics are independent**: an undeclared authenticated connection can still receive backend-scoped `sessions_changed` according to the normal subscription/observation rules. `catalog_cursor_epoch_v2` gates the `list_sessions` RPC/cursor contract only; it MUST NOT gate EventPublisher delivery. A subsequent undeclared `list_sessions` request returns `protocol.capability_required` as specified above.
+
+**Release ordering**: supported clients MUST implement and advertise the capability before the server begins returning the undeclared error. In particular, the production remote-web client must ship the declaration and one-shot `cursor_stale → page-0` recovery first. Canonical protocol and client readiness MUST be published before the MacBridge service flip; code retained only for rollback does not restore a supported undeclared success contract.
 
 ### Capability
 
