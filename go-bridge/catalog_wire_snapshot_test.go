@@ -481,18 +481,32 @@ func TestCatalogWireSnapshot_GenerationFenceDropsOldBuildAndRebuildsOnce(t *test
 		}
 		return []map[string]interface{}{{"id": "current", "updatedAtMillis": int64(2)}}, nil
 	}
-	results := make(chan *catalogWireSnapshot, 2)
-	for i := 0; i < 2; i++ {
-		go func() { snap, _ := cache.FetchOrReuseContext(context.Background(), scope, builder); results <- snap }()
-	}
+	oldResult := make(chan *catalogWireSnapshot, 1)
+	waiterResult := make(chan *catalogWireSnapshot, 1)
+	go func() { snap, _ := cache.FetchOrReuseContext(context.Background(), scope, builder); oldResult <- snap }()
 	<-oldStarted
+	go func() {
+		snap, _ := cache.FetchOrReuseContext(context.Background(), scope, builder)
+		waiterResult <- snap
+	}()
+	time.Sleep(20 * time.Millisecond)
 	cache.FenceBackend("codex")
-	close(releaseOld)
-	for i := 0; i < 2; i++ {
-		snap := <-results
+	select {
+	case snap := <-waiterResult:
 		if snap == nil || snap.maps[0]["id"] != "current" {
 			t.Fatalf("old generation escaped fence: %#v", snap)
 		}
+	case <-time.After(time.Second):
+		t.Fatal("fence did not wake old-generation waiter while old builder remained blocked")
+	}
+	select {
+	case <-oldResult:
+		t.Fatal("old builder caller returned before its builder completed")
+	default:
+	}
+	close(releaseOld)
+	if snap := <-oldResult; snap == nil || snap.maps[0]["id"] != "current" {
+		t.Fatalf("old builder caller did not transparently join current generation: %#v", snap)
 	}
 	mu.Lock()
 	defer mu.Unlock()
@@ -539,6 +553,67 @@ func TestCatalogWireSnapshot_SameGenerationErrorFanoutAndContextExit(t *testing.
 	defer callsMu.Unlock()
 	if calls != 1 {
 		t.Fatalf("error fanout retried builder: calls=%d", calls)
+	}
+}
+
+func TestCatalogWireSnapshot_BackendFenceCoversAllScopesAndIsolatesBackends(t *testing.T) {
+	cache, _ := newWireCacheWithFakeNow(time.UnixMilli(2_000_000))
+	codexGlobal := codexCatalogScopeKey("codex", "")
+	codexDir := codexCatalogScopeKey("codex", "/tmp/workspace")
+	grokGlobal := grokCatalogScopeKey("grokbuild")
+	calls := 0
+	if _, err := cache.FetchOrReuse(codexGlobal, builderFromMaps(synthWireMaps(2), &calls)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cache.FetchOrReuse(grokGlobal, builderFromMaps(synthWireMaps(2), &calls)); err != nil {
+		t.Fatal(err)
+	}
+	started, release := make(chan struct{}), make(chan struct{})
+	dirCalls := 0
+	dirResult := make(chan *catalogWireSnapshot, 1)
+	go func() {
+		snap, _ := cache.FetchOrReuseContext(context.Background(), codexDir, func() ([]map[string]interface{}, error) {
+			dirCalls++
+			if dirCalls == 1 {
+				close(started)
+				<-release
+				return []map[string]interface{}{{"id": "old-dir", "updatedAtMillis": int64(1)}}, nil
+			}
+			return []map[string]interface{}{{"id": "new-dir", "updatedAtMillis": int64(2)}}, nil
+		})
+		dirResult <- snap
+	}()
+	<-started
+	cache.FenceBackend("codex")
+	if cache.Peek(codexGlobal) != nil || cache.Peek(codexDir) != nil {
+		t.Fatal("codex fence retained a committed or in-flight scope")
+	}
+	if cache.Peek(grokGlobal) == nil {
+		t.Fatal("codex fence invalidated another backend")
+	}
+	close(release)
+	if snap := <-dirResult; snap == nil || snap.maps[0]["id"] != "new-dir" || dirCalls != 2 {
+		t.Fatalf("directory scope committed old generation: snap=%#v calls=%d", snap, dirCalls)
+	}
+}
+
+func TestCatalogWireSnapshot_RejectsIllegalScopeBeforeStateMutation(t *testing.T) {
+	invalid := []catalogWireScope{
+		{Global: true},
+		{BackendID: "codex", Global: true, Directory: "/tmp/workspace"},
+		{BackendID: "codex"},
+	}
+	for _, scope := range invalid {
+		cache, _ := newWireCacheWithFakeNow(time.UnixMilli(2_000_000))
+		if _, err := cache.FetchOrReuseContext(context.Background(), scope, func() ([]map[string]interface{}, error) {
+			t.Fatal("illegal scope reached builder")
+			return nil, nil
+		}); err == nil {
+			t.Fatalf("illegal scope accepted: %#v", scope)
+		}
+		if len(cache.scopes) != 0 || len(cache.inFlight) != 0 || len(cache.generations) != 0 {
+			t.Fatalf("illegal scope mutated cache state: %#v", scope)
+		}
 	}
 }
 

@@ -227,6 +227,7 @@ func (c *catalogWireSnapshotCache) FenceBackend(backendID string) uint64 {
 	}
 	for scope := range c.inFlight {
 		if scope.BackendID == backendID {
+			c.inFlight[scope].complete()
 			delete(c.inFlight, scope)
 		}
 	}

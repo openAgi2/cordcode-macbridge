@@ -2,6 +2,7 @@ package gobridge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -109,6 +110,80 @@ func TestSessionDiscoveryControlPlanePublisherCapabilityMatrix(t *testing.T) {
 	}
 	if _, ok := handlers.projectionKernel.Snapshot("codex", ""); ok {
 		t.Fatal("sessions_changed entered the Projection Kernel")
+	}
+}
+
+func TestSessionDiscoveryFencesCatalogBeforeBroadcastAndForcesRebuild(t *testing.T) {
+	handlers := newTestHandlers(t)
+	agent := &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1"}}}
+	handlers.RegisterAgent("codex", agent)
+	cache := handlers.codexCatalogWireCache()
+	scope := codexCatalogScopeKey("codex", "")
+	oldMaps := []map[string]interface{}{
+		{"id": "old-a", "updatedAtMillis": int64(2)},
+		{"id": "old-b", "updatedAtMillis": int64(1)},
+	}
+	calls := 0
+	page0, stale, err := cache.pageV2(scope, "", 1, builderFromMaps(oldMaps, &calls))
+	if err != nil || stale != nil {
+		t.Fatalf("warm page0 err=%v stale=%v", err, stale)
+	}
+	oldCursor := page0["nextCursor"].(string)
+
+	conn := newPublisherCaptureConn(nil)
+	handlers.broadcaster.RegisterConn(conn)
+	handlers.eventPublisher.RegisterConnection(conn)
+	seen := map[string]string{}
+	handlers.snapshotSessions(context.Background(), seen, true)
+	agent.sessionInfos = []core.AgentSessionInfo{{ID: "s1"}, {ID: "s2"}}
+	handlers.snapshotSessions(context.Background(), seen, false)
+	conn.waitCount(t, 1)
+
+	if cache.Peek(scope) != nil {
+		t.Fatal("sessions_changed was observable before the old snapshot was fenced")
+	}
+	if _, stale, err := cache.pageV2(scope, oldCursor, 1, builderFromMaps(nil, &calls)); err != nil || stale == nil || stale.Code != "cursor_stale" {
+		t.Fatalf("old cursor after notification stale=%+v err=%v", stale, err)
+	}
+	newMaps := []map[string]interface{}{{"id": "new-member", "updatedAtMillis": int64(3)}}
+	rebuilt, stale, err := cache.pageV2(scope, "", 10, builderFromMaps(newMaps, &calls))
+	if err != nil || stale != nil {
+		t.Fatalf("rebuild err=%v stale=%v", err, stale)
+	}
+	got := rebuilt["sessions"].([]map[string]interface{})
+	if len(got) != 1 || got[0]["id"] != "new-member" {
+		t.Fatalf("post-notification page0 reused old snapshot: %#v", got)
+	}
+}
+
+func TestSessionDiscoveryErrorSkipsFenceButSuccessEmptyFences(t *testing.T) {
+	handlers := newTestHandlers(t)
+	agent := &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1"}}}
+	handlers.RegisterAgent("codex", agent)
+	cache := handlers.codexCatalogWireCache()
+	scope := codexCatalogScopeKey("codex", "")
+	calls := 0
+	if _, err := cache.FetchOrReuse(scope, builderFromMaps(synthWireMaps(2), &calls)); err != nil {
+		t.Fatal(err)
+	}
+	conn := newPublisherCaptureConn(nil)
+	handlers.broadcaster.RegisterConn(conn)
+	handlers.eventPublisher.RegisterConnection(conn)
+	seen := map[string]string{}
+	handlers.snapshotSessions(context.Background(), seen, true)
+
+	agent.sessionListErr = errors.New("native unavailable")
+	handlers.snapshotSessions(context.Background(), seen, false)
+	if cache.Peek(scope) == nil || len(conn.snapshot()) != 0 {
+		t.Fatal("error poll fenced cache, updated seen, or broadcast")
+	}
+
+	agent.sessionListErr = nil
+	agent.sessionInfos = nil
+	handlers.snapshotSessions(context.Background(), seen, false)
+	conn.waitCount(t, 1)
+	if cache.Peek(scope) != nil {
+		t.Fatal("successful empty catalog did not fence prior snapshot")
 	}
 }
 
