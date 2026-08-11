@@ -52,6 +52,66 @@ func TestSessionDiscoveryBroadcastsOnNewSession(t *testing.T) {
 	}
 }
 
+func TestSessionDiscoveryControlPlanePublisherCapabilityMatrix(t *testing.T) {
+	handlers := newTestHandlers(t)
+	agent := &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1"}}}
+	handlers.RegisterAgent("codex", agent)
+
+	type capabilityCase struct {
+		name          string
+		sessionSyncV2 bool
+		catalogV2     bool
+		conn          *publisherCaptureConn
+	}
+	cases := []capabilityCase{
+		{name: "legacy-undeclared", conn: newPublisherCaptureConn(nil)},
+		{name: "legacy-catalog-v2", catalogV2: true, conn: newPublisherCaptureConn(nil)},
+		{name: "sync-v2-undeclared", sessionSyncV2: true, conn: newPublisherCaptureConn(nil)},
+		{name: "sync-v2-catalog-v2", sessionSyncV2: true, catalogV2: true, conn: newPublisherCaptureConn(nil)},
+	}
+	for _, item := range cases {
+		handlers.broadcaster.RegisterConn(item.conn)
+		handlers.eventPublisher.RegisterConnection(item.conn)
+		handlers.eventPublisher.SetConnSyncV2(item.conn, item.sessionSyncV2)
+		handlers.eventPublisher.SetConnCatalogCursorEpochV2(item.conn, item.catalogV2)
+	}
+
+	seen := map[string]string{}
+	handlers.snapshotSessions(context.Background(), seen, true)
+	agent.sessionInfos = []core.AgentSessionInfo{{ID: "s1"}, {ID: "s2"}}
+	handlers.snapshotSessions(context.Background(), seen, false)
+
+	for _, item := range cases {
+		item.conn.waitCount(t, 1)
+		frames := item.conn.snapshot()
+		if len(frames) != 1 {
+			t.Fatalf("%s received %d frames, want exactly one", item.name, len(frames))
+		}
+		msg, ok := frames[0].(EventMessage)
+		if !ok || msg.Event != "sessions_changed" || msg.BackendID != "codex" || msg.SessionID != "" ||
+			msg.Seq != 1 || msg.EventID != msg.BridgeEpoch+":1" || !msg.Replayable {
+			t.Fatalf("%s frame=%#v", item.name, frames[0])
+		}
+		item.conn.mu.Lock()
+		classes := append([]relayOutboundClass(nil), item.conn.classes...)
+		item.conn.mu.Unlock()
+		if len(classes) != 1 || classes[0] != classifyRelayEvent("sessions_changed") {
+			t.Fatalf("%s classes=%v", item.name, classes)
+		}
+	}
+
+	replay := handlers.eventPublisher.EventBuffer().Replay("codex", "", BridgeSessionCut{})
+	if replay.Disposition != ReplayAvailable || len(replay.Events) != 1 || replay.Events[0].Event != "sessions_changed" {
+		t.Fatalf("control-plane replay=%+v", replay)
+	}
+	if _, ok := handlers.eventPublisher.ProjectionReducer().Snapshot("codex", ""); ok {
+		t.Fatal("sessions_changed entered the legacy projection reducer")
+	}
+	if _, ok := handlers.projectionKernel.Snapshot("codex", ""); ok {
+		t.Fatal("sessions_changed entered the Projection Kernel")
+	}
+}
+
 // TestSessionDiscoveryFiresOnUpdatedAtOnlyChange：Phase 7 §442 关键新能力——fingerprint 覆盖
 // id|updatedAtMillis，故「既有 session 收到新 turn → updatedAt 变，但 ID 集合不变」也触发
 // sessions_changed。旧 ID-set diff 会漏掉这种情况（列表 recency 不刷新）。本测试钉死：相同 ID

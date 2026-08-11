@@ -106,12 +106,15 @@ func (h *Handlers) snapshotSessions(ctx context.Context, seen map[string]string,
 		if current != prev {
 			slog.Info("go-bridge: sessions_changed (catalog fingerprint changed)",
 				"backend", id, "sessionCount", count)
-			h.deltaBatcher.Send(LogicalEvent{
+			if _, err := h.eventPublisher.PublishControlPlane(LogicalEvent{
 				BackendID: id,
 				Event:     "sessions_changed",
 				Data:      map[string]interface{}{"backendId": id},
 				Broadcast: true,
-			})
+			}); err != nil {
+				slog.Error("go-bridge: sessions_changed control-plane publish rejected",
+					"backend", id, "error", err.Error())
+			}
 		}
 	}
 }

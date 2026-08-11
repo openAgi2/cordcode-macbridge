@@ -1062,7 +1062,7 @@ func (h *Handlers) deliverClaudeLegacyRow(
 }
 
 // deliverClaudeLiveRawFrames dual-sends the raw content frames of an accepted live source batch to
-// legacy (non-syncV2) consumers via the deliver-only outlet — never re-reduced (the transaction
+// legacy (non-syncV2) consumers via the package-private pre-reduced outlet — never re-reduced (the transaction
 // already reduced them; guardrail #3). Mirrors the prior legacy raw sequence (turn_started arms
 // before user_message). v2 consumers get the projection_patch instead (design §6.5/§9.3).
 func (h *Handlers) deliverClaudeLiveRawFrames(batch ClaudeSourceRecordBatch, sessionID, backendID string) {
@@ -1070,7 +1070,7 @@ func (h *Handlers) deliverClaudeLiveRawFrames(batch ClaudeSourceRecordBatch, ses
 	dir := h.sessions.directoryForSession(sessionID)
 	h.mu.Unlock()
 	publish := func(event string, data map[string]interface{}) {
-		h.eventPublisher.PublishLogicalDeliverOnly(LogicalEvent{
+		h.eventPublisher.publishPreReducedTimeline(LogicalEvent{
 			SessionID: sessionID, BackendID: backendID, Event: event, Data: data,
 			Directory: dir, Broadcast: true, Offline: IsDurableMilestone(event),
 		})

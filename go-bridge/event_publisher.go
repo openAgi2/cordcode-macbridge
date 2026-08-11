@@ -311,67 +311,6 @@ func (p *EventPublisher) PublishProjectionPatch(backendID, sessionID string, pat
 	p.mu.Unlock()
 }
 
-// PublishLogicalDeliverOnly stamps and fans out an ALREADY-REDUCED logical event frame to legacy
-// (non-syncV2) subscribers without reducing or flushing a patch. A Kernel-private ingest (e.g.
-// ApplyClaudeSourceRecordBatch) already reduced the event; this preserves the dual-send raw
-// contract (design §9.3) for legacy consumers while v2 (syncV2) consumers receive the authoritative
-// projection_patch via PublishProjectionPatch. It never hands the event back to the reducer, so it
-// cannot double-write the timeline (guardrail #3). The EventMessage is built here, the single
-// blessed site, so TestBusinessEventConstructionHasNoProductionBypass accepts it.
-func (p *EventPublisher) PublishLogicalDeliverOnly(logical LogicalEvent) {
-	if p == nil {
-		return
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	logical.ClassHint = classifyRelayEvent(logical.Event)
-	p.seq++
-	seq := p.seq
-	perSessionSeq := 0
-	if logical.BackendID != "" && logical.SessionID != "" {
-		key := logical.BackendID + "\x00" + logical.SessionID
-		p.perSessionSeq[key]++
-		perSessionSeq = p.perSessionSeq[key]
-	}
-	msg := EventMessage{
-		Type:          "event",
-		EventID:       fmt.Sprintf("%s:%d", p.bridgeEpoch, seq),
-		Seq:           seq,
-		PerSessionSeq: perSessionSeq,
-		BridgeEpoch:   p.bridgeEpoch,
-		SessionID:     logical.SessionID,
-		BackendID:     logical.BackendID,
-		Event:         logical.Event,
-		Data:          logical.Data,
-		Message:       logical.Message,
-		Replayable:    isReplayableEvent(logical.Event),
-		Timestamp:     time.Now().UTC().UnixMilli(),
-	}
-	p.buffer.Append(msg)
-	if p.broadcaster == nil {
-		return
-	}
-	for _, conn := range p.broadcaster.Targets(logical.BackendID, logical.SessionID, logical.Directory) {
-		// v2 (syncV2) consumers receive the projection_patch, not the raw timeline frame — never
-		// dual-publish content to a projection-only client (design §6.5).
-		if p.syncV2[conn] {
-			continue
-		}
-		if !p.shouldDeliverRawEventLocked(conn, logical.BackendID, logical.SessionID, logical.Event) {
-			continue
-		}
-		if p.observation != nil {
-			if device := conn.AuthedDevice(); device != nil &&
-				!p.observation.ShouldSendEvent(device.DeviceID, logical.BackendID, logical.SessionID, logical.Event) {
-				continue
-			}
-		}
-		if sink := p.sinkLocked(conn); sink != nil {
-			sink.tryEnqueue(eventOutboundFrame{value: msg, classHint: logical.ClassHint, classified: true})
-		}
-	}
-}
-
 func (p *EventPublisher) SetOfflineRoute(route func(EventMessage)) {
 	p.mu.Lock()
 	p.offlineRoute = route
@@ -738,7 +677,65 @@ func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID strin
 	}
 }
 
+type eventPublishMode uint8
+
+const (
+	publishTimelineEvent eventPublishMode = iota
+	publishControlPlaneEvent
+	publishPreReducedTimelineEvent
+)
+
+// PublishLogical publishes a timeline event through the process-scoped ordering,
+// recovery, observation and delivery pipeline. Timeline events are reduced into
+// the Projection Kernel before their raw frame is delivered.
 func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
+	msg, err := p.publish(logical, publishTimelineEvent)
+	if err != nil {
+		panic(err)
+	}
+	return msg
+}
+
+// PublishControlPlane publishes the only catalog control-plane push currently
+// allowed by the protocol. Validation happens before publish acquires the ordering
+// lock, stamps Seq/EventID, appends EventBuffer state, resolves targets, or touches
+// any delivery side effect. The shared publish primitive deliberately skips only
+// Projection Kernel/reducer ingestion and projection patch flushing.
+func (p *EventPublisher) PublishControlPlane(logical LogicalEvent) (EventMessage, error) {
+	if err := validateControlPlaneEvent(logical); err != nil {
+		return EventMessage{}, err
+	}
+	return p.publish(logical, publishControlPlaneEvent)
+}
+
+// publishPreReducedTimeline is package-private because only a projection transaction that has
+// already committed the same logical source record may use it. It preserves the legacy raw frame
+// while routing stamping, buffering, recovery, observation and delivery through publish.
+func (p *EventPublisher) publishPreReducedTimeline(logical LogicalEvent) EventMessage {
+	msg, err := p.publish(logical, publishPreReducedTimelineEvent)
+	if err != nil {
+		panic(err)
+	}
+	return msg
+}
+
+func validateControlPlaneEvent(logical LogicalEvent) error {
+	if logical.Event != "sessions_changed" {
+		return fmt.Errorf("control-plane event %q is not allowed", logical.Event)
+	}
+	if logical.BackendID == "" {
+		return fmt.Errorf("control-plane sessions_changed requires backend ID")
+	}
+	if logical.SessionID != "" {
+		return fmt.Errorf("control-plane sessions_changed must not be session-scoped")
+	}
+	return nil
+}
+
+// publish is the single stamping and delivery primitive for timeline and
+// control-plane logical events. mode is private so callers cannot opt arbitrary
+// events out of the Projection Kernel through a public reduce flag.
+func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (EventMessage, error) {
 	p.mu.Lock()
 	logical.ClassHint = classifyRelayEvent(logical.Event)
 	if logical.ClassHint == relayOutboundNormal {
@@ -770,7 +767,10 @@ func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
 	// SessionProjection under the publisher ordering lock. Projection revision advances only
 	// when the reducer commits a mutation; it is distinct from transport perSessionSeq.
 	projectionApplied := false
-	if isDerivedLegacyQuestionEvent(logical.Event) {
+	if mode == publishControlPlaneEvent || mode == publishPreReducedTimelineEvent {
+		// Catalog control-plane events intentionally do not enter the timeline.
+		// Pre-reduced timeline events have already committed through the Kernel transaction.
+	} else if isDerivedLegacyQuestionEvent(logical.Event) {
 		// Strictly one-way: canonical user_input -> legacy question presentation. The derived raw
 		// frame is never allowed to become a second projection writer.
 	} else if p.kernel != nil {
@@ -984,7 +984,7 @@ func (p *EventPublisher) PublishLogical(logical LogicalEvent) EventMessage {
 			_ = wait.conn.Close()
 		}
 	}
-	return msg
+	return msg, nil
 }
 
 func cloneCutMap(input BridgeSessionCutMap) BridgeSessionCutMap {

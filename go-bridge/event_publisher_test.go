@@ -167,6 +167,94 @@ func TestEventPublisherCarriesCanonicalTypedClassHint(t *testing.T) {
 	}
 }
 
+func TestPublishControlPlaneRejectsInvalidEventsWithoutSideEffects(t *testing.T) {
+	publisher := NewEventPublisher("epoch-control-invalid")
+	conn := newPublisherCaptureConn(nil)
+	publisher.RegisterConnection(conn)
+
+	cases := []LogicalEvent{
+		{BackendID: "codex", Event: "text_delta", Targets: []Connection{conn}},
+		{BackendID: "codex", Event: "turn_completed", Targets: []Connection{conn}},
+		{Event: "sessions_changed", Targets: []Connection{conn}},
+		{BackendID: "codex", SessionID: "session-a", Event: "sessions_changed", Targets: []Connection{conn}},
+	}
+	for index, logical := range cases {
+		if msg, err := publisher.PublishControlPlane(logical); err == nil || msg != (EventMessage{}) {
+			t.Fatalf("case %d accepted invalid control-plane event: msg=%+v err=%v", index, msg, err)
+		}
+	}
+
+	publisher.mu.Lock()
+	seq := publisher.seq
+	publisher.mu.Unlock()
+	events, bytes := publisher.EventBuffer().Stats()
+	if seq != 0 || events != 0 || bytes != 0 || len(conn.snapshot()) != 0 {
+		t.Fatalf("invalid publishes had side effects: seq=%d events=%d bytes=%d frames=%d", seq, events, bytes, len(conn.snapshot()))
+	}
+	if _, ok := publisher.ProjectionReducer().Snapshot("codex", ""); ok {
+		t.Fatal("invalid control-plane event created backend-scoped projection state")
+	}
+}
+
+func TestPublishControlPlanePreservesRecoveryObservationAndClassifiedDelivery(t *testing.T) {
+	observation := NewObservationManager()
+	conn := newPublisherCaptureConn(nil)
+	conn.device = &TrustedDeviceRecord{DeviceID: "control-plane-device"}
+	publisher := NewEventPublisher("epoch-control-recovery")
+	publisher.SetObservationManager(observation)
+	publisher.RegisterConnection(conn)
+	if _, err := publisher.BeginRecovery(conn, "control-plane-recovery"); err != nil {
+		t.Fatal(err)
+	}
+
+	msg, err := publisher.PublishControlPlane(LogicalEvent{
+		BackendID: "codex", Event: "sessions_changed", Targets: []Connection{conn},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if got := len(conn.snapshot()); got != 0 {
+		t.Fatalf("recovering connection received control-plane event early: %d", got)
+	}
+	if err := publisher.CompleteRecovery(conn, "control-plane-recovery"); err != nil {
+		t.Fatal(err)
+	}
+	conn.waitCount(t, 2)
+	frames := conn.snapshot()
+	if frames[0].(map[string]interface{})["type"] != "recovery_complete" || frames[1] != msg {
+		t.Fatalf("recovery frames=%#v want completion then sessions_changed", frames)
+	}
+	conn.mu.Lock()
+	classes := append([]relayOutboundClass(nil), conn.classes...)
+	conn.mu.Unlock()
+	if len(classes) != 2 || classes[0] != relayOutboundControl || classes[1] != classifyRelayEvent("sessions_changed") {
+		t.Fatalf("classified recovery delivery=%v", classes)
+	}
+}
+
+func TestControlPlanePublisherHasNoPublicBypassOrEventNameBranchInPublishLogical(t *testing.T) {
+	data, err := os.ReadFile("event_publisher.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(data)
+	if strings.Contains(source, "PublishLogicalDeliverOnly") {
+		t.Fatal("deprecated public deliver-only publisher still exists")
+	}
+	start := strings.Index(source, "func (p *EventPublisher) PublishLogical(")
+	if start < 0 {
+		t.Fatal("could not locate PublishLogical wrapper")
+	}
+	end := strings.Index(source[start:], "\n}")
+	if end < 0 {
+		t.Fatal("could not locate end of PublishLogical wrapper")
+	}
+	if body := source[start : start+end]; strings.Contains(body, "sessions_changed") {
+		t.Fatal("PublishLogical contains an event-name special case")
+	}
+}
+
 func TestEventPublisherSlowConnectionDoesNotBlockFastConnection(t *testing.T) {
 	gate := make(chan struct{})
 	slow := newPublisherCaptureConn(gate)
