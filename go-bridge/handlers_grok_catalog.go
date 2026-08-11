@@ -66,6 +66,10 @@ func grokCatalogScopeKey(backendID string) catalogWireScope {
 	return newCatalogWireScope(backendID, "", false)
 }
 
+func grokCatalogDirectoryScope(backendID, dir string) catalogWireScope {
+	return newCatalogWireScope(backendID, dir, false)
+}
+
 // buildGrokEnrichedSessions 执行 §5.1 step 2-3 的富 wire 管线：FetchSessionList（managed ACP
 // subprocess session/list，跨 cwd，recency 排序）→ sessionsToWire → enrichSessionStatesForList
 // → overlayPinnedState。Phase 7 §445 收敛（与 OpenCode Phase 4 / codex 同形）：**不再
@@ -173,15 +177,29 @@ func (h *Handlers) grokHandleListSessions(conn Connection, msg WireMessage, agen
 		return
 	}
 	if dir != "" {
-		snap, err := cache.FetchOrReuse(scopeKey, func() ([]map[string]interface{}, error) {
-			return h.buildGrokEnrichedSessions(msg.BackendID)
+		directoryScope := grokCatalogDirectoryScope(msg.BackendID, dir)
+		result, staleErr, err := cache.pageV2(directoryScope, cursor, limit, func() ([]map[string]interface{}, error) {
+			global, err := cache.FetchOrReuse(scopeKey, func() ([]map[string]interface{}, error) {
+				return h.buildGrokEnrichedSessions(msg.BackendID)
+			})
+			if err != nil {
+				return nil, err
+			}
+			return filterWireSessionsByDirectory(global.maps, directoryScope.Directory), nil
 		})
 		if err != nil {
 			conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
 			return
 		}
-		filtered := filterWireSessionsByDirectory(snap.maps, dir)
-		result := paginateSessionList(filtered, cursor, limit)
+		if staleErr != nil {
+			slog.Info("grokbuild directory list_sessions cursor_stale",
+				"directory", redactDirForLog(dir),
+				"cursor_present", cursor != "",
+				"duration_ms", time.Since(started).Milliseconds(),
+			)
+			conn.SendResult(msg.RequestID, nil, staleErr)
+			return
+		}
 		if ws, ok := result["sessions"].([]map[string]interface{}); ok {
 			slog.Info("grokbuild list_sessions v2 (session/list dir-filter)",
 				"directory", redactDirForLog(dir),

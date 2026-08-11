@@ -182,9 +182,7 @@ func TestGrokCatalog_FetchFailureReturnsExplicitError_NoSilentFallback(t *testin
 	}
 }
 
-// TestGrokCatalog_V2Declared_EmitsV2EpochCursor：directory-scoped 深挖路径（dir 过滤 +
-// paginateSessionList）在 limit 截断时发 nextCursor；全局首页 fair-home 不发 nextCursor。
-// 这里用 directory 路径验证分页 cursor 仍可用（v1 bridge cursor，非 fair-home）。
+// TestGrokCatalog_V2Declared_EmitsV2EpochCursor pins the directory-bound declared v2 cursor.
 func TestGrokCatalog_V2Declared_EmitsV2EpochCursor(t *testing.T) {
 	ws := t.TempDir()
 	sessions := make([]core.AgentSessionInfo, 5)
@@ -220,23 +218,80 @@ func TestGrokCatalog_V2Declared_EmitsV2EpochCursor(t *testing.T) {
 	if !ok || nextCursor == "" {
 		t.Fatalf("nextCursor = %#v, want 非空 pagination cursor", data["nextCursor"])
 	}
-	// directory-scoped Grok 走 paginateSessionList → v1 cursor（可深挖即可）。
 	decoded, isV1, derr := decodeListCursorV2(nextCursor)
 	if derr != nil {
 		t.Fatalf("nextCursor 解码失败：%v", derr)
 	}
-	if !isV1 {
-		// 若将来 directory 路径也升 v2，允许；但不得 silent fail。
-		if decoded.Epoch == "" {
-			t.Fatal("v2 cursor missing epoch")
-		}
+	if isV1 || decoded.Version != listCursorVersionV2 || decoded.Epoch == "" {
+		t.Fatalf("declared directory cursor = %+v isV1=%v, want epoch-bearing v2", decoded, isV1)
 	}
-	if decoded.Version != listCursorVersion && decoded.Version != listCursorVersionV2 {
-		t.Fatalf("nextCursor version = %d, want v1 or v2", decoded.Version)
-	}
-	// v1 dir-scoped cursor has no epoch; that is expected for Grok directory deep-dive.
 	wireSessions, _ := data["sessions"].([]any)
 	if len(wireSessions) != 2 {
 		t.Fatalf("page-0 sessions = %d, want 2（limit 2）", len(wireSessions))
+	}
+}
+
+func TestGrokCatalog_DirectoryV2FenceAndCrossScopeStale(t *testing.T) {
+	dirA, dirB := t.TempDir(), t.TempDir()
+	sessions := []core.AgentSessionInfo{
+		{ID: "a1", Summary: "A one", Directory: dirA, ModifiedAt: time.Unix(3, 0)},
+		{ID: "a2", Summary: "A two", Directory: dirA, ModifiedAt: time.Unix(2, 0)},
+		{ID: "b1", Summary: "B one", Directory: dirB, ModifiedAt: time.Unix(1, 0)},
+	}
+	agent := &fakeGrokCatalogAgent{fakeAgent: &fakeAgent{name: "grokbuild"}, fetchFn: func(context.Context) ([]core.AgentSessionInfo, error) {
+		return append([]core.AgentSessionInfo(nil), sessions...), nil
+	}}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("grokbuild", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+	handlers.eventPublisher.SetConnCatalogCursorEpochV2(serverConn, true)
+
+	request := func(id, directory, cursor string) map[string]any {
+		params := map[string]any{"directory": directory, "limit": 1}
+		if cursor != "" {
+			params["cursor"] = cursor
+		}
+		handlers.HandleRPC(serverConn, WireMessage{BackendID: "grokbuild", Method: "list_sessions", RequestID: id, Params: mustJSONRaw(t, params)})
+		return readJSONMaps(t, clientConn, 1)[0]
+	}
+	p0 := request("a0", dirA, "")
+	data := p0["data"].(map[string]any)
+	cursor := data["nextCursor"].(string)
+	if cross := request("cross", dirB, cursor); cross["ok"] != false || cross["error"].(map[string]any)["code"] != "cursor_stale" {
+		t.Fatalf("cross-directory cursor accepted: %#v", cross)
+	}
+
+	handlers.grokCatalogWireCache().FenceBackend("grokbuild")
+	if old := request("old", dirA, cursor); old["ok"] != false || old["error"].(map[string]any)["code"] != "cursor_stale" {
+		t.Fatalf("old directory cursor survived global fence: %#v", old)
+	}
+	sessions = []core.AgentSessionInfo{{ID: "a-new", Summary: "A new", Directory: dirA, ModifiedAt: time.Unix(4, 0)}}
+	newPage := request("new", dirA, "")
+	if ids := resultSessionIDs(t, newPage); len(ids) != 1 || ids[0] != "a-new" {
+		t.Fatalf("rebuilt directory view=%v", ids)
+	}
+}
+
+func TestGrokCatalog_UndeclaredDirectoryRemainsV1(t *testing.T) {
+	dir := t.TempDir()
+	agent := &fakeGrokCatalogAgent{fakeAgent: &fakeAgent{name: "grokbuild", sessionInfos: []core.AgentSessionInfo{
+		{ID: "disk-a", Directory: dir, ModifiedAt: time.Unix(2, 0)},
+		{ID: "disk-b", Directory: dir, ModifiedAt: time.Unix(1, 0)},
+	}}}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("grokbuild", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+	handlers.HandleRPC(serverConn, WireMessage{BackendID: "grokbuild", Method: "list_sessions", RequestID: "legacy-dir", Params: mustJSONRaw(t, map[string]any{"directory": dir, "limit": 1})})
+	msg := readJSONMaps(t, clientConn, 1)[0]
+	data := msg["data"].(map[string]any)
+	cursor := data["nextCursor"].(string)
+	_, isV1, err := decodeListCursorV2(cursor)
+	if err != nil || !isV1 {
+		t.Fatalf("undeclared directory cursor isV1=%v err=%v", isV1, err)
+	}
+	if agent.fetchN != 0 {
+		t.Fatalf("undeclared directory called native catalog %d times", agent.fetchN)
 	}
 }
