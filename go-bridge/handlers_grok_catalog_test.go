@@ -117,34 +117,6 @@ func TestGrokBuildEnrichedSessions_PreservesUpstreamOrder(t *testing.T) {
 	}
 }
 
-// Stage 1 retains the now-unreachable v1 implementation as an immediate rollback seam.
-func TestGrokCatalog_RollbackV1UsesNativeMembership(t *testing.T) {
-	ws := t.TempDir()
-	agent := &fakeGrokCatalogAgent{
-		fakeAgent: &fakeAgent{name: "grokbuild", sessionInfos: []core.AgentSessionInfo{
-			{ID: "disk_only", Directory: ws},
-		}},
-		fetchFn: func(context.Context) ([]core.AgentSessionInfo, error) { return grokFixtureSessions(ws), nil },
-	}
-	handlers := newTestHandlers(t)
-	handlers.RegisterAgent("grokbuild", agent)
-	serverConn, clientConn, cleanup := openTestConn(t)
-	defer cleanup()
-
-	handlers.handleListSessions(serverConn, WireMessage{
-		BackendID: "grokbuild", Method: "list_sessions", RequestID: "r1",
-		Params: mustJSONRaw(t, map[string]any{}),
-	}, agent)
-	msgs := readJSONMaps(t, clientConn, 1)
-	ids := resultSessionIDs(t, msgs[0])
-	if len(ids) != 2 || ids[0] != "session_b" || ids[1] != "session_a" {
-		t.Fatalf("rollback v1 sessions = %v, want v1-sorted native membership", ids)
-	}
-	if agent.fetchN != 1 {
-		t.Fatalf("FetchSessionList calls = %d, want 1", agent.fetchN)
-	}
-}
-
 // TestGrokCatalog_FetchFailureReturnsExplicitError_NoSilentFallback：DECLARED 连接 +
 // FetchSessionList 失败（含 §5.4 #5 fail-closed：握手缺 session/list 能力）→ list_failed
 // 显式错误。断言 envelope ok=false + error.code=list_failed，且不返回任何 session（即使
@@ -267,33 +239,5 @@ func TestGrokCatalog_DirectoryV2FenceAndCrossScopeStale(t *testing.T) {
 	newPage := request("new", dirA, "")
 	if ids := resultSessionIDs(t, newPage); len(ids) != 1 || ids[0] != "a-new" {
 		t.Fatalf("rebuilt directory view=%v", ids)
-	}
-}
-
-func TestGrokCatalog_RollbackDirectoryRemainsV1(t *testing.T) {
-	dir := t.TempDir()
-	agent := &fakeGrokCatalogAgent{
-		fakeAgent: &fakeAgent{name: "grokbuild", sessionInfos: []core.AgentSessionInfo{{ID: "disk-must-not-appear", Directory: dir}}},
-		fetchFn: func(context.Context) ([]core.AgentSessionInfo, error) {
-			return []core.AgentSessionInfo{
-				{ID: "native-a", Summary: "native A", Directory: dir, ModifiedAt: time.Unix(2, 0)},
-				{ID: "native-b", Summary: "native B", Directory: dir, ModifiedAt: time.Unix(1, 0)},
-			}, nil
-		},
-	}
-	handlers := newTestHandlers(t)
-	handlers.RegisterAgent("grokbuild", agent)
-	serverConn, clientConn, cleanup := openTestConn(t)
-	defer cleanup()
-	handlers.handleListSessions(serverConn, WireMessage{BackendID: "grokbuild", Method: "list_sessions", RequestID: "legacy-dir", Params: mustJSONRaw(t, map[string]any{"directory": dir, "limit": 1})}, agent)
-	msg := readJSONMaps(t, clientConn, 1)[0]
-	data := msg["data"].(map[string]any)
-	cursor := data["nextCursor"].(string)
-	_, isV1, err := decodeListCursorV2(cursor)
-	if err != nil || !isV1 {
-		t.Fatalf("rollback directory cursor isV1=%v err=%v", isV1, err)
-	}
-	if agent.fetchN != 1 {
-		t.Fatalf("rollback directory native catalog calls=%d want 1", agent.fetchN)
 	}
 }

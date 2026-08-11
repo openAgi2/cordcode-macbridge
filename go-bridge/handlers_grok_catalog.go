@@ -6,19 +6,14 @@ package gobridge
 //   - 复用 generic catalogWireSnapshotCache（与 Codex/OpenCode 共享：scope-keyed，
 //     grokbuild scope key 与其它 backend 互斥，互不复用快照）；
 //   - builder（buildGrokEnrichedSessions）跑 session/list 富 wire 管线（FetchSessionList →
-//     sessionsToWire → enrich/overlay → sortSessionsByUpdatedAt）；
-//   - capability 门控（catalog_cursor_epoch_v2）：declared → v2 epoch-bearing cursor +
-//     cursor_stale；undeclared → v1 paginateSessionList（既有 disk-scan 经 agent.ListSessions
-//     的等价 wire 切片）byte-for-byte 不变。
+//     sessionsToWire → enrich/overlay）；
+//   - declared catalog_cursor_epoch_v2 → v2 epoch-bearing cursor + cursor_stale；
+//   - undeclared clients are rejected by the shared dispatch gate before this handler.
 //
 // Grok 与 Codex 的差异：Grok 的 ACP session/list **不按 cwd 过滤**（Grok native catalog 跨
 // 所有 cwd 返回），故 FetchSessionList 不取 dir、scope key 无 dir 维度。映射遵循 frozen
 // fixture（testdata/session_list_sanitized.json）。
 //
-// §10 发布顺序：capability 上线前（iOS Phase 6 才声明），MacBridge 不得对任何连接发射 v2
-// cursor，且数据源 disk-scan→session/list 同样只对 declared 连接生效。当前 declared 恒为
-// false → grokHandleListSessions 不可达 → 零行为变化。
-
 import (
 	"context"
 	"log/slog"
@@ -73,8 +68,7 @@ func grokCatalogDirectoryScope(backendID, dir string) catalogWireScope {
 // subprocess session/list，跨 cwd，recency 排序）→ sessionsToWire → enrichSessionStatesForList
 // → overlayPinnedState。Phase 7 §445 收敛（与 OpenCode Phase 4 / codex 同形）：**不再
 // sortSessionsByUpdatedAt 覆盖**——session/list 的 recency 是权威上游序，本地 updatedAt 重排会改写它。
-// v1（undeclared → generic disk-scan agent.ListSessions）不经此 builder，故移除 sort 只影响 v2 主线。
-// builder 仅由 grokHandleListSessions（v2 DECLARED）调用。
+// builder 仅由 declared grokHandleListSessions 调用；undeclared clients do not have a list data path.
 //
 // 失败必须显式返回 error（§5.1 step 6 / §5.4 #5：删除 catalog 失败时静默回退 JSONL 的路径；
 // 握手缺 session/list 能力时 FetchSessionList 已 fail-closed，此处不再二次 fallback）。
@@ -111,12 +105,9 @@ func filterGrokPlaceholderSessions(sessions []map[string]interface{}) []map[stri
 	return out
 }
 
-// grokHandleListSessions 是 Grok list_sessions 的 v2 catalog 主线路径（DECLARED：
-// hello 声明 catalog_cursor_epoch_v2）。调用方（handleListSessions）仅在 capability 已声明时
-// 路由到此；undeclared 连接走既有 generic disk-scan（agent.ListSessions）路径 byte-for-byte
-// 不变（§10 发布顺序：capability 上线前 MacBridge 不得对任何连接发射 v2 cursor，且数据源
-// 从 disk-scan 切到 session/list 同样只对 declared 连接生效——iOS Phase 6 才声明 → 当前零
-// 行为变化）。
+// grokHandleListSessions 是 Grok list_sessions 的 declared v2 catalog 主线路径。调用方仅在
+// hello 已协商 catalog_cursor_epoch_v2 时路由到此；undeclared 连接在 dispatch gate 返回
+// protocol.capability_required。
 //
 // Grok session/list 非 cwd-scoped → builder 不取 dir（与 codexHandleListSessions 的 cwd=workDir
 // 不同）。

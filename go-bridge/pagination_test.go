@@ -323,15 +323,16 @@ func TestPaginatedMessages_FallbackWhenNotOptedIn(t *testing.T) {
 	}
 }
 
-func listResult(t *testing.T, h *Handlers, backendID string, limit int, cursor string) map[string]interface{} {
+func listResult(t *testing.T, h *Handlers, backendID, directory string, limit int, cursor string) map[string]interface{} {
 	t.Helper()
-	params, _ := json.Marshal(map[string]any{"limit": limit, "cursor": cursor})
+	params, _ := json.Marshal(map[string]any{"directory": directory, "limit": limit, "cursor": cursor})
 	conn := &sessionLoadCaptureConn{}
 	agent, ok := h.getAgent(backendID)
 	if !ok {
 		t.Fatalf("backend %q not registered", backendID)
 	}
-	// These legacy pagination fixtures intentionally exercise the Stage-1 rollback seam.
+	// Direct handler tests explicitly model the supported declared catalog contract.
+	h.eventPublisher.SetConnCatalogCursorEpochV2(conn, true)
 	h.handleListSessions(conn, WireMessage{BackendID: backendID, Method: "list_sessions", RequestID: "test-list", Params: params}, agent)
 	return rpcData(t, conn)
 }
@@ -364,8 +365,9 @@ func TestSessionListLimitUsesConfiguredCap(t *testing.T) {
 	}
 }
 
-// list_sessions pages through sessions newest-first by composite cursor with no
-// duplicates or gaps across pages.
+// Declared directory-scoped list_sessions preserves native membership order across pages with
+// no duplicates or gaps. Global page-0 is the separate fair-home surface and is not a deep-page
+// cursor chain.
 func TestListSessionsPagination(t *testing.T) {
 	withCodexRootsDisabled(t)
 	workspace := t.TempDir()
@@ -379,9 +381,9 @@ func TestListSessionsPagination(t *testing.T) {
 	h := NewHandlers()
 	h.RegisterAgent("codex", agent)
 
-	page1 := listResult(t, h, "codex", 1, "")
-	if ids1 := listIDs(page1); len(ids1) != 1 || ids1[0] != "s3" {
-		t.Fatalf("page1 ids %v, want [s3]", ids1)
+	page1 := listResult(t, h, "codex", workspace, 1, "")
+	if ids1 := listIDs(page1); len(ids1) != 1 || ids1[0] != "s1" {
+		t.Fatalf("page1 ids %v, want native-order [s1]", ids1)
 	}
 	if hasMore, _ := page1["hasMore"].(bool); !hasMore {
 		t.Errorf("page1 hasMore=false, want true")
@@ -391,15 +393,15 @@ func TestListSessionsPagination(t *testing.T) {
 		t.Fatal("page1 missing nextCursor")
 	}
 
-	page2 := listResult(t, h, "codex", 1, next1)
+	page2 := listResult(t, h, "codex", workspace, 1, next1)
 	if ids2 := listIDs(page2); len(ids2) != 1 || ids2[0] != "s2" {
-		t.Fatalf("page2 ids %v, want [s2]", ids2)
+		t.Fatalf("page2 ids %v, want native-order [s2]", ids2)
 	}
 	next2, _ := page2["nextCursor"].(string)
 
-	page3 := listResult(t, h, "codex", 1, next2)
-	if ids3 := listIDs(page3); len(ids3) != 1 || ids3[0] != "s1" {
-		t.Fatalf("page3 ids %v, want [s1]", ids3)
+	page3 := listResult(t, h, "codex", workspace, 1, next2)
+	if ids3 := listIDs(page3); len(ids3) != 1 || ids3[0] != "s3" {
+		t.Fatalf("page3 ids %v, want native-order [s3]", ids3)
 	}
 	if hasMore, _ := page3["hasMore"].(bool); hasMore {
 		t.Errorf("page3 hasMore=true, want false (last page)")
@@ -464,8 +466,8 @@ func TestPaginatedMessages_CursorSurvivesAppend(t *testing.T) {
 	}
 }
 
-// List cursor tie-breaks by sessionID ASC when two sessions share updatedAtMillis.
-func TestListSessionsPagination_TieBreakByID(t *testing.T) {
+// Equal timestamps do not introduce a local ID re-sort: v2 preserves native membership order.
+func TestListSessionsPagination_EqualTimestampsPreservesNativeOrder(t *testing.T) {
 	withCodexRootsDisabled(t)
 	workspace := t.TempDir()
 	newest := time.Date(2026, 1, 1, 0, 0, 10, 0, time.UTC)
@@ -479,19 +481,19 @@ func TestListSessionsPagination_TieBreakByID(t *testing.T) {
 	h := NewHandlers()
 	h.RegisterAgent("codex", agent)
 
-	page1 := listResult(t, h, "codex", 1, "")
-	if ids := listIDs(page1); len(ids) != 1 || ids[0] != "aaa" {
-		t.Fatalf("page1 ids %v, want [aaa] (ASC tie-break among newest)", ids)
+	page1 := listResult(t, h, "codex", workspace, 1, "")
+	if ids := listIDs(page1); len(ids) != 1 || ids[0] != "bbb" {
+		t.Fatalf("page1 ids %v, want native-order [bbb]", ids)
 	}
 	next1, _ := page1["nextCursor"].(string)
 
-	page2 := listResult(t, h, "codex", 1, next1)
-	if ids := listIDs(page2); len(ids) != 1 || ids[0] != "bbb" {
-		t.Fatalf("page2 ids %v, want [bbb] (next in tie group)", ids)
+	page2 := listResult(t, h, "codex", workspace, 1, next1)
+	if ids := listIDs(page2); len(ids) != 1 || ids[0] != "aaa" {
+		t.Fatalf("page2 ids %v, want native-order [aaa]", ids)
 	}
 	next2, _ := page2["nextCursor"].(string)
 
-	page3 := listResult(t, h, "codex", 1, next2)
+	page3 := listResult(t, h, "codex", workspace, 1, next2)
 	if ids := listIDs(page3); len(ids) != 1 || ids[0] != "older" {
 		t.Fatalf("page3 ids %v, want [older]", ids)
 	}

@@ -12,7 +12,7 @@ package gobridge
 //
 // 用 publisherCaptureConn 作 fake Connection（已实现 Connection 接口）；cache 测试用可控 builder +
 // fake clock，不触网络、不启动 live `opencode serve`。handler gate 本身由 capability 门控测试覆盖
-// （undeclared → v1 路径，结构上不可能到达 pageV2）。
+// （undeclared → capability error，结构上不可能到达 pageV2）。
 
 import (
 	"context"
@@ -89,7 +89,7 @@ func TestHelloSupportsCatalogCursorEpochV2(t *testing.T) {
 // ── 2. wire-map 快照缓存 ───────────────────────────────────────────────────────
 
 // synthWireMaps 构造 n 个 enriched wire map：id=ses_II，updatedAtMillis 严格递减（与
-// sortSessionsByUpdatedAt 输出序一致），含 mapSession 产物必需的 id/updatedAtMillis 字段。
+// cache canonical order 一致），含 mapSession 产物必需的 id/updatedAtMillis 字段。
 func synthWireMaps(n int) []map[string]interface{} {
 	out := make([]map[string]interface{}, n)
 	for i := 0; i < n; i++ {
@@ -621,7 +621,7 @@ func TestCatalogWireSnapshot_RejectsIllegalScopeBeforeStateMutation(t *testing.T
 
 // TestCatalogWireSnapshot_DeclaredPathEmitsV2CursorsOnly：声明路径（pageV2）发射的 nextCursor
 // 一律 v2（decode → isV1=false, Version=2）且携带快照 epoch。handler gate（capability 门控测试
-// 已覆盖）保证 undeclared 连接结构上不可能到达 pageV2 → 无 v2 cursor / cursor_stale 泄漏到旧连接。
+// 已覆盖）保证 undeclared 连接结构上不可能到达 pageV2 → 明确 capability error。
 func TestCatalogWireSnapshot_DeclaredPathEmitsV2CursorsOnly(t *testing.T) {
 	calls := 0
 	cache, _ := newWireCacheWithFakeNow(time.UnixMilli(2_000_000))

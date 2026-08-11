@@ -59,14 +59,14 @@ func synthSessions(n int) []NormalizedSession {
 	out := make([]NormalizedSession, n)
 	for i := 0; i < n; i++ {
 		out[i] = NormalizedSession{
-			StableID:         fmt.Sprintf("ses_%02d", i),
-			BackendID:        "opencode",
-			Title:            fmt.Sprintf("session %d", i),
-			UpdatedAtMillis:  int64(1_000_000 - i*1000),
-			CreatedAtMillis:  int64(1_000_000 - i*1000 - 500),
-			Directory:        "/tmp/fixture-workspace",
-			IsRoot:           true,
-			OrderingKey:      fmt.Sprintf("ses_%02d", i),
+			StableID:        fmt.Sprintf("ses_%02d", i),
+			BackendID:       "opencode",
+			Title:           fmt.Sprintf("session %d", i),
+			UpdatedAtMillis: int64(1_000_000 - i*1000),
+			CreatedAtMillis: int64(1_000_000 - i*1000 - 500),
+			Directory:       "/tmp/fixture-workspace",
+			IsRoot:          true,
+			OrderingKey:     fmt.Sprintf("ses_%02d", i),
 		}
 	}
 	return out
@@ -217,7 +217,7 @@ func TestCatalogSnapshotCache_NoSnapshotStale(t *testing.T) {
 }
 
 // TestCatalogSnapshotCache_V1CursorStale：v2 模式下 v1 cursor 无 epoch → cursorStaleV1
-// （§4.1.1「v1 无 epoch 视为 stale」；Phase 1C 决定是否对未声明连接发射）。
+// （§4.1.1「v1 无 epoch 视为 stale」；用于 declared 客户端持有旧 cursor 的恢复）。
 func TestCatalogSnapshotCache_V1CursorStale(t *testing.T) {
 	stub := &stubCatalogProvider{sessions: synthSessions(3)}
 	cache, _ := newCacheWithFakeNow(stub, time.UnixMilli(2_000_000))

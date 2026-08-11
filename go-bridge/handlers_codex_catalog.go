@@ -7,13 +7,9 @@ package gobridge
 //   - 复用 generic catalogWireSnapshotCache（与 OpenCode 共享：scope-keyed，codex/opencode
 //     scope key 互斥，互不复用快照）；
 //   - builder（buildCodexEnrichedSessions）跑 thread/list 富 wire 管线（FetchThreadList →
-//     sessionsToWire → enrich/overlay → sortSessionsByUpdatedAt）；
-//   - capability 门控（catalog_cursor_epoch_v2）：declared → v2 epoch-bearing cursor +
-//     cursor_stale；undeclared → v1 paginateSessionList（既有 disk-scan 经 agent.ListSessions
-//     的等价 wire 切片）byte-for-byte 不变。
-//
-// §10 发布顺序：capability 上线前（iOS Phase 6 才声明），MacBridge 不得对任何连接发射 v2 cursor。
-// 当前 declared 恒为 false → codexHandleListSessions 走 v1 → 零行为变化。
+//     sessionsToWire → enrich/overlay）；
+//   - declared catalog_cursor_epoch_v2 → v2 epoch-bearing cursor + cursor_stale；
+//   - undeclared clients are rejected by the shared dispatch gate before this handler.
 
 import (
 	"context"
@@ -66,9 +62,8 @@ func codexCatalogScopeKey(backendID, dir string) catalogWireScope {
 // desc）→ sessionsToWire → enrichSessionStatesForList → overlayPinnedState。
 // Phase 7 §445 收敛（与 OpenCode Phase 4 / handlers_opencode.go 同形）：
 // **不再 sortSessionsByUpdatedAt 覆盖**——thread/list 的 recency_at desc 是权威上游序，本地
-// updatedAt 重排会改写它（"Mac native 显示什么，iOS 就显示什么"）。v1（undeclared → generic
-// disk-scan agent.ListSessions）不经此 builder，故移除 sort 只影响 v2 主线，byte-for-byte 不动 v1。
-// builder 仅由 codexHandleListSessions（v2 DECLARED）调用。
+// updatedAt 重排会改写它（"Mac native 显示什么，iOS 就显示什么"）。builder 仅由 declared
+// codexHandleListSessions 调用；undeclared clients do not have a list data path.
 //
 // 失败必须显式返回 error（§5.1 step 6：删除 catalog 失败时静默回退 JSONL 的路径）。
 func (h *Handlers) buildCodexEnrichedSessions(ctx context.Context, backendID, dir string) ([]map[string]interface{}, error) {
@@ -81,11 +76,9 @@ func (h *Handlers) buildCodexEnrichedSessions(ctx context.Context, backendID, di
 	return mapped, nil
 }
 
-// codexHandleListSessions 是 Codex list_sessions 的 v2 catalog 主线路径（DECLARED：
-// hello 声明 catalog_cursor_epoch_v2）。调用方（handleListSessions）仅在 capability 已声明时
-// 路由到此；undeclared 连接走既有 generic disk-scan（agent.ListSessions）路径 byte-for-byte
-// 不变（§10 发布顺序：capability 上线前 MacBridge 不得对任何连接发射 v2 cursor，且数据源
-// 从 disk-scan 切到 thread/list 同样只对 declared 连接生效——iOS Phase 6 才声明 → 当前零行为变化）。
+// codexHandleListSessions 是 Codex list_sessions 的 declared v2 catalog 主线路径。调用方仅在
+// hello 已协商 catalog_cursor_epoch_v2 时路由到此；undeclared 连接在 dispatch gate 返回
+// protocol.capability_required。
 //
 // Scope：
 //   - iOS Codex 是 root-only 全局 catalog（不带 directory）→ dir="" → 与 Mac Codex 多项目

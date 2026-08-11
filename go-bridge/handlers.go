@@ -44,9 +44,9 @@ type Handlers struct {
 	contentRefs            map[string]string
 	contentRefOrder        []string
 	ocProxy                *OpenCodeProxy
-	// catalogWireCache 缓存 OpenCode list_sessions 的 enriched wire maps（§4.1.1 / §5.3#3，
-	// Phase 1C）。仅对声明 catalog_cursor_epoch_v2 的连接使用；未声明连接走既有 v1
-	// paginateSessionList 路径不变。lazy init（sync.Once），构造路径 NewHandlers 不改。
+	// catalogWireCache 缓存 declared catalog_cursor_epoch_v2 客户端的 enriched wire maps
+	//（§4.1.1 / §5.3#3，Phase 1C）。未声明连接在 dispatch gate 直接失败，不进入 cache。
+	// lazy init（sync.Once），构造路径 NewHandlers 不改。
 	catalogWireCache    *catalogWireSnapshotCache
 	catalogWireInitOnce sync.Once
 	// catalogProcRegistry 跟踪 catalog 子进程（§4.3/§11，Phase 1E）。Phase 2-5 catalog client 经
@@ -975,8 +975,8 @@ func (h *Handlers) HandleRPC(conn Connection, msg WireMessage) {
 
 	// Phase 8B minimum-client retirement: list_sessions requires the negotiated catalog
 	// contract for every backend. This gate intentionally lives before both the generic and
-	// OpenCode dispatchers so Codex, Grok, OpenCode and Claude share one wire error. The stage-1
-	// rollout keeps the old v1 implementations below unreachable for an immediate code revert.
+	// OpenCode dispatchers so Codex, Grok, OpenCode and Claude share one wire error. Stage 2 has
+	// removed the formerly unreachable undeclared v1 implementations.
 	if msg.Method == "list_sessions" && catalogCapabilityRequiredFor(agent.Name()) && !h.eventPublisher.ConnCatalogCursorEpochV2(conn) {
 		retryable := false
 		conn.SendResult(msg.RequestID, nil, &WireError{
@@ -2605,15 +2605,14 @@ func (h *Handlers) findClaudeSessionFile(sessionID string, optDir string) (proje
 }
 
 func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent core.Agent) {
-	// Public routing reaches this function only after catalog_cursor_epoch_v2 negotiation.
-	// The undeclared v1 branches remain temporarily reachable only to rollback-focused tests in
-	// Stage 1; Stage 2 removes them after owner acceptance and the observation window.
-	if agent.Name() == "codex" && h.eventPublisher.ConnCatalogCursorEpochV2(conn) {
+	// Canonical public routing reaches this function only after catalog_cursor_epoch_v2
+	// negotiation. Claude intentionally keeps its declared v1-shaped compatibility cursor.
+	if agent.Name() == "codex" {
 		h.codexHandleListSessions(conn, msg, agent)
 		return
 	}
 	// Grok session/list is backend-global; declared directory views are bridge-filtered v2 scopes.
-	if agent.Name() == "grokbuild" && h.eventPublisher.ConnCatalogCursorEpochV2(conn) {
+	if agent.Name() == "grokbuild" {
 		h.grokHandleListSessions(conn, msg, agent)
 		return
 	}
@@ -2622,40 +2621,7 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 	metrics := newSessionLoadRequestMetrics(conn, msg)
 	ctx := core.WithSessionLoadMetrics(h.ctx, metrics.context())
 
-	// Stage-1 rollback seam: Codex/Grok v1 presentation over the same native membership.
-	if agent.Name() == "codex" || agent.Name() == "grokbuild" {
-		listCtx, cancel := context.WithTimeout(ctx, catalogRequestTimeout)
-		defer cancel()
-		dir := extractDir(msg)
-		var wireSessions []map[string]interface{}
-		var err error
-		if agent.Name() == "codex" {
-			wireSessions, _, err = h.codexVisibleMembership(listCtx, msg.BackendID, dir)
-		} else {
-			wireSessions, _, err = h.grokVisibleMembership(listCtx, msg.BackendID)
-			if err == nil && dir != "" {
-				wireSessions = filterWireSessionsByDirectory(wireSessions, newCatalogWireScope(msg.BackendID, dir, false).Directory)
-			}
-		}
-		if err != nil {
-			metrics.sendResult(conn, msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
-			return
-		}
-		mappingStarted := time.Now()
-		wireSessions = copyWireMaps(wireSessions)
-		sortSessionsByUpdatedAt(wireSessions)
-		wireSessions = h.enrichSessionStatesForList(wireSessions, agent, h.getRunningMap(listCtx, agent))
-		h.overlayPinnedState(wireSessions, agentBackendID(agent))
-		result := paginateSessionList(wireSessions, extractStringParam(msg, "cursor"), limit)
-		metrics.wireMapping += time.Since(mappingStarted)
-		if ws, ok := result["sessions"].([]map[string]interface{}); ok {
-			metrics.resultCount = len(ws)
-		}
-		metrics.sendResult(conn, msg.RequestID, result, nil)
-		return
-	}
-
-	// 非 claudecode backend：直接用 agent 自己的 ListSessions 实现
+	// 非 canonical catalog backend 的 internal/test agents 仍可复用 generic list helper。
 	if agent.Name() != "claudecode" {
 		sessions, err := agent.ListSessions(ctx)
 		if err != nil {
@@ -2664,13 +2630,6 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 		}
 		mappingStarted := time.Now()
 		wireSessions := sessionsToWire(sessions)
-		// Codex/Grok 未声明 v2 时走此 generic 路径；同样过滤幽灵/非项目目录。
-		switch agent.Name() {
-		case "codex":
-			wireSessions = filterCodexCatalogSessions(wireSessions)
-		case "grokbuild":
-			wireSessions = filterSessionsMissingWorkspace(wireSessions)
-		}
 		wireSessions = h.enrichSessionStatesForList(wireSessions, agent, h.getRunningMap(ctx, agent))
 		h.overlayPinnedState(wireSessions, agentBackendID(agent))
 		result := paginateSessionList(wireSessions, extractStringParam(msg, "cursor"), limit)
@@ -2734,19 +2693,6 @@ func extractPositiveInt(msg WireMessage, key string) int {
 		return 0
 	}
 	return value
-}
-
-func sortSessionsByUpdatedAt(sessions []map[string]interface{}) {
-	sort.Slice(sessions, func(i, j int) bool {
-		mi, _ := sessions[i]["updatedAtMillis"].(int64)
-		mj, _ := sessions[j]["updatedAtMillis"].(int64)
-		if mi != mj {
-			return mi > mj
-		}
-		idi, _ := sessions[i]["id"].(string)
-		idj, _ := sessions[j]["id"].(string)
-		return idi < idj
-	})
 }
 
 func limitLatestSessions(sessions []map[string]interface{}, limit int) []map[string]interface{} {

@@ -147,9 +147,9 @@ func mapsClone(input map[string]interface{}) map[string]interface{} {
 	return out
 }
 
-func TestRollbackNativeV1SameTimestampPagination(t *testing.T) {
+func TestNativeV2SameTimestampPagination(t *testing.T) {
 	for _, backend := range []string{"codex", "grokbuild"} {
-		for _, scope := range []string{"global", "directory"} {
+		for _, scope := range []string{"directory"} {
 			t.Run(backend+"/"+scope, func(t *testing.T) {
 				workspace := t.TempDir()
 				if backend == "codex" {
@@ -170,8 +170,9 @@ func TestRollbackNativeV1SameTimestampPagination(t *testing.T) {
 				defer cleanup()
 				agent, ok := h.getAgent(backend)
 				if !ok {
-					t.Fatal("registered rollback agent missing")
+					t.Fatal("registered catalog agent missing")
 				}
+				h.eventPublisher.SetConnCatalogCursorEpochV2(server, true)
 				cursor := ""
 				var got []string
 				for page := 0; page < 3; page++ {
@@ -188,14 +189,14 @@ func TestRollbackNativeV1SameTimestampPagination(t *testing.T) {
 					data := msg["data"].(map[string]any)
 					cursor, _ = data["nextCursor"].(string)
 					if cursor != "" {
-						if _, isV1, err := decodeListCursorV2(cursor); err != nil || !isV1 {
-							t.Fatalf("page %d cursor isV1=%v err=%v", page, isV1, err)
+						if _, isV1, err := decodeListCursorV2(cursor); err != nil || isV1 {
+							t.Fatalf("page %d cursor isV1=%v err=%v, want v2", page, isV1, err)
 						}
 					}
 				}
-				want := []string{"a", "b", "c"}
+				want := []string{"c", "a", "b"}
 				if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
-					t.Fatalf("v1 pages=%v want=%v", got, want)
+					t.Fatalf("v2 pages=%v want=%v", got, want)
 				}
 			})
 		}

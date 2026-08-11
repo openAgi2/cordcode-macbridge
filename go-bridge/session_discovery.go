@@ -15,7 +15,7 @@ package gobridge
 // fingerprint 覆盖 native relative order 与每个成员的 id/updatedAt/title/normalized directory/
 // projectId；新增、删除、recency、标题、可见目录或原生排序变化都会触发 sessions_changed。
 //
-// 数据源对齐（§10）：Claude 取全局 catalog；Codex/Grok 取与 declared/undeclared list_sessions
+// 数据源对齐（§10）：Claude 取全局 catalog；Codex/Grok 取与 declared list_sessions
 // 共用的 native visible membership；其它 backend 仍取 agent.ListSessions。
 
 import (

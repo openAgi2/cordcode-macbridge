@@ -10,9 +10,8 @@ package gobridge
 //   - 切片时复用 catalog_cursor_v2.go 的全部原语（encodeListCursorV2/decodeListCursorV2
 //     /validateCursorV2/deriveSnapshotEpoch/snapshotExpired + cursorStale* 原因码），
 //     仅把 nextCursor 换成 epoch-bearing v2 形式；
-//   - 仅对在 hello 声明 catalog_cursor_epoch_v2 的连接使用（ocHandleListSessions gate）。
-//     未声明连接走既有 v1 paginateSessionList 路径 byte-for-byte 不变（§10 发布顺序：
-//     capability 上线前 MacBridge 不得对任何连接发射 v2 cursor）。
+//   - 仅对在 hello 声明 catalog_cursor_epoch_v2 的连接使用。未声明连接由统一 dispatch
+//     gate 返回 protocol.capability_required，不进入 cache。
 //
 // 快照语义与 1B 一致（设计 §4.1.1）：page-0 有界全量读，按 scope 缓存（TTL + singleflight）；
 // page-N 复用同一冻结快照切片，不重建；cursor 携带 epoch；TTL 过期 / epoch 不匹配 /

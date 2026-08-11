@@ -10,7 +10,7 @@ package gobridge
 // 之前 server.go:598-601 的「声明 → echo」wiring 没有直接测试覆盖；Phase 7 的声明率观测依赖它，
 // 故补齐。relay 路径（main.go）结构与 direct 对称，按 session_sync_v2_test.go 的覆盖惯例只测 direct。
 //
-// 同时验证「未声明不 echo」（legacy client 零行为变化），与 TestSessionSyncV2CapabilityOmittedWithoutOptIn
+// 同时验证「未声明不 echo」（其 list_sessions 会由 retirement gate 拒绝），与 TestSessionSyncV2CapabilityOmittedWithoutOptIn
 // 同形。
 
 import (
@@ -58,7 +58,7 @@ func TestCatalogCursorEpochV2CapabilityEchoedWhenDeclared(t *testing.T) {
 }
 
 // TestCatalogCursorEpochV2CapabilityOmittedWhenNotDeclared：legacy client（未声明）的 hello_ack
-// 不得包含 catalog_cursor_epoch_v2，行为零变化（§10 发布顺序：未声明连接走 v1 主线）。
+// 不得伪造 catalog_cursor_epoch_v2；后续 list_sessions 由 retirement test 覆盖明确错误。
 func TestCatalogCursorEpochV2CapabilityOmittedWhenNotDeclared(t *testing.T) {
 	const epoch = "aaaaaaaa-bbbb-4ccc-8ddd-ffffffffffff"
 	handlers := NewHandlers()

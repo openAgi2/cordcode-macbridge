@@ -15,7 +15,8 @@ import (
 const catalogRequestTimeout = 8 * time.Second
 
 // codexVisibleMembership and grokVisibleMembership are the single pre-enrichment membership
-// owners shared by declared snapshots, undeclared v1 presentation and discovery polling.
+// owners shared by declared snapshots and discovery polling. The former undeclared v1
+// presentation path was retired in Phase 8B Stage 2.
 func (h *Handlers) codexVisibleMembership(ctx context.Context, backendID, dir string) ([]map[string]interface{}, core.Agent, error) {
 	agent, ok := h.getAgent(backendID)
 	if !ok {

@@ -1,13 +1,12 @@
 package gobridge
 
 // handlers_codex_catalog_test.go 验证 Phase 2 Stream A chunk 2A-2/3：codex catalog wiring
-// （设计 §5.1 step 5-6 / §10 发布顺序）。覆盖 handleListSessions 的 codex 分支门控与
+// （设计 §5.1 step 5-6 / §10 发布顺序）。覆盖 handleListSessions 的 declared codex 路由与
 // buildCodexEnrichedSessions 富 wire 管线串联，不启动真实 codex app-server（注入 fake lister）。
 //
 // 关键不变量：
-//  1. capability 门控（§10）：DECLARED 连接 → codexHandleListSessions → FetchThreadList（thread/list，
-//     默认 global scope / dir=""）；UNDECLARED 连接 → 既有 generic disk-scan（agent.ListSessions）
-//     byte-for-byte 不变。
+//  1. DECLARED 连接 → codexHandleListSessions → FetchThreadList（thread/list，默认 global
+//     scope / dir=""）；UNDECLARED 连接由统一 retirement test 锁定为 capability error。
 //  2. §5.1 step 6：FetchThreadList 失败 → list_failed 显式错误，不静默回退 disk-scan。
 //  3. DECLARED 路径发射 v2 epoch cursor（§10：declared-only，undeclared 结构上不可达 pageV2）。
 
@@ -184,37 +183,6 @@ func TestCodexBuildEnrichedSessions_PreservesUpstreamOrder(t *testing.T) {
 	// fixture 输入序 [thread_a, thread_b]；builder 保留原样（不再 sortSessionsByUpdatedAt）。
 	if id0 != "thread_a" || id1 != "thread_b" {
 		t.Fatalf("builder order = [%s %s], want [thread_a thread_b]（保留 FetchThreadList 上游序，Phase 7 §445 不本地重排）", id0, id1)
-	}
-}
-
-// Stage 1 retains the now-unreachable v1 implementation as an immediate rollback seam.
-func TestCodexCatalog_RollbackV1UsesNativeMembership(t *testing.T) {
-	withCodexRootsDisabled(t)
-	ws := t.TempDir()
-	agent := &fakeCodexCatalogAgent{
-		fakeAgent: &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{
-			// Directory 必须是仍存在的目录：generic 路径也会 filterSessionsMissingWorkspace。
-			{ID: "disk_only", Directory: ws},
-		}},
-		fetchFn:  func(context.Context, string) ([]core.AgentSessionInfo, error) { return threadFixtureSessions(ws), nil },
-		workDirV: ws,
-	}
-	handlers := newTestHandlers(t)
-	handlers.RegisterAgent("codex", agent)
-	serverConn, clientConn, cleanup := openTestConn(t)
-	defer cleanup()
-
-	handlers.handleListSessions(serverConn, WireMessage{
-		BackendID: "codex", Method: "list_sessions", RequestID: "r1",
-		Params: mustJSONRaw(t, map[string]any{}),
-	}, agent)
-	msgs := readJSONMaps(t, clientConn, 1)
-	ids := resultSessionIDs(t, msgs[0])
-	if len(ids) != 2 || ids[0] != "thread_b" || ids[1] != "thread_a" {
-		t.Fatalf("rollback v1 sessions = %v, want v1-sorted native membership", ids)
-	}
-	if agent.fetchN != 1 {
-		t.Fatalf("FetchThreadList calls = %d, want 1", agent.fetchN)
 	}
 }
 

@@ -84,8 +84,8 @@ func encodeListCursorV2(c listCursorV2) (string, error) {
 // decodeListCursorV2 解码 opaque cursor。返回 (cursor, isV1, err)：
 //   - v==2：isV1=false，返回完整 v2 cursor。
 //   - v==1：isV1=true（v1 无 epoch）。在 v2 模式下（连接已声明 catalog_cursor_epoch_v2）
-//     v1 cursor 一律视为 stale（设计 §4.1.1「v1 无 epoch 视为 stale」）；capability 门控
-//     未声明的旧连接不走此路径（继续 v1 盲切，Phase 1 接线）。
+//     v1 cursor 一律视为 stale（设计 §4.1.1「v1 无 epoch 视为 stale」）；未声明的旧连接
+//     不走此路径（Phase 8B 起由统一 gate 拒绝）。
 //   - 无 version / 未知 version / 损坏：err。
 //
 // isV1 由调用方配合 validateCursorV2 转成 cursorStaleV1，而不是直接报错，以便 capability

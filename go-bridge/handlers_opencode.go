@@ -331,11 +331,8 @@ func (h *Handlers) openCodeCatalogWireCache() *catalogWireSnapshotCache {
 // 上游序），又是未来分歧源（若上游改排序语义，本地覆盖会让 iOS 偏离 Mac native）。故 builder
 // 透传上游真实顺序，由调用方决定是否需要本地排序。
 //
-//   - v2 DECLARED 路径（ocHandleListSessions）：直接消费上游序 + pageV2 快照（page-N 切同一
-//     page-0 快照，杜绝 §3.3 跨页漂移）。
-//   - v1 UNDECLARED 路径（ocHandleListSessionsV1）：paginateSessionList 的值过滤产出的 page
-//     顺序镜像输入序，故 v1 在 builder 后显式 sortSessionsByUpdatedAt，保证 §10 byte-for-byte
-//     不变（legacy 路径不上行「信任上游」收敛）。
+// declared 路径（ocHandleListSessions）直接消费上游序 + pageV2 快照（page-N 切同一 page-0
+// 快照，杜绝 §3.3 跨页漂移）。undeclared 客户端由统一 dispatch gate 拒绝，不进入 builder。
 func (h *Handlers) buildOpenCodeEnrichedSessions(backendID, dir string, rootsOnly bool) ([]map[string]interface{}, error) {
 	page, err := h.ocProxy.listSessions(OpenCodeSessionListOptions{
 		Directory: dir,
@@ -364,13 +361,6 @@ func (h *Handlers) ocHandleListSessions(conn Connection, msg WireMessage, dir st
 	}
 
 	started := time.Now()
-
-	// Public routing already requires catalog_cursor_epoch_v2. The undeclared branch remains a
-	// Stage-1 rollback seam only and is removed in Stage 2 after acceptance/observation.
-	if !h.eventPublisher.ConnCatalogCursorEpochV2(conn) {
-		h.ocHandleListSessionsV1(conn, msg, dir, rootsOnly, limit, cursor, started)
-		return
-	}
 
 	// DECLARED：v2 快照路径（§4.1.1 / §5.3#3）。page-0：FetchOrReuse(builder) 取/建快照；
 	// page-N：Peek（不重建）→ validateCursorV2 → 切片 / cursor_stale。
@@ -402,38 +392,6 @@ func (h *Handlers) ocHandleListSessions(conn Connection, msg WireMessage, dir st
 			"result_count", len(ws),
 			"next_cursor_present", result["hasMore"] == true,
 			"catalog_alive_procs", len(h.catalogProcessRegistry().AlivePIDs()), // Phase 7 §443 活跃 catalog 子进程数
-			"duration_ms", time.Since(started).Milliseconds(),
-		)
-	}
-	conn.SendResult(msg.RequestID, result, nil)
-}
-
-// ocHandleListSessionsV1 is the Stage-1 rollback copy of the former undeclared list path:
-// bounded upstream read → rich wire mapping → paginateSessionList (v1 cursor).
-func (h *Handlers) ocHandleListSessionsV1(conn Connection, msg WireMessage, dir string, rootsOnly bool, limit int, cursor string, started time.Time) {
-	mapped, err := h.buildOpenCodeEnrichedSessions(msg.BackendID, dir, rootsOnly)
-	if err != nil {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
-		return
-	}
-
-	// v1 是 UNDECLARED legacy 路径：paginateSessionList 的值过滤产出 page 顺序镜像输入序，
-	// 故必须在此显式 sortSessionsByUpdatedAt 保证 §10 byte-for-byte 不变（Phase 4 的「信任
-	// 上游序」收敛只对 v2 DECLARED 路径生效，不上行到 v1）。builder 已不再 tail-sort。
-	sortSessionsByUpdatedAt(mapped)
-
-	// Slice the in-memory list by cursor+limit, identical to Codex/Claude.
-	// paginateSessionList emits a real nextCursor and hasMore derived from the
-	// actual remaining count, so "load more" appears whenever there is more data.
-	result := paginateSessionList(mapped, cursor, limit)
-
-	if ws, ok := result["sessions"].([]map[string]interface{}); ok {
-		slog.Info("opencode list_sessions",
-			"directory", redactDirForLog(dir),
-			"limit", limit,
-			"cursor_present", cursor != "",
-			"result_count", len(ws),
-			"next_cursor_present", result["hasMore"] == true,
 			"duration_ms", time.Since(started).Milliseconds(),
 		)
 	}

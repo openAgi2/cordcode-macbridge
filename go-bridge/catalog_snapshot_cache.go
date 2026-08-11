@@ -288,7 +288,7 @@ func (c *catalogSnapshotCache) encodeNext(snap *cachedSnapshot, page []Normalize
 // sortNormalizedForCursor 把 sessions 排成 cursor 切片所需的确定性全序：
 // UpdatedAtMillis DESC，StableID ASC。主键（updatedAt DESC）与 backend 上游序一致
 // （OpenCode /session 上游 time.updated desc，Phase 0 冻结）；StableID 仅作确定性
-// tie-break，与既有 v1 sortSessionsByUpdatedAt 行为一致（handlers_opencode.go）。
+// tie-break，作为 epoch-bearing cursor 的稳定 canonical order。
 func sortNormalizedForCursor(s []NormalizedSession) {
 	sort.Slice(s, func(i, j int) bool {
 		if s[i].UpdatedAtMillis != s[j].UpdatedAtMillis {
