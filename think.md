@@ -755,3 +755,47 @@ Claude `prepareProjectionHydrateSource` 通过 agent `TranscriptPath` 查文件�
 `findSessionFile` 只扫 `~/.codex/sessions/`，Desktop archive 物理移动到
 `archived_sessions/` 后 cold hydrate 报 session file not found。
 修复：active 优先，archived fallback（`7baafd8`）。
+
+## 2026-08-12：Claude Desktop archive/delete 不消失（iOS 列表残留）
+
+### 现象
+owner 真机矩阵：Claude Code 模式下 Mac 端改名/新建/发消息都能同步，但 Mac 端
+Claude Desktop archive/delete 后，iOS 列表仍显示这些 session，重启 iOS App 也一样。
+
+### 根因（MacBridge 单侧，compatibility catalog 看不到 Desktop 私有状态）
+`claude_session_catalog.go` 只扫 `~/.claude/projects/**/*.jsonl`。Claude Desktop 3P
+（`claude-desktop-3p`）archive/delete **不改 JSONL 文件**：
+- archive：只把 `~/Library/Application Support/Claude-3p/claude-code-sessions/<acct>/<org>/local_*.json`
+  里的 `isArchived` 置 true；transcript 文件原样保留。
+- delete：只删自己的 `local_*.json` 并在同目录写 `deleted_<uuid>` tombstone；
+  transcript 文件也原样保留。
+
+日志证据（`~/Library/Logs/Claude-3p/main.log`，2026-08-12 00:12–00:17）：
+`LocalSessions.delete/archive` 与实际 `local_*.json` + `deleted_*` 一一对应；
+对应的 Chat JSONL 仍存在。
+
+### 修复
+新增 `claude_desktop_state.go`：读 Desktop 自己的纯数据文件（不碰 app.asar /
+私有 Electron API），把
+- `local_*.json isArchived=true` → 给对应 CLI transcript 打 `ArchivedAt`（文件 mtime），
+  catalog 照旧输出 `archivedAtMillis`，iOS/remote-web 既有过滤逻辑隐藏；
+- `deleted_*` tombstone → 直接从 catalog 排除对应 JSONL；
+- Desktop 文件 mtime 并入 `claudeSessionFingerprint`，archive/unarchive/delete 都能
+  让缓存失效并触发 `sessions_changed`。
+
+兼容两个 App Support 根：`Claude-3p/` 与 `Claude/`，并同时扫
+`claude-code-sessions/` 与 `local-agent-mode-sessions/`。解析失败时 fail-safe：
+不伪造结果，维持旧 JSONL 列表行为。
+
+### 验证
+- 定向单测：`TestClaudeSessionCatalogHonorsDesktopArchiveAndDelete`（archive 标记、
+  unarchive 失效、tombstone 排除与恢复）。
+- 本机真实状态校验（临时测试，未提交）：`91330136-…`（已 delete tombstone）不再列出；
+  `9e5bc559-…`（已 archive）带 `archivedAtMillis`。
+- 全量 `go test ./go-bridge/...` PASS；定向 race PASS。
+- Release 重建 + 覆盖安装 `/Applications/CordCodeLink.app`。
+
+### 诚实边界
+Desktop 存储格式是私有且可能随版本变化；这是兼容 catalog 的 best-effort，不是
+Claude 原生 catalog 同源。等 Claude 上游暴露稳定 catalog 接口后再迁移，不要把它
+当成 exact parity。

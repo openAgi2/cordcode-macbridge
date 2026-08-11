@@ -45,6 +45,11 @@ type claudeSessionFingerprint struct {
 	// untouched), so without this the catalog's fingerprint match would reuse a
 	// stale cached entry and ArchivedAt would never update.
 	SidecarModTimeUnixNano int64
+	// DesktopModTimeUnixNano tracks Claude Desktop's private session store
+	// (local_*.json archive flags and deleted_* tombstones). Desktop archive/
+	// delete do not touch the JSONL transcript, so this is required for those
+	// state changes to invalidate the cached entry.
+	DesktopModTimeUnixNano int64
 }
 
 type claudeSessionIndexEntry struct {
@@ -74,7 +79,8 @@ type claudeSessionSnapshot struct {
 }
 
 type claudeSessionCatalog struct {
-	projectsDir string
+	projectsDir        string
+	desktopStateLoader func() claudeDesktopSessionState
 
 	mu       sync.Mutex
 	snapshot *claudeSessionSnapshot
@@ -87,6 +93,9 @@ func newClaudeSessionCatalog(projectsDir string) *claudeSessionCatalog {
 	return &claudeSessionCatalog{
 		projectsDir:  projectsDir,
 		parseSession: scanClaudeSessionMetadata,
+		desktopStateLoader: func() claudeDesktopSessionState {
+			return loadClaudeDesktopSessionState(defaultClaudeAppSupportDir())
+		},
 	}
 }
 
@@ -163,6 +172,8 @@ func (c *claudeSessionCatalog) buildSnapshot(
 		modTime     time.Time
 	}
 
+	desktopState := c.desktopStateLoader()
+
 	enumerateStarted := time.Now()
 	projectDirs, err := os.ReadDir(c.projectsDir)
 	if err != nil {
@@ -213,17 +224,22 @@ func (c *claudeSessionCatalog) buildSnapshot(
 			if si, serr := os.Stat(claudeBridgeSessionSidecarPath(projectPath, strings.TrimSuffix(name, ".jsonl"))); serr == nil {
 				sidecarModNano = si.ModTime().UnixNano()
 			}
+			sessionID := strings.TrimSuffix(name, ".jsonl")
+			if desktopState.isDeleted(sessionID) {
+				continue
+			}
 			candidates = append(candidates, fileCandidate{
 				key: claudeSessionKey{
 					ProjectKey: projectKey,
-					SessionID:  strings.TrimSuffix(name, ".jsonl"),
+					SessionID:  sessionID,
 				},
 				path:      filepath.Join(projectPath, name),
 				directory: realDirectory,
 				fingerprint: claudeSessionFingerprint{
-					ModTimeUnixNano:       info.ModTime().UnixNano(),
-					SizeBytes:             size,
+					ModTimeUnixNano:        info.ModTime().UnixNano(),
+					SizeBytes:              size,
 					SidecarModTimeUnixNano: sidecarModNano,
+					DesktopModTimeUnixNano: desktopState.modNano(sessionID),
 				},
 				modTime: info.ModTime(),
 			})
@@ -245,22 +261,25 @@ func (c *claudeSessionCatalog) buildSnapshot(
 		parseStarted := time.Now()
 		scan := c.parseSession(candidate.path, candidate.modTime)
 		metrics.AddMetadataParse(time.Since(parseStarted))
-			nextByKey[candidate.key] = claudeSessionIndexEntry{
-				Key:                candidate.key,
-				FilePath:           candidate.path,
-				Directory:          candidate.directory,
-				Title:              scan.Title,
-				CustomTitle:        scan.CustomTitle,
-				FirstUserAt:        scan.FirstUserAt,
-				CompactBoundaryIDs: append([]string(nil), scan.CompactBoundaryIDs...),
-				ModelID:            scan.ModelID,
-				ProviderID:         scan.ProviderID,
-				ReasoningEffort:    scan.ReasoningEffort,
-				CreatedAt:          scan.CreatedAt,
-				UpdatedAt:          scan.UpdatedAt,
-				ArchivedAt:         scan.ArchivedAt,
-				Fingerprint:        candidate.fingerprint,
-			}
+		if archivedAt := desktopState.archivedAt(candidate.key.SessionID); archivedAt.After(scan.ArchivedAt) {
+			scan.ArchivedAt = archivedAt
+		}
+		nextByKey[candidate.key] = claudeSessionIndexEntry{
+			Key:                candidate.key,
+			FilePath:           candidate.path,
+			Directory:          candidate.directory,
+			Title:              scan.Title,
+			CustomTitle:        scan.CustomTitle,
+			FirstUserAt:        scan.FirstUserAt,
+			CompactBoundaryIDs: append([]string(nil), scan.CompactBoundaryIDs...),
+			ModelID:            scan.ModelID,
+			ProviderID:         scan.ProviderID,
+			ReasoningEffort:    scan.ReasoningEffort,
+			CreatedAt:          scan.CreatedAt,
+			UpdatedAt:          scan.UpdatedAt,
+			ArchivedAt:         scan.ArchivedAt,
+			Fingerprint:        candidate.fingerprint,
+		}
 	}
 	deleted := 0
 	if previous != nil {

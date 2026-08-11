@@ -1,6 +1,7 @@
 package gobridge
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,126 @@ import (
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
+
+func TestClaudeSessionCatalogHonorsDesktopArchiveAndDelete(t *testing.T) {
+	projectsDir := t.TempDir()
+	ws := catalogFixtureWorkspace(t, projectsDir, "desktop")
+	projectDir := filepath.Join(projectsDir, "-tmp-desktop")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	activeID := "active-0000-0000-0000-000000000001"
+	archivedID := "archived-0000-0000-0000-000000000002"
+	deletedID := "deleted-0000-0000-0000-000000000003"
+	for _, fixture := range []struct {
+		id    string
+		title string
+	}{
+		{activeID, "active"},
+		{archivedID, "archived"},
+		{deletedID, "deleted"},
+	} {
+		writeClaudeCatalogFixture(
+			t,
+			filepath.Join(projectDir, fixture.id+".jsonl"),
+			ws,
+			fixture.title,
+			"2026-08-12T00:10:00Z",
+		)
+	}
+
+	appSupport := t.TempDir()
+	storeDir := filepath.Join(appSupport, claudeDesktopAppSupportDir3P, claudeDesktopSessionsDir, "acct", "org")
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	archivedAt := time.Date(2026, 8, 12, 0, 17, 41, 0, time.UTC)
+	localArchivedID := "local-archived-0000-0000-0000-000000000004"
+	archivedJSON := fmt.Sprintf(
+		`{"sessionId":%q,"cliSessionId":%q,"isArchived":true}`+"\n",
+		"local_"+localArchivedID,
+		archivedID,
+	)
+	archivedPath := filepath.Join(storeDir, claudeDesktopLocalPrefix+localArchivedID+".json")
+	if err := os.WriteFile(archivedPath, []byte(archivedJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(archivedPath, archivedAt, archivedAt); err != nil {
+		t.Fatal(err)
+	}
+	deletedPath := filepath.Join(storeDir, claudeDesktopDeletedPrefix+deletedID)
+	if err := os.WriteFile(deletedPath, []byte("tombstone"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	catalog := newClaudeSessionCatalog(projectsDir)
+	catalog.desktopStateLoader = func() claudeDesktopSessionState {
+		return loadClaudeDesktopSessionState(appSupport)
+	}
+
+	got := catalog.list("", &core.SessionLoadMetrics{})
+	byID := make(map[string]map[string]interface{}, len(got))
+	for _, session := range got {
+		id, _ := session["id"].(string)
+		byID[id] = session
+	}
+	if len(got) != 2 {
+		t.Fatalf("sessions = %d, want active+archived only; got %#v", len(got), byID)
+	}
+	if _, ok := byID[activeID]; !ok {
+		t.Fatalf("active session missing: %#v", byID)
+	}
+	if _, ok := byID[deletedID]; ok {
+		t.Fatalf("desktop-deleted session still listed: %#v", byID)
+	}
+	archivedWire, ok := byID[archivedID]
+	if !ok {
+		t.Fatalf("archived session missing (it should surface archivedAtMillis): %#v", byID)
+	}
+	if _, ok := archivedWire["archivedAtMillis"]; !ok {
+		t.Fatalf("desktop-archived session has no archivedAtMillis: %#v", archivedWire)
+	}
+
+	// Unarchive: the Desktop local JSON flips isArchived=false and its mtime
+	// advances. The fingerprint must invalidate and drop archivedAtMillis.
+	unarchivedAt := archivedAt.Add(time.Minute)
+	unarchivedJSON := fmt.Sprintf(
+		`{"sessionId":%q,"cliSessionId":%q,"isArchived":false}`+"\n",
+		"local_"+localArchivedID,
+		archivedID,
+	)
+	if err := os.WriteFile(archivedPath, []byte(unarchivedJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(archivedPath, unarchivedAt, unarchivedAt); err != nil {
+		t.Fatal(err)
+	}
+	gotUnarchived := catalog.list("", &core.SessionLoadMetrics{})
+	for _, session := range gotUnarchived {
+		id, _ := session["id"].(string)
+		if id != archivedID {
+			continue
+		}
+		if _, ok := session["archivedAtMillis"]; ok {
+			t.Fatalf("unarchived session still carries archivedAtMillis: %#v", session)
+		}
+	}
+
+	// Restore the deleted tombstone removal path: without the tombstone the
+	// transcript becomes visible again.
+	if err := os.Remove(deletedPath); err != nil {
+		t.Fatal(err)
+	}
+	gotRestored := catalog.list("", &core.SessionLoadMetrics{})
+	restoredIDs := make(map[string]struct{}, len(gotRestored))
+	for _, session := range gotRestored {
+		id, _ := session["id"].(string)
+		restoredIDs[id] = struct{}{}
+	}
+	if _, ok := restoredIDs[deletedID]; !ok {
+		t.Fatalf("deleted session did not return after tombstone removal: %#v", restoredIDs)
+	}
+}
 
 func TestClaudeSessionCatalogIncrementalRefreshAndDeletion(t *testing.T) {
 	projectsDir := t.TempDir()
