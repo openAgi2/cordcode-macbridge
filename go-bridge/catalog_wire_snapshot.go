@@ -22,6 +22,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,7 +33,7 @@ import (
 // catalogWireSnapshot 是一个 OpenCode scope 的缓存快照：enriched wire maps + epoch +
 // createdAt。maps 已按 (updatedAtMillis DESC, id ASC) 排序，切片与派生 cursor 直接复用。
 type catalogWireSnapshot struct {
-	scope     string
+	scope     catalogWireScope
 	epoch     string
 	createdAt time.Time
 	maps      []map[string]interface{}
@@ -43,8 +44,8 @@ type catalogWireSnapshot struct {
 type catalogWireSnapshotCache struct {
 	now      func() time.Time
 	mu       sync.Mutex
-	scopes   map[string]*catalogWireSnapshot
-	inFlight map[string]chan struct{}
+	scopes   map[catalogWireScope]*catalogWireSnapshot
+	inFlight map[catalogWireScope]chan struct{}
 }
 
 func newCatalogWireSnapshotCache(now func() time.Time) *catalogWireSnapshotCache {
@@ -53,26 +54,71 @@ func newCatalogWireSnapshotCache(now func() time.Time) *catalogWireSnapshotCache
 	}
 	return &catalogWireSnapshotCache{
 		now:      now,
-		scopes:   make(map[string]*catalogWireSnapshot),
-		inFlight: make(map[string]chan struct{}),
+		scopes:   make(map[catalogWireScope]*catalogWireSnapshot),
+		inFlight: make(map[catalogWireScope]chan struct{}),
 	}
+}
+
+// catalogWireScope is the sole identity for a declared catalog snapshot. Keeping the complete
+// visibility contract in one comparable value prevents cache ownership and cursor epochs from
+// silently omitting a dimension as new backends are added.
+type catalogWireScope struct {
+	BackendID string
+	Global    bool
+	Directory string
+	RootsOnly bool
+}
+
+func newCatalogWireScope(backendID, dir string, rootsOnly bool) catalogWireScope {
+	backendID = strings.TrimSpace(backendID)
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return catalogWireScope{BackendID: backendID, Global: true, RootsOnly: rootsOnly}
+	}
+	if normalized, ok := normalizeCatalogDirectory(dir); ok {
+		dir = normalized
+	} else {
+		dir = filepath.Clean(dir)
+	}
+	return catalogWireScope{BackendID: backendID, Directory: dir, RootsOnly: rootsOnly}
+}
+
+func (s catalogWireScope) validate() error {
+	if s.BackendID == "" {
+		return fmt.Errorf("catalog wire scope requires backend ID")
+	}
+	if s.Global == (s.Directory != "") {
+		return fmt.Errorf("catalog wire scope must be exactly global or directory-scoped")
+	}
+	return nil
+}
+
+func (s catalogWireScope) identity() string {
+	global := "0"
+	if s.Global {
+		global = "1"
+	}
+	roots := "0"
+	if s.RootsOnly {
+		roots = "1"
+	}
+	return s.BackendID + "\x00" + global + "\x00" + s.Directory + "\x00" + roots
 }
 
 // openCodeCatalogScopeKey 派生 OpenCode scope 缓存键：(backendID, directory, rootsOnly)。
 // 三个维度都纳入：不同 backend / 不同目录 / root-only 与否互不复用快照。
-func openCodeCatalogScopeKey(backendID, dir string, rootsOnly bool) string {
-	roots := "0"
-	if rootsOnly {
-		roots = "1"
-	}
-	return backendID + "\x00" + dir + "\x00" + roots
+func openCodeCatalogScopeKey(backendID, dir string, rootsOnly bool) catalogWireScope {
+	return newCatalogWireScope(backendID, dir, rootsOnly)
 }
 
 // wireFingerprint 由 enriched wire maps 派生确定摘要（id|updatedAtMillis，按 id 排序后换行拼接）。
 // 与 fingerprintCatalog（NormalizedSession）同语义，只是字段从 wire map 读取。成员或 updatedAt
 // 任一变化 → fingerprint 变 → epoch 变 → 旧 cursor cursor_stale（§4.1.1）。
 func wireFingerprint(maps []map[string]interface{}) string {
-	type kv struct{ id string; ts int64 }
+	type kv struct {
+		id string
+		ts int64
+	}
 	pairs := make([]kv, 0, len(maps))
 	for _, m := range maps {
 		id, _ := m["id"].(string)
@@ -91,19 +137,38 @@ func wireFingerprint(maps []map[string]interface{}) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// wireListFingerprint is order-sensitive because declared snapshots preserve native provider
+// order. A pure reordering must rotate the epoch even when membership is unchanged.
+func wireListFingerprint(maps []map[string]interface{}) string {
+	var b strings.Builder
+	for _, item := range maps {
+		id, _ := item["id"].(string)
+		ts, _ := item["updatedAtMillis"].(int64)
+		b.WriteString(id)
+		b.WriteByte('|')
+		b.WriteString(strconv.FormatInt(ts, 10))
+		b.WriteByte('\n')
+	}
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:])
+}
+
 // sortWireMapsForCursor 把 enriched wire maps 排成 cursor 切片所需的序：
 // updatedAtMillis DESC，id ASC（与 sortSessionsByUpdatedAt / paginateSessionList 一致）。
-func sortWireMapsForCursor(maps []map[string]interface{}) {
-	sort.Slice(maps, func(i, j int) bool {
-		ti, _ := maps[i]["updatedAtMillis"].(int64)
-		tj, _ := maps[j]["updatedAtMillis"].(int64)
-		if ti != tj {
-			return ti > tj // DESC
+func validateCatalogWireMaps(maps []map[string]interface{}) error {
+	seen := make(map[string]struct{}, len(maps))
+	for index, item := range maps {
+		id, _ := item["id"].(string)
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return fmt.Errorf("catalog snapshot row %d has empty session ID", index)
 		}
-		idi, _ := maps[i]["id"].(string)
-		idj, _ := maps[j]["id"].(string)
-		return idi < idj // ASC
-	})
+		if _, exists := seen[id]; exists {
+			return fmt.Errorf("catalog snapshot has duplicate session ID %q", id)
+		}
+		seen[id] = struct{}{}
+	}
+	return nil
 }
 
 // wireSnapshotExpired 复刻 snapshotExpired 语义但作用于 wire 快照（snapshotExpired 读
@@ -121,73 +186,80 @@ func wireSnapshotView(s *catalogWireSnapshot) *catalogSnapshot {
 	if s == nil {
 		return nil
 	}
-	return &catalogSnapshot{Scope: s.scope, Epoch: s.epoch, CreatedAt: s.createdAt}
+	return &catalogSnapshot{Scope: s.scope.identity(), Epoch: s.epoch, CreatedAt: s.createdAt}
 }
 
 // Invalidate 丢掉指定 scope 的缓存快照（不打断 inFlight）。用于 fair-home 需要立刻反映
 // 磁盘目录删除时强制重建（owner 2026-08-11 幽灵 cccode-* 目录）。
-func (c *catalogWireSnapshotCache) Invalidate(scopeKey string) {
+func (c *catalogWireSnapshotCache) Invalidate(scope catalogWireScope) {
 	if c == nil {
 		return
 	}
 	c.mu.Lock()
-	delete(c.scopes, scopeKey)
+	delete(c.scopes, scope)
 	c.mu.Unlock()
 }
 
 // FetchOrReuse 是 page-0 路径：缓存命中且未过期 → 复用；否则 singleflight 调 builder 构造
 // enriched wire maps 并缓存。builder 只在 miss/expiry 时调用。返回的快照的 maps 是缓存内
 // 副本的可读引用（切片元素仍共享 map；调用方只读不写，handler 不再 mutate）。
-func (c *catalogWireSnapshotCache) FetchOrReuse(scopeKey string, builder func() ([]map[string]interface{}, error)) (*catalogWireSnapshot, error) {
+func (c *catalogWireSnapshotCache) FetchOrReuse(scope catalogWireScope, builder func() ([]map[string]interface{}, error)) (*catalogWireSnapshot, error) {
+	if err := scope.validate(); err != nil {
+		return nil, err
+	}
 	c.mu.Lock()
-	if snap, ok := c.scopes[scopeKey]; ok && !wireSnapshotExpired(snap, c.now()) {
+	if snap, ok := c.scopes[scope]; ok && !wireSnapshotExpired(snap, c.now()) {
 		c.mu.Unlock()
 		return snap, nil
 	}
 	// 已有 page-0 在飞 → 等它完成，复用其结果（不重复打上游）。
-	if wait, ok := c.inFlight[scopeKey]; ok {
+	if wait, ok := c.inFlight[scope]; ok {
 		c.mu.Unlock()
 		<-wait
 		c.mu.Lock()
-		snap := c.scopes[scopeKey]
+		snap := c.scopes[scope]
 		c.mu.Unlock()
 		if snap != nil && !wireSnapshotExpired(snap, c.now()) {
 			return snap, nil
 		}
-		return nil, fmt.Errorf("opencode catalog snapshot unavailable for scope %q", scopeKey)
+		return nil, fmt.Errorf("catalog snapshot unavailable for scope %q", scope.identity())
 	}
 	wait := make(chan struct{})
-	c.inFlight[scopeKey] = wait
+	c.inFlight[scope] = wait
 	c.mu.Unlock()
 
 	maps, err := builder()
 
 	c.mu.Lock()
-	delete(c.inFlight, scopeKey)
+	delete(c.inFlight, scope)
 	if err != nil {
 		close(wait)
 		c.mu.Unlock()
 		return nil, err
 	}
 	cp := append([]map[string]interface{}(nil), maps...)
-	sortWireMapsForCursor(cp)
+	if err := validateCatalogWireMaps(cp); err != nil {
+		close(wait)
+		c.mu.Unlock()
+		return nil, err
+	}
 	snap := &catalogWireSnapshot{
-		scope:     scopeKey,
-		epoch:     deriveSnapshotEpoch(wireFingerprint(cp)),
+		scope:     scope,
+		epoch:     deriveSnapshotEpoch(scope.identity() + "\x00" + wireListFingerprint(cp)),
 		createdAt: c.now(),
 		maps:      cp,
 	}
-	c.scopes[scopeKey] = snap
+	c.scopes[scope] = snap
 	close(wait)
 	c.mu.Unlock()
 	return snap, nil
 }
 
 // Peek 是 page-N 路径：返回缓存快照（不重建、不打上游）。可能返回 nil（该 scope 无快照）。
-func (c *catalogWireSnapshotCache) Peek(scopeKey string) *catalogWireSnapshot {
+func (c *catalogWireSnapshotCache) Peek(scope catalogWireScope) *catalogWireSnapshot {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.scopes[scopeKey]
+	return c.scopes[scope]
 }
 
 // pageV2 为已声明 catalog_cursor_epoch_v2 的连接计算一页 v2 catalog：
@@ -197,9 +269,9 @@ func (c *catalogWireSnapshotCache) Peek(scopeKey string) *catalogWireSnapshot {
 // 返回 wire result map（{sessions, hasMore, nextCursor?}，shape 与 paginateSessionList 一致）
 // 或 cursor_stale WireError（staleErr）或硬错误（err：list_failed / 损坏 cursor）。
 // page-0 不会 stale（刚建/复用未过期快照）；page-N 的 stale 由 validateCursorV2 判定。
-func (c *catalogWireSnapshotCache) pageV2(scopeKey, cursor string, limit int, builder func() ([]map[string]interface{}, error)) (map[string]interface{}, *WireError, error) {
+func (c *catalogWireSnapshotCache) pageV2(scope catalogWireScope, cursor string, limit int, builder func() ([]map[string]interface{}, error)) (map[string]interface{}, *WireError, error) {
 	if cursor == "" {
-		snap, err := c.FetchOrReuse(scopeKey, builder)
+		snap, err := c.FetchOrReuse(scope, builder)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -209,7 +281,7 @@ func (c *catalogWireSnapshotCache) pageV2(scopeKey, cursor string, limit int, bu
 		}
 		return wireResultMap(sessions, nextCursor, hasMore), nil, nil
 	}
-	snap := c.Peek(scopeKey)
+	snap := c.Peek(scope)
 	sessions, nextCursor, hasMore, staleReason, derr := sliceCatalogWirePage(snap, cursor, limit, c.now())
 	if derr != nil {
 		return nil, nil, derr
@@ -242,15 +314,18 @@ func sliceCatalogWirePage(snap *catalogWireSnapshot, cursor string, limit int, n
 	if stale, reason := validateCursorV2(cur, isV1, wireSnapshotView(snap), now); stale {
 		return nil, "", false, reason, nil
 	}
-	// 切严格后继：(ts, id) 排在 cursor 之后的行。maps 已按 (ts DESC, id ASC) 排序。
-	start := len(snap.maps)
+	// Native order is authoritative. Locate the exact SessionID anchor in the frozen snapshot,
+	// then slice by index; timestamps are cursor metadata, never a local ordering instruction.
+	start := -1
 	for i, m := range snap.maps {
-		ts, _ := m["updatedAtMillis"].(int64)
 		id, _ := m["id"].(string)
-		if ts < cur.UpdatedAtMillis || (ts == cur.UpdatedAtMillis && id > cur.SessionID) {
-			start = i
+		if id == cur.SessionID {
+			start = i + 1
 			break
 		}
+	}
+	if start < 0 {
+		return nil, "", false, cursorStaleEpochMismatch, nil
 	}
 	end := start + limit
 	if limit <= 0 || end > len(snap.maps) {

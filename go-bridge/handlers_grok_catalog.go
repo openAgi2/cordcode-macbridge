@@ -62,8 +62,8 @@ func (h *Handlers) grokCatalogWireCache() *catalogWireSnapshotCache {
 // grokCatalogScopeKey 派生 Grok scope 缓存键：仅 backendID。Grok ACP session/list 跨 cwd
 // 返回所有 session（§5.4 / frozen fixture），无 workspace dir 维度，故一维 key。空 dir 段
 // 仅用于与 codex/opencode（两段 key）格式对齐，实际唯一性靠 backendID="grokbuild"。
-func grokCatalogScopeKey(backendID string) string {
-	return backendID + "\x00"
+func grokCatalogScopeKey(backendID string) catalogWireScope {
+	return newCatalogWireScope(backendID, "", false)
 }
 
 // buildGrokEnrichedSessions 执行 §5.1 step 2-3 的富 wire 管线：FetchSessionList（managed ACP

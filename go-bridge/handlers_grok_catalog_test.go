@@ -79,12 +79,9 @@ func TestGrokCatalog_V2Declared_RoutesToFetchSessionList(t *testing.T) {
 	})
 	msgs := readJSONMaps(t, clientConn, 1)
 	ids := resultSessionIDs(t, msgs[0])
-	// v2 结果序由 catalogWireSnapshotCache.sortWireMapsForCursor 规范化为 (updatedAt DESC, id ASC)
-	// （cursor 严格后继切片的稳定序）。Phase 7 §445 移除了 builder 内冗余的 sortSessionsByUpdatedAt
-	// （与 OpenCode Phase 4 / codex 同形）——cache 是序的唯一权威。builder 自身「不排序」由
-	// TestGrokBuildEnrichedSessions_PreservesUpstreamOrder 直接断言。
-	if len(ids) != 2 || ids[0] != "session_b" || ids[1] != "session_a" {
-		t.Fatalf("DECLARED sessions = %v, want [session_b session_a]（cache 规范序 updatedAt DESC）", ids)
+	// Declared v2 preserves the native session/list order end-to-end.
+	if len(ids) != 2 || ids[0] != "session_a" || ids[1] != "session_b" {
+		t.Fatalf("DECLARED sessions = %v, want native order [session_a session_b]", ids)
 	}
 	if agent.fetchN != 1 {
 		t.Fatalf("FetchSessionList calls = %d, want 1", agent.fetchN)

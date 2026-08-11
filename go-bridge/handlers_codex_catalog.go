@@ -54,8 +54,8 @@ func (h *Handlers) codexCatalogWireCache() *catalogWireSnapshotCache {
 
 // codexCatalogScopeKey 派生 Codex scope 缓存键：(backendID, dir)。dir 空 = 全局 catalog；
 // 非空 = workspace 精确过滤。无 rootsOnly 维度（OpenCode 有），故两维：backend + dir。
-func codexCatalogScopeKey(backendID, dir string) string {
-	return backendID + "\x00" + dir
+func codexCatalogScopeKey(backendID, dir string) catalogWireScope {
+	return newCatalogWireScope(backendID, dir, false)
 }
 
 // buildCodexEnrichedSessions 执行 §5.1 step 2-3 的富 wire 管线：FetchThreadList（app-server

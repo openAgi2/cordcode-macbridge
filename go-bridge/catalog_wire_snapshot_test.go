@@ -92,11 +92,11 @@ func synthWireMaps(n int) []map[string]interface{} {
 	out := make([]map[string]interface{}, n)
 	for i := 0; i < n; i++ {
 		out[i] = map[string]interface{}{
-			"id":               fmt.Sprintf("ses_%02d", i),
-			"updatedAtMillis":  int64(1_000_000 - i*1000),
-			"createdAtMillis":  int64(1_000_000 - i*1000 - 500),
-			"title":            fmt.Sprintf("session %d", i),
-			"directory":        "/tmp/fixture-workspace",
+			"id":              fmt.Sprintf("ses_%02d", i),
+			"updatedAtMillis": int64(1_000_000 - i*1000),
+			"createdAtMillis": int64(1_000_000 - i*1000 - 500),
+			"title":           fmt.Sprintf("session %d", i),
+			"directory":       "/tmp/fixture-workspace",
 		}
 	}
 	return out
@@ -200,6 +200,99 @@ func TestCatalogWireSnapshot_MultiPageNoDrift(t *testing.T) {
 		if m["id"] != want[i+2] {
 			t.Errorf("page1b[%d].id = %q, want %q（page-N 不应受 builder 数据变化漂移）", i, m["id"], want[i+2])
 		}
+	}
+}
+
+func TestCatalogWireSnapshot_PreservesNativeOrderAndUsesSessionIDAnchor(t *testing.T) {
+	cache, _ := newWireCacheWithFakeNow(time.UnixMilli(2_000_000))
+	scope := codexCatalogScopeKey("codex", "")
+	maps := []map[string]interface{}{
+		{"id": "native-first", "updatedAtMillis": int64(10)},
+		{"id": "native-second", "updatedAtMillis": int64(9999)},
+		{"id": "native-third", "updatedAtMillis": int64(20)},
+	}
+	calls := 0
+	p0, staleErr, err := cache.pageV2(scope, "", 2, builderFromMaps(maps, &calls))
+	if err != nil || staleErr != nil {
+		t.Fatalf("page0 err=%v stale=%v", err, staleErr)
+	}
+	got0 := p0["sessions"].([]map[string]interface{})
+	if got0[0]["id"] != "native-first" || got0[1]["id"] != "native-second" {
+		t.Fatalf("page0 reordered native rows: %#v", got0)
+	}
+	p1, staleErr, err := cache.pageV2(scope, p0["nextCursor"].(string), 2, builderFromMaps(nil, &calls))
+	if err != nil || staleErr != nil {
+		t.Fatalf("page1 err=%v stale=%v", err, staleErr)
+	}
+	got1 := p1["sessions"].([]map[string]interface{})
+	if len(got1) != 1 || got1[0]["id"] != "native-third" {
+		t.Fatalf("page1 did not continue after SessionID anchor: %#v", got1)
+	}
+}
+
+func TestCatalogWireSnapshot_ScopeOwnsCacheAndEpoch(t *testing.T) {
+	cache, _ := newWireCacheWithFakeNow(time.UnixMilli(2_000_000))
+	maps := synthWireMaps(3)
+	calls := 0
+	scopeA := newCatalogWireScope("codex", "/tmp/a/../workspace", false)
+	if normalized := newCatalogWireScope("codex", "/tmp/workspace", false); scopeA != normalized {
+		t.Fatalf("directory was not normalized: %#v %#v", scopeA, normalized)
+	}
+	p0, _, err := cache.pageV2(scopeA, "", 1, builderFromMaps(maps, &calls))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cursor := p0["nextCursor"].(string)
+	foreignScopes := []catalogWireScope{
+		newCatalogWireScope("grokbuild", "/tmp/workspace", false),
+		newCatalogWireScope("codex", "/tmp/other", false),
+		newCatalogWireScope("codex", "/tmp/workspace", true),
+		newCatalogWireScope("codex", "", false),
+	}
+	for _, foreign := range foreignScopes {
+		if _, _, err := cache.pageV2(foreign, "", 1, builderFromMaps(maps, &calls)); err != nil {
+			t.Fatal(err)
+		}
+		_, stale, err := cache.pageV2(foreign, cursor, 1, builderFromMaps(nil, &calls))
+		if err != nil || stale == nil || stale.Code != "cursor_stale" {
+			t.Fatalf("foreign scope %#v accepted cursor: stale=%+v err=%v", foreign, stale, err)
+		}
+	}
+}
+
+func TestCatalogWireSnapshot_RejectsInvalidSessionIDs(t *testing.T) {
+	for name, maps := range map[string][]map[string]interface{}{
+		"empty":     {map[string]interface{}{"id": "", "updatedAtMillis": int64(1)}},
+		"duplicate": {map[string]interface{}{"id": "same", "updatedAtMillis": int64(2)}, map[string]interface{}{"id": "same", "updatedAtMillis": int64(1)}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cache, _ := newWireCacheWithFakeNow(time.UnixMilli(2_000_000))
+			calls := 0
+			if _, _, err := cache.pageV2(codexCatalogScopeKey("codex", ""), "", 1, builderFromMaps(maps, &calls)); err == nil {
+				t.Fatal("invalid SessionID set was cached")
+			}
+			if len(cache.scopes) != 0 {
+				t.Fatal("invalid snapshot mutated cache")
+			}
+		})
+	}
+}
+
+func TestCatalogWireSnapshot_MissingSessionIDAnchorIsStale(t *testing.T) {
+	cache, _ := newWireCacheWithFakeNow(time.UnixMilli(2_000_000))
+	scope := openCodeCatalogScopeKey("opencode", "/tmp/workspace", true)
+	calls := 0
+	snap, err := cache.FetchOrReuse(scope, builderFromMaps(synthWireMaps(3), &calls))
+	if err != nil {
+		t.Fatal(err)
+	}
+	forged, err := encodeListCursorV2(listCursorV2{Epoch: snap.epoch, UpdatedAtMillis: 1_000_000, SessionID: "missing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, stale, err := cache.pageV2(scope, forged, 1, builderFromMaps(nil, &calls))
+	if err != nil || stale == nil || stale.Code != "cursor_stale" {
+		t.Fatalf("missing anchor stale=%+v err=%v", stale, err)
 	}
 }
 
