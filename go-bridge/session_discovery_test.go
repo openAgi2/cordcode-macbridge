@@ -74,6 +74,73 @@ func TestSessionDiscoveryBroadcastsOnNewSession(t *testing.T) {
 	}
 }
 
+func TestSessionDiscoveryBlockedBackendDoesNotStarveCodex(t *testing.T) {
+	previousInterval := sessionDiscoveryInterval
+	sessionDiscoveryInterval = 10 * time.Millisecond
+	t.Cleanup(func() { sessionDiscoveryInterval = previousInterval })
+	withCodexRootsDisabled(t)
+
+	handlers := newTestHandlers(t)
+	blockedStarted := make(chan struct{})
+	releaseBlocked := make(chan struct{})
+	var blockOnce sync.Once
+	handlers.RegisterAgent("grokbuild", &fakeGrokCatalogAgent{
+		fakeAgent: &fakeAgent{name: "grokbuild"},
+		fetchFn: func(context.Context) ([]core.AgentSessionInfo, error) {
+			blockOnce.Do(func() { close(blockedStarted) })
+			<-releaseBlocked
+			return nil, errors.New("released blocked provider")
+		},
+	})
+
+	workspace := t.TempDir()
+	var stateMu sync.Mutex
+	expanded := false
+	codexSeeded := make(chan struct{})
+	var seedOnce sync.Once
+	codex := &fakeCodexCatalogAgent{
+		fakeAgent: &fakeAgent{name: "codex"},
+		fetchFn: func(context.Context, string) ([]core.AgentSessionInfo, error) {
+			stateMu.Lock()
+			defer stateMu.Unlock()
+			seedOnce.Do(func() { close(codexSeeded) })
+			infos := []core.AgentSessionInfo{{ID: "s1", Summary: "one", Directory: workspace}}
+			if expanded {
+				infos = append(infos, core.AgentSessionInfo{ID: "s2", Summary: "two", Directory: workspace})
+			}
+			return infos, nil
+		},
+	}
+	handlers.RegisterAgent("codex", codex)
+
+	serverConn, clientConn, cleanup := openTestConn(t)
+	t.Cleanup(cleanup)
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "codex", SessionID: "list-view"})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	t.Cleanup(func() { close(releaseBlocked) })
+	handlers.StartSessionDiscoveryWatcher(ctx)
+
+	select {
+	case <-blockedStarted:
+	case <-time.After(time.Second):
+		t.Fatal("blocking backend worker did not start")
+	}
+	select {
+	case <-codexSeeded:
+	case <-time.After(time.Second):
+		t.Fatal("Codex seed was starved by blocking backend")
+	}
+	stateMu.Lock()
+	expanded = true
+	stateMu.Unlock()
+
+	msg := readJSONMaps(t, clientConn, 1)[0]
+	if msg["event"] != "sessions_changed" || msg["backendId"] != "codex" {
+		t.Fatalf("Codex refresh event=%#v", msg)
+	}
+}
+
 func TestSessionDiscoveryControlPlanePublisherCapabilityMatrix(t *testing.T) {
 	handlers := newTestHandlers(t)
 	agent := discoveryCodexAgent(t, &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1"}}})

@@ -21,6 +21,7 @@ package gobridge
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -36,34 +37,46 @@ func (h *Handlers) StartSessionDiscoveryWatcher(ctx context.Context) {
 }
 
 func (h *Handlers) runSessionDiscovery(ctx context.Context) {
-	// Critical: this goroutine must never silently die. snapshotSessions walks
-	// Claude transcript files (209MB datasets, 16MB-per-line JSONL) and has, in
-	// production, produced ZERO sessions_changed events across all logs since 7/5
-	// — consistent with an unrecovered panic killing the watcher with no log line.
-	// recover keeps the loop alive and emits a visible error so a future panic
-	// can no longer hide. Control-plane only (guard #8); does not touch timeline.
+	slog.Info("go-bridge: session discovery watcher started",
+		"interval", sessionDiscoveryInterval.String(),
+		"backends", len(h.Agents()))
+	var workers sync.WaitGroup
+	for id, agent := range h.Agents() {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			h.runBackendSessionDiscovery(ctx, id, agent)
+		}()
+	}
+	<-ctx.Done()
+	workers.Wait()
+	slog.Info("go-bridge: session discovery watcher stopped (context done)")
+}
+
+// runBackendSessionDiscovery owns one backend's cadence and last-good fingerprint. Backends are
+// deliberately isolated: a provider that blocks despite ctx cancellation must not starve native
+// refresh for every other backend (owner A-O1 production failure, 2026-08-11).
+func (h *Handlers) runBackendSessionDiscovery(ctx context.Context, id string, agent core.Agent) {
+	// A provider panic may kill only its own worker. Recover and re-arm that backend without
+	// disturbing other workers; the first successful scan after restart seeds last-good state.
 	defer func() {
 		if r := recover(); r != nil {
-			slog.Error("go-bridge: session discovery watcher recovered from panic — loop continuing",
-				"error", r)
-			// Re-arm by re-entering; ctx still governs exit.
-			go h.runSessionDiscovery(ctx)
+			slog.Error("go-bridge: session discovery backend worker recovered from panic — worker continuing",
+				"backend", id, "error", r)
+			go h.runBackendSessionDiscovery(ctx, id, agent)
 		}
 	}()
 
-	slog.Info("go-bridge: session discovery watcher started",
-		"interval", sessionDiscoveryInterval.String())
 	seen := map[string]string{}
-	h.snapshotSessions(ctx, seen, true)
+	h.snapshotBackendSession(ctx, seen, true, id, agent)
 	ticker := time.NewTicker(sessionDiscoveryInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			slog.Info("go-bridge: session discovery watcher stopped (context done)")
 			return
 		case <-ticker.C:
-			h.snapshotSessions(ctx, seen, false)
+			h.snapshotBackendSession(ctx, seen, false, id, agent)
 		}
 	}
 }
@@ -72,55 +85,59 @@ func (h *Handlers) runSessionDiscovery(ctx context.Context) {
 // "sessions_changed" for any backend whose fingerprint changed since the last scan
 // (Phase 7 §442：provider fingerprint 驱动 sessions_changed)。
 func (h *Handlers) snapshotSessions(ctx context.Context, seen map[string]string, seed bool) {
+	for id, agent := range h.Agents() {
+		h.snapshotBackendSession(ctx, seen, seed, id, agent)
+	}
+}
+
+func (h *Handlers) snapshotBackendSession(ctx context.Context, seen map[string]string, seed bool, id string, agent core.Agent) {
 	tag := "poll"
 	if seed {
 		tag = "seed"
 	}
-	for id, agent := range h.Agents() {
-		started := time.Now()
-		current, count, err := h.discoveryFingerprint(ctx, id, agent)
-		duration := time.Since(started)
-		if err != nil {
-			// Previously this branch was silent. A recurring enumerate error leaves
-			// seen[id] at the seed fingerprint forever → fingerprint never changes →
-			// sessions_changed never fires, with no log to reveal why. Skip without
-			// updating seen (preserve last good fingerprint so a later successful
-			// poll can still detect change).
-			slog.Warn("go-bridge: session discovery fingerprint error (no broadcast)",
-				"phase", tag, "backend", id, "durationMs", duration.Milliseconds(), "error", err.Error())
-			continue
+	started := time.Now()
+	current, count, err := h.discoveryFingerprint(ctx, id, agent)
+	duration := time.Since(started)
+	if err != nil {
+		// Previously this branch was silent. A recurring enumerate error leaves
+		// seen[id] at the seed fingerprint forever → fingerprint never changes →
+		// sessions_changed never fires, with no log to reveal why. Skip without
+		// updating seen (preserve last good fingerprint so a later successful
+		// poll can still detect change).
+		slog.Warn("go-bridge: session discovery fingerprint error (no broadcast)",
+			"phase", tag, "backend", id, "durationMs", duration.Milliseconds(), "error", err.Error())
+		return
+	}
+	prev, hadPrev := seen[id]
+	if seed || !hadPrev {
+		seen[id] = current
+		slog.Info("go-bridge: session discovery snapshot seeded",
+			"backend", id, "sessionCount", count, "durationMs", duration.Milliseconds())
+		return
+	}
+	// Phase 7 §442：fingerprint 变化即 catalog 变化（新增/删除/更新任一）→ 触发 sessions_changed。
+	// 不再区分 new/removed：fingerprint 是确定摘要，任一成员或 updatedAt 变化都改写它，
+	// 这覆盖了「session 被归档（从 visible 移除）」「新 session 出现」「既有 session 收到新 turn」
+	// 三种情况，客户端刷新 list_sessions 即可拿到最新 catalog。
+	if current != prev {
+		// Fence every declared snapshot scope before exposing the new fingerprint or
+		// publishing its notification. A client reacting immediately to the event can
+		// therefore never reuse a pre-change global/directory snapshot.
+		h.openCodeCatalogWireCache().FenceBackend(id)
+		seen[id] = current
+		slog.Info("go-bridge: sessions_changed (catalog fingerprint changed)",
+			"backend", id, "sessionCount", count, "durationMs", duration.Milliseconds())
+		if _, err := h.eventPublisher.PublishControlPlane(LogicalEvent{
+			BackendID: id,
+			Event:     "sessions_changed",
+			Data:      map[string]interface{}{"backendId": id},
+			Broadcast: true,
+		}); err != nil {
+			slog.Error("go-bridge: sessions_changed control-plane publish rejected",
+				"backend", id, "error", err.Error())
 		}
-		prev, hadPrev := seen[id]
-		if seed || !hadPrev {
-			seen[id] = current
-			slog.Info("go-bridge: session discovery snapshot seeded",
-				"backend", id, "sessionCount", count, "durationMs", duration.Milliseconds())
-			continue
-		}
-		// Phase 7 §442：fingerprint 变化即 catalog 变化（新增/删除/更新任一）→ 触发 sessions_changed。
-		// 不再区分 new/removed：fingerprint 是确定摘要，任一成员或 updatedAt 变化都改写它，
-		// 这覆盖了「session 被归档（从 visible 移除）」「新 session 出现」「既有 session 收到新 turn」
-		// 三种情况，客户端刷新 list_sessions 即可拿到最新 catalog。
-		if current != prev {
-			// Fence every declared snapshot scope before exposing the new fingerprint or
-			// publishing its notification. A client reacting immediately to the event can
-			// therefore never reuse a pre-change global/directory snapshot.
-			h.openCodeCatalogWireCache().FenceBackend(id)
-			seen[id] = current
-			slog.Info("go-bridge: sessions_changed (catalog fingerprint changed)",
-				"backend", id, "sessionCount", count, "durationMs", duration.Milliseconds())
-			if _, err := h.eventPublisher.PublishControlPlane(LogicalEvent{
-				BackendID: id,
-				Event:     "sessions_changed",
-				Data:      map[string]interface{}{"backendId": id},
-				Broadcast: true,
-			}); err != nil {
-				slog.Error("go-bridge: sessions_changed control-plane publish rejected",
-					"backend", id, "error", err.Error())
-			}
-		} else {
-			seen[id] = current
-		}
+	} else {
+		seen[id] = current
 	}
 }
 
