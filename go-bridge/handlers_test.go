@@ -1195,6 +1195,7 @@ func TestOpenCodeListSessionsFetchesLargePageAndPaginatesInMemory(t *testing.T) 
 	handlers.RegisterOpenCodeProxy(NewOpenCodeProxy(proxyServer.URL, "", ""))
 	serverConn, clientConn, cleanup := openTestConn(t)
 	defer cleanup()
+	handlers.eventPublisher.SetConnCatalogCursorEpochV2(serverConn, true)
 
 	handlers.handleOpenCodeRPC(serverConn, WireMessage{
 		BackendID: "opencode",
@@ -1254,7 +1255,7 @@ func TestOpenCodeListSessionsFetchesLargePageAndPaginatesInMemory(t *testing.T) 
 	}
 
 	logText := logs.String()
-	for _, want := range []string{`msg="opencode list_sessions"`, "directory=project", "limit=2", "result_count=2"} {
+	for _, want := range []string{`msg="opencode list_sessions v2"`, "directory=project", "limit=2", "result_count=2"} {
 		if !strings.Contains(logText, want) {
 			t.Fatalf("diagnostic log missing %q in %s", want, logText)
 		}
@@ -1270,7 +1271,7 @@ func TestOpenCodeListSessionsRootsOnlyWithCursorNowSupported(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[{"id":"ses_1","title":"One","time":{"created":1000,"updated":1000}}]`))
+		_, _ = w.Write([]byte(`[{"id":"ses_1","title":"One","time":{"created":1000,"updated":1000}},{"id":"ses_2","title":"Two","time":{"created":900,"updated":900}}]`))
 	}))
 	defer proxyServer.Close()
 
@@ -1279,8 +1280,27 @@ func TestOpenCodeListSessionsRootsOnlyWithCursorNowSupported(t *testing.T) {
 	handlers.RegisterOpenCodeProxy(NewOpenCodeProxy(proxyServer.URL, "", ""))
 	serverConn, clientConn, cleanup := openTestConn(t)
 	defer cleanup()
+	handlers.eventPublisher.SetConnCatalogCursorEpochV2(serverConn, true)
 
-	// rootsOnly + cursor is no longer rejected; it pages the in-memory list.
+	// Obtain a real epoch-bearing cursor from page 0; arbitrary opaque legacy cursors are rejected.
+	handlers.handleOpenCodeRPC(serverConn, WireMessage{
+		BackendID: "opencode",
+		Method:    "list_sessions",
+		RequestID: "oc-sessions-roots-page0",
+		Params: mustJSONRaw(t, map[string]any{
+			"directory": "/tmp/project",
+			"rootsOnly": true,
+			"limit":     1,
+		}),
+	})
+	page0 := readJSONMaps(t, clientConn, 1)[0]
+	page0Data, _ := page0["data"].(map[string]any)
+	nextCursor, _ := page0Data["nextCursor"].(string)
+	if nextCursor == "" {
+		t.Fatal("rootsOnly page 0 missing v2 nextCursor")
+	}
+
+	// rootsOnly + a valid v2 cursor pages the frozen in-memory snapshot.
 	handlers.handleOpenCodeRPC(serverConn, WireMessage{
 		BackendID: "opencode",
 		Method:    "list_sessions",
@@ -1288,14 +1308,14 @@ func TestOpenCodeListSessionsRootsOnlyWithCursorNowSupported(t *testing.T) {
 		Params: mustJSONRaw(t, map[string]any{
 			"directory": "/tmp/project",
 			"rootsOnly": true,
-			"limit":     10,
-			"cursor":    "opaque-cursor",
+			"limit":     1,
+			"cursor":    nextCursor,
 		}),
 	})
 
 	messages := readJSONMaps(t, clientConn, 1)
 	if got := messages[0]["ok"]; got != true {
-		t.Fatalf("ok = %#v, want true (rootsOnly+cursor now supported)", got)
+		t.Fatalf("ok = %#v, want true (rootsOnly+valid-v2-cursor supported)", got)
 	}
 }
 
