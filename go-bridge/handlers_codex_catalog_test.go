@@ -187,8 +187,8 @@ func TestCodexBuildEnrichedSessions_PreservesUpstreamOrder(t *testing.T) {
 	}
 }
 
-// Undeclared keeps v1 presentation while sharing native membership with declared/poller.
-func TestCodexCatalog_UndeclaredUsesNativeMembershipWithV1(t *testing.T) {
+// Stage 1 retains the now-unreachable v1 implementation as an immediate rollback seam.
+func TestCodexCatalog_RollbackV1UsesNativeMembership(t *testing.T) {
 	withCodexRootsDisabled(t)
 	ws := t.TempDir()
 	agent := &fakeCodexCatalogAgent{
@@ -203,16 +203,15 @@ func TestCodexCatalog_UndeclaredUsesNativeMembershipWithV1(t *testing.T) {
 	handlers.RegisterAgent("codex", agent)
 	serverConn, clientConn, cleanup := openTestConn(t)
 	defer cleanup()
-	// 不 SetConnCatalogCursorEpochV2 → UNDECLARED。
 
-	handlers.HandleRPC(serverConn, WireMessage{
+	handlers.handleListSessions(serverConn, WireMessage{
 		BackendID: "codex", Method: "list_sessions", RequestID: "r1",
 		Params: mustJSONRaw(t, map[string]any{}),
-	})
+	}, agent)
 	msgs := readJSONMaps(t, clientConn, 1)
 	ids := resultSessionIDs(t, msgs[0])
 	if len(ids) != 2 || ids[0] != "thread_b" || ids[1] != "thread_a" {
-		t.Fatalf("UNDECLARED sessions = %v, want v1-sorted native membership", ids)
+		t.Fatalf("rollback v1 sessions = %v, want v1-sorted native membership", ids)
 	}
 	if agent.fetchN != 1 {
 		t.Fatalf("FetchThreadList calls = %d, want 1", agent.fetchN)

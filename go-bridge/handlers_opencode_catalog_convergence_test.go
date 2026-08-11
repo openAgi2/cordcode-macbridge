@@ -103,11 +103,11 @@ func TestOpenCodeCatalogBuilder_PreservesUpstreamOrder(t *testing.T) {
 	}
 }
 
-// TestOpenCodeCatalogV1_StillSortsByUpdatedDesc：UNDECLARED 连接 → ocHandleListSessionsV1
-// （legacy v1 路径）。同一 fake proxy 非 desc 顺序输入，v1 在 builder 后显式
+// TestOpenCodeCatalogRollbackV1_StillSortsByUpdatedDesc：Stage 1 保留但公开路由不可达的
+// rollback v1 路径。同一 fake proxy 非 desc 顺序输入，v1 在 builder 后显式
 // sortSessionsByUpdatedAt → 输出 [A(300), C(200), B(100)]（updated desc）。证明 §10 v1
 // byte-for-byte 不变（本地排序保留），收敛只对 v2 生效。
-func TestOpenCodeCatalogV1_StillSortsByUpdatedDesc(t *testing.T) {
+func TestOpenCodeCatalogRollbackV1_StillSortsByUpdatedDesc(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	quietLogger(t)
 	proxy := nonDescOrderProxy(t)
@@ -118,12 +118,11 @@ func TestOpenCodeCatalogV1_StillSortsByUpdatedDesc(t *testing.T) {
 	handlers.RegisterOpenCodeProxy(NewOpenCodeProxy(proxy.URL, "", ""))
 	serverConn, clientConn, cleanup := openTestConn(t)
 	defer cleanup()
-	// 不 SetConnCatalogCursorEpochV2 → UNDECLARED → v1。
 
-	handlers.handleOpenCodeRPC(serverConn, WireMessage{
+	handlers.ocHandleListSessions(serverConn, WireMessage{
 		BackendID: "opencode", Method: "list_sessions", RequestID: "oc-v1-order",
 		Params: mustJSONRaw(t, map[string]any{"directory": "/tmp/conv-v1", "limit": 10}),
-	})
+	}, "/tmp/conv-v1")
 	msgs := readJSONMaps(t, clientConn, 1)
 	ids := resultSessionIDsInOrder(t, msgs[0])
 	// v1 本地排序：updated desc [A(300), C(200), B(100)]。

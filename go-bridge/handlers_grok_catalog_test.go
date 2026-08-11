@@ -117,8 +117,8 @@ func TestGrokBuildEnrichedSessions_PreservesUpstreamOrder(t *testing.T) {
 	}
 }
 
-// Undeclared keeps v1 presentation while sharing native membership with declared/poller.
-func TestGrokCatalog_UndeclaredUsesNativeMembershipWithV1(t *testing.T) {
+// Stage 1 retains the now-unreachable v1 implementation as an immediate rollback seam.
+func TestGrokCatalog_RollbackV1UsesNativeMembership(t *testing.T) {
 	ws := t.TempDir()
 	agent := &fakeGrokCatalogAgent{
 		fakeAgent: &fakeAgent{name: "grokbuild", sessionInfos: []core.AgentSessionInfo{
@@ -130,16 +130,15 @@ func TestGrokCatalog_UndeclaredUsesNativeMembershipWithV1(t *testing.T) {
 	handlers.RegisterAgent("grokbuild", agent)
 	serverConn, clientConn, cleanup := openTestConn(t)
 	defer cleanup()
-	// 不 SetConnCatalogCursorEpochV2 → UNDECLARED。
 
-	handlers.HandleRPC(serverConn, WireMessage{
+	handlers.handleListSessions(serverConn, WireMessage{
 		BackendID: "grokbuild", Method: "list_sessions", RequestID: "r1",
 		Params: mustJSONRaw(t, map[string]any{}),
-	})
+	}, agent)
 	msgs := readJSONMaps(t, clientConn, 1)
 	ids := resultSessionIDs(t, msgs[0])
 	if len(ids) != 2 || ids[0] != "session_b" || ids[1] != "session_a" {
-		t.Fatalf("UNDECLARED sessions = %v, want v1-sorted native membership", ids)
+		t.Fatalf("rollback v1 sessions = %v, want v1-sorted native membership", ids)
 	}
 	if agent.fetchN != 1 {
 		t.Fatalf("FetchSessionList calls = %d, want 1", agent.fetchN)
@@ -271,7 +270,7 @@ func TestGrokCatalog_DirectoryV2FenceAndCrossScopeStale(t *testing.T) {
 	}
 }
 
-func TestGrokCatalog_UndeclaredDirectoryRemainsV1(t *testing.T) {
+func TestGrokCatalog_RollbackDirectoryRemainsV1(t *testing.T) {
 	dir := t.TempDir()
 	agent := &fakeGrokCatalogAgent{
 		fakeAgent: &fakeAgent{name: "grokbuild", sessionInfos: []core.AgentSessionInfo{{ID: "disk-must-not-appear", Directory: dir}}},
@@ -286,15 +285,15 @@ func TestGrokCatalog_UndeclaredDirectoryRemainsV1(t *testing.T) {
 	handlers.RegisterAgent("grokbuild", agent)
 	serverConn, clientConn, cleanup := openTestConn(t)
 	defer cleanup()
-	handlers.HandleRPC(serverConn, WireMessage{BackendID: "grokbuild", Method: "list_sessions", RequestID: "legacy-dir", Params: mustJSONRaw(t, map[string]any{"directory": dir, "limit": 1})})
+	handlers.handleListSessions(serverConn, WireMessage{BackendID: "grokbuild", Method: "list_sessions", RequestID: "legacy-dir", Params: mustJSONRaw(t, map[string]any{"directory": dir, "limit": 1})}, agent)
 	msg := readJSONMaps(t, clientConn, 1)[0]
 	data := msg["data"].(map[string]any)
 	cursor := data["nextCursor"].(string)
 	_, isV1, err := decodeListCursorV2(cursor)
 	if err != nil || !isV1 {
-		t.Fatalf("undeclared directory cursor isV1=%v err=%v", isV1, err)
+		t.Fatalf("rollback directory cursor isV1=%v err=%v", isV1, err)
 	}
 	if agent.fetchN != 1 {
-		t.Fatalf("undeclared directory native catalog calls=%d want 1", agent.fetchN)
+		t.Fatalf("rollback directory native catalog calls=%d want 1", agent.fetchN)
 	}
 }

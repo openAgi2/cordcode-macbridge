@@ -365,9 +365,8 @@ func (h *Handlers) ocHandleListSessions(conn Connection, msg WireMessage, dir st
 
 	started := time.Now()
 
-	// §10 发布顺序 / capability 门控：仅在 hello 声明 catalog_cursor_epoch_v2 的连接上启用
-	// v2 epoch-bearing cursor + cursor_stale 路径；未声明连接走既有 v1 paginateSessionList，
-	// byte-for-byte 不变。iOS 在 Phase 6 才声明该 capability → 当前 declared 恒为 false → 零行为变化。
+	// Public routing already requires catalog_cursor_epoch_v2. The undeclared branch remains a
+	// Stage-1 rollback seam only and is removed in Stage 2 after acceptance/observation.
 	if !h.eventPublisher.ConnCatalogCursorEpochV2(conn) {
 		h.ocHandleListSessionsV1(conn, msg, dir, rootsOnly, limit, cursor, started)
 		return
@@ -409,9 +408,8 @@ func (h *Handlers) ocHandleListSessions(conn Connection, msg WireMessage, dir st
 	conn.SendResult(msg.RequestID, result, nil)
 }
 
-// ocHandleListSessionsV1 是未声明 catalog_cursor_epoch_v2 连接的既有 list 路径：上游有界全量读
-// → 富 wire 管线 → paginateSessionList（v1 cursor）切片。与 1C 前的行为 byte-for-byte 一致；
-// v2 gate 把它隔离为 undeclared 专用，保证 capability 上线前零行为变化。
+// ocHandleListSessionsV1 is the Stage-1 rollback copy of the former undeclared list path:
+// bounded upstream read → rich wire mapping → paginateSessionList (v1 cursor).
 func (h *Handlers) ocHandleListSessionsV1(conn Connection, msg WireMessage, dir string, rootsOnly bool, limit int, cursor string, started time.Time) {
 	mapped, err := h.buildOpenCodeEnrichedSessions(msg.BackendID, dir, rootsOnly)
 	if err != nil {

@@ -123,11 +123,11 @@ func (p *EventPublisher) ConnReadFileV2(conn Connection) bool {
 }
 
 // SetConnCatalogCursorEpochV2 records that the client advertised catalog_cursor_epoch_v2 in
-// hello (cross-backend session catalog parity §4.1.1 / §10). Only connections marked here may
-// receive v2 (epoch-bearing) list_sessions cursors and cursor_stale; every other connection
-// keeps the legacy v1 cursor path byte-for-byte. This is a pure client-capability gate (no
-// server-side toggle): the capability declaration IS the §10 release gate. Replacement
-// connections must negotiate again; UnregisterConnection clears the mark.
+// hello. Only connections marked here may call list_sessions: non-Claude backends receive v2
+// epoch cursors/cursor_stale, while declared Claude keeps its dedicated v1-shaped compatibility
+// catalog. Undeclared list requests fail with protocol.capability_required. This flag does not
+// gate sessions_changed delivery. Replacement connections must negotiate again; unregister
+// clears the mark.
 func (p *EventPublisher) SetConnCatalogCursorEpochV2(conn Connection, enabled bool) {
 	if p == nil || conn == nil {
 		return

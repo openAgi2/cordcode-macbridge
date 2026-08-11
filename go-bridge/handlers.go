@@ -971,6 +971,20 @@ func (h *Handlers) HandleRPC(conn Connection, msg WireMessage) {
 		return
 	}
 
+	// Phase 8B minimum-client retirement: list_sessions requires the negotiated catalog
+	// contract for every backend. This gate intentionally lives before both the generic and
+	// OpenCode dispatchers so Codex, Grok, OpenCode and Claude share one wire error. The stage-1
+	// rollout keeps the old v1 implementations below unreachable for an immediate code revert.
+	if msg.Method == "list_sessions" && !h.eventPublisher.ConnCatalogCursorEpochV2(conn) {
+		retryable := false
+		conn.SendResult(msg.RequestID, nil, &WireError{
+			Code:      "protocol.capability_required",
+			Message:   "list_sessions requires catalog_cursor_epoch_v2",
+			Retryable: &retryable,
+		})
+		return
+	}
+
 	// opencode 全部走 ocProxy
 	if msg.BackendID == "opencode" && h.isOC() {
 		h.handleOpenCodeRPC(conn, msg)
@@ -2580,8 +2594,9 @@ func findClaudeSessionFile(sessionID string, optDir string) (projectDir string, 
 }
 
 func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent core.Agent) {
-	// Declared Codex/Grok use v2 snapshots. Undeclared connections share the same native visible
-	// membership below but retain the v1 cursor/comparator wire contract.
+	// Public routing reaches this function only after catalog_cursor_epoch_v2 negotiation.
+	// The undeclared v1 branches remain temporarily reachable only to rollback-focused tests in
+	// Stage 1; Stage 2 removes them after owner acceptance and the observation window.
 	if agent.Name() == "codex" && h.eventPublisher.ConnCatalogCursorEpochV2(conn) {
 		h.codexHandleListSessions(conn, msg, agent)
 		return
@@ -2596,8 +2611,7 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 	metrics := newSessionLoadRequestMetrics(conn, msg)
 	ctx := core.WithSessionLoadMetrics(h.ctx, metrics.context())
 
-	// Codex/Grok undeclared compatibility keeps the v1 cursor/comparator, but membership comes
-	// from the same native source and visibility helper as declared v2 and discovery.
+	// Stage-1 rollback seam: Codex/Grok v1 presentation over the same native membership.
 	if agent.Name() == "codex" || agent.Name() == "grokbuild" {
 		listCtx, cancel := context.WithTimeout(ctx, catalogRequestTimeout)
 		defer cancel()
