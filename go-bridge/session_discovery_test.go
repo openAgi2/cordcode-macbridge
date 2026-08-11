@@ -77,7 +77,6 @@ func TestSessionDiscoveryBroadcastsOnNewSession(t *testing.T) {
 func TestSessionDiscoveryBlockedBackendDoesNotStarveCodex(t *testing.T) {
 	previousInterval := sessionDiscoveryInterval
 	sessionDiscoveryInterval = 10 * time.Millisecond
-	t.Cleanup(func() { sessionDiscoveryInterval = previousInterval })
 	withCodexRootsDisabled(t)
 
 	handlers := newTestHandlers(t)
@@ -117,9 +116,21 @@ func TestSessionDiscoveryBlockedBackendDoesNotStarveCodex(t *testing.T) {
 	t.Cleanup(cleanup)
 	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "codex", SessionID: "list-view"})
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	t.Cleanup(func() { close(releaseBlocked) })
-	handlers.StartSessionDiscoveryWatcher(ctx)
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		handlers.runSessionDiscovery(ctx)
+	}()
+	t.Cleanup(func() {
+		close(releaseBlocked)
+		cancel()
+		select {
+		case <-watcherDone:
+		case <-time.After(time.Second):
+			t.Error("session discovery watcher did not stop")
+		}
+		sessionDiscoveryInterval = previousInterval
+	})
 
 	select {
 	case <-blockedStarted:
@@ -347,40 +358,59 @@ func TestSessionDiscoveryDoesNotBroadcastOnNoChange(t *testing.T) {
 func TestSessionDiscoverySurvivesPanicAndStillBroadcasts(t *testing.T) {
 	prev := sessionDiscoveryInterval
 	sessionDiscoveryInterval = 10 * time.Millisecond
-	t.Cleanup(func() { sessionDiscoveryInterval = prev })
+	withCodexRootsDisabled(t)
 
 	handlers := newTestHandlers(t)
-	// listHook: seed poll completes normally (records seen=s1); the FIRST regular
-	// poll panics, then all subsequent polls succeed. The watcher must recover and
+	// The seed poll completes normally (records seen=s1); the FIRST regular poll
+	// panics, then all subsequent polls succeed. The watcher must recover and
 	// still broadcast sessions_changed once s2 appears — proving it did not die.
+	workspace := t.TempDir()
 	callCount := 0
+	expanded := false
 	var mu sync.Mutex
-	agent := discoveryCodexAgent(t, &fakeAgent{
-		name:         "codex",
-		sessionInfos: []core.AgentSessionInfo{{ID: "s1"}},
-		listHook: func() {
+	agent := &fakeCodexCatalogAgent{
+		fakeAgent: &fakeAgent{name: "codex"},
+		fetchFn: func(context.Context, string) ([]core.AgentSessionInfo, error) {
 			mu.Lock()
+			defer mu.Unlock()
 			callCount++
-			n := callCount
-			mu.Unlock()
-			if n == 2 { // first non-seed poll panics once
+			if callCount == 2 { // first non-seed poll panics once
 				panic("simulated transcript parse failure")
 			}
+			infos := []core.AgentSessionInfo{{ID: "s1", Directory: workspace}}
+			if expanded {
+				infos = append(infos, core.AgentSessionInfo{ID: "s2", Directory: workspace})
+			}
+			return infos, nil
 		},
-	})
+	}
 	handlers.RegisterAgent("codex", agent)
 	serverConn, clientConn, cleanup := openTestConn(t)
 	t.Cleanup(cleanup)
 	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "codex", SessionID: "list-view"})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	handlers.StartSessionDiscoveryWatcher(ctx)
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		handlers.runSessionDiscovery(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-watcherDone:
+		case <-time.After(time.Second):
+			t.Error("session discovery watcher did not stop")
+		}
+		sessionDiscoveryInterval = prev
+	})
 
 	// After the seed (s1) and the panicking poll, add s2. The recovered watcher
 	// must still detect the growth on a later poll and broadcast sessions_changed.
 	time.Sleep(60 * time.Millisecond) // let seed + panic poll happen
-	agent.sessionInfos = []core.AgentSessionInfo{{ID: "s1"}, {ID: "s2"}}
+	mu.Lock()
+	expanded = true
+	mu.Unlock()
 
 	if err := clientConn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
 		t.Fatalf("set read deadline: %v", err)

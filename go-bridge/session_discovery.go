@@ -37,15 +37,16 @@ func (h *Handlers) StartSessionDiscoveryWatcher(ctx context.Context) {
 }
 
 func (h *Handlers) runSessionDiscovery(ctx context.Context) {
+	interval := sessionDiscoveryInterval
 	slog.Info("go-bridge: session discovery watcher started",
-		"interval", sessionDiscoveryInterval.String(),
+		"interval", interval.String(),
 		"backends", len(h.Agents()))
 	var workers sync.WaitGroup
 	for id, agent := range h.Agents() {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			h.runBackendSessionDiscovery(ctx, id, agent)
+			h.runBackendSessionDiscovery(ctx, id, agent, interval)
 		}()
 	}
 	<-ctx.Done()
@@ -56,25 +57,32 @@ func (h *Handlers) runSessionDiscovery(ctx context.Context) {
 // runBackendSessionDiscovery owns one backend's cadence and last-good fingerprint. Backends are
 // deliberately isolated: a provider that blocks despite ctx cancellation must not starve native
 // refresh for every other backend (owner A-O1 production failure, 2026-08-11).
-func (h *Handlers) runBackendSessionDiscovery(ctx context.Context, id string, agent core.Agent) {
-	// A provider panic may kill only its own worker. Recover and re-arm that backend without
-	// disturbing other workers; the first successful scan after restart seeds last-good state.
+func (h *Handlers) runBackendSessionDiscovery(ctx context.Context, id string, agent core.Agent, interval time.Duration) {
+	// Keep panic recovery inside this tracked worker. Re-arming via an untracked goroutine would
+	// let runSessionDiscovery report stopped while the replacement still accessed handler state.
+	for ctx.Err() == nil {
+		if !h.runBackendSessionDiscoveryLoop(ctx, id, agent, interval) {
+			return
+		}
+	}
+}
+
+func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string, agent core.Agent, interval time.Duration) (panicked bool) {
 	defer func() {
 		if r := recover(); r != nil {
+			panicked = true
 			slog.Error("go-bridge: session discovery backend worker recovered from panic — worker continuing",
 				"backend", id, "error", r)
-			go h.runBackendSessionDiscovery(ctx, id, agent)
 		}
 	}()
-
 	seen := map[string]string{}
 	h.snapshotBackendSession(ctx, seen, true, id, agent)
-	ticker := time.NewTicker(sessionDiscoveryInterval)
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return false
 		case <-ticker.C:
 			h.snapshotBackendSession(ctx, seen, false, id, agent)
 		}
