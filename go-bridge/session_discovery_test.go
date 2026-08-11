@@ -198,8 +198,9 @@ func TestSessionDiscoveryClaudeUsesGlobalCatalog(t *testing.T) {
 	if err := os.Mkdir(projectDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	elsewhereWorkspace := catalogFixtureWorkspace(t, projectsDir, "someuser-elsewhere")
 	writeClaudeCatalogFixture(t, filepath.Join(projectDir, "claude-abc.jsonl"),
-		"/Users/someuser/elsewhere", "elsewhere session", "2026-07-30T10:00:00Z")
+		elsewhereWorkspace, "elsewhere session", "2026-07-30T10:00:00Z")
 	catalog := newClaudeSessionCatalog(projectsDir)
 	handlers.claudeSessions = catalog
 
@@ -226,8 +227,9 @@ func TestSessionDiscoveryClaudeUsesGlobalCatalog(t *testing.T) {
 	if err := os.Mkdir(otherProject, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	app2Workspace := catalogFixtureWorkspace(t, projectsDir, "someuser-app2")
 	writeClaudeCatalogFixture(t, filepath.Join(otherProject, "claude-def.jsonl"),
-		"/Users/someuser/app2", "app2 session", "2026-07-30T10:05:00Z")
+		app2Workspace, "app2 session", "2026-07-30T10:05:00Z")
 
 	if err := clientConn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
 		t.Fatalf("set read deadline: %v", err)
@@ -262,8 +264,9 @@ func TestSessionDiscoveryFiresOnArchive(t *testing.T) {
 	if err := os.Mkdir(projectDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	workspace := catalogFixtureWorkspace(t, projectsDir, "someuser-work")
 	writeClaudeCatalogFixture(t, filepath.Join(projectDir, "claude-xyz.jsonl"),
-		"/Users/someuser/work", "to be archived", "2026-07-30T11:00:00Z")
+		workspace, "to be archived", "2026-07-30T11:00:00Z")
 	handlers.claudeSessions = newClaudeSessionCatalog(projectsDir)
 	handlers.RegisterAgent("claude", &fakeAgent{name: "claudecode", sessionInfos: nil})
 
