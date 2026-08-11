@@ -13,7 +13,7 @@
     "protocol": {
       "name": "cordcode-bridge",
       "version": 1,
-      "schemaRevision": "2026-05-07"
+      "schemaRevision": "2026-08-01"
     },
     "security": {
       "level": "lan",
@@ -21,6 +21,9 @@
       "hostCategory": "private",
       "isTailscaleCGNAT": false,
       "isPublicWS": false
+    },
+    "connectionPolicy": {
+      "preferLocalNetwork": false
     }
   },
   "capabilities": {

@@ -16,6 +16,34 @@ final class MacBridgeBehaviorTests: XCTestCase {
         }
         XCTAssertEqual(arguments[index + 1], "125")
     }
+
+    /// Relay-first + opt-in LAN:argv `-prefer-local-network` 必须镜像 `-relay-enabled` 的 = 形式。
+    /// 默认 RuntimeConfig 生成 false;显式 true 生成 true。
+    func testProcessArgumentsPreferLocalNetworkDefaultAndExplicit() {
+        let defaultConfig = RuntimeConfig(
+            executablePath: "/tmp/runtime",
+            dataDir: "/tmp/data",
+            logDir: "/tmp/logs"
+        )
+        XCTAssertFalse(defaultConfig.preferLocalNetwork, "RuntimeConfig.preferLocalNetwork 默认必须为 false")
+        let defaultArgs = RuntimeManager.processArguments(for: defaultConfig)
+        XCTAssertEqual(defaultArgs.first { $0.hasPrefix("-prefer-local-network=") }, "-prefer-local-network=false",
+                       "默认应下发 -prefer-local-network=false（Relay 底座）")
+
+        let enabledConfig = RuntimeConfig(
+            executablePath: "/tmp/runtime",
+            dataDir: "/tmp/data",
+            logDir: "/tmp/logs",
+            preferLocalNetwork: true
+        )
+        let enabledArgs = RuntimeManager.processArguments(for: enabledConfig)
+        XCTAssertEqual(enabledArgs.first { $0.hasPrefix("-prefer-local-network=") }, "-prefer-local-network=true",
+                       "显式 true 应下发 -prefer-local-network=true")
+
+        // argv = 形式（不是分开的 flag+value），与现有 -relay-enabled / -pairing-include-* 一致。
+        XCTAssertFalse(enabledArgs.contains("-prefer-local-network"), "不得使用分开的 flag 形式")
+    }
+
     func testGoDurationFormatting() {
         XCTAssertEqual(BridgeStatusViewModel.formatUptime("42.381s"), L10n.overviewUptimeUnderMinute)
         XCTAssertEqual(BridgeStatusViewModel.formatUptime("12m4.2s"), String(format: L10n.overviewUptimeMinutes, 12))
@@ -61,7 +89,8 @@ final class MacBridgeBehaviorTests: XCTestCase {
             includeRemote: nil,
             remoteAnalysis: nil,
             listenStatus: nil,
-            relay: .init(configured: true, endpoint: nil, routeId: nil)
+            preferLocalNetwork: nil,
+            relay: .init(configured: true, enabled: nil, connected: nil, endpoint: nil, routeId: nil)
         )
         let viewModel = BridgeStatusViewModel()
         viewModel.configure(apiClient: RetryingOverviewClient(remoteResults: [.failure(TestError.failed), .success(expected)]))

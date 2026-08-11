@@ -108,12 +108,14 @@ list_sessions
 list_projects
 fetch_todos
 get_workspace_diff
+get_turn_diff
+get_full_thread_diff
 get_usage
 run_diagnostics
 list_memory_files
 read_memory_file
 fetch_content_chunk
-read_file
+read_file_v2
 list_directory
 get_git_context
 checkout_git_branch
@@ -128,10 +130,90 @@ compress_context
 check_pending_notifications
 question_reply
 question_reject
+resolve_user_input
 get_delivery_prekey_status
 upload_delivery_prekeys
 get_delivery_chain_head
+set_observation_scope
+enable_relay_pairing
 ```
+
+## RPC Scopes (§6.3)
+
+Every backend RPC is mapped to one of seven scope tokens. The scope table is the single
+source of truth in `go-bridge/rpc_scopes.go` (`rpcScopeTable`); the method-name list above
+and this section are its human-readable mirror. The CI guards
+`TestEveryDispatchedRPCHasScope` / `TestScopeTableCoversAllMethods` keep the table and the
+dispatch surface in sync — any newly dispatched RPC MUST declare a scope or the build breaks.
+
+Scope check lives in `CapabilityPolicy.AuthorizeRPC`, which is the single funnel inside
+`HandleRPC` — it runs before `dispatchRPC` and before every out-of-switch method route
+(`set_observation_scope`, the three delivery RPCs, `enable_relay_pairing`), so all of them
+pass through the same gate. A denied RPC returns a stable error:
+
+```json
+{ "code": "forbidden", "message": "scope <scope> not granted" }
+```
+
+`ping` and `recovery_applied` are connection-level `type` messages (not `method` RPCs); they
+never reach `HandleRPC` method routing and are unconditional by construction. The dispatch
+`case "hello"` is a legacy no-op placeholder (returns `{ok:true}`); the real handshake is the
+`type:"hello"` message handled separately, so `hello` is mapped to an empty (unconditional)
+scope only to keep the CI guard satisfied.
+
+| scope | RPCs | default for a paired device |
+|---|---|---|
+| `session.read` | `get_session`, `get_session_messages`, `get_session_projection`, `list_sessions`, `list_pinned_sessions`, `fetch_todos`, `check_pending_notifications`, `get_turn_diff`, `get_full_thread_diff` | ✅ |
+| `session.write` | `create_session`, `send_message`, `abort_generation`, `resume_session`, `delete_session`, `rename_session`, `archive_session`, `set_session_pinned`, `compress_context`, `resolve_permission`, `question_reply`, `question_reject`, `resolve_user_input`, `share_session`, `set_observation_scope` | ✅ |
+| `config.read` | `list_providers`, `list_models`, `list_agents`, `list_permission_modes`, `get_usage`, `list_memory_files`, `read_memory_file`, `run_diagnostics` | ✅ |
+| `config.write` | `set_provider`, `switch_model`, `set_permission_mode` | ✅ |
+| `workspace.read` | `get_workspace_diff`, `read_file_v2`, `list_directory`, `get_git_context`, `fetch_content_chunk`, `check_pull_request_support` | ✅ |
+| `workspace.mutate` | `checkout_git_branch`, `create_git_branch`, `create_git_worktree`, `create_pull_request`, `commit_and_push`, `list_projects` | ✅ (recommend an owner per-action confirmation on top) |
+| `delivery.manage` | `get_delivery_prekey_status`, `upload_delivery_prekeys`, `get_delivery_chain_head`, `enable_relay_pairing` | ✅ (own device chain only) |
+| _(empty — unconditional)_ | `hello` (legacy dispatch placeholder) | ✅ (no scope required, else handshake deadlock) |
+
+**Backward compatibility.** A paired device with no `grantedScopes` recorded (every existing
+persisted record) is treated as holding all seven scopes, so this change does not alter the
+current authorization semantics. The value is structural: a future restricted pairing (e.g.
+read-only iPad), a hard gate forcing every new RPC through security review, and client-side
+UI gating off `hello_ack.grantedScopes`.
+
+### Hello scope fields (additive, optional)
+
+`hello` may carry `requestedScopes` and `hello_ack` carries `grantedScopes`. Both are optional
+additive fields; old clients that do not send/parse them are unaffected.
+
+```ts
+// hello (request) — additive
+{
+  ...,
+  requestedScopes?: string[]   // client-declared intent; not enforced yet (forward compat)
+}
+
+// hello_ack — additive
+{
+  ...,
+  grantedScopes?: string[]    // the scopes this device actually holds; client may UI-gate on it
+}
+```
+
+When the device record has explicit `grantedScopes`, `hello_ack.grantedScopes` echoes that
+restricted set; otherwise it echoes the full default set (`DefaultGrantedScopes`), so a normal
+paired client always observes all seven scopes today.
+
+### Claude resume ownership preflight
+
+For `send_message`, MacBridge performs a best-effort ownership preflight only when the selected
+backend is `claudecode`, the request resumes a non-empty session id, and that session is not already
+backed by a live entry in the current MacBridge registry. If any matching session stub identifies a
+still-live Claude process, the request fails before `StartSession(--resume)` with
+`session.held_by_external_worker`. If the lister is unavailable or the check errors/times out, it
+fails closed with `session.owner_check_failed`. Both errors carry `retryable: true`; clients surface
+the failure and let the user retry after external state changes rather than automatically retrying.
+
+This is not an ownership lock. Corrupt/unreadable stubs may be skipped, and another client can start
+a process after the check (TOCTOU). New sessions, already registry-owned sessions, and non-Claude
+backends do not use this preflight.
 
 ## Events
 
@@ -176,6 +258,9 @@ context_compressed
 context_usage_updated
 question_asked
 question_resolved
+user_input_requested
+user_input_resolved
+turn_diff_ready
 projection_patch
 projection_snapshot
 sync_invalidate
@@ -250,6 +335,62 @@ field, type, or wire value was changed.
     `AskUserQuestion` before event emission, so the iOS question UI does not
     appear in those modes.
 
+### Structured user input v2 (`structured_user_input_v1`)
+
+`structured_user_input_v1` is the **multi-question, multi-select** successor to the
+single-question `question_asked` / `question_reply` path. It is an additive, non-breaking
+capability: a backend advertises it per-descriptor only when its adapter, responder, and the
+Projection Kernel reducer are all ready; clients that do not see it keep the v1 path verbatim.
+The v1 and v2 paths MUST NOT be mixed for the same interaction, and v2 MUST NOT fall back to
+`question_reply` on failure (`.off` is an explicit legacy mode, not a runtime fallback).
+
+- `user_input_requested` is the bridge event for one structured-input interaction. It carries
+  `turnId`, `interactionId`, `status` (`pending` normal, or `failed` for malformed questions —
+  both project once), `questions[]`, `canRespond`, `canReject`, `expiresAt?`, and
+  `diagnosticCode?` (e.g. `invalid_backend_request`). Each question is
+  `{ id, header?, prompt, answerMode: "single"|"multiple"|"text", options[], allowsCustomAnswer,
+  isSecret, required }`; each option is `{ id, label, description? }`. Stable ids are derived
+  (lowercase SHA-256 prefix `"ui_"`): Codex `interactionId = "ui_"+sha256("codex\0"+requestIdType+
+  "\0"+requestIdValue+"\0"+threadId+"\0"+turnId+"\0"+itemId)[:32]`, Claude
+  `interactionId = "ui_"+sha256("claudecode\0"+requestId)[:32]`; `questionId = interactionId+"_q_"+i`,
+  `optionId = questionId+"_o_"+j`.
+- `user_input_resolved` carries `turnId`, `interactionId`, `status` (`answered`|`rejected`|
+  `auto_resolved`|`unavailable`|`failed`), `source` (`ios`|`mac`|`other_client`|`backend`), and
+  `resolvedAt`. The projection never stores answer text (esp. for `isSecret`); the resolved event
+  only carries status/source/resolvedAt.
+- `resolve_user_input` is the backend-neutral bridge RPC for answering/rejecting a v2
+  interaction. Payload: `{ interactionId, clientActionId, action: "answer"|"reject",
+  answers?: [{ questionId, values: [{ kind: "option"|"text", optionId?, text? }] }] }`. MacBridge
+  routes it to the backend-specific `UserInputResponder` (Codex app-server JSON-RPC
+  `resolveUserInput`/`interrupt`, or Claude `control_response` allow with `updatedInput.answers` /
+  deny). It returns `{ interactionId, outcome: "accepted"|"already_resolved"|"in_progress",
+  currentStatus, headRev }` or a
+  `UserInputError{ code, message }` (`interaction_not_found`, `invalid_answer_shape`,
+  `backend_response_failed`, `session_not_active`). `outcome/currentStatus` acknowledges the action
+  and may remain `in_progress/pending` when another writer holds the claim. Only the projected
+  `user_input` part at `headRev` establishes terminal UI state; the RPC result never writes card
+  state independently.
+- Claude v1 invariants (adapter-enforced, design §9): `allowsCustomAnswer=true`, matching Claude's
+  real Other/custom-result path; `multiSelect` maps to `single`/`multiple`; empty
+  options are malformed (not normalized to text); each question is `required=true`, `isSecret=false`;
+  duplicate question text within one interaction is `invalid_backend_request` (it cannot be an
+  unambiguous `answers` map key). Codex has no verified reject path (`canReject=false`); Claude has
+  a real deny `control_response` (`canReject=true`).
+- Projection Kernel (design §10): one `user_input` part per `interactionId`, upserted in place
+  (never a second "answered" card); `execution.phase=requires_action` while any active-turn
+  `user_input` part is `pending`; resolved updates the part in place and reverts phase per active
+  turn status. The reducer is the single consumer for both live and hydrate; identityless frames
+  (missing `turnId`/`interactionId`) are dropped without committing a revision, and a `resolved`
+  with no matching requested part is dropped (no fabrication, no second writer).
+- One canonical backend interaction registry owns each pending responder. Legacy
+  `question_asked/question_resolved` frames are derived strictly one-way from that Kernel interaction
+  for legacy connections; `session_sync_v2` connections receive only projection updates. Legacy raw
+  events never feed back into the Kernel and never create a second writable registry.
+
+`schemaRevision` is bumped to `2026-08-02` for this additive set (new capability, RPC, part
+variant, part op, event names); the protocol major version is unchanged and old clients ignore
+the unknown names.
+
 ## Mapping Notes
 
 iOS accepts compatible session directory fields in this priority order:
@@ -298,11 +439,55 @@ include Tailscale self-signed `wss://100.x` candidates, because those require a 
 SPKI pin. Clients should treat `local` as primary, race or fallback across `locals` inside the direct
 phase, and keep Relay as the remote path when available.
 
+## Connection policy (control-plane)
+
+`connectionPolicy` is a **control-plane** preference delivered over authenticated channels. Product
+mental model: **Relay is the stable connection base; same-LAN direct is an opt-in performance
+optimization.**
+
+```ts
+connectionPolicy?: {
+  preferLocalNetwork: boolean  // default false
+}
+```
+
+It appears in four authenticated payloads only:
+
+- `hello_ack.bridge.connectionPolicy`
+- Relay-first `RelayFirstResult.connectionPolicy`
+- direct `pairing_complete.bridge.connectionPolicy`
+- `GET /internal/remote/status` top-level `preferLocalNetwork`
+
+`preferLocalNetwork` is `false` by default. Only when the Mac owner explicitly enables it does iOS
+prefer ordinary LAN direct (`ws://<lan-ip>`, security level `lan`) on Wi-Fi/mixed networks, falling
+back to Relay on failure. Cellular stays on Relay. It does **not** affect Tailscale TLS pinning, URL
+security classification, or an explicit custom-remote intent.
+
+Candidate discovery is independent of the preference: when `preferLocalNetwork` is `false` the Mac
+still publishes the full LAN candidate set (`currentURLs.locals`, `RelayFirstResult.localUrls`), so
+toggling the switch on later requires no re-pairing and DHCP/address changes still refresh. The
+presence of candidates alone never changes policy.
+
+The field is optional everywhere. A new client decoding an old payload treats a missing
+`connectionPolicy` as `preferLocalNetwork: false`; an old client ignores the new field.
+
+**Session Sync v2 red line:** `connectionPolicy` is control-plane only. It MUST NOT appear in any
+`EventMessage.data`, MUST NOT enter the timeline via publish/ingest, and MUST NOT be added to
+`SessionProjection` or matched in the projection reducer. Path migration (LAN ↔ Relay) only swaps
+transport — it bumps connection generation, invalidates stale in-flight frames, and re-aligns the
+same `SessionProjection` via the unified reconcile path. The preference, URL candidates, and actual
+transport kind do not participate in projection ownership, completion, or the timeline reducer.
+
+`GET /internal/remote/status` also exposes a real `relay.connected` boolean (independent of
+`relay.configured`): the Mac only renders "connected to relay" when the encrypted channel's status
+provider reports connected AND relay is enabled and configured. `configured == true` alone MUST NOT
+be displayed as connected.
+
 ## Session Pagination
 
 There are two separate pagination surfaces:
 
-1. `list_sessions` session-list pagination. These fields are additive and may be used when a backend returns the standard `{ sessions, nextCursor, hasMore }` envelope. Clients MUST treat `cursor` as opaque and scoped to backend, bridge/backend identity, project or directory bucket, and the current backend process lifetime unless a future protocol marks it durable. OpenCode may carry an upstream cursor here; file-backed backends may carry a bridge-owned cursor.
+1. `list_sessions` session-list pagination. These fields are additive and may be used when a backend returns the standard `{ sessions, nextCursor, hasMore }` envelope. The `cursor`/`nextCursor` exposed to clients is always **bridge-owned**: MacBridge never forwards an upstream catalog cursor across the bridge boundary (upstream cursors from Codex `thread/list` or Grok ACP are used only for MacBridge's internal bounded read). Clients MUST treat `cursor` as opaque and scoped to backend, bridge/backend identity, and project or directory bucket. The bridge-owned cursor is **durable across catalog subprocess/connection restarts**: it is NOT invalidated when the backend catalog process or the bridge connection restarts, as long as the catalog data fingerprint is unchanged. Only a fingerprint change (new/updated/removed sessions) or page-0 snapshot TTL expiry invalidates it, reported via `cursor_stale` (see § Cursor invalidity below). OpenCode `/session` is array-only and exposes no upstream cursor; MacBridge synthesizes the bridge-owned cursor over the bounded in-memory fetch.
 2. `get_session_messages` message-history pagination. This is gated by the existing `session_pagination` backend capability and is unrelated to OpenCode project bucket list loading.
 
 ### `list_sessions` paging
@@ -332,8 +517,35 @@ Rules:
 
 - Clients MUST NOT parse cursor contents or reuse a cursor across backend/project/directory scopes.
 - `hasMore` is authoritative. Do not infer more pages from `sessions.length == limit`.
-- For OpenCode directory-scoped lists, stable upstream servers may still be array-only and omit a cursor. MacBridge fetches a bounded upstream page, then exposes bridge-owned cursor pagination over that in-memory result; `hasMore` reflects the remaining bridge-owned slice for the current request scope.
+- For OpenCode directory-scoped lists, the upstream `/session` endpoint is array-only (no upstream cursor). MacBridge fetches a bounded upstream page (≤100, the upstream API's hard cap), then synthesizes bridge-owned cursor pagination over that in-memory result; `hasMore` reflects the remaining bridge-owned slice for the current request scope. If the workspace has more than 100 sessions, the excess is silently invisible at the upstream boundary — a known ceiling imposed by the upstream API shape, not a bridge choice.
 - `rootsOnly` remains valid for legacy/non-OpenCode list calls. OpenCode forwards it as the server-side root-session filter; clients must still scope cursors to the same backend/project/directory.
+
+### Cursor invalidity (`cursor_stale`)
+
+`cursor_stale` is the shared, generic cursor-invalidity error code for BOTH pagination surfaces — `list_sessions` session-list paging and `get_session_messages` history paging. It is a pagination-negotiation result, NOT a catalog live/stale state and NOT a UI error: clients MUST NOT surface it as an error. On receipt, the client discards the current cursor chain and reloads from page-0 (list) / the first page (history), merging the fresh result with unchanged local state by id.
+
+Trigger reasons differ per surface:
+
+- `list_sessions` (bridge-owned snapshot cursor, v2): the cursor's snapshot epoch no longer matches the current catalog fingerprint (sessions added/updated/removed); the page-0 snapshot has passed TTL with no fresh snapshot rebuilt; or no snapshot exists for the scope. A v1 cursor received from a connection that declared `catalog_cursor_epoch_v2` is also treated as stale (it carries no epoch).
+- `get_session_messages` (history): the indexed transcript prefix the cursor referenced was rewritten, truncated, or replaced, so ancestry can no longer be proven continuous (see § Cursor semantics below).
+
+The client rebuild contract is identical for both: drop the cursor chain, suppress error display, reload page-0 / first page.
+
+### Capability: `catalog_cursor_epoch_v2`
+
+A CLIENT opt-in capability for the bridge-owned session-list snapshot cursor (design `docs/2026-08-09-cross-backend-session-catalog-parity-implementation-plan.md` §4.1.1). The client declares `capabilities: ["catalog_cursor_epoch_v2"]` in `hello`; MacBridge echoes `capabilities["catalog_cursor_epoch_v2"] = true` in `hello_ack`.
+
+- **Declared, non-Claude backend**: MacBridge emits the v2 bridge-owned cursor (opaque; carries a snapshot epoch derived from the catalog fingerprint, plus the v1 content position) and returns `cursor_stale` (per § Cursor invalidity) when the epoch mismatches, the snapshot expired, or a stale v1 cursor arrives. The client implements the `cursor_stale → discard chain + resend page-0` contract.
+- **Declared, Claude backend**: declaration proves the client satisfies the minimum-client capability contract, but Claude has no supported native catalog. MacBridge therefore continues the dedicated Claude compatibility catalog successfully; its cursor remains v1-shaped and MUST NOT be presented as an epoch-v2 cursor.
+- **Undeclared**: `list_sessions` fails with a stable wire error: `code = "protocol.capability_required"`, `retryable = false`, and a message containing `catalog_cursor_epoch_v2`. The error response MUST NOT contain a success-shaped `sessions` field, including an empty array. This applies to Codex, Grok, OpenCode, and Claude; undeclared clients have no generic v1 success path.
+
+Advertising `catalog_cursor_epoch_v2` is an explicit promise that the client has implemented `cursor_stale → resend page-0`; clients MUST NOT advertise the capability while still treating `cursor_stale` as a fatal/unexpected error. This mirrors the `session_sync_v2` MUST-NOT-advertise contract: the capability is a versioned opt-in/out, not a runtime fallback.
+
+**Intentional same-major minimum-client retirement**: the undeclared error is an intentional breaking deprecation under protocol major 1, approved as a minimum-client retirement. It MUST NOT be described as a non-breaking additive change. A runtime failure on a declared v2 path MUST NOT fall back to v1.
+
+**Push semantics are independent**: an undeclared authenticated connection can still receive backend-scoped `sessions_changed` according to the normal subscription/observation rules. `catalog_cursor_epoch_v2` gates the `list_sessions` RPC/cursor contract only; it MUST NOT gate EventPublisher delivery. A subsequent undeclared `list_sessions` request returns `protocol.capability_required` as specified above.
+
+**Release ordering**: supported clients MUST implement and advertise the capability before the server begins returning the undeclared error. In particular, the production remote-web client must ship the declaration and one-shot `cursor_stale → page-0` recovery first. Canonical protocol and client readiness MUST be published before the MacBridge service flip; code retained only for rollback does not restore a supported undeclared success contract.
 
 ### Capability
 
@@ -350,10 +562,306 @@ implements file-relay content streaming for **codex** (rollout) and **claude**/`
 also emits `user_message` with `{ itemId, turnId, text }` when the rollout persists the external
 prompt; `itemId` is the response-item message ID and is reused by rich history reconciliation.
 **opencode** is push-native via its SSE firehose (separate path, not this capability); **grokbuild**
-is pending the leader-socket subscriber. Clients seeing this capability SHOULD NOT start
+streams external-turn content through the projection pipeline (updates.jsonl file-tailer fallback,
+`session_sync_v2`) and does not advertise this capability yet. The external prompt
+(`user_message_chunk`) is caught up at relay attach when its turn is still in flight and emitted as
+`user_message` attributed to that turn's source-proven `promptId`; prompts of completed turns come
+from cold hydrate (`chat_history.jsonl`). Clients seeing this capability SHOULD NOT start
 discovery/active external-turn probes and SHOULD keep only a `turn_completed` reconcile + a
 low-frequency watchdog; clients on backends without it fall back to current polling. Adding the
 string is non-breaking (extensible `capabilities` array); no protocol major-version bump.
+
+### Capability: `supports_checkpoint` / `supports_conversation_rollback`
+
+§6.1 checkpoint 只读 diff. A backend advertises `supports_checkpoint` in `capabilities`
+when its agent driver implements the `core.CheckpointProvider` opt-in interface. MacBridge
+then captures a HIDDEN git ref snapshot of the agent workspace after each completed turn, so
+the client can later fetch a per-turn or full-thread file diff (read-only). The snapshot is a
+workspace FILE snapshot only — it is NOT a session truth source; session truth always stays in
+the official CLI. Capture honestly no-ops on a non-git workspace (`workspace_not_git`); no
+mock/placeholder snapshot is ever written.
+
+`supports_conversation_rollback` is advertised when the driver implements the forward-compat
+`core.ConversationRollbackProvider` interface. No current driver implements it, so the
+capability is absent everywhere today and the (currently hidden) revert entry stays disabled
+until one does.
+
+Both are extensible `capabilities` strings; adding them is non-breaking (no major version bump).
+No backend-id hard-branching; derivation is by type assertion on the driver.
+
+### Capability: `supports_workspace_browse` (§6.5)
+
+A backend advertises `supports_workspace_browse` in `capabilities` when its agent driver
+implements the `core.WorkDirSwitcher` interface (claudecode, codex, opencode all do). iOS
+uses this to gate the workspace file browser entry (distinct from the pre-session remote
+directory picker). The capability is additive (extensible string, no major version bump).
+
+### Capability: `supports_pull_requests` (§7.1)
+
+A backend advertises `supports_pull_requests` when all three preconditions are met:
+1. the agent implements `core.WorkDirSwitcher` (has a known workdir);
+2. `git remote get-url origin` returns a URL containing `github.com`;
+3. `gh` CLI is installed and authenticated on the Mac.
+
+When present, iOS may show a "Create Pull Request" entry on the session Git panel;
+when absent, the entry is hidden. The capability is additive (extensible string, no major
+version bump).
+
+### Capability: `supports_commit_message` (Phase 1 §4.1 B)
+
+A backend advertises `supports_commit_message` when the agent driver implements
+`core.CommitMessageGenerator` (one-off, non-interactive commit message generation).
+Current implementations: `claudecode`, `codex` (`opencode`/`grokbuild` do not implement
+it). When present, iOS may show the "Commit and Push" entry with a generated-message
+option on the session Git panel; when absent, that entry is hidden. Additive (extensible
+string, no major version bump).
+
+### RPC: `commit_and_push` (Phase 1 §4.1 B)
+
+Commits all changes (tracked modifications + new untracked files, honoring `.gitignore`)
+and pushes the current branch. The commit message is either the caller-provided `message`,
+or — when empty — generated non-interactively by the agent (`CommitMessageGenerator`).
+It never touches a chat session or the timeline (SSV2 control-plane). `create_pull_request`
+semantics are unchanged (not split).
+
+Request:
+
+```ts
+{
+  directory: string,   // required; must pass validateGitDirectory
+  message?: string     // optional; empty → agent generates (requires supports_commit_message)
+}
+```
+
+Response:
+
+```ts
+{
+  head: string,        // new HEAD commit sha after commit
+  pushed: boolean,     // true after a successful push
+  remote: string       // upstream ref pushed to, e.g. "origin/main" or "origin/<branch>"
+}
+```
+
+Failure codes: `invalid_params` / `invalid_directory` / `not_a_git_repo` /
+`nothing_to_commit` (clean working tree) / `commit_message_generation_unsupported` (agent
+has no `CommitMessageGenerator`) / `commit_message_generation_failed` /
+`git_status_failed` / `git_add_failed` / `git_diff_failed` / `git_commit_failed` /
+`push_rejected` (no upstream + detached HEAD, or push rejected) + real git stderr summary.
+
+### RPC: `create_pull_request` (§7.1)
+
+Creates a GitHub pull request from the current workspace. All params except `base` are
+required.
+
+| field | type | description |
+|-------|------|-------------|
+| `directory` | string | Git repository root (must pass `validateGitDirectory`). |
+| `base` | string? | Target branch; absent → repository default. |
+
+`title` / `body` are deprecated and ignored by the current handler. The PR title and body are generated on the Mac side by the session's agent from the real diff and the repository `PULL_REQUEST_TEMPLATE.md` (if present).
+
+Server-side, the handler checks the GitHub remote, generates a sanitised branch name
+`cordcode/<slug>` (whitelist `^cordcode/[a-z0-9][a-z0-9-]{0,60}$`), checks out or
+creates the branch, pushes to origin, and invokes `gh pr create`. The response carries
+`pr_url`, `branch`, and `base` (see `handlers_git.go` `handleCreatePullRequest`; an
+earlier version of this doc also listed `remote_url`, which the handler never sends).
+
+**PR template handling (T3-style).** Before invoking `gh pr create`, the server resolves
+the repo root via `git rev-parse --show-toplevel` and reads the first existing
+`PULL_REQUEST_TEMPLATE.md` (repo root, then `.github/`; ≤64 KiB; read-only — fixed
+relative names only). The template text (if any) is included in the prompt sent to the
+session's agent together with the real diff; the agent generates the title and body.
+No placeholder/append merge protocol exists. The server never writes the template back
+to the workspace or git.
+
+### RPC: `check_pull_request_support` (§7.1)
+
+Returns whether the current workspace directory supports PR creation **right now**.
+It re-runs the same checks as `supports_pull_requests`: `git remote get-url origin` must
+contain `github.com`, and `gh` must be installed. Clients call this when opening the diff
+sheet instead of trusting a cached hello_ack capability, because the capability is
+workdir-scoped and becomes stale after switching directories.
+
+Request:
+
+```ts
+{
+  directory: string
+}
+```
+
+Response:
+
+```ts
+{
+  supported: boolean
+}
+```
+
+### RPC: `get_git_context` (§6.5 + Phase 1 §4.1)
+
+Returns the git context for a workspace directory: repository root, current branch,
+worktrees, local branches, and (Phase 1 §4.1, all optional / additive) workspace
+status fields. Old clients ignore the optional fields.
+
+Request:
+
+```ts
+{
+  directory: string
+}
+```
+
+Response:
+
+```ts
+{
+  repositoryRoot: string,
+  // detached HEAD → currentBranch is "" (empty string), never the literal "Detached HEAD".
+  currentBranch: string,
+  worktrees: { path: string, branch?: string, isCurrent: boolean }[],
+  branches: string[],
+
+  // Phase 1 §4.1 status extension (all optional; omitted → client degrades gracefully).
+  isRepo?: boolean,            // true when rev-parse reached here; absent → treat as unknown.
+  isDirty?: boolean,           // git status --porcelain non-empty (untracked counts as dirty).
+  changedFileCount?: number,   // len(workspace diff files); INCLUDES untracked (not pure numstat).
+  additions?: number,          // workspace diff additions; same source as changedFileCount.
+  deletions?: number,          // workspace diff deletions; untracked files contribute 0.
+  hasUpstream?: boolean,       // rev-parse --abbrev-ref @{u} success; no upstream → false (NOT error).
+  aheadCount?: number,         // ONLY when hasUpstream; no upstream → omitted (NOT 0).
+  behindCount?: number,        // ONLY when hasUpstream; no upstream → omitted (NOT 0).
+  defaultBranch?: string,      // symbolic-ref origin/HEAD; no origin → omitted (client must NOT guess "main").
+  openPullRequest?: { number: number, url: string, state: string } | null
+                               // gh pr view for current branch; no PR / non-GitHub / no gh → omitted/null.
+}
+```
+
+**Failure semantics (Phase 1 §4.1.1, authoritative):**
+- `isRepo` failure → whole RPC error (no half-status).
+- `isDirty` / `changedFileCount` / `additions` / `deletions`: all three derive from one
+  `loadWorkspaceDiff` call; any failure → whole RPC error (same-error, no half-status, no
+  independent field omission).
+- `hasUpstream` no-upstream → `false` (exit 128), NOT an error.
+- `aheadCount`/`behindCount` no-upstream → omitted (NOT 0).
+- `defaultBranch` no-origin → omitted (client must NOT guess `main`).
+- `openPullRequest`: no-PR and cannot-query are both omitted/null — client cannot distinguish
+  them but must NOT fabricate a PR object. `gh pr view` network behavior needs real GitHub
+  (verify with a fixture during implementation).
+
+### RPC: `list_directory` params (§6.5)
+
+`list_directory` accepts optional fields that refine listing behavior. All are additive
+— clients that do not send them get the previous default behavior unchanged.
+
+| field | type | default | description |
+|-------|------|---------|-------------|
+| `path` | string | (required) | Directory to list; `""` or `~` → home dir |
+| `limit` | number | `200` | Max top-level entries; `0` → default. Capped to `500`. |
+| `offset` | number | `0` | Skip N top-level entries before listing. |
+| `depth` | number | `1` | Recursion depth. `1` = immediate children only; max `3`. Symlink entries are never recursed. |
+| `workspace_root` | string | (absent) | When present, the handler validates `realpath(path)` starts with `realpath(workspace_root)`, rejecting `../` / absolute-outside traversals. Symlink entries are marked `isSymlink:true` and treated as unexpandable leaf nodes. When absent, the RPC retains the existing broad (picker) behavior — `path` is resolved via `expandPath` with no workspace-bound restriction. |
+
+Response shape (all fields except `currentPath` and `items` are additive):
+
+```json
+{
+  "currentPath": "/absolute/resolved/path",
+  "items": [
+    { "name": "main.go",  "path": "/.../main.go",  "isDirectory": false },
+    { "name": "src",      "path": "/.../src",      "isDirectory": true },
+    { "name": "src-link", "path": "/.../src-link", "isDirectory": false, "isSymlink": true }
+  ],
+  "limit": 200,
+  "offset": 0,
+  "depth": 1,
+  "hasMore": false
+}
+```
+
+| response field | description |
+|----------------|-------------|
+| `currentPath` | Canonical absolute path that was actually listed. |
+| `items[].name` | Entry name (hidden files prefixed with `.` are filtered out). |
+| `items[].path` | Full absolute path. |
+| `items[].isDirectory` | `true` for directories (non-symlink). Symlink-to-dir reports `false`. |
+| `items[].isSymlink` | `true` if the entry is a symlink (always a leaf — never recursed). |
+| `limit` / `offset` / `depth` | Echoed for client-side pagination logic. |
+| `hasMore` | `true` when more top-level entries exist beyond `offset + limit`. |
+
+### Event: `turn_diff_ready`
+
+Optional control-plane push (§6.1). After MacBridge successfully writes a turn's checkpoint
+git ref, it emits `turn_diff_ready` so clients can surface a per-turn `+/-` summary without
+polling. It carries NO full patch (plan §6.1). Clients that miss it fall back to the
+`get_turn_diff` / `get_full_thread_diff` RPCs. The event is control-plane only: it never
+mutates the message projection (SSV2 guardrail 8 enumerated exception — not a second timeline
+writer).
+
+```ts
+{
+  checkpointRef: string,            // refs/cordcode/checkpoints/<backendId>/turn/<N>/r<short>
+  turnNumber: number,               // 1-based count of the just-completed turn
+  files: Array<{ path: string; additions: number; deletions: number }>,  // capped (~50)
+  truncated: boolean                // true when the file list hit the event cap; use RPC for full
+}
+```
+
+### RPC: `get_turn_diff`
+
+Returns the per-file diff for a single completed turn (between the `turnNumber-1` and
+`turnNumber` checkpoint refs). For `turnNumber == 1` the baseline is git's empty tree, so the
+turn's files appear as additions. Gated on `supports_checkpoint`: returns `checkpoint_unsupported`
+for backends that do not implement it, and `workspace_not_git` when the resolved workspace is
+not a git repository. Both RPCs are scoped to `session.read` (see the scope table in
+**RPC Scopes (§6.3)**; the scope gate is live, and a paired device holds all scopes by default).
+
+Request:
+
+```ts
+{
+  sessionId: string,
+  turnNumber: number,            // 1-based
+  directory?: string             // optional; falls back to the session registry + WorkDirSwitcher
+}
+```
+
+Response:
+
+```ts
+{
+  files: Array<{ path: string; additions: number; deletions: number; diff?: string }>,  // diff = unified patch (RPC only; turn_diff_ready stays patch-free)
+  additions: number,             // totals across files
+  deletions: number,
+  truncated: boolean,            // true when files exceed the server cap (~500)
+  checkpointRef: string,         // the turn's ref (for debugging / client-side caching)
+  fromRef?: string               // the previous turn's ref, or empty when turnNumber == 1
+}
+```
+
+Stable error codes: `checkpoint_unsupported`, `workspace_not_git`, `workspace_missing`,
+`checkpoint_not_found` (no ref for the given turn), `invalid_directory`, `invalid_params`.
+
+### RPC: `get_full_thread_diff`
+
+Returns the aggregate per-file diff from the EARLIEST captured turn to the LATEST for a session.
+When only one turn is captured, or when comparing against the session's first captured state,
+the baseline falls back to git's empty tree so the turn's files appear as additions. Same
+capability gating and error codes as `get_turn_diff`.
+
+Request:
+
+```ts
+{
+  sessionId: string,
+  directory?: string
+}
+```
+
+Response shape is identical to `get_turn_diff` (`files`, `additions`, `deletions`,
+`truncated`, `checkpointRef`, `fromRef`), with `checkpointRef` = the latest turn's ref and
+`fromRef` = the earliest turn's ref (or empty when the empty-tree baseline is used).
 
 ### Event: `sessions_changed`
 
@@ -405,7 +913,9 @@ When `paginate` is true and the backend supports it, the response data is:
 - Cursors are opaque and versioned. Clients must not introspect or construct them.
 - A cursor is only valid for the session and backend it was issued for.
 - `cursor_stale` means the history prefix the cursor referenced can no longer be proven continuous;
-  reset to the first page.
+  reset to the first page. `cursor_stale` is the shared generic invalidity code for both this
+  history surface and the `list_sessions` snapshot cursor — see § Cursor invalidity for the full
+  trigger-reason / rebuild-contract enumeration.
 
 ## Session Projection Stream (session_sync_v2)
 
@@ -419,8 +929,8 @@ patches/snapshots and MUST NOT dual-source merge content against `get_session_me
 - **Single outbound funnel.** Projection frames leave MacBridge only through the existing
   `EventPublisher` per-connection dispatch (they reuse `broadcaster` + observation target
   resolution). There is no parallel projection websocket / SSE pipe.
-- **Production scope.** Codex, Claude and OpenCode project through the same Kernel contract;
-  iOS and remote-web consume the same SPS ownership semantics.
+- **Production scope.** Codex, Claude, OpenCode and Grok Build project through the same Kernel
+  contract; iOS and remote-web consume the same SPS ownership semantics.
 
 ### Capability: `session_sync_v2`
 
@@ -530,6 +1040,20 @@ Exact field shapes (`BridgeSessionProjection`, `BridgeTurnProjection`, `BridgeMe
 `BridgeProjectionPart`, `BridgeProjectionPatch`, `BridgePartOp`, `BridgeExecutionView`) are defined
 in `docs/protocol/schema/bridge-v1.types.ts`.
 
+#### Tool part additive fields: `title` / `fileChanges` (ChatGPT-style activity rows)
+
+`BridgeProjectionPart` tool variant gains two **optional** fields (non-breaking, lowerCamelCase):
+
+| Field | Purpose |
+|-------|---------|
+| `title?: string` | Path-bearing display title (Claude Edit/Write `file_path`, Codex patch target, etc.). Clients use it for activity-row labels and `extractPrimaryPath` when structured file path is otherwise missing. |
+| `fileChanges?: { path, kind?, movePath?, diff? }[]` | Structured file mutations for this tool step (Codex Patch / apply_patch). Same shape as UnifiedFileChange. |
+
+Producers (live `tool_started`/`tool_finished` and cold hydrate) must pass these through the
+Projection Kernel reducer so snapshot/patch parts retain them. Clients map them read-only; when
+absent they fall back to `toolInput` / tool output presentation parsing — never invent paths or
+`+0 −0`. Older clients ignore unknown optional fields.
+
 #### Part vocabulary: `subagent` (B4 child-stream, sync-only)
 
 `BridgeProjectionPart` gains an additive `type: "subagent"` variant for Claude `Agent`/`Task`
@@ -549,6 +1073,37 @@ mainstream anchor is absent is dropped (fail-open to the current state, never fa
 This is distinct from the legacy `streamId`/`parentStreamId` live child-stream fields (Events
 §`child_stream_*`), which describe **live** mid-run delivery. B4 sync-only does not use those:
 async mid-run live delivery is a separate, future enhancement (方案 2).
+
+#### Part vocabulary: `user_input` (structured user input v2)
+
+`BridgeProjectionPart` gains an additive `type: "user_input"` variant for one structured-input
+interaction (design §6/§10), backend-neutral once projected. The MacBridge Projection Kernel is
+the single writer: it reduces `user_input_requested`/`user_input_resolved` events into exactly one
+part per `interactionId`, upserted **in place** on the owning assistant turn/message (never a
+second "answered" card). Clients map it read-only into a dedicated block; they do not derive
+status, do not write answers back into the projection, and do not synthesize a second card.
+
+Part fields (all lowerCamelCase, optional unless noted):
+
+| Field | Purpose |
+|-------|---------|
+| `interactionId: string` | Stable derived id (`"ui_"+sha256…`); the upsert key. |
+| `status: string` | `pending` \| `answered` \| `rejected` \| `auto_resolved` \| `unavailable` \| `failed`. |
+| `questions` | Canonical question array (see Semantic Notes §Structured user input v2). Absent on `resolved`. |
+| `canRespond: boolean` | Whether the client may answer (`false` for `failed`/`unavailable`). |
+| `canReject: boolean` | Whether the client may reject (Claude `true`, Codex `false`). |
+| `expiresAt?: number` | epoch-ms display hint; clients MUST NOT use a local timer to flip status. |
+| `resolvedAt?: number` | epoch-ms when the interaction reached a terminal status. |
+| `resolutionSource?: string` | `ios` \| `mac` \| `other_client` \| `backend`. |
+| `diagnosticCode?: string` | e.g. `invalid_backend_request` for malformed/`failed`. |
+
+A new part op `upsert_user_input` carries the full part in `BridgePartOp.part` (targeting the
+owning `turnId`/`messageId`). `execution.phase` becomes `requires_action` while any active-turn
+`user_input` part is `pending`; resolving the last pending part reverts phase per the active turn
+status. Snapshot/patch round-trips preserve the part and its `questions` (deep-copied); a
+checkpoint with a `pending` part whose responder handle was lost after process restart is
+recovered to `unavailable` via the Kernel private recovery transaction (design §10.3), never left
+as a clickable-but-unanswerable UI.
 
 ## Session Pinning
 

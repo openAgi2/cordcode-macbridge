@@ -1,3 +1,23 @@
+// claude_session_catalog.go 是 Claude Code 的 session catalog 实现，属于「跨后端 Session Catalog
+// 同源改造」（docs/2026-08-09-cross-backend-session-catalog-parity-implementation-plan.md §5.2）的
+// **明确标注的 compatibility catalog**——不是 Claude Desktop / Claude Code 原生 catalog 同源。
+//
+// §5.2 诚实边界（honest boundary）：Claude Code CLI（claude --version 2.1.209）目前**没有**公开的
+// session 列表 / catalog 子命令，也没有 `ccd_session_mgmt__list_sessions` 能力；该能力只存在于
+// Claude Desktop 的私有 Electron 层（app.asar，§5.2 P0 #4 明确禁止复用）。因此 Claude 的 catalog
+// 只能从 `~/.claude/projects/` 下的 JSONL transcript 文件派生（本文件做的事），与 codex thread/list、
+// grok session/list、opencode /session 这些**后端原生 catalog API** 不同源。
+//
+// 这意味着（与已迁移 backend 的关键差异）：
+//   - 本 catalog **不**走 catalog_cursor_epoch_v2 v2 主线（无原生 catalog → 无 pageV2 快照 → 无 v2
+//     epoch cursor）。handlers.go 的 list_sessions dispatch 对 claudecode 没有 v2 分支（只有 codex /
+//     grokbuild 在 ConnCatalogCursorEpochV2 时路由到各自 *HandleListSessions），即使连接声明了
+//     catalog_cursor_epoch_v2，claudecode 也继续走 paginateSessionList 的 v1 盲切路径——这是「不
+//     宣称 false parity」的结构保证（见 handlers_claude_catalog_guardrail_test.go）。
+//   - 等 Claude Code 上游暴露稳定 catalog 接口后，再把 claude 迁移到原生同源主线（届时新增 v2
+//     分支 + provider adapter + 定向测试），不要在本文件里伪造一致。
+//
+// upstream blocker 证据见 docs/2026-08-10-claude-catalog-supported-interface-investigation.md。
 package gobridge
 
 import (
@@ -25,6 +45,11 @@ type claudeSessionFingerprint struct {
 	// untouched), so without this the catalog's fingerprint match would reuse a
 	// stale cached entry and ArchivedAt would never update.
 	SidecarModTimeUnixNano int64
+	// DesktopModTimeUnixNano tracks Claude Desktop's private session store
+	// (local_*.json archive flags and deleted_* tombstones). Desktop archive/
+	// delete do not touch the JSONL transcript, so this is required for those
+	// state changes to invalidate the cached entry.
+	DesktopModTimeUnixNano int64
 }
 
 type claudeSessionIndexEntry struct {
@@ -54,7 +79,8 @@ type claudeSessionSnapshot struct {
 }
 
 type claudeSessionCatalog struct {
-	projectsDir string
+	projectsDir        string
+	desktopStateLoader func() claudeDesktopSessionState
 
 	mu       sync.Mutex
 	snapshot *claudeSessionSnapshot
@@ -67,6 +93,9 @@ func newClaudeSessionCatalog(projectsDir string) *claudeSessionCatalog {
 	return &claudeSessionCatalog{
 		projectsDir:  projectsDir,
 		parseSession: scanClaudeSessionMetadata,
+		desktopStateLoader: func() claudeDesktopSessionState {
+			return loadClaudeDesktopSessionState(defaultClaudeAppSupportDir())
+		},
 	}
 }
 
@@ -143,6 +172,8 @@ func (c *claudeSessionCatalog) buildSnapshot(
 		modTime     time.Time
 	}
 
+	desktopState := c.desktopStateLoader()
+
 	enumerateStarted := time.Now()
 	projectDirs, err := os.ReadDir(c.projectsDir)
 	if err != nil {
@@ -161,6 +192,12 @@ func (c *claudeSessionCatalog) buildSnapshot(
 		realDirectory := resolveProjectRealDirectory(projectPath)
 		if realDirectory == "" {
 			realDirectory = projectKey
+		}
+		// Compatibility catalog ≈ Desktop visibility: hide ephemeral scratch / deleted
+		// worktrees that Claude Desktop does not surface as top-level projects
+		// (owner 2026-08-10: claude_aq_capture under /private/tmp, quirky worktree).
+		if !claudeWorkspaceVisibleForCatalog(realDirectory) {
+			continue
 		}
 		files, readErr := os.ReadDir(projectPath)
 		if readErr != nil {
@@ -187,17 +224,22 @@ func (c *claudeSessionCatalog) buildSnapshot(
 			if si, serr := os.Stat(claudeBridgeSessionSidecarPath(projectPath, strings.TrimSuffix(name, ".jsonl"))); serr == nil {
 				sidecarModNano = si.ModTime().UnixNano()
 			}
+			sessionID := strings.TrimSuffix(name, ".jsonl")
+			if desktopState.isDeleted(sessionID) {
+				continue
+			}
 			candidates = append(candidates, fileCandidate{
 				key: claudeSessionKey{
 					ProjectKey: projectKey,
-					SessionID:  strings.TrimSuffix(name, ".jsonl"),
+					SessionID:  sessionID,
 				},
 				path:      filepath.Join(projectPath, name),
 				directory: realDirectory,
 				fingerprint: claudeSessionFingerprint{
-					ModTimeUnixNano:       info.ModTime().UnixNano(),
-					SizeBytes:             size,
+					ModTimeUnixNano:        info.ModTime().UnixNano(),
+					SizeBytes:              size,
 					SidecarModTimeUnixNano: sidecarModNano,
+					DesktopModTimeUnixNano: desktopState.modNano(sessionID),
 				},
 				modTime: info.ModTime(),
 			})
@@ -219,22 +261,25 @@ func (c *claudeSessionCatalog) buildSnapshot(
 		parseStarted := time.Now()
 		scan := c.parseSession(candidate.path, candidate.modTime)
 		metrics.AddMetadataParse(time.Since(parseStarted))
-			nextByKey[candidate.key] = claudeSessionIndexEntry{
-				Key:                candidate.key,
-				FilePath:           candidate.path,
-				Directory:          candidate.directory,
-				Title:              scan.Title,
-				CustomTitle:        scan.CustomTitle,
-				FirstUserAt:        scan.FirstUserAt,
-				CompactBoundaryIDs: append([]string(nil), scan.CompactBoundaryIDs...),
-				ModelID:            scan.ModelID,
-				ProviderID:         scan.ProviderID,
-				ReasoningEffort:    scan.ReasoningEffort,
-				CreatedAt:          scan.CreatedAt,
-				UpdatedAt:          scan.UpdatedAt,
-				ArchivedAt:         scan.ArchivedAt,
-				Fingerprint:        candidate.fingerprint,
-			}
+		if archivedAt := desktopState.archivedAt(candidate.key.SessionID); archivedAt.After(scan.ArchivedAt) {
+			scan.ArchivedAt = archivedAt
+		}
+		nextByKey[candidate.key] = claudeSessionIndexEntry{
+			Key:                candidate.key,
+			FilePath:           candidate.path,
+			Directory:          candidate.directory,
+			Title:              scan.Title,
+			CustomTitle:        scan.CustomTitle,
+			FirstUserAt:        scan.FirstUserAt,
+			CompactBoundaryIDs: append([]string(nil), scan.CompactBoundaryIDs...),
+			ModelID:            scan.ModelID,
+			ProviderID:         scan.ProviderID,
+			ReasoningEffort:    scan.ReasoningEffort,
+			CreatedAt:          scan.CreatedAt,
+			UpdatedAt:          scan.UpdatedAt,
+			ArchivedAt:         scan.ArchivedAt,
+			Fingerprint:        candidate.fingerprint,
+		}
 	}
 	deleted := 0
 	if previous != nil {
@@ -448,4 +493,69 @@ func claudeSessionEntryToWire(entry claudeSessionIndexEntry) map[string]interfac
 		wire["archivedAtMillis"] = entry.ArchivedAt.UnixMilli()
 	}
 	return wire
+}
+
+// claudeWorkspaceVisibleForCatalog approximates Claude Desktop's public session list
+// for this compatibility catalog (JSONL scan — not Desktop-native). Desktop does not
+// surface ephemeral scratch workspaces as top-level projects; hide them so iOS does
+// not show ghost groups like claude_aq_capture (/private/tmp) or deleted worktrees
+// (…/.claude/worktrees/<name>).
+//
+// Rules (path-shape only — no Desktop private DB):
+//  1. empty / encoded-key-only fallbacks → hide
+//  2. Claude Code git worktree paths (…/.claude/worktrees/…) → hide
+//  3. system temp roots (/tmp, /private/tmp, /var/tmp, /var/folders) → hide
+//  4. absolute path that no longer exists as a directory → hide (deleted worktree/project)
+func claudeWorkspaceVisibleForCatalog(directory string) bool {
+	dir := strings.TrimSpace(directory)
+	if dir == "" || dir == "." {
+		return false
+	}
+	clean := filepath.Clean(dir)
+	// Encoded project keys look like "-Users-jacklee-Projects-foo" (no real path).
+	// Those only appear when resolveProjectRealDirectory failed; hide them.
+	if !filepath.IsAbs(clean) {
+		return false
+	}
+	if isClaudeWorktreePath(clean) {
+		return false
+	}
+	if isSystemTempWorkspace(clean) {
+		return false
+	}
+	info, err := os.Stat(clean)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	return true
+}
+
+// isClaudeWorktreePath reports Claude Code's per-session git worktrees under
+// <repo>/.claude/worktrees/<name>. Desktop does not list these as independent projects.
+func isClaudeWorktreePath(dir string) bool {
+	const marker = string(filepath.Separator) + ".claude" + string(filepath.Separator) + "worktrees" + string(filepath.Separator)
+	if strings.Contains(dir, marker) {
+		return true
+	}
+	suffix := string(filepath.Separator) + ".claude" + string(filepath.Separator) + "worktrees"
+	return strings.HasSuffix(dir, suffix)
+}
+
+// isSystemTempWorkspace reports OS scratch roots. Capture fixtures and one-off probes
+// often land under /private/tmp; Desktop does not list them alongside real projects.
+//
+// Note: /var/folders is intentionally NOT included — macOS unit tests and some app
+// sandboxes live there; filtering it would hide legitimate fixtures and break CI.
+func isSystemTempWorkspace(dir string) bool {
+	prefixes := []string{
+		"/private/tmp",
+		"/var/tmp",
+		"/tmp",
+	}
+	for _, p := range prefixes {
+		if dir == p || strings.HasPrefix(dir, p+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }

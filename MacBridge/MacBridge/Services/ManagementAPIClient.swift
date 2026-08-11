@@ -22,13 +22,32 @@ protocol DeviceAPIProviding {
 // MARK: - Management API 数据模型
 
 /// GET /internal/status 响应
-struct ManagementStatus: Codable {
+struct ManagementStatus: Sendable {
     let status: String
     let bridgeId: String?
     let displayName: String?
     let iosPort: Int?
     let uptime: String?
     let version: String?
+    let v1: ManagementV1Status?
+
+    init(
+        status: String,
+        bridgeId: String?,
+        displayName: String?,
+        iosPort: Int?,
+        uptime: String?,
+        version: String?,
+        v1: ManagementV1Status? = nil
+    ) {
+        self.status = status
+        self.bridgeId = bridgeId
+        self.displayName = displayName
+        self.iosPort = iosPort
+        self.uptime = uptime
+        self.version = version
+        self.v1 = v1
+    }
 }
 
 /// GET /internal/devices 响应中的单个设备
@@ -53,6 +72,9 @@ struct RemoteStatus: Codable {
     let includeRemote: Bool?
     let remoteAnalysis: RemoteURLAnalysis?
     let listenStatus: ListenStatus?
+    /// control-plane 连接策略:同一局域网时是否优先直连(默认 false=Relay 底座)。
+    /// 可选:旧 go-bridge 响应缺该字段时解码为 nil,UI 按 false 处理。SSV2:不进入 timeline。
+    let preferLocalNetwork: Bool?
     let relay: RelayStatus?
 
     struct RemoteURLAnalysis: Codable {
@@ -71,6 +93,11 @@ struct RemoteStatus: Codable {
 
     struct RelayStatus: Codable {
         let configured: Bool
+        /// enabled/connected 可选:真实 relay 连接状态只在该字段为 true 时显示「已接入中继网」,
+        /// 否则按 enabled/configured/connected 组合显示未启用/配置中/未连接。不从 configured 推导为已连接。
+        /// 旧 go-bridge 响应缺字段时解码为 nil。
+        let enabled: Bool?
+        let connected: Bool?
         let endpoint: String?
         let routeId: String?
     }
@@ -167,10 +194,14 @@ class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIP
     private func performRequest(
         _ path: String,
         method: String = "GET",
+        body: Data? = nil,
         using requestSession: URLSession? = nil
     ) async throws -> Data {
         var req = request(path, method: method)
-        if method == "POST" { req.httpBody = Data() }
+        if method == "POST" {
+            req.httpBody = body ?? Data()
+            if body != nil { req.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        }
         let (data, response) = try await (requestSession ?? session).data(for: req)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
             let code = (response as? HTTPURLResponse)?.statusCode ?? -1
@@ -181,7 +212,28 @@ class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIP
 
     func getStatus() async throws -> ManagementStatus {
         let data = try await performRequest("/internal/status")
-        return try JSONDecoder().decode(ManagementStatus.self, from: data)
+        return try ManagementStatusCodec.decode(data)
+    }
+
+    func quiesce(_ request: ManagementQuiesceRequest) async throws -> ManagementRuntimeResult {
+        let data = try await performRequest(
+            "/internal/runtime/quiesce", method: "POST", body: try ManagementRequestCodec.encode(request)
+        )
+        return try ManagementRuntimeResultCodec.decode(data, group: "quiesce")
+    }
+
+    func commitQuiescedShutdown(_ request: ManagementCommitRequest) async throws -> ManagementRuntimeResult {
+        let data = try await performRequest(
+            "/internal/runtime/commit-quiesced-shutdown", method: "POST", body: try ManagementRequestCodec.encode(request)
+        )
+        return try ManagementRuntimeResultCodec.decode(data, group: "commit")
+    }
+
+    func abortQuiesce(_ request: ManagementCommitRequest) async throws -> ManagementRuntimeResult {
+        let data = try await performRequest(
+            "/internal/runtime/abort-quiesce", method: "POST", body: try ManagementRequestCodec.encode(request)
+        )
+        return try ManagementRuntimeResultCodec.decode(data, group: "abort")
     }
 
     func updateDisplayName(_ displayName: String) async throws {

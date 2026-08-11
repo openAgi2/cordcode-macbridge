@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -48,6 +49,7 @@ type fakeAgent struct {
 	sessionInfos       []core.AgentSessionInfo
 	sessionListErr     error
 	listHook           func() // optional; lets a test inject a panic on ListSessions
+	listSessionsCalls  atomic.Int64
 	model              string
 	reasoningEffort    string
 	workDir            string
@@ -109,6 +111,43 @@ func (u *unsupportedMutationAgent) ListSessions(context.Context) ([]core.AgentSe
 func (u *unsupportedMutationAgent) Stop() error { return nil }
 
 func (f *fakeAgent) Name() string { return f.name }
+
+// WireDescriptor (§6.2) makes fakeAgent self-describe by name, mirroring the real
+// driver values in agent/<drv>/wire_descriptor.go. A fakeAgent stands in for a real
+// driver, so after §6.2 it must self-describe the same A-class static capabilities
+// (content_chunking/question_reply/external_turn_streaming for claude, external_turn_streaming
+// for codex, todos 兜底 for opencode) instead of relying on the removed id-keyed checks.
+// "claude" and "claudecode" map to the same descriptor (production alias); unknown names
+// return nil → legacy fallback. Keep these values in sync with the driver files.
+func (f *fakeAgent) WireDescriptor() *core.WireDescriptor {
+	switch f.name {
+	case "claude", "claudecode":
+		return &core.WireDescriptor{
+			Kind: "claude_code", DisplayName: "Claude Code",
+			LiveEventModel: core.LiveEventSessionProcess, RequiresExternalTurnPolling: true,
+			StaticCapabilities: []string{"content_chunking", "question_reply", "external_turn_streaming"},
+		}
+	case "codex":
+		return &core.WireDescriptor{
+			Kind: "codex", DisplayName: "Codex",
+			LiveEventModel: core.LiveEventSessionProcess, RequiresExternalTurnPolling: false,
+			StaticCapabilities: []string{"external_turn_streaming"},
+		}
+	case "opencode":
+		return &core.WireDescriptor{
+			Kind: "opencode", DisplayName: "OpenCode",
+			LiveEventModel: core.LiveEventBroadcast, RequiresExternalTurnPolling: true,
+			StaticCapabilities: []string{"todos"},
+		}
+	case "grokbuild":
+		return &core.WireDescriptor{
+			Kind: "grokbuild", DisplayName: "Grok Build",
+			LiveEventModel: core.LiveEventSessionProcess, RequiresExternalTurnPolling: true,
+		}
+	default:
+		return nil
+	}
+}
 
 func (f *fakeAgent) GetRunningSessionIDs(ctx context.Context) (map[string]bool, error) {
 	f.runningCalls++
@@ -193,6 +232,7 @@ func (f *fakeAgent) StartSession(_ context.Context, sessionID string) (core.Agen
 }
 
 func (f *fakeAgent) ListSessions(context.Context) ([]core.AgentSessionInfo, error) {
+	f.listSessionsCalls.Add(1)
 	if f.listHook != nil {
 		f.listHook()
 	}
@@ -201,6 +241,8 @@ func (f *fakeAgent) ListSessions(context.Context) ([]core.AgentSessionInfo, erro
 	}
 	return append([]core.AgentSessionInfo(nil), f.sessionInfos...), nil
 }
+
+func (f *fakeAgent) ListSessionsCallCount() int64 { return f.listSessionsCalls.Load() }
 
 func (f *fakeAgent) GetSessionHistory(context.Context, string, int) ([]core.HistoryEntry, error) {
 	if f.historyErr != nil {
@@ -613,119 +655,44 @@ func TestSetPermissionModeAppliesToLiveSessionWhenSupported(t *testing.T) {
 type readFileCaptureConn struct {
 	data interface{}
 	err  *WireError
+	// done 由 SendResult 关闭一次，供 async 路径（read_file_v2 经 file pool）等待结果。
+	// nil（裸字面量构造）时 SendResult 不触碰它，保持 legacy 同步测试行为。
+	done chan struct{}
+	once sync.Once
+}
+
+// newReadFileCaptureConn 构造带 done 信号的 conn，用于 read_file_v2 异步路径测试。
+func newReadFileCaptureConn() *readFileCaptureConn {
+	return &readFileCaptureConn{done: make(chan struct{})}
+}
+
+// waitForResult 阻塞直到 SendResult 被调用一次或超时。
+func (c *readFileCaptureConn) waitForResult(t *testing.T) {
+	t.Helper()
+	if c.done == nil {
+		return // 裸字面量（同步路径），无需等待
+	}
+	select {
+	case <-c.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("readFileCaptureConn: SendResult 未在 2s 内调用")
+	}
 }
 
 func (c *readFileCaptureConn) SendJSON(any) {}
 func (c *readFileCaptureConn) SendResult(_ string, data interface{}, err *WireError) {
 	c.data = data
 	c.err = err
+	c.once.Do(func() {
+		if c.done != nil {
+			close(c.done)
+		}
+	})
 }
 func (c *readFileCaptureConn) SendEvent(string, string, string, interface{}) {}
 func (c *readFileCaptureConn) AuthedDevice() *TrustedDeviceRecord            { return nil }
 func (c *readFileCaptureConn) RemoteAddr() string                            { return "test:read-file" }
 func (c *readFileCaptureConn) Close() error                                  { return nil }
-
-func TestReadFileEnforcesAuthorizedWorkspaceBoundary(t *testing.T) {
-	workspace := t.TempDir()
-	secretDir := t.TempDir()
-	allowedPath := filepath.Join(workspace, "main.go")
-	secretPath := filepath.Join(secretDir, "management-token")
-	envPath := filepath.Join(workspace, ".env")
-	linkPath := filepath.Join(workspace, "linked-secret")
-	if err := os.WriteFile(allowedPath, []byte("package main\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(secretPath, []byte("do-not-leak"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(envPath, []byte("TOKEN=do-not-leak"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(secretPath, linkPath); err != nil {
-		t.Fatal(err)
-	}
-
-	handlers := newTestHandlers(t)
-	handlers.RegisterAgent("codex", &fakeAgent{name: "codex", workDir: workspace})
-
-	tests := []struct {
-		name     string
-		path     string
-		wantCode string
-	}{
-		{name: "absolute outside", path: secretPath, wantCode: "file.outside_authorized_root"},
-		{name: "relative traversal", path: filepath.Join("..", filepath.Base(secretDir), "management-token"), wantCode: "file.outside_authorized_root"},
-		{name: "symlink escape", path: linkPath, wantCode: "file.symlink_escape"},
-		{name: "sensitive workspace file", path: envPath, wantCode: "file.sensitive_path_denied"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			conn := &readFileCaptureConn{}
-			handlers.handleReadFile(conn, WireMessage{
-				RequestID: "req_" + strings.ReplaceAll(tt.name, " ", "_"),
-				BackendID: "codex",
-				Params: mustJSONRaw(t, map[string]any{
-					"path":      tt.path,
-					"directory": workspace,
-				}),
-			})
-			if conn.err == nil || conn.err.Code != tt.wantCode {
-				t.Fatalf("error = %#v, want code %q", conn.err, tt.wantCode)
-			}
-			encoded, err := json.Marshal(struct {
-				Data interface{}
-				Err  *WireError
-			}{Data: conn.data, Err: conn.err})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if strings.Contains(string(encoded), "do-not-leak") {
-				t.Fatalf("response leaked secret content: %s", encoded)
-			}
-		})
-	}
-
-	conn := &readFileCaptureConn{}
-	handlers.handleReadFile(conn, WireMessage{
-		RequestID: "req_allowed",
-		BackendID: "codex",
-		Params: mustJSONRaw(t, map[string]any{
-			"path":      allowedPath,
-			"directory": workspace,
-		}),
-	})
-	if conn.err != nil {
-		t.Fatalf("allowed read error = %#v", conn.err)
-	}
-	data, _ := conn.data.(map[string]interface{})
-	if got := data["content"]; got != "package main\n" {
-		t.Fatalf("content = %#v, want allowed file content; data=%#v", got, conn.data)
-	}
-}
-
-func TestReadFileFailsClosedWithoutServerAuthorizedWorkspace(t *testing.T) {
-	workspace := t.TempDir()
-	path := filepath.Join(workspace, "main.go")
-	if err := os.WriteFile(path, []byte("package main\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	handlers := newTestHandlers(t)
-	handlers.RegisterAgent("codex", &unsupportedMutationAgent{name: "codex"})
-	conn := &readFileCaptureConn{}
-
-	handlers.handleReadFile(conn, WireMessage{
-		RequestID: "req_no_root",
-		BackendID: "codex",
-		Params: mustJSONRaw(t, map[string]any{
-			"path":      path,
-			"directory": workspace,
-		}),
-	})
-	if conn.err == nil || conn.err.Code != "file.outside_authorized_root" {
-		t.Fatalf("error = %#v, want file.outside_authorized_root", conn.err)
-	}
-}
 
 func TestBackendListAdvertisesMemoryDiagnosticsAndUsageCapabilities(t *testing.T) {
 	handlers := newTestHandlers(t)
@@ -1228,6 +1195,7 @@ func TestOpenCodeListSessionsFetchesLargePageAndPaginatesInMemory(t *testing.T) 
 	handlers.RegisterOpenCodeProxy(NewOpenCodeProxy(proxyServer.URL, "", ""))
 	serverConn, clientConn, cleanup := openTestConn(t)
 	defer cleanup()
+	handlers.eventPublisher.SetConnCatalogCursorEpochV2(serverConn, true)
 
 	handlers.handleOpenCodeRPC(serverConn, WireMessage{
 		BackendID: "opencode",
@@ -1287,10 +1255,15 @@ func TestOpenCodeListSessionsFetchesLargePageAndPaginatesInMemory(t *testing.T) 
 	}
 
 	logText := logs.String()
-	for _, want := range []string{`msg="opencode list_sessions"`, "directory=/tmp/project", "limit=2", "result_count=2"} {
+	for _, want := range []string{`msg="opencode list_sessions v2"`, "directory=project", "limit=2", "result_count=2"} {
 		if !strings.Contains(logText, want) {
 			t.Fatalf("diagnostic log missing %q in %s", want, logText)
 		}
+	}
+	// Phase 7 §444：catalog 日志的 directory 已脱敏为 basename（project）。绝对路径 /tmp/project
+	// 不得出现在日志中——此负向断言锁定脱敏契约，防止回归到直接打 workDir/cwd。
+	if strings.Contains(logText, "/tmp/project") {
+		t.Fatalf("diagnostic log leaks absolute directory path (§444 redaction): %s", logText)
 	}
 }
 
@@ -1298,7 +1271,7 @@ func TestOpenCodeListSessionsRootsOnlyWithCursorNowSupported(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[{"id":"ses_1","title":"One","time":{"created":1000,"updated":1000}}]`))
+		_, _ = w.Write([]byte(`[{"id":"ses_1","title":"One","time":{"created":1000,"updated":1000}},{"id":"ses_2","title":"Two","time":{"created":900,"updated":900}}]`))
 	}))
 	defer proxyServer.Close()
 
@@ -1307,8 +1280,27 @@ func TestOpenCodeListSessionsRootsOnlyWithCursorNowSupported(t *testing.T) {
 	handlers.RegisterOpenCodeProxy(NewOpenCodeProxy(proxyServer.URL, "", ""))
 	serverConn, clientConn, cleanup := openTestConn(t)
 	defer cleanup()
+	handlers.eventPublisher.SetConnCatalogCursorEpochV2(serverConn, true)
 
-	// rootsOnly + cursor is no longer rejected; it pages the in-memory list.
+	// Obtain a real epoch-bearing cursor from page 0; arbitrary opaque legacy cursors are rejected.
+	handlers.handleOpenCodeRPC(serverConn, WireMessage{
+		BackendID: "opencode",
+		Method:    "list_sessions",
+		RequestID: "oc-sessions-roots-page0",
+		Params: mustJSONRaw(t, map[string]any{
+			"directory": "/tmp/project",
+			"rootsOnly": true,
+			"limit":     1,
+		}),
+	})
+	page0 := readJSONMaps(t, clientConn, 1)[0]
+	page0Data, _ := page0["data"].(map[string]any)
+	nextCursor, _ := page0Data["nextCursor"].(string)
+	if nextCursor == "" {
+		t.Fatal("rootsOnly page 0 missing v2 nextCursor")
+	}
+
+	// rootsOnly + a valid v2 cursor pages the frozen in-memory snapshot.
 	handlers.handleOpenCodeRPC(serverConn, WireMessage{
 		BackendID: "opencode",
 		Method:    "list_sessions",
@@ -1316,14 +1308,14 @@ func TestOpenCodeListSessionsRootsOnlyWithCursorNowSupported(t *testing.T) {
 		Params: mustJSONRaw(t, map[string]any{
 			"directory": "/tmp/project",
 			"rootsOnly": true,
-			"limit":     10,
-			"cursor":    "opaque-cursor",
+			"limit":     1,
+			"cursor":    nextCursor,
 		}),
 	})
 
 	messages := readJSONMaps(t, clientConn, 1)
 	if got := messages[0]["ok"]; got != true {
-		t.Fatalf("ok = %#v, want true (rootsOnly+cursor now supported)", got)
+		t.Fatalf("ok = %#v, want true (rootsOnly+valid-v2-cursor supported)", got)
 	}
 }
 
@@ -2227,6 +2219,23 @@ func TestModelProviderForAgentKeepsPrefixedProvider(t *testing.T) {
 	}
 }
 
+// TestModelProviderForAgentUsesActiveProviderForGrokbuild 锁死 §5.1 缺口 1（C6 后半）：
+// grokbuild 实现 ProviderSwitcher 后，无前缀模型（如 grok-4.5）在有 active provider 时
+// 标到 active name，而非回落 "default"（修复前 grokbuild 不实现 ProviderSwitcher，100% 走 default）。
+func TestModelProviderForAgentUsesActiveProviderForGrokbuild(t *testing.T) {
+	agent := &fakeAgent{
+		name:           "grokbuild",
+		providers:      []core.ProviderConfig{{Name: "glm"}},
+		activeProvider: "glm",
+	}
+
+	id, provider, providerID := modelProviderForAgent(agent, "grok-4.5")
+
+	if id != "grok-4.5" || provider != "glm" || providerID != "glm" {
+		t.Fatalf("model provider = (%q, %q, %q), want (grok-4.5, glm, glm)", id, provider, providerID)
+	}
+}
+
 func TestCodexProviderSwitchOnlyAffectsNewSessions(t *testing.T) {
 	agent := &fakeAgent{
 		name:              "codex",
@@ -2556,6 +2565,16 @@ func TestClaudeFileRelayAndAgentRelayRunConcurrentlyRaceFree(t *testing.T) {
 	}
 	handlers := newTestHandlers(t)
 	handlers.RegisterAgent("claudecode", agent)
+	// This test models a MacBridge-owned session with both its stdout relay and the transcript
+	// watcher active. Install the real session object up front so send_message does not enter the
+	// external-owner resume preflight (a live external-only stub is now intentionally rejected).
+	ownedSession, err := agent.StartSession(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	handlers.mu.Lock()
+	handlers.putSession(sessionID, ownedSession)
+	handlers.mu.Unlock()
 	serverConn, clientConn, cleanup := openTestConn(t)
 	t.Cleanup(cleanup)
 	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "claudecode", SessionID: sessionID})
@@ -3299,12 +3318,14 @@ func TestClaudeListSessionsUsesRuntimeEffortWhenMetadataMissing(t *testing.T) {
 	}
 
 	projectsDir := t.TempDir()
+	ws := catalogFixtureWorkspace(t, projectsDir, "claude-project")
 	projectDir := filepath.Join(projectsDir, "-tmp-claude-project")
 	if err := os.MkdirAll(projectDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	sessionPath := filepath.Join(projectDir, "ses_1.jsonl")
-	if err := os.WriteFile(sessionPath, []byte("{}\n"), 0644); err != nil {
+	// cwd must be a real non-temp workspace so claudeWorkspaceVisibleForCatalog keeps it.
+	if err := os.WriteFile(sessionPath, []byte(`{"cwd":"`+ws+`"}`+"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	catalog := newClaudeSessionCatalog(projectsDir)
@@ -3323,6 +3344,7 @@ func TestClaudeListSessionsUsesRuntimeEffortWhenMetadataMissing(t *testing.T) {
 	handlers.RegisterAgent("claudecode", agent)
 	serverConn, clientConn, cleanup := openTestConn(t)
 	defer cleanup()
+	handlers.eventPublisher.SetConnCatalogCursorEpochV2(serverConn, true)
 
 	handlers.HandleRPC(serverConn, WireMessage{
 		BackendID: "claudecode",
@@ -3355,12 +3377,13 @@ func TestClaudeListSessionsDoesNotWriteTmpDump(t *testing.T) {
 
 	agent := &fakeAgent{name: "claudecode", reasoningEffort: "high"}
 	projectsDir := t.TempDir()
+	ws := catalogFixtureWorkspace(t, projectsDir, "claude-dump")
 	projectDir := filepath.Join(projectsDir, "-tmp-claude-project")
 	if err := os.MkdirAll(projectDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	sessionPath := filepath.Join(projectDir, "ses_dump.jsonl")
-	if err := os.WriteFile(sessionPath, []byte("{}\n"), 0644); err != nil {
+	if err := os.WriteFile(sessionPath, []byte(`{"cwd":"`+ws+`"}`+"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	catalog := newClaudeSessionCatalog(projectsDir)
@@ -3377,6 +3400,7 @@ func TestClaudeListSessionsDoesNotWriteTmpDump(t *testing.T) {
 	handlers.RegisterAgent("claudecode", agent)
 	serverConn, clientConn, cleanup := openTestConn(t)
 	defer cleanup()
+	handlers.eventPublisher.SetConnCatalogCursorEpochV2(serverConn, true)
 
 	// Fire list_sessions repeatedly; the dump previously wrote on every call.
 	for i := 0; i < 3; i++ {
@@ -3971,10 +3995,10 @@ func TestRunDiagnosticsReturnsNotSupportedWhenNoProvider(t *testing.T) {
 	}
 }
 
-// TestReadFileAcceptsSubdirectoryWithinWorkspace 验证 P0-1 review 观察：
+// TestAuthorizedReadFileRootAcceptsSubdirectoryWithinWorkspace 验证授权根解析：
 // requestedDir 是授权 workspace 的子目录时应被接受（不误拒合法子目录调用），
 // workspace 外的目录仍被拒绝。
-func TestReadFileAcceptsSubdirectoryWithinWorkspace(t *testing.T) {
+func TestAuthorizedReadFileRootAcceptsSubdirectoryWithinWorkspace(t *testing.T) {
 	workspace := t.TempDir()
 	subDir := filepath.Join(workspace, "src")
 	if err := os.MkdirAll(subDir, 0o755); err != nil {
@@ -4208,5 +4232,626 @@ func TestSessionRuntimeStateEnrichment(t *testing.T) {
 	session, _ = data["session"].(map[string]any)
 	if got := session["runtimeState"]; got != "running" {
 		t.Fatalf("get_session (external) runtimeState = %#v, want running", got)
+	}
+}
+
+func TestClaudeResumeSessionUsesRegistryStateWithoutTranscriptScan(t *testing.T) {
+	agent := &fakeAgent{
+		name:              "claudecode",
+		runningSessionIDs: map[string]bool{"large-session": true},
+	}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("claude", agent)
+	handlers.sessions.markRunning("large-session")
+	// This test isolates synchronous resume enrichment. Model the normal already-watching
+	// state so the independently asynchronous file relay does not perform its own source scan.
+	handlers.relayRunning["large-session"] = true
+	handlers.relayRunningKind["large-session"] = relayKindClaudeFile
+
+	probeCalls := 0
+	handlers.transcriptStateProbe = func() { probeCalls++ }
+
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "claude",
+		Method:    "resume_session",
+		RequestID: "req-large-resume",
+		Params: mustJSONRaw(t, map[string]any{
+			"sessionId": "large-session",
+			"directory": "/tmp",
+		}),
+	})
+
+	messages := readJSONMaps(t, clientConn, 1)
+	data, _ := messages[0]["data"].(map[string]any)
+	if got := data["runtimeState"]; got != "running" {
+		t.Fatalf("resume_session runtimeState = %#v, want registry running", got)
+	}
+	if agent.runningCalls != 0 {
+		t.Fatalf("resume_session called GetRunningSessionIDs %d time(s), want 0", agent.runningCalls)
+	}
+	if probeCalls != 0 {
+		t.Fatalf("resume_session scanned transcript %d time(s), want 0", probeCalls)
+	}
+}
+
+func TestShouldListClaudeProjectsAllowlist(t *testing.T) {
+	t.Parallel()
+	if shouldListClaudeProjects(nil) {
+		t.Fatal("nil agent must not scan Claude projects")
+	}
+	if !shouldListClaudeProjects(&fakeAgent{name: "claudecode"}) {
+		t.Fatal("claudecode must scan Claude projects")
+	}
+	if !shouldListClaudeProjects(&fakeAgent{name: "claude"}) {
+		t.Fatal("claude alias must scan Claude projects")
+	}
+	for _, name := range []string{"codex", "grokbuild", "opencode"} {
+		if shouldListClaudeProjects(&fakeAgent{name: name}) {
+			t.Fatalf("%s must not scan Claude projects", name)
+		}
+	}
+}
+
+func TestHandleListProjectsCodexReturnsEmptyEvenIfClaudeProjectsExist(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	claudeProjects := filepath.Join(home, ".claude", "projects", "-Users-jacklee-Projects-fake")
+	if err := os.MkdirAll(claudeProjects, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	handlers := newTestHandlers(t)
+	conn := &readFileCaptureConn{}
+	handlers.handleListProjects(conn, WireMessage{RequestID: "req-codex-projects"}, &fakeAgent{name: "codex"})
+
+	if conn.err != nil {
+		t.Fatalf("unexpected wire error: %+v", conn.err)
+	}
+	data, _ := conn.data.(map[string]interface{})
+	projects, _ := data["projects"].([]interface{})
+	if len(projects) != 0 {
+		t.Fatalf("codex list_projects = %#v, want empty (must not inherit ~/.claude/projects)", projects)
+	}
+}
+
+// TestHandleListProjectsClaudeSkipsEmptyShells：Claude list_projects 不得返回无 .jsonl 的
+// 空 project 壳（owner 2026-08-10：iOS 侧栏出现一堆「暂无会话」幽灵目录）。
+func TestHandleListProjectsClaudeSkipsEmptyShells(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	projectsRoot := filepath.Join(home, ".claude", "projects")
+	emptyDir := filepath.Join(projectsRoot, "-Users-jacklee-Projects-empty-shell")
+	liveDir := filepath.Join(projectsRoot, "-Users-jacklee-Projects-live")
+	if err := os.MkdirAll(emptyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(liveDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Real workspace on disk (visibility filter requires existing non-temp cwd).
+	liveWS := filepath.Join(home, "Projects", "live")
+	if err := os.MkdirAll(liveWS, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Live project: one transcript with cwd so resolveProjectRealDirectory works.
+	liveJSONL := filepath.Join(liveDir, "sess-live.jsonl")
+	if err := os.WriteFile(liveJSONL, []byte(`{"cwd":"`+liveWS+`","type":"session_meta"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	handlers := newTestHandlers(t)
+	conn := &readFileCaptureConn{}
+	handlers.handleListProjects(conn, WireMessage{RequestID: "req-claude-projects"}, &fakeAgent{name: "claudecode"})
+
+	if conn.err != nil {
+		t.Fatalf("unexpected wire error: %+v", conn.err)
+	}
+	data, _ := conn.data.(map[string]interface{})
+	// handleListProjects sends []map[string]interface{}, not []interface{}.
+	projects, ok := data["projects"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("projects type = %T (%#v), want []map[string]interface{}", data["projects"], data["projects"])
+	}
+	if len(projects) != 1 {
+		t.Fatalf("claude list_projects count = %d (%#v), want 1 (empty shell filtered)", len(projects), projects)
+	}
+	if projects[0]["directory"] != liveWS {
+		t.Fatalf("directory = %#v, want %s", projects[0]["directory"], liveWS)
+	}
+	if projects[0]["name"] != "live" {
+		t.Fatalf("name = %#v, want live", projects[0]["name"])
+	}
+}
+
+// TestClaudeWorkspaceVisibleForCatalog_HidesTempAndWorktrees：Desktop 不显示的
+// /private/tmp 抓取目录与 .claude/worktrees 不得进入 public catalog。
+func TestClaudeWorkspaceVisibleForCatalog_HidesTempAndWorktrees(t *testing.T) {
+	// Real existing non-temp path (control).
+	okDir := t.TempDir()
+	if !claudeWorkspaceVisibleForCatalog(okDir) {
+		t.Fatalf("visible fixture dir %q should pass", okDir)
+	}
+	// System temp.
+	if claudeWorkspaceVisibleForCatalog("/private/tmp/claude_aq_capture") {
+		t.Fatal("/private/tmp/... must be hidden")
+	}
+	if claudeWorkspaceVisibleForCatalog("/tmp/scratch") {
+		t.Fatal("/tmp/... must be hidden")
+	}
+	// Worktree path shape (existence irrelevant — shape alone hides).
+	wt := filepath.Join(okDir, ".claude", "worktrees", "quirky-blackburn-3f30d4")
+	if claudeWorkspaceVisibleForCatalog(wt) {
+		t.Fatalf("worktree path %q must be hidden", wt)
+	}
+	// Missing absolute path.
+	missing := filepath.Join(okDir, "does-not-exist-workspace")
+	if claudeWorkspaceVisibleForCatalog(missing) {
+		t.Fatalf("missing path %q must be hidden", missing)
+	}
+	// Encoded project key fallback.
+	if claudeWorkspaceVisibleForCatalog("-Users-jacklee-Projects-foo") {
+		t.Fatal("encoded project key must be hidden")
+	}
+}
+
+// ── §6.5: list_directory workspace-bound + symlink + pagination + depth ────────────────
+
+func TestListDirectoryWorkspaceBound_RejectsTraversal(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	subDir := filepath.Join(workspace, "src")
+	if err := os.Mkdir(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outsideFile := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(outsideFile, []byte("no"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	workspaceFile := filepath.Join(workspace, "ok.txt")
+	if err := os.WriteFile(workspaceFile, []byte("ok"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	h := newTestHandlers(t)
+
+	tests := []struct {
+		name          string
+		path          string
+		workspaceRoot string
+		wantCode      string
+	}{
+		{
+			name:          "absolute outside workspace",
+			path:          outside,
+			workspaceRoot: workspace,
+			wantCode:      "file.outside_authorized_root",
+		},
+		{
+			name:          "traversal relative",
+			path:          filepath.Join(workspace, "..", filepath.Base(outside)),
+			workspaceRoot: workspace,
+			wantCode:      "file.outside_authorized_root", // canonicalExistingDirectory resolves '..' → outside; pathIsWithinRoot catches it
+		},
+		{
+			name:          "valid subdirectory within workspace",
+			path:          subDir,
+			workspaceRoot: workspace,
+			wantCode:      "", // success
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn := &readFileCaptureConn{}
+			h.handleListDirectory(conn, WireMessage{
+				RequestID: "req_" + tt.name,
+				Params: mustJSONRaw(t, map[string]any{
+					"path":           tt.path,
+					"workspace_root": tt.workspaceRoot,
+				}),
+			})
+			if tt.wantCode == "" {
+				if conn.err != nil {
+					t.Fatalf("expected success, got error: %+v", conn.err)
+				}
+				return
+			}
+			if conn.err == nil || conn.err.Code != tt.wantCode {
+				t.Fatalf("error = %#v, want code %q", conn.err, tt.wantCode)
+			}
+		})
+	}
+
+	// 允许：workspace 内的子目录。
+	conn := &readFileCaptureConn{}
+	h.handleListDirectory(conn, WireMessage{
+		RequestID: "req_allowed_subdir",
+		Params: mustJSONRaw(t, map[string]any{
+			"path":           subDir,
+			"workspace_root": workspace,
+		}),
+	})
+	if conn.err != nil {
+		t.Fatalf("allowed subdir should succeed, got error: %+v", conn.err)
+	}
+}
+
+func TestListDirectoryWorkspaceBound_SymlinkLeaf(t *testing.T) {
+	workspace := t.TempDir()
+	subDir := filepath.Join(workspace, "src")
+	if err := os.Mkdir(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nestedFile := filepath.Join(subDir, "util.go")
+	if err := os.WriteFile(nestedFile, []byte("package util"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// symlink 在 workspace 内，指向子目录
+	linkPath := filepath.Join(workspace, "src-link")
+	if err := os.Symlink(subDir, linkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	h := newTestHandlers(t)
+	conn := &readFileCaptureConn{}
+	h.handleListDirectory(conn, WireMessage{
+		RequestID: "req_symlink_leaf",
+		Params: mustJSONRaw(t, map[string]any{
+			"path":           workspace,
+			"workspace_root": workspace,
+			"depth":          2,
+		}),
+	})
+	if conn.err != nil {
+		t.Fatalf("expected nil error, got %+v", conn.err)
+	}
+	resMap, _ := conn.data.(map[string]interface{})
+	itemsRaw, _ := json.Marshal(resMap["items"])
+
+	type item struct {
+		Name        string `json:"name"`
+		Path        string `json:"path"`
+		IsDirectory bool   `json:"isDirectory"`
+		IsSymlink   bool   `json:"isSymlink,omitempty"`
+	}
+	var items []item
+	json.Unmarshal(itemsRaw, &items)
+
+	if len(items) < 2 {
+		t.Fatalf("expected >=2 items (src + src-link + files under src), got %d: %v", len(items), items)
+	}
+
+	// 找 src-link（symlink 叶节点，不应有子条目）。
+	hasLink := false
+	hasUtilGo := false
+	for _, it := range items {
+		if it.Name == "src-link" {
+			hasLink = true
+			if !it.IsSymlink {
+				t.Error("symlink entry should have isSymlink=true")
+			}
+		}
+		if it.Name == "util.go" {
+			hasUtilGo = true
+		}
+		// symlink 不应有子条目跟随——但 symlink 是 leaf，children 只出现在 real dir 下。
+	}
+	if !hasLink {
+		t.Error("missing symlink entry 'src-link'")
+	}
+	if !hasUtilGo {
+		t.Error("missing nested file 'util.go' under real dir 'src'")
+	}
+}
+
+func TestListDirectoryWorkspaceBound_SymlinkEscape(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "leak.txt")
+	if err := os.WriteFile(outsideFile, []byte("leaked"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// symlink 在 workspace 内，指向 workspace 外的目录
+	escLink := filepath.Join(workspace, "escape-link")
+	if err := os.Symlink(outside, escLink); err != nil {
+		t.Fatal(err)
+	}
+
+	h := newTestHandlers(t)
+
+	// workspace-bound 模式：列出 workspace，symlink 应作为叶节点出现（不跟随，不暴露逃逸）。
+	conn := &readFileCaptureConn{}
+	h.handleListDirectory(conn, WireMessage{
+		RequestID: "req_escape_leaf",
+		Params: mustJSONRaw(t, map[string]any{
+			"path":           workspace,
+			"workspace_root": workspace,
+			"depth":          2,
+		}),
+	})
+	if conn.err != nil {
+		t.Fatalf("expected nil error, got %+v", conn.err)
+	}
+	resMap, _ := conn.data.(map[string]interface{})
+	itemsRaw, _ := json.Marshal(resMap["items"])
+
+	type item struct {
+		Name      string `json:"name"`
+		IsSymlink bool   `json:"isSymlink,omitempty"`
+	}
+	var items []item
+	json.Unmarshal(itemsRaw, &items)
+
+	for _, it := range items {
+		if it.Name == "leak.txt" {
+			t.Fatalf("symlink escape: leaked file from outside dir should NOT appear in listing")
+		}
+		if it.Name == "escape-link" && !it.IsSymlink {
+			t.Error("escape-link should be marked as symlink")
+		}
+	}
+}
+
+func TestListDirectory_Pagination(t *testing.T) {
+	workspace := t.TempDir()
+	// 创建 10 个文件用于分页
+	for i := 0; i < 10; i++ {
+		fname := fmt.Sprintf("file-%02d.txt", i)
+		if err := os.WriteFile(filepath.Join(workspace, fname), []byte("data"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := newTestHandlers(t)
+
+	// 第 1 页：limit=4, offset=0
+	conn := &readFileCaptureConn{}
+	h.handleListDirectory(conn, WireMessage{
+		RequestID: "req_page1",
+		Params: mustJSONRaw(t, map[string]any{
+			"path":  workspace,
+			"limit": 4,
+		}),
+	})
+	if conn.err != nil {
+		t.Fatalf("unexpected error: %+v", conn.err)
+	}
+	resMap := conn.data.(map[string]interface{})
+	page1JSON, _ := json.Marshal(resMap["items"])
+	type item struct{ Name string }
+	var page1 []item
+	json.Unmarshal(page1JSON, &page1)
+	if len(page1) != 4 {
+		t.Fatalf("page1: expected 4 items, got %d", len(page1))
+	}
+	if resMap["hasMore"] != true {
+		t.Error("expected hasMore=true after first page of 4/10")
+	}
+
+	// 第 2 页：limit=4, offset=4
+	conn = &readFileCaptureConn{}
+	h.handleListDirectory(conn, WireMessage{
+		RequestID: "req_page2",
+		Params: mustJSONRaw(t, map[string]any{
+			"path":   workspace,
+			"limit":  4,
+			"offset": 4,
+		}),
+	})
+	resMap = conn.data.(map[string]interface{})
+	page2JSON, _ := json.Marshal(resMap["items"])
+	var page2 []item
+	json.Unmarshal(page2JSON, &page2)
+	if len(page2) != 4 {
+		t.Fatalf("page2: expected 4 items, got %d", len(page2))
+	}
+	if resMap["hasMore"] != true {
+		t.Error("expected hasMore=true after 8/10")
+	}
+
+	// 第 3 页（最后一页）：limit=4, offset=8 → 2 items, hasMore=false
+	conn = &readFileCaptureConn{}
+	h.handleListDirectory(conn, WireMessage{
+		RequestID: "req_page3",
+		Params: mustJSONRaw(t, map[string]any{
+			"path":   workspace,
+			"limit":  4,
+			"offset": 8,
+		}),
+	})
+	resMap = conn.data.(map[string]interface{})
+	page3JSON, _ := json.Marshal(resMap["items"])
+	var page3 []item
+	json.Unmarshal(page3JSON, &page3)
+	if len(page3) != 2 {
+		t.Fatalf("page3: expected 2 items (last page), got %d", len(page3))
+	}
+	if resMap["hasMore"] != false {
+		t.Error("expected hasMore=false on last page (10/10)")
+	}
+
+	// 前两页不应重叠。
+	page1Names := make(map[string]bool)
+	for _, it := range page1 {
+		page1Names[it.Name] = true
+	}
+	for _, it := range page2 {
+		if page1Names[it.Name] {
+			t.Errorf("page2 and page1 overlap on %s", it.Name)
+		}
+	}
+}
+
+func TestListDirectory_DepthRecursion(t *testing.T) {
+	workspace := t.TempDir()
+	sub := filepath.Join(workspace, "src")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	deep := filepath.Join(sub, "internal")
+	if err := os.Mkdir(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(deep, "config.go"), []byte("package config"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "app.go"), []byte("package main"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "main.go"), []byte("package main"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	h := newTestHandlers(t)
+
+	// depth=1：只看到 workspace 的直接子条目（src + main.go），没有孙子条目。
+	conn1 := &readFileCaptureConn{}
+	h.handleListDirectory(conn1, WireMessage{
+		RequestID: "req_depth1",
+		Params: mustJSONRaw(t, map[string]any{
+			"path":           workspace,
+			"workspace_root": workspace,
+			"depth":          1,
+		}),
+	})
+	resMap := conn1.data.(map[string]interface{})
+	itemsJSON, _ := json.Marshal(resMap["items"])
+	type item struct {
+		Name        string `json:"name"`
+		IsDirectory bool   `json:"isDirectory"`
+	}
+	var d1 []item
+	json.Unmarshal(itemsJSON, &d1)
+	if len(d1) != 2 {
+		t.Fatalf("depth=1: expected 2 top-level items (src + main.go), got %d: %v", len(d1), d1)
+	}
+	for _, it := range d1 {
+		if it.Name == "internal" || it.Name == "config.go" || it.Name == "app.go" {
+			t.Errorf("depth=1 should NOT include %s (it is inside src/)", it.Name)
+		}
+	}
+
+	// depth=2：看到 workspace + src 子目录（app.go + internal/）
+	conn2 := &readFileCaptureConn{}
+	h.handleListDirectory(conn2, WireMessage{
+		RequestID: "req_depth2",
+		Params: mustJSONRaw(t, map[string]any{
+			"path":           workspace,
+			"workspace_root": workspace,
+			"depth":          2,
+		}),
+	})
+	resMap2 := conn2.data.(map[string]interface{})
+	itemsJSON2, _ := json.Marshal(resMap2["items"])
+	var d2 []item
+	json.Unmarshal(itemsJSON2, &d2)
+	if len(d2) < 4 {
+		t.Fatalf("depth=2: expected >=4 items (top-level 2 + src children), got %d: %v", len(d2), d2)
+	}
+	hasAppGo := false
+	hasInternal := false
+	hasConfigGo := false
+	for _, it := range d2 {
+		if it.Name == "app.go" {
+			hasAppGo = true
+		}
+		if it.Name == "internal" {
+			hasInternal = true
+		}
+		if it.Name == "config.go" {
+			hasConfigGo = true
+		}
+	}
+	if !hasAppGo {
+		t.Error("depth=2 should include src/app.go")
+	}
+	if !hasInternal {
+		t.Error("depth=2 should include src/internal/ (subdirectory)")
+	}
+	if hasConfigGo {
+		t.Error("depth=2 should NOT include src/internal/config.go (it is depth=3)")
+	}
+}
+
+func TestListDirectory_BroadModeWithHomeDir(t *testing.T) {
+	// 广域模式（无 workspace_root）：保持现有行为——expandPath 展开 ~ 到家目录。
+	h := newTestHandlers(t)
+	conn := &readFileCaptureConn{}
+	h.handleListDirectory(conn, WireMessage{
+		RequestID: "req_home",
+		Params:    mustJSONRaw(t, map[string]any{"path": "~"}),
+	})
+	if conn.err != nil {
+		t.Fatalf("broad mode ~ should succeed, got error: %+v", conn.err)
+	}
+	resMap, _ := conn.data.(map[string]interface{})
+	cp, ok := resMap["currentPath"].(string)
+	if !ok || cp == "" {
+		t.Fatal("broad mode should return currentPath (home dir)")
+	}
+	homeDir, _ := os.UserHomeDir()
+	if homeDir != "" && cp != homeDir {
+		t.Errorf("expected ~ to resolve to %s, got %s", homeDir, cp)
+	}
+	// 验证响应有 hasMore 字段（additive，picker 也带）。
+	if _, ok := resMap["hasMore"]; !ok {
+		t.Error("broad mode response should include hasMore field")
+	}
+}
+
+// TestListDirectory_BroadMode_SymlinkIsLeaf 固化 review① 不变量：广域模式（无 workspace_root）
+// 下 symlink 仍是叶子——即便 symlink 指向浏览目录之外（等价 ~/.ssh 等敏感目录），也只返回
+// isSymlink:true 叶子标记，不递归展开 target 内容。picker 可浏览任意真实目录，但不穿越 symlink。
+// 该守卫由 collectDirItems 的 mode-independent `!isSymlink` 递归门保证，与 workspaceBound 无关。
+func TestListDirectory_BroadMode_SymlinkIsLeaf(t *testing.T) {
+	workspace := t.TempDir()
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "leak.txt")
+	if err := os.WriteFile(outsideFile, []byte("leaked"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// symlink 在广域浏览目录内，指向外部敏感目录（模拟经 symlink 翻到 ~/.ssh 等）。
+	escLink := filepath.Join(workspace, "escape-link")
+	if err := os.Symlink(outside, escLink); err != nil {
+		t.Fatal(err)
+	}
+
+	h := newTestHandlers(t)
+	conn := &readFileCaptureConn{}
+	// 广域模式：不传 workspace_root；depth=3 给足递归空间，若 symlink 被错误展开会暴露 leak.txt。
+	h.handleListDirectory(conn, WireMessage{
+		RequestID: "req_broad_symlink",
+		Params: mustJSONRaw(t, map[string]any{
+			"path":  workspace,
+			"depth": 3,
+		}),
+	})
+	if conn.err != nil {
+		t.Fatalf("broad mode symlink listing should succeed, got error: %+v", conn.err)
+	}
+	resMap, _ := conn.data.(map[string]interface{})
+	itemsRaw, _ := json.Marshal(resMap["items"])
+
+	type item struct {
+		Name      string `json:"name"`
+		IsSymlink bool   `json:"isSymlink,omitempty"`
+	}
+	var items []item
+	json.Unmarshal(itemsRaw, &items)
+
+	hasLink := false
+	for _, it := range items {
+		if it.Name == "leak.txt" {
+			t.Fatalf("broad mode symlink leaf violated: target content '%s' leaked from outside dir", it.Name)
+		}
+		if it.Name == "escape-link" {
+			hasLink = true
+			if !it.IsSymlink {
+				t.Error("escape-link should be marked isSymlink=true in broad mode")
+			}
+		}
+	}
+	if !hasLink {
+		t.Error("missing symlink entry 'escape-link' in broad mode listing")
 	}
 }

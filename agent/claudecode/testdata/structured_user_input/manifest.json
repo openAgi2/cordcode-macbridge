@@ -1,0 +1,10 @@
+{
+  "producer": "Claude Code CLI",
+  "producer_version": "2.1.209",
+  "files": {
+    "claude_single_paired.json": "abdb13b309b682c5ab49e112613b43bf76c26da3096d95884ccdaa4a3ee58f8f",
+    "claude_multi_select_paired.json": "ff36e4e7f7351d54170e7d5a3fa92ef13958217346b0601c0319cac747ac70de",
+    "claude_multi_question_paired.json": "ecf35c18d4839adce107e097d1089546e5a9fcb928570c7c5ab53e9421d0bad2",
+    "claude_no_options_rejected.jsonl": "084c1fd062c1065728bd37c83a7b9037db3ff4f9b60fc6a237832e2877aa1100"
+  }
+}

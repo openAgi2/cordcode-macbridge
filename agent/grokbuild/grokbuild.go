@@ -24,6 +24,7 @@ var _ core.DiagnosticsProvider = (*Agent)(nil)
 var _ core.WorkDirSwitcher = (*Agent)(nil)
 var _ core.ModeSwitcher = (*Agent)(nil)
 var _ core.ModelSwitcher = (*Agent)(nil)
+var _ core.ProviderSwitcher = (*Agent)(nil)
 var _ core.ReasoningEffortSwitcher = (*Agent)(nil)
 var _ core.ToolAuthorizer = (*Agent)(nil)
 var _ core.HistoryProvider = (*Agent)(nil)
@@ -39,9 +40,23 @@ type Agent struct {
 	reasoningEffort string
 	mode            string
 	allowedTools    []string
+	// providers / activeIdx 背载 iOS 下发的第三方 Grok provider 配置（GLM/DeepSeek 等
+	// 经 grok 网关）。AvailableModels 优先返 active provider 的 Models，使 custom 模型可见；
+	// modelProviderForAgent 据此把无前缀模型标到 active provider 名下而非 "default"。
+	providers []core.ProviderConfig
+	activeIdx int // -1 = no provider set
 	// grokHome overrides ~/.grok / GROK_HOME for session catalog (tests).
 	grokHome string
 	mu       sync.RWMutex
+
+	// --- catalog subprocess singleton（§5.4 Phase 3）---
+	// catalogClient 是进程级单例 ACP catalog 子进程（grok agent --no-leader stdio），
+	// 与 per-turn grokSession 子进程分开管理、分开回收。catalogClientMu 串行化
+	// create/replace；catalogRegistrar 是 bridge ProcessRegistry 注入句柄。
+	// §10：capability 未声明前 go-bridge 不路由到 FetchSessionList → 当前不可达 = 零行为变化。
+	catalogClient   *grokCatalogClient
+	catalogClientMu sync.Mutex
+	catalogRegistrar CatalogSubprocessRegistrar
 }
 
 func init() {
@@ -51,8 +66,9 @@ func init() {
 // New creates a Grok Build agent from the given options map.
 func New(opts map[string]any) (core.Agent, error) {
 	a := &Agent{
-		workDir: ".",
-		mode:    "default",
+		workDir:  ".",
+		mode:     "default",
+		activeIdx: -1,
 	}
 
 	if v, ok := opts["work_dir"].(string); ok && v != "" {
@@ -114,42 +130,66 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 }
 
 // ListSessions returns sessions from the local Grok session store
-// ($GROK_HOME/sessions). ACP session/list is not available on current CLI
-// versions (Method not found); the on-disk catalog is the v1 discovery path.
+// ($GROK_HOME/sessions). This is the v1 on-disk discovery path (undeclared
+// connections, §10). The catalog main line is FetchSessionList (managed ACP
+// session/list subprocess, catalog_session_list.go) — routed only for connections
+// that declare catalog_cursor_epoch_v2.
 // Implementation: session_catalog.go.
 
 func (a *Agent) Stop() error { return nil }
 
-// SubscribeSessionEvents attaches to a running grok leader (~/.grok/leader.sock)
-// as a READ-ONLY subscriber for one session and streams its live session/update
-// notifications as core.Events (via convertSessionUpdate). It does NOT spawn a
-// leader, acquire the flock, or drive the session. Fail-fast when no leader
-// socket exists (grok not running → no external turn to observe). The channel
-// closes when the leader disconnects or ctx is cancelled.
+// SubscribeSessionEvents streams a session's live session/update notifications as
+// core.Events (via convertSessionUpdate). It prefers the leader-socket subscriber
+// (push, low-latency) when ~/.grok/leader.sock exists; otherwise it falls back to
+// the updates.jsonl file tailer (poll). grok's leader socket only exists under
+// use_leader=true (default inline embedded agent mode never creates it), so the
+// file fallback is the path most users actually hit — and it works without any
+// requirement on how grok was launched, since grok writes updates.jsonl in all
+// modes. Both sources feed the same codec (convertSessionUpdate), so the downstream
+// relay loop's turn-start synthesis / defer-idle logic is shared unchanged.
+//
+// Neither path spawns a leader, acquires the flock, or drives the session. The
+// channel closes when the source disconnects / tails out or ctx is cancelled.
 //
 // grokHome is write-once (set in New), so reading it here without a.mu is safe.
 func (a *Agent) SubscribeSessionEvents(ctx context.Context, sessionID, cwd string) (<-chan core.Event, error) {
-	socketPath := resolveLeaderSocket(a.grokHome)
-	if _, err := os.Stat(socketPath); err != nil {
-		return nil, fmt.Errorf("grokbuild: leader socket not available (%s): %w", socketPath, err)
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, fmt.Errorf("grokbuild: SubscribeSessionEvents requires a sessionId")
 	}
 	if strings.TrimSpace(cwd) == "" {
 		cwd = a.GetWorkDir()
 	}
 	ch := make(chan core.Event, 32)
+	forward := func(ev core.Event) {
+		if ev.SessionID == "" {
+			ev.SessionID = sessionID
+		}
+		select {
+		case ch <- ev:
+		case <-ctx.Done():
+		}
+	}
+
+	socketPath := resolveLeaderSocket(a.grokHome)
+	if _, err := os.Stat(socketPath); err != nil {
+		// Leader socket absent (默认 inline 模式) —— fallback 到 updates.jsonl file tailer。
+		slog.Info("grokbuild: leader socket absent, falling back to updates.jsonl file tailer",
+			"session", sessionID, "socket", socketPath)
+		tail := newUpdatesFileTailSubscriber(a.grokHome, sessionID)
+		go func() {
+			defer close(ch)
+			if err := tail.Run(ctx, forward); err != nil {
+				slog.Debug("grokbuild: updates file tailer ended", "session", sessionID, "error", err)
+			}
+		}()
+		return ch, nil
+	}
+
 	sub := NewLeaderSubscriber(socketPath, sessionID, cwd)
 	go func() {
 		defer close(ch)
 		slog.Info("grokbuild: leader subscriber starting", "session", sessionID, "socket", socketPath)
-		if err := sub.Run(ctx, func(ev core.Event) {
-			if ev.SessionID == "" {
-				ev.SessionID = sessionID
-			}
-			select {
-			case ch <- ev:
-			case <-ctx.Done():
-			}
-		}); err != nil {
+		if err := sub.Run(ctx, forward); err != nil {
 			slog.Debug("grokbuild: leader subscriber ended", "session", sessionID, "error", err)
 		}
 	}()
@@ -206,10 +246,24 @@ func (a *Agent) SetModel(model string) {
 func (a *Agent) GetModel() string {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	return a.model
+	return core.GetProviderModel(a.providers, a.activeIdx, a.model)
+}
+
+// configuredModels returns the model list pre-configured on the active provider
+// (iOS-injected third-party Grok providers). Empty when no provider is set.
+func (a *Agent) configuredModels() []core.ModelOption {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return core.GetProviderModels(a.providers, a.activeIdx)
 }
 
 func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
+	if models := a.configuredModels(); len(models) > 0 {
+		return models
+	}
+	// Grok CLI 走 ACP agent stdio（grok agent stdio），无 `grok models` 子命令（ACP v1 无标准
+	// listModels），故不照搬 opencode 的 exec models 探测；custom provider 模型经
+	// configuredModels 可见，无 provider 时回落默认 Grok 模型。详见 t3code-adoption-plan §5.1。
 	return []core.ModelOption{
 		{Name: "grok-4.5", Desc: "Grok 4.5"},
 		{Name: "grok-4", Desc: "Grok 4"},
@@ -232,6 +286,50 @@ func (a *Agent) GetReasoningEffort() string {
 
 func (a *Agent) AvailableReasoningEfforts() []string {
 	return []string{"low", "medium", "high"}
+}
+
+// --- ProviderSwitcher ---
+
+func (a *Agent) SetProviders(providers []core.ProviderConfig) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.providers = providers
+}
+
+func (a *Agent) SetActiveProvider(name string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if name == "" {
+		a.activeIdx = -1
+		slog.Info("grokbuild: provider cleared")
+		return true
+	}
+	for i, p := range a.providers {
+		if p.Name == name {
+			a.activeIdx = i
+			slog.Info("grokbuild: provider switched", "provider", name)
+			return true
+		}
+	}
+	return false
+}
+
+func (a *Agent) GetActiveProvider() *core.ProviderConfig {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.activeIdx < 0 || a.activeIdx >= len(a.providers) {
+		return nil
+	}
+	p := a.providers[a.activeIdx]
+	return &p
+}
+
+func (a *Agent) ListProviders() []core.ProviderConfig {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	result := make([]core.ProviderConfig, len(a.providers))
+	copy(result, a.providers)
+	return result
 }
 
 // --- ToolAuthorizer ---

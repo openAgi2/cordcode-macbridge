@@ -40,9 +40,10 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 			caps = append(caps, "session_mutation")
 		}
 	}
-	if id == "claudecode" {
-		caps = append(caps, "content_chunking")
-	}
+	// §6.2: A-class static positive capabilities (content_chunking for claude,
+	// claude question_reply, external_turn_streaming, opencode todos 兜底) migrated
+	// out of id-keyed checks into the driver's WireDescriptor.StaticCapabilities
+	// (self-description). They are appended below from resolveStaticDescriptor(agent).
 	if _, ok := agent.(core.SessionDeleter); ok {
 		caps = append(caps, "session_delete")
 	}
@@ -58,31 +59,98 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 			caps = append(caps, "permission_resolve")
 		}
 	}
-	if _, ok := agent.(core.TodoProvider); ok || id == "opencode" {
+	// D class (mixed): TodoProvider interface half stays wire; opencode id-half migrated
+	// into opencode's WireDescriptor.StaticCapabilities (§6.2 A-class), appended below.
+	if _, ok := agent.(core.TodoProvider); ok {
 		caps = append(caps, "todos")
 	}
 	if id == "codex" && codexBackendMode == "app_server" {
 		caps = append(caps, "compression")
 		caps = append(caps, "question_reply")
 	}
-	// claudecode now answers AskUserQuestion via the verified control_response
-	// path (RespondQuestion/RejectQuestion in session.go), so it advertises the
-	// backend-neutral question_reply capability. OpenCode does not resolve
-	// questions over the bridge and must NOT advertise it.
-	if id == "claudecode" {
-		caps = append(caps, "question_reply")
+	// claude question_reply now flows from the driver's WireDescriptor.StaticCapabilities
+	// (§6.2 A-class self-description), not an id check here. OpenCode does not resolve
+	// questions over the bridge and must NOT advertise it (its StaticCapabilities omits it).
+
+	// structured_user_input_v1（design docs/2026-08-01-codex-claude-structured-user-input-design.md §13）：
+	// 仅当 backend adapter session 实现 core.UserInputResponder（ResolveUserInput）时广告。这是
+	// per-backend descriptor capability；session_sync_v2（Projection Kernel readiness）是独立的
+	// global connection capability，iOS 按 §13.1 step 8 自行 AND 两者，此处不同步耦合、不在 advert
+	// 层 AND Kernel。实现者：Codex app_server（appServerSession）与 Claude Code（claudeSession）；
+	// opencode 与非 app_server codex 不实现 → fail-closed（iOS 不出现提问卡）。
+	// Claude capability and production control-request routing share one readiness source through
+	// StructuredUserInputProvider. Descriptor aliases therefore cannot advertise a path that the
+	// instantiated adapter has not enabled. No cross-backend global boolean is used.
+	if id == "codex" && codexBackendMode == "app_server" {
+		caps = append(caps, "structured_user_input_v1")
+	}
+	if ready, ok := agent.(core.StructuredUserInputProvider); ok && ready.StructuredUserInputReady() {
+		caps = append(caps, "structured_user_input_v1")
 	}
 
-	// external_turn_streaming（refactor `multi-client-streaming-sync` Phase 1/2）：MacBridge 对该
-	// backend 的外部 turn 已实现 push 流式——file-relay 解析 transcript/rollout 增长，发
-	// text_delta/reasoning_delta/tool_started/context_usage_updated，客户端据此可关闭发现型轮询、
-	// 改用 reconcile-on-event（turn_completed 一次 reconcile + 低频看门狗）。Phase 1 已为 codex
-	// （rollout 流）与 claude/claudecode（transcript 流）实现；opencode 本就 SSE push-native；
-	// grokbuild 待 leader-socket subscriber。capability 是 extensible string，非破坏性新增，无需
-	// 协议大版本 bump。
-	if id == "codex" || id == "claude" || id == "claudecode" {
-		caps = append(caps, "external_turn_streaming")
+	// external_turn_streaming (refactor `multi-client-streaming-sync` Phase 1/2): declared
+	// for backends whose external turns MacBridge now streams via push (file-relay content
+	// deltas). §6.2 migrated this out of an id check into each driver's
+	// WireDescriptor.StaticCapabilities: codex (rollout stream) and claude/claudecode
+	// (transcript stream) self-describe it; opencode is already SSE push-native (no
+	// file-relay); grokbuild waits on the leader-socket subscriber. The capability is an
+	// extensible string, a non-breaking addition with no protocol major-version bump.
+	if wd := resolveStaticDescriptor(agent); wd != nil {
+		caps = append(caps, wd.StaticCapabilities...)
 	}
 
-	return caps
+	// §6.1 checkpoint 只读 diff: capability 派生自 CheckpointProvider opt-in 接口（与
+	// SessionPinner 同模板）。snapshot 是 workspace 文件快照（非 session 真相源）；iOS 据此
+	// capability 决定是否展示 turn diff UI。capture 在 non-git workspace 诚实地不写 ref
+	// （workspace_not_git），无 mock/placeholder fallback。ConversationRollbackProvider 当前
+	// 无 driver 实现 → capability 缺省隐藏，revert 入口据此禁用。两条都是 extensible string，
+	// 非破坏性新增，无 major version bump；不做 backend-id 硬分支。
+	if cp, ok := agent.(core.CheckpointProvider); ok && cp.SupportsCheckpoint() {
+		caps = append(caps, "supports_checkpoint")
+	}
+	if _, ok := agent.(core.ConversationRollbackProvider); ok {
+		caps = append(caps, "supports_conversation_rollback")
+	}
+
+	// §6.5 工作区文件浏览器: 当 backend 有 WorkDirSwitcher 接口时,声明 workspace-browse
+	// 能力。所有三个 agent (claudecode/codex/opencode) 均实现此接口,因此浏览器入口普遍可用。
+	// 为 extensible string,additive,无 major version bump。
+	if _, ok := agent.(core.WorkDirSwitcher); ok {
+		caps = append(caps, "supports_workspace_browse")
+	}
+
+	// §7.1 PR 集成（GitHub-only）：当 backend 有 WorkDirSwitcher + 工作区是 GitHub remote
+	// + gh CLI 已安装且认证 + driver 实现了非交互式 PR 内容生成器时，声明 supports_pull_requests。
+	if ws, ok := agent.(core.WorkDirSwitcher); ok && ws.GetWorkDir() != "" {
+		if _, ok := agent.(core.PrContentGenerator); ok && supportsPullRequests(ws.GetWorkDir()) {
+			caps = append(caps, "supports_pull_requests")
+		}
+	}
+
+	// Phase 1 §4.1 B commit_and_push：当 driver 实现了非交互式 commit message 生成器时，
+	// 声明 supports_commit_message（iOS 据此决定是否显示 commit message 编辑/生成 UI）。
+	// 现网仅 claudecode/codex 实现（opencode/grokbuild 无），未实现的 backend 不显示 commit UI。
+	if _, ok := agent.(core.CommitMessageGenerator); ok {
+		caps = append(caps, "supports_commit_message")
+	}
+
+	return dedupCapabilities(caps)
+}
+
+// dedupCapabilities preserves first-occurrence order while removing duplicates. §6.2
+// moved A-class capabilities into WireDescriptor.StaticCapabilities, which a driver
+// could in principle also derive via an interface (e.g. an opencode-like backend that
+// both implements TodoProvider and lists "todos" in its StaticCapabilities). Dedup keeps
+// the advertised set clean without relying on every driver to avoid overlap.
+func dedupCapabilities(caps []string) []string {
+	seen := make(map[string]bool, len(caps))
+	out := make([]string, 0, len(caps))
+	for _, c := range caps {
+		if c == "" || seen[c] {
+			continue
+		}
+		seen[c] = true
+		out = append(out, c)
+	}
+	return out
 }

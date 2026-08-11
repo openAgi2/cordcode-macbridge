@@ -1,0 +1,126 @@
+{
+  "$schema": "cordcode.management-inventory.v1",
+  "schemaVersion": 1,
+  "root": {
+    "name": "management-file-read",
+    "kind": "mac-local-management-api",
+    "status": "frozen",
+    "statusLadder": "draft -> proposed -> observed -> frozen",
+    "statusTransitionRule": "Frozen by R1.12: every variant is exact real Go or Mac Swift producer bytes; strict codecs, state/liveness tests and process escalation gates pass.",
+    "canonicalOwner": "macbridge (docs/protocol/samples/management-file-read/ is the ONLY copy; NOT synced to iOS — iOS does not consume the Management API)",
+    "producerConsumers": {
+      "producer": "go-bridge ManagementServer status/quiesce/commit/abort handlers plus Mac Swift RuntimeManager producer models",
+      "consumers": ["macbridge Mac Swift ManagementStatus/RuntimeManager/RuntimeProcessController and Go strict request codecs"],
+      "notConsumers": ["iOS (Management API is loopback-only, Mac-internal)"]
+    },
+    "scopeNote": "Mac-local Management API (/internal/status, future /internal/runtime/quiesce, commit-quiesced-shutdown, abort-quiesce). Distinct from the cross-repo Bridge/Relay wire root and from the iOS JSC/artifact root. Per plan §3.6 sample-owner rules."
+  },
+  "numericDomainRules": {
+    "integerToken": "all numeric fields must be base-10 JSON integer tokens; reject negative, float, exponent, quoted-number, null, overflow",
+    "managementSchemaVersion": "exact 1 (v1)",
+    "pid": "Int32 domain, pid in 1...Int32.max",
+    "stateEpoch": "UInt64, starts at 1, increments by exactly 1 on each FileReadHealth state transition; never wraps; overflow = fail-closed",
+    "quiesceEpoch": "UInt64, starts at 1, increments by exactly 1 on each accepted quiesce operation; never wraps",
+    "healthEpoch": "UInt64 echo of current stateEpoch at observation time; expectedHealthEpoch compared against it; no third counter",
+    "stuckWorkers": "UInt32 protocol domain, bounded by A0 poolSize",
+    "activeTurns": "UInt32 protocol domain, bounded by A0 maxBridgeOwnedActiveTurns",
+    "pendingInteractions": "UInt32 protocol domain, bounded by A0 maxPendingInteractions",
+    "leaseMillis": "UInt32, > 0, bounded by A0 leaseMin/leaseMax",
+    "leaseRemainingMillis": "UInt32, 0 <= leaseRemainingMillis <= leaseMillis",
+    "retryAfterMillis": "UInt32, > 0",
+    "bridgeEpoch": "UInt64 opaque runtime identity epoch (Go-owned)"
+  },
+  "idAndTokenSecurityDomain": {
+    "operationId": {
+      "encoding": "16 random bytes encoded as exactly 32 lowercase ASCII hex characters",
+      "regex": "^[0-9a-f]{32}$",
+      "role": "opaque correlation; may be hash-map key; NOT constant-time (not a secret)"
+    },
+    "token": {
+      "encoding": "16 random bytes encoded as exactly 32 lowercase ASCII hex characters",
+      "regex": "^[0-9a-f]{32}$",
+      "role": "short-lived authorization secret",
+      "comparison": "constant-time byte comparison after hex-decode to 16 raw bytes",
+      "redactionRule": "token MUST NOT appear in OSLog, Go log, stdout/stderr, metrics, support info, crash annotation, or status; fixtures use fixed non-production test token only",
+      "macLifetime": "Mac holds token only within current operation object; cleared on commit/abort/terminal, generation teardown, or sleep/wake invalidation"
+    },
+    "decoderRule": "strict decoder rejects wrong length, uppercase, non-ASCII, or non-hex BEFORE entering business lock"
+  },
+  "timeBudgetInequalities": {
+    "fields": ["quiesceHTTPTimeout", "safeDecodeBudget", "commitHTTPTimeout", "abortHTTPTimeout", "executorSchedulingMargin", "minimumCommitRemainingMillis", "leaseMin", "leaseMax"],
+    "checkedArithmetic": "all additions use checked arithmetic; any overflow fails the config gate",
+    "mustHold": [
+      "minimumCommitRemainingMillis >= commitHTTPTimeout + executorSchedulingMargin",
+      "leaseMin >= quiesceHTTPTimeout + safeDecodeBudget + minimumCommitRemainingMillis",
+      "leaseMax >= leaseMin"
+    ],
+    "valuesFrozenAt": "R1.12 production gate: quiesce/commit/abort HTTP 2000ms, safe decode 500ms, executor margin 500ms, minimum commit remaining 2500ms, lease min=max=30000ms"
+  },
+  "variants": [
+    {
+      "group": "status",
+      "name": "v0-status",
+      "evidenceStatus": "observed",
+      "observedVia": "real Go handleStatus (go-bridge/management_api.go) with deterministic non-sensitive test config + injected fixed clock",
+      "expectedFile": "v0-status-observed.json",
+      "expectedCount": 1,
+      "fields": ["bridgeId", "displayName", "status", "uptime", "version"],
+      "producer": "go-bridge handleStatus",
+      "consumers": ["macbridge Mac Swift ManagementStatus (v0 lenient decoder)"],
+      "notes": "R11 §2.1 live key/type dump confirmed 5 string fields, no iosPort. iosPort is Mac Swift model optional only; must NOT be written into v0 producer fixture."
+    },
+    { "group": "status", "name": "v1-status-healthy-accepting", "evidenceStatus": "observed", "expectedFile": "v1-status-accepting.json", "expectedCount": 1, "producer": "go-bridge handleStatus", "consumers": ["macbridge Mac Swift"], "notes": "healthy + accepting; managementSchemaVersion:1 + v0 fields retained + quiesce.state=none" },
+    { "group": "status", "name": "v1-status-healthy-quiescing", "evidenceStatus": "observed", "expectedFile": "v1-status-quiescing.json", "expectedCount": 1, "producer": "go-bridge handleStatus", "consumers": ["macbridge Mac Swift"], "notes": "healthy + quiescing; quiesce.state=leased; status carries no token" },
+    { "group": "status", "name": "v1-status-healthy-shuttingDown", "evidenceStatus": "observed", "expectedFile": "v1-status-shuttingDown.json", "expectedCount": 1, "producer": "go-bridge handleStatus", "consumers": ["macbridge Mac Swift"], "notes": "healthy + shuttingDown; quiesce.state=committed" },
+    { "group": "status", "name": "v1-status-degrading-accepting", "evidenceStatus": "observed", "expectedFile": "v1-status-degrading-accepting.json", "expectedCount": 1, "producer": "go-bridge handleStatus", "consumers": ["macbridge Mac Swift"] },
+    { "group": "status", "name": "v1-status-degrading-quiescing", "evidenceStatus": "observed", "expectedFile": "v1-status-degrading-quiescing.json", "expectedCount": 1, "producer": "go-bridge handleStatus", "consumers": ["macbridge Mac Swift"] },
+    { "group": "status", "name": "v1-status-degrading-shuttingDown", "evidenceStatus": "observed", "expectedFile": "v1-status-degrading-shuttingDown.json", "expectedCount": 1, "producer": "go-bridge handleStatus", "consumers": ["macbridge Mac Swift"] },
+    { "group": "status", "name": "v1-status-degraded-accepting", "evidenceStatus": "observed", "expectedFile": "v1-status-degraded-accepting.json", "expectedCount": 1, "producer": "go-bridge handleStatus", "consumers": ["macbridge Mac Swift"] },
+    { "group": "status", "name": "v1-status-degraded-quiescing", "evidenceStatus": "observed", "expectedFile": "v1-status-degraded-quiescing.json", "expectedCount": 1, "producer": "go-bridge handleStatus", "consumers": ["macbridge Mac Swift"] },
+    { "group": "status", "name": "v1-status-degraded-shuttingDown", "evidenceStatus": "observed", "expectedFile": "v1-status-degraded-shuttingDown.json", "expectedCount": 1, "producer": "go-bridge handleStatus", "consumers": ["macbridge Mac Swift"] },
+
+    { "group": "quiesce-request", "name": "quiesce-request", "evidenceStatus": "observed", "expectedFile": "quiesce-request.json", "expectedCount": 1, "producer": "macbridge Mac Swift (RuntimeManager)", "consumers": ["go-bridge (R1.11)"], "notes": "POST /internal/runtime/quiesce; exact fields managementSchemaVersion:1, operationId, expectedRuntime{pid,bridgeEpoch}, expectedHealthEpoch; Mac RNG failure => request not sent" },
+    { "group": "quiesce-result", "name": "quiesce-safe", "evidenceStatus": "observed", "expectedFile": "quiesce-result-safe.json", "expectedCount": 1, "producer": "go-bridge (R1.11)", "consumers": ["macbridge Mac Swift"], "notes": "outcome=safe + runtimeIdentity,healthEpoch,quiesceEpoch,token,leaseMillis,leaseRemainingMillis" },
+    { "group": "quiesce-result", "name": "quiesce-deferred", "evidenceStatus": "observed", "expectedFile": "quiesce-result-deferred.json", "expectedCount": 1, "producer": "go-bridge (R1.11)", "consumers": ["macbridge Mac Swift"], "notes": "outcome=deferred + activeTurns,pendingInteractions,retryAfterMillis; runtime stays accepting" },
+    { "group": "quiesce-result", "name": "quiesce-identity-mismatch", "evidenceStatus": "observed", "expectedFile": "quiesce-result-identity-mismatch.json", "expectedCount": 1, "producer": "go-bridge (R1.11)", "consumers": ["macbridge Mac Swift"], "notes": "outcome only, no extra fields" },
+    { "group": "quiesce-result", "name": "quiesce-epoch-mismatch", "evidenceStatus": "observed", "expectedFile": "quiesce-result-epoch-mismatch.json", "expectedCount": 1, "producer": "go-bridge (R1.11)", "consumers": ["macbridge Mac Swift"] },
+    { "group": "quiesce-result", "name": "quiesce-already-committed", "evidenceStatus": "observed", "expectedFile": "quiesce-result-already-committed.json", "expectedCount": 1, "producer": "go-bridge (R1.11)", "consumers": ["macbridge Mac Swift"], "notes": "runtime already shuttingDown" },
+    { "group": "quiesce-result", "name": "quiesce-already-quiescing", "evidenceStatus": "observed", "expectedFile": "quiesce-result-already-quiescing.json", "expectedCount": 1, "producer": "go-bridge (R1.11)", "consumers": ["macbridge Mac Swift"], "notes": "active different operation; no token leaked" },
+    { "group": "quiesce-result", "name": "quiesce-operation-reused", "evidenceStatus": "observed", "expectedFile": "quiesce-result-operation-reused.json", "expectedCount": 1, "producer": "go-bridge (R1.11)", "consumers": ["macbridge Mac Swift"], "notes": "operationId hit last-terminal (incl just-expired active); no new lease; forces new ID" },
+    { "group": "quiesce-result", "name": "quiesce-token-generation-failed", "evidenceStatus": "observed", "expectedFile": "quiesce-result-token-generation-failed.json", "expectedCount": 1, "producer": "go-bridge (R1.11)", "consumers": ["macbridge Mac Swift"], "notes": "Go RNG failure; stays accepting" },
+
+    { "group": "commit-request", "name": "commit-request", "evidenceStatus": "observed", "expectedFile": "commit-request.json", "expectedCount": 1, "producer": "macbridge Mac Swift", "consumers": ["go-bridge (R1.11)"], "notes": "POST /internal/runtime/commit-quiesced-shutdown; exact: managementSchemaVersion:1, operationId, expectedRuntime, expectedHealthEpoch, quiesceEpoch, token" },
+    { "group": "commit-result", "name": "commit-committed", "evidenceStatus": "observed", "expectedFile": "commit-result-committed.json", "expectedCount": 1, "producer": "go-bridge (R1.11)", "consumers": ["macbridge Mac Swift"], "notes": "outcome=committed + runtimeIdentity,healthEpoch,quiesceEpoch; Go atomic quiescing->shuttingDown then graceful self-exit regardless of response delivery" },
+    { "group": "commit-result", "name": "commit-already-committed", "evidenceStatus": "observed", "expectedFile": "commit-result-already-committed.json", "expectedCount": 1, "producer": "go-bridge (R1.11)", "consumers": ["macbridge Mac Swift"], "notes": "+ runtimeIdentity,healthEpoch,quiesceEpoch" },
+    { "group": "commit-result", "name": "commit-identity-mismatch", "evidenceStatus": "observed", "expectedFile": "commit-result-identity-mismatch.json", "expectedCount": 1, "producer": "go-bridge (R1.11)", "consumers": ["macbridge Mac Swift"] },
+    { "group": "commit-result", "name": "commit-epoch-mismatch", "evidenceStatus": "observed", "expectedFile": "commit-result-epoch-mismatch.json", "expectedCount": 1, "producer": "go-bridge (R1.11)", "consumers": ["macbridge Mac Swift"] },
+    { "group": "commit-result", "name": "commit-quiesce-mismatch", "evidenceStatus": "observed", "expectedFile": "commit-result-quiesce-mismatch.json", "expectedCount": 1, "producer": "go-bridge (R1.11)", "consumers": ["macbridge Mac Swift"], "notes": "operationId relation or quiesceEpoch wrong; no state change" },
+    { "group": "commit-result", "name": "commit-token-mismatch", "evidenceStatus": "observed", "expectedFile": "commit-result-token-mismatch.json", "expectedCount": 1, "producer": "go-bridge (R1.11)", "consumers": ["macbridge Mac Swift"], "notes": "same operation+epoch but token wrong; constant-time compare; no state change" },
+    { "group": "commit-result", "name": "commit-lease-expired", "evidenceStatus": "observed", "expectedFile": "commit-result-lease-expired.json", "expectedCount": 1, "producer": "go-bridge (R1.11)", "consumers": ["macbridge Mac Swift"], "notes": "now >= expiresAt; same lock restores accepting + writes expired terminal" },
+
+    { "group": "abort-request", "name": "abort-request", "evidenceStatus": "observed", "expectedFile": "abort-request.json", "expectedCount": 1, "producer": "macbridge Mac Swift", "consumers": ["go-bridge (R1.11)"], "notes": "POST /internal/runtime/abort-quiesce; same fields as commit-request" },
+    { "group": "abort-result", "name": "abort-aborted", "evidenceStatus": "observed", "expectedFile": "abort-result-aborted.json", "expectedCount": 1, "producer": "go-bridge (R1.11)", "consumers": ["macbridge Mac Swift"], "notes": "outcome=aborted + runtimeIdentity,healthEpoch; restores accepting" },
+    { "group": "abort-result", "name": "abort-already-accepting", "evidenceStatus": "observed", "expectedFile": "abort-result-already-accepting.json", "expectedCount": 1, "producer": "go-bridge (R1.11)", "consumers": ["macbridge Mac Swift"], "notes": "accepting + last same aborted; idempotent" },
+    { "group": "abort-result", "name": "abort-already-committed", "evidenceStatus": "observed", "expectedFile": "abort-result-already-committed.json", "expectedCount": 1, "producer": "go-bridge (R1.11)", "consumers": ["macbridge Mac Swift"] },
+    { "group": "abort-result", "name": "abort-identity-mismatch", "evidenceStatus": "observed", "expectedFile": "abort-result-identity-mismatch.json", "expectedCount": 1, "producer": "go-bridge (R1.11)", "consumers": ["macbridge Mac Swift"] },
+    { "group": "abort-result", "name": "abort-epoch-mismatch", "evidenceStatus": "observed", "expectedFile": "abort-result-epoch-mismatch.json", "expectedCount": 1, "producer": "go-bridge (R1.11)", "consumers": ["macbridge Mac Swift"] },
+    { "group": "abort-result", "name": "abort-quiesce-mismatch", "evidenceStatus": "observed", "expectedFile": "abort-result-quiesce-mismatch.json", "expectedCount": 1, "producer": "go-bridge (R1.11)", "consumers": ["macbridge Mac Swift"] },
+    { "group": "abort-result", "name": "abort-token-mismatch", "evidenceStatus": "observed", "expectedFile": "abort-result-token-mismatch.json", "expectedCount": 1, "producer": "go-bridge (R1.11)", "consumers": ["macbridge Mac Swift"] },
+    { "group": "abort-result", "name": "abort-lease-expired", "evidenceStatus": "observed", "expectedFile": "abort-result-lease-expired.json", "expectedCount": 1, "producer": "go-bridge (R1.11)", "consumers": ["macbridge Mac Swift"] },
+
+    { "group": "bridge-error-envelope", "name": "error-runtime-quiescing", "evidenceStatus": "observed", "expectedFile": "error-runtime-quiescing.json", "expectedCount": 1, "producer": "go-bridge Bridge admission", "consumers": ["iOS + macbridge Mac Swift"], "notes": "Bridge-owned admission rejects new turn/question/permission/file while quiescing" },
+    { "group": "bridge-error-envelope", "name": "error-file-read-degraded", "evidenceStatus": "observed", "expectedFile": "error-file-read-degraded.json", "expectedCount": 1, "producer": "go-bridge file RPC", "consumers": ["iOS + macbridge Mac Swift"], "notes": "FileReadHealth degraded; stuck workers; not retried until management health recovers + re-handshake" },
+
+    { "group": "supervisor-state", "name": "supervisor-idle", "evidenceStatus": "observed", "expectedFile": "supervisor-state-idle.json", "expectedCount": 1, "producer": "macbridge Mac RuntimeProcessController", "consumers": ["macbridge Mac UI"], "notes": "Mac-local; NOT Go wire state" },
+    { "group": "supervisor-state", "name": "supervisor-pending", "evidenceStatus": "observed", "expectedFile": "supervisor-state-pending.json", "expectedCount": 1, "producer": "macbridge Mac", "consumers": ["macbridge Mac UI"], "notes": "multiple restart reasons merge into single pending intent" },
+    { "group": "supervisor-state", "name": "supervisor-quiescing", "evidenceStatus": "observed", "expectedFile": "supervisor-state-quiescing.json", "expectedCount": 1, "producer": "macbridge Mac", "consumers": ["macbridge Mac UI"] },
+    { "group": "supervisor-state", "name": "supervisor-restarting", "evidenceStatus": "observed", "expectedFile": "supervisor-state-restarting.json", "expectedCount": 1, "producer": "macbridge Mac", "consumers": ["macbridge Mac UI"], "notes": "graceful->SIGTERM->(<=2s)->SIGKILL->(<=2s)reap->port release->launch" },
+    { "group": "supervisor-state", "name": "supervisor-restartFailed", "evidenceStatus": "observed", "expectedFile": "supervisor-state-restartFailed.json", "expectedCount": 1, "producer": "macbridge Mac", "consumers": ["macbridge Mac UI"], "notes": "retains failure evidence; manual retry on same serialized coordinator; never launch 2nd runtime" }
+  ],
+  "commitAtomicCommitAbortTable": {
+    "sourceRef": "plan §3.6.3 commit/abort全函数与判定优先级",
+    "judgementOrder": ["runtime identity", "expectedHealthEpoch", "operationId relation", "quiesceEpoch", "token constant-time match", "lease deadline"],
+    "rule": "strict codec/auth before business lock; within lock, first lock-acquirer linearizes; mismatch never mutates state; lease live only when now < expiresAt (now==expiresAt is expired)",
+    "coveredByTest": "go-bridge management admission table-driven + fake-clock test (a1-mgmt-state-tests)"
+  }
+}

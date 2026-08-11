@@ -68,14 +68,14 @@ func TestProjectionPatchDeliveredToV2ConnOnly(t *testing.T) {
 	ep.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "s1", Event: "turn_started", Data: map[string]interface{}{"turnId": "T1"}, Broadcast: true})
 	ep.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "s1", Event: "text_delta", Data: map[string]interface{}{"itemId": "T1", "delta": "Hello"}, Broadcast: true})
 
-	patches := waitForProjectionPatches(t, v2, 2)
-	if len(patches) != 2 {
-		t.Fatalf("v2 received %d projection_patch frames, want exactly 2 (one per event)", len(patches))
+	patches := waitForProjectionPatches(t, v2, 1)
+	if len(patches) != 1 {
+		t.Fatalf("v2 received %d projection_patch frames, want exactly 1 (turn_started publishes no skeleton patch)", len(patches))
 	}
 
-	// syncRev is monotonic and == perSessionSeq (1 then 2).
-	if patches[0].PerSessionSeq != 1 || patches[1].PerSessionSeq != 2 {
-		t.Fatalf("syncRev sequence = %d,%d, want 1,2", patches[0].PerSessionSeq, patches[1].PerSessionSeq)
+	// syncRev is monotonic and == perSessionSeq (projection_patch carries patch.SyncRev).
+	if patches[0].PerSessionSeq != 1 {
+		t.Fatalf("perSessionSeq = %d, want 1", patches[0].PerSessionSeq)
 	}
 	legacy.waitCount(t, 2)
 	if got := len(rawEventFrames(v2.snapshot(), "turn_started", "text_delta")); got != 0 {
@@ -178,6 +178,68 @@ func TestSessionSyncV2RawTimelineClassification(t *testing.T) {
 	}
 }
 
+func TestCanonicalUserInputIsProjectionOnlyAndLegacyIsOneWayDerived(t *testing.T) {
+	broadcaster := NewBroadcaster()
+	ep := NewEventPublisher("epoch-user-input", broadcaster)
+	key := SubscriptionKey{BackendID: "claude", SessionID: "s-ui"}
+	v2 := newPublisherCaptureConn(nil)
+	v2.device = &TrustedDeviceRecord{DeviceID: "dev-v2-ui"}
+	legacy := newPublisherCaptureConn(nil)
+	legacy.device = &TrustedDeviceRecord{DeviceID: "dev-legacy-ui"}
+	broadcaster.Subscribe(v2, key)
+	broadcaster.Subscribe(legacy, key)
+	ep.SetConnSyncV2(v2, true)
+
+	ep.PublishLogical(LogicalEvent{BackendID: "claude", SessionID: "s-ui", Event: "turn_started", Data: map[string]interface{}{"turnId": "T1"}, Broadcast: true})
+	ep.PublishLogical(LogicalEvent{BackendID: "claude", SessionID: "s-ui", Event: "user_input_requested", Data: map[string]interface{}{
+		"turnId": "T1", "interactionId": "ui_1", "status": "pending", "questions": uiQuestionsWire(), "canRespond": true, "canReject": true,
+	}, Broadcast: true})
+
+	waitForProjectionPatches(t, v2, 1)
+	if got := len(rawEventFrames(v2.snapshot(), "user_input_requested")); got != 0 {
+		t.Fatalf("v2 received %d raw canonical requests", got)
+	}
+	if got := len(rawEventFrames(legacy.snapshot(), "user_input_requested")); got != 0 {
+		t.Fatalf("legacy received %d raw canonical requests", got)
+	}
+
+	ep.PublishLogical(LogicalEvent{BackendID: "claude", SessionID: "s-ui", Event: "question_asked", Data: map[string]interface{}{"questionId": "req-1"}, Broadcast: true})
+	legacy.waitCount(t, 2) // turn_started + derived question_asked
+	if got := len(rawEventFrames(legacy.snapshot(), "question_asked")); got != 1 {
+		t.Fatalf("legacy received %d derived question_asked frames, want 1", got)
+	}
+	if got := len(rawEventFrames(v2.snapshot(), "question_asked")); got != 0 {
+		t.Fatalf("v2 received %d raw derived question_asked frames", got)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if got := len(projectionPatchFrames(v2.snapshot())); got != 1 {
+		t.Fatalf("derived legacy frame wrote projection; patch count=%d want 1", got)
+	}
+
+	ep.PublishLogical(LogicalEvent{BackendID: "claude", SessionID: "s-ui", Event: "user_input_resolved", Data: map[string]interface{}{
+		"turnId": "T1", "interactionId": "ui_1", "status": "answered", "source": "ios",
+	}, Broadcast: true})
+	waitForProjectionPatches(t, v2, 2)
+	if got := len(rawEventFrames(v2.snapshot(), "user_input_resolved")); got != 0 {
+		t.Fatalf("v2 received %d raw canonical resolutions", got)
+	}
+	if got := len(rawEventFrames(legacy.snapshot(), "user_input_resolved")); got != 0 {
+		t.Fatalf("legacy received %d raw canonical resolutions", got)
+	}
+	ep.PublishLogical(LogicalEvent{BackendID: "claude", SessionID: "s-ui", Event: "question_resolved", Data: map[string]interface{}{"questionId": "req-1", "result": "replied"}, Broadcast: true})
+	legacy.waitCount(t, 3)
+	if got := len(rawEventFrames(legacy.snapshot(), "question_resolved")); got != 1 {
+		t.Fatalf("legacy received %d derived question_resolved frames, want 1", got)
+	}
+	if got := len(rawEventFrames(v2.snapshot(), "question_resolved")); got != 0 {
+		t.Fatalf("v2 received %d raw derived question_resolved frames", got)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if got := len(projectionPatchFrames(v2.snapshot())); got != 2 {
+		t.Fatalf("derived legacy resolution wrote projection; patch count=%d want 2", got)
+	}
+}
+
 // TestProjectionPatchCarriesContent: the text_delta patch carries an append_text partOp with the
 // delta text, and the turn_started patch carries the turn upsert — proving the reduce output is
 // delivered intact over the funnel (Phase 1 "reduce correctness over the live funnel" proof).
@@ -193,17 +255,24 @@ func TestProjectionPatchCarriesContent(t *testing.T) {
 	ep.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "s1", Event: "text_delta", Data: map[string]interface{}{"itemId": "T1", "delta": "Hello"}, Broadcast: true})
 	ep.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "s1", Event: "text_delta", Data: map[string]interface{}{"itemId": "T1", "delta": " world"}, Broadcast: true})
 
-	patches := waitForProjectionPatches(t, v2, 3)
+	patches := waitForProjectionPatches(t, v2, 2)
 
-	// First patch: turn lifecycle upsert.
+	// First patch carries content directly: turn_started no longer publishes a skeleton
+	// patch (owner 2026-08-04 fence fix), so the first frame is the text_delta append.
 	first := patches[0].Data.(ProjectionPatch)
-	if len(first.UpsertTurns) != 1 || first.UpsertTurns[0].TurnID != "T1" || first.UpsertTurns[0].Status != "running" {
-		t.Fatalf("first patch upsertTurns = %+v", first.UpsertTurns)
+	foundHello := false
+	for _, op := range first.PartOps {
+		if op.Op == "append_text" && op.Text == "Hello" {
+			foundHello = true
+		}
+	}
+	if !foundHello {
+		t.Fatalf("first patch missing append_text Hello: %+v", first.PartOps)
 	}
 
 	// Concatenate all append_text payloads across the content patches — must equal the deltas.
 	var combined string
-	for _, p := range patches[1:] {
+	for _, p := range patches {
 		pp := p.Data.(ProjectionPatch)
 		for _, op := range pp.PartOps {
 			if op.Op == "append_text" {
@@ -222,9 +291,9 @@ func TestProjectionPatchNoSubscriberNoCrash(t *testing.T) {
 	ep := NewEventPublisher("epoch-emit", broadcaster)
 	// No subscribers, no v2 conns.
 	ep.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "s1", Event: "turn_started", Data: map[string]interface{}{"turnId": "T1"}, Broadcast: true})
-	// Reducer still advanced (pull works even with no live subscriber).
-	if rev := ep.ProjectionHeadRev("codex", "s1"); rev != 1 {
-		t.Fatalf("headRev = %d, want 1", rev)
+	// turn_started alone must not advance headRev (skeleton frames never commit).
+	if rev := ep.ProjectionHeadRev("codex", "s1"); rev != 0 {
+		t.Fatalf("headRev = %d, want 0", rev)
 	}
 }
 
@@ -283,12 +352,12 @@ func TestDurableOfflineTurnCompletedDeliversIdleProjectionPatch(t *testing.T) {
 		Offline:   true,
 	})
 
-	patches := waitForProjectionPatches(t, v2, 3)
+	patches := waitForProjectionPatches(t, v2, 2)
 	last := patches[len(patches)-1].Data.(ProjectionPatch)
 	if last.Execution == nil || last.Execution.Phase != "idle" {
 		t.Fatalf("final patch execution = %+v, want phase idle under Offline durable stamp", last.Execution)
 	}
-	if last.SyncRev < 3 {
-		t.Fatalf("final syncRev = %d, want >= 3", last.SyncRev)
+	if last.SyncRev < 2 {
+		t.Fatalf("final syncRev = %d, want >= 2", last.SyncRev)
 	}
 }

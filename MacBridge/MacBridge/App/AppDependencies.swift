@@ -118,6 +118,7 @@ class AppDependencies: ObservableObject {
             : ""
 
         let relayEnabled = UserDefaults.standard.object(forKey: "relayEnabled") as? Bool ?? true
+        let preferLocalNetwork = UserDefaults.standard.object(forKey: "preferLocalNetwork") as? Bool ?? false
         let logFilePath = logDir + "/go-bridge.log"
         let config = RuntimeConfig(
             executablePath: executablePath,
@@ -140,8 +141,9 @@ class AppDependencies: ObservableObject {
             // Keychain access may require user authorization after an app update.
             // OfficialRelayProvisioner loads it off the main actor and restarts with the real credential.
             relayCredential: "",
+            preferLocalNetwork: preferLocalNetwork,
             relayServiceAddress: UserDefaults.standard.string(forKey: "relayServiceAddress") ?? "",
-            sessionListLimit: UserDefaults.standard.object(forKey: "sessionListLimit") as? Int ?? 50
+            sessionListLimit: UserDefaults.standard.object(forKey: "sessionListLimit") as? Int ?? 100
         )
 
         self.runtimeManager = RuntimeManager(config: config)
@@ -197,9 +199,21 @@ class AppDependencies: ObservableObject {
         NotificationCenter.default.publisher(for: .sessionListLimitDidChange)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
-                let value = UserDefaults.standard.object(forKey: "sessionListLimit") as? Int ?? 50
+                let value = UserDefaults.standard.object(forKey: "sessionListLimit") as? Int ?? 100
                 self?.runtimeManager.applyConfigAndRestart { config in
                     config.sessionListLimit = min(max(value, 1), 150)
+                }
+            }
+            .store(in: &cancellables)
+
+        // 「同一局域网时优先直连」开关变更:原子写 RuntimeConfig.preferLocalNetwork + 单次 restart。
+        // 不得复制 config.x = ...; restart() 两步写法。
+        NotificationCenter.default.publisher(for: .preferLocalNetworkDidChange)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                let value = UserDefaults.standard.object(forKey: "preferLocalNetwork") as? Bool ?? false
+                self?.runtimeManager.applyConfigAndRestart { config in
+                    config.preferLocalNetwork = value
                 }
             }
             .store(in: &cancellables)
@@ -217,10 +231,13 @@ class AppDependencies: ObservableObject {
                             self.runtimeManager.config.relayCredential != relay.credential else {
                         return
                     }
-                    self.runtimeManager.config.relayEndpoint = relay.endpoint
-                    self.runtimeManager.config.relayRouteID = relay.routeID
-                    self.runtimeManager.config.relayCredential = relay.credential
-                    self.runtimeManager.restart()
+                    // P2-1: 收敛到 applyConfigAndRestart（原子写 + 单次 restart），替代原先
+                    // config.x = ...; restart() 的两步写法，避免同一配置窗口重复 restart。
+                    self.runtimeManager.applyConfigAndRestart { c in
+                        c.relayEndpoint = relay.endpoint
+                        c.relayRouteID = relay.routeID
+                        c.relayCredential = relay.credential
+                    }
                 } catch {
                     NSLog("[AppDependencies] 官方 Relay 自动启用失败: \(error.localizedDescription)")
                 }

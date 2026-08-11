@@ -28,6 +28,9 @@ type RelayFirstResult struct {
 	// 空表示 Mac 不在任何 LAN(纯 relay);iOS 此时保持 localURL=relayEndpoint 占位。
 	// 不承载 Tailscale 候选(需独立 TLS pin,relay-first completion 本期不下发 pin)。
 	LocalURLs []string `json:"localUrls,omitempty"`
+	// ConnectionPolicy 是 control-plane 连接策略,与 LAN 候选独立。默认 false=Relay 底座。
+	// SSV2:不进入 timeline/projection。
+	ConnectionPolicy *ConnectionPolicy `json:"connectionPolicy,omitempty"`
 }
 
 type relayPendingClaim struct {
@@ -149,6 +152,7 @@ func (s *ManagementServer) approveRelayPairing(ctx context.Context, session *Pai
 		BridgeFingerprint:       s.cfg.RelayIdentity.Fingerprint(),
 		ChannelGeneration:       1,
 		LocalURLs:               s.cfg.LocalURLs,
+		ConnectionPolicy:        &ConnectionPolicy{PreferLocalNetwork: s.cfg.PreferLocalNetwork},
 	}
 	plaintext, err := json.Marshal(result)
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -152,7 +153,7 @@ func TestProjectionHydrateGrowingSourceKeepsBaselineAndPendingDisjoint(t *testin
 	if commit.PendingLive != 4 {
 		t.Fatalf("pending live count = %d, want 4", commit.PendingLive)
 	}
-	if len(commit.Projection.Turns) != 2 || commit.Projection.SyncRev != 8 {
+	if len(commit.Projection.Turns) != 2 || commit.Projection.SyncRev != 6 {
 		t.Fatalf("committed projection = %+v", commit.Projection)
 	}
 	if commit.Projection.Turns[0].TurnID != "turn-1" ||
@@ -272,8 +273,8 @@ func TestProjectionKernelPendingLiveRejectsDuplicateAndOutOfOrderInput(t *testin
 	if got := projectionTurnText(commit.Projection.Turns[0]); got != "once" {
 		t.Fatalf("duplicate/out-of-order pending input changed projection: %q", got)
 	}
-	if commit.Projection.SyncRev != 2 {
-		t.Fatalf("projection rev = %d, want two committed mutations", commit.Projection.SyncRev)
+	if commit.Projection.SyncRev != 1 {
+		t.Fatalf("projection rev = %d, want one committed mutation (turn_started no longer commits)", commit.Projection.SyncRev)
 	}
 }
 
@@ -301,6 +302,11 @@ func TestProjectionKernelBareShellWaitsForRealContent(t *testing.T) {
 		t.Fatal("bare shell became ready")
 	}
 
+	// §5.1 #7: content alone no longer satisfies the commit gate. The bare shell must reach a
+	// terminal turn state AND the cold source must be marked fully ingested — mirroring the
+	// handler path (runProjectionHydrateTransaction marks source-complete after ingest, then
+	// waits). Here real content lands, then the turn is sealed, then source-complete arms the
+	// gate; only then is the transaction committable.
 	kernel.IngestLive(EventMessage{
 		EventID:       "epoch:1",
 		Seq:           1,
@@ -311,6 +317,17 @@ func TestProjectionKernelBareShellWaitsForRealContent(t *testing.T) {
 		Event:         "text_delta",
 		Data:          map[string]interface{}{"itemId": "turn-bare", "delta": "content"},
 	})
+	kernel.IngestLive(EventMessage{
+		EventID:       "epoch:2",
+		Seq:           2,
+		PerSessionSeq: 2,
+		BridgeEpoch:   "epoch",
+		BackendID:     "codex",
+		SessionID:     "bare-wait",
+		Event:         "turn_completed",
+		Data:          map[string]interface{}{"turnId": "turn-bare"},
+	})
+	kernel.MarkHydrateSourceIngestComplete("codex", "bare-wait")
 	if err := kernel.WaitHydrateCommitReady(context.Background(), "codex", "bare-wait"); err != nil {
 		t.Fatal(err)
 	}
@@ -676,5 +693,218 @@ func TestPathlessRebuildDoesNotCarryCheckpointBaseline(t *testing.T) {
 	if commitB.Projection.Turns[0].TurnID != builderTurnID {
 		t.Fatalf("want sole builder turn %q, got %q (live baseline was carried)",
 			builderTurnID, commitB.Projection.Turns[0].TurnID)
+	}
+}
+
+// TestClaudeCompositeCheckpointHitRestoresBaseline_NotEmptyHead0 reproduces the
+// 2026-08-01 owner regression: every Claude session opened empty ("还没有消息").
+//
+// Production Claude hydrate always uses CompositeRichHistoryProvider segments
+// (prepareProjectionHydrateSource Path=="", Segments=[{Cursor:EOF}]). A validated
+// checkpoint hit sets startCursor=source.Cursor (EOF). If Site B skips Restore
+// because Path=="" is treated as pathless full rebuild, produce returns early on
+// startOffset==endOffset and the committed projection is empty (headRev=0).
+//
+// Fix: pathlessFullRebuildSource requires Path=="" AND no Segments — composite
+// Claude must Restore the checkpoint baseline when the gap is empty.
+func TestClaudeCompositeCheckpointHitRestoresBaseline_NotEmptyHead0(t *testing.T) {
+	dir := t.TempDir()
+	store := NewProjectionCheckpointStore(dir)
+	const backendID = "claude"
+	const sessionID = "5054485f-composite-empty-reg"
+	const cut int64 = 5641696 // matches real transcript EOF in go-bridge logs
+
+	// Phase 1 — commit a non-empty projection + composite checkpoint at EOF.
+	kernelA := NewProjectionKernel(NewProjectionReducer(), store)
+	sourceAtEOF := ProjectionSourceDescriptor{
+		Identity: sessionID,
+		Cursor:   cut,
+		Segments: []ProjectionSourceSegment{{
+			Identity: sessionID,
+			Path:     filepath.Join(dir, "transcript.jsonl"),
+			Cursor:   cut,
+		}},
+	}
+	// Write a real file of size `cut` so BuildProjectionSourceCheckpoints / Save work.
+	// Cursor validation only needs size >= cursor; content is irrelevant for this unit.
+	if err := os.WriteFile(sourceAtEOF.Segments[0].Path, make([]byte, cut), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// For checkpoint save we need a simpler path: stage via Commit + StageCheckpoint
+	// through the same helpers production uses. Here we seed via non-composite first,
+	// then overwrite with composite checkpoint matching production schema.
+	admission1, err := kernelA.BeginHydrateTransaction(backendID, sessionID,
+		ProjectionSourceDescriptor{Identity: sessionID, Path: sourceAtEOF.Segments[0].Path, Cursor: cut},
+		false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !admission1.Leader {
+		t.Fatal("phase1 want leader")
+	}
+	const turnID = "turn-seed-1"
+	kernelA.ApplyHydrateEvent(backendID, sessionID, "epoch", "user_message", map[string]interface{}{
+		"itemId": turnID, "turnId": turnID, "text": "hello from checkpoint",
+	})
+	kernelA.ApplyHydrateEvent(backendID, sessionID, "epoch", "text_delta", map[string]interface{}{
+		"itemId": turnID, "delta": "assistant reply",
+	})
+	kernelA.ApplyHydrateEvent(backendID, sessionID, "epoch", "turn_completed", map[string]interface{}{
+		"turnId": turnID, "done": true,
+	})
+	commit1, err := kernelA.CommitHydrateTransaction(backendID, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commit1.Projection.SyncRev == 0 || len(commit1.Projection.Turns) != 1 {
+		t.Fatalf("seed projection empty: rev=%d turns=%d", commit1.Projection.SyncRev, len(commit1.Projection.Turns))
+	}
+	// Persist composite-shaped checkpoint (sources[] at EOF) like production Claude.
+	srcCkpts, err := BuildProjectionSourceCheckpoints(sourceAtEOF)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ckpt := NewReadyCompositeProjectionCheckpoint(
+		backendID, sessionID, srcCkpts, commit1.Projection, time.Now(),
+	)
+	if err := store.Save(ckpt); err != nil {
+		t.Fatal(err)
+	}
+
+	// Phase 2 — fresh kernel, composite source at same EOF cut (checkpoint validates).
+	kernelB := NewProjectionKernel(NewProjectionReducer(), store)
+	admission2, err := kernelB.BeginHydrateTransaction(backendID, sessionID, sourceAtEOF, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !admission2.Leader {
+		t.Fatal("want leader on composite reopen")
+	}
+	if !admission2.CheckpointHit {
+		t.Fatal("want checkpoint hit at unchanged EOF cut")
+	}
+	if admission2.StartCursor != cut || admission2.StartCut != cut {
+		t.Fatalf("want startCursor=startCut=%d (empty gap), got [%d,%d)",
+			cut, admission2.StartCursor, admission2.StartCut)
+	}
+	// Production produce returns nil immediately when startOffset==endOffset — no events.
+	// Commit must still expose the restored baseline (non-zero rev, non-empty turns).
+	commit2, err := kernelB.CommitHydrateTransaction(backendID, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commit2.Projection.SyncRev == 0 {
+		t.Fatal("REGRESSION: composite checkpoint hit produced headRev=0 empty projection " +
+			"(Claude sessions show 还没有消息 on iOS)")
+	}
+	if len(commit2.Projection.Turns) != 1 {
+		t.Fatalf("want 1 restored turn, got %d", len(commit2.Projection.Turns))
+	}
+	if commit2.Projection.Turns[0].TurnID != turnID {
+		t.Fatalf("want restored turn %q, got %q", turnID, commit2.Projection.Turns[0].TurnID)
+	}
+}
+
+// TestProjectionHydrateAbortedTurnWithoutSourceCompleteNotReady is the §5.1 #7 RED baseline.
+// A content-less aborted turn whose cold source is NOT yet marked fully ingested must NOT be
+// committable. This encodes the boundary as a permanent contract: source-EOF is the
+// authoritative readiness signal, not turn shape. Before the §5.1 #7 fix this stayed not-ready
+// for the wrong reason (HasContentTurn=false on a content-less turn); after the fix it stays
+// not-ready for the right reason (source not yet complete). Either way: no commit without the
+// source-complete signal.
+func TestProjectionHydrateAbortedTurnWithoutSourceCompleteNotReady(t *testing.T) {
+	kernel := NewProjectionKernel(nil, nil)
+	admission, err := kernel.BeginHydrateTransaction(
+		"codex", "aborted-no-src",
+		ProjectionSourceDescriptor{Identity: "aborted-no-src"},
+		false, false,
+	)
+	if err != nil || !admission.Leader {
+		t.Fatalf("admission=%+v err=%v", admission, err)
+	}
+	kernel.ApplyHydrateEvent("codex", "aborted-no-src", "epoch", "turn_started",
+		map[string]interface{}{"turnId": "turn-aborted"})
+	kernel.ApplyHydrateEvent("codex", "aborted-no-src", "epoch", "turn_aborted",
+		map[string]interface{}{"turnId": "turn-aborted"})
+
+	short, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if err := kernel.WaitHydrateCommitReady(short, "codex", "aborted-no-src"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("aborted turn without source-complete must stay not-ready, got err=%v", err)
+	}
+	if _, ok := kernel.Snapshot("codex", "aborted-no-src"); ok {
+		t.Fatal("aborted turn without source-complete became ready")
+	}
+}
+
+// TestProjectionHydrateAbortedTurnWithSourceCompleteReady is the §5.1 #7 GREEN target. A
+// content-less aborted turn that has reached a terminal state, once the cold source is fully
+// ingested, IS committable. This is exactly the case the old gate (HasContentTurn) could never
+// satisfy — an aborted/empty session with no assistant content would hydrate forever — and the
+// reason §5.1 #7 replaces content-shape guessing with authoritative source-EOF + terminal state.
+func TestProjectionHydrateAbortedTurnWithSourceCompleteReady(t *testing.T) {
+	kernel := NewProjectionKernel(nil, nil)
+	admission, err := kernel.BeginHydrateTransaction(
+		"codex", "aborted-src",
+		ProjectionSourceDescriptor{Identity: "aborted-src"},
+		false, false,
+	)
+	if err != nil || !admission.Leader {
+		t.Fatalf("admission=%+v err=%v", admission, err)
+	}
+	kernel.ApplyHydrateEvent("codex", "aborted-src", "epoch", "turn_started",
+		map[string]interface{}{"turnId": "turn-aborted"})
+	kernel.ApplyHydrateEvent("codex", "aborted-src", "epoch", "turn_aborted",
+		map[string]interface{}{"turnId": "turn-aborted"})
+	kernel.MarkHydrateSourceIngestComplete("codex", "aborted-src")
+
+	if err := kernel.WaitHydrateCommitReady(context.Background(), "codex", "aborted-src"); err != nil {
+		t.Fatalf("aborted terminal turn + source-complete must be ready, got err=%v", err)
+	}
+	commit, err := kernel.CommitHydrateTransaction("codex", "aborted-src")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commit.Projection.Turns) != 1 {
+		t.Fatalf("want 1 aborted turn committed, got %d turns", len(commit.Projection.Turns))
+	}
+	if got := commit.Projection.Turns[0].Status; got != "aborted" {
+		t.Fatalf("aborted turn status=%q, want \"aborted\"", got)
+	}
+}
+
+// TestProjectionHydrateErrorTurnWithSourceCompleteReady covers the crash sibling of the aborted
+// case (§5.1 #7). A turn_error event must settle the turn to status=error and satisfy the
+// commit gate once the source is fully ingested. Crash and abort are distinct terminal states;
+// covering both prevents a "only aborted works" regression (the historical failure mode where
+// fixing one terminal kind left the crash sibling stuck hydrating).
+func TestProjectionHydrateErrorTurnWithSourceCompleteReady(t *testing.T) {
+	kernel := NewProjectionKernel(nil, nil)
+	admission, err := kernel.BeginHydrateTransaction(
+		"codex", "error-src",
+		ProjectionSourceDescriptor{Identity: "error-src"},
+		false, false,
+	)
+	if err != nil || !admission.Leader {
+		t.Fatalf("admission=%+v err=%v", admission, err)
+	}
+	kernel.ApplyHydrateEvent("codex", "error-src", "epoch", "turn_started",
+		map[string]interface{}{"turnId": "turn-err"})
+	kernel.ApplyHydrateEvent("codex", "error-src", "epoch", "turn_error",
+		map[string]interface{}{"turnId": "turn-err"})
+	kernel.MarkHydrateSourceIngestComplete("codex", "error-src")
+
+	if err := kernel.WaitHydrateCommitReady(context.Background(), "codex", "error-src"); err != nil {
+		t.Fatalf("error terminal turn + source-complete must be ready, got err=%v", err)
+	}
+	commit, err := kernel.CommitHydrateTransaction("codex", "error-src")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commit.Projection.Turns) != 1 {
+		t.Fatalf("want 1 error turn committed, got %d turns", len(commit.Projection.Turns))
+	}
+	if got := commit.Projection.Turns[0].Status; got != "error" {
+		t.Fatalf("error turn status=%q, want \"error\"", got)
 	}
 }

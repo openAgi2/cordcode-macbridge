@@ -3,6 +3,7 @@
 package claudecode
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -75,14 +76,14 @@ func isProcessRunning(pid int) bool {
 // does not regress into false-idle. The PID-reuse defence relies on the
 // strong-mismatch branches — executable not claude, or cwd differs — which
 // return false. Callers must have already confirmed liveness via procAlive.
-func verifyClaudeProcessIdentity(pid int, expectCwd string) bool {
-	if comm, ok := processComm(pid); ok {
+func verifyClaudeProcessIdentity(ctx context.Context, pid int, expectCwd string) bool {
+	if comm, ok := processComm(ctx, pid); ok {
 		if !strings.Contains(strings.ToLower(comm), "claude") {
 			return false
 		}
 	}
 	if expectCwd != "" {
-		if cwd, ok := processCwd(pid); ok && cwd != expectCwd {
+		if cwd, ok := processCwd(ctx, pid); ok && cwd != expectCwd {
 			return false
 		}
 	}
@@ -92,8 +93,8 @@ func verifyClaudeProcessIdentity(pid int, expectCwd string) bool {
 // processComm returns the executable name of pid (the basename path on macOS,
 // or the comm string on Linux). ok=false means the lookup was unavailable
 // (process gone, or ps not available) — callers fail-open.
-func processComm(pid int) (string, bool) {
-	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output()
+func processComm(ctx context.Context, pid int) (string, bool) {
+	out, err := exec.CommandContext(ctx, "ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output()
 	if err != nil {
 		return "", false
 	}
@@ -106,11 +107,14 @@ func processComm(pid int) (string, bool) {
 
 // processCwd returns the working directory of pid. ok=false means unavailable.
 // Linux uses the /proc/<pid>/cwd symlink (no fork); macOS falls back to lsof.
-func processCwd(pid int) (string, bool) {
+func processCwd(ctx context.Context, pid int) (string, bool) {
+	if ctx.Err() != nil {
+		return "", false
+	}
 	if link, err := os.Readlink("/proc/" + strconv.Itoa(pid) + "/cwd"); err == nil && link != "" {
 		return link, true
 	}
-	out, err := exec.Command("lsof", "-a", "-p", strconv.Itoa(pid), "-d", "cwd", "-Fn").Output()
+	out, err := exec.CommandContext(ctx, "lsof", "-a", "-p", strconv.Itoa(pid), "-d", "cwd", "-Fn").Output()
 	if err != nil {
 		return "", false
 	}
@@ -123,4 +127,3 @@ func processCwd(pid int) (string, bool) {
 	}
 	return "", false
 }
-

@@ -11,6 +11,9 @@ extension Notification.Name {
     /// 远程 URL 配置变更时触发，RuntimeManager 应更新配置并重启
     static let remoteURLDidChange = Notification.Name("remoteURLDidChange")
     static let sessionListLimitDidChange = Notification.Name("sessionListLimitDidChange")
+    /// 「同一局域网时优先直连」连接偏好变更（Relay-first + opt-in LAN）。RuntimeManager 应
+    /// 原子更新 RuntimeConfig.preferLocalNetwork 并只 restart 一次。SSV2:control-plane，不进入 timeline。
+    static let preferLocalNetworkDidChange = Notification.Name("preferLocalNetworkDidChange")
     /// P2-3：键盘命令请求打开「帮助与诊断」工作表。
     static let openDiagnosticsRequest = Notification.Name("openDiagnosticsRequest")
     /// P2-3：键盘命令请求打开「连接状态」工作表。
@@ -29,6 +32,40 @@ enum BridgeStatus: String {
     case stopped        // 用户主动停止
     case crashed        // 崩溃
     case sleeping       // Mac 休眠中
+}
+
+enum RuntimeSupervisorState: String, Codable, Sendable {
+    case idle, pending, quiescing, restarting, restartFailed
+}
+
+struct RuntimeSupervisorObservation: Codable, Equatable, Sendable {
+    let supervisorState: RuntimeSupervisorState
+}
+
+private enum RuntimeRestartTrigger: Sendable {
+    case manual, configuration, automatic
+}
+
+private enum RuntimeRecoveryError: LocalizedError {
+    case operationIDGenerationFailed
+    case managementUnavailable
+    case legacyAutomaticRecoveryDisabled
+    case runtimeIdentityMismatch
+    case quiesceRejected(String)
+    case commitRejected(String)
+    case quiesceTimedOut
+
+    var errorDescription: String? {
+        switch self {
+        case .operationIDGenerationFailed: return "无法生成安全的 restart operation id"
+        case .managementUnavailable: return "runtime 正在运行，但安全管理接口尚不可用"
+        case .legacyAutomaticRecoveryDisabled: return "旧版 runtime 不支持安全自动恢复"
+        case .runtimeIdentityMismatch: return "runtime identity 已变化，已拒绝迟到的恢复操作"
+        case let .quiesceRejected(outcome): return "runtime quiesce 被拒绝：\(outcome)"
+        case let .commitRejected(outcome): return "runtime shutdown commit 被拒绝：\(outcome)"
+        case .quiesceTimedOut: return "runtime 仍有活跃任务，安全重启等待超时"
+        }
+    }
 }
 
 struct OpenCodeDesktopSyncResult: Equatable {
@@ -64,6 +101,11 @@ struct RuntimeConfig {
     var relayEndpoint: String
     var relayRouteID: String
     var relayCredential: String
+    /// 「同一局域网时优先直连」control-plane 连接策略。默认 false（Relay 底座）。
+    /// 由 UserDefaults `preferLocalNetwork` 注入，随 argv `-prefer-local-network` 下发 go-bridge，
+    /// 再随 hello_ack.bridge.connectionPolicy / RelayFirstResult / pairing_complete 下发 iOS。
+    /// SSV2:不进入 timeline/projection。
+    var preferLocalNetwork: Bool
     var relayServiceAddress: String
     var sessionListLimit: Int
 
@@ -89,8 +131,9 @@ struct RuntimeConfig {
         relayEndpoint: String = "",
         relayRouteID: String = "",
         relayCredential: String = "",
+        preferLocalNetwork: Bool = false,
         relayServiceAddress: String = "",
-        sessionListLimit: Int = 50
+        sessionListLimit: Int = 100
     ) {
         self.executablePath = NSString(string: executablePath).expandingTildeInPath
         self.port = port
@@ -113,6 +156,7 @@ struct RuntimeConfig {
         self.relayEndpoint = relayEndpoint
         self.relayRouteID = relayRouteID
         self.relayCredential = relayCredential
+        self.preferLocalNetwork = preferLocalNetwork
         self.relayServiceAddress = relayServiceAddress
         self.sessionListLimit = min(max(sessionListLimit, 1), 150)
     }
@@ -151,12 +195,16 @@ class RuntimeManager: ObservableObject {
     @Published private(set) var managementToken: String?
     @Published private(set) var lastError: String?
     @Published private(set) var agents: [AgentInfo] = []
+    @Published private(set) var supervisorState: RuntimeSupervisorState = .idle
+
+    var supervisorObservation: RuntimeSupervisorObservation {
+        RuntimeSupervisorObservation(supervisorState: supervisorState)
+    }
 
     private var apiClient: ManagementAPIClient?
+    private var latestManagementStatus: ManagementStatus?
     private var openCodeManagedServer: OpenCodeManagedServer?
-    private var bridgeProcess: Process?
-    /// 当前进程的标准输出 pipe，用于在重启时先清理 readabilityHandler
-    private var currentStdoutPipe: Pipe?
+    private let processController = RuntimeProcessController()
     private var monitorTask: Task<Void, Never>?
     private var userStopped = false
     /// 最近一次 launchBridgeProcess 启动的 PID，用于区分旧进程退出和新进程退出
@@ -175,7 +223,6 @@ class RuntimeManager: ObservableObject {
     /// 同一 epoch，防同 PID 生命周期外的旧 runtime.json 误判（PID 复用 / 残留文件）。
     private var currentBridgeEpoch: String?
     private let maxCrashRetries = 3
-    private var logFileHandle: FileHandle?
     /// Mac 休眠期间为 true，阻止 crash 重试
     private var isSleeping = false
     private var managementFailureCount = 0
@@ -203,7 +250,6 @@ class RuntimeManager: ObservableObject {
 
     deinit {
         monitorTask?.cancel()
-        logFileHandle?.closeFile()
         if let obs = sleepObserver { NSWorkspace.shared.notificationCenter.removeObserver(obs) }
         if let obs = wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(obs) }
     }
@@ -216,17 +262,25 @@ class RuntimeManager: ObservableObject {
         stuckRestartCount = 0
         autoRestartPending = false
         setStatus(.starting, "正在启动 Bridge...")
+        supervisorState = .restarting
         launchBridgeProcess()
     }
 
     func stop() {
         userStopped = true
-        terminateProcess()
         resetRuntimeState()
+        supervisorState = .idle
         setStatus(.stopped, "CordCode Link 已停止")
+        Task { [processController, port = config.port] in
+            try? await processController.stopAndConfirmPort(gracefulWait: .zero, port: port)
+        }
     }
 
     func restart() {
+        scheduleRestart(trigger: .manual)
+    }
+
+    private func scheduleRestart(trigger: RuntimeRestartTrigger) {
         // 保持 userStopped=true，让 terminationHandler 忽略 terminateProcess 导致的进程退出。
         // 在 launchBridgeProcess 之前才重置为 false。
         userStopped = true
@@ -236,12 +290,23 @@ class RuntimeManager: ObservableObject {
         launchGeneration += 1
         let gen = launchGeneration
         restartTask?.cancel()
-        terminateProcess()
         setStatus(.starting, "正在重启 Bridge...")
-        // 短暂延迟让端口释放、旧 pipe 清理、terminationHandler Task 执行完毕
+        supervisorState = .pending
         restartTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
             guard let self else { return }
+            do {
+                let gracefulWait = try await self.prepareCooperativeRestart(trigger: trigger, generation: gen)
+                guard gen == self.launchGeneration, !Task.isCancelled else { return }
+                self.supervisorState = .restarting
+                try await self.processController.stopAndConfirmPort(gracefulWait: gracefulWait, port: self.config.port)
+            } catch {
+                guard gen == self.launchGeneration else { return }
+                self.lastError = error.localizedDescription
+                self.setStatus(.crashed, "Bridge 安全重启失败")
+                self.supervisorState = .restartFailed
+                return
+            }
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
             // 醒来后必须同时校验 generation 与 cancel 状态：若期间又有新 restart 到来，
             // gen 已过期或 Task 被 cancel，直接 return 不 launch（收敛重复 restart）。
             guard gen == self.launchGeneration, !Task.isCancelled else { return }
@@ -255,7 +320,7 @@ class RuntimeManager: ObservableObject {
     /// 反复接管与 ready frame 抖动。
     func applyConfigAndRestart(_ apply: (inout RuntimeConfig) -> Void) {
         apply(&config)
-        restart()
+        scheduleRestart(trigger: .configuration)
     }
 
     /// 更新 OpenCode 认证凭据（下次启动时生效）
@@ -270,18 +335,20 @@ class RuntimeManager: ObservableObject {
         monitorTask?.cancel()
         monitorTask = nil
         openCodeManagedServer?.stop()
-        terminateProcess(waitForExit: true)
+        let semaphore = DispatchSemaphore(value: 0)
+        let controller = processController
+        let port = config.port
+        Task.detached {
+            try? await controller.stopAndConfirmPort(gracefulWait: .zero, port: port)
+            semaphore.signal()
+        }
+        _ = semaphore.wait(timeout: .now() + 5)
     }
 
     // MARK: - 进程管理
 
     private func launchBridgeProcess() {
-        // T05: 重入守卫——若已有当前 generation 的进程正在 starting/running，直接 return，
-        // 防止 cancel 竞态或重复调用导致同 generation 多次 launch。
-        if bridgeProcess != nil && lastLaunchedPID != 0 {
-            // 进程仍可能存活或正在退出；交由 terminationHandler 处理，不重复 launch。
-            if let proc = bridgeProcess, proc.isRunning { return }
-        }
+        disableLegacyGoBridgeLaunchAgents()
         // 确保目录存在
         // P2-8: data/log 目录创建后收紧为 0700（仅 owner 可访问）。
         try? FileManager.default.createDirectory(atPath: config.dataDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -291,19 +358,13 @@ class RuntimeManager: ObservableObject {
         try? FileManager.default.removeItem(atPath: config.dataDir + "/runtime.json")
         resolveManagedOpenCodeIfNeeded()
         configureOpenCodeDesktopServerIfNeeded()
-        guard prepareRuntimeOwnershipForLaunch() else { return }
-
         launchCount += 1
         // T06: 每次 launch 重置 epoch 锁定，新进程的 runtime.json 首次读到时重新锁定。
         currentBridgeEpoch = nil
         // management token
         let token = ensureManagementToken()
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: config.executablePath)
-
         let arguments = Self.processArguments(for: config)
-        process.arguments = arguments
 
         // 环境变量：OpenCode 凭据（password 走 env，绝不进 argv）
         let environment = Self.processEnvironment(
@@ -311,60 +372,35 @@ class RuntimeManager: ObservableObject {
             managementToken: token,
             existingEnvironment: ProcessInfo.processInfo.environment
         )
-        process.environment = environment
-
-        // 日志输出
-        let logPipe = Pipe()
-        process.standardOutput = logPipe
-        process.standardError = logPipe
-        currentStdoutPipe = logPipe
-        redirectPipeToFile(logPipe, path: config.logFilePath)
-
-        // 进程退出回调 — 使用退出进程的真实 PID 区分旧进程和新进程
-        process.terminationHandler = { [weak self] process in
-            let exitedPID = process.processIdentifier
-            Task { @MainActor in
-                self?.handleProcessTermination(exitedPID: exitedPID)
+        let spec = RuntimeProcessLaunchSpec(
+            executablePath: config.executablePath,
+            arguments: arguments,
+            environment: environment,
+            logFilePath: config.logFilePath,
+            port: config.port
+        )
+        let generation = launchGeneration
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let pid = try await self.processController.launch(spec)
+                guard generation == self.launchGeneration else {
+                    try? await self.processController.stopAndConfirmPort(gracefulWait: .zero, port: self.config.port)
+                    return
+                }
+                self.lastLaunchedPID = pid
+                self.managementFailureCount = 0
+                self.lastLaunchedAt = Date()
+                self.autoRestartPending = false
+                self.supervisorState = .pending
+                NSLog("[RuntimeManager] go-bridge 启动 PID=\(pid)")
+            } catch {
+                guard generation == self.launchGeneration else { return }
+                self.setStatus(.crashed, "启动失败: \(error.localizedDescription)")
+                self.lastError = error.localizedDescription
+                self.supervisorState = .restartFailed
             }
         }
-
-        do {
-            try process.run()
-            bridgeProcess = process
-            lastLaunchedPID = process.processIdentifier
-            managementFailureCount = 0
-            lastLaunchedAt = Date()
-            autoRestartPending = false
-            NSLog("[RuntimeManager] go-bridge 启动 PID=\(process.processIdentifier)")
-        } catch {
-            setStatus(.crashed, "启动失败: \(error.localizedDescription)")
-            lastError = error.localizedDescription
-        }
-    }
-
-    private func terminateProcess(waitForExit: Bool = false) {
-        // 先清理 pipe 的 readabilityHandler，防止进程终止后 handler 在后台线程继续访问已关闭的 FileHandle
-        if let pipe = currentStdoutPipe {
-            pipe.fileHandleForReading.readabilityHandler = nil
-        }
-        currentStdoutPipe = nil
-
-        guard let process = bridgeProcess, process.isRunning else {
-            bridgeProcess = nil
-            return
-        }
-        process.terminate()
-        if waitForExit {
-            let waitStart = Date()
-            while process.isRunning && Date().timeIntervalSince(waitStart) < 2.0 {
-                Thread.sleep(forTimeInterval: 0.05)
-            }
-            if process.isRunning {
-                kill(process.processIdentifier, SIGKILL)
-            }
-        }
-        bridgeProcess = nil
-        NSLog("[RuntimeManager] 已请求终止 go-bridge")
     }
 
     private func handleProcessTermination(exitedPID: Int32) {
@@ -409,7 +445,11 @@ class RuntimeManager: ObservableObject {
         guard monitorTask == nil else { return }
         monitorTask = Task { [weak self] in
             while let self, !Task.isCancelled {
-                if self.bridgeProcess?.isRunning == true {
+                if let termination = await self.processController.consumeTermination() {
+                    self.handleProcessTermination(exitedPID: termination.pid)
+                }
+                let process = await self.processController.snapshot()
+                if process.isRunning {
                     await self.pollManagementAPI()
                     self.evaluateAutoRestart()
                 }
@@ -459,12 +499,179 @@ class RuntimeManager: ObservableObject {
         stuckRestartCount += 1
         autoRestartPending = true
         NSLog("[RuntimeManager] \(reason)（第 \(stuckRestartCount)/\(maxStuckRestarts) 次）")
-        restart()
+        scheduleRestart(trigger: .automatic)
+    }
+
+    /// 返回 controller 在 signal escalation 前应等待 committed Go 自行退出的时间。
+    /// v1 路径只有 commit 成功（或 status 已 committed）才返回；token 仅存在本方法局部变量中。
+    private func prepareCooperativeRestart(
+        trigger: RuntimeRestartTrigger,
+        generation: Int
+    ) async throws -> Duration {
+        guard let client = apiClient else {
+            let process = await processController.snapshot()
+            // Startup configuration can arrive before runtime.json exposes the management API
+            // (notably Relay credentials loaded from Keychain). The runtime is not ready and
+            // cannot own sessions yet, so replacing that startup process is safe. Once startup
+            // has completed, the management handshake remains mandatory.
+            if process.isRunning, !Self.canReplacePreReadyRuntime(status: status) {
+                throw RuntimeRecoveryError.managementUnavailable
+            }
+            return .zero
+        }
+        var status: ManagementStatus
+        if let latestManagementStatus {
+            status = latestManagementStatus
+        } else {
+            status = try await client.getStatus()
+        }
+        guard generation == launchGeneration, !Task.isCancelled else { throw CancellationError() }
+        guard let initialV1 = status.v1 else {
+            if trigger == .automatic { throw RuntimeRecoveryError.legacyAutomaticRecoveryDisabled }
+            try await client.shutdown()
+            return .seconds(2)
+        }
+        guard initialV1.runtimeIdentity.pid == lastLaunchedPID else {
+            throw RuntimeRecoveryError.runtimeIdentityMismatch
+        }
+        guard var operationID = Self.generateOperationID() else {
+            throw RuntimeRecoveryError.operationIDGenerationFailed
+        }
+        supervisorState = .quiescing
+        let deadline = ContinuousClock.now.advanced(by: .seconds(30))
+
+        while ContinuousClock.now < deadline {
+            guard generation == launchGeneration, !Task.isCancelled else { throw CancellationError() }
+            guard let v1 = status.v1, v1.runtimeIdentity.pid == lastLaunchedPID else {
+                throw RuntimeRecoveryError.runtimeIdentityMismatch
+            }
+            switch v1.quiesce {
+            case let .committed(existingOperation, _):
+                if existingOperation == operationID { return .seconds(2) }
+                // 另一 coordinator 已 commit；同一 PID 已不可逆 shuttingDown，只做收割。
+                return .seconds(2)
+            default:
+                break
+            }
+
+            let request = ManagementQuiesceRequest(
+                operationId: operationID,
+                expectedRuntime: v1.runtimeIdentity,
+                expectedHealthEpoch: v1.fileReadHealth.stateEpoch
+            )
+            let result: ManagementRuntimeResult
+            do {
+                result = try await client.quiesce(request)
+            } catch {
+                guard generation == launchGeneration, !Task.isCancelled else { throw CancellationError() }
+                status = try await client.getStatus()
+                continue
+            }
+            guard generation == launchGeneration, !Task.isCancelled else { throw CancellationError() }
+            switch result {
+            case let .safe(identity, healthEpoch, quiesceEpoch, token, leaseMillis, remaining):
+                guard identity == v1.runtimeIdentity, healthEpoch == v1.fileReadHealth.stateEpoch else {
+                    throw RuntimeRecoveryError.runtimeIdentityMismatch
+                }
+                // 2s commit HTTP + 500ms executor margin；不足时必须 abort，绝不 signal。
+                guard leaseMillis >= 2_500, remaining >= 2_500 else {
+                    let abort = ManagementCommitRequest(
+                        operationId: operationID, expectedRuntime: identity,
+                        expectedHealthEpoch: healthEpoch, quiesceEpoch: quiesceEpoch, token: token
+                    )
+                    _ = try? await client.abortQuiesce(abort)
+                    guard generation == launchGeneration, !Task.isCancelled else { throw CancellationError() }
+                    try? await Task.sleep(for: .milliseconds(250))
+                    guard generation == launchGeneration, !Task.isCancelled else { throw CancellationError() }
+                    status = try await client.getStatus()
+                    guard let nextID = Self.generateOperationID() else {
+                        throw RuntimeRecoveryError.operationIDGenerationFailed
+                    }
+                    operationID = nextID
+                    continue
+                }
+                let commit = ManagementCommitRequest(
+                    operationId: operationID, expectedRuntime: identity,
+                    expectedHealthEpoch: healthEpoch, quiesceEpoch: quiesceEpoch, token: token
+                )
+                do {
+                    let commitResult = try await client.commitQuiescedShutdown(commit)
+                    guard generation == launchGeneration, !Task.isCancelled else { throw CancellationError() }
+                    switch commitResult {
+                    case let .committed(committedIdentity, committedHealth, committedEpoch):
+                        guard committedIdentity == identity, committedHealth == healthEpoch,
+                              committedEpoch == quiesceEpoch else {
+                            throw RuntimeRecoveryError.runtimeIdentityMismatch
+                        }
+                        return .seconds(2)
+                    case let .outcome(outcome):
+                        if outcome == "lease_expired" {
+                            status = try await client.getStatus()
+                            guard let nextID = Self.generateOperationID() else {
+                                throw RuntimeRecoveryError.operationIDGenerationFailed
+                            }
+                            operationID = nextID
+                            continue
+                        }
+                        throw RuntimeRecoveryError.commitRejected(outcome)
+                    default:
+                        throw RuntimeRecoveryError.commitRejected("invalid_result")
+                    }
+                } catch let recovery as RuntimeRecoveryError {
+                    throw recovery
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    // commit response 丢失不等于未处理：先用 level-triggered status reconcile。
+                    guard generation == launchGeneration, !Task.isCancelled else { throw CancellationError() }
+                    status = try await client.getStatus()
+                    if let reconcile = status.v1,
+                       case let .committed(existingOperation, existingEpoch) = reconcile.quiesce,
+                       existingOperation == operationID, existingEpoch == quiesceEpoch {
+                        return .seconds(2)
+                    }
+                    continue
+                }
+            case let .deferred(_, _, retryAfterMillis):
+                try? await Task.sleep(for: .milliseconds(Int64(retryAfterMillis)))
+                guard generation == launchGeneration, !Task.isCancelled else { throw CancellationError() }
+                status = try await client.getStatus()
+            case let .outcome(outcome):
+                switch outcome {
+                case "operation_reused":
+                    guard let nextID = Self.generateOperationID() else {
+                        throw RuntimeRecoveryError.operationIDGenerationFailed
+                    }
+                    operationID = nextID
+                case "already_committed":
+                    return .seconds(2)
+                case "already_quiescing":
+                    try? await Task.sleep(for: .milliseconds(250))
+                    guard generation == launchGeneration, !Task.isCancelled else { throw CancellationError() }
+                    status = try await client.getStatus()
+                default:
+                    throw RuntimeRecoveryError.quiesceRejected(outcome)
+                }
+            default:
+                throw RuntimeRecoveryError.quiesceRejected("invalid_result")
+            }
+        }
+        throw RuntimeRecoveryError.quiesceTimedOut
+    }
+
+    nonisolated static func canReplacePreReadyRuntime(status: BridgeStatus) -> Bool {
+        status == .starting
+    }
+
+    private nonisolated static func generateOperationID() -> String? {
+        var bytes = [UInt8](repeating: 0, count: 16)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else { return nil }
+        return bytes.map { String(format: "%02x", $0) }.joined()
     }
 
     private func pollManagementAPI() async {
         let dataDir = config.dataDir
-        let expectedPID = bridgeProcess?.processIdentifier
+        let expectedPID = lastLaunchedPID == 0 ? nil : lastLaunchedPID
         let bootstrap = await Task.detached(priority: .utility) {
             (
                 frame: Self.readRuntimeJSON(in: dataDir),
@@ -522,8 +729,15 @@ class RuntimeManager: ObservableObject {
             let resp = try await client.getStatus()
             // T07: 旧请求返回后，若期间已 restart（generation 变或 PID 变），丢弃结果。
             guard pollGeneration == launchGeneration, pollPID == lastLaunchedPID else { return }
+            if let v1 = resp.v1, v1.runtimeIdentity.pid != pollPID {
+                throw RuntimeRecoveryError.runtimeIdentityMismatch
+            }
+            latestManagementStatus = resp
             applyManagementStatus(resp.status)
             managementFailureCount = 0
+            if resp.v1?.fileReadHealth.restartRecommended == true {
+                triggerAutoRestart(reason: "文件读取运行时已退化，自动安全重启")
+            }
             // agents 刷新独立低优先级 task，不阻塞本轮 status 轮询与自动重启判定。
             Task.detached(priority: .utility) { [weak self, weak client] in
                 guard let client else { return }
@@ -549,36 +763,11 @@ class RuntimeManager: ObservableObject {
 
     // MARK: - 状态辅助
 
-    /// rotateLogFileIfNeeded 按大小滚动日志：超过 maxLogBytes 时把当前文件移为 .1，
-    /// 最多保留 maxLogGenerations 代（P2-8 日志治理）。
-    private static let maxLogBytes: Int64 = 8 * 1024 * 1024   // 8 MiB
-    private static let maxLogGenerations = 3
-
-    private func rotateLogFileIfNeeded(path: String) {
-        let fm = FileManager.default
-        guard let attrs = try? fm.attributesOfItem(atPath: path),
-              let size = attrs[.size] as? Int64 else { return }
-        guard size >= Self.maxLogBytes else { return }
-        let oldest = "\(path).\(Self.maxLogGenerations)"
-        if fm.fileExists(atPath: oldest) {
-            try? fm.removeItem(atPath: oldest)
-        }
-        for gen in stride(from: Self.maxLogGenerations - 1, through: 1, by: -1) {
-            let from = "\(path).\(gen)"
-            let to = "\(path).\(gen + 1)"
-            if fm.fileExists(atPath: from) {
-                try? fm.moveItem(atPath: from, toPath: to)
-            }
-        }
-        if fm.fileExists(atPath: path) {
-            try? fm.moveItem(atPath: path, toPath: "\(path).1")
-        }
-    }
-
     private func resetRuntimeState() {
         managementURL = nil
         managementToken = nil
         apiClient = nil
+        latestManagementStatus = nil
         lastError = nil
         agents = []
     }
@@ -600,73 +789,15 @@ class RuntimeManager: ObservableObject {
         switch rawStatus {
         case "ready":
             crashCount = 0
+            supervisorState = .idle
             setStatus(.ready, "CordCode Link 运行中")
         case "ready_no_agents":
             crashCount = 0
+            supervisorState = .idle
             setStatus(.readyNoAgents, "请配置至少一个 AI 工具")
         default:
             setStatus(.starting, "CordCode Link 正在启动...")
         }
-    }
-
-    private struct PortOwner {
-        let pid: Int32
-        let command: String
-        let executablePath: String?
-    }
-
-    private func prepareRuntimeOwnershipForLaunch() -> Bool {
-        disableLegacyGoBridgeLaunchAgents()
-
-        guard let owner = Self.portOwner(for: config.port) else {
-            return true
-        }
-
-        if canTakeOverPortOwner(owner) {
-            NSLog("[RuntimeManager] 清理旧 Bridge runtime PID=\(owner.pid) path=\(owner.executablePath ?? owner.command)")
-            kill(owner.pid, SIGTERM)
-            if waitUntilPortIsFree(config.port, timeout: 2.0) {
-                return true
-            }
-            kill(owner.pid, SIGKILL)
-            return waitUntilPortIsFree(config.port, timeout: 1.0)
-        }
-
-        let ownerText = owner.executablePath ?? owner.command
-        lastError = "端口 \(config.port) 已被占用：\(ownerText)"
-        setStatus(.crashed, "端口 \(config.port) 已被其他进程占用")
-        return false
-    }
-
-    private func canTakeOverPortOwner(_ owner: PortOwner) -> Bool {
-        let executable = owner.executablePath ?? ""
-        let command = owner.command
-        let currentRuntime = config.executablePath
-
-        if executable == currentRuntime {
-            return true
-        }
-        if executable.hasSuffix("/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime") {
-            return true
-        }
-        if executable.contains("/go-bridge/go-bridge") || command.contains("/go-bridge/go-bridge") {
-            return true
-        }
-        if executable.hasSuffix("/cordcode-bridge-runtime") || command.hasSuffix("/cordcode-bridge-runtime") || executable.contains("/cordcode-bridge-runtime") {
-            return true
-        }
-        return false
-    }
-
-    private func waitUntilPortIsFree(_ port: Int, timeout: TimeInterval) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if Self.portOwner(for: port) == nil {
-                return true
-            }
-            Thread.sleep(forTimeInterval: 0.1)
-        }
-        return Self.portOwner(for: port) == nil
     }
 
     private func disableLegacyGoBridgeLaunchAgents() {
@@ -914,7 +1045,7 @@ class RuntimeManager: ObservableObject {
                 self.setStatus(.starting, "Mac 已唤醒，正在恢复 Bridge 服务...")
                 // 等 2 秒让网络等系统服务恢复
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
-                if self.bridgeProcess?.isRunning == true {
+                if await self.processController.snapshot().isRunning {
                     await self.pollManagementAPI()
                 } else {
                     // start() 重置 crashCount，确保唤醒后一定能重启
@@ -925,39 +1056,6 @@ class RuntimeManager: ObservableObject {
     }
 
     // MARK: - 工具方法
-
-    /// 将 pipe 的输出重定向到日志文件。
-    /// 用 try-catch 保护所有 FileHandle 操作，防止进程终止后的竞态 crash。
-    private func redirectPipeToFile(_ pipe: Pipe, path: String) {
-        // 先关闭旧的日志文件 handle
-        logFileHandle?.closeFile()
-        logFileHandle = nil
-
-        // P2-8: 拒绝 symlink 日志路径，防止被替换指向任意文件；并按大小滚动。
-        rotateLogFileIfNeeded(path: path)
-        if let attrs = try? FileManager.default.attributesOfItem(atPath: path),
-           attrs[.type] as? FileAttributeType == .typeSymbolicLink {
-            try? FileManager.default.removeItem(atPath: path)
-        }
-        FileManager.default.createFile(atPath: path, contents: nil, attributes: [.posixPermissions: 0o600])
-        guard let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: path)) else { return }
-        logFileHandle = handle
-        pipe.fileHandleForReading.readabilityHandler = { fh in
-            let data = fh.availableData
-            if data.isEmpty {
-                fh.readabilityHandler = nil
-                try? handle.close()
-                return
-            }
-            // try-catch 防止 handle 已关闭时 seekToEndOfFile 抛异常
-            do {
-                try handle.seekToEnd()
-                handle.write(data)
-            } catch {
-                // handle 已关闭或 pipe 已断开，静默忽略
-            }
-        }
-    }
 
     /// 构造 go-bridge 进程 argv（可测试，不启动进程）。URL 非 secret 可进 argv；
     /// password 不在此处出现（走 processEnvironment 的 env）。
@@ -990,6 +1088,8 @@ class RuntimeManager: ObservableObject {
         arguments += ["-pairing-include-tailscale=\(config.includeTailscaleInPairing ? "true" : "false")"]
         arguments += ["-pairing-include-remote=\(config.includeRemoteInPairing ? "true" : "false")"]
         arguments += ["-relay-enabled=\(config.relayEnabled ? "true" : "false")"]
+        // Relay-first + opt-in LAN:镜像 -relay-enabled 的 argv = 形式，默认 false。
+        arguments += ["-prefer-local-network=\(config.preferLocalNetwork ? "true" : "false")"]
         return arguments
     }
 
@@ -1051,48 +1151,6 @@ class RuntimeManager: ObservableObject {
         var bytes = [UInt8](repeating: 0, count: 32)
         _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
         return bytes.map { String(format: "%02x", $0) }.joined(separator: "")
-    }
-
-    private nonisolated static func portOwner(for port: Int) -> PortOwner? {
-        let output = runCommand("/usr/sbin/lsof", [
-            "-nP",
-            "-iTCP:\(port)",
-            "-sTCP:LISTEN",
-            "-Fpc",
-        ])
-        var pid: Int32?
-        var command = ""
-
-        for line in output.split(separator: "\n").map(String.init) {
-            if line.hasPrefix("p"), let value = Int32(line.dropFirst()) {
-                pid = value
-            } else if line.hasPrefix("c") {
-                command = String(line.dropFirst())
-            }
-        }
-
-        guard let pid else { return nil }
-        return PortOwner(
-            pid: pid,
-            command: command,
-            executablePath: executablePath(forPID: pid)
-        )
-    }
-
-    private nonisolated static func executablePath(forPID pid: Int32) -> String? {
-        let output = runCommand("/usr/sbin/lsof", ["-p", "\(pid)", "-Fn"])
-        var previousWasTextFile = false
-        for line in output.split(separator: "\n").map(String.init) {
-            if line == "ftxt" {
-                previousWasTextFile = true
-                continue
-            }
-            if previousWasTextFile, line.hasPrefix("n") {
-                return String(line.dropFirst())
-            }
-            previousWasTextFile = false
-        }
-        return nil
     }
 
     private nonisolated static func runCommand(_ launchPath: String, _ arguments: [String]) -> String {

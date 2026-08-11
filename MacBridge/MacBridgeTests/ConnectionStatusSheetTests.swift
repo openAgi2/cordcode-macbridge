@@ -1,8 +1,10 @@
 import XCTest
 @testable import CordCodeLink
 
-// P1-2 连接状态 Sheet 测试：验证单页结构契约与默认/高级分层。
-// RemoteAccessView 的真实保存/配置行为由既有逻辑承载，此处只锁定 IA 契约（不再二级导航）。
+// Relay-first + opt-in LAN 连接状态 Sheet 测试（2026-08-01 重写）。
+// 旧版断言「单页 + 显示/隐藏高级」IA 的 L10n key，那是被 sidebar IA 早已取代的过期契约。
+// 本版锁定新 IA：常驻连接信息卡、§3.3 状态真实性（connected==true 才显示「已接入中继网」）、
+// 以及 control-plane wire model（preferLocalNetwork + relay.connected/enabled）可解码。
 @MainActor
 final class ConnectionStatusSheetTests: XCTestCase {
 
@@ -11,44 +13,49 @@ final class ConnectionStatusSheetTests: XCTestCase {
         XCTAssertEqual(LayoutConstants.connectionSheetHeight, 740)
     }
 
-    func testConnectionSectionCopyKeysPresent() {
-        XCTAssertFalse(L10n.connectionStatusSecureRemote.isEmpty)
-        XCTAssertFalse(L10n.connectionStatusSecureRemoteHint.isEmpty)
-        XCTAssertFalse(L10n.connectionStatusLocalNetwork.isEmpty)
-        XCTAssertFalse(L10n.connectionStatusLocalNetworkHint.isEmpty)
-        XCTAssertFalse(L10n.connectionStatusAdvanced.isEmpty)
-        XCTAssertFalse(L10n.connectionStatusShowAdvanced.isEmpty)
-        XCTAssertFalse(L10n.connectionStatusHideAdvanced.isEmpty)
-    }
-
-    func testAdvancedToggleCopyIsActionPair() {
-        // 「显示高级选项」与「隐藏高级选项」是同一动作的两种状态，互斥。
-        XCTAssertNotEqual(L10n.connectionStatusShowAdvanced, L10n.connectionStatusHideAdvanced)
-    }
-
-    func testConnectionCopyDescribesAutoNotMutuallyExclusive() {
-        // Relay/LAN 文案应表达“自动路径”，不暗示用户必须在二者间选择。
-        let remoteHint = L10n.connectionStatusSecureRemoteHint.lowercased()
-        let localHint = L10n.connectionStatusLocalNetworkHint.lowercased()
-        XCTAssertTrue(remoteHint.contains("relay") || remoteHint.contains("relay".uppercased()),
-                      "安全远程文案应说明 Relay 自动保持连接")
-        XCTAssertTrue(localHint.contains("wi-fi") || localHint.contains("自动"),
-                      "本地网络文案应说明自动使用更快直连")
-    }
-
-    func testConnectionSectionCopyAvoidsScaryTerms() {
-        // 面向用户的连接说明不应把端口/endpoint 作为首要描述。
-        let copies = [
-            L10n.connectionStatusSecureRemote,
-            L10n.connectionStatusSecureRemoteHint,
-            L10n.connectionStatusLocalNetwork,
-            L10n.connectionStatusLocalNetworkHint,
-        ]
-        let forbidden = ["8777", "endpoint", "Endpoint"]
-        for copy in copies {
-            for term in forbidden {
-                XCTAssertFalse(copy.contains(term), "连接文案「\(copy)」不应包含技术词「\(term)」")
-            }
+    /// wire model:control-plane 字段可解码。preferLocalNetwork + relay.connected/enabled 都是可选，
+    /// 旧 go-bridge 响应缺字段时解码为 nil（消费侧按 false / 未连接处理）。
+    func testRemoteStatusDecodesConnectionPolicyAndRelayConnected() throws {
+        let json = """
+        {
+          "preferLocalNetwork": true,
+          "relay": {"configured": true, "enabled": true, "connected": true}
         }
+        """.data(using: .utf8)!
+        let status = try JSONDecoder().decode(RemoteStatus.self, from: json)
+        XCTAssertEqual(status.preferLocalNetwork, true)
+        XCTAssertEqual(status.relay?.configured, true)
+        XCTAssertEqual(status.relay?.enabled, true)
+        XCTAssertEqual(status.relay?.connected, true)
+    }
+
+    /// wire model:缺字段的旧 payload 解码为 nil,消费侧按 false / 未连接处理(不冒充已连接)。
+    func testRemoteStatusLegacyPayloadDecodesNilPolicyAndConnected() throws {
+        let json = """
+        { "relay": {"configured": true} }
+        """.data(using: .utf8)!
+        let status = try JSONDecoder().decode(RemoteStatus.self, from: json)
+        XCTAssertNil(status.preferLocalNetwork, "旧 payload 缺 preferLocalNetwork 应解码为 nil")
+        XCTAssertEqual(status.relay?.configured, true)
+        XCTAssertNil(status.relay?.connected, "缺 connected 应解码为 nil——不得从 configured 推导为已连接")
+        XCTAssertNil(status.relay?.enabled)
+    }
+
+    /// 源码守卫:§3.3 状态真实性——视图用 connected-aware helper,而非把 configured 冒充为已接入。
+    private static var remoteAccessViewSource: String {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let viewFile = testFile
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("MacBridge/Views/RemoteAccessView.swift")
+        return (try? String(contentsOf: viewFile, encoding: .utf8)) ?? ""
+    }
+
+    func testViewSourceUsesConnectedAwareRelayStatus() {
+        let src = Self.remoteAccessViewSource
+        XCTAssertFalse(src.isEmpty, "应能定位 RemoteAccessView.swift 源码")
+        XCTAssertTrue(src.contains("relayConnected"), "应凭 RelayStatus.connected==true 判定真实连接")
+        XCTAssertTrue(src.contains("relayConnectionStateText"), "连接信息卡应使用 connected-aware 状态文案")
+        XCTAssertTrue(src.contains("已接入中继网"), "connected==true 时应显示「已接入中继网」")
     }
 }

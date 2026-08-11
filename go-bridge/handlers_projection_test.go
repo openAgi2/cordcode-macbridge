@@ -126,7 +126,7 @@ func TestHandleGetSessionProjectionReturnsReducerState(t *testing.T) {
 	if !ok {
 		t.Fatalf("data.projection not SessionProjection: %T", dataMap["projection"])
 	}
-	if proj.SessionID != "s1" || proj.SyncRev != 2 || len(proj.Turns) != 1 || proj.Turns[0].TurnID != "T1" {
+	if proj.SessionID != "s1" || proj.SyncRev != 1 || len(proj.Turns) != 1 || proj.Turns[0].TurnID != "T1" {
 		t.Fatalf("projection = %+v", proj)
 	}
 }
@@ -157,9 +157,9 @@ func TestHandleGetSessionProjectionDeltaAtHead(t *testing.T) {
 	handlers := NewHandlers()
 	handlers.eventPublisher.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "s1", Event: "turn_started", Data: map[string]interface{}{"turnId": "T1"}, Broadcast: true})
 	handlers.eventPublisher.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "s1", Event: "text_delta", Data: map[string]interface{}{"itemId": "T1", "delta": "ready"}, Broadcast: true})
-	// headRev is now 2 and contains real content (a bare shell alone is not ready).
+	// headRev is now 1: turn_started does not commit (a bare shell alone is not ready); text_delta carries content.
 	conn := &readFileCaptureConn{}
-	params, _ := json.Marshal(map[string]interface{}{"sessionId": "s1", "sinceRev": 2})
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": "s1", "sinceRev": 1})
 	msg := WireMessage{RequestID: "r1", BackendID: "codex", Method: "get_session_projection", Params: params}
 	handlers.handleGetSessionProjection(conn, msg, nil)
 
@@ -171,7 +171,7 @@ func TestHandleGetSessionProjectionDeltaAtHead(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected patches delta at head, got %+v", dataMap)
 	}
-	if len(patches) != 0 || dataMap["headRev"].(int) != 2 {
+	if len(patches) != 0 || dataMap["headRev"].(int) != 1 {
 		t.Fatalf("expected empty patches + headRev 2, got %+v", dataMap)
 	}
 }
@@ -992,7 +992,7 @@ func TestClaudeColdHydrateMissingFileHonestError(t *testing.T) {
 // producer MUST return an honest
 // projection.not_migrated error — never fall through to an empty head-0 shell (§10.5.7 修法 1).
 func TestProjectionNotMigratedForUnsupportedBackend(t *testing.T) {
-	for _, backend := range []string{"madeup-backend", "grokbuild"} {
+	for _, backend := range []string{"madeup-backend"} {
 		handlers := NewHandlers()
 		conn := &readFileCaptureConn{}
 		params, _ := json.Marshal(map[string]interface{}{"sessionId": "s-" + backend})
@@ -1013,6 +1013,63 @@ func TestProjectionNotMigratedForUnsupportedBackend(t *testing.T) {
 	}
 }
 
+// TestGrokBuildProjectionHydrateFromRichHistory: grokbuild is migrated as a pathless
+// rich-history projection backend (chat_history.jsonl snapshot). A cold get_session_projection
+// must reduce the entries into a committed projection instead of returning
+// projection.not_migrated.
+func TestGrokBuildProjectionHydrateFromRichHistory(t *testing.T) {
+	handlers := NewHandlers()
+	agent := &fakeAgent{
+		name: "grokbuild",
+		richHistory: []core.RichHistoryEntry{
+			{ID: "u1", Role: "user", Content: "列一下当前目录文件"},
+			{
+				ID:       "a1",
+				Role:     "assistant",
+				Content:  "src/ 下有 main.go",
+				Thinking: "先看目录结构",
+				Parts: []map[string]any{
+					{"type": "reasoning", "content": "先看目录结构"},
+					{"type": "text", "content": "src/ 下有 main.go"},
+					{"type": "tool", "step": map[string]any{
+						"id": "tool-1", "toolName": "list_dir", "status": "completed",
+						"output": map[string]any{"kind": "inline", "text": "main.go"},
+					}},
+				},
+			},
+		},
+	}
+	handlers.mu.Lock()
+	handlers.agents = map[string]core.Agent{"grokbuild": agent}
+	handlers.mu.Unlock()
+
+	if !backendSupportsProjectionHydrate("grokbuild") {
+		t.Fatal("grokbuild must be a projection hydrate backend after migration")
+	}
+
+	conn := &readFileCaptureConn{}
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": "ses-grok-1", "sinceRev": 0})
+	msg := WireMessage{RequestID: "r-grok", BackendID: "grokbuild", Method: "get_session_projection", Params: params}
+	handlers.handleGetSessionProjection(conn, msg, nil)
+	if conn.err != nil {
+		t.Fatalf("grokbuild hydrate error: %+v", conn.err)
+	}
+	data, ok := conn.data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("unexpected data type %T", conn.data)
+	}
+	raw, _ := json.Marshal(data)
+	if !strings.Contains(string(raw), "列一下当前目录文件") {
+		t.Fatalf("projection missing user text: %s", string(raw))
+	}
+	if !strings.Contains(string(raw), "src/ 下有 main.go") {
+		t.Fatalf("projection missing assistant text: %s", string(raw))
+	}
+	if !strings.Contains(string(raw), "tool-1") {
+		t.Fatalf("projection missing tool part: %s", string(raw))
+	}
+}
+
 // TestClaudeEntryToProjectionEvents unit-tests the claude transcript → projection-event mapper:
 // user text starts a turn (user_message), assistant blocks emit text_delta/reasoning_delta/
 // tool_started, a user tool_result emits tool_finished, and a final stop_reason emits a
@@ -1026,7 +1083,7 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 		StopReason string          `json:"stop_reason"`
 		Content    json.RawMessage `json:"content"`
 	}{ID: "u1", Role: "user", Content: json.RawMessage(`[{"type":"text","text":"hello"}]`)}}
-	evs := claudeEntryToProjectionEvents(user, &currentTurnID)
+	evs := claudeEntryToProjectionEvents(user, &currentTurnID, nil)
 	if len(evs) != 1 || evs[0].Event != "user_message" || evs[0].Data["turnId"] != "u1" {
 		t.Fatalf("user entry → %+v", evs)
 	}
@@ -1040,7 +1097,7 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 		StopReason string          `json:"stop_reason"`
 		Content    json.RawMessage `json:"content"`
 	}{ID: "a1", Role: "assistant", StopReason: "end_turn", Content: json.RawMessage(`[{"type":"text","text":"hi"},{"type":"thinking","thinking":"plan"},{"type":"tool_use","id":"tool-1","name":"Read","input":{"path":"x"}}]`)}}
-	evs = claudeEntryToProjectionEvents(asst, &currentTurnID)
+	evs = claudeEntryToProjectionEvents(asst, &currentTurnID, nil)
 	// expect: text_delta, reasoning_delta, tool_started, turn_completed (TurnDone)
 	if len(evs) != 4 {
 		t.Fatalf("assistant entry → %d events: %+v", len(evs), evs)
@@ -1064,7 +1121,7 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 		StopReason string          `json:"stop_reason"`
 		Content    json.RawMessage `json:"content"`
 	}{ID: "u2", Role: "user", Content: json.RawMessage(`[{"type":"tool_result","tool_use_id":"tool-1","content":"file body"}]`)}}
-	evs = claudeEntryToProjectionEvents(tr, &currentTurnID)
+	evs = claudeEntryToProjectionEvents(tr, &currentTurnID, nil)
 	if len(evs) != 1 || evs[0].Event != "tool_finished" || evs[0].Data["itemId"] != "tool-1" {
 		t.Fatalf("tool_result → tool_finished matched by tool_use_id: %+v", evs)
 	}
@@ -1081,7 +1138,7 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 			Content    json.RawMessage `json:"content"`
 		}{Role: "user", Content: json.RawMessage(`"讲个程序员笑话"`)},
 	}
-	evs = claudeEntryToProjectionEvents(userUUID, &currentTurnID)
+	evs = claudeEntryToProjectionEvents(userUUID, &currentTurnID, nil)
 	if len(evs) != 1 || evs[0].Event != "user_message" {
 		t.Fatalf("uuid-only user → %+v", evs)
 	}
@@ -1101,7 +1158,7 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 			Content    json.RawMessage `json:"content"`
 		}{ID: "msg_asst_1", Role: "assistant", StopReason: "end_turn", Content: json.RawMessage(`[{"type":"text","text":"SQL JOIN joke"}]`)},
 	}
-	evs = claudeEntryToProjectionEvents(asstUUID, &currentTurnID)
+	evs = claudeEntryToProjectionEvents(asstUUID, &currentTurnID, nil)
 	if len(evs) != 2 {
 		t.Fatalf("uuid-turn assistant → %d events: %+v", len(evs), evs)
 	}
@@ -1122,7 +1179,7 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 			PostTokens: 8605,
 		},
 	}
-	evs = claudeEntryToProjectionEvents(compact, &currentTurnID)
+	evs = claudeEntryToProjectionEvents(compact, &currentTurnID, nil)
 	if len(evs) != 1 || evs[0].Event != "system_message" {
 		t.Fatalf("compact boundary → %+v", evs)
 	}
@@ -1143,8 +1200,204 @@ func TestClaudeEntryToProjectionEvents(t *testing.T) {
 			StopReason string          `json:"stop_reason"`
 			Content    json.RawMessage `json:"content"`
 		}{Role: "user", Content: json.RawMessage(`"internal compact prompt"`)}}
-	if got := claudeEntryToProjectionEvents(internalSummary, &currentTurnID); len(got) != 0 {
+	if got := claudeEntryToProjectionEvents(internalSummary, &currentTurnID, nil); len(got) != 0 {
 		t.Fatalf("internal compact summary must be filtered, got %+v", got)
+	}
+}
+
+// TestClaudeAskUserQuestionTranscriptProjectsAsObserveOnlyUserInput verifies the real Claude
+// Desktop transcript shape: AskUserQuestion is an assistant tool_use block, but this relay does
+// not own the Desktop responder handle. It must produce a structured pending card with disabled
+// response capabilities, never an ordinary tool_started activity row.
+func TestClaudeAskUserQuestionTranscriptProjectsAsObserveOnlyUserInput(t *testing.T) {
+	currentTurnID := "turn-claude-desktop"
+	entry := claudeTranscriptRelayEntry{
+		Type:      "assistant",
+		Timestamp: "2026-08-02T07:16:46.671Z",
+		Message: &struct {
+			ID         string          `json:"id"`
+			Role       string          `json:"role"`
+			StopReason string          `json:"stop_reason"`
+			Content    json.RawMessage `json:"content"`
+		}{
+			ID:      "assistant-ask-user-question",
+			Role:    "assistant",
+			Content: json.RawMessage(`[{"type":"tool_use","id":"call-ask-user-question","name":"AskUserQuestion","input":{"questions":[{"header":"构建失败策略","multiSelect":false,"options":[{"description":"失败后最多重试三次。","label":"自动重试 3 次"},{"description":"首次失败即停止。","label":"立即失败并报告"}],"question":"构建失败时,你希望脚本怎么处理?"}]}}]`),
+		},
+	}
+
+	events := claudeEntryToProjectionEvents(entry, &currentTurnID, nil)
+	if len(events) != 1 || events[0].Event != "user_input_requested" {
+		t.Fatalf("AskUserQuestion must map to one user_input_requested event, got %+v", events)
+	}
+	data := events[0].Data
+	if data["interactionId"] != claudecode.DeriveStructuredUserInputInteractionID("call-ask-user-question") {
+		t.Fatalf("interactionId = %v", data["interactionId"])
+	}
+	if data["turnId"] != "turn-claude-desktop" || data["itemId"] != "call-ask-user-question" {
+		t.Fatalf("attribution = %+v", data)
+	}
+	if data["status"] != "pending" || data["canRespond"] != false || data["canReject"] != false || data["diagnosticCode"] != "observe_only" {
+		t.Fatalf("observe-only capabilities/status = %+v", data)
+	}
+	questions, ok := data["questions"].([]interface{})
+	if !ok || len(questions) != 1 {
+		t.Fatalf("normalized questions = %#v", data["questions"])
+	}
+	question, ok := questions[0].(map[string]interface{})
+	if !ok || question["prompt"] != "构建失败时,你希望脚本怎么处理?" ||
+		question["answerMode"] != "single" || question["allowsCustomAnswer"] != true {
+		t.Fatalf("normalized question = %#v", questions[0])
+	}
+	if _, hasToolStarted := data["toolName"]; hasToolStarted || events[0].Event == "tool_started" {
+		t.Fatalf("AskUserQuestion must not be projected as tool_started: %+v", events[0])
+	}
+}
+
+// TestClaudeAskUserQuestionTranscriptResolutionProjectsWithoutAnswerBody locks the persisted
+// Claude Desktop result envelope (toolUseResult.questions/answers + message tool_result). The
+// relay resolves the same interaction in place and intentionally drops the answer text.
+func TestClaudeAskUserQuestionTranscriptResolutionProjectsWithoutAnswerBody(t *testing.T) {
+	currentTurnID := "turn-claude-desktop"
+	line := []byte(`{"type":"user","uuid":"user-ask-result","timestamp":"2026-08-02T07:17:01.000Z","sourceToolAssistantUUID":"assistant-ask-user-question","toolUseResult":{"questions":[{"header":"构建失败策略","multiSelect":false,"options":[{"label":"自动重试 3 次"},{"label":"立即失败并报告"}],"question":"构建失败时,你希望脚本怎么处理?"}],"answers":{"构建失败时,你希望脚本怎么处理?":["立即失败并报告"]}},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-ask-user-question","content":"Your questions have been answered."}]}}`)
+	var entry claudeTranscriptRelayEntry
+	if err := json.Unmarshal(line, &entry); err != nil {
+		t.Fatalf("unmarshal real Claude result shape: %v", err)
+	}
+	events := claudeEntryToProjectionEvents(entry, &currentTurnID, nil)
+	if len(events) != 1 || events[0].Event != "user_input_resolved" {
+		t.Fatalf("AskUserQuestion result must map to one user_input_resolved event, got %+v", events)
+	}
+	data := events[0].Data
+	if data["interactionId"] != claudecode.DeriveStructuredUserInputInteractionID("call-ask-user-question") ||
+		data["status"] != "answered" || data["source"] != "other_client" || data["resolvedAt"] != int64(1785655021000) {
+		t.Fatalf("resolution = %+v", data)
+	}
+	if _, hasAnswers := data["answers"]; hasAnswers {
+		t.Fatalf("resolved projection must not contain answers: %+v", data)
+	}
+}
+
+func TestClaudeRichHistoryAskUserQuestionProjectsStructuredEventsWithoutToolActivity(t *testing.T) {
+	transcript := strings.Join([]string{
+		`{"type":"user","timestamp":"2026-08-02T07:16:35.730Z","message":{"id":"user-ask","role":"user","content":"先问我再继续"}}`,
+		`{"type":"assistant","timestamp":"2026-08-02T07:16:46.671Z","message":{"id":"assistant-ask","role":"assistant","content":[{"type":"tool_use","id":"call-ask","name":"AskUserQuestion","input":{"questions":[{"header":"构建失败策略","multiSelect":false,"options":[{"label":"自动重试 3 次"},{"label":"立即失败并报告"}],"question":"构建失败时,你希望脚本怎么处理?"}]}}]}}`,
+		`{"type":"user","timestamp":"2026-08-02T07:54:57.860Z","toolUseResult":{"questions":[{"header":"构建失败策略","multiSelect":false,"options":[{"label":"自动重试 3 次"},{"label":"立即失败并报告"}],"question":"构建失败时,你希望脚本怎么处理?"}],"answers":{"构建失败时,你希望脚本怎么处理?":["立即失败并报告"]}},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-ask","content":"Your questions have been answered."}]}}`,
+	}, "\n")
+	entries, err := claudecode.LoadClaudeRichHistoryFromReader(strings.NewReader(transcript), "ask-user-rich-history.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var events []projectionHydrateEvent
+	if err := streamRichHistoryProjectionEntries(context.Background(), entries, func(event projectionHydrateEvent) bool {
+		events = append(events, event)
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var requested, resolved *projectionHydrateEvent
+	for i := range events {
+		event := &events[i]
+		if event.Data["itemId"] == "call-ask" && (event.Event == "tool_started" || event.Event == "tool_finished") {
+			t.Fatalf("AskUserQuestion leaked ordinary tool activity: %+v", event)
+		}
+		switch event.Event {
+		case "user_input_requested":
+			requested = event
+		case "user_input_resolved":
+			resolved = event
+		}
+	}
+	if requested == nil || requested.Data["turnId"] != "user-ask" || requested.Data["status"] != "pending" ||
+		requested.Data["canRespond"] != false || requested.Data["diagnosticCode"] != "observe_only" {
+		t.Fatalf("requested = %+v; events=%+v", requested, events)
+	}
+	if resolved == nil || resolved.Data["turnId"] != "user-ask" || resolved.Data["status"] != "answered" ||
+		resolved.Data["source"] != "other_client" || resolved.Data["resolvedAt"] != int64(1785657297860) {
+		t.Fatalf("resolved = %+v; events=%+v", resolved, events)
+	}
+}
+
+func TestPendingClaudeRichHistoryAskUserQuestionKeepsRequiresAction(t *testing.T) {
+	entries := []core.RichHistoryEntry{
+		{ID: "user-ask", Role: "user", Content: "先问我再继续"},
+		{ID: "assistant-ask", Role: "assistant", Parts: []map[string]any{{
+			"type": "user_input", "itemId": "call-ask", "interactionId": "ui_ask",
+			"status": "pending", "questions": []core.UserInputQuestion{{
+				ID: "ui_ask_q_0", Prompt: "怎么处理?", AnswerMode: core.UserInputAnswerModeSingle,
+				Options: []core.UserInputOption{{ID: "ui_ask_q_0_o_0", Label: "A"}}, Required: true,
+			}}, "canRespond": false, "canReject": false, "diagnosticCode": "observe_only",
+		}}},
+	}
+	var events []projectionHydrateEvent
+	if err := streamRichHistoryProjectionEntries(context.Background(), entries, func(event projectionHydrateEvent) bool {
+		events = append(events, event)
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.Event == "turn_completed" && event.Data["turnId"] == "user-ask" {
+			t.Fatalf("pending AskUserQuestion must not be sealed: %+v", events)
+		}
+	}
+	r := newTestReducer()
+	for i, event := range events {
+		r.Apply(ev(i+1, "claude", "s1", event.Event, event.Data))
+	}
+	projection, ok := r.Snapshot("claude", "s1")
+	if !ok || projection.Execution.Phase != "requires_action" || projection.Execution.ActiveTurnID != "user-ask" {
+		t.Fatalf("execution = %+v want requires_action/user-ask; events=%+v", projection.Execution, events)
+	}
+}
+
+func TestClaudeDesktopTranscriptPendingQuestionKeepsCustomAndRequiresAction(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "claude-desktop-pending.jsonl")
+	transcript := strings.Join([]string{
+		`{"type":"user","uuid":"user-ask","timestamp":"2026-08-02T10:00:00.000Z","message":{"role":"user","content":"先问我再继续"}}`,
+		`{"type":"assistant","uuid":"assistant-ask","parentUuid":"user-ask","timestamp":"2026-08-02T10:00:01.000Z","message":{"id":"assistant-ask","role":"assistant","content":[{"type":"tool_use","id":"call-ask","name":"AskUserQuestion","input":{"questions":[{"header":"构建失败策略","multiSelect":false,"options":[{"label":"自动重试 3 次"},{"label":"立即失败并报告"}],"question":"构建失败时如何处理？"}]}}]}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(transcript), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var events []projectionHydrateEvent
+	if err := streamClaudeTranscriptProjectionEvents(context.Background(), path, func(event projectionHydrateEvent) bool {
+		events = append(events, event)
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	requested := -1
+	for index, event := range events {
+		if event.Event == "turn_completed" && event.Data["turnId"] == "user-ask" {
+			t.Fatalf("pending external question was incorrectly completed: %+v", events)
+		}
+		if event.Event == "user_input_requested" {
+			requested = index
+			questions, ok := event.Data["questions"].([]interface{})
+			if !ok || len(questions) != 1 {
+				t.Fatalf("questions = %#v", event.Data["questions"])
+			}
+			question, ok := questions[0].(map[string]interface{})
+			if !ok || question["allowsCustomAnswer"] != true || event.Data["canRespond"] != false ||
+				event.Data["canReject"] != false || event.Data["diagnosticCode"] != "observe_only" {
+				t.Fatalf("external question contract = event:%+v question:%#v", event, questions[0])
+			}
+		}
+	}
+	if requested < 0 {
+		t.Fatalf("missing user_input_requested: %+v", events)
+	}
+
+	r := newTestReducer()
+	for index, event := range events {
+		r.Apply(ev(index+1, "claude", "desktop-session", event.Event, event.Data))
+	}
+	projection, ok := r.Snapshot("claude", "desktop-session")
+	if !ok || projection.Execution.Phase != "requires_action" || projection.Execution.ActiveTurnID != "user-ask" {
+		t.Fatalf("execution = %+v want requires_action/user-ask; events=%+v", projection.Execution, events)
 	}
 }
 

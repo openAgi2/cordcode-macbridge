@@ -13,7 +13,9 @@ struct RemoteAccessView: View {
     @State private var showAdvanced = false
     @State private var isEditingRelay = false
     @State private var isEditingCustomURL = false
-    @State private var showTechnicalDetails = true
+    // Relay-first + opt-in LAN：同一局域网时优先直连。默认 false（Relay 底座）。
+    // 变更走 .preferLocalNetworkDidChange → AppDependencies.applyConfigAndRestart 原子写 + 单次 restart。
+    @AppStorage("preferLocalNetwork") private var preferLocalNetwork = false
     @State private var relayMode: RelayMode = .official
     @State private var relaySaveState: RelaySaveState = .idle
     @State private var customAddressSaveState: CustomAddressSaveState = .idle
@@ -27,8 +29,9 @@ struct RemoteAccessView: View {
 
     // 为了让 sheet 感觉上更接近老版左右分栏，在 sheet 内部实现简易 master-detail
     // 保持入口仍是 sheet（工作站/toolbar 打开），但内容呈现像老版列表+详情。
+    // Relay-first + opt-in LAN：左侧只保留 Relay / Tailscale / 自定义。局域网不再是独立页签
+    // （LAN 是 Relay 页内的 opt-in 偏好开关，不再是独立连接方式）。
     enum ConnectionMethod: String, CaseIterable {
-        case lan = "局域网"
         case relay = "Relay"
         case tailscale = "Tailscale"
         case other = "其他 (VPS/自定义)"
@@ -38,10 +41,6 @@ struct RemoteAccessView: View {
     var apiClient: ManagementAPIClient?
     /// P2-3：Reduce Motion 时取消位移，只保留状态替换。
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var localURL: String {
-        remoteStatus?.localURL ?? remoteStatus?.listenStatus?.localURL ?? ""
-    }
 
     private var tailscaleURL: String {
         remoteStatus?.tailscaleURL ?? ""
@@ -148,6 +147,42 @@ struct RemoteAccessView: View {
         }
     }
 
+    /// §3.3 状态真实性：真实 relay 连接（RelayStatus.connected==true）才认「已接入」。
+    private var relayConnected: Bool {
+        remoteStatus?.relay?.connected == true
+    }
+
+    /// 状态卡标题：已启用 / 配置中 / 未启用 / 未连接。saving 态优先；否则按 enabled/connected/configured。
+    private var relayStatusCardTitle: String {
+        let isZh = L10n.current == .zhHans
+        switch relaySaveState {
+        case .enabling: return L10n.remoteRelayEnabling
+        case .disabling: return L10n.remoteRelayDisabling
+        default: break
+        }
+        if !relayEnabled { return isZh ? "未启用" : "Disabled" }
+        if relayConnected { return isZh ? "已启用" : "Enabled" }
+        if relayConfigured == true { return isZh ? "配置中" : "Configuring" }
+        return isZh ? "未连接" : "Not Connected"
+    }
+
+    /// 连接信息卡「Relay 状态」行：connected==true 才显示「已接入中继网」，否则未启用/配置中/未连接。
+    private var relayConnectionStateText: String {
+        let isZh = L10n.current == .zhHans
+        if !relayEnabled { return isZh ? "未启用" : "Disabled" }
+        if relayConnected { return isZh ? "已接入中继网" : "Connected to relay" }
+        if relayConfigured == true { return isZh ? "配置中" : "Configuring" }
+        return isZh ? "未连接" : "Not connected"
+    }
+
+    /// 连接信息卡「中继类型」行：官方 / 自定义（不暴露原始 endpoint）。
+    private var relayTypeText: String {
+        let isZh = L10n.current == .zhHans
+        return relayMode == .official
+            ? (isZh ? "官方中继" : "Official Relay")
+            : (isZh ? "自定义中继" : "Custom Relay")
+    }
+
     var body: some View {
         PageContainer(scrolls: false, maxContentWidth: LayoutConstants.connectionSheetWidth) {
             VStack(alignment: .leading, spacing: 0) {
@@ -203,7 +238,6 @@ struct RemoteAccessView: View {
                             ConnectionSidebarButton(
                                 method: method,
                                 isSelected: selectedMethod == method,
-                                localURL: localURL,
                                 relayConfigured: relayConfigured,
                                 tailscaleURL: tailscaleURL,
                                 relayEnabled: relayEnabled,
@@ -222,7 +256,6 @@ struct RemoteAccessView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 16) {
                             switch selectedMethod {
-                            case .lan: lanDetailView
                             case .relay: relayDetailView
                             case .tailscale: tailscaleDetailView
                             case .other: customAddressDetailView
@@ -242,8 +275,8 @@ struct RemoteAccessView: View {
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                     Text(L10n.current == .zhHans
-                        ? "智能连接策略：优先并行尝试局域网与 Tailscale 直连以实现最低延迟，仅在直连不可达时自动无缝回退至 Relay 加密中继。"
-                        : "Smart Connection: Prioritizes low-latency LAN and Tailscale direct paths, falling back to Relay secure tunnel if unreachable.")
+                        ? "默认使用 Relay 保持稳定连接。开启局域网直连后，同一网络下将优先使用本地连接。"
+                        : "Relay is used by default for a stable connection. Once LAN direct is enabled, the local connection is preferred on the same network.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
@@ -272,112 +305,6 @@ struct RemoteAccessView: View {
         }
     }
 
-    private var lanDetailView: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            SettingsCardContainer {
-                HStack(spacing: 16) {
-                    ZStack {
-                        Color.green.opacity(0.15)
-                        Image(systemName: "wifi")
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundStyle(Color.green)
-                    }
-                    .frame(width: 48, height: 48)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(localURL.isEmpty ? (L10n.current == .zhHans ? "未就绪" : "Not Ready") : (L10n.current == .zhHans ? "正常监听中" : "Listening"))
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(.primary)
-                        Text(L10n.current == .zhHans
-                            ? "当 iPhone 与 Mac 处于同一 Wi-Fi 或局域网下时，使用此方式进行高速直连。数据不离开局域网。"
-                            : "When iPhone and Mac are on the same Wi-Fi or local network, this method provides high-speed direct connection. Data does not leave the local network.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .lineSpacing(2)
-                    }
-
-                    Spacer()
-                    
-                    if !localURL.isEmpty {
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(Color.green)
-                                .frame(width: 8, height: 8)
-                            Text(L10n.current == .zhHans ? "正常监听" : "Listening")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(.green)
-                        }
-                    }
-                }
-            }
-
-            if !localURL.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(L10n.diagnosisInfo)
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.secondary)
-                        .padding(.leading, 4)
-
-                    SettingsCardContainer {
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(L10n.current == .zhHans ? "局域网连接地址" : "LAN Connection URL")
-                                        .font(.system(size: 14, weight: .semibold))
-                                    Text(localURL)
-                                        .font(.system(size: 12, design: .monospaced))
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                
-                                Button(L10n.current == .zhHans ? "复制" : "Copy") {
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(localURL, forType: .string)
-                                }
-                                .buttonStyle(.bordered)
-                            }
-                        }
-                    }
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text(L10n.securityLevel)
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 4)
-
-                SettingsCardContainer {
-                    HStack {
-                        ZStack {
-                            Color.green.opacity(0.15)
-                            Image(systemName: "lock.shield.fill")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.green)
-                        }
-                        .frame(width: 24, height: 24)
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(L10n.current == .zhHans ? "局域网内传输" : "Local Network Transmission")
-                                .font(.system(size: 14, weight: .semibold))
-                            Text(L10n.remoteLANHint)
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                        }
-
-                        Spacer()
-
-                        Text(L10n.current == .zhHans ? "已保护" : "Protected")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.green)
-                    }
-                }
-            }
-        }
-    }
-
     private var relayDetailView: some View {
         VStack(alignment: .leading, spacing: 20) {
             SettingsCardContainer {
@@ -392,21 +319,17 @@ struct RemoteAccessView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(relayEnabled && relayConfigured == true ? (L10n.current == .zhHans ? "已启用" : "Enabled") : (relayEnabled ? (L10n.current == .zhHans ? "配置中" : "Configuring") : (L10n.current == .zhHans ? "未启用" : "Disabled")))
+                        Text(relayStatusCardTitle)
                             .font(.system(size: 16, weight: .bold))
                             .foregroundStyle(.primary)
+                        // 合并后的单一安全说明：替代原先的短描述 + 独立「安全与隐私」区块 + 重复「端到端加密」标签。
                         Text(L10n.current == .zhHans
-                            ? "可在不同网络下安全连接此 Mac"
-                            : "Allows safe connection under different network environments.")
+                            ? "通过端到端加密 Relay，可在不同网络下安全连接此 Mac；中继服务器无法读取代码或消息内容。"
+                            : "Connect to this Mac securely across networks via end-to-end encrypted Relay. The relay server cannot read your code or messages.")
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
-                        HStack(spacing: 4) {
-                            Image(systemName: "lock.shield")
-                                .font(.system(size: 11))
-                            Text(L10n.current == .zhHans ? "端到端加密" : "End-to-End Encrypted")
-                                .font(.system(size: 11))
-                        }
-                        .foregroundStyle(.secondary.opacity(0.8))
+                            .lineSpacing(2)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
 
                     Spacer()
@@ -430,6 +353,52 @@ struct RemoteAccessView: View {
                     feedbackRow(text: L10n.remoteRelayDisabling, isProgress: true)
                 default:
                     EmptyView()
+                }
+            }
+
+            // 连接偏好：同一局域网时优先直连（opt-in LAN）。默认关闭。变更走
+            // .preferLocalNetworkDidChange → applyConfigAndRestart（原子写 + 单次 restart）。
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L10n.current == .zhHans ? "连接偏好" : "Connection Preference")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 4)
+
+                SettingsCardContainer {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            Color.green.opacity(0.15)
+                            Image(systemName: "wifi")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.green)
+                        }
+                        .frame(width: 24, height: 24)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(L10n.current == .zhHans ? "同一局域网时优先直连" : "Prefer direct connection on same LAN")
+                                .font(.system(size: 14, weight: .semibold))
+                            Text(L10n.current == .zhHans
+                                ? "开启后，同一网络下优先使用高速直连；不可用时自动切回 Relay。"
+                                : "When enabled, a high-speed direct connection is preferred on the same network; falls back to Relay automatically if unavailable.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .lineSpacing(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        Spacer()
+
+                        Toggle("", isOn: $preferLocalNetwork)
+                            .toggleStyle(.switch)
+                            .onChange(of: preferLocalNetwork) { _, _ in
+                                NotificationCenter.default.post(name: .preferLocalNetworkDidChange, object: nil)
+                            }
+                            .accessibilityLabel(Text(L10n.current == .zhHans ? "同一局域网时优先直连" : "Prefer direct connection on same LAN"))
+                            .accessibilityHint(Text(L10n.current == .zhHans
+                                ? "开启后同一网络下优先使用本地直连，不可用时切回 Relay。"
+                                : "When on, prefer local direct connection on the same network; fall back to Relay if unavailable."))
+                    }
                 }
             }
 
@@ -539,77 +508,23 @@ struct RemoteAccessView: View {
                 InlineFeedback(style: .error, message: err)
             }
 
+            // 连接信息卡：常驻渲染（无 disclosure）。展示默认路径 / Relay 状态 / 中继类型 / 连接协议 / 加密协议。
+            // 不展示 route ID、原始 endpoint、credential——这些只留在诊断/编辑入口，遵守 secret/redaction。
             VStack(alignment: .leading, spacing: 8) {
-                Text(L10n.current == .zhHans ? "安全与隐私" : "Security & Privacy")
+                Text(L10n.current == .zhHans ? "连接信息" : "Connection Info")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(.secondary)
                     .padding(.leading, 4)
 
                 SettingsCardContainer {
-                    HStack {
-                        ZStack {
-                            Color.green.opacity(0.15)
-                            Image(systemName: "shield.fill")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.green)
-                        }
-                        .frame(width: 24, height: 24)
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(L10n.current == .zhHans ? "端到端加密" : "End-to-End Encrypted")
-                                .font(.system(size: 14, weight: .semibold))
-                            Text(L10n.current == .zhHans ? "中继服务器无法读取传输的代码或消息内容" : "Relay servers cannot read transmitted code or message content")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                        }
-
-                        Spacer()
-
-                        Text(L10n.current == .zhHans ? "已开启" : "Enabled")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.green)
+                    VStack(alignment: .leading, spacing: 6) {
+                        technicalInfoRow(label: L10n.current == .zhHans ? "默认路径" : "Default Path", value: "Relay")
+                        // §3.3 状态真实性：只有 connected==true 才显示「已接入中继网」，否则按 enabled/configured/connected 显示。
+                        technicalInfoRow(label: L10n.current == .zhHans ? "Relay 状态" : "Relay Status", value: relayConnectionStateText)
+                        technicalInfoRow(label: L10n.current == .zhHans ? "中继类型" : "Relay Type", value: relayTypeText)
+                        technicalInfoRow(label: L10n.current == .zhHans ? "连接协议" : "Protocol", value: "WSS (WebSocket Secure)")
+                        technicalInfoRow(label: L10n.current == .zhHans ? "加密协议" : "Encryption", value: L10n.current == .zhHans ? "端到端 HPKE (X25519 / AES-128-GCM)" : "End-to-End HPKE (X25519 / AES-128-GCM)")
                     }
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        showTechnicalDetails.toggle()
-                    }
-                } label: {
-                    HStack {
-                        Image(systemName: "info.circle")
-                            .font(.system(size: 14))
-                        Text(L10n.current == .zhHans ? "查看连接技术信息" : "Technical Information")
-                            .font(.system(size: 13, weight: .medium))
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 10, weight: .bold))
-                            .rotationEffect(.degrees(showTechnicalDetails ? 90 : 0))
-                    }
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 8)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                if showTechnicalDetails {
-                    SettingsCardContainer {
-                        VStack(alignment: .leading, spacing: 6) {
-                            technicalInfoRow(label: L10n.current == .zhHans ? "协议版本" : "Protocol Version", value: "WSS (Websocket Secure)")
-                            technicalInfoRow(label: L10n.current == .zhHans ? "加密协议" : "Encryption", value: L10n.current == .zhHans ? "端到端 HPKE (X25519 / AES-128-GCM)" : "End-to-End HPKE (X25519 / AES-128-GCM)")
-                            technicalInfoRow(label: L10n.current == .zhHans ? "连接状态" : "Status", value: relayConfigured == true ? (L10n.current == .zhHans ? "已接入中继网" : "Connected") : (L10n.current == .zhHans ? "未就绪" : "Not Ready"))
-                            if let endpoint = remoteStatus?.relay?.endpoint {
-                                technicalInfoRow(label: L10n.current == .zhHans ? "服务器地址" : "Server Endpoint", value: endpoint)
-                            }
-                            if let routeId = remoteStatus?.relay?.routeId {
-                                technicalInfoRow(label: L10n.current == .zhHans ? "路由识别码" : "Route ID", value: routeId)
-                            }
-                        }
-                    }
-                    .transition(.opacity)
                 }
             }
         }
@@ -1188,7 +1103,6 @@ private struct SettingsCardContainer<Content: View>: View {
 private struct ConnectionSidebarButton: View {
     let method: RemoteAccessView.ConnectionMethod
     let isSelected: Bool
-    let localURL: String
     let relayConfigured: Bool?
     let tailscaleURL: String
     let relayEnabled: Bool
@@ -1241,13 +1155,6 @@ private struct ConnectionSidebarButton: View {
     @ViewBuilder
     private var iconView: some View {
         switch method {
-        case .lan:
-            ZStack {
-                Color.green.opacity(0.15)
-                Image(systemName: "wifi")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.green)
-            }
         case .relay:
             ZStack {
                 Color.blue.opacity(0.15)
@@ -1274,7 +1181,6 @@ private struct ConnectionSidebarButton: View {
 
     private var title: String {
         switch method {
-        case .lan: return L10n.current == .zhHans ? "局域网" : "Local Network"
         case .relay: return "Relay"
         case .tailscale: return "Tailscale"
         case .other: return L10n.current == .zhHans ? "自定义连接" : "Custom Access"
@@ -1283,7 +1189,6 @@ private struct ConnectionSidebarButton: View {
 
     private var subtitle: String {
         switch method {
-        case .lan: return L10n.current == .zhHans ? "同一网络内自动连接" : "Auto-connect on same Wi-Fi"
         case .relay: return L10n.current == .zhHans ? "跨网络安全连接" : "Secure remote connection"
         case .tailscale: return L10n.current == .zhHans ? "通过私有网络连接" : "Connect via private network"
         case .other: return L10n.current == .zhHans ? "VPS 或自定义地址" : "VPS or custom endpoints"
@@ -1305,8 +1210,6 @@ private struct ConnectionSidebarButton: View {
     private var badgeInfo: (String, Color) {
         let isZh = L10n.current == .zhHans
         switch method {
-        case .lan:
-            return (localURL.isEmpty ? (isZh ? "未配置" : "Not Configured") : (isZh ? "可用" : "Available"), localURL.isEmpty ? .secondary : .green)
         case .relay:
             if !relayEnabled {
                 return (isZh ? "未启用" : "Disabled", .secondary)

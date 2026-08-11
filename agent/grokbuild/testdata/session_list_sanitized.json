@@ -1,0 +1,202 @@
+{
+  "_comment": "Sanitized REAL grok 1.0.0 ACP session/list capture. Field names/types/order are verbatim from the live ACP response; only sensitive values (sessionIds, titles, cwds, git facets, branch names, repo paths) are replaced with stable fixture values. Captured via read-only ACP handshake (initialize -> authenticate cached_token -> session/list). Do NOT hand-edit field names — they are the frozen wire schema. NOTE: per-session field is 'updatedAt' (ISO-8601 string), NOT 'lastActivity'.",
+  "grokVersion": "1.0.0",
+  "initialize": {
+    "protocolVersion": 1,
+    "agentCapabilities": {
+      "loadSession": true,
+      "promptCapabilities": {
+        "image": false,
+        "audio": false,
+        "embeddedContext": true
+      },
+      "mcpCapabilities": {
+        "http": true,
+        "sse": true
+      },
+      "sessionCapabilities": {
+        "list": {},
+        "resume": {},
+        "close": {}
+      },
+      "auth": {},
+      "_meta": {
+        "x.ai/fs_notify": true,
+        "x.ai/hooks": {
+          "blockingEvents": [
+            "pre_tool_use",
+            "stop",
+            "subagent_stop"
+          ],
+          "decisions": [
+            "deny",
+            "block"
+          ],
+          "stopSignals": [
+            "continue",
+            "stopReason",
+            "additionalContext"
+          ]
+        },
+        "x.ai/capabilities": {
+          "toolOverrides": {
+            "x_keyword_search": true,
+            "x_semantic_search": true,
+            "x_user_search": false,
+            "x_thread_fetch": false
+          }
+        }
+      }
+    },
+    "authMethods": [
+      {
+        "id": "cached_token",
+        "name": "cached_token",
+        "description": "Cached token from ~/.grok/auth.json"
+      },
+      {
+        "id": "grok.com",
+        "name": "Grok",
+        "description": "Sign in with Grok"
+      }
+    ]
+  },
+  "request": {
+    "method": "session/list",
+    "params": {}
+  },
+  "response": {
+    "jsonrpc": "2.0",
+    "id": 3,
+    "result": {
+      "sessions": [
+        {
+          "sessionId": "019f0000-0000-7000-8000-100000000001",
+          "cwd": "/tmp/fixture-workspace",
+          "title": "Fixture grok session alpha",
+          "updatedAt": "2026-08-08T14:36:11.900198+00:00",
+          "_meta": {
+            "x.ai/session": {
+              "kind": "build",
+              "facets": {
+                "branch": "main",
+                "cwd": "/tmp/fixture-workspace",
+                "gitRoot": "/tmp/fixture-workspace/",
+                "kind": "build",
+                "repo": "fixture-repo"
+              }
+            }
+          }
+        },
+        {
+          "sessionId": "019f0000-0000-7000-8000-100000000002",
+          "cwd": "/tmp/fixture-workspace",
+          "title": "Fixture grok session beta",
+          "updatedAt": "2026-08-08T14:36:11.895197+00:00",
+          "_meta": {
+            "x.ai/session": {
+              "kind": "build",
+              "facets": {
+                "branch": "main",
+                "cwd": "/tmp/fixture-workspace",
+                "gitRoot": "/tmp/fixture-workspace/",
+                "kind": "build",
+                "repo": "fixture-repo"
+              }
+            }
+          }
+        },
+        {
+          "sessionId": "019f0000-0000-7000-8000-100000000003",
+          "cwd": "/tmp/fixture-other-repo",
+          "title": "Fixture grok session gamma",
+          "updatedAt": "2026-08-08T04:25:23.908695+00:00",
+          "_meta": {
+            "x.ai/session": {
+              "kind": "build",
+              "facets": {
+                "branch": "feature/fixture",
+                "cwd": "/tmp/fixture-other-repo",
+                "gitRoot": "/tmp/fixture-other-repo/",
+                "kind": "build",
+                "repo": "fixture-other"
+              }
+            }
+          }
+        }
+      ],
+      "nextCursor": "eyJib3VuZGFyeSI6eyJ1cGRhdGVkX2F0IjoiMjAyNi0wOC0wNlQwODowOTozNS41NDcxMTQrMDA6MDAifX0",
+      "_meta": {
+        "x.ai/facets": {
+          "scope": "window",
+          "keys": [
+            {
+              "key": "branch",
+              "values": [
+                {
+                  "value": "main",
+                  "count": 2
+                },
+                {
+                  "value": "feature/fixture",
+                  "count": 1
+                }
+              ]
+            },
+            {
+              "key": "cwd",
+              "values": [
+                {
+                  "value": "/tmp/fixture-workspace",
+                  "count": 2
+                },
+                {
+                  "value": "/tmp/fixture-other-repo",
+                  "count": 1
+                }
+              ]
+            },
+            {
+              "key": "gitRoot",
+              "values": [
+                {
+                  "value": "/tmp/fixture-workspace/",
+                  "count": 2
+                },
+                {
+                  "value": "/tmp/fixture-other-repo/",
+                  "count": 1
+                }
+              ]
+            },
+            {
+              "key": "kind",
+              "values": [
+                {
+                  "value": "build",
+                  "count": 3
+                }
+              ]
+            },
+            {
+              "key": "repo",
+              "values": [
+                {
+                  "value": "fixture-repo",
+                  "count": 2
+                },
+                {
+                  "value": "fixture-other",
+                  "count": 1
+                }
+              ]
+            }
+          ]
+        },
+        "x.ai/partial": {
+          "conversations": false
+        }
+      }
+    }
+  }
+}

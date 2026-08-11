@@ -23,12 +23,43 @@ import (
 // longer carries a prior projection as baseline (see BeginHydrateTransaction),
 // which changes the turn set produced for pathless backends — old checkpoints
 // that mixed live row-UUID turns with builder user-line-N turns must be rebuilt.
-const projectionCheckpointSchemaVersion = 5
+// v6: ProjectionPart tool retains optional title + fileChanges (guardrail 12 / ChatGPT-style
+// activity rows). Bumping invalidates v5 checkpoints so cold hydrate re-reduces with the new
+// fields instead of restoring pre-title baselines (which left iOS activity rows as bare
+// 「已编辑文件」 even after the reducer fix).
+// v7: Claude AskUserQuestion transcript tool_use/tool_result rows are projected as structured
+// user-input events instead of ordinary tool activity. Bumping invalidates v6 checkpoints so
+// sessions already hydrated before this mapper change are rebuilt from the canonical transcript.
+// v8: Claude pathless rich-history hydrate now preserves the same structured user-input
+// semantics. v7 checkpoints may still contain AskUserQuestion as ordinary tool parts.
+// v9: an interrupt marker following a resolved AskUserQuestion no longer hides the owning
+// prompt and reattributes the structured part to an older turn.
+// v10: Claude AskUserQuestion now advertises its evidence-backed custom-answer capability,
+// and a pending transcript-owned question keeps execution in requires_action. v9 checkpoints
+// can contain allowsCustomAnswer=false and execution.phase=idle, so they must be rebuilt from
+// the canonical transcript instead of being restored as a permanently stale observe-only card.
+const projectionCheckpointSchemaVersion = 10
 
 var (
 	ErrProjectionCheckpointInvalid  = errors.New("projection checkpoint invalid")
 	ErrProjectionCheckpointDisabled = errors.New("projection checkpoint persistence disabled")
 )
+
+// projectionReducerEvent constructs reducer-only input. Keeping this constructor in the
+// projection kernel makes the no-production-bypass guard mechanically distinguish isolated
+// reducer transactions from business-event egress, which must go through EventPublisher.
+func projectionReducerEvent(
+	backendID, sessionID, event string,
+	data interface{},
+	perSessionSeq int,
+	bridgeEpoch string,
+) EventMessage {
+	return EventMessage{
+		BackendID: backendID, SessionID: sessionID,
+		Event: event, Data: data,
+		PerSessionSeq: perSessionSeq, BridgeEpoch: bridgeEpoch,
+	}
+}
 
 type ProjectionHydratePhase string
 
@@ -454,6 +485,17 @@ type projectionHydrateTransaction struct {
 	nextInput   int
 	pendingLive []EventMessage
 	liveArrived chan struct{}
+	// sourceIngestComplete is set true once cold-source ingest finishes (design §5.1 #7,
+	// guardrail #6). WaitHydrateCommitReady will not commit until this is true, so readiness
+	// is decided from authoritative source-EOF + turn terminal state rather than content
+	// shape or turn-count guessing.
+	sourceIngestComplete bool
+	// coldArmedTurnIDs records every turn ID the cold-source ingest referenced (turnId or
+	// itemId). The commit gate checks terminal state only for these turns — turns carried
+	// from a committed/live baseline are authoritative live truth, not cold-source half-seen
+	// guesses, so a live in-progress session cold-pulled commits its current state instead of
+	// blocking until the in-flight turn completes.
+	coldArmedTurnIDs map[string]struct{}
 }
 
 type ProjectionHydrateAdmission struct {
@@ -480,6 +522,16 @@ type ProjectionKernel struct {
 	checkpointPolicy ProjectionCheckpointPolicy
 	now              func() time.Time
 	randomUnit       func() float64
+
+	// stageTurnCheckpoint is the §6.1 git-checkpoint hook. When non-nil, IngestLive
+	// invokes it AFTER the reducer applies a turn_completed event, passing the
+	// 1-based TurnCount() of the just-completed turn. The callback ONLY stages
+	// intent (under the coalescer's own mutex); it must NOT perform git I/O on
+	// this stack (IngestLive runs under k.mu holding the event-delivery lock).
+	// Git I/O happens later in the checkpoint coalescer goroutine (checkpoint.go).
+	// Sourced from Handlers via SetTurnCheckpointStager; nil in unit tests that do
+	// not exercise the checkpoint path.
+	stageTurnCheckpoint func(backendID, sessionID string, turnN int)
 }
 
 func NewProjectionKernel(reducer *ProjectionReducer, store projectionCheckpointPersistence) *ProjectionKernel {
@@ -512,6 +564,18 @@ func (k *ProjectionKernel) SetReducer(reducer *ProjectionReducer) {
 	}
 	k.mu.Lock()
 	k.reducer = reducer
+	k.mu.Unlock()
+}
+
+// SetTurnCheckpointStager wires the §6.1 git-checkpoint hook. The stager is
+// invoked from IngestLive after the reducer applies a turn_completed event; it
+// must only register intent (no git I/O). Handlers passes h.checkpointCoalescer.stage.
+func (k *ProjectionKernel) SetTurnCheckpointStager(fn func(backendID, sessionID string, turnN int)) {
+	if k == nil {
+		return
+	}
+	k.mu.Lock()
+	k.stageTurnCheckpoint = fn
 	k.mu.Unlock()
 }
 
@@ -601,20 +665,31 @@ func (k *ProjectionKernel) finishHydrateLocked(session *projectionKernelSession)
 	}
 }
 
-// pathlessRichHistoryBackend reports whether a backend's pathless hydrate (source.Path
-// == "") replays the full source through a rich-history builder: Claude (pathless or
-// compact-continuation segments) and OpenCode (HTTP rich history). Such a rebuild must
-// start from an empty reducer so the builder is the sole baseline; carrying a prior
-// projection would replay content onto it and duplicate turns. Codex is file-based — a
-// pathless Codex session is a degenerate no-file case with no builder replay, so it is
-// excluded and keeps its carried live baseline.
+// pathlessRichHistoryBackend reports whether a backend can perform a pathless hydrate
+// (source.Path == "") that replays content through a rich-history builder: Claude and
+// OpenCode. Codex is file-based and excluded.
 func pathlessRichHistoryBackend(backendID string) bool {
 	switch backendID {
-	case "opencode", "claude", "claudecode":
+	case "opencode", "grokbuild", "claude", "claudecode":
 		return true
 	default:
 		return false
 	}
+}
+
+// pathlessFullRebuildSource is true when hydrate must start from an EMPTY reducer and
+// re-reduce the entire source as sole baseline (OpenCode HTTP; Claude without file/segment
+// cursors). Carrying a prior projection would replay builder output on top of already-
+// present turns and can duplicate content across live row-UUID vs builder turn ids
+// (see docs/2026-07-31-claude-projection-pathless-hydrate-duplication-fix.md).
+//
+// Claude composite segments still carry per-file cursors and validated checkpoints.
+// Those must NOT be treated as full rebuilds: when a checkpoint hit sets startCursor to
+// the segment cut (EOF), produceProjectionHydrateSource returns early on
+// startOffset==endOffset. Without restoring the checkpoint baseline the committed
+// projection is empty (headRev=0) and iOS shows "还没有消息" for every Claude session.
+func pathlessFullRebuildSource(backendID string, source ProjectionSourceDescriptor) bool {
+	return source.Path == "" && len(source.Segments) == 0 && pathlessRichHistoryBackend(backendID)
 }
 
 // BeginHydrateTransaction creates the isolated reducer used for [checkpointCursor,startCut).
@@ -675,26 +750,19 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 	catchUpFrom := session.committedSourceCursor
 	wasReadyCatchUp := session.status.Phase == ProjectionHydrateReady && source.Path != "" && source.Cursor > catchUpFrom
 	tx := &projectionHydrateTransaction{
-		source:      source,
-		startCut:    source.Cursor,
-		reducer:     NewProjectionReducer(),
-		liveArrived: make(chan struct{}, 1),
+		source:           source,
+		startCut:         source.Cursor,
+		reducer:          NewProjectionReducer(),
+		liveArrived:      make(chan struct{}, 1),
+		coldArmedTurnIDs: make(map[string]struct{}),
 	}
 	if source.Path == "" {
-		if pathlessRichHistoryBackend(backendID) {
-			// Claude / OpenCode pathless rebuild starts EMPTY. Their rich-history builder
-			// has no file cursor and re-reduces the full source every time, so the projection
-			// must be derived SOLELY from that rebuild. Carrying a prior committed projection
-			// (in-memory here, or from checkpoint below) would replay the builder on top of
-			// already-present content — text_delta appends, never replaces — and, when the
-			// prior baseline used a different turn-id scheme (live/raw row-UUID vs builder
-			// user-line-N), create duplicate turns that persist in the checkpoint across
-			// reopens. See docs/2026-07-31-claude-projection-pathless-hydrate-duplication-fix.md.
+		if pathlessFullRebuildSource(backendID, source) {
+			// OpenCode / Claude pathless (no Path, no Segments) rebuild starts EMPTY.
 			// tx.reducer is already a fresh NewProjectionReducer(); do NOT Restore.
-		} else if !sourceChanged {
-			// Codex is file-based: a pathless Codex session is a degenerate no-file case
-			// with NO builder replay, so the carried in-memory live state is the sole
-			// content and must be preserved (do not drop it).
+		} else if !sourceChanged && len(source.Segments) == 0 {
+			// Codex pathless degenerate no-file case: keep carried live baseline.
+			// Claude composite Segments are handled via checkpoint Restore below (not here).
 			if existing, ok := k.reducer.Snapshot(backendID, sessionID); ok {
 				tx.reducer.Restore(backendID, sessionID, existing)
 			}
@@ -723,10 +791,12 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 		checkpoint, err := store.LoadValidated(backendID, sessionID, source)
 		switch {
 		case err == nil:
-			if !(source.Path == "" && pathlessRichHistoryBackend(backendID)) {
-				// Carry the checkpoint projection forward as baseline — EXCEPT for a
-				// Claude/OpenCode pathless rebuild, which must start empty so the rich-
-				// history builder is the sole baseline (see Site A comment above).
+			if !pathlessFullRebuildSource(backendID, source) {
+				// Carry the checkpoint projection as baseline.
+				// CRITICAL: Claude composite (Path=="" + Segments) is NOT a full rebuild —
+				// startCursor becomes source.Cursor (EOF cut). Skipping Restore here yields
+				// an empty projection (headRev=0) and empty iOS Claude sessions.
+				// Only true pathless full rebuilds (no Path, no Segments) skip Restore.
 				tx.reducer.Restore(backendID, sessionID, checkpoint.Projection)
 			}
 			if len(source.Segments) > 0 {
@@ -776,6 +846,15 @@ func (k *ProjectionKernel) ApplyHydrateEvent(
 		return false
 	}
 	tx := session.hydrate
+	// Record every turn the cold source references (turnId, else itemId), so the commit gate
+	// checks terminal state only for cold-source-armed turns (design §5.1 #7). Turns carried
+	// from a committed/live baseline are never referenced here and thus never gate — live
+	// in-progress sessions cold-pulled commit their current state instead of blocking.
+	if tid, ok := data["turnId"].(string); ok && tid != "" {
+		tx.coldArmedTurnIDs[tid] = struct{}{}
+	} else if iid, ok := data["itemId"].(string); ok && iid != "" {
+		tx.coldArmedTurnIDs[iid] = struct{}{}
+	}
 	tx.nextInput++
 	before := tx.reducer.LastAppliedRev(backendID, sessionID)
 	tx.reducer.Apply(EventMessage{
@@ -810,11 +889,56 @@ func (k *ProjectionKernel) IngestLive(msg EventMessage) bool {
 	}
 	before := k.reducer.LastAppliedRev(msg.BackendID, msg.SessionID)
 	k.reducer.Apply(msg)
-	return k.reducer.LastAppliedRev(msg.BackendID, msg.SessionID) != before
+	projectionAdvanced := k.reducer.LastAppliedRev(msg.BackendID, msg.SessionID) != before
+
+	// §6.1 checkpoint hook: after the reducer applies turn_completed, read the
+	// 1-based TurnCount() (= the just-completed turn) and stage the git-checkpoint
+	// intent. This is KERNEL-level (not reducer-level — the reducer stays pure and
+	// cannot reference git or the Kernel). We DO NOT self-maintain a counter;
+	// TurnCount() is projection truth. The stager only registers intent under the
+	// coalescer's own mutex; git I/O runs in the coalescer goroutine, NEVER under
+	// k.mu (that would block all session event delivery). Gated on
+	// projectionAdvanced so a no-op/duplicate turn_completed does not capture.
+	if projectionAdvanced && msg.Event == "turn_completed" && k.stageTurnCheckpoint != nil {
+		if turnN := k.reducer.TurnCount(msg.BackendID, msg.SessionID); turnN > 0 {
+			k.stageTurnCheckpoint(msg.BackendID, msg.SessionID, turnN)
+		}
+	}
+	return projectionAdvanced
 }
 
-// WaitHydrateCommitReady distinguishes a truly empty inspected source from a bare turn shell.
-// A bare shell remains hydrating until a post-cut live event contributes real content.
+// MarkHydrateSourceIngestComplete signals that cold-source ingest feeding this hydrate
+// transaction has finished — no further ApplyHydrateEvent calls will be made from the cold
+// source (mainstream transcript + Claude sidechain). WaitHydrateCommitReady will not commit
+// until this is set, so readiness is decided from authoritative source-EOF + turn terminal
+// state rather than content shape or turn-count guessing (design §5.1 #7, guardrail #6).
+// Also nudges liveArrived so a waiter re-evaluates immediately. Idempotent; no-op if the
+// transaction is no longer active (already committed/failed/superseded).
+func (k *ProjectionKernel) MarkHydrateSourceIngestComplete(backendID, sessionID string) {
+	if k == nil {
+		return
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	session := k.sessionLocked(backendID, sessionID)
+	if session.status.Phase != ProjectionHydrateHydrating || session.hydrate == nil {
+		return
+	}
+	session.hydrate.sourceIngestComplete = true
+	select {
+	case session.hydrate.liveArrived <- struct{}{}:
+	default:
+	}
+}
+
+// WaitHydrateCommitReady blocks until the hydrate transaction is committable, then returns
+// nil. Commit readiness is authoritative (design §5.1 #7, guardrail #6): the cold source must
+// be fully ingested (MarkHydrateSourceIngestComplete) AND every turn armed by the source must
+// have reached a terminal state (completed/aborted/error). This replaces the earlier
+// turnCount==0 || HasContentTurn gate, which guessed from count/content shape and left
+// empty/aborted/crashed sessions stuck hydrating forever. A bare turn_started with no
+// terminal event stays not-ready (correct); a live in-flight turn cold-opened mid-flight
+// waits for its terminal event instead of committing on partial content.
 func (k *ProjectionKernel) WaitHydrateCommitReady(
 	ctx context.Context,
 	backendID, sessionID string,
@@ -834,8 +958,15 @@ func (k *ProjectionKernel) WaitHydrateCommitReady(
 		for _, msg := range tx.pendingLive {
 			preview.Apply(msg)
 		}
-		turnCount := preview.TurnCount(backendID, sessionID)
-		ready := turnCount == 0 || preview.HasContentTurn(backendID, sessionID)
+		// §5.1 #7 / guardrail #6: readiness is authoritative, not guessed. Commit only after
+		// the cold source is fully ingested AND every turn the cold source armed has reached a
+		// terminal state (completed/aborted/error). Scoped to cold-armed turns: turns carried
+		// from a committed/live baseline are live truth and do not gate, so a live in-progress
+		// session cold-pulled commits its current state instead of blocking. The old
+		// `turnCount == 0 || HasContentTurn(...)` gate guessed from count/content shape; it left
+		// empty/aborted/crashed sessions stuck hydrating forever and could commit a half-seen
+		// in-flight turn on partial content.
+		ready := tx.sourceIngestComplete && preview.NonTerminalTurnCountInSet(backendID, sessionID, tx.coldArmedTurnIDs) == 0
 		liveArrived := tx.liveArrived
 		k.mu.Unlock()
 		if ready {

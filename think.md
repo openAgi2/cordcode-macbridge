@@ -1,6 +1,42 @@
 # Claude Code 冷启动既有 session 首轮流式从头重播：跨仓排查结论
 
-## 2026-07-18 追加复盘：Relay 长 session 的 A/B/D 优化状态与跨端经验
+## 2026-08-04 追加复盘：Grok 外部任务 iOS 输入框卡"完成态"
+
+### 现象
+Mac 端发起的 Grok Build 任务正在执行时,iOS 端同步该 session 的过程中输入框一直停在"完成态",没有进入"执行中"。Claude/Codex/OpenCode 无此问题。
+
+### 根因(两层,均在 MacBridge)
+1. **codec 丢弃上游 durable `turn_completed`**:`convertSessionUpdate`(`agent/grokbuild/acp_codec.go`)的 default 分支把 `turn_completed` sessionUpdate 当未知类型丢弃。真实 `~/.grok/sessions/*/updates.jsonl` 证实上游在终态发 durable `turn_completed`(440 次,带 `prompt_id`+`stop_reason`,method `_x.ai/session/update`,无 isReplay → 进 leader live rail),但 codec 不映射它。
+2. **relay loop 不合成 turn-start 信号**:`grokLeaderSessionRelayLoop`(`go-bridge/handlers_relay.go`)只转发内容事件,不合成 `turn_started`/`session_state_changed(running)`。上游 grok-build 不发任何 turn-start sessionUpdate(真实数据 `response_started`=0)。
+
+iOS 进入"执行中"(`isGenerating`)唯一可靠触发是收到 `turn_started` 或 `session_state_changed(running)`。两个都收不到 → 输入框停完成态。
+
+### 诊断方法(autonomous,不依赖 owner)
+- 用本机 `~/.grok/sessions/*/updates.jsonl` 作为真实协议样本(上游持久化的通知 = live rail 同源),grep `sessionUpdate` tag 分布。替代了 audit 报告要求的"真实 leader wire 捕获"。
+- 对照 codex(`handlers_relay.go:347-355`)和 claude(`:586-597`)的 file relay:它们都会在检测到活跃 turn 时合成 `turn_started`+`session_state_changed(running)` —— grok 的 leader relay 缺这步。
+- audit-plan 评审(`docs/2026-08-04-grok-external-turn-completing-state-fix-audit.md`)纠正了 v1 方案的事实错误("upstream 永不发 turn_completed"是错的)。
+
+### 修复(三层,MacBridge 单侧)
+- **改动 A(codec,主收口)**:`convertSessionUpdate` 加 `case "turn_completed"`,映射成 `EventResult{Done:true, TurnID:prompt_id}`;`error` stop_reason 转 `EventError`。`sessionUpdatePayload` 加 `PromptID`/`StopReason` 字段(兼容 `prompt_id`/`promptId` 两种 key)。`mapAgentEvent` 已把它转成 wire `turn_completed`,relay loop markIdle 自然生效。
+- **改动 B(relay,开始信号)**:`grokLeaderSessionRelayLoop` 在首个内容事件(`text_delta`/`reasoning_delta`/`tool_started`/`tool_finished`)前合成 `turn_started`(turnId 空)+ `session_state_changed(running)`,置 `turnArmed`。turnId 解耦(开始信号用空 ID,结束信号用 prompt_id),避免 ID 跳变。
+- **改动 C(relay,兜底)**:`defer` 里若 `turnArmed` 仍为 true(leader 异常断开,未收 turn_completed),补发 `session_state_changed(idle)` + markIdle。
+
+### 关键决策记录
+- **不动 `handlers.go:1824-1839`(Bug 4 补丁)**:它针对 iOS 本地发起路径(那条路径 `session.go:380` 自己 emit turn_started),与 leader relay loop 是独立路径。动它会重新引入 2026-07-12"卡执行中"回归。
+- **不动 iOS** `sessionSyncV2ProjectionBackend`(grok 被排除):grok 尚未迁移到 projection,是已知架构边界。iOS 对 wire 事件是 backend-agnostic 的,Mac 发对事件就能进入执行中。
+- **不动 capability**:保持 `requiresPollingForExternalTurns=true` 的 probe 并行兜底。
+
+### 验证
+- 定向测试:`go test ./agent/grokbuild/... -count=1`(15 通过,含 5 个新 turn_completed 变体)+ `go test ./go-bridge/... -count=1`(含 6 个新 grok leader relay 测试:合成/幂等/error/plan 不触发/defer idle/subscribe error)。
+- Release 构建 + 覆盖安装 `/Applications`(runtime commit `4218327f883a`,built `2026-08-04T13:43:50Z`),8777 监听者核对为正式版。
+- **待 owner 真机验收**:Mac 发起 Grok 任务 → iOS 输入框变"执行中";任务完成 → 恢复"完成态"(不卡执行中)。这是诚实边界——单测和部署不等于端到端成功。
+
+### 后续原则
+- **真实数据样本胜过静态推测**:audit 用上游源码静态分析发现"upstream 发 turn_completed",但本机 `updates.jsonl` 直接证实了 440 次 + 字段形状,是最短路径。排查协议类 bug 先 grep 本机持久化样本。
+- **turn 生命周期合成属 relay 层,不属 codec**:codec 是无状态 ACP→core.Event 映射;turn 开始/结束的 wire 语义合成发生在 relay loop(和 codex/claude 一致)。但 durable 终态信号的**映射**(把上游 turn_completed 转成 core.Event)属 codec——因为它是协议变体到事件的 1:1 转换。
+- **leader channel close ≠ turn 结束**:close 只表示 leader 断开。turn 结束的权威信号是上游 `turn_completed`。收口逻辑必须区分两者。
+
+
 
 ### 最终状态（后续 agent 先看此表）
 
@@ -713,3 +749,57 @@ Claude `prepareProjectionHydrateSource` 通过 agent `TranscriptPath` 查文件�
 - 仓库全量 Go 仍有两个独立既有失败：
   `TestScanCodexTranscriptRelayEventsToolsAndTokens`（Codex itemId）、
   `TestRegressionR1_LeaseAutoDowngrade`（lease expiry）；单独重跑仍失败，本轮不顺手改。
+
+## 2026-08-07：Codex archived session hydrate 失败
+
+`findSessionFile` 只扫 `~/.codex/sessions/`，Desktop archive 物理移动到
+`archived_sessions/` 后 cold hydrate 报 session file not found。
+修复：active 优先，archived fallback（`7baafd8`）。
+
+## 2026-08-12：Claude Desktop archive/delete 不消失（iOS 列表残留）
+
+### 现象
+owner 真机矩阵：Claude Code 模式下 Mac 端改名/新建/发消息都能同步，但 Mac 端
+Claude Desktop archive/delete 后，iOS 列表仍显示这些 session，重启 iOS App 也一样。
+
+### 根因（MacBridge 单侧，compatibility catalog 看不到 Desktop 私有状态）
+`claude_session_catalog.go` 只扫 `~/.claude/projects/**/*.jsonl`。Claude Desktop 3P
+（`claude-desktop-3p`）archive/delete **不改 JSONL 文件**：
+- archive：只把 `~/Library/Application Support/Claude-3p/claude-code-sessions/<acct>/<org>/local_*.json`
+  里的 `isArchived` 置 true；transcript 文件原样保留。
+- delete：只删自己的 `local_*.json` 并在同目录写 `deleted_<uuid>` tombstone；
+  transcript 文件也原样保留。
+
+日志证据（`~/Library/Logs/Claude-3p/main.log`，2026-08-12 00:12–00:17）：
+`LocalSessions.delete/archive` 与实际 `local_*.json` + `deleted_*` 一一对应；
+对应的 Chat JSONL 仍存在。
+
+### 修复
+新增 `claude_desktop_state.go`：读 Desktop 自己的纯数据文件（不碰 app.asar /
+私有 Electron API），把
+- `local_*.json isArchived=true` → 给对应 CLI transcript 打 `ArchivedAt`（文件 mtime），
+  catalog 照旧输出 `archivedAtMillis`，iOS/remote-web 既有过滤逻辑隐藏；
+- `deleted_*` tombstone → 直接从 catalog 排除对应 JSONL；
+- Desktop 文件 mtime 并入 `claudeSessionFingerprint`，archive/unarchive/delete 都能
+  让缓存失效并触发 `sessions_changed`。
+
+兼容两个 App Support 根：`Claude-3p/` 与 `Claude/`，并同时扫
+`claude-code-sessions/` 与 `local-agent-mode-sessions/`。解析失败时 fail-safe：
+不伪造结果，维持旧 JSONL 列表行为。
+
+### 验证
+- 定向单测：`TestClaudeSessionCatalogHonorsDesktopArchiveAndDelete`（archive 标记、
+  unarchive 失效、tombstone 排除与恢复）。
+- 本机真实状态校验（临时测试，未提交）：`91330136-…`（已 delete tombstone）不再列出；
+  `9e5bc559-…`（已 archive）带 `archivedAtMillis`。
+- 全量 `go test ./go-bridge/...` PASS；定向 race PASS。
+- Release 重建 + 覆盖安装 `/Applications/CordCodeLink.app`。
+
+### 诚实边界
+Desktop 存储格式是私有且可能随版本变化；这是兼容 catalog 的 best-effort，不是
+Claude 原生 catalog 同源。等 Claude 上游暴露稳定 catalog 接口后再迁移，不要把它
+当成 exact parity。
+
+### owner 复测（2026-08-12）
+真机复测反馈「基本符合预期」：Desktop archive/delete 后 iOS 列表能及时消失，
+unarchive 也能恢复；本轮修复闭环。

@@ -172,11 +172,15 @@ func extractParams(line []byte) json.RawMessage {
 
 // convertSessionUpdate converts an ACP session/update notification params to one or more core.Events.
 // params is the raw "params" field of the session/update notification:
-// {"sessionId":"...", "update": {"sessionUpdate":"agent_message_chunk", "content":{...}}}
+// {"sessionId":"...", "update": {"sessionUpdate":"agent_message_chunk", "content":{...}}, "_meta":{...}}
 func convertSessionUpdate(params json.RawMessage, sessionID string) []core.Event {
-	// First parse the outer wrapper to get the "update" field.
+	// First parse the outer wrapper to get the "update" field and the top-level _meta.
 	var outer struct {
 		Update sessionUpdatePayload `json:"update"`
+		Meta   struct {
+			PromptID    string `json:"promptId,omitempty"`
+			PromptIDRaw string `json:"prompt_id,omitempty"`
+		} `json:"_meta,omitempty"`
 	}
 	if err := json.Unmarshal(params, &outer); err != nil {
 		return []core.Event{{
@@ -187,33 +191,64 @@ func convertSessionUpdate(params json.RawMessage, sessionID string) []core.Event
 
 	p := outer.Update
 
+	// grok 流式 chunk 的稳定 turn/item 关联键 = params._meta.promptId, 与 turn_completed 的
+	// prompt_id 实测同值 (例如 "73494e8f-...")。SSV2 projection reducer 要求 text_delta /
+	// reasoning_delta / tool 携带 source-proven itemId/turnId, 否则 identityless 事件被直接 skip
+	// (projection_reducer.go:465/537/568/598); 同时 iOS 的 syncV2 连接 raw timeline 被 seal
+	// (projection_delivery.go), 只有 projection patch 能到 iOS。因此必须把 promptId 透传成
+	// ItemID/TurnID, reducer 才会接受并 flush patch。tool_call 的 toolCallId 是 per-tool 稳定 id,
+	// 独立作 RequestID (tool_started/tool_finished 的 itemId)。
+	promptID := outer.Meta.PromptID
+	if promptID == "" {
+		promptID = outer.Meta.PromptIDRaw
+	}
+
 	switch p.SessionUpdate {
 	case "agent_message_chunk":
-		if p.Content != nil {
-			return []core.Event{{
-				Type:    core.EventText,
-				Content: p.Content.Text,
-			}}
+		if !p.hasContent() {
+			return nil
 		}
-		return nil
+		return []core.Event{{
+			Type:    core.EventText,
+			Content: p.contentText(),
+			ItemID:  promptID,
+			TurnID:  promptID,
+		}}
 
 	case "agent_thought_chunk":
-		if p.Content != nil {
-			return []core.Event{{
-				Type:    core.EventThinking,
-				Content: p.Content.Text,
-			}}
+		if !p.hasContent() {
+			return nil
 		}
-		return nil
+		return []core.Event{{
+			Type:    core.EventThinking,
+			Content: p.contentText(),
+			ItemID:  promptID,
+			TurnID:  promptID,
+		}}
 
 	case "user_message_chunk":
-		// User message echo — not forwarded to iOS.
-		return nil
+		// 外部 turn 的用户 prompt 回显 (真实 updates.jsonl: 只带 promptIndex, 不带
+		// promptId)。必须转成 EventUserMessage 交给 relay loop 缓冲, 否则 iOS 只能
+		// 看到回复看不到 prompt。turn 身份 (promptId) 由同 turn 首个内容事件到达时
+		// 补齐 (见 grokLeaderSessionRelayLoop), 这里不合成任何身份。
+		if !p.hasContent() {
+			return nil
+		}
+		text := strings.TrimSpace(p.contentText())
+		if text == "" {
+			return nil
+		}
+		return []core.Event{{
+			Type:    core.EventUserMessage,
+			Content: text,
+		}}
 
 	case "tool_call":
 		ev := core.Event{
-			Type:     core.EventToolUse,
-			ToolName: p.Title,
+			Type:      core.EventToolUse,
+			ToolName:  p.Title,
+			TurnID:    promptID,
+			RequestID: p.ToolCallID,
 		}
 		if p.Status == "completed" {
 			success := true
@@ -239,6 +274,8 @@ func convertSessionUpdate(params json.RawMessage, sessionID string) []core.Event
 				ToolName:    p.Title,
 				ToolStatus:  p.Status,
 				ToolSuccess: &success,
+				RequestID:   p.ToolCallID,
+				TurnID:      promptID,
 			}}
 		}
 		return nil
@@ -274,6 +311,37 @@ func convertSessionUpdate(params json.RawMessage, sessionID string) []core.Event
 		"available_commands_update", "config_option_update":
 		// Internal state updates — not forwarded as events.
 		return nil
+
+	case "turn_completed":
+		// 上游 durable 终态信号 (x.ai/session_notification, 无 isReplay → 进 leader live rail)。
+		// prompt_id 是跨重连的 turn 关联键 (resolvedPromptID 兼容 promptId/prompt_id 两种 key);
+		// stop_reason 区分正常结束与异常。映射成 EventResult{Done:true}, mapAgentEvent 会把它转成
+		// wire turn_completed, grokLeaderSessionRelayLoop 的 markIdle 分支据此收口。
+		promptID := p.resolvedPromptID()
+		switch p.StopReason {
+		case "error":
+			// 上游报错 → 转 wire error (终态), iOS 显示真实失败而非假完成。
+			return []core.Event{{
+				Type:    core.EventError,
+				Content: "grok turn error",
+				Done:    true,
+				TurnID:  promptID,
+			}}
+		case "cancelled":
+			return []core.Event{{
+				Type:    core.EventResult,
+				Done:    true,
+				TurnID:  promptID,
+				Content: "cancelled",
+			}}
+		default:
+			// end_turn / rate_limit / 空 → 正常完成。
+			return []core.Event{{
+				Type:   core.EventResult,
+				Done:   true,
+				TurnID: promptID,
+			}}
+		}
 
 	default:
 		// Unknown update type — log for diagnostics but do NOT emit an error

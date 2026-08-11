@@ -51,6 +51,42 @@ func TestObservationIncludeRunningSignalsAllowsUnlistedMilestonesOnly(t *testing
 	}
 }
 
+func TestObservationRebindSessionIDRewritesPendingAlias(t *testing.T) {
+	om := NewObservationManager()
+	om.SetScope("dev_1", ObservationScope{
+		BackendID:    "codex",
+		SessionIDs:   []string{"pending-abc", "other"},
+		DeliveryMode: scopeFullStream,
+		LeaseSeconds: 90,
+	})
+	n := om.RebindSessionID("codex", "pending-abc", "real-thread-1")
+	if n != 1 {
+		t.Fatalf("rewritten scopes = %d, want 1", n)
+	}
+	scope := om.GetScope("dev_1", "codex")
+	if scope == nil {
+		t.Fatal("scope missing after rebind")
+	}
+	// pending replaced; real present once; other kept
+	got := map[string]bool{}
+	for _, sid := range scope.SessionIDs {
+		got[sid] = true
+	}
+	if got["pending-abc"] {
+		t.Fatalf("pending id still in scope: %#v", scope.SessionIDs)
+	}
+	if !got["real-thread-1"] || !got["other"] {
+		t.Fatalf("scope SessionIDs = %#v, want real-thread-1 + other", scope.SessionIDs)
+	}
+	// ShouldSendEvent must accept the real session for full_stream content.
+	if !om.ShouldSendEvent("dev_1", "codex", "real-thread-1", "projection_patch") {
+		t.Fatal("projection_patch for real id must pass after observation rebind")
+	}
+	if om.ShouldSendEvent("dev_1", "codex", "pending-abc", "projection_patch") {
+		t.Fatal("pending id must no longer match after rebind")
+	}
+}
+
 func TestSetObservationScopeRPCRequiresAuthenticatedDeviceAndStoresScope(t *testing.T) {
 	h := NewHandlers()
 	defer h.Shutdown(context.Background())

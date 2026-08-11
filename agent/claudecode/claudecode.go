@@ -75,6 +75,10 @@ type Agent struct {
 	pinStore *pinstore.Store
 }
 
+func (a *Agent) StructuredUserInputReady() bool {
+	return StructuredUserInputReady
+}
+
 var claudeProviderManagedEnvVars = map[string]struct{}{
 	"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST":                  {},
 	"CLAUDE_CODE_USE_BEDROCK":                               {},
@@ -314,8 +318,17 @@ func (a *Agent) configuredModels() []core.ModelOption {
 }
 
 func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
-	// 优先用 ~/.claude/settings.json 的别名映射（owner 网关场景的权威源）。
-	// 详见 docs/2026-06-30-claudecode-models-from-settings-json.md。
+	// custom 网关场景（Claude Code Router 或 ANTHROPIC_BASE_URL 非空）：settingsModels 的 3-slot
+	// 别名只是 owner 子集映射（haiku/sonnet/opus → 当前 *_MODEL_NAME），网关 /v1/models 才是完整模型源
+	//（含 GLM/DeepSeek 等）。故不短路 alias，合并 alias + fetchModelsFromAPI（去重，alias 优先保留 Desc）。
+	// 官方 anthropic 场景（无网关）：settingsModels 是权威源（owner 别名映射），保持短路。
+	// 详见 docs/2026-06-30-claudecode-models-from-settings-json.md + t3code-adoption-plan §5.1 缺口4。
+	if a.usesCustomGateway() {
+		if models := a.mergeGatewayModels(ctx); len(models) > 0 {
+			return models
+		}
+		return defaultClaudeModels()
+	}
 	if models := a.settingsModels(); len(models) > 0 {
 		return models
 	}
@@ -325,6 +338,49 @@ func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
 	if models := a.fetchModelsFromAPI(ctx); len(models) > 0 {
 		return models
 	}
+	return defaultClaudeModels()
+}
+
+// usesCustomGateway 判定是否走 custom 网关：routerURL（Claude Code Router，agent 构造注入）
+// 或 ANTHROPIC_BASE_URL 环境变量非空。此时网关 /v1/models 是完整模型源（非官方默认端点）。
+func (a *Agent) usesCustomGateway() bool {
+	a.mu.RLock()
+	routerURL := a.routerURL
+	a.mu.RUnlock()
+	return routerURL != "" || os.Getenv("ANTHROPIC_BASE_URL") != ""
+}
+
+// mergeGatewayModels 合并 settingsModels（owner 3-slot 别名）与 fetchModelsFromAPI（网关 /v1/models
+// 全量）。按 Name 去重，alias 优先（保留其 Desc，避免被网关同名项覆盖显示名）。fetchModelsFromAPI
+// 无白名单，GLM/DeepSeek 等第三方 id 全可见。
+func (a *Agent) mergeGatewayModels(ctx context.Context) []core.ModelOption {
+	alias := a.settingsModels()
+	api := a.fetchModelsFromAPI(ctx)
+	if len(alias) == 0 {
+		return api
+	}
+	if len(api) == 0 {
+		return alias
+	}
+	seen := make(map[string]bool, len(alias)+len(api))
+	merged := make([]core.ModelOption, 0, len(alias)+len(api))
+	for _, m := range alias {
+		if !seen[m.Name] {
+			seen[m.Name] = true
+			merged = append(merged, m)
+		}
+	}
+	for _, m := range api {
+		if !seen[m.Name] {
+			seen[m.Name] = true
+			merged = append(merged, m)
+		}
+	}
+	return merged
+}
+
+// defaultClaudeModels 是无任何模型源（无 settings alias、无 provider、API 取不到）时的兜底。
+func defaultClaudeModels() []core.ModelOption {
 	return []core.ModelOption{
 		{Name: "sonnet", Desc: "Claude Sonnet (balanced)"},
 		{Name: "opus", Desc: "Claude Opus (most capable)"},
@@ -671,10 +727,17 @@ func (a *Agent) LiveSessionProcess(ctx context.Context, sessionID string) (core.
 	}
 	for _, stub := range stubs {
 		if stub.SessionID == sessionID {
+			live := procIdentityAlive(ctx, stub.PID, stub.Cwd)
+			if err := ctx.Err(); err != nil {
+				return core.LiveSessionProcess{SessionID: sessionID}, err
+			}
+			if !live {
+				continue
+			}
 			return core.LiveSessionProcess{
 				SessionID: stub.SessionID,
 				PID:       stub.PID,
-				Live:      procIdentityAlive(stub.PID, stub.Cwd),
+				Live:      true,
 			}, nil
 		}
 	}
@@ -705,7 +768,10 @@ func (a *Agent) GetRunningSessionIDs(ctx context.Context) (map[string]bool, erro
 		default:
 		}
 
-		if procIdentityAlive(stub.PID, stub.Cwd) {
+		if procIdentityAlive(ctx, stub.PID, stub.Cwd) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			// Default to false: if we cannot locate and inspect the transcript file,
 			// we cannot prove the session is still executing.  The old default of
 			// true caused sessions whose .jsonl was inaccessible (wrong project dir,
@@ -786,6 +852,7 @@ type transcriptHistoryEnvelope struct {
 	IsCompactSummary          bool                       `json:"isCompactSummary"`
 	IsVisibleInTranscriptOnly bool                       `json:"isVisibleInTranscriptOnly"`
 	CompactMetadata           *transcriptCompactMetadata `json:"compactMetadata"`
+	ToolUseResult             json.RawMessage            `json:"toolUseResult"`
 }
 
 type transcriptCompactMetadata struct {
@@ -830,6 +897,7 @@ type richHistoryMessageBuilder struct {
 	ThinkingSegments []string
 	Parts            []richHistoryPartBuilder
 	Steps            map[string]map[string]any
+	UserInputs       map[string]map[string]any
 	StepOrder        []string
 	ModelID          string
 	AgentName        string
@@ -844,10 +912,11 @@ type richHistoryPartBuilder struct {
 
 func newRichHistoryMessageBuilder(id, role string, timestamp time.Time) *richHistoryMessageBuilder {
 	return &richHistoryMessageBuilder{
-		ID:        id,
-		Role:      role,
-		Timestamp: timestamp,
-		Steps:     make(map[string]map[string]any),
+		ID:         id,
+		Role:       role,
+		Timestamp:  timestamp,
+		Steps:      make(map[string]map[string]any),
+		UserInputs: make(map[string]map[string]any),
 	}
 }
 
@@ -877,7 +946,73 @@ func (b *richHistoryMessageBuilder) addThinking(thinking string) {
 	})
 }
 
-func (b *richHistoryMessageBuilder) addToolUse(toolID, toolName string) string {
+func (b *richHistoryMessageBuilder) addStructuredUserInput(toolID string, input json.RawMessage) string {
+	toolID = strings.TrimSpace(toolID)
+	if toolID == "" {
+		return ""
+	}
+	if _, exists := b.UserInputs[toolID]; exists {
+		return toolID
+	}
+	interactionID := deriveClaudeInteractionID(toolID)
+	var decoded map[string]any
+	normalized := []core.UserInputQuestion(nil)
+	normalizeErr := json.Unmarshal(input, &decoded)
+	if normalizeErr == nil {
+		normalized, normalizeErr = normalizeClaudeUserQuestions(interactionID, parseUserQuestions(decoded))
+	}
+	status := string(core.UserInputStatusPending)
+	diagnosticCode := "observe_only"
+	if normalizeErr != nil || len(normalized) == 0 {
+		status = string(core.UserInputStatusFailed)
+		diagnosticCode = "invalid_backend_request"
+	}
+	part := map[string]any{
+		"type":           "user_input",
+		"itemId":         toolID,
+		"interactionId":  interactionID,
+		"status":         status,
+		"questions":      normalized,
+		"canRespond":     false,
+		"canReject":      false,
+		"diagnosticCode": diagnosticCode,
+	}
+	b.UserInputs[toolID] = part
+	b.Parts = append(b.Parts, richHistoryPartBuilder{Value: part})
+	return toolID
+}
+
+func (b *richHistoryMessageBuilder) resolveStructuredUserInput(toolID string, resolvedAt time.Time) bool {
+	part, ok := b.UserInputs[toolID]
+	if !ok {
+		return false
+	}
+	if part["status"] == string(core.UserInputStatusFailed) {
+		return true
+	}
+	part["status"] = string(core.UserInputStatusAnswered)
+	part["resolutionSource"] = "other_client"
+	if !resolvedAt.IsZero() {
+		part["resolvedAt"] = resolvedAt.UnixMilli()
+	}
+	return true
+}
+
+func hasStructuredUserInputAfter(builders []*richHistoryMessageBuilder, prior *richHistoryMessageBuilder) bool {
+	seenPrior := false
+	for _, builder := range builders {
+		if builder == prior {
+			seenPrior = true
+			continue
+		}
+		if seenPrior && len(builder.UserInputs) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *richHistoryMessageBuilder) addToolUse(toolID, toolName string, input json.RawMessage) string {
 	toolID = strings.TrimSpace(toolID)
 	if toolID == "" {
 		toolID = fmt.Sprintf("tool-%d", len(b.StepOrder)+1)
@@ -889,13 +1024,40 @@ func (b *richHistoryMessageBuilder) addToolUse(toolID, toolName string) string {
 	if toolName == "" {
 		toolName = "unknown"
 	}
+	// L-α (Phase 1C): preserve the tool input and derive a path-bearing title from it so
+	// cold-start hydration (and thus iOS) can show a file path for Edit/Write/Read/MultiEdit.
+	// Previously the title was hardcoded to toolName (claudecode.go:880-903), so even after the
+	// Phase 1A hydration passthrough, iOS extractPrimaryPath branch 2 failed (toolName has no '/').
+	// summarizeInput returns file_path for Edit/Write/Read and command for Bash — matching the
+	// live session.go path. When summarizeInput yields nothing, fall back to toolName (prior behavior).
+	title := toolName
+	toolInputValue := ""
+	var parsedInput any
+	if len(input) > 0 {
+		toolInputValue = string(input)
+		var decoded map[string]any
+		if err := json.Unmarshal(input, &decoded); err == nil {
+			parsedInput = decoded
+			if summarized := summarizeInput(toolName, decoded); strings.TrimSpace(summarized) != "" {
+				title = summarized
+			}
+		}
+	}
 	step := map[string]any{
 		"id":                             toolID,
 		"toolName":                       toolName,
-		"title":                          toolName,
+		"title":                          title,
 		"status":                         "unknown",
 		"requiresPermissionConfirmation": false,
 		"availablePermissionOptions":     []any{},
+	}
+	if toolInputValue != "" {
+		step["toolInput"] = toolInputValue
+	}
+	if parsedInput != nil {
+		// Keep the structured input available for downstream consumers (e.g. permission parsing,
+		// future fileChanges derivation). Hydration forwards toolInput as the string form.
+		step["input"] = parsedInput
 	}
 	b.Steps[toolID] = step
 	b.StepOrder = append(b.StepOrder, toolID)
@@ -1130,6 +1292,8 @@ func LoadClaudeRichHistoryFromReader(r io.Reader, path string) ([]core.RichHisto
 	assistantByMessageID := make(map[string]*richHistoryMessageBuilder)
 	toolOwners := make(map[string]*richHistoryMessageBuilder)
 	pendingToolResults := make(map[string]transcriptToolResult)
+	structuredInputOwners := make(map[string]*richHistoryMessageBuilder)
+	pendingStructuredInputResults := make(map[string]time.Time)
 	userByPromptID := make(map[string]*richHistoryMessageBuilder)
 	skipNextSkillInstruction := false
 	skipNextResumeNoResponse := false
@@ -1207,7 +1371,19 @@ func LoadClaudeRichHistoryFromReader(r io.Reader, path string) ([]core.RichHisto
 				case "thinking":
 					builder.addThinking(block.Thinking)
 				case "tool_use":
-					toolID := builder.addToolUse(block.ID, block.Name)
+					if strings.EqualFold(strings.TrimSpace(block.Name), "AskUserQuestion") {
+						toolID := builder.addStructuredUserInput(block.ID, block.Input)
+						if toolID == "" {
+							continue
+						}
+						structuredInputOwners[toolID] = builder
+						if resolvedAt, ok := pendingStructuredInputResults[toolID]; ok {
+							builder.resolveStructuredUserInput(toolID, resolvedAt)
+							delete(pendingStructuredInputResults, toolID)
+						}
+						continue
+					}
+					toolID := builder.addToolUse(block.ID, block.Name, block.Input)
 					toolOwners[toolID] = builder
 					if pending, ok := pendingToolResults[toolID]; ok {
 						builder.applyToolResult(toolID, pending)
@@ -1225,8 +1401,12 @@ func LoadClaudeRichHistoryFromReader(r io.Reader, path string) ([]core.RichHisto
 				if prior := userByPromptID[strings.TrimSpace(raw.PromptID)]; prior != nil {
 					// Claude records an accepted prompt and later an interrupt marker
 					// for the same promptId before moving the retry into a compact
-					// continuation file. Desktop hides that abandoned pair.
-					prior.Hidden = true
+					// continuation file. Desktop hides that abandoned pair. A prompt
+					// that already produced AskUserQuestion is not abandoned: Skip/Stop
+					// may append the same interrupt marker after the question result.
+					if !hasStructuredUserInputAfter(builders, prior) {
+						prior.Hidden = true
+					}
 				}
 				continue
 			}
@@ -1240,6 +1420,14 @@ func LoadClaudeRichHistoryFromReader(r io.Reader, path string) ([]core.RichHisto
 				switch block.Type {
 				case "tool_result":
 					if block.ToolUseID == "" {
+						continue
+					}
+					if HasStructuredUserInputResultEnvelope(raw.ToolUseResult) {
+						if owner, ok := structuredInputOwners[block.ToolUseID]; ok {
+							owner.resolveStructuredUserInput(block.ToolUseID, timestamp)
+						} else {
+							pendingStructuredInputResults[block.ToolUseID] = timestamp
+						}
 						continue
 					}
 					result := transcriptToolResult{

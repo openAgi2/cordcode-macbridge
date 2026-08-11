@@ -1,6 +1,7 @@
 package claudecode
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"io"
@@ -11,6 +12,69 @@ import (
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
+
+func TestProductionSessionStructuredInputHelperProcess(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		resumeID string
+		wantSID  string
+	}{
+		{name: "new", wantSID: "fixture-session"},
+		{name: "resume", resumeID: "fixture-session", wantSID: "fixture-session"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			cs, err := newClaudeSession(ctx, t.TempDir(), os.Args[0],
+				[]string{"-test.run=TestHelperProcess", "--", "structured-input-fixture"}, "",
+				"", "", tc.resumeID, "default", nil, nil,
+				[]string{"GO_WANT_HELPER_PROCESS=1"}, "", false, core.SpawnOptions{}, 0)
+			if err != nil {
+				t.Fatalf("newClaudeSession: %v", err)
+			}
+			defer func() { _ = cs.Close() }()
+
+			var requested core.Event
+			for requested.Type != core.EventUserInputRequested {
+				select {
+				case ev, ok := <-cs.Events():
+					if !ok {
+						t.Fatal("session exited before structured request")
+					}
+					requested = ev
+				case <-ctx.Done():
+					t.Fatal("timed out waiting for structured request")
+				}
+			}
+			if requested.SessionID != tc.wantSID || requested.TurnID != "assistant-tool-only" {
+				t.Fatalf("request identity = session %q turn %q", requested.SessionID, requested.TurnID)
+			}
+			// Destroy live identity before answering: resolution must use the turn captured in registry.
+			cs.activeMsgID.Store("")
+			cs.streamState.reset()
+			ui := requested.UserInput
+			answer := []core.UserInputAnswer{{QuestionID: ui.Questions[0].ID, Values: []core.UserInputValue{{Kind: core.UserInputValueOption, OptionID: ui.Questions[0].Options[0].ID}}}}
+			if _, err := cs.ResolveUserInput(ctx, ui.InteractionID, "f40f8934-8f3d-4e5f-a9b5-883b6a8f5147", core.UserInputActionAnswer, answer); err != nil {
+				t.Fatalf("ResolveUserInput: %v", err)
+			}
+			var resolved core.Event
+			for resolved.Type != core.EventUserInputResolved {
+				select {
+				case ev, ok := <-cs.Events():
+					if !ok {
+						t.Fatal("session exited before resolved event")
+					}
+					resolved = ev
+				case <-ctx.Done():
+					t.Fatal("timed out waiting for resolved event")
+				}
+			}
+			if resolved.TurnID != requested.TurnID {
+				t.Fatalf("resolved turn %q != owning turn %q", resolved.TurnID, requested.TurnID)
+			}
+		})
+	}
+}
 
 func TestHandleResultParsesUsage(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -268,6 +332,12 @@ func TestHelperProcess(t *testing.T) {
 	}
 
 	mode := os.Args[len(os.Args)-1]
+	for _, arg := range os.Args {
+		if arg == "structured-input-fixture" {
+			mode = arg
+			break
+		}
+	}
 	switch mode {
 	case "sleep":
 		time.Sleep(30 * time.Second)
@@ -278,6 +348,22 @@ func TestHelperProcess(t *testing.T) {
 		os.Exit(0)
 	case "stdin-eof-exit":
 		_, _ = io.Copy(io.Discard, os.Stdin)
+		os.Exit(0)
+	case "structured-input-fixture":
+		_, _ = os.Stdout.WriteString(`{"type":"system","session_id":"fixture-session"}` + "\n")
+		for i, arg := range os.Args {
+			if arg == "--resume" && i+1 < len(os.Args) {
+				_, _ = os.Stdout.WriteString(`{"type":"result","result":"history drained","session_id":"fixture-session"}` + "\n")
+				break
+			}
+		}
+		_, _ = os.Stdout.WriteString(`{"type":"stream_event","event":{"type":"message_start","message":{"id":"assistant-tool-only"}}}` + "\n")
+		_, _ = os.Stdout.WriteString(`{"type":"control_request","request_id":"fixture-request","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"question":"Retry?","header":"Build","multiSelect":false,"options":[{"label":"Retry","description":"Try again"},{"label":"Fail","description":"Stop"}]}]}}}` + "\n")
+		scanner := bufio.NewScanner(os.Stdin)
+		if !scanner.Scan() {
+			os.Exit(3)
+		}
+		_, _ = os.Stdout.WriteString(`{"type":"result","result":"done","session_id":"fixture-session"}` + "\n")
 		os.Exit(0)
 	default:
 		os.Exit(2)

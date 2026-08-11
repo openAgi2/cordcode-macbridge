@@ -166,6 +166,10 @@ type appServerSession struct {
 
 	sawDelta sync.Map // key: itemId (string), value: bool — 标记已收到 delta 的 item
 
+	// userInputReg 持有结构化用户输入（item/tool/requestUserInput）的 pending 状态机。
+	// 只保存完成 backend response 所需的原始 identity，不写 protocol/普通日志/答案正文。
+	userInputReg *userInputRegistry
+
 	runtimeMu sync.RWMutex
 	usage     *core.UsageReport
 	context   *core.ContextUsage
@@ -185,18 +189,19 @@ func newAppServerSession(ctx context.Context, url, transport, workDir, model, ef
 		transport = appServerTransportStdio
 	}
 	s := &appServerSession{
-		url:       url,
-		transport: transport,
-		workDir:   workDir,
-		model:     model,
-		effort:    effort,
-		mode:      mode,
-		extraEnv:  append([]string(nil), extraEnv...),
-		codexHome: strings.TrimSpace(codexHome),
-		events:    make(chan core.Event, 128),
-		ctx:       sessionCtx,
-		cancel:    cancel,
-		pending:   make(map[int64]chan rpcResponseEnvelope),
+		url:          url,
+		transport:    transport,
+		workDir:      workDir,
+		model:        model,
+		effort:       effort,
+		mode:         mode,
+		extraEnv:     append([]string(nil), extraEnv...),
+		codexHome:    strings.TrimSpace(codexHome),
+		events:       make(chan core.Event, 128),
+		ctx:          sessionCtx,
+		cancel:       cancel,
+		pending:      make(map[int64]chan rpcResponseEnvelope),
+		userInputReg: newUserInputRegistry(),
 	}
 	s.alive.Store(true)
 
@@ -834,22 +839,56 @@ func (s *appServerSession) handleRPCMessage(data []byte) {
 		return
 	}
 
-	if _, ok := probe["id"]; ok {
+	// §8.1 envelope classification by field combination（不靠“有 id 即 response”）。
+	// 当前 schema 已证：server request = method+id+params；response = id+result/error（无 method）。
+	_, hasMethod := probe["method"]
+	_, hasID := probe["id"]
+	_, hasResult := probe["result"]
+	_, hasError := probe["error"]
+
+	switch classifyRPCEnvelope(hasMethod, hasID, hasResult, hasError) {
+	case envelopeServerRequest:
+		var req struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if err := json.Unmarshal(data, &req); err != nil {
+			slog.Debug("codex app-server: bad server request envelope", "error", err)
+			return
+		}
+		s.handleServerRequest(req.Method, req.ID, req.Params)
+	case envelopeNotification:
+		var notif rpcNotificationEnvelope
+		if err := json.Unmarshal(data, &notif); err != nil {
+			slog.Debug("codex app-server: bad notification envelope", "error", err)
+			return
+		}
+		s.handleNotification(notif.Method, notif.Params)
+	case envelopeResponse:
 		var resp rpcResponseEnvelope
 		if err := json.Unmarshal(data, &resp); err != nil {
 			slog.Debug("codex app-server: bad response envelope", "error", err)
 			return
 		}
 		s.handleResponse(resp)
-		return
+	default:
+		slog.Warn("codex app-server: unclassifiable JSON-RPC envelope; ignored",
+			"has_method", hasMethod, "has_id", hasID, "has_result", hasResult, "has_error", hasError)
 	}
+}
 
-	var notif rpcNotificationEnvelope
-	if err := json.Unmarshal(data, &notif); err != nil {
-		slog.Debug("codex app-server: bad notification envelope", "error", err)
-		return
+// handleServerRequest 分发 app-server 发来的 JSON-RPC server request（method+id）。
+// 当前唯一受支持的 method 是 item/tool/requestUserInput（§8.1）。未知 method 回 JSON-RPC
+// method_not_found error 以免 server 永久挂起，并记 diagnostic 日志。
+func (s *appServerSession) handleServerRequest(method string, id json.RawMessage, params json.RawMessage) {
+	switch method {
+	case "item/tool/requestUserInput":
+		s.handleRequestUserInput(id, params)
+	default:
+		slog.Warn("codex app-server: unhandled server request method", "method", method)
+		s.respondServerError(id, -32601, "method not found: "+method)
 	}
-	s.handleNotification(notif.Method, notif.Params)
 }
 
 func (s *appServerSession) stderrLoop(r io.Reader) {
@@ -1051,6 +1090,41 @@ func (s *appServerSession) handleNotification(method string, paramsRaw json.RawM
 				QuestionOpts: opts,
 				Required:     required,
 				ThreadID:     strings.TrimSpace(threadID),
+			})
+		}
+
+	case "serverRequest/resolved":
+		// §8.3：Mac/其他端先回答 → backend 发 {requestId, threadId}。
+		// 该 notification 只带 requestId，不足以重派生 interactionId，故走 registry 反查索引。
+		var notif struct {
+			RequestID any    `json:"requestId"`
+			ThreadID  string `json:"threadId"`
+		}
+		if err := json.Unmarshal(paramsRaw, &notif); err != nil {
+			slog.Debug("codex app-server: serverRequest/resolved parse failed", "error", err)
+			break
+		}
+		_, canonical, ok := codexRequestIDType(notif.RequestID)
+		if !ok {
+			slog.Debug("codex app-server: serverRequest/resolved requestId not string|int64")
+			break
+		}
+		iid, found := s.userInputReg.LookupByRequestID(canonical)
+		if !found {
+			// 未知/已清理的 request：可能是本端未注册的请求，幂等忽略（不发第二 revision）。
+			slog.Debug("codex app-server: serverRequest/resolved for unknown request", "requestId", canonical)
+			break
+		}
+		if s.userInputReg.MarkExternallyResolved(iid) {
+			// 状态实际变化才发 resolved（本端已解决时为幂等确认，无第二 revision/第二 part）。
+			s.emit(core.Event{
+				Type:      core.EventUserInputResolved,
+				SessionID: strings.TrimSpace(notif.ThreadID),
+				UserInput: &core.UserInputInteraction{
+					InteractionID:    iid,
+					Status:           core.UserInputStatusAnswered,
+					ResolutionSource: "backend",
+				},
 			})
 		}
 	}
@@ -1782,8 +1856,21 @@ func (s *appServerSession) writeJSON(v any) error {
 }
 
 func (s *appServerSession) writeMessage(data []byte) error {
-	s.writeMu.Lock()
+	return s.writeMessageContext(context.Background(), data)
+}
+
+func (s *appServerSession) writeMessageContext(ctx context.Context, data []byte) error {
+	for !s.writeMu.TryLock() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Millisecond):
+		}
+	}
 	defer s.writeMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	s.procMu.Lock()
 	conn := s.conn
@@ -1795,6 +1882,10 @@ func (s *appServerSession) writeMessage(data []byte) error {
 		if conn == nil {
 			return fmt.Errorf("codex app-server websocket is closed")
 		}
+		if deadline, ok := ctx.Deadline(); ok {
+			_ = conn.SetWriteDeadline(deadline)
+			defer conn.SetWriteDeadline(time.Time{})
+		}
 		if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 			return fmt.Errorf("codex app-server websocket write: %w", err)
 		}
@@ -1803,6 +1894,12 @@ func (s *appServerSession) writeMessage(data []byte) error {
 
 	if stdin == nil {
 		return fmt.Errorf("codex app-server connection is closed")
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		if deadlineWriter, ok := stdin.(interface{ SetWriteDeadline(time.Time) error }); ok {
+			_ = deadlineWriter.SetWriteDeadline(deadline)
+			defer deadlineWriter.SetWriteDeadline(time.Time{})
+		}
 	}
 
 	if _, err := stdin.Write(append(data, '\n')); err != nil {

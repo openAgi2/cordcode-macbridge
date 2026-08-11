@@ -2,6 +2,7 @@ package gobridge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,55 +13,111 @@ import (
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
-func TestSessionIDSet(t *testing.T) {
-	set := sessionIDSet([]core.AgentSessionInfo{
-		{ID: "s1"}, {ID: " s2 "}, {ID: ""}, {ID: "s1"}, // dup + empty + trimmed
-	})
-	if len(set) != 2 || !set["s1"] || !set["s2"] {
-		t.Fatalf("set = %v, want {s1, s2} (empty dropped, trimmed, deduped)", set)
-	}
+func discoveryCodexAgent(t *testing.T, base *fakeAgent) *fakeCodexCatalogAgent {
+	t.Helper()
+	withCodexRootsDisabled(t)
+	workspace := t.TempDir()
+	return &fakeCodexCatalogAgent{fakeAgent: base, fetchFn: func(_ context.Context, _ string) ([]core.AgentSessionInfo, error) {
+		if base.listHook != nil {
+			base.listHook()
+		}
+		if base.sessionListErr != nil {
+			return nil, base.sessionListErr
+		}
+		infos := append([]core.AgentSessionInfo(nil), base.sessionInfos...)
+		for index := range infos {
+			if infos[index].Directory == "" {
+				infos[index].Directory = workspace
+			}
+		}
+		return infos, nil
+	}}
 }
 
-func TestDiffNewSessions(t *testing.T) {
-	prev := map[string]bool{"a": true, "b": true}
-	current := map[string]bool{"a": true, "b": true, "c": true, "d": true}
-	got := diffNewSessions(prev, current)
-	if len(got) != 2 {
-		t.Fatalf("diff = %v, want 2 new (c,d)", got)
+type discoveryHintState struct {
+	mu           sync.Mutex
+	expanded     bool
+	headCalls    int
+	headErrors   int
+	fullCalls    int
+	headSeeded   chan struct{}
+	headSeedOnce sync.Once
+	workspace    string
+}
+
+type discoveryHintCodexAgent struct {
+	*fakeCodexCatalogAgent
+	state *discoveryHintState
+}
+
+type discoveryFastGrokState struct {
+	mu        sync.Mutex
+	expanded  bool
+	errors    int
+	calls     int
+	seeded    chan struct{}
+	seedOnce  sync.Once
+	workspace string
+}
+
+type discoveryFastGrokAgent struct {
+	*fakeAgent
+	state *discoveryFastGrokState
+}
+
+func (a *discoveryFastGrokAgent) FetchSessionList(context.Context) ([]core.AgentSessionInfo, error) {
+	a.state.mu.Lock()
+	defer a.state.mu.Unlock()
+	a.state.calls++
+	a.state.seedOnce.Do(func() { close(a.state.seeded) })
+	if a.state.errors > 0 {
+		a.state.errors--
+		return nil, errors.New("transient Grok native catalog failure")
 	}
-	for _, id := range got {
-		if id != "c" && id != "d" {
-			t.Fatalf("unexpected new id %q", id)
-		}
+	infos := []core.AgentSessionInfo{{ID: "g1", Summary: "one", Directory: a.state.workspace}}
+	if a.state.expanded {
+		infos = append([]core.AgentSessionInfo{{ID: "g2", Summary: "two", Directory: a.state.workspace}}, infos...)
 	}
-	// No growth → no diff.
-	if diff := diffNewSessions(current, current); len(diff) != 0 {
-		t.Fatalf("diff of equal sets = %v, want empty", diff)
+	return infos, nil
+}
+
+func (a *discoveryHintCodexAgent) FetchThreadListHead(context.Context, string, int) ([]core.AgentSessionInfo, error) {
+	a.state.mu.Lock()
+	defer a.state.mu.Unlock()
+	a.state.headCalls++
+	if a.state.headErrors > 0 {
+		a.state.headErrors--
+		return nil, errors.New("transient native head failure")
 	}
-	// Removed sessions are not "new".
-	if diff := diffNewSessions(current, prev); len(diff) != 0 {
-		t.Fatalf("diff on shrink = %v, want empty (removals are not new)", diff)
+	a.state.headSeedOnce.Do(func() { close(a.state.headSeeded) })
+	infos := []core.AgentSessionInfo{{ID: "s1", Summary: "one", Directory: a.state.workspace}}
+	if a.state.expanded {
+		infos = append([]core.AgentSessionInfo{{ID: "s2", Summary: "two", Directory: a.state.workspace}}, infos...)
 	}
+	return infos, nil
 }
 
 // TestSessionDiscoveryBroadcastsOnNewSession: watcher detects a new session ID
 // across snapshots and broadcasts "sessions_changed" to a subscribed client.
+//
+// Phase 7 §442：change detection 现由 catalog fingerprint 驱动（seen 为 backend→fingerprint）。
+// 新增 session 改写 fingerprint → 触发 sessions_changed。
 func TestSessionDiscoveryBroadcastsOnNewSession(t *testing.T) {
 	prev := sessionDiscoveryInterval
 	sessionDiscoveryInterval = 10 * time.Millisecond
 	t.Cleanup(func() { sessionDiscoveryInterval = prev })
 
 	handlers := newTestHandlers(t)
-	agent := &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1"}}}
+	agent := discoveryCodexAgent(t, &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1"}}})
 	handlers.RegisterAgent("codex", agent)
 	serverConn, clientConn, cleanup := openTestConn(t)
 	t.Cleanup(cleanup)
 	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "codex", SessionID: "list-view"})
 
-	seen := map[string]map[string]bool{}
+	seen := map[string]string{}
 	// Seed (s1) — no broadcast.
 	handlers.snapshotSessions(context.Background(), seen, true)
-	// New session s2 appears.
+	// New session s2 appears → fingerprint changes.
 	agent.sessionInfos = []core.AgentSessionInfo{{ID: "s1"}, {ID: "s2"}}
 	handlers.snapshotSessions(context.Background(), seen, false)
 
@@ -80,6 +137,472 @@ func TestSessionDiscoveryBroadcastsOnNewSession(t *testing.T) {
 	}
 }
 
+func TestSessionDiscoveryBlockedBackendDoesNotStarveCodex(t *testing.T) {
+	previousInterval := sessionDiscoveryInterval
+	sessionDiscoveryInterval = 10 * time.Millisecond
+	withCodexRootsDisabled(t)
+
+	handlers := newTestHandlers(t)
+	blockedStarted := make(chan struct{})
+	releaseBlocked := make(chan struct{})
+	var blockOnce sync.Once
+	handlers.RegisterAgent("grokbuild", &fakeGrokCatalogAgent{
+		fakeAgent: &fakeAgent{name: "grokbuild"},
+		fetchFn: func(context.Context) ([]core.AgentSessionInfo, error) {
+			blockOnce.Do(func() { close(blockedStarted) })
+			<-releaseBlocked
+			return nil, errors.New("released blocked provider")
+		},
+	})
+
+	workspace := t.TempDir()
+	var stateMu sync.Mutex
+	expanded := false
+	codexSeeded := make(chan struct{})
+	var seedOnce sync.Once
+	codex := &fakeCodexCatalogAgent{
+		fakeAgent: &fakeAgent{name: "codex"},
+		fetchFn: func(context.Context, string) ([]core.AgentSessionInfo, error) {
+			stateMu.Lock()
+			defer stateMu.Unlock()
+			seedOnce.Do(func() { close(codexSeeded) })
+			infos := []core.AgentSessionInfo{{ID: "s1", Summary: "one", Directory: workspace}}
+			if expanded {
+				infos = append(infos, core.AgentSessionInfo{ID: "s2", Summary: "two", Directory: workspace})
+			}
+			return infos, nil
+		},
+	}
+	handlers.RegisterAgent("codex", codex)
+
+	serverConn, clientConn, cleanup := openTestConn(t)
+	t.Cleanup(cleanup)
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "codex", SessionID: "list-view"})
+	ctx, cancel := context.WithCancel(context.Background())
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		handlers.runSessionDiscovery(ctx)
+	}()
+	t.Cleanup(func() {
+		close(releaseBlocked)
+		cancel()
+		select {
+		case <-watcherDone:
+		case <-time.After(time.Second):
+			t.Error("session discovery watcher did not stop")
+		}
+		sessionDiscoveryInterval = previousInterval
+	})
+
+	select {
+	case <-blockedStarted:
+	case <-time.After(time.Second):
+		t.Fatal("blocking backend worker did not start")
+	}
+	select {
+	case <-codexSeeded:
+	case <-time.After(time.Second):
+		t.Fatal("Codex seed was starved by blocking backend")
+	}
+	stateMu.Lock()
+	expanded = true
+	stateMu.Unlock()
+
+	msg := readJSONMaps(t, clientConn, 1)[0]
+	if msg["event"] != "sessions_changed" || msg["backendId"] != "codex" {
+		t.Fatalf("Codex refresh event=%#v", msg)
+	}
+}
+
+func TestSessionDiscoveryCodexHeadHintTriggersAuthoritativeRefresh(t *testing.T) {
+	previousInterval := sessionDiscoveryInterval
+	previousHintInterval := codexDiscoveryHintInterval
+	sessionDiscoveryInterval = time.Hour
+	codexDiscoveryHintInterval = 10 * time.Millisecond
+	withCodexRootsDisabled(t)
+
+	state := &discoveryHintState{
+		headErrors: 2,
+		headSeeded: make(chan struct{}),
+		workspace:  t.TempDir(),
+	}
+	base := &fakeCodexCatalogAgent{fakeAgent: &fakeAgent{name: "codex"}}
+	base.fetchFn = func(context.Context, string) ([]core.AgentSessionInfo, error) {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		state.fullCalls++
+		infos := []core.AgentSessionInfo{{ID: "s1", Summary: "one", Directory: state.workspace}}
+		if state.expanded {
+			infos = append([]core.AgentSessionInfo{{ID: "s2", Summary: "two", Directory: state.workspace}}, infos...)
+		}
+		return infos, nil
+	}
+	agent := &discoveryHintCodexAgent{fakeCodexCatalogAgent: base, state: state}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	t.Cleanup(cleanup)
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "codex", SessionID: "list-view"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		handlers.runSessionDiscovery(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-watcherDone:
+		case <-time.After(time.Second):
+			t.Error("session discovery watcher did not stop")
+		}
+		sessionDiscoveryInterval = previousInterval
+		codexDiscoveryHintInterval = previousHintInterval
+	})
+
+	select {
+	case <-state.headSeeded:
+	case <-time.After(time.Second):
+		t.Fatal("Codex native head probe did not recover and seed")
+	}
+	// Head errors and a stable head must not start another full native walk.
+	time.Sleep(30 * time.Millisecond)
+	state.mu.Lock()
+	fullBeforeChange := state.fullCalls
+	state.expanded = true
+	state.mu.Unlock()
+	if fullBeforeChange != 1 {
+		t.Fatalf("stable/error head probes caused %d full fetches, want seed only", fullBeforeChange)
+	}
+
+	msg := readJSONMaps(t, clientConn, 1)[0]
+	if msg["event"] != "sessions_changed" || msg["backendId"] != "codex" {
+		t.Fatalf("Codex hint-triggered refresh event=%#v", msg)
+	}
+	state.mu.Lock()
+	fullAfterChange := state.fullCalls
+	state.mu.Unlock()
+	if fullAfterChange != 2 {
+		t.Fatalf("head change full fetches=%d, want seed + one authoritative refresh", fullAfterChange)
+	}
+}
+
+func TestSessionDiscoveryGrokFastCadencePublishesAfterErrorsAndFences(t *testing.T) {
+	previousInterval := sessionDiscoveryInterval
+	previousFastInterval := grokDiscoveryFastInterval
+	sessionDiscoveryInterval = time.Hour
+	grokDiscoveryFastInterval = 10 * time.Millisecond
+
+	state := &discoveryFastGrokState{seeded: make(chan struct{}), workspace: t.TempDir()}
+	agent := &discoveryFastGrokAgent{fakeAgent: &fakeAgent{name: "grokbuild"}, state: state}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("grokbuild", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	t.Cleanup(cleanup)
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "grokbuild", SessionID: "list-view"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		handlers.runSessionDiscovery(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-watcherDone:
+		case <-time.After(time.Second):
+			t.Error("session discovery watcher did not stop")
+		}
+		sessionDiscoveryInterval = previousInterval
+		grokDiscoveryFastInterval = previousFastInterval
+	})
+
+	select {
+	case <-state.seeded:
+	case <-time.After(time.Second):
+		t.Fatal("Grok discovery did not seed")
+	}
+	// Warm a declared snapshot so the fast change path must fence it before publishing.
+	cache := handlers.grokCatalogWireCache()
+	scope := grokCatalogScopeKey("grokbuild")
+	calls := 0
+	if _, err := cache.FetchOrReuse(scope, builderFromMaps(synthWireMaps(2), &calls)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Stable fast scans do not publish. Two transient errors must preserve the last-good
+	// fingerprint/cache; the first successful recovery observes g2 and publishes exactly once.
+	time.Sleep(20 * time.Millisecond)
+	state.mu.Lock()
+	state.errors = 2
+	state.expanded = true
+	state.mu.Unlock()
+	msg := readJSONMaps(t, clientConn, 1)[0]
+	if msg["event"] != "sessions_changed" || msg["backendId"] != "grokbuild" {
+		t.Fatalf("Grok fast refresh event=%#v", msg)
+	}
+	if cache.Peek(scope) != nil {
+		t.Fatal("Grok fast refresh published before fencing the old snapshot")
+	}
+	state.mu.Lock()
+	gotCalls := state.calls
+	state.mu.Unlock()
+	if gotCalls < 5 { // seed + stable + two errors + recovery
+		t.Fatalf("Grok native calls=%d, want seed/stable/errors/recovery chain", gotCalls)
+	}
+
+	if err := clientConn.SetReadDeadline(time.Now().Add(50 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	var duplicate map[string]any
+	if err := clientConn.ReadJSON(&duplicate); err == nil {
+		t.Fatalf("stable Grok membership published duplicate event: %#v", duplicate)
+	}
+}
+
+func TestSessionDiscoveryGrokFastCadenceRequiresActiveConnection(t *testing.T) {
+	previousInterval := sessionDiscoveryInterval
+	previousFastInterval := grokDiscoveryFastInterval
+	sessionDiscoveryInterval = time.Hour
+	grokDiscoveryFastInterval = 10 * time.Millisecond
+
+	state := &discoveryFastGrokState{seeded: make(chan struct{}), workspace: t.TempDir()}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("grokbuild", &discoveryFastGrokAgent{
+		fakeAgent: &fakeAgent{name: "grokbuild"},
+		state:     state,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		handlers.runSessionDiscovery(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-watcherDone:
+		case <-time.After(time.Second):
+			t.Error("session discovery watcher did not stop")
+		}
+		sessionDiscoveryInterval = previousInterval
+		grokDiscoveryFastInterval = previousFastInterval
+	})
+
+	select {
+	case <-state.seeded:
+	case <-time.After(time.Second):
+		t.Fatal("Grok discovery did not seed")
+	}
+	time.Sleep(40 * time.Millisecond)
+	state.mu.Lock()
+	gotCalls := state.calls
+	state.mu.Unlock()
+	if gotCalls != 1 {
+		t.Fatalf("disconnected Grok fast cadence made %d calls, want seed only", gotCalls)
+	}
+}
+
+func TestSessionDiscoveryControlPlanePublisherCapabilityMatrix(t *testing.T) {
+	handlers := newTestHandlers(t)
+	agent := discoveryCodexAgent(t, &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1"}}})
+	handlers.RegisterAgent("codex", agent)
+
+	type capabilityCase struct {
+		name          string
+		sessionSyncV2 bool
+		catalogV2     bool
+		conn          *publisherCaptureConn
+	}
+	cases := []capabilityCase{
+		{name: "legacy-undeclared", conn: newPublisherCaptureConn(nil)},
+		{name: "legacy-catalog-v2", catalogV2: true, conn: newPublisherCaptureConn(nil)},
+		{name: "sync-v2-undeclared", sessionSyncV2: true, conn: newPublisherCaptureConn(nil)},
+		{name: "sync-v2-catalog-v2", sessionSyncV2: true, catalogV2: true, conn: newPublisherCaptureConn(nil)},
+	}
+	for _, item := range cases {
+		handlers.broadcaster.RegisterConn(item.conn)
+		handlers.eventPublisher.RegisterConnection(item.conn)
+		handlers.eventPublisher.SetConnSyncV2(item.conn, item.sessionSyncV2)
+		handlers.eventPublisher.SetConnCatalogCursorEpochV2(item.conn, item.catalogV2)
+	}
+
+	seen := map[string]string{}
+	handlers.snapshotSessions(context.Background(), seen, true)
+	agent.sessionInfos = []core.AgentSessionInfo{{ID: "s1"}, {ID: "s2"}}
+	handlers.snapshotSessions(context.Background(), seen, false)
+
+	for _, item := range cases {
+		item.conn.waitCount(t, 1)
+		frames := item.conn.snapshot()
+		if len(frames) != 1 {
+			t.Fatalf("%s received %d frames, want exactly one", item.name, len(frames))
+		}
+		msg, ok := frames[0].(EventMessage)
+		if !ok || msg.Event != "sessions_changed" || msg.BackendID != "codex" || msg.SessionID != "" ||
+			msg.Seq != 1 || msg.EventID != msg.BridgeEpoch+":1" || !msg.Replayable {
+			t.Fatalf("%s frame=%#v", item.name, frames[0])
+		}
+		item.conn.mu.Lock()
+		classes := append([]relayOutboundClass(nil), item.conn.classes...)
+		item.conn.mu.Unlock()
+		if len(classes) != 1 || classes[0] != classifyRelayEvent("sessions_changed") {
+			t.Fatalf("%s classes=%v", item.name, classes)
+		}
+	}
+
+	replay := handlers.eventPublisher.EventBuffer().Replay("codex", "", BridgeSessionCut{})
+	if replay.Disposition != ReplayAvailable || len(replay.Events) != 1 || replay.Events[0].Event != "sessions_changed" {
+		t.Fatalf("control-plane replay=%+v", replay)
+	}
+	if _, ok := handlers.eventPublisher.ProjectionReducer().Snapshot("codex", ""); ok {
+		t.Fatal("sessions_changed entered the legacy projection reducer")
+	}
+	if _, ok := handlers.projectionKernel.Snapshot("codex", ""); ok {
+		t.Fatal("sessions_changed entered the Projection Kernel")
+	}
+}
+
+func TestSessionDiscoveryFencesCatalogBeforeBroadcastAndForcesRebuild(t *testing.T) {
+	handlers := newTestHandlers(t)
+	agent := discoveryCodexAgent(t, &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1"}}})
+	handlers.RegisterAgent("codex", agent)
+	cache := handlers.codexCatalogWireCache()
+	scope := codexCatalogScopeKey("codex", "")
+	oldMaps := []map[string]interface{}{
+		{"id": "old-a", "updatedAtMillis": int64(2)},
+		{"id": "old-b", "updatedAtMillis": int64(1)},
+	}
+	calls := 0
+	page0, stale, err := cache.pageV2(scope, "", 1, builderFromMaps(oldMaps, &calls))
+	if err != nil || stale != nil {
+		t.Fatalf("warm page0 err=%v stale=%v", err, stale)
+	}
+	oldCursor := page0["nextCursor"].(string)
+
+	conn := newPublisherCaptureConn(nil)
+	handlers.broadcaster.RegisterConn(conn)
+	handlers.eventPublisher.RegisterConnection(conn)
+	seen := map[string]string{}
+	handlers.snapshotSessions(context.Background(), seen, true)
+	agent.sessionInfos = []core.AgentSessionInfo{{ID: "s1"}, {ID: "s2"}}
+	handlers.snapshotSessions(context.Background(), seen, false)
+	conn.waitCount(t, 1)
+
+	if cache.Peek(scope) != nil {
+		t.Fatal("sessions_changed was observable before the old snapshot was fenced")
+	}
+	if _, stale, err := cache.pageV2(scope, oldCursor, 1, builderFromMaps(nil, &calls)); err != nil || stale == nil || stale.Code != "cursor_stale" {
+		t.Fatalf("old cursor after notification stale=%+v err=%v", stale, err)
+	}
+	newMaps := []map[string]interface{}{{"id": "new-member", "updatedAtMillis": int64(3)}}
+	rebuilt, stale, err := cache.pageV2(scope, "", 10, builderFromMaps(newMaps, &calls))
+	if err != nil || stale != nil {
+		t.Fatalf("rebuild err=%v stale=%v", err, stale)
+	}
+	got := rebuilt["sessions"].([]map[string]interface{})
+	if len(got) != 1 || got[0]["id"] != "new-member" {
+		t.Fatalf("post-notification page0 reused old snapshot: %#v", got)
+	}
+}
+
+func TestSessionDiscoveryErrorSkipsFenceButSuccessEmptyFences(t *testing.T) {
+	handlers := newTestHandlers(t)
+	agent := discoveryCodexAgent(t, &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1"}}})
+	handlers.RegisterAgent("codex", agent)
+	cache := handlers.codexCatalogWireCache()
+	scope := codexCatalogScopeKey("codex", "")
+	calls := 0
+	if _, err := cache.FetchOrReuse(scope, builderFromMaps(synthWireMaps(2), &calls)); err != nil {
+		t.Fatal(err)
+	}
+	conn := newPublisherCaptureConn(nil)
+	handlers.broadcaster.RegisterConn(conn)
+	handlers.eventPublisher.RegisterConnection(conn)
+	seen := map[string]string{}
+	handlers.snapshotSessions(context.Background(), seen, true)
+
+	agent.sessionListErr = errors.New("native unavailable")
+	handlers.snapshotSessions(context.Background(), seen, false)
+	if cache.Peek(scope) == nil || len(conn.snapshot()) != 0 {
+		t.Fatal("error poll fenced cache, updated seen, or broadcast")
+	}
+
+	agent.sessionListErr = nil
+	agent.sessionInfos = nil
+	handlers.snapshotSessions(context.Background(), seen, false)
+	conn.waitCount(t, 1)
+	if cache.Peek(scope) != nil {
+		t.Fatal("successful empty catalog did not fence prior snapshot")
+	}
+}
+
+// TestSessionDiscoveryFiresOnUpdatedAtOnlyChange：Phase 7 §442 关键新能力——fingerprint 覆盖
+// id|updatedAtMillis，故「既有 session 收到新 turn → updatedAt 变，但 ID 集合不变」也触发
+// sessions_changed。旧 ID-set diff 会漏掉这种情况（列表 recency 不刷新）。本测试钉死：相同 ID
+// 集合 {s1}，仅 s1 的 ModifiedAt 前进 → 必须 broadcast。
+func TestSessionDiscoveryFiresOnUpdatedAtOnlyChange(t *testing.T) {
+	prev := sessionDiscoveryInterval
+	sessionDiscoveryInterval = 10 * time.Millisecond
+	t.Cleanup(func() { sessionDiscoveryInterval = prev })
+
+	handlers := newTestHandlers(t)
+	t0 := time.Unix(1_700_000_000, 0).UTC()
+	agent := discoveryCodexAgent(t, &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1", ModifiedAt: t0}}})
+	handlers.RegisterAgent("codex", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	t.Cleanup(cleanup)
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "codex", SessionID: "list-view"})
+
+	seen := map[string]string{}
+	handlers.snapshotSessions(context.Background(), seen, true)
+	// Same ID set {s1}, only ModifiedAt advances. ID-set diff would see no change;
+	// fingerprint (id|updatedAtMillis) must change → sessions_changed.
+	agent.sessionInfos = []core.AgentSessionInfo{{ID: "s1", ModifiedAt: t0.Add(1 * time.Hour)}}
+	handlers.snapshotSessions(context.Background(), seen, false)
+
+	if err := clientConn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	var payload map[string]any
+	if err := clientConn.ReadJSON(&payload); err != nil {
+		t.Fatalf("expected sessions_changed on updatedAt-only change (§442 fingerprint): %v", err)
+	}
+	if got := payload["event"]; got != "sessions_changed" {
+		t.Fatalf("event = %#v, want sessions_changed (updatedAt change must fire via fingerprint)", got)
+	}
+}
+
+// TestSessionDiscoveryDoesNotBroadcastOnNoChange：fingerprint 未变 → 不广播（无新/删除/更新）。
+func TestSessionDiscoveryDoesNotBroadcastOnNoChange(t *testing.T) {
+	prev := sessionDiscoveryInterval
+	sessionDiscoveryInterval = 10 * time.Millisecond
+	t.Cleanup(func() { sessionDiscoveryInterval = prev })
+
+	handlers := newTestHandlers(t)
+	agent := discoveryCodexAgent(t, &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{{ID: "s1"}}})
+	handlers.RegisterAgent("codex", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	t.Cleanup(cleanup)
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "codex", SessionID: "list-view"})
+
+	seen := map[string]string{}
+	handlers.snapshotSessions(context.Background(), seen, true)
+	// Same sessions, same ModifiedAt → identical fingerprint → no broadcast.
+	handlers.snapshotSessions(context.Background(), seen, false)
+
+	if err := clientConn.SetReadDeadline(time.Now().Add(200 * time.Millisecond)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	var payload map[string]any
+	if err := clientConn.ReadJSON(&payload); err == nil {
+		t.Fatalf("unexpected sessions_changed on no-change snapshot (fingerprint stable): %#v", payload)
+	}
+}
+
 // TestSessionDiscoverySurvivesPanicAndStillBroadcasts: if ListSessions (or the
 // snapshot walk) panics, the watcher goroutine must recover and keep emitting
 // sessions_changed on later polls. This pins the production root cause: the
@@ -89,25 +612,30 @@ func TestSessionDiscoveryBroadcastsOnNewSession(t *testing.T) {
 func TestSessionDiscoverySurvivesPanicAndStillBroadcasts(t *testing.T) {
 	prev := sessionDiscoveryInterval
 	sessionDiscoveryInterval = 10 * time.Millisecond
-	t.Cleanup(func() { sessionDiscoveryInterval = prev })
+	withCodexRootsDisabled(t)
 
 	handlers := newTestHandlers(t)
-	// listHook: seed poll completes normally (records seen=s1); the FIRST regular
-	// poll panics, then all subsequent polls succeed. The watcher must recover and
+	// The seed poll completes normally (records seen=s1); the FIRST regular poll
+	// panics, then all subsequent polls succeed. The watcher must recover and
 	// still broadcast sessions_changed once s2 appears — proving it did not die.
+	workspace := t.TempDir()
 	callCount := 0
+	expanded := false
 	var mu sync.Mutex
-	agent := &fakeAgent{
-		name:         "codex",
-		sessionInfos: []core.AgentSessionInfo{{ID: "s1"}},
-		listHook: func() {
+	agent := &fakeCodexCatalogAgent{
+		fakeAgent: &fakeAgent{name: "codex"},
+		fetchFn: func(context.Context, string) ([]core.AgentSessionInfo, error) {
 			mu.Lock()
+			defer mu.Unlock()
 			callCount++
-			n := callCount
-			mu.Unlock()
-			if n == 2 { // first non-seed poll panics once
+			if callCount == 2 { // first non-seed poll panics once
 				panic("simulated transcript parse failure")
 			}
+			infos := []core.AgentSessionInfo{{ID: "s1", Directory: workspace}}
+			if expanded {
+				infos = append(infos, core.AgentSessionInfo{ID: "s2", Directory: workspace})
+			}
+			return infos, nil
 		},
 	}
 	handlers.RegisterAgent("codex", agent)
@@ -116,13 +644,27 @@ func TestSessionDiscoverySurvivesPanicAndStillBroadcasts(t *testing.T) {
 	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "codex", SessionID: "list-view"})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	handlers.StartSessionDiscoveryWatcher(ctx)
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		handlers.runSessionDiscovery(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-watcherDone:
+		case <-time.After(time.Second):
+			t.Error("session discovery watcher did not stop")
+		}
+		sessionDiscoveryInterval = prev
+	})
 
 	// After the seed (s1) and the panicking poll, add s2. The recovered watcher
 	// must still detect the growth on a later poll and broadcast sessions_changed.
 	time.Sleep(60 * time.Millisecond) // let seed + panic poll happen
-	agent.sessionInfos = []core.AgentSessionInfo{{ID: "s1"}, {ID: "s2"}}
+	mu.Lock()
+	expanded = true
+	mu.Unlock()
 
 	if err := clientConn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
 		t.Fatalf("set read deadline: %v", err)
@@ -163,8 +705,9 @@ func TestSessionDiscoveryClaudeUsesGlobalCatalog(t *testing.T) {
 	if err := os.Mkdir(projectDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	elsewhereWorkspace := catalogFixtureWorkspace(t, projectsDir, "someuser-elsewhere")
 	writeClaudeCatalogFixture(t, filepath.Join(projectDir, "claude-abc.jsonl"),
-		"/Users/someuser/elsewhere", "elsewhere session", "2026-07-30T10:00:00Z")
+		elsewhereWorkspace, "elsewhere session", "2026-07-30T10:00:00Z")
 	catalog := newClaudeSessionCatalog(projectsDir)
 	handlers.claudeSessions = catalog
 
@@ -191,8 +734,9 @@ func TestSessionDiscoveryClaudeUsesGlobalCatalog(t *testing.T) {
 	if err := os.Mkdir(otherProject, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	app2Workspace := catalogFixtureWorkspace(t, projectsDir, "someuser-app2")
 	writeClaudeCatalogFixture(t, filepath.Join(otherProject, "claude-def.jsonl"),
-		"/Users/someuser/app2", "app2 session", "2026-07-30T10:05:00Z")
+		app2Workspace, "app2 session", "2026-07-30T10:05:00Z")
 
 	if err := clientConn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
 		t.Fatalf("set read deadline: %v", err)
@@ -227,8 +771,9 @@ func TestSessionDiscoveryFiresOnArchive(t *testing.T) {
 	if err := os.Mkdir(projectDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	workspace := catalogFixtureWorkspace(t, projectsDir, "someuser-work")
 	writeClaudeCatalogFixture(t, filepath.Join(projectDir, "claude-xyz.jsonl"),
-		"/Users/someuser/work", "to be archived", "2026-07-30T11:00:00Z")
+		workspace, "to be archived", "2026-07-30T11:00:00Z")
 	handlers.claudeSessions = newClaudeSessionCatalog(projectsDir)
 	handlers.RegisterAgent("claude", &fakeAgent{name: "claudecode", sessionInfos: nil})
 
@@ -255,8 +800,9 @@ func TestSessionDiscoveryFiresOnArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The archive must remove the session from the poller's set (archived excluded)
-	// → diffRemovedSessions fires → sessions_changed reaches the client.
+	// The archive must remove the session from the poller's visible set (archived
+	// excluded) → fingerprint changes → sessions_changed reaches the client.
+	// (Phase 7 §442: fingerprint-over-visible; archive shrinks visible → fingerprint 变。)
 	if err := clientConn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
 		t.Fatalf("set read deadline: %v", err)
 	}
@@ -279,8 +825,9 @@ func TestClaudeCatalogSurfacesArchivedAtMillis(t *testing.T) {
 	if err := os.Mkdir(projectDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	ws := catalogFixtureWorkspace(t, projectsDir, "someuser-work")
 	writeClaudeCatalogFixture(t, filepath.Join(projectDir, "claude-xyz.jsonl"),
-		"/Users/someuser/work", "work session", "2026-07-30T11:00:00Z")
+		ws, "work session", "2026-07-30T11:00:00Z")
 
 	catalog := newClaudeSessionCatalog(projectsDir)
 

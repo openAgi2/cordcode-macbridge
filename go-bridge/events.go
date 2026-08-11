@@ -198,6 +198,42 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 			"result":     ev.Content,
 		}, false
 
+	case core.EventUserInputRequested:
+		// Structured user input v2 (design §10.1). Projects once through the Kernel as a
+		// user_input part; status=pending (normal) or failed (malformed questions, still
+		// projected once with canRespond=false). turnId/itemId carry source-proven attribution
+		// the reducer requires to attach the part (identityless frames are dropped upstream).
+		if ev.UserInput == nil {
+			return "", nil, false
+		}
+		ui := ev.UserInput
+		return "user_input_requested", eventData(ev, map[string]interface{}{
+			"turnId":         ev.TurnID,
+			"itemId":         ev.ItemID,
+			"interactionId":  ui.InteractionID,
+			"status":         string(ui.Status),
+			"questions":      userInputQuestionsToWire(ui.Questions),
+			"canRespond":     ui.CanRespond,
+			"canReject":      ui.CanReject,
+			"expiresAt":      ui.ExpiresAt,
+			"diagnosticCode": ui.DiagnosticCode,
+		}), false
+
+	case core.EventUserInputResolved:
+		// Resolved in place; projection carries no answer text. source ∈ ios|mac|other_client|backend.
+		if ev.UserInput == nil {
+			return "", nil, false
+		}
+		ui := ev.UserInput
+		return "user_input_resolved", eventData(ev, map[string]interface{}{
+			"turnId":        ev.TurnID,
+			"itemId":        ev.ItemID,
+			"interactionId": ui.InteractionID,
+			"status":        string(ui.Status),
+			"source":        ui.ResolutionSource,
+			"resolvedAt":    ui.ResolvedAt,
+		}), false
+
 	default:
 		slog.Debug("go-bridge: unhandled event type", "type", ev.Type)
 		return "", nil, false
@@ -238,6 +274,46 @@ func fileChangesToWire(changes []core.FileChange) []map[string]interface{} {
 		result = append(result, item)
 	}
 	return result
+}
+
+func userInputOptionsToWire(options []core.UserInputOption) []map[string]interface{} {
+	out := make([]map[string]interface{}, 0, len(options))
+	for _, o := range options {
+		opt := map[string]interface{}{
+			"id":    o.ID,
+			"label": o.Label,
+		}
+		if o.Description != "" {
+			opt["description"] = o.Description
+		}
+		out = append(out, opt)
+	}
+	return out
+}
+
+// userInputQuestionsToWire serializes the canonical core.UserInputQuestion slice to the wire shape
+// consumed by go-bridge events.go (user_input_requested) and the projection reducer. Mirrors the
+// ProjectionPart.UserInputQuestions vocabulary (design §6.1/§10.1) and the iOS Swift / message-web
+// mirror types: each question carries id / header? / prompt / answerMode / options[{id,label,
+// description?}] / allowsCustomAnswer / isSecret / required.
+func userInputQuestionsToWire(questions []core.UserInputQuestion) []interface{} {
+	out := make([]interface{}, 0, len(questions))
+	for _, q := range questions {
+		entry := map[string]interface{}{
+			"id":                 q.ID,
+			"prompt":             q.Prompt,
+			"answerMode":         string(q.AnswerMode),
+			"options":            userInputOptionsToWire(q.Options),
+			"allowsCustomAnswer": q.AllowsCustomAnswer,
+			"isSecret":           q.IsSecret,
+			"required":           q.Required,
+		}
+		if q.Header != "" {
+			entry["header"] = q.Header
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 func todosToWire(todos []core.Todo) []map[string]interface{} {

@@ -70,8 +70,8 @@ func TestProjectionRPCTraceCorrelatesReceiveHydrateAndEnqueue(t *testing.T) {
 			t.Fatalf("stage %s lost correlation fields: %+v", stage, record)
 		}
 	}
-	if got := stages["hydrate_ready"]["headRev"]; got != float64(2) {
-		t.Fatalf("hydrate_ready headRev = %#v, want 2", got)
+	if got := stages["hydrate_ready"]["headRev"]; got != float64(1) {
+		t.Fatalf("hydrate_ready headRev = %#v, want 1 (turn_started no longer commits)", got)
 	}
 	if got := stages["response_enqueue"]["outcome"]; got != "snapshot" {
 		t.Fatalf("response_enqueue outcome = %#v, want snapshot", got)
@@ -84,7 +84,7 @@ func TestProjectionRPCTraceCorrelatesReceiveHydrateAndEnqueue(t *testing.T) {
 		if got := record["connectionGeneration"]; got != float64(1) {
 			t.Fatalf("%s connectionGeneration = %#v, want 1", stage, got)
 		}
-		if got := record["cutRev"]; got != float64(2) {
+		if got := record["cutRev"]; got != float64(1) {
 			t.Fatalf("%s cutRev = %#v, want 2", stage, got)
 		}
 	}

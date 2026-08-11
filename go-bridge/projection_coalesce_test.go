@@ -22,8 +22,8 @@ func TestCoalesceMixedContentInOnePatch(t *testing.T) {
 	if !ok {
 		t.Fatal("expected a coalesced patch")
 	}
-	if patch.SyncRev != 6 {
-		t.Fatalf("syncRev = %d, want 6", patch.SyncRev)
+	if patch.SyncRev != 5 {
+		t.Fatalf("syncRev = %d, want 5 (turn_started no longer commits skeleton)", patch.SyncRev)
 	}
 
 	// One append_text carrying concatenated text deltas.
@@ -61,7 +61,7 @@ func TestCoalesceBufferIsInternalNotDistributed(t *testing.T) {
 	r.Apply(ev(2, "codex", "s1", "text_delta", map[string]interface{}{"itemId": "T1", "delta": "x"}))
 
 	first, ok := r.FlushPatch("codex", "s1")
-	if !ok || first.SyncRev != 2 {
+	if !ok || first.SyncRev != 1 {
 		t.Fatalf("first flush = %+v ok=%v", first, ok)
 	}
 	// No new activity → second flush is empty (buffer was cleared; no separate distribution).
@@ -70,7 +70,7 @@ func TestCoalesceBufferIsInternalNotDistributed(t *testing.T) {
 	}
 	// Snapshot still returns the authoritative full state (buffer is internal, projection persists).
 	proj, _ := r.Snapshot("codex", "s1")
-	if proj.SyncRev != 2 || len(proj.Turns) != 1 {
+	if proj.SyncRev != 1 || len(proj.Turns) != 1 {
 		t.Fatalf("snapshot after flush = %+v", proj)
 	}
 }

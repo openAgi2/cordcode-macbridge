@@ -49,7 +49,19 @@ type RelayDeviceConn struct {
 
 	// requestClasses is populated when an inbound Relay RPC is admitted and
 	// consumed exactly once by SendResult, keeping handler call sites unchanged.
-	requestClasses         map[string]relayOutboundClass
+	requestClasses map[string]relayOutboundClass
+	// requestMethods 存 inbound 请求的 method（R1.5），用于 SendResult 判断是否为 cancelable allowlist
+	// （read_file_v2）以安装 cancel handle。registerRequestClass 记录，SendResult 消费一次。
+	requestMethods map[string]string
+	// requestBulkCorrelations 存 read_file_v2 inbound 请求预绑定的 bulkCorrelationId（R1.4），
+	// 由 registerRequestClass 在 admit 时记录，SendResult chunk 路径消费一次。
+	requestBulkCorrelations map[string]string
+	// requestBulkHandles 存 read_file_v2 chunked result 的 OutboundBulkHandle（R1.5），
+	// 由 SendResult 在创建 chunk group 时按 requestId 安装，cancel_request_v1 查找并 Cancel()，
+	// group 完成 / 单帧 result / error 时清理。
+	requestBulkHandles map[string]*OutboundBulkHandle
+	// bulkCorrelations 是该 device/generation 的 correlation registry（active/retired + caps）。
+	bulkCorrelations       *BulkCorrelationRegistry
 	inboundScheduler       *relayInboundScheduler
 	sessionBulkGenerations map[string]uint64
 	bulkRequestContexts    map[string]relayBulkRequestContext
@@ -59,6 +71,9 @@ type RelayDeviceConn struct {
 	closed         bool
 	outboundGzip   bool
 	outboundChunks bool
+	// outboundChunkProgress：client 已 ack relay_chunk_progress_v1（R1.4）。默认 false =>
+	// 即便请求带 bulkCorrelationId 也不 stamp correlated chunk（base 兼容；iOS 未升级时不破坏 AAD）。
+	outboundChunkProgress bool
 
 	// lastActivity 记录最后一次从该 device 收到有效数据的时间（unix nano）。
 	// 由 handleInboundEnvelope 在解密成功后更新；心跳循环据此做半开检测：
@@ -69,9 +84,14 @@ type RelayDeviceConn struct {
 var _ Connection = (*RelayDeviceConn)(nil)
 
 const (
-	relayGzipCapability   = "relay_gzip_v1"
-	relayChunksCapability = "relay_chunks_v1"
-	relayGzipThreshold    = 32 * 1024
+	relayGzipCapability          = "relay_gzip_v1"
+	relayChunksCapability        = "relay_chunks_v1"
+	relayChunkProgressCapability = "relay_chunk_progress_v1" // R1.4 §3.6.4：read_file_v2 request-aware bulk correlation
+	relayCancelCapability        = "cancel_request_v1"       // R1.5 §3.6.4：read_file_v2 bulk cancel control RPC
+	relayGzipThreshold           = 32 * 1024
+	// R1.4 correlation registry caps（A0 冻结前保守值）。
+	relayBulkCorrelationMaxActive  = 32
+	relayBulkCorrelationMaxRetired = 64
 )
 
 func (rc *RelayDeviceConn) channelGeneration() uint64 {
@@ -92,18 +112,22 @@ func NewRelayDeviceConn(
 	sendEnvelope func(json.RawMessage) error,
 ) *RelayDeviceConn {
 	rc := &RelayDeviceConn{
-		deviceID:               deviceID,
-		bridgeID:               bridgeID,
-		routeID:                routeID,
-		generation:             generation,
-		device:                 device,
-		macToIosKey:            macToIosKey,
-		iosToMacKey:            iosToMacKey,
-		sendEnvelope:           sendEnvelope,
-		requestClasses:         make(map[string]relayOutboundClass),
-		sessionBulkGenerations: make(map[string]uint64),
-		bulkRequestContexts:    make(map[string]relayBulkRequestContext),
-		activeBulkHandles:      make(map[string]*OutboundBulkHandle),
+		deviceID:                deviceID,
+		bridgeID:                bridgeID,
+		routeID:                 routeID,
+		generation:              generation,
+		device:                  device,
+		macToIosKey:             macToIosKey,
+		iosToMacKey:             iosToMacKey,
+		sendEnvelope:            sendEnvelope,
+		requestClasses:          make(map[string]relayOutboundClass),
+		requestMethods:          make(map[string]string),
+		requestBulkCorrelations: make(map[string]string),
+		requestBulkHandles:      make(map[string]*OutboundBulkHandle),
+		bulkCorrelations:        NewBulkCorrelationRegistry(relayBulkCorrelationMaxActive, relayBulkCorrelationMaxRetired),
+		sessionBulkGenerations:  make(map[string]uint64),
+		bulkRequestContexts:     make(map[string]relayBulkRequestContext),
+		activeBulkHandles:       make(map[string]*OutboundBulkHandle),
 	}
 	// 双方向 counter 从 1 开始
 	rc.sendCounter.Store(1)
@@ -134,13 +158,49 @@ func (rc *RelayDeviceConn) setOutboundWriter(writer *relayOutboundWriter) {
 	rc.mu.Unlock()
 }
 
-func (rc *RelayDeviceConn) registerRequestClass(requestID, method string) {
+func (rc *RelayDeviceConn) registerRequestClass(requestID, method string, bulkCorrelationID string) {
 	if requestID == "" {
 		return
 	}
 	rc.mu.Lock()
 	rc.requestClasses[requestID] = classifyRelayRequest(method)
+	rc.requestMethods[requestID] = method
+	// R1.4：仅 read_file_v2（本期 correlation allowlist）且 client 已 ack progress capability
+	// 时才记录 correlation；否则不 stamp correlated chunk（base 兼容）。
+	if method == "read_file_v2" && bulkCorrelationID != "" && rc.outboundChunkProgress {
+		rc.requestBulkCorrelations[requestID] = bulkCorrelationID
+	}
 	rc.mu.Unlock()
+}
+
+// negotiateRelayChunkProgress 在 client hello 声明 relay_chunk_progress_v1 时启用 correlated
+// bulk chunk（R1.4）。progress ⇒ chunks（依赖关系由 client 保证：不会只 ack progress 不 ack chunks）。
+func negotiateRelayChunkProgress(conn Connection, capabilities []string) bool {
+	rc, ok := conn.(*RelayDeviceConn)
+	if !ok {
+		return false
+	}
+	for _, capability := range capabilities {
+		if capability == relayChunkProgressCapability {
+			rc.mu.Lock()
+			rc.outboundChunkProgress = true
+			rc.mu.Unlock()
+			return true
+		}
+	}
+	return false
+}
+
+// negotiateRelayCancel 在 client hello 声明 cancel_request_v1 时回显该能力（R1.5）。
+// Mac echo 后 iOS 才发送 cancel_request_v1 control RPC。Mac handler 不硬拒——allowlist（仅
+// read_file_v2）由 handle 安装门控，device/generation 绑定由 per-conn map 保证。
+func negotiateRelayCancel(_ Connection, capabilities []string) bool {
+	for _, capability := range capabilities {
+		if capability == relayCancelCapability {
+			return true
+		}
+	}
+	return false
 }
 
 func (rc *RelayDeviceConn) cleanupSupersededRequest(requestID string) {
@@ -334,17 +394,7 @@ func gzipPayload(payload []byte) ([]byte, error) {
 
 // SendResult 发送带 requestId 的 result 回复。
 func (rc *RelayDeviceConn) SendResult(requestID string, data interface{}, err *WireError) {
-	resp := map[string]interface{}{
-		"type":      "result",
-		"requestId": requestID,
-	}
-	if err != nil {
-		resp["ok"] = false
-		resp["error"] = err
-	} else {
-		resp["ok"] = true
-		resp["data"] = data
-	}
+	resp := resultEnvelope(requestID, data, err)
 	plaintext, marshalErr := json.Marshal(resp)
 	if marshalErr != nil {
 		slog.Error("relay-conn: marshal result", "device", rc.deviceID, "requestId", requestID, "error", marshalErr)
@@ -353,8 +403,13 @@ func (rc *RelayDeviceConn) SendResult(requestID string, data interface{}, err *W
 	rc.mu.Lock()
 	class, ok := rc.requestClasses[requestID]
 	delete(rc.requestClasses, requestID)
+	method := rc.requestMethods[requestID]
+	delete(rc.requestMethods, requestID)
 	bulkContext, hasBulkContext := rc.bulkRequestContexts[requestID]
 	delete(rc.bulkRequestContexts, requestID)
+	// R1.4：取出 read_file_v2 预绑定的 bulkCorrelationId（仅 progress capability acked 时非空）。
+	bulkCorrelationID := rc.requestBulkCorrelations[requestID]
+	delete(rc.requestBulkCorrelations, requestID)
 	writer := rc.writer
 	closed := rc.closed
 	outboundGzip := rc.outboundGzip
@@ -403,13 +458,34 @@ func (rc *RelayDeviceConn) SendResult(requestID string, data interface{}, err *W
 				slog.Info("relay bulk superseded before submit", "device", rc.deviceID, "requestId", requestID, "sessionId", bulkContext.sessionID, "stale_handler_elapsed_ms", durationMillis(time.Since(bulkContext.startedAt)), "serialized_bytes", len(plaintext))
 				return
 			}
+			// R1.4：correlated chunk（read_file_v2 + progress acked）原子登记 correlation。
+			// duplicate/reuse/busy 都是 strict failure：close transport generation（无安全 owner，禁匿名 drain）。
+			if bulkCorrelationID != "" {
+				admitted, reason := rc.bulkCorrelations.PutIfAbsent(bulkCorrelationID)
+				if !admitted {
+					handle.Cancel()
+					if hasBulkContext {
+						rc.completeBulkHandle(bulkContext.sessionID, handle)
+					}
+					slog.Warn("relay bulk correlation rejected; closing generation", "device", rc.deviceID, "requestId", requestID, "reason", reason)
+					_ = rc.Close()
+					return
+				}
+			}
 			job := &relayOutboundJob{
 				conn: rc, payload: plaintext, contentEncoding: contentEncoding,
 				cursor: &relayChunkCursor{
 					groupID: groupID, count: count, chunkBytes: chunkBytes, handle: handle,
 					sessionID: bulkContext.sessionID, sessionGeneration: bulkContext.generation,
 					channelGeneration: channelGeneration, expiresAt: time.Now().Add(relayBulkCursorMaxAge),
+					bulkCorrelationID: bulkCorrelationID,
+					requestID:         requestID,
 				},
+			}
+			// R1.5：read_file_v2（cancel allowlist）的 chunked result 把 handle 按 requestId 登记，
+			// 供 cancel_request_v1 查找并 Cancel()。base/correlated 通用；cancel capability 在 handler 门控。
+			if method == "read_file_v2" {
+				rc.installRequestBulkHandle(requestID, handle)
 			}
 			if writeErr := writer.admitBulk(job); writeErr != nil {
 				handle.Cancel()

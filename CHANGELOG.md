@@ -8,6 +8,24 @@
 
 ## [Unreleased]
 
+- **Codex/Grok session 目录与原生客户端保持同源并主动刷新**：CordCode Link 的已声明 v2 列表、旧客户端 v1 列表和后台 `sessions_changed` 探测现在共用各 backend 的原生可见成员集；目录清空、标题/排序/工作区变化会先使旧分页快照失效，再通知 iPhone 刷新。Codex/Grok 不再用磁盘扫描补齐原生列表，旧客户端仍保留 v1 cursor 成功契约；OpenCode/Claude compatibility 未删除。控制面通知不进入 session timeline，原生读取错误会保留上次成功状态并等待恢复，不伪造空列表。
+
+- **文件读取协议硬切为 `read_file_v2`**：CordCode Link 删除旧 `read_file` 的 dispatch、scope、capability、Relay 分类、codec 与 fixture，只保留带 workspace/session owner 的严格授权读取。旧客户端调用旧方法会收到统一 `method_not_found`；Relay 仅将 v2 归入 bulk，并继续支持分块、公平调度与取消。iOS/Web 同步移除 fallback 与旧 API，最低兼容版本随此次变更抬升。
+
+- **RPC 按方法鉴权 scope（§6.3）**：每个后端 RPC 映射到 7 个 scope 之一（`session.read`/`session.write`/`config.read`/`config.write`/`workspace.read`/`workspace.mutate`/`delivery.manage`），`go-bridge/rpc_scopes.go` 为单一真相源。校验落在 `CapabilityPolicy.AuthorizeRPC`（HandleRPC 单一漏斗，先于 dispatchRPC 与所有 switch 外方法路由）。配对设备默认拥有全部 scope（向后兼容，不改变现有授权语义）；受限调用返回稳定错误码 `forbidden`。新增 RPC 必须声明 scope，否则 CI guard `TestEveryDispatchedRPCHasScope` 编译期失败。
+- **hello/hello_ack 携带 scope（§6.3 additive）**：`hello` 增可选 `requestedScopes`，`hello_ack` 增可选 `grantedScopes`（回显设备实际拥有的 scope），供客户端 UI gating；旧 client 不受影响。`TrustedDeviceRecord` 增 `grantedScopes` 字段，nil/空视作默认全集。
+- **Driver 自描述 wire 属性（§6.2 零跨层抽象）**：claudecode/codex/opencode/grokbuild 各自通过 `WireDescriptor()` 自报 Kind/DisplayName/LiveEventModel/Polling/StaticCapabilities，`BuildAgentDescriptor` 优先读自描述、仅未迁移 driver 才回退 id-keyed switch。新增 agent 不再需要改 wire 层 switch。
+- **修正 id drift 致 claude 漏报能力**：迁移前 `backend_capabilities.go` 的 `id=="claudecode"` 判等在生产 backend id（`claude`）下从未命中，claude 实际未广告 `content_chunking` 与 `question_reply`。迁入 driver `StaticCapabilities` 后 claude 按设计恢复广告这两项（与既有注释意图一致），生产 descriptor 与设计/测试假设对齐。
+- MacBridge 自有 Claude session 的 AskUserQuestion 已接通生产 responder：iPhone 可回答选项、Other 自定义答案或跳过；同一 interaction 由单一 claim/投影链路收口，多端竞态不会重复写入。
+- `resolve_user_input` 现在返回完整 interaction/status/revision acknowledgement，客户端会等待权威 projection 决定终态；Claude 外部进程仍持有 session 或归属检查失败时，续接会在启动第二个 worker 前明确拒绝并允许人工重试。
+
+### 2026-08-02 — Claude Desktop AskUserQuestion transcript projection
+
+- Claude Desktop 外部会话的 `AskUserQuestion` transcript 现在按 `structured_user_input_v1` 投影为 `observe_only` 的 `user_input_requested`，不再退化为普通 `tool_started`。
+- 外部会话保留 Claude 原生的 Other 自定义答案能力，但明确为只读列表；待回答期间 execution 保持 `requires_action`，iOS 输入区不会再错误显示为已完成。
+- Claude transcript 的 `toolUseResult.questions/answers` 只用于识别原地收口为 `user_input_resolved`，答案正文不进入 projection。
+- checkpoint schema 升级后会丢弃旧的错误投影并从 transcript 重建；同时补齐 canonical Bridge v1 schema，修正 Codex 文本片段拼接和完整 Go 回归暴露的租约测试时序。
+
 ### 2026-07-31 — 修复 iOS/web 端 Claude 已完成 session 重开时消息重复出现两次
 
 - Claude session 经 cold hydrate 重建投影时，不再把上一份投影（live 的 row-UUID turn）作为 baseline 叠加在 rich-history builder 重放之上。此前两套 turn-id 方案（live row-UUID 与 builder `user-line-N`）无法归并，同一份内容在两个 id 下各落一个 turn 并写进 checkpoint，重开经 AlreadyReady 直接返回这份陈旧重复，表现为「切走再切回仍重复两次」。Mac 端渲染本就不消费该投影，故一直正常。

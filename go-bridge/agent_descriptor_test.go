@@ -32,6 +32,13 @@ type fullFakeAgent struct {
 	descriptorFakeAgent
 }
 
+type readyStructuredInputFakeAgent struct {
+	fullFakeAgent
+	ready bool
+}
+
+func (f *readyStructuredInputFakeAgent) StructuredUserInputReady() bool { return f.ready }
+
 func (f *fullFakeAgent) SetModel(string)                                    {}
 func (f *fullFakeAgent) GetModel() string                                   { return "" }
 func (f *fullFakeAgent) AvailableModels(context.Context) []core.ModelOption { return nil }
@@ -67,6 +74,63 @@ func (f *fullFakeAgent) ArchiveSession(context.Context, string, time.Time) (*cor
 }
 func (f *fullFakeAgent) DeleteSession(context.Context, string) error             { return nil }
 func (f *fullFakeAgent) FetchTodos(context.Context, string) ([]core.Todo, error) { return nil, nil }
+
+// WireDescriptor (§6.2) makes fullFakeAgent behave like a migrated driver: it
+// self-describes by name, mirroring the real driver values in
+// agent/<drv>/wire_descriptor.go. "claude" and "claudecode" map to the same descriptor
+// (production alias). Unknown names return nil → legacy fallback path. This lets the
+// existing capability tests exercise the §6.2 primary path (WireDescriptor consulted)
+// rather than the legacy id-keyed switches.
+func (f *fullFakeAgent) WireDescriptor() *core.WireDescriptor {
+	switch f.name {
+	case "claude", "claudecode":
+		return &core.WireDescriptor{
+			Kind:                        "claude_code",
+			DisplayName:                 "Claude Code",
+			LiveEventModel:              core.LiveEventSessionProcess,
+			RequiresExternalTurnPolling: true,
+			StaticCapabilities:          []string{"content_chunking", "question_reply", "external_turn_streaming"},
+		}
+	case "codex":
+		return &core.WireDescriptor{
+			Kind:                        "codex",
+			DisplayName:                 "Codex",
+			LiveEventModel:              core.LiveEventSessionProcess,
+			RequiresExternalTurnPolling: false,
+			StaticCapabilities:          []string{"external_turn_streaming"},
+		}
+	case "opencode":
+		return &core.WireDescriptor{
+			Kind:                        "opencode",
+			DisplayName:                 "OpenCode",
+			LiveEventModel:              core.LiveEventBroadcast,
+			RequiresExternalTurnPolling: true,
+			StaticCapabilities:          []string{"todos"},
+		}
+	case "grokbuild":
+		return &core.WireDescriptor{
+			Kind:                        "grokbuild",
+			DisplayName:                 "Grok Build",
+			LiveEventModel:              core.LiveEventSessionProcess,
+			RequiresExternalTurnPolling: true,
+			StaticCapabilities:          nil,
+		}
+	default:
+		return nil
+	}
+}
+
+// wireDescriptorFakeAgent embeds the minimal descriptorFakeAgent and adds ONLY
+// WireDescriptor — no other optional interface. It represents a driver that has
+// self-described its static wire attributes (including A-class capabilities) without
+// implementing the matching interface. Used to prove e.g. opencode advertises todos
+// from StaticCapabilities even though it does not implement TodoProvider.
+type wireDescriptorFakeAgent struct {
+	descriptorFakeAgent
+	wd *core.WireDescriptor
+}
+
+func (f *wireDescriptorFakeAgent) WireDescriptor() *core.WireDescriptor { return f.wd }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
@@ -221,6 +285,77 @@ func TestBuildAgentDescriptorOpenCodeDoesNotAdvertiseQuestionReply(t *testing.T)
 	}
 }
 
+// structured_user_input_v1 (design §13): advertised only by backends whose adapter
+// session implements core.UserInputResponder — Codex app_server (appServerSession) and
+// Claude Code (claudeSession). session_sync_v2 is a separate global connection capability;
+// iOS ANDs the two client-side (§13.1 step 8), so this advert reflects responder readiness only.
+func TestCodexAppServerStructuredUserInputCapability(t *testing.T) {
+	agent := &fullFakeAgent{descriptorFakeAgent{name: "codex"}}
+	d := BuildAgentDescriptor("codex", agent, "app_server", nil)
+	if !descriptorHasCapability(d.Capabilities, "structured_user_input_v1") {
+		t.Fatalf("structured_user_input_v1 missing for codex app_server: %v", d.Capabilities)
+	}
+}
+
+func TestCodexExecNoStructuredUserInputCapability(t *testing.T) {
+	agent := &fullFakeAgent{descriptorFakeAgent{name: "codex"}}
+	d := BuildAgentDescriptor("codex", agent, "exec", nil)
+	if descriptorHasCapability(d.Capabilities, "structured_user_input_v1") {
+		t.Fatalf("structured_user_input_v1 must not appear in codex exec mode: %v", d.Capabilities)
+	}
+}
+
+// Claude Code advertises structured_user_input_v1 only through the adapter readiness interface;
+// descriptor aliases do not independently manufacture capability readiness.
+func TestClaudeCodeStructuredUserInputCapability_ProductionAliasID(t *testing.T) {
+	agent := &readyStructuredInputFakeAgent{fullFakeAgent: fullFakeAgent{descriptorFakeAgent{name: "claudecode"}}, ready: true}
+	d := BuildAgentDescriptor("claude", agent, "", nil) // 生产 descriptor id = "claude"
+	if !descriptorHasCapability(d.Capabilities, "structured_user_input_v1") {
+		t.Fatalf("structured_user_input_v1 missing for claude (aliased claudecode): %v", d.Capabilities)
+	}
+}
+
+func TestClaudeCodeStructuredUserInputCapability_DirectID(t *testing.T) {
+	agent := &readyStructuredInputFakeAgent{fullFakeAgent: fullFakeAgent{descriptorFakeAgent{name: "claudecode"}}, ready: true}
+	d := BuildAgentDescriptor("claudecode", agent, "", nil)
+	if !descriptorHasCapability(d.Capabilities, "structured_user_input_v1") {
+		t.Fatalf("structured_user_input_v1 missing for claudecode: %v", d.Capabilities)
+	}
+}
+
+func TestClaudeCodeStructuredUserInputCapability_FailsClosedWhenAdapterNotReady(t *testing.T) {
+	agent := &readyStructuredInputFakeAgent{fullFakeAgent: fullFakeAgent{descriptorFakeAgent{name: "claudecode"}}, ready: false}
+	d := BuildAgentDescriptor("claude", agent, "", nil)
+	if descriptorHasCapability(d.Capabilities, "structured_user_input_v1") {
+		t.Fatalf("structured_user_input_v1 advertised while adapter not ready: %v", d.Capabilities)
+	}
+}
+
+func TestClaudeCodeNameAloneDoesNotAdvertiseStructuredUserInput(t *testing.T) {
+	agent := &fullFakeAgent{descriptorFakeAgent{name: "claudecode"}}
+	d := BuildAgentDescriptor("claude", agent, "", nil)
+	if descriptorHasCapability(d.Capabilities, "structured_user_input_v1") {
+		t.Fatalf("agent name alone advertised structured input: %v", d.Capabilities)
+	}
+}
+
+// OpenCode and grokbuild do not implement ResolveUserInput → must NOT advertise (fail-closed).
+func TestOpenCodeNoStructuredUserInputCapability(t *testing.T) {
+	agent := &fullFakeAgent{descriptorFakeAgent{name: "opencode"}}
+	d := BuildAgentDescriptor("opencode", agent, "", nil)
+	if descriptorHasCapability(d.Capabilities, "structured_user_input_v1") {
+		t.Fatalf("structured_user_input_v1 must not be advertised for opencode: %v", d.Capabilities)
+	}
+}
+
+func TestGrokBuildNoStructuredUserInputCapability(t *testing.T) {
+	agent := &fullFakeAgent{descriptorFakeAgent{name: "grokbuild"}}
+	d := BuildAgentDescriptor("grokbuild", agent, "", nil)
+	if descriptorHasCapability(d.Capabilities, "structured_user_input_v1") {
+		t.Fatalf("structured_user_input_v1 must not be advertised for grokbuild: %v", d.Capabilities)
+	}
+}
+
 func TestBuildAgentDescriptorDoesNotAdvertiseSessionPagination(t *testing.T) {
 	agent := &fullFakeAgent{descriptorFakeAgent{name: "claudecode"}}
 	d := BuildAgentDescriptor("claudecode", agent, "", nil)
@@ -253,17 +388,24 @@ func TestCodexNoPermissionResolve(t *testing.T) {
 }
 
 func TestOpenCodeAlwaysHasTodos(t *testing.T) {
-	d := BuildAgentDescriptor("opencode", &descriptorFakeAgent{name: "opencode"}, "", nil)
-
-	found := false
-	for _, c := range d.Capabilities {
-		if c == "todos" {
-			found = true
-			break
-		}
+	// §6.2: opencode's todos 兜底 migrated from the `id=="opencode"` id-half in
+	// backend_capabilities.go into the driver's WireDescriptor.StaticCapabilities.
+	// This fake self-describes opencode (todos in StaticCapabilities) but, like the real
+	// opencode driver, does NOT implement TodoProvider — proving todos is advertised from
+	// self-description alone.
+	agent := &wireDescriptorFakeAgent{
+		descriptorFakeAgent: descriptorFakeAgent{name: "opencode"},
+		wd: &core.WireDescriptor{
+			Kind:               "opencode",
+			DisplayName:        "OpenCode",
+			LiveEventModel:     core.LiveEventBroadcast,
+			StaticCapabilities: []string{"todos"},
+		},
 	}
-	if !found {
-		t.Fatal("opencode always has todos capability")
+	d := BuildAgentDescriptor("opencode", agent, "", nil)
+
+	if !descriptorHasCapability(d.Capabilities, "todos") {
+		t.Fatalf("opencode must advertise todos from StaticCapabilities (caps=%v)", d.Capabilities)
 	}
 }
 
@@ -300,6 +442,73 @@ func descriptorHasCapability(caps []string, target string) bool {
 		}
 	}
 	return false
+}
+
+// TestCodexNonAppServerNoModeCaps (§6.2 guard): codex in a non-app-server mode must
+// advertise its STATIC capability (external_turn_streaming, from WireDescriptor) while
+// every mode-conditional capability (compression / question_reply /
+// structured_user_input_v1, B-class) stays absent. This is the wire-side proof that the
+// §6.2 migration left mode conditions id-keyed in wire (not in StaticCapabilities) and
+// that they fail-closed without app_server.
+func TestCodexNonAppServerNoModeCaps(t *testing.T) {
+	agent := &fullFakeAgent{descriptorFakeAgent{name: "codex"}}
+	d := BuildAgentDescriptor("codex", agent, "exec", nil)
+
+	if !descriptorHasCapability(d.Capabilities, "external_turn_streaming") {
+		t.Errorf("external_turn_streaming (static) missing in codex exec: %v", d.Capabilities)
+	}
+	for _, cap := range []string{"compression", "question_reply", "structured_user_input_v1"} {
+		if descriptorHasCapability(d.Capabilities, cap) {
+			t.Errorf("%s (mode-conditional) must be absent in codex exec: %v", cap, d.Capabilities)
+		}
+	}
+}
+
+// TestBuildAgentDescriptorPrefersWireDescriptor (§6.2 guard): when a driver
+// self-describes, BuildAgentDescriptor must take Kind/DisplayName/LiveEvents/Polling
+// from the WireDescriptor, NOT from the legacy id-keyed switches. Proven by giving a
+// fake a descriptor whose values differ from what agentKind("custom") etc. would return.
+func TestBuildAgentDescriptorPrefersWireDescriptor(t *testing.T) {
+	agent := &wireDescriptorFakeAgent{
+		descriptorFakeAgent: descriptorFakeAgent{name: "custom"},
+		wd: &core.WireDescriptor{
+			Kind:                        "self_described_kind",
+			DisplayName:                 "Self Described",
+			LiveEventModel:              core.LiveEventSessionProcess,
+			RequiresExternalTurnPolling: true,
+		},
+	}
+	d := BuildAgentDescriptor("custom", agent, "", nil)
+
+	if d.Kind != "self_described_kind" {
+		t.Errorf("Kind = %q, want self_described_kind (from WireDescriptor)", d.Kind)
+	}
+	if d.DisplayName != "Self Described" {
+		t.Errorf("DisplayName = %q, want Self Described (from WireDescriptor)", d.DisplayName)
+	}
+	if d.LiveEvents != "session_process" {
+		t.Errorf("LiveEvents = %q, want session_process (from WireDescriptor)", d.LiveEvents)
+	}
+	if !d.RequiresPollingForExternalTurns {
+		t.Error("RequiresPollingForExternalTurns = false, want true (from WireDescriptor)")
+	}
+}
+
+// TestLegacyFallbackWhenNoWireDescriptor (§6.2 guard): a driver that does NOT
+// self-describe still resolves via the legacy id-keyed switches. This is the fallback
+// path that keeps un-migrated drivers working; descriptorFakeAgent (no WireDescriptor)
+// exercises it.
+func TestLegacyFallbackWhenNoWireDescriptor(t *testing.T) {
+	d := BuildAgentDescriptor("claude", &descriptorFakeAgent{name: "claudecode"}, "", nil)
+	if d.Kind != "claude_code" {
+		t.Errorf("Kind = %q, want claude_code (legacy fallback)", d.Kind)
+	}
+	if d.LiveEvents != "session_process" {
+		t.Errorf("LiveEvents = %q, want session_process (legacy fallback)", d.LiveEvents)
+	}
+	if !d.RequiresPollingForExternalTurns {
+		t.Error("RequiresPollingForExternalTurns = false, want true (legacy fallback)")
+	}
 }
 
 func TestDetectOpenCodeServiceUsesGlobalHealth(t *testing.T) {

@@ -410,20 +410,15 @@ func parseCodexTurnContext(line []byte, modelID, reasoningEffort *string) {
 }
 
 // findSessionFile locates the JSONL transcript for a given session ID.
+// Preference order:
+//  1. active ~/.codex/sessions/**/rollout-*<id>.jsonl
+//  2. Codex Desktop archive ~/.codex/archived_sessions/rollout-*<id>.jsonl
+//
+// Codex Desktop archive physically moves the rollout out of sessions/; without
+// the archived fallback, cold hydrate / todos / transcript relay fail with
+// "session file not found" even though the transcript still exists on disk.
 func findSessionFile(sessionID, codexHome string) string {
-	sessionsDir := filepath.Join(resolveCodexHomeDir(codexHome), "sessions")
-
-	var found string
-	_ = filepath.Walk(sessionsDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || found != "" {
-			return nil
-		}
-		if strings.Contains(filepath.Base(path), sessionID) {
-			found = path
-		}
-		return nil
-	})
-	return found
+	return findSessionFileInCodexHome(resolveCodexHomeDir(codexHome), sessionID)
 }
 
 // getSessionHistory reads the JSONL transcript and returns user/assistant messages.

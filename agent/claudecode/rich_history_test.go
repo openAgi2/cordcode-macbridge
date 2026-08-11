@@ -113,6 +113,73 @@ func TestGetRichSessionHistory_RebuildsStructuredMessagesAndAppliesLimitAfterMer
 	}
 }
 
+func TestLoadClaudeRichHistory_AskUserQuestionIsObserveOnlyStructuredInput(t *testing.T) {
+	transcript := strings.Join([]string{
+		`{"type":"user","timestamp":"2026-08-02T07:16:35.730Z","message":{"id":"user-ask","role":"user","content":"先问我再继续"}}`,
+		`{"type":"assistant","timestamp":"2026-08-02T07:16:46.671Z","message":{"id":"assistant-ask","role":"assistant","content":[{"type":"tool_use","id":"call-ask","name":"AskUserQuestion","input":{"questions":[{"header":"构建失败策略","multiSelect":false,"options":[{"description":"失败后重试。","label":"自动重试 3 次"},{"description":"首次失败即停止。","label":"立即失败并报告"}],"question":"构建失败时,你希望脚本怎么处理?"}]}}]}}`,
+	}, "\n")
+	entries, err := LoadClaudeRichHistoryFromReader(strings.NewReader(transcript), "ask-user-pending.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("entries = %d, want 2", len(entries))
+	}
+	assistant := entries[1]
+	if len(assistant.Parts) != 1 || len(assistant.Steps) != 0 {
+		t.Fatalf("AskUserQuestion must be one structured part and no tool step: parts=%#v steps=%#v", assistant.Parts, assistant.Steps)
+	}
+	part := assistant.Parts[0]
+	if part["type"] != "user_input" || part["itemId"] != "call-ask" || part["status"] != "pending" ||
+		part["canRespond"] != false || part["canReject"] != false || part["diagnosticCode"] != "observe_only" {
+		t.Fatalf("observe-only part = %#v", part)
+	}
+	questions, ok := part["questions"].([]core.UserInputQuestion)
+	if !ok || len(questions) != 1 || questions[0].Prompt != "构建失败时,你希望脚本怎么处理?" ||
+		len(questions[0].Options) != 2 || !questions[0].AllowsCustomAnswer {
+		t.Fatalf("questions = %#v", part["questions"])
+	}
+}
+
+func TestLoadClaudeRichHistory_AskUserQuestionResultResolvesStructuredInput(t *testing.T) {
+	transcript := strings.Join([]string{
+		`{"type":"user","timestamp":"2026-08-02T07:16:35.730Z","message":{"id":"user-ask","role":"user","content":"先问我再继续"}}`,
+		`{"type":"assistant","timestamp":"2026-08-02T07:16:46.671Z","message":{"id":"assistant-ask","role":"assistant","content":[{"type":"tool_use","id":"call-ask","name":"AskUserQuestion","input":{"questions":[{"header":"构建失败策略","multiSelect":false,"options":[{"label":"自动重试 3 次"},{"label":"立即失败并报告"}],"question":"构建失败时,你希望脚本怎么处理?"}]}}]}}`,
+		`{"type":"user","timestamp":"2026-08-02T07:54:57.860Z","toolUseResult":{"questions":[{"header":"构建失败策略","multiSelect":false,"options":[{"label":"自动重试 3 次"},{"label":"立即失败并报告"}],"question":"构建失败时,你希望脚本怎么处理?"}],"answers":{"构建失败时,你希望脚本怎么处理?":["立即失败并报告"]}},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-ask","content":"Your questions have been answered."}]}}`,
+	}, "\n")
+	entries, err := LoadClaudeRichHistoryFromReader(strings.NewReader(transcript), "ask-user-resolved.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	part := entries[1].Parts[0]
+	if part["type"] != "user_input" || part["status"] != "answered" || part["resolutionSource"] != "other_client" {
+		t.Fatalf("resolved part = %#v", part)
+	}
+	if part["resolvedAt"] != int64(1785657297860) {
+		t.Fatalf("resolvedAt = %#v", part["resolvedAt"])
+	}
+	if len(entries[1].Steps) != 0 {
+		t.Fatalf("resolved AskUserQuestion leaked ordinary tool steps: %#v", entries[1].Steps)
+	}
+}
+
+func TestLoadClaudeRichHistory_InterruptAfterAskUserQuestionKeepsOwningPrompt(t *testing.T) {
+	transcript := strings.Join([]string{
+		`{"type":"user","promptId":"prompt-ask","timestamp":"2026-08-02T07:16:35.730Z","message":{"role":"user","content":"先问我再继续"}}`,
+		`{"type":"assistant","timestamp":"2026-08-02T07:16:46.671Z","message":{"id":"assistant-ask","role":"assistant","content":[{"type":"tool_use","id":"call-ask","name":"AskUserQuestion","input":{"questions":[{"header":"策略","multiSelect":false,"options":[{"label":"A"},{"label":"B"}],"question":"怎么处理?"}]}}]}}`,
+		`{"type":"user","promptId":"prompt-ask","timestamp":"2026-08-02T07:54:57.860Z","toolUseResult":{"questions":[{"header":"策略","multiSelect":false,"options":[{"label":"A"},{"label":"B"}],"question":"怎么处理?"}],"answers":{"怎么处理?":"[No preference]"}},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-ask","content":"answered"}]}}`,
+		`{"type":"user","promptId":"prompt-ask","timestamp":"2026-08-02T07:55:13.760Z","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}`,
+	}, "\n")
+	entries, err := LoadClaudeRichHistoryFromReader(strings.NewReader(transcript), "ask-user-interrupted.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 || entries[0].Role != "user" || entries[0].Content != "先问我再继续" ||
+		entries[1].Role != "assistant" || len(entries[1].Parts) != 1 || entries[1].Parts[0]["type"] != "user_input" {
+		t.Fatalf("AskUserQuestion owning prompt was hidden after Skip/Stop: %#v", entries)
+	}
+}
+
 func TestGetRichSessionHistory_GracefullyHandlesUnknownBlocksMissingResultsAndBrokenJSON(t *testing.T) {
 	homeDir := t.TempDir()
 	workDir := filepath.Join(t.TempDir(), "project")

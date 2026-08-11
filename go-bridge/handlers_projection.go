@@ -81,7 +81,8 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 	// this to heal its pathless HTTP baseline; Claude uses it to detect a new
 	// compact continuation or advanced segment cut.
 	forceColdInspection := params.SinceRev == 0 &&
-		(msg.BackendID == "opencode" || msg.BackendID == "claude" || msg.BackendID == "claudecode")
+		(msg.BackendID == "opencode" || msg.BackendID == "grokbuild" ||
+			msg.BackendID == "claude" || msg.BackendID == "claudecode")
 	if err := h.ensureProjectionHydrated(
 		msg.BackendID,
 		params.SessionID,
@@ -242,9 +243,10 @@ var errProjectionSourceUnavailable = errors.New("projection source is not availa
 
 func backendSupportsProjectionHydrate(backendID string) bool {
 	switch backendID {
-	case "codex", "claude", "claudecode", "opencode":
+	case "codex", "claude", "claudecode", "opencode", "grokbuild":
 		// K5: Codex/Claude use JSONL transcript hydrate; OpenCode uses HTTP rich-history
-		// full rebuild (no transcript file / no file-prefix checkpoint).
+		// full rebuild (no transcript file / no file-prefix checkpoint); grokbuild uses the
+		// same pathless rich-history rebuild from local chat_history.jsonl.
 		return true
 	default:
 		return false
@@ -283,7 +285,8 @@ func (h *Handlers) ensureProjectionHydrated(
 		return err
 	}
 	// Pathless re-open: force full GetRichSessionHistory rebuild when already Ready.
-	sourceChanged := forceColdInspection && ready && backendID == "opencode" && source.Path == ""
+	sourceChanged := forceColdInspection && ready &&
+		(backendID == "opencode" || backendID == "grokbuild") && source.Path == ""
 	admission, err := h.projectionKernel.BeginHydrateTransaction(
 		backendID, sessionID, source, false, sourceChanged,
 	)
@@ -334,6 +337,8 @@ func (h *Handlers) prepareProjectionHydrateSource(
 		agentName = "claudecode"
 	case "opencode":
 		agentName = "opencode"
+	case "grokbuild":
+		agentName = "grokbuild"
 	default:
 		return ProjectionSourceDescriptor{}, errProjectionBackendNotMigrated
 	}
@@ -391,7 +396,7 @@ func (h *Handlers) prepareProjectionHydrateSource(
 		}
 		// Test/custom providers without the explicit stitching guarantee retain
 		// the normal single-transcript path and its checkpoint semantics.
-		_, path := findClaudeSessionFile(sessionID, directory)
+		_, path := h.findClaudeSessionFile(sessionID, directory)
 		if path != "" {
 			cut, err := projectionJSONLStartCut(path)
 			if err != nil {
@@ -407,10 +412,11 @@ func (h *Handlers) prepareProjectionHydrateSource(
 		}
 		return ProjectionSourceDescriptor{}, errProjectionSourceUnavailable
 	}
-	// OpenCode has no JSONL transcript path. Cold hydrate is a full rich-history rebuild
-	// keyed by session identity only (Cursor=0, Path empty). Checkpoint file-prefix validation
-	// does not apply; re-open always rebuilds from GetRichSessionHistory.
-	if backendID == "opencode" {
+	// OpenCode has no JSONL transcript path; grokbuild's chat_history.jsonl is a structured
+	// turn snapshot, not a raw transcript with stable byte cursors. Both cold-hydrate as a full
+	// rich-history rebuild keyed by session identity only (Cursor=0, Path empty). Checkpoint
+	// file-prefix validation does not apply; re-open always rebuilds from GetRichSessionHistory.
+	if backendID == "opencode" || backendID == "grokbuild" {
 		if _, ok := agent.(core.RichHistoryProvider); !ok {
 			if h.eventPublisher.ProjectionTurnCount(backendID, sessionID) > 0 {
 				return ProjectionSourceDescriptor{Identity: sessionID}, nil
@@ -636,6 +642,11 @@ func (h *Handlers) runProjectionHydrateTransaction(
 			}
 		}
 	}
+	// §5.1 #7: cold-source ingest (mainstream + Claude sidechain) is now complete — no more
+	// ApplyHydrateEvent calls will be made from the cold source. Arm the commit gate so
+	// WaitHydrateCommitReady decides readiness from authoritative source-EOF + turn terminal
+	// state instead of content-shape/turn-count guessing (guardrail #6).
+	h.projectionKernel.MarkHydrateSourceIngestComplete(backendID, sessionID)
 	if err := h.projectionKernel.WaitHydrateCommitReady(ctx, backendID, sessionID); err != nil {
 		h.projectionKernel.MarkFailed(
 			backendID, sessionID, "projection.bare_source_wait_failed", err.Error(), true,
@@ -776,7 +787,8 @@ func (h *Handlers) produceProjectionHydrateRange(
 	base SessionProjection,
 	emit func(projectionHydrateEvent) bool,
 ) error {
-	if backendID != "opencode" && backendID != "claude" && backendID != "claudecode" &&
+	if backendID != "opencode" && backendID != "grokbuild" &&
+		backendID != "claude" && backendID != "claudecode" &&
 		(path == "" || startOffset == endOffset) {
 		return nil
 	}
@@ -810,7 +822,7 @@ func (h *Handlers) produceProjectionHydrateRange(
 			return emit(projectionHydrateEvent{
 				Event:    eventName,
 				Data:     data,
-				TurnDone: ev.kind == "task_complete",
+				TurnDone: ev.kind == "task_complete" || ev.kind == "turn_aborted",
 			})
 		})
 	case "claude", "claudecode":
@@ -829,6 +841,8 @@ func (h *Handlers) produceProjectionHydrateRange(
 		)
 	case "opencode":
 		return h.streamOpenCodeRichHistoryProjectionEvents(ctx, sessionID, emit)
+	case "grokbuild":
+		return h.streamBackendRichHistoryProjectionEvents(ctx, "grokbuild", sessionID, emit)
 	default:
 		return errProjectionBackendNotMigrated
 	}
@@ -845,6 +859,117 @@ type projectionHydrateEvent struct {
 	Data               map[string]interface{}
 	TurnDone           bool
 	SourceBlockOrdinal *int
+}
+
+// hydrateToolEventsFromStep emits the tool_started + tool_finished projection-hydrate events
+// for one rich-history tool step, preserving the structured fields iOS needs for friendly
+// activity rows (fileChanges / title / toolInput). Previously hydration only copied
+// itemId/toolName/toolStatus/toolResult, which dropped Codex structured fileChanges and
+// Claude path-bearing title/toolInput, leaving iOS cold-start with no file path (R2/R5).
+//
+// For Claude cold-start this is necessary but NOT sufficient on its own: the upstream
+// rich-history builder (richHistoryMessageBuilder.addToolUse) must first populate a valid
+// title/toolInput (L-α) — otherwise this passthrough just forwards toolName as the title.
+func hydrateToolEventsFromStep(step map[string]any) []projectionHydrateEvent {
+	toolID := strings.TrimSpace(fmt.Sprint(step["id"]))
+	toolName := strings.TrimSpace(fmt.Sprint(step["toolName"]))
+	status := strings.TrimSpace(fmt.Sprint(step["status"]))
+	if status == "" || status == "<nil>" {
+		status = "completed"
+	}
+	if toolID == "" || toolID == "<nil>" {
+		return nil
+	}
+	started := map[string]interface{}{"itemId": toolID}
+	if toolName != "" && toolName != "<nil>" {
+		started["toolName"] = toolName
+	}
+	// Preserve path-bearing fields on tool_started so iOS can render a friendly title
+	// before completion (e.g. "正在编辑 <file>").
+	copyOptionalStepField(started, step, "title")
+	copyOptionalStepField(started, step, "toolInput")
+	copyOptionalStepField(started, step, "fileChanges")
+
+	finished := map[string]interface{}{
+		"itemId":     toolID,
+		"toolStatus": status,
+	}
+	if toolName != "" && toolName != "<nil>" {
+		finished["toolName"] = toolName
+	}
+	if output := step["output"]; output != nil {
+		finished["toolResult"] = output
+	}
+	// Same structured fields on tool_finished so the completed activity row has path/diff.
+	copyOptionalStepField(finished, step, "title")
+	copyOptionalStepField(finished, step, "toolInput")
+	copyOptionalStepField(finished, step, "fileChanges")
+
+	return []projectionHydrateEvent{
+		{Event: "tool_started", Data: started},
+		{Event: "tool_finished", Data: finished},
+	}
+}
+
+func hydrateUserInputEventsFromPart(part map[string]any, turnID string) []projectionHydrateEvent {
+	interactionID := dataString(part, "interactionId")
+	if interactionID == "" || turnID == "" {
+		return nil
+	}
+	status := dataString(part, "status")
+	if status == "" {
+		status = "pending"
+	}
+	requestStatus := status
+	if status != "pending" && status != "failed" {
+		requestStatus = "pending"
+	}
+	request := map[string]interface{}{
+		"turnId":         turnID,
+		"interactionId":  interactionID,
+		"status":         requestStatus,
+		"questions":      part["questions"],
+		"canRespond":     dataBool(part, "canRespond"),
+		"canReject":      dataBool(part, "canReject"),
+		"diagnosticCode": dataString(part, "diagnosticCode"),
+	}
+	if itemID := dataString(part, "itemId"); itemID != "" {
+		request["itemId"] = itemID
+	}
+	out := []projectionHydrateEvent{{Event: "user_input_requested", Data: request}}
+	if status == "pending" || status == "failed" {
+		return out
+	}
+	resolved := map[string]interface{}{
+		"turnId":        turnID,
+		"interactionId": interactionID,
+		"status":        status,
+		"source":        dataString(part, "resolutionSource"),
+	}
+	if itemID := dataString(part, "itemId"); itemID != "" {
+		resolved["itemId"] = itemID
+	}
+	if resolvedAt := dataInt64(part, "resolvedAt"); resolvedAt != 0 {
+		resolved["resolvedAt"] = resolvedAt
+	}
+	out = append(out, projectionHydrateEvent{Event: "user_input_resolved", Data: resolved})
+	return out
+}
+
+// copyOptionalStepField copies a non-nil, non-empty step field into the target hydration
+// event data under the same key. It deliberately forwards whatever the upstream builder
+// produced (including structured fileChanges []any / toolInput string / title string)
+// without inventing or transforming values.
+func copyOptionalStepField(target map[string]interface{}, step map[string]any, key string) {
+	if v, ok := step[key]; ok && v != nil {
+		// Skip fmt "<nil>" stringified placeholders the upstream may emit.
+		if s, isStr := v.(string); isStr {
+			if strings.TrimSpace(s) == "" || s == "<nil>" {
+				return
+			}
+		}
+		target[key] = v
+	}
 }
 
 // streamOpenCodeRichHistoryProjectionEvents rebuilds a full projection baseline from
@@ -968,6 +1093,7 @@ func openCodeRichHistoryEntryToProjectionEvents(
 			*currentTurnID = turnID
 		}
 		emittedContent := false
+		hasPendingUserInput := false
 		// Prefer structured parts when present.
 		if len(entry.Parts) > 0 {
 			for _, part := range entry.Parts {
@@ -1004,31 +1130,17 @@ func openCodeRichHistoryEntryToProjectionEvents(
 					if step == nil {
 						continue
 					}
-					toolID := strings.TrimSpace(fmt.Sprint(step["id"]))
-					toolName := strings.TrimSpace(fmt.Sprint(step["toolName"]))
-					status := strings.TrimSpace(fmt.Sprint(step["status"]))
-					if status == "" || status == "<nil>" {
-						status = "completed"
-					}
-					if toolID == "" || toolID == "<nil>" {
+					out = append(out, hydrateToolEventsFromStep(step)...)
+					emittedContent = true
+				case "user_input":
+					events := hydrateUserInputEventsFromPart(part, turnID)
+					if len(events) == 0 {
 						continue
 					}
-					started := map[string]interface{}{"itemId": toolID}
-					if toolName != "" && toolName != "<nil>" {
-						started["toolName"] = toolName
+					out = append(out, events...)
+					if strings.TrimSpace(fmt.Sprint(part["status"])) == "pending" {
+						hasPendingUserInput = true
 					}
-					out = append(out, projectionHydrateEvent{Event: "tool_started", Data: started})
-					finished := map[string]interface{}{
-						"itemId":     toolID,
-						"toolStatus": status,
-					}
-					if toolName != "" && toolName != "<nil>" {
-						finished["toolName"] = toolName
-					}
-					if output := step["output"]; output != nil {
-						finished["toolResult"] = output
-					}
-					out = append(out, projectionHydrateEvent{Event: "tool_finished", Data: finished})
 					emittedContent = true
 				}
 			}
@@ -1049,32 +1161,17 @@ func openCodeRichHistoryEntryToProjectionEvents(
 				emittedContent = true
 			}
 			for _, step := range entry.Steps {
-				toolID := strings.TrimSpace(fmt.Sprint(step["id"]))
-				toolName := strings.TrimSpace(fmt.Sprint(step["toolName"]))
-				status := strings.TrimSpace(fmt.Sprint(step["status"]))
-				if status == "" || status == "<nil>" {
-					status = "completed"
-				}
-				if toolID == "" || toolID == "<nil>" {
-					continue
-				}
-				started := map[string]interface{}{"itemId": toolID}
-				if toolName != "" && toolName != "<nil>" {
-					started["toolName"] = toolName
-				}
-				out = append(out, projectionHydrateEvent{Event: "tool_started", Data: started})
-				finished := map[string]interface{}{"itemId": toolID, "toolStatus": status}
-				if toolName != "" && toolName != "<nil>" {
-					finished["toolName"] = toolName
-				}
-				if output := step["output"]; output != nil {
-					finished["toolResult"] = output
-				}
-				out = append(out, projectionHydrateEvent{Event: "tool_finished", Data: finished})
+				out = append(out, hydrateToolEventsFromStep(step)...)
 				emittedContent = true
 			}
 		}
-		// Rich history rows are complete snapshots; always seal the turn.
+		// AskUserQuestion with no result is a blocking boundary, not a completed turn. Keeping
+		// it open lets the reducer preserve execution.phase=requires_action so every composer
+		// stays in the waiting state while the owning Claude Desktop session awaits an answer.
+		if hasPendingUserInput {
+			return out
+		}
+		// Other rich history rows are complete snapshots; seal the turn.
 		out = append(out, projectionHydrateEvent{
 			Event:    "turn_completed",
 			Data:     map[string]interface{}{"turnId": turnID, "done": true, "reason": "rich_history"},
@@ -1120,6 +1217,16 @@ func codexRelayEventToProjectionEvent(ev codexRelayEvent, currentTurnID *string,
 		}
 		*currentTurnID = ""
 		return "turn_completed", map[string]interface{}{"turnId": tid, "done": true, "reason": "task_complete"}, true
+	case "turn_aborted":
+		// §5.1 #7 producer layer 3：cold rollout 的 turn_aborted（真实形态 019f5453）映射到
+		// reducer 的 turn_aborted 终态 case。turnID 回退同 task_complete（driver 可能省略）。
+		// 清空 *currentTurnID——turn 已终态，后续 content 不再挂到它。
+		tid := ev.turnID
+		if tid == "" {
+			tid = *currentTurnID
+		}
+		*currentTurnID = ""
+		return "turn_aborted", map[string]interface{}{"turnId": tid, "reason": "turn_aborted"}, true
 	case "text":
 		if !ev.canonical {
 			return "", nil, false

@@ -331,6 +331,8 @@ const (
 	EventContextUsageUpdated EventType = "context_usage_updated" // runtime context usage changed
 	EventQuestionAsked       EventType = "question_asked"        // agent asks user a question (Codex)
 	EventQuestionResolved    EventType = "question_resolved"     // question was answered or cancelled
+	EventUserInputRequested  EventType = "user_input_requested"  // 结构化用户输入交互产生（pending/failed），权威 payload 在 Event.UserInput（设计 §10.1）
+	EventUserInputResolved   EventType = "user_input_resolved"   // 结构化用户输入交互被解决（answered/rejected/auto_resolved/unavailable）
 )
 
 // UserQuestion represents a structured question from AskUserQuestion.
@@ -352,6 +354,64 @@ type QuestionOption struct {
 	ID          string `json:"id"`
 	Label       string `json:"label"`
 	Description string `json:"description,omitempty"`
+}
+
+// ── 结构化用户输入 v2 domain model（设计 §6/§10.1）─────────────────────────────
+// 这是 user_input projection part 与 EventUserInputRequested/Resolved 的权威 payload。
+// projection 不保存答案正文；isSecret=true 时答案不得进入 projection/日志/诊断/snapshot。
+
+// UserInputStatus 是一次结构化用户输入交互的生命周期状态。
+type UserInputStatus string
+
+const (
+	UserInputStatusPending      UserInputStatus = "pending"
+	UserInputStatusAnswered     UserInputStatus = "answered"
+	UserInputStatusRejected     UserInputStatus = "rejected"
+	UserInputStatusAutoResolved UserInputStatus = "auto_resolved"
+	UserInputStatusUnavailable  UserInputStatus = "unavailable"
+	UserInputStatusFailed       UserInputStatus = "failed"
+)
+
+// UserInputAnswerMode 表达单题的回答形态。
+type UserInputAnswerMode string
+
+const (
+	UserInputAnswerModeSingle   UserInputAnswerMode = "single"
+	UserInputAnswerModeMultiple UserInputAnswerMode = "multiple"
+	UserInputAnswerModeText     UserInputAnswerMode = "text"
+)
+
+// UserInputOption 是一个可选项；ID 由 interactionId/questionId/optionIndex 稳定派生（§6.1）。
+type UserInputOption struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+}
+
+// UserInputQuestion 是一道规范化后的结构化提问。
+type UserInputQuestion struct {
+	ID                 string              `json:"id"`
+	Header             string              `json:"header,omitempty"`
+	Prompt             string              `json:"prompt"`
+	AnswerMode         UserInputAnswerMode `json:"answerMode"`
+	Options            []UserInputOption   `json:"options"`
+	AllowsCustomAnswer bool                `json:"allowsCustomAnswer"`
+	IsSecret           bool                `json:"isSecret"`
+	Required           bool                `json:"required"`
+}
+
+// UserInputInteraction 是一次完整的结构化用户输入交互，对应一个 user_input projection part。
+// ResolutionSource 取值 ios|mac|other_client|backend。ExpiresAt/ResolvedAt 为 epoch-ms，仅显示。
+type UserInputInteraction struct {
+	InteractionID    string              `json:"interactionId"`
+	Status           UserInputStatus     `json:"status"`
+	Questions        []UserInputQuestion `json:"questions"`
+	CanRespond       bool                `json:"canRespond"`
+	CanReject        bool                `json:"canReject"`
+	ExpiresAt        int64               `json:"expiresAt,omitempty"`
+	ResolvedAt       int64               `json:"resolvedAt,omitempty"`
+	ResolutionSource string              `json:"resolutionSource,omitempty"`
+	DiagnosticCode   string              `json:"diagnosticCode,omitempty"`
 }
 
 // FileChange describes one structured file mutation emitted by an agent.
@@ -411,6 +471,10 @@ type Event struct {
 	QuestionOpts []QuestionOption // 可选项
 	Required     bool             // 是否必须回答
 	ThreadID     string           // Codex thread id
+	// user_input v2 结构化交互（EventUserInputRequested/Resolved 的权威 payload）。
+	// 旧单题 QuestionID/QuestionText/QuestionOpts 字段只服务 legacy `.off` 路径；
+	// v2 adapter 只填充 UserInput（设计 §10.1）。projection 不保存答案正文。
+	UserInput *UserInputInteraction
 }
 
 // HistoryEntry is one turn in a conversation.

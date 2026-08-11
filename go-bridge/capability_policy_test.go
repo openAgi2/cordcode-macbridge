@@ -4,16 +4,15 @@ import (
 	"testing"
 )
 
-// TestCapabilityPolicyAllowsFileScopedByDefault 验证 policy 层接入且默认放行
-// （workspace 锚点由 handleReadFile 兜底），不破坏现有授权语义。
+// TestCapabilityPolicyAllowsFileScopedByDefault 验证 v2 policy 层接入且默认放行。
 func TestCapabilityPolicyAllowsFileScopedByDefault(t *testing.T) {
 	handlers := NewHandlers()
 	conn := &readFileCaptureConn{}
-	msg := WireMessage{RequestID: "req_cap", Method: "read_file", BackendID: "codex"}
+	msg := WireMessage{RequestID: "req_cap", Method: "read_file_v2", BackendID: "codex"}
 
 	// AuthorizeRPC 对 fileScopedMethods 默认返回 nil（放行），由下游 handler 校验。
 	if perr := handlers.capabilityPolicy.AuthorizeRPC(conn, msg); perr != nil {
-		t.Fatalf("AuthorizeRPC read_file 默认应放行, got %#v", perr)
+		t.Fatalf("AuthorizeRPC read_file_v2 默认应放行, got %#v", perr)
 	}
 }
 
@@ -30,28 +29,40 @@ func TestCapabilityPolicyIgnoresNonFileMethod(t *testing.T) {
 func TestCapabilityPolicyNilSafe(t *testing.T) {
 	var p *CapabilityPolicy
 	conn := &readFileCaptureConn{}
-	if perr := p.AuthorizeRPC(conn, WireMessage{Method: "read_file"}); perr != nil {
+	if perr := p.AuthorizeRPC(conn, WireMessage{Method: "read_file_v2"}); perr != nil {
 		t.Fatalf("nil policy 应放行, got %#v", perr)
 	}
 }
 
-// TestHandleRPCHooksCapabilityPolicy 验证 HandleRPC 集成了 policy 层：
-// read_file 请求会经过 AuthorizeRPC（通过 debug 日志/无 panic + 正常 dispatch 验证）。
+// TestHandleRPCHooksCapabilityPolicy 验证 HandleRPC 集成了 v2 policy 与 capability gate。
 func TestHandleRPCHooksCapabilityPolicy(t *testing.T) {
 	handlers := NewHandlers()
 	agent := &fakeAgent{name: "codex"}
 	handlers.RegisterAgent("codex", agent)
 	conn := &readFileCaptureConn{}
-	// 发送一个 read_file 请求（无 path）→ 走 policy → handleReadFile 返回 missing_param。
+	handlers.eventPublisher.SetConnReadFileV2(conn, true)
+	// 发送一个空参数 read_file_v2 → 走 policy/capability gate → strict codec 返回 invalid_params。
 	handlers.HandleRPC(conn, WireMessage{
-		Type: "request", RequestID: "req_hook", BackendID: "codex", Method: "read_file",
+		Type: "request", RequestID: "req_hook", BackendID: "codex", Method: "read_file_v2",
 		Params: mustJSONRaw(t, map[string]any{}),
 	})
 	if conn.err == nil {
-		t.Fatal("read_file 空 path 应返回错误（证明 policy hook 后正常 dispatch）")
+		t.Fatal("read_file_v2 空参数应返回错误（证明 policy hook 后正常 dispatch）")
 	}
-	// 不应是 capability policy 拒绝（默认放行）；应是 handleReadFile 的 missing_param。
-	if conn.err.Code != "missing_param" && conn.err.Code != "file.outside_authorized_root" {
-		t.Fatalf("err code = %q, want missing_param 或 file.outside_authorized_root（policy 默认放行）", conn.err.Code)
+	if conn.err.Code != "invalid_params" {
+		t.Fatalf("err code = %q, want invalid_params（policy 默认放行）", conn.err.Code)
+	}
+}
+
+func TestRemovedReadFileReturnsMethodNotFound(t *testing.T) {
+	handlers := NewHandlers()
+	handlers.RegisterAgent("codex", &fakeAgent{name: "codex"})
+	conn := &readFileCaptureConn{}
+	handlers.HandleRPC(conn, WireMessage{
+		Type: "request", RequestID: "legacy-read", BackendID: "codex", Method: "read_file",
+		Params: mustJSONRaw(t, map[string]any{"path": "/tmp/never-read"}),
+	})
+	if conn.err == nil || conn.err.Code != "method_not_found" {
+		t.Fatalf("removed read_file returned data=%#v err=%+v, want method_not_found", conn.data, conn.err)
 	}
 }

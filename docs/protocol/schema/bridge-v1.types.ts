@@ -95,7 +95,12 @@ export interface BridgeBackendInfo {
   id: string;
   kind: "claude_code" | "opencode" | "codex" | string;
   displayName?: string;
-  /** Backend-scoped capabilities; session_sync_v2 here (not only hello_ack) selects ownership. */
+  /**
+   * Backend-scoped capabilities. `session_sync_v2` here (not only hello_ack) selects ownership;
+   * `structured_user_input_v1` advertises the multi-question/multi-select path (resolve_user_input
+   * RPC + user_input part). Both are advertised per-descriptor only when that backend's adapter +
+   * responder + Kernel reducer are ready (design §13.1).
+   */
   capabilities?: string[];
   descriptor?: Record<string, string>;
   permissionMode?: { mode?: string };
@@ -130,6 +135,14 @@ export interface BridgeHelloAck {
     };
     protocol: BridgeProtocol;
     security?: BridgeSecurityProfile;
+    /**
+     * Control-plane connection policy (Relay-first + opt-in LAN). Optional; absent or
+     * preferLocalNetwork=false means Relay is the base. Does NOT enter the timeline/projection.
+     * See bridge-v1.md「Connection policy (control-plane)」.
+     */
+    connectionPolicy?: {
+      preferLocalNetwork: boolean; // default false
+    };
   };
   capabilities?: Record<string, boolean>;
   bridgeEpoch?: string;
@@ -203,7 +216,7 @@ export type BridgeRPCMethod =
   | "list_memory_files"
   | "read_memory_file"
   | "fetch_content_chunk"
-  | "read_file"
+  | "read_file_v2"
   | "rename_session"
   | "share_session"
   | "archive_session"
@@ -231,7 +244,13 @@ export type BridgeRPCMethod =
   | "get_git_context"
   | "checkout_git_branch"
   | "create_git_branch"
-  | "create_git_worktree";
+  | "create_git_worktree"
+  // §6.1 checkpoint 只读 diff: per-turn / full-thread read-only workspace diff backed by
+  // hidden git refs. Capability string: "supports_checkpoint" (derived from the driver
+  // implementing core.CheckpointProvider). Scoped to session.read (scope table §6.3).
+  // Canonical doc: docs/protocol/bridge-v1.md「RPC: get_turn_diff / get_full_thread_diff」.
+  | "get_turn_diff"
+  | "get_full_thread_diff";
 
 export interface BridgeRequest<TParams = Record<string, unknown>> {
   type: "request";
@@ -285,6 +304,12 @@ export type BridgeEventName =
   | "question_asked"
   | "question_resolved"
   | "sessions_changed"
+  // §6.1 checkpoint 只读 diff: control-plane push after MacBridge writes a turn's
+  // checkpoint git ref. Carries per-file {path,+/-} (capped, NO full patch) so clients
+  // can surface the summary without polling. Control-plane only: never mutates the
+  // message projection (SSV2 guardrail 8 enumerated exception — not a second writer).
+  // Canonical doc: bridge-v1.md「Event: turn_diff_ready」.
+  | "turn_diff_ready"
   // Session Projection Stream (session_sync_v2 capability). Mac reduces EventPublisher
   // output into one authoritative SessionProjection; clients apply patches/snapshots only
   // and never dual-source merge. See bridge-v1.md「Session Projection Stream」.
@@ -441,6 +466,23 @@ export type BridgeProjectionPart =
       toolResult?: unknown;
       toolStatus?: string;
       matches?: ToolMatches;
+      /**
+       * Optional display title for the tool step. Path-bearing for file tools
+       * (e.g. Claude Edit/Write `file_path`, Codex patch target). Additive;
+       * absent on older producers — clients fall back to toolInput / toolName.
+       */
+      title?: string;
+      /**
+       * Optional structured file mutations for this tool step (Codex Patch /
+       * apply_patch). Shape matches UnifiedFileChange (path/kind/diff/movePath).
+       * Additive; absent when the producer only has free-form toolResult text.
+       */
+      fileChanges?: Array<{
+        path: string;
+        kind?: string;
+        movePath?: string;
+        diff?: string;
+      }>;
     }
   | { type: "file"; path?: string; kind?: string; diff?: string; movePath?: string }
   | {
@@ -461,7 +503,64 @@ export type BridgeProjectionPart =
       subagentBlocks?: BridgeProjectionPart[];
       subagentError?: string;
       subagentDiagnostic?: string; // orphan_parent | cycle | max_depth
+    }
+  | {
+      // Structured user input v2 (design §6/§10). One part per interactionId, upserted in place
+      // by the MacBridge Projection Kernel (the single writer) — never a second "answered" card.
+      // Clients map this read-only into a dedicated block; status is owned by the kernel, answer
+      // text is never stored in the projection (esp. for isSecret). See bridge-v1.md
+      // 「Part vocabulary: user_input」 and 「Structured user input v2」.
+      type: "user_input";
+      interactionId: string; // stable derived id ("ui_"+sha256…); the upsert key
+      status: "pending" | "answered" | "rejected" | "auto_resolved" | "unavailable" | "failed";
+      questions?: BridgeUserInputQuestion[]; // present on requested; absent on resolved
+      canRespond: boolean; // false for failed/unavailable (no clickable UI)
+      canReject: boolean; // Claude true (real deny control_response), Codex false
+      expiresAt?: number; // epoch-ms display hint; clients MUST NOT run a local timer to flip status
+      resolvedAt?: number; // epoch-ms when the interaction reached a terminal status
+      resolutionSource?: "ios" | "mac" | "other_client" | "backend";
+      diagnosticCode?: string; // e.g. invalid_backend_request for malformed/failed
     };
+
+/** Canonical structured-input question (design §6.1). Ids derived: questionId = interactionId+"_q_"+i. */
+export interface BridgeUserInputQuestion {
+  id: string;
+  header?: string;
+  prompt: string;
+  answerMode: "single" | "multiple" | "text";
+  options: BridgeUserInputOption[]; // non-empty (empty is malformed → failed)
+  allowsCustomAnswer: boolean; // Claude AskUserQuestion: true (real Other/custom-result path)
+  isSecret: boolean; // Claude v1: always false
+  required: boolean; // Claude v1: always true
+}
+
+/** optionId = questionId+"_o_"+j. */
+export interface BridgeUserInputOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+export interface ResolveUserInputParams {
+  sessionId: string;
+  interactionId: string;
+  clientActionId: string; // canonical UUID v4, reused for idempotent retry of the same action
+  action: "answer" | "reject";
+  answers?: Array<{
+    questionId: string;
+    values: Array<
+      | { kind: "option"; optionId: string }
+      | { kind: "text"; text: string }
+    >;
+  }>;
+}
+
+export interface ResolveUserInputResult {
+  interactionId: string;
+  outcome: "accepted" | "already_resolved" | "in_progress";
+  currentStatus: Extract<BridgeProjectionPart, { type: "user_input" }>["status"];
+  headRev: number;
+}
 
 export interface BridgeMessageProjection {
   /** Authoritative source id: rollout response_item.id (user) / call_id (tool) / lifecycle turn_id (assistant text). */
@@ -509,6 +608,7 @@ export type BridgePartOp =
   | { turnId: string; messageId: string; op: "append_text"; text: string }
   | { turnId: string; messageId: string; op: "set_thinking"; text: string }
   | { turnId: string; messageId: string; op: "upsert_tool"; part: Extract<BridgeProjectionPart, { type: "tool" }> }
+  | { turnId: string; messageId: string; op: "upsert_user_input"; part: Extract<BridgeProjectionPart, { type: "user_input" }> }
   | { turnId: string; messageId: string; op: "replace_parts"; parts: BridgeProjectionPart[] };
 
 /** Push frame `projection_patch`: baseRev→syncRev incremental delta (coalesced 50–100ms server-side). */

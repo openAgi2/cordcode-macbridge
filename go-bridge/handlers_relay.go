@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openAgi2/cordcode-macbridge/agent/claudecode"
 	"github.com/openAgi2/cordcode-macbridge/agent/codex"
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
@@ -90,17 +91,32 @@ func (h *Handlers) startClaudeSessionFileRelayAt(
 		return
 	}
 	h.mu.Lock()
+	kind := h.relayRunningKind[sessionID]
 	running := h.relayRunning[sessionID]
-	if !running {
+	switch {
+	case running && kind == relayKindClaudeFile:
+		// Already the UUID content source.
+		h.mu.Unlock()
+		return
+	case running && kind == relayKindAgent:
+		// Agent sidecar holds the global slot for control-plane. Promote kind to
+		// claude_file so this loop is the content source without killing agent
+		// (agent continues via agentRelayRunning). Without this, local send that
+		// started agent first never attached file-relay → no mid-turn projection_patch.
+		h.relayRunningKind[sessionID] = relayKindClaudeFile
+		h.mu.Unlock()
+		go h.claudeSessionFileRelayLoop(sessionID, conn, backendID, initialOffset)
+		return
+	case !running:
 		h.relayRunning[sessionID] = true
 		h.relayRunningKind[sessionID] = relayKindClaudeFile
+		h.mu.Unlock()
+		go h.claudeSessionFileRelayLoop(sessionID, conn, backendID, initialOffset)
+		return
+	default:
+		h.mu.Unlock()
+		return
 	}
-	h.mu.Unlock()
-	if running {
-		return // 已有标准 relay 或文件 relay 在运行
-	}
-
-	go h.claudeSessionFileRelayLoop(sessionID, conn, backendID, initialOffset)
 }
 
 func (h *Handlers) startCodexSessionFileRelay(sessionID string, conn Connection, backendID string, agent core.Agent) {
@@ -163,8 +179,45 @@ func (h *Handlers) startGrokLeaderSessionRelay(sessionID, backendID string, agen
 // to core.Event via convertSessionUpdate) to clients via the same wire path as
 // local turns (mapAgentEvent + sendSessionEvent). Exits when the leader disconnects
 // (channel close); the next session-open restarts it.
+//
+// Turn 生命周期合成 (Mac 发起的外部 turn 没有 iOS 发起路径里的 EventTurnStarted):
+//   - turn_started: 上游 grok-build 不发任何 turn-start sessionUpdate (真实数据
+//     response_started=0), 所以在首个内容事件前合成 turn_started + running, 激活
+//     iOS isGenerating。turnId 用首个内容事件携带的 _meta.promptId (== 后续
+//     turn_completed 的 prompt_id, convertSessionUpdate 已透传到 ev.TurnID)——SSV2
+//     projection reducer 的 turn_started 分支要求 source-proven turnId 才会 arm
+//     ActiveTurnID (projection_reducer.go:465), 留空会被 skip, 后续 tool_started 无
+//     active turn 可挂。promptId 与 turn_completed 收口键一致, 不跳变。
+//   - turn_completed: 由 convertSessionUpdate 的 case "turn_completed" 映射上游 durable
+//     终态信号产生 (主收口), 这里只负责 markIdle + 重置 turnArmed。
+//   - defer idle: 仅当 leader 异常断开 (channel close) 且未收到 turn_completed 时
+//     兜底, 防止 isGenerating 残留; 正常收口不经过这里。
 func (h *Handlers) grokLeaderSessionRelayLoop(sessionID, backendID string, sub core.SessionEventSubscriber, relayKey, cwd string) {
+	// 内容事件: 首个到达时触发 turn_started 合成。todos_updated (plan) 不算内容,
+	// 因为它可能在 turn 真正开始前就到达, 误触发执行态。
+	isContentEvent := func(eventName string) bool {
+		switch eventName {
+		case "text_delta", "reasoning_delta", "tool_started", "tool_finished":
+			return true
+		}
+		return false
+	}
+
+	var turnArmed bool
+	// armedTurnID 是首个内容事件透传的 promptId —— user_message_chunk 不带 promptId,
+	// 需要用同 turn 的 promptId 补身份 (SSV2 reducer 对 identityless 的 user_message
+	// 直接 skip, iOS 会只看到回复看不到 prompt)。
+	var armedTurnID string
+	// pendingUserText 缓冲外部 turn 的用户 prompt (attach 补扫或 live user_message_chunk),
+	// 等 turn 身份确定后一次性以 user_message 送入投影。
+	var pendingUserText string
 	defer func() {
+		// leader 异常断开且未收 turn_completed → 兜底补 idle, 防 isGenerating 残留。
+		if turnArmed {
+			slog.Info("go-bridge: grokLeaderSessionRelay leader disconnect with armed turn, emitting fallback idle", "sessionID", sessionID)
+			h.sessions.markIdle(sessionID)
+			h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "idle"})
+		}
 		h.mu.Lock()
 		delete(h.relayRunning, relayKey)
 		h.mu.Unlock()
@@ -181,10 +234,59 @@ func (h *Handlers) grokLeaderSessionRelayLoop(sessionID, backendID string, sub c
 		if eventName == "" {
 			continue
 		}
-		if eventName == "turn_started" {
+		if eventName == "user_message" && ev.TurnID == "" {
+			// 身份延迟的 user prompt (codec 的 user_message_chunk): 挂起, 等首个
+			// 内容事件用同 turn 的 promptId 补齐后再发, 不在此处猜身份。
+			if text := strings.TrimSpace(ev.Content); text != "" {
+				pendingUserText = text
+			}
+			continue
+		}
+		// 首个内容事件前合成 turn_started + running (Mac 外部 turn 无上游 start 信号)。
+		// turnId 取自首个内容事件的 ev.TurnID (= convertSessionUpdate 透传的 _meta.promptId),
+		// 让 reducer arm ActiveTurnID 后续 tool/text 才有 turn 可挂。
+		if isContentEvent(eventName) && !turnArmed {
+			turnArmed = true
+			armedTurnID = ev.TurnID
 			h.sessions.markRunning(sessionID)
-		} else if eventName == "turn_completed" || eventName == "error" {
+			slog.Info("go-bridge: grokLeaderSessionRelay SYNTHESIZE turn_started+running", "sessionID", sessionID, "firstContent", eventName, "turnId", ev.TurnID)
+			h.sendSessionEvent(sessionID, backendID, "turn_started", map[string]interface{}{"turnId": ev.TurnID})
+			if pendingUserText != "" {
+				h.sendSessionEvent(sessionID, backendID, "user_message", map[string]interface{}{
+					"itemId": ev.TurnID,
+					"turnId": ev.TurnID,
+					"text":   pendingUserText,
+				})
+				pendingUserText = ""
+			}
+			h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "running"})
+		} else if eventName == "user_message" && turnArmed && armedTurnID != "" {
+			// 内容事件先到、prompt 后到 (异常顺序): 用已 arm 的 turn 身份补发。
+			h.sendSessionEvent(sessionID, backendID, "user_message", map[string]interface{}{
+				"itemId": armedTurnID,
+				"turnId": armedTurnID,
+				"text":   ev.Content,
+			})
+			continue
+		}
+		if eventName == "turn_completed" || eventName == "error" {
+			// 从未收到内容事件的 turn (空回复): 终态自带 promptId, 此时补发挂起的
+			// prompt, 让 iOS 至少看到用户问题 + 完成收口, 而不是只看到空回复。
+			if pendingUserText != "" && ev.TurnID != "" {
+				h.sendSessionEvent(sessionID, backendID, "user_message", map[string]interface{}{
+					"itemId": ev.TurnID,
+					"turnId": ev.TurnID,
+					"text":   pendingUserText,
+				})
+			}
+			pendingUserText = ""
+			armedTurnID = ""
+			// 上游 durable 终态信号到达 (convertSessionUpdate 映射) → 主收口。
 			h.sessions.markIdle(sessionID)
+			turnArmed = false
+			slog.Info("go-bridge: grokLeaderSessionRelay turn terminal", "sessionID", sessionID, "event", eventName)
+		} else if eventName == "turn_started" {
+			h.sessions.markRunning(sessionID)
 		}
 		h.sendSessionEvent(sessionID, backendID, eventName, data)
 	}
@@ -363,6 +465,19 @@ func (h *Handlers) codexSessionFileRelayLoop(sessionID string, conn Connection, 
 				h.recordPendingNotification(sessionID, backendID, "completed", "task_complete")
 				currentTurnID = ""
 				// task_complete 后继续 watch 下一轮（Phase 0）；relay 靠无增长 TTL 退出。
+			case "turn_aborted":
+				// §5.1 #7 producer layer 3（live file-relay）：rollout 增长出 turn_aborted
+				// （真实形态 019f5453）→ 收口 active turn（reducer turn_aborted 终态）+ idle。
+				// 不发 completed 通知（用户中断，非完成）。清空 currentTurnID 让 watch-loop 的
+				// detectCodexTranscriptTask 复核判 idle，及时停止 watch 该 stale 文件。
+				abortedTurnID := ev.turnID
+				if abortedTurnID == "" {
+					abortedTurnID = currentTurnID
+				}
+				slog.Info("go-bridge: codexSessionFileRelay EMIT turn_aborted", "sessionID", sessionID)
+				h.sendSessionEvent(sessionID, backendID, "turn_aborted", map[string]interface{}{"turnId": abortedTurnID, "reason": "turn_aborted"})
+				h.broadcastIdleState(sessionID, backendID)
+				currentTurnID = ""
 			case "text":
 				if seen[ev.text] {
 					continue
@@ -451,6 +566,16 @@ func (h *Handlers) ensureRelaysForSubscribedCodexSessions() {
 		return
 	}
 	for _, sessionID := range h.broadcaster.SubscribedSessionIDs("codex") {
+		// Lazy-create placeholders never have a rollout JSONL; restarting a file
+		// relay for pending-* only burns CPU and log noise. Prefer the resolved
+		// real id (registry alias) when available.
+		if strings.HasPrefix(sessionID, "pending-") {
+			if t, ok := h.sessions.get(sessionID); ok && t != nil && t.sessionID != "" && t.sessionID != sessionID {
+				sessionID = t.sessionID
+			} else {
+				continue
+			}
+		}
 		h.mu.Lock()
 		running := h.relayRunning[codexSessionFileRelayKey(sessionID)]
 		h.mu.Unlock()
@@ -473,7 +598,7 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 		slog.Info("go-bridge: claudeSessionFileRelay exited", "sessionID", sessionID)
 	}()
 
-	_, sessPath := findClaudeSessionFile(sessionID, "")
+	_, sessPath := h.findClaudeSessionFile(sessionID, "")
 	if sessPath == "" {
 		slog.Debug("go-bridge: claudeSessionFileRelay no transcript file found", "sessionID", sessionID)
 		return
@@ -606,11 +731,15 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 		if cachedPID == 0 {
 			// Late bind: process may appear after open (owner opens idle B, then Mac starts turn).
 			if proc2, lister2, err2 := h.sessionLiveProcess(context.Background(), sessionID, backendID); err2 == nil && proc2.Live && proc2.PID > 0 {
-				cachedPID = proc2.PID
-				if lister2 != nil {
-					liveLister = lister2
+				// A process catalog can briefly retain a just-dead worker. Verify the PID before
+				// binding so a subscribed watcher does not churn dead→bind on every poll.
+				if lister2 == nil || lister2.IsProcessAlive(context.Background(), proc2.PID) {
+					cachedPID = proc2.PID
+					if lister2 != nil {
+						liveLister = lister2
+					}
+					slog.Info("go-bridge: claudeSessionFileRelay bound live process", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
 				}
-				slog.Info("go-bridge: claudeSessionFileRelay bound live process", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
 			}
 		}
 		if liveLister != nil && cachedPID > 0 {
@@ -618,8 +747,18 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 				processDeathMisses++
 				if processDeathMisses >= claudeFileRelayProcessDeathMisses {
 					h.broadcastIdleState(sessionID, backendID)
-					slog.Info("go-bridge: claudeSessionFileRelay process dead, exiting", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
-					return
+					if !h.broadcaster.HasSessionSubscriber(backendID, sessionID) {
+						slog.Info("go-bridge: claudeSessionFileRelay process dead with no subscriber, exiting", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
+						return
+					}
+					// Claude Desktop may end one worker and later append another turn to the
+					// same transcript from a replacement process. The open client subscription,
+					// not the lifetime of one PID, owns this watcher. Forget the stale PID and
+					// return to late-binding mode while continuing to observe file growth.
+					slog.Info("go-bridge: claudeSessionFileRelay process dead; keeping subscribed transcript watch", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
+					cachedPID = 0
+					liveLister = nil
+					processDeathMisses = 0
 				}
 			} else {
 				processDeathMisses = 0
@@ -654,7 +793,9 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 		}
 		if !sourceChanged {
 			processStillLive := cachedPID > 0 && liveLister != nil && liveLister.IsProcessAlive(context.Background(), cachedPID)
-			if !runningObserved && !processStillLive && claudeFileRelayLiveIdleTTL > 0 && time.Since(lastMeaningfulGrowth) >= claudeFileRelayLiveIdleTTL {
+			if !runningObserved && !processStillLive &&
+				!h.broadcaster.HasSessionSubscriber(backendID, sessionID) &&
+				claudeFileRelayLiveIdleTTL > 0 && time.Since(lastMeaningfulGrowth) >= claudeFileRelayLiveIdleTTL {
 				if !h.sessions.isIdle(sessionID) {
 					h.broadcastIdleState(sessionID, backendID)
 				}
@@ -895,7 +1036,7 @@ func (h *Handlers) deliverClaudeLegacyRow(
 	runningObserved *bool,
 	cachedPID int,
 ) {
-	evs := claudeEntryToProjectionEvents(e, currentTurnID)
+	evs := claudeEntryToProjectionEvents(e, currentTurnID, nil)
 	for _, ev := range evs {
 		switch ev.Event {
 		case "user_message":
@@ -921,7 +1062,7 @@ func (h *Handlers) deliverClaudeLegacyRow(
 }
 
 // deliverClaudeLiveRawFrames dual-sends the raw content frames of an accepted live source batch to
-// legacy (non-syncV2) consumers via the deliver-only outlet — never re-reduced (the transaction
+// legacy (non-syncV2) consumers via the package-private pre-reduced outlet — never re-reduced (the transaction
 // already reduced them; guardrail #3). Mirrors the prior legacy raw sequence (turn_started arms
 // before user_message). v2 consumers get the projection_patch instead (design §6.5/§9.3).
 func (h *Handlers) deliverClaudeLiveRawFrames(batch ClaudeSourceRecordBatch, sessionID, backendID string) {
@@ -929,7 +1070,7 @@ func (h *Handlers) deliverClaudeLiveRawFrames(batch ClaudeSourceRecordBatch, ses
 	dir := h.sessions.directoryForSession(sessionID)
 	h.mu.Unlock()
 	publish := func(event string, data map[string]interface{}) {
-		h.eventPublisher.PublishLogicalDeliverOnly(LogicalEvent{
+		h.eventPublisher.publishPreReducedTimeline(LogicalEvent{
 			SessionID: sessionID, BackendID: backendID, Event: event, Data: data,
 			Directory: dir, Broadcast: true, Offline: IsDurableMilestone(event),
 		})
@@ -990,7 +1131,12 @@ type claudeTranscriptRelayEntry struct {
 	IsCompactSummary          bool                        `json:"isCompactSummary"`
 	IsVisibleInTranscriptOnly bool                        `json:"isVisibleInTranscriptOnly"`
 	CompactMetadata           *claudeRelayCompactMetadata `json:"compactMetadata"`
-	Message                   *struct {
+	// Claude Desktop persists the complete AskUserQuestion resolution on the user row in
+	// toolUseResult, alongside message.content.tool_result. The relay needs presence and
+	// shape only; answers are never copied into the projection event.
+	ToolUseResult           json.RawMessage `json:"toolUseResult"`
+	SourceToolAssistantUUID string          `json:"sourceToolAssistantUUID"`
+	Message                 *struct {
 		ID         string          `json:"id"`
 		Role       string          `json:"role"`
 		StopReason string          `json:"stop_reason"`
@@ -1292,6 +1438,49 @@ type claudeRelayContentBlock struct {
 	IsError   bool            `json:"is_error"`    // tool_result
 }
 
+// claudeToolUseMeta records a tool_use block's display metadata (toolName + path-bearing title
+// + raw toolInput) so the later tool_result record (matched by tool_use_id) can carry the same
+// fields onto tool_finished. This is the Phase 1C L-α correlation for the relay-transcript
+// cold-start path.
+type claudeToolUseMeta struct {
+	ToolName  string
+	Title     string
+	ToolInput string
+}
+
+// claudeSummarizeToolInput mirrors the claudecode package's summarizeInput: derives a
+// human-readable, often path-bearing summary from a tool input map (file_path for
+// Edit/Write/Read/MultiEdit, command for Bash, pattern for Grep/Glob). Used so cold-start
+// tool events carry a title that iOS extractPrimaryPath branch 2 can resolve to a file path.
+// Returns "" when no known field is present (caller falls back to toolName).
+func claudeSummarizeToolInput(tool string, input map[string]any) string {
+	if input == nil {
+		return ""
+	}
+	switch tool {
+	case "Read", "Edit", "Write", "MultiEdit":
+		if fp, ok := input["file_path"].(string); ok && fp != "" {
+			return fp
+		}
+	case "Bash":
+		if cmd, ok := input["command"].(string); ok && cmd != "" {
+			return cmd
+		}
+	case "Grep":
+		if p, ok := input["pattern"].(string); ok && p != "" {
+			return p
+		}
+	case "Glob":
+		if p, ok := input["pattern"].(string); ok && p != "" {
+			return p
+		}
+		if p, ok := input["glob_pattern"].(string); ok && p != "" {
+			return p
+		}
+	}
+	return ""
+}
+
 // claudeRelayContentBlocks 解析 assistant message.content（可能是字符串或 block 数组）。
 func claudeRelayContentBlocks(raw json.RawMessage) []claudeRelayContentBlock {
 	if len(raw) == 0 || string(raw) == "null" {
@@ -1360,6 +1549,9 @@ func streamClaudeTranscriptProjectionEventsRangeSeed(
 	scanner.Buffer(buf, 1024*1024*16)
 	skipNextResumeNoResponse := false
 	currentTurnID := initialTurnID
+	// L-α: per-scan tool_use metadata correlation (tool_use_id → toolName/title/toolInput),
+	// so tool_finished (from the later user tool_result record) carries a path-bearing title.
+	toolUseMeta := make(map[string]claudeToolUseMeta)
 	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -1376,7 +1568,7 @@ func streamClaudeTranscriptProjectionEventsRangeSeed(
 			continue
 		}
 		if isClaudeCompactionBoundaryRelayEntry(e) {
-			for _, ev := range claudeEntryToProjectionEvents(e, &currentTurnID) {
+			for _, ev := range claudeEntryToProjectionEvents(e, &currentTurnID, nil) {
 				if !emit(ev) {
 					return ctx.Err()
 				}
@@ -1400,7 +1592,7 @@ func streamClaudeTranscriptProjectionEventsRangeSeed(
 		if e.Type != "user" && e.Type != "assistant" {
 			continue
 		}
-		for _, ev := range claudeEntryToProjectionEvents(e, &currentTurnID) {
+		for _, ev := range claudeEntryToProjectionEvents(e, &currentTurnID, toolUseMeta) {
 			if !emit(ev) {
 				return ctx.Err()
 			}
@@ -1417,7 +1609,13 @@ func streamClaudeTranscriptProjectionEventsRangeSeed(
 // emits user_message; user tool_result blocks emit tool_finished; assistant blocks emit
 // text_delta / reasoning_delta / tool_started; a final stop_reason emits turn_completed (the
 // segment boundary). Returns nil for entries that carry no projection-meaningful content.
-func claudeEntryToProjectionEvents(e claudeTranscriptRelayEntry, currentTurnID *string) []projectionHydrateEvent {
+//
+// toolUseMeta threads tool_use block metadata (toolName + path-bearing title + toolInput) from
+// the assistant tool_use record to the later user tool_result record (matched by tool_use_id),
+// so tool_finished carries the same path-bearing title/toolName iOS needs for cold-start
+// activity rows (Phase 1C L-α on the relay-transcript path). May be nil when the caller does
+// not need cross-entry correlation.
+func claudeEntryToProjectionEvents(e claudeTranscriptRelayEntry, currentTurnID *string, toolUseMeta map[string]claudeToolUseMeta) []projectionHydrateEvent {
 	if isClaudeInternalCompactRelayEntry(e) {
 		return nil
 	}
@@ -1451,9 +1649,42 @@ func claudeEntryToProjectionEvents(e claudeTranscriptRelayEntry, currentTurnID *
 			if b.Type != "tool_result" {
 				continue
 			}
+			if b.ToolUseID != "" && claudecode.HasStructuredUserInputResultEnvelope(e.ToolUseResult) {
+				data := map[string]interface{}{
+					"turnId":        *currentTurnID,
+					"itemId":        b.ToolUseID,
+					"interactionId": claudecode.DeriveStructuredUserInputInteractionID(b.ToolUseID),
+					"status":        "answered",
+					"source":        "other_client",
+				}
+				if timestampMillis := claudeRelayTimestampMillis(e.Timestamp); timestampMillis > 0 {
+					data["resolvedAt"] = timestampMillis
+				}
+				// Do not emit tool_finished for AskUserQuestion. Its resolution is a structured
+				// user_input update; the answer body remains outside projection by contract.
+				out = append(out, projectionHydrateEvent{Event: "user_input_resolved", Data: data})
+				continue
+			}
 			data := map[string]interface{}{"toolResult": claudeToolResultText(b), "toolStatus": "completed"}
 			if b.ToolUseID != "" {
 				data["itemId"] = b.ToolUseID
+				// L-α (relay-transcript path): carry the tool_use metadata (toolName + title +
+				// toolInput) onto tool_finished so cold-start hydration forwards a path-bearing
+				// title to iOS. Previously tool_finished only had itemId/toolResult/toolStatus,
+				// so Claude cold-start showed no file path (R5).
+				if toolUseMeta != nil {
+					if meta, ok := toolUseMeta[b.ToolUseID]; ok {
+						if meta.ToolName != "" {
+							data["toolName"] = meta.ToolName
+						}
+						if meta.Title != "" {
+							data["title"] = meta.Title
+						}
+						if meta.ToolInput != "" {
+							data["toolInput"] = meta.ToolInput
+						}
+					}
+				}
 			}
 			out = append(out, projectionHydrateEvent{Event: "tool_finished", Data: data})
 		}
@@ -1491,12 +1722,67 @@ func claudeEntryToProjectionEvents(e claudeTranscriptRelayEntry, currentTurnID *
 				out = append(out, projectionHydrateEvent{Event: "reasoning_delta", Data: map[string]interface{}{"itemId": turnID, "delta": b.Thinking}})
 			}
 		case "tool_use", "server_tool_use":
+			if b.Name == "AskUserQuestion" && b.ID != "" {
+				interactionID := claudecode.DeriveStructuredUserInputInteractionID(b.ID)
+				var input map[string]any
+				var normalized []core.UserInputQuestion
+				var normalizeErr error
+				if err := json.Unmarshal(b.Input, &input); err != nil {
+					normalizeErr = err
+				} else {
+					normalized, normalizeErr = claudecode.NormalizeStructuredUserInputQuestions(interactionID, input)
+				}
+				status := "pending"
+				diagnosticCode := "observe_only"
+				canRespond := false
+				canReject := false
+				if normalizeErr != nil || len(normalized) == 0 {
+					status = "failed"
+					diagnosticCode = "invalid_backend_request"
+				}
+				out = append(out, projectionHydrateEvent{
+					Event: "user_input_requested",
+					Data: map[string]interface{}{
+						"turnId":         turnID,
+						"itemId":         b.ID,
+						"interactionId":  interactionID,
+						"status":         status,
+						"questions":      userInputQuestionsToWire(normalized),
+						"canRespond":     canRespond,
+						"canReject":      canReject,
+						"diagnosticCode": diagnosticCode,
+					},
+				})
+				continue
+			}
 			data := map[string]interface{}{"toolName": b.Name}
+			// L-α (relay-transcript path): derive a path-bearing title from the tool input
+			// (file_path for Edit/Write/Read, command for Bash) so cold-start activity rows
+			// show a file path. Matches the live session.go summarizeInput path.
+			toolInputStr := ""
+			title := b.Name
 			if len(b.Input) > 0 && string(b.Input) != "null" {
 				data["toolInput"] = json.RawMessage(b.Input)
+				toolInputStr = string(b.Input)
+				var decoded map[string]any
+				if err := json.Unmarshal(b.Input, &decoded); err == nil {
+					if summarized := claudeSummarizeToolInput(b.Name, decoded); strings.TrimSpace(summarized) != "" {
+						title = summarized
+					}
+				}
 			}
+			data["title"] = title
 			if b.ID != "" {
 				data["itemId"] = b.ID
+				// Record metadata so the matching tool_result (user record) tool_finished
+				// can carry the same title/toolName/toolInput.
+				if toolUseMeta != nil {
+					toolUseMeta[b.ID] = claudeToolUseMeta{
+						ToolName:  b.Name,
+						Title:     title,
+						ToolInput: toolInputStr,
+					}
+				}
 			}
 			out = append(out, projectionHydrateEvent{Event: "tool_started", Data: data})
 		}
@@ -1542,7 +1828,7 @@ func claudeToolResultText(b claudeRelayContentBlock) string {
 }
 
 func (h *Handlers) classifyClaudeTranscriptFile(sessPath string) claudeTranscriptRelayMeaningfulEntry {
-	transcriptStateProbe()
+	h.noteTranscriptStateProbe()
 	completeCut, err := projectionJSONLStartCut(sessPath)
 	if err != nil {
 		return claudeTranscriptRelayMeaningfulEntry{}
@@ -1627,17 +1913,26 @@ func (h *Handlers) detectCodexTranscriptTask(sessPath string) (string, string) {
 			if event.turnID != "" {
 				turnID = event.turnID
 			}
+		case "turn_aborted":
+			// §5.1 #7 producer layer 3：rollout 以 turn_aborted 收口（无 task_complete，
+			// 真实形态 019f5453）→ 视同 idle 终态，避免 detectCodexTranscriptTaskState 永久
+			// 判 running 致 file-relay 滞留 watch 一个已死的 turn 文件。
+			state = "idle"
+			if event.turnID != "" {
+				turnID = event.turnID
+			}
 		}
 	}
 	return state, turnID
 }
 
-// scanCodexTranscriptTaskEvents 提取 lifecycle 事件（task_started/task_complete），
-// 供 detectCodexTranscriptTaskState 判定当前态。委托给统一扫描器后过滤。
+// scanCodexTranscriptTaskEvents 提取 lifecycle 事件（task_started/task_complete/turn_aborted），
+// 供 detectCodexTranscriptTaskState 判定当前态。委托给统一扫描器后过滤。turn_aborted 是
+// §5.1 #7 新增的终态（中断收口），与 task_complete 同等进入 state 判定。
 func (h *Handlers) scanCodexTranscriptTaskEvents(sessPath string, offset int64) []codexRelayEvent {
 	var events []codexRelayEvent
 	for _, ev := range scanCodexTranscriptRelayEvents(sessPath, offset) {
-		if ev.kind == "task_started" || ev.kind == "task_complete" {
+		if ev.kind == "task_started" || ev.kind == "task_complete" || ev.kind == "turn_aborted" {
 			events = append(events, ev)
 		}
 	}
@@ -1809,6 +2104,13 @@ func codexRolloutEntryEvents(entry codexRolloutEntry) []codexRelayEvent {
 			out = append(out, codexRelayEvent{kind: "task_started", turnID: p.TurnID})
 		case "task_complete":
 			out = append(out, codexRelayEvent{kind: "task_complete", turnID: p.TurnID})
+		case "turn_aborted":
+			// §5.1 #7 producer layer 3（cold rollout）：真实 rollout 形态见 session
+			// 019f5453（event_msg.payload.type="turn_aborted"，携带 turn_id / reason /
+			// completed_at / duration_ms）。这是 turn 的终态标记——只读 turn_id（reason
+			// 等字段 catalog/projection 不消费），映射到 reducer 的 turn_aborted 终态 case，
+			// 使 content-less aborted turn 不再永久 hydrating（guardrail #6）。
+			out = append(out, codexRelayEvent{kind: "turn_aborted", turnID: p.TurnID})
 		case "agent_message":
 			if strings.TrimSpace(p.Message) != "" {
 				out = append(out, codexRelayEvent{kind: "text", text: p.Message})
@@ -2143,6 +2445,22 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 				errMsg := ""
 				if ev.Error != nil {
 					errMsg = ev.Error.Error()
+				}
+				// §5.1 #7 producer layer 3（live）：进程崩溃 / turn.failed / app-server error 都
+				// 走 core.EventError。若不收口，projection 的 active turn 永久 running（计划
+				// §5.1 #7 line 211）。reducer 的 turn_error case（5df5a28）settle active turn；
+				// turnId 省略时 reducer 回退到 ActiveTurnID。仅对 EventError 即终态的非 claude
+				// backend 合成（claude 的 EventError 可恢复，loop continue 不收口）。
+				if backendID != "claude" && backendID != "claudecode" {
+					h.deltaBatcher.Send(LogicalEvent{
+						SessionID: sessionID,
+						BackendID: backendID,
+						Event:     "turn_error",
+						Data:      map[string]interface{}{"turnId": ev.TurnID, "message": errMsg},
+						Directory: directory,
+						Broadcast: true,
+						Offline:   true,
+					})
 				}
 				h.broadcastIdleState(sessionID, backendID)
 				h.recordPendingNotification(sessionID, backendID, "error", errMsg)

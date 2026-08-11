@@ -2,6 +2,7 @@ package gobridge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -100,6 +101,32 @@ func TestProjectionCheckpointRestoreValidAndEmpty(t *testing.T) {
 	gotEmpty, ok := emptyKernel.Snapshot("codex", "empty-session")
 	if !ok || gotEmpty.SessionID != "empty-session" || len(gotEmpty.Turns) != 0 {
 		t.Fatalf("valid empty checkpoint must be ready: ok=%v projection=%+v", ok, gotEmpty)
+	}
+}
+
+func TestProjectionCheckpointRejectsPreviousSemanticSchema(t *testing.T) {
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "rollout.jsonl")
+	writeProjectionSource(t, sourcePath, "prefix\n")
+	source := ProjectionSourceDescriptor{Identity: "rollout-previous-schema", Path: sourcePath, Cursor: int64(len("prefix\n"))}
+	store := NewProjectionCheckpointStore(dir)
+	checkpoint := saveTestCheckpoint(t, store, source, testProjection("session-previous-schema", 1))
+
+	checkpoint.SchemaVersion = projectionCheckpointSchemaVersion - 1
+	raw, err := json.Marshal(checkpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkpointPath, err := store.checkpointPath("codex", checkpoint.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(checkpointPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.LoadValidated("codex", checkpoint.SessionID, source); !errors.Is(err, ErrProjectionCheckpointInvalid) {
+		t.Fatalf("previous semantic checkpoint schema must be invalidated, got %v", err)
 	}
 }
 

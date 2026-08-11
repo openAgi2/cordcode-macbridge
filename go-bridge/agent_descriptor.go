@@ -74,38 +74,72 @@ func agentDisplayName(id string, agent core.Agent) string {
 	}
 }
 
-// agentLiveEvents 根据 agent ID 返回实时事件模型。
-// claude 进程模型是 stdin/stdout pipe，无法广播外部 turn 事件；
-// opencode 使用服务事件流；codex 只有显式共享 app-server URL 时才有进程级广播。
-func agentLiveEvents(id string, codexBackendMode string, cfg *AgentDetectionConfig) string {
+// resolveStaticDescriptor returns the driver's WireDescriptor if it self-describes,
+// else nil. A driver returning a nil descriptor is treated as "not provided" so a
+// driver may opt out per-build.
+func resolveStaticDescriptor(agent core.Agent) *core.WireDescriptor {
+	if wd, ok := agent.(core.WireDescriptorProvider); ok {
+		return wd.WireDescriptor()
+	}
+	return nil
+}
+
+// resolveDescriptorNames returns (Kind, DisplayName), preferring the driver's
+// self-description (§6.2) and falling back to the pre-§6.2 id-keyed switches for
+// drivers that have not migrated. Every registered driver
+// (claudecode/codex/opencode/grokbuild) self-describes, so agentKind/agentDisplayName
+// are fallback-only and their default branches are never hit by a registered driver.
+func resolveDescriptorNames(id string, agent core.Agent) (string, string) {
+	if wd := resolveStaticDescriptor(agent); wd != nil {
+		return wd.Kind, wd.DisplayName
+	}
+	return agentKind(id), agentDisplayName(id, agent)
+}
+
+// resolveRequiresPolling returns whether the client should poll external turns, from
+// the driver's self-description (fallback to the legacy id switch for un-migrated
+// drivers).
+func resolveRequiresPolling(id string, agent core.Agent) bool {
+	if wd := resolveStaticDescriptor(agent); wd != nil {
+		return wd.RequiresExternalTurnPolling
+	}
+	return legacyRequiresPolling(id)
+}
+
+// legacyRequiresPolling is the pre-§6.2 fallback for drivers that do not self-describe.
+// codex is excluded because its transcript relay emits authoritative turn boundaries.
+func legacyRequiresPolling(id string) bool {
+	return id == "claude" || id == "opencode" || id == "grokbuild"
+}
+
+// legacyLiveEventBase is the pre-§6.2 fallback static base for drivers that do not
+// self-describe, mirroring the original agentLiveEvents switch minus the codex override.
+func legacyLiveEventBase(id string) core.LiveEventModel {
 	switch id {
-	case "claude":
-		return "session_process"
-	case "grokbuild":
-		return "session_process" // grok agent stdio 是 stdin/stdout pipe，与 claude 同为进程模型
-	case "codex":
-		if codexBackendMode == "app_server" && cfg != nil && strings.TrimSpace(cfg.CodexAppServerURL) != "" {
-			return "broadcast"
-		}
-		return "session_process"
+	case "claude", "grokbuild", "codex":
+		return core.LiveEventSessionProcess
 	default:
-		return "broadcast"
+		return core.LiveEventBroadcast
 	}
 }
 
-// agentRequiresPolling 根据 agent ID 判断是否需要轮询外部 turn。
-func agentRequiresPolling(id string, codexBackendMode string, cfg *AgentDetectionConfig) bool {
-	if id == "claude" || id == "opencode" || id == "grokbuild" {
-		return true
+// resolveLiveEvents returns the live-event model. The static base comes from the
+// driver's WireDescriptor (fallback to legacyLiveEventBase for un-migrated drivers).
+// The codex app_server runtime override (session_process → broadcast when a shared
+// app-server URL is configured) is applied on top of the static base — it is
+// mode-conditional (§6.2 B-class) and therefore stays in wire, not in the driver's
+// self-description.
+func resolveLiveEvents(id string, agent core.Agent, codexBackendMode string, cfg *AgentDetectionConfig) string {
+	base := core.LiveEventBroadcast
+	if wd := resolveStaticDescriptor(agent); wd != nil {
+		base = wd.LiveEventModel
+	} else {
+		base = legacyLiveEventBase(id)
 	}
-	// Codex transcript relay emits authoritative turn_started/turn_completed
-	// events for both implicit and shared app-server sessions. Polling the full
-	// history as a fallback mistakes transcript rewrites for new turns and can
-	// force an idle iOS timeline back to its bottom.
-	if id == "codex" {
-		return false
+	if id == "codex" && codexBackendMode == "app_server" && cfg != nil && strings.TrimSpace(cfg.CodexAppServerURL) != "" {
+		return string(core.LiveEventBroadcast)
 	}
-	return false
+	return string(base)
 }
 
 // BuildAgentDescriptor 为单个 agent 构建描述符。
@@ -113,15 +147,16 @@ func agentRequiresPolling(id string, codexBackendMode string, cfg *AgentDetectio
 // cfg 为 nil 时使用默认检测地址。
 func BuildAgentDescriptor(id string, agent core.Agent, codexBackendMode string, cfg *AgentDetectionConfig) AgentProviderDescriptor {
 	status, reason := detectAgentStatus(id, codexBackendMode, cfg)
+	kind, displayName := resolveDescriptorNames(id, agent)
 	return AgentProviderDescriptor{
 		ID:                              id,
-		Kind:                            agentKind(id),
-		DisplayName:                     agentDisplayName(id, agent),
+		Kind:                            kind,
+		DisplayName:                     displayName,
 		Status:                          status,
 		Reason:                          reason,
 		Capabilities:                    deriveBackendCapabilities(id, agent, codexBackendMode),
-		LiveEvents:                      agentLiveEvents(id, codexBackendMode, cfg),
-		RequiresPollingForExternalTurns: agentRequiresPolling(id, codexBackendMode, cfg),
+		LiveEvents:                      resolveLiveEvents(id, agent, codexBackendMode, cfg),
+		RequiresPollingForExternalTurns: resolveRequiresPolling(id, agent),
 	}
 }
 

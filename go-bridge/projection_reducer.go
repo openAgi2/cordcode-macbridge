@@ -37,11 +37,20 @@ type projectionSession struct {
 	lastFlushedRev int // highest rev emitted in a patch (delta base for next patch)
 
 	// pending deltas accumulated since lastFlushedRev; cleared by FlushPatch.
-	textAppends map[string][]string       // assistant messageId -> delta chunks (append_text)
-	thinking    map[string]string         // assistant messageId -> full accumulated reasoning (set_thinking)
-	tools       map[string]ProjectionPart // tool callId -> latest tool part (upsert_tool)
-	upsertTurns map[string]TurnProjection // turnId -> latest whole-turn snapshot (upsertTurns)
-	execution   *ExecutionView            // pending execution change
+	textAppends map[string][]string         // assistant messageId -> delta chunks (append_text)
+	thinking    map[string]string           // assistant messageId -> full accumulated reasoning (set_thinking)
+	tools       map[string]ProjectionPart   // tool callId -> latest tool part (upsert_tool)
+	upsertTurns map[string]TurnProjection   // turnId -> latest whole-turn snapshot (upsertTurns)
+	userInputs  map[string]userInputPending // interactionId -> latest user_input part + owning turn (upsert_user_input)
+	execution   *ExecutionView              // pending execution change
+}
+
+// userInputPending captures a pending upsert_user_input PartOp: the owning assistant turn/message
+// and the latest user_input part. Keyed by interactionId so repeated requested/resolved events for
+// the same interaction coalesce into one in-place upsert (design §6.1: no second "answered" card).
+type userInputPending struct {
+	turnID string
+	part   ProjectionPart
 }
 
 func cloneProjectionSessionState(source *projectionSession) *projectionSession {
@@ -56,6 +65,7 @@ func cloneProjectionSessionState(source *projectionSession) *projectionSession {
 		thinking:       make(map[string]string, len(source.thinking)),
 		tools:          make(map[string]ProjectionPart, len(source.tools)),
 		upsertTurns:    make(map[string]TurnProjection, len(source.upsertTurns)),
+		userInputs:     make(map[string]userInputPending, len(source.userInputs)),
 	}
 	for key, chunks := range source.textAppends {
 		cloned.textAppends[key] = append([]string(nil), chunks...)
@@ -68,6 +78,10 @@ func cloneProjectionSessionState(source *projectionSession) *projectionSession {
 	}
 	for key, turn := range source.upsertTurns {
 		cloned.upsertTurns[key] = cloneTurn(turn)
+	}
+	for key, pending := range source.userInputs {
+		pending.part = cloneProjectionPart(pending.part)
+		cloned.userInputs[key] = pending
 	}
 	if source.execution != nil {
 		execution := *source.execution
@@ -155,6 +169,18 @@ func dataInt64(m map[string]interface{}, key string) int64 {
 	}
 }
 
+func dataBool(m map[string]interface{}, key string) bool {
+	if m == nil {
+		return false
+	}
+	if v, ok := m[key]; ok {
+		if b, ok := v.(bool); ok {
+			return b
+		}
+	}
+	return false
+}
+
 func (ps *projectionSession) turnByID(turnID string) *TurnProjection {
 	for i := range ps.projection.Turns {
 		if ps.projection.Turns[i].TurnID == turnID {
@@ -197,6 +223,47 @@ func (ps *projectionSession) upsertTurn(turn TurnProjection) {
 	if ps.upsertTurns != nil {
 		ps.upsertTurns[turn.TurnID] = turn
 	}
+}
+
+// upsertTurnPersistOnly merges into projection.Turns without staging a flush delta. Used by
+// turn_started so skeleton frames (running turn without content) never leave the reducer —
+// publishing one breaks client local-send optimistic paint fences (owner 2026-08-04 真机).
+func (ps *projectionSession) upsertTurnPersistOnly(turn TurnProjection) {
+	if turn.TurnID == "" {
+		return
+	}
+	if t := ps.turnByID(turn.TurnID); t != nil {
+		if turn.Status != "" {
+			t.Status = turn.Status
+		}
+		if turn.StartedAt != 0 {
+			t.StartedAt = turn.StartedAt
+		}
+		if turn.CompletedAt != 0 {
+			t.CompletedAt = turn.CompletedAt
+		}
+		if turn.User != nil {
+			t.User = turn.User
+		}
+		if turn.Assistant != nil {
+			t.Assistant = turn.Assistant
+		}
+		if turn.System != nil {
+			t.System = turn.System
+		}
+		return
+	}
+	ps.projection.Turns = append(ps.projection.Turns, turn)
+}
+
+// setActiveTurnPersistOnly arms Execution.ActiveTurnID without staging ps.execution. Content
+// events call markRunning (full path) once they arrive; turn_started alone must not flush a
+// running-execution delta for a content-less turn (see upsertTurnPersistOnly note).
+func (ps *projectionSession) setActiveTurnPersistOnly(turnID string) {
+	if turnID == "" {
+		return
+	}
+	ps.projection.Execution = ExecutionView{Phase: "running", ActiveTurnID: turnID}
 }
 
 // markRunning sets session execution to running for turnID (design §7.4). Content
@@ -260,6 +327,65 @@ func (ps *projectionSession) latestRunningTurnID() string {
 	return ""
 }
 
+// upsertUserInputPart inserts or replaces (in place, by interactionId) a user_input part in the
+// assistant message. Design §6.1: the same interaction upserts in place — never appends a second
+// "answered" card. Returns the index of the part.
+func upsertUserInputPart(msg *MessageProjection, part ProjectionPart) int {
+	if idx := findUserInputPart(msg, part.UserInputInteractionID); idx >= 0 {
+		msg.Parts[idx] = part
+		return idx
+	}
+	msg.Parts = append(msg.Parts, part)
+	return len(msg.Parts) - 1
+}
+
+// findUserInputPart returns the index of the user_input part with the given interactionId, or -1.
+func findUserInputPart(msg *MessageProjection, interactionID string) int {
+	if msg == nil || interactionID == "" {
+		return -1
+	}
+	for i := range msg.Parts {
+		if msg.Parts[i].Type == "user_input" && msg.Parts[i].UserInputInteractionID == interactionID {
+			return i
+		}
+	}
+	return -1
+}
+
+// hasPendingUserInput reports whether the turn's assistant message has any pending user_input part.
+func (ps *projectionSession) hasPendingUserInput(turnID string) bool {
+	t := ps.turnByID(turnID)
+	if t == nil || t.Assistant == nil {
+		return false
+	}
+	for i := range t.Assistant.Parts {
+		if t.Assistant.Parts[i].Type == "user_input" && t.Assistant.Parts[i].UserInputStatus == "pending" {
+			return true
+		}
+	}
+	return false
+}
+
+// applyUserInputExecution derives execution.phase from user_input state (design §6.2):
+//   - active turn has a pending user_input → requires_action
+//   - no pending user_input and the turn is still running/pending → running
+//     (turn_completed owns the idle transition; we never preemptively idle an active turn)
+//   - turn already settled (completed/aborted/error) → leave phase untouched (idle stays idle)
+func (ps *projectionSession) applyUserInputExecution(turnID string) {
+	if turnID == "" {
+		return
+	}
+	if ps.hasPendingUserInput(turnID) {
+		exec := ExecutionView{Phase: "requires_action", ActiveTurnID: turnID}
+		ps.projection.Execution = exec
+		ps.execution = &exec
+		return
+	}
+	if t := ps.turnByID(turnID); t != nil && (t.Status == "running" || t.Status == "pending") {
+		ps.markRunning(turnID)
+	}
+}
+
 // ensureAssistantTextPart returns the assistant message's trailing text part, creating one if
 // the last part is not text. Used by append_text accumulation.
 func (m *MessageProjection) ensureTrailingTextPart() *ProjectionPart {
@@ -312,6 +438,7 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			thinking:    make(map[string]string),
 			tools:       make(map[string]ProjectionPart),
 			upsertTurns: make(map[string]TurnProjection),
+			userInputs:  make(map[string]userInputPending),
 		}
 		r.sessions[key] = ps
 	}
@@ -338,9 +465,17 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if turnID == "" {
 			return // no source-proven turnId; skip identityless lifecycle frames
 		}
-		commit()
-		ps.upsertTurn(TurnProjection{TurnID: turnID, Status: "running", StartedAt: ps.projection.UpdatedAt})
-		ps.markRunning(turnID)
+		// No commit / no flush-buffer writes on turn_started: at this point the turn has no
+		// user/assistant content yet. Publishing a skeleton projection (rev advances while the
+		// user part is not in) breaks client local-send optimistic paint fences — a lagging
+		// patch with rev > baseline but no user row blanks the just-sent bubble (owner
+		// 2026-08-04 真机: 发送后 "问题1" 消失几秒再出现). Content events (user_message /
+		// text_delta / reasoning_delta / tool_started) commit the complete frame when they arrive.
+		// Persist-only updates keep Execution.ActiveTurnID armed (tool_started / text_delta attach
+		// point in content-only turns that never carry a user_message) and preserve StartedAt,
+		// without staging a flush delta that FlushPatch would publish.
+		ps.upsertTurnPersistOnly(TurnProjection{TurnID: turnID, Status: "running", StartedAt: ps.projection.UpdatedAt})
+		ps.setActiveTurnPersistOnly(turnID)
 
 	case "user_message":
 		turnID := dataString(data, "turnId")
@@ -516,6 +651,15 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if v, ok := data["matches"]; ok {
 			part.Matches = v
 		}
+		// Guardrail 12 / ChatGPT-style activity rows: path-bearing title + structured
+		// fileChanges must survive into Snapshot parts (hydrate and live both emit them
+		// on event Data; without this merge they die at the reducer).
+		if title := dataString(data, "title"); title != "" {
+			part.Title = title
+		}
+		if v, ok := data["fileChanges"]; ok {
+			part.FileChanges = v
+		}
 		if status := dataString(data, "toolStatus"); status != "" {
 			part.ToolStatus = status
 		} else if msg.Event == "tool_started" {
@@ -567,15 +711,15 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		}
 		blocks, _ := data["subagentBlocks"].([]ProjectionPart)
 		part := ProjectionPart{
-			Type:              "subagent",
-			AgentID:           agentID,
-			ParentAgentID:     dataString(data, "parentAgentId"),
-			SpawnToolUseID:    dataString(data, "spawnToolUseId"),
-			SpawnDepth:        int(dataInt64(data, "spawnDepth")),
-			SubagentType:      dataString(data, "subagentType"),
-			SubagentStatus:    dataString(data, "subagentStatus"),
-			SubagentBlocks:    blocks,
-			SubagentError:     dataString(data, "subagentError"),
+			Type:               "subagent",
+			AgentID:            agentID,
+			ParentAgentID:      dataString(data, "parentAgentId"),
+			SpawnToolUseID:     dataString(data, "spawnToolUseId"),
+			SpawnDepth:         int(dataInt64(data, "spawnDepth")),
+			SubagentType:       dataString(data, "subagentType"),
+			SubagentStatus:     dataString(data, "subagentStatus"),
+			SubagentBlocks:     blocks,
+			SubagentError:      dataString(data, "subagentError"),
 			SubagentDiagnostic: dataString(data, "subagentDiagnostic"),
 		}
 		// Upsert by AgentID within the assistant message (mirrors the tool upsert pattern).
@@ -590,6 +734,80 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if !found {
 			t.Assistant.Parts = append(t.Assistant.Parts, part)
 		}
+
+	case "user_input_requested":
+		// Structured user input requested (design §10.1/§10.2). The adapter emits a proven
+		// turnId + interactionId; without both the event is identityless and skipped (no
+		// phantom turn, no raw second path). status may be pending (normal) or failed
+		// (malformed questions) — both project once via the same upsert.
+		turnID := dataString(data, "turnId")
+		interactionID := dataString(data, "interactionId")
+		if turnID == "" || interactionID == "" {
+			return
+		}
+		// interactionId is the cross-source identity. Claude live stream attributes the request
+		// to its assistant message while transcript hydrate attributes the same tool_use to the
+		// enclosing user turn. Once either source has established the interaction, keep that
+		// owning turn and update in place instead of creating a phantom second card.
+		if existing, ok := ps.userInputs[interactionID]; ok && existing.turnID != "" {
+			turnID = existing.turnID
+		}
+		commit()
+		t := ps.turnByID(turnID)
+		if t == nil {
+			ps.upsertTurn(TurnProjection{TurnID: turnID, Status: "running"})
+			t = ps.turnByID(turnID)
+		}
+		if t.Assistant == nil {
+			t.Assistant = &MessageProjection{ID: turnID, Role: "assistant"}
+		}
+		part := ProjectionPart{
+			Type:                    "user_input",
+			UserInputInteractionID:  interactionID,
+			UserInputStatus:         dataString(data, "status"),
+			UserInputQuestions:      data["questions"],
+			UserInputCanRespond:     dataBool(data, "canRespond"),
+			UserInputCanReject:      dataBool(data, "canReject"),
+			UserInputExpiresAt:      dataInt64(data, "expiresAt"),
+			UserInputDiagnosticCode: dataString(data, "diagnosticCode"),
+		}
+		if part.UserInputStatus == "" {
+			part.UserInputStatus = "pending"
+		}
+		upsertUserInputPart(t.Assistant, part)
+		ps.userInputs[interactionID] = userInputPending{turnID: turnID, part: part}
+		ps.applyUserInputExecution(turnID)
+
+	case "user_input_resolved":
+		// Resolved in place: update the existing part's status/source/resolvedAt (design §10.2).
+		// Projection never stores the answer text. If no matching requested part exists, the
+		// resolution is stale/unattributable — do not fabricate one (no second path).
+		turnID := dataString(data, "turnId")
+		interactionID := dataString(data, "interactionId")
+		if turnID == "" || interactionID == "" {
+			return
+		}
+		if existing, ok := ps.userInputs[interactionID]; ok && existing.turnID != "" {
+			turnID = existing.turnID
+		}
+		t := ps.turnByID(turnID)
+		if t == nil || t.Assistant == nil {
+			return
+		}
+		idx := findUserInputPart(t.Assistant, interactionID)
+		if idx < 0 {
+			return
+		}
+		commit()
+		t.Assistant.Parts[idx].UserInputStatus = dataString(data, "status")
+		t.Assistant.Parts[idx].UserInputResolutionSource = dataString(data, "source")
+		if resolvedAt := dataInt64(data, "resolvedAt"); resolvedAt != 0 {
+			t.Assistant.Parts[idx].UserInputResolvedAt = resolvedAt
+		} else {
+			t.Assistant.Parts[idx].UserInputResolvedAt = ps.projection.UpdatedAt
+		}
+		ps.userInputs[interactionID] = userInputPending{turnID: turnID, part: t.Assistant.Parts[idx]}
+		ps.applyUserInputExecution(turnID)
 
 	case "turn_completed":
 		turnID := dataString(data, "turnId")
@@ -613,6 +831,41 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		exec := ExecutionView{Phase: "idle"}
 		ps.projection.Execution = exec
 		ps.execution = &exec
+
+	case "turn_aborted", "turn_error":
+		// §5.1 #7: an aborted or failed turn is a terminal state, not a forever-hydrating
+		// shell. Without these cases a content-less aborted/crashed turn never satisfied the
+		// old hydrate-commit gate (HasContentTurn=false, turnCount!=0 → waited indefinitely),
+		// so empty/aborted/archived sessions stuck on "hydrating" forever. The turn keeps
+		// whatever user/assistant content already landed (upsertTurn merges non-zero fields);
+		// only status + CompletedAt change. The producer side (codex rollout abort/crash →
+		// turn_aborted / turn_error events) lands in Phase 2; the reducer contract is defined
+		// and unit-tested here so Phase 2 only needs to emit the events.
+		turnID := dataString(data, "turnId")
+		if turnID == "" {
+			// Live driver frames may omit turnId; fall back to the armed active turn, mirroring
+			// turn_completed (design §6.4 rule 3).
+			turnID = ps.projection.Execution.ActiveTurnID
+		}
+		if turnID == "" {
+			return
+		}
+		status := "aborted"
+		if msg.Event == "turn_error" {
+			status = "error"
+		}
+		commit()
+		ps.upsertTurn(TurnProjection{TurnID: turnID, Status: status, CompletedAt: ps.projection.UpdatedAt})
+		if turn := ps.turnByID(turnID); turn != nil {
+			classifyProjectionTextPresentation(turn.Assistant, true)
+			ps.upsertTurns[turnID] = *turn
+		}
+		// Settling other open turns mirrors turn_completed: at most one live turn, so a
+		// terminal event also retires any older non-settled zombie turns.
+		ps.settleOtherOpenTurns(turnID, ps.projection.UpdatedAt)
+		exec := ExecutionView{Phase: "idle"}
+		ps.projection.Execution = exec
+		ps.execution = &exec
 	}
 }
 
@@ -631,6 +884,12 @@ func mergeToolPart(dst *ProjectionPart, src ProjectionPart) {
 	// 对齐 ToolResult 的 non-nil merge 语义（后到覆盖）。
 	if src.Matches != nil {
 		dst.Matches = src.Matches
+	}
+	if src.Title != "" {
+		dst.Title = src.Title
+	}
+	if src.FileChanges != nil {
+		dst.FileChanges = src.FileChanges
 	}
 	if src.ToolStatus != "" {
 		dst.ToolStatus = src.ToolStatus
@@ -723,7 +982,7 @@ func (r *ProjectionReducer) FlushPatch(backendID, sessionID string) (ProjectionP
 	}
 	headRev := ps.projection.SyncRev
 	if headRev == ps.lastFlushedRev && len(ps.textAppends) == 0 && len(ps.thinking) == 0 &&
-		len(ps.tools) == 0 && len(ps.upsertTurns) == 0 && ps.execution == nil {
+		len(ps.tools) == 0 && len(ps.upsertTurns) == 0 && len(ps.userInputs) == 0 && ps.execution == nil {
 		return ProjectionPatch{}, false
 	}
 	patch := ProjectionPatch{BaseRev: ps.lastFlushedRev, SyncRev: headRev}
@@ -749,11 +1008,18 @@ func (r *ProjectionReducer) FlushPatch(backendID, sessionID string) (ProjectionP
 		turnID := ps.projection.Execution.ActiveTurnID
 		patch.PartOps = append(patch.PartOps, PartOp{TurnID: turnID, MessageID: turnID, Op: "upsert_tool", Part: &tool})
 	}
+	// user_input upserts: one PartOp per interaction (in-place upsert by interactionId). The owning
+	// message id is the assistant turn/message id (Claude/Codex assistant message id == turn id).
+	for _, u := range ps.userInputs {
+		part := cloneProjectionPart(u.part)
+		patch.PartOps = append(patch.PartOps, PartOp{TurnID: u.turnID, MessageID: u.turnID, Op: "upsert_user_input", Part: &part})
+	}
 	// Clear pending; next patch will be delta from this head.
 	ps.textAppends = make(map[string][]string)
 	ps.thinking = make(map[string]string)
 	ps.tools = make(map[string]ProjectionPart)
 	ps.upsertTurns = make(map[string]TurnProjection)
+	ps.userInputs = make(map[string]userInputPending)
 	ps.execution = nil
 	ps.lastFlushedRev = headRev
 	return patch, true
@@ -833,6 +1099,38 @@ func (r *ProjectionReducer) HasContentTurn(backendID, sessionID string) bool {
 	return false
 }
 
+// NonTerminalTurnCountInSet returns how many of the given turn IDs are NOT yet in a terminal
+// state (status other than completed/aborted/error). This is the §5.1 #7 hydrate-commit
+// readiness signal, scoped to turns armed by cold-source ingest (see projectionHydrateTransaction.
+// coldArmedTurnIDs). Turns carried from a committed/live baseline are authoritative live truth,
+// not cold-source half-seen guesses, so they are excluded from the gate — a live in-progress
+// session cold-pulled returns its current state instead of blocking until the in-flight turn
+// completes. Guardrail #6: readiness is decided from authoritative cold-source-EOF + terminal
+// state, never from content shape or turn count; the live baseline is authoritative, not guessed.
+func (r *ProjectionReducer) NonTerminalTurnCountInSet(backendID, sessionID string, ids map[string]struct{}) int {
+	if r == nil || len(ids) == 0 {
+		return 0
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ps := r.sessions[projectionSessionKey(backendID, sessionID)]
+	if ps == nil {
+		return 0
+	}
+	count := 0
+	for i := range ps.projection.Turns {
+		t := &ps.projection.Turns[i]
+		if _, ok := ids[t.TurnID]; !ok {
+			continue
+		}
+		st := t.Status
+		if st != "completed" && st != "aborted" && st != "error" {
+			count++
+		}
+	}
+	return count
+}
+
 // --- deep-copy helpers (Snapshot must be independent of later reduce activity) ---
 
 func cloneSessionProjection(s SessionProjection) SessionProjection {
@@ -886,6 +1184,8 @@ func cloneProjectionPart(part ProjectionPart) ProjectionPart {
 	out.ToolInput = cloneProjectionJSONValue(part.ToolInput)
 	out.ToolResult = cloneProjectionJSONValue(part.ToolResult)
 	out.Matches = cloneProjectionJSONValue(part.Matches)
+	out.FileChanges = cloneProjectionJSONValue(part.FileChanges)
+	out.UserInputQuestions = cloneProjectionJSONValue(part.UserInputQuestions)
 	if len(part.SubagentBlocks) > 0 {
 		// SubagentBlocks is a concrete []ProjectionPart (recursive); the shallow `out := part`
 		// above only copies the slice header. Deep-copy each nested part so the reducer's

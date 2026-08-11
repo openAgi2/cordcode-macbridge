@@ -66,6 +66,84 @@ type ToolAuthorizer interface {
 	GetAllowedTools() []string
 }
 
+// ── 结构化用户输入 v2 回答能力（设计 §7/§10.1）─────────────────────────────────
+// go-bridge resolve_user_input handler 只调用 UserInputResponder；旧
+// RespondQuestion/RejectQuestion 仅留给明确 `.off` legacy client，不作为 v2 fallback。
+
+// UserInputAction 是提交动作。
+type UserInputAction string
+
+const (
+	UserInputActionAnswer UserInputAction = "answer"
+	UserInputActionReject UserInputAction = "reject"
+)
+
+// UserInputValueKind 表达单个 value 是选项引用还是自定义文本。
+type UserInputValueKind string
+
+const (
+	UserInputValueOption UserInputValueKind = "option"
+	UserInputValueText   UserInputValueKind = "text"
+)
+
+// UserInputValue 是一题答案中的一个值。
+type UserInputValue struct {
+	Kind     UserInputValueKind `json:"kind"`
+	OptionID string             `json:"optionId,omitempty"`
+	Text     string             `json:"text,omitempty"`
+}
+
+// UserInputAnswer 是一题的规范化答案。
+type UserInputAnswer struct {
+	QuestionID string           `json:"questionId"`
+	Values     []UserInputValue `json:"values"`
+}
+
+// UserInputResolutionOutcome 是 resolve RPC 的结果分类。
+type UserInputResolutionOutcome string
+
+const (
+	UserInputOutcomeAccepted        UserInputResolutionOutcome = "accepted"
+	UserInputOutcomeAlreadyResolved UserInputResolutionOutcome = "already_resolved"
+	UserInputOutcomeInProgress      UserInputResolutionOutcome = "in_progress"
+)
+
+// UserInputResolution 是 ResolveUserInput 的返回。
+type UserInputResolution struct {
+	Outcome       UserInputResolutionOutcome
+	CurrentStatus UserInputStatus
+	HeadRev       int
+}
+
+// UserInputError 是结构化用户输入 resolve 的稳定错误，携带 §7 固定错误码。
+// go-bridge resolve_user_input handler 用它映射 WireError；adapter 不得回显 secret/custom answer。
+type UserInputError struct {
+	Code    string
+	Message string
+}
+
+func (e *UserInputError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return e.Message
+}
+
+// UserInputResponder 是 v2 结构化用户输入的唯一回答能力接口。
+// 实现方负责原子 claim（first-writer-wins）、写真实 backend response、
+// 成功后才提交 Kernel resolved event；clientActionID 提供幂等。
+type UserInputResponder interface {
+	ResolveUserInput(ctx context.Context, interactionID string, clientActionID string, action UserInputAction, answers []UserInputAnswer) (UserInputResolution, error)
+}
+
+// StructuredUserInputProvider marks an agent whose production adapter, real
+// responder, and canonical interaction producer are enabled together. Backend
+// capability advertisement must use this readiness instead of backend-name
+// inference so a dormant session flag cannot diverge from the descriptor.
+type StructuredUserInputProvider interface {
+	StructuredUserInputReady() bool
+}
+
 // TurnCanceler is an optional interface for agent sessions that can cancel
 // the currently running turn via an RPC call to the backend service.
 type TurnCanceler interface {
@@ -411,6 +489,82 @@ type SessionArchiver interface {
 type SessionPinner interface {
 	SetSessionPinned(ctx context.Context, sessionID, directory string, pinned bool, pinnedAt time.Time) (*SessionPin, error)
 	ListPinnedSessions(ctx context.Context) ([]SessionPin, error)
+}
+
+// CheckpointProvider is an opt-in interface for agents whose sessions MacBridge may
+// snapshot into hidden git refs after each completed turn (§6.1 read-only checkpoint
+// diff). The snapshot is a workspace FILE snapshot only — it is NOT a session truth
+// source; session truth always stays in the official CLI (plan §3 防呆, SSV2 guardrail 1).
+//
+// Per-session workspace resolution lives in go-bridge (sessionRegistry.directoryForSession,
+// populated when create_session/send_message carry a directory); the driver does not need
+// to track (sessionID → cwd) itself. The capability therefore gates the feature on
+// "this backend opts in", while capture still no-ops honestly when the resolved workspace
+// is not a git repo (workspace_not_git) — no mock/placeholder snapshot is ever written.
+//
+// deriveBackendCapabilities advertises "supports_checkpoint" when a driver implements
+// this interface; iOS gates the diff UI on that capability string.
+type CheckpointProvider interface {
+	// SupportsCheckpoint is the stable opt-in signal. Returning true means MacBridge
+	// may capture read-only git-ref workspace checkpoints for this backend's sessions.
+	SupportsCheckpoint() bool
+}
+
+// ConversationRollbackProvider is a forward-compatibility opt-in interface for agents
+// that can roll a conversation back to a prior turn. No driver implements it today;
+// the capability "supports_conversation_rollback" stays absent until one does, which
+// keeps the (currently hidden) revert entry gated off (§6.1 "revert 未实现").
+// The signature is intentionally minimal so a future driver can fill it in without
+// reshaping the interface.
+type ConversationRollbackProvider interface {
+	// RollbackConversationToTurn rolls the conversation state of sessionID back to the
+	// given 1-based turn number (as reported by ProjectionReducer.TurnCount). It must
+	// return a non-nil error until a real driver implements it.
+	RollbackConversationToTurn(ctx context.Context, sessionID string, turnNumber int) error
+}
+
+// LiveEventModel enumerates how a backend surfaces external-turn progress to MacBridge
+// (and thus to clients). §6.2 driver self-description carries this as a static value;
+// the codex app_server runtime override (session_process → broadcast when a shared
+// app-server URL is configured) still applies in go-bridge on top of the static base.
+type LiveEventModel string
+
+const (
+	// LiveEventSessionProcess: the agent runs as a stdin/stdout pipe (or per-session
+	// process) whose external turns MacBridge can only observe by tailing its output
+	// files. claudecode / codex / grokbuild are process-model by default.
+	LiveEventSessionProcess LiveEventModel = "session_process"
+	// LiveEventBroadcast: the agent exposes a service-level event stream that fans out
+	// external-turn events to multiple observers. opencode is broadcast-native; codex
+	// upgrades to broadcast only when a shared app-server URL is configured.
+	LiveEventBroadcast LiveEventModel = "broadcast"
+)
+
+// WireDescriptor is a driver's self-described static wire attributes (§6.2 provider
+// 零跨层抽象). Each driver returns its own Kind / DisplayName / LiveEventModel /
+// RequiresExternalTurnPolling / StaticCapabilities instead of go-bridge branching on
+// backend id. Only STATIC attributes belong here — anything that depends on runtime
+// state (codex app_server mode, adapter readiness, detection probes) stays in wire.
+//
+// StaticCapabilities is the home for A-class positive capabilities that were
+// previously id-keyed in backend_capabilities.go (content_chunking, claude
+// question_reply, external_turn_streaming, opencode todos 兜底). Mode-conditional
+// capabilities (codex app_server compression/question_reply/structured_user_input_v1)
+// and interface-gated capabilities (TodoProvider/ToolAuthorizer/...) are NOT here.
+type WireDescriptor struct {
+	Kind                        string
+	DisplayName                 string
+	LiveEventModel              LiveEventModel
+	RequiresExternalTurnPolling bool
+	StaticCapabilities          []string
+}
+
+// WireDescriptorProvider is implemented by every driver that self-describes its static
+// wire attributes. go-bridge prefers this self-description and falls back to the
+// pre-§6.2 id-keyed switches only for drivers that have not yet migrated. A nil
+// descriptor is treated as "not provided" so a driver can opt out per-build.
+type WireDescriptorProvider interface {
+	WireDescriptor() *WireDescriptor
 }
 
 // WorkDirSwitcher is an optional interface for agents that support runtime

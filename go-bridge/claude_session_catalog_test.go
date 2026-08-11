@@ -1,6 +1,7 @@
 package gobridge
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,14 +12,135 @@ import (
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
+func TestClaudeSessionCatalogHonorsDesktopArchiveAndDelete(t *testing.T) {
+	projectsDir := t.TempDir()
+	ws := catalogFixtureWorkspace(t, projectsDir, "desktop")
+	projectDir := filepath.Join(projectsDir, "-tmp-desktop")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	activeID := "active-0000-0000-0000-000000000001"
+	archivedID := "archived-0000-0000-0000-000000000002"
+	deletedID := "deleted-0000-0000-0000-000000000003"
+	for _, fixture := range []struct {
+		id    string
+		title string
+	}{
+		{activeID, "active"},
+		{archivedID, "archived"},
+		{deletedID, "deleted"},
+	} {
+		writeClaudeCatalogFixture(
+			t,
+			filepath.Join(projectDir, fixture.id+".jsonl"),
+			ws,
+			fixture.title,
+			"2026-08-12T00:10:00Z",
+		)
+	}
+
+	appSupport := t.TempDir()
+	storeDir := filepath.Join(appSupport, claudeDesktopAppSupportDir3P, claudeDesktopSessionsDir, "acct", "org")
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	archivedAt := time.Date(2026, 8, 12, 0, 17, 41, 0, time.UTC)
+	localArchivedID := "local-archived-0000-0000-0000-000000000004"
+	archivedJSON := fmt.Sprintf(
+		`{"sessionId":%q,"cliSessionId":%q,"isArchived":true}`+"\n",
+		"local_"+localArchivedID,
+		archivedID,
+	)
+	archivedPath := filepath.Join(storeDir, claudeDesktopLocalPrefix+localArchivedID+".json")
+	if err := os.WriteFile(archivedPath, []byte(archivedJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(archivedPath, archivedAt, archivedAt); err != nil {
+		t.Fatal(err)
+	}
+	deletedPath := filepath.Join(storeDir, claudeDesktopDeletedPrefix+deletedID)
+	if err := os.WriteFile(deletedPath, []byte("tombstone"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	catalog := newClaudeSessionCatalog(projectsDir)
+	catalog.desktopStateLoader = func() claudeDesktopSessionState {
+		return loadClaudeDesktopSessionState(appSupport)
+	}
+
+	got := catalog.list("", &core.SessionLoadMetrics{})
+	byID := make(map[string]map[string]interface{}, len(got))
+	for _, session := range got {
+		id, _ := session["id"].(string)
+		byID[id] = session
+	}
+	if len(got) != 2 {
+		t.Fatalf("sessions = %d, want active+archived only; got %#v", len(got), byID)
+	}
+	if _, ok := byID[activeID]; !ok {
+		t.Fatalf("active session missing: %#v", byID)
+	}
+	if _, ok := byID[deletedID]; ok {
+		t.Fatalf("desktop-deleted session still listed: %#v", byID)
+	}
+	archivedWire, ok := byID[archivedID]
+	if !ok {
+		t.Fatalf("archived session missing (it should surface archivedAtMillis): %#v", byID)
+	}
+	if _, ok := archivedWire["archivedAtMillis"]; !ok {
+		t.Fatalf("desktop-archived session has no archivedAtMillis: %#v", archivedWire)
+	}
+
+	// Unarchive: the Desktop local JSON flips isArchived=false and its mtime
+	// advances. The fingerprint must invalidate and drop archivedAtMillis.
+	unarchivedAt := archivedAt.Add(time.Minute)
+	unarchivedJSON := fmt.Sprintf(
+		`{"sessionId":%q,"cliSessionId":%q,"isArchived":false}`+"\n",
+		"local_"+localArchivedID,
+		archivedID,
+	)
+	if err := os.WriteFile(archivedPath, []byte(unarchivedJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(archivedPath, unarchivedAt, unarchivedAt); err != nil {
+		t.Fatal(err)
+	}
+	gotUnarchived := catalog.list("", &core.SessionLoadMetrics{})
+	for _, session := range gotUnarchived {
+		id, _ := session["id"].(string)
+		if id != archivedID {
+			continue
+		}
+		if _, ok := session["archivedAtMillis"]; ok {
+			t.Fatalf("unarchived session still carries archivedAtMillis: %#v", session)
+		}
+	}
+
+	// Restore the deleted tombstone removal path: without the tombstone the
+	// transcript becomes visible again.
+	if err := os.Remove(deletedPath); err != nil {
+		t.Fatal(err)
+	}
+	gotRestored := catalog.list("", &core.SessionLoadMetrics{})
+	restoredIDs := make(map[string]struct{}, len(gotRestored))
+	for _, session := range gotRestored {
+		id, _ := session["id"].(string)
+		restoredIDs[id] = struct{}{}
+	}
+	if _, ok := restoredIDs[deletedID]; !ok {
+		t.Fatalf("deleted session did not return after tombstone removal: %#v", restoredIDs)
+	}
+}
+
 func TestClaudeSessionCatalogIncrementalRefreshAndDeletion(t *testing.T) {
 	projectsDir := t.TempDir()
+	ws := catalogFixtureWorkspace(t, projectsDir, "project")
 	projectDir := filepath.Join(projectsDir, "-tmp-project")
 	if err := os.Mkdir(projectDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	sessionPath := filepath.Join(projectDir, "session-1.jsonl")
-	writeClaudeCatalogFixture(t, sessionPath, "/tmp/project", "first", "2026-06-01T10:00:00Z")
+	writeClaudeCatalogFixture(t, sessionPath, ws, "first", "2026-06-01T10:00:00Z")
 
 	catalog := newClaudeSessionCatalog(projectsDir)
 	var parseCalls atomic.Int32
@@ -49,7 +171,7 @@ func TestClaudeSessionCatalogIncrementalRefreshAndDeletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeClaudeCatalogFixture(t, sessionPath, "/tmp/project", "changed with same mtime", "2026-06-01T11:00:00Z")
+	writeClaudeCatalogFixture(t, sessionPath, ws, "changed with same mtime", "2026-06-01T11:00:00Z")
 	if err := os.Chtimes(sessionPath, info.ModTime(), info.ModTime()); err != nil {
 		t.Fatal(err)
 	}
@@ -76,13 +198,15 @@ func TestClaudeSessionCatalogIncrementalRefreshAndDeletion(t *testing.T) {
 
 func TestClaudeSessionCatalogKeepsProjectIdentityAndFiltersSnapshot(t *testing.T) {
 	projectsDir := t.TempDir()
+	wsOne := catalogFixtureWorkspace(t, projectsDir, "one")
+	wsTwo := catalogFixtureWorkspace(t, projectsDir, "two")
 	for _, fixture := range []struct {
 		projectKey string
 		directory  string
 		title      string
 	}{
-		{"-tmp-one", "/tmp/one", "one"},
-		{"-tmp-two", "/tmp/two", "two"},
+		{"-tmp-one", wsOne, "one"},
+		{"-tmp-two", wsTwo, "two"},
 	} {
 		projectDir := filepath.Join(projectsDir, fixture.projectKey)
 		if err := os.Mkdir(projectDir, 0o755); err != nil {
@@ -103,20 +227,21 @@ func TestClaudeSessionCatalogKeepsProjectIdentityAndFiltersSnapshot(t *testing.T
 		t.Fatalf("same session id across projects collapsed: %#v", all)
 	}
 	filtered := catalog.list("-tmp-one", &core.SessionLoadMetrics{})
-	if len(filtered) != 1 || filtered[0]["directory"] != "/tmp/one" {
+	if len(filtered) != 1 || filtered[0]["directory"] != wsOne {
 		t.Fatalf("project filter result = %#v", filtered)
 	}
 }
 
 func TestClaudeSessionCatalogUsesCustomTitle(t *testing.T) {
 	projectsDir := t.TempDir()
+	ws := catalogFixtureWorkspace(t, projectsDir, "project")
 	projectDir := filepath.Join(projectsDir, "-tmp-project")
 	if err := os.Mkdir(projectDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	sessionPath := filepath.Join(projectDir, "session-1.jsonl")
-	content := `{"type":"user","timestamp":"2026-06-01T10:00:00Z","cwd":"/tmp/project","message":{"role":"user","content":[{"type":"text","text":"first prompt"}]}}` + "\n" +
-		`{"type":"assistant","timestamp":"2026-06-01T10:01:00Z","cwd":"/tmp/project","message":{"role":"assistant","content":[{"type":"text","text":"assistant fallback"}]}}` + "\n" +
+	content := `{"type":"user","timestamp":"2026-06-01T10:00:00Z","cwd":"` + ws + `","message":{"role":"user","content":[{"type":"text","text":"first prompt"}]}}` + "\n" +
+		`{"type":"assistant","timestamp":"2026-06-01T10:01:00Z","cwd":"` + ws + `","message":{"role":"assistant","content":[{"type":"text","text":"assistant fallback"}]}}` + "\n" +
 		`{"type":"custom-title","customTitle":"Claude Desktop title","sessionId":"session-1"}` + "\n"
 	if err := os.WriteFile(sessionPath, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
@@ -134,13 +259,14 @@ func TestClaudeSessionCatalogUsesCustomTitle(t *testing.T) {
 
 func TestClaudeSessionCatalogUsesAssistantModel(t *testing.T) {
 	projectsDir := t.TempDir()
+	ws := catalogFixtureWorkspace(t, projectsDir, "project")
 	projectDir := filepath.Join(projectsDir, "-tmp-project")
 	if err := os.Mkdir(projectDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	sessionPath := filepath.Join(projectDir, "session-1.jsonl")
-	content := `{"type":"user","timestamp":"2026-06-01T10:00:00Z","cwd":"/tmp/project","message":{"role":"user","content":[{"type":"text","text":"first prompt"}]}}` + "\n" +
-		`{"type":"assistant","timestamp":"2026-06-01T10:01:00Z","cwd":"/tmp/project","message":{"role":"assistant","model":"anthropic/claude-sonnet-4","content":[{"type":"text","text":"assistant fallback"}]}}` + "\n"
+	content := `{"type":"user","timestamp":"2026-06-01T10:00:00Z","cwd":"` + ws + `","message":{"role":"user","content":[{"type":"text","text":"first prompt"}]}}` + "\n" +
+		`{"type":"assistant","timestamp":"2026-06-01T10:01:00Z","cwd":"` + ws + `","message":{"role":"assistant","model":"anthropic/claude-sonnet-4","content":[{"type":"text","text":"assistant fallback"}]}}` + "\n"
 	if err := os.WriteFile(sessionPath, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -160,14 +286,15 @@ func TestClaudeSessionCatalogUsesAssistantModel(t *testing.T) {
 
 func TestClaudeSessionCatalogUsesSidecarModelAndEffort(t *testing.T) {
 	projectsDir := t.TempDir()
+	ws := catalogFixtureWorkspace(t, projectsDir, "project")
 	projectDir := filepath.Join(projectsDir, "-tmp-project")
 	if err := os.Mkdir(projectDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	sessionPath := filepath.Join(projectDir, "session-1.jsonl")
-	content := `{"type":"user","timestamp":"2026-06-01T10:00:00Z","cwd":"/tmp/project","message":{"role":"user","content":[{"type":"text","text":"first prompt"}]}}` + "\n" +
-		`{"type":"assistant","timestamp":"2026-06-01T10:01:00Z","cwd":"/tmp/project","message":{"role":"assistant","model":"old-model","content":[{"type":"thinking","thinking":"thinking first"}]}}` + "\n" +
-		`{"type":"assistant","timestamp":"2026-06-01T10:02:00Z","cwd":"/tmp/project","message":{"role":"assistant","model":"old-model","content":[{"type":"text","text":"assistant fallback"}]}}` + "\n"
+	content := `{"type":"user","timestamp":"2026-06-01T10:00:00Z","cwd":"` + ws + `","message":{"role":"user","content":[{"type":"text","text":"first prompt"}]}}` + "\n" +
+		`{"type":"assistant","timestamp":"2026-06-01T10:01:00Z","cwd":"` + ws + `","message":{"role":"assistant","model":"old-model","content":[{"type":"thinking","thinking":"thinking first"}]}}` + "\n" +
+		`{"type":"assistant","timestamp":"2026-06-01T10:02:00Z","cwd":"` + ws + `","message":{"role":"assistant","model":"old-model","content":[{"type":"text","text":"assistant fallback"}]}}` + "\n"
 	if err := os.WriteFile(sessionPath, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -201,18 +328,19 @@ func TestClaudeSessionCatalogUsesSidecarModelAndEffort(t *testing.T) {
 
 func TestClaudeSessionCatalogReadersReuseSnapshotDuringRefresh(t *testing.T) {
 	projectsDir := t.TempDir()
+	ws := catalogFixtureWorkspace(t, projectsDir, "project")
 	projectDir := filepath.Join(projectsDir, "-tmp-project")
 	if err := os.Mkdir(projectDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	sessionPath := filepath.Join(projectDir, "session-1.jsonl")
-	writeClaudeCatalogFixture(t, sessionPath, "/tmp/project", "first", "2026-06-01T10:00:00Z")
+	writeClaudeCatalogFixture(t, sessionPath, ws, "first", "2026-06-01T10:00:00Z")
 
 	catalog := newClaudeSessionCatalog(projectsDir)
 	if got := catalog.list("", &core.SessionLoadMetrics{}); len(got) != 1 {
 		t.Fatalf("initial catalog = %#v", got)
 	}
-	writeClaudeCatalogFixture(t, sessionPath, "/tmp/project", "changed", "2026-06-01T11:00:00Z")
+	writeClaudeCatalogFixture(t, sessionPath, ws, "changed", "2026-06-01T11:00:00Z")
 
 	parseStarted := make(chan struct{})
 	releaseParse := make(chan struct{})
@@ -244,8 +372,22 @@ func TestClaudeSessionCatalogReadersReuseSnapshotDuringRefresh(t *testing.T) {
 	<-refreshDone
 }
 
+// catalogFixtureWorkspace returns a real on-disk workspace path outside system temp
+// roots (/tmp, /private/tmp) so claudeWorkspaceVisibleForCatalog keeps the sessions.
+func catalogFixtureWorkspace(t *testing.T, projectsDir, name string) string {
+	t.Helper()
+	dir := filepath.Join(filepath.Dir(projectsDir), "ws-"+name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func writeClaudeCatalogFixture(t *testing.T, path, directory, title, timestamp string) {
 	t.Helper()
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	content := `{"type":"user","timestamp":"` + timestamp + `","cwd":"` + directory + `","message":{"role":"user","content":[{"type":"text","text":"prompt"}]}}` + "\n" +
 		`{"type":"assistant","timestamp":"` + timestamp + `","cwd":"` + directory + `","message":{"role":"assistant","content":[{"type":"text","text":"` + title + `"}]}}` + "\n"
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
@@ -258,6 +400,9 @@ func writeClaudeCatalogFixture(t *testing.T, path, directory, title, timestamp s
 // assistantTs 用于区分两个文件的 UpdatedAt（fork 检测保留最新者）。
 func writeClaudeForkFixture(t *testing.T, path, directory, customTitle, firstUserTs, assistantTs string) {
 	t.Helper()
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	content := `{"type":"user","timestamp":"` + firstUserTs + `","cwd":"` + directory + `","message":{"role":"user","content":[{"type":"text","text":"prompt"}]}}` + "\n" +
 		`{"type":"custom-title","customTitle":"` + customTitle + `","sessionId":"` + filepath.Base(path) + `"}` + "\n" +
 		`{"type":"assistant","timestamp":"` + assistantTs + `","cwd":"` + directory + `","message":{"role":"assistant","content":[{"type":"text","text":"reply"}]}}` + "\n"
@@ -274,7 +419,7 @@ func TestClaudeSessionCatalogHidesForkChildren(t *testing.T) {
 	if err := os.Mkdir(projectDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	directory := "/tmp/fork-project"
+	directory := catalogFixtureWorkspace(t, projectsDir, "fork-project")
 	// fork 对：相同 custom-title + 相同首条 user timestamp，不同的 assistant timestamp（区分新旧）
 	writeClaudeForkFixture(t,
 		filepath.Join(projectDir, "older-session.jsonl"),
@@ -308,7 +453,7 @@ func TestClaudeSessionCatalogKeepsDifferentFirstUserTs(t *testing.T) {
 	if err := os.Mkdir(projectDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	directory := "/tmp/nofork-project"
+	directory := catalogFixtureWorkspace(t, projectsDir, "nofork-project")
 	writeClaudeForkFixture(t,
 		filepath.Join(projectDir, "session-a.jsonl"),
 		directory, "Same title",
@@ -337,13 +482,14 @@ func TestClaudeSessionCatalogKeepsSessionsWithoutCustomTitle(t *testing.T) {
 	}
 	// 两个会话首条 user ts 相同，但都没有 custom-title（只有 assistant 回退 title）。
 	// 不应被当成 fork。
+	ws := catalogFixtureWorkspace(t, projectsDir, "notitle")
 	writeClaudeCatalogFixture(t,
 		filepath.Join(projectDir, "a-no-title.jsonl"),
-		"/tmp/notitle", "Same assistant fallback",
+		ws, "Same assistant fallback",
 		"2026-07-01T10:00:00Z")
 	writeClaudeCatalogFixture(t,
 		filepath.Join(projectDir, "b-no-title.jsonl"),
-		"/tmp/notitle", "Same assistant fallback",
+		ws, "Same assistant fallback",
 		"2026-07-01T10:00:00Z")
 
 	catalog := newClaudeSessionCatalog(projectsDir)
@@ -359,16 +505,17 @@ func TestClaudeSessionCatalogCollapsesCompactContinuationByBoundaryUUID(t *testi
 	if err := os.Mkdir(projectDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	ws := catalogFixtureWorkspace(t, projectsDir, "compact-project")
 	parent := strings.Join([]string{
-		`{"type":"user","timestamp":"2026-07-29T08:00:00Z","cwd":"/tmp/compact-project","message":{"role":"user","content":"original prompt"}}`,
+		`{"type":"user","timestamp":"2026-07-29T08:00:00Z","cwd":"` + ws + `","message":{"role":"user","content":"original prompt"}}`,
 		`{"type":"custom-title","customTitle":"One logical session","sessionId":"parent-session"}`,
 		`{"type":"system","subtype":"compact_boundary","uuid":"shared-boundary","timestamp":"2026-07-29T08:17:51Z"}`,
 	}, "\n") + "\n"
 	child := strings.Join([]string{
 		`{"type":"custom-title","customTitle":"One logical session","sessionId":"child-session"}`,
 		`{"type":"system","subtype":"compact_boundary","uuid":"shared-boundary","timestamp":"2026-07-29T08:17:51Z"}`,
-		`{"type":"user","timestamp":"2026-07-29T08:34:00Z","cwd":"/tmp/compact-project","message":{"role":"user","content":"continued prompt"}}`,
-		`{"type":"assistant","timestamp":"2026-07-29T08:35:00Z","cwd":"/tmp/compact-project","message":{"role":"assistant","content":"continued answer"}}`,
+		`{"type":"user","timestamp":"2026-07-29T08:34:00Z","cwd":"` + ws + `","message":{"role":"user","content":"continued prompt"}}`,
+		`{"type":"assistant","timestamp":"2026-07-29T08:35:00Z","cwd":"` + ws + `","message":{"role":"assistant","content":"continued answer"}}`,
 	}, "\n") + "\n"
 	if err := os.WriteFile(filepath.Join(projectDir, "parent-session.jsonl"), []byte(parent), 0o600); err != nil {
 		t.Fatal(err)

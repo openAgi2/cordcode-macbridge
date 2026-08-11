@@ -18,6 +18,9 @@ import (
 
 	"github.com/openAgi2/cordcode-macbridge/agent/claudecode"
 	"github.com/openAgi2/cordcode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/go-bridge/admission"
+	"github.com/openAgi2/cordcode-macbridge/go-bridge/filepool"
+	"github.com/openAgi2/cordcode-macbridge/go-bridge/readfile"
 	"github.com/openAgi2/cordcode-macbridge/pinstore"
 	"github.com/openAgi2/cordcode-macbridge/transcriptindex"
 )
@@ -28,7 +31,7 @@ var hiddenDirectoryBases = map[string]bool{
 
 const (
 	claudeSessionSummaryReadLimit = 512 * 1024
-	defaultSessionListLimit       = 50
+	defaultSessionListLimit       = 100
 	maxSessionListLimit           = 150
 )
 
@@ -41,22 +44,37 @@ type Handlers struct {
 	contentRefs            map[string]string
 	contentRefOrder        []string
 	ocProxy                *OpenCodeProxy
+	// catalogWireCache 缓存 declared catalog_cursor_epoch_v2 客户端的 enriched wire maps
+	//（§4.1.1 / §5.3#3，Phase 1C）。未声明连接在 dispatch gate 直接失败，不进入 cache。
+	// lazy init（sync.Once），构造路径 NewHandlers 不改。
+	catalogWireCache    *catalogWireSnapshotCache
+	catalogWireInitOnce sync.Once
+	// catalogProcRegistry 跟踪 catalog 子进程（§4.3/§11，Phase 1E）。Phase 2-5 catalog client 经
+	// h.catalogProcessRegistry() Register 其 stdio 单例子进程；handlers.Shutdown 经其 Shutdown 确定性
+	// 回收。OpenCode 无子进程不经此。lazy init（sync.Once），构造路径不改。
+	catalogProcRegistry    *ProcessRegistry
+	catalogProcInitOnce    sync.Once
 	codexBackendMode       string
 	pendingNotifications   *PendingNotificationStore
 	broadcaster            *Broadcaster
 	eventPublisher         *EventPublisher
 	projectionKernel       *ProjectionKernel
 	projectionHydrateSlots chan struct{}
+	// checkpointCoalescer owns the §6.1 git-checkpoint write path (parallel to,
+	// but deliberately separate from, the projection coalescer). It is wired to
+	// the kernel via SetTurnCheckpointStager; the kernel calls it from IngestLive
+	// after each turn_completed. nil in unit tests that don't exercise capture.
+	checkpointCoalescer *checkpointCoalescer
 	// deltaBatcher（Fix 5）：text_delta/reasoning_delta 时间窗攒批，降低上游每 token 一帧
 	// 的 WS/HPKE/日志开销。relayEvents / startPassiveSubscription 通过它下发，而非直接 broadcaster.Send。
-	deltaBatcher            *DeltaBatcher
-	relayRunning            map[string]bool   // sessionID/relayKey → 是否已有 relay goroutine
-	relayRunningKind        map[string]string // sessionID → agent/file relay 类型，用于避免 Claude file relay 抢占真实 stdout relay
+	deltaBatcher     *DeltaBatcher
+	relayRunning     map[string]bool   // sessionID/relayKey → 是否已有 relay goroutine
+	relayRunningKind map[string]string // sessionID → agent/file relay 类型，用于避免 Claude file relay 抢占真实 stdout relay
 	// agentRelayRunning 与 relayRunningKind 解耦：标记 agent relay (relayEvents) goroutine 是否在跑。
 	// 本地发 turn 时若 file relay 已占用全局槽位 (kind=claude_file)，startRelayIfNotRunning 不再把 kind
 	// 翻成 agent，避免 claudeSessionFileRelayLoop 被 superseded 退出而丢失唯一 UUID 内容来源（见
 	// startRelayIfNotRunning 注释与 Issue 3 调查 docs/2026-07-30-remote-web-send-message-not-live-investigation.md）。
-	agentRelayRunning map[string]bool
+	agentRelayRunning       map[string]bool
 	claudeSourceCorrelation *claudeSourceCorrelationTracker
 	deliveryPrekeys         *PrekeyStore
 	observation             *ObservationManager
@@ -74,10 +92,17 @@ type Handlers struct {
 	dataDir              string
 	relayHelloHandler    func(conn Connection, msg *WireMessage)
 	claudeSessions       *claudeSessionCatalog
+	transcriptStateProbe func()
 	pendingClaudeRuntime map[string]claudeRuntimeSelection
 	transcriptIndex      *transcriptindex.Store
 	// capabilityPolicy 是集中式 RPC 授权层（P3 架构演进，§3.2/§8）。
 	capabilityPolicy *CapabilityPolicy
+	// filePool 是 §3.6.3 的全局专用 bounded file-read worker pool，把 read_file_v2
+	// 的 I/O 从 per-device inbound scheduler 解耦。nil 时（部分单测）handleReadFileV2
+	// 回退到同步内联读，不阻塞测试。
+	filePool         *filepool.Pool
+	admission        *admission.AdmissionMachine
+	bridgeOwnedTurns map[string]struct{}
 	relayEnabled     bool
 	sessionListLimit int
 
@@ -149,19 +174,42 @@ func newHandlersWithContext(ctx context.Context, bridgeEpoch string) *Handlers {
 		presentation:            presentation,
 		relayEventRouter:        NewRelayEventRouter(observation, outbox, prekeys, NewMailboxService(NewRelayHub()), presentation),
 		claudeSessions:          newDefaultClaudeSessionCatalog(),
+		transcriptStateProbe:    func() {},
 		pendingClaudeRuntime:    make(map[string]claudeRuntimeSelection),
 		transcriptIndex:         transcriptindex.NewStore(defaultTranscriptIndexDir()),
 		capabilityPolicy:        NewCapabilityPolicy(),
 		relayEnabled:            true,
 		sessionListLimit:        defaultSessionListLimit,
+		bridgeOwnedTurns:        make(map[string]struct{}),
 		ctx:                     ctx,
 		cleanupStop:             make(chan struct{}),
 	}
+	// §3.6.3: 全局专用 bounded file-read worker pool。配置失败属于不可恢复的部署错误，
+	// 直接 panic（与 mustGenerateBridgeEpoch 同一处理级别），避免运行时静默回退到阻塞调度器。
+	filePool, err := filepool.New(defaultFilePoolConfig())
+	if err != nil {
+		panic(fmt.Sprintf("filepool config invalid: %v", err))
+	}
+	h.filePool = filePool
 	h.installEventPublisher(NewEventPublisher(bridgeEpoch, h.broadcaster))
 	h.projectionKernel = NewProjectionKernel(
 		h.eventPublisher.ProjectionReducer(),
 		NewProjectionCheckpointStore(""),
 	)
+	// §6.1 checkpoint 只读 diff: wire the git-checkpoint coalescer. The coalescer
+	// resolves workspace dirs from the session registry and emits turn_diff_ready
+	// via h.publishEvent (EventPublisher.PublishLogical, the single Kernel→
+	// EventPublisher outlet). The kernel calls it from IngestLive after each
+	// turn_completed. Capture is additionally gated on the agent implementing
+	// core.CheckpointProvider (resolver.CheckpointEnabled), so backends that do
+	// not opt in honestly no-op.
+	h.checkpointCoalescer = newCheckpointCoalescer(&handlersCheckpointResolver{h: h}, func(le LogicalEvent) {
+		// The coalescer emits turn_diff_ready (control-plane only) through the
+		// single Kernel→EventPublisher outlet. The return EventMessage is the
+		// stamped fan-out frame; the coalescer does not need it.
+		_ = h.publishEvent(le)
+	})
+	h.projectionKernel.SetTurnCheckpointStager(h.checkpointCoalescer.stage)
 	h.eventPublisher.SetProjectionKernel(h.projectionKernel)
 	// TTL cache for the Claude running map (Fix 3). The recompute closure binds to
 	// whatever claudecode agent is currently registered, so the cache is valid
@@ -185,8 +233,71 @@ func newHandlersWithContext(ctx context.Context, bridgeEpoch string) *Handlers {
 		// unconditionally — the cost is one map nil and at most one extra
 		// GetRunningSessionIDs on the next list_sessions.
 		h.runningMap.invalidate()
+		if newState == string(sessionStateIdle) {
+			h.completeBridgeTurn(sessionID)
+		}
 	}
 	return h
+}
+
+// SetAdmissionMachine 注入 Management runtime admission。生产 main 在 ManagementServer
+// 构造时安装；无 management API 的开发/测试模式保持 nil，不改变既有行为。
+func (h *Handlers) SetAdmissionMachine(machine *admission.AdmissionMachine) {
+	h.mu.Lock()
+	h.admission = machine
+	h.mu.Unlock()
+}
+
+func (h *Handlers) admitBridgeTurn(sessionID string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.admission == nil {
+		return true
+	}
+	if _, exists := h.bridgeOwnedTurns[sessionID]; exists {
+		return false
+	}
+	if !h.admission.TryBeginBridgeTurn() {
+		return false
+	}
+	h.bridgeOwnedTurns[sessionID] = struct{}{}
+	return true
+}
+
+func (h *Handlers) completeBridgeTurn(sessionID string) {
+	h.mu.Lock()
+	if _, exists := h.bridgeOwnedTurns[sessionID]; !exists {
+		h.mu.Unlock()
+		return
+	}
+	delete(h.bridgeOwnedTurns, sessionID)
+	machine := h.admission
+	h.mu.Unlock()
+	if machine != nil {
+		machine.EndBridgeTurn()
+	}
+}
+
+func (h *Handlers) pendingInteractionCount() uint32 {
+	identities := h.sessions.activityIdentities()
+	var count uint32
+	for _, identity := range identities {
+		projection, ok := h.projectionKernel.Snapshot(identity.backendID, identity.sessionID)
+		if !ok {
+			continue
+		}
+		for _, turn := range projection.Turns {
+			if turn.Assistant == nil {
+				continue
+			}
+			for _, part := range turn.Assistant.Parts {
+				if part.Type == "user_input" && part.UserInputStatus == "pending" && count < ^uint32(0) {
+					count++
+				}
+			}
+		}
+	}
+	return count
 }
 
 func (h *Handlers) installEventPublisher(publisher *EventPublisher) {
@@ -304,6 +415,14 @@ func (h *Handlers) rebindLiveTargetsForSession(backendID, sessionID string) int 
 						if sid == sessionID || sid == "*" {
 							shouldBind = true
 							break
+						}
+						// Pending alias still listed in scope after lazy create: treat as
+						// observing the resolved real session (first-turn delivery).
+						if strings.HasPrefix(sid, "pending-") {
+							if t, ok := h.sessions.get(sid); ok && t != nil && t.sessionID == sessionID {
+								shouldBind = true
+								break
+							}
 						}
 					}
 				}
@@ -496,6 +615,9 @@ func (h *Handlers) RegisterAgent(id string, agent core.Agent) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.agents[id] = agent
+	// §4.3：codex/grokbuild catalog stdio 子进程注册到 bridge ProcessRegistry，Shutdown 时确定性进程组回收。
+	h.injectCodexCatalogRegistrar(agent)
+	h.injectGrokCatalogRegistrar(agent)
 }
 
 // session access helpers — bridge h.mu and sessionRegistry
@@ -564,6 +686,18 @@ func (h *Handlers) Shutdown(ctx context.Context) error {
 		// Fix 5: 停止 delta 攒批 ticker 并 flush 残留 text（流式末尾的 token 不丢）。
 		if h.deltaBatcher != nil {
 			h.deltaBatcher.Stop()
+		}
+		// §3.6.3: 关闭 file-read worker pool（drain queued、cancel in-flight ctx、等待 workers）。
+		if h.filePool != nil {
+			h.filePool.Close()
+		}
+		// §4.3/§11: catalog 子进程独立回收（不进 sessionRegistry.drain）。进程组 SIGKILL + 确定性
+		// 总超时（catalogShutdownTimeout）。Phase 1 registry 恒空（无 catalog 子进程）；Phase 2-5
+		// catalog client Register 后生效。直读字段（不经 getter）避免 shutdown 时无谓初始化。
+		if h.catalogProcRegistry != nil {
+			if remaining := h.catalogProcRegistry.Shutdown(catalogShutdownTimeout); len(remaining) > 0 {
+				slog.Warn("go-bridge: catalog subprocesses remained after shutdown", "pids", remaining)
+			}
 		}
 
 		// Snapshot active sessions under the lock and clear the registry so
@@ -808,6 +942,13 @@ func (h *Handlers) HandleRPC(conn Connection, msg WireMessage) {
 		conn.SendResult(msg.RequestID, nil, perr)
 		return
 	}
+	if msg.Method == "read_file_v2" && !h.eventPublisher.ConnReadFileV2(conn) {
+		conn.SendResult(msg.RequestID, nil, &WireError{
+			Code:    "capability_not_negotiated",
+			Message: "read_file_v2 was not negotiated for this connection",
+		})
+		return
+	}
 
 	if h.handleDeliveryRPC(conn, msg) {
 		return
@@ -832,6 +973,20 @@ func (h *Handlers) HandleRPC(conn Connection, msg WireMessage) {
 		return
 	}
 
+	// Phase 8B minimum-client retirement: list_sessions requires the negotiated catalog
+	// contract for every backend. This gate intentionally lives before both the generic and
+	// OpenCode dispatchers so Codex, Grok, OpenCode and Claude share one wire error. Stage 2 has
+	// removed the formerly unreachable undeclared v1 implementations.
+	if msg.Method == "list_sessions" && catalogCapabilityRequiredFor(agent.Name()) && !h.eventPublisher.ConnCatalogCursorEpochV2(conn) {
+		retryable := false
+		conn.SendResult(msg.RequestID, nil, &WireError{
+			Code:      "protocol.capability_required",
+			Message:   "list_sessions requires catalog_cursor_epoch_v2",
+			Retryable: &retryable,
+		})
+		return
+	}
+
 	// opencode 全部走 ocProxy
 	if msg.BackendID == "opencode" && h.isOC() {
 		h.handleOpenCodeRPC(conn, msg)
@@ -839,6 +994,15 @@ func (h *Handlers) HandleRPC(conn Connection, msg WireMessage) {
 	}
 
 	h.dispatchRPC(conn, msg, agent)
+}
+
+func catalogCapabilityRequiredFor(agentName string) bool {
+	switch agentName {
+	case "codex", "grokbuild", "opencode", "claude", "claudecode":
+		return true
+	default:
+		return false
+	}
 }
 
 func (h *Handlers) handleSetObservationScope(conn Connection, msg WireMessage) {
@@ -1053,6 +1217,10 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleFetchTodos(conn, msg, agent)
 	case "get_workspace_diff":
 		h.handleGetWorkspaceDiff(conn, msg, agent)
+	case "get_turn_diff":
+		h.handleGetTurnDiff(conn, msg, agent)
+	case "get_full_thread_diff":
+		h.handleGetFullThreadDiff(conn, msg, agent)
 	case "get_usage":
 		h.handleGetUsage(conn, msg, agent)
 	case "run_diagnostics":
@@ -1063,12 +1231,20 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleReadMemoryFile(conn, msg, agent)
 	case "fetch_content_chunk":
 		h.handleFetchContentChunk(conn, msg)
-	case "read_file":
-		h.handleReadFile(conn, msg)
+	case "read_file_v2":
+		h.handleReadFileV2(conn, msg)
+	case "cancel_request_v1":
+		h.handleCancelRequest(conn, msg)
 	case "list_directory":
 		h.handleListDirectory(conn, msg)
 	case "get_git_context":
 		h.handleGetGitContext(conn, msg)
+	case "check_pull_request_support":
+		h.handleCheckPullRequestSupport(conn, msg, agent)
+	case "create_pull_request":
+		h.handleCreatePullRequest(conn, msg, agent)
+	case "commit_and_push":
+		h.handleCommitAndPush(conn, msg, agent)
 	case "checkout_git_branch":
 		h.handleCheckoutGitBranch(conn, msg)
 	case "create_git_branch":
@@ -1096,6 +1272,8 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleQuestionReply(conn, msg)
 	case "question_reject":
 		h.handleQuestionReject(conn, msg)
+	case "resolve_user_input":
+		h.handleResolveUserInput(conn, msg, agent)
 	default:
 		conn.SendResult(msg.RequestID, nil, &WireError{
 			Code:    "method_not_found",
@@ -1272,10 +1450,11 @@ func (h *Handlers) handleListAgents(conn Connection, msg WireMessage, agent core
 }
 
 func (h *Handlers) handleListProjects(conn Connection, msg WireMessage, agent core.Agent) {
-	// Claude-style project scan under ~/.claude/projects is only meaningful for
-	// Claude. Grok Build sessions live under ~/.grok/sessions and are discovered
-	// via agent.ListSessions — do not pollute Grok UI with Claude project folders.
-	if agent != nil && agent.Name() == "grokbuild" {
+	// ~/.claude/projects is Claude-only (path-encoded keys like -Users-jacklee-Projects-…).
+	// Codex / Grok / others discover workspace via session.directory from ListSessions.
+	// Previously only grokbuild was excluded; Codex still scanned Claude folders → iOS
+	// sidebar seeded dozens of empty "暂无会话" groups under Codex mode.
+	if !shouldListClaudeProjects(agent) {
 		conn.SendResult(msg.RequestID, map[string]interface{}{"projects": []interface{}{}}, nil)
 		return
 	}
@@ -1302,9 +1481,21 @@ func (h *Handlers) handleListProjects(conn Connection, msg WireMessage, agent co
 		if isHiddenProjectDir(key) {
 			continue
 		}
-		realDir := resolveProjectRealDirectory(filepath.Join(projectsDir, key))
+		projectPath := filepath.Join(projectsDir, key)
+		// Skip empty Claude project shells (no transcript jsonl). Claude leaves stale
+		// path-encoded dirs under ~/.claude/projects after one-off /tmp or deleted
+		// workspaces; listing them seeds iOS "暂无会话" ghost groups (owner 2026-08-10).
+		if !claudeProjectDirHasSessions(projectPath) {
+			continue
+		}
+		realDir := resolveProjectRealDirectory(projectPath)
 		if realDir == "" {
-			realDir = key
+			// No cwd in any jsonl — cannot map to a real workspace; drop.
+			continue
+		}
+		// Same Desktop-approx visibility as list_sessions (tmp / worktrees / missing cwd).
+		if !claudeWorkspaceVisibleForCatalog(realDir) {
+			continue
 		}
 		displayName := filepath.Base(realDir)
 		projects = append(projects, map[string]interface{}{
@@ -1317,6 +1508,38 @@ func (h *Handlers) handleListProjects(conn Connection, msg WireMessage, agent co
 		projects = []map[string]interface{}{}
 	}
 	conn.SendResult(msg.RequestID, map[string]interface{}{"projects": projects}, nil)
+}
+
+// claudeProjectDirHasSessions reports whether a ~/.claude/projects/<key> directory
+// contains at least one transcript .jsonl. Used by list_projects to hide empty shells.
+func claudeProjectDirHasSessions(projectPath string) bool {
+	files, err := os.ReadDir(projectPath)
+	if err != nil {
+		return false
+	}
+	for _, f := range files {
+		if f.IsDir() {
+			continue
+		}
+		if strings.HasSuffix(f.Name(), ".jsonl") {
+			return true
+		}
+	}
+	return false
+}
+
+// shouldListClaudeProjects gates the ~/.claude/projects filesystem scan.
+// Only the Claude agent owns that catalog; all other backends must return empty.
+func shouldListClaudeProjects(agent core.Agent) bool {
+	if agent == nil {
+		return false
+	}
+	switch agent.Name() {
+	case "claudecode", "claude":
+		return true
+	default:
+		return false
+	}
 }
 
 func resolveProjectRealDirectory(projectDir string) string {
@@ -1729,6 +1952,16 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 	if msg.Params != nil {
 		json.Unmarshal(msg.Params, &params)
 	}
+	if !h.admitBridgeTurn(params.SessionID) {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "runtime.quiescing", Message: "Bridge runtime is quiescing"})
+		return
+	}
+	turnCommitted := false
+	defer func() {
+		if !turnCommitted {
+			h.completeBridgeTurn(params.SessionID)
+		}
+	}()
 
 	if params.Directory != "" {
 		switchDir(agent, params.Directory)
@@ -1749,6 +1982,12 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 		resumeID := params.SessionID
 		if strings.HasPrefix(resumeID, "pending-") {
 			resumeID = ""
+		}
+		if resumeID != "" && agent.Name() == "claudecode" {
+			if wireErr := preflightClaudeResume(h.ctx, agent, resumeID); wireErr != nil {
+				conn.SendResult(msg.RequestID, nil, wireErr)
+				return
+			}
 		}
 		slog.Info("go-bridge: handleSendMessage: session not found in registry. Starting new agent session.", "sessionID", params.SessionID, "resumeID", resumeID, "agent", agent.Name())
 		startAt := time.Now()
@@ -1832,9 +2071,61 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "send_failed", Message: err.Error()})
 		return
 	}
+	turnCommitted = true
 
 	conn.SendResult(msg.RequestID, &ResultResponse{Ok: true}, nil)
+	// Claude projection content is UUID-keyed via file-relay; agent relay is control-plane
+	// sidecar (may lack itemId). Ensure file-relay is running before/alongside agent so
+	// mid-turn ApplyClaudeSourceRecordBatch → FlushProjectionPatch can emit (SSV2 SoT).
+	// startClaudeSessionFileRelay is a no-op when claude_file already owns the slot.
+	if msg.BackendID == "claude" || msg.BackendID == "claudecode" {
+		h.startClaudeSessionFileRelay(params.SessionID, conn, msg.BackendID)
+	}
 	h.startRelayIfNotRunning(params.SessionID, sess, conn, msg.BackendID)
+	if msg.BackendID == "claude" || msg.BackendID == "claudecode" {
+		// If agent claimed the global slot first on a race, still attach file-relay as
+		// content source (startClaudeSessionFileRelayAt allows agent+file coexistence).
+		h.startClaudeSessionFileRelay(params.SessionID, conn, msg.BackendID)
+	}
+}
+
+var claudeResumeOwnerCheckTimeout = 2 * time.Second
+
+func preflightClaudeResume(rootCtx context.Context, agent core.Agent, sessionID string) *WireError {
+	if err := rootCtx.Err(); err != nil {
+		return &WireError{Code: "request.cancelled", Message: err.Error()}
+	}
+	lister, ok := agent.(core.LiveSessionLister)
+	if !ok {
+		return retryableSessionError(
+			"session.owner_check_failed",
+			"无法确认会话进程归属，为避免冲突未发送，请稍后重试。",
+		)
+	}
+	checkCtx, cancel := context.WithTimeout(rootCtx, claudeResumeOwnerCheckTimeout)
+	defer cancel()
+	proc, err := lister.LiveSessionProcess(checkCtx, sessionID)
+	if rootErr := rootCtx.Err(); rootErr != nil {
+		return &WireError{Code: "request.cancelled", Message: rootErr.Error()}
+	}
+	if err != nil || checkCtx.Err() != nil {
+		return retryableSessionError(
+			"session.owner_check_failed",
+			"无法确认会话进程归属，为避免冲突未发送，请稍后重试。",
+		)
+	}
+	if proc.Live {
+		return retryableSessionError(
+			"session.held_by_external_worker",
+			"该会话记录的进程仍在运行。请在启动该会话的客户端中结束会话并退出对应进程，然后重试。",
+		)
+	}
+	return nil
+}
+
+func retryableSessionError(code, message string) *WireError {
+	retryable := true
+	return &WireError{Code: code, Message: message, Retryable: &retryable}
 }
 
 func applySendMessageRuntimeOptions(agent core.Agent, params SendMessageParams, dataDir string) {
@@ -1966,9 +2257,38 @@ func (h *Handlers) rebindSessionIDIfResolved(currentID string, sess core.AgentSe
 	}
 
 	h.sessions.rebind(currentID, realID)
+	// Broadcaster: move pending subscriptions (any directory variant) → real id.
 	h.broadcaster.Rebind(currentID, realID, backendID, directory)
 	h.eventPublisher.EventBuffer().Rebind(backendID, currentID, realID)
 	h.rebindRelayKind(currentID, realID, relayKindAgent)
+	// Observation: rewrite pending → real so ShouldSendEvent / rebindLiveTargets
+	// accept projection_patch for the real session before the client's next lease renew.
+	if h.observation != nil {
+		h.observation.RebindSessionID(backendID, currentID, realID)
+	}
+	// Ensure the live device conn is subscribed under the real id immediately.
+	// Without this, first-turn text/turn_completed patches flush with zero targets.
+	if n := h.rebindLiveTargetsForSession(backendID, realID); n > 0 {
+		slog.Info("go-bridge: pending→real rebind rebound live targets",
+			"backendID", backendID,
+			"from", currentID,
+			"to", realID,
+			"conns", n,
+		)
+	} else {
+		slog.Warn("go-bridge: pending→real rebind found zero live targets",
+			"backendID", backendID,
+			"from", currentID,
+			"to", realID,
+		)
+	}
+	// Codex file relay is keyed by session id; start under real id so transcript
+	// catch-up does not thrash on the pending ghost subscription.
+	if backendID == "codex" {
+		if agent, ok := h.Agents()["codex"]; ok && agent != nil {
+			h.startCodexSessionFileRelay(realID, nil, backendID, agent)
+		}
+	}
 	if backendID == "claude" || backendID == "claudecode" {
 		h.mu.Lock()
 		selection := h.pendingClaudeRuntime[currentID]
@@ -1976,6 +2296,11 @@ func (h *Handlers) rebindSessionIDIfResolved(currentID string, sess core.AgentSe
 		h.mu.Unlock()
 		h.writeClaudeRuntimeSidecar(realID, directory, selection)
 	}
+	slog.Info("go-bridge: session id rebind complete",
+		"backendID", backendID,
+		"from", currentID,
+		"to", realID,
+	)
 	return realID
 }
 
@@ -2202,7 +2527,7 @@ func (h *Handlers) handleGetSession(conn Connection, msg WireMessage, agent core
 
 	dir := extractDir(msg)
 	if agent.Name() == "claudecode" {
-		projDir, sessPath := findClaudeSessionFile(params.SessionID, dir)
+		projDir, sessPath := h.findClaudeSessionFile(params.SessionID, dir)
 		if sessPath != "" {
 			info, err := os.Stat(sessPath)
 			if err == nil {
@@ -2245,8 +2570,8 @@ func (h *Handlers) handleGetSession(conn Connection, msg WireMessage, agent core
 	conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_found", Message: fmt.Sprintf("session %q not found", params.SessionID)})
 }
 
-func findClaudeSessionFile(sessionID string, optDir string) (projectDir string, sessionPath string) {
-	transcriptStateProbe()
+func (h *Handlers) findClaudeSessionFile(sessionID string, optDir string) (projectDir string, sessionPath string) {
+	h.noteTranscriptStateProbe()
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", ""
@@ -2280,11 +2605,23 @@ func findClaudeSessionFile(sessionID string, optDir string) (projectDir string, 
 }
 
 func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent core.Agent) {
+	// Canonical public routing reaches this function only after catalog_cursor_epoch_v2
+	// negotiation. Claude intentionally keeps its declared v1-shaped compatibility cursor.
+	if agent.Name() == "codex" {
+		h.codexHandleListSessions(conn, msg, agent)
+		return
+	}
+	// Grok session/list is backend-global; declared directory views are bridge-filtered v2 scopes.
+	if agent.Name() == "grokbuild" {
+		h.grokHandleListSessions(conn, msg, agent)
+		return
+	}
+
 	limit := h.effectiveSessionListLimit(extractPositiveInt(msg, "limit"))
 	metrics := newSessionLoadRequestMetrics(conn, msg)
-	ctx := core.WithSessionLoadMetrics(context.Background(), metrics.context())
+	ctx := core.WithSessionLoadMetrics(h.ctx, metrics.context())
 
-	// 非 claudecode backend：直接用 agent 自己的 ListSessions 实现
+	// 非 canonical catalog backend 的 internal/test agents 仍可复用 generic list helper。
 	if agent.Name() != "claudecode" {
 		sessions, err := agent.ListSessions(ctx)
 		if err != nil {
@@ -2307,6 +2644,7 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 	// claudecode: refresh the global fingerprinted catalog, then filter its
 	// immutable snapshot instead of reparsing every project transcript.
 	dir := extractDir(msg)
+	cursor := extractStringParam(msg, "cursor")
 	projectKey := ""
 	if dir != "" {
 		if resolvedKey, projectPath := resolveProjectDir(dir); projectPath != "" {
@@ -2317,7 +2655,23 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 	allSessions := h.claudeSessions.list(projectKey, metrics.context())
 	allSessions = h.enrichSessionStatesForList(allSessions, agent, h.getRunningMap(ctx, agent))
 	h.overlayPinnedState(allSessions, "claudecode")
-	result := paginateSessionList(allSessions, extractStringParam(msg, "cursor"), limit)
+	// 全局首页（无 directory、无 cursor）：每目录 K 硬顶公平切片，避免单项目吃光 N。
+	// directory-scoped / 带 cursor：普通分页，支持侧栏「加载更多」深挖。
+	var result map[string]interface{}
+	if dir == "" && cursor == "" {
+		result = packageFairHomePage(allSessions, defaultSessionListPerDirectoryLimit, limit)
+		if ws, ok := result["sessions"].([]map[string]interface{}); ok {
+			slog.Info("claudecode list_sessions fair-home",
+				"limit", limit,
+				"per_dir_limit", defaultSessionListPerDirectoryLimit,
+				"result_count", len(ws),
+				"full_count", len(allSessions),
+				"has_more", result["hasMore"] == true,
+			)
+		}
+	} else {
+		result = paginateSessionList(allSessions, cursor, limit)
+	}
 	metrics.wireMapping += time.Since(mappingStarted)
 	if ws, ok := result["sessions"].([]map[string]interface{}); ok {
 		metrics.resultCount = len(ws)
@@ -2339,14 +2693,6 @@ func extractPositiveInt(msg WireMessage, key string) int {
 		return 0
 	}
 	return value
-}
-
-func sortSessionsByUpdatedAt(sessions []map[string]interface{}) {
-	sort.Slice(sessions, func(i, j int) bool {
-		mi, _ := sessions[i]["updatedAtMillis"].(int64)
-		mj, _ := sessions[j]["updatedAtMillis"].(int64)
-		return mi > mj
-	})
 }
 
 func limitLatestSessions(sessions []map[string]interface{}, limit int) []map[string]interface{} {
@@ -2668,7 +3014,7 @@ func (h *Handlers) writeClaudeRuntimeSidecar(sessionID, directory string, select
 	if selection.ModelID == "" && selection.ProviderID == "" && selection.ReasoningEffort == "" {
 		return
 	}
-	projectDir, _ := findClaudeSessionFile(sessionID, directory)
+	projectDir, _ := h.findClaudeSessionFile(sessionID, directory)
 	if projectDir == "" && strings.TrimSpace(directory) != "" {
 		_, projectDir = resolveProjectDir(directory)
 	}
@@ -3041,7 +3387,7 @@ func (h *Handlers) handleResumeSession(conn Connection, msg WireMessage, agent c
 		"id":        params.SessionID,
 		"directory": dir,
 	}
-	conn.SendResult(msg.RequestID, h.enrichSessionStateWithAgent(result, agent), nil)
+	conn.SendResult(msg.RequestID, h.enrichResumeSessionState(result, agent), nil)
 }
 
 func (h *Handlers) handleSwitchModel(conn Connection, msg WireMessage, agent core.Agent) {
@@ -3211,6 +3557,159 @@ func (h *Handlers) handleQuestionReject(conn Connection, msg WireMessage) {
 	}
 
 	conn.SendResult(msg.RequestID, &ResultResponse{Ok: true}, nil)
+}
+
+// handleResolveUserInput 是 v2 结构化用户输入回答的唯一入口（设计 §7/§10.1）。
+// 它只调用可选能力 core.UserInputResponder；旧 RespondQuestion/RejectQuestion 不作 fallback。
+// 把 adapter 返回的 *core.UserInputError 映射为 WireError（保留稳定 code），不回显 secret/答案正文。
+func (h *Handlers) handleResolveUserInput(conn Connection, msg WireMessage, _ core.Agent) {
+	var params struct {
+		SessionID      string                  `json:"sessionId"`
+		InteractionID  string                  `json:"interactionId"`
+		ClientActionID string                  `json:"clientActionId"`
+		Action         core.UserInputAction    `json:"action"`
+		Answers        *[]core.UserInputAnswer `json:"answers"`
+	}
+	if msg.Params != nil {
+		json.Unmarshal(msg.Params, &params)
+	}
+
+	if strings.TrimSpace(msg.BackendID) == "" || strings.TrimSpace(params.SessionID) == "" || strings.TrimSpace(params.InteractionID) == "" {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: "backendId, sessionId, and interactionId are required"})
+		return
+	}
+	if !isUUIDv4(params.ClientActionID) {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: "clientActionId must be a UUID v4"})
+		return
+	}
+	if params.Action != core.UserInputActionAnswer && params.Action != core.UserInputActionReject {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: `action must be "answer" or "reject"`})
+		return
+	}
+	if params.Action == core.UserInputActionAnswer && (params.Answers == nil || len(*params.Answers) == 0) {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: "answer action requires non-empty answers"})
+		return
+	}
+	if params.Action == core.UserInputActionReject && params.Answers != nil {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: "reject action must omit answers"})
+		return
+	}
+
+	tracked, ok := h.sessions.getForBackend(params.SessionID, msg.BackendID)
+	if !ok {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_found", Message: "no active session for this backend and structured user input"})
+		return
+	}
+	sess := tracked.session
+	if params.Action == core.UserInputActionReject {
+		part, _, found := h.projectedUserInput(msg.BackendID, params.SessionID, params.InteractionID)
+		if !found {
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "interaction_not_found", Message: "interaction not found in current projection"})
+			return
+		}
+		if !part.UserInputCanReject {
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "response_not_supported", Message: "this interaction cannot be rejected"})
+			return
+		}
+	}
+
+	responder, ok := sess.(core.UserInputResponder)
+	if !ok {
+		// backend 未声明 structured_user_input_v1 能力：fail-closed，明确告知不支持。
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "response_not_supported", Message: "this backend does not support structured user input"})
+		return
+	}
+
+	resolveCtx, cancel := context.WithTimeout(h.ctx, 10*time.Second)
+	defer cancel()
+	var answers []core.UserInputAnswer
+	if params.Answers != nil {
+		answers = *params.Answers
+	}
+	resolution, err := responder.ResolveUserInput(resolveCtx, params.InteractionID, params.ClientActionID, params.Action, answers)
+	if err != nil {
+		var uie *core.UserInputError
+		if errors.As(err, &uie) {
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: uie.Code, Message: uie.Message})
+			return
+		}
+		slog.Error("go-bridge: ResolveUserInput failed", "interactionId", params.InteractionID, "error", err)
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "resolve_user_input_failed", Message: err.Error()})
+		return
+	}
+	part, headRev, err := h.waitForUserInputResolution(resolveCtx, msg.BackendID, params.SessionID, params.InteractionID, resolution)
+	if err != nil {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "resolve_user_input_failed", Message: err.Error()})
+		return
+	}
+	resolution.CurrentStatus = core.UserInputStatus(part.UserInputStatus)
+	resolution.HeadRev = headRev
+
+	conn.SendResult(msg.RequestID, map[string]any{
+		"interactionId": params.InteractionID,
+		"outcome":       resolution.Outcome,
+		"currentStatus": resolution.CurrentStatus,
+		"headRev":       resolution.HeadRev,
+	}, nil)
+}
+
+func isUUIDv4(value string) bool {
+	if len(value) != 36 || value[8] != '-' || value[13] != '-' || value[18] != '-' || value[23] != '-' || value[14] != '4' {
+		return false
+	}
+	variant := value[19]
+	if variant != '8' && variant != '9' && variant != 'a' && variant != 'b' && variant != 'A' && variant != 'B' {
+		return false
+	}
+	for i, c := range value {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			continue
+		}
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+func (h *Handlers) projectedUserInput(backendID, sessionID, interactionID string) (ProjectionPart, int, bool) {
+	if h.eventPublisher == nil || h.eventPublisher.ProjectionReducer() == nil {
+		return ProjectionPart{}, 0, false
+	}
+	projection, ok := h.eventPublisher.ProjectionReducer().Snapshot(backendID, sessionID)
+	if !ok {
+		return ProjectionPart{}, 0, false
+	}
+	for _, turn := range projection.Turns {
+		if turn.Assistant == nil {
+			continue
+		}
+		for _, part := range turn.Assistant.Parts {
+			if part.Type == "user_input" && part.UserInputInteractionID == interactionID {
+				return part, projection.SyncRev, true
+			}
+		}
+	}
+	return ProjectionPart{}, projection.SyncRev, false
+}
+
+func (h *Handlers) waitForUserInputResolution(ctx context.Context, backendID, sessionID, interactionID string, resolution core.UserInputResolution) (ProjectionPart, int, error) {
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		part, headRev, found := h.projectedUserInput(backendID, sessionID, interactionID)
+		if found {
+			status := core.UserInputStatus(part.UserInputStatus)
+			if resolution.Outcome == core.UserInputOutcomeInProgress || status != core.UserInputStatusPending {
+				return part, headRev, nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ProjectionPart{}, 0, fmt.Errorf("projection did not commit structured input resolution before timeout: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func sessionsToWire(sessions []core.AgentSessionInfo) []map[string]interface{} {
@@ -3445,35 +3944,74 @@ func backendKindForAgent(agent core.Agent) string {
 	}
 }
 
-// ── read_file: iOS 端查看消息中引用的文件内容 ──────────────────────────────────
+const readFileMaxSize = 2 * 1024 * 1024 // 2MB
 
-const (
-	readFileMaxSize   = 2 * 1024 * 1024 // 2MB
-	readFileMaxLines  = 5000
-	readFileTailLines = 200
-)
+// defaultFilePoolConfig 是 read_file_v2 bounded worker pool 的默认配置（plan §3.6.3 / A0.5）。
+// 最终数值待 A0 冻结；当前选择保守可工作值：4 个 worker、单设备最多 1 并发（保留 3 个
+// global slot）、单设备队列 4、全局队列 32、读超时 10s、stuckAge 5s。
+// degradeAt=1：损失 1 个 slot 即报警（minHealthyFileSlots=3 ⇒ 4-3=1）。
+func defaultFilePoolConfig() filepool.Config {
+	const poolSize uint32 = 4
+	return filepool.Config{
+		PoolSize:          poolSize,
+		PerDeviceInFlight: 1,
+		PerDeviceQueued:   4,
+		GlobalQueued:      32,
+		ReadTimeout:       10 * time.Second,
+		Health: admission.FileReadHealthConfig{
+			PoolSize:            poolSize,
+			MinHealthyFileSlots: 3,
+			DegradeAt:           1,
+			StuckAgeMillis:      5000,
+		},
+	}
+}
 
-func (h *Handlers) handleReadFile(conn Connection, msg WireMessage) {
-	var params struct {
-		Path      string `json:"path"`
-		Directory string `json:"directory,omitempty"`
-		SessionID string `json:"sessionId,omitempty"`
-	}
-	if msg.Params != nil {
-		json.Unmarshal(msg.Params, &params)
-	}
-	if params.Path == "" {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "missing_param", Message: "path required"})
+// ── read_file_v2: tagged text/unsupported_encoding/binary + segments + identity (plan §3.6) ──
+//
+// 这是唯一的文件源码读取 RPC；调用方必须在 hello 阶段协商 read_file_v2 capability。
+// params exact: path + owner{kind:session|workspace, backendId, sessionId+directory | workspaceRoot}。
+// MacBridge 按 owner 授权并返回 server-canonical owningIdentity（canonicalized root）。
+// 结果经 readfile.BuildReadFileV2Result 构造（encoding 分类 + segments + 行语义），WirePayload 发出。
+func (h *Handlers) handleReadFileV2(conn Connection, msg WireMessage) {
+	path, owner, decodeErr := readfile.DecodeReadFileV2Request(msg.Params)
+	if decodeErr != nil {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: "read_file_v2 params must match the exact owner schema"})
 		return
 	}
 
-	authorizedRoot, err := h.authorizedReadFileRoot(msg, params.Directory, params.SessionID)
+	backendID := owner.BackendID
+	if backendID == "" {
+		backendID = msg.BackendID
+	}
+	var requestedDir, sessionID string
+	var identity readfile.OwningIdentity
+	switch owner.Kind {
+	case "session":
+		requestedDir = owner.CanonicalDirectory
+		sessionID = owner.SessionID
+		identity = readfile.OwningIdentity{Kind: "session", BackendID: backendID, SessionID: owner.SessionID}
+	case "workspace":
+		requestedDir = owner.CanonicalWorkspaceRoot
+		identity = readfile.OwningIdentity{Kind: "workspace", BackendID: backendID}
+	default:
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: "owner.kind must be session|workspace"})
+		return
+	}
+
+	authorizedRoot, err := h.authorizedReadFileRoot(msg, requestedDir, sessionID)
 	if err != nil {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "file.outside_authorized_root", Message: "file is outside the authorized workspace"})
 		return
 	}
+	// server-canonical identity：workspace 用 canonicalized authorizedRoot；session 用 canonical session dir。
+	if identity.Kind == "workspace" {
+		identity.CanonicalWorkspaceRoot = authorizedRoot
+	} else if dir := h.sessions.directoryForSession(sessionID); dir != "" {
+		identity.CanonicalDirectory = dir
+	}
 
-	resolvedPath, info, err := resolveAuthorizedReadFilePath(authorizedRoot, params.Path)
+	resolvedPath, info, err := resolveAuthorizedReadFilePath(authorizedRoot, path)
 	if err != nil {
 		var wireErr *WireError
 		if errors.As(err, &wireErr) {
@@ -3483,81 +4021,245 @@ func (h *Handlers) handleReadFile(conn Connection, msg WireMessage) {
 		}
 		return
 	}
-
 	if info.Size() > readFileMaxSize {
-		conn.SendResult(msg.RequestID, nil, &WireError{
-			Code:    "file_too_large",
-			Message: fmt.Sprintf("file size %d bytes exceeds limit %d bytes", info.Size(), readFileMaxSize),
-		})
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "file_too_large", Message: fmt.Sprintf("file size %d bytes exceeds limit %d bytes", info.Size(), readFileMaxSize)})
 		return
 	}
 
+	// §3.6.3：授权 + 路径解析 + size gate 保持同步（它们是先于读取的 admission）；
+	// 实际 os.Open/Stat/ReadAll 投递到全局专用 bounded file pool，避免一次卡住的 os.Read
+	// 阻塞本设备 inbound scheduler 上的 permission_response/question_reply/send_message。
+	ext := strings.TrimPrefix(filepath.Ext(resolvedPath), ".")
+	requestID := msg.RequestID
+	infoClone := info
+	identityClone := identity
+	work := func(ctx context.Context) {
+		performReadFileV2Read(ctx, conn, requestID, resolvedPath, infoClone, ext, identityClone)
+	}
+	onCancel := func(err error) {
+		// pool 在 admit 后、Work 前（degrading drain）终结本任务时调用。
+		code := "file.read_degraded"
+		if errors.Is(err, filepool.ErrPoolClosed) {
+			code = "read_failed"
+		}
+		conn.SendResult(requestID, nil, &WireError{Code: code, Message: "file read could not be completed"})
+	}
+
+	if h.filePool == nil {
+		// 测试未注入 pool：内联同步读（不享受解耦/退化保护，保持既有测试行为）。
+		work(context.Background())
+		return
+	}
+	if submitErr := h.filePool.Submit(filepool.Job{DeviceID: stableFileReadDeviceID(conn), Work: work, OnCancel: onCancel}); submitErr != nil {
+		code := "read_failed"
+		switch {
+		case errors.Is(submitErr, filepool.ErrFileBusy):
+			code = "file.read_busy"
+		case errors.Is(submitErr, filepool.ErrFileDegraded):
+			code = "file.read_degraded"
+		}
+		conn.SendResult(requestID, nil, &WireError{Code: code, Message: "file read could not be admitted"})
+		return
+	}
+	// 提交成功：pool 稍后触发 work（成功/失败 SendResult）或 onCancel（degrade），
+	// 本 goroutine 立即返回，inbound scheduler 不被阻塞。
+}
+
+// stableFileReadDeviceID 返回稳定认证设备 ID 作为 file pool 的 fair 身份
+// （plan §3.6.3）。未认证（开发模式）返回空串 → 单一 anonymous bucket。
+func stableFileReadDeviceID(conn Connection) string {
+	if d := conn.AuthedDevice(); d != nil {
+		return d.DeviceID
+	}
+	return ""
+}
+
+// performReadFileV2Read 在 file pool worker 上执行实际的有界读取 + 结果组装 + 回写。
+// ctx 带 ReadTimeout deadline；分块读取间检查 ctx，commit 前再次校验，禁止 late writeback。
+func performReadFileV2Read(ctx context.Context, conn Connection, requestID, resolvedPath string, info os.FileInfo, ext string, identity readfile.OwningIdentity) {
 	file, err := os.Open(resolvedPath)
 	if err != nil {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "read_failed", Message: "failed to open file"})
+		conn.SendResult(requestID, nil, &WireError{Code: "read_failed", Message: "failed to open file"})
 		return
 	}
 	defer file.Close()
-
 	openedInfo, err := file.Stat()
-	if err != nil || !os.SameFile(info, openedInfo) {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "file.changed_during_read", Message: "file changed during authorization"})
+	if err != nil || !stableFileSnapshot(info, openedInfo) {
+		conn.SendResult(requestID, nil, &WireError{Code: "file.changed_during_read", Message: "file changed during authorization"})
 		return
 	}
-
-	data, err := io.ReadAll(io.LimitReader(file, readFileMaxSize+1))
+	data, err := readBoundedCooperative(file, readFileMaxSize, ctx)
 	if err != nil {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "read_failed", Message: "failed to read file"})
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			// 协作取消 / late 读：丢弃，不回写（plan §3.6.3：连接关闭/deadline/cancel 后禁止 late result 写回）。
+			slog.Warn("read_file_v2 discarded after context cancel", "requestId", safeID(requestID), "err", err)
+			return
+		}
+		conn.SendResult(requestID, nil, &WireError{Code: "read_failed", Message: "failed to read file"})
 		return
 	}
 	if len(data) > readFileMaxSize {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "file_too_large", Message: "file exceeds size limit"})
+		conn.SendResult(requestID, nil, &WireError{Code: "file_too_large", Message: "file exceeds size limit"})
 		return
 	}
-
-	content := string(data)
-	lines := strings.Split(content, "\n")
-	totalLines := len(lines)
-	truncated := false
-
-	// 超过行数限制时截断：保留头部 + 尾部
-	if totalLines > readFileMaxLines {
-		headLines := readFileMaxLines - readFileTailLines
-		head := lines[:headLines]
-		tail := lines[totalLines-readFileTailLines:]
-		content = strings.Join(head, "\n") +
-			fmt.Sprintf("\n\n... (%d lines omitted) ...\n\n", totalLines-headLines-readFileTailLines) +
-			strings.Join(tail, "\n")
-		truncated = true
+	finalInfo, err := file.Stat()
+	if err != nil || !stableFileSnapshot(openedInfo, finalInfo) {
+		conn.SendResult(requestID, nil, &WireError{Code: "file.changed_during_read", Message: "file changed while being read"})
+		return
 	}
-
-	// 推断语言（用于前端高亮）
-	ext := strings.TrimPrefix(filepath.Ext(resolvedPath), ".")
-
-	conn.SendResult(msg.RequestID, map[string]interface{}{
-		"path":       resolvedPath,
-		"content":    content,
-		"extension":  ext,
-		"sizeBytes":  len(data),
-		"totalLines": totalLines,
-		"truncated":  truncated,
-	}, nil)
+	if ctx.Err() != nil {
+		// commit guard：读取虽完成，但 ctx 已过期/cancel，禁止 late writeback。
+		slog.Warn("read_file_v2 discarded: context done before commit", "requestId", safeID(requestID))
+		return
+	}
+	// read_file_v2 返回 byte admission（2 MiB）内的完整文本。5000 行只限制 iOS Shiki
+	// 高亮资格，不得在传输层删掉源码。
+	result := readfile.BuildReadFileV2Result(data, resolvedPath, ext, identity, readfile.NoLineTruncation, 0)
+	conn.SendResult(requestID, result.WirePayload(), nil)
 }
 
-// ── list_directory: iOS 端远程选择/浏览 Mac 本地文件夹 ──────────────────────────────
+// stableFileSnapshot rejects replacement and in-place rewrites, including the
+// common same-size case. The post-read check is intentionally performed on the
+// already-open descriptor so a pathname swap cannot make torn bytes look valid.
+func stableFileSnapshot(before, after os.FileInfo) bool {
+	return before != nil && after != nil &&
+		os.SameFile(before, after) &&
+		before.Size() == after.Size() &&
+		before.Mode() == after.Mode() &&
+		before.ModTime().Equal(after.ModTime())
+}
 
+// readBoundedCooperative 以固定块读取 file 至多 maxBytes+1 字节，并在每次 syscall 间
+// 检查 ctx（plan §3.6.3：worker 分块 read 并在每次 syscall 间检查 context）。ctx 无法抢占
+// 阻塞 syscall；真正卡住的 read 由 file pool 的 stuck watchdog（FileReadHealth 退化）处理。
+func readBoundedCooperative(file *os.File, maxBytes int64, ctx context.Context) ([]byte, error) {
+	const chunk = 64 << 10
+	limit := maxBytes + 1 // +1 sentinel 用于探测超限（与 io.LimitReader(+1) 语义一致）
+	buf := make([]byte, 0, chunk)
+	tmp := make([]byte, chunk)
+	for int64(len(buf)) < limit {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		remaining := limit - int64(len(buf))
+		want := int64(chunk)
+		if want > remaining {
+			want = remaining
+		}
+		n, err := file.Read(tmp[:want])
+		if n > 0 {
+			buf = append(buf, tmp[:n]...)
+		}
+		if err == io.EOF {
+			return buf, nil
+		}
+		if err != nil {
+			return buf, err
+		}
+	}
+	return buf, nil
+}
+
+// ── cancel_request_v1: read_file_v2 bulk cancel control RPC（R1.5，§3.6.4）──────────
+//
+// 独立 connection capability（Mac 在 hello 回显 cancel_request_v1 后 iOS 才发送）。
+// 本期 cancel allowlist 只有 read_file_v2——非 read_file_v2 请求不会在 requestBulkHandles
+// 登记 handle，故 lookup 返回 nil → not_found（隐式 allowlist 门控，不同于 not_cancellable）。
+// device/generation 绑定由 per-conn map 自然保证：A 设备 cancel 找不到 B 设备的 handle，
+// 新 generation（重连）的 cancel 找不到旧 generation 的 handle。
+//
+// too_late 边界 = committedToWriter（plan §3.6.4「cancel唯一原子状态机」）：Relay 为 index0
+// 原子 commit 到 writer。handle.Cancel() 用 CAS active→cancelled 与 writer 的 index0 commit
+// 互斥裁决：cancel 赢 → cancelled（writer 跳过 index0）；writer 已 commit index0 → too_late。
+func (h *Handlers) handleCancelRequest(conn Connection, msg WireMessage) {
+	var params struct {
+		RequestID string `json:"requestId"` // 待 cancel 的原始请求 ID
+	}
+	if msg.Params != nil {
+		json.Unmarshal(msg.Params, &params)
+	}
+	if params.RequestID == "" {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "missing_param", Message: "requestId required"})
+		return
+	}
+	rc, ok := conn.(*RelayDeviceConn)
+	if !ok {
+		// Direct/LAN：read_file_v2 结果是单帧同步发送（无 chunk group），cancel 总是 too_late。
+		// Direct 的 committedToWriter = 首个 response frame 原子 commit 到 socket writer（R1.9 细化）。
+		conn.SendResult(msg.RequestID, map[string]interface{}{"outcome": "too_late", "requestId": params.RequestID}, nil)
+		return
+	}
+	handle := rc.lookupRequestBulkHandle(params.RequestID)
+	if handle == nil {
+		// 未登记 = 非 read_file_v2 / 已完成 / 跨 device·generation / 从未 chunked。
+		conn.SendResult(msg.RequestID, map[string]interface{}{"outcome": "not_found", "requestId": params.RequestID}, nil)
+		return
+	}
+	outcome := "too_late"
+	if handle.Cancel() {
+		outcome = "cancelled"
+		slog.Info("relay cancel_request_v1 cancelled bulk group", "device", rc.deviceID, "originalRequestId", safeID(params.RequestID), "groupID", handle.GroupID())
+	}
+	conn.SendResult(msg.RequestID, map[string]interface{}{"outcome": outcome, "requestId": params.RequestID}, nil)
+}
+
+// ── list_directory: iOS 端远程选择/浏览 Mac 本地文件夹 (§6.5) ────────────────────
+//
+// 两个模式，由可选 workspace_root 参数切换：
+//  1. workspace_root 传（workspace-bound）：realpath(requested) 必须在 realpath(root) 内，
+//     symlink 列为 isSymlink:true 叶子不递归；拒 ../ 越界。
+//  2. workspace_root 不传（广域 picker）：picker 无 workspace 边界、可浏览任意真实目录；
+//     symlink 仍由 collectDirItems 的 mode-independent 守卫叶子化（不递归 target），见 review①。
+//
+// 同时新增 limit/offset/depth 翻页与子树预取（additive，所有调用方共享）。
 func (h *Handlers) handleListDirectory(conn Connection, msg WireMessage) {
 	var params struct {
-		Path string `json:"path"`
+		Path          string `json:"path"`
+		Limit         int    `json:"limit"`
+		Offset        int    `json:"offset"`
+		Depth         int    `json:"depth"`
+		WorkspaceRoot string `json:"workspace_root"`
 	}
 	if msg.Params != nil {
 		json.Unmarshal(msg.Params, &params)
 	}
 
-	resolvedPath, err := expandPath(params.Path)
-	if err != nil {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_path", Message: err.Error()})
-		return
+	var root string
+	var resolvedPath string
+	workspaceBound := params.WorkspaceRoot != ""
+
+	if workspaceBound {
+		var err error
+		root, err = canonicalExistingDirectory(params.WorkspaceRoot)
+		if err != nil {
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "file.outside_authorized_root", Message: "invalid workspace root: " + err.Error()})
+			return
+		}
+		if params.Path == "" {
+			resolvedPath = root
+		} else {
+			resolvedPath, err = canonicalExistingDirectory(params.Path)
+			if err != nil {
+				conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_path", Message: err.Error()})
+				return
+			}
+			if !pathIsWithinRoot(root, resolvedPath) {
+				conn.SendResult(msg.RequestID, nil, &WireError{Code: "file.outside_authorized_root", Message: "requested directory is outside the authorized workspace"})
+				return
+			}
+		}
+	} else {
+		// 广域模式（picker）：不设 workspace 边界，通过 expandPath 接受 ~/相对路径，
+		// picker 可浏览任意真实目录。symlink 安全由 collectDirItems 的 mode-independent
+		// 守卫保证（isSymlink → 叶子不递归），故即便 path 下含指向外部的 symlink，也只
+		// 返回叶子标记、不展开 target 内容（review①：TestListDirectory_BroadMode_SymlinkIsLeaf）。
+		var err error
+		resolvedPath, err = expandPath(params.Path)
+		if err != nil {
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_path", Message: err.Error()})
+			return
+		}
+		root = resolvedPath // 广域无 workspace 边界：root=resolvedPath 使 pathIsWithinRoot 恒真（picker 预期）
 	}
 
 	entries, err := os.ReadDir(resolvedPath)
@@ -3566,36 +4268,119 @@ func (h *Handlers) handleListDirectory(conn Connection, msg WireMessage) {
 		return
 	}
 
-	type directoryItem struct {
-		Name        string `json:"name"`
-		Path        string `json:"path"`
-		IsDirectory bool   `json:"isDirectory"`
+	limit := clampInt(params.Limit, 200, 1, 500)
+	offset := max(0, params.Offset)
+	depth := clampInt(params.Depth, 1, 1, 3)
+
+	allEntries := filterAndSortDirEntries(entries)
+	totalTopLevel := len(allEntries)
+
+	end := offset + limit
+	if offset > totalTopLevel {
+		offset = totalTopLevel
 	}
-
-	var items []directoryItem
-	for _, entry := range entries {
-		name := entry.Name()
-		// 过滤隐藏文件/文件夹 (以 . 开头)
-		if strings.HasPrefix(name, ".") {
-			continue
-		}
-		itemPath := filepath.Join(resolvedPath, name)
-		items = append(items, directoryItem{
-			Name:        name,
-			Path:        itemPath,
-			IsDirectory: entry.IsDir(),
-		})
-
-		// 限制单次返回条数，避免大文件夹内存爆满
-		if len(items) >= 1000 {
-			break
-		}
+	if end > totalTopLevel {
+		end = totalTopLevel
 	}
+	topSlice := allEntries[offset:end]
+	hasMore := (offset + limit) < totalTopLevel
 
+	items := collectDirItems(resolvedPath, topSlice, root, workspaceBound, depth, limit)
 	conn.SendResult(msg.RequestID, map[string]interface{}{
 		"currentPath": resolvedPath,
 		"items":       items,
+		"limit":       limit,
+		"offset":      offset,
+		"depth":       depth,
+		"hasMore":     hasMore,
 	}, nil)
+}
+
+// ── list_directory helpers ──────────────────────────────────────────────────────────
+
+func clampInt(v, zeroVal, minVal, maxVal int) int {
+	if v == 0 {
+		return zeroVal
+	}
+	if v < minVal {
+		return minVal
+	}
+	if v > maxVal {
+		return maxVal
+	}
+	return v
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// filterAndSortDirEntries 过滤隐藏条目（. 开头），并按「目录优先→字母序」排序。
+func filterAndSortDirEntries(entries []os.DirEntry) []os.DirEntry {
+	var visible []os.DirEntry
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		visible = append(visible, e)
+	}
+	sort.Slice(visible, func(i, j int) bool {
+		aDir, bDir := visible[i].IsDir(), visible[j].IsDir()
+		if aDir != bDir {
+			return aDir // dirs first
+		}
+		return visible[i].Name() < visible[j].Name()
+	})
+	return visible
+}
+
+// collectDirItems 把当前层的 entries 转为 []directoryItem，并按 depth 递归子目录（仅真实
+// 目录，不含 symlink）。limit 参数控制每层递归的子条目上限，防止 depth=3 时响应爆炸。
+func collectDirItems(parent string, entries []os.DirEntry, workspaceRoot string, workspaceBound bool, depth, limit int) []directoryItem {
+	var items []directoryItem
+	for _, e := range entries {
+		name := e.Name()
+		isSymlink := e.Type()&os.ModeSymlink != 0
+		isDir := e.IsDir()
+		itemPath := filepath.Join(parent, name)
+
+		items = append(items, directoryItem{
+			Name:        name,
+			Path:        itemPath,
+			IsDirectory: isDir,
+			IsSymlink:   isSymlink,
+		})
+
+		// 递归子目录：仅当 depth > 1 且是真实目录（非 symlink）。
+		if depth > 1 && isDir && !isSymlink {
+			childPath := itemPath
+			if workspaceBound && !pathIsWithinRoot(workspaceRoot, childPath) {
+				continue // defense in depth：已由父层校验，补充检查
+			}
+			childEntries, err := os.ReadDir(childPath)
+			if err != nil {
+				continue // 允许权限等读失败（静默跳过，不阻塞整体列表）
+			}
+			childVisible := filterAndSortDirEntries(childEntries)
+			if len(childVisible) > limit {
+				childVisible = childVisible[:limit]
+			}
+			children := collectDirItems(childPath, childVisible, workspaceRoot, workspaceBound, depth-1, limit)
+			items = append(items, children...)
+		}
+	}
+	return items
+}
+
+// directoryItem 是 list_directory 响应的单条目；放在 file-level 以在测试中可见。
+type directoryItem struct {
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	IsDirectory bool   `json:"isDirectory"`
+	IsSymlink   bool   `json:"isSymlink,omitempty"`
 }
 
 func expandPath(path string) (string, error) {
@@ -3681,6 +4466,90 @@ func resolveAuthorizedReadFilePath(root, requestedPath string) (string, os.FileI
 	if !filepath.IsAbs(candidate) {
 		candidate = filepath.Join(root, candidate)
 	}
+	resolved, info, err := resolveAuthorizedReadFileCandidate(root, candidate)
+	if err == nil {
+		return resolved, info, nil
+	}
+
+	// Markdown produced by coding agents sometimes uses a display filename as the href
+	// (for example [plan.md](plan.md)) even when the file lives below the workspace root.
+	// Preserve normal path semantics first; only a single-component relative basename that
+	// does not exist at root is eligible for a bounded unique-name lookup. Never guess when
+	// multiple files share the name.
+	if filepath.IsAbs(cleanPath) || filepath.Base(cleanPath) != cleanPath || !errors.Is(err, os.ErrNotExist) {
+		return "", nil, err
+	}
+	if isSensitiveReadFilePath(filepath.Join(root, cleanPath)) {
+		return "", nil, &WireError{Code: "file.sensitive_path_denied", Message: "sensitive file access is denied"}
+	}
+	matched, matchErr := findUniqueAuthorizedBasename(root, cleanPath)
+	if matchErr != nil {
+		return "", nil, matchErr
+	}
+	if matched == "" {
+		return "", nil, err
+	}
+	return resolveAuthorizedReadFileCandidate(root, matched)
+}
+
+const maxAuthorizedBasenameSearchEntries = 50_000
+
+var (
+	errAuthorizedBasenameAmbiguous = errors.New("authorized basename is ambiguous")
+	errAuthorizedBasenameLimit     = errors.New("authorized basename search limit exceeded")
+)
+
+func findUniqueAuthorizedBasename(root, basename string) (string, error) {
+	var match string
+	visited := 0
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if entry != nil && entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if path == root {
+			return nil
+		}
+		if entry.IsDir() && shouldSkipBasenameSearchDirectory(entry.Name()) {
+			return filepath.SkipDir
+		}
+		visited++
+		if visited > maxAuthorizedBasenameSearchEntries {
+			return errAuthorizedBasenameLimit
+		}
+		if !entry.Type().IsRegular() || entry.Name() != basename {
+			return nil
+		}
+		if match != "" {
+			return errAuthorizedBasenameAmbiguous
+		}
+		match = path
+		return nil
+	})
+	switch {
+	case errors.Is(err, errAuthorizedBasenameAmbiguous):
+		return "", &WireError{Code: "file.basename_ambiguous", Message: "filename matches multiple files in the authorized workspace"}
+	case errors.Is(err, errAuthorizedBasenameLimit):
+		return "", &WireError{Code: "file.basename_search_limit", Message: "workspace is too large for filename-only lookup; use a relative or absolute path"}
+	case err != nil:
+		return "", err
+	default:
+		return match, nil
+	}
+}
+
+func shouldSkipBasenameSearchDirectory(name string) bool {
+	switch name {
+	case ".git", ".build", "build", "DerivedData", "node_modules", "Pods":
+		return true
+	default:
+		return false
+	}
+}
+
+func resolveAuthorizedReadFileCandidate(root, candidate string) (string, os.FileInfo, error) {
 	candidateAbs, err := filepath.Abs(candidate)
 	if err != nil {
 		return "", nil, &WireError{Code: "file.outside_authorized_root", Message: "file is outside the authorized workspace"}

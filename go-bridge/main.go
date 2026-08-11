@@ -2,6 +2,8 @@ package gobridge
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -22,6 +24,7 @@ import (
 	_ "github.com/openAgi2/cordcode-macbridge/agent/opencode"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
+	"github.com/openAgi2/cordcode-macbridge/go-bridge/admission"
 	"github.com/openAgi2/cordcode-macbridge/pinstore"
 )
 
@@ -53,6 +56,10 @@ func Main() {
 	includeTailscale := flag.Bool("pairing-include-tailscale", true, "Include detected Tailscale URL in pairing QR")
 	includeRemote := flag.Bool("pairing-include-remote", true, "Include manual remote URL in pairing QR")
 	relayEnabled := flag.Bool("relay-enabled", true, "Enable encrypted relay path")
+	// preferLocalNetwork 镜像 -relay-enabled 的 bool flag pattern(argv = 形式由 Mac Swift
+	// RuntimeManager.processArguments 生成)。默认 false:Relay 是稳定连接底座,LAN 是 Mac owner
+	// 显式开启的性能优化。control-plane only,不下发进 timeline。
+	preferLocalNetwork := flag.Bool("prefer-local-network", false, "Prefer same-LAN direct connection when available (opt-in; falls back to relay)")
 	sessionListLimit := flag.Int("session-list-limit", defaultSessionListLimit, "Maximum sessions returned per list request (1-150)")
 
 	// Relay 加密通道配置（首版：通过 flags 或环境变量注入，后续由 MacBridge runtime config 驱动）
@@ -248,27 +255,28 @@ func Main() {
 		displayName := loadOrCreateDisplayName(dataDir)
 
 		mgmtCfg := ManagementConfig{
-			Handlers:         handlers,
-			Token:            *managementToken,
-			DataDir:          dataDir,
-			PairingStore:     func() PairingSessionStore { s := NewMemoryPairingStore(); globalPairingStore = s; return s }(),
-			DeviceStore:      func() TrustedDeviceStore { s := newTrustedDeviceStore(dataDir); globalDeviceStore = s; return s }(),
-			BridgeID:         bridgeID,
-			DisplayName:      displayName,
-			LocalURL:         advertisedLocalURL,
-			LocalURLs:        advertisedLocalURLs,
-			TailscaleURL:     tailscaleURL,
-			RemoteURL:        *remoteURL,
-			IncludeTailscale: *includeTailscale,
-			IncludeRemote:    *includeRemote,
-			RelayEndpoint:    *relayEndpoint,
-			RelayRouteID:     *relayRouteID,
-			RelayCredential:  *relayCredential,
-			RelayConfigured:  relayConfigured,
-			RelayEnabled:     *relayEnabled,
-			RelayIdentity:    relayIdentity,
-			Agents:           handlers.agents,
-			CodexBackendMode: *codexBackend,
+			Handlers:           handlers,
+			Token:              *managementToken,
+			DataDir:            dataDir,
+			PairingStore:       func() PairingSessionStore { s := NewMemoryPairingStore(); globalPairingStore = s; return s }(),
+			DeviceStore:        func() TrustedDeviceStore { s := newTrustedDeviceStore(dataDir); globalDeviceStore = s; return s }(),
+			BridgeID:           bridgeID,
+			DisplayName:        displayName,
+			LocalURL:           advertisedLocalURL,
+			LocalURLs:          advertisedLocalURLs,
+			TailscaleURL:       tailscaleURL,
+			RemoteURL:          *remoteURL,
+			IncludeTailscale:   *includeTailscale,
+			IncludeRemote:      *includeRemote,
+			RelayEndpoint:      *relayEndpoint,
+			RelayRouteID:       *relayRouteID,
+			RelayCredential:    *relayCredential,
+			RelayConfigured:    relayConfigured,
+			RelayEnabled:       *relayEnabled,
+			RelayIdentity:      relayIdentity,
+			PreferLocalNetwork: *preferLocalNetwork,
+			Agents:             handlers.agents,
+			CodexBackendMode:   *codexBackend,
 			DetectionCfg: &AgentDetectionConfig{
 				OpenCodeURL:       *ocBaseURL,
 				OpenCodeUser:      *ocUser,
@@ -276,6 +284,9 @@ func Main() {
 				CodexAppServerURL: *codexAppServerURL,
 			},
 			TLSPin: tlsPin,
+			RuntimeIdentity: admission.RuntimeIdentity{
+				PID: int32(os.Getpid()), BridgeEpoch: managementBridgeEpoch(bridgeEpoch),
+			},
 		}
 		mgmtSrv = NewManagementServer(mgmtCfg)
 
@@ -316,6 +327,8 @@ func Main() {
 		remoteIdentityURLs(tailscaleURL, *remoteURL, *includeTailscale, *includeRemote)...,
 	)
 	server.SetLocalCandidateURLs(advertisedLocalURLs)
+	// control-plane 连接策略注入 Server,供 direct 与 relay 两处 hello handler 在 hello_ack 下发。
+	server.SetConnectionPolicy(ConnectionPolicy{PreferLocalNetwork: *preferLocalNetwork})
 	server.SetDetectionConfig(&AgentDetectionConfig{
 		OpenCodeURL:       *ocBaseURL,
 		OpenCodeUser:      *ocUser,
@@ -356,12 +369,36 @@ func Main() {
 			server.detectionCfg,
 			handlers.sessions,
 		)
+		// relay 路径同样权威下发 control-plane 连接策略(与 direct hello 同源 server.connectionPolicy)。
+		if ack.Bridge != nil {
+			ack.Bridge.ConnectionPolicy = &server.connectionPolicy
+		}
 		ack.BridgeEpoch = bridgeEpoch
 		if ack.Ok && negotiateRelayGzip(conn, hello.Capabilities) {
 			ack.Capabilities[relayGzipCapability] = true
 		}
 		if ack.Ok && negotiateRelayChunks(conn, hello.Capabilities) {
 			ack.Capabilities[relayChunksCapability] = true
+		}
+		// R1.4：relay_chunk_progress_v1（progress ⇒ chunks；client 保证不同时 ack progress 而不 ack chunks）。
+		// ack 后 Mac 才会对 read_file_v2 correlated chunk stamp bulkCorrelationId。
+		if ack.Ok && negotiateRelayChunkProgress(conn, hello.Capabilities) {
+			ack.Capabilities[relayChunkProgressCapability] = true
+		}
+		// R1.5：cancel_request_v1（read_file_v2 bulk cancel control RPC）。echo 后 iOS 才发送 cancel。
+		if ack.Ok && negotiateRelayCancel(conn, hello.Capabilities) {
+			ack.Capabilities[relayCancelCapability] = true
+		}
+		if ack.Ok && helloSupportsReadFileV2(&hello) {
+			ack.Capabilities["read_file_v2"] = true
+			server.eventPublisher.SetConnReadFileV2(conn, true)
+		}
+		// Phase 7 §446: observe catalog_cursor_epoch_v2 declaration rate (relay path). Mirrors
+		// server.go direct path; per-hello boolean mineable for v1-blind-cut retirement threshold.
+		catalogV2 := ack.Ok && helloSupportsCatalogCursorEpochV2(&hello)
+		if catalogV2 {
+			ack.Capabilities["catalog_cursor_epoch_v2"] = true
+			server.eventPublisher.SetConnCatalogCursorEpochV2(conn, true)
 		}
 		var replay []EventMessage
 		if server.recoveryEnabled && helloSupportsRecovery(&hello) && ack.Ok {
@@ -384,7 +421,7 @@ func Main() {
 		if ack.Recovery != nil {
 			server.emitRecoveryFrames(conn, ack.Recovery, replay)
 		}
-		slog.Info("relay-bridge-client: hello_ack sent via relay", "ok", ack.Ok, "device", hello.Client.DeviceID)
+		slog.Info("relay-bridge-client: hello_ack sent via relay", "ok", ack.Ok, "device", hello.Client.DeviceID, "catalog_cursor_epoch_v2", catalogV2)
 	})
 
 	http.Handle("/pairing", http.HandlerFunc(handlePairingWebSocket))
@@ -452,6 +489,12 @@ func Main() {
 			// 启动 relay bridge client：连接到 relay service 的 bridge WebSocket，
 			// 处理设备握手，为每个已认证设备创建 RelayDeviceConn 并注册到 Broadcaster。
 			relayBridgeClient = NewRelayBridgeClient(handlers, sharedRelayHub, relayIdentity, bridgeID, *relayRouteID, *relayCredential)
+			// 真实 client 构造后、Run 前,原子替换 management server 的 default disconnected
+			// provider,使 /internal/remote/status 的 relay.connected 反映真实连接状态。
+			// *RelayBridgeClient 凭现有 Connected()(内部锁)隐式满足 RelayConnectionStatusProvider。
+			if mgmtSrv != nil {
+				mgmtSrv.SetRelayStatusProvider(relayBridgeClient)
+			}
 			handlers.ConfigureRelayDelivery(*relayRouteID, relayBridgeClient.SendEnvelope)
 			bridgeWSURL := strings.TrimRight(*relayEndpoint, "/") + "/v1/routes/" + *relayRouteID + "/bridge"
 			if sharedRelayHub != nil {
@@ -564,6 +607,15 @@ func Main() {
 		slog.Error("go-bridge: server error", "error", err)
 		os.Exit(1)
 	}
+}
+
+func managementBridgeEpoch(bridgeEpoch string) uint64 {
+	digest := sha256.Sum256([]byte(bridgeEpoch))
+	epoch := binary.BigEndian.Uint64(digest[:8])
+	if epoch == 0 {
+		return 1
+	}
+	return epoch
 }
 
 func localRelayServiceListenAddress(raw string) (string, error) {

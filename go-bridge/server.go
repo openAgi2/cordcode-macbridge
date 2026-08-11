@@ -146,10 +146,11 @@ func (c *Conn) SendJSONReport(v interface{}) error {
 }
 
 func (c *Conn) SendResult(requestID string, data interface{}, err *WireError) {
-	resp := map[string]interface{}{
-		"type":      "result",
-		"requestId": requestID,
-	}
+	c.SendJSON(resultEnvelope(requestID, data, err))
+}
+
+func resultEnvelope(requestID string, data interface{}, err *WireError) map[string]interface{} {
+	resp := map[string]interface{}{"type": "result", "requestId": requestID}
 	if err != nil {
 		resp["ok"] = false
 		resp["error"] = err
@@ -157,7 +158,7 @@ func (c *Conn) SendResult(requestID string, data interface{}, err *WireError) {
 		resp["ok"] = true
 		resp["data"] = data
 	}
-	c.SendJSON(resp)
+	return resp
 }
 
 func (c *Conn) Close() error {
@@ -202,6 +203,7 @@ type Server struct {
 	remoteURL            string
 	remoteURLs           []string
 	localCandidateURLs   []string
+	connectionPolicy     ConnectionPolicy
 	detectionCfg         *AgentDetectionConfig
 	bridgeEpoch          string
 	eventPublisher       *EventPublisher
@@ -232,6 +234,27 @@ func helloSupportsSessionSyncV2(hello *HelloMessage) bool {
 	return false
 }
 
+func helloSupportsReadFileV2(hello *HelloMessage) bool {
+	for _, capability := range hello.Capabilities {
+		if capability == "read_file_v2" {
+			return true
+		}
+	}
+	return false
+}
+
+// helloSupportsCatalogCursorEpochV2 returns true when the client advertised
+// catalog_cursor_epoch_v2 (cross-backend session catalog parity §4.1.1 / §10). Same shape as
+// helloSupportsReadFileV2; the declaration alone gates MacBridge's emission of v2 cursors.
+func helloSupportsCatalogCursorEpochV2(hello *HelloMessage) bool {
+	for _, capability := range hello.Capabilities {
+		if capability == "catalog_cursor_epoch_v2" {
+			return true
+		}
+	}
+	return false
+}
+
 func appendUniqueCapability(capabilities []string, capability string) []string {
 	for _, existing := range capabilities {
 		if existing == capability {
@@ -248,11 +271,12 @@ func advertiseSessionSyncV2Backend(backends []AgentProviderDescriptor) {
 	for i := range backends {
 		id := backends[i].ID
 		kind := backends[i].Kind
-	// Per-backend migration (design §4 / K5): only backends with a projection hydrate
+		// Per-backend migration (design §4 / K5): only backends with a projection hydrate
 		// producer advertise ownership capability.
 		if id == "codex" || kind == "codex" ||
 			id == "claude" || id == "claudecode" || kind == "claude_code" || kind == "claude" ||
-			id == "opencode" || kind == "opencode" {
+			id == "opencode" || kind == "opencode" ||
+			id == "grokbuild" || kind == "grokbuild" {
 			backends[i].Capabilities = appendUniqueCapability(
 				backends[i].Capabilities,
 				"session_sync_v2",
@@ -280,6 +304,20 @@ func (s *Server) SetBridgeIdentity(bridgeID, displayName, runtimeVersion, localU
 // SetLocalCandidateURLs 设置 LAN 直连候选列表,用于 hello_ack.currentURLs.locals(secondary 候选)。
 func (s *Server) SetLocalCandidateURLs(urls []string) {
 	s.localCandidateURLs = uniqueNonEmptyStrings(urls)
+}
+
+// SetConnectionPolicy 设置 control-plane 连接策略,经 hello_ack.bridge.connectionPolicy 下发。
+// 与 LAN 候选独立:关闭 preferLocalNetwork 时仍发布 LAN 候选,iOS 只是不把它们纳入自动优先。
+// 由 main.go 在启动时从 -prefer-local-network flag 注入一次;config 变更走 applyConfigAndRestart
+// 重启新进程,故运行期内该字段不被并发改写(与 localCandidateURLs/remoteURLs 同为启动期注入)。
+// SSV2:纯 control-plane,不进入 timeline/projection。
+func (s *Server) SetConnectionPolicy(policy ConnectionPolicy) {
+	s.connectionPolicy = policy
+}
+
+// ConnectionPolicy 返回当前 control-plane 连接策略(供 direct 与 relay 两处 hello handler 读取)。
+func (s *Server) ConnectionPolicy() ConnectionPolicy {
+	return s.connectionPolicy
 }
 
 // SetDetectionConfig 设置 agent 检测配置。
@@ -485,7 +523,7 @@ func (s *Server) handleRegister(conn *Conn, msg *WireMessage) {
 
 func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage) {
 	if conn.revoked {
-		conn.SendJSON(map[string]interface{}{
+		connection.SendJSON(map[string]interface{}{
 			"type": "hello_ack",
 			"ok":   false,
 			"error": map[string]string{
@@ -531,6 +569,10 @@ func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage
 		s.detectionCfg,
 		s.handlers.sessions,
 	)
+	// control-plane 连接策略随每次 hello_ack 权威下发(默认 false=Relay 底座)。
+	if ack.Bridge != nil {
+		ack.Bridge.ConnectionPolicy = &s.connectionPolicy
+	}
 	ack.BridgeEpoch = s.bridgeEpoch
 	var replay []EventMessage
 	if s.recoveryEnabled && helloSupportsRecovery(&hello) && ack.Ok {
@@ -549,12 +591,24 @@ func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage
 		advertiseSessionSyncV2Backend(ack.Backends)
 		s.eventPublisher.SetConnSyncV2(connection, true)
 	}
-	conn.SendJSON(ack)
+	if ack.Ok && helloSupportsReadFileV2(&hello) {
+		ack.Capabilities["read_file_v2"] = true
+		s.eventPublisher.SetConnReadFileV2(connection, true)
+	}
+	// Phase 7 §446: observe catalog_cursor_epoch_v2 declaration rate. The per-hello boolean is
+	// mineable from logs to decide the future v1-blind-cut retirement threshold ("iOS 全量迁移达阈值后").
+	// Declaration IS the §10 release gate: echo + SetConn happen only when the client opted in.
+	catalogV2 := ack.Ok && helloSupportsCatalogCursorEpochV2(&hello)
+	if catalogV2 {
+		ack.Capabilities["catalog_cursor_epoch_v2"] = true
+		s.eventPublisher.SetConnCatalogCursorEpochV2(connection, true)
+	}
+	connection.SendJSON(ack)
 	if ack.Recovery != nil {
 		s.emitRecoveryFrames(connection, ack.Recovery, replay)
 	}
 
-	slog.Info("go-bridge: hello_ack sent", "ok", ack.Ok, "device", hello.Client.DeviceID)
+	slog.Info("go-bridge: hello_ack sent", "ok", ack.Ok, "device", hello.Client.DeviceID, "catalog_cursor_epoch_v2", catalogV2)
 }
 
 func helloSupportsRecovery(hello *HelloMessage) bool {

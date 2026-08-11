@@ -104,13 +104,7 @@ func buildSidechainAgentBlocks(ctx context.Context, agentPath string) (blocks []
 	seq := 0
 	scanErr := streamClaudeTranscriptProjectionEventsRangeSeed(ctx, agentPath, 0, -1, "", func(ev projectionHydrateEvent) bool {
 		seq++
-		child.Apply(EventMessage{
-			BackendID:     "claude",
-			SessionID:     "sidechain",
-			Event:         ev.Event,
-			Data:          ev.Data,
-			PerSessionSeq: seq,
-		})
+		child.Apply(projectionReducerEvent("claude", "sidechain", ev.Event, ev.Data, seq, ""))
 		return ctx.Err() == nil
 	})
 	if scanErr != nil || ctx.Err() != nil {

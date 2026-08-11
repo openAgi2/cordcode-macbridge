@@ -1,0 +1,142 @@
+{
+  "producer": "Claude Code",
+  "producer_version": "2.1.209",
+  "mode": "multi_question",
+  "control_request": {
+    "type": "control_request",
+    "request_id": "request-multi_question-001",
+    "request": {
+      "subtype": "can_use_tool",
+      "tool_name": "AskUserQuestion",
+      "display_name": "AskUserQuestion",
+      "input": {
+        "questions": [
+          {
+            "question": "Pick color?",
+            "header": "Color",
+            "options": [
+              {
+                "label": "Red",
+                "description": "Red color"
+              },
+              {
+                "label": "Blue",
+                "description": "Blue color"
+              }
+            ],
+            "multiSelect": false
+          },
+          {
+            "question": "Pick size?",
+            "header": "Size",
+            "options": [
+              {
+                "label": "S",
+                "description": "Small"
+              },
+              {
+                "label": "M",
+                "description": "Medium"
+              },
+              {
+                "label": "L",
+                "description": "Large"
+              }
+            ],
+            "multiSelect": false
+          }
+        ]
+      },
+      "tool_use_id": "tool-use-multi_question-001",
+      "requires_user_interaction": true
+    }
+  },
+  "control_response": {
+    "type": "control_response",
+    "response": {
+      "subtype": "success",
+      "request_id": "request-multi_question-001",
+      "response": {
+        "behavior": "allow",
+        "updatedInput": {
+          "questions": [
+            {
+              "question": "Pick color?",
+              "header": "Color",
+              "options": [
+                {
+                  "label": "Red",
+                  "description": "Red color"
+                },
+                {
+                  "label": "Blue",
+                  "description": "Blue color"
+                }
+              ],
+              "multiSelect": false
+            },
+            {
+              "question": "Pick size?",
+              "header": "Size",
+              "options": [
+                {
+                  "label": "S",
+                  "description": "Small"
+                },
+                {
+                  "label": "M",
+                  "description": "Medium"
+                },
+                {
+                  "label": "L",
+                  "description": "Large"
+                }
+              ],
+              "multiSelect": false
+            }
+          ],
+          "answers": {
+            "Pick color?": "Red",
+            "Pick size?": "M"
+          }
+        }
+      }
+    }
+  },
+  "result_evidence": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "result": "Done.",
+    "permission_denials": [],
+    "num_turns": 3,
+    "stop_reason": "end_turn",
+    "terminal_reason": "completed"
+  },
+  "verification": {
+    "request_id_linkage_ok": true,
+    "updated_input_preserved_questions": true,
+    "result_subtype": "success",
+    "permission_denials": [],
+    "control_request_sha256": "82e1871d70b746d73c218eda33ff1cde2d35e2be53bf166633160ed306e279cf",
+    "control_response_sha256": "9fb3ad06a8dec9eefcc03d50843c074635f0730727b0d1f9d0772193c3d601a3",
+    "answers_sha256": "982f1c0e83084914b1f813133164a8322cdd52048e12578f4778581d93935624",
+    "result_evidence_sha256": "000637798821fcbd3271c3b0aec8354a15fa38abd19b25d011aa75df052c46f1"
+  },
+  "sanitization": {
+    "replaced_fields": [
+      "control_request.request_id",
+      "request.tool_use_id",
+      "control_response.response.request_id"
+    ],
+    "preserved_fields": [
+      "questions",
+      "headers",
+      "options",
+      "multiSelect",
+      "answers",
+      "value types"
+    ],
+    "raw_capture_sha256": "34984b7ac70b2bec7c8eccc572f0acb0d3197ae53b44083287a7aa7df375e90a"
+  }
+}

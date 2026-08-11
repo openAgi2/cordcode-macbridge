@@ -35,8 +35,8 @@ func TestReducerTurnLifecycleAppendComplete(t *testing.T) {
 	if !ok {
 		t.Fatal("no projection")
 	}
-	if proj.SyncRev != 4 {
-		t.Fatalf("SyncRev = %d, want 4", proj.SyncRev)
+	if proj.SyncRev != 3 {
+		t.Fatalf("SyncRev = %d, want 3 (turn_started no longer commits)", proj.SyncRev)
 	}
 	if len(proj.Turns) != 1 || proj.Turns[0].TurnID != "T1" {
 		t.Fatalf("turns = %+v", proj.Turns)
@@ -96,8 +96,8 @@ func TestReducerCanonicalTextPartsAndOrphanToolResult(t *testing.T) {
 			t.Fatalf("orphan tool result materialized a tool part: %+v", part)
 		}
 	}
-	if projection.SyncRev != 4 {
-		t.Fatalf("orphan output must not advance projection revision; rev=%d, want 4", projection.SyncRev)
+	if projection.SyncRev != 3 {
+		t.Fatalf("orphan output must not advance projection revision; rev=%d, want 3", projection.SyncRev)
 	}
 }
 
@@ -112,8 +112,8 @@ func TestReducerRevMonotonicAndIdempotent(t *testing.T) {
 	r.Apply(ev(3, "codex", "s1", "text_delta", map[string]interface{}{"itemId": "T1", "delta": "c"}))
 
 	proj, _ := r.Snapshot("codex", "s1")
-	if proj.SyncRev != 3 {
-		t.Fatalf("SyncRev = %d, want 3", proj.SyncRev)
+	if proj.SyncRev != 2 {
+		t.Fatalf("SyncRev = %d, want 2 (turn_started no longer commits)", proj.SyncRev)
 	}
 	var text string
 	for _, p := range proj.Turns[0].Assistant.Parts {
@@ -127,7 +127,7 @@ func TestReducerRevMonotonicAndIdempotent(t *testing.T) {
 	// An older seq arriving out of order is ignored.
 	r.Apply(ev(2, "codex", "s1", "text_delta", map[string]interface{}{"itemId": "T1", "delta": "ZZ"}))
 	proj, _ = r.Snapshot("codex", "s1")
-	if proj.SyncRev != 3 {
+	if proj.SyncRev != 2 {
 		t.Fatalf("SyncRev changed after stale seq: %d", proj.SyncRev)
 	}
 }
@@ -304,16 +304,18 @@ func TestReducerFlushPatchCoalescesAndDeltas(t *testing.T) {
 	if !ok {
 		t.Fatal("first flush produced no patch")
 	}
-	if p1.BaseRev != 0 || p1.SyncRev != 3 {
-		t.Fatalf("patch1 base/sync = %d/%d, want 0/3", p1.BaseRev, p1.SyncRev)
+	if p1.BaseRev != 0 || p1.SyncRev != 2 {
+		t.Fatalf("patch1 base/sync = %d/%d, want 0/2", p1.BaseRev, p1.SyncRev)
 	}
 	// The two text deltas are coalesced into a single append_text op.
 	if len(p1.PartOps) != 1 || p1.PartOps[0].Op != "append_text" || p1.PartOps[0].Text != "ab" {
 		t.Fatalf("patch1 partOps = %+v", p1.PartOps)
 	}
-	// upsertTurns carries the turn-start lifecycle.
-	if len(p1.UpsertTurns) != 1 || p1.UpsertTurns[0].TurnID != "T1" {
-		t.Fatalf("patch1 upsertTurns = %+v", p1.UpsertTurns)
+	// The turn upsert lands with the first content event (markRunning carries the
+	// content-bearing turn). A bare skeleton turn must never publish (owner 2026-08-04
+	// fence fix) — assert the upsert carries assistant content.
+	if len(p1.UpsertTurns) != 1 || p1.UpsertTurns[0].TurnID != "T1" || p1.UpsertTurns[0].Assistant == nil {
+		t.Fatalf("patch1 upsertTurns = %+v, want T1 with content", p1.UpsertTurns)
 	}
 
 	// No new activity: second flush is empty.
@@ -327,8 +329,8 @@ func TestReducerFlushPatchCoalescesAndDeltas(t *testing.T) {
 	if !ok {
 		t.Fatal("third flush produced no patch")
 	}
-	if p2.BaseRev != 3 || p2.SyncRev != 4 {
-		t.Fatalf("patch2 base/sync = %d/%d, want 3/4", p2.BaseRev, p2.SyncRev)
+	if p2.BaseRev != 2 || p2.SyncRev != 3 {
+		t.Fatalf("patch2 base/sync = %d/%d, want 2/3", p2.BaseRev, p2.SyncRev)
 	}
 	if len(p2.PartOps) != 1 || p2.PartOps[0].Text != "c" {
 		t.Fatalf("patch2 partOps = %+v", p2.PartOps)
@@ -347,8 +349,8 @@ func TestPublishLogicalMountsProjectionReducer(t *testing.T) {
 	if !ok {
 		t.Fatal("PublishLogical did not populate the projection reducer (mount broken)")
 	}
-	if proj.SyncRev != 2 {
-		t.Fatalf("SyncRev = %d, want 2 (perSessionSeq allocated before Apply)", proj.SyncRev)
+	if proj.SyncRev != 1 {
+		t.Fatalf("SyncRev = %d, want 1 (turn_started no longer commits)", proj.SyncRev)
 	}
 	if len(proj.Turns) != 1 || proj.Turns[0].TurnID != "T1" {
 		t.Fatalf("turns = %+v", proj.Turns)
@@ -628,5 +630,69 @@ func TestReducerToolMatchesAbsentIsNil(t *testing.T) {
 	}
 	if part.Matches != nil {
 		t.Fatalf("matches should be nil when no matches key; got %+v", part.Matches)
+	}
+}
+
+// TestTurnStartedDoesNotPublishSkeletonTurn: a bare turn_started must NOT advance SyncRev —
+// committing it publishes a skeleton projection (running turn without user/assistant content)
+// that breaks client local-send optimistic paint fences (owner 2026-08-04 真机: 发送后
+// user bubble 消失几秒再出现,因为半成品 patch rev > baseline 但无 user row)。
+func TestTurnStartedDoesNotPublishSkeletonTurn(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	patch, ok := r.FlushPatch("codex", "s1")
+	if ok {
+		t.Fatalf("bare turn_started must not publish a patch, got %+v", patch)
+	}
+	proj, _ := r.Snapshot("codex", "s1")
+	if proj.SyncRev != 0 {
+		t.Fatalf("SyncRev = %d, want 0 (turn_started must not commit)", proj.SyncRev)
+	}
+	// Execution stays armed for tool attach (ActiveTurnID) even without commit.
+	if proj.Execution.Phase != "running" || proj.Execution.ActiveTurnID != "T1" {
+		t.Fatalf("execution = %+v, want running/T1 (markRunning must stay)", proj.Execution)
+	}
+}
+
+// TestTurnStartedUserMessageLandTogether: turn_started followed by user_message commits ONE
+// patch carrying the user part — the frame a client sees after its send already contains the
+// user row, so the optimistic paint fence can release safely without blanking the bubble.
+func TestTurnStartedUserMessageLandTogether(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "codex", "s1", "user_message", map[string]interface{}{"turnId": "T1", "itemId": "u1", "text": "问题1"}))
+	patch, ok := r.FlushPatch("codex", "s1")
+	if !ok {
+		t.Fatal("expected a patch after user_message")
+	}
+	if patch.SyncRev != 1 {
+		t.Fatalf("SyncRev = %d, want 1 (only user_message commits)", patch.SyncRev)
+	}
+	proj, _ := r.Snapshot("codex", "s1")
+	if len(proj.Turns) != 1 {
+		t.Fatalf("turns = %d, want 1", len(proj.Turns))
+	}
+	turn := proj.Turns[0]
+	if turn.User == nil || len(turn.User.Parts) == 0 || turn.User.Parts[0].Text != "问题1" {
+		t.Fatalf("turn user part missing: %+v", turn.User)
+	}
+	if turn.Status != "running" || proj.Execution.Phase != "running" {
+		t.Fatalf("turn/execution must stay running: turn=%+v exec=%+v", turn, proj.Execution)
+	}
+}
+
+// TestTurnStartedRepeatedNoExtraCommit: a duplicated turn_started (two entry points relay the
+// same lifecycle frame) must not advance SyncRev either — idempotent by construction.
+func TestTurnStartedRepeatedNoExtraCommit(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "codex", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(3, "codex", "s1", "user_message", map[string]interface{}{"turnId": "T1", "itemId": "u1", "text": "hi"}))
+	patch, ok := r.FlushPatch("codex", "s1")
+	if !ok {
+		t.Fatal("expected a patch")
+	}
+	if patch.SyncRev != 1 {
+		t.Fatalf("SyncRev = %d, want 1 (duplicated turn_started must not commit)", patch.SyncRev)
 	}
 }

@@ -173,9 +173,14 @@ func TestClaudeSourceShapeFixtures_LoadAllAndValidateManifest(t *testing.T) {
 		if !reflect.DeepEqual(admitted, scan.Entries) {
 			t.Errorf("%s record envelope changed admitted entry sequence", fe.File)
 		}
-		// no fixture may masquerade as containing real user content
-		if fe.Provenance != "observed-derived-synthetic" {
-			t.Errorf("%s provenance must be observed-derived-synthetic, got %q", fe.File, fe.Provenance)
+		// no fixture may masquerade as containing real user content: provenance must
+		// declare the fixture as either fully synthetic (IR-6 set) or real-shape-but-redacted
+		// (anonymized from a real wire shape, with no real user body/ids/paths).
+		switch fe.Provenance {
+		case "observed-derived-synthetic", "observed-derived-real-shape":
+			// allowed
+		default:
+			t.Errorf("%s provenance must be observed-derived-synthetic or observed-derived-real-shape, got %q", fe.File, fe.Provenance)
 		}
 		// mapper must ingest every fixture without panicking
 		_ = mapClaudeFixture(t, fe.File)
@@ -193,7 +198,7 @@ func TestClaudeSourceShapeCorpusOracleFixedFixtureCrossCheck(t *testing.T) {
 		"python3",
 		filepath.Join(claudeSourceShapesDir, "recompute_corpus_stats.py"),
 		"--root", claudeSourceShapesDir,
-		"--expect-h4", "10,1",
+		"--expect-h4", "12,1",
 	)
 	output, err := command.CombinedOutput()
 	if err != nil {
@@ -202,7 +207,7 @@ func TestClaudeSourceShapeCorpusOracleFixedFixtureCrossCheck(t *testing.T) {
 	text := string(output)
 	for _, required := range []string{
 		"H3 logicalRecordReuseGroups: 3; physicalOccurrencesInGroups: 6",
-		"H4 resolvableAssistantRows: 10; fileOrderOwnerMismatchRows: 1",
+		"H4 resolvableAssistantRows: 12; fileOrderOwnerMismatchRows: 1",
 		"crossCheck: streaming==indexed",
 	} {
 		if !strings.Contains(text, required) {

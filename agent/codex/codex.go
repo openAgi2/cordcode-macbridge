@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/BurntSushi/toml"
 	"github.com/openAgi2/cordcode-macbridge/core"
 	"github.com/openAgi2/cordcode-macbridge/pinstore"
 )
@@ -51,6 +52,14 @@ type Agent struct {
 	// Injected via opts["pin_store"] from go-bridge main; nil in unit tests that do not
 	// exercise pinning.
 	pinStore *pinstore.Store
+
+	// catalogClient 是长寿命 thread-unbound app-server catalog client（Phase 2 §5.1）。
+	// 单例：首次 fetchThreadList 懒构造，已死则重建。catalogRegistrar 由 go-bridge 经
+	// SetCatalogSubprocessRegistrar 注入（bridge ProcessRegistry），供 stdio 子进程注册到
+	// bridge shutdown 回收链。ws 传输无子进程，registrar 不参与。
+	catalogClient   *catalogClient
+	catalogClientMu sync.Mutex
+	catalogRegistrar CatalogSubprocessRegistrar
 }
 
 func New(opts map[string]any) (core.Agent, error) {
@@ -174,7 +183,12 @@ func (a *Agent) SetModel(model string) {
 func (a *Agent) GetModel() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return core.GetProviderModel(a.providers, a.activeIdx, a.model)
+	// 优先级：provider model → bridge 设置的 a.model → config.toml 的 model（ccswitch）。
+	// config 兜底让 isDefault 能正确标记 ccswitch 配置的模型（handleListModels 用 GetModel 判 default）。
+	if m := core.GetProviderModel(a.providers, a.activeIdx, a.model); m != "" {
+		return m
+	}
+	return readCodexConfigModel()
 }
 
 func (a *Agent) SetReasoningEffort(effort string) {
@@ -204,6 +218,18 @@ func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
 	if models := a.configuredModels(); len(models) > 0 {
 		return models
 	}
+	// 级 2：ccswitch 写 ~/.codex/config.toml 的 model_catalog_json 指向完整目录——显示目录全部模型，
+	// 当前生效的由 config.toml 顶层 model 经 GetModel 标 isDefault。
+	if models := readCodexConfigModels(); len(models) > 0 {
+		return models
+	}
+	// 级 2.5（owner 2026-08-04 拍板：单一模型语义）：config.toml 顶层 model 存在但无 catalog
+	//（ccswitch 只写了单一 model）——只返该模型，短路 cached/API/兜底。保证 AvailableModels 含
+	// GetModel 返回值，handleListModels isDefault 命中（否则 iOS applyModelSelection 落到 models.first
+	// = 官方模型，发往 custom 端点 404）。有意不合并：custom 端点显示 GPT 备选是误导。
+	if m := readCodexConfigModel(); m != "" {
+		return []core.ModelOption{{Name: m, Desc: m}}
+	}
 	if models := readCodexCachedModels(); len(models) > 0 {
 		return models
 	}
@@ -220,11 +246,89 @@ func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
 	}
 }
 
-var openaiChatModels = map[string]bool{
-	"o4-mini": true, "o3": true, "o3-mini": true, "o1": true, "o1-mini": true,
-	"gpt-4.1": true, "gpt-4.1-mini": true, "gpt-4.1-nano": true,
-	"gpt-4o": true, "gpt-4o-mini": true,
-	"codex-mini-latest": true,
+// readCodexConfigModel 读取 config.toml 的顶层 model 字段（ccswitch 当前生效模型）。
+// 用于 GetModel 兜底 + isDefault 标记。不依赖 catalog——config.toml 的 model 才是"当前生效"。
+func readCodexConfigModel() string {
+	codexHome := os.Getenv("CODEX_HOME")
+	if codexHome == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		codexHome = filepath.Join(home, ".codex")
+	}
+	b, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
+	if err != nil {
+		return ""
+	}
+	var cfg struct {
+		Model string `toml:"model"`
+	}
+	if err := toml.Unmarshal(b, &cfg); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.Model)
+}
+
+// readCodexConfigModels 读取 ccswitch 配置的模型目录（owner 2026-08-04 决策：
+// 显示 catalog 全部模型，当前生效的由 config.toml model 经 GetModel 标 default）。
+// 数据源：config.toml 的 model_catalog_json 字段指向的 catalog 文件
+//（cc-switch 写入，如 cc-switch-model-catalog.json），含 slug + display_name。
+// 只读模型目录，不读任何凭据字段。
+func readCodexConfigModels() []core.ModelOption {
+	codexHome := os.Getenv("CODEX_HOME")
+	if codexHome == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil
+		}
+		codexHome = filepath.Join(home, ".codex")
+	}
+	b, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
+	if err != nil {
+		return nil
+	}
+	var cfg struct {
+		ModelCatalogJSON string `toml:"model_catalog_json"`
+	}
+	if err := toml.Unmarshal(b, &cfg); err != nil {
+		return nil
+	}
+	catalogName := strings.TrimSpace(cfg.ModelCatalogJSON)
+	if catalogName == "" {
+		return nil
+	}
+	// model_catalog_json 可能是相对 ~/.codex 的文件名，也可能是绝对路径。
+	catalogPath := catalogName
+	if !filepath.IsAbs(catalogPath) {
+		catalogPath = filepath.Join(codexHome, catalogPath)
+	}
+	cb, err := os.ReadFile(catalogPath)
+	if err != nil {
+		return nil
+	}
+	var catalog struct {
+		Models []struct {
+			Slug        string `json:"slug"`
+			DisplayName string `json:"display_name"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(cb, &catalog); err != nil {
+		return nil
+	}
+	var models []core.ModelOption
+	for _, m := range catalog.Models {
+		slug := strings.TrimSpace(m.Slug)
+		if slug == "" {
+			continue
+		}
+		name := strings.TrimSpace(m.DisplayName)
+		if name == "" {
+			name = slug
+		}
+		models = append(models, core.ModelOption{Name: slug, Desc: name})
+	}
+	return models
 }
 
 func (a *Agent) fetchModelsFromAPI(ctx context.Context) []core.ModelOption {
@@ -278,9 +382,7 @@ func (a *Agent) fetchModelsFromAPI(ctx context.Context) []core.ModelOption {
 
 	var models []core.ModelOption
 	for _, m := range result.Data {
-		if openaiChatModels[m.ID] {
-			models = append(models, core.ModelOption{Name: m.ID})
-		}
+		models = append(models, core.ModelOption{Name: m.ID})
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].Name < models[j].Name })
 	return models

@@ -24,7 +24,7 @@ func (h *Handlers) handleOpenCodeRPC(conn Connection, msg WireMessage) {
 	case "list_providers", "set_provider", "list_agents",
 		"fetch_todos", "get_usage", "run_diagnostics",
 		"get_workspace_diff",
-		"list_memory_files", "read_memory_file", "fetch_content_chunk", "read_file",
+		"list_memory_files", "read_memory_file", "fetch_content_chunk", "read_file_v2",
 		"list_directory", "get_git_context", "checkout_git_branch",
 		"create_git_branch", "create_git_worktree",
 		"rename_session", "archive_session", "compress_context",
@@ -112,6 +112,27 @@ func (h *Handlers) enrichSessionState(mapped map[string]interface{}) map[string]
 	return h.enrichSessionStateWithAgent(mapped, nil)
 }
 
+// enrichResumeSessionState is the control-plane-only resume response path. Opening an existing
+// session must not synchronously rescan its transcript: projection/history owns content loading,
+// and the file relay updates the registry when new lifecycle evidence arrives. The generic
+// single-session detail enricher intentionally retains its deeper inspection for get_session.
+func (h *Handlers) enrichResumeSessionState(mapped map[string]interface{}, agent core.Agent) map[string]interface{} {
+	if mapped == nil || agent == nil || agent.Name() != "claudecode" {
+		return h.enrichSessionStateWithAgent(mapped, agent)
+	}
+	sessionID, _ := mapped["id"].(string)
+	if sessionID == "" {
+		return mapped
+	}
+	h.injectClaudeReasoningEffort(mapped, agent)
+	state := "idle"
+	if tracked, ok := h.sessions.get(sessionID); ok {
+		state = string(tracked.state)
+	}
+	mapped["runtimeState"] = state
+	return mapped
+}
+
 func (h *Handlers) enrichSessionStateWithAgent(mapped map[string]interface{}, agent core.Agent) map[string]interface{} {
 	if mapped == nil {
 		return nil
@@ -137,7 +158,7 @@ func (h *Handlers) enrichSessionStateWithAgent(mapped map[string]interface{}, ag
 					} else {
 						// 不在 runningMap 中——进程可能已退出。
 						// 回退到直接读取 transcript 文件判定。
-						_, sessPath := findClaudeSessionFile(sessionID, "")
+						_, sessPath := h.findClaudeSessionFile(sessionID, "")
 						if sessPath != "" {
 							state = h.detectClaudeTranscriptState(sessPath)
 							if state == "unknown" {
@@ -154,7 +175,7 @@ func (h *Handlers) enrichSessionStateWithAgent(mapped map[string]interface{}, ag
 			if !usedTranscriptFallback && state == "running" {
 				// registry 说 running 但 GetRunningSessionIDs 出错，
 				// 也用 transcript 校验。
-				_, sessPath := findClaudeSessionFile(sessionID, "")
+				_, sessPath := h.findClaudeSessionFile(sessionID, "")
 				if sessPath != "" {
 					fileState := h.detectClaudeTranscriptState(sessPath)
 					if fileState == "idle" {
@@ -291,6 +312,46 @@ func (h *Handlers) injectClaudeReasoningEffort(mapped map[string]interface{}, ag
 // in-memory by paginateSessionList with a real cursor, exactly like Codex/Claude.
 const openCodeSessionFetchLimit = 100
 
+// openCodeCatalogWireCache 返回 per-Handlers 的 OpenCode wire-map 快照缓存，首次使用时懒加载。
+// 缓存是进程级 scope 元数据（per-scope enriched wire maps + epoch），跨 list_sessions 调用复用
+// （§4.1.1）。用 sync.Once 而非在 NewHandlers 里初始化，保持既有构造路径不变。
+func (h *Handlers) openCodeCatalogWireCache() *catalogWireSnapshotCache {
+	h.catalogWireInitOnce.Do(func() {
+		h.catalogWireCache = newCatalogWireSnapshotCache(nil)
+	})
+	return h.catalogWireCache
+}
+
+// buildOpenCodeEnrichedSessions 执行 §5.3#3 富 wire 管线：listSessions（上游 ≤100 有界全量读）
+// → mapSession → enrichSessionStatesForList → overlayPinnedState。
+//
+// Phase 4 收敛（§5.3#3 / Phase 4 §421）：**不再在此处 sortSessionsByUpdatedAt 覆盖**。
+// 上游 /session 已按 time.updated desc 返回（frozen fixture testdata/opencode/catalog_sanitized.json
+// + TestOpenCodeCatalog_SessionDescByTimeUpdated 锁定该不变量）。re-sort 既冗余（同 key desc ==
+// 上游序），又是未来分歧源（若上游改排序语义，本地覆盖会让 iOS 偏离 Mac native）。故 builder
+// 透传上游真实顺序，由调用方决定是否需要本地排序。
+//
+// declared 路径（ocHandleListSessions）直接消费上游序 + pageV2 快照（page-N 切同一 page-0
+// 快照，杜绝 §3.3 跨页漂移）。undeclared 客户端由统一 dispatch gate 拒绝，不进入 builder。
+func (h *Handlers) buildOpenCodeEnrichedSessions(backendID, dir string, rootsOnly bool) ([]map[string]interface{}, error) {
+	page, err := h.ocProxy.listSessions(OpenCodeSessionListOptions{
+		Directory: dir,
+		Limit:     openCodeSessionFetchLimit,
+		Roots:     rootsOnly,
+	})
+	if err != nil {
+		return nil, err
+	}
+	agent, _ := h.getAgent(backendID)
+	mapped := make([]map[string]interface{}, 0, len(page.Sessions))
+	for _, s := range page.Sessions {
+		mapped = append(mapped, mapSession(s))
+	}
+	mapped = h.enrichSessionStatesForList(mapped, agent, h.getRunningMap(context.Background(), agent))
+	h.overlayPinnedState(mapped, "opencode")
+	return mapped, nil
+}
+
 func (h *Handlers) ocHandleListSessions(conn Connection, msg WireMessage, dir string) {
 	rootsOnly := extractBool(msg, "rootsOnly")
 	limit := h.effectiveSessionListLimit(extractPositiveInt(msg, "limit"))
@@ -301,41 +362,36 @@ func (h *Handlers) ocHandleListSessions(conn Connection, msg WireMessage, dir st
 
 	started := time.Now()
 
-	// Fetch a large page from upstream so the in-memory list reflects the real
-	// total. rootsOnly is forwarded as the server-side roots=true SQL filter
-	// (isNull(parent_id)); we no longer discard child sessions client-side, which
-	// used to make hasMore unreliable for small projects.
-	page, err := h.ocProxy.listSessions(OpenCodeSessionListOptions{
-		Directory: dir,
-		Limit:     openCodeSessionFetchLimit,
-		Roots:     rootsOnly,
+	// DECLARED：v2 快照路径（§4.1.1 / §5.3#3）。page-0：FetchOrReuse(builder) 取/建快照；
+	// page-N：Peek（不重建）→ validateCursorV2 → 切片 / cursor_stale。
+	scopeKey := openCodeCatalogScopeKey(msg.BackendID, dir, rootsOnly)
+	cache := h.openCodeCatalogWireCache()
+	result, staleErr, err := cache.pageV2(scopeKey, cursor, limit, func() ([]map[string]interface{}, error) {
+		return h.buildOpenCodeEnrichedSessions(msg.BackendID, dir, rootsOnly)
 	})
 	if err != nil {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
 		return
 	}
-
-	agent, _ := h.getAgent(msg.BackendID)
-	mapped := make([]map[string]interface{}, 0, len(page.Sessions))
-	for _, s := range page.Sessions {
-		mapped = append(mapped, mapSession(s))
+	if staleErr != nil {
+		// Phase 7 §443 可观测性：cursor_stale 是 live/stale 协商结果（非错误），记录脱敏指标便于
+		// 统计 stale 触发率（epoch mismatch / TTL 无快照 / v1 cursor）。dir 脱敏（§444）。
+		slog.Info("opencode list_sessions cursor_stale",
+			"directory", redactDirForLog(dir),
+			"cursor_present", cursor != "",
+			"duration_ms", time.Since(started).Milliseconds(),
+		)
+		conn.SendResult(msg.RequestID, nil, staleErr) // cursor_stale（Retryable）
+		return
 	}
-	mapped = h.enrichSessionStatesForList(mapped, agent, h.getRunningMap(context.Background(), agent))
-	h.overlayPinnedState(mapped, "opencode")
-	sortSessionsByUpdatedAt(mapped)
-
-	// Slice the in-memory list by cursor+limit, identical to Codex/Claude.
-	// paginateSessionList emits a real nextCursor and hasMore derived from the
-	// actual remaining count, so "load more" appears whenever there is more data.
-	result := paginateSessionList(mapped, cursor, limit)
-
 	if ws, ok := result["sessions"].([]map[string]interface{}); ok {
-		slog.Info("opencode list_sessions",
-			"directory", dir,
+		slog.Info("opencode list_sessions v2",
+			"directory", redactDirForLog(dir),
 			"limit", limit,
 			"cursor_present", cursor != "",
 			"result_count", len(ws),
 			"next_cursor_present", result["hasMore"] == true,
+			"catalog_alive_procs", len(h.catalogProcessRegistry().AlivePIDs()), // Phase 7 §443 活跃 catalog 子进程数
 			"duration_ms", time.Since(started).Milliseconds(),
 		)
 	}
@@ -480,6 +536,16 @@ func (h *Handlers) ocHandleSendMessage(conn Connection, msg WireMessage, dir str
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "missing_param", Message: "sessionId required"})
 		return
 	}
+	if !h.admitBridgeTurn(params.SessionID) {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "runtime.quiescing", Message: "Bridge runtime is quiescing"})
+		return
+	}
+	turnCommitted := false
+	defer func() {
+		if !turnCommitted {
+			h.completeBridgeTurn(params.SessionID)
+		}
+	}()
 
 	modelID := normalizeModelParam(params.Model)
 	sess, err := h.ensureOpenCodeSession(agent, params.SessionID, modelID, dir)
@@ -506,6 +572,7 @@ func (h *Handlers) ocHandleSendMessage(conn Connection, msg WireMessage, dir str
 	}
 
 	h.sessions.markRunning(params.SessionID)
+	turnCommitted = true
 	conn.SendResult(msg.RequestID, &ResultResponse{Ok: true}, nil)
 	h.startRelayIfNotRunning(params.SessionID, sess, conn, msg.BackendID)
 }

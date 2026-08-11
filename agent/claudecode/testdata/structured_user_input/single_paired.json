@@ -1,0 +1,111 @@
+{
+  "producer": "Claude Code",
+  "producer_version": "2.1.209",
+  "mode": "single",
+  "control_request": {
+    "type": "control_request",
+    "request_id": "request-single-001",
+    "request": {
+      "subtype": "can_use_tool",
+      "tool_name": "AskUserQuestion",
+      "display_name": "AskUserQuestion",
+      "input": {
+        "questions": [
+          {
+            "question": "Please pick one of the following options.",
+            "header": "Choice",
+            "options": [
+              {
+                "label": "A",
+                "description": "Option A"
+              },
+              {
+                "label": "B",
+                "description": "Option B"
+              },
+              {
+                "label": "C",
+                "description": "Option C"
+              }
+            ],
+            "multiSelect": false
+          }
+        ]
+      },
+      "tool_use_id": "tool-use-single-001",
+      "requires_user_interaction": true
+    }
+  },
+  "control_response": {
+    "type": "control_response",
+    "response": {
+      "subtype": "success",
+      "request_id": "request-single-001",
+      "response": {
+        "behavior": "allow",
+        "updatedInput": {
+          "questions": [
+            {
+              "question": "Please pick one of the following options.",
+              "header": "Choice",
+              "options": [
+                {
+                  "label": "A",
+                  "description": "Option A"
+                },
+                {
+                  "label": "B",
+                  "description": "Option B"
+                },
+                {
+                  "label": "C",
+                  "description": "Option C"
+                }
+              ],
+              "multiSelect": false
+            }
+          ],
+          "answers": {
+            "Please pick one of the following options.": "A"
+          }
+        }
+      }
+    }
+  },
+  "result_evidence": {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "result": "Done.",
+    "permission_denials": [],
+    "num_turns": 3,
+    "stop_reason": "end_turn",
+    "terminal_reason": "completed"
+  },
+  "verification": {
+    "request_id_linkage_ok": true,
+    "updated_input_preserved_questions": true,
+    "result_subtype": "success",
+    "permission_denials": [],
+    "control_request_sha256": "5939816f69a1e04014f1cd978cd57a27d692ea762ea29211e1ae52dc92f0691d",
+    "control_response_sha256": "b948742d60eae42d43442565198ed6ae516e89709c4bdcf6d1f30ce70ef5e7e8",
+    "answers_sha256": "d269482a63fbc8578c4641b35113feba4f3baa28af7981ebae31d0b1b505a0e8",
+    "result_evidence_sha256": "000637798821fcbd3271c3b0aec8354a15fa38abd19b25d011aa75df052c46f1"
+  },
+  "sanitization": {
+    "replaced_fields": [
+      "control_request.request_id",
+      "request.tool_use_id",
+      "control_response.response.request_id"
+    ],
+    "preserved_fields": [
+      "questions",
+      "headers",
+      "options",
+      "multiSelect",
+      "answers",
+      "value types"
+    ],
+    "raw_capture_sha256": "6038037e5a8f544945bb1b33017afff3231568a2504497e22f7400cc328ca3ba"
+  }
+}

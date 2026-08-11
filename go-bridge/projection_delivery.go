@@ -58,10 +58,31 @@ func isSessionSyncV2RawTimelineEvent(event string) bool {
 	}
 }
 
+// Canonical structured-input events are projection-only for every connection. Legacy clients
+// receive the one-way question_asked/question_resolved presentation emitted by the adapter after
+// the canonical event has entered the reducer; v2 clients receive only the resulting projection.
+func isProjectionOnlyCanonicalEvent(event string) bool {
+	switch event {
+	case "user_input_requested", "user_input_resolved":
+		return true
+	default:
+		return false
+	}
+}
+
+// Legacy question frames are a presentation derived from canonical user_input state. They may
+// be delivered to legacy clients, but must never be ingested back into the projection Kernel.
+func isDerivedLegacyQuestionEvent(event string) bool {
+	return event == "question_asked" || event == "question_resolved"
+}
+
 // shouldDeliverRawEventLocked reports whether conn remains eligible for the raw envelope.
 // Sessionless errors/control notifications are never projection-owned even if they reuse an event
 // name from the timeline deny-list. Caller must hold p.mu: syncV2 is mutable connection state.
 func (p *EventPublisher) shouldDeliverRawEventLocked(conn Connection, backendID, sessionID, event string) bool {
+	if backendID != "" && sessionID != "" && isProjectionOnlyCanonicalEvent(event) {
+		return false
+	}
 	return !p.syncV2[conn] || backendID == "" || sessionID == "" || !isSessionSyncV2RawTimelineEvent(event)
 }
 
@@ -75,4 +96,58 @@ func (p *EventPublisher) ConnSyncV2(conn Connection) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.syncV2[conn]
+}
+
+// SetConnReadFileV2 records the authenticated hello negotiation for this exact connection.
+// Replacement connections must negotiate again; UnregisterConnection clears the mark.
+func (p *EventPublisher) SetConnReadFileV2(conn Connection, enabled bool) {
+	if p == nil || conn == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if enabled {
+		p.readFileV2[conn] = true
+	} else {
+		delete(p.readFileV2, conn)
+	}
+}
+
+func (p *EventPublisher) ConnReadFileV2(conn Connection) bool {
+	if p == nil || conn == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.readFileV2[conn]
+}
+
+// SetConnCatalogCursorEpochV2 records that the client advertised catalog_cursor_epoch_v2 in
+// hello. Only connections marked here may call list_sessions: non-Claude backends receive v2
+// epoch cursors/cursor_stale, while declared Claude keeps its dedicated v1-shaped compatibility
+// catalog. Undeclared list requests fail with protocol.capability_required. This flag does not
+// gate sessions_changed delivery. Replacement connections must negotiate again; unregister
+// clears the mark.
+func (p *EventPublisher) SetConnCatalogCursorEpochV2(conn Connection, enabled bool) {
+	if p == nil || conn == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if enabled {
+		p.catalogCursorEpochV2[conn] = true
+	} else {
+		delete(p.catalogCursorEpochV2, conn)
+	}
+}
+
+// ConnCatalogCursorEpochV2 reports whether this exact connection negotiated catalog_cursor_epoch_v2.
+// The list handler (ocHandleListSessions) consults it to decide v2-snapshot path vs legacy v1.
+func (p *EventPublisher) ConnCatalogCursorEpochV2(conn Connection) bool {
+	if p == nil || conn == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.catalogCursorEpochV2[conn]
 }

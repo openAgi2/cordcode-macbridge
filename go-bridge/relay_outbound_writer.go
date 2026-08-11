@@ -69,6 +69,8 @@ type relayChunkCursor struct {
 	sessionGeneration uint64
 	channelGeneration uint64
 	expiresAt         time.Time
+	bulkCorrelationID string // R1.4：read_file_v2 correlated chunk 的 request-aware 绑定（空 = base chunk）
+	requestID         string // R1.5：read_file_v2 chunked result 的 requestId（complete 时清理 cancel handle）
 }
 
 // relayOutboundWriter is the only owner of Relay application-data writes for
@@ -202,6 +204,15 @@ func (w *relayOutboundWriter) run() {
 					if job.cursor != nil && job.cursor.sessionID != "" {
 						job.conn.completeBulkHandle(job.cursor.sessionID, job.cursor.handle)
 					}
+					// R1.5：read_file_v2 chunk group 完成 → 清理 requestId→handle（cancel 不再可命中）。
+					if job.cursor != nil && job.cursor.requestID != "" {
+						job.conn.completeRequestBulkHandle(job.cursor.requestID, job.cursor.handle)
+					}
+					// R1.4：correlated chunk group 完成（成功/错误/超时）→ retire correlation，
+					// 进入 retired 窗口（防 reuse）。conn 关闭时整个 registry 随之销毁。
+					if job.cursor != nil && job.cursor.bulkCorrelationID != "" {
+						job.conn.bulkCorrelations.Retire(job.cursor.bulkCorrelationID)
+					}
 					if job.done != nil {
 						job.done <- err
 					}
@@ -226,7 +237,10 @@ func (w *relayOutboundWriter) writeSelected(job *relayOutboundJob) (error, bool)
 		return err, true
 	}
 	cursor := job.cursor
-	if cursor.handle.Cancelled() && cursor.nextIndex == 0 {
+	// R1.5：在写 index0 前 CAS active→committed 声明 committedToWriter 边界。若 cancel 已赢得 CAS
+	// （state=cancelled）则 MarkIndex0Committed 返回 false → 跳过 group（cancelled）。这把 cancel 与
+	// index0-commit 在单一 atomic 上线性化（plan §3.6.4「cancel唯一原子状态机」）。
+	if cursor.nextIndex == 0 && !cursor.handle.MarkIndex0Committed() {
 		relayBulkSuperseded.Add(1)
 		return nil, true
 	}
@@ -249,10 +263,21 @@ func (w *relayOutboundWriter) writeSelected(job *relayOutboundJob) (error, bool)
 	if end > len(job.payload) {
 		end = len(job.payload)
 	}
-	metadata := &RelayChunkMetadata{GroupID: cursor.groupID, Index: cursor.nextIndex, Count: cursor.count}
+	metadata := &RelayChunkMetadata{GroupID: cursor.groupID, Index: cursor.nextIndex, Count: cursor.count, BulkCorrelationID: cursor.bulkCorrelationID}
 	err := job.conn.writeLogicalFrame(job.payload[start:end], job.contentEncoding, metadata)
 	wire := time.Since(writtenAt)
-	slog.Info("relay chunk delivered", "relay_queue_wait_ms", durationMillis(queueWait), "socket_send_ms", durationMillis(wire), "relay_chunk_wire_ms", durationMillis(wire), "relay_outbound_total_ms", durationMillis(time.Since(job.admittedAt)), "relay_chunk_count", cursor.count, "chunk_index", metadata.Index)
+	slog.Info(
+		"relay chunk delivered",
+		"requestId", cursor.requestID,
+		"groupId", metadata.GroupID,
+		"bulkCorrelationId", metadata.BulkCorrelationID,
+		"relay_queue_wait_ms", durationMillis(queueWait),
+		"socket_send_ms", durationMillis(wire),
+		"relay_chunk_wire_ms", durationMillis(wire),
+		"relay_outbound_total_ms", durationMillis(time.Since(job.admittedAt)),
+		"relay_chunk_count", cursor.count,
+		"chunk_index", metadata.Index,
+	)
 	if err != nil {
 		return err, true
 	}
@@ -427,6 +452,13 @@ func classifyRelayRequest(method string) relayOutboundClass {
 	case "list_models", "list_permission_modes", "get_git_context", "get_todos", "list_agents", "list_providers":
 		return relayOutboundMetadata
 	case "get_session_messages", "get_session_projection":
+		return relayOutboundBulk
+	// R1.3（§3.6.4）：read_file_v2 的结果可能很大（最高 2 MiB），
+	// 走 bulk 路径以复用 gzip + relay_chunks_v1 公平分块，避免单巨型 Normal 帧在弱网
+	// Relay 上饿死 text_delta/permission 等交互帧。base chunk path（无 correlation）；
+	// request-aware progress（bulkCorrelationId）属于 R1.4。inbound 请求本身很小，
+	// 归为 bulk 仅影响调度优先级（低于 interactive），不延迟其 filepool 派发。
+	case "read_file_v2":
 		return relayOutboundBulk
 	default:
 		return relayOutboundNormal

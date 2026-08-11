@@ -6,6 +6,13 @@ import XCTest
 // 不依赖 UI automation / simulator。
 final class RuntimeManagerRestartTests: XCTestCase {
 
+    func testOnlyStartingRuntimeCanRestartBeforeManagementIsReady() {
+        XCTAssertTrue(RuntimeManager.canReplacePreReadyRuntime(status: .starting))
+        XCTAssertFalse(RuntimeManager.canReplacePreReadyRuntime(status: .ready))
+        XCTAssertFalse(RuntimeManager.canReplacePreReadyRuntime(status: .readyNoAgents))
+        XCTAssertFalse(RuntimeManager.canReplacePreReadyRuntime(status: .crashed))
+    }
+
     @MainActor
     private func makeManager() -> RuntimeManager {
         RuntimeManager(config: RuntimeConfig(
@@ -91,5 +98,23 @@ final class RuntimeManagerRestartTests: XCTestCase {
         
         XCTAssertTrue(manager.config.relayEnabled)
     }
-}
 
+    /// 验证 preferLocalNetwork 默认 false,且通过 applyConfigAndRestart 原子映射(镜像 relayEnabled)。
+    @MainActor
+    func testPreferLocalNetworkConfigMapping() async {
+        let manager = makeManager()
+
+        // 默认必须为 false(Relay 底座)
+        XCTAssertFalse(manager.config.preferLocalNetwork, "preferLocalNetwork 默认必须为 false")
+
+        manager.applyConfigAndRestart { c in
+            c.preferLocalNetwork = true
+        }
+        XCTAssertTrue(manager.config.preferLocalNetwork)
+
+        manager.applyConfigAndRestart { c in
+            c.preferLocalNetwork = false
+        }
+        XCTAssertFalse(manager.config.preferLocalNetwork)
+    }
+}

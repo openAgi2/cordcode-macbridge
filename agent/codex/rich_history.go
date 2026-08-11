@@ -276,7 +276,10 @@ func codexTranscriptOutput(raw json.RawMessage) string {
 				texts = append(texts, part.Text)
 			}
 		}
-		return strings.Join(texts, "\n")
+		// Persisted content items are ordered text fragments. Preserve their exact
+		// boundaries instead of injecting separators: a fragment may already end in
+		// a newline, and adding another one corrupts terminal/tool output on replay.
+		return strings.Join(texts, "")
 	}
 	return string(raw)
 }

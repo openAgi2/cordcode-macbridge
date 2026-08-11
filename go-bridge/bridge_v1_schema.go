@@ -17,7 +17,22 @@ const (
 	// 2026-07-29 Phase 4: session_sync_v2 opt-in semantics become projection-only; Mac no longer
 	// live-delivers raw timeline content to opted-in connections. Legacy clients omit the
 	// capability and retain the explicit off path.
-	BridgeProtocolSchemaRevision = "2026-07-29"
+	//
+	// 2026-08-01: connectionPolicy (control-plane)。Relay-first + opt-in LAN 改造:Mac 在已认证信道
+	// (hello_ack.bridge / RelayFirstResult / pairing_complete.bridge / /internal/remote/status)下发
+	// connectionPolicy.preferLocalNetwork,默认 false(Relay 是默认底座,LAN 是用户主动开启的性能优化)。
+	// 非破坏性可选新增:旧 iOS 忽略该字段;新 iOS 解码旧 payload 取 false。SSV2 红线:纯 control-plane,
+	// 严禁进入 EventMessage.Data / timeline / SessionProjection / ProjectionReducer。
+	//
+	// 2026-08-02: Structured user input (design docs/2026-08-01-codex-claude-structured-user-input-design.md)。
+	// 新增 capability `structured_user_input_v1`、RPC `resolve_user_input`、part variant `user_input`、
+	// part op `upsert_user_input`、live event 名 `user_input_requested`/`user_input_resolved`。仍是
+	// extensible 非破坏性新增（capability 数组/map、新 RPC method、新 event 名、新 part type/op），
+	// 只 bump schemaRevision；hello 只在 Protocol.Version 上 gating，旧客户端忽略未知 event/RPC。
+	// capability 在 P6 由 backend descriptor 独立广告（Codex/Claude 各自 readiness），P3 落地 Kernel
+	// reducer/events/schema 后才广告。MacBridge 本常量与 iOS `CCCodeBridgeProtocol.schemaRevision`
+	// 必须同值（设计 §13）。
+	BridgeProtocolSchemaRevision = "2026-08-02"
 )
 
 type BridgeV1Protocol struct {
@@ -49,13 +64,32 @@ type BridgeV1CurrentURLs struct {
 	Locals []string `json:"locals,omitempty"`
 }
 
+// ConnectionPolicy 是 control-plane 连接策略,经已认证信道(hello_ack.bridge /
+// RelayFirstResult / pairing_complete.bridge / /internal/remote/status)下发给客户端。
+//
+// 产品心智:Relay 是稳定连接底座,局域网是用户主动开启的性能优化。preferLocalNetwork
+// 默认 false —— 只有 Mac owner 显式开启后,iOS 才在 Wi-Fi/混合网络下优先尝试普通 LAN 直连,
+// 失败后自动回退 Relay。候选发布(currentURLs.locals / RelayFirstResult.localUrls)与该偏好独立:
+// 关闭偏好时 Mac 仍完整发布 LAN 候选,只是 iOS 不把它们纳入自动优先路径。
+//
+// SSV2 红线:纯 control-plane 配置。权威运行时状态只存在 ManagementConfig/Server,序列化副本
+// 只允许出现在上述四个已认证 payload。严禁写入任何 EventMessage.Data、严禁经
+// PublishLogical/IngestLive 进入 timeline、不得在 SessionProjection 增加 policy 字段、
+// 也不得在 ProjectionReducer.Apply 的 switch 中新增匹配 policy 的 case。
+type ConnectionPolicy struct {
+	// PreferLocalNetwork 控制安全分类为 localLanWS 的普通 LAN 是否自动优先。
+	// 不影响 Tailscale TLS pin、安全 URL 分类或用户显式选择的自定义远程路径。
+	PreferLocalNetwork bool `json:"preferLocalNetwork"`
+}
+
 type BridgeV1BridgeProfile struct {
-	BridgeID       string                   `json:"bridgeId"`
-	DisplayName    string                   `json:"displayName"`
-	RuntimeVersion string                   `json:"runtimeVersion"`
-	CurrentURLs    BridgeV1CurrentURLs      `json:"currentURLs"`
-	Protocol       BridgeV1Protocol         `json:"protocol"`
-	Security       *BridgeV1SecurityProfile `json:"security,omitempty"`
+	BridgeID         string                   `json:"bridgeId"`
+	DisplayName      string                   `json:"displayName"`
+	RuntimeVersion   string                   `json:"runtimeVersion"`
+	CurrentURLs      BridgeV1CurrentURLs      `json:"currentURLs"`
+	Protocol         BridgeV1Protocol         `json:"protocol"`
+	Security         *BridgeV1SecurityProfile `json:"security,omitempty"`
+	ConnectionPolicy *ConnectionPolicy        `json:"connectionPolicy,omitempty"`
 }
 
 type BridgeV1SecurityProfile struct {

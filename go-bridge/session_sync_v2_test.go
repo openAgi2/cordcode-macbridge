@@ -58,6 +58,8 @@ func TestSessionSyncV2CapabilityScopedToMigratedBackend(t *testing.T) {
 		{ID: "claude", Kind: "claude_code", Capabilities: []string{"session_mutation"}},
 		{ID: "codex", Kind: "codex", Capabilities: []string{"todos"}},
 		{ID: "opencode", Kind: "opencode", Capabilities: nil},
+		{ID: "grokbuild", Kind: "grokbuild", Capabilities: nil},
+		{ID: "copilot", Kind: "copilot", Capabilities: nil},
 	}
 	advertiseSessionSyncV2Backend(backends)
 	for _, backend := range backends {
@@ -67,7 +69,8 @@ func TestSessionSyncV2CapabilityScopedToMigratedBackend(t *testing.T) {
 				hasV2 = true
 			}
 		}
-		migrated := backend.ID == "codex" || backend.ID == "claude" || backend.ID == "opencode"
+		migrated := backend.ID == "codex" || backend.ID == "claude" ||
+			backend.ID == "opencode" || backend.ID == "grokbuild"
 		if migrated && !hasV2 {
 			t.Fatalf("migrated backend %q did not advertise session_sync_v2", backend.ID)
 		}
@@ -262,7 +265,7 @@ func TestSessionSyncV2DirectTransportResultPrecedesLiveProjectionPatch(t *testin
 		t.Fatalf("projection result data = %#v", result["data"])
 	}
 	projection, ok := data["projection"].(map[string]interface{})
-	if !ok || projection["syncRev"] != float64(2) || projection["bridgeEpoch"] != epoch {
+	if !ok || projection["syncRev"] != float64(1) || projection["bridgeEpoch"] != epoch {
 		t.Fatalf("committed projection result lost head/epoch: %#v", data["projection"])
 	}
 
@@ -279,9 +282,9 @@ func TestSessionSyncV2DirectTransportResultPrecedesLiveProjectionPatch(t *testin
 		if frame["event"] == "projection_patch" {
 			patch, ok := frame["data"].(map[string]interface{})
 			if !ok ||
-				patch["baseRev"] != float64(2) ||
-				patch["syncRev"] != float64(3) ||
-				frame["perSessionSeq"] != float64(3) ||
+				patch["baseRev"] != float64(1) ||
+				patch["syncRev"] != float64(2) ||
+				frame["perSessionSeq"] != float64(2) ||
 				frame["bridgeEpoch"] != epoch {
 				t.Fatalf("live patch lost ordered head/epoch evidence: %#v", frame)
 			}
