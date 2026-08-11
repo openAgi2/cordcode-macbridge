@@ -23,6 +23,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/agent/grokbuild"
@@ -87,9 +89,37 @@ func (h *Handlers) buildGrokEnrichedSessions(backendID string) ([]map[string]int
 		return nil, err
 	}
 	mapped := sessionsToWire(sessions)
+	// 过滤占位 session：title 为空，或 title 仅等于 cwd basename（如 home 目录下
+	// title=jacklee / directory=/Users/jacklee）——Desktop 侧栏通常不展示这类空壳。
+	mapped = filterGrokPlaceholderSessions(mapped)
+	// 与 Codex 一致：cwd 已删除的 workspace 不进列表。
+	mapped = filterSessionsMissingWorkspace(mapped)
 	mapped = h.enrichSessionStatesForList(mapped, agent, h.getRunningMap(context.Background(), agent))
 	h.overlayPinnedState(mapped, "grokbuild")
 	return mapped, nil
+}
+
+// filterGrokPlaceholderSessions 去掉无实质标题的 Grok session（owner 2026-08-10：
+// 侧栏出现整组「jacklee」空 session）。
+func filterGrokPlaceholderSessions(sessions []map[string]interface{}) []map[string]interface{} {
+	if len(sessions) == 0 {
+		return sessions
+	}
+	out := make([]map[string]interface{}, 0, len(sessions))
+	for _, s := range sessions {
+		title, _ := s["title"].(string)
+		title = strings.TrimSpace(title)
+		dir := sessionDirectoryKey(s)
+		base := ""
+		if dir != "" {
+			base = filepath.Base(dir)
+		}
+		if title == "" || (base != "" && title == base) {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 // grokHandleListSessions 是 Grok list_sessions 的 v2 catalog 主线路径（DECLARED：
@@ -107,12 +137,65 @@ func (h *Handlers) grokHandleListSessions(conn Connection, msg WireMessage, agen
 	if limit > 1000 {
 		limit = 1000
 	}
+	// Grok 上游 session/list 非 cwd-scoped；directory 仅作 bridge 侧过滤（iOS「查看更多」深挖）。
+	dir := extractDir(msg)
 	started := time.Now()
 
 	// v2 快照路径（§4.1.1 / §5.1 step 2）。page-0：FetchOrReuse(builder) 取/建快照；
 	// page-N：Peek（不重建）→ validateCursorV2 → 切片 / cursor_stale。
 	scopeKey := grokCatalogScopeKey(msg.BackendID)
 	cache := h.grokCatalogWireCache()
+
+	// 全局首页：B2 公平切片。directory-scoped：从全量快照按 directory 过滤后普通分页。
+	// 出站再滤 missing workspace，覆盖快照 TTL 窗口内的磁盘删除。
+	if dir == "" && cursor == "" {
+		snap, err := cache.FetchOrReuse(scopeKey, func() ([]map[string]interface{}, error) {
+			return h.buildGrokEnrichedSessions(msg.BackendID)
+		})
+		if err != nil {
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
+			return
+		}
+		full := filterSessionsMissingWorkspace(snap.maps)
+		result := packageFairHomePage(full, defaultSessionListPerDirectoryLimit, limit)
+		if ws, ok := result["sessions"].([]map[string]interface{}); ok {
+			slog.Info("grokbuild list_sessions v2 (session/list fair-home)",
+				"limit", limit,
+				"per_dir_limit", defaultSessionListPerDirectoryLimit,
+				"result_count", len(ws),
+				"full_count", len(full),
+				"next_cursor_present", result["hasMore"] == true,
+				"catalog_alive_procs", len(h.catalogProcessRegistry().AlivePIDs()),
+				"duration_ms", time.Since(started).Milliseconds(),
+			)
+		}
+		conn.SendResult(msg.RequestID, result, nil)
+		return
+	}
+	if dir != "" {
+		snap, err := cache.FetchOrReuse(scopeKey, func() ([]map[string]interface{}, error) {
+			return h.buildGrokEnrichedSessions(msg.BackendID)
+		})
+		if err != nil {
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
+			return
+		}
+		filtered := filterWireSessionsByDirectory(snap.maps, dir)
+		result := paginateSessionList(filtered, cursor, limit)
+		if ws, ok := result["sessions"].([]map[string]interface{}); ok {
+			slog.Info("grokbuild list_sessions v2 (session/list dir-filter)",
+				"directory", redactDirForLog(dir),
+				"limit", limit,
+				"cursor_present", cursor != "",
+				"result_count", len(ws),
+				"next_cursor_present", result["hasMore"] == true,
+				"duration_ms", time.Since(started).Milliseconds(),
+			)
+		}
+		conn.SendResult(msg.RequestID, result, nil)
+		return
+	}
+
 	result, staleErr, err := cache.pageV2(scopeKey, cursor, limit, func() ([]map[string]interface{}, error) {
 		return h.buildGrokEnrichedSessions(msg.BackendID)
 	})
@@ -141,4 +224,19 @@ func (h *Handlers) grokHandleListSessions(conn Connection, msg WireMessage, agen
 		)
 	}
 	conn.SendResult(msg.RequestID, result, nil)
+}
+
+// filterWireSessionsByDirectory 保留 directory 精确匹配的 session（Grok 上游无 cwd 过滤）。
+func filterWireSessionsByDirectory(sessions []map[string]interface{}, dir string) []map[string]interface{} {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return sessions
+	}
+	out := make([]map[string]interface{}, 0, len(sessions))
+	for _, s := range sessions {
+		if sessionDirectoryKey(s) == dir {
+			out = append(out, s)
+		}
+	}
+	return out
 }

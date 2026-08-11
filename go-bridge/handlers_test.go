@@ -3293,12 +3293,14 @@ func TestClaudeListSessionsUsesRuntimeEffortWhenMetadataMissing(t *testing.T) {
 	}
 
 	projectsDir := t.TempDir()
+	ws := catalogFixtureWorkspace(t, projectsDir, "claude-project")
 	projectDir := filepath.Join(projectsDir, "-tmp-claude-project")
 	if err := os.MkdirAll(projectDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	sessionPath := filepath.Join(projectDir, "ses_1.jsonl")
-	if err := os.WriteFile(sessionPath, []byte("{}\n"), 0644); err != nil {
+	// cwd must be a real non-temp workspace so claudeWorkspaceVisibleForCatalog keeps it.
+	if err := os.WriteFile(sessionPath, []byte(`{"cwd":"`+ws+`"}`+"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	catalog := newClaudeSessionCatalog(projectsDir)
@@ -3349,12 +3351,13 @@ func TestClaudeListSessionsDoesNotWriteTmpDump(t *testing.T) {
 
 	agent := &fakeAgent{name: "claudecode", reasoningEffort: "high"}
 	projectsDir := t.TempDir()
+	ws := catalogFixtureWorkspace(t, projectsDir, "claude-dump")
 	projectDir := filepath.Join(projectsDir, "-tmp-claude-project")
 	if err := os.MkdirAll(projectDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	sessionPath := filepath.Join(projectDir, "ses_dump.jsonl")
-	if err := os.WriteFile(sessionPath, []byte("{}\n"), 0644); err != nil {
+	if err := os.WriteFile(sessionPath, []byte(`{"cwd":"`+ws+`"}`+"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	catalog := newClaudeSessionCatalog(projectsDir)
@@ -4281,6 +4284,86 @@ func TestHandleListProjectsCodexReturnsEmptyEvenIfClaudeProjectsExist(t *testing
 	projects, _ := data["projects"].([]interface{})
 	if len(projects) != 0 {
 		t.Fatalf("codex list_projects = %#v, want empty (must not inherit ~/.claude/projects)", projects)
+	}
+}
+
+// TestHandleListProjectsClaudeSkipsEmptyShells：Claude list_projects 不得返回无 .jsonl 的
+// 空 project 壳（owner 2026-08-10：iOS 侧栏出现一堆「暂无会话」幽灵目录）。
+func TestHandleListProjectsClaudeSkipsEmptyShells(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	projectsRoot := filepath.Join(home, ".claude", "projects")
+	emptyDir := filepath.Join(projectsRoot, "-Users-jacklee-Projects-empty-shell")
+	liveDir := filepath.Join(projectsRoot, "-Users-jacklee-Projects-live")
+	if err := os.MkdirAll(emptyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(liveDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Real workspace on disk (visibility filter requires existing non-temp cwd).
+	liveWS := filepath.Join(home, "Projects", "live")
+	if err := os.MkdirAll(liveWS, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Live project: one transcript with cwd so resolveProjectRealDirectory works.
+	liveJSONL := filepath.Join(liveDir, "sess-live.jsonl")
+	if err := os.WriteFile(liveJSONL, []byte(`{"cwd":"`+liveWS+`","type":"session_meta"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	handlers := newTestHandlers(t)
+	conn := &readFileCaptureConn{}
+	handlers.handleListProjects(conn, WireMessage{RequestID: "req-claude-projects"}, &fakeAgent{name: "claudecode"})
+
+	if conn.err != nil {
+		t.Fatalf("unexpected wire error: %+v", conn.err)
+	}
+	data, _ := conn.data.(map[string]interface{})
+	// handleListProjects sends []map[string]interface{}, not []interface{}.
+	projects, ok := data["projects"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("projects type = %T (%#v), want []map[string]interface{}", data["projects"], data["projects"])
+	}
+	if len(projects) != 1 {
+		t.Fatalf("claude list_projects count = %d (%#v), want 1 (empty shell filtered)", len(projects), projects)
+	}
+	if projects[0]["directory"] != liveWS {
+		t.Fatalf("directory = %#v, want %s", projects[0]["directory"], liveWS)
+	}
+	if projects[0]["name"] != "live" {
+		t.Fatalf("name = %#v, want live", projects[0]["name"])
+	}
+}
+
+// TestClaudeWorkspaceVisibleForCatalog_HidesTempAndWorktrees：Desktop 不显示的
+// /private/tmp 抓取目录与 .claude/worktrees 不得进入 public catalog。
+func TestClaudeWorkspaceVisibleForCatalog_HidesTempAndWorktrees(t *testing.T) {
+	// Real existing non-temp path (control).
+	okDir := t.TempDir()
+	if !claudeWorkspaceVisibleForCatalog(okDir) {
+		t.Fatalf("visible fixture dir %q should pass", okDir)
+	}
+	// System temp.
+	if claudeWorkspaceVisibleForCatalog("/private/tmp/claude_aq_capture") {
+		t.Fatal("/private/tmp/... must be hidden")
+	}
+	if claudeWorkspaceVisibleForCatalog("/tmp/scratch") {
+		t.Fatal("/tmp/... must be hidden")
+	}
+	// Worktree path shape (existence irrelevant — shape alone hides).
+	wt := filepath.Join(okDir, ".claude", "worktrees", "quirky-blackburn-3f30d4")
+	if claudeWorkspaceVisibleForCatalog(wt) {
+		t.Fatalf("worktree path %q must be hidden", wt)
+	}
+	// Missing absolute path.
+	missing := filepath.Join(okDir, "does-not-exist-workspace")
+	if claudeWorkspaceVisibleForCatalog(missing) {
+		t.Fatalf("missing path %q must be hidden", missing)
+	}
+	// Encoded project key fallback.
+	if claudeWorkspaceVisibleForCatalog("-Users-jacklee-Projects-foo") {
+		t.Fatal("encoded project key must be hidden")
 	}
 }
 

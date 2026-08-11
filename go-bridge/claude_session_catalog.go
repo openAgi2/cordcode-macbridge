@@ -182,6 +182,12 @@ func (c *claudeSessionCatalog) buildSnapshot(
 		if realDirectory == "" {
 			realDirectory = projectKey
 		}
+		// Compatibility catalog ≈ Desktop visibility: hide ephemeral scratch / deleted
+		// worktrees that Claude Desktop does not surface as top-level projects
+		// (owner 2026-08-10: claude_aq_capture under /private/tmp, quirky worktree).
+		if !claudeWorkspaceVisibleForCatalog(realDirectory) {
+			continue
+		}
 		files, readErr := os.ReadDir(projectPath)
 		if readErr != nil {
 			continue
@@ -468,4 +474,69 @@ func claudeSessionEntryToWire(entry claudeSessionIndexEntry) map[string]interfac
 		wire["archivedAtMillis"] = entry.ArchivedAt.UnixMilli()
 	}
 	return wire
+}
+
+// claudeWorkspaceVisibleForCatalog approximates Claude Desktop's public session list
+// for this compatibility catalog (JSONL scan — not Desktop-native). Desktop does not
+// surface ephemeral scratch workspaces as top-level projects; hide them so iOS does
+// not show ghost groups like claude_aq_capture (/private/tmp) or deleted worktrees
+// (…/.claude/worktrees/<name>).
+//
+// Rules (path-shape only — no Desktop private DB):
+//  1. empty / encoded-key-only fallbacks → hide
+//  2. Claude Code git worktree paths (…/.claude/worktrees/…) → hide
+//  3. system temp roots (/tmp, /private/tmp, /var/tmp, /var/folders) → hide
+//  4. absolute path that no longer exists as a directory → hide (deleted worktree/project)
+func claudeWorkspaceVisibleForCatalog(directory string) bool {
+	dir := strings.TrimSpace(directory)
+	if dir == "" || dir == "." {
+		return false
+	}
+	clean := filepath.Clean(dir)
+	// Encoded project keys look like "-Users-jacklee-Projects-foo" (no real path).
+	// Those only appear when resolveProjectRealDirectory failed; hide them.
+	if !filepath.IsAbs(clean) {
+		return false
+	}
+	if isClaudeWorktreePath(clean) {
+		return false
+	}
+	if isSystemTempWorkspace(clean) {
+		return false
+	}
+	info, err := os.Stat(clean)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	return true
+}
+
+// isClaudeWorktreePath reports Claude Code's per-session git worktrees under
+// <repo>/.claude/worktrees/<name>. Desktop does not list these as independent projects.
+func isClaudeWorktreePath(dir string) bool {
+	const marker = string(filepath.Separator) + ".claude" + string(filepath.Separator) + "worktrees" + string(filepath.Separator)
+	if strings.Contains(dir, marker) {
+		return true
+	}
+	suffix := string(filepath.Separator) + ".claude" + string(filepath.Separator) + "worktrees"
+	return strings.HasSuffix(dir, suffix)
+}
+
+// isSystemTempWorkspace reports OS scratch roots. Capture fixtures and one-off probes
+// often land under /private/tmp; Desktop does not list them alongside real projects.
+//
+// Note: /var/folders is intentionally NOT included — macOS unit tests and some app
+// sandboxes live there; filtering it would hide legitimate fixtures and break CI.
+func isSystemTempWorkspace(dir string) bool {
+	prefixes := []string{
+		"/private/tmp",
+		"/var/tmp",
+		"/tmp",
+	}
+	for _, p := range prefixes {
+		if dir == p || strings.HasPrefix(dir, p+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }

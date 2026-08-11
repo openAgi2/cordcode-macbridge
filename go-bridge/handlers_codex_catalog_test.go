@@ -6,13 +6,16 @@ package gobridge
 //
 // 关键不变量：
 //  1. capability 门控（§10）：DECLARED 连接 → codexHandleListSessions → FetchThreadList（thread/list，
-//     workspace-scoped）；UNDECLARED 连接 → 既有 generic disk-scan（agent.ListSessions）byte-for-byte 不变。
+//     默认 global scope / dir=""）；UNDECLARED 连接 → 既有 generic disk-scan（agent.ListSessions）
+//     byte-for-byte 不变。
 //  2. §5.1 step 6：FetchThreadList 失败 → list_failed 显式错误，不静默回退 disk-scan。
 //  3. DECLARED 路径发射 v2 epoch cursor（§10：declared-only，undeclared 结构上不可达 pageV2）。
 
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -45,13 +48,21 @@ func (f *fakeCodexCatalogAgent) FetchThreadList(ctx context.Context, dir string)
 
 func (f *fakeCodexCatalogAgent) GetWorkDir() string { return f.workDirV }
 
+// withCodexRootsDisabled 让 catalog 单测 fixture 的 t.TempDir 不被本机 Mac Codex roots 白名单滤掉。
+func withCodexRootsDisabled(t *testing.T) {
+	t.Helper()
+	prev := loadCodexWorkspaceRootsFn
+	loadCodexWorkspaceRootsFn = func() []string { return nil }
+	t.Cleanup(func() { loadCodexWorkspaceRootsFn = prev })
+}
+
 // threadFixtureSessions 是 FetchThreadList 返回的 thread/list 映射产物（ID 前缀 thread_，与
-// disk-scan 的 disk_ 区分，便于证明路由）。
-func threadFixtureSessions() []core.AgentSessionInfo {
+// disk-scan 的 disk_ 区分，便于证明路由）。dir 必须是真实存在的目录（catalog 会过滤已删 cwd）。
+func threadFixtureSessions(dir string) []core.AgentSessionInfo {
 	return []core.AgentSessionInfo{
-		{ID: "thread_a", Summary: "thread A", Directory: "/tmp/codex-ws",
+		{ID: "thread_a", Summary: "thread A", Directory: dir,
 			ProviderID: "openai", ModifiedAt: time.Unix(1_700_000_100, 0).UTC()},
-		{ID: "thread_b", Summary: "thread B", Directory: "/tmp/codex-ws",
+		{ID: "thread_b", Summary: "thread B", Directory: dir,
 			ProviderID: "openai", ModifiedAt: time.Unix(1_700_000_200, 0).UTC()},
 	}
 }
@@ -76,15 +87,18 @@ func resultSessionIDs(t *testing.T, msg map[string]any) []string {
 }
 
 // TestCodexCatalog_V2Declared_RoutesToFetchThreadList：DECLARED 连接（hello 声明
-// catalog_cursor_epoch_v2）→ codexHandleListSessions → FetchThreadList（thread/list，cwd=workDir）。
+// catalog_cursor_epoch_v2）→ codexHandleListSessions → FetchThreadList（thread/list，
+// 默认 global dir=""；不读 agent.workDir）。
 // 返回 thread_* ID 证明走了 thread/list，而非 disk-scan（fakeAgent.sessionInfos 的 disk_* 不可达）。
 func TestCodexCatalog_V2Declared_RoutesToFetchThreadList(t *testing.T) {
+	withCodexRootsDisabled(t)
+	ws := t.TempDir()
 	agent := &fakeCodexCatalogAgent{
 		fakeAgent: &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{
 			{ID: "disk_should_not_appear"},
 		}},
-		fetchFn:  func(context.Context, string) ([]core.AgentSessionInfo, error) { return threadFixtureSessions(), nil },
-		workDirV: "/tmp/codex-ws",
+		fetchFn:  func(context.Context, string) ([]core.AgentSessionInfo, error) { return threadFixtureSessions(ws), nil },
+		workDirV: ws, // 故意设非空：断言 catalog 不再被 workDir 劫持
 	}
 	handlers := newTestHandlers(t)
 	handlers.RegisterAgent("codex", agent)
@@ -108,8 +122,38 @@ func TestCodexCatalog_V2Declared_RoutesToFetchThreadList(t *testing.T) {
 	if agent.fetchN != 1 {
 		t.Fatalf("FetchThreadList calls = %d, want 1", agent.fetchN)
 	}
-	if len(agent.fetchDirs) != 1 || agent.fetchDirs[0] != "/tmp/codex-ws" {
-		t.Fatalf("FetchThreadList dir = %v, want [/tmp/codex-ws]（cwd=workDir）", agent.fetchDirs)
+	if len(agent.fetchDirs) != 1 || agent.fetchDirs[0] != "" {
+		t.Fatalf("FetchThreadList dir = %v, want [\"\"]（root-only 全局 catalog，不读 workDir）", agent.fetchDirs)
+	}
+}
+
+// TestCodexCatalog_V2Declared_HonorsDirectoryParam：wire 带 directory 时 cwd 精确过滤到该
+// workspace（§3.1），仍不读 agent.workDir。
+func TestCodexCatalog_V2Declared_HonorsDirectoryParam(t *testing.T) {
+	withCodexRootsDisabled(t)
+	ws := t.TempDir()
+	target := filepath.Join(ws, "cordcode-ios")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agent := &fakeCodexCatalogAgent{
+		fakeAgent: &fakeAgent{name: "codex"},
+		fetchFn:  func(context.Context, string) ([]core.AgentSessionInfo, error) { return threadFixtureSessions(target), nil },
+		workDirV: filepath.Join(ws, "should-not-be-used"),
+	}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+	handlers.eventPublisher.SetConnCatalogCursorEpochV2(serverConn, true)
+
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "codex", Method: "list_sessions", RequestID: "r-dir",
+		Params: mustJSONRaw(t, map[string]any{"directory": target}),
+	})
+	_ = readJSONMaps(t, clientConn, 1)
+	if len(agent.fetchDirs) != 1 || agent.fetchDirs[0] != target {
+		t.Fatalf("FetchThreadList dir = %v, want [%s]", agent.fetchDirs, target)
 	}
 }
 
@@ -119,15 +163,17 @@ func TestCodexCatalog_V2Declared_RoutesToFetchThreadList(t *testing.T) {
 // fixture 故意返回非 updatedAt-DESC 序 [thread_a(100), thread_b(200)]（本地排序会给 [b,a]），
 // builder 输出仍为 [a,b] 即证明未本地重排。cache 层的规范化由 integration 测试 + cache 专项测试覆盖。
 func TestCodexBuildEnrichedSessions_PreservesUpstreamOrder(t *testing.T) {
+	withCodexRootsDisabled(t)
+	ws := t.TempDir()
 	agent := &fakeCodexCatalogAgent{
 		fakeAgent: &fakeAgent{name: "codex"},
-		fetchFn:  func(context.Context, string) ([]core.AgentSessionInfo, error) { return threadFixtureSessions(), nil },
-		workDirV: "/tmp/codex-ws",
+		fetchFn:  func(context.Context, string) ([]core.AgentSessionInfo, error) { return threadFixtureSessions(ws), nil },
+		workDirV: ws,
 	}
 	handlers := newTestHandlers(t)
 	handlers.RegisterAgent("codex", agent)
 
-	mapped, err := handlers.buildCodexEnrichedSessions("codex", "/tmp/codex-ws")
+	mapped, err := handlers.buildCodexEnrichedSessions("codex", ws)
 	if err != nil {
 		t.Fatalf("buildCodexEnrichedSessions failed: %v", err)
 	}
@@ -146,12 +192,15 @@ func TestCodexBuildEnrichedSessions_PreservesUpstreamOrder(t *testing.T) {
 // disk-scan（agent.ListSessions）路径 byte-for-byte 不变（§10）。FetchThreadList 不可达，
 // 返回 disk_* ID 证明走了 disk-scan 而非 thread/list。
 func TestCodexCatalog_Undeclared_RoutesToGenericDiskScan(t *testing.T) {
+	withCodexRootsDisabled(t)
+	ws := t.TempDir()
 	agent := &fakeCodexCatalogAgent{
 		fakeAgent: &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{
-			{ID: "disk_only"},
+			// Directory 必须是仍存在的目录：generic 路径也会 filterSessionsMissingWorkspace。
+			{ID: "disk_only", Directory: ws},
 		}},
-		fetchFn:  func(context.Context, string) ([]core.AgentSessionInfo, error) { return threadFixtureSessions(), nil },
-		workDirV: "/tmp/codex-ws",
+		fetchFn:  func(context.Context, string) ([]core.AgentSessionInfo, error) { return threadFixtureSessions(ws), nil },
+		workDirV: ws,
 	}
 	handlers := newTestHandlers(t)
 	handlers.RegisterAgent("codex", agent)
@@ -177,12 +226,14 @@ func TestCodexCatalog_Undeclared_RoutesToGenericDiskScan(t *testing.T) {
 // FetchThreadList 失败 → list_failed 显式错误（§5.1 step 6：删除 catalog 失败时静默回退
 // JSONL 的路径）。断言 envelope ok=false + error.code=list_failed，且不返回任何 session。
 func TestCodexCatalog_FetchFailureReturnsExplicitError_NoSilentFallback(t *testing.T) {
+	withCodexRootsDisabled(t)
+	ws := t.TempDir()
 	agent := &fakeCodexCatalogAgent{
 		fakeAgent: &fakeAgent{name: "codex", sessionInfos: []core.AgentSessionInfo{
 			{ID: "disk_must_not_leak"}, // 即使 disk-scan 有数据，也不得作为 fallback 返回
 		}},
 		fetchErr: errors.New("codex app-server unreachable"),
-		workDirV: "/tmp/codex-ws",
+		workDirV: ws,
 	}
 	handlers := newTestHandlers(t)
 	handlers.RegisterAgent("codex", agent)
@@ -207,16 +258,18 @@ func TestCodexCatalog_FetchFailureReturnsExplicitError_NoSilentFallback(t *testi
 	}
 }
 
-// TestCodexCatalog_V2Declared_EmitsV2EpochCursor：DECLARED 连接 + 5 thread + limit=2 →
-// page-0 返回 2 sessions + hasMore + nextCursor，且 nextCursor 解码为 v2（Version=2，
-// 携带 epoch）。证明 catalog 主线经 pageV2 正确发射 v2 cursor（§10：仅 declared）。
+// TestCodexCatalog_V2Declared_EmitsV2EpochCursor：DECLARED 连接 + directory-scoped + 5 thread
+// + limit=2 → page-0 返回 2 sessions + hasMore + nextCursor（v2 epoch）。
+// 全局首页走 fair-home（无 nextCursor）；v2 cursor 在 directory 深挖路径验证。
 func TestCodexCatalog_V2Declared_EmitsV2EpochCursor(t *testing.T) {
+	withCodexRootsDisabled(t)
+	ws := t.TempDir()
 	threads := make([]core.AgentSessionInfo, 5)
 	for i := range threads {
 		threads[i] = core.AgentSessionInfo{
 			ID:        "thread_" + string(rune('a'+i)),
 			Summary:   "t",
-			Directory: "/tmp/codex-ws",
+			Directory: ws,
 			// 严格递减 updatedAtMillis，使排序稳定（thread_a 最新）。
 			ModifiedAt: time.Unix(int64(1_700_000_000+i*100), 0).UTC(),
 		}
@@ -224,7 +277,7 @@ func TestCodexCatalog_V2Declared_EmitsV2EpochCursor(t *testing.T) {
 	agent := &fakeCodexCatalogAgent{
 		fakeAgent: &fakeAgent{name: "codex"},
 		fetchFn:   func(context.Context, string) ([]core.AgentSessionInfo, error) { return threads, nil },
-		workDirV:  "/tmp/codex-ws",
+		workDirV:  ws,
 	}
 	handlers := newTestHandlers(t)
 	handlers.RegisterAgent("codex", agent)
@@ -234,7 +287,8 @@ func TestCodexCatalog_V2Declared_EmitsV2EpochCursor(t *testing.T) {
 
 	handlers.HandleRPC(serverConn, WireMessage{
 		BackendID: "codex", Method: "list_sessions", RequestID: "r1",
-		Params: mustJSONRaw(t, map[string]any{"limit": 2}),
+		// directory-scoped → pageV2（非 fair-home）
+		Params: mustJSONRaw(t, map[string]any{"limit": 2, "directory": ws}),
 	})
 	msgs := readJSONMaps(t, clientConn, 1)
 	data, _ := msgs[0]["data"].(map[string]any)

@@ -33,12 +33,13 @@ func TestClaudeCatalog_Declared_NeverEmitsV2EpochCursor(t *testing.T) {
 
 	// 2 个 session（不同 UpdatedAt），limit=1 → hasMore=true → 产出 nextCursor。
 	projectsDir := t.TempDir()
+	ws := catalogFixtureWorkspace(t, projectsDir, "claude-guardrail")
 	projectDir := filepath.Join(projectsDir, "-tmp-claude-guardrail")
 	if err := os.MkdirAll(projectDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"ses_a.jsonl", "ses_b.jsonl"} {
-		if err := os.WriteFile(filepath.Join(projectDir, name), []byte("{}\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(projectDir, name), []byte(`{"cwd":"`+ws+`"}`+"\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -68,7 +69,8 @@ func TestClaudeCatalog_Declared_NeverEmitsV2EpochCursor(t *testing.T) {
 		BackendID: "claudecode",
 		Method:    "list_sessions",
 		RequestID: "claude-guard-1",
-		Params:    mustJSONRaw(t, map[string]any{"limit": 1}),
+		// directory-scoped → 普通分页（全局首页 fair-home 不发 nextCursor）
+		Params: mustJSONRaw(t, map[string]any{"limit": 1, "directory": ws}),
 	})
 	msgs := readJSONMaps(t, clientConn, 1)
 	if msgs[0]["ok"] != true {
@@ -106,11 +108,12 @@ func TestClaudeCatalog_Declared_NeverEmitsV2EpochCursor(t *testing.T) {
 func TestClaudeCatalog_Declared_StillReturnsSessions(t *testing.T) {
 	agent := &fakeAgent{name: "claudecode"}
 	projectsDir := t.TempDir()
+	ws := catalogFixtureWorkspace(t, projectsDir, "claude-returns")
 	projectDir := filepath.Join(projectsDir, "-tmp-claude-returns")
 	if err := os.MkdirAll(projectDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projectDir, "ses_1.jsonl"), []byte("{}\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projectDir, "ses_1.jsonl"), []byte(`{"cwd":"`+ws+`"}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	catalog := newClaudeSessionCatalog(projectsDir)

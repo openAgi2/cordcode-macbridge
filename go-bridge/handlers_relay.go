@@ -91,17 +91,32 @@ func (h *Handlers) startClaudeSessionFileRelayAt(
 		return
 	}
 	h.mu.Lock()
+	kind := h.relayRunningKind[sessionID]
 	running := h.relayRunning[sessionID]
-	if !running {
+	switch {
+	case running && kind == relayKindClaudeFile:
+		// Already the UUID content source.
+		h.mu.Unlock()
+		return
+	case running && kind == relayKindAgent:
+		// Agent sidecar holds the global slot for control-plane. Promote kind to
+		// claude_file so this loop is the content source without killing agent
+		// (agent continues via agentRelayRunning). Without this, local send that
+		// started agent first never attached file-relay → no mid-turn projection_patch.
+		h.relayRunningKind[sessionID] = relayKindClaudeFile
+		h.mu.Unlock()
+		go h.claudeSessionFileRelayLoop(sessionID, conn, backendID, initialOffset)
+		return
+	case !running:
 		h.relayRunning[sessionID] = true
 		h.relayRunningKind[sessionID] = relayKindClaudeFile
+		h.mu.Unlock()
+		go h.claudeSessionFileRelayLoop(sessionID, conn, backendID, initialOffset)
+		return
+	default:
+		h.mu.Unlock()
+		return
 	}
-	h.mu.Unlock()
-	if running {
-		return // 已有标准 relay 或文件 relay 在运行
-	}
-
-	go h.claudeSessionFileRelayLoop(sessionID, conn, backendID, initialOffset)
 }
 
 func (h *Handlers) startCodexSessionFileRelay(sessionID string, conn Connection, backendID string, agent core.Agent) {

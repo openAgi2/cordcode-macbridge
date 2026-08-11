@@ -25,8 +25,11 @@ import (
 
 // threadListParams 是 thread/list 的请求参数。Scope 字段（cwd/archived/source/sortKey/
 // sortDirection）由 Phase 0 冻结；limit/cursor 是 MacBridge 内部有界读取控制，不进冻结集。
+//
+// Cwd 使用 omitempty：空串表示「全局 catalog」（与 Mac Codex UI 多项目列表一致），请求里
+// 省略 cwd 字段。非空 cwd = 精确 workspace 过滤（§3.1）。
 type threadListParams struct {
-	Cwd           string `json:"cwd"`
+	Cwd           string `json:"cwd,omitempty"`
 	Archived      bool   `json:"archived"`
 	Source        string `json:"source"`
 	SortKey       string `json:"sortKey"`
@@ -35,9 +38,18 @@ type threadListParams struct {
 	Cursor        string `json:"cursor,omitempty"`
 }
 
-// frozenThreadListScopeParams 返回 Phase 0 冻结的 thread/list scope 参数（cwd 由调用方按
-// workspace 注入）。source="interactive" 覆盖 CLI/exec/non-interactive kind，与 Mac Codex
-// UI 的可见集一致（§3.1）。
+// codexThreadListPageSize 是 MacBridge 内部 thread/list 单页大小。app-server 在省略 limit
+// 时默认只回 ~25 条并给 nextCursor；不设 limit + 不跟 cursor 会把全局 catalog 截成一页
+// （真机回归：iOS 只见 25 条，远少于 Mac Codex / 旧 disk-scan）。
+const codexThreadListPageSize = 100
+
+// codexThreadListMaxItems 是一次有界全量读取的硬上限（§4.1.1：metadata-only 有数量上限）。
+// 覆盖多项目全局 interactive catalog（本机实跑 ~500），同时防止异常膨胀。
+const codexThreadListMaxItems = 1000
+
+// frozenThreadListScopeParams 返回 Phase 0 冻结的 thread/list scope 参数。
+// cwd 空 = 全局 catalog（省略 cwd 字段）；非空 = 精确 workspace 过滤。
+// source="interactive" 覆盖 CLI/exec/non-interactive kind，与 Mac Codex UI 的可见集一致（§3.1）。
 func frozenThreadListScopeParams(cwd string) threadListParams {
 	return threadListParams{
 		Cwd:           cwd,
@@ -163,6 +175,10 @@ func (c *catalogClient) requestWithTimeoutCtx(ctx context.Context, method string
 // codexThreadToAgentSessionInfo 把 thread/list 单条 thread 映射成 core.AgentSessionInfo
 // （§5.1 step 3）。标题优先 name，name 空时用 preview（§5.1 step 4：按 Codex 响应语义用
 // preview，不读 session_index.jsonl）。MessageCount 不在 catalog 字段内，置 0（不猜）。
+//
+// ModifiedAt 优先 recencyAt（thread/list 排序键、Mac Codex 侧栏同源），回退 updatedAt。
+// 原因：state_5.sqlite 里大量 session 的 updated_at 被批量写脏成同一时间戳（owner 真机
+// 「1天前」成片错误），而 recency_at 才是最近活动时间（2026-08-11）。
 func codexThreadToAgentSessionInfo(th codexThread) core.AgentSessionInfo {
 	title := th.Name
 	if strings.TrimSpace(title) == "" {
@@ -172,10 +188,18 @@ func codexThreadToAgentSessionInfo(th codexThread) core.AgentSessionInfo {
 		ID:         th.ID,
 		Summary:    title,
 		Directory:  th.Cwd,
-		ModifiedAt: codexThreadUnixTime(th.UpdatedAt),
+		ModifiedAt: codexThreadModifiedAt(th),
 		ProviderID: th.ModelProvider,
 		GitBranch:  th.GitInfo.Branch,
 	}
+}
+
+// codexThreadModifiedAt 列表展示/排序用时间：recencyAt > updatedAt > zero。
+func codexThreadModifiedAt(th codexThread) time.Time {
+	if th.RecencyAt > 0 {
+		return codexThreadUnixTime(th.RecencyAt)
+	}
+	return codexThreadUnixTime(th.UpdatedAt)
 }
 
 // codexThreadUnixTime 把 thread/list 的 unix 秒时间戳转 time.Time。0/负值返回零值。
@@ -237,32 +261,77 @@ func (a *Agent) SetCatalogSubprocessRegistrar(r CatalogSubprocessRegistrar) {
 	a.mu.Unlock()
 }
 
-// FetchThreadList 是 go-bridge catalog 适配器的入口：取单例 catalog client，
-// 用冻结 scope 参数（cwd=dir）调 thread/list，映射成 core.AgentSessionInfo。dir 为空时
-// 用 Agent workDir（与 thread/list cwd 精确过滤语义一致）。
+// FetchThreadList 是 go-bridge catalog 适配器的入口：取单例 catalog client，用冻结
+// scope 参数调 thread/list，并在 MacBridge 内部用上游 cursor 逐页取齐（§4.1.1 有界全量
+// 读取），映射成 core.AgentSessionInfo。
+//
+// dir 语义：
+//   - 空串 → 全局 catalog（省略 thread/list.cwd；与 Mac Codex 多项目侧栏同源）
+//   - 非空 → cwd 精确过滤到该 workspace
+//
+// 故意不回退到 Agent.workDir：workDir 会随最近一次 start/resume session 漂移，若拿它当
+// catalog scope，iOS 全局列表会被压成「当前工程第一页 ~25 条」，丢失其它项目。
 //
 // 失败必须显式返回 error（§5.1 step 6：删除 catalog 失败时静默回退 JSONL 的路径）。
 // 导出以供 go-bridge 经 codexThreadLister 接口（结构化满足）调用。
 func (a *Agent) FetchThreadList(ctx context.Context, dir string) ([]core.AgentSessionInfo, error) {
-	if dir == "" {
-		a.mu.RLock()
-		dir = a.workDir
-		a.mu.RUnlock()
-	}
 	cli, err := a.catalogClientInstance(ctx)
 	if err != nil {
 		return nil, err
 	}
-	params := frozenThreadListScopeParams(dir)
-	result, err := cli.listThreads(ctx, params)
-	if err != nil {
-		return nil, err
+
+	out := make([]core.AgentSessionInfo, 0, codexThreadListPageSize)
+	seen := make(map[string]struct{}, codexThreadListPageSize)
+	cursor := ""
+	pages := 0
+	for {
+		if len(out) >= codexThreadListMaxItems {
+			break
+		}
+		params := frozenThreadListScopeParams(dir)
+		params.Limit = codexThreadListPageSize
+		if cursor != "" {
+			params.Cursor = cursor
+		}
+		result, listErr := cli.listThreads(ctx, params)
+		if listErr != nil {
+			return nil, listErr
+		}
+		pages++
+		for _, th := range result.Data {
+			id := strings.TrimSpace(th.ID)
+			if id == "" {
+				id = strings.TrimSpace(th.SessionID)
+			}
+			if id != "" {
+				if _, dup := seen[id]; dup {
+					continue
+				}
+				seen[id] = struct{}{}
+			}
+			out = append(out, codexThreadToAgentSessionInfo(th))
+			if len(out) >= codexThreadListMaxItems {
+				break
+			}
+		}
+		if result.NextCursor == "" || len(result.Data) == 0 {
+			break
+		}
+		// 防御：上游若回同一 cursor 会无限循环。
+		if result.NextCursor == cursor {
+			slog.Warn("codex catalog: thread/list repeated nextCursor; stopping page walk",
+				"cwd", dir, "pages", pages, "count", len(out))
+			break
+		}
+		cursor = result.NextCursor
+		// 硬页数上限：maxItems/pageSize + 余量，防止异常 cursor 链。
+		if pages >= (codexThreadListMaxItems/codexThreadListPageSize)+2 {
+			slog.Warn("codex catalog: thread/list page walk hit page cap",
+				"cwd", dir, "pages", pages, "count", len(out))
+			break
+		}
 	}
-	out := make([]core.AgentSessionInfo, 0, len(result.Data))
-	for _, th := range result.Data {
-		out = append(out, codexThreadToAgentSessionInfo(th))
-	}
-	slog.Debug("codex catalog: thread/list",
-		"cwd", dir, "count", len(out), "has_next_cursor", result.NextCursor != "")
+	slog.Info("codex catalog: thread/list bounded fetch",
+		"cwd", dir, "count", len(out), "pages", pages, "capped", len(out) >= codexThreadListMaxItems)
 	return out, nil
 }

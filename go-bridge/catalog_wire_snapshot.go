@@ -124,6 +124,17 @@ func wireSnapshotView(s *catalogWireSnapshot) *catalogSnapshot {
 	return &catalogSnapshot{Scope: s.scope, Epoch: s.epoch, CreatedAt: s.createdAt}
 }
 
+// Invalidate 丢掉指定 scope 的缓存快照（不打断 inFlight）。用于 fair-home 需要立刻反映
+// 磁盘目录删除时强制重建（owner 2026-08-11 幽灵 cccode-* 目录）。
+func (c *catalogWireSnapshotCache) Invalidate(scopeKey string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	delete(c.scopes, scopeKey)
+	c.mu.Unlock()
+}
+
 // FetchOrReuse 是 page-0 路径：缓存命中且未过期 → 复用；否则 singleflight 调 builder 构造
 // enriched wire maps 并缓存。builder 只在 miss/expiry 时调用。返回的快照的 maps 是缓存内
 // 副本的可读引用（切片元素仍共享 map；调用方只读不写，handler 不再 mutate）。

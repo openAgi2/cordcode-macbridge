@@ -1456,9 +1456,21 @@ func (h *Handlers) handleListProjects(conn Connection, msg WireMessage, agent co
 		if isHiddenProjectDir(key) {
 			continue
 		}
-		realDir := resolveProjectRealDirectory(filepath.Join(projectsDir, key))
+		projectPath := filepath.Join(projectsDir, key)
+		// Skip empty Claude project shells (no transcript jsonl). Claude leaves stale
+		// path-encoded dirs under ~/.claude/projects after one-off /tmp or deleted
+		// workspaces; listing them seeds iOS "暂无会话" ghost groups (owner 2026-08-10).
+		if !claudeProjectDirHasSessions(projectPath) {
+			continue
+		}
+		realDir := resolveProjectRealDirectory(projectPath)
 		if realDir == "" {
-			realDir = key
+			// No cwd in any jsonl — cannot map to a real workspace; drop.
+			continue
+		}
+		// Same Desktop-approx visibility as list_sessions (tmp / worktrees / missing cwd).
+		if !claudeWorkspaceVisibleForCatalog(realDir) {
+			continue
 		}
 		displayName := filepath.Base(realDir)
 		projects = append(projects, map[string]interface{}{
@@ -1471,6 +1483,24 @@ func (h *Handlers) handleListProjects(conn Connection, msg WireMessage, agent co
 		projects = []map[string]interface{}{}
 	}
 	conn.SendResult(msg.RequestID, map[string]interface{}{"projects": projects}, nil)
+}
+
+// claudeProjectDirHasSessions reports whether a ~/.claude/projects/<key> directory
+// contains at least one transcript .jsonl. Used by list_projects to hide empty shells.
+func claudeProjectDirHasSessions(projectPath string) bool {
+	files, err := os.ReadDir(projectPath)
+	if err != nil {
+		return false
+	}
+	for _, f := range files {
+		if f.IsDir() {
+			continue
+		}
+		if strings.HasSuffix(f.Name(), ".jsonl") {
+			return true
+		}
+	}
+	return false
 }
 
 // shouldListClaudeProjects gates the ~/.claude/projects filesystem scan.
@@ -2019,7 +2049,19 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 	turnCommitted = true
 
 	conn.SendResult(msg.RequestID, &ResultResponse{Ok: true}, nil)
+	// Claude projection content is UUID-keyed via file-relay; agent relay is control-plane
+	// sidecar (may lack itemId). Ensure file-relay is running before/alongside agent so
+	// mid-turn ApplyClaudeSourceRecordBatch → FlushProjectionPatch can emit (SSV2 SoT).
+	// startClaudeSessionFileRelay is a no-op when claude_file already owns the slot.
+	if msg.BackendID == "claude" || msg.BackendID == "claudecode" {
+		h.startClaudeSessionFileRelay(params.SessionID, conn, msg.BackendID)
+	}
 	h.startRelayIfNotRunning(params.SessionID, sess, conn, msg.BackendID)
+	if msg.BackendID == "claude" || msg.BackendID == "claudecode" {
+		// If agent claimed the global slot first on a race, still attach file-relay as
+		// content source (startClaudeSessionFileRelayAt allows agent+file coexistence).
+		h.startClaudeSessionFileRelay(params.SessionID, conn, msg.BackendID)
+	}
 }
 
 var claudeResumeOwnerCheckTimeout = 2 * time.Second
@@ -2567,6 +2609,13 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 		}
 		mappingStarted := time.Now()
 		wireSessions := sessionsToWire(sessions)
+		// Codex/Grok 未声明 v2 时走此 generic 路径；同样过滤幽灵/非项目目录。
+		switch agent.Name() {
+		case "codex":
+			wireSessions = filterCodexCatalogSessions(wireSessions)
+		case "grokbuild":
+			wireSessions = filterSessionsMissingWorkspace(wireSessions)
+		}
 		wireSessions = h.enrichSessionStatesForList(wireSessions, agent, h.getRunningMap(ctx, agent))
 		h.overlayPinnedState(wireSessions, agentBackendID(agent))
 		result := paginateSessionList(wireSessions, extractStringParam(msg, "cursor"), limit)
@@ -2581,6 +2630,7 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 	// claudecode: refresh the global fingerprinted catalog, then filter its
 	// immutable snapshot instead of reparsing every project transcript.
 	dir := extractDir(msg)
+	cursor := extractStringParam(msg, "cursor")
 	projectKey := ""
 	if dir != "" {
 		if resolvedKey, projectPath := resolveProjectDir(dir); projectPath != "" {
@@ -2591,7 +2641,23 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 	allSessions := h.claudeSessions.list(projectKey, metrics.context())
 	allSessions = h.enrichSessionStatesForList(allSessions, agent, h.getRunningMap(ctx, agent))
 	h.overlayPinnedState(allSessions, "claudecode")
-	result := paginateSessionList(allSessions, extractStringParam(msg, "cursor"), limit)
+	// 全局首页（无 directory、无 cursor）：每目录 K 硬顶公平切片，避免单项目吃光 N。
+	// directory-scoped / 带 cursor：普通分页，支持侧栏「加载更多」深挖。
+	var result map[string]interface{}
+	if dir == "" && cursor == "" {
+		result = packageFairHomePage(allSessions, defaultSessionListPerDirectoryLimit, limit)
+		if ws, ok := result["sessions"].([]map[string]interface{}); ok {
+			slog.Info("claudecode list_sessions fair-home",
+				"limit", limit,
+				"per_dir_limit", defaultSessionListPerDirectoryLimit,
+				"result_count", len(ws),
+				"full_count", len(allSessions),
+				"has_more", result["hasMore"] == true,
+			)
+		}
+	} else {
+		result = paginateSessionList(allSessions, cursor, limit)
+	}
 	metrics.wireMapping += time.Since(mappingStarted)
 	if ws, ok := result["sessions"].([]map[string]interface{}); ok {
 		metrics.resultCount = len(ws)

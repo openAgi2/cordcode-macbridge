@@ -18,6 +18,7 @@ package codex
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -70,9 +71,9 @@ func TestCodexThreadMapping_FrozenFixture(t *testing.T) {
 		if info.GitBranch != th.GitInfo.Branch {
 			t.Errorf("GitBranch = %q, want gitInfo.branch %q", info.GitBranch, th.GitInfo.Branch)
 		}
-		// updatedAt unix 秒 → ModifiedAt。
-		if want := codexThreadUnixTime(th.UpdatedAt); !info.ModifiedAt.Equal(want) {
-			t.Errorf("ModifiedAt = %v, want %v (updatedAt=%d sec)", info.ModifiedAt, want, th.UpdatedAt)
+		// recencyAt 优先，否则 updatedAt（与 Mac Codex 侧栏同源；避免批量写脏 updated_at）。
+		if want := codexThreadModifiedAt(th); !info.ModifiedAt.Equal(want) {
+			t.Errorf("ModifiedAt = %v, want %v (recencyAt=%d updatedAt=%d)", info.ModifiedAt, want, th.RecencyAt, th.UpdatedAt)
 		}
 		// catalog 不携带 message count；不得猜（§4.2 / 护栏 #6）。
 		if info.MessageCount != 0 {
@@ -239,6 +240,173 @@ func TestCatalogClient_WS_HandshakeAndListThreads(t *testing.T) {
 	}
 }
 
+// fakeCatalogWSServerPaging 与 fakeCatalogWSServer 同形，但 thread/list 按 cursor 分页：
+// page0 返回 items[0:pageSize]+nextCursor；后续页按 cursor 切片。用于验证 FetchThreadList
+// 内部有界全量读取（§4.1.1：limit + 跟 nextCursor）。
+func fakeCatalogWSServerPaging(t *testing.T, items []codexThread, pageSize int) (string, func()) {
+	t.Helper()
+	if pageSize <= 0 {
+		pageSize = 2
+	}
+	var upgrader websocket.Upgrader
+	var connMu sync.Mutex
+	var conns []*websocket.Conn
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		connMu.Lock()
+		conns = append(conns, conn)
+		connMu.Unlock()
+		defer conn.Close()
+		for {
+			_, data, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var msg struct {
+				ID     any             `json:"id"`
+				Method string          `json:"method"`
+				Params json.RawMessage `json:"params"`
+			}
+			if json.Unmarshal(data, &msg) != nil {
+				continue
+			}
+			if msg.Method == "" {
+				continue
+			}
+			var result any
+			switch msg.Method {
+			case "initialize":
+				result = map[string]any{"protocolVersion": "2025-11-01-codex"}
+			case "thread/list":
+				var p struct {
+					Limit  int    `json:"limit"`
+					Cursor string `json:"cursor"`
+					Cwd    string `json:"cwd"`
+				}
+				_ = json.Unmarshal(msg.Params, &p)
+				start := 0
+				if p.Cursor != "" {
+					// cursor = "idx:<n>"
+					var idx int
+					if _, err := fmt.Sscanf(p.Cursor, "idx:%d", &idx); err == nil {
+						start = idx
+					}
+				}
+				limit := p.Limit
+				if limit <= 0 {
+					limit = pageSize
+				}
+				end := start + limit
+				if end > len(items) {
+					end = len(items)
+				}
+				if start > len(items) {
+					start = len(items)
+				}
+				page := items[start:end]
+				next := ""
+				if end < len(items) {
+					next = fmt.Sprintf("idx:%d", end)
+				}
+				result = threadListResult{Data: page, NextCursor: next}
+			default:
+				result = struct{}{}
+			}
+			resp, _ := json.Marshal(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      msg.ID,
+				"result":  result,
+			})
+			if err := conn.WriteMessage(websocket.TextMessage, resp); err != nil {
+				return
+			}
+		}
+	})
+	server := httptest.NewServer(mux)
+	stop := func() {
+		connMu.Lock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+		conns = nil
+		connMu.Unlock()
+		server.Close()
+	}
+	return "ws" + server.URL[len("http"):], stop
+}
+
+// TestFetchThreadList_PaginatesUpstreamCursor 锁定 §4.1.1：FetchThreadList 必须设 limit 并
+// 跟随 nextCursor 取齐，不能只拿 app-server 默认第一页（真机回归：默认 ~25 条截断）。
+// 同时锁定 dir="" 不回退到 Agent.workDir（全局 multi-project catalog）。
+func TestFetchThreadList_PaginatesUpstreamCursor(t *testing.T) {
+	// 5 条 thread，pageSize=2 → 需要 3 页才能取齐。
+	items := make([]codexThread, 5)
+	for i := range items {
+		items[i] = codexThread{
+			ID:        fmt.Sprintf("thread-%d", i),
+			SessionID: fmt.Sprintf("thread-%d", i),
+			Name:      fmt.Sprintf("Session %d", i),
+			Cwd:       "/tmp/ws",
+			UpdatedAt: 1784082300 + int64(i),
+		}
+	}
+	url, stop := fakeCatalogWSServerPaging(t, items, 2)
+	defer stop()
+
+	a := &Agent{
+		workDir:         "/tmp/should-not-scope-global",
+		appServerURL:    url,
+		appServerURLSet: true,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	got, err := a.FetchThreadList(ctx, "") // global
+	if err != nil {
+		t.Fatalf("FetchThreadList: %v", err)
+	}
+	if len(got) != 5 {
+		t.Fatalf("FetchThreadList global count = %d, want 5（必须跨页取齐）", len(got))
+	}
+	for i, s := range got {
+		want := fmt.Sprintf("thread-%d", i)
+		if s.ID != want {
+			t.Errorf("got[%d].ID = %q, want %q", i, s.ID, want)
+		}
+	}
+	// Scoped dir still walks pages (fake ignores cwd filter; count still 5).
+	got2, err := a.FetchThreadList(ctx, "/tmp/ws")
+	if err != nil {
+		t.Fatalf("FetchThreadList scoped: %v", err)
+	}
+	if len(got2) != 5 {
+		t.Fatalf("FetchThreadList scoped count = %d, want 5", len(got2))
+	}
+}
+
+// TestFrozenThreadListScopeParams_EmptyCwdOmitsField 锁定全局 catalog：cwd 空时 JSON 省略 cwd。
+func TestFrozenThreadListScopeParams_EmptyCwdOmitsField(t *testing.T) {
+	p := frozenThreadListScopeParams("")
+	p.Limit = 100
+	raw, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m["cwd"]; ok {
+		t.Fatalf("cwd present in JSON %s, want omitted for global catalog", raw)
+	}
+	if m["limit"] != float64(100) {
+		t.Fatalf("limit = %v, want 100", m["limit"])
+	}
+}
+
 // TestCatalogClient_WSDeadReturnsExplicitError 锁定 §5.1 step 6：连接死亡后 listThreads
 // 返回明确 error，不静默回退。
 func TestCatalogClient_WSDeadReturnsExplicitError(t *testing.T) {
@@ -271,4 +439,26 @@ func TestCatalogClient_WSDeadReturnsExplicitError(t *testing.T) {
 		t.Fatal("dead client listThreads 返回 nil error，应显式失败（§5.1 step 6）")
 	}
 	c.Close()
+}
+
+// TestCodexThreadMapping_PrefersRecencyAt：updatedAt 被批量写脏时仍展示 recencyAt。
+func TestCodexThreadMapping_PrefersRecencyAt(t *testing.T) {
+	th := codexThread{
+		ID:        "bulk-dirty",
+		Name:      "session",
+		Cwd:       "/tmp/ws",
+		UpdatedAt: 1_786_282_536, // bulk stamp
+		RecencyAt: 1_786_183_902, // real last activity
+	}
+	info := codexThreadToAgentSessionInfo(th)
+	want := codexThreadUnixTime(th.RecencyAt)
+	if !info.ModifiedAt.Equal(want) {
+		t.Fatalf("ModifiedAt = %v, want recency %v", info.ModifiedAt, want)
+	}
+	// no recency → fall back to updatedAt
+	th2 := codexThread{ID: "no-recency", UpdatedAt: 100}
+	info2 := codexThreadToAgentSessionInfo(th2)
+	if !info2.ModifiedAt.Equal(codexThreadUnixTime(100)) {
+		t.Fatalf("fallback ModifiedAt = %v, want updatedAt", info2.ModifiedAt)
+	}
 }

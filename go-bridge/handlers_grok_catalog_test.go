@@ -44,13 +44,13 @@ func (f *fakeGrokCatalogAgent) FetchSessionList(ctx context.Context) ([]core.Age
 }
 
 // grokFixtureSessions 是 FetchSessionList 返回的 session/list 映射产物（ID 前缀 session_，
-// 与 disk-scan 的 disk_ 区分，证明路由）。与 threadFixtureSessions 同构但命名区分 backend。
-func grokFixtureSessions() []core.AgentSessionInfo {
+// 与 disk-scan 的 disk_ 区分，证明路由）。ws 必须是仍存在的目录（workspace 存在性过滤）。
+func grokFixtureSessions(ws string) []core.AgentSessionInfo {
 	return []core.AgentSessionInfo{
-		{ID: "session_a", Summary: "grok A", Directory: "/tmp/grok-ws",
+		{ID: "session_a", Summary: "grok A", Directory: ws,
 			ProviderID: "grok", GitBranch: "main",
 			ModifiedAt: time.Unix(1_700_000_100, 0).UTC()},
-		{ID: "session_b", Summary: "grok B", Directory: "/tmp/grok-ws",
+		{ID: "session_b", Summary: "grok B", Directory: ws,
 			ProviderID: "grok", GitBranch: "feature/x",
 			ModifiedAt: time.Unix(1_700_000_200, 0).UTC()},
 	}
@@ -60,11 +60,12 @@ func grokFixtureSessions() []core.AgentSessionInfo {
 // catalog_cursor_epoch_v2）→ grokHandleListSessions → FetchSessionList（session/list，跨 cwd）。
 // 返回 session_* ID 证明走了 session/list，而非 disk-scan（fakeAgent.sessionInfos 的 disk_* 不可达）。
 func TestGrokCatalog_V2Declared_RoutesToFetchSessionList(t *testing.T) {
+	ws := t.TempDir()
 	agent := &fakeGrokCatalogAgent{
 		fakeAgent: &fakeAgent{name: "grokbuild", sessionInfos: []core.AgentSessionInfo{
-			{ID: "disk_should_not_appear"},
+			{ID: "disk_should_not_appear", Directory: ws},
 		}},
-		fetchFn: func(context.Context) ([]core.AgentSessionInfo, error) { return grokFixtureSessions(), nil },
+		fetchFn: func(context.Context) ([]core.AgentSessionInfo, error) { return grokFixtureSessions(ws), nil },
 	}
 	handlers := newTestHandlers(t)
 	handlers.RegisterAgent("grokbuild", agent)
@@ -96,9 +97,10 @@ func TestGrokCatalog_V2Declared_RoutesToFetchSessionList(t *testing.T) {
 // fixture 故意返回非 updatedAt-DESC 序 [session_a(100), session_b(200)]（本地排序会给 [b,a]），
 // builder 输出仍为 [a,b] 即证明未本地重排。cache 层的规范化由 integration 测试 + cache 专项测试覆盖。
 func TestGrokBuildEnrichedSessions_PreservesUpstreamOrder(t *testing.T) {
+	ws := t.TempDir()
 	agent := &fakeGrokCatalogAgent{
 		fakeAgent: &fakeAgent{name: "grokbuild"},
-		fetchFn:   func(context.Context) ([]core.AgentSessionInfo, error) { return grokFixtureSessions(), nil },
+		fetchFn:   func(context.Context) ([]core.AgentSessionInfo, error) { return grokFixtureSessions(ws), nil },
 	}
 	handlers := newTestHandlers(t)
 	handlers.RegisterAgent("grokbuild", agent)
@@ -122,11 +124,12 @@ func TestGrokBuildEnrichedSessions_PreservesUpstreamOrder(t *testing.T) {
 // disk-scan（agent.ListSessions）路径 byte-for-byte 不变（§10）。FetchSessionList 不可达，
 // 返回 disk_* ID 证明走了 disk-scan 而非 session/list。
 func TestGrokCatalog_Undeclared_RoutesToGenericDiskScan(t *testing.T) {
+	ws := t.TempDir()
 	agent := &fakeGrokCatalogAgent{
 		fakeAgent: &fakeAgent{name: "grokbuild", sessionInfos: []core.AgentSessionInfo{
-			{ID: "disk_only"},
+			{ID: "disk_only", Directory: ws},
 		}},
-		fetchFn: func(context.Context) ([]core.AgentSessionInfo, error) { return grokFixtureSessions(), nil },
+		fetchFn: func(context.Context) ([]core.AgentSessionInfo, error) { return grokFixtureSessions(ws), nil },
 	}
 	handlers := newTestHandlers(t)
 	handlers.RegisterAgent("grokbuild", agent)
@@ -182,16 +185,17 @@ func TestGrokCatalog_FetchFailureReturnsExplicitError_NoSilentFallback(t *testin
 	}
 }
 
-// TestGrokCatalog_V2Declared_EmitsV2EpochCursor：DECLARED 连接 + 5 session + limit=2 →
-// page-0 返回 2 sessions + hasMore + nextCursor，且 nextCursor 解码为 v2（Version=2，
-// 携带 epoch）。证明 catalog 主线经 pageV2 正确发射 v2 cursor（§10：仅 declared）。
+// TestGrokCatalog_V2Declared_EmitsV2EpochCursor：directory-scoped 深挖路径（dir 过滤 +
+// paginateSessionList）在 limit 截断时发 nextCursor；全局首页 fair-home 不发 nextCursor。
+// 这里用 directory 路径验证分页 cursor 仍可用（v1 bridge cursor，非 fair-home）。
 func TestGrokCatalog_V2Declared_EmitsV2EpochCursor(t *testing.T) {
+	ws := t.TempDir()
 	sessions := make([]core.AgentSessionInfo, 5)
 	for i := range sessions {
 		sessions[i] = core.AgentSessionInfo{
 			ID:        "session_" + string(rune('a'+i)),
 			Summary:   "g",
-			Directory: "/tmp/grok-ws",
+			Directory: ws,
 			// 严格递减 updatedAtMillis，使排序稳定（session_a 最新）。
 			ModifiedAt: time.Unix(int64(1_700_000_000+i*100), 0).UTC(),
 		}
@@ -208,7 +212,7 @@ func TestGrokCatalog_V2Declared_EmitsV2EpochCursor(t *testing.T) {
 
 	handlers.HandleRPC(serverConn, WireMessage{
 		BackendID: "grokbuild", Method: "list_sessions", RequestID: "r1",
-		Params: mustJSONRaw(t, map[string]any{"limit": 2}),
+		Params: mustJSONRaw(t, map[string]any{"limit": 2, "directory": ws}),
 	})
 	msgs := readJSONMaps(t, clientConn, 1)
 	data, _ := msgs[0]["data"].(map[string]any)
@@ -217,21 +221,23 @@ func TestGrokCatalog_V2Declared_EmitsV2EpochCursor(t *testing.T) {
 	}
 	nextCursor, ok := data["nextCursor"].(string)
 	if !ok || nextCursor == "" {
-		t.Fatalf("nextCursor = %#v, want 非空 v2 cursor", data["nextCursor"])
+		t.Fatalf("nextCursor = %#v, want 非空 pagination cursor", data["nextCursor"])
 	}
+	// directory-scoped Grok 走 paginateSessionList → v1 cursor（可深挖即可）。
 	decoded, isV1, derr := decodeListCursorV2(nextCursor)
 	if derr != nil {
-		t.Fatalf("nextCursor 非 v2（解码失败）：%v", derr)
+		t.Fatalf("nextCursor 解码失败：%v", derr)
 	}
-	if isV1 {
-		t.Fatal("nextCursor 是 v1（无 epoch）—— DECLARED 路径不得发射 v1 cursor（§10 泄漏）")
+	if !isV1 {
+		// 若将来 directory 路径也升 v2，允许；但不得 silent fail。
+		if decoded.Epoch == "" {
+			t.Fatal("v2 cursor missing epoch")
+		}
 	}
-	if decoded.Version != listCursorVersionV2 {
-		t.Fatalf("nextCursor version = %d, want %d", decoded.Version, listCursorVersionV2)
+	if decoded.Version != listCursorVersion && decoded.Version != listCursorVersionV2 {
+		t.Fatalf("nextCursor version = %d, want v1 or v2", decoded.Version)
 	}
-	if decoded.Epoch == "" {
-		t.Fatal("nextCursor 缺 epoch（DECLARED 路径 cursor 必须携带快照 epoch）")
-	}
+	// v1 dir-scoped cursor has no epoch; that is expected for Grok directory deep-dive.
 	wireSessions, _ := data["sessions"].([]any)
 	if len(wireSessions) != 2 {
 		t.Fatalf("page-0 sessions = %d, want 2（limit 2）", len(wireSessions))

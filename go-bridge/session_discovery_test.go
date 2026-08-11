@@ -315,8 +315,9 @@ func TestClaudeCatalogSurfacesArchivedAtMillis(t *testing.T) {
 	if err := os.Mkdir(projectDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	ws := catalogFixtureWorkspace(t, projectsDir, "someuser-work")
 	writeClaudeCatalogFixture(t, filepath.Join(projectDir, "claude-xyz.jsonl"),
-		"/Users/someuser/work", "work session", "2026-07-30T11:00:00Z")
+		ws, "work session", "2026-07-30T11:00:00Z")
 
 	catalog := newClaudeSessionCatalog(projectsDir)
 
