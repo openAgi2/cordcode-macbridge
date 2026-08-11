@@ -20,6 +20,7 @@ package gobridge
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -30,6 +31,13 @@ import (
 // sessionDiscoveryInterval is the snapshot cadence. Package var so tests can shrink it.
 var sessionDiscoveryInterval = 60 * time.Second
 
+// A small native recency-head probe restores seconds-scale Codex detection without running the
+// 500+ member full catalog continuously. A changed head is only a trigger: the normal full native
+// fingerprint still owns fence/seen/publish. The 60-second full scan remains the safety net.
+var codexDiscoveryHintInterval = 3 * time.Second
+
+const codexDiscoveryHeadLimit = 25
+
 // StartSessionDiscoveryWatcher launches the background new-session watcher. The
 // first scan seeds the snapshot without broadcasting (no startup burst).
 func (h *Handlers) StartSessionDiscoveryWatcher(ctx context.Context) {
@@ -38,6 +46,7 @@ func (h *Handlers) StartSessionDiscoveryWatcher(ctx context.Context) {
 
 func (h *Handlers) runSessionDiscovery(ctx context.Context) {
 	interval := sessionDiscoveryInterval
+	hintInterval := codexDiscoveryHintInterval
 	slog.Info("go-bridge: session discovery watcher started",
 		"interval", interval.String(),
 		"backends", len(h.Agents()))
@@ -46,7 +55,7 @@ func (h *Handlers) runSessionDiscovery(ctx context.Context) {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			h.runBackendSessionDiscovery(ctx, id, agent, interval)
+			h.runBackendSessionDiscovery(ctx, id, agent, interval, hintInterval)
 		}()
 	}
 	<-ctx.Done()
@@ -57,17 +66,17 @@ func (h *Handlers) runSessionDiscovery(ctx context.Context) {
 // runBackendSessionDiscovery owns one backend's cadence and last-good fingerprint. Backends are
 // deliberately isolated: a provider that blocks despite ctx cancellation must not starve native
 // refresh for every other backend (owner A-O1 production failure, 2026-08-11).
-func (h *Handlers) runBackendSessionDiscovery(ctx context.Context, id string, agent core.Agent, interval time.Duration) {
+func (h *Handlers) runBackendSessionDiscovery(ctx context.Context, id string, agent core.Agent, interval, hintInterval time.Duration) {
 	// Keep panic recovery inside this tracked worker. Re-arming via an untracked goroutine would
 	// let runSessionDiscovery report stopped while the replacement still accessed handler state.
 	for ctx.Err() == nil {
-		if !h.runBackendSessionDiscoveryLoop(ctx, id, agent, interval) {
+		if !h.runBackendSessionDiscoveryLoop(ctx, id, agent, interval, hintInterval) {
 			return
 		}
 	}
 }
 
-func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string, agent core.Agent, interval time.Duration) (panicked bool) {
+func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string, agent core.Agent, interval, hintInterval time.Duration) (panicked bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			panicked = true
@@ -79,14 +88,61 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 	h.snapshotBackendSession(ctx, seen, true, id, agent)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	var hintTicker *time.Ticker
+	var hintC <-chan time.Time
+	if id == "codex" {
+		if _, ok := agent.(codexThreadHeadLister); ok && hintInterval > 0 {
+			hintTicker = time.NewTicker(hintInterval)
+			hintC = hintTicker.C
+			defer hintTicker.Stop()
+		}
+	}
+	var hintSeen string
+	hintSeeded := false
 	for {
 		select {
 		case <-ctx.Done():
 			return false
 		case <-ticker.C:
 			h.snapshotBackendSession(ctx, seen, false, id, agent)
+		case <-hintC:
+			if !h.broadcaster.HasConnections() {
+				continue
+			}
+			current, err := h.codexDiscoveryHintFingerprint(ctx, agent)
+			if err != nil {
+				slog.Warn("go-bridge: Codex discovery head probe error (no full refresh)", "error", err.Error())
+				continue
+			}
+			if !hintSeeded {
+				hintSeen = current
+				hintSeeded = true
+				continue
+			}
+			if current == hintSeen {
+				continue
+			}
+			slog.Info("go-bridge: Codex discovery head changed; running authoritative full refresh")
+			if h.snapshotBackendSession(ctx, seen, false, id, agent) {
+				hintSeen = current
+			}
 		}
 	}
+}
+
+func (h *Handlers) codexDiscoveryHintFingerprint(ctx context.Context, agent core.Agent) (string, error) {
+	lister, ok := agent.(codexThreadHeadLister)
+	if !ok {
+		return "", fmt.Errorf("Codex agent does not support native head probe")
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, catalogRequestTimeout)
+	defer cancel()
+	infos, err := lister.FetchThreadListHead(probeCtx, "", codexDiscoveryHeadLimit)
+	if err != nil {
+		return "", err
+	}
+	wire := filterCodexCatalogSessions(sessionsToWire(infos))
+	return listSemanticFingerprint(wire), nil
 }
 
 // snapshotSessions samples every backend's catalog fingerprint once and broadcasts
@@ -98,7 +154,7 @@ func (h *Handlers) snapshotSessions(ctx context.Context, seen map[string]string,
 	}
 }
 
-func (h *Handlers) snapshotBackendSession(ctx context.Context, seen map[string]string, seed bool, id string, agent core.Agent) {
+func (h *Handlers) snapshotBackendSession(ctx context.Context, seen map[string]string, seed bool, id string, agent core.Agent) bool {
 	tag := "poll"
 	if seed {
 		tag = "seed"
@@ -114,14 +170,14 @@ func (h *Handlers) snapshotBackendSession(ctx context.Context, seen map[string]s
 		// poll can still detect change).
 		slog.Warn("go-bridge: session discovery fingerprint error (no broadcast)",
 			"phase", tag, "backend", id, "durationMs", duration.Milliseconds(), "error", err.Error())
-		return
+		return false
 	}
 	prev, hadPrev := seen[id]
 	if seed || !hadPrev {
 		seen[id] = current
 		slog.Info("go-bridge: session discovery snapshot seeded",
 			"backend", id, "sessionCount", count, "durationMs", duration.Milliseconds())
-		return
+		return true
 	}
 	// Phase 7 §442：fingerprint 变化即 catalog 变化（新增/删除/更新任一）→ 触发 sessions_changed。
 	// 不再区分 new/removed：fingerprint 是确定摘要，任一成员或 updatedAt 变化都改写它，
@@ -147,6 +203,7 @@ func (h *Handlers) snapshotBackendSession(ctx context.Context, seen map[string]s
 	} else {
 		seen[id] = current
 	}
+	return true
 }
 
 // discoveryFingerprint returns the catalog fingerprint for a backend, computed from

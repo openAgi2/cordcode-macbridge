@@ -45,6 +45,10 @@ type codexThreadLister interface {
 	FetchThreadList(ctx context.Context, dir string) ([]core.AgentSessionInfo, error)
 }
 
+type codexThreadHeadLister interface {
+	FetchThreadListHead(ctx context.Context, dir string, limit int) ([]core.AgentSessionInfo, error)
+}
+
 // codexCatalogWireCache 复用 generic catalogWireSnapshotCache（与 OpenCode 共享同一实例：
 // scope-keyed，codexCatalogScopeKey 与 openCodeCatalogScopeKey 互斥，互不复用快照）。
 func (h *Handlers) codexCatalogWireCache() *catalogWireSnapshotCache {

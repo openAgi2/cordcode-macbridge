@@ -153,8 +153,8 @@ func fakeCatalogWSServer(t *testing.T, listResult threadListResult) (string, fun
 				return
 			}
 			var msg struct {
-				ID     any             `json:"id"`
-				Method string          `json:"method"`
+				ID     any    `json:"id"`
+				Method string `json:"method"`
 			}
 			if json.Unmarshal(data, &msg) != nil {
 				continue
@@ -384,6 +384,32 @@ func TestFetchThreadList_PaginatesUpstreamCursor(t *testing.T) {
 	}
 	if len(got2) != 5 {
 		t.Fatalf("FetchThreadList scoped count = %d, want 5", len(got2))
+	}
+}
+
+func TestFetchThreadListHead_UsesSingleBoundedNativePage(t *testing.T) {
+	threads := mapFrozenFixtureThreads(t)
+	if len(threads) < 3 {
+		t.Fatalf("fixture has %d threads, want at least 3", len(threads))
+	}
+	url, stop := fakeCatalogWSServerPaging(t, threads, 2)
+	defer stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	a := &Agent{appServerURL: url, appServerURLSet: true, cliBin: "codex"}
+
+	got, err := a.FetchThreadListHead(ctx, "", 2)
+	if err != nil {
+		t.Fatalf("FetchThreadListHead: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("head count=%d, want exactly requested single page of 2", len(got))
+	}
+	if got[0].ID != threads[0].ID || got[1].ID != threads[1].ID {
+		t.Fatalf("head order=[%s %s], want native recency head=[%s %s]", got[0].ID, got[1].ID, threads[0].ID, threads[1].ID)
+	}
+	if err := a.catalogClient.Close(); err != nil {
+		t.Fatalf("close catalog client: %v", err)
 	}
 }
 

@@ -510,6 +510,12 @@ func (b *Broadcaster) RegisterConn(conn Connection) {
 	b.allConns[conn] = struct{}{}
 }
 
+func (b *Broadcaster) HasConnections() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.allConns) > 0
+}
+
 func (b *Broadcaster) Subscribe(conn Connection, key SubscriptionKey) {
 	b.mu.Lock()
 	defer b.mu.Unlock()

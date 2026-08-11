@@ -43,6 +43,11 @@ type threadListParams struct {
 // （真机回归：iOS 只见 25 条，远少于 Mac Codex / 旧 disk-scan）。
 const codexThreadListPageSize = 100
 
+// codexThreadListHeadMax is the maximum lightweight recency head requested by catalog-change
+// detection. It is a trigger only: the bridge still runs the bounded full native fetch before
+// fencing or publishing, so this never becomes a second catalog truth.
+const codexThreadListHeadMax = 25
+
 // codexThreadListMaxItems 是一次有界全量读取的硬上限（§4.1.1：metadata-only 有数量上限）。
 // 覆盖多项目全局 interactive catalog（本机实跑 ~500），同时防止异常膨胀。
 const codexThreadListMaxItems = 1000
@@ -333,5 +338,30 @@ func (a *Agent) FetchThreadList(ctx context.Context, dir string) ([]core.AgentSe
 	}
 	slog.Info("codex catalog: thread/list bounded fetch",
 		"cwd", dir, "count", len(out), "pages", pages, "capped", len(out) >= codexThreadListMaxItems)
+	return out, nil
+}
+
+// FetchThreadListHead returns one small native recency-ordered page without following the
+// upstream cursor. MacBridge uses it only as a cheap change hint; membership, cache fencing and
+// sessions_changed remain owned by FetchThreadList's full native snapshot.
+func (a *Agent) FetchThreadListHead(ctx context.Context, dir string, limit int) ([]core.AgentSessionInfo, error) {
+	cli, err := a.catalogClientInstance(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > codexThreadListHeadMax {
+		limit = codexThreadListHeadMax
+	}
+	params := frozenThreadListScopeParams(dir)
+	params.Limit = limit
+	result, err := cli.listThreads(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]core.AgentSessionInfo, 0, len(result.Data))
+	for _, thread := range result.Data {
+		out = append(out, codexThreadToAgentSessionInfo(thread))
+	}
+	slog.Info("codex catalog: thread/list head probe", "cwd", dir, "count", len(out), "limit", limit)
 	return out, nil
 }

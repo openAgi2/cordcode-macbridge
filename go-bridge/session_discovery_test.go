@@ -34,6 +34,38 @@ func discoveryCodexAgent(t *testing.T, base *fakeAgent) *fakeCodexCatalogAgent {
 	}}
 }
 
+type discoveryHintState struct {
+	mu           sync.Mutex
+	expanded     bool
+	headCalls    int
+	headErrors   int
+	fullCalls    int
+	headSeeded   chan struct{}
+	headSeedOnce sync.Once
+	workspace    string
+}
+
+type discoveryHintCodexAgent struct {
+	*fakeCodexCatalogAgent
+	state *discoveryHintState
+}
+
+func (a *discoveryHintCodexAgent) FetchThreadListHead(context.Context, string, int) ([]core.AgentSessionInfo, error) {
+	a.state.mu.Lock()
+	defer a.state.mu.Unlock()
+	a.state.headCalls++
+	if a.state.headErrors > 0 {
+		a.state.headErrors--
+		return nil, errors.New("transient native head failure")
+	}
+	a.state.headSeedOnce.Do(func() { close(a.state.headSeeded) })
+	infos := []core.AgentSessionInfo{{ID: "s1", Summary: "one", Directory: a.state.workspace}}
+	if a.state.expanded {
+		infos = append([]core.AgentSessionInfo{{ID: "s2", Summary: "two", Directory: a.state.workspace}}, infos...)
+	}
+	return infos, nil
+}
+
 // TestSessionDiscoveryBroadcastsOnNewSession: watcher detects a new session ID
 // across snapshots and broadcasts "sessions_changed" to a subscribed client.
 //
@@ -149,6 +181,80 @@ func TestSessionDiscoveryBlockedBackendDoesNotStarveCodex(t *testing.T) {
 	msg := readJSONMaps(t, clientConn, 1)[0]
 	if msg["event"] != "sessions_changed" || msg["backendId"] != "codex" {
 		t.Fatalf("Codex refresh event=%#v", msg)
+	}
+}
+
+func TestSessionDiscoveryCodexHeadHintTriggersAuthoritativeRefresh(t *testing.T) {
+	previousInterval := sessionDiscoveryInterval
+	previousHintInterval := codexDiscoveryHintInterval
+	sessionDiscoveryInterval = time.Hour
+	codexDiscoveryHintInterval = 10 * time.Millisecond
+	withCodexRootsDisabled(t)
+
+	state := &discoveryHintState{
+		headErrors: 2,
+		headSeeded: make(chan struct{}),
+		workspace:  t.TempDir(),
+	}
+	base := &fakeCodexCatalogAgent{fakeAgent: &fakeAgent{name: "codex"}}
+	base.fetchFn = func(context.Context, string) ([]core.AgentSessionInfo, error) {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		state.fullCalls++
+		infos := []core.AgentSessionInfo{{ID: "s1", Summary: "one", Directory: state.workspace}}
+		if state.expanded {
+			infos = append([]core.AgentSessionInfo{{ID: "s2", Summary: "two", Directory: state.workspace}}, infos...)
+		}
+		return infos, nil
+	}
+	agent := &discoveryHintCodexAgent{fakeCodexCatalogAgent: base, state: state}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	t.Cleanup(cleanup)
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "codex", SessionID: "list-view"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		handlers.runSessionDiscovery(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-watcherDone:
+		case <-time.After(time.Second):
+			t.Error("session discovery watcher did not stop")
+		}
+		sessionDiscoveryInterval = previousInterval
+		codexDiscoveryHintInterval = previousHintInterval
+	})
+
+	select {
+	case <-state.headSeeded:
+	case <-time.After(time.Second):
+		t.Fatal("Codex native head probe did not recover and seed")
+	}
+	// Head errors and a stable head must not start another full native walk.
+	time.Sleep(30 * time.Millisecond)
+	state.mu.Lock()
+	fullBeforeChange := state.fullCalls
+	state.expanded = true
+	state.mu.Unlock()
+	if fullBeforeChange != 1 {
+		t.Fatalf("stable/error head probes caused %d full fetches, want seed only", fullBeforeChange)
+	}
+
+	msg := readJSONMaps(t, clientConn, 1)[0]
+	if msg["event"] != "sessions_changed" || msg["backendId"] != "codex" {
+		t.Fatalf("Codex hint-triggered refresh event=%#v", msg)
+	}
+	state.mu.Lock()
+	fullAfterChange := state.fullCalls
+	state.mu.Unlock()
+	if fullAfterChange != 2 {
+		t.Fatalf("head change full fetches=%d, want seed + one authoritative refresh", fullAfterChange)
 	}
 }
 
