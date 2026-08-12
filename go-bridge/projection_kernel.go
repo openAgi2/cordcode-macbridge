@@ -485,10 +485,16 @@ type projectionHydrateTransaction struct {
 	nextInput   int
 	pendingLive []EventMessage
 	liveArrived chan struct{}
-	// sourceIngestComplete is set true once cold-source ingest finishes (design §5.1 #7,
-	// guardrail #6). WaitHydrateCommitReady will not commit until this is true, so readiness
-	// is decided from authoritative source-EOF + turn terminal state rather than content
-	// shape or turn-count guessing.
+	// sourceIsLive is sampled once at hydrate admission (design §3.1 of the SSV2 running-session
+	// cold-open fix): a live in-progress process is an explicit lifecycle signal that lets the
+	// commit gate release a cold-armed running turn as an honest running partial. The value is
+	// fixed for the transaction; process death during hydrate is closed by the live side
+	// (relay-before-hydrate + synthesized turn_aborted, §3.2/§3.3), never by re-polling liveness.
+	sourceIsLive bool
+	// sourceIngestComplete is set true once cold-source ingest finishes (design §3.3 rule #2 /
+	// D6 / K1 of the cold-start plan, guardrail #6). WaitHydrateCommitReady will not commit until
+	// this is true, so readiness is decided from authoritative source-EOF + turn terminal state
+	// rather than content shape or turn-count guessing.
 	sourceIngestComplete bool
 	// coldArmedTurnIDs records every turn ID the cold-source ingest referenced (turnId or
 	// itemId). The commit gate checks terminal state only for these turns — turns carried
@@ -698,7 +704,7 @@ func pathlessFullRebuildSource(backendID string, source ProjectionSourceDescript
 func (k *ProjectionKernel) BeginHydrateTransaction(
 	backendID, sessionID string,
 	source ProjectionSourceDescriptor,
-	explicitRetry, sourceChanged bool,
+	explicitRetry, sourceChanged, sourceIsLive bool,
 ) (ProjectionHydrateAdmission, error) {
 	if k == nil || backendID == "" || sessionID == "" || source.Cursor < 0 {
 		return ProjectionHydrateAdmission{}, fmt.Errorf("%w: invalid hydrate admission", ErrProjectionCheckpointInvalid)
@@ -755,6 +761,7 @@ func (k *ProjectionKernel) BeginHydrateTransaction(
 		reducer:          NewProjectionReducer(),
 		liveArrived:      make(chan struct{}, 1),
 		coldArmedTurnIDs: make(map[string]struct{}),
+		sourceIsLive:     sourceIsLive,
 	}
 	if source.Path == "" {
 		if pathlessFullRebuildSource(backendID, source) {
@@ -847,7 +854,7 @@ func (k *ProjectionKernel) ApplyHydrateEvent(
 	}
 	tx := session.hydrate
 	// Record every turn the cold source references (turnId, else itemId), so the commit gate
-	// checks terminal state only for cold-source-armed turns (design §5.1 #7). Turns carried
+	// checks terminal state only for cold-source-armed turns (design §3.3 rule #2 / D6 / K1). Turns carried
 	// from a committed/live baseline are never referenced here and thus never gate — live
 	// in-progress sessions cold-pulled commit their current state instead of blocking.
 	if tid, ok := data["turnId"].(string); ok && tid != "" {
@@ -911,7 +918,8 @@ func (k *ProjectionKernel) IngestLive(msg EventMessage) bool {
 // transaction has finished — no further ApplyHydrateEvent calls will be made from the cold
 // source (mainstream transcript + Claude sidechain). WaitHydrateCommitReady will not commit
 // until this is set, so readiness is decided from authoritative source-EOF + turn terminal
-// state rather than content shape or turn-count guessing (design §5.1 #7, guardrail #6).
+// state rather than content shape or turn-count guessing (design §3.3 rule #2 / D6 / K1 of
+// the cold-start plan, guardrail #6).
 // Also nudges liveArrived so a waiter re-evaluates immediately. Idempotent; no-op if the
 // transaction is no longer active (already committed/failed/superseded).
 func (k *ProjectionKernel) MarkHydrateSourceIngestComplete(backendID, sessionID string) {
@@ -932,13 +940,16 @@ func (k *ProjectionKernel) MarkHydrateSourceIngestComplete(backendID, sessionID 
 }
 
 // WaitHydrateCommitReady blocks until the hydrate transaction is committable, then returns
-// nil. Commit readiness is authoritative (design §5.1 #7, guardrail #6): the cold source must
-// be fully ingested (MarkHydrateSourceIngestComplete) AND every turn armed by the source must
-// have reached a terminal state (completed/aborted/error). This replaces the earlier
-// turnCount==0 || HasContentTurn gate, which guessed from count/content shape and left
-// empty/aborted/crashed sessions stuck hydrating forever. A bare turn_started with no
-// terminal event stays not-ready (correct); a live in-flight turn cold-opened mid-flight
-// waits for its terminal event instead of committing on partial content.
+// nil. Commit readiness is authoritative (design §3.3 rule #2 / D6 / K1 of the cold-start
+// plan, guardrail #6): the cold source must be fully ingested
+// (MarkHydrateSourceIngestComplete) AND every turn armed by the source must have reached a
+// terminal state (completed/aborted/error) — unless the source is live (§3.1 of the SSV2
+// running-session cold-open fix), in which case an in-flight running turn may commit as an
+// honest running partial. This replaces the earlier turnCount==0 || HasContentTurn gate,
+// which guessed from count/content shape and left empty/aborted/crashed sessions stuck
+// hydrating forever. A bare turn_started with no terminal event stays not-ready (correct); a
+// non-live in-flight turn cold-opened mid-flight waits for its terminal event instead of
+// committing on partial content.
 func (k *ProjectionKernel) WaitHydrateCommitReady(
 	ctx context.Context,
 	backendID, sessionID string,
@@ -958,15 +969,18 @@ func (k *ProjectionKernel) WaitHydrateCommitReady(
 		for _, msg := range tx.pendingLive {
 			preview.Apply(msg)
 		}
-		// §5.1 #7 / guardrail #6: readiness is authoritative, not guessed. Commit only after
-		// the cold source is fully ingested AND every turn the cold source armed has reached a
-		// terminal state (completed/aborted/error). Scoped to cold-armed turns: turns carried
-		// from a committed/live baseline are live truth and do not gate, so a live in-progress
-		// session cold-pulled commits its current state instead of blocking. The old
+		// §3.3 rule #2 / D6 / K1 (cold-start plan) + §3.1 (SSV2 running-session fix): readiness
+		// is authoritative, not guessed. Commit only after the cold source is fully ingested AND
+		// either every turn the cold source armed has reached a terminal state
+		// (completed/aborted/error), or the source is live (an explicit lifecycle signal that
+		// admits an honest running partial for the in-flight turn). Scoped to cold-armed turns:
+		// turns carried from a committed/live baseline are live truth and do not gate, so a live
+		// in-progress session cold-pulled commits its current state instead of blocking. The old
 		// `turnCount == 0 || HasContentTurn(...)` gate guessed from count/content shape; it left
 		// empty/aborted/crashed sessions stuck hydrating forever and could commit a half-seen
 		// in-flight turn on partial content.
-		ready := tx.sourceIngestComplete && preview.NonTerminalTurnCountInSet(backendID, sessionID, tx.coldArmedTurnIDs) == 0
+		ready := tx.sourceIngestComplete &&
+			(tx.sourceIsLive || preview.NonTerminalTurnCountInSet(backendID, sessionID, tx.coldArmedTurnIDs) == 0)
 		liveArrived := tx.liveArrived
 		k.mu.Unlock()
 		if ready {
@@ -992,12 +1006,12 @@ func (k *ProjectionKernel) CommitHydrateTransaction(
 		return ProjectionHydrateCommit{}, errors.New("projection hydrate transaction is not active")
 	}
 	tx := session.hydrate
-	if (backendID == "claude" || backendID == "claudecode") && len(tx.pendingLive) > 0 {
-		return ProjectionHydrateCommit{}, fmt.Errorf(
-			"%w: Claude hydrate received uncorrelated live rows; re-inspect from one source owner",
-			ErrProjectionCheckpointInvalid,
-		)
-	}
+	// Live rows arriving during Claude hydrate are now expected and correlated: the live file
+	// relay starts before the hydrate wait (§3.2) and routes in-flight content through the
+	// EventPublisher into pendingLive, and the Claude source ledger advances past every
+	// physical row during hydrate (§3.2 hydrate routing), so the post-cut live events are
+	// authoritative same-owner rows, not uncorrelated overlap. CommitHydrateTransaction applies
+	// them after the baseline in their stamped order.
 	baseline, ok := tx.reducer.Snapshot(backendID, sessionID)
 	if !ok {
 		baseline = SessionProjection{

@@ -1003,7 +1003,9 @@ Cold start is a single-flight transaction. MacBridge restores a validated checkp
 commits baseline plus pending live events. Hydrate does not publish ordinary events, consume
 transport sequence numbers, enter recovery/offline/mailbox buffers, or expose partial projections.
 A completed source inspection may commit an honest `ready(empty)`; a bare running shell alone
-MUST remain hydrating.
+MUST remain hydrating. A cold pull of a session whose source process is live may return a
+partial containing an in-flight `running` turn — that partial is an authoritative subset of the
+projection, not a final state; the turn is completed by subsequent `projection_patch` frames.
 
 RPC lifecycle is explicit:
 

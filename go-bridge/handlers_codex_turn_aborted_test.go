@@ -110,7 +110,7 @@ func TestCodexColdHydrate_TurnAbortedSettlesProjection(t *testing.T) {
 	admission, err := kernel.BeginHydrateTransaction(
 		backendID, sessionID,
 		ProjectionSourceDescriptor{Identity: sessionID},
-		false, false,
+		false, false, false,
 	)
 	if err != nil || !admission.Leader {
 		t.Fatalf("admission=%+v err=%v", admission, err)

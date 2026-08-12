@@ -39,7 +39,7 @@ func TestProjectionKernelRehydratesWhenCompositeSourceCutChanges(t *testing.T) {
 		},
 	}
 	admission, err := kernel.BeginHydrateTransaction(
-		"claudecode", source.Identity, source, false, false,
+		"claudecode", source.Identity, source, false, false, false,
 	)
 	if err != nil || !admission.Leader {
 		t.Fatalf("initial admission = %+v err=%v", admission, err)
@@ -49,7 +49,7 @@ func TestProjectionKernelRehydratesWhenCompositeSourceCutChanges(t *testing.T) {
 	}
 
 	unchanged, err := kernel.BeginHydrateTransaction(
-		"claudecode", source.Identity, source, false, false,
+		"claudecode", source.Identity, source, false, false, false,
 	)
 	if err != nil || !unchanged.AlreadyReady {
 		t.Fatalf("unchanged source must reuse Ready state: %+v err=%v", unchanged, err)
@@ -59,7 +59,7 @@ func TestProjectionKernelRehydratesWhenCompositeSourceCutChanges(t *testing.T) {
 	advanced.Segments[1].Cursor = 15
 	advanced.Cursor = 25
 	changed, err := kernel.BeginHydrateTransaction(
-		"claudecode", source.Identity, advanced, false, false,
+		"claudecode", source.Identity, advanced, false, false, false,
 	)
 	if err != nil || !changed.Leader || changed.AlreadyReady {
 		t.Fatalf("advanced composite source must start private rebuild: %+v err=%v", changed, err)
@@ -90,7 +90,7 @@ func TestProjectionHydrateGrowingSourceKeepsBaselineAndPendingDisjoint(t *testin
 		Cursor:   cut,
 	}
 	admission, err := handlers.projectionKernel.BeginHydrateTransaction(
-		"codex", "session-growing", source, false, false,
+		"codex", "session-growing", source, false, false, false,
 	)
 	if err != nil || !admission.Leader || admission.StartCut != cut {
 		t.Fatalf("hydrate admission = %+v err=%v", admission, err)
@@ -187,13 +187,19 @@ func TestProjectionHydrateGrowingSourceKeepsBaselineAndPendingDisjoint(t *testin
 	}
 }
 
-func TestClaudeProjectionHydrateRejectsUncorrelatedPendingLive(t *testing.T) {
+func TestClaudeProjectionHydrateAppliesPendingLiveOnCommit(t *testing.T) {
+	// §3.1/§3.2 of the SSV2 running-session cold-open fix: the Claude live file relay starts
+	// BEFORE the hydrate wait and routes in-flight content rows into the transaction's
+	// pendingLive (same authoritative mapper as the source-batch path). CommitHydrateTransaction
+	// therefore no longer rejects pendingLive for Claude; it applies the queued events after the
+	// cold baseline in their stamped order, so the committed projection is the honest running
+	// partial plus any post-cut content that already arrived.
 	kernel := NewProjectionKernel(NewProjectionReducer(), nil)
 	source := ProjectionSourceDescriptor{
 		Identity: "claude-overlap", Path: "/private/source.jsonl", Cursor: 100,
 	}
 	if _, err := kernel.BeginHydrateTransaction(
-		"claude", "claude-overlap", source, false, false,
+		"claude", "claude-overlap", source, false, false, false,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -208,11 +214,18 @@ func TestClaudeProjectionHydrateRejectsUncorrelatedPendingLive(t *testing.T) {
 		PerSessionSeq: 1, Event: "text_delta",
 		Data: map[string]interface{}{"itemId": "turn-1", "delta": "unproven overlap"},
 	})
-	if _, err := kernel.CommitHydrateTransaction("claude", "claude-overlap"); !errors.Is(err, ErrProjectionCheckpointInvalid) {
-		t.Fatalf("commit error = %v, want explicit uncorrelated-overlap failure", err)
+	commit, err := kernel.CommitHydrateTransaction("claude", "claude-overlap")
+	if err != nil {
+		t.Fatalf("commit error = %v, want pendingLive applied after baseline", err)
 	}
-	if projection, ok := kernel.Snapshot("claude", "claude-overlap"); ok {
-		t.Fatalf("failed overlap commit exposed projection: %+v", projection)
+	if commit.PendingLive != 1 {
+		t.Fatalf("commit.PendingLive = %d, want 1", commit.PendingLive)
+	}
+	if len(commit.Projection.Turns) != 1 {
+		t.Fatalf("committed turns = %d, want 1", len(commit.Projection.Turns))
+	}
+	if got := projectionTurnText(commit.Projection.Turns[0]); got != "baselineunproven overlap" {
+		t.Fatalf("pending live delta lost or misordered after commit: %q", got)
 	}
 }
 
@@ -238,7 +251,7 @@ func TestProjectionKernelPendingLiveRejectsDuplicateAndOutOfOrderInput(t *testin
 		"session-order",
 		ProjectionSourceDescriptor{Identity: "session-order", Cursor: 0},
 		false,
-		false,
+		false, false,
 	)
 	if err != nil || !admission.Leader {
 		t.Fatalf("admission = %+v err=%v", admission, err)
@@ -285,7 +298,7 @@ func TestProjectionKernelBareShellWaitsForRealContent(t *testing.T) {
 		"bare-wait",
 		ProjectionSourceDescriptor{Identity: "bare-wait"},
 		false,
-		false,
+		false, false,
 	); err != nil || !admission.Leader {
 		t.Fatalf("admission=%+v err=%v", admission, err)
 	}
@@ -455,7 +468,7 @@ func TestProjectionCatchUpWhenSourceAdvancesPastReady(t *testing.T) {
 	admission, err := kernel.BeginHydrateTransaction(
 		backendID, sessionID,
 		ProjectionSourceDescriptor{Identity: sessionID, Path: "/tmp/unused", Cursor: 10},
-		false, false,
+		false, false, false,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -483,7 +496,7 @@ func TestProjectionCatchUpWhenSourceAdvancesPastReady(t *testing.T) {
 	again, err := kernel.BeginHydrateTransaction(
 		backendID, sessionID,
 		ProjectionSourceDescriptor{Identity: sessionID, Path: "/tmp/unused", Cursor: 10},
-		false, false,
+		false, false, false,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -496,7 +509,7 @@ func TestProjectionCatchUpWhenSourceAdvancesPastReady(t *testing.T) {
 	catchUp, err := kernel.BeginHydrateTransaction(
 		backendID, sessionID,
 		ProjectionSourceDescriptor{Identity: sessionID, Path: "/tmp/unused", Cursor: 50},
-		false, false,
+		false, false, false,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -543,7 +556,7 @@ func TestOpenCodePathlessForceRebuildOnSourceChanged(t *testing.T) {
 	admission, err := kernel.BeginHydrateTransaction(
 		backendID, sessionID,
 		ProjectionSourceDescriptor{Identity: sessionID, Path: "", Cursor: 0},
-		false, false,
+		false, false, false,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -566,7 +579,7 @@ func TestOpenCodePathlessForceRebuildOnSourceChanged(t *testing.T) {
 	again, err := kernel.BeginHydrateTransaction(
 		backendID, sessionID,
 		ProjectionSourceDescriptor{Identity: sessionID, Path: "", Cursor: 0},
-		false, false,
+		false, false, false,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -579,7 +592,7 @@ func TestOpenCodePathlessForceRebuildOnSourceChanged(t *testing.T) {
 	force, err := kernel.BeginHydrateTransaction(
 		backendID, sessionID,
 		ProjectionSourceDescriptor{Identity: sessionID, Path: "", Cursor: 0},
-		false, true,
+		false, true, false,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -632,7 +645,7 @@ func TestPathlessRebuildDoesNotCarryCheckpointBaseline(t *testing.T) {
 	kernelA := NewProjectionKernel(NewProjectionReducer(), store)
 	if admission, err := kernelA.BeginHydrateTransaction(backendID, sessionID,
 		ProjectionSourceDescriptor{Identity: sessionID, Path: "", Cursor: 0},
-		false, false); err != nil {
+		false, false, false); err != nil {
 		t.Fatal(err)
 	} else if !admission.Leader {
 		t.Fatal("phase1: want leader")
@@ -661,7 +674,7 @@ func TestPathlessRebuildDoesNotCarryCheckpointBaseline(t *testing.T) {
 	kernelB := NewProjectionKernel(NewProjectionReducer(), store)
 	admission2, err := kernelB.BeginHydrateTransaction(backendID, sessionID,
 		ProjectionSourceDescriptor{Identity: sessionID, Path: "", Cursor: 0},
-		false, false)
+		false, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -735,7 +748,7 @@ func TestClaudeCompositeCheckpointHitRestoresBaseline_NotEmptyHead0(t *testing.T
 	// then overwrite with composite checkpoint matching production schema.
 	admission1, err := kernelA.BeginHydrateTransaction(backendID, sessionID,
 		ProjectionSourceDescriptor{Identity: sessionID, Path: sourceAtEOF.Segments[0].Path, Cursor: cut},
-		false, false)
+		false, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -773,7 +786,7 @@ func TestClaudeCompositeCheckpointHitRestoresBaseline_NotEmptyHead0(t *testing.T
 
 	// Phase 2 — fresh kernel, composite source at same EOF cut (checkpoint validates).
 	kernelB := NewProjectionKernel(NewProjectionReducer(), store)
-	admission2, err := kernelB.BeginHydrateTransaction(backendID, sessionID, sourceAtEOF, false, false)
+	admission2, err := kernelB.BeginHydrateTransaction(backendID, sessionID, sourceAtEOF, false, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -817,7 +830,7 @@ func TestProjectionHydrateAbortedTurnWithoutSourceCompleteNotReady(t *testing.T)
 	admission, err := kernel.BeginHydrateTransaction(
 		"codex", "aborted-no-src",
 		ProjectionSourceDescriptor{Identity: "aborted-no-src"},
-		false, false,
+		false, false, false,
 	)
 	if err != nil || !admission.Leader {
 		t.Fatalf("admission=%+v err=%v", admission, err)
@@ -847,7 +860,7 @@ func TestProjectionHydrateAbortedTurnWithSourceCompleteReady(t *testing.T) {
 	admission, err := kernel.BeginHydrateTransaction(
 		"codex", "aborted-src",
 		ProjectionSourceDescriptor{Identity: "aborted-src"},
-		false, false,
+		false, false, false,
 	)
 	if err != nil || !admission.Leader {
 		t.Fatalf("admission=%+v err=%v", admission, err)
@@ -883,7 +896,7 @@ func TestProjectionHydrateErrorTurnWithSourceCompleteReady(t *testing.T) {
 	admission, err := kernel.BeginHydrateTransaction(
 		"codex", "error-src",
 		ProjectionSourceDescriptor{Identity: "error-src"},
-		false, false,
+		false, false, false,
 	)
 	if err != nil || !admission.Leader {
 		t.Fatalf("admission=%+v err=%v", admission, err)
@@ -906,5 +919,145 @@ func TestProjectionHydrateErrorTurnWithSourceCompleteReady(t *testing.T) {
 	}
 	if got := commit.Projection.Turns[0].Status; got != "error" {
 		t.Fatalf("error turn status=%q, want \"error\"", got)
+	}
+}
+
+// M1 (§5.1): a running Claude turn cold-opened with a LIVE source commits as an honest running
+// partial once the cold source is fully ingested — no terminal event required. This is the
+// §3.1 core of the SSV2 running-session cold-open fix: the commit gate releases
+// (sourceIngestComplete && (all armed turns terminal || sourceIsLive)).
+func TestColdHydrateRunningClaudeCommitsPartialWithRunningTurn(t *testing.T) {
+	kernel := NewProjectionKernel(nil, nil)
+	const (
+		backendID = "claude"
+		sessionID = "cold-live-running"
+		turnID    = "turn-live"
+	)
+	admission, err := kernel.BeginHydrateTransaction(
+		backendID, sessionID,
+		ProjectionSourceDescriptor{Identity: sessionID, Path: "/tmp/live.jsonl", Cursor: 10},
+		false, false, true, // sourceIsLive: live process sampled at admission
+	)
+	if err != nil || !admission.Leader {
+		t.Fatalf("admission=%+v err=%v", admission, err)
+	}
+	// In-flight content: user_message + non-terminal assistant text delta (no stop_reason).
+	if !kernel.ApplyHydrateEvent(backendID, sessionID, "epoch", "user_message",
+		map[string]interface{}{"turnId": turnID, "itemId": turnID, "text": "q"}) {
+		t.Fatal("user_message not applied")
+	}
+	if !kernel.ApplyHydrateEvent(backendID, sessionID, "epoch", "text_delta",
+		map[string]interface{}{"itemId": turnID, "delta": "partial answer"}) {
+		t.Fatal("text_delta not applied")
+	}
+	kernel.MarkHydrateSourceIngestComplete(backendID, sessionID)
+
+	short, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := kernel.WaitHydrateCommitReady(short, backendID, sessionID); err != nil {
+		t.Fatalf("live running turn must not gate on its terminal event, got err=%v", err)
+	}
+	commit, err := kernel.CommitHydrateTransaction(backendID, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commit.Projection.Turns) != 1 {
+		t.Fatalf("committed turns = %d, want 1", len(commit.Projection.Turns))
+	}
+	if got := commit.Projection.Turns[0].Status; got != "running" {
+		t.Fatalf("in-flight turn status=%q, want \"running\" (honest partial, not fake completion)", got)
+	}
+	if got := commit.Projection.Execution.Phase; got != "running" {
+		t.Fatalf("execution phase=%q, want \"running\"", got)
+	}
+	if got := projectionTurnText(commit.Projection.Turns[0]); got != "qpartial answer" {
+		t.Fatalf("partial content lost: %q", got)
+	}
+}
+
+// M2 (§5.1): the running partial committed by M1 is later settled by the LIVE domain via a
+// turn_completed patch — monotonic forward, no duplicate turn, status flips to completed.
+func TestColdHydrateRunningTurnCompletesViaLivePatch(t *testing.T) {
+	kernel := NewProjectionKernel(nil, nil)
+	const (
+		backendID = "claude"
+		sessionID = "cold-live-completes"
+		turnID    = "turn-live"
+	)
+	if _, err := kernel.BeginHydrateTransaction(
+		backendID, sessionID,
+		ProjectionSourceDescriptor{Identity: sessionID, Path: "/tmp/live.jsonl", Cursor: 10},
+		false, false, true,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !kernel.ApplyHydrateEvent(backendID, sessionID, "epoch", "user_message",
+		map[string]interface{}{"turnId": turnID, "itemId": turnID, "text": "q"}) {
+		t.Fatal("user_message not applied")
+	}
+	kernel.MarkHydrateSourceIngestComplete(backendID, sessionID)
+	if err := kernel.WaitHydrateCommitReady(context.Background(), backendID, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	commit, err := kernel.CommitHydrateTransaction(backendID, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revBefore := commit.Projection.SyncRev
+	if len(commit.Projection.Turns) != 1 || commit.Projection.Turns[0].Status != "running" {
+		t.Fatalf("baseline commit not a running partial: %+v", commit.Projection.Turns)
+	}
+
+	// Live turn_completed settles the running partial on the committed reducer.
+	kernel.IngestLive(EventMessage{
+		BackendID: backendID, SessionID: sessionID, BridgeEpoch: "epoch",
+		PerSessionSeq: 1, Event: "turn_completed",
+		Data: map[string]interface{}{"turnId": turnID},
+	})
+	snap, ok := kernel.Snapshot(backendID, sessionID)
+	if !ok {
+		t.Fatal("no snapshot after live completion")
+	}
+	if len(snap.Turns) != 1 {
+		t.Fatalf("live completion duplicated turns: %d, want 1", len(snap.Turns))
+	}
+	if got := snap.Turns[0].Status; got != "completed" {
+		t.Fatalf("turn status after live patch=%q, want \"completed\"", got)
+	}
+	if snap.SyncRev <= revBefore {
+		t.Fatalf("sync rev not monotonic: before=%d after=%d", revBefore, snap.SyncRev)
+	}
+}
+
+// M3 (§5.1): a NON-live source with a non-terminal cold-armed turn must still gate — the
+// §3.3 rule #2 / D6 "bare turn shell must not be treated as ready" defense is preserved.
+// Only the explicit live signal (or a terminal event) releases the commit gate.
+func TestColdHydrateNonLiveNonTerminalStillGates(t *testing.T) {
+	kernel := NewProjectionKernel(nil, nil)
+	const (
+		backendID = "claude"
+		sessionID = "cold-nonlive-running"
+		turnID    = "turn-stuck"
+	)
+	if _, err := kernel.BeginHydrateTransaction(
+		backendID, sessionID,
+		ProjectionSourceDescriptor{Identity: sessionID, Path: "/tmp/dead.jsonl", Cursor: 10},
+		false, false, false, // sourceIsLive: false — no live process
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !kernel.ApplyHydrateEvent(backendID, sessionID, "epoch", "user_message",
+		map[string]interface{}{"turnId": turnID, "itemId": turnID, "text": "q"}) {
+		t.Fatal("user_message not applied")
+	}
+	kernel.MarkHydrateSourceIngestComplete(backendID, sessionID)
+
+	short, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
+	if err := kernel.WaitHydrateCommitReady(short, backendID, sessionID); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("non-live non-terminal armed turn must stay not-ready, got err=%v", err)
+	}
+	if _, ok := kernel.Snapshot(backendID, sessionID); ok {
+		t.Fatal("non-live non-terminal turn became ready")
 	}
 }
