@@ -803,3 +803,11 @@ Claude 原生 catalog 同源。等 Claude 上游暴露稳定 catalog 接口后�
 ### owner 复测（2026-08-12）
 真机复测反馈「基本符合预期」：Desktop archive/delete 后 iOS 列表能及时消失，
 unarchive 也能恢复；本轮修复闭环。
+
+### owner 复测（2026-08-12）：SSV2 运行中 session 冷开超时修复
+真机矩阵 1-5 全部「基本符合预期 ✅」：运行中 Claude 长任务冷开 15s 内出内容
+（running partial）、turn 完成后自动补全为 completed、短任务/idle session 冷开
+正常、crashed 进程冷开收口为 aborted/诚实失败。三阶段修复闭环：§3.1
+`sourceIsLive` 提交门槛（admission 采样）+ §3.2 Claude relay 提前到 hydrate 前 +
+§3.3 进程死亡合成 `turn_aborted`，配套 iOS §3.4 late-retryable 清错并重启
+pull loop。详见 `docs/2026-08-12-ssv2-running-session-projection-timeout-fix-plan.md`。
