@@ -81,10 +81,15 @@ func (s *updatesFileTailSubscriber) Run(ctx context.Context, onEvent func(core.E
 		return fmt.Errorf("grokbuild: stat updates.jsonl: %w", err)
 	}
 	// Attach 时补一条“未完成 turn 的 user prompt”: iOS 可能在 Mac 已发出 prompt
-	// 之后才打开会话, user_message_chunk 已写在 EOF 之前; chat_history.jsonl 在
-	// turn 结束前也不含该行。只补最后一个终态之后、尚未收到 turn_completed 的那条
-	// prompt——已完成 turn 的 prompt 由冷 hydrate 提供,这里不重放。
-	if pending := latestPendingUserMessage(path); pending != "" {
+	// 之后才打开会话, user_message_chunk 已写在 EOF 之前。只补最后一个终态之后、
+	// 尚未收到 turn_completed 的那条 prompt——已完成 turn 的 prompt 由冷 hydrate
+	// 提供,这里不重放。
+	// 2026-08-12: grok 在 turn 执行中就会把该 user 行追加进 chat_history.jsonl,
+	// 冷 hydrate 基线已包含 prompt + 已生成的回复; 此时再补扫会把同一 prompt 重复
+	// 投递给 iOS (问题/回复出现两次)。仅当 chat_history 尚未落盘该 prompt 的竞态
+	// 窗口 (Mac 刚发出 prompt、iOS 立即冷开) 才需要补扫。
+	if pending := latestPendingUserMessage(path); pending != "" &&
+		!historyContainsUserPrompt(filepath.Join(filepath.Dir(path), "chat_history.jsonl"), pending) {
 		onEvent(core.Event{Type: core.EventUserMessage, Content: pending})
 	}
 	offset := info.Size()
@@ -195,6 +200,46 @@ func latestPendingUserMessage(path string) string {
 		}
 	}
 	return pending
+}
+
+// historyContainsUserPrompt reports whether chat_history.jsonl already contains a
+// user row whose normalized prompt text equals pending. Normalization matches
+// readRichSessionHistory's user branch (unwrap <user_query>, trim, skip
+// synthetic/bootstrap rows), so the cross-file comparison is exact — in the real
+// running-session repro the chat_history <user_query> row and the updates.jsonl
+// user_message_chunk carry byte-identical prompt text. A missing/unreadable
+// chat_history returns false (the "prompt not yet persisted" race), so the
+// attach-time replay is preserved for that window.
+func historyContainsUserPrompt(chatHistoryPath, pending string) bool {
+	f, err := os.Open(chatHistoryPath)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	want := strings.TrimSpace(pending)
+	for sc.Scan() {
+		raw := bytes.TrimSpace(sc.Bytes())
+		if len(raw) == 0 {
+			continue
+		}
+		var row grokHistoryLine
+		if json.Unmarshal(raw, &row) != nil {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(row.Type)) != "user" || row.SyntheticReason != "" {
+			continue
+		}
+		text := strings.TrimSpace(unwrapUserQuery(extractTextContent(row.Content)))
+		if text == "" || looksLikeFrameworkBootstrap(text) {
+			continue
+		}
+		if text == want {
+			return true
+		}
+	}
+	return false
 }
 
 // waitForFile polls until the session's updates.jsonl exists, returning its path.

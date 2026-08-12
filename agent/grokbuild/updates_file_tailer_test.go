@@ -388,3 +388,116 @@ func TestUpdatesFileTailMissingSessionErrors(t *testing.T) {
 		t.Fatal("want error for missing session file, got nil")
 	}
 }
+
+// chatHistoryLine builds a chat_history.jsonl row in grok's on-disk shape.
+func chatHistoryLine(rowType, content string) []byte {
+	obj := map[string]any{"type": rowType}
+	if rowType == "user" {
+		obj["content"] = []any{map[string]any{"type": "text", "text": content}}
+	} else {
+		obj["content"] = content
+	}
+	b, _ := json.Marshal(obj)
+	return append(b, '\n')
+}
+
+// setupSessionWithHistory creates a session dir containing chat_history.jsonl
+// with the given rows and an EMPTY updates.jsonl, returning both paths.
+func setupSessionWithHistory(t *testing.T, sessionID string, rows ...[]byte) (grokHome, historyPath, updatesPath string) {
+	t.Helper()
+	home := t.TempDir()
+	dir := filepath.Join(home, "sessions", "encoded-cwd", sessionID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	historyPath = filepath.Join(dir, "chat_history.jsonl")
+	if err := os.WriteFile(historyPath, bytesJoin(rows), 0o644); err != nil {
+		t.Fatalf("write chat_history.jsonl: %v", err)
+	}
+	updatesPath = filepath.Join(dir, "updates.jsonl")
+	if err := os.WriteFile(updatesPath, nil, 0o644); err != nil {
+		t.Fatalf("create empty updates.jsonl: %v", err)
+	}
+	return home, historyPath, updatesPath
+}
+
+func bytesJoin(rows [][]byte) []byte {
+	var out []byte
+	for _, r := range rows {
+		out = append(out, r...)
+	}
+	return out
+}
+
+// TestUpdatesFileTailPendingSuppressedWhenInHistory: running-session cold-open
+// repro. chat_history.jsonl already carries the in-flight turn's user prompt +
+// partial assistant reply (grok appends them while the turn executes), and
+// updates.jsonl has the SAME user_message_chunk after the last turn_completed
+// (no terminal for this turn). The cold hydrate baseline already served the
+// prompt, so the tailer must NOT replay it at attach — otherwise iOS shows the
+// question twice and the reply restarting from the half.
+func TestUpdatesFileTailPendingSuppressedWhenInHistory(t *testing.T) {
+	fastTailKnobs()
+	home, _, path := setupSessionWithHistory(t, "ses-dup",
+		chatHistoryLine("user", "<user_query>\n这是完成情况：docs/2026-08-12-plan.md\n</user_query>"),
+		chatHistoryLine("assistant", "对照完成情况与三张截图，只做效果分析，不动代码。"),
+	)
+	appendUpdates(t, path,
+		updatesLine("session/update", "ses-dup",
+			map[string]any{"sessionUpdate": "turn_completed", "prompt_id": "p-old", "stop_reason": "end_turn"}, nil),
+		updatesLine("session/update", "ses-dup",
+			map[string]any{"sessionUpdate": "user_message_chunk", "content": map[string]any{"type": "text", "text": "这是完成情况：docs/2026-08-12-plan.md"}}, nil),
+	)
+
+	var got []core.Event
+	var mu sync.Mutex
+	stop := startTailer(home, "ses-dup", func(ev core.Event) {
+		mu.Lock()
+		got = append(got, ev)
+		mu.Unlock()
+	})
+	time.Sleep(120 * time.Millisecond) // attach 补扫 + 首个 live poll
+	stop(200 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 0 {
+		t.Fatalf("attach replayed prompt already present in chat_history: got %d events, want 0: %+v", len(got), got)
+	}
+}
+
+// TestUpdatesFileTailPendingEmittedWhenNotInHistory: the race window the
+// attach-scan exists for. chat_history.jsonl exists but does NOT yet contain the
+// in-flight prompt (Mac just sent it, grok hasn't flushed the user row) — the
+// tailer must still replay the pending prompt so iOS doesn't miss the question.
+func TestUpdatesFileTailPendingEmittedWhenNotInHistory(t *testing.T) {
+	fastTailKnobs()
+	home, _, path := setupSessionWithHistory(t, "ses-race",
+		chatHistoryLine("user", "<user_query>\n上一个已完成的问题\n</user_query>"),
+	)
+	appendUpdates(t, path,
+		updatesLine("session/update", "ses-race",
+			map[string]any{"sessionUpdate": "turn_completed", "prompt_id": "p-old", "stop_reason": "end_turn"}, nil),
+		updatesLine("session/update", "ses-race",
+			map[string]any{"sessionUpdate": "user_message_chunk", "content": map[string]any{"type": "text", "text": "刚发出的新问题"}}, nil),
+	)
+
+	var got []core.Event
+	var mu sync.Mutex
+	stop := startTailer(home, "ses-race", func(ev core.Event) {
+		mu.Lock()
+		got = append(got, ev)
+		mu.Unlock()
+	})
+	time.Sleep(120 * time.Millisecond)
+	stop(200 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 1 {
+		t.Fatalf("got %d events, want 1 pending user message: %+v", len(got), got)
+	}
+	if got[0].Type != core.EventUserMessage || got[0].Content != "刚发出的新问题" {
+		t.Fatalf("pending event = %+v, want EventUserMessage '刚发出的新问题'", got[0])
+	}
+}
