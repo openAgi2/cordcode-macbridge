@@ -511,3 +511,82 @@ func TestClaudeFileRelayProcessNotLiveStillWatchesGrowth(t *testing.T) {
 		t.Fatalf("completion missing text=%v completed=%v", sawText, sawCompleted)
 	}
 }
+
+// M5 (§5.1, Phase 2): process death with a non-terminal transcript tail must synthesize
+// turn_aborted — the only closure path for a crashed Claude session (sourceIsLive flips to
+// false at admission, so the commit gate does not release it; §3.3 rule #2 / D6 producer-layer
+// semantics, mirroring the codex producer). The synthesized terminal event feeds the reducer so
+// the in-flight turn settles to aborted instead of staying hydrating forever.
+func TestClaudeProcessDeathSynthesizesTurnAborted(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	const sessionID = "process-death-synthesized-abort"
+	writeClaudeFileRelayTranscript(t, home, sessionID,
+		`{"type":"user","uuid":"death-user-1","message":{"role":"user","content":"external prompt"}}`,
+	)
+	handlers, agent, client := startClaudeFileRelayFixture(t, sessionID, true)
+
+	messages := client.readEvents(t, 1)
+	if got := messages[0]["event"]; got != "turn_started" {
+		t.Fatalf("event = %#v, want turn_started", got)
+	}
+	data, _ := messages[0]["data"].(map[string]any)
+	if data["turnId"] != "death-user-1" {
+		t.Fatalf("warm-start turnId = %#v, want death-user-1", data["turnId"])
+	}
+
+	// Kill the live process mid-turn (no final stop_reason in the transcript). The relay must
+	// synthesize turn_aborted before broadcasting idle.
+	agent.processMu.Lock()
+	agent.alivePIDs[4242] = false
+	agent.processMu.Unlock()
+
+	messages = client.readEvents(t, 2)
+	if messages[0]["event"] != "turn_aborted" || messages[1]["event"] != "session_state_changed" {
+		t.Fatalf("events after process death = %v, want [turn_aborted, session_state_changed]", eventNames(messages))
+	}
+	abortData, _ := messages[0]["data"].(map[string]any)
+	if abortData["turnId"] != "death-user-1" || abortData["reason"] != "process_death" {
+		t.Fatalf("turn_aborted data = %#v, want turnId=death-user-1 reason=process_death", abortData)
+	}
+
+	// The synthesized terminal event must have settled the in-flight turn in the reducer —
+	// this is what releases the non-live cold-hydrate commit gate (all armed turns terminal).
+	snap, ok := handlers.eventPublisher.ProjectionReducer().Snapshot("claude", sessionID)
+	if !ok {
+		t.Fatal("no projection snapshot after synthesized abort")
+	}
+	if len(snap.Turns) != 1 || snap.Turns[0].Status != "aborted" {
+		t.Fatalf("projection after synthesized abort = %+v, want single aborted turn", snap.Turns)
+	}
+}
+
+// M5b: process death after an already-terminal transcript tail must NOT synthesize a second
+// abort (the turn is closed; synthesis would be a duplicate terminal event).
+func TestClaudeProcessDeathTerminalTailDoesNotSynthesizeAbort(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	const sessionID = "process-death-terminal-tail"
+	writeClaudeFileRelayTranscript(t, home, sessionID,
+		`{"type":"user","uuid":"done-user-1","message":{"role":"user","content":"external prompt"}}`,
+		`{"type":"assistant","uuid":"done-asst-1","message":{"id":"done-asst-1","role":"assistant","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn"}}`,
+	)
+	_, agent, client := startClaudeFileRelayFixture(t, sessionID, true)
+
+	// Terminal tail → initial scan is idle only (no replay of the completed turn).
+	messages := client.readEvents(t, 1)
+	if messages[0]["event"] != "session_state_changed" {
+		t.Fatalf("first event = %#v, want initial idle", messages[0])
+	}
+
+	agent.processMu.Lock()
+	agent.alivePIDs[4242] = false
+	agent.processMu.Unlock()
+
+	// Terminal tail: only idle is emitted, never a synthesized turn_aborted.
+	time.Sleep(60 * time.Millisecond)
+	messages = client.readEvents(t, 1)
+	if messages[0]["event"] != "session_state_changed" {
+		t.Fatalf("event after process death with terminal tail = %#v, want idle only (no synthesized abort)", messages[0])
+	}
+}

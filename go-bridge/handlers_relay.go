@@ -692,6 +692,10 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 	// Seed turn identity from last user on disk so warm-start / mid-turn open can
 	// attribute subsequent assistant growth without empty turnId frames.
 	currentTurnID := lastClaudeUserIdentityFromPath(sessPath, offset)
+	// Dedup guard for §3.3 process-death turn_aborted synthesis: at most one synthesized abort
+	// per turn identity, so a replacement process dying on a LATER turn still synthesizes while
+	// the same turn is never double-aborted.
+	lastSynthesizedAbortTurnID := ""
 
 	if !live {
 		// No discoverable process: stay idle and watch for future transcript growth.
@@ -746,6 +750,15 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 			if !liveLister.IsProcessAlive(context.Background(), cachedPID) {
 				processDeathMisses++
 				if processDeathMisses >= claudeFileRelayProcessDeathMisses {
+					// §3.3 (required, not optional): a dead process with a non-terminal transcript
+					// tail must close the in-flight turn with turn_aborted, mirroring the codex
+					// producer. Without it a crashed Claude session stays a non-live cold-armed
+					// turn with no terminal event, and the hydrate commit gate (which only
+					// releases non-live armed turns once every armed turn is terminal) would stay
+					// hydrating forever. Synthesis feeds pendingLive during hydrate and the
+					// committed reducer afterwards.
+					h.synthesizeClaudeTurnAbortedIfNeeded(sessPath, sessionID, backendID, currentTurnID, &lastSynthesizedAbortTurnID)
+					runningObserved = false
 					h.broadcastIdleState(sessionID, backendID)
 					if !h.broadcaster.HasSessionSubscriber(backendID, sessionID) {
 						slog.Info("go-bridge: claudeSessionFileRelay process dead with no subscriber, exiting", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
@@ -929,6 +942,40 @@ func (h *Handlers) acknowledgeClaudeSourceRow(backendID, sessionID string, corre
 	}
 }
 
+// synthesizeClaudeTurnAbortedIfNeeded closes an in-flight Claude turn with turn_aborted when
+// the live process died without a final stop_reason in the transcript (crashed scenario; §3.3
+// rule #2 / D6 producer-layer semantics, mirroring the codex producer). The hydrate commit gate
+// (WaitHydrateCommitReady) only releases non-live cold-armed turns once every armed turn is
+// terminal, so a crashed session would otherwise stay hydrating forever. Emits at most once per
+// turn: lastSynthesized records the turnId already closed, so a replacement process dying on a
+// later turn still synthesizes while the same turn is never double-aborted. No-op when the
+// transcript tail is already terminal or no turn identity is known.
+func (h *Handlers) synthesizeClaudeTurnAbortedIfNeeded(
+	sessPath, sessionID, backendID, currentTurnID string,
+	lastSynthesized *string,
+) {
+	if currentTurnID == "" || lastSynthesized == nil || *lastSynthesized == currentTurnID {
+		return
+	}
+	last := h.classifyClaudeTranscriptFile(sessPath)
+	if !last.hasMeaningfulEntry {
+		return
+	}
+	inFlight := last.entryType == "user" && !last.interrupt
+	if last.entryType == "assistant" && !last.finalAssistant {
+		inFlight = true
+	}
+	if !inFlight {
+		return
+	}
+	h.sendSessionEvent(sessionID, backendID, "turn_aborted", map[string]interface{}{
+		"turnId": currentTurnID, "reason": "process_death",
+	})
+	*lastSynthesized = currentTurnID
+	slog.Info("go-bridge: claudeSessionFileRelay synthesized turn_aborted for dead process",
+		"sessionID", sessionID, "backendID", backendID, "turnId", currentTurnID)
+}
+
 // applyClaudeLiveSourceRecord routes one live Claude content record through the Kernel-private
 // source-batch transaction — the sole projection writer for Claude content (guardrail #3). H3
 // exact-replay (graph-only, projection-stable) and H4 parent-chain ownership resolve under the
@@ -947,8 +994,27 @@ func (h *Handlers) applyClaudeLiveSourceRecord(
 	cachedPID int,
 ) {
 	ingestDomain := "live"
-	if h.projectionKernel.Status(backendID, sessionID).Phase == ProjectionHydrateHydrating {
+	hydrating := h.projectionKernel.Status(backendID, sessionID).Phase == ProjectionHydrateHydrating
+	if hydrating {
 		ingestDomain = "pending_live"
+		// During hydrate the committed reducer is still the OLD baseline; the hydrate
+		// transaction owns the authoritative reducer for [checkpoint, cut). Route this live
+		// content row through the EventPublisher legacy path so IngestLive queues the
+		// projection events into the transaction's pendingLive (applied atomically after the
+		// baseline commits, §3.2 of the SSV2 running-session cold-open fix), and advance the
+		// Mac-private source ledger past the row so the cursor stays contiguous for the next
+		// live batch. The source-batch transaction cannot run here: it swaps the committed
+		// reducer, which CommitHydrateTransaction would overwrite with the baseline Restore.
+		// The mapper (claudeEntryToProjectionEvents) is identical to the batch path, so the
+		// queued events are the same authoritative projection events the live path would emit.
+		h.acknowledgeClaudeSourceRow(backendID, sessionID, correlation, scanned.ByteEnd)
+		h.deliverClaudeLegacyRow(scanned.Entry, sessionID, backendID, currentTurnID, runningObserved, cachedPID)
+		emitClaudeSourceTrace(claudeSourceTraceRecord{
+			Phase: "live", IngestDomain: ingestDomain, BackendID: backendID, SessionID: sessionID,
+			Correlation: correlation, Record: scanned, FileOrderTurnID: *currentTurnID,
+			Transition: "queued_pending_live",
+		})
+		return
 	}
 	state, ok := h.projectionKernel.ClaudeSourceStateSnapshot(backendID, sessionID)
 	if !ok {

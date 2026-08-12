@@ -69,7 +69,9 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 	// Projection-only clients never call get_session_messages, so subscribing alone is not
 	// enough for file-backed external sessions: nothing would be watching Claude/Codex JSONL
 	// growth and the reducer would never receive live events. Start the same read-only relay
-	// ownership used by the legacy history-open path.
+	// ownership used by the legacy history-open path. Claude/ClaudeCode start their file relay
+	// through the beforeHydrate hook below (cold path) or the warm-path start after hydrate, so
+	// the in-flight terminal events can feed the commit gate during the hydrate wait.
 	if msg.BackendID != "claude" && msg.BackendID != "claudecode" {
 		h.startProjectionLiveRelay(params.SessionID, conn, msg.BackendID, agent, params.Directory)
 	}
@@ -83,11 +85,23 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 	forceColdInspection := params.SinceRev == 0 &&
 		(msg.BackendID == "opencode" || msg.BackendID == "grokbuild" ||
 			msg.BackendID == "claude" || msg.BackendID == "claudecode")
+	// Claude cold open starts the live file relay BEFORE the hydrate wait (aligned with
+	// codex/opencode above) so in-flight terminal events can feed the commit gate, and passes
+	// the hydrate admission cut so the relay's initial scan range is disjoint from the
+	// cold-source baseline. The post-hydrate start below covers the warm/AlreadyReady path
+	// (idempotent no-op when the cold path already started the relay at the same cut).
+	var beforeHydrate []func(ProjectionSourceDescriptor)
+	if msg.BackendID == "claude" || msg.BackendID == "claudecode" {
+		beforeHydrate = append(beforeHydrate, func(source ProjectionSourceDescriptor) {
+			h.startClaudeSessionFileRelayAt(params.SessionID, conn, msg.BackendID, &source.Cursor)
+		})
+	}
 	if err := h.ensureProjectionHydrated(
 		msg.BackendID,
 		params.SessionID,
 		params.Directory,
 		forceColdInspection,
+		beforeHydrate...,
 	); err != nil {
 		code := "projection.hydrate_failed"
 		retryable := false
@@ -126,9 +140,10 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 		return
 	}
 	if msg.BackendID == "claude" || msg.BackendID == "claudecode" {
-		// Hydrate owns the Claude source first. The live reader then inherits the committed
-		// complete-record cursor, making the baseline/live ranges disjoint without resampling
-		// file size and without adding a second projection writer.
+		// Warm path: the live reader inherits the committed complete-record cursor, making the
+		// baseline/live ranges disjoint without resampling file size and without adding a second
+		// projection writer. No-op when the cold-path beforeHydrate hook already started the
+		// relay at the admission cut (relayRunning guard).
 		h.startProjectionLiveRelay(params.SessionID, conn, msg.BackendID, agent, params.Directory)
 	}
 
@@ -256,9 +271,15 @@ func backendSupportsProjectionHydrate(backendID string) bool {
 // ensureProjectionHydrated waits for a full committed baseline within the pull budget. Concurrent
 // pulls join the Kernel single-flight. Budget expiry returns projection.hydrating without
 // cancelling a healthy transaction.
+//
+// beforeHydrate hooks run once after the source is prepared and immediately before hydrate
+// admission. Claude cold-open uses this to start the live file relay with the hydrate admission
+// cut (baseline/live ranges disjoint) so in-flight terminal events can feed the commit gate while
+// the transaction waits (§3.2 of the SSV2 running-session cold-open fix).
 func (h *Handlers) ensureProjectionHydrated(
 	backendID, sessionID, directory string,
 	forceColdInspection bool,
+	beforeHydrate ...func(ProjectionSourceDescriptor),
 ) error {
 	if h == nil || h.eventPublisher == nil || h.projectionKernel == nil || sessionID == "" {
 		return nil
@@ -287,8 +308,25 @@ func (h *Handlers) ensureProjectionHydrated(
 	// Pathless re-open: force full GetRichSessionHistory rebuild when already Ready.
 	sourceChanged := forceColdInspection && ready &&
 		(backendID == "opencode" || backendID == "grokbuild") && source.Path == ""
+	// Hydrate owns the source cut. Hand it to any pre-hydrate hook (Claude cold-open starts
+	// its live file relay here so in-flight terminal events can feed the commit gate; the relay
+	// inherits the admission cut so its initial scan is disjoint from the cold-source baseline).
+	for _, fn := range beforeHydrate {
+		fn(source)
+	}
+	// sourceIsLive is sampled once at admission and stored on the transaction (design §3.1): a
+	// running Claude turn cold-opened mid-flight may commit as an honest running partial instead
+	// of blocking on its terminal event. Sampling is per-admission, not continuous — process
+	// death during hydrate is closed by the live side (relay-before-hydrate + synthesized
+	// turn_aborted, §3.2/§3.3), never by re-polling liveness.
+	sourceIsLive := false
+	if backendID == "claude" || backendID == "claudecode" {
+		if proc, _, liveErr := h.sessionLiveProcess(context.Background(), sessionID, backendID); liveErr == nil && proc.Live {
+			sourceIsLive = true
+		}
+	}
 	admission, err := h.projectionKernel.BeginHydrateTransaction(
-		backendID, sessionID, source, false, sourceChanged,
+		backendID, sessionID, source, false, sourceChanged, sourceIsLive,
 	)
 	if err != nil {
 		return err
@@ -642,10 +680,11 @@ func (h *Handlers) runProjectionHydrateTransaction(
 			}
 		}
 	}
-	// §5.1 #7: cold-source ingest (mainstream + Claude sidechain) is now complete — no more
-	// ApplyHydrateEvent calls will be made from the cold source. Arm the commit gate so
-	// WaitHydrateCommitReady decides readiness from authoritative source-EOF + turn terminal
-	// state instead of content-shape/turn-count guessing (guardrail #6).
+	// §3.3 rule #2 / D6 / K1: cold-source ingest (mainstream + Claude sidechain) is now
+	// complete — no more ApplyHydrateEvent calls will be made from the cold source. Arm the
+	// commit gate so WaitHydrateCommitReady decides readiness from authoritative source-EOF +
+	// turn terminal state (or the explicit live signal, §3.1) instead of content-shape/turn-
+	// count guessing (guardrail #6).
 	h.projectionKernel.MarkHydrateSourceIngestComplete(backendID, sessionID)
 	if err := h.projectionKernel.WaitHydrateCommitReady(ctx, backendID, sessionID); err != nil {
 		h.projectionKernel.MarkFailed(
@@ -1218,7 +1257,7 @@ func codexRelayEventToProjectionEvent(ev codexRelayEvent, currentTurnID *string,
 		*currentTurnID = ""
 		return "turn_completed", map[string]interface{}{"turnId": tid, "done": true, "reason": "task_complete"}, true
 	case "turn_aborted":
-		// §5.1 #7 producer layer 3：cold rollout 的 turn_aborted（真实形态 019f5453）映射到
+		// §3.3 rule #2 / D6 / K1 producer layer 3：cold rollout 的 turn_aborted（真实形态 019f5453）映射到
 		// reducer 的 turn_aborted 终态 case。turnID 回退同 task_complete（driver 可能省略）。
 		// 清空 *currentTurnID——turn 已终态，后续 content 不再挂到它。
 		tid := ev.turnID

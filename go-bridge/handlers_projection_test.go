@@ -1565,3 +1565,137 @@ func TestOpenCodeHandleRPCRoutesGetSessionProjection(t *testing.T) {
 		t.Fatalf("routed projection missing history content: %s", string(raw))
 	}
 }
+
+// M4 (§5.1): a Claude cold open must start the live file relay BEFORE the hydrate wait
+// (§3.2), so in-flight terminal events can feed the commit gate while the transaction is
+// blocked. We hold the hydrate goroutine at its start hook and assert the file relay is
+// already running while the RPC is still pending — the ordering that lets a live
+// turn_completed / synthesized turn_aborted release the gate instead of waiting 15s.
+func TestClaudeFileRelayStartedBeforeHydrate(t *testing.T) {
+	withFastClaudeFileRelay(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	const sessionID = "relay-before-hydrate"
+	path := writeClaudeFileRelayTranscript(t, home, sessionID,
+		`{"type":"user","uuid":"u1","message":{"role":"user","content":"prompt"}}`,
+		`{"type":"assistant","uuid":"a1","message":{"id":"a1","role":"assistant","content":[{"type":"text","text":"answer"}],"stop_reason":"end_turn"}}`,
+	)
+
+	prevHook := coldHydrateTestHook
+	started := make(chan struct{})
+	release := make(chan struct{})
+	coldHydrateTestHook = func(ctx context.Context) {
+		close(started)
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+	}
+	t.Cleanup(func() { coldHydrateTestHook = prevHook })
+
+	handlers := NewHandlers()
+	agent := &fakeAgent{name: "claudecode", transcriptPath: path}
+	handlers.RegisterAgent("claudecode", agent)
+
+	conn := &readFileCaptureConn{}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		params, _ := json.Marshal(map[string]interface{}{"sessionId": sessionID})
+		msg := WireMessage{RequestID: "r-order", BackendID: "claude", Method: "get_session_projection", Params: params}
+		handlers.handleGetSessionProjection(conn, msg, agent)
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("hydrate goroutine never started")
+	}
+	// The RPC is still blocked in the hydrate wait; the Claude file relay must already be
+	// running (started via the beforeHydrate hook at admission, ahead of the gate wait).
+	if !handlers.relayKindIs(sessionID, relayKindClaudeFile) {
+		t.Fatal("Claude file relay was not running while hydrate was still waiting")
+	}
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("RPC did not return after hydrate release")
+	}
+	if conn.err != nil {
+		t.Fatalf("RPC error: %+v", conn.err)
+	}
+	dataMap, ok := conn.data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("data not map: %T", conn.data)
+	}
+	if _, ok := dataMap["projection"].(SessionProjection); !ok {
+		t.Fatalf("expected committed projection, got %+v", dataMap)
+	}
+}
+
+// M6 (§5.1, end-to-end): cold-opening a RUNNING Claude session must return a snapshot within
+// the RPC budget (well under 15s) instead of projection.hydrating. The transcript tail is a
+// non-terminal user row (no assistant terminal event yet); the process is live, so §3.1
+// releases the commit gate and the RPC serves the honest running partial immediately.
+func TestHandleGetSessionProjectionRunningSessionWithinBudget(t *testing.T) {
+	withFastClaudeFileRelay(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	const sessionID = "running-session-budget"
+	path := writeClaudeFileRelayTranscript(t, home, sessionID,
+		`{"type":"user","uuid":"running-user-1","message":{"role":"user","content":"long running task"}}`,
+	)
+
+	agent := &fakeCompositeHistoryAgent{
+		fakeAgent: &fakeAgent{
+			name: "claudecode",
+			liveProcesses: map[string]core.LiveSessionProcess{
+				sessionID: {SessionID: sessionID, PID: 4242, Live: true},
+			},
+			alivePIDs: map[int]bool{4242: true},
+		},
+		segments: []core.TranscriptSourceSegment{
+			{Identity: sessionID, Path: path},
+		},
+		entries: []core.RichHistoryEntry{
+			{ID: "running-user-1", Role: "user", Content: "long running task"},
+		},
+	}
+	handlers := NewHandlers()
+	handlers.RegisterAgent("claudecode", agent)
+
+	conn := &readFileCaptureConn{}
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": sessionID})
+	msg := WireMessage{RequestID: "r-running", BackendID: "claude", Method: "get_session_projection", Params: params}
+
+	start := time.Now()
+	handlers.handleGetSessionProjection(conn, msg, agent)
+	elapsed := time.Since(start)
+
+	if elapsed >= 5*time.Second {
+		t.Fatalf("running-session cold open took %s; must return well under the 15s RPC budget", elapsed)
+	}
+	if conn.err != nil {
+		t.Fatalf("running-session cold open failed: %+v", conn.err)
+	}
+	dataMap, ok := conn.data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("data not map: %T", conn.data)
+	}
+	proj, ok := dataMap["projection"].(SessionProjection)
+	if !ok {
+		t.Fatalf("expected committed projection, got %+v", dataMap)
+	}
+	if len(proj.Turns) != 1 {
+		t.Fatalf("projection turns = %d, want the single in-flight turn", len(proj.Turns))
+	}
+	// Honest running partial: the in-flight turn stays running (never fake-completed, and
+	// never stuck hydrating).
+	if got := proj.Turns[0].Status; got != "running" {
+		t.Fatalf("in-flight turn status=%q, want \"running\"", got)
+	}
+	if got := proj.Execution.Phase; got != "running" {
+		t.Fatalf("execution phase=%q, want \"running\"", got)
+	}
+}
