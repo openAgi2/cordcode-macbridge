@@ -811,3 +811,22 @@ unarchive 也能恢复；本轮修复闭环。
 `sourceIsLive` 提交门槛（admission 采样）+ §3.2 Claude relay 提前到 hydrate 前 +
 §3.3 进程死亡合成 `turn_aborted`，配套 iOS §3.4 late-retryable 清错并重启
 pull loop。详见 `docs/2026-08-12-ssv2-running-session-projection-timeout-fix-plan.md`。
+
+### 2026-08-12 追加：Grok 运行中 session 冷开重复投递未完成 turn 的 prompt（已修 ✅）
+
+现象：grok build 正在执行时 iOS 冷开，显示「问题A，回复A(前半截)，问题A，回复A(从前半截
+处开始)」。真实 session `019ff1b3-…` + go-bridge.log 证实：冷 hydrate 基线 revs 1–311 已含
+chat_history 的 user 行(问题A) + assistant 行(前半截回复)；tailer attach 补扫
+`latestPendingUserMessage` 又把 updates.jsonl 同一条 `user_message_chunk` 投递 → relay 以
+新 turnId=3a5c0825… 合成 turn_started 并补发 user_message(rev 312) → iOS 看到问题/回复两遍。
+
+根因：grok 在 turn 执行中就把 user 行追加进 chat_history.jsonl，而 attach 补扫逻辑只按
+「最后一个 turn_completed 之后」判断，未检查 chat_history 是否已含该 prompt。
+
+修复：`historyContainsUserPrompt`（归一化 = unwrap `<user_query>` + trim + 跳过
+synthetic/bootstrap，与 readRichSessionHistory 用户行一致；真实样本逐字节一致 343 字符），
+chat_history 已含该 prompt 时抑制 attach 补扫。竞态窗口（prompt 已发、chat_history 未落盘）
+仍补扫，不破坏原设计。iOS 零改动。测试：新增 2 个（history 已含 → 不投递；history 未含 →
+仍投递），原有 catch-up 测试保持通过；go test ./agent/grokbuild/ + ./go-bridge/... 全绿。
+Release 构建 68e01ae 已部署 /Applications。owner 真机复测（2026-08-12）：「测试结果基本上
+没问题 ✅」。
