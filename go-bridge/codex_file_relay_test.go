@@ -43,6 +43,48 @@ func TestDetectCodexTranscriptTaskState(t *testing.T) {
 	}
 }
 
+// TestDetectCodexTranscriptRunningTurnWithContent locks the §3.3 rule #2 / D6 gate for the
+// codex transcript-based cold-start live sampling: a bare task_started shell must NOT count as
+// a live turn, while a non-terminal turn that has produced content must.
+func TestDetectCodexTranscriptRunningTurnWithContent(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "live-content.jsonl")
+	h := &Handlers{}
+
+	write := func(t *testing.T, content string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write transcript: %v", err)
+		}
+	}
+
+	// Bare shell: only task_started, no content -> not a live turn (must stay hydrating).
+	write(t, `{"timestamp":"2026-08-12T00:00:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-bare"}}`+"\n")
+	if got := h.detectCodexTranscriptRunningTurnWithContent(path); got {
+		t.Fatal("bare task_started shell must not be a live turn")
+	}
+
+	// Running turn with content (user + assistant response_items) -> live.
+	write(t, strings.Join([]string{
+		`{"timestamp":"2026-08-12T00:00:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-running"}}`,
+		`{"timestamp":"2026-08-12T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"msg-user","content":[{"type":"input_text","text":"mid-flight prompt"}]}}`,
+		`{"timestamp":"2026-08-12T00:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"in progress"}]}}`,
+	}, "\n")+"\n")
+	if got := h.detectCodexTranscriptRunningTurnWithContent(path); !got {
+		t.Fatal("non-terminal turn with content must be a live turn")
+	}
+
+	// Terminal closes the turn: completed tail must not be live.
+	write(t, strings.Join([]string{
+		`{"timestamp":"2026-08-12T00:00:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-done"}}`,
+		`{"timestamp":"2026-08-12T00:00:01Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}}`,
+		`{"timestamp":"2026-08-12T00:00:02Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-done"}}`,
+	}, "\n")+"\n")
+	if got := h.detectCodexTranscriptRunningTurnWithContent(path); got {
+		t.Fatal("completed turn must not be a live turn")
+	}
+}
+
 // codexRolloutEvent 构造一条 Codex rollout event_msg 行（用于 file-relay 测试）。
 func codexRolloutEvent(eventType string) string {
 	return fmt.Sprintf(`{"timestamp":"2026-07-01T07:37:47.626Z","type":"event_msg","payload":{"type":%q,"turn_id":"turn-1"}}`, eventType)
@@ -302,5 +344,90 @@ func TestCodexRelayWatcherStartsRelayForSubscribedSession(t *testing.T) {
 	events := readEventNames(t, clientConn, 2)
 	if events[0] != "turn_started" {
 		t.Fatalf("events after late task_started = %v, want turn_started", events)
+	}
+}
+
+// TestCodexFileRelayProcessDeathSynthesizesTurnAborted 验证 §3.3（codex 侧）：codex 进程死亡（无增长
+// 超过 hardCap，既有「超限几乎可判定进程已死」语义）且 transcript 尾部为未终结 task_started 时，
+// file relay 合成 turn_aborted（reason=process_death）收口投影，再广播 idle 并退出 —— 否则 crashed
+// codex session 会在投影里留下永久 running turn（sourceIsLive=false 时提交门槛也不放行）。合成必须
+// 在有订阅者时也发生（iOS push 模型下 iOS 打开 crashed session 不会自动解除订阅）。
+func TestCodexFileRelayProcessDeathSynthesizesTurnAborted(t *testing.T) {
+	const sessionID = "process-death-synth-abort"
+	handlers, _, client, _ := startCodexFileRelayFixture(t, sessionID,
+		codexRolloutEvent("task_started"),
+	)
+	// running 启动：turn_started + session_state_changed(running)。
+	events := readEventNames(t, client, 2)
+	if events[0] != "turn_started" || events[1] != "session_state_changed" {
+		t.Fatalf("running startup events = %v, want [turn_started session_state_changed]", events)
+	}
+
+	// 无增长 → 软 TTL 复核仍 running → 续 watch（不误退）。
+	time.Sleep(150 * time.Millisecond)
+	if !codexFileRelayIsRunning(t, handlers, sessionID) {
+		t.Fatal("codex file relay exited during soft-TTL while task still running")
+	}
+
+	// 等 hardCap（fast fixture 1s）→ 进程死亡判定 → 合成 turn_aborted + idle，然后退出。
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if !codexFileRelayIsRunning(t, handlers, sessionID) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if codexFileRelayIsRunning(t, handlers, sessionID) {
+		t.Fatal("codex file relay did not exit at hardCap for dead running process")
+	}
+
+	names, payloads := readEventNamesWithPayloads(t, client, 2)
+	if names[0] != "turn_aborted" || names[1] != "session_state_changed" {
+		t.Fatalf("events after process death = %v, want [turn_aborted session_state_changed]", names)
+	}
+	if payloads[0] == nil || payloads[0]["turnId"] != "turn-1" || payloads[0]["reason"] != "process_death" {
+		t.Fatalf("turn_aborted data = %#v, want turnId=turn-1 reason=process_death", payloads[0])
+	}
+
+	// 合成的终态必须已进入投影 reducer（收口 in-flight turn）——这是非 live 冷开提交门槛
+	// （所有 cold-armed turn 终结）在 crashed 场景唯一放行路径。
+	snap, ok := handlers.eventPublisher.ProjectionReducer().Snapshot("codex", sessionID)
+	if !ok {
+		t.Fatal("no projection snapshot after synthesized abort")
+	}
+	if len(snap.Turns) != 1 || snap.Turns[0].Status != "aborted" {
+		t.Fatalf("projection after synthesized abort = %+v, want single aborted turn", snap.Turns)
+	}
+}
+
+// TestCodexFileRelayProcessDeathIdleTailDoesNotSynthesizeAbort 验证 §3.3 对称防重：进程死亡时
+// transcript 尾部已是终态（task_complete）→ 不合成第二个 turn_aborted（turn 已关闭，合成即重复终态）。
+func TestCodexFileRelayProcessDeathIdleTailDoesNotSynthesizeAbort(t *testing.T) {
+	const sessionID = "process-death-idle-tail"
+	handlers, _, client, _ := startCodexFileRelayFixture(t, sessionID,
+		codexRolloutEvent("task_started"),
+		codexRolloutEvent("task_complete"),
+	)
+	_ = readEventNames(t, client, 2) // idle 启动：turn_completed + idle
+
+	// 等 hardCap 后退出：idle 尾部只广播 idle，绝不合成 turn_aborted。
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if !codexFileRelayIsRunning(t, handlers, sessionID) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if codexFileRelayIsRunning(t, handlers, sessionID) {
+		t.Fatal("codex file relay did not exit at hardCap")
+	}
+	// idle 尾部进程死亡：投影里的 turn 保持 completed，绝不被重复合成为 aborted。
+	// （relay 退出时 registry 已是 idle，不会广播任何额外事件。）
+	snap, ok := handlers.eventPublisher.ProjectionReducer().Snapshot("codex", sessionID)
+	if !ok {
+		t.Fatal("no projection snapshot after idle-tail process death")
+	}
+	if len(snap.Turns) != 1 || snap.Turns[0].Status != "completed" {
+		t.Fatalf("projection after idle-tail process death = %+v, want single completed turn (no synthesized abort)", snap.Turns)
 	}
 }

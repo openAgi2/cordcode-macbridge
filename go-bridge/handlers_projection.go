@@ -315,13 +315,23 @@ func (h *Handlers) ensureProjectionHydrated(
 		fn(source)
 	}
 	// sourceIsLive is sampled once at admission and stored on the transaction (design §3.1): a
-	// running Claude turn cold-opened mid-flight may commit as an honest running partial instead
-	// of blocking on its terminal event. Sampling is per-admission, not continuous — process
-	// death during hydrate is closed by the live side (relay-before-hydrate + synthesized
-	// turn_aborted, §3.2/§3.3), never by re-polling liveness.
+	// running turn cold-opened mid-flight may commit as an honest running partial instead of
+	// blocking on its terminal event. Sampling is per-admission, not continuous — process death
+	// during hydrate is closed by the live side (relay-before-hydrate + synthesized turn_aborted,
+	// §3.2/§3.3), never by re-polling liveness.
 	sourceIsLive := false
-	if backendID == "claude" || backendID == "claudecode" {
+	if backendID == "claude" || backendID == "claudecode" || backendID == "codex" {
 		if proc, _, liveErr := h.sessionLiveProcess(context.Background(), sessionID, backendID); liveErr == nil && proc.Live {
+			sourceIsLive = true
+		} else if backendID == "codex" && source.Path != "" &&
+			h.detectCodexTranscriptRunningTurnWithContent(source.Path) {
+			// Cold-start race closer: the codex file relay (started before hydrate) marks the
+			// session running asynchronously from its initial task-state detection. Close the
+			// window deterministically from the transcript itself, so a genuinely in-flight
+			// codex turn cold-opened mid-run commits as a running partial even before the relay
+			// goroutine has run its first tick. The detector requires the non-terminal tail turn
+			// to have produced content (§3.3 rule #2 / D6): a bare task_started shell stays
+			// hydrating instead of being exposed as a ready empty running turn.
 			sourceIsLive = true
 		}
 	}

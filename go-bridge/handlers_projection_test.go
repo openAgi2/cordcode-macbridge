@@ -1699,3 +1699,111 @@ func TestHandleGetSessionProjectionRunningSessionWithinBudget(t *testing.T) {
 		t.Fatalf("execution phase=%q, want \"running\"", got)
 	}
 }
+
+// TestHandleGetSessionProjectionRunningCodexSessionWithinBudget is the codex analogue of
+// TestHandleGetSessionProjectionRunningSessionWithinBudget: a running codex session cold-opened
+// mid-flight must return an honest running partial well under the 15s RPC budget instead of
+// blocking on the in-flight turn's terminal event. Codex liveness is the sessionRegistry state
+// maintained by the passive app-server subscriber / codex file relay (§3.1 extension), sampled
+// at hydrate admission; the relay-before-hydrate ordering plus the synchronous transcript-state
+// fallback close the cold-start race.
+func TestHandleGetSessionProjectionRunningCodexSessionWithinBudget(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "codex-running-rollout.jsonl")
+	rollout := strings.Join([]string{
+		`{"timestamp":"2026-08-12T00:00:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-running"}}`,
+		`{"timestamp":"2026-08-12T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"msg-user","content":[{"type":"input_text","text":"long running task"}]}}`,
+		`{"timestamp":"2026-08-12T00:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"partial answer"}]}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(rollout), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	handlers := NewHandlers()
+	handlers.RegisterAgent("codex", &fakeAgent{name: "codex", transcriptPath: path})
+	// The passive app-server subscriber (or a prior relay tick) has already marked the session
+	// running — this is the explicit lifecycle signal sampled at hydrate admission.
+	handlers.sessions.markRunning("running-codex-session")
+
+	conn := &readFileCaptureConn{}
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": "running-codex-session"})
+	msg := WireMessage{RequestID: "r-running-codex", BackendID: "codex", Method: "get_session_projection", Params: params}
+
+	start := time.Now()
+	handlers.handleGetSessionProjection(conn, msg, nil)
+	elapsed := time.Since(start)
+
+	if elapsed >= 5*time.Second {
+		t.Fatalf("running-codex cold open took %s; must return well under the 15s RPC budget", elapsed)
+	}
+	if conn.err != nil {
+		t.Fatalf("running-codex cold open failed: %+v", conn.err)
+	}
+	dataMap, ok := conn.data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("data not map: %T", conn.data)
+	}
+	proj, ok := dataMap["projection"].(SessionProjection)
+	if !ok {
+		t.Fatalf("expected committed projection, got %+v", dataMap)
+	}
+	if len(proj.Turns) != 1 {
+		t.Fatalf("projection turns = %d, want the single in-flight turn", len(proj.Turns))
+	}
+	// Honest running partial: the in-flight turn stays running (never fake-completed, and
+	// never stuck hydrating).
+	if got := proj.Turns[0].Status; got != "running" {
+		t.Fatalf("in-flight turn status=%q, want \"running\"", got)
+	}
+	if got := proj.Execution.Phase; got != "running" {
+		t.Fatalf("execution phase=%q, want \"running\"", got)
+	}
+}
+
+// TestHandleGetSessionProjectionRunningCodexSessionTranscriptFallback verifies the cold-start
+// race closer: even when the registry has not yet marked the session running (relay goroutine
+// has not run its first tick), a transcript whose tail is a non-terminal task_started still
+// samples sourceIsLive=true at hydrate admission and commits the running partial immediately.
+func TestHandleGetSessionProjectionRunningCodexSessionTranscriptFallback(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "codex-running-fallback.jsonl")
+	rollout := strings.Join([]string{
+		`{"timestamp":"2026-08-12T00:00:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-fallback"}}`,
+		`{"timestamp":"2026-08-12T00:00:01Z","type":"response_item","payload":{"type":"message","role":"user","id":"msg-user","content":[{"type":"input_text","text":"mid-flight prompt"}]}}`,
+		`{"timestamp":"2026-08-12T00:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"in progress"}]}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(rollout), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	handlers := NewHandlers()
+	handlers.RegisterAgent("codex", &fakeAgent{name: "codex", transcriptPath: path})
+	// Deliberately do NOT markRunning: the transcript fallback must carry liveness on its own.
+
+	conn := &readFileCaptureConn{}
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": "running-codex-fallback"})
+	msg := WireMessage{RequestID: "r-running-codex-fallback", BackendID: "codex", Method: "get_session_projection", Params: params}
+
+	start := time.Now()
+	handlers.handleGetSessionProjection(conn, msg, nil)
+	elapsed := time.Since(start)
+
+	if elapsed >= 5*time.Second {
+		t.Fatalf("running-codex transcript-fallback cold open took %s; must be well under the 15s RPC budget", elapsed)
+	}
+	if conn.err != nil {
+		t.Fatalf("running-codex transcript-fallback cold open failed: %+v", conn.err)
+	}
+	dataMap, ok := conn.data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("data not map: %T", conn.data)
+	}
+	proj, ok := dataMap["projection"].(SessionProjection)
+	if !ok {
+		t.Fatalf("expected committed projection, got %+v", dataMap)
+	}
+	if len(proj.Turns) != 1 {
+		t.Fatalf("projection turns = %d, want the single in-flight turn", len(proj.Turns))
+	}
+	if got := proj.Turns[0].Status; got != "running" {
+		t.Fatalf("in-flight turn status=%q, want \"running\"", got)
+	}
+}

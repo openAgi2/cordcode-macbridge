@@ -293,6 +293,19 @@ func (h *Handlers) grokLeaderSessionRelayLoop(sessionID, backendID string, sub c
 }
 
 func (h *Handlers) sessionLiveProcess(ctx context.Context, sessionID, backendID string) (core.LiveSessionProcess, core.LiveSessionLister, error) {
+	// Codex has no per-session process-stub LiveSessionLister (unlike Claude's session-stubs).
+	// The explicit lifecycle signal is the sessionRegistry state maintained by the passive
+	// app-server subscriber (running/idle from turn_started / session_state_changed /
+	// turn_completed) and by the codex file relay (task_started/task_complete/turn_aborted).
+	// isIdle defaults to true for unknown sessions, so this is strictly "registered AND
+	// running" — a session the bridge has never seen is not treated as live. Short-circuit
+	// before the agent-lister loop so codex never falls through to the claudecode stub lookup.
+	if backendID == "codex" {
+		if !h.sessions.isIdle(sessionID) {
+			return core.LiveSessionProcess{SessionID: sessionID, Live: true}, nil, nil
+		}
+		return core.LiveSessionProcess{SessionID: sessionID}, nil, nil
+	}
 	seen := make(map[string]bool)
 	for _, id := range []string{backendID, "claude", "claudecode"} {
 		if strings.TrimSpace(id) == "" || seen[id] {
@@ -404,19 +417,35 @@ func (h *Handlers) codexSessionFileRelayLoop(sessionID string, conn Connection, 
 				recheckedAfterTTL = false
 				continue
 			}
-			// iOS 仍订阅该 session 时持续 watch（push 模型）。无订阅者时也不再因软 TTL 退出：iOS 打开
-			// idle 外部 session 后常停轮询，若 relay 在 Mac 端稍后发 turn 前退出会错过整轮（owner
-			// 复现：打开 idle session → relay 90s 退出 → 后来发任务 → 无 live 同步）。subscriber 现仅
-			// 作日志，不再当退出门槛；只用 hardCap 回收 goroutine，running 复核保留。
+			since := time.Since(lastGrowth)
+			// hardCap 判定进程死亡（既有语义：「超限几乎可判定进程已死」），并回收 goroutine。
+			// §3.3：若此时仍 armed 一个未终结 turn（transcript 尾部 task_started、registry 仍
+			// running），合成 turn_aborted 收口投影 —— 否则 crashed codex session 会在投影里留下
+			// 永久 running turn。该判定不因有订阅者而跳过：死进程不会再写文件，下一轮真实 turn
+			// 由 codex relay watcher / 下次打开补启 relay。
+			if codexFileRelayNoGrowthHardCap > 0 && since >= codexFileRelayNoGrowthHardCap {
+				if currentTurnID != "" && !h.sessions.isIdle(sessionID) &&
+					h.detectCodexTranscriptTaskState(sessPath) == "running" {
+					h.sendSessionEvent(sessionID, backendID, "turn_aborted", map[string]interface{}{
+						"turnId": currentTurnID, "reason": "process_death",
+					})
+					slog.Info("go-bridge: codexSessionFileRelay synthesized turn_aborted for dead process",
+						"sessionID", sessionID, "backendID", backendID, "turnId", currentTurnID)
+				}
+				if !h.sessions.isIdle(sessionID) {
+					h.broadcastIdleState(sessionID, backendID)
+				}
+				slog.Info("go-bridge: codexSessionFileRelay no-growth hardCap elapsed, exiting", "sessionID", sessionID, "idleFor", since.String(), "subscribed", h.codexSessionHasSubscriber(sessionID, backendID))
+				return
+			}
+			// iOS 仍订阅该 session 时持续 watch（push 模型）：打开 idle 外部 session 后 iOS 常停
+			// 轮询，若 relay 在 Mac 端稍后发 turn 前退出会错过整轮（owner 复现：打开 idle session →
+			// relay 90s 退出 → 后来发任务 → 无 live 同步）。软 TTL 不再作为退出门槛；只有 hardCap
+			// 回收 goroutine。running 复核保留（仍 running → 续 watch）。
 			if h.codexSessionHasSubscriber(sessionID, backendID) {
 				continue
 			}
-			since := time.Since(lastGrowth)
-			shouldExit := false
-			switch {
-			case codexFileRelayNoGrowthHardCap > 0 && since >= codexFileRelayNoGrowthHardCap:
-				shouldExit = true
-			case codexFileRelayNoGrowthTTL > 0 && since >= codexFileRelayNoGrowthTTL:
+			if codexFileRelayNoGrowthTTL > 0 && since >= codexFileRelayNoGrowthTTL {
 				if !recheckedAfterTTL {
 					recheckedAfterTTL = true
 					if h.detectCodexTranscriptTaskState(sessPath) == "running" {
@@ -425,13 +454,6 @@ func (h *Handlers) codexSessionFileRelayLoop(sessionID string, conn Connection, 
 						slog.Info("go-bridge: codexSessionFileRelay no-growth TTL elapsed, idle — keep watching until hardCap (no-subscriber no longer exits)", "sessionID", sessionID, "idleFor", since.String(), "subscribed", h.codexSessionHasSubscriber(sessionID, backendID))
 					}
 				}
-			}
-			if shouldExit {
-				if !h.sessions.isIdle(sessionID) {
-					h.broadcastIdleState(sessionID, backendID)
-				}
-				slog.Info("go-bridge: codexSessionFileRelay no-growth hardCap elapsed, exiting", "sessionID", sessionID, "idleFor", since.String(), "subscribed", h.codexSessionHasSubscriber(sessionID, backendID))
-				return
 			}
 			continue
 		}
@@ -1963,6 +1985,32 @@ func (h *Handlers) detectClaudeTranscriptState(sessPath string) string {
 func (h *Handlers) detectCodexTranscriptTaskState(sessPath string) string {
 	state, _ := h.detectCodexTranscriptTask(sessPath)
 	return state
+}
+
+// detectCodexTranscriptRunningTurnWithContent 判定 transcript 尾部是否存在一个「未终结且已产生
+// 可投影内容」的 turn（§3.3 rule #2 / D6 的 codex 侧实现）。codex 的冷启 live 采样走 transcript
+// 判定时，不能只凭尾部 task_started 未闭合就放行 —— bare turn shell（仅 task_started、没有任何
+// 内容事件）必须保持 hydrating，直到出现真实内容或终态，否则会把空壳当 ready 暴露给投影。
+// 任一非 lifecycle 事件（text/reasoning/user_message/tool_*/context_usage）落在未闭合的
+// task_started 之后即视为「有内容」。
+func (h *Handlers) detectCodexTranscriptRunningTurnWithContent(sessPath string) bool {
+	open := false
+	hasContent := false
+	for _, ev := range scanCodexTranscriptRelayEvents(sessPath, 0) {
+		switch ev.kind {
+		case "task_started":
+			open = true
+			hasContent = false
+		case "task_complete", "turn_aborted":
+			open = false
+			hasContent = false
+		default:
+			if open {
+				hasContent = true
+			}
+		}
+	}
+	return open && hasContent
 }
 
 func (h *Handlers) detectCodexTranscriptTask(sessPath string) (string, string) {
