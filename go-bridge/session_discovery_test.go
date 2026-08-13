@@ -1,11 +1,15 @@
 package gobridge
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -113,6 +117,10 @@ func TestSessionDiscoveryBroadcastsOnNewSession(t *testing.T) {
 	serverConn, clientConn, cleanup := openTestConn(t)
 	t.Cleanup(cleanup)
 	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "codex", SessionID: "list-view"})
+	var logs bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
 
 	seen := map[string]string{}
 	// Seed (s1) — no broadcast.
@@ -134,6 +142,27 @@ func TestSessionDiscoveryBroadcastsOnNewSession(t *testing.T) {
 	data, _ := payload["data"].(map[string]any)
 	if data["backendId"] != "codex" {
 		t.Fatalf("data = %#v, want backendId=codex", data)
+	}
+	var changeLog, deliveryLog map[string]interface{}
+	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		var record map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("decode discovery log: %v\n%s", err, line)
+		}
+		switch record["msg"] {
+		case "go-bridge: sessions_changed (catalog fingerprint changed)":
+			changeLog = record
+		case "event-publisher: control-plane delivery outcome":
+			deliveryLog = record
+		}
+	}
+	if changeLog == nil || changeLog["catalogGeneration"] != float64(1) {
+		t.Fatalf("catalog change log lost generation: %+v\n%s", changeLog, logs.String())
+	}
+	if deliveryLog == nil || deliveryLog["catalogGeneration"] != float64(1) ||
+		deliveryLog["candidateTargets"] != float64(1) || deliveryLog["enqueued"] != float64(1) ||
+		deliveryLog["overflowed"] != float64(0) {
+		t.Fatalf("catalog sink outcome incomplete: %+v\n%s", deliveryLog, logs.String())
 	}
 }
 

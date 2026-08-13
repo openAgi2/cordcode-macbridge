@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/agent/claudecode"
@@ -49,6 +50,7 @@ type Handlers struct {
 	// lazy init（sync.Once），构造路径 NewHandlers 不改。
 	catalogWireCache    *catalogWireSnapshotCache
 	catalogWireInitOnce sync.Once
+	catalogGeneration   atomic.Uint64
 	// catalogProcRegistry 跟踪 catalog 子进程（§4.3/§11，Phase 1E）。Phase 2-5 catalog client 经
 	// h.catalogProcessRegistry() Register 其 stdio 单例子进程；handlers.Shutdown 经其 Shutdown 确定性
 	// 回收。OpenCode 无子进程不经此。lazy init（sync.Once），构造路径不改。

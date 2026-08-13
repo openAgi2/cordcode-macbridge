@@ -47,16 +47,30 @@ func TestProjectionRPCTraceCorrelatesReceiveHydrateAndEnqueue(t *testing.T) {
 	handlers.handleGetSessionProjection(conn, msg, nil)
 
 	stages := map[string]map[string]interface{}{}
+	var performance map[string]interface{}
 	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
 		var record map[string]interface{}
 		if err := json.Unmarshal([]byte(line), &record); err != nil {
 			t.Fatalf("decode log line: %v\n%s", err, line)
 		}
 		if record["msg"] != "go-bridge: projection_rpc" {
+			if record["msg"] == "go-bridge: projection performance metrics" {
+				performance = record
+			}
 			continue
 		}
 		stage, _ := record["stage"].(string)
 		stages[stage] = record
+	}
+	if performance == nil {
+		t.Fatalf("missing projection performance metrics in logs:\n%s", logs.String())
+	}
+	if performance["responseKind"] != "snapshot" ||
+		performance["responseBytes"].(float64) <= 0 ||
+		performance["projectionBytes"].(float64) <= 0 ||
+		performance["turnCount"] != float64(1) ||
+		performance["partCount"] != float64(1) {
+		t.Fatalf("projection performance metrics incomplete: %+v", performance)
 	}
 
 	for _, stage := range []string{"mac_receive", "hydrate_ready", "response_enqueue"} {
@@ -87,5 +101,37 @@ func TestProjectionRPCTraceCorrelatesReceiveHydrateAndEnqueue(t *testing.T) {
 		if got := record["cutRev"]; got != float64(1) {
 			t.Fatalf("%s cutRev = %#v, want 2", stage, got)
 		}
+	}
+}
+
+func TestMeasureProjectionPayloadSeparatesLargeContentCategories(t *testing.T) {
+	projection := SessionProjection{
+		SessionID: "session",
+		SyncRev:   7,
+		Execution: ExecutionView{Phase: "idle"},
+		Turns: []TurnProjection{{
+			TurnID: "turn",
+			Status: "completed",
+			Assistant: &MessageProjection{
+				ID:   "assistant",
+				Role: "assistant",
+				Parts: []ProjectionPart{
+					{Type: "text", Text: "hello"},
+					{Type: "reasoning", Text: "thinking"},
+					{Type: "tool", ToolResult: map[string]interface{}{"output": "large"}, FileChanges: []interface{}{map[string]interface{}{"path": "a.swift"}}},
+				},
+			},
+		}},
+	}
+
+	got := measureProjectionPayload(projection)
+	if got.ProjectionBytes <= 0 || got.ExecutionBytes <= 0 || got.TurnsBytes <= 0 {
+		t.Fatalf("wire envelope sizes missing: %+v", got)
+	}
+	if got.TextBytes != len("hello") || got.ReasoningBytes != len("thinking") {
+		t.Fatalf("text category sizes = %+v", got)
+	}
+	if got.ToolResultBytes <= 0 || got.FileChangesBytes <= 0 || got.TurnCount != 1 || got.PartCount != 3 {
+		t.Fatalf("structured category sizes incomplete: %+v", got)
 	}
 }

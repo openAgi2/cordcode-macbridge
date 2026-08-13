@@ -33,6 +33,9 @@ type LogicalEvent struct {
 	WaitTargets []Connection
 	Offline     bool
 	ClassHint   relayOutboundClass
+	// CatalogGeneration is observation-only correlation for sessions_changed. It is never
+	// encoded into EventMessage and therefore cannot change the bridge protocol.
+	CatalogGeneration uint64
 }
 
 type eventOutboundFrame struct {
@@ -342,6 +345,18 @@ func (p *EventPublisher) RegisterConnection(conn Connection) {
 	p.sinkLocked(conn)
 }
 
+func (p *EventPublisher) ActiveRecoveryID(conn Connection) string {
+	if p == nil || conn == nil {
+		return ""
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if recovery := p.recoveries[conn]; recovery != nil {
+		return recovery.recoveryID
+	}
+	return ""
+}
+
 func (p *EventPublisher) EnqueueControl(conn Connection, frame interface{}, wait bool) error {
 	if conn == nil {
 		return fmt.Errorf("connection is required")
@@ -586,6 +601,11 @@ func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID strin
 		if !p.syncV2[conn] {
 			continue
 		}
+		recoveryID := ""
+		if recovery := p.recoveries[conn]; recovery != nil {
+			recoveryID = recovery.recoveryID
+		}
+		logProjectionPatchMetrics(backendID, sessionID, recoveryID, patch)
 		// Design §6.5: projection push reuses observation filter (same as raw path).
 		if p.observation != nil {
 			if device := conn.AuthedDevice(); device != nil &&
@@ -975,6 +995,7 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 		slog.Info("event-publisher: control-plane delivery outcome",
 			"event", logical.Event,
 			"backendID", logical.BackendID,
+			"catalogGeneration", logical.CatalogGeneration,
 			"candidateTargets", len(targets),
 			"enqueued", enqueued,
 			"observationFiltered", observationFiltered,

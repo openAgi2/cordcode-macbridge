@@ -57,6 +57,7 @@ var coldHydrateSegmentTestHook func(ctx context.Context, segmentIdx, contentTurn
 // baseline commits. A completed source inspection may commit a true empty session; a bare turn
 // shell remains hydrating.
 func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, agent core.Agent) {
+	requestStartedAt := time.Now()
 	var params GetSessionProjectionParams
 	if msg.Params != nil {
 		_ = json.Unmarshal(msg.Params, &params)
@@ -166,21 +167,31 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 	// Cheap delta response when the client is already at head: empty patch set.
 	if params.SinceRev != 0 && params.SinceRev == headRev {
 		logProjectionRPCTrace("response_enqueue", msg, params.SessionID, params.SinceRev, headRev, "delta_at_head", &admission)
-		if err := h.eventPublisher.CompleteProjectionSnapshot(conn, admission, msg.RequestID, map[string]interface{}{
+		response := map[string]interface{}{
 			"patches": []ProjectionPatch{},
 			"headRev": headRev,
-		}); err != nil {
+		}
+		logProjectionResponseMetrics(
+			msg, params.SessionID, params.SinceRev, headRev, "delta_at_head", response,
+			h.eventPublisher.ActiveRecoveryID(conn), requestStartedAt, nil,
+		)
+		if err := h.eventPublisher.CompleteProjectionSnapshot(conn, admission, msg.RequestID, response); err != nil {
 			slog.Warn("go-bridge: projection snapshot response enqueue failed", "requestId", msg.RequestID, "error", err)
 		}
 		return
 	}
 
 	logProjectionRPCTrace("response_enqueue", msg, params.SessionID, params.SinceRev, proj.SyncRev, "snapshot", &admission)
+	response := map[string]interface{}{"projection": proj}
+	logProjectionResponseMetrics(
+		msg, params.SessionID, params.SinceRev, proj.SyncRev, "snapshot", response,
+		h.eventPublisher.ActiveRecoveryID(conn), requestStartedAt, &proj,
+	)
 	if err := h.eventPublisher.CompleteProjectionSnapshot(
 		conn,
 		admission,
 		msg.RequestID,
-		map[string]interface{}{"projection": proj},
+		response,
 	); err != nil {
 		slog.Warn("go-bridge: projection snapshot response enqueue failed", "requestId", msg.RequestID, "error", err)
 	}

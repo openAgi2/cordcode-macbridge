@@ -208,21 +208,24 @@ func (h *Handlers) snapshotBackendSession(ctx context.Context, seen map[string]s
 	// 这覆盖了「session 被归档（从 visible 移除）」「新 session 出现」「既有 session 收到新 turn」
 	// 三种情况，客户端刷新 list_sessions 即可拿到最新 catalog。
 	if current != prev {
+		catalogGeneration := h.catalogGeneration.Add(1)
 		// Fence every declared snapshot scope before exposing the new fingerprint or
 		// publishing its notification. A client reacting immediately to the event can
 		// therefore never reuse a pre-change global/directory snapshot.
 		h.openCodeCatalogWireCache().FenceBackend(id)
 		seen[id] = current
 		slog.Info("go-bridge: sessions_changed (catalog fingerprint changed)",
-			"backend", id, "sessionCount", count, "durationMs", duration.Milliseconds())
+			"backend", id, "catalogGeneration", catalogGeneration,
+			"sessionCount", count, "durationMs", duration.Milliseconds())
 		if _, err := h.eventPublisher.PublishControlPlane(LogicalEvent{
-			BackendID: id,
-			Event:     "sessions_changed",
-			Data:      map[string]interface{}{"backendId": id},
-			Broadcast: true,
+			BackendID:         id,
+			Event:             "sessions_changed",
+			Data:              map[string]interface{}{"backendId": id},
+			Broadcast:         true,
+			CatalogGeneration: catalogGeneration,
 		}); err != nil {
 			slog.Error("go-bridge: sessions_changed control-plane publish rejected",
-				"backend", id, "error", err.Error())
+				"backend", id, "catalogGeneration", catalogGeneration, "error", err.Error())
 		}
 	} else {
 		seen[id] = current
