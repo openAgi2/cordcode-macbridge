@@ -1,10 +1,10 @@
 # DeepSeek Harness (DSH) Driver 设计文档
 
-- **日期**：2026-08-13（v8：round6 审计 —— source-proven turn/step 校验、crash→respawn 闭环、nonce 128-bit）
+- **日期**：2026-08-14（v9：round7 审计 —— notification session scope、at-most-once delivery、typed process death、attachments、ignorable policy）
 - **Runtime**：DeepSeek Harness `dsh-jsonrpc-agent`（pinned `47f943859bef60e4160492346772ded9b24f765a`，协议 `0.0.1`，pre-release）
-- **协议**：DSH SDK JSON-RPC 2.0 over stdio（**非** ACP）
+- **协议**：DSH SDK JSON-RPC 2.0 over stdio（**非** ACP），3 requests + 4 notifications（§3.0）
 - **证据**：`scripts/dsh-gate0/`（4 次真实 run + assembled composition + sanitizer 带 peer 断言）
-- **审计**：round1-4（`docs/2026-08-13-dsh-driver-design-audit-round{1,2,3,4}.md`）、round5/6（`docs/2026-08-1{3,4}-dsh-driver-design-audit-round{5,6}.md`）
+- **审计**：round1-4（`docs/2026-08-13-dsh-driver-design-audit-round{1,2,3,4}.md`）、round5/6（`docs/2026-08-1{3,4}-dsh-driver-design-audit-round{5,6}.md`）、round7（`docs/2026-08-14-dsh-driver-design-audit-round7.md`）
 
 ---
 
@@ -22,9 +22,31 @@ SDK 协议满足 rich timeline（reasoning/tool/todo/usage），ACP 显式丢弃
 
 ## 3. 输入输出 schema
 
+### 3.0 Wire surface inventory（round7 P0-1 基线）
+
+Pinned `packages/sdk/protocol/src/types.ts:50-104` 明确 3 个 request + 4 个 notification。Driver 的 §3 映射必须以这张顶层 inventory 为骨架，不能只处理 `session.event`：
+
+| 方向 | method | shape | session scope 要求 |
+|---|---|---|---|
+| client→server | `initialize` | `cwd/provider/model/maxTokens?` → `{serverInfo:{name,version}}` | — |
+| client→server | `session/prompt` | `sessionId/contentBlocks[]` → `{messageId}` | root scope（§3.6） |
+| client→server | `shutdown` | empty → `{}` | — |
+| server→client | `session.event` | `{sessionId,event}`；**runtime 中每个 session**（source: `types.ts:51-53`） | **必须按 sessionId 过滤**（§3.8） |
+| server→client | `session.status` | `{sessionId,status:idle\|running}` | 只在 `sessionId==rootSessionID` 时影响 root runtime（§3.4, §3.8） |
+| server→client | `subagent.started` | `{parentSessionId,childSessionId}` | 建 lineage，child event 不进 root codec（§3.8） |
+| server→client | `subagent.finished` | `{provider,agentId,parentSessionId,childSessionId,status,stopReason,lastAssistantMessage?}` | 清 lineage（§3.8） |
+
+源码证据链（round7）：
+1. `types.ts:50-56`：`session.event` 覆盖"every session in the runtime"。
+2. `server.ts:71-103`：server 对 `session/event`、`agent/status`、`session/created`→`subagent.started`、`subagent/end`→`subagent.finished` 注册全局广播，**没有自动限制为 SDK root session**。
+3. `client.ts:354-371`：SDK client 明确说明 scoping 是 **client-side**，提供 `subscribeSessionTree` 建 lineage 过滤。
+4. `sdk-client.spec.ts:129-147`：冻结测试证明 child `session.event` 会出现在 raw notification stream。
+
+> Driver 等价于 SDK client，**必须自行做 session scoping**，不能假设 notification 只来自 root session。
+
 ### 3.1-3.2 传输 / 握手
 
-newline-delimited JSON-RPC 2.0。**无 cancel/session-close/session-resume/load/list**。`initialize`→`{serverInfo:{name:'deepseek-harness-sdk-runtime'}}`；`session/prompt` 惰性创建。
+newline-delimited JSON-RPC 2.0。**无 cancel/session-close/session-resume/load/list**。`initialize`→`{serverInfo:{name:'deepseek-harness-sdk-runtime'}}`；`session/prompt` 惰性创建。Driver 接收全部 4 类 notification，按 §3.8 session scope 路由。
 
 ### 3.3 `session.event` → core.Event 映射（自包含，证据标签分级）
 
@@ -54,17 +76,29 @@ newline-delimited JSON-RPC 2.0。**无 cancel/session-close/session-resume/load/
 | `session/title` | 🟢 | 标题 | `data.title` |
 | `request/header`·`request/context` | 🟢 | context usage 输入 | `data.contextWindow`（§3.7） |
 | `agent/inbox/spliced` | 🟢 | 内部 | prompt 入队 |
-| 其余（compaction/approval-asked/command/tool-workflow/goal-plan-schedule/session-end-seed 等） | ⚪ | ignored/deferred | 无样本 |
+| 其余（compaction/approval-asked/command/tool-workflow/goal-plan-schedule/session-end-seed 等） | ⚪ | **逐项声明**（§3.10）：known+deferred → 记录诊断后跳过；unknown+无 ignorable → fail visibly | 无样本 |
 
-### 3.4 turn 生命周期
+### 3.4 turn 生命周期 + session.status 消费规则（round7 P1-3）
 
-`turn/start`+`turn/end`（reason 6 态）+ `session.status`。`session/prompt` 只回 `{messageId}`，turn 完成只认 `turn/end`。
+**turn 完成只认 `turn/end`**。`session/prompt` 只回 `{messageId}`，不表示 turn 完成。
+
+**`session.status`（round7 P1-3）**：SDK server 广播 `session.status {sessionId, status: idle|running}`（`types.ts:59-64`）。四次 `.stdout` 和 `run-output.txt` 都出现 root `running→idle`。消费规则：
+
+| 规则 | 说明 |
+|---|---|
+| **session scope** | 只在 `sessionId == rootSessionID` 时影响 root runtime state（§3.8） |
+| **liveness 辅助信号** | root `running`/`idle` 是 runtime-state 辅助信号，用于 iOS 执行态 UI 提示 |
+| **不替代 turn/end** | `turn/end` 是 turn completion truth；`session.status=idle` **不**单独收口 turn、**不**生成第二个 turn terminal |
+| **重复/迟到** | 重复或迟到的 `session.status` 不改变已完成 turn 的状态 |
+| **child/foreign** | descendant 或 foreign session 的 `status` 不影响 root state（§3.8） |
+
+**durable fixture**：gate helper 应把全部 4 类 notification 以带 `method/params` 的 sanitized JSONL 独立保存，至少冻结 root `running`/`idle`。当前证据为 `.stdout` 和 `run-output.txt`（非 committed durable fixture），committed JSONL dumps 只保存 `session.event`。durable notification dump 作为 driver 测试基建 deferred（§15）。
 
 ### 3.5 权限模型
 
 权限栈在 `bundle/base`。assembled composition（`driver-cordis.yml`）：🟢 可加载+激活+fail-closed（unconfined executor 拒绝）；🟢 **环境切换 verified**（run3 `workspace-write`+`ask` vs run4 `danger-full-access`+`never`）。一期 `permission_resolve` 不声明。
 
-### 3.6 identity + source.kind 分流 + process nonce（v8：round5/6 P0）
+### 3.6 identity + source.kind 分流 + process nonce（v9：round5/6/7 P0）
 
 #### 3.6.1 identity（对齐 reducer + active-turn 状态机 + source-proven 校验）
 
@@ -112,30 +146,82 @@ assembled composition 两种 `user/message`（同 `role:"user"` + UUID `data.id`
 
 run3/run4 冻结样本：每 turn seq(N)=`user` + seq(N+1)=`plugin`。两者都发会让 reducer 同 turn 再次 upsert，plugin 覆盖真实 prompt。
 
-#### 3.6.3 process nonce + crash→respawn 生命周期（round5 P0-2 + round6 P0-1/P1-2）
+#### 3.6.3 process nonce + 交付语义 + 进程生命周期（round5 P0-2 + round6 P0-1/P1-2 + round7 P0-2/P0-3/P1-4）
 
-**v6 错误**：`processGen` 存 driver 内存，go-bridge/Agent 重启归零；原 sessionId 再传入 `StartSession` → `g0-t1` 复用（v6 "重启换 sessionId"断言无源码支撑：`handleAbortGeneration` 只返回 `{ok:true}`，`handleSendMessage` 把原 id 当 resumeID 传 `StartSession`）。
+**v6 错误**：`processGen` 存 driver 内存，go-bridge/Agent 重启归零；原 sessionId 再传入 `StartSession` → `g0-t1` 复用。
 
-**v7 错误（round6 P0-1）**：process nonce 只证明「新 spawn 已生成不冲突 TurnID」，没证明「crash 后必触发新 spawn」。当前 go-bridge `relayEvents` 的 defer（`handlers_relay.go:2451-2455`）只清 `agentRelayRunning`/`relayRunningKind`，**不删 session registry**；`handleSendMessage`（`handlers.go:1975-1976`）对 `ok=true && sess!=nil` 直接 `sess.Send`（`handlers.go:2070`），错误只映射成 wire `send_failed`，不删除 session、不 respawn、不重试。子进程 crash → 死亡 session 留在 registry → 下一次发送复用同一对象 → 不进入 `StartSession` → 不生成新 nonce。abort 与完整 runtime 重启能到 `StartSession`，**crash 路径未闭环**。
+**v7 错误（round6 P0-1）**：process nonce 只证明「新 spawn 已生成不冲突 TurnID」，没证明「crash 后必触发新 spawn」。crash 路径未闭环。
 
-**v8 方案（process nonce + crash-respawn 闭环）**：
+**v8 错误（round7 P0-2/P0-3）**：① idle crash 后「对这条新 prompt 重试一次」违反 at-most-once（DSH server `prompt()` 先 `followup(message)` 入队再返回 `messageId`；transport error 不能证明请求未送达）。② 把任意 `EventError` 当进程死亡并 delete registry，但 `EventError` 同时表示 turn/model/protocol error，进程仍健康；`sessionRegistry.delete()`（`types.go:360-374`）只删 map 不 `Close`，会制造活进程孤儿。
 
-1. **nonce**：每次 spawn 用 `crypto/rand` 生成 **16 字节（128-bit）** 随机 hex（round6 P1-2：8 字节仅概率唯一，无法支撑「必新」承诺；16 字节成本为零且消除 birthday 隐患）。`rand.Read` 失败 → **spawn fail-closed**（不退时间戳/零值 fallback）。nonce 无需持久化，但必须在启动子进程**前**成功生成并固定到该 process lifetime。`TurnID = "p{nonce}-t{turn}"`。
+**v9 方案（process nonce + at-most-once delivery + typed process death）**：
 
-2. **crash→respawn owner（round6 P0-1，唯一 owner = go-bridge，primitive = `deleteSession` `handlers.go:637`）**：
-   - **eager 淘汰**：`relayEvents` 对 DSH backend 收到 terminal（非 claude `EventError` / events channel close）时，按 **session 对象身份 CAS** 删除 registry 项——仅当 registry 仍持有本次 relay 读的同一 `sess` 对象才删（镜像 `clearRelayKindIf` 的 compare-and-delete 模式 `handlers_relay.go:619`），避免旧 relay defer 清掉并发新 spawn 的新 session。**失败 turn 必须先以原 nonce 的 `turn_error` 收口**：现有 `EventError → turn_error` 路径（`handlers_relay.go:2558-2584`）已满足，**不重放失败 prompt**。
-   - **lazy 淘汰（idle crash）**：turn 正常完成后、idle 期 crash 时无活跃 reader，relay 早已退出，eager 不触发。下一次 `handleSendMessage` 的 `sess.Send` 返回 transport 错误（broken pipe）；该错误必须触发同样的 CAS 淘汰 + 重入 `StartSession`（driver spawn 新进程 + 新 nonce + 新 codec）+ **对这条新 prompt 重试一次**（重试的是崩溃后新发的 prompt，不是崩溃 turn）。
-   - 淘汰后 `getSession` 返回 `ok=false` → `handleSendMessage` 进入既有 `StartSession` 分支（`handlers.go:1979-2042`）→ driver spawn 新进程 + 新 nonce。
+##### ① nonce（round7 P1-4 措辞修正）
 
-3. **race 边界**：abort 与 crash 并发 → 对象身份 CAS 使淘汰幂等（首触发淘汰，次为 no-op）；并发 send 已有 double-checked locking（`handlers.go:2048-2059`），新 session 不会被 stale relay defer 误清。eager 与 lazy 不互斥：eager 已淘汰的 session lazy 不再命中（对象已变）。
+每次 spawn 用 `crypto/rand` 生成 **16 字节（128-bit）** 随机 hex。`rand.Read` 失败 → **spawn fail-closed**（不退时间戳/零值 fallback）。nonce 无需持久化，但必须在启动子进程**前**成功生成并固定到该 process lifetime。`TurnID = "p{nonce}-t{turn}"`。
 
-4. **三场景全覆盖**：abort → kill → terminal → 淘汰 → 再发 `StartSession`（新 nonce）；crash → terminal → 淘汰 → 再发（新 nonce）；go-bridge 重启 → registry 空 → `StartSession`（新 nonce）。**均 `t1` 不复用**。
+> **措辞修正（round7 P1-4）**：128-bit CSPRNG nonce 提供**碰撞概率可忽略**的唯一性（2^-128 birthday bound），不是数学上的"必新"。"均 `t1` 不复用"应理解为概率保证，不是确定性不变量。
 
-5. 不改 session 协议（原 sessionId，不碰 rebind）；projection key=TurnID（含 nonce）。
+##### ② turn terminal vs process terminal（round7 P0-3）
 
-> **respawn 实现测试 deferred（§15）**：driver + go-bridge 代码；冻结样本至少覆盖 turn 中 crash、turn 后 idle crash、crash+abort 并发、crash 后首次新 send 四态。
+**核心区分**：`EventError` 先只收口当前 turn；仅 **typed process-exit** 或 **channel-closed** 或 **`!sess.Alive()`** 才触发 registry 淘汰。
 
-> **替代方案（不采纳，§15）**：replacement session（abort 返回新 sessionId + iOS 切换，跨仓协议改动）/ 持久化 `(backend,outerSessionID)→generation`（需原子递增/恢复定义）—— process-nonce + go-bridge 对象身份淘汰最局部、无需持久化、不碰 session 流/rebind。
+| 事件 | turn terminal？ | process terminal？ | 动作 |
+|---|---|---|---|
+| `EventError`（model/turn/protocol error） | ✅ `turn_error` 收口 | ❌ 进程仍健康 | 收口 turn，**保留 session**，下一 turn 可继续发送 |
+| events channel close（unexpected） | ✅ `turn_error`（如 in-flight） | ✅ process death | CAS 淘汰 + Close/reap |
+| events channel close（normal shutdown/abort） | ✅ 正常完成 | ✅ 但不合成额外 error | 淘汰 + Close |
+| `!sess.Alive()`（pre-send health check） | — | ✅ | CAS 淘汰 + Close，下一条请求 respawn |
+
+**CAS delete + Close ownership**：
+- `sessionRegistry.delete()`（`types.go:360-374`）只从 map 删除并返回 session 对象，**不 Close**。
+- CAS helper 按 **session 对象身份** compare-and-delete（镜像 `clearRelayKindIf` 的 compare-and-delete 模式 `handlers_relay.go:619`），返回被删的 exact old session。
+- **赢得 CAS 的 owner** 在锁外幂等 `Close()`/reap 该 session；**输家 no-op**。
+- 保证：同一 session 的 `Close` **只调用一次**；registry 无 orphan（活进程不在 registry 中）。
+
+**健康 turn/model error 后继续发送**：driver 收到 `EventError` → `turn_error` 收口 → relay return → session 保留在 registry → 下一条 `handleSendMessage` 走 `sess.Send` 正常路径（不 respawn）。验收矩阵 #8。
+
+##### ③ at-most-once delivery（round7 P0-2）
+
+**问题**：DSH server `prompt()`（`server.ts:132-142`）先 `agent.followup(message)` 把带唯一 id 的用户消息入队，**然后**才返回 `{messageId}`。进程可能在完整接收 request、执行 `followup` 之后，于 response flush 前退出。driver 此时只看到 EOF/broken pipe。若自动重发，会生成第二个 DSH messageId，两个 prompt 都可能执行，工具调用副作用也可能重复。现有 bridge request ID 没有传进 DSH，也没有 SDK idempotency key，无法靠下游去重。
+
+**at-most-once 规则**：
+
+| 场景 | 请求是否可能已送达 | 允许重发？ |
+|---|---|---|
+| **pre-send 已知死亡**（`!sess.Alive()` / registry miss） | ❌ 未发送任何字节 | ✅ CAS 淘汰 + respawn + 发送**一次**（pre-send repair，不是 retry） |
+| **zero-byte write**（连接建立后写 0 字节即 error） | ❌ 未写入 | ✅ respawn + 发送一次 |
+| **partial write**（写了部分字节后 error） | ⚠️ 可能已送达 | ❌ **fail visibly**；淘汰死亡 session 供**下一条不同请求**重建 |
+| **full request + response lost**（请求完整发出，response 未收到） | ⚠️ 可能已入队执行 | ❌ **fail visibly**；不重放本 prompt |
+| **accepted unknown**（不确定是否被 server 接收） | ⚠️ 不确定 | ❌ **fail visibly** |
+
+**实现约束**：
+- `sess.Send` error 必须是 **typed/classified delivery outcome**，不是 generic error。
+- 只有能证明 **zero bytes written / not accepted** 的错误才可重建后发送。
+- partial write、response lost、accepted unknown 一律将本请求 fail visibly（返回 wire `send_failed`），淘汰死亡 session 供**下一条不同请求**重建，**不得重放本 prompt**。
+- 若产品坚持自动 retry，必须先扩展协议把 bridge request identity 作为 DSH 幂等键并由 server durable dedup；当前协议（`0.0.1`）没有该能力。
+
+> **不采纳：v8「idle crash 后对这条新 prompt 重试一次」**。该方案无法区分 "pre-send 已知死亡"（安全重建 + 发送）和 "send 后响应丢失"（不安全重放）。v9 以 delivery classification 替代：只有 pre-send death 和 zero-byte write 允许一次发送，其余 fail visibly。
+
+##### ④ race 边界
+
+abort 与 crash 并发 → 对象身份 CAS 使淘汰幂等（首触发淘汰，次为 no-op）；并发 send 已有 double-checked locking（`handlers.go:2048-2059`），新 session 不会被 stale relay defer 误清。eager 与 lazy 不互斥：eager 已淘汰的 session lazy 不再命中（对象已变）。abort+relay close、stale relay close 新 session、Close 只调用一次、registry 无 orphan（验收矩阵 #12）。
+
+##### ⑤ 五场景全覆盖
+
+1. abort → kill → terminal → 淘汰 → Close → 再发 `StartSession`（新 nonce）。
+2. crash（turn 中） → typed process death → 淘汰 → Close → 再发（新 nonce）。
+3. crash（idle） → 下一条 `handleSendMessage` pre-send health check 发现 `!sess.Alive()` → CAS 淘汰 → Close → respawn → 发送一次（新 nonce）。
+4. 健康 turn/model error → `turn_error` 收口 → **session 保留** → 下一条正常发送。
+5. go-bridge 重启 → registry 空 → `StartSession`（新 nonce）。
+
+##### ⑥ 不改 session 协议
+
+原 sessionId，不碰 rebind；projection key=TurnID（含 nonce）。
+
+> **respawn 实现测试 deferred（§15）**：driver + go-bridge 代码；验收矩阵 #6-#9, #12 的 fault-injection 场景（pre-send dead、zero-byte/partial/full send、response lost、健康 error 后继续、process exit、abort/crash/stale relay 并发）。
+
+> **替代方案（不采纳，§15）**：replacement session（abort 返回新 sessionId + iOS 切换，跨仓协议改动）/ 持久化 `(backend,outerSessionID)→generation`（需原子递增/恢复定义）/ 自动 retry（需 SDK idempotency key，当前协议不支持）—— process-nonce + typed process death + at-most-once delivery 最局部、无需持久化、不碰 session 流/rebind。
 
 ### 3.7 chunk/assembled 双写 + usage（round4 P0-2；peer 边界 round6 P1-3）
 
@@ -163,15 +249,99 @@ run3/run4 冻结样本：每 turn seq(N)=`user` + seq(N+1)=`plugin`。两者都�
 
 **4 种情况**：正常流 🟢 / 无delta-assembled ⚪ 防御性 / 重复 ⚪（processed-seq 去重）/ 乱序-gap ⚪（buffer/flush 未定义）。**去重 ≠ 乱序重排**，分开。
 
+### 3.8 Notification session scope & 路由矩阵（round7 P0-1）
+
+**背景**：DSH SDK server 对 `session.event`、`session.status`、`subagent.started`、`subagent.finished` 做进程级全局广播（`server.ts:71-103`），**不自动限制为 root session**。SDK client 自行通过 `subscribeSessionTree` 做 client-side scoping（`client.ts:354-371`）。Driver 等价于 SDK client，**必须自行做 session scoping**，否则 child/foreign session 的 event/status 会破坏 root codec 的单一 `activeTurn/activeStep` 状态机。
+
+**root session identity**：driver 在 `initialize` + 首次 `session/prompt` 后，记录 SDK 分配的 sessionId 作为 **rootSessionID**。该 id 在该 process lifetime 内不变。
+
+**四类 notification 路由矩阵**：
+
+| notification | `sessionId` 归属 | 一期处理 |
+|---|---|---|
+| `session.event` | `params.sessionId == rootSessionID` | **进入 root codec**（§3.3 映射表 + §3.6 identity） |
+| `session.event` | descendant（在 lineage 中，见 `subagent.started`） | **显式过滤**，不进 root codec；可记录诊断日志 |
+| `session.event` | unknown foreign（不在 lineage、≠ root） | **不并入 root**；fail-visible protocol diagnostic 或明确丢弃并记录 |
+| `session.status` | `== rootSessionID` | 更新 root runtime state（§3.4）；**不替代 turn/end 作为完成真相** |
+| `session.status` | descendant / foreign | **不影响 root state**；child `idle` 不得收口 parent turn |
+| `subagent.started` | — | 建 lineage 边 `parentSessionId → childSessionId`；验证 parent 非空、拒绝 self-loop/循环 lineage |
+| `subagent.finished` | — | 清 lineage；验证 parent/child 非空；`lastAssistantMessage` 可缺失 |
+
+**lineage 管理**：
+- `subagent.started` 的 `childSessionId` 加入 active descendant set；后续该 id 的 `session.event`/`session.status` 一律过滤。
+- `subagent.finished` 从 descendant set 移除。
+- process 退出时清空全部 lineage。
+- 一期不展示 subagent timeline；`subagent.started/finished` 完整 shape（`SubagentFinishedNotification`）标 🔵 source-schema，一期仅做诊断过滤，不映射为 core.Event。
+
+**`StreamID/ParentStreamID` 映射**：一期 root 为 main stream（空 StreamID）。descendant event 被过滤，不分配 StreamID。若未来要展示 subagent timeline，需扩展 codec 支持 per-session stream、lineage-aware StreamID 和 parent/child 关联。
+
+**冻结测试要求（验收矩阵 #2, #3）**：
+1. parent turn 内启动 child 完整 turn → parent user/assistant/usage/turn 结果**完全不含 child 内容**，parent active state 不被 child 改写。
+2. child `session.status=idle` 先于 parent `turn/end` → parent turn 不被收口。
+3. 两级 descendant → 全部过滤。
+4. foreign session notification → 不并入 root；按明确策略诊断/拒绝。
+5. self-loop/空 lineage `subagent.started` → 拒绝。
+6. child `subagent.finished` 缺 `lastAssistantMessage` → 正常清 lineage，不 fail。
+
+> **测试 deferred（§15）**：使用 pinned SDK subagent fixture（`sdk-client.spec.ts:129-147`）+ synthetic wire fixture 构造上述场景。
+
+### 3.9 Attachment 输入策略（round7 P1-1）
+
+MacBridge `core.AgentSession.Send(prompt, images, files)` 接收 `images []ImageAttachment` 和 `files []FileAttachment`；go-bridge `handlers.go:2069-2070` 无条件传给 driver。v9 必须定义非空 images/files 的处理策略。
+
+**DSH SDK 限制**（🔵 source）：
+- `session/prompt.contentBlocks` 支持 `image`，但 wire image 不是 base64，而是 `ImageAttachmentRef {attachmentId,mediaType,bytes,width,height,name?}`，引用指向 DSH attachment service。
+- SDK protocol **没有 upload RPC**；`attachmentId` 由 DSH attachment service 内部分配。
+- DSH `ContentBlock` **没有通用 file block**。
+
+**一期策略**：text-only prompt。
+
+| 附件类型 | 一期策略 | 理由 |
+|---|---|---|
+| **image** | 不支持 → 返回稳定 `not_supported` | DSH attachment-local 写入 path（bytes→ref）需要 driver 实现 DSH attachment service 对接，一期不在范围。不能自行伪造 `attachmentId`。 |
+| **file** | 不支持 → 返回稳定 `not_supported` | DSH `ContentBlock` 无通用 file block；现有 `SaveFilesToDisk + prompt path` 语义需要 driver 端文件落地逻辑，一期不做。 |
+| **text-only** | ✅ 正常 `session/prompt` | 已 verified（4 次 real run） |
+
+**实现约束**：
+- 非空 images/files 必须同步返回 wire `not_supported`（或 `send_failed`），**不得静默丢弃**。
+- iOS backend descriptor 不得暗示 DSH backend 支持图片/文件上传（§8 capability 不声明 attachment 相关能力）。
+- 若未来支持 image：需定义 bytes→ref 路径（通过 attachment-local 安全写入）、验证 mime/尺寸/限额/清理/`DSH_HOME` 隔离；不能用伪造 `attachmentId` 绕过 attachment service。
+
+**contract test 要求**：text-only ✅、单 image → `not_supported`、坏 mime/超限 → `not_supported`、单 file → `not_supported`、混合附件 → `not_supported`。真实 key 只需验证 provider 能消费 image；格式/拒绝路径用 source-owned fixture。
+
+### 3.10 Unknown event ignorable fail-closed 策略（round7 P1-2）
+
+`SessionEvent` envelope（`packages/core/session/src/types.ts:404-422`）明确规定：未知 `type` 只有显式标注 `ignorable:true` 才能跳过；未知且未标 ignorable 的事件**必须拒绝解释**（MUST refuse to reconstruct），否则可能静默重建错误 timeline。
+
+**三级分类**：
+
+| 类别 | 判定 | 处理 |
+|---|---|---|
+| **已知 + 已映射** | 在 §3.3 映射表中 | 按 mapping rule 映射 |
+| **已知 + deferred** | 在 `KNOWN_SESSION_EVENT_TYPES`（44 种）中，但一期不映射 | 逐项声明 ignore（如 compaction/approval-asked/command/tool-workflow/goal-plan-schedule/session-end-seed）；记录诊断日志后跳过 |
+| **未知 + `ignorable:true`** | 不在 frozen inventory 中，但 envelope 标 `ignorable:true` | 记录诊断后跳过 |
+| **未知 + 无 `ignorable` 标记** | 不在 frozen inventory 中，envelope 无 `ignorable` | **fail visibly**：收口 active turn（`turn_error`），不得静默跳过 |
+
+**额外校验**：
+- 非法 `ignorable:false` → 按无 ignorable 处理（fail visibly）。
+- 非布尔 `ignorable` 值 → 按 wire error 处理（fail visibly）。
+- seq gap（`data.seq` 不连续）→ 记录诊断；一期不 buffer/flush（§3.7 ⚪），但必须有 gap detection 日志。
+- seq duplicate → processed-seq 去重（§3.7 既有规则）。
+
+**frozen inventory**：driver 使用 `KNOWN_SESSION_EVENT_TYPES`（44 种）作为 known-type set。每轮 DSH 版本 pin 后重新生成该列表并验证无漂移。当前 pinned 44 种见 `scripts/dsh-gate0/known-event-types.txt`（round1 审计生成）。
+
+> **测试 deferred（§15）**：使用 pinned source schema 的 wire fixture 构造 unknown ignorable/required/illegal 场景（验收矩阵 #4, #5）；不需要真实 key。
+
 ---
 
 ## 4. session 生命周期（live-only）
 
 | 操作 | 一期 | 说明 |
 |---|---|---|
-| 创建/发送 | ✅ `session/prompt` | `{messageId}` |
-| 取消 | ❌ kill 进程 | 触发 §3.6.3 crash-respawn（terminal → 淘汰 → 再发新 nonce），sessionId 不变 |
+| 创建/发送 | ✅ `session/prompt`（text-only，§3.9） | `{messageId}`；at-most-once delivery（§3.6.3 ③） |
+| 取消 | ❌ kill 进程 | 触发 §3.6.3 ② typed process death（terminal → CAS 淘汰 → Close → 再发新 nonce），sessionId 不变 |
 | 列出/resume | ❌ | live-only |
+| 图片/文件附件 | ❌ | 一期 text-only，非空返回 `not_supported`（§3.9） |
 
 **`ListSessions`（round4 P1-4 澄清）**：driver 返回 `nil, core.ErrNotSupported`。**当前 go-bridge generic handler（handlers.go:2628）把任何 error（含 ErrNotSupported）映射为 wire `list_failed`**，不是 `not_supported`。文档如实：一期 wire 表现为 `list_failed`（不伪造空成功）；若要 `not_supported` code，driver 主体合入时在 handler 加 `errors.Is(ErrNotSupported)` 分支（handlers.go:1431/1605 已有此模式的先例）。
 
@@ -179,13 +349,13 @@ run3/run4 冻结样本：每 turn seq(N)=`user` + seq(N+1)=`plugin`。两者都�
 
 ## 5-7. 取消关闭 / 错误 / 脱敏
 
-Close 三阶段；正常 `shutdown→{}` 🟢，SIGTERM/SIGKILL ⚪。错误→`EventError`+fail visibly。dumps 经 `sanitize.py` 递归 scrub + **peer 存在断言**（round4 P1）。
+Close 三阶段；正常 `shutdown→{}` 🟢，SIGTERM/SIGKILL ⚪。错误 → `EventError` **先收口 turn**（§3.6.3 ② typed process death）；仅 typed process-exit/channel-close 触发 registry 淘汰。dumps 经 `sanitize.py` 递归 scrub + **peer 存在断言**（round4 P1）。
 
 ---
 
 ## 8. capability
 
-`LiveEventSessionProcess`，无 `external_turn_streaming`。🟢 session_state/workspace_diff/diagnostics；⚠️ todos（须 FetchTodos 持久化读）/usage_reporting（须跨 turn 聚合）；❌ session_history/permission_resolve/supports_checkpoint。
+`LiveEventSessionProcess`，无 `external_turn_streaming`。🟢 session_state/workspace_diff/diagnostics；⚠️ todos（须 FetchTodos 持久化读）/usage_reporting（须跨 turn 聚合）；❌ session_history/permission_resolve/supports_checkpoint/attachments。一期 text-only prompt（§3.9）；notification session scope 由 driver client-side 过滤（§3.8）。
 
 ---
 
@@ -216,7 +386,7 @@ pinned `47f943859bef60e4160492346772ded9b24f765a`。
 
 ## 13. 风险
 
-1. pre-release 漂移；2. 取消即触发 crash-respawn（kill → terminal → 淘汰 → 再发新 nonce；turn 隔代，同 turn 不重放）；3. 无 list/resume；4. approval 不经协议；5. DeepSeek 绑定；6. reducer 模型约束（turn 内多 step 拼接）；7. ⚪ 证据缺口。
+1. pre-release 漂移；2. 取消即触发 typed process death（kill → terminal → CAS 淘汰 → Close → 再发新 nonce；同 turn 不重放，at-most-once delivery §3.6.3 ③）；3. 无 list/resume；4. approval 不经协议；5. DeepSeek 绑定；6. reducer 模型约束（turn 内多 step 拼接）；7. ⚪ 证据缺口；8. child/foreign session notification 必须由 driver 过滤（§3.8）；9. 一期 text-only，不支持图片/文件附件（§3.9）；10. unknown event 必须 fail-closed（§3.10）。
 
 ---
 
@@ -246,14 +416,26 @@ pinned `47f943859bef60e4160492346772ded9b24f765a`。
 ### Round6（v7→v8）
 | 项 | v7 问题 | v8 修订 | 状态 |
 |---|---|---|---|
-| P0-1 | nonce 只保证新 spawn 新 ID；crash 后死亡 session 留 registry，再发不走 `StartSession` | §3.6.3 crash→respawn 闭环：relay terminal 按 session 对象身份 CAS `deleteSession`（eager）+ `sess.Send` transport 错误触发淘汰重试（lazy，覆盖 idle crash）；失败 turn 先 `turn_error` 收口，不重放 | ✅ 设计；respawn 四态测试 deferred |
+| P0-1 | nonce 只保证新 spawn 新 ID；crash 后死亡 session 留 registry，再发不走 `StartSession` | §3.6.3 crash→respawn 闭环：relay terminal 按 session 对象身份 CAS `deleteSession`（eager）+ `sess.Send` transport 错误触发淘汰重试（lazy，覆盖 idle crash）；失败 turn 先 `turn_error` 收口，不重放 | ✅ 设计→v9 重写（at-most-once + typed death） |
 | P0-2 | assistant/tool 行只「用 active」，未校验 source turn/step | §3.6.1 validate-then-map：除 user 外 turn-scoped frame 校验 `data.turn/step==active`，mismatch fail visibly；step 嵌套/未闭合校验 | ✅ 设计；reducer 测试 deferred |
 | P1-1 | identity 矩阵写「TurnID（所有 event）」与 34 条 turnless shape 冲突 | §3.6.1 矩阵限定 turn-scoped core.Event；control-plane/session/internal 不赋 TurnID | ✅ |
-| P1-2 | nonce 8 字节仅概率唯一、无 `crypto/rand` 失败策略 | 16 字节（128-bit）+ `rand.Read` 失败 fail-closed（spawn 失败，不 fallback 时间戳/零值） | ✅ 设计 |
+| P1-2 | nonce 8 字节仅概率唯一、无 `crypto/rand` 失败策略 | 16 字节（128-bit）+ `rand.Read` 失败 fail-closed（spawn 失败，不 fallback 时间戳/零值） | ✅ 设计→v9 措辞修正（概率保证） |
 | P1-3 | sanitizer 用内容 truthiness，单侧空 peer 仍通过 | §3.7/§15 如实收紧为「非空 peer 缺失即失败」；seen-flags + cardinality + 负向 fixture 属 driver 测试基建 deferred | 🟡 doc 已如实；代码 deferred |
 | P1-4 | §4/§12/§13/§15 仍残留 processGen/generation/v6 真值，审计索引缺 round5/6 | 统一为 nonce + crash-respawn；§12 标题去 v6；审计索引补 round5/6；header→v8 | ✅ |
 | P1-5 | README 仍 round4/v6 + 仅 chunk→assembled 单向 peer | README 同步 v8 + 双向 peer + 空内容边界；durable 负向 fixture/test deferred | ✅ 文本；fixture deferred |
 | P2 | evidence 目录未跟踪 `__pycache__` | 根 `.gitignore` 忽略 `__pycache__/` | ✅ |
+
+### Round7（v8→v9）
+| 项 | v8 问题 | v9 修订 | 状态 |
+|---|---|---|---|
+| P0-1 | 只处理 `session.event`，遗漏 `session.status`/`subagent.started`/`subagent.finished`；SDK server 全局广播，child/foreign session 会破坏 parent active-turn 状态机 | §3.0 wire inventory（3 request + 4 notification）+ §3.8 notification session scope 路由矩阵：root/descendant/foreign 分流，lineage 管理，child event 显式过滤 | ✅ 设计；frozen fixture 测试 deferred |
+| P0-2 | idle crash 后「对这条新 prompt 重试一次」违反 at-most-once（server 先 `followup` 入队再返回 `messageId`，transport error 不能证明未送达） | §3.6.3 ③ at-most-once delivery：pre-send death / zero-byte write → 可重建发送一次；partial write / response lost / accepted unknown → fail visibly 不重放。替代 v8 lazy retry | ✅ 设计；fault-injection 测试 deferred |
+| P0-3 | 任意 `EventError` 当进程死亡并 delete registry，但 `EventError` 同时表示 turn/model error；`delete()` 不 Close 会造孤儿 | §3.6.3 ② typed process death：`EventError` 先只收口 turn（保留 session）；仅 typed process-exit/channel-close/`!Alive()` 触发淘汰；CAS 返回 old session，winner 在锁外幂等 Close/reap，loser no-op | ✅ 设计；race test deferred |
+| P1-1 | `Send(prompt, images, files)` 输入 shape 完全缺失 | §3.9 attachment 策略：一期 text-only，非空 images/files 返回稳定 `not_supported`，不静默丢弃；DSH SDK 无 upload RPC / 无 file block | ✅ 设计；contract test deferred |
+| P1-2 | 未知 event type 缺 `ignorable` fail-closed 规则 | §3.10 ignorable policy：known+deferred 逐项声明 ignore；unknown+`ignorable:true` 记录诊断后跳过；unknown+无 marker → fail visibly 收口 turn | ✅ 设计；wire fixture test deferred |
+| P1-3 | `session.status` 有运行证据但无 durable fixture 与消费规则 | §3.4 session.status 消费规则：root-only scope、liveness 辅助信号、不替代 turn/end、child/foreign 不影响 root；durable notification dump deferred | ✅ 设计；durable fixture deferred |
+| P1-4 | nonce 写「必新」是数学绝对量，实际是概率属性 | §3.6.3 ① 措辞修正：「128-bit CSPRNG，碰撞概率可忽略（2^-128 birthday bound）」，不是数学上的必不碰撞 | ✅ |
+| P2 | Round6 修订表中 P0-2 行描述与 P0-1 有交叉重复 | 检查并确保 v9 Round6 表中 P0-1/P0-2 行内容互斥清晰 | ✅ |
 
 ### Round1-4 闭环：见前版（descriptor/resume/权限/计数/Gate0/identity/双写owner/环境切换/source.kind/usage/block/ListSessions/todo/自包含）。
 
@@ -263,10 +445,16 @@ pinned `47f943859bef60e4160492346772ded9b24f765a`。
 
 | 审计建议 | 处理 | 原因 |
 |---|---|---|
-| replacement session（abort 返回新 sessionId + iOS 切换） | 不采纳（选 process-nonce 方案） | replacement 需改 go-bridge handleAbortGeneration + iOS session 流（跨仓协议改动）；process-nonce + go-bridge 对象身份淘汰更局部，不改 session 流/rebind |
-| `ProjectionReducer` 级测试 | deferred | driver 测试代码；本次限定"优化文档"。identity 已对齐 reducer 源码（L535+L16-17）+ source.kind 分流 + process nonce + crash-respawn 淘汰 + source-proven 校验 |
-| sanitizer seen-flags / cardinality / 负向 fixture（round6 P1-3） | deferred | sanitizer 现用内容 truthiness（`s['text']`）兼任「见过」与「内容」，单侧空 peer 仍通过；doc 已如实收紧为「非空 peer 缺失即失败」。改 seen-flags + assembled cardinality + 负向 fixture（须独立 harness，因 `sanitize.py` 原地重写 dump）属 driver 测试基建，与下述 Gate helper CI gate 同类 |
-| crash→respawn 四态实现测试（round6 P0-1） | deferred | driver + go-bridge 代码：turn 中 crash / turn 后 idle crash / crash+abort 并发 / crash 后首次新 send。设计闭环见 §3.6.3（已对齐 `deleteSession`/`relayEvents` defer/`sess.Send` 源码） |
+| replacement session（abort 返回新 sessionId + iOS 切换） | 不采纳（选 process-nonce 方案） | replacement 需改 go-bridge handleAbortGeneration + iOS session 流（跨仓协议改动）；process-nonce + typed process death 更局部，不改 session 流/rebind |
+| 自动 retry（transport error 后重发同一 prompt） | 不采纳（违反 at-most-once） | DSH server 先 `followup` 入队再返回 `messageId`；transport error 不能证明未送达。需 SDK idempotency key 才能安全 retry，当前协议不支持。v9 以 delivery classification 替代（§3.6.3 ③） |
+| 图片/文件附件上传 | 不采纳（一期 text-only） | DSH SDK 无 upload RPC；`ImageAttachmentRef` 需要 attachment service 对接；`ContentBlock` 无通用 file block。非空返回 `not_supported`（§3.9） |
+| subagent timeline 展示 | 不采纳（一期过滤） | child event 显式过滤不进 root codec（§3.8）。若未来支持需扩展 codec：per-session stream、lineage-aware StreamID、parent/child 关联 |
+| `ProjectionReducer` 级测试 | deferred | driver 测试代码。identity 已对齐 reducer 源码（L535+L16-17）+ source.kind 分流 + process nonce + typed process death + source-proven 校验 |
+| sanitizer seen-flags / cardinality / 负向 fixture（round6 P1-3） | deferred | sanitizer 现用内容 truthiness（`s['text']`）兼任「见过」与「内容」，单侧空 peer 仍通过；doc 已如实收紧为「非空 peer 缺失即失败」。改 seen-flags + assembled cardinality + 负向 fixture 属 driver 测试基建 |
+| crash→respawn / at-most-once / typed death 实现测试（round6 P0-1 + round7 P0-2/P0-3） | deferred | driver + go-bridge 代码：验收矩阵 #6-#9, #12 的 fault-injection 场景（pre-send dead、zero-byte/partial/full send、response lost、健康 error 后继续、process exit、abort/crash/stale relay 并发）。设计闭环见 §3.6.3（已对齐 `deleteSession`/`relayEvents` defer/`sess.Send`/`prompt()` 源码） |
+| notification session scope 实现测试（round7 P0-1） | deferred | driver + go-bridge 代码：验收矩阵 #2-#5 的 subagent/foreign/ignorable 场景。设计闭环见 §3.8（已对齐 `types.ts:50-104`/`server.ts:71-103`/`client.ts:354-371`） |
+| attachment contract test（round7 P1-1） | deferred | driver 代码：text-only ✅ / image → not_supported / file → not_supported / 混合 → not_supported。设计见 §3.9 |
+| durable notification dump（round7 P1-3） | deferred | gate helper 把全部 4 类 notification 以带 method/params 的 sanitized JSONL 保存；当前证据为 `.stdout` / `run-output.txt` |
 | `block-start/end → newPart` 扩展 core.Event | 一期不扩展 | core.Event 无 newPart；一期自然合并（同 turn 多 block text 拼接）。若要 block 级独立 part，扩展 core.Event+wire（协议改动） |
 | Gate helper 完整 CI gate（malformed/join） | 部分采纳 | 已修：env 转发/O_TRUNC/sendAndWait 竞态/rpc-error/PARTIAL exit 1/peer 断言。完整 malformed/join 属 driver 测试基建 |
 | fail-closed durable fixture / protocol pack 同步 | deferred | 测试基建/跨仓协议 |
@@ -274,4 +462,4 @@ pinned `47f943859bef60e4160492346772ded9b24f765a`。
 **main.go v7 实际修复**：① `DSH_PERMISSION_MODE`/`DSH_SYSTEM_PROMPT` 转发；② dump `O_TRUNC`；③ `sendAndWait` 先注册后写 + rpc-error 返回 nil（fatal exit 1）；④ **PARTIAL→`os.Exit(1)`**；⑤ error response 不打印 OK；⑥ **gofmt 干净 + go vet 无诊断**。
 **sanitize.py v7**：递归 scrub + **双向 peer 断言**（chunk→assembled 与 assembled→chunk 双向，**非空** peer 缺失即失败；负向样本 assembled-only/chunk-only 均 FAIL）+ 无路径断言。**已知边界（round6 P1-3）**：断言用内容 truthiness（`s['text']`/`s['atext']`）兼任「见过记录」与「拼接内容」，单侧空 text delta / 单侧空 assembled text 仍通过；当前真实 dump 无空块，既有结论不受影响。完整「缺任一 peer 即失败」需 seen-flags + assembled cardinality + 负向 fixture，见 §15 deferred。
 
-**当前结论**：协议选型、事件映射（自包含+source.kind 分流）、identity（对齐 reducer + process nonce + source-proven turn/step 校验）、crash→respawn 闭环（go-bridge 对象身份淘汰）、双写去重（peer 断言）、usage 公式、权限 composition（环境切换）七块设计完整且有真实证据。剩余为 driver 实现代码（respawn 四态测试/sanitizer seen-flags fixture/protocol 同步）与特殊触发 dump。
+**当前结论（v9）**：协议选型（SDK JSON-RPC，3 request + 4 notification）、事件映射（自包含 + source.kind 分流 + ignorable fail-closed）、identity（对齐 reducer + process nonce + source-proven turn/step 校验）、交付语义（at-most-once delivery）、进程生命周期（typed process death + CAS Close ownership）、notification session scope（root/descendant/foreign 路由矩阵）、attachment 策略（一期 text-only）、session.status 消费规则、双写去重（peer 断言）、usage 公式、权限 composition（环境切换）十一块设计完整且有真实/源码证据。剩余为 driver 实现代码（respawn/at-most-once/typed-death fault-injection 测试、notification scope fixture、attachment contract test、sanitizer seen-flags fixture、durable notification dump、protocol 同步）与特殊触发 dump。
