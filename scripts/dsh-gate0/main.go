@@ -232,6 +232,10 @@ func main() {
 		defer func() { _ = takePending(fmt.Sprintf("%d", id)) }()
 		select {
 		case f := <-ch:
+			if len(f.Error) > 0 {
+				fmt.Printf("[rpc-error] id=%d %s\n", id, truncate(string(f.Error), 200))
+				return nil
+			}
 			return f
 		case <-time.After(90 * time.Second):
 			fmt.Printf("[TIMEOUT] waiting id=%d\n", id)
@@ -300,6 +304,7 @@ func main() {
 		fmt.Println("\nVERDICT: PASS — turn/end captured.")
 	} else {
 		fmt.Println("\nVERDICT: PARTIAL — no turn/end or had errors.")
+		os.Exit(1)
 	}
 }
 

@@ -70,6 +70,14 @@ def assert_consistency(events, fname):
                 steps[key]['ausage'] = d.get('usage')
     bad = []
     for k, s in steps.items():
+        # peer-existence assertions (round4 P1): a step with content/usage delta
+        # MUST have an assembled peer; missing peer means lost frames, not success.
+        if s['text'] and not s['atext']:
+            bad.append(f'{fname} step{k}: text delta present but assembled text missing (peer lost)')
+        if s['reason'] and not s['areason']:
+            bad.append(f'{fname} step{k}: reasoning delta present but assembled reasoning missing')
+        if s['cusage'] and not s['ausage']:
+            bad.append(f'{fname} step{k}: chunk usage present but assembled usage missing')
         if s['atext'] and s['text'] != s['atext']:
             bad.append(f'{fname} step{k}: text chunk!=assembled ({len(s["text"])} vs {len(s["atext"])})')
         if s['areason'] and s['reason'] != s['areason']:
