@@ -20,6 +20,10 @@ xcuserdata/
 *.log
 *.tmp
 
+# Python bytecode (evidence tooling under scripts/, e.g. scripts/dsh-gate0)
+__pycache__/
+*.pyc
+
 # Agent memory files
 # CLAUDE.md is a shared project guide and is tracked with the root live docs.
 AGENTS.md

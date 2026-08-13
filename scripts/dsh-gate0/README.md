@@ -44,16 +44,18 @@ DSH_PERMISSION_MODE=danger-full-access DSH_GATE0_CONFIG=/abs/driver-cordis.yml \
 **环境切换**：run3↔run4 preset/mode/policy 真实切换。
 **计数**：裸 mock=11，union=17。
 
-## 净化 + peer 一致性断言（round4 P1）
+## 净化 + peer 一致性断言（round4 P1；双向 round5；边界 round6）
 
 `sanitize.py`：
 1. **递归 scrub** 所有 JSON string 值（`/private/var/folders/.../dsh-conn-cwd-NNN`→`<CWD>`、`/tmp/dsh-*.txt`→`<TMPFILE>`）
-2. **peer-existence + equality 断言**：每 `(turn,step)` 有 text/reasoning delta **必须**有 assembled peer（缺 peer 即失败，不再空通过）；chunk usage **必须**有 assembled usage peer；内容相等；无路径残留
+2. **双向 peer + equality 断言（round5）**：每 `(turn,step)` 的 chunk text/reasoning/usage 与 assembled text/reasoning/usage **互为 peer**——chunk-only 或 assembled-only 的**非空**内容均判失败（负向样本 assembled-only/chunk-only 均 FAIL）；内容相等；无路径残留
 
 ```sh
 python3 sanitize.py
 # → assert: chunk==assembled, usage peer exists+equal, no host path — ALL PASS
 ```
+
+> **已知边界（round6 P1-3）**：断言以内容 truthiness（`s['text']`/`s['atext']`）兼任「见过记录」与「拼接内容」，单侧**空** text delta / 单侧**空** assembled text 仍通过。当前真实 dump（run1-4）无空块，既有结论不受影响。完整「缺任一 peer 即失败」需改 seen-flags + assembled cardinality + 独立负向 fixture（`sanitize.py` 原地重写 dump，负向样本须单独 harness），属 driver 测试基建，见设计文档 §15 deferred。
 
 ## main.go（v6 修复，round4 P1）
 
