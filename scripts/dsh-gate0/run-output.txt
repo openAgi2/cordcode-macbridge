@@ -1,0 +1,44 @@
+[spawn] pid=96985
+[initialize OK] {"serverInfo":{"name":"deepseek-harness-sdk-runtime","version":"0.0.1"}}
+[event] seq=0   type=agent/inbox/spliced
+[status] {"sessionId":"conn-test","status":"running"}
+[event] seq=1   type=turn/start
+[event] seq=2   type=agent/inbox/spliced
+[prompt OK] {"messageId":"8c35ffa2-ba4c-4197-8bb4-67939f1d545f"}
+[event] seq=3   type=step/start
+[event] seq=4   type=user/message
+[event] seq=5   type=session/title
+[event] seq=6   type=request/header
+[event] seq=7   type=request/context
+[mock] #1 POST /chat/completions  body=6541 bytes
+[event] seq=8   type=assistant/chunk
+[event] seq=9   type=assistant/chunk
+[event] seq=10  type=assistant/chunk
+[event] seq=11  type=assistant/chunk
+[event] seq=12  type=assistant/chunk
+[event] seq=13  type=assistant/message
+[event] seq=14  type=step/end
+[event] seq=15  type=turn/end
+[status] {"sessionId":"conn-test","status":"idle"}
+[shutdown OK] {}
+
+==================== RESULT ====================
+captured 16 session.event notifications:
+  - agent/inbox/spliced
+  - turn/start
+  - agent/inbox/spliced
+  - step/start
+  - user/message
+  - session/title
+  - request/header
+  - request/context
+  - assistant/chunk
+  - assistant/chunk
+  - assistant/chunk
+  - assistant/chunk
+  - assistant/chunk
+  - assistant/message
+  - step/end
+  - turn/end
+
+VERDICT: PASS — Go drove DSH over stdio JSON-RPC and received the live session.event stream.
