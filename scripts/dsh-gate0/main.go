@@ -1,18 +1,17 @@
 // DSH SDK protocol connectivity probe (Gate 0 evidence).
 //
-// Two modes, selected by DEEPSEEK_API_KEY:
-//   - mock  (key == "dsh-conn-fake-key"): local HTTP server impersonates the
-//     DeepSeek API with a canned SSE turn — no real key needed (Gate 0).
-//   - real  (any other non-empty key):    connects to the real DeepSeek API
-//     (DEEPSEEK_BASE_URL optional), drives one turn with prompt = args[1],
-//     and appends every session.event's full JSON params to DSH_GATE0_DUMP.
+// Two modes by DEEPSEEK_API_KEY:
+//   - mock (key == "dsh-conn-fake-key"): local HTTP canned SSE turn, no real key.
+//   - real (other non-empty key): real DeepSeek API; prompt = args[1]; appends every
+//     session.event full JSON to DSH_GATE0_DUMP (O_TRUNC overwrite per run).
 //
 // Env:
-//   DSH_ROOT            (required) path to deepseek-harness checkout (pnpm install done)
-//   DEEPSEEK_API_KEY    fake key → mock; real key → real API
-//   DSH_GATE0_CONFIG    (optional) cordis.yml path; default <DSH_ROOT>/examples/jsonrpc-agent/cordis.yml
-//   DSH_GATE0_MAX_TOKENS (optional, real mode) initialize maxTokens; default 2048
-//   DSH_GATE0_DUMP      (optional, real mode) file to append full session.event JSON
+//   DSH_ROOT            (required) deepseek-harness checkout (pnpm install done)
+//   DEEPSEEK_API_KEY    fake → mock; real → real API
+//   DSH_GATE0_CONFIG    (optional) cordis.yml; default examples/jsonrpc-agent/cordis.yml
+//   DSH_GATE0_MAX_TOKENS (optional, real) initialize maxTokens; default 2048
+//   DSH_GATE0_DUMP      (optional, real) file to write full session.event JSON (overwrite)
+//   DSH_PERMISSION_MODE / DSH_SYSTEM_PROMPT (forwarded to the child when set)
 package main
 
 import (
@@ -59,21 +58,22 @@ func main() {
 	apiKey := os.Getenv("DEEPSEEK_API_KEY")
 	realMode := apiKey != "" && apiKey != "dsh-conn-fake-key"
 	var baseURL, promptText string
-	var maxTokens int = 2048
+	maxTokens := 2048
 	if v := os.Getenv("DSH_GATE0_MAX_TOKENS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			maxTokens = n
 		}
 	}
 	var dumpFile *os.File
+	verdictOK := true
 	if realMode {
 		if len(os.Args) < 2 {
 			fatal("real mode requires prompt as args[1]")
 		}
 		promptText = os.Args[1]
-		baseURL = os.Getenv("DEEPSEEK_BASE_URL") // empty → runtime default
+		baseURL = os.Getenv("DEEPSEEK_BASE_URL")
 		if dp := os.Getenv("DSH_GATE0_DUMP"); dp != "" {
-			f, err := os.OpenFile(dp, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+			f, err := os.OpenFile(dp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644) // overwrite per run
 			must(err)
 			dumpFile = f
 			defer dumpFile.Close()
@@ -82,7 +82,6 @@ func main() {
 	} else {
 		apiKey = "dsh-conn-fake-key"
 		promptText = "say hello"
-		// mock server
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
 		must(err)
 		port := ln.Addr().(*net.TCPAddr).Port
@@ -120,6 +119,12 @@ func main() {
 		"DSH_CWD=" + cwd,
 		"DSH_SESSION_ROOT=" + sessionRoot,
 	}
+	// Forward permission/policy env to the child (round-3 P1: was missing).
+	for _, k := range []string{"DSH_PERMISSION_MODE", "DSH_SYSTEM_PROMPT"} {
+		if v := os.Getenv(k); v != "" {
+			env = append(env, k+"="+v)
+		}
+	}
 	if baseURL != "" {
 		env = append(env, "DEEPSEEK_BASE_URL="+baseURL)
 	}
@@ -149,6 +154,7 @@ func main() {
 	var mu sync.Mutex
 	pending := map[string]chan *rpcFrame{}
 	var eventTypes []string
+	var rpcErrors []json.RawMessage
 	regPending := func(key string) chan *rpcFrame {
 		ch := make(chan *rpcFrame, 1)
 		mu.Lock()
@@ -174,6 +180,12 @@ func main() {
 				continue
 			}
 			if len(f.ID) > 0 && f.Method == "" {
+				if len(f.Error) > 0 { // JSON-RPC error response
+					mu.Lock()
+					rpcErrors = append(rpcErrors, f.Error)
+					mu.Unlock()
+					fmt.Printf("[rpc-error] id=%s %s\n", string(f.ID), truncate(string(f.Error), 200))
+				}
 				if ch := takePending(string(f.ID)); ch != nil {
 					ch <- &f
 				}
@@ -204,16 +216,19 @@ func main() {
 		}
 	}()
 
-	send := func(id int, method string, params any) {
+	// sendAndWait registers the pending channel BEFORE writing stdin, so a fast
+	// response cannot race past registration (round-3 P1).
+	sendAndWait := func(id int, method string, params any) *rpcFrame {
+		ch := regPending(fmt.Sprintf("%d", id))
 		obj := map[string]any{"jsonrpc": "2.0", "id": id, "method": method}
 		if params != nil {
 			obj["params"] = params
 		}
 		b, _ := json.Marshal(obj)
-		_, _ = stdin.Write(append(b, '\n'))
-	}
-	waitResp := func(id int) *rpcFrame {
-		ch := regPending(fmt.Sprintf("%d", id))
+		if _, err := stdin.Write(append(b, '\n')); err != nil {
+			_ = takePending(fmt.Sprintf("%d", id))
+			return nil
+		}
 		defer func() { _ = takePending(fmt.Sprintf("%d", id)) }()
 		select {
 		case f := <-ch:
@@ -234,24 +249,21 @@ func main() {
 		return false
 	}
 
-	send(1, "initialize", map[string]any{"cwd": cwd, "provider": "deepseek-official", "model": "deepseek-chat", "maxTokens": maxTokens})
-	if r := waitResp(1); r != nil {
+	if r := sendAndWait(1, "initialize", map[string]any{"cwd": cwd, "provider": "deepseek-official", "model": "deepseek-chat", "maxTokens": maxTokens}); r != nil {
 		fmt.Printf("[initialize OK] %s\n", truncate(string(r.Result), 300))
 	} else {
-		fatal("initialize timed out")
+		fatal("initialize failed/timed out")
 	}
-	send(2, "session/prompt", map[string]any{"sessionId": "conn-test", "contentBlocks": []map[string]any{{"type": "text", "text": promptText}}})
-	if r := waitResp(2); r != nil {
+	if r := sendAndWait(2, "session/prompt", map[string]any{"sessionId": "conn-test", "contentBlocks": []map[string]any{{"type": "text", "text": promptText}}}); r != nil {
 		fmt.Printf("[prompt OK] %s\n", truncate(string(r.Result), 200))
 	} else {
-		fatal("session/prompt timed out")
+		fatal("session/prompt failed/timed out")
 	}
 	deadline := time.Now().Add(120 * time.Second)
 	for time.Now().Before(deadline) && !hasEventType("turn/end") {
 		time.Sleep(150 * time.Millisecond)
 	}
-	send(3, "shutdown", nil)
-	waitResp(3)
+	sendAndWait(3, "shutdown", nil)
 	_ = stdin.Close()
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -265,13 +277,11 @@ func main() {
 	mu.Lock()
 	defer mu.Unlock()
 	fmt.Println("\n==================== RESULT ====================")
-	// distinct types in order
 	seen := map[string]bool{}
 	var distinct []string
-	turnedOK := false
 	for _, t := range eventTypes {
 		if t == "turn/end" {
-			turnedOK = true
+			verdictOK = true
 		}
 		if !seen[t] {
 			seen[t] = true
@@ -282,11 +292,24 @@ func main() {
 	for _, t := range distinct {
 		fmt.Printf("  - %s\n", t)
 	}
-	if turnedOK {
+	if len(rpcErrors) > 0 {
+		verdictOK = false
+		fmt.Printf("RPC errors: %d\n", len(rpcErrors))
+	}
+	if hasEventTypeLocked(eventTypes, "turn/end") && verdictOK {
 		fmt.Println("\nVERDICT: PASS — turn/end captured.")
 	} else {
-		fmt.Println("\nVERDICT: PARTIAL — no turn/end.")
+		fmt.Println("\nVERDICT: PARTIAL — no turn/end or had errors.")
 	}
+}
+
+func hasEventTypeLocked(types []string, t string) bool {
+	for _, e := range types {
+		if e == t {
+			return true
+		}
+	}
+	return false
 }
 
 func must(err error) {

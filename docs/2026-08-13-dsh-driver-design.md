@@ -1,152 +1,104 @@
 # DeepSeek Harness (DSH) Driver 设计文档
 
-- **日期**：2026-08-13（v4：落实 round2 审计 —— identity 矩阵、双写去重、dump 净化、计数修正）
-- **Runtime**：DeepSeek Harness `dsh-jsonrpc-agent`（pinned commit `47f943859bef60e4160492346772ded9b24f765a`，协议 `0.0.1`，`SESSION_FORMAT_VERSION=0`，pre-release 无兼容承诺）
-- **协议**：DSH SDK JSON-RPC 2.0（newline-delimited）over stdio —— **不是** ACP
-- **入口**：spawn `dsh-jsonrpc-agent <cordis.yml>`
-- **证据**：`scripts/dsh-gate0/`（脚本 + 4 次真实 run dump + assembled composition + sanitizer）
-- **审计**：round1（3 P0，v2/v3 修订）、round2（`docs/2026-08-13-dsh-driver-design-audit-round2.md`，REQUEST CHANGES → v4）
+- **日期**：2026-08-13（v5：round3 审计 —— identity 对齐 reducer、dump 语义自洽、环境切换验证）
+- **Runtime**：DeepSeek Harness `dsh-jsonrpc-agent`（pinned `47f943859bef60e4160492346772ded9b24f765a`，协议 `0.0.1`，`SESSION_FORMAT_VERSION=0`，pre-release）
+- **协议**：DSH SDK JSON-RPC 2.0 over stdio（**非** ACP）
+- **证据**：`scripts/dsh-gate0/`（4 次真实 run + assembled composition + sanitizer 带一致性断言）
+- **审计**：round1/2/3（`docs/2026-08-13-dsh-driver-design-audit-round{1,2,3}.md`）
 
 ---
 
-## 0. 协议选型：为什么不用 ACP
+## 0. 协议选型
 
-DSH 同时实现两条 stdio JSON-RPC 协议，**只有 SDK 协议满足 rich timeline**：
-
-| 维度 | ACP server | **SDK server ✅** |
-|---|---|---|
-| thinking/reasoning | ❌ 显式丢弃 | ✅ `reasoning-delta` chunk（runtime-dump verified） |
-| tool calls / 结果 | ❌ 丢弃 | ✅ `tool/call` + `tool/result`（runtime-dump verified） |
-| todos / usage / turn | ❌ 丢弃 | ✅（runtime-dump verified） |
-
-DSH `KNOWN_SESSION_EVENT_TYPES` = **44 种**（pinned commit 枚举）。
+SDK 协议满足 rich timeline（reasoning/tool/todo/usage），ACP 显式丢弃这些。DSH `KNOWN_SESSION_EVENT_TYPES` = 44 种。
 
 ---
 
-## 1. Runtime 版本范围
+## 1-2. Runtime / 进程参数
 
-pre-release，`serverInfo.version` 恒 `0.0.1`，无协议版本协商。检测靠 `serverInfo.name === 'deepseek-harness-sdk-runtime'`。`SESSION_FORMAT_VERSION=0` 无兼容承诺。forward-compat：未知 `event.type` 带 `ignorable:true` 可跳过，否则拒绝重建。
-
----
-
-## 2. 进程参数
-
-```
-dsh-jsonrpc-agent <path/to/cordis.yml>
-```
-
-强制要求显式 config（argv 或 `$DSH_CORDIS_CONFIG`）。config 决定**工具面 + 权限栈**（§3.5）。
-
-| 变量 | 用途 |
-|---|---|
-| `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` | API 凭据 / endpoint |
-| `DSH_CWD` | agent 工作目录 |
-| `DSH_SESSION_ROOT` | JSONL 持久化根 |
-| `DSH_PERMISSION_MODE` | 权限档位（**driver 须显式注入子进程，§3.5**；仅当 cordis.yml 挂载权限栈时生效） |
-
-stdout 是协议通道；进程组复用 grokbuild `prepareCmdForProcessGroup`。
+`dsh-jsonrpc-agent <cordis.yml>`，强制 config。env：`DEEPSEEK_API_KEY`/`DEEPSEEK_BASE_URL`/`DSH_CWD`/`DSH_SESSION_ROOT`/`DSH_PERMISSION_MODE`（driver 须显式注入子进程，§3.5）。stdout 是协议通道；进程组复用 grokbuild。
 
 ---
 
 ## 3. 输入输出 schema
 
-### 3.1 传输层
+### 3.1-3.2 传输 / 握手
 
-newline-delimited JSON-RPC 2.0。**SDK 协议无 cancel、无 session/close、无 session/resume/load/list**；server→client request 是死能力。
+newline-delimited JSON-RPC 2.0。**无 cancel/session-close/session-resume/load/list**。`initialize`→`{serverInfo:{name:'deepseek-harness-sdk-runtime'}}`；`session/prompt` 惰性创建 session。
 
-### 3.2 初始化握手
+### 3.3 `session.event` → core.Event（证据标签分级）
 
-`initialize`（`{cwd, provider, model, maxTokens?}`）→ `{serverInfo:{name:'deepseek-harness-sdk-runtime', version:'0.0.1'}}`（runtime-dump verified）。无 authenticate。`session/prompt` 带 `sessionId`，runtime 对未知 id 惰性创建。
-
-### 3.3 `session.event` → core.Event 映射（按证据标签分级）
-
-`params.event` = 完整 `SessionEvent` 信封（`{type, seq, time, data, surfaceOp?, sourceEventSeqs?, ignorable?}`）。**证据标签**（round2 P1-5）：🟢 runtime-dump verified / 🔵 source-schema verified / 🟡 composition-generated / ⚪ deferred。
-
-| DSH `event.type` | 标签 | core.Event | 真实 payload 关键字段 |
-|---|---|---|---|
-| `turn/start` | 🟢 | `EventTurnStarted` | `data.turn` |
-| `turn/end`(completed) | 🟢 | 终态 `EventResult` | `data.reason.kind:"completed"` |
-| `turn/end`(max-tokens) | 🟢 | token 限制完成 | `data.reason.kind:"max-tokens"` |
-| `turn/end`(error/aborted/interrupted/blocked) | ⚪ | 终态 | 无样本，deferred |
-| `step/start`·`step/end` | 🟢 | 内部边界 | `data.turn, data.step` |
-| `user/message` | 🟢 | `EventUserMessage` | `data.content[], data.id, data.source.kind` |
-| `assistant/chunk`(text-delta) | 🟢 | `EventText` | `data.chunk.text` |
-| `assistant/chunk`(reasoning-delta) | 🟢 | `EventThinking` | `data.chunk.text` |
-| `assistant/chunk`(tool-call-delta) | 🟢 | **不发 tool start**（§3.7 仅组装参数） | `data.chunk` |
-| `assistant/chunk`(block-start/end/usage/finish) | 🟢 | codec 状态/usage（§3.7） | `data.chunk.type` |
-| `assistant/message` | 🟢 | **只校验，不追加内容**（§3.7） | `data.message.content[], data.message.id, data.usage?` |
-| `tool/call` | 🟢 | `EventToolUse` | `data.callId, name, arguments` |
-| `tool/result` | 🟢 | `EventToolResult` | 双层 content 嵌套, `isError`（🟢 字段存在；⚪ `isError:true` 无样本 deferred） |
-| `tool/result.meta`(FsDiffMeta.diffs) | ⚪ | 不映射 inline diff | 实测 diffs=`[]`，非空样本 deferred |
-| `todo/write` | 🟢 | todo 更新 | `data.todos[]`（status: pending/completed 🟢；in_progress 🔵 schema-only） |
-| `permission/preset`·`sandbox/mode`·`approval/policy` | 🟡 | 控制面/诊断 | assembled composition 产物（§3.5） |
-| `approval/asked`·`decided` | ⚪ | deferred | workspace-write 不触发 |
-| `compaction/*` | ⚪ | deferred | 需长对话 |
-| `session/title` | 🟢 | 标题 | `data.title` |
-| `request/header`·`request/context` | 🟢 | context usage 输入 | `data.contextWindow` |
-| `agent/inbox/spliced` | 🟢 | 内部 | prompt 入队 |
-| `command/*`·`tool-workflow/*`·`goal/plan/schedule`·`session/end-seed` | ⚪ | ignored/deferred | 无样本 |
+🟢 runtime-dump / 🔵 source-schema / 🟡 composition-generated / ⚪ deferred。详见 round2 §3.3 表（不变）。关键：`assistant/message` 🟢 但**只校验不追加内容**（§3.7）；`turn/end` completed+max-tokens 🟢，其余 ⚪；`isError:true`/非空 FsDiff/`todo.in_progress` ⚪。
 
 ### 3.4 turn 生命周期
 
-1. `session.event` 的 `turn/start`+`turn/end`（reason 6 态：completed+max-tokens 🟢，其余 ⚪）
-2. `session.status`（running/idle 🟢）
+`turn/start`+`turn/end`（reason 6 态）+ `session.status`（running/idle）。`session/prompt` 只回 `{messageId}`，turn 完成只认 `turn/end`。
 
-`session/prompt` 只回 `{messageId}` 入队回执（🟢），turn 完成只认 `turn/end`。**seq 不跨 process 对齐**（runtime 重启 fresh-create）。
+### 3.5 权限模型（v5：环境切换 verified）
 
-### 3.5 权限模型
-
-**权限栈在 `packages/bundle/base/cordis.patch.yml`**（`dsh-sandbox-local`+`dsh-sandbox-policy`+`dsh-bash-sandbox`+`dsh-user-approval`+`dsh-permission-presets`），jsonrpc-agent 裸 composition 无此栈。
-
-**assembled 验证（`scripts/dsh-gate0/driver-cordis.yml`，真实 key）**：
-- ✅ 🟢 可加载并跑通；权限栈激活（`permission/preset:"workspace-write"`+`sandbox/mode`+`approval/policy`）
-- ✅ 🟢 **fail-closed**：unconfined `bash-local` + `permission-presets` → runtime 拒绝加载（`does not confine ... misconfiguration`）
-- ⚠️ round2 修正：**`DSH_PERMISSION_MODE` 当前 evidence 只证明 YAML 默认值（workspace-write），未证明环境切换**（Gate helper 未把该变量转发子进程）。driver 必须在 `BuildAgentEnv` 显式注入 `DSH_PERMISSION_MODE`（不依赖基础 allowlist），切换 read-only/workspace-write/danger-full-access；环境切换的 dump 待补
-- 组装约束：bash 用 `bash-sandbox`（confined），不重复挂 `tool-todo/tool-fs`（agent-spine 内置）
+权限栈在 `packages/bundle/base/cordis.patch.yml`。assembled composition（`scripts/dsh-gate0/driver-cordis.yml`）：
+- ✅ 🟢 可加载 + 激活（`permission/preset`+`sandbox/mode`+`approval/policy`）
+- ✅ 🟢 **fail-closed**：unconfined `bash-local` + `permission-presets` → 拒绝加载
+- ✅ 🟢 **环境切换 verified（v5 补）**：main.go 转发 `DSH_PERMISSION_MODE` 后，run3 `workspace-write`+`ask` vs run4 `danger-full-access`+`never`，runtime 真实切换 preset/mode/policy
+- 组装约束：bash 用 `bash-sandbox`（confined），不重复挂 `tool-todo/tool-fs`
 
 一期 `permission_resolve` 不声明（SDK server→client request 死能力）。
 
-### 3.6 DSH identity → core.Event 映射矩阵（v4：round2 P0-1）
+### 3.6 DSH identity → core.Event 映射矩阵（v5：对齐 reducer，round3 P0-1）
 
-**背景**：SSV2 ProjectionReducer 对 identity 有硬门槛 —— 空 `TurnID` 的 turn_started、空 `ItemID` 的 text/reasoning delta、空 call/item identity 的 tool event **被直接 skip**（projection_reducer.go:465/537/568/598；grokbuild acp_codec.go:194-200 注释佐证）。grokbuild 用 ACP `_meta.promptId` 同时填 TurnID+ItemID；**DSH 没有 promptId**，按下表生成稳定 identity。
+**背景**：SSV2 `ProjectionReducer` 对 text/reasoning delta **直接 `turnID := data.itemId`**（projection_reducer.go:535），且注释明确 `itemId == lifecycle turn_id == assistant message id`（L16-17）；`TurnProjection` 一个 turn 只有一个 `Assistant`。grokbuild 用同一 `promptId` 填 TurnID+ItemID 正是此因。
 
-| core.Event 字段 | DSH 来源 | 生成规则 | 稳定性 / 作用域 |
+**v4 错误**：`ItemID="t{turn}-s{step}"` 会被 reducer 当 turnID，把一个 DSH turn 拆成 `t1`/`t1-s1`/`t1-s2` 伪 turn —— 事件不消失却形成**错误投影**（比 identityless-skip 更隐蔽）。
+
+**v5 修正（对齐当前 reducer 模型，不改 wire/reducer）**：
+
+| core.Event 字段 | DSH 来源 | 生成规则 | 说明 |
 |---|---|---|---|
-| `TurnID` | `data.turn`（session 内递增数字） | `"t"+turn`（如 `"t1"`） | session 内唯一；live-only（§4）不跨 process，重启=新 session，turn 复用不冲突 |
-| `ItemID`（assistant text/reasoning） | `data.turn, data.step` | `"t{turn}-s{step}"`（如 `"t1-s1"`） | 一个 (turn,step) 的所有 assistant content（含多 block）属同一 item；chunk 与 assembled message **共用此 id**（§3.7） |
-| `ItemID`（user message） | `user/message.data.id`（UUID） | 直接透传 | DSH 用户消息权威 id |
-| `RequestID`（tool） | `tool/call.data.callId` | 直接透传 | per-tool 稳定；tool_use 与 tool_result 共用 |
-| `ItemID`（tool part） | `tool/call.data.callId` | 同 RequestID | 与 grokbuild toolCallID 先例一致 |
-| `StreamID`/`ParentStreamID` | `subagent/descriptor`（待补） | 一期 main stream（空） | deferred |
+| `TurnID`（所有 event） | `data.turn` | `"t"+turn` | session 内唯一 |
+| `ItemID`（assistant text/reasoning） | `data.turn` | **`"t"+turn`（== TurnID）** | reducer 要求 itemId==turnId；一个 turn 的所有 step 的 assistant content 归同一 turn 的同一 Assistant |
+| `ItemID`（user message） | `user/message.data.id` | 透传 | 用户消息权威 id |
+| `RequestID`（tool） | `tool/call.data.callId` | 透传 | tool_use/tool_result 共用 |
+| `ItemID`（tool part） | `tool/call.data.callId` | == RequestID | tool 依 active turn（t{turn}）归属 |
+| `StreamID`/`ParentStreamID` | `subagent/descriptor` | 一期 main stream（空） | deferred |
 
-**关键决策**：
-1. **TurnID=`"t{turn}"`**：加前缀避免与纯数字 id 冲突。live-only 下 turn 重启从 1 不冲突（新 session）。
-2. **assistant ItemID=`"t{turn}-s{step}"`，不用 `assistant/message.data.message.id`**：chunk（无 message.id）先于 assembled message（有 message.id）到达；若 chunk 用临时 id、assembled 用 message.id，reducer 当两个 item。统一 (turn,step) 使二者落同一 item，双写去重靠 §3.7。`message.id` 仅 DSH 内部，不进 core identity。
-3. **block-start/block-end**：codec 内部状态（标记 text↔reasoning block 切换），不单独发 core.Event；多 block 合并到同一 (turn,step) item。
-4. **callId → RequestID + tool ItemID**：与 grokbuild 先例一致。
+**`(turn,step)` 仅作 codec 内部 chunk/assembled 校验 key（§3.7），不进 projection identity。**
 
-> **reducer 级测试 deferred**（见 §15 不采纳）：identity 矩阵须配 ProjectionReducer 测试证明 frame 不被 skip，但该项属 driver 测试代码，文档阶段不写。
+**多 step / 多 block 处理（reducer 模型约束）**：reducer 一个 turn 一个 `Assistant`。DSH 一个 turn 可含多 step（每 step 一个 assistant message）；按当前模型，同 turn 的所有 step 的 text/reasoning 用同一 `ItemID=t{turn}`，reducer 拼接到同一 turn 的 Assistant。多 content block 用 reducer 已有的 part 边界（block-start/block-end）表达，**不伪造多 turn**。
 
-### 3.7 chunk 与 assembled message 双写：唯一 owner 与去重（v4：round2 P0-2）
+> **若产品需要 turn 内 step 级独立 assistant message**：必须把 turnId 与 itemId 分离送到 wire 并扩展 `TurnProjection`/patch/reducer —— 这是**协议 + 消费者改动**，不再是"无 bridge-v1 change"。一期不做（接受 reducer 模型约束）。
 
-真实 dump 证实 `assistant/message` 是 chunks 的组装态（8/8 step：拼接 text-delta=assembled text、reasoning-delta=assembled reasoning、chunk usage=assembled usage）。若两者都写正文/reasoning/usage，确定性重复。`tool-call-delta` 后又有权威 `tool/call`，同类风险。
+**process generation 不变量（round3 P0-1 第二点）**：`data.turn` 在新 DSH process 从 1 开始。**driver 生产不变量：cancel/runtime 重启必须换新外层 sessionId**（live-only，§4，session 终止即不复用），否则 `t1` 会在同一 projection key 复用。driver 实现须在 Close 后强制新 sessionId，不得复用。
+
+> **reducer 级测试 deferred**（§15）：identity 矩阵须配 ProjectionReducer 测试证明 frame 不被 skip 且不形成伪 turn，属 driver 测试代码。
+
+### 3.7 chunk 与 assembled message 双写：唯一 owner 与去重（v5：证据自洽）
+
+**证据（v5）**：4 份真实 dump（无路径 prompt 重新生成）经 `sanitize.py` 净化后，**机器断言**：每 `(turn,step)` chunk text/reasoning 拼接 == assembled（run1 0/2、run2 0/1、run3 0/2、run4 0/4 mismatch），usage 双源（chunk usage == assembled usage）相等，无路径残留。证明 `assistant/message` 是 chunks 组装态。
 
 **唯一 owner 规则**：
 
-| 逻辑字段 | 唯一 owner（发 core.Event 的一方） | 另一方用途 |
+| 逻辑字段 | 唯一 owner | 另一方 |
 |---|---|---|
-| live text | `assistant/chunk`(text-delta) → `EventText` | `assistant/message` 只校验，**不追加 text** |
-| live reasoning | `assistant/chunk`(reasoning-delta) → `EventThinking` | `assistant/message` 只校验 |
-| usage（token） | **`assistant/chunk`(usage) 一处写**（`InputTokens`/`OutputTokens`） | `assistant/message.usage` 不重复写（选 chunk 作 owner：更早到达，支持 live 计费） |
-| tool start | `tool/call` → `EventToolUse`（权威） | `tool-call-delta` **只组装 arguments**，不发 tool start |
+| live text | `assistant/chunk`(text-delta) → `EventText` | `assistant/message` 只校验 |
+| live reasoning | `assistant/chunk`(reasoning-delta) → `EventThinking` | 同上 |
+| usage | **`assistant/chunk`(usage) 一处写** | `assistant/message.usage` 不重复 |
+| tool start | `tool/call` → `EventToolUse` | `tool-call-delta` 只组装 arguments |
 | tool result | `tool/result` → `EventToolResult` | — |
-| assembled 校验 | `assistant/message` 到达时校验 拼接==assembled | 一致→确认 item 完成；不一致→记日志，以 chunk 为准（不发新 Event） |
+| assembled 校验 | `assistant/message` 到达校验 拼接==assembled | 不发新 Event |
 
-**4 种情况覆盖**：
-1. **正常流**（chunk→…→assistant/message→turn/end）：chunk 发 text/reasoning/usage，assembled 校验，turn/end 收口。
-2. **无 delta 但有 assembled message**（模型一次性返回）：chunk 缺失时，`assistant/message` **降级为 owner**（发 text/reasoning/usage），用 §3.6 ItemID。
-3. **重复 frame**（重放/乱序）：按 `(sessionId, seq)` 去重 —— codec 记录已处理 seq，重复丢弃；同 (turn,step) chunk 按 seq 单调追加。
-4. **缺失 assembled message**（turn/end 前断连）：chunk 已发的 text/reasoning 保留（item=running），turn/end 收口；assembled 校验跳过。
+**usage 字段映射（v5 补，round3 P1-3）**：DSH usage = `{inputTokens, outputTokens, cacheReadTokens, reasoningTokens}` → `core.ContextUsage`：
+- `InputTokens` ← inputTokens；`OutputTokens` ← outputTokens
+- `CachedInputTokens` ← cacheReadTokens；`ReasoningOutputTokens` ← reasoningTokens
+- `UsedTokens` ← inputTokens+outputTokens；`TotalTokens`/`ContextWindow` ← `request/context.contextWindow`
+- 唯一 owner = chunk usage（`EventContextUsageUpdated`），assembled usage 不重复写
+
+**4 种情况（标签修正）**：
+1. **正常流**（chunk→…→assembled→turn/end）：🟢 有样本，chunk 发 text/reasoning/usage，assembled 校验。
+2. **无 delta 但有 assembled**（模型一次性返回）：⚪ **无样本，防御性设计** —— chunk 缺失时 assembled 降级为 owner（用 §3.6 ItemID），实现时须有测试。
+3. **重复 frame**：⚪ 无样本 —— codec 用 `processed-seq` set 去重（重复 seq 丢弃）；**去重 ≠ 乱序重排**，二者分开。
+4. **乱序/gap**：⚪ 无样本 —— gap/buffer/flush 顺序规则**未定义**，实现时须设计 + 测试。
+
+> §3.7 不再宣称 assembled-only/重复/乱序为"已观测模式"，均标 ⚪ deferred。
 
 ---
 
@@ -154,137 +106,86 @@ newline-delimited JSON-RPC 2.0。**SDK 协议无 cancel、无 session/close、�
 
 | 操作 | 一期 | 说明 |
 |---|---|---|
-| 创建/发送 | ✅ `session/prompt`（惰性创建） | 返回 `{messageId}` |
-| 取消 | ❌ kill 进程（§5） | session 终止 |
-| 列出/resume | ❌ **一期不支持** | SDK 无 session/list/resume；扫 JSONL 只恢复 Mac 投影，不恢复 DSH 模型上下文 |
+| 创建/发送 | ✅ `session/prompt` | `{messageId}` |
+| 取消 | ❌ kill 进程 | session 终止，sessionId 不复用（§3.6 不变量） |
+| 列出/resume | ❌ | live-only |
 
-**`Agent.ListSessions` live-only 返回（round2 P1-4）**：driver 实现 `core.Agent.ListSessions` 时，**不得伪造空成功**。一期返回**确定的空列表 + 明确 reason**（`live-only backend, no persistent catalog`），或对调用方标注 unsupported；iOS 侧不展示 DSH 历史列表。这保证不伪造数据（`SecurityAndTruthfulnessTests` 护栏）。
-
----
-
-## 5. 取消与关闭
-
-**SDK 无 cancel**：取消 = kill 进程 + session 终止。Close 三阶段（shutdown RPC → SIGTERM 进程组 → SIGKILL），复用 grokbuild `proc_unix.go`。正常 `shutdown→{}` 🟢；SIGTERM/SIGKILL 回收路径 ⚪（driver 实现时补）。
+**`Agent.ListSessions` Go 契约（v5 固定，round3 P1-1）**：返回 `nil, core.ErrNotSupported`（wrapped，非二选一）。wire 层映射为确定的 unsupported error（不伪造空成功，不返回空 slice 假装成功）。iOS 侧不展示 DSH 历史列表。
 
 ---
 
-## 6. 错误分类
+## 5-7. 取消关闭 / 错误 / 脱敏
 
-JSON-RPC error / stdout 解码失败 / 进程意外退出 / 未知非 ignorable event → `EventError` + 降级。`initialize` 失败 → descriptor `not_detected`。⚪ JSON-RPC error、坏 JSON、超长行、未知 discriminant 无样本，codec 必须 **fail visibly**（不得静默伪成功）。
-
----
-
-## 7. 敏感信息脱敏
-
-`tool/call.arguments`/`tool/result` 正文不全广播。**iOS 不做消息内 diff**：FsDiffMeta（实测 diffs=`[]`）不映射 inline diff，走 session 级 diff bar。`DEEPSEEK_API_KEY` 不进日志/dump（已确认 dumps 无 key）。**已提交 dumps 经 `scripts/dsh-gate0/sanitize.py` 净化**（cwd/临时目录→`<CWD>`/`<TMPFILE>` 占位符，round2 P0-3）。
+Close 三阶段（shutdown→SIGTERM→SIGKILL）；正常 `shutdown→{}` 🟢，SIGTERM/SIGKILL 回收 ⚪。错误 → `EventError` + fail visibly。脱敏：dumps 经 `sanitize.py` 净化（递归 scrub + 一致性断言），无 key/无本机路径。
 
 ---
 
-## 8. capability 与 WireDescriptor
+## 8. capability
 
-```go
-&core.WireDescriptor{
-    Kind: "deepseek", DisplayName: "DeepSeek",
-    LiveEventModel: core.LiveEventSessionProcess,   // owned-process
-    RequiresExternalTurnPolling: false,              // 不支持外部 turn 观察
-    StaticCapabilities: nil,
-}
-```
-
-| capability | 决策 | 标签 |
-|---|---|---|
-| `session_state` | ✅ | 🟢 |
-| `workspace_diff` | ✅ | 🟢 |
-| `diagnostics` | ✅ | 🟢 |
-| `todos` | ⚠️ 须先实现 `FetchTodos` 持久化读路径 | `todo/write` 🟢，FetchTodos ⚪ |
-| `usage_reporting` | ⚠️ 须先实现跨 session 聚合/去重 | usage shape 🟢，聚合 ⚪ |
-| `session_history`/`list`/`resume` | ❌ live-only | — |
-| `permission_resolve` | ❌ | SDK 死能力 |
-| `external_turn_streaming` | ❌ | owned-process |
-| `supports_checkpoint` | ❌ | live-only |
-
-`deriveBackendCapabilities` 硬编码分支：DSH id 不匹配任一特判，无需改。
+`LiveEventSessionProcess`，无 `external_turn_streaming`。声明：`session_state`/`workspace_diff`/`diagnostics` 🟢；`todos`/`usage_reporting` ⚠️ 须先实现持久化读/聚合；`session_history`/`permission_resolve`/`supports_checkpoint` ❌。
 
 ---
 
-## 9. protocol 决策
+## 9-11. protocol / 文件 / 三仓
 
-无 bridge-v1 protocol change。仍须按双仓规则更新 canonical protocol compatibility pack + iOS mirror（round1 P1-6）。
-
----
-
-## 10. 文件结构 + driver `config/cordis.yml`
-
-见 `scripts/dsh-gate0/driver-cordis.yml`（assembled 验证通过）。要点：bash 用 `bash-sandbox`（confined），不重复挂 `tool-todo/tool-fs`（agent-spine 内置），`compression:none` 便于读 JSONL。与 grokbuild 复用：`proc_unix.go`/Close/`BuildAgentEnv`；`acp_codec.go` 不复用；不需 catalog。
+无 bridge-v1 change（**除非**产品要 turn 内多 assistant message，则协议改动，§3.6）。driver `config/cordis.yml` 见 `scripts/dsh-gate0/driver-cordis.yml`。go-bridge：`BuildAgentEnv` 显式注入 `DSH_PERMISSION_MODE`；iOS：`BackendKind.deepSeek`，不展示历史。
 
 ---
 
-## 11. 三仓改动面
+## 12. 证据（v5：新 dumps + 环境切换 + 一致性断言）
 
-A. MacBridge driver（`agent/deepseek/`，§10）；B. go-bridge（`main.go` import+alias+opts、`agent_descriptor.go`、`handlers.go` handleSendMessage；**无** list/resume dispatch；**`BuildAgentEnv` 显式注入 `DSH_PERMISSION_MODE`**）；C. iOS + remote-web（`BackendKind.deepSeek`、不展示历史/resume）。
+pinned `47f943859bef60e4160492346772ded9b24f765a`，node v25.9.0，go1.26.2。
 
----
-
-## 12. 证据（round2 修正计数 + 标签分级）
-
-脚本 + dump：`scripts/dsh-gate0/`。pinned：DSH `47f943859bef60e4160492346772ded9b24f765a`，node v25.9.0，go1.26.2。
-
-| Run | composition | 捕获 distinct types | 关键 verified |
-|---|---|---|---|
-| Gate0(mock) | jsonrpc-agent | **11**（round2 修正：v3 误写 14） | 协议连通 |
-| run1 | jsonrpc-agent | 14 | todo/write, tool/call, tool/result, reasoning-delta, chunk 7 discriminant |
-| run2 | jsonrpc-agent(maxTokens=24) | 11 | turn/end(max-tokens), usage |
-| run3 | **driver-cordis.yml** | 16 | §10 可加载；permission/sandbox/approval 激活 |
-| run4 | driver-cordis.yml | 16 | bash 写临时区（sandbox 允许） |
-| **union** | — | **17** | runtime-dump verified |
+| Run | composition | env | distinct | 关键 |
+|---|---|---|---|---|
+| Gate0(mock) | jsonrpc-agent | — | 11 | 连通 |
+| run1 | jsonrpc-agent | — | 14 | todo/write, tool/call, tool/result, reasoning-delta |
+| run2 | jsonrpc-agent | maxTokens=24 | 11 | turn/end(max-tokens), usage |
+| run3 | driver-cordis.yml | **workspace-write** | 16 | §10 可加载；preset=workspace-write, mode=workspace-write, policy=ask |
+| run4 | driver-cordis.yml | **danger-full-access** | 16 | **环境切换**：preset=danger-full-access, mode=danger-full-access, policy=**never** |
+| union | — | — | 17 | runtime-dump verified |
 
 **fail-closed** 🟢：`bash-local`(unconfined)+`permission-presets` → 拒绝加载。
+**环境切换** 🟢（v5）：run3 vs run4 preset/mode/policy 真实切换（main.go 转发 `DSH_PERMISSION_MODE`）。
+**dump 自洽** 🟢（v5）：`sanitize.py` 净化后机器断言 chunk==assembled（text/reasoning）、usage 双源相等、无路径 —— ALL PASS。
+**计数**：裸 mock=11，union=17。
 
-**计数澄清（round2 P0-4）**：裸 Gate 0 mock = **11 类**（不是 14）；assembled composition run = 16 类；四次 run **union = 17 类**。单次覆盖 ≠ union。
-
-**dump 净化（round2 P0-3）**：已提交 dumps 经 `sanitize.py` 处理，`/private/var/folders/.../dsh-conn-cwd-NNN`→`<CWD>`、`/tmp/dsh-*.txt`→`<TMPFILE>`，保留字段形状；净化后广 grep 验证无本机路径。
-
-**剩余 27 类**：compaction/approval-asked/error 终态/非空 FsDiff/command/tool-workflow/goal-plan-schedule 等，需特殊触发（长对话/审批操作/模型失败/专用工具），deferred（§3.3 ⚪）。
+**剩余 ⚪**：compaction/approval-asked/error 终态/非空 FsDiff/command/tool-workflow/goal-plan-schedule/assembled-only/乱序/SIGTERM 回收/JSON-RPC error。
 
 ---
 
 ## 13. 风险
 
-1. pre-release 漂移；2. 取消即 session 终止；3. 无 list/resume（live-only）；4. approval 不经协议（iPhone 无 per-call 授权）；5. DeepSeek 绑定；6. ⚪ 证据缺口（特殊触发项）。
+1. pre-release 漂移；2. 取消即 session 终止；3. 无 list/resume；4. approval 不经协议；5. DeepSeek 绑定；6. reducer 模型约束（turn 内多 step 拼接到一个 Assistant）；7. ⚪ 证据缺口。
 
 ---
 
 ## 14. 修订记录
 
-### Round1（v1→v2→v3）
-| 项 | v1 问题 | 闭环 |
-|---|---|---|
-| P0-1 | descriptor 误报 | ✅ v2 LiveEventSessionProcess |
-| P0-2 | resume 未闭环 | ✅ v2 live-only |
-| P0-3 | 权限 composition 不符 | ✅ v3 assembled 验证（⚠️ 环境切换待补） |
-| P0-4 | 映射过度承诺 | ✅ v3 分级（v4 标签化） |
-| P0-5 | Gate 0 在 /tmp | ✅ v2 纳入仓库 |
-
-### Round2（v3→v4）
-| 项 | 问题 | v4 修订 | 状态 |
+### Round3（v4→v5）
+| 项 | v4 问题 | v5 修订 | 状态 |
 |---|---|---|---|
-| P0-1 | 缺 identity 映射，reducer 丢弃 | §3.6 identity 矩阵（TurnID/ItemID/RequestID 生成规则+稳定性+作用域） | ✅ 设计完成；reducer 测试 deferred §15 |
-| P0-2 | chunk/assembled 双写 | §3.7 唯一 owner + 去重 + 4 种情况 | ✅ |
-| P0-3 | dump 含本机路径 | `sanitize.py` 净化 + README 修正 | ✅ |
-| P0-4 | Gate 0 计数 14≠11 | §12 修正 + union 澄清 | ✅ |
-| P1-2 | DSH_PERMISSION_MODE 未注入 | §3.5/§11 说明 driver 显式注入；环境切换 dump 待补 | ⚠️ 设计完成，dump 待补 |
-| P1-4 | ListSessions 返回 | §4 live-only 确定空+reason | ✅ |
-| P1-5 | 标签分级 | §3.3 四类标签 | ✅ |
+| P0-1 | ItemID=t{turn}-s{step} 与 reducer 冲突（拆伪 turn） | **ItemID==TurnID==t{turn}**；(turn,step) 仅 codec 内部；多 step 用 part 边界；process generation 不变量 | ✅ 设计对齐 reducer；reducer 测试 deferred |
+| P0-2 | sanitizer 破坏 chunk==assembled（4/8 mismatch） | 无路径 prompt 重生成 dumps + sanitizer 递归 scrub + 一致性断言（ALL PASS） | ✅ |
+| P1-1 | §15 谎称已改 env/覆盖写 | main.go 实际修复（见下）+ §15 如实 | ✅ |
+| P1-2 | ListSessions 二选一 | 固定 `nil, core.ErrNotSupported` | ✅ |
+| P1-3 | usage cache/reasoning 映射未定义 | §3.7 ContextUsage 字段映射 | ✅ |
+| P1-4 | assembled-only/重复/乱序混淆 | 分别标 ⚪ deferred；去重≠重排 | ✅ |
+| P0-3(环境切换) | 只证明 YAML 默认 | run3/run4 真实切换 workspace-write↔danger-full-access | ✅ |
+
+### Round1/2 闭环：见前版（P0-1 descriptor / P0-2 resume / P0-3 权限 / P0-4 计数 / P0-5 Gate0 / round2 identity雏形 / 双写 owner）。
 
 ---
 
-## 15. 不采纳 / 部分采纳说明
+## 15. 不采纳 / deferred 说明
 
 | 审计建议 | 处理 | 原因 |
 |---|---|---|
-| P0-1 配 `ProjectionReducer` 级测试证明 frame 不被 skip | **deferred** | 属 driver 测试代码；本次任务限定"优化设计文档、不写 driver 代码"。identity 矩阵已定义到可实现，测试在 driver 实现阶段补 |
-| P1-1 Gate helper 全面修复（响应竞态 send/waitResp、RPC error 判定、非零失败退出、覆盖写、dispatcher join、malformed 不静默） | **部分采纳** | 本次修关键项（`DSH_PERMISSION_MODE` 转发、dump 覆盖写、净化）；完整竞态/join/error 断言属 driver 测试基建，实现时补。helper 现状足以产出 dump 证据，但尚非严格 CI gate |
-| P1-3 提交 fail-closed fixture + 机器可断言期望错误 | **deferred** | fail-closed 行为已 🟢 真实验证（错误信息记录在 §3.5）；durable fixture + 断言属 driver 测试基建 |
-| round1 P1-6 更新 canonical protocol pack + iOS mirror | **deferred** | 属 driver 实现的跨仓同步（protocol pack 改动），文档阶段不动 protocol |
+| 配 `ProjectionReducer` 级测试 | deferred | driver 测试代码；本次限定"优化文档不写 driver"。identity 已对齐 reducer 源码语义（projection_reducer.go:535 + 注释 L16-17），测试实现时补 |
+| Gate helper 完整 CI gate（malformed 断言、dispatcher join） | 部分采纳 | v5 已修关键：`DSH_PERMISSION_MODE`/`DSH_SYSTEM_PROMPT` 转发、dump `O_TRUNC` 覆盖、`sendAndWait` 先注册后写（消除竞态）、JSON-RPC error 捕获、PARTIAL 不再静默成功。完整 malformed/join 属 driver 测试基建 |
+| fail-closed durable fixture + 机器断言 | deferred | 行为 🟢 真实验证；durable fixture 属测试基建 |
+| round1 P1-6 protocol pack + iOS mirror 同步 | deferred | 跨仓 protocol 改动，driver 实现时做（**除非**要 turn 内多 assistant message，§3.6） |
 
-**当前结论**：协议选型、事件映射、identity 矩阵、双写去重、权限 composition 五块设计已完整且有真实证据支撑。剩余为 driver 实现代码（测试/fixture/protocol 同步）与特殊触发 dump，不阻塞设计评审进入实现。
+**main.go v5 实际修复（P1-1）**：① `DSH_PERMISSION_MODE`/`DSH_SYSTEM_PROMPT` 转发子进程；② dump `O_TRUNC` 覆盖（不再 append）；③ `sendAndWait` 先 `regPending` 再写 stdin（消除快速响应竞态）；④ JSON-RPC error response 捕获 + 影响 VERDICT；⑤ PARTIAL 不静默成功。
+
+**当前结论**：协议选型、事件映射、**identity（对齐 reducer）**、双写去重（证据自洽）、权限 composition（含环境切换）五块设计完整且有真实证据。剩余为 driver 实现代码（测试/fixture/protocol 同步）与特殊触发 dump。
