@@ -6,12 +6,13 @@
 //     session.event full JSON to DSH_GATE0_DUMP (O_TRUNC overwrite per run).
 //
 // Env:
-//   DSH_ROOT            (required) deepseek-harness checkout (pnpm install done)
-//   DEEPSEEK_API_KEY    fake → mock; real → real API
-//   DSH_GATE0_CONFIG    (optional) cordis.yml; default examples/jsonrpc-agent/cordis.yml
-//   DSH_GATE0_MAX_TOKENS (optional, real) initialize maxTokens; default 2048
-//   DSH_GATE0_DUMP      (optional, real) file to write full session.event JSON (overwrite)
-//   DSH_PERMISSION_MODE / DSH_SYSTEM_PROMPT (forwarded to the child when set)
+//
+//	DSH_ROOT            (required) deepseek-harness checkout (pnpm install done)
+//	DEEPSEEK_API_KEY    fake → mock; real → real API
+//	DSH_GATE0_CONFIG    (optional) cordis.yml; default examples/jsonrpc-agent/cordis.yml
+//	DSH_GATE0_MAX_TOKENS (optional, real) initialize maxTokens; default 2048
+//	DSH_GATE0_DUMP      (optional, real) file to write full session.event JSON (overwrite)
+//	DSH_PERMISSION_MODE / DSH_SYSTEM_PROMPT (forwarded to the child when set)
 package main
 
 import (

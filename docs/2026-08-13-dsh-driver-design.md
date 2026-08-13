@@ -1,6 +1,6 @@
 # DeepSeek Harness (DSH) Driver 设计文档
 
-- **日期**：2026-08-13（v6：round4 审计 —— source.kind 分流、usage 公式、generation 闭环、自包含）
+- **日期**：2026-08-13（v7：round5 审计 —— active-turn 状态机、process nonce、双向 peer）
 - **Runtime**：DeepSeek Harness `dsh-jsonrpc-agent`（pinned `47f943859bef60e4160492346772ded9b24f765a`，协议 `0.0.1`，pre-release）
 - **协议**：DSH SDK JSON-RPC 2.0 over stdio（**非** ACP）
 - **证据**：`scripts/dsh-gate0/`（4 次真实 run + assembled composition + sanitizer 带 peer 断言）
@@ -64,48 +64,62 @@ newline-delimited JSON-RPC 2.0。**无 cancel/session-close/session-resume/load/
 
 权限栈在 `bundle/base`。assembled composition（`driver-cordis.yml`）：🟢 可加载+激活+fail-closed（unconfined executor 拒绝）；🟢 **环境切换 verified**（run3 `workspace-write`+`ask` vs run4 `danger-full-access`+`never`）。一期 `permission_resolve` 不声明。
 
-### 3.6 identity + source.kind 分流 + generation（v6：round4 P0-1/P0-3）
+### 3.6 identity + source.kind 分流 + process nonce（v7：round5 P0-1/P0-2）
 
-#### 3.6.1 identity（对齐 reducer）
+#### 3.6.1 identity（对齐 reducer + active-turn 状态机）
 
 SSV2 reducer：text/reasoning delta `turnID := data.itemId`（projection_reducer.go:535），`itemId == lifecycle turn_id`（L16-17）；一个 turn 一个 `Assistant`。
 
+**process nonce（v7 替代 v6 内存 generation，round5 P0-2）**：每个 DSH 子进程 spawn 时生成随机 nonce（`crypto/rand` 8 字节 hex）。`TurnID = "p{nonce}-t{turn}"`。nonce **不依赖内存计数** → 跨 Agent/runtime/go-bridge 重启都不复用（新进程新 nonce）。覆盖三场景：abort→再发 / 子进程 crash→再发 / go-bridge 重启→Agent 重建 spawn 新进程，均新 nonce，`t1` 不复用。不改外层 session 协议（driver 用 iOS 传入原 sessionId，不碰 rebind）。
+
+**active-turn 状态机（v7，round5 P0-1）**：真实 dump 证实 `user/message` 6/6 **无 `data.turn/step`**（仅 `turn/start` 有 turn）。codec 必须维护 active-turn，user/message 绑定当前 active turn：
+
+| codec 状态转移 | 触发 event | 动作 |
+|---|---|---|
+| → `activeTurnID` | `turn/start(data.turn=N)` | 设 `activeTurn=N`、`activeTurnID="p{nonce}-t{N}"`；已有 active（嵌套 turn）→ **fail visibly** |
+| 绑定 active | `user/message(source.kind=user)` | `TurnID=activeTurnID`、`ItemID=data.id`；**无 active turn → fail visibly**（不回退 UUID，否则 user 落 UUID turn 与 assistant 分裂） |
+| 丢弃 | `user/message(source.kind=plugin)` | 不发 event（§3.6.2） |
+| 用 active | `assistant/chunk`/`tool/*` | assistant `ItemID==TurnID=activeTurnID`；tool `RequestID=callId` |
+| 校验 | `step/start/end` | 校验 active turn/step（不当 user 自带字段） |
+| 清空 | `turn/end` | 校验 active turn 匹配后清空；user 到达终态后到达 → **fail visibly** |
+
+**identity 矩阵**：
+
 | core.Event 字段 | 生成规则 |
 |---|---|
-| `TurnID`（所有 event） | `"g{gen}-t{turn}"`（§3.6.3 generation） |
+| `TurnID`（所有 event） | `activeTurnID="p{nonce}-t{activeTurn}"`（active-turn 状态机） |
 | `ItemID`（assistant text/reasoning） | **== TurnID**（reducer 要求） |
-| `ItemID`（user message, source.kind=user） | `user/message.data.id` |
-| `RequestID`/`ItemID`（tool） | `tool/call.data.callId` |
+| `ItemID`（user, source.kind=user） | `data.id`（TurnID 来自 active-turn） |
+| `RequestID`/`ItemID`（tool） | `callId` |
 | `StreamID` | 一期 main stream（空） |
 
-`(turn,step)` 仅 codec 内部 chunk/assembled 校验 key，不进 projection。**多 step / 多 block**：同 turn 所有 step 的 assistant content 归同一 turn 的同一 `Assistant`（reducer 模型约束）；block-start/end 一期**自然合并**（core.Event 无 newPart 字段，同 turn 多 text block 拼接成一个 text）——**不伪造多 turn，也不声称"已有 part 边界"**（round4 P1-3 修正）。若产品要 turn 内 step 级独立 message，须扩展 core.Event+wire+reducer（协议改动，一期不做）。
+`(turn,step)` 仅 codec 内部 chunk/assembled 校验 key。**多 step / 多 block**：同 turn 所有 step 归同一 turn 同一 `Assistant`；block-start/end 一期**自然合并**（core.Event 无 newPart，不声称"已有 part 边界"）。若要 step 级独立 message，须扩展 core.Event+wire+reducer（协议改动，一期不做）。
+
+> **reducer 级测试 deferred（§15）**：冻结样本测 codec→mapAgentEvent→reducer，证 user/assistant 同 turn、plugin 不入 timeline、abort/crash/restart 三类 nonce 不冲突。
 
 #### 3.6.2 source.kind 分流（round4 P0-1）
 
-assembled composition 产生两种 `user/message`（同 `role:"user"` + UUID `data.id`，**不能按 role/id 区分**）：
+assembled composition 两种 `user/message`（同 `role:"user"` + UUID `data.id`，不能按 role/id 区分）：
 
 | `data.source.kind` | 内容 | 处理 |
 |---|---|---|
-| `user` | 真实用户 prompt | → `EventUserMessage`（TurnID=g{gen}-t{turn}） |
-| `plugin` | 权限运行时上下文（"file policy: workspace-write, approval policy: ask"） | **不发 user event**；仅诊断/权限状态，禁止进 user timeline |
+| `user` | 真实用户 prompt | → `EventUserMessage`（TurnID=activeTurnID） |
+| `plugin` | 权限运行时上下文 | **不发 event**（禁止覆盖用户 prompt） |
 | 未知 | — | fail visibly / deferred |
 
-**run3/run4 冻结样本**（`dumps/`）：每 turn seq(N)=`user` 真实 prompt + seq(N+1)=`plugin` 权限快照。若两者都发 `EventUserMessage`，reducer `user_message` 对同 turn 再次 upsert，plugin 快照**覆盖真实用户问题**。分流后同 turn 只有一个真实 user projection。driver codec 必须按 `data.source.kind` 分流。
+run3/run4 冻结样本：每 turn seq(N)=`user` + seq(N+1)=`plugin`。两者都发会让 reducer 同 turn 再次 upsert，plugin 覆盖真实 prompt。
 
-#### 3.6.3 process generation（round4 P0-3）
+#### 3.6.3 process nonce 跨重启稳定性（round5 P0-2）
 
-**问题**：`data.turn` 在新 DSH process 从 1 开始。go-bridge `handleAbortGeneration` 返回 `{ok:true}` 无新 sessionId；iOS 停留原 session，再发携带原 `SessionID`；`handleSendMessage` 把该 id 当 resumeID 传 `StartSession`；DSH 无 resume，新进程 `turn=1` → `t1` 在同一 projection key 复用。
+**v6 错误**：`processGen` 存 driver 内存，go-bridge/Agent 重启归零；原 sessionId 再传入 `StartSession` → `g0-t1` 复用（v6 "重启换 sessionId"断言无源码支撑：`handleAbortGeneration` 只返回 `{ok:true}`，`handleSendMessage` 把原 id 当 resumeID 传 `StartSession`）。
 
-**方案（driver 内部 generation，不改 go-bridge/iOS session 流）**：
-- driver `Agent` 维护 `processGen` counter（per session）
-- `StartSession`：若该 session 进程已死（Close 过/崩溃），`processGen++` + spawn 新进程；新 session `processGen=0`
-- **`TurnID = "g{gen}-t{turn}"`**（所有 event）
-- projection key = TurnID → 不同 gen 的 `t1`（`g0-t1` vs `g1-t1`）不冲突
-- `processGen` 存 driver 内存，driver 实例生命周期单调；go-bridge 重启 = 全新 session（新外层 sessionId）
+**v7 方案（process nonce）**：
+- 每次 spawn 生成随机 nonce（`crypto/rand`），`TurnID="p{nonce}-t{turn}"`
+- nonce 不依赖内存单调计数 → 新进程必新 nonce
+- **三场景全覆盖**：abort→再发 / crash→再发 / go-bridge 重启→Agent 重建，均新 nonce，`t1` 不复用
+- 不改 session 协议（原 sessionId，不碰 rebind）；projection key=TurnID（含 nonce）
 
-**不碰 rebind**：driver 用 iOS 传入的原 sessionId（不私自生成新 id），故 `pending-*→real` rebind 不触发。projection 用 TurnID（含 gen）区分 turn，不依赖 sessionId 切换。
-
-> **替代方案（不采纳，§15）**：replacement session（abort 返回新 sessionId + iOS 切换）需改 go-bridge handleAbortGeneration + iOS session 流，是跨仓协议改动；generation 方案更局部。
+> **替代方案（不采纳，§15）**：replacement session（跨仓协议改动）/ 持久化 `(backend,outerSessionID)→generation`（需原子递增/恢复定义）—— nonce 最局部、无需持久化。
 
 ### 3.7 chunk/assembled 双写 + usage（v6：round4 P0-2）
 
@@ -205,7 +219,15 @@ pinned `47f943859bef60e4160492346772ded9b24f765a`。
 | P1 todo completed | 样本被覆盖 | run1 重跑补 pending+completed | ✅ |
 | P1 自包含 | 引用 round2 跨仓表 | §3.3 自包含映射表 | ✅ |
 
-### Round1-3 闭环：见前版（descriptor/resume/权限/计数/Gate0/identity雏形/双写owner/环境切换）。
+### Round5（v6→v7）
+| 项 | v6 问题 | v7 修订 | 状态 |
+|---|---|---|---|
+| P0-1 | user/message 无 data.turn，TurnID 生成规则缺 active-turn 归属 | §3.6.1 active-turn 状态机（turn/start 设 active、user 绑定 active、无 active fail visibly） | ✅ 设计；reducer 测试 deferred |
+| P0-2 | processGen 内存归零，go-bridge 重启 g0-t1 复用 | §3.6.3 **process nonce**（每子进程随机 nonce，TurnID=p{nonce}-t{turn}，跨重启不复用） | ✅ 设计；三场景测试 deferred |
+| P1 sanitizer | peer 仅 chunk→assembled（assembled-only 空通过） | 双向 peer 断言 + 负向样本验证（assembled-only/chunk-only 均 FAIL） | ✅ |
+| P2 gofmt | main.go gofmt 差异 | `gofmt -w` + go vet 干净 | ✅ |
+
+### Round1-4 闭环：见前版（descriptor/resume/权限/计数/Gate0/identity/双写owner/环境切换/source.kind/usage/block/ListSessions/todo/自包含）。
 
 ---
 
@@ -219,7 +241,7 @@ pinned `47f943859bef60e4160492346772ded9b24f765a`。
 | Gate helper 完整 CI gate（malformed/join） | 部分采纳 | 已修：env 转发/O_TRUNC/sendAndWait 竞态/rpc-error/PARTIAL exit 1/peer 断言。完整 malformed/join 属 driver 测试基建 |
 | fail-closed durable fixture / protocol pack 同步 | deferred | 测试基建/跨仓协议 |
 
-**main.go v6 实际修复**：① `DSH_PERMISSION_MODE`/`DSH_SYSTEM_PROMPT` 转发；② dump `O_TRUNC`；③ `sendAndWait` 先注册后写 + rpc-error 返回 nil（调用 fatal exit 1）；④ **PARTIAL→`os.Exit(1)`**；⑤ error response 不打印 OK。
-**sanitize.py v6**：递归 scrub + **peer-existence 断言**（chunk↔assembled 双向，缺 peer 即失败）+ 无路径断言。
+**main.go v7 实际修复**：① `DSH_PERMISSION_MODE`/`DSH_SYSTEM_PROMPT` 转发；② dump `O_TRUNC`；③ `sendAndWait` 先注册后写 + rpc-error 返回 nil（fatal exit 1）；④ **PARTIAL→`os.Exit(1)`**；⑤ error response 不打印 OK；⑥ **gofmt 干净 + go vet 无诊断**。
+**sanitize.py v7**：递归 scrub + **双向 peer 断言**（chunk→assembled 与 assembled→chunk 双向，缺任一 peer 即失败；负向样本 assembled-only/chunk-only 均 FAIL）+ 无路径断言。
 
 **当前结论**：协议选型、事件映射（自包含+source.kind 分流）、identity（对齐 reducer+generation）、双写去重（peer 断言）、usage 公式、权限 composition（环境切换）六块设计完整且有真实证据。剩余为 driver 实现代码（测试/fixture/protocol 同步）与特殊触发 dump。

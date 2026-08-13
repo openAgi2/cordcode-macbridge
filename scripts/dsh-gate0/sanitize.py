@@ -78,6 +78,14 @@ def assert_consistency(events, fname):
             bad.append(f'{fname} step{k}: reasoning delta present but assembled reasoning missing')
         if s['cusage'] and not s['ausage']:
             bad.append(f'{fname} step{k}: chunk usage present but assembled usage missing')
+        # reverse peer (round5 P1): assembled-only content/usage without a chunk
+        # peer is also a failure — the assertion is now genuinely bidirectional.
+        if s['atext'] and not s['text']:
+            bad.append(f'{fname} step{k}: assembled text present but no text delta (assembled-only)')
+        if s['areason'] and not s['reason']:
+            bad.append(f'{fname} step{k}: assembled reasoning present but no reasoning delta')
+        if s['ausage'] and not s['cusage']:
+            bad.append(f'{fname} step{k}: assembled usage present but no usage chunk (assembled-only)')
         if s['atext'] and s['text'] != s['atext']:
             bad.append(f'{fname} step{k}: text chunk!=assembled ({len(s["text"])} vs {len(s["atext"])})')
         if s['areason'] and s['reason'] != s['areason']:
