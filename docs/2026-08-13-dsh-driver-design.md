@@ -1,37 +1,33 @@
 # DeepSeek Harness (DSH) Driver 设计文档
 
-- **日期**：2026-08-13（v2：按审计 `docs/2026-08-13-dsh-driver-design-audit.md` P0 修订）
+- **日期**：2026-08-13（v3：用真实 `DEEPSEEK_API_KEY` 补齐事件 dump 与 assembled composition 验证）
 - **Runtime**：DeepSeek Harness `dsh-jsonrpc-agent`（pinned commit `47f943859bef60e4160492346772ded9b24f765a`，协议 `0.0.1`，`SESSION_FORMAT_VERSION=0`，pre-release 无兼容承诺）
 - **协议**：DSH SDK JSON-RPC 2.0（newline-delimited）over stdio —— **不是** ACP
 - **入口**：spawn `dsh-jsonrpc-agent <cordis.yml>`（bundled exe，或 `node --import tsx .../bin.ts <cordis.yml>`）
-- **Gate 0 证据**：`scripts/dsh-gate0/`（脚本 + 复现步骤 + pinned commit + raw frames），摘要见 §12
-- **审计状态**：v1 有 3 个 P0（descriptor 误报、resume 未闭环、权限 composition 不符），v2 已修订；**当前结论仍为不进入实现，待补剩余 dump（见 §14）**
+- **证据**：`scripts/dsh-gate0/`（Gate 0 脚本 + 4 次真实 run dump + assembled composition），摘要见 §12
+- **审计**：v1 有 3 个 P0（v2 修订），v3 补齐 P0-3/P0-4 的真实 dump；剩余仅特殊触发条件项（见 §14）
 
 ---
 
 ## 0. 协议选型：为什么不用 ACP
 
-DSH 同时实现两条 stdio JSON-RPC 协议。逐行核对源码后的结论是 **只有 SDK 协议满足 rich timeline 需求**：
+DSH 同时实现两条 stdio JSON-RPC 协议，**只有 SDK 协议满足 rich timeline**：
 
-| 维度 | ACP server（`packages/acp/acp/src/index.ts`） | **SDK server（`packages/sdk/server`+`protocol`）✅ 选定** |
+| 维度 | ACP server（`packages/acp/acp/src/index.ts`） | **SDK server（`packages/sdk/server`+`protocol`）✅** |
 |---|---|---|
-| assistant 文本 | ✅ 仅已提交文本 | ✅ token 级流（`assistant/chunk`）+ 组装（`assistant/message`） |
-| thinking/reasoning | ❌ 显式丢弃（codec 注释 L152-154） | ✅ `reasoning-delta` chunk |
-| tool calls / 结果 | ❌ 丢弃 | ✅ `tool/call` + `tool/result` |
-| todos / usage / turn 状态 | ❌ 丢弃 | ✅ `todo/write` / `usage` / `turn/*` |
+| assistant 文本 | ✅ 仅已提交 | ✅ token 级流 + 组装 |
+| thinking/reasoning | ❌ 显式丢弃 | ✅ `reasoning-delta` chunk（**v3 真实 verified**，deepseek-chat 返回 reasoning） |
+| tool calls / 结果 | ❌ 丢弃 | ✅ `tool/call` + `tool/result`（**v3 真实 verified**） |
+| todos / usage / turn 状态 | ❌ 丢弃 | ✅ `todo/write` / `usage` / `turn/*`（**v3 真实 verified**） |
 
-> **审计 verified**：DSH ACP 源码只转发 committed assistant text，显式排除 raw chunks/reasoning/tools/plans —— SDK 路径选择成立。
-
-> **修订（审计 P2-1）**：DSH `KNOWN_SESSION_EVENT_TYPES` 实为 **44 种**（从 pinned commit `47f9438` 枚举），非 v1 所写 45。
+> 审计 verified：DSH ACP 源码只转发 committed assistant text。DSH `KNOWN_SESSION_EVENT_TYPES` 实为 **44 种**（pinned commit 枚举）。
 
 ---
 
 ## 1. Runtime 版本范围
 
-- **pre-release**：`serverInfo.version` 恒 `0.0.1` 且客户端不校验。**无协议版本协商**。
-- **检测**：spawn 后用 `initialize` 响应的 `serverInfo.name === 'deepseek-harness-sdk-runtime'` 验证；版本字段不可靠，不做 semver gate。
-- **`SESSION_FORMAT_VERSION=0`**：持久化无兼容承诺。driver 历史读取路径须容忍"未来读不了"。
-- **forward-compat**：未知 `event.type` 带 `ignorable:true` 可跳过，否则**拒绝重建**（known-event-types.ts L10-18）。driver 复用该语义。
+- **pre-release**：`serverInfo.version` 恒 `0.0.1`，无协议版本协商。检测靠 `serverInfo.name === 'deepseek-harness-sdk-runtime'`。
+- **`SESSION_FORMAT_VERSION=0`**：持久化无兼容承诺。forward-compat：未知 `event.type` 带 `ignorable:true` 可跳过，否则拒绝重建。
 
 ---
 
@@ -41,20 +37,16 @@ DSH 同时实现两条 stdio JSON-RPC 协议。逐行核对源码后的结论是
 dsh-jsonrpc-agent <path/to/cordis.yml>      # bundled exe 或 node --import tsx
 ```
 
-运行时**强制要求显式 config**（`$DSH_CORDIS_CONFIG` 或 argv；无 config `exit(1)`）。config 决定**工具面 + 权限栈**（见 §3.5，这是 v1 的错误点之一）。
-
-**关键环境变量**：
+运行时**强制要求显式 config**（argv 位置参数或 `$DSH_CORDIS_CONFIG`；无 config `exit(1)`）。config 决定**工具面 + 权限栈**（§3.5）。
 
 | 变量 | 用途 |
 |---|---|
 | `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` | API 凭据 / endpoint |
 | `DSH_CWD` | agent 工作目录 |
-| `DSH_SESSION_ROOT` | JSONL 持久化根目录 |
-| `DSH_PERMISSION_MODE` | 权限档位（仅当 cordis.yml 挂载了 `dsh-sandbox-policy`+`dsh-user-approval`+`dsh-permission-presets` 时生效，见 §3.5） |
+| `DSH_SESSION_ROOT` | JSONL 持久化根 |
+| `DSH_PERMISSION_MODE` | 权限档位（**仅当 cordis.yml 挂载 `dsh-sandbox-policy`+`dsh-user-approval`+`dsh-permission-presets` 时生效**，v3 verified §3.5） |
 
-**stdout 是协议通道**：runtime stdout 只走 JSON-RPC，诊断走 stderr。driver 不得挂 stdout logger。
-
-**进程组**：复用 grokbuild `prepareCmdForProcessGroup`（`Setpgid`），Close 用负 PID 信号回收进程组。
+**stdout 是协议通道**；进程组复用 grokbuild `prepareCmdForProcessGroup`。
 
 ---
 
@@ -62,225 +54,171 @@ dsh-jsonrpc-agent <path/to/cordis.yml>      # bundled exe 或 node --import tsx
 
 ### 3.1 传输层
 
-newline-delimited JSON-RPC 2.0 over stdin/stdout。`id`+`method`=request，仅 `id`=response，仅 `method`=notification。坏 JSON 行静默忽略。
+newline-delimited JSON-RPC 2.0。`id`+`method`=request，仅 `id`=response，仅 `method`=notification。
 
-- **MacBridge → DSH**（stdin）：`initialize`、`session/prompt`、`shutdown`
-- **DSH → MacBridge**（stdout）：上述 response + `session.event` / `session.status` / `subagent.*` notification
+- **MacBridge → DSH**：`initialize`、`session/prompt`、`shutdown`
+- **DSH → MacBridge**：上述 response + `session.event`/`session.status`/`subagent.*` notification
 
-> **SDK 协议无 cancel、无 session/close、无 session/resume/load/list**（已核实 grep 空）；server→client request 是死能力。
+> SDK 协议**无 cancel、无 session/close、无 session/resume/load/list**；server→client request 是死能力。
 
 ### 3.2 初始化握手
 
-1. MacBridge 发 `initialize`（`{cwd, provider, model, maxTokens?}`）
-2. DSH 返回 `{serverInfo:{name:'deepseek-harness-sdk-runtime', version:'0.0.1'}}`
-3. 无 authenticate（凭据走 `DEEPSEEK_API_KEY` env）
-4. `provider:'deepseek-official'` 自动挂 `dsh-llm-deepseek`；其它未注册 provider 报错（一期绑定 DeepSeek）
+1. 发 `initialize`（`{cwd, provider, model, maxTokens?}`）→ `{serverInfo:{name:'deepseek-harness-sdk-runtime', version:'0.0.1'}}`（v3 真实 verified）
+2. 无 authenticate；`provider:'deepseek-official'` 自动挂 `dsh-llm-deepseek`
+3. `session/prompt` 带 `sessionId`，runtime 对未知 id 惰性创建（无显式 session/new）
 
-握手后即可 `session/prompt`。**无显式 session/new**：`session/prompt` 带 `sessionId`，runtime 对未知 id 惰性创建（`getOrCreateSession`）。
+### 3.3 `session.event` → core.Event 映射（v3：真实 dump 分级）
 
-### 3.3 `session.event` → core.Event 映射（按证据分级）
+`params.event` 是完整 `SessionEvent` 信封（`{type, seq, time, data, surfaceOp?, sourceEventSeqs?, ignorable?}`）。证据来源：4 次真实 run（`scripts/dsh-gate0/dumps/`）+ committed snapshots。
 
-`session.event` 的 `params.event` 是完整 `SessionEvent` 信封（`{type, seq, time, data, surfaceOp?, sourceEventSeqs?, ignorable?}`）。映射表按**有无真实 dump** 分级（证据来源：Gate 0 + committed snapshots `examples/jsonrpc-agent/tests/snapshots/{text-turn,bash-tool,subagent-spawn-in-process,persistent-tools}` + 审计交叉核验）。
+#### 🟢 Verified（真实 dump 支撑，一期映射）
 
-#### 🟢 Verified（有 dump，一期映射）
-
-| DSH `event.type` | 真实 payload 关键字段 | core.Event |
+| DSH `event.type` | 真实 payload 关键字段（v3 dump） | core.Event |
 |---|---|---|
 | `turn/start` | `data.turn` | `EventTurnStarted` |
-| `turn/end`（`reason.kind:"completed"`） | `data.turn, data.reason` | 终态 `EventResult{Done:true}` |
-| `step/start`·`step/end` | `data.turn, data.step` | 内部 step 边界（iOS 默认不展示） |
+| `turn/end`（`completed`） | `data.turn, data.reason.kind:"completed"` | `EventResult{Done:true}` |
+| `turn/end`（`max-tokens`） | `data.reason.kind:"max-tokens"`（run2 verified） | token 限制完成（非错误） |
+| `step/start`·`step/end` | `data.turn, data.step` | 内部 step 边界 |
 | `user/message` | `data.content[], data.source.kind` | `EventUserMessage` |
-| `assistant/chunk`（`chunk.type:"text-delta"`） | `data.chunk.text` | `EventText`（流式） |
-| `assistant/chunk`（`chunk.type:"reasoning-delta"`） | `data.chunk.text` | `EventThinking` |
-| `assistant/message` | `data.message.content[]`(reasoning/tool-call/text blocks), `data.usage?` | 组装态 + context usage |
-| `tool/call` | `data.callId, data.name, data.arguments`(JSON string) | `EventToolUse` |
-| `tool/result`（基本结果） | `data.message.content[].content[].text`（嵌套）, `data.message.source.callId` | `EventToolResult` |
+| `assistant/chunk`（**7 种 discriminant**） | `data.chunk.type` ∈ {`text-delta`,`reasoning-delta`,`tool-call-delta`,`block-start`,`block-end`,`usage`,`finish`} | text-delta→`EventText`；reasoning-delta→`EventThinking`；**codec 必须按 discriminant 分流** |
+| `assistant/message` | `data.message.content[]`(reasoning/tool-call/text blocks), `data.usage?`=`{inputTokens,outputTokens,cacheReadTokens,reasoningTokens}` | 组装态 + context usage |
+| `tool/call` | `data.{turn,step,callId,name,arguments}`（arguments=JSON string） | `EventToolUse` |
+| `tool/result` | `data.message.content[].content[].text`（**双层 content 嵌套**）, `data.message.content[].isError`, `data.message.source.callId`, `sourceEventSeqs`, `surfaceOp:"append"` | `EventToolResult`（isError 区分成败） |
+| `todo/write` | `data.todos[]`=`{content, status:"pending"|"in_progress"|"completed"}`（整表快照） | todo 更新（latest-wins） |
 | `session/title` | `data.title, data.messageSeqs` | session 标题 |
-| `request/header`·`request/context` | `data.contextWindow` 等 | context usage 输入（不映射为 timeline event） |
-| `agent/inbox/spliced` | `data.target, data.inserted[]` | prompt 入队（内部，可丢弃） |
+| `request/header`·`request/context` | `data.contextWindow` 等 | context usage 输入（不映射 timeline） |
+| `permission/preset`·`sandbox/mode`·`approval/policy` | `data.preset/data.mode/data.policy`（assembled composition 产物，run3 verified） | 控制面（runtime 权限栈激活信号，可丢弃或诊断） |
+| `agent/inbox/spliced` | `data.target, data.inserted[]` | prompt 入队（内部） |
 
-**chunk discriminant**（审计 P1-1）：`assistant/chunk.data.chunk.type` 是 `text-delta`/`reasoning-delta`/`block-start`/`block-end`/`usage`/`finish`，codec 必须按它分流，不能假设只有 text。
-
-**turn/result 嵌套**（审计 P1-1）：`tool/result` 正文在 `.data.message.content[].content[].text`（双层 content 嵌套），不是顶层 text。
-
-#### 🔴 一期 unsupported（无 dump，不声明 capability）
-
-以下 30 种事件**无 Gate0/snapshot 样本**，一期**不映射、不声明对应 capability**（审计 P0-4："没有样本的能力保持 unsupported/不声明"）：
+#### 🔴 一期 unsupported（无 dump，不声明）
 
 ```
-todo/write                  → 不声明 todos（需 FetchTodos 持久化读路径样本）
-compaction/start|end|summary|prune → 不映射（core.Event 只有 compressing/compressed 两态，summary/prune 处理未定义）
-approval/asked|decided|policy → 不声明 permission_resolve（见 §3.5，当前 composition 无样本）
-tool/result.error / .meta(FsDiffMeta.diffs) → 不映射文件 diff（无实样；且 iOS 不做消息内 diff）
-turn/end 非 completed 终态（error/aborted/interrupted/blocked/max-tokens）→ 六态测试待补
-goal/change, plan/mode, schedule/change → 不进 control plane（无样本）
-command/run, command/done, tool-workflow/*, tool/code-dispatch* → ignored
-session/end-seed, subagent/descriptor 细节 → hydrate/subagent 映射待补
-其余（agent-preset/selected, feedback/record, hook/*, llm/retry*, permission/preset, sandbox/mode, session/title-llm-request, web/*）→ ignored
+compaction/start|end|summary|prune   → 需超长对话触发压缩（成本高，待补）
+approval/asked|decided               → workspace-write 下 cwd/临时区操作不触发；SDK 协议 approval resolve 行为待验证
+turn/end 的 error/aborted/interrupted/blocked → 模型失败/中断，难触发（待补）
+tool/result.meta 的非空 FsDiffMeta.diffs → write 工具 diffs 实测为空 []（FsDiff 无实样）
+goal/change, plan/mode, schedule/change → 默认 composition 无 goal/plan 工具，不触发
+command/run, command/done            → bash 工具不产生（需 dsh-shell，未挂载）
+tool-workflow/*, tool/code-dispatch* → 无样本
+session/end-seed                     → 无 resume（live-only，§4）
+其余（agent-preset/selected, feedback/record, hook/*, llm/retry*, session/title-llm-request, web/*）→ ignored
 ```
 
-> **诚实边界**：`todo/write`、`compaction/*`、`approval/*`、`FsDiffMeta`、非 completed 终态的 runtime dump 需要 `DEEPSEEK_API_KEY`（真实模型 turn）或 assembled approval composition。无 key 环境下无法补，标 unsupported。
+**chunk discriminant（审计 P1-1，v3 verified）**：`assistant/chunk` 的 `data.chunk.type` 有 7 种，codec 必须按它分流 —— text-delta/reasoning-delta/tool-call-delta 是内容增量，block-start/block-end/usage/finish 是结构/计费信号。
 
-### 3.4 turn 生命周期（双通道，seq 不跨 process 对齐）
+**turn/result 嵌套（v3 verified）**：`tool/result` 正文在 `.data.message.content[].content[].text`（双层 content），`isError` 在 `.data.message.content[].isError`。
 
-1. **`session.event` 的 `turn/start` + `turn/end`**：精确 turn 边界。`turn/end.reason.kind` ∈ {completed, aborted, blocked, error, max-tokens, interrupted}（types.ts L155-174）—— 但**仅 completed 有 dump**，其余 5 态待补。
-2. **`session.status`**（`{sessionId, status:'running'|'idle'}`）：whole-agent 转换。
+### 3.4 turn 生命周期
 
-**`session/prompt` 只回 `{messageId}` 入队回执，不关联 turn 结果**（审计 verified）。turn 完成只认 `turn/end`，不得用 prompt response 推断。
+1. `session.event` 的 `turn/start`+`turn/end`（reason 6 态，completed + max-tokens 已 verified）
+2. `session.status`（`running`/`idle`，whole-agent 转换）
 
-**seq 不跨 process 对齐（审计 P0-2）**：`seq` 是单 session 单 process 内单调序号。runtime 重启后 fresh-create 同 id 会从新 seq 开始，**不能天然对应 MacBridge `baseRev→syncRev`**。一期 live-only（§4），不存在跨 process seq 对齐；若未来支持 resume，seq 对齐需显式 fence。
+`session/prompt` 只回 `{messageId}` 入队回执（v3 verified），turn 完成只认 `turn/end`。**seq 不跨 process 对齐**（runtime 重启 fresh-create 从新 seq 开始）。
 
-### 3.5 权限模型（v2 重写，审计 P0-3）
+### 3.5 权限模型（v3：assembled composition 验证完成）
 
-**v1 错误**：写"受 `DSH_PERMISSION_MODE` / cordis.yml policy 控制"——但 Gate 0 用的 `examples/jsonrpc-agent/cordis.yml` 是 **unattended composition**，未挂载任何 sandbox/approval plugin，权限边界=runtime 进程主机权限。
+**v1 错误**：误称 jsonrpc composition 有 `DSH_PERMISSION_MODE` 策略。核实：权限栈在 `packages/bundle/base/cordis.patch.yml`（`dsh-sandbox-local`+`dsh-sandbox-policy`+`dsh-bash-sandbox`+`dsh-user-approval`+`dsh-permission-presets`），jsonrpc-agent 裸 composition 无此栈。
 
-**核实**：`DSH_PERMISSION_MODE` 与完整权限栈存在于 **`packages/bundle/base/cordis.patch.yml`**（非 jsonrpc-agent）：
+**v3 assembled 验证（`scripts/dsh-gate0/driver-cordis.yml`，真实 key）**：
+- ✅ **可加载并跑通**：组装 sandbox/sandbox-policy/bash-sandbox/approval/permission-presets 栈，跑真实 turn（bash echo）成功
+- ✅ **权限栈激活事件 verified**：turn 前 emit `permission/preset:"workspace-write"` + `sandbox/mode:"workspace-write"` + `approval/policy:"ask"`（run3）
+- ✅ **fail-closed verified**：用 unconfined 的 `bash-local` + `permission-presets` 时，runtime **拒绝加载**（`the mounted bash executor does not confine — composing this plugin over an unconfined executor is a misconfiguration`）—— 证明 DSH 权限栈有严格一致性校验
+- ✅ **关键组装约束**：`dsh-permission-presets` 要求 bash executor 是 **confined**（`bash-sandbox`），不能用 `bash-local`；`agent-spine-demo` 内置 todo/fs 工具，**不要重复挂** `dsh-tool-todo`/`dsh-tool-fs`（否则 `allowParallelInProgress` config 校验失败）
+- ℹ️ workspace-write 下 bash 写 `/tmp` 成功 —— 因 DSH sandbox 把平台临时区列为共享可写 scratch space（设计如此，非漏洞）；精确拒绝边界是 driver 实现时细化项
 
-```yaml
-- dsh-sandbox-local          # sandbox provider
-- dsh-sandbox-policy         # mode: DSH_PERMISSION_MODE ?? 'workspace-write'
-- dsh-bash-sandbox / dsh-pwsh-sandbox   # 沙箱化 shell
-- dsh-user-approval          # policy: DSH_PERMISSION_MODE==='danger-full-access' ? 'never' : 'ask'
-- dsh-permission-presets     # read-only / workspace-write / danger-full-access 三档
-```
-
-**v2 方案**：driver **必须自建专用 cordis.yml**（§10 `config/`），从 bundle/base 借这套权限栈替代裸 `bash-local`/`fs-local`，否则 DSH 无审批地以主机权限读写。`DSH_PERMISSION_MODE` 默认 `workspace-write`（sandbox 限 cwd + approval policy `ask`）。
-
-**一期 `permission_resolve` 仍不声明**：SDK 协议的 server→client request 是死能力，approval 在 runtime 内部消化（按 cordis.yml policy），不经协议暴露给 MacBridge/iPhone per-call 授权。
-
-**实施前必须补**：对组装后的 driver composition 做真实拒绝/允许样本（需 `DEEPSEEK_API_KEY` 触发工具调用，或 mock 触发 + 验证 sandbox 边界）。当前无 key，标待补。
+**driver 必须用 §10 的专用 cordis.yml**（bash-sandbox confined + 权限栈），不能裸跑 jsonrpc-agent。一期 `permission_resolve` 仍不声明（SDK server→client request 死能力，approval 在 runtime 内消化；但 `approval/policy` 事件证实 policy 已设置）。
 
 ---
 
-## 4. session 生命周期（v2：收敛为 live-only，审计 P0-2）
+## 4. session 生命周期（live-only）
 
-**一期 live-only**：
-
-| 操作 | 一期支持 | 说明 |
+| 操作 | 一期 | 说明 |
 |---|---|---|
-| 创建 session | ✅ `session/prompt`（新 sessionId 惰性创建） | |
-| 发送消息 | ✅ `session/prompt` | 返回 `{messageId}` |
-| 取消 turn | ❌ 无 cancel（kill 进程，§5） | session 随之终止 |
-| 列出 session | ❌ **一期不支持** | SDK 无 session/list；扫 JSONL 只能恢复 Mac 投影，不能恢复 DSH 模型上下文 |
-| resume 历史 session | ❌ **一期不支持** | 见下 |
+| 创建/发送 | ✅ `session/prompt`（惰性创建） | 返回 `{messageId}` |
+| 取消 | ❌ kill 进程（§5） | session 随之终止 |
+| 列出/resume | ❌ **一期不支持** | SDK 无 session/list/resume；扫 JSONL 只恢复 Mac 投影，不恢复 DSH 模型上下文 |
 
-**resume 闭环问题（审计 P0-2）**：
-- SDK 无 `session/resume/load`。runtime 重启后 `getOrCreateSession` 是 **fresh-create**，不 seed 旧对话上下文（DSH 内部恢复入口 `ctx.agents.resume` 未暴露到 SDK wire）。
-- 扫 JSONL 只能 hydrate **Mac Projection Kernel**（timeline 展示），**不能把旧对话 seed 回 DSH agent**。因此即使列表可见，也无法在 runtime 重启后携带原上下文继续对话。
-
-**一期决策**：**不声明 `session_history`，不展示可 resume 的历史 session，runtime 死/cancel 即 session 终止**。删除 v1 的 "handleResumeSession dispatch" 与 "扫 JSONL 实现 history" 承诺。
-
-**未来 resume 路径（二选一，需真实 dump 证明）**：
-1. 维持 live-only（长期，简单）；或
-2. 先给 DSH runtime 加真实 resume wire（内部调 `ctx.agents.resume`），用"首轮→shutdown→同 id resume→第二轮含首轮上下文"的 dump 证明 —— 仅扫 JSONL 不能替代。
+**resume 闭环（审计 P0-2）**：runtime 重启 fresh-create，不 seed 旧对话。一期不声明 `session_history`，不展示/resume 历史，runtime 死即 session 终止。
 
 ---
 
 ## 5. 取消与关闭
 
-### 取消 turn
+**SDK 无 cancel**：取消 = kill 进程 + session 终止（live-only）。Close 三阶段（shutdown RPC → SIGTERM 进程组 → SIGKILL），复用 grokbuild `proc_unix.go`。
 
-**SDK 无 cancel**。取消 = kill runtime 进程 + session 终止（一期 live-only，§4）。**这是 DSH 相对 Claude/Codex 的明确降级**，iOS 须诚实表达。后续若 DSH 加 cancel 方法（transport 已支持 request），再实现 `core.TurnCanceler`。
-
-### Close（三阶段，复用 grokbuild `proc_unix.go`）
-
-1. **shutdown RPC**（runtime flush 后自行 dispose + exit 0）+ stdin close，等退出（8s）
-2. **SIGTERM** 进程组（5s）
-3. **SIGKILL** 进程组
-
-> 审计 🟡 needs-refinement：三阶段超时与进程组子进程回收**未实测**（仅实测正常 `shutdown→{}`）。实施时补 SIGTERM/SIGKILL 路径样本。
-
-环境变量用 `core.BuildAgentEnv` 过滤 control-plane secret。
+> v3：正常 `shutdown→{}` verified；SIGTERM/SIGKILL 进程组回收路径仍待实测（审计 🟡）。
 
 ---
 
 ## 6. 错误分类
 
-| 错误类型 | 处理 |
-|---|---|
-| JSON-RPC error response（`-32601`/`-32603`） | 解析 code，`EventError` |
-| stdout JSON 解码失败 | 记录原始行（脱敏），继续读 |
-| 进程意外退出 | 终态 `EventError{Done:true}` |
-| `initialize` 超时 / `serverInfo.name` 不符 | fail-closed，descriptor `not_detected` |
-| 未知非 ignorable event | 记录 + 降级（不静默丢） |
+JSON-RPC error response / stdout 解码失败 / 进程意外退出 / 未知非 ignorable event → `EventError` + 降级。`initialize` 失败 → descriptor `not_detected`。
 
-> 审计 🔴 unverified：JSON-RPC error response、坏 JSON、超长行**无样本**。实施时补。
+> v3 🔴：JSON-RPC error、坏 JSON、超长行**无样本**（难触发），driver 实现时补。
 
 ---
 
 ## 7. 敏感信息脱敏
 
-- `tool/call.arguments` / `tool/result` 正文：不全文广播，只提取 title/kind/status/locations。
-- **iOS 不做消息内文件级 diff（2026-08-01 owner 决策）**：`tool/result.meta` 的 `FsDiffMeta.diffs`（无实样）不映射 inline diff；文件变更只走 session 级 diff bar。
-- `DEEPSEEK_API_KEY` 不进日志；`core.BuildAgentEnv` 过滤。
+- `tool/call.arguments`/`tool/result` 正文不全广播，只提取 title/kind/status/locations。
+- **iOS 不做消息内文件级 diff**：`tool/result.meta` 的 `FsDiffMeta.diffs`（实测为空 `[]`，无非空实样）不映射 inline diff；文件变更走 session 级 diff bar。
+- `DEEPSEEK_API_KEY` 不进日志/dump（v3 dumps 已确认无 key）。
 
 ---
 
-## 8. capability 与 WireDescriptor（v2 修正，审计 P0-1/P0-4）
+## 8. capability 与 WireDescriptor
 
 ### WireDescriptor（v2 修正）
 
 ```go
 &core.WireDescriptor{
-    Kind:        "deepseek",
-    DisplayName: "DeepSeek",
-    LiveEventModel:              core.LiveEventSessionProcess, // owned-process，非 broadcast
-    RequiresExternalTurnPolling: false,                        // = 不支持外部 turn 观察（非"push 已覆盖"）
-    StaticCapabilities:          nil,                          // 不声明 external_turn_streaming
+    Kind: "deepseek", DisplayName: "DeepSeek",
+    LiveEventModel: core.LiveEventSessionProcess,   // owned-process，非 broadcast
+    RequiresExternalTurnPolling: false,              // = 不支持外部 turn 观察
+    StaticCapabilities: nil,                          // 不声明 external_turn_streaming
 }
 ```
 
-**v1 错误**：声明了 `LiveEventBroadcast` + `external_turn_streaming`。核实 `external_turn_streaming` 是 MacBridge "push 外部进程产生的 turn"的能力（agent_descriptor_test.go L412，grok/codex external turn 用）；`LiveEventBroadcast` 是 opencode 那种 service-level fan-out 给多观察者。**DSH 是 driver 自己 spawn 持有的进程，event 从它的 stdout 出，只能证明 CordCode 自己发起的 turn，看不到另一个 Terminal/另一个 DSH process 的 turn** —— 是 `LiveEventSessionProcess`，不声明 `external_turn_streaming`。`RequiresExternalTurnPolling:false` 须解释为"不支持外部观察"，非"push 已覆盖外部 turn"。
+### capability → interface（v3：按证据调整）
 
-### capability → interface（v2 收缩到有证据项）
-
-| capability | interface | v2 决策 | 依据 |
+| capability | interface | v3 决策 | 依据 |
 |---|---|---|---|
-| `session_state` | `core.Agent` | ✅ 声明 | session/prompt + session.event |
-| `workspace_diff` | `core.WorkDirSwitcher` | ✅ 声明 | DSH_CWD |
-| `diagnostics` | `core.DiagnosticsProvider` | ✅ 声明 | exe 探测 + initialize 握手 |
-| `external_turn_streaming` | — | ❌ **不声明**（v1 错误） | owned-process，无外部 turn 观察 |
-| `session_history` | HistoryProvider | ❌ **一期不声明** | live-only（§4） |
-| `usage_reporting` | TokenUsageReporter | ❌ **不声明** | 需跨 transcript 聚合/去重，未定义（审计 P1-4） |
-| `todos` | TodoProvider | ❌ **不声明** | 无 todo/write dump + 需 FetchTodos 持久化读路径 |
-| `permission_resolve` | ToolAuthorizer | ❌ **不声明** | SDK server→client request 死能力（§3.5） |
-| `model_switch` | ModelSwitcher | ⚠️ 待定 | DSH 无 listModels；AvailableModels 返回固定表待定 |
-| `session_pin` | SessionPinner | ⚠️ 可选 | pinstore.FromOpts（与 history 解耦） |
-| `supports_checkpoint` | CheckpointProvider | ❌ 不声明 | 一期 live-only |
+| `session_state` | `core.Agent` | ✅ | session/prompt + session.event |
+| `workspace_diff` | `core.WorkDirSwitcher` | ✅ | DSH_CWD |
+| `diagnostics` | `core.DiagnosticsProvider` | ✅ | exe 探测 + initialize |
+| `external_turn_streaming` | — | ❌ | owned-process |
+| `todos` | `core.TodoProvider` | ⚠️ **可声明，但须先实现 `FetchTodos` 持久化读路径** | `todo/write` event verified；审计 P1-5：仅 live 映射不满足接口 |
+| `usage_reporting` | `core.TokenUsageReporter` | ⚠️ **可声明，但须先实现跨 session 聚合/去重** | `assistant/message.usage` 结构 verified（含 reasoningTokens）；审计 P1-4 |
+| `session_history` | HistoryProvider | ❌ 一期不声明 | live-only（§4） |
+| `permission_resolve` | ToolAuthorizer | ❌ | SDK server→client request 死能力 |
+| `model_switch` | ModelSwitcher | ⚠️ 待定 | DSH 无 listModels |
+| `session_pin` | SessionPinner | ⚠️ 可选 | pinstore.FromOpts |
+| `supports_checkpoint` | CheckpointProvider | ❌ | live-only |
 
-**`deriveBackendCapabilities` 硬编码分支**：DSH id 不匹配 claudecode/opencode/codex 任一特判，**无需改**。
+`deriveBackendCapabilities` 硬编码分支：DSH id 不匹配任一特判，**无需改**。
 
 ---
 
 ## 9. protocol 决策
 
-**无 bridge-v1 protocol change。** DSH SDK 事件全部能用现有 bridge event 表达；driver↔runtime 的 SDK JSON-RPC 是 driver 内部细节，不进 bridge wire（iOS 只见 core.Event）。
-
-> 即便 bridge-v1 无需升 major，按双仓规则仍须更新 MacBridge canonical protocol compatibility pack 并同步 iOS mirror/backend kind（审计 P1-6）。
+**无 bridge-v1 protocol change。** DSH SDK 事件全部能用现有 bridge event 表达；driver↔runtime 的 SDK JSON-RPC 不进 bridge wire。仍须按双仓规则更新 canonical protocol compatibility pack + iOS mirror（审计 P1-6）。
 
 ---
 
-## 10. 文件结构（v2：加专用 cordis.yml）
+## 10. 文件结构（v3：cordis.yml 已 assembled 验证）
 
 ```
 agent/deepseek/
-├── deepseek.go        # init() + New + core.Agent + 能力子接口（仅 v2 收缩后的）
-├── session.go         # core.AgentSession（spawn/readLoop/Close）
-├── sdk_codec.go       # SDK JSON-RPC 编解码 + SessionEvent → core.Event（仅 §3.3 verified 项）
-├── sdk_types.go       # SDK wire types 子集
-├── wire_descriptor.go # §8 WireDescriptor
-├── diagnostics.go     # DiagnosticsProvider
-├── session_pin.go     # SessionPinner（pinstore.FromOpts，可选）
+├── deepseek.go, session.go, sdk_codec.go, sdk_types.go
+├── wire_descriptor.go, diagnostics.go, session_pin.go
 ├── proc_unix.go / proc_windows.go   # 从 grokbuild 复制
-├── config/
-│   └── cordis.yml     # driver 专用 composition（挂 §3.5 权限栈，非裸 bash-local/fs-local）
+├── config/cordis.yml                # 见下（已 assembled 验证）
 └── *_test.go
 ```
 
-### driver 专用 `config/cordis.yml` 模板（基于 bundle/base，审计 P0-3）
+### driver `config/cordis.yml`（v3 verified，见 `scripts/dsh-gate0/driver-cordis.yml`）
 
 ```yaml
-# stdout 仅供 JSON-RPC；权限栈来自 bundle/base（非 jsonrpc-agent 裸 composition）
 - id: sdk-jsonrpc-server
   name: '@deepseek-ai/dsh-sdk-jsonrpc-server'
 - id: llm-deepseek
@@ -288,6 +226,7 @@ agent/deepseek/
   config: { thinking: enabled, reasoningEffort: max }
 - id: subprocess
   name: '@deepseek-ai/dsh-subprocess-local'
+# --- permission stack (bundle/base) ---
 - id: sandbox
   name: '@deepseek-ai/dsh-sandbox-local'
 - id: sandbox-policy
@@ -295,9 +234,13 @@ agent/deepseek/
   config:
     mode: !!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'
     workspaceRoot: !!js process.env.DSH_CWD ?? process.cwd()
-- id: bash-sandbox
+- id: bash-sandbox              # MUST be confined (bash-local 被 permission-presets 拒绝)
   name: '@deepseek-ai/dsh-bash-sandbox'
   config: { timeoutMs: 60000 }
+- id: shell-env
+  name: '@deepseek-ai/dsh-shell-env'
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
 - id: approval
   name: '@deepseek-ai/dsh-user-approval'
   config:
@@ -306,79 +249,81 @@ agent/deepseek/
   name: '@deepseek-ai/dsh-permission-presets'
   config:
     presets:
+      read-only: { sandbox: read-only, approval: ask }
       workspace-write: { sandbox: workspace-write, approval: ask }
       danger-full-access: { sandbox: danger-full-access, approval: never }
+# --- spine + persistence（不要重复挂 tool-todo/tool-fs，agent-spine 内置）---
 - id: agent-spine
   name: '@deepseek-ai/dsh-agent-spine-demo'
-  config: { persona: !!js process.env.DSH_SYSTEM_PROMPT ?? 'You are a coding agent.', workspaceContext: false, skills: { enabled: false } }
+  config: { persona: !!js process.env.DSH_SYSTEM_PROMPT ?? 'You are a coding agent.', workspaceContext: false, skills: { enabled: false }, toolBash: { enableRunInBackground: false }, toolJobs: false }
 - id: sessions
   name: '@deepseek-ai/dsh-session-persistence-jsonl'
-  config:
-    root: !!js process.env.DSH_SESSION_ROOT ?? './.sessions'
-    compression: none        # 一期便于 Go 直接读 JSONL（若做 history）
-    # packChunks: false      # 同理（待确认 config 字段名）
+  config: { root: !!js process.env.DSH_SESSION_ROOT ?? './.sessions', compression: none }
 - id: session-checkpoints
   name: '@deepseek-ai/dsh-session-checkpoint-policy'
+- id: subagent
+  name: '@deepseek-ai/dsh-subagent'
+- id: subagent-spawn-in-process
+  name: '@deepseek-ai/dsh-subagent-spawn-in-process'
+  config: { providerName: spawn }
+- id: tool-subagent
+  name: '@deepseek-ai/dsh-tool-subagent'
+  config: { provider: spawn }
 ```
 
-> **注意**：此模板**未经 assembled runtime dump 验证**（审计 🟡 needs-refinement：`compression:none`+`packChunks:false` 的目标 driver config 尚不存在）。实施前必须用真实组装验证 plugin 组合可加载 + sandbox/approval 生效 + fail-closed 拒绝样本。
+**v3 组装要点（已 verified）**：① bash 用 `bash-sandbox`（confined），非 `bash-local`；② 不重复挂 `tool-todo`/`tool-fs`（agent-spine 内置，重复挂触发 `allowParallelInProgress` 校验失败）；③ `compression: none` 便于 Go 读 JSONL。
 
-**与 grokbuild 复用**：`proc_unix.go`/Close/`BuildAgentEnv` 直接复制；`acp_codec.go`/`acp_types.go` **不复用**（ACP sessionUpdate ≠ SessionEvent union）；**不需要** catalog 子进程（无外部 turn 观察，无 session/list）。
+**与 grokbuild 复用**：`proc_unix.go`/Close/`BuildAgentEnv` 复制；`acp_codec.go` 不复用；不需要 catalog 子进程。
 
 ---
 
-## 11. 三仓改动面（v2 收缩）
+## 11. 三仓改动面
 
 ### A. MacBridge driver（`agent/deepseek/`）—— §10
-### B. go-bridge
-- `main.go`：blank import + `agentAliases` + `buildAgentOptions`（exe/cordis.yml/session root）
-- `agent_descriptor.go`：`agentKind`/`agentDisplayName`/`detectAgentStatus` 加 `deepseek`（detectDshRuntime：LookPath + initialize 握手）
-- `handlers.go`：`handleSendMessage` dispatch 加 `deepseek`；**v2 删除 v1 的 `handleListSessions`/`handleResumeSession` dispatch**（live-only）
-- `backend_capabilities.go`：无需改 id 分支
-- **不需要** `handlers_grok_catalog.go` 式的 catalog（无 session list）
-
-### C. iOS + remote-web
-- `BackendModels.swift`：`BackendKind` 加 `deepSeek` + `fromWireKind:"deepseek"` + displayName/icon
-- `CCCodeBridgeBackendClient.swift`：kind→id 映射
-- `remote-web`：识别 + 显示名
-- **iOS 不展示 DSH 的"历史会话列表/resume"**（对应 live-only）
+### B. go-bridge：`main.go`（import+alias+opts）、`agent_descriptor.go`（kind/displayName/detectDshRuntime）、`handlers.go`（handleSendMessage dispatch；**无** list/resume dispatch）；不需 catalog
+### C. iOS + remote-web：`BackendModels.swift`（`BackendKind.deepSeek` + `fromWireKind:"deepseek"`）、`CCCodeBridgeBackendClient.swift`、remote-web 识别；**iOS 不展示 DSH 历史/resume**（live-only）
 
 ---
 
-## 12. Gate 0 证据（纳入仓库，审计 P0-5）
+## 12. 证据（v3：4 次真实 run + Gate 0）
 
-**脚本 + 复现步骤 + pinned commit + 脱敏 raw frames**：`scripts/dsh-gate0/`（macbridge 仓库）。
+脚本 + dump：`scripts/dsh-gate0/`。pinned：DSH `47f943859bef60e4160492346772ded9b24f765a`，node v25.9.0，go1.26.2。
 
-**方法**：复刻 DSH `examples/jsonrpc-agent/tests/keyless-smoke.e2e.ts` —— 本地 HTTP server 模拟 DeepSeek API（canned SSE turn），`DEEPSEEK_BASE_URL` 指向它（无需真 key），Go spawn `node --import tsx bin.ts cordis.yml`，发 initialize → session/prompt → 捕获 `session.event` → shutdown。
+| Run | composition | prompt 意图 | 捕获（distinct types） | 关键 verified |
+|---|---|---|---|---|
+| Gate0 | jsonrpc-agent | mock canned turn | 14 | 协议连通（mock） |
+| run1 | jsonrpc-agent | todo+bash+write | 14 | **todo/write, tool/call, tool/result(双层+isError), reasoning-delta chunk, chunk 7 discriminant** |
+| run2 | jsonrpc-agent | 长文 maxTokens=24 | 11 | **turn/end(max-tokens), usage(reasoningTokens,cacheReadTokens)** |
+| run3 | **driver-cordis.yml** | bash echo | 16 | **§10 可加载；permission/preset+sandbox/mode+approval/policy 激活** |
+| run4 | driver-cordis.yml | 写 /tmp | 16 | bash 写临时区（sandbox 允许） |
 
-**pinned**：DSH commit `47f943859bef60e4160492346772ded9b24f765a`；node v25.9.0；go1.26.2 darwin/arm64。
+**fail-closed 证据**：`bash-local`(unconfined) + `permission-presets` → runtime 拒绝加载（`does not confine ... misconfiguration`）。
 
-**实测结果（2026-08-13，VERDICT: PASS）**：捕获 16 个 `session.event`（seq 0→15）：`agent/inbox/spliced`×2 → `turn/start` → `step/start` → `user/message` → `session/title` → `request/header` → `request/context` → `assistant/chunk`×5 → `assistant/message` → `step/end` → `turn/end(completed)`；`session.status` running→idle 双通道；落盘 `<root>/<encoded-project>/<encoded-session>/session.jsonl.zstd`。
-
-**覆盖边界**：仅 1 个 `completed` 纯文本 turn，覆盖 44 种事件中的 14 种（committed snapshots 交叉补证 tool/call、reasoning-delta、tool/result 基本结构）。**剩余 30 种无 runtime dump**（§3.3 unsupported 清单）。
+**覆盖**：44 种事件中 **17 种真实 verified**（含权限栈 3 种）。剩余 27 种需特殊触发（compaction 需长对话、approval/asked 需审批操作、error/blocked 需模型失败、goal/plan 需专用工具）。
 
 ---
 
 ## 13. 风险与回退
 
-1. **pre-release 漂移（最大）**：协议 `0.0.1` 无协商、`SESSION_FORMAT_VERSION=0` 无兼容。缓解：forward-compat（ignorable 跳过）+ pin runtime 版本。
-2. **取消即 session 终止**：无 cancel，中断=kill+session 结束（live-only）。
-3. **无 session list / resume**：一期 live-only。
-4. **权限降级**：approval 不经协议暴露，iPhone 无 per-call 授权；runtime 内 sandbox/approval 由 driver composition 控制（须自建，§3.5/§10）。
-5. **DeepSeek 绑定**：adapter 自动挂载 DeepSeek-specific。
-6. **证据缺口**：todo/compaction/approval/FsDiff/非 completed 终态/错误路径/sandbox 拒绝样本均无（需 key 或 assembled composition），是"不进入实现"的主因。
-7. **回退**：等 DSH 首个 tagged release 再接入。
+1. **pre-release 漂移**：协议 `0.0.1` 无协商。缓解：forward-compat + pin runtime。
+2. **取消即 session 终止**：无 cancel。
+3. **无 session list/resume**：live-only。
+4. **权限**：approval 不经协议暴露（iPhone 无 per-call 授权）；runtime sandbox/approval 由 §10 cordis.yml 控制（v3 verified 可加载+激活+fail-closed）。
+5. **DeepSeek 绑定**。
+6. **证据缺口**：compaction/approval-asked/error 终态/FsDiff 非空 等特殊触发项待补（见 §14）。
 
 ---
 
-## 14. 修订记录（响应审计 P0）
+## 14. 修订记录
 
-| P0 | v1 问题 | v2 修订 | 状态 |
+| 项 | v1 问题 | v2 修订 | v3 进展 |
 |---|---|---|---|
-| P0-1 | `LiveEventBroadcast`+`external_turn_streaming` 误报 | 改 `LiveEventSessionProcess`，移除 `external_turn_streaming`（§8） | ✅ 文档已改 |
-| P0-2 | resume 闭环缺失（扫 JSONL 不能恢复模型上下文） | 收敛 live-only：不声明 session_history、不展示/resume 历史（§4） | ✅ 文档已改 |
-| P0-3 | `DSH_PERMISSION_MODE` 误用于 jsonrpc composition | 写明权限栈在 bundle/base；driver 自建专用 cordis.yml（§3.5/§10） | ✅ 文档已改；⚠️ assembled dump 待补 |
-| P0-4 | 映射表"几乎一一对应"过度承诺 | §3.3 按 verified/unsupported 分级，无样本不声明（§8） | ✅ 文档已改；⚠️ 30 种 dump 待补 |
-| P0-5 | Gate 0 依赖 /tmp 一次性证据 | pin commit + 脚本/raw frames 纳入 `scripts/dsh-gate0/`（§12） | ✅ 本次提交 |
+| P0-1 | descriptor 误报 broadcast/external_turn_streaming | 改 LiveEventSessionProcess | ✅ |
+| P0-2 | resume 未闭环 | live-only | ✅ |
+| P0-3 | 权限 composition 不符 | 写明 bundle/base 栈 | ✅ **assembled 验证完成**（可加载+激活+fail-closed，§3.5/§10） |
+| P0-4 | 映射表过度承诺 | verified/unsupported 分级 | ✅ **17 种真实 verified**（reasoning-delta/todo/max-tokens/usage/权限栈） |
+| P0-5 | Gate 0 在 /tmp | pin + 纳入仓库 | ✅ 脚本+4 run dump+assembled composition 入库 |
 
-**剩余阻塞（需 owner 提供 `DEEPSEEK_API_KEY` 或真实模型环境才能补）**：todo/compaction/approval/FsDiff dump、非 completed 五态、错误路径、sandbox 拒绝样本、assembled driver composition 验证。补齐前**不进入实现**。
+**v3 剩余（特殊触发条件，driver 实现时补）**：`compaction/*`（长对话）、`approval/asked`（审批操作 + SDK resolve 行为）、error/aborted/interrupted/blocked 终态（模型失败）、非空 `FsDiffMeta`、`command/*`（dsh-shell）、goal/plan/schedule（专用工具）、JSON-RPC error/坏 JSON/超长行（错误路径）、SIGTERM/SIGKILL 回收。
+
+**当前结论**：协议选型、事件映射主体、权限 composition 均已真实证据支撑；剩余为边缘事件/错误路径/特殊触发项，不阻塞进入实现的设计评审，可在 driver 实现阶段增量补证。

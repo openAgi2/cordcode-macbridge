@@ -1,52 +1,60 @@
-# DSH Gate 0 连通性验证证据
+# DSH Gate 0 证据 + 真实事件 dump
 
-证明 Go 进程能 spawn DSH JSON-RPC agent runtime、驱动 `initialize` + `session/prompt`、消费完整 `session.event` 流 —— DSH driver 设计（`docs/2026-08-13-dsh-driver-design.md`）的地基证据。
+DSH driver 设计（`docs/2026-08-13-dsh-driver-design.md`）的全部协议证据：连通性、真实事件 dump、assembled composition（sandbox/approval）验证。
 
 ## Pinned
 
-- **DSH commit**：`47f943859bef60e4160492346772ded9b24f765a`（`/path/to/deepseek-harness` checkout 到此）
-- **方法学**：复刻 DSH 自身 `examples/jsonrpc-agent/tests/keyless-smoke.e2e.ts` —— 本地 HTTP server 模拟 DeepSeek chat-completions API（canned SSE turn），`DEEPSEEK_BASE_URL` 指向它，**无需真实 `DEEPSEEK_API_KEY`**。
-- **环境（本轮）**：node v25.9.0、go1.26.2 darwin/arm64、macOS。
+- **DSH commit**：`47f943859bef60e4160492346772ded9b24f765a`
+- node v25.9.0、go1.26.2 darwin/arm64
+
+## 两种模式（由 `DEEPSEEK_API_KEY` 决定）
+
+- **mock**（`key == dsh-conn-fake-key`）：本地 HTTP server 模拟 DeepSeek API，canned SSE turn，**无需真 key**（Gate 0 连通性）。
+- **real**（真 key）：连真实 DeepSeek API，`prompt = args[1]`，把每个 `session.event` 完整 JSON append 到 `DSH_GATE0_DUMP`。
 
 ## 复现
 
 ```sh
-# 1. DSH 源码 checkout 并 pin 到上述 commit，pnpm install（提供 tsx + 全 workspace）
+# 1. DSH 源码 pin + install
 cd /path/to/deepseek-harness
 git checkout 47f943859bef60e4160492346772ded9b24f765a
 pnpm install
+echo "DEEPSEEK_API_KEY=sk-..." > .env   # real 模式需要；mock 模式不需要
 
-# 2. 跑 Gate 0（脚本用 DSH_ROOT 定位 DSH checkout）
+# 2a. mock 模式（Gate 0，无 key）
 cd /path/to/cordcode-macbridge/scripts/dsh-gate0
-DSH_ROOT=/path/to/deepseek-harness go run main.go
+DSH_ROOT=/path/to/deepseek-harness DEEPSEEK_API_KEY=dsh-conn-fake-key go run main.go
+
+# 2b. real 模式（真实事件 dump）
+set -a; source /path/to/deepseek-harness/.env; set +a
+DSH_ROOT=/path/to/deepseek-harness DSH_GATE0_DUMP=dumps/runX.jsonl \
+  go run main.go "your prompt here"
+
+# 2c. assembled composition（§10 sandbox/approval 栈）
+DSH_ROOT=... DSH_PERMISSION_MODE=workspace-write \
+  DSH_GATE0_CONFIG=/abs/path/to/driver-cordis.yml \
+  DSH_GATE0_DUMP=dumps/runX.jsonl go run main.go "your prompt"
 ```
 
-## 本轮结果（VERDICT: PASS）
+## 本次证据（4 次真实 run，见 `dumps/`）
 
-捕获 **16 个 `session.event`**（seq 0→15），完整覆盖一个 `completed` turn：
+| Run | composition | 捕获 distinct types | 关键 verified |
+|---|---|---|---|
+| run1 | jsonrpc-agent | 14 | `todo/write`, `tool/call`, `tool/result`(双层嵌套+isError), `reasoning-delta` chunk, chunk 7 种 discriminant |
+| run2 | jsonrpc-agent（maxTokens=24） | 11 | `turn/end(max-tokens)`, `usage`(reasoningTokens, cacheReadTokens) |
+| run3 | **driver-cordis.yml** | 16 | §10 可加载；`permission/preset`+`sandbox/mode`+`approval/policy` 激活 |
+| run4 | driver-cordis.yml | 16 | bash 写临时区（sandbox 允许） |
 
-```
-agent/inbox/spliced → turn/start → agent/inbox/spliced → step/start →
-user/message → session/title → request/header → request/context →
-assistant/chunk ×5 → assistant/message → step/end → turn/end(completed)
-```
+**fail-closed 证据**：`bash-local`(unconfined) + `permission-presets` → runtime 拒绝加载（`does not confine ... misconfiguration`）。
 
-- `session.status` running → idle 双通道
-- `initialize` → `{serverInfo:{name:'deepseek-harness-sdk-runtime',version:'0.0.1'}}`
-- `session/prompt` → `{messageId}`（仅入队回执，不关联 turn 结果）
-- 落盘 `<DSH_SESSION_ROOT>/<encoded-project>/<encoded-session>/session.jsonl.zstd`
-
-完整 raw frames 见 `run-output.txt`。
-
-## 覆盖边界（重要）
-
-仅 **1 个 `completed` 纯文本 turn**，覆盖 DSH 44 种已知事件中的 **14 种**。剩余 30 种（`todo/write`、`compaction/*`、`approval/*`、`tool/result.meta` FsDiff、非 completed 五态、错误路径等）**无 runtime dump** —— 需真实 `DEEPSEEK_API_KEY` 或 assembled approval composition 才能补，是"暂不进入实现"的主因（见设计文档 §14）。
-
-committed snapshots（`examples/jsonrpc-agent/tests/snapshots/{text-turn,bash-tool,subagent-spawn-in-process,persistent-tools}`）交叉补证 `tool/call`、`reasoning-delta`、`tool/result` 基本结构，但非本脚本产出。
+**覆盖**：44 种事件中 17 种真实 verified（含权限栈 3 种）。
 
 ## 文件
 
-- `main.go` —— Go 验证脚本（spawn + mock API + JSON-RPC 帧往返 + session.event 捕获）
-- `run-output.txt` —— 本轮完整输出（raw frames）
+- `main.go` —— 验证脚本（mock/real 双模式，仅 Go 标准库）
+- `driver-cordis.yml` —— §10 driver 专用 assembled composition（sandbox/approval 栈，已 verified 可加载）
+- `dumps/*.jsonl` —— 4 次真实 run 的 `session.event` 完整 JSON（每行一个 event params）
+- `dumps/*.stdout` —— 调试输出（**gitignored**，含本机路径，不入库）
+- `run-output.txt` —— Gate 0 mock 模式输出
 
-> 脚本仅用 Go 标准库，不依赖 macbridge module；`go run main.go` 即可。
+> `dumps/*.jsonl` 已确认无 key、无本机绝对路径。`*.stdout` 因含本机路径被 `.gitignore` 排除。
