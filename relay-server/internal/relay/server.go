@@ -761,9 +761,29 @@ func (s *Server) bridge(routeID string) *socketPeer {
 
 func (s *Server) removeBridge(routeID string, peer *socketPeer) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.bridges[routeID] == peer {
-		delete(s.bridges, routeID)
+	if s.bridges[routeID] != peer {
+		// A newer bridge already registered itself: this is a replacement, the route
+		// stays served — must NOT disturb device sockets.
+		s.mu.Unlock()
+		return
+	}
+	delete(s.bridges, routeID)
+	prefix := routeID + "\x00"
+	var devices []*socketPeer
+	for key, dev := range s.devices {
+		if strings.HasPrefix(key, prefix) {
+			devices = append(devices, dev)
+		}
+	}
+	s.mu.Unlock()
+	// 2026-08-14 device-stall fix: when the route's bridge socket drops, silently
+	// parked device sockets previously learned "bridge offline" only on their NEXT
+	// outbound frame — iOS devices kept a healthy-looking websocket for up to a
+	// watchdog period while the bridge's outbound queue overflowed and closed, so
+	// offline-window replies arrived tens of seconds late via catch-up pulls. Close
+	// route devices proactively so they reconnect immediately.
+	for _, dev := range devices {
+		s.closePeer(dev, websocket.CloseTryAgainLater, "bridge offline")
 	}
 }
 

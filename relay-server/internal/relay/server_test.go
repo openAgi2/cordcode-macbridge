@@ -3,6 +3,7 @@ package relay
 import (
 	"bytes"
 	"crypto/ed25519"
+	"errors"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -642,5 +643,70 @@ func TestPairingClaimInvalidInput(t *testing.T) {
 		map[string]any{"state": "approved", "sealedResult": []byte("x")})
 	if response.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400 for nonexistent claim, got %d", response.StatusCode)
+	}
+}
+
+// 2026-08-14 device-stall regression: when the route's bridge socket drops, parked
+// device sockets must be closed promptly with "bridge offline" instead of waiting
+// for the device's next outbound frame. Replacement must not disturb devices.
+func TestBridgeDropClosesRouteDevicesPromptlyAndReplacementKeepsDevices(t *testing.T) {
+	relayServer, httpServer := newTestServer(t, 20)
+	credentials := provisionDevice(t, httpServer.URL)
+	bridge := wsDial(t, httpServer.URL, "/v1/routes/"+credentials.routeID+"/bridge", credentials.bridgeAuth)
+	device := wsDial(t, httpServer.URL, "/v1/routes/"+credentials.routeID+"/devices/phone-1", credentials.deviceAuth)
+
+	// Sanity: bridge→device forwarding works before the drop.
+	toDevice := []byte(`{"routeId":"` + credentials.routeID + `","senderId":"bridge","destinationId":"phone-1","ciphertext":"cipher"}`)
+	if err := bridge.WriteMessage(websocket.TextMessage, toDevice); err != nil {
+		t.Fatal(err)
+	}
+	device.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, payload, err := device.ReadMessage(); err != nil || string(payload) != string(toDevice) {
+		t.Fatalf("pre-drop forward payload=%s err=%v", payload, err)
+	}
+
+	// Bridge socket goes away without a replacement. Wait until the server has
+	// processed the drop (registration removed) so later steps are deterministic.
+	bridge.Close()
+	dropDeadline := time.Now().Add(2 * time.Second)
+	for relayServer.bridge(credentials.routeID) != nil && time.Now().Before(dropDeadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	device.SetReadDeadline(time.Now().Add(5 * time.Second))
+	for {
+		_, _, err := device.ReadMessage()
+		if err == nil {
+			continue // drain any queued frames until the close surfaces
+		}
+		closeErr := &websocket.CloseError{}
+		if errors.As(err, &closeErr) {
+			if closeErr.Code != websocket.CloseTryAgainLater {
+				t.Fatalf("expected CloseTryAgainLater, got %d", closeErr.Code)
+			}
+		} else if !websocket.IsUnexpectedCloseError(err) {
+			t.Fatalf("expected close error, got %v", err)
+		}
+		break
+	}
+
+	// Replacement semantics: a new bridge registers while devices stay connected and
+	// forwarding continues without closing the device socket.
+	bridge2 := wsDial(t, httpServer.URL, "/v1/routes/"+credentials.routeID+"/bridge", credentials.bridgeAuth)
+	// wsDial returns before handleBridgeSocket runs setBridge; wait for the
+	// registration so the old bridge's deferred cleanup cannot race the test.
+	deadline := time.Now().Add(2 * time.Second)
+	for relayServer.bridge(credentials.routeID) == nil && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	// phone-1 reconnects (its socket was closed with TryAgainLater; the device
+	// record stays registered, so re-auth succeeds).
+	device2 := wsDial(t, httpServer.URL, "/v1/routes/"+credentials.routeID+"/devices/phone-1", credentials.deviceAuth)
+	toDevice2 := []byte(`{"routeId":"` + credentials.routeID + `","senderId":"bridge","destinationId":"phone-1","ciphertext":"after"}`)
+	if err := bridge2.WriteMessage(websocket.TextMessage, toDevice2); err != nil {
+		t.Fatal(err)
+	}
+	device2.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, payload, err := device2.ReadMessage(); err != nil || string(payload) != string(toDevice2) {
+		t.Fatalf("post-replacement forward payload=%s err=%v", payload, err)
 	}
 }
