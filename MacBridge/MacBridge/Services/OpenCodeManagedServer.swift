@@ -151,6 +151,7 @@ final class OpenCodeManagedServer {
     private let portProber: OpenCodePortProbing
     private let healthProbe: OpenCodeManagedHealthProbing
     private let processFactory: OpenCodeProcessFactory
+    private let processStartResolver: (Int32) -> Date?
     let desktopController: OpenCodeDesktopProcessControlling
 
     private var process: Process?
@@ -167,7 +168,8 @@ final class OpenCodeManagedServer {
         portProber: OpenCodePortProbing = DefaultOpenCodePortProber(),
         healthProbe: OpenCodeManagedHealthProbing = DefaultOpenCodeManagedHealthProbe(),
         processFactory: OpenCodeProcessFactory = DefaultOpenCodeProcessFactory(),
-        desktopController: OpenCodeDesktopProcessControlling = DefaultOpenCodeDesktopProcessController()
+        desktopController: OpenCodeDesktopProcessControlling = DefaultOpenCodeDesktopProcessController(),
+        processStartResolver: ((Int32) -> Date?)? = nil
     ) {
         self.dataDir = dataDir
         self.logDir = logDir
@@ -177,6 +179,7 @@ final class OpenCodeManagedServer {
         self.healthProbe = healthProbe
         self.processFactory = processFactory
         self.desktopController = desktopController
+        self.processStartResolver = processStartResolver ?? OpenCodeManagedServer.processStartDate(pid:)
     }
 
     func ensureRunning(timeout: TimeInterval = 5.0) -> OpenCodeManagedEndpoint? {
@@ -328,7 +331,65 @@ final class OpenCodeManagedServer {
             kill(pid, SIGTERM)
             return false
         }
+        // Catalog degradation guard (2026-08-14 incident): a server whose models.dev
+        // fetch failed after it started is "healthy" on /global/health but cannot
+        // resolve any builtin provider — every prompt against e.g. zhipu closes as a
+        // silent empty turn. Refuse to adopt it and force a fresh spawn instead of
+        // keeping the degraded process alive across app restarts for days.
+        if adoptedProcessHasCatalogDegradation(pid: pid) {
+            kill(pid, SIGTERM)
+            NSLog("[OpenCodeManagedServer] Refusing to adopt catalog-degraded opencode server (models.dev fetch failed after process start); respawning")
+            return false
+        }
         return true
+    }
+
+    /// A catalog-degraded adoption is one whose stderr log carries a
+    /// `Failed to fetch models.dev` line timestamped at/after the process start.
+    /// The err.log accumulates output from the spawn that created it, so the
+    /// timestamp bound keeps older spawns' failures from vetoing a healthy one.
+    private func adoptedProcessHasCatalogDegradation(pid: Int32) -> Bool {
+        guard let start = processStartResolver(pid) else { return false }
+        guard let text = try? String(contentsOfFile: stderrLogPath, encoding: .utf8) else {
+            return false
+        }
+        return Self.evaluateAdoptionCatalogDegraded(logText: text, processStart: start)
+    }
+
+    static func evaluateAdoptionCatalogDegraded(logText: String, processStart: Date) -> Bool {
+        for rawLine in logText.split(separator: "\n").reversed() {
+            let line = String(rawLine)
+            guard line.contains("Failed to fetch models.dev"),
+                  let logged = logLineTimestamp(line) else { continue }
+            if logged >= processStart {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Parses the `timestamp=2026-08-14T07:56:14.414Z` prefix opencode writes
+    /// on every --print-logs stderr line.
+    static func logLineTimestamp(_ line: String) -> Date? {
+        guard let range = line.range(of: "timestamp=") else { return nil }
+        let rest = line[range.upperBound...].prefix(30)
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: String(rest)) {
+            return date
+        }
+        let plain = ISO8601DateFormatter()
+        return plain.date(from: String(rest))
+    }
+
+    static func processStartDate(pid: Int32) -> Date? {
+        let output = runCommand("/bin/ps", ["-p", "\(pid)", "-o", "lstart="])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !output.isEmpty else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "EEE MMM dd HH:mm:ss yyyy"
+        return formatter.date(from: output)
     }
 
     private func waitUntilReady(endpoint: PersistedState, process: Process, timeout: TimeInterval) -> Bool {
@@ -422,6 +483,9 @@ final class OpenCodeManagedServer {
         FileManager.default.createFile(atPath: stderrLogPath, contents: nil, attributes: [.posixPermissions: 0o600])
         guard let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: stderrLogPath)) else { return }
         stderrHandle = handle
+        // Handler-local state only (the original closure deliberately captures
+        // no self); the flag is scoped to this spawn's stderr stream.
+        var modelsDevFailureLogged = false
         pipe.fileHandleForReading.readabilityHandler = { fh in
             let data = fh.availableData
             guard !data.isEmpty else {
@@ -431,6 +495,10 @@ final class OpenCodeManagedServer {
             }
             var text = String(data: data, encoding: .utf8) ?? ""
             text = Self.redact(text, password: password)
+            if text.contains("Failed to fetch models.dev"), !modelsDevFailureLogged {
+                modelsDevFailureLogged = true
+                NSLog("[OpenCodeManagedServer] WARNING: opencode failed to fetch models.dev — builtin provider catalog is missing; prompts against builtin providers (e.g. zhipuai-coding-plan) will close as silent empty turns until the server respawns")
+            }
             if let redacted = text.data(using: .utf8) {
                 try? handle.seekToEnd()
                 handle.write(redacted)

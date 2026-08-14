@@ -134,6 +134,38 @@ final class OpenCodeManagedServerTests: XCTestCase {
         )
     }
 
+    // Catalog-degradation adoption guard (2026-08-14 incident): a models.dev fetch
+    // failure logged at/after the adopted process started means the server cannot
+    // resolve builtin providers even though /global/health is green.
+    func testAdoptionCatalogDegradedWhenModelsDevFailureAfterProcessStart() {
+        let iso = ISO8601DateFormatter()
+        let start = iso.date(from: "2026-08-14T09:00:00Z")!
+        let log = """
+        timestamp=2026-08-14T09:56:14.414Z level=INFO message="global event connected"
+        timestamp=2026-08-14T09:56:20.036Z level=ERROR message="Failed to fetch models.dev" cause=Cause([Fail(TimeoutError)])
+        """
+        XCTAssertTrue(OpenCodeManagedServer.evaluateAdoptionCatalogDegraded(logText: log, processStart: start))
+    }
+
+    func testAdoptionNotDegradedWhenFailurePredatesProcessStart() {
+        let iso = ISO8601DateFormatter()
+        let start = iso.date(from: "2026-08-14T10:00:00Z")!
+        let log = """
+        timestamp=2026-08-14T09:56:20.036Z level=ERROR message="Failed to fetch models.dev" cause=Cause([Fail(TimeoutError)])
+        """
+        XCTAssertFalse(OpenCodeManagedServer.evaluateAdoptionCatalogDegraded(logText: log, processStart: start))
+    }
+
+    func testAdoptionNotDegradedWithoutModelsDevSignature() {
+        let iso = ISO8601DateFormatter()
+        let start = iso.date(from: "2026-08-14T09:00:00Z")!
+        let log = """
+        timestamp=2026-08-14T09:56:14.414Z level=INFO message="global event connected"
+        """
+        XCTAssertFalse(OpenCodeManagedServer.evaluateAdoptionCatalogDegraded(logText: log, processStart: start))
+        XCTAssertFalse(OpenCodeManagedServer.evaluateAdoptionCatalogDegraded(logText: "", processStart: start))
+    }
+
     private func tempDir() -> URL {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("oc-managed-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
