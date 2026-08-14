@@ -416,6 +416,7 @@ func Main() {
 			ack.Capabilities["session_sync_v2"] = true
 			advertiseSessionSyncV2Backend(ack.Backends)
 			server.eventPublisher.SetConnSyncV2(conn, true)
+			server.eventPublisher.SetConnProjectionEpoch(conn, hello.LastBridgeEpoch)
 		}
 		conn.SendJSON(ack)
 		if ack.Recovery != nil {

@@ -87,6 +87,14 @@ func logProjectionResponseMetrics(
 		"responseBytes", encodedJSONSize(response),
 		"elapsedMs", durationMillis(time.Since(startedAt)),
 	}
+	if result, ok := data.(map[string]interface{}); ok {
+		if resume, ok := result["resume"].(ProjectionResumeDiagnostic); ok {
+			attrs = append(attrs, "resumeKind", resume.Kind)
+			if resume.Reason != nil {
+				attrs = append(attrs, "resumeReason", *resume.Reason)
+			}
+		}
+	}
 	if projection != nil {
 		breakdown := measureProjectionPayload(*projection)
 		attrs = append(attrs,

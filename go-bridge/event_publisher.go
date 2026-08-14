@@ -226,6 +226,7 @@ type EventPublisher struct {
 	projection               *ProjectionReducer
 	kernel                   *ProjectionKernel
 	syncV2                   map[Connection]bool
+	projectionEpochMismatch  map[Connection]bool
 	readFileV2               map[Connection]bool
 	catalogCursorEpochV2     map[Connection]bool
 	nextConnectionGeneration uint64
@@ -259,24 +260,25 @@ func NewEventPublisher(bridgeEpoch string, broadcaster ...*Broadcaster) *EventPu
 		panic("event publisher bridge epoch must not be empty")
 	}
 	p := &EventPublisher{
-		bridgeEpoch:            bridgeEpoch,
-		perSessionSeq:          make(map[string]int),
-		sinks:                  make(map[Connection]*eventOutboundSink),
-		offlineQueue:           make(chan EventMessage, eventOutboundQueueCapacity),
-		recoveries:             make(map[Connection]*publisherRecovery),
-		buffer:                 NewEventBuffer(EventBufferConfig{}),
-		liveBuffer:             NewLiveFrameBuffer(),
-		now:                    time.Now,
-		completed:              make(map[Connection]string),
-		projection:             NewProjectionReducer(),
-		syncV2:                 make(map[Connection]bool),
-		readFileV2:             make(map[Connection]bool),
-		catalogCursorEpochV2:   make(map[Connection]bool),
-		connectionGenerations:  make(map[Connection]uint64),
-		projectionFences:       make(map[projectionFenceKey]*projectionSnapshotFence),
-		projectionSnapshotCuts: make(map[projectionFenceKey]int),
-		projectionInvalidated:  make(map[projectionFenceKey]bool),
-		projectionJournal:      NewProjectionRevisionJournal(0, 0),
+		bridgeEpoch:             bridgeEpoch,
+		perSessionSeq:           make(map[string]int),
+		sinks:                   make(map[Connection]*eventOutboundSink),
+		offlineQueue:            make(chan EventMessage, eventOutboundQueueCapacity),
+		recoveries:              make(map[Connection]*publisherRecovery),
+		buffer:                  NewEventBuffer(EventBufferConfig{}),
+		liveBuffer:              NewLiveFrameBuffer(),
+		now:                     time.Now,
+		completed:               make(map[Connection]string),
+		projection:              NewProjectionReducer(),
+		syncV2:                  make(map[Connection]bool),
+		projectionEpochMismatch: make(map[Connection]bool),
+		readFileV2:              make(map[Connection]bool),
+		catalogCursorEpochV2:    make(map[Connection]bool),
+		connectionGenerations:   make(map[Connection]uint64),
+		projectionFences:        make(map[projectionFenceKey]*projectionSnapshotFence),
+		projectionSnapshotCuts:  make(map[projectionFenceKey]int),
+		projectionInvalidated:   make(map[projectionFenceKey]bool),
+		projectionJournal:       NewProjectionRevisionJournal(0, 0),
 	}
 	if len(broadcaster) > 0 {
 		p.broadcaster = broadcaster[0]
@@ -337,7 +339,7 @@ func (p *EventPublisher) FlushPatchAndRecord(backendID, sessionID string) (Proje
 
 func (p *EventPublisher) recordProjectionPatchLocked(backendID, sessionID string, patch ProjectionPatch) {
 	if p.projectionJournal != nil {
-		p.projectionJournal.Record(backendID, sessionID, patch)
+		p.projectionJournal.Record(backendID, sessionID, patch, p.now())
 	}
 }
 
@@ -421,6 +423,7 @@ func (p *EventPublisher) UnregisterConnection(conn Connection) {
 	delete(p.recoveries, conn)
 	delete(p.completed, conn)
 	delete(p.syncV2, conn)
+	delete(p.projectionEpochMismatch, conn)
 	delete(p.readFileV2, conn)
 	delete(p.catalogCursorEpochV2, conn)
 	delete(p.connectionGenerations, conn)

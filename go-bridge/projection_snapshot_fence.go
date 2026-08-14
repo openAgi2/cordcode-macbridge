@@ -18,6 +18,13 @@ type ProjectionSnapshotAdmission struct {
 	fenceID              uint64
 }
 
+type ProjectionResumeSelection struct {
+	Patches        []ProjectionPatch
+	Available      bool
+	FallbackReason ProjectionResumeFallbackReason
+	EpochChanged   bool
+}
+
 type projectionFenceKey struct {
 	conn                 Connection
 	backendID, sessionID string
@@ -55,20 +62,27 @@ func (p *EventPublisher) BeginProjectionSnapshotWithResume(
 	conn Connection,
 	backendID, sessionID string,
 	sinceRev int,
-) (SessionProjection, ProjectionSnapshotAdmission, []ProjectionPatch, bool, error) {
+) (SessionProjection, ProjectionSnapshotAdmission, ProjectionResumeSelection, error) {
 	if p == nil || conn == nil || backendID == "" || sessionID == "" {
-		return SessionProjection{}, ProjectionSnapshotAdmission{}, nil, false, fmt.Errorf("projection snapshot identity is required")
+		return SessionProjection{}, ProjectionSnapshotAdmission{}, ProjectionResumeSelection{}, fmt.Errorf("projection snapshot identity is required")
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	projection, admission, err := p.beginProjectionSnapshotLocked(conn, backendID, sessionID)
 	if err != nil {
-		return SessionProjection{}, ProjectionSnapshotAdmission{}, nil, false, err
+		return SessionProjection{}, ProjectionSnapshotAdmission{}, ProjectionResumeSelection{}, err
 	}
-	patches, ok := p.projectionJournal.ContiguousRange(
-		backendID, sessionID, sinceRev, admission.CutRev,
+	selection := ProjectionResumeSelection{EpochChanged: p.projectionEpochMismatch[conn]}
+	if selection.EpochChanged {
+		return projection, admission, selection, nil
+	}
+	patches, ok, reason := p.projectionJournal.ContiguousRangeAt(
+		backendID, sessionID, sinceRev, admission.CutRev, p.now(),
 	)
-	return projection, admission, patches, ok, nil
+	selection.Patches = patches
+	selection.Available = ok
+	selection.FallbackReason = reason
+	return projection, admission, selection, nil
 }
 
 // beginProjectionSnapshotLocked requires EventPublisher.mu. Callers use it to keep journal range

@@ -33,6 +33,22 @@ func (p *EventPublisher) SetConnSyncV2(conn Connection, enabled bool) {
 	)
 }
 
+// SetConnProjectionEpoch records whether this negotiated v2 connection presented a non-empty
+// previous bridge epoch that differs from the current process. Numeric revisions are scoped to
+// an epoch and must never be resumed across this boundary.
+func (p *EventPublisher) SetConnProjectionEpoch(conn Connection, lastBridgeEpoch string) {
+	if p == nil || conn == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if lastBridgeEpoch != "" && lastBridgeEpoch != p.bridgeEpoch {
+		p.projectionEpochMismatch[conn] = true
+	} else {
+		delete(p.projectionEpochMismatch, conn)
+	}
+}
+
 // isSessionSyncV2RawTimelineEvent mirrors the content-writer seals in iOS and remote-web.
 // These events have already been reduced into SessionProjection before delivery, so sending the
 // raw frame to a projection-only client would recreate the retired dual-publish path.

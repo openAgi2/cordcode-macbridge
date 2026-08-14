@@ -1034,8 +1034,15 @@ Request params (additive):
 Response data — full projection, or a delta when `sinceRev` was honored:
 
 ```ts
-| { projection: BridgeSessionProjection }
-| { patches: BridgeProjectionPatch[], headRev: number }
+| {
+    projection: BridgeSessionProjection,
+    resume?: { kind: "full", reason: "cold" | "journal_gap" | "epoch_change" | "limit", requestedRev?: number }
+  }
+| {
+    patches: BridgeProjectionPatch[],
+    headRev: number,
+    resume?: { kind: "at_head" | "journal", fromRev: number, toRev: number }
+  }
 ```
 
 MacBridge keeps a process/`bridgeEpoch`-scoped bounded journal of already-committed
@@ -1046,6 +1053,14 @@ from `sinceRev` through the snapshot admission cut, the RPC returns that non-emp
 entry, epoch change, or head mismatch returns the authoritative `{projection}` form instead. The
 journal is not a session store and MUST NOT reconstruct a projection, call history, or substitute a
 cached snapshot.
+
+`resume` is additive for compatibility and emitted by current MacBridge builds. `at_head` and
+`journal` identify the exact admitted revision interval. A full response reports one typed reason:
+`cold` for no requested revision, `journal_gap` for non-contiguous revisions, `epoch_change` when
+the negotiated client's prior bridge epoch differs, or `limit` when rev-count, encoded-byte, age,
+or oversized-entry retention removed the requested suffix. The production journal is bounded by
+128 patches, 2 MiB per session, and 30 minutes; these bounds cover the P0 observed production
+window (8 patches, 416–754 bytes over about 19 minutes) without becoming durable session storage.
 
 #### Observed paired wire samples
 

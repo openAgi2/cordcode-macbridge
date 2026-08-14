@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestProjectionRevisionJournalReturnsExactContiguousRangeAndClones(t *testing.T) {
@@ -51,6 +52,27 @@ func TestProjectionRevisionJournalReturnsExactContiguousRangeAndClones(t *testin
 	gotJSON, _ := json.Marshal(again[0])
 	if !reflect.DeepEqual(gotJSON, wantJSON) {
 		t.Fatalf("canonical patch changed\n got: %s\nwant: %s", gotJSON, wantJSON)
+	}
+}
+
+func TestProjectionRevisionJournalClassifiesRetentionAndGap(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0)
+	journal := NewProjectionRevisionJournal(2, 1<<20, 30*time.Minute)
+	journal.Record("codex", "s1", ProjectionPatch{BaseRev: 1, SyncRev: 2}, base)
+	journal.Record("codex", "s1", ProjectionPatch{BaseRev: 2, SyncRev: 3}, base.Add(time.Minute))
+	journal.Record("codex", "s1", ProjectionPatch{BaseRev: 3, SyncRev: 4}, base.Add(2*time.Minute))
+	if _, ok, reason := journal.ContiguousRangeAt("codex", "s1", 1, 4, base.Add(2*time.Minute)); ok || reason != ProjectionResumeLimit {
+		t.Fatalf("count eviction = ok %v reason %q, want limit", ok, reason)
+	}
+	journal.Record("codex", "s1", ProjectionPatch{BaseRev: 9, SyncRev: 10}, base.Add(3*time.Minute))
+	if _, ok, reason := journal.ContiguousRangeAt("codex", "s1", 4, 10, base.Add(3*time.Minute)); ok || reason != ProjectionResumeJournalGap {
+		t.Fatalf("discontinuity = ok %v reason %q, want journal_gap", ok, reason)
+	}
+
+	ageJournal := NewProjectionRevisionJournal(8, 1<<20, 30*time.Minute)
+	ageJournal.Record("codex", "s2", ProjectionPatch{BaseRev: 7, SyncRev: 8}, base)
+	if _, ok, reason := ageJournal.ContiguousRangeAt("codex", "s2", 7, 8, base.Add(31*time.Minute)); ok || reason != ProjectionResumeLimit {
+		t.Fatalf("age eviction = ok %v reason %q, want limit", ok, reason)
 	}
 }
 

@@ -39,6 +39,26 @@ var coldHydrateBackgroundBudget = defaultColdHydrateBackgroundBudget
 
 var errProjectionHydrating = errors.New("projection hydration is still in progress")
 
+type ProjectionResumeDiagnostic struct {
+	Kind         string  `json:"kind"`
+	FromRev      *int    `json:"fromRev,omitempty"`
+	ToRev        *int    `json:"toRev,omitempty"`
+	Reason       *string `json:"reason,omitempty"`
+	RequestedRev *int    `json:"requestedRev,omitempty"`
+}
+
+func projectionResumeRange(kind string, fromRev, toRev int) ProjectionResumeDiagnostic {
+	return ProjectionResumeDiagnostic{Kind: kind, FromRev: &fromRev, ToRev: &toRev}
+}
+
+func projectionResumeFull(reason string, requestedRev int) ProjectionResumeDiagnostic {
+	resume := ProjectionResumeDiagnostic{Kind: "full", Reason: &reason}
+	if requestedRev > 0 {
+		resume.RequestedRev = &requestedRev
+	}
+	return resume
+}
+
 const projectionHydratingRetryAfter = 250 * time.Millisecond
 
 // coldHydrateTestHook, when non-nil, runs once at the start of the hydrate goroutine.
@@ -148,7 +168,7 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 		h.startProjectionLiveRelay(params.SessionID, conn, msg.BackendID, agent, params.Directory)
 	}
 
-	proj, admission, resumePatches, hasResumeRange, snapshotErr := h.eventPublisher.BeginProjectionSnapshotWithResume(
+	proj, admission, resumeSelection, snapshotErr := h.eventPublisher.BeginProjectionSnapshotWithResume(
 		conn,
 		msg.BackendID,
 		params.SessionID,
@@ -166,11 +186,12 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 	logProjectionRPCTrace("hydrate_ready", msg, params.SessionID, params.SinceRev, headRev, "", &admission)
 
 	// Cheap delta response when the client is already at head: empty patch set.
-	if params.SinceRev != 0 && params.SinceRev == headRev {
+	if params.SinceRev != 0 && params.SinceRev == headRev && !resumeSelection.EpochChanged {
 		logProjectionRPCTrace("response_enqueue", msg, params.SessionID, params.SinceRev, headRev, "delta_at_head", &admission)
 		response := map[string]interface{}{
 			"patches": []ProjectionPatch{},
 			"headRev": headRev,
+			"resume":  projectionResumeRange("at_head", params.SinceRev, headRev),
 		}
 		logProjectionResponseMetrics(
 			msg, params.SessionID, params.SinceRev, headRev, "delta_at_head", response,
@@ -181,11 +202,12 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 		}
 		return
 	}
-	if params.SinceRev != 0 && hasResumeRange && len(resumePatches) > 0 {
+	if params.SinceRev != 0 && resumeSelection.Available && len(resumeSelection.Patches) > 0 {
 		logProjectionRPCTrace("response_enqueue", msg, params.SessionID, params.SinceRev, headRev, "delta", &admission)
 		response := map[string]interface{}{
-			"patches": resumePatches,
+			"patches": resumeSelection.Patches,
 			"headRev": headRev,
+			"resume":  projectionResumeRange("journal", params.SinceRev, headRev),
 		}
 		logProjectionResponseMetrics(
 			msg, params.SessionID, params.SinceRev, headRev, "delta", response,
@@ -197,8 +219,22 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 		return
 	}
 
+	fullReason := "cold"
+	if params.SinceRev > 0 {
+		switch {
+		case resumeSelection.EpochChanged:
+			fullReason = "epoch_change"
+		case resumeSelection.FallbackReason == ProjectionResumeLimit:
+			fullReason = "limit"
+		default:
+			fullReason = "journal_gap"
+		}
+	}
 	logProjectionRPCTrace("response_enqueue", msg, params.SessionID, params.SinceRev, proj.SyncRev, "snapshot", &admission)
-	response := map[string]interface{}{"projection": proj}
+	response := map[string]interface{}{
+		"projection": proj,
+		"resume":     projectionResumeFull(fullReason, params.SinceRev),
+	}
 	logProjectionResponseMetrics(
 		msg, params.SessionID, params.SinceRev, proj.SyncRev, "snapshot", response,
 		h.eventPublisher.ActiveRecoveryID(conn), requestStartedAt, &proj,

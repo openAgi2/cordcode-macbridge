@@ -645,7 +645,15 @@ export interface BridgeGetSessionProjectionParams {
   limitTurns?: number;
 }
 
+export type BridgeProjectionResume =
+  | { kind: "at_head" | "journal"; fromRev: number; toRev: number }
+  | {
+      kind: "full";
+      reason: "cold" | "journal_gap" | "epoch_change" | "limit";
+      requestedRev?: number;
+    };
+
 /** get_session_projection result: full projection (no sinceRev / server chose snapshot) OR delta patches. */
 export type BridgeGetSessionProjectionResult =
-  | { projection: BridgeSessionProjection }
-  | { patches: BridgeProjectionPatch[]; headRev: number };
+  | { projection: BridgeSessionProjection; resume?: BridgeProjectionResume }
+  | { patches: BridgeProjectionPatch[]; headRev: number; resume?: BridgeProjectionResume };

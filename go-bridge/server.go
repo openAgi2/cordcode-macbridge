@@ -590,6 +590,7 @@ func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage
 		ack.Capabilities["session_sync_v2"] = true
 		advertiseSessionSyncV2Backend(ack.Backends)
 		s.eventPublisher.SetConnSyncV2(connection, true)
+		s.eventPublisher.SetConnProjectionEpoch(connection, hello.LastBridgeEpoch)
 	}
 	if ack.Ok && helloSupportsReadFileV2(&hello) {
 		ack.Capabilities["read_file_v2"] = true

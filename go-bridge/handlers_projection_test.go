@@ -129,6 +129,10 @@ func TestHandleGetSessionProjectionReturnsReducerState(t *testing.T) {
 	if proj.SessionID != "s1" || proj.SyncRev != 1 || len(proj.Turns) != 1 || proj.Turns[0].TurnID != "T1" {
 		t.Fatalf("projection = %+v", proj)
 	}
+	resume := dataMap["resume"].(ProjectionResumeDiagnostic)
+	if resume.Kind != "full" || resume.Reason == nil || *resume.Reason != "cold" || resume.RequestedRev != nil {
+		t.Fatalf("cold resume diagnostic = %+v", resume)
+	}
 }
 
 // TestHandleGetSessionProjectionEmptyWhenNoState: without a source inspection, absence of reducer
@@ -174,6 +178,10 @@ func TestHandleGetSessionProjectionDeltaAtHead(t *testing.T) {
 	if len(patches) != 0 || dataMap["headRev"].(int) != 1 {
 		t.Fatalf("expected empty patches + headRev 2, got %+v", dataMap)
 	}
+	resume := dataMap["resume"].(ProjectionResumeDiagnostic)
+	if resume.Kind != "at_head" || resume.FromRev == nil || *resume.FromRev != 1 || resume.ToRev == nil || *resume.ToRev != 1 {
+		t.Fatalf("at-head resume diagnostic = %+v", resume)
+	}
 }
 
 func TestHandleGetSessionProjectionReturnsJournaledNonEmptyDelta(t *testing.T) {
@@ -212,6 +220,75 @@ func TestHandleGetSessionProjectionReturnsJournaledNonEmptyDelta(t *testing.T) {
 	}
 	if len(patches[0].PartOps) != 1 || patches[0].PartOps[0].Text != " second" {
 		t.Fatalf("delta payload changed: %+v", patches[0])
+	}
+	resume := dataMap["resume"].(ProjectionResumeDiagnostic)
+	if resume.Kind != "journal" || resume.FromRev == nil || *resume.FromRev != 1 || resume.ToRev == nil || *resume.ToRev != 2 {
+		t.Fatalf("journal resume diagnostic = %+v", resume)
+	}
+}
+
+func TestHandleGetSessionProjectionEpochChangeForcesFull(t *testing.T) {
+	handlers := NewHandlers()
+	handlers.eventPublisher.PublishLogical(LogicalEvent{
+		BackendID: "codex", SessionID: "s1", Event: "turn_started",
+		Data: map[string]interface{}{"turnId": "T1"}, Broadcast: true,
+	})
+	handlers.eventPublisher.PublishLogical(LogicalEvent{
+		BackendID: "codex", SessionID: "s1", Event: "text_delta",
+		Data: map[string]interface{}{"itemId": "T1", "delta": "ready"}, Broadcast: true,
+	})
+	conn := &readFileCaptureConn{}
+	handlers.eventPublisher.SetConnSyncV2(conn, true)
+	handlers.eventPublisher.SetConnProjectionEpoch(conn, "previous-process-epoch")
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": "s1", "sinceRev": 1})
+	msg := WireMessage{RequestID: "r-epoch", BackendID: "codex", Method: "get_session_projection", Params: params}
+	handlers.handleGetSessionProjection(conn, msg, nil)
+
+	dataMap := conn.data.(map[string]interface{})
+	if _, ok := dataMap["projection"].(SessionProjection); !ok {
+		t.Fatalf("epoch change did not force authoritative full: %+v", dataMap)
+	}
+	resume := dataMap["resume"].(ProjectionResumeDiagnostic)
+	if resume.Kind != "full" || resume.Reason == nil || *resume.Reason != "epoch_change" || resume.RequestedRev == nil || *resume.RequestedRev != 1 {
+		t.Fatalf("epoch-change resume diagnostic = %+v", resume)
+	}
+}
+
+func TestHandleGetSessionProjectionJournalGapReportsFullReason(t *testing.T) {
+	handlers := NewHandlers()
+	for index, text := range []string{"first", " second"} {
+		event := "text_delta"
+		data := map[string]interface{}{"itemId": "T1", "delta": text}
+		if index == 0 {
+			handlers.eventPublisher.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "s1", Event: "turn_started", Data: map[string]interface{}{"turnId": "T1"}, Broadcast: true})
+		}
+		handlers.eventPublisher.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "s1", Event: event, Data: data, Broadcast: true})
+	}
+	handlers.eventPublisher.mu.Lock()
+	handlers.eventPublisher.projectionJournal.clear("codex", "s1")
+	handlers.eventPublisher.mu.Unlock()
+	conn := &readFileCaptureConn{}
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": "s1", "sinceRev": 1})
+	handlers.handleGetSessionProjection(conn, WireMessage{RequestID: "r-gap", BackendID: "codex", Params: params}, nil)
+	resume := conn.data.(map[string]interface{})["resume"].(ProjectionResumeDiagnostic)
+	if resume.Reason == nil || *resume.Reason != "journal_gap" {
+		t.Fatalf("journal-gap resume diagnostic = %+v", resume)
+	}
+}
+
+func TestHandleGetSessionProjectionRetentionReportsFullLimit(t *testing.T) {
+	handlers := NewHandlers()
+	handlers.eventPublisher.projectionJournal = NewProjectionRevisionJournal(1, 1<<20)
+	handlers.eventPublisher.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "s1", Event: "turn_started", Data: map[string]interface{}{"turnId": "T1"}, Broadcast: true})
+	for _, text := range []string{"first", " second", " third"} {
+		handlers.eventPublisher.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "s1", Event: "text_delta", Data: map[string]interface{}{"itemId": "T1", "delta": text}, Broadcast: true})
+	}
+	conn := &readFileCaptureConn{}
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": "s1", "sinceRev": 1})
+	handlers.handleGetSessionProjection(conn, WireMessage{RequestID: "r-limit", BackendID: "codex", Params: params}, nil)
+	resume := conn.data.(map[string]interface{})["resume"].(ProjectionResumeDiagnostic)
+	if resume.Reason == nil || *resume.Reason != "limit" {
+		t.Fatalf("retention-limit resume diagnostic = %+v", resume)
 	}
 }
 
