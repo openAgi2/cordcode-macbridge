@@ -1,10 +1,10 @@
 # DeepSeek Harness (DSH) Driver 设计文档
 
-- **日期**：2026-08-14（v13：round11 审计 —— classifyAttachment 单一分类、generator HEAD-blob provenance）
+- **日期**：2026-08-14（v13；round12 **APPROVE** —— 设计放行，见 §16 交接验收门槛）
 - **Runtime**：DeepSeek Harness `dsh-jsonrpc-agent`（pinned `47f943859bef60e4160492346772ded9b24f765a`，协议 `0.0.1`，pre-release）
 - **协议**：DSH SDK JSON-RPC 2.0 over stdio（**非** ACP），3 requests + 4 notifications（§3.0）
 - **证据**：`scripts/dsh-gate0/`（4 次真实 run + assembled composition + sanitizer 带 peer 断言）
-- **审计**：round1-4（`docs/2026-08-13-dsh-driver-design-audit-round{1,2,3,4}.md`）、round5/6（`docs/2026-08-1{3,4}-dsh-driver-design-audit-round{5,6}.md`）、round7-11（`docs/2026-08-14-dsh-driver-design-audit-round{7,8,9,10,11}.md`）
+- **审计**：round1-4（`docs/2026-08-13-dsh-driver-design-audit-round{1,2,3,4}.md`）、round5/6（`docs/2026-08-1{3,4}-dsh-driver-design-audit-round{5,6}.md`）、round7-11（`docs/2026-08-14-dsh-driver-design-audit-round{7,8,9,10,11}.md`）、round12 APPROVE（`docs/2026-08-14-dsh-driver-design-audit-round12.md`）
 
 ---
 
@@ -366,7 +366,7 @@ effectiveKind = image,  若 kind == "image" 或 normalized mime 以 "image/" 开
 
 > opencode server 模式拒 image 是**现状语义化**（该路径图像本就静默丢失），不是新增回归；grokbuild 同理（ACP 声明 image=false）。既有 backend 的 **file 路径全部不回归**；claude/codex 的 image 不回归。
 
-**contract test**：上表全部场景（含 opencode 双模式、grokbuild image 拒绝、**`kind:"file", mime:"image/*"` mismatch fixture 逐 backend**、malformed MIME 三例）+ 全部在 **pre-StartSession** 拒绝；真实 key 只验 provider 能消费 image，拒绝路径用 source-owned wire fixture。
+**contract test**：上表全部场景（含 opencode 双模式、grokbuild image 拒绝、**`kind:"file", mime:"image/*"` mismatch fixture 逐 backend**、malformed MIME 三例）+ 全部在 **pre-StartSession** 拒绝；真实 key 只验 provider 能消费 image，拒绝路径用 source-owned wire fixture。**fixture 实例化注意（round12）**：`image/*` 是 MIME family 示意写法、**不是合法字面值**（v13 MIME 正则会拒绝它）——contract fixture 必须实例化为具体 subtype（`image/png`、`image/jpeg` 等），不得按字面构造。
 
 ### 3.10 seq integrity + ignorable fail-closed（round7 P1-2 + round8 P0-2/P0-3）
 
@@ -549,6 +549,12 @@ pinned `47f943859bef60e4160492346772ded9b24f765a`。
 | P0-1 | capability gate 按 raw `kind` 判断，`splitAttachments` 实际按 `kind=="image" ∨ mime 前缀 image/`（attachments.go:41）重分类；`{kind:"file", mime:"image/png"}` 绕过 file-only gate（Grok 进不可用 image block / OC server 进静默丢图 / DSH 错误码不稳定） | §3.9 新增 **`classifyAttachment` 单一规则**（effectiveKind=kind∨mime，pre-check 与 split 共用、禁止第二套判断）；support gate 改查 effectiveKind；raw 校验补 MIME `type/subtype` 语法（malformed 含 `;` 参数 → `invalid_params`，有意收紧）；矩阵新增 `kind:"file", mime:"image/*"` fixture 行（逐 backend）。「kind 唯一权威」备选不采纳（§15） | ✅ 设计；contract test deferred |
 | P2 | generator `--write` 读 DSH **working tree** 却 stamp HEAD SHA：dirty worktree + 新增唯一事件会生成 45 类 artifact 且标为 clean HEAD（审计员负向复现） | `--write` 改经 `git show HEAD:<path>` 读 **exact committed blob**（内容与 SHA 同源，dirty 不再泄漏——已复现审计员场景验证 2 类非 3 类）；verify 新增 **provenance drift** 检查（artifact stamp ≠ DSH HEAD 即 exit≠0，同 set 也报）；missing artifact 改干净报错；已测 8 场景（clean verify/3.9 二进制/verify、dirty 不泄漏、set drift、provenance-only drift、full match、真实 repo） | ✅ artifact |
 
+### Round12（v13）：**APPROVE —— 设计放行**
+
+两项 round11 阻断实证关闭（effectiveKind 唯一规则 + 对抗输入逐 backend 推导一致；generator HEAD-blob/provenance/Py3.9 全场景通过）。两条非阻断实现注意已采纳：① contract fixture 中 `image/*` 须实例化为具体 subtype（正则会拒绝字面 `image/*`），已注 §3.9；② artifact 已用新脚本 `--write` 重生成对齐 header（event set/SHA 本就正确）。
+
+**设计层停止循环审计；下一阶段 = driver/go-bridge 实现 + §16 验收门槛。**
+
 ### Round1-4 闭环：见前版（descriptor/resume/权限/计数/Gate0/identity/双写owner/环境切换/source.kind/usage/block/ListSessions/todo/自包含）。
 
 ---
@@ -578,3 +584,18 @@ pinned `47f943859bef60e4160492346772ded9b24f765a`。
 **当前结论（v13）**：协议选型（SDK JSON-RPC，3 request + 4 notification）、事件映射（自包含 + source.kind 分流 + ignorable 四级 fail-closed + `session/title` 内部诊断）、identity（对齐 reducer + process nonce + source-proven turn/step 校验）、**seq 完整性（envelope `event.seq` + 首 seq=0 + per-root fail-closed）**、交付语义（at-most-once delivery + Go `DeliveryError` contract）、**错误分类（application recoverable vs protocol/codec fatal）**、进程生命周期（typed process death + CAS Close ownership）、notification session scope（root/descendant/foreign 三分 + lineage tombstone 保留到 teardown）、attachment 策略（一期 text-only + source-proven positive 矩阵 + **`classifyAttachment` 单一分类（effectiveKind，gate 与 split 共用）** + go-bridge pre-check + canonical `unsupported_attachment`/`invalid_params` + MIME 语法校验）、session.status 消费规则（driver-internal only）、双写去重（peer 断言）、usage 公式、权限 composition（环境切换）十三块设计完整且有真实/源码证据；正文无互斥规则、无二选一。
 
 **⚠ 诚实边界（round8 P1-4 + round9 P1-4 + round10 A/B=B + round11）**：本版为**设计修订 + 2 个 committed artifact（`known-event-types.txt` + `gen-known-event-types.py`：HEAD-blob 读取、SHA 同源 stamp、provenance drift 检查，8 场景实测）**；**driver/go-bridge 代码尚未编写（含 capability truth-source descriptor 物理修改与 `classifyAttachment` 重构——按 owner A/B 决策选 B，随实现提交 + contract tests 交付），fault-injection / contract / fixture 测试尚未提交——非"已落地"**。每条设计规则已对齐其依赖的真实接口（DSH `types.ts`/`server.ts`/`client.ts`/`known-event-types.ts`/`index.ts`、MacBridge `core/interfaces.go`/`attachments.go`（含分类行 41）/`backend_capabilities.go`/`handlers.go`/`projection_reducer.go`/canonical protocol）。剩余实现：capability truth-source 同步（claude/codex `image+file`、opencode `file`+mode-aware `image`、grokbuild `file`、DSH `text`）、`classifyAttachment` 共用重构、respawn/at-most-once/typed-death fault-injection、notification scope + lineage fixture、seq=0/gap/conflicting-dup wire fixture、attachment raw-wire rejection test（含 opencode 双模式、grok image 拒绝、kind/mime mismatch fixture、malformed MIME）、`DeliveryError` errors.As 矩阵、CAS eviction/Close-once race、reducer frozen-sample、sanitizer seen-flags、durable notification dump、protocol 同步。
+
+---
+
+## 16. 交接验收门槛（round12 APPROVE 附带，开发 agent 必须与实现同交）
+
+设计已放行（round12），但以下测试**必须与实现代码同批交付**，不得以「设计完成」宣称 landed：
+
+1. **attachment matrix**：raw malformed、mixed、effectiveKind mismatch（`kind:"file", mime:"image/png"` 等，实例化具体 subtype）、DSH/Grok/OpenCode server 拒绝、Claude/Codex/OpenCode CLI 不回归，全部断言 pre-StartSession。
+2. **capability truth source**：Claude/Codex `image+file`，OpenCode `file` + mode-aware image，Grok file-only，DSH text-only。
+3. **seq fixture**：首帧 0、首帧非 0、exact replay、gap、倒退、conflicting duplicate。
+4. **notification scope**：root/descendant/foreign event 与 status、finish 后迟到 child、grandchild、foreign parent、id reuse。
+5. **delivery fault matrix**：pre-write、zero-byte、partial、response lost、accepted unknown。
+6. **process lifecycle**：application error 保留 session，framing/seq/scope/invariant fatal 淘汰，CAS Close-once。
+7. **reducer frozen samples**：user/assistant 同 turn、plugin 不进 timeline、turn/step mismatch fail、nonce 重启不冲突。
+8. **generator/protocol sync**：repo 内 `gen-known-event-types.py` verify 保持 exit 0；protocol pack / iOS mirror 如实现引入 wire 契约变化则同步更新（canonical 先行）。
