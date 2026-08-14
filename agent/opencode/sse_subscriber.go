@@ -46,6 +46,14 @@ type sseSubscriber struct {
 	// one projection user_message. userTurnStarted de-dupes turn_started.
 	userPrompts     map[string]string // messageID -> full prompt text so far
 	userTurnStarted map[string]bool   // messageID -> turn_started already emitted
+	// turnSawAssistantOutput tracks whether a turn produced any assistant
+	// content (text/reasoning/tool). OpenCode closes a provider-resolution
+	// failure (e.g. model catalog missing after a models.dev fetch failure)
+	// as a silent empty loop exit — no error event, no assistant message
+	// (2026-08-14: zhipu turns completed in ~80ms with zero output). At
+	// session idle, an armed turn with no output emits EventResult with Error
+	// (wire turn_error) instead of a healthy empty turn_completed.
+	turnSawAssistantOutput map[string]bool // turnID -> any assistant output seen
 
 	// sessionFilter (active mode): when filterActive is true, emit drops any
 	// event whose SessionID != sessionFilter. Lock-free via atomics so emit
@@ -77,6 +85,8 @@ func newSSESubscriber(ctx context.Context, a *Agent) *sseSubscriber {
 		activeTurns:     make(map[string]string),
 		userPrompts:     make(map[string]string),
 		userTurnStarted: make(map[string]bool),
+
+		turnSawAssistantOutput: make(map[string]bool),
 	}
 }
 
@@ -701,7 +711,30 @@ func (s *sseSubscriber) emitResultOnce(sessionID string) {
 	if s.activeTurns != nil {
 		turnID = s.activeTurns[sessionID]
 	}
+	hadOutput := turnID != "" && s.turnSawAssistantOutput[turnID]
+	delete(s.turnSawAssistantOutput, turnID)
 	s.stateMu.Unlock()
+	if turnID != "" && !hadOutput {
+		// Honest failure surfacing (2026-08-14): opencode resolves a missing
+		// model/provider locally and exits the prompt loop silently — zero
+		// assistant messages, zero error events. Completing this as a healthy
+		// turn hides a real failure from every downstream layer. Emit
+		// EventResult with Error so the wire layer maps it to turn_error
+		// (kernel settles the turn as error, not completed) and leave a log
+		// fingerprint for instant diagnosis.
+		slog.Warn("opencode: turn closed with zero assistant output",
+			"session_id", sessionID,
+			"turn_id", turnID)
+		s.emit(core.Event{
+			Type:      core.EventResult,
+			Error:     fmt.Errorf("model produced no output (model or provider may be unavailable on the server)"),
+			SessionID: sessionID,
+			Done:      true,
+			TurnID:    turnID,
+		})
+		s.clearActiveTurn(sessionID)
+		return
+	}
 	s.emit(core.Event{Type: core.EventResult, SessionID: sessionID, Done: true, TurnID: turnID})
 	s.clearActiveTurn(sessionID)
 }
@@ -919,6 +952,17 @@ func (s *sseSubscriber) emit(ev core.Event) {
 		f, _ := s.sessionFilter.Load().(string)
 		if f == "" || ev.SessionID != f {
 			return
+		}
+	}
+	switch ev.Type {
+	case core.EventText, core.EventTextReplace, core.EventThinking, core.EventToolUse, core.EventToolResult:
+		if ev.TurnID != "" {
+			s.stateMu.Lock()
+			if s.turnSawAssistantOutput == nil {
+				s.turnSawAssistantOutput = make(map[string]bool)
+			}
+			s.turnSawAssistantOutput[ev.TurnID] = true
+			s.stateMu.Unlock()
 		}
 	}
 	select {

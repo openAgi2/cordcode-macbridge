@@ -115,6 +115,19 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 
 	case core.EventResult:
 		if ev.Done {
+			if ev.Error != nil {
+				// Failed turn (e.g. opencode provider resolution produced zero
+				// output, 2026-08-14): settle as turn_error so the kernel marks
+				// the turn error instead of a healthy empty turn_completed.
+				payload := map[string]interface{}{
+					"done":    true,
+					"message": ev.Error.Error(),
+				}
+				if ev.TurnID != "" {
+					payload["turnId"] = ev.TurnID
+				}
+				return "turn_error", eventData(ev, payload), true
+			}
 			payload := map[string]interface{}{
 				"done":         true,
 				"text":         ev.Content,

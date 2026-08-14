@@ -261,6 +261,33 @@ func TestMapAgentEventCarriesChildIdentityAcrossAllChildEventKinds(t *testing.T)
 	}
 }
 
+// Errored EventResult (opencode empty-turn honest failure, 2026-08-14) maps to
+// turn_error so the kernel settles the turn as error instead of a healthy
+// empty turn_completed; plain EventResult keeps mapping to turn_completed.
+func TestMapAgentEventErroredResultMapsToTurnError(t *testing.T) {
+	name, data, done := mapAgentEvent(core.Event{
+		Type:   core.EventResult,
+		Error:  errors.New("model produced no output"),
+		Done:   true,
+		TurnID: "msg_u",
+	})
+	if name != "turn_error" || !done {
+		t.Fatalf("event = %q/%v, want turn_error done=true", name, done)
+	}
+	payload := data.(map[string]interface{})
+	if payload["turnId"] != "msg_u" {
+		t.Fatalf("payload turnId = %#v, want msg_u", payload["turnId"])
+	}
+	if msg, _ := payload["message"].(string); msg != "model produced no output" {
+		t.Fatalf("payload message = %#v", payload["message"])
+	}
+
+	name, _, done = mapAgentEvent(core.Event{Type: core.EventResult, Done: true, TurnID: "msg_u"})
+	if name != "turn_completed" || !done {
+		t.Fatalf("plain result = %q/%v, want turn_completed done=true", name, done)
+	}
+}
+
 func TestMapAgentEventToolFinishedIncludesToolInput(t *testing.T) {
 	success := true
 	name, data, done := mapAgentEvent(core.Event{

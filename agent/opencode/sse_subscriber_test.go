@@ -21,6 +21,8 @@ func newTestSSESubscriber() *sseSubscriber {
 		activeTurns:     make(map[string]string),
 		userPrompts:     make(map[string]string),
 		userTurnStarted: make(map[string]bool),
+
+		turnSawAssistantOutput: make(map[string]bool),
 	}
 }
 
@@ -295,6 +297,56 @@ func TestSSESubscriber_MultiStepToolsDoNotCompleteUntilSessionIdle(t *testing.T)
 	}
 	if len(plans) != 1 || plans[0].Plan[0].Content != "A" {
 		t.Fatalf("plan events = %#v", plans)
+	}
+}
+
+// Empty-turn honest failure (2026-08-14): a user prompt armed a turn, the
+// provider resolved nothing (e.g. model catalog missing after a models.dev
+// fetch failure — zhipu turns closed in ~80ms with zero output), and the
+// session went idle. The closing EventResult must carry Error so the wire
+// layer maps it to turn_error instead of a healthy empty turn_completed.
+func TestSSESubscriber_EmptyAssistantTurnIdleEmitsTurnError(t *testing.T) {
+	sub := newTestSSESubscriber()
+	defer sub.cancel()
+
+	sub.handleRawEvent(`{"payload":{"type":"message.updated","properties":{"info":{"id":"msg_u","sessionID":"ses_1","role":"user","parts":[{"type":"text","text":"hi"}]}}}}`)
+	sub.handleRawEvent(`{"payload":{"type":"session.status","properties":{"sessionID":"ses_1","type":"idle"}}}`)
+
+	events := drainSSEEvents(sub)
+	if len(events) != 3 {
+		t.Fatalf("event count = %d, want 3 (user_message, turn_started, errored result): %#v", len(events), events)
+	}
+	last := events[len(events)-1]
+	if last.Type != core.EventResult || !last.Done || last.Error == nil {
+		t.Fatalf("closing event = %#v, want EventResult Done with non-nil Error", last)
+	}
+	if last.TurnID != "msg_u" {
+		t.Fatalf("closing event turnID = %q, want msg_u", last.TurnID)
+	}
+}
+
+// Companion guard: turns that DID produce assistant output must keep closing
+// with a plain (error-free) EventResult.
+func TestSSESubscriber_NonEmptyTurnStillCompletesWithoutError(t *testing.T) {
+	sub := newTestSSESubscriber()
+	defer sub.cancel()
+
+	sub.handleRawEvent(`{"payload":{"type":"message.updated","properties":{"info":{"id":"msg_u","sessionID":"ses_1","role":"user","parts":[{"type":"text","text":"hi"}]}}}}`)
+	sub.handleRawEvent(`{"payload":{"type":"message.part.delta","properties":{"sessionID":"ses_1","messageID":"msg_a1","partID":"t1","field":"text","delta":"Hello"}}}`)
+	sub.handleRawEvent(`{"payload":{"type":"session.status","properties":{"sessionID":"ses_1","type":"idle"}}}`)
+
+	events := drainSSEEvents(sub)
+	var result *core.Event
+	for i := range events {
+		if events[i].Type == core.EventResult {
+			result = &events[i]
+		}
+	}
+	if result == nil {
+		t.Fatalf("no EventResult in %#v", events)
+	}
+	if result.Error != nil || !result.Done {
+		t.Fatalf("closing event = %#v, want plain Done EventResult without Error", *result)
 	}
 }
 
