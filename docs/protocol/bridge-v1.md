@@ -1047,6 +1047,16 @@ entry, epoch change, or head mismatch returns the authoritative `{projection}` f
 journal is not a session store and MUST NOT reconstruct a projection, call history, or substitute a
 cached snapshot.
 
+#### Observed paired wire samples
+
+The canonical sanitized production capture is under
+`docs/protocol/samples/session-projection-v2/`. It contains both the real
+`projection_patch` envelope and a later authenticated `get_session_projection` non-empty delta
+response. The push `data` object equals the first pull `patches` element. Its observed patch key
+presence is `baseRev`/`syncRev`/`execution`/`upsertTurns` present and
+`partOps`/`replacesClientIds` absent; absence is preserved rather than normalized to empty arrays.
+See the sample README for capture provenance, sanitization boundaries, and raw hashes.
+
 Exact field shapes (`BridgeSessionProjection`, `BridgeTurnProjection`, `BridgeMessageProjection`,
 `BridgeProjectionPart`, `BridgeProjectionPatch`, `BridgePartOp`, `BridgeExecutionView`) are defined
 in `docs/protocol/schema/bridge-v1.types.ts`.

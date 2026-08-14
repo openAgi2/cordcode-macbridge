@@ -1,0 +1,85 @@
+{
+  "data": {
+    "headRev": 720,
+    "patches": [
+      {
+        "baseRev": 717,
+        "syncRev": 718,
+        "execution": {
+          "phase": "running",
+          "activeTurnId": "turn_redacted"
+        },
+        "upsertTurns": [
+          {
+            "turnId": "turn_redacted",
+            "status": "running",
+            "startedAt": 1700000000000,
+            "user": {
+              "id": "message_redacted",
+              "role": "user",
+              "parts": [
+                {
+                  "type": "text",
+                  "text": "[redacted real user text]"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "baseRev": 718,
+        "syncRev": 719,
+        "execution": {
+          "phase": "idle"
+        },
+        "upsertTurns": [
+          {
+            "turnId": "turn_redacted",
+            "status": "completed",
+            "startedAt": 1700000000000,
+            "completedAt": 1700000001000,
+            "user": {
+              "id": "message_redacted",
+              "role": "user",
+              "parts": [
+                {
+                  "type": "text",
+                  "text": "[redacted real user text]"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "baseRev": 719,
+        "syncRev": 720,
+        "execution": {
+          "phase": "idle"
+        },
+        "upsertTurns": [
+          {
+            "turnId": "turn_redacted",
+            "status": "completed",
+            "startedAt": 1700000000000,
+            "completedAt": 1700000002000,
+            "user": {
+              "id": "message_redacted",
+              "role": "user",
+              "parts": [
+                {
+                  "type": "text",
+                  "text": "[redacted real user text]"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "ok": true,
+  "requestId": "request_redacted",
+  "type": "result"
+}
