@@ -32,7 +32,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -43,6 +46,10 @@ import (
 // catalogSessionRequestTimeout 是单次 catalog RPC（session/list 等）的硬超时。
 // 与 codex catalogClient 的 60s 对齐（§5.4 #6：持久连接 + 受控超时）。
 const catalogSessionRequestTimeout = 60 * time.Second
+
+// grokCatalogMaxListPages bounds the session/list cursor walk so a pathological
+// upstream (cyclic cursor or an enormous index) cannot pin catalog RPCs forever.
+const grokCatalogMaxListPages = 50
 
 // catalogSessionReadMaxLineSize 限制单行 JSON-RPC 消息上限（session/list 结果可能很大）。
 const catalogSessionReadMaxLineSize = 10 * 1024 * 1024
@@ -283,20 +290,63 @@ type grokSessionListResult struct {
 // listSessions 调用 session/list（空 params，跨 cwd 返回所有 session）并映射为
 // core.AgentSessionInfo。字段映射遵循 frozen fixture（ID←sessionId / Summary←title /
 // Directory←cwd / ModifiedAt←parse(updatedAt) / GitBranch←_meta.x.ai/session.facets.branch）。
+// listSessions walks the native catalog's cursor pages to completion. Grok
+// 1.0.0 returns at most 30 sessions per page regardless of a limit param
+// (verified 2026-08-14 against the owner's real catalog: 91 on-disk sessions,
+// page 1 = 30) — consuming only page 1 hid whole directories from iOS. The
+// upstream index also emits duplicate session ids (per-turn rows); duplicates
+// collapse to the first, recency-ordered occurrence.
 func (c *grokCatalogClient) listSessions(ctx context.Context) ([]core.AgentSessionInfo, error) {
+	return listSessionsPaged(ctx, c.fetchSessionListPage)
+}
+
+func (c *grokCatalogClient) fetchSessionListPage(ctx context.Context, cursor string) (grokSessionListResult, error) {
+	params := map[string]any{}
+	if cursor != "" {
+		params["cursor"] = cursor
+	}
 	id := c.idCounter.next()
-	raw, err := c.callRPCWithCtx(ctx, id, "session/list", map[string]any{}, catalogSessionRequestTimeout)
+	raw, err := c.callRPCWithCtx(ctx, id, "session/list", params, catalogSessionRequestTimeout)
 	if err != nil {
-		return nil, err
+		return grokSessionListResult{}, err
 	}
 	var res grokSessionListResult
 	if err := json.Unmarshal(raw, &res); err != nil {
-		return nil, fmt.Errorf("grokbuild catalog: decode session/list result: %w", err)
+		return grokSessionListResult{}, fmt.Errorf("grokbuild catalog: decode session/list result: %w", err)
 	}
-	out := make([]core.AgentSessionInfo, 0, len(res.Sessions))
-	for _, s := range res.Sessions {
-		out = append(out, grokSessionItemToAgentSessionInfo(s))
+	return res, nil
+}
+
+func listSessionsPaged(
+	ctx context.Context,
+	fetch func(context.Context, string) (grokSessionListResult, error),
+) ([]core.AgentSessionInfo, error) {
+	var out []core.AgentSessionInfo
+	seen := make(map[string]bool)
+	cursor := ""
+	for page := 0; page < grokCatalogMaxListPages; page++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		res, err := fetch(ctx, cursor)
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range res.Sessions {
+			if s.SessionID != "" && seen[s.SessionID] {
+				continue
+			}
+			seen[s.SessionID] = true
+			out = append(out, grokSessionItemToAgentSessionInfo(s))
+		}
+		if res.NextCursor == "" || len(res.Sessions) == 0 {
+			return out, nil
+		}
+		cursor = res.NextCursor
 	}
+	slog.Warn("grokbuild catalog: session/list page cap reached",
+		"pages", grokCatalogMaxListPages,
+		"unique_sessions", len(out))
 	return out, nil
 }
 
@@ -479,7 +529,56 @@ func (a *Agent) FetchSessionList(ctx context.Context) ([]core.AgentSessionInfo, 
 	if err != nil {
 		return nil, err
 	}
-	return client.listSessions(ctx)
+	sessions, err := client.listSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	enrichGrokCatalogTitles(resolveGrokHome(a.grokHome), sessions)
+	return sessions, nil
+}
+
+// enrichGrokCatalogTitles backfills empty CLI titles from on-disk summary.json
+// generated_title. 2026-08-14: the native session/list fills its title field
+// only when Grok's own indexer generated one — page 1 (30 rows) carried exactly
+// one title, so the bridge placeholder filter (empty-title sessions hidden,
+// owner 2026-08-10 jacklee-noise rule) reduced the whole catalog to a single
+// card and iOS showed one directory with one session. Disk generated_title is
+// the stable title source; sessions without one stay untouched — no fabricated
+// titles, and the 2026-08-10 hide-untitled rule keeps applying to them.
+func enrichGrokCatalogTitles(grokHome string, sessions []core.AgentSessionInfo) {
+	if grokHome == "" {
+		return
+	}
+	for i := range sessions {
+		if strings.TrimSpace(sessions[i].Summary) != "" {
+			continue
+		}
+		// Normalize whitespace-only summaries while we are here; the downstream
+		// placeholder filter trims anyway, but the wire value should not carry
+		// blank filler.
+		sessions[i].Summary = ""
+		dir := findSessionDir(grokHome, sessions[i].ID)
+		if dir == "" {
+			continue
+		}
+		if title := readGrokGeneratedTitle(filepath.Join(dir, "summary.json")); title != "" {
+			sessions[i].Summary = title
+		}
+	}
+}
+
+func readGrokGeneratedTitle(summaryPath string) string {
+	raw, err := os.ReadFile(summaryPath)
+	if err != nil || len(raw) == 0 {
+		return ""
+	}
+	var s struct {
+		GeneratedTitle string `json:"generated_title"`
+	}
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(s.GeneratedTitle)
 }
 
 // catalogClientInstance 返回存活的单例 catalog client，必要时（首次 / 已死）重建。
