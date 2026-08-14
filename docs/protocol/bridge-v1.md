@@ -1038,6 +1038,15 @@ Response data — full projection, or a delta when `sinceRev` was honored:
 | { patches: BridgeProjectionPatch[], headRev: number }
 ```
 
+MacBridge keeps a process/`bridgeEpoch`-scoped bounded journal of already-committed
+`BridgeProjectionPatch` values. Journal entries preserve the canonical patch payload unchanged;
+retention size/byte metadata remains outside the wire patch. When the retained suffix is contiguous
+from `sinceRev` through the snapshot admission cut, the RPC returns that non-empty suffix plus
+`headRev`. `sinceRev == headRev` returns an empty patch list. Any gap, retention miss, oversized
+entry, epoch change, or head mismatch returns the authoritative `{projection}` form instead. The
+journal is not a session store and MUST NOT reconstruct a projection, call history, or substitute a
+cached snapshot.
+
 Exact field shapes (`BridgeSessionProjection`, `BridgeTurnProjection`, `BridgeMessageProjection`,
 `BridgeProjectionPart`, `BridgeProjectionPatch`, `BridgePartOp`, `BridgeExecutionView`) are defined
 in `docs/protocol/schema/bridge-v1.types.ts`.

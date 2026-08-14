@@ -148,10 +148,11 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 		h.startProjectionLiveRelay(params.SessionID, conn, msg.BackendID, agent, params.Directory)
 	}
 
-	proj, admission, snapshotErr := h.eventPublisher.BeginProjectionSnapshot(
+	proj, admission, resumePatches, hasResumeRange, snapshotErr := h.eventPublisher.BeginProjectionSnapshotWithResume(
 		conn,
 		msg.BackendID,
 		params.SessionID,
+		params.SinceRev,
 	)
 	if snapshotErr != nil {
 		logProjectionRPCTrace("response_enqueue", msg, params.SessionID, params.SinceRev, -1, "projection.not_ready", nil)
@@ -177,6 +178,21 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 		)
 		if err := h.eventPublisher.CompleteProjectionSnapshot(conn, admission, msg.RequestID, response); err != nil {
 			slog.Warn("go-bridge: projection snapshot response enqueue failed", "requestId", msg.RequestID, "error", err)
+		}
+		return
+	}
+	if params.SinceRev != 0 && hasResumeRange && len(resumePatches) > 0 {
+		logProjectionRPCTrace("response_enqueue", msg, params.SessionID, params.SinceRev, headRev, "delta", &admission)
+		response := map[string]interface{}{
+			"patches": resumePatches,
+			"headRev": headRev,
+		}
+		logProjectionResponseMetrics(
+			msg, params.SessionID, params.SinceRev, headRev, "delta", response,
+			h.eventPublisher.ActiveRecoveryID(conn), requestStartedAt, nil,
+		)
+		if err := h.eventPublisher.CompleteProjectionSnapshot(conn, admission, msg.RequestID, response); err != nil {
+			slog.Warn("go-bridge: projection delta response enqueue failed", "requestId", msg.RequestID, "error", err)
 		}
 		return
 	}

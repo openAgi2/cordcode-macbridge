@@ -234,6 +234,7 @@ type EventPublisher struct {
 	projectionFences         map[projectionFenceKey]*projectionSnapshotFence
 	projectionSnapshotCuts   map[projectionFenceKey]int
 	projectionInvalidated    map[projectionFenceKey]bool
+	projectionJournal        *ProjectionRevisionJournal
 	// rebindTargets is invoked (without p.mu) when a live event has zero online
 	// targets. Handlers rebinds broadcaster subscriptions from device registry +
 	// observation so mid-turn EMITs are not permanently dropped after path thrash.
@@ -275,6 +276,7 @@ func NewEventPublisher(bridgeEpoch string, broadcaster ...*Broadcaster) *EventPu
 		projectionFences:       make(map[projectionFenceKey]*projectionSnapshotFence),
 		projectionSnapshotCuts: make(map[projectionFenceKey]int),
 		projectionInvalidated:  make(map[projectionFenceKey]bool),
+		projectionJournal:      NewProjectionRevisionJournal(0, 0),
 	}
 	if len(broadcaster) > 0 {
 		p.broadcaster = broadcaster[0]
@@ -310,8 +312,33 @@ func (p *EventPublisher) PublishProjectionPatch(backendID, sessionID string, pat
 		return
 	}
 	p.mu.Lock()
+	p.recordProjectionPatchLocked(backendID, sessionID, patch)
 	p.deliverProjectionPatchLocked(backendID, sessionID, patch)
 	p.mu.Unlock()
+}
+
+// FlushPatchAndRecord fixes the publication lock order at EventPublisher.mu → ProjectionReducer.mu
+// and records the exact committed patch before any target/filter decision. A patch therefore
+// remains pull-resumable even when no v2 client was online for its push delivery.
+func (p *EventPublisher) FlushPatchAndRecord(backendID, sessionID string) (ProjectionPatch, bool) {
+	if p == nil || p.projection == nil {
+		return ProjectionPatch{}, false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	patch, ok := p.projection.FlushPatch(backendID, sessionID)
+	if !ok {
+		return ProjectionPatch{}, false
+	}
+	p.recordProjectionPatchLocked(backendID, sessionID, patch)
+	p.deliverProjectionPatchLocked(backendID, sessionID, patch)
+	return patch, true
+}
+
+func (p *EventPublisher) recordProjectionPatchLocked(backendID, sessionID string, patch ProjectionPatch) {
+	if p.projectionJournal != nil {
+		p.projectionJournal.Record(backendID, sessionID, patch)
+	}
 }
 
 func (p *EventPublisher) SetOfflineRoute(route func(EventMessage)) {
@@ -932,6 +959,7 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 	if projectionApplied && p.projection != nil && logical.BackendID != "" && logical.SessionID != "" {
 		patch, flushOk := p.projection.FlushPatch(logical.BackendID, logical.SessionID)
 		if flushOk {
+			p.recordProjectionPatchLocked(logical.BackendID, logical.SessionID, patch)
 			slog.Info("go-bridge: [K4Patch] flush",
 				"sessionPrefix", projectionSessionLogPrefix(logical.SessionID),
 				"event", logical.Event,

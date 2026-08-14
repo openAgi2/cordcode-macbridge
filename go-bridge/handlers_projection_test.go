@@ -176,6 +176,45 @@ func TestHandleGetSessionProjectionDeltaAtHead(t *testing.T) {
 	}
 }
 
+func TestHandleGetSessionProjectionReturnsJournaledNonEmptyDelta(t *testing.T) {
+	handlers := NewHandlers()
+	handlers.eventPublisher.PublishLogical(LogicalEvent{
+		BackendID: "codex", SessionID: "s1", Event: "turn_started",
+		Data: map[string]interface{}{"turnId": "T1"}, Broadcast: true,
+	})
+	handlers.eventPublisher.PublishLogical(LogicalEvent{
+		BackendID: "codex", SessionID: "s1", Event: "text_delta",
+		Data: map[string]interface{}{"itemId": "T1", "delta": "first"}, Broadcast: true,
+	})
+	handlers.eventPublisher.PublishLogical(LogicalEvent{
+		BackendID: "codex", SessionID: "s1", Event: "text_delta",
+		Data: map[string]interface{}{"itemId": "T1", "delta": " second"}, Broadcast: true,
+	})
+
+	conn := &readFileCaptureConn{}
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": "s1", "sinceRev": 1})
+	msg := WireMessage{RequestID: "r-delta", BackendID: "codex", Method: "get_session_projection", Params: params}
+	handlers.handleGetSessionProjection(conn, msg, nil)
+
+	if conn.err != nil {
+		t.Fatalf("unexpected delta error: %+v", conn.err)
+	}
+	dataMap, ok := conn.data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("data not a map: %T", conn.data)
+	}
+	patches, ok := dataMap["patches"].([]ProjectionPatch)
+	if !ok || len(patches) != 1 {
+		t.Fatalf("expected one non-empty journal patch, got %+v", dataMap)
+	}
+	if patches[0].BaseRev != 1 || patches[0].SyncRev != 2 || dataMap["headRev"].(int) != 2 {
+		t.Fatalf("delta continuity mismatch: %+v", dataMap)
+	}
+	if len(patches[0].PartOps) != 1 || patches[0].PartOps[0].Text != " second" {
+		t.Fatalf("delta payload changed: %+v", patches[0])
+	}
+}
+
 // TestHandleGetSessionProjectionRoutedByDispatch: the dispatch switch routes get_session_projection
 // to the handler (guards against a missing case).
 func TestHandleGetSessionProjectionRoutedByDispatch(t *testing.T) {

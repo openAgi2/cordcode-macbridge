@@ -1094,8 +1094,7 @@ func (h *Handlers) applyClaudeLiveSourceRecord(
 		// Sole projection delivery: flush the authoritative patch the transaction just advanced and
 		// deliver it on the single projection stream. Never sendSessionEvent the content events —
 		// that would reduce them a second time and double-write the timeline (guardrail #3).
-		if patch, flushOk := h.projectionKernel.FlushProjectionPatch(backendID, sessionID); flushOk {
-			h.eventPublisher.PublishProjectionPatch(backendID, sessionID, patch)
+		if _, flushOk := h.eventPublisher.FlushPatchAndRecord(backendID, sessionID); flushOk {
 			delivered = 1
 		}
 		// Dual-send (design §9.3): legacy non-syncV2 consumers still get the raw content frames

@@ -45,6 +45,38 @@ func (p *EventPublisher) BeginProjectionSnapshot(
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	return p.beginProjectionSnapshotLocked(conn, backendID, sessionID)
+}
+
+// BeginProjectionSnapshotWithResume selects a journal range and installs the snapshot fence under
+// one EventPublisher lock. The returned range is therefore bounded by the same immutable cutRev as
+// the full projection snapshot; post-cut live patches remain queued behind the result.
+func (p *EventPublisher) BeginProjectionSnapshotWithResume(
+	conn Connection,
+	backendID, sessionID string,
+	sinceRev int,
+) (SessionProjection, ProjectionSnapshotAdmission, []ProjectionPatch, bool, error) {
+	if p == nil || conn == nil || backendID == "" || sessionID == "" {
+		return SessionProjection{}, ProjectionSnapshotAdmission{}, nil, false, fmt.Errorf("projection snapshot identity is required")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	projection, admission, err := p.beginProjectionSnapshotLocked(conn, backendID, sessionID)
+	if err != nil {
+		return SessionProjection{}, ProjectionSnapshotAdmission{}, nil, false, err
+	}
+	patches, ok := p.projectionJournal.ContiguousRange(
+		backendID, sessionID, sinceRev, admission.CutRev,
+	)
+	return projection, admission, patches, ok, nil
+}
+
+// beginProjectionSnapshotLocked requires EventPublisher.mu. Callers use it to keep journal range
+// selection and fence admission atomic without introducing a second journal lock.
+func (p *EventPublisher) beginProjectionSnapshotLocked(
+	conn Connection,
+	backendID, sessionID string,
+) (SessionProjection, ProjectionSnapshotAdmission, error) {
 	if p.kernel == nil {
 		return SessionProjection{}, ProjectionSnapshotAdmission{}, fmt.Errorf("projection kernel is not configured")
 	}
