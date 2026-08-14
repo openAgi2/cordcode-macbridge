@@ -2,16 +2,18 @@
 """Regenerate / verify scripts/dsh-gate0/known-event-types.txt against the
 pinned DSH source `KNOWN_SESSION_EVENT_TYPES` Set literal.
 
-Round9 P2: the previous regeneration hint was a non-runnable `node -e` snippet
-with an ellipsis. Round10 P2: `--write` must preserve the pinned SHA (read from
-DSH_ROOT's git HEAD, never hand-typed) and the ignorable-semantics block, and
-the script must run on Python 3.9 (macOS system Python) — hence
-`from __future__ import annotations`.
+Round9 P2: the previous regeneration hint was a non-runnable `node -e` snippet.
+Round10 P2: `--write` must preserve the pinned SHA and ignorable-semantics block,
+and run on Python 3.9 (macOS system Python) — hence `from __future__ import annotations`.
+Round11 P2: `--write` reads the exact committed blob via `git show HEAD:<path>`
+(never the working tree), so a dirty checkout cannot be stamped as clean HEAD;
+`verify` also compares the artifact's stamped SHA against DSH ROOT's current HEAD
+and reports provenance drift even when the event set is unchanged.
 
 Usage:
-  DSH_ROOT=/path/to/deepseek-harness python3 gen-known-event-types.py          # verify
-  DSH_ROOT=/path/to/deepseek-harness python3 gen-known-event-types.py --write   # regenerate
-  python3 gen-known-event-types.py --src /abs/path/known-event-types.ts         # explicit src (verify only)
+  DSH_ROOT=/path/to/deepseek-harness python3 gen-known-event-types.py          # verify (set + provenance)
+  DSH_ROOT=/path/to/deepseek-harness python3 gen-known-event-types.py --write  # regenerate from HEAD blob
+  python3 gen-known-event-types.py --src /abs/path/known-event-types.ts        # raw-file verify (no SHA check)
 """
 from __future__ import annotations
 
@@ -25,6 +27,8 @@ TXT = os.path.join(HERE, "known-event-types.txt")
 DEFAULT_SRC = "packages/core/session/src/known-event-types.ts"
 # match single-quoted event names inside the Set literal
 EVENT_RE = re.compile(r"'([A-Za-z][A-Za-z0-9_./-]*)'")
+# artifact header stamp: "deepseek-harness@<sha>"
+SHA_RE = re.compile(r"deepseek-harness@([0-9a-f]{7,40})")
 
 SEMANTICS = """#
 # Semantics (per source comment + SessionEvent.ignorable in core/session/src/types.ts):
@@ -35,48 +39,50 @@ SEMANTICS = """#
 #"""
 
 USAGE_LINES = """# Regenerate / verify this snapshot with the executable script:
-#   DSH_ROOT=/path/to/deepseek-harness python3 scripts/dsh-gate0/gen-known-event-types.py           # verify (exits non-zero on drift)
-#   DSH_ROOT=/path/to/deepseek-harness python3 scripts/dsh-gate0/gen-known-event-types.py --write  # regenerate
-"""
+#   DSH_ROOT=/path/to/deepseek-harness python3 scripts/dsh-gate0/gen-known-event-types.py           # verify (set + provenance drift)
+#   DSH_ROOT=/path/to/deepseek-harness python3 scripts/dsh-gate0/gen-known-event-types.py --write  # regenerate from HEAD blob
+#"""
 
 
-def resolve_src(arg_src):
-    if arg_src:
-        return arg_src, None
-    root = os.environ.get("DSH_ROOT")
-    if not root:
-        sys.exit("error: set DSH_ROOT or pass --src <known-event-types.ts>")
-    return os.path.join(root, DEFAULT_SRC), root
-
-
-def git_head_sha(root):
-    """Exact pinned SHA from the DSH checkout itself (round10 P2: never hand-typed)."""
+def git(root, *args):
     try:
         out = subprocess.run(
-            ["git", "-C", root, "rev-parse", "HEAD"],
+            ["git", "-C", root, *args],
             capture_output=True, text=True, check=True,
         )
-        return out.stdout.strip()
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        sys.exit(f"error: could not read git HEAD SHA from DSH_ROOT={root}: {e}")
+        return out.stdout
+    except subprocess.CalledProcessError as e:
+        sys.exit(f"error: git {' '.join(args)} failed in {root}: {e.stderr.strip()}")
 
 
-def extract_types(src_path):
-    text = open(src_path, encoding="utf-8").read()
-    # isolate the KNOWN_SESSION_EVENT_TYPES Set block
+def repo_root(root):
+    toplevel = git(root, "rev-parse", "--show-toplevel").strip()
+    if os.path.realpath(root) != os.path.realpath(toplevel):
+        sys.exit(f"error: DSH_ROOT={root} is not the git repo root ({toplevel}); point DSH_ROOT at the checkout root")
+    return toplevel
+
+
+def head_blob(root):
+    """Exact committed blob (round11 P2): content and SHA always come from the same HEAD."""
+    sha = git(root, "rev-parse", "HEAD").strip()
+    blob = git(root, "show", f"HEAD:{DEFAULT_SRC}")
+    return sha, blob
+
+
+def extract_types(text, label):
     m = re.search(r"KNOWN_SESSION_EVENT_TYPES[^=]*=\s*new Set\(\[(.*?)\]\)", text, re.S)
     if not m:
-        sys.exit(f"error: could not find KNOWN_SESSION_EVENT_TYPES Set in {src_path}")
+        sys.exit(f"error: could not find KNOWN_SESSION_EVENT_TYPES Set in {label}")
     return EVENT_RE.findall(m.group(1))
 
 
-def committed_types():
-    out = []
-    for line in open(TXT, encoding="utf-8"):
-        s = line.strip()
-        if s and not s.startswith("#"):
-            out.append(s)
-    return out
+def artifact_state():
+    if not os.path.exists(TXT):
+        sys.exit(f"error: artifact not found: {TXT} — run with --write to generate it")
+    lines = open(TXT, encoding="utf-8").read()
+    types = [s.strip() for s in lines.splitlines() if s.strip() and not s.startswith("#")]
+    m = SHA_RE.search(lines)
+    return types, (m.group(1) if m else None)
 
 
 def build_header(sha, count):
@@ -85,7 +91,7 @@ def build_header(sha, count):
         "#",
         f"# Source of truth: deepseek-harness@{sha}",
         f"#   {DEFAULT_SRC}",
-        "# Generated by scripts/dsh-gate0/gen-known-event-types.py --write",
+        "# Generated by scripts/dsh-gate0/gen-known-event-types.py --write (from the HEAD blob)",
     ]
     lines.extend(USAGE_LINES.rstrip("\n").split("\n"))
     lines.append(SEMANTICS.rstrip("\n"))
@@ -101,28 +107,53 @@ def main():
     for i, a in enumerate(args):
         if a == "--src" and i + 1 < len(args):
             src = args[i + 1]
-    src_path, root = resolve_src(src)
-    types = extract_types(src_path)
+
+    if src:
+        if do_write:
+            sys.exit("error: --write requires DSH_ROOT (HEAD blob + SHA stamp); --src is verify-only")
+        types = extract_types(open(src, encoding="utf-8").read(), src)
+        committed, _ = artifact_state()
+        src_set, com_set = set(types), set(committed)
+        if src_set == com_set:
+            print(f"OK (raw-file mode): source==artifact, {len(types)} types (no provenance check)")
+            return 0
+        print(f"DRIFT (raw-file mode): source={len(src_set)} artifact={len(com_set)}")
+        print("  missing from artifact:", sorted(src_set - com_set))
+        print("  extra in artifact:", sorted(com_set - src_set))
+        return 1
+
+    root = os.environ.get("DSH_ROOT")
+    if not root:
+        sys.exit("error: set DSH_ROOT or pass --src <known-event-types.ts>")
+    repo_root(root)
+    sha, blob = head_blob(root)
+    types = extract_types(blob, f"HEAD:{DEFAULT_SRC}")
     if len(types) != len(set(types)):
         sys.exit(f"error: source Set has duplicates: {len(types)} entries, {len(set(types))} unique")
+
     if do_write:
-        if root is None:
-            sys.exit("error: --write requires DSH_ROOT (to stamp the git HEAD SHA); --src alone is verify-only")
-        sha = git_head_sha(root)
         with open(TXT, "w", encoding="utf-8") as f:
             f.write(build_header(sha, len(types)))
             f.write("\n".join(types) + "\n")
-        print(f"wrote {len(types)} types (pinned {sha[:12]}) to {TXT}")
+        print(f"wrote {len(types)} types (pinned {sha[:12]}, from HEAD blob) to {TXT}")
         return 0
-    committed = committed_types()
+
+    committed, art_sha = artifact_state()
+    failures = []
     src_set, com_set = set(types), set(committed)
-    if src_set == com_set:
-        print(f"OK: source==artifact, {len(types)} types (sorted-equal)")
-        return 0
-    print(f"DRIFT: source={len(src_set)} artifact={len(com_set)}")
-    print("  missing from artifact:", sorted(src_set - com_set))
-    print("  extra in artifact:", sorted(com_set - src_set))
-    return 1
+    if src_set != com_set:
+        failures.append(f"set drift: source={len(src_set)} artifact={len(com_set)}")
+        failures.append("  missing from artifact: " + str(sorted(src_set - com_set)))
+        failures.append("  extra in artifact: " + str(sorted(com_set - src_set)))
+    if art_sha != sha:
+        failures.append(f"provenance drift: artifact stamped {art_sha} but DSH HEAD is {sha} — re-run --write after re-pin")
+    if failures:
+        print("DRIFT:")
+        for f in failures:
+            print(" ", f)
+        return 1
+    print(f"OK: source==artifact, {len(types)} types; artifact SHA == DSH HEAD ({sha[:12]})")
+    return 0
 
 
 if __name__ == "__main__":

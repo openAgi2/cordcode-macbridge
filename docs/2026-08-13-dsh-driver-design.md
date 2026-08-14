@@ -1,10 +1,10 @@
 # DeepSeek Harness (DSH) Driver 设计文档
 
-- **日期**：2026-08-14（v12：round10 审计 —— source-proven attachment 矩阵、mode-aware opencode、消残留互斥、artifact provenance）
+- **日期**：2026-08-14（v13：round11 审计 —— classifyAttachment 单一分类、generator HEAD-blob provenance）
 - **Runtime**：DeepSeek Harness `dsh-jsonrpc-agent`（pinned `47f943859bef60e4160492346772ded9b24f765a`，协议 `0.0.1`，pre-release）
 - **协议**：DSH SDK JSON-RPC 2.0 over stdio（**非** ACP），3 requests + 4 notifications（§3.0）
 - **证据**：`scripts/dsh-gate0/`（4 次真实 run + assembled composition + sanitizer 带 peer 断言）
-- **审计**：round1-4（`docs/2026-08-13-dsh-driver-design-audit-round{1,2,3,4}.md`）、round5/6（`docs/2026-08-1{3,4}-dsh-driver-design-audit-round{5,6}.md`）、round7-10（`docs/2026-08-14-dsh-driver-design-audit-round{7,8,9,10}.md`）
+- **审计**：round1-4（`docs/2026-08-13-dsh-driver-design-audit-round{1,2,3,4}.md`）、round5/6（`docs/2026-08-1{3,4}-dsh-driver-design-audit-round{5,6}.md`）、round7-11（`docs/2026-08-14-dsh-driver-design-audit-round{7,8,9,10,11}.md`）
 
 ---
 
@@ -333,11 +333,20 @@ abort 与 crash 并发 → 对象身份 CAS 使淘汰幂等（首触发淘汰，
 **正解：positive 声明 + 单一校验路径。**
 
 1. **真相源同步（实现 change-set，随 driver/go-bridge 实现提交 + contract tests 一起交付——round10 A/B 决策选 B）**：claudecode/codex 加 `image`+`file`；opencode 加 `file` + mode-aware `image`；**grokbuild 只加 `file`（不加 image）**；**DSH 只声明 `text`**。同一 truth source（capability 派生，经 `deriveBackendCapabilities`），不得把「旧 driver 未声明」默认解释为「不支持」。
+**`classifyAttachment` 单一分类（round11 P0-1）**：现有 `splitAttachments` 的真实分类是 `isImage := a.Kind == "image" || strings.HasPrefix(strings.ToLower(a.Mime), "image/")`（`attachments.go:41`）——**不按 raw `kind`**。若 pre-check 按 raw kind、split 按 kind∨mime 各判一套，`{kind:"file", mime:"image/png"}` 会先过 file-only gate（GrokBuild/DSH），再被 split 转成 `ImageAttachment` 绕过 v12 矩阵（Grok 进不可用 image block、OpenCode server 进静默丢图路径、DSH 无法稳定产出 `unsupported_attachment`）。**唯一规则（pre-check 与 `splitAttachments` 共用同一 classifier，不得复制第二套判断）**：
+
+```text
+effectiveKind = image,  若 kind == "image" 或 normalized mime 以 "image/" 开头
+             = file,   否则
+```
+
+保留现有兼容语义（kind∨mime，round11 推荐项；「kind 为唯一权威」的 wire 收紧方案不采纳，见 §15）。
+
 2. **单一校验路径**（`handleSendMessage` decode 后、`admitBridgeTurn`/`switchDir`/`getSession`/`StartSession`/`markRunning`/`splitAttachments` **之前**，无 session 副作用）：
-   - a. **raw 结构校验**（遍历全部附件）：`kind ∈ {image,file}`、`mime` 非空、base64 可解码且 decoded 非空。任一不过 → `invalid_params`（**整条消息拒绝**，不部分处理、不静默丢）。
-   - b. **support matrix**（按 backend positive 声明）：附件 `kind` 必须被该 backend capability set **positively 包含**；否则 → `unsupported_attachment`。
+   - a. **raw 结构校验**（遍历全部附件）：`kind ∈ {image,file}`；`mime` **非空**（canonical `AttachmentInput.mime: string` 必填）且符合 `type/subtype` 语法（trim+lowercase 后匹配 `^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+$`，**不接受参数**如 `; charset=`）；base64 可解码且 decoded 非空。任一不过 → `invalid_params`（**整条消息拒绝**，不部分处理、不静默丢）。malformed MIME（`"not-a-mime"`/`"image"`/`"image/png; charset=utf-8"`）→ `invalid_params`（**有意收紧**：此前此类垃圾输入静默流入 driver，非有效路径回归）。
+   - b. **support matrix**（按 backend positive 声明）：附件 **`effectiveKind`**（绝非 raw `kind`）必须被该 backend capability set **positively 包含**；否则 → `unsupported_attachment`。
    - c. 全过才进 StartSession/Send。
-3. **`splitAttachments`（defense-in-depth）**：返回 validation error（不再 `continue` 静默跳过 malformed），由调用方在 (a) 映射 `invalid_params`。
+3. **`splitAttachments`（实现 change-set）**：改用**同一个 `classifyAttachment`**（分类行为等价于现 `isImage` 规则），并对空/invalid/decoded-empty base64 **返回 validation error**（不再 `continue` 静默跳过），由调用方在 (a) 映射 `invalid_params`。
 4. **DSH driver `Send`（defense-in-depth）**：收到非空 slices 仍返 typed error（不伪造 attachmentId）。
 
 **大小策略（round9 P0-1）**：`AttachmentInput` 无 `sizeBytes`，`splitAttachments` 现无任何大小限制，既有 backend 也没有 handler 级上限。**本期不引入 handler 级大小上限**（避免给 claudecode/codex/opencode/grokbuild 新增可能拒绝其现可接受大附件的限制）；故 **`attachment_too_large` 本期不在 acceptance 矩阵**。未来引入大小策略时，上限须 **per-backend positive 声明**（与 support 同源），不得用统一常量回归既有 backend。
@@ -350,12 +359,14 @@ abort 与 crash 并发 → 对象身份 CAS 使淘汰幂等（首触发淘汰，
 |---|---|---|---|---|---|
 | valid file | ✅ 进 `Send` | ✅ 进 `Send` | ✅ 进 `Send` | ✅ 进 `Send` | `unsupported_attachment` |
 | valid image | ✅ 进 `Send` | ✅ 进 `Send` | `unsupported_attachment`（mode-aware，图像不再静默丢） | `unsupported_attachment`（image=false 冻结样本） | `unsupported_attachment` |
-| invalid base64 / 坏 mime / 空 kind | `invalid_params` | `invalid_params` | `invalid_params` | `invalid_params` | `invalid_params` |
+| **`kind:"file", mime:"image/*"`（round11 fixture，effectiveKind=image）** | ✅ 走 image path 进 `Send` | ✅ 走 image path | `unsupported_attachment` | `unsupported_attachment` | `unsupported_attachment` |
+| malformed MIME（`"not-a-mime"`/`"image"`/带 `;` 参数） | `invalid_params` | `invalid_params` | `invalid_params` | `invalid_params` | `invalid_params` |
+| invalid base64 / 空 kind | `invalid_params` | `invalid_params` | `invalid_params` | `invalid_params` | `invalid_params` |
 | mixed valid+invalid | `invalid_params`（整条拒绝） | 同左 | 同左 | 同左 | 同左 |
 
 > opencode server 模式拒 image 是**现状语义化**（该路径图像本就静默丢失），不是新增回归；grokbuild 同理（ACP 声明 image=false）。既有 backend 的 **file 路径全部不回归**；claude/codex 的 image 不回归。
 
-**contract test**：上表全部场景（含 opencode 双模式、grokbuild image 拒绝）+ 全部在 **pre-StartSession** 拒绝；真实 key 只验 provider 能消费 image，拒绝路径用 source-owned wire fixture。
+**contract test**：上表全部场景（含 opencode 双模式、grokbuild image 拒绝、**`kind:"file", mime:"image/*"` mismatch fixture 逐 backend**、malformed MIME 三例）+ 全部在 **pre-StartSession** 拒绝；真实 key 只验 provider 能消费 image，拒绝路径用 source-owned wire fixture。
 
 ### 3.10 seq integrity + ignorable fail-closed（round7 P1-2 + round8 P0-2/P0-3）
 
@@ -532,6 +543,12 @@ pinned `47f943859bef60e4160492346772ded9b24f765a`。
 | P1-2 | §8/§4/§13 残留「非空附件一律 `unsupported_attachment`」与 §3.9 raw 校验优先冲突 | §4 表/§8/§13 风险 9/§15 行统一为：坏结构 → `invalid_params`；结构有效但不支持 → `unsupported_attachment` | ✅ |
 | P2 | `gen-known-event-types.py --write` 生成降级 header（丢 pinned SHA 与 ignorable 语义）；`str \| None`/`list[str]` 需 Py≥3.10 | `--write` 保留 Semantics block + usage lines，SHA 从 `DSH_ROOT` `git rev-parse HEAD` 读取（fail-closed）；`from __future__ import annotations` 兼容 3.9；已实测 verify/drift/`--write` 三模式 + artifact 用新脚本再生成（byte-stable） | ✅ artifact |
 
+### Round11（v12→v13）
+| 项 | v12 问题 | v13 修订 | 状态 |
+|---|---|---|---|
+| P0-1 | capability gate 按 raw `kind` 判断，`splitAttachments` 实际按 `kind=="image" ∨ mime 前缀 image/`（attachments.go:41）重分类；`{kind:"file", mime:"image/png"}` 绕过 file-only gate（Grok 进不可用 image block / OC server 进静默丢图 / DSH 错误码不稳定） | §3.9 新增 **`classifyAttachment` 单一规则**（effectiveKind=kind∨mime，pre-check 与 split 共用、禁止第二套判断）；support gate 改查 effectiveKind；raw 校验补 MIME `type/subtype` 语法（malformed 含 `;` 参数 → `invalid_params`，有意收紧）；矩阵新增 `kind:"file", mime:"image/*"` fixture 行（逐 backend）。「kind 唯一权威」备选不采纳（§15） | ✅ 设计；contract test deferred |
+| P2 | generator `--write` 读 DSH **working tree** 却 stamp HEAD SHA：dirty worktree + 新增唯一事件会生成 45 类 artifact 且标为 clean HEAD（审计员负向复现） | `--write` 改经 `git show HEAD:<path>` 读 **exact committed blob**（内容与 SHA 同源，dirty 不再泄漏——已复现审计员场景验证 2 类非 3 类）；verify 新增 **provenance drift** 检查（artifact stamp ≠ DSH HEAD 即 exit≠0，同 set 也报）；missing artifact 改干净报错；已测 8 场景（clean verify/3.9 二进制/verify、dirty 不泄漏、set drift、provenance-only drift、full match、真实 repo） | ✅ artifact |
+
 ### Round1-4 闭环：见前版（descriptor/resume/权限/计数/Gate0/identity/双写owner/环境切换/source.kind/usage/block/ListSessions/todo/自包含）。
 
 ---
@@ -542,13 +559,14 @@ pinned `47f943859bef60e4160492346772ded9b24f765a`。
 |---|---|---|
 | replacement session（abort 返回新 sessionId + iOS 切换） | 不采纳（选 process-nonce 方案） | replacement 需改 go-bridge handleAbortGeneration + iOS session 流（跨仓协议改动）；process-nonce + typed process death 更局部，不改 session 流/rebind |
 | 自动 retry（transport error 后重发同一 prompt） | 不采纳（违反 at-most-once） | DSH server 先 `followup` 入队再返回 `messageId`；transport error 不能证明未送达。需 SDK idempotency key 才能安全 retry，当前协议不支持。v9 以 delivery classification 替代（§3.6.3 ③） |
-| 图片/文件附件上传 | 不采纳（一期 text-only） | DSH SDK 无 upload RPC；`ImageAttachmentRef` 需要 attachment service 对接；`ContentBlock` 无通用 file block。**拒绝放 go-bridge pre-check**（splitAttachments 之前），坏结构 → `invalid_params`、有效但不支持 → `unsupported_attachment`（§3.9），不在 driver 层 |
+| 图片/文件附件上传 | 不采纳（一期 text-only） | DSH SDK 无 upload RPC；`ImageAttachmentRef` 需要 attachment service 对接；`ContentBlock` 无通用 file block。**拒绝放 go-bridge pre-check**（splitAttachments 之前），坏结构 → `invalid_params`、有效但不支持（按 `effectiveKind`）→ `unsupported_attachment`（§3.9），不在 driver 层 |
+| 「`kind` 为唯一分类权威」（`kind:"file", mime:"image/*"` 一律按 file，round11 备选） | 不采纳（保留 kind∨mime 兼容规则） | 现链路（splitAttachments `isImage`）对 `kind:"file", mime:"image/*"` **已按 image 处理**；改为 kind 权威会把这类输入从 image 路径改到 file 路径，是对现存输入类别的行为改写（wire 语义收紧），须协议兼容说明 + 确认无发送方依赖——超出本 driver 任务。兼容规则（effectiveKind=kind∨mime）保持现网行为，仅让 gate 与 split 用同一判断并新增拒绝矩阵，不改写任何允许路径 |
 | subagent timeline 展示 | 不采纳（一期过滤） | child event 显式过滤不进 root codec（§3.8）。若未来支持需扩展 codec：per-session stream、lineage-aware StreamID、parent/child 关联 |
 | `ProjectionReducer` 级测试 | deferred | driver 测试代码。identity 已对齐 reducer 源码（L535+L16-17）+ source.kind 分流 + process nonce + typed process death + source-proven 校验 |
 | sanitizer seen-flags / cardinality / 负向 fixture（round6 P1-3） | deferred | sanitizer 现用内容 truthiness（`s['text']`）兼任「见过」与「内容」，单侧空 peer 仍通过；doc 已如实收紧为「非空 peer 缺失即失败」。改 seen-flags + assembled cardinality + 负向 fixture 属 driver 测试基建 |
 | crash→respawn / at-most-once / typed death 实现测试（round6 P0-1 + round7 P0-2/P0-3） | deferred | driver + go-bridge 代码：验收矩阵 #6-#9, #12 的 fault-injection 场景（pre-send dead、zero-byte/partial/full send、response lost、健康 error 后继续、process exit、abort/crash/stale relay 并发）。设计闭环见 §3.6.3（已对齐 `deleteSession`/`relayEvents` defer/`sess.Send`/`prompt()` 源码） |
 | notification session scope 实现测试（round7 P0-1） | deferred | driver + go-bridge 代码：验收矩阵 #2-#5 的 subagent/foreign/ignorable 场景。设计闭环见 §3.8（已对齐 `types.ts:50-104`/`server.ts:71-103`/`client.ts:354-371`） |
-| attachment contract test（round7 P1-1 + round8/9/10 P0-1） | deferred | go-bridge pre-check + driver 代码 + descriptor truth-source 同步（随实现提交）：text-only ✅ / DSH valid image·file → `unsupported_attachment` / 坏 base64·坏 mime·空 kind → `invalid_params` / mixed → `invalid_params`（整条拒绝）/ claude·codex valid image+file → 进 `Send` / **opencode CLI image ✅、server image → `unsupported_attachment`（mode-aware）/ grokbuild image → `unsupported_attachment`**（全部 pre-StartSession）。设计见 §3.9 修正矩阵 |
+| attachment contract test（round7-11 P0 链） | deferred | go-bridge pre-check + driver 代码 + descriptor truth-source 同步 + `classifyAttachment` 共用重构（随实现提交）：text-only ✅ / DSH valid image·file → `unsupported_attachment` / 坏 base64·malformed MIME（`not-a-mime`/`image`/带 `;`）/ 空 kind → `invalid_params` / mixed → `invalid_params`（整条拒绝）/ **`kind:"file", mime:"image/*"` → effectiveKind=image：DSH·grok·OC-server → `unsupported_attachment`，claude·codex·OC-CLI → image path** / claude·codex valid image+file → 进 `Send` / opencode CLI image ✅、server image → `unsupported_attachment`（mode-aware）/ grokbuild image → `unsupported_attachment`（全部 pre-StartSession）。设计见 §3.9 |
 | durable notification dump（round7 P1-3） | deferred | gate helper 把全部 4 类 notification 以带 method/params 的 sanitized JSONL 保存；当前证据为 `.stdout` / `run-output.txt` |
 | `block-start/end → newPart` 扩展 core.Event | 一期不扩展 | core.Event 无 newPart；一期自然合并（同 turn 多 block text 拼接）。若要 block 级独立 part，扩展 core.Event+wire（协议改动） |
 | Gate helper 完整 CI gate（malformed/join） | 部分采纳 | 已修：env 转发/O_TRUNC/sendAndWait 竞态/rpc-error/PARTIAL exit 1/peer 断言。完整 malformed/join 属 driver 测试基建 |
@@ -557,6 +575,6 @@ pinned `47f943859bef60e4160492346772ded9b24f765a`。
 **main.go v7 实际修复**：① `DSH_PERMISSION_MODE`/`DSH_SYSTEM_PROMPT` 转发；② dump `O_TRUNC`；③ `sendAndWait` 先注册后写 + rpc-error 返回 nil（fatal exit 1）；④ **PARTIAL→`os.Exit(1)`**；⑤ error response 不打印 OK；⑥ **gofmt 干净 + go vet 无诊断**。
 **sanitize.py v7**：递归 scrub + **双向 peer 断言**（chunk→assembled 与 assembled→chunk 双向，**非空** peer 缺失即失败；负向样本 assembled-only/chunk-only 均 FAIL）+ 无路径断言。**已知边界（round6 P1-3）**：断言用内容 truthiness（`s['text']`/`s['atext']`）兼任「见过记录」与「拼接内容」，单侧空 text delta / 单侧空 assembled text 仍通过；当前真实 dump 无空块，既有结论不受影响。完整「缺任一 peer 即失败」需 seen-flags + assembled cardinality + 负向 fixture，见 §15 deferred。
 
-**当前结论（v12）**：协议选型（SDK JSON-RPC，3 request + 4 notification）、事件映射（自包含 + source.kind 分流 + ignorable 四级 fail-closed + `session/title` 内部诊断）、identity（对齐 reducer + process nonce + source-proven turn/step 校验）、**seq 完整性（envelope `event.seq` + 首 seq=0 + per-root fail-closed）**、交付语义（at-most-once delivery + Go `DeliveryError` contract）、**错误分类（application recoverable vs protocol/codec fatal）**、进程生命周期（typed process death + CAS Close ownership）、notification session scope（root/descendant/foreign 三分 + lineage tombstone 保留到 teardown）、attachment 策略（一期 text-only + **source-proven positive 矩阵：claude/codex image+file、opencode file+mode-aware image、grok file、DSH text** + go-bridge pre-check + canonical `unsupported_attachment`/`invalid_params`）、session.status 消费规则（driver-internal only）、双写去重（peer 断言）、usage 公式、权限 composition（环境切换）十三块设计完整且有真实/源码证据；正文无互斥规则、无二选一。
+**当前结论（v13）**：协议选型（SDK JSON-RPC，3 request + 4 notification）、事件映射（自包含 + source.kind 分流 + ignorable 四级 fail-closed + `session/title` 内部诊断）、identity（对齐 reducer + process nonce + source-proven turn/step 校验）、**seq 完整性（envelope `event.seq` + 首 seq=0 + per-root fail-closed）**、交付语义（at-most-once delivery + Go `DeliveryError` contract）、**错误分类（application recoverable vs protocol/codec fatal）**、进程生命周期（typed process death + CAS Close ownership）、notification session scope（root/descendant/foreign 三分 + lineage tombstone 保留到 teardown）、attachment 策略（一期 text-only + source-proven positive 矩阵 + **`classifyAttachment` 单一分类（effectiveKind，gate 与 split 共用）** + go-bridge pre-check + canonical `unsupported_attachment`/`invalid_params` + MIME 语法校验）、session.status 消费规则（driver-internal only）、双写去重（peer 断言）、usage 公式、权限 composition（环境切换）十三块设计完整且有真实/源码证据；正文无互斥规则、无二选一。
 
-**⚠ 诚实边界（round8 P1-4 + round9 P1-4 + round10 A/B= B）**：本版为**设计修订 + 2 个 committed artifact（`known-event-types.txt` + 可执行 `gen-known-event-types.py`，SHA 自动 stamp）**；**driver/go-bridge 代码尚未编写（含 capability truth-source descriptor 物理修改——按 owner A/B 决策选 B，随实现提交 + contract tests 交付），fault-injection / contract / fixture 测试尚未提交——非"已落地"**。每条设计规则已对齐其依赖的真实接口（DSH `types.ts`/`server.ts`/`client.ts`/`known-event-types.ts`/`index.ts`、MacBridge `core/interfaces.go`/`attachments.go`/`backend_capabilities.go`/`handlers.go`/`projection_reducer.go`/canonical protocol）。剩余实现：capability truth-source 同步（按 §3.9 修正矩阵：claude/codex `image+file`、opencode `file`+mode-aware `image`、grokbuild `file`、DSH `text`）、respawn/at-most-once/typed-death fault-injection、notification scope + lineage fixture、seq=0/gap/conflicting-dup wire fixture、attachment raw-wire rejection test（含 opencode 双模式 + grok image 拒绝）、`DeliveryError` errors.As 矩阵、CAS eviction/Close-once race、reducer frozen-sample、sanitizer seen-flags、durable notification dump、protocol 同步。
+**⚠ 诚实边界（round8 P1-4 + round9 P1-4 + round10 A/B=B + round11）**：本版为**设计修订 + 2 个 committed artifact（`known-event-types.txt` + `gen-known-event-types.py`：HEAD-blob 读取、SHA 同源 stamp、provenance drift 检查，8 场景实测）**；**driver/go-bridge 代码尚未编写（含 capability truth-source descriptor 物理修改与 `classifyAttachment` 重构——按 owner A/B 决策选 B，随实现提交 + contract tests 交付），fault-injection / contract / fixture 测试尚未提交——非"已落地"**。每条设计规则已对齐其依赖的真实接口（DSH `types.ts`/`server.ts`/`client.ts`/`known-event-types.ts`/`index.ts`、MacBridge `core/interfaces.go`/`attachments.go`（含分类行 41）/`backend_capabilities.go`/`handlers.go`/`projection_reducer.go`/canonical protocol）。剩余实现：capability truth-source 同步（claude/codex `image+file`、opencode `file`+mode-aware `image`、grokbuild `file`、DSH `text`）、`classifyAttachment` 共用重构、respawn/at-most-once/typed-death fault-injection、notification scope + lineage fixture、seq=0/gap/conflicting-dup wire fixture、attachment raw-wire rejection test（含 opencode 双模式、grok image 拒绝、kind/mime mismatch fixture、malformed MIME）、`DeliveryError` errors.As 矩阵、CAS eviction/Close-once race、reducer frozen-sample、sanitizer seen-flags、durable notification dump、protocol 同步。
