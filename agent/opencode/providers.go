@@ -101,6 +101,27 @@ func (a *Agent) GetRichSessionHistory(ctx context.Context, sessionID string, lim
 	return result, nil
 }
 
+// IsSessionActive reports whether the opencode server currently considers the
+// session busy (a turn in flight). Used by the cold-hydrate producer to decide
+// whether a trailing unanswered user turn is dead (settle as turn_error) or
+// live (keep open for its terminal event). Backed by the server's own
+// GET /session/status collection (verified against opencode 1.17.20: maps
+// busy session ids to {"type":"busy"}, empty object when everything is idle —
+// so a MISSING key is a definitive idle verdict, not a guess). Conservative on
+// any error: report active so a live turn is never falsely settled.
+func (a *Agent) IsSessionActive(ctx context.Context, sessionID string) bool {
+	raw, err := a.fetchJSON(ctx, "/session/status")
+	if err != nil {
+		return true
+	}
+	var busy map[string]struct{}
+	if err := json.Unmarshal(raw, &busy); err != nil {
+		return true
+	}
+	_, isActive := busy[sessionID]
+	return isActive
+}
+
 func (a *Agent) FetchTodos(ctx context.Context, sessionID string) ([]core.Todo, error) {
 	raw, err := a.fetchJSON(ctx, "/session/"+sessionID+"/todo")
 	if err != nil {

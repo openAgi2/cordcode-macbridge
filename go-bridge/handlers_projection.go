@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -882,7 +883,9 @@ func (h *Handlers) produceProjectionHydrateSource(
 	if err != nil {
 		return err
 	}
-	return streamRichHistoryProjectionEntries(ctx, entries, emit)
+	// Claude segment replay has no activity probe; the commit gate keeps
+	// waiting rather than settling turns it cannot prove dead.
+	return streamRichHistoryProjectionEntries(ctx, entries, false, emit)
 }
 
 func projectionSessionLogPrefix(sessionID string) string {
@@ -1127,21 +1130,68 @@ func (h *Handlers) streamBackendRichHistoryProjectionEvents(
 	if err != nil {
 		return err
 	}
-	return streamRichHistoryProjectionEntries(ctx, entries, emit)
+	// Seal trailing unanswered user turns only when the backend confirms the
+	// session is idle (no turn in flight). Backends without activity probing
+	// keep the previous behavior — the commit gate waits rather than guessing.
+	sealTrailingUnanswered := false
+	if prober, ok := agent.(core.SessionActivityProbing); ok {
+		sealTrailingUnanswered = !prober.IsSessionActive(ctx, sessionID)
+	}
+	return streamRichHistoryProjectionEntries(ctx, entries, sealTrailingUnanswered, emit)
 }
 
 func streamRichHistoryProjectionEntries(
 	ctx context.Context,
 	entries []core.RichHistoryEntry,
+	sealTrailingUnanswered bool,
 	emit func(projectionHydrateEvent) bool,
 ) error {
 	currentTurnID := ""
+	// Unanswered user turns: armed by a user row, cleared by any following
+	// assistant row (which seals or holds the turn boundary — pending user_input
+	// keeps requires_action and must NOT be settled). Rich history rows are
+	// complete snapshots, so a user row with no assistant row after it is a turn
+	// that died without output (e.g. provider resolution failure, 2026-08-14
+	// empty-turn incident). The hydrate commit gate correctly refuses to commit
+	// turns with no terminal state — without sealing, such a session cold-opens
+	// as endless "loading" on iOS.
+	unanswered := make(map[string]struct{})
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		role := strings.ToLower(strings.TrimSpace(entry.Role))
+		if role == "assistant" && currentTurnID != "" {
+			delete(unanswered, currentTurnID)
+		}
+		emitted := 0
 		for _, ev := range openCodeRichHistoryEntryToProjectionEvents(entry, &currentTurnID) {
+			emitted++
 			if !emit(ev) {
+				return ctx.Err()
+			}
+		}
+		if role == "user" && emitted > 0 && currentTurnID != "" {
+			unanswered[currentTurnID] = struct{}{}
+		}
+	}
+	if sealTrailingUnanswered && len(unanswered) > 0 {
+		// Mirror the live zero-output turn_error: settle each dead unanswered
+		// user turn so the authoritative commit gate can pass. Only reachable
+		// when the backend confirmed the session is idle — a live in-flight
+		// turn keeps waiting for its real terminal event. Sorted for
+		// deterministic event order.
+		ids := make([]string, 0, len(unanswered))
+		for id := range unanswered {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			if !emit(projectionHydrateEvent{
+				Event:    "turn_error",
+				Data:     map[string]interface{}{"turnId": id, "done": true, "reason": "rich_history_unanswered"},
+				TurnDone: true,
+			}) {
 				return ctx.Err()
 			}
 		}

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/agent/codex"
+	"github.com/openAgi2/cordcode-macbridge/agent/opencode"
 )
 
 // largestJSONLUnder walks root and returns the path of the largest *.jsonl file (proxy for a
@@ -592,4 +593,69 @@ func TestRealColdPullOpencodeWithoutAgentIsSourceUnavailable(t *testing.T) {
 		t.Fatalf("opencode must be migrated; got not_migrated")
 	}
 	t.Logf("REAL OPENCODE cold pull without agent: honest failure ✅ — code=%s msg=%s", conn.err.Code, conn.err.Message)
+}
+
+// TestRealColdPullOpencodeTrailingUnansweredTurnCommits drives the REAL
+// production cold-pull path against the REAL managed opencode server for a
+// session whose rich history ends with an unanswered user turn (the 2026-08-14
+// empty-turn incident left exactly this shape; pre-fix the hydrate commit gate
+// blocked forever → iOS endless "loading"). Post-fix the adapter seals the dead
+// turn as turn_error once the server confirms the session is idle, and the
+// cold pull must commit a full baseline within the normal budget.
+//
+// Env-gated (owner machine data; nothing baked into the repo):
+//   CC_REAL_OPENCODE_SESSION — target ses_… id
+//   CC_REAL_OPENCODE_URL / _USER / _PASS — managed server endpoint + basic auth
+func TestRealColdPullOpencodeTrailingUnansweredTurnCommits(t *testing.T) {
+	sessionID := strings.TrimSpace(os.Getenv("CC_REAL_OPENCODE_SESSION"))
+	baseURL := strings.TrimSpace(os.Getenv("CC_REAL_OPENCODE_URL"))
+	if sessionID == "" || baseURL == "" {
+		t.Skip("CC_REAL_OPENCODE_SESSION / CC_REAL_OPENCODE_URL not set")
+	}
+	agent, err := opencode.New(map[string]any{
+		"cmd":            "opencode",
+		"work_dir":       ".",
+		"opencode_url":   baseURL,
+		"opencode_user":  os.Getenv("CC_REAL_OPENCODE_USER"),
+		"opencode_pass":  os.Getenv("CC_REAL_OPENCODE_PASS"),
+	})
+	if err != nil {
+		t.Skipf("opencode agent unavailable on this machine: %v", err)
+	}
+
+	handlers := NewHandlers()
+	handlers.RegisterAgent("opencode", agent)
+
+	conn := &readFileCaptureConn{}
+	params, _ := json.Marshal(map[string]interface{}{"sessionId": sessionID, "sinceRev": 0})
+	msg := WireMessage{RequestID: "r-real-oc-hang", BackendID: "opencode", Method: "get_session_projection", Params: params}
+
+	start := time.Now()
+	handlers.handleGetSessionProjection(conn, msg, nil)
+	elapsed := time.Since(start)
+
+	if conn.err != nil {
+		t.Fatalf("REAL OPENCODE trailing-unanswered cold pull FAILED (pre-fix symptom: endless hydrating): code=%s msg=%s — %s",
+			conn.err.Code, conn.err.Message, elapsed)
+	}
+	dataMap, ok := conn.data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("real opencode: served data not a map: %T — %s", conn.data, elapsed)
+	}
+	proj, ok := dataMap["projection"].(SessionProjection)
+	if !ok || len(proj.Turns) == 0 || proj.SyncRev <= 0 {
+		t.Fatalf("real opencode: empty snapshot (forbidden): %+v — %s", dataMap["projection"], elapsed)
+	}
+	if elapsed >= defaultColdHydrateTimeout {
+		t.Fatalf("real opencode: committed baseline after %s, must be within %s (pre-fix: never)",
+			elapsed, defaultColdHydrateTimeout)
+	}
+	// The trailing unanswered turn must now carry a terminal status.
+	last := proj.Turns[len(proj.Turns)-1]
+	if last.Status != "completed" && last.Status != "aborted" && last.Status != "error" {
+		t.Fatalf("trailing turn still non-terminal (%q) — gate would block again", last.Status)
+	}
+	t.Logf("REAL OPENCODE trailing-unanswered cold pull: full baseline in %s, turns=%d syncRev=%d, trailing status=%s",
+		elapsed, len(proj.Turns), proj.SyncRev, last.Status)
+	waitForColdHydrateDrained(t, handlers, "opencode", sessionID, 30*time.Second)
 }

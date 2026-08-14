@@ -1405,7 +1405,7 @@ func TestClaudeRichHistoryAskUserQuestionProjectsStructuredEventsWithoutToolActi
 		t.Fatal(err)
 	}
 	var events []projectionHydrateEvent
-	if err := streamRichHistoryProjectionEntries(context.Background(), entries, func(event projectionHydrateEvent) bool {
+	if err := streamRichHistoryProjectionEntries(context.Background(), entries, false, func(event projectionHydrateEvent) bool {
 		events = append(events, event)
 		return true
 	}); err != nil {
@@ -1446,7 +1446,7 @@ func TestPendingClaudeRichHistoryAskUserQuestionKeepsRequiresAction(t *testing.T
 		}}},
 	}
 	var events []projectionHydrateEvent
-	if err := streamRichHistoryProjectionEntries(context.Background(), entries, func(event projectionHydrateEvent) bool {
+	if err := streamRichHistoryProjectionEntries(context.Background(), entries, false, func(event projectionHydrateEvent) bool {
 		events = append(events, event)
 		return true
 	}); err != nil {
@@ -1465,6 +1465,160 @@ func TestPendingClaudeRichHistoryAskUserQuestionKeepsRequiresAction(t *testing.T
 	if !ok || projection.Execution.Phase != "requires_action" || projection.Execution.ActiveTurnID != "user-ask" {
 		t.Fatalf("execution = %+v want requires_action/user-ask; events=%+v", projection.Execution, events)
 	}
+}
+
+// collectRichHistoryEvents runs the adapter over entries and returns emitted
+// events plus the reducer projection after applying them (opencode backend).
+func collectRichHistoryEvents(t *testing.T, entries []core.RichHistoryEntry, seal bool) ([]projectionHydrateEvent, SessionProjection) {
+	t.Helper()
+	var events []projectionHydrateEvent
+	emit := func(event projectionHydrateEvent) bool {
+		events = append(events, event)
+		return true
+	}
+	if err := streamRichHistoryProjectionEntries(context.Background(), entries, seal, emit); err != nil {
+		t.Fatal(err)
+	}
+	r := newTestReducer()
+	for i, event := range events {
+		r.Apply(ev(i+1, "opencode", "s1", event.Event, event.Data))
+	}
+	projection, ok := r.Snapshot("opencode", "s1")
+	if !ok {
+		t.Fatalf("no projection; events=%+v", events)
+	}
+	return events, projection
+}
+
+// 2026-08-14 hydrate-hang regression: an idle session whose rich history ends
+// with an unanswered user turn (the empty-turn incident left exactly this
+// shape) must cold-hydrate — the adapter seals the dead turn as turn_error so
+// the authoritative commit gate passes.
+func TestRichHistoryTrailingUnansweredUserTurnSealedWhenIdle(t *testing.T) {
+	entries := []core.RichHistoryEntry{
+		{ID: "msg_u1", Role: "user", Content: "讲个笑话"},
+		{ID: "msg_a1", Role: "assistant", Content: "好笑的笑话"},
+		{ID: "msg_u2", Role: "user", Content: "讲个鬼故事"},
+	}
+	events, projection := collectRichHistoryEvents(t, entries, true)
+
+	var seal *projectionHydrateEvent
+	for i := range events {
+		if events[i].Event == "turn_error" {
+			seal = &events[i]
+		}
+	}
+	if seal == nil {
+		t.Fatalf("no trailing turn_error seal: %+v", events)
+	}
+	if seal.Data["turnId"] != "msg_u2" || seal.TurnDone != true {
+		t.Fatalf("seal = %+v, want turnId=msg_u2 TurnDone=true", seal)
+	}
+	if projection.Execution.Phase != "idle" {
+		t.Fatalf("execution phase = %q, want idle after seal", projection.Execution.Phase)
+	}
+	if len(projection.Turns) != 2 {
+		t.Fatalf("turn count = %d, want 2: %+v", len(projection.Turns), projection.Turns)
+	}
+	for _, turn := range projection.Turns {
+		if turn.Status != "completed" && turn.Status != "error" {
+			t.Fatalf("turn %s status = %q, want terminal", turn.TurnID, turn.Status)
+		}
+	}
+	if idSet := NonTerminalTurnIDsOf(t, projection); len(idSet) != 0 {
+		t.Fatalf("non-terminal turns after seal: %v", idSet)
+	}
+}
+
+// A session the backend reports as active (turn in flight) must NOT be sealed —
+// the live rail owns the in-flight turn's terminal event.
+func TestRichHistoryTrailingUnansweredUserTurnNotSealedWhenLive(t *testing.T) {
+	entries := []core.RichHistoryEntry{
+		{ID: "msg_a1", Role: "assistant", Content: "好笑的笑话"},
+		{ID: "msg_u2", Role: "user", Content: "正在跑的问题"},
+	}
+	events, _ := collectRichHistoryEvents(t, entries, false)
+	for _, event := range events {
+		if event.Event == "turn_error" {
+			t.Fatalf("live session must not be sealed: %+v", events)
+		}
+	}
+}
+
+// Turns that DID get an assistant reply are sealed by turn_completed; no
+// synthetic turn_error may appear.
+func TestRichHistoryAnsweredTurnsNotErrorSealed(t *testing.T) {
+	entries := []core.RichHistoryEntry{
+		{ID: "msg_u1", Role: "user", Content: "讲个笑话"},
+		{ID: "msg_a1", Role: "assistant", Content: "好笑的笑话"},
+	}
+	events, projection := collectRichHistoryEvents(t, entries, true)
+	for _, event := range events {
+		if event.Event == "turn_error" {
+			t.Fatalf("answered turn error-sealed: %+v", events)
+		}
+	}
+	if len(projection.Turns) != 1 || projection.Turns[0].Status != "completed" {
+		t.Fatalf("turns = %+v", projection.Turns)
+	}
+}
+
+// An assistant row with a pending user_input holds requires_action — it must
+// clear the unanswered marker even though it emits no turn_completed, and no
+// turn_error may be synthesized for it.
+func TestRichHistoryPendingUserInputNotErrorSealed(t *testing.T) {
+	entries := []core.RichHistoryEntry{
+		{ID: "msg_u1", Role: "user", Content: "先问我再继续"},
+		{ID: "msg_a1", Role: "assistant", Parts: []map[string]any{{
+			"type": "user_input", "itemId": "call-ask", "interactionId": "ui_ask",
+			"status": "pending", "questions": []core.UserInputQuestion{{
+				ID: "ui_ask_q_0", Prompt: "怎么处理?", AnswerMode: core.UserInputAnswerModeSingle,
+				Options: []core.UserInputOption{{ID: "ui_ask_q_0_o_0", Label: "A"}}, Required: true,
+			}}, "canRespond": false, "canReject": false, "diagnosticCode": "observe_only",
+		}}},
+	}
+	events, projection := collectRichHistoryEvents(t, entries, true)
+	for _, event := range events {
+		if event.Event == "turn_error" {
+			t.Fatalf("requires_action boundary error-sealed: %+v", events)
+		}
+	}
+	if projection.Execution.Phase != "requires_action" {
+		t.Fatalf("execution phase = %q, want requires_action", projection.Execution.Phase)
+	}
+}
+
+// Consecutive unanswered user rows (multiple empty turns in a row) are each
+// sealed, so the commit gate cannot strand the older one.
+func TestRichHistoryConsecutiveUnansweredUserTurnsAllSealed(t *testing.T) {
+	entries := []core.RichHistoryEntry{
+		{ID: "msg_u1", Role: "user", Content: "第一条"},
+		{ID: "msg_u2", Role: "user", Content: "第二条"},
+	}
+	events, projection := collectRichHistoryEvents(t, entries, true)
+	sealed := map[string]bool{}
+	for _, event := range events {
+		if event.Event == "turn_error" {
+			sealed[event.Data["turnId"].(string)] = true
+		}
+	}
+	if !sealed["msg_u1"] || !sealed["msg_u2"] {
+		t.Fatalf("sealed = %v, want both turns; events=%+v", sealed, events)
+	}
+	if idSet := NonTerminalTurnIDsOf(t, projection); len(idSet) != 0 {
+		t.Fatalf("non-terminal turns after seal: %v", idSet)
+	}
+}
+
+func NonTerminalTurnIDsOf(t *testing.T, projection SessionProjection) []string {
+	t.Helper()
+	var ids []string
+	for _, turn := range projection.Turns {
+		if turn.Status != "completed" && turn.Status != "aborted" && turn.Status != "error" {
+			ids = append(ids, turn.TurnID)
+		}
+	}
+	return ids
 }
 
 func TestClaudeDesktopTranscriptPendingQuestionKeepsCustomAndRequiresAction(t *testing.T) {

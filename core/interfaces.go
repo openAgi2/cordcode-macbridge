@@ -163,6 +163,15 @@ type RichHistoryProvider interface {
 	GetRichSessionHistory(ctx context.Context, sessionID string, limit int) ([]RichHistoryEntry, error)
 }
 
+// SessionActivityProbing is an optional interface for agents whose backend can
+// report whether a session currently has a turn in flight. Cold-hydrate
+// producers use it to decide whether a trailing unanswered user turn is a dead
+// failure (safe to settle) or a live in-flight prompt (must stay open).
+// Implementations must be conservative: unknown/error ⇒ active.
+type SessionActivityProbing interface {
+	IsSessionActive(ctx context.Context, sessionID string) bool
+}
+
 // TranscriptSourceSegment identifies one physical file in an ordered,
 // source-proven logical transcript. Cursor is filled by the bridge at hydrate
 // admission and is the exclusive complete-line byte cut for that file.
