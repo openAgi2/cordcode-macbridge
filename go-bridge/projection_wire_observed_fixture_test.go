@@ -134,3 +134,41 @@ func TestObservedProjectionWireCanonicalTypedRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestObservedProjectionResumeWirePairAndDiagnostic(t *testing.T) {
+	push := observedProjectionFixture(t, "projection-patch-resume-observed.json")
+	pull := observedProjectionFixture(t, "get-session-projection-delta-resume-observed.json")
+	pullData := rawObject(t, pull["data"])
+	if got, want := sortedRawKeys(pullData), []string{"headRev", "patches", "resume"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("resume pull data keys = %v, want %v", got, want)
+	}
+	patches := rawArray(t, pullData["patches"])
+	if len(patches) != 3 || !reflect.DeepEqual(semanticJSON(t, push["data"]), semanticJSON(t, patches[0])) {
+		t.Fatal("resume production push/pull pair is not an exact three-patch suffix")
+	}
+	var resume ProjectionResumeDiagnostic
+	if err := json.Unmarshal(pullData["resume"], &resume); err != nil {
+		t.Fatal(err)
+	}
+	if resume.Kind != "journal" || resume.FromRev == nil || *resume.FromRev != 720 || resume.ToRev == nil || *resume.ToRev != 723 {
+		t.Fatalf("resume diagnostic = %+v", resume)
+	}
+	for index, raw := range append([]json.RawMessage{push["data"]}, patches...) {
+		var typed ProjectionPatch
+		if err := json.Unmarshal(raw, &typed); err != nil {
+			t.Fatalf("patch[%d] typed decode: %v", index, err)
+		}
+		encoded, err := json.Marshal(typed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before, after := rawObject(t, raw), rawObject(t, encoded)
+		for _, key := range canonicalProjectionPatchFields {
+			beforeRaw, beforePresent := before[key]
+			afterRaw, afterPresent := after[key]
+			if beforePresent != afterPresent || beforePresent && !reflect.DeepEqual(semanticJSON(t, beforeRaw), semanticJSON(t, afterRaw)) {
+				t.Errorf("patch[%d] field %s changed after typed round-trip", index, key)
+			}
+		}
+	}
+}

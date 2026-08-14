@@ -1,6 +1,6 @@
 # Session Projection v2 observed wire samples
 
-These two files are a paired, sanitized capture from the installed production MacBridge runtime
+The original two files are a paired, sanitized capture from the installed production MacBridge runtime
 at commit `da8551d6d525`. A temporary client completed the real direct
 pairing → approval → authenticated `hello(session_sync_v2)` path, set a full-stream observation
 scope, and sent a real Codex turn. The runtime emitted `projection_patch` 717→718. A separately
@@ -31,3 +31,13 @@ Independent wire presence extraction for every observed patch reports:
 
 The automated contract test independently decodes each patch through the canonical typed
 `ProjectionPatch`, re-encodes it, and compares all six fields one by one, including presence.
+
+The `*-resume-observed.json` pair is a second production capture after deploying commit
+`a0f309f57fdb`. The session was first authoritatively hydrated, then a real Codex turn produced
+patches 720→723. A replacement authenticated v2 connection requested `sinceRev: 720` and received
+the non-empty suffix with `resume: {kind:"journal",fromRev:720,toRev:723}`. The capture device was
+revoked after collection. Sanitization follows the same presence-preserving rules above; raw
+hashes are:
+
+- resume push: `sha256:b16c953011e9a7c90169d4b6279da955fb3a17e805d41d01d8fbb60beaa18c2a`
+- resume pull: `sha256:e2dea52257b08f38b96133009daea2a9d60206114c26073ce5d97890236221a5`

@@ -1,0 +1,37 @@
+{
+  "type": "event",
+  "eventId": "",
+  "seq": 0,
+  "perSessionSeq": 721,
+  "bridgeEpoch": "epoch_redacted",
+  "sessionId": "session_redacted",
+  "backendId": "codex",
+  "event": "projection_patch",
+  "data": {
+    "baseRev": 720,
+    "syncRev": 721,
+    "execution": {
+      "phase": "running",
+      "activeTurnId": "turn_redacted"
+    },
+    "upsertTurns": [
+      {
+        "turnId": "turn_redacted",
+        "status": "running",
+        "startedAt": 1700000000000,
+        "user": {
+          "id": "message_redacted",
+          "role": "user",
+          "parts": [
+            {
+              "type": "text",
+              "text": "sample request"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "replayable": false,
+  "timestamp": 1700000000000
+}

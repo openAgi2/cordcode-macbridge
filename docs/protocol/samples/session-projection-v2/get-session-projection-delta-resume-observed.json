@@ -1,0 +1,90 @@
+{
+  "data": {
+    "headRev": 723,
+    "patches": [
+      {
+        "baseRev": 720,
+        "syncRev": 721,
+        "execution": {
+          "phase": "running",
+          "activeTurnId": "turn_redacted"
+        },
+        "upsertTurns": [
+          {
+            "turnId": "turn_redacted",
+            "status": "running",
+            "startedAt": 1700000000000,
+            "user": {
+              "id": "message_redacted",
+              "role": "user",
+              "parts": [
+                {
+                  "type": "text",
+                  "text": "sample request"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "baseRev": 721,
+        "syncRev": 722,
+        "execution": {
+          "phase": "idle"
+        },
+        "upsertTurns": [
+          {
+            "turnId": "turn_redacted",
+            "status": "completed",
+            "startedAt": 1700000000000,
+            "completedAt": 1700000001000,
+            "user": {
+              "id": "message_redacted",
+              "role": "user",
+              "parts": [
+                {
+                  "type": "text",
+                  "text": "sample request"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "baseRev": 722,
+        "syncRev": 723,
+        "execution": {
+          "phase": "idle"
+        },
+        "upsertTurns": [
+          {
+            "turnId": "turn_redacted",
+            "status": "completed",
+            "startedAt": 1700000000000,
+            "completedAt": 1700000001000,
+            "user": {
+              "id": "message_redacted",
+              "role": "user",
+              "parts": [
+                {
+                  "type": "text",
+                  "text": "sample request"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "resume": {
+      "kind": "journal",
+      "fromRev": 720,
+      "toRev": 723
+    }
+  },
+  "ok": true,
+  "requestId": "request_redacted",
+  "type": "result"
+}
