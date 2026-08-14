@@ -41,6 +41,16 @@ type grokSession struct {
 	// terminalDone is set when a Done event has been emitted so process exit
 	// does not emit a second terminal event.
 	terminalDone atomic.Bool
+	// handshaking spans process start → post-handshake drain. session/load
+	// makes Grok replay historical session/update notifications while no
+	// consumer is attached yet; a replay larger than the 64-slot events
+	// channel used to freeze readLoop inside emit() and starve
+	// callRPC(session/load) of its response (2026-08-14 deadlock on a 3232
+	// line replay). While handshaking, emit discards overflow instead of
+	// blocking — same semantics as the post-handshake drain (replay is
+	// historical state and is discarded anyway), counted for observability.
+	handshaking            atomic.Bool
+	droppedHandshakeEvents atomic.Int64
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -117,6 +127,7 @@ func newGrokSession(ctx context.Context, agent *Agent, sessionID string) (*grokS
 	// Store requested ID early; loadSession keeps it, newSession replaces it.
 	s.sessionID.Store(sessionID)
 	s.alive.Store(true)
+	s.handshaking.Store(true)
 
 	handshakeStart := time.Now()
 	slog.Info("grokbuild: handshake step",
@@ -184,6 +195,8 @@ func newGrokSession(ctx context.Context, agent *Agent, sessionID string) (*grokS
 	// state — not part of the user's current turn. If left in the channel,
 	// relayEvents will forward them to iOS as if they were live turn events,
 	// including any prior error that would abort the turn immediately.
+	// Overflow beyond the channel capacity was already discarded by emit()'s
+	// handshaking mode; both are reported together below.
 	drained := 0
 drainLoop:
 	for {
@@ -194,11 +207,18 @@ drainLoop:
 			break drainLoop
 		}
 	}
-	if drained > 0 {
-		// Reset terminalDone so the real turn's terminal event is not suppressed.
-		s.terminalDone.Store(false)
-		slog.Info("grokbuild: drained stale handshake events", "count", drained)
+	// Reset unconditionally: any Done seen during handshake was replay, and a
+	// discarded replay Done would otherwise leave terminalDone set and
+	// suppress the real turn's terminal event.
+	s.terminalDone.Store(false)
+	if dropped := s.droppedHandshakeEvents.Swap(0); drained > 0 || dropped > 0 {
+		slog.Info("grokbuild: drained stale handshake events",
+			"drained", drained,
+			"discarded_overflow", dropped)
 	}
+	// End handshaking mode last: real turn events only begin after
+	// StartSession returns, so nothing live can be discarded by this window.
+	s.handshaking.Store(false)
 
 	// Wait for process exit in background; emit a terminal error if none yet.
 	go func() {
@@ -774,8 +794,20 @@ func (s *grokSession) emit(ev core.Event) {
 		}
 	}
 
+	// Handshake replay: non-blocking discard. Blocking here (pre-2026-08-14)
+	// froze readLoop once the 64-slot channel filled and starved the pending
+	// callRPC(session/load) of its response.
+	if s.handshaking.Load() {
+		select {
+		case s.events <- ev:
+		default:
+			s.droppedHandshakeEvents.Add(1)
+		}
+		return
+	}
+
 	// Diagnostic probe: if the events channel has no consumer (e.g. relayEvents
-	// not yet started during handshake), s.events <- ev blocks here. Without a
+	// between turns), s.events <- ev blocks here. Without a
 	// timeout this would freeze readLoop and deadlock callRPC waiters.
 	// We start a 100ms side-channel timer; if it fires before send completes,
 	// we log a warning — then continue the original blocking send unchanged.
