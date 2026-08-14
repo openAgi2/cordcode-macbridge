@@ -251,6 +251,8 @@ tool_finished
 todos_updated
 turn_started
 turn_completed
+turn_error
+turn_aborted
 error
 permission_request
 context_compressing
@@ -265,6 +267,15 @@ projection_patch
 projection_snapshot
 sync_invalidate
 ```
+
+`turn_error` / `turn_aborted` settle a turn as failed/aborted at the Kernel (turn status
+`error`/`aborted`, execution → idle); the wire shape is the reducer contract defined when
+the cases landed (`turnId`, optional `message`, `done: true`). Producers active as of
+2026-08-14: the codex live relay (`turn_aborted` on aborted tasks), the opencode live
+subscriber (zero-output turns — provider resolution failures that the server otherwise
+closes silently), and the idle-verified cold-hydrate seal for trailing unanswered user
+turns (`reason: rich_history_unanswered`). Before that date the events existed in the
+reducer/mailbox contract only, with no producer.
 
 `tool_started` / `tool_finished` may carry an optional `data.matches` field. It is the
 single structured truth for explore/search results and has exactly one of these shapes:

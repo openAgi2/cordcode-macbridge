@@ -797,6 +797,15 @@ func (s *grokSession) emit(ev core.Event) {
 	// Handshake replay: non-blocking discard. Blocking here (pre-2026-08-14)
 	// froze readLoop once the 64-slot channel filled and starved the pending
 	// callRPC(session/load) of its response.
+	//
+	// Scope note (recorded 2026-08-15): EVERYTHING arriving during the handshake
+	// window is treated as replayed historical state and may be discarded — by
+	// this path and, before the fix, by the post-handshake drain. That includes
+	// a `session/request_permission` notification replayed during session/load:
+	// it is dropped, not surfaced. This is the window's intended semantics (the
+	// drain comment explicitly discards replayed state "including any prior
+	// error"); live permission requests belong to a started turn and arrive
+	// after StartSession returns, outside this window.
 	if s.handshaking.Load() {
 		select {
 		case s.events <- ev:

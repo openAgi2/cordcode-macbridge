@@ -830,3 +830,16 @@ chat_history 已含该 prompt 时抑制 attach 补扫。竞态窗口（prompt �
 仍投递），原有 catch-up 测试保持通过；go test ./agent/grokbuild/ + ./go-bridge/... 全绿。
 Release 构建 68e01ae 已部署 /Applications。owner 真机复测（2026-08-12）：「测试结果基本上
 没问题 ✅」。
+
+## 2026-08-15：grokbuild 握手窗口事件丢弃语义（记录在案，非缺陷）
+
+2026-08-14 修复 session/load replay 死锁（commit 862e4f8）后明确的既有语义：握手窗口
+（进程启动 → session/new|load 完成 + drain 结束）内到达的**一切** ACP 通知都按 replayed
+历史状态处理，可能被丢弃——包括 `session/request_permission`。这与修复前 post-handshake
+drain 的行为一致（drain 注释明确丢弃 replayed state "including any prior error"），无回归。
+真实 live 权限请求属于已开始的 turn，在 StartSession 返回之后到达，不在此窗口内。
+落点：`agent/grokbuild/session.go` emit() 握手丢弃分支的 scope note。
+
+同日另一记录：`turn_error` wire producer 激活（opencode 空转 turn + idle 验证的冷 hydrate
+seal，commits e00b389/8eabd6e），canonical `docs/protocol/bridge-v1.md` 事件清单补入
+`turn_error`/`turn_aborted` 及说明，iOS mirror 已同步。
