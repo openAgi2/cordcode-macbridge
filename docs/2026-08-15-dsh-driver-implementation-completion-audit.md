@@ -9,10 +9,12 @@
 
 ## 1. 结论
 
-**通过，可交 owner 真机验收。** §16 八类门槛全部由审计方当场复跑通过；报告的两处
+**§16 八门槛与产品形态合规复核通过**（下文证据不变）。**但整体「可交验收」结论已被
+2026-08-15 owner 真机反馈推翻一项**：切到 DeepSeek 模式后 session 列表直出 wire 错误
+文案——live-only 列表空态缺失，属计划盲区 + 审计失察，阻断验收，详见 §8。两处
 「事实修正」经独立复核**均属实**（其中一处纠正的是审计方自己开工指令 v2 里的错误事实，
 开发 agent 如实报备而非照抄指令，处理正确）；「探测-复用-未启动」产品形态在代码、测试
-锁死与生产日志三个层面都成立。无阻断项；2 条非阻断备注见 §4。
+锁死与生产日志三个层面都成立。除 §8 缺陷外无其他阻断项；2 条非阻断备注见 §4。
 
 ---
 
@@ -102,3 +104,32 @@
 - 审计方**未重复执行**：手工 mock-key E2E turn（报告「本机实测记录」）与 Release 构建流程
   ——以 §16 自动化套件亲复跑 + 生产日志 + 运行中正式版进程为替代证据；真实端到端由
   owner 矩阵第 2 行闭环。
+
+---
+
+## 8. 追加（2026-08-15 owner 真机反馈）：审计结论修正——发现 1 项阻断级 UX 缺陷
+
+owner 实测：iOS 切到 DeepSeek 模式，session 列表直接显示
+**「backend does not support session listing」**。复核属实，且为**计划盲区 + 审计失察**：
+
+- **根因链**：设计/产品说 deepSeek live-only「不展示历史」，两端各做了自己那一半——
+  go-bridge 对 list_sessions 诚实返回 `not_supported`（`handlers.go:2722`，符合设计 §4）；
+  iOS 加了 `BackendKind.deepSeek`。但**没有任何一方把「不展示历史」翻译成「列表不调
+  RPC + 空态提示」**：iOS 的 session 列表（`SessionsView.loadSessions` 等多处
+  `backendClient.fetchSessions`）对所有 backend 无条件调用，wire 错误 message 被原样
+  渲染进「会话加载失败」错误态（`SidebarView.swift:225` 一带）。wire descriptor 也无
+  session-list 能力位可供门控。
+- **计划盲区**：该场景不在 §16 八门槛、也不在完成报告 5 行矩阵中——矩阵只测「backend
+  出现 DeepSeek」，没测「切进去之后列表长什么样」。
+- **审计失察（如实记录）**：审计时生产日志里已可见一串
+  `RPC request method=list_sessions backendId=deepseek`（21:25–21:55），审计方看到了却
+  未追查这些请求换来的是什么响应。
+- **修正后结论**：§16 八门槛与产品形态合规的复核结果不变（均真实通过）；但「可交 owner
+  验收」的完整结论**不成立**——在下列修复落地并复验前，矩阵第 2 行（进会话发消息）之前
+  的基本 UX 就已破损。
+- **要求的行为**：live-only backend 的 session 列表显示**空态 + 一句提示**（如「此对话后端
+  为实时模式：直接发消息开始新会话，无历史列表」），不再发起无谓的 list RPC；且 iOS 应把
+  `not_supported` 错误码兜底映射为空态而非错误横幅（防未来任何 live-only backend 复发）。
+  go-bridge 侧行为正确，无需改动。
+- **验收补充行**：切到 DeepSeek 模式 → 列表显示空态提示、无错误横幅、日志无
+  list_sessions RPC（或偶发一次即被空态短路）。
