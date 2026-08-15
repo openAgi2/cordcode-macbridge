@@ -178,7 +178,34 @@ type UnifiedError = {
 | `attachment_too_large` | 附件超大小限制 | — |
 | `invalid_params` | 参数校验失败 | — |
 
----
+### `send_message` attachments：结构校验与支持矩阵（pre-StartSession）
+
+attachments 在进入任何 session 副作用（admission / `StartSession` / `markRunning` /
+split）**之前**按两级校验，任一级失败整条消息拒绝（不部分处理、不静默丢弃）：
+
+1. **raw 结构校验** → `invalid_params`：每个附件 `kind ∈ {image, file}`；`mime` 非空且
+   为裸 `type/subtype`（trim+lowercase 后匹配 `^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+$`，
+   不接受 `;` 参数，`image/*` 这类通配不是合法字面值）；`base64` 可标准解码且解码后
+   非空。valid+invalid 混合同样整条拒绝。
+2. **支持矩阵** → `unsupported_attachment`：附件的 **effectiveKind**（`kind == "image"`
+   或 normalized mime 以 `image/` 开头 → image，否则 file——与 split 分类共用同一规则，
+   不是两套判断）必须被该 backend 在 `hello_ack.backends[].capabilities` 中 **positive
+   声明**（`image` / `file`）。缺席即不支持；「未声明」不得反向理解为「全支持」。
+
+各 backend 正向声明（按 driver×mode，语义支持而非签名支持）：
+
+| backend | `file` | `image` |
+|---|---|---|
+| claude / codex | ✅ | ✅（两种 codex 模式均验） |
+| opencode（无 managed server / CLI） | ✅ | ✅（`--file` 路径保留） |
+| opencode（managed server） | ✅ | ❌（该路径图像本就静默丢失——拒绝是现状语义化） |
+| grokbuild | ✅ | ❌（ACP `promptCapabilities.image=false`） |
+| deepseek（DSH） | ❌ | ❌（text-only；能力集仅声明 `text`） |
+
+`attachment_too_large` 当前不产生（本期无 handler 级大小上限；未来引入时上限须
+per-backend 正向声明，不得用统一常量回归既有 backend）。两条错误码均为既有 canonical
+code，capability 字符串为 extensible addition，无 major version bump。
+
 
 ## 4. 方法表
 
