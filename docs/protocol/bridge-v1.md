@@ -1026,6 +1026,7 @@ RPC lifecycle is explicit:
 | `ready` | success `{projection}` or `{patches,headRev}` | complete committed head; only this may map into the active timeline |
 | `failed` | error `projection.hydrate_failed`, `retryable`, optional `retryAfterMillis`/`attempts` | hydrate terminated; retry policy is explicit |
 | not migrated | error `projection.not_migrated`, `retryable=false` | selected backend has no v2 authority |
+| not found | error `projection.not_found`, `retryable=false` | live-only backend session has neither kernel state nor a live session this bridge epoch (e.g. DeepSeek after a bridge restart); nothing to serve — never an empty shell |
 
 The RPC response budget is 15 seconds. Budget expiry while the transaction remains healthy returns
 `projection.hydrating`; it never returns head-0 or a partial success. The client may keep its

@@ -430,7 +430,7 @@ Close 三阶段；正常 `shutdown→{}` 🟢，SIGTERM/SIGKILL ⚪。错误 →
 
 ## 8. capability
 
-`LiveEventSessionProcess`，无 `external_turn_streaming`。🟢 session_state/workspace_diff/diagnostics；⚠️ todos（须 FetchTodos 持久化读）/usage_reporting（须跨 turn 聚合）；❌ session_history/permission_resolve/supports_checkpoint。一期 text-only：DSH descriptor 只声明 `text`、**不声明** `image`/`file`（canonical 名，非 `attachments`）。attachment gate 走 **positive 声明**（§3.9，非「缺席=不支持」负推断）：DSH 缺 `image`/`file` 声明 → **结构有效**的 image/file pre-check 返 `unsupported_attachment`；**raw 结构非法**（空 kind/坏 mime/坏 base64/mixed）返 `invalid_params`（§3.9 单一路径 a→b）。notification session scope 由 driver client-side 过滤（§3.8）。
+`LiveEventSessionProcess`，无 `external_turn_streaming`。🟢 session_state/workspace_diff/diagnostics；⚠️ todos（须 FetchTodos 持久化读）/usage_reporting（须跨 turn 聚合）；❌ session_history/permission_resolve/supports_checkpoint。🟢 **session_sync_v2**（owner 方向放行 2026-08-16，附记修订：live-only 会话以 kernel 投影状态为基线——live ingestion 累积的 kernel reducer 状态经独立 live-only admission 事务原子达 `ready`，无磁盘 hydrate 源、无 history backfill；会话已死且 kernel 无痕 → 诚实 `projection.not_found`，禁止空壳快照。详见 `docs/2026-08-16-dsh-live-only-projection-spec.md`）。一期 text-only：DSH descriptor 只声明 `text`、**不声明** `image`/`file`（canonical 名，非 `attachments`）。attachment gate 走 **positive 声明**（§3.9，非「缺席=不支持」负推断）：DSH 缺 `image`/`file` 声明 → **结构有效**的 image/file pre-check 返 `unsupported_attachment`；**raw 结构非法**（空 kind/坏 mime/坏 base64/mixed）返 `invalid_params`（§3.9 单一路径 a→b）。notification session scope 由 driver client-side 过滤（§3.8）。
 
 ---
 
