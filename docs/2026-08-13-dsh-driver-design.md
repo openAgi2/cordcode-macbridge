@@ -600,3 +600,28 @@ pinned `47f943859bef60e4160492346772ded9b24f765a`。
 6. **process lifecycle**：application error 保留 session，framing/seq/scope/invariant fatal 淘汰，CAS Close-once。
 7. **reducer frozen samples**：user/assistant 同 turn、plugin 不进 timeline、turn/step mismatch fail、nonce 重启不冲突。
 8. **generator/protocol sync**：repo 内 `gen-known-event-types.py` verify 保持 exit 0；protocol pack / iOS mirror 如实现引入 wire 契约变化则同步更新（canonical 先行）。
+
+---
+
+## 附记：2026-08-15 owner 产品决策（runtime 探测形态，指令 v2）
+
+**探测-复用-未启动是全部 backend 的统一产品形态**：MacBridge 只探测用户 Mac 上已装的
+工具链并直接复用其自身配置的 key/provider，永不替用户安装 runtime、编译源码、下载包、
+或要求为 MacBridge 单独配置 key。DSH 的探测链（实现于 agent/dsh）：
+
+1. PATH `dsh-jsonrpc-agent`（用户显式安装 demo 包/wheel）
+2. **用户全局 `@deepseek-ai/dsh`（真实用户形态，第一公民）**：`npm root -g` + 已知根定位
+   全局树；其依赖闭包含全部 runtime family（cordis/dsh-agent/dsh-llm/dsh-session/…）但
+   **不含 SDK stdio 层**（server/protocol/demo 胶水/agent-spine）——该四包由 MacBridge
+   vendor（rc.6，MIT，未修改，agent/dsh/vendor），在 driver 自己的数据目录构建影子
+   node_modules（vendor 四包真实文件 + 其余 family symlink 到用户全局树，Node realpath
+   语义解析回用户版本）后以 `node <demo>/lib/bin.js` + `DSH_CORDIS_CONFIG` 拉起。
+3. pip wheel（pkg exe + Python Resolution API）
+4. nvm 最新版 bin
+5. 源码 checkout 仅 `DSH_DEV_SOURCE_ROOT` 显式 opt-in（源码是参考材料，永不进产品链）
+
+凭据链不变（provider key > `~/.dsh/.credentials.yaml` > `~/.dsh/.env`，`dsh web` 存的
+key 直接生效）。撤回此前「npm 分发/托管安装（managed runtime）」表述；探测链禁止
+npm install/npx/任何下载（测试锁死）。rc.6 双清单 artifact：本机安装包实测
+KNOWN_SESSION_EVENT_TYPES 仍为 **44 类**（与 pin 一致；含 tool-workflow×4 与
+agent-preset/selected，未删除——实测修正），driver ③ 类清单全覆盖，无 fail 误触发。

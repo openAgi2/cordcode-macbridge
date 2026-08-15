@@ -67,12 +67,20 @@ type Agent struct {
 	// runtimeSource labels how the runtime binary was found (diagnostics).
 	runtimeSource string
 
-	// srcRoot/nodeBin/scriptPath are set in source-checkout mode: the runtime
-	// runs as `node --import tsx packages/examples/jsonrpc-demo/src/bin.ts`
-	// with cwd=checkout root (the launch shape gate0 verified on this pin).
-	srcRoot    string
-	nodeBin    string
-	scriptPath string
+	// Node-script launch mode (set when nodeBin != ""): the runtime runs as
+	// `node [preArgs...] <scriptPath>` with cwd=spawnDir. Forms:
+	//   route 2 (user-global dsh): vendored demo lib/bin.js, cwd = the
+	//     driver's shadow-tree dir; bare plugins resolve beside cordis.yml
+	//     (vendored SDK layer real + family symlinked to the user's tree).
+	//   route 5 (dev checkout, opt-in): `--import tsx <bin.ts>`,
+	//     cwd = checkout root (the gate0-verified launch shape).
+	srcRoot       string // set only for source-checkout mode
+	nodeBin       string
+	scriptPath    string
+	spawnDir      string
+	scriptPreArgs []string
+	configViaEnv  bool // route 2: pass the config via DSH_CORDIS_CONFIG
+	globalDsh     *globalDshInstall
 
 	mu sync.RWMutex
 }
@@ -111,29 +119,39 @@ func New(opts map[string]any) (core.Agent, error) {
 			return nil, err
 		}
 	} else {
-		// Auto-discovery: an installed harness must just work (owner
-		// feedback 2026-08-15). PATH exe → PATH wheel exe → source checkout
-		// → nvm → python wheel Resolution API.
-		if rt := discoverRuntimeBinary(); rt != nil {
+		// Probe-only discovery (directive v2): explicit installs → user-global
+		// npm dsh (the real-user form, served via the vendored SDK layer +
+		// shadow tree) → pip wheel → nvm → dev checkout (opt-in env).
+		if rt := discoverProbeOnly(); rt != nil {
 			a.runtimeSource = rt.source
-			if rt.srcRoot != "" {
-				a.srcRoot, a.nodeBin, a.scriptPath = rt.srcRoot, rt.nodeBin, rt.script
-				slog.Info("dsh: runtime auto-discovered (source checkout)",
-					"root", rt.srcRoot, "node", filepath.Base(rt.nodeBin))
-			} else {
+			a.nodeBin = rt.nodeBin
+			switch {
+			case rt.exe != "":
 				a.cliBin = rt.exe
-				slog.Info("dsh: runtime auto-discovered", "bin", filepath.Base(rt.exe), "source", rt.source)
+				slog.Info("dsh: runtime probed", "bin", filepath.Base(rt.exe), "source", rt.source)
+			case rt.global != nil:
+				// Route 2: materialize the shadow tree beside our cordis.yml.
+				binJS, err := ensureShadowTree(a.shadowBaseDir(), rt.global)
+				if err != nil {
+					return nil, err
+				}
+				a.scriptPath = binJS
+				a.spawnDir = a.shadowBaseDir()
+				a.configViaEnv = true
+				a.globalDsh = rt.global
+				slog.Info("dsh: runtime via user-global npm dsh",
+					"dsh", rt.global.dshVersion, "app-boot", rt.global.appBootVersion,
+					"tree", rt.global.dshDir)
+			case rt.srcRoot != "":
+				a.srcRoot = rt.srcRoot
+				a.scriptPath = rt.script
+				a.spawnDir = rt.srcRoot
+				a.scriptPreArgs = []string{"--import", "tsx"}
+				slog.Info("dsh: runtime via dev-only source checkout", "root", rt.srcRoot)
 			}
 		} else {
-			return nil, fmt.Errorf("dsh: runtime not found — install DeepSeek Harness (source checkout, dsh-jsonrpc-agent on PATH, the deepseek-harness-runtime-bin wheel, or an nvm install) or set the deepseek cli_path option")
+			return nil, fmt.Errorf("dsh: DeepSeek Harness not found — install it with `npm i -g @deepseek-ai/dsh` (then `dsh web` once to save the API key), or pip install deepseek-harness-runtime-bin; nothing is installed on your behalf")
 		}
-	}
-
-	if v, ok := opts["model"].(string); ok && v != "" {
-		a.model = v
-	}
-	if v, ok := opts["mode"].(string); ok && v != "" {
-		a.mode = normalizePermissionMode(v)
 	}
 
 	// The runtime requires an explicit config argument (§1-2 强制 config).
@@ -150,9 +168,10 @@ func New(opts map[string]any) (core.Agent, error) {
 		return nil, fmt.Errorf("dsh: config %q unavailable: %w", a.configPath, err)
 	}
 
-	// Exe-mode runtime validation (src mode validated its own facts above):
-	// an explicit cli_path must actually resolve; discovery already proved it.
-	if a.srcRoot == "" {
+	// Exe-mode runtime validation (node-script modes validated their own
+	// facts above): an explicit cli_path must actually resolve; discovery
+	// already proved the rest.
+	if a.nodeBin == "" {
 		if _, err := exec.LookPath(a.cliBin); err != nil {
 			if _, statErr := os.Stat(a.cliBin); statErr != nil {
 				return nil, fmt.Errorf("dsh: runtime %q not found: %w", a.cliBin, err)
@@ -161,6 +180,12 @@ func New(opts map[string]any) (core.Agent, error) {
 	}
 
 	return a, nil
+}
+
+// shadowBaseDir is the driver's data dir: <workDir>/.cccode-macbridge/dsh —
+// holds cordis.yml, the session root, and the route-2 shadow node_modules.
+func (a *Agent) shadowBaseDir() string {
+	return filepath.Join(a.workDir, dshDataSubdir)
 }
 
 // materializeEmbeddedConfig writes the driver's composition (design §10,
@@ -179,12 +204,13 @@ func (a *Agent) materializeEmbeddedConfig() (string, error) {
 	return path, nil
 }
 
-// DiscoverRuntime exposes the runtime auto-discovery so the bridge descriptor
-// status reflects the same acquisition routes the driver spawns from (one
-// truth source for hello_ack availability and StartSession). The returned
-// path is the direct executable, or the bin.ts script for a source checkout.
+// DiscoverRuntime exposes the probe-only runtime discovery so the bridge
+// descriptor status reflects the same acquisition routes the driver spawns
+// from (one truth source for hello_ack availability and StartSession). The
+// returned path is the direct executable or the launch script; the
+// user-global route reports the demo bin.js once the shadow tree exists.
 func DiscoverRuntime() (string, string) {
-	rt := discoverRuntimeBinary()
+	rt := discoverProbeOnly()
 	if rt == nil {
 		return "", ""
 	}
@@ -205,8 +231,8 @@ func (a *Agent) useSourceCheckout(root string) error {
 		return fmt.Errorf("dsh: source checkout %q found but no node binary", root)
 	}
 	a.srcRoot = root
-	a.nodeBin = node
-	a.scriptPath = script
+	a.nodeBin, a.scriptPath, a.spawnDir = node, script, root
+	a.scriptPreArgs = []string{"--import", "tsx"}
 	a.runtimeSource = "source-checkout:explicit"
 	return nil
 }

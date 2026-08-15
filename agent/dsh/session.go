@@ -112,21 +112,31 @@ func newDshSession(ctx context.Context, agent *Agent, sessionID string) (*dshSes
 	sessionCtx, cancel := context.WithCancel(ctx)
 
 	var cmd *exec.Cmd
-	if agent.srcRoot != "" {
-		// Source-checkout mode: the launch shape gate0 verified on this pin —
-		// `node --import tsx <bin.ts> <config>` with cwd at the checkout root
-		// (plugin resolution walks the checkout's pnpm node_modules).
-		args := append([]string{"--import", "tsx", agent.scriptPath}, agent.cliExtraArgs...)
-		args = append(args, agent.configPath)
+	if agent.nodeBin != "" {
+		// Node-script mode (user-global dsh shadow tree or dev checkout):
+		// `node [preArgs...] <script>` with the mode's spawn dir as cwd —
+		// plugin resolution walks that tree's node_modules. Route 2 passes
+		// the config via DSH_CORDIS_CONFIG (the upstream runner's preferred
+		// channel); route 5 keeps the argv positional.
+		args := append(append([]string{}, agent.scriptPreArgs...), agent.scriptPath)
+		if !agent.configViaEnv {
+			args = append(args, agent.cliExtraArgs...)
+			args = append(args, agent.configPath)
+		}
 		cmd = exec.CommandContext(sessionCtx, agent.nodeBin, args...)
-		cmd.Dir = agent.srcRoot
+		cmd.Dir = agent.spawnDir
 	} else {
 		args := append([]string{agent.configPath}, agent.cliExtraArgs...)
 		cmd = exec.CommandContext(sessionCtx, agent.cliBin, args...)
 		cmd.Dir = agent.workDir
 	}
 	prepareCmdForProcessGroup(cmd)
-	cmd.Env = agent.buildProcessEnv()
+	cmdEnv := agent.buildProcessEnv()
+	if agent.configViaEnv {
+		// Upstream runner contract: DSH_CORDIS_CONFIG wins over argv.
+		cmdEnv = append(cmdEnv, "DSH_CORDIS_CONFIG="+agent.configPath)
+	}
+	cmd.Env = cmdEnv
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

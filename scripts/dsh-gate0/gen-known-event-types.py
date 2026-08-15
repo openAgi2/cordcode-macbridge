@@ -21,6 +21,8 @@ import os
 import re
 import subprocess
 import sys
+from pathlib import Path
+from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TXT = os.path.join(HERE, "known-event-types.txt")
@@ -156,5 +158,65 @@ def main():
     return 0
 
 
+
+# ── package-source mode (owner directive v2 §4): freeze the KNOWN list of an
+# INSTALLED dsh-session package (compiled lib/index.js) as a second artifact,
+# independent of the pinned source checkout. Usage:
+#   python3 gen-known-event-types.py --package-source <path/to/dsh-session/lib/index.js> --write-artifact scripts/dsh-gate0/known-event-types-rc6.txt
+#   python3 gen-known-event-types.py --package-source <...>   # verify existing artifact
+def extract_package_known_types(js_path):
+    text = Path(js_path).read_text(encoding="utf-8")
+    m = re.search(r"const KNOWN_SESSION_EVENT_TYPES = new Set\((.*?)\)", text, re.S)
+    if not m:
+        raise SystemExit("package-source: KNOWN_SESSION_EVENT_TYPES Set not found in %s" % js_path)
+    names = re.findall(r'"([^"]+)"', m.group(1))
+    return sorted(set(names))
+
+
+def main_package_source(argv):
+    js_path = None
+    artifact = None
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--package-source":
+            js_path = argv[i + 1]; i += 2
+        elif a == "--write-artifact":
+            artifact = argv[i + 1]; i += 2
+        else:
+            i += 1
+    if not js_path:
+        raise SystemExit("package-source mode requires --package-source <dsh-session lib/index.js>")
+    names = extract_package_known_types(js_path)
+    body = "\n".join(names)
+    header = (
+        "# DSH KNOWN_SESSION_EVENT_TYPES — installed package snapshot (%s)\n"
+        "# Source: %s (compiled Set literal)\n"
+        "# Companion to known-event-types.txt (pinned source checkout 47f9438).\n"
+        "# Count: %d\n" % (datetime.now().isoformat(timespec="seconds"), js_path, len(names))
+    )
+    text = header + "\n" + body + "\n"
+    if artifact:
+        Path(artifact).write_text(text, encoding="utf-8")
+        print("package-source: wrote %d types to %s" % (len(names), artifact))
+        return 0
+    # verify: compare against the sibling rc6 artifact if present
+    rc6 = Path(__file__).resolve().parent / "known-event-types-rc6.txt"
+    if not rc6.exists():
+        print("package-source: no rc6 artifact to verify against; use --write-artifact first")
+        return 1
+    existing = [l for l in rc6.read_text(encoding="utf-8").splitlines() if l and not l.startswith("#")]
+    if sorted(existing) == names:
+        print("OK: package-source == rc6 artifact, %d types" % len(names))
+        return 0
+    print("DRIFT: package-source %d types vs artifact %d types" % (len(names), len(existing)))
+    return 1
+
+
+def _dispatch() -> int:
+    if "--package-source" in sys.argv:
+        return main_package_source(sys.argv)
+    return main()
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_dispatch())

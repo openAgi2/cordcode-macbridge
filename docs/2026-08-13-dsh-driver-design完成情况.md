@@ -70,36 +70,40 @@ iOS `BackendKind.deepSeek`。§16 八类验收门槛全部有同批交付的自�
 - iOS：`xcodebuild build` SUCCEEDED；`-only-testing:CCCodeTests/BridgeModelsTests` 43/43；真机安装+启动完成。
 - generator verify exit 0（44 类、SHA 与 DSH HEAD 同源）。
 
-## 附录：harness 自动发现（owner 产品反馈，2026-08-15 追加）
+## 附录：harness 探测（owner 产品决策指令 v2，2026-08-15 终态）
 
-owner 指出「用户 mac 装了 DeepSeek Harness 后，MacBridge 应自动搞定 runtime 发现与 key」。
-已落地（a90b75a + 测试）：
+**用户效果**：`npm i -g @deepseek-ai/dsh` + `dsh web` 存过 key → CordCode Link 的
+DeepSeek 直接可用（零额外安装/配置，MacBridge 永不代装）。未安装任何形态 → backend
+如实「未启动」。
 
-- **runtime 多路探测**：`agent/dsh/discovery.go` `DiscoverRuntime()`——PATH `dsh-jsonrpc-agent`
-  → PATH `dsh-jsonrpc-agent-pkg-<plat>`（官方 Python wheel `deepseek-harness-runtime-bin` 的
-  单文件可执行名；platforms.json 映射 darwin/arm64→macos-arm64 等）→ **源码 checkout**
-  （`~/Projects/deepseek-harness` 等常规位置；校验 bin.ts+pnpm node_modules 后按 gate0 验证过
-  的 `node --import tsx <bin.ts> <config>`、cwd=checkout root 拉起；node 经 PATH→nvm→常见
-  绝对路径解析；亦可用 `dsh_root` 显式指定）→ nvm 最新版 bin →
-  `python3 -c 'import deepseek_harness_runtime; print(bundled_runtime_path())'`（官方
-  Resolution API，含 macOS `-spawn-helper` 完整性校验，3s 有界）。`New` 与
-  `detectDSHRuntime` 共用同一函数——hello_ack 状态与 StartSession spawn 目标永远一致。
-  Mac App `cliSearchPath` 增 pnpm/volta/npm-global 目录（GUI 不继承 shell PATH）。
-  **真机验证（本 Mac）**：`~/Projects/deepseek-harness`（pin 47f9438）下
-  `runtime auto-discovered (source checkout)` + `agent registered backendId=deepseek`，
-  `~/.dsh/.credentials.yaml` 的 DEEPSEEK_API_KEY 自动生效。live-only backend 的
-  discovery watcher 对 ErrNotSupported 改为安静跳过（不再周期性告警）。
-- **凭据层级镜像 DSH 语义**（关键事实：packaged runtime 闭包 108 依赖里**没有**
-  `dsh-credentials-local`——`.credentials.yaml` 只有 web bundle 会挂载，因此 composition
-  无法挂它，driver 侧读文件是唯一可行路径）：MacBridge provider key（显式）>
-  `$DSH_HOME/.credentials.yaml` 的 `DEEPSEEK_API_KEY`/`DEEPSEEK_BASE_URL`（dsh Web UI
-  Models 页写入的严格扁平 `ref: value` 映射；最小解析子集，flow 集合/嵌套=诚实 miss）>
-  `$DSH_HOME/.env`；per-key 独立下落。注入仍走 `BuildAgentEnv` 的 env 通道——DSH 自身
-  层级里 inherited env 排第一，语义等价于 runtime 自己解析。自定义 `DSH_HOME` 转发子进程。
-- **用户效果**：`pip install deepseek-harness-runtime-bin`（或 PATH/nvm 安装）+ 在 dsh Web UI
-  保存过一次 key → CordCode Link 的 DeepSeek backend 直接可用，MacBridge 内零额外配置。
-- **测试**：`discovery_test.go`——层级/优先级/per-key 下落/引号注释解析/malformed 诚实
-  miss/DSH_HOME 覆盖/平台映射/nvm glob/python probe seam（成功+失败+有界不挂起）/
-  buildProcessEnv provider>harness 优先级。
+实现（d9a9887 之后的探测重构，见 git log）：
 
-owner 真机验收矩阵第 1 行前提相应简化为「安装 DeepSeek Harness 并在其 Web UI 保存过 key」。
+- **探测链（probe-only）**：① PATH `dsh-jsonrpc-agent`（显式安装优先）→ ② 用户全局
+  `@deepseek-ai/dsh`（`npm root -g` 只读查询 + homebrew/usr-local/nvm/pnpm 已知根；
+  dsh+dsh-app-boot 存在且 entry 可解析才命中，双版本进日志）→ ③ pip wheel（pkg exe +
+  Python Resolution API，3s 有界）→ ④ nvm 最新 → ⑤ 源码仅 `DSH_DEV_SOURCE_ROOT`
+  opt-in（标注 dev-only）。全部未命中 → `AgentStatusNotDetected` 文案链不动。
+- **vendor SDK 层 + 影子树**：已安装 dsh@rc.6 的 61 依赖/194 嵌套包里没有
+  dsh-sdk-jsonrpc-server/-protocol/-demo/agent-spine-demo（机器实测，非猜测）——四包
+  rc.6 从 npm pack vendor 入仓（MIT，未修改，来源注明），driver 数据目录构建影子
+  node_modules：四包真实文件 + 其余 family 全量 symlink 到用户全局树（Node 默认
+  realpath 解析回用户已装版本）。spawn：`node <shadow>/…/dsh-sdk-jsonrpc-demo/lib/bin.js`
+  + `DSH_CORDIS_CONFIG`（上游 runner 官方 env 通道）；不写用户全局目录/DSH_HOME。
+- **禁止项（测试锁死）**：探测链零 npm install/npx/下载（fake-npm 被调 install 即
+  exit 99 + 源码 grep-lock）；`~/.dsh` 只读；无 MacBridge 侧 key 配置要求。
+  上一轮 managed runtime 安装代码全数删除。
+- **rc.6 实测（本机 = 真实样本）**：全局 dsh@0.1.0-rc.6 + `~/.dsh/.credentials.yaml`；
+  mock key（env 覆盖凭据链，headers 实证 Bearer fake）驱动 ② 路径完整 turn：
+  initialize/prompt 收据/4 类 notification/事件面全通（turn completed，事件与 §3.3
+  映射一致）。**清单实测修正**：安装包 rc.6 的 KNOWN_SESSION_EVENT_TYPES 仍为 44 类
+  （含 tool-workflow×4 + agent-preset/selected；node 导出与编译字面量双证据），与指令
+  预期的 39 不符——driver 的 ③ 类清单为 44 全集，两种结果均无 fail 误触发。第二
+  artifact `known-event-types-rc6.txt` + gen 脚本 `--package-source` 模式，双清单
+  verify exit 0。
+- **测试**：优先级 fixture（①>②>③>④、⑤ 仅 env opt-in、假全局树命中/缺失/entry 不可
+  解析诚实降级、版本解析）、影子树（vendor 真实文件+family symlink+幂等刷新+绝不写
+  全局树）、never-install 锁死、vendored 胶水完整性；driver 级 fault-injection 与
+  §16 门槛测试全部保持通过。
+
+真机验收矩阵第 1 行前提：**Mac 已 `npm i -g @deepseek-ai/dsh` 且在 dsh Web UI 存过
+key**（或装过 demo 包/wheel 任一形态）。

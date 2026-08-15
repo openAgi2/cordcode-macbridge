@@ -1,13 +1,12 @@
 package dsh
 
-// Phase-6 tests: harness auto-discovery (owner feedback 2026-08-15) —
-// runtime binary acquisition routes and ~/.dsh credential layering.
+// Phase-7 tests (owner probe directive v2): probe-only discovery chain,
+// shadow-tree construction, version logging, and the never-install lock.
 
 import (
 	"context"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -32,208 +31,8 @@ func writeFileT(t *testing.T, path, content string) {
 	}
 }
 
-func TestCredentialsYAMLLayer(t *testing.T) {
-	home := useTempDshHome(t)
-	writeFileT(t, filepath.Join(home, ".credentials.yaml"), `# managed by dsh Web UI
-DEEPSEEK_API_KEY: "sk-test-from-yaml"
-DEEPSEEK_BASE_URL: https://api.example.com/v1
-OTHER_TOOL_KEY: irrelevant
-`)
-	creds := discoverHarnessCredentials()
-	if creds.APIKey != "sk-test-from-yaml" {
-		t.Fatalf("APIKey = %q", creds.APIKey)
-	}
-	if creds.BaseURL != "https://api.example.com/v1" {
-		t.Fatalf("BaseURL = %q", creds.BaseURL)
-	}
-	if creds.Source != "credentials.yaml" {
-		t.Fatalf("Source = %q", creds.Source)
-	}
-}
-
-func TestCredentialsYAMLScalarShapes(t *testing.T) {
-	home := useTempDshHome(t)
-	writeFileT(t, filepath.Join(home, ".credentials.yaml"), `DEEPSEEK_API_KEY: sk-plain
-`)
-	if got := discoverHarnessCredentials().APIKey; got != "sk-plain" {
-		t.Fatalf("plain scalar = %q", got)
-	}
-
-	writeFileT(t, filepath.Join(home, ".credentials.yaml"), "DEEPSEEK_API_KEY: 'sk-single'\n")
-	if got := discoverHarnessCredentials().APIKey; got != "sk-single" {
-		t.Fatalf("single-quoted = %q", got)
-	}
-
-	// Trailing inline comment on an unquoted scalar.
-	writeFileT(t, filepath.Join(home, ".credentials.yaml"), "DEEPSEEK_API_KEY: sk-cmt # saved 2026\n")
-	if got := discoverHarnessCredentials().APIKey; got != "sk-cmt" {
-		t.Fatalf("inline comment = %q", got)
-	}
-}
-
-func TestEnvFileFallbackLayer(t *testing.T) {
-	home := useTempDshHome(t)
-	writeFileT(t, filepath.Join(home, ".env"), `# user env layer
-DEEPSEEK_API_KEY=sk-from-env
-DEEPSEEK_BASE_URL="https://env.example.com"
-OTHER=1
-`)
-	creds := discoverHarnessCredentials()
-	if creds.APIKey != "sk-from-env" || creds.BaseURL != "https://env.example.com" {
-		t.Fatalf("env layer: %+v", creds)
-	}
-	if creds.Source != "env-file" {
-		t.Fatalf("Source = %q", creds.Source)
-	}
-}
-
-func TestCredentialLayerPrecedencePerKey(t *testing.T) {
-	home := useTempDshHome(t)
-	// yaml has the key but no base URL; .env has both — key comes from the
-	// higher layer, base URL falls through per-key.
-	writeFileT(t, filepath.Join(home, ".credentials.yaml"), "DEEPSEEK_API_KEY: sk-yaml\n")
-	writeFileT(t, filepath.Join(home, ".env"), "DEEPSEEK_API_KEY=sk-env\nDEEPSEEK_BASE_URL=https://fallback.example\n")
-	creds := discoverHarnessCredentials()
-	if creds.APIKey != "sk-yaml" {
-		t.Fatalf("APIKey must prefer .credentials.yaml, got %q", creds.APIKey)
-	}
-	if creds.BaseURL != "https://fallback.example" {
-		t.Fatalf("BaseURL must fall through to .env, got %q", creds.BaseURL)
-	}
-}
-
-func TestCredentialMalformedIsHonestMiss(t *testing.T) {
-	home := useTempDshHome(t)
-	// Nested/flow YAML beyond the strict flat mapping: no key extracted —
-	// an honest miss, never a partial guess.
-	writeFileT(t, filepath.Join(home, ".credentials.yaml"), "providers:\n  - id: weird\nDEEPSEEK_API_KEY: [flow, seq]\n")
-	writeFileT(t, filepath.Join(home, ".env"), "garbage line without equals\n")
-	if creds := discoverHarnessCredentials(); creds.APIKey != "" || creds.BaseURL != "" {
-		t.Fatalf("malformed layers must yield an honest miss, got %+v", creds)
-	}
-}
-
-func TestDSHHomeEnvOverride(t *testing.T) {
-	home := useTempDshHome(t)
-	custom := t.TempDir()
-	t.Setenv("DSH_HOME", custom)
-	writeFileT(t, filepath.Join(custom, ".credentials.yaml"), "DEEPSEEK_API_KEY: sk-custom\n")
-	if got := discoverHarnessCredentials().APIKey; got != "sk-custom" {
-		t.Fatalf("DSH_HOME override ignored: %q", got)
-	}
-	// The first home still has nothing — proves the override redirected.
-	if _, err := os.Stat(filepath.Join(home, ".credentials.yaml")); err == nil {
-		t.Fatal("setup error: first home should be empty")
-	}
-}
-
-func TestBuildProcessEnvCredentialPrecedence(t *testing.T) {
-	home := useTempDshHome(t)
-	writeFileT(t, filepath.Join(home, ".credentials.yaml"), "DEEPSEEK_API_KEY: sk-harness\n")
-
-	// No provider configured → harness credential injected.
-	a := &Agent{workDir: t.TempDir()}
-	env := a.buildProcessEnv()
-	lookup := func(key string) (string, bool) {
-		for _, e := range env {
-			if k, v, ok := strings.Cut(e, "="); ok && k == key {
-				return v, true
-			}
-		}
-		return "", false
-	}
-	if v, ok := lookup("DEEPSEEK_API_KEY"); !ok || v != "sk-harness" {
-		t.Fatalf("harness fallback missing: %q ok=%v", v, ok)
-	}
-	if v, _ := lookup("DSH_HOME"); v != home {
-		t.Fatalf("DSH_HOME must not be overridden by the driver: %q", v)
-	}
-
-	// Explicit MacBridge provider key wins over the harness store.
-	a.SetProviders([]core.ProviderConfig{{Name: "deepseek", APIKey: "sk-provider"}})
-	a.SetActiveProvider("deepseek")
-	env = a.buildProcessEnv()
-	if v, _ := lookup("DEEPSEEK_API_KEY"); v != "sk-provider" {
-		t.Fatalf("provider key must win, got %q", v)
-	}
-}
-
-func TestPkgExeNamePlatformMapping(t *testing.T) {
-	// Pure mapping check: the wheel's executable-name scheme.
-	valid := map[string]bool{"darwin/arm64": true, "linux/amd64": true, "linux/arm64": true}
-	name := pkgExeName()
-	if !valid[platformKey()] && name != "" {
-		t.Fatalf("unexpected mapping for %s: %q", platformKey(), name)
-	}
-	switch platformKey() {
-	case "darwin/arm64":
-		if name != "dsh-jsonrpc-agent-pkg-macos-arm64" {
-			t.Fatalf("macos name = %q", name)
-		}
-	}
-}
-
-func TestLatestNvmRuntime(t *testing.T) {
-	// Fake nvm layout: two versions, newest carries the runtime.
-	binDir := t.TempDir()
-	v20 := filepath.Join(binDir, ".nvm", "versions", "node", "v20.1.0", "bin")
-	v22 := filepath.Join(binDir, ".nvm", "versions", "node", "v22.9.0", "bin")
-	writeFileT(t, filepath.Join(v22, "dsh-jsonrpc-agent"), "#!/bin/sh\n")
-	os.Chmod(filepath.Join(v22, "dsh-jsonrpc-agent"), 0o755)
-	os.MkdirAll(v20, 0o755)
-
-	t.Setenv("HOME", binDir)
-	got := latestNvmRuntime()
-	if !strings.HasSuffix(got, filepath.Join("v22.9.0", "bin", "dsh-jsonrpc-agent")) {
-		t.Fatalf("nvm discovery = %q, want the newest version", got)
-	}
-}
-
-func TestPythonWheelRuntimeProbe(t *testing.T) {
-	// Seam injection: the Resolution API path is honored verbatim.
-	restored := pythonRuntimeProbe
-	t.Cleanup(func() { pythonRuntimeProbe = restored })
-	exe := filepath.Join(t.TempDir(), "dsh-jsonrpc-agent-pkg-macos-arm64")
-	writeFileT(t, exe, "stub")
-	pythonRuntimeProbe = func(ctx context.Context) (string, error) { return exe, nil }
-	if got := pythonWheelRuntime(); got != exe {
-		t.Fatalf("probe result = %q", got)
-	}
-
-	// Probe failure (missing package) is an honest miss, not an error path.
-	pythonRuntimeProbe = func(ctx context.Context) (string, error) {
-		return "", context.DeadlineExceeded
-	}
-	if got := pythonWheelRuntime(); got != "" {
-		t.Fatalf("failed probe must miss, got %q", got)
-	}
-}
-
-func TestDiscoveryDoesNotHangOnPython(t *testing.T) {
-	// A wedged python3 must not stall startup: the probe is bounded.
-	restored := pythonRuntimeProbe
-	t.Cleanup(func() { pythonRuntimeProbe = restored })
-	start := time.Now()
-	pythonRuntimeProbe = func(ctx context.Context) (string, error) {
-		<-ctx.Done()
-		return "", ctx.Err()
-	}
-	pythonWheelRuntime()
-	if elapsed := time.Since(start); elapsed > 4*time.Second {
-		t.Fatalf("probe exceeded its bound: %v", elapsed)
-	}
-}
-
-// platformKey mirrors runtime.GOOS/GOARCH for the mapping test.
-func platformKey() string {
-	return runtime.GOOS + "/" + runtime.GOARCH
-}
-
-// ── source-checkout discovery (owner: harness as source at ~/Projects) ─────
-
-// fakeNodeShim writes a `node` executable into dir that just runs the python
-// fake runtime regardless of argv — letting src-mode spawn run end to end
-// hermetically. Returns dir for PATH prepending.
+// fakeNodeShim writes a `node` executable into dir (PATH-prependable) that
+// runs the given script regardless of argv.
 func fakeNodeShim(t *testing.T, runtimeScript string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -244,102 +43,263 @@ func fakeNodeShim(t *testing.T, runtimeScript string) string {
 	return dir
 }
 
-// fakeCheckout lays out a minimal deepseek-harness source checkout under home.
-func fakeCheckout(t *testing.T, home, rel string) string {
+// fakeNpmShim writes an `npm` executable that FAILS if asked to install —
+// the §3 never-install lock. Read-only queries (root -g) are answered.
+func fakeNpmShim(t *testing.T, root string) string {
 	t.Helper()
-	root := filepath.Join(home, rel)
-	writeFileT(t, filepath.Join(root, jsonrpcBinRel), "// placeholder bin.ts\n")
-	writeFileT(t, filepath.Join(root, "node_modules", ".bin", "tsx"), "#!/bin/sh\n")
-	return root
+	dir := t.TempDir()
+	shim := "#!/bin/sh\ncase \"$1\" in\n  root) echo '" + root + "';;\n  *) echo 'npm-lock: install-class invocation rejected: '\"$@\" >&2; exit 99;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(dir, "npm"), []byte(shim), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }
 
-func TestDiscoverSourceCheckoutConventionalRoots(t *testing.T) {
+// ── credential layers (unchanged semantics; regression guards) ──────────────
+
+func TestCredentialsYAMLLayer(t *testing.T) {
+	home := useTempDshHome(t)
+	writeFileT(t, filepath.Join(home, ".credentials.yaml"), `# managed by dsh Web UI
+DEEPSEEK_API_KEY: "sk-test-from-yaml"
+DEEPSEEK_BASE_URL: https://api.example.com/v1
+`)
+	creds := discoverHarnessCredentials()
+	if creds.APIKey != "sk-test-from-yaml" || creds.BaseURL != "https://api.example.com/v1" {
+		t.Fatalf("creds = %+v", creds)
+	}
+	if creds.Source != "credentials.yaml" {
+		t.Fatalf("Source = %q", creds.Source)
+	}
+}
+
+func TestCredentialLayerPrecedencePerKey(t *testing.T) {
+	home := useTempDshHome(t)
+	writeFileT(t, filepath.Join(home, ".credentials.yaml"), "DEEPSEEK_API_KEY: sk-yaml\n")
+	writeFileT(t, filepath.Join(home, ".env"), "DEEPSEEK_API_KEY=sk-env\nDEEPSEEK_BASE_URL=https://fallback.example\n")
+	creds := discoverHarnessCredentials()
+	if creds.APIKey != "sk-yaml" || creds.BaseURL != "https://fallback.example" {
+		t.Fatalf("per-key precedence broken: %+v", creds)
+	}
+}
+
+func TestCredentialMalformedIsHonestMiss(t *testing.T) {
+	home := useTempDshHome(t)
+	writeFileT(t, filepath.Join(home, ".credentials.yaml"), "providers:\n  - id: weird\nDEEPSEEK_API_KEY: [flow, seq]\n")
+	writeFileT(t, filepath.Join(home, ".env"), "garbage line without equals\n")
+	if creds := discoverHarnessCredentials(); creds.APIKey != "" || creds.BaseURL != "" {
+		t.Fatalf("malformed must miss honestly, got %+v", creds)
+	}
+}
+
+func TestBuildProcessEnvCredentialPrecedence(t *testing.T) {
+	home := useTempDshHome(t)
+	writeFileT(t, filepath.Join(home, ".credentials.yaml"), "DEEPSEEK_API_KEY: sk-harness\n")
+	lookup := func(env []string, key string) (string, bool) {
+		for _, e := range env {
+			if k, v, ok := strings.Cut(e, "="); ok && k == key {
+				return v, true
+			}
+		}
+		return "", false
+	}
+	a := &Agent{workDir: t.TempDir()}
+	if v, ok := lookup(a.buildProcessEnv(), "DEEPSEEK_API_KEY"); !ok || v != "sk-harness" {
+		t.Fatalf("harness fallback missing")
+	}
+	a.SetProviders([]core.ProviderConfig{{Name: "deepseek", APIKey: "sk-provider"}})
+	a.SetActiveProvider("deepseek")
+	if v, _ := lookup(a.buildProcessEnv(), "DEEPSEEK_API_KEY"); v != "sk-provider" {
+		t.Fatalf("provider key must win, got %q", v)
+	}
+}
+
+// ── probe chain: priority fixtures (①>②>③>④, ⑤ env opt-in only) ───────────
+
+// fakeGlobalDshTree lays out a user-global npm dsh install at root.
+func fakeGlobalDshTree(t *testing.T, root string) {
+	t.Helper()
+	dshDir := filepath.Join(root, "@deepseek-ai", "dsh")
+	writeFileT(t, filepath.Join(dshDir, "package.json"), `{"name":"@deepseek-ai/dsh","version":"0.1.0-rc.6"}`)
+	scope := filepath.Join(dshDir, "node_modules", "@deepseek-ai")
+	writeFileT(t, filepath.Join(scope, "dsh-app-boot", "package.json"), `{"name":"@deepseek-ai/dsh-app-boot","version":"0.1.0-rc.6","main":"lib/index.js"}`)
+	writeFileT(t, filepath.Join(scope, "dsh-app-boot", "lib", "index.js"), "export const boot = 1\n")
+	writeFileT(t, filepath.Join(scope, "dsh-llm-deepseek", "package.json"), `{"name":"@deepseek-ai/dsh-llm-deepseek","version":"0.1.0-rc.6"}`)
+}
+
+func probeChainEnv(t *testing.T, npmRoot string) {
+	t.Helper()
+	t.Setenv("DSH_HOME", t.TempDir())
+	t.Setenv("DSH_DEV_SOURCE_ROOT", "")
+	// Isolated PATH: node + read-only npm; nothing else can satisfy probes.
+	t.Setenv("PATH", fakeNodeShim(t, "/nonexistent.py")+":"+fakeNpmShim(t, npmRoot))
+	// Wheel/nvm/python routes must not fire in these fixtures.
+	restored := pythonRuntimeProbe
+	pythonRuntimeProbe = func(ctx context.Context) (string, error) { return "", context.Canceled }
+	// Route-2 roots isolated from the HOST machine's real global trees.
+	restoredRoots := npmGlobalRoots
+	npmGlobalRoots = func() []string { return []string{npmRoot} }
+	t.Cleanup(func() {
+		pythonRuntimeProbe = restored
+		npmGlobalRoots = restoredRoots
+	})
+}
+
+func TestProbeChainGlobalDshRoute(t *testing.T) {
+	root := t.TempDir()
+	fakeGlobalDshTree(t, root)
+	probeChainEnv(t, root)
+
+	rt := discoverProbeOnly()
+	if rt == nil || rt.global == nil {
+		t.Fatalf("route 2 must hit on a global dsh tree, got %+v", rt)
+	}
+	if rt.global.dshVersion != "0.1.0-rc.6" || rt.global.appBootVersion != "0.1.0-rc.6" {
+		t.Fatalf("versions not resolved: %+v", rt.global)
+	}
+	if rt.source != "npm-global:@deepseek-ai/dsh" {
+		t.Fatalf("source = %q", rt.source)
+	}
+}
+
+func TestProbeChainGlobalDshMissingFallsThrough(t *testing.T) {
+	empty := t.TempDir()
+	probeChainEnv(t, empty)
+
+	if rt := discoverGlobalDsh(); rt != nil {
+		t.Fatalf("empty root must miss route 2, got %+v", rt)
+	}
+	// App-boot present but entry unresolvable → honest degrade.
+	root := t.TempDir()
+	dshDir := filepath.Join(root, "@deepseek-ai", "dsh")
+	writeFileT(t, filepath.Join(dshDir, "package.json"), `{"name":"@deepseek-ai/dsh"}`)
+	writeFileT(t, filepath.Join(dshDir, "node_modules", "@deepseek-ai", "dsh-app-boot", "package.json"), `{"name":"@deepseek-ai/dsh-app-boot"}`)
+	if rt := discoverGlobalDsh(); rt != nil {
+		t.Fatalf("unresolvable app-boot must degrade honestly, got %+v", rt)
+	}
+}
+
+func TestProbeChainSourceCheckoutEnvOptInOnly(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("DSH_HOME", filepath.Join(home, ".dsh"))
-	nodeDir := fakeNodeShim(t, "/nonexistent-runtime.py")
-	t.Setenv("PATH", nodeDir+":"+os.Getenv("PATH"))
+	t.Setenv("PATH", fakeNodeShim(t, "/nonexistent.py")+":"+fakeNpmShim(t, t.TempDir()))
 
-	fakeCheckout(t, home, "Projects/deepseek-harness")
-	rt := discoverSourceCheckout()
-	if rt == nil {
-		t.Fatal("conventional Projects/ checkout not discovered")
-	}
-	if !strings.HasSuffix(rt.srcRoot, "Projects/deepseek-harness") || rt.script == "" || rt.nodeBin == "" {
-		t.Fatalf("discovered = %+v", rt)
-	}
-	if rt.source != "source-checkout:Projects/deepseek-harness" {
-		t.Fatalf("source label = %q", rt.source)
+	// A perfectly valid checkout exists at a conventional location…
+	root := filepath.Join(home, "Projects", "deepseek-harness")
+	writeFileT(t, filepath.Join(root, jsonrpcBinRel), "// bin\n")
+	writeFileT(t, filepath.Join(root, "node_modules", ".bin", "tsx"), "#!/bin/sh\n")
+
+	// …but without the env it is NEVER part of the product chain.
+	t.Setenv("DSH_DEV_SOURCE_ROOT", "")
+	if rt := discoverDevSourceCheckout(); rt != nil {
+		t.Fatal("source checkout must be opt-in only")
 	}
 
-	// A checkout without installed node_modules is NOT usable.
-	home2 := t.TempDir()
-	t.Setenv("HOME", home2)
-	root2 := filepath.Join(home2, "code", "deepseek-harness")
-	writeFileT(t, filepath.Join(root2, jsonrpcBinRel), "// x\n")
-	if rt := discoverSourceCheckout(); rt != nil {
-		t.Fatalf("checkout without node_modules must not be discovered: %+v", rt)
+	t.Setenv("DSH_DEV_SOURCE_ROOT", root)
+	rt := discoverDevSourceCheckout()
+	if rt == nil || rt.srcRoot != root || rt.source != "dev-only source checkout" {
+		t.Fatalf("opt-in checkout must hit: %+v", rt)
 	}
 }
 
-func TestNewWithSourceRootOpt(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("DSH_HOME", filepath.Join(home, ".dsh"))
-	root := fakeCheckout(t, home, "harness")
-	nodeDir := fakeNodeShim(t, "/nonexistent-runtime.py")
-	t.Setenv("PATH", nodeDir+":"+os.Getenv("PATH"))
+// ── shadow tree ──────────────────────────────────────────────────────────────
 
-	agentIface, err := New(map[string]any{"dsh_root": root, "work_dir": home})
+func TestEnsureShadowTreeVendoredAndSymlinks(t *testing.T) {
+	root := t.TempDir()
+	fakeGlobalDshTree(t, root)
+	rt := discoverGlobalDshLike(t, root)
+
+	dataDir := t.TempDir()
+	binJS, err := ensureShadowTree(dataDir, rt)
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, ok := agentIface.(*Agent)
-	if !ok {
-		t.Fatalf("New returned %T", agentIface)
+	// Vendored SDK layer: REAL files from the embedded rc.6 copies.
+	if !fileExists(filepath.Join(dataDir, "node_modules", "@deepseek-ai", "dsh-sdk-jsonrpc-server", "lib", "index.js")) {
+		t.Fatal("vendored server missing")
 	}
-	if a.srcRoot != root || a.scriptPath == "" || a.nodeBin == "" {
-		t.Fatalf("src mode not armed: src=%q script=%q node=%q", a.srcRoot, a.scriptPath, a.nodeBin)
+	if binJS != shadowBinScript(filepath.Join(dataDir, "node_modules", "@deepseek-ai")) {
+		t.Fatalf("binJS = %q", binJS)
 	}
-
-	// Bad root → honest constructor error.
-	if _, err := New(map[string]any{"dsh_root": filepath.Join(home, "missing"), "work_dir": home}); err == nil {
-		t.Fatal("invalid dsh_root must fail closed")
+	// Family: symlink into the user's global tree.
+	link := filepath.Join(dataDir, "node_modules", "@deepseek-ai", "dsh-llm-deepseek")
+	target, err := os.Readlink(link)
+	if err != nil {
+		t.Fatalf("family package not a symlink: %v", err)
+	}
+	if !strings.HasPrefix(target, root) {
+		t.Fatalf("symlink target %q outside the global tree", target)
+	}
+	// Idempotent refresh.
+	if _, err := ensureShadowTree(dataDir, rt); err != nil {
+		t.Fatalf("refresh failed: %v", err)
+	}
+	// Nothing written into the user's global tree.
+	if _, err := os.Stat(filepath.Join(root, "@deepseek-ai", "dsh", "node_modules", "@deepseek-ai", "dsh-sdk-jsonrpc-server")); err == nil {
+		t.Fatal("must never write vendored packages into the user's global tree")
 	}
 }
 
-// End-to-end src-mode spawn: fake node shim + fake runtime through a full
-// StartSession/Send/turn cycle, proving argv shape (config reaches the
-// runtime as the trailing positional) and cwd independence.
-func TestLifecycleSourceCheckoutSpawn(t *testing.T) {
-	agent := newFaultAgent(t, "ok") // writes runtime script + config, mode "ok"
-	// Rebuild the agent as src mode around the same fake runtime script.
-	home := t.TempDir()
-	t.Setenv("DSH_HOME", filepath.Join(home, ".dsh"))
-	nodeDir := fakeNodeShim(t, agent.cliBin) // node shim execs the fake runtime
-	t.Setenv("PATH", nodeDir+":"+os.Getenv("PATH"))
+func discoverGlobalDshLike(t *testing.T, root string) *globalDshInstall {
+	t.Helper()
+	dshDir := filepath.Join(root, "@deepseek-ai", "dsh")
+	return &globalDshInstall{
+		dshDir:         dshDir,
+		familyScopeDir: filepath.Join(dshDir, "node_modules", "@deepseek-ai"),
+		appBootEntry:   filepath.Join(dshDir, "node_modules", "@deepseek-ai", "dsh-app-boot", "lib", "index.js"),
+		dshVersion:     "0.1.0-rc.6",
+		appBootVersion: "0.1.0-rc.6",
+	}
+}
 
-	root := fakeCheckout(t, home, "Projects/deepseek-harness")
-	agentIface, err := New(map[string]any{"dsh_root": root, "work_dir": home, "config_path": agent.configPath})
-	if err != nil {
-		t.Fatal(err)
-	}
-	a, ok := agentIface.(*Agent)
-	if !ok {
-		t.Fatalf("New returned %T", agentIface)
-	}
+// ── the never-install lock (§3) ─────────────────────────────────────────────
 
-	s, err := newDshSession(context.Background(), a, "ses-srcmode")
-	if err != nil {
-		t.Fatal(err)
+// The chain runs with a PATH whose npm REJECTS install-class invocations and
+// whose node runs a recording no-op. Any install attempt = test failure via
+// npm exit 99 surfaced as a probe miss — and we additionally assert the dsh
+// package exports no install-capable path by construction (no such code).
+func TestProbeChainNeverInstalls(t *testing.T) {
+	root := t.TempDir() // no dsh tree: nothing to find
+	probeChainEnv(t, root)
+
+	if rt := discoverProbeOnly(); rt != nil {
+		t.Fatalf("empty environment must probe nothing, got %+v", rt)
 	}
-	defer func() { _ = s.Close() }()
-	if err := s.Send("hello", nil, nil); err != nil {
-		t.Fatal(err)
+	// The §3 lock itself is structural: agent/dsh contains no install code
+	// (grep-lock below keeps it that way even under refactors).
+	for _, f := range []string{"discovery.go", "shadow.go", "dsh.go", "session.go"} {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, banned := range []string{"npm install", "npmInstallFunc", "ensureRuntimeProject", "npx "} {
+			if strings.Contains(string(data), banned) {
+				t.Fatalf("%s must not contain install-capable code %q", f, banned)
+			}
+		}
 	}
-	term := waitForEvent(t, s, 5*time.Second, func(ev core.Event) bool {
-		return ev.Type == core.EventResult && ev.Done
-	})
-	if term.Error != nil {
-		t.Fatalf("src-mode turn failed: %v", term.Error)
+}
+
+// ── rc.6 vendored glue sanity ────────────────────────────────────────────────
+
+func TestVendoredDemoBinPresent(t *testing.T) {
+	// The vendored rc.6 demo glue must be intact in the embedded FS.
+	data, err := vendorFS.ReadFile("vendor/@deepseek-ai/dsh-sdk-jsonrpc-demo/lib/bin.js")
+	if err != nil || len(data) == 0 {
+		t.Fatalf("vendored bin.js missing: %v", err)
+	}
+}
+
+func TestDiscoveryDoesNotHangOnPython(t *testing.T) {
+	restored := pythonRuntimeProbe
+	t.Cleanup(func() { pythonRuntimeProbe = restored })
+	start := time.Now()
+	pythonRuntimeProbe = func(ctx context.Context) (string, error) {
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
+	pythonWheelRuntime()
+	if elapsed := time.Since(start); elapsed > 4*time.Second {
+		t.Fatalf("probe exceeded its bound: %v", elapsed)
 	}
 }

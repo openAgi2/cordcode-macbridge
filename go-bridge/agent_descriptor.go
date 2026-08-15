@@ -226,8 +226,8 @@ func detectAgentStatus(id string, codexBackendMode string, cfg *AgentDetectionCo
 // spawn 目标一致；缺失时如实报 not_detected 并给出获取途径。
 func detectDSHRuntime() (AgentStatus, string) {
 	bin, source := dsh.DiscoverRuntime()
-	if bin == "" {
-		return AgentStatusNotDetected, "DeepSeek Harness runtime not found (install dsh-jsonrpc-agent on PATH or pip install deepseek-harness-runtime-bin)"
+	if bin == "" && source == "" {
+		return AgentStatusNotDetected, "DeepSeek Harness runtime not found (install Node.js/npm for the managed runtime, dsh-jsonrpc-agent on PATH, or pip install deepseek-harness-runtime-bin)"
 	}
 	return AgentStatusAvailable, source
 }
