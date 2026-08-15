@@ -211,10 +211,34 @@ owner 真机验收（2026-08-15 23:55）发现：§8 空态修复后发送「讲
   （T11 patch 先于基线 reconcile/T12 无裁判/T13 终态诚实文案）+
   `ChatViewModelSessionSyncV2Tests` 52/52 回归绿。
 
+## 会话写入用户 harness 默认存储（2026-08-16，owner 决策，commit `624c6a4`）
+
+owner 决策（2026-08-16）：`DSH_SESSION_ROOT` 从 MacBridge 私有目录改为用户 harness
+默认存储 `$DSH_HOME/sessions`（默认 `~/.dsh/sessions`）——iPhone 起的 DeepSeek 会话
+直接落入 Mac 端 `dsh web` 的会话列表、可在 Mac 端续聊（初衷「无缝对接 session +
+双向接力」的前半）。MacBridge 私有 session 目录废止；仅 HOME 解析彻底失败时防御性
+回退（仍在 MacBridge data dir 内，绝不以相对路径散写 cwd）。
+
+- 实现（`agent/dsh/dsh.go buildProcessEnv`）：`dshHome()` 成功 → `sessionRoot =
+  $DSH_HOME/sessions` 并 `MkdirAll` 物化；`dshHome()==""` → 回退
+  `<workdir>/.cccode-macbridge/dsh/sessions`。
+- 测试：`TestBuildProcessEnvSessionRootInUserHarnessStore`——默认值=用户 harness
+  存储且目录已建；HOME/DSH_HOME 双失败时回退路径锁定在 MacBridge data dir 内。
+- 设计 §9-11 记账：「不展示历史」收窄为「iOS 侧暂无列表入口」——SDK 无 list/resume
+  RPC，iOS 列出/续聊 dsh 会话待官方接口开放或 prompt-known-id 恢复实验后另立项
+  （反向接力=未来项，不在本计划内）。
+- 旧测试会话残留在私有目录（本改动之前写入）无害、不迁移。
+- 验收矩阵第 5 行验证此轮；正式版 App 已含（2026-08-16 01:16 重装）。
+
 ## 证据索引（MacBridge dsh/driver 分支）
 
 `9555562` driver 骨架/codec/identity → `739ea1a` codec 测试 → `9dade9d` scope/seq/ignorable →
 `d2158a9` typed death/at-most-once/CAS → `5837fbe` attachment 全链+truth-source → `1abec61`
 canonical 协议章节 → `af46f3e` usage/双写+门槛7 → `c71c692` Mac App drivers 默认 →
 `a90b75a`/`d9a9887` 发现形态（后被 v2 收编/降级）→ `2755a7f` 探测-复用终态+vendor 影子树。
-iOS：`4e51ef1` BackendKind.deepSeek、`3bc597a` protocol mirror。
+修复/审计轮（`2755a7f` 之后）：`a2d4f97` 报告终态重写 → `5a614ff` 独立审计全文 →
+`e701ecc` 审计结论修正（owner 真机反馈）→ `c3079cb`/`ff78fe1` §8 空态修复入册 →
+`842fcbb` live-only 投影 spec → `c580ced` canonical/mirror 增 `projection.not_found` →
+`a70cbfb` live-only 基线 admission → `624c6a4` 会话写入用户 harness 存储。
+iOS：`4e51ef1` BackendKind.deepSeek、`3bc597a` protocol mirror、`fa371a3` 列表空态、
+`9b7efd4` 隐藏 list 入口门控、`69ba490` 投影渲染接入、`de13be8` 渲染开关收档+诚实文案。
