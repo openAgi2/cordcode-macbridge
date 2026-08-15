@@ -304,7 +304,15 @@ func (a *Agent) buildProcessEnv() []string {
 		providerEnv = append(providerEnv, "DEEPSEEK_BASE_URL="+h.BaseURL)
 	}
 
-	sessionRoot := filepath.Join(workDir, dshDataSubdir, sessionsSubdir)
+	// 2026-08-16 owner 决策：DSH 会话写入用户 harness 默认存储（$DSH_HOME/sessions，
+	// 默认 ~/.dsh/sessions）——CordCode 起的会话直接出现在 dsh web 的会话列表并可在
+	// Mac 端续聊（初衷「双向接力」前半）。MacBridge 私有 session 目录废止；仅当 HOME
+	// 解析彻底失败时防御性回退私有目录，绝不以相对路径散写 cwd。
+	home := dshHome()
+	sessionRoot := filepath.Join(home, sessionsSubdir)
+	if home == "" {
+		sessionRoot = filepath.Join(workDir, dshDataSubdir, sessionsSubdir)
+	}
 	_ = os.MkdirAll(sessionRoot, 0o755)
 
 	driverEnv := []string{

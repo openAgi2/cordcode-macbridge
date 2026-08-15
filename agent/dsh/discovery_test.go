@@ -113,6 +113,35 @@ func TestBuildProcessEnvCredentialPrecedence(t *testing.T) {
 	}
 }
 
+// 2026-08-16 owner 决策：DSH_SESSION_ROOT 必须指向用户 harness 默认存储
+// （$DSH_HOME/sessions），CordCode 会话落入 dsh web 可见可续聊；仅在 HOME
+// 解析失败时才允许退回 MacBridge 私有目录。
+func TestBuildProcessEnvSessionRootInUserHarnessStore(t *testing.T) {
+	lookup := func(env []string, key string) (string, bool) {
+		for _, e := range env {
+			if k, v, ok := strings.Cut(e, "="); ok && k == key {
+				return v, true
+			}
+		}
+		return "", false
+	}
+	home := useTempDshHome(t)
+	a := &Agent{workDir: t.TempDir()}
+	if v, ok := lookup(a.buildProcessEnv(), "DSH_SESSION_ROOT"); !ok || v != filepath.Join(home, "sessions") {
+		t.Fatalf("DSH_SESSION_ROOT = %q, want %s", v, filepath.Join(home, "sessions"))
+	}
+	if _, err := os.Stat(filepath.Join(home, "sessions")); err != nil {
+		t.Fatalf("session root not materialized under harness home: %v", err)
+	}
+
+	// HOME 与 DSH_HOME 都解析失败 → 防御性回退私有目录，绝不相对路径散写 cwd。
+	t.Setenv("DSH_HOME", "")
+	t.Setenv("HOME", "")
+	if v, _ := lookup(a.buildProcessEnv(), "DSH_SESSION_ROOT"); v != filepath.Join(a.workDir, dshDataSubdir, sessionsSubdir) {
+		t.Fatalf("fallback must stay inside MacBridge data dir, got %q", v)
+	}
+}
+
 // ── probe chain: priority fixtures (①>②>③>④, ⑤ env opt-in only) ───────────
 
 // fakeGlobalDshTree lays out a user-global npm dsh install at root.

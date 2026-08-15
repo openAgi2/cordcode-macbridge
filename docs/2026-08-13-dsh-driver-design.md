@@ -438,6 +438,8 @@ Close 三阶段；正常 `shutdown→{}` 🟢，SIGTERM/SIGKILL ⚪。错误 →
 
 无 bridge-v1 change（除非 turn 内多 message，§3.6）。driver `config/cordis.yml`=`scripts/dsh-gate0/driver-cordis.yml`。`BuildAgentEnv`（`core/message.go:134`，core 包、非 go-bridge 目录）注入 `DSH_PERMISSION_MODE`；iOS 侧为**待实施项**：`BackendKind`（iOS 仓 `OpenCodeiOS/OpenCodeiOS/Services/Backend/BackendModels.swift`）现有 case 为 openCode/codex/claudeCode/copilot/thinBridge/grokBuild，**不含且历史上从未有过** `deepSeek`——实现时需**新增** `case deepSeek`（含 wire kind 字符串映射）并保持不展示历史。
 
+**2026-08-16 owner 决策（会话存储·双向接力前半）**：`DSH_SESSION_ROOT` 指向用户 harness 默认存储 `$DSH_HOME/sessions`（默认 `~/.dsh/sessions`）——CordCode 起的 DSH 会话直接落入 dsh web 的会话列表、Mac 端可续聊（初衷「无缝对接 session + 双向接力」的前半，见 `[综合版对比]2026-08-04-t3code-vs-cordcode.md` §0）。MacBridge 私有 session 目录废止（仅 HOME 解析失败时防御性回退，见 `dsh.go buildProcessEnv` 与 `TestBuildProcessEnvSessionRootInUserHarnessStore`）。「不展示历史」相应收窄为「iOS 侧暂无列表入口」——SDK 无 list/resume RPC，iOS 列表/续聊待官方接口开放或 prompt-known-id 恢复实验后另立项。
+
 ---
 
 ## 12. 证据
