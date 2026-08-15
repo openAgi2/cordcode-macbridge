@@ -440,6 +440,8 @@ Close 三阶段；正常 `shutdown→{}` 🟢，SIGTERM/SIGKILL ⚪。错误 →
 
 **2026-08-16 owner 决策（会话存储·双向接力前半）**：`DSH_SESSION_ROOT` 指向用户 harness 默认存储 `$DSH_HOME/sessions`（默认 `~/.dsh/sessions`）——CordCode 起的 DSH 会话直接落入 dsh web 的会话列表、Mac 端可续聊（初衷「无缝对接 session + 双向接力」的前半，见 `[综合版对比]2026-08-04-t3code-vs-cordcode.md` §0）。MacBridge 私有 session 目录废止（仅 HOME 解析失败时防御性回退，见 `dsh.go buildProcessEnv` 与 `TestBuildProcessEnvSessionRootInUserHarnessStore`）。「不展示历史」相应收窄为「iOS 侧暂无列表入口」——SDK 无 list/resume RPC，iOS 列表/续聊待官方接口开放或 prompt-known-id 恢复实验后另立项。
 
+**2026-08-16 store bridge（owner 两点裁决后实现，见 `docs/2026-08-16-dsh-session-store-bridge-design.md`）**：iOS 列表/历史已落地——Mac 读取用户 `~/.dsh/sessions`（明文+zstd 双后缀）实现 `ListSessions`/`RichHistoryProvider`；§8 投影从 live-only admission 升级为 **file-backed pathless 全量重建**（opencode/grokbuild 同款 machinery，store 日志为冷基线；admission 降级为「store 未落盘的全新活会话」回退；`projection.not_found` 收窄为 kernel 与 store 双未知）。prompt-known-id 恢复经源码取证否定（SDK server 仅 `agents.create`，persistence 拒绝重复物化）——死会话续聊由 `session_resume_not_supported` 诚实拒绝（canonical/mirror 已入册），待 SDK 开放 resume 后升级。§8 栏其余裁决（声明制迁移、禁空壳、iOS 零裁判）不变。
+
 ---
 
 ## 12. 证据

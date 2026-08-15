@@ -8,6 +8,8 @@
 
 ## [Unreleased]
 
+- **新功能：iOS 端 DeepSeek 会话列表与历史（store 桥接）**：Mac 读取用户自己的 `~/.dsh/sessions`（dsh web 与手机自建的会话同列，明文与 zstd 双格式、标题取自 harness 的 session/title 事件）——iPhone 上 DeepSeek 模式现在有完整会话列表；点开任意已结束会话可查看完整历史（含思考过程与工具调用），file-backed 投影冷加载。已结束会话内发消息得到诚实提示（当前 DSH SDK 不支持跨进程续聊，可发起新会话），绝不覆写磁盘会话。
+
 - **改进：CordCode 起的 DeepSeek 会话写入用户 harness 默认存储（双向接力前半）**：`DSH_SESSION_ROOT` 从 MacBridge 私有目录改为 `$DSH_HOME/sessions`（默认 `~/.dsh/sessions`）——手机上发起的 DeepSeek 会话直接出现在 Mac 端 `dsh web` 的会话列表里、可在 Mac 端续聊。不再造隔离的私有 session 目录；仅 HOME 解析失败时防御性回退。
 
 - **修复：DeepSeek 消息页死寂（turn 完成但 iPhone 永久「执行中」无回复）**：live-only 会话正式迁移 SSV2——投影基线 = kernel 中 live 注入累积的权威状态，经独立 live-only admission 事务原子就绪（复用既有 hydrate 事务/fence 串行化，无磁盘历史源、无并行写路径）。三层缺口同修：投影 admission 路径（此前恒回 not_migrated 导致 iPhone 拿不到基线、补丁无 ownership 不渲染）、per-backend session_sync_v2 capability 广告、iOS 投影渲染开关。会话已死且 kernel 无痕（如 Mac 重启后重开）→ 诚实新错误码 `projection.not_found`（协议已入册）；kernel 有状态的死进程会话照常服务最后已知状态。顺带：观察心跳不再为 live-only 死会话每次续租空转 relayEvents。
