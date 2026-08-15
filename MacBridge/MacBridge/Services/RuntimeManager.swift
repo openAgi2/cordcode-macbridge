@@ -114,7 +114,7 @@ struct RuntimeConfig {
         port: Int = 8777,
         dataDir: String,
         logDir: String,
-        drivers: [String] = ["claude", "opencode", "codex", "grokbuild"],
+        drivers: [String] = ["claude", "opencode", "codex", "grokbuild", "deepseek"],
         workDir: String = FileManager.default.homeDirectoryForCurrentUser.path,
         codexBackend: String = "app_server",
         codexAppServerURL: String = "",
