@@ -405,8 +405,17 @@ type UnifiedSession = {
   effectiveModelId?: string
   effectiveProviderId?: string
   agentName?: string
+  runtimeState?: 'idle' | 'running' | 'requiresAction' | 'compactingHint' | 'requestingHint' | 'unknown'
 }
 ```
+
+**`runtimeState`（2026-08-15 F-8 补记，go-bridge 既有 de facto 字段正式入册）：**
+session 运行态徽标值域。`unknown` = Mac 侧确实查不到该 session 的状态（进程
+探测不可用且无 registry 记录、或 claude transcript 尾部无可判定条目）——**客户端
+必须不渲染状态徽标**（「不知道就不亮灯」），不得把 unknown 当 idle/running 处理。
+已知状态语义不变：`running` 执行中、`idle` 空闲、`requiresAction` 待用户动作、
+`compactingHint`/`requestingHint` 上下文整理中。客户端实现提示：不识别的值一律
+按 unknown 处理（不亮徽标）。
 
 **字段映射（wire → Swift）：**
 
@@ -427,6 +436,7 @@ type UnifiedSession = {
 | `effectiveModelId` | `effectiveModelID` | wire `Id` → Swift `ID` |
 | `effectiveProviderId` | `effectiveProviderID` | wire `Id` → Swift `ID` |
 | `agentName` | (无直接字段，adapter 层处理) | |
+| `runtimeState` | `runtimeState` | 可选；值域与 unknown 语义见上方补记；Swift 侧为 `String?` 原样保存 |
 
 Swift 派生属性：`isPrimarySession` = `parentId` 为空，`isArchived` = `archivedAt != nil`，`isChildSession` = `!isPrimarySession`。
 

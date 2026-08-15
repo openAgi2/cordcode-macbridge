@@ -4855,3 +4855,18 @@ func TestListDirectory_BroadMode_SymlinkIsLeaf(t *testing.T) {
 		t.Error("missing symlink entry 'escape-link' in broad mode listing")
 	}
 }
+
+// TestDetectClaudeTranscriptState_UnknownWhenNoMeaningfulEntry pins the "unknown"
+// output of the transcript detector (F-8): an empty / undecidable transcript tail
+// must stay "unknown" so the enrichment layer can surface it honestly instead of
+// fabricating "idle".
+func TestDetectClaudeTranscriptState_UnknownWhenNoMeaningfulEntry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "claude.jsonl")
+	if err := os.WriteFile(path, []byte("\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	handlers := &Handlers{}
+	if got := handlers.detectClaudeTranscriptState(path); got != "unknown" {
+		t.Fatalf("empty transcript state = %q, want unknown", got)
+	}
+}

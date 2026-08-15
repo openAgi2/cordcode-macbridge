@@ -147,6 +147,11 @@ func (h *Handlers) enrichSessionStateWithAgent(mapped map[string]interface{}, ag
 		// 对 claudecode：优先用 GetRunningSessionIDs（检查有活跃进程的 session）。
 		// 若 session 不在结果中（进程已退出、session 文件已清理），回退到直接读取
 		// transcript 文件判定。这修复了进程退出后 registry 旧 "running" 状态泄漏的问题。
+		//
+		// F-8（2026-08-15，owner 拍板「不知道就不亮灯」）：transcript 探测返回
+		// unknown（尾部无可判定条目）或文件找不到时，保留 "unknown"（客户端不渲染
+		// 徽标），不再强转 "idle"。markIdle 是 registry 进程存活的内部簿记
+		// （不在 runningMap = 无活跃进程的事实），与 wire 上报的 turn 状态语义无关。
 		if agent != nil && agent.Name() == "claudecode" {
 			h.injectClaudeReasoningEffort(mapped, agent)
 			usedTranscriptFallback := false
@@ -161,11 +166,9 @@ func (h *Handlers) enrichSessionStateWithAgent(mapped map[string]interface{}, ag
 						_, sessPath := h.findClaudeSessionFile(sessionID, "")
 						if sessPath != "" {
 							state = h.detectClaudeTranscriptState(sessPath)
-							if state == "unknown" {
-								state = "idle"
-							}
 						} else {
-							state = "idle"
+							// 文件找不到：确实查不到。
+							state = "unknown"
 						}
 						h.sessions.markIdle(sessionID)
 						usedTranscriptFallback = true
@@ -266,11 +269,17 @@ func (h *Handlers) enrichSessionStatesForList(sessions []map[string]interface{},
 // applyListRuntimeState sets runtimeState on mapped from the registry and the
 // precomputed runningMap only. It does not touch the filesystem and does not
 // mutate the registry. When runningMap is non-nil it is authoritative.
+//
+// F-8（2026-08-15，owner 拍板「不知道就不亮灯」）：runningMap 不可用（查询出错或
+// agent 无 RunningSessionLister）且 registry 也没有该 session 的记录时，属于
+// 「确实查不到」——产出 "unknown"（客户端不渲染状态徽标），不再默认谎报 "idle"。
+// registry 有记录时维持既有 last-known 回退（包括可能 stale 的 running——
+// 「registry 说 running 且无法复核」不在本条修复范围）。
 func (h *Handlers) applyListRuntimeState(mapped map[string]interface{}, runningMap map[string]bool) map[string]interface{} {
 	if mapped == nil {
 		return nil
 	}
-	state := "idle"
+	state := "unknown"
 	if sessionID, _ := mapped["id"].(string); sessionID != "" {
 		if ts, ok := h.sessions.get(sessionID); ok && string(ts.state) != "" {
 			state = string(ts.state)

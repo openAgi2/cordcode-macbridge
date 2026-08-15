@@ -99,7 +99,9 @@ func TestGetRunningMap_NonListerReturnsNil(t *testing.T) {
 
 // TestApplyListRuntimeState_NilRunningMapFallsBackToRegistry covers the
 // non-lister / lookup-error path: when runningMap is nil, runtime state comes
-// from the registry (last-known), with idle as the default for unknown sessions.
+// from the registry (last-known). F-8 (2026-08-15): sessions with no registry
+// row at all report "unknown" (client renders no badge) instead of defaulting
+// to a fabricated "idle".
 func TestApplyListRuntimeState_NilRunningMapFallsBackToRegistry(t *testing.T) {
 	handlers := newTestHandlers(t)
 	handlers.sessions.markRunning("reg-running")
@@ -107,8 +109,24 @@ func TestApplyListRuntimeState_NilRunningMapFallsBackToRegistry(t *testing.T) {
 	if m := handlers.applyListRuntimeState(map[string]interface{}{"id": "reg-running"}, nil); m["runtimeState"] != "running" {
 		t.Fatalf("nil runningMap fallback for reg-running = %#v, want running (registry)", m["runtimeState"])
 	}
-	if m := handlers.applyListRuntimeState(map[string]interface{}{"id": "unknown"}, nil); m["runtimeState"] != "idle" {
-		t.Fatalf("unknown + nil runningMap = %#v, want idle (default)", m["runtimeState"])
+	if m := handlers.applyListRuntimeState(map[string]interface{}{"id": "unknown"}, nil); m["runtimeState"] != "unknown" {
+		t.Fatalf("unknown + nil runningMap = %#v, want unknown (F-8: 查不到不谎报 idle)", m["runtimeState"])
+	}
+}
+
+// TestApplyListRuntimeState_RunningMapAuthoritativeKnownStates is the F-8
+// counter-case: a non-nil runningMap is a definitive PID-scan answer, so it
+// must keep reporting running/idle — "unknown" is reserved for genuinely
+// unverifiable rows.
+func TestApplyListRuntimeState_RunningMapAuthoritativeKnownStates(t *testing.T) {
+	handlers := newTestHandlers(t)
+	handlers.sessions.markRunning("reg-stale-running")
+
+	if m := handlers.applyListRuntimeState(map[string]interface{}{"id": "live"}, map[string]bool{"live": true}); m["runtimeState"] != "running" {
+		t.Fatalf("runningMap hit = %#v, want running", m["runtimeState"])
+	}
+	if m := handlers.applyListRuntimeState(map[string]interface{}{"id": "reg-stale-running"}, map[string]bool{}); m["runtimeState"] != "idle" {
+		t.Fatalf("runningMap miss (definitive) = %#v, want idle", m["runtimeState"])
 	}
 }
 
@@ -447,5 +465,43 @@ func TestGetRunningMap_ProductionClaudeRegistrationFindsClaudeCodeAgent(t *testi
 	}
 	if agent.runningCalls != 1 {
 		t.Fatalf("runningCalls=%d, want 1 (GetRunningSessionIDs must be invoked through production \"claude\" registration)", agent.runningCalls)
+	}
+}
+
+// TestEnrichSessionStateWithAgent_ClaudeUnknownNotFabricatedAsIdle is the F-8
+// detail-path guard: a claude session with no live process and no locatable
+// transcript file must surface "unknown" (client renders no badge) instead of a
+// fabricated "idle". The session id embeds a high-entropy suffix so
+// findClaudeSessionFile can never match a real ~/.claude/projects entry.
+func TestEnrichSessionStateWithAgent_ClaudeUnknownNotFabricatedAsIdle(t *testing.T) {
+	handlers := newTestHandlers(t)
+	agent := &fakeAgent{
+		name:              "claudecode",
+		reasoningEffort:   "high",
+		runningSessionIDs: map[string]bool{}, // authoritative PID scan: no live process
+	}
+	sessionID := fmt.Sprintf("ses-f8-unknown-%d-%d", time.Now().UnixNano(), os.Getpid())
+	mapped := map[string]interface{}{"id": sessionID}
+
+	out := handlers.enrichSessionStateWithAgent(mapped, agent)
+	if out["runtimeState"] != "unknown" {
+		t.Fatalf("runtimeState = %#v, want unknown (F-8: 查不到不谎报 idle)", out["runtimeState"])
+	}
+}
+
+// TestEnrichSessionStateWithAgent_ClaudeRunningStaysRunning is the F-8
+// counter-case for the detail path: a session present in the authoritative
+// running map must still report "running"; a live transcript tail must still
+// report its detected state (known states unchanged).
+func TestEnrichSessionStateWithAgent_ClaudeRunningStaysRunning(t *testing.T) {
+	handlers := newTestHandlers(t)
+	sessionID := "ses-f8-running"
+	agent := &fakeAgent{
+		name:              "claudecode",
+		runningSessionIDs: map[string]bool{sessionID: true},
+	}
+	out := handlers.enrichSessionStateWithAgent(map[string]interface{}{"id": sessionID}, agent)
+	if out["runtimeState"] != "running" {
+		t.Fatalf("runtimeState = %#v, want running", out["runtimeState"])
 	}
 }
