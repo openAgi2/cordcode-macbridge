@@ -1,109 +1,142 @@
 # DSH Driver 设计实现完成情况
 
-- **对象**：`docs/2026-08-13-dsh-driver-design.md`（v13，round12 APPROVE）
-- **日期**：2026-08-15
-- **分支**：MacBridge `dsh/driver`（9555562…a3f6b5d，9 commit）；iOS `dsh/driver`（4e51ef1…3bc597a，3 commit）
-- **执行队列**：`.exec-plan/state/plan-8ba00fc3460a.json`（5 phase / 18 todo 全部 proven done）
-- **验证基线**：DSH SDK 钉在 `47f943859bef60e4160492346772ded9b24f765a`，全程未 re-pin
+- **对象**：`docs/2026-08-13-dsh-driver-design.md`（v13，round12 APPROVE）+ 2026-08-15 owner 产品决策附记（探测形态指令 v2）
+- **日期**：2026-08-15（首版报告同日；本版为 p1–p7 终态收敛重写）
+- **分支**：MacBridge `dsh/driver`（9555562…2755a7f，16 commit）；iOS `dsh/driver`（4e51ef1、3bc597a，2 commit）
+- **执行队列**：`.exec-plan/state/plan-8ba00fc3460a.json`（7 phase / 24 todo 全部 proven done，hash e26aaed664a8）
+- **协议基线**：设计 pin `deepseek-harness@47f9438`（协议 serverInfo 0.0.1）；实测运行面为本机安装的 `@deepseek-ai/dsh@0.1.0-rc.6`（用户真实形态）。全程未 re-pin、未改动 checkout。
 
 ## 结论
 
-设计 v13 的十三个模块全部落地为生产代码：`agent/dsh` driver（进程/握手/codec/identity/scope/seq/lifecycle）、
-go-bridge 接线（attachment 两级 pre-check、DeliveryError 分类、CAS 淘汰、capability truth-source）、
-iOS `BackendKind.deepSeek`。§16 八类验收门槛全部有同批交付的自动化测试证据（下表）。
-**未执行**的验证只有：真实 DeepSeek key 端到端（按开工指令需 owner 明确授权）与 owner 真机人工验收矩阵（文末）。
+设计 v13 的十三个模块全部落地为生产代码；runtime 侧按 owner 指令 v2 收敛为**探测-复用-未启动**
+形态（探测用户已装 harness、复用其凭据、永不代装）。§16 八类验收门槛全部有同批交付的自动化
+测试证据；产品路径（用户全局 npm dsh + 影子树 + vendor SDK 层）在本机以 mock key 完整实测
+通过，正式版 App 日志实证 backend 注册。**未执行**项只剩：真实 DeepSeek key 的 turn（owner
+按文末矩阵在 iPhone 验收）。
+
+## 交付物总览
+
+| 层 | 内容 |
+|---|---|
+| `agent/dsh`（driver） | 进程/握手/codec（§3.3 映射、active-turn 状态机、identity 矩阵、source.kind 分流）；scope/lineage + seq/ignorable（§3.8/§3.10）；nonce/typed death/at-most-once（§3.6.3）；usage 公式 + chunk/assembled 双写 peer 校验（§3.7）；探测链 + 影子树 + 凭据链（指令 v2） |
+| `agent/dsh/vendor` | SDK stdio 层四包 rc.6（server/protocol/demo 胶水/agent-spine-demo），npm pack 原样 vendor（MIT），来源注明 |
+| `core` | `AttachmentSupporter` 接口、`DeliveryError{Stage}` typed 契约 |
+| `go-bridge` | attachment 两级 pre-StartSession 校验（`classifyAttachment` 单一规则）；handleSendMessage 交付分类 + CAS 淘汰；capability truth-source 同步（五 backend）；detectDSHRuntime 与 driver 共用探测；generic list `not_supported` 分支 |
+| iOS | `BackendKind.deepSeek`（wire kind `deepseek`）+ 10 文件 exhaustive switch 补齐 + 43/43 单测 + 真机安装回归 |
+| 产物 | `known-event-types.txt`（pin 44）+ `known-event-types-rc6.txt`（本机安装包实测 44）双清单，gen 脚本 `--package-source` 模式 |
+| 协议 | canonical `unified-bridge-protocol.md` attachments 章节（additive，无 wire 破坏）→ iOS mirror 同步 |
+
+## 产品形态终态（owner 指令 v2）
+
+**用户效果**：`npm i -g @deepseek-ai/dsh` + `dsh web` 存过 key → CordCode Link 的 DeepSeek
+直接可用，零额外安装/配置；未装任何形态 → backend 如实「未启动」。MacBridge 永不安装、
+编译、下载任何 runtime，永不要求 MacBridge 侧 key 配置。
+
+- **探测链**（probe-only，先命中先得）：① PATH `dsh-jsonrpc-agent`（用户显式安装）→
+  ② **用户全局 `@deepseek-ai/dsh`**（`npm root -g` 只读查询 + homebrew/usr-local/nvm/pnpm
+  已知根；dsh 与 dsh-app-boot 存在且 entry 可解析才命中，双版本进日志）→ ③ pip wheel
+  （`dsh-jsonrpc-agent-pkg-<plat>` + Python Resolution API，3s 有界）→ ④ nvm 最新版 bin →
+  ⑤ 源码 checkout 仅 `DSH_DEV_SOURCE_ROOT` 显式 opt-in（标注 dev-only，源码只是参考材料）。
+- **vendor SDK 层 + 影子树**（②的运行方式）：已安装 dsh@rc.6 的 61 依赖/194 嵌套包**不含**
+  dsh-sdk-jsonrpc-server/-protocol/-demo 与 dsh-agent-spine-demo（机器实测，见「事实修正」）——
+  四包 rc.6 vendor 入仓；driver 数据目录构建影子 node_modules：四包真实文件 + 其余 family
+  全量 symlink 到用户全局树（Node 默认 realpath 语义解析回用户已装版本）。spawn：
+  `node <shadow>/…/dsh-sdk-jsonrpc-demo/lib/bin.js` + `DSH_CORDIS_CONFIG`（上游 runner 官方
+  env 通道）；cwd/DSH_CWD/DSH_SESSION_ROOT/DSH_PERMISSION_MODE 注入沿用 driver 逻辑；
+  不写用户全局目录、`~/.dsh` 只读。
+- **凭据链**（镜像 DSH 自身信任序）：MacBridge provider key（显式）> `$DSH_HOME/
+  .credentials.yaml`（dsh Web UI Models 页写入的严格扁平映射，最小解析子集、flow 集合诚实
+  miss）> `$DSH_HOME/.env`；per-key 独立下落；自定义 `DSH_HOME` 转发子进程。注入走 env——
+  DSH 层级里 inherited env 本就第一，语义等价于 runtime 自解析。
+- **版本兼容边界**：vendor 胶水针对 rc.6 的 app-boot `boot()` 签名；用户 dsh 升级导致签名
+  漂移时 spawn fail-closed 呈现，不静默。
 
 ## §16 八类验收门槛逐项证据
 
-所有测试证据均为可复跑命令（attestation: re-verified——报告撰写时全部重新执行通过）。
+（attestation: re-verified——本报告撰写时全部重新执行通过）
 
 | # | 门槛 | 测试与证据 | 结果 |
 |---|---|---|---|
-| 1 | attachment matrix | `go-bridge/attachment_matrix_test.go` + `attachments_test.go`：valid file/image 逐 backend；`{kind:"file", mime:"image/png"}` mismatch fixture（实例化具体 subtype，round12 注意事项①）逐 backend——image-capable 走 image path（断言 images=1）、OC-server/grok/DSH 拒；malformed MIME 三例 + `image/*` 字面值 + 空 kind + 坏/空 base64 + mixed 全 backend `invalid_params`；**全部断言 pre-StartSession（agent.starts==0、零 Send）**。`cmd:go test ./go-bridge/ -run TestAttachmentMatrix -count=1` | ✅ PASS |
-| 2 | capability truth source | 机制半：`TestDeriveCapabilitiesIncludesAttachmentKinds`（derive 与 gate 同源）。真相半（in-package）：claude `image+file`、codex `image+file`、grok `[file]`、opencode 双模式 `[file image]`（CLI）/`[file]`（managed server）、DSH 不实现接口 + 静态能力无 image/file + Send sentinel `errors.Is`。`cmd:go test ./agent/{claudecode,codex,grokbuild,opencode,dsh}/ -run TestSupportedAttachmentKinds -count=1` | ✅ PASS |
-| 3 | seq fixture | `agent/dsh/scope_seq_test.go`：首帧 0 接受 / 首帧非 0（missing prefix）/ exact replay 幂等跳过（canonical 键序无关）/ conflicting duplicate / gap / 倒退 / 负数——后四者 fail visibly。`cmd:go test ./agent/dsh/ -run TestSeq -count=1` | ✅ PASS |
-| 4 | notification scope | `scope_seq_test.go` §3.8 冻结 11 场景：parent 内 child 完整 turn 零污染、child idle 不收口 parent、两级 descendant、foreign event/status 双双终止、self-loop/空 id/foreign parent/循环 started 拒绝注入、finished 缺 lastAssistantMessage 正常、finish 后迟到 child 仍 descendant（tombstone 不删）、grandchild 过滤、重复 started 幂等、child id reuse 重挂边、scope 路由先于 seq。`cmd:go test ./agent/dsh/ -run TestScope -count=1` | ✅ PASS |
-| 5 | delivery fault matrix | `agent/dsh/lifecycle_test.go`（python fake runtime 真子进程）：pre-write（死后 Send→StagePreWrite，ReplayAllowed）+ response lost（写完请求进程死→StageAwaitingResponse 禁重放）+ zero-byte/partial write 单元分类。`go-bridge/delivery_dsh_test.go`：PreWrite 修复一次（respawn 后恰好再发一次、Close 一次、registry 持新 session）、Awaiting 活 session 不重放不淘汰 / 死 session 淘汰供下一条、partial 不重放、plain error 行为不变。`cmd:go test ./agent/dsh/ ./go-bridge/ -run "TestDelivery|TestSendMessage" -count=1` | ✅ PASS |
-| 6 | process lifecycle | `TestLifecycleApplicationErrorKeepsSession`（合法 turn/end reason=error 只收口 turn、进程存活、下一 turn 可继续）；`TestLifecycleFramingViolationKillsProcess`（非 JSON 行→可见 terminal+进程死亡+单一 terminal）；`TestEvictSessionCAS*`（Close 恰好一次、stale 淘汰者无法误杀 replacement、16 并发 CAS 单 winner）；`TestAbortEvictsAndStaleEvictorCannotKillReplacement`（五场景 1）。`cmd:go test ./agent/dsh/ ./go-bridge/ -run "TestLifecycle|TestEvict|TestAbortEvicts" -count=1` | ✅ PASS |
-| 7 | reducer frozen samples | `go-bridge/dsh_pipeline_test.go`——**真实管线**：fake runtime 进程 → `dsh.New` → `handleSendMessage` → relayEvents → `mapAgentEvent` → EventPublisher → `ProjectionReducer.Snapshot`：user/assistant 同 turn（含 user part 文本断言）、plugin user/message 不入 timeline、turn mismatch 污染帧不落 timeline 且 turn 不 settled completed、双 spawn nonce 不冲突（各自 `p{nonce}-t1` 独立投影）。`cmd:go test ./go-bridge/ -run TestDSHReducerFrozenSamples -count=1` | ✅ PASS |
-| 8 | generator/protocol sync | `cmd:DSH_ROOT=~/Projects/deepseek-harness python3 scripts/dsh-gate0/gen-known-event-types.py` → `OK: source==artifact, 44 types; artifact SHA == DSH HEAD`（exit 0）。protocol pack：canonical `unified-bridge-protocol.md` 新增 attachments 两级校验章节（1abec61）→ iOS mirror 同步（3bc597a），双仓各自单独 commit。无 bridge-v1 破坏性变更（capability 字符串 additive，错误码均为既有 canonical code）。 | ✅ PASS |
+| 1 | attachment matrix | `go-bridge/attachment_matrix_test.go`+`attachments_test.go`：valid file/image 逐 backend；`{kind:"file",mime:"image/png"}` mismatch（实例化具体 subtype）逐 backend——image-capable 走 image path（断言 images=1）、OC-server/grok/DSH 拒；malformed MIME 三例+`image/*` 字面值+空 kind+坏/空 base64+mixed 全 backend `invalid_params`；**全部断言 pre-StartSession（starts=0 零 Send）** | ✅ PASS |
+| 2 | capability truth source | 机制半：derive 与 gate 同源测试；真相半（in-package）：claude/codex `image+file`、grok `[file]`、opencode 双模式 `[file,image]`/`[file]`、DSH 不实现接口+静态能力无 image/file+Send sentinel `errors.Is` | ✅ PASS |
+| 3 | seq fixture | `scope_seq_test.go`：首帧 0/首帧非 0（missing prefix）/exact replay 幂等（canonical 键序无关）/conflicting duplicate/gap/倒退/负数——后四者 fail visibly | ✅ PASS |
+| 4 | notification scope | 同文件 §3.8 冻结 11 场景：parent 内 child 完整 turn 零污染、child idle 不收口 parent、两级 descendant、foreign event/status 双终止、self-loop/空 id/foreign parent/循环 started 拒注入、finished 缺 lastAssistantMessage 正常、finish 后迟到 child 仍 descendant、grandchild、重复 started 幂等、id reuse 重挂、scope 先于 seq | ✅ PASS |
+| 5 | delivery fault matrix | driver：python fake runtime（pre-write/response lost/zero-byte/partial write 分类）；bridge：PreWrite 修复一次（respawn 后恰好再发一次、Close 一次、registry 持新 session）、Awaiting 活 session 不重放不淘汰/死 session 淘汰供下一条、partial 不重放、plain error 行为不变 | ✅ PASS |
+| 6 | process lifecycle | application error（turn/end reason=error）收口 turn 保留进程且下一 turn 可继续；framing 违例可见 terminal+进程死亡+单一 terminal；CAS Close 恰好一次/stale 淘汰者无法误杀 replacement/16 并发单 winner；abort 路径 | ✅ PASS |
+| 7 | reducer frozen samples | `dsh_pipeline_test.go` 真实管线（fake runtime 进程→`dsh.New`→handleSendMessage→relayEvents→mapAgentEvent→EventPublisher→ProjectionReducer Snapshot）：user/assistant 同 turn、plugin 不入 timeline、turn mismatch 污染帧不落 timeline 且不 settled、双 spawn nonce 不冲突 | ✅ PASS |
+| 8 | generator/protocol sync | 双清单 verify exit 0：pin 源（44 类+SHA 同源）+ 本机安装包 `--package-source`（44 类）；canonical protocol pack attachments 章节（1abec61）→ iOS mirror（3bc597a）；无 bridge-v1 破坏性变更 | ✅ PASS |
 
-## 实现范围与设计对齐
+## 两处事实修正（实测证据，偏离指令「已验证事实」，如实报备）
 
-- **§1-2/§3.0-3.3**：`agent/dsh`（events.go wire 类型、session.go 进程/握手/收据等待/Close 三阶段、codec.go §3.3 映射表逐行、内嵌 cordis.yml、env 经 `BuildAgentEnv` 注入五变量、进程组复用 grokbuild 模式）。
-- **§3.4**：session.status 只作 root 内部 liveness（Debug 日志），不发 core.Event、不投影 iOS、不替代 turn/end。
-- **§3.6.1/3.6.2**：active-turn 状态机（validate-then-map、嵌套 turn/step/终态后 user 全部 fail visibly）、identity 矩阵（TurnID=`p{nonce}-t{N}`、assistant ItemID==TurnID、user ItemID=data.id、tool=callId、control-plane 无 TurnID）、source.kind user/plugin/unknown 三分流。
-- **§3.6.3**：nonce 16 字节 CSPRNG（失败 fail-closed）于 spawn 前生成；错误二分（application 保留进程 / protocol violation 发 terminal+杀进程）；`core.DeliveryError{Stage}` 四级 typed 契约 + go-bridge `errors.As` 矩阵 + PreWrite pre-send repair 一次；`sessionRegistry.deleteIfSame` 对象身份 CAS + `evictSessionCAS` winner 锁外幂等 Close；abort 复用既有 delete+Close 路径。五场景由上述测试覆盖（#2/#3 在 fault-injection 中以 process-death 路径验证；#5 go-bridge 重启 = registry 空为结构事实）。
-- **§3.7**：usage 公式（UsedTokens=input+cacheRead、TotalTokens=UsedTokens、ContextWindow 独立、reasoning 子分）；chunk 为唯一 live owner；assembled（block-end/assistant/message/tool-call 参数/usage 双源）全部只校验不追加，不一致即 protocol violation。
-- **§3.8/§3.10**：scope router 三分路由 + lineage tombstone 保留到 teardown；seq 矩阵；ignorable 四级（只认字面 `true` marker；known-unimplemented/unknown 均 fail visibly，44-name 清单内嵌做诊断区分）。
-- **§3.9**：`classifyAttachment` 单一规则（effectiveKind=kind∨normalized mime，gate 与 split 共用）；两级 pre-StartSession 校验插入 `handleSendMessage` 与 `ocHandleSendMessage`；truth-source 按 driver×mode 正向声明（`core.AttachmentSupporter` 接口——比设计文本的「derive 传 mode 参数」更贴 §6.2 自描述先例，效果等价：gate 与 hello_ack 广告同源）；`attachment_too_large` 不产生（按设计不引入统一上限）。
-- **§4**：ListSessions 返 `core.ErrNotSupported`；generic list handler 加 `errors.Is` → `not_supported`（按文档注记的可选分支，已实现）。
-- **§8**：capability 照表——`LiveEventSessionProcess`、不要求外部 turn polling、`workspace_diff`（WorkDirSwitcher）、`diagnostics`（runtime/config/API key 三查）、`permission_mode`（三预设）、`model_switch`/`provider_switch`；不声明 `session_history`/`permission_resolve`/`supports_checkpoint`/`todos`/`usage_reporting`（后两者按设计 ⚠️ 条件未满足——FetchTodos 持久化读与跨 turn 聚合均未实现，诚实不声明）。
-- **§9-11/iOS**：`BackendKind.deepSeek`（wire kind `"deepseek"` 映射、不展示历史、不进 serverCreationCases、live event 流）；全部 exhaustive switch 补齐（10 个文件）；真机安装回归通过。
+1. **SDK stdio 层不在用户 dsh 闭包内**：指令事实 #2 称「全 family 闭包都在」——family 21 个
+   必需包确实全在全局树（含 schemastery/cordis），但 `dsh-sdk-jsonrpc-server`/`-protocol`/
+   `-demo`/`dsh-agent-spine-demo` 不在 dsh@0.1.0-rc.6 的 61 项依赖、194 个嵌套 @deepseek-ai
+   包中（已装 package.json 与目录双核对）。因此「vendor 启动器」扩展为 vendor 这四包——
+   这是对指令的唯一实现扩展，机制（vendor、复用全局树、零安装）完全在指令框架内。
+2. **rc.6 事件清单实测仍为 44 类**：指令事实 #4 预期 44→39（移除 tool-workflow×4 +
+   agent-preset/selected）；本机 rc.6 `dsh-session` 的 `KNOWN_SESSION_EVENT_TYPES` 实测
+   Set(44)（node 动态导入）且编译字面量 44 条（grep 双证据），五类仍在。两种结果对 driver
+   均无风险（③ 类清单为 44 全集，无 fail 误触发）；第二 artifact 以实测为准。
 
-## 实现中的裁量（设计文本之外的选择，均不违背冻结规则）
+## 实现裁量（设计/指令文本之外的选择，均不违背冻结规则）
 
-1. **`DeliveryError` 落在 `core/` 而非 `agent/dsh/`**：跨层 typed 契约（driver 返回→bridge 分类）对齐 `core.ErrNotSupported` 先例，且避免 go-bridge→agent/dsh 静态依赖。
-2. **attachment 声明用 `core.AttachmentSupporter` 接口**而非给 `deriveBackendCapabilities` 加 mode 参数：opencode 的 mode（httpBaseURL 有无）由 driver 自持，capability 与 gate 从同一接口派生，符合 §6.2「自描述优于 wire 分支」。
-3. **`turn/end` 无样本 reason（error/aborted/interrupted/blocked）映射为 turn_error 终态**（不伪造成功、不淘汰进程）：设计标 ⚪ deferred 无样本；按 fail-closed 哲学选择「可见失败收口」，属 application error 类。
-4. **rootSessionID 复用 bridge sessionID（非 pending- 前缀时）**：DSH 无 resume（`getOrCreateSession` 只查内存 map），复用 id 无副作用且免 rebind；`pending-`/空则生成 `dsh-{nonce前缀}`。
-5. **eager relay 淘汰未实现**：设计 §3.6.3④ 提及 eager+lazy 双路；实现为 lazy（pre-send repair）+abort 删除+idle cleanup，五场景全覆盖且 CAS 保证幂等——eager 属优化而非正确性要求。
+1. `DeliveryError` 落 `core/`（跨层 typed 契约，对齐 `ErrNotSupported` 先例）。
+2. attachment 声明用 `core.AttachmentSupporter` 接口（opencode 模式自持），capability 与 gate 同源。
+3. `turn/end` 无样本 reason（error/aborted/…）→ turn_error 收口不伪造成功、不淘汰进程。
+4. rootSessionID 复用 bridge sessionID（非 pending- 前缀时）；DSH 无 resume，无副作用。
+5. eager relay 淘汰未实现：lazy（pre-send repair）+abort+cleanup 已覆盖五场景，CAS 保证幂等。
+6. 影子树 symlink 而非复制 family（realpath 解析回用户版本；用户升级 dsh 后重启即生效）。
+
+## 演进与撤回记录（如实）
+
+- p6 曾按「自动搞定」实现 managed runtime（MacBridge 自行 `npm install` 钉版本项目）——owner
+  指令 v2 明确**禁止代装**后全数删除（`ensureRuntimeProject`/`npmInstallFunc`/runtime_dir
+  接线），并以 fake-npm + 源码 grep-lock 测试锁死「探测链永不安装」。设计文档附记已撤回相关表述。
+- 源码 checkout 曾进默认发现链（d9a9887）——v2 后移出，仅 `DSH_DEV_SOURCE_ROOT` opt-in。
 
 ## 验证边界（未执行项，如实标注）
 
-- **真实 DeepSeek key 端到端未执行**：按开工指令「真实 key 的 run 需 owner 明确授权，默认不碰」。所有协议行为由 gate0 冻结 dump fixture + fake runtime fault-injection 覆盖。
-- **owner 真机人工验收未执行**：需 owner 在 iPhone 上操作（超出本任务授权）。建议矩阵：
+- **真实 DeepSeek key 的 turn 未执行**：owner 授权事项；本机实测全部走 mock key（env 覆盖
+  凭据链，HTTP headers 实证 `Bearer dsh-conn-fake-key`，未触真实 API、未读真实 key 内容）。
+- **owner 真机验收矩阵未执行**（需 iPhone 操作，超出授权）：
 
 | # | 前提 | 动作 | 应看到 |
 |---|---|---|---|
-| 1 | Mac 安装 dsh-jsonrpc-agent（PATH 可达）+ 配置 DeepSeek provider key | 打开 CordCode Link | backend 列表出现 DeepSeek（status available） |
-| 2 | iPhone 已配对 | 选 DeepSeek → 发一条消息 | turn 正常流式（文字/思考/工具/todo），上下文用量有值 |
+| 1 | Mac 已 `npm i -g @deepseek-ai/dsh` 且 dsh Web UI 存过 key | 打开 CordCode Link | backend 列表出现 DeepSeek（available，来源 npm-global） |
+| 2 | iPhone 已配对 | 选 DeepSeek 发一条消息 | turn 正常流式（文字/思考/工具/todo），上下文用量有值 |
 | 3 | 同上 | turn 进行中 abort | 立即中断收口；再发一条正常（新进程新 nonce） |
-| 4 | 同上 | 发送带图片的消息 | 收到「不支持该附件类型」类错误（text-only） |
-| 5 | 未安装 runtime 的 Mac | 打开 CordCode Link | DeepSeek 不出现（日志有明确 not found，不伪造可用） |
+| 4 | 同上 | 发送带图片的消息 | 被拒「不支持该附件」（text-only，pre-StartSession） |
+| 5 | 未装任何 harness 形态的 Mac | 打开 CordCode Link | DeepSeek 不出现（「未启动」+获取指引，不伪造可用） |
 
-- **Release 构建/覆盖安装已执行**：`build-unsigned-release.sh` → `/Applications` 覆盖 → 重启；8777 监听者为正式版 App 内嵌 runtime（`-drivers …,deepseek`）、无临时产物残留。本机未装 `dsh-jsonrpc-agent`，runtime 日志如实记录 `failed to create agent: dsh: runtime not found in PATH`——backend fail-closed 跳过（与 grokbuild 缺失 grok CLI 行为一致），属预期。
+- Release 构建/覆盖安装已执行（BUILD SUCCEEDED → `/Applications` → 重启；8777 由正式版内嵌
+  runtime 监听、无临时产物残留）。生产日志实证 route②：`runtime via user-global npm dsh
+  dsh=0.1.0-rc.6 app-boot=0.1.0-rc.6` + `agent registered backendId=deepseek`。
 
-## 全量回归快照（2026-08-15）
+## 本机实测记录（2026-08-15，真实样本）
 
-- `go build ./...` ok；`go test ./go-bridge/... ./agent/... ./core/... ./transcriptindex/... -count=1` 全 ok（go-bridge 54.5s、agent/dsh 2.4s、四家既有 driver 全过）；`(cd relay-server && go test ./...)` ok。
-- iOS：`xcodebuild build` SUCCEEDED；`-only-testing:CCCodeTests/BridgeModelsTests` 43/43；真机安装+启动完成。
-- generator verify exit 0（44 类、SHA 与 DSH HEAD 同源）。
+- 环境：`/opt/homebrew/bin/dsh`（npm 全局 `@deepseek-ai/dsh@0.1.0-rc.6`）+
+  `~/.dsh/.credentials.yaml`（含 DEEPSEEK_API_KEY）。
+- **driver E2E（产品路径全事件面）**：`dsh.New`（探测命中②）→ StartSession（影子树构建+
+  node 拉起 vendor 胶水）→ Send → 完整 turn：`turn_started / user_message / text /
+  context_usage_updated / result(done)`，进程回收正常。
+- **协议级 census（手动驱动同 composition）**：initialize OK、prompt 收据、4 类 notification、
+  事件流与 §3.3 映射逐项一致（block-start/delta/block-end/usage/finish/message/step/turn_end
+  completed）；请求 headers 实证 env 凭据覆盖生效。
 
-## 附录：harness 探测（owner 产品决策指令 v2，2026-08-15 终态）
+## 全量回归快照（2026-08-15，报告撰写时重跑）
 
-**用户效果**：`npm i -g @deepseek-ai/dsh` + `dsh web` 存过 key → CordCode Link 的
-DeepSeek 直接可用（零额外安装/配置，MacBridge 永不代装）。未安装任何形态 → backend
-如实「未启动」。
+- `go build ./...` ok；`go test ./agent/dsh/... -count=1` ok（5.8s）；go-bridge 定向
+  （DSH/attachment/delivery/Evict/SendMessage/Seq/Scope/Lifecycle/classify）ok（2.4s）；
+  此前全量 `./go-bridge/... ./agent/... ./core/... ./transcriptindex/...` 13 包 ok +
+  `(cd relay-server && go test ./...)` ok。
+- 双清单 generator verify 双模式 exit 0。
+- iOS：`xcodebuild build` SUCCEEDED；`-only-testing:CCCodeTests/BridgeModelsTests` 43/43；
+  真机安装+启动完成（iPhone 16 Pro）。
 
-实现（d9a9887 之后的探测重构，见 git log）：
+## 证据索引（MacBridge dsh/driver 分支）
 
-- **探测链（probe-only）**：① PATH `dsh-jsonrpc-agent`（显式安装优先）→ ② 用户全局
-  `@deepseek-ai/dsh`（`npm root -g` 只读查询 + homebrew/usr-local/nvm/pnpm 已知根；
-  dsh+dsh-app-boot 存在且 entry 可解析才命中，双版本进日志）→ ③ pip wheel（pkg exe +
-  Python Resolution API，3s 有界）→ ④ nvm 最新 → ⑤ 源码仅 `DSH_DEV_SOURCE_ROOT`
-  opt-in（标注 dev-only）。全部未命中 → `AgentStatusNotDetected` 文案链不动。
-- **vendor SDK 层 + 影子树**：已安装 dsh@rc.6 的 61 依赖/194 嵌套包里没有
-  dsh-sdk-jsonrpc-server/-protocol/-demo/agent-spine-demo（机器实测，非猜测）——四包
-  rc.6 从 npm pack vendor 入仓（MIT，未修改，来源注明），driver 数据目录构建影子
-  node_modules：四包真实文件 + 其余 family 全量 symlink 到用户全局树（Node 默认
-  realpath 解析回用户已装版本）。spawn：`node <shadow>/…/dsh-sdk-jsonrpc-demo/lib/bin.js`
-  + `DSH_CORDIS_CONFIG`（上游 runner 官方 env 通道）；不写用户全局目录/DSH_HOME。
-- **禁止项（测试锁死）**：探测链零 npm install/npx/下载（fake-npm 被调 install 即
-  exit 99 + 源码 grep-lock）；`~/.dsh` 只读；无 MacBridge 侧 key 配置要求。
-  上一轮 managed runtime 安装代码全数删除。
-- **rc.6 实测（本机 = 真实样本）**：全局 dsh@0.1.0-rc.6 + `~/.dsh/.credentials.yaml`；
-  mock key（env 覆盖凭据链，headers 实证 Bearer fake）驱动 ② 路径完整 turn：
-  initialize/prompt 收据/4 类 notification/事件面全通（turn completed，事件与 §3.3
-  映射一致）。**清单实测修正**：安装包 rc.6 的 KNOWN_SESSION_EVENT_TYPES 仍为 44 类
-  （含 tool-workflow×4 + agent-preset/selected；node 导出与编译字面量双证据），与指令
-  预期的 39 不符——driver 的 ③ 类清单为 44 全集，两种结果均无 fail 误触发。第二
-  artifact `known-event-types-rc6.txt` + gen 脚本 `--package-source` 模式，双清单
-  verify exit 0。
-- **测试**：优先级 fixture（①>②>③>④、⑤ 仅 env opt-in、假全局树命中/缺失/entry 不可
-  解析诚实降级、版本解析）、影子树（vendor 真实文件+family symlink+幂等刷新+绝不写
-  全局树）、never-install 锁死、vendored 胶水完整性；driver 级 fault-injection 与
-  §16 门槛测试全部保持通过。
-
-真机验收矩阵第 1 行前提：**Mac 已 `npm i -g @deepseek-ai/dsh` 且在 dsh Web UI 存过
-key**（或装过 demo 包/wheel 任一形态）。
+`9555562` driver 骨架/codec/identity → `739ea1a` codec 测试 → `9dade9d` scope/seq/ignorable →
+`d2158a9` typed death/at-most-once/CAS → `5837fbe` attachment 全链+truth-source → `1abec61`
+canonical 协议章节 → `af46f3e` usage/双写+门槛7 → `c71c692` Mac App drivers 默认 →
+`a90b75a`/`d9a9887` 发现形态（后被 v2 收编/降级）→ `2755a7f` 探测-复用终态+vendor 影子树。
+iOS：`4e51ef1` BackendKind.deepSeek、`3bc597a` protocol mirror。
