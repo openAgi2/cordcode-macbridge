@@ -72,7 +72,11 @@ for line in sys.stdin:
             sys.stdout.write("this is not json\n")
             sys.stdout.flush()
         else:
+            ev("request/context", {"provider": "deepseek-official", "model": "deepseek-chat", "contextWindow": 1000000})
+            ev("assistant/chunk", {"turn": 1, "step": 1, "chunk": {"type": "block-start", "index": 0, "blockType": "text"}})
             ev("assistant/chunk", {"turn": 1, "step": 1, "chunk": {"type": "text-delta", "index": 0, "text": "hi"}})
+            ev("assistant/chunk", {"turn": 1, "step": 1, "chunk": {"type": "block-end", "index": 0, "block": {"type": "text", "text": "hi"}}})
+            ev("assistant/chunk", {"turn": 1, "step": 1, "chunk": {"type": "usage", "usage": {"inputTokens": 20, "outputTokens": 3, "cacheReadTokens": 100, "reasoningTokens": 0}}})
             ev("step/end", {"turn": 1, "step": 1})
             ev("turn/end", {"turn": 1, "reason": {"kind": "completed"}})
         notify("session.status", {"sessionId": sid, "status": "idle"})

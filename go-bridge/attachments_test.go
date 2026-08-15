@@ -6,9 +6,9 @@ import (
 	"testing"
 )
 
-func pngB64() string  { return base64.StdEncoding.EncodeToString([]byte{0x89, 0x50, 0x4E, 0x47}) }
-func pdfB64() string  { return base64.StdEncoding.EncodeToString([]byte{0x25, 0x50, 0x44, 0x46}) }
-func anyB64() string  { return base64.StdEncoding.EncodeToString([]byte{0x1, 0x2}) }
+func pngB64() string { return base64.StdEncoding.EncodeToString([]byte{0x89, 0x50, 0x4E, 0x47}) }
+func pdfB64() string { return base64.StdEncoding.EncodeToString([]byte{0x25, 0x50, 0x44, 0x46}) }
+func anyB64() string { return base64.StdEncoding.EncodeToString([]byte{0x1, 0x2}) }
 
 func TestSplitAttachments_ImageAndFile(t *testing.T) {
 	inputs := []AttachmentInput{
@@ -83,13 +83,13 @@ func TestClassifyAttachmentSingleRule(t *testing.T) {
 		kind, mime, want string
 	}{
 		{"image", "image/png", "image"},
-		{"image", "text/plain", "image"},               // kind wins
-		{"file", "image/png", "image"},                 // mime prefix wins (round11 fixture)
+		{"image", "text/plain", "image"}, // kind wins
+		{"file", "image/png", "image"},   // mime prefix wins (round11 fixture)
 		{"file", "application/pdf", "file"},
-		{"file", "IMAGE/PNG", "image"},                 // normalized mime prefix
-		{"", "image/jpeg", "image"},                    // legacy lenient shape
+		{"file", "IMAGE/PNG", "image"}, // normalized mime prefix
+		{"", "image/jpeg", "image"},    // legacy lenient shape
 		{"", "text/csv", "file"},
-		{"file", "  image/png  ", "image"},             // trimmed
+		{"file", "  image/png  ", "image"}, // trimmed
 	}
 	for _, tc := range cases {
 		got := classifyAttachment(AttachmentInput{Kind: tc.kind, Mime: tc.mime})

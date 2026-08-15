@@ -81,6 +81,32 @@ type dshCodec struct {
 	lastAcceptedCanonical string
 	// sawFirstSeq records whether any root event has been accepted yet.
 	sawFirstSeq bool
+
+	// ── chunk/assembled peer state (§3.7 唯一 owner + peer 校验) ──
+	// Live text/reasoning is owned by chunk deltas; block-end blocks and the
+	// assembled assistant/message are VALIDATED against the accumulated
+	// deltas (the gate0 sanitizer's peer assertions, internalized). A
+	// mismatch is protocol drift — fail visibly, never re-source content from
+	// the assembled copy.
+	openBlocks map[int]*dshBlockAccum
+	// stepText/stepReasoning accumulate the CLOSED blocks of the active step
+	// for the assistant/message comparison.
+	stepText      strings.Builder
+	stepReasoning strings.Builder
+	// toolArgsAccum accumulates argumentsDelta per callId; tool/call and
+	// block-end(tool-call) must agree with it when deltas were observed.
+	toolArgsAccum map[string]string
+}
+
+// dshBlockAccum tracks one open assistant block (by chunk index): its type
+// and the concatenated delta payloads. block-end must reproduce the same
+// content — assembled copies validate, they never re-source.
+type dshBlockAccum struct {
+	blockType string
+	text      strings.Builder
+	toolID    string
+	toolArgs  strings.Builder
+	hasDelta  bool
 }
 
 func newCodec(nonce string) *dshCodec {
@@ -89,6 +115,35 @@ func newCodec(nonce string) *dshCodec {
 		activeTurn:    noTurn,
 		activeStep:    noStep,
 		toolCallNames: make(map[string]string),
+		openBlocks:    make(map[int]*dshBlockAccum),
+		toolArgsAccum: make(map[string]string),
+	}
+}
+
+// resetStepPeerState clears the per-step assembled-comparison accumulators.
+func (c *dshCodec) resetStepPeerState() {
+	c.openBlocks = make(map[int]*dshBlockAccum)
+	c.stepText.Reset()
+	c.stepReasoning.Reset()
+}
+
+// contextUsageEvent builds the §3.7 pressure projection from one usage
+// snapshot: UsedTokens = inputTokens + cacheReadTokens (DSH inputTokens does
+// NOT include cache hits), TotalTokens = UsedTokens (filling contextWindow
+// there would fabricate a "window full"), ContextWindow from request/context.
+func contextUsageEvent(u *dshUsage, window int) core.Event {
+	used := u.InputTokens + u.CacheReadTokens
+	return core.Event{
+		Type: core.EventContextUsageUpdated,
+		ContextUsage: &core.ContextUsage{
+			InputTokens:           u.InputTokens,
+			CachedInputTokens:     u.CacheReadTokens,
+			OutputTokens:          u.OutputTokens,
+			ReasoningOutputTokens: u.ReasoningTokens,
+			UsedTokens:            used,
+			TotalTokens:           used,
+			ContextWindow:         window,
+		},
 	}
 }
 
@@ -264,6 +319,8 @@ func (c *dshCodec) applyTurnStart(env *dshEvent) ([]core.Event, error) {
 	c.activeTurnID = fmt.Sprintf("p%s-t%d", c.nonce, d.Turn)
 	c.activeStep = noStep
 	c.lastUsage = nil
+	c.resetStepPeerState()
+	c.toolArgsAccum = make(map[string]string)
 	return []core.Event{{Type: core.EventTurnStarted, TurnID: c.activeTurnID}}, nil
 }
 
@@ -311,6 +368,8 @@ func (c *dshCodec) applyTurnEnd(env *dshEvent) ([]core.Event, error) {
 	c.activeStep = noStep
 	c.activeTurnID = ""
 	c.lastUsage = nil
+	c.resetStepPeerState()
+	c.toolArgsAccum = make(map[string]string)
 	return []core.Event{ev}, nil
 }
 
@@ -335,6 +394,7 @@ func (c *dshCodec) applyStepStart(env *dshEvent) ([]core.Event, error) {
 		return nil, protocolViolationf("nested step/start (seq %d): step %d still open", env.Seq, c.activeStep)
 	}
 	c.activeStep = d.Step
+	c.resetStepPeerState()
 	return nil, nil
 }
 
@@ -348,6 +408,9 @@ func (c *dshCodec) applyStepEnd(env *dshEvent) ([]core.Event, error) {
 	}
 	if err := c.validateActiveTurnStep("step/end", env.Seq, d.Turn, d.Step); err != nil {
 		return nil, err
+	}
+	if len(c.openBlocks) != 0 {
+		return nil, protocolViolationf("step/end (seq %d) with %d unclosed assistant block(s)", env.Seq, len(c.openBlocks))
 	}
 	c.activeStep = noStep
 	return nil, nil
@@ -444,8 +507,13 @@ func (c *dshCodec) applyAssistantChunk(env *dshEvent) ([]core.Event, error) {
 	case "block-start":
 		switch d.Chunk.BlockType {
 		case "text", "reasoning", "tool-call":
-			// Internal block boundary; phase 1 merges naturally (core.Event
-			// has no newPart — §3.6.1).
+			// Internal block boundary; merged naturally (core.Event has no
+			// newPart — §3.6.1). The opened block accumulates its deltas for
+			// the block-end peer check.
+			if _, exists := c.openBlocks[d.Chunk.Index]; exists {
+				return nil, protocolViolationf("assistant/chunk block-start (seq %d) reopens index %d", env.Seq, d.Chunk.Index)
+			}
+			c.openBlocks[d.Chunk.Index] = &dshBlockAccum{blockType: d.Chunk.BlockType}
 			return nil, nil
 		default:
 			return nil, protocolViolationf("assistant/chunk block-start (seq %d) unknown blockType %q", env.Seq, d.Chunk.BlockType)
@@ -453,6 +521,11 @@ func (c *dshCodec) applyAssistantChunk(env *dshEvent) ([]core.Event, error) {
 
 	case "text-delta":
 		// Live text owner is the chunk delta (§3.7). ItemID == TurnID.
+		accum := c.openBlocks[d.Chunk.Index]
+		if accum == nil || accum.blockType != "text" {
+			return nil, protocolViolationf("assistant/chunk text-delta (seq %d) outside an open text block (index %d)", env.Seq, d.Chunk.Index)
+		}
+		accum.text.WriteString(d.Chunk.Text)
 		return []core.Event{{
 			Type:    core.EventText,
 			Content: d.Chunk.Text,
@@ -461,6 +534,11 @@ func (c *dshCodec) applyAssistantChunk(env *dshEvent) ([]core.Event, error) {
 		}}, nil
 
 	case "reasoning-delta":
+		accum := c.openBlocks[d.Chunk.Index]
+		if accum == nil || accum.blockType != "reasoning" {
+			return nil, protocolViolationf("assistant/chunk reasoning-delta (seq %d) outside an open reasoning block (index %d)", env.Seq, d.Chunk.Index)
+		}
+		accum.text.WriteString(d.Chunk.Text)
 		return []core.Event{{
 			Type:    core.EventThinking,
 			Content: d.Chunk.Text,
@@ -469,16 +547,52 @@ func (c *dshCodec) applyAssistantChunk(env *dshEvent) ([]core.Event, error) {
 		}}, nil
 
 	case "tool-call-delta":
-		// Assemble-only: the tool start owner is tool/call (§3.7). Track the
-		// name for result attribution.
+		// Assemble-only: the tool start owner is tool/call (§3.7). Deltas
+		// accumulate per callId for the block-end/tool-call peer check.
+		accum := c.openBlocks[d.Chunk.Index]
+		if accum == nil || accum.blockType != "tool-call" {
+			return nil, protocolViolationf("assistant/chunk tool-call-delta (seq %d) outside an open tool-call block (index %d)", env.Seq, d.Chunk.Index)
+		}
 		if d.Chunk.ID != "" && d.Chunk.Name != "" {
 			c.toolCallNames[d.Chunk.ID] = d.Chunk.Name
+		}
+		if d.Chunk.ID != "" {
+			accum.toolID = d.Chunk.ID
+			accum.hasDelta = true
+			accum.toolArgs.WriteString(d.Chunk.ArgumentsDelta)
+			c.toolArgsAccum[d.Chunk.ID] += d.Chunk.ArgumentsDelta
 		}
 		return nil, nil
 
 	case "block-end":
-		if d.Chunk.Block != nil && d.Chunk.Block.Type == "tool-call" && d.Chunk.Block.ID != "" && d.Chunk.Block.Name != "" {
-			c.toolCallNames[d.Chunk.Block.ID] = d.Chunk.Block.Name
+		accum := c.openBlocks[d.Chunk.Index]
+		if accum == nil {
+			return nil, protocolViolationf("assistant/chunk block-end (seq %d) without open block (index %d)", env.Seq, d.Chunk.Index)
+		}
+		delete(c.openBlocks, d.Chunk.Index)
+		if d.Chunk.Block == nil || d.Chunk.Block.Type != accum.blockType {
+			return nil, protocolViolationf("assistant/chunk block-end (seq %d) block type mismatch (open %q)", env.Seq, accum.blockType)
+		}
+		switch accum.blockType {
+		case "text":
+			if d.Chunk.Block.Text != accum.text.String() {
+				return nil, protocolViolationf("text block-end (seq %d) disagrees with accumulated deltas", env.Seq)
+			}
+			c.stepText.WriteString(d.Chunk.Block.Text)
+		case "reasoning":
+			if d.Chunk.Block.Text != accum.text.String() {
+				return nil, protocolViolationf("reasoning block-end (seq %d) disagrees with accumulated deltas", env.Seq)
+			}
+			c.stepReasoning.WriteString(d.Chunk.Block.Text)
+		case "tool-call":
+			if d.Chunk.Block.ID != "" && d.Chunk.Block.Name != "" {
+				c.toolCallNames[d.Chunk.Block.ID] = d.Chunk.Block.Name
+			}
+			if accum.hasDelta && d.Chunk.Block.ID != "" {
+				if assembled, ok := c.toolArgsAccum[d.Chunk.Block.ID]; ok && assembled != d.Chunk.Block.Arguments {
+					return nil, protocolViolationf("tool-call block-end (seq %d) arguments disagree with accumulated deltas", env.Seq)
+				}
+			}
 		}
 		return nil, nil
 
@@ -488,7 +602,9 @@ func (c *dshCodec) applyAssistantChunk(env *dshEvent) ([]core.Event, error) {
 		}
 		u := *d.Chunk.Usage
 		c.lastUsage = &u
-		return nil, nil
+		// Current-session pressure of the most recent request (§3.7): not a
+		// cross-step accumulation.
+		return []core.Event{contextUsageEvent(&u, c.contextWindow)}, nil
 
 	case "finish":
 		// Step-internal finish boundary (stop / tool-calls / max-tokens are
@@ -501,17 +617,55 @@ func (c *dshCodec) applyAssistantChunk(env *dshEvent) ([]core.Event, error) {
 }
 
 // applyAssistantMessage — assembled message: validate only, never append
-// (§3.7: live text/reasoning owner is the chunk delta path).
+// (§3.7: live text/reasoning owner is the chunk delta path). The assembled
+// content and usage must agree with what the chunk stream produced; a
+// disagreement is protocol drift (fail visibly), and content is NEVER
+// re-sourced from the assembled copy.
 func (c *dshCodec) applyAssistantMessage(env *dshEvent) ([]core.Event, error) {
 	var d struct {
-		Turn int `json:"turn"`
-		Step int `json:"step"`
+		Turn    int `json:"turn"`
+		Step    int `json:"step"`
+		Message struct {
+			Content []struct {
+				Type      string `json:"type"`
+				Text      string `json:"text"`
+				ID        string `json:"id"`
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			} `json:"content"`
+		} `json:"message"`
+		Usage *dshUsage `json:"usage"`
 	}
 	if err := decodeData(env, &d); err != nil {
 		return nil, err
 	}
 	if err := c.validateActiveTurnStep("assistant/message", env.Seq, d.Turn, d.Step); err != nil {
 		return nil, err
+	}
+
+	var text, reasoning strings.Builder
+	for _, blk := range d.Message.Content {
+		switch blk.Type {
+		case "text":
+			text.WriteString(blk.Text)
+		case "reasoning":
+			reasoning.WriteString(blk.Text)
+		case "tool-call":
+			// Tool-call blocks in the assembled message must also agree with
+			// the accumulated deltas when deltas were observed.
+			if assembled, ok := c.toolArgsAccum[blk.ID]; ok && assembled != blk.Arguments {
+				return nil, protocolViolationf("assistant/message (seq %d) tool-call arguments disagree with accumulated deltas", env.Seq)
+			}
+		}
+	}
+	if text.String() != c.stepText.String() {
+		return nil, protocolViolationf("assistant/message (seq %d) text disagrees with chunk deltas", env.Seq)
+	}
+	if reasoning.String() != c.stepReasoning.String() {
+		return nil, protocolViolationf("assistant/message (seq %d) reasoning disagrees with chunk deltas", env.Seq)
+	}
+	if d.Usage != nil && c.lastUsage != nil && *d.Usage != *c.lastUsage {
+		return nil, protocolViolationf("assistant/message (seq %d) usage disagrees with the chunk usage source", env.Seq)
 	}
 	return nil, nil
 }
@@ -532,6 +686,9 @@ func (c *dshCodec) applyToolCall(env *dshEvent) ([]core.Event, error) {
 	}
 	if d.CallID == "" {
 		return nil, protocolViolationf("tool/call (seq %d) missing callId", env.Seq)
+	}
+	if assembled, ok := c.toolArgsAccum[d.CallID]; ok && assembled != d.Arguments {
+		return nil, protocolViolationf("tool/call (seq %d) arguments disagree with accumulated deltas", env.Seq)
 	}
 	c.toolCallNames[d.CallID] = d.Name
 	return []core.Event{{

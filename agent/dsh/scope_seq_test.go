@@ -178,11 +178,15 @@ func TestScopeChildTurnDoesNotPolluteRoot(t *testing.T) {
 		Provider: "spawn", AgentID: child, ParentSessionID: root, ChildSessionID: child,
 		Status: "ok", StopReason: "completed"}))
 
-	// Parent turn continues and closes normally.
+	// Parent turn continues and closes normally (real-wire block discipline).
 	s.handleNotification(rootEvent(t, root, 3, "assistant/chunk",
+		`{"turn":1,"step":1,"chunk":{"type":"block-start","index":0,"blockType":"text"}}`))
+	s.handleNotification(rootEvent(t, root, 4, "assistant/chunk",
 		`{"turn":1,"step":1,"chunk":{"type":"text-delta","index":0,"text":"parent text"}}`))
-	s.handleNotification(rootEvent(t, root, 4, "step/end", `{"turn":1,"step":1}`))
-	s.handleNotification(rootEvent(t, root, 5, "turn/end", `{"turn":1,"reason":{"kind":"completed"}}`))
+	s.handleNotification(rootEvent(t, root, 5, "assistant/chunk",
+		`{"turn":1,"step":1,"chunk":{"type":"block-end","index":0,"block":{"type":"text","text":"parent text"}}}`))
+	s.handleNotification(rootEvent(t, root, 6, "step/end", `{"turn":1,"step":1}`))
+	s.handleNotification(rootEvent(t, root, 7, "turn/end", `{"turn":1,"reason":{"kind":"completed"}}`))
 
 	evs := drainEvents(s)
 	var texts, users []core.Event
