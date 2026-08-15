@@ -4,7 +4,8 @@
 - **Runtime**：DeepSeek Harness `dsh-jsonrpc-agent`（pinned `47f943859bef60e4160492346772ded9b24f765a`，协议 `0.0.1`，pre-release）
 - **协议**：DSH SDK JSON-RPC 2.0 over stdio（**非** ACP），3 requests + 4 notifications（§3.0）
 - **证据**：`scripts/dsh-gate0/`（4 次真实 run + assembled composition + sanitizer 带 peer 断言）
-- **审计**：round1-4（`docs/2026-08-13-dsh-driver-design-audit-round{1,2,3,4}.md`）、round5/6（`docs/2026-08-1{3,4}-dsh-driver-design-audit-round{5,6}.md`）、round7-11（`docs/2026-08-14-dsh-driver-design-audit-round{7,8,9,10,11}.md`）、round12 APPROVE（`docs/2026-08-14-dsh-driver-design-audit-round12.md`）
+- **审计**：round1-12 共 12 份，全部存于**相邻 iOS 仓** `../cordcode-ios/docs/`（本仓 docs/ 无副本；跨仓阅读时路径相对本仓根目录解析）：round1=`2026-08-13-dsh-driver-design-audit.md`、round2-5=`2026-08-13-dsh-driver-design-audit-round{2,3,4,5}.md`、round6-11=`2026-08-14-dsh-driver-design-audit-round{6,…,11}.md`、round12 **APPROVE**=`2026-08-14-dsh-driver-design-audit-round12.md`
+- **复核**（2026-08-15，定稿后两仓代码更新后重验）：round12（`2edb59b`）之后 MacBridge 的 8 个 commit（grokbuild/opencode 修复、F-7/F-8、冷 hydrate seal、turn_error/turn_aborted producer 入册 canonical——与本文终态设计同向）及 iOS 侧 remote-web/渲染器/PWA 收尾均未触碰本文设计锚点；接口/seam/registry·CAS/reducer identity/core 事件面/六条 driver 附件路径全部重验成立；DSH 本地 checkout 仍在 pin `47f9438`，`gen-known-event-types.py` verify exit 0。**行号漂移**：正文少量引用行号已位移（`attachments.go` isImage 41→32、`clearRelayKindIf` 定义 →`handlers_relay.go:2427`、`errors.Is(ErrNotSupported)` 先例 →`:1433/:1607`、`handleSendMessage` →`:1952` 起、`core/message.go:527` title 注释位次变化），语义全部完好——**实现时按符号 grep 定位，行号以 round12 定稿快照为准**
 
 ---
 
@@ -435,7 +436,7 @@ Close 三阶段；正常 `shutdown→{}` 🟢，SIGTERM/SIGKILL ⚪。错误 →
 
 ## 9-11. protocol / 文件 / 三仓
 
-无 bridge-v1 change（除非 turn 内多 message，§3.6）。driver `config/cordis.yml`=`scripts/dsh-gate0/driver-cordis.yml`。go-bridge `BuildAgentEnv` 注入 `DSH_PERMISSION_MODE`；iOS `BackendKind.deepSeek`，不展示历史。
+无 bridge-v1 change（除非 turn 内多 message，§3.6）。driver `config/cordis.yml`=`scripts/dsh-gate0/driver-cordis.yml`。`BuildAgentEnv`（`core/message.go:134`，core 包、非 go-bridge 目录）注入 `DSH_PERMISSION_MODE`；iOS 侧为**待实施项**：`BackendKind`（iOS 仓 `OpenCodeiOS/OpenCodeiOS/Services/Backend/BackendModels.swift`）现有 case 为 openCode/codex/claudeCode/copilot/thinBridge/grokBuild，**不含且历史上从未有过** `deepSeek`——实现时需**新增** `case deepSeek`（含 wire kind 字符串映射）并保持不展示历史。
 
 ---
 
