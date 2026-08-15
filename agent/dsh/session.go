@@ -27,8 +27,8 @@ import (
 var _ core.AgentSession = (*dshSession)(nil)
 
 const (
-	eventsBufferSize = 256
-	stdoutLineLimit  = 8 << 20 // match gate0: envelopes with big request/header payloads
+	eventsBufferSize  = 256
+	stdoutLineLimit   = 8 << 20 // match gate0: envelopes with big request/header payloads
 	promptReceiptWait = 60 * time.Second
 	initializeWait    = 90 * time.Second
 	gracefulStopWait  = 8 * time.Second
@@ -165,9 +165,9 @@ func newDshSession(ctx context.Context, agent *Agent, sessionID string) (*dshSes
 		s.alive.Store(false)
 		if waitErr != nil && !s.terminalDone.Load() {
 			s.emit(core.Event{
-				Type:    core.EventError,
-				Error:   fmt.Errorf("dsh process exited: %v", waitErr),
-				Done:    true,
+				Type:  core.EventError,
+				Error: fmt.Errorf("dsh process exited: %v", waitErr),
+				Done:  true,
 			})
 		}
 		s.closeEvents()
