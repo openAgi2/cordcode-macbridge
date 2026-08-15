@@ -8,7 +8,7 @@
 
 ## [Unreleased]
 
-- **修复：切到 DeepSeek 模式会话列表直出错误文案**：live-only 后端（无历史列表）此前把 wire 的 not_supported 原样渲染成「会话加载失败」横幅。现在列表直接呈现空态与一句提示（实时模式：直接发消息开始新对话，无历史列表），且不再对该后端发起任何会话列表请求；同时新增通用兜底——任何后端的列表请求返回 not_supported 都显示空态而非错误（其他真实错误仍正常报错，不掩盖故障）。
+- **修复：切到 DeepSeek 模式会话列表直出错误文案**：live-only 后端（无历史列表）此前把 wire 的 not_supported 原样渲染成「会话加载失败」横幅。现在列表直接呈现空态与一句提示（实时模式：直接发消息开始新会话，无历史列表），且不再对该后端发起任何会话列表请求；三处隐藏入口（会话目录补全扫描、目录加载 list_projects、查看更多分页）一并门控；同时新增通用兜底——任何后端的列表请求返回 not_supported 都显示空态而非错误（其他真实错误仍正常报错，不掩盖故障）。
 
 - **装了 DeepSeek Harness 即零配置可用（探测-复用，永不代装）**：CordCode Link 只探测用户已装的 DeepSeek Harness——`npm i -g @deepseek-ai/dsh` 是第一公民（SDK stdio 层由 MacBridge 内置 vendor，运行时经影子 node_modules 复用你全局安装的 runtime 全家桶，不安装/不下载/不碰你的全局目录），PATH 上的 `dsh-jsonrpc-agent`、pip wheel、nvm 同样支持；DeepSeek key 直接沿用 `dsh` Web UI 存好的凭据（`~/.dsh/.credentials.yaml`，或 `~/.dsh/.env`），MacBridge 显式 provider 配置仍最优先。未装任何形态时 backend 如实显示未启动。诊断面板显示 runtime 与凭据来源。
 - **新增 DeepSeek Harness（DSH）backend（设计 v13 / round12 APPROVE 全量落地）**：CordCode Link 新增 `deepseek` backend，桥接 `dsh-jsonrpc-agent` stdio JSON-RPC runtime（每 session 一进程、进程组回收）。事件面完整映射 turn/step/user/assistant chunk/tool/todo/usage；`user/message` 按 `source.kind` 分流（权限运行时上下文不再覆盖真实 prompt）；TurnID 携带每进程 128-bit nonce，进程重启永不串轴；seq 完整性 fail-closed（首帧必须 0、gap/倒退/冲突重复即终止）；subagent/foreign session 通知按 lineage tombstone 路由（迟到 child 事件不误杀）；错误二分——模型/turn 级错误只收口 turn 保留进程，协议损坏先发可见 terminal 再淘汰进程；at-most-once 交付（只有可证明未送达的 pre-write 允许重建后发送一次，其余 fail visibly 不重放）。live-only：无 session 列表/历史（list 返回 `not_supported`）；一期 text-only。要求 Mac 安装 `dsh-jsonrpc-agent`（缺失时该 backend 如实不出现）。

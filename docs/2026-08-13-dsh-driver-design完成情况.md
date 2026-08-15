@@ -135,14 +135,34 @@ listing」错误横幅（独立审计 e701ecc 定性为阻断：live-only 列表
 - **通用兜底**：列表 RPC 收到 wire `not_supported` → 空态而非错误横幅（保护未来
   live-only backend 与遗漏路径）；其他错误码（`list_failed` 等）仍 fail visibly 走
   错误横幅（对照测试锁定，不掩盖真实故障）；
-- **空态文案**：侧栏显示「此对话后端为实时模式：没有历史会话列表，直接发送消息即可
-  开始新对话」而非「暂无会话」；
+- **空态文案**：侧栏显示「实时模式：直接发消息开始新会话，无历史列表」而非「暂无会话」
+  （初版文案较长，2026-08-15 按 owner 指令对齐为现文案）；
 - **go-bridge 无改动**（审计确认其 not_supported 行为正确）；
 - **测试**：`LiveOnlySessionListTests` 4 用例全过（deepSeek 零 RPC 空态 / 语义仅
   deepSeek / not_supported→空态 / list_failed 仍报错）；受影响套件
   （ColdCache/AutoRefresh/BridgeModels）50/50；真机安装+启动完成（fa371a3）。
 - **验收行（审计 §8 补充）**：切到 DeepSeek 模式 → 列表空态提示、无错误横幅、
   MacBridge 日志无 list_sessions RPC——待 owner 真机复核。
+
+### §8 补充修复：隐藏 list 入口门控（2026-08-15，owner 止损指令复核发现）
+
+owner 止损指令（终止「读 ~/.dsh 磁盘会话」调查方向，重申 §4 live-only 冻结）后，
+按「所有列表入口」逐点复核 iOS 侧 list RPC 触达面，发现三处被主列表短路掩盖的
+隐藏入口并全部门控（iOS 仓 dsh/driver）：
+
+- **目录补全扫描**：`resolveSessionDirectoryIfNeeded` 在目录未知时回退
+  `getSession` + `fetchProjects` + 逐项目 `fetchSessions` 扫描——deepSeek 新建
+  会话未选目录时 directory 为空必然触达（create 响应 directory 仅在 iOS 显式
+  传入时回传）。live-only 后端目录只认本地缓存，缓存缺失直接跳过远程补全，
+  目录保持缺失、会话照常收发；
+- **目录加载**：`loadProjectDirectories` 的 `fetchProjects`（list_projects）对
+  live-only 后端恒回 not_supported，不再发 RPC，本地目录服务合并与默认目录建议
+  保持可用；
+- **查看更多分页**：`fetchDirectorySessionPage` 增 live-only 防御性拒绝（实际
+  不可达，防未来入口复发）；
+- **测试**：`LiveOnlySessionListTests` 增第 5 用例（目录补全零
+  get_session/list_projects/list RPC、目录不伪造）；stub 增
+  getSession/fetchProjects 计数器；全套件 5/5 + 受影响套件回归全绿。
 
 ## 全量回归快照（2026-08-15，报告撰写时重跑）
 
