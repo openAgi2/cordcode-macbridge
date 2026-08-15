@@ -69,3 +69,30 @@ iOS `BackendKind.deepSeek`。§16 八类验收门槛全部有同批交付的自�
 - `go build ./...` ok；`go test ./go-bridge/... ./agent/... ./core/... ./transcriptindex/... -count=1` 全 ok（go-bridge 54.5s、agent/dsh 2.4s、四家既有 driver 全过）；`(cd relay-server && go test ./...)` ok。
 - iOS：`xcodebuild build` SUCCEEDED；`-only-testing:CCCodeTests/BridgeModelsTests` 43/43；真机安装+启动完成。
 - generator verify exit 0（44 类、SHA 与 DSH HEAD 同源）。
+
+## 附录：harness 自动发现（owner 产品反馈，2026-08-15 追加）
+
+owner 指出「用户 mac 装了 DeepSeek Harness 后，MacBridge 应自动搞定 runtime 发现与 key」。
+已落地（a90b75a + 测试）：
+
+- **runtime 多路探测**：`agent/dsh/discovery.go` `DiscoverRuntime()`——PATH `dsh-jsonrpc-agent`
+  → PATH `dsh-jsonrpc-agent-pkg-<plat>`（官方 Python wheel `deepseek-harness-runtime-bin` 的
+  单文件可执行名；platforms.json 映射 darwin/arm64→macos-arm64 等）→ nvm 最新版 bin →
+  `python3 -c 'import deepseek_harness_runtime; print(bundled_runtime_path())'`（官方
+  Resolution API，含 macOS `-spawn-helper` 完整性校验，3s 有界）。`New` 与
+  `detectDSHRuntime` 共用同一函数——hello_ack 状态与 StartSession spawn 目标永远一致。
+  Mac App `cliSearchPath` 增 pnpm/volta/npm-global 目录（GUI 不继承 shell PATH）。
+- **凭据层级镜像 DSH 语义**（关键事实：packaged runtime 闭包 108 依赖里**没有**
+  `dsh-credentials-local`——`.credentials.yaml` 只有 web bundle 会挂载，因此 composition
+  无法挂它，driver 侧读文件是唯一可行路径）：MacBridge provider key（显式）>
+  `$DSH_HOME/.credentials.yaml` 的 `DEEPSEEK_API_KEY`/`DEEPSEEK_BASE_URL`（dsh Web UI
+  Models 页写入的严格扁平 `ref: value` 映射；最小解析子集，flow 集合/嵌套=诚实 miss）>
+  `$DSH_HOME/.env`；per-key 独立下落。注入仍走 `BuildAgentEnv` 的 env 通道——DSH 自身
+  层级里 inherited env 排第一，语义等价于 runtime 自己解析。自定义 `DSH_HOME` 转发子进程。
+- **用户效果**：`pip install deepseek-harness-runtime-bin`（或 PATH/nvm 安装）+ 在 dsh Web UI
+  保存过一次 key → CordCode Link 的 DeepSeek backend 直接可用，MacBridge 内零额外配置。
+- **测试**：`discovery_test.go`——层级/优先级/per-key 下落/引号注释解析/malformed 诚实
+  miss/DSH_HOME 覆盖/平台映射/nvm glob/python probe seam（成功+失败+有界不挂起）/
+  buildProcessEnv provider>harness 优先级。
+
+owner 真机验收矩阵第 1 行前提相应简化为「安装 DeepSeek Harness 并在其 Web UI 保存过 key」。

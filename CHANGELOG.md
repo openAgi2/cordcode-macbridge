@@ -8,6 +8,8 @@
 
 ## [Unreleased]
 
+- **装了 DeepSeek Harness 即零配置可用（harness 自动发现）**：CordCode Link 现在自动定位 DSH runtime（PATH → 官方 wheel 单文件可执行 `dsh-jsonrpc-agent-pkg-*` → nvm 最新版 → Python Resolution API），不再要求手工指定路径；DeepSeek API key 优先沿用用户已有的 harness 凭据（`~/.dsh/.credentials.yaml`——`dsh` Web UI 保存过的 key 直接生效，其次 `~/.dsh/.env`），MacBridge 显式配置的 provider key 仍最优先。诊断面板会显示 runtime 与凭据的实际来源；未安装时 backend 依旧如实不出现并给出获取途径。
+
 - **新增 DeepSeek Harness（DSH）backend（设计 v13 / round12 APPROVE 全量落地）**：CordCode Link 新增 `deepseek` backend，桥接 `dsh-jsonrpc-agent` stdio JSON-RPC runtime（每 session 一进程、进程组回收）。事件面完整映射 turn/step/user/assistant chunk/tool/todo/usage；`user/message` 按 `source.kind` 分流（权限运行时上下文不再覆盖真实 prompt）；TurnID 携带每进程 128-bit nonce，进程重启永不串轴；seq 完整性 fail-closed（首帧必须 0、gap/倒退/冲突重复即终止）；subagent/foreign session 通知按 lineage tombstone 路由（迟到 child 事件不误杀）；错误二分——模型/turn 级错误只收口 turn 保留进程，协议损坏先发可见 terminal 再淘汰进程；at-most-once 交付（只有可证明未送达的 pre-write 允许重建后发送一次，其余 fail visibly 不重放）。live-only：无 session 列表/历史（list 返回 `not_supported`）；一期 text-only。要求 Mac 安装 `dsh-jsonrpc-agent`（缺失时该 backend 如实不出现）。
 - **附件发送全面收紧为两级 pre-StartSession 校验**：`send_message` 附件现按「raw 结构（kind 词表 / 裸 `type/subtype` MIME / 非空可解码 base64 / 混合整条拒）→ `invalid_params`」和「effectiveKind（kind∨mime 单一分类规则）× backend 正向能力声明 → `unsupported_attachment`」在任何 session 副作用之前整条校验。各 backend 能力同步为语义真相：Claude/Codex image+file；OpenCode CLI 声明 image、managed server 不声明（该路径图像本就静默丢失，拒绝即现状语义化）；Grok Build file-only；DSH text-only。此前畸形 MIME/空 base64 会被静默丢弃流入 driver，现在诚实拒绝。协议章节已入 canonical pack 并同步 iOS mirror。
 
