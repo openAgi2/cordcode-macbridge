@@ -20,6 +20,7 @@ import (
 	// Register cc-connect agents via init()
 	_ "github.com/openAgi2/cordcode-macbridge/agent/claudecode"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/codex"
+	_ "github.com/openAgi2/cordcode-macbridge/agent/dsh"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/grokbuild"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/opencode"
 
@@ -30,7 +31,7 @@ import (
 
 func Main() {
 	port := flag.Int("port", 8777, "WebSocket listen port")
-	drivers := flag.String("drivers", "claude,opencode,codex,grokbuild", "Comma-separated agent list")
+	drivers := flag.String("drivers", "claude,opencode,codex,grokbuild,deepseek", "Comma-separated agent list")
 	workDir := flag.String("work-dir", "", "Working directory for agents (default: cwd)")
 	showVersion := flag.Bool("version", false, "Print runtime version and exit")
 	codexBackend := flag.String("codex-backend", envOr("GO_BRIDGE_CODEX_BACKEND", "exec"), "Codex backend mode: exec or app_server")
@@ -127,6 +128,7 @@ func Main() {
 		"opencode":  "opencode",
 		"codex":     "codex",
 		"grokbuild": "grokbuild",
+		"deepseek":  "dsh",
 	}
 
 	for _, id := range strings.Split(*drivers, ",") {

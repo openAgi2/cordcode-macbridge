@@ -212,9 +212,21 @@ func detectAgentStatus(id string, codexBackendMode string, cfg *AgentDetectionCo
 		return detectCodexService(codexBackendMode, codexURL)
 	case "grokbuild":
 		return detectGrokCLI()
+	case "deepseek":
+		return detectDSHRuntime()
 	default:
 		return AgentStatusAvailable, ""
 	}
+}
+
+// detectDSHRuntime 检测 DeepSeek Harness runtime（dsh-jsonrpc-agent）可用性。
+// stdio JSON-RPC runtime 没有廉价探活子命令，仅做 PATH 存在性检查；
+// 缺失时 backend 如实报 not_detected，不伪造 available。
+func detectDSHRuntime() (AgentStatus, string) {
+	if _, err := exec.LookPath("dsh-jsonrpc-agent"); err != nil {
+		return AgentStatusNotDetected, "dsh-jsonrpc-agent runtime not found in PATH"
+	}
+	return AgentStatusAvailable, ""
 }
 
 // detectClaudeCLI 检测 Claude Code CLI 可用性。
