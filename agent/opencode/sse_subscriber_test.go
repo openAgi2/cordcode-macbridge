@@ -10,13 +10,13 @@ import (
 func newTestSSESubscriber() *sseSubscriber {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &sseSubscriber{
-		events:       make(chan core.Event, 16),
-		ctx:          ctx,
-		cancel:       cancel,
-		messageRoles: make(map[string]string),
-		messageIDs:   make(map[string]string),
-		partKinds:    make(map[string]string),
-		partContent:  make(map[string]string),
+		events:          make(chan core.Event, 16),
+		ctx:             ctx,
+		cancel:          cancel,
+		messageRoles:    make(map[string]string),
+		messageIDs:      make(map[string]string),
+		partKinds:       make(map[string]string),
+		partContent:     make(map[string]string),
 		completed:       make(map[string]bool),
 		activeTurns:     make(map[string]string),
 		userPrompts:     make(map[string]string),

@@ -1978,6 +1978,13 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 	if msg.Params != nil {
 		json.Unmarshal(msg.Params, &params)
 	}
+	// §3.9 单一校验路径，pre-StartSession：raw 结构（invalid_params）→ support
+	// matrix 按 effectiveKind（unsupported_attachment）。任何 session 副作用
+	// （admission/switchDir/StartSession/markRunning）都发生在这之后。
+	if wireErr := validateSendMessageAttachments(agent, params.Attachments); wireErr != nil {
+		conn.SendResult(msg.RequestID, nil, wireErr)
+		return
+	}
 	if !h.admitBridgeTurn(params.SessionID) {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "runtime.quiescing", Message: "Bridge runtime is quiescing"})
 		return
@@ -2094,7 +2101,12 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 		Directory: dir,
 	})
 
-	images, files := splitAttachments(params.Attachments)
+	images, files, splitErr := splitAttachments(params.Attachments)
+	if splitErr != nil {
+		// Defensive: the pre-check above already rejects these.
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: splitErr.Error()})
+		return
+	}
 	sendErr := sess.Send(params.Content, images, files)
 	if sendErr != nil {
 		var delivery *core.DeliveryError
@@ -2704,6 +2716,12 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 	if agent.Name() != "claudecode" {
 		sessions, err := agent.ListSessions(ctx)
 		if err != nil {
+			// Live-only backends (e.g. dsh) return core.ErrNotSupported —
+			// surface not_supported instead of a misleading list_failed.
+			if errors.Is(err, core.ErrNotSupported) {
+				metrics.sendResult(conn, msg.RequestID, nil, &WireError{Code: "not_supported", Message: "backend does not support session listing"})
+				return
+			}
 			metrics.sendResult(conn, msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
 			return
 		}

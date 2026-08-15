@@ -89,7 +89,7 @@ func (s *opencodeServerSession) CurrentSessionID() string {
 }
 
 func (s *opencodeServerSession) Events() <-chan core.Event { return s.sub.events }
-func (s *opencodeServerSession) Alive() bool                { return s.alive.Load() }
+func (s *opencodeServerSession) Alive() bool               { return s.alive.Load() }
 
 func (s *opencodeServerSession) Send(prompt string, images []core.ImageAttachment, files []core.FileAttachment) error {
 	if !s.alive.Load() {

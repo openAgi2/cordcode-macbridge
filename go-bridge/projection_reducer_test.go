@@ -502,8 +502,8 @@ func TestReducerSkipsIdentitylessAgentRelayContent(t *testing.T) {
 	const backend, sid = "claudecode", "s-skip"
 	r.Apply(ev(1, backend, sid, "text_delta", map[string]interface{}{"delta": "no identity"}))      // empty itemId
 	r.Apply(ev(2, backend, sid, "reasoning_delta", map[string]interface{}{"delta": "no identity"})) // empty itemId
-	r.Apply(ev(3, backend, sid, "turn_started", map[string]interface{}{}))                           // empty turnId
-	r.Apply(ev(4, backend, sid, "turn_completed", map[string]interface{}{}))                         // empty turnId, no active turn
+	r.Apply(ev(3, backend, sid, "turn_started", map[string]interface{}{}))                          // empty turnId
+	r.Apply(ev(4, backend, sid, "turn_completed", map[string]interface{}{}))                        // empty turnId, no active turn
 
 	if r.TurnCount(backend, sid) != 0 {
 		proj, _ := r.Snapshot(backend, sid)

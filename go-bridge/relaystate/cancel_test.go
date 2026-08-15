@@ -5,11 +5,11 @@ import "testing"
 // table-driven：每个 (state, writerCommitted) -> (outcome, newState) 唯一确定。
 func TestTryCancel_TableDriven(t *testing.T) {
 	cases := []struct {
-		name           string
-		state          CancelState
+		name            string
+		state           CancelState
 		writerCommitted bool
-		wantOutcome    CancelOutcome
-		wantState      CancelState
+		wantOutcome     CancelOutcome
+		wantState       CancelState
 	}{
 		{"queued -> cancelled", StateQueued, false, CancelCancelled, StateCancelled},
 		{"reading -> cancelled", StateReading, false, CancelCancelled, StateCancelled},

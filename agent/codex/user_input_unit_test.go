@@ -55,8 +55,8 @@ func TestDeriveCodexInteractionIDRequestTypeDisambiguates(t *testing.T) {
 func TestDeriveCodexInteractionIDInputSensitivity(t *testing.T) {
 	base := deriveCodexInteractionID("string", "req-1", "th", "tu", "it")
 	for _, mod := range []struct {
-		name                                            string
-		typ, rid, th, tu, it                            string
+		name                 string
+		typ, rid, th, tu, it string
 	}{
 		{"requestID", "string", "req-2", "th", "tu", "it"},
 		{"threadID", "string", "req-1", "thX", "tu", "it"},
@@ -72,10 +72,10 @@ func TestDeriveCodexInteractionIDInputSensitivity(t *testing.T) {
 
 func TestCodexRequestIDTypeClassification(t *testing.T) {
 	cases := []struct {
-		raw             any
-		wantType        string
-		wantCanonical   string
-		wantOK          bool
+		raw           any
+		wantType      string
+		wantCanonical string
+		wantOK        bool
 	}{
 		{"abc", "string", "abc", true},
 		{float64(42), "int64", "42", true},
@@ -195,9 +195,9 @@ func TestNormalizeCodexQuestionsIsOtherFalseDisablesCustom(t *testing.T) {
 
 func TestClassifyRPCEnvelope(t *testing.T) {
 	cases := []struct {
-		name                              string
-		method, id, result, err           bool
-		want                              rpcEnvelopeKind
+		name                    string
+		method, id, result, err bool
+		want                    rpcEnvelopeKind
 	}{
 		{"server request", true, true, false, false, envelopeServerRequest},
 		{"server request may carry result-less", true, true, false, false, envelopeServerRequest},
@@ -230,13 +230,13 @@ func TestClassifyRPCEnvelopeServerRequestNotResponse(t *testing.T) {
 
 func sampleEntry(iid string) pendingEntry {
 	return pendingEntry{
-		interactionID:        iid,
-		requestIDCanonical:   "req-1",
-		rawRequestID:         json.RawMessage(`"req-1"`),
-		rawQuestionID:        map[string]string{deriveQuestionID(iid, 0): "backend-q-1"},
-		optionLabel:          map[string]string{deriveOptionID(deriveQuestionID(iid, 0), 0): "Red"},
-		questionMode:         map[string]core.UserInputAnswerMode{deriveQuestionID(iid, 0): core.UserInputAnswerModeSingle},
-		questionOrder:        []string{deriveQuestionID(iid, 0)},
+		interactionID:      iid,
+		requestIDCanonical: "req-1",
+		rawRequestID:       json.RawMessage(`"req-1"`),
+		rawQuestionID:      map[string]string{deriveQuestionID(iid, 0): "backend-q-1"},
+		optionLabel:        map[string]string{deriveOptionID(deriveQuestionID(iid, 0), 0): "Red"},
+		questionMode:       map[string]core.UserInputAnswerMode{deriveQuestionID(iid, 0): core.UserInputAnswerModeSingle},
+		questionOrder:      []string{deriveQuestionID(iid, 0)},
 	}
 }
 

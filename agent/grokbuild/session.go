@@ -683,9 +683,9 @@ func (s *grokSession) handlePermissionRequest(req *agentRequest) {
 	s.pendingPermsMu.Unlock()
 
 	s.emit(core.Event{
-		Type:     core.EventPermissionRequest,
+		Type:      core.EventPermissionRequest,
 		RequestID: reqIDStr,
-		ToolName: params.ToolCall.Title,
+		ToolName:  params.ToolCall.Title,
 	})
 }
 

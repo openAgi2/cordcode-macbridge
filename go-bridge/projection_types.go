@@ -42,15 +42,15 @@ type ProjectionPart struct {
 	// iOS/remote-web map this read-only into WebSubagentGroupBlock. Join keys mirror the real
 	// sidechain `.meta.json` schema (sample-verified): depth-1 anchors to the mainstream turn via
 	// SpawnToolUseID ↔ mainstream Agent tool_use id; depth≥2 nests via ParentAgentID ↔ parent agentId.
-	AgentID           string           `json:"agentId,omitempty"`
-	ParentAgentID     string           `json:"parentAgentId,omitempty"`
-	SpawnToolUseID    string           `json:"spawnToolUseId,omitempty"`
-	SpawnDepth        int              `json:"spawnDepth,omitempty"`
-	SubagentType      string           `json:"subagentType,omitempty"`    // async | sync (from .meta.json agentType)
-	SubagentStatus    string           `json:"subagentStatus,omitempty"`  // running | completed | failed (sample only verified completed)
-	SubagentBlocks    []ProjectionPart `json:"subagentBlocks,omitempty"`  // recursive (text/reasoning/tool/nested subagent)
-	SubagentError     string           `json:"subagentError,omitempty"`
-	SubagentDiagnostic string          `json:"subagentDiagnostic,omitempty"` // orphan_parent | cycle | max_depth
+	AgentID            string           `json:"agentId,omitempty"`
+	ParentAgentID      string           `json:"parentAgentId,omitempty"`
+	SpawnToolUseID     string           `json:"spawnToolUseId,omitempty"`
+	SpawnDepth         int              `json:"spawnDepth,omitempty"`
+	SubagentType       string           `json:"subagentType,omitempty"`   // async | sync (from .meta.json agentType)
+	SubagentStatus     string           `json:"subagentStatus,omitempty"` // running | completed | failed (sample only verified completed)
+	SubagentBlocks     []ProjectionPart `json:"subagentBlocks,omitempty"` // recursive (text/reasoning/tool/nested subagent)
+	SubagentError      string           `json:"subagentError,omitempty"`
+	SubagentDiagnostic string           `json:"subagentDiagnostic,omitempty"` // orphan_parent | cycle | max_depth
 
 	// user_input (Type=="user_input") — structured user input interaction (design §6/§10).
 	// One part per interactionId, upserted in place (never a second "answered" card). The kernel
@@ -61,15 +61,15 @@ type ProjectionPart struct {
 	// UserInputQuestions is the canonical question array as wire data ([]any of maps with
 	// id/header?/prompt/answerMode/options[{id,label,description?}]/allowsCustomAnswer/isSecret/
 	// required); deep-cloned via cloneProjectionJSONValue like other interface{} part fields.
-	UserInputInteractionID     string      `json:"interactionId,omitempty"`
-	UserInputStatus            string      `json:"status,omitempty"` // pending|answered|rejected|auto_resolved|unavailable|failed
-	UserInputQuestions         interface{} `json:"questions,omitempty"`
-	UserInputCanRespond        bool        `json:"canRespond,omitempty"`
-	UserInputCanReject         bool        `json:"canReject,omitempty"`
-	UserInputExpiresAt         int64       `json:"expiresAt,omitempty"`
-	UserInputResolvedAt        int64       `json:"resolvedAt,omitempty"`
-	UserInputResolutionSource  string      `json:"resolutionSource,omitempty"` // ios|mac|other_client|backend
-	UserInputDiagnosticCode    string      `json:"diagnosticCode,omitempty"`
+	UserInputInteractionID    string      `json:"interactionId,omitempty"`
+	UserInputStatus           string      `json:"status,omitempty"` // pending|answered|rejected|auto_resolved|unavailable|failed
+	UserInputQuestions        interface{} `json:"questions,omitempty"`
+	UserInputCanRespond       bool        `json:"canRespond,omitempty"`
+	UserInputCanReject        bool        `json:"canReject,omitempty"`
+	UserInputExpiresAt        int64       `json:"expiresAt,omitempty"`
+	UserInputResolvedAt       int64       `json:"resolvedAt,omitempty"`
+	UserInputResolutionSource string      `json:"resolutionSource,omitempty"` // ios|mac|other_client|backend
+	UserInputDiagnosticCode   string      `json:"diagnosticCode,omitempty"`
 }
 
 // MessageProjection is one user/assistant/system message within a turn.
@@ -113,7 +113,7 @@ type SessionProjection struct {
 type PartOp struct {
 	TurnID    string           `json:"turnId"`
 	MessageID string           `json:"messageId"`
-	Op        string           `json:"op"` // append_text | set_thinking | upsert_tool | upsert_user_input | replace_parts
+	Op        string           `json:"op"`              // append_text | set_thinking | upsert_tool | upsert_user_input | replace_parts
 	Text      string           `json:"text,omitempty"`  // append_text / set_thinking
 	Part      *ProjectionPart  `json:"part,omitempty"`  // upsert_tool / upsert_user_input
 	Parts     []ProjectionPart `json:"parts,omitempty"` // replace_parts

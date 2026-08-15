@@ -212,7 +212,7 @@ func mustJSON(t *testing.T, v interface{}) []byte {
 }
 
 // stubNoCommitAgent 满足 core.Agent（嵌入 stubAgentCheckpoint）但不实现 CommitMessageGenerator
-//（触发 commit_message_generation_unsupported）。
+// （触发 commit_message_generation_unsupported）。
 type stubNoCommitAgent struct {
 	stubAgentCheckpoint
 }
@@ -259,5 +259,5 @@ func (c *captureConn) SendResult(requestID string, data interface{}, err *WireEr
 }
 
 func (c *captureConn) AuthedDevice() *TrustedDeviceRecord { return nil }
-func (c *captureConn) RemoteAddr() string                  { return "test" }
-func (c *captureConn) Close() error                         { return nil }
+func (c *captureConn) RemoteAddr() string                 { return "test" }
+func (c *captureConn) Close() error                       { return nil }

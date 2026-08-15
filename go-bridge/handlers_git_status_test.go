@@ -136,4 +136,3 @@ func TestLoadGitContextStatusFields_OpenPROmittedForNonGitHubOrNoGh(t *testing.T
 		t.Fatalf("openPullRequest = %v, want nil (omit, 非 GitHub)", ctx.OpenPullRequest)
 	}
 }
-

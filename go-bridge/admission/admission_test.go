@@ -11,8 +11,8 @@ var errSentinel = errors.New("injected rng failure")
 // fakeClock 是可变时钟，用于 fake-clock lease 边界测试。
 type fakeClock struct{ t time.Time }
 
-func (f *fakeClock) now() time.Time { return f.t }
-func (f *fakeClock) set(t time.Time) { f.t = t }
+func (f *fakeClock) now() time.Time          { return f.t }
+func (f *fakeClock) set(t time.Time)         { f.t = t }
 func (f *fakeClock) advance(d time.Duration) { f.t = f.t.Add(d) }
 
 var (
@@ -158,26 +158,26 @@ func TestCommitAbort_FullTable(t *testing.T) {
 	cases := []caCase{
 		{
 			name: "quiescing+active same+live+token match => committed", isCommit: true,
-			setup: func(t *testing.T, m *AdmissionMachine, c *fakeClock) { quiesceActiveA(t, m) },
-			req: func() CommitRequest { return reqA(1, tokA) },
+			setup:       func(t *testing.T, m *AdmissionMachine, c *fakeClock) { quiesceActiveA(t, m) },
+			req:         func() CommitRequest { return reqA(1, tokA) },
 			wantOutcome: OutcomeCommitted, wantState: StateShuttingDown, wantTerm: terminalCommitted, expectTerm: true,
 		},
 		{
 			name: "quiescing+active same+live+token match => aborted (abort)", isCommit: false,
-			setup: func(t *testing.T, m *AdmissionMachine, c *fakeClock) { quiesceActiveA(t, m) },
-			req: func() CommitRequest { return reqA(1, tokA) },
+			setup:       func(t *testing.T, m *AdmissionMachine, c *fakeClock) { quiesceActiveA(t, m) },
+			req:         func() CommitRequest { return reqA(1, tokA) },
 			wantOutcome: OutcomeAborted, wantState: StateAccepting, wantTerm: terminalAborted, expectTerm: true,
 		},
 		{
 			name: "quiescing+active same+token mismatch => token_mismatch (no mut)", isCommit: true,
-			setup: func(t *testing.T, m *AdmissionMachine, c *fakeClock) { quiesceActiveA(t, m) },
-			req: func() CommitRequest { return reqA(1, tokB) },
+			setup:       func(t *testing.T, m *AdmissionMachine, c *fakeClock) { quiesceActiveA(t, m) },
+			req:         func() CommitRequest { return reqA(1, tokB) },
 			wantOutcome: OutcomeTokenMismatch, wantState: StateQuiescing, expectTerm: false,
 		},
 		{
 			name: "quiescing+active same+quiesceEpoch mismatch => quiesce_mismatch (no mut)", isCommit: true,
-			setup: func(t *testing.T, m *AdmissionMachine, c *fakeClock) { quiesceActiveA(t, m) },
-			req: func() CommitRequest { return reqA(999, tokA) },
+			setup:       func(t *testing.T, m *AdmissionMachine, c *fakeClock) { quiesceActiveA(t, m) },
+			req:         func() CommitRequest { return reqA(999, tokA) },
 			wantOutcome: OutcomeQuiesceMismatch, wantState: StateQuiescing, expectTerm: false,
 		},
 		{
@@ -190,14 +190,14 @@ func TestCommitAbort_FullTable(t *testing.T) {
 		},
 		{
 			name: "accepting+no last/unknown => quiesce_mismatch (commit)", isCommit: true,
-			setup: func(t *testing.T, m *AdmissionMachine, c *fakeClock) {},
-			req:   func() CommitRequest { return reqA(1, tokA) },
+			setup:       func(t *testing.T, m *AdmissionMachine, c *fakeClock) {},
+			req:         func() CommitRequest { return reqA(1, tokA) },
 			wantOutcome: OutcomeQuiesceMismatch, wantState: StateAccepting, expectTerm: false,
 		},
 		{
 			name: "accepting+no last/unknown => quiesce_mismatch (abort)", isCommit: false,
-			setup: func(t *testing.T, m *AdmissionMachine, c *fakeClock) {},
-			req:   func() CommitRequest { return reqA(1, tokA) },
+			setup:       func(t *testing.T, m *AdmissionMachine, c *fakeClock) {},
+			req:         func() CommitRequest { return reqA(1, tokA) },
 			wantOutcome: OutcomeQuiesceMismatch, wantState: StateAccepting, expectTerm: false,
 		},
 		{
@@ -209,7 +209,7 @@ func TestCommitAbort_FullTable(t *testing.T) {
 					t.Fatalf("setup commit: %s", cr.Outcome)
 				}
 			},
-			req: func() CommitRequest { return reqA(1, tokA) },
+			req:         func() CommitRequest { return reqA(1, tokA) },
 			wantOutcome: OutcomeAlreadyCommitted, wantState: StateShuttingDown, wantTerm: terminalCommitted, expectTerm: true,
 		},
 		{
@@ -274,7 +274,7 @@ func TestCommitAbort_LeaseBoundary(t *testing.T) {
 	t.Run("now==expiresAt => lease_expired + restore accepting + expired terminal", func(t *testing.T) {
 		clock := &fakeClock{}
 		m := newAcceptingMachine(clock)
-		quiesceActiveA(t, m) // expiresAt = t0 + 30s
+		quiesceActiveA(t, m)                                             // expiresAt = t0 + 30s
 		clock.advance(time.Duration(testLeaseMillis) * time.Millisecond) // now == expiresAt
 		r := m.Commit(reqA(1, tokA))
 		if r.Outcome != OutcomeLeaseExpired {

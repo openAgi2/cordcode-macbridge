@@ -32,11 +32,11 @@ const codexCatalogTransportSelection = "shared-websocket-if-configured-else-sing
 // 过滤、非归档、交互式 source、sortKey=recency_at、sortDirection=desc）。limit 是分页大小、
 // cursor 仅供 MacBridge 内部有界读取，二者不在冻结的核心 scope 字段里。
 var frozenThreadListRequestParams = map[string]any{
-	"cwd":            "/tmp/fixture-workspace", // sanitized
-	"archived":       false,
-	"source":         "interactive",
-	"sortKey":        "recency_at",
-	"sortDirection":  "desc",
+	"cwd":           "/tmp/fixture-workspace", // sanitized
+	"archived":      false,
+	"source":        "interactive",
+	"sortKey":       "recency_at",
+	"sortDirection": "desc",
 }
 
 // frozenThreadFields 是 thread/list 单个 thread 条目的冻结字段集（实跑捕获原样）。Phase 2
@@ -50,10 +50,10 @@ var frozenThreadFields = []string{
 }
 
 type threadListFixtureDoc struct {
-	Comment        string          `json:"_comment"`
-	CodexCliVersion string         `json:"codexCliVersion"`
-	Request        map[string]any  `json:"request"`
-	Response       json.RawMessage `json:"response"`
+	Comment         string          `json:"_comment"`
+	CodexCliVersion string          `json:"codexCliVersion"`
+	Request         map[string]any  `json:"request"`
+	Response        json.RawMessage `json:"response"`
 }
 
 func loadThreadListFixture(t *testing.T) threadListFixtureDoc {
@@ -96,9 +96,9 @@ func TestThreadList_FrozenResponseShape(t *testing.T) {
 	doc := loadThreadListFixture(t)
 	var resp struct {
 		Result struct {
-			Data             []map[string]any `json:"data"`
-			NextCursor       string           `json:"nextCursor"`
-			BackwardsCursor  string           `json:"backwardsCursor"`
+			Data            []map[string]any `json:"data"`
+			NextCursor      string           `json:"nextCursor"`
+			BackwardsCursor string           `json:"backwardsCursor"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(doc.Response, &resp); err != nil {

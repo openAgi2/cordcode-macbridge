@@ -6,14 +6,19 @@ import (
 	"testing"
 )
 
+func pngB64() string  { return base64.StdEncoding.EncodeToString([]byte{0x89, 0x50, 0x4E, 0x47}) }
+func pdfB64() string  { return base64.StdEncoding.EncodeToString([]byte{0x25, 0x50, 0x44, 0x46}) }
+func anyB64() string  { return base64.StdEncoding.EncodeToString([]byte{0x1, 0x2}) }
+
 func TestSplitAttachments_ImageAndFile(t *testing.T) {
-	png := base64.StdEncoding.EncodeToString([]byte{0x89, 0x50, 0x4E, 0x47})
-	pdf := base64.StdEncoding.EncodeToString([]byte{0x25, 0x50, 0x44, 0x46})
 	inputs := []AttachmentInput{
-		{Kind: "image", Mime: "image/png", Filename: "a.png", Base64: png},
-		{Kind: "file", Mime: "application/pdf", Filename: "a.pdf", Base64: pdf},
+		{Kind: "image", Mime: "image/png", Filename: "a.png", Base64: pngB64()},
+		{Kind: "file", Mime: "application/pdf", Filename: "a.pdf", Base64: pdfB64()},
 	}
-	images, files := splitAttachments(inputs)
+	images, files, err := splitAttachments(inputs)
+	if err != nil {
+		t.Fatalf("valid input must split: %v", err)
+	}
 	if len(images) != 1 || len(files) != 1 {
 		t.Fatalf("want 1 image + 1 file, got %d images, %d files", len(images), len(files))
 	}
@@ -28,35 +33,104 @@ func TestSplitAttachments_ImageAndFile(t *testing.T) {
 	}
 }
 
-func TestSplitAttachments_KindInferredFromMime(t *testing.T) {
+func TestSplitAttachments_EffectiveKindSharedWithGate(t *testing.T) {
+	// The classification in split MUST equal classifyAttachment — the same
+	// judgment the pre-check gate uses (round11 P0-1: no second opinion).
 	jpg := base64.StdEncoding.EncodeToString([]byte{0xFF, 0xD8, 0xFF})
-	// kind 留空，仅靠 mime=image/* 归类为图片（与 iOS wireAttachments 推导一致）。
-	images, files := splitAttachments([]AttachmentInput{
-		{Kind: "", Mime: "image/jpeg", Base64: jpg},
-	})
+	inputs := []AttachmentInput{
+		{Kind: "", Mime: "image/jpeg", Base64: jpg}, // legacy lenient shape: still image downstream
+	}
+	if got := classifyAttachment(inputs[0]); got != "image" {
+		t.Fatalf("classifyAttachment = %q, want image", got)
+	}
+	images, files, err := splitAttachments(inputs)
+	if err != nil {
+		t.Fatalf("split of decodable legacy shape must succeed: %v", err)
+	}
 	if len(images) != 1 || len(files) != 0 {
-		t.Fatalf("mime image/* 应归类 image；got %d images %d files", len(images), len(files))
+		t.Fatalf("mime image/* classifies image; got %d images %d files", len(images), len(files))
 	}
 }
 
-func TestSplitAttachments_DropsInvalid(t *testing.T) {
-	good := base64.StdEncoding.EncodeToString([]byte{0x1, 0x2})
-	images, files := splitAttachments([]AttachmentInput{
-		{Kind: "image", Mime: "image/png", Base64: ""},           // 空 base64 → 丢
-		{Kind: "image", Mime: "image/png", Base64: "@@notb64@@"}, // 非法 base64 → 丢
-		{Kind: "image", Mime: "image/png", Base64: good},         // 保留
-	})
-	if len(images) != 1 {
-		t.Fatalf("want 1 valid image, got %d", len(images))
+func TestSplitAttachments_RejectsInvalid(t *testing.T) {
+	cases := []struct {
+		name  string
+		input []AttachmentInput
+	}{
+		{"empty base64", []AttachmentInput{{Kind: "image", Mime: "image/png", Base64: ""}}},
+		{"invalid base64", []AttachmentInput{{Kind: "image", Mime: "image/png", Base64: "@@notb64@@"}}},
 	}
-	if len(files) != 0 {
-		t.Errorf("unexpected files: %d", len(files))
+	for _, tc := range cases {
+		images, files, err := splitAttachments(tc.input)
+		if err == nil {
+			t.Fatalf("%s: want validation error, got %d images %d files", tc.name, len(images), len(files))
+		}
 	}
 }
 
 func TestSplitAttachments_NilEmpty(t *testing.T) {
-	images, files := splitAttachments(nil)
+	images, files, err := splitAttachments(nil)
+	if err != nil {
+		t.Fatalf("nil input: %v", err)
+	}
 	if images != nil || files != nil {
 		t.Errorf("nil input should return nil slices, got images=%v files=%v", images, files)
+	}
+}
+
+func TestClassifyAttachmentSingleRule(t *testing.T) {
+	cases := []struct {
+		kind, mime, want string
+	}{
+		{"image", "image/png", "image"},
+		{"image", "text/plain", "image"},               // kind wins
+		{"file", "image/png", "image"},                 // mime prefix wins (round11 fixture)
+		{"file", "application/pdf", "file"},
+		{"file", "IMAGE/PNG", "image"},                 // normalized mime prefix
+		{"", "image/jpeg", "image"},                    // legacy lenient shape
+		{"", "text/csv", "file"},
+		{"file", "  image/png  ", "image"},             // trimmed
+	}
+	for _, tc := range cases {
+		got := classifyAttachment(AttachmentInput{Kind: tc.kind, Mime: tc.mime})
+		if got != tc.want {
+			t.Errorf("classify(%q,%q) = %q, want %q", tc.kind, tc.mime, got, tc.want)
+		}
+	}
+}
+
+func TestValidateAttachmentStructure(t *testing.T) {
+	cases := []struct {
+		name    string
+		input   AttachmentInput
+		wantErr bool
+	}{
+		{"valid image", AttachmentInput{Kind: "image", Mime: "image/png", Base64: pngB64()}, false},
+		{"valid file", AttachmentInput{Kind: "file", Mime: "application/pdf", Base64: pdfB64()}, false},
+		{"uppercase mime ok", AttachmentInput{Kind: "file", Mime: "Application/PDF", Base64: pdfB64()}, false},
+		{"empty kind", AttachmentInput{Kind: "", Mime: "text/plain", Base64: anyB64()}, true},
+		{"unknown kind", AttachmentInput{Kind: "video", Mime: "video/mp4", Base64: anyB64()}, true},
+		{"empty mime", AttachmentInput{Kind: "file", Base64: anyB64()}, true},
+		{"not-a-mime", AttachmentInput{Kind: "file", Mime: "not-a-mime", Base64: anyB64()}, true},
+		{"bare type", AttachmentInput{Kind: "file", Mime: "image", Base64: anyB64()}, true},
+		{"mime with params", AttachmentInput{Kind: "file", Mime: "image/png; charset=utf-8", Base64: anyB64()}, true},
+		{"mime wildcard literal", AttachmentInput{Kind: "file", Mime: "image/*", Base64: anyB64()}, true},
+		{"empty base64", AttachmentInput{Kind: "file", Mime: "text/plain", Base64: ""}, true},
+		{"bad base64", AttachmentInput{Kind: "file", Mime: "text/plain", Base64: "!!"}, true},
+	}
+	for _, tc := range cases {
+		err := validateAttachmentStructure([]AttachmentInput{tc.input})
+		if (err != nil) != tc.wantErr {
+			t.Errorf("%s: err=%v wantErr=%v", tc.name, err, tc.wantErr)
+		}
+	}
+
+	// Mixed valid + invalid: the WHOLE batch is rejected.
+	err := validateAttachmentStructure([]AttachmentInput{
+		{Kind: "image", Mime: "image/png", Base64: pngB64()},
+		{Kind: "file", Mime: "not-a-mime", Base64: anyB64()},
+	})
+	if err == nil {
+		t.Fatal("mixed batch must be rejected as a whole")
 	}
 }

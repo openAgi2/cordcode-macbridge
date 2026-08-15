@@ -175,9 +175,9 @@ func isNonProjectCatalogPath(clean string) bool {
 }
 
 // matchCodexWorkspaceRoot 找最长 saved root 覆盖 cwd。
-// - 精确匹配任意 root（含 home）→ 命中；
-// - 前缀匹配（cwd 在 root 下）仅当 root 不是用户 home：避免 /Users/jacklee 吞掉所有子工程，
-//   把 opencode-cc-connect 错误归到「jacklee」组（Mac 侧栏也不会把未登记工程挂出来）。
+//   - 精确匹配任意 root（含 home）→ 命中；
+//   - 前缀匹配（cwd 在 root 下）仅当 root 不是用户 home：避免 /Users/jacklee 吞掉所有子工程，
+//     把 opencode-cc-connect 错误归到「jacklee」组（Mac 侧栏也不会把未登记工程挂出来）。
 func matchCodexWorkspaceRoot(cwd string, roots []string) (root string, ok bool) {
 	if cwd == "" || len(roots) == 0 {
 		return "", false

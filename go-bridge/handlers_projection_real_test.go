@@ -604,8 +604,9 @@ func TestRealColdPullOpencodeWithoutAgentIsSourceUnavailable(t *testing.T) {
 // cold pull must commit a full baseline within the normal budget.
 //
 // Env-gated (owner machine data; nothing baked into the repo):
-//   CC_REAL_OPENCODE_SESSION — target ses_… id
-//   CC_REAL_OPENCODE_URL / _USER / _PASS — managed server endpoint + basic auth
+//
+//	CC_REAL_OPENCODE_SESSION — target ses_… id
+//	CC_REAL_OPENCODE_URL / _USER / _PASS — managed server endpoint + basic auth
 func TestRealColdPullOpencodeTrailingUnansweredTurnCommits(t *testing.T) {
 	sessionID := strings.TrimSpace(os.Getenv("CC_REAL_OPENCODE_SESSION"))
 	baseURL := strings.TrimSpace(os.Getenv("CC_REAL_OPENCODE_URL"))
@@ -613,11 +614,11 @@ func TestRealColdPullOpencodeTrailingUnansweredTurnCommits(t *testing.T) {
 		t.Skip("CC_REAL_OPENCODE_SESSION / CC_REAL_OPENCODE_URL not set")
 	}
 	agent, err := opencode.New(map[string]any{
-		"cmd":            "opencode",
-		"work_dir":       ".",
-		"opencode_url":   baseURL,
-		"opencode_user":  os.Getenv("CC_REAL_OPENCODE_USER"),
-		"opencode_pass":  os.Getenv("CC_REAL_OPENCODE_PASS"),
+		"cmd":           "opencode",
+		"work_dir":      ".",
+		"opencode_url":  baseURL,
+		"opencode_user": os.Getenv("CC_REAL_OPENCODE_USER"),
+		"opencode_pass": os.Getenv("CC_REAL_OPENCODE_PASS"),
 	})
 	if err != nil {
 		t.Skipf("opencode agent unavailable on this machine: %v", err)

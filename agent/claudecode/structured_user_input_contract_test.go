@@ -101,8 +101,8 @@ func TestClaudeResponseEnvelopeMatchesRequest(t *testing.T) {
 // 多问题 map 覆盖全部原 question text，每题 value 类型按其 multiSelect 编码。
 func TestClaudeAnswersTypedPerMultiSelect(t *testing.T) {
 	types := map[string]string{
-		"single_paired.json":       "single",
-		"multi_select_paired.json": "multiple",
+		"single_paired.json":         "single",
+		"multi_select_paired.json":   "multiple",
 		"multi_question_paired.json": "multi_question",
 	}
 	for name, mode := range types {

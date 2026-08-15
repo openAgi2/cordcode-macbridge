@@ -52,10 +52,10 @@ func decryptSingleResult(t *testing.T, out chan RelayEnvelope, key []byte) map[s
 		t.Fatal("cancel result 应为单帧")
 	}
 	var resp struct {
-		Type     string                 `json:"type"`
-		ID       string                 `json:"requestId"`
-		OK       bool                   `json:"ok"`
-		Data     map[string]interface{} `json:"data"`
+		Type string                 `json:"type"`
+		ID   string                 `json:"requestId"`
+		OK   bool                   `json:"ok"`
+		Data map[string]interface{} `json:"data"`
 	}
 	if err := json.Unmarshal(combined, &resp); err != nil {
 		t.Fatal(err)

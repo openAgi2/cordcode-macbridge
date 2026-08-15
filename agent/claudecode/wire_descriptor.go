@@ -35,3 +35,10 @@ func (a *Agent) WireDescriptor() *core.WireDescriptor {
 }
 
 var _ core.WireDescriptorProvider = (*Agent)(nil)
+
+// SupportedAttachmentKinds (§3.9 truth source): image bytes become base64
+// image blocks in the request parts and files are staged to disk and passed
+// as path references — both reach the real Claude request.
+func (a *Agent) SupportedAttachmentKinds() []string { return []string{"image", "file"} }
+
+var _ core.AttachmentSupporter = (*Agent)(nil)

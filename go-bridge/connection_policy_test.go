@@ -40,7 +40,7 @@ func TestConnectionPolicy_JSONShape(t *testing.T) {
 
 func TestRelayFirstResult_ConnectionPolicy(t *testing.T) {
 	withPolicy := RelayFirstResult{
-		DeviceID:          "dev",
+		DeviceID:         "dev",
 		ConnectionPolicy: &ConnectionPolicy{PreferLocalNetwork: true},
 	}
 	out, _ := json.Marshal(withPolicy)
@@ -57,7 +57,7 @@ func TestRelayFirstResult_ConnectionPolicy(t *testing.T) {
 // RelayFirstResult 中 policy 与 LAN 候选必须独立:关偏好(false)时候选仍完整发布。
 func TestRelayFirstResult_PolicyIndependentOfCandidates(t *testing.T) {
 	r := RelayFirstResult{
-		LocalURLs:         []string{"ws://192.168.1.25:8777/bridge"},
+		LocalURLs:        []string{"ws://192.168.1.25:8777/bridge"},
 		ConnectionPolicy: &ConnectionPolicy{PreferLocalNetwork: false},
 	}
 	out, _ := json.Marshal(r)
@@ -96,13 +96,13 @@ func TestPairingCompleteBridge_ConnectionPolicyFlatURLs(t *testing.T) {
 // 都描述 hello_ack.bridge,connectionPolicy 必须序列化为同一 JSON 键且值一致,防漂移。
 func TestConnectionPolicy_DualStructureConsistency(t *testing.T) {
 	rt, _ := json.Marshal(HelloBridgeInfo{
-		BridgeID:          "brg",
-		CurrentURLs:       HelloURLs{Local: "l"},
+		BridgeID:         "brg",
+		CurrentURLs:      HelloURLs{Local: "l"},
 		ConnectionPolicy: &ConnectionPolicy{PreferLocalNetwork: true},
 	})
 	sc, _ := json.Marshal(BridgeV1BridgeProfile{
-		BridgeID:          "brg",
-		CurrentURLs:       BridgeV1CurrentURLs{Local: "l"},
+		BridgeID:         "brg",
+		CurrentURLs:      BridgeV1CurrentURLs{Local: "l"},
 		ConnectionPolicy: &ConnectionPolicy{PreferLocalNetwork: true},
 	})
 	var rtMap, scMap map[string]json.RawMessage
@@ -202,11 +202,11 @@ func remoteStatusBody(t *testing.T, s *ManagementServer) remoteStatusDecoded {
 // 必须使 connected=false,即使 relay.configured=true。不从 configured 推导为已连接。
 func TestRemoteStatus_ConstructionWindowDisconnected(t *testing.T) {
 	cfg := ManagementConfig{
-		LocalURL:          "ws://192.168.1.25:8777/bridge",
-		RelayEnabled:      true,
-		RelayConfigured:   true,
-		RelayEndpoint:     "wss://relay.example",
-		RelayRouteID:      "rt",
+		LocalURL:           "ws://192.168.1.25:8777/bridge",
+		RelayEnabled:       true,
+		RelayConfigured:    true,
+		RelayEndpoint:      "wss://relay.example",
+		RelayRouteID:       "rt",
 		PreferLocalNetwork: true,
 	}
 	s := NewManagementServer(cfg) // 未注入真实 provider

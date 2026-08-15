@@ -57,8 +57,8 @@ type Agent struct {
 	// 单例：首次 fetchThreadList 懒构造，已死则重建。catalogRegistrar 由 go-bridge 经
 	// SetCatalogSubprocessRegistrar 注入（bridge ProcessRegistry），供 stdio 子进程注册到
 	// bridge shutdown 回收链。ws 传输无子进程，registrar 不参与。
-	catalogClient   *catalogClient
-	catalogClientMu sync.Mutex
+	catalogClient    *catalogClient
+	catalogClientMu  sync.Mutex
 	catalogRegistrar CatalogSubprocessRegistrar
 }
 
@@ -273,7 +273,7 @@ func readCodexConfigModel() string {
 // readCodexConfigModels 读取 ccswitch 配置的模型目录（owner 2026-08-04 决策：
 // 显示 catalog 全部模型，当前生效的由 config.toml model 经 GetModel 标 default）。
 // 数据源：config.toml 的 model_catalog_json 字段指向的 catalog 文件
-//（cc-switch 写入，如 cc-switch-model-catalog.json），含 slug + display_name。
+// （cc-switch 写入，如 cc-switch-model-catalog.json），含 slug + display_name。
 // 只读模型目录，不读任何凭据字段。
 func readCodexConfigModels() []core.ModelOption {
 	codexHome := os.Getenv("CODEX_HOME")

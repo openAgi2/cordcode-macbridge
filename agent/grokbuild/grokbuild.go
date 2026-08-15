@@ -54,8 +54,8 @@ type Agent struct {
 	// 与 per-turn grokSession 子进程分开管理、分开回收。catalogClientMu 串行化
 	// create/replace；catalogRegistrar 是 bridge ProcessRegistry 注入句柄。
 	// §10：capability 未声明前 go-bridge 不路由到 FetchSessionList → 当前不可达 = 零行为变化。
-	catalogClient   *grokCatalogClient
-	catalogClientMu sync.Mutex
+	catalogClient    *grokCatalogClient
+	catalogClientMu  sync.Mutex
 	catalogRegistrar CatalogSubprocessRegistrar
 }
 
@@ -66,8 +66,8 @@ func init() {
 // New creates a Grok Build agent from the given options map.
 func New(opts map[string]any) (core.Agent, error) {
 	a := &Agent{
-		workDir:  ".",
-		mode:     "default",
+		workDir:   ".",
+		mode:      "default",
 		activeIdx: -1,
 	}
 

@@ -107,7 +107,7 @@ type catalogBackoff struct {
 }
 
 // defaultCatalogBackoff 是 catalog client 默认退避：500ms→1s→2s→4s→8s→8s，第 6 步起 GiveUp
-//（总重连窗口约 23.5s，足以覆盖短暂抖动，又不至于长时间静默不可用）。
+// （总重连窗口约 23.5s，足以覆盖短暂抖动，又不至于长时间静默不可用）。
 var defaultCatalogBackoff = catalogBackoff{
 	Initial:  500 * time.Millisecond,
 	Factor:   2.0,

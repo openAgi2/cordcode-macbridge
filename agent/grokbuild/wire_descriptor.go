@@ -22,3 +22,11 @@ func (a *Agent) WireDescriptor() *core.WireDescriptor {
 }
 
 var _ core.WireDescriptorProvider = (*Agent)(nil)
+
+// SupportedAttachmentKinds (§3.9 truth source): file paths are appended to
+// the prompt text, but the ACP image block cannot carry bytes/MIME/URI and
+// Grok CLI freezes promptCapabilities.image=false — image is NOT declared
+// (declaring it would be a false capability).
+func (a *Agent) SupportedAttachmentKinds() []string { return []string{"file"} }
+
+var _ core.AttachmentSupporter = (*Agent)(nil)

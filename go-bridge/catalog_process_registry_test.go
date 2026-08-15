@@ -178,7 +178,7 @@ func TestProcessRegistry_ShutdownReclaimsGrandchild(t *testing.T) {
 
 // TestHandlers_Shutdown_ReapsCatalogSubprocess（§4.3/§11 端到端 hook）：catalog 子进程注册到
 // h.catalogProcessRegistry()（不经 sessionRegistry），handlers.Shutdown 必须经独立 catalog hook
-//（catalogProcRegistry.Shutdown）回收它，与 sessionRegistry.drain() 解耦。
+// （catalogProcRegistry.Shutdown）回收它，与 sessionRegistry.drain() 解耦。
 func TestHandlers_Shutdown_ReapsCatalogSubprocess(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

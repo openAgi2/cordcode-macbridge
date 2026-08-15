@@ -58,15 +58,15 @@ type gitContext struct {
 	// OpenPullRequest 为当前分支的 open PR（无 PR → nil；查不了 → nil + 不伪造）。
 	// 失败语义（§4.1.1 定稿）：IsRepo 失败 → 整次 RPC error；IsDirty / ChangedFileCount /
 	// Additions / Deletions 任一失败 → 整次 RPC error（三者同 error，禁止半份 status）。
-	IsRepo           *bool              `json:"isRepo,omitempty"`
-	IsDirty          *bool              `json:"isDirty,omitempty"`
-	ChangedFileCount *int               `json:"changedFileCount,omitempty"`
-	Additions        *int               `json:"additions,omitempty"`
-	Deletions        *int               `json:"deletions,omitempty"`
-	HasUpstream      *bool              `json:"hasUpstream,omitempty"`
-	AheadCount       *int               `json:"aheadCount,omitempty"`
-	BehindCount      *int               `json:"behindCount,omitempty"`
-	DefaultBranch    *string            `json:"defaultBranch,omitempty"`
+	IsRepo           *bool               `json:"isRepo,omitempty"`
+	IsDirty          *bool               `json:"isDirty,omitempty"`
+	ChangedFileCount *int                `json:"changedFileCount,omitempty"`
+	Additions        *int                `json:"additions,omitempty"`
+	Deletions        *int                `json:"deletions,omitempty"`
+	HasUpstream      *bool               `json:"hasUpstream,omitempty"`
+	AheadCount       *int                `json:"aheadCount,omitempty"`
+	BehindCount      *int                `json:"behindCount,omitempty"`
+	DefaultBranch    *string             `json:"defaultBranch,omitempty"`
 	OpenPullRequest  *gitOpenPullRequest `json:"openPullRequest,omitempty"`
 }
 

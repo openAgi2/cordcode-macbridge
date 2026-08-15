@@ -45,11 +45,11 @@ const (
 // leaderClientMsg is the leader-envelope frame sent by the subscriber. Only the
 // variants a read-only subscriber uses are populated.
 type leaderClientMsg struct {
-	Type         string         `json:"type"`                    // register | acp | ping | disconnect
-	Mode         string         `json:"mode,omitempty"`          // register: "stdio"
-	ClientType   string         `json:"client_type,omitempty"`   // register
-	Capabilities map[string]any `json:"capabilities,omitempty"`  // register (empty = valid)
-	Payload      string         `json:"payload,omitempty"`       // acp: JSON-RPC string
+	Type         string         `json:"type"`                   // register | acp | ping | disconnect
+	Mode         string         `json:"mode,omitempty"`         // register: "stdio"
+	ClientType   string         `json:"client_type,omitempty"`  // register
+	Capabilities map[string]any `json:"capabilities,omitempty"` // register (empty = valid)
+	Payload      string         `json:"payload,omitempty"`      // acp: JSON-RPC string
 }
 
 // leaderServerMsg is the leader-envelope frame received. Only fields the

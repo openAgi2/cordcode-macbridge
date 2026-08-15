@@ -64,4 +64,3 @@ func TestRichHistoryBuilder_AddToolUse_BashDerivesCommandTitle(t *testing.T) {
 		t.Errorf("title = %q, want 'git status --short' (Bash command, L-α)", title)
 	}
 }
-

@@ -43,15 +43,15 @@ func TestFixtures_RequestsDecode(t *testing.T) {
 func TestFixtures_ResultsDecode(t *testing.T) {
 	quiesce := map[string]string{ // file -> expected outcome
 		"quiesce-result-safe.json": "safe", "quiesce-result-deferred.json": "deferred",
-		"quiesce-result-identity-mismatch.json": "identity_mismatch",
-		"quiesce-result-epoch-mismatch.json":    "epoch_mismatch",
-		"quiesce-result-already-committed.json": "already_committed",
-		"quiesce-result-already-quiescing.json": "already_quiescing",
-		"quiesce-result-operation-reused.json":  "operation_reused",
+		"quiesce-result-identity-mismatch.json":       "identity_mismatch",
+		"quiesce-result-epoch-mismatch.json":          "epoch_mismatch",
+		"quiesce-result-already-committed.json":       "already_committed",
+		"quiesce-result-already-quiescing.json":       "already_quiescing",
+		"quiesce-result-operation-reused.json":        "operation_reused",
 		"quiesce-result-token-generation-failed.json": "token_generation_failed",
 	}
 	commit := map[string]string{
-		"commit-result-committed.json": "committed",
+		"commit-result-committed.json":         "committed",
 		"commit-result-already-committed.json": "already_committed",
 		"commit-result-identity-mismatch.json": "identity_mismatch",
 		"commit-result-epoch-mismatch.json":    "epoch_mismatch",
@@ -60,7 +60,7 @@ func TestFixtures_ResultsDecode(t *testing.T) {
 		"commit-result-lease-expired.json":     "lease_expired",
 	}
 	abort := map[string]string{
-		"abort-result-aborted.json": "aborted",
+		"abort-result-aborted.json":           "aborted",
 		"abort-result-already-accepting.json": "already_accepting",
 		"abort-result-already-committed.json": "already_committed",
 		"abort-result-identity-mismatch.json": "identity_mismatch",
@@ -105,16 +105,16 @@ func TestFixtures_ResultsDecode(t *testing.T) {
 func TestFixtures_RequestNegativeCorpus(t *testing.T) {
 	base := `{"managementSchemaVersion":1,"operationId":"ffeeddccbbaa99887766554433221100","expectedRuntime":{"pid":12345,"bridgeEpoch":1},"expectedHealthEpoch":1,"quiesceEpoch":1,"token":"00112233445566778899aabbccddeeff"}`
 	mutations := map[string]string{
-		"duplicate key":      `{"managementSchemaVersion":1,"operationId":"ffeeddccbbaa99887766554433221100","operationId":"ffeeddccbbaa99887766554433221100","expectedRuntime":{"pid":12345,"bridgeEpoch":1},"expectedHealthEpoch":1,"quiesceEpoch":1,"token":"00112233445566778899aabbccddeeff"}`,
-		"unknown field":      `{"managementSchemaVersion":1,"operationId":"ffeeddccbbaa99887766554433221100","expectedRuntime":{"pid":12345,"bridgeEpoch":1},"expectedHealthEpoch":1,"quiesceEpoch":1,"token":"00112233445566778899aabbccddeeff","extra":7}`,
-		"missing field":      `{"managementSchemaVersion":1,"operationId":"ffeeddccbbaa99887766554433221100","expectedRuntime":{"pid":12345,"bridgeEpoch":1},"expectedHealthEpoch":1,"quiesceEpoch":1}`,
-		"null field":         `{"managementSchemaVersion":1,"operationId":null,"expectedRuntime":{"pid":12345,"bridgeEpoch":1},"expectedHealthEpoch":1,"quiesceEpoch":1,"token":"00112233445566778899aabbccddeeff"}`,
-		"quoted number":      `{"managementSchemaVersion":"1","operationId":"ffeeddccbbaa99887766554433221100","expectedRuntime":{"pid":12345,"bridgeEpoch":1},"expectedHealthEpoch":1,"quiesceEpoch":1,"token":"00112233445566778899aabbccddeeff"}`,
-		"negative number":    `{"managementSchemaVersion":1,"operationId":"ffeeddccbbaa99887766554433221100","expectedRuntime":{"pid":-1,"bridgeEpoch":1},"expectedHealthEpoch":1,"quiesceEpoch":1,"token":"00112233445566778899aabbccddeeff"}`,
-		"float pid":          `{"managementSchemaVersion":1,"operationId":"ffeeddccbbaa99887766554433221100","expectedRuntime":{"pid":12.5,"bridgeEpoch":1},"expectedHealthEpoch":1,"quiesceEpoch":1,"token":"00112233445566778899aabbccddeeff"}`,
-		"uppercase hex op":   `{"managementSchemaVersion":1,"operationId":"FFEEDDCCBBAA99887766554433221100","expectedRuntime":{"pid":12345,"bridgeEpoch":1},"expectedHealthEpoch":1,"quiesceEpoch":1,"token":"00112233445566778899aabbccddeeff"}`,
-		"bad token hex":      `{"managementSchemaVersion":1,"operationId":"ffeeddccbbaa99887766554433221100","expectedRuntime":{"pid":12345,"bridgeEpoch":1},"expectedHealthEpoch":1,"quiesceEpoch":1,"token":"ZZ112233445566778899aabbccddeeff"}`,
-		"short op":           `{"managementSchemaVersion":1,"operationId":"ff","expectedRuntime":{"pid":12345,"bridgeEpoch":1},"expectedHealthEpoch":1,"quiesceEpoch":1,"token":"00112233445566778899aabbccddeeff"}`,
+		"duplicate key":    `{"managementSchemaVersion":1,"operationId":"ffeeddccbbaa99887766554433221100","operationId":"ffeeddccbbaa99887766554433221100","expectedRuntime":{"pid":12345,"bridgeEpoch":1},"expectedHealthEpoch":1,"quiesceEpoch":1,"token":"00112233445566778899aabbccddeeff"}`,
+		"unknown field":    `{"managementSchemaVersion":1,"operationId":"ffeeddccbbaa99887766554433221100","expectedRuntime":{"pid":12345,"bridgeEpoch":1},"expectedHealthEpoch":1,"quiesceEpoch":1,"token":"00112233445566778899aabbccddeeff","extra":7}`,
+		"missing field":    `{"managementSchemaVersion":1,"operationId":"ffeeddccbbaa99887766554433221100","expectedRuntime":{"pid":12345,"bridgeEpoch":1},"expectedHealthEpoch":1,"quiesceEpoch":1}`,
+		"null field":       `{"managementSchemaVersion":1,"operationId":null,"expectedRuntime":{"pid":12345,"bridgeEpoch":1},"expectedHealthEpoch":1,"quiesceEpoch":1,"token":"00112233445566778899aabbccddeeff"}`,
+		"quoted number":    `{"managementSchemaVersion":"1","operationId":"ffeeddccbbaa99887766554433221100","expectedRuntime":{"pid":12345,"bridgeEpoch":1},"expectedHealthEpoch":1,"quiesceEpoch":1,"token":"00112233445566778899aabbccddeeff"}`,
+		"negative number":  `{"managementSchemaVersion":1,"operationId":"ffeeddccbbaa99887766554433221100","expectedRuntime":{"pid":-1,"bridgeEpoch":1},"expectedHealthEpoch":1,"quiesceEpoch":1,"token":"00112233445566778899aabbccddeeff"}`,
+		"float pid":        `{"managementSchemaVersion":1,"operationId":"ffeeddccbbaa99887766554433221100","expectedRuntime":{"pid":12.5,"bridgeEpoch":1},"expectedHealthEpoch":1,"quiesceEpoch":1,"token":"00112233445566778899aabbccddeeff"}`,
+		"uppercase hex op": `{"managementSchemaVersion":1,"operationId":"FFEEDDCCBBAA99887766554433221100","expectedRuntime":{"pid":12345,"bridgeEpoch":1},"expectedHealthEpoch":1,"quiesceEpoch":1,"token":"00112233445566778899aabbccddeeff"}`,
+		"bad token hex":    `{"managementSchemaVersion":1,"operationId":"ffeeddccbbaa99887766554433221100","expectedRuntime":{"pid":12345,"bridgeEpoch":1},"expectedHealthEpoch":1,"quiesceEpoch":1,"token":"ZZ112233445566778899aabbccddeeff"}`,
+		"short op":         `{"managementSchemaVersion":1,"operationId":"ff","expectedRuntime":{"pid":12345,"bridgeEpoch":1},"expectedHealthEpoch":1,"quiesceEpoch":1,"token":"00112233445566778899aabbccddeeff"}`,
 	}
 	// base must decode OK first
 	if _, err := DecodeCommitRequest(json.RawMessage(base)); err != nil {

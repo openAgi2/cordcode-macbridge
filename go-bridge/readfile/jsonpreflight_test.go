@@ -23,10 +23,10 @@ func TestJSONStringLen_Corpus(t *testing.T) {
 		"control\x01\x02\x1f",
 		"unicode emoji \U0001F600 \U0001F680",
 		"chinese 中文 日本語",
-		"line sep para sep end",       // U+2028 / U+2029（显式）
+		"line sep para sep end", // U+2028 / U+2029（显式）
 		"mixed <\"a\\b\"> &     \U0001F600",
-		"\xff invalid byte",                      // 非法 UTF-8（0xff）
-		"lone continuation \x80",                 // 非法 UTF-8（0x80）
+		"\xff invalid byte",                          // 非法 UTF-8（0xff）
+		"lone continuation \x80",                     // 非法 UTF-8（0x80）
 		string([]byte{0x41, 0xe2, 0x28, 0xa1, 0x42}), // 非法 UTF-8 序列（中间断）
 	}
 	for _, s := range cases {

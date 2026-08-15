@@ -28,11 +28,11 @@ func TestCanonicalChunkAAD_BaseVsCorrelatedDiffer(t *testing.T) {
 func TestCanonicalChunkAAD_TamperEachFieldChangesAAD(t *testing.T) {
 	base := CanonicalChunkAAD("grp-1", 2, 5, "0123456789abcdef0123456789abcdef")
 	cases := map[string][]byte{
-		"groupId changed":      CanonicalChunkAAD("grp-2", 2, 5, "0123456789abcdef0123456789abcdef"),
-		"index changed":        CanonicalChunkAAD("grp-1", 3, 5, "0123456789abcdef0123456789abcdef"),
-		"count changed":        CanonicalChunkAAD("grp-1", 2, 6, "0123456789abcdef0123456789abcdef"),
-		"correlation changed":  CanonicalChunkAAD("grp-1", 2, 5, "fedcba9876543210fedcba9876543210"),
-		"correlation dropped":  CanonicalChunkAAD("grp-1", 2, 5, ""),
+		"groupId changed":     CanonicalChunkAAD("grp-2", 2, 5, "0123456789abcdef0123456789abcdef"),
+		"index changed":       CanonicalChunkAAD("grp-1", 3, 5, "0123456789abcdef0123456789abcdef"),
+		"count changed":       CanonicalChunkAAD("grp-1", 2, 6, "0123456789abcdef0123456789abcdef"),
+		"correlation changed": CanonicalChunkAAD("grp-1", 2, 5, "fedcba9876543210fedcba9876543210"),
+		"correlation dropped": CanonicalChunkAAD("grp-1", 2, 5, ""),
 	}
 	for name, aad := range cases {
 		if bytes.Equal(base, aad) {

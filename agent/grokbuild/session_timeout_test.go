@@ -90,8 +90,8 @@ func TestStdinWrite_BlocksWhenPipeBufferFull(t *testing.T) {
 	var totalWritten atomic.Int64
 
 	type writeResult struct {
-		total int64  // snapshot of cumulative bytes at completion
-		n     int    // last write's return value
+		total int64 // snapshot of cumulative bytes at completion
+		n     int   // last write's return value
 		err   error
 	}
 	writeDone := make(chan writeResult, 1)

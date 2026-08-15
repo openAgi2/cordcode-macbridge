@@ -545,6 +545,12 @@ func (h *Handlers) ocHandleSendMessage(conn Connection, msg WireMessage, dir str
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "missing_param", Message: "sessionId required"})
 		return
 	}
+	// §3.9 单一校验路径（与 handleSendMessage 同一 helper）：server 模式不声明
+	// image（该路径图像本就静默丢失，拒绝是现状语义化）。
+	if wireErr := validateSendMessageAttachments(agent, params.Attachments); wireErr != nil {
+		conn.SendResult(msg.RequestID, nil, wireErr)
+		return
+	}
 	if !h.admitBridgeTurn(params.SessionID) {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "runtime.quiescing", Message: "Bridge runtime is quiescing"})
 		return
@@ -574,7 +580,11 @@ func (h *Handlers) ocHandleSendMessage(conn Connection, msg WireMessage, dir str
 		Directory: dir,
 	})
 
-	images, files := splitAttachments(params.Attachments)
+	images, files, splitErr := splitAttachments(params.Attachments)
+	if splitErr != nil {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: splitErr.Error()})
+		return
+	}
 	if err := sess.Send(params.Content, images, files); err != nil {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "send_failed", Message: err.Error()})
 		return

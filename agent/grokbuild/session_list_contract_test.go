@@ -25,9 +25,9 @@ const sessionListFixture = "testdata/session_list_sanitized.json"
 var frozenGrokSessionFields = []string{"sessionId", "cwd", "title", "updatedAt", "_meta"}
 
 type grokSessionListFixtureDoc struct {
-	Comment    string          `json:"_comment"`
-	GrokVersion string         `json:"grokVersion"`
-	Initialize struct {
+	Comment     string `json:"_comment"`
+	GrokVersion string `json:"grokVersion"`
+	Initialize  struct {
 		ProtocolVersion   any `json:"protocolVersion"`
 		AgentCapabilities struct {
 			LoadSession         any `json:"loadSession"`

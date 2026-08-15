@@ -92,9 +92,9 @@ func TestResolveOpencodeModelLocked(t *testing.T) {
 	})
 	t.Run("active provider overrides", func(t *testing.T) {
 		a := &Agent{
-			model:      "opencode/mimo-v2.5-free",
-			activeIdx:  0,
-			providers:  []core.ProviderConfig{{Name: "zhipuai-coding-plan", Model: "glm-5.1"}},
+			model:     "opencode/mimo-v2.5-free",
+			activeIdx: 0,
+			providers: []core.ProviderConfig{{Name: "zhipuai-coding-plan", Model: "glm-5.1"}},
 		}
 		p, m := resolveOpencodeModelLocked(a)
 		if p != "zhipuai-coding-plan" || m != "glm-5.1" {

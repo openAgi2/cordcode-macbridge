@@ -101,9 +101,9 @@ func packageFairHomePage(full []map[string]interface{}, perDirLimit, globalLimit
 	fair := fairSliceSessionList(full, perDirLimit, globalLimit)
 	hasMore := fairHomeHasMore(full, fair, perDirLimit)
 	return map[string]interface{}{
-		"sessions":         fair,
-		"hasMore":          hasMore,
-		"directoryTotals":  directorySessionTotals(full),
+		"sessions":        fair,
+		"hasMore":         hasMore,
+		"directoryTotals": directorySessionTotals(full),
 	}
 }
 

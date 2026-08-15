@@ -27,7 +27,7 @@ import (
 // v0FixtureConfig 是固定、非敏感、确定性的测试配置。任何字段都不得是本机真实值。
 func v0FixtureConfig() ManagementConfig {
 	return ManagementConfig{
-		Handlers:     NewHandlers(),
+		Handlers: NewHandlers(),
 		// Token 只用于通过 checkAuth；handleStatus 的 v0 响应不输出 token，因此该值不影响 fixture bytes。
 		// 复用既有 testMgmtToken 以与 authRequest helper 一致。
 		Token:        testMgmtToken,

@@ -58,7 +58,7 @@ type sseSubscriber struct {
 	// sessionFilter (active mode): when filterActive is true, emit drops any
 	// event whose SessionID != sessionFilter. Lock-free via atomics so emit
 	// stays cheap. Empty/resume case leaves filterActive false (observe all).
-	filterActive atomic.Bool
+	filterActive  atomic.Bool
 	sessionFilter atomic.Value // string
 }
 
@@ -71,16 +71,16 @@ func newSSESubscriber(ctx context.Context, a *Agent) *sseSubscriber {
 
 	subCtx, cancel := context.WithCancel(ctx)
 	return &sseSubscriber{
-		url:          strings.TrimRight(url, "/"),
-		authHeader:   auth,
-		workDir:      dir,
-		events:       make(chan core.Event, 128),
-		ctx:          subCtx,
-		cancel:       cancel,
-		messageRoles: make(map[string]string),
-		messageIDs:   make(map[string]string),
-		partKinds:    make(map[string]string),
-		partContent:  make(map[string]string),
+		url:             strings.TrimRight(url, "/"),
+		authHeader:      auth,
+		workDir:         dir,
+		events:          make(chan core.Event, 128),
+		ctx:             subCtx,
+		cancel:          cancel,
+		messageRoles:    make(map[string]string),
+		messageIDs:      make(map[string]string),
+		partKinds:       make(map[string]string),
+		partContent:     make(map[string]string),
 		completed:       make(map[string]bool),
 		activeTurns:     make(map[string]string),
 		userPrompts:     make(map[string]string),

@@ -21,20 +21,20 @@ func TestParseStrictUInt_AcceptsValid(t *testing.T) {
 func TestParseStrictUInt_RejectsInvalid(t *testing.T) {
 	// 每个 token 都必须被拒绝。
 	cases := map[string]bool{ // value: true=must-reject
-		`"-1"`:   true,  // quoted
-		`"123"`:  true,  // quoted number
-		`null`:   true,
-		`true`:   true,
-		`false`:  true,
-		`-1`:     true,  // negative
-		`1.5`:    true,  // float
-		`1e3`:    true,  // exponent
-		`1_000`:  true,  // underscore
-		`+5`:     true,
-		`{}`:     true,
-		`[]`:     true,
-		` `:      true,  // empty after trim
-		`0x10`:   true,
+		`"-1"`:  true, // quoted
+		`"123"`: true, // quoted number
+		`null`:  true,
+		`true`:  true,
+		`false`: true,
+		`-1`:    true, // negative
+		`1.5`:   true, // float
+		`1e3`:   true, // exponent
+		`1_000`: true, // underscore
+		`+5`:    true,
+		`{}`:    true,
+		`[]`:    true,
+		` `:     true, // empty after trim
+		`0x10`:  true,
 	}
 	for tok := range cases {
 		raw := json.RawMessage(tok)
@@ -80,12 +80,12 @@ func TestOperationIDToken_HexValidation(t *testing.T) {
 		t.Errorf("good token rejected: %v", err)
 	}
 	bad := []string{
-		"FFEEDDCCBBAA99887766554433221100", // uppercase
-		"ffeeddccbbaa9988776655443322110",  // 31 chars
+		"FFEEDDCCBBAA99887766554433221100",  // uppercase
+		"ffeeddccbbaa9988776655443322110",   // 31 chars
 		"ffeeddccbbaa998877665544332211000", // 33 chars
 		"ggeeddccbbaa99887766554433221100",  // non-hex
 		"ffeeddccbbaa9988776655443322110z",  // non-hex
-		"",                                   // empty
+		"",                                  // empty
 		"ff ee dd cc bb aa 99 88 77 66 55 44 33 22 11 00",
 	}
 	for _, b := range bad {
@@ -115,13 +115,13 @@ func TestConstantTimeCompareToken(t *testing.T) {
 func TestDecodeStrictObject_RejectsCorpus(t *testing.T) {
 	allowed := []string{"a", "b"}
 	cases := map[string]string{
-		`{"a":1,"b":2}`:           "", // ok
-		`{"a":1}`:                 "missing b",
-		`{"a":1,"b":2,"c":3}`:     "unknown c",
-		`{"a":1,"b":2,"a":3}`:     "duplicate a",
-		`{"a":1,"b":null}`:        "null b",
-		`[1,2]`:                   "not object",
-		`""`:                      "not object",
+		`{"a":1,"b":2}`:       "", // ok
+		`{"a":1}`:             "missing b",
+		`{"a":1,"b":2,"c":3}`: "unknown c",
+		`{"a":1,"b":2,"a":3}`: "duplicate a",
+		`{"a":1,"b":null}`:    "null b",
+		`[1,2]`:               "not object",
+		`""`:                  "not object",
 	}
 	for body, wantErr := range cases {
 		_, err := DecodeStrictObject(json.RawMessage(body), allowed)

@@ -18,7 +18,7 @@ import (
 )
 
 // slowCatalogProvider 是可控 fake：计数 FetchPage0 调用；可选通过 releaseCh 阻塞到测试方 close
-//（singleflight 时序）；可选返回 err；mode 决定是「尊重 ctx」还是「纯 sleep 无视 ctx」。
+// （singleflight 时序）；可选返回 err；mode 决定是「尊重 ctx」还是「纯 sleep 无视 ctx」。
 type slowCatalogProvider struct {
 	mu        sync.Mutex
 	calls     int

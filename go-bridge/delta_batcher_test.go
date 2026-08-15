@@ -243,7 +243,6 @@ func TestDeltaBatchOverflowFlushesImmediately(t *testing.T) {
 	}
 }
 
-
 // TestDeltaBatchPreservesItemID: projection SoT attributes text_delta by itemId.
 // Batching must keep itemId on the merged frame; otherwise OpenCode/Claude live
 // content is skipped by ProjectionReducer and only turn_completed advances headRev.

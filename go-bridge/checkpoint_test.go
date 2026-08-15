@@ -43,9 +43,9 @@ func (s *stubCheckpointResolver) ResolveWorkspace(backendID, sessionID string) s
 
 // stubAgentCheckpoint is a minimal Agent satisfying CheckpointProvider.
 type stubAgentCheckpoint struct {
-	name      string
+	name       string
 	checkpoint bool
-	rollback  bool
+	rollback   bool
 }
 
 func (a *stubAgentCheckpoint) Name() string { return a.name }
@@ -55,7 +55,7 @@ func (a *stubAgentCheckpoint) StartSession(_ context.Context, _ string) (core.Ag
 func (a *stubAgentCheckpoint) ListSessions(_ context.Context) ([]core.AgentSessionInfo, error) {
 	return nil, nil
 }
-func (a *stubAgentCheckpoint) Stop() error { return nil }
+func (a *stubAgentCheckpoint) Stop() error              { return nil }
 func (a *stubAgentCheckpoint) SupportsCheckpoint() bool { return a.checkpoint }
 
 // stubAgentRollback also satisfies ConversationRollbackProvider.

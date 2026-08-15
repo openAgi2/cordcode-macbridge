@@ -79,9 +79,9 @@ type jsonrpcError struct {
 // --- initialize ---
 
 type initializeParams struct {
-	ProtocolVersion     int                  `json:"protocolVersion"`
-	ClientCapabilities  *clientCapabilities  `json:"clientCapabilities,omitempty"`
-	ClientInfo          *clientInfo          `json:"clientInfo,omitempty"`
+	ProtocolVersion    int                 `json:"protocolVersion"`
+	ClientCapabilities *clientCapabilities `json:"clientCapabilities,omitempty"`
+	ClientInfo         *clientInfo         `json:"clientInfo,omitempty"`
 }
 
 type clientCapabilities struct {
@@ -100,15 +100,15 @@ type clientInfo struct {
 }
 
 type initializeResult struct {
-	ProtocolVersion   int                 `json:"protocolVersion"`
-	AgentCapabilities *agentCapabilities  `json:"agentCapabilities,omitempty"`
-	AgentInfo         *clientInfo         `json:"agentInfo,omitempty"`
-	AuthMethods       []authMethod        `json:"authMethods,omitempty"`
+	ProtocolVersion   int                `json:"protocolVersion"`
+	AgentCapabilities *agentCapabilities `json:"agentCapabilities,omitempty"`
+	AgentInfo         *clientInfo        `json:"agentInfo,omitempty"`
+	AuthMethods       []authMethod       `json:"authMethods,omitempty"`
 }
 
 type agentCapabilities struct {
-	LoadSession         acpFlag                  `json:"loadSession,omitempty"`
-	SessionCapabilities *sessionCapabilities     `json:"sessionCapabilities,omitempty"`
+	LoadSession         acpFlag              `json:"loadSession,omitempty"`
+	SessionCapabilities *sessionCapabilities `json:"sessionCapabilities,omitempty"`
 }
 
 type sessionCapabilities struct {
@@ -136,9 +136,9 @@ type authenticateParams struct {
 // --- session/new ---
 
 type sessionNewParams struct {
-	CWD                  string           `json:"cwd"`
-	McpServers           []any            `json:"mcpServers"`
-	AdditionalDirectories []string        `json:"additionalDirectories,omitempty"`
+	CWD                   string   `json:"cwd"`
+	McpServers            []any    `json:"mcpServers"`
+	AdditionalDirectories []string `json:"additionalDirectories,omitempty"`
 }
 
 type sessionNewResult struct {
@@ -177,7 +177,7 @@ type sessionCancelParams struct {
 // --- session/update (notification) ---
 
 type sessionUpdateParams struct {
-	SessionID string       `json:"sessionId"`
+	SessionID string        `json:"sessionId"`
 	Update    sessionUpdate `json:"update"`
 }
 
@@ -191,27 +191,27 @@ type sessionUpdate struct {
 // sessionUpdatePayload holds all possible fields across variants.
 // Only fields relevant to the active variant are populated.
 type sessionUpdatePayload struct {
-	SessionUpdate string          `json:"sessionUpdate"`
-	MessageID     string          `json:"messageId,omitempty"`
+	SessionUpdate string `json:"sessionUpdate"`
+	MessageID     string `json:"messageId,omitempty"`
 	// Content 保持 raw: grok 的 agent_*_chunk 用单个 text object, 但 tool_call_update
 	// 记录的 content 是数组 (实测 929 条 tool_call_update 里约一半是数组形状,
 	// 见 contentText())。用 *contentBlock 会让整个 outer unmarshal 失败 → EventError →
 	// relay loop 误判终态 → idle/running 振荡。raw + contentText() 同时兼容两种形状。
 	Content    json.RawMessage    `json:"content,omitempty"`
 	ToolCallID string             `json:"toolCallId,omitempty"`
-	Title         string             `json:"title,omitempty"`
-	Kind          string             `json:"kind,omitempty"`
-	Status        string             `json:"status,omitempty"`
-	Locations     []toolCallLocation `json:"locations,omitempty"`
-	Entries       []planEntry        `json:"entries,omitempty"`
-	Used          *int               `json:"used,omitempty"`
-	Size          *int               `json:"size,omitempty"`
+	Title      string             `json:"title,omitempty"`
+	Kind       string             `json:"kind,omitempty"`
+	Status     string             `json:"status,omitempty"`
+	Locations  []toolCallLocation `json:"locations,omitempty"`
+	Entries    []planEntry        `json:"entries,omitempty"`
+	Used       *int               `json:"used,omitempty"`
+	Size       *int               `json:"size,omitempty"`
 	// turn_completed 终态字段。上游在不同版本里对 prompt_id 的 JSON key 不一致
 	// (真实 updates.jsonl: "prompt_id" 440 次, "promptId" 289 次), 两个字段都接收,
 	// 取非空者作 durable turn 关联键。stop_reason 区分正常结束 / 取消 / 限流 / 错误。
-	PromptID   string `json:"promptId,omitempty"`
+	PromptID    string `json:"promptId,omitempty"`
 	PromptIDRaw string `json:"prompt_id,omitempty"` // snake_case 兜底 (旧上游版本)
-	StopReason string `json:"stop_reason,omitempty"`
+	StopReason  string `json:"stop_reason,omitempty"`
 }
 
 // resolvedPromptID returns the durable turn correlation key from a turn_completed
@@ -305,7 +305,7 @@ type planEntry struct {
 
 type requestPermissionParams struct {
 	SessionID string             `json:"sessionId"`
-	ToolCall  permissionToolCall  `json:"toolCall"`
+	ToolCall  permissionToolCall `json:"toolCall"`
 	Options   []permissionOption `json:"options"`
 }
 
@@ -340,8 +340,8 @@ type sessionListResult struct {
 }
 
 type acpSessionInfo struct {
-	SessionID     string `json:"sessionId"`
-	CWD           string `json:"cwd,omitempty"`
-	Title         string `json:"title,omitempty"`
-	LastActivity  string `json:"lastActivity,omitempty"`
+	SessionID    string `json:"sessionId"`
+	CWD          string `json:"cwd,omitempty"`
+	Title        string `json:"title,omitempty"`
+	LastActivity string `json:"lastActivity,omitempty"`
 }

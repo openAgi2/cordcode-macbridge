@@ -27,6 +27,12 @@ import (
 
 var _ core.AgentSession = (*dshSession)(nil)
 
+// errAttachmentsNotSupported is the driver-level defense-in-depth refusal for
+// non-empty image/file slices (§3.9 path 4): the go-bridge pre-check already
+// rejects attachments before StartSession; this keeps the driver itself from
+// ever fabricating attachment delivery.
+var errAttachmentsNotSupported = fmt.Errorf("dsh: attachments are not supported (text-only)")
+
 const (
 	eventsBufferSize  = 256
 	stdoutLineLimit   = 8 << 20 // match gate0: envelopes with big request/header payloads
@@ -213,7 +219,7 @@ func (s *dshSession) Send(prompt string, images []core.ImageAttachment, files []
 	// attachments before StartSession, and the driver still refuses non-empty
 	// slices rather than fabricating delivery.
 	if len(images) > 0 || len(files) > 0 {
-		return fmt.Errorf("dsh: attachments are not supported (text-only)")
+		return errAttachmentsNotSupported
 	}
 	if prompt == "" {
 		return fmt.Errorf("dsh: empty prompt")

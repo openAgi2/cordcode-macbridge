@@ -13,10 +13,10 @@ import (
 
 // CorrelatedRegistry 是单端 correlation registry 的模型（active + retired 集合 + caps）。
 type CorrelatedRegistry struct {
-	active       map[string]bool
-	retired      map[string]bool
-	maxActive    int
-	maxRetired   int
+	active     map[string]bool
+	retired    map[string]bool
+	maxActive  int
+	maxRetired int
 }
 
 func NewCorrelatedRegistry(maxActive, maxRetired int) *CorrelatedRegistry {
@@ -59,8 +59,8 @@ func (r *CorrelatedRegistry) Retire(key string) bool {
 	return true
 }
 
-func (r *CorrelatedRegistry) ActiveCount() int    { return len(r.active) }
-func (r *CorrelatedRegistry) RetiredCount() int   { return len(r.retired) }
+func (r *CorrelatedRegistry) ActiveCount() int  { return len(r.active) }
+func (r *CorrelatedRegistry) RetiredCount() int { return len(r.retired) }
 
 // ── Deadline / clock 不变式（plan §3.6.4 阶段数值）─────────────────────────────
 // server group max age 120s > client total cap 90s > pre-first-chunk idle 30s > inter-chunk idle 15s。
@@ -86,7 +86,7 @@ func CheckDeadlineInvariants() error {
 type FakeClock struct{ now time.Time }
 
 func NewFakeClock(t time.Time) *FakeClock { return &FakeClock{now: t} }
-func (c *FakeClock) Now() time.Time        { return c.now }
+func (c *FakeClock) Now() time.Time       { return c.now }
 func (c *FakeClock) Advance(d time.Duration) time.Time {
 	c.now = c.now.Add(d)
 	return c.now

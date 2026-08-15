@@ -64,7 +64,9 @@ func (h *OutboundBulkHandle) MarkIndex0Committed() bool {
 }
 
 // Index0Committed 返回是否已过 too_late 边界（cancel handler 报 too_late 用）。
-func (h *OutboundBulkHandle) Index0Committed() bool { return h != nil && h.state.Load() == bulkCommitted }
+func (h *OutboundBulkHandle) Index0Committed() bool {
+	return h != nil && h.state.Load() == bulkCommitted
+}
 
 type relayBulkRequestContext struct {
 	sessionID  string

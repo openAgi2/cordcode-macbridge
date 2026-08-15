@@ -60,6 +60,25 @@ type PermissionResult struct {
 	Message      string         `json:"message,omitempty"`      // reason for deny
 }
 
+// AttachmentSupporter is an optional interface for agents that can declare
+// which attachment kinds their CURRENT configuration semantically supports.
+// This is the single positive truth source for the go-bridge attachment gate
+// (design docs/2026-08-13-dsh-driver-design.md §3.9): absence of the
+// interface — or absence of a kind — means that kind is NOT supported, and a
+// structurally valid attachment of that kind is rejected with
+// unsupported_attachment before StartSession.
+//
+// Declaring a kind is a semantic claim, not a signature claim: a driver may
+// list "image" only when image bytes genuinely reach the backend request
+// (mode-dependent drivers — e.g. opencode server mode silently dropping
+// staged images — must NOT list it in that mode).
+type AttachmentSupporter interface {
+	// SupportedAttachmentKinds returns the positively supported subset of
+	// {"image", "file"} for the agent's current mode. "text"-only drivers
+	// should not implement this interface at all.
+	SupportedAttachmentKinds() []string
+}
+
 // ToolAuthorizer is an optional interface for agents that support dynamic tool authorization.
 type ToolAuthorizer interface {
 	AddAllowedTools(tools ...string) error

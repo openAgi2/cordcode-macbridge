@@ -263,15 +263,15 @@ func TestProjectionPayloadBaseline(t *testing.T) {
 	categories := []string{"text", "toolResult", "toolInput", "diff", "matches", "subagentBlocks"}
 
 	type sizePoint struct {
-		Turns            int         `json:"turns"`
-		PartsTotal       int         `json:"parts_total"`
-		UncompressedBytes int        `json:"uncompressed_bytes"`
-		CompressedBytes  int         `json:"compressed_bytes"`
-		GzipRatio        float64     `json:"gzip_ratio"`
-		CloneNsMedian    int64       `json:"clone_ns_median"`
-		MarshalNsMedian  int64       `json:"marshal_ns_median"`
-		GzipNsMedian     int64       `json:"gzip_ns_median"`
-		CategoryBytes    map[string]int `json:"category_bytes"`
+		Turns             int            `json:"turns"`
+		PartsTotal        int            `json:"parts_total"`
+		UncompressedBytes int            `json:"uncompressed_bytes"`
+		CompressedBytes   int            `json:"compressed_bytes"`
+		GzipRatio         float64        `json:"gzip_ratio"`
+		CloneNsMedian     int64          `json:"clone_ns_median"`
+		MarshalNsMedian   int64          `json:"marshal_ns_median"`
+		GzipNsMedian      int64          `json:"gzip_ns_median"`
+		CategoryBytes     map[string]int `json:"category_bytes"`
 	}
 	points := make([]sizePoint, 0, len(turnCounts))
 
@@ -364,9 +364,9 @@ func TestProjectionPayloadBaseline(t *testing.T) {
 
 	// 落盘 JSON 产物(供 P3 findings 文档引用真实数字)。
 	artifact := map[string]interface{}{
-		"plan":       "docs/2026-07-31-remote-web-relay-session-loading-v3.md",
-		"phase":      "p1-autonomous-source-baseline",
-		"note":       "源头侧合成 projection 基线;relay 传输侧(socket_send_ms/真实 RTT)仍需 owner §7 真机实测。",
+		"plan":        "docs/2026-07-31-remote-web-relay-session-loading-v3.md",
+		"phase":       "p1-autonomous-source-baseline",
+		"note":        "源头侧合成 projection 基线;relay 传输侧(socket_send_ms/真实 RTT)仍需 owner §7 真机实测。",
 		"size_points": points,
 		"sensitivity": map[string]interface{}{
 			"turns":              50,

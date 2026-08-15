@@ -102,7 +102,7 @@ func TestRealProjectionFixtureCapture(t *testing.T) {
 				"syncRev":           proj.SyncRev,
 			},
 			"atHead": map[string]interface{}{
-				"elapsedMs": fullElapsed.Milliseconds() * 0 + atHeadElapsed.Milliseconds(),
+				"elapsedMs": fullElapsed.Milliseconds()*0 + atHeadElapsed.Milliseconds(),
 				"wireBytes": atHeadBytes,
 			},
 		}

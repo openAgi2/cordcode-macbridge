@@ -1,8 +1,8 @@
 package readfile
 
 import (
-	"encoding/binary"
 	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"unicode/utf8"
 )
@@ -13,8 +13,8 @@ import (
 
 // EncodingClassification 是 ClassifyEncoding 的结果。
 type EncodingClassification struct {
-	Kind        string // "text" | "unsupported_encoding" | "binary"
-	Detected    string // BOM-detected: "utf-32le"|"utf-32be"|"utf-16le"|"utf-16be"；text/binary/unknown 为 ""
+	Kind         string // "text" | "unsupported_encoding" | "binary"
+	Detected     string // BOM-detected: "utf-32le"|"utf-32be"|"utf-16le"|"utf-16be"；text/binary/unknown 为 ""
 	DisplayBytes []byte // UTF-8 BOM 剥离后的 display bytes（text 用；其它 = data 原样）
 }
 

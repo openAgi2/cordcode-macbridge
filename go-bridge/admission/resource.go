@@ -8,10 +8,10 @@ import (
 // FileReadHealthConfig 是 plan §3.6.3 / A0.5 / A-1.6 的 file-read worker pool 资源上限与退化阈值。
 // 三个正交状态机之一（FileReadHealth，与 RuntimeAdmission、Mac SupervisorState 正交）。
 type FileReadHealthConfig struct {
-	PoolSize           uint32 // 全局专用 bounded file-read worker pool 大小
+	PoolSize            uint32 // 全局专用 bounded file-read worker pool 大小
 	MinHealthyFileSlots uint32 // 损失多少 slot 之前仍算 healthy 的下限
-	DegradeAt          uint32 // 不可用 slot 达到此值即进入 degrading（必须在全部 slot 损失前报警）
-	StuckAgeMillis     uint32 // 单个 worker 卡住多久判定为 stuck（原子进入 degrading）
+	DegradeAt           uint32 // 不可用 slot 达到此值即进入 degrading（必须在全部 slot 损失前报警）
+	StuckAgeMillis      uint32 // 单个 worker 卡住多久判定为 stuck（原子进入 degrading）
 }
 
 // ErrResourceInvariant 表示资源上限不变式被违反（配置 gate 失败）。

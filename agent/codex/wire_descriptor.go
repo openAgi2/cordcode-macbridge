@@ -28,3 +28,9 @@ func (a *Agent) WireDescriptor() *core.WireDescriptor {
 }
 
 var _ core.WireDescriptorProvider = (*Agent)(nil)
+
+// SupportedAttachmentKinds (§3.9 truth source): images are staged with their
+// path preserved and files staged to disk in BOTH exec and app_server modes.
+func (a *Agent) SupportedAttachmentKinds() []string { return []string{"image", "file"} }
+
+var _ core.AttachmentSupporter = (*Agent)(nil)

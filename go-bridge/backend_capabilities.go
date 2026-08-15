@@ -112,6 +112,14 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 		caps = append(caps, "supports_conversation_rollback")
 	}
 
+	// §3.9 attachment truth source: positively declared attachment kinds from
+	// core.AttachmentSupporter (per-driver×mode semantic support — the same
+	// source the send_message pre-check gates on). Absence means NOT
+	// supported; "absence = unsupported" must never be read the other way.
+	if sup, ok := agent.(core.AttachmentSupporter); ok {
+		caps = append(caps, sup.SupportedAttachmentKinds()...)
+	}
+
 	// §6.5 工作区文件浏览器: 当 backend 有 WorkDirSwitcher 接口时,声明 workspace-browse
 	// 能力。所有三个 agent (claudecode/codex/opencode) 均实现此接口,因此浏览器入口普遍可用。
 	// 为 extensible string,additive,无 major version bump。

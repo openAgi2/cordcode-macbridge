@@ -28,9 +28,9 @@ func TestLiveDriverTurnIDPlumbsExecutionPhaseIdle(t *testing.T) {
 	}
 
 	endName, endData, endDone := mapAgentEvent(core.Event{
-		Type:   core.EventResult,
-		Done:   true,
-		TurnID: "turn-live-contract",
+		Type:    core.EventResult,
+		Done:    true,
+		TurnID:  "turn-live-contract",
 		Content: "done",
 	})
 	if endName != "turn_completed" || !endDone {

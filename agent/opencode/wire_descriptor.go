@@ -26,3 +26,21 @@ func (a *Agent) WireDescriptor() *core.WireDescriptor {
 }
 
 var _ core.WireDescriptorProvider = (*Agent)(nil)
+
+// SupportedAttachmentKinds (§3.9 mode-aware truth source): files are declared
+// in both modes. Images are declared ONLY in CLI mode: the CLI path forwards
+// staged image paths via --file, while the managed-server path drops staged
+// image paths before building the HTTP body (server_session.go:103 discards
+// them) — a server-mode image would be silently lost, so declaring it there
+// would be a false capability. httpBaseURL is read under a.mu like every
+// other mode consumer.
+func (a *Agent) SupportedAttachmentKinds() []string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.httpBaseURL != "" {
+		return []string{"file"}
+	}
+	return []string{"file", "image"}
+}
+
+var _ core.AttachmentSupporter = (*Agent)(nil)

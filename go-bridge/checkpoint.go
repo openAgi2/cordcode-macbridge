@@ -140,8 +140,8 @@ type checkpointCoalescer struct {
 	notify chan struct{}
 
 	resolver CheckpointWorkspaceResolver
-	publish func(LogicalEvent) // = h.publishEvent (Kernel→EventPublisher exit)
-	now     func() time.Time
+	publish  func(LogicalEvent) // = h.publishEvent (Kernel→EventPublisher exit)
+	now      func() time.Time
 
 	// onCaptureSync, if non-nil, is invoked synchronously inside the goroutine
 	// after each session's capture+emit completes. Used by the anti-double-write
@@ -278,12 +278,12 @@ func (c *checkpointCoalescer) captureAndEmit(
 	// (turn_diff_ready is absent from the reducer switch), so it cannot
 	// double-write the timeline (SSV2 guardrail 3 / 8).
 	if publish != nil {
-			data := map[string]interface{}{
-				"checkpointRef": ref,
-				"turnNumber":    in.turnN,
-				"files":         eventFiles,
-				"truncated":     len(eventFiles) >= checkpointMaxEventFiles,
-			}
+		data := map[string]interface{}{
+			"checkpointRef": ref,
+			"turnNumber":    in.turnN,
+			"files":         eventFiles,
+			"truncated":     len(eventFiles) >= checkpointMaxEventFiles,
+		}
 		publish(LogicalEvent{
 			BackendID: in.backendID,
 			SessionID: in.sessionID,

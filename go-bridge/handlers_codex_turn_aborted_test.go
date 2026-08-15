@@ -99,9 +99,9 @@ func TestDetectCodexTranscriptTask_TurnAborted_IsIdle(t *testing.T) {
 // WaitHydrateCommitReady 的 NonTerminalTurnCountInSet!=0 → 超时；turn 状态也不会是 aborted。
 func TestCodexColdHydrate_TurnAbortedSettlesProjection(t *testing.T) {
 	const (
-		backendID  = "codex"
-		sessionID  = "aborted-cold-hydrate"
-		turnID     = "turn-abort-1"
+		backendID = "codex"
+		sessionID = "aborted-cold-hydrate"
+		turnID    = "turn-abort-1"
 	)
 	handlers := newTestHandlers(t)
 	path := writeCodexRolloutFile(t, realShapeAbortedRollout(turnID)...)

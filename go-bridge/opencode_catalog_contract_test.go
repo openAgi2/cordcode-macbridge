@@ -36,26 +36,26 @@ var frozenOpenCodeSessionFields = []string{
 var frozenOpenCodeProjectFields = []string{"id", "worktree", "vcs", "time", "sandboxes"}
 
 type opencodeCatalogFixtureDoc struct {
-	Comment        string                 `json:"_comment"`
-	OpencodeVersion string                `json:"opencodeVersion"`
-	Auth           map[string]any         `json:"auth"`
-	Ceiling        map[string]any         `json:"sessionEndpointCeiling"`
-	Requests       map[string]any         `json:"requests"`
-	Responses      struct {
+	Comment         string         `json:"_comment"`
+	OpencodeVersion string         `json:"opencodeVersion"`
+	Auth            map[string]any `json:"auth"`
+	Ceiling         map[string]any `json:"sessionEndpointCeiling"`
+	Requests        map[string]any `json:"requests"`
+	Responses       struct {
 		SessionRoots struct {
-			Shape                string              `json:"_shape"`
-			CapturedTotalReturned int                 `json:"_capturedTotalReturned"`
-			CapturedTotalIsCapped bool                `json:"_capturedTotalIsCapped"`
-			Sessions              []map[string]any    `json:"sessions"`
+			Shape                 string           `json:"_shape"`
+			CapturedTotalReturned int              `json:"_capturedTotalReturned"`
+			CapturedTotalIsCapped bool             `json:"_capturedTotalIsCapped"`
+			Sessions              []map[string]any `json:"sessions"`
 		} `json:"session_roots"`
 		SessionScoped struct {
 			Shape    string           `json:"_shape"`
 			Sessions []map[string]any `json:"sessions"`
 		} `json:"session_scoped"`
 		Project struct {
-			Shape                string           `json:"_shape"`
+			Shape                 string           `json:"_shape"`
 			CapturedTotalReturned int              `json:"_capturedTotalReturned"`
-			Projects             []map[string]any `json:"projects"`
+			Projects              []map[string]any `json:"projects"`
 		} `json:"project"`
 	} `json:"responses"`
 }

@@ -111,10 +111,10 @@ type agentNotification struct {
 func decodeMessage(line []byte) (*jsonrpcResponse, *agentRequest, *agentNotification, error) {
 	// Try response first (has "result" or "error" and "id" but no "method").
 	var probe struct {
-		ID      *json.RawMessage `json:"id,omitempty"`
-		Method  *string          `json:"method,omitempty"`
-		Result  *json.RawMessage `json:"result,omitempty"`
-		Error   *jsonrpcError    `json:"error,omitempty"`
+		ID     *json.RawMessage `json:"id,omitempty"`
+		Method *string          `json:"method,omitempty"`
+		Result *json.RawMessage `json:"result,omitempty"`
+		Error  *jsonrpcError    `json:"error,omitempty"`
 	}
 	if err := json.Unmarshal(line, &probe); err != nil {
 		return nil, nil, nil, fmt.Errorf("decode json-rpc line: %w", err)

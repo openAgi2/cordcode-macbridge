@@ -188,7 +188,7 @@ func TestAvailableModels_APIFetch_NoWhitelist(t *testing.T) {
 
 // TestAvailableModels_NativeSingleModel_IsDefault 覆盖 §5.1 缺口 3（C5）：config.toml 顶层 model
 // 存在、无 catalog → AvailableModels 只返该模型 + GetModel()==该模型，handleListModels isDefault 命中
-//（修复前 GetModel 返 native glm-4.7 但 AvailableModels 不含 → 无 isDefault → iOS 落到 models.first）。
+// （修复前 GetModel 返 native glm-4.7 但 AvailableModels 不含 → 无 isDefault → iOS 落到 models.first）。
 func TestAvailableModels_NativeSingleModel_IsDefault(t *testing.T) {
 	writeCodexConfig(t, "model = \"glm-4.7\"\n") // 无 catalog 字段
 	a := &Agent{}

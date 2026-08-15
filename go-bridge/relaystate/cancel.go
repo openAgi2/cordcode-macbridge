@@ -5,7 +5,9 @@
 // 真实 runtime 接线（双端 registry、writer admission、Relay framing）是 R1。
 //
 // cancel 唯一原子状态机（plan §3.6.4「cancel唯一原子状态机」）：
-//   queued → reading → serializing → outboundQueued → committedToWriter → complete
+//
+//	queued → reading → serializing → outboundQueued → committedToWriter → complete
+//
 // committedToWriter 是唯一 too_late 边界：Relay 为 index0 原子 commit 到 writer，Direct 为首个
 // response frame 原子 commit。cancel 与 commit 在同一锁/actor 状态转移中裁决。
 package relaystate
@@ -87,10 +89,10 @@ func TryCancel(state CancelState, writerCommitted bool) (CancelOutcome, CancelSt
 func Advance(from, to CancelState) bool {
 	// 允许的向前边
 	edges := map[CancelState]CancelState{
-		StateQueued:           StateReading,
-		StateReading:         StateSerializing,
-		StateSerializing:     StateOutboundQueued,
-		StateOutboundQueued:  StateCommittedToWriter,
+		StateQueued:            StateReading,
+		StateReading:           StateSerializing,
+		StateSerializing:       StateOutboundQueued,
+		StateOutboundQueued:    StateCommittedToWriter,
 		StateCommittedToWriter: StateComplete,
 	}
 	next, ok := edges[from]
