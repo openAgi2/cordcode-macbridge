@@ -123,6 +123,27 @@
   事件流与 §3.3 映射逐项一致（block-start/delta/block-end/usage/finish/message/step/turn_end
   completed）；请求 headers 实证 env 凭据覆盖生效。
 
+## 审计 §8 阻断项修复（2026-08-15，iOS fa371a3）
+
+owner 真机验收发现：切 DeepSeek 模式列表直出「backend does not support session
+listing」错误横幅（独立审计 e701ecc 定性为阻断：live-only 列表空态缺失，计划盲区+
+审计失察）。已修复并复验：
+
+- **入口短路**：`BackendKind.isLiveOnlySessionList`（deepSeek）——`loadSessions` 对
+  live-only backend 不发任何 list/projects/pinned RPC，发布空列表并清除错误/加载/
+  陈旧缓存态；
+- **通用兜底**：列表 RPC 收到 wire `not_supported` → 空态而非错误横幅（保护未来
+  live-only backend 与遗漏路径）；其他错误码（`list_failed` 等）仍 fail visibly 走
+  错误横幅（对照测试锁定，不掩盖真实故障）；
+- **空态文案**：侧栏显示「此对话后端为实时模式：没有历史会话列表，直接发送消息即可
+  开始新对话」而非「暂无会话」；
+- **go-bridge 无改动**（审计确认其 not_supported 行为正确）；
+- **测试**：`LiveOnlySessionListTests` 4 用例全过（deepSeek 零 RPC 空态 / 语义仅
+  deepSeek / not_supported→空态 / list_failed 仍报错）；受影响套件
+  （ColdCache/AutoRefresh/BridgeModels）50/50；真机安装+启动完成（fa371a3）。
+- **验收行（审计 §8 补充）**：切到 DeepSeek 模式 → 列表空态提示、无错误横幅、
+  MacBridge 日志无 list_sessions RPC——待 owner 真机复核。
+
 ## 全量回归快照（2026-08-15，报告撰写时重跑）
 
 - `go build ./...` ok；`go test ./agent/dsh/... -count=1` ok（5.8s）；go-bridge 定向
