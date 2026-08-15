@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
@@ -58,7 +59,12 @@ type Agent struct {
 	mode         string
 	providers    []core.ProviderConfig
 	activeIdx    int // -1 = no provider set
-	mu           sync.RWMutex
+
+	// receiptWait bounds the session/prompt enqueue-receipt wait. Defaults to
+	// promptReceiptWait; fault-injection tests shrink it.
+	receiptWait time.Duration
+
+	mu sync.RWMutex
 }
 
 // New creates a DSH agent from the given options map.

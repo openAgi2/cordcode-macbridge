@@ -12,6 +12,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -217,8 +218,13 @@ func (s *dshSession) Send(prompt string, images []core.ImageAttachment, files []
 	if prompt == "" {
 		return fmt.Errorf("dsh: empty prompt")
 	}
+	// Pre-send health check (§3.6.3② !Alive() row): provably zero bytes
+	// written — the caller may CAS-evict, respawn, and send ONCE.
 	if !s.alive.Load() {
-		return fmt.Errorf("dsh: session not alive")
+		return &core.DeliveryError{
+			Stage: core.StagePreWrite,
+			Cause: fmt.Errorf("dsh: session not alive (pre-send)"),
+		}
 	}
 
 	id := s.nextRequestID()
@@ -228,8 +234,29 @@ func (s *dshSession) Send(prompt string, images []core.ImageAttachment, files []
 		SessionID:     s.rootSessionID,
 		ContentBlocks: []promptContent{{Type: "text", Text: prompt}},
 	}
-	if _, err := s.callRPC(id, "session/prompt", params, promptReceiptWait); err != nil {
-		return fmt.Errorf("dsh: session/prompt: %w", err)
+	receiptWait := s.agent.receiptWait
+	if receiptWait <= 0 {
+		receiptWait = promptReceiptWait
+	}
+	if _, err := s.callRPC(id, "session/prompt", params, receiptWait); err != nil {
+		var de *core.DeliveryError
+		if errors.As(err, &de) {
+			// Write-phase classification stands (zero-byte vs partial).
+			return err
+		}
+		var re *rpcError
+		if errors.As(err, &re) {
+			// Definite server-side rejection: the prompt was NOT enqueued —
+			// a plain error, no delivery uncertainty.
+			return fmt.Errorf("dsh: session/prompt: %w", err)
+		}
+		// Wait-phase failure: the request was fully written but the receipt
+		// never arrived. DSH enqueues the prompt BEFORE responding, so the
+		// turn may already be running — replay is forbidden (§3.6.3③).
+		return &core.DeliveryError{
+			Stage: core.StageAwaitingResponse,
+			Cause: fmt.Errorf("dsh: session/prompt: %w", err),
+		}
 	}
 	return nil
 }
@@ -469,6 +496,19 @@ func (s *dshSession) readStderr() {
 
 // --- JSON-RPC plumbing ---
 
+// rpcError is a definite JSON-RPC error RESPONSE from the server: the request
+// reached the runtime and was rejected there. Unlike a *core.DeliveryError it
+// carries no delivery uncertainty — the prompt was not enqueued — so the
+// caller fails visibly without transport-classification semantics.
+type rpcError struct {
+	Code    int
+	Message string
+}
+
+func (e *rpcError) Error() string {
+	return fmt.Sprintf("rpc error %d: %s", e.Code, e.Message)
+}
+
 func (s *dshSession) nextRequestID() int64 { return s.idCounter.Add(1) }
 
 // callRPC registers the response waiter BEFORE writing, so a fast stdio peer
@@ -491,7 +531,7 @@ func (s *dshSession) callRPC(id int64, method string, params any, timeout time.D
 	select {
 	case frame := <-ch:
 		if frame.Error != nil {
-			return nil, fmt.Errorf("rpc error %d: %s", frame.Error.Code, frame.Error.Message)
+			return nil, &rpcError{Code: frame.Error.Code, Message: frame.Error.Message}
 		}
 		return frame.Result, nil
 	case <-timer.C:
@@ -527,11 +567,18 @@ func (s *dshSession) writeRequest(id int64, method string, params any) error {
 	s.stdinMu.Lock()
 	defer s.stdinMu.Unlock()
 	n, err := s.stdin.Write(append(data, '\n'))
-	if err != nil {
-		return err
-	}
-	if n != len(data)+1 {
-		return fmt.Errorf("short write: %d of %d bytes", n, len(data)+1)
+	if err != nil || n != len(data)+1 {
+		// Delivery classification (§3.6.3③): zero bytes moved = provably
+		// undelivered (PreWrite, repairable); any byte written = the request
+		// may have been delivered (PartialWrite, no replay).
+		stage := core.StagePartialWrite
+		if n == 0 {
+			stage = core.StagePreWrite
+		}
+		return &core.DeliveryError{
+			Stage: stage,
+			Cause: fmt.Errorf("%s write: %d of %d bytes: %v", method, n, len(data)+1, err),
+		}
 	}
 	return nil
 }

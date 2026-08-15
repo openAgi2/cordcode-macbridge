@@ -640,6 +640,30 @@ func (h *Handlers) deleteSession(sessionID string) (core.AgentSession, bool) {
 	return h.sessions.delete(sessionID)
 }
 
+// deleteSessionIfSame CAS-deletes the sessionID entry only when it still maps
+// to exactly sess. Caller must hold h.mu.
+func (h *Handlers) deleteSessionIfSame(sessionID string, sess core.AgentSession) (core.AgentSession, bool) {
+	return h.sessions.deleteIfSame(sessionID, sess)
+}
+
+// evictSessionCAS is the typed-death eviction path (§3.6.3 CAS ownership):
+// compare-and-delete by session object identity under h.mu, then the single
+// CAS winner Close()s the evicted session outside the lock. Losers no-op —
+// Close is called exactly once per session object, and a racing replacement
+// session can never be evicted by a stale evictor.
+func (h *Handlers) evictSessionCAS(sessionID string, sess core.AgentSession) bool {
+	if sess == nil {
+		return false
+	}
+	h.mu.Lock()
+	old, won := h.deleteSessionIfSame(sessionID, sess)
+	h.mu.Unlock()
+	if won && old != nil {
+		_ = old.Close()
+	}
+	return won
+}
+
 func (h *Handlers) putSessionWithMeta(sessionID, backendID, directory string, sess core.AgentSession) {
 	h.sessions.put(sessionID, backendID, directory, sess)
 }
@@ -1973,6 +1997,10 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 
 	// P1-5: 默认日志不记录用户消息正文，仅记录长度，避免 prompt/源码/凭据进入日志、崩溃包或诊断。
 	slog.Info("go-bridge: handleSendMessage", "sessionID", params.SessionID, "contentLen", len(params.Content))
+	resumeID := params.SessionID
+	if strings.HasPrefix(resumeID, "pending-") {
+		resumeID = ""
+	}
 	h.mu.Lock()
 	sess, ok := h.getSession(params.SessionID)
 	h.mu.Unlock()
@@ -1981,10 +2009,6 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 	// 尚无真实 agent 会话——必须走 StartSession（对真实 id 即 --resume）续接，
 	// 否则下面 sess.Send 会对 nil 接口派发而 panic（2026-06-30 真机复现的崩溃）。
 	if !ok || sess == nil {
-		resumeID := params.SessionID
-		if strings.HasPrefix(resumeID, "pending-") {
-			resumeID = ""
-		}
 		if resumeID != "" && agent.Name() == "claudecode" {
 			if wireErr := preflightClaudeResume(h.ctx, agent, resumeID); wireErr != nil {
 				conn.SendResult(msg.RequestID, nil, wireErr)
@@ -2071,9 +2095,60 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 	})
 
 	images, files := splitAttachments(params.Attachments)
-	if err := sess.Send(params.Content, images, files); err != nil {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "send_failed", Message: err.Error()})
-		return
+	sendErr := sess.Send(params.Content, images, files)
+	if sendErr != nil {
+		var delivery *core.DeliveryError
+		if errors.As(sendErr, &delivery) && delivery.ReplayAllowed() {
+			// §3.6.3③ StagePreWrite: provably zero bytes written (dead
+			// session at the pre-send check, or a zero-byte write). This is
+			// a pre-send REPAIR, not a retry: CAS-evict the dead session
+			// (Close once), respawn with a fresh process nonce, and send
+			// this prompt exactly one more time.
+			slog.Warn("go-bridge: handleSendMessage: pre-write delivery failure, repairing once",
+				"sessionID", params.SessionID, "backendID", msg.BackendID, "stage", delivery.Stage.String())
+			h.evictSessionCAS(params.SessionID, sess)
+			var respawnErr error
+			sess, respawnErr = agent.StartSession(h.ctx, resumeID)
+			if respawnErr != nil {
+				slog.Error("go-bridge: handleSendMessage: respawn failed", "sessionID", params.SessionID, "error", respawnErr)
+				conn.SendResult(msg.RequestID, nil, &WireError{Code: "send_failed", Message: sendErr.Error()})
+				return
+			}
+			// Double-checked put: a concurrent send may have won the slot.
+			h.mu.Lock()
+			existing, existingOk := h.getSession(params.SessionID)
+			if existingOk && existing != nil && existing != sess {
+				h.mu.Unlock()
+				_ = sess.Close()
+				sess = existing
+			} else {
+				h.putSessionWithMeta(params.SessionID, msg.BackendID, extractDir(msg), sess)
+				h.mu.Unlock()
+			}
+			h.sessions.markRunning(params.SessionID)
+			if repairErr := sess.Send(params.Content, images, files); repairErr != nil {
+				// The repaired attempt fails visibly too — never a second
+				// replay. Evict only a dead session for the next request.
+				var repairDelivery *core.DeliveryError
+				if errors.As(repairErr, &repairDelivery) && !sess.Alive() {
+					h.evictSessionCAS(params.SessionID, sess)
+				}
+				conn.SendResult(msg.RequestID, nil, &WireError{Code: "send_failed", Message: repairErr.Error()})
+				return
+			}
+		} else {
+			// PartialWrite / AwaitingResponse / AcceptedUnknown: the prompt
+			// may already be enqueued and executing — fail visibly and never
+			// replay it (§3.6.3③). Evict only when the session is dead, so
+			// the NEXT different request rebuilds instead of re-hitting it.
+			if errors.As(sendErr, &delivery) && !sess.Alive() {
+				h.evictSessionCAS(params.SessionID, sess)
+			}
+			slog.Warn("go-bridge: handleSendMessage: send failed (no replay)",
+				"sessionID", params.SessionID, "backendID", msg.BackendID, "error", sendErr.Error())
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "send_failed", Message: sendErr.Error()})
+			return
+		}
 	}
 	turnCommitted = true
 

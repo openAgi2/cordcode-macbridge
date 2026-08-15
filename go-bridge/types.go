@@ -357,6 +357,30 @@ func (r *sessionRegistry) isIdle(sessionID string) bool {
 	return !ok || t.state == sessionStateIdle
 }
 
+// deleteIfSame CAS-deletes the registry entry for sessionID only when it
+// still holds exactly sess (object identity). This mirrors the
+// compare-and-delete pattern of clearRelayKindIf: racing replacements (abort,
+// concurrent send, stale relay defer) can no longer evict a NEWER session,
+// and exactly one CAS winner owns the out-of-lock Close/reap (design
+// docs/2026-08-13-dsh-driver-design.md §3.6.3 CAS ownership). Returns the
+// removed session when the CAS won.
+func (r *sessionRegistry) deleteIfSame(sessionID string, sess core.AgentSession) (core.AgentSession, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, ok := r.sessions[sessionID]
+	if !ok || t == nil || t.session == nil || t.session != sess {
+		return nil, false
+	}
+	if t.sessionID != "" {
+		delete(r.sessions, t.sessionID)
+	}
+	if t.pendingID != "" {
+		delete(r.sessions, t.pendingID)
+	}
+	delete(r.sessions, sessionID)
+	return t.session, true
+}
+
 func (r *sessionRegistry) delete(sessionID string) (core.AgentSession, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
