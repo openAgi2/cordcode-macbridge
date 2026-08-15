@@ -111,9 +111,20 @@ func newDshSession(ctx context.Context, agent *Agent, sessionID string) (*dshSes
 
 	sessionCtx, cancel := context.WithCancel(ctx)
 
-	args := append([]string{agent.configPath}, agent.cliExtraArgs...)
-	cmd := exec.CommandContext(sessionCtx, agent.cliBin, args...)
-	cmd.Dir = agent.workDir
+	var cmd *exec.Cmd
+	if agent.srcRoot != "" {
+		// Source-checkout mode: the launch shape gate0 verified on this pin —
+		// `node --import tsx <bin.ts> <config>` with cwd at the checkout root
+		// (plugin resolution walks the checkout's pnpm node_modules).
+		args := append([]string{"--import", "tsx", agent.scriptPath}, agent.cliExtraArgs...)
+		args = append(args, agent.configPath)
+		cmd = exec.CommandContext(sessionCtx, agent.nodeBin, args...)
+		cmd.Dir = agent.srcRoot
+	} else {
+		args := append([]string{agent.configPath}, agent.cliExtraArgs...)
+		cmd = exec.CommandContext(sessionCtx, agent.cliBin, args...)
+		cmd.Dir = agent.workDir
+	}
 	prepareCmdForProcessGroup(cmd)
 	cmd.Env = agent.buildProcessEnv()
 

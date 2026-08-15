@@ -77,11 +77,18 @@ owner 指出「用户 mac 装了 DeepSeek Harness 后，MacBridge 应自动搞�
 
 - **runtime 多路探测**：`agent/dsh/discovery.go` `DiscoverRuntime()`——PATH `dsh-jsonrpc-agent`
   → PATH `dsh-jsonrpc-agent-pkg-<plat>`（官方 Python wheel `deepseek-harness-runtime-bin` 的
-  单文件可执行名；platforms.json 映射 darwin/arm64→macos-arm64 等）→ nvm 最新版 bin →
+  单文件可执行名；platforms.json 映射 darwin/arm64→macos-arm64 等）→ **源码 checkout**
+  （`~/Projects/deepseek-harness` 等常规位置；校验 bin.ts+pnpm node_modules 后按 gate0 验证过
+  的 `node --import tsx <bin.ts> <config>`、cwd=checkout root 拉起；node 经 PATH→nvm→常见
+  绝对路径解析；亦可用 `dsh_root` 显式指定）→ nvm 最新版 bin →
   `python3 -c 'import deepseek_harness_runtime; print(bundled_runtime_path())'`（官方
   Resolution API，含 macOS `-spawn-helper` 完整性校验，3s 有界）。`New` 与
   `detectDSHRuntime` 共用同一函数——hello_ack 状态与 StartSession spawn 目标永远一致。
   Mac App `cliSearchPath` 增 pnpm/volta/npm-global 目录（GUI 不继承 shell PATH）。
+  **真机验证（本 Mac）**：`~/Projects/deepseek-harness`（pin 47f9438）下
+  `runtime auto-discovered (source checkout)` + `agent registered backendId=deepseek`，
+  `~/.dsh/.credentials.yaml` 的 DEEPSEEK_API_KEY 自动生效。live-only backend 的
+  discovery watcher 对 ErrNotSupported 改为安静跳过（不再周期性告警）。
 - **凭据层级镜像 DSH 语义**（关键事实：packaged runtime 闭包 108 依赖里**没有**
   `dsh-credentials-local`——`.credentials.yaml` 只有 web bundle 会挂载，因此 composition
   无法挂它，driver 侧读文件是唯一可行路径）：MacBridge provider key（显式）>

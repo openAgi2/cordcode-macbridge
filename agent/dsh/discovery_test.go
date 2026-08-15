@@ -228,3 +228,118 @@ func TestDiscoveryDoesNotHangOnPython(t *testing.T) {
 func platformKey() string {
 	return runtime.GOOS + "/" + runtime.GOARCH
 }
+
+// ── source-checkout discovery (owner: harness as source at ~/Projects) ─────
+
+// fakeNodeShim writes a `node` executable into dir that just runs the python
+// fake runtime regardless of argv — letting src-mode spawn run end to end
+// hermetically. Returns dir for PATH prepending.
+func fakeNodeShim(t *testing.T, runtimeScript string) string {
+	t.Helper()
+	dir := t.TempDir()
+	shim := "#!/bin/sh\nexec python3 \"" + runtimeScript + "\" \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "node"), []byte(shim), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// fakeCheckout lays out a minimal deepseek-harness source checkout under home.
+func fakeCheckout(t *testing.T, home, rel string) string {
+	t.Helper()
+	root := filepath.Join(home, rel)
+	writeFileT(t, filepath.Join(root, jsonrpcBinRel), "// placeholder bin.ts\n")
+	writeFileT(t, filepath.Join(root, "node_modules", ".bin", "tsx"), "#!/bin/sh\n")
+	return root
+}
+
+func TestDiscoverSourceCheckoutConventionalRoots(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("DSH_HOME", filepath.Join(home, ".dsh"))
+	nodeDir := fakeNodeShim(t, "/nonexistent-runtime.py")
+	t.Setenv("PATH", nodeDir+":"+os.Getenv("PATH"))
+
+	fakeCheckout(t, home, "Projects/deepseek-harness")
+	rt := discoverSourceCheckout()
+	if rt == nil {
+		t.Fatal("conventional Projects/ checkout not discovered")
+	}
+	if !strings.HasSuffix(rt.srcRoot, "Projects/deepseek-harness") || rt.script == "" || rt.nodeBin == "" {
+		t.Fatalf("discovered = %+v", rt)
+	}
+	if rt.source != "source-checkout:Projects/deepseek-harness" {
+		t.Fatalf("source label = %q", rt.source)
+	}
+
+	// A checkout without installed node_modules is NOT usable.
+	home2 := t.TempDir()
+	t.Setenv("HOME", home2)
+	root2 := filepath.Join(home2, "code", "deepseek-harness")
+	writeFileT(t, filepath.Join(root2, jsonrpcBinRel), "// x\n")
+	if rt := discoverSourceCheckout(); rt != nil {
+		t.Fatalf("checkout without node_modules must not be discovered: %+v", rt)
+	}
+}
+
+func TestNewWithSourceRootOpt(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("DSH_HOME", filepath.Join(home, ".dsh"))
+	root := fakeCheckout(t, home, "harness")
+	nodeDir := fakeNodeShim(t, "/nonexistent-runtime.py")
+	t.Setenv("PATH", nodeDir+":"+os.Getenv("PATH"))
+
+	agentIface, err := New(map[string]any{"dsh_root": root, "work_dir": home})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, ok := agentIface.(*Agent)
+	if !ok {
+		t.Fatalf("New returned %T", agentIface)
+	}
+	if a.srcRoot != root || a.scriptPath == "" || a.nodeBin == "" {
+		t.Fatalf("src mode not armed: src=%q script=%q node=%q", a.srcRoot, a.scriptPath, a.nodeBin)
+	}
+
+	// Bad root → honest constructor error.
+	if _, err := New(map[string]any{"dsh_root": filepath.Join(home, "missing"), "work_dir": home}); err == nil {
+		t.Fatal("invalid dsh_root must fail closed")
+	}
+}
+
+// End-to-end src-mode spawn: fake node shim + fake runtime through a full
+// StartSession/Send/turn cycle, proving argv shape (config reaches the
+// runtime as the trailing positional) and cwd independence.
+func TestLifecycleSourceCheckoutSpawn(t *testing.T) {
+	agent := newFaultAgent(t, "ok") // writes runtime script + config, mode "ok"
+	// Rebuild the agent as src mode around the same fake runtime script.
+	home := t.TempDir()
+	t.Setenv("DSH_HOME", filepath.Join(home, ".dsh"))
+	nodeDir := fakeNodeShim(t, agent.cliBin) // node shim execs the fake runtime
+	t.Setenv("PATH", nodeDir+":"+os.Getenv("PATH"))
+
+	root := fakeCheckout(t, home, "Projects/deepseek-harness")
+	agentIface, err := New(map[string]any{"dsh_root": root, "work_dir": home, "config_path": agent.configPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, ok := agentIface.(*Agent)
+	if !ok {
+		t.Fatalf("New returned %T", agentIface)
+	}
+
+	s, err := newDshSession(context.Background(), a, "ses-srcmode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	if err := s.Send("hello", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	term := waitForEvent(t, s, 5*time.Second, func(ev core.Event) bool {
+		return ev.Type == core.EventResult && ev.Done
+	})
+	if term.Error != nil {
+		t.Fatalf("src-mode turn failed: %v", term.Error)
+	}
+}

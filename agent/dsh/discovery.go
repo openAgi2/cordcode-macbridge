@@ -70,29 +70,115 @@ func pkgExeName() string {
 	}
 }
 
-// discoverRuntimeBinary searches every acquisition route in order. It returns
-// the executable path plus a short human-readable source label for
-// diagnostics. An empty result means the harness runtime is not installed.
-func discoverRuntimeBinary() (string, string) {
+// discoveredRuntime captures WHICH harness installation was found and HOW to
+// spawn it: either a direct executable (exe set) or a source checkout run via
+// `node --import tsx packages/examples/jsonrpc-demo/src/bin.ts` (srcRoot /
+// nodeBin / script set — the exact launch shape gate0 verified on this pin).
+type discoveredRuntime struct {
+	exe     string // direct executable (PATH / wheel / nvm)
+	srcRoot string // source checkout root (src mode)
+	nodeBin string // node binary for src mode
+	script  string // jsonrpc-demo bin.ts inside the checkout
+	source  string // diagnostics label
+}
+
+// sourceCheckoutCandidates lists conventional source-checkout locations
+// probed in order (relative to $HOME). A checkout is valid when the
+// jsonrpc-demo bin plus the installed node_modules (pnpm) are present.
+var sourceCheckoutCandidates = []string{
+	"Projects/deepseek-harness",
+	"deepseek-harness",
+	"code/deepseek-harness",
+	"dev/deepseek-harness",
+	".local/share/deepseek-harness",
+}
+
+const jsonrpcBinRel = "packages/examples/jsonrpc-demo/src/bin.ts"
+
+// discoverSourceCheckout probes the conventional checkout locations.
+func discoverSourceCheckout() *discoveredRuntime {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	for _, rel := range sourceCheckoutCandidates {
+		root := filepath.Join(home, rel)
+		script := filepath.Join(root, jsonrpcBinRel)
+		if !fileExists(script) || !fileExists(filepath.Join(root, "node_modules", ".bin", "tsx")) {
+			continue
+		}
+		node := resolveNodeBinary()
+		if node == "" {
+			return nil // checkout present but no node to run it
+		}
+		return &discoveredRuntime{
+			srcRoot: root,
+			nodeBin: node,
+			script:  script,
+			source:  "source-checkout:" + rel,
+		}
+	}
+	return nil
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+// resolveNodeBinary finds node for the src mode: PATH first, then nvm's
+// newest version, then common absolute install locations.
+func resolveNodeBinary() string {
+	if path, err := exec.LookPath("node"); err == nil {
+		return path
+	}
+	if node := latestNvmBinary("node"); node != "" {
+		return node
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	for _, p := range []string{
+		filepath.Join(home, ".volta", "bin", "node"),
+		"/opt/homebrew/bin/node",
+		"/usr/local/bin/node",
+	} {
+		if fileExists(p) {
+			return p
+		}
+	}
+	return ""
+}
+
+// discoverRuntimeBinary searches every acquisition route in order. An empty
+// result means the harness runtime is not installed on this Mac.
+func discoverRuntimeBinary() *discoveredRuntime {
 	if path, err := exec.LookPath("dsh-jsonrpc-agent"); err == nil {
-		return path, "PATH:dsh-jsonrpc-agent"
+		return &discoveredRuntime{exe: path, source: "PATH:dsh-jsonrpc-agent"}
 	}
 	if name := pkgExeName(); name != "" {
 		if path, err := exec.LookPath(name); err == nil {
-			return path, "PATH:" + name
+			return &discoveredRuntime{exe: path, source: "PATH:" + name}
 		}
 	}
+	if rt := discoverSourceCheckout(); rt != nil {
+		return rt
+	}
 	if path := latestNvmRuntime(); path != "" {
-		return path, "nvm"
+		return &discoveredRuntime{exe: path, source: "nvm"}
 	}
 	if path := pythonWheelRuntime(); path != "" {
-		return path, "python-wheel"
+		return &discoveredRuntime{exe: path, source: "python-wheel"}
 	}
-	return "", ""
+	return nil
 }
 
 // latestNvmRuntime finds dsh-jsonrpc-agent under the newest nvm node version.
-func latestNvmRuntime() string {
+func latestNvmRuntime() string { return latestNvmBinary("dsh-jsonrpc-agent") }
+
+// latestNvmBinary finds <name> under the newest nvm node version that has it.
+func latestNvmBinary(name string) string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
@@ -102,24 +188,36 @@ func latestNvmRuntime() string {
 	if err != nil {
 		return ""
 	}
-	best, bestMajor, bestMinor, bestPatch := "", -1, -1, -1
+	type version struct {
+		major, minor, patch int
+		dir                 string
+	}
+	var versions []version
 	for _, e := range entries {
 		if !e.IsDir() || !strings.HasPrefix(e.Name(), "v") {
 			continue
 		}
-		major, minor, patch, ok := parseNodeVersion(e.Name())
-		if !ok {
-			continue
-		}
-		if major > bestMajor || (major == bestMajor && minor > bestMinor) ||
-			(major == bestMajor && minor == bestMinor && patch > bestPatch) {
-			candidate := filepath.Join(versionsDir, e.Name(), "bin", "dsh-jsonrpc-agent")
-			if _, err := exec.LookPath(candidate); err == nil {
-				best, bestMajor, bestMinor, bestPatch = candidate, major, minor, patch
-			}
+		if major, minor, patch, ok := parseNodeVersion(e.Name()); ok {
+			versions = append(versions, version{major, minor, patch, e.Name()})
 		}
 	}
-	return best
+	// Highest version first; return the first that carries the binary.
+	for i := 0; i < len(versions); i++ {
+		best := i
+		for j := i + 1; j < len(versions); j++ {
+			v, w := versions[j], versions[best]
+			if v.major > w.major || (v.major == w.major && v.minor > w.minor) ||
+				(v.major == w.major && v.minor == w.minor && v.patch > w.patch) {
+				best = j
+			}
+		}
+		versions[i], versions[best] = versions[best], versions[i]
+		candidate := filepath.Join(versionsDir, versions[i].dir, "bin", name)
+		if fileExists(candidate) {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func parseNodeVersion(name string) (major, minor, patch int, ok bool) {

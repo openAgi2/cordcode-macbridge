@@ -20,6 +20,7 @@ package gobridge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -187,6 +188,13 @@ func (h *Handlers) snapshotBackendSession(ctx context.Context, seen map[string]s
 	current, count, err := h.discoveryFingerprint(ctx, id, agent)
 	duration := time.Since(started)
 	if err != nil {
+		// Live-only backends (dsh) have no list by design — a quiet skip, not
+		// a recurring warning (there is no fingerprint to preserve).
+		if errors.Is(err, core.ErrNotSupported) {
+			slog.Debug("go-bridge: session discovery skipped (backend has no session list)",
+				"phase", tag, "backend", id)
+			return false
+		}
 		// Previously this branch was silent. A recurring enumerate error leaves
 		// seen[id] at the seed fingerprint forever → fingerprint never changes →
 		// sessions_changed never fires, with no log to reveal why. Skip without

@@ -67,6 +67,13 @@ type Agent struct {
 	// runtimeSource labels how the runtime binary was found (diagnostics).
 	runtimeSource string
 
+	// srcRoot/nodeBin/scriptPath are set in source-checkout mode: the runtime
+	// runs as `node --import tsx packages/examples/jsonrpc-demo/src/bin.ts`
+	// with cwd=checkout root (the launch shape gate0 verified on this pin).
+	srcRoot    string
+	nodeBin    string
+	scriptPath string
+
 	mu sync.RWMutex
 }
 
@@ -98,15 +105,27 @@ func New(opts map[string]any) (core.Agent, error) {
 		if len(fields) > 1 {
 			a.cliExtraArgs = fields[1:]
 		}
+	} else if root, ok := opts["dsh_root"].(string); ok && strings.TrimSpace(root) != "" {
+		// Explicit source-checkout root.
+		if err := a.useSourceCheckout(strings.TrimSpace(root)); err != nil {
+			return nil, err
+		}
 	} else {
 		// Auto-discovery: an installed harness must just work (owner
-		// feedback 2026-08-15). PATH → wheel pkg exe → nvm → python wheel API.
-		if path, source := discoverRuntimeBinary(); path != "" {
-			a.cliBin = path
-			a.runtimeSource = source
-			slog.Info("dsh: runtime auto-discovered", "bin", filepath.Base(path), "source", source)
+		// feedback 2026-08-15). PATH exe → PATH wheel exe → source checkout
+		// → nvm → python wheel Resolution API.
+		if rt := discoverRuntimeBinary(); rt != nil {
+			a.runtimeSource = rt.source
+			if rt.srcRoot != "" {
+				a.srcRoot, a.nodeBin, a.scriptPath = rt.srcRoot, rt.nodeBin, rt.script
+				slog.Info("dsh: runtime auto-discovered (source checkout)",
+					"root", rt.srcRoot, "node", filepath.Base(rt.nodeBin))
+			} else {
+				a.cliBin = rt.exe
+				slog.Info("dsh: runtime auto-discovered", "bin", filepath.Base(rt.exe), "source", rt.source)
+			}
 		} else {
-			return nil, fmt.Errorf("dsh: runtime not found — install DeepSeek Harness (dsh-jsonrpc-agent on PATH, the deepseek-harness-runtime-bin wheel, or an nvm install) or set the deepseek cli_path option")
+			return nil, fmt.Errorf("dsh: runtime not found — install DeepSeek Harness (source checkout, dsh-jsonrpc-agent on PATH, the deepseek-harness-runtime-bin wheel, or an nvm install) or set the deepseek cli_path option")
 		}
 	}
 
@@ -131,8 +150,14 @@ func New(opts map[string]any) (core.Agent, error) {
 		return nil, fmt.Errorf("dsh: config %q unavailable: %w", a.configPath, err)
 	}
 
-	if _, err := exec.LookPath(a.cliBin); err != nil {
-		return nil, fmt.Errorf("dsh: runtime %q not found in PATH: %w", a.cliBin, err)
+	// Exe-mode runtime validation (src mode validated its own facts above):
+	// an explicit cli_path must actually resolve; discovery already proved it.
+	if a.srcRoot == "" {
+		if _, err := exec.LookPath(a.cliBin); err != nil {
+			if _, statErr := os.Stat(a.cliBin); statErr != nil {
+				return nil, fmt.Errorf("dsh: runtime %q not found: %w", a.cliBin, err)
+			}
+		}
 	}
 
 	return a, nil
@@ -154,11 +179,36 @@ func (a *Agent) materializeEmbeddedConfig() (string, error) {
 	return path, nil
 }
 
-// DiscoverRuntime exposes the runtime binary auto-discovery so the bridge
-// descriptor status reflects the same acquisition routes the driver spawns
-// from (one truth source for hello_ack availability and StartSession).
+// DiscoverRuntime exposes the runtime auto-discovery so the bridge descriptor
+// status reflects the same acquisition routes the driver spawns from (one
+// truth source for hello_ack availability and StartSession). The returned
+// path is the direct executable, or the bin.ts script for a source checkout.
 func DiscoverRuntime() (string, string) {
-	return discoverRuntimeBinary()
+	rt := discoverRuntimeBinary()
+	if rt == nil {
+		return "", ""
+	}
+	if rt.exe != "" {
+		return rt.exe, rt.source
+	}
+	return rt.script, rt.source
+}
+
+// useSourceCheckout validates a source checkout and records its spawn facts.
+func (a *Agent) useSourceCheckout(root string) error {
+	script := filepath.Join(root, jsonrpcBinRel)
+	if !fileExists(script) || !fileExists(filepath.Join(root, "node_modules", ".bin", "tsx")) {
+		return fmt.Errorf("dsh: %q is not a usable deepseek-harness checkout (missing %s or installed node_modules)", root, jsonrpcBinRel)
+	}
+	node := resolveNodeBinary()
+	if node == "" {
+		return fmt.Errorf("dsh: source checkout %q found but no node binary", root)
+	}
+	a.srcRoot = root
+	a.nodeBin = node
+	a.scriptPath = script
+	a.runtimeSource = "source-checkout:explicit"
+	return nil
 }
 
 func (a *Agent) Name() string { return "dsh" }
