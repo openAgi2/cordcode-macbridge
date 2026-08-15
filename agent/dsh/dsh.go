@@ -64,6 +64,9 @@ type Agent struct {
 	// promptReceiptWait; fault-injection tests shrink it.
 	receiptWait time.Duration
 
+	// runtimeSource labels how the runtime binary was found (diagnostics).
+	runtimeSource string
+
 	mu sync.RWMutex
 }
 
@@ -95,7 +98,18 @@ func New(opts map[string]any) (core.Agent, error) {
 		if len(fields) > 1 {
 			a.cliExtraArgs = fields[1:]
 		}
+	} else {
+		// Auto-discovery: an installed harness must just work (owner
+		// feedback 2026-08-15). PATH → wheel pkg exe → nvm → python wheel API.
+		if path, source := discoverRuntimeBinary(); path != "" {
+			a.cliBin = path
+			a.runtimeSource = source
+			slog.Info("dsh: runtime auto-discovered", "bin", filepath.Base(path), "source", source)
+		} else {
+			return nil, fmt.Errorf("dsh: runtime not found — install DeepSeek Harness (dsh-jsonrpc-agent on PATH, the deepseek-harness-runtime-bin wheel, or an nvm install) or set the deepseek cli_path option")
+		}
 	}
+
 	if v, ok := opts["model"].(string); ok && v != "" {
 		a.model = v
 	}
@@ -140,6 +154,13 @@ func (a *Agent) materializeEmbeddedConfig() (string, error) {
 	return path, nil
 }
 
+// DiscoverRuntime exposes the runtime binary auto-discovery so the bridge
+// descriptor status reflects the same acquisition routes the driver spawns
+// from (one truth source for hello_ack availability and StartSession).
+func DiscoverRuntime() (string, string) {
+	return discoverRuntimeBinary()
+}
+
 func (a *Agent) Name() string { return "dsh" }
 
 // StartSession spawns one runtime process per session (§1-2 process model,
@@ -182,17 +203,30 @@ func (a *Agent) buildProcessEnv() []string {
 	a.mu.RLock()
 	workDir := a.workDir
 	mode := a.mode
-	var providerEnv []string
+	providerKey, providerBaseURL := "", ""
 	if a.activeIdx >= 0 && a.activeIdx < len(a.providers) {
-		p := a.providers[a.activeIdx]
-		if p.APIKey != "" {
-			providerEnv = append(providerEnv, "DEEPSEEK_API_KEY="+p.APIKey)
-		}
-		if p.BaseURL != "" {
-			providerEnv = append(providerEnv, "DEEPSEEK_BASE_URL="+p.BaseURL)
-		}
+		providerKey = a.providers[a.activeIdx].APIKey
+		providerBaseURL = a.providers[a.activeIdx].BaseURL
 	}
 	a.mu.RUnlock()
+
+	// Credential layering (product hardening): an explicit MacBridge provider
+	// key wins; otherwise fall back to the harness's own user-level store
+	// (~/.dsh/.credentials.yaml written by the dsh Web UI, then ~/.dsh/.env).
+	// Injected env ranks first in every DSH trust layering, so this is
+	// semantically the harness resolving its own credentials.
+	var providerEnv []string
+	if providerKey != "" {
+		providerEnv = append(providerEnv, "DEEPSEEK_API_KEY="+providerKey)
+	} else if h := discoverHarnessCredentials(); h.APIKey != "" {
+		providerEnv = append(providerEnv, "DEEPSEEK_API_KEY="+h.APIKey)
+		slog.Debug("dsh: using harness-stored DeepSeek credential", "source", h.Source)
+	}
+	if providerBaseURL != "" {
+		providerEnv = append(providerEnv, "DEEPSEEK_BASE_URL="+providerBaseURL)
+	} else if h := discoverHarnessCredentials(); h.BaseURL != "" {
+		providerEnv = append(providerEnv, "DEEPSEEK_BASE_URL="+h.BaseURL)
+	}
 
 	sessionRoot := filepath.Join(workDir, dshDataSubdir, sessionsSubdir)
 	_ = os.MkdirAll(sessionRoot, 0o755)
@@ -201,6 +235,12 @@ func (a *Agent) buildProcessEnv() []string {
 		"DSH_CWD=" + workDir,
 		"DSH_SESSION_ROOT=" + sessionRoot,
 		"DSH_PERMISSION_MODE=" + mode,
+	}
+	// Forward a custom harness home so the runtime's own $DSH_HOME/.env
+	// fallback layer resolves the same directory the driver read credentials
+	// from. (Default ~/.dsh needs no forwarding — HOME is allowlisted.)
+	if custom := strings.TrimSpace(os.Getenv("DSH_HOME")); custom != "" {
+		driverEnv = append(driverEnv, "DSH_HOME="+custom)
 	}
 
 	base := core.FilterEnvToAllowlist(os.Environ(), core.AgentEnvRuntimeAllowlist())

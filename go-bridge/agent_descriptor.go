@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/openAgi2/cordcode-macbridge/agent/dsh"
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
@@ -219,14 +220,16 @@ func detectAgentStatus(id string, codexBackendMode string, cfg *AgentDetectionCo
 	}
 }
 
-// detectDSHRuntime 检测 DeepSeek Harness runtime（dsh-jsonrpc-agent）可用性。
-// stdio JSON-RPC runtime 没有廉价探活子命令，仅做 PATH 存在性检查；
-// 缺失时 backend 如实报 not_detected，不伪造 available。
+// detectDSHRuntime 检测 DeepSeek Harness runtime 可用性。与 driver 共用
+// agent/dsh.DiscoverRuntime（同一获取路径：PATH → wheel pkg exe → nvm →
+// python wheel Resolution API），保证 hello_ack 状态与 StartSession 的
+// spawn 目标一致；缺失时如实报 not_detected 并给出获取途径。
 func detectDSHRuntime() (AgentStatus, string) {
-	if _, err := exec.LookPath("dsh-jsonrpc-agent"); err != nil {
-		return AgentStatusNotDetected, "dsh-jsonrpc-agent runtime not found in PATH"
+	bin, source := dsh.DiscoverRuntime()
+	if bin == "" {
+		return AgentStatusNotDetected, "DeepSeek Harness runtime not found (install dsh-jsonrpc-agent on PATH or pip install deepseek-harness-runtime-bin)"
 	}
-	return AgentStatusAvailable, ""
+	return AgentStatusAvailable, source
 }
 
 // detectClaudeCLI 检测 Claude Code CLI 可用性。

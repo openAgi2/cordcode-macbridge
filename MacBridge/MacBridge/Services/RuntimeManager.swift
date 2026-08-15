@@ -178,6 +178,11 @@ struct RuntimeConfig {
             // still named `codex`, but is no longer under /Applications/Codex.app.
             "/Applications/ChatGPT.app/Contents/Resources",
             "/Applications/Codex.app/Contents/Resources",
+            // Node-ecosystem global bin dirs (GUI launches do not inherit
+            // the user's shell PATH; dsh-jsonrpc-agent installs live here).
+            "~/Library/pnpm",      // pnpm global bin
+            "~/.volta/bin",        // volta shims
+            "~/.npm-global/bin",   // npm prefix=~/.npm-global convention
         ]
     }
 }
