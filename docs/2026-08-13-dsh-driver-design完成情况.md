@@ -174,6 +174,43 @@ owner 止损指令（终止「读 ~/.dsh 磁盘会话」调查方向，重申 §
 - iOS：`xcodebuild build` SUCCEEDED；`-only-testing:CCCodeTests/BridgeModelsTests` 43/43；
   真机安装+启动完成（iPhone 16 Pro）。
 
+## live-only 投影基线修复（2026-08-16，spec `docs/2026-08-16-dsh-live-only-projection-spec.md`）
+
+owner 真机验收（2026-08-15 23:55）发现：§8 空态修复后发送「讲个笑话」，turn 在 Mac 完整
+跑完（seq 1→201 全部经 relay delivered）但 iPhone 死寂——输入框永久「执行中」、无回复。
+根因（三层门全部缺 deepSeek）：
+
+1. **Mac `backendSupportsProjectionHydrate`** 不含 deepseek → `get_session_projection`
+   恒回 `projection.not_migrated`（日志 5 次重试全拒）→ iOS 消息页（SSV2 投影为唯一
+   数据源）拿不到基线，patch 无 ownership 不渲染；
+2. **Mac `advertiseSessionSyncV2Backend`** 不含 deepseek → per-backend capability 缺失；
+3. **iOS `sessionSyncV2ProjectionBackend`** 不含 deepSeek → 即便基线到达也不渲染。
+
+修复（owner 方向放行「live-only 会话以 kernel 状态为投影基线」，五条硬约束见 spec）：
+
+- **Mac live-only admission**（`handlers_projection.go`）：`backendUsesLiveOnlyProjection`
+  独立判定（非允许清单加项）；`ensureLiveOnlyProjectionAdmission` 复用 kernel hydrate
+  事务原语——pathless keep-carried-baseline 分支以 kernel reducer 状态为基线，admission
+  窗口内 live 事件经 pendingLive 原子并入，立即 commit 达 Ready；rev 连续/fence 串行化
+  全部沿用既有机制，零并行写路径；kernel 增 `HasReducerState`。
+- **诚实 not_found**（C2）：kernel 无状态且 registry 无会话（bridge 重启后重开）→ 新
+  wire 错误 `projection.not_found`（retryable=false，canonical/mirror 已入册）；kernel
+  有状态的死进程会话照常服务最后已知状态（含终态 execution）。
+- **Mac 观察剪枝**（附带修复 A）：`set_observation_scope` 对 live-only backend 的死会话
+  （无 live 会话 + 无 kernel 状态）从 observed set 剔除，不再每次续租为其空转
+  relayEvents；其他 backend 不受影响（外部 turn 观察依赖非 registry 会话）。
+- **Mac capability**：`advertiseSessionSyncV2Backend` 增 deepseek（live-only admission
+  达 ready 即拥有 SSV2 投影面）。
+- **iOS**：`sessionSyncV2ProjectionBackend` 增 `.deepSeek`；`applyProjectionPullOutcome`
+  增 `projection.not_found`/`projection.not_migrated` 专门诚实文案（「会话已结束或不存在
+  （实时模式会话不保留历史）」）；同步管线零改动（C3：不超时收口、不无 ownership 渲染、
+  无 legacy fallback——reconcile 行为以测试锁定）。
+- **测试**：Mac `handlers_projection_liveonly_test.go` 6 用例（基线=kernel/patch 先于
+  基线+rev 连续/not_found 死会话/死进程有状态照常服务/路径 guard/观察剪枝）+
+  Projection|Observation|Hydrat 回归全绿；iOS `LiveOnlyProjectionStateTests` 3 用例
+  （T11 patch 先于基线 reconcile/T12 无裁判/T13 终态诚实文案）+
+  `ChatViewModelSessionSyncV2Tests` 52/52 回归绿。
+
 ## 证据索引（MacBridge dsh/driver 分支）
 
 `9555562` driver 骨架/codec/identity → `739ea1a` codec 测试 → `9dade9d` scope/seq/ignorable →

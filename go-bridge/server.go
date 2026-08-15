@@ -272,11 +272,14 @@ func advertiseSessionSyncV2Backend(backends []AgentProviderDescriptor) {
 		id := backends[i].ID
 		kind := backends[i].Kind
 		// Per-backend migration (design §4 / K5): only backends with a projection hydrate
-		// producer advertise ownership capability.
+		// producer advertise ownership capability. deepseek reaches Ready via the live-only
+		// admission (kernel-authoritative baseline, spec 2026-08-16) — no disk hydrate
+		// producer by design, but it owns the SSV2 projection plane all the same.
 		if id == "codex" || kind == "codex" ||
 			id == "claude" || id == "claudecode" || kind == "claude_code" || kind == "claude" ||
 			id == "opencode" || kind == "opencode" ||
-			id == "grokbuild" || kind == "grokbuild" {
+			id == "grokbuild" || kind == "grokbuild" ||
+			id == "deepseek" || kind == "deepseek" {
 			backends[i].Capabilities = appendUniqueCapability(
 				backends[i].Capabilities,
 				"session_sync_v2",

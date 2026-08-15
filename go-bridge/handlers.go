@@ -1042,9 +1042,32 @@ func (h *Handlers) handleSetObservationScope(conn Connection, msg WireMessage) {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: "invalid observation scope"})
 		return
 	}
+	observedSessions := req.SessionIDs
+	// Live-only backend sessions that are neither live in the registry nor carry kernel
+	// state are dead by definition (no external event source exists for them) — prune them
+	// from the observed set instead of spinning per-session relays for them every renewal
+	// (spec 2026-08-16 附带修复 A). Other backends keep unknown-session observation:
+	// external turns (another terminal) are not registry sessions by design.
+	if backendUsesLiveOnlyProjection(req.BackendID) {
+		kept := make([]string, 0, len(observedSessions))
+		for _, sid := range observedSessions {
+			if sid == "" {
+				continue
+			}
+			if _, live := h.getSession(sid); live || h.projectionKernel.HasReducerState(req.BackendID, sid) {
+				kept = append(kept, sid)
+			} else {
+				slog.Info("go-bridge: observation pruned dead live-only session",
+					"backendID", req.BackendID,
+					"sessionPrefix", projectionSessionLogPrefix(sid),
+				)
+			}
+		}
+		observedSessions = kept
+	}
 	h.observation.SetScope(device.DeviceID, ObservationScope{
 		BackendID:             req.BackendID,
-		SessionIDs:            req.SessionIDs,
+		SessionIDs:            observedSessions,
 		DeliveryMode:          req.DeliveryMode,
 		IncludeRunningSignals: req.IncludeRunningSignals,
 		LeaseSeconds:          req.LeaseSeconds,
@@ -1057,11 +1080,11 @@ func (h *Handlers) handleSetObservationScope(conn Connection, msg WireMessage) {
 	// get_session_messages (owner 2026-07-24: Mac turn_started + zero online
 	// while iOS had the session open).
 	if h.eventPublisher != nil {
-		for _, sid := range req.SessionIDs {
+		for _, sid := range observedSessions {
 			h.eventPublisher.NoteLiveInterest(device.DeviceID, req.BackendID, sid)
 		}
 	}
-	for _, sid := range req.SessionIDs {
+	for _, sid := range observedSessions {
 		if sid == "" {
 			continue
 		}
@@ -1073,14 +1096,15 @@ func (h *Handlers) handleSetObservationScope(conn Connection, msg WireMessage) {
 	// INFO so flapping/delivery-gap forensics can see mode without Debug log level.
 	// hasSubscriber after Subscribe is the forensic for candidateTargets=0 regressions.
 	hasSub := false
-	if len(req.SessionIDs) > 0 {
-		hasSub = h.broadcaster.HasSessionSubscriber(req.BackendID, req.SessionIDs[0])
+	if len(observedSessions) > 0 {
+		hasSub = h.broadcaster.HasSessionSubscriber(req.BackendID, observedSessions[0])
 	}
 	slog.Info("go-bridge: set_observation_scope applied",
 		"deviceID", safeID(device.DeviceID),
 		"backendID", req.BackendID,
 		"mode", req.DeliveryMode,
-		"sessions", len(req.SessionIDs),
+		"sessions", len(observedSessions),
+		"requestedSessions", len(req.SessionIDs),
 		"includeRunning", req.IncludeRunningSignals,
 		"leaseSeconds", req.LeaseSeconds,
 		"hasSessionSubscriber", hasSub,

@@ -137,6 +137,8 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 			retryAfterMillis = &value
 		case errors.Is(err, errProjectionBackendNotMigrated):
 			code = "projection.not_migrated"
+		case errors.Is(err, errProjectionSessionNotFound):
+			code = "projection.not_found"
 		default:
 			status := h.projectionKernel.Status(msg.BackendID, params.SessionID)
 			if failure := status.Failure; failure != nil {
@@ -320,6 +322,16 @@ func logProjectionRPCTrace(
 var errProjectionBackendNotMigrated = errors.New("backend not yet migrated to session projection")
 var errProjectionSourceUnavailable = errors.New("projection source is not available for inspection")
 
+// errProjectionSessionNotFound is returned for a live-only backend session that has neither
+// kernel state (live ingestion never committed an event this bridge epoch) nor a live registry
+// session. Nothing can be served — the RPC fails honestly with code projection.not_found
+// instead of an empty head-0 shell (spec 2026-08-16 C2; §10.5.7 修法 1).
+var errProjectionSessionNotFound = errors.New("live-only session has no kernel state and no live session in this bridge epoch")
+
+// backendSupportsProjectionHydrate gates the disk/rich-history cold-hydrate producers.
+// deepseek is deliberately NOT listed here: its sessions are live-only (no transcript, no
+// rich history — design §4) and reach Ready through the dedicated live-only admission path
+// below instead (spec 2026-08-16 C5: never a bare allowlist edit).
 func backendSupportsProjectionHydrate(backendID string) bool {
 	switch backendID {
 	case "codex", "claude", "claudecode", "opencode", "grokbuild":
@@ -329,6 +341,76 @@ func backendSupportsProjectionHydrate(backendID string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// backendUsesLiveOnlyProjection reports whether a backend's projection baseline comes
+// exclusively from kernel state accumulated by live ingestion (SSV2 live-only semantics,
+// design §8 session_sync_v2). Such backends have no disk hydrate source by design and must
+// never reach prepareProjectionHydrateSource; dead sessions (no kernel state and no live
+// registry session) fail honestly with projection.not_found.
+func backendUsesLiveOnlyProjection(backendID string) bool {
+	return backendID == "deepseek"
+}
+
+// ensureLiveOnlyProjectionAdmission brings a live-only backend session to Ready with the
+// kernel's live-ingested state as the baseline. It reuses the kernel hydrate transaction
+// primitives for serialization — the pathless keep-carried-baseline branch restores the
+// authoritative reducer snapshot into the transaction, events arriving inside the admission
+// window queue as pendingLive and are applied by the atomic commit — so rev continuity and
+// fence semantics are the existing ones, with no parallel writer (spec 2026-08-16 C1/C5).
+func (h *Handlers) ensureLiveOnlyProjectionAdmission(backendID, sessionID string) error {
+	if _, live := h.getSession(sessionID); !live && !h.projectionKernel.HasReducerState(backendID, sessionID) {
+		return errProjectionSessionNotFound
+	}
+	source := ProjectionSourceDescriptor{
+		Identity: "live-only:" + backendID + ":" + sessionID,
+	}
+	admission, err := h.projectionKernel.BeginHydrateTransaction(backendID, sessionID, source, false, false, true)
+	if err != nil {
+		return err
+	}
+	if admission.AlreadyReady {
+		return nil
+	}
+	if admission.Leader {
+		commit, commitErr := h.projectionKernel.CommitHydrateTransaction(backendID, sessionID)
+		if commitErr != nil {
+			h.projectionKernel.MarkFailed(backendID, sessionID, "projection.commit_failed", commitErr.Error(), true)
+			return commitErr
+		}
+		slog.Info("go-bridge: projection_shadow",
+			"stage", "live_only_admission_commit",
+			"policyVersion", SessionSyncV2PolicyVersion,
+			"backendID", backendID,
+			"sessionPrefix", projectionSessionLogPrefix(sessionID),
+			"headRev", commit.Projection.SyncRev,
+			"pendingLive", commit.PendingLive,
+		)
+		if commit.PendingPatch != nil {
+			h.eventPublisher.PublishProjectionPatch(backendID, sessionID, *commit.PendingPatch)
+		}
+		return nil
+	}
+	if admission.Done == nil {
+		return errProjectionHydrating
+	}
+	budget := coldHydrateTimeout
+	if budget <= 0 {
+		budget = defaultColdHydrateTimeout
+	}
+	select {
+	case <-admission.Done:
+		status := h.projectionKernel.Status(backendID, sessionID)
+		if status.Phase == ProjectionHydrateReady {
+			return nil
+		}
+		if status.Failure != nil {
+			return errors.New(status.Failure.Message)
+		}
+		return errors.New("projection hydrate ended without a committed state")
+	case <-time.After(budget):
+		return fmt.Errorf("%w; retry after admission completes", errProjectionHydrating)
 	}
 }
 
@@ -353,6 +435,9 @@ func (h *Handlers) ensureProjectionHydrated(
 	// Cold OpenCode pulls may force a pathless rich-history rebuild below.
 	if ready && !forceColdInspection {
 		return nil
+	}
+	if backendUsesLiveOnlyProjection(backendID) {
+		return h.ensureLiveOnlyProjectionAdmission(backendID, sessionID)
 	}
 	if !backendSupportsProjectionHydrate(backendID) {
 		return errProjectionBackendNotMigrated

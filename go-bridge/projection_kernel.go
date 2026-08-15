@@ -608,6 +608,20 @@ func (k *ProjectionKernel) Status(backendID, sessionID string) ProjectionHydrati
 	return status
 }
 
+// HasReducerState reports whether the authoritative reducer holds any state for the
+// session, i.e. live ingestion committed at least one event this bridge epoch. The
+// live-only projection admission uses it to distinguish a dead session (honest
+// projection.not_found) from a live session whose baseline has not been admitted yet.
+func (k *ProjectionKernel) HasReducerState(backendID, sessionID string) bool {
+	if k == nil {
+		return false
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	_, ok := k.reducer.Snapshot(backendID, sessionID)
+	return ok
+}
+
 func (k *ProjectionKernel) BeginHydrate(backendID, sessionID string, explicitRetry, sourceChanged bool) bool {
 	k.mu.Lock()
 	defer k.mu.Unlock()
