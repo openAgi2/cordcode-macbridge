@@ -190,8 +190,9 @@ func (h *Handlers) startGrokLeaderSessionRelay(sessionID, backendID string, agen
 //     active turn 可挂。promptId 与 turn_completed 收口键一致, 不跳变。
 //   - turn_completed: 由 convertSessionUpdate 的 case "turn_completed" 映射上游 durable
 //     终态信号产生 (主收口), 这里只负责 markIdle + 重置 turnArmed。
-//   - defer idle: 仅当 leader 异常断开 (channel close) 且未收到 turn_completed 时
-//     兜底, 防止 isGenerating 残留; 正常收口不经过这里。
+//   - defer 中断: 仅当 leader 异常断开 (channel close) 且未收到 turn_completed 时
+//     兜底, 合成 turn_aborted(leader_disconnect) + idle——turn 结果未知, 必须以
+//     「中断」收口而非猜「完成」(F-7); 正常收口不经过这里。
 func (h *Handlers) grokLeaderSessionRelayLoop(sessionID, backendID string, sub core.SessionEventSubscriber, relayKey, cwd string) {
 	// 内容事件: 首个到达时触发 turn_started 合成。todos_updated (plan) 不算内容,
 	// 因为它可能在 turn 真正开始前就到达, 误触发执行态。
@@ -212,10 +213,17 @@ func (h *Handlers) grokLeaderSessionRelayLoop(sessionID, backendID string, sub c
 	// 等 turn 身份确定后一次性以 user_message 送入投影。
 	var pendingUserText string
 	defer func() {
-		// leader 异常断开且未收 turn_completed → 兜底补 idle, 防 isGenerating 残留。
+		// leader 异常断开且未收 turn_completed：turn 结果未知（可能仍在跑，也可能已死）。
+		// F-7（2026-08-15 登记簿）：不再把「结果未知」静默猜成「已完成」——先合成
+		// turn_aborted(leader_disconnect) 明确中断语义（对齐 codex 死进程先例 :423-432，
+		// 协议 bridge-v1.md「turn_error/turn_aborted settle a turn as failed/aborted」），
+		// 再补 idle 让客户端收口、防 isGenerating 残留（2026-08-04 修复保留）。
 		if turnArmed {
-			slog.Info("go-bridge: grokLeaderSessionRelay leader disconnect with armed turn, emitting fallback idle", "sessionID", sessionID)
+			slog.Info("go-bridge: grokLeaderSessionRelay leader disconnect with armed turn, emitting turn_aborted(leader_disconnect) + idle", "sessionID", sessionID)
 			h.sessions.markIdle(sessionID)
+			h.sendSessionEvent(sessionID, backendID, "turn_aborted", map[string]interface{}{
+				"turnId": armedTurnID, "reason": "leader_disconnect",
+			})
 			h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "idle"})
 		}
 		h.mu.Lock()

@@ -52,9 +52,10 @@ func TestGrokLeaderRelay_SynthesizesTurnStartedOnFirstContent(t *testing.T) {
 	}()
 
 	// Expect: turn_started(synth) + session_state_changed:running(synth) + text_delta + text_delta
-	// Leader channel closed without turn_completed → defer emits session_state_changed:idle
-	names := readEventNames(t, clientConn, 5)
-	want := []string{"turn_started", "session_state_changed", "text_delta", "text_delta", "session_state_changed"}
+	// Leader channel closed without turn_completed → defer emits turn_aborted(leader_disconnect)
+	// + session_state_changed:idle (F-7: 结果未知按「中断」收口, 不猜「完成」)
+	names := readEventNames(t, clientConn, 6)
+	want := []string{"turn_started", "session_state_changed", "text_delta", "text_delta", "turn_aborted", "session_state_changed"}
 	if len(names) != len(want) {
 		t.Fatalf("got %d events %v, want %d %v", len(names), names, len(want), want)
 	}
@@ -218,10 +219,13 @@ func TestGrokLeaderRelay_PlanDoesNotTriggerTurnStarted(t *testing.T) {
 	}
 }
 
-// TestGrokLeaderRelay_DefersIdleOnDisconnectWithoutCompletion verifies the fallback:
-// if the leader channel closes while a turn is armed (no turn_completed received),
-// defer emits session_state_changed:idle to prevent isGenerating from being stuck.
-func TestGrokLeaderRelay_DefersIdleOnDisconnectWithoutCompletion(t *testing.T) {
+// TestGrokLeaderRelay_DefersAbortedPlusIdleOnDisconnectWithoutCompletion verifies the
+// fallback (F-7): if the leader channel closes while a turn is armed (no turn_completed
+// received), defer emits turn_aborted(leader_disconnect) + session_state_changed:idle —
+// the turn outcome is unknown and must settle as interrupted, NOT silently guessed
+// "completed" — while the trailing idle still prevents isGenerating from being stuck
+// (2026-08-04 regression guard).
+func TestGrokLeaderRelay_DefersAbortedPlusIdleOnDisconnectWithoutCompletion(t *testing.T) {
 	serverConn, clientConn, cleanup := openTestConn(t)
 	defer cleanup()
 
@@ -234,7 +238,7 @@ func TestGrokLeaderRelay_DefersIdleOnDisconnectWithoutCompletion(t *testing.T) {
 
 	// Content event arms the turn, then channel closes without turn_completed
 	events := make(chan core.Event, 1)
-	events <- core.Event{Type: core.EventText, Content: "partial response, leader dies"}
+	events <- core.Event{Type: core.EventText, Content: "partial response, leader dies", TurnID: "prompt-dc"}
 	close(events)
 	sub := &fakeSessionEventSubscriber{events: events}
 
@@ -244,10 +248,17 @@ func TestGrokLeaderRelay_DefersIdleOnDisconnectWithoutCompletion(t *testing.T) {
 		close(done)
 	}()
 
-	// turn_started(synth) + running(synth) + text_delta + session_state_changed:idle(defer fallback)
-	names := readEventNames(t, clientConn, 4)
-	if names[3] != "session_state_changed" {
-		t.Fatalf("last event = %q, want session_state_changed (defer idle fallback)", names[3])
+	// turn_started(synth) + running(synth) + text_delta + turn_aborted(defer) + session_state_changed:idle(defer)
+	names, payloads := readEventNamesWithPayloads(t, clientConn, 5)
+	want := []string{"turn_started", "session_state_changed", "text_delta", "turn_aborted", "session_state_changed"}
+	for i, w := range want {
+		if names[i] != w {
+			t.Fatalf("event[%d] = %q, want %q (full: %v)", i, names[i], w, names)
+		}
+	}
+	aborted := payloads[3]
+	if aborted["turnId"] != "prompt-dc" || aborted["reason"] != "leader_disconnect" {
+		t.Fatalf("turn_aborted payload = %v, want turnId=prompt-dc reason=leader_disconnect", aborted)
 	}
 
 	select {

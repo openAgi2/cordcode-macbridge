@@ -8,6 +8,8 @@
 
 ## [Unreleased]
 
+- **Grok 断线不再把结果未知的 turn 猜成「已完成」（登记簿 F-7）**：Grok 任务的 leader 观察通道异常断开且 turn 未收到完成信号时，此前直接补发 `idle` 状态，客户端据此把 turn 收口成完成——断线重连后任务可能仍在跑或结果已丢失，用户却看到「已完成」。现在断开时先合成 `turn_aborted(leader_disconnect)` 中断事件（复用协议既有 turn 中止语义，与 codex 死进程处理对齐），再补 `idle` 收口执行态；客户端（iOS 已同步支持）以「中断」收口、不假装完成。正常完成/错误路径不受影响。
+
 - **Codex/Grok session 目录与原生客户端保持同源并主动刷新**：CordCode Link 的已声明 v2 列表、旧客户端 v1 列表和后台 `sessions_changed` 探测现在共用各 backend 的原生可见成员集；目录清空、标题/排序/工作区变化会先使旧分页快照失效，再通知 iPhone 刷新。Codex/Grok 不再用磁盘扫描补齐原生列表，旧客户端仍保留 v1 cursor 成功契约；OpenCode/Claude compatibility 未删除。控制面通知不进入 session timeline，原生读取错误会保留上次成功状态并等待恢复，不伪造空列表。
 
 - **文件读取协议硬切为 `read_file_v2`**：CordCode Link 删除旧 `read_file` 的 dispatch、scope、capability、Relay 分类、codec 与 fixture，只保留带 workspace/session owner 的严格授权读取。旧客户端调用旧方法会收到统一 `method_not_found`；Relay 仅将 v2 归入 bulk，并继续支持分块、公平调度与取消。iOS/Web 同步移除 fallback 与旧 API，最低兼容版本随此次变更抬升。
