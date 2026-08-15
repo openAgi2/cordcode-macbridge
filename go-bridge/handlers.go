@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/agent/claudecode"
+	"github.com/openAgi2/cordcode-macbridge/agent/dsh"
 	"github.com/openAgi2/cordcode-macbridge/core"
 	"github.com/openAgi2/cordcode-macbridge/go-bridge/admission"
 	"github.com/openAgi2/cordcode-macbridge/go-bridge/filepool"
@@ -1031,6 +1032,13 @@ func catalogCapabilityRequiredFor(agentName string) bool {
 	}
 }
 
+// backendHasNoExternalEventSource reports backends whose sessions cannot be
+// driven by another frontend outside this bridge (deepseek v1: no dsh web
+// file tail). Observation-scope renewal uses it to prune dead ids.
+func backendHasNoExternalEventSource(backendID string) bool {
+	return backendID == "deepseek"
+}
+
 func (h *Handlers) handleSetObservationScope(conn Connection, msg WireMessage) {
 	device := conn.AuthedDevice()
 	if device == nil {
@@ -1043,12 +1051,14 @@ func (h *Handlers) handleSetObservationScope(conn Connection, msg WireMessage) {
 		return
 	}
 	observedSessions := req.SessionIDs
-	// Live-only backend sessions that are neither live in the registry nor carry kernel
-	// state are dead by definition (no external event source exists for them) — prune them
-	// from the observed set instead of spinning per-session relays for them every renewal
-	// (spec 2026-08-16 附带修复 A). Other backends keep unknown-session observation:
-	// external turns (another terminal) are not registry sessions by design.
-	if backendUsesLiveOnlyProjection(req.BackendID) {
+	// Backends with no external event source (deepseek: store logs are read-only
+	// in v1, no file tail — 2026-08-16 store bridge design §3 边界) can never
+	// observe a turn for a session that is neither live in the registry nor in
+	// the kernel: prune those ids instead of spinning per-session relays for
+	// them on every renewal (spec 2026-08-16 附带修复 A). Other backends keep
+	// unknown-session observation: external turns (another terminal) are not
+	// registry sessions by design.
+	if backendHasNoExternalEventSource(req.BackendID) {
 		kept := make([]string, 0, len(observedSessions))
 		for _, sid := range observedSessions {
 			if sid == "" {
@@ -2045,6 +2055,20 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 				conn.SendResult(msg.RequestID, nil, wireErr)
 				return
 			}
+		}
+		// DSH store bridge: a requested id that exists in the user's harness
+		// store is a dead session — the pinned SDK has no cross-process resume
+		// (design §2.1; persistence refuses to rematerialize an existing log).
+		// Fail fast with the typed wire error instead of surfacing the harness
+		// materialization refusal at the first session/prompt.
+		if resumeID != "" && agent.Name() == "dsh" && dsh.StoreHasSession(resumeID) {
+			retryable := false
+			conn.SendResult(msg.RequestID, nil, &WireError{
+				Code:      "session_resume_not_supported",
+				Message:   "this DeepSeek session has ended; the current DSH SDK (0.1.0-rc.6) does not support resuming it from another client — start a new session to continue",
+				Retryable: &retryable,
+			})
+			return
 		}
 		slog.Info("go-bridge: handleSendMessage: session not found in registry. Starting new agent session.", "sessionID", params.SessionID, "resumeID", resumeID, "agent", agent.Name())
 		startAt := time.Now()

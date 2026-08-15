@@ -9,11 +9,13 @@ package dsh
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -239,15 +241,66 @@ func (a *Agent) useSourceCheckout(root string) error {
 
 func (a *Agent) Name() string { return "dsh" }
 
+// ErrSessionNotResumable: the session id exists in the user's harness store
+// but no live process holds it — the pinned SDK has no cross-process resume
+// (session/prompt on a known id lazily CREATES; persistence then refuses to
+// rematerialize an existing log, source-verified 2026-08-16 §2.1). Failing
+// here is deterministic and honest; the go-bridge preflight maps it to the
+// wire error session_resume_not_supported.
+var ErrSessionNotResumable = errors.New("dsh: session exists on disk but the pinned SDK has no cross-process resume")
+
 // StartSession spawns one runtime process per session (§1-2 process model,
-// mirroring grokbuild's process-group handling).
+// mirroring grokbuild's process-group handling). A requested id that already
+// exists in the store is a dead session — resume is SDK-blocked, so it fails
+// fast instead of erroring at the first session/prompt materialization.
 func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentSession, error) {
+	if strings.TrimSpace(sessionID) != "" && StoreHasSession(sessionID) {
+		return nil, ErrSessionNotResumable
+	}
 	return newDshSession(ctx, a, sessionID)
 }
 
-// ListSessions — DSH is live-only (§4): no list/resume over the protocol.
+// ListSessions scans the user's harness session store (2026-08-16 store
+// bridge design §4.2). The store IS the user's own dsh storage: phone-created
+// sessions land there (624c6a4 form) and dsh web sessions become visible on
+// iOS with no bridge-private catalog. Delegated subagent tasks stay hidden.
 func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, error) {
-	return nil, core.ErrNotSupported
+	store := openDshSessionStore()
+	sessions, err := store.scanSessions()
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	infos := make([]core.AgentSessionInfo, 0, len(sessions))
+	for _, sess := range sessions {
+		if sess.Subagent {
+			continue
+		}
+		infos = append(infos, core.AgentSessionInfo{
+			ID:         sess.ID,
+			Summary:    sessionTitle(sess.Path, sess.Plain),
+			Directory:  sess.Cwd,
+			ModifiedAt: time.Unix(sess.ModTime, 0),
+		})
+	}
+	sort.Slice(infos, func(i, j int) bool { return infos[i].ModifiedAt.After(infos[j].ModifiedAt) })
+	return infos, nil
+}
+
+// GetRichSessionHistory implements core.RichHistoryProvider over the harness
+// store log (design §4.3) — the file-backed counterpart the SSV2 pathless
+// cold-hydrate and get_session_messages both consume.
+func (a *Agent) GetRichSessionHistory(ctx context.Context, sessionID string, limit int) ([]core.RichHistoryEntry, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	sess, ok := openDshSessionStore().resolveSessionFile(sessionID)
+	if !ok {
+		return nil, fmt.Errorf("dsh: session %q not found in harness store", sessionID)
+	}
+	return readRichHistory(sess, limit)
 }
 
 func (a *Agent) Stop() error { return nil }

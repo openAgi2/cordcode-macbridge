@@ -215,6 +215,18 @@ This is not an ownership lock. Corrupt/unreadable stubs may be skipped, and anot
 a process after the check (TOCTOU). New sessions, already registry-owned sessions, and non-Claude
 backends do not use this preflight.
 
+### DeepSeek dead-session resume guard
+
+For `send_message` on the `deepseek` backend with a non-empty resume id that is not live in the
+MacBridge registry but DOES exist in the user's harness store (`~/.dsh/sessions`), the request
+fails before any process spawn with error `session_resume_not_supported` (`retryable: false`):
+the pinned DSH SDK (0.1.0-rc.6) exposes no cross-process resume — `session/prompt` on a known id
+lazily creates a new agent+session pair, and the harness persistence refuses to rematerialize an
+existing log (source-verified against pin `47f9438`). Clients surface this honestly (the session
+has ended; start a new session to continue) instead of retrying. History of such a session remains
+fully readable via `get_session_projection`/`get_session_messages` over the store. New sessions
+(empty/pending ids) and registry-live sessions are unaffected.
+
 ## Events
 
 Event envelope:
@@ -1026,7 +1038,7 @@ RPC lifecycle is explicit:
 | `ready` | success `{projection}` or `{patches,headRev}` | complete committed head; only this may map into the active timeline |
 | `failed` | error `projection.hydrate_failed`, `retryable`, optional `retryAfterMillis`/`attempts` | hydrate terminated; retry policy is explicit |
 | not migrated | error `projection.not_migrated`, `retryable=false` | selected backend has no v2 authority |
-| not found | error `projection.not_found`, `retryable=false` | live-only backend session has neither kernel state nor a live session this bridge epoch (e.g. DeepSeek after a bridge restart); nothing to serve — never an empty shell |
+| not found | error `projection.not_found`, `retryable=false` | backend session has neither kernel state, a live session, nor a file-backed source this bridge epoch (e.g. a DeepSeek id absent from the user harness store); nothing to serve — never an empty shell |
 
 The RPC response budget is 15 seconds. Budget expiry while the transaction remains healthy returns
 `projection.hydrating`; it never returns head-0 or a partial success. The client may keep its
