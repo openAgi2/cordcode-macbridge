@@ -29,11 +29,11 @@ var embeddedCordisYML []byte
 const dshProviderRoute = "deepseek-official"
 
 const (
-	defaultCLIBin    = "dsh-jsonrpc-agent"
-	defaultModel     = "deepseek-chat"
-	dshDataSubdir    = ".cccode-macbridge/dsh"
-	cordisYMLName    = "cordis.yml"
-	sessionsSubdir   = "sessions"
+	defaultCLIBin  = "dsh-jsonrpc-agent"
+	defaultModel   = "deepseek-chat"
+	dshDataSubdir  = ".cccode-macbridge/dsh"
+	cordisYMLName  = "cordis.yml"
+	sessionsSubdir = "sessions"
 )
 
 var _ core.Agent = (*Agent)(nil)
@@ -339,8 +339,8 @@ func (a *Agent) RunDiagnostics(ctx context.Context, progress func(core.Diagnosti
 	if _, err := exec.LookPath(cliBin); err != nil {
 		notify(core.DiagnosticResult{
 			ID: "dsh-runtime", Name: "dsh-jsonrpc-agent runtime", Status: "failed",
-			Message:    fmt.Sprintf("runtime %q not found in PATH", cliBin),
-			Severity:   "error",
+			Message:       fmt.Sprintf("runtime %q not found in PATH", cliBin),
+			Severity:      "error",
 			FixSuggestion: "Install the DeepSeek Harness runtime (dsh-jsonrpc-agent) and ensure it is on PATH",
 		})
 		report.OverallStatus = "failed"
@@ -362,8 +362,8 @@ func (a *Agent) RunDiagnostics(ctx context.Context, progress func(core.Diagnosti
 	if !apiKeySet {
 		notify(core.DiagnosticResult{
 			ID: "dsh-api-key", Name: "DeepSeek API key", Status: "warning",
-			Message:     "no active provider carries a DeepSeek API key; turns will fail authentication",
-			Severity:    "warning",
+			Message:       "no active provider carries a DeepSeek API key; turns will fail authentication",
+			Severity:      "warning",
 			FixSuggestion: "Configure the DeepSeek provider API key in backend provider settings",
 		})
 		if report.OverallStatus == "ok" {

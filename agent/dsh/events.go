@@ -58,8 +58,8 @@ type subagentFinishedParams struct {
 	AgentID         string `json:"agentId"`
 	ParentSessionID string `json:"parentSessionId"`
 	ChildSessionID  string `json:"childSessionId"`
-	Status          string `json:"status"`      // "ok" | "error"
-	StopReason      string `json:"stopReason"`  // provider-reported
+	Status          string `json:"status"`     // "ok" | "error"
+	StopReason      string `json:"stopReason"` // provider-reported
 }
 
 // dshEvent is the session-log event envelope. seq sits at the envelope top
@@ -92,10 +92,10 @@ func (e *dshEvent) ignorableMarker() bool {
 // assistant/message. inputTokens does NOT include cache hits; the context
 // pressure projection is inputTokens + cacheReadTokens (§3.7).
 type dshUsage struct {
-	InputTokens      int `json:"inputTokens"`
-	OutputTokens     int `json:"outputTokens"`
-	CacheReadTokens  int `json:"cacheReadTokens"`
-	ReasoningTokens  int `json:"reasoningTokens"`
+	InputTokens     int `json:"inputTokens"`
+	OutputTokens    int `json:"outputTokens"`
+	CacheReadTokens int `json:"cacheReadTokens"`
+	ReasoningTokens int `json:"reasoningTokens"`
 }
 
 // wire request payloads
@@ -119,8 +119,8 @@ type initializeResult struct {
 const dshServerInfoName = "deepseek-harness-sdk-runtime"
 
 type sessionPromptParams struct {
-	SessionID     string           `json:"sessionId"`
-	ContentBlocks []promptContent  `json:"contentBlocks"`
+	SessionID     string          `json:"sessionId"`
+	ContentBlocks []promptContent `json:"contentBlocks"`
 }
 
 type promptContent struct {

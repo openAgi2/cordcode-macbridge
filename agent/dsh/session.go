@@ -74,6 +74,9 @@ type dshSession struct {
 
 	// codec is owned exclusively by the read loop goroutine.
 	codec *dshCodec
+	// scope routes notifications against the root session tree (§3.8); same
+	// read-loop ownership as the codec.
+	scope *scopeRouter
 }
 
 // newProcessNonce generates the 16-byte (128-bit) CSPRNG nonce for one spawn.
@@ -142,6 +145,7 @@ func newDshSession(ctx context.Context, agent *Agent, sessionID string) (*dshSes
 		done:          make(chan struct{}),
 		respChannels:  make(map[int64]chan *jsonrpcFrame),
 		codec:         newCodec(nonce),
+		scope:         newScopeRouter(rootID),
 	}
 	s.alive.Store(true)
 
@@ -348,9 +352,11 @@ func (s *dshSession) handleResponse(frame *jsonrpcFrame) {
 	}
 }
 
-// handleNotification routes the four server→client notifications. Scope
-// routing (root/descendant/foreign, §3.8) runs BEFORE any root codec state is
-// touched: descendant and foreign frames never advance root decode state.
+// handleNotification routes the four server→client notifications through the
+// §3.8 matrix. Session-scope routing runs BEFORE any root decode state is
+// touched: descendant frames are filtered with diagnostics, foreign frames
+// are protocol pollution and terminate the process (the driver keeps one root
+// tree per process — a foreign id means the single-root invariant broke).
 func (s *dshSession) handleNotification(method string, params json.RawMessage) {
 	switch method {
 	case "session.event":
@@ -359,21 +365,25 @@ func (s *dshSession) handleNotification(method string, params json.RawMessage) {
 			s.handleProtocolViolation(protocolViolationf("session.event params schema violation: %v", err))
 			return
 		}
-		if p.SessionID != s.rootSessionID {
-			// Phase-1 routing: non-root frames are filtered here. Full
-			// lineage/foreign semantics (§3.8 tombstone matrix) land in the
-			// scope phase.
-			slog.Debug("dsh: filtered non-root session.event",
+		switch s.scope.classify(p.SessionID) {
+		case scopeRoot:
+			events, err := s.codec.apply(&p.Event)
+			if err != nil {
+				s.handleProtocolViolation(err)
+				return
+			}
+			for _, ev := range events {
+				s.emit(ev)
+			}
+		case scopeDescendant:
+			// Child session content never enters the root codec: its seq
+			// does not advance root expectedSeq and its turn frames never
+			// touch the root active-turn state machine.
+			slog.Debug("dsh: filtered descendant session.event",
 				"scope_session", shortID(p.SessionID), "type", p.Event.Type)
-			return
-		}
-		events, err := s.codec.apply(&p.Event)
-		if err != nil {
-			s.handleProtocolViolation(err)
-			return
-		}
-		for _, ev := range events {
-			s.emit(ev)
+		default:
+			s.handleProtocolViolation(protocolViolationf(
+				"foreign session.event from %q (type %s) — outside the root tree", p.SessionID, p.Event.Type))
 		}
 
 	case "session.status":
@@ -385,17 +395,33 @@ func (s *dshSession) handleNotification(method string, params json.RawMessage) {
 			s.handleProtocolViolation(protocolViolationf("session.status params schema violation: %v", err))
 			return
 		}
-		if p.SessionID != s.rootSessionID {
-			slog.Debug("dsh: filtered non-root session.status", "scope_session", shortID(p.SessionID))
+		switch s.scope.classify(p.SessionID) {
+		case scopeRoot:
+			slog.Debug("dsh: root session.status (driver-internal liveness)", "status", p.Status)
+		case scopeDescendant:
+			// Child idle must never close the parent turn.
+			slog.Debug("dsh: filtered descendant session.status",
+				"scope_session", shortID(p.SessionID), "status", p.Status)
+		default:
+			s.handleProtocolViolation(protocolViolationf(
+				"foreign session.status from %q (status %s) — outside the root tree", p.SessionID, p.Status))
+		}
+
+	case "subagent.started":
+		var p subagentStartedParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			s.handleProtocolViolation(protocolViolationf("subagent.started params schema violation: %v", err))
 			return
 		}
-		slog.Debug("dsh: root session.status (driver-internal liveness)", "status", p.Status)
+		s.scope.recordStarted(p.ParentSessionID, p.ChildSessionID)
 
-	case "subagent.started", "subagent.finished":
-		// Lineage bookkeeping lands with the scope phase (§3.8). Phase 1:
-		// acknowledged, not mapped to core.Event (subagent timelines are not
-		// rendered in phase 1).
-		slog.Debug("dsh: subagent notification (lineage phase pending)", "method", method)
+	case "subagent.finished":
+		var p subagentFinishedParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			s.handleProtocolViolation(protocolViolationf("subagent.finished params schema violation: %v", err))
+			return
+		}
+		s.scope.recordFinished(p.ParentSessionID, p.ChildSessionID)
 
 	default:
 		// Unknown notification method: not part of the pinned wire surface

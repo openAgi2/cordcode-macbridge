@@ -45,8 +45,9 @@ const (
 )
 
 // dshCodec holds the root session's decode state: active turn/step, chunk
-// assembly for tool-call deltas, and the last usage snapshot of the active
-// turn (used to fill turn terminal token totals).
+// assembly for tool-call deltas, the last usage snapshot of the active turn
+// (used to fill turn terminal token totals), and the per-root sequence
+// integrity tracker (§3.10.1).
 type dshCodec struct {
 	nonce string
 
@@ -65,6 +66,21 @@ type dshCodec struct {
 	// contextWindow is captured from request/context (model capacity); used
 	// with usage snapshots for context pressure (§3.7).
 	contextWindow int
+
+	// expectedSeq is the next root-session sequence number. DSH's invariant
+	// is seq == log.length — a 0-based contiguous run, and the SDK wire has
+	// no replay/resume handshake exposing a trusted firstLiveSeq. So the
+	// first root event MUST be seq 0 (non-zero start = lost prefix, round9
+	// P0-2), and any later gap/regression/conflicting duplicate is protocol
+	// corruption (§3.10.1).
+	expectedSeq int
+	// lastAcceptedCanonical is the canonical JSON of the most recently
+	// seq-accepted envelope (wire key order normalized away). An exact
+	// re-delivery of that envelope is an idempotent replay; anything else at
+	// the same seq is a conflicting duplicate.
+	lastAcceptedCanonical string
+	// sawFirstSeq records whether any root event has been accepted yet.
+	sawFirstSeq bool
 }
 
 func newCodec(nonce string) *dshCodec {
@@ -73,6 +89,63 @@ func newCodec(nonce string) *dshCodec {
 		activeTurn:    noTurn,
 		activeStep:    noStep,
 		toolCallNames: make(map[string]string),
+	}
+}
+
+// canonicalEnvelope normalizes one envelope into deterministic JSON so
+// exact-replay comparison is independent of wire key order (§3.10.1
+// "canonical JSON 与已见完全相同").
+func canonicalEnvelope(env *dshEvent) string {
+	var data any
+	if len(env.Data) > 0 {
+		if err := json.Unmarshal(env.Data, &data); err != nil {
+			data = nil
+		}
+	}
+	canonical, err := json.Marshal(struct {
+		Type      string          `json:"type"`
+		Seq       int             `json:"seq"`
+		Time      int64           `json:"time"`
+		Ignorable json.RawMessage `json:"ignorable,omitempty"`
+		Data      any             `json:"data"`
+	}{env.Type, env.Seq, env.Time, env.Ignorable, data})
+	if err != nil {
+		return ""
+	}
+	return string(canonical)
+}
+
+// checkSeq enforces the §3.10.1 matrix for a root-scoped envelope. It returns
+// (accepted, replayed, err): accepted advances expectedSeq; replayed marks an
+// exact-replay duplicate that is skipped idempotently without re-mapping.
+func (c *dshCodec) checkSeq(env *dshEvent) (accepted bool, replayed bool, err error) {
+	if env.Seq < 0 {
+		return false, false, protocolViolationf("negative seq %d (%s)", env.Seq, env.Type)
+	}
+	if !c.sawFirstSeq && env.Seq != 0 {
+		return false, false, protocolViolationf("first root event must have seq 0, got %d (%s) — missing prefix", env.Seq, env.Type)
+	}
+
+	switch {
+	case env.Seq == c.expectedSeq:
+		c.expectedSeq++
+		c.sawFirstSeq = true
+		c.lastAcceptedCanonical = canonicalEnvelope(env)
+		return true, false, nil
+
+	case c.sawFirstSeq && env.Seq == c.expectedSeq-1:
+		if canonicalEnvelope(env) == c.lastAcceptedCanonical {
+			// Exact replay of the previous envelope: idempotent skip, no
+			// re-mapping, no advancement.
+			return false, true, nil
+		}
+		return false, false, protocolViolationf("conflicting duplicate seq %d (%s)", env.Seq, env.Type)
+
+	case env.Seq > c.expectedSeq:
+		return false, false, protocolViolationf("seq gap: got %d, expected %d (%s)", env.Seq, c.expectedSeq, env.Type)
+
+	default:
+		return false, false, protocolViolationf("seq regression: got %d, expected %d (%s)", env.Seq, c.expectedSeq, env.Type)
 	}
 }
 
@@ -85,6 +158,17 @@ func (c *dshCodec) turnID() string { return c.activeTurnID }
 // terminal and tear the process down (§3.6.3②); it must NOT continue decoding
 // on the polluted stream.
 func (c *dshCodec) apply(env *dshEvent) ([]core.Event, error) {
+	// Sequence integrity runs BEFORE the ignorable/mapping layers: every
+	// log event consumes a seq, so even a safe-skip frame must pass the gate
+	// (and its replay must be detectable, §3.10.1).
+	_, replayed, err := c.checkSeq(env)
+	if err != nil {
+		return nil, err
+	}
+	if replayed {
+		return nil, nil
+	}
+
 	// The ignorable:true marker is the ONLY safe-skip channel, for known or
 	// unknown types alike (§3.10.2 class ④). false / non-bool / absent all
 	// mean REQUIRED.
@@ -127,9 +211,14 @@ func (c *dshCodec) apply(env *dshEvent) ([]core.Event, error) {
 		return nil, nil
 
 	default:
-		// Class ③ / unknown: known-name-but-unimplemented or entirely unknown
-		// REQUIRED event. "No sample" is not "safe to ignore" — fail visibly.
-		return nil, protocolViolationf("unimplemented required event type %q (seq %d)", env.Type, env.Seq)
+		// Class ③ / unknown: a name the pinned runtime recognizes but the
+		// driver has not implemented, or a name unknown to it entirely. Both
+		// are REQUIRED (no ignorable marker) — "no sample" is never
+		// "safe to ignore"; fail visibly (§3.10.2).
+		if knownSessionEventTypes[env.Type] {
+			return nil, protocolViolationf("known but unimplemented required event type %q (seq %d)", env.Type, env.Seq)
+		}
+		return nil, protocolViolationf("unknown required event type %q (seq %d)", env.Type, env.Seq)
 	}
 }
 
@@ -295,10 +384,10 @@ func (c *dshCodec) applyUserMessage(env *dshEvent) ([]core.Event, error) {
 			}
 		}
 		return []core.Event{{
-			Type:   core.EventUserMessage,
+			Type:    core.EventUserMessage,
 			Content: text.String(),
-			TurnID: c.activeTurnID,
-			ItemID: d.ID,
+			TurnID:  c.activeTurnID,
+			ItemID:  d.ID,
 		}}, nil
 
 	case "plugin":
@@ -318,23 +407,23 @@ func (c *dshCodec) applyUserMessage(env *dshEvent) ([]core.Event, error) {
 // schema: text-delta/reasoning-delta carry `text`; tool-call-delta carries
 // `argumentsDelta` (NOT `arguments`) — design §3.3.
 type dshChunk struct {
-	Type     string `json:"type"`
-	Index    int    `json:"index"`
-	BlockType string `json:"blockType"`
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Text     string `json:"text"`
-	ArgumentsDelta string `json:"argumentsDelta"`
-	Usage    *dshUsage `json:"usage"`
-	Reason   *struct {
+	Type           string    `json:"type"`
+	Index          int       `json:"index"`
+	BlockType      string    `json:"blockType"`
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	Text           string    `json:"text"`
+	ArgumentsDelta string    `json:"argumentsDelta"`
+	Usage          *dshUsage `json:"usage"`
+	Reason         *struct {
 		Kind string `json:"kind"`
 	} `json:"reason"`
 	Block *struct {
-		Type      string     `json:"type"`
-		Text      string     `json:"text"`
-		ID        string     `json:"id"`
-		Name      string     `json:"name"`
-		Arguments string     `json:"arguments"`
+		Type      string `json:"type"`
+		Text      string `json:"text"`
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
 	} `json:"block"`
 }
 
@@ -457,17 +546,17 @@ func (c *dshCodec) applyToolCall(env *dshEvent) ([]core.Event, error) {
 
 func (c *dshCodec) applyToolResult(env *dshEvent) ([]core.Event, error) {
 	var d struct {
-		Turn int `json:"turn"`
-		Step int `json:"step"`
+		Turn    int `json:"turn"`
+		Step    int `json:"step"`
 		Message struct {
 			Source struct {
 				Kind   string `json:"kind"`
 				CallID string `json:"callId"`
 			} `json:"source"`
 			Content []struct {
-				Type      string `json:"type"`
+				Type       string `json:"type"`
 				ToolCallID string `json:"toolCallId"`
-				Content   []struct {
+				Content    []struct {
 					Type string `json:"type"`
 					Text string `json:"text"`
 				} `json:"content"`
