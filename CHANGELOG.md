@@ -8,6 +8,9 @@
 
 ## [Unreleased]
 
+- **新增 DeepSeek Harness（DSH）backend（设计 v13 / round12 APPROVE 全量落地）**：CordCode Link 新增 `deepseek` backend，桥接 `dsh-jsonrpc-agent` stdio JSON-RPC runtime（每 session 一进程、进程组回收）。事件面完整映射 turn/step/user/assistant chunk/tool/todo/usage；`user/message` 按 `source.kind` 分流（权限运行时上下文不再覆盖真实 prompt）；TurnID 携带每进程 128-bit nonce，进程重启永不串轴；seq 完整性 fail-closed（首帧必须 0、gap/倒退/冲突重复即终止）；subagent/foreign session 通知按 lineage tombstone 路由（迟到 child 事件不误杀）；错误二分——模型/turn 级错误只收口 turn 保留进程，协议损坏先发可见 terminal 再淘汰进程；at-most-once 交付（只有可证明未送达的 pre-write 允许重建后发送一次，其余 fail visibly 不重放）。live-only：无 session 列表/历史（list 返回 `not_supported`）；一期 text-only。要求 Mac 安装 `dsh-jsonrpc-agent`（缺失时该 backend 如实不出现）。
+- **附件发送全面收紧为两级 pre-StartSession 校验**：`send_message` 附件现按「raw 结构（kind 词表 / 裸 `type/subtype` MIME / 非空可解码 base64 / 混合整条拒）→ `invalid_params`」和「effectiveKind（kind∨mime 单一分类规则）× backend 正向能力声明 → `unsupported_attachment`」在任何 session 副作用之前整条校验。各 backend 能力同步为语义真相：Claude/Codex image+file；OpenCode CLI 声明 image、managed server 不声明（该路径图像本就静默丢失，拒绝即现状语义化）；Grok Build file-only；DSH text-only。此前畸形 MIME/空 base64 会被静默丢弃流入 driver，现在诚实拒绝。协议章节已入 canonical pack 并同步 iOS mirror。
+
 - **会话列表不再把「查不到状态」谎报成「空闲」（登记簿 F-8）**：session 列表与 claude 详情的状态富化此前把「确实查不到」（进程探测不可用且无 registry 记录、claude transcript 尾部无可判定条目或文件找不到）一律强转为 `idle`。现在这些情况产出 `runtimeState="unknown"`——客户端不渲染状态徽标（不知道就不亮灯）。已知状态（running/idle/requiresAction 等）显示不变；「registry 说 running 且无法复核」的既有回退维持现状。协议值域已入册（unified-bridge-protocol.md §6.1）；remote-web 零消费、零改动。
 
 - **Grok 断线不再把结果未知的 turn 猜成「已完成」（登记簿 F-7）**：Grok 任务的 leader 观察通道异常断开且 turn 未收到完成信号时，此前直接补发 `idle` 状态，客户端据此把 turn 收口成完成——断线重连后任务可能仍在跑或结果已丢失，用户却看到「已完成」。现在断开时先合成 `turn_aborted(leader_disconnect)` 中断事件（复用协议既有 turn 中止语义，与 codex 死进程处理对齐），再补 `idle` 收口执行态；客户端（iOS 已同步支持）以「中断」收口、不假装完成。正常完成/错误路径不受影响。
