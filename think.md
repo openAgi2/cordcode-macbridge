@@ -843,3 +843,9 @@ drain 的行为一致（drain 注释明确丢弃 replayed state "including any p
 同日另一记录：`turn_error` wire producer 激活（opencode 空转 turn + idle 验证的冷 hydrate
 seal，commits e00b389/8eabd6e），canonical `docs/protocol/bridge-v1.md` 事件清单补入
 `turn_error`/`turn_aborted` 及说明，iOS mirror 已同步。
+
+## 2026-08-16 臆想教训：dsh web「未分组」结论先于取证
+
+- 事件：真机复测中 Mac web 显示手机会话于「未分组」，agent 未读 web 源码即断言「Chat 未注册 workspace，用户加上即可」——事实相反（Chat 早已注册；分组机制是 workspace.json 显式 sessionIds 名单而非路径匹配），被 owner 以双端截图纠正。
+- 教训：对**另一个系统的行为**下结论前必须读它的源码/数据；「听起来合理的机制解释」≠ 证据。跨系统（iOS/dsh web/harness）行为差异排查同样适用本仓排障纪律：先取证再定性，不确定就说不确定。
+- 顺带固化的事实：dsh web workspace 分组=显式名单（entity.ts attachSession 仅 web 自身 create/fork 调用，校验头行 cwd=workspace 路径）；workspace.json 受 dsh-storage-domain 两写恢复协议管理，外部进程不可盲写。

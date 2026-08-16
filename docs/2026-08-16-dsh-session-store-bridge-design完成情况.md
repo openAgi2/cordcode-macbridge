@@ -54,7 +54,7 @@ owner 复测：编码修复生效（会话落盘、Mac web 可见「讲个宇航
 
 修复：① defaultModel→`deepseek-v4-flash`、模型列表对齐 v4 两档、`normalizeModelName` 归一旧名（iOS 缓存防御）；② 基线选择矩阵修正——live/kernel 会话一律 admission 基线（a70cbfb 已验证形态），file 重建只服务死会话（forceCold 对死会话触发重建，web 增长可见）；③ driver 实现 `SessionActivityProbing`（活进程集合），死会话尾部未答 turn 封口 → 基线可提交。
 
-验证：`TestDeepSeekLiveSessionWithStoreFileUsesKernelBaseline`（真机形态：registry 活会话+store 落盘 → kernel 基线达 Ready）+ `TestNormalizeModelNameMapsLegacyDefaults`/`TestIsSessionActiveTracksLiveRoots`；agent/dsh + go-bridge 全量回归绿；Release 重装核对。「未分组」目录为 dsh web 自身对未注册 workspace 的展示行为，非缺陷。
+验证：`TestDeepSeekLiveSessionWithStoreFileUsesKernelBaseline`（真机形态：registry 活会话+store 落盘 → kernel 基线达 Ready）+ `TestNormalizeModelNameMapsLegacyDefaults`/`TestIsSessionActiveTracksLiveRoots`；agent/dsh + go-bridge 全量回归绿；Release 重装核对。「未分组」机制（owner 纠正后源码取证）：dsh web 分组不看会话 cwd，而是 workspace.json（dsh-storage-domain 两写恢复协议管理）里每个 workspace 显式记录的 sessionIds 名单；attach 只发生在 web 自己的 create/fork HTTP 流程（api-proxy.ts）。driver 是独立进程，其会话 cwd 虽完全正确也进不了名单 → web 显示未分组（会话数据本身完全互通、可打开可续聊）。CordCode 侧代写该文件有丢更新/破坏恢复日志风险，不做——web 侧自动收编待 dsh 官方支持。
 
 ## 验收（owner 真机，替代原矩阵）
 
