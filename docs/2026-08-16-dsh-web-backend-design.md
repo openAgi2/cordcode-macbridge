@@ -94,21 +94,68 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
 2. 未命中 → managed：spawn `dsh --profile web --host 127.0.0.1 --port <3096..3196 自选>`，端口与凭据状态写 data dir 的 `dsh-web-managed-server.json`（0600，opencode-managed-server.json 先例）；崩溃重启/sleep-wake 归 RuntimeManager 既有生命周期管理；
 3. 两态都失败 → hello_ack 如实「未启动」（初衷：不代装）。
 
-### 4.3 映射表（bridge RPC → dsh API）
+### 4.3 功能面完整映射（对照 bridge 全 RPC 面 × iOS 既有功能）
 
-| bridge 面 | dsh API | 备注 |
-|---|---|---|
-| `list_sessions` | `session.list` | 过滤 `origin=subagent`；running→运行态 enrich；mtime=updatedAt；directory=cwd |
-| `get_session` / `get_session_messages` | `session.history` | `beforeSeq`↔cursor、`maxMessages`↔limit；projections 块按需取标题 |
-| `send_message`（新会话） | `session.create{cwd}` → `session.prompt{mode:"queue"}` | cwd=iOS 选定目录；命中 workspace 自动归组 |
-| `send_message`（既有会话） | `session.prompt{mode:"queue"}` | **官方 resume——跨进程续聊达成，无守卫、无 `session_resume_not_supported`** |
-| `abort_generation` | `session.cancel` | |
-| `list_models` | `llm.models`（+`session.models`） | 官方目录；不再手写白名单 |
-| `rename_session` | `session.rename` | 可选二期 |
-| 事件 | `GET /api/events.mux`（SSE 长连） | `session/event` 帧→复用 `codec.go` §3.3 映射→现有通用事件管线→kernel→SSV2；重连=重开流+重拉 history；`approval/question` 帧→现有 permission/question 事件、应答 `POST /api/respond`（**一期是否接入=owner 决定项**，不接则 MacBridge 如实声明能力缺位） |
-| 冷历史投影 | `RichHistoryProvider` ← `session.history` | 走既有 pathless hydrate（同现机制，仅数据源换 HTTP）；无新投影代码 |
+对照物=bridge wire 全部 RPC（`handlers.go` dispatch）+ iOS 在其他四 backend 上已跑熟的功能。标记：**✅一期映射**（直调官方 API）｜**♻️通用管线**（bridge 既有机制，无新 backend 代码）｜**2️⃣二期**（官方面已核实，一期不接）｜**⛔如实 not_supported**（无官方面，iOS 走既有空态/隐藏入口兜底——fa371a3 惯例，不报错横幅）。
 
-`start_session` 不再 spawn 子进程：bridge 侧每会话状态仅为「SSE 订阅 + 会话句柄」，进程模型收敛为「常驻 web 服务 + 单条 SSE」。
+#### 4.3.1 会话列表（iOS 侧栏：目录分组、标题、时间、运行徽标、置顶、下拉刷新）
+
+- `list_sessions` ✅ `session.list`：sessionId→id、`updatedAt`(ms)→modifiedAt、`cwd`→directory（iOS 目录分组与旧件同构）、`running`→运行态 enrich、`origin=subagent`/`parentSessionId` 过滤（与 web 侧栏一致隐藏子代理与 blank 空会话）；官方 cursor 为未实现保留位 → 一次全量 + bridge 既有分页/fair-slice 复用。标题：projections 块（`sessionListMetadata`）优先，无标题 unit 则 `session.history` 尾读一次（实现时按 §3.5 落定）。
+- `get_session` ✅ 同源（列表缓存或 history 头信息）。
+- 置顶 `set_session_pinned`/`list_pinned_sessions` ♻️ bridge 自有 pin 索引（AgentSessionInfo 解析依赖 ListSessions，已具备）。
+- 下拉刷新 ✅ list 重拉 + 投影 forceCold 重建（既有机制）。
+
+#### 4.3.2 消息页加载（历史渲染：思考流、工具卡片、分页）
+
+- `get_session_messages` ✅ `session.history`：`beforeSeq`↔cursor、`maxMessages`↔limit（官方按 append-origin 消息边界分页）；映射为既有 rich-history 形状（role/content/thinking/parts/steps）——官方 history 自带 `ToolEventView` 渲染意图与整日志统计，工具步骤信息比旧件直读 store 更富。
+- `get_session_projection`（SSV2 消息页）✅+♻️：live 事件喂 kernel（见 4.3.3）；冷会话 pathless hydrate 的 `RichHistoryProvider` 数据源 = `session.history`（机制同旧件，仅换数据源；投影代码零新增）。
+- `read_file_v2`/`fetch_content_chunk` ♻️ bridge 通用 Mac 文件读取（与 backend 无关）。
+
+#### 4.3.3 流式同步与运行态（isGenerating、text/思考增量、停止按钮、完成通知）
+
+- **单条 SSE** `GET /api/events.mux`（bridge 常驻持有）→ `session/event` 帧（SessionEvent 与磁盘日志同构）→ **复用 `agent/dsh/codec.go` §3.3 映射** → core.Event → 既有推送管线（relay/直连）→ iOS 既有渲染链，零新渲染逻辑。
+- 运行态：turn 事件推导 + `host/session-status{running}` → `session_state_changed` 广播（既有）。
+- **外部 turn 可见性（对旧 dsh 是新能力）**：mux 覆盖全部会话——用户在 Mac web 发起的 turn，iOS 同样收事件/投影与完成通知（对齐 claudecode 外部旁观）；dsh-web 不进 `backendHasNoExternalEventSource` 剪枝名单，observation/离线 mailbox ♻️ 全部照常。
+- 断线：SSE 重连=重开流+重拉 history（官方 v1 语义照搬）；断线窗口由重连后 history 重拉+投影 forceCold 补齐。
+- 红线（坑 7/8）：`turn/end reason=error` 必须透传官方错误文本为终态事件——失败路径必现可见终态。
+
+#### 4.3.4 发送消息
+
+- 新会话 ✅ `session.create{cwd=iOS 选定目录}`（cwd 命中已注册 workspace 自动归组，§3.5）→ `session.prompt{mode:"queue", content:[text]}`。
+- 既有会话 ✅ `session.prompt` 直接续（官方 resume，§3.1）——iOS「会话已结束」文案路径对 dsh-web 不适用，无守卫、无 `session_resume_not_supported`。
+- steer 插话转向 2️⃣ `mode:"steer"`（一期 queue）。
+- 附件/图片 2️⃣：官方 `session.attachment` + `imageLimits` 投影已核实；一期 descriptor `StaticCapabilities` 声明 text-only（既有两级附件校验照走）。
+- `abort_generation` ✅ `session.cancel{sessionId}`。
+- 审批/问题应答（owner 决定项，倾向一期）：`approval/requested`/`question/requested` 帧 → 既有 permission/question 事件（iOS 权限 UI 已有），应答 `POST /api/respond`；不接则 descriptor 不声明 capability、iOS 隐藏入口（声明制）。
+
+#### 4.3.5 provider / model（iOS 模型选择器、provider 切换）
+
+- `list_providers` ✅ `llm.providers{}` → 用户 dsh 已配置的 provider 全集（如 opencode-go/zai——复用用户已配，初衷）。
+- `list_models` ✅ `llm.models{}`（provider 分组目录）+ `session.models{sessionId}`（当前会话 effective 选择 + 可用集）。
+- `switch_model` / backend 级 `set_provider` ✅ `session.selectModel{sessionId, provider, model, reasoningEffort?}`——官方语义=会话内立即生效并持久化为部署默认；无 backend 级全局写面，如实按此语义映射。
+- **模型目录/白名单永远来自运行时**（坑 3 红线，不再手写复本）。
+- `list_permission_modes`/`set_permission_mode` ⛔ 一期：dsh 权限形态由 agent preset 承载，无 bridge 级 mode 写面；二期评估 preset 面（`agentPresets.*` API 已存在）。
+
+#### 4.3.6 会话生命周期（增删改）
+
+- 新建 ✅（4.3.4）；`resume_session`（重开）✅ = history+订阅（无进程语义）。
+- `rename_session` ✅ `session.rename{sessionId, title}`（官方规范化后回 accepted title）。
+- `delete_session` ⛔ **官方无 delete API** → 一期如实 not_supported（`workspace.archiveSession` 是归档非删除，语义不同；是否映射二期与 owner 定）；iOS 删除入口对该 backend 禁用。
+- `archive_session` 2️⃣ `workspace.archiveSession{sessionId}`（归档集语义）。
+- `share_session` ⛔（bridge 已通用 not_supported）；`compress_context` ⛔（compaction 属 preset 体系，无 RPC 面）。
+
+#### 4.3.7 目录与环境（iOS 目录选择器、项目建议）
+
+- `list_directory` ✅ `host.listDirectory{path?}`（官方目录浏览面，iOS 目录选择器数据源）；`host.createDirectory` 2️⃣。
+- `list_projects` ✅ `workspace.list`（已注册 workspace=快速目录建议）；空则本地目录服务兜底（旧件同款）。
+- git 面（`get_git_context`/PR 三件套/commit_and_push/branch/worktree）⛔ 无对应面，iOS 入口隐藏（与其他无 git 面 backend 同）。
+
+#### 4.3.8 其余面
+
+- `run_diagnostics` ✅ 探测结构化输出（实例来源 external/managed、端口、`host.describe` 版本、`llm.providers` 状态）。
+- `fetch_todos` ⛔ 一期（web 的 plan 属会话投影无 todo RPC；二期评估）；`get_usage` ⛔ 一期（token 计量在 context-meter 投影单元，二期按 `session/projection` 帧核对后决定接入或维持）；diff 三件套 ⛔；`list_agents` ⛔ 一期（单一 preset；`agentPresets` API 已存在，二期）。
+- `session.search` ✅ 备用（iOS 搜索现为本地实现已够；官方 search 可作二期服务端搜索）。
+- `check_pending_notifications`/prekey/delivery ♻️ bridge/relay 通用，与 backend 无关。
 
 ### 4.4 安全模型
 
@@ -120,7 +167,7 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
 
 ## 6. 测试与验收
 
-- 单测：httptest 假 dsh 服务（schema 样本 fixtures：list/history/prompt 响应、SSE mux 帧序列）覆盖映射表逐行；生命周期（探测命中/managed spawn/双失败 not_configured）；探活失败诊断文案；
+- 单测：httptest 假 dsh 服务（schema 样本 fixtures：list/history/prompt/models/providers 响应、SSE mux 帧序列）覆盖 §4.3 功能面总表**逐行**（含 ⛔ 项的 not_supported 断言）；生命周期（探测命中/managed spawn/双失败 not_configured）；探活失败诊断文案；
 - 回归：bridge 全量 + 旧 deepSeek 套件零改动验证；
 - iOS：`BackendKind` case 单测 + 定向 CCCodeTests；
 - 真机验收（核心新增行）：**iOS 对 Mac web 创建的任意历史会话发消息→真实续聊（双向：web 续 iOS 建的会话）**；列表/历史/新建/流式/停止对齐旧件既有验收行。
