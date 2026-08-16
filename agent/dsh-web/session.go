@@ -132,10 +132,14 @@ func (s *dshSession) Close() error {
 		return nil
 	}
 	if id := s.CurrentSessionID(); id != "" {
-		s.agent.bindings.drop(id)
+		s.agent.bindings.dropIf(id, s)
 	}
 	s.cancel()
-	// Drain/stop the events channel: §8-3's mux pump selects on ctx.
+	// Unblock relayEvents. Leaving the channel open after Close left a
+	// zombie relay on the old session object (idle TTL evicted the
+	// registry entry; dsh-web idle-timeout is disabled), so the next
+	// StartSession could not attach a new relay and iOS missed approvals.
+	close(s.events)
 	return nil
 }
 
@@ -149,6 +153,7 @@ func (s *dshSession) emit(ev core.Event) {
 	if ev.SessionID == "" {
 		ev.SessionID = s.CurrentSessionID()
 	}
+	defer func() { _ = recover() }()
 	select {
 	case s.events <- ev:
 	default:
@@ -185,14 +190,26 @@ func (sb *sessionBindings) put(id string, s *dshSession) {
 	if sb.sessions == nil {
 		sb.sessions = map[string]*dshSession{}
 	}
+	prev := sb.sessions[id]
 	sb.sessions[id] = s
 	sb.mu.Unlock()
+	if prev != nil && prev != s {
+		_ = prev.Close()
+	}
 }
 
 func (sb *sessionBindings) drop(id string) {
 	sb.mu.Lock()
 	delete(sb.sessions, id)
 	sb.mu.Unlock()
+}
+
+func (sb *sessionBindings) dropIf(id string, s *dshSession) {
+	sb.mu.Lock()
+	defer sb.mu.Unlock()
+	if sb.sessions[id] == s {
+		delete(sb.sessions, id)
+	}
 }
 
 func (sb *sessionBindings) get(id string) (*dshSession, bool) {

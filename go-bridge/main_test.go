@@ -71,6 +71,15 @@ func TestDisablesRelayIdleTimeoutIncludesOpenCode(t *testing.T) {
 	}
 }
 
+func TestRelaySurvivesTurnBoundaryForDSHWeb(t *testing.T) {
+	if !relaySurvivesTurnBoundary("dsh-web") {
+		t.Fatal("dsh-web relay must stay up after turn_completed so the next approval is forwarded")
+	}
+	if relaySurvivesTurnBoundary("codex") {
+		t.Fatal("codex relay still exits on EventResult (historical contract)")
+	}
+}
+
 func TestClearOpenCodeServerAuthEnv(t *testing.T) {
 	t.Setenv("OPENCODE_SERVER_USERNAME", "user")
 	t.Setenv("OPENCODE_SERVER_PASSWORD", "pass")

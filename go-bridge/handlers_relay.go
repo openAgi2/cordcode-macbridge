@@ -56,11 +56,15 @@ var (
 // file relay 继续作为 UUID-keyed 内容来源。reducer 跳过 agent relay 无 itemId 的正文，不会重复应用。
 func (h *Handlers) startRelayIfNotRunning(sessionID string, sess core.AgentSession, conn Connection, backendID string) {
 	h.mu.Lock()
-	if h.agentRelayRunning[sessionID] {
+	if h.agentRelayRunning[sessionID] && h.agentRelaySess[sessionID] == sess {
 		h.mu.Unlock()
 		return
 	}
+	stale := h.agentRelaySess[sessionID]
+	h.agentRelayGen[sessionID]++
+	gen := h.agentRelayGen[sessionID]
 	h.agentRelayRunning[sessionID] = true
+	h.agentRelaySess[sessionID] = sess
 	// 仅当没有 relay 占用全局槽位时才认领并把 kind 标为 agent；若 file relay (claude_file) 已占用，
 	// 保留其 kind 以免触发 claudeSessionFileRelayLoop 的 supersession 退出。
 	if !h.relayRunning[sessionID] {
@@ -68,7 +72,12 @@ func (h *Handlers) startRelayIfNotRunning(sessionID string, sess core.AgentSessi
 		h.relayRunningKind[sessionID] = relayKindAgent
 	}
 	h.mu.Unlock()
-	go h.relayEvents(conn, sess, sessionID, backendID)
+	if stale != nil && stale != sess {
+		slog.Warn("go-bridge: replacing stale agent relay after session respawn",
+			"backendID", backendID, "sessionID", sessionID)
+		_ = stale.Close()
+	}
+	go h.relayEvents(conn, sess, sessionID, backendID, gen)
 }
 
 // startClaudeSessionFileRelay 为没有 AgentSession 的 Claude Desktop session
@@ -2421,6 +2430,19 @@ func disablesRelayIdleTimeout(backendID string) bool {
 	}
 }
 
+// relaySurvivesTurnBoundary reports backends whose AgentSession outlives a
+// single turn. Exiting relayEvents on EventResult/EventError leaves a zombie
+// if Close does not close Events() — the next send starts a new session
+// object while startRelayIfNotRunning no-ops, and iOS misses later approvals.
+func relaySurvivesTurnBoundary(backendID string) bool {
+	switch backendID {
+	case "claude", "claudecode", "dsh-web":
+		return true
+	default:
+		return false
+	}
+}
+
 func (h *Handlers) relayKindIs(sessionID, kind string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -2454,15 +2476,30 @@ func (h *Handlers) rebindRelayKind(fromID, toID, kind string) {
 // 且事件通道没有跨进程共享事件总线，它的 relayEvents goroutine 在完成一轮（EventResult）或空闲时
 // 绝不能退出（通过 continue 忽略）。这也意味着该 goroutine 和底层 session 会常驻在内存中，
 // 其最终生命周期的释放依赖于 session 显式关闭/删除导致 events channel 关闭。这需要注意潜在的泄漏风险。
-func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionID, backendID string) {
+func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionID, backendID string, gen ...uint64) {
+	var relayGen uint64
+	if len(gen) > 0 {
+		relayGen = gen[0]
+	}
 	origSessionID := sessionID
 	defer func() {
 		h.mu.Lock()
-		delete(h.agentRelayRunning, origSessionID)
-		delete(h.agentRelayRunning, sessionID)
+		current := h.agentRelayGen[origSessionID]
+		if g := h.agentRelayGen[sessionID]; g > current {
+			current = g
+		}
+		owns := relayGen == 0 || current == relayGen
+		if owns {
+			delete(h.agentRelayRunning, origSessionID)
+			delete(h.agentRelaySess, origSessionID)
+			delete(h.agentRelayRunning, sessionID)
+			delete(h.agentRelaySess, sessionID)
+		}
 		h.mu.Unlock()
-		h.clearRelayKindIf(origSessionID, relayKindAgent)
-		h.clearRelayKindIf(sessionID, relayKindAgent)
+		if owns {
+			h.clearRelayKindIf(origSessionID, relayKindAgent)
+			h.clearRelayKindIf(sessionID, relayKindAgent)
+		}
 		slog.Info("go-bridge: relayEvents exited", "backendID", backendID, "sessionID", sessionID)
 	}()
 	slog.Info("go-bridge: relayEvents started", "backendID", backendID, "sessionID", sessionID)
@@ -2560,7 +2597,7 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 			if ev.Type == core.EventResult && ev.Done {
 				h.broadcastIdleState(sessionID, backendID)
 				h.recordPendingNotification(sessionID, backendID, "completed", "")
-				if backendID == "claude" || backendID == "claudecode" {
+				if relaySurvivesTurnBoundary(backendID) {
 					continue
 				}
 				return
@@ -2588,7 +2625,7 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 				}
 				h.broadcastIdleState(sessionID, backendID)
 				h.recordPendingNotification(sessionID, backendID, "error", errMsg)
-				if backendID == "claude" || backendID == "claudecode" {
+				if relaySurvivesTurnBoundary(backendID) {
 					continue
 				}
 				return

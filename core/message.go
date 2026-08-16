@@ -323,6 +323,7 @@ const (
 	EventResult              EventType = "result"                // final aggregated result
 	EventError               EventType = "error"                 // error occurred
 	EventPermissionRequest   EventType = "permission_request"    // agent requests permission via stdio protocol
+	EventPermissionResolved  EventType = "permission_resolved"   // permission was allowed or denied (projection SoT close)
 	EventThinking            EventType = "thinking"              // thinking/processing status
 	EventTurnStarted         EventType = "turn_started"          // new turn started (for passive broadcast)
 	EventUserMessage         EventType = "user_message"          // user prompt attributed to a turn (projection SoT)

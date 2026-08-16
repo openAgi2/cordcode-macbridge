@@ -298,6 +298,7 @@ export type BridgeEventName =
   | "turn_completed"
   | "error"
   | "permission_request"
+  | "permission_resolved"
   | "context_compressing"
   | "context_compressed"
   | "context_usage_updated"

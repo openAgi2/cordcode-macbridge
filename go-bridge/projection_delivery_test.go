@@ -170,8 +170,8 @@ func TestSessionSyncV2RawTimelineClassification(t *testing.T) {
 	for _, event := range []string{
 		"todos_updated", "context_usage_updated", "sessions_changed",
 		"diagnostic_progress", "permission_mode_changed",
-		// permission/question 未进 reducer，必须继续当 raw 控制面投递给 SSV2。
-		"permission_request", "permission_asked",
+		// permission/question 仍当 raw 控制面投递给 SSV2（投影已吃 permission_*，raw 兜底）。
+		"permission_request", "permission_resolved", "permission_asked",
 		"question_asked", "question_resolved",
 	} {
 		if isSessionSyncV2RawTimelineEvent(event) {

@@ -78,6 +78,8 @@ type Handlers struct {
 	// 翻成 agent，避免 claudeSessionFileRelayLoop 被 superseded 退出而丢失唯一 UUID 内容来源（见
 	// startRelayIfNotRunning 注释与 Issue 3 调查 docs/2026-07-30-remote-web-send-message-not-live-investigation.md）。
 	agentRelayRunning       map[string]bool
+	agentRelaySess          map[string]core.AgentSession
+	agentRelayGen           map[string]uint64
 	claudeSourceCorrelation *claudeSourceCorrelationTracker
 	deliveryPrekeys         *PrekeyStore
 	observation             *ObservationManager
@@ -170,6 +172,8 @@ func newHandlersWithContext(ctx context.Context, bridgeEpoch string) *Handlers {
 		relayRunning:            make(map[string]bool),
 		relayRunningKind:        make(map[string]string),
 		agentRelayRunning:       make(map[string]bool),
+		agentRelaySess:          make(map[string]core.AgentSession),
+		agentRelayGen:           make(map[string]uint64),
 		claudeSourceCorrelation: newClaudeSourceCorrelationTracker(),
 		deliveryPrekeys:         prekeys,
 		observation:             observation,
@@ -3649,14 +3653,36 @@ func (h *Handlers) handleResolvePermission(conn Connection, msg WireMessage) {
 	sess, ok := h.getSession(params.SessionID)
 	h.mu.Unlock()
 
-	if !ok {
+	result := core.PermissionResult{Behavior: params.Behavior}
+	var err error
+	if ok && sess != nil {
+		err = sess.RespondPermission(params.RequestID, result)
+	} else if agent, aok := h.getAgent(msg.BackendID); aok {
+		if responder, rok := agent.(core.SessionPermissionResponder); rok {
+			err = responder.RespondSessionPermission(h.ctx, params.SessionID, params.RequestID, result)
+		} else {
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_found", Message: "no active session for permission response"})
+			return
+		}
+	} else {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_found", Message: "no active session for permission response"})
 		return
 	}
-
-	result := core.PermissionResult{Behavior: params.Behavior}
-	if err := sess.RespondPermission(params.RequestID, result); err != nil {
+	if err != nil {
 		slog.Error("go-bridge: RespondPermission failed", "error", err)
+	} else {
+		// Close the projection permission card immediately. Waiting for the host
+		// approval/resolved mux frame leaves SSV2 remapping the still-pending tool
+		// (Task Review / message dock stay up after Allow).
+		h.publishEvent(LogicalEvent{
+			SessionID: params.SessionID,
+			BackendID: msg.BackendID,
+			Event:     "permission_resolved",
+			Data: map[string]interface{}{
+				"requestId": params.RequestID,
+				"behavior":  params.Behavior,
+			},
+		})
 	}
 
 	conn.SendResult(msg.RequestID, &ResultResponse{Ok: true}, nil)
@@ -3681,12 +3707,21 @@ func (h *Handlers) handleQuestionReply(conn Connection, msg WireMessage) {
 	sess, ok := h.getSession(params.SessionID)
 	h.mu.Unlock()
 
-	if !ok {
+	var err error
+	if ok && sess != nil {
+		err = sess.RespondQuestion(params.QuestionID, params.OptionIDs)
+	} else if agent, aok := h.getAgent(msg.BackendID); aok {
+		if responder, rok := agent.(core.SessionQuestionResponder); rok {
+			err = responder.RespondSessionQuestion(h.ctx, params.SessionID, params.QuestionID, params.OptionIDs)
+		} else {
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_found", Message: "no active session for question reply"})
+			return
+		}
+	} else {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_found", Message: "no active session for question reply"})
 		return
 	}
-
-	if err := sess.RespondQuestion(params.QuestionID, params.OptionIDs); err != nil {
+	if err != nil {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "question_reply_failed", Message: err.Error()})
 		return
 	}
@@ -3712,12 +3747,21 @@ func (h *Handlers) handleQuestionReject(conn Connection, msg WireMessage) {
 	sess, ok := h.getSession(params.SessionID)
 	h.mu.Unlock()
 
-	if !ok {
+	var err error
+	if ok && sess != nil {
+		err = sess.RejectQuestion(params.QuestionID)
+	} else if agent, aok := h.getAgent(msg.BackendID); aok {
+		if responder, rok := agent.(core.SessionQuestionResponder); rok {
+			err = responder.RejectSessionQuestion(h.ctx, params.SessionID, params.QuestionID)
+		} else {
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_found", Message: "no active session for question reject"})
+			return
+		}
+	} else {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_found", Message: "no active session for question reject"})
 		return
 	}
-
-	if err := sess.RejectQuestion(params.QuestionID); err != nil {
+	if err != nil {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "question_reject_failed", Message: err.Error()})
 		return
 	}
@@ -3728,7 +3772,7 @@ func (h *Handlers) handleQuestionReject(conn Connection, msg WireMessage) {
 // handleResolveUserInput 是 v2 结构化用户输入回答的唯一入口（设计 §7/§10.1）。
 // 它只调用可选能力 core.UserInputResponder；旧 RespondQuestion/RejectQuestion 不作 fallback。
 // 把 adapter 返回的 *core.UserInputError 映射为 WireError（保留稳定 code），不回显 secret/答案正文。
-func (h *Handlers) handleResolveUserInput(conn Connection, msg WireMessage, _ core.Agent) {
+func (h *Handlers) handleResolveUserInput(conn Connection, msg WireMessage, agent core.Agent) {
 	var params struct {
 		SessionID      string                  `json:"sessionId"`
 		InteractionID  string                  `json:"interactionId"`
@@ -3762,11 +3806,10 @@ func (h *Handlers) handleResolveUserInput(conn Connection, msg WireMessage, _ co
 	}
 
 	tracked, ok := h.sessions.getForBackend(params.SessionID, msg.BackendID)
-	if !ok {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_found", Message: "no active session for this backend and structured user input"})
-		return
+	var sess core.AgentSession
+	if ok {
+		sess = tracked.session
 	}
-	sess := tracked.session
 	if params.Action == core.UserInputActionReject {
 		part, _, found := h.projectedUserInput(msg.BackendID, params.SessionID, params.InteractionID)
 		if !found {
@@ -3779,9 +3822,18 @@ func (h *Handlers) handleResolveUserInput(conn Connection, msg WireMessage, _ co
 		}
 	}
 
-	responder, ok := sess.(core.UserInputResponder)
-	if !ok {
-		// backend 未声明 structured_user_input_v1 能力：fail-closed，明确告知不支持。
+	var responder core.UserInputResponder
+	if sess != nil {
+		responder, _ = sess.(core.UserInputResponder)
+	}
+	if responder == nil && agent != nil {
+		responder, _ = agent.(core.UserInputResponder)
+	}
+	if responder == nil {
+		if !ok {
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_found", Message: "no active session for this backend and structured user input"})
+			return
+		}
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "response_not_supported", Message: "this backend does not support structured user input"})
 		return
 	}

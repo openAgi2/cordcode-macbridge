@@ -53,6 +53,20 @@ type AgentSession interface {
 	RejectQuestion(questionID string) error
 }
 
+// SessionQuestionResponder answers a question without a live AgentSession
+// (Mac-initiated turn that iOS is only observing).
+type SessionQuestionResponder interface {
+	RespondSessionQuestion(ctx context.Context, sessionID, questionID string, optionIDs []string) error
+	RejectSessionQuestion(ctx context.Context, sessionID, questionID string) error
+}
+
+// SessionPermissionResponder answers an approval without a live AgentSession.
+// Used when iOS is only observing a session (Mac-initiated turn) and the
+// go-bridge registry has no StartSession binding.
+type SessionPermissionResponder interface {
+	RespondSessionPermission(ctx context.Context, sessionID, requestID string, result PermissionResult) error
+}
+
 // PermissionResult represents the user's decision on a permission request.
 type PermissionResult struct {
 	Behavior     string         `json:"behavior"`               // "allow" or "deny"

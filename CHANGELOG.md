@@ -7,6 +7,13 @@
 版本号对齐 MacBridge Release 构建的 `MARKETING_VERSION`（见 `MacBridge/project.yml`）。日期为协调世界时（UTC）。
 
 ## [Unreleased]
+- **修复：iPhone 多选卡点选项没反应**：DeepSeek Web 明确广告结构化问答能力，iPhone 提交/跳过才能真正回给 Mac。
+- **修复：Mac 弹出的多选问答框 iPhone 看不到**：DeepSeek Web 的多选题（可同时勾几项）只在官方 web 出现。根因是只发了旧的 `question_asked`，投影内核按规定不吃这个事件，iPhone 消息页没有问答卡。现改为走权威的结构化问答，并带上「多选」标记。
+- **修复：Mac 选完覆盖后 iPhone 不出现权限条**：文件已存在的选择题在 Mac 上选「覆盖」后，Mac 会弹出写文件/提权框，iPhone 没有。根因是 codec 重置后的新 turn 只在 Mac 内存里记一笔、不推 turn 壳，iPhone 收到 `upsert_tool` 却对不上 turn，直接丢掉。现把所属 turn 和权限工具一起推出去。
+- **修复：DeepSeek Web 选择题只出现在 Mac**：文件已存在时的「您现在想让我做什么？」只在官方 web 弹出。现同样送到 iPhone（输入框上方问答卡），任一侧提交或跳过后两边都收。
+- **改进：DeepSeek Web 审批只留 iPhone 原生条，Mac 发起也能批**：消息页不再叠一张前端权限卡；原生「需要权限」条加高到两行以展示 escalate sandbox 原因。Mac web 发起的 turn 同样把审批送到正在看的 iPhone，任一侧点允许/拒绝后两边都收。
+- **修复：DeepSeek Web 第二轮审批（删文件/提权）iPhone 不再弹出**：第一轮写文件结束后转发协程就退出了，空闲回收又关不掉旧事件通道，下一轮审批发到新会话却没人转发。现 turn 结束后继续听、Close 会关掉通道，删文件这类沙箱提权也会上屏。
+- **修复：DeepSeek Web 审批在消息页看不见、点允许后任务验收不收**：权限卡被折进过程组只剩「等待授权」摘要；允许之后投影仍是 pending，任务验收权限页留着。现消息页在输入框上方弹出允许/拒绝；允许或拒绝后投影清掉待批准状态，卡片收起。
 - **修复：DeepSeek Web 审批二次仍不上 iPhone**：权限事件即使送到手机，SSV2 也会用投影重画消息页，而投影里没有权限标记，卡片立刻被盖掉。现把 `permission_request` 写入投影（pending tool + `requiresPermissionConfirmation`），iPhone 从投影画审批卡。
 - **修复：DeepSeek Web 写文件审批只出现在 Mac web、iPhone 没有**：官方 `approval/asked` 审计事件被码器当未知类型重置；SSV2 把 `permission_request` 误判成「已进投影」而丢掉（reducer 其实不吃它）；审批等待期间 `relayEvents` 60 秒空闲超时又把 turn 自动收口。现改为：审计事件忽略、权限/问答仍走 raw 投递、dsh-web 关闭空闲超时。
 - **修复：DeepSeek Web 复测仍不流式（Mac web 在出字、iPhone 不渲染）**：Mac 已推完整 projection_patch，但 iOS 投影渲染开关漏了 DeepSeek Web（与当初 DeepSeek 同一类漏列），补丁被泵丢掉、界面仍等 raw live event；Mac web 旁观只有 passive/patch，iOS 发送后也不渲染。另：刚 StartSession、kernel 仍空时旧条件把 live 会话收成空基线（首张 snapshot 只有 1 个 turn）。修复：iOS 把 DeepSeek Web 列入 SSV2 投影族；Mac 仅在已有 kernel 时走 live-only，空 kernel 先用官方 history 播种。

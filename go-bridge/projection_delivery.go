@@ -62,10 +62,8 @@ func isSessionSyncV2RawTimelineEvent(event string) bool {
 		"text_delta", "message_updated", "message_content",
 		"reasoning_delta", "thinking_delta",
 		"tool_started", "tool_finished", "tool_content",
-		// permission_request / question_asked 并未进入 projection reducer
-		// （reducer 只认 user_input_requested）。列入 deny-list 会让 SSV2 客户端
-		// 既收不到投影权限卡、也收不到 raw 事件——DeepSeek Web 真机行 6：
-		// Mac web 弹出审批、iPhone 消息页和任务验收都是空的。
+		// permission_request / permission_resolved / question_asked 仍走 raw
+		// 控制面（不在此 deny-list）：投影已吃 permission_*，raw 作兜底。
 		"context_compressing", "context_compressed",
 		"session_state_changed", "session_running_signal",
 		"delivery_reconcile_required",

@@ -27,7 +27,7 @@ func (a *Agent) WireDescriptor() *core.WireDescriptor {
 		DisplayName:                 "DeepSeek Web",
 		LiveEventModel:              core.LiveEventBroadcast,
 		RequiresExternalTurnPolling: false,
-		StaticCapabilities:          []string{"external_turn_streaming", "question_reply"},
+		StaticCapabilities:          []string{"external_turn_streaming", "question_reply", "structured_user_input_v1"},
 	}
 }
 

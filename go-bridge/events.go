@@ -153,11 +153,24 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 		}), true
 
 	case core.EventPermissionRequest:
-		return "permission_request", map[string]interface{}{
+		payload := map[string]interface{}{
 			"requestId":    ev.RequestID,
 			"toolName":     ev.ToolName,
 			"toolInput":    ev.ToolInput,
 			"toolInputRaw": ev.ToolInputRaw,
+		}
+		if ev.Content != "" {
+			payload["reason"] = ev.Content
+		}
+		return "permission_request", payload, false
+
+	case core.EventPermissionResolved:
+		// Projection SoT close for a pending permission card. iOS resolve_permission
+		// and host approval/resolved both land here so SSV2 remaps without a leftover
+		// requiresPermissionConfirmation tool.
+		return "permission_resolved", map[string]interface{}{
+			"requestId": ev.RequestID,
+			"behavior":  ev.Content,
 		}, false
 
 	case core.EventContextCompressing:

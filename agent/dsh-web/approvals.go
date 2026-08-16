@@ -4,15 +4,15 @@ package dshweb
 // iOS-initiated turn hangs forever at the first ask-policy tool, violating
 // fail-visibly).
 //
-// Approval flow: approval/requested → core permission_request (surface rule:
-// bridge registry hit = a live binding for that session — the ONLY judging
-// criterion, R2-3; observation subscription alone is NOT a surface) → iOS
-// answers → /api/respond {sessionId, approvalId, outcome} where
+// Approval flow: approval/requested → core permission_request. Bound sessions
+// emit on the session channel; unbound (Mac-initiated) sessions emit on the
+// agent passive channel so an observing iPhone can also approve. First writer
+// wins: either side's allow/deny closes both UIs via approval/resolved.
+// iOS answers → /api/respond {sessionId, approvalId, outcome} where
 // allow→allowed-once / deny→rejected (the official outcome set is binary;
 // iOS's always-variants already collapse to allow/deny on the wire, R3-2).
-// approval/resolved closes the pending entry (first-writer-wins: web answering
-// first settles the batch and the turn continuing closes iOS's prompt through
-// its toolUseID lifecycle — no synthetic permission-resolved event exists).
+// approval/resolved closes the pending entry (first-writer-wins) and emits
+// permission_resolved so the projection drops requiresPermissionConfirmation.
 //
 // Question flow (R2-1/R3-1/S-1/S-2/S-3): dsh asks WHOLE BATCHES (one ask,
 // many questions, one answer). Each question carries its own dsh id
@@ -44,6 +44,12 @@ import (
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
+
+var _ core.SessionPermissionResponder = (*Agent)(nil)
+var _ core.SessionQuestionResponder = (*Agent)(nil)
+var _ core.UserInputResponder = (*Agent)(nil)
+var _ core.StructuredUserInputProvider = (*Agent)(nil)
+var _ core.UserInputResponder = (*dshSession)(nil)
 
 // approvalsState is the agent-level pending registry (mux is agent-scoped).
 type approvalsState struct {
@@ -92,6 +98,127 @@ func (a *Agent) approvalsInit() {
 	}
 }
 
+// emitPermissionEvent delivers a permission asked/resolved event to the bound
+// session when one exists, otherwise to the agent passive channel (Mac-initiated
+// turns that iOS is only observing).
+func (a *Agent) sessionTurnID(sessionID string) string {
+	if sessionID == "" {
+		return ""
+	}
+	a.streamMu.Lock()
+	defer a.streamMu.Unlock()
+	if c := a.codecs[sessionID]; c != nil {
+		return c.activeTurnID
+	}
+	return ""
+}
+
+func (a *Agent) emitQuestionResolved(sessionID string, sess *dshSession, questionID, outcome string) {
+	status := core.UserInputStatusAnswered
+	if outcome == "cancelled" || outcome == "rejected" {
+		status = core.UserInputStatusRejected
+	}
+	a.emitPermissionEvent(sessionID, sess, core.Event{
+		Type:      core.EventUserInputResolved,
+		SessionID: sessionID,
+		TurnID:    a.sessionTurnID(sessionID),
+		ItemID:    questionID,
+		UserInput: &core.UserInputInteraction{
+			InteractionID:    questionID,
+			Status:           status,
+			ResolutionSource: "ios",
+		},
+	})
+	a.emitPermissionEvent(sessionID, sess, core.Event{
+		Type:       core.EventQuestionResolved,
+		SessionID:  sessionID,
+		QuestionID: questionID,
+		Content:    outcome,
+		ThreadID:   sessionID,
+	})
+}
+
+func (a *Agent) emitPermissionEvent(sessionID string, sess *dshSession, ev core.Event) {
+	if ev.SessionID == "" {
+		ev.SessionID = sessionID
+	}
+	if sess != nil {
+		sess.emitControlCritical(ev)
+		return
+	}
+	ch := a.passiveEvents()
+	select {
+	case ch <- ev:
+	case <-time.After(5 * time.Second):
+		slog.Error("dsh-web: passive permission event dropped after wait",
+			"sessionPrefix", shortLog(sessionID), "type", string(ev.Type))
+	}
+}
+
+// RespondSessionPermission implements core.SessionPermissionResponder so
+// resolve_permission works without a go-bridge registry session (observe-only).
+func (a *Agent) RespondSessionPermission(ctx context.Context, sessionID, requestID string, result core.PermissionResult) error {
+	return a.respondApproval(ctx, sessionID, requestID, result)
+}
+
+func (a *Agent) StructuredUserInputReady() bool { return true }
+
+func (a *Agent) RespondSessionQuestion(ctx context.Context, sessionID, questionID string, optionIDs []string) error {
+	return a.respondQuestion(ctx, sessionID, questionID, optionIDs, "")
+}
+
+func (a *Agent) RejectSessionQuestion(ctx context.Context, sessionID, questionID string) error {
+	return a.rejectQuestion(ctx, sessionID, questionID)
+}
+
+func (a *Agent) ResolveUserInput(ctx context.Context, interactionID string, _ string, action core.UserInputAction, answers []core.UserInputAnswer) (core.UserInputResolution, error) {
+	a.approvalsInit()
+	a.approvals.mu.Lock()
+	rpcID := a.approvals.questionOwner[interactionID]
+	batch := a.approvals.batches[rpcID]
+	sessionID := ""
+	if batch != nil {
+		sessionID = batch.sessionID
+	}
+	a.approvals.mu.Unlock()
+	if sessionID == "" {
+		return core.UserInputResolution{}, &core.UserInputError{Code: "interaction_not_found", Message: "question is not pending"}
+	}
+	sess, _ := a.bindings.get(sessionID)
+	if action == core.UserInputActionReject {
+		if err := a.rejectQuestion(ctx, sessionID, interactionID); err != nil {
+			return core.UserInputResolution{}, err
+		}
+		a.emitQuestionResolved(sessionID, sess, interactionID, "cancelled")
+		return core.UserInputResolution{Outcome: core.UserInputOutcomeAccepted, CurrentStatus: core.UserInputStatusRejected}, nil
+	}
+	for _, ans := range answers {
+		var selected []string
+		var custom string
+		for _, v := range ans.Values {
+			if v.Kind == core.UserInputValueOption && v.OptionID != "" {
+				selected = append(selected, v.OptionID)
+			}
+			if v.Kind == core.UserInputValueText && strings.TrimSpace(v.Text) != "" {
+				custom = v.Text
+			}
+		}
+		qid := ans.QuestionID
+		if qid == "" {
+			qid = interactionID
+		}
+		if err := a.respondQuestion(ctx, sessionID, qid, selected, custom); err != nil {
+			return core.UserInputResolution{}, err
+		}
+		a.emitQuestionResolved(sessionID, sess, qid, "answered")
+	}
+	return core.UserInputResolution{Outcome: core.UserInputOutcomeAccepted, CurrentStatus: core.UserInputStatusAnswered}, nil
+}
+
+func (s *dshSession) ResolveUserInput(ctx context.Context, interactionID string, clientActionID string, action core.UserInputAction, answers []core.UserInputAnswer) (core.UserInputResolution, error) {
+	return s.agent.ResolveUserInput(ctx, interactionID, clientActionID, action, answers)
+}
+
 // emitControlCritical posts a control-critical event (permission/question) to
 // the bound session with a bounded wait — unlike live deltas these may not be
 // silently dropped (a lost permission_request hangs the turn, 坑 8).
@@ -102,6 +229,7 @@ func (s *dshSession) emitControlCritical(ev core.Event) {
 	if ev.SessionID == "" {
 		ev.SessionID = s.CurrentSessionID()
 	}
+	defer func() { _ = recover() }()
 	select {
 	case s.events <- ev:
 	case <-time.After(5 * time.Second):
@@ -129,28 +257,35 @@ func (a *Agent) handleApprovalFrame(ctx context.Context, rpcID, method string, p
 			slog.Warn("dsh-web: approval/requested unparsable", "error", err)
 			return
 		}
-		// Surface rule (R2-3): registry hit only. External sessions keep their
-		// approvals on the web UI — "whoever is watching answers".
-		sess, ok := a.bindings.get(f.SessionID)
-		if !ok || sess == nil {
-			slog.Debug("dsh-web: approval not surfaced (no bridge binding)",
-				"sessionPrefix", shortLog(f.SessionID), "tool", f.ToolName)
-			return
-		}
 		a.approvals.mu.Lock()
 		a.approvals.approvals[f.ApprovalID] = &pendingApproval{
 			rpcID: rpcID, sessionID: f.SessionID, approvalID: f.ApprovalID, toolName: f.ToolName,
 		}
 		a.approvals.mu.Unlock()
+		sess, _ := a.bindings.get(f.SessionID)
 		// The dsh approval frame carries no tool input (events.schema.ts) —
 		// the request surfaces with the tool name; nothing is invented.
-		sess.emitControlCritical(core.Event{
-			Type:      core.EventPermissionRequest,
-			SessionID: f.SessionID,
-			RequestID: f.ApprovalID,
-			ToolName:  f.ToolName,
+		raw := map[string]any{}
+		if f.Reason != "" {
+			raw["reason"] = f.Reason
+		}
+		if f.CallID != "" {
+			raw["callId"] = f.CallID
+		}
+		var toolInputRaw map[string]any
+		if len(raw) > 0 {
+			toolInputRaw = raw
+		}
+		a.emitPermissionEvent(f.SessionID, sess, core.Event{
+			Type:         core.EventPermissionRequest,
+			SessionID:    f.SessionID,
+			RequestID:    f.ApprovalID,
+			ToolName:     f.ToolName,
+			Content:      f.Reason,
+			ToolInput:    f.Reason,
+			ToolInputRaw: toolInputRaw,
 		})
-		slog.Info("dsh-web: approval surfaced", "sessionPrefix", shortLog(f.SessionID), "tool", f.ToolName)
+		slog.Info("dsh-web: approval surfaced", "sessionPrefix", shortLog(f.SessionID), "tool", f.ToolName, "bound", sess != nil)
 
 	case "approval/resolved":
 		var f struct {
@@ -162,16 +297,24 @@ func (a *Agent) handleApprovalFrame(ctx context.Context, rpcID, method string, p
 			return
 		}
 		a.approvals.mu.Lock()
-		_, ours := a.approvals.approvals[f.ApprovalID]
 		delete(a.approvals.approvals, f.ApprovalID)
 		a.approvals.mu.Unlock()
-		if ours {
-			// First-writer-wins close: if the web answered, the pending entry
-			// settles here; iOS's prompt closes through the toolUseID
-			// lifecycle as the turn continues (no permission_resolved wire
-			// event exists — none is invented).
-			slog.Info("dsh-web: approval resolved", "sessionPrefix", shortLog(f.SessionID), "outcome", f.Outcome)
+		// Projection SoT now owns the permission card. Closing the pending
+		// entry is not enough — SSV2 remaps from the projection, so the
+		// host-resolved outcome must clear requiresPermissionConfirmation.
+		// Idempotent with go-bridge resolve_permission → permission_resolved.
+		behavior := "deny"
+		if f.Outcome == "allowed-once" {
+			behavior = "allow"
 		}
+		sess, _ := a.bindings.get(f.SessionID)
+		a.emitPermissionEvent(f.SessionID, sess, core.Event{
+			Type:      core.EventPermissionResolved,
+			SessionID: f.SessionID,
+			RequestID: f.ApprovalID,
+			Content:   behavior,
+		})
+		slog.Info("dsh-web: approval resolved", "sessionPrefix", shortLog(f.SessionID), "outcome", f.Outcome)
 	}
 }
 
@@ -198,14 +341,6 @@ func (a *Agent) handleQuestionFrame(ctx context.Context, rpcID, method string, p
 			slog.Warn("dsh-web: question/requested unparsable or empty", "error", err)
 			return
 		}
-		// Surface rule (R2-3): registry hit only.
-		sess, ok := a.bindings.get(f.SessionID)
-		if !ok || sess == nil {
-			slog.Debug("dsh-web: question batch not surfaced (no bridge binding)",
-				"sessionPrefix", shortLog(f.SessionID))
-			return
-		}
-
 		a.approvals.mu.Lock()
 		if _, exists := a.approvals.batches[rpcID]; !exists {
 			fresh := &pendingQuestionBatch{
@@ -222,20 +357,55 @@ func (a *Agent) handleQuestionFrame(ctx context.Context, rpcID, method string, p
 		} // existing batch = reconnect replay (S-2): re-emit only
 		a.approvals.mu.Unlock()
 
-		// Per-question events, each with its own dsh id (R3-1) — iOS's
-		// replace-by-id upsert keeps every question visible and answerable.
+		sess, _ := a.bindings.get(f.SessionID)
+		// Per-question events, each with its own dsh id (R3-1). Bound sessions
+		// use the session channel; Mac-initiated (unbound) use the passive
+		// channel so an observing iPhone can answer too.
+		//
+		// Canonical writer is user_input_requested (SSV2 projection / UserInputDock).
+		// question_asked is the one-way legacy presentation only — EventPublisher
+		// will not ingest it, so emitting it alone leaves iPhone with no card
+		// (owner 2026-08-16: Mac 多选框出现，iPhone 没有).
 		for _, q := range f.Questions {
 			opts := make([]core.QuestionOption, 0, len(q.Options))
+			uiOpts := make([]core.UserInputOption, 0, len(q.Options))
 			for _, o := range q.Options {
 				// dsh options have no ids: the label IS the identifier, echoed
 				// verbatim in the answer's selected[] (user-questions types).
 				opts = append(opts, core.QuestionOption{ID: o.Label, Label: o.Label, Description: o.Description})
+				uiOpts = append(uiOpts, core.UserInputOption{ID: o.Label, Label: o.Label, Description: o.Description})
 			}
 			text := q.Question
 			if q.Header != "" {
 				text = q.Header + "：" + q.Question
 			}
-			sess.emitControlCritical(core.Event{
+			mode := core.UserInputAnswerModeSingle
+			if q.MultiSelect {
+				mode = core.UserInputAnswerModeMultiple
+			}
+			a.emitPermissionEvent(f.SessionID, sess, core.Event{
+				Type:      core.EventUserInputRequested,
+				SessionID: f.SessionID,
+				TurnID:    a.sessionTurnID(f.SessionID),
+				ItemID:    q.ID,
+				UserInput: &core.UserInputInteraction{
+					InteractionID: q.ID,
+					Status:        core.UserInputStatusPending,
+					Questions: []core.UserInputQuestion{{
+						ID:                 q.ID,
+						Header:             q.Header,
+						Prompt:             q.Question,
+						AnswerMode:         mode,
+						Options:            uiOpts,
+						AllowsCustomAnswer: true,
+						IsSecret:           false,
+						Required:           true,
+					}},
+					CanRespond: true,
+					CanReject:  true,
+				},
+			})
+			a.emitPermissionEvent(f.SessionID, sess, core.Event{
 				Type:         core.EventQuestionAsked,
 				SessionID:    f.SessionID,
 				QuestionID:   q.ID,
@@ -246,7 +416,7 @@ func (a *Agent) handleQuestionFrame(ctx context.Context, rpcID, method string, p
 			})
 		}
 		slog.Info("dsh-web: question batch surfaced",
-			"sessionPrefix", shortLog(f.SessionID), "questions", len(f.Questions), "batch", shortLog(rpcID))
+			"sessionPrefix", shortLog(f.SessionID), "questions", len(f.Questions), "batch", shortLog(rpcID), "bound", sess != nil)
 
 	case "question/resolved":
 		var f struct {
@@ -267,16 +437,29 @@ func (a *Agent) handleQuestionFrame(ctx context.Context, rpcID, method string, p
 		}
 		a.approvals.mu.Unlock()
 		if batch == nil {
-			return // resolved for a batch never surfaced here (web-only ask)
+			return // resolved for a batch never surfaced here
 		}
 		// S-1: the frame has no per-question content — the batch state expands
-		// into N per-id resolved events so each iOS pending step closes.
-		sess, ok := a.bindings.get(f.SessionID)
-		if !ok || sess == nil {
-			return
+		// into N per-id resolved events so each iOS pending card closes.
+		sess, _ := a.bindings.get(f.SessionID)
+		status := core.UserInputStatusAnswered
+		if strings.EqualFold(f.Outcome, "cancelled") || strings.EqualFold(f.Outcome, "rejected") {
+			status = core.UserInputStatusRejected
 		}
+		turnID := a.sessionTurnID(f.SessionID)
 		for _, qid := range batch.questionIDs {
-			sess.emit(core.Event{
+			a.emitPermissionEvent(f.SessionID, sess, core.Event{
+				Type:      core.EventUserInputResolved,
+				SessionID: f.SessionID,
+				TurnID:    turnID,
+				ItemID:    qid,
+				UserInput: &core.UserInputInteraction{
+					InteractionID:    qid,
+					Status:           status,
+					ResolutionSource: "backend",
+				},
+			})
+			a.emitPermissionEvent(f.SessionID, sess, core.Event{
 				Type:       core.EventQuestionResolved,
 				SessionID:  f.SessionID,
 				QuestionID: qid,

@@ -41,12 +41,41 @@ func drainOne(t *testing.T, ch <-chan core.Event, what string) core.Event {
 	}
 }
 
+func drainOf(t *testing.T, ch <-chan core.Event, typ core.EventType, what string) core.Event {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case ev := <-ch:
+			if ev.Type == typ {
+				return ev
+			}
+		case <-deadline:
+			t.Fatalf("%s never arrived (want %s)", what, typ)
+			return core.Event{}
+		}
+	}
+}
+
 func assertNoEvent(t *testing.T, ch <-chan core.Event, what string) {
 	t.Helper()
 	select {
 	case ev := <-ch:
 		t.Fatalf("%s unexpectedly arrived: %+v", what, ev)
 	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+func TestSessionCloseUnblocksEventsChannel(t *testing.T) {
+	f := newFakeDSHServer(t)
+	defer f.Close()
+	a := newTestAgent(t, f)
+	sess := boundTestSession(t, f, a, "sess-close")
+	if err := sess.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if _, ok := <-sess.Events(); ok {
+		t.Fatal("Events() must close so relayEvents can exit after idle eviction")
 	}
 }
 
@@ -59,10 +88,14 @@ func TestApprovalChainSurfacesAndResponds(t *testing.T) {
 	// approval/requested for a BOUND session surfaces a permission request.
 	a.handleApprovalFrame(context.Background(), "frame-rpc-a1", "approval/requested", mustJSON(map[string]any{
 		"sessionId": "sess-appr", "approvalId": "appr-1", "toolName": "bash", "callId": "c9",
+		"reason": "escalate sandbox to danger-full-access: 超出工作区",
 	}))
 	ev := drainOne(t, sess.Events(), "permission_request")
 	if ev.Type != core.EventPermissionRequest || ev.RequestID != "appr-1" || ev.ToolName != "bash" {
 		t.Fatalf("permission event: %+v", ev)
+	}
+	if ev.Content != "escalate sandbox to danger-full-access: 超出工作区" {
+		t.Fatalf("reason not plumbed: %+v", ev)
 	}
 
 	// iOS allow → /api/respond echoes the frame rpcId, outcome allowed-once.
@@ -119,30 +152,50 @@ func TestApprovalChainSurfacesAndResponds(t *testing.T) {
 	}
 }
 
-func TestApprovalExternalSessionNotSurfaced(t *testing.T) {
+func TestApprovalExternalSessionSurfacesOnPassive(t *testing.T) {
 	f := newFakeDSHServer(t)
 	defer f.Close()
 	a := newTestAgent(t, f)
 	bound := boundTestSession(t, f, a, "sess-bound") // bind SOME session
 
-	// approval for an UNBOUND session: no surface, no pending registry entry.
+	// Mac-initiated turn: no StartSession binding. Still surface on the
+	// agent passive channel so an observing iPhone can approve.
 	a.handleApprovalFrame(context.Background(), "rpc-x", "approval/requested", mustJSON(map[string]any{
 		"sessionId": "sess-external", "approvalId": "appr-ext", "toolName": "write",
+		"reason": "escalate sandbox to danger-full-access: 超出工作区",
 	}))
-	assertNoEvent(t, bound.Events(), "external approval")
+	assertNoEvent(t, bound.Events(), "must not double-deliver to a different binding")
+	ev := drainOne(t, a.passiveEvents(), "external approval via passive")
+	if ev.Type != core.EventPermissionRequest || ev.RequestID != "appr-ext" || ev.SessionID != "sess-external" {
+		t.Fatalf("passive permission: %+v", ev)
+	}
+	if ev.Content == "" {
+		t.Fatal("reason must ride the passive permission event")
+	}
+	if err := a.RespondSessionPermission(context.Background(), "sess-external", "appr-ext", core.PermissionResult{Behavior: "allow"}); err != nil {
+		t.Fatalf("observe-only respond: %v", err)
+	}
 
-	// question for an UNBOUND session: same rule.
+	// question for an UNBOUND session also goes to passive (same product rule).
 	a.handleQuestionFrame(context.Background(), "rpc-q", "question/requested", mustJSON(map[string]any{
 		"sessionId": "sess-external",
 		"questions": []map[string]any{{"id": "q-ext", "question": "外部？"}},
 	}))
-	assertNoEvent(t, bound.Events(), "external question")
+	assertNoEvent(t, bound.Events(), "must not double-deliver question to a different binding")
+	uiex := drainOf(t, a.passiveEvents(), core.EventUserInputRequested, "external user_input via passive")
+	if uiex.UserInput == nil || uiex.UserInput.InteractionID != "q-ext" {
+		t.Fatalf("passive user_input: %+v", uiex)
+	}
+	qev := drainOf(t, a.passiveEvents(), core.EventQuestionAsked, "external question via passive")
+	if qev.Type != core.EventQuestionAsked || qev.QuestionID != "q-ext" {
+		t.Fatalf("passive question: %+v", qev)
+	}
 
 	a.approvalsMu.Lock()
 	n := len(a.approvals.batches)
 	a.approvalsMu.Unlock()
-	if n != 0 {
-		t.Fatalf("external frames must not create pending state, got %d batches", n)
+	if n == 0 {
+		t.Fatal("external question must stay pending so iOS can answer")
 	}
 }
 
@@ -161,6 +214,10 @@ func TestApprovalResolvedClosesPendingFirstWriterWins(t *testing.T) {
 	a.handleApprovalFrame(context.Background(), "rpc-fw2", "approval/resolved", mustJSON(map[string]any{
 		"sessionId": "sess-fw", "approvalId": "appr-fw", "outcome": "allowed-once",
 	}))
+	resolved := drainOne(t, sess.Events(), "permission_resolved")
+	if resolved.Type != core.EventPermissionResolved || resolved.RequestID != "appr-fw" || resolved.Content != "allow" {
+		t.Fatalf("permission_resolved: %+v", resolved)
+	}
 	// The mux stream replays still-pending frames on reconnect — but this one
 	// is settled, so a replayed approval/requested is a NEW pending entry only
 	// if re-pushed after settle; our late iOS respond now hits not-pending,
@@ -186,8 +243,12 @@ func TestQuestionBatchFullSemantics(t *testing.T) {
 			{"id": "q2", "question": "要不要跑测试", "header": "验证", "multiSelect": false},
 		},
 	}))
-	q1 := drainOne(t, sess.Events(), "question q1")
-	q2 := drainOne(t, sess.Events(), "question q2")
+	ui1 := drainOf(t, sess.Events(), core.EventUserInputRequested, "user_input q1")
+	q1 := drainOf(t, sess.Events(), core.EventQuestionAsked, "question q1")
+	q2 := drainOf(t, sess.Events(), core.EventQuestionAsked, "question q2")
+	if ui1.UserInput == nil || ui1.UserInput.InteractionID != "q1" || ui1.UserInput.Questions[0].AnswerMode != core.UserInputAnswerModeSingle {
+		t.Fatalf("canonical q1: %+v", ui1.UserInput)
+	}
 	if q1.Type != core.EventQuestionAsked || q1.QuestionID != "q1" || q1.QuestionText != "选方案" {
 		t.Fatalf("q1: %+v", q1)
 	}
@@ -285,8 +346,8 @@ func TestQuestionBatchFullSemantics(t *testing.T) {
 	a.handleQuestionFrame(context.Background(), "batch-rpc-1", "question/resolved", mustJSON(map[string]any{
 		"sessionId": "sess-q", "questionRpcId": "batch-rpc-1", "outcome": "answered",
 	}))
-	r1 := drainOne(t, sess.Events(), "resolved q1")
-	r2 := drainOne(t, sess.Events(), "resolved q2")
+	r1 := drainOf(t, sess.Events(), core.EventQuestionResolved, "resolved q1")
+	r2 := drainOf(t, sess.Events(), core.EventQuestionResolved, "resolved q2")
 	if r1.Type != core.EventQuestionResolved || r1.QuestionID != "q1" || r1.Content != "answered" {
 		t.Fatalf("r1: %+v", r1)
 	}
@@ -314,8 +375,8 @@ func TestQuestionRejectCancelsWholeBatchViaErrorBranch(t *testing.T) {
 			{"id": "r2", "question": "二"},
 		},
 	}))
-	drainOne(t, sess.Events(), "question r1")
-	drainOne(t, sess.Events(), "question r2")
+	drainOf(t, sess.Events(), core.EventQuestionAsked, "question r1")
+	drainOf(t, sess.Events(), core.EventQuestionAsked, "question r2")
 
 	// Answering one question first must NOT send anything; rejecting the
 	// OTHER cancels the WHOLE batch through the error branch (asymmetry).
@@ -356,13 +417,13 @@ func TestQuestionReconnectReplayIsIdempotent(t *testing.T) {
 	})
 	// First delivery.
 	a.handleQuestionFrame(context.Background(), "batch-rc", "question/requested", frame)
-	drainOne(t, sess.Events(), "question rc1 (first)")
+	drainOf(t, sess.Events(), core.EventQuestionAsked, "question rc1 (first)")
 	// Partial answer, then the mux reconnect replays the same frame (S-2).
 	if err := sess.RespondQuestion("rc1", []string{"已答"}); err != nil {
 		t.Fatal(err)
 	}
 	a.handleQuestionFrame(context.Background(), "batch-rc", "question/requested", frame)
-	ev := drainOne(t, sess.Events(), "question rc1 (replay)")
+	ev := drainOf(t, sess.Events(), core.EventQuestionAsked, "question rc1 (replay)")
 	if ev.QuestionID != "rc1" {
 		t.Fatalf("replay event: %+v", ev)
 	}
@@ -385,7 +446,37 @@ func TestQuestionReconnectReplayIsIdempotent(t *testing.T) {
 	a.handleQuestionFrame(context.Background(), "batch-rc", "question/resolved", mustJSON(map[string]any{
 		"sessionId": "sess-rc", "questionRpcId": "batch-rc", "outcome": "answered",
 	}))
-	if ev := drainOne(t, sess.Events(), "resolved rc1"); ev.QuestionID != "rc1" {
+	if ev := drainOf(t, sess.Events(), core.EventQuestionResolved, "resolved rc1"); ev.QuestionID != "rc1" {
 		t.Fatalf("resolved: %+v", ev)
+	}
+}
+
+func TestQuestionMultiSelectProjectsCanonicalMultiple(t *testing.T) {
+	f := newFakeDSHServer(t)
+	defer f.Close()
+	a := newTestAgent(t, f)
+	a.handleQuestionFrame(context.Background(), "rpc-ms", "question/requested", mustJSON(map[string]any{
+		"sessionId": "sess-ms",
+		"questions": []map[string]any{{
+			"id":          "q-ms",
+			"header":      "测试多选",
+			"question":    "西游记小故事.txt 已存在。请选择您想执行哪些操作：",
+			"multiSelect": true,
+			"options": []map[string]any{
+				{"label": "保留现状", "description": "不做任何改动"},
+				{"label": "覆盖西游记小故事.txt", "description": "用新版本替换其内容"},
+			},
+		}},
+	}))
+	ev := drainOf(t, a.passiveEvents(), core.EventUserInputRequested, "multi-select user_input")
+	if ev.UserInput == nil || len(ev.UserInput.Questions) != 1 {
+		t.Fatalf("user_input: %+v", ev.UserInput)
+	}
+	q := ev.UserInput.Questions[0]
+	if q.AnswerMode != core.UserInputAnswerModeMultiple || q.Header != "测试多选" || len(q.Options) != 2 {
+		t.Fatalf("multi-select question = %+v", q)
+	}
+	if q.Options[0].ID != "保留现状" || !q.AllowsCustomAnswer {
+		t.Fatalf("options/custom = %+v", q)
 	}
 }

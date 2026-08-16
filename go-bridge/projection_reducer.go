@@ -2,6 +2,7 @@ package gobridge
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -313,6 +314,35 @@ func (ps *projectionSession) settleOtherOpenTurns(activeTurnID string, completed
 	}
 }
 
+// stageTurnForFlush copies the current turn snapshot into the flush buffer so the next
+// projection_patch carries UpsertTurns. Persist-only turn_started never stages a shell
+// (optimistic-paint fence); permission_request / question_asked / FlushPatch must do it
+// or iOS applyingPartOps skips upsert_tool / upsert_user_input (no matching turnId).
+func (ps *projectionSession) stageTurnForFlush(turnID string) {
+	if ps == nil || turnID == "" || ps.upsertTurns == nil {
+		return
+	}
+	if t := ps.turnByID(turnID); t != nil {
+		ps.upsertTurns[turnID] = *t
+	}
+}
+
+// stageOwningTurnsForPendingParts ensures every pending tool / user_input PartOp has a
+// turn shell in upsertTurns. Codec reset after a Mac-side question answer emits a new
+// persist-only turn_started; without this, FlushPatch ships upsert_tool alone and iOS
+// drops it (owner 2026-08-16: Mac 覆盖后出现权限框，iPhone 没有).
+func (ps *projectionSession) stageOwningTurnsForPendingParts() {
+	if ps == nil {
+		return
+	}
+	if len(ps.tools) > 0 {
+		ps.stageTurnForFlush(ps.projection.Execution.ActiveTurnID)
+	}
+	for _, pending := range ps.userInputs {
+		ps.stageTurnForFlush(pending.turnID)
+	}
+}
+
 // latestRunningTurnID prefers the last turn with status running/pending; else last turn id.
 func (ps *projectionSession) latestRunningTurnID() string {
 	for i := len(ps.projection.Turns) - 1; i >= 0; i-- {
@@ -350,6 +380,65 @@ func findUserInputPart(msg *MessageProjection, interactionID string) int {
 		}
 	}
 	return -1
+}
+
+func questionOptionsToUserInputOptions(raw interface{}) []map[string]interface{} {
+	list, ok := raw.([]interface{})
+	if !ok {
+		if typed, ok := raw.([]map[string]interface{}); ok {
+			out := make([]map[string]interface{}, 0, len(typed))
+			for i, m := range typed {
+				id := dataString(m, "id")
+				label := dataString(m, "label")
+				if id == "" {
+					id = label
+				}
+				if id == "" {
+					id = "opt-" + strconv.Itoa(i)
+				}
+				out = append(out, map[string]interface{}{
+					"id":          id,
+					"label":       label,
+					"description": dataString(m, "description"),
+				})
+			}
+			return out
+		}
+		return nil
+	}
+	out := make([]map[string]interface{}, 0, len(list))
+	for i, item := range list {
+		m, _ := item.(map[string]interface{})
+		if m == nil {
+			continue
+		}
+		id := dataString(m, "id")
+		label := dataString(m, "label")
+		if id == "" {
+			id = label
+		}
+		if id == "" {
+			id = "opt-" + strconv.Itoa(i)
+		}
+		out = append(out, map[string]interface{}{
+			"id":          id,
+			"label":       label,
+			"description": dataString(m, "description"),
+		})
+	}
+	return out
+}
+
+func hasPermissionTool(msg *MessageProjection, itemID string) bool {
+	if msg == nil || itemID == "" {
+		return false
+	}
+	for i := range msg.Parts {
+		if msg.Parts[i].Type == "tool" && msg.Parts[i].ItemID == itemID {
+			return true
+		}
+	}
+	return false
 }
 
 // hasPendingUserInput reports whether the turn's assistant message has any pending user_input part.
@@ -757,11 +846,15 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if activeTurnID == "" {
 			return
 		}
+		commit()
 		t := ps.turnByID(activeTurnID)
+		if t == nil {
+			ps.upsertTurn(TurnProjection{TurnID: activeTurnID, Status: "running"})
+			t = ps.turnByID(activeTurnID)
+		}
 		if t == nil {
 			return
 		}
-		commit()
 		if t.Assistant == nil {
 			t.Assistant = &MessageProjection{ID: activeTurnID, Role: "assistant"}
 		}
@@ -773,6 +866,9 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		}
 		if name := dataString(data, "toolName"); name != "" {
 			part.ToolName = name
+		}
+		if reason := dataString(data, "reason"); reason != "" {
+			part.Title = reason
 		}
 		if v, ok := data["toolInput"]; ok {
 			part.ToolInput = v
@@ -800,24 +896,180 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 				}
 			}
 		}
+		ps.stageTurnForFlush(activeTurnID)
 		ps.applyUserInputExecution(activeTurnID)
+
+	case "permission_resolved":
+		// Close the pending permission tool in place. itemId == requestId (approvalId).
+		// First-writer-wins: iOS resolve_permission and host approval/resolved are
+		// idempotent — a second resolve on an already-cleared part is a no-op.
+		callID := dataString(data, "requestId")
+		if callID == "" {
+			callID = dataString(data, "itemId")
+		}
+		if callID == "" {
+			return
+		}
+		behavior := strings.ToLower(dataString(data, "behavior"))
+		if behavior == "" {
+			behavior = strings.ToLower(dataString(data, "outcome"))
+		}
+		denied := behavior == "deny" || behavior == "rejected" || behavior == "cancelled" || behavior == "unavailable"
+		// Search the active turn first, then any turn that still holds this pending tool.
+		turnID := ps.projection.Execution.ActiveTurnID
+		t := ps.turnByID(turnID)
+		if t == nil || t.Assistant == nil || !hasPermissionTool(t.Assistant, callID) {
+			t = nil
+			for i := range ps.projection.Turns {
+				if ps.projection.Turns[i].Assistant != nil && hasPermissionTool(ps.projection.Turns[i].Assistant, callID) {
+					t = &ps.projection.Turns[i]
+					turnID = ps.projection.Turns[i].TurnID
+					break
+				}
+			}
+		}
+		if t == nil || t.Assistant == nil {
+			return
+		}
+		commit()
+		for i := range t.Assistant.Parts {
+			if t.Assistant.Parts[i].Type == "tool" && t.Assistant.Parts[i].ItemID == callID {
+				t.Assistant.Parts[i].RequiresPermissionConfirmation = false
+				if denied {
+					t.Assistant.Parts[i].ToolStatus = "rejected"
+				} else if t.Assistant.Parts[i].ToolStatus == "" || t.Assistant.Parts[i].ToolStatus == "pending" {
+					t.Assistant.Parts[i].ToolStatus = "running"
+				}
+				if ps.tools != nil {
+					ps.tools[callID] = t.Assistant.Parts[i]
+				}
+				break
+			}
+		}
+		ps.applyUserInputExecution(turnID)
+
+	case "question_asked":
+		// dsh-web mux question/requested. Project as user_input so SSV2 clients
+		// get the composer UserInputDock (same card as Claude/Codex structured ask).
+		qid := dataString(data, "questionId")
+		if qid == "" {
+			return
+		}
+		turnID := ps.projection.Execution.ActiveTurnID
+		if turnID == "" {
+			turnID = ps.latestRunningTurnID()
+		}
+		if turnID == "" {
+			return
+		}
+		if existing, ok := ps.userInputs[qid]; ok && existing.turnID != "" {
+			turnID = existing.turnID
+		}
+		commit()
+		t := ps.turnByID(turnID)
+		if t == nil {
+			ps.upsertTurn(TurnProjection{TurnID: turnID, Status: "running"})
+			t = ps.turnByID(turnID)
+		}
+		if t.Assistant == nil {
+			t.Assistant = &MessageProjection{ID: turnID, Role: "assistant"}
+		}
+		prompt := dataString(data, "questionText")
+		opts := questionOptionsToUserInputOptions(data["options"])
+		answerMode := dataString(data, "answerMode")
+		if answerMode == "" {
+			if dataBool(data, "multiSelect") {
+				answerMode = "multiple"
+			} else {
+				answerMode = "single"
+			}
+		}
+		questions := []map[string]interface{}{
+			{
+				"id":                 qid,
+				"header":             nil,
+				"prompt":             prompt,
+				"answerMode":         answerMode,
+				"options":            opts,
+				"allowsCustomAnswer": true,
+				"isSecret":           false,
+				"required":           true,
+			},
+		}
+		part := ProjectionPart{
+			Type:                   "user_input",
+			UserInputInteractionID: qid,
+			UserInputStatus:        "pending",
+			UserInputQuestions:     questions,
+			UserInputCanRespond:    true,
+			UserInputCanReject:     true,
+		}
+		upsertUserInputPart(t.Assistant, part)
+		ps.userInputs[qid] = userInputPending{turnID: turnID, part: part}
+		ps.stageTurnForFlush(turnID)
+		ps.applyUserInputExecution(turnID)
+
+	case "question_resolved":
+		qid := dataString(data, "questionId")
+		if qid == "" {
+			return
+		}
+		status := "answered"
+		if result := strings.ToLower(dataString(data, "result")); result == "cancelled" || result == "rejected" {
+			status = "rejected"
+		}
+		turnID := ""
+		if existing, ok := ps.userInputs[qid]; ok {
+			turnID = existing.turnID
+		}
+		if turnID == "" {
+			turnID = ps.projection.Execution.ActiveTurnID
+		}
+		t := ps.turnByID(turnID)
+		if t == nil || t.Assistant == nil {
+			return
+		}
+		idx := findUserInputPart(t.Assistant, qid)
+		if idx < 0 {
+			return
+		}
+		commit()
+		t.Assistant.Parts[idx].UserInputStatus = status
+		t.Assistant.Parts[idx].UserInputResolutionSource = "backend"
+		t.Assistant.Parts[idx].UserInputResolvedAt = ps.projection.UpdatedAt
+		ps.userInputs[qid] = userInputPending{turnID: turnID, part: t.Assistant.Parts[idx]}
+		ps.applyUserInputExecution(turnID)
 
 	case "user_input_requested":
 		// Structured user input requested (design §10.1/§10.2). The adapter emits a proven
 		// turnId + interactionId; without both the event is identityless and skipped (no
 		// phantom turn, no raw second path). status may be pending (normal) or failed
 		// (malformed questions) — both project once via the same upsert.
-		turnID := dataString(data, "turnId")
+		//
+		// dsh-web Mac-initiated asks may omit turnId (codec reset + unbound observe).
+		// Fall back to the persist-only ActiveTurnID so iOS still gets a UserInputDock.
 		interactionID := dataString(data, "interactionId")
-		if turnID == "" || interactionID == "" {
+		if interactionID == "" {
 			return
 		}
+		turnID := dataString(data, "turnId")
 		// interactionId is the cross-source identity. Claude live stream attributes the request
 		// to its assistant message while transcript hydrate attributes the same tool_use to the
 		// enclosing user turn. Once either source has established the interaction, keep that
 		// owning turn and update in place instead of creating a phantom second card.
 		if existing, ok := ps.userInputs[interactionID]; ok && existing.turnID != "" {
 			turnID = existing.turnID
+		}
+		if turnID == "" && msg.BackendID == "dsh-web" {
+			// Mac-initiated dsh-web asks after codec reset may omit turnId.
+			// Claude/Codex stay fail-closed (identityless frames stay dropped).
+			turnID = ps.projection.Execution.ActiveTurnID
+			if turnID == "" {
+				turnID = ps.latestRunningTurnID()
+			}
+		}
+		if turnID == "" {
+			return
 		}
 		commit()
 		t := ps.turnByID(turnID)
@@ -843,19 +1095,23 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		}
 		upsertUserInputPart(t.Assistant, part)
 		ps.userInputs[interactionID] = userInputPending{turnID: turnID, part: part}
+		ps.stageTurnForFlush(turnID)
 		ps.applyUserInputExecution(turnID)
 
 	case "user_input_resolved":
 		// Resolved in place: update the existing part's status/source/resolvedAt (design §10.2).
 		// Projection never stores the answer text. If no matching requested part exists, the
 		// resolution is stale/unattributable — do not fabricate one (no second path).
-		turnID := dataString(data, "turnId")
 		interactionID := dataString(data, "interactionId")
-		if turnID == "" || interactionID == "" {
+		if interactionID == "" {
 			return
 		}
+		turnID := dataString(data, "turnId")
 		if existing, ok := ps.userInputs[interactionID]; ok && existing.turnID != "" {
 			turnID = existing.turnID
+		}
+		if turnID == "" {
+			turnID = ps.projection.Execution.ActiveTurnID
 		}
 		t := ps.turnByID(turnID)
 		if t == nil || t.Assistant == nil {
@@ -1052,6 +1308,7 @@ func (r *ProjectionReducer) FlushPatch(backendID, sessionID string) (ProjectionP
 	if ps == nil {
 		return ProjectionPatch{}, false
 	}
+	ps.stageOwningTurnsForPendingParts()
 	headRev := ps.projection.SyncRev
 	if headRev == ps.lastFlushedRev && len(ps.textAppends) == 0 && len(ps.thinking) == 0 &&
 		len(ps.tools) == 0 && len(ps.upsertTurns) == 0 && len(ps.userInputs) == 0 && ps.execution == nil {

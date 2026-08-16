@@ -267,6 +267,7 @@ turn_error
 turn_aborted
 error
 permission_request
+permission_resolved
 context_compressing
 context_compressed
 context_usage_updated
@@ -337,6 +338,11 @@ field, type, or wire value was changed.
   `permission_request`. `permission_request` is only used for AskUserQuestion as
   a fallback when parsing yields zero valid questions, so malformed input still
   produces a visible block.
+- `permission_resolved` closes a pending permission card in the Session
+  Projection (`requiresPermissionConfirmation` cleared; status `running` on
+  allow, `rejected` on deny). Producers: `resolve_permission` RPC success, and
+  dsh-web host `approval/resolved`. Payload: `{ requestId, behavior }` where
+  `behavior` is `allow` or `deny`. Idempotent.
 - `resolve_permission.behavior` wire values are exactly `"allow"` / `"deny"`.
   This is the MacBridge/agent wire contract (`core.PermissionResult.behavior`).
   Claude's permission responder treats ONLY `behavior == "allow"` as allow; any

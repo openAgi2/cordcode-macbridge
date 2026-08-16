@@ -643,7 +643,7 @@ func TestWireDescriptorDeepSeekWeb(t *testing.T) {
 	if wd.RequiresExternalTurnPolling {
 		t.Fatal("mux pushes external turns — polling not required")
 	}
-	for _, want := range []string{"external_turn_streaming", "question_reply"} {
+	for _, want := range []string{"external_turn_streaming", "question_reply", "structured_user_input_v1"} {
 		found := false
 		for _, c := range wd.StaticCapabilities {
 			if c == want {
