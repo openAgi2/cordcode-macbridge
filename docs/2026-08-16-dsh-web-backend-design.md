@@ -1,7 +1,7 @@
 # dsh-web Backend 设计（官方 Web API 转发 + bridge-v1 翻译）
 
-- 日期：2026-08-16
-- 状态：**设计稿，待 owner 过目**（批准后才实施）
+- 日期：2026-08-16（v2：按评审 `docs/2026-08-16-dsh-web-backend-design-review.md` 修订——B1 载波更正为 WebSocket、M1-M4 必改全收、S1-S14 建议逐条处置，见文末「评审采纳记录」）
+- 状态：**设计稿 v2，评审已通过（修改后通过→已修改），待 owner 终审**（批准后才实施）
 - 背景：SDK stdio 路线收口暂停（`docs/2026-08-16-dsh-session-store-bridge-design完成情况.md` 收口节）；owner 裁决并行新增本 backend，旧 `deepSeek` 保留不删。
 - 不变约束：CordCode 初衷（探测-复用-未启动、零迁移、双向接力、永不自托管）+ SSV2 十二条护栏。
 
@@ -27,7 +27,7 @@ dsh-web backend = **官方 Web API 的请求转发器 + bridge-v1 成熟格式�
 | 1 | **路线锚定错面**：把「SDK 协议面没有 list/resume」当成「无法读 Mac 端会话」，为错误结论建造 live-only 投影、iOS 隐藏列表等整套补偿架构，后全部拆除 | dsh 暴露三个面：协议面（最窄）、文件面（store，claudecode 先例就在本仓）、web API 面（最全）；调查只查了第一个 | **是**（本设计即以 web API 面为基础）；过程纪律：否定性断言必须标注在哪几个层面查证过 |
 | 2 | **存储编码冲突**（真机一轮）：driver 写明文，web 写 zstd；harness `checkRootEncoding` 扫整个 root，任一相反编码工件即在 materialize 时拒绝 → `turn_started` 后 1ms `turn_error` | 共写用户 store 必须对齐在位写者的编码（zstd）；修复=driver cordis.yml `compression: zstd` | **是**（本路线不触碰持久化配置，会话由 web 服务自己写） |
 | 3 | **模型名越界**（真机二轮）：driver 默认 `deepseek-chat`，rc.6 官方路由仅支持 `deepseek-v4-pro/flash` | 运行时自己的报错就念出了白名单——模型事实应取自运行时（`llm.models`），不应手写 | **是**（`list_models` 直连官方目录；resume 会话用其自记录模型） |
-| 4 | **投影基线优先级 + 尾封口**（真机二轮）：活会话被误推 file 重建与 live 流竞争 → `projection.hydrating` 循环；失败 turn（只有用户消息无回复）的尾部未答 turn 永不封口 → 基线永不提交 | 正确矩阵：live/kernel 会话一律实时基线，file 重建只服务死会话；死会话尾部未答 turn 需 `SessionActivityProbing` 如实封口 | **部分**——此坑在 SSV2 通用管线层（本设计 §4.3 事件管线沿用），评审时需确认映射后事件含终态（官方 turn/end reason=error 必须透传为终态事件） |
+| 4 | **投影基线优先级 + 尾封口**（真机二轮）：活会话被误推 file 重建与 live 流竞争 → `projection.hydrating` 循环；失败 turn（只有用户消息无回复）的尾部未答 turn 永不封口 → 基线永不提交 | 正确矩阵：live/kernel 会话一律实时基线，file 重建只服务死会话；死会话尾部未答 turn 需 `SessionActivityProbing` 如实封口 | **已闭环（v2）**——事件终态透传见 §4.3.3 红线；死会话尾封口经 `SessionActivityProbing` 设计收口（§4.3.2，评审 M1） |
 | 5 | **「未分组」臆想**：未读 web 源码即断言「Chat 未注册 workspace，用户加上即可」，被双端截图纠正 | web 分组 = workspace.json 里每 workspace 显式记录的 sessionIds 名单（受两写恢复协议管理，**外部进程不可盲写**）；attach 只发生在 web 自己的 create/fork HTTP 流程 | **是**（本路线走 HTTP create，cwd 命中已注册 workspace 自动归组；且不写 workspace.json） |
 | 6 | **materialize 防覆写**：对已存在 id 发 prompt，持久化拒绝重复物化（"refusing to materialize: a log already exists"） | SDK 面无 resume，死会话续聊只能诚实拒绝（`session_resume_not_supported`） | **是**（官方 HTTP 面有真 resume，见 §3.1） |
 | 7 | **codec 折叠错误文本**：`turn/end reason=error` 被映射为泛化文案，底层错误（编码/模型）在日志不可见 | 排障时用裸 JSON-RPC 探针直连 runtime 取原始错误全文（`DSH_TURN_REPRO` 测试保留此手法） | 评审项：新适配器必须把官方 `RpcError` 的 message 透传到诊断/事件，不得折叠 |
@@ -39,7 +39,8 @@ dsh-web backend = **官方 Web API 的请求转发器 + bridge-v1 成熟格式�
 1. 对外部系统的任何行为断言，必须先读其源码/数据——「听起来合理的机制解释」≠ 证据（坑 5）；
 2. 否定性断言（「X 不可能」）必须标注在哪几个层面找过（坑 1）；
 3. 事实（模型目录、编码、端口、能力）取自运行时自己的声明面，不手写复本（坑 2/3）；
-4. 失败路径必须产生可见终态——禁止静默等待（坑 4/7/8）。
+4. 失败路径必须产生可见终态——禁止静默等待（坑 4/7/8）；
+5. **物理载波类断言（传输协议、端口、格式）必须读实现代码并活体验证**——文档措辞可能描述的是逻辑象限而非物理现实（v2 教训：初稿把 WebSocket 载波写成 SSE，源头是 README 的「SSE 帧」象限措辞，评审以 426/101 活体实验纠正）。
 
 ## 3. 四项前置核实结论（源码 pin 47f9438 + 本机实测）
 
@@ -47,14 +48,17 @@ dsh-web backend = **官方 Web API 的请求转发器 + bridge-v1 成熟格式�
 
 `packages/host/apiproxy/src/api-proxy.ts:1653-1670`：`session.prompt` 对已存在会话走 `ctx.agents.resume({resumeSessionId, …})`（磁盘冷恢复，会话记录的 preset/模型选择随 resume 恢复），未知 id 走 `agents.create`。owner 已在 web 实证「对任意历史 session 发消息」。**模型选择三级解析**（进程内 > 会话日志 `request/header` > `agent-default-model`）——历史会话用它自己记录的模型，上轮「deepseek-chat 越界」类故障在这条路线上结构性不可能。
 
-### 3.2 事件流契约 ✅
+### 3.2 事件流契约 ✅（v2 更正：载波为 WebSocket，非 SSE）
 
-载波（`dsh-host-apiproxy` README + `dsh-client-connection/src/api-path.ts`）：
-- unary：`POST /api/<method>`，`application/json`（否则 415）；业务错误恒 HTTP 200 + `RpcResult` error 分支（封闭错误码集 `RpcErrorDetailsMap`）；
-- 流：`GET /api/events.mux`（SSE）与 `GET /api/events.host`（SSE）；服务端反向请求（审批/问题应答）`POST /api/respond`；
-- 重连：`since` v1 未实现——重连=重开流+重拉 history（bridge 侧照做即可）。
+**载波（评审 B1 活体实验纠正）**：两条事件流是 **WebSocket**（`websocket-downlink.ts` 为 `ws` 库 `WebSocketServer`；普通 GET 恒回 `426 Upgrade Required`，带 upgrade 头得 `101` 并立即推帧——本机 3080 实测）。初稿误写 SSE，源于 apiproxy README 把 ServerRequest 象限称「SSE 帧」的逻辑措辞；纪律固化见 §2.3 第 5 条。
 
-MuxFrame（`api/events.schema.ts`，SSE 帧判别联合）：
+三层线格式（实施必需，活体核对）：
+- **unary**：`POST /api/<method>`，`application/json`（否则 415），请求体=`ClientRequest` 信封 `{type:"client-request", rpcId, method, payload}`；响应=`ServerResponse` `{type:"server-response", rpcId, result:{ok,value}|{ok:false,error}}`；业务错误恒 HTTP 200 + `RpcResult` error 分支（封闭错误码集 `RpcErrorDetailsMap`）；裸对象无信封会被 `bad-request` 拒；
+- **流**：`GET /api/events.mux` 与 `GET /api/events.host`（均 WebSocket 升级）；每帧外层=`ServerRequest` 信封 `{type:"server-request", rpcId, method, payload}`，MuxFrame/HostFrame 位于 `payload` 槽；
+- **反向请求**（审批/问题应答）：`POST /api/respond`（回传 `rpcId`——mux 帧信封里的 rpcId 原样回显）；
+- 重连：`since` v1 未实现——重连=重开流+重拉 history（bridge 侧照做即可）。Go 侧需 WebSocket 客户端（非 opencode `sse_subscriber.go` 的 SSE 先例）。
+
+MuxFrame（`api/events.schema.ts`，payload 判别联合）：
 - `session/event`：**`event` 字段即 SessionEvent——与磁盘日志同构信封**（`{type,seq,time,data}`），现有 `agent/dsh/codec.go` §3.3 映射表可直接复用；另带可选 `view`（工具渲染意图）；
 - `session/subscribed{lastSeq}`、`session/queue`（queued/steering/context 收件箱）、`session/jobs`、`session/projection{key,value,seq}`（高序覆盖的通用投影对）、`stream/error`；
 - `approval/requested|resolved`、`question/requested|resolved`（应答走 `/api/respond`）。
@@ -75,7 +79,7 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
 
 ### 3.5 关键方法形状（映射直接依据）
 
-- `session.list`：`{cursor?}`（cursor 为保留位未实现→一次全量，bridge 自行分页）→ `items: [{sessionId, updatedAt(ms), running, blank, parentSessionId?, origin?, cwd?, agentPreset?, projections?}]`（标题等元数据在 projections 块，实现时按 `sessionProjectionsBlockSchema` 落定具体 unit；无标题 unit 则退 `session.history` 尾读）；
+- `session.list`：`{cursor?}`（cursor 为保留位未实现→一次全量，bridge 自行分页）→ `items: [{sessionId, updatedAt(ms), running, blank, parentSessionId?, origin?, cwd?, agentPreset?, projections?}]`（标题直出：**`session-title` 投影 unit 实际存在**——评审活体证实 `projections.values.title` 即真实标题（`session-title/src/index.ts:309`），主路径成立；仅当部署未组 session-title 插件时退 `session.history` 尾读 fallback）；
 - `session.create`：`{workspaceId? | cwd?, sessionId?, agentPreset?}`——**传 cwd（iOS 选定目录）**；注意 web 的 workspace attach 恰好发生在 HTTP create/fork 流程内（9ac8102 复盘），cwd 命中已注册 workspace 时新会话自动归组——旧路线的「未分组」问题在此路线对命中目录自动解决；
 - `session.prompt`：`{sessionId, mode: "queue"|"steer", content:[parts], clientTimeZone?}`；
 - `session.cancel`：`{sessionId}`；`session.history`：冷读（不 resume、不发布 Agent）+ `beforeSeq` 向后分页 + 尾页 projections 块；
@@ -85,13 +89,15 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
 
 ### 4.1 模块与身份
 
-- 新 Go 包 `agent/dshweb`（注册名 `dsh-web`；wire kind `deepseek-web`；iOS `BackendKind.deepSeekWeb`，显示「DeepSeek Web」）；Mac App runtime 默认 drivers 增列（c71c692 先例）；iOS 仅增 case + 列表项。
-- 不与旧 `agent/dsh` 共享代码；旧 backend 一行不动。
+- 新 Go 包 `agent/dshweb`（注册名 `dsh-web`；wire kind `deepseek-web`；iOS `BackendKind.deepSeekWeb`，显示「DeepSeek Web」）；Mac App runtime 默认 drivers 增列（c71c692 先例）。
+- **实施基线与代码关系（评审 M3）**：实施在两仓 `dsh/driver` 分支进行（`agent/dsh` 在该分支树内；main 无 dsh 目录——`git ls-tree main agent/` 证实）。与旧件的关系：**不 import `agent/dsh` 包**；「复用 codec」的确切含义=把 §3.3 事件映射表（连同其 wire fixture 单测）**复制**进 `agent/dshweb` 并归属其下——旧件未来退役不牵连新包。`dsh/driver` 合回 main 的时机是 owner 另行裁决的事项，**不作为本设计前置**。
+- iOS 改动量（评审 S10，如实）：不止「增一个 case」——`.deepSeek` 在 iOS 非测试代码 **11 个文件**存在穷举 switch（BackendModels、ChatUIKitContainerView×5、ChatViewModel+Generation×2、SelectionSheets、CCCodeBridgeBackendClient、SessionLifecycleDiagnosticPhase、ModelManagementService、ChatViewModel、ChatViewModel+CodexStreaming、ChatViewModel+DirectoryPreferences、ServerViewModel），新增 case 时 Swift 穷举检查**编译期强制**全部暴露，逐处做归组决策（不会静默漏）；行为相关的两处需显式决策：DirectoryPreferences:107（list_projects 通用路径，dsh-web 走 workspace.list 映射）、ChatUIKitContainerView:4335（context entry 显隐与 `get_usage` ⛔ 的联动）。
 
 ### 4.2 web 服务生命周期（探测复用优先，managed 兜底）
 
 1. 探测：`POST 127.0.0.1:3080/api/host.describe` 探活（可扩展已知端口列表/用户配置）；命中 → 复用用户自己的实例；
-2. 未命中 → managed：spawn `dsh --profile web --host 127.0.0.1 --port <3096..3196 自选>`，端口与凭据状态写 data dir 的 `dsh-web-managed-server.json`（0600，opencode-managed-server.json 先例）；崩溃重启/sleep-wake 归 RuntimeManager 既有生命周期管理；
+2. 未命中 → managed：spawn `dsh --profile web --host 127.0.0.1 --port <3096..3196 自选>`，端口与**实例来源状态**写 data dir 的 `dsh-web-managed-server.json`（0600，opencode-managed-server.json 先例；dsh v1 无凭据面——trust fence 明示自身非认证层，故无凭据可记，评审 S11）；崩溃重启/sleep-wake 归 RuntimeManager 既有生命周期管理；
+   - **双实例策略（评审 S3，如实标注不确定性）**：探测仅在启动时进行——用户此后自启 3080 实例时，managed 实例与用户实例共写同一 store（per-session 目录隔离下与「web+旧 driver 共存」同类；`session-persistence-jsonl` 源码检索未发现跨进程锁——**未做双实例写实验，不确定**，实施期以受控 sandbox（DSH_HOME 临时目录）双实例实验补证；周期重探+让位迁移列为二期）。
 3. 两态都失败 → hello_ack 如实「未启动」（初衷：不代装）。
 
 ### 4.3 功能面完整映射（对照 bridge 全 RPC 面 × iOS 既有功能）
@@ -100,27 +106,39 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
 
 #### 4.3.1 会话列表（iOS 侧栏：目录分组、标题、时间、运行徽标、置顶、下拉刷新）
 
-- `list_sessions` ✅ `session.list`：sessionId→id、`updatedAt`(ms)→modifiedAt、`cwd`→directory（iOS 目录分组与旧件同构）、`running`→运行态 enrich、`origin=subagent`/`parentSessionId` 过滤（与 web 侧栏一致隐藏子代理与 blank 空会话）；官方 cursor 为未实现保留位 → 一次全量 + bridge 既有分页/fair-slice 复用。标题：projections 块（`sessionListMetadata`）优先，无标题 unit 则 `session.history` 尾读一次（实现时按 §3.5 落定）。
+- `list_sessions` ✅ `session.list`：sessionId→id、`updatedAt`(ms)→modifiedAt、`cwd`→directory（iOS 目录分组与旧件同构）、`running`→运行态 enrich、`origin=subagent`/`parentSessionId` 过滤（与 web 侧栏一致隐藏子代理与 blank 空会话）；官方 cursor 为未实现保留位 → 一次全量 + bridge 既有分页/fair-slice 复用。标题：`projections.values.title` 直出（`session-title` unit，评审活体证实，§3.5）；部署未组该插件时退 `session.history` 尾读。
 - `get_session` ✅ 同源（列表缓存或 history 头信息）。
 - 置顶 `set_session_pinned`/`list_pinned_sessions` ♻️ bridge 自有 pin 索引（AgentSessionInfo 解析依赖 ListSessions，已具备）。
 - 下拉刷新 ✅ list 重拉 + 投影 forceCold 重建（既有机制）。
 - **外部变更自动同步（Mac 端 dsh web 新建会话/外部 turn → iOS 列表及时更新，双层）**：
-  1. **即时层（事件驱动，新接线）**：bridge 常驻第二条 SSE `GET /api/events.host`——`host/session-added`/`session-removed`/`workspace-changed` 帧到达 → 立即触发该 backend 一次 `session.list` 重扫 → catalog 指纹 diff → 既有 `sessions_changed` 控制面广播（`event_publisher.go:773`，backend 级）→ iOS 自动刷新列表；`host/session-status{running}` → 运行徽标实时翻转（外部 turn 开始/结束）。
+  1. **即时层（事件驱动，新接线）**：bridge 常驻第二条 WebSocket 流 `GET /api/events.host`（§3.2）——`host/session-added`/`session-removed`/`workspace-changed` 帧到达 → 立即触发该 backend 一次 `session.list` 重扫 → catalog 指纹 diff → 既有 `sessions_changed` 控制面广播（`event_publisher.go:773`，backend 级）→ iOS 自动刷新列表；`host/session-status{running}` → 运行徽标实时翻转（外部 turn 开始/结束）。
   2. **兜底层（零新代码）**：bridge 既有逐 backend session discovery watcher（`session_discovery.go:50`，周期 ListSessions→指纹 diff→`sessions_changed`）对 dsh-web 自动生效——host 流断线期间由它保底。
   - 现有会话新增 turn：mux `session/event` 全会话覆盖（4.3.3）——已打开的消息页实时收流；未打开会话的徽标/时间由 `session-status` + `sessions_changed` 刷新，打开时经 history/投影补齐全程。
 
 #### 4.3.2 消息页加载（历史渲染：思考流、工具卡片、分页）
 
 - `get_session_messages` ✅ `session.history`：`beforeSeq`↔cursor、`maxMessages`↔limit（官方按 append-origin 消息边界分页）；映射为既有 rich-history 形状（role/content/thinking/parts/steps）——官方 history 自带 `ToolEventView` 渲染意图与整日志统计，工具步骤信息比旧件直读 store 更富。
-- `get_session_projection`（SSV2 消息页）✅+♻️：live 事件喂 kernel（见 4.3.3）；冷会话 pathless hydrate 的 `RichHistoryProvider` 数据源 = `session.history`（机制同旧件，仅换数据源；投影代码零新增）。
+- `get_session_projection`（SSV2 消息页）✅+♻️：live 事件喂 kernel（见 4.3.3）；冷会话 pathless hydrate 的 `RichHistoryProvider` 数据源 = `session.history`。**投影语义零新增，但 backend-id 键控接线点需逐一加入（评审 M4——漏任一处对应机制静默失效）**，且归属 **opencode/grokbuild 的 pathless 家族**，**不进** deepseek 的 store-file 分支（dsh-web 无「store 未落盘窗口」语义，亦不需要 live-only admission 回退——会话在服务端常驻，mux 事件即时到达）：
+
+  | 接线点 | 处置 |
+  |---|---|
+  | `backendSupportsProjectionHydrate`（handlers_projection.go:337） | 加入 `deepseek-web`（pathless 家族） |
+  | `prepareProjectionHydrateSource` pathless 分支（:468/:629） | 加入（agentName=`dsh-web`） |
+  | `produceProjectionHydrateRange` guard+case（:1003/:1059） | 加入 |
+  | 两处 forceCold 集合（handleGetSessionProjection ~:111 + sourceChanged 集） | 加入 |
+  | deepseek 专属 store-file/live-only 分支（:432/:548） | **不进** |
+  | `backendHasNoExternalEventSource` 剪枝（handlers.go:1039） | **不进**（mux 即外部事件源） |
+  | `agent_descriptor.go:216`/`main.go:131`/`server.go:282` | 注册与 SSV2 能力广告 |
+
+- **`SessionActivityProbing`（评审 M1，坑 4 后半闭环）**：dshweb 实现该接口——`IsSessionActive` 数据源=running 徽标（`session.list` 探活缓存 + `host/session-status` 帧实时更新）；**错误/未知 ⇒ 保守返回 active**（封口方向宁可等待）。不实现则死会话（尾部未答 turn）冷开永远 loading（`handlers_projection.go:1232-1238` commit gate 语义）。
 - `read_file_v2`/`fetch_content_chunk` ♻️ bridge 通用 Mac 文件读取（与 backend 无关）。
 
 #### 4.3.3 流式同步与运行态（isGenerating、text/思考增量、停止按钮、完成通知）
 
-- **两条常驻 SSE**：`GET /api/events.mux`（会话事件）+ `GET /api/events.host`（会话生命周期，4.3.1 即时层）。mux 的 `session/event` 帧（SessionEvent 与磁盘日志同构）→ **复用 `agent/dsh/codec.go` §3.3 映射** → core.Event → 既有推送管线（relay/直连）→ iOS 既有渲染链，零新渲染逻辑。
+- **两条常驻 WebSocket 流**（§3.2）：`GET /api/events.mux`（会话事件）+ `GET /api/events.host`（会话生命周期，4.3.1 即时层）。mux 的 `session/event` 帧（SessionEvent 与磁盘日志同构）→ **复用 codec §3.3 映射（复制进 dshweb，§4.1）** → core.Event → 既有推送管线（relay/直连）→ iOS 既有渲染链，零新渲染逻辑。
 - 运行态：turn 事件推导 + `host/session-status{running}` → `session_state_changed` 广播（既有）。
 - **外部 turn 可见性（对旧 dsh 是新能力）**：mux 覆盖全部会话——用户在 Mac web 发起的 turn，iOS 同样收事件/投影与完成通知（对齐 claudecode 外部旁观）；dsh-web 不进 `backendHasNoExternalEventSource` 剪枝名单，observation/离线 mailbox ♻️ 全部照常。
-- 断线：SSE 重连=重开流+重拉 history（官方 v1 语义照搬）；断线窗口由重连后 history 重拉+投影 forceCold 补齐。
+- 断线：WS 重连=重开流+重拉 history（官方 v1 语义照搬）；断线窗口由重连后 history 重拉+投影 forceCold 补齐（§6 有专项测试）。
 - 红线（坑 7/8）：`turn/end reason=error` 必须透传官方错误文本为终态事件——失败路径必现可见终态。
 
 #### 4.3.4 发送消息
@@ -130,15 +148,16 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
 - steer 插话转向 2️⃣ `mode:"steer"`（一期 queue）。
 - 附件/图片 2️⃣：官方 `session.attachment` + `imageLimits` 投影已核实；一期 descriptor `StaticCapabilities` 声明 text-only（既有两级附件校验照走）。
 - `abort_generation` ✅ `session.cancel{sessionId}`。
-- 审批/问题应答（owner 决定项，倾向一期）：`approval/requested`/`question/requested` 帧 → 既有 permission/question 事件（iOS 权限 UI 已有），应答 `POST /api/respond`；不接则 descriptor 不声明 capability、iOS 隐藏入口（声明制）。
+- **审批/问答 = 一期必接（评审 M2 升格，非决定项）**：活体证实默认 `approval/policy="ask"`——不接则 iOS 发起的 turn 在首个需审批工具处**无限挂起**（无终态无错误），直接违反 fail-visibly 红线（坑 8 类别）；旧路线靠自组 cordis.yml 权限栈规避，本路线会话由官方 preset 组装，无此规避。映射：`approval/requested` → 既有 permission 请求事件（iOS 权限 UI 已有）；`question/requested`（含 options/multiSelect/plan-review intent）→ **既有 question 事件面**（`question_reply`/`question_reject` 承接；`resolve_user_input` 不用于 dsh-web 一期）；应答统一 `POST /api/respond` 回显帧信封 rpcId。**先答者得**语义如实：web 端若先应答，bridge 收 `approval/resolved` 帧关闭请求（评审 S4）。
+- **外部会话的审批帧路由（评审 S4）**：mux 为 agent 级持有，外部（web 发起）会话的 approval/question 帧同样到达；处置=只为 **iOS 已订阅/打开**的会话（bridge registry 有会话对象，`h.getSession()` 命中）surface 权限 UI，未订阅会话的帧不进权限面（web 自己的 UI 在应答）——与「谁在看谁应答」的产品语义一致，避免为全量外部会话注册代理对象。
 
 #### 4.3.5 provider / model（iOS 模型选择器、provider 切换）
 
-- `list_providers` ✅ `llm.providers{}` → 用户 dsh 已配置的 provider 全集（如 opencode-go/zai——复用用户已配，初衷）。
+- `list_providers` ✅ `llm.providers{}` → 用户 dsh 已配置的 provider 全集（如 opencode-go/zai——复用用户已配，初衷）。**过滤规则（评审 S1）**：活体证实响应混有大量休眠项（`active:false, declared:false`，如 amazon-bedrock/anthropic 等）——映射仅取 `active:true` 进 `list_providers`；全量与状态位进 run_diagnostics 输出。
 - `list_models` ✅ `llm.models{}`（provider 分组目录）+ `session.models{sessionId}`（当前会话 effective 选择 + 可用集）。
 - `switch_model` / backend 级 `set_provider` ✅ `session.selectModel{sessionId, provider, model, reasoningEffort?}`——官方语义=会话内立即生效并持久化为部署默认；无 backend 级全局写面，如实按此语义映射。
 - **模型目录/白名单永远来自运行时**（坑 3 红线，不再手写复本）。
-- `list_permission_modes`/`set_permission_mode` ⛔ 一期：dsh 权限形态由 agent preset 承载，无 bridge 级 mode 写面；二期评估 preset 面（`agentPresets.*` API 已存在）。
+- `list_permission_modes`/`set_permission_mode` ⛔ 一期（评审 S13 修正理由）：**面存在但不一一对应**——settings 域有 `permission` ns、`permissions` 投影 unit 存在（loopback 特权方法，bridge 恰可调），但其语义（web 偏好/preset 组合）与 bridge 的 permission-mode 开关不同构；一期不接，二期评估 settings/preset 面的语义映射（`agentPreset.*` API 已存在，前缀以 rpc-map.ts:54-59 为准）。
 
 #### 4.3.6 会话生命周期（增删改）
 
@@ -156,22 +175,34 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
 
 #### 4.3.8 其余面
 
-- `run_diagnostics` ✅ 探测结构化输出（实例来源 external/managed、端口、`host.describe` 版本、`llm.providers` 状态）。
+- `run_diagnostics` ✅ 探测结构化输出（实例来源 external/managed、端口、`llm.providers` 全量与状态位）。**版本字段语义（评审 S6）**：`host.describe` 的 `version:"0.0.1"` 是占位符非 npm 版本（活体证实）——诊断呈现标注为「API 版本标识」，npm 包版本另由探测（`dsh --version`/安装树）获取，不冒充。
+- `list_memory_files`/`read_memory_file` ⛔（评审 S5 补行）：`MemoryFileReader` 类型断言自动 not_supported（handlers.go:1766-1771），无新代码；`cancel_request_v1` ♻️ 连接级通用面（handlers.go:4308-4310），backend 无关。
 - `fetch_todos` ⛔ 一期（web 的 plan 属会话投影无 todo RPC；二期评估）；`get_usage` ⛔ 一期（token 计量在 context-meter 投影单元，二期按 `session/projection` 帧核对后决定接入或维持）；diff 三件套 ⛔；`list_agents` ⛔ 一期（单一 preset；`agentPresets` API 已存在，二期）。
-- `session.search` ✅ 备用（iOS 搜索现为本地实现已够；官方 search 可作二期服务端搜索）。
+- `session.search` 2️⃣（评审 S9 消歧）：iOS 搜索现为本地实现已够，官方服务端搜索二期接入（面已核实存在）。
 - `check_pending_notifications`/prekey/delivery ♻️ bridge/relay 通用，与 backend 无关。
 
 ### 4.4 安全模型
 
-仅 loopback 访问（trust fence 无 Origin 放行）；`deepseek-web` 的 iOS 流量永远只走 Bridge（8777/relay，配对+加密）；managed 端口永不对外；特权方法由 fence 钉死 loopback——**禁止**任何 `--host 0.0.0.0`/`--trusted-host` 托管配置。
+仅 loopback 访问（trust fence 无 Origin 放行）；`deepseek-web` 的 iOS 流量永远只走 Bridge（8777/relay，配对+加密）；managed 端口永不对外；特权方法由 fence 钉死 loopback——**禁止**任何 `--host 0.0.0.0`/`--trusted-host` 托管配置。**如实声明（评审 S11）**：dsh v1 服务本身无认证（trust fence 非 auth 层），managed 实例与本机其他进程可达的风险面与用户自启的 3080 实例同类——loopback-only 绑定 + Bridge 前置是全部防线，与 opencode managed（自生成 Basic Auth）的差异在诊断中如实呈现。
+
+### 4.5 SSV2 真相清单（iOS CLAUDE.md 专项计划要求项，评审 S12）
+
+- **真相 owner**：dsh web 服务（官方 host 上下文）——会话日志、投影、模型选择的唯一权威；MacBridge kernel 只持有本 epoch 事件镜像与投影缓存（checkpoint 可丢弃重建）。
+- **唯一 writer**：dsh web 服务写 `~/.dsh/sessions` 与 workspace.json；MacBridge 经 dsh-web backend **零直接写**（prompt/selectModel/respond 走官方 API）。
+- **受影响事务域**：kernel hydrate/live 事务域（既有，pathless 家族）；无新事务域。
+- **新增数据路径**：仅 `dsh-web-managed-server.json`（端口/实例来源，data dir，0600）；无新会话数据路径。
+- **active 下全部写入口**：`session.create/prompt/cancel/rename/selectModel` + `/api/respond`（审批问答）——全部经官方 API；无旁路。
+- **失败呈现方式**：探活失败→backend not_configured+诊断；turn 失败→终态事件透传官方 RpcError 文本；审批超时→无超时裁判（iOS 不裁判，SSV2 护栏），等待用户或 web 端先答。
+- **防双写测试**：单测断言 dshweb 包不含任何 store/workspace 文件写路径（go vet/代码审查项）+ 双实例受控实验（§4.2）。
 
 ## 5. 与旧 `deepSeek` backend 并存
 
-同一份 `~/.dsh/sessions`；各自独立列表；跨 backend 打开行为差异如实：dsh-web 可 resume 旧件建的会话，旧件对 dsh-web 建的会话仍走「已结束」守卫。附件一期 text-only 声明（与旧件一致；官方 `session.attachment`/`imageLimits` 面已核实存在，二期按 owner 需求接入）。
+同一份 `~/.dsh/sessions`；各自独立列表；跨 backend 打开行为差异如实：dsh-web 可 resume 旧件建的会话，旧件对 dsh-web 建的会话仍走「已结束」守卫；**旧件早期（模型修复前）会话记录的是 `default/deepseek-chat`**（评审 S2 活体证实）——dsh-web 续聊这些会话会在模型校验层得到**可见错误**（官方报错文本透传），修复路径=对该会话 `switch_model` 选合法模型或另起新会话，属历史数据残留而非本设计缺陷，真机矩阵加一行覆盖。附件一期 text-only 声明（与旧件一致；官方 `session.attachment`/`imageLimits` 面已核实存在，二期按 owner 需求接入）。
 
 ## 6. 测试与验收
 
-- 单测：httptest 假 dsh 服务（schema 样本 fixtures：list/history/prompt/models/providers 响应、SSE mux 帧序列）覆盖 §4.3 功能面总表**逐行**（含 ⛔ 项的 not_supported 断言）；生命周期（探测命中/managed spawn/双失败 not_configured）；探活失败诊断文案；
+- 单测：httptest 假 dsh 服务（**含 WebSocket 端点**；schema 样本 fixtures：ClientRequest/ServerRequest 信封 + list/history/prompt/models/providers 响应 + mux/host 帧序列）覆盖 §4.3 功能面总表**逐行**（含 ⛔ 项的 not_supported 断言）；生命周期（探测命中/managed spawn/双失败 not_configured）；探活失败诊断文案；
+- 专项（评审补充）：**RpcError message 全文透传断言**（坑 7 测试面——构造 bad-request/业务错误帧，断言 iOS 侧拿到原始文本）；**WS 断线重连**（重开流+history 重拉+投影 forceCold 补齐）；**SessionActivityProbing 三态**（死会话尾封口/活会话不封口/探活失败保守 active）；**审批链路**（approval 帧→permission 事件→/api/respond 回显 rpcId→resolved 收口；外部会话不 surface；web 先答的先答者得）；双实例受控实验（sandbox DSH_HOME，§4.2）；providers `active:true` 过滤；
 - 回归：bridge 全量 + 旧 deepSeek 套件零改动验证；
 - iOS：`BackendKind` case 单测 + 定向 CCCodeTests；
 - 真机验收（核心新增行）：**iOS 对 Mac web 创建的任意历史会话发消息→真实续聊（双向：web 续 iOS 建的会话）**；列表/历史/新建/流式/停止对齐旧件既有验收行。
@@ -183,8 +214,37 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
 
 ## 8. 实施拆分（批准后走 exec-plan）
 
-1. `agent/dshweb` HTTP 客户端 + 探活 + 生命周期（探测/managed）；
-2. 映射表逐行（list/history/prompt/cancel/models）+ 单测；
-3. SSE mux 管线（codec 复用 + approval/question 决定项）；
-4. wire descriptor/canonical 协议 pack + iOS `BackendKind` case + mirror；
-5. Mac App drivers 默认列 + Release 安装 + 真机验收矩阵。
+1. `agent/dshweb` HTTP+WebSocket 客户端（三层信封）+ 探活 + 生命周期（探测/managed/json）；
+2. 映射表逐行（list/**create**/history/prompt/cancel/**rename**/models/providers/selectModel）+ 单测；
+3. **WS mux/host 双流管线**（codec 映射复制 + SessionActivityProbing + sessions_changed 即时层）；
+4. **审批问答链路**（帧→事件→/api/respond；外部会话路由策略）；
+5. 投影接线点清单逐项（§4.3.2 表）+ pathless 家族回归；
+6. **list_directory/list_projects**（host.listDirectory/workspace.list）；
+7. wire descriptor/canonical 协议 pack + iOS `BackendKind` case 与 ~11 处穷举归组 + mirror；
+8. Mac App drivers 默认列 + Release 安装 + 真机验收矩阵。
+
+## 9. 评审采纳记录（v2 对照 `docs/2026-08-16-dsh-web-backend-design-review.md`）
+
+| 项 | 处置 | 落点 |
+|---|---|---|
+| B1 载波=WebSocket 非 SSE | **采纳** | §3.2 重写（WS+三层信封+426 行为+更正溯源）；§4.3.1/§4.3.3/§6/§8 同步改 WS |
+| M1 SessionActivityProbing 缺失 | **采纳** | §4.3.2（running 徽标数据源+保守 active）+ §6 三态测试 |
+| M2 审批分期与 fail-visibly 冲突 | **采纳**（升格一期必接） | §4.3.4（含 S4 外部会话路由+先答者得+question→question_reply 选型） |
+| M3 复用 vs 不共享矛盾/分支依赖 | **部分采纳** | 矛盾修复+「复用=复制映射表进 dshweb」采纳（§4.1）；**「实施前置=dsh/driver 合回 main」不采纳**——理由：owner 已裁决 merge 时机另行决定（收口指令「无需 merge」），实施在 dsh/driver 分支进行，两包同树并存即满足复制来源，合 main 不构成技术前置 |
+| M4 「投影零新增」不成立 | **采纳** | §4.3.2 接线点清单表（pathless 家族归属+deepseek 分支不进+剪枝不进）+ §8 拆分 5 |
+| S1 providers 休眠项过滤 | 采纳 | §4.3.5（active:true 进列表，全量进诊断） |
+| S2 旧件早期会话模型名残留 | 采纳 | §5 差异清单+真机矩阵行 |
+| S3 双实例共存策略 | 采纳 | §4.2（启动时探测+不确定性如实+sandbox 受控实验）+ §6 |
+| S4 外部会话审批路由/应答面选型 | 采纳 | §4.3.4（并入 M2 段落） |
+| S5 总表补三行 | 采纳 | §4.3.8 |
+| S6 host.describe 版本占位符 | 采纳 | §4.3.8 |
+| S7 RpcError 透传断言+重连测试 | 采纳 | §6 专项 |
+| S8 拆分与 ✅ 集对齐 | 采纳 | §8 重排为 8 项 |
+| S9 search 标记歧义 | 采纳 | §4.3.8 改 2️⃣ |
+| S10 iOS 改动量低估 | 采纳 | §4.1（11 文件清单+两处显式决策点） |
+| S11 managed json「凭据」措辞 | 采纳 | §4.2/§4.4（无凭据面+暴露面如实） |
+| S12 SSV2 真相清单 | 采纳 | §4.5 成段 |
+| S13 permission modes ⛔ 理由过强 | 采纳 | §4.3.5（「有面但语义不对应，二期评估」） |
+| S14 agentPreset 前缀笔误 | 采纳 | §4.3.5 |
+
+**坑 4 闭环状态更新**：评审判「未闭环」→ v2 经 §4.3.2 SessionActivityProbing 设计收口；坑 7/8 测试面经 §6 专项补齐。
