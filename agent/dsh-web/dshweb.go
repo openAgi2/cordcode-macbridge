@@ -51,6 +51,9 @@ type Agent struct {
 	pendingSel selection
 	// catalog is the last runtime-fetched provider/model catalog.
 	catalog *modelCatalog
+	// allowedTools records bridge-side tool authorization hints (returned
+	// verbatim; dsh v1 has no pre-authorization surface).
+	allowedTools []string
 
 	// Dual-stream pump state (§8-3): passive channel, refresh signals,
 	// per-session codecs.

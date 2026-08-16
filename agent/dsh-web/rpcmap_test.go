@@ -625,3 +625,43 @@ func TestListProjectSuggestionsEmptyRegistry(t *testing.T) {
 		t.Fatalf("empty registry must return empty (iOS local fallback): %+v", suggestions)
 	}
 }
+
+// ── wire descriptor (§8-7) ──────────────────────────────────────────────────
+
+func TestWireDescriptorDeepSeekWeb(t *testing.T) {
+	a := &Agent{}
+	wd := a.WireDescriptor()
+	if wd == nil {
+		t.Fatal("descriptor must self-describe")
+	}
+	if wd.Kind != "deepseek-web" || wd.DisplayName != "DeepSeek Web" {
+		t.Fatalf("kind/displayName: %+v", wd)
+	}
+	if wd.LiveEventModel != "broadcast" {
+		t.Fatalf("mux is agent-level broadcast: %s", wd.LiveEventModel)
+	}
+	if wd.RequiresExternalTurnPolling {
+		t.Fatal("mux pushes external turns — polling not required")
+	}
+	for _, want := range []string{"external_turn_streaming", "question_reply"} {
+		found := false
+		for _, c := range wd.StaticCapabilities {
+			if c == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("StaticCapabilities missing %q: %+v", want, wd.StaticCapabilities)
+		}
+	}
+	// ToolAuthorizer present (permission_resolve derivation for iOS actions).
+	if _, ok := interface{}(a).(interface {
+		AddAllowedTools(...string) error
+		GetAllowedTools() []string
+	}); !ok {
+		t.Fatal("ToolAuthorizer must be implemented (permission_resolve)")
+	}
+	if _, ok := interface{}(a).(core.HistoryProvider); !ok {
+		t.Fatal("legacy HistoryProvider must be implemented (session_history)")
+	}
+}
