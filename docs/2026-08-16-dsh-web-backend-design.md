@@ -1,7 +1,7 @@
 # dsh-web Backend 设计（官方 Web API 转发 + bridge-v1 翻译）
 
-- 日期：2026-08-16（v2：一轮评审 B1/M1-M4/S1-S14；v3：二轮评审 APPROVE + R2-1…R2-6 尾项全采纳，见文末「评审采纳记录」）
-- 状态：**设计稿 v3，两轮评审通过（r2 APPROVE），待 owner 终审**（批准后实施）
+- 日期：2026-08-16（v2：一轮评审；v3：二轮 APPROVE+R2 尾项；v3.1：三轮评审 R3-1/R3-2 必改——两条 v3 落实时臆造的机制按源码修正，见文末「评审采纳记录」）
+- 状态：**设计稿 v3.1，三轮评审收口（r2 APPROVE + r3 必改已修），待 owner 终审**（批准后实施）
 - 背景：SDK stdio 路线收口暂停（`docs/2026-08-16-dsh-session-store-bridge-design完成情况.md` 收口节）；owner 裁决并行新增本 backend，旧 `deepSeek` 保留不删。
 - 不变约束：CordCode 初衷（探测-复用-未启动、零迁移、双向接力、永不自托管）+ SSV2 十二条护栏。
 
@@ -36,7 +36,7 @@ dsh-web backend = **官方 Web API 的请求转发器 + bridge-v1 成熟格式�
 
 ### 2.3 过程纪律（从上述坑中提炼，评审员可用同尺检验本设计）
 
-1. 对外部系统的任何行为断言，必须先读其源码/数据——「听起来合理的机制解释」≠ 证据（坑 5）；
+1. 对外部系统的任何行为断言，必须先读其源码/数据——「听起来合理的机制解释」≠ 证据（坑 5）。**纪律适用于一切写入文档的行为描述，包括落实评审建议时补的机制细节**（v3 的 R2-1/R2-2 即在修订动作里复发此病，三轮评审以 iOS question 存储/permission wire 载荷源码纠正）；
 2. 否定性断言（「X 不可能」）必须标注在哪几个层面找过（坑 1）；
 3. 事实（模型目录、编码、端口、能力）取自运行时自己的声明面，不手写复本（坑 2/3）；
 4. 失败路径必须产生可见终态——禁止静默等待（坑 4/7/8）；
@@ -149,8 +149,12 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
 - 附件/图片 2️⃣：官方 `session.attachment` + `imageLimits` 投影已核实；一期 descriptor `StaticCapabilities` 声明 text-only（既有两级附件校验照走）。
 - `abort_generation` ✅ `session.cancel{sessionId}`。
 - **审批/问答 = 一期必接（评审 M2 升格，非决定项）**：活体证实默认 `approval/policy="ask"`——不接则 iOS 发起的 turn 在首个需审批工具处**无限挂起**（无终态无错误），直接违反 fail-visibly 红线（坑 8 类别）；旧路线靠自组 cordis.yml 权限栈规避，本路线会话由官方 preset 组装，无此规避。映射：`approval/requested` → 既有 permission 请求事件（iOS 权限 UI 已有）；`question/requested`（含 options/multiSelect/plan-review intent）→ **既有 question 事件面**（`question_reply`/`question_reject` 承接；`resolve_user_input` 不用于 dsh-web 一期）；应答统一 `POST /api/respond` 回显帧信封 rpcId（approvals.ts:1-21 二轮加证）。**先答者得**语义如实：web 端若先应答，bridge 收 `approval/resolved` 帧关闭请求（resolved 帧广播全部 mux 消费者）。
-- **审批选项如实降级（评审 R2-2）**：dsh 的 approval outcome 是二值集（仅 `allowed-once`|`rejected`，无 always 面）——dsh-web 的 permission 事件只声明「本次允许/拒绝」两选项，iOS 权限 UI 的「始终允许」类变体对该 backend 隐藏（按事件声明渲染，不虚构能力）。
-- **问答整批作答语义（评审 R2-1）**：dsh 一次 ask 多题**整批作答**（questions.ts「one ask, many questions, one answer — never split」），而 bridge `question_reply` 是单题模型——聚合点在 dshweb：一批 N 题 → N 个 question 事件共享同一帧 rpcId，dshweb 持批状态、逐题累积 iOS 应答，**收齐整批后一次 `POST /api/respond`**；iOS 中间态如实（单题已答但批未齐=该题显示已提交，整批等待中）；任一题 `question_reject` → 整批 cancel（outcome `cancelled`）。
+- **审批选项与 wire 折叠事实（评审 R2-2 设计，三轮 R3-2 按源码修正）**：dsh 的 approval outcome 是二值集（仅 `allowed-once`|`rejected`，无 always 面）。**修正**：wire 的 permission_request 载荷并无选项声明字段（events.go:156-161 仅 requestId/toolName/toolInput/toolInputRaw），iOS 选项也是硬编码（CCCodeBridgeBackendClient.swift:1390-1395）——v3 的「按事件声明渲染」机制不存在，删除。**真实机制（三轮源码核验的好消息）**：iOS 的 always 变体在 wire 层本就折叠为二值（approveAlways→`behavior:"allow"`、rejectAlways→`"deny"`，CCCodeBridgeBackendClient.swift:787-802）——dshweb 映射 allow→allowed-once / deny→rejected 即正确工作，无语义反转；残余仅「Always Approve」**标签语义弱化**（按下后无持久化面，下次仍会问）——接受为如实降级。「隐藏 always 变体」列为 iOS 可选优化（若一期做，须把 CCCodeBridgeBackendClient.swift:1390 的选项构造补进 §4.1 归组决策清单——当前 11 文件穷举清单不含该行为点）。
+- **问答整批作答语义（评审 R2-1 设计，三轮 R3-1 按源码修正）**：dsh 一次 ask 多题**整批作答**（questions.ts「one ask, many questions, one answer — never split」），而 bridge `question_reply` 是单题模型。聚合点在 dshweb，**id 键控按源码事实**：
+  - **questionId = dsh 每题自带唯一 id**（events.schema.ts:21），一批 N 题 → N 个 question 事件各持自己的题 id——iOS question 存储按 id 替换式 upsert（同 id 替换、异 id 追加，ChatViewModel+CodexStreaming.swift:768/1826-1832），逐题 id 才能全部可见可答（v3 曾写「共享帧 rpcId」= 会被覆盖只剩最后一题，已废）；
+  - 帧 rpcId 仅作 dshweb 内部**批 key**，不上 wire；逐题累积应答，**收齐整批后按题 id 组装一次 `POST /api/respond`**（应答形状 `{answers:[{id,selected,custom?}]}` 按题 id 键控，user-questions/types.ts:53-66）；
+  - **中间态如实**：iOS 提交 RPC 成功不置 completed，状态由 `question_resolved` 事件驱动（ChatUIKitContainerView.swift:3443-3455）——dshweb **不合成**逐题 resolved（批未提交前合成=虚假乐观；若他题 reject 整批取消则先前「已提交」是谎言），各题保持 pending 直至 host 批 `question/resolved` 帧到达后统一映射；
+  - **reject 不对称（防坑）**：question 的取消走 respond 的 **error 分支**（`ok:false, code:"cancelled"`），不是 value 载荷——与 approval（value outcome）不对称，实施时勿照抄；任一题 `question_reject` → 整批以 error-cancelled 应答。
 - **外部会话的审批帧路由（评审 S4；判据统一按 R2-3）**：mux 为 agent 级持有，外部（web 发起）会话的 approval/question 帧同样到达；surface 判据=**bridge registry 命中**（`h.getSession()` 有该会话对象——即 iOS 打开过该会话；observation 订阅而无 registry 对象**不**构成判据，两者是不同集合）；未命中的帧不进权限面（web 自己的 UI 在应答）——与「谁在看谁应答」的产品语义一致，避免为全量外部会话注册代理对象。
 
 #### 4.3.5 provider / model（iOS 模型选择器、provider 切换）
@@ -265,3 +269,14 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
 | R2-6 接线点表 :468 归属 | 采纳 | §4.3.2 表（sourceChanged 判定归 `ensureProjectionHydrated` ~:418；pathless 条件在 :629） |
 
 三项遗留评审项终态（二轮判定）：坑 4 后半 **闭环**（M1+三态测试）；坑 7 **闭环**（透传断言专项）；坑 8 **闭环**（审批升格一期必接消除挂起路径）。
+
+## 11. 三轮评审采纳记录（v3.1 对照 `docs/2026-08-16-dsh-web-backend-design-review-r3.md`）
+
+三轮结论：修改后通过（R3-1/R3-2 必改）；四条纯文字修订（R2-3/4/5/6）复核合格；M3 部分不采纳理由复核维持。两条必改**全采纳**——均为 v3 落实二轮建议时**未查源码臆造机制**（§2.3 纪律 1 在修订动作里复发，已在纪律条款中显式封堵）：
+
+| 项 | 处置 | 要点 |
+|---|---|---|
+| R3-1 「N 题共享 rpcId」被 iOS 替换式存储覆盖 | 采纳 | questionId=每题自带 id（iOS 异 id 追加才全可见）；帧 rpcId 仅作 dshweb 内部批 key；收齐按题 id 组装一次 respond；中间态不合成 resolved（保持 pending 至 host 批 resolved 帧）；reject 走 error 分支（与 approval 不对称） |
+| R3-2 「按事件声明渲染」机制臆造 | 采纳 | 删除该机制；如实写 wire 折叠事实（always→allow/deny 二值，映射即正确、无语义反转）；残余=标签语义弱化，接受；隐藏变体列为 iOS 可选优化（含 §4.1 补充决策点提示） |
+
+§4.3.4 全段源码对照自查（评审建议）：其余断言（create/prompt queue/resume 语义、cancel、approval outcome 集、/api/respond rpcId 回显、resolved 帧全员广播先答者得、registry 判据）均有三轮内源码/活体证据在案，未再发现失实项。三项遗留评审项闭环判定维持（R3-1 修正消除了坑 8 的新击穿路径）。
