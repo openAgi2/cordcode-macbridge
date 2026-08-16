@@ -8,6 +8,9 @@
 
 ## [Unreleased]
 
+- **新功能：DeepSeek Web backend（dsh-web，官方 Web API 转发 + bridge-v1 翻译）**：MacBridge 新增 `deepseek-web` backend——探测复用用户自启的 `dsh web`（默认 127.0.0.1:3080），未命中时托管拉起 loopback 实例（3096–3196，随 Link 启动保活，凭据零记录）。所有数据格式转换在 MacBridge 端完成：官方 `session.list/history/prompt/cancel/rename/models/providers/selectModel` 映射为 bridge-v1 成熟格式，mux/host 双 WebSocket 流全量推送（用户在 Mac web 发起的外部 turn 在 iPhone 实时可见，无需轮询），web 新建会话/外部 turn 秒级同步到 iPhone 列表；审批/问答经既有权限 UI 应答（官方 ask 策略下不接会无限挂起——一期必接）；投影冷加载走 pathless 家族（官方 history 重建基线），旧 `deepseek` backend 完整保留。iOS 端为纯枚举增量（「DeepSeek Web」模式入口），零新渲染逻辑。
+
+
 - **修复：iOS 新建 DeepSeek 会话 turn 失败于模型名（真机第二轮）**：rc.6 官方路由只支持 `deepseek-v4-pro/flash`，driver 旧默认 `deepseek-chat` 越界（报错原文「The supported API model names are deepseek-v4-pro or deepseek-v4-flash」）。默认与模型列表对齐 v4 两档，旧模型名自动归一（iOS 缓存防御）。
 - **修复：失败 turn 后消息页投影卡「执行中」（hydrating 循环）**：活会话被误推向文件重建与 live 流竞争、且失败 turn（仅用户消息无回复）的尾部未答 turn 永不封口。基线选择改为 live/kernel 优先（验证过的 admission 路径）、文件重建只服务死会话；driver 实现活会话探测（死会话尾部未答 turn 如实封口）。
 
