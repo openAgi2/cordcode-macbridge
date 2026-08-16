@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-16T18:30:00+08:00",
+  "updated_at": "2026-08-16T19:00:00+08:00",
   "todos": [
     {
       "id": "s8-1-client-impl",
@@ -592,11 +592,14 @@
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "iOS 真机安装完成（iPhone 16 Pro BFC431AC，run.sh device 构建安装启动成功）；双仓提交齐；MacBridge go test 全绿（§8-7 前置）。",
+        "summary": "iOS 真机安装完成（iPhone 16 Pro BFC431AC，run.sh device 构建安装启动成功）；定向 BridgeModelsTests 45/45 绿（含新增 2 项 BackendKind case）；iOS 定向 build SUCCEEDED；canonical/mirror protocol diff 为空。补充尝试：全量 -only-testing:CCCodeTests 于 15:25 启动后运行 18 分钟无测试汇总输出（runner 近空转），按 CLAUDE.md 超时纪律终止本任务创建的测试进程并回收——「全量套件未完成」如实标注，不以部分输出冒充；新增代码由定向 45/45+build+真机安装覆盖。",
         "artifacts": [
-          "cmd:scripts/run.sh device --device BFC431AC => installed+launched"
+          "cmd:xcodebuild test -only-testing:CCCodeTests/BridgeModelsTests => 45/45",
+          "cmd:xcodebuild build => BUILD SUCCEEDED",
+          "cmd:scripts/run.sh device --device BFC431AC => installed+launched",
+          "cmd:全量 CCCodeTests => 主体未完成（停滞终止，如实标注）"
         ],
-        "checked_at": "2026-08-16T18:00:00+08:00"
+        "checked_at": "2026-08-16T19:00:00+08:00"
       }
     },
     {
@@ -671,13 +674,17 @@
       "notes": "等待 owner 执行设计 §6 真机验收矩阵并逐行回报；owner 回报前本项保持 in_progress，不得自标 done。",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "manual",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "agent 侧可执行部分已完成：双仓分支 diff gitleaks secret scan no leaks found；真机矩阵已交付 owner。剩余 = owner 执行设计 §6 矩阵逐行回报——回报前本项保持 in_progress。",
+        "artifacts": [
+          "cmd:gitleaks detect --pipe => no leaks found（MacBridge）",
+          "cmd:gitleaks detect --pipe => no leaks found（iOS）",
+          "真机矩阵表（本会话交付 owner）"
+        ],
+        "checked_at": "2026-08-16T19:00:00+08:00"
       }
     }
   ]
