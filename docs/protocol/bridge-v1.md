@@ -586,7 +586,9 @@ also emits `user_message` with `{ itemId, turnId, text }` when the rollout persi
 prompt; `itemId` is the response-item message ID and is reused by rich history reconciliation.
 **opencode** is push-native via its SSE firehose (separate path, not this capability); **grokbuild**
 streams external-turn content through the projection pipeline (updates.jsonl file-tailer fallback,
-`session_sync_v2`) and does not advertise this capability yet. The external prompt
+`session_sync_v2`) and does not advertise this capability yet. **dsh-web** advertises it: its
+official mux WebSocket stream is an agent-level broadcast covering EVERY session (including turns
+started in the Mac web UI), pushed live through the same relay path. The external prompt
 (`user_message_chunk`) is caught up at relay attach when its turn is still in flight and emitted as
 `user_message` attributed to that turn's source-proven `promptId`; prompts of completed turns come
 from cold hydrate (`chat_history.jsonl`). Clients seeing this capability SHOULD NOT start
@@ -611,6 +613,59 @@ until one does.
 
 Both are extensible `capabilities` strings; adding them is non-breaking (no major version bump).
 No backend-id hard-branching; derivation is by type assertion on the driver.
+
+### Backend: `dsh-web` (kind `deepseek-web`)
+
+The `dsh-web` backend (hello_ack `backends[].id = "dsh-web"`, `kind = "deepseek-web"`,
+display name "DeepSeek Web") forwards onto the official DeepSeek Harness Web API
+(`dsh web`, default `127.0.0.1:3080`; MacBridge spawns a managed loopback instance
+`3096..3196` when the user's own instance is absent). All data-format conversion is
+MacBridge-side; the session store (`~/.dsh/sessions`) stays written only by the official
+service (MacBridge never writes it or `workspace.json`).
+
+Wire behavior:
+
+- `liveEvents = "broadcast"`, `requiresPollingForExternalTurns = false`: the official mux
+  WebSocket stream covers every session; external turns (started in the Mac web UI) stream
+  live with `external_turn_streaming` advertised. Catalog changes additionally trigger
+  `sessions_changed` through the host-stream immediate layer on top of the generic
+  discovery watcher.
+- `session_history` / rich history / SSV2 cold hydrate all derive from the official
+  `session.history` (pathless family: no transcript file, no byte-cut checkpoint;
+  re-open rebuilds fully). `session_sync_v2` is advertised.
+- `send_message` maps to `session.prompt` (mode `queue`). Prompting an existing session
+  uses the official resume semantics — there is NO "session ended" guard and NO
+  `session_resume_not_supported` for this backend. Phase 1 is text-only: no attachment
+  kinds are declared, so the two-level attachment gate rejects image/file uploads.
+- Approvals/questions surface through the existing `permission_request` /
+  `question_asked` events, answered via `resolve_permission` / `question_reply` /
+  `question_reject`. dsh asks WHOLE QUESTION BATCHES: each question carries its own
+  per-question id on the wire (iOS's replace-by-id upsert keeps every question
+  answerable); MacBridge accumulates answers per question id and answers the batch once;
+  `question_resolved` arrives per question id after the host settles the batch. A
+  rejection cancels the whole batch. Approval outcomes are the official binary set
+  (`allowed-once`/`rejected`); iOS's always-variants collapse to allow/deny on the wire
+  (no semantic inversion; the always-persistence face does not exist in phase 1).
+  Frames for sessions without a live bridge binding (web-only sessions) are not surfaced.
+- Model/provider selection maps to the official session-scoped `session.selectModel`
+  (there is no backend-global write surface); `list_providers` lists only
+  runtime-active providers, `list_models` comes from the runtime catalog.
+- `list_projects` serves the official workspace registry (`workspace.list`) as
+  quick-pick directory suggestions; `list_directory` stays on the bridge-generic local
+  filesystem browser shared by every backend.
+- Not supported in phase 1 (existing generic `not_supported` paths; iOS hides the
+  entries): `delete_session`, git surface (`get_git_context` / PR suite /
+  `commit_and_push` / branch / worktree), diff suite, `fetch_todos`, `get_usage`,
+  memory files, `list_permission_modes`/`set_permission_mode`, `list_agents`,
+  `compress_context`, `share_session`. `rename_session` works on the RPC level; the
+  iOS rename/archive entries follow the `session_mutation` convention (hidden until
+  archive lands, identical to codex/opencode today).
+- `run_diagnostics` reports the instance source (external probe hit / managed spawn,
+  port, loopback-only disclosure) and the full provider registry with state bits; the
+  `host.describe` version is an API-level identifier, NOT the npm package version.
+
+Adding the backend is a non-breaking extension of the descriptor space (new
+`backends[].kind` value; clients that do not know it ignore the backend).
 
 ### Capability: `supports_workspace_browse` (§6.5)
 
