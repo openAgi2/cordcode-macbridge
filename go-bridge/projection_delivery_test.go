@@ -160,7 +160,6 @@ func TestSessionSyncV2RawTimelineClassification(t *testing.T) {
 		"turn_started", "turn_completed", "user_message",
 		"text_delta", "message_updated", "reasoning_delta",
 		"tool_started", "tool_finished",
-		"permission_request", "question_asked", "question_resolved",
 		"context_compressing", "context_compressed",
 		"session_state_changed", "delivery_reconcile_required", "error",
 	} {
@@ -171,6 +170,9 @@ func TestSessionSyncV2RawTimelineClassification(t *testing.T) {
 	for _, event := range []string{
 		"todos_updated", "context_usage_updated", "sessions_changed",
 		"diagnostic_progress", "permission_mode_changed",
+		// permission/question 未进 reducer，必须继续当 raw 控制面投递给 SSV2。
+		"permission_request", "permission_asked",
+		"question_asked", "question_resolved",
 	} {
 		if isSessionSyncV2RawTimelineEvent(event) {
 			t.Errorf("%s must remain control-plane", event)

@@ -66,6 +66,9 @@ func TestDisablesRelayIdleTimeoutIncludesOpenCode(t *testing.T) {
 	if !disablesRelayIdleTimeout("opencode") {
 		t.Fatal("opencode relay idle timeout should be disabled")
 	}
+	if !disablesRelayIdleTimeout("dsh-web") {
+		t.Fatal("dsh-web relay idle timeout should be disabled (approval wait is silent)")
+	}
 }
 
 func TestClearOpenCodeServerAuthEnv(t *testing.T) {

@@ -372,18 +372,20 @@ func TestCodecKnownControlPlaneTypesDoNotReset(t *testing.T) {
 		env("command/run", 1, map[string]any{"id": "c1"}),
 		env("command/done", 2, map[string]any{"id": "c1"}),
 		env("session/title-llm-request", 3, map[string]any{"titleProvider": "llm"}),
-		env("step/start", 4, map[string]any{"turn": 1, "step": 1}),
-		env("assistant/chunk", 5, map[string]any{"turn": 1, "step": 1, "chunk": map[string]any{
+		env("approval/asked", 4, map[string]any{"id": "appr-1", "toolName": "write"}),
+		env("approval/decided", 5, map[string]any{"id": "appr-1", "outcome": "allowed-once"}),
+		env("step/start", 6, map[string]any{"turn": 1, "step": 1}),
+		env("assistant/chunk", 7, map[string]any{"turn": 1, "step": 1, "chunk": map[string]any{
 			"type": "block-start", "index": 0, "blockType": "text",
 		}}),
-		env("assistant/chunk", 6, map[string]any{"turn": 1, "step": 1, "chunk": map[string]any{
+		env("assistant/chunk", 8, map[string]any{"turn": 1, "step": 1, "chunk": map[string]any{
 			"type": "text-delta", "index": 0, "text": "命令后仍可流式",
 		}}),
-		env("assistant/chunk", 7, map[string]any{"turn": 1, "step": 1, "chunk": map[string]any{
+		env("assistant/chunk", 9, map[string]any{"turn": 1, "step": 1, "chunk": map[string]any{
 			"type": "block-end", "index": 0, "block": map[string]any{"type": "text", "text": "命令后仍可流式"},
 		}}),
-		env("step/end", 8, map[string]any{"turn": 1, "step": 1}),
-		env("turn/end", 9, map[string]any{"turn": 1, "reason": map[string]any{"kind": "completed"}}),
+		env("step/end", 10, map[string]any{"turn": 1, "step": 1}),
+		env("turn/end", 11, map[string]any{"turn": 1, "reason": map[string]any{"kind": "completed"}}),
 	})
 	// 恰一个 turn_started（无重置产生的第二个）+ delta 保留 + 干净收口。
 	var turnStarted, textDeltas, terminal int

@@ -223,7 +223,12 @@ func (c *sessionCodec) apply(env *sessionEventWire) ([]core.Event, error) {
 	// 中，且 2026-08-16 真机矩阵证实无 timeline 内容——此前两版因未知类型
 	// 重置杀了码器状态（双 turn_started、身份断裂）。
 	case "permission/preset", "sandbox/mode", "approval/policy", "agent/inbox/spliced", "session/title",
-		"command/run", "command/done", "session/title-llm-request":
+		"command/run", "command/done", "session/title-llm-request",
+		// approval/asked + approval/decided 是官方 log-only 审计对（known-event-types
+		// 注册表；user-approval README：「只写入日志，人类权限 UI 不属于上下文」）。
+		// 真机 2026-08-16 行 6：当未知类型重置，杀 mid-turn 码器。真正的 iOS 权限
+		// 面走 mux approval/requested → permission_request，不走这两条审计事件。
+		"approval/asked", "approval/decided":
 		return nil, nil
 
 	default:
