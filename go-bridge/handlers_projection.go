@@ -457,17 +457,18 @@ func (h *Handlers) ensureProjectionHydrated(
 		// 发送后重同步，sinceRev=0）时，pathless 历史重建产出落后基线——在飞
 		// turn 未入 session.history cut，且重建的 turn 身份与 live 流不同源——
 		// fence 把 kernel 从 464 回退到 10，后续 live 补丁身份脱节 iOS 不渲染，
-		// 并诱发连续重建循环（16:07 四连 fence）。正确矩阵与 deepseek 收口同构：
-		// live/kernel 会话一律以 kernel 状态为基线（live-only admission：
-		// carried baseline + pendingLive，rev 连续、身份一致）；pathless 重建
-		// 只服务从未入 kernel 的会话（首次打开）与脱活会话的 forceCold。
-		// 与 deepseek 分支的区别：无 store 语义（会话服务端常驻，mux 即事件源）。
+		// 并诱发连续重建循环（16:07 四连 fence）。正确矩阵：
+		//   * 已有 kernel：live 或非 forceCold → live-only（保 rev/身份）
+		//   * 尚无 kernel：即使 registry 已 live（刚 StartSession / mux 尚未
+		//     入核），也走 pathless history 播种。旧条件 `live || …` 会在空
+		//     kernel 上 live-only admission，首张 snapshot turnCount=1，历史
+		//     被丢掉（真机 16:26:16）。
+		// 脱活 forceCold 与从未见过的会话仍 fall through 到 pathless。
 		_, live := h.getSession(sessionID)
 		hasKernel := h.projectionKernel.HasReducerState(backendID, sessionID)
-		if live || (hasKernel && !forceColdInspection) {
+		if hasKernel && (live || !forceColdInspection) {
 			return h.ensureLiveOnlyProjectionAdmission(backendID, sessionID)
 		}
-		// 脱活会话的 forceCold 或从未见过的会话：fall through 到 pathless 重建。
 	}
 	if !backendSupportsProjectionHydrate(backendID) {
 		return errProjectionBackendNotMigrated

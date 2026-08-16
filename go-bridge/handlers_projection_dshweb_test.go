@@ -272,3 +272,35 @@ func TestDSHWebDeadSessionForceColdStillRebuilds(t *testing.T) {
 		t.Fatalf("kernel phase = %q, want ready", st.Phase)
 	}
 }
+
+// StartSession 把会话写入 registry 之后、mux 事件尚未入核时，冷拉必须走
+// pathless history 播种，不得对空 kernel 做 live-only admission（真机
+// 16:26:16 snapshot turnCount=1，历史被丢掉）。
+func TestDSHWebLiveRegistryWithoutKernelSeedsFromHistory(t *testing.T) {
+	h := newDshProjectionHandlers(t)
+	sessionID := "dshweb-live-nokernel-1"
+	fakeSess := &fakeAgentSession{id: sessionID, events: make(chan core.Event)}
+	h.mu.Lock()
+	h.agents = map[string]core.Agent{"dsh-web": &fakeAgent{
+		name: "dsh-web",
+		richHistory: []core.RichHistoryEntry{
+			{ID: "u-hist", Role: "user", Content: "历史用户句"},
+			{ID: "a-hist", Role: "assistant", Content: "历史回复", Parts: []map[string]any{{"type": "text", "content": "历史回复"}}},
+		},
+	}}
+	h.putSession(sessionID, fakeSess)
+	h.mu.Unlock()
+
+	if h.projectionKernel.HasReducerState("dsh-web", sessionID) {
+		t.Fatal("precondition: kernel must be empty")
+	}
+
+	conn, _ := dshWebPull(h, sessionID, 0)
+	if conn.err != nil {
+		t.Fatalf("live+!hasKernel pull: %+v", conn.err)
+	}
+	raw, _ := json.Marshal(conn.data)
+	if !strings.Contains(string(raw), "历史用户句") {
+		t.Fatalf("history seed missing from first-admission snapshot: %s", string(raw))
+	}
+}

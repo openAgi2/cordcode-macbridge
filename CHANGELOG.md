@@ -7,6 +7,7 @@
 版本号对齐 MacBridge Release 构建的 `MARKETING_VERSION`（见 `MacBridge/project.yml`）。日期为协调世界时（UTC）。
 
 ## [Unreleased]
+- **修复：DeepSeek Web 复测仍不流式（Mac web 在出字、iPhone 不渲染）**：Mac 已推完整 projection_patch，但 iOS 投影渲染开关漏了 DeepSeek Web（与当初 DeepSeek 同一类漏列），补丁被泵丢掉、界面仍等 raw live event；Mac web 旁观只有 passive/patch，iOS 发送后也不渲染。另：刚 StartSession、kernel 仍空时旧条件把 live 会话收成空基线（首张 snapshot 只有 1 个 turn）。修复：iOS 把 DeepSeek Web 列入 SSV2 投影族；Mac 仅在已有 kernel 时走 live-only，空 kernel 先用官方 history 播种。
 - **修复：DeepSeek Web 真机首测 live 流断裂（执行态卡住、切会话冷重建才见回复）**：根因是 iOS 在 live turn 期间冷拉投影时，pathless 历史重建产出落后基线（在飞 turn 未入 history 快照、turn 身份与 live 流不同源），fence 把 kernel 版本回退后 live 补丁身份脱节不渲染（并诱发重建循环）；另 web profile 的控制面事件（命令执行标记、标题生成请求）触发码器重置。修复：live/kernel 会话一律以 kernel 状态为投影基线（与旧 DeepSeek 收口同构），重建只服务首次打开与脱活会话；三类控制面事件入已知忽略清单。
 
 
