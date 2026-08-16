@@ -339,3 +339,26 @@ func TestObservationPrunesDeadLiveOnlySessions(t *testing.T) {
 		t.Fatalf("claude unknown session must stay subscribed, targets=%d", len(targets))
 	}
 }
+
+// 真机 2026-08-16 复盘：活会话（kernel 有状态 + store 已落盘）曾被推向 file
+// 重建并与 live 流竞争 → hydrating 循环。矩阵修正后：live/kernel 会话一律走
+// admission 基线（本 epoch 权威），store 重建只服务死会话。
+func TestDeepSeekLiveSessionWithStoreFileUsesKernelBaseline(t *testing.T) {
+	h := newDshProjectionHandlers(t)
+	writeDshStoreSessionMarker(t, "dsh-live-store-1")
+	// Real-device form: the registry still holds the live driver session.
+	h.mu.Lock()
+	h.putSessionWithMeta("dsh-live-store-1", "deepseek", "", &fakeAgentSession{id: "dsh-live-store-1", events: make(chan core.Event, 1)})
+	h.mu.Unlock()
+
+	liveOnlyPublishTurn(h, "deepseek", "dsh-live-store-1", "T1", []string{"kernel", " ", "wins"}, "turn_completed")
+
+	conn, _ := liveOnlyProjectionPull(h, "dsh-live-store-1", 0)
+	proj := liveOnlyProjectionOf(t, conn)
+	if len(proj.Turns) != 1 || proj.Turns[0].TurnID != "T1" {
+		t.Fatalf("live session must serve the kernel baseline, turns=%+v", proj.Turns)
+	}
+	if st := h.projectionKernel.Status("deepseek", "dsh-live-store-1"); st.Phase != ProjectionHydrateReady {
+		t.Fatalf("kernel phase = %q, want ready (no file-hydrate race)", st.Phase)
+	}
+}

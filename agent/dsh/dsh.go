@@ -33,7 +33,7 @@ const dshProviderRoute = "deepseek-official"
 
 const (
 	defaultCLIBin  = "dsh-jsonrpc-agent"
-	defaultModel   = "deepseek-chat"
+	defaultModel   = "deepseek-v4-flash"
 	dshDataSubdir  = ".cccode-macbridge/dsh"
 	cordisYMLName  = "cordis.yml"
 	sessionsSubdir = "sessions"
@@ -46,6 +46,7 @@ var _ core.ModeSwitcher = (*Agent)(nil)
 var _ core.ModelSwitcher = (*Agent)(nil)
 var _ core.ProviderSwitcher = (*Agent)(nil)
 var _ core.DiagnosticsProvider = (*Agent)(nil)
+var _ core.SessionActivityProbing = (*Agent)(nil)
 
 func init() {
 	core.RegisterAgent("dsh", New)
@@ -76,6 +77,11 @@ type Agent struct {
 	//     (vendored SDK layer real + family symlinked to the user's tree).
 	//   route 5 (dev checkout, opt-in): `--import tsx <bin.ts>`,
 	//     cwd = checkout root (the gate0-verified launch shape).
+	// liveRoots tracks root session ids with a live driver process; the
+	// SessionActivityProbing implementation answers from it (a dead store
+	// session's trailing unanswered user turn must seal, not wait forever).
+	liveRoots map[string]struct{}
+
 	srcRoot       string // set only for source-checkout mode
 	nodeBin       string
 	scriptPath    string
@@ -104,10 +110,14 @@ func New(opts map[string]any) (core.Agent, error) {
 		model:     defaultModel,
 		mode:      "workspace-write",
 		activeIdx: -1,
+		liveRoots: map[string]struct{}{},
 	}
 
 	if v, ok := opts["work_dir"].(string); ok && v != "" {
 		a.workDir = v
+	}
+	if v, ok := opts["model"].(string); ok && strings.TrimSpace(v) != "" {
+		a.model = normalizeModelName(v)
 	}
 	if v, ok := opts["cli_path"].(string); ok && v != "" {
 		fields := strings.Fields(v)
@@ -289,6 +299,32 @@ func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, erro
 	return infos, nil
 }
 
+// IsSessionActive implements core.SessionActivityProbing: the driver is the
+// only writer for its sessions, so a root id without a live process is
+// definitively idle — cold hydrate may seal a trailing unanswered user turn
+// instead of waiting for a terminal event that will never come.
+func (a *Agent) IsSessionActive(_ context.Context, sessionID string) bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	_, live := a.liveRoots[strings.TrimSpace(sessionID)]
+	return live
+}
+
+func (a *Agent) markLiveRoot(rootID string) {
+	a.mu.Lock()
+	if a.liveRoots == nil {
+		a.liveRoots = map[string]struct{}{}
+	}
+	a.liveRoots[rootID] = struct{}{}
+	a.mu.Unlock()
+}
+
+func (a *Agent) clearLiveRoot(rootID string) {
+	a.mu.Lock()
+	delete(a.liveRoots, rootID)
+	a.mu.Unlock()
+}
+
 // GetRichSessionHistory implements core.RichHistoryProvider over the harness
 // store log (design §4.3) — the file-backed counterpart the SSV2 pathless
 // cold-hydrate and get_session_messages both consume.
@@ -437,8 +473,23 @@ func normalizePermissionMode(mode string) string {
 
 func (a *Agent) SetModel(model string) {
 	a.mu.Lock()
-	a.model = model
+	a.model = normalizeModelName(model)
 	a.mu.Unlock()
+}
+
+// normalizeModelName maps the legacy pre-rc.6 names onto the supported set —
+// iOS may still hold a cached model id from before the 2026-08-16 fix
+// (real-device: "supported API model names are deepseek-v4-pro or
+// deepseek-v4-flash, but you passed default/deepseek-chat").
+func normalizeModelName(model string) string {
+	switch strings.TrimSpace(model) {
+	case "deepseek-chat", "":
+		return defaultModel
+	case "deepseek-reasoner":
+		return "deepseek-v4-pro"
+	default:
+		return model
+	}
 }
 
 func (a *Agent) GetModel() string {
@@ -453,9 +504,11 @@ func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
 		defer a.mu.RUnlock()
 		return models
 	}
+	// rc.6 supported set (real-device error text 2026-08-16: "The supported
+	// API model names are deepseek-v4-pro or deepseek-v4-flash").
 	return []core.ModelOption{
-		{Name: "deepseek-chat", Desc: "DeepSeek Chat"},
-		{Name: "deepseek-reasoner", Desc: "DeepSeek Reasoner"},
+		{Name: "deepseek-v4-flash", Desc: "DeepSeek V4 Flash"},
+		{Name: "deepseek-v4-pro", Desc: "DeepSeek V4 Pro"},
 	}
 }
 

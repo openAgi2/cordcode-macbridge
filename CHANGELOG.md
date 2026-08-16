@@ -8,6 +8,9 @@
 
 ## [Unreleased]
 
+- **修复：iOS 新建 DeepSeek 会话 turn 失败于模型名（真机第二轮）**：rc.6 官方路由只支持 `deepseek-v4-pro/flash`，driver 旧默认 `deepseek-chat` 越界（报错原文「The supported API model names are deepseek-v4-pro or deepseek-v4-flash」）。默认与模型列表对齐 v4 两档，旧模型名自动归一（iOS 缓存防御）。
+- **修复：失败 turn 后消息页投影卡「执行中」（hydrating 循环）**：活会话被误推向文件重建与 live 流竞争、且失败 turn（仅用户消息无回复）的尾部未答 turn 永不封口。基线选择改为 live/kernel 优先（验证过的 admission 路径）、文件重建只服务死会话；driver 实现活会话探测（死会话尾部未答 turn 如实封口）。
+
 - **修复：iOS 新建的 DeepSeek 会话发送后立即失败（执行中无回复、Mac 端 dsh web 看不到）**：driver 的会话存储编码（明文）与 dsh web 写入用户 store 的 zstd 工件冲突——harness 在物化会话时拒绝混用编码的存储根。driver 改用与 web 一致的 zstd，新建会话正常写入 `~/.dsh/sessions`（Mac/手机双向可见恢复）。
 
 - **新功能：iOS 端 DeepSeek 会话列表与历史（store 桥接）**：Mac 读取用户自己的 `~/.dsh/sessions`（dsh web 与手机自建的会话同列，明文与 zstd 双格式、标题取自 harness 的 session/title 事件）——iPhone 上 DeepSeek 模式现在有完整会话列表；点开任意已结束会话可查看完整历史（含思考过程与工具调用），file-backed 投影冷加载。已结束会话内发消息得到诚实提示（当前 DSH SDK 不支持跨进程续聊，可发起新会话），绝不覆写磁盘会话。

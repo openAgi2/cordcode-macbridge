@@ -48,6 +48,14 @@ owner 复测：列表/历史/跨端同步 ✅（含 Mac 新建目录及时同步
 
 修复（`c522e73`）：cordis.yml `compression: zstd`（与 web 默认一致；读侧双后缀本就兼容）。验证：`DSH_TURN_REPRO` 真实 spawn 复现测试——修复前探针捕获 encodingMismatch 原文，修复后编码错误消失、turn 到达 LLM 层（mock key 401 预期终态）、会话成功物化进 store；`agent/dsh` 全套回归绿；Release 重装核对（8777=/Applications runtime、route② 探测正常）。
 
+## 真机修复轮二（2026-08-16 第二轮复测）
+
+owner 复测：编码修复生效（会话落盘、Mac web 可见「讲个宇航员的笑话」）。**新缺陷**：turn 失败于模型名——rc.6 官方路由仅支持 `deepseek-v4-pro/flash`，driver 旧默认 `deepseek-chat` 越界（key 有效，错误到达模型校验层）；同时消息页投影对失败 turn 卡 hydrating 循环（活会话被误推 file 重建 + 尾部未答 turn 永不封口）。
+
+修复：① defaultModel→`deepseek-v4-flash`、模型列表对齐 v4 两档、`normalizeModelName` 归一旧名（iOS 缓存防御）；② 基线选择矩阵修正——live/kernel 会话一律 admission 基线（a70cbfb 已验证形态），file 重建只服务死会话（forceCold 对死会话触发重建，web 增长可见）；③ driver 实现 `SessionActivityProbing`（活进程集合），死会话尾部未答 turn 封口 → 基线可提交。
+
+验证：`TestDeepSeekLiveSessionWithStoreFileUsesKernelBaseline`（真机形态：registry 活会话+store 落盘 → kernel 基线达 Ready）+ `TestNormalizeModelNameMapsLegacyDefaults`/`TestIsSessionActiveTracksLiveRoots`；agent/dsh + go-bridge 全量回归绿；Release 重装核对。「未分组」目录为 dsh web 自身对未注册 workspace 的展示行为，非缺陷。
+
 ## 验收（owner 真机，替代原矩阵）
 
 | # | 动作 | 应看到 |

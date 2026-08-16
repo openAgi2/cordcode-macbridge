@@ -36,3 +36,39 @@ func TestDriverStartSessionDeadStoreIDFailsDeterministically(t *testing.T) {
 		t.Fatalf("unknown id must not trip the resume guard: %v", err)
 	}
 }
+
+// rc.6 supported model set (real-device error 2026-08-16): the legacy defaults
+// must normalize away — iOS may still hold cached pre-fix model ids.
+func TestNormalizeModelNameMapsLegacyDefaults(t *testing.T) {
+	cases := map[string]string{
+		"deepseek-chat":     defaultModel,
+		"deepseek-reasoner": "deepseek-v4-pro",
+		"":                  defaultModel,
+		"deepseek-v4-flash": "deepseek-v4-flash",
+	}
+	for in, want := range cases {
+		if got := normalizeModelName(in); got != want {
+			t.Errorf("normalizeModelName(%q) = %q, want %q", in, got, want)
+		}
+	}
+	a := &Agent{}
+	a.SetModel("deepseek-chat")
+	if a.model != defaultModel {
+		t.Fatalf("SetModel must normalize, got %q", a.model)
+	}
+}
+
+func TestIsSessionActiveTracksLiveRoots(t *testing.T) {
+	a := &Agent{}
+	a.markLiveRoot("dsh-live-1")
+	if !a.IsSessionActive(context.Background(), "dsh-live-1") {
+		t.Fatal("live root must report active")
+	}
+	if a.IsSessionActive(context.Background(), "dsh-gone") {
+		t.Fatal("unknown root must report idle (seal trailing turns)")
+	}
+	a.clearLiveRoot("dsh-live-1")
+	if a.IsSessionActive(context.Background(), "dsh-live-1") {
+		t.Fatal("cleared root must report idle")
+	}
+}

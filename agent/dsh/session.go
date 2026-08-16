@@ -184,6 +184,7 @@ func newDshSession(ctx context.Context, agent *Agent, sessionID string) (*dshSes
 		s.teardownProcess()
 		return nil, fmt.Errorf("dsh: initialize: %w", err)
 	}
+	agent.markLiveRoot(rootID)
 	slog.Info("dsh: session started",
 		"pid", cmd.Process.Pid,
 		"session_id_prefix", shortID(rootID),
@@ -195,6 +196,7 @@ func newDshSession(ctx context.Context, agent *Agent, sessionID string) (*dshSes
 		waitErr := cmd.Wait()
 		close(s.done)
 		s.alive.Store(false)
+		s.agent.clearLiveRoot(s.rootSessionID)
 		if waitErr != nil && !s.terminalDone.Load() {
 			s.emit(core.Event{
 				Type:  core.EventError,
