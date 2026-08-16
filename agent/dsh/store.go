@@ -6,8 +6,10 @@
 // Format facts (source-verified against dsh pin 47f9438):
 //   - projectKey is LOSSY (separator runs collapse to '-'), so the true cwd
 //     comes from each log's header line, never from the directory name.
-//   - The harness web profile writes zstd artifacts; the driver composition
-//     pins compression:none — both suffixes must be readable.
+//   - The harness web profile and the driver composition both write zstd
+//     artifacts (the driver pinned none until 2026-08-16, when the shared
+//     user store made the encoding check reject the mix) — both suffixes
+//     stay readable for any plaintext legacy logs.
 package dsh
 
 import (

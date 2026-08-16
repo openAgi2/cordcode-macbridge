@@ -64,7 +64,11 @@
   name: '@deepseek-ai/dsh-session-persistence-jsonl'
   config:
     root: !!js process.env.DSH_SESSION_ROOT ?? './.sessions'
-    compression: none
+    # 2026-08-16 真机修复：root 指向用户 harness store（624c6a4）后，web profile 写入的
+    # zstd 工件与 none 配置冲突——persistence 的 checkRootEncoding 扫整个 root，任一相反
+    # 编码工件即拒绝 materialize（真机现象：iOS 新建会话 turn 立即 error、dsh web 看不到）。
+    # 与 harness web 默认保持一致使用 zstd（读侧 store.go 双后缀兼容明文残留）。
+    compression: zstd
 
 - id: session-checkpoints
   name: '@deepseek-ai/dsh-session-checkpoint-policy'
