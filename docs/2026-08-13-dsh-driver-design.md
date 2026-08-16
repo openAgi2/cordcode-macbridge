@@ -1,6 +1,7 @@
 # DeepSeek Harness (DSH) Driver 设计文档
 
 - **日期**：2026-08-14（v13；round12 **APPROVE** —— 设计放行，见 §16 交接验收门槛）
+- **路线状态（2026-08-16 收口）**：SDK stdio 路线**暂停、成果保留**（owner 裁决）——实现完成并经三轮真机修复达到可用（列表/历史/新建/流式/停止），但该路线锚定在 dsh 最窄的协议面上（无跨进程 resume/steer/审批，升级脆弱）。后续另立 **dsh-web backend**（官方 web api-proxy HTTP 契约的转发器+bridge-v1 翻译器），与本路线产出并行共存，跑稳后凭使用证据定退役。复盘与裁决全文：`docs/2026-08-16-dsh-session-store-bridge-design完成情况.md` 收口节。
 - **Runtime**：DeepSeek Harness `dsh-jsonrpc-agent`（pinned `47f943859bef60e4160492346772ded9b24f765a`，协议 `0.0.1`，pre-release）
 - **协议**：DSH SDK JSON-RPC 2.0 over stdio（**非** ACP），3 requests + 4 notifications（§3.0）
 - **证据**：`scripts/dsh-gate0/`（4 次真实 run + assembled composition + sanitizer 带 peer 断言）

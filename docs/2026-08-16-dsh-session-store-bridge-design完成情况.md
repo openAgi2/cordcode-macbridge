@@ -67,3 +67,20 @@ owner 复测：编码修复生效（会话落盘、Mac web 可见「讲个宇航
 | 5 | 活会话续聊（流式/停止/附件拒绝/重启后历史） | 原行为不变 |
 
 全绿后两仓 `dsh/driver` 合回 main + 推远端（与前置计划收尾合并执行）。
+
+## 收口（2026-08-16 owner 裁决：暂停，保留成果，转 dsh-web）
+
+**真机终态**：owner 确认发送+回复正常；列表/历史/跨端同步可用；双端截图核对 web 与 iOS 列表、内容对齐（含「未分组」机制取证，见修复轮二）。SDK stdio 路线至此功能达标，边界如实：无跨进程 resume、无 steer/审批问答、对 dsh 升级脆弱（三轮真机故障均为重新推导官方已保证的事实）。
+
+**路线复盘**：第一版接入把调查锚定在 dsh 的 SDK 协议面（3 方法、无 list/resume）——用户工具暴露的最窄面；实际 dsh web 的 HTTP api-proxy 才是最全面（`session.list/search/create/fork/history/prompt(queue|steer)/models` + mux/host WebSocket 事件流 + workspace/approvals/questions/credentials，schema 化契约，web 前端即其第一个客户端）。「SDK 无 X」被升格为「无法 X」是本轮总根源（owner 两轮点破：store 可读 → web API 全量）。
+
+**裁决**：
+1. 现有接入（两仓 `dsh/driver` 分支全部 commit）**保留不删**，停止演进；
+2. 后续新增 **dsh-web backend**：官方 web API 的请求转发器 + bridge-v1 成熟格式（codex/claudecode/opencode/grokbuild 已验证）的翻译器，全部转换在 MacBridge 端完成，iOS 几乎零改；与现有 `deepSeek` backend 并行共存（同一份 `~/.dsh/sessions`，跨 backend 打开行为差异如实呈现）；
+3. dsh-web 真机跑稳后凭使用证据再定旧件退役——不在无证据时预判。
+
+**dsh-web 立项前置核实项**（先取证再设计，教训固化）：① `prompt` 对既有会话的续聊语义（web 上下文含 `agents.resume`）；② mux WebSocket 帧契约细节；③ 托管启动形态（loopback 绑定、端口受控、进程管理——opencode managed_local 先例）；④ HTTP API 跨版本稳定性承诺。
+
+**遗留（owner 决定项/另行立项）**：两仓 `dsh/driver` 未合 main、未推远端（MacBridge 本地 main 另有 1 个未推文档 commit）；验收矩阵行 4（死会话续聊）由 dsh-web 路线取代；CCCodeTests 全量套件挂起隐患另行立项排查。
+
+**证据索引（最终）**：MacBridge `e83e186`→`9ac8102`（store bridge + 三轮真机修复 + 收口）；iOS `4b5eb69`/`9489a6f`（解门控+文案+mirror）；exec-plan `plan-bf2e7697a934` 17/17。

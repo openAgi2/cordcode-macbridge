@@ -849,3 +849,9 @@ seal，commits e00b389/8eabd6e），canonical `docs/protocol/bridge-v1.md` 事�
 - 事件：真机复测中 Mac web 显示手机会话于「未分组」，agent 未读 web 源码即断言「Chat 未注册 workspace，用户加上即可」——事实相反（Chat 早已注册；分组机制是 workspace.json 显式 sessionIds 名单而非路径匹配），被 owner 以双端截图纠正。
 - 教训：对**另一个系统的行为**下结论前必须读它的源码/数据；「听起来合理的机制解释」≠ 证据。跨系统（iOS/dsh web/harness）行为差异排查同样适用本仓排障纪律：先取证再定性，不确定就说不确定。
 - 顺带固化的事实：dsh web workspace 分组=显式名单（entity.ts attachSession 仅 web 自身 create/fork 调用，校验头行 cwd=workspace 路径）；workspace.json 受 dsh-storage-domain 两写恢复协议管理，外部进程不可盲写。
+
+## 2026-08-16 路线教训：接入外部工具先枚举全部暴露面，「SDK 无 X」≠「无法 X」
+
+- 事件：dsh 接入第一版把「SDK 协议面没有 list/resume」铁板钉钉为「无法读取 Mac 端会话」，为此建造 live-only 投影 admission、iOS 隐藏列表等整套补偿架构。事实：会话数据一直在 `~/.dsh/sessions`（claudecode 文件读取先例就在本仓）；dsh web 的 api-proxy HTTP 契约（session.list/history/prompt 含 queue|steer/续聊/mux+host WS 事件流/workspace/approvals，schema 化）才是最全面、且官方前端日常在用的面。owner 两轮点破（store 可读 → web API 全量）。
+- 教训：接入用户自有工具时，先枚举它**暴露的全部面**（协议 / 文件 / 常驻服务+官方前端所用的 API），锚定用户实际使用的那条最全面通道，而不是我们恰好要对接的那条最窄通道；否定性断言必须标注「在哪几个层面找过」。三轮真机故障（存储编码、模型白名单、归组臆想）与路线错误同源=MacBridge 重新推导官方已保证的事实。
+- 处置：SDK stdio 路线暂停、成果保留（收口全文见 `docs/2026-08-16-dsh-session-store-bridge-design完成情况.md` 收口节）；后续 dsh-web backend=官方 API 转发器+bridge-v1 翻译器，与现有 deepSeek backend 并行，先完成四项核实（prompt 续聊语义/mux 帧契约/托管启动形态/API 版本承诺）再出设计。
