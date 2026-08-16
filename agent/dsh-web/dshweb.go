@@ -60,6 +60,10 @@ type Agent struct {
 	refreshSignals chan struct{}
 	codecs         map[string]*sessionCodec
 
+	// approvals/question pending state (§8-4).
+	approvalsMu sync.Mutex
+	approvals   *approvalsState
+
 	bgCtx    context.Context
 	bgCancel context.CancelFunc
 

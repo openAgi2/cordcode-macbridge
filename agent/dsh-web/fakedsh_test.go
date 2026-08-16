@@ -191,6 +191,9 @@ func (f *fakeDSHServer) handleRespond(w http.ResponseWriter, r *http.Request) {
 	f.lastRespond.mu.Lock()
 	f.lastRespond.body = append([]byte(nil), body...)
 	f.lastRespond.mu.Unlock()
+	f.requests.mu.Lock()
+	f.requests.list = append(f.requests.list, recordedRequest{method: "/api/respond", payload: body})
+	f.requests.mu.Unlock()
 
 	var env struct {
 		Type   string        `json:"type"`
