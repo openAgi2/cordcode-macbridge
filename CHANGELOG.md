@@ -7,6 +7,8 @@
 版本号对齐 MacBridge Release 构建的 `MARKETING_VERSION`（见 `MacBridge/project.yml`）。日期为协调世界时（UTC）。
 
 ## [Unreleased]
+- **修复：DeepSeek Web 真机首测 live 流断裂（执行态卡住、切会话冷重建才见回复）**：根因是 iOS 在 live turn 期间冷拉投影时，pathless 历史重建产出落后基线（在飞 turn 未入 history 快照、turn 身份与 live 流不同源），fence 把 kernel 版本回退后 live 补丁身份脱节不渲染（并诱发重建循环）；另 web profile 的控制面事件（命令执行标记、标题生成请求）触发码器重置。修复：live/kernel 会话一律以 kernel 状态为投影基线（与旧 DeepSeek 收口同构），重建只服务首次打开与脱活会话；三类控制面事件入已知忽略清单。
+
 
 - **新功能：DeepSeek Web backend（dsh-web，官方 Web API 转发 + bridge-v1 翻译）**：MacBridge 新增 `deepseek-web` backend——探测复用用户自启的 `dsh web`（默认 127.0.0.1:3080），未命中时托管拉起 loopback 实例（3096–3196，随 Link 启动保活，凭据零记录）。所有数据格式转换在 MacBridge 端完成：官方 `session.list/history/prompt/cancel/rename/models/providers/selectModel` 映射为 bridge-v1 成熟格式，mux/host 双 WebSocket 流全量推送（用户在 Mac web 发起的外部 turn 在 iPhone 实时可见，无需轮询），web 新建会话/外部 turn 秒级同步到 iPhone 列表；审批/问答经既有权限 UI 应答（官方 ask 策略下不接会无限挂起——一期必接）；投影冷加载走 pathless 家族（官方 history 重建基线），旧 `deepseek` backend 完整保留。iOS 端为纯枚举增量（「DeepSeek Web」模式入口），零新渲染逻辑。
 
