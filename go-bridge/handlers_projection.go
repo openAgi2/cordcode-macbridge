@@ -451,6 +451,24 @@ func (h *Handlers) ensureProjectionHydrated(
 		}
 		// else: dead + store-backed → fall through to the pathless file hydrate.
 	}
+	if backendID == "dsh-web" {
+		// dsh-web 真机矩阵 2026-08-16（坑 4 同类；设计 §4.3.2 的「deepseek 分支
+		// 不进」假设被真机证伪）：iOS 在 live turn 期间冷拉（连接代际变化 /
+		// 发送后重同步，sinceRev=0）时，pathless 历史重建产出落后基线——在飞
+		// turn 未入 session.history cut，且重建的 turn 身份与 live 流不同源——
+		// fence 把 kernel 从 464 回退到 10，后续 live 补丁身份脱节 iOS 不渲染，
+		// 并诱发连续重建循环（16:07 四连 fence）。正确矩阵与 deepseek 收口同构：
+		// live/kernel 会话一律以 kernel 状态为基线（live-only admission：
+		// carried baseline + pendingLive，rev 连续、身份一致）；pathless 重建
+		// 只服务从未入 kernel 的会话（首次打开）与脱活会话的 forceCold。
+		// 与 deepseek 分支的区别：无 store 语义（会话服务端常驻，mux 即事件源）。
+		_, live := h.getSession(sessionID)
+		hasKernel := h.projectionKernel.HasReducerState(backendID, sessionID)
+		if live || (hasKernel && !forceColdInspection) {
+			return h.ensureLiveOnlyProjectionAdmission(backendID, sessionID)
+		}
+		// 脱活会话的 forceCold 或从未见过的会话：fall through 到 pathless 重建。
+	}
 	if !backendSupportsProjectionHydrate(backendID) {
 		return errProjectionBackendNotMigrated
 	}

@@ -177,3 +177,98 @@ func TestDSHWebProjectionTrailingUnansweredWaitsWhenActive(t *testing.T) {
 		t.Fatal("active trailing turn must NOT commit as ready")
 	}
 }
+
+// ── 真机矩阵修复回归（2026-08-16，坑 4 同类）───────────────────────────────
+
+// TestDSHWebColdPullDuringLiveTurnKeepsKernelBaseline：iOS 在 live turn 期间
+// 冷拉（sinceRev=0）必须服务 kernel 现有状态（live-only admission），不得
+// pathless 重建——重建的 history cut 落后于 live 流且 turn 身份不同源，fence
+// 回退 rev 后 live 补丁身份脱节（真机日志 16:05:31 rev 464→10 + 16:07 四连
+// fence 循环）。断言：拉取后 running turn 与 deltas 保留、headRev 不回退。
+func TestDSHWebColdPullDuringLiveTurnKeepsKernelBaseline(t *testing.T) {
+	h := newDshProjectionHandlers(t)
+	sessionID := "dshweb-live-race-1"
+
+	// Live turn 进行中：turn_started + 两条 delta，无终端（running）。
+	h.eventPublisher.PublishLogical(LogicalEvent{BackendID: "dsh-web", SessionID: sessionID, Event: "turn_started", Data: map[string]interface{}{"turnId": "dshw-t1"}})
+	h.eventPublisher.PublishLogical(LogicalEvent{BackendID: "dsh-web", SessionID: sessionID, Event: "text_delta", Data: map[string]interface{}{"itemId": "dshw-t1", "delta": "月亮"}})
+	h.eventPublisher.PublishLogical(LogicalEvent{BackendID: "dsh-web", SessionID: sessionID, Event: "text_delta", Data: map[string]interface{}{"itemId": "dshw-t1", "delta": "笑话"}})
+
+	prePullRev := h.eventPublisher.ProjectionTurnCount("dsh-web", sessionID)
+	if prePullRev == 0 {
+		t.Fatal("live events must have committed kernel state")
+	}
+
+	// 注册 live session（registry 命中=live 判据）+ 冷拉（forceColdInspection 路径）。
+	fakeSess := &fakeAgentSession{id: sessionID, events: make(chan core.Event)}
+	h.mu.Lock()
+	h.agents = map[string]core.Agent{"dsh-web": &fakeAgent{name: "dsh-web", richHistory: []core.RichHistoryEntry{
+		{ID: "stale-u", Role: "user", Content: "旧内容（重建基线不得采用）"},
+	}}}
+	h.putSession(sessionID, fakeSess)
+	h.mu.Unlock()
+
+	conn, _ := dshWebPull(h, sessionID, 0)
+	if conn.err != nil {
+		t.Fatalf("cold pull during live turn: %+v", conn.err)
+	}
+	proj := liveOnlyProjectionOf(t, conn)
+
+	// Running turn 必须保留且含已流式内容——不得被落后重建覆盖。
+	if proj.Execution.ActiveTurnID != "dshw-t1" {
+		t.Fatalf("active turn lost: execution=%+v", proj.Execution)
+	}
+	foundText := false
+	var runningStatus string
+	for _, turn := range proj.Turns {
+		if turn.TurnID == "dshw-t1" {
+			runningStatus = turn.Status
+			for _, p := range turn.Assistant.Parts {
+				if p.Type == "text" {
+					foundText = foundText || strings.Contains(p.Text, "月亮")
+				}
+			}
+		}
+	}
+	if runningStatus != "running" {
+		t.Fatalf("in-flight turn must stay running, got %q", runningStatus)
+	}
+	if !foundText {
+		t.Fatalf("live deltas lost after cold pull: %+v", proj.Turns)
+	}
+	// 无「旧内容」污染：重建基线不得被采用。
+	raw, _ := json.Marshal(proj)
+	if strings.Contains(string(raw), "旧内容（重建基线不得采用）") {
+		t.Fatal("pathless rebuild must NOT replace kernel state during a live turn")
+	}
+}
+
+// 脱活会话 + forceCold 仍走重建（dsh web 增长可见 / 断线窗口补齐），确认
+// 修复没有把重建路径整体堵死。
+func TestDSHWebDeadSessionForceColdStillRebuilds(t *testing.T) {
+	h := newDshProjectionHandlers(t)
+	sessionID := "dshweb-dead-rebuild-1"
+	agent := &fakeAgent{
+		name: "dsh-web",
+		richHistory: []core.RichHistoryEntry{
+			{ID: "u1", Role: "user", Content: "已完成的旧 turn"},
+			{ID: "a1", Role: "assistant", Content: "回复", Parts: []map[string]any{{"type": "text", "content": "回复"}}},
+		},
+	}
+	h.mu.Lock()
+	h.agents = map[string]core.Agent{"dsh-web": agent}
+	h.mu.Unlock()
+
+	// 首次冷拉（无 kernel 状态、无 live）→ pathless 重建。
+	conn, _ := dshWebPull(h, sessionID, 0)
+	if conn.err != nil {
+		t.Fatalf("first-open rebuild: %+v", conn.err)
+	}
+	raw, _ := json.Marshal(conn.data)
+	if !strings.Contains(string(raw), "已完成的旧 turn") {
+		t.Fatalf("first-open rebuild content missing: %s", string(raw))
+	}
+	if st := h.projectionKernel.Status("dsh-web", sessionID); st.Phase != ProjectionHydrateReady {
+		t.Fatalf("kernel phase = %q, want ready", st.Phase)
+	}
+}

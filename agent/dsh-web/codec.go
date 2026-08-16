@@ -217,7 +217,13 @@ func (c *sessionCodec) apply(env *sessionEventWire) ([]core.Event, error) {
 		return c.applyRequestContext(env)
 
 	// Class ②: known control-plane events with no timeline effect.
-	case "permission/preset", "sandbox/mode", "approval/policy", "agent/inbox/spliced", "session/title":
+	// command/run + command/done（斜杠命令执行标记）与
+	// session/title-llm-request（标题生成的辅助 LLM 调用记录；标题本体经
+	// session/title 事件与标题投影落地）在官方 known-event-types.ts 注册表
+	// 中，且 2026-08-16 真机矩阵证实无 timeline 内容——此前两版因未知类型
+	// 重置杀了码器状态（双 turn_started、身份断裂）。
+	case "permission/preset", "sandbox/mode", "approval/policy", "agent/inbox/spliced", "session/title",
+		"command/run", "command/done", "session/title-llm-request":
 		return nil, nil
 
 	default:

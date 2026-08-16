@@ -358,3 +358,52 @@ func TestIsSessionActiveThreeStates(t *testing.T) {
 		t.Fatal("unknown-after-refresh must stay conservative ACTIVE")
 	}
 }
+
+// ── 真机矩阵修复回归（2026-08-16）──────────────────────────────────────────
+
+// TestCodecKnownControlPlaneTypesDoNotReset：真机日志证实 command/run、
+// command/done、session/title-llm-request（官方 known-event-types 注册表）
+// 会出现在 web profile 的 mux 流中；此前类③策略对它们重置码器，杀了 mid-turn
+// 状态（双 turn_started、身份断裂）。三者无 timeline 内容，必须类②忽略。
+func TestCodecKnownControlPlaneTypesDoNotReset(t *testing.T) {
+	c := newSessionCodec("sess-cp")
+	events := collect(t, c, []sessionEventWire{
+		env("turn/start", 0, map[string]any{"turn": 1}),
+		env("command/run", 1, map[string]any{"id": "c1"}),
+		env("command/done", 2, map[string]any{"id": "c1"}),
+		env("session/title-llm-request", 3, map[string]any{"titleProvider": "llm"}),
+		env("step/start", 4, map[string]any{"turn": 1, "step": 1}),
+		env("assistant/chunk", 5, map[string]any{"turn": 1, "step": 1, "chunk": map[string]any{
+			"type": "block-start", "index": 0, "blockType": "text",
+		}}),
+		env("assistant/chunk", 6, map[string]any{"turn": 1, "step": 1, "chunk": map[string]any{
+			"type": "text-delta", "index": 0, "text": "命令后仍可流式",
+		}}),
+		env("assistant/chunk", 7, map[string]any{"turn": 1, "step": 1, "chunk": map[string]any{
+			"type": "block-end", "index": 0, "block": map[string]any{"type": "text", "text": "命令后仍可流式"},
+		}}),
+		env("step/end", 8, map[string]any{"turn": 1, "step": 1}),
+		env("turn/end", 9, map[string]any{"turn": 1, "reason": map[string]any{"kind": "completed"}}),
+	})
+	// 恰一个 turn_started（无重置产生的第二个）+ delta 保留 + 干净收口。
+	var turnStarted, textDeltas, terminal int
+	for _, ev := range events {
+		switch ev.Type {
+		case core.EventTurnStarted:
+			turnStarted++
+		case core.EventText:
+			textDeltas++
+		case core.EventResult:
+			terminal++
+		}
+	}
+	if turnStarted != 1 {
+		t.Fatalf("control-plane types must not reset the codec: %d turn_started (want 1)", turnStarted)
+	}
+	if textDeltas != 1 {
+		t.Fatalf("delta after control-plane types: %d", textDeltas)
+	}
+	if terminal != 1 {
+		t.Fatalf("clean terminal: %d", terminal)
+	}
+}
