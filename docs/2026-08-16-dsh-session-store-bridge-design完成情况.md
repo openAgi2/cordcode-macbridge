@@ -40,6 +40,14 @@ owner 两点已实现并全部本地验证：iOS DeepSeek 模式现在显示**�
 
 **已知边界（如实）**：① 死会话续聊 SDK 封死（诚实错误+协议入册），待官方 resume 后升级；② dsh web 正在跑的会话 v1 无实时 tail——iOS 下拉刷新触发全量重建可见增量；③ 全量 CCCodeTests 套件在 85 分钟后 0% CPU 挂起（既有隐患、非本次改动面——改动类 115/115 通过），建议另行立项排查；④ 列表 MessageCount 恒 0（标题扫描预算内不做全量计数，诚实置空）。
 
+## 真机修复轮（2026-08-16 owner 复测反馈）
+
+owner 复测：列表/历史/跨端同步 ✅（含 Mac 新建目录及时同步）；死会话续聊被诚实拒绝（设计内，SDK 0.1.0-rc.6 无跨进程 resume）。**缺陷**：iOS 新建会话发送后长时间「执行中」无回复、Mac web 看不到该会话。
+
+根因（日志 + 裸探针双重取证）：`624c6a4` 将 `DSH_SESSION_ROOT` 指向用户 store 后，web 写入的 zstd 工件与 driver `compression: none` 冲突——harness `checkRootEncoding` 扫整个 root，materialize 时抛 `…uses .jsonl.zstd, but this backend is configured for compression "none"`（真机日志：turn_started 后 1ms turn_error）。私有目录时代 root 为空纯明文故未暴露。
+
+修复（`c522e73`）：cordis.yml `compression: zstd`（与 web 默认一致；读侧双后缀本就兼容）。验证：`DSH_TURN_REPRO` 真实 spawn 复现测试——修复前探针捕获 encodingMismatch 原文，修复后编码错误消失、turn 到达 LLM 层（mock key 401 预期终态）、会话成功物化进 store；`agent/dsh` 全套回归绿；Release 重装核对（8777=/Applications runtime、route② 探测正常）。
+
 ## 验收（owner 真机，替代原矩阵）
 
 | # | 动作 | 应看到 |

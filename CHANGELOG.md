@@ -8,6 +8,8 @@
 
 ## [Unreleased]
 
+- **修复：iOS 新建的 DeepSeek 会话发送后立即失败（执行中无回复、Mac 端 dsh web 看不到）**：driver 的会话存储编码（明文）与 dsh web 写入用户 store 的 zstd 工件冲突——harness 在物化会话时拒绝混用编码的存储根。driver 改用与 web 一致的 zstd，新建会话正常写入 `~/.dsh/sessions`（Mac/手机双向可见恢复）。
+
 - **新功能：iOS 端 DeepSeek 会话列表与历史（store 桥接）**：Mac 读取用户自己的 `~/.dsh/sessions`（dsh web 与手机自建的会话同列，明文与 zstd 双格式、标题取自 harness 的 session/title 事件）——iPhone 上 DeepSeek 模式现在有完整会话列表；点开任意已结束会话可查看完整历史（含思考过程与工具调用），file-backed 投影冷加载。已结束会话内发消息得到诚实提示（当前 DSH SDK 不支持跨进程续聊，可发起新会话），绝不覆写磁盘会话。
 
 - **改进：CordCode 起的 DeepSeek 会话写入用户 harness 默认存储（双向接力前半）**：`DSH_SESSION_ROOT` 从 MacBridge 私有目录改为 `$DSH_HOME/sessions`（默认 `~/.dsh/sessions`）——手机上发起的 DeepSeek 会话直接出现在 Mac 端 `dsh web` 的会话列表里、可在 Mac 端续聊。不再造隔离的私有 session 目录；仅 HOME 解析失败时防御性回退。
