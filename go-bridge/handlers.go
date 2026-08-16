@@ -1515,6 +1515,27 @@ func (h *Handlers) handleListProjects(conn Connection, msg WireMessage, agent co
 	// Previously only grokbuild was excluded; Codex still scanned Claude folders → iOS
 	// sidebar seeded dozens of empty "暂无会话" groups under Codex mode.
 	if !shouldListClaudeProjects(agent) {
+		// Backends owning a workspace registry (dsh-web → official
+		// workspace.list) serve their own quick-pick suggestions; the rest
+		// return empty and iOS falls back to session.directory grouping plus
+		// its local directory service (dsh-web design §4.3.7).
+		if lister, ok := agent.(core.ProjectLister); ok {
+			suggestions, err := lister.ListProjectSuggestions(h.ctx)
+			if err != nil {
+				conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
+				return
+			}
+			projects := make([]map[string]interface{}, 0, len(suggestions))
+			for _, s := range suggestions {
+				projects = append(projects, map[string]interface{}{
+					"id":        s.ID,
+					"directory": s.Directory,
+					"name":      s.Name,
+				})
+			}
+			conn.SendResult(msg.RequestID, map[string]interface{}{"projects": projects}, nil)
+			return
+		}
 		conn.SendResult(msg.RequestID, map[string]interface{}{"projects": []interface{}{}}, nil)
 		return
 	}

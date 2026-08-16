@@ -581,3 +581,47 @@ func TestRunDiagnosticsFailsVisiblyWithoutInstance(t *testing.T) {
 		t.Fatalf("expected unhealthy: %+v", report.Results)
 	}
 }
+
+// ── list_projects (§4.3.7) ──────────────────────────────────────────────────
+
+func TestListProjectSuggestionsFromWorkspaceList(t *testing.T) {
+	f := newFakeDSHServer(t)
+	defer f.Close()
+	a := newTestAgent(t, f)
+	f.handlers["workspace.list"] = fakeRPCResponse{value: map[string]any{
+		"items": []map[string]any{
+			{"workspaceId": "w1", "path": "/Users/x/proj", "title": "我的项目", "sessionIds": []string{"s1"}, "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-02T00:00:00Z"},
+			{"workspaceId": "w2", "path": "/Users/x/other", "title": "", "sessionIds": []string{}, "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"},
+		},
+		"archivedSessionIds": []string{},
+	}}
+	suggestions, err := a.ListProjectSuggestions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(suggestions) != 2 {
+		t.Fatalf("suggestions: %+v", suggestions)
+	}
+	if suggestions[0].ID != "w1" || suggestions[0].Directory != "/Users/x/proj" || suggestions[0].Name != "我的项目" {
+		t.Fatalf("named workspace: %+v", suggestions[0])
+	}
+	if suggestions[1].Name != "other" {
+		t.Fatalf("title-less workspace falls back to path base: %+v", suggestions[1])
+	}
+}
+
+func TestListProjectSuggestionsEmptyRegistry(t *testing.T) {
+	f := newFakeDSHServer(t)
+	defer f.Close()
+	a := newTestAgent(t, f)
+	f.handlers["workspace.list"] = fakeRPCResponse{value: map[string]any{
+		"items": []map[string]any{}, "archivedSessionIds": []string{},
+	}}
+	suggestions, err := a.ListProjectSuggestions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(suggestions) != 0 {
+		t.Fatalf("empty registry must return empty (iOS local fallback): %+v", suggestions)
+	}
+}

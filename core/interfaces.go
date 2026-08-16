@@ -649,6 +649,23 @@ type CatalogRefreshSignaler interface {
 	CatalogRefreshSignals() <-chan struct{}
 }
 
+// ProjectSuggestion is one quick-pick directory suggestion for the iOS
+// directory chooser, served by a ProjectLister backend.
+type ProjectSuggestion struct {
+	ID        string
+	Directory string
+	Name      string
+}
+
+// ProjectLister is an optional interface for backends that own a workspace/
+// project registry (e.g. dsh-web's official workspace.list) and can serve
+// directory suggestions for list_projects. Backends without it keep the
+// generic behavior: iOS derives groups from session.directory and falls back
+// to its local directory service.
+type ProjectLister interface {
+	ListProjectSuggestions(ctx context.Context) ([]ProjectSuggestion, error)
+}
+
 // SessionEventSubscriber is the per-session counterpart: agents that expose ONE
 // session's live events via a subscribe channel (e.g. Grok leader-socket: a
 // read-only subscriber attaches per sessionID). Used by MacBridge's per-session
