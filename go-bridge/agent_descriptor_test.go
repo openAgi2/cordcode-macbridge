@@ -751,7 +751,7 @@ func TestManagementAPI_DisplayName_AuthRequired(t *testing.T) {
 // ── detectAgentStatus tests (P3-1) ──────────────────────────────────────────
 
 func TestDetectAgentStatus_UnknownID(t *testing.T) {
-	status, reason := detectAgentStatus("nonexistent", "exec", nil)
+	status, reason := detectAgentStatus("nonexistent", nil, "exec", nil)
 	if status != AgentStatusAvailable {
 		t.Errorf("unknown agent status = %q, want available (passthrough)", status)
 	}
@@ -780,7 +780,7 @@ func TestDetectOpenCodeService_NotRunning(t *testing.T) {
 
 // T05: 未配置 OpenCode URL 时返回 not_configured，绝不隐式 dial 64667。
 func TestDetectAgentStatus_OpenCodeNotConfiguredWhenCfgNil(t *testing.T) {
-	status, reason := detectAgentStatus("opencode", "", nil)
+	status, reason := detectAgentStatus("opencode", nil, "", nil)
 	if status != AgentStatusNotConfigured {
 		t.Fatalf("status = %q, want not_configured (must not dial 64667)", status)
 	}
@@ -790,7 +790,7 @@ func TestDetectAgentStatus_OpenCodeNotConfiguredWhenCfgNil(t *testing.T) {
 }
 
 func TestDetectAgentStatus_OpenCodeNotConfiguredWhenURLEmpty(t *testing.T) {
-	status, _ := detectAgentStatus("opencode", "", &AgentDetectionConfig{
+	status, _ := detectAgentStatus("opencode", nil, "", &AgentDetectionConfig{
 		OpenCodeURL: "",
 	})
 	if status != AgentStatusNotConfigured {
@@ -801,7 +801,7 @@ func TestDetectAgentStatus_OpenCodeNotConfiguredWhenURLEmpty(t *testing.T) {
 func TestDetectAgentStatus_OpenCodeDialsConfiguredURL(t *testing.T) {
 	// 配置了 loopback URL（external_http / legacy_64667）时才探测；空端口必然连不上，
 	// 落到 service_not_running / not_detected，证明它确实在尝试配置的 URL 而非 64667。
-	status, _ := detectAgentStatus("opencode", "", &AgentDetectionConfig{
+	status, _ := detectAgentStatus("opencode", nil, "", &AgentDetectionConfig{
 		OpenCodeURL: "http://127.0.0.1:1",
 	})
 	if status == AgentStatusNotConfigured {

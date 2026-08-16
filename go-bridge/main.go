@@ -21,6 +21,7 @@ import (
 	_ "github.com/openAgi2/cordcode-macbridge/agent/claudecode"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/codex"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/dsh"
+	_ "github.com/openAgi2/cordcode-macbridge/agent/dsh-web"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/grokbuild"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/opencode"
 
@@ -149,6 +150,7 @@ func Main() {
 			codexBackend:      *codexBackend,
 			codexAppServerURL: *codexAppServerURL,
 			pinStore:          pinStore,
+			dataDir:           *dataDirPath,
 		})
 
 		agent, err := core.CreateAgent(agentName, agentOpts)
@@ -793,6 +795,7 @@ type agentOptionsConfig struct {
 	codexBackend      string
 	codexAppServerURL string
 	pinStore          *pinstore.Store
+	dataDir           string
 }
 
 func buildAgentOptions(id string, cfg agentOptionsConfig) map[string]any {
@@ -803,6 +806,7 @@ func buildAgentOptions(id string, cfg agentOptionsConfig) map[string]any {
 		"opencode_user": cfg.openCodeUser,
 		"opencode_pass": cfg.openCodePass,
 		"pin_store":     cfg.pinStore,
+		"data_dir":      cfg.dataDir,
 	}
 
 	if id == "codex" {

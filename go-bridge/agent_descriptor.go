@@ -147,7 +147,7 @@ func resolveLiveEvents(id string, agent core.Agent, codexBackendMode string, cfg
 // 通过 detectAgentStatus 检测实际可用性状态，替代硬编码 AgentStatusAvailable。
 // cfg 为 nil 时使用默认检测地址。
 func BuildAgentDescriptor(id string, agent core.Agent, codexBackendMode string, cfg *AgentDetectionConfig) AgentProviderDescriptor {
-	status, reason := detectAgentStatus(id, codexBackendMode, cfg)
+	status, reason := detectAgentStatus(id, agent, codexBackendMode, cfg)
 	kind, displayName := resolveDescriptorNames(id, agent)
 	return AgentProviderDescriptor{
 		ID:                              id,
@@ -185,9 +185,16 @@ type AgentDetectionConfig struct {
 	CodexAppServerURL string // Optional shared Codex app-server WebSocket URL.
 }
 
+// instanceStatusProber is implemented by drivers whose availability is the
+// state of a resolved external/managed service instance (dsh-web). Detection
+// only mirrors that state — it never resolves or spawns.
+type instanceStatusProber interface {
+	InstanceStatus() (available bool, detail string)
+}
+
 // detectAgentStatus 检测单个 agent 的可用性状态。
 // 所有检测设置超时，避免阻塞 go-bridge 启动。
-func detectAgentStatus(id string, codexBackendMode string, cfg *AgentDetectionConfig) (AgentStatus, string) {
+func detectAgentStatus(id string, agent core.Agent, codexBackendMode string, cfg *AgentDetectionConfig) (AgentStatus, string) {
 	switch id {
 	case "claude":
 		return detectClaudeCLI()
@@ -215,9 +222,26 @@ func detectAgentStatus(id string, codexBackendMode string, cfg *AgentDetectionCo
 		return detectGrokCLI()
 	case "deepseek":
 		return detectDSHRuntime()
+	case "dsh-web":
+		return detectDSHWebInstance(agent)
 	default:
 		return AgentStatusAvailable, ""
 	}
+}
+
+// detectDSHWebInstance mirrors the dsh-web driver's resolved-instance state
+// (external probe hit / managed spawn / both failed). Detection itself never
+// probes or spawns — the driver's startup background resolution owns that.
+func detectDSHWebInstance(agent core.Agent) (AgentStatus, string) {
+	prober, ok := agent.(instanceStatusProber)
+	if !ok {
+		return AgentStatusNotConfigured, "dsh-web driver does not expose instance status"
+	}
+	available, detail := prober.InstanceStatus()
+	if available {
+		return AgentStatusAvailable, detail
+	}
+	return AgentStatusNotConfigured, detail
 }
 
 // detectDSHRuntime 检测 DeepSeek Harness runtime 可用性。与 driver 共用
