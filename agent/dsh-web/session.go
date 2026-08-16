@@ -1,0 +1,212 @@
+package dshweb
+
+// dshSession implements core.AgentSession for one official dsh web session.
+// Unlike the stdio route there is NO child process per session: the session
+// object is a thin binding (official session id + resolved instance client);
+// live events arrive through the agent-level mux stream (§8-3) and
+// approvals/questions through the §8-4 responders.
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"sync/atomic"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
+)
+
+var _ core.AgentSession = (*dshSession)(nil)
+var _ core.TurnCanceler = (*dshSession)(nil)
+
+type dshSession struct {
+	agent   *Agent
+	client  *Client
+	events  chan core.Event
+	ctx     context.Context
+	cancel  context.CancelFunc
+	closed  atomic.Bool
+	idValue atomic.Value // string
+}
+
+// StartSession binds or creates one official session (design §4.3.4/§4.3.6):
+//
+//   - sessionID == "" → session.create{cwd} (cwd = iOS-selected directory via
+//     create_session's switchDir; cwd hitting a registered workspace
+//     auto-groups there — the official create flow owns workspace attach).
+//   - sessionID != "" → bind the existing session (official resume semantics;
+//     no guard, no session_resume_not_supported — §3.1), verified by a light
+//     history probe so an unknown id fails visibly with the official
+//     session-not-found text.
+func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentSession, error) {
+	client, err := a.clientFor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s := &dshSession{
+		agent:  a,
+		client: client,
+		events: make(chan core.Event, 64),
+	}
+	s.ctx, s.cancel = context.WithCancel(ctx)
+
+	if sessionID == "" {
+		created, err := s.create(ctx)
+		if err != nil {
+			s.cancel()
+			return nil, err
+		}
+		s.idValue.Store(created)
+	} else {
+		// Light existence probe: history on an unknown id returns the official
+		// session-not-found RpcError — surfaced verbatim (坑 7).
+		max := 1
+		probe := sessionHistoryRequest{SessionID: sessionID, MaxMessages: &max}
+		if err := client.Call(ctx, "session.history", probe, nil); err != nil {
+			s.cancel()
+			return nil, err
+		}
+		s.idValue.Store(sessionID)
+	}
+	a.noteActiveSession(s.CurrentSessionID())
+	a.bindings.put(s.CurrentSessionID(), s)
+	return s, nil
+}
+
+// create performs session.create{cwd} and applies any pending model
+// selection (bridge-level switch_model before the first session — the only
+// official surface is session-scoped selectModel, applied right after create).
+func (s *dshSession) create(ctx context.Context) (string, error) {
+	var val sessionCreateValue
+	req := sessionCreateRequest{Cwd: s.agent.GetWorkDir()}
+	if err := s.client.Call(ctx, "session.create", req, &val); err != nil {
+		return "", err
+	}
+	if val.SessionID == "" {
+		return "", fmt.Errorf("dshweb: session.create returned empty sessionId")
+	}
+	s.agent.applyPendingModelSelection(ctx, s.client, val.SessionID)
+	return val.SessionID, nil
+}
+
+func (s *dshSession) CurrentSessionID() string {
+	id, _ := s.idValue.Load().(string)
+	return id
+}
+
+// Send queues one user turn: session.prompt{mode:"queue"} with a single text
+// part (phase 1 is text-only — images ride session.attachment in phase 2;
+// the bridge's attachment gate already rejects them pre-StartSession since
+// this driver does not declare AttachmentSupporter).
+//
+// Turn events (turn/start…turn/end) arrive on Events() via the mux stream
+// (§8-3). Send failures return the official RpcError text verbatim — the
+// iOS send-error bubble shows the real cause (fail visibly, 坑 8).
+func (s *dshSession) Send(prompt string, images []core.ImageAttachment, files []core.FileAttachment) error {
+	if len(images) > 0 || len(files) > 0 {
+		return fmt.Errorf("dsh-web: attachments are not supported in phase 1 (text-only)")
+	}
+	if s.closed.Load() {
+		return fmt.Errorf("dsh-web: session closed")
+	}
+	req := sessionPromptRequest{
+		SessionID: s.CurrentSessionID(),
+		Mode:      "queue",
+		Content:   []promptContentPart{{Type: "text", Text: prompt}},
+	}
+	return s.client.Call(s.ctx, "session.prompt", req, nil)
+}
+
+// CancelTurn maps abort_generation onto session.cancel.
+func (s *dshSession) CancelTurn(ctx context.Context) error {
+	return s.client.Call(ctx, "session.cancel", sessionCancelRequest{SessionID: s.CurrentSessionID()}, nil)
+}
+
+func (s *dshSession) Events() <-chan core.Event { return s.events }
+
+// Alive: the session binding is alive until Close. The dsh web service owns
+// the real runtime; there is no local process to monitor.
+func (s *dshSession) Alive() bool { return !s.closed.Load() }
+
+func (s *dshSession) Close() error {
+	if s.closed.Swap(true) {
+		return nil
+	}
+	if id := s.CurrentSessionID(); id != "" {
+		s.agent.bindings.drop(id)
+	}
+	s.cancel()
+	// Drain/stop the events channel: §8-3's mux pump selects on ctx.
+	return nil
+}
+
+// emit posts one event to the session channel (used by the §8-3 mux pump).
+// Drops (never blocks) when no consumer keeps up — live deltas are
+// lossy-tolerant, and the projection forceCold path re-syncs from history.
+func (s *dshSession) emit(ev core.Event) {
+	if s.closed.Load() {
+		return
+	}
+	if ev.SessionID == "" {
+		ev.SessionID = s.CurrentSessionID()
+	}
+	select {
+	case s.events <- ev:
+	default:
+	}
+}
+
+// RespondPermission answers an approval request (§8-4 wires the pending
+// registry; until then the request id is unknown and the error is honest).
+func (s *dshSession) RespondPermission(requestID string, result core.PermissionResult) error {
+	return s.agent.respondApproval(s.ctx, s.CurrentSessionID(), requestID, result)
+}
+
+// RespondQuestion answers one question of an ask batch (§8-4: per-question
+// ids accumulate; the batch answers once via /api/respond when complete).
+func (s *dshSession) RespondQuestion(questionID string, optionIDs []string) error {
+	return s.agent.respondQuestion(s.ctx, s.CurrentSessionID(), questionID, optionIDs, "")
+}
+
+// RejectQuestion rejects: any rejected question cancels the WHOLE batch
+// (error branch `cancelled` — asymmetric with approvals by design, §4.3.4).
+func (s *dshSession) RejectQuestion(questionID string) error {
+	return s.agent.rejectQuestion(s.ctx, s.CurrentSessionID(), questionID)
+}
+
+// sessionBindings tracks live session objects for the §8-4 surface rule
+// (bridge registry hit = the surface criterion) and §8-3 routing.
+type sessionBindings struct {
+	mu       sync.RWMutex
+	sessions map[string]*dshSession
+}
+
+func (sb *sessionBindings) put(id string, s *dshSession) {
+	sb.mu.Lock()
+	if sb.sessions == nil {
+		sb.sessions = map[string]*dshSession{}
+	}
+	sb.sessions[id] = s
+	sb.mu.Unlock()
+}
+
+func (sb *sessionBindings) drop(id string) {
+	sb.mu.Lock()
+	delete(sb.sessions, id)
+	sb.mu.Unlock()
+}
+
+func (sb *sessionBindings) get(id string) (*dshSession, bool) {
+	sb.mu.RLock()
+	defer sb.mu.RUnlock()
+	s, ok := sb.sessions[id]
+	return s, ok
+}
+
+// noteActiveSession records the most recently started session id — the
+// target for a bridge-level switch_model (no official backend-global write
+// surface; session.selectModel is session-scoped, design §4.3.5).
+func (a *Agent) noteActiveSession(id string) {
+	a.mu.Lock()
+	a.lastActiveSessionID = id
+	a.mu.Unlock()
+}

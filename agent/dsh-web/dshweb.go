@@ -37,6 +37,21 @@ type Agent struct {
 	// design §4.3.1 ♻️; summary enrichment stays in go-bridge handlers).
 	pinStore *pinstore.Store
 
+	// running caches the last session.list running flags (§4.3.1 enrich;
+	// §8-3's host/session-status frames keep it fresh).
+	running runningCache
+	// bindings tracks live session objects (§8-4 surface rule + §8-3 routing).
+	bindings sessionBindings
+
+	// lastActiveSessionID is the most recent StartSession target — the
+	// bridge-level switch_model surface (§4.3.5: no official global write;
+	// session.selectModel is session-scoped).
+	lastActiveSessionID string
+	// pendingSel is the recorded provider/model/effort selection.
+	pendingSel selection
+	// catalog is the last runtime-fetched provider/model catalog.
+	catalog *modelCatalog
+
 	bgCtx    context.Context
 	bgCancel context.CancelFunc
 
@@ -137,12 +152,31 @@ func (a *Agent) InstanceStatus() (available bool, detail string) {
 	return false, "dsh web instance not resolved yet (probe/managed spawn in flight)"
 }
 
-// StartSession is not wired until the §8-2 RPC mapping lands.
-func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentSession, error) {
-	return nil, fmt.Errorf("dsh-web: session RPC mapping not implemented yet (design §8-2)")
+// WorkDirSwitcher: create_session's directory parameter lands via switchDir
+// before StartSession, so the agent-level work dir is the next create's cwd.
+
+func (a *Agent) SetWorkDir(dir string) {
+	a.mu.Lock()
+	a.workDir = dir
+	a.mu.Unlock()
 }
 
-// ListSessions is not wired until the §8-2 RPC mapping lands.
-func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, error) {
-	return nil, fmt.Errorf("dsh-web: session RPC mapping not implemented yet (design §8-2)")
+func (a *Agent) GetWorkDir() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.workDir
 }
+
+var _ core.WorkDirSwitcher = (*Agent)(nil)
+
+// GetRichSessionHistory implements core.RichHistoryProvider (§4.3.2:
+// pathless cold-hydrate data source = session.history).
+func (a *Agent) GetRichSessionHistory(ctx context.Context, sessionID string, limit int) ([]core.RichHistoryEntry, error) {
+	client, err := a.clientFor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return a.getRichHistory(ctx, client, sessionID, limit)
+}
+
+var _ core.RichHistoryProvider = (*Agent)(nil)

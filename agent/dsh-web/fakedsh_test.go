@@ -44,6 +44,9 @@ type fakeDSHServer struct {
 	t        testingT
 	server   *httptest.Server
 	handlers map[string]fakeRPCResponse
+	// hooks, when set for a method, take precedence over handlers and see the
+	// raw payload (pagination / create-id sequencing tests).
+	hooks map[string]func(payload []byte) fakeRPCResponse
 
 	// lastRequest records the most recent unary request envelope.
 	lastRequest struct {
@@ -51,6 +54,12 @@ type fakeDSHServer struct {
 		method  string
 		rpcID   string
 		payload json.RawMessage
+	}
+
+	// requests records every unary request seen, in order.
+	requests struct {
+		mu   sync.Mutex
+		list []recordedRequest
 	}
 
 	// lastRespond records the most recent /api/respond body.
@@ -70,6 +79,12 @@ type fakeDSHServer struct {
 	mu sync.Mutex
 }
 
+// recordedRequest is one captured unary call.
+type recordedRequest struct {
+	method  string
+	payload []byte
+}
+
 // testingT is the subset of testing.T the fake needs (keeps it usable from
 // package tests without importing testing in non-test builds).
 type testingT interface {
@@ -81,6 +96,7 @@ func newFakeDSHServer(t testingT) *fakeDSHServer {
 	f := &fakeDSHServer{
 		t:           t,
 		handlers:    map[string]fakeRPCResponse{},
+		hooks:       map[string]func(payload []byte) fakeRPCResponse{},
 		upgradeSeen: map[string]int{},
 	}
 	mux := http.NewServeMux()
@@ -140,7 +156,19 @@ func (f *fakeDSHServer) handleAPI(w http.ResponseWriter, r *http.Request) {
 	f.lastRequest.rpcID = env.RPCID
 	f.lastRequest.payload = env.Payload
 	f.lastRequest.mu.Unlock()
+	f.requests.mu.Lock()
+	f.requests.list = append(f.requests.list, recordedRequest{method: env.Method, payload: env.Payload})
+	f.requests.mu.Unlock()
 
+	if hook, ok := f.hooks[env.Method]; ok {
+		scripted := hook(env.Payload)
+		if scripted.err != nil {
+			writeServerResponse(w, env.RPCID, rpcResultBody{OK: false, Error: scripted.err})
+			return
+		}
+		writeServerResponse(w, env.RPCID, rpcResultBody{OK: true, Value: mustJSON(scripted.value)})
+		return
+	}
 	scripted, ok := f.handlers[method]
 	if !ok {
 		// Unknown-but-valid path: mirror the real registry's 404 for methods
