@@ -1,7 +1,7 @@
 # dsh-web Backend 设计（官方 Web API 转发 + bridge-v1 翻译）
 
-- 日期：2026-08-16（v2：按评审 `docs/2026-08-16-dsh-web-backend-design-review.md` 修订——B1 载波更正为 WebSocket、M1-M4 必改全收、S1-S14 建议逐条处置，见文末「评审采纳记录」）
-- 状态：**设计稿 v2，评审已通过（修改后通过→已修改），待 owner 终审**（批准后才实施）
+- 日期：2026-08-16（v2：一轮评审 B1/M1-M4/S1-S14；v3：二轮评审 APPROVE + R2-1…R2-6 尾项全采纳，见文末「评审采纳记录」）
+- 状态：**设计稿 v3，两轮评审通过（r2 APPROVE），待 owner 终审**（批准后实施）
 - 背景：SDK stdio 路线收口暂停（`docs/2026-08-16-dsh-session-store-bridge-design完成情况.md` 收口节）；owner 裁决并行新增本 backend，旧 `deepSeek` 保留不删。
 - 不变约束：CordCode 初衷（探测-复用-未启动、零迁移、双向接力、永不自托管）+ SSV2 十二条护栏。
 
@@ -123,9 +123,9 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
   | 接线点 | 处置 |
   |---|---|
   | `backendSupportsProjectionHydrate`（handlers_projection.go:337） | 加入 `deepseek-web`（pathless 家族） |
-  | `prepareProjectionHydrateSource` pathless 分支（:468/:629） | 加入（agentName=`dsh-web`） |
+  | `prepareProjectionHydrateSource` pathless 分支（:534 起，条件在 :629） | 加入（agentName=`dsh-web`） |
   | `produceProjectionHydrateRange` guard+case（:1003/:1059） | 加入 |
-  | 两处 forceCold 集合（handleGetSessionProjection ~:111 + sourceChanged 集） | 加入 |
+  | 两处 forceCold 集合（handleGetSessionProjection ~:111 + `ensureProjectionHydrated` ~:418 起 sourceChanged 判定） | 加入 |
   | deepseek 专属 store-file/live-only 分支（:432/:548） | **不进** |
   | `backendHasNoExternalEventSource` 剪枝（handlers.go:1039） | **不进**（mux 即外部事件源） |
   | `agent_descriptor.go:216`/`main.go:131`/`server.go:282` | 注册与 SSV2 能力广告 |
@@ -148,8 +148,10 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
 - steer 插话转向 2️⃣ `mode:"steer"`（一期 queue）。
 - 附件/图片 2️⃣：官方 `session.attachment` + `imageLimits` 投影已核实；一期 descriptor `StaticCapabilities` 声明 text-only（既有两级附件校验照走）。
 - `abort_generation` ✅ `session.cancel{sessionId}`。
-- **审批/问答 = 一期必接（评审 M2 升格，非决定项）**：活体证实默认 `approval/policy="ask"`——不接则 iOS 发起的 turn 在首个需审批工具处**无限挂起**（无终态无错误），直接违反 fail-visibly 红线（坑 8 类别）；旧路线靠自组 cordis.yml 权限栈规避，本路线会话由官方 preset 组装，无此规避。映射：`approval/requested` → 既有 permission 请求事件（iOS 权限 UI 已有）；`question/requested`（含 options/multiSelect/plan-review intent）→ **既有 question 事件面**（`question_reply`/`question_reject` 承接；`resolve_user_input` 不用于 dsh-web 一期）；应答统一 `POST /api/respond` 回显帧信封 rpcId。**先答者得**语义如实：web 端若先应答，bridge 收 `approval/resolved` 帧关闭请求（评审 S4）。
-- **外部会话的审批帧路由（评审 S4）**：mux 为 agent 级持有，外部（web 发起）会话的 approval/question 帧同样到达；处置=只为 **iOS 已订阅/打开**的会话（bridge registry 有会话对象，`h.getSession()` 命中）surface 权限 UI，未订阅会话的帧不进权限面（web 自己的 UI 在应答）——与「谁在看谁应答」的产品语义一致，避免为全量外部会话注册代理对象。
+- **审批/问答 = 一期必接（评审 M2 升格，非决定项）**：活体证实默认 `approval/policy="ask"`——不接则 iOS 发起的 turn 在首个需审批工具处**无限挂起**（无终态无错误），直接违反 fail-visibly 红线（坑 8 类别）；旧路线靠自组 cordis.yml 权限栈规避，本路线会话由官方 preset 组装，无此规避。映射：`approval/requested` → 既有 permission 请求事件（iOS 权限 UI 已有）；`question/requested`（含 options/multiSelect/plan-review intent）→ **既有 question 事件面**（`question_reply`/`question_reject` 承接；`resolve_user_input` 不用于 dsh-web 一期）；应答统一 `POST /api/respond` 回显帧信封 rpcId（approvals.ts:1-21 二轮加证）。**先答者得**语义如实：web 端若先应答，bridge 收 `approval/resolved` 帧关闭请求（resolved 帧广播全部 mux 消费者）。
+- **审批选项如实降级（评审 R2-2）**：dsh 的 approval outcome 是二值集（仅 `allowed-once`|`rejected`，无 always 面）——dsh-web 的 permission 事件只声明「本次允许/拒绝」两选项，iOS 权限 UI 的「始终允许」类变体对该 backend 隐藏（按事件声明渲染，不虚构能力）。
+- **问答整批作答语义（评审 R2-1）**：dsh 一次 ask 多题**整批作答**（questions.ts「one ask, many questions, one answer — never split」），而 bridge `question_reply` 是单题模型——聚合点在 dshweb：一批 N 题 → N 个 question 事件共享同一帧 rpcId，dshweb 持批状态、逐题累积 iOS 应答，**收齐整批后一次 `POST /api/respond`**；iOS 中间态如实（单题已答但批未齐=该题显示已提交，整批等待中）；任一题 `question_reject` → 整批 cancel（outcome `cancelled`）。
+- **外部会话的审批帧路由（评审 S4；判据统一按 R2-3）**：mux 为 agent 级持有，外部（web 发起）会话的 approval/question 帧同样到达；surface 判据=**bridge registry 命中**（`h.getSession()` 有该会话对象——即 iOS 打开过该会话；observation 订阅而无 registry 对象**不**构成判据，两者是不同集合）；未命中的帧不进权限面（web 自己的 UI 在应答）——与「谁在看谁应答」的产品语义一致，避免为全量外部会话注册代理对象。
 
 #### 4.3.5 provider / model（iOS 模型选择器、provider 切换）
 
@@ -177,7 +179,7 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
 
 - `run_diagnostics` ✅ 探测结构化输出（实例来源 external/managed、端口、`llm.providers` 全量与状态位）。**版本字段语义（评审 S6）**：`host.describe` 的 `version:"0.0.1"` 是占位符非 npm 版本（活体证实）——诊断呈现标注为「API 版本标识」，npm 包版本另由探测（`dsh --version`/安装树）获取，不冒充。
 - `list_memory_files`/`read_memory_file` ⛔（评审 S5 补行）：`MemoryFileReader` 类型断言自动 not_supported（handlers.go:1766-1771），无新代码；`cancel_request_v1` ♻️ 连接级通用面（handlers.go:4308-4310），backend 无关。
-- `fetch_todos` ⛔ 一期（web 的 plan 属会话投影无 todo RPC；二期评估）；`get_usage` ⛔ 一期（token 计量在 context-meter 投影单元，二期按 `session/projection` 帧核对后决定接入或维持）；diff 三件套 ⛔；`list_agents` ⛔ 一期（单一 preset；`agentPresets` API 已存在，二期）。
+- `fetch_todos` ⛔ 一期（web 的 plan 属会话投影无 todo RPC；二期评估）；`get_usage` ⛔ 一期（token 计量在 context-meter 投影单元，二期按 `session/projection` 帧核对后决定接入或维持）；diff 三件套 ⛔；`list_agents` ⛔ 一期（单一 preset；`agentPreset.*` API 已存在，二期）。
 - `session.search` 2️⃣（评审 S9 消歧）：iOS 搜索现为本地实现已够，官方服务端搜索二期接入（面已核实存在）。
 - `check_pending_notifications`/prekey/delivery ♻️ bridge/relay 通用，与 backend 无关。
 
@@ -205,7 +207,7 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
 - 专项（评审补充）：**RpcError message 全文透传断言**（坑 7 测试面——构造 bad-request/业务错误帧，断言 iOS 侧拿到原始文本）；**WS 断线重连**（重开流+history 重拉+投影 forceCold 补齐）；**SessionActivityProbing 三态**（死会话尾封口/活会话不封口/探活失败保守 active）；**审批链路**（approval 帧→permission 事件→/api/respond 回显 rpcId→resolved 收口；外部会话不 surface；web 先答的先答者得）；双实例受控实验（sandbox DSH_HOME，§4.2）；providers `active:true` 过滤；
 - 回归：bridge 全量 + 旧 deepSeek 套件零改动验证；
 - iOS：`BackendKind` case 单测 + 定向 CCCodeTests；
-- 真机验收（核心新增行）：**iOS 对 Mac web 创建的任意历史会话发消息→真实续聊（双向：web 续 iOS 建的会话）**；列表/历史/新建/流式/停止对齐旧件既有验收行。
+- 真机验收（核心新增行）：**iOS 对 Mac web 创建的任意历史会话发消息→真实续聊（双向：web 续 iOS 建的会话）**；**旧件早期（模型修复前）会话续聊 → 官方模型校验错误可见透传 → switch_model 修复后可续**（S2 行，评审 R2-5 落表）；**审批链路**（ask 工具 → iPhone 权限弹窗 → 应答后 turn 继续；web 端先答则 iPhone 收 resolved 收口）；Mac web 新建会话/外部 turn → iOS 列表自动同步（无手动刷新）；列表/历史/新建/流式/停止对齐旧件既有验收行。
 
 ## 7. 边界与退役
 
@@ -248,3 +250,18 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
 | S14 agentPreset 前缀笔误 | 采纳 | §4.3.5 |
 
 **坑 4 闭环状态更新**：评审判「未闭环」→ v2 经 §4.3.2 SessionActivityProbing 设计收口；坑 7/8 测试面经 §6 专项补齐。
+
+## 10. 二轮评审采纳记录（v3 对照 `docs/2026-08-16-dsh-web-backend-design-review-r2.md`）
+
+二轮结论 **APPROVE**；B1/M1-M4/S1-S14 处置全部经独立复核有效（含 M3 部分不采纳理由核验成立）。6 条建议级尾项**全采纳**：
+
+| 项 | 处置 | 落点 |
+|---|---|---|
+| R2-1 问答整批作答语义 | 采纳 | §4.3.4（dshweb 批状态聚合 + iOS 中间态如实 + reject→整批 cancel） |
+| R2-2 approval outcome 二值集 | 采纳 | §4.3.4（「始终允许」类选项按声明隐藏） |
+| R2-3 surface 判据统一 | 采纳 | §4.3.4（registry 命中为唯一判据；observation 订阅≠判据） |
+| R2-4 agentPresets 残留前缀 | 采纳 | §4.3.8 更正 |
+| R2-5 S2 真机矩阵行落 §6 | 采纳 | §6 验收行 |
+| R2-6 接线点表 :468 归属 | 采纳 | §4.3.2 表（sourceChanged 判定归 `ensureProjectionHydrated` ~:418；pathless 条件在 :629） |
+
+三项遗留评审项终态（二轮判定）：坑 4 后半 **闭环**（M1+三态测试）；坑 7 **闭环**（透传断言专项）；坑 8 **闭环**（审批升格一期必接消除挂起路径）。
