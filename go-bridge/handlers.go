@@ -2712,7 +2712,7 @@ func (h *Handlers) handleGetSession(conn Connection, msg WireMessage, agent core
 					ReasoningEffort: scan.ReasoningEffort,
 				}
 				wireSession := sessionsToWire([]core.AgentSessionInfo{sessionInfo})[0]
-				conn.SendResult(msg.RequestID, map[string]interface{}{"session": h.enrichSessionStateWithAgent(wireSession, agent)}, nil)
+				conn.SendResult(msg.RequestID, h.sessionResultWithContextUsage(wireSession, agent, params.SessionID), nil)
 				return
 			}
 		}
@@ -2727,11 +2727,22 @@ func (h *Handlers) handleGetSession(conn Connection, msg WireMessage, agent core
 	for _, session := range sessions {
 		if session.ID == params.SessionID {
 			wireSession := sessionsToWire([]core.AgentSessionInfo{session})[0]
-			conn.SendResult(msg.RequestID, map[string]interface{}{"session": h.enrichSessionStateWithAgent(wireSession, agent)}, nil)
+			conn.SendResult(msg.RequestID, h.sessionResultWithContextUsage(wireSession, agent, params.SessionID), nil)
 			return
 		}
 	}
 	conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_found", Message: fmt.Sprintf("session %q not found", params.SessionID)})
+}
+
+func (h *Handlers) sessionResultWithContextUsage(wireSession map[string]interface{}, agent core.Agent, sessionID string) map[string]interface{} {
+	session := h.enrichSessionStateWithAgent(wireSession, agent)
+	result := map[string]interface{}{"session": session}
+	if usage := h.getSessionContextUsage(agent, sessionID); usage != nil {
+		wire := contextUsageToWire(usage)
+		result["contextUsage"] = wire
+		session["contextUsage"] = wire
+	}
+	return result
 }
 
 func (h *Handlers) findClaudeSessionFile(sessionID string, optDir string) (projectDir string, sessionPath string) {
@@ -3418,6 +3429,9 @@ func contextUsageToWire(usage *core.ContextUsage) map[string]interface{} {
 		"outputTokens":          usage.OutputTokens,
 		"reasoningOutputTokens": usage.ReasoningOutputTokens,
 		"contextWindow":         usage.ContextWindow,
+		"systemTokens":          usage.SystemTokens,
+		"toolsTokens":           usage.ToolsTokens,
+		"messageTokens":         usage.MessageTokens,
 	}
 }
 

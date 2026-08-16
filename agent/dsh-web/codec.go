@@ -744,6 +744,9 @@ func (c *sessionCodec) applyRequestContext(env *sessionEventWire) ([]core.Event,
 		return nil, err
 	}
 	c.contextWindow = d.ContextWindow
+	if c.lastUsage != nil && c.contextWindow > 0 {
+		return []core.Event{contextUsageEvent(c.lastUsage, c.contextWindow)}, nil
+	}
 	return nil, nil
 }
 

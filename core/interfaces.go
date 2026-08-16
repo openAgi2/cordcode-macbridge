@@ -445,6 +445,11 @@ type ContextUsage struct {
 	OutputTokens          int
 	ReasoningOutputTokens int
 	ContextWindow         int
+	// Official dsh web contextBreakdown projection (system prompt / tool
+	// schemas / conversation). Zero when the backend has no composition view.
+	SystemTokens  int
+	ToolsTokens   int
+	MessageTokens int
 }
 
 // ContextCompressor is an optional interface for agents that support

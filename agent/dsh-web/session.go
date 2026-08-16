@@ -17,6 +17,7 @@ import (
 
 var _ core.AgentSession = (*dshSession)(nil)
 var _ core.TurnCanceler = (*dshSession)(nil)
+var _ core.LiveModeSwitcher = (*dshSession)(nil)
 
 type dshSession struct {
 	agent   *Agent
@@ -58,14 +59,24 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 		s.idValue.Store(created)
 	} else {
 		// Light existence probe: history on an unknown id returns the official
-		// session-not-found RpcError — surfaced verbatim (坑 7).
+		// session-not-found RpcError — surfaced verbatim (坑 7). The tail page
+		// also carries contextPressure/contextBreakdown — seed the meter so
+		// iOS does not open on "暂无上下文用量数据".
 		max := 1
+		var hist sessionHistoryValue
 		probe := sessionHistoryRequest{SessionID: sessionID, MaxMessages: &max}
-		if err := client.Call(ctx, "session.history", probe, nil); err != nil {
+		if err := client.Call(ctx, "session.history", probe, &hist); err != nil {
 			s.cancel()
 			return nil, err
 		}
 		s.idValue.Store(sessionID)
+		if usage := usageFromProjections(hist.Projections); usage != nil {
+			a.rememberContextUsage(sessionID, usage)
+			select {
+			case s.events <- core.Event{Type: core.EventContextUsageUpdated, SessionID: sessionID, ContextUsage: usage}:
+			default:
+			}
+		}
 	}
 	a.noteActiveSession(s.CurrentSessionID())
 	a.bindings.put(s.CurrentSessionID(), s)

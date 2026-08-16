@@ -197,6 +197,9 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 				"outputTokens":          ev.ContextUsage.OutputTokens,
 				"reasoningOutputTokens": ev.ContextUsage.ReasoningOutputTokens,
 				"contextWindow":         ev.ContextUsage.ContextWindow,
+				"systemTokens":          ev.ContextUsage.SystemTokens,
+				"toolsTokens":           ev.ContextUsage.ToolsTokens,
+				"messageTokens":         ev.ContextUsage.MessageTokens,
 			},
 		}, false
 

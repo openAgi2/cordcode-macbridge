@@ -7,6 +7,9 @@
 版本号对齐 MacBridge Release 构建的 `MARKETING_VERSION`（见 `MacBridge/project.yml`）。日期为协调世界时（UTC）。
 
 ## [Unreleased]
+- **修复：DeepSeek Web 打开旧会话 iPhone 看不到上下文圆环**：用量是打开后再拉的，圆环不能等数据才出现。`get_session` 现在带上官方上下文用量，iPhone 打开会话和点圆环都会刷新。
+- **改进：DeepSeek Web 上下文窗口对齐官方 web**：点输入条上下文钮不再是「暂无用量」。现读官方 `contextPressure`/`contextBreakdown`，显示已用百分比、`~41.2K / 1M` 以及系统提示词 / 工具 / 对话消息拆分。
+- **修复：DeepSeek Web 选权限不再往消息页发 `/permission`**：官方齿轮走宿主斜杠命令通道（不进模型、不出现用户气泡）。此前误走了发消息接口，模型会回「我无法更改沙箱/权限策略」。现与官方 web 同一条写面，并记住默认。
 - **修复：iPhone 多选卡点选项没反应**：DeepSeek Web 明确广告结构化问答能力，iPhone 提交/跳过才能真正回给 Mac。
 - **修复：Mac 弹出的多选问答框 iPhone 看不到**：DeepSeek Web 的多选题（可同时勾几项）只在官方 web 出现。根因是只发了旧的 `question_asked`，投影内核按规定不吃这个事件，iPhone 消息页没有问答卡。现改为走权威的结构化问答，并带上「多选」标记。
 - **修复：Mac 选完覆盖后 iPhone 不出现权限条**：文件已存在的选择题在 Mac 上选「覆盖」后，Mac 会弹出写文件/提权框，iPhone 没有。根因是 codec 重置后的新 turn 只在 Mac 内存里记一笔、不推 turn 壳，iPhone 收到 `upsert_tool` 却对不上 turn，直接丢掉。现把所属 turn 和权限工具一起推出去。

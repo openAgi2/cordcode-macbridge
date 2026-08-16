@@ -516,8 +516,8 @@ func TestUnsupportedCapabilitiesAreAbsent(t *testing.T) {
 	if _, ok := interface{}(a).(core.AgentLister); ok {
 		t.Fatal("list_agents ⛔ phase 1: must not implement AgentLister")
 	}
-	if _, ok := interface{}(a).(core.ModeSwitcher); ok {
-		t.Fatal("list_permission_modes/set_permission_mode ⛔ phase 1: must not implement ModeSwitcher")
+	if _, ok := interface{}(a).(core.ModeSwitcher); !ok {
+		t.Fatal("list_permission_modes/set_permission_mode: dsh-web must implement ModeSwitcher")
 	}
 	if _, ok := interface{}(a).(core.AttachmentSupporter); ok {
 		t.Fatal("text-only phase 1: must NOT implement AttachmentSupporter (a declared kind is a semantic claim)")
