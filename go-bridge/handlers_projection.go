@@ -108,7 +108,7 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 	forceColdInspection := params.SinceRev == 0 &&
 		(msg.BackendID == "opencode" || msg.BackendID == "grokbuild" ||
 			msg.BackendID == "claude" || msg.BackendID == "claudecode" ||
-			msg.BackendID == "deepseek")
+			msg.BackendID == "deepseek" || msg.BackendID == "dsh-web")
 	// Claude cold open starts the live file relay BEFORE the hydrate wait (aligned with
 	// codex/opencode above) so in-flight terminal events can feed the commit gate, and passes
 	// the hydrate admission cut so the relay's initial scan range is disjoint from the
@@ -333,13 +333,16 @@ var errProjectionSessionNotFound = errors.New("live-only session has no kernel s
 // backendSupportsProjectionHydrate gates the disk/rich-history cold-hydrate producers.
 // deepseek joined the pathless rich-history rebuild with the 2026-08-16 store bridge:
 // its cold baseline is the user harness store log (~/.dsh/sessions, read-only), the same
-// file-backed form as claudecode transcripts (design §4.4).
+// file-backed form as claudecode transcripts (design §4.4). dsh-web is the pathless
+// family's HTTP member: its baseline is the official session.history over the resolved
+// dsh web instance (dsh-web design §4.3.2).
 func backendSupportsProjectionHydrate(backendID string) bool {
 	switch backendID {
-	case "codex", "claude", "claudecode", "opencode", "grokbuild", "deepseek":
+	case "codex", "claude", "claudecode", "opencode", "grokbuild", "deepseek", "dsh-web":
 		// K5: Codex/Claude use JSONL transcript hydrate; OpenCode uses HTTP rich-history
 		// full rebuild (no transcript file / no file-prefix checkpoint); grokbuild and
-		// deepseek use the same pathless rich-history rebuild from local session logs.
+		// deepseek use the same pathless rich-history rebuild from local session logs;
+		// dsh-web rebuilds pathless from the official session.history API.
 		return true
 	default:
 		return false
@@ -465,7 +468,7 @@ func (h *Handlers) ensureProjectionHydrated(
 	}
 	// Pathless re-open: force full GetRichSessionHistory rebuild when already Ready.
 	sourceChanged := forceColdInspection && ready &&
-		(backendID == "opencode" || backendID == "grokbuild" || backendID == "deepseek") && source.Path == ""
+		(backendID == "opencode" || backendID == "grokbuild" || backendID == "deepseek" || backendID == "dsh-web") && source.Path == ""
 	// Hydrate owns the source cut. Hand it to any pre-hydrate hook (Claude cold-open starts
 	// its live file relay here so in-flight terminal events can feed the commit gate; the relay
 	// inherits the admission cut so its initial scan is disjoint from the cold-source baseline).
@@ -547,6 +550,8 @@ func (h *Handlers) prepareProjectionHydrateSource(
 		agentName = "grokbuild"
 	case "deepseek":
 		agentName = "dsh"
+	case "dsh-web":
+		agentName = "dsh-web"
 	default:
 		return ProjectionSourceDescriptor{}, errProjectionBackendNotMigrated
 	}
@@ -622,11 +627,11 @@ func (h *Handlers) prepareProjectionHydrateSource(
 	}
 	// OpenCode has no JSONL transcript path; grokbuild's chat_history.jsonl is a structured
 	// turn snapshot, not a raw transcript with stable byte cursors; deepseek's store logs
-	// are zstd-compressed (web artifacts), so no byte-cut prefix applies either. All three
-	// cold-hydrate as a full rich-history rebuild keyed by session identity only
-	// (Cursor=0, Path empty). Checkpoint file-prefix validation does not apply; re-open
-	// always rebuilds from GetRichSessionHistory.
-	if backendID == "opencode" || backendID == "grokbuild" || backendID == "deepseek" {
+	// are zstd-compressed (web artifacts); dsh-web's baseline is the official
+	// session.history API. All four cold-hydrate as a full rich-history rebuild keyed
+	// by session identity only (Cursor=0, Path empty). Checkpoint file-prefix validation
+	// does not apply; re-open always rebuilds from GetRichSessionHistory.
+	if backendID == "opencode" || backendID == "grokbuild" || backendID == "deepseek" || backendID == "dsh-web" {
 		if _, ok := agent.(core.RichHistoryProvider); !ok {
 			if h.eventPublisher.ProjectionTurnCount(backendID, sessionID) > 0 {
 				return ProjectionSourceDescriptor{Identity: sessionID}, nil
@@ -1001,6 +1006,7 @@ func (h *Handlers) produceProjectionHydrateRange(
 	emit func(projectionHydrateEvent) bool,
 ) error {
 	if backendID != "opencode" && backendID != "grokbuild" && backendID != "deepseek" &&
+		backendID != "dsh-web" &&
 		backendID != "claude" && backendID != "claudecode" &&
 		(path == "" || startOffset == endOffset) {
 		return nil
@@ -1058,6 +1064,8 @@ func (h *Handlers) produceProjectionHydrateRange(
 		return h.streamBackendRichHistoryProjectionEvents(ctx, "grokbuild", sessionID, emit)
 	case "deepseek":
 		return h.streamBackendRichHistoryProjectionEvents(ctx, "dsh", sessionID, emit)
+	case "dsh-web":
+		return h.streamBackendRichHistoryProjectionEvents(ctx, "dsh-web", sessionID, emit)
 	default:
 		return errProjectionBackendNotMigrated
 	}
