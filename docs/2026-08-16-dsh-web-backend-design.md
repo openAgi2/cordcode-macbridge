@@ -1,7 +1,7 @@
 # dsh-web Backend 设计（官方 Web API 转发 + bridge-v1 翻译）
 
-- 日期：2026-08-16（v2：一轮评审；v3：二轮 APPROVE+R2 尾项；v3.1：三轮评审 R3-1/R3-2 必改——两条 v3 落实时臆造的机制按源码修正，见文末「评审采纳记录」）
-- 状态：**设计稿 v3.1，三轮评审收口（r2 APPROVE + r3 必改已修），待 owner 终审**（批准后实施）
+- 日期：2026-08-16（v2：一轮评审；v3：二轮 APPROVE+R2 尾项；v3.1：三轮 R3-1/R3-2 必改；v3.2：四轮 APPROVE 收口 + owner 三项指令落稿（iOS 改动量核验/新建 agent/dsh-web 目录/API 盲区兜底许可）+ S-1…S-3 收尾，见文末「评审采纳记录」）
+- 状态：**设计稿 v3.2，四轮评审通过（r4 APPROVE），待 owner 终审**（批准后实施）
 - 背景：SDK stdio 路线收口暂停（`docs/2026-08-16-dsh-session-store-bridge-design完成情况.md` 收口节）；owner 裁决并行新增本 backend，旧 `deepSeek` 保留不删。
 - 不变约束：CordCode 初衷（探测-复用-未启动、零迁移、双向接力、永不自托管）+ SSV2 十二条护栏。
 
@@ -89,8 +89,8 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
 
 ### 4.1 模块与身份
 
-- 新 Go 包 `agent/dshweb`（注册名 `dsh-web`；wire kind `deepseek-web`；iOS `BackendKind.deepSeekWeb`，显示「DeepSeek Web」）；Mac App runtime 默认 drivers 增列（c71c692 先例）。
-- **实施基线与代码关系（评审 M3）**：实施在两仓 `dsh/driver` 分支进行（`agent/dsh` 在该分支树内；main 无 dsh 目录——`git ls-tree main agent/` 证实）。与旧件的关系：**不 import `agent/dsh` 包**；「复用 codec」的确切含义=把 §3.3 事件映射表（连同其 wire fixture 单测）**复制**进 `agent/dshweb` 并归属其下——旧件未来退役不牵连新包。`dsh/driver` 合回 main 的时机是 owner 另行裁决的事项，**不作为本设计前置**。
+- 新 Go 包位于 **`agent/dsh-web/`**（**owner 指定目录名**，2026-08-16 四轮评审后指令；`agent/dsh` 一行不动，完全物理隔离。Go 目录名可含连字符而包标识符不能——包名 `dshweb`，import 路径 `…/agent/dsh-web`，注册名 `dsh-web`、wire kind `deepseek-web`，功能零影响，仅为本仓首个含连字符的 agent 目录；iOS `BackendKind.deepSeekWeb`，显示「DeepSeek Web」）；Mac App runtime 默认 drivers 增列（c71c692 先例）。
+- **实施基线与代码关系（评审 M3）**：实施在两仓 `dsh/driver` 分支进行（`agent/dsh` 在该分支树内；main 无 dsh 目录——`git ls-tree main agent/` 证实）。与旧件的关系：**不 import `agent/dsh` 包**；「复用 codec」的确切含义=把 §3.3 事件映射表（连同其 wire fixture 单测）**复制**进 `agent/dsh-web` 并归属其下——旧件未来退役不牵连新包。`dsh/driver` 合回 main 的时机是 owner 另行裁决的事项，**不作为本设计前置**。
 - iOS 改动量（评审 S10，如实）：不止「增一个 case」——`.deepSeek` 在 iOS 非测试代码 **11 个文件**存在穷举 switch（BackendModels、ChatUIKitContainerView×5、ChatViewModel+Generation×2、SelectionSheets、CCCodeBridgeBackendClient、SessionLifecycleDiagnosticPhase、ModelManagementService、ChatViewModel、ChatViewModel+CodexStreaming、ChatViewModel+DirectoryPreferences、ServerViewModel），新增 case 时 Swift 穷举检查**编译期强制**全部暴露，逐处做归组决策（不会静默漏）；行为相关的两处需显式决策：DirectoryPreferences:107（list_projects 通用路径，dsh-web 走 workspace.list 映射）、ChatUIKitContainerView:4335（context entry 显隐与 `get_usage` ⛔ 的联动）。
 
 ### 4.2 web 服务生命周期（探测复用优先，managed 兜底）
@@ -155,6 +155,9 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
   - 帧 rpcId 仅作 dshweb 内部**批 key**，不上 wire；逐题累积应答，**收齐整批后按题 id 组装一次 `POST /api/respond`**（应答形状 `{answers:[{id,selected,custom?}]}` 按题 id 键控，user-questions/types.ts:53-66）；
   - **中间态如实**：iOS 提交 RPC 成功不置 completed，状态由 `question_resolved` 事件驱动（ChatUIKitContainerView.swift:3443-3455）——dshweb **不合成**逐题 resolved（批未提交前合成=虚假乐观；若他题 reject 整批取消则先前「已提交」是谎言），各题保持 pending 直至 host 批 `question/resolved` 帧到达后统一映射；
   - **reject 不对称（防坑）**：question 的取消走 respond 的 **error 分支**（`ok:false, code:"cancelled"`），不是 value 载荷——与 approval（value outcome）不对称，实施时勿照抄；任一题 `question_reject` → 整批以 error-cancelled 应答。
+  - **批 resolved 的展开机制（评审 S-1）**：host 批 `question/resolved` 帧载荷仅 `{sessionId, questionRpcId, outcome}`（events.schema.ts:52），**无逐题内容**——「映射为逐题 resolved」实为 dshweb 从批状态查 rpcId→题 id 集合**展开为 N 个** iOS `question_resolved{questionId, result}` 事件（勿预期帧内有逐题数据）。
+  - **断线边界如实标注（评审 S-2）**：mux 重开会重放 still-pending 的 question/approval 帧（同 rpcId，官方 refresh-recovery）——重连后批状态可重建、iOS 幂等重收；但**断线窗口内已被 web 端答掉的批不重放**，iOS 该批 pending step 在 live 视图内不收口，自愈=会话重开冷加载（ask 的工具结果入 durable 日志，history 重建终态）——与既有 backend 的 transient question 同类，非永久挂起。
+  - **重复提交幂等（评审 S-3）**：批 pending 期间 iOS 可对同一题重复提交——dshweb 批状态按题 id **覆盖式**累积，后答覆盖前答，无重复计数。
 - **外部会话的审批帧路由（评审 S4；判据统一按 R2-3）**：mux 为 agent 级持有，外部（web 发起）会话的 approval/question 帧同样到达；surface 判据=**bridge registry 命中**（`h.getSession()` 有该会话对象——即 iOS 打开过该会话；observation 订阅而无 registry 对象**不**构成判据，两者是不同集合）；未命中的帧不进权限面（web 自己的 UI 在应答）——与「谁在看谁应答」的产品语义一致，避免为全量外部会话注册代理对象。
 
 #### 4.3.5 provider / model（iOS 模型选择器、provider 切换）
@@ -216,11 +219,12 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
 ## 7. 边界与退役
 
 - 硬边界：不 re-pin、不改 vendor（旧 backend 冻结依赖）；不写用户 `workspace.json`（归组由 web 自身 create/fork 收编）；`since` 续传 v1 未实现照官方语义重开流。
+- **Owner 兜底许可（2026-08-16 指令）**：若实施中遇到官方 API 实现不了的功能点，可**复制**（不 import）`agent/dsh` 的已有成果（store.go/zstd_reader.go 等只读解析）作兜底。红线不变：**只读**——绝不写 `~/.dsh/sessions` 与 workspace.json（坑 2 教训：写路径才有编码冲突风险，读侧双后缀本就兼容）。现状核查（四轮评审功能对照表）：一期全部 ✅ 项均有 API 路径，⛔ 项（delete/git/diff/todos/usage）官方无面且旧件同样没有——此许可为兜底阀门而非既定需求。
 - 旧 `deepSeek` 退役判据：owner 日常真机使用 dsh-web 全绿若干天后另行裁决（不在无证据时预判）；退役时同步清理 iOS `session_resume_not_supported` 文案映射。
 
 ## 8. 实施拆分（批准后走 exec-plan）
 
-1. `agent/dshweb` HTTP+WebSocket 客户端（三层信封）+ 探活 + 生命周期（探测/managed/json）；
+1. `agent/dsh-web` HTTP+WebSocket 客户端（三层信封）+ 探活 + 生命周期（探测/managed/json）；
 2. 映射表逐行（list/**create**/history/prompt/cancel/**rename**/models/providers/selectModel）+ 单测；
 3. **WS mux/host 双流管线**（codec 映射复制 + SessionActivityProbing + sessions_changed 即时层）；
 4. **审批问答链路**（帧→事件→/api/respond；外部会话路由策略）；
@@ -280,3 +284,11 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
 | R3-2 「按事件声明渲染」机制臆造 | 采纳 | 删除该机制；如实写 wire 折叠事实（always→allow/deny 二值，映射即正确、无语义反转）；残余=标签语义弱化，接受；隐藏变体列为 iOS 可选优化（含 §4.1 补充决策点提示） |
 
 §4.3.4 全段源码对照自查（评审建议）：其余断言（create/prompt queue/resume 语义、cancel、approval outcome 集、/api/respond rpcId 回显、resolved 帧全员广播先答者得、registry 判据）均有三轮内源码/活体证据在案，未再发现失实项。三项遗留评审项闭环判定维持（R3-1 修正消除了坑 8 的新击穿路径）。
+
+## 12. 四轮评审采纳记录（v3.2 对照 `docs/2026-08-16-dsh-web-backend-design-review-r4.md`）
+
+四轮结论 **APPROVE（可交付 owner 终审）**；R3-1/R3-2 修正逐点核验合格，纪律封堵与 §4.3.4 自查复核通过。本轮 3 条建议级收尾**全采纳**（§4.3.4 批作答段落补三条）：S-1 批 resolved 展开机制（帧无逐题数据，dshweb 按批状态展开 N 个）；S-2 断线边界如实（重放恢复成立 + web 已答批不重放、冷开自愈）；S-3 重复提交按题 id 覆盖幂等。
+
+**Owner 三项指令落稿（同 commit）**：① iOS 改动量核验结论入 §4.1（纯枚举增量约 30-60 行 + 测试，权限/问答 UI 零改——两处本可能动 iOS 的点已在 wire 折叠与批聚合设计里消掉）；② 新建 `agent/dsh-web/` 目录（owner 指定），`agent/dsh` 一行不动、完全物理隔离，包名 `dshweb`/import `…/agent/dsh-web` 的连字符注记；③ §7 记录 API 盲区兜底许可（复制不 import 旧件只读成果；红线=绝不写 store/workspace.json；现状核查一期用不上，为兜底阀门）。
+
+**四轮累计账目**：1 阻断（B1）+ 6 必改（M1-M4、R3-1/2）+ 23 条建议（S1-S14、R2-1…6、S-1…3）全部处置；owner 已裁决事项（SDK 路线暂停保留、merge 时机）四轮未重开。实施期挂账：双实例 sandbox 实验、get_usage 二期投影核对。
