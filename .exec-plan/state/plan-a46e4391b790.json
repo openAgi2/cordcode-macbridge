@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-16T20:30:00+08:00",
+  "updated_at": "2026-08-16T16:36:22+08:00",
   "todos": [
     {
       "id": "s8-1-client-impl",
@@ -81,15 +81,16 @@
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "go test ./agent/dsh-web/ -count=1 14/14 全绿：信封编解码与 payload 槽、RpcError 全文透传（坑 7）、carrier 415/400/404/500 分类、裸体 bad-request 分支（200+error）、WS 426/升级帧/ServerRequest method=payload.type、respond rpcId 回显+value 分支+reject cancelled error 分支（不对称）、生命周期三态（external 命中/managed spawn+0600 状态文件+重启再收养不重复 spawn/双失败报错）、external 优先不 spawn、argv 红线（--host 127.0.0.1/--port/--profile web，永不 --trusted-host/0.0.0.0）。双实例受控实验（真实 dsh web，sandbox DSH_HOME=/Users/jacklee/Projects/.dsh-sandbox-50444 已清理）：A:3181 session.create cwd=/tmp/dsh-cocreate → B:3182 第二次 session.list 即见该会话（首次空=冷启动扫描窗口）；共写成立。附加发现：冷视图 session.list 无 projections 块（A 自有会话带全量 projections 含 title:null/permissions/imageLimits/sessionStats），故冷会话标题须走 session.history 尾读 fallback——§8-2 实现注记。",
+        "summary": "[audit 2026-08-16 复验] go test ./agent/dsh-web/ -count=1 PASS。 原证明：go test ./agent/dsh-web/ -count=1 14/14 全绿：信封编解码与 payload 槽、RpcError 全文透传（坑 7）、carrier 415/400/404/500 分类、裸体 bad-request 分支（200+error）、WS 426/升级帧/ServerRequest method=payload.type、respond rpcId 回显+value 分支+reject cancelled error 分支（不对称）、生命周期三态（external 命中/managed spawn+0600 状态文件+重启再收养不重复 spawn/双失败报错）、external 优先不 spawn、argv 红线（--host 127.0.0.1/--port/--profile web，永不 --trusted-host/0.0.0.0）。双实例受控实验（真实 dsh web，sandbox DSH_HOME=/Users/jacklee/Projects/.dsh-sandbox-50444 已清理）：A:3181 session.create cwd=/tmp/dsh-cocreate → B:3182 第二次 session.list 即见该会话（首次空=冷启动扫描窗口）；共写成立。附加发现：冷视图 session.list 无 projections 块（A 自有会话带全量 projections 含 title:null/permissions/imageLimits/sessionStats），故冷会话标题须走 session.history 尾读 fallback——§8-2 实现注记。",
         "artifacts": [
           "agent/dsh-web/lifecycle_test.go",
           "agent/dsh-web/fakedsh_test.go",
-          "git:1376e3f"
+          "git:1376e3f",
+          "/tmp/dsh-web-audit-20260816/dsh-web.txt"
         ],
-        "checked_at": "2026-08-16T14:35:00+08:00"
+        "checked_at": "2026-08-16T16:35:47+08:00"
       }
     },
     {
@@ -103,7 +104,7 @@
         "s8-1-client-tests"
       ],
       "source": "§6",
-      "notes": "",
+      "notes": "audit 2026-08-16 全量复跑：dsh-web+go-bridge 绿；唯一失败 agent/claudecode TestRunModelQueryDiagnostic_WarnsWithoutProbeConfig（本机 ANTHROPIC_API_KEY 使零值 Agent 走探测成功，属环境泄漏/既有测试卫生问题，dsh-web 未改该文件）。",
       "verification": {
         "required": true,
         "status": "present",
@@ -168,14 +169,15 @@
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "26 项全绿：列表映射与过滤、标题直出/尾读 fallback、create 携带 cwd、既有 id 绑定不 create、未知 id 官方错误透传、prompt queue 载荷与错误透传、cancel、rename 规范化标题、history 分页+turn/tool/reasoning 映射+输出按 callId 关联、providers active:true 过滤、switch_model→selectModel 会话内生效、⛔ 13 个接口缺席断言、诊断文案（API 版本标识/全量状态位/loopback 披露）。",
+        "summary": "[audit 2026-08-16 复验] go test ./agent/dsh-web/ -count=1 PASS。 原证明：26 项全绿：列表映射与过滤、标题直出/尾读 fallback、create 携带 cwd、既有 id 绑定不 create、未知 id 官方错误透传、prompt queue 载荷与错误透传、cancel、rename 规范化标题、history 分页+turn/tool/reasoning 映射+输出按 callId 关联、providers active:true 过滤、switch_model→selectModel 会话内生效、⛔ 13 个接口缺席断言、诊断文案（API 版本标识/全量状态位/loopback 披露）。",
         "artifacts": [
           "agent/dsh-web/rpcmap_test.go",
-          "cmd:go test ./agent/dsh-web/ -count=1 => ok"
+          "cmd:go test ./agent/dsh-web/ -count=1 => ok",
+          "/tmp/dsh-web-audit-20260816/dsh-web.txt"
         ],
-        "checked_at": "2026-08-16T15:10:00+08:00"
+        "checked_at": "2026-08-16T16:35:47+08:00"
       }
     },
     {
@@ -189,7 +191,7 @@
         "s8-2-rpcmap-tests"
       ],
       "source": "§6",
-      "notes": "",
+      "notes": "audit 2026-08-16 全量复跑：dsh-web+go-bridge 绿；唯一失败 agent/claudecode TestRunModelQueryDiagnostic_WarnsWithoutProbeConfig（本机 ANTHROPIC_API_KEY 使零值 Agent 走探测成功，属环境泄漏/既有测试卫生问题，dsh-web 未改该文件）。",
       "verification": {
         "required": true,
         "status": "present",
@@ -249,14 +251,15 @@
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "全绿：codec 全 turn 序列映射、turn error 原因透传、基线容忍+gap 重置换新、孤儿采纳、外部会话 passive 路由、binding 会话单投递负断言、断流后重开（≥2 次 dial）、host 帧触发 refresh 信号+running 翻转、三态探活（running/idle/探活失败保守+刷新解析+仍未知保守）。",
+        "summary": "[audit 2026-08-16 复验] go test ./agent/dsh-web/ -count=1 PASS（含 TestStreamReconnectReopensAfterDrop / TestIsSessionActiveThreeStates）。 原证明：全绿：codec 全 turn 序列映射、turn error 原因透传、基线容忍+gap 重置换新、孤儿采纳、外部会话 passive 路由、binding 会话单投递负断言、断流后重开（≥2 次 dial）、host 帧触发 refresh 信号+running 翻转、三态探活（running/idle/探活失败保守+刷新解析+仍未知保守）。",
         "artifacts": [
           "agent/dsh-web/streams_test.go",
-          "cmd:go test ./agent/dsh-web/ -count=1 => ok"
+          "cmd:go test ./agent/dsh-web/ -count=1 => ok",
+          "/tmp/dsh-web-audit-20260816/dsh-web.txt"
         ],
-        "checked_at": "2026-08-16T15:40:00+08:00"
+        "checked_at": "2026-08-16T16:35:47+08:00"
       }
     },
     {
@@ -270,7 +273,7 @@
         "s8-3-ws-pipeline-tests"
       ],
       "source": "§6",
-      "notes": "",
+      "notes": "audit 2026-08-16 全量复跑：dsh-web+go-bridge 绿；唯一失败 agent/claudecode TestRunModelQueryDiagnostic_WarnsWithoutProbeConfig（本机 ANTHROPIC_API_KEY 使零值 Agent 走探测成功，属环境泄漏/既有测试卫生问题，dsh-web 未改该文件）。",
       "verification": {
         "required": true,
         "status": "present",
@@ -326,14 +329,15 @@
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "全绿：审批链路（事件+rpcId 回显+allow/deny 映射+迟到 no-op）、外部会话不 surface（无 pending 状态）、web 先答先答者得、批问答全语义（双题全可见/部分应答不 respond/覆盖幂等/收齐一次 respond 按题 id 键控/中间态无合成 resolved/批帧展开 N 个/终态后报错）、reject 整批 cancelled error 分支、重连重放不重复 respond。",
+        "summary": "[audit 2026-08-16 复验] go test ./agent/dsh-web/ -count=1 PASS。 原证明：全绿：审批链路（事件+rpcId 回显+allow/deny 映射+迟到 no-op）、外部会话不 surface（无 pending 状态）、web 先答先答者得、批问答全语义（双题全可见/部分应答不 respond/覆盖幂等/收齐一次 respond 按题 id 键控/中间态无合成 resolved/批帧展开 N 个/终态后报错）、reject 整批 cancelled error 分支、重连重放不重复 respond。",
         "artifacts": [
           "agent/dsh-web/approvals_test.go",
-          "cmd:go test ./agent/dsh-web/ -count=1 => ok"
+          "cmd:go test ./agent/dsh-web/ -count=1 => ok",
+          "/tmp/dsh-web-audit-20260816/dsh-web.txt"
         ],
-        "checked_at": "2026-08-16T16:00:00+08:00"
+        "checked_at": "2026-08-16T16:35:47+08:00"
       }
     },
     {
@@ -347,7 +351,7 @@
         "s8-4-approval-tests"
       ],
       "source": "§6",
-      "notes": "",
+      "notes": "audit 2026-08-16 全量复跑：dsh-web+go-bridge 绿；唯一失败 agent/claudecode TestRunModelQueryDiagnostic_WarnsWithoutProbeConfig（本机 ANTHROPIC_API_KEY 使零值 Agent 走探测成功，属环境泄漏/既有测试卫生问题，dsh-web 未改该文件）。",
       "verification": {
         "required": true,
         "status": "present",
@@ -406,14 +410,15 @@
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "4 项全绿：接线点与不进清单断言、pathless 冷 hydrate rich history 基线→Ready、死会话尾封口（idle）、活会话不封口（active，预算缩短 200ms）。",
+        "summary": "[audit 2026-08-16 复验] go test ./go-bridge/ -run TestDSHWeb -count=1 PASS（6/6，含 ColdPullDuringLiveTurn / DeadSessionForceCold）。 原证明：4 项全绿：接线点与不进清单断言、pathless 冷 hydrate rich history 基线→Ready、死会话尾封口（idle）、活会话不封口（active，预算缩短 200ms）。",
         "artifacts": [
           "go-bridge/handlers_projection_dshweb_test.go",
-          "cmd:go test ./go-bridge/ -run TestDSHWeb => ok"
+          "cmd:go test ./go-bridge/ -run TestDSHWeb => ok",
+          "/tmp/dsh-web-audit-20260816/go-bridge-dshweb.txt"
         ],
-        "checked_at": "2026-08-16T16:30:00+08:00"
+        "checked_at": "2026-08-16T16:35:47+08:00"
       }
     },
     {
@@ -427,7 +432,7 @@
         "s8-5-projection-tests"
       ],
       "source": "§6",
-      "notes": "",
+      "notes": "audit 2026-08-16 全量复跑：dsh-web+go-bridge 绿；唯一失败 agent/claudecode TestRunModelQueryDiagnostic_WarnsWithoutProbeConfig（本机 ANTHROPIC_API_KEY 使零值 Agent 走探测成功，属环境泄漏/既有测试卫生问题，dsh-web 未改该文件）。",
       "verification": {
         "required": true,
         "status": "present",
@@ -485,13 +490,14 @@
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "全绿：workspace.list 映射（命名 workspace/无 title 兜底/空 registry 空列表）。",
+        "summary": "[audit 2026-08-16 复验] go test ./agent/dsh-web/ -count=1 PASS（含 workspace.list 两项）。 原证明：全绿：workspace.list 映射（命名 workspace/无 title 兜底/空 registry 空列表）。",
         "artifacts": [
-          "cmd:go test ./agent/dsh-web/ -count=1 => ok"
+          "cmd:go test ./agent/dsh-web/ -count=1 => ok",
+          "/tmp/dsh-web-audit-20260816/dsh-web.txt"
         ],
-        "checked_at": "2026-08-16T17:00:00+08:00"
+        "checked_at": "2026-08-16T16:35:47+08:00"
       }
     },
     {
@@ -505,7 +511,7 @@
         "s8-6-dirs-tests"
       ],
       "source": "§6",
-      "notes": "",
+      "notes": "audit 2026-08-16 全量复跑：dsh-web+go-bridge 绿；唯一失败 agent/claudecode TestRunModelQueryDiagnostic_WarnsWithoutProbeConfig（本机 ANTHROPIC_API_KEY 使零值 Agent 走探测成功，属环境泄漏/既有测试卫生问题，dsh-web 未改该文件）。",
       "verification": {
         "required": true,
         "status": "present",
@@ -564,14 +570,16 @@
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "MacBridge TestWireDescriptorDeepSeekWeb 绿；iOS BridgeModelsTests 45/45 绿（新增 fromWireKind+语义 2 项）；iOS 定向 build SUCCEEDED；canonical/mirror bridge-v1.md diff 为空。",
+        "summary": "[audit 2026-08-16 复验] xcodebuild test -only-testing:CCCodeTests/BridgeModelsTests → 45/45 Passed（iPhone 17 Pro Max 模拟器）；go test ./agent/dsh-web/ TestWireDescriptorDeepSeekWeb PASS；canonical/mirror identical。 原证明：MacBridge TestWireDescriptorDeepSeekWeb 绿；iOS BridgeModelsTests 45/45 绿（新增 fromWireKind+语义 2 项）；iOS 定向 build SUCCEEDED；canonical/mirror bridge-v1.md diff 为空。",
         "artifacts": [
           "cmd:xcodebuild test -only-testing:CCCodeTests/BridgeModelsTests => 45/45",
-          "cmd:diff canonical mirror => identical"
+          "cmd:diff canonical mirror => identical",
+          "/tmp/dsh-web-audit-20260816/ios-bridge-models.txt",
+          "xcresult:Test-CordCode-2026.08.16_16-35-06-+0800.xcresult 45/45"
         ],
-        "checked_at": "2026-08-16T18:00:00+08:00"
+        "checked_at": "2026-08-16T16:36:22+08:00"
       }
     },
     {
@@ -644,7 +652,7 @@
         "s8-8-release-impl"
       ],
       "source": "§8-8/§6",
-      "notes": "",
+      "notes": "audit 2026-08-16 运行态复核：/Applications runtime 嵌入 6cd40cc；pgrep 仅 Applications；8777=内嵌 runtime；protocol canonical/mirror identical；agent/dsh diff 空。",
       "verification": {
         "required": true,
         "status": "present",
@@ -723,20 +731,21 @@
         "s8-8-review-fix-impl"
       ],
       "source": "review-fix",
-      "notes": "review-fix-for:s8-8-release-regression",
+      "notes": "review-fix-for:s8-8-release-regression audit 2026-08-16 全量复跑：dsh-web+go-bridge 绿；唯一失败 agent/claudecode TestRunModelQueryDiagnostic_WarnsWithoutProbeConfig（本机 ANTHROPIC_API_KEY 使零值 Agent 走探测成功，属环境泄漏/既有测试卫生问题，dsh-web 未改该文件）。",
       "verification": {
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "go test ./go-bridge/ -run TestDSHWeb 全绿；go test ./agent/dsh-web/ 全绿；全量 go test（core+pinstore+transcriptindex+agent+go-bridge）绿；agent/dsh 零改动。",
+        "summary": "[audit 2026-08-16 复验] go test ./go-bridge/ -run TestDSHWeb -count=1 PASS + go test ./agent/dsh-web/ PASS（含 TestCodecKnownControlPlaneTypesDoNotReset）。 原证明：go test ./go-bridge/ -run TestDSHWeb 全绿；go test ./agent/dsh-web/ 全绿；全量 go test（core+pinstore+transcriptindex+agent+go-bridge）绿；agent/dsh 零改动。",
         "artifacts": [
           "cmd:go test ./go-bridge/ -count=1 => ok",
           "cmd:go test ./agent/dsh-web/ -count=1 => ok",
-          "cmd:全量 go test => all ok"
+          "cmd:全量 go test => all ok",
+          "/tmp/dsh-web-audit-20260816/go-bridge-dshweb.txt"
         ],
-        "checked_at": "2026-08-16T20:30:00+08:00"
+        "checked_at": "2026-08-16T16:35:47+08:00"
       }
     },
     {
