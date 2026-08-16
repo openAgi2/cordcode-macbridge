@@ -104,6 +104,10 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
 - `get_session` ✅ 同源（列表缓存或 history 头信息）。
 - 置顶 `set_session_pinned`/`list_pinned_sessions` ♻️ bridge 自有 pin 索引（AgentSessionInfo 解析依赖 ListSessions，已具备）。
 - 下拉刷新 ✅ list 重拉 + 投影 forceCold 重建（既有机制）。
+- **外部变更自动同步（Mac 端 dsh web 新建会话/外部 turn → iOS 列表及时更新，双层）**：
+  1. **即时层（事件驱动，新接线）**：bridge 常驻第二条 SSE `GET /api/events.host`——`host/session-added`/`session-removed`/`workspace-changed` 帧到达 → 立即触发该 backend 一次 `session.list` 重扫 → catalog 指纹 diff → 既有 `sessions_changed` 控制面广播（`event_publisher.go:773`，backend 级）→ iOS 自动刷新列表；`host/session-status{running}` → 运行徽标实时翻转（外部 turn 开始/结束）。
+  2. **兜底层（零新代码）**：bridge 既有逐 backend session discovery watcher（`session_discovery.go:50`，周期 ListSessions→指纹 diff→`sessions_changed`）对 dsh-web 自动生效——host 流断线期间由它保底。
+  - 现有会话新增 turn：mux `session/event` 全会话覆盖（4.3.3）——已打开的消息页实时收流；未打开会话的徽标/时间由 `session-status` + `sessions_changed` 刷新，打开时经 history/投影补齐全程。
 
 #### 4.3.2 消息页加载（历史渲染：思考流、工具卡片、分页）
 
@@ -113,7 +117,7 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
 
 #### 4.3.3 流式同步与运行态（isGenerating、text/思考增量、停止按钮、完成通知）
 
-- **单条 SSE** `GET /api/events.mux`（bridge 常驻持有）→ `session/event` 帧（SessionEvent 与磁盘日志同构）→ **复用 `agent/dsh/codec.go` §3.3 映射** → core.Event → 既有推送管线（relay/直连）→ iOS 既有渲染链，零新渲染逻辑。
+- **两条常驻 SSE**：`GET /api/events.mux`（会话事件）+ `GET /api/events.host`（会话生命周期，4.3.1 即时层）。mux 的 `session/event` 帧（SessionEvent 与磁盘日志同构）→ **复用 `agent/dsh/codec.go` §3.3 映射** → core.Event → 既有推送管线（relay/直连）→ iOS 既有渲染链，零新渲染逻辑。
 - 运行态：turn 事件推导 + `host/session-status{running}` → `session_state_changed` 广播（既有）。
 - **外部 turn 可见性（对旧 dsh 是新能力）**：mux 覆盖全部会话——用户在 Mac web 发起的 turn，iOS 同样收事件/投影与完成通知（对齐 claudecode 外部旁观）；dsh-web 不进 `backendHasNoExternalEventSource` 剪枝名单，observation/离线 mailbox ♻️ 全部照常。
 - 断线：SSE 重连=重开流+重拉 history（官方 v1 语义照搬）；断线窗口由重连后 history 重拉+投影 forceCold 补齐。
