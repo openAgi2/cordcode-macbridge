@@ -72,6 +72,9 @@ type fakeDSHServer struct {
 	muxFrames []any
 	// hostFrames are pushed to every events.host subscriber on connect.
 	hostFrames []any
+	// closeAfterPush closes each stream socket after pushing its frames
+	// (reconnect-path tests); false keeps streams open.
+	closeAfterPush bool
 
 	// upgradeRequests counts WS dials seen per path.
 	upgradeSeen map[string]int
@@ -218,6 +221,7 @@ func (f *fakeDSHServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.upgradeSeen[r.URL.Path]++
 	var frames []any
+	closeAfter := f.closeAfterPush
 	if r.URL.Path == "/api/events.mux" {
 		frames = f.muxFrames
 	} else {
@@ -253,6 +257,11 @@ func (f *fakeDSHServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 		if err := conn.WriteJSON(env); err != nil {
 			return
 		}
+	}
+	if closeAfter {
+		// Simulate a server-side drop so the client exercises its reopen path.
+		_ = conn.Close()
+		return
 	}
 	// Hold the socket open until the client closes (real server keeps the
 	// stream alive; tests close the stream themselves).

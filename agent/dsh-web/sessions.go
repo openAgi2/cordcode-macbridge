@@ -59,12 +59,14 @@ func (rc *runningCache) get(sessionID string) (bool, bool) {
 	return running, ok
 }
 
-// setOne updates one session's flag (host/session-status frames).
+// setOne updates one session's flag (host/session-status frames). Creates
+// the map on demand so flips before the first list still land.
 func (rc *runningCache) setOne(sessionID string, running bool) {
 	rc.mu.Lock()
-	if rc.set != nil {
-		rc.set[sessionID] = running
+	if rc.set == nil {
+		rc.set = map[string]bool{}
 	}
+	rc.set[sessionID] = running
 	rc.mu.Unlock()
 }
 

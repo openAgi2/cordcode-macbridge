@@ -640,6 +640,15 @@ type EventSubscriber interface {
 	Subscribe(ctx context.Context) (<-chan Event, error)
 }
 
+// CatalogRefreshSignaler is an optional interface for backends that can detect
+// catalog-affecting changes the moment they happen (e.g. dsh-web's host
+// WebSocket stream) instead of waiting for the discovery watcher's polling
+// cadence. Each signal asks the bridge for an immediate fingerprint rescan →
+// sessions_changed (latency win only; the poller remains the safety net).
+type CatalogRefreshSignaler interface {
+	CatalogRefreshSignals() <-chan struct{}
+}
+
 // SessionEventSubscriber is the per-session counterpart: agents that expose ONE
 // session's live events via a subscribe channel (e.g. Grok leader-socket: a
 // read-only subscriber attaches per sessionID). Used by MacBridge's per-session

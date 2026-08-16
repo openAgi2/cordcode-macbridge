@@ -111,6 +111,14 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 			defer hintTicker.Stop()
 		}
 	}
+	// dsh-web 即时层 (design §4.3.1): host-stream frames signal an immediate
+	// rescan instead of a fixed fast cadence — event-driven, not polled.
+	var refreshC <-chan struct{}
+	if id == "dsh-web" {
+		if signaler, ok := agent.(core.CatalogRefreshSignaler); ok {
+			refreshC = signaler.CatalogRefreshSignals()
+		}
+	}
 	var hintSeen string
 	hintSeeded := false
 	for {
@@ -118,6 +126,10 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 		case <-ctx.Done():
 			return false
 		case <-ticker.C:
+			h.snapshotBackendSession(ctx, seen, false, id, agent)
+		case <-refreshC:
+			// Coalesced by the signaler's buffered channel; the fingerprint
+			// diff itself decides whether sessions_changed fires.
 			h.snapshotBackendSession(ctx, seen, false, id, agent)
 		case <-hintC:
 			if !h.broadcaster.HasConnections() {

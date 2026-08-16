@@ -52,6 +52,14 @@ type Agent struct {
 	// catalog is the last runtime-fetched provider/model catalog.
 	catalog *modelCatalog
 
+	// Dual-stream pump state (§8-3): passive channel, refresh signals,
+	// per-session codecs.
+	streamMu       sync.Mutex
+	streamsStarted bool
+	passive        chan core.Event
+	refreshSignals chan struct{}
+	codecs         map[string]*sessionCodec
+
 	bgCtx    context.Context
 	bgCancel context.CancelFunc
 

@@ -7,10 +7,24 @@ package dshweb
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
+
+// handleApprovalFrame receives mux approval frames (§8-4 wires the pending
+// registry + surface rule; until then the frame is logged and dropped).
+func (a *Agent) handleApprovalFrame(ctx context.Context, rpcID, method string, payload json.RawMessage) {
+	slog.Debug("dsh-web: approval frame (§8-4 pending)", "method", method, "rpcId", rpcID)
+}
+
+// handleQuestionFrame receives mux question frames (§8-4 wires the batch
+// answer assembly; until then the frame is logged and dropped).
+func (a *Agent) handleQuestionFrame(ctx context.Context, rpcID, method string, payload json.RawMessage) {
+	slog.Debug("dsh-web: question frame (§8-4 pending)", "method", method, "rpcId", rpcID)
+}
 
 // respondApproval maps the bridge permission decision onto the official
 // approval response payload (allow→allowed-once / deny→rejected — the
