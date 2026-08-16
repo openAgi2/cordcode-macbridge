@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-16T16:36:22+08:00",
+  "updated_at": "2026-08-16T16:51:38+08:00",
   "todos": [
     {
       "id": "s8-1-client-impl",
@@ -759,7 +759,7 @@
         "s8-8-review-fix-tests"
       ],
       "source": "review-fix",
-      "notes": "review-fix-for:s8-8-release-regression",
+      "notes": "review-fix-for:s8-8-release-regression; 首轮 6cd40cc 未根治。owner 复测 2026-08-16 16:38：行 2/3/4 仍 ❌（Mac web 在流、iPhone 不渲染）；行 8 ✅；6/7 未测。第二轮根因：iOS sessionSyncV2ProjectionBackend 漏 deepSeekWeb + Mac live&&!hasKernel 空基线。fix2: Mac 841cd92 / iOS 8b92322。待 owner 再测 2/3/4/6/7。",
       "verification": {
         "required": true,
         "status": "missing",
@@ -773,6 +773,85 @@
           "cmd:go-bridge.log => instance resolved external + mux/host open"
         ],
         "checked_at": "2026-08-16T20:30:00+08:00"
+      }
+    },
+    {
+      "id": "s8-8-review-fix2-impl",
+      "title": "修复2：iOS SSV2 列入 deepSeekWeb + 空 kernel 先 history 播种",
+      "description": "review-fix-for:s8-8-release-regression。① iOS ChatViewModel.sessionSyncV2ProjectionBackend 加 .deepSeekWeb（Mac 已推 patch，漏列则泵丢掉、UI 等 raw event）。② Mac dsh-web 基线条件改为 hasKernel && (live || !forceCold)，空 kernel 即使 registry live 也走 pathless history。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "review-fix",
+      "notes": "review-fix-for:s8-8-release-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "iOS ChatViewModel.swift 加 .deepSeekWeb；Mac handlers_projection.go 条件改为 hasKernel && (live || !forceCold)。git Mac:841cd92 iOS:8b92322。",
+        "artifacts": [
+          "OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel.swift",
+          "go-bridge/handlers_projection.go",
+          "git:841cd92",
+          "iOS git:8b92322"
+        ],
+        "checked_at": "2026-08-16T16:51:38+08:00"
+      }
+    },
+    {
+      "id": "s8-8-review-fix2-tests",
+      "title": "修复2 测试：SSV2 接管 + live!hasKernel 播种 + 既有 live 冷拉不回退",
+      "description": "review-fix-for:s8-8-release-regression。iOS testDeepSeekWebActiveOwnsMessagesWhenCapable；Mac TestDSHWebLiveRegistryWithoutKernelSeedsFromHistory + 既有 TestDSHWeb 全绿。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "tests",
+      "depends_on": [
+        "s8-8-review-fix2-impl"
+      ],
+      "source": "review-fix",
+      "notes": "review-fix-for:s8-8-release-regression",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "go test ./go-bridge/ -run TestDSHWeb PASS（含新 LiveRegistryWithoutKernelSeedsFromHistory + 既有 ColdPull/DeadSession）。iOS ChatViewModelSessionSyncV2Tests/testDeepSeekWebActiveOwnsMessagesWhenCapable + BridgeModelsTests 46/46 PASS。",
+        "artifacts": [
+          "cmd:go test ./go-bridge/ -run TestDSHWeb => ok",
+          "cmd:xcodebuild test ChatViewModelSessionSyncV2Tests/testDeepSeekWeb + BridgeModelsTests => 46/46"
+        ],
+        "checked_at": "2026-08-16T16:51:38+08:00"
+      }
+    },
+    {
+      "id": "s8-8-review-fix2-regression",
+      "title": "修复2 回归：双仓重装 + owner 复测行 2/3/4/6/7",
+      "description": "review-fix-for:s8-8-release-regression。Mac Release 841cd92 已覆盖 /Applications；iOS 8b92322 已装 iPhone 16 Pro 并启动。剩余=owner 复测行 2/3/4（流式）及 6/7（审批）。",
+      "status": "in_progress",
+      "phase": "s8-8",
+      "kind": "regression",
+      "depends_on": [
+        "s8-8-review-fix2-tests"
+      ],
+      "source": "review-fix",
+      "notes": "review-fix-for:s8-8-release-regression",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "manual",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "agent 侧已完成：Mac Release 841cd92 覆盖安装，runtime 嵌入 841cd92，8777=/Applications，dsh-web external 3080 + mux/host 开；iOS run.sh device BFC431AC 安装启动成功。等 owner 复测。",
+        "artifacts": [
+          "dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip (runtime 841cd92)",
+          "cmd:pgrep => 仅 /Applications",
+          "cmd:scripts/run.sh device --device BFC431AC => installed+launched"
+        ],
+        "checked_at": "2026-08-16T16:51:38+08:00"
       }
     }
   ]
