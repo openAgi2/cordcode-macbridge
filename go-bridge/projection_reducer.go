@@ -362,6 +362,10 @@ func (ps *projectionSession) hasPendingUserInput(turnID string) bool {
 		if t.Assistant.Parts[i].Type == "user_input" && t.Assistant.Parts[i].UserInputStatus == "pending" {
 			return true
 		}
+		if t.Assistant.Parts[i].Type == "tool" && t.Assistant.Parts[i].RequiresPermissionConfirmation &&
+			(t.Assistant.Parts[i].ToolStatus == "" || t.Assistant.Parts[i].ToolStatus == "pending") {
+			return true
+		}
 	}
 	return false
 }
@@ -735,6 +739,69 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			t.Assistant.Parts = append(t.Assistant.Parts, part)
 		}
 
+	case "permission_request":
+		// dsh-web mux approval/requested. Not reduced before 2026-08-16, so SSV2
+		// clients never saw a permission card (projection overwrite wiped the live
+		// toolStarted). itemId = requestId (approvalId); attach to the active turn.
+		callID := dataString(data, "requestId")
+		if callID == "" {
+			callID = dataString(data, "itemId")
+		}
+		if callID == "" {
+			return
+		}
+		activeTurnID := ps.projection.Execution.ActiveTurnID
+		if activeTurnID == "" {
+			activeTurnID = ps.latestRunningTurnID()
+		}
+		if activeTurnID == "" {
+			return
+		}
+		t := ps.turnByID(activeTurnID)
+		if t == nil {
+			return
+		}
+		commit()
+		if t.Assistant == nil {
+			t.Assistant = &MessageProjection{ID: activeTurnID, Role: "assistant"}
+		}
+		part := ProjectionPart{
+			Type:                           "tool",
+			ItemID:                         callID,
+			ToolStatus:                     "pending",
+			RequiresPermissionConfirmation: true,
+		}
+		if name := dataString(data, "toolName"); name != "" {
+			part.ToolName = name
+		}
+		if v, ok := data["toolInput"]; ok {
+			part.ToolInput = v
+		} else if v, ok := data["toolInputRaw"]; ok {
+			part.ToolInput = v
+		}
+		found := false
+		for i := range t.Assistant.Parts {
+			if t.Assistant.Parts[i].Type == "tool" && t.Assistant.Parts[i].ItemID == callID {
+				mergeToolPart(&t.Assistant.Parts[i], part)
+				t.Assistant.Parts[i].RequiresPermissionConfirmation = true
+				t.Assistant.Parts[i].ToolStatus = "pending"
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Assistant.Parts = append(t.Assistant.Parts, part)
+		}
+		if ps.tools != nil {
+			for i := range t.Assistant.Parts {
+				if t.Assistant.Parts[i].Type == "tool" && t.Assistant.Parts[i].ItemID == callID {
+					ps.tools[callID] = t.Assistant.Parts[i]
+					break
+				}
+			}
+		}
+		ps.applyUserInputExecution(activeTurnID)
+
 	case "user_input_requested":
 		// Structured user input requested (design §10.1/§10.2). The adapter emits a proven
 		// turnId + interactionId; without both the event is identityless and skipped (no
@@ -893,6 +960,11 @@ func mergeToolPart(dst *ProjectionPart, src ProjectionPart) {
 	}
 	if src.ToolStatus != "" {
 		dst.ToolStatus = src.ToolStatus
+	}
+	if src.RequiresPermissionConfirmation {
+		dst.RequiresPermissionConfirmation = true
+	} else if src.ToolStatus != "" && src.ToolStatus != "pending" {
+		dst.RequiresPermissionConfirmation = false
 	}
 }
 

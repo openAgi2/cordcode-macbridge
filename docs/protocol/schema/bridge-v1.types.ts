@@ -483,6 +483,12 @@ export type BridgeProjectionPart =
         movePath?: string;
         diff?: string;
       }>;
+      /**
+       * Optional: this pending tool must be approved before the turn continues
+       * (dsh-web approval/requested → permission_request). Additive; absent/false
+       * on older producers. Clients map to the existing permission card.
+       */
+      requiresPermissionConfirmation?: boolean;
     }
   | { type: "file"; path?: string; kind?: string; diff?: string; movePath?: string }
   | {

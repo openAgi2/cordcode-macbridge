@@ -30,6 +30,11 @@ type ProjectionPart struct {
 	// Wire shape: []{path, kind?, movePath?, diff?}. Additive; see bridge-v1.types.ts
 	// BridgeProjectionPart tool.fileChanges.
 	FileChanges interface{} `json:"fileChanges,omitempty"`
+	// RequiresPermissionConfirmation marks a pending tool that must be approved
+	// before the turn continues (dsh-web approval/requested → permission_request).
+	// Additive; absent/false on older producers. SSV2 clients render the existing
+	// permission card from this flag — the raw permission_request is not SoT.
+	RequiresPermissionConfirmation bool `json:"requiresPermissionConfirmation,omitempty"`
 
 	// file
 	Path     string `json:"path,omitempty"`
