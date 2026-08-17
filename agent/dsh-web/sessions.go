@@ -8,6 +8,7 @@ package dshweb
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -70,11 +71,20 @@ func (rc *runningCache) setOne(sessionID string, running bool) {
 	rc.mu.Unlock()
 }
 
+// ungroupedDirectory is the official sidebar bucket label (zh-CN
+// `group.ungrouped` = "未分组"). Official grouping is workspace.sessionIds
+// membership, not cwd; iOS sidebars group by session.directory, so stray
+// rows must not keep a workspace path or they collapse into that folder.
+const ungroupedDirectory = "未分组"
+
 // ListSessions maps session.list onto AgentSessionInfo rows (design §4.3.1):
-// sessionId→id, updatedAt(ms)→modifiedAt, cwd→directory, running→cache;
+// sessionId→id, updatedAt(ms)→modifiedAt, running→cache;
 // subagent rows (origin=subagent / parentSessionId set) and blank sessions
-// are filtered exactly like the web sidebar. The official cursor is an
-// unimplemented reserved seat — one full page; the bridge paginates.
+// are filtered exactly like the web sidebar. Directory is official workspace
+// membership (workspace.list sessionIds), not cwd — same rule as the Mac web
+// sidebar (think.md 2026-08-16). Archived ids get ArchivedAt so iOS hides
+// them. The official cursor is an unimplemented reserved seat — one full
+// page; the bridge paginates.
 func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, error) {
 	client, err := a.clientFor(ctx)
 	if err != nil {
@@ -84,6 +94,8 @@ func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, erro
 	if err := client.Call(ctx, "session.list", sessionListRequest{}, &val); err != nil {
 		return nil, err
 	}
+
+	grouping, archived, haveGrouping := loadOfficialGrouping(ctx, client)
 
 	a.running.stage(val.Items)
 	out := make([]core.AgentSessionInfo, 0, len(val.Items))
@@ -95,9 +107,23 @@ func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, erro
 			continue
 		}
 		info := core.AgentSessionInfo{
-			ID:         item.SessionID,
-			ModifiedAt: time.UnixMilli(item.UpdatedAt),
-			Directory:  item.Cwd,
+			ID:          item.SessionID,
+			ModifiedAt:  time.UnixMilli(item.UpdatedAt),
+			Directory:   item.Cwd,
+			AgentPreset: item.AgentPreset,
+		}
+		if haveGrouping {
+			if path, ok := grouping[item.SessionID]; ok {
+				info.Directory = path
+			} else {
+				info.Directory = ungroupedDirectory
+			}
+		}
+		if _, ok := archived[item.SessionID]; ok {
+			info.ArchivedAt = info.ModifiedAt
+			if info.ArchivedAt.IsZero() {
+				info.ArchivedAt = time.Unix(1, 0).UTC()
+			}
 		}
 		info.Summary = titleFromProjections(item.Projections)
 		if info.Summary == "" {
@@ -110,6 +136,72 @@ func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, erro
 	}
 	a.running.commit()
 	return out, nil
+}
+
+// loadOfficialGrouping reads workspace.list. On success, grouping maps a
+// session id to the first workspace path that lists it, and archived is the
+// registry-global archive set. A failed call returns haveGrouping=false so
+// ListSessions keeps cwd (list still works; grouping degrades).
+func loadOfficialGrouping(ctx context.Context, client *Client) (map[string]string, map[string]struct{}, bool) {
+	var val workspaceListValue
+	if err := client.Call(ctx, "workspace.list", map[string]any{}, &val); err != nil {
+		return nil, nil, false
+	}
+	grouping := make(map[string]string, 16)
+	for _, w := range val.Items {
+		if w.Path == "" {
+			continue
+		}
+		for _, id := range w.SessionIDs {
+			if id == "" {
+				continue
+			}
+			if _, exists := grouping[id]; exists {
+				continue
+			}
+			grouping[id] = w.Path
+		}
+	}
+	archived := make(map[string]struct{}, len(val.ArchivedSessionIds))
+	for _, id := range val.ArchivedSessionIds {
+		if id != "" {
+			archived[id] = struct{}{}
+		}
+	}
+	return grouping, archived, true
+}
+
+// isUngroupedDirectory reports the iOS sidebar bucket for sessions that are
+// not on any workspace.sessionIds list. Create must not send it as cwd.
+func isUngroupedDirectory(dir string) bool {
+	return strings.TrimSpace(dir) == ungroupedDirectory
+}
+
+// workspaceIDForDirectory returns the official workspace id whose path matches
+// dir. Empty if workspace.list fails or no path matches — caller then sends cwd.
+func workspaceIDForDirectory(ctx context.Context, client *Client, dir string) string {
+	want := normalizeWorkspacePath(dir)
+	if want == "" {
+		return ""
+	}
+	var val workspaceListValue
+	if err := client.Call(ctx, "workspace.list", map[string]any{}, &val); err != nil {
+		return ""
+	}
+	for _, w := range val.Items {
+		if normalizeWorkspacePath(w.Path) == want && w.WorkspaceID != "" {
+			return w.WorkspaceID
+		}
+	}
+	return ""
+}
+
+func normalizeWorkspacePath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return ""
+	}
+	return filepath.Clean(p)
 }
 
 // titleFromProjections extracts projections.values.title (the session-title

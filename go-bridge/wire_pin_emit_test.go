@@ -50,3 +50,24 @@ func TestMapSessionEmitsPinnedAtMillisWhenSourceHasIt(t *testing.T) {
 		t.Fatal("mapSession emitted pinnedAtMillis for non-pinned source")
 	}
 }
+
+func TestSessionsToWireEmitsAgentPreset(t *testing.T) {
+	sessions := []core.AgentSessionInfo{
+		{ID: "ptc", Summary: "t1", AgentPreset: "code"},
+		{ID: "plain", Summary: "t2"},
+	}
+	wire := sessionsToWire(sessions)
+	if len(wire) != 2 {
+		t.Fatalf("want 2 wire maps, got %d", len(wire))
+	}
+	got, ok := wire[0]["agentPreset"]
+	if !ok {
+		t.Fatal("preset session missing agentPreset")
+	}
+	if got != "code" {
+		t.Fatalf("agentPreset=%v want=code", got)
+	}
+	if _, present := wire[1]["agentPreset"]; present {
+		t.Fatal("session without preset must omit agentPreset")
+	}
+}

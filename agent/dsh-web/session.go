@@ -9,6 +9,7 @@ package dshweb
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -31,9 +32,9 @@ type dshSession struct {
 
 // StartSession binds or creates one official session (design §4.3.4/§4.3.6):
 //
-//   - sessionID == "" → session.create{cwd} (cwd = iOS-selected directory via
-//     create_session's switchDir; cwd hitting a registered workspace
-//     auto-groups there — the official create flow owns workspace attach).
+//   - sessionID == "" → session.create{workspaceId} when the iOS-selected
+//     directory matches a registered workspace (official attach only runs
+//     with workspaceId); otherwise session.create{cwd}.
 //   - sessionID != "" → bind the existing session (official resume semantics;
 //     no guard, no session_resume_not_supported — §3.1), verified by a light
 //     history probe so an unknown id fails visibly with the official
@@ -83,12 +84,28 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	return s, nil
 }
 
-// create performs session.create{cwd} and applies any pending model
-// selection (bridge-level switch_model before the first session — the only
-// official surface is session-scoped selectModel, applied right after create).
+// create performs session.create and applies any pending model selection
+// (bridge-level switch_model before the first session — the only official
+// surface is session-scoped selectModel, applied right after create).
+//
+// Official attach (workspace.sessionIds) runs ONLY when the payload carries
+// workspaceId (apiproxy session.create). cwd alone sets the session header
+// directory and leaves the row in 未分组 — the design's "cwd match auto-groups"
+// claim was wrong. When the iOS-selected directory matches a registered
+// workspace path, send workspaceId (schema: at most one of workspaceId|cwd).
 func (s *dshSession) create(ctx context.Context) (string, error) {
 	var val sessionCreateValue
-	req := sessionCreateRequest{Cwd: s.agent.GetWorkDir()}
+	req := sessionCreateRequest{}
+	if cwd := s.agent.GetWorkDir(); cwd != "" && !isUngroupedDirectory(cwd) {
+		if wsID := workspaceIDForDirectory(ctx, s.client, cwd); wsID != "" {
+			req.WorkspaceID = wsID
+		} else {
+			req.Cwd = cwd
+		}
+	}
+	if preset := strings.TrimSpace(s.agent.pendingPreset); preset != "" {
+		req.AgentPreset = preset
+	}
 	if err := s.client.Call(ctx, "session.create", req, &val); err != nil {
 		return "", err
 	}

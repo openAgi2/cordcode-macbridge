@@ -82,6 +82,7 @@ var rpcScopeTable = map[string]string{
 	"set_provider":        ScopeConfigWrite,
 	"switch_model":        ScopeConfigWrite,
 	"set_permission_mode": ScopeConfigWrite,
+	"set_agent_preset":    ScopeConfigWrite,
 
 	// workspace.read
 	"get_workspace_diff":         ScopeWorkspaceRead,

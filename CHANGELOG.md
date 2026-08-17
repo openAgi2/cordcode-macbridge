@@ -7,6 +7,16 @@
 版本号对齐 MacBridge Release 构建的 `MARKETING_VERSION`（见 `MacBridge/project.yml`）。日期为协调世界时（UTC）。
 
 ## [Unreleased]
+- **修复：长 DeepSeek Harness 会话 iPhone 打不开投影**：官方 history 按「消息数」分页，一条消息里可能有几千条 chunk。以前一页要 2000 条消息，Exec plan 那种会话单页 55MB，超过 32MB 读取上限后 JSON 被截断，iPhone 显示「无法加载会话投影」。现按官方默认每页 50 条消息，超大页会自动缩小再拉。
+- **改进：DeepSeek Harness 已开会话显示当前预设**：列表和打开会话时带上官方 `agentPreset`，iPhone 标题旁能看到「标准模式 / PTC模式 / 极简模式 / 创造模式」，和官方 web 标题左那枚芯片一样。
+- **新功能：DeepSeek Harness 新建会话可选官方 Agent 预设**：iPhone 空白页列出标准 / PTC / 极简 / 创造，创建时传给官方 `session.create`。开聊后锁定。
+- **改进：DeepSeek Harness 会话统计进上下文表**：点 ⭕ 除了已用百分比和拆分，还能看到官方 StatsLine 的轮次/步数、LLM/工具耗时、首 token、吞吐、缓存命中和计费 in/out。数据来自官方 `sessionStats`/`tokenUsage`，不在 iPhone 上自己加。
+- **改进：DeepSeek Harness 用官方鲸鱼标**：工作站工具行图标换成官方 `dsh web` favicon，尺寸和现有 Claude/Codex/Grok/OpenCode 标记一致。
+- **改进：DeepSeek Web 对外显示为 DeepSeek Harness**：hello_ack 显示名改了，wire kind 仍是 `deepseek-web`，driver 仍是 `dsh-web`。
+- **改进：产品入口不再提供旧 DeepSeek（SDK）模式**：默认只留 DeepSeek Web。旧 `agent/dsh` 源码还在，需要时仍可显式挂上，但 iPhone 上不再出现「DeepSeek」和「DeepSeek Web」两个入口。
+- **修复：DeepSeek Web 点「查看更多」会列出所有工作区**：深挖只该看当前目录。此前列表接口没按目录过滤，cordcode-ios 的「查看更多」里会混进 Chat 的会话。
+- **修复：DeepSeek Web 在 Chat 目录新建会话却进「未分组」**：官方只有带工作区 id 的创建才会写入该文件夹名单，只传目录路径不会归组。iPhone 在 Chat 点新建现在会带上对应工作区 id。
+- **修复：DeepSeek Web 会话列表分组与官方 web 不一致**：官方按工作区名单归组（不在名单里的进「未分组」，归档的不显示），iPhone 之前按目录路径归组，所以 Chat 目录下的会话会被并进 Chat，归档的也会露出来。现跟官方同一套名单。
 - **修复：DeepSeek Web 打开旧会话 iPhone 看不到上下文圆环**：用量是打开后再拉的，圆环不能等数据才出现。`get_session` 现在带上官方上下文用量，iPhone 打开会话和点圆环都会刷新。
 - **改进：DeepSeek Web 上下文窗口对齐官方 web**：点输入条上下文钮不再是「暂无用量」。现读官方 `contextPressure`/`contextBreakdown`，显示已用百分比、`~41.2K / 1M` 以及系统提示词 / 工具 / 对话消息拆分。
 - **修复：DeepSeek Web 选权限不再往消息页发 `/permission`**：官方齿轮走宿主斜杠命令通道（不进模型、不出现用户气泡）。此前误走了发消息接口，模型会回「我无法更改沙箱/权限策略」。现与官方 web 同一条写面，并记住默认。

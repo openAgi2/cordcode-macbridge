@@ -3,6 +3,10 @@
 > 本文从原一体仓库 `go-bridge 框架现状.md`、`go_bridge_使用指南.md` 中提炼，
 > 以拆分后的 `cordcode-macbridge` 源码为准。旧 Node Unified Bridge、外部 `cc-connect`
 > replace、Copilot sidecar 和 FRP 默认路径均已删除出当前说明。
+>
+> 2026-08-17 按当前树校正：默认 drivers 含 `deepseek`/`dsh-web`；补 SSV2 投影、
+> 目录 catalog、Grok `session/list`、dsh-web 官方 API 转发模型。设计细节仍以
+> `docs/2026-08-16-dsh-web-backend-design.md` 为准，本文只记现行结构。
 
 ## 边界
 
@@ -14,15 +18,21 @@ iPhone / iPad
             │
             ▼
 cordcode-bridge-runtime
-  ├─ protocol/auth/pairing/relay: go-bridge/
+  ├─ protocol/auth/pairing/relay/projection: go-bridge/
   ├─ agent interfaces: core/
-  ├─ agent implementations: agent/{claudecode,codex,grokbuild,opencode}/
+  ├─ agent implementations: agent/{claudecode,codex,grokbuild,opencode,dsh,dsh-web}/
   └─ local configuration: config/
 ```
 
 `core/`、`config/`、`agent/` 已迁入本仓库，不再依赖原一体仓库或本机绝对路径
 `replace`。wire 协议适配留在 `go-bridge/`，agent 的进程、历史、模型和能力实现放在
 `agent/` 与 `core/`。
+
+产品 runtime 默认 `-drivers` 为
+`claude,opencode,codex,grokbuild,dsh-web`。flag 里的 id 与 Go 包名
+不完全相同：`claude` → `agent/claudecode`，`dsh-web` 包名是 `dshweb`、
+wire kind 是 `deepseek-web`。旧 `deepseek` → `agent/dsh` 仍可显式挂上，
+但默认不再注册（2026-08-17 产品入口退役，源码保留）。
 
 ## 为什么不再使用旧 Node Unified Bridge
 
@@ -38,6 +48,8 @@ go-bridge 的边界来自旧实现暴露出的四类问题：
 - agent 数据面能力放进 `core/agent`；
 - wire、auth、pairing、relay adaptation 放进 `go-bridge/`；
 - 只有 OpenCode server 独有的 HTTP 语义保留 proxy；
+- DeepSeek Web 是官方 `dsh web` HTTP/WebSocket 的转发器 + bridge-v1 翻译器，
+  不发明模型名、标题或工作区归组；
 - 真实路径失败时暴露错误，不增加假结果或 fallback backend。
 
 ## 三个网络面
@@ -63,8 +75,9 @@ Relay 是第四条传输路径但复用同一 Bridge RPC/event 语义。Relay se
 3. 关闭 direct/relay 连接；
 4. 停止 relay、TLS 与 Management 服务。
 
-Claude 与 Codex 子进程使用进程组回收。不要通过增加后台孤儿进程或忽略 shutdown 错误来
-“提高可用性”。
+Claude / Codex / Grok catalog 与 dsh 子进程使用进程组回收；dsh-web 只杀自己
+spawn 的 managed 实例，从不碰用户自己的 3080。不要通过增加后台孤儿进程或忽略
+shutdown 错误来“提高可用性”。
 
 ## 事件、session 与广播设计
 
@@ -138,8 +151,14 @@ turn 完成时，在线订阅设备收到事件；未在线设备的通知写入
 因此 iOS 不能把“Bridge 有 liveEventStream”误解为“Claude 的所有外部 turn 都会广播”。
 
 > [!NOTE]
-> 为了支持 Claude Code 长生命周期的 CLI 进程交互与多轮会话，MacBridge 的 `relayEvents` 转发协程在遇到完成/空闲等退出事件时对 `"claude"` 后端特判继续运行（通过 `continue` 绕过退出）。
-> 这意味着每一个通过 iOS 发起过消息的 Claude 会话都会长驻一个转发协程和底层会话对象，其生命周期的终结完全依赖于该会话被显式关闭或删除（届时 events channel 关闭，协程才会自然退出）。在排查协程或内存泄露时需要注意此常驻设计。
+> `relayEvents` 对会跨 turn 存活的 backend 不在 `turn_completed` / 空闲时退出：
+> `relaySurvivesTurnBoundary` 当前覆盖 `claude` / `claudecode` / `dsh-web`。
+> Claude 是长生命周期 CLI；dsh-web 是常驻 mux 绑定，下一轮审批/问答仍走同一
+> `Events()` 通道。`Close()` 必须关闭 `Events()`，否则下一轮 send 会新建 session
+> 对象而 `startRelayIfNotRunning` 空转，iOS 收不到后续审批。
+> 另：`disablesRelayIdleTimeout` 对 claude / claudecode / codex / opencode /
+> dsh-web 关闭 60s 空闲收口——dsh-web 审批等待期间 mux 不再吐 `text_delta`，
+> 空闲超时会把还在等权限的 turn 提前封口。
 
 ### Codex
 
@@ -180,9 +199,99 @@ MacBridge Restart 只重启 Bridge runtime，不负责重启外部共享 Codex a
 ### Grok Build
 
 Grok Build 由 `agent/grokbuild` ACP driver 提供，产品 runtime 默认注册名为 `grokbuild`
-（界面显示为 Grok Build）。ACP 当前不提供 session/list，因此会话目录与历史由本机
-`~/.grok/sessions` catalog 提供；其能力与可用状态仍由 `core` 可选接口和 descriptor 推导，
-客户端不得仅按 backend 名称假定能力。
+（界面显示为 Grok Build）。
+
+- 每个 turn 仍是独立 `grok agent` stdio 子进程（`LiveEventSessionProcess`）。
+- 会话目录走进程级单例 catalog 子进程：`grok agent --no-leader stdio` 上的
+  `session/list`（握手未声明 list 能力则 fail-closed，不再静默读本地
+  `~/.grok/sessions`）。上游 list **不按 cwd 过滤**；iOS「查看更多」的
+  directory 范围由 go-bridge `filterWireSessionsByDirectory` 过滤。
+- descriptor：`requiresPollingForExternalTurns=true`（外部 turn 仍要 polling /
+  `updates.jsonl` tailer 兜底；leader-socket 订阅尚未取代这一声明）。
+- 能力仍由 `core` 可选接口和 `WireDescriptor` 推导，客户端不得只按名称猜。
+
+### DeepSeek（`deepseek` → `agent/dsh`，产品入口已退役）
+
+旧 SDK stdio 路线。源码与 `dsh-web` **并行保留、互不 import**，但 **默认
+drivers 不再注册**，iOS 将其标为 deprecated。会话数据在 `~/.dsh/sessions`，
+DeepSeek Web 经官方 API 可读可续。不要在这条路上再扩功能。
+
+每个活跃 session 一个 `dsh-jsonrpc-agent`（或用户全局 npm `dsh` 的
+shadow-tree 启动）子进程，协议是 SDK JSON-RPC 2.0 over stdio，不是官方 web API。
+
+- wire kind `deepseek`，iOS `BackendKind.deepSeek`。
+- 会话日志可读用户 `~/.dsh/sessions`（zstd / 明文）；冷投影走 pathless
+  rich-history 重建。
+- `LiveEventSessionProcess`，`requiresPollingForExternalTurns=false`（没有
+  跨进程共享事件总线，外部 Mac web turn 不会进这个 driver）。
+- 与官方 web 共写同一 store 时必须对齐编码（zstd）和模型白名单；新接入应优先
+  dsh-web，不要在这条路上再扩官方 web 才有的审批/问答/归组。
+
+### DeepSeek Web（`dsh-web` → `agent/dsh-web`，包名 `dshweb`）
+
+官方 `dsh web` 的请求转发器 + bridge-v1 翻译器。iOS 几乎零新渲染逻辑；标题、
+模型、权限预设、上下文用量、工作区归组都取自官方 API，MacBridge 不发明这些事实。
+
+**实例生命周期（探测复用优先）：**
+
+1. 启动时后台 `host.describe` 探测用户自己的实例（默认 `127.0.0.1:3080`）；
+2. 未命中则 managed spawn：`dsh --profile web --host 127.0.0.1 --port 3096…3196`，
+   状态写入 data dir 的 `dsh-web-managed-server.json`（0600，无凭据——dsh v1
+   无认证面）；
+3. 两态都失败 → hello_ack `not_configured`，不代装。
+
+hello_ack 的 `detectDSHWebInstance` 只镜像 driver 已解析的实例状态，自己不再
+探测或 spawn。
+
+**两条常驻 WebSocket（官方 v1 无 `since`，重连 = 重开流 + history/forceCold）：**
+
+| 流 | 作用 |
+| --- | --- |
+| `GET /api/events.mux` | 全会话 `session/event`（与磁盘日志同构）。`assistant/chunk` 的 `text-delta` 即真流式打字机。绑定中的 session 走该 `dshSession.Events()`；其余走 agent 级 passive 通道（外部 Mac web turn 同样直播）。 |
+| `GET /api/events.host` | `session-added/removed/status`、`workspace-changed` → `CatalogRefreshSignaler` 立即重扫 catalog，不必等 60s discovery。 |
+
+**会话列表与归组：**
+
+- `session.list` → `ListSessions`：滤掉 `origin=subagent` / `parentSessionId` /
+  `blank`；标题优先 `projections.values.title`，否则 history 尾读。
+- 分组键不是 cwd。官方侧栏按 `workspace.list` 的 `sessionIds` 名单归组；
+  不在名单里的进「未分组」；`archivedSessionIds` 打 `archivedAtMillis`，iOS 隐藏。
+- 在 Chat / cordcode-ios 这种已登记目录新建：`session.create` 必须带
+  `workspaceId`（官方 **只有** 带 workspaceId 才会 `attachSession`）。只传 cwd
+  能聊，但会话进「未分组」。cwd 命中已登记 path 时 create 改传 workspaceId。
+- `list_sessions` 带 `directory`（iOS「查看更多」）时，generic 列表路径必须
+  `filterWireSessionsByDirectory`，否则 sheet 会混进所有工作区。
+
+**审批 / 问答 / 权限 / 用量：**
+
+- 权限：官方 mux `approval/requested` → `permission_request`；应答
+  `POST /api/respond`（first-writer-wins）。日志里的 `approval/asked` 只是审计，
+  不进 codec。
+- 问答：权威事件是 `user_input_requested`（SSV2 投影 / UserInputDock）。
+  `question_asked` 是 derived-legacy，EventPublisher **不 ingest**。
+- 齿轮权限模式：`ModeSwitcher` 走官方 `POST /api/commands/execute`
+  `{args:{agentId,line:"/permission <preset>"}}`，**禁止**当用户消息
+  `session.prompt`（否则模型会回「我无法改沙箱」）。
+- Agent 预设（标准/PTC/极简/创造）：`agentPreset.list` / `session.create.agentPreset`；
+  空白会话才能 `agentPreset.select`。不是权限档。`session.list` /
+  `get_session` 带官方 `agentPreset`，iPhone 标题旁显示「标准模式」芯片。
+- 上下文表：官方 projections 的 `contextPressure` /
+  `contextBreakdown`（system/tools/messages），以及 StatsLine 的
+  `sessionStats` / `tokenUsage`（轮次、耗时、缓存命中、计费
+  in/out）；`get_session` 带 `contextUsage`，tail 与
+  `session/projection` 增量都发 `context_usage_updated`。iOS 点 ⭕
+  看同一张表，不另做输入框底下那一行。
+- 冷投影：`session.history` 按官方 `maxMessages=50` 分页（消息边界，不是
+  事件条数）。长会话一页过大时缩小再拉，避免 32MiB unary 截断。
+
+**descriptor：**
+
+- kind `deepseek-web`，显示名 DeepSeek Harness（iOS 切换框用这个名字；底层仍是 dsh-web）。
+- `LiveEventBroadcast`，`requiresPollingForExternalTurns=false`。
+- StaticCapabilities：`external_turn_streaming`、`question_reply`、
+  `structured_user_input_v1`。phase 1 不声明附件。
+- 投影：pathless 家族，冷基线 = 官方 `session.history`，**不进** deepseek
+  的 store-file 分支。live/kernel 会话以 kernel 为基线，重建只服务冷开。
 
 ### OpenCode
 
@@ -235,25 +344,33 @@ agent session 等价。
 `go-bridge/agent_descriptor.go` 根据 `core/interfaces.go` 的可选接口推导 capability。
 调用方必须以 `hello_ack.backends[].capabilities` 为准，不要只按 backend 名称猜能力。
 
-常见 capability：
+常见 capability（`deriveBackendCapabilities` + 各 driver `WireDescriptor.StaticCapabilities`）：
 
 | capability | 来源 |
 | --- | --- |
 | `model_switch`、`session_state` | 基础能力 |
 | `provider_switch` | `ProviderSwitcher` |
 | `session_history` | `HistoryProvider` |
-| `workspace_diff` | `WorkDirSwitcher` |
+| `workspace_diff`、`supports_workspace_browse` | `WorkDirSwitcher` |
 | `memory_read` | `MemoryFileReader` |
 | `diagnostics` | `DiagnosticsProvider` |
 | `usage_reporting` | `TokenUsageReporter` |
-| `permission_mode` | `ModeSwitcher` |
+| `permission_mode` | `ModeSwitcher`（含 dsh-web 官方 `/permission` 预设） |
 | `session_mutation` | rename + archive |
 | `session_delete` | `SessionDeleter` |
-| `content_chunking` | Claude Code 专属，配合 `fetch_content_chunk` |
-| `permission_resolve` | `ToolAuthorizer`，当前不对 OpenCode/Codex 宣告 |
-| `todos` | `TodoProvider`，OpenCode 也显式暴露 |
-| `compression` | Codex app-server |
-| `question_reply` | 目前只在 Management API `/internal/agents` 的 `BackendList()` 中出现，不在 `hello_ack.backends[]` 的 `deriveCapabilities()` 中下发 |
+| `session_pin` | `SessionPinner`（独立于 mutation；Codex/OpenCode/dsh-web 可只有 pin） |
+| `content_chunking` | Claude `StaticCapabilities`，配合 `fetch_content_chunk` |
+| `permission_resolve` | `ToolAuthorizer`；OpenCode/Codex 不宣告；dsh-web 宣告（`/api/respond`） |
+| `todos` | `TodoProvider` |
+| `compression` | Codex `app_server` |
+| `question_reply` | Codex `app_server` 在 derive 里加；Claude / dsh-web 走 `StaticCapabilities` |
+| `structured_user_input_v1` | Codex `app_server`，或 `StructuredUserInputProvider`；dsh-web 也在 StaticCapabilities |
+| `external_turn_streaming` | 各 driver `StaticCapabilities`（Claude transcript / Codex file-relay / dsh-web mux） |
+| `supports_checkpoint` / `supports_commit_message` / `supports_pull_requests` | 对应 opt-in 接口；未实现则不宣告 |
+
+`session_sync_v2` 是 **连接级** capability（hello 里声明、hello_ack 回显），不是
+backend 行上的 capability。它打开 Session Projection Stream，与上面的 per-backend
+能力正交；iOS 对结构化问答自行 AND `session_sync_v2` + `structured_user_input_v1`。
 
 `session_pagination` 当前仍不向客户端宣告：稳定游标与 transcript-index 分页实现已经存在，
 但 backward paging 曾造成 newest/backward UI 振荡，产品路径仍走完整历史 fallback。重新启用
@@ -283,9 +400,10 @@ agent 事件经 `go-bridge/events.go` 统一映射：
 | tool use/result | `tool_started` / `tool_finished` |
 | plan | `todos_updated` |
 | turn lifecycle | `turn_started` / `turn_completed` |
-| permission | `permission_request` |
+| permission | `permission_request` / `permission_resolved` |
 | context | `context_compressing` / `context_compressed` / `context_usage_updated` |
-| Codex question | `question_asked` / `question_resolved` |
+| 旧问答 | `question_asked` / `question_resolved`（derived-legacy；EventPublisher 不 ingest `question_asked`） |
+| 结构化问答 | `user_input_requested` / `user_input_resolved`（SSV2 / UserInputDock 权威面） |
 
 同一 session 的 direct 与 relay 客户端通过 broadcaster 订阅。连接关闭必须注销订阅；
 发送方也走 broadcaster，避免“直接写 + 广播”产生双份事件。
@@ -308,15 +426,57 @@ running-session polling、session switch 之间的互斥与优先级。MacBridge
   不清空 live partial。
 - **OpenCode**：SSE live event 优先，descriptor 决定 polling 兜底；与 Codex 同样走
   merge-only 直通。
+- **DeepSeek Web**：mux 是 agent 级广播，覆盖本机 web 发起的外部 turn，不需要
+  external-turn polling。iOS 必须把它放进 SSV2 投影族；空 kernel 时先用官方
+  history 播种，不得把 live 会话收成空基线。审批等待期无 text_delta，relay 不得
+  因空闲超时封口。
 
 ownership 的读写与 history apply 前复核均在 iOS `@MainActor` 边界内完成，并有定向
 交错测试覆盖（`RemoteRunningSessionTests.testClaudeCodeInterleave_*`）。MacBridge 的
 send/stream 语义不为此做 backend-specific 重复抑制——iOS 侧的 race 由 iOS policy 收敛。
 
+流式粒度（产品手感，不是 bug）：dsh-web 的 `assistant/chunk text-delta` 与官方 web
+同一条细流，iPhone 呈打字机；Claude CLI 的 `content_block_delta` 常按词/句攒批；
+Codex 产品路径多见 `item.completed` 整段落地；Grok ACP `agent_message_chunk` 通常
+是一小段。不要按 DeepSeek Web 的逐字效果去改其他 backend 的上游契约。
+
+## Session Projection（SSV2）
+
+协商到 `session_sync_v2` 的客户端以投影为消息页真相源：`get_session_projection`
+拉基线，`projection_patch` 推增量。kernel + reducer 在 `go-bridge/projection_*.go`。
+
+冷加载家族：
+
+| 家族 | backend | 基线 |
+| --- | --- | --- |
+| transcript JSONL | claude / claudecode / Codex | `TranscriptLocator` + transcriptindex |
+| pathless HTTP/rich-history | opencode / grokbuild / deepseek / **dsh-web** | OpenCode HTTP、本地 grok/dsh 日志、或官方 `session.history` |
+
+规则：live/kernel 已有状态的会话以 kernel 为基线，file/HTTP 重建只服务冷开或脱活
+会话。forceCold 集合与 `backendSupportsProjectionHydrate` 必须同时列入新 backend，
+漏一处对应机制静默失效。dsh-web **不进** deepseek 的 store-file / live-only
+admission 回退（会话在官方服务端常驻，mux 即时到达）。
+
+## 会话目录（list_sessions）
+
+- **全局首页**：Claude / Codex / Grok 走 fair-home（每 directory 最多 K=5 +
+  `directoryTotals`），避免单项目吃光配额。iOS 侧栏「查看更多」再发
+  directory-scoped 分页。
+- **directory-scoped**：必须按该 directory 过滤后再分页。Claude 用 projectKey；
+  Codex/Grok 从全局快照 `filterWireSessionsByDirectory`；dsh-web / deepseek 等
+  generic `handleListSessions` 同样要过滤——漏掉则「查看更多」混进全部工作区。
+- **sessions_changed**：`session_discovery.go` 按 catalog 指纹周期重扫（默认
+  60s）。Codex 另有 3s recency-head；Grok 在有客户端连接时 5s 全量指纹；
+  dsh-web 由 host 流信号立即重扫，不另开快轮询。
+
 ## 已知风险与不可破坏约束
 
 - WebSocket/auth/relay 是 agent core 之外的额外失败面；先分层定位，不同时改 driver 和客户端。
 - OpenCode 仍是 hybrid path，职责边界需要显式维护。
+- `agent/dsh` 与 `agent/dsh-web` 并行、禁止互相 import；新功能接官方 web 面，不要在 SDK
+  stdio 路线上重做归组/审批。
+- dsh-web 不得盲写 `~/.dsh/workspace.json`（两写恢复协议，外部进程不可代写）。
+  归组只走官方 `session.create{workspaceId}` / `workspace.list`。
 - 控制面 secret 不能进入 agent subprocess；错误和 stderr 必须脱敏。
 - direct 与 relay 必须共享 auth、撤销、RPC 和事件语义，不能长期形成两套协议。
 - 公网明文 `ws://` 必须 fail-closed；Tailscale 自签名只允许已配对 SPKI pin。
@@ -326,12 +486,15 @@ send/stream 语义不为此做 backend-specific 重复抑制——iOS 侧的 rac
 - `list_sessions` 是只读 UI 热路径：per-row transcript 打开数必须为 0、不得 `markIdle`、
   不得写 `/tmp`；transcript 推理只能出现在 detail 路径或 `GetRunningSessionIDs` 的 live-PID
   有界检查里，不能回到 list 热路径。transcript-state 缓存的指纹必须 size + mtime 同时比较。
+- generic / dsh-web 的 directory-scoped `list_sessions` 必须过滤，不得把全量 catalog
+  当成某一个工作区的「查看更多」。
 
 ## 测试入口
 
 ```bash
 go test ./go-bridge/... -count=1
 go test ./agent/claudecode/... ./agent/codex/... ./agent/grokbuild/... ./agent/opencode/... -count=1
+go test ./agent/dsh-web/... ./agent/dsh/... -count=1
 go test ./core/... ./config/... -count=1
 (cd relay-server && go test ./... -count=1)
 ```
@@ -343,11 +506,11 @@ Release 覆盖安装。需要 iOS 真机交互验证时，按相邻仓库规则�
 
 端到端同步异常时按边界取证：
 
-1. MacBridge runtime 日志中是否收到 backend 原始事件；
-2. `events.go` 是否映射出正确 wire event；
-3. broadcaster 是否有目标订阅；
-4. iOS 是否收到 envelope；
-5. iOS 是被 live event、session state 还是 history polling 驱动。
+1. MacBridge runtime 日志中是否收到 backend 原始事件（dsh-web 还要看 mux/host 是否连上 3080）；
+2. `events.go` / codec 是否映射出正确 wire event（dsh-web 审批看 `permission_request`，问答看 `user_input_requested`）；
+3. 投影 kernel 是否 ingest、SSV2 客户端是否吃 patch 而不是只等 raw live；
+4. broadcaster 是否有目标订阅，`relayEvents` 是否因空闲/turn 边界提前退出；
+5. iOS 是被 live event、投影、session state 还是 history polling 驱动。
 
 只有确认事件在 MacBridge 前半段消失时才修改 driver；只有确认 wire 已到 iOS 后才修改
 `ChatViewModel`。不要通过同时改两端制造无法归因的“看起来好了”。

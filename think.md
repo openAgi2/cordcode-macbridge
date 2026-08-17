@@ -1,5 +1,17 @@
 # Claude Code 冷启动既有 session 首轮流式从头重播：跨仓排查结论
 
+## 2026-08-17：DeepSeek Harness 长会话 iPhone「无法加载会话投影」
+
+### 现象
+「Exec plan 交接审计与门禁核实」在官方 Mac web 能打开，iPhone 报「无法加载会话投影。重新打开会话可重试。」（无「超时」二字）。同 backend 的短会话正常。
+
+### 根因
+`get_session_projection` → `projection.hydrate_failed`（约 0.67s，不是 15s 超时）。官方 `session.history` 按 **user/assistant 消息数** 分页，一条消息含成千上万 `assistant/chunk`。dsh-web 以前 `maxMessages=2000` 一页拉完：该会话 258 条消息 / 277k 事件 / **55MiB**，超过 unary 32MiB `LimitReader`，JSON 被截断，Unmarshal 失败。对照：「西游记」短会话 3MiB，能打开。
+
+### 修复
+每页改官方默认 50 条消息；读满 32MiB+1 视为超大页并减半重试。不要再把 `maxMessages` 当成事件条数。
+
+
 ## 2026-08-04 追加复盘：Grok 外部任务 iOS 输入框卡"完成态"
 
 ### 现象
@@ -849,9 +861,16 @@ seal，commits e00b389/8eabd6e），canonical `docs/protocol/bridge-v1.md` 事�
 - 事件：真机复测中 Mac web 显示手机会话于「未分组」，agent 未读 web 源码即断言「Chat 未注册 workspace，用户加上即可」——事实相反（Chat 早已注册；分组机制是 workspace.json 显式 sessionIds 名单而非路径匹配），被 owner 以双端截图纠正。
 - 教训：对**另一个系统的行为**下结论前必须读它的源码/数据；「听起来合理的机制解释」≠ 证据。跨系统（iOS/dsh web/harness）行为差异排查同样适用本仓排障纪律：先取证再定性，不确定就说不确定。
 - 顺带固化的事实：dsh web workspace 分组=显式名单（entity.ts attachSession 仅 web 自身 create/fork 调用，校验头行 cwd=workspace 路径）；workspace.json 受 dsh-storage-domain 两写恢复协议管理，外部进程不可盲写。
+- 2026-08-17 复发：dsh-web `ListSessions` 一期把 `cwd` 直接写成 `directory`，iOS 按路径归组 → 同一 Chat cwd 但不在 Chat `sessionIds` 里的会话（太阳能/月球）进了 iOS Chat，官方在「未分组」；`archivedSessionIds`（讲个光头笑话等）官方隐藏、iOS 仍显示。修复=ListSessions 读 `workspace.list` 名单写 directory / ArchivedAt，不再用 cwd 冒充分组。
+- 2026-08-17 同日：owner 在 iOS Chat 目录新建「加州笑话」仍进未分组。官方 `session.create` 源码（apiproxy create）**只有 payload 带 workspaceId 才 attachSession**；只传 cwd 只写会话头目录、不进名单。设计 §3.5「cwd 命中已注册 workspace 自动归组」是错的。修复=create 前 workspace.list 按路径反查 id，命中则只传 workspaceId。
 
 ## 2026-08-16 路线教训：接入外部工具先枚举全部暴露面，「SDK 无 X」≠「无法 X」
 
 - 事件：dsh 接入第一版把「SDK 协议面没有 list/resume」铁板钉钉为「无法读取 Mac 端会话」，为此建造 live-only 投影 admission、iOS 隐藏列表等整套补偿架构。事实：会话数据一直在 `~/.dsh/sessions`（claudecode 文件读取先例就在本仓）；dsh web 的 api-proxy HTTP 契约（session.list/history/prompt 含 queue|steer/续聊/mux+host WS 事件流/workspace/approvals，schema 化）才是最全面、且官方前端日常在用的面。owner 两轮点破（store 可读 → web API 全量）。
 - 教训：接入用户自有工具时，先枚举它**暴露的全部面**（协议 / 文件 / 常驻服务+官方前端所用的 API），锚定用户实际使用的那条最全面通道，而不是我们恰好要对接的那条最窄通道；否定性断言必须标注「在哪几个层面找过」。三轮真机故障（存储编码、模型白名单、归组臆想）与路线错误同源=MacBridge 重新推导官方已保证的事实。
 - 处置：SDK stdio 路线暂停、成果保留（收口全文见 `docs/2026-08-16-dsh-session-store-bridge-design完成情况.md` 收口节）；后续 dsh-web backend=官方 API 转发器+bridge-v1 翻译器，与现有 deepSeek backend 并行，先完成四项核实（prompt 续聊语义/mux 帧契约/托管启动形态/API 版本承诺）再出设计。
+
+## 2026-08-17 官方 StatsLine 不在 iOS 时间线重算
+
+- 官方输入框底下那一行来自整本日志投影：`sessionStats`（轮/步/llmMs/toolMs/ttft/decode）+ `tokenUsage`（uncached/cacheRead/cacheWrite/output）。缓存命中 = cacheRead / (uncached+cacheRead+cacheWrite)。窗口内节点 fold 只是没投影时的 fallback，分页/压缩会改窗口，不能当账单。
+- iOS 放在已有 ⭕ 表的「本会话」，不另做 composer footer。数字只转发官方投影，不从手机消息列表加总。

@@ -51,11 +51,13 @@ type Agent struct {
 	// (read-only / workspace-write / danger-full-access).
 	mode string
 	// usageBySession caches official contextPressure/contextBreakdown
-	// occupancy for GetContextUsage / live emit.
+	// occupancy plus sessionStats/tokenUsage for GetContextUsage / live emit.
 	usageMu        sync.Mutex
 	usageBySession map[string]*core.ContextUsage
 	// pendingSel is the recorded provider/model/effort selection.
 	pendingSel selection
+	// pendingPreset is the official agentPreset id for the next session.create.
+	pendingPreset string
 	// catalog is the last runtime-fetched provider/model catalog.
 	catalog *modelCatalog
 	// allowedTools records bridge-side tool authorization hints (returned

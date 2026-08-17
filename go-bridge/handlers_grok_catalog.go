@@ -241,17 +241,28 @@ func (h *Handlers) grokHandleListSessions(conn Connection, msg WireMessage, agen
 	conn.SendResult(msg.RequestID, result, nil)
 }
 
-// filterWireSessionsByDirectory 保留 directory 精确匹配的 session（Grok 上游无 cwd 过滤）。
+// filterWireSessionsByDirectory 保留 directory 匹配的 session（Grok / dsh-web
+// 上游列表都是全局的，directory 只作 bridge 侧过滤）。绝对路径用 Clean 对齐
+// 尾斜杠；「未分组」这类非路径键仍按字面比较。
 func filterWireSessionsByDirectory(sessions []map[string]interface{}, dir string) []map[string]interface{} {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
 		return sessions
 	}
+	want := catalogDirectoryMatchKey(dir)
 	out := make([]map[string]interface{}, 0, len(sessions))
 	for _, s := range sessions {
-		if sessionDirectoryKey(s) == dir {
+		if catalogDirectoryMatchKey(sessionDirectoryKey(s)) == want {
 			out = append(out, s)
 		}
 	}
 	return out
+}
+
+func catalogDirectoryMatchKey(dir string) string {
+	dir = strings.TrimSpace(dir)
+	if dir == "" || !strings.HasPrefix(dir, "/") {
+		return dir
+	}
+	return filepath.Clean(dir)
 }

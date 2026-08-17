@@ -186,7 +186,8 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
 
 - `run_diagnostics` ✅ 探测结构化输出（实例来源 external/managed、端口、`llm.providers` 全量与状态位）。**版本字段语义（评审 S6）**：`host.describe` 的 `version:"0.0.1"` 是占位符非 npm 版本（活体证实）——诊断呈现标注为「API 版本标识」，npm 包版本另由探测（`dsh --version`/安装树）获取，不冒充。
 - `list_memory_files`/`read_memory_file` ⛔（评审 S5 补行）：`MemoryFileReader` 类型断言自动 not_supported（handlers.go:1766-1771），无新代码；`cancel_request_v1` ♻️ 连接级通用面（handlers.go:4308-4310），backend 无关。
-- `fetch_todos` ⛔ 一期（web 的 plan 属会话投影无 todo RPC；二期评估）；`get_usage` ⛔ 一期（token 计量在 context-meter 投影单元，二期按 `session/projection` 帧核对后决定接入或维持）；diff 三件套 ⛔；`list_agents` ⛔ 一期（单一 preset；`agentPreset.*` API 已存在，二期）。
+- `fetch_todos` ⛔ 一期（web 的 plan 属会话投影无 todo RPC；二期评估）；`get_usage` ⛔ 一期（token 计量在 context-meter 投影单元，二期按 `session/projection` 帧核对后决定接入或维持）；diff 三件套 ⛔。
+- `list_agents` ✅ 2026-08-17：官方 `agentPreset.list`（标准/PTC/极简/创造）。iPhone 空白页可选，开聊后锁定。创建走 `session.create.agentPreset`。创作面（copy/remove）仍不做。见 [2026-08-17-dsh-web-agent-preset-picker.md](2026-08-17-dsh-web-agent-preset-picker.md)。
 - `session.search` 2️⃣（评审 S9 消歧）：iOS 搜索现为本地实现已够，官方服务端搜索二期接入（面已核实存在）。
 - `check_pending_notifications`/prekey/delivery ♻️ bridge/relay 通用，与 backend 无关。
 

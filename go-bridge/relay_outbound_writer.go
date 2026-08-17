@@ -449,7 +449,7 @@ func classifyRelayRequest(method string) relayOutboundClass {
 		return relayOutboundControl
 	case "send_message", "resolve_permission", "permission_response", "question_reply", "question_reject":
 		return relayOutboundInteractive
-	case "list_models", "list_permission_modes", "get_git_context", "get_todos", "list_agents", "list_providers":
+	case "list_models", "list_permission_modes", "get_git_context", "get_todos", "list_agents", "list_providers", "set_agent_preset":
 		return relayOutboundMetadata
 	case "get_session_messages", "get_session_projection":
 		return relayOutboundBulk

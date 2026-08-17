@@ -587,6 +587,11 @@ private struct AgentBrandMark: View {
                     .resizable()
                     .scaledToFit()
                     .frame(width: 23, height: 23)
+            case "deepseek-web", "dsh-web", "deepseek":
+                Image("deepseek_logo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 23, height: 23)
             default:
                 Image(systemName: "command")
                     .resizable()

@@ -176,10 +176,12 @@ func (a *Agent) dispatchMuxFrame(ctx context.Context, rpcID, method string, payl
 	case "question/requested", "question/resolved":
 		a.handleQuestionFrame(ctx, rpcID, method, payload)
 
-	case "session/queue", "session/jobs", "session/projection":
-		// Renderer-side inbox/jobs/projection hints: no bridge timeline
-		// mapping in phase 1 (todos/usage rides §4.3.8's phase-2 list).
+	case "session/queue", "session/jobs":
+		// Renderer-side inbox/jobs hints: no bridge timeline mapping.
 		slog.Debug("dsh-web: mux frame noted", "method", method)
+
+	case "session/projection":
+		a.handleSessionProjection(payload)
 
 	case "stream/error":
 		var f struct {
@@ -193,6 +195,31 @@ func (a *Agent) dispatchMuxFrame(ctx context.Context, rpcID, method string, payl
 	default:
 		slog.Debug("dsh-web: unknown mux frame", "method", method)
 	}
+}
+
+func (a *Agent) handleSessionProjection(payload json.RawMessage) {
+	var f struct {
+		SessionID string          `json:"sessionId"`
+		Key       string          `json:"key"`
+		Value     json.RawMessage `json:"value"`
+	}
+	if json.Unmarshal(payload, &f) != nil || f.SessionID == "" {
+		return
+	}
+	switch f.Key {
+	case "contextPressure", "contextBreakdown", "sessionStats", "tokenUsage":
+	default:
+		return
+	}
+	usage := a.applyProjectionValue(f.SessionID, f.Key, f.Value)
+	if usage == nil {
+		return
+	}
+	a.deliverSessionEvents(f.SessionID, []core.Event{{
+		Type:         core.EventContextUsageUpdated,
+		SessionID:    f.SessionID,
+		ContextUsage: usage,
+	}})
 }
 
 // dispatchHostFrame routes one host ServerRequest payload.

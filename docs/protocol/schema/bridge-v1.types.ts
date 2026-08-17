@@ -396,6 +396,11 @@ export interface BridgeSessionInfo {
   effectiveProviderId?: string;
   /** Claude/Codex only. */
   reasoningEffort?: string;
+  /**
+   * Official dsh-web agent preset id (`standard` / `code` / `minimal` / `cordis`).
+   * Present only when the backend reports one (DeepSeek Harness session.list/get).
+   */
+  agentPreset?: string;
   /** OpenCode only (literal "opencode"). */
   backendId?: string;
   /** OpenCode only. */

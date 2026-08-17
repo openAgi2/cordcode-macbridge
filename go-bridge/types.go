@@ -102,8 +102,9 @@ type EventMessage struct {
 // Handler-specific request/response types.
 
 type CreateSessionParams struct {
-	Title     string `json:"title,omitempty"`
-	Directory string `json:"directory,omitempty"`
+	Title       string `json:"title,omitempty"`
+	Directory   string `json:"directory,omitempty"`
+	AgentPreset string `json:"agentPreset,omitempty"`
 }
 
 type SendMessageParams struct {
@@ -181,6 +182,7 @@ type SessionInfo struct {
 	ModifiedAt       string `json:"modifiedAt,omitempty"`
 	PinnedAtMillis   int64  `json:"pinnedAtMillis,omitempty"`
 	ArchivedAtMillis int64  `json:"archivedAtMillis,omitempty"`
+	AgentPreset      string `json:"agentPreset,omitempty"`
 }
 
 // HistoryEntry returned to iOS.

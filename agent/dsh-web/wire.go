@@ -25,6 +25,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -218,9 +219,12 @@ func (c *Client) Call(ctx context.Context, method string, payload any, out any) 
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxUnaryResponseBytes))
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, unaryResponseLimit+1))
 	if err != nil {
 		return &carrierError{Op: method, Status: resp.StatusCode, Wrapped: err}
+	}
+	if int64(len(respBody)) > unaryResponseLimit {
+		return &carrierError{Op: method, Status: resp.StatusCode, Detail: unaryOversizeDetail}
 	}
 	if resp.StatusCode != http.StatusOK {
 		// Carrier layer speaks plain text bodies ("content type must be
@@ -306,10 +310,19 @@ func (c *Client) Respond(ctx context.Context, rpcID string, ok bool, value any, 
 	return receipt.Accepted, nil
 }
 
-// maxUnaryResponseBytes bounds one unary reply read. session.history pages are
-// the largest payloads; 32MiB is a generous ceiling that still stops a
-// corrupted stream from exhausting memory.
-const maxUnaryResponseBytes = 32 << 20
+// unaryResponseLimit bounds one unary reply read. session.history pages are
+// the largest payloads; 32MiB stops a corrupted stream from exhausting
+// memory. History paging must keep each page under this (official
+// maxMessages=50 default; a 200-message Exec-plan page was already 38MiB).
+// Tests may lower this to prove oversize retry.
+var unaryResponseLimit int64 = 32 << 20
+
+const unaryOversizeDetail = "unary response exceeded size limit"
+
+func isUnaryOversize(err error) bool {
+	var ce *carrierError
+	return err != nil && errors.As(err, &ce) && ce.Detail == unaryOversizeDetail
+}
 
 // ── WS downlink streams ─────────────────────────────────────────────────────
 //

@@ -188,19 +188,7 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 			return "", nil, false
 		}
 		return "context_usage_updated", map[string]interface{}{
-			"context": map[string]interface{}{
-				"usedTokens":            ev.ContextUsage.UsedTokens,
-				"baselineTokens":        ev.ContextUsage.BaselineTokens,
-				"totalTokens":           ev.ContextUsage.TotalTokens,
-				"inputTokens":           ev.ContextUsage.InputTokens,
-				"cachedInputTokens":     ev.ContextUsage.CachedInputTokens,
-				"outputTokens":          ev.ContextUsage.OutputTokens,
-				"reasoningOutputTokens": ev.ContextUsage.ReasoningOutputTokens,
-				"contextWindow":         ev.ContextUsage.ContextWindow,
-				"systemTokens":          ev.ContextUsage.SystemTokens,
-				"toolsTokens":           ev.ContextUsage.ToolsTokens,
-				"messageTokens":         ev.ContextUsage.MessageTokens,
-			},
+			"context": contextUsageToWire(ev.ContextUsage),
 		}, false
 
 	case core.EventQuestionAsked:

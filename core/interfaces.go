@@ -248,6 +248,13 @@ type AgentLister interface {
 	ListAgents(ctx context.Context) ([]AgentDescriptor, error)
 }
 
+// AgentPresetSelector is an optional interface for backends whose session
+// create/select carries an official agent preset id (dsh-web agentPreset).
+type AgentPresetSelector interface {
+	SetPendingAgentPreset(id string)
+	SelectAgentPreset(ctx context.Context, sessionID, id string) error
+}
+
 // ProviderConfig holds API provider settings for an agent.
 type ProviderConfig struct {
 	Name     string
@@ -450,6 +457,21 @@ type ContextUsage struct {
 	SystemTokens  int
 	ToolsTokens   int
 	MessageTokens int
+	// Official dsh web sessionStats projection (whole-log turn/step wall times).
+	// Zero when the backend has no StatsLine projection.
+	SessionTurns        int
+	SessionSteps        int
+	SessionLlmMs        int
+	SessionToolMs       int
+	SessionTtftMs       int
+	SessionTtftSteps    int
+	SessionDecodeMs     int
+	SessionDecodeTokens int
+	// Official dsh web tokenUsage projection (billed prompt-side buckets).
+	// Distinct from InputTokens, which dsh-web uses for conversation occupancy.
+	UncachedInputTokens int
+	CacheReadTokens     int
+	CacheWriteTokens    int
 }
 
 // ContextCompressor is an optional interface for agents that support

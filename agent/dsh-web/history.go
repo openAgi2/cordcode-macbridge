@@ -20,6 +20,13 @@ import (
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
+// historyPageMessages matches official DEFAULT_MAX_MESSAGES (api-proxy.ts).
+// Official maxMessages counts user/assistant messages; each expands to
+// thousands of assistant/chunk rows. 2000-message pages for a long Exec-plan
+// session were 55MiB and blew the 32MiB unary cap → truncated JSON →
+// projection.hydrate_failed on iPhone.
+const historyPageMessages = 50
+
 // getRichHistory maps session.history pages to rich entries (oldest first).
 // limit<=0 means unlimited.
 func (a *Agent) getRichHistory(ctx context.Context, client *Client, sessionID string, limit int) ([]core.RichHistoryEntry, error) {
@@ -30,10 +37,7 @@ func (a *Agent) getRichHistory(ctx context.Context, client *Client, sessionID st
 	if budget <= 0 {
 		budget = 500
 	}
-	maxPerReq := budget * 4
-	if maxPerReq > 2000 {
-		maxPerReq = 2000
-	}
+	pageSize := historyPageMessages
 
 	var pages [][]apiHistoryEntry
 	collected := 0
@@ -44,10 +48,17 @@ func (a *Agent) getRichHistory(ctx context.Context, client *Client, sessionID st
 			seq := *before
 			req.BeforeSeq = &seq
 		}
-		max := maxPerReq
+		max := pageSize
 		req.MaxMessages = &max
 		var val sessionHistoryValue
 		if err := client.Call(ctx, "session.history", req, &val); err != nil {
+			if isUnaryOversize(err) && pageSize > 1 {
+				pageSize = pageSize / 2
+				if pageSize < 1 {
+					pageSize = 1
+				}
+				continue
+			}
 			return nil, err
 		}
 		if len(val.Events) == 0 {

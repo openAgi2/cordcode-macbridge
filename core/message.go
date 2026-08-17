@@ -522,6 +522,10 @@ type AgentDescriptor struct {
 	Hidden      bool   `json:"hidden,omitempty"`
 	Native      bool   `json:"native,omitempty"`
 	Description string `json:"description,omitempty"`
+	// DisplayName is the official UI label (e.g. 极简模式). Name stays the
+	// stable id used on create/select (e.g. minimal).
+	DisplayName string `json:"displayName,omitempty"`
+	IsDefault   bool   `json:"isDefault,omitempty"`
 }
 
 // SessionPin is the identity-only pin (置顶) record persisted by a SessionPinner driver.
@@ -558,4 +562,7 @@ type AgentSessionInfo struct {
 	ModelID         string
 	ProviderID      string
 	ReasoningEffort string
+	// AgentPreset is the official dsh-web agent preset id (standard/code/minimal/cordis).
+	// Empty for backends that do not have presets. Wire field: agentPreset.
+	AgentPreset string
 }

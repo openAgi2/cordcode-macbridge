@@ -24,7 +24,7 @@ import (
 func (a *Agent) WireDescriptor() *core.WireDescriptor {
 	return &core.WireDescriptor{
 		Kind:                        WireKind, // "deepseek-web" — iOS BackendKind.deepSeekWeb
-		DisplayName:                 "DeepSeek Web",
+		DisplayName:                 "DeepSeek Harness",
 		LiveEventModel:              core.LiveEventBroadcast,
 		RequiresExternalTurnPolling: false,
 		StaticCapabilities:          []string{"external_turn_streaming", "question_reply", "structured_user_input_v1"},

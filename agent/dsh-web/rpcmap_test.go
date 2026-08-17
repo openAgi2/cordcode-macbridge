@@ -153,6 +153,217 @@ func TestListSessionsTitleFallsBackToUserMessage(t *testing.T) {
 	}
 }
 
+func TestListSessionsGroupsByWorkspaceSessionIDs(t *testing.T) {
+	f := newFakeDSHServer(t)
+	defer f.Close()
+	a := newTestAgent(t, f)
+
+	f.handlers["session.list"] = fakeRPCResponse{value: map[string]any{
+		"items": []map[string]any{
+			{"sessionId": "s-chat", "updatedAt": 4, "running": false, "blank": false, "cwd": "/Users/x/Chat",
+				"projections": map[string]any{"values": map[string]any{"title": "讲封神榜故事"}}},
+			{"sessionId": "s-stray", "updatedAt": 3, "running": false, "blank": false, "cwd": "/Users/x/Chat",
+				"projections": map[string]any{"values": map[string]any{"title": "太阳能发电站的故事"}}},
+			{"sessionId": "s-ios", "updatedAt": 2, "running": false, "blank": false, "cwd": "/Users/x/cordcode-ios",
+				"projections": map[string]any{"values": map[string]any{"title": "西游记"}}},
+		},
+	}}
+	f.handlers["workspace.list"] = fakeRPCResponse{value: map[string]any{
+		"items": []map[string]any{
+			{"workspaceId": "w-chat", "path": "/Users/x/Chat", "title": "Chat", "sessionIds": []string{"s-chat"}},
+			{"workspaceId": "w-ios", "path": "/Users/x/cordcode-ios", "title": "cordcode-ios", "sessionIds": []string{"s-ios"}},
+		},
+		"archivedSessionIds": []string{},
+	}}
+
+	sessions, err := a.ListSessions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 3 {
+		t.Fatalf("rows: %+v", sessions)
+	}
+	byID := map[string]core.AgentSessionInfo{}
+	for _, s := range sessions {
+		byID[s.ID] = s
+	}
+	if byID["s-chat"].Directory != "/Users/x/Chat" {
+		t.Fatalf("attached Chat session directory: %+v", byID["s-chat"])
+	}
+	if byID["s-ios"].Directory != "/Users/x/cordcode-ios" {
+		t.Fatalf("attached ios session directory: %+v", byID["s-ios"])
+	}
+	if byID["s-stray"].Directory != ungroupedDirectory {
+		t.Fatalf("same-cwd stray must be 未分组, got %+v", byID["s-stray"])
+	}
+}
+
+func TestListSessionsMarksArchivedFromWorkspaceList(t *testing.T) {
+	f := newFakeDSHServer(t)
+	defer f.Close()
+	a := newTestAgent(t, f)
+
+	f.handlers["session.list"] = fakeRPCResponse{value: map[string]any{
+		"items": []map[string]any{
+			{"sessionId": "s-live", "updatedAt": 4, "running": false, "blank": false, "cwd": "/Users/x/Chat",
+				"projections": map[string]any{"values": map[string]any{"title": "在列"}}},
+			{"sessionId": "s-arch", "updatedAt": 3, "running": false, "blank": false, "cwd": "/Users/x/Chat",
+				"projections": map[string]any{"values": map[string]any{"title": "讲个光头笑话"}}},
+		},
+	}}
+	f.handlers["workspace.list"] = fakeRPCResponse{value: map[string]any{
+		"items": []map[string]any{
+			{"workspaceId": "w-chat", "path": "/Users/x/Chat", "title": "Chat", "sessionIds": []string{"s-live"}},
+		},
+		"archivedSessionIds": []string{"s-arch"},
+	}}
+
+	sessions, err := a.ListSessions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("rows: %+v", sessions)
+	}
+	var live, archived core.AgentSessionInfo
+	for _, s := range sessions {
+		switch s.ID {
+		case "s-live":
+			live = s
+		case "s-arch":
+			archived = s
+		}
+	}
+	if !live.ArchivedAt.IsZero() {
+		t.Fatalf("live session must not be archived: %+v", live)
+	}
+	if archived.ArchivedAt.IsZero() {
+		t.Fatalf("official archivedSessionIds must surface ArchivedAt: %+v", archived)
+	}
+	if archived.Directory != ungroupedDirectory {
+		t.Fatalf("archived stray directory: %+v", archived)
+	}
+}
+
+func TestListSessionsMapsOfficialAgentPreset(t *testing.T) {
+	f := newFakeDSHServer(t)
+	defer f.Close()
+	a := newTestAgent(t, f)
+
+	f.handlers["session.list"] = fakeRPCResponse{value: map[string]any{
+		"items": []map[string]any{
+			{"sessionId": "s-ptc", "updatedAt": 4, "running": false, "blank": false, "cwd": "/Users/x/Chat",
+				"agentPreset": "code",
+				"projections": map[string]any{"values": map[string]any{"title": "Codex与Claude"}}},
+			{"sessionId": "s-std", "updatedAt": 3, "running": false, "blank": false, "cwd": "/Users/x/Chat",
+				"agentPreset": "standard",
+				"projections": map[string]any{"values": map[string]any{"title": "普通会话"}}},
+		},
+	}}
+	f.handlers["workspace.list"] = fakeRPCResponse{value: map[string]any{
+		"items": []map[string]any{
+			{"workspaceId": "w-chat", "path": "/Users/x/Chat", "title": "Chat", "sessionIds": []string{"s-ptc", "s-std"}},
+		},
+	}}
+
+	sessions, err := a.ListSessions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]core.AgentSessionInfo{}
+	for _, s := range sessions {
+		byID[s.ID] = s
+	}
+	if byID["s-ptc"].AgentPreset != "code" {
+		t.Fatalf("PTC session preset: %+v", byID["s-ptc"])
+	}
+	if byID["s-std"].AgentPreset != "standard" {
+		t.Fatalf("standard session preset: %+v", byID["s-std"])
+	}
+}
+
+func TestListAgentsMapsOfficialPresets(t *testing.T) {
+	f := newFakeDSHServer(t)
+	defer f.Close()
+	a := newTestAgent(t, f)
+	f.handlers["agentPreset.list"] = fakeRPCResponse{value: map[string]any{
+		"presets": []any{
+			map[string]any{"id": "standard", "name": "标准模式", "description": "完整", "isDefault": true, "trust": "system"},
+			map[string]any{"id": "minimal", "name": "极简模式", "description": "双工具", "trust": "system"},
+			map[string]any{"id": "broken", "name": "坏的", "broken": "missing plugin", "trust": "user"},
+		},
+	}}
+	got, err := a.ListAgents(context.Background())
+	if err != nil {
+		t.Fatalf("ListAgents: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len=%d want 2 (broken omitted): %+v", len(got), got)
+	}
+	if got[0].Name != "standard" || got[0].DisplayName != "标准模式" || !got[0].IsDefault {
+		t.Fatalf("standard = %+v", got[0])
+	}
+	if got[1].Name != "minimal" || got[1].DisplayName != "极简模式" {
+		t.Fatalf("minimal = %+v", got[1])
+	}
+}
+
+func TestStartSessionCreateSendsPendingAgentPreset(t *testing.T) {
+	f := newFakeDSHServer(t)
+	defer f.Close()
+	a := newTestAgent(t, f)
+	a.SetPendingAgentPreset("minimal")
+	f.hooks["session.create"] = func(payload []byte) fakeRPCResponse {
+		return fakeRPCResponse{value: map[string]any{"sessionId": "official-preset", "agentPreset": "minimal"}}
+	}
+	sess, err := a.StartSession(context.Background(), "")
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	defer sess.Close()
+	calls := methodCalls(f, "session.create")
+	if len(calls) != 1 {
+		t.Fatalf("create calls: %d", len(calls))
+	}
+	var req sessionCreateRequest
+	if err := json.Unmarshal(calls[0], &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.AgentPreset != "minimal" {
+		t.Fatalf("agentPreset = %q, want minimal", req.AgentPreset)
+	}
+}
+
+func TestStartSessionOmitsUngroupedCwd(t *testing.T) {
+	f := newFakeDSHServer(t)
+	defer f.Close()
+	a := newTestAgent(t, f)
+	a.workDir = ungroupedDirectory
+	f.hooks["session.create"] = func(payload []byte) fakeRPCResponse {
+		return fakeRPCResponse{value: map[string]any{"sessionId": "official-ungrouped", "agentPreset": "standard"}}
+	}
+
+	sess, err := a.StartSession(context.Background(), "")
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	defer sess.Close()
+	calls := methodCalls(f, "session.create")
+	if len(calls) != 1 {
+		t.Fatalf("create calls: %d", len(calls))
+	}
+	var req sessionCreateRequest
+	if err := json.Unmarshal(calls[0], &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.Cwd != "" {
+		t.Fatalf("未分组 must not be sent as cwd, got %q", req.Cwd)
+	}
+	if req.WorkspaceID != "" {
+		t.Fatal("ungrouped create must not invent a workspaceId")
+	}
+}
+
 // ── create / resume / prompt / cancel (§4.3.4/§4.3.6) ───────────────────────
 
 func TestStartSessionCreateUsesCwd(t *testing.T) {
@@ -183,7 +394,44 @@ func TestStartSessionCreateUsesCwd(t *testing.T) {
 		t.Fatalf("create must carry the iOS-selected cwd, got %q", req.Cwd)
 	}
 	if req.WorkspaceID != "" {
-		t.Fatal("create must not carry workspaceId (cwd path only)")
+		t.Fatal("unmatched cwd must not invent a workspaceId")
+	}
+}
+
+func TestStartSessionCreateUsesWorkspaceIDWhenCwdMatches(t *testing.T) {
+	f := newFakeDSHServer(t)
+	defer f.Close()
+	a := newTestAgent(t, f)
+	a.workDir = "/Users/x/Chat/"
+	f.handlers["workspace.list"] = fakeRPCResponse{value: map[string]any{
+		"items": []map[string]any{
+			{"workspaceId": "w-chat", "path": "/Users/x/Chat", "title": "Chat", "sessionIds": []string{"s-old"}},
+			{"workspaceId": "w-ios", "path": "/Users/x/cordcode-ios", "title": "cordcode-ios", "sessionIds": []string{}},
+		},
+		"archivedSessionIds": []string{},
+	}}
+	f.hooks["session.create"] = func(payload []byte) fakeRPCResponse {
+		return fakeRPCResponse{value: map[string]any{"sessionId": "official-chat", "agentPreset": "standard"}}
+	}
+
+	sess, err := a.StartSession(context.Background(), "")
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	defer sess.Close()
+	calls := methodCalls(f, "session.create")
+	if len(calls) != 1 {
+		t.Fatalf("create calls: %d", len(calls))
+	}
+	var req sessionCreateRequest
+	if err := json.Unmarshal(calls[0], &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.WorkspaceID != "w-chat" {
+		t.Fatalf("matching Chat folder must create with workspaceId, got %+v", req)
+	}
+	if req.Cwd != "" {
+		t.Fatalf("schema is workspaceId XOR cwd, got cwd %q", req.Cwd)
 	}
 }
 
@@ -405,6 +653,69 @@ func TestRichHistoryMapsTurnsToolsAndReasoning(t *testing.T) {
 	// Paging walked both pages (two history calls).
 	if len(methodCalls(f, "session.history")) != 2 {
 		t.Fatalf("expected 2 history pages, got %d", len(methodCalls(f, "session.history")))
+	}
+	var first sessionHistoryRequest
+	_ = json.Unmarshal(methodCalls(f, "session.history")[0], &first)
+	if first.MaxMessages == nil || *first.MaxMessages != historyPageMessages {
+		t.Fatalf("first page maxMessages=%v want %d", first.MaxMessages, historyPageMessages)
+	}
+}
+
+func TestRichHistoryShrinksOversizedPage(t *testing.T) {
+	f := newFakeDSHServer(t)
+	defer f.Close()
+	a := newTestAgent(t, f)
+
+	old := unaryResponseLimit
+	unaryResponseLimit = 900
+	t.Cleanup(func() { unaryResponseLimit = old })
+
+	f.hooks["session.history"] = func(payload []byte) fakeRPCResponse {
+		var req sessionHistoryRequest
+		_ = json.Unmarshal(payload, &req)
+		max := 0
+		if req.MaxMessages != nil {
+			max = *req.MaxMessages
+		}
+		if max >= historyPageMessages {
+			return fakeRPCResponse{value: map[string]any{
+				"events": []map[string]any{
+					{"event": map[string]any{"type": "user/message", "seq": 1, "time": 1, "data": map[string]any{
+						"content": []map[string]any{{"type": "text", "text": strings.Repeat("X", 4000)}},
+						"source":  map[string]any{"kind": "user"},
+					}}},
+				},
+				"hasMore": false,
+			}}
+		}
+		return fakeRPCResponse{value: map[string]any{
+			"events": []map[string]any{
+				{"event": map[string]any{"type": "user/message", "seq": 1, "time": 1, "data": map[string]any{
+					"content": []map[string]any{{"type": "text", "text": "短页"}},
+					"source":  map[string]any{"kind": "user"},
+				}}},
+			},
+			"hasMore": false,
+		}}
+	}
+
+	entries, err := a.GetRichSessionHistory(context.Background(), "s-big", 0)
+	if err != nil {
+		t.Fatalf("GetRichSessionHistory: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Content != "短页" {
+		t.Fatalf("entries after shrink: %+v", entries)
+	}
+	var sizes []int
+	for _, raw := range methodCalls(f, "session.history") {
+		var req sessionHistoryRequest
+		_ = json.Unmarshal(raw, &req)
+		if req.MaxMessages != nil {
+			sizes = append(sizes, *req.MaxMessages)
+		}
+	}
+	if len(sizes) < 2 || sizes[0] != historyPageMessages || sizes[len(sizes)-1] >= historyPageMessages {
+		t.Fatalf("page sizes did not shrink: %v", sizes)
 	}
 }
 
@@ -634,7 +945,7 @@ func TestWireDescriptorDeepSeekWeb(t *testing.T) {
 	if wd == nil {
 		t.Fatal("descriptor must self-describe")
 	}
-	if wd.Kind != "deepseek-web" || wd.DisplayName != "DeepSeek Web" {
+	if wd.Kind != "deepseek-web" || wd.DisplayName != "DeepSeek Harness" {
 		t.Fatalf("kind/displayName: %+v", wd)
 	}
 	if wd.LiveEventModel != "broadcast" {

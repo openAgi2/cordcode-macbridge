@@ -1253,6 +1253,8 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleListPermissionModes(conn, msg, agent)
 	case "set_permission_mode":
 		h.handleSetPermissionMode(conn, msg, agent)
+	case "set_agent_preset":
+		h.handleSetAgentPreset(conn, msg, agent)
 	case "create_session":
 		h.handleCreateSession(conn, msg, agent)
 	case "send_message":
@@ -1502,15 +1504,50 @@ func (h *Handlers) handleListAgents(conn Connection, msg WireMessage, agent core
 
 	result := make([]map[string]interface{}, 0, len(agents))
 	for _, agentInfo := range agents {
-		result = append(result, map[string]interface{}{
+		item := map[string]interface{}{
 			"name":        agentInfo.Name,
 			"mode":        agentInfo.Mode,
 			"hidden":      agentInfo.Hidden,
 			"native":      agentInfo.Native,
 			"description": agentInfo.Description,
-		})
+		}
+		if agentInfo.DisplayName != "" {
+			item["displayName"] = agentInfo.DisplayName
+		}
+		if agentInfo.IsDefault {
+			item["isDefault"] = true
+		}
+		result = append(result, item)
 	}
 	conn.SendResult(msg.RequestID, map[string]interface{}{"agents": result}, nil)
+}
+
+func (h *Handlers) handleSetAgentPreset(conn Connection, msg WireMessage, agent core.Agent) {
+	selector, ok := agent.(core.AgentPresetSelector)
+	if !ok {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "not_supported", Message: "backend does not support agent presets"})
+		return
+	}
+	var params struct {
+		SessionID   string `json:"sessionId"`
+		AgentPreset string `json:"agentPreset"`
+	}
+	if msg.Params != nil {
+		json.Unmarshal(msg.Params, &params)
+	}
+	id := strings.TrimSpace(params.AgentPreset)
+	if id == "" {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "missing_param", Message: "agentPreset required"})
+		return
+	}
+	selector.SetPendingAgentPreset(id)
+	if strings.TrimSpace(params.SessionID) != "" {
+		if err := selector.SelectAgentPreset(context.Background(), params.SessionID, id); err != nil {
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "set_failed", Message: err.Error()})
+			return
+		}
+	}
+	conn.SendResult(msg.RequestID, map[string]interface{}{"agentPreset": id}, nil)
 }
 
 func (h *Handlers) handleListProjects(conn Connection, msg WireMessage, agent core.Agent) {
@@ -1971,6 +2008,11 @@ func (h *Handlers) handleCreateSession(conn Connection, msg WireMessage, agent c
 	if params.Directory != "" {
 		switchDir(agent, params.Directory)
 	}
+	if params.AgentPreset != "" {
+		if setter, ok := agent.(core.AgentPresetSelector); ok {
+			setter.SetPendingAgentPreset(params.AgentPreset)
+		}
+	}
 
 	if agent.Name() == "codex" || agent.Name() == "claudecode" {
 		sessionID := fmt.Sprintf("pending-%s", generateShortID())
@@ -2007,6 +2049,9 @@ func (h *Handlers) handleCreateSession(conn Connection, msg WireMessage, agent c
 	}
 	if params.Directory != "" {
 		result["directory"] = params.Directory
+	}
+	if params.AgentPreset != "" {
+		result["agentPreset"] = params.AgentPreset
 	}
 
 	h.publishEvent(LogicalEvent{SessionID: sessionID, BackendID: msg.BackendID, Event: "session_state_changed", Data: map[string]interface{}{"state": "idle"}, Targets: []Connection{conn}})
@@ -2813,6 +2858,11 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 		wireSessions := sessionsToWire(sessions)
 		wireSessions = h.enrichSessionStatesForList(wireSessions, agent, h.getRunningMap(ctx, agent))
 		h.overlayPinnedState(wireSessions, agentBackendID(agent))
+		// iOS「查看更多」带 directory 深挖；dsh-web/deepseek 等 generic 列表一次全量，
+		// 必须在 bridge 侧按 directory 过滤，否则 sheet 会混进所有工作区。
+		if dir := extractDir(msg); dir != "" {
+			wireSessions = filterWireSessionsByDirectory(wireSessions, dir)
+		}
 		result := paginateSessionList(wireSessions, extractStringParam(msg, "cursor"), limit)
 		metrics.wireMapping += time.Since(mappingStarted)
 		if ws, ok := result["sessions"].([]map[string]interface{}); ok {
@@ -3432,6 +3482,17 @@ func contextUsageToWire(usage *core.ContextUsage) map[string]interface{} {
 		"systemTokens":          usage.SystemTokens,
 		"toolsTokens":           usage.ToolsTokens,
 		"messageTokens":         usage.MessageTokens,
+		"sessionTurns":          usage.SessionTurns,
+		"sessionSteps":          usage.SessionSteps,
+		"sessionLlmMs":          usage.SessionLlmMs,
+		"sessionToolMs":         usage.SessionToolMs,
+		"sessionTtftMs":         usage.SessionTtftMs,
+		"sessionTtftSteps":      usage.SessionTtftSteps,
+		"sessionDecodeMs":       usage.SessionDecodeMs,
+		"sessionDecodeTokens":   usage.SessionDecodeTokens,
+		"uncachedInputTokens":   usage.UncachedInputTokens,
+		"cacheReadTokens":       usage.CacheReadTokens,
+		"cacheWriteTokens":      usage.CacheWriteTokens,
 	}
 }
 
@@ -3974,6 +4035,9 @@ func sessionsToWire(sessions []core.AgentSessionInfo) []map[string]interface{} {
 		}
 		if !s.PinnedAt.IsZero() {
 			wire["pinnedAtMillis"] = s.PinnedAt.UnixMilli()
+		}
+		if s.AgentPreset != "" {
+			wire["agentPreset"] = s.AgentPreset
 		}
 		result = append(result, wire)
 	}

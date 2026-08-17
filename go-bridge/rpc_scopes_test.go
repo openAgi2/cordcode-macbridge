@@ -14,7 +14,7 @@ import (
 var dispatchedRPCMethods = []string{
 	"hello",
 	"list_providers", "set_provider", "list_models", "list_agents",
-	"list_permission_modes", "set_permission_mode",
+	"list_permission_modes", "set_permission_mode", "set_agent_preset",
 	"create_session", "send_message", "abort_generation",
 	"get_session", "get_session_messages", "get_session_projection",
 	"delete_session", "resume_session", "switch_model", "resolve_permission",
