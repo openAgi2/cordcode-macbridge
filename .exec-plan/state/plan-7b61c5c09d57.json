@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T02:52:26+0800",
+  "updated_at": "2026-08-19T02:55:45+0800",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -433,7 +433,7 @@
       "id": "s8-6-permissions-impl",
       "title": "§8-6 审批：permissions.go 折叠 reply + SessionPermissionResponder + ToolAuthorizer；问答 ⛔",
       "description": "wire_descriptor.go 点亮 ToolAuthorizer（permission_resolve 由类型断言推导，不手写进 StaticCapabilities）。permissions.go：SSE permission.asked→EventPermissionRequest（§8-3 已有事件面）；回复按 §3.4 折叠表——1.18 {response}：allow（含 Always 标签）先探 once 若 4xx 再试 allow；deny 先探 reject 若 4xx 再试 deny；v2 {reply}：allow→once、deny→reject；探针结果写入诊断（1.18 权限字面量先探，实施期挂账）。core.SessionPermissionResponder 覆盖旁观（registry 判据=bridge registry 命中该 session；网页先答→收 resolved 关卡，先答者得）。RespondQuestion/RejectQuestion 返回 core.ErrNotSupported；不实现 UserInputResponder/SessionQuestionResponder；不广告 question_reply/structured_user_input_v1。设计 §3.4/§4.3.4。",
-      "status": "pending",
+      "status": "done",
       "phase": "s8-6",
       "kind": "impl",
       "depends_on": [
@@ -443,20 +443,24 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
-        "attestation": null,
+        "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "折叠 impl 已随 §8-4 落地（permissions.go：1.18 allow→先探 once 4xx 回退 allow、deny→先探 reject 4xx 回退 deny；v2 once/reject；noteFoldAttempt 探针结果进 foldDiagnostics；SessionPermissionResponder 旁观面）。本项补齐：wire_descriptor.go ToolAuthorizer（AddAllowedTools/GetAllowedTools verbatim——permission_resolve 经类型断言点亮）；diagnostics.go RunDiagnostics（endpoint 源/loopback 检查/双代探针 generation 进诊断/目录与所选模型成员检查含 1.18 pending 语义提示/权限折叠状态行）。问答保持 ⛔（session RespondQuestion/RejectQuestion=core.ErrNotSupported，§8-4 已测）。",
+        "artifacts": [
+          "agent/opencode-web/wire_descriptor.go",
+          "agent/opencode-web/diagnostics.go",
+          "agent/opencode-web/permissions.go(§8-4)"
+        ],
+        "checked_at": "2026-08-19T02:55:45+0800"
       }
     },
     {
       "id": "s8-6-permissions-tests",
       "title": "§8-6 单测：权限折叠 allow→once（4xx 回退）/deny→reject；问答 not_supported",
       "description": "设计 §6 单测表：权限折叠——allow→once（或活体钉死的 1.18 值；4xx 时回退 allow 并记诊断）；deny→reject（4xx 回退 deny）。POST /session/:id/permissions/:requestID 请求体断言。问答——RespondQuestion/RejectQuestion 返回 core.ErrNotSupported。iOS 侧 autoApprove 不把 .openCodeWeb 算进去（坑 11 断言留 §8-7 BridgeModelsTests/代码审查）。",
-      "status": "pending",
+      "status": "done",
       "phase": "s8-6",
       "kind": "tests",
       "depends_on": [
@@ -466,20 +470,22 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "test-execution",
-        "attestation": null,
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "6 个新用例（包内共 52 全过）：allow 先 once 命中即止（单 POST body=response:once）/once 4xx 回退 allow（两连 POST 顺序断言）；deny 同构 reject/deny；v2 双行为 reply:once/reject 且路由 /api/session/:id/permission/:rid/reply；空 id 拒绝；ToolAuthorizer verbatim 回读；RunDiagnostics 携带 generation=1.18 与折叠状态、空 URL failed+共享文案。",
+        "artifacts": [
+          "agent/opencode-web/permissions_test.go"
+        ],
+        "checked_at": "2026-08-19T02:55:45+0800"
       }
     },
     {
       "id": "s8-6-permissions-regression",
       "title": "§8-6 回归：全量 go 测试 + 旧包零增量",
       "description": "go test ./agent/opencode-web/... ./go-bridge/... -count=1 零失败；git diff --stat agent/opencode 为空。1.18 活体权限字面量探针：只读方式核对现网 4096 serve 权限路径字面量（禁止写请求）；结果写进诊断与完成报告挂账。",
-      "status": "pending",
+      "status": "done",
       "phase": "s8-6",
       "kind": "regression",
       "depends_on": [
@@ -489,13 +495,13 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "test-execution",
-        "attestation": null,
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
+        "summary": "go vet 干净；go test ./go-bridge/... ./agent/... 失败集仅含两条已定性先存失败（projection flaky 双树随机翻转 + dsh-web TestGetBackgroundTaskDetailFoundAndMissing 两树同挂）；git diff --stat agent/opencode 为空。1.18 活体字面量只读取证：/opt/homebrew/bin/opencode（1.18.18）strings 含 once×2/reject×2/always×3（S4 复证），上下文不排他——维持先探+4xx 回退策略，活体钉死依赖 owner 现网审批流（矩阵行 6），探针接受结果运行时进诊断 foldDiagnostics。对现网 4096 零写请求。",
         "artifacts": [],
-        "checked_at": null
+        "checked_at": "2026-08-19T02:55:45+0800"
       }
     },
     {

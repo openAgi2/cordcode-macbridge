@@ -33,3 +33,25 @@ func (a *Agent) WireDescriptor() *core.WireDescriptor {
 }
 
 var _ core.WireDescriptorProvider = (*Agent)(nil)
+
+// ToolAuthorizer lights up the bridge-derived permission_resolve capability:
+// approvals surface through SSE permission.asked and resolve via the §3.4
+// folding (permissions.go). The allowed-tools list itself is recorded and
+// returned verbatim — the official API has no pre-authorization surface to
+// push it to.
+func (a *Agent) AddAllowedTools(tools ...string) error {
+	a.mu.Lock()
+	a.allowedTools = append(a.allowedTools, tools...)
+	a.mu.Unlock()
+	return nil
+}
+
+func (a *Agent) GetAllowedTools() []string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	out := make([]string, len(a.allowedTools))
+	copy(out, a.allowedTools)
+	return out
+}
+
+var _ core.ToolAuthorizer = (*Agent)(nil)

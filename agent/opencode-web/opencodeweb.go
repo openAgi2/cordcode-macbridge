@@ -51,6 +51,10 @@ type Agent struct {
 	// the next prompt (1.18 has no dedicated switch endpoint — design §4.3.5).
 	pendingModel string
 
+	// allowedTools records bridge-side tool authorization hints (returned
+	// verbatim; the official API has no pre-authorization surface).
+	allowedTools []string
+
 	// probeMu guards the last API-generation probe outcome. The probe is a
 	// read-only GET sequence; it never mutates server state.
 	probeMu sync.Mutex
