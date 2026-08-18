@@ -824,9 +824,8 @@ func TestUnsupportedCapabilitiesAreAbsent(t *testing.T) {
 	if _, ok := interface{}(a).(core.TokenUsageReporter); ok {
 		t.Fatal("must not implement TokenUsageReporter")
 	}
-	if _, ok := interface{}(a).(core.AgentLister); ok {
-		t.Fatal("list_agents ⛔ phase 1: must not implement AgentLister")
-	}
+	// AgentLister ⛔ 守卫已随产品化预设功能（09d0089）移除：agent_presets.go 的
+	// ListAgents 把官方 agent preset 映射为 core.AgentDescriptor，是已交付能力。
 	if _, ok := interface{}(a).(core.ModeSwitcher); !ok {
 		t.Fatal("list_permission_modes/set_permission_mode: dsh-web must implement ModeSwitcher")
 	}
