@@ -92,6 +92,10 @@ type fakeAgent struct {
 	lastProcessAliveID int
 	// transcriptPath 让 fakeAgent 满足 core.TranscriptLocator（Codex file relay 需要）。
 	transcriptPath string
+	// modelSelection/modelSelectionOK 让 fakeAgent 满足
+	// core.SessionModelSelectionReader（get_session 权威模型合并路径）。
+	modelSelection   core.SessionModelSelection
+	modelSelectionOK bool
 }
 
 type unsupportedMutationAgent struct {
@@ -243,6 +247,10 @@ func (f *fakeAgent) ListSessions(context.Context) ([]core.AgentSessionInfo, erro
 }
 
 func (f *fakeAgent) ListSessionsCallCount() int64 { return f.listSessionsCalls.Load() }
+
+func (f *fakeAgent) GetSessionModelSelection(context.Context, string) (core.SessionModelSelection, bool) {
+	return f.modelSelection, f.modelSelectionOK
+}
 
 func (f *fakeAgent) GetSessionHistory(context.Context, string, int) ([]core.HistoryEntry, error) {
 	if f.historyErr != nil {
@@ -3270,6 +3278,79 @@ func TestHandleArchiveSessionReturnsArchivedSession(t *testing.T) {
 	session, _ := data["session"].(map[string]any)
 	if got := session["archivedAtMillis"]; got != float64(archivedAt.UnixMilli()) {
 		t.Fatalf("archivedAtMillis = %#v, want %d", got, archivedAt.UnixMilli())
+	}
+}
+
+func TestHandleGetSessionMergesSessionModelSelection(t *testing.T) {
+	agent := &fakeAgent{
+		name: "dsh-web",
+		sessionInfos: []core.AgentSessionInfo{{
+			ID:         "ses_1",
+			Summary:    "DSH session",
+			ModifiedAt: time.Unix(1710000500, 0).UTC(),
+		}},
+		modelSelection:   core.SessionModelSelection{Provider: "deepseek", Model: "deepseek-v4-flash", ReasoningEffort: "high"},
+		modelSelectionOK: true,
+	}
+
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("dsh-web", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "dsh-web",
+		Method:    "get_session",
+		RequestID: "session-1",
+		Params:    mustJSONRaw(t, map[string]any{"sessionId": "ses_1"}),
+	})
+
+	messages := readJSONMaps(t, clientConn, 1)
+	data, _ := messages[0]["data"].(map[string]any)
+	session, _ := data["session"].(map[string]any)
+	if got := session["effectiveModelId"]; got != "deepseek-v4-flash" {
+		t.Fatalf("effectiveModelId = %#v, want deepseek-v4-flash", got)
+	}
+	if got := session["effectiveProviderId"]; got != "deepseek" {
+		t.Fatalf("effectiveProviderId = %#v, want deepseek", got)
+	}
+	if got := session["reasoningEffort"]; got != "high" {
+		t.Fatalf("reasoningEffort = %#v, want high", got)
+	}
+}
+
+func TestHandleGetSessionWithoutSelectionKeepsRowUnmodeled(t *testing.T) {
+	agent := &fakeAgent{
+		name: "dsh-web",
+		sessionInfos: []core.AgentSessionInfo{{
+			ID:         "ses_1",
+			Summary:    "DSH session without a current selection",
+			ModifiedAt: time.Unix(1710000500, 0).UTC(),
+		}},
+		// modelSelectionOK=false: the backend has no real current selection —
+		// the row must stay unmodeled instead of fabricating one.
+	}
+
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("dsh-web", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "dsh-web",
+		Method:    "get_session",
+		RequestID: "session-1",
+		Params:    mustJSONRaw(t, map[string]any{"sessionId": "ses_1"}),
+	})
+
+	messages := readJSONMaps(t, clientConn, 1)
+	data, _ := messages[0]["data"].(map[string]any)
+	session, _ := data["session"].(map[string]any)
+	if got, ok := session["effectiveModelId"]; ok {
+		t.Fatalf("effectiveModelId = %#v, want absent (no fabricated model)", got)
+	}
+	if got, ok := session["effectiveProviderId"]; ok {
+		t.Fatalf("effectiveProviderId = %#v, want absent", got)
 	}
 }
 

@@ -528,6 +528,18 @@ type SessionArchiver interface {
 	ArchiveSession(ctx context.Context, sessionID string, archivedAt time.Time) (*AgentSessionInfo, error)
 }
 
+// SessionModelSelectionReader is an optional interface for agents that can
+// report a session's AUTHORITATIVE current model selection (provider + model +
+// reasoning effort) from a real backend surface (dsh-web: the official
+// session.models RPC). go-bridge merges the result into get_session responses
+// so iOS restores the session's REAL model instead of falling back to the
+// global default (selection priority: session truth > history > cache >
+// default). Session LIST rows stay unmodeled — the read is per open, not a
+// per-list fan-out. Implementations must report ok=false rather than
+// fabricate values when the backend has no real current selection.
+type SessionModelSelectionReader interface {
+	GetSessionModelSelection(ctx context.Context, sessionID string) (SessionModelSelection, bool)
+}
 // SessionPinner is an optional interface for agents that support pinning (置顶) sessions.
 // Pin state is MacBridge-owned session metadata (NOT agent-local storage): each driver
 // persists it in its prescribed store (Claude → .cc-connect-session-meta sidecar;

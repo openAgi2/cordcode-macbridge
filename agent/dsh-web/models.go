@@ -267,6 +267,36 @@ func (a *Agent) AvailableReasoningEfforts() []string {
 	return nil
 }
 
+// ── SessionModelSelectionReader (session truth for get_session) ────────────
+
+// GetSessionModelSelection reads the official per-session current selection
+// (session.models → current{provider, model, reasoningEffort}) — the layer-1
+// truth of the selection priority chain (session truth > history > cache >
+// default). go-bridge merges it into get_session so iOS opens the session
+// with its REAL model instead of a global default. ok=false when the RPC
+// fails or the session has no current selection — callers must not fabricate.
+func (a *Agent) GetSessionModelSelection(ctx context.Context, sessionID string) (core.SessionModelSelection, bool) {
+	client, err := a.clientFor(ctx)
+	if err != nil {
+		return core.SessionModelSelection{}, false
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var val sessionModelsValue
+	if err := client.Call(ctx, "session.models", sessionModelsRequest{SessionID: sessionID}, &val); err != nil {
+		return core.SessionModelSelection{}, false
+	}
+	if strings.TrimSpace(val.Current.Model) == "" && strings.TrimSpace(val.Current.Provider) == "" {
+		return core.SessionModelSelection{}, false
+	}
+	return core.SessionModelSelection{
+		Provider:        val.Current.Provider,
+		Model:           val.Current.Model,
+		ReasoningEffort: val.Current.ReasoningEffort,
+	}, true
+}
+
 var _ core.ProviderSwitcher = (*Agent)(nil)
 var _ core.ModelSwitcher = (*Agent)(nil)
 var _ core.ReasoningEffortSwitcher = (*Agent)(nil)
+var _ core.SessionModelSelectionReader = (*Agent)(nil)

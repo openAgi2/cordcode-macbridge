@@ -2771,12 +2771,40 @@ func (h *Handlers) handleGetSession(conn Connection, msg WireMessage, agent core
 
 	for _, session := range sessions {
 		if session.ID == params.SessionID {
+			mergeSessionModelSelection(context.Background(), agent, &session)
 			wireSession := sessionsToWire([]core.AgentSessionInfo{session})[0]
 			conn.SendResult(msg.RequestID, h.sessionResultWithContextUsage(wireSession, agent, params.SessionID), nil)
 			return
 		}
 	}
 	conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_found", Message: fmt.Sprintf("session %q not found", params.SessionID)})
+}
+
+// mergeSessionModelSelection overlays a session's authoritative current model
+// selection (core.SessionModelSelectionReader, e.g. dsh-web session.models)
+// onto the session row before it goes on the wire — the session-truth layer
+// of the selection priority chain, so iOS opens the session with its REAL
+// model instead of a global default. Only non-empty reader fields override;
+// agents without the interface (or sessions with no real current selection)
+// keep the row unchanged — never a fabricated model.
+func mergeSessionModelSelection(ctx context.Context, agent core.Agent, session *core.AgentSessionInfo) {
+	reader, ok := agent.(core.SessionModelSelectionReader)
+	if !ok {
+		return
+	}
+	sel, ok := reader.GetSessionModelSelection(ctx, session.ID)
+	if !ok {
+		return
+	}
+	if sel.Model != "" {
+		session.ModelID = sel.Model
+	}
+	if sel.Provider != "" {
+		session.ProviderID = sel.Provider
+	}
+	if sel.ReasoningEffort != "" {
+		session.ReasoningEffort = sel.ReasoningEffort
+	}
 }
 
 func (h *Handlers) sessionResultWithContextUsage(wireSession map[string]interface{}, agent core.Agent, sessionID string) map[string]interface{} {

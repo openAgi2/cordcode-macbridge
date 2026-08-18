@@ -566,3 +566,13 @@ type AgentSessionInfo struct {
 	// Empty for backends that do not have presets. Wire field: agentPreset.
 	AgentPreset string
 }
+
+// SessionModelSelection is a session's authoritative current model selection,
+// reported by a SessionModelSelectionReader (e.g. dsh-web session.models →
+// current{provider, model, reasoningEffort}). Fields are empty when the
+// backend did not provide them; readers must never invent values.
+type SessionModelSelection struct {
+	Provider        string
+	Model           string
+	ReasoningEffort string
+}
