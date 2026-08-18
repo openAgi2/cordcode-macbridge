@@ -142,6 +142,24 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 		caps = append(caps, "supports_commit_message")
 	}
 
+	// Phase 4 后台任务只读中心（roadmap §3.2/§3.3）：`background_tasks` = list 面
+	// （dsh-web 经 core.BackgroundTaskProvider；claudecode 由 go-bridge sidechain
+	// registry 服务——与 B4 同源派生，C1）；`background_task_details` = detail 面
+	// （BackgroundTaskDetailReader 或 claude registry detail）。未声明的 backend
+	// 完全无任务面，iOS 不显示入口。
+	if _, ok := agent.(core.BackgroundTaskProvider); ok {
+		caps = append(caps, "background_tasks")
+	}
+	if id == "claudecode" {
+		caps = append(caps, "background_tasks")
+	}
+	if _, ok := agent.(core.BackgroundTaskDetailReader); ok {
+		caps = append(caps, "background_task_details")
+	}
+	if id == "claudecode" {
+		caps = append(caps, "background_task_details")
+	}
+
 	return dedupCapabilities(caps)
 }
 

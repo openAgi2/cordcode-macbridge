@@ -1277,6 +1277,10 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleResolvePermission(conn, msg)
 	case "list_sessions":
 		h.handleListSessions(conn, msg, agent)
+	case "background_tasks.list":
+		h.handleBackgroundTasksList(conn, msg, agent)
+	case "background_tasks.get":
+		h.handleBackgroundTasksGet(conn, msg, agent)
 	case "list_projects":
 		h.handleListProjects(conn, msg, agent)
 	case "fetch_todos":

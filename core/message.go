@@ -567,6 +567,41 @@ type AgentSessionInfo struct {
 	AgentPreset string
 }
 
+// BackgroundTask is the backend-neutral read-only background-task summary
+// (docs/protocol/bridge-v1.md「Background Tasks」; roadmap §3.2). Sources must be
+// real agent state — Claude sidechain meta/JSONL (the same files B4 hydrates,
+// single-derivation rule C1) or DSH official session.list subagent rows. Fields
+// the backend does not know stay zero/empty (wire omits them; iOS never renders
+// unknown as 0).
+type BackgroundTask struct {
+	TaskID              string
+	BackendID           string
+	RootSessionID       string
+	ParentTaskID        string // nested parent (Claude parentAgentId); "" for depth-1
+	AgentID             string // Claude sidechain agent id / DSH sub-session id
+	Title               string // task instruction/description (real text, not invented)
+	AgentName           string // general-purpose 等
+	Status              string // queued|running|completed|failed|cancelled
+	StartedAt           time.Time
+	FinishedAt          time.Time
+	TokenCount          int64 // 0 = unknown
+	ToolUseCount        int64 // 0 = unknown
+	Error               string
+	TranscriptAvailable bool // detail/read path exists
+	UpdatedAt           time.Time
+}
+
+// BackgroundTaskDetail is the read-only detail (background_tasks.get).
+// Phase 4 is read-only: CanCancel/CanRetry stay false until the capability-gated
+// operations land (roadmap Phase D).
+type BackgroundTaskDetail struct {
+	Task        BackgroundTask
+	Instruction string
+	NestedTasks []BackgroundTask
+	CanCancel   bool
+	CanRetry    bool
+}
+
 // SessionModelSelection is a session's authoritative current model selection,
 // reported by a SessionModelSelectionReader (e.g. dsh-web session.models →
 // current{provider, model, reasoningEffort}). Fields are empty when the

@@ -544,6 +544,24 @@ type SessionArchiver interface {
 	ArchiveSession(ctx context.Context, sessionID string, archivedAt time.Time) (*AgentSessionInfo, error)
 }
 
+// BackgroundTaskProvider is an optional interface for agents whose runtime has
+// a real, queryable background-task plane (dsh-web: official session.list
+// subagent rows). go-bridge advertises the `background_tasks` capability when
+// the agent implements it (or, for claudecode, when the go-bridge sidechain
+// registry can serve — the Claude side lives in go-bridge beside the B4
+// hydrate so both derive from the same sidechain files, single-derivation C1).
+// Implementations must return only real task records — never invented rows.
+type BackgroundTaskProvider interface {
+	ListBackgroundTasks(ctx context.Context) ([]BackgroundTask, error)
+}
+
+// BackgroundTaskDetailReader is the optional detail half (background_tasks.get).
+// Implementing only the list half is valid: the detail RPC then answers
+// not_supported honestly instead of fabricating a detail body.
+type BackgroundTaskDetailReader interface {
+	GetBackgroundTaskDetail(ctx context.Context, taskID string) (*BackgroundTaskDetail, error)
+}
+
 // SessionModelSelectionReader is an optional interface for agents that can
 // report a session's AUTHORITATIVE current model selection (provider + model +
 // reasoning effort) from a real backend surface (dsh-web: the official

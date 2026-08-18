@@ -36,6 +36,10 @@ type claudeSidechainMeta struct {
 	ToolUseID     string `json:"toolUseId"`
 	ParentAgentID string `json:"parentAgentId"`
 	SpawnDepth    int    `json:"spawnDepth"`
+	// StoppedByUser: 真实样本 2/159 携带（路线图 §3.3 cancelled 信号源）。
+	// B4 投影不消费它（projection 无 cancelled 概念）；仅 background_tasks
+	// summary 层据此把状态映射为 cancelled。
+	StoppedByUser bool `json:"stoppedByUser"`
 	agentID       string // derived from filename, not JSON
 }
 
