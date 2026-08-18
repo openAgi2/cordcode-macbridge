@@ -278,6 +278,7 @@ func advertiseSessionSyncV2Backend(backends []AgentProviderDescriptor) {
 		if id == "codex" || kind == "codex" ||
 			id == "claude" || id == "claudecode" || kind == "claude_code" || kind == "claude" ||
 			id == "opencode" || kind == "opencode" ||
+			id == "opencode-web" || kind == "opencode-web" ||
 			id == "grokbuild" || kind == "grokbuild" ||
 			id == "deepseek" || kind == "deepseek" ||
 			id == "dsh-web" || kind == "deepseek-web" {

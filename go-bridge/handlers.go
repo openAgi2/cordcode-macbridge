@@ -372,6 +372,13 @@ func (h *Handlers) replaceConnection(old, new Connection) {
 	h.eventPublisher.FlushLiveFrameBufferForDevice(new)
 }
 
+// observationResubscribeBackends is the authoritative re-attach list for
+// relay reconnects: every backend whose external turns a device may observe.
+// Package-level (not inline) so tests can assert membership (评审 M3 —— 名单
+// 提为可测常量). dsh-web's absence is a known pre-existing gap reported to
+// the owner separately (opencode-web design §4.1.5 M3).
+var observationResubscribeBackends = []string{"codex", "claudecode", "opencode", "grokbuild", "claude", "opencode-web"}
+
 // resubscribeObservationSessions re-attaches broadcaster session keys for every
 // backend/session still listed in the device's observation scope.
 func (h *Handlers) resubscribeObservationSessions(conn Connection) {
@@ -382,7 +389,7 @@ func (h *Handlers) resubscribeObservationSessions(conn Connection) {
 	if device == nil {
 		return
 	}
-	for _, backendID := range []string{"codex", "claudecode", "opencode", "grokbuild", "claude"} {
+	for _, backendID := range observationResubscribeBackends {
 		scope := h.observation.GetScope(device.DeviceID, backendID)
 		if scope == nil {
 			continue
@@ -1233,7 +1240,11 @@ func (h *Handlers) handleDeliveryRPC(conn Connection, msg WireMessage) bool {
 
 func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agent) {
 	if dir := extractDir(msg); dir != "" {
-		if agent.Name() == "opencode" || shouldSwitchWorkDirForMethod(msg.Method) {
+		// opencode/opencode-web 的四个读方法（list/get/messages/projection）被
+		// shouldSwitchWorkDirForMethod 排除在通用切目录外，但它们的每会话
+		// x-opencode-directory 头正是靠这里切 workDir——不加特判则读路径的
+		// 目录头恒为启动值，坑 5 原样复发（评审 M2-1）。
+		if agent.Name() == "opencode" || agent.Name() == "opencode-web" || shouldSwitchWorkDirForMethod(msg.Method) {
 			switchDir(agent, dir)
 		}
 	}
@@ -4292,6 +4303,8 @@ func backendKindForAgent(agent core.Agent) string {
 		return "codex"
 	case "opencode":
 		return "opencode"
+	case "opencode-web":
+		return "opencode-web"
 	default:
 		return agent.Name()
 	}

@@ -2420,10 +2420,11 @@ var (
 
 func disablesRelayIdleTimeout(backendID string) bool {
 	switch backendID {
-	case "claude", "claudecode", "codex", "opencode", "dsh-web":
+	case "claude", "claudecode", "codex", "opencode", "dsh-web", "opencode-web":
 		// dsh-web mux 在审批等待期间不再吐 text_delta。60s 空闲超时会
 		// auto-complete 并退出 relayEvents（真机 18:10:41，审批已 surface
-		// 仍被收口），iOS 权限卡来不及停留。
+		// 仍被收口），iOS 权限卡来不及停留。opencode-web 同理：审批等待期
+		// 同样无 text_delta（评审 M2-2，一期必接审批）。
 		return true
 	default:
 		return false

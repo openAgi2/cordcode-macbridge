@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T02:48:29+0800",
+  "updated_at": "2026-08-19T02:52:26+0800",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -355,7 +355,7 @@
       "id": "s8-5-projection-wiring-impl",
       "title": "§8-5 投影与 go-bridge 接线：§4.3.2 表逐项 + §4.1.5 全表 + iOS sessionSyncV2ProjectionBackend",
       "description": "go-bridge 接线全表（rg 按符号复核，设计行号已漂移）：dispatchRPC switchDir 特判（M2-1）——Name()==\"opencode\"||shouldSwitchWorkDirForMethod() 特判扩含 opencode-web（四读方法 list/get/messages/projection 携带会话 directory 头）；disablesRelayIdleTimeout（M2-2）加 case（dsh-web 在列先例）；resubscribeObservationSessions（M3）加入名单（行为级测试或名单提为可测常量二选一，实施时定）；catalogCapabilityRequiredFor 不加入（S7）；backend_capabilities permission_resolve 排除名单无需改动（S5）；handlers_session_pin resolvePinWire 走 default（禁止 resolveOpenCodePin）；backendKindForAgent 显式 case；backendSupportsProjectionHydrate 加 opencode-web；prepareProjectionHydrateSource case agentName=opencode-web；pathless 分支加入（与 dsh-web 同组）；forceCold 加入；produceProjectionHydrateRange 前置加入 + switch case 用 streamBackendRichHistoryProjectionEvents(ctx,\"opencode-web\",sessionID,emit)（禁用 streamOpenCodeRichHistoryProjectionEvents）；pathlessRichHistoryBackend 加 opencode-web；advertiseSessionSyncV2Backend id/kind==opencode-web；backendHasNoExternalEventSource 不进；handlers_opencode.go 不为 opencode-web 开门。iOS：ChatViewModel.swift sessionSyncV2ProjectionBackend 加 .openCodeWeb（坑 9）。测试风格对齐 TestDSHWeb*。设计 §4.1.5/§4.3.2 表。",
-      "status": "pending",
+      "status": "done",
       "phase": "s8-5",
       "kind": "impl",
       "depends_on": [
@@ -366,20 +366,26 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
-        "attestation": null,
+        "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "§4.1.5/§4.3.2 全表接线（rg 按符号复核）：M2-1 dispatchRPC switchDir 特判扩含 opencode-web（四读方法切目录防坑 5）；M2-2 disablesRelayIdleTimeout 加 case；M3 resubscribeObservationSessions 名单提为包级 observationResubscribeBackends 常量并加入 opencode-web（二选一取可测常量形态；dsh-web 缺口注释保留待 owner）；backendKindForAgent 显式 case；backendSupportsProjectionHydrate/pathless 分支/forceCold sourceChanged/produceProjectionHydrateRange 前置+switch（用 streamBackendRichHistoryProjectionEvents(ctx,opencode-web)，未用 streamOpenCode* 专用 helper）/pathlessRichHistoryBackend/advertiseSessionSyncV2Backend(id/kind) 全部加入。不进：catalogCapabilityRequiredFor（S7）、backendHasNoExternalEventSource、handlers_opencode.go、resolvePinWire（default）、backend_capabilities（自动放行）。iOS sessionSyncV2ProjectionBackend 单行因枚举 case 未建会破坏编译，随 §8-7 一体落地（顺序调整如实记录）。",
+        "artifacts": [
+          "go-bridge/handlers.go",
+          "go-bridge/handlers_relay.go",
+          "go-bridge/handlers_projection.go",
+          "go-bridge/projection_kernel.go",
+          "go-bridge/server.go"
+        ],
+        "checked_at": "2026-08-19T02:52:26+0800"
       }
     },
     {
       "id": "s8-5-projection-wiring-tests",
       "title": "§8-5 单测：TestOpenCodeWebProjectionWiring + M2-1/M2-2/M3 断言",
       "description": "go-bridge/handlers_projection_dshweb_test.go 风格加 TestOpenCodeWebProjectionWiring。设计 §6 相关行：relay 空闲超时——disablesRelayIdleTimeout(\"opencode-web\") 为 true；observation re-attach（M3）——名单含 opencode-web（行为级测试或常量断言二选一）；switchDir 特判（M2-1）——四读方法携带 directory 头（httptest 断言请求头）；SSV2 广告——advertiseSessionSyncV2Backend 含 opencode-web。iOS：ChatViewModelSessionSyncV2Tests 加 openCodeWeb 为 true（可留 §8-7 统一跑，此处 Mac 侧为准）。",
-      "status": "pending",
+      "status": "done",
       "phase": "s8-5",
       "kind": "tests",
       "depends_on": [
@@ -389,20 +395,22 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "test-execution",
-        "attestation": null,
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "TestOpenCodeWebProjectionWiring（pathless 两清单成员+两个不进清单 S7/外部事件源+M2-2+M3 常量含 opencode-web+backendKind 显式 case+SSV2 id/kind 双形态广告+pathless 源准备 Identity-only）+ TestDispatchRPCSwitchDirCoversOpenCodeWebReads（M2-1 行为级：四读方法带 directory 必切 workDir）+ TestOpenCodeWebProjectionHydrateFromRichHistory（冷 pull 全量重建 kernel Ready，对照 DSHWeb 风格）全过。",
+        "artifacts": [
+          "go-bridge/handlers_projection_ocweb_test.go"
+        ],
+        "checked_at": "2026-08-19T02:52:26+0800"
       }
     },
     {
       "id": "s8-5-projection-wiring-regression",
       "title": "§8-5 回归：全量 go 测试 + 旧包零增量",
       "description": "go test ./agent/opencode-web/... ./go-bridge/... -count=1 零失败；git diff --stat agent/opencode 为空。iOS 侧单行改动（sessionSyncV2ProjectionBackend）如已做，补定向 -only-testing:CCCodeTests/ChatViewModelSessionSyncV2Tests（iOS 分支 opencode/web 上）。",
-      "status": "pending",
+      "status": "done",
       "phase": "s8-5",
       "kind": "regression",
       "depends_on": [
@@ -412,13 +420,13 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "test-execution",
-        "attestation": null,
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
+        "summary": "go build+vet 干净；go test ./go-bridge/... 失败集仅含先存 flaky（多轮定性）；git diff --stat agent/opencode 为空。iOS 侧单行延至 §8-7（见 impl notes）。",
         "artifacts": [],
-        "checked_at": null
+        "checked_at": "2026-08-19T02:52:26+0800"
       }
     },
     {

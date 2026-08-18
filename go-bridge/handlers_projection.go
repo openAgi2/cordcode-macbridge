@@ -338,11 +338,12 @@ var errProjectionSessionNotFound = errors.New("live-only session has no kernel s
 // dsh web instance (dsh-web design §4.3.2).
 func backendSupportsProjectionHydrate(backendID string) bool {
 	switch backendID {
-	case "codex", "claude", "claudecode", "opencode", "grokbuild", "deepseek", "dsh-web":
+	case "codex", "claude", "claudecode", "opencode", "grokbuild", "deepseek", "dsh-web", "opencode-web":
 		// K5: Codex/Claude use JSONL transcript hydrate; OpenCode uses HTTP rich-history
 		// full rebuild (no transcript file / no file-prefix checkpoint); grokbuild and
 		// deepseek use the same pathless rich-history rebuild from local session logs;
-		// dsh-web rebuilds pathless from the official session.history API.
+		// dsh-web rebuilds pathless from the official session.history API; opencode-web
+		// rebuilds pathless from the official GET /session/:id/message API.
 		return true
 	default:
 		return false
@@ -487,7 +488,7 @@ func (h *Handlers) ensureProjectionHydrated(
 	}
 	// Pathless re-open: force full GetRichSessionHistory rebuild when already Ready.
 	sourceChanged := forceColdInspection && ready &&
-		(backendID == "opencode" || backendID == "grokbuild" || backendID == "deepseek" || backendID == "dsh-web") && source.Path == ""
+		(backendID == "opencode" || backendID == "grokbuild" || backendID == "deepseek" || backendID == "dsh-web" || backendID == "opencode-web") && source.Path == ""
 	// Hydrate owns the source cut. Hand it to any pre-hydrate hook (Claude cold-open starts
 	// its live file relay here so in-flight terminal events can feed the commit gate; the relay
 	// inherits the admission cut so its initial scan is disjoint from the cold-source baseline).
@@ -571,6 +572,8 @@ func (h *Handlers) prepareProjectionHydrateSource(
 		agentName = "dsh"
 	case "dsh-web":
 		agentName = "dsh-web"
+	case "opencode-web":
+		agentName = "opencode-web"
 	default:
 		return ProjectionSourceDescriptor{}, errProjectionBackendNotMigrated
 	}
@@ -647,10 +650,11 @@ func (h *Handlers) prepareProjectionHydrateSource(
 	// OpenCode has no JSONL transcript path; grokbuild's chat_history.jsonl is a structured
 	// turn snapshot, not a raw transcript with stable byte cursors; deepseek's store logs
 	// are zstd-compressed (web artifacts); dsh-web's baseline is the official
-	// session.history API. All four cold-hydrate as a full rich-history rebuild keyed
+	// session.history API; opencode-web's baseline is the official message API. All
+	// pathless members cold-hydrate as a full rich-history rebuild keyed
 	// by session identity only (Cursor=0, Path empty). Checkpoint file-prefix validation
 	// does not apply; re-open always rebuilds from GetRichSessionHistory.
-	if backendID == "opencode" || backendID == "grokbuild" || backendID == "deepseek" || backendID == "dsh-web" {
+	if backendID == "opencode" || backendID == "grokbuild" || backendID == "deepseek" || backendID == "dsh-web" || backendID == "opencode-web" {
 		if _, ok := agent.(core.RichHistoryProvider); !ok {
 			if h.eventPublisher.ProjectionTurnCount(backendID, sessionID) > 0 {
 				return ProjectionSourceDescriptor{Identity: sessionID}, nil
@@ -1025,7 +1029,7 @@ func (h *Handlers) produceProjectionHydrateRange(
 	emit func(projectionHydrateEvent) bool,
 ) error {
 	if backendID != "opencode" && backendID != "grokbuild" && backendID != "deepseek" &&
-		backendID != "dsh-web" &&
+		backendID != "dsh-web" && backendID != "opencode-web" &&
 		backendID != "claude" && backendID != "claudecode" &&
 		(path == "" || startOffset == endOffset) {
 		return nil
@@ -1079,6 +1083,10 @@ func (h *Handlers) produceProjectionHydrateRange(
 		)
 	case "opencode":
 		return h.streamOpenCodeRichHistoryProjectionEvents(ctx, sessionID, emit)
+	case "opencode-web":
+		// NOT streamOpenCodeRichHistoryProjectionEvents — that helper resolves
+		// the agent by name "opencode"; opencode-web is its own driver.
+		return h.streamBackendRichHistoryProjectionEvents(ctx, "opencode-web", sessionID, emit)
 	case "grokbuild":
 		return h.streamBackendRichHistoryProjectionEvents(ctx, "grokbuild", sessionID, emit)
 	case "deepseek":

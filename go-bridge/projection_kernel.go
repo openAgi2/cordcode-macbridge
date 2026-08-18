@@ -690,7 +690,7 @@ func (k *ProjectionKernel) finishHydrateLocked(session *projectionKernelSession)
 // OpenCode. Codex is file-based and excluded.
 func pathlessRichHistoryBackend(backendID string) bool {
 	switch backendID {
-	case "opencode", "grokbuild", "claude", "claudecode":
+	case "opencode", "grokbuild", "claude", "claudecode", "opencode-web":
 		return true
 	default:
 		return false
