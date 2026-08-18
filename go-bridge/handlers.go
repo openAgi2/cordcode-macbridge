@@ -1281,6 +1281,8 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleBackgroundTasksList(conn, msg, agent)
 	case "background_tasks.get":
 		h.handleBackgroundTasksGet(conn, msg, agent)
+	case "background_tasks.cancel":
+		h.handleBackgroundTasksCancel(conn, msg, agent)
 	case "list_projects":
 		h.handleListProjects(conn, msg, agent)
 	case "fetch_todos":

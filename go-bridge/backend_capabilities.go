@@ -159,6 +159,11 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 	if id == "claudecode" {
 		caps = append(caps, "background_task_details")
 	}
+	// Phase 5：cancel 只在 backend 有真实取消面时声明（dsh-web 官方
+	// session.cancel）。Claude sidechain 无 bridge 侧取消路径 → 不声明。
+	if _, ok := agent.(core.BackgroundTaskCanceller); ok {
+		caps = append(caps, "background_task_cancel")
+	}
 
 	return dedupCapabilities(caps)
 }

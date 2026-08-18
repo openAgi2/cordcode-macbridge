@@ -770,14 +770,16 @@ func (p *EventPublisher) publishPreReducedTimeline(logical LogicalEvent) EventMe
 }
 
 func validateControlPlaneEvent(logical LogicalEvent) error {
-	if logical.Event != "sessions_changed" {
+	// Phase 5：background_tasks_changed 是 sessions_changed 同形的 backend 级
+	// invalidate 通知（不携带任务数据，客户端重新 list 拿真值）。
+	if logical.Event != "sessions_changed" && logical.Event != "background_tasks_changed" {
 		return fmt.Errorf("control-plane event %q is not allowed", logical.Event)
 	}
 	if logical.BackendID == "" {
-		return fmt.Errorf("control-plane sessions_changed requires backend ID")
+		return fmt.Errorf("control-plane %s requires backend ID", logical.Event)
 	}
 	if logical.SessionID != "" {
-		return fmt.Errorf("control-plane sessions_changed must not be session-scoped")
+		return fmt.Errorf("control-plane %s must not be session-scoped", logical.Event)
 	}
 	return nil
 }

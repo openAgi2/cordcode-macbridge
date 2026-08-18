@@ -114,6 +114,9 @@ func (a *Agent) GetBackgroundTaskDetail(ctx context.Context, taskID string) (*co
 			return &core.BackgroundTaskDetail{
 				Task:        t,
 				Instruction: t.Title,
+				// 只读列表里仍 running 的官方子会话可经 session.cancel 取消；
+				// 终态任务不可取消（不提供假按钮）。
+				CanCancel: t.Status == "running",
 			}, nil
 		}
 	}
@@ -127,5 +130,17 @@ func shortTaskID(id string) string {
 	return id
 }
 
+// CancelBackgroundTask implements core.BackgroundTaskCanceller via the official
+// session.cancel RPC on the sub-session — a real cancellation surface, no local
+// simulation.
+func (a *Agent) CancelBackgroundTask(ctx context.Context, taskID string) error {
+	client, err := a.clientFor(ctx)
+	if err != nil {
+		return err
+	}
+	return client.Call(ctx, "session.cancel", sessionCancelRequest{SessionID: taskID}, nil)
+}
+
 var _ core.BackgroundTaskProvider = (*Agent)(nil)
 var _ core.BackgroundTaskDetailReader = (*Agent)(nil)
+var _ core.BackgroundTaskCanceller = (*Agent)(nil)

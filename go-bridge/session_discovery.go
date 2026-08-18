@@ -247,6 +247,16 @@ func (h *Handlers) snapshotBackendSession(ctx context.Context, seen map[string]s
 			slog.Error("go-bridge: sessions_changed control-plane publish rejected",
 				"backend", id, "catalogGeneration", catalogGeneration, "error", err.Error())
 		}
+		// Phase 5：catalog 指纹变化同样意味着后台任务面可能变化（DSH 子任务
+		// 是 session 行、Claude sidechain 挂在 session 目录下）。对有任务面的
+		// backend 追加一条 background_tasks.changed invalidate 通知——客户端
+		// 重新 background_tasks.list 拿真值，事件本身不携带任务数据（不做
+		// 双真值）。
+		if id == "claudecode" {
+			h.publishBackgroundTasksChanged(id, catalogGeneration)
+		} else if _, ok := agent.(core.BackgroundTaskProvider); ok {
+			h.publishBackgroundTasksChanged(id, catalogGeneration)
+		}
 	} else {
 		seen[id] = current
 	}

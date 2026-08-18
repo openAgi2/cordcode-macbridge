@@ -6,6 +6,7 @@ package dshweb
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 )
 
@@ -113,5 +114,41 @@ func TestGetBackgroundTaskDetailFoundAndMissing(t *testing.T) {
 
 	if _, err := a.GetBackgroundTaskDetail(context.Background(), "no-such"); err == nil {
 		t.Fatal("missing task must error (task_not_found path)")
+	}
+}
+
+// Phase 5：官方 session.cancel 真实取消面。
+func TestCancelBackgroundTaskUsesOfficialSessionCancel(t *testing.T) {
+	f := newFakeDSHServer(t)
+	defer f.Close()
+	a := newTestAgent(t, f)
+	f.handlers["background"] = fakeRPCResponse{}
+	f.handlers["session.cancel"] = fakeRPCResponse{value: map[string]any{}}
+
+	if err := a.CancelBackgroundTask(context.Background(), "sub-999"); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	calls := methodCalls(f, "session.cancel")
+	if len(calls) != 1 {
+		t.Fatalf("session.cancel calls = %d, want 1", len(calls))
+	}
+	var payload struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := json.Unmarshal(calls[0], &payload); err != nil || payload.SessionID != "sub-999" {
+		t.Fatalf("payload = %s (err %v)", calls[0], err)
+	}
+	// 运行中任务的 detail 声明可取消；终态不声明。
+	f.handlers["session.list"] = fakeRPCResponse{value: bgTaskFixtureSessionList()}
+	detail, err := a.GetBackgroundTaskDetail(context.Background(), "sub-1111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !detail.CanCancel {
+		t.Fatal("running task detail must declare CanCancel (official session.cancel surface)")
+	}
+	done, _ := a.GetBackgroundTaskDetail(context.Background(), "sub-2222")
+	if done.CanCancel {
+		t.Fatal("terminal task must NOT declare CanCancel")
 	}
 }

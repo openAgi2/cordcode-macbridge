@@ -18,6 +18,7 @@ package gobridge
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -277,6 +278,53 @@ func (h *Handlers) handleBackgroundTasksGet(conn Connection, msg WireMessage, ag
 			"retry":  detail.CanRetry,
 		},
 	}, nil)
+}
+
+// publishBackgroundTasksChanged emits the Phase 5 invalidate notification. The
+// event carries NO task data — clients re-list from the authoritative RPC (no
+// second truth source rides the event).
+func (h *Handlers) publishBackgroundTasksChanged(backendID string, catalogGeneration uint64) {
+	if !h.broadcaster.HasConnections() {
+		return
+	}
+	if _, err := h.eventPublisher.PublishControlPlane(LogicalEvent{
+		BackendID:         backendID,
+		Event:             "background_tasks_changed",
+		Data:              map[string]interface{}{"backendId": backendID},
+		Broadcast:         true,
+		CatalogGeneration: catalogGeneration,
+	}); err != nil {
+		slog.Error("go-bridge: background_tasks_changed publish rejected",
+			"backend", backendID, "error", err.Error())
+	}
+}
+
+// handleBackgroundTasksCancel routes the Phase 5 capability-gated cancel. Only
+// backends with a REAL cancellation surface implement core.BackgroundTaskCanceller
+// (dsh-web: official session.cancel). Claude sidechains have no bridge-owned
+// cancel path — the capability stays absent there and the RPC answers
+// not_supported instead of pretending.
+func (h *Handlers) handleBackgroundTasksCancel(conn Connection, msg WireMessage, agent core.Agent) {
+	var params struct {
+		TaskID string `json:"taskId"`
+	}
+	if msg.Params != nil {
+		_ = json.Unmarshal(msg.Params, &params)
+	}
+	if strings.TrimSpace(params.TaskID) == "" {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "missing_param", Message: "taskId required"})
+		return
+	}
+	canceller, ok := agent.(core.BackgroundTaskCanceller)
+	if !ok {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "not_supported", Message: "backend does not support background task cancel"})
+		return
+	}
+	if err := canceller.CancelBackgroundTask(context.Background(), params.TaskID); err != nil {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "cancel_failed", Message: err.Error()})
+		return
+	}
+	conn.SendResult(msg.RequestID, map[string]any{"cancelled": true}, nil)
 }
 
 // claudeProjectsRootForBackgroundTasks resolves the Claude projects root for the

@@ -212,3 +212,84 @@ func TestBackgroundTasksCapabilityDerivation(t *testing.T) {
 		}
 	}
 }
+
+// Phase 5：cancel 路由与 capability。
+type backgroundTaskCancellerAgent struct {
+	*fakeAgent
+	cancelled []string
+}
+
+func (b *backgroundTaskCancellerAgent) ListBackgroundTasks(context.Context) ([]core.BackgroundTask, error) {
+	return nil, nil
+}
+
+func (b *backgroundTaskCancellerAgent) CancelBackgroundTask(_ context.Context, taskID string) error {
+	b.cancelled = append(b.cancelled, taskID)
+	return nil
+}
+
+func TestBackgroundTasksCancelRoutingAndCapability(t *testing.T) {
+	// 无取消面（claudecode）→ not_supported（诚实拒绝，不假装）。
+	claude := &fakeAgent{name: "claudecode"}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("claudecode", claude)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "claudecode", Method: "background_tasks.cancel",
+		RequestID: "c-1", Params: mustJSONRaw(t, map[string]any{"taskId": "agentA"}),
+	})
+	messages := readJSONMaps(t, clientConn, 1)
+	if code, _ := messages[0]["error"].(map[string]any)["code"].(string); code != "not_supported" {
+		t.Fatalf("claude cancel code = %v, want not_supported", messages[0]["error"])
+	}
+	cleanup()
+
+	// 有真实取消面（dsh canceller）→ 转发 taskId。
+	dsh := &backgroundTaskCancellerAgent{fakeAgent: &fakeAgent{name: "dsh-web"}}
+	handlers = newTestHandlers(t)
+	handlers.RegisterAgent("dsh-web", dsh)
+	serverConn, clientConn, cleanup = openTestConn(t)
+	defer cleanup()
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "dsh-web", Method: "background_tasks.cancel",
+		RequestID: "c-2", Params: mustJSONRaw(t, map[string]any{"taskId": "sub-9"}),
+	})
+	messages = readJSONMaps(t, clientConn, 1)
+	data, _ := messages[0]["data"].(map[string]any)
+	if data["cancelled"] != true {
+		t.Fatalf("data = %#v, want cancelled=true", messages[0])
+	}
+	if len(dsh.cancelled) != 1 || dsh.cancelled[0] != "sub-9" {
+		t.Fatalf("cancelled = %v, want [sub-9]", dsh.cancelled)
+	}
+
+	// capability：canceller 声明 background_task_cancel；claudecode 不声明。
+	hasCap := func(agent core.Agent, id, want string) bool {
+		for _, c := range deriveBackendCapabilities(id, agent, "") {
+			if c == want {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasCap(dsh, "dsh-web", "background_task_cancel") {
+		t.Fatal("canceller backend must advertise background_task_cancel")
+	}
+	if hasCap(claude, "claudecode", "background_task_cancel") {
+		t.Fatal("claudecode must NOT advertise cancel (no bridge-owned surface)")
+	}
+}
+
+func TestBackgroundTasksChangedControlPlaneEventAllowed(t *testing.T) {
+	// validateControlPlaneEvent：background_tasks_changed 与 sessions_changed 同形
+	// （backend 级、非 session-scoped）。
+	if err := validateControlPlaneEvent(LogicalEvent{BackendID: "dsh-web", Event: "background_tasks_changed"}); err != nil {
+		t.Fatalf("backend-scoped background_tasks_changed must pass: %v", err)
+	}
+	if err := validateControlPlaneEvent(LogicalEvent{BackendID: "dsh-web", Event: "background_tasks_changed", SessionID: "s"}); err == nil {
+		t.Fatal("session-scoped background_tasks_changed must be rejected")
+	}
+	if err := validateControlPlaneEvent(LogicalEvent{Event: "background_tasks_changed"}); err == nil {
+		t.Fatal("missing backend ID must be rejected")
+	}
+}

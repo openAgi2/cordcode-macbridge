@@ -555,6 +555,14 @@ type BackgroundTaskProvider interface {
 	ListBackgroundTasks(ctx context.Context) ([]BackgroundTask, error)
 }
 
+// BackgroundTaskCanceller is the Phase 5 capability-gated cancel surface. Only
+// backends with a REAL cancellation path implement it (dsh-web: official
+// session.cancel on the sub-session). Claude sidechains have no bridge-owned
+// cancel — the capability stays absent and the RPC answers not_supported.
+type BackgroundTaskCanceller interface {
+	CancelBackgroundTask(ctx context.Context, taskID string) error
+}
+
 // BackgroundTaskDetailReader is the optional detail half (background_tasks.get).
 // Implementing only the list half is valid: the detail RPC then answers
 // not_supported honestly instead of fabricating a detail body.
