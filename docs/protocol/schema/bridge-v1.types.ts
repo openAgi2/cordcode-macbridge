@@ -93,7 +93,7 @@ export interface BridgeSecurityProfile {
 
 export interface BridgeBackendInfo {
   id: string;
-  kind: "claude_code" | "opencode" | "codex" | string;
+  kind: "claude_code" | "opencode" | "codex" | "opencode-web" | string;
   displayName?: string;
   /**
    * Backend-scoped capabilities. `session_sync_v2` here (not only hello_ack) selects ownership;

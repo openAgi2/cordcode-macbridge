@@ -676,6 +676,79 @@ Wire behavior:
 Adding the backend is a non-breaking extension of the descriptor space (new
 `backends[].kind` value; clients that do not know it ignore the backend).
 
+### Backend: `opencode-web` (kind `opencode-web`)
+
+The `opencode-web` backend (hello_ack `backends[].id = "opencode-web"`,
+`kind = "opencode-web"`, display name "OpenCode Web") is the official
+`opencode serve` HTTP/SSE client (design
+`docs/2026-08-18-opencode-web-backend-design.md`). It coexists with the legacy
+hybrid `opencode` backend until retirement: the Swift-managed server
+(`opencode-managed-server.json`, port range `4096..4196`) keeps serving both —
+`opencode-web` is a second client of the same resolved URL, never a second
+supervisor, and never binds or spawns anything itself.
+
+Wire behavior:
+
+- `liveEvents = "broadcast"`, `requiresPollingForExternalTurns = false`: the
+  official `/global/event` SSE (v2: `/api/event`) covers every session on the
+  serve; external web turns stream live with `external_turn_streaming`
+  advertised. Catalog changes (`session.created`/`session.deleted`) trigger
+  `sessions_changed` through the catalog refresh signal on top of the generic
+  discovery watcher. Empty URL ⇒ descriptor `not_configured` (no SSE
+  subscription, no implicit legacy-port dialing).
+- API generation is probed at startup (`/global/health` exists ⇒ 1.18
+  un-prefixed routes; otherwise `/api/health` ⇒ v2 `/api` routes); the probe
+  result (`generation=… url=…`) rides the descriptor reason and
+  `run_diagnostics`. Bare-array vs `{data}` envelope is the final shape
+  arbiter (1.18.18 also answers `/api/*` — dual presence is not proof of v2).
+- Reads carry the session's own `x-opencode-directory` header (list uses the
+  request directory; the go-bridge switchDir special-case keeps it correct
+  for the four read methods —坑 5 修复). `session_history` / rich history /
+  SSV2 cold hydrate derive from `GET /session/:id/message` (pathless family:
+  re-open rebuilds fully). `session_sync_v2` is advertised.
+- Context usage follows the official web formula: the LAST assistant message
+  with positive token total over the runtime catalog's `limit.context`
+  (`total = input+output+reasoning+cache.read+cache.write`). A missing window
+  yields no usage value (iOS shows 暂无) — never a fabricated 200k. The v2
+  `…/context` route (post-compact in-context messages) is NOT an occupancy
+  source. `IsSessionActive` reads 1.18 `GET /session/status` (missing key =
+  definitive idle; v2 `/api/session/active` absence is NOT a global idle
+  verdict).
+- `send_message` maps to `POST /session/:id/prompt_async` (v2:
+  `…/prompt` after a session-scoped model switch) and ALWAYS carries a
+  catalog model `{id, providerID}`. A model outside the runtime provider
+  catalog fails the send RPC with zero POSTs; attachments are NOT declared
+  in phase 1 (image/file uploads are rejected loudly, never silently
+  dropped). A turn that arms but produces zero assistant output surfaces as
+  `turn_error` with the diagnosable "model produced no output" text (never a
+  healthy empty completion). `abort_generation` maps to `…/abort` (v2:
+  `…/interrupt`); closing the iOS view only tears the SSE binding — it never
+  aborts the running turn.
+- Approvals surface through the existing `permission_request` events (SSE
+  `permission.asked`) and are answered by folding bridge `allow`/`deny` onto
+  the official reply literals (1.18 probes `once`/`reject` first and falls
+  back to `allow`/`deny` on 4xx; v2 replies `once`/`reject` directly). The
+  serve holds the single answer lock: the first answerer (web UI or iOS)
+  wins. Questions are NOT supported in phase 1 (`not_supported`; no banner).
+- `list_providers`/`list_models` come from `GET /provider` (recursive runtime
+  catalog; qualified `providerID/modelID` ids); `switch_model` records a
+  pending selection that rides the next prompt (1.18 has no dedicated switch
+  endpoint — the NEXT reply uses the new model; v2 switches via
+  `POST …/model`). `list_agents` maps `GET /agent`; `list_projects` maps
+  `GET /project` reading the `worktree` field (v2's `/api/location` is a
+  single-location parser, NOT a project list — `not_supported` there).
+- Not supported in phase 1: `fetch_todos` (todos not advertised),
+  `get_usage`, memory files, diff suite, git surface,
+  `list_permission_modes`/`set_permission_mode`, `set_agent_preset`,
+  `delete_session` (HTTP delete not live-pinned), `rename_session` (until
+  live-pinned), `share_session`, `resolve_user_input`.
+- `run_diagnostics` reports the endpoint source, loopback-only disclosure,
+  the generation probe detail, catalog/selected-model membership, and the
+  permission-literal folding state.
+
+Adding the backend is a non-breaking extension of the descriptor space (new
+`backends[].kind` value; clients that do not know it ignore the backend).
+
 ### Capability: `supports_workspace_browse` (§6.5)
 
 A backend advertises `supports_workspace_browse` in `capabilities` when its agent driver
