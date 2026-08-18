@@ -30,6 +30,7 @@ var _ core.ToolAuthorizer = (*Agent)(nil)
 var _ core.HistoryProvider = (*Agent)(nil)
 var _ core.RichHistoryProvider = (*Agent)(nil)
 var _ core.SessionEventSubscriber = (*Agent)(nil)
+var _ core.SessionModelSelectionReader = (*Agent)(nil)
 
 // Agent implements core.Agent for the Grok Build CLI.
 type Agent struct {
@@ -258,16 +259,14 @@ func (a *Agent) configuredModels() []core.ModelOption {
 }
 
 func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
-	if models := a.configuredModels(); len(models) > 0 {
-		return models
-	}
+	_ = ctx
 	// Grok CLI 走 ACP agent stdio（grok agent stdio），无 `grok models` 子命令（ACP v1 无标准
-	// listModels），故不照搬 opencode 的 exec models 探测；custom provider 模型经
-	// configuredModels 可见，无 provider 时回落默认 Grok 模型。详见 t3code-adoption-plan §5.1。
-	return []core.ModelOption{
-		{Name: "grok-4.5", Desc: "Grok 4.5"},
-		{Name: "grok-4", Desc: "Grok 4"},
-	}
+	// listModels），故不照搬 opencode 的 exec models 探测。custom provider 模型经
+	// configuredModels 可见；无 provider 时返回空——ACP 没有模型目录真值，旧的
+	// grok-4.5/grok-4 硬编码回落会把过时模型冒充真实目录（路线图 §5.6 第 4 条），
+	// 诚实状态是空 catalog + iOS 显示「后端未提供当前模型」。会话实际模型经
+	// SessionModelSelectionReader（transcript 证据）下发。详见 t3code-adoption-plan §5.1。
+	return a.configuredModels()
 }
 
 // --- ReasoningEffortSwitcher ---

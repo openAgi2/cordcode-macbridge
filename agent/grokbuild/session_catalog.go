@@ -67,6 +67,85 @@ func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, erro
 	return listLocalSessions(ctx, home)
 }
 
+// GetSessionModelSelection implements core.SessionModelSelectionReader with
+// on-disk evidence only (roadmap §5.6: the ACP surface has no model RPC, so
+// the Mac side derives the session truth from transcript/history — C3: iOS
+// never parses transcripts itself). Model = the newest assistant model_id in
+// chat_history.jsonl, falling back to summary.json's current_model_id;
+// Provider = the same namespace the model catalog uses (active custom
+// provider, else "default") so iOS's restored selection matches catalog rows.
+// No evidence → ok=false: "后端未提供当前模型" is the honest state, never a
+// stale grok-4.5/grok-4 fallback masquerading as the real model.
+func (a *Agent) GetSessionModelSelection(ctx context.Context, sessionID string) (core.SessionModelSelection, bool) {
+	_ = ctx
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return core.SessionModelSelection{}, false
+	}
+	a.mu.RLock()
+	home := a.grokHomeLocked()
+	a.mu.RUnlock()
+	if home == "" {
+		return core.SessionModelSelection{}, false
+	}
+	model := lastAssistantModelID(home, sessionID)
+	if model == "" {
+		return core.SessionModelSelection{}, false
+	}
+	provider := "default"
+	if p := a.GetActiveProvider(); p != nil && strings.TrimSpace(p.Name) != "" {
+		provider = p.Name
+	}
+	return core.SessionModelSelection{Provider: provider, Model: model}, true
+}
+
+// lastAssistantModelID finds the session's newest real assistant model evidence:
+// the last assistant row carrying model_id in chat_history.jsonl, falling back
+// to summary.json's current_model_id. Empty when no evidence exists.
+func lastAssistantModelID(grokHome, sessionID string) string {
+	dir := findSessionDir(grokHome, sessionID)
+	if dir == "" {
+		return ""
+	}
+	if m := lastModelIDFromChatHistory(filepath.Join(dir, "chat_history.jsonl")); m != "" {
+		return m
+	}
+	if info, ok := parseSummaryFile(filepath.Join(dir, "summary.json")); ok {
+		return strings.TrimSpace(info.ModelID)
+	}
+	return ""
+}
+
+// lastModelIDFromChatHistory returns the model_id of the LAST assistant row
+// that carries one (the most recent model the session actually ran on).
+func lastModelIDFromChatHistory(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	last := ""
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		line := bytes.TrimSpace(sc.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var row grokHistoryLine
+		if err := json.Unmarshal(line, &row); err != nil {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(row.Type)) != "assistant" {
+			continue
+		}
+		if m := strings.TrimSpace(row.ModelID); m != "" {
+			last = m
+		}
+	}
+	return last
+}
+
 // GetSessionHistory implements core.HistoryProvider by reading chat_history.jsonl.
 func (a *Agent) GetSessionHistory(ctx context.Context, sessionID string, limit int) ([]core.HistoryEntry, error) {
 	_ = ctx

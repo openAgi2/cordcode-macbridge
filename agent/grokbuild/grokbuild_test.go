@@ -144,9 +144,10 @@ func TestAgent_ModelSwitcher(t *testing.T) {
 		t.Errorf("GetModel = %q", agent.GetModel())
 	}
 
-	models := agent.AvailableModels(nil)
-	if len(models) == 0 {
-		t.Error("AvailableModels should not be empty")
+	// 无 custom provider 时 ACP 无模型目录真值：空 catalog 是诚实状态
+	// （路线图 §5.6 第 4 条——旧的 grok-4.5/grok-4 硬编码回落已移除）。
+	if models := agent.AvailableModels(nil); len(models) != 0 {
+		t.Errorf("AvailableModels without a provider = %+v, want empty (no fabricated catalog)", models)
 	}
 }
 
@@ -336,10 +337,10 @@ func TestAvailableModels_CustomProviderModels(t *testing.T) {
 	}
 	agent := a.(*Agent)
 
-	// 无 provider：回落默认 2 条。
+	// 无 provider：ACP 无目录真值，返回空（不再回落硬编码 grok-4.5/grok-4）。
 	defModels := agent.AvailableModels(context.Background())
-	if len(defModels) != 2 {
-		t.Errorf("default AvailableModels len = %d, want 2", len(defModels))
+	if len(defModels) != 0 {
+		t.Errorf("default AvailableModels len = %d, want 0", len(defModels))
 	}
 
 	// 注入 custom provider（GLM）+ 模型，设 active。
