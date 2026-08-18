@@ -1,6 +1,6 @@
 # OpenCode Web Backend 设计（官方 HTTP/SSE 转发 + bridge-v1 翻译）
 
-- 日期：2026-08-18（v2：实施真值；v3：按评审 `2026-08-18-opencode-web-backend-design-review.md` 修订——M1-M3 必改全收（iOS if 比较型接线 ≥12 处、go-bridge 三处表外键控点）+ S1-S9 逐条处置，见文末「评审采纳记录」。中间稿/讨论轨迹见 [初稿](2026-08-18-opencode-web-backend-design-初稿.md)）
+- 日期：2026-08-18（v2：实施真值；v3：一轮评审 M1-M3+S1-S9；v3.1：二轮评审 **APPROVE** 收口——diff 逐项核验通过、S7 亲核修正独立复核属实、audit-plan 背书盘点通过，三条实施期提示落稿，见文末「评审采纳记录」。中间稿/讨论轨迹见 [初稿](2026-08-18-opencode-web-backend-design-初稿.md)）
 - 状态：**待评审后实施**。本文是开发 agent 的唯一真值；初稿不作实施依据。批准前不写 `agent/opencode-web` 代码。
 - 背景：旧 `opencode` 在 iOS 上占用圈空、部分会话发了没回；官方网页（本机 `opencode serve`）同会话有数。owner 要求 **新开独立 backend**，与旧包物理隔离，成熟后再摘旧入口、代码不删。
 - 对照：结构、纪律、接线密度效仿 [2026-08-16-dsh-web-backend-design.md](2026-08-16-dsh-web-backend-design.md)。**不要**把 dsh 的 JSON-RPC 信封、双 WebSocket、`/api/respond` 批问答原样抄过来。本路线的载波是 **HTTP + SSE**，不是 WebSocket。
@@ -356,7 +356,7 @@ StaticCapabilities:          []string{"external_turn_streaming"}
 
 #### 4.1.5 go-bridge（一期必须动、且只加不改旧门控）
 
-行号以写本文时工作树为准；实施时 `rg` 复核，漏一处对应机制静默失效。
+行号以写本文时工作树为准；**v3 修订时的前一提交（Phase 5 任务通知）已使 handlers.go 行号漂移（二轮提示 1）**——实施时一律 `rg` 按符号复核，漏一处对应机制静默失效。
 
 | 位置 | 处置 |
 |---|---|
@@ -645,7 +645,7 @@ InstanceStatus() (available bool, detail string)
 | import 守卫 | 新包 import 图不含 `agent/opencode`；源文件无 sqlite3/CLI 字符串 |
 | InstanceStatus | 空 URL → not_configured；探针失败 → not_configured |
 | relay 空闲超时（评审 M2-2） | `disablesRelayIdleTimeout("opencode-web")` 为 true（审批等待不被 60s 收口） |
-| observation re-attach（评审 M3） | `resubscribeObservationSessions` 名单含 opencode-web（重连后外部会话恢复） |
+| observation re-attach（评审 M3；可测形态二选一——二轮提示 2） | 名单含 opencode-web：**行为级测试**（重连后断言 re-subscribe 发生）或**将名单提为可测常量**再断言内容，实施时定 |
 | switchDir 特判（评审 M2-1） | 四读方法携带 directory 头（httptest 断言请求头） |
 | iOS if 比较类归组（评审 M1） | SessionsView/SidebarView/SessionManagement 的 `.openCodeWeb` 分支行为断言（项目合并、目录侧栏显示、agent 过滤） |
 
@@ -736,3 +736,19 @@ InstanceStatus() (available bool, detail string)
 | S9 坑 9 引用补注 | 采纳 | §2.1 坑 9（main 已修复 deepSeekWeb；openCodeWeb 同样需加） |
 
 不采纳项：无。
+
+---
+
+## 11. 二轮评审采纳记录（v3.1 对照 `2026-08-18-opencode-web-backend-design-review-r2.md`）
+
+二轮结论 **APPROVE（可交付 owner 终审）**：v3 diff 逐项核验通过；**S7 亲核修正经独立源码复核属实**（`catalogCapabilityRequiredFor` 唯一调用点 `handlers.go:1011`，门控 list_sessions 对未协商 v2 旧客户端、返回显式 `protocol.capability_required`——「落实修订时亲核源码」的正面示范）；audit-plan 背书盘点通过（v3 全部内容形状断言均有活体/源码证据，无「描述了但无样本」项）。十三坑全数完整闭环；一轮 3 必改 + 9 建议全部闭环。
+
+三条实施期提示（不阻塞批准）处置：
+
+| # | 提示 | 处置 |
+|---|---|---|
+| 1 | 行号基线漂移（Phase 5 提交已移动 handlers.go 行号） | §4.1.5 前言补注；实施按 `rg` 符号复核（设计本有此声明，强化提示） |
+| 2 | M3 名单为函数内硬编码数组，§6 断言需可测形态 | §6 用例行改「二选一」：行为级测试 / 名单提为可测常量，实施时定 |
+| 3 | dsh-web 既有缺口（resubscribe 名单缺 dsh-web）是否在其队列补一行 | **owner 决策项**，与本设计实施互不阻塞——已在 M3 行与本文记录，待 owner 裁决 |
+
+实施期挂账（不变）：1.18 权限字面量先探、rename/delete 活体钉死、双代探针进诊断。
