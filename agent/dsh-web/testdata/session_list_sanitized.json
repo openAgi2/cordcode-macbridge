@@ -1,0 +1,256 @@
+{
+  "_comment": "Sanitized REAL dsh-web session.list capture (dsh web 0.0.1, live 2026-08-18). Field names/types/order are verbatim from the live /api/session.list response; only sensitive values (session ids, titles/goal/plan/todos projection text, cwd) are replaced with stable fixture values. Root rows keep the `session-<uuid>` id shape; subagent rows keep the bare-uuid id plus parentSessionId+origin (the exact keys ListSessions filters on). Numeric projections (sessionStats/tokenUsage/contextPressure) keep their captured shapes. Do NOT hand-edit field names — this is the frozen wire schema (audit P1 / roadmap Phase 1).",
+  "dshWebVersion": "0.0.1",
+  "request": {
+    "payload": {}
+  },
+  "response": {
+    "type": "server-response",
+    "rpcId": "fixture",
+    "result": {
+      "ok": true,
+      "value": {
+        "items": [
+          {
+            "sessionId": "session-00000000-0000-4000-8000-000000000001",
+            "updatedAt": 1786942288185,
+            "running": false,
+            "blank": false,
+            "cwd": "/tmp/fixture-workspace-1",
+            "agentPreset": "standard",
+            "projections": {
+              "asOfSeq": 1509,
+              "values": {
+                "sessionStats": {
+                  "turns": 2,
+                  "steps": 2,
+                  "llmMs": 21016,
+                  "toolMs": 0,
+                  "ttftMs": 5052,
+                  "ttftSteps": 2,
+                  "decodeMs": 15964,
+                  "decodeTokens": 1475
+                },
+                "title": "fixture title 1",
+                "goal": null,
+                "tokenUsage": {
+                  "uncachedInputTokens": 11598,
+                  "outputTokens": 1475,
+                  "cacheReadTokens": 11904,
+                  "cacheWriteTokens": 0
+                },
+                "contextPressure": {
+                  "pressureTokens": 12031,
+                  "projectedTokens": 12481,
+                  "contextWindow": 1000000
+                },
+                "contextBreakdown": null,
+                "subagentTiming": {
+                  "settledMs": 0
+                },
+                "subagent": null,
+                "permissions": null,
+                "sessionListMetadata": null,
+                "imageLimits": null,
+                "todos": null,
+                "plan": null
+              }
+            }
+          },
+          {
+            "sessionId": "session-00000000-0000-4000-8000-000000000002",
+            "updatedAt": 1786938398778,
+            "running": false,
+            "blank": false,
+            "cwd": "/tmp/fixture-workspace-2",
+            "agentPreset": "standard",
+            "projections": {
+              "asOfSeq": 14236,
+              "values": {
+                "sessionStats": {
+                  "turns": 30,
+                  "steps": 70,
+                  "llmMs": 259165,
+                  "toolMs": 12673516,
+                  "ttftMs": 121062,
+                  "ttftSteps": 70,
+                  "decodeMs": 138103,
+                  "decodeTokens": 15211
+                },
+                "title": "fixture title 2",
+                "goal": null,
+                "tokenUsage": {
+                  "uncachedInputTokens": 32195,
+                  "outputTokens": 15211,
+                  "cacheReadTokens": 2320640,
+                  "cacheWriteTokens": 0
+                },
+                "contextPressure": {
+                  "pressureTokens": 42207,
+                  "projectedTokens": 42285,
+                  "contextWindow": 1000000
+                },
+                "contextBreakdown": null,
+                "subagentTiming": {
+                  "settledMs": 0
+                },
+                "subagent": null,
+                "permissions": null,
+                "sessionListMetadata": null,
+                "imageLimits": null,
+                "todos": null,
+                "plan": null
+              }
+            }
+          },
+          {
+            "sessionId": "session-00000000-0000-4000-8000-000000000003",
+            "updatedAt": 1786934441532,
+            "running": false,
+            "blank": true,
+            "cwd": "/tmp/fixture-workspace-3",
+            "agentPreset": "minimal",
+            "projections": {
+              "asOfSeq": 2,
+              "values": {
+                "sessionStats": {
+                  "turns": 0,
+                  "steps": 0,
+                  "llmMs": 0,
+                  "toolMs": 0,
+                  "ttftMs": 0,
+                  "ttftSteps": 0,
+                  "decodeMs": 0,
+                  "decodeTokens": 0
+                },
+                "title": null,
+                "goal": null,
+                "tokenUsage": {
+                  "uncachedInputTokens": 0,
+                  "outputTokens": 0,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                },
+                "contextPressure": {},
+                "contextBreakdown": null,
+                "subagentTiming": {
+                  "settledMs": 0
+                },
+                "subagent": null,
+                "permissions": null,
+                "sessionListMetadata": null,
+                "imageLimits": null,
+                "todos": null,
+                "plan": null
+              }
+            }
+          },
+          {
+            "sessionId": "00000000-0000-4000-8000-000000000001",
+            "updatedAt": 1786626910890,
+            "running": false,
+            "blank": false,
+            "parentSessionId": "session-00000000-0000-4000-8000-000000000001",
+            "origin": "subagent",
+            "cwd": "/tmp/fixture-workspace-4",
+            "agentPreset": "standard",
+            "projections": {
+              "asOfSeq": 17579,
+              "values": {
+                "sessionStats": {
+                  "turns": 1,
+                  "steps": 31,
+                  "llmMs": 182817,
+                  "toolMs": 5017,
+                  "ttftMs": 42022,
+                  "ttftSteps": 31,
+                  "decodeMs": 140795,
+                  "decodeTokens": 18962
+                },
+                "title": "fixture title 4",
+                "goal": null,
+                "tokenUsage": {
+                  "uncachedInputTokens": 149287,
+                  "outputTokens": 18962,
+                  "cacheReadTokens": 3310208,
+                  "cacheWriteTokens": 0
+                },
+                "contextPressure": {
+                  "pressureTokens": 160335,
+                  "projectedTokens": 164464,
+                  "contextWindow": 1000000
+                },
+                "contextBreakdown": null,
+                "subagentTiming": {
+                  "settledMs": 187824
+                },
+                "subagent": {
+                  "mode": "continuable",
+                  "label": "grokbuild driver接入模板深挖",
+                  "seq": 0
+                },
+                "permissions": null,
+                "sessionListMetadata": null,
+                "imageLimits": null,
+                "todos": null,
+                "plan": null
+              }
+            }
+          },
+          {
+            "sessionId": "00000000-0000-4000-8000-000000000002",
+            "updatedAt": 1786626910886,
+            "running": false,
+            "blank": false,
+            "parentSessionId": "session-00000000-0000-4000-8000-000000000001",
+            "origin": "subagent",
+            "cwd": "/tmp/fixture-workspace-5",
+            "agentPreset": "standard",
+            "projections": {
+              "asOfSeq": 24430,
+              "values": {
+                "sessionStats": {
+                  "turns": 1,
+                  "steps": 74,
+                  "llmMs": 281861,
+                  "toolMs": 23752,
+                  "ttftMs": 95120,
+                  "ttftSteps": 74,
+                  "decodeMs": 186741,
+                  "decodeTokens": 26690
+                },
+                "title": "fixture title 5",
+                "goal": null,
+                "tokenUsage": {
+                  "uncachedInputTokens": 124589,
+                  "outputTokens": 26690,
+                  "cacheReadTokens": 6700032,
+                  "cacheWriteTokens": 0
+                },
+                "contextPressure": {
+                  "pressureTokens": 140478,
+                  "projectedTokens": 144548,
+                  "contextWindow": 1000000
+                },
+                "contextBreakdown": null,
+                "subagentTiming": {
+                  "settledMs": 306389
+                },
+                "subagent": {
+                  "mode": "continuable",
+                  "label": "DSH protocols & data completeness",
+                  "seq": 0
+                },
+                "permissions": null,
+                "sessionListMetadata": null,
+                "imageLimits": null,
+                "todos": null,
+                "plan": null
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

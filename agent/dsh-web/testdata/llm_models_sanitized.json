@@ -1,0 +1,631 @@
+{
+  "_comment": "Sanitized REAL dsh-web llm.models capture (dsh web 0.0.1, live 2026-08-18). Catalog data (provider ids, model ids/names, reasoning efforts incl. the off/minimal tiers) is public product contract evidence and kept verbatim; the envelope mirrors the live /api/llm.models response. Per-model reasoning{efforts,defaultEffort} here is the truth source ModelEffortCatalog reads (roadmap §5.2/§5.7, audit N2/N3).",
+  "dshWebVersion": "0.0.1",
+  "request": {
+    "payload": {}
+  },
+  "response": {
+    "type": "server-response",
+    "rpcId": "fixture",
+    "result": {
+      "ok": true,
+      "value": {
+        "groups": [
+          {
+            "id": "deepseek-official",
+            "name": "DeepSeek",
+            "models": [
+              {
+                "id": "deepseek-v4-flash",
+                "name": "DeepSeek-V4-Flash",
+                "reasoning": {
+                  "efforts": [
+                    {
+                      "id": "off",
+                      "name": "Off"
+                    },
+                    {
+                      "id": "low",
+                      "name": "Low"
+                    },
+                    {
+                      "id": "high",
+                      "name": "High"
+                    },
+                    {
+                      "id": "max",
+                      "name": "Max"
+                    }
+                  ],
+                  "defaultEffort": "high"
+                }
+              },
+              {
+                "id": "deepseek-v4-pro",
+                "name": "DeepSeek-V4-Pro",
+                "reasoning": {
+                  "efforts": [
+                    {
+                      "id": "off",
+                      "name": "Off"
+                    },
+                    {
+                      "id": "low",
+                      "name": "Low"
+                    },
+                    {
+                      "id": "high",
+                      "name": "High"
+                    },
+                    {
+                      "id": "max",
+                      "name": "Max"
+                    }
+                  ],
+                  "defaultEffort": "high"
+                }
+              }
+            ]
+          },
+          {
+            "id": "zai-coding-cn",
+            "name": "zai-coding-cn",
+            "models": [
+              {
+                "id": "glm-4.5-air",
+                "name": "GLM-4.5-Air",
+                "reasoning": {
+                  "efforts": [
+                    {
+                      "id": "off",
+                      "name": "Off"
+                    },
+                    {
+                      "id": "minimal",
+                      "name": "Minimal"
+                    },
+                    {
+                      "id": "low",
+                      "name": "Low"
+                    },
+                    {
+                      "id": "medium",
+                      "name": "Medium"
+                    },
+                    {
+                      "id": "high",
+                      "name": "High"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "glm-4.7",
+                "name": "GLM-4.7",
+                "reasoning": {
+                  "efforts": [
+                    {
+                      "id": "off",
+                      "name": "Off"
+                    },
+                    {
+                      "id": "minimal",
+                      "name": "Minimal"
+                    },
+                    {
+                      "id": "low",
+                      "name": "Low"
+                    },
+                    {
+                      "id": "medium",
+                      "name": "Medium"
+                    },
+                    {
+                      "id": "high",
+                      "name": "High"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "glm-5-turbo",
+                "name": "GLM-5-Turbo",
+                "reasoning": {
+                  "efforts": [
+                    {
+                      "id": "off",
+                      "name": "Off"
+                    },
+                    {
+                      "id": "minimal",
+                      "name": "Minimal"
+                    },
+                    {
+                      "id": "low",
+                      "name": "Low"
+                    },
+                    {
+                      "id": "medium",
+                      "name": "Medium"
+                    },
+                    {
+                      "id": "high",
+                      "name": "High"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "glm-5.1",
+                "name": "GLM-5.1",
+                "reasoning": {
+                  "efforts": [
+                    {
+                      "id": "off",
+                      "name": "Off"
+                    },
+                    {
+                      "id": "minimal",
+                      "name": "Minimal"
+                    },
+                    {
+                      "id": "low",
+                      "name": "Low"
+                    },
+                    {
+                      "id": "medium",
+                      "name": "Medium"
+                    },
+                    {
+                      "id": "high",
+                      "name": "High"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "glm-5.2",
+                "name": "GLM-5.2",
+                "reasoning": {
+                  "efforts": [
+                    {
+                      "id": "off",
+                      "name": "Off"
+                    },
+                    {
+                      "id": "low",
+                      "name": "Low"
+                    },
+                    {
+                      "id": "medium",
+                      "name": "Medium"
+                    },
+                    {
+                      "id": "high",
+                      "name": "High"
+                    },
+                    {
+                      "id": "max",
+                      "name": "Max"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "glm-5v-turbo",
+                "name": "GLM-5V-Turbo",
+                "reasoning": {
+                  "efforts": [
+                    {
+                      "id": "off",
+                      "name": "Off"
+                    },
+                    {
+                      "id": "minimal",
+                      "name": "Minimal"
+                    },
+                    {
+                      "id": "low",
+                      "name": "Low"
+                    },
+                    {
+                      "id": "medium",
+                      "name": "Medium"
+                    },
+                    {
+                      "id": "high",
+                      "name": "High"
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "id": "opencode-go",
+            "name": "opencode-go",
+            "models": [
+              {
+                "id": "minimax-m3",
+                "name": "MiniMax-M3",
+                "reasoning": {
+                  "efforts": [
+                    {
+                      "id": "off",
+                      "name": "Off"
+                    },
+                    {
+                      "id": "minimal",
+                      "name": "Minimal"
+                    },
+                    {
+                      "id": "low",
+                      "name": "Low"
+                    },
+                    {
+                      "id": "medium",
+                      "name": "Medium"
+                    },
+                    {
+                      "id": "high",
+                      "name": "High"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "qwen3.7-max",
+                "name": "Qwen3.7 Max",
+                "reasoning": {
+                  "efforts": [
+                    {
+                      "id": "off",
+                      "name": "Off"
+                    },
+                    {
+                      "id": "minimal",
+                      "name": "Minimal"
+                    },
+                    {
+                      "id": "low",
+                      "name": "Low"
+                    },
+                    {
+                      "id": "medium",
+                      "name": "Medium"
+                    },
+                    {
+                      "id": "high",
+                      "name": "High"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "qwen3.7-plus",
+                "name": "Qwen3.7 Plus",
+                "reasoning": {
+                  "efforts": [
+                    {
+                      "id": "off",
+                      "name": "Off"
+                    },
+                    {
+                      "id": "minimal",
+                      "name": "Minimal"
+                    },
+                    {
+                      "id": "low",
+                      "name": "Low"
+                    },
+                    {
+                      "id": "medium",
+                      "name": "Medium"
+                    },
+                    {
+                      "id": "high",
+                      "name": "High"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "deepseek-v4-flash",
+                "name": "DeepSeek V4 Flash",
+                "reasoning": {
+                  "efforts": [
+                    {
+                      "id": "off",
+                      "name": "Off"
+                    },
+                    {
+                      "id": "high",
+                      "name": "High"
+                    },
+                    {
+                      "id": "max",
+                      "name": "Max"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "deepseek-v4-pro",
+                "name": "DeepSeek V4 Pro",
+                "reasoning": {
+                  "efforts": [
+                    {
+                      "id": "off",
+                      "name": "Off"
+                    },
+                    {
+                      "id": "high",
+                      "name": "High"
+                    },
+                    {
+                      "id": "max",
+                      "name": "Max"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "glm-5.1",
+                "name": "GLM-5.1",
+                "reasoning": {
+                  "efforts": [
+                    {
+                      "id": "off",
+                      "name": "Off"
+                    },
+                    {
+                      "id": "minimal",
+                      "name": "Minimal"
+                    },
+                    {
+                      "id": "low",
+                      "name": "Low"
+                    },
+                    {
+                      "id": "medium",
+                      "name": "Medium"
+                    },
+                    {
+                      "id": "high",
+                      "name": "High"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "glm-5.2",
+                "name": "GLM-5.2",
+                "reasoning": {
+                  "efforts": [
+                    {
+                      "id": "high",
+                      "name": "High"
+                    },
+                    {
+                      "id": "max",
+                      "name": "Max"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "hy3",
+                "name": "Hy3",
+                "reasoning": {
+                  "efforts": [
+                    {
+                      "id": "off",
+                      "name": "Off"
+                    },
+                    {
+                      "id": "low",
+                      "name": "Low"
+                    },
+                    {
+                      "id": "high",
+                      "name": "High"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "kimi-k2.6",
+                "name": "Kimi K2.6",
+                "reasoning": {
+                  "efforts": [
+                    {
+                      "id": "off",
+                      "name": "Off"
+                    },
+                    {
+                      "id": "high",
+                      "name": "High"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "kimi-k2.7-code",
+                "name": "Kimi K2.7 Code",
+                "reasoning": {
+                  "efforts": [
+                    {
+                      "id": "off",
+                      "name": "Off"
+                    },
+                    {
+                      "id": "minimal",
+                      "name": "Minimal"
+                    },
+                    {
+                      "id": "low",
+                      "name": "Low"
+                    },
+                    {
+                      "id": "medium",
+                      "name": "Medium"
+                    },
+                    {
+                      "id": "high",
+                      "name": "High"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "kimi-k3",
+                "name": "Kimi K3 (2x usage)",
+                "reasoning": {
+                  "efforts": [
+                    {
+                      "id": "max",
+                      "name": "Max"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "mimo-v2.5",
+                "name": "MiMo V2.5",
+                "reasoning": {
+                  "efforts": [
+                    {
+                      "id": "off",
+                      "name": "Off"
+                    },
+                    {
+                      "id": "minimal",
+                      "name": "Minimal"
+                    },
+                    {
+                      "id": "low",
+                      "name": "Low"
+                    },
+                    {
+                      "id": "medium",
+                      "name": "Medium"
+                    },
+                    {
+                      "id": "high",
+                      "name": "High"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "mimo-v2.5-pro",
+                "name": "MiMo V2.5 Pro",
+                "reasoning": {
+                  "efforts": [
+                    {
+                      "id": "off",
+                      "name": "Off"
+                    },
+                    {
+                      "id": "minimal",
+                      "name": "Minimal"
+                    },
+                    {
+                      "id": "low",
+                      "name": "Low"
+                    },
+                    {
+                      "id": "medium",
+                      "name": "Medium"
+                    },
+                    {
+                      "id": "high",
+                      "name": "High"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "minimax-m2.7",
+                "name": "MiniMax-M2.7",
+                "reasoning": {
+                  "efforts": [
+                    {
+                      "id": "off",
+                      "name": "Off"
+                    },
+                    {
+                      "id": "minimal",
+                      "name": "Minimal"
+                    },
+                    {
+                      "id": "low",
+                      "name": "Low"
+                    },
+                    {
+                      "id": "medium",
+                      "name": "Medium"
+                    },
+                    {
+                      "id": "high",
+                      "name": "High"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "qwen3.6-plus",
+                "name": "Qwen3.6 Plus",
+                "reasoning": {
+                  "efforts": [
+                    {
+                      "id": "off",
+                      "name": "Off"
+                    },
+                    {
+                      "id": "minimal",
+                      "name": "Minimal"
+                    },
+                    {
+                      "id": "low",
+                      "name": "Low"
+                    },
+                    {
+                      "id": "medium",
+                      "name": "Medium"
+                    },
+                    {
+                      "id": "high",
+                      "name": "High"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "grok-4.5",
+                "name": "Grok 4.5",
+                "reasoning": {
+                  "efforts": [
+                    {
+                      "id": "low",
+                      "name": "Low"
+                    },
+                    {
+                      "id": "medium",
+                      "name": "Medium"
+                    },
+                    {
+                      "id": "high",
+                      "name": "High"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ],
+        "failures": []
+      }
+    }
+  }
+}
