@@ -24,6 +24,7 @@ import (
 	_ "github.com/openAgi2/cordcode-macbridge/agent/dsh-web"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/grokbuild"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/opencode"
+	_ "github.com/openAgi2/cordcode-macbridge/agent/opencode-web"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 	"github.com/openAgi2/cordcode-macbridge/go-bridge/admission"
@@ -32,7 +33,7 @@ import (
 
 func Main() {
 	port := flag.Int("port", 8777, "WebSocket listen port")
-	drivers := flag.String("drivers", "claude,opencode,codex,grokbuild,dsh-web", "Comma-separated agent list")
+	drivers := flag.String("drivers", "claude,opencode,codex,grokbuild,dsh-web,opencode-web", "Comma-separated agent list")
 	workDir := flag.String("work-dir", "", "Working directory for agents (default: cwd)")
 	showVersion := flag.Bool("version", false, "Print runtime version and exit")
 	codexBackend := flag.String("codex-backend", envOr("GO_BRIDGE_CODEX_BACKEND", "exec"), "Codex backend mode: exec or app_server")
@@ -43,6 +44,14 @@ func Main() {
 	ocBaseURL := flag.String("opencode-url", envOr("OPENCODE_BASE_URL", ""), "OpenCode HTTP API URL (loopback, e.g. http://127.0.0.1:<port>). Empty = not configured.")
 	ocUser := flag.String("opencode-user", envOr("OPENCODE_SERVER_USERNAME", ""), "OpenCode auth username")
 	ocPass := flag.String("opencode-pass", envOr("OPENCODE_SERVER_PASSWORD", ""), "OpenCode auth password")
+
+	// opencode-web：官方 serve 的纯 HTTP/SSE 客户端 backend（设计
+	// docs/2026-08-18-opencode-web-backend-design.md）。与旧 opencode 物理隔离、
+	// 键名分开（新包读 opencode_web_*，绝不读 opencode_url）；并存期 Swift 把同一
+	// 已解析 URL 同时传给两组 flag。凭据经进程环境注入（不常驻 argv）。
+	ocwBaseURL := flag.String("opencode-web-url", envOr("OPENCODE_WEB_BASE_URL", ""), "OpenCode Web HTTP API URL (same resolved serve URL as -opencode-url during coexistence). Empty = not configured.")
+	ocwUser := flag.String("opencode-web-user", envOr("OPENCODE_WEB_SERVER_USERNAME", ""), "OpenCode Web auth username")
+	ocwPass := flag.String("opencode-web-pass", envOr("OPENCODE_WEB_SERVER_PASSWORD", ""), "OpenCode Web auth password")
 
 	// 管理 API（Mac App product 模式使用，开发模式不启用）
 	managementHost := flag.String("management-host", "", "Management API host (product mode: 127.0.0.1)")
@@ -147,6 +156,9 @@ func Main() {
 			openCodeURL:       *ocBaseURL,
 			openCodeUser:      *ocUser,
 			openCodePass:      *ocPass,
+			openCodeWebURL:    *ocwBaseURL,
+			openCodeWebUser:   *ocwUser,
+			openCodeWebPass:   *ocwPass,
 			codexBackend:      *codexBackend,
 			codexAppServerURL: *codexAppServerURL,
 			pinStore:          pinStore,
@@ -189,7 +201,7 @@ func Main() {
 		}
 		slog.Info("go-bridge: agent registered", "backendId", id, "agent", agentName, "workDir", *workDir)
 
-		if sub, ok := agent.(core.EventSubscriber); ok && shouldStartPassiveSubscription(id, *codexBackend, *codexAppServerURL, *ocBaseURL) {
+		if sub, ok := agent.(core.EventSubscriber); ok && shouldStartPassiveSubscription(id, *codexBackend, *codexAppServerURL, *ocBaseURL, *ocwBaseURL) {
 			go startPassiveSubscription(ctx, handlers, id, sub)
 		}
 
@@ -775,7 +787,7 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 	}
 }
 
-func shouldStartPassiveSubscription(backendID, codexBackendMode, codexAppServerURL, openCodeURL string) bool {
+func shouldStartPassiveSubscription(backendID, codexBackendMode, codexAppServerURL, openCodeURL, openCodeWebURL string) bool {
 	if backendID == "codex" {
 		return normalizeCodexBackend(codexBackendMode) == "app_server" && strings.TrimSpace(codexAppServerURL) != ""
 	}
@@ -783,6 +795,11 @@ func shouldStartPassiveSubscription(backendID, codexBackendMode, codexAppServerU
 		// 无 URL 时 OpenCode backend 处于 not_configured，不启动 SSE 订阅
 		//（Subscribe 也会拒绝空 URL，这里提前避免无意义重连退避）。
 		return strings.TrimSpace(openCodeURL) != ""
+	}
+	if backendID == "opencode-web" {
+		// 同规则：纯 HTTP 客户端，空 URL = not_configured，不启动常驻 SSE
+		//（设计 §2.1 坑 13——默认分支会无意义重连退避）。
+		return strings.TrimSpace(openCodeWebURL) != ""
 	}
 	return true
 }
@@ -792,6 +809,9 @@ type agentOptionsConfig struct {
 	openCodeURL       string
 	openCodeUser      string
 	openCodePass      string
+	openCodeWebURL    string
+	openCodeWebUser   string
+	openCodeWebPass   string
 	codexBackend      string
 	codexAppServerURL string
 	pinStore          *pinstore.Store
@@ -817,6 +837,13 @@ func buildAgentOptions(id string, cfg agentOptionsConfig) map[string]any {
 				opts["app_server_url"] = url
 			}
 		}
+	}
+
+	if id == "opencode-web" {
+		// 新包读自己的键（设计 §4.1.2）——绝不复用 opencode_url 作为来源。
+		opts["opencode_web_url"] = cfg.openCodeWebURL
+		opts["opencode_web_user"] = cfg.openCodeWebUser
+		opts["opencode_web_pass"] = cfg.openCodeWebPass
 	}
 
 	return opts
@@ -849,6 +876,8 @@ func clearControlPlaneEnv() {
 		"CORDCODE_RELAY_ENDPOINT",
 		"OPENCODE_SERVER_USERNAME",
 		"OPENCODE_SERVER_PASSWORD",
+		"OPENCODE_WEB_SERVER_USERNAME",
+		"OPENCODE_WEB_SERVER_PASSWORD",
 		// Clear all other CORDCODE_* control-plane vars defensively (dev flags,
 		// VPS creds, etc.). Keep the allowlisted runtime vars only if needed.
 	} {

@@ -25,6 +25,27 @@ func TestBuildAgentOptions_DefaultCodexUsesSuggestMode(t *testing.T) {
 	}
 }
 
+func TestBuildAgentOptions_OpenCodeWebUsesSeparateKeys(t *testing.T) {
+	opts := buildAgentOptions("opencode-web", agentOptionsConfig{
+		workDir:         "/tmp/project",
+		openCodeURL:     "http://127.0.0.1:4096",
+		openCodeUser:    "legacy-user",
+		openCodePass:    "legacy-pass",
+		openCodeWebURL:  "http://127.0.0.1:4096",
+		openCodeWebUser: "web-user",
+		openCodeWebPass: "web-pass",
+	})
+	if got := opts["opencode_web_url"]; got != "http://127.0.0.1:4096" {
+		t.Fatalf("opencode_web_url = %#v", got)
+	}
+	if got := opts["opencode_web_user"]; got != "web-user" {
+		t.Fatalf("opencode_web_user = %#v, want web-user (not the legacy keys)", got)
+	}
+	if got := opts["opencode_web_pass"]; got != "web-pass" {
+		t.Fatalf("opencode_web_pass = %#v, want web-pass (not the legacy keys)", got)
+	}
+}
+
 func TestBuildAgentOptions_CodexAppServerUsesFullAuto(t *testing.T) {
 	opts := buildAgentOptions("codex", agentOptionsConfig{
 		workDir:           "/tmp/project",
@@ -44,21 +65,28 @@ func TestBuildAgentOptions_CodexAppServerUsesFullAuto(t *testing.T) {
 }
 
 func TestShouldStartPassiveSubscription_CodexRequiresExplicitSharedURL(t *testing.T) {
-	if shouldStartPassiveSubscription("codex", "app_server", "", "") {
+	if shouldStartPassiveSubscription("codex", "app_server", "", "", "") {
 		t.Fatal("codex implicit app_server should not start process-level passive subscription")
 	}
-	if !shouldStartPassiveSubscription("codex", "app_server", "ws://127.0.0.1:4141", "") {
+	if !shouldStartPassiveSubscription("codex", "app_server", "ws://127.0.0.1:4141", "", "") {
 		t.Fatal("codex explicit shared app_server URL should start passive subscription")
 	}
-	if shouldStartPassiveSubscription("codex", "exec", "ws://127.0.0.1:4141", "") {
+	if shouldStartPassiveSubscription("codex", "exec", "ws://127.0.0.1:4141", "", "") {
 		t.Fatal("codex exec mode should not start app-server passive subscription")
 	}
 	// OpenCode: 无 URL（endpoint 未配置）不得启动 SSE 订阅，避免无意义重连退避。
-	if shouldStartPassiveSubscription("opencode", "", "", "") {
+	if shouldStartPassiveSubscription("opencode", "", "", "", "") {
 		t.Fatal("opencode without server URL should not start passive subscription")
 	}
-	if !shouldStartPassiveSubscription("opencode", "", "", "http://127.0.0.1:4096") {
+	if !shouldStartPassiveSubscription("opencode", "", "", "http://127.0.0.1:4096", "") {
 		t.Fatal("opencode with a configured server URL should start passive subscription")
+	}
+	// opencode-web: 同规则（设计 §2.1 坑 13）——空 URL = not_configured，不启动 SSE。
+	if shouldStartPassiveSubscription("opencode-web", "", "", "", "") {
+		t.Fatal("opencode-web without server URL should not start passive subscription")
+	}
+	if !shouldStartPassiveSubscription("opencode-web", "", "", "", "http://127.0.0.1:4096") {
+		t.Fatal("opencode-web with a configured server URL should start passive subscription")
 	}
 }
 
