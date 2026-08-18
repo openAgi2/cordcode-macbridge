@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T03:10:32+0800",
+  "updated_at": "2026-08-19T03:34:35+0800",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -659,6 +659,86 @@
         "summary": "",
         "artifacts": [],
         "checked_at": null
+      }
+    },
+    {
+      "id": "s8-8-review-fix-catalog-impl",
+      "title": "owner 报障修复：模型目录 connected 过滤 + 单飞缓存",
+      "description": "owner 2026-08-19 报：iOS opencode-web 模型列表出现数百个未配置 provider 模型（zeldoc/siliconflow 等）且全模式卡顿。根因：1.18 GET /provider 为三段信封 {all:[192 provider×全量 models.dev≈5MB], default, connected:[已配置 provider]}；旧实现递归收集 all 全量（6637 模型）且 list_models/发送门控/占用窗口每次重新拉 5MB 无缓存。修复：models.go 改 typed 信封解析、只收 connected provider（对齐官方网页选择框；connected 空=空目录）、60s catalogCacheTTL 单飞缓存全消费方共享；context_usage.go 窗口改走同一缓存。活体钉死：/provider 5,055,947 bytes、connected=[zhipuai-coding-plan,deepseek,opencode-go,openai,xai,opencode,Vertex]=65 模型。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "impl",
+      "depends_on": [
+        "s8-8-release-tests"
+      ],
+      "source": "owner 报障 2026-08-19",
+      "notes": "review-fix-for:s8-8-release-tests",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "models.go 信封解析+connected 过滤+60s 缓存；context_usage 窗口共享缓存；沙盒复跑 catalog 6572→9（connected=opencode+Vertex）。",
+        "artifacts": [
+          "agent/opencode-web/models.go",
+          "agent/opencode-web/context_usage.go",
+          "agent/opencode-web/opencodeweb.go"
+        ],
+        "checked_at": "2026-08-19T03:34:35+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-catalog-tests",
+      "title": "目录过滤/缓存单测+沙盒 E2E 复跑",
+      "description": "夹具全部改活体信封形状；新增未配置 provider 不入 picker/windows 断言与 5MB 单飞断言。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "tests",
+      "depends_on": [
+        "s8-8-review-fix-catalog-impl"
+      ],
+      "source": "owner 报障",
+      "notes": "review-fix-for:s8-8-review-fix-catalog-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "52 用例全过（含 TestProviderCatalogFetchedOncePerTTL 单飞断言、never-configured 排除断言）；沙盒 E2E PASS（catalog=9）。",
+        "artifacts": [
+          "agent/opencode-web/sessions_test.go",
+          "agent/opencode-web/session_test.go",
+          "agent/opencode-web/events_test.go",
+          "agent/opencode-web/sandbox_e2e_test.go"
+        ],
+        "checked_at": "2026-08-19T03:34:35+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-catalog-regression",
+      "title": "回归+Release 重装（b8030e3）+现网 descriptor 复核",
+      "description": "go-bridge 失败集零增量；Release 重建覆盖安装 commit b8030e3；现网 descriptor available/generation=1.18。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "regression",
+      "depends_on": [
+        "s8-8-review-fix-catalog-tests"
+      ],
+      "source": "owner 报障",
+      "notes": "review-fix-for:s8-8-review-fix-catalog-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "git diff agent/opencode 空；diff 干净树失败集仅先存两条；现网只读数学核对：修复后 iOS 将显示 65 模型（7 provider）。owner 复测待回报。",
+        "artifacts": [
+          "/tmp/mine-fails7.txt"
+        ],
+        "checked_at": "2026-08-19T03:34:35+0800"
       }
     }
   ]
