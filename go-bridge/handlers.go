@@ -1391,7 +1391,30 @@ func (h *Handlers) handleListModels(conn Connection, msg WireMessage, agent core
 		})
 	}
 
-	if re, ok := agent.(core.ReasoningEffortSwitcher); ok {
+	// Per-model effort truth first (roadmap §5.2 / audit N3): a runtime that
+	// declares per-model efforts (dsh-web llm.models) fills each model's own
+	// supportedReasoningEfforts/defaultReasoningEffort. The agent-level
+	// AvailableReasoningEfforts() below describes only the CURRENT selected
+	// model — kept for agents without per-model truth, never smeared onto a
+	// catalog that has its own declarations.
+	if mel, ok := agent.(core.ModelEffortCatalog); ok {
+		for i := range models {
+			id, _ := models[i]["id"].(string)
+			if id == "" {
+				continue
+			}
+			efforts, defaultEffort, ok := mel.EffortsForModel(context.Background(), id)
+			if !ok || len(efforts) == 0 {
+				continue
+			}
+			wireEfforts := make([]string, len(efforts))
+			copy(wireEfforts, efforts)
+			models[i]["supportedReasoningEfforts"] = wireEfforts
+			if defaultEffort != "" {
+				models[i]["defaultReasoningEffort"] = defaultEffort
+			}
+		}
+	} else if re, ok := agent.(core.ReasoningEffortSwitcher); ok {
 		efforts := re.AvailableReasoningEfforts()
 		if len(efforts) > 0 {
 			wireEfforts := make([]string, len(efforts))

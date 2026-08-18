@@ -252,6 +252,126 @@ func (f *fakeAgent) GetSessionModelSelection(context.Context, string) (core.Sess
 	return f.modelSelection, f.modelSelectionOK
 }
 
+// perModelEffortAgent wraps fakeAgent with core.ModelEffortCatalog（per-model
+// effort 透传测试：list_models 必须逐模型填各自档位，不得把 agent 级列表
+// 抹平到整个目录 —— 路线图 §5.2 / 审计 N3）。
+type perModelEffortAgent struct {
+	*fakeAgent
+	models []core.ModelOption
+	efforts map[string]fakeModelEfforts
+}
+
+type fakeModelEfforts struct {
+	efforts []string
+	def     string
+}
+
+func (p *perModelEffortAgent) AvailableModels(context.Context) []core.ModelOption { return p.models }
+
+func (p *perModelEffortAgent) EffortsForModel(_ context.Context, model string) ([]string, string, bool) {
+	e, ok := p.efforts[model]
+	if !ok {
+		return nil, "", false
+	}
+	return e.efforts, e.def, true
+}
+
+// agentLevelEffortAgent：无 per-model 目录的 agent（codex/claudecode 现状），
+// 保留 agent 级均匀填充的 legacy 分支。
+type agentLevelEffortAgent struct {
+	*fakeAgent
+	models []core.ModelOption
+}
+
+func (a *agentLevelEffortAgent) AvailableModels(context.Context) []core.ModelOption { return a.models }
+
+func TestHandleListModelsPerModelEfforts(t *testing.T) {
+	agent := &perModelEffortAgent{
+		fakeAgent: &fakeAgent{name: "dsh-web"},
+		models: []core.ModelOption{
+			{Name: "deepseek/deepseek-v4-flash", Desc: "DeepSeek V4 Flash"},
+			{Name: "deepseek/deepseek-v4", Desc: "DeepSeek V4"},
+		},
+		efforts: map[string]fakeModelEfforts{
+			// deepseek-v4 有意无 per-model 数据：该行必须保持空，不得被
+			// 其他模型的档位或 agent 级档位抹平填充。
+			"deepseek/deepseek-v4-flash": {efforts: []string{"off", "low", "high", "max"}, def: "high"},
+		},
+	}
+
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("dsh-web", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "dsh-web",
+		Method:    "list_models",
+		RequestID: "models-1",
+		Params:    mustJSONRaw(t, map[string]any{}),
+	})
+
+	messages := readJSONMaps(t, clientConn, 1)
+	data, _ := messages[0]["data"].(map[string]any)
+	models, _ := data["models"].([]any)
+	if len(models) != 2 {
+		t.Fatalf("models len = %d, want 2", len(models))
+	}
+	byID := map[string]map[string]any{}
+	for _, m := range models {
+		mm, _ := m.(map[string]any)
+		id, _ := mm["id"].(string)
+		byID[id] = mm
+	}
+	flash := byID["deepseek/deepseek-v4-flash"]
+	got, _ := flash["supportedReasoningEfforts"].([]any)
+	if len(got) != 4 || got[0] != "off" || got[3] != "max" {
+		t.Fatalf("flash supportedReasoningEfforts = %#v, want [off low high max]", got)
+	}
+	if flash["defaultReasoningEffort"] != "high" {
+		t.Fatalf("flash defaultReasoningEffort = %#v, want high", flash["defaultReasoningEffort"])
+	}
+	plain := byID["deepseek/deepseek-v4"]
+	if efforts, ok := plain["supportedReasoningEfforts"].([]any); ok && len(efforts) > 0 {
+		t.Fatalf("plain model supportedReasoningEfforts = %#v, want empty (no per-model data; no smearing)", efforts)
+	}
+}
+
+func TestHandleListModelsAgentLevelEffortsWithoutPerModelCatalog(t *testing.T) {
+	agent := &agentLevelEffortAgent{
+		fakeAgent: &fakeAgent{name: "claudecode"},
+		models: []core.ModelOption{
+			{Name: "sonnet-5", Desc: "Sonnet 5"},
+			{Name: "opus-5", Desc: "Opus 5"},
+		},
+	}
+
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("claudecode", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "claudecode",
+		Method:    "list_models",
+		RequestID: "models-1",
+		Params:    mustJSONRaw(t, map[string]any{}),
+	})
+
+	messages := readJSONMaps(t, clientConn, 1)
+	data, _ := messages[0]["data"].(map[string]any)
+	models, _ := data["models"].([]any)
+	if len(models) != 2 {
+		t.Fatalf("models len = %d, want 2", len(models))
+	}
+	for _, m := range models {
+		mm, _ := m.(map[string]any)
+		efforts, _ := mm["supportedReasoningEfforts"].([]any)
+		if len(efforts) == 0 {
+			t.Fatalf("model %v supportedReasoningEfforts empty; legacy agent-level fill must remain", mm["id"])
+		}
+	}
+}
 func (f *fakeAgent) GetSessionHistory(context.Context, string, int) ([]core.HistoryEntry, error) {
 	if f.historyErr != nil {
 		return nil, f.historyErr

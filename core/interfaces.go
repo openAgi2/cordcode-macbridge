@@ -327,6 +327,22 @@ type ReasoningEffortSwitcher interface {
 	AvailableReasoningEfforts() []string
 }
 
+// ModelEffortCatalog is an optional interface for agents whose runtime catalog
+// declares reasoning efforts PER MODEL (e.g. dsh-web llm.models
+// reasoning{efforts,defaultEffort}). handleListModels uses it to fill each
+// wire model's supportedReasoningEfforts/defaultReasoningEffort from that
+// model's own runtime data. The agent-level AvailableReasoningEfforts()
+// describes only the CURRENT selected model and must never be smeared across
+// the whole catalog (roadmap §5.2 / audit N3).
+type ModelEffortCatalog interface {
+	// EffortsForModel returns the runtime-declared effort ids and default
+	// effort for one catalog model. model uses the same provider-qualified or
+	// bare id naming as AvailableModels. ok=false when the runtime declared no
+	// efforts for the model — the caller must leave the wire fields empty
+	// rather than fall back to agent-level smearing.
+	EffortsForModel(ctx context.Context, model string) (efforts []string, defaultEffort string, ok bool)
+}
+
 // ModelOption describes a selectable model.
 type ModelOption struct {
 	Name  string // model identifier passed to CLI

@@ -300,3 +300,42 @@ var _ core.ProviderSwitcher = (*Agent)(nil)
 var _ core.ModelSwitcher = (*Agent)(nil)
 var _ core.ReasoningEffortSwitcher = (*Agent)(nil)
 var _ core.SessionModelSelectionReader = (*Agent)(nil)
+var _ core.ModelEffortCatalog = (*Agent)(nil)
+
+// ── ModelEffortCatalog (per-model effort truth) ────────────────────────────
+
+// EffortsForModel returns the runtime-declared efforts + default effort for
+// one catalog model (llm.models reasoning{efforts,defaultEffort} — per-model
+// truth, never smeared across the catalog). model accepts the
+// provider-qualified "provider/model" ids that AvailableModels emits, or a
+// bare model id. The catalog cache is refreshed by AvailableModels, which
+// handleListModels calls first. ok=false when the model has no
+// runtime-declared reasoning efforts.
+func (a *Agent) EffortsForModel(_ context.Context, model string) ([]string, string, bool) {
+	provider, id := splitQualifiedModel(model)
+	if id == "" {
+		return nil, "", false
+	}
+	a.mu.RLock()
+	catalog := a.catalog
+	a.mu.RUnlock()
+	for _, g := range catalog.groups {
+		if provider != "" && g.ID != provider {
+			continue
+		}
+		for _, m := range g.Models {
+			if m.ID != id || m.Reasoning == nil {
+				continue
+			}
+			efforts := make([]string, 0, len(m.Reasoning.Efforts))
+			for _, e := range m.Reasoning.Efforts {
+				efforts = append(efforts, e.ID)
+			}
+			if len(efforts) == 0 {
+				return nil, "", false
+			}
+			return efforts, m.Reasoning.DefaultEffort, true
+		}
+	}
+	return nil, "", false
+}
