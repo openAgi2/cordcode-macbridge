@@ -206,6 +206,10 @@ type sessionUpdatePayload struct {
 	Entries    []planEntry        `json:"entries,omitempty"`
 	Used       *int               `json:"used,omitempty"`
 	Size       *int               `json:"size,omitempty"`
+	TokensUsed     *int `json:"tokens_used,omitempty"`
+	ContextWindow  *int `json:"context_window,omitempty"`
+	TokensBefore   *int `json:"tokens_before,omitempty"`
+	TokensAfter    *int `json:"tokens_after,omitempty"`
 	// turn_completed 终态字段。上游在不同版本里对 prompt_id 的 JSON key 不一致
 	// (真实 updates.jsonl: "prompt_id" 440 次, "promptId" 289 次), 两个字段都接收,
 	// 取非空者作 durable turn 关联键。stop_reason 区分正常结束 / 取消 / 限流 / 错误。

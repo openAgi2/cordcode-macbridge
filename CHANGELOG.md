@@ -7,6 +7,7 @@
 版本号对齐 MacBridge Release 构建的 `MARKETING_VERSION`（见 `MacBridge/project.yml`）。日期为协调世界时（UTC）。
 
 ## [Unreleased]
+- **改进：Claude / Grok Build / OpenCode 上下文圈能出数**：点 ⭕ 不再三家都是「暂无」。Grok 读会话 `signals.json` 的占用和 500K 窗口；OpenCode 读 `GET /session` 的 tokens + 模型 `limit.context`；Claude 用最后一条 assistant 的 prompt occupancy（input+cache）加模型窗口（200K / 1M）。不是 DeepSeek 那种拆分表，只做已用/窗口。
 - **修复：长 DeepSeek Harness 会话 iPhone 打不开投影**：官方 history 按「消息数」分页，一条消息里可能有几千条 chunk。以前一页要 2000 条消息，Exec plan 那种会话单页 55MB，超过 32MB 读取上限后 JSON 被截断，iPhone 显示「无法加载会话投影」。现按官方默认每页 50 条消息，超大页会自动缩小再拉。
 - **改进：DeepSeek Harness 已开会话显示当前预设**：列表和打开会话时带上官方 `agentPreset`，iPhone 标题旁能看到「标准模式 / PTC模式 / 极简模式 / 创造模式」，和官方 web 标题左那枚芯片一样。
 - **新功能：DeepSeek Harness 新建会话可选官方 Agent 预设**：iPhone 空白页列出标准 / PTC / 极简 / 创造，创建时传给官方 `session.create`。开聊后锁定。

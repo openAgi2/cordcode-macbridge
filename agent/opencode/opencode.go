@@ -43,6 +43,9 @@ type Agent struct {
 	persistentModelCache *opencodePersistentModelCache
 	refreshingModelCache bool
 	mu                   sync.RWMutex
+	usageMu              sync.Mutex
+	usageBySession       map[string]*core.ContextUsage
+	modelWindows         map[string]int
 
 	// pinStore persists MacBridge-owned session pin (置顶) metadata for SessionPinner.
 	// Injected via opts["pin_store"] from go-bridge main; nil in unit tests that do not

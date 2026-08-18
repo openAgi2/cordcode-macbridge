@@ -23,6 +23,7 @@ import (
 // setSessionFilter 锁定单个 sessionID，emit 只放行该 session 的事件，让 active
 // session 复用全套解析 + dedup + turn 生命周期翻译逻辑，只收自己的事件。
 type sseSubscriber struct {
+	agent      *Agent
 	url        string
 	authHeader string
 	workDir    string
@@ -71,6 +72,7 @@ func newSSESubscriber(ctx context.Context, a *Agent) *sseSubscriber {
 
 	subCtx, cancel := context.WithCancel(ctx)
 	return &sseSubscriber{
+		agent:           a,
 		url:             strings.TrimRight(url, "/"),
 		authHeader:      auth,
 		workDir:         dir,
@@ -580,6 +582,17 @@ func (s *sseSubscriber) handleSSESessionUpdated(properties map[string]any, sessi
 	}
 	if status == "idle" && sessionID != "" {
 		s.emitResultOnce(sessionID)
+	}
+	if sessionID != "" && s.agent != nil {
+		window := s.agent.contextWindowForModel(context.Background(), modelFromOpenCodeInfo(info))
+		if usage := usageFromOpenCodeInfoMap(info, window); usage != nil {
+			s.agent.rememberContextUsage(sessionID, usage)
+			s.emit(core.Event{
+				Type:         core.EventContextUsageUpdated,
+				SessionID:    sessionID,
+				ContextUsage: usage,
+			})
+		}
 	}
 }
 

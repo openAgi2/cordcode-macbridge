@@ -59,6 +59,11 @@ type claudeSession struct {
 	// enter this registry; there is no independently writable v1 registry.
 	claudeUserInputReg *claudeUserInputRegistry
 
+	model            string
+	maxContextTokens int
+	usageMu          sync.Mutex
+	lastUsage        *core.ContextUsage
+
 	// gracefulStopTimeout is how long Close() waits for a clean exit
 	// (stdin close → Stop hooks → process exit) before escalating to
 	// SIGTERM and then SIGKILL. Default: 120s to match claude-mem's
@@ -256,6 +261,8 @@ func newClaudeSession(ctx context.Context, workDir, cliBin string, cliExtraArgs 
 		stdin:               stdin,
 		events:              make(chan core.Event, 64),
 		workDir:             workDir,
+		model:               model,
+		maxContextTokens:    maxContextTokens,
 		ctx:                 sessionCtx,
 		cancel:              cancel,
 		done:                make(chan struct{}),
@@ -450,6 +457,13 @@ func (cs *claudeSession) handleAssistant(raw map[string]any) {
 	msg, ok := raw["message"].(map[string]any)
 	if !ok {
 		return
+	}
+	if usage, ok := msg["usage"].(map[string]any); ok {
+		model, _ := msg["model"].(string)
+		if model == "" {
+			model = cs.model
+		}
+		cs.emitContextUsage(usage, model)
 	}
 	contentArr, ok := msg["content"].([]any)
 	if !ok {

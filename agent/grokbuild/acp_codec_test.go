@@ -199,6 +199,17 @@ func TestConvertSessionUpdate_Plan(t *testing.T) {
 	}
 }
 
+func TestConvertSessionUpdate_AutoCompactStarted(t *testing.T) {
+	params := json.RawMessage(`{"sessionId":"s1","update":{"sessionUpdate":"auto_compact_started","tokens_used":400576,"context_window":500000,"percentage":80}}`)
+	events := convertSessionUpdate(params, "s1")
+	if len(events) != 1 || events[0].Type != core.EventContextUsageUpdated {
+		t.Fatalf("events = %+v", events)
+	}
+	if events[0].ContextUsage.UsedTokens != 400576 || events[0].ContextUsage.ContextWindow != 500000 {
+		t.Fatalf("usage = %+v", events[0].ContextUsage)
+	}
+}
+
 func TestConvertSessionUpdate_UsageUpdate(t *testing.T) {
 	params := json.RawMessage(`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","used":5000,"size":200000}}`)
 	events := convertSessionUpdate(params, "s1")

@@ -655,8 +655,21 @@ func (s *grokSession) handleNotification(notif *agentNotification) {
 	switch notif.Method {
 	case "session/update":
 		events := convertSessionUpdate(notif.Params, s.CurrentSessionID())
+		alreadyUsage := false
+		refreshSignals := false
 		for _, ev := range events {
+			if ev.Type == core.EventContextUsageUpdated {
+				alreadyUsage = true
+			}
+			if ev.Done {
+				refreshSignals = true
+			}
 			s.emit(ev)
+		}
+		if !alreadyUsage && refreshSignals {
+			if usage := loadGrokSignalsUsage(s.agent.grokHome, s.CurrentSessionID()); usage != nil {
+				s.emit(core.Event{Type: core.EventContextUsageUpdated, ContextUsage: usage})
+			}
 		}
 	case "session/cancel":
 		// Agent cancelled its own turn — emit a result.

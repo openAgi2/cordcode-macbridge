@@ -1,5 +1,20 @@
 # Claude Code 冷启动既有 session 首轮流式从头重播：跨仓排查结论
 
+## 2026-08-17：Claude / Grok / OpenCode 点 ⭕ 没数据
+
+### 现象
+iPhone 上 DeepSeek Harness / Codex 的上下文圈有数，Claude Code / Grok Build / OpenCode 打开是「暂无上下文用量数据」。
+
+### 根因
+iOS 圈只认 `get_session.contextUsage` 且要求 `contextWindow > 0`。全仓原先只有 Codex 和 dsh-web 实现 `GetSessionContextUsage`。
+
+- **Grok**：88 份 `updates.jsonl` 里 **0 条** `usage_update`。用量在 `turn_completed.usage`（回合计费累计，不能当占用）和 `signals.json` 的 `contextTokensUsed` / `contextWindowTokens`（本机 25/25 有数，窗口 500K）。`auto_compact_started` 也带同一对字段。
+- **OpenCode**：`GET /session/:id` 有 `tokens{input,output,reasoning,cache}`；模型窗口在 `/provider` 的 `limit.context`（如 mimo-v2.5-free = 200K）。driver 以前不读。
+- **Claude**：JSONL assistant `usage` 有 input/cache/output，**没有**官方窗口。`/usage` 是订阅额度。启发式占用 = 最后一条 assistant 的 `input+cache_read+cache_creation`，窗口 200K / 1M。
+
+### 修复
+三家补 `GetSessionContextUsage` + 必要的 live `context_usage_updated`。不要把 Grok `turn_completed.usage.inputTokens` 当占用。
+
 ## 2026-08-17：DeepSeek Harness 长会话 iPhone「无法加载会话投影」
 
 ### 现象

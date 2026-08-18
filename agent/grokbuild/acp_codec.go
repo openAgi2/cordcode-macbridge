@@ -307,6 +307,15 @@ func convertSessionUpdate(params json.RawMessage, sessionID string) []core.Event
 		}
 		return nil
 
+	case "auto_compact_started", "auto_compact_completed":
+		if usage := contextUsageFromCompactUpdate(p); usage != nil {
+			return []core.Event{{
+				Type:         core.EventContextUsageUpdated,
+				ContextUsage: usage,
+			}}
+		}
+		return nil
+
 	case "session_info_update", "current_mode_update",
 		"available_commands_update", "config_option_update":
 		// Internal state updates — not forwarded as events.

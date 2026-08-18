@@ -281,6 +281,19 @@ hello_ack 的 `detectDSHWebInstance` 只镜像 driver 已解析的实例状态�
   in/out）；`get_session` 带 `contextUsage`，tail 与
   `session/projection` 增量都发 `context_usage_updated`。iOS 点 ⭕
   看同一张表，不另做输入框底下那一行。
+
+**其它 backend 的占用（2026-08-17，仅已用/窗口，没有 Harness 拆分）：**
+
+- Codex：`GetSessionContextUsage` 读 rollout `token_count` + `model_context_window`。
+- Grok Build：真实落盘 **没有** `usage_update`。占用在 `signals.json` 的
+  `contextTokensUsed` / `contextWindowTokens`（本机实测窗口 500K）。
+  `auto_compact_started` 也会带同一对字段。`turn_completed.usage.inputTokens`
+  是回合计费累计，不能当占用。
+- OpenCode：`GET /session/:id` 的 `tokens` + `/provider` 里模型
+  `limit.context`。占用 = `input + cache.read + cache.write`。
+- Claude Code：JSONL 没有官方窗口。启发式占用 = 最后一条 assistant
+  `input_tokens + cache_read + cache_creation`；窗口 200K，模型名含 `1m`
+  则 1M；`--max-context-tokens` 优先。
 - 冷投影：`session.history` 按官方 `maxMessages=50` 分页（消息边界，不是
   事件条数）。长会话一页过大时缩小再拉，避免 32MiB unary 截断。
 

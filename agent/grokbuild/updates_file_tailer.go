@@ -313,12 +313,26 @@ func (s *updatesFileTailSubscriber) drainNew(path string, start int64, onEvent f
 		if isReplayUpdate(params) {
 			continue
 		}
-		for _, ev := range convertSessionUpdate(params, s.sessionID) {
+		events := convertSessionUpdate(params, s.sessionID)
+		emittedUsage := false
+		for _, ev := range events {
 			if ev.Done && (ev.Type == core.EventResult || ev.Type == core.EventError) {
 				terminal = true
 			}
+			if ev.Type == core.EventContextUsageUpdated {
+				emittedUsage = true
+			}
 			if onEvent != nil {
 				onEvent(ev)
+			}
+		}
+		if !emittedUsage && terminal && onEvent != nil {
+			if usage := loadGrokSignalsUsage(s.grokHome, s.sessionID); usage != nil {
+				onEvent(core.Event{
+					Type:         core.EventContextUsageUpdated,
+					SessionID:    s.sessionID,
+					ContextUsage: usage,
+				})
 			}
 		}
 	}
