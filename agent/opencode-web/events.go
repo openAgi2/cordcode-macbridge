@@ -1,0 +1,907 @@
+package opencodeweb
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
+)
+
+// events.go is the常驻 SSE subscriber (design §4.3.3): /global/event on 1.18,
+// /api/event on v2. It is copied from the legacy subscriber (design §7 兜底 —
+// the turn lifecycle translation is battle-tested) and owned by this package,
+// with the design-mandated deltas:
+//
+//   - session.updated recomputes occupancy via the official §3.3 message-level
+//     formula (never top-level tokens);
+//   - todo.updated is IGNORED in phase 1 (todos not advertised);
+//   - session.created / session.deleted feed CatalogRefreshSignaler instead of
+//     the chat stream;
+//   - no CLI NDJSON event handlers — this package only talks to the server
+//     face (the payload wrapper unwrap stays, top-level server types stay).
+type sseSubscriber struct {
+	agent  *Agent
+	client *Client
+
+	events chan core.Event
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	closeOnce sync.Once
+	wg        sync.WaitGroup
+
+	stateMu      sync.Mutex
+	messageRoles map[string]string
+	messageIDs   map[string]string
+	partKinds    map[string]string
+	partContent  map[string]string
+	completed    map[string]bool
+	activeTurns  map[string]string // sessionID -> owning user/message turn id
+	// userPrompts accumulates the live user prompt text for a message id so a
+	// bare message.updated (role=user, no parts) plus later part deltas still
+	// become one projection user_message. userTurnStarted de-dupes turn_started.
+	userPrompts     map[string]string
+	userTurnStarted map[string]bool
+	// turnSawAssistantOutput tracks whether a turn produced any assistant
+	// content. The serve closes a provider-resolution failure (e.g. stale
+	// default model) as a silent empty loop exit — no error event, no
+	// assistant message (2026-08-14: 81ms empty-turn lesson). At session idle
+	// an armed turn with no output emits EventResult with Error (wire
+	// turn_error) instead of a healthy empty turn_completed.
+	turnSawAssistantOutput map[string]bool // turnID -> any assistant output seen
+
+	// Active-mode filter (§8-4 session binding): filterActive drops events
+	// whose SessionID != sessionFilter. Empty filter = pending (drops all).
+	filterActive  atomic.Bool
+	sessionFilter atomic.Value // string
+}
+
+func newSSESubscriber(ctx context.Context, a *Agent, c *Client) *sseSubscriber {
+	subCtx, cancel := context.WithCancel(ctx)
+	return &sseSubscriber{
+		agent:                  a,
+		client:                 c,
+		events:                 make(chan core.Event, 128),
+		ctx:                    subCtx,
+		cancel:                 cancel,
+		messageRoles:           make(map[string]string),
+		messageIDs:             make(map[string]string),
+		partKinds:              make(map[string]string),
+		partContent:            make(map[string]string),
+		completed:              make(map[string]bool),
+		activeTurns:            make(map[string]string),
+		userPrompts:            make(map[string]string),
+		userTurnStarted:        make(map[string]bool),
+		turnSawAssistantOutput: make(map[string]bool),
+	}
+}
+
+func (s *sseSubscriber) connect() error {
+	eventPath := "/global/event"
+	if s.client.Generation() == generationV2 {
+		eventPath = "/api/event"
+	}
+	sseURL := s.client.endpoint(eventPath)
+
+	req, err := http.NewRequestWithContext(s.ctx, http.MethodGet, sseURL, nil)
+	if err != nil {
+		return fmt.Errorf("opencode-web SSE subscriber: %w", err)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Cache-Control", "no-cache")
+	if s.client.authHeader != "" {
+		req.Header.Set("Authorization", s.client.authHeader)
+	}
+
+	resp, err := s.client.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("opencode-web SSE subscriber connect %s: %w", sseURL, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return fmt.Errorf("opencode-web SSE subscriber: HTTP %d", resp.StatusCode)
+	}
+
+	slog.Info("opencode-web SSE subscriber connected", "url", sseURL, "generation", string(s.client.Generation()))
+
+	s.wg.Add(1)
+	go s.readLoop(resp.Body)
+	return nil
+}
+
+// readLoop reads the SSE stream (data: lines, blank-line separators); a bare
+// JSON line is tolerated as NDJSON compat.
+func (s *sseSubscriber) readLoop(body io.ReadCloser) {
+	defer s.wg.Done()
+	defer body.Close()
+
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
+
+	var currentData strings.Builder
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			data := currentData.String()
+			currentData.Reset()
+			if data == "" {
+				continue
+			}
+			s.handleRawEvent(strings.TrimSpace(data))
+			continue
+		}
+		if strings.HasPrefix(line, "data: ") {
+			currentData.WriteString(strings.TrimPrefix(line, "data: "))
+			currentData.WriteString("\n")
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			currentData.WriteString(strings.TrimPrefix(line, "data:"))
+			currentData.WriteString("\n")
+			continue
+		}
+		if strings.HasPrefix(line, "event:") || strings.HasPrefix(line, "id:") || strings.HasPrefix(line, "retry:") || strings.HasPrefix(line, ":") {
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "{") {
+			s.handleRawEvent(trimmed)
+		}
+	}
+	if err := scanner.Err(); err != nil && s.ctx.Err() == nil {
+		slog.Debug("opencode-web SSE subscriber read error", "error", err)
+	}
+}
+
+// handleRawEvent unwraps the server payload envelope (design §3.6):
+//
+//	{"payload":{"type":"message.part.delta","properties":{…}}}
+//
+// and also accepts a top-level server type (CLI NDJSON shape).
+func (s *sseSubscriber) handleRawEvent(data string) {
+	data = strings.TrimSpace(data)
+	if data == "" {
+		return
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(data), &raw); err != nil {
+		slog.Debug("opencode-web SSE: non-JSON data", "data", truncateForError(data))
+		return
+	}
+	if payload, _ := raw["payload"].(map[string]any); payload != nil {
+		s.handleServerEvent(payload)
+		return
+	}
+	if eventType, _ := raw["type"].(string); isServerEventType(eventType) {
+		s.handleServerEvent(raw)
+	}
+}
+
+func (s *sseSubscriber) handleServerEvent(payload map[string]any) {
+	eventType, _ := payload["type"].(string)
+	properties, _ := payload["properties"].(map[string]any)
+	if properties == nil {
+		properties = map[string]any{}
+	}
+	sessionID := extractSSESessionID(properties)
+
+	switch eventType {
+	case "message.updated":
+		s.handleMessageUpdated(properties, sessionID)
+	case "message.part.delta":
+		s.handlePartDelta(properties, sessionID)
+	case "message.part.updated":
+		s.handlePartUpdated(properties, sessionID)
+	case "session.status":
+		s.handleSessionStatus(properties, sessionID)
+	case "session.updated":
+		s.handleSessionUpdated(properties, sessionID)
+	case "permission.asked":
+		s.handlePermissionAsked(properties, sessionID)
+	case "todo.updated":
+		// Phase 1: todos are not advertised (design §4.3.3) — deliberately
+		// ignored, no EventPlan.
+	case "server.connected", "message.removed", "message.part.removed", "session.diff":
+		// Not chat content; not catalog-affecting either.
+	case "session.created", "session.deleted":
+		// Catalog-affecting: ask the bridge for an immediate fingerprint
+		// rescan → sessions_changed. Never enters the chat stream.
+		s.agent.signalCatalogRefresh()
+	default:
+		slog.Debug("opencode-web SSE: unhandled server event", "type", eventType)
+	}
+}
+
+func (s *sseSubscriber) handleMessageUpdated(properties map[string]any, sessionID string) {
+	info := firstMap(properties, "info", "message")
+	if info == nil {
+		return
+	}
+	messageID := firstString(info, "id", "messageID", "messageId")
+	role := firstString(info, "role")
+	if sessionID == "" {
+		sessionID = extractSSESessionID(info)
+	}
+	if messageID != "" && role != "" {
+		s.stateMu.Lock()
+		s.messageRoles[messageID] = role
+		if sessionID != "" {
+			s.messageIDs[messageID] = sessionID
+		}
+		s.stateMu.Unlock()
+	}
+	if sessionID != "" && role == "user" {
+		s.resetCompletion(sessionID)
+		if messageID != "" {
+			s.setActiveTurn(sessionID, messageID)
+			userText := ""
+			for _, part := range extractMessageParts(info) {
+				if firstString(part, "type") == "text" {
+					if chunk := firstString(part, "text", "content", "initial"); chunk != "" {
+						if userText != "" {
+							userText += "\n"
+						}
+						userText += chunk
+					}
+				}
+			}
+			if strings.TrimSpace(userText) != "" {
+				s.noteUserPrompt(sessionID, messageID, userText, false)
+			}
+		}
+	}
+	if sessionID == "" || role != "assistant" {
+		return
+	}
+	for _, part := range extractMessageParts(info) {
+		partID := firstString(part, "id", "partID", "partId")
+		kind := firstString(part, "type")
+		if kind == "" {
+			continue
+		}
+		s.rememberPartKind(sessionID, messageID, partID, kind)
+		switch kind {
+		case "text":
+			text := firstString(part, "text", "content")
+			if d := s.deltaForPartSnapshot(sessionID, messageID, partID, kind, text); d.content != "" {
+				eventType := core.EventText
+				if d.isComplete {
+					eventType = core.EventTextReplace
+				}
+				turnID := s.owningTurnID(sessionID, messageID)
+				s.emit(core.Event{Type: eventType, Content: d.content, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
+			}
+		case "reasoning":
+			text := firstString(part, "text", "content")
+			if d := s.deltaForPartSnapshot(sessionID, messageID, partID, kind, text); d.content != "" {
+				turnID := s.owningTurnID(sessionID, messageID)
+				s.emit(core.Event{Type: core.EventThinking, Content: d.content, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
+			}
+		case "tool":
+			s.handleToolPart(part, sessionID, messageID)
+		}
+	}
+	// Intentionally no result on assistant time.completed: multi-step turns
+	// mark each tool-bearing assistant message completed before the next step
+	// runs. Turn completion is owned solely by session.status/session.updated
+	// idle (design §4.3.3 红线).
+}
+
+func (s *sseSubscriber) handlePartDelta(properties map[string]any, sessionID string) {
+	messageID := firstString(properties, "messageID", "messageId")
+	if sessionID == "" {
+		sessionID = s.sessionIDForMessage(messageID)
+	}
+	field := firstString(properties, "field")
+	delta := firstString(properties, "delta")
+	if delta == "" {
+		return
+	}
+	// User prompt text often arrives ONLY as part.delta after a bare
+	// message.updated; dropping it leaves turns with no user bubble.
+	if s.isUserMessage(messageID) {
+		if field == "" || field == "text" {
+			s.noteUserPrompt(sessionID, messageID, delta, true)
+		}
+		return
+	}
+	partID := firstString(properties, "partID", "partId")
+	kind := s.kindForPart(sessionID, messageID, partID, field)
+	switch kind {
+	case "reasoning":
+		s.appendPartContent(sessionID, messageID, partID, kind, delta)
+		turnID := s.owningTurnID(sessionID, messageID)
+		s.emit(core.Event{Type: core.EventThinking, Content: delta, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
+	case "text", "":
+		s.appendPartContent(sessionID, messageID, partID, "text", delta)
+		turnID := s.owningTurnID(sessionID, messageID)
+		s.emit(core.Event{Type: core.EventText, Content: delta, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
+	default:
+		slog.Debug("opencode-web SSE: ignored part delta", "kind", kind, "field", field)
+	}
+}
+
+func (s *sseSubscriber) handlePartUpdated(properties map[string]any, sessionID string) {
+	part := firstMap(properties, "part")
+	if part == nil {
+		return
+	}
+	messageID := firstString(properties, "messageID", "messageId")
+	if messageID == "" {
+		messageID = firstString(part, "messageID", "messageId")
+	}
+	if sessionID == "" {
+		sessionID = firstString(part, "sessionID", "sessionId")
+	}
+	if sessionID == "" {
+		sessionID = s.sessionIDForMessage(messageID)
+	}
+	if s.isUserMessage(messageID) {
+		kind := firstString(part, "type")
+		if kind == "" || kind == "text" {
+			text := firstString(part, "text", "content", "initial")
+			if strings.TrimSpace(text) != "" {
+				s.noteUserPrompt(sessionID, messageID, text, false)
+			}
+		}
+		return
+	}
+	partID := firstString(properties, "partID", "partId")
+	if partID == "" {
+		partID = firstString(part, "id", "partID", "partId")
+	}
+	kind := firstString(part, "type")
+	if kind == "" {
+		kind = s.kindForPart(sessionID, messageID, partID, "")
+	}
+	s.rememberPartKind(sessionID, messageID, partID, kind)
+
+	switch kind {
+	case "text":
+		text := firstString(part, "text", "content")
+		if d := s.deltaForPartSnapshot(sessionID, messageID, partID, kind, text); d.content != "" {
+			eventType := core.EventText
+			if d.isComplete {
+				eventType = core.EventTextReplace
+			}
+			turnID := s.owningTurnID(sessionID, messageID)
+			s.emit(core.Event{Type: eventType, Content: d.content, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
+		}
+	case "reasoning":
+		text := firstString(part, "text", "content")
+		if d := s.deltaForPartSnapshot(sessionID, messageID, partID, kind, text); d.content != "" {
+			turnID := s.owningTurnID(sessionID, messageID)
+			s.emit(core.Event{Type: core.EventThinking, Content: d.content, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
+		}
+	case "tool":
+		s.handleToolPart(part, sessionID, messageID)
+	default:
+		slog.Debug("opencode-web SSE: ignored part update", "kind", kind)
+	}
+}
+
+// handleToolPart emits the tool lifecycle. messageID feeds turn attribution:
+// tool events carry the owning turn id so a tool-bearing step counts as
+// assistant output — a healthy multi-step tool turn must NOT close as
+// zero-output at idle (design §4.3.3; delta vs the legacy copy, which left
+// tool events unattributed).
+func (s *sseSubscriber) handleToolPart(part map[string]any, sessionID, messageID string) {
+	toolName := firstString(part, "tool", "name")
+	if toolName == "" {
+		// Verified live shape (history mapping parity): the tool object carries
+		// toolName; "name" and "id" stay as fallbacks.
+		toolName = firstString(firstMap(part, "tool"), "toolName", "name", "id")
+	}
+	state := firstMap(part, "state")
+	if state == nil {
+		// Verified live shape (history mapping parity): state can nest inside
+		// the tool object instead of sitting on the part.
+		state = firstMap(firstMap(part, "tool"), "state")
+	}
+	status := firstString(state, "status")
+	input := extractToolInput(state)
+	if input == "" {
+		input = firstString(part, "title")
+	}
+	partID := firstString(part, "id", "partID", "partId")
+	turnID := s.owningTurnID(sessionID, messageID)
+
+	s.emit(core.Event{Type: core.EventToolUse, ToolName: toolName, ToolInput: input, SessionID: sessionID, RequestID: partID, TurnID: turnID, ItemID: turnID})
+	if status == "completed" || status == "error" || status == "failed" {
+		output := firstString(state, "output", "result")
+		toolStatus := status
+		if toolStatus == "error" {
+			toolStatus = "failed"
+		}
+		s.emit(core.Event{
+			Type:       core.EventToolResult,
+			ToolName:   toolName,
+			ToolResult: truncateForError(output),
+			ToolStatus: toolStatus,
+			SessionID:  sessionID,
+			RequestID:  partID,
+			TurnID:     turnID,
+			ItemID:     turnID,
+		})
+	}
+}
+
+func (s *sseSubscriber) handleSessionStatus(properties map[string]any, sessionID string) {
+	status := firstString(properties, "type")
+	if status == "" {
+		status = firstString(firstMap(properties, "status"), "type", "status")
+	}
+	if sessionID == "" {
+		sessionID = extractSSESessionID(firstMap(properties, "status"))
+	}
+	if status == "running" && sessionID != "" {
+		s.resetCompletion(sessionID)
+	}
+	if status == "idle" && sessionID != "" {
+		s.emitResultOnce(sessionID)
+	}
+}
+
+// handleSessionUpdated: the idle/running transition carries the same
+// turn-lifecycle semantics as session.status, plus the §3.3 occupancy
+// recompute — always message-level, never top-level tokens.
+func (s *sseSubscriber) handleSessionUpdated(properties map[string]any, sessionID string) {
+	info := firstMap(properties, "info", "session")
+	if info == nil {
+		return
+	}
+	if sessionID == "" {
+		sessionID = extractSSESessionID(info)
+	}
+	status := firstString(info, "status")
+	if status == "running" && sessionID != "" {
+		s.resetCompletion(sessionID)
+	}
+	if status == "idle" && sessionID != "" {
+		s.emitResultOnce(sessionID)
+	}
+	if sessionID != "" {
+		s.recomputeUsage(sessionID)
+	}
+}
+
+func (s *sseSubscriber) recomputeUsage(sessionID string) {
+	ctx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
+	defer cancel()
+	messages, err := s.agent.fetchMessageMapsWithClient(ctx, s.client, sessionID)
+	if err != nil {
+		slog.Debug("opencode-web: usage recompute fetch failed", "session", sessionID, "error", err)
+		return
+	}
+	usage := usageFromMessages(ctx, s.agent, s.client, messages)
+	if usage == nil {
+		return
+	}
+	s.agent.rememberContextUsage(sessionID, usage)
+	s.emit(core.Event{
+		Type:         core.EventContextUsageUpdated,
+		SessionID:    sessionID,
+		ContextUsage: usage,
+	})
+}
+
+func (s *sseSubscriber) handlePermissionAsked(properties map[string]any, sessionID string) {
+	id := firstString(properties, "id", "permissionID", "permissionId")
+	toolName := firstString(properties, "tool", "toolName")
+	input := firstString(properties, "title", "description")
+	s.emit(core.Event{
+		Type:      core.EventPermissionRequest,
+		RequestID: id,
+		ToolName:  toolName,
+		ToolInput: input,
+		SessionID: sessionID,
+	})
+}
+
+// noteUserPrompt records user prompt text into the live stream. isDelta=true
+// appends; false replaces/grows from a snapshot. Emits EventUserMessage with
+// the accumulated text and EventTurnStarted once per message id.
+func (s *sseSubscriber) noteUserPrompt(sessionID, messageID, text string, isDelta bool) {
+	text = strings.TrimRight(text, "\r")
+	if sessionID == "" || messageID == "" || strings.TrimSpace(text) == "" {
+		return
+	}
+	s.setActiveTurn(sessionID, messageID)
+
+	s.stateMu.Lock()
+	prev := s.userPrompts[messageID]
+	full := text
+	if isDelta {
+		full = prev + text
+	} else if prev != "" {
+		if text == prev {
+			s.stateMu.Unlock()
+			return
+		}
+		if strings.HasPrefix(text, prev) {
+			full = text
+		} else if strings.HasPrefix(prev, text) {
+			s.stateMu.Unlock()
+			return
+		}
+	}
+	s.userPrompts[messageID] = full
+	startTurn := !s.userTurnStarted[messageID]
+	if startTurn {
+		s.userTurnStarted[messageID] = true
+	}
+	s.stateMu.Unlock()
+
+	s.emit(core.Event{
+		Type:      core.EventUserMessage,
+		Content:   full,
+		SessionID: sessionID,
+		TurnID:    messageID,
+		ItemID:    messageID,
+	})
+	if startTurn {
+		s.emit(core.Event{
+			Type:      core.EventTurnStarted,
+			SessionID: sessionID,
+			TurnID:    messageID,
+		})
+	}
+}
+
+func (s *sseSubscriber) isUserMessage(messageID string) bool {
+	if messageID == "" {
+		return false
+	}
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	return s.messageRoles[messageID] == "user"
+}
+
+func (s *sseSubscriber) sessionIDForMessage(messageID string) string {
+	if messageID == "" {
+		return ""
+	}
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	return s.messageIDs[messageID]
+}
+
+// emitResultOnce is the ONLY turn terminal (design §4.3.3): session idle.
+// A turn that armed but produced zero assistant output surfaces as
+// EventResult with the diagnosable error text (wire turn_error) — never a
+// healthy empty completion.
+func (s *sseSubscriber) emitResultOnce(sessionID string) {
+	s.stateMu.Lock()
+	if s.completed[sessionID] {
+		s.stateMu.Unlock()
+		return
+	}
+	s.completed[sessionID] = true
+	turnID := s.activeTurns[sessionID]
+	hadOutput := turnID != "" && s.turnSawAssistantOutput[turnID]
+	delete(s.turnSawAssistantOutput, turnID)
+	s.stateMu.Unlock()
+	if turnID != "" && !hadOutput {
+		slog.Warn("opencode-web: turn closed with zero assistant output",
+			"session_id", sessionID,
+			"turn_id", turnID)
+		s.emit(core.Event{
+			Type:      core.EventResult,
+			Error:     fmt.Errorf("model produced no output (model or provider may be unavailable on the server)"),
+			SessionID: sessionID,
+			Done:      true,
+			TurnID:    turnID,
+		})
+		s.clearActiveTurn(sessionID)
+		return
+	}
+	s.emit(core.Event{Type: core.EventResult, SessionID: sessionID, Done: true, TurnID: turnID})
+	s.clearActiveTurn(sessionID)
+}
+
+func (s *sseSubscriber) resetCompletion(sessionID string) {
+	s.stateMu.Lock()
+	delete(s.completed, sessionID)
+	s.stateMu.Unlock()
+}
+
+func (s *sseSubscriber) setActiveTurn(sessionID, turnID string) {
+	if sessionID == "" || turnID == "" {
+		return
+	}
+	s.stateMu.Lock()
+	s.activeTurns[sessionID] = turnID
+	s.stateMu.Unlock()
+}
+
+func (s *sseSubscriber) activeTurn(sessionID string) string {
+	if sessionID == "" {
+		return ""
+	}
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	return s.activeTurns[sessionID]
+}
+
+func (s *sseSubscriber) clearActiveTurn(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	s.stateMu.Lock()
+	delete(s.activeTurns, sessionID)
+	s.stateMu.Unlock()
+}
+
+func (s *sseSubscriber) owningTurnID(sessionID, messageID string) string {
+	if turnID := s.activeTurn(sessionID); turnID != "" {
+		return turnID
+	}
+	return messageID
+}
+
+func (s *sseSubscriber) kindForPart(sessionID, messageID, partID, field string) string {
+	if field == "reasoning" {
+		return "reasoning"
+	}
+	if field == "text" {
+		return "text"
+	}
+	key := partCacheKey(sessionID, messageID, partID, "")
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	return s.partKinds[key]
+}
+
+func (s *sseSubscriber) rememberPartKind(sessionID, messageID, partID, kind string) {
+	if kind == "" {
+		return
+	}
+	key := partCacheKey(sessionID, messageID, partID, "")
+	s.stateMu.Lock()
+	s.partKinds[key] = kind
+	s.stateMu.Unlock()
+}
+
+func (s *sseSubscriber) appendPartContent(sessionID, messageID, partID, kind, delta string) {
+	key := partCacheKey(sessionID, messageID, partID, kind)
+	s.stateMu.Lock()
+	s.partContent[key] += delta
+	if kind != "" {
+		s.partKinds[partCacheKey(sessionID, messageID, partID, "")] = kind
+	}
+	s.stateMu.Unlock()
+}
+
+type partDelta struct {
+	content    string
+	isComplete bool
+}
+
+func (s *sseSubscriber) deltaForPartSnapshot(sessionID, messageID, partID, kind, text string) partDelta {
+	if text == "" {
+		return partDelta{}
+	}
+	key := partCacheKey(sessionID, messageID, partID, kind)
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	previous := s.partContent[key]
+	s.partContent[key] = text
+	if kind != "" {
+		s.partKinds[partCacheKey(sessionID, messageID, partID, "")] = kind
+	}
+	if previous == "" {
+		return partDelta{content: text}
+	}
+	if strings.HasPrefix(text, previous) {
+		return partDelta{content: strings.TrimPrefix(text, previous)}
+	}
+	if text == previous {
+		return partDelta{}
+	}
+	return partDelta{content: text, isComplete: true}
+}
+
+func partCacheKey(sessionID, messageID, partID, kind string) string {
+	key := sessionID + "\x00" + messageID + "\x00" + partID
+	if kind != "" {
+		key += "\x00" + kind
+	}
+	return key
+}
+
+func isServerEventType(eventType string) bool {
+	switch eventType {
+	case "message.updated", "message.part.delta", "message.part.updated", "session.status", "session.updated", "todo.updated", "permission.asked",
+		"server.connected", "session.created", "session.deleted", "message.removed", "message.part.removed", "session.diff":
+		return true
+	default:
+		return false
+	}
+}
+
+func extractSSESessionID(properties map[string]any) string {
+	if properties == nil {
+		return ""
+	}
+	if sid := firstString(properties, "sessionID", "sessionId"); sid != "" {
+		return sid
+	}
+	for _, key := range []string{"info", "session", "message", "status"} {
+		if sid := extractSSESessionID(firstMap(properties, key)); sid != "" {
+			return sid
+		}
+	}
+	return ""
+}
+
+func extractMessageParts(info map[string]any) []map[string]any {
+	if info == nil {
+		return nil
+	}
+	var result []map[string]any
+	for _, key := range []string{"parts", "content"} {
+		items, _ := info[key].([]any)
+		for _, item := range items {
+			if part, _ := item.(map[string]any); part != nil {
+				result = append(result, part)
+			}
+		}
+	}
+	if part := firstMap(info, "part"); part != nil {
+		result = append(result, part)
+	}
+	return result
+}
+
+func firstMap(raw map[string]any, keys ...string) map[string]any {
+	if raw == nil {
+		return nil
+	}
+	for _, key := range keys {
+		if value, _ := raw[key].(map[string]any); value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+func firstString(raw map[string]any, keys ...string) string {
+	if raw == nil {
+		return ""
+	}
+	for _, key := range keys {
+		if value, _ := raw[key].(string); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func extractToolInput(state map[string]any) string {
+	if state == nil {
+		return ""
+	}
+	raw, _ := state["input"]
+	switch typed := raw.(type) {
+	case string:
+		return truncateForError(typed)
+	case map[string]any, []any:
+		b, err := json.Marshal(typed)
+		if err != nil {
+			return ""
+		}
+		return truncateForError(string(b))
+	default:
+		return ""
+	}
+}
+
+func (s *sseSubscriber) emit(ev core.Event) {
+	if s.filterActive.Load() {
+		f, _ := s.sessionFilter.Load().(string)
+		if f == "" || ev.SessionID != f {
+			return
+		}
+	}
+	switch ev.Type {
+	case core.EventText, core.EventTextReplace, core.EventThinking, core.EventToolUse, core.EventToolResult:
+		if ev.TurnID != "" {
+			s.stateMu.Lock()
+			s.turnSawAssistantOutput[ev.TurnID] = true
+			s.stateMu.Unlock()
+		}
+	}
+	select {
+	case s.events <- ev:
+	case <-s.ctx.Done():
+	default:
+		slog.Debug("opencode-web SSE: event dropped", "type", ev.Type)
+	}
+}
+
+func (s *sseSubscriber) setSessionFilter(id string) {
+	if id == "" {
+		return
+	}
+	s.sessionFilter.Store(id)
+}
+
+// Close tears the stream down. INVARIANT (copied from the legacy subscriber):
+// events is closed only after the producer (readLoop, tracked by wg) exits —
+// the timeout branch defers the close instead of racing it.
+func (s *sseSubscriber) Close() error {
+	s.cancel()
+	s.closeOnce.Do(func() {
+		done := make(chan struct{})
+		go func() {
+			s.wg.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+			close(s.events)
+		case <-time.After(3 * time.Second):
+			slog.Debug("opencode-web SSE: close timeout, deferring events close until readLoop exits")
+			go func() {
+				<-done
+				close(s.events)
+			}()
+		}
+	})
+	return nil
+}
+
+// Subscribe implements core.EventSubscriber for the passive (旁观) stream —
+// every session on the serve, including external web turns.
+func (a *Agent) Subscribe(ctx context.Context) (<-chan core.Event, error) {
+	c, err := a.clientFor(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("opencode-web SSE subscription unavailable: %w", err)
+	}
+	sub := newSSESubscriber(ctx, a, c)
+	if err := sub.connect(); err != nil {
+		return nil, err
+	}
+	go func() {
+		<-sub.ctx.Done()
+		_ = sub.Close()
+	}()
+	return sub.events, nil
+}
+
+var _ core.EventSubscriber = (*Agent)(nil)
+
+// CatalogRefreshSignals implements core.CatalogRefreshSignaler: each SSE
+// session.created/deleted asks the bridge for an immediate fingerprint
+// rescan (sessions_changed); the discovery watcher stays the safety net.
+func (a *Agent) CatalogRefreshSignals() <-chan struct{} {
+	a.catalogMu.Lock()
+	defer a.catalogMu.Unlock()
+	if a.catalogRefresh == nil {
+		a.catalogRefresh = make(chan struct{}, 16)
+	}
+	return a.catalogRefresh
+}
+
+func (a *Agent) signalCatalogRefresh() {
+	a.catalogMu.Lock()
+	defer a.catalogMu.Unlock()
+	if a.catalogRefresh == nil {
+		a.catalogRefresh = make(chan struct{}, 16)
+	}
+	select {
+	case a.catalogRefresh <- struct{}{}:
+	default:
+	}
+}
+
+var _ core.CatalogRefreshSignaler = (*Agent)(nil)

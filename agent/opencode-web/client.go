@@ -131,3 +131,8 @@ func truncateForError(s string) string {
 	}
 	return string(runes[:max]) + "…"
 }
+
+// decodeJSONObject decodes an object payload (used by the activity map).
+func decodeJSONObject(raw []byte, out any) error {
+	return json.Unmarshal(raw, out)
+}

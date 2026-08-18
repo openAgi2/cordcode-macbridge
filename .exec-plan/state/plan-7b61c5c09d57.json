@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T02:29:49+0800",
+  "updated_at": "2026-08-19T02:42:31+0800",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -203,7 +203,7 @@
       "id": "s8-3-sse-activity-impl",
       "title": "§8-3 SSE + SessionActivityProbing：events.go/activity.go——旁观/重连/零输出 turn_error/catalog 刷新",
       "description": "实现 core.EventSubscriber（常驻 SSE，按代选 /global/event 或 /api/event）+ core.SessionActivityProbing + core.CatalogRefreshSignaler。对照复制 agent/opencode/sse_subscriber.go（复制后归属新包、删除 CLI NDJSON 面可保留兼容解包）：事件表 §4.3.3——message.updated role=user→EventUserMessage+一次 EventTurnStarted；message.part.delta field=text→EventText（user 消息累加 prompt）；field=reasoning→EventThinking；message.part.updated type=text→EventText/EventTextReplace；type=reasoning→EventThinking；type=tool→EventToolUse，status completed/error→EventToolResult（RequestID=part.id）；session.status type=running→清 completion；type=idle→emitResultOnce（唯一 turn 终态，零输出→EventResult{Error:\"model produced no output (model or provider may be unavailable on the server)\",Done:true}）；session.updated idle/running→同上+按 §3.3 重算占用发 EventContextUsageUpdated（禁止顶层 tokens）；permission.asked→EventPermissionRequest（RequestID=id）；todo.updated 一期忽略；session.created/deleted→CatalogRefreshSignaler 不进 chat 流；server.connected/session.diff/message.removed 忽略。红线：不在 step_finish 或 assistant time.completed 上发 EventResult；HTTP 4xx/5xx 原文进诊断；SSE 帧解 payload 包装也兼容顶层 type；断线重开 SSE+重拉 message+forceCold；surface 判据=bridge registry 命中该 session。activity.go——IsSessionActive=1.18 /session/status 有该 id（key 在=busy，缺席=idle）；解析失败或 HTTP 失败→true（保守）；禁止只用 v2 /session/active 当全局 idle。设计 §4.3.2 活跃/§4.3.3 全表。",
-      "status": "pending",
+      "status": "done",
       "phase": "s8-3",
       "kind": "impl",
       "depends_on": [
@@ -213,20 +213,25 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
-        "attestation": null,
+        "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "events.go：SSE 订阅器对照复制旧 sse_subscriber 并按设计 deltas——按代选 /global/event 或 /api/event；payload 包装解开+顶层 server type 兼容（无 CLI NDJSON handler）；事件表 §4.3.3（message.updated user→EventUserMessage+单次 EventTurnStarted、delta text/reasoning、part.updated snapshot→EventText/EventTextReplace、tool→EventToolUse+completed/error→EventToolResult RequestID=part.id、session.status running 清 completion/idle 唯一终态、permission.asked→EventPermissionRequest）；session.updated 重算占用走 §3.3 消息级公式（禁顶层 tokens）发 EventContextUsageUpdated；todo.updated 一期忽略；session.created/deleted→CatalogRefreshSignaler 不进 chat 流；零输出 idle→EventResult{Error 含 may be unavailable 文案,Done}；红线：assistant time.completed/工具完成不发 EventResult。相对旧复制的两处修正（活体形状对齐）：tool 名回退补 toolName 键、state 可嵌套 tool 对象内；工具事件带 TurnID 归因（健康多步工具 turn 不再被误判零输出——旧包缺口，新包修复并留注释）。Subscribe/close 不变量（events 仅在 readLoop 退出后 close）照抄。activity.go：IsSessionActive 1.18 /session/status（缺席=definitive idle）；v2 /api/session/active（缺席≠全局 idle→保守 active）；HTTP/解析失败→active。",
+        "artifacts": [
+          "agent/opencode-web/events.go",
+          "agent/opencode-web/activity.go",
+          "agent/opencode-web/history.go(fetchMessageMapsWithClient)",
+          "agent/opencode-web/opencodeweb.go(catalog 字段)"
+        ],
+        "checked_at": "2026-08-19T02:42:31+0800"
       }
     },
     {
       "id": "s8-3-sse-activity-tests",
       "title": "§8-3 单测：零输出 idle turn_error/多步不提前完成/三态活跃/目录头（switchDir M2-1 前置）",
       "description": "设计 §6 单测表相关行：零输出 idle——session.status=idle 且无 assistant part→EventResult.Error 含 may be unavailable。多步不提前完成——tool time.completed 不发 EventResult，只在 session.status idle 发。SSE 事件表逐行（user 消息/delta text/delta reasoning/part.updated tool completed/error/permission.asked/catalog 刷新信号）。IsSessionActive 三态——status map 有 id=busy、缺席=idle、HTTP 失败=active 保守。占用重算——session.updated 触发 EventContextUsageUpdated 且读 message 级非顶层。switchDir 特判四读方法携带 directory 头（httptest 断言请求头；此为 §8-5 M2-1 的包内前置断言）。",
-      "status": "pending",
+      "status": "done",
       "phase": "s8-3",
       "kind": "tests",
       "depends_on": [
@@ -236,20 +241,22 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "test-execution",
-        "attestation": null,
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "13 个新用例（包内共 45 全过）：user 消息累计+单次 turn_started；assistant delta/snapshot（无关 snapshot→TextReplace）；tool 生命周期（running/completed 两跳、RequestID=part id）+多步红线（tool completed 与 assistant time.completed 都不发 EventResult，仅 session idle 收口一次）；零输出 idle→turn_error 文案含 may be unavailable；permission.asked；catalog 信号不进 chat；todo.updated 忽略；session.updated 重算占用走消息级（used=18457 非 7）；live SSE 端到端（header 先 flush 防死锁）；IsSessionActive 三态+v2 保守语义。",
+        "artifacts": [
+          "agent/opencode-web/events_test.go"
+        ],
+        "checked_at": "2026-08-19T02:42:31+0800"
       }
     },
     {
       "id": "s8-3-sse-activity-regression",
       "title": "§8-3 回归：全量 go 测试 + 旧包零增量",
       "description": "go test ./agent/opencode-web/... ./go-bridge/... -count=1 零失败；git diff --stat agent/opencode 为空。",
-      "status": "pending",
+      "status": "done",
       "phase": "s8-3",
       "kind": "regression",
       "depends_on": [
@@ -259,13 +266,13 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "test-execution",
-        "attestation": null,
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
+        "summary": "go vet 干净；go test ./go-bridge/... 失败集仅含已定性先存 flaky TestCanonicalUserInputIsProjectionOnlyAndLegacyIsOneWayDerived（单跑/全量在干净树与工作树均随机翻转，多轮取证与本改动无因果）；git diff --stat agent/opencode 为空。",
         "artifacts": [],
-        "checked_at": null
+        "checked_at": "2026-08-19T02:42:31+0800"
       }
     },
     {

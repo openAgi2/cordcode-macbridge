@@ -64,6 +64,11 @@ type Agent struct {
 	modelWindows   map[string]int
 	modelWindowsAt time.Time
 
+	// catalogMu guards the catalog refresh signal channel (SSE
+	// session.created/deleted → sessions_changed; design §4.3.1).
+	catalogMu      sync.Mutex
+	catalogRefresh chan struct{}
+
 	bgCtx    context.Context
 	bgCancel context.CancelFunc
 

@@ -242,6 +242,12 @@ func (a *Agent) fetchMessageMaps(ctx context.Context, c *Client, sessionID strin
 	return out, nil
 }
 
+// fetchMessageMapsWithClient lets the SSE recompute path reuse an
+// already-generation-pinned client instead of re-probing.
+func (a *Agent) fetchMessageMapsWithClient(ctx context.Context, c *Client, sessionID string) ([]map[string]any, error) {
+	return a.fetchMessageMaps(ctx, c, sessionID)
+}
+
 // lastAssistantWithTokens scans backward for the last assistant message whose
 // token total is positive (official web formula step 1, design §3.3). info is
 // the下沉 info map; ok=false when no such message exists.
