@@ -163,9 +163,10 @@ func TestAgent_ReasoningEffortSwitcher(t *testing.T) {
 		t.Errorf("GetReasoningEffort = %q", agent.GetReasoningEffort())
 	}
 
-	efforts := agent.AvailableReasoningEfforts()
-	if len(efforts) != 3 {
-		t.Errorf("AvailableReasoningEfforts = %v, want 3 items", efforts)
+	// ACP 无 effort 真值（不上 wire）：显式未知（空列表），不再硬编码
+	// [low,medium,high] 猜测（路线图 §5.7 / 审计 N1）。
+	if efforts := agent.AvailableReasoningEfforts(); len(efforts) != 0 {
+		t.Errorf("AvailableReasoningEfforts = %v, want empty (no ACP effort truth)", efforts)
 	}
 }
 

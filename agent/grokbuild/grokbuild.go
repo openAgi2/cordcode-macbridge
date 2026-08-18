@@ -283,8 +283,14 @@ func (a *Agent) GetReasoningEffort() string {
 	return a.reasoningEffort
 }
 
+// AvailableReasoningEfforts returns NO effort list: the Grok ACP surface has
+// no reasoning-effort parameter (acp_types.go carries no effort field and
+// SetReasoningEffort never reaches the wire), so the honest state is
+// "unknown" — iOS hides the effort control and handleListModels leaves the
+// catalog unsmeared. The old hardcoded [low,medium,high] was a local guess,
+// not runtime truth (roadmap §5.7 / audit N1).
 func (a *Agent) AvailableReasoningEfforts() []string {
-	return []string{"low", "medium", "high"}
+	return nil
 }
 
 // --- ProviderSwitcher ---
