@@ -1,6 +1,6 @@
 # OpenCode Web Backend 设计（官方 HTTP/SSE 转发 + bridge-v1 翻译）
 
-- 日期：2026-08-18（v2：给开发 agent 的实施真值。中间稿/讨论轨迹见 [2026-08-18-opencode-web-backend-design-初稿.md](2026-08-18-opencode-web-backend-design-初稿.md)）
+- 日期：2026-08-18（v2：实施真值；v3：按评审 `2026-08-18-opencode-web-backend-design-review.md` 修订——M1-M3 必改全收（iOS if 比较型接线 ≥12 处、go-bridge 三处表外键控点）+ S1-S9 逐条处置，见文末「评审采纳记录」。中间稿/讨论轨迹见 [初稿](2026-08-18-opencode-web-backend-design-初稿.md)）
 - 状态：**待评审后实施**。本文是开发 agent 的唯一真值；初稿不作实施依据。批准前不写 `agent/opencode-web` 代码。
 - 背景：旧 `opencode` 在 iOS 上占用圈空、部分会话发了没回；官方网页（本机 `opencode serve`）同会话有数。owner 要求 **新开独立 backend**，与旧包物理隔离，成熟后再摘旧入口、代码不删。
 - 对照：结构、纪律、接线密度效仿 [2026-08-16-dsh-web-backend-design.md](2026-08-16-dsh-web-backend-design.md)。**不要**把 dsh 的 JSON-RPC 信封、双 WebSocket、`/api/respond` 批问答原样抄过来。本路线的载波是 **HTTP + SSE**，不是 WebSocket。
@@ -60,11 +60,11 @@
 | 2 | 模型走 CLI + 磁盘缓存 | `opencode models` + `*.opencode-models.json`（`opencode.go:99-106`） | 只 `/provider`（或探测到的 v2 `/api/provider`+`/api/model`） |
 | 3 | 占用读错字段 | `GetSessionContextUsage` 读 `GET /session/:id` 顶层 `tokens`（`context_usage.go:86-107`）；本机 99/100 为 0。网页用最后一条 assistant ÷ `limit.context`（官方 `packages/app/src/components/session/session-context-metrics.ts`） | §3.3 公式；顶层 tokens=0 必须回落 `/message` |
 | 4 | 发送不带 model | `prompt_async` body 只有 `parts`（`server_session.go:116-118`）；session.model 常 null → 默认 `zhipuai-coding-plan/glm-4.7`；目录挂了 **81ms 空转零 assistant**（`docs/2026-08-14-opencode-empty-turn-and-grokbuild-session-load-timeout-analysis.md`） | 发送必带 catalog 内模型；不在目录 → 立刻可见错误 |
-| 5 | 目录头错了像空会话 | `x-opencode-directory` 不对：列表有标题、`/message` 0 条。网页 URL 带 `/server/<项目>/` | 所有读写带会话自己的 directory |
+| 5 | 目录头错了像空会话 | `x-opencode-directory` 不对：列表有标题、`/message` 0 条。网页 URL 带 `/server/<项目>/` | 所有读写带会话自己的 directory；**含读路径的 switchDir 特判（评审 M2-1，§4.1.5）——不加特判则四个读方法永不切目录、坑 5 原样复发** |
 | 6 | 问答未接 | `RespondQuestion` 直接报不支持（`server_session.go:190-196`） | 1.18 路径未活体钉死前 ⛔，不臆造 |
 | 7 | 权限字面量抄错 | v2 是 `once`/`always`/`reject`（`packages/schema/src/permission.ts`），不是 allow/deny。旧包发 `{response: behavior}` 且 behavior 来自 bridge 的 `allow`/`deny`（`server_session.go:173-177`） | §4.3.4 折叠表；1.18 活体钉死后再写死映射 |
 | 8 | 把 checkout v2 当成唯一现网 | 本机 1.18.18 是无前缀 `/session`、`/global/event`、`/global/health` | §3.2 双代表；默认跟 1.18 |
-| 9 | SSV2 漏 kind | dsh-web 真机行 2/3/4：Mac 已推 patch，iOS `sessionSyncV2ProjectionBackend` 漏 `.deepSeekWeb`（`ChatViewModel.swift:327-329`） | §4.3.2 / §8-5：Mac 接线 + iOS **同期**列入 |
+| 9 | SSV2 漏 kind | dsh-web 真机行 2/3/4：Mac 已推 patch，iOS `sessionSyncV2ProjectionBackend` 漏 `.deepSeekWeb`（历史事实；**当前 main 已含 `.deepSeekWeb`，dsh-web 实施时修复——评审 S9 补注**） | §4.3.2 / §8-5：Mac 接线 + iOS **同期**列入（`.openCodeWeb` 同样必须加入） |
 | 10 | 新包再抄一份管家抢端口 | 旧管家已在 4096…4196 择口；写死 4097 会撞（`OpenCodeManagedServerTests.swift` 即用 4097 作第二空闲口） | 客户端不 spawn；沙盒用 **4296…4396** |
 | 11 | iOS 旧 OpenCode 自动批权限 | `ChatViewModel+CodexStreaming.swift:1969-1971`：`autoApproveBridgePermissionIfNeeded` **只对 `.openCode`** 自动 allow | 新 kind **禁止**进这个分支，否则审批 UI 永远不出现 |
 | 12 | `detectAgentStatus` 默认 Available | `agent_descriptor.go:228-229`：未列 id 一律 `AgentStatusAvailable`。新 id 若不加 case，空 URL 也会在 hello_ack 里显示可用 | 必须加 `case "opencode-web"` + `InstanceStatus`（dsh-web 先例 `:225-226`） |
@@ -107,6 +107,8 @@
 | todos | `GET /session/:id/todo`（`providers.go:125-153`） | 探测到再切 |
 | 压缩后消息 | （非占用） | `GET /api/session/:id/context` = 上次 compact 后仍在上下文的消息，**禁止当占用表** |
 
+**双面共存事实（评审 S3 活体）**：本机 1.18.18 上 `/api/health` 也返回 200（`{"healthy":true}`）、`/api/session` 返回 `{data:[…]}` 信封——即「有 `/api` 前缀」不能证 v2。**探针互斥依据**=checkout v2 无 `/global/health` 路由（health 走 /api）；第三步「数组 vs `{data}`」仍是最终形状判据，维持。
+
 启动探针（按序，记录用的是哪一代，写入 `InstanceStatus` 诊断）：
 
 1. `GET {base}/global/health`（可 401，再带 Basic Auth）
@@ -147,7 +149,7 @@
 
 ### 3.4 权限 / 问答字面量 ✅ / ⚠️
 
-- 权限 v2 官方值：`once` | `always` | `reject`。
+- 权限 v2 官方值：`once` | `always` | `reject`。1.18 二进制 strings 三字面量齐在（评审 S4 取证，置信增强）——但二进制字面量不能证明唯一枚举，实施仍按「先探」策略。
 - bridge `core.PermissionResult.Behavior` 只有 `"allow"` / `"deny"`（`core/interfaces.go:71-75`），**没有 always 字段**。iOS `approveAlways` 在 wire 层已折成 `behavior:"allow"`（dsh-web 设计 R3-2 同源）。
 - 一期映射（1.18 活体钉死前按此实施，探针结果写入诊断）：
 
@@ -179,11 +181,11 @@ wire 层映射为 `turn_error`。新包：**发送前 catalog 校验** + **零�
   "directory": "/Users/…/project",
   "time": { "created": 0, "updated": 0 },
   "model": { "id": "…", "providerID": "…" },
-  "tokens": { "input": 0, "output": 0, "reasoning": 0, "total": 0, "cache": { "read": 0, "write": 0 } }
+  "tokens": { "input": 0, "output": 0, "reasoning": 0, "cache": { "read": 0, "write": 0 } }
 }
 ```
 
-`time.updated` 是毫秒。`model` / `tokens` 经常全 0 或 null。
+`time.updated` 是毫秒。`model` / `tokens` 经常全 0 或 null。**两级 tokens 形状不同（评审 S1 活体修正）**：顶层**无 `total` 字段**（100 会话采样）；**message 级 `info.tokens` 才有 `total`**（活体 18457 实例）——占用公式读 message 级，样板勿混。
 
 `GET /session/:id/message` 裸数组元素（`providers.go:190-315`）：
 
@@ -365,7 +367,12 @@ StaticCapabilities:          []string{"external_turn_streaming"}
 | `shouldStartPassiveSubscription` `main.go:778` | `opencode-web` 在 URL 非空时才启动；空 URL 返回 false |
 | `RegisterOpenCodeProxy` `main.go:197` | **不**为 `opencode-web` 注册 |
 | `detectAgentStatus` `agent_descriptor.go:198` | `case "opencode-web": return detectLikeDSHWeb(agent)`（走 `instanceStatusProber`） |
-| `catalogCapabilityRequiredFor` `handlers.go:1030` | 加入 `"opencode-web"`（否则 list_models 失败被静默） |
+| `dispatchRPC` switchDir 特判 `handlers.go:1236`（评审 M2-1） | `Name()=="opencode" \|\| shouldSwitchWorkDirForMethod()` 特判**扩含 `opencode-web`**——`shouldSwitchWorkDirForMethod` 对 list/get/messages/projection 四读方法返回 false，旧 opencode 全靠 Name 特判切目录；不加入则读路径 `x-opencode-directory` 恒为启动值，坑 5 复发 |
+| `disablesRelayIdleTimeout` `handlers_relay.go:2421`（评审 M2-2） | **加入 case**（dsh-web 在列，注释即其真机故障：审批等待期无 text_delta，60s 空闲超时把已 surface 的权限卡收口）——opencode-web 一期必接审批，不加入必复发同型故障 |
+| `resubscribeObservationSessions` `handlers.go:385`（评审 M3） | **加入名单**（现为硬编码五 backend，dsh-web 也不在——既有疑似缺口另报 owner，不在本设计内修）——外部 turn 旁观的 relay 重连 re-attach 依赖此名单；进=与 codex/claude 同待遇，§6 加重连用例 |
+| `catalogCapabilityRequiredFor` `handlers.go:1030` | **不加入（评审 S7 修正）**：该门控的是 `list_sessions` 对**未协商 catalog_cursor_epoch_v2 的旧客户端**（显式 wire 错误，非静默、非 list_models）；dsh-web 不在列且工作正常——同判不加入，v1 客户端也可列。原行「list_models 失败被静默」描述失实，作废 |
+| `backend_capabilities.go:59` permission_resolve 排除名单 | **无需改动**（评审 S5）：名单只排除 opencode/codex，新 id 自动放行；`ToolAuthorizer` 类型断言即广告 |
+| `handlers_session_pin.go:255` directory-scope pin 查找 | **无需改动**（评审 S6）：新 backend 走 default any-scope——与旧 opencode 的 directory-scope 行为差异如实接受 |
 | `backendKindForAgent` `handlers.go:4230` | Name()=`opencode-web` 时 default 已够；仍建议显式 case |
 | `backendSupportsProjectionHydrate` `handlers_projection.go:339` | 加入 `"opencode-web"` |
 | `prepareProjectionHydrateSource` `handlers_projection.go:561` | `case "opencode-web": agentName = "opencode-web"` |
@@ -393,9 +400,12 @@ StaticCapabilities:          []string{"external_turn_streaming"}
 
 `MacBridgeBehaviorTests` 的 argv 测试加：drivers 含 `opencode-web`；有 URL 时两条 flag 都在。
 
-#### 4.1.7 iOS 穷举（编译器强制，漏一处编不过）
+#### 4.1.7 iOS 穷举与 if 比较型接线（评审 M1 修正：两类安全性不同）
 
-新增 `.openCodeWeb` 时打开这些文件逐处归组（`rg "case \\.openCode"` / `case \\.deepSeekWeb` 复核）。写本文时至少：
+- **switch 穷举类**：编译器强制，漏一处编不过；
+- **`if ==` / `guard ==` 比较类**：**编译器不报错，静默漏**——必须 `rg '\.openCode\b'`（非测试）人工全量核对。评审 M1 全量扫描实得 18 文件：12 个 switch 类入下表；**3 文件 ≥12 处 if 比较类为行为分支必补**（v2 漏列，「编译器强制」的安全声明对它们不成立）；5 文件默认值类无需改动。
+
+新增 `.openCodeWeb` 时打开这些文件逐处归组（`rg "case \\.openCode"` / `rg '\.openCode\b'` 复核）。写本文时至少：
 
 | 文件 | 行号附近 | 归组决策 |
 |---|---|---|
@@ -426,6 +436,19 @@ StaticCapabilities:          []string{"external_turn_streaming"}
 | `ModelManagementService.swift` | :286 | 与 openCode 同组 |
 | `BridgeTransportTests.swift` | fromWireKind / catalog / live stream | 加 `.openCodeWeb` 断言：`usesRootOnly=false`，`usesBackendLiveEventStream=true`，`fromWireKind("opencode-web")` |
 | `ChatViewModelSessionSyncV2Tests.swift` | | 加 openCodeWeb 为 true |
+
+**if 比较类行为分支（评审 M1 必补，3 文件 ≥12 处——不加入则对应行为静默缺失）：**
+
+| 文件:行 | 语义 | 归组决策 |
+|---|---|---|
+| `SessionsView.swift:916` | 缓存阶段 OpenCode bucket 种子 | 与 `.openCode` 同组加入 |
+| `SessionsView.swift:2117/2130/2134` | `fetchProjects`+去重+`sortedOpenCodeProjects` 项目合并 | **与 `.openCode` 同组加入**——不加则项目列表走通用路径（混入 manual 目录、无排序），击穿 `usesRootOnlySessionCatalog=false` 的「按目录对齐网页」承诺 |
+| `SessionsView.swift:2663/2685/2715` | bucket 懒加载与分页路径选择（:2715 `if kind == .openCode { return nil }`） | 与 `.openCode` 同组加入（目录分组深挖） |
+| `SidebarView.swift:91/281/388` | 项目分组侧栏显示条件 + 按目录 group 懒加载 | **与 `.openCode` 同组加入**——:91 `== .openCode && projectRoots` 为 false 则目录分组侧栏整体不显示 |
+| `ChatViewModel+SessionManagement.swift:1134/1140` | agent 过滤（OpenCode 只显 primary agents） | 与 `.openCode` 同组加入（与旧入口行为一致） |
+| `ChatViewModel+DirectoryPreferences.swift:107` 附近 | dsh-web 评审的通用路径点 | 实施时 `rg` 核对归组（评审 §5.3 提示项） |
+
+**默认值类（评审 M1 注记，无需改动）**：`Server.swift`/`ServerConfig.swift`/`AddServerView.swift`/`BridgeOfflineSnapshotAdapter`/`BridgeDiscoveryService` 的 `= .openCode` 默认值与 decode 兜底——新 backend 不依赖默认值。
 
 列表预设芯片：无（Harness 专用）。旧 `.openCode` 并存期保持。
 
@@ -542,7 +565,7 @@ InstanceStatus() (available bool, detail string)
 #### 4.3.5 provider / model / agent
 
 - `list_providers` / `list_models` ✅ `/provider`（及 v2 表）。窗口字段留下给占用。`catalogCapabilityRequiredFor` 必须列入。
-- `switch_model` / `set_provider` ✅ 会话级：v2 `POST …/model`；1.18 无独立口则记下 pending，下一次 prompt 带新 model，并在诊断注明。
+- `switch_model` / `set_provider` ✅ 会话级：v2 `POST …/model`；1.18 无独立口则记下 pending，下一次 prompt 带新 model，并在诊断注明。**UI 语义注记（评审 S8）**：1.18 的 pending 机制=「下次发送生效」，iOS 选择器的即时反馈与服务端延迟生效存在语义差——诊断与完成报告须写明，真机验收按「下一次回复用新模型」判定，避免争议。
 - `list_agents` ✅ `GET /agent`。空数组合法；HTTP 失败 → ⛔。
 - `set_agent_preset` ⛔（OpenCode agent ≠ dsh agentPreset）。
 - `list_permission_modes` / `set_permission_mode` ⛔（除非活体证明与 bridge 三档同构）。旧包的 default/yolo **不要**复制。
@@ -558,7 +581,7 @@ InstanceStatus() (available bool, detail string)
 
 #### 4.3.7 目录
 
-- `list_projects` ✅ `GET /project`（不是 `/api/location`）。
+- `list_projects` ✅ `GET /project`（不是 `/api/location`）。**字段映射（评审 S2 活体）**：元素是 `{id, worktree, vcs, time, sandboxes}`——目录建议取 **`worktree`** 字段（非 directory/path）。
 - `list_directory` ♻️ 一期沿用 bridge 通用 FS。若 1.18 有可靠 fs.list 再 ✅ 并补测。完成报告必须写明走的是哪条。
 - git 面（`get_git_context` / PR / `commit_and_push` / branch / worktree）⛔。
 
@@ -621,6 +644,10 @@ InstanceStatus() (available bool, detail string)
 | 权限折叠 | allow→once（或活体钉死的 1.18 值）；deny→reject |
 | import 守卫 | 新包 import 图不含 `agent/opencode`；源文件无 sqlite3/CLI 字符串 |
 | InstanceStatus | 空 URL → not_configured；探针失败 → not_configured |
+| relay 空闲超时（评审 M2-2） | `disablesRelayIdleTimeout("opencode-web")` 为 true（审批等待不被 60s 收口） |
+| observation re-attach（评审 M3） | `resubscribeObservationSessions` 名单含 opencode-web（重连后外部会话恢复） |
+| switchDir 特判（评审 M2-1） | 四读方法携带 directory 头（httptest 断言请求头） |
+| iOS if 比较类归组（评审 M1） | SessionsView/SidebarView/SessionManagement 的 `.openCodeWeb` 分支行为断言（项目合并、目录侧栏显示、agent 过滤） |
 
 **回归：**
 
@@ -659,9 +686,9 @@ InstanceStatus() (available bool, detail string)
 2. **列表/历史/占用**：§4.3.1–4.3.2 HTTP 映射 + 占用公式单测（tokens=0 回落、无窗口不谎报）。
 3. **SSE + SessionActivityProbing**：旁观、重连、零输出 turn_error、`/session/status` 三态、catalog 刷新信号。
 4. **发送 + 模型**：create/prompt 带 catalog 模型；停止按代；catalog 校验；不声明附件。
-5. **投影接线**：§4.3.2 表逐项 + iOS `sessionSyncV2ProjectionBackend`；测试风格对齐 `TestDSHWeb*`。
+5. **投影与 go-bridge 接线**：§4.3.2 表逐项 + §4.1.5 全表（含 M2-1 switchDir 特判、M2-2 relay 超时、M3 observation 名单）+ iOS `sessionSyncV2ProjectionBackend`；测试风格对齐 `TestDSHWeb*`。
 6. **审批**：SSE→permission→折叠 reply；registry 判据；先答者得。问答保持 ⛔。
-7. **iOS kind + protocol mirror**：§4.1.7 穷举 + BridgeModelsTests + SSV2 测试；Mac drivers 并存；**不**删旧 kind。
+7. **iOS kind + protocol mirror**：§4.1.7 两类接线（switch 穷举 + **if 比较型 3 文件 ≥12 处**，M1）+ BridgeModelsTests + SSV2 测试；Mac drivers 并存；**不**删旧 kind。
 8. **Release**：`/Applications` 覆盖安装；现网 URL 矩阵 §6 表 1–6；**不得**用沙盒绿宣称成熟。
 
 ---
@@ -686,3 +713,26 @@ InstanceStatus() (available bool, detail string)
 | 广告 `todos` 却不实现 TodoProvider | **否**，一期不广告 |
 
 给评审：先核 §2 坑表与 §3 双代表是否仍与本机 1.18 一致，再核 §4.1.5 / §4.1.7 接线点是否写全。不要在未读 1.18 活体的情况下把实施默认改回 checkout-only v2。
+
+---
+
+## 10. 评审采纳记录（v3 对照 `2026-08-18-opencode-web-backend-design-review.md`）
+
+评审结论：修改后通过（3 必改 + 9 建议；无阻断）。§3 全部关键断言经活体+源码双重证实（载波 HTTP+SSE、双代 API 表 1.18 列、占用公式与回落、权限 v2 字面量、十三坑事实引用）。必改全为接线表补行——dsh-web M4 病的变体，且因 if 比较型无编译器兜底而更隐蔽。
+
+| 项 | 处置 | 落点 |
+|---|---|---|
+| M1 iOS 表漏 if 比较型 ≥12 处/3 文件 | **采纳** | §4.1.7 重构为两类（switch 编译器强制 / **if 比较型须 rg 人工核对**）；补 SessionsView×7/SidebarView×3/SessionManagement×2 行为表（逐处归组=与 `.openCode` 同组）+ DirectoryPreferences 核对项 + 5 默认值文件注记；§6 加行为断言用例；§8-7 并入 |
+| M2-1 dispatchRPC switchDir 特判 | **采纳** | §4.1.5 加行（特判扩含 opencode-web——四读方法切目录）；坑 5 行同步闭环；§6 加请求头断言 |
+| M2-2 disablesRelayIdleTimeout | **采纳** | §4.1.5 加行（加入 case；注释即 dsh-web 真机同型故障）；§6 加用例 |
+| M3 resubscribeObservationSessions | **采纳（决策：进名单）** | §4.1.5 加行（与 codex/claude 同待遇——外部 turn 旁观的 relay 重连 re-attach 依赖）；dsh-web 不在名单的既有疑似缺口如实上报 owner、不在本设计内修；§6 加重连用例 |
+| S1 顶层 tokens 样板失真 | 采纳 | §3.6 修正（顶层无 `total`，message 级 `info.tokens` 才有；两级形状差异注明） |
+| S2 /project 字段是 worktree | 采纳 | §4.3.7 字段映射 |
+| S3 本机 1.18.18 双面共存 | 采纳 | §3.2 补注（`/api/*` 也 200；互斥依据=v2 无 `/global/health`；形状判据维持） |
+| S4 1.18 二进制三字面量 | 采纳 | §3.4 置信注记（先探策略不变） |
+| S5/S6 表外「无需改动」注记 | 采纳 | §4.1.5 两行注记（backend_capabilities 自动放行 / pin any-scope 差异如实） |
+| S7 catalogCapabilityRequiredFor 危害描述失实 | **采纳（修正）** | 亲核源码：门控的是 `list_sessions` 对未协商 v2 的旧客户端（显式 wire 错误，非静默、非 list_models）；dsh-web 不在列且正常——同判**不加入**，原行作废 |
+| S8 switch_model pending UI 语义 | 采纳 | §4.3.4 注记（下次发送生效；验收判定口径） |
+| S9 坑 9 引用补注 | 采纳 | §2.1 坑 9（main 已修复 deepSeekWeb；openCodeWeb 同样需加） |
+
+不采纳项：无。
