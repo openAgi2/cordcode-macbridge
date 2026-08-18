@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T03:05:34+0800",
+  "updated_at": "2026-08-19T03:07:01+0800",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -589,7 +589,7 @@
       "id": "s8-8-release-impl",
       "title": "§8-8 Release：Release 构建覆盖安装 /Applications + 重启",
       "description": "按 CLAUDE.md 硬约束：构建 Release → 覆盖安装到 /Applications/CordCodeLink.app → killall CordCodeLink → open 重启 → 核对 pgrep 只有 /Applications 路径、8777 监听者为内嵌 cordcode-bridge-runtime、go-bridge.log 无启动失败。严禁临时构建产物。核对 hello_ack.backends 含 opencode-web（日志或 Management API 只读探测）。",
-      "status": "pending",
+      "status": "done",
       "phase": "s8-8",
       "kind": "impl",
       "depends_on": [
@@ -600,13 +600,16 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
-        "attestation": null,
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "build-unsigned-release.sh BUILD SUCCEEDED（runtime commit 2d11152）；killall→rm→cp Release app→open 重启；pgrep 无 /Applications 外残留；8777 监听者为 /Applications/CordCodeLink.app 内嵌 cordcode-bridge-runtime（PID 76471）；runtime_ready drivers 含 opencode-web；Management API 只读核对：opencode-web descriptor available+reason=generation=1.18 url=http://127.0.0.1:4096（探针在现网 serve 上判代成功）、capabilities=[diagnostics,external_turn_streaming,model_switch,permission_resolve,session_history,session_state,supports_workspace_browse,workspace_diff]（无 todos/question_reply，符合 §4.1.4）；旧 opencode descriptor 并存原样（poll=True 等脏行为保持）。",
+        "artifacts": [
+          "build/unsigned-release/Build/Products/Release/CordCodeLink.app",
+          "dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip"
+        ],
+        "checked_at": "2026-08-19T03:07:01+0800"
       }
     },
     {
