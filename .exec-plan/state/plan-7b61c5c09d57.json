@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T02:23:17+0800",
+  "updated_at": "2026-08-19T02:29:49+0800",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -122,7 +122,7 @@
       "id": "s8-2-list-history-usage-impl",
       "title": "§8-2 列表/历史/占用：sessions.go/history.go/context_usage.go/projects.go/agents.go HTTP 映射",
       "description": "实现 §4.3.1/§4.3.2（列表/详情/历史）+ §3.3 占用公式 + §4.3.7 list_projects + §4.1.3 相关接口：(a) sessions.go——ListSessions=GET /session（1.18 裸数组；v2 解 {data}），映射 id/title→Summary/time.updated(毫秒)→ModifiedAt/directory；get_session=GET /session/:id；请求头 x-opencode-directory=当前 workDir（list）/该会话 directory（get）。子 agent/空会话未核实前不过滤，单测钉「未知字段忽略」。(b) history.go——GetRichSessionHistory/GetSessionHistory=GET /session/:id/message，映射复制 mapRichHistoryEntry 语义（agent/opencode/providers.go:190-315 对照复制，复制后归属新包）：info 下沉、parts[].type=text/reasoning/tool/file、tool state.status/output。(c) context_usage.go——§3.3 官方公式：从消息倒找最后一条 tokenTotal>0 的 assistant；total=input+output+reasoning+cache.read+cache.write；usage%=round(total/model.limit.context)；映射 core.ContextUsage 全字段（ContextWindow=/provider 里该模型 limit.context）；顶层 session.tokens=0 必回落 /message；无窗口返回 nil 禁止谎报 200k；模型 id 用 last assistant 的 providerID+modelID（info 上），不用 session 顶层 model；禁止把 v2 GET …/context 当占用。实现 GetSessionContextUsage（duck type）+ core.ContextUsageReporter（session 上）。(d) models.go——GET /provider（递归收集任意节点上同时有 id 与 limit.context 的对象，窗口 map key 同时记 id 与 providerID/id）→ list_providers/list_models/SetModel；1.18 无独立 switch 口则记 pending 下次 prompt 带新 model 并诊断注明。(e) projects.go——GET /project（不是 /api/location），元素 {id,worktree,vcs,time,sandboxes}，目录建议取 worktree 字段。(f) agents.go——GET /agent 裸数组 {name|id,mode,description,hidden,native}→list_agents；空数组合法。设计 §3.3/§3.6/§4.1.1/§4.3.1/§4.3.2/§4.3.5/§4.3.7。",
-      "status": "pending",
+      "status": "done",
       "phase": "s8-2",
       "kind": "impl",
       "depends_on": [
@@ -132,20 +132,28 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
-        "attestation": null,
+        "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "sessions.go（ListSessions=GET /session 裸数组+v2 {data} 解码、id/title→Summary/time.updated 毫秒→ModifiedAt/directory/model 映射、未知字段忽略、ModifiedAt desc+ID 稳定排序、请求头 x-opencode-directory=workDir；fetchSessionInfo=GET /session/:id）；history.go（GetRichSessionHistory/GetSessionHistory=GET message 路由、mapRichHistoryEntry 语义复制（info 下沉/text/reasoning/tool state.status/output/file）、limit 裁尾）；context_usage.go（§3.3 公式：倒找 last assistant tokenTotal>0、total=五项和、消息级 info.tokens 唯一来源、模型取 info.providerID+modelID、窗口 /provider 递归收集双键（id 与 providerID/id）5min TTL、无窗口→nil 禁谎报、缓存 remember/cached 供 session 面与失败回落）；models.go（fetchModelCatalog 递归收集模型形节点、qualified providerID/modelID 名、AvailableModels/SetModel/GetModel pending 语义、窗口图与占用共享、modelInCatalog 发送门）；projects.go（GET /project worktree 字段→Directory，v2 返回 not_supported 不用 /api/location）；agents.go（GET /agent 映射，空数组合法）。",
+        "artifacts": [
+          "agent/opencode-web/sessions.go",
+          "agent/opencode-web/history.go",
+          "agent/opencode-web/context_usage.go",
+          "agent/opencode-web/models.go",
+          "agent/opencode-web/projects.go",
+          "agent/opencode-web/agents.go",
+          "agent/opencode-web/opencodeweb.go"
+        ],
+        "checked_at": "2026-08-19T02:29:49+0800"
       }
     },
     {
       "id": "s8-2-list-history-usage-tests",
       "title": "§8-2 单测：列表映射/占用公式两红线/目录头断言",
       "description": "设计 §6 单测表相关行：列表映射——id/title/directory/updated；x-opencode-directory 头出现在 httptest 收到的请求（list 与 get 各断言）。占用 tokens=0——session.tokens 全 0 + message last assistant 有数→used/window 仍出。占用无窗口——last assistant 有 tokens 但 provider 无 limit→返回 nil 不谎报 200k。两级 tokens 形状（S1）：顶层无 total 字段、message 级 info.tokens 才有 total——夹具按 §3.6 样板。history 映射——text/reasoning/tool(parts[].type) 状态映射、未知字段忽略。provider 递归收集 + 窗口 key 双记（id 与 providerID/id）。project worktree 字段映射。1.18 裸数组 + 一组 v2 {data} 信封双覆盖。",
-      "status": "pending",
+      "status": "done",
       "phase": "s8-2",
       "kind": "tests",
       "depends_on": [
@@ -155,20 +163,22 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "test-execution",
-        "attestation": null,
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "11 个新用例（包内共 26 全过，go test ./agent/opencode-web/... -count=1 ok）：列表映射+目录头+认证头断言（探针形状请求区分）；v2 信封+稳定排序；history parts/steps/tool output 映射+目录头+limit 裁尾+HistoryProvider 折叠；占用——顶层 tokens 全 0 仍从消息级出数（used=18457 五项和）、无窗口→nil 不谎报、无 assistant tokens→nil；AvailableModels qualified 名+Desc+窗口图双键共享+SetModel/GetModel；project worktree 映射+无 worktree 行丢弃；agent 映射+空数组合法；v2 下 projects not_supported。",
+        "artifacts": [
+          "agent/opencode-web/sessions_test.go"
+        ],
+        "checked_at": "2026-08-19T02:29:49+0800"
       }
     },
     {
       "id": "s8-2-list-history-usage-regression",
       "title": "§8-2 回归：全量 go 测试 + 旧包零增量",
       "description": "go test ./agent/opencode-web/... ./go-bridge/... -count=1 零失败；git diff --stat agent/opencode 为空。",
-      "status": "pending",
+      "status": "done",
       "phase": "s8-2",
       "kind": "regression",
       "depends_on": [
@@ -178,13 +188,15 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "test-execution",
-        "attestation": null,
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "go test ./go-bridge/... 失败集与 §8-1 基线 diff 为空（零增量）；./agent/opencode/... ok 11.3s；git diff --stat agent/opencode 为空。",
+        "artifacts": [
+          "/tmp/mine-fails2.txt(对照记录)"
+        ],
+        "checked_at": "2026-08-19T02:29:49+0800"
       }
     },
     {

@@ -47,10 +47,22 @@ type Agent struct {
 	workDir  string
 	pinStore *pinstore.Store
 
+	// pendingModel is the recorded "providerID/modelID" selection that rides
+	// the next prompt (1.18 has no dedicated switch endpoint — design §4.3.5).
+	pendingModel string
+
 	// probeMu guards the last API-generation probe outcome. The probe is a
 	// read-only GET sequence; it never mutates server state.
 	probeMu sync.Mutex
 	probe   *probeResult
+
+	// usageMu guards the last computed context usage per session and the
+	// provider-catalog window map (design §3.3 — windows only ever come from
+	// the runtime catalog, never a hand-written list).
+	usageMu        sync.Mutex
+	usageBySession map[string]*core.ContextUsage
+	modelWindows   map[string]int
+	modelWindowsAt time.Time
 
 	bgCtx    context.Context
 	bgCancel context.CancelFunc
@@ -198,10 +210,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	return nil, fmt.Errorf("opencode-web: StartSession not implemented yet (skeleton; lands with the send phase)")
 }
 
-// ListSessions lands with §8-2 (GET /session). Until then it fails loudly.
-func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, error) {
-	return nil, fmt.Errorf("opencode-web: ListSessions not implemented yet (skeleton; lands with the list phase)")
-}
+// ListSessions lands with §8-2 (GET /session) — see sessions.go.
 
 // WorkDirSwitcher: create_session's directory parameter arrives via the
 // go-bridge switchDir dispatch, so the agent-level work dir is the default
