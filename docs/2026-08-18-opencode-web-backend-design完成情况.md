@@ -41,11 +41,12 @@
 | 双代探针结果进诊断 | 已落：`run_diagnostics` 的 `ocw_probe` 行携带 `generation=… url=…` |
 | M3 名单可测形态 | 取「可测常量」形态：`observationResubscribeBackends` 包级变量 + 成员断言（设计二选一） |
 
-## 四、设计执行中的三处活体修正（均有真 serve 证据）
+## 四、设计执行中的活体修正（均有真 serve 证据）
 
 1. **prompt_async 模型键为 `modelID`**（设计 §3.6 样板写 `id`）：沙盒活体 400 `Missing key at ["model"]["modelID"]` 钉死；**create 仍收 `id`**（两写路由键形不同）。已修 `session.go` 并把单测断言改为 modelID（commit `78b72f1`）。读取面（GET /session 等）确认为 `id`，不受影响。
 2. **工具事件 TurnID 归因**：旧 sse_subscriber 复制件中 tool 事件不带 TurnID，健康多步工具 turn 会被误判零输出。新包修复（`handleToolPart` 传 messageID 归因），有注释与单测背书。
 3. **tool 名/state 嵌套**：SSE 工具 part 的 `toolName`/`state` 可嵌套在 `tool` 对象内，与历史映射（活体形状）对齐后补 fallback。
+4. **【owner 报障 2026-08-19 修复】模型目录须按 `connected` 过滤 + 5MB 单飞缓存**（commit `b8030e3`）：owner 发现 iOS 模型列表混入数百个从未配置的 provider（zeldoc/siliconflow 等）且全模式卡顿。活体取证：1.18 `GET /provider` 是三段信封 `{all:[192 provider × 全量 models.dev = 6637 模型 ≈ 5MB], default, connected:[7 个已配置 provider = 65 模型]}`——官方网页选择框只渲染 `connected`。旧实现递归收集 `all` 全量且每次 list_models/发送门控/占用窗口都重拉 5MB。修复：typed 信封解析 + 只收 `connected`（空 connected=空目录，诚实）+ 60s 单飞缓存全消费方共享。沙盒复跑目录 6572→9；现网只读数学核对 iOS 将显示 65 个（7 provider）；Release 已重装（b8030e3），**owner iPhone 复测待回报**。
 
 ## 五、验收矩阵（owner 执行——§6 现网行 1–6）
 
