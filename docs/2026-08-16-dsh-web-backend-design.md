@@ -1,8 +1,8 @@
 # dsh-web Backend 设计（官方 Web API 转发 + bridge-v1 翻译）
 
 - 日期：2026-08-16（v2：一轮评审；v3：二轮 APPROVE+R2 尾项；v3.1：三轮 R3-1/R3-2 必改；v3.2：四轮 APPROVE 收口 + owner 三项指令落稿（iOS 改动量核验/新建 agent/dsh-web 目录/API 盲区兜底许可）+ S-1…S-3 收尾，见文末「评审采纳记录」）
-- 状态：**设计稿 v3.2，四轮评审通过（r4 APPROVE），待 owner 终审**（批准后实施）
-- 背景：SDK stdio 路线收口暂停（`docs/2026-08-16-dsh-session-store-bridge-design完成情况.md` 收口节）；owner 裁决并行新增本 backend，旧 `deepSeek` 保留不删。
+- 状态：**已实施并合入 main，owner 真机验收通过**（2026-08-18）。exec-plan 队列 `plan-a46e4391b790` 全部 done。产品显示名现为 DeepSeek Harness（wire kind 仍是 `deepseek-web`）。完成报告见 `docs/2026-08-18-dsh-web-backend-design完成情况.md`。
+- 背景：SDK stdio 路线收口暂停（`docs/2026-08-16-dsh-session-store-bridge-design完成情况.md` 收口节）；owner 裁决并行新增本 backend，旧 `deepSeek` 保留不删。后于产品入口退役，日常只用本路线。
 - 不变约束：CordCode 初衷（探测-复用-未启动、零迁移、双向接力、永不自托管）+ SSV2 十二条护栏。
 
 ## 1. 路线定义（一句话）
@@ -90,7 +90,7 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
 ### 4.1 模块与身份
 
 - 新 Go 包位于 **`agent/dsh-web/`**（**owner 指定目录名**，2026-08-16 四轮评审后指令；`agent/dsh` 一行不动，完全物理隔离。Go 目录名可含连字符而包标识符不能——包名 `dshweb`，import 路径 `…/agent/dsh-web`，注册名 `dsh-web`、wire kind `deepseek-web`，功能零影响，仅为本仓首个含连字符的 agent 目录；iOS `BackendKind.deepSeekWeb`，显示「DeepSeek Web」）；Mac App runtime 默认 drivers 增列（c71c692 先例）。
-- **实施基线与代码关系（评审 M3）**：实施在两仓 `dsh/driver` 分支进行（`agent/dsh` 在该分支树内；main 无 dsh 目录——`git ls-tree main agent/` 证实）。与旧件的关系：**不 import `agent/dsh` 包**；「复用 codec」的确切含义=把 §3.3 事件映射表（连同其 wire fixture 单测）**复制**进 `agent/dsh-web` 并归属其下——旧件未来退役不牵连新包。`dsh/driver` 合回 main 的时机是 owner 另行裁决的事项，**不作为本设计前置**。
+- **实施基线与代码关系（评审 M3）**：实施先在两仓 `dsh/web` 进行，**2026-08-17 已合入 main**（Mac `09d0089`，iOS `627c0e9`）。与旧件的关系：**不 import `agent/dsh` 包**；「复用 codec」的确切含义=把 §3.3 事件映射表（连同其 wire fixture 单测）**复制**进 `agent/dsh-web` 并归属其下——旧件已从产品入口退役，源码保留。
 - iOS 改动量（评审 S10，如实）：不止「增一个 case」——`.deepSeek` 在 iOS 非测试代码 **11 个文件**存在穷举 switch（BackendModels、ChatUIKitContainerView×5、ChatViewModel+Generation×2、SelectionSheets、CCCodeBridgeBackendClient、SessionLifecycleDiagnosticPhase、ModelManagementService、ChatViewModel、ChatViewModel+CodexStreaming、ChatViewModel+DirectoryPreferences、ServerViewModel），新增 case 时 Swift 穷举检查**编译期强制**全部暴露，逐处做归组决策（不会静默漏）；行为相关的两处需显式决策：DirectoryPreferences:107（list_projects 通用路径，dsh-web 走 workspace.list 映射）、ChatUIKitContainerView:4335（context entry 显隐与 `get_usage` ⛔ 的联动）。
 
 ### 4.2 web 服务生命周期（探测复用优先，managed 兜底）
@@ -221,9 +221,11 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
 
 - 硬边界：不 re-pin、不改 vendor（旧 backend 冻结依赖）；不写用户 `workspace.json`（归组由 web 自身 create/fork 收编）；`since` 续传 v1 未实现照官方语义重开流。
 - **Owner 兜底许可（2026-08-16 指令）**：若实施中遇到官方 API 实现不了的功能点，可**复制**（不 import）`agent/dsh` 的已有成果（store.go/zstd_reader.go 等只读解析）作兜底。红线不变：**只读**——绝不写 `~/.dsh/sessions` 与 workspace.json（坑 2 教训：写路径才有编码冲突风险，读侧双后缀本就兼容）。现状核查（四轮评审功能对照表）：一期全部 ✅ 项均有 API 路径，⛔ 项（delete/git/diff/todos/usage）官方无面且旧件同样没有——此许可为兜底阀门而非既定需求。
-- 旧 `deepSeek` 退役判据：owner 日常真机使用 dsh-web 全绿若干天后另行裁决（不在无证据时预判）；退役时同步清理 iOS `session_resume_not_supported` 文案映射。
+- 旧 `deepSeek` 退役：2026-08-17 产品入口已去掉；iOS 后端切换只留 DeepSeek Harness。旧模式下建的会话仍可在 Harness 打开。
 
-## 8. 实施拆分（批准后走 exec-plan）
+## 8. 实施拆分（已完成）
+
+exec-plan 状态：`.exec-plan/state/plan-a46e4391b790.json`。§8-1…§8-8 及后续 review-fix 均 done；owner 真机矩阵（流式、双向旁观、审批/问答、工作区归组、长会话投影、预设芯片）2026-08-16～18 回报通过。
 
 1. `agent/dsh-web` HTTP+WebSocket 客户端（三层信封）+ 探活 + 生命周期（探测/managed/json）；
 2. 映射表逐行（list/**create**/history/prompt/cancel/**rename**/models/providers/selectModel）+ 单测；
@@ -292,4 +294,4 @@ HostFrame：`host/session-added`（含 parent/origin/cwd）、`session-removed`�
 
 **Owner 三项指令落稿（同 commit）**：① iOS 改动量核验结论入 §4.1（纯枚举增量约 30-60 行 + 测试，权限/问答 UI 零改——两处本可能动 iOS 的点已在 wire 折叠与批聚合设计里消掉）；② 新建 `agent/dsh-web/` 目录（owner 指定），`agent/dsh` 一行不动、完全物理隔离，包名 `dshweb`/import `…/agent/dsh-web` 的连字符注记；③ §7 记录 API 盲区兜底许可（复制不 import 旧件只读成果；红线=绝不写 store/workspace.json；现状核查一期用不上，为兜底阀门）。
 
-**四轮累计账目**：1 阻断（B1）+ 6 必改（M1-M4、R3-1/2）+ 23 条建议（S1-S14、R2-1…6、S-1…3）全部处置；owner 已裁决事项（SDK 路线暂停保留、merge 时机）四轮未重开。实施期挂账：双实例 sandbox 实验、get_usage 二期投影核对。
+**四轮累计账目**：1 阻断（B1）+ 6 必改（M1-M4、R3-1/2）+ 23 条建议（S1-S14、R2-1…6、S-1…3）全部处置；owner 已裁决事项（SDK 路线暂停保留）四轮未重开，后已合 main。实施期挂账后续：双实例 sandbox 在 §8-1 测试已做；上下文占用/StatsLine 已按官方 `contextPressure`/`sessionStats`/`tokenUsage` 接到 iOS ⭕（超出原稿 `get_usage` ⛔ 的一期范围，属产品增量）。

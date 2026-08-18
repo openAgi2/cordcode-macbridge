@@ -36,7 +36,7 @@
 3. 空白但已有 sessionId 时（少见）：`set_agent_preset` → `agentPreset.select`。官方锁了就如实报错。
 4. 创作类 RPC 不接。
 5. capability：实现了 `ListAgents` 即可；iOS DeepSeek Harness 用空白页这一行，不恢复输入条 Agent 标签。
-6. 已开聊会话：官方 `session.list` / `get_session` 的 `agentPreset` 经 `AgentSessionInfo` → wire `agentPreset` 到 iPhone。标题旁显示「🧩 标准模式」芯片（和官方 web 标题左一致）；列表行也带同一枚芯片。只展示，不能在已开聊会话里改。
+6. 已开聊会话：官方 `session.list` / `get_session` 的 `agentPreset` 经 `AgentSessionInfo` → wire `agentPreset` 到 iPhone。消息页副标题行显示「🧩 标准模式」芯片（和官方 web 标题左一致）。会话列表 / 侧栏 / 预览卡不标预设。只展示，不能在已开聊会话里改。
 
 ## 不做什么
 
