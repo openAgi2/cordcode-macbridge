@@ -288,7 +288,7 @@ func TestUsageZeroTopLevelStillComputesFromMessages(t *testing.T) {
 	agent, _ := newDataAgent(t, map[string]string{
 		"/session/ses_x":         `{"id":"ses_x","tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}},"model":null}`,
 		"/session/ses_x/message": lastAssistantPayload(),
-		"/provider":              `{"zhipuai-coding-plan":{"npm":{"id":"zhipuai-coding-plan","models":{"glm-4.7":{"id":"glm-4.7","limit":{"context":128000}}}}}}`,
+		"/provider":              `{"all":[{"id":"zhipuai-coding-plan","models":{"glm-4.7":{"id":"glm-4.7","limit":{"context":128000}}}}],"connected":["zhipuai-coding-plan"]}`,
 	}, "/tmp/proj")
 
 	usage, err := agent.GetSessionContextUsage(context.Background(), "ses_x")
@@ -316,7 +316,7 @@ func TestUsageZeroTopLevelStillComputesFromMessages(t *testing.T) {
 func TestUsageNoWindowReturnsNilNotFabricated(t *testing.T) {
 	agent, _ := newDataAgent(t, map[string]string{
 		"/session/ses_x/message": lastAssistantPayload(),
-		"/provider":              `{"someprov":{"models":{"glm-4.7":{"id":"glm-4.7"}}}}`,
+		"/provider":              `{"all":[{"id":"someprov","models":{"glm-4.7":{"id":"glm-4.7"}}}],"connected":["someprov"]}`,
 	}, "/tmp/proj")
 	usage, err := agent.GetSessionContextUsage(context.Background(), "ses_x")
 	if err != nil {
@@ -330,7 +330,7 @@ func TestUsageNoWindowReturnsNilNotFabricated(t *testing.T) {
 func TestUsageNoAssistantTokensReturnsNil(t *testing.T) {
 	agent, _ := newDataAgent(t, map[string]string{
 		"/session/ses_x/message": `[{"info":{"role":"assistant"},"parts":[]}]`,
-		"/provider":              `{"p":{"models":{"m":{"id":"m","limit":{"context":1000}}}}}`,
+		"/provider":              `{"all":[{"id":"p","models":{"m":{"id":"m","limit":{"context":1000}}}}],"connected":["p"]}`,
 	}, "/tmp")
 	usage, err := agent.GetSessionContextUsage(context.Background(), "ses_x")
 	if err != nil || usage != nil {
@@ -340,9 +340,13 @@ func TestUsageNoAssistantTokensReturnsNil(t *testing.T) {
 
 func TestAvailableModelsQualifiedNamesAndWindows(t *testing.T) {
 	agent, _ := newDataAgent(t, map[string]string{
-		"/provider": `{"zhipuai-coding-plan":{"npm":{"id":"zhipuai-coding-plan","name":"Zhipu","models":{
+		"/provider": `{"all":[
+		{"id":"zhipuai-coding-plan","name":"Zhipu","models":{
 			"glm-4.7":{"id":"glm-4.7","name":"GLM 4.7","limit":{"context":128000}},
-			"glm-4.6":{"id":"glm-4.6","limit":{"context":64000}}}}}}`,
+			"glm-4.6":{"id":"glm-4.6","limit":{"context":64000}}}},
+		{"id":"never-configured","name":"Stranger","models":{
+			"stranger-model":{"id":"stranger-model","limit":{"context":999000}}}}
+	],"connected":["zhipuai-coding-plan"]}`,
 	}, "/tmp")
 	models := agent.AvailableModels(context.Background())
 	if len(models) != 2 {
@@ -350,6 +354,11 @@ func TestAvailableModelsQualifiedNamesAndWindows(t *testing.T) {
 	}
 	if models[0].Name != "zhipuai-coding-plan/glm-4.6" || models[1].Name != "zhipuai-coding-plan/glm-4.7" {
 		t.Fatalf("qualified names = %+v", models)
+	}
+	for _, m := range models {
+		if strings.Contains(m.Name, "never-configured") {
+			t.Fatalf("providers outside `connected` must not pollute the picker (live 2026-08-19: owner saw 6600+ unconfigured models), got %s", m.Name)
+		}
 	}
 	if models[1].Desc != "GLM 4.7" {
 		t.Fatalf("desc = %q", models[1].Desc)
@@ -362,10 +371,52 @@ func TestAvailableModelsQualifiedNamesAndWindows(t *testing.T) {
 	if windows["zhipuai-coding-plan/glm-4.7"] != 128000 || windows["glm-4.7"] != 128000 {
 		t.Fatalf("windows = %+v", windows)
 	}
+	if _, leaked := windows["stranger-model"]; leaked {
+		t.Fatalf("unconfigured provider windows must not leak into usage lookups: %+v", windows)
+	}
 	agent.SetModel("zhipuai-coding-plan/glm-4.7")
 	if agent.GetModel() != "zhipuai-coding-plan/glm-4.7" {
 		t.Fatalf("GetModel = %q", agent.GetModel())
 	}
+}
+
+// The 1.18 /provider JSON is ~5MB live — list_models, the send catalog gate,
+// and the usage-window lookup must share ONE fetch per TTL, not re-pull it
+// per call (owner-reported 2026-08-19 lag root cause).
+func TestProviderCatalogFetchedOncePerTTL(t *testing.T) {
+	agent, serve := newSendAgent(t, map[string]string{})
+	first := agent.AvailableModels(context.Background())
+	if len(first) == 0 {
+		t.Fatal("catalog must resolve")
+	}
+	// Send-gate lookup + a second picker open + a window lookup all within
+	// the TTL.
+	if _, ok := agent.modelInCatalog(context.Background(), mustClient(t, agent), "zhipuai-coding-plan", "glm-4.7"); !ok {
+		t.Fatal("catalog gate must hit the cached catalog")
+	}
+	if second := agent.AvailableModels(context.Background()); len(second) != len(first) {
+		t.Fatalf("cached catalog drifted: %d vs %d", len(second), len(first))
+	}
+	fetches := 0
+	serve.mu.Lock()
+	for _, req := range serve.requests {
+		if req.Path == "/provider" {
+			fetches++
+		}
+	}
+	serve.mu.Unlock()
+	if fetches != 1 {
+		t.Fatalf("provider JSON (~5MB live) must be fetched once per TTL, got %d", fetches)
+	}
+}
+
+func mustClient(t *testing.T, a *Agent) *Client {
+	t.Helper()
+	c, err := a.clientFor(context.Background())
+	if err != nil {
+		t.Fatalf("clientFor: %v", err)
+	}
+	return c
 }
 
 func TestListProjectsMapsWorktree(t *testing.T) {

@@ -2,7 +2,6 @@ package opencodeweb
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"time"
 
@@ -110,26 +109,26 @@ func usageFromMessages(ctx context.Context, a *Agent, c *Client, messages []map[
 	}
 }
 
-// modelWindowCacheTTL bounds the /provider window map freshness.
+// modelWindowCacheTTL bounds the /provider window map freshness (kept in sync
+// with the catalog cache; the raw JSON is ~5MB on 1.18).
 const modelWindowCacheTTL = 5 * time.Minute
 
 // contextWindowForModel resolves limit.context from the runtime provider
-// catalog (design §3.6: recursive collection of any node carrying both id and
-// limit.context; keys record both bare id and providerID/id).
+// catalog windows (connected providers; keys record both bare id and
+// providerID/id). Misses refresh through the shared catalog cache.
 func (a *Agent) contextWindowForModel(ctx context.Context, c *Client, providerID, modelID string) int {
 	if modelID == "" {
 		return 0
 	}
-	windows, ok := a.cachedModelWindows()
-	if !ok {
-		windows = a.refreshModelWindows(ctx, c)
-	}
-	if window := lookupModelWindow(windows, providerID, modelID); window > 0 {
+	if window := lookupModelWindow(a.snapshotModelWindows(), providerID, modelID); window > 0 {
 		return window
 	}
-	// One refresh per miss when the cache is stale.
-	windows = a.refreshModelWindows(ctx, c)
-	return lookupModelWindow(windows, providerID, modelID)
+	catalog, err := a.fetchModelCatalog(ctx, c)
+	if err != nil {
+		slog.Debug("opencode-web: provider fetch for windows failed", "error", err)
+		return 0
+	}
+	return lookupModelWindow(catalog.windows, providerID, modelID)
 }
 
 func lookupModelWindow(windows map[string]int, providerID, modelID string) int {
@@ -144,6 +143,16 @@ func lookupModelWindow(windows map[string]int, providerID, modelID string) int {
 	return windows[modelID]
 }
 
+func (a *Agent) snapshotModelWindows() map[string]int {
+	a.usageMu.Lock()
+	defer a.usageMu.Unlock()
+	if a.modelWindows == nil {
+		return nil
+	}
+	return a.modelWindows
+}
+
+// cachedModelWindows reports the window map when fresh enough for assertions.
 func (a *Agent) cachedModelWindows() (map[string]int, bool) {
 	a.usageMu.Lock()
 	defer a.usageMu.Unlock()
@@ -151,28 +160,6 @@ func (a *Agent) cachedModelWindows() (map[string]int, bool) {
 		return nil, false
 	}
 	return a.modelWindows, true
-}
-
-func (a *Agent) refreshModelWindows(ctx context.Context, c *Client) map[string]int {
-	raw, err := c.fetchJSON(ctx, c.apiPath("/provider"), a.GetWorkDir())
-	if err != nil {
-		slog.Debug("opencode-web: provider fetch for windows failed", "error", err)
-		return nil
-	}
-	var root any
-	if err := json.Unmarshal(raw, &root); err != nil {
-		return nil
-	}
-	found := map[string]int{}
-	collectModelWindows(root, found)
-	if len(found) == 0 {
-		return nil
-	}
-	a.usageMu.Lock()
-	a.modelWindows = found
-	a.modelWindowsAt = time.Now()
-	a.usageMu.Unlock()
-	return found
 }
 
 // collectModelWindows recursively records every node carrying both id and

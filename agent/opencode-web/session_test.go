@@ -10,7 +10,7 @@ import (
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
-const testProviderCatalog = `{"zhipuai-coding-plan":{"npm":{"id":"zhipuai-coding-plan","models":{"glm-4.7":{"id":"glm-4.7","limit":{"context":128000}}}}}}`
+const testProviderCatalog = `{"all":[{"id":"zhipuai-coding-plan","name":"Zhipu","models":{"glm-4.7":{"id":"glm-4.7","name":"GLM 4.7","limit":{"context":128000}},"glm-4.6":{"id":"glm-4.6","limit":{"context":64000}}}}],"default":{"zhipuai-coding-plan":"glm-4.7"},"connected":["zhipuai-coding-plan"]}`
 
 func countRequests(s *recordingServe, method, pathPrefix string) []recordedRequest {
 	s.mu.Lock()
@@ -91,7 +91,7 @@ func TestSendCarriesCatalogModelOnCreateAndPrompt(t *testing.T) {
 
 func TestSendCatalogGateIsZeroPOST(t *testing.T) {
 	agent, serve := newSendAgent(t, map[string]string{
-		"/provider": `{"other-provider":{"models":{"other-model":{"id":"other-model","limit":{"context":1000}}}}}`,
+		"/provider": `{"all":[{"id":"other-provider","models":{"other-model":{"id":"other-model","limit":{"context":1000}}}}],"connected":["other-provider"]}`,
 	})
 	agent.SetModel("zhipuai-coding-plan/glm-9.9")
 

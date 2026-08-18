@@ -299,7 +299,7 @@ func TestSSETodoUpdatedIgnoredInPhase1(t *testing.T) {
 func TestSSESessionUpdatedRecomputesUsageFromMessages(t *testing.T) {
 	agent, _ := newDataAgent(t, map[string]string{
 		"/session/ses_1/message": lastAssistantPayload(),
-		"/provider":              `{"zhipuai-coding-plan":{"models":{"glm-4.7":{"id":"glm-4.7","limit":{"context":128000}}}}}`,
+		"/provider":              `{"all":[{"id":"zhipuai-coding-plan","models":{"glm-4.7":{"id":"glm-4.7","limit":{"context":128000}}}}],"connected":["zhipuai-coding-plan"]}`,
 	}, "/tmp")
 	sub := newDrivenSubscriber(t, agent)
 

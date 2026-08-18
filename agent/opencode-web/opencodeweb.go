@@ -73,6 +73,11 @@ type Agent struct {
 	catalogMu      sync.Mutex
 	catalogRefresh chan struct{}
 
+	// catalogEntryMu guards the parsed provider catalog (~5MB raw JSON on
+	// 1.18 — one fetch per TTL shared by list_models / send gate / windows).
+	catalogEntryMu sync.Mutex
+	catalogEntry   *catalogCacheEntry
+
 	bgCtx    context.Context
 	bgCancel context.CancelFunc
 
