@@ -471,9 +471,24 @@ func mapSession(s map[string]interface{}) map[string]interface{} {
 	}
 	effectiveProviderID, _ := s["effectiveProviderId"].(string)
 	if effectiveProviderID == "" {
-		effectiveProviderID, _ = s["effective_provider_id"].(string)
+		effectiveProviderID, _ := s["effective_provider_id"].(string)
 		if effectiveProviderID == "" {
 			effectiveProviderID, _ = s["providerID"].(string)
+		}
+	}
+	// Upstream truth (live-captured 2026-08-18, managed server GET /session):
+	// the bound model rides as the NESTED `model` object — OpenCode binds the
+	// model per session at create time (POST /session {model:{id,providerID}};
+	// think.md 2026-07-06: prompt-body model fields are ignored) and sessions
+	// without a bound model carry no `model` key at all, which keeps the
+	// no-fabrication rule for free. The nested object wins over the flat
+	// aliases above.
+	if m, ok := s["model"].(map[string]interface{}); ok {
+		if mid, _ := m["id"].(string); mid != "" {
+			effectiveModelID = mid
+		}
+		if pid, _ := m["providerID"].(string); pid != "" {
+			effectiveProviderID = pid
 		}
 	}
 
