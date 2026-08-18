@@ -107,6 +107,8 @@ resolve_permission
 list_sessions
 list_projects
 fetch_todos
+background_tasks.list
+background_tasks.get
 get_workspace_diff
 get_turn_diff
 get_full_thread_diff
@@ -946,6 +948,53 @@ Request:
 Response shape is identical to `get_turn_diff` (`files`, `additions`, `deletions`,
 `truncated`, `checkpointRef`, `fromRef`), with `checkpointRef` = the latest turn's ref and
 `fromRef` = the earliest turn's ref (or empty when the empty-tree baseline is used).
+
+### Capability: `background_tasks` / `background_task_details`（Phase 4 只读任务中心）
+
+后台任务 = Mac 端 agent 已启动、拥有独立任务身份、可脱离当前 timeline 继续执行并可集中查询的 agent task（roadmap §3.1）。它不是 todo、不是普通 tool row、也不是 root session 列表的一员（subagent 子 session 永远不回填 root 列表）。
+
+能力与来源（单一派生点，护栏 C1）：
+
+| Capability | 服务方 | 数据源 |
+| --- | --- | --- |
+| `background_tasks` | `dsh-web`（`core.BackgroundTaskProvider`）；`claudecode`（go-bridge sidechain registry） | dsh：官方 `session.list` 子任务行（origin=subagent + parentSessionId）；claude：`subagents/agent-*.meta.json` + `.jsonl`（与 B4 hydrate 同一文件、同一 status 派生函数） |
+| `background_task_details` | 同上（detail 面） | claude detail = meta description + 嵌套子任务；dsh detail = 列表行本身（官方列表面无独立 instruction 字段，不造数） |
+
+未声明能力的 backend 完全无任务面：iOS 不显示任何任务入口（无能力 = 无入口，不显示空列表假装支持）。
+
+Claude 状态派生：`running/failed/completed` 由 B4 同款 reducer walk 产出（`buildSidechainAgentBlocks`，同一函数）；`cancelled` 是 summary 层信号，来自 meta 的 `stoppedByUser`（真实样本 2/159；B4 投影无 cancelled 概念，互不矛盾）。dsh 状态只有 `running/completed` 两态——官方列表行无失败信号，不发明。
+
+### RPC: `background_tasks.list`
+
+params: `{}`（跨 session 全量；排序 updatedAt 降序，服务端计算）
+
+```ts
+{ tasks: BackgroundTaskSummary[] }
+```
+
+`BackgroundTaskSummary`（未知字段整体 OMIT，客户端不得把缺失当 0 渲染）：
+
+```ts
+{
+  taskId: string,            // 稳定任务 ID（claude sidechain agent id / dsh 子 session id）
+  backendId: string,
+  rootSessionId: string,     // 所属父 session
+  parentTaskId?: string,     // 嵌套父任务（claude depth≥2）
+  agentId?: string,
+  title: string,             // 真实指令/标题文本
+  agentName?: string,        // general-purpose 等
+  status: "queued" | "running" | "completed" | "failed" | "cancelled",
+  startedAt?: string, finishedAt?: string, durationMillis?: number,  // 后端计算
+  tokenCount?: number, toolUseCount?: number,                        // 后端真实统计
+  error?: string,
+  transcriptAvailable: boolean,
+  updatedAt: string
+}
+```
+
+### RPC: `background_tasks.get`
+
+params: `{ taskId }` → `{ task, instruction, nestedTasks: BackgroundTaskSummary[], capabilities: { cancel: boolean, retry: boolean } }`。Phase 4 只读：`capabilities` 恒为 false（cancel/retry 属 Phase 5 capability-gated 操作）。错误码：`task_not_found`。
 
 ### Event: `sessions_changed`
 
