@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T02:42:31+0800",
+  "updated_at": "2026-08-19T02:48:29+0800",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -279,7 +279,7 @@
       "id": "s8-4-send-models-impl",
       "title": "§8-4 发送 + 模型：session.go create/prompt 带 catalog 模型、停止按代、catalog 校验、附件拒绝",
       "description": "实现 StartSession/AgentSession/Send/CancelTurn（core.TurnCanceler session 上）：create=POST /session {directory,model:{id,providerID}}（directory 同时作 x-opencode-directory 头）；续聊 prompt_async（1.18）/prompt（v2）**必带 catalog 内 model**；成功=204 或 200，4xx/5xx 原文进 send 错误。catalog 校验：模型不在 /provider→send 错误、零 POST。非空 images/files→返回错误不静默丢。停止按代 abort/interrupt；Close 只拆 SSE 绑定不杀 serve。resume_session=对已有 id StartSession+订 SSE。Send 前 catalog 校验 + 零输出 idle turn_error 两条都要。不声明 AttachmentSupporter。设计 §4.3.4。",
-      "status": "pending",
+      "status": "done",
       "phase": "s8-4",
       "kind": "impl",
       "depends_on": [
@@ -289,20 +289,24 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
-        "attestation": null,
+        "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "session.go：StartSession（resume 绑定已知 id 并采纳 serve 会话模型作回退真值；新会话首 Send 懒创建；绑定专用过滤 SSE）；Send（附件非空→响亮错误不静默丢；resolveSendModel=pending(SetModel)→StartSession 采纳值→诚报 no model selected 零 POST；modelInCatalog 门控不过→错误零 POST；create POST /session 带 directory+model+头；1.18 prompt_async 带 model{id,providerID}+parts；v2 先 POST …/model 再 prompt{prompt}；4xx/5xx 原文透传）；CancelTurn 按代 abort/interrupt（TurnCanceler）；Close 只拆 SSE 不 abort 不杀 serve；GetContextUsage 缓存面（ContextUsageReporter）；问答 core.ErrNotSupported。permissions.go 一并落地（session 接口依赖）：§3.4 折叠 1.18 allow→once 4xx 回退 allow/deny→reject 回退 deny、v2 once/reject、探针结果 noteFoldAttempt 进诊断 foldDiagnostics、SessionPermissionResponder 旁观面。",
+        "artifacts": [
+          "agent/opencode-web/session.go",
+          "agent/opencode-web/permissions.go",
+          "agent/opencode-web/opencodeweb.go"
+        ],
+        "checked_at": "2026-08-19T02:48:29+0800"
       }
     },
     {
       "id": "s8-4-send-models-tests",
       "title": "§8-4 单测：发送带 model/catalog 拦截零 POST/附件拒绝/停止按代",
       "description": "设计 §6 单测表：发送带 model——POST body 含 model.id+providerID（create 与续聊都断言）。catalog 拦截——模型不在 /provider→错误、零 prompt POST（httptest 计数器断言）。附件——非空 images/files→Send 返回错误。停止——1.18 POST abort、v2 POST interrupt。create 响应 {id:ses_…} 解析。4xx 原文透传进 send 错误不折叠。",
-      "status": "pending",
+      "status": "done",
       "phase": "s8-4",
       "kind": "tests",
       "depends_on": [
@@ -312,20 +316,23 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "test-execution",
-        "attestation": null,
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "10 个新用例（包内共 46 全过）：create+prompt 均带 catalog model{id,providerID} 且 directory 头/体齐；catalog 拦截零 POST；无模型诚实错误零 POST；附件拒绝零 POST；4xx 原文进 send 错误（HTTP 400+body）；resume 采纳 serve 会话模型+会话自身 directory 头+零 create；1.18 abort 停止且 Close 不 abort；v2 interrupt 停止；问答 ErrNotSupported。",
+        "artifacts": [
+          "agent/opencode-web/session_test.go",
+          "agent/opencode-web/sessions_test.go(方法级路由扩展)"
+        ],
+        "checked_at": "2026-08-19T02:48:29+0800"
       }
     },
     {
       "id": "s8-4-send-models-regression",
       "title": "§8-4 回归：全量 go 测试 + 旧包零增量",
       "description": "go test ./agent/opencode-web/... ./go-bridge/... -count=1 零失败；git diff --stat agent/opencode 为空。",
-      "status": "pending",
+      "status": "done",
       "phase": "s8-4",
       "kind": "regression",
       "depends_on": [
@@ -335,13 +342,13 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "test-execution",
-        "attestation": null,
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
+        "summary": "go vet 干净；go test ./go-bridge/... 失败集仅含先存 flaky（多轮两树取证已定性）；git diff --stat agent/opencode 为空。",
         "artifacts": [],
-        "checked_at": null
+        "checked_at": "2026-08-19T02:48:29+0800"
       }
     },
     {

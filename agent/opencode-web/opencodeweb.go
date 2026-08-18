@@ -209,11 +209,7 @@ func (a *Agent) clientFor(ctx context.Context) (*Client, error) {
 	return c, nil
 }
 
-// StartSession lands with §8-4 (create/resume + Send). Until then it fails
-// loudly rather than pretending a session exists.
-func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentSession, error) {
-	return nil, fmt.Errorf("opencode-web: StartSession not implemented yet (skeleton; lands with the send phase)")
-}
+// StartSession lands with §8-4 — see session.go.
 
 // ListSessions lands with §8-2 (GET /session) — see sessions.go.
 

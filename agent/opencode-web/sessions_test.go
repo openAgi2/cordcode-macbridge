@@ -16,11 +16,15 @@ import (
 
 // recordingServe is the data-plane fake: Basic Auth on everything (managed
 // serve style), canned JSON per path, and per-request recording of the
-// x-opencode-directory header for the M2-1/坑 5 assertions.
+// x-opencode-directory header + body for the M2-1/坑 5/send assertions.
+// methodResponses ("POST /session" → body) override responses for one method,
+// so GET and POST on the same route can answer different shapes like the real
+// serve.
 type recordingServe struct {
-	mu        sync.Mutex
-	responses map[string]string
-	requests  []recordedRequest
+	mu              sync.Mutex
+	responses       map[string]string
+	methodResponses map[string]string
+	requests        []recordedRequest
 }
 
 type recordedRequest struct {
@@ -28,24 +32,46 @@ type recordedRequest struct {
 	Path      string
 	Directory string
 	Authed    bool
+	Body      string
 }
 
 func (s *recordingServe) handler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		bodyBytes, _ := io.ReadAll(r.Body)
 		s.mu.Lock()
-		defer s.mu.Unlock()
 		_, pass, ok := r.BasicAuth()
 		s.requests = append(s.requests, recordedRequest{
 			Method:    r.Method,
 			Path:      r.URL.Path,
 			Directory: r.Header.Get("x-opencode-directory"),
 			Authed:    ok && pass == "pw",
+			Body:      string(bodyBytes),
 		})
-		if !ok || pass != "pw" {
+		authed := ok && pass == "pw"
+		// SSE endpoints: headers + block until the client disconnects.
+		if r.URL.Path == "/global/event" || r.URL.Path == "/api/event" {
+			if !authed {
+				s.mu.Unlock()
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			s.mu.Unlock()
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+			return
+		}
+		s.mu.Unlock()
+		if !authed {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
+		s.mu.Lock()
 		body, found := s.responses[r.URL.Path]
+		if mBody, mFound := s.methodResponses[r.Method+" "+r.URL.Path]; mFound {
+			body, found = mBody, true
+		}
+		s.mu.Unlock()
 		if !found {
 			w.WriteHeader(http.StatusNotFound)
 			return
