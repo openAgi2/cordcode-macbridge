@@ -78,8 +78,8 @@ func TestSendCarriesCatalogModelOnCreateAndPrompt(t *testing.T) {
 	if prompt.Path == "" {
 		t.Fatal("prompt POST missing")
 	}
-	if !strings.Contains(prompt.Body, `"model"`) || !strings.Contains(prompt.Body, `"id":"glm-4.7"`) || !strings.Contains(prompt.Body, `"providerID":"zhipuai-coding-plan"`) {
-		t.Fatalf("prompt body must carry model {id, providerID}, got %s", prompt.Body)
+	if !strings.Contains(prompt.Body, `"model"`) || !strings.Contains(prompt.Body, `"modelID":"glm-4.7"`) || !strings.Contains(prompt.Body, `"providerID":"zhipuai-coding-plan"`) {
+		t.Fatalf("prompt body must carry model {modelID, providerID} (live-pinned 1.18), got %s", prompt.Body)
 	}
 	if !strings.Contains(prompt.Body, `"parts"`) || !strings.Contains(prompt.Body, "hello") {
 		t.Fatalf("prompt body must carry text parts, got %s", prompt.Body)
@@ -232,8 +232,8 @@ func TestResumeAdoptsServeSessionModel(t *testing.T) {
 		t.Fatalf("Send with adopted model: %v", err)
 	}
 	prompts := countRequests(serve, "POST", "/session/ses_x/prompt_async")
-	if len(prompts) != 1 || !strings.Contains(prompts[0].Body, `"id":"glm-4.7"`) {
-		t.Fatalf("resume send must carry the serve session model, got %+v", prompts)
+	if len(prompts) != 1 || !strings.Contains(prompts[0].Body, `"modelID":"glm-4.7"`) {
+		t.Fatalf("resume send must carry the serve session model (modelID key), got %+v", prompts)
 	}
 	if prompts[0].Directory != "/tmp/proj" {
 		t.Fatalf("resume send must use the session's own directory header, got %q", prompts[0].Directory)

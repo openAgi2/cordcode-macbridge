@@ -150,9 +150,12 @@ func (s *serverSession) Send(prompt string, images []core.ImageAttachment, files
 		return fmt.Errorf("opencode-web prompt HTTP %d: %s", code, truncateForError(string(raw)))
 	}
 
+	// Live-pinned on 1.18.18 (sandbox E2E 2026-08-19): prompt_async's model
+	// object uses `modelID` (400 "Missing key at [model][modelID]" with `id`),
+	// while POST /session create uses `id` — the two write routes differ.
 	body := map[string]any{
 		"parts": []map[string]any{{"type": "text", "text": prompt}},
-		"model": map[string]any{"id": resolved.ID, "providerID": resolved.ProviderID},
+		"model": map[string]any{"modelID": resolved.ID, "providerID": resolved.ProviderID},
 	}
 	code, raw, err := s.client.doRequest(s.ctx, http.MethodPost, s.client.endpoint("/session/"+chatID+"/prompt_async"), body, s.directoryHeader(), true)
 	if err != nil {
