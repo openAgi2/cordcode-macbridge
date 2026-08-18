@@ -109,6 +109,7 @@ list_projects
 fetch_todos
 background_tasks.list
 background_tasks.get
+background_tasks.cancel
 get_workspace_diff
 get_turn_diff
 get_full_thread_diff
@@ -994,7 +995,15 @@ params: `{}`（跨 session 全量；排序 updatedAt 降序，服务端计算）
 
 ### RPC: `background_tasks.get`
 
-params: `{ taskId }` → `{ task, instruction, nestedTasks: BackgroundTaskSummary[], capabilities: { cancel: boolean, retry: boolean } }`。Phase 4 只读：`capabilities` 恒为 false（cancel/retry 属 Phase 5 capability-gated 操作）。错误码：`task_not_found`。
+params: `{ taskId }` → `{ task, instruction, nestedTasks: BackgroundTaskSummary[], capabilities: { cancel: boolean, retry: boolean } }`。`capabilities` 反映真实可操作性：dsh-web 运行中任务 `cancel=true`（官方 `session.cancel` 面）；终态任务与无取消面的 backend 恒 false。`retry` 当前所有 backend 均 false（无真实重试面，不假装）。错误码：`task_not_found`。
+
+### RPC: `background_tasks.cancel`（Phase 5，capability `background_task_cancel`）
+
+params: `{ taskId }` → `{ cancelled: true }`。仅在 backend 声明 `background_task_cancel`（实现取消面：dsh-web 官方 `session.cancel`）时可调；未声明 backend 诚实返回 `not_supported`（Claude sidechain 无 bridge 侧取消路径，不提供假取消）。`clear`/`retry` 暂无协议面：无真实数据源支撑，待 runtime 提供真实表面再增补（roadmap Phase D 逐 backend 开放原则）。
+
+### Event: `background_tasks_changed`（Phase 5）
+
+backend 级 control-plane invalidate 通知（与 `sessions_changed` 同形：带 backendId、非 session-scoped、broadcast）。触发源：session catalog 指纹变化（DSH 事件驱动 refresh 信号 / 各 backend discovery 周期）——同一变化同时意味着任务面可能变化。事件**不携带任务数据**：客户端收到后重新 `background_tasks.list` 拿权威真值（事件不做第二真值）。Claude 的 mid-run 子代理 live 推送仍属未来增强（B4 hydrate-only 现状，roadmap §2.1）；Claude 任务列表新鲜度由同一 discovery 指纹机制覆盖。
 
 ### Event: `sessions_changed`
 
