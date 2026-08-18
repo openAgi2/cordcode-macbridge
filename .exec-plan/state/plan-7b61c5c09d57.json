@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T02:55:45+0800",
+  "updated_at": "2026-08-19T03:05:34+0800",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -508,7 +508,7 @@
       "id": "s8-7-ios-kind-protocol-impl",
       "title": "§8-7 iOS kind + protocol mirror：§4.1.7 两类接线（switch 穷举 + if 比较型 3 文件 ≥12 处）+ Mac drivers",
       "description": "iOS 仓 /Users/jacklee/Projects/cordcode-ios 分支 opencode/web（先 git checkout opencode/web）。switch 穷举类（§4.1.7 表逐行）：BackendModels.swift fromWireKind（\"opencode-web\"/\"openCodeWeb\"→.openCodeWeb；\"opencode_web\"→nil）/isDeprecated=false/prefersComposerPermissionModes=false/displayName=\"OpenCode Web\"/iconName=\"opencode_logo\"/isCustomAsset 与 .openCode 同组 true/connectionSetupHelpText 新文案/inputBarModelTitle=\"Model\"/emptyModel* 与 openCode 同组/historyOnlySessionHelperText=nil/usesBackendLiveEventStream=true/usesRootOnlySessionCatalog=false；ChatViewModel.swift sessionSyncV2ProjectionBackend 加 .openCodeWeb（若 §8-5 未做）；ChatViewModel+Generation.swift :2460/:2490 与 .openCode 同组（expectedProviderIDs=nil，effort=nil）；ChatViewModel+CodexStreaming.swift fallback name 新 case 返回 \"opencode-web\" 或 \"assistant\"；autoApproveBridgePermissionIfNeeded **禁止**把 .openCodeWeb 算进去（坑 11）；ChatUIKitContainerView.swift agent title=\"OpenCode Web\"/model 校验与 openCode 同组 break/timeline fallback/输入条目录隐藏；SelectionSheets.swift :214「OpenCode Web：工具审批经 Bridge 应答」；ServerViewModel.swift :990 超时文案；SessionLifecycleDiagnosticPhase.swift :70；CCCodeBridgeBackendClient.swift :25 默认 backend id \"opencode-web\"；ModelManagementService.swift :286 与 openCode 同组。if 比较型 3 文件 ≥12 处（M1，rg 人工核对）：SessionsView.swift :916/:2117/:2130/:2134/:2663/:2685/:2715 与 .openCode 同组；SidebarView.swift :91/:281/:388 与 .openCode 同组；ChatViewModel+SessionManagement.swift :1134/:1140 agent 过滤与 .openCode 同组；ChatViewModel+DirectoryPreferences.swift :107 附近 rg 核对归组。默认值类 5 文件不改。Mac 侧：RuntimeConfig.drivers 追加 opencode-web；processArguments URL 非空时追加 -opencode-web-url（与 -opencode-url 同值）；processEnvironment OPENCODE_WEB_SERVER_USERNAME/PASSWORD（或复用 OPENCODE_* 但 flag 分开）；OpenCodeManagedServer 一行不改。协议 pack：docs/protocol/bridge-v1.md 加 Backend: opencode-web 节（Mac 真值+iOS mirror 双仓各自 commit）；schema/bridge-v1.types.ts kind 联合类型追加。设计 §4.1.6/§4.1.7/§4.1.8。",
-      "status": "pending",
+      "status": "done",
       "phase": "s8-7",
       "kind": "impl",
       "depends_on": [
@@ -518,20 +518,28 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
-        "attestation": null,
+        "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "iOS（分支 opencode/web，commit 6cd4594）：BackendKind.openCodeWeb 枚举+fromWireKind（opencode-web/openCodeWeb→case；opencode_web→nil）；switch 穷举全量归组（BackendModels 12 位：displayName OpenCode Web/iconName opencode_logo/isCustomAsset true/connectionSetupHelpText 新文案/inputBarModelTitle Model/emptyModel* 同组/historyOnly=nil/usesBackendLiveEventStream=true/usesRootOnlySessionCatalog=false 与 openCode 同组/isDeprecated=false/prefersComposer=false；ChatViewModel SSV2 投影族+Generation 两处 expectedProviderIDs=nil effort=nil；CodexStreaming backendLiveAgentName=assistant 且 autoApproveBridgePermissionIfNeeded 保持只认 .openCode（坑 11 显式注释）；ChatUIKitContainerView agent title/model 校验 break/timeline fallback 多 agent 才显示/输入条目录隐藏；SelectionSheets 权限文案；ServerViewModel 超时文案；SessionLifecycleDiagnosticPhase 全字段；CCCodeBridgeBackendClient normalized 兜底 opencode-web；ModelManagementService 同组）。if 比较型 13 处全改（SessionsView 7/SidebarView 3/SessionManagement 2/ChatUIKitContainerView 目录 1，与 .openCode 同组）；DirectoryPreferences rg 核对无 openCode 位（如实记录）；默认值类 5 文件不改。Mac（commit c304756）：drivers 追加 opencode-web、URL 非空时 -opencode-web-url 同值、env OPENCODE_WEB_SERVER_USERNAME/PASSWORD 分键、OpenCodeManagedServer 零改动。协议 pack：canonical de71b94 + iOS mirror 6624f36 双落盘 commit（docs 立即 commit 规则），bridge-v1.md 新增 opencode-web backend 节 + types.ts kind 联合。",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Backend/BackendModels.swift",
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel.swift",
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Views/Session/SessionsView.swift",
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Views/Components/SidebarView.swift",
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel+SessionManagement.swift",
+          "MacBridge/MacBridge/Services/RuntimeManager.swift",
+          "docs/protocol/bridge-v1.md"
+        ],
+        "checked_at": "2026-08-19T03:05:34+0800"
       }
     },
     {
       "id": "s8-7-ios-kind-protocol-tests",
       "title": "§8-7 单测：BridgeModelsTests + SSV2 测试 + MacBridgeBehaviorTests argv",
       "description": "iOS（-only-testing:CCCodeTests）：BridgeTransportTests 加 .openCodeWeb 断言——usesRootOnly=false、usesBackendLiveEventStream=true、fromWireKind(\"opencode-web\")==.openCodeWeb、fromWireKind(\"opencode_web\")==nil；ChatViewModelSessionSyncV2Tests 加 openCodeWeb 为 true。Mac：MacBridgeBehaviorTests argv 测试——drivers 含 opencode-web、有 URL 时 -opencode-web-url 与 -opencode-url 都在。iOS if 比较类归组行为断言（设计 §6）：SessionsView/SidebarView/SessionManagement 的 .openCodeWeb 分支（项目合并、目录侧栏显示、agent 过滤）——能写成单测的写成单测，不能的以 rg 全量核对记录进 artifacts。",
-      "status": "pending",
+      "status": "done",
       "phase": "s8-7",
       "kind": "tests",
       "depends_on": [
@@ -541,20 +549,24 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "test-execution",
-        "attestation": null,
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "iOS -only-testing:CCCodeTests：BridgeModelsTests 50 全过（新增 fromWireKind 三态+semantics 全断言）、ChatViewModelSessionSyncV2Tests 55 全过（新增 openCodeWeb 为 true——坑 9）。Mac -only-testing:CordCodeLinkTests/MacBridgeBehaviorTests 20 全过（drivers 含 opencode-web+双 URL flag+空 URL 均无+WEB env 分键）。iOS app build 0 error（编译器穷举强制全过=switch 类无漏）。",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/BridgeTransportTests.swift",
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/ChatViewModelSessionSyncV2Tests.swift",
+          "MacBridge/MacBridgeTests/MacBridgeBehaviorTests.swift"
+        ],
+        "checked_at": "2026-08-19T03:05:34+0800"
       }
     },
     {
       "id": "s8-7-ios-kind-protocol-regression",
       "title": "§8-7 回归：iOS 定向 build+unit test、Mac 定向 build、真机安装、协议 mirror 双 commit",
       "description": "iOS：定向 build（iPhone 17 Pro Max simulator）+ -only-testing:CCCodeTests 定向（BridgeModelsTests 相关类+ChatViewModelSessionSyncV2Tests）；有 connected 真机则 scripts/run.sh device 安装（不授权 UI 操作）。Mac：xcodebuild Debug build 验证编译。协议 pack canonical（MacBridge）与 mirror（iOS）各自落盘 commit（docs/ 修改立即 commit 硬规则）。旧 .openCode 入口与 kind 全部保留。",
-      "status": "pending",
+      "status": "done",
       "phase": "s8-7",
       "kind": "regression",
       "depends_on": [
@@ -564,13 +576,13 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "test-execution",
-        "attestation": null,
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
+        "summary": "iOS 定向 build 0 error；两测试类全过；connected 真机 scripts/run.sh device 构建安装启动成功（bundle org.openagi.cordcode，非 UI 操作）；Mac Debug build 0 error；协议 canonical/mirror 各自单独 commit（de71b94/6624f36）；旧 .openCode kind 与入口全部保留（isDeprecated 未动）。",
         "artifacts": [],
-        "checked_at": null
+        "checked_at": "2026-08-19T03:05:34+0800"
       }
     },
     {
