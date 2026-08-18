@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T03:07:01+0800",
+  "updated_at": "2026-08-19T03:10:32+0800",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -604,7 +604,7 @@
         "method": "implementation",
         "attestation": "re-verified",
         "na_reason": null,
-        "summary": "build-unsigned-release.sh BUILD SUCCEEDED（runtime commit 2d11152）；killall→rm→cp Release app→open 重启；pgrep 无 /Applications 外残留；8777 监听者为 /Applications/CordCodeLink.app 内嵌 cordcode-bridge-runtime（PID 76471）；runtime_ready drivers 含 opencode-web；Management API 只读核对：opencode-web descriptor available+reason=generation=1.18 url=http://127.0.0.1:4096（探针在现网 serve 上判代成功）、capabilities=[diagnostics,external_turn_streaming,model_switch,permission_resolve,session_history,session_state,supports_workspace_browse,workspace_diff]（无 todos/question_reply，符合 §4.1.4）；旧 opencode descriptor 并存原样（poll=True 等脏行为保持）。",
+        "summary": "build-unsigned-release.sh BUILD SUCCEEDED；最终 runtime commit 78b72f1（含 modelID 活体修正）killall→rm→cp→open 两次重装；8777 监听者为 /Applications 内嵌 runtime（77481）；runtime_ready drivers 含 opencode-web；Management API 只读：opencode-web available+generation=1.18 url=4096、caps 含 permission_resolve 无 todos；旧 opencode 并存原样。",
         "artifacts": [
           "build/unsigned-release/Build/Products/Release/CordCodeLink.app",
           "dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip"
@@ -616,7 +616,7 @@
       "id": "s8-8-release-tests",
       "title": "§8-8 验证：现网 serve 只读探针 + 假 serve 沙盒端到端",
       "description": "本机 4096 owner 真实 serve 只读探针（health/GET/SSE 连接可以；禁止任何写请求、禁止真实 prompt）：health 200、GET /session 200、SSE 连接成功。沙盒端到端（4296…4396 + 独立数据目录，若本机 opencode CLI 可用）：完整 create/send/SSE/审批折叠/abort 链路。现网矩阵 §6 表 1-6 中 owner 才能执行的行整理成测试矩阵表交 owner。",
-      "status": "pending",
+      "status": "done",
       "phase": "s8-8",
       "kind": "tests",
       "depends_on": [
@@ -626,13 +626,16 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "test-execution",
-        "attestation": null,
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "现网 4096 只读探针（零写请求）：authed health 200、GET /session 200（100 会话）、SSE 连接 200 且 3s 窗口收 server.connected payload 帧。沙盒端到端（4296+独立 XDG 数据目录+Basic Auth，已停）：TestSandboxEndToEnd 环境门控测试在真 1.18.18 二进制全链路 PASS——判代/列表/6572 模型/create+发送 204/SSE 用户气泡/真实 provider 缺失 turn 零输出 turn_error/abort 2xx/诊断。过程中活体钉死 1.18 写路由模型键形（prompt_async=modelID、create=id，设计样板失真已修正 commit 78b72f1）。",
+        "artifacts": [
+          "agent/opencode-web/sandbox_e2e_test.go",
+          "/tmp/ocw-sandbox/(隔离数据目录，已停)"
+        ],
+        "checked_at": "2026-08-19T03:10:32+0800"
       }
     },
     {
@@ -646,7 +649,7 @@
         "s8-8-release-tests"
       ],
       "source": "§8-8/§6 真机",
-      "notes": "",
+      "notes": "owner 现网矩阵 §6 行 1-6 未执行（必须 owner 真机验收；沙盒绿不替代——设计红线）。矩阵表已随完成情况报告 docs/2026-08-18-opencode-web-backend-design完成情况.md §五 交付 owner。",
       "verification": {
         "required": true,
         "status": "missing",
