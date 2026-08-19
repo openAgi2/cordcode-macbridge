@@ -33,3 +33,6 @@ var _ = syscall.SIGTERM
 func processCommandLine(pid int) (string, bool) {
 	return "", false
 }
+
+// processStartTime is the windows placeholder (S9 best-effort surface).
+func processStartTime(pid int) string { return "" }

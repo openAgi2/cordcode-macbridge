@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T16:28:05.174635+00:00",
+  "updated_at": "2026-08-19T16:34:15.801849+00:00",
   "todos": [
     {
       "id": "s1-resolver-impl",
@@ -279,7 +279,7 @@
       "id": "s4-shutdown-migration-impl",
       "title": "关停留任 + 旧孤儿一次性迁移清理(PID 安全)",
       "description": "①Stop() 不杀本进程 spawn 的位子实例(留任收养,设计§5;单测清理用注入);②启动一次性迁移:存在旧 state 且指向 3096–3196→核对 PID cmdline 含 dsh 且仍监听记录端口才杀,对不上只删 state+告警(§12.1 无/§6 PID 安全,防 PID 复用),随后删 state 文件;③诊断补实例进程启动时间(ps 取,host.describe 无此字段,§5/S9)。设计§5/§6/§8.8",
-      "status": "in_progress",
+      "status": "done",
       "phase": "phase4",
       "kind": "impl",
       "depends_on": [
@@ -289,12 +289,19 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
+        "summary": "Stop() 不杀座位实例(留任收养);CleanupLegacyManaged 一次性清理(3096–3196 仅 PID活+cmdline含dsh+端口在听才 TERM→KILL,不符删state+告警);Agent 构造同步执行先于 saveState;跨平台 cmdline(unix ps/windows 降级)",
+        "artifacts": [
+          "git:ad167de",
+          "agent/dsh-web/migrate.go",
+          "agent/dsh-web/resolver.go",
+          "agent/dsh-web/proc_unix.go",
+          "agent/dsh-web/proc_windows.go",
+          "agent/dsh-web/dshweb.go"
+        ],
         "checked_at": null
       }
     },
@@ -302,7 +309,7 @@
       "id": "s4-shutdown-migration-tests",
       "title": "关停与迁移单测",
       "description": "①迁移:state 指向活 PID+cmdline 匹配→杀;PID 活+cmdline 不匹配→不杀+删 state+告警;PID 死→删 state;②Stop() 不杀 spawn 实例;③端口区间 3096–3196 常量已退役(编译期/引用检查)",
-      "status": "pending",
+      "status": "done",
       "phase": "phase4",
       "kind": "tests",
       "depends_on": [
@@ -312,12 +319,16 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
+        "summary": "清理六态(无文件/座位纪保留/死PID/PID复用不杀/端口释放不杀/全匹配杀真子进程)+Stop 留任(stops=0 且座位仍应答)",
+        "artifacts": [
+          "git:c1a0b2f",
+          "agent/dsh-web/migrate_test.go",
+          "cmd:go test ./agent/dsh-web/ -count=1 => ok"
+        ],
         "checked_at": null
       }
     },
@@ -325,7 +336,7 @@
       "id": "s4-shutdown-migration-regression",
       "title": "关停迁移回归:全量测试",
       "description": "go test ./agent/dsh-web/... ./go-bridge/... -count=1 全绿",
-      "status": "pending",
+      "status": "done",
       "phase": "phase4",
       "kind": "regression",
       "depends_on": [
@@ -335,12 +346,14 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "mixed",
+        "status": "present",
+        "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
+        "summary": "dsh-web 全量 ok(11.8s)+go-bridge 全量 ok(48.2s),同代码态仅 dsh-web 测试 import 修正",
+        "artifacts": [
+          "cmd:go test ./agent/dsh-web/ ./go-bridge/ -count=1 => ok"
+        ],
         "checked_at": null
       }
     },
@@ -348,7 +361,7 @@
       "id": "s5-diagnostics-doc-impl",
       "title": "诊断文案 + 活文档同步",
       "description": "①agent/dsh-web/diagnostics.go:实例来源(位子上 external/managed)、reconnecting 状态与宽限截止、PID+进程启动时间,诊断区分\"端口被非 dsh 进程占用\";②GO_BRIDGE_ARCHITECTURE.md ~:237-241 的 3096–3196 段改写为权威端口模型(S8);③run_diagnostics 的 Resolve 副作用在文案/文档标注(S2)。设计§3.2/§4-3/§5/§8.8/S8",
-      "status": "pending",
+      "status": "in_progress",
       "phase": "phase5",
       "kind": "impl",
       "depends_on": [
