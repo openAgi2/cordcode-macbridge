@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -320,15 +321,24 @@ func TestSSESessionUpdatedRecomputesUsageFromMessages(t *testing.T) {
 		}),
 	)
 
-	events := drain(sub)
+	// The recompute runs async (it must not stall the SSE read loop) — poll
+	// for the usage event with a bounded deadline.
 	var usage *core.ContextUsage
-	for _, ev := range events {
-		if ev.Type == core.EventContextUsageUpdated && ev.ContextUsage != nil {
-			usage = ev.ContextUsage
+	deadline := time.After(5 * time.Second)
+	for usage == nil {
+		for _, ev := range drain(sub) {
+			if ev.Type == core.EventContextUsageUpdated && ev.ContextUsage != nil {
+				usage = ev.ContextUsage
+			}
 		}
-	}
-	if usage == nil {
-		t.Fatal("session.updated must recompute occupancy")
+		if usage != nil {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("session.updated must recompute occupancy")
+		case <-time.After(20 * time.Millisecond):
+		}
 	}
 	if usage.UsedTokens != 18457 || usage.ContextWindow != 128000 {
 		t.Fatalf("usage must be message-level per §3.3 (used=18457 window=128000), got %+v", usage)
@@ -457,5 +467,113 @@ func TestIsSessionActiveV2MissStaysConservative(t *testing.T) {
 	}
 	if !agent.IsSessionActive(context.Background(), "ses_other") {
 		t.Fatal("v2 active hit must report active")
+	}
+}
+
+// TestSSEStreamReconnectsAndHealsAfterDrop reproduces the owner-verified
+// failure (2026-08-19): a stream that dies MID-TURN must (a) reconnect and
+// keep relaying, and (b) settle the armed turn via the status map when the
+// serve went idle during the gap — instead of leaving iOS stuck in 执行中.
+func TestSSEStreamReconnectsAndHealsAfterDrop(t *testing.T) {
+	var connCount atomic.Int64
+	dropped := make(chan struct{}, 1)
+	sse := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, pass, ok := r.BasicAuth(); !ok || pass != "pw" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/global/event":
+			n := connCount.Add(1)
+			w.Header().Set("Content-Type", "text/event-stream")
+			flusher := w.(http.Flusher)
+			flusher.Flush()
+			if n == 1 {
+				// Connection 1: arm a turn, stream half the deltas, then DIE.
+				fmt.Fprintf(w, "data: %s\n\n", sseFrame("message.updated", map[string]any{
+					"info": map[string]any{"id": "msg_u1", "role": "user",
+						"parts": []any{map[string]any{"type": "text", "text": "再讲个孙悟空的故事"}}},
+					"sessionID": "ses_1",
+				}))
+				flusher.Flush()
+				fmt.Fprintf(w, "data: %s\n\n", sseFrame("message.part.delta", map[string]any{
+					"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_1",
+					"field": "text", "delta": "half of the story…",
+				}))
+				flusher.Flush()
+				dropped <- struct{}{}
+				return // closes the response mid-turn
+			}
+			// Connection 2+: stays open, sends nothing (the serve already
+			// finished the turn during the gap — terminal event lost).
+			<-r.Context().Done()
+		case "/session/status":
+			// Serve went idle while we were disconnected.
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			if r.URL.Path == "/global/health" {
+				_, _ = w.Write([]byte(`{"healthy":true}`))
+				return
+			}
+			if r.URL.Path == "/session" {
+				_, _ = w.Write([]byte(`[]`))
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer sse.Close()
+
+	a, err := New(map[string]any{
+		"opencode_web_url":  sse.URL,
+		"opencode_web_user": "u",
+		"opencode_web_pass": "pw",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	agent := a.(*Agent)
+	// Cancellable ctx so teardown ends the long-lived reconnect (connection 2
+	// blocks in the handler until the client goes away — otherwise the
+	// server's Close() waits forever).
+	subCtx, cancelSub := context.WithCancel(context.Background())
+	defer cancelSub()
+	events, err := agent.Subscribe(subCtx)
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+
+	sawUser, sawHalf, sawResult := false, false, false
+	deadline := time.After(15 * time.Second)
+	for !(sawUser && sawHalf && sawResult) {
+		select {
+		case ev := <-events:
+			switch ev.Type {
+			case core.EventUserMessage:
+				sawUser = true
+			case core.EventText:
+				if strings.Contains(ev.Content, "half of the story") {
+					sawHalf = true
+				}
+			case core.EventResult:
+				// The armed turn saw assistant output pre-drop → clean result.
+				if ev.Error != nil {
+					t.Fatalf("turn with pre-drop output must settle clean, got %v", ev.Error)
+				}
+				sawResult = true
+			}
+		case <-deadline:
+			t.Fatalf("reconnect/heal incomplete: user=%v half=%v result=%v (connections=%d)",
+				sawUser, sawHalf, sawResult, connCount.Load())
+		}
+	}
+	// The redial follows the min-backoff (1s) AFTER the heal — poll for it.
+	reconnectDeadline := time.After(6 * time.Second)
+	for connCount.Load() < 2 {
+		select {
+		case <-reconnectDeadline:
+			t.Fatalf("subscriber must reconnect after the drop, connections=%d", connCount.Load())
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
 }

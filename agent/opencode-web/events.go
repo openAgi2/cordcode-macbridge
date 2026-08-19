@@ -85,7 +85,29 @@ func newSSESubscriber(ctx context.Context, a *Agent, c *Client) *sseSubscriber {
 	}
 }
 
+// sseReconnect backoff bounds.
+const (
+	sseReconnectMinBackoff = time.Second
+	sseReconnectMaxBackoff = 15 * time.Second
+)
+
+// connect performs the FIRST dial synchronously (callers surface the error),
+// then hands the body to run() which owns mid-life reconnects.
 func (s *sseSubscriber) connect() error {
+	resp, err := s.dial()
+	if err != nil {
+		return err
+	}
+	s.wg.Add(1)
+	go s.run(resp.Body)
+	return nil
+}
+
+// dial opens one SSE response. The stream rides streamClient (NO timeout —
+// http.Client.Timeout covers reading the response body, so any finite value
+// kills the stream mid-turn; owner-verified 2026-08-19: turn 2 died at the
+// 30s mark mid-stream).
+func (s *sseSubscriber) dial() (*http.Response, error) {
 	eventPath := "/global/event"
 	if s.client.Generation() == generationV2 {
 		eventPath = "/api/event"
@@ -94,7 +116,7 @@ func (s *sseSubscriber) connect() error {
 
 	req, err := http.NewRequestWithContext(s.ctx, http.MethodGet, sseURL, nil)
 	if err != nil {
-		return fmt.Errorf("opencode-web SSE subscriber: %w", err)
+		return nil, fmt.Errorf("opencode-web SSE subscriber: %w", err)
 	}
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("Cache-Control", "no-cache")
@@ -102,26 +124,96 @@ func (s *sseSubscriber) connect() error {
 		req.Header.Set("Authorization", s.client.authHeader)
 	}
 
-	resp, err := s.client.httpClient.Do(req)
+	resp, err := s.client.streamClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("opencode-web SSE subscriber connect %s: %w", sseURL, err)
+		return nil, fmt.Errorf("opencode-web SSE subscriber connect %s: %w", sseURL, err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
-		return fmt.Errorf("opencode-web SSE subscriber: HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("opencode-web SSE subscriber: HTTP %d", resp.StatusCode)
 	}
-
 	slog.Info("opencode-web SSE subscriber connected", "url", sseURL, "generation", string(s.client.Generation()))
-
-	s.wg.Add(1)
-	go s.readLoop(resp.Body)
-	return nil
+	return resp, nil
 }
 
-// readLoop reads the SSE stream (data: lines, blank-line separators); a bare
-// JSON line is tolerated as NDJSON compat.
-func (s *sseSubscriber) readLoop(body io.ReadCloser) {
+// run owns the stream lifecycle: read → on drop (body ends while ctx is
+// alive) heal armed turns, backoff, redial. A dropped stream otherwise
+// leaves iOS stuck in 执行中 forever — the terminal session-idle event dies
+// with the connection.
+func (s *sseSubscriber) run(body io.ReadCloser) {
 	defer s.wg.Done()
+	backoff := sseReconnectMinBackoff
+	for {
+		s.readStream(body)
+		if s.ctx.Err() != nil {
+			return
+		}
+		slog.Warn("opencode-web SSE: stream dropped mid-flight, healing + reconnecting")
+		s.healArmedTurnsAfterDrop()
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
+			if backoff < sseReconnectMaxBackoff {
+				backoff *= 2
+			}
+			resp, err := s.dial()
+			if err == nil {
+				body = resp.Body
+				break
+			}
+			if s.ctx.Err() != nil {
+				return
+			}
+			slog.Debug("opencode-web SSE: reconnect attempt failed", "error", err)
+		}
+		backoff = sseReconnectMinBackoff
+	}
+}
+
+// healArmedTurnsAfterDrop settles turns that armed before a stream drop and
+// went idle during the gap (their terminal event was lost): 1.18
+// GET /session/status is the definitive busy map, so any armed session no
+// longer busy gets its one-shot result now. v2's /api/session/active has
+// foreground-drain-only semantics — absence is not an idle verdict, so v2
+// stays conservative (no heal).
+func (s *sseSubscriber) healArmedTurnsAfterDrop() {
+	if s.client.Generation() == generationV2 {
+		return
+	}
+	s.stateMu.Lock()
+	armed := make([]string, 0, len(s.activeTurns))
+	for sessionID := range s.activeTurns {
+		armed = append(armed, sessionID)
+	}
+	s.stateMu.Unlock()
+	if len(armed) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	raw, err := s.client.fetchJSON(ctx, "/session/status", s.agent.GetWorkDir())
+	if err != nil {
+		slog.Debug("opencode-web SSE: post-drop status heal failed", "error", err)
+		return
+	}
+	var busy map[string]struct{}
+	if err := decodeJSONObject(raw, &busy); err != nil {
+		return
+	}
+	for _, sessionID := range armed {
+		if _, isActive := busy[sessionID]; !isActive {
+			slog.Info("opencode-web SSE: settling turn that went idle during stream gap", "session", sessionID)
+			s.emitResultOnce(sessionID)
+		}
+	}
+}
+
+// readStream reads one SSE connection to its end (data: lines, blank-line
+// separators); a bare JSON line is tolerated as NDJSON compat.
+func (s *sseSubscriber) readStream(body io.ReadCloser) {
 	defer body.Close()
 
 	scanner := bufio.NewScanner(body)
@@ -470,7 +562,10 @@ func (s *sseSubscriber) handleSessionUpdated(properties map[string]any, sessionI
 		s.emitResultOnce(sessionID)
 	}
 	if sessionID != "" {
-		s.recomputeUsage(sessionID)
+		// Async: the recompute fetches messages (and on a cold cache the ~5MB
+		// provider JSON) — running it inline would stall the SSE read loop
+		// mid-turn.
+		go s.recomputeUsage(sessionID)
 	}
 }
 

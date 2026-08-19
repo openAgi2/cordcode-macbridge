@@ -32,8 +32,13 @@ type Client struct {
 	user       string
 	pass       string
 	authHeader string
+	// httpClient carries a whole-request timeout for regular API calls.
 	httpClient *http.Client
-	gen        generation
+	// streamClient has NO timeout: http.Client.Timeout covers reading the
+	// response BODY, so any finite value would kill the SSE stream mid-turn
+	// (owner-verified 2026-08-19: turn 2 died at the 30s mark mid-stream).
+	streamClient *http.Client
+	gen          generation
 }
 
 func newClient(baseURL, user, pass string) *Client {
@@ -42,11 +47,12 @@ func newClient(baseURL, user, pass string) *Client {
 		auth = "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+pass))
 	}
 	return &Client{
-		baseURL:    strings.TrimRight(strings.TrimSpace(baseURL), "/"),
-		user:       user,
-		pass:       pass,
-		authHeader: auth,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		baseURL:      strings.TrimRight(strings.TrimSpace(baseURL), "/"),
+		user:         user,
+		pass:         pass,
+		authHeader:   auth,
+		httpClient:   &http.Client{Timeout: 30 * time.Second},
+		streamClient: &http.Client{},
 	}
 }
 
