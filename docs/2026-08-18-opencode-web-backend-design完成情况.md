@@ -55,7 +55,7 @@ owner 指出理想路径是 dsh-web 式「读官方 web 源码→穷举 API→�
 
 **官方 v1 SDK 面（packages/sdk/js gen，1.18 谱系）**：session{list,create,status,delete,get,update,children,todo,init,fork,abort,share,unshare,diff,summarize,messages,prompt(POST /session/:id/message),message/:mid,prompt_async,command,shell,revert,unrevert}、provider{list,auth,oauth}、Global.event=get.sse("/global/event")、project{list,current}、agent、path/config/vcs/file/pty/mcp/lsp/formatter/tui。
 
-**逐面对表结论**：一期 12 个已接面与官方用法一致（含 connected 过滤 prompt-model-selection.ts、占用公式 session-context-metrics.ts 逐字段、SSE 无寿命时限）。本轮对齐两处：占用改**严格五项和**（删自加的 total 回落）；发送补官方**默认模型回退链**（pending→会话采纳→首个 connected provider 的 default??首模型；回退候选全部过 catalog 门控，connected 空目录仍诚实报错零 POST）。官方有而一期未接（按设计 ⛔/2️⃣ 维持）：revert/unrevert、summarize(compact)、fork、children、diff、todo、init、command、shell——列为二期候选清单。tui/pty/lsp/mcp 等 Mac 客户端不适用面不接。
+**逐面对表结论**：一期 12 个已接面与官方用法一致（含 connected 过滤 prompt-model-selection.ts、占用公式 session-context-metrics.ts 逐字段、SSE 无寿命时限）。本轮对齐两处：占用改**严格五项和**（删自加的 total 回落）；发送补官方**默认模型回退链**——实际实现两级：pending 选择→会话采纳模型→首个 connected provider 的 default??首模型（回退候选全部过 catalog 门控，connected 空目录仍诚实报错零 POST）。**与官方五级链的已知缺口**（监工核验 2026-08-19 指出）：官方的「配置默认/最近使用」两级在 iOS 场景无对应物（iOS 自己的模型缓存等价于传入级）；「agent 指定」级有真实对应物但**输入链路不存在**——iOS `sendMessage(agent:)` 参数在 Bridge 适配层被丢弃、wire `send_message` 无 agent 字段、Mac 侧无 hook。补全该级 = 跨仓协议扩展（wire 加字段 + iOS 传值 + Mac 读 /agent 的 model），非 Mac 侧小改，待 owner 裁决；现状：iOS 选 agent 不选模型时发送用首个 connected 默认模型。官方有而一期未接（按设计 ⛔/2️⃣ 维持）：revert/unrevert、summarize(compact)、fork、children、diff、todo、init、command、shell——列为二期候选清单。tui/pty/lsp/mcp 等 Mac 客户端不适用面不接。
 
 ## 五、验收矩阵（owner 执行——§6 现网行 1–6）
 
@@ -64,7 +64,7 @@ owner 指出理想路径是 dsh-web 式「读官方 web 源码→穷举 API→�
 | # | 前提条件 | 动作 | 应看到 |
 |---|---|---|---|
 | 1 | 网页里找一个占用约十几万 tokens 的会话 | iPhone 切 **OpenCode Web** 打开该会话，看 ⭕ 占用圈 | 有已用/窗口数值（非「暂无」），与网页百分比一致 |
-| 2 | 同一会话 | iPhone 选目录内模型后发一条短消息 | 有流式回复；若故意选目录外坏模型 → 明确失败提示（非空等 81ms） |
+| 2 | 同一会话 | iPhone 选目录内模型后发一条短消息 | 有流式回复；若故意选目录外坏模型 → 明确失败提示（非空等 81ms）。附加观察点（监工建议）：**只选 agent 不选模型**发送 → 现状会用首个 connected provider 的默认模型（官方 web 此场景用该 agent 的 model 字段，见 §四·补 缺口注记） |
 | 3 | 网页 `/server/<项目>/session/…` 任一历史会话 | iPhone OpenCode Web 按同目录打开 | 历史消息与网页一致（含工具/思考块） |
 | 4 | Mac 网页某会话打字发 turn | iPhone 已打开同一会话 | 实时旁观（外部 turn 流式到 iPhone） |
 | 5 | 同一 Mac | 切回旧 **OpenCode** 入口 | 旧入口仍可用；占用圈空等脏行为**保持原样** |
