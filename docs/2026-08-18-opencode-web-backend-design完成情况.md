@@ -49,6 +49,14 @@
 4. **【owner 报障 2026-08-19 修复·二】SSE 流被 30s 客户端超时杀流 → 卡「执行中」**（commit `3f91726`）：owner 复测 turn1 正常、turn2 流到一半停滞且永远执行中（Mac 网页正常完成）。根因：共享 `http.Client{Timeout:30s}` 被用于 SSE GET——Go 的 Client.Timeout 覆盖响应体读取全程，超 30 秒的 turn 被客户端中途杀流；订阅器静默退出无重连，终端 idle 事件随连接丢失（旧包用无超时 DefaultClient 故无此病）。修复：SSE 专用无超时客户端；断线自动重连（1–15s 退避）；重连前按 /session/status 治愈掉线期已 idle 的 armed turn（v2 保守不治愈）；占用重算移出读循环。行为级测试 TestSSEStreamReconnectsAndHealsAfterDrop 复现中途断流并断言治愈+重连。
 5. **【owner 报障 2026-08-19 修复·一】模型目录须按 `connected` 过滤 + 5MB 单飞缓存**（commit `b8030e3`）：owner 发现 iOS 模型列表混入数百个从未配置的 provider（zeldoc/siliconflow 等）且全模式卡顿。活体取证：1.18 `GET /provider` 是三段信封 `{all:[192 provider × 全量 models.dev = 6637 模型 ≈ 5MB], default, connected:[7 个已配置 provider = 65 模型]}`——官方网页选择框只渲染 `connected`。旧实现递归收集 `all` 全量且每次 list_models/发送门控/占用窗口都重拉 5MB。修复：typed 信封解析 + 只收 `connected`（空 connected=空目录，诚实）+ 60s 单飞缓存全消费方共享。沙盒复跑目录 6572→9；现网只读数学核对 iOS 将显示 65 个（7 provider）；Release 已重装（b8030e3），**owner iPhone 复测待回报**。
 
+## 四·补、官方源码审计与对齐（2026-08-19，owner 指令「参照官方 web」）
+
+owner 指出理想路径是 dsh-web 式「读官方 web 源码→穷举 API→包装」。补做该审计（checkout /Users/jacklee/Projects/opencode @dev，v2 线；1.18 分歧以活体为准）：
+
+**官方 v1 SDK 面（packages/sdk/js gen，1.18 谱系）**：session{list,create,status,delete,get,update,children,todo,init,fork,abort,share,unshare,diff,summarize,messages,prompt(POST /session/:id/message),message/:mid,prompt_async,command,shell,revert,unrevert}、provider{list,auth,oauth}、Global.event=get.sse("/global/event")、project{list,current}、agent、path/config/vcs/file/pty/mcp/lsp/formatter/tui。
+
+**逐面对表结论**：一期 12 个已接面与官方用法一致（含 connected 过滤 prompt-model-selection.ts、占用公式 session-context-metrics.ts 逐字段、SSE 无寿命时限）。本轮对齐两处：占用改**严格五项和**（删自加的 total 回落）；发送补官方**默认模型回退链**（pending→会话采纳→首个 connected provider 的 default??首模型；回退候选全部过 catalog 门控，connected 空目录仍诚实报错零 POST）。官方有而一期未接（按设计 ⛔/2️⃣ 维持）：revert/unrevert、summarize(compact)、fork、children、diff、todo、init、command、shell——列为二期候选清单。tui/pty/lsp/mcp 等 Mac 客户端不适用面不接。
+
 ## 五、验收矩阵（owner 执行——§6 现网行 1–6）
 
 前提：Mac 运行新 Release（已装 `/Applications`，runtime commit `78b72f1`）；iPhone 安装本分支 Debug（已装）；Mac 网页打开 `http://127.0.0.1:4096`。
