@@ -107,6 +107,12 @@ owner 指出理想路径是 dsh-web 式「读官方 web 源码→穷举 API→�
 
 **本地实现的部分都是官方 TS 客户端同样在本地做的**（占用五项和公式、connected 过滤、错误文案以正文承载、目录头传递），以及桥接自身机制（指纹发现、目录缓存、双订阅线映射）——不替代任何 serve 端点。
 
+**官方四流程对照（owner 点名，源码级）**：
+- 模型列表：官方 `legacy.provider.list()`（bootstrap.ts:233）↔ 本实现 GET /provider + connected 过滤（models.go:96，prompt-model-selection 同构）；
+- session 列表：官方 v1 SDK `session.list({directory,…,order:"desc"})` = **GET /session?directory= 查询参数**（sdk/js gen SessionListData.query.directory）↔ 本实现对齐（commit 872e688；此前用等效的 x-opencode-directory 头，活体两种形状 14 条最新优先互证）；
+- 创建 session：官方 POST /session（SDK SessionCreateData）↔ session.go:218 同端点同键形（id/model，活体修正过）；
+- 同步新 session：官方 SSE `event.listen` → event-reducer `session.created` 插入 store（server-sync.tsx:531 / event-reducer.ts:131）↔ 本实现同一 SSE 流 session.created → 目录信号 → 指纹重扫 → sessions_changed 推 iOS（桥接层等价翻译，iOS 为客户端）。
+
 **owner 质疑成立的点与根因**：`GET /project` 最初就接了（首版 projects.go），但只接到 list_projects 建议 RPC；**会话列表骨架**按设计稿 §4 做成「无头 GET /session 全量 + 指纹」——设计稿本身把无头响应当全量真值（错误假设，活体证明它是陈旧百条切片）。补做的官方源码审计穷举了 SDK API 面并对表 models/占用/错误三面，但**没有审「官方 web 如何拉会话列表」这条路径**——审计记录把 /session list 标为「已接且一致」，核对的是端点存在性而非语义。该错误假设单点炸出整串症状（新会话不可见→指纹不变→无刷新→目录分组污染），与 owner「测试出一堆问题也不奇怪」的推断一致。教训入档：**对表必须到语义级（官方客户端如何调用+响应形状活体验证），端点存在性不构成一致性证明**。
 
 ## 五、验收矩阵（owner 执行——§6 现网行 1–6）
