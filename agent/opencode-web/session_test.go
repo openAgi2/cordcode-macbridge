@@ -66,11 +66,14 @@ func TestSendCarriesCatalogModelOnCreateAndPrompt(t *testing.T) {
 	if create.Path == "" {
 		t.Fatal("create POST /session missing")
 	}
-	if !strings.Contains(create.Body, `"directory":"/tmp/proj"`) {
-		t.Fatalf("create body must carry directory, got %s", create.Body)
+	// Official v1 SDK shape (SessionCreateData, sandbox-verified on 1.18.18):
+	// directory rides the QUERY param; the body is optional {parentID,title} —
+	// no directory, no model (the first prompt_async binds the model).
+	if bd := strings.TrimSpace(create.Body); bd != "{}" {
+		t.Fatalf("create body must be the official optional-empty shape {}, got %s", bd)
 	}
-	if !strings.Contains(create.Body, `"id":"glm-4.7"`) || !strings.Contains(create.Body, `"providerID":"zhipuai-coding-plan"`) {
-		t.Fatalf("create body must carry the catalog model, got %s", create.Body)
+	if !strings.Contains(create.Query, "directory=") {
+		t.Fatalf("create must carry ?directory= query (official SDK shape), got %q", create.Query)
 	}
 	if create.Directory != "/tmp/proj" {
 		t.Fatalf("create must send x-opencode-directory header, got %q", create.Directory)

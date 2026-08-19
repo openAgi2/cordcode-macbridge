@@ -33,6 +33,7 @@ type recordingServe struct {
 type recordedRequest struct {
 	Method    string
 	Path      string
+	Query     string
 	Directory string
 	Authed    bool
 	Body      string
@@ -46,6 +47,7 @@ func (s *recordingServe) handler() http.HandlerFunc {
 		s.requests = append(s.requests, recordedRequest{
 			Method:    r.Method,
 			Path:      r.URL.Path,
+			Query:     r.URL.RawQuery,
 			Directory: r.Header.Get("x-opencode-directory"),
 			Authed:    ok && pass == "pw",
 			Body:      string(bodyBytes),

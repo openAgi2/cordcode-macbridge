@@ -139,7 +139,7 @@ func newPermissionAgent(t *testing.T, f *permissionFake) *Agent {
 	return a.(*Agent)
 }
 
-func TestPermissionFoldAllowPrefersOnceThenFallsBack(t *testing.T) {
+func TestPermissionFoldAllowSendsOnceOnly(t *testing.T) {
 	// Scenario A: 1.18 accepts `once` → single POST {"response":"once"}.
 	f := &permissionFake{accept: map[string]bool{"once": true}}
 	agent := newPermissionAgent(t, f)
@@ -151,19 +151,21 @@ func TestPermissionFoldAllowPrefersOnceThenFallsBack(t *testing.T) {
 		t.Fatalf("must send once first and stop, got %v", rec)
 	}
 
-	// Scenario B: `once` rejected (4xx) → fallback literal `allow`.
-	f2 := &permissionFake{accept: map[string]bool{"allow": true}}
+	// Scenario B (SDK-pinned 2026-08-19): official enum is once|always|reject —
+	// bare `allow` never existed, so a rejected `once` is a real server error
+	// (no dead-letter fallback). The error must surface verbatim.
+	f2 := &permissionFake{accept: map[string]bool{}}
 	agent2 := newPermissionAgent(t, f2)
-	if err := agent2.RespondSessionPermission(context.Background(), "ses_1", "pr_1", core.PermissionResult{Behavior: "allow"}); err != nil {
-		t.Fatalf("allow with once rejected must fall back: %v", err)
+	err := agent2.RespondSessionPermission(context.Background(), "ses_1", "pr_1", core.PermissionResult{Behavior: "allow"})
+	if err == nil {
+		t.Fatal("once rejected must surface an error (no fallback literal)")
 	}
-	rec2 := f2.recorded()
-	if len(rec2) != 2 || !strings.Contains(rec2[0], `"response":"once"`) || !strings.Contains(rec2[1], `"response":"allow"`) {
-		t.Fatalf("must probe once then fall back to allow, got %v", rec2)
+	if !strings.Contains(err.Error(), "no accepted literal") {
+		t.Fatalf("error must name the fold failure, got %v", err)
 	}
 }
 
-func TestPermissionFoldDenyPrefersRejectThenFallsBack(t *testing.T) {
+func TestPermissionFoldDenySendsRejectOnly(t *testing.T) {
 	f := &permissionFake{accept: map[string]bool{"reject": true}}
 	agent := newPermissionAgent(t, f)
 	if err := agent.RespondSessionPermission(context.Background(), "ses_1", "pr_1", core.PermissionResult{Behavior: "deny"}); err != nil {
@@ -174,14 +176,12 @@ func TestPermissionFoldDenyPrefersRejectThenFallsBack(t *testing.T) {
 		t.Fatalf("must send reject first, got %v", rec)
 	}
 
-	f2 := &permissionFake{accept: map[string]bool{"deny": true}}
+	// SDK-pinned: `deny` is not an official literal — a rejected `reject`
+	// surfaces as an error instead of probing dead letters.
+	f2 := &permissionFake{accept: map[string]bool{}}
 	agent2 := newPermissionAgent(t, f2)
-	if err := agent2.RespondSessionPermission(context.Background(), "ses_1", "pr_1", core.PermissionResult{Behavior: "deny"}); err != nil {
-		t.Fatalf("deny fallback: %v", err)
-	}
-	rec2 := f2.recorded()
-	if len(rec2) != 2 || !strings.Contains(rec2[1], `"response":"deny"`) {
-		t.Fatalf("must fall back to deny, got %v", rec2)
+	if err := agent2.RespondSessionPermission(context.Background(), "ses_1", "pr_1", core.PermissionResult{Behavior: "deny"}); err == nil {
+		t.Fatal("reject rejected must surface an error (no fallback literal)")
 	}
 }
 

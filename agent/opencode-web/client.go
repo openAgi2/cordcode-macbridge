@@ -100,6 +100,17 @@ func (c *Client) doRequest(ctx context.Context, method, url string, body any, di
 		req.Header.Set("Authorization", c.authHeader)
 	}
 	if directory != "" {
+		// Official client shape: EVERY v1 SDK method carries directory as a
+		// query parameter (sdk/js gen types.gen.ts — SessionListData /
+		// SessionCreateData / SessionPromptData / SessionMessagesData /
+		// ProviderListData / ProjectListData … all `query?: { directory?: string }`).
+		// The x-opencode-directory header rides along as redundancy; the query
+		// param is the canonical form (live probe: both scope 1.18.18).
+		q := req.URL.Query()
+		if q.Get("directory") == "" {
+			q.Set("directory", directory)
+			req.URL.RawQuery = q.Encode()
+		}
 		req.Header.Set("x-opencode-directory", directory)
 	}
 	resp, err := c.httpClient.Do(req)

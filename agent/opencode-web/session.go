@@ -211,10 +211,12 @@ func (s *serverSession) ensureServerSession(model ocwModelRef) (string, error) {
 		return id, nil
 	}
 	dir := s.a.GetWorkDir()
-	body := map[string]any{
-		"directory": dir,
-		"model":     map[string]any{"id": model.ID, "providerID": model.ProviderID},
-	}
+	// Official v1 SDK shape (SessionCreateData): POST /session?directory=<dir>
+	// with an OPTIONAL {parentID?, title?} body — model is NOT part of create;
+	// the first prompt_async's body.model is what binds the session's model
+	// (the old body {directory, model{id}} was tolerated by the serve as
+	// extra keys but is not the official shape).
+	body := map[string]any{}
 	code, raw, err := s.client.doRequest(s.ctx, http.MethodPost, s.client.endpoint(s.client.apiPath("/session")), body, dir, true)
 	if err != nil {
 		return "", fmt.Errorf("opencode-web create session: %w", err)

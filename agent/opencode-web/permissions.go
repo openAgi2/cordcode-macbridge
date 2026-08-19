@@ -13,18 +13,21 @@ import (
 
 // permissions.go implements the approval reply folding (design §3.4).
 //
-// bridge core.PermissionResult.Behavior only carries "allow" / "deny" — the
-// official v2 enum is once | always | reject, and the 1.18 binary contains
-// all three literals (S4 取证) but a binary's strings cannot prove the sole
-// enumeration. Phase-1 strategy: PROBE first (1.18), fall back on 4xx, and
-// record what worked into the diagnostics snapshot:
+// Official v1 SDK proof (sdk/js gen PostSessionIdPermissionsPermissionIdData):
+//	POST /session/{id}/permissions/{permissionID}  body {"response": "once" | "always" | "reject"}
+// bridge core.PermissionResult.Behavior carries only "allow"/"deny", so:
+//	allow → "once" (least privilege: this request only; the official enum has
+//	        no bare "allow" — the earlier probe fallbacks were dead letters)
+//	deny  → "reject"
+// The fold diagnostics remain for observability (which literal the serve
+// accepted), but the value set is now SDK-pinned, not probed.
+// v2 generation keeps its own shape (different permission model — request/
+// saved registry); it is NOT re-verified against the v2 SDK here (owner 现网
+// is 1.18; v2 marked pending in the completion report).
 //
-//	allow (incl. iOS Always label) → try once, on 4xx retry allow
-//	deny                            → try reject, on 4xx retry deny
-//
-// v2 replies directly with once / reject. First answerer wins: a permission
-// already answered by the web UI resolves server-side and our reply lands as
-// a no-op error we surface as EventPermissionResolved-style success-best-effort.
+// First answerer wins: a permission already answered by the web UI resolves
+// server-side and our reply lands as a no-op error we surface as
+// EventPermissionResolved-style success-best-effort.
 
 // permissionFold records which literal the endpoint accepted, for diagnostics.
 type permissionFold struct {
@@ -67,14 +70,14 @@ func foldDiagnostics() string {
 	return "permission folding: " + strings.Join(parts, " ")
 }
 
-// replyLiteral returns the ordered literals to try for a bridge behavior on
-// the 1.18 generation.
+// replyLiteral returns the ordered literals to try for a bridge behavior.
+// SDK-pinned enumeration: once | always | reject — no bare allow/deny exists.
 func replyLiteral(behavior string) []string {
 	switch behavior {
 	case "allow":
-		return []string{"once", "allow"}
+		return []string{"once"}
 	case "deny":
-		return []string{"reject", "deny"}
+		return []string{"reject"}
 	default:
 		return []string{"reject"}
 	}
