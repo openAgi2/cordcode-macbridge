@@ -134,7 +134,14 @@ func (s *dshSession) Send(prompt string, images []core.ImageAttachment, files []
 		return fmt.Errorf("dsh-web: attachments are not supported in phase 1 (text-only)")
 	}
 	if s.closed.Load() {
-		return fmt.Errorf("dsh-web: session closed")
+		return fmt.Errorf("dsh web: session closed")
+	}
+	// Canonical-seat grace (design §12.1-2): a bound session's client bypasses
+	// Resolve, so surface the grace window explicitly — handlers map this to
+	// backend_unavailable, and the in-flight turn died with the instance (the
+	// terminal producer closes it; reconnect re-pulls history).
+	if inGrace, until := s.agent.resolver.GraceState(); inGrace {
+		return &ErrInstanceReconnecting{BaseURL: s.agent.resolver.seatURL(), Until: until}
 	}
 	req := sessionPromptRequest{
 		SessionID: s.CurrentSessionID(),

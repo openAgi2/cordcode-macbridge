@@ -1,0 +1,416 @@
+{
+  "version": 6,
+  "project_root": "/Users/jacklee/Projects/cordcode-macbridge-dsh3080",
+  "plan_file": "docs/2026-08-19-dsh-web-canonical-3080-instance-design.md",
+  "state_store": {
+    "canonical_path": ".exec-plan/state/plan-ae1b5ef7c726.json",
+    "legacy_path": ".claude/exec-plans/plan-ae1b5ef7c726.json",
+    "origin": "new",
+    "migrated_from": null,
+    "migrated_at": null
+  },
+  "queue_policy": {
+    "todo_md_role": "informational-only",
+    "completion_gate": "proof-carrying-impl-tests-regression",
+    "phase_done_rule": "all-required-todos-done",
+    "audit_rule": "unsupported-done-must-downgrade",
+    "start_exit_rule": "internal-audit-before-success",
+    "audit_failure_policy": "light-repairable-heavy-external-blocker",
+    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+    "session_mirror_policy": "todo-write-optional-mirror",
+    "invocation_policy": "slash-or-natural-language-equivalent",
+    "persistence_rule": "persist-on-every-status-transition"
+  },
+  "report_policy": {
+    "auto_write_completion_report": true,
+    "report_directory": "docs",
+    "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+    "write_when": "all-required-todos-proven-done",
+    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  },
+  "reports": {
+    "completion_report_path": "docs/2026-08-19-dsh-web-canonical-3080-instance-design完成情况.md",
+    "completion_report_status": "missing",
+    "last_generated_at": null,
+    "based_on_queue_hash": null
+  },
+  "updated_at": "2026-08-19T16:19:19.294247+00:00",
+  "todos": [
+    {
+      "id": "s1-resolver-impl",
+      "title": "resolver 权威端口状态机重写",
+      "description": "agent/dsh-web/resolver.go:位子=probeURLs[0](默认3080,spawn只绑位子,退役 managedPortMin/Max 3096–3196);失联(缓存死/位子探活失败且本进程曾有实例)→lostAt 置位进宽限 gracePeriod=120s,期间不收养不 spawn,Resolve 返回可 errors.As 的类型化错误 ErrInstanceReconnecting(含截止时间);冷启动(从未有实例)→立即 spawn 位子;宽限到期→spawn 位子;锁纪律 mu 只护 resolved/lostAt,探活与 spawn boot-wait 锁外,single-flight(并发解析一个在飞其余立即返回),宽限探活失败 ≤1s 负缓存;source 标签:boot-wait 端点命中后本进程孩子 processIsAlive(resolver.go:473 接线)且占位子才 managed,否则 external,永不记尸体 PID;Resolve source 变迁打 INFO(from→to+原因 cache-dead/grace/spawn/rebind);state 文件仅写不读(诊断与迁移用)。设计§3.1/§3.3/§3.4/§4/§12.1-1,2",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "§12/§12.1/§8",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "resolver 重写为权威端口状态机:位子=probeURLs[0] 只绑位子;失联→宽限(120s 默认)类型化 ErrInstanceReconnecting 不收养不 spawn;冷启动/到期→座位 spawn 且 dark 分支先探座位再 spawn;锁外 I/O+single-flight+≤1s 负缓存+5s spawn 退避;processIsAlive(EPERM=存活) 标签所有权永不记死 PID;变迁 INFO 日志;3096–3196 退役;state 只写不读。lifecycle 旧收养测试改写为座位语义;包内测试全绿,go build ./... + go vet 通过",
+        "artifacts": [
+          "git:7dc3bfd",
+          "agent/dsh-web/resolver.go",
+          "agent/dsh-web/lifecycle_test.go"
+        ],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s1-resolver-tests",
+      "title": "resolver 生命周期单测(含§8.1必测形态)",
+      "description": "agent/dsh-web 生命周期单测(httptest 假 dsh 先例):①位子应答→返回实例;②冷启动→spawn 位子(argv 断言 --host 127.0.0.1 --port 3080,无 --trusted-host);③曾有实例+位子死→宽限内 ErrInstanceReconnecting,不 spawn 且不收养旧 state 指向的 3096(§8.1 必测形态,时间用可注入缩短);④宽限到期→spawn 位子;⑤EADDRINUSE 竞态:starter 孩子死+位子应答→external 标签无尸体 PID;⑥权威端口可配置 probeURLs=[4000]→spawn 绑 4000;⑦single-flight 并发不阻塞。设计§8.1/§8.4/§8.6/§8.7",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "tests",
+      "depends_on": [
+        "s1-resolver-impl"
+      ],
+      "source": "§12/§12.1/§8",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "座位生命周期 6 组单测全绿:§8.1 形态(失联宽限类型化错误不 spawn 不收养侧端口孤儿+用户回座重绑 external)、宽限+负缓存烧穿后座位补拉、M5 标签(活孩子 managed/死孩子 external 零 PID 不写 state/暗座死孩子快速失败)、8 并发 single-flight 恰一次 spawn、失联回调边沿恰一次;测试假件禁 keep-alive 修正保真度",
+        "artifacts": [
+          "git:f571e6d",
+          "agent/dsh-web/seat_lifecycle_test.go",
+          "cmd:go test ./agent/dsh-web/ -count=1 => ok"
+        ],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s1-resolver-regression",
+      "title": "resolver 回归:全量 dsh-web+bridge 测试",
+      "description": "go test ./agent/dsh-web/... ./go-bridge/... -count=1 全绿 + go vet ./agent/dsh-web/... ;确认旧 deepseek(agent/dsh)套件零改动通过",
+      "status": "done",
+      "phase": "phase1",
+      "kind": "regression",
+      "depends_on": [
+        "s1-resolver-tests"
+      ],
+      "source": "§12/§12.1/§8",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "agent/dsh-web + agent/dsh(旧件零改动) + go-bridge 全量 -count=1 全绿,exit=0",
+        "artifacts": [
+          "cmd:go test ./agent/dsh-web/... ./agent/dsh/... ./go-bridge/... -count=1 => 全 ok"
+        ],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s2-grace-wire-impl",
+      "title": "宽限 wire 契约:handler 映射 backend_unavailable + InstanceStatus 特判",
+      "description": "①resolver 导出 ErrInstanceReconnecting;②go-bridge/handlers.go send 三处(:2284/2306/2319)与 list 四处(:1541/1606/2808/2939)识别 errors.As(ErrInstanceReconnecting)→WireError{Code:backend_unavailable, Message:\"dsh web instance reconnecting (grace)\"},不得只改 handleSendMessage 三处,其余错误保持现行码;③已打开会话感知宽限:dshSession.Send(agent/dsh-web/session.go:132)开头查 resolver 宽限态返回类型化错误(§12.1-2 实现A);④dshweb.go InstanceStatus 宽限内(lostAt 置位未到期)特判 available=true+detail \"instance reconnecting (grace until <t>)\",防 Current()==nil 经 detectInstanceStatusProber(agent_descriptor.go:247-255)落 not_configured(§12.1-4);⑤冷启动 spawn in-flight 并发 RPC 经 clientFor→类型化错误→backend_unavailable。设计§3.2/§12.1",
+      "status": "in_progress",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "s1-resolver-regression"
+      ],
+      "source": "§12/§12.1/§8",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s2-grace-wire-tests",
+      "title": "宽限 wire 单测(§8.5必测行)",
+      "description": "①§8.5 必测:已打开会话 Send(fake 实例死)→ErrInstanceReconnecting,经 handler 映射 backend_unavailable 非 send_failed;②list_sessions 宽限→backend_unavailable 非 list_failed;③InstanceStatus 宽限内 available=true,经 detectInstanceStatusProber 得 AgentStatusAvailable 非 not_configured;④非宽限错误仍落现行码(不误伤)。设计§8.5",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "s2-grace-wire-impl"
+      ],
+      "source": "§12/§12.1/§8",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s2-grace-wire-regression",
+      "title": "宽限 wire 回归:全量测试+协议确认",
+      "description": "go test ./agent/dsh-web/... ./go-bridge/... -count=1 全绿;确认 docs/protocol 错误表 backend_unavailable 既有行无需变更(零 pack 改动)",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "s2-grace-wire-tests"
+      ],
+      "source": "§12/§12.1/§8",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s3-turn-terminal-impl",
+      "title": "宽限进入时 running 会话推 turn 终态(幂等)",
+      "description": "进入宽限/缓存探活失败时,对 registry 中该 backend running 的 dsh-web 会话推终态错误事件(EventError,透传\"dsh web 实例失联\"原文,turn 收口红线);幂等:同一 session 只推一次——宽限进入与流 1006 重连两条触发路径共享 once 状态,防双发 turn_error(§12.1-3)。实现:Resolver 失联回调→Agent 对 runningCache 中 running 会话发终态。设计§3.2 turn 段/§12 切口3",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "impl",
+      "depends_on": [
+        "s2-grace-wire-regression"
+      ],
+      "source": "§12/§12.1/§8",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s3-turn-terminal-tests",
+      "title": "turn 终态幂等单测",
+      "description": "①宽限进入→running 会话各收一次终态;②宽限进入+流 1006 双触发→同一 session 只推一次;③终态事件形状符合 turn 收口语义;④非 running 会话不推",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "tests",
+      "depends_on": [
+        "s3-turn-terminal-impl"
+      ],
+      "source": "§12/§12.1/§8",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s3-turn-terminal-regression",
+      "title": "turn 终态回归:全量测试",
+      "description": "go test ./agent/dsh-web/... ./go-bridge/... -count=1 全绿",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "regression",
+      "depends_on": [
+        "s3-turn-terminal-tests"
+      ],
+      "source": "§12/§12.1/§8",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s4-shutdown-migration-impl",
+      "title": "关停留任 + 旧孤儿一次性迁移清理(PID 安全)",
+      "description": "①Stop() 不杀本进程 spawn 的位子实例(留任收养,设计§5;单测清理用注入);②启动一次性迁移:存在旧 state 且指向 3096–3196→核对 PID cmdline 含 dsh 且仍监听记录端口才杀,对不上只删 state+告警(§12.1 无/§6 PID 安全,防 PID 复用),随后删 state 文件;③诊断补实例进程启动时间(ps 取,host.describe 无此字段,§5/S9)。设计§5/§6/§8.8",
+      "status": "pending",
+      "phase": "phase4",
+      "kind": "impl",
+      "depends_on": [
+        "s3-turn-terminal-regression"
+      ],
+      "source": "§12/§12.1/§8",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s4-shutdown-migration-tests",
+      "title": "关停与迁移单测",
+      "description": "①迁移:state 指向活 PID+cmdline 匹配→杀;PID 活+cmdline 不匹配→不杀+删 state+告警;PID 死→删 state;②Stop() 不杀 spawn 实例;③端口区间 3096–3196 常量已退役(编译期/引用检查)",
+      "status": "pending",
+      "phase": "phase4",
+      "kind": "tests",
+      "depends_on": [
+        "s4-shutdown-migration-impl"
+      ],
+      "source": "§12/§12.1/§8",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s4-shutdown-migration-regression",
+      "title": "关停迁移回归:全量测试",
+      "description": "go test ./agent/dsh-web/... ./go-bridge/... -count=1 全绿",
+      "status": "pending",
+      "phase": "phase4",
+      "kind": "regression",
+      "depends_on": [
+        "s4-shutdown-migration-tests"
+      ],
+      "source": "§12/§12.1/§8",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s5-diagnostics-doc-impl",
+      "title": "诊断文案 + 活文档同步",
+      "description": "①agent/dsh-web/diagnostics.go:实例来源(位子上 external/managed)、reconnecting 状态与宽限截止、PID+进程启动时间,诊断区分\"端口被非 dsh 进程占用\";②GO_BRIDGE_ARCHITECTURE.md ~:237-241 的 3096–3196 段改写为权威端口模型(S8);③run_diagnostics 的 Resolve 副作用在文案/文档标注(S2)。设计§3.2/§4-3/§5/§8.8/S8",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl",
+      "depends_on": [
+        "s4-shutdown-migration-regression"
+      ],
+      "source": "§12/§12.1/§8",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s5-diagnostics-doc-tests",
+      "title": "诊断输出单测",
+      "description": "diagnostics 输出含:来源/端口/reconnecting(宽限中)/启动时间;宽限外不含 reconnecting",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "tests",
+      "depends_on": [
+        "s5-diagnostics-doc-impl"
+      ],
+      "source": "§12/§12.1/§8",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s5-diagnostics-doc-regression",
+      "title": "诊断与活文档回归",
+      "description": "go test ./agent/dsh-web/... -count=1 全绿;git diff 审阅 GO_BRIDGE_ARCHITECTURE.md 段落与设计§2/§3 一致",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "regression",
+      "depends_on": [
+        "s5-diagnostics-doc-tests"
+      ],
+      "source": "§12/§12.1/§8",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "s6-full-regression",
+      "title": "全量回归收口",
+      "description": "根模块 go test ./... -count=1 全绿 + go vet ./agent/dsh-web/... ./go-bridge/... + go build ./go-bridge;relay-server 模块不受影响(零改动声明核对 git diff);真机验收行(§8.1/8.3/8.9/8.10 真机部分)移交 owner 矩阵,报告中如实标注",
+      "status": "pending",
+      "phase": "phase6",
+      "kind": "regression",
+      "depends_on": [
+        "s5-diagnostics-doc-regression"
+      ],
+      "source": "§12/§12.1/§8",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    }
+  ]
+}

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 	"github.com/openAgi2/cordcode-macbridge/pinstore"
@@ -161,7 +162,15 @@ func (a *Agent) Stop() error {
 
 // InstanceStatus reports the resolved-instance state for hello_ack detection.
 // It never resolves or spawns — only mirrors the background/startup result.
+//
+// Canonical-seat grace special case (design §3.2/§12.1-4): while the seat is
+// in its grace window, Current()==nil — reporting available=false here would
+// fall through detectInstanceStatusProber as not_configured, exactly the code
+// the grace contract forbids. Stay visible with the reconnecting detail.
 func (a *Agent) InstanceStatus() (available bool, detail string) {
+	if inGrace, until := a.resolver.GraceState(); inGrace {
+		return true, fmt.Sprintf("instance reconnecting (grace until %s)", until.Format(time.RFC3339))
+	}
 	if inst := a.resolver.Current(); inst != nil {
 		switch inst.Source {
 		case SourceExternal:

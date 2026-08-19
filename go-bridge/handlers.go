@@ -19,6 +19,7 @@ import (
 
 	"github.com/openAgi2/cordcode-macbridge/agent/claudecode"
 	"github.com/openAgi2/cordcode-macbridge/agent/dsh"
+	dshweb "github.com/openAgi2/cordcode-macbridge/agent/dsh-web"
 	"github.com/openAgi2/cordcode-macbridge/core"
 	"github.com/openAgi2/cordcode-macbridge/go-bridge/admission"
 	"github.com/openAgi2/cordcode-macbridge/go-bridge/filepool"
@@ -26,6 +27,24 @@ import (
 	"github.com/openAgi2/cordcode-macbridge/pinstore"
 	"github.com/openAgi2/cordcode-macbridge/transcriptindex"
 )
+
+// wireErrorWithReconnect maps the dsh-web seat-grace typed error to the
+// protocol code backend_unavailable (canonical-3080 design §3.2): the seat is
+// expected back, so the backend is NOT unconfigured — not_configured is
+// forbidden for this state. Every other error keeps the caller's current code
+// (send_failed / list_failed).
+func wireErrorWithReconnect(err error, fallbackCode string) *WireError {
+	code := fallbackCode
+	var re *dshweb.ErrInstanceReconnecting
+	if errors.As(err, &re) {
+		code = "backend_unavailable"
+	}
+	return &WireError{Code: code, Message: err.Error()}
+}
+
+func sendWireError(err error) *WireError { return wireErrorWithReconnect(err, "send_failed") }
+
+func listWireError(err error) *WireError { return wireErrorWithReconnect(err, "list_failed") }
 
 var hiddenDirectoryBases = map[string]bool{
 	"claudeprobe": true,
@@ -1538,7 +1557,7 @@ func (h *Handlers) handleListAgents(conn Connection, msg WireMessage, agent core
 			conn.SendResult(msg.RequestID, nil, &WireError{Code: "not_supported", Message: "backend does not support agent listing"})
 			return
 		}
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
+		conn.SendResult(msg.RequestID, nil, listWireError(err))
 		return
 	}
 
@@ -1603,7 +1622,7 @@ func (h *Handlers) handleListProjects(conn Connection, msg WireMessage, agent co
 		if lister, ok := agent.(core.ProjectLister); ok {
 			suggestions, err := lister.ListProjectSuggestions(h.ctx)
 			if err != nil {
-				conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
+				conn.SendResult(msg.RequestID, nil, listWireError(err))
 				return
 			}
 			projects := make([]map[string]interface{}, 0, len(suggestions))
@@ -2281,7 +2300,7 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 			sess, respawnErr = agent.StartSession(h.ctx, resumeID)
 			if respawnErr != nil {
 				slog.Error("go-bridge: handleSendMessage: respawn failed", "sessionID", params.SessionID, "error", respawnErr)
-				conn.SendResult(msg.RequestID, nil, &WireError{Code: "send_failed", Message: sendErr.Error()})
+				conn.SendResult(msg.RequestID, nil, sendWireError(sendErr))
 				return
 			}
 			// Double-checked put: a concurrent send may have won the slot.
@@ -2303,7 +2322,7 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 				if errors.As(repairErr, &repairDelivery) && !sess.Alive() {
 					h.evictSessionCAS(params.SessionID, sess)
 				}
-				conn.SendResult(msg.RequestID, nil, &WireError{Code: "send_failed", Message: repairErr.Error()})
+				conn.SendResult(msg.RequestID, nil, sendWireError(repairErr))
 				return
 			}
 		} else {
@@ -2316,7 +2335,7 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 			}
 			slog.Warn("go-bridge: handleSendMessage: send failed (no replay)",
 				"sessionID", params.SessionID, "backendID", msg.BackendID, "error", sendErr.Error())
-			conn.SendResult(msg.RequestID, nil, &WireError{Code: "send_failed", Message: sendErr.Error()})
+			conn.SendResult(msg.RequestID, nil, sendWireError(sendErr))
 			return
 		}
 	}
@@ -2805,7 +2824,7 @@ func (h *Handlers) handleGetSession(conn Connection, msg WireMessage, agent core
 
 	sessions, err := agent.ListSessions(context.Background())
 	if err != nil {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
+		conn.SendResult(msg.RequestID, nil, listWireError(err))
 		return
 	}
 
@@ -2936,7 +2955,7 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 				metrics.sendResult(conn, msg.RequestID, nil, &WireError{Code: "not_supported", Message: "backend does not support session listing"})
 				return
 			}
-			metrics.sendResult(conn, msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
+			metrics.sendResult(conn, msg.RequestID, nil, listWireError(err))
 			return
 		}
 		mappingStarted := time.Now()
