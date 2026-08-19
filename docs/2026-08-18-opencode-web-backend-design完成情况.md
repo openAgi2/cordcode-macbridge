@@ -67,6 +67,23 @@ owner 指出理想路径是 dsh-web 式「读官方 web 源码→穷举 API→�
 
 **修复**：三面全部接住并记入 per-session 错误记录；零输出终端改用服务端原文（无记录才回落通用文案）；新 turn 起臂时清记录；冷历史的失败 assistant 消息把 info.error 文案显为 content（与网页一致）。测试：抓包帧逐字节回放（驱动式 + 真实 SSE 传输两套）断言终端携带「当前订阅套餐暂未开放…」原文；陈旧错误不污染下一轮健康 turn。
 
+## 四·补三、列表目录限定 + retry 瞬态 + 终态文案 3× 去重（owner 真机反馈 2026-08-19 午后，commit `9315b62`）
+
+**现象 A（列表）**：Mac 端 opencode desktop（已确认：`@opencode-ai/desktop` 为 **Electron** 应用，`electron-vite`/`electron-builder`——本质是 web 程序，owner 判断正确）连 4096，在 cordcode-ios 目录新建会话并发送；iOS opencode-web 列表**不可见该会话，重启也不可见**；切旧 opencode 模式立即可见。且 opencode-web 列表把所有历史目录都列出（含 Mac 已关闭/删除的），旧模式列表反而更像桌面端。
+
+**活体根因（只读探针 owner serve 钉死）**：1.18 `GET /session` 按 `x-opencode-directory` 头**按目录返回**（带头 cordcode-ios → 14 条、红楼梦会话最新第一条）；**不带头的全局响应是陈旧百条切片**（最新条目停在 7 月 6 日，当天所有会话缺席）。旧实现走桥接 generic 路径：粘滞 workdir 头 + 全局列表 + 事后按目录过滤——其它目录的新会话**结构性不可见**；目录分组来自这份陈旧列表，幽灵目录全数漏出。旧 opencode 模式可用是因为它走 `ocProxy listSessions({Directory, Roots})`（CLI 限定目录 + roots 感知 + v2 游标）。
+
+**修复（官方对齐：目录发现/分组以 serve 自己的工程注册表 `GET /project` 为准——与官方桌面端目录选择器同源；HTTP-only，不碰 CLI/storage）**：
+- `ListSessions` 改为 /project 注册表逐目录**限定拉取**的合并视图（最新优先；ghost 与 `/` 剔除；15s TTL + SSE `session.created/deleted` 信号即时失效——桌面端新建会话即刻进指纹 → sessions_changed → iOS 刷新可见）；
+- 新增 `core.DirectorySessionLister`：带 directory 的 list_sessions 走限定拉取；桥接叠加幽灵目录可见性过滤（与其它 catalog 同规则）；非该能力 backend（dsh-web/deepseek）契约不变；
+- `ListProjectSuggestions` 去重 + 剔除 global/ghost worktree。
+
+**现象 B（重试期无提示）**：重试退避（3/8/16/34/60s…）期间官方网页渲染 `session.status{type:"retry"}` 红行，iOS 全程无提示——owner 两次报障后本轮实现：新增 wire 事件 `session_retry_status{attempt,message,next}`（`core.EventRetryStatus`；非 durable milestone、不在 SSV2 raw deny-list、投影 kernel 忽略——control-plane 专用载体，旧客户端安全忽略）；iOS `mapBridgeEvent` → `.sessionRetryStatus` → runtime status 相位 `.retrying` → 状态栏「自动重试中（第N次）…」+ provider 原文（message-web 契约扩 `retrying` 态 + `retryAttempt` 字段，bundle 已重编）。
+
+**现象 C（文案 3×）**：12.33.26 截图套餐报错显示 3 次。活体日志钉死：同一 SSE 失败帧被**双订阅线**（StartSession 专用订阅 + 全局 passive 订阅）各自映射一遍，且 `emitResultOnce` 消费 terminal 记录后，trailing `message.updated(info.error)` 又当「首次」重发——text_delta flush 3 次（rev 59/61/63）。修复：文案发射闸门提升到 **Agent 级 claim**（跨订阅线只发一次；新 turn 重臂）；测试双订阅线逐帧交错驱动钉死。
+
+**同轮确认的既有事实链（不改，供 owner 裁决）**：失败 turn 的 raw `turn_error` 已在 deny-list 之外（SSV2 设备可收）且投影补丁含 turn settle + execution idle——服务端链路完整；12:49 复测 iOS 仍卡执行中，指向**设备上的 App 构建早于 493310f**（turn_error 解码修复需随新构建安装；「重启 App」不等于「重装新构建」）。
+
 ## 五、验收矩阵（owner 执行——§6 现网行 1–6）
 
 前提：Mac 运行新 Release（已装 `/Applications`，runtime commit `78b72f1`）；iPhone 安装本分支 Debug（已装）；Mac 网页打开 `http://127.0.0.1:4096`。

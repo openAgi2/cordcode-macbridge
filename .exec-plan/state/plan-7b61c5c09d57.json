@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T12:48:03+0800",
+  "updated_at": "2026-08-19T13:57:45",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -1105,6 +1105,207 @@
         "artifacts": [],
         "checked_at": "2026-08-19T12:48:03+0800"
       }
+    },
+    {
+      "id": "s8-8-review-fix-list-scope-impl",
+      "title": "会话列表目录限定（桌面端新建会话 iOS 不可见 + 目录污染）（实现）",
+      "description": "会话列表目录限定（桌面端新建会话 iOS 不可见 + 目录污染）",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "implementation",
+      "depends_on": [],
+      "source": "owner 报障（2026-08-19 午后）",
+      "notes": "review-fix group list-scope; commit 9315b62",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "见 tests todo 与完成情况报告 §四·补三"
+      },
+      "created_at": "2026-08-19T13:57:45",
+      "updated_at": "2026-08-19T13:57:45"
+    },
+    {
+      "id": "s8-8-review-fix-list-scope-tests",
+      "title": "会话列表目录限定（桌面端新建会话 iOS 不可见 + 目录污染）（测试）",
+      "description": "impl+tests 成对",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "tests",
+      "depends_on": [
+        "s8-8-review-fix-list-scope-impl"
+      ],
+      "source": "owner 报障",
+      "notes": "agent: list_scope_test×3 + events_dedupe_test×3；bridge: handlers_list_scope_test×3 + TestMapAgentEventRetryStatus；iOS: testMapBridgeEvent_SessionRetryStatus + RunningStatusBar retry×2（12/12）；app BUILD SUCCEEDED",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "go test agent+bridge 绿（仅先存 flaky）；vitest 绿（3 先存 App 权限测试失败与本轮无关，stash 复跑证实）"
+      },
+      "created_at": "2026-08-19T13:57:45",
+      "updated_at": "2026-08-19T13:57:45"
+    },
+    {
+      "id": "s8-8-review-fix-list-scope-regression",
+      "title": "会话列表目录限定（桌面端新建会话 iOS 不可见 + 目录污染）（回归+Release）",
+      "description": "Release 覆盖安装 + 活体验证",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "regression",
+      "depends_on": [
+        "s8-8-review-fix-list-scope-tests"
+      ],
+      "source": "owner 报障",
+      "notes": "commit 9315b62; runtime pid 16873 @13:49",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual-verification",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "二进制含 session_retry_status 确认；opencode-web 发现快照 100(陈旧)→780(31 目录合并真值)@360ms；owner 真机复测项：①列表见红楼梦会话（无需重启）②目录列表去幽灵 ③重试行 ④文案单条 ⑤失败后不卡执行中（需装含 493310f 的新 iOS 构建）"
+      },
+      "created_at": "2026-08-19T13:57:45",
+      "updated_at": "2026-08-19T13:57:45"
+    },
+    {
+      "id": "s8-8-review-fix-retry-transient-impl",
+      "title": "retry 瞬态事件链（重试期无提示，owner 两次报障）（实现）",
+      "description": "retry 瞬态事件链（重试期无提示，owner 两次报障）",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "implementation",
+      "depends_on": [],
+      "source": "owner 报障（2026-08-19 午后）",
+      "notes": "review-fix group retry-transient; commit 9315b62",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "见 tests todo 与完成情况报告 §四·补三"
+      },
+      "created_at": "2026-08-19T13:57:45",
+      "updated_at": "2026-08-19T13:57:45"
+    },
+    {
+      "id": "s8-8-review-fix-retry-transient-tests",
+      "title": "retry 瞬态事件链（重试期无提示，owner 两次报障）（测试）",
+      "description": "impl+tests 成对",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "tests",
+      "depends_on": [
+        "s8-8-review-fix-retry-transient-impl"
+      ],
+      "source": "owner 报障",
+      "notes": "agent: list_scope_test×3 + events_dedupe_test×3；bridge: handlers_list_scope_test×3 + TestMapAgentEventRetryStatus；iOS: testMapBridgeEvent_SessionRetryStatus + RunningStatusBar retry×2（12/12）；app BUILD SUCCEEDED",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "go test agent+bridge 绿（仅先存 flaky）；vitest 绿（3 先存 App 权限测试失败与本轮无关，stash 复跑证实）"
+      },
+      "created_at": "2026-08-19T13:57:45",
+      "updated_at": "2026-08-19T13:57:45"
+    },
+    {
+      "id": "s8-8-review-fix-retry-transient-regression",
+      "title": "retry 瞬态事件链（重试期无提示，owner 两次报障）（回归+Release）",
+      "description": "Release 覆盖安装 + 活体验证",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "regression",
+      "depends_on": [
+        "s8-8-review-fix-retry-transient-tests"
+      ],
+      "source": "owner 报障",
+      "notes": "commit 9315b62; runtime pid 16873 @13:49",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual-verification",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "二进制含 session_retry_status 确认；opencode-web 发现快照 100(陈旧)→780(31 目录合并真值)@360ms；owner 真机复测项：①列表见红楼梦会话（无需重启）②目录列表去幽灵 ③重试行 ④文案单条 ⑤失败后不卡执行中（需装含 493310f 的新 iOS 构建）"
+      },
+      "created_at": "2026-08-19T13:57:45",
+      "updated_at": "2026-08-19T13:57:45"
+    },
+    {
+      "id": "s8-8-review-fix-terminal-dedupe-impl",
+      "title": "终态错误文案 3× 去重（双订阅线 + trailing info.error 重发）（实现）",
+      "description": "终态错误文案 3× 去重（双订阅线 + trailing info.error 重发）",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "implementation",
+      "depends_on": [],
+      "source": "owner 报障（2026-08-19 午后）",
+      "notes": "review-fix group terminal-dedupe; commit 9315b62",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "见 tests todo 与完成情况报告 §四·补三"
+      },
+      "created_at": "2026-08-19T13:57:45",
+      "updated_at": "2026-08-19T13:57:45"
+    },
+    {
+      "id": "s8-8-review-fix-terminal-dedupe-tests",
+      "title": "终态错误文案 3× 去重（双订阅线 + trailing info.error 重发）（测试）",
+      "description": "impl+tests 成对",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "tests",
+      "depends_on": [
+        "s8-8-review-fix-terminal-dedupe-impl"
+      ],
+      "source": "owner 报障",
+      "notes": "agent: list_scope_test×3 + events_dedupe_test×3；bridge: handlers_list_scope_test×3 + TestMapAgentEventRetryStatus；iOS: testMapBridgeEvent_SessionRetryStatus + RunningStatusBar retry×2（12/12）；app BUILD SUCCEEDED",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "go test agent+bridge 绿（仅先存 flaky）；vitest 绿（3 先存 App 权限测试失败与本轮无关，stash 复跑证实）"
+      },
+      "created_at": "2026-08-19T13:57:45",
+      "updated_at": "2026-08-19T13:57:45"
+    },
+    {
+      "id": "s8-8-review-fix-terminal-dedupe-regression",
+      "title": "终态错误文案 3× 去重（双订阅线 + trailing info.error 重发）（回归+Release）",
+      "description": "Release 覆盖安装 + 活体验证",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "regression",
+      "depends_on": [
+        "s8-8-review-fix-terminal-dedupe-tests"
+      ],
+      "source": "owner 报障",
+      "notes": "commit 9315b62; runtime pid 16873 @13:49",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual-verification",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "二进制含 session_retry_status 确认；opencode-web 发现快照 100(陈旧)→780(31 目录合并真值)@360ms；owner 真机复测项：①列表见红楼梦会话（无需重启）②目录列表去幽灵 ③重试行 ④文案单条 ⑤失败后不卡执行中（需装含 493310f 的新 iOS 构建）"
+      },
+      "created_at": "2026-08-19T13:57:45",
+      "updated_at": "2026-08-19T13:57:45"
     }
   ]
 }
