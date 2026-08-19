@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-20T00:59:02.521895",
+  "updated_at": "2026-08-20T01:15:33.153027",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -1789,6 +1789,22 @@
         "required": true,
         "status": "pending",
         "evidence": ""
+      }
+    },
+    {
+      "id": "ocw-newsession-15s-create",
+      "title": "opencode-web 新会话 create_session 15s 空等修复（快速 pending-id）",
+      "description": "owner 现网 2026-08-20：chat 目录新会话首条消息回显卡 ~15s。根因：handleCreateSession 对惰性建会话的 opencode-web 走 waitForSessionID(15s) 必空等（首个 Send 才建 serve 会话）。修复：并入 codex/claude 快速 pending-id 分支；回归测试 <3s 双断言。send 后 iOS 无内容症状待 owner 带 15s 修复复测后判（Mac 侧 text/permission patch 全部 delivered，iOS pending→real 绑定链在位但存在已知 first-turn blank body 风险面）。",
+      "status": "done",
+      "phase": "ocw-newsess",
+      "kind": "fix",
+      "depends_on": [],
+      "source": "owner 现网 2026-08-20 01:06",
+      "notes": "commit 6fcad07；runtime 6fcad077a564 已覆盖安装 pid 54614",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "TestCreateSessionOpenCodeWebReturnsPendingFast… 绿 + 双套件绿；owner 复测待回"
       }
     }
   ]
