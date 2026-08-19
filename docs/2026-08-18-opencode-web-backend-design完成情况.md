@@ -46,7 +46,8 @@
 1. **prompt_async 模型键为 `modelID`**（设计 §3.6 样板写 `id`）：沙盒活体 400 `Missing key at ["model"]["modelID"]` 钉死；**create 仍收 `id`**（两写路由键形不同）。已修 `session.go` 并把单测断言改为 modelID（commit `78b72f1`）。读取面（GET /session 等）确认为 `id`，不受影响。
 2. **工具事件 TurnID 归因**：旧 sse_subscriber 复制件中 tool 事件不带 TurnID，健康多步工具 turn 会被误判零输出。新包修复（`handleToolPart` 传 messageID 归因），有注释与单测背书。
 3. **tool 名/state 嵌套**：SSE 工具 part 的 `toolName`/`state` 可嵌套在 `tool` 对象内，与历史映射（活体形状）对齐后补 fallback。
-4. **【owner 报障 2026-08-19 修复】模型目录须按 `connected` 过滤 + 5MB 单飞缓存**（commit `b8030e3`）：owner 发现 iOS 模型列表混入数百个从未配置的 provider（zeldoc/siliconflow 等）且全模式卡顿。活体取证：1.18 `GET /provider` 是三段信封 `{all:[192 provider × 全量 models.dev = 6637 模型 ≈ 5MB], default, connected:[7 个已配置 provider = 65 模型]}`——官方网页选择框只渲染 `connected`。旧实现递归收集 `all` 全量且每次 list_models/发送门控/占用窗口都重拉 5MB。修复：typed 信封解析 + 只收 `connected`（空 connected=空目录，诚实）+ 60s 单飞缓存全消费方共享。沙盒复跑目录 6572→9；现网只读数学核对 iOS 将显示 65 个（7 provider）；Release 已重装（b8030e3），**owner iPhone 复测待回报**。
+4. **【owner 报障 2026-08-19 修复·二】SSE 流被 30s 客户端超时杀流 → 卡「执行中」**（commit `3f91726`）：owner 复测 turn1 正常、turn2 流到一半停滞且永远执行中（Mac 网页正常完成）。根因：共享 `http.Client{Timeout:30s}` 被用于 SSE GET——Go 的 Client.Timeout 覆盖响应体读取全程，超 30 秒的 turn 被客户端中途杀流；订阅器静默退出无重连，终端 idle 事件随连接丢失（旧包用无超时 DefaultClient 故无此病）。修复：SSE 专用无超时客户端；断线自动重连（1–15s 退避）；重连前按 /session/status 治愈掉线期已 idle 的 armed turn（v2 保守不治愈）；占用重算移出读循环。行为级测试 TestSSEStreamReconnectsAndHealsAfterDrop 复现中途断流并断言治愈+重连。
+5. **【owner 报障 2026-08-19 修复·一】模型目录须按 `connected` 过滤 + 5MB 单飞缓存**（commit `b8030e3`）：owner 发现 iOS 模型列表混入数百个从未配置的 provider（zeldoc/siliconflow 等）且全模式卡顿。活体取证：1.18 `GET /provider` 是三段信封 `{all:[192 provider × 全量 models.dev = 6637 模型 ≈ 5MB], default, connected:[7 个已配置 provider = 65 模型]}`——官方网页选择框只渲染 `connected`。旧实现递归收集 `all` 全量且每次 list_models/发送门控/占用窗口都重拉 5MB。修复：typed 信封解析 + 只收 `connected`（空 connected=空目录，诚实）+ 60s 单飞缓存全消费方共享。沙盒复跑目录 6572→9；现网只读数学核对 iOS 将显示 65 个（7 provider）；Release 已重装（b8030e3），**owner iPhone 复测待回报**。
 
 ## 五、验收矩阵（owner 执行——§6 现网行 1–6）
 

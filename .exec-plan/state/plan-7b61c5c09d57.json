@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T03:34:35+0800",
+  "updated_at": "2026-08-19T10:39:06+0800",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -739,6 +739,82 @@
           "/tmp/mine-fails7.txt"
         ],
         "checked_at": "2026-08-19T03:34:35+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-sse-timeout-impl",
+      "title": "owner 报障修复：SSE 流 30s 客户端超时杀流→重连+idle 治愈",
+      "description": "owner 2026-08-19 复测：turn1 完整、turn2 流到一半 iOS 停滞且永远「执行中」，Mac 网页正常完成。根因：Client 的 http.Client.Timeout=30s 被共用到 SSE GET——Go 该超时覆盖响应体读取全程，>30s 的 turn 被客户端中途杀流；readLoop 静默退出且无重连，终端 session-idle 事件随连接丢失→iOS 卡执行中。旧包用 DefaultClient（无超时）故无此病。修复：(1) streamClient 无超时专用；(2) run() 拥有重连循环（1s..15s 退避）；(3) healArmedTurnsAfterDrop——重连前拉 /session/status，掉线期已 idle 的 armed turn 立即 emitResultOnce（v2 保守不治愈）；(4) recomputeUsage 移出读循环（异步，防 5MB 目录拉取阻塞 delta）。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "impl",
+      "depends_on": [
+        "s8-8-review-fix-catalog-regression"
+      ],
+      "source": "owner 报障 2026-08-19 第二轮",
+      "notes": "review-fix-for:s8-8-review-fix-catalog-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "events.go dial/run/heal 重构+client.go streamClient；沙盒与单测全绿。",
+        "artifacts": [
+          "agent/opencode-web/events.go",
+          "agent/opencode-web/client.go"
+        ],
+        "checked_at": "2026-08-19T10:39:06+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-sse-timeout-tests",
+      "title": "断线重连+治愈行为级测试",
+      "description": "TestSSEStreamReconnectsAndHealsAfterDrop：连接1 发 user+半程 delta 后中途断；/session/status 空 map；断言治愈发干净 EventResult（有 pre-drop 输出不误报零输出）且重连建立第二条连接。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "tests",
+      "depends_on": [
+        "s8-8-review-fix-sse-timeout-impl"
+      ],
+      "source": "owner 报障",
+      "notes": "review-fix-for:s8-8-review-fix-sse-timeout-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "包内 54 用例全过（含重连治愈+异步重算轮询改造）；无挂起。",
+        "artifacts": [
+          "agent/opencode-web/events_test.go"
+        ],
+        "checked_at": "2026-08-19T10:39:06+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-sse-timeout-regression",
+      "title": "回归+Release 重装（3f91726）",
+      "description": "go-bridge 失败集零增量；Release 重建覆盖安装，现网 descriptor available。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "regression",
+      "depends_on": [
+        "s8-8-review-fix-sse-timeout-tests"
+      ],
+      "source": "owner 报障",
+      "notes": "review-fix-for:s8-8-review-fix-sse-timeout-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "git diff agent/opencode 空；失败集仅先存 flaky；runtime 3f91726 已装、descriptor available generation=1.18。owner 复测待回报。",
+        "artifacts": [
+          "/tmp/mine-fails8.txt"
+        ],
+        "checked_at": "2026-08-19T10:39:06+0800"
       }
     }
   ]
