@@ -144,6 +144,22 @@ owner 指出理想路径是 dsh-web 式「读官方 web 源码→穷举 API→�
 
 **测试**：agent events_test 夹具换成活体帧（旧夹具即虚构形状的实物证据，已销）；go-bridge 官方/薄载荷双向断言；iOS wire 行为（always/降级）、官方字段解码、dock 模型透传、catalog 全键、ToolStep 旧 JSON 兼容共 10 个新用例。先存失败不变（dsh-web 后台任务详情 ×1、go-bridge 投影时序 ×1，均 stash 证实在 HEAD 复现，与本轮无关）。
 
+## 四·补七、权限卡复测收口：投影 SoT 缺官方字段 + 双 backend 同 serve 互扰 + 老 opencode 移除（owner 复测 2026-08-19 19:23，commit `6a50a75` / iOS `f334e95`）
+
+**owner 复测**：文案已显示（如「是否编写xx文件」）但「始终允许」按钮仍缺；截图卡仍是旧布局（「权限请求」+「正在读取 /path」+ `unknown` 杂字 + 两按钮）。
+
+**根因（日志实锤，两叠加）**：
+1. **投影 SoT 缺字段**：SSV2 权限卡以投影 part 为 SoT（raw permission_request 只是兜底）。内核 permission_request reducer 造的 ProjectionPart 从未携带 permissionKind/patterns——第一轮只修了 raw 事件链，投影链没修。`unknown` 杂字来源定位：iOS `mapToolStep` 的 `part.toolName ?? "unknown"`（薄 part 无 toolName）。
+2. **双 backend 同 serve 互扰**：runtime 同时启动老 `opencode`（-opencode-url）与 `opencode-web`（-opencode-web-url），**两者同指 4096**。同一 permission.asked 帧被两条订阅各自翻译：两条 permission_request（同 per_id、薄/厚）+ 两条投影流（各自独立 syncRev）灌进 iOS 同一 replica（`applyPatch` 只按 sessionId 分键、不分 backend）——后到者胜，rev 交错还触发 base mismatch → recovery pull，卡片呈现非确定。
+
+**三处收口**：
+- **投影 SoT（根修）**：内核 reducer 落 `permissionKind`/`permissionPatterns` 进 ProjectionPart（merge 非空不回退；clone 深拷贝新 slice）；schema/协议文档 additive 同步；iOS SessionProjectionPart + mapToolStep 透传。
+- **iOS 竞态防御**：`mergedToolStepOnUpsert`——同 id 权限步骤官方字段只进不出、已解析卡不被迟到 pending 重开；`recordPendingPermissionOfficial` 只升不降。
+- **移除干扰源（owner 指令）**：老 opencode backend 从 Swift 默认驱动列表与 go flag 默认移除（`-drivers claude,codex,grokbuild,dsh-web,opencode-web`；代码保留，回滚=加回列表并翻转驱动测试断言）。新 runtime 注册表已验证无 backend=opencode，4096 单订阅。
+
+**遗留说明**：iOS 端老 opencode 模式入口未动（Mac 侧 backend 缺席后 descriptor 不再下发，iOS 不会展示可用 backend）；如需彻底清理 iOS 入口另立任务。
+
+
 
 ## 五、验收矩阵（owner 执行——§6 现网行 1–6）
 

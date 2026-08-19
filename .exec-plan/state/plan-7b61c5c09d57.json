@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T19:08:44.330519",
+  "updated_at": "2026-08-19T19:40:16.208729",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -1394,6 +1394,94 @@
         "required": true,
         "status": "present",
         "evidence": "runtime -version 输出 65597cbefe5f；run.sh exit=0 全部完成"
+      }
+    },
+    {
+      "id": "s10-1-permission-recheck-forensics",
+      "title": "权限卡复测根因：投影 SoT 缺官方字段 + 双 backend 同 serve 互扰",
+      "description": "日志实锤：同一 permission.asked 被老 opencode 与 opencode-web 双发（同 per_id 薄/厚）+ 双投影流（独立 syncRev）灌进 iOS 同一 replica（applyPatch 不分 backend）后到者胜；投影 part 从未带官方字段；unknown=mapToolStep 的 toolName ?? unknown。",
+      "status": "done",
+      "phase": "s10-1",
+      "kind": "forensics",
+      "depends_on": [],
+      "source": "owner 复测 2026-08-19 19:23",
+      "notes": "go-bridge.log 19:23:39 双 passive event + 双 K4Patch flush",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "runtime log"
+      }
+    },
+    {
+      "id": "s10-2-permission-projection-sot",
+      "title": "投影 SoT 补官方字段（内核 reducer/part/clone + iOS 模型/mapping + schema）",
+      "description": "ProjectionPart 加 permissionKind/patterns；reducer 读取 + mergeToolPart 非空不回退 + clone 深拷贝；schema BridgeProjectionPart additive；iOS SessionProjectionPart/mapToolStep 透传。",
+      "status": "done",
+      "phase": "s10-2",
+      "kind": "impl",
+      "depends_on": [
+        "s10-1-permission-recheck-forensics"
+      ],
+      "source": "owner 复测",
+      "notes": "TestReducerPermissionRequestCarriesOfficialPayloadAndThinMergeKeepsIt 绿",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "go test"
+      }
+    },
+    {
+      "id": "s10-3-permission-ios-race-defense",
+      "title": "iOS 双流竞态防御（mergedToolStepOnUpsert + official 标记只升不降）",
+      "description": "同 id 权限步骤 upsert 合并：官方字段不回退、已解析卡不被迟到 pending 重开；recordPendingPermissionOfficial sticky。",
+      "status": "done",
+      "phase": "s10-3",
+      "kind": "impl",
+      "depends_on": [
+        "s10-1-permission-recheck-forensics"
+      ],
+      "source": "owner 复测",
+      "notes": "testMergedToolStepOnUpsertKeepsOfficialFieldsAgainstThinDuplicate 绿",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "xcodebuild test"
+      }
+    },
+    {
+      "id": "s10-4-remove-legacy-opencode-backend",
+      "title": "老 opencode backend 移除（owner 指令，消除双订阅干扰）",
+      "description": "Swift 默认驱动列表 + go flag 默认移除 opencode；代码保留可回滚；驱动列表测试断言翻转；新 runtime 注册表验证无 backend=opencode。",
+      "status": "done",
+      "phase": "s10-4",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "owner 指令 2026-08-19",
+      "notes": "commit 6a50a75；runtime pid 15611 drivers=claude,codex,grokbuild,dsh-web,opencode-web",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "runtime log agent registered 列表"
+      }
+    },
+    {
+      "id": "s10-5-permission-recheck-release",
+      "title": "双仓提交 + Release 覆盖安装 + 真机重装 + 文档补七",
+      "description": "Mac 6a50a75（runtime 6a50a759d301 覆盖安装 pid 15611）；iOS f334e95 真机安装启动；完成情况 §四·补七。",
+      "status": "done",
+      "phase": "s10-5",
+      "kind": "release",
+      "depends_on": [
+        "s10-2-permission-projection-sot",
+        "s10-3-permission-ios-race-defense",
+        "s10-4-remove-legacy-opencode-backend"
+      ],
+      "source": "owner 复测",
+      "notes": "run.sh exit=0；go 全绿；iOS 定向套件绿",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "runtime -version + driver list"
       }
     }
   ]
