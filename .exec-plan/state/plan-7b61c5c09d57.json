@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T20:38:59.982221",
+  "updated_at": "2026-08-19T21:02:57.543460",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -642,23 +642,24 @@
       "id": "s8-8-release-regression",
       "title": "§8-8 回归：现网矩阵 §6 表 1-6（owner 执行）+ 完成情况报告",
       "description": "现网 serve 矩阵 §6 表 1-6 全过（owner 执行；重点：占用圈有数、坏模型明确失败、审批 Allow/Deny 可用且不自动批、旧 OpenCode 入口保持原样）——owner 未验收前本 todo 只能停在 pending/blocked，不得用沙盒绿冒充。全部 proven 后写 docs/2026-08-18-opencode-web-backend-design完成情况.md（含实施期挂账处置、自评/复核标注）。",
-      "status": "pending",
+      "status": "done",
       "phase": "s8-8",
       "kind": "regression",
       "depends_on": [
         "s8-8-release-tests"
       ],
       "source": "§8-8/§6 真机",
-      "notes": "owner 现网矩阵 §6 行 1-6 未执行（必须 owner 真机验收；沙盒绿不替代——设计红线）。矩阵表已随完成情况报告 docs/2026-08-18-opencode-web-backend-design完成情况.md §五 交付 owner。",
+      "notes": "owner 真机验收 2026-08-19（三轮）：行1 占用圈✅ 行3 历史一致✅ 行4 实时旁观✅ 行6 审批 Allow/Deny+网页先答收口✅；行2 坏模型回合初判❌→真因 relay prekey 耗尽（非翻译层，沙盒证明链路正确）→修复 b2d934c 后复测通过（终态+错误文案与 Mac 一致，重试瞬态行缺席属瞬态设计，owner 记过）；行5 旧入口不可用=按 owner 指令移除（§补七），预期行为",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "manual-verification",
-        "attestation": null,
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "attestation": "owner 2026-08-19 20:2x 矩阵执行 + 21:0x 行2复测「这一条可以算过了」",
+        "summary": "现网矩阵 6/6 闭环",
+        "artifacts": [
+          "docs/2026-08-18-opencode-web-backend-design完成情况.md §四·补六~补九、§五"
+        ],
+        "checked_at": "2026-08-19"
       }
     },
     {
