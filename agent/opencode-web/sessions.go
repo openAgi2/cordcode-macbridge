@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -148,7 +149,15 @@ func (a *Agent) ListSessionsInDirectory(ctx context.Context, directory string) (
 var _ core.DirectorySessionLister = (*Agent)(nil)
 
 func (a *Agent) listSessionsWith(ctx context.Context, c *Client, dir string) ([]core.AgentSessionInfo, error) {
-	raw, err := c.fetchJSON(ctx, c.apiPath("/session"), dir)
+	// Official v1 SDK call shape: GET /session?directory=<path> (sdk/js gen
+	// SessionListData.query.directory). The x-opencode-directory header rides
+	// along via fetchJSON — both scope the 1.18.18 serve identically (live
+	// probe 2026-08-19: 14 rows, newest first, either form).
+	path := c.apiPath("/session")
+	if dir != "" {
+		path += "?directory=" + url.QueryEscape(dir)
+	}
+	raw, err := c.fetchJSON(ctx, path, dir)
 	if err != nil {
 		return nil, err
 	}
