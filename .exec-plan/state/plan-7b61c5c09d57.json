@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-20T01:15:33.153027",
+  "updated_at": "2026-08-20T03:07:27.895531",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -1805,6 +1805,24 @@
         "required": true,
         "status": "present",
         "evidence": "TestCreateSessionOpenCodeWebReturnsPendingFast… 绿 + 双套件绿；owner 复测待回"
+      }
+    },
+    {
+      "id": "ocw-newsess-render-fix",
+      "title": "新会话首回合「执行中无回复」双端修复（hydrate 名单 + rebind 观察集）",
+      "description": "owner 现网 2026-08-20 复测（15s 修复生效后仍无回复）。沙盒 E2E（真 ChatViewModel+真 transport 直连 mock serve）复现并收口三处：① Mac forceColdInspection 家族名单漏 opencode-web（a0b623d）→ 新会话首拉 hydrate 卡死 15s；② iOS rebindPendingSessionIdIfNeeded 不同步 projectionStore 观察集 → patch 全走 background-apply 永不渲染；③ E2E 诊断测试留作常驻回归（真 iOS 管线；保真三件 attach/scope/模型；沙盒缺位 XCTSkip）。E2E 绿（syncRev=7 助手渲染 1.4s）；iOS 130 用例套件绿。",
+      "status": "done",
+      "phase": "ocw-newsess2",
+      "kind": "fix",
+      "depends_on": [
+        "ocw-newsession-15s-create"
+      ],
+      "source": "owner 现网复测 2026-08-20 01:16",
+      "notes": "Mac a0b623d（runtime a0b623d228a6 已覆盖安装）；iOS 已提交（rebind 观察集 + E2E 回归）；真机装机因设备 unavailable（锁屏/离网）暂未完成，待手机可达后 run.sh device 补装并 owner 复测",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "E2E 测试通过 + 双仓套件绿；owner 真机复测待装机"
       }
     }
   ]
