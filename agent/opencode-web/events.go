@@ -58,12 +58,16 @@ type sseSubscriber struct {
 	// an armed turn with no output emits EventResult with Error (wire
 	// turn_error) instead of a healthy empty turn_completed.
 	turnSawAssistantOutput map[string]bool // turnID -> any assistant output seen
-	// lastSessionError records the serve's own error text for a session
-	// (session.status retry.message / session.error / assistant info.error).
-	// A zero-output turn surfaces it verbatim at idle instead of the generic
-	// guess (owner-verified 2026-08-19: zhipuai 1302 permission error was
-	// invisible on iOS while the Mac web showed it).
+	// lastSessionError records the serve's TRANSIENT retry text (candidate
+	// diagnosis only — a retried turn that later succeeds stays clean).
 	lastSessionError map[string]string
+	// lastTerminalError records the serve's EXPLICIT failure text
+	// (session.error frame / assistant info.error). Such a turn settles as
+	// turn_error with the serve's text AND the text is emitted as assistant
+	// content — the projection reducer drops turn_error.message, so content
+	// is the only carrier iOS renders (owner-verified 2026-08-19 twice: the
+	// wire event carried the text, iOS showed nothing).
+	lastTerminalError map[string]string
 
 	// Active-mode filter (§8-4 session binding): filterActive drops events
 	// whose SessionID != sessionFilter. Empty filter = pending (drops all).
@@ -89,6 +93,7 @@ func newSSESubscriber(ctx context.Context, a *Agent, c *Client) *sseSubscriber {
 		userTurnStarted:        make(map[string]bool),
 		turnSawAssistantOutput: make(map[string]bool),
 		lastSessionError:       make(map[string]string),
+		lastTerminalError:      make(map[string]string),
 	}
 }
 
@@ -304,9 +309,21 @@ func (s *sseSubscriber) handleServerEvent(payload map[string]any) {
 		s.handleSessionStatus(properties, sessionID)
 	case "session.error":
 		// Terminal failure frame (live-pinned 1.18.18: provider APIError with
-		// the real message). Recorded; the following idle emits it.
+		// the real message). Recorded as terminal AND emitted as assistant
+		// content — the projection reducer drops turn_error.message, so the
+		// text part is what iOS actually renders (same as the web timeline).
 		if msg := extractSessionErrorMessage(properties); msg != "" {
 			s.noteSessionError(sessionID, msg)
+			if s.noteTerminalSessionError(sessionID, msg) {
+				turnID := s.owningTurnID(sessionID, "")
+				s.emit(core.Event{
+					Type:      core.EventText,
+					Content:   msg,
+					SessionID: sessionID,
+					TurnID:    turnID,
+					ItemID:    turnID,
+				})
+			}
 		}
 	case "session.idle":
 		// 1.18.18 emits both session.status idle AND session.idle; treat the
@@ -377,9 +394,20 @@ func (s *sseSubscriber) handleMessageUpdated(properties map[string]any, sessionI
 		return
 	}
 	// A failed assistant message carries info.error (live-pinned 1.18.18) —
-	// record so a zero-output close surfaces the provider's own text.
+	// terminal: record and surface the text as content (deduped against the
+	// session.error frame, which usually fires first).
 	if errMsg := extractSessionErrorMessage(info); errMsg != "" {
 		s.noteSessionError(sessionID, errMsg)
+		if s.noteTerminalSessionError(sessionID, errMsg) {
+			turnID := s.owningTurnID(sessionID, messageID)
+			s.emit(core.Event{
+				Type:      core.EventText,
+				Content:   errMsg,
+				SessionID: sessionID,
+				TurnID:    turnID,
+				ItemID:    turnID,
+			})
+		}
 	}
 	for _, part := range extractMessageParts(info) {
 		partID := firstString(part, "id", "partID", "partId")
@@ -720,7 +748,23 @@ func (s *sseSubscriber) emitResultOnce(sessionID string) {
 	turnID := s.activeTurns[sessionID]
 	hadOutput := turnID != "" && s.turnSawAssistantOutput[turnID]
 	delete(s.turnSawAssistantOutput, turnID)
+	terminal := s.lastTerminalError[sessionID]
+	delete(s.lastTerminalError, sessionID)
 	s.stateMu.Unlock()
+	if terminal != "" {
+		// The serve explicitly failed the turn (session.error / info.error):
+		// settle as turn_error even when partial output landed, carrying the
+		// serve's text.
+		s.emit(core.Event{
+			Type:      core.EventResult,
+			Error:     fmt.Errorf("%s", terminal),
+			SessionID: sessionID,
+			Done:      true,
+			TurnID:    turnID,
+		})
+		s.clearActiveTurn(sessionID)
+		return
+	}
 	if turnID != "" && !hadOutput {
 		// Prefer the serve's own error text (session.error / retry.message /
 		// assistant info.error) over the generic guess — the provider's
@@ -747,8 +791,7 @@ func (s *sseSubscriber) emitResultOnce(sessionID string) {
 	s.clearActiveTurn(sessionID)
 }
 
-// noteSessionError records the serve's own error text for the session's
-// current turn; cleared when the next turn arms.
+// noteSessionError records the serve's transient retry text (candidate).
 func (s *sseSubscriber) noteSessionError(sessionID, message string) {
 	if sessionID == "" || strings.TrimSpace(message) == "" {
 		return
@@ -759,6 +802,24 @@ func (s *sseSubscriber) noteSessionError(sessionID, message string) {
 	}
 	s.lastSessionError[sessionID] = message
 	s.stateMu.Unlock()
+}
+
+// noteTerminalSessionError records the serve's explicit failure text
+// (session.error / assistant info.error). Returns true when this is the
+// FIRST terminal error for the turn (caller emits the text content exactly
+// once).
+func (s *sseSubscriber) noteTerminalSessionError(sessionID, message string) bool {
+	if sessionID == "" || strings.TrimSpace(message) == "" {
+		return false
+	}
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	if s.lastTerminalError == nil {
+		s.lastTerminalError = make(map[string]string)
+	}
+	_, existed := s.lastTerminalError[sessionID]
+	s.lastTerminalError[sessionID] = message
+	return !existed
 }
 
 func (s *sseSubscriber) takeSessionError(sessionID string) string {
@@ -797,6 +858,7 @@ func (s *sseSubscriber) setActiveTurn(sessionID, turnID string) {
 	s.stateMu.Lock()
 	s.activeTurns[sessionID] = turnID
 	delete(s.lastSessionError, sessionID)
+	delete(s.lastTerminalError, sessionID)
 	s.stateMu.Unlock()
 }
 

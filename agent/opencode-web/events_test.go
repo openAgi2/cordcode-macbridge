@@ -604,9 +604,13 @@ func TestProviderErrorSurfacesVerbatimAtIdle(t *testing.T) {
 	)
 
 	var results []core.Event
+	var errorTexts []string
 	for _, ev := range drain(sub) {
-		if ev.Type == core.EventResult {
+		switch ev.Type {
+		case core.EventResult:
 			results = append(results, ev)
+		case core.EventText:
+			errorTexts = append(errorTexts, ev.Content)
 		}
 	}
 	if len(results) != 1 {
@@ -617,6 +621,49 @@ func TestProviderErrorSurfacesVerbatimAtIdle(t *testing.T) {
 	}
 	if !results[0].Done {
 		t.Fatal("terminal must be Done")
+	}
+	// The text must ALSO arrive as assistant content — the projection reducer
+	// drops turn_error.message, so the content part is what iOS renders.
+	found := false
+	for _, text := range errorTexts {
+		if strings.Contains(text, "当前订阅套餐暂未开放GLM-5.2-Highspeed权限") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the serve's error text must be emitted as content (iOS-renderable), texts=%v", errorTexts)
+	}
+}
+
+// A TRANSIENT retry that eventually succeeds must close clean — the retry
+// text is a candidate diagnosis only, never a poison for a healthy turn.
+func TestTransientRetryThenSuccessClosesClean(t *testing.T) {
+	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
+	sub := newDrivenSubscriber(t, agent)
+	driveFrames(sub,
+		sseFrame("message.updated", map[string]any{
+			"info": map[string]any{"id": "msg_u1", "role": "user",
+				"parts": []any{map[string]any{"type": "text", "text": "hi"}}},
+			"sessionID": "ses_1",
+		}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1", "status": map[string]any{"type": "busy"}}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1",
+			"status": map[string]any{"type": "retry", "attempt": 1, "message": "transient 429"}}),
+		// Retry recovers: real assistant output arrives.
+		sseFrame("message.part.delta", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_1", "field": "text", "delta": "recovered answer",
+		}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1", "status": map[string]any{"type": "idle"}}),
+	)
+	events := drain(sub)
+	var last *core.Event
+	for i := range events {
+		if events[i].Type == core.EventResult {
+			last = &events[i]
+		}
+	}
+	if last == nil || last.Error != nil {
+		t.Fatalf("retried-then-successful turn must close clean, got %+v", last)
 	}
 }
 
