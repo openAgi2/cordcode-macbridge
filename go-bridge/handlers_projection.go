@@ -105,8 +105,14 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 	// A cold open inspects sources even when the Kernel is Ready. OpenCode uses
 	// this to heal its pathless HTTP baseline; Claude uses it to detect a new
 	// compact continuation or advanced segment cut.
+	// opencode-web belongs to the same pathless rich-history family as the
+	// source list below (§657 家族) — it was missing here, so a first pull on a
+	// live-reduced new session skipped the cold baseline commit and stayed
+	// errProjectionHydrating (sandbox E2E 2026-08-20: pulls returned
+	// projection.hydrating until the 15s budget expired, iOS rendered nothing).
 	forceColdInspection := params.SinceRev == 0 &&
-		(msg.BackendID == "opencode" || msg.BackendID == "grokbuild" ||
+		(msg.BackendID == "opencode" || msg.BackendID == "opencode-web" ||
+			msg.BackendID == "grokbuild" ||
 			msg.BackendID == "claude" || msg.BackendID == "claudecode" ||
 			msg.BackendID == "deepseek" || msg.BackendID == "dsh-web")
 	// Claude cold open starts the live file relay BEFORE the hydrate wait (aligned with
