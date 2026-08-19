@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func writeLegacyState(t *testing.T, dir string, port, pid int) {
