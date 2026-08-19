@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T21:02:57.543460",
+  "updated_at": "2026-08-19T22:19:46.778925",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -1551,6 +1551,158 @@
         "required": true,
         "status": "present",
         "evidence": "MailboxReplay/RelayFrame/Phase2 套件绿"
+      }
+    },
+    {
+      "id": "t1-projection-derived-frame-filter",
+      "title": "Mac：投影派生帧过滤（SSV2 不收 question raw）",
+      "description": "shouldDeliverRawEventLocked 拦截 isDerivedLegacyQuestionEvent（SSV2）；deny-list 注释同步。",
+      "status": "done",
+      "phase": "t1",
+      "kind": "fix",
+      "depends_on": [],
+      "source": "owner backlog 指令",
+      "notes": "9796432",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "TestCanonicalUserInput… -count=3 绿"
+      }
+    },
+    {
+      "id": "t2-dshweb-test-semantics",
+      "title": "Mac：dsh-web 后台任务详情测试语义（Phase 5）",
+      "description": "断言更新为 running 可取消/终态不可取消。",
+      "status": "done",
+      "phase": "t2",
+      "kind": "fix",
+      "depends_on": [],
+      "source": "owner backlog",
+      "notes": "9796432",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "dsh-web 套件绿"
+      }
+    },
+    {
+      "id": "t3-v2-shape-audit",
+      "title": "Mac：v2 形状复核（3 处漂移修复 + 5 契约测试 + 信封兼容）",
+      "description": "postModel 嵌套/interrupt 无 body/directory 收敛/create+info 信封；location 绑定未实现如实声明。",
+      "status": "done",
+      "phase": "t3",
+      "kind": "fix",
+      "depends_on": [],
+      "source": "owner backlog",
+      "notes": "9796432；v2 无现网",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "TestOfficialShape_V2_* 绿"
+      }
+    },
+    {
+      "id": "t4-ios-coldcache-hang",
+      "title": "iOS：ColdCache 挂起修复（全量套件 2059/7 败可跑完）",
+      "description": "codex 去重用例补 preset；store 30s 挂起兜底。",
+      "status": "done",
+      "phase": "t4",
+      "kind": "fix",
+      "depends_on": [],
+      "source": "owner backlog",
+      "notes": "a049625",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "全量 CCCodeTests 完整跑完"
+      }
+    },
+    {
+      "id": "t5-ios-pinch-zoom",
+      "title": "iOS：pinch-zoom（nil 手势判定）",
+      "description": "isViewportZoomDisabled 对 nil pinchGestureRecognizer 按 scale 锁死判定。",
+      "status": "done",
+      "phase": "t5",
+      "kind": "fix",
+      "depends_on": [],
+      "source": "owner backlog",
+      "notes": "a049625",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "MessageWebLifecycle 绿"
+      }
+    },
+    {
+      "id": "t6-ios-legacy-opencode-entry",
+      "title": "iOS：旧 OpenCode 入口移除（兼容层保留）",
+      "description": "serverCreationCases 去 openCode + isDeprecated；默认 .claudeCode；枚举/解码保留。",
+      "status": "done",
+      "phase": "t6",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "owner backlog（决策：入口移除、可回滚）",
+      "notes": "a049625 真机已装",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "BridgeTransport/HeaderMenu 套件绿"
+      }
+    },
+    {
+      "id": "t7-retry-transient-compensation",
+      "title": "重试瞬态行补偿（Mac 重附重放 + iOS 前台补显）",
+      "description": "Agent 快照 2min 新鲜窗 StartSession 重放、idle 清除；iOS didBecomeActive 补显 .retrying。",
+      "status": "done",
+      "phase": "t7",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "owner 验收遗留小缺口",
+      "notes": "Mac 9796432（runtime 已覆盖安装 pid 73947）/ iOS a049625",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "TestRetrySnapshotReplay… 绿；iOS 构建+套件绿"
+      }
+    },
+    {
+      "id": "t8-backlog-cleanup-closeout",
+      "title": "双仓提交 + 全量验证 + Release 覆盖 + 文档补十",
+      "description": "Mac 9796432（六包全绿）；iOS a049625（全量 2059/7，7 个先存入档）；runtime 9796432d5e77 覆盖安装。",
+      "status": "done",
+      "phase": "t8",
+      "kind": "release",
+      "depends_on": [
+        "t1-projection-derived-frame-filter",
+        "t2-dshweb-test-semantics",
+        "t3-v2-shape-audit",
+        "t4-ios-coldcache-hang",
+        "t5-ios-pinch-zoom",
+        "t6-ios-legacy-opencode-entry",
+        "t7-retry-transient-compensation"
+      ],
+      "source": "owner backlog",
+      "notes": "新暴露 7 项先存失败入 backlog",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "双仓提交 + 安装验证"
+      }
+    },
+    {
+      "id": "backlog-ios-7-preexisting-failures",
+      "title": "backlog：iOS 新暴露 7 项先存测试失败（基线证实，产品语义漂移）",
+      "description": "SessionsViewModelServerSwitchTests ×4（initialize 重试未发生）、SessionRefreshNotification isCoalescedForCodex（1≠2）、CodexSessionResumeWaits（1≠0）、AuthoritativeEmptyTodoFetchClearsStale（权威空拉取未清陈旧 todo 缓存）。此前被 ColdCache 挂起掩蔽，全量套件修复后暴露；需逐个判读产品意图后修。",
+      "status": "pending",
+      "phase": "backlog",
+      "kind": "debt",
+      "depends_on": [],
+      "source": "全量套件首次完整跑完（2026-08-19）",
+      "notes": "基线 stash 证实非本批引入",
+      "verification": {
+        "required": true,
+        "status": "pending",
+        "evidence": ""
       }
     }
   ]

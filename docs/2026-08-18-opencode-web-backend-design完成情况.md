@@ -186,6 +186,31 @@ owner 指出理想路径是 dsh-web 式「读官方 web 源码→穷举 API→�
 
 **验收行 5 说明**：旧 OpenCode 入口按 owner 指令已从 Mac 驱动列表移除（§补七），iOS 旧入口不再可用属预期；恢复 = 驱动列表加回（测试断言已翻转，回滚路径在案）。
 
+## 四·补十、backlog 四项清偿（owner 指令 2026-08-19 深夜，Mac `9796432` / iOS `a049625`）
+
+**1. 先存测试失败修复（两仓）**：
+- **Mac go-bridge 投影派生帧**（先存确定失败，非 flaky）：`question_asked/question_resolved` 是 canonical `user_input_*` 的单向派生 legacy 呈现帧，给 SSV2 连接发 raw = 复活已废弃的双发布路径——`shouldDeliverRawEventLocked` 拦截（legacy 连接照发）。
+- **Mac dsh-web 后台任务详情**：断言停在 Phase 4 只读语义，实现已是 Phase 5（running 可 `session.cancel`）——更新断言 + 补终态任务不可取消。
+- **iOS ColdCache 挂起**（全量套件此前永远跑不完）：根因 `testInitialize_codexRootCatalogDeduplicates…` 漏 preset，无预设 scope 的 `loadSessionListSnapshot` continuation 永挂——补 cache-miss 预设；`ControllableSnapshotStore` 加 30s 挂起兜底自动放行（防未来遗漏释放；正常竞态用例毫秒级释放不受影响）。
+- **iOS pinch-zoom**：iOS 27 runtime 下 `scrollView.pinchGestureRecognizer` 为 nil，`nil == false` 恒假——`isViewportZoomDisabled` 对 nil 手势按 scale 锁死判定。
+- **成果**：全量 CCCodeTests 首次完整跑完——**2059 过 / 7 败**；7 个均为基线（stash）证实的先存失败（重试/合并计数类产品语义漂移，此前被挂起掩蔽，新暴露），已立 backlog 待专项，非本批引入。
+
+**2. iOS 旧 OpenCode 入口清理**（决策：入口移除、兼容层保留）：`serverCreationCases` 去 `.openCode` + `isDeprecated` 标记（thinBridge/deepSeek 同列）；枚举与 Codable 解码保留（已存 openCode 服务器仍可显示/编辑，Mac 侧无 backend 即不可用）；AddServerView 新建默认 `.claudeCode`；切换菜单按 deprecated 过滤（夹具随之更新）。
+
+**3. 重试瞬态行补偿**（owner 验收遗留小缺口，双侧）：
+- Mac（9796432）：Agent 记录最近重试快照（2 分钟新鲜窗），`StartSession` 重附（重开会话/relay 重连）时重放一次 `session_retry_status`；回合收口（idle）清除防复活。测试 `TestRetrySnapshotReplayOnStartSessionAndClearOnIdle`。
+- iOS（a049625）：ChatViewModel 记录最近 `session_retry_status` 快照，`didBecomeActive`（解锁/回前台）时当前会话仍在执行且快照新鲜 → 重放 `.retrying` 相位（运行状态栏「自动重试中（第 N 次）」补显）。
+
+**4. v2 形状复核**（对 v2 SDK `v2/gen/types.gen.ts` 逐一审计，修复三处漂移 + 五个契约测试 `TestOfficialShape_V2_*`）：
+- postModel 扁平 body → 嵌套 `{"model":{id,providerID}}`（V2SessionSwitchModelData/ModelRef）；
+- abort/interrupt 去 JSON body（两代 SDK 均 `body?: never`）；
+- directory 收敛：v2 仅 `GET /api/session`（V2SessionListData 唯一声明 directory query），其余路由不带；`x-opencode-directory` 头为 1.18 惯例，v2 wire 不带；
+- v2 响应信封兼容：create/fetchSessionInfo 解 `{"data":…}` 包裹；
+- **如实声明**：v2 无现网验证（owner serve 1.18）；location 绑定（LocationRef/workspace 流）未实现——v2 create 在 serve 默认 location 落点，接入 v2 现网前需补核。
+
+**新暴露 backlog（先存、7 项，基线证实）**：SessionsViewModelServerSwitchTests ×4（initialize 重试未发生）、testSessionRefreshNotification_isCoalescedForCodex（1≠2）、testCodexSessionResumeWaits…（1≠0）、testAuthoritativeEmptyTodoFetchClearsStaleCacheAndDock（权威空拉取未清陈旧 todo 缓存）——均为产品语义漂移，需逐个判读意图后修，另立任务。
+
+
 
 
 
