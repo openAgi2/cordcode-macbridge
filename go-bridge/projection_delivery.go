@@ -62,8 +62,10 @@ func isSessionSyncV2RawTimelineEvent(event string) bool {
 		"text_delta", "message_updated", "message_content",
 		"reasoning_delta", "thinking_delta",
 		"tool_started", "tool_finished", "tool_content",
-		// permission_request / permission_resolved / question_asked 仍走 raw
-		// 控制面（不在此 deny-list）：投影已吃 permission_*，raw 作兜底。
+		// permission_request / permission_resolved 仍走 raw 控制面（不在此
+		// deny-list）：投影已吃 permission_*，raw 作兜底。question_asked /
+		// question_resolved 为派生 legacy 帧——SSV2 不发 raw（见
+		// shouldDeliverRawEventLocked），SSV2 靠 canonical user_input 投影。
 		"context_compressing", "context_compressed",
 		"session_state_changed", "session_running_signal",
 		"delivery_reconcile_required",
@@ -97,6 +99,13 @@ func isDerivedLegacyQuestionEvent(event string) bool {
 // name from the timeline deny-list. Caller must hold p.mu: syncV2 is mutable connection state.
 func (p *EventPublisher) shouldDeliverRawEventLocked(conn Connection, backendID, sessionID, event string) bool {
 	if backendID != "" && sessionID != "" && isProjectionOnlyCanonicalEvent(event) {
+		return false
+	}
+	// Derived legacy question frames are a presentation of canonical user_input state
+	// (always co-published with user_input_requested, which the kernel reduces). Sending
+	// them raw to syncV2 clients would recreate the retired dual-publish path for the
+	// question UI — legacy conns only (isDerivedLegacyQuestionEvent semantics).
+	if backendID != "" && sessionID != "" && isDerivedLegacyQuestionEvent(event) && p.syncV2[conn] {
 		return false
 	}
 	return !p.syncV2[conn] || backendID == "" || sessionID == "" || !isSessionSyncV2RawTimelineEvent(event)

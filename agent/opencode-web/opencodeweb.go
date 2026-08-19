@@ -94,6 +94,14 @@ type Agent struct {
 	terminalTextSet map[string]bool // sessionID → terminal text already emitted this turn
 	retryStatusSeen map[string]int  // sessionID → highest retry attempt already emitted
 
+	// lastRetryMu guards the per-session retry snapshot for re-attach replay.
+	// bridge-v1 session_retry_status is transient by design（不做离线持久化，
+	// 官方 web 也只在实时流显示）——owner 2026-08-19：锁屏/后台窗口会错过
+	// 重试行。重附（iOS 重开会话 / relay 重连 → StartSession）时若快照仍
+	// 新鲜（2 分钟内）则重放一次；回合收口即清除，避免陈旧重试状态复活。
+	lastRetryMu sync.Mutex
+	lastRetry   map[string]retrySnapshot
+
 	bgCtx    context.Context
 	bgCancel context.CancelFunc
 
@@ -141,6 +149,7 @@ func New(opts map[string]any) (core.Agent, error) {
 	a.bgCtx, a.bgCancel = context.WithCancel(context.Background())
 	a.terminalTextSet = make(map[string]bool)
 	a.retryStatusSeen = make(map[string]int)
+	a.lastRetry = make(map[string]retrySnapshot)
 
 	if a.baseURL != "" {
 		// Bounded startup probe so the first hello_ack reports the real state
@@ -212,6 +221,57 @@ func (a *Agent) claimRetryStatus(sessionID string, attempt int) bool {
 		a.retryStatusSeen[sessionID] = attempt
 	}
 	return true
+}
+
+// retrySnapshot is the replayable tail of the transient retry notices.
+type retrySnapshot struct {
+	Attempt int
+	Message string
+	Next    int64
+	At      time.Time
+}
+
+// retrySnapshotFreshness bounds replay: serve retry backoff windows are
+// seconds-scale; 2 minutes covers the observed worst case without resurrecting
+// stale rows after a settled turn (settle clears the snapshot anyway).
+const retrySnapshotFreshness = 2 * time.Minute
+
+// noteRetrySnapshot records the latest retry notice for re-attach replay.
+func (a *Agent) noteRetrySnapshot(sessionID string, attempt int, message string, next int64) {
+	if sessionID == "" {
+		return
+	}
+	a.lastRetryMu.Lock()
+	defer a.lastRetryMu.Unlock()
+	if a.lastRetry == nil {
+		a.lastRetry = make(map[string]retrySnapshot)
+	}
+	a.lastRetry[sessionID] = retrySnapshot{Attempt: attempt, Message: message, Next: next, At: time.Now()}
+}
+
+// clearRetrySnapshot drops the replay tail when the turn settles (idle) or a
+// new turn arms — settled turns must not replay a retry row on re-attach.
+func (a *Agent) clearRetrySnapshot(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	a.lastRetryMu.Lock()
+	defer a.lastRetryMu.Unlock()
+	delete(a.lastRetry, sessionID)
+}
+
+// replayableRetrySnapshot returns the fresh snapshot for the session, if any.
+func (a *Agent) replayableRetrySnapshot(sessionID string) (retrySnapshot, bool) {
+	if sessionID == "" {
+		return retrySnapshot{}, false
+	}
+	a.lastRetryMu.Lock()
+	defer a.lastRetryMu.Unlock()
+	snap, ok := a.lastRetry[sessionID]
+	if !ok || time.Since(snap.At) > retrySnapshotFreshness {
+		return retrySnapshot{}, false
+	}
+	return snap, true
 }
 
 // instanceStatusProbeTTL bounds how long a successful probe stays trusted

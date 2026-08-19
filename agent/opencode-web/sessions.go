@@ -203,6 +203,18 @@ func (a *Agent) listSessionsWith(ctx context.Context, c *Client, dir string) ([]
 	return out, nil
 }
 
+// unwrapDataEnvelope descends a v2 {"data": …} envelope when present,
+// returning the inner payload (v1 flat payloads pass through unchanged).
+func unwrapDataEnvelope(raw []byte) []byte {
+	var probe struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil || len(probe.Data) == 0 {
+		return raw
+	}
+	return probe.Data
+}
+
 // fetchSessionInfo fetches one session via GET /session/:id. The directory
 // header uses the current work dir (the serve does not hard-scope single
 // session GETs by it); the response carries the session's own directory for
@@ -213,7 +225,7 @@ func (a *Agent) fetchSessionInfo(ctx context.Context, c *Client, sessionID strin
 		return nil, err
 	}
 	var entry ocwSessionEntry
-	if err := json.Unmarshal(raw, &entry); err != nil {
+	if err := json.Unmarshal(unwrapDataEnvelope(raw), &entry); err != nil {
 		return nil, err
 	}
 	if entry.ID == "" {

@@ -72,6 +72,20 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 		<-sessionCtx.Done()
 		_ = sub.Close()
 	}()
+	// Re-attach replay: iOS 锁屏/后台窗口会错过瞬态 session_retry_status
+	//（不做离线持久化，官方 web 同语义）。重附时若快照新鲜（2 分钟内、回合
+	// 未收口）则重放一次，回前台/重开会话即见「自动重试中（第 N 次）」。
+	if id := s.CurrentSessionID(); id != "" {
+		if snap, ok := a.replayableRetrySnapshot(id); ok {
+			sub.emit(core.Event{
+				Type:         core.EventRetryStatus,
+				Content:      snap.Message,
+				SessionID:    id,
+				RetryAttempt: snap.Attempt,
+				RetryNext:    snap.Next,
+			})
+		}
+	}
 	return s, nil
 }
 
@@ -225,19 +239,33 @@ func (s *serverSession) ensureServerSession(model ocwModelRef) (string, error) {
 		return "", fmt.Errorf("opencode-web create session HTTP %d: %s", code, truncateForError(string(raw)))
 	}
 	var resp struct {
-		ID string `json:"id"`
+		ID  string `json:"id"`
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
 	}
-	if err := json.Unmarshal(raw, &resp); err != nil || resp.ID == "" {
+	if err := json.Unmarshal(raw, &resp); err != nil {
 		return "", fmt.Errorf("opencode-web create session: bad response: %s", truncateForError(string(raw)))
 	}
-	s.chatID.Store(resp.ID)
-	s.sub.setSessionFilter(resp.ID)
-	return resp.ID, nil
+	created := resp.ID
+	if created == "" {
+		// v2 envelope: {"data": {...}} (V2SessionCreateResponses).
+		created = resp.Data.ID
+	}
+	if created == "" {
+		return "", fmt.Errorf("opencode-web create session: bad response: %s", truncateForError(string(raw)))
+	}
+	s.chatID.Store(created)
+	s.sub.setSessionFilter(created)
+	return created, nil
 }
 
 // postModel applies the v2 session-level model switch endpoint.
+// Official v2 shape (V2SessionSwitchModelData): POST /api/session/{id}/model
+// body {"model": ModelRef{id, providerID, variant?}} — nested, NOT flattened
+// (the old flat {providerID, modelID} body was a shape drift, 2026-08-19 audit).
 func (s *serverSession) postModel(model ocwModelRef, chatID string) error {
-	body := map[string]any{"providerID": model.ProviderID, "modelID": model.ID}
+	body := map[string]any{"model": map[string]any{"id": model.ID, "providerID": model.ProviderID}}
 	code, raw, err := s.client.doRequest(s.ctx, http.MethodPost, s.client.endpoint(s.client.apiPath("/session/")+chatID+"/model"), body, s.directoryHeader(), true)
 	if err != nil {
 		return fmt.Errorf("opencode-web switch model: %w", err)
@@ -260,7 +288,10 @@ func (s *serverSession) CancelTurn(ctx context.Context) error {
 	}
 	actx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	code, raw, err := s.client.doRequest(actx, http.MethodPost, s.client.endpoint(path), map[string]any{}, s.directoryHeader(), true)
+	// Official shape: abort (v1 SessionAbortData) and interrupt (v2
+	// V2SessionInterruptData) are both `body?: never` — no JSON body (the
+	// former empty-object body was tolerated drift, 2026-08-19 audit).
+	code, raw, err := s.client.doRequest(actx, http.MethodPost, s.client.endpoint(path), nil, s.directoryHeader(), true)
 	if err != nil {
 		return fmt.Errorf("opencode-web abort: %w", err)
 	}

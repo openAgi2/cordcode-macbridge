@@ -844,3 +844,70 @@ func TestSSETransportReplayOfCapturedFailure(t *testing.T) {
 		t.Fatalf("terminal must carry the serve's own text %q, got %q", quotaErr, terminalErr)
 	}
 }
+
+// 重试瞬态行的重附补偿（owner 2026-08-19：锁屏/后台错过「自动重试中」）：
+// StartSession 重附时新鲜快照重放一次；回合收口（idle）清除，不复活旧行。
+func TestRetrySnapshotReplayOnStartSessionAndClearOnIdle(t *testing.T) {
+	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
+	sub := newDrivenSubscriber(t, agent)
+
+	driveFrames(sub,
+		sseFrame("session.status", map[string]any{
+			"sessionID": "ses_r", "status": map[string]any{
+				"type": "retry", "attempt": 2, "message": "套餐无权限", "next": float64(1787143000000),
+			},
+		}),
+	)
+	if events := drain(sub); len(events) == 0 {
+		t.Fatal("retry status must emit")
+	}
+
+	// 重附：StartSession（resume 同会话）应重放一次重试行。
+	sess, err := agent.StartSession(context.Background(), "ses_r")
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	rs := sess.(*serverSession).sub
+	var replay *core.Event
+	for {
+		select {
+		case ev := <-rs.events:
+			if ev.Type == core.EventRetryStatus {
+				e := ev
+				replay = &e
+			}
+		default:
+			goto drained
+		}
+	}
+drained:
+	if replay == nil {
+		t.Fatal("re-attach must replay the fresh retry snapshot")
+	}
+	if replay.RetryAttempt != 2 || replay.Content != "套餐无权限" {
+		t.Fatalf("replay = %+v", replay)
+	}
+
+	// 回合收口清除：idle 后新 StartSession 不得再重放。
+	driveFrames(sub, sseFrame("session.status", map[string]any{
+		"sessionID": "ses_r", "status": map[string]any{"type": "idle"},
+	}))
+	drain(sub)
+	sess2, err := agent.StartSession(context.Background(), "ses_r")
+	if err != nil {
+		t.Fatalf("StartSession 2: %v", err)
+	}
+	t.Cleanup(func() { _ = sess2.Close() })
+	rs2 := sess2.(*serverSession).sub
+	for {
+		select {
+		case ev := <-rs2.events:
+			if ev.Type == core.EventRetryStatus {
+				t.Fatal("settled turn must not replay a retry row")
+			}
+		default:
+			return
+		}
+	}
+}

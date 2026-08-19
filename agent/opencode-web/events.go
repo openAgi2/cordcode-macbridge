@@ -335,6 +335,7 @@ func (s *sseSubscriber) handleServerEvent(payload map[string]any) {
 			sessionID = firstString(properties, "sessionID", "sessionId")
 		}
 		if sessionID != "" {
+			s.agent.clearRetrySnapshot(sessionID)
 			s.emitResultOnce(sessionID)
 		}
 	case "session.updated":
@@ -612,6 +613,9 @@ func (s *sseSubscriber) handleSessionStatus(properties map[string]any, sessionID
 		}
 		attempt := int(firstNumeric(statusMap, "attempt"))
 		next := int64(firstNumeric(statusMap, "next"))
+		// Re-attach replay tail: iOS 锁屏/后台会错过瞬态重试行（owner
+		// 2026-08-19）——记录最新快照，StartSession 重附时新鲜则重放一次。
+		s.agent.noteRetrySnapshot(sessionID, attempt, msg, next)
 		if s.agent.claimRetryStatus(sessionID, attempt) {
 			s.emit(core.Event{
 				Type:         core.EventRetryStatus,
@@ -626,6 +630,7 @@ func (s *sseSubscriber) handleSessionStatus(properties map[string]any, sessionID
 		s.resetCompletion(sessionID)
 	}
 	if status == "idle" && sessionID != "" {
+		s.agent.clearRetrySnapshot(sessionID)
 		s.emitResultOnce(sessionID)
 	}
 }

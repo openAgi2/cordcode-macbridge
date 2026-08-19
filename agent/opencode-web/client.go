@@ -107,11 +107,22 @@ func (c *Client) doRequest(ctx context.Context, method, url string, body any, di
 		// The x-opencode-directory header rides along as redundancy; the query
 		// param is the canonical form (live probe: both scope 1.18.18).
 		q := req.URL.Query()
-		if q.Get("directory") == "" {
+		appendQuery := true
+		if c.gen == generationV2 {
+			// v2 SDK (v2/gen types.gen.ts, 2026-08-19 audit): ONLY
+			// V2SessionListData declares query.directory — every other v2
+			// route is `query?: never`. The official v2 client never sends
+			// it elsewhere, and the x-opencode-directory header is a 1.18
+			// convention that stays off the v2 wire.
+			appendQuery = req.Method == http.MethodGet && strings.HasSuffix(url, "/api/session")
+		}
+		if appendQuery && q.Get("directory") == "" {
 			q.Set("directory", directory)
 			req.URL.RawQuery = q.Encode()
 		}
-		req.Header.Set("x-opencode-directory", directory)
+		if c.gen != generationV2 {
+			req.Header.Set("x-opencode-directory", directory)
+		}
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
