@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T22:19:46.778925",
+  "updated_at": "2026-08-19T23:51:45.178485",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -1699,6 +1699,92 @@
       "depends_on": [],
       "source": "全量套件首次完整跑完（2026-08-19）",
       "notes": "基线 stash 证实非本批引入",
+      "verification": {
+        "required": true,
+        "status": "pending",
+        "evidence": ""
+      }
+    },
+    {
+      "id": "ios-7-failures-triage-v2",
+      "title": "iOS 7 项先存失败：分诊报告 v2（评审全采纳）",
+      "description": "评审三处事实指正复核属实（f0db3e5d 引入空保留/75d4e40 仅静默/无现成守护）；#7 修法收紧为 purpose 区分；#6 核查落定维持 A。",
+      "status": "done",
+      "phase": "triage",
+      "kind": "docs",
+      "depends_on": [],
+      "source": "owner 评审 2026-08-19",
+      "notes": "iOS docs/2026-08-19-preexisting-test-failures-triage.md v2",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "git show 复核"
+      }
+    },
+    {
+      "id": "ios-7-failures-batch1",
+      "title": "第一批 A×5：侧栏可见 setup + reload 反向用例",
+      "description": "b231021 门控语义；9/9 绿。",
+      "status": "done",
+      "phase": "b1",
+      "kind": "fix",
+      "depends_on": [
+        "ios-7-failures-triage-v2"
+      ],
+      "source": "owner 批准",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "SessionsViewModelServerSwitchTests 9/9"
+      }
+    },
+    {
+      "id": "ios-7-failures-batch2",
+      "title": "第二批 #6：codex resume 单事务语义改测试",
+      "description": "6215bbc 语义 + 第二信号幂等断言；零产品改动。",
+      "status": "done",
+      "phase": "b2",
+      "kind": "fix",
+      "depends_on": [
+        "ios-7-failures-triage-v2"
+      ],
+      "source": "owner 批准",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "用例绿"
+      }
+    },
+    {
+      "id": "ios-7-failures-batch3",
+      "title": "第三批 #7（B）：todo purpose 区分 + 守护测试先行",
+      "description": "loadSessionTodos purpose .open/.poll（默认安全）；四处 .open；applySessionTodos allowsEmptyClear；两枚守护测试钉 f0db3e5d 保护面。真机复验待 owner。",
+      "status": "done",
+      "phase": "b3",
+      "kind": "fix",
+      "depends_on": [
+        "ios-7-failures-triage-v2"
+      ],
+      "source": "owner 批准（修法按评审收紧）",
+      "notes": "TodoRefreshGenerationTests 8/8；全量 2069/0（两轮）",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "全量套件两次 2069 过 0 用例失败"
+      }
+    },
+    {
+      "id": "ios-backlog-memory-evict-crash",
+      "title": "backlog：内存告警驱逐与异步渲染的数组越界崩溃（全量负载暴露）",
+      "description": "Fatal error: Index out of range（ContiguousArrayBuffer:695），触发窗口在 Memory warning evict 之后的消息渲染期间；单跑不触发、内存压力依赖。疑似消息缓存驱逐与 timeline 渲染竞态。需专项诊断（定位数组/线程 + 压测复现），真机低内存可感。",
+      "status": "pending",
+      "phase": "backlog",
+      "kind": "bug",
+      "depends_on": [],
+      "source": "全量套件第三/四轮（2026-08-19 23:36）",
+      "notes": "证据：/tmp/full-cctests4.log 2591-2652 行窗口",
       "verification": {
         "required": true,
         "status": "pending",
