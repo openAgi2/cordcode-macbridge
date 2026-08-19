@@ -132,6 +132,17 @@ func New(opts map[string]any) (core.Agent, error) {
 	a.resolver = NewResolver(resolverOpts...)
 	a.resolver.SetLostCallback(a.handleSeatLost)
 
+	// One-time legacy reap (design §6): synchronous so it precedes any
+	// saveState that would overwrite a legacy record. PID-safe — mismatch
+	// means remove-and-warn, never a wrong kill.
+	if dir := a.resolver.dataDirOf(); dir != "" {
+		if killed, note := CleanupLegacyManaged(dir, nil); killed {
+			slog.Info("dsh-web: legacy managed instance reaped", "detail", note)
+		} else if note != "" && note != "no legacy state file" && note != "no data dir" {
+			slog.Info("dsh-web: legacy cleanup", "detail", note)
+		}
+	}
+
 	// Startup resolution (§4.2): probe the user's instance, else spawn the
 	// managed one, in the background so agent construction (and the hello_ack
 	// built moments later) never blocks on a 30s dsh boot. hello_ack shows

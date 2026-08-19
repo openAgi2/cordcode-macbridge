@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T16:24:46.100762+00:00",
+  "updated_at": "2026-08-19T16:28:05.174635+00:00",
   "todos": [
     {
       "id": "s1-resolver-impl",
@@ -199,7 +199,7 @@
       "id": "s3-turn-terminal-impl",
       "title": "宽限进入时 running 会话推 turn 终态(幂等)",
       "description": "进入宽限/缓存探活失败时,对 registry 中该 backend running 的 dsh-web 会话推终态错误事件(EventError,透传\"dsh web 实例失联\"原文,turn 收口红线);幂等:同一 session 只推一次——宽限进入与流 1006 重连两条触发路径共享 once 状态,防双发 turn_error(§12.1-3)。实现:Resolver 失联回调→Agent 对 runningCache 中 running 会话发终态。设计§3.2 turn 段/§12 切口3",
-      "status": "in_progress",
+      "status": "done",
       "phase": "phase3",
       "kind": "impl",
       "depends_on": [
@@ -209,12 +209,17 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
+        "summary": "lossSeq 边沿序号+LossSeq();SetLostCallback 每 alive→dark 边沿恰一次;handleSeatLost 对 running 已知会话各推 EventError 终态(失联原文),边沿幂等+重武装,通道满如实 Warn",
+        "artifacts": [
+          "git:dbbe7de",
+          "agent/dsh-web/resolver.go",
+          "agent/dsh-web/dshweb.go",
+          "agent/dsh-web/session.go"
+        ],
         "checked_at": null
       }
     },
@@ -222,7 +227,7 @@
       "id": "s3-turn-terminal-tests",
       "title": "turn 终态幂等单测",
       "description": "①宽限进入→running 会话各收一次终态;②宽限进入+流 1006 双触发→同一 session 只推一次;③终态事件形状符合 turn 收口语义;④非 running 会话不推",
-      "status": "pending",
+      "status": "done",
       "phase": "phase3",
       "kind": "tests",
       "depends_on": [
@@ -232,12 +237,16 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
+        "summary": "running 会话同边沿恰 1 条终态且形状正确;同边沿重复触发不双发;下一边沿重武装再推 1 条;idle/未知不推",
+        "artifacts": [
+          "git:HEAD",
+          "agent/dsh-web/turn_terminal_test.go",
+          "cmd:go test -run TestSeatLossTerminal => ok"
+        ],
         "checked_at": null
       }
     },
@@ -245,7 +254,7 @@
       "id": "s3-turn-terminal-regression",
       "title": "turn 终态回归:全量测试",
       "description": "go test ./agent/dsh-web/... ./go-bridge/... -count=1 全绿",
-      "status": "pending",
+      "status": "done",
       "phase": "phase3",
       "kind": "regression",
       "depends_on": [
@@ -255,12 +264,14 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "mixed",
+        "status": "present",
+        "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
+        "summary": "agent/dsh-web + go-bridge 全量 -count=1 零失败",
+        "artifacts": [
+          "cmd:go test ./agent/dsh-web/... ./go-bridge/... -count=1 => 全 ok"
+        ],
         "checked_at": null
       }
     },
@@ -268,7 +279,7 @@
       "id": "s4-shutdown-migration-impl",
       "title": "关停留任 + 旧孤儿一次性迁移清理(PID 安全)",
       "description": "①Stop() 不杀本进程 spawn 的位子实例(留任收养,设计§5;单测清理用注入);②启动一次性迁移:存在旧 state 且指向 3096–3196→核对 PID cmdline 含 dsh 且仍监听记录端口才杀,对不上只删 state+告警(§12.1 无/§6 PID 安全,防 PID 复用),随后删 state 文件;③诊断补实例进程启动时间(ps 取,host.describe 无此字段,§5/S9)。设计§5/§6/§8.8",
-      "status": "pending",
+      "status": "in_progress",
       "phase": "phase4",
       "kind": "impl",
       "depends_on": [

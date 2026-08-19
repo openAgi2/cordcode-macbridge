@@ -611,17 +611,19 @@ func (r *Resolver) LastSpawnErr() error {
 	return r.spawnErr
 }
 
-// Stop kills the managed instance this process spawned (bridge shutdown).
-// External instances are left running — they are not ours.
+// dataDirOf exposes the persistence dir for the one-time legacy cleanup.
+func (r *Resolver) dataDirOf() string { return r.dataDir }
+
+// Stop disconnects the resolver WITHOUT killing the instance this process
+// spawned (design §5 "不杀 + 下次收养"): the seat keeps serving the user's
+// browser across bridge restarts, and the next run adopts it via the seat.
+// Failed-spawn children are reaped inside spawnOnSeat itself; this path never
+// owns a live child's death anymore. Tests clean up via their own starters.
 func (r *Resolver) Stop() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	var stopErr error
-	if r.managedStart != nil {
-		stopErr = r.managedStart.Stop()
-	}
 	r.resolved = nil
-	return stopErr
+	return nil
 }
 
 func portOf(baseURL string) int {
