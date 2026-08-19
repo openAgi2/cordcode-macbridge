@@ -115,6 +115,18 @@ owner 指出理想路径是 dsh-web 式「读官方 web 源码→穷举 API→�
 
 **owner 质疑成立的点与根因**：`GET /project` 最初就接了（首版 projects.go），但只接到 list_projects 建议 RPC；**会话列表骨架**按设计稿 §4 做成「无头 GET /session 全量 + 指纹」——设计稿本身把无头响应当全量真值（错误假设，活体证明它是陈旧百条切片）。补做的官方源码审计穷举了 SDK API 面并对表 models/占用/错误三面，但**没有审「官方 web 如何拉会话列表」这条路径**——审计记录把 /session list 标为「已接且一致」，核对的是端点存在性而非语义。该错误假设单点炸出整串症状（新会话不可见→指纹不变→无刷新→目录分组污染），与 owner「测试出一堆问题也不奇怪」的推断一致。教训入档：**对表必须到语义级（官方客户端如何调用+响应形状活体验证），端点存在性不构成一致性证明**。
 
+## 四·补五、官方调用形状契约（owner 质询「如何证明其他地方没犯相同错误」，commit `8fe67b2`）
+
+**机制化证明**：`official_shapes_test.go` 把官方 v1 SDK（sdk/js gen types.gen.ts）的逐端点请求形状——路径、查询参数、body 键集——钉进测试常跑；任何面今后形状漂移（重蹈 /session 列表覆辙）测试直接红。本轮审计结论与修正：
+
+- **directory 全面对齐官方查询参数**：SDK 全部 12 个 Data 类型均为 `query{directory?}`；此前只列表带查询参数、其余面只发请求头（等效但非官方形状）。doRequest 现统一追加 `?directory=`（头保留作冗余）。
+- **create 对齐 SessionCreateData**：官方 body 只可选 {parentID,title}——directory 走查询参数、**model 不属于 create**（首条 prompt_async 才绑定会话模型）。旧实现把 directory+model 塞 body（serve 容忍多余键，非官方形状）。**裸沙盒（真 1.18.18、隔离 XDG、4296）行为验证**：`POST /session?directory=…` body `{}` → 200 落对目录、`GET /session?directory=` 列表可见、DELETE 清理。
+- **权限枚举 SDK 证明**：`once|always|reject`（PostSessionIdPermissionsPermissionIdData）——旧实现的 allow/deny 回退字面量是永不接受的死信，已删；路径 `/session/{id}/permissions/{rid}` 与 body `{"response":…}` 本就与官方一致（当初探测式实现歪打正着，现由 SDK 证明钉死）。
+- **v1/v2 同步 prompt 路径复核**：v1=`/session/{id}/message`、v2=`/api/session/{id}/prompt`（client gen 证实）——本实现 v2 分支路径正确，v1 只用 prompt_async（官方路径），无偏差。
+- **待核面（如实）**：v2 分支整体（v2 权限模型为 request/saved 注册表制、v2 prompt body `{"prompt":…}` 形状）未对 v2 SDK 逐一复核——owner 现网是 1.18，v2 留待接入现网时补核；/global/health 探针为桥接自创（官方客户端无此用法，用于双代探测，非对官方面的翻译，无对齐义务）。
+
+**证明结构三层**：①形状层——official_shapes_test 契约（SDK 类型 → 断言）；②行为层——裸沙盒真二进制验证（create/list/delete）+ 既有 sandbox E2E（探测/目录/发送/失败收口）；③现网层——owner 矩阵行 1–6 真机验收（占用/审批/旁观等）。三层各管一段，缺层即回到「端点存在性≠语义一致性」的老坑。
+
 ## 五、验收矩阵（owner 执行——§6 现网行 1–6）
 
 前提：Mac 运行新 Release（已装 `/Applications`，runtime commit `78b72f1`）；iPhone 安装本分支 Debug（已装）；Mac 网页打开 `http://127.0.0.1:4096`。
