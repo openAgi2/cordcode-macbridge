@@ -316,6 +316,7 @@ func TestResolveExternalProbeHit(t *testing.T) {
 type countingStarter struct {
 	ln     net.Listener
 	starts int
+	stops  int
 	fail   bool
 	pid    int // reported child pid; defaults to the test process (alive)
 }
@@ -338,6 +339,7 @@ func (s *countingStarter) Start(ctx context.Context, port int) (int, error) {
 }
 
 func (s *countingStarter) Stop() error {
+	s.stops++
 	if s.ln != nil {
 		return s.ln.Close()
 	}
