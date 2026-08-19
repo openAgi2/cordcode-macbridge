@@ -30,11 +30,11 @@
   },
   "reports": {
     "completion_report_path": "docs/2026-08-19-dsh-web-canonical-3080-instance-design完成情况.md",
-    "completion_report_status": "missing",
-    "last_generated_at": null,
-    "based_on_queue_hash": null
+    "completion_report_status": "current",
+    "last_generated_at": "2026-08-19T16:37:26.718814+00:00",
+    "based_on_queue_hash": "6545f4bfdebe"
   },
-  "updated_at": "2026-08-19T16:34:15.801849+00:00",
+  "updated_at": "2026-08-19T16:37:26.718814+00:00",
   "todos": [
     {
       "id": "s1-resolver-impl",
@@ -361,7 +361,7 @@
       "id": "s5-diagnostics-doc-impl",
       "title": "诊断文案 + 活文档同步",
       "description": "①agent/dsh-web/diagnostics.go:实例来源(位子上 external/managed)、reconnecting 状态与宽限截止、PID+进程启动时间,诊断区分\"端口被非 dsh 进程占用\";②GO_BRIDGE_ARCHITECTURE.md ~:237-241 的 3096–3196 段改写为权威端口模型(S8);③run_diagnostics 的 Resolve 副作用在文案/文档标注(S2)。设计§3.2/§4-3/§5/§8.8/S8",
-      "status": "in_progress",
+      "status": "done",
       "phase": "phase5",
       "kind": "impl",
       "depends_on": [
@@ -371,12 +371,17 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
+        "summary": "diagInstance 宽限窗口/非 dsh 占端口区分/托管行 pid+ps 启动时间+留任语义/external 行端口即身份+突变标注;GO_BRIDGE_ARCHITECTURE.md 生命周期段改写座位模型;processStartTime 跨平台",
+        "artifacts": [
+          "git:aa61e37",
+          "agent/dsh-web/diagnostics.go",
+          "GO_BRIDGE_ARCHITECTURE.md",
+          "agent/dsh-web/proc_unix.go"
+        ],
         "checked_at": null
       }
     },
@@ -384,7 +389,7 @@
       "id": "s5-diagnostics-doc-tests",
       "title": "诊断输出单测",
       "description": "diagnostics 输出含:来源/端口/reconnecting(宽限中)/启动时间;宽限外不含 reconnecting",
-      "status": "pending",
+      "status": "done",
       "phase": "phase5",
       "kind": "tests",
       "depends_on": [
@@ -394,12 +399,16 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
+        "summary": "宽限窗口文案(含座位+backend_unavailable 行为)/托管行/external 收养行三条断言",
+        "artifacts": [
+          "git:aa61e37",
+          "agent/dsh-web/diagnostics_seat_test.go",
+          "cmd:go test ./agent/dsh-web/ -run TestDiagInstance => ok"
+        ],
         "checked_at": null
       }
     },
@@ -407,7 +416,7 @@
       "id": "s5-diagnostics-doc-regression",
       "title": "诊断与活文档回归",
       "description": "go test ./agent/dsh-web/... -count=1 全绿;git diff 审阅 GO_BRIDGE_ARCHITECTURE.md 段落与设计§2/§3 一致",
-      "status": "pending",
+      "status": "done",
       "phase": "phase5",
       "kind": "regression",
       "depends_on": [
@@ -417,12 +426,16 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
+        "summary": "dsh-web 全量 ok + go vet 两包通过;活文档段落 diff 审阅与设计 §2/§3 语义一致(自查)",
+        "artifacts": [
+          "cmd:go test ./agent/dsh-web/ -count=1 => ok",
+          "cmd:go vet ./agent/dsh-web/ ./go-bridge/ => ok",
+          "git:aa61e37"
+        ],
         "checked_at": null
       }
     },
@@ -430,7 +443,7 @@
       "id": "s6-full-regression",
       "title": "全量回归收口",
       "description": "根模块 go test ./... -count=1 全绿 + go vet ./agent/dsh-web/... ./go-bridge/... + go build ./go-bridge;relay-server 模块不受影响(零改动声明核对 git diff);真机验收行(§8.1/8.3/8.9/8.10 真机部分)移交 owner 矩阵,报告中如实标注",
-      "status": "pending",
+      "status": "done",
       "phase": "phase6",
       "kind": "regression",
       "depends_on": [
@@ -440,12 +453,16 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "mixed",
-        "attestation": "self-attested",
+        "status": "present",
+        "method": "automated",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
+        "summary": "根模块 go test ./... -count=1 零失败(exit=0)+ go build ./... OK + go vet OK;git diff e60c141 越界路径(relay-server/MacBridge/iOS 等)零改动;真机验收行(§8.1/8.3/8.9/8.10 真机部分)移交 owner 矩阵,本队列不覆盖",
+        "artifacts": [
+          "cmd:go test ./... -count=1 => exit 0 全 ok",
+          "cmd:go build ./... => OK",
+          "cmd:git diff --stat e60c141 (scope 外) => 空"
+        ],
         "checked_at": null
       }
     }
