@@ -283,11 +283,9 @@ func usageTotalFor(info map[string]any) int {
 		cacheRead = anyInt(cache["read"])
 		cacheWrite = anyInt(cache["write"])
 	}
-	total := anyInt(tokens["input"]) + anyInt(tokens["output"]) + anyInt(tokens["reasoning"]) + cacheRead + cacheWrite
-	if total == 0 {
-		total = anyInt(tokens["total"])
-	}
-	return total
+	// Official tokenTotal is STRICTLY the five-part sum
+	// (session-context-metrics.ts) — no `total`-field fallback.
+	return anyInt(tokens["input"]) + anyInt(tokens["output"]) + anyInt(tokens["reasoning"]) + cacheRead + cacheWrite
 }
 
 func anyInt(v any) int {

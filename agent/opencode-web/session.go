@@ -85,10 +85,12 @@ func (s *serverSession) CurrentSessionID() string {
 func (s *serverSession) Events() <-chan core.Event { return s.sub.events }
 func (s *serverSession) Alive() bool               { return s.alive.Load() }
 
-// resolveSendModel picks the send model: freshest pending selection first,
-// then the StartSession-resolved model. Empty means an honest error — the
-// serve's session.model is frequently null and the legacy default-model hack
-// is exactly the 81ms-empty-turn root cause this backend must not repeat.
+// resolveSendModel picks the send model with the official picker's chain
+// (prompt-model-selection.ts): current pending selection → session-adopted
+// model → first connected provider's default ?? its first model. Every
+// candidate still passes the catalog gate below — the fallback never escapes
+// the connected catalog, so the legacy default-model failure mode (a made-up
+// model id) cannot recur.
 func (s *serverSession) resolveSendModel() (ocwModelRef, error) {
 	if pending := s.a.GetModel(); pending != "" {
 		providerID, modelID := parseQualifiedModel(pending)
@@ -99,7 +101,30 @@ func (s *serverSession) resolveSendModel() (ocwModelRef, error) {
 	if m, ok := s.model.Load().(*ocwModelRef); ok && m != nil && m.ID != "" {
 		return *m, nil
 	}
-	return ocwModelRef{}, fmt.Errorf("opencode-web: no model selected — pick a model from the catalog before sending (list_models)")
+	catalog, err := s.a.fetchModelCatalog(s.ctx, s.client)
+	if err != nil {
+		return ocwModelRef{}, fmt.Errorf("opencode-web: no model selected and the catalog is unavailable: %w", err)
+	}
+	if ref, ok := catalog.fallbackModel(); ok {
+		return ref, nil
+	}
+	return ocwModelRef{}, fmt.Errorf("opencode-web: no usable model — the server's connected provider catalog is empty (configure a provider in OpenCode first)")
+}
+
+// fallbackModel mirrors the official picker fallback: the FIRST connected
+// provider's default model, else its first listed model.
+func (c *ocwModelCatalog) fallbackModel() (ocwModelRef, bool) {
+	for _, providerID := range c.connectedOrder {
+		if modelID, ok := c.defaults[providerID]; ok && modelID != "" {
+			return ocwModelRef{ProviderID: providerID, ID: modelID}, true
+		}
+		for _, m := range c.Models {
+			if p, id := parseQualifiedModel(m.Name); p == providerID && id != "" {
+				return ocwModelRef{ProviderID: p, ID: id}, true
+			}
+		}
+	}
+	return ocwModelRef{}, false
 }
 
 // Send implements core.AgentSession. Phase 1 is text-only: non-empty image or

@@ -36,6 +36,12 @@ type ocwModelCatalog struct {
 	Models []core.ModelOption
 	// windows is the shared window map (also used by the usage formula).
 	windows map[string]int
+	// defaults maps connected providerID → its default modelID (envelope
+	// `default` field) — the official picker's fallback-chain input.
+	defaults map[string]string
+	// connectedOrder preserves the envelope's connected provider order (the
+	// official fallback takes the FIRST connected provider's default).
+	connectedOrder []string
 }
 
 // catalogCacheTTL bounds catalog freshness; one 5MB fetch per window at most.
@@ -115,7 +121,10 @@ func parseProviderCatalog(raw []byte) *ocwModelCatalog {
 		for _, id := range envelope.Connected {
 			connected[id] = true
 		}
-		catalog := &ocwModelCatalog{windows: map[string]int{}}
+		catalog := &ocwModelCatalog{
+			windows:  map[string]int{},
+			defaults: map[string]string{},
+		}
 		var rows []core.ModelOption
 		for _, provider := range envelope.All {
 			if provider.ID == "" || len(provider.Models) == 0 {
@@ -123,6 +132,10 @@ func parseProviderCatalog(raw []byte) *ocwModelCatalog {
 			}
 			if !connected[provider.ID] {
 				continue // 未配置凭据的 provider 不进选择框（对齐官方网页）；connected 为空 = 无可用模型
+			}
+			catalog.connectedOrder = append(catalog.connectedOrder, provider.ID)
+			if def, ok := envelope.Default[provider.ID]; ok && def != "" {
+				catalog.defaults[provider.ID] = def
 			}
 			for _, model := range provider.Models {
 				id := model.ID
@@ -155,7 +168,7 @@ func parseProviderCatalog(raw []byte) *ocwModelCatalog {
 	seen := map[string]bool{}
 	windows := map[string]int{}
 	collectCatalogModels(root, "", &rows, seen, windows)
-	catalog := &ocwModelCatalog{windows: windows}
+	catalog := &ocwModelCatalog{windows: windows, defaults: map[string]string{}}
 	for _, row := range rows {
 		catalog.Models = append(catalog.Models, row)
 	}

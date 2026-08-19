@@ -80,9 +80,6 @@ func usageFromMessages(ctx context.Context, a *Agent, c *Client, messages []map[
 	output := anyInt(tokens["output"])
 	reasoning := anyInt(tokens["reasoning"])
 	total := input + output + reasoning + cacheRead + cacheWrite
-	if total == 0 {
-		total = anyInt(tokens["total"])
-	}
 	if total <= 0 {
 		return nil
 	}

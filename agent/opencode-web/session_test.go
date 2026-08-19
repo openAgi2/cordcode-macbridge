@@ -109,19 +109,46 @@ func TestSendCatalogGateIsZeroPOST(t *testing.T) {
 	}
 }
 
-func TestSendWithoutAnyModelFailsZeroPOST(t *testing.T) {
-	agent, serve := newSendAgent(t, map[string]string{})
+// Official picker semantics (prompt-model-selection.ts): with no explicit
+// selection, the FIRST connected provider's default model rides the send —
+// never an invented id.
+func TestSendFallsBackToConnectedDefaultModel(t *testing.T) {
+	agent, serve := newSendAgent(t, map[string]string{
+		"/session/ses_new/prompt_async": `{}`,
+	})
+	withCreateRoute(serve, `{"id":"ses_new"}`)
+	// No SetModel, no resume id — fallback must pick zhipuai-coding-plan's
+	// default glm-4.7 from the envelope `default` map.
+	sess, err := agent.StartSession(context.Background(), "")
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	defer sess.Close()
+	if err := sess.Send("hello", nil, nil); err != nil {
+		t.Fatalf("Send via fallback: %v", err)
+	}
+	prompts := countRequests(serve, "POST", "/session/ses_new/prompt_async")
+	if len(prompts) != 1 || !strings.Contains(prompts[0].Body, `"modelID":"glm-4.7"`) {
+		t.Fatalf("fallback must send the connected default glm-4.7, got %+v", prompts)
+	}
+}
+
+// Empty connected catalog = nothing usable: honest error, zero POST.
+func TestSendFailsWhenConnectedCatalogEmpty(t *testing.T) {
+	agent, serve := newSendAgent(t, map[string]string{
+		"/provider": `{"all":[{"id":"other-provider","models":{"other-model":{"id":"other-model","limit":{"context":1000}}}}],"connected":[]}`,
+	})
 	sess, err := agent.StartSession(context.Background(), "")
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 	defer sess.Close()
 	err = sess.Send("hello", nil, nil)
-	if err == nil || !strings.Contains(err.Error(), "no model selected") {
-		t.Fatalf("expected honest no-model error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "connected provider catalog is empty") {
+		t.Fatalf("expected honest empty-catalog error, got %v", err)
 	}
 	if posts := countRequests(serve, "POST", "/session"); len(posts) != 0 {
-		t.Fatalf("no-model send must yield ZERO POSTs, got %+v", posts)
+		t.Fatalf("empty-catalog send must yield ZERO POSTs, got %+v", posts)
 	}
 }
 
