@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T20:19:36.999020",
+  "updated_at": "2026-08-19T20:38:59.982221",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -1516,6 +1516,40 @@
         "required": true,
         "status": "present",
         "evidence": "testOpenCodeWebSessionOffersOfficialActionsEvenWithoutKind 绿 + TaskDock/WireBehavior 套件绿"
+      }
+    },
+    {
+      "id": "s12-1-badmodel-forensics",
+      "title": "验收行2取证：沙盒证明 Mac 翻译链正确，真因 relay prekey 耗尽",
+      "description": "owner 验收 5/6 过。行2空等：现网日志 prekey exhausted（两设备）+ iPhone 零次 get_delivery_prekey_status；沙盒全链路（mock 403）retry→turn_error→idle→错误文本全对。真因：直连 transport relayCredentials:nil→维护跳过→池只耗不补；durable 里程碑走信箱，瞬断窗口投递丢失。",
+      "status": "done",
+      "phase": "s12-1",
+      "kind": "forensics",
+      "depends_on": [],
+      "source": "owner 验收 2026-08-19",
+      "notes": "沙盒已清理",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "client2.mjs 输出终态收口 YES"
+      }
+    },
+    {
+      "id": "s12-2-prekey-direct-maintenance",
+      "title": "iOS：直连 prekey 维护（SavedBridgeStore 装载凭据）+ 5 分钟周期水位检查",
+      "description": "loadRelayCredentialsForMaintenance（同源 connector 语义）；replenish 改走装载器；维护任务周期循环。",
+      "status": "done",
+      "phase": "s12-2",
+      "kind": "impl",
+      "depends_on": [
+        "s12-1-badmodel-forensics"
+      ],
+      "source": "owner 验收",
+      "notes": "iOS b2d934c 真机已装",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "MailboxReplay/RelayFrame/Phase2 套件绿"
       }
     }
   ]

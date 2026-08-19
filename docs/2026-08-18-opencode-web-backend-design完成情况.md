@@ -172,6 +172,21 @@ owner 指出理想路径是 dsh-web 式「读官方 web 源码→穷举 API→�
 
 **测试**：`testOpenCodeWebSessionOffersOfficialActionsEvenWithoutKind`（薄步骤 + opencode-web 会话 → 官方按钮）；TaskDock/WireBehavior 套件绿。真机 c1762c6 已装。
 
+## 四·补九、验收行 2 收口：坏模型回合 iOS 空等 = relay prekey 耗尽（owner 验收 2026-08-19 20:2x，iOS `b2d934c`）
+
+**owner 验收**（5/6 过：占用圈/历史一致/实时旁观/审批收口 ✅）：行 2——坏模型（权限不足/额度没了）Mac 端已报错，iOS 空等。
+
+**取证（双路）**：
+- 现网日志：两次 iOS 发送（20:21:56 好模型流式正常、20:22:45）均完整跑完（turn_completed 20:23:09），serve 侧消息记录完好；但自 **20:22:26 起 `relay-router: prekey exhausted`（两台设备）**持续告警，且整个 runtime 生命周期 iPhone **零次** `get_delivery_prekey_status`。
+- 全栈沙盒复现（mock provider 第 2 次调用回 403 权限不足）：**Mac 翻译链对该失败模式完全正确**——`session_retry_status(attempt=5) → turn_error(真实文案) → session_state_changed idle → text_delta(错误文本)`，终态收口 + 文案均 YES。排除翻译层。
+
+**真因**：`turn_error/turn_completed` 是 durable 里程碑，设备瞬断（锁屏/后台/重连窗口）时走 relay 加密信箱投递；**直连 transport 恒 `relayCredentials:nil`** → `runRelayPostConnectMaintenance` 直接跳过 → LAN 直连期间 prekey 池只耗不补（目标水位 32，全天测试耗尽）→ 信箱投递丢失 → iPhone 永远等不到终态 → 空等（Mac 官方端直连 serve 正常报错）。
+
+**修复（iOS b2d934c）**：`loadRelayCredentialsForMaintenance`——直连时凭据从 SavedBridgeStore 装载（与 connector 同源语义，无 relay 配置静默跳过）；`replenishDeliveryPrekeysIfNeeded` 改走装载器；维护任务改 **5 分钟周期循环**（长连接期间也补水）。MailboxReplay/RelayFrame/Phase2 套件绿。
+
+**验收行 5 说明**：旧 OpenCode 入口按 owner 指令已从 Mac 驱动列表移除（§补七），iOS 旧入口不再可用属预期；恢复 = 驱动列表加回（测试断言已翻转，回滚路径在案）。
+
+
 
 
 
