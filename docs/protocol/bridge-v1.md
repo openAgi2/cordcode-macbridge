@@ -381,6 +381,11 @@ field, type, or wire value was changed.
   - Field names/values are shape-pinned to the official frame
     (`agent/opencode-web` permlab capture + official desktop
     session-permission-dock.tsx); absence on other backends is by design.
+  - The Session Projection part carries the same two fields
+    (`permissionKind` / `permissionPatterns`) — the projected part is the
+    permission-card SoT for SSV2 clients, so the kernel copies them from the
+    wire event on reduce (non-empty merge: a thin duplicate from a same-serve
+    legacy backend must not erase them).
 - v1 limitations (enforced at MacBridge parse time, never reach iOS):
   - Only single-question, single-select AskUserQuestion prompts are emitted as
     `question_asked`.
@@ -1325,6 +1330,7 @@ in `docs/protocol/schema/bridge-v1.types.ts`.
 | `title?: string` | Path-bearing display title (Claude Edit/Write `file_path`, Codex patch target, etc.). Clients use it for activity-row labels and `extractPrimaryPath` when structured file path is otherwise missing. |
 | `fileChanges?: { path, kind?, movePath?, diff? }[]` | Structured file mutations for this tool step (Codex Patch / apply_patch). Same shape as UnifiedFileChange. |
 | `requiresPermissionConfirmation?: boolean` | Pending tool must be approved before the turn continues (`permission_request`). Clients map to the existing permission card. Absent/false on older producers. |
+| `permissionKind?: string` / `permissionPatterns?: string[]` | Official permission payload (opencode-web v1.18) carried on the projected permission part: category key + pattern rows so SSV2 clients render the official card (category line + patterns + reject/always/once). Mirrors the `permission_request` extras; additive, absent on other backends. |
 
 Producers (live `tool_started`/`tool_finished` and cold hydrate) must pass these through the
 Projection Kernel reducer so snapshot/patch parts retain them. Clients map them read-only; when

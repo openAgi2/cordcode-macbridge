@@ -105,6 +105,46 @@ func TestReducerPermissionRequestKeepsReasonAsTitle(t *testing.T) {
 	t.Fatalf("missing bash permission part: %+v", proj.Turns[0].Assistant.Parts)
 }
 
+// 官方载荷（opencode-web v1.18，live-pinned permission.asked）：permissionKind/
+// patterns 必须落到投影 part（SSV2 权限卡的 SoT），且同 id 薄事件后到不得抹掉
+//（双 backend 订阅同一 serve 的竞态：老 opencode 与 opencode-web 各发一条）。
+func TestReducerPermissionRequestCarriesOfficialPayloadAndThinMergeKeepsIt(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "opencode-web", "ses_1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "opencode-web", "ses_1", "permission_request", map[string]interface{}{
+		"requestId":      "per_9",
+		"toolName":       "external_directory",
+		"permissionKind": "external_directory",
+		"patterns":       []interface{}{"/Users/jacklee/Projects/Chat/*"},
+		"toolInput":      "/Users/jacklee/Projects/Chat/红楼梦故事.txt",
+	}))
+	// 同 id 薄载荷（老 backend 竞态）后到。
+	r.Apply(ev(3, "opencode", "ses_1", "permission_request", map[string]interface{}{
+		"requestId": "per_9",
+		"toolName":  "",
+	}))
+
+	proj, ok := r.Snapshot("opencode-web", "ses_1")
+	if !ok {
+		t.Fatal("no projection")
+	}
+	for _, p := range proj.Turns[0].Assistant.Parts {
+		if p.Type == "tool" && p.ItemID == "per_9" {
+			if !p.RequiresPermissionConfirmation || p.ToolStatus != "pending" {
+				t.Fatalf("pending permission part = %+v", p)
+			}
+			if p.PermissionKind != "external_directory" {
+				t.Fatalf("permissionKind = %q, want external_directory (thin merge must keep official fields)", p.PermissionKind)
+			}
+			if len(p.PermissionPatterns) != 1 || p.PermissionPatterns[0] != "/Users/jacklee/Projects/Chat/*" {
+				t.Fatalf("permissionPatterns = %v", p.PermissionPatterns)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing permission part: %+v", proj.Turns[0].Assistant.Parts)
+}
+
 func TestReducerPermissionResolvedClearsPendingAndLeavesRunning(t *testing.T) {
 	r := newTestReducer()
 	r.Apply(ev(1, "dsh-web", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))

@@ -114,7 +114,10 @@ struct RuntimeConfig {
         port: Int = 8777,
         dataDir: String,
         logDir: String,
-        drivers: [String] = ["claude", "opencode", "codex", "grokbuild", "dsh-web", "opencode-web"],
+        // 老 opencode backend 已从驱动列表移除（owner 2026-08-19：与 opencode-web
+        // 双订阅同一 serve，事件/投影双流互相覆盖，干扰 opencode-web 测试）。
+        // agent/opencode 代码保留未删，回滚只需把 "opencode" 加回此列表。
+        drivers: [String] = ["claude", "codex", "grokbuild", "dsh-web", "opencode-web"],
         workDir: String = FileManager.default.homeDirectoryForCurrentUser.path,
         codexBackend: String = "app_server",
         codexAppServerURL: String = "",

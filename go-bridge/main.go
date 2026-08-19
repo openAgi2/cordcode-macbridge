@@ -33,7 +33,9 @@ import (
 
 func Main() {
 	port := flag.Int("port", 8777, "WebSocket listen port")
-	drivers := flag.String("drivers", "claude,opencode,codex,grokbuild,dsh-web,opencode-web", "Comma-separated agent list")
+	// 老 opencode backend 移除（owner 2026-08-19：与 opencode-web 双订阅同一 serve 互扰）；
+	// 代码保留，回滚加回 "opencode" 即可。
+	drivers := flag.String("drivers", "claude,codex,grokbuild,dsh-web,opencode-web", "Comma-separated agent list")
 	workDir := flag.String("work-dir", "", "Working directory for agents (default: cwd)")
 	showVersion := flag.Bool("version", false, "Print runtime version and exit")
 	codexBackend := flag.String("codex-backend", envOr("GO_BRIDGE_CODEX_BACKEND", "exec"), "Codex backend mode: exec or app_server")

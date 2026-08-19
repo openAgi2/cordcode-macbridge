@@ -261,8 +261,10 @@ final class MacBridgeBehaviorTests: XCTestCase {
             return XCTFail("argv must contain -drivers")
         }
         let drivers = args[idx + 1].split(separator: ",").map(String.init)
-        XCTAssertTrue(drivers.contains("opencode-web"), "drivers must include opencode-web (coexistence)")
-        XCTAssertTrue(drivers.contains("opencode"), "legacy opencode driver stays during coexistence")
+        XCTAssertTrue(drivers.contains("opencode-web"), "drivers must include opencode-web")
+        // 老 opencode driver 已移除（owner 2026-08-19：与 opencode-web 双订阅同一
+        // serve，双事件/双投影流互覆干扰测试）。回滚 = 从列表加回并翻转此断言。
+        XCTAssertFalse(drivers.contains("opencode"), "legacy opencode driver must stay removed (dual-subscription interference)")
     }
 
     func testProcessEnvironmentCarriesOpenCodeCreds() {

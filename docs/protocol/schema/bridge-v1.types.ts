@@ -511,6 +511,14 @@ export type BridgeProjectionPart =
        * on older producers. Clients map to the existing permission card.
        */
       requiresPermissionConfirmation?: boolean;
+      /**
+       * Official permission payload (opencode-web v1.18 permission.asked, live-pinned):
+       * category key + pattern rows carried on the projected permission part so SSV2
+       * clients render the official card (需要权限 + category line + patterns +
+       * reject/always/once). Mirrors the wire permission_request extras; additive.
+       */
+      permissionKind?: string;
+      permissionPatterns?: string[];
     }
   | { type: "file"; path?: string; kind?: string; diff?: string; movePath?: string }
   | {

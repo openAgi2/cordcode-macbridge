@@ -151,6 +151,27 @@ func dataString(m map[string]interface{}, key string) string {
 	return ""
 }
 
+// dataStringSlice reads a JSON string-array event field ([]interface{} of strings).
+func dataStringSlice(m map[string]interface{}, key string) []string {
+	if m == nil {
+		return nil
+	}
+	raw, ok := m[key].([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		if s, ok := v.(string); ok && s != "" {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func dataInt64(m map[string]interface{}, key string) int64 {
 	if m == nil {
 		return 0
@@ -875,6 +896,14 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		} else if v, ok := data["toolInputRaw"]; ok {
 			part.ToolInput = v
 		}
+		// Official permission payload (opencode-web v1.18): additive category/pattern
+		// fields ride the projected part so SSV2 clients render the official card.
+		if kind := dataString(data, "permissionKind"); kind != "" {
+			part.PermissionKind = kind
+		}
+		if patterns := dataStringSlice(data, "patterns"); len(patterns) > 0 {
+			part.PermissionPatterns = patterns
+		}
 		found := false
 		for i := range t.Assistant.Parts {
 			if t.Assistant.Parts[i].Type == "tool" && t.Assistant.Parts[i].ItemID == callID {
@@ -1217,6 +1246,14 @@ func mergeToolPart(dst *ProjectionPart, src ProjectionPart) {
 	if src.ToolStatus != "" {
 		dst.ToolStatus = src.ToolStatus
 	}
+	// Official permission fields: non-empty wins (thin duplicates from a
+	// same-serve legacy backend must not erase the official payload).
+	if src.PermissionKind != "" {
+		dst.PermissionKind = src.PermissionKind
+	}
+	if len(src.PermissionPatterns) > 0 {
+		dst.PermissionPatterns = src.PermissionPatterns
+	}
 	if src.RequiresPermissionConfirmation {
 		dst.RequiresPermissionConfirmation = true
 	} else if src.ToolStatus != "" && src.ToolStatus != "pending" {
@@ -1515,6 +1552,10 @@ func cloneProjectionPart(part ProjectionPart) ProjectionPart {
 	out.Matches = cloneProjectionJSONValue(part.Matches)
 	out.FileChanges = cloneProjectionJSONValue(part.FileChanges)
 	out.UserInputQuestions = cloneProjectionJSONValue(part.UserInputQuestions)
+	if len(part.PermissionPatterns) > 0 {
+		out.PermissionPatterns = make([]string, len(part.PermissionPatterns))
+		copy(out.PermissionPatterns, part.PermissionPatterns)
+	}
 	if len(part.SubagentBlocks) > 0 {
 		// SubagentBlocks is a concrete []ProjectionPart (recursive); the shallow `out := part`
 		// above only copies the slice header. Deep-copy each nested part so the reducer's

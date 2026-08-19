@@ -35,6 +35,13 @@ type ProjectionPart struct {
 	// Additive; absent/false on older producers. SSV2 clients render the existing
 	// permission card from this flag — the raw permission_request is not SoT.
 	RequiresPermissionConfirmation bool `json:"requiresPermissionConfirmation,omitempty"`
+	// Official permission payload (opencode-web v1.18 permission.asked, live-pinned):
+	// category key + pattern rows mirror the wire permission_request fields; SSV2
+	// clients render the official card (需要权限 + category line + patterns +
+	// reject/always/once triple) from the projected part. Additive; absent on
+	// other backends. See bridge-v1.md「Official permission payload」.
+	PermissionKind     string   `json:"permissionKind,omitempty"`
+	PermissionPatterns []string `json:"permissionPatterns,omitempty"`
 
 	// file
 	Path     string `json:"path,omitempty"`
