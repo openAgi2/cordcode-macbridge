@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T12:40:03+0800",
+  "updated_at": "2026-08-19T12:48:03+0800",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -1033,6 +1033,77 @@
         "summary": "真机安装启动（非 UI 操作）；owner 复测：重试结束后应显示套餐原文并解除执行态。",
         "artifacts": [],
         "checked_at": "2026-08-19T12:40:03+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-coldopen-stuck-impl",
+      "title": "owner 报障：冷启动后失败会话仍执行中且停止无效（go-bridge 注册表旧洞 ed42513）",
+      "description": "serve 真相只读核实：busy 表空、失败 assistant time.completed 有值——serve 侧早已终局；冷开 hydrate 映射正确（失败 assistant→text+turn_completed）。根因在 go-bridge 通用层：passive 事件循环的注册表 markIdle 只认 turn_completed/error，漏 turn_error/turn_aborted——失败 turn 后 registry 永远 running；opencode-web 无 RunningSessionLister，列表 runtimeState 回退 registry → iOS 冷开被种成执行中，停止按钮无法清除。老 opencode 81ms 零输出 turn 同样中招（owner 直觉『和老 opencode 问题类似』正确）。修复：markIdle 分支补 turn_error/turn_aborted（bridge-v1.md settle 语义）。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "owner 报障 2026-08-19 第五轮",
+      "notes": "review-fix-for:s8-8-review-fix-stuck-running-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "main.go passive 循环 markIdle 补两事件名+注释。",
+        "artifacts": [
+          "go-bridge/main.go"
+        ],
+        "checked_at": "2026-08-19T12:48:03+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-coldopen-stuck-tests",
+      "title": "回归测试 TestPassiveTurnErrorSettlesRegistryIdle",
+      "description": "turn_started→running；settle→idle；列表 runtimeState（nil runningMap 回退 registry）=idle。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "tests",
+      "depends_on": [
+        "s8-8-review-fix-coldopen-stuck-impl"
+      ],
+      "source": "owner 报障",
+      "notes": "review-fix-for:s8-8-review-fix-coldopen-stuck-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "PASS；go-bridge 失败集零增量（仅先存 flaky）。",
+        "artifacts": [
+          "go-bridge/list_enrich_test.go"
+        ],
+        "checked_at": "2026-08-19T12:48:03+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-coldopen-stuck-regression",
+      "title": "回归+Release 重装（ed42513）",
+      "description": "bridge 重启即清掉旧注册表 stuck 状态；后续失败 turn 不再卡。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "regression",
+      "depends_on": [
+        "s8-8-review-fix-coldopen-stuck-tests"
+      ],
+      "source": "owner 报障",
+      "notes": "review-fix-for:s8-8-review-fix-coldopen-stuck-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "runtime ed42513 已装。owner 复测：重启 iPhone App 冷开该会话应显示失败文案且非执行中。",
+        "artifacts": [],
+        "checked_at": "2026-08-19T12:48:03+0800"
       }
     }
   ]
