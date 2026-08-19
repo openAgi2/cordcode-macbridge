@@ -747,7 +747,11 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 			if ev.SessionID != "" {
 				if eventName == "turn_started" {
 					h.sessions.markRunning(ev.SessionID)
-				} else if eventName == "turn_completed" || eventName == "error" {
+				} else if eventName == "turn_completed" || eventName == "turn_error" || eventName == "turn_aborted" || eventName == "error" {
+					// turn_error/turn_aborted settle a turn as failed/aborted
+					// （bridge-v1.md）——此前漏列：失败 turn（如 opencode-web provider
+					// 报错、旧 opencode 81ms 零输出）结束后 registry 永远 running，
+					// 列表 runtimeState 卡「执行中」且冷开复种（owner 实测 2026-08-19）。
 					h.sessions.markIdle(ev.SessionID)
 				} else if eventName == "session_state_changed" {
 					if dataMap, ok := data.(map[string]interface{}); ok {
