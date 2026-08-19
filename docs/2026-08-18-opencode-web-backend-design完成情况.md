@@ -127,6 +127,24 @@ owner 指出理想路径是 dsh-web 式「读官方 web 源码→穷举 API→�
 
 **证明结构三层**：①形状层——official_shapes_test 契约（SDK 类型 → 断言）；②行为层——裸沙盒真二进制验证（create/list/delete）+ 既有 sandbox E2E（探测/目录/发送/失败收口）；③现网层——owner 矩阵行 1–6 真机验收（占用/审批/旁观等）。三层各管一段，缺层即回到「端点存在性≠语义一致性」的老坑。
 
+## 四·补六、权限框对齐官方（owner 对比反馈 2026-08-19 18:15，Mac 官方框信息量更高 + 「始终允许」按钮缺失）
+
+**owner 现场对比**：同一 session 同一请求，Mac 官方桌面权限框＝标题「需要权限」+ 类别「访问项目目录之外的文件」+ 路径 `/Users/jacklee/Projects/Chat/*` + 三按钮「拒绝 / 始终允许 / 允许一次」；iOS opencode-web 权限卡信息量低且只有两按钮。
+
+**根因（又一起「端点存在性≠载荷形状」）**：`handlePermissionAsked` 读 `tool`（字符串）、`title`、`description`——**真实帧里全都不存在**。这是与 §补五 /session 列表同型的错误：路径/事件名对了，载荷形状是臆造的。
+
+**官方形状钉死（双背书）**：
+- **源码层**：main 仓库 `PermissionV1.Request`＝`{id, sessionID, permission, patterns[], metadata{}, always[], tool{messageID,callID}}`（tool 是对象）；桌面渲染 `session-permission-dock.tsx`＝i18n `settings.permissions.tool.{kind}.description` 类别行 + patterns 逐行等宽 + 无条件三按钮（once/always/reject → 允许一次/始终允许/拒绝）；server 端 always 回复把 `always[]` patterns 存为会话期 allow 规则并自动放行同会话覆盖的 pending。
+- **活体层（permlab，真 1.18.18 二进制 + mock 模型）**：mock 流式返回 read 目录外文件的 tool call → serve 真实 ask：`/global/event` 帧与 `GET /permission` 均为上述形状（kind=`external_directory`、metadata 带 filepath/parentDir）；`POST /session/{id}/permissions/{rid}` body `{"response":"always"}` → 200 + `permission.replied{reply:"always"}` + pending 清空。**v1 SDK gen types 里的 `{type,pattern,title}` 形状是旧版文档，1.18.18 实际不讲它**——以活体为准。
+
+**实施（三层贯穿）**：
+- core.Event 加 `PermissionKind/PermissionPatterns`；`handlePermissionAsked` 按活体帧重写；`replyLiteral` 加 `always→"always"`（v2 分支同映射）；claudecode/grokbuild/dsh-web 把 `Behavior=="always"` 容错为一次性 allow（防御纵深——iOS 只对官方载荷发 always）。
+- go-bridge `permission_request` 载荷 additively 加 `permissionKind`/`patterns`（薄载荷向后兼容，其他 backend 原样）；协议文档 + 双仓 schema 同步（顺带补齐 Mac 侧 schema 缺的 session_retry_status 联合项，两仓恢复逐字节一致）。
+- iOS：ToolStep 加官方字段（Codable 兼容旧缓存）；TaskDock 官方布局（「需要权限」+ 类别行 + patterns 逐行 + 拒绝[plain]/始终允许[bordered]/允许一次[prominent]，官方顺序）；消息流卡标题「需要权限」+ 副标题类别行；`OfficialPermissionCatalog` 逐键镜像官方 zh.ts 14 键（未知键不渲染类别行——官方 `value === key` 语义）；`approveAlways` 对官方请求回 wire `"always"`（非官方降级 `"allow"`，与 Claude 等兼容）。**非官方载荷的权限卡两按钮布局原样保留。**
+
+**测试**：agent events_test 夹具换成活体帧（旧夹具即虚构形状的实物证据，已销）；go-bridge 官方/薄载荷双向断言；iOS wire 行为（always/降级）、官方字段解码、dock 模型透传、catalog 全键、ToolStep 旧 JSON 兼容共 10 个新用例。先存失败不变（dsh-web 后台任务详情 ×1、go-bridge 投影时序 ×1，均 stash 证实在 HEAD 复现，与本轮无关）。
+
+
 ## 五、验收矩阵（owner 执行——§6 现网行 1–6）
 
 前提：Mac 运行新 Release（已装 `/Applications`，runtime commit `78b72f1`）；iPhone 安装本分支 Debug（已装）；Mac 网页打开 `http://127.0.0.1:4096`。

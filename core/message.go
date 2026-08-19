@@ -454,6 +454,11 @@ type Event struct {
 	ToolSuccess    *bool          // optional success flag for EventToolResult
 	SessionID      string         // agent-managed session ID for conversation continuity
 	RequestID      string         // unique request ID for EventPermissionRequest
+	// Official permission.asked payload (opencode-web v1.18, live-pinned):
+	// permission kind + patterns are what the official desktop renders
+	// (category line + pattern rows); "always" replies persist these.
+	PermissionKind     string   // e.g. "external_directory"; empty for backends without official payload
+	PermissionPatterns []string // e.g. ["/Users/x/Projects/Chat/*"]
 	TurnID         string         // source-proven turn identity (Codex/Claude/OpenCode turn id; projection lifecycle)
 	ItemID         string         // source-proven item identity (assistant text/reasoning/tool part id)
 	Questions      []UserQuestion // populated when ToolName == "AskUserQuestion"

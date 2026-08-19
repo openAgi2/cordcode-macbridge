@@ -15,10 +15,13 @@ import (
 //
 // Official v1 SDK proof (sdk/js gen PostSessionIdPermissionsPermissionIdData):
 //	POST /session/{id}/permissions/{permissionID}  body {"response": "once" | "always" | "reject"}
-// bridge core.PermissionResult.Behavior carries only "allow"/"deny", so:
-//	allow → "once" (least privilege: this request only; the official enum has
-//	        no bare "allow" — the earlier probe fallbacks were dead letters)
-//	deny  → "reject"
+// bridge core.PermissionResult.Behavior carries "allow"/"deny"/"always", so:
+//	allow  → "once" (least privilege: this request only; the official enum has
+//	         no bare "allow" — the earlier probe fallbacks were dead letters)
+//	always → "always" (official permission.asked carries always[] patterns the
+//	         serve persists session-wide; verified live on 1.18.18 permlab:
+//	         reply 200 + permission.replied{reply:"always"} + pending cleared)
+//	deny   → "reject"
 // The fold diagnostics remain for observability (which literal the serve
 // accepted), but the value set is now SDK-pinned, not probed.
 // v2 generation keeps its own shape (different permission model — request/
@@ -55,7 +58,7 @@ func foldDiagnostics() string {
 	foldState.mu.Lock()
 	defer foldState.mu.Unlock()
 	var parts []string
-	for _, behavior := range []string{"allow", "deny"} {
+	for _, behavior := range []string{"allow", "always", "deny"} {
 		if hit, ok := foldState.lhits[behavior]; ok {
 			parts = append(parts, fmt.Sprintf("%s→%s", behavior, hit))
 			continue
@@ -76,6 +79,8 @@ func replyLiteral(behavior string) []string {
 	switch behavior {
 	case "allow":
 		return []string{"once"}
+	case "always":
+		return []string{"always"}
 	case "deny":
 		return []string{"reject"}
 	default:
@@ -98,8 +103,11 @@ func (a *Agent) respondPermission(ctx context.Context, c *Client, sessionID, req
 
 	if c.Generation() == generationV2 {
 		literal := "reject"
-		if behavior == "allow" {
+		switch behavior {
+		case "allow":
 			literal = "once"
+		case "always":
+			literal = "always"
 		}
 		body := map[string]any{"reply": literal}
 		if result.Message != "" && behavior == "deny" {

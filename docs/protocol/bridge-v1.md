@@ -355,17 +355,32 @@ field, type, or wire value was changed.
   allow, `rejected` on deny). Producers: `resolve_permission` RPC success, and
   dsh-web host `approval/resolved`. Payload: `{ requestId, behavior }` where
   `behavior` is `allow` or `deny`. Idempotent.
-- `resolve_permission.behavior` wire values are exactly `"allow"` / `"deny"`.
-  This is the MacBridge/agent wire contract (`core.PermissionResult.behavior`).
-  Claude's permission responder treats ONLY `behavior == "allow"` as allow; any
-  other value (including legacy `approve`/`approve_always`/`reject`/
-  `reject_always`) is deny.
+- `resolve_permission.behavior` wire values are `"allow"` / `"deny"` /
+  `"always"`. `"always"` is only sent by clients for `permission_request`
+  events that carry the official payload (below); backends without an official
+  always concept degrade it to a one-time allow (never deny).
 - The iOS UI/native action enum (`approve` / `approveAlways` / `reject` /
   `rejectAlways`) is a **different layer** from the bridge wire `behavior`. iOS
   translates the UI action to the wire value before calling `resolve_permission`
-  (`approve`/`approveAlways` → `"allow"`, `reject`/`rejectAlways` → `"deny"`).
-  Clients MUST send `allow`/`deny` on the wire; legacy snake_case values are a
-  bug, not an alternate vocabulary.
+  (`approve` → `"allow"`, `approveAlways` → `"always"` for official-payload
+  requests or `"allow"` otherwise, `reject`/`rejectAlways` → `"deny"`).
+  Clients MUST send `allow`/`deny`/`always` on the wire; legacy snake_case
+  values are a bug, not an alternate vocabulary.
+- **Official permission payload (opencode-web, v1.18)** — `permission_request`
+  gains two additive, optional fields mirroring the live-pinned official
+  `permission.asked` SSE frame (1.18.18 `/global/event`, 2026-08-19):
+  - `permissionKind?: string` — official category key, e.g.
+    `"external_directory"`. Clients render the category line via the official
+    i18n catalog (`settings.permissions.tool.{kind}.description`, e.g.
+    「访问项目目录之外的文件」); unknown keys render no category line.
+  - `patterns?: string[]` — official patterns, e.g. `["/Users/x/Projects/Chat/*"]`,
+    rendered one row each (monospace, break-all) like the official desktop dock.
+  - Requests carrying these fields offer the official button triple
+    拒绝/始终允许/允许一次 → wire `"deny"` / `"always"` / `"allow"`. Requests
+    without them keep the legacy two-button card verbatim.
+  - Field names/values are shape-pinned to the official frame
+    (`agent/opencode-web` permlab capture + official desktop
+    session-permission-dock.tsx); absence on other backends is by design.
 - v1 limitations (enforced at MacBridge parse time, never reach iOS):
   - Only single-question, single-select AskUserQuestion prompts are emitted as
     `question_asked`.

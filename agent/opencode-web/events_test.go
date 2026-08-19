@@ -247,8 +247,20 @@ func TestSSEPermissionAsked(t *testing.T) {
 	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
 	sub := newDrivenSubscriber(t, agent)
 
+	// Live-pinned 1.18.18 permission.asked frame (permlab /global/event,
+	// 2026-08-19): {id, sessionID, permission, patterns[], metadata{…}, always[], tool{…}}.
+	// There is no string tool/title/description field in the real payload.
 	driveFrames(sub, sseFrame("permission.asked", map[string]any{
-		"sessionID": "ses_1", "id": "perm_9", "tool": "bash", "title": "rm -rf build",
+		"sessionID":  "ses_1",
+		"id":         "per_9",
+		"permission": "external_directory",
+		"patterns":   []any{"/Users/jacklee/Projects/Chat/*"},
+		"metadata": map[string]any{
+			"filepath":  "/Users/jacklee/Projects/Chat/红楼梦故事.txt",
+			"parentDir": "/Users/jacklee/Projects/Chat",
+		},
+		"always": []any{"/Users/jacklee/Projects/Chat/*"},
+		"tool":   map[string]any{"messageID": "msg_1", "callID": "call_1"},
 	}))
 
 	events := drain(sub)
@@ -256,8 +268,17 @@ func TestSSEPermissionAsked(t *testing.T) {
 	for _, ev := range events {
 		if ev.Type == core.EventPermissionRequest {
 			found = true
-			if ev.RequestID != "perm_9" || ev.ToolName != "bash" {
-				t.Fatalf("permission event = %+v", ev)
+			if ev.RequestID != "per_9" {
+				t.Fatalf("permission request id = %q", ev.RequestID)
+			}
+			if ev.PermissionKind != "external_directory" {
+				t.Fatalf("permission kind = %q, want external_directory", ev.PermissionKind)
+			}
+			if len(ev.PermissionPatterns) != 1 || ev.PermissionPatterns[0] != "/Users/jacklee/Projects/Chat/*" {
+				t.Fatalf("permission patterns = %v", ev.PermissionPatterns)
+			}
+			if ev.ToolInput != "/Users/jacklee/Projects/Chat/红楼梦故事.txt" {
+				t.Fatalf("permission filepath (ToolInput) = %q", ev.ToolInput)
 			}
 		}
 	}

@@ -287,6 +287,18 @@ export interface BridgeToolEventData {
   parentStreamId?: string;
 }
 
+// Official permission payload extras (opencode-web v1.18 permission.asked,
+// live-pinned 1.18.18 /global/event): permissionKind = official category key
+// (rendered via the official i18n catalog settings.permissions.tool.{kind}.description),
+// patterns = official pattern rows. Additive; absent on other backends — clients
+// keep the legacy two-button card verbatim. Requests carrying them offer the
+// official reject/always/once triple (wire deny/always/allow).
+// Canonical doc: bridge-v1.md「Official permission payload」(2026-08-19).
+export interface BridgePermissionRequestExtras {
+  permissionKind?: string;
+  patterns?: string[];
+}
+
 export type BridgeEventName =
   | "text_delta"
   | "message_updated"
@@ -317,6 +329,10 @@ export type BridgeEventName =
   // Phase 1 = Codex rollout path only; driver/local-send/web are Phase 3+.
   | "projection_patch"
   | "projection_snapshot"
+  // Transient provider-retry notice (opencode-web 1.18 session.status{type:"retry"}):
+  // {attempt, message, next?}. Turn stays alive — control-plane only, never settles
+  // turn state, not mailbox-durable. Canonical doc: bridge-v1.md (2026-08-19).
+  | "session_retry_status"
   | "sync_invalidate";
 
 export interface BridgeEvent<TData = unknown> {

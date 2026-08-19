@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T13:57:45",
+  "updated_at": "2026-08-19T18:57:34.609750",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -1306,6 +1306,95 @@
       },
       "created_at": "2026-08-19T13:57:45",
       "updated_at": "2026-08-19T13:57:45"
+    },
+    {
+      "id": "s9-1-official-permission-forensics",
+      "title": "权限框对齐官方：取证（官方源码 + 1.18.18 活体帧 + always 语义）",
+      "description": "owner 对比 Mac 官方权限框（信息量更高 + 始终允许按钮）。官方源码：permission.asked 载荷 {id,sessionID,permission,patterns[],metadata{},always[],tool{messageID,callID}}；桌面渲染 i18n settings.permissions.tool.{kind}.description + patterns 逐行 + 三按钮拒绝/始终允许/允许一次（once|always|reject）。活体：permlab 裸 1.18.18 + mock 模型（read 目录外文件）→ /global/event 真帧捕获 + GET /permission 同形 + always 回复 200 + permission.replied{reply:always} + pending 清空。旧 handlePermissionAsked 读 tool/title/description 全是虚构字段（真帧无此字段，tool 是对象）。",
+      "status": "done",
+      "phase": "s9-1",
+      "kind": "forensics",
+      "depends_on": [],
+      "source": "owner 2026-08-19 18:15 对比反馈",
+      "notes": "取证现场 /tmp/ocw-permlab（已清理）；官方 zh.ts 类别表 14 键全量入 iOS OfficialPermissionCatalog",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "sse_global.txt 真帧 + serve.log asking 行 + always 回复 200"
+      }
+    },
+    {
+      "id": "s9-2-official-permission-agent-payload",
+      "title": "agent 载荷加厚 + always 行为链（core.Event 新字段 + replyLiteral always + 三 backend 容错）",
+      "description": "core.Event 加 PermissionKind/PermissionPatterns；handlePermissionAsked 按活体帧重写（kind/patterns/metadata.filepath）；replyLiteral allow→once/always→always/deny→reject（v2 分支同映射）；claudecode/grokbuild/dsh-web 把 Behavior==always 容错为一次性 allow（防御纵深）；go-bridge permission_request 载荷加 permissionKind/patterns（additive，薄载荷向后兼容）。",
+      "status": "done",
+      "phase": "s9-2",
+      "kind": "impl",
+      "depends_on": [
+        "s9-1-official-permission-forensics"
+      ],
+      "source": "owner 对比反馈",
+      "notes": "go build ✅；events_test 重写为活体帧夹具；TestMapAgentEventPermissionRequestOfficialPayload 双向断言",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "go test ./agent/opencode-web ./go-bridge -run Permission/MapAgentEvent 全绿"
+      }
+    },
+    {
+      "id": "s9-3-official-permission-ios-card",
+      "title": "iOS 官方三按钮权限卡（ToolStep 官方字段 + TaskDock 官方布局 + always wire）",
+      "description": "ToolStep 加 permissionKind/permissionPatterns（Codable 兼容旧缓存）；bridge mapBridgeEvent 解码官方字段；event pump 记录 official 标记；approveAlways 官方请求回 wire always（否则降级 allow）；TaskDock 官方布局（需要权限 + 类别行 + patterns 逐行 + 拒绝/始终允许/允许一次，bordered 中键样式）；消息流卡标题「需要权限」+ 副标题类别行；OfficialPermissionCatalog 镜像官方 zh.ts 14 键（未知键不渲染）。非官方载荷两按钮卡原样。",
+      "status": "done",
+      "phase": "s9-3",
+      "kind": "impl",
+      "depends_on": [
+        "s9-2-official-permission-agent-payload"
+      ],
+      "source": "owner 对比反馈",
+      "notes": "新文件并入既有文件（xcodeproj 显式引用无 gem）；BUILD SUCCEEDED；wire/catalog/dock 单测新增 8 个",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "xcodebuild test -only-testing 定向套件全绿"
+      }
+    },
+    {
+      "id": "s9-4-official-permission-protocol-docs",
+      "title": "bridge-v1 协议文档 + 双仓 schema 同步（Official permission payload + behavior always）",
+      "description": "bridge-v1.md 双仓：resolve_permission.behavior 加 always（仅官方载荷发送，其他 backend 容错为 allow）；permission_request 增补 permissionKind/patterns 语义与官方渲染规则。schema bridge-v1.types.ts 双仓加 BridgePermissionRequestExtras + 补齐 Mac 侧缺的 session_retry_status 联合项，两文件恢复逐字节一致。",
+      "status": "done",
+      "phase": "s9-4",
+      "kind": "docs",
+      "depends_on": [
+        "s9-2-official-permission-agent-payload"
+      ],
+      "source": "owner 对比反馈",
+      "notes": "diff 双仓 schema 一致",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "diff -q 相同"
+      }
+    },
+    {
+      "id": "s9-5-official-permission-release",
+      "title": "双仓提交 + Release 覆盖安装 + 真机重装",
+      "description": "Mac 仓提交 + Release 构建 cordcode-bridge-runtime 覆盖 /Applications/CordCodeLink.app；iOS 仓提交 + scripts/run.sh device 装真机；完成情况文档补六落档。",
+      "status": "pending",
+      "phase": "s9-5",
+      "kind": "release",
+      "depends_on": [
+        "s9-3-official-permission-ios-card",
+        "s9-4-official-permission-protocol-docs"
+      ],
+      "source": "owner 对比反馈",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "pending",
+        "evidence": ""
+      }
     }
   ]
 }

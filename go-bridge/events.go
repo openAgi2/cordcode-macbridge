@@ -180,6 +180,15 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 		if ev.Content != "" {
 			payload["reason"] = ev.Content
 		}
+		// Official permission.asked payload (opencode-web v1.18, live-pinned):
+		// clients render the category line + pattern rows from these and offer
+		// the official reject/always/once triple; absent on other backends.
+		if ev.PermissionKind != "" {
+			payload["permissionKind"] = ev.PermissionKind
+		}
+		if len(ev.PermissionPatterns) > 0 {
+			payload["patterns"] = ev.PermissionPatterns
+		}
 		return "permission_request", payload, false
 
 	case core.EventPermissionResolved:

@@ -676,16 +676,36 @@ func (s *sseSubscriber) recomputeUsage(sessionID string) {
 	})
 }
 
+// handlePermissionAsked forwards the official permission.asked payload.
+//
+// Live-pinned 1.18.18 frame (permlab /global/event, 2026-08-19):
+//
+//	{id, sessionID, permission, patterns[], metadata{filepath,parentDir},
+//	 always[], tool{messageID,callID}}
+//
+// The official desktop renders category text from `permission` (i18n key
+// settings.permissions.tool.{permission}.description) plus one row per
+// pattern, with reject/always/once buttons. The earlier fields this read
+// (tool as a string, title/description) do not exist in the real frame.
 func (s *sseSubscriber) handlePermissionAsked(properties map[string]any, sessionID string) {
 	id := firstString(properties, "id", "permissionID", "permissionId")
-	toolName := firstString(properties, "tool", "toolName")
-	input := firstString(properties, "title", "description")
+	if sid := firstString(properties, "sessionID"); sid != "" {
+		sessionID = sid
+	}
+	kind := firstString(properties, "permission")
+	patterns := stringSlice(properties, "patterns")
+	filePath := ""
+	if meta := firstMap(properties, "metadata"); meta != nil {
+		filePath = firstString(meta, "filepath")
+	}
 	s.emit(core.Event{
-		Type:      core.EventPermissionRequest,
-		RequestID: id,
-		ToolName:  toolName,
-		ToolInput: input,
-		SessionID: sessionID,
+		Type:               core.EventPermissionRequest,
+		RequestID:          id,
+		ToolName:           kind,
+		ToolInput:          filePath,
+		SessionID:          sessionID,
+		PermissionKind:     kind,
+		PermissionPatterns: patterns,
 	})
 }
 
@@ -1052,6 +1072,24 @@ func firstString(raw map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+// stringSlice reads a JSON string-array field; nil/absent yields nil.
+func stringSlice(raw map[string]any, key string) []string {
+	if raw == nil {
+		return nil
+	}
+	values, _ := raw[key].([]any)
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if s, _ := value.(string); s != "" {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // firstNumeric reads a JSON number field (float64 after decode) tolerantly.
