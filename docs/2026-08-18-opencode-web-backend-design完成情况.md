@@ -159,6 +159,20 @@ owner 指出理想路径是 dsh-web 式「读官方 web 源码→穷举 API→�
 
 **遗留说明**：iOS 端老 opencode 模式入口未动（Mac 侧 backend 缺席后 descriptor 不再下发，iOS 不会展示可用 backend）；如需彻底清理 iOS 入口另立任务。
 
+## 四·补八、读问薄卡复测：官方三按钮改为无条件渲染（owner 复测 2026-08-19 19:42，iOS `c1762c6`）
+
+**owner 复测**（老 backend 移除后）：iOS 发起「写贾宝玉外貌描写到红楼梦故事.txt」——读取问（第 1 问）仍两按钮无「始终允许」，编辑问（第 2 问）三按钮正常；**Mac 端两问均三按钮**。
+
+**取证（全栈沙盒复现）**：搭独立复现栈（permlab mock serve + 沙盒 bridge 实例 8799 + 配对 WS 客户端模拟 iOS wire 行为，含 set_observation_scope full_stream）。结论：**Mac 侧双链两问均带官方字段**——wire permission_request（每问双订阅线×双投递路径共 4 份）全部 kind=external_directory + patterns；内核 reducer/PartOp 序列化结构直通 ProjectionPart。薄卡来自 iOS 侧某条未定位的步骤落地路径（真机 syslog 因 Wi-Fi 连接无法取证，模拟器 UI 复现因无 idb 后端未完成）。
+
+**修正（官方本义）**：与其继续追未定位路径，改对齐官方行为本身——官方桌面 `session-permission-dock.tsx` 的三按钮**无条件渲染**，不看载荷 richness（这正是 Mac 端两问都有「始终允许」的原因）。iOS 据此：
+- `PermissionDockModel.offersOfficialActions`：opencode-web 会话恒 true；`permissionKind` 非空时任何 backend 也启用。
+- TaskDock 官方卡双条件（kind 或 offersOfficialActions）；薄步骤回退显示 title 行。其他 backend 两按钮布局不变。
+- `approveAlways` 对 opencode-web 会话直发 wire `"always"`（不再依赖 official 标记；serve 枚举已活体验证）；其他 backend 降级 `"allow"` 行为不变。
+
+**测试**：`testOpenCodeWebSessionOffersOfficialActionsEvenWithoutKind`（薄步骤 + opencode-web 会话 → 官方按钮）；TaskDock/WireBehavior 套件绿。真机 c1762c6 已装。
+
+
 
 
 ## 五、验收矩阵（owner 执行——§6 现网行 1–6）

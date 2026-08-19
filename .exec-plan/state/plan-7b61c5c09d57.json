@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T19:40:16.208729",
+  "updated_at": "2026-08-19T20:19:36.999020",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -1482,6 +1482,40 @@
         "required": true,
         "status": "present",
         "evidence": "runtime -version + driver list"
+      }
+    },
+    {
+      "id": "s11-1-readask-forensics",
+      "title": "读问薄卡取证：全栈沙盒复现证明 Mac 侧双链均厚（wire 4× rich + 内核/PartOp 直通）",
+      "description": "owner 复测：读问两按钮、写问三按钮、Mac 两问均三按钮。独立复现栈（mock serve+沙盒 bridge 8799+配对 WS 客户端含 observation full_stream）：两问 wire 事件全部 kind+patterns；薄卡为 iOS 侧未定位路径（真机 Wi-Fi 无 syslog；模拟器无 idb）。",
+      "status": "done",
+      "phase": "s11-1",
+      "kind": "forensics",
+      "depends_on": [],
+      "source": "owner 复测 2026-08-19 19:42",
+      "notes": "沙盒已清理（serve/mock/bridge/模拟器 app 均停）",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "client.mjs 输出 asks=8 全 rich"
+      }
+    },
+    {
+      "id": "s11-2-official-triple-unconditional",
+      "title": "官方三按钮无条件渲染（对齐官方 dock 本义）+ opencode-web always wire",
+      "description": "官方 session-permission-dock.tsx 三按钮无条件渲染。iOS：PermissionDockModel.offersOfficialActions（openCodeWeb 会话恒 true）；TaskDock 双条件官方卡；approveAlways 对 openCodeWeb 直发 always。其他 backend 不变。",
+      "status": "done",
+      "phase": "s11-2",
+      "kind": "impl",
+      "depends_on": [
+        "s11-1-readask-forensics"
+      ],
+      "source": "owner 复测",
+      "notes": "iOS c1762c6 真机已装",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "testOpenCodeWebSessionOffersOfficialActionsEvenWithoutKind 绿 + TaskDock/WireBehavior 套件绿"
       }
     }
   ]
