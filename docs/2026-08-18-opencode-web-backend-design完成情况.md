@@ -57,6 +57,16 @@ owner 指出理想路径是 dsh-web 式「读官方 web 源码→穷举 API→�
 
 **逐面对表结论**：一期 12 个已接面与官方用法一致（含 connected 过滤 prompt-model-selection.ts、占用公式 session-context-metrics.ts 逐字段、SSE 无寿命时限）。本轮对齐两处：占用改**严格五项和**（删自加的 total 回落）；发送补官方**默认模型回退链**——实际实现两级：pending 选择→会话采纳模型→首个 connected provider 的 default??首模型（回退候选全部过 catalog 门控，connected 空目录仍诚实报错零 POST）。**与官方五级链的已知缺口**（监工核验 2026-08-19 指出）：官方的「配置默认/最近使用」两级在 iOS 场景无对应物（iOS 自己的模型缓存等价于传入级）；「agent 指定」级有真实对应物但**输入链路不存在**——iOS `sendMessage(agent:)` 参数在 Bridge 适配层被丢弃、wire `send_message` 无 agent 字段、Mac 侧无 hook。补全该级 = 跨仓协议扩展（wire 加字段 + iOS 传值 + Mac 读 /agent 的 model），非 Mac 侧小改，待 owner 裁决；现状：iOS 选 agent 不选模型时发送用首个 connected 默认模型。官方有而一期未接（按设计 ⛔/2️⃣ 维持）：revert/unrevert、summarize(compact)、fork、children、diff、todo、init、command、shell——列为二期候选清单。tui/pty/lsp/mcp 等 Mac 客户端不适用面不接。
 
+## 四·补二、provider 报错透传（owner 矩阵行 2 实测反馈 2026-08-19，commit `e404af7`）
+
+**现象**：iOS 选了试用期已过的 GLM-5.2-Highspeed 发送，Mac 网页显示「当前订阅套餐暂未开放GLM-5.2-Highspeed权限」，iOS 无任何显示。
+
+**活体取证**（errlab 沙盒：mock provider 返回智谱同款 403，抓完整 SSE 帧序列）：1.18 的失败链路为 `busy → session.status{type:"retry",attempt,message}×N（指数退避 3/8/16/34/60s…）→ session.error{error:{name:"APIError",data:{message,statusCode,isRetryable}}} → session.status idle + session.idle → assistant message.updated 带 info.error`。provider 报错文案**只**由 retry 帧、session.error 帧、assistant info.error 三处承载。
+
+**根因**：订阅器事件表（抄自旧包）不认识 `retry` 状态、`session.error`/`session.idle` 事件类型、`info.error` 字段——三面全丢，idle 后只能发通用零输出文案。
+
+**修复**：三面全部接住并记入 per-session 错误记录；零输出终端改用服务端原文（无记录才回落通用文案）；新 turn 起臂时清记录；冷历史的失败 assistant 消息把 info.error 文案显为 content（与网页一致）。测试：抓包帧逐字节回放（驱动式 + 真实 SSE 传输两套）断言终端携带「当前订阅套餐暂未开放…」原文；陈旧错误不污染下一轮健康 turn。
+
 ## 五、验收矩阵（owner 执行——§6 现网行 1–6）
 
 前提：Mac 运行新 Release（已装 `/Applications`，runtime commit `78b72f1`）；iPhone 安装本分支 Debug（已装）；Mac 网页打开 `http://127.0.0.1:4096`。

@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T10:39:06+0800",
+  "updated_at": "2026-08-19T11:31:49+0800",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -815,6 +815,82 @@
           "/tmp/mine-fails8.txt"
         ],
         "checked_at": "2026-08-19T10:39:06+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-provider-error-impl",
+      "title": "owner 矩阵行 2 反馈：provider 报错透传三面",
+      "description": "iOS 选过期模型发送，Mac web 显示套餐错误而 iOS 无显示。errlab 沙盒 mock provider 抓帧钉死 1.18 失败链路（busy→retry×N→session.error→idle+session.idle→info.error）；订阅器补 session.error/session.idle 事件类型、retry.message 记录、assistant info.error 记录；零输出终端改用服务端原文；新 turn 清记录；冷历史失败消息显 error 文案。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "owner 矩阵行 2 实测反馈",
+      "notes": "review-fix-for:s8-8-review-fix-sse-timeout-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "events.go/history.go 三面接住+错误记录+原文终端。",
+        "artifacts": [
+          "agent/opencode-web/events.go",
+          "agent/opencode-web/history.go"
+        ],
+        "checked_at": "2026-08-19T11:31:49+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-provider-error-tests",
+      "title": "抓包帧回放测试（驱动式+真实 SSE 传输）",
+      "description": "复现智谱 1302 场景：retry+session.error+idle+session.idle 帧序列→终端携带服务端原文；retry-only 种子；陈旧错误清除；传输级回放。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "tests",
+      "depends_on": [
+        "s8-8-review-fix-provider-error-impl"
+      ],
+      "source": "owner 反馈",
+      "notes": "review-fix-for:s8-8-review-fix-provider-error-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "包内 59 用例全过（新增 4）。",
+        "artifacts": [
+          "agent/opencode-web/events_test.go",
+          "agent/opencode-web/sandbox_e2e_test.go"
+        ],
+        "checked_at": "2026-08-19T11:31:49+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-provider-error-regression",
+      "title": "回归+Release 重装（e404af7）",
+      "description": "go-bridge 零增量；Release 重建覆盖安装。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "regression",
+      "depends_on": [
+        "s8-8-review-fix-provider-error-tests"
+      ],
+      "source": "owner 反馈",
+      "notes": "review-fix-for:s8-8-review-fix-provider-error-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "git diff agent/opencode 空；失败集仅先存 flaky；runtime e404af7 已装。owner 复测待回报（预期：iOS 在 turn 终态显示服务端原文；重试期间 iOS 保持执行中=对齐 Mac web 的 Retrying 行为）。",
+        "artifacts": [
+          "/tmp/mine-fails9.txt",
+          "/tmp/ocw-errlab/(取证现场，serve 已停)"
+        ],
+        "checked_at": "2026-08-19T11:31:49+0800"
       }
     }
   ]
