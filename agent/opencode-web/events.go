@@ -312,9 +312,12 @@ func (s *sseSubscriber) handleServerEvent(payload map[string]any) {
 		// the real message). Recorded as terminal AND emitted as assistant
 		// content — the projection reducer drops turn_error.message, so the
 		// text part is what iOS actually renders (same as the web timeline).
+		// The emission gate is agent-level: both subscribers decode this frame
+		// and per-subscriber state would emit the text once per connection.
 		if msg := extractSessionErrorMessage(properties); msg != "" {
 			s.noteSessionError(sessionID, msg)
-			if s.noteTerminalSessionError(sessionID, msg) {
+			s.noteTerminalSessionError(sessionID, msg)
+			if s.agent.claimTerminalText(sessionID) {
 				turnID := s.owningTurnID(sessionID, "")
 				s.emit(core.Event{
 					Type:      core.EventText,
@@ -394,11 +397,15 @@ func (s *sseSubscriber) handleMessageUpdated(properties map[string]any, sessionI
 		return
 	}
 	// A failed assistant message carries info.error (live-pinned 1.18.18) —
-	// terminal: record and surface the text as content (deduped against the
-	// session.error frame, which usually fires first).
+	// terminal: record and surface the text as content. The emission gate is
+	// the agent-level claim: this frame trails session.error by ~100ms and
+	// per-subscriber state was already consumed by emitResultOnce, which used
+	// to re-arm the text as "first" and emit a duplicate (2026-08-19 live log:
+	// 套餐 error rendered 3× on iOS).
 	if errMsg := extractSessionErrorMessage(info); errMsg != "" {
 		s.noteSessionError(sessionID, errMsg)
-		if s.noteTerminalSessionError(sessionID, errMsg) {
+		s.noteTerminalSessionError(sessionID, errMsg)
+		if s.agent.claimTerminalText(sessionID) {
 			turnID := s.owningTurnID(sessionID, messageID)
 			s.emit(core.Event{
 				Type:      core.EventText,
@@ -593,10 +600,26 @@ func (s *sseSubscriber) handleSessionStatus(properties map[string]any, sessionID
 	}
 	if status == "retry" {
 		// Transient: the serve retries with backoff and the turn continues
-		// (official web renders a "Retrying automatically..." row). Record
-		// the message — it is the only early carrier of the provider text.
-		if msg := firstString(statusMap, "message"); msg != "" {
+		// (official web renders a "Retrying automatically..." row with the
+		// provider message). Record the message — it is the only early carrier
+		// of the provider text — and forward the notice on the wire as
+		// session_retry_status so clients can render the same transient row.
+		// Live-pinned frame: properties.status = {type:"retry", attempt:N,
+		// message, next:<epoch-ms>}.
+		msg := firstString(statusMap, "message")
+		if msg != "" {
 			s.noteSessionError(sessionID, msg)
+		}
+		attempt := int(firstNumeric(statusMap, "attempt"))
+		next := int64(firstNumeric(statusMap, "next"))
+		if s.agent.claimRetryStatus(sessionID, attempt) {
+			s.emit(core.Event{
+				Type:         core.EventRetryStatus,
+				Content:      msg,
+				SessionID:    sessionID,
+				RetryAttempt: attempt,
+				RetryNext:    next,
+			})
 		}
 	}
 	if status == "running" && sessionID != "" {
@@ -699,6 +722,12 @@ func (s *sseSubscriber) noteUserPrompt(sessionID, messageID, text string, isDelt
 		s.userTurnStarted[messageID] = true
 	}
 	s.stateMu.Unlock()
+
+	if startTurn {
+		// New turn: re-arm the agent-level once-claims so a fresh failure in
+		// this turn can surface its own terminal text / retry statuses.
+		s.agent.clearTerminalOnceClaims(sessionID)
+	}
 
 	s.emit(core.Event{
 		Type:      core.EventUserMessage,
@@ -1025,6 +1054,22 @@ func firstString(raw map[string]any, keys ...string) string {
 	return ""
 }
 
+// firstNumeric reads a JSON number field (float64 after decode) tolerantly.
+func firstNumeric(raw map[string]any, key string) float64 {
+	if raw == nil {
+		return 0
+	}
+	switch typed := raw[key].(type) {
+	case float64:
+		return typed
+	case int:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	}
+	return 0
+}
+
 func extractToolInput(state map[string]any) string {
 	if state == nil {
 		return ""
@@ -1133,7 +1178,6 @@ func (a *Agent) CatalogRefreshSignals() <-chan struct{} {
 
 func (a *Agent) signalCatalogRefresh() {
 	a.catalogMu.Lock()
-	defer a.catalogMu.Unlock()
 	if a.catalogRefresh == nil {
 		a.catalogRefresh = make(chan struct{}, 16)
 	}
@@ -1141,6 +1185,10 @@ func (a *Agent) signalCatalogRefresh() {
 	case a.catalogRefresh <- struct{}{}:
 	default:
 	}
+	a.catalogMu.Unlock()
+	// A catalog change also invalidates the merged project-directory view:
+	// the next discovery poller / union listing must see the fresh registry.
+	a.invalidateProjectCache()
 }
 
 var _ core.CatalogRefreshSignaler = (*Agent)(nil)

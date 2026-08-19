@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -24,6 +26,7 @@ type recordingServe struct {
 	mu              sync.Mutex
 	responses       map[string]string
 	methodResponses map[string]string
+	dirResponses    map[string]string
 	requests        []recordedRequest
 }
 
@@ -70,6 +73,12 @@ func (s *recordingServe) handler() http.HandlerFunc {
 		body, found := s.responses[r.URL.Path]
 		if mBody, mFound := s.methodResponses[r.Method+" "+r.URL.Path]; mFound {
 			body, found = mBody, true
+		}
+		// Directory-scoped responses (live 1.18 semantics: GET /session switches
+		// on the x-opencode-directory header; the headerless shape is a stale
+		// bounded slice). Consulted before the static map.
+		if dirBody, dirFound := s.dirResponses[r.URL.Path+"|"+r.Header.Get("x-opencode-directory")]; dirFound {
+			body, found = dirBody, true
 		}
 		s.mu.Unlock()
 		if !found {
@@ -420,8 +429,11 @@ func mustClient(t *testing.T, a *Agent) *Client {
 }
 
 func TestListProjectsMapsWorktree(t *testing.T) {
+	// 2026-08-19：worktree 可见性要求磁盘存在（幽灵目录不下发）——夹具用真实临时目录。
+	realProj := t.TempDir()
+	projectsPayload := `[{"id":"prj_1","worktree":` + strconv.Quote(realProj) + `,"vcs":{"branch":"main"},"time":{"created":1},"sandboxes":[]},{"id":"prj_2"}]`
 	agent, _ := newDataAgent(t, map[string]string{
-		"/project": `[{"id":"prj_1","worktree":"/Users/x/proj","vcs":{"branch":"main"},"time":{"created":1},"sandboxes":[]},{"id":"prj_2"}]`,
+		"/project": projectsPayload,
 	}, "/tmp")
 	projects, err := agent.ListProjectSuggestions(context.Background())
 	if err != nil {
@@ -430,7 +442,7 @@ func TestListProjectsMapsWorktree(t *testing.T) {
 	if len(projects) != 1 {
 		t.Fatalf("entries without worktree dropped, got %+v", projects)
 	}
-	if projects[0].Directory != "/Users/x/proj" || projects[0].Name != "proj" || projects[0].ID != "prj_1" {
+	if projects[0].Directory != realProj || projects[0].Name != filepath.Base(realProj) || projects[0].ID != "prj_1" {
 		t.Fatalf("mapping = %+v", projects[0])
 	}
 }

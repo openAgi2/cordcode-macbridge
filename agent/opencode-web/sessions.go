@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -72,20 +75,80 @@ func decodeListPayload(raw []byte) ([]json.RawMessage, error) {
 	return envelope.Data, nil
 }
 
-// ListSessions implements core.Agent: GET /session (v2: /api/session + {data}
-// envelope). The x-opencode-directory header carries the current work dir
-// (switched per RPC by the go-bridge dispatch特判, design §2.1 坑 5 / §4.1.5
-// M2-1) — with no dir known, no pretending of a complete global view.
+// ListSessions implements core.Agent as the MERGED view over the serve's
+// project registry (projects.go): one scoped GET /session per worktree,
+// newest-first (2026-08-19 live-pinned: the headerless global /session is a
+// stale bounded slice — newest entry weeks old, same-day sessions missing —
+// so it must never back a catalog). This is what the discovery fingerprint
+// and iOS global requests consume. On the v2 generation (no /project) it
+// degrades to the current-directory fetch.
 func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, error) {
 	c, err := a.clientFor(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return a.listSessionsWith(ctx, c)
+	dirs := a.projectDirectories(ctx)
+	if len(dirs) == 0 {
+		// v2 (no /project) or a cold registry error: one scoped fetch with
+		// the current work dir rather than the stale headerless global.
+		return a.listSessionsWith(ctx, c, a.GetWorkDir())
+	}
+	type bucket struct {
+		idx   int
+		items []core.AgentSessionInfo
+	}
+	buckets := make([]bucket, len(dirs))
+	var wg sync.WaitGroup
+	for i, dir := range dirs {
+		wg.Add(1)
+		go func(idx int, dir string) {
+			defer wg.Done()
+			items, err := a.listSessionsWith(ctx, c, dir)
+			if err == nil {
+				buckets[idx] = bucket{idx: idx, items: items}
+			}
+		}(i, dir)
+	}
+	wg.Wait()
+	total := 0
+	for _, b := range buckets {
+		total += len(b.items)
+	}
+	out := make([]core.AgentSessionInfo, 0, total)
+	for _, b := range buckets {
+		out = append(out, b.items...)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		mi, mj := out[i].ModifiedAt, out[j].ModifiedAt
+		if !mi.Equal(mj) {
+			return mi.After(mj)
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
 }
 
-func (a *Agent) listSessionsWith(ctx context.Context, c *Client) ([]core.AgentSessionInfo, error) {
-	raw, err := c.fetchJSON(ctx, c.apiPath("/session"), a.GetWorkDir())
+// ListSessionsInDirectory implements core.DirectorySessionLister: a scoped
+// fetch for one directory (the serve returns that directory's sessions,
+// newest first). iOS per-directory list requests MUST go through this — the
+// global merged view plus a post-filter would both over-fetch and inherit
+// registry staleness for brand-new sessions.
+func (a *Agent) ListSessionsInDirectory(ctx context.Context, directory string) ([]core.AgentSessionInfo, error) {
+	directory = strings.TrimSpace(directory)
+	if directory == "" {
+		return a.ListSessions(ctx)
+	}
+	c, err := a.clientFor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return a.listSessionsWith(ctx, c, directory)
+}
+
+var _ core.DirectorySessionLister = (*Agent)(nil)
+
+func (a *Agent) listSessionsWith(ctx context.Context, c *Client, dir string) ([]core.AgentSessionInfo, error) {
+	raw, err := c.fetchJSON(ctx, c.apiPath("/session"), dir)
 	if err != nil {
 		return nil, err
 	}
@@ -123,6 +186,17 @@ func (a *Agent) listSessionsWith(ctx context.Context, c *Client) ([]core.AgentSe
 		}
 		return out[i].ID < out[j].ID
 	})
+	if dir != "" {
+		// Scoped fetch safety: keep only the requested directory's rows even
+		// if the serve ignored the header (post-conditions over trust).
+		scoped := make([]core.AgentSessionInfo, 0, len(out))
+		for _, info := range out {
+			if strings.TrimSpace(info.Directory) == "" || filepath.Clean(info.Directory) == filepath.Clean(dir) {
+				scoped = append(scoped, info)
+			}
+		}
+		return scoped, nil
+	}
 	return out, nil
 }
 

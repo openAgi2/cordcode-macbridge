@@ -334,6 +334,7 @@ const (
 	EventQuestionResolved    EventType = "question_resolved"     // question was answered or cancelled
 	EventUserInputRequested  EventType = "user_input_requested"  // 结构化用户输入交互产生（pending/failed），权威 payload 在 Event.UserInput（设计 §10.1）
 	EventUserInputResolved   EventType = "user_input_resolved"   // 结构化用户输入交互被解决（answered/rejected/auto_resolved/unavailable）
+	EventRetryStatus         EventType = "retry_status"          // transient provider-retry notice (serve keeps the turn alive; wire session_retry_status)
 )
 
 // UserQuestion represents a structured question from AskUserQuestion.
@@ -466,6 +467,8 @@ type Event struct {
 	ToolMatches    *ToolMatches
 	StreamID       string // stable child stream identity; empty means the main stream
 	ParentStreamID string // optional parent child-stream identity
+	RetryAttempt   int    // populated for EventRetryStatus (1-based serve retry attempt)
+	RetryNext      int64  // populated for EventRetryStatus (serve epoch-ms when the next attempt fires)
 	// question 相关字段
 	QuestionID   string           // question 唯一标识 (Codex ask)
 	QuestionText string           // question prompt 文本

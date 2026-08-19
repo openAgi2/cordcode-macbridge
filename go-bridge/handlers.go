@@ -2911,7 +2911,24 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 
 	// 非 canonical catalog backend 的 internal/test agents 仍可复用 generic list helper。
 	if agent.Name() != "claudecode" {
-		sessions, err := agent.ListSessions(ctx)
+		var sessions []core.AgentSessionInfo
+		var err error
+		requestedDir := extractDir(msg)
+		if requestedDir != "" {
+			if dl, ok := agent.(core.DirectorySessionLister); ok {
+				// opencode-web 1.18: GET /session is x-opencode-directory-scoped
+				// and its headerless global response is a stale bounded slice
+				// (2026-08-19 live probe: same-day sessions entirely missing).
+				// A directory-filtered request MUST be a scoped fetch — the old
+				// post-filter-of-global path could never see brand-new sessions
+				// in other directories (owner 真机: desktop 新建会话 iOS 不可见).
+				sessions, err = dl.ListSessionsInDirectory(ctx, requestedDir)
+			} else {
+				sessions, err = agent.ListSessions(ctx)
+			}
+		} else {
+			sessions, err = agent.ListSessions(ctx)
+		}
 		if err != nil {
 			// Live-only backends (e.g. dsh) return core.ErrNotSupported —
 			// surface not_supported instead of a misleading list_failed.
@@ -2924,12 +2941,19 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 		}
 		mappingStarted := time.Now()
 		wireSessions := sessionsToWire(sessions)
+		// Serve-registry backends (opencode-web) list per project worktree and
+		// can still carry rows whose directory died since the registry fetch —
+		// apply the same ghost-directory visibility rule the other catalogs
+		// use, so iOS never grows "已关闭目录" groups the Mac side no longer shows.
+		if _, scoped := agent.(core.DirectorySessionLister); scoped {
+			wireSessions = filterSessionsMissingWorkspace(wireSessions)
+		}
 		wireSessions = h.enrichSessionStatesForList(wireSessions, agent, h.getRunningMap(ctx, agent))
 		h.overlayPinnedState(wireSessions, agentBackendID(agent))
 		// iOS「查看更多」带 directory 深挖；dsh-web/deepseek 等 generic 列表一次全量，
 		// 必须在 bridge 侧按 directory 过滤，否则 sheet 会混进所有工作区。
-		if dir := extractDir(msg); dir != "" {
-			wireSessions = filterWireSessionsByDirectory(wireSessions, dir)
+		if requestedDir != "" {
+			wireSessions = filterWireSessionsByDirectory(wireSessions, requestedDir)
 		}
 		result := paginateSessionList(wireSessions, extractStringParam(msg, "cursor"), limit)
 		metrics.wireMapping += time.Since(mappingStarted)

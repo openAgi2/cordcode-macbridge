@@ -761,6 +761,15 @@ type ProjectLister interface {
 	ListProjectSuggestions(ctx context.Context) ([]ProjectSuggestion, error)
 }
 
+// DirectorySessionLister is an optional interface for backends whose upstream
+// scopes session listing by directory (opencode-web 1.18: GET /session is
+// x-opencode-directory-scoped and its headerless response is a stale bounded
+// slice). For such backends a directory-filtered list request MUST be a
+// scoped fetch, not a post-filter of a global list.
+type DirectorySessionLister interface {
+	ListSessionsInDirectory(ctx context.Context, directory string) ([]AgentSessionInfo, error)
+}
+
 // SessionEventSubscriber is the per-session counterpart: agents that expose ONE
 // session's live events via a subscribe channel (e.g. Grok leader-socket: a
 // read-only subscriber attaches per sessionID). Used by MacBridge's per-session

@@ -153,6 +153,41 @@ func TestMapAgentEventTextDelta(t *testing.T) {
 	}
 }
 
+// session_retry_status is control-plane only: it must not be a durable
+// milestone (no mailbox persistence) and must not settle turn state —
+// the opencode-web 1.18 retry backoff keeps the turn alive.
+func TestMapAgentEventRetryStatus(t *testing.T) {
+	name, data, done := mapAgentEvent(core.Event{
+		Type:         core.EventRetryStatus,
+		Content:      "当前订阅套餐暂未开放GLM-5.2-Highspeed权限",
+		SessionID:    "ses_1",
+		RetryAttempt: 3,
+		RetryNext:    1787109167553,
+	})
+	if name != "session_retry_status" {
+		t.Fatalf("event name = %q, want session_retry_status", name)
+	}
+	if done {
+		t.Fatal("retry status must not be a terminal (done=false)")
+	}
+	if IsDurableMilestone(name) {
+		t.Fatal("session_retry_status must not persist to the mailbox")
+	}
+	payload, ok := data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("payload type = %T, want map[string]interface{}", data)
+	}
+	if got := payload["message"]; got != "当前订阅套餐暂未开放GLM-5.2-Highspeed权限" {
+		t.Fatalf("message = %#v", got)
+	}
+	if got := payload["attempt"]; got != 3 {
+		t.Fatalf("attempt = %#v, want 3", got)
+	}
+	if got := payload["next"]; got != int64(1787109167553) {
+		t.Fatalf("next = %#v, want 1787109167553", got)
+	}
+}
+
 func TestMapAgentEventToolStarted(t *testing.T) {
 	name, data, done := mapAgentEvent(core.Event{
 		Type:         core.EventToolUse,

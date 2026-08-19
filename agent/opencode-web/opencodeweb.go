@@ -73,10 +73,26 @@ type Agent struct {
 	catalogMu      sync.Mutex
 	catalogRefresh chan struct{}
 
+	// projectsMu guards the merged serve-project directory view (projects.go:
+	// /project registry, TTL-cached + SSE-catalog-signal invalidated).
+	projectsMu    sync.Mutex
+	projectDirs   []string
+	projectDirsAt time.Time
+
 	// catalogEntryMu guards the parsed provider catalog (~5MB raw JSON on
 	// 1.18 — one fetch per TTL shared by list_models / send gate / windows).
 	catalogEntryMu sync.Mutex
 	catalogEntry   *catalogCacheEntry
+
+	// onceMu guards the cross-subscriber once-claims. A live session is watched
+	// by BOTH a dedicated subscriber (StartSession → relay channel) and the
+	// global passive one — both decode the same SSE frames, so per-subscriber
+	// dedupe lets terminal error text through once per subscriber (2026-08-19
+	// live log: the 套餐 error text flushed 3× as text_delta). The claim lives
+	// at Agent level and survives emitResultOnce's terminal-map consume.
+	onceMu          sync.Mutex
+	terminalTextSet map[string]bool // sessionID → terminal text already emitted this turn
+	retryStatusSeen map[string]int  // sessionID → highest retry attempt already emitted
 
 	bgCtx    context.Context
 	bgCancel context.CancelFunc
@@ -123,6 +139,8 @@ func New(opts map[string]any) (core.Agent, error) {
 		a.pinStore = pinstore.FromOpts(opts)
 	}
 	a.bgCtx, a.bgCancel = context.WithCancel(context.Background())
+	a.terminalTextSet = make(map[string]bool)
+	a.retryStatusSeen = make(map[string]int)
 
 	if a.baseURL != "" {
 		// Bounded startup probe so the first hello_ack reports the real state
@@ -141,6 +159,59 @@ func (a *Agent) Stop() error {
 		a.bgCancel()
 	}
 	return nil
+}
+
+// claimTerminalText reports whether the caller won the single terminal-text
+// emission slot for this session's turn (live 1.18 failure chain fires
+// session.error once per SSE connection — with two subscribers that is two
+// emissions, and the trailing assistant message.updated(info.error) adds a
+// third after emitResultOnce consumed the per-subscriber terminal note).
+func (a *Agent) claimTerminalText(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	a.onceMu.Lock()
+	defer a.onceMu.Unlock()
+	if a.terminalTextSet == nil {
+		a.terminalTextSet = make(map[string]bool)
+	}
+	if a.terminalTextSet[sessionID] {
+		return false
+	}
+	a.terminalTextSet[sessionID] = true
+	return true
+}
+
+// clearTerminalOnceClaims re-arms the once-claims when a new turn arms
+// (user prompt observed). Safe to call from both subscribers.
+func (a *Agent) clearTerminalOnceClaims(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	a.onceMu.Lock()
+	defer a.onceMu.Unlock()
+	delete(a.terminalTextSet, sessionID)
+	delete(a.retryStatusSeen, sessionID)
+}
+
+// claimRetryStatus dedupes the transient retry notice per attempt across the
+// two subscribers (each fires the same session.status{retry} frame).
+func (a *Agent) claimRetryStatus(sessionID string, attempt int) bool {
+	if sessionID == "" {
+		return false
+	}
+	a.onceMu.Lock()
+	defer a.onceMu.Unlock()
+	if a.retryStatusSeen == nil {
+		a.retryStatusSeen = make(map[string]int)
+	}
+	if attempt > 0 && a.retryStatusSeen[sessionID] >= attempt {
+		return false
+	}
+	if attempt > a.retryStatusSeen[sessionID] {
+		a.retryStatusSeen[sessionID] = attempt
+	}
+	return true
 }
 
 // instanceStatusProbeTTL bounds how long a successful probe stays trusted

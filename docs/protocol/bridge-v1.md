@@ -282,6 +282,7 @@ turn_diff_ready
 projection_patch
 projection_snapshot
 sync_invalidate
+session_retry_status
 ```
 
 `turn_error` / `turn_aborted` settle a turn as failed/aborted at the Kernel (turn status
@@ -292,6 +293,14 @@ subscriber (zero-output turns — provider resolution failures that the server o
 closes silently), and the idle-verified cold-hydrate seal for trailing unanswered user
 turns (`reason: rich_history_unanswered`). Before that date the events existed in the
 reducer/mailbox contract only, with no producer.
+
+`session_retry_status` (2026-08-19, producer: opencode-web) is a **transient** control-plane
+notice: the serve is retrying the provider call with backoff and the turn stays alive. Shape:
+`{sessionId, attempt: number, message: string, next?: number(epoch-ms of the next attempt)}`.
+It must NOT settle turn state, is not a durable milestone (no mailbox persistence), and is
+NOT in the session-sync-v2 raw deny-list — raw delivery is its only carrier (the projection
+kernel ignores it). Clients render it as a transient row (official web parity: the serve's
+`session.status {type:"retry"}` row); older clients that do not know the name ignore it.
 
 `tool_started` / `tool_finished` may carry an optional `data.matches` field. It is the
 single structured truth for explore/search results and has exactly one of these shapes:
