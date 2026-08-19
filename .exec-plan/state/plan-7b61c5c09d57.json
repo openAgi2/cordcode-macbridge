@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T18:57:34.609750",
+  "updated_at": "2026-08-19T19:08:44.330519",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -1381,7 +1381,7 @@
       "id": "s9-5-official-permission-release",
       "title": "双仓提交 + Release 覆盖安装 + 真机重装",
       "description": "Mac 仓提交 + Release 构建 cordcode-bridge-runtime 覆盖 /Applications/CordCodeLink.app；iOS 仓提交 + scripts/run.sh device 装真机；完成情况文档补六落档。",
-      "status": "pending",
+      "status": "done",
       "phase": "s9-5",
       "kind": "release",
       "depends_on": [
@@ -1389,11 +1389,11 @@
         "s9-4-official-permission-protocol-docs"
       ],
       "source": "owner 对比反馈",
-      "notes": "",
+      "notes": "Mac 65597cb（Release runtime 65597cbefe5f 覆盖 /Applications，新 pid 98826 @18:59 已验 -version + health 鉴权响应）；iOS 8863d30（scripts/run.sh device 真机 Debug 构建安装启动成功）；文档 §四·补六 落档",
       "verification": {
         "required": true,
-        "status": "pending",
-        "evidence": ""
+        "status": "present",
+        "evidence": "runtime -version 输出 65597cbefe5f；run.sh exit=0 全部完成"
       }
     }
   ]
