@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -183,6 +184,14 @@ func mapRichHistoryEntry(message map[string]any) core.RichHistoryEntry {
 		id, _ = message["id"].(string)
 	}
 
+	// A provider-failed assistant message has no text parts but carries
+	// info.error — surface the serve's text so cold-opens match the web.
+	if strings.TrimSpace(content) == "" {
+		if errMsg := errorMessageFromInfo(info); errMsg != "" {
+			content = errMsg
+		}
+	}
+
 	return core.RichHistoryEntry{
 		ID:         id,
 		Role:       role,
@@ -197,6 +206,24 @@ func mapRichHistoryEntry(message map[string]any) core.RichHistoryEntry {
 		ProviderID: strValue(info, "providerID"),
 		ModelName:  strValue(info, "modelName"),
 	}
+}
+
+// errorMessageFromInfo reads info.error.data.message (1.18.18 shape) with
+// name/message fallbacks.
+func errorMessageFromInfo(info map[string]any) string {
+	if info == nil {
+		return ""
+	}
+	err := firstMap(info, "error")
+	if err == nil {
+		return ""
+	}
+	if data := firstMap(err, "data"); data != nil {
+		if msg := firstString(data, "message"); msg != "" {
+			return msg
+		}
+	}
+	return firstString(err, "message")
 }
 
 func makeToolOutput(value any) map[string]any {

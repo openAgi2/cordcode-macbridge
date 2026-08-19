@@ -58,6 +58,12 @@ type sseSubscriber struct {
 	// an armed turn with no output emits EventResult with Error (wire
 	// turn_error) instead of a healthy empty turn_completed.
 	turnSawAssistantOutput map[string]bool // turnID -> any assistant output seen
+	// lastSessionError records the serve's own error text for a session
+	// (session.status retry.message / session.error / assistant info.error).
+	// A zero-output turn surfaces it verbatim at idle instead of the generic
+	// guess (owner-verified 2026-08-19: zhipuai 1302 permission error was
+	// invisible on iOS while the Mac web showed it).
+	lastSessionError map[string]string
 
 	// Active-mode filter (§8-4 session binding): filterActive drops events
 	// whose SessionID != sessionFilter. Empty filter = pending (drops all).
@@ -82,6 +88,7 @@ func newSSESubscriber(ctx context.Context, a *Agent, c *Client) *sseSubscriber {
 		userPrompts:            make(map[string]string),
 		userTurnStarted:        make(map[string]bool),
 		turnSawAssistantOutput: make(map[string]bool),
+		lastSessionError:       make(map[string]string),
 	}
 }
 
@@ -295,6 +302,21 @@ func (s *sseSubscriber) handleServerEvent(payload map[string]any) {
 		s.handlePartUpdated(properties, sessionID)
 	case "session.status":
 		s.handleSessionStatus(properties, sessionID)
+	case "session.error":
+		// Terminal failure frame (live-pinned 1.18.18: provider APIError with
+		// the real message). Recorded; the following idle emits it.
+		if msg := extractSessionErrorMessage(properties); msg != "" {
+			s.noteSessionError(sessionID, msg)
+		}
+	case "session.idle":
+		// 1.18.18 emits both session.status idle AND session.idle; treat the
+		// latter as the same one-shot terminal (emitResultOnce de-dupes).
+		if sessionID == "" {
+			sessionID = firstString(properties, "sessionID", "sessionId")
+		}
+		if sessionID != "" {
+			s.emitResultOnce(sessionID)
+		}
 	case "session.updated":
 		s.handleSessionUpdated(properties, sessionID)
 	case "permission.asked":
@@ -353,6 +375,11 @@ func (s *sseSubscriber) handleMessageUpdated(properties map[string]any, sessionI
 	}
 	if sessionID == "" || role != "assistant" {
 		return
+	}
+	// A failed assistant message carries info.error (live-pinned 1.18.18) —
+	// record so a zero-output close surfaces the provider's own text.
+	if errMsg := extractSessionErrorMessage(info); errMsg != "" {
+		s.noteSessionError(sessionID, errMsg)
 	}
 	for _, part := range extractMessageParts(info) {
 		partID := firstString(part, "id", "partID", "partId")
@@ -528,12 +555,21 @@ func (s *sseSubscriber) handleToolPart(part map[string]any, sessionID, messageID
 }
 
 func (s *sseSubscriber) handleSessionStatus(properties map[string]any, sessionID string) {
+	statusMap := firstMap(properties, "status")
 	status := firstString(properties, "type")
 	if status == "" {
-		status = firstString(firstMap(properties, "status"), "type", "status")
+		status = firstString(statusMap, "type", "status")
 	}
 	if sessionID == "" {
-		sessionID = extractSSESessionID(firstMap(properties, "status"))
+		sessionID = extractSSESessionID(statusMap)
+	}
+	if status == "retry" {
+		// Transient: the serve retries with backoff and the turn continues
+		// (official web renders a "Retrying automatically..." row). Record
+		// the message — it is the only early carrier of the provider text.
+		if msg := firstString(statusMap, "message"); msg != "" {
+			s.noteSessionError(sessionID, msg)
+		}
 	}
 	if status == "running" && sessionID != "" {
 		s.resetCompletion(sessionID)
@@ -686,12 +722,20 @@ func (s *sseSubscriber) emitResultOnce(sessionID string) {
 	delete(s.turnSawAssistantOutput, turnID)
 	s.stateMu.Unlock()
 	if turnID != "" && !hadOutput {
+		// Prefer the serve's own error text (session.error / retry.message /
+		// assistant info.error) over the generic guess — the provider's
+		// diagnosis must reach iOS verbatim.
+		detail := s.takeSessionError(sessionID)
+		if detail == "" {
+			detail = "model produced no output (model or provider may be unavailable on the server)"
+		}
 		slog.Warn("opencode-web: turn closed with zero assistant output",
 			"session_id", sessionID,
-			"turn_id", turnID)
+			"turn_id", turnID,
+			"detail", detail)
 		s.emit(core.Event{
 			Type:      core.EventResult,
-			Error:     fmt.Errorf("model produced no output (model or provider may be unavailable on the server)"),
+			Error:     fmt.Errorf("%s", detail),
 			SessionID: sessionID,
 			Done:      true,
 			TurnID:    turnID,
@@ -701,6 +745,43 @@ func (s *sseSubscriber) emitResultOnce(sessionID string) {
 	}
 	s.emit(core.Event{Type: core.EventResult, SessionID: sessionID, Done: true, TurnID: turnID})
 	s.clearActiveTurn(sessionID)
+}
+
+// noteSessionError records the serve's own error text for the session's
+// current turn; cleared when the next turn arms.
+func (s *sseSubscriber) noteSessionError(sessionID, message string) {
+	if sessionID == "" || strings.TrimSpace(message) == "" {
+		return
+	}
+	s.stateMu.Lock()
+	if s.lastSessionError == nil {
+		s.lastSessionError = make(map[string]string)
+	}
+	s.lastSessionError[sessionID] = message
+	s.stateMu.Unlock()
+}
+
+func (s *sseSubscriber) takeSessionError(sessionID string) string {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	msg := s.lastSessionError[sessionID]
+	delete(s.lastSessionError, sessionID)
+	return msg
+}
+
+// extractSessionErrorMessage pulls properties.error.data.message (1.18.18
+// session.error frame) with name/message fallbacks.
+func extractSessionErrorMessage(properties map[string]any) string {
+	err := firstMap(properties, "error")
+	if err == nil {
+		return ""
+	}
+	if data := firstMap(err, "data"); data != nil {
+		if msg := firstString(data, "message"); msg != "" {
+			return msg
+		}
+	}
+	return firstString(err, "message")
 }
 
 func (s *sseSubscriber) resetCompletion(sessionID string) {
@@ -715,6 +796,7 @@ func (s *sseSubscriber) setActiveTurn(sessionID, turnID string) {
 	}
 	s.stateMu.Lock()
 	s.activeTurns[sessionID] = turnID
+	delete(s.lastSessionError, sessionID)
 	s.stateMu.Unlock()
 }
 
@@ -815,7 +897,7 @@ func partCacheKey(sessionID, messageID, partID, kind string) string {
 
 func isServerEventType(eventType string) bool {
 	switch eventType {
-	case "message.updated", "message.part.delta", "message.part.updated", "session.status", "session.updated", "todo.updated", "permission.asked",
+	case "message.updated", "message.part.delta", "message.part.updated", "session.status", "session.updated", "session.error", "session.idle", "todo.updated", "permission.asked",
 		"server.connected", "session.created", "session.deleted", "message.removed", "message.part.removed", "session.diff":
 		return true
 	default:

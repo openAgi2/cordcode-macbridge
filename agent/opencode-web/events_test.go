@@ -577,3 +577,202 @@ func TestSSEStreamReconnectsAndHealsAfterDrop(t *testing.T) {
 		}
 	}
 }
+
+// TestProviderErrorSurfacesVerbatimAtIdle reproduces the owner-verified
+// scenario (2026-08-19, zhipuai 1302): a provider-rejected turn surfaces the
+// serve's own text — carried ONLY by session.status retry / session.error /
+// assistant info.error, all previously dropped — at the terminal instead of
+// the generic zero-output guess. Frame order live-pinned on 1.18.18.
+func TestProviderErrorSurfacesVerbatimAtIdle(t *testing.T) {
+	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
+	sub := newDrivenSubscriber(t, agent)
+
+	driveFrames(sub,
+		sseFrame("message.updated", map[string]any{
+			"info": map[string]any{"id": "msg_u1", "role": "user",
+				"parts": []any{map[string]any{"type": "text", "text": "hi"}}},
+			"sessionID": "ses_1",
+		}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1", "status": map[string]any{"type": "busy"}}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1",
+			"status": map[string]any{"type": "retry", "attempt": 1, "message": "当前订阅套餐暂未开放GLM-5.2-Highspeed权限"}}),
+		sseFrame("session.error", map[string]any{"sessionID": "ses_1",
+			"error": map[string]any{"name": "APIError", "data": map[string]any{
+				"message": "当前订阅套餐暂未开放GLM-5.2-Highspeed权限", "statusCode": 403, "isRetryable": false}}}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1", "status": map[string]any{"type": "idle"}}),
+		sseFrame("session.idle", map[string]any{"sessionID": "ses_1"}),
+	)
+
+	var results []core.Event
+	for _, ev := range drain(sub) {
+		if ev.Type == core.EventResult {
+			results = append(results, ev)
+		}
+	}
+	if len(results) != 1 {
+		t.Fatalf("exactly one terminal result (idle + session.idle de-duped), got %d", len(results))
+	}
+	if results[0].Error == nil || !strings.Contains(results[0].Error.Error(), "当前订阅套餐暂未开放GLM-5.2-Highspeed权限") {
+		t.Fatalf("the serve's own error text must surface verbatim, got %v", results[0].Error)
+	}
+	if !results[0].Done {
+		t.Fatal("terminal must be Done")
+	}
+}
+
+// Retry frames alone (no session.error yet — retries still running out) still
+// seed the message so an eventual zero-output close is diagnosable.
+func TestRetryMessageAloneSeedsTerminalError(t *testing.T) {
+	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
+	sub := newDrivenSubscriber(t, agent)
+	driveFrames(sub,
+		sseFrame("message.updated", map[string]any{
+			"info":      map[string]any{"id": "msg_u1", "role": "user"},
+			"sessionID": "ses_1",
+		}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1",
+			"status": map[string]any{"type": "retry", "attempt": 2, "message": "provider 429: quota"}}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1", "status": map[string]any{"type": "idle"}}),
+	)
+	events := drain(sub)
+	var result *core.Event
+	for i := range events {
+		if events[i].Type == core.EventResult {
+			result = &events[i]
+		}
+	}
+	if result == nil || result.Error == nil || !strings.Contains(result.Error.Error(), "provider 429: quota") {
+		t.Fatalf("retry message must seed the terminal error, got %+v", result)
+	}
+}
+
+// A stale error from the previous turn must not poison the next healthy one.
+func TestSessionErrorClearedOnNextTurn(t *testing.T) {
+	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
+	sub := newDrivenSubscriber(t, agent)
+	driveFrames(sub,
+		sseFrame("message.updated", map[string]any{
+			"info": map[string]any{"id": "msg_u1", "role": "user"}, "sessionID": "ses_1",
+		}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1",
+			"status": map[string]any{"type": "retry", "message": "old failure"}}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1", "status": map[string]any{"type": "idle"}}),
+		// Next turn: fresh user message + real assistant output.
+		sseFrame("message.updated", map[string]any{
+			"info": map[string]any{"id": "msg_u2", "role": "user",
+				"parts": []any{map[string]any{"type": "text", "text": "again"}}},
+			"sessionID": "ses_1",
+		}),
+		sseFrame("message.updated", map[string]any{
+			"info": map[string]any{"id": "msg_a2", "role": "assistant"}, "sessionID": "ses_1",
+		}),
+		sseFrame("message.part.delta", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a2", "partID": "pt_1", "field": "text", "delta": "recovered",
+		}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1", "status": map[string]any{"type": "idle"}}),
+	)
+	var last *core.Event
+	events := drain(sub)
+	for i := range events {
+		if events[i].Type == core.EventResult {
+			last = &events[i]
+		}
+	}
+	if last == nil || last.Error != nil {
+		t.Fatalf("healthy follow-up turn must close clean (no stale error), got %+v", last)
+	}
+}
+
+// TestSSETransportReplayOfCapturedFailure runs the BYTE-EXACT frames captured
+// from the real 1.18.18 serve (errlab 2026-08-19, zhipuai-1302-style provider
+// rejection) through the subscriber's REAL SSE transport (dial → readStream →
+// parse → terminal) — deterministic end-to-end without waiting out the
+// serve's multi-minute retry backoff.
+func TestSSETransportReplayOfCapturedFailure(t *testing.T) {
+	const quotaErr = "当前订阅套餐暂未开放GLM-5.2-Highspeed权限"
+	frames := []string{
+		sseFrame("message.updated", map[string]any{
+			"sessionID": "ses_1",
+			"info": map[string]any{"id": "msg_u1", "role": "user", "sessionID": "ses_1",
+				"time": map[string]any{"created": 1787109199294}},
+		}),
+		sseFrame("message.part.updated", map[string]any{
+			"sessionID": "ses_1",
+			"part":      map[string]any{"type": "text", "text": "hi", "messageID": "msg_u1", "sessionID": "ses_1", "id": "prt_u1"},
+		}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1", "status": map[string]any{"type": "busy"}}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1",
+			"status": map[string]any{"type": "retry", "attempt": 1, "message": quotaErr}}),
+		sseFrame("session.error", map[string]any{"sessionID": "ses_1",
+			"error": map[string]any{"name": "APIError", "data": map[string]any{
+				"message": quotaErr, "statusCode": 403, "isRetryable": false}}}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1", "status": map[string]any{"type": "idle"}}),
+		sseFrame("session.idle", map[string]any{"sessionID": "ses_1"}),
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		_, pass, ok := r.BasicAuth()
+		if !ok || pass != "pw" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/global/event":
+			w.Header().Set("Content-Type", "text/event-stream")
+			flusher := w.(http.Flusher)
+			flusher.Flush()
+			for _, f := range frames {
+				fmt.Fprintf(w, "data: %s\n\n", f)
+				flusher.Flush()
+			}
+			<-r.Context().Done()
+		case "/global/health":
+			_, _ = w.Write([]byte(`{"healthy":true}`))
+		case "/session":
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	a, err := New(map[string]any{
+		"work_dir":          "/tmp",
+		"opencode_web_url":  srv.URL,
+		"opencode_web_user": "u",
+		"opencode_web_pass": "pw",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	subCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events, err := a.(*Agent).Subscribe(subCtx)
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+
+	sawUser, sawTerminal := false, false
+	var terminalErr string
+	deadline := time.After(10 * time.Second)
+	for !(sawUser && sawTerminal) {
+		select {
+		case ev := <-events:
+			switch ev.Type {
+			case core.EventUserMessage:
+				sawUser = true
+			case core.EventResult:
+				sawTerminal = true
+				if ev.Error != nil {
+					terminalErr = ev.Error.Error()
+				}
+			}
+		case <-deadline:
+			t.Fatalf("replay incomplete: user=%v terminal=%v err=%q", sawUser, sawTerminal, terminalErr)
+		}
+	}
+	if !strings.Contains(terminalErr, quotaErr) {
+		t.Fatalf("terminal must carry the serve's own text %q, got %q", quotaErr, terminalErr)
+	}
+}
