@@ -254,6 +254,18 @@ func (sb *sessionBindings) get(id string) (*dshSession, bool) {
 	return s, ok
 }
 
+// snapshot copies the live session objects for edge consumers (seat-loss
+// terminal producer, design §12 item 3).
+func (sb *sessionBindings) snapshot() []*dshSession {
+	sb.mu.RLock()
+	defer sb.mu.RUnlock()
+	out := make([]*dshSession, 0, len(sb.sessions))
+	for _, s := range sb.sessions {
+		out = append(out, s)
+	}
+	return out
+}
+
 // noteActiveSession records the most recently started session id — the
 // target for a bridge-level switch_model (no official backend-global write
 // surface; session.selectModel is session-scoped, design §4.3.5).

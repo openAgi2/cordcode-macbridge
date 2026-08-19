@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T16:19:19.294247+00:00",
+  "updated_at": "2026-08-19T16:24:46.100762+00:00",
   "todos": [
     {
       "id": "s1-resolver-impl",
@@ -117,7 +117,7 @@
       "id": "s2-grace-wire-impl",
       "title": "宽限 wire 契约:handler 映射 backend_unavailable + InstanceStatus 特判",
       "description": "①resolver 导出 ErrInstanceReconnecting;②go-bridge/handlers.go send 三处(:2284/2306/2319)与 list 四处(:1541/1606/2808/2939)识别 errors.As(ErrInstanceReconnecting)→WireError{Code:backend_unavailable, Message:\"dsh web instance reconnecting (grace)\"},不得只改 handleSendMessage 三处,其余错误保持现行码;③已打开会话感知宽限:dshSession.Send(agent/dsh-web/session.go:132)开头查 resolver 宽限态返回类型化错误(§12.1-2 实现A);④dshweb.go InstanceStatus 宽限内(lostAt 置位未到期)特判 available=true+detail \"instance reconnecting (grace until <t>)\",防 Current()==nil 经 detectInstanceStatusProber(agent_descriptor.go:247-255)落 not_configured(§12.1-4);⑤冷启动 spawn in-flight 并发 RPC 经 clientFor→类型化错误→backend_unavailable。设计§3.2/§12.1",
-      "status": "in_progress",
+      "status": "done",
       "phase": "phase2",
       "kind": "impl",
       "depends_on": [
@@ -127,12 +127,17 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
+        "summary": "wireErrorWithReconnect(errors.As→backend_unavailable)接入 send×3+list×4;dshSession.Send 查 GraceState 返回类型化错误;InstanceStatus 宽限特判 available=true+reconnecting;build+vet+两包测试全绿",
+        "artifacts": [
+          "git:cea924c",
+          "go-bridge/handlers.go",
+          "agent/dsh-web/session.go",
+          "agent/dsh-web/dshweb.go"
+        ],
         "checked_at": null
       }
     },
@@ -140,7 +145,7 @@
       "id": "s2-grace-wire-tests",
       "title": "宽限 wire 单测(§8.5必测行)",
       "description": "①§8.5 必测:已打开会话 Send(fake 实例死)→ErrInstanceReconnecting,经 handler 映射 backend_unavailable 非 send_failed;②list_sessions 宽限→backend_unavailable 非 list_failed;③InstanceStatus 宽限内 available=true,经 detectInstanceStatusProber 得 AgentStatusAvailable 非 not_configured;④非宽限错误仍落现行码(不误伤)。设计§8.5",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "tests",
       "depends_on": [
@@ -150,12 +155,17 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
+        "summary": "§8.5:绑定会话 Send 宽限→类型化错误;InstanceStatus 宽限 available=true;detector 链路 available 保住;映射矩阵(typed/wrapped/plain/starting→backend_unavailable 或现行码)",
+        "artifacts": [
+          "git:b66ab64",
+          "agent/dsh-web/grace_wire_test.go",
+          "go-bridge/wire_reconnect_map_test.go",
+          "cmd:go test => ok"
+        ],
         "checked_at": null
       }
     },
@@ -163,7 +173,7 @@
       "id": "s2-grace-wire-regression",
       "title": "宽限 wire 回归:全量测试+协议确认",
       "description": "go test ./agent/dsh-web/... ./go-bridge/... -count=1 全绿;确认 docs/protocol 错误表 backend_unavailable 既有行无需变更(零 pack 改动)",
-      "status": "pending",
+      "status": "done",
       "phase": "phase2",
       "kind": "regression",
       "depends_on": [
@@ -173,12 +183,15 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "mixed",
+        "status": "present",
+        "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
+        "summary": "agent/dsh-web + go-bridge 全量 -count=1 全绿;docs/protocol 零改动(backend_unavailable 既有行,无 pack 变更)",
+        "artifacts": [
+          "cmd:go test ./agent/dsh-web/... ./go-bridge/... -count=1 => 全 ok",
+          "git diff HEAD~2 -- docs/protocol/ => 空"
+        ],
         "checked_at": null
       }
     },
@@ -186,7 +199,7 @@
       "id": "s3-turn-terminal-impl",
       "title": "宽限进入时 running 会话推 turn 终态(幂等)",
       "description": "进入宽限/缓存探活失败时,对 registry 中该 backend running 的 dsh-web 会话推终态错误事件(EventError,透传\"dsh web 实例失联\"原文,turn 收口红线);幂等:同一 session 只推一次——宽限进入与流 1006 重连两条触发路径共享 once 状态,防双发 turn_error(§12.1-3)。实现:Resolver 失联回调→Agent 对 runningCache 中 running 会话发终态。设计§3.2 turn 段/§12 切口3",
-      "status": "pending",
+      "status": "in_progress",
       "phase": "phase3",
       "kind": "impl",
       "depends_on": [

@@ -214,6 +214,7 @@ type Resolver struct {
 	resolved     *ResolvedInstance // nil while dark
 	everResolved bool              // this process once held a live seat
 	lostAt       time.Time         // seat went dark at; zero while healthy
+	lossSeq      uint64            // alive→dark edges seen (terminal-producer idempotence key)
 	negUntil     time.Time         // dark-seat probe cache / spawn backoff
 	spawning     bool              // a spawn/boot-wait is in flight
 	spawnErr     error             // last spawn failure (diagnostics)
@@ -324,6 +325,16 @@ func (r *Resolver) SetLostCallback(fn func()) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.onLost = fn
+}
+
+// LossSeq returns how many alive→dark edges this resolver has seen. The
+// terminal producer keys its idempotence on this sequence: however many
+// probe/stream paths notice one death, each edge fires at most once per
+// session, and a later edge re-arms (design §12.1-3).
+func (r *Resolver) LossSeq() uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lossSeq
 }
 
 // GraceState reports whether the seat is inside a reconnect grace window and
@@ -496,6 +507,7 @@ func (r *Resolver) Resolve(ctx context.Context) (*ResolvedInstance, error) {
 func (r *Resolver) loseSeatLocked(prev *ResolvedInstance) error {
 	r.resolved = nil
 	r.lostAt = time.Now()
+	r.lossSeq++
 	r.negUntil = r.lostAt.Add(seatProbeNegativeCache)
 	until := r.lostAt.Add(r.gracePeriod)
 	slog.Info("dsh-web: seat lost — grace window, no adopt/no spawn",

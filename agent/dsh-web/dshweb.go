@@ -44,6 +44,12 @@ type Agent struct {
 	// bindings tracks live session objects (§8-4 surface rule + §8-3 routing).
 	bindings sessionBindings
 
+	// Terminal-producer idempotence (design §12 item 3 / §12.1-3): keyed on
+	// the resolver's loss sequence so one alive→dark edge closes each running
+	// session exactly once, and a later edge re-arms.
+	termMu       sync.Mutex
+	lastTermLoss uint64
+
 	// lastActiveSessionID is the most recent StartSession target — the
 	// bridge-level switch_model surface (§4.3.5: no official global write;
 	// session.selectModel is session-scoped).
@@ -124,6 +130,7 @@ func New(opts map[string]any) (core.Agent, error) {
 		a.pinStore = ps
 	}
 	a.resolver = NewResolver(resolverOpts...)
+	a.resolver.SetLostCallback(a.handleSeatLost)
 
 	// Startup resolution (§4.2): probe the user's instance, else spawn the
 	// managed one, in the background so agent construction (and the hello_ack
@@ -158,6 +165,46 @@ func (a *Agent) Stop() error {
 		a.bgCancel()
 	}
 	return a.resolver.Stop()
+}
+
+// handleSeatLost is the resolver's alive→dark edge hook (design §12 item 3):
+// every live bound session whose official running flag was up receives ONE
+// terminal error event — the instance died mid-turn and iOS must never hang
+// on 「执行中」 (坑 8 red line). Idempotence is keyed on the resolver's loss
+// sequence: grace entry, stream 1006, and any probe path all funnel through
+// the single loseSeat transition, and this guard makes double-firing
+// structurally impossible while re-arming on the next edge (§12.1-3).
+func (a *Agent) handleSeatLost() {
+	seq := a.resolver.LossSeq()
+	a.termMu.Lock()
+	if seq == a.lastTermLoss {
+		a.termMu.Unlock()
+		return
+	}
+	a.lastTermLoss = seq
+	a.termMu.Unlock()
+
+	err := fmt.Errorf("dsh web 实例失联（%s）：进行中的本轮对话随实例中断；实例恢复后请重发，或重新打开会话拉取历史", a.resolver.seatURL())
+	for _, s := range a.bindings.snapshot() {
+		id := s.CurrentSessionID()
+		if id == "" {
+			continue
+		}
+		running, known := a.running.get(id)
+		if !known || !running {
+			continue
+		}
+		select {
+		case s.events <- core.Event{Type: core.EventError, SessionID: id, Error: err}:
+			slog.Info("dsh-web: terminal error event emitted for running session",
+				"sessionID", id, "lossSeq", seq)
+		default:
+			// Channel full — the bridge read loop for this session is gone;
+			// the next use rebuilds. Fail loudly in logs, never silently.
+			slog.Warn("dsh-web: terminal event dropped (session channel full)",
+				"sessionID", id, "lossSeq", seq)
+		}
+	}
 }
 
 // InstanceStatus reports the resolved-instance state for hello_ack detection.
