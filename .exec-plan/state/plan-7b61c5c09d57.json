@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T12:12:35+0800",
+  "updated_at": "2026-08-19T12:40:03+0800",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -962,6 +962,77 @@
         "summary": "owner 复测待回报。",
         "artifacts": [],
         "checked_at": "2026-08-19T12:12:35+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-stuck-running-impl",
+      "title": "owner 报障：重试结束后 iOS 仍执行中（iOS turn_error 未解码 493310f）",
+      "description": "日志取证：12:30:49 turn_error+套餐文案补丁（syncRev56-59）已送达 iPhone LAN 通道、投影 execution idle 已下发——Mac 侧完整。根因 iOS：CCCodeBridgeBackendClient 事件解码 switch 无 turn_error case（仅 turn_started/completed/aborted），wire turn_error 落 default 丢弃；runtimeStateStore 只在 .turnCompleted/.error 收口→执行中永不解除。修复：补 turn_error{turnId,message}→.error(sessionId,message) 映射（对所有 backend 失败收口生效）。另：日志暴露 relay prekey exhausted（两设备）与旧 opencode backend 对同一 serve 的并行广播（opencode rev1-2 与 opencode-web rev55-59 同会话双流）——均如实上报待 owner 关注。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "owner 报障 2026-08-19 第四轮+官方源码阅读指令",
+      "notes": "review-fix-for:s8-8-review-fix-model-revert-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "iOS 事件解码补 turn_error→.error；官方源码阅读结论：retry 期间官方 web 显示错误卡片（Card variant=error+原文80字截断+倒计时），终态由 session.status idle 驱动。",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/CCCodeBridgeBackendClient.swift"
+        ],
+        "checked_at": "2026-08-19T12:40:03+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-stuck-running-tests",
+      "title": "解码回归测试（RemoteRunningSessionTests 64 全过）",
+      "description": "testMapBridgeEvent_TurnError_MapsToErrorWithMessage：套餐原文逐字断言。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "tests",
+      "depends_on": [
+        "s8-8-review-fix-stuck-running-impl"
+      ],
+      "source": "owner 报障",
+      "notes": "review-fix-for:s8-8-review-fix-stuck-running-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "CCCodeTests/RemoteRunningSessionTests 64 全过（新增 1）。",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/RemoteRunningSessionTests.swift"
+        ],
+        "checked_at": "2026-08-19T12:40:03+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-stuck-running-regression",
+      "title": "回归：真机安装+遗留观察项落档",
+      "description": "iPhone 16 Pro 安装启动成功。重试期间 iOS 无瞬态提示（官方有错误卡片+倒计时）——bridge-v1 无该瞬态载体，列为协议演进项待 owner 裁决。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "regression",
+      "depends_on": [
+        "s8-8-review-fix-stuck-running-tests"
+      ],
+      "source": "owner 报障",
+      "notes": "review-fix-for:s8-8-review-fix-stuck-running-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "真机安装启动（非 UI 操作）；owner 复测：重试结束后应显示套餐原文并解除执行态。",
+        "artifacts": [],
+        "checked_at": "2026-08-19T12:40:03+0800"
       }
     }
   ]
