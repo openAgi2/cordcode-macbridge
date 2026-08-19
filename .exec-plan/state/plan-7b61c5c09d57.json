@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T11:31:49+0800",
+  "updated_at": "2026-08-19T12:12:35+0800",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -891,6 +891,77 @@
           "/tmp/ocw-errlab/(取证现场，serve 已停)"
         ],
         "checked_at": "2026-08-19T11:31:49+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-model-revert-impl",
+      "title": "owner 报障：发送后模型选择器回退旧模型（iOS 8a8f69b）",
+      "description": "现象：打开会话显示旧模型→手选 GLM→发送（turn 实际用 GLM；serve session.model/消息两 端点只读核实均=GLM）→UI 回退旧模型。根因 iOS：打开时快照 currentSessionMetadataModelID=旧值，selectModel 不更新快照，发送后消息刷新「快照非空→restore 快照」拉回旧值。修复：selectModel 显式选择时同步快照。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "owner 报障 2026-08-19 第三轮",
+      "notes": "review-fix-for:s8-8-review-fix-provider-error-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "iOS ChatViewModel+ModelSelection.swift 快照同步。",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel+ModelSelection.swift"
+        ],
+        "checked_at": "2026-08-19T12:12:35+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-model-revert-tests",
+      "title": "回归测试（56 全过）",
+      "description": "testSelectModelSyncsSessionMetadataSnapshot。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "tests",
+      "depends_on": [
+        "s8-8-review-fix-model-revert-impl"
+      ],
+      "source": "owner 报障",
+      "notes": "review-fix-for:s8-8-review-fix-model-revert-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "ChatViewModelSessionSyncV2Tests 56 全过。",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/ChatViewModelSessionSyncV2Tests.swift"
+        ],
+        "checked_at": "2026-08-19T12:12:35+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-model-revert-regression",
+      "title": "回归：真机安装启动",
+      "description": "build 0 error；iPhone 16 Pro 安装启动成功。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "regression",
+      "depends_on": [
+        "s8-8-review-fix-model-revert-tests"
+      ],
+      "source": "owner 报障",
+      "notes": "review-fix-for:s8-8-review-fix-model-revert-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "owner 复测待回报。",
+        "artifacts": [],
+        "checked_at": "2026-08-19T12:12:35+0800"
       }
     }
   ]
