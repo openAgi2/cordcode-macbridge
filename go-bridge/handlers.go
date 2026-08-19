@@ -2054,7 +2054,16 @@ func (h *Handlers) handleCreateSession(conn Connection, msg WireMessage, agent c
 		}
 	}
 
-	if agent.Name() == "codex" || agent.Name() == "claudecode" {
+	// Fast pending-id path: these backends materialize the server-side session
+	// lazily at first Send (codex/claude lazy create; opencode-web's
+	// ensureServerSession creates on the first prompt — the catalog model rides
+	// prompt_async, design §3.2). waitForSessionID below can NEVER observe an
+	// id pre-send for them: opencode-web paid a guaranteed 15s stall on every
+	// iOS new-session send (owner 现网 2026-08-20: create_session 01:06:18.160
+	// → send_message 01:06:33.492, user echo delayed ~15s). The pending→real
+	// rebind machinery (bridge live-target rebind + iOS projection.frame
+	// rebind) is the designed continuation.
+	if agent.Name() == "codex" || agent.Name() == "claudecode" || agent.Name() == "opencode-web" {
 		sessionID := fmt.Sprintf("pending-%s", generateShortID())
 		result := map[string]interface{}{
 			"id":    sessionID,
