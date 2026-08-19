@@ -84,6 +84,31 @@ owner 指出理想路径是 dsh-web 式「读官方 web 源码→穷举 API→�
 
 **同轮确认的既有事实链（不改，供 owner 裁决）**：失败 turn 的 raw `turn_error` 已在 deny-list 之外（SSV2 设备可收）且投影补丁含 turn settle + execution idle——服务端链路完整；12:49 复测 iOS 仍卡执行中，指向**设备上的 App 构建早于 493310f**（turn_error 解码修复需随新构建安装；「重启 App」不等于「重装新构建」）。
 
+## 四·补四、网络面全量盘点（owner 质询「是否有假 HTTP / 真造轮子」2026-08-19）
+
+`agent/opencode-web` 全部网络调用点（源码行号级）——**16 个面全部是官方端点，无一本地伪造替代**：
+
+| 面 | 端点 | 源码 | 活体/测试背书 |
+|---|---|---|---|
+| 探针 | GET /global/health（+v2 /api/health 兜底） | probe.go:52-120 | 活体（双代互斥判据） |
+| SSE | GET /global/event | events.go:123 | 活体（失败链路帧序钉死） |
+| 会话状态 | GET /session/status | events.go:209, activity.go:35 | 活体（掉线治愈/探测） |
+| 列表 | GET /session（按目录头） | sessions.go:151 | 活体（本轮钉死目录作用域语义） |
+| 单会话 | GET /session/:id | sessions.go:208 | 活体 |
+| 新建 | POST /session | session.go:218 | 活体（id/model 键形修正过） |
+| 发送 | POST /session/:id/prompt_async（+同步 prompt 兜底） | session.go:185/168 | 活体（modelID 键形修正过） |
+| v2 切模型 | POST /session/:id/model | session.go:239 | 沙盒 E2E |
+| 取消 | POST /session/:id/abort\|interrupt | session.go:257 | 单测+owner 停止链路 |
+| 历史/占用 | GET /session/:id/message | history.go:30/253 | 活体（占用公式逐字段对齐） |
+| 模型目录 | GET /provider | models.go:96 | 活体（三段信封/connected 钉死） |
+| agents | GET /agent | agents.go:20 | 单测 |
+| 工程 | GET /project | projects.go:43 | 活体（本轮成为列表骨架） |
+| 权限 | POST /session/:id/permission/:rid/reply | permissions.go:105-120 | 单测（owner 矩阵行 6 待验） |
+
+**本地实现的部分都是官方 TS 客户端同样在本地做的**（占用五项和公式、connected 过滤、错误文案以正文承载、目录头传递），以及桥接自身机制（指纹发现、目录缓存、双订阅线映射）——不替代任何 serve 端点。
+
+**owner 质疑成立的点与根因**：`GET /project` 最初就接了（首版 projects.go），但只接到 list_projects 建议 RPC；**会话列表骨架**按设计稿 §4 做成「无头 GET /session 全量 + 指纹」——设计稿本身把无头响应当全量真值（错误假设，活体证明它是陈旧百条切片）。补做的官方源码审计穷举了 SDK API 面并对表 models/占用/错误三面，但**没有审「官方 web 如何拉会话列表」这条路径**——审计记录把 /session list 标为「已接且一致」，核对的是端点存在性而非语义。该错误假设单点炸出整串症状（新会话不可见→指纹不变→无刷新→目录分组污染），与 owner「测试出一堆问题也不奇怪」的推断一致。教训入档：**对表必须到语义级（官方客户端如何调用+响应形状活体验证），端点存在性不构成一致性证明**。
+
 ## 五、验收矩阵（owner 执行——§6 现网行 1–6）
 
 前提：Mac 运行新 Release（已装 `/Applications`，runtime commit `78b72f1`）；iPhone 安装本分支 Debug（已装）；Mac 网页打开 `http://127.0.0.1:4096`。
