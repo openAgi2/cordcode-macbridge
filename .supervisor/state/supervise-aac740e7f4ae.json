@@ -12,7 +12,7 @@
       "kind": "implementation",
       "title": "Gate S 正式退出并实施 C1",
       "issued_at": "2026-08-20T14:40:12Z",
-      "status": "in_progress",
+      "status": "verified",
       "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-001-gate-s-exit-and-c1.md",
       "scope": "Mac-only C1",
       "constraints": [
@@ -25,6 +25,7 @@
         "git:bc4fcdd",
         "git:5c82ecc"
       ],
+      "resolved_by_directive": 2,
       "report": {
         "received_at": "2026-08-20T14:40:12Z",
         "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-001-gate-s-exit-and-c1.md",
@@ -38,7 +39,7 @@
       "kind": "hole-fill",
       "title": "补洞 C1 unsupported-generation diagnostics",
       "issued_at": "2026-08-20T14:46:25Z",
-      "status": "in_progress",
+      "status": "verified",
       "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-002-c1-diagnostics-hole-fill.md",
       "scope": "Mac-only C1 diagnostics/tests",
       "constraints": [
@@ -55,12 +56,13 @@
         "received_at": "2026-08-20T14:56:46Z",
         "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-002-c1-diagnostics-hole-fill.md",
         "audited": true,
-        "audit_verdict": "partial",
+        "audit_verdict": "verified",
         "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-002-c1-diagnostics-hole-fill.md",
-        "recheck_received_at": "2026-08-20T15:01:32Z"
+        "recheck_received_at": "2026-08-20T15:01:32Z",
+        "recheck_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-002-recheck.md"
       }
     }
   ],
   "current_directive_number": 2,
-  "last_updated": "2026-08-20T15:01:32Z"
+  "last_updated": "2026-08-20T15:02:47Z"
 }
