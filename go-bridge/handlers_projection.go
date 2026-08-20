@@ -522,6 +522,21 @@ func (h *Handlers) ensureProjectionHydrated(
 			sourceIsLive = true
 		}
 	}
+	if backendID == "opencode-web" {
+		// opencode-web's real session id exists only after the first Send creates
+		// it server-side (create_session returns a pending id), so the first
+		// projection pull always lands mid-turn. Without a live signal the commit
+		// gate blocks on the cold-armed in-flight turn's terminal event — an
+		// event only the cold source can observe, which itself lags the prompt
+		// queue — and the transaction holds every live frame in pendingLive
+		// until the turn ends, delivering the whole reply as one patch (real
+		// device 2026-08-20: reply landed in bulk seconds after send). Registry
+		// liveness is this backend's honest §3.1 signal: a session the bridge is
+		// running may have a turn in flight and commits as a running partial.
+		if _, live := h.getSession(sessionID); live {
+			sourceIsLive = true
+		}
+	}
 	admission, err := h.projectionKernel.BeginHydrateTransaction(
 		backendID, sessionID, source, false, sourceChanged, sourceIsLive,
 	)
@@ -1277,6 +1292,18 @@ func (h *Handlers) streamBackendRichHistoryProjectionEvents(
 	sealTrailingUnanswered := false
 	if prober, ok := agent.(core.SessionActivityProbing); ok {
 		sealTrailingUnanswered = !prober.IsSessionActive(ctx, sessionID)
+	}
+	// Registry liveness overrides a remote idle verdict: a prompt this bridge
+	// just queued (opencode-web prompt_async) can race the serve's busy map —
+	// 1.18 answers a missing key as definitive idle — and sealing the
+	// just-sent turn commits a prematurely-terminal baseline (real device
+	// 2026-08-20: iOS input flipped completed mid-turn). A session this
+	// bridge holds live may still have a turn in flight; only dead sessions
+	// may seal.
+	if sealTrailingUnanswered {
+		if _, live := h.getSession(sessionID); live {
+			sealTrailingUnanswered = false
+		}
 	}
 	return streamRichHistoryProjectionEntries(ctx, entries, sealTrailingUnanswered, emit)
 }

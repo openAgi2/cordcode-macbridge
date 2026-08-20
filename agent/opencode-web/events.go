@@ -798,11 +798,26 @@ func (s *sseSubscriber) emitResultOnce(sessionID string) {
 		s.stateMu.Unlock()
 		return
 	}
-	s.completed[sessionID] = true
 	turnID := s.activeTurns[sessionID]
+	terminal := s.lastTerminalError[sessionID]
+	if turnID == "" && terminal == "" {
+		// Fresh-session idle: POST /session makes the serve broadcast the new
+		// session's initial session.updated/session.status idle, and that
+		// creation broadcast races the first prompt_async through the same SSE
+		// filter — it can arrive before the user echo arms a turn. A bare idle
+		// with no armed turn and no terminal error completes nothing: emitting
+		// EventResult here fakes a healthy turn terminal, which exits the
+		// bridge relay (opencode-web does not survive turn boundaries) and
+		// kills the live feed for the whole first turn (real device
+		// 2026-08-20: input flips completed instantly, the reply lands as one
+		// bulk patch seconds later). Leave `completed` unset so the real
+		// turn-end idle still emits exactly once.
+		s.stateMu.Unlock()
+		return
+	}
+	s.completed[sessionID] = true
 	hadOutput := turnID != "" && s.turnSawAssistantOutput[turnID]
 	delete(s.turnSawAssistantOutput, turnID)
-	terminal := s.lastTerminalError[sessionID]
 	delete(s.lastTerminalError, sessionID)
 	s.stateMu.Unlock()
 	if terminal != "" {
