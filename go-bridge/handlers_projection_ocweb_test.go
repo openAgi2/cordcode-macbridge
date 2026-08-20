@@ -3,6 +3,7 @@ package gobridge
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -150,6 +151,14 @@ type activityProbingFakeAgent struct {
 	active        bool
 	richHistoryFn func(call int32) []core.RichHistoryEntry
 	fetchCalls    *atomic.Int32
+	fetchInfo     func() (*core.AgentSessionInfo, error)
+}
+
+func (a *activityProbingFakeAgent) FetchSessionInfo(ctx context.Context, sessionID string) (*core.AgentSessionInfo, error) {
+	if a.fetchInfo == nil {
+		return nil, fmt.Errorf("no fetchInfo stub")
+	}
+	return a.fetchInfo()
 }
 
 func (a *activityProbingFakeAgent) IsSessionActive(context.Context, string) bool {
@@ -444,5 +453,39 @@ func TestOpenCodeWebDeadEmptyColdSourceSingleFetch(t *testing.T) {
 	}
 	if st := h.projectionKernel.Status("opencode-web", sessionID); st.Phase != ProjectionHydrateReady {
 		t.Fatalf("kernel phase = %q, want ready (honest empty commit)", st.Phase)
+	}
+}
+
+// get_session prefers the by-id fetcher over the directory-scoped list scan:
+// archived sessions can be absent from the default enumeration while remaining
+// individually readable (live 1.18.18) — the archive refetch must not race
+// that filter, and sessions outside the current work dir must resolve.
+func TestOpenCodeWebGetSessionPrefersByIDFetcher(t *testing.T) {
+	h := newTestHandlers(t)
+	agent := &activityProbingFakeAgent{
+		fakeAgent: &fakeAgent{
+			name: "opencode-web",
+			// List intentionally does NOT contain the session (archive filter).
+			sessionInfos: []core.AgentSessionInfo{},
+		},
+	}
+	agent.fetchInfo = func() (*core.AgentSessionInfo, error) {
+		return &core.AgentSessionInfo{
+			ID: "ses_fetch1", Summary: "已归档会话", Directory: "/tmp/proj",
+			ModifiedAt: time.UnixMilli(2).UTC(), ArchivedAt: time.UnixMilli(3).UTC(),
+		}, nil
+	}
+	h.mu.Lock()
+	h.agents = map[string]core.Agent{"opencode-web": agent}
+	h.mu.Unlock()
+	conn := &readFileCaptureConn{}
+	params, _ := json.Marshal(map[string]any{"sessionId": "ses_fetch1"})
+	h.dispatchRPC(conn, WireMessage{Method: "get_session", BackendID: "opencode-web", Params: params, RequestID: "r-fetch"}, agent)
+	if conn.err != nil {
+		t.Fatalf("get_session must resolve via the by-id fetcher, got %+v", conn.err)
+	}
+	raw, _ := json.Marshal(conn.data)
+	if !strings.Contains(string(raw), `"id":"ses_fetch1"`) || !strings.Contains(string(raw), `"archivedAtMillis"`) {
+		t.Fatalf("by-id fetch result must carry the session with archivedAtMillis: %s", string(raw))
 	}
 }

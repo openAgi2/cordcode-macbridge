@@ -27,10 +27,46 @@ import (
 // Session.ArchivedTimestamp shape (Schema.Finite epoch milliseconds; the
 // official Session.setArchived / touch callers use Date.now()).
 //
-// Live caveat (sandbox 1.18.18): the default GET /session list does NOT
+// Live caveat (sandbox 1.18.18): the default GET /session enumeration does NOT
 // exclude archived sessions — the rows keep flowing with time.archived set,
 // so the list mapper populates AgentSessionInfo.ArchivedAt and clients hide
 // them (wire archivedAtMillis semantics).
+
+// FetchSessionInfo implements core.SessionInfoFetcher via GET /session/{id}
+// (same Session.Info shape as the list rows; v2 {"data":…} envelope unwrapped
+// by fetchSessionInfo). The single-object read stays valid for archived
+// sessions that the default list may exclude, so the bridge's get_session
+// does not race the list filter after an archive.
+func (a *Agent) FetchSessionInfo(ctx context.Context, sessionID string) (*core.AgentSessionInfo, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, fmt.Errorf("opencode-web: fetch session info: empty session id")
+	}
+	c, err := a.clientFor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	entry, err := a.fetchSessionInfo(ctx, c, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return ocwSessionEntryToInfo(entry), nil
+}
+
+func ocwSessionEntryToInfo(entry *ocwSessionEntry) *core.AgentSessionInfo {
+	info := &core.AgentSessionInfo{
+		ID:         entry.ID,
+		Summary:    entry.Title,
+		Directory:  entry.Directory,
+		ModifiedAt: entry.Time.updatedAt(),
+		ArchivedAt: entry.Time.archivedAt(),
+	}
+	if entry.Model != nil {
+		info.ModelID = entry.Model.ID
+		info.ProviderID = entry.Model.ProviderID
+	}
+	return info
+}
 
 // DeleteSession implements core.SessionDeleter.
 func (a *Agent) DeleteSession(ctx context.Context, sessionID string) error {
@@ -82,20 +118,10 @@ func (a *Agent) ArchiveSession(ctx context.Context, sessionID string, archivedAt
 	if err := json.Unmarshal(raw, &entry); err != nil {
 		return nil, fmt.Errorf("opencode-web: archive session %s: response decode: %w", sessionID, err)
 	}
-	info := core.AgentSessionInfo{
-		ID:        entry.ID,
-		Summary:   entry.Title,
-		Directory: entry.Directory,
-		ModifiedAt: entry.Time.updatedAt(),
-		ArchivedAt: entry.Time.archivedAt(),
-	}
+	info := ocwSessionEntryToInfo(&entry)
 	if info.ID == "" {
 		info.ID = sessionID
 	}
-	if entry.Model != nil {
-		info.ModelID = entry.Model.ID
-		info.ProviderID = entry.Model.ProviderID
-	}
 	a.signalCatalogRefresh()
-	return &info, nil
+	return info, nil
 }

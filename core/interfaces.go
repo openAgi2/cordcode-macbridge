@@ -534,6 +534,15 @@ type SessionDeleter interface {
 	DeleteSession(ctx context.Context, sessionID string) error
 }
 
+// SessionInfoFetcher is an optional single-session read. Backends with a real
+// by-id endpoint implement it so the bridge's get_session does not depend on
+// the directory-scoped list scan — archived sessions can be excluded from the
+// default list while remaining individually readable (live 1.18.18), and a
+// list-scan also misses sessions outside the current work dir.
+type SessionInfoFetcher interface {
+	FetchSessionInfo(ctx context.Context, sessionID string) (*AgentSessionInfo, error)
+}
+
 // SessionRenamer is an optional interface for agents that support renaming sessions.
 type SessionRenamer interface {
 	RenameSession(ctx context.Context, sessionID, title string) (*AgentSessionInfo, error)

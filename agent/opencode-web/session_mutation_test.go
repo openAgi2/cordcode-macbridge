@@ -146,3 +146,40 @@ func TestListSessionsMapsArchivedAt(t *testing.T) {
 		t.Fatal("Agent must implement core.SessionArchiver")
 	}
 }
+
+func TestFetchSessionInfoOfficialShapeAndMapping(t *testing.T) {
+	archivedMs := float64(time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC).UnixMilli())
+	row, _ := json.Marshal(map[string]any{
+		"id":        "ses_fetch1",
+		"title":     "单取",
+		"directory": "/tmp/proj",
+		"time":      map[string]any{"created": archivedMs - 2000, "updated": archivedMs - 1000, "archived": archivedMs},
+		"model":     map[string]any{"id": "glm-4.7", "providerID": "zhipuai-coding-plan"},
+	})
+	agent, serve := newDataAgent(t, map[string]string{"/session/ses_fetch1": string(row)}, "/tmp/proj")
+	info, err := agent.FetchSessionInfo(context.Background(), "ses_fetch1")
+	if err != nil {
+		t.Fatalf("FetchSessionInfo: %v", err)
+	}
+	if info.ID != "ses_fetch1" || info.Summary != "单取" || info.Directory != "/tmp/proj" {
+		t.Fatalf("mapped info %+v", info)
+	}
+	if !info.ArchivedAt.Equal(time.UnixMilli(int64(archivedMs)).UTC()) {
+		t.Fatalf("ArchivedAt = %v, want %v", info.ArchivedAt, time.UnixMilli(int64(archivedMs)).UTC())
+	}
+	if info.ModelID != "glm-4.7" || info.ProviderID != "zhipuai-coding-plan" {
+		t.Fatalf("model mapping %+v", info)
+	}
+	reqs := serve.requestsFor("/session/ses_fetch1")
+	if len(reqs) == 0 || reqs[0].Method != "GET" || !reqs[0].Authed {
+		t.Fatalf("expected an authed GET by id, got %+v", reqs)
+	}
+}
+
+func TestFetchSessionInfoPropagatesHTTPError(t *testing.T) {
+	agent, _ := newDataAgent(t, map[string]string{}, "/tmp/proj")
+	_, err := agent.FetchSessionInfo(context.Background(), "ses_missing")
+	if err == nil || !strings.Contains(err.Error(), "404") {
+		t.Fatalf("expected diagnosable 404 error, got %v", err)
+	}
+}

@@ -2823,6 +2823,20 @@ func (h *Handlers) handleGetSession(conn Connection, msg WireMessage, agent core
 		}
 	}
 
+	// Prefer the backend's by-id read when available: a directory-scoped list
+	// scan misses sessions outside the current work dir, and archived sessions
+	// can be excluded from the default list while remaining individually
+	// readable (live 1.18.18) — the archive refetch must not race that filter.
+	// Any fetcher miss falls through to the list scan below (legacy behavior).
+	if fetcher, ok := agent.(core.SessionInfoFetcher); ok {
+		if info, err := fetcher.FetchSessionInfo(context.Background(), params.SessionID); err == nil && info != nil {
+			mergeSessionModelSelection(context.Background(), agent, info)
+			wireSession := sessionsToWire([]core.AgentSessionInfo{*info})[0]
+			conn.SendResult(msg.RequestID, h.sessionResultWithContextUsage(wireSession, agent, params.SessionID), nil)
+			return
+		}
+	}
+
 	sessions, err := agent.ListSessions(context.Background())
 	if err != nil {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
