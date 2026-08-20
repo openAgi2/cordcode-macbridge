@@ -221,7 +221,7 @@
       ],
       "linked_commits": [],
       "roadmap_diff": {
-        "design_commit": "pending-current-design-owner-commit",
+        "design_commit": "git:9bb72db",
         "summary": "Directive-007 evidence is verified. E1b/E4b/E5b close variant/provider/config mapping; canonical §6.11.2 converts the remaining roadmap into one concentrated C2 review-fix plus C3-C7 batch with a single final activation/audit gate.",
         "checker": "python3 agent/opencode-web/testdata/official-1.18.18/harness/check_canonical_execution_design.py --self-test"
       },
