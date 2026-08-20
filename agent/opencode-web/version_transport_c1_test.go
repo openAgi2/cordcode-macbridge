@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // version_transport_c1_test.go pins the C1 version/transport boundary
@@ -304,5 +306,134 @@ func TestSSEReconnectIsTransportOnly(t *testing.T) {
 			t.Fatalf("transport reconnect must not emit timeline events, got %+v", ev)
 		}
 	case <-grace.C:
+	}
+}
+
+// result returns the named diagnostic row (directive-002 hole-fill tests).
+func result(t *testing.T, report *core.DiagnosticReport, id string) core.DiagnosticResult {
+	t.Helper()
+	for _, r := range report.Results {
+		if r.ID == id {
+			return r
+		}
+	}
+	t.Fatalf("diagnostic row %q missing from %+v", id, report.Results)
+	return core.DiagnosticResult{}
+}
+
+func TestV2DiagnosticsQuarantinedStopsAtProbe(t *testing.T) {
+	// Directive-002: a detected-but-quarantined v2 endpoint must fail
+	// diagnostics at the probe row with the shared quarantine wording and
+	// STOP — zero /provider catalog reads, zero writes, zero event streams.
+	agent, s := newC1Serve(t, map[string]string{
+		"/api/health":  `{"healthy":true}`,
+		"/api/session": `{"data":[]}`,
+		"/provider":    testProviderCatalog,
+	})
+	report, err := agent.RunDiagnostics(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("RunDiagnostics: %v", err)
+	}
+	if report.OverallStatus != "failed" {
+		t.Fatalf("overall = %q, results %+v", report.OverallStatus, report.Results)
+	}
+	probe := result(t, report, "ocw_probe")
+	if probe.Status != "failed" {
+		t.Fatalf("ocw_probe.status = %q, want failed", probe.Status)
+	}
+	if !strings.Contains(probe.Message, "unsupported-generation") || !strings.Contains(probe.Message, "quarantined") {
+		t.Fatalf("ocw_probe message must name the quarantine, got %q", probe.Message)
+	}
+	for _, r := range report.Results {
+		if r.ID == "ocw_catalog" {
+			t.Fatalf("quarantine must stop before catalog checks, got %+v", r)
+		}
+	}
+	if reqs := s.requestsFor("/provider"); len(reqs) != 0 {
+		t.Fatalf("quarantine must issue ZERO /provider requests, got %+v", reqs)
+	}
+	if posts := countRequests(s, "POST", ""); len(posts) != 0 {
+		t.Fatalf("quarantine must issue ZERO POSTs, got %+v", posts)
+	}
+	for _, eventPath := range []string{"/global/event", "/api/event"} {
+		if reqs := s.requestsFor(eventPath); len(reqs) != 0 {
+			t.Fatalf("quarantine must open ZERO event streams at %s, got %+v", eventPath, reqs)
+		}
+	}
+}
+
+func TestDiagnostics118StillPassed(t *testing.T) {
+	agent, _ := newC1Serve(t, map[string]string{
+		"/global/health": `{"healthy":true}`,
+		"/session":       `[]`,
+		"/provider":      testProviderCatalog,
+	})
+	report, err := agent.RunDiagnostics(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("RunDiagnostics: %v", err)
+	}
+	if report.OverallStatus != "passed" {
+		t.Fatalf("1.18.18 diagnostics must stay passed, got %q (%+v)", report.OverallStatus, report.Results)
+	}
+	probe := result(t, report, "ocw_probe")
+	if probe.Status != "passed" || !strings.Contains(probe.Message, "generation=1.18") {
+		t.Fatalf("ocw_probe must pass with generation=1.18, got %+v", probe)
+	}
+}
+
+func TestDiagnosticsUnknownAndUnauthenticatedStayProbeFailures(t *testing.T) {
+	// Unknown shape: probe failure, NOT the v2 quarantine verdict.
+	unknown, _ := newC1Serve(t, map[string]string{
+		"/global/health": `{"healthy":true}`,
+		"/session":       `{"weird":true}`,
+		"/api/session":   `{"also-weird":true}`,
+	})
+	report, err := unknown.RunDiagnostics(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("RunDiagnostics: %v", err)
+	}
+	if report.OverallStatus != "failed" {
+		t.Fatalf("unknown shape must fail, got %q", report.OverallStatus)
+	}
+	probe := result(t, report, "ocw_probe")
+	if probe.Status != "failed" || !strings.Contains(probe.Message, "probe failed") {
+		t.Fatalf("unknown shape must be a probe failure, got %+v", probe)
+	}
+	if strings.Contains(probe.Message, "unsupported-generation") {
+		t.Fatalf("unknown shape is NOT the quarantine verdict, got %q", probe.Message)
+	}
+
+	// server_unauthenticated: health answers 200 WITHOUT auth — its own probe
+	// failure class, distinct from quarantine.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/global/health":
+			_, _ = w.Write([]byte(`{"healthy":true}`)) // no auth required — the failure signal
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	a, _ := New(map[string]any{
+		"work_dir":          "/tmp/proj",
+		"opencode_web_url":  srv.URL,
+		"opencode_web_user": "u",
+		"opencode_web_pass": "pw",
+	})
+	report2, err := a.(*Agent).RunDiagnostics(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("RunDiagnostics: %v", err)
+	}
+	if report2.OverallStatus != "failed" {
+		t.Fatalf("unauthenticated server must fail, got %q", report2.OverallStatus)
+	}
+	probe2 := result(t, report2, "ocw_probe")
+	if probe2.Status != "failed" || !strings.Contains(probe2.Message, "server_unauthenticated") {
+		t.Fatalf("no-auth 200 must surface server_unauthenticated, got %+v", probe2)
+	}
+	if strings.Contains(probe2.Message, "unsupported-generation") {
+		t.Fatalf("server_unauthenticated is NOT the quarantine verdict, got %q", probe2.Message)
 	}
 }

@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-20T19:30:00Z",
+  "updated_at": "2026-08-20T20:30:00Z",
   "todos": [
     {
       "id": "gate-a-inventory-impl",
@@ -614,7 +614,7 @@
         "gate-s-s4-test-map-regression"
       ],
       "source": "Gate C1",
-      "notes": "C1 only. clientFor is the single verified-generation gate: generation118 is the only generation handed out; v2/unknown fail closed (distinct quarantine error, zero prompt/SSE/Kernel/capability). InstanceStatus now distinguishes unsupported-generation from probe failures. v2 write paths deleted (Send v2 branch, postModel, CancelTurn /interrupt, SSE /api/event dial). Catalog legacy recursive walk deleted (fail closed on unknown shape). Basic Auth/directory scoping/HTTP timeout/SSE no-lifetime-timeout/bounded reconnect unchanged and transport-only.",
+      "notes": "C1 only. clientFor is the single verified-generation gate: generation118 is the only generation handed out; v2/unknown fail closed (distinct quarantine error, zero prompt/SSE/Kernel/capability). InstanceStatus now distinguishes unsupported-generation from probe failures. v2 write paths deleted (Send v2 branch, postModel, CancelTurn /interrupt, SSE /api/event dial). Catalog legacy recursive walk deleted (fail closed on unknown shape). Basic Auth/directory scoping/HTTP timeout/SSE no-lifetime-timeout/bounded reconnect unchanged and transport-only. Hole-fill directive-002 (audit-001 partial): RunDiagnostics now fails ocw_probe with shared unsupported-generation (quarantined) wording and stops before catalog checks; corrected capability wording (no NEW v2 capability; existing array unchanged).",
       "verification": {
         "required": true,
         "status": "present",
@@ -627,9 +627,11 @@
           "agent/opencode-web/session.go",
           "agent/opencode-web/events.go",
           "agent/opencode-web/models.go",
-          "agent/opencode-web/context_usage.go"
+          "agent/opencode-web/context_usage.go",
+          "agent/opencode-web/diagnostics.go",
+          "agent/opencode-web/opencodeweb.go"
         ],
-        "checked_at": "2026-08-20T19:30:00Z"
+        "checked_at": "2026-08-20T20:30:00Z"
       }
     },
     {
@@ -643,7 +645,7 @@
         "c1-version-transport-impl"
       ],
       "source": "Gate C1",
-      "notes": "",
+      "notes": " Hole-fill directive-002 (audit-001 partial): RunDiagnostics now fails ocw_probe with shared unsupported-generation (quarantined) wording and stops before catalog checks; corrected capability wording (no NEW v2 capability; existing array unchanged).",
       "verification": {
         "required": true,
         "status": "present",
@@ -654,9 +656,11 @@
         "artifacts": [
           "agent/opencode-web/version_transport_c1_test.go",
           "cmd:go test ./agent/opencode-web/ -run TestVerified118Only|TestV2FailClosedQuarantine|TestGenerationV2Quarantine|TestBasicAuthDirectoryTimeout|TestSSEReconnectIsTransportOnly -count=1 => all PASS",
-          "cmd:go test ./agent/opencode-web/ -count=1 -timeout 180s => ok"
+          "cmd:go test ./agent/opencode-web/ -count=1 -timeout 180s => ok",
+          "cmd:go test ./agent/opencode-web/ -run TestV2DiagnosticsQuarantinedStopsAtProbe|TestDiagnostics118StillPassed|TestDiagnosticsUnknownAndUnauthenticatedStayProbeFailures => all PASS (directive-002)",
+          "cmd:go test ./go-bridge/ -run TestOpenCodeWebV2QuarantineDescriptorNotAvailable => PASS"
         ],
-        "checked_at": "2026-08-20T19:30:00Z"
+        "checked_at": "2026-08-20T20:30:00Z"
       }
     },
     {
@@ -670,7 +674,7 @@
         "c1-version-transport-tests"
       ],
       "source": "Gate C1",
-      "notes": "",
+      "notes": " Hole-fill directive-002 (audit-001 partial): RunDiagnostics now fails ocw_probe with shared unsupported-generation (quarantined) wording and stops before catalog checks; corrected capability wording (no NEW v2 capability; existing array unchanged).",
       "verification": {
         "required": true,
         "status": "present",
@@ -682,9 +686,12 @@
           "cmd:go build ./... => OK",
           "cmd:go test ./go-bridge/ -run OpenCodeWeb|SessionSyncV2|Projection|EventPublisher|BridgeEpoch -count=1 => ok 4.5s",
           "cmd:go test ./core/ -count=1 => ok",
-          "agent/opencode-web/version_transport_c1_test.go"
+          "agent/opencode-web/version_transport_c1_test.go",
+          "cmd:go test ./agent/opencode-web/ -count=1 -timeout 180s => ok 2.717s",
+          "cmd:go test ./go-bridge/ -run OpenCodeWeb|AgentDescriptor -count=1 => ok 0.843s",
+          "cmd:go test ./core/ -count=1 => ok; go vet => clean; go build ./... => OK"
         ],
-        "checked_at": "2026-08-20T19:30:00Z"
+        "checked_at": "2026-08-20T20:30:00Z"
       }
     },
     {

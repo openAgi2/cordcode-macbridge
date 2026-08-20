@@ -278,6 +278,13 @@ func (a *Agent) replayableRetrySnapshot(sessionID string) (retrySnapshot, bool) 
 // before InstanceStatus re-probes (read-only GETs against a loopback server).
 const instanceStatusProbeTTL = 15 * time.Second
 
+// unsupportedGenerationDetail is the single shared quarantine wording used by
+// InstanceStatus, clientFor, and RunDiagnostics so the status mirror, the
+// product gate, and the diagnostics report cannot drift (C1).
+func unsupportedGenerationDetail(gen generation, detail string) string {
+	return fmt.Sprintf("unsupported-generation (quarantined): probe detected generation %s; the only verified product generation is OpenCode 1.18.18 — no prompt, no SSE ingest, no Kernel writes; %s", gen, detail)
+}
+
 // InstanceStatus mirrors the endpoint state for hello_ack detection. The probe
 // is a read-only GET sequence; it never spawns, binds, or writes. States stay
 // distinct (C1): not configured / probe failed (unreachable, unauthorized,
@@ -302,7 +309,7 @@ func (a *Agent) InstanceStatus() (available bool, detail string) {
 		return false, "probe failed: " + res.err.Error()
 	}
 	if res.gen != generation118 {
-		return false, fmt.Sprintf("unsupported-generation (quarantined): probe detected generation %s; the only verified product generation is OpenCode 1.18.18 — no prompt, no SSE ingest, no Kernel writes; %s", res.gen, res.detail)
+		return false, unsupportedGenerationDetail(res.gen, res.detail)
 	}
 	return true, res.detail
 }
