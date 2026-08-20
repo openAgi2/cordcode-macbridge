@@ -1428,6 +1428,143 @@ def capture_a10(c: Client, sse: SSE, out: Path, workspace: str) -> None:
         raise RuntimeError(f"A10 archived by-id get failed: {get_code}")
 
 
+def _git_worktree(root: Path, name: str) -> str:
+    import subprocess
+
+    d = root / name
+    d.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q"], cwd=d, check=True)
+    (d / "README.md").write_text(name + "\n")
+    env_git = ["git", "-C", str(d), "-c", "user.name=gatea", "-c", "user.email=gatea@invalid"]
+    subprocess.run(env_git + ["add", "."], check=True)
+    subprocess.run(env_git + ["commit", "-qm", "wp init"], check=True)
+    return str(d)
+
+
+def capture_wp(c: Client, sse: SSE, out: Path, workspace: str) -> None:
+    """Workspace.project registry sample (directive-003 Phase 0).
+
+    Observed facts (1.18.18 @2cba7e227d): a plain non-git directory folds
+    into the global pseudo-project (worktree='/', directory appended to
+    global.sandboxes — core/project.ts resolve + project.ts:243-244); only a
+    git worktree with at least one commit becomes its own project row
+    (core/project.ts:105-119 rootCommits/remote derive the id). The capture
+    therefore registers two harness-owned git worktrees, then deletes one
+    (harness-owned dir only) to observe whether the server registry keeps the
+    entry — registry truth vs local existence overlay.
+    """
+    import shutil
+
+    root = Path(workspace).parent
+    ws2 = str(root / "workspace2")
+    if not Path(ws2).is_dir():
+        raise RuntimeError(f"second directory missing: {ws2}")
+    c2 = c.clone(ws2)
+
+    # Baseline: opening non-git harness workspaces registers only the global
+    # pseudo-project (the directories fold into global.sandboxes).
+    c2.request("GET", "/session", query={"roots": "true", "limit": "1"})
+    code0, base_projects, _ = c.request("GET", "/project", query={})
+    if code0 != 200 or not isinstance(base_projects, list):
+        raise RuntimeError(f"GET /project baseline failed: {code0}")
+
+    g1 = _git_worktree(root, "wsgit1")
+    g2 = _git_worktree(root, "wsgit2")
+    cg1 = c.clone(g1)
+    cg2 = c.clone(g2)
+    s1_code, s1, _ = cg1.request("POST", "/session", body={"title": "wp-git-1"})
+    s2_code, s2, _ = cg2.request("POST", "/session", body={"title": "wp-git-2"})
+    if s1_code >= 300 or s2_code >= 300:
+        raise RuntimeError(f"git-worktree session create failed: {s1_code}/{s2_code}")
+    _, after_create, _ = c.request("GET", "/project", query={})
+    if not isinstance(after_create, list):
+        raise RuntimeError("GET /project after create was not a list")
+
+    shutil.rmtree(g2, ignore_errors=True)
+    _, after_delete, _ = c.request("GET", "/project", query={})
+    if not isinstance(after_delete, list):
+        raise RuntimeError("GET /project after delete was not a list")
+
+    def worktrees(items: Any) -> list[str]:
+        return [str(item.get("worktree") or "") for item in items if isinstance(item, dict)]
+
+    def entry_map(items: Any) -> dict[str, dict[str, Any]]:
+        outm: dict[str, dict[str, Any]] = {}
+        for item in items:
+            if isinstance(item, dict) and item.get("id"):
+                outm[str(item["id"])] = item
+        return outm
+
+    import os as _os
+
+    def real(p: str) -> str:
+        return _os.path.realpath(p)
+
+    wts = worktrees(after_create)
+    if real(g1) not in wts or real(g2) not in wts:
+        raise RuntimeError(f"git worktrees not registered as projects: {wts}")
+    distinct = [w for w in wts if w not in ("/", "")]
+    if len(distinct) < 2:
+        raise RuntimeError(f"need >=2 distinct worktree entries, got {wts}")
+
+    presence = [
+        {
+            "id": bool(item.get("id")),
+            "worktree": bool(item.get("worktree")),
+            "vcs": "vcs" in item,
+            "time": "time" in item,
+            "sandboxes": "sandboxes" in item,
+        }
+        for item in after_create
+        if isinstance(item, dict)
+    ]
+
+    write_sample(
+        out / "wp-workspace-project.sanitized.json",
+        {
+            "meta": {
+                "scenario": "WP",
+                "opencodeVersion": OPENCODE_VERSION,
+                "sourceCommit": SOURCE_COMMIT,
+                "captureStatus": "captured",
+            },
+            "source": {
+                "ui": "packages/app/src/utils/server-compat.ts:304 legacy().project.list() (data ?? [])",
+                "server": "packages/opencode/src/server/routes/instance/httpapi/handlers/project.ts:15-17 list -> Project.list; packages/opencode/src/project/project.ts:336 list (DB rows), :35-56 fromRow, :217 global pseudo-project worktree='/', :243-244 non-worktree directory folds into sandboxes; packages/core/src/project.ts:105-119 git rootCommits/remote derive project id",
+            },
+            "http": [
+                {"step": "baseline", "method": "GET", "path": "/project", "status": code0},
+                {"step": "git1-session", "method": "POST", "path": "/session", "status": s1_code},
+                {"step": "git2-session", "method": "POST", "path": "/session", "status": s2_code},
+                {"step": "after-create", "method": "GET", "path": "/project", "status": 200},
+                {"step": "after-delete", "method": "GET", "path": "/project", "status": 200},
+            ],
+            "baseline": {"count": len(base_projects), "worktrees": worktrees(base_projects)},
+            "afterCreate": {
+                "count": len(after_create),
+                "worktrees": wts,
+                "gitWorktreesRegistered": [real(g1) in wts, real(g2) in wts],
+                "distinctNonGlobalWorktrees": len(distinct),
+                "realpathNote": "registry stores os.path.realpath worktrees (/private/tmp on macOS); git worktrees registered only with >=1 commit",
+            },
+            "afterDelete": {
+                "count": len(after_delete),
+                "worktrees": worktrees(after_delete),
+                "deletedGitWorktreeStillRegistered": real(g2) in worktrees(after_delete),
+                "deletedDirectory": g2,
+                "note": "harness-owned temp dir; observation only — CordCode missing-worktree handling is a client-side visibility overlay, never a server claim",
+            },
+            "fieldPresenceObserved": presence,
+            "rawPayloads": {
+                "baseline": base_projects,
+                "afterCreate": after_create,
+                "afterDelete": after_delete,
+            },
+        },
+        workspace,
+    )
+
+
 SCENARIOS = {
     "a1": capture_a1,
     "a2": capture_a2,
@@ -1439,6 +1576,7 @@ SCENARIOS = {
     "a8": capture_a8,
     "a9": capture_a9,
     "a10": capture_a10,
+    "wp": capture_wp,
 }
 
 

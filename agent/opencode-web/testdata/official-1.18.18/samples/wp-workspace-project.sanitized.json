@@ -1,0 +1,173 @@
+{
+  "meta": {
+    "scenario": "WP",
+    "opencodeVersion": "1.18.18",
+    "sourceCommit": "2cba7e227d",
+    "captureStatus": "captured"
+  },
+  "source": {
+    "ui": "packages/app/src/utils/server-compat.ts:304 legacy().project.list() (data ?? [])",
+    "server": "packages/opencode/src/server/routes/instance/httpapi/handlers/project.ts:15-17 list -> Project.list; packages/opencode/src/project/project.ts:336 list (DB rows), :35-56 fromRow, :217 global pseudo-project worktree='/', :243-244 non-worktree directory folds into sandboxes; packages/core/src/project.ts:105-119 git rootCommits/remote derive project id"
+  },
+  "http": [
+    {
+      "step": "baseline",
+      "method": "GET",
+      "path": "/project",
+      "status": 200
+    },
+    {
+      "step": "git1-session",
+      "method": "POST",
+      "path": "/session",
+      "status": 200
+    },
+    {
+      "step": "git2-session",
+      "method": "POST",
+      "path": "/session",
+      "status": 200
+    },
+    {
+      "step": "after-create",
+      "method": "GET",
+      "path": "/project",
+      "status": 200
+    },
+    {
+      "step": "after-delete",
+      "method": "GET",
+      "path": "/project",
+      "status": 200
+    }
+  ],
+  "baseline": {
+    "count": 1,
+    "worktrees": [
+      "/"
+    ]
+  },
+  "afterCreate": {
+    "count": 3,
+    "worktrees": [
+      "/",
+      "/private/tmp/ocw-gate-a/wsgit1",
+      "/private/tmp/ocw-gate-a/wsgit2"
+    ],
+    "gitWorktreesRegistered": [
+      true,
+      true
+    ],
+    "distinctNonGlobalWorktrees": 2,
+    "realpathNote": "registry stores os.path.realpath worktrees (/private/tmp on macOS); git worktrees registered only with >=1 commit"
+  },
+  "afterDelete": {
+    "count": 3,
+    "worktrees": [
+      "/",
+      "/private/tmp/ocw-gate-a/wsgit1",
+      "/private/tmp/ocw-gate-a/wsgit2"
+    ],
+    "deletedGitWorktreeStillRegistered": true,
+    "deletedDirectory": "/tmp/ocw-gate-a/wsgit2",
+    "note": "harness-owned temp dir; observation only — CordCode missing-worktree handling is a client-side visibility overlay, never a server claim"
+  },
+  "fieldPresenceObserved": [
+    {
+      "id": true,
+      "worktree": true,
+      "vcs": false,
+      "time": true,
+      "sandboxes": true
+    },
+    {
+      "id": true,
+      "worktree": true,
+      "vcs": true,
+      "time": true,
+      "sandboxes": true
+    },
+    {
+      "id": true,
+      "worktree": true,
+      "vcs": true,
+      "time": true,
+      "sandboxes": true
+    }
+  ],
+  "rawPayloads": {
+    "baseline": [
+      {
+        "id": "global",
+        "worktree": "/",
+        "time": {
+          "created": 0,
+          "updated": 0
+        },
+        "sandboxes": []
+      }
+    ],
+    "afterCreate": [
+      {
+        "id": "global",
+        "worktree": "/",
+        "time": {
+          "created": 0,
+          "updated": 0
+        },
+        "sandboxes": []
+      },
+      {
+        "id": "bbe23944e7d50e7079c3437063c02803811ce0dc",
+        "worktree": "/private/tmp/ocw-gate-a/wsgit1",
+        "vcs": "git",
+        "time": {
+          "created": 0,
+          "updated": 0
+        },
+        "sandboxes": []
+      },
+      {
+        "id": "46c09f49a46f3534a4cd74485c72d0badb018428",
+        "worktree": "/private/tmp/ocw-gate-a/wsgit2",
+        "vcs": "git",
+        "time": {
+          "created": 0,
+          "updated": 0
+        },
+        "sandboxes": []
+      }
+    ],
+    "afterDelete": [
+      {
+        "id": "global",
+        "worktree": "/",
+        "time": {
+          "created": 0,
+          "updated": 0
+        },
+        "sandboxes": []
+      },
+      {
+        "id": "bbe23944e7d50e7079c3437063c02803811ce0dc",
+        "worktree": "/private/tmp/ocw-gate-a/wsgit1",
+        "vcs": "git",
+        "time": {
+          "created": 0,
+          "updated": 0
+        },
+        "sandboxes": []
+      },
+      {
+        "id": "46c09f49a46f3534a4cd74485c72d0badb018428",
+        "worktree": "/private/tmp/ocw-gate-a/wsgit2",
+        "vcs": "git",
+        "time": {
+          "created": 0,
+          "updated": 0
+        },
+        "sandboxes": []
+      }
+    ]
+  }
+}
