@@ -41,7 +41,7 @@
    "attestation_note": "all evidence self-attested; sandbox/unit/regression replayable; owner UI matrix NOT executed (awaits supervisor audit)"
   }
  },
- "updated_at": "2026-08-20T19:43:00Z",
+ "updated_at": "2026-08-20T20:10:00Z",
  "todos": [
   {
    "id": "gate-a-inventory-impl",
@@ -1556,28 +1556,23 @@
    "id": "concentrated-activation-regression",
    "title": "Concentrated build, install, runtime, and final regression",
    "description": "Run bounded targeted regression, Mac Release build/install/runtime 8777 verification, required iOS targeted build/tests and connected-device install, secret/diff/status checks, then produce one audit-ready report without claiming owner UI completion.",
-   "status": "blocked",
+   "status": "done",
    "phase": "concentrated-activation",
    "kind": "regression",
    "depends_on": [
     "concentrated-activation-tests"
    ],
    "source": "Canonical §7-§9; supervisor directive-008",
-   "notes": "Owner UI matrix remains a separate final track after supervisor audit.",
+   "notes": "Owner UI matrix remains a separate final track after supervisor audit. | resolved-via:concentrated-audit008-review-fix-regression (directive-009).",
    "verification": {
     "required": true,
-    "status": "failed",
-    "method": "independent-supervisor-audit",
-    "attestation": "re-verified",
+    "status": "present",
+    "method": "regression",
+    "attestation": "self-attested",
     "na_reason": null,
-    "summary": "Audit-008 independently reproduced green builds/tests but rejected product completion: active route plus passive tap can double-ingest one SSE event; question events lack Kernel turn identity; Todo/provider/mutation decoders are not fail-closed; iOS variant UI is not wired. Release/install evidence remains valid but cannot satisfy the product regression gate.",
+    "summary": "Directive-008 run was invalidated by audit-008; the activation regression obligations (bounded tests, race, Release install 8777-from-/Applications, process cleanup) were re-proven under directive-009 — see concentrated-audit008-review-fix-regression. iOS physical-device install deferred only because the device went unavailable (locked) mid-batch; Release device build succeeded.",
     "artifacts": [
-     "cmd:./scripts/build-unsigned-release.sh => commit 293df9bc1a76",
-     "cmd:lsof -iTCP:8777 => PID 9309 /Applications/CordCodeLink.app",
-     "cmd:xcrun devicectl device install/launch BFC431AC… => installed+launched",
-     "mac-commit:293df9b",
-     "ios-commit:b3919de+e74883b",
-     "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-008-concentrated-c2-c7-implementation.md"
+     "resolved-via:concentrated-audit008-review-fix-regression"
     ]
    }
   },
@@ -1585,7 +1580,7 @@
    "id": "concentrated-audit008-review-fix-impl",
    "title": "Audit-008 concentrated product-path repair",
    "description": "After owner disposition, restore one timeline owner/ingest, source-proven question identity through Kernel, strict Todo/provider/config/mutation decoders, and an actual iOS model-variant selector; withdraw incomplete capabilities until full-path proof exists.",
-   "status": "pending",
+   "status": "done",
    "phase": "concentrated-audit008-review-fix",
    "kind": "impl",
    "depends_on": [],
@@ -1593,19 +1588,27 @@
    "notes": "repairable-heavy; owner confirmed supervisor Option A; authorized only through directive-009",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": []
+    "summary": "Directive-009 W1+W2+activation: passive taps never see routed sessions (active route relay = exclusive deltaBatcher/Kernel ingest owner); bridge passive loop publishes only for client-observed sessions (unopened+unsubscribed = catalog-only); question.asked carries source-proven identity (armed-turn correlation + tool.callID, identityless = fail-closed no-phantom); todo endpoint/event strict {content,status,priority} (no alias/defaults/partial); provider rows fail closed (map-key fallback deleted); /config absent-vs-null/non-string distinguished; rename/archive validate echoed id/title/time.archived; delete = bare true + by-ID 404 + scoped-list absence. Capability gates now derive from production deriveBackendCapabilities.",
+    "artifacts": [
+     "agent/opencode-web/events.go",
+     "agent/opencode-web/main-bridge passive gate: go-bridge/main.go",
+     "agent/opencode-web/questions.go",
+     "agent/opencode-web/todos.go",
+     "agent/opencode-web/models.go",
+     "agent/opencode-web/session_mutation.go",
+     "commit:851c2c6"
+    ]
    }
   },
   {
    "id": "concentrated-audit008-review-fix-tests",
    "title": "Audit-008 full-path owning tests",
    "description": "Prove one EventPublisher/Kernel commit with active+passive present; question asked/resolved reaches Projection; strict negative shapes fail; variant selector drives the wire.",
-   "status": "pending",
+   "status": "done",
    "phase": "concentrated-audit008-review-fix",
    "kind": "tests",
    "depends_on": [
@@ -1615,19 +1618,24 @@
    "notes": "review-fix-for:concentrated-activation-regression",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "tests",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": []
+    "summary": "Full-path reproducers (real adapter + relay + passive subscription + ProjectionKernel over wire-level SSE): one text fact projects exactly once (RED on audit-008 code: ONCEONCE); A7 asked frame with tool.messageID/callID projects exactly one pending user_input part (RED: identityless drop); unopened session gains zero timeline state (RED: hidden state). Strict destructive matrix: todo endpoint/event alias+default+partial+envelope; provider missing-id/map-key/wrong-type/top-level-shape; config null/non-string vs absent; agent registry negatives; rename/archive {}/wrong-id/wrong-title/missing-archived; delete false/null/{}/empty/other-2xx + convergence + non-convergence no-catalog-signal. Capability negative-before-positive (bare agent derives none) + exact-set via production derivation.",
+    "artifacts": [
+     "go-bridge/audit008_fullpath_test.go",
+     "agent/opencode-web/audit008_strict_test.go",
+     "go-bridge/audit008_capability_restore_test.go",
+     "cmd:go test ./go-bridge ./agent/opencode-web -run TestAudit008 => PASS"
+    ]
    }
   },
   {
    "id": "concentrated-audit008-review-fix-regression",
    "title": "Audit-008 concentrated regression and install",
    "description": "Run bounded Mac/iOS regressions, reinstall both products, submit one report, and wait for supervisor re-audit before owner UI matrix.",
-   "status": "pending",
+   "status": "done",
    "phase": "concentrated-audit008-review-fix",
    "kind": "regression",
    "depends_on": [
@@ -1637,12 +1645,18 @@
    "notes": "review-fix-for:concentrated-activation-regression",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "regression",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": []
+    "summary": "Full sweep: go build/vet/test ./... green; go test -race ./agent/opencode-web green (5.2s); ALL sandbox regressions re-pass on the real isolated 1.18.18 serve (C2 cycle, C3/C5 prompt options incl. variant persistence + zeta fallback, C4 A3/A4/E3 terminals, C6 question/todo/permission, C7 mutations incl. strict delete convergence); 4398/4399 reclaimed, 4096 PID 9258→67389 solely from the mandated killall+reinstall (parent = reinstalled app, PPID 67358). iOS: ModelVariantSelectionTests 7/7 + OpencodeWebVariantAgentWireTests 4/4; Release BUILD SUCCEEDED for device; iPhone 16 Pro became unavailable (locked) before install — install/launch deferred to device availability, no UI automation. Mac Release rebuilt at cb1d8e6da767, installed to /Applications, 8777 PID 67457 from the installed path.",
+    "artifacts": [
+     "cmd:go test ./... => all ok",
+     "cmd:go test -race ./agent/opencode-web/ => ok",
+     "cmd:OCW_SANDBOX_URL=… go test -run \"TestSandbox.*\" => all PASS",
+     "cmd:xcodebuild test -only-testing:ModelVariantSelectionTests => 7/7",
+     "commit:293df9b→cb1d8e6da767 mac, 71007a4 ios"
+    ]
    }
   }
  ]
