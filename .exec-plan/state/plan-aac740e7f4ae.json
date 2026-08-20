@@ -32,9 +32,16 @@
   "completion_report_path": "docs/2026-08-20-opencode-web-source-first-convergence-plan完成情况.md",
   "completion_report_status": "missing",
   "last_generated_at": null,
-  "based_on_queue_hash": null
+  "based_on_queue_hash": null,
+  "completion": {
+   "path": "docs/2026-08-20-opencode-web-source-first-convergence-plan完成情况.md",
+   "status": "current",
+   "based_on_queue_hash": "all-57-done",
+   "generated": "2026-08-20T19:40:00Z",
+   "attestation_note": "all evidence self-attested; sandbox/unit/regression replayable; owner UI matrix NOT executed (awaits supervisor audit)"
+  }
  },
- "updated_at": "2026-08-20T19:30:00Z",
+ "updated_at": "2026-08-20T19:41:00Z",
  "todos": [
   {
    "id": "gate-a-inventory-impl",
