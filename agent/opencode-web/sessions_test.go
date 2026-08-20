@@ -27,7 +27,20 @@ type recordingServe struct {
 	responses       map[string]string
 	methodResponses map[string]string
 	dirResponses    map[string]string
-	requests        []recordedRequest
+	// statusOverrides ("METHOD /path" → HTTP status) answers with a bare
+	// status and no body (404 convergence probes etc.).
+	statusOverrides map[string]int
+	// statusAfter answers METHOD /path with a bare code once more than
+	// `after` matching requests have been served (200-then-404 convergence
+	// probes: {"code":404,"after":1} keeps the first GET 200).
+	statusAfter  map[string]recordingStatusAfter
+	hitCounters map[string]int
+	requests    []recordedRequest
+}
+
+type recordingStatusAfter struct {
+	code int
+	after int
 }
 
 type recordedRequest struct {
@@ -72,6 +85,23 @@ func (s *recordingServe) handler() http.HandlerFunc {
 			return
 		}
 		s.mu.Lock()
+		key := r.Method + " " + r.URL.Path
+		if code, ok := s.statusOverrides[key]; ok {
+			s.mu.Unlock()
+			w.WriteHeader(code)
+			return
+		}
+		if sa, ok := s.statusAfter[key]; ok {
+			if s.hitCounters == nil {
+				s.hitCounters = make(map[string]int)
+			}
+			s.hitCounters[key]++
+			if s.hitCounters[key] > sa.after {
+				s.mu.Unlock()
+				w.WriteHeader(sa.code)
+				return
+			}
+		}
 		body, found := s.responses[r.URL.Path]
 		if mBody, mFound := s.methodResponses[r.Method+" "+r.URL.Path]; mFound {
 			body, found = mBody, true

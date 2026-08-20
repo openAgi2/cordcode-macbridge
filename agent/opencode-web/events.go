@@ -735,10 +735,25 @@ func (s *sseSubscriber) handleQuestionAsked(properties map[string]any, sessionID
 	if req.SessionID != "" {
 		sessionID = req.SessionID
 	}
+	// Audit-008 W1.2 — source-proven identity ONLY. The A7 asked frame carries
+	// tool.messageID (the assistant message of the running turn) and
+	// tool.callID (the tool item). The owning TURN is the subscriber's own
+	// armed turn correlation for this session — never a guess from array
+	// position, time, or random values. An asked frame whose session has no
+	// armed turn (or no tool identity) is fail-closed: it must not project a
+	// phantom turn.
+	turnID := s.activeTurn(sessionID)
+	if turnID == "" || req.Tool.MessageID == "" {
+		slog.Warn("opencode-web SSE: question.asked without source-proven turn identity — dropped (no phantom turn)",
+			"session", sessionID, "question", req.ID, "toolMessageID", req.Tool.MessageID)
+		return
+	}
 	s.agent.noteQuestionAsked(req)
 	s.emit(core.Event{
 		Type:      core.EventUserInputRequested,
 		SessionID: sessionID,
+		TurnID:    turnID,
+		ItemID:    req.Tool.CallID,
 		UserInput: questionInteraction(req),
 	})
 }
@@ -758,10 +773,12 @@ func (s *sseSubscriber) handleQuestionResolved(eventType string, properties map[
 	if eventType == "question.rejected" {
 		status = core.UserInputStatusRejected
 	}
-	s.agent.questionResolved(requestID)
+	req, _ := s.agent.questionResolved(requestID)
 	s.emit(core.Event{
 		Type:      core.EventUserInputResolved,
 		SessionID: sessionID,
+		TurnID:    s.activeTurn(sessionID),
+		ItemID:    knownToolCallID(&req),
 		UserInput: &core.UserInputInteraction{
 			InteractionID:    requestID,
 			Status:           status,
@@ -782,26 +799,17 @@ func (s *sseSubscriber) handleTodoUpdated(properties map[string]any, sessionID s
 	if sessionID == "" {
 		return
 	}
-	rawTodos, _ := properties["todos"].([]any)
-	todos := make([]core.Todo, 0, len(rawTodos))
-	for _, item := range rawTodos {
-		row, _ := item.(map[string]any)
-		if row == nil {
-			continue
-		}
-		content := firstString(row, "content", "text")
-		if content == "" {
-			continue // malformed item: skipped WITHOUT inventing content
-		}
-		status := firstString(row, "status")
-		if status == "" {
-			status = "pending"
-		}
-		priority := firstString(row, "priority")
-		if priority == "" {
-			priority = "normal"
-		}
-		todos = append(todos, core.Todo{Content: content, Status: status, Priority: priority})
+	// Audit-008 W2.1: decode the ENTIRE replacement first (strict A8 shape);
+	// a malformed row fails the whole update — the last-known snapshot is
+	// untouched and NO partial plan event is emitted.
+	b, err := json.Marshal(properties["todos"])
+	if err != nil {
+		return
+	}
+	todos, err := decodeTodoRows(b)
+	if err != nil {
+		slog.Warn("opencode-web SSE: malformed todo.updated replacement ignored", "session", sessionID, "error", err)
+		return
 	}
 	s.agent.rememberTodos(sessionID, todos)
 	s.emit(core.Event{Type: core.EventPlan, SessionID: sessionID, Plan: todos})
@@ -1249,14 +1257,18 @@ func (s *sseSubscriber) emit(ev core.Event) {
 			s.stateMu.Unlock()
 		}
 	}
-	// C4 §6.5 routing: the ONE global subscriber normalizes each direct event
-	// once and delivers copies to (a) the registered session route, (b) every
-	// passive observation tap, and (c) the subscriber's own channel (direct-
-	// drive tests and any global consumer). All sends are non-blocking — a
-	// stalled consumer must never stall the single SSE read loop.
+	// C4 §6.5 single timeline-ingest owner (audit-008 W1.1): a session with a
+	// registered route delivers EXCLUSIVELY through that route — its relay is
+	// the one deltaBatcher/EventPublisher/Kernel ingest owner. Passive taps
+	// never see routed sessions' events, so the same fact cannot be ingested
+	// twice. Passive taps DO receive unrouted sessions' events (external-turn
+	// observation for subscribed clients; the bridge gates unopened+unsub-
+	// scribable sessions to catalog-only). All sends are non-blocking.
+	routed := false
 	if ev.SessionID != "" {
 		s.agent.routesMu.Lock()
 		if chans, ok := s.agent.routes[ev.SessionID]; ok {
+			routed = true
 			for ch := range chans {
 				select {
 				case ch <- ev:
@@ -1267,15 +1279,17 @@ func (s *sseSubscriber) emit(ev core.Event) {
 		}
 		s.agent.routesMu.Unlock()
 	}
-	s.agent.passiveMu.Lock()
-	for ch := range s.agent.passive {
-		select {
-		case ch <- ev:
-		default:
-			slog.Debug("opencode-web SSE: passive tap full, event dropped", "type", ev.Type)
+	if !routed {
+		s.agent.passiveMu.Lock()
+		for ch := range s.agent.passive {
+			select {
+			case ch <- ev:
+			default:
+				slog.Debug("opencode-web SSE: passive tap full, event dropped", "type", ev.Type)
+			}
 		}
+		s.agent.passiveMu.Unlock()
 	}
-	s.agent.passiveMu.Unlock()
 	select {
 	case s.events <- ev:
 	case <-s.ctx.Done():
@@ -1387,6 +1401,16 @@ func (a *Agent) releaseGlobalSubscriber() {
 // registerRoute entitles one session channel to the session's normalized
 // events. Registering the same channel under multiple ids (resume → create)
 // is fine; unregisterRoute removes every binding.
+// HasPassiveTaps reports whether at least one passive observation tap is
+// attached to the global subscriber (full-path test determinism probe: the
+// directive-009 reproducers wait for the bridge's passive loop to attach
+// before injecting wire frames).
+func (a *Agent) HasPassiveTaps() bool {
+	a.passiveMu.Lock()
+	defer a.passiveMu.Unlock()
+	return len(a.passive) > 0
+}
+
 func (a *Agent) registerRoute(sessionID string, ch chan core.Event) {
 	if sessionID == "" || ch == nil {
 		return

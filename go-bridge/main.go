@@ -774,14 +774,27 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 				}
 			}
 
-			h.deltaBatcher.Send(LogicalEvent{
-				SessionID: ev.SessionID,
-				BackendID: backendID,
-				Event:     eventName,
-				Data:      data,
-				Broadcast: true,
-				Offline:   IsDurableMilestone(eventName),
-			})
+			// Audit-008 W1.1 — single timeline-ingest owner. The passive
+			// path may only PUBLISH events for sessions a client actually
+			// observes (set_observation_scope / session subscription): that
+			// is the E3 subscribed-external-turn route, delivered once
+			// through this single publisher. Sessions with no live
+			// subscriber are catalog/control-only (§6.5): the registry
+			// bookkeeping above already ran; feeding the Kernel here would
+			// build a hidden timeline for a session nobody opened. Actively
+			// relayed sessions never reach this loop at all — the adapter
+			// routes their events exclusively to the session route whose
+			// relay is the ingest owner.
+			if ev.SessionID == "" || h.broadcaster.HasSessionSubscriber(backendID, ev.SessionID) {
+				h.deltaBatcher.Send(LogicalEvent{
+					SessionID: ev.SessionID,
+					BackendID: backendID,
+					Event:     eventName,
+					Data:      data,
+					Broadcast: true,
+					Offline:   IsDurableMilestone(eventName),
+				})
+			}
 		}
 		slog.Info("go-bridge: passive subscription ended, reconnecting", "backend", backendID)
 

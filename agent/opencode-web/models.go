@@ -131,8 +131,17 @@ func (a *Agent) fetchModelCatalog(ctx context.Context, c *Client) (*ocwModelCata
 // produce plausible-but-false catalogs; the catalog simply becomes
 // unavailable and Send/list_models report it honestly).
 func parseProviderCatalog(raw []byte) (*ocwModelCatalog, error) {
+	// Shape first (E4b: the top level is exactly {all,connected,default});
+	// a non-object top level is a shape violation, while type errors inside
+	// otherwise-object rows are row malformations (audit-008 W2.2).
+	if trimmed := trimSpaceBytes(raw); len(trimmed) == 0 || trimmed[0] != '{' {
+		return nil, fmt.Errorf("opencode-web: provider catalog shape not recognized — expected the verified 1.18.18 {all,connected,default} envelope; failing closed instead of recursive shape guessing (C1): body=%s", truncateForError(string(raw)))
+	}
 	var envelope ocwProviderEnvelope
-	if err := json.Unmarshal(raw, &envelope); err != nil || len(envelope.All) == 0 {
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil, fmt.Errorf("opencode-web: provider catalog malformed (wrong types in a verified row): %w", err)
+	}
+	if len(envelope.All) == 0 {
 		return nil, fmt.Errorf("opencode-web: provider catalog shape not recognized — expected the verified 1.18.18 {all,connected,default} envelope; failing closed instead of recursive shape guessing (C1): body=%s", truncateForError(string(raw)))
 	}
 	connected := map[string]bool{}
@@ -146,8 +155,11 @@ func parseProviderCatalog(raw []byte) (*ocwModelCatalog, error) {
 	}
 	var rows []core.ModelOption
 	for _, provider := range envelope.All {
-		if provider.ID == "" || len(provider.Models) == 0 {
-			continue
+		// Audit-008 W2.2: a row without `id` is an unidentifiable physical
+		// row of the verified `all` array — fail closed, never silently
+		// skipped and never repaired with a guess.
+		if provider.ID == "" {
+			return nil, fmt.Errorf("opencode-web: provider catalog row missing required provider id")
 		}
 		if !connected[provider.ID] {
 			continue // 未配置凭据的 provider 不进选择框（对齐官方网页）；connected 为空 = 无可用模型
@@ -156,14 +168,13 @@ func parseProviderCatalog(raw []byte) (*ocwModelCatalog, error) {
 		if def, ok := envelope.Default[provider.ID]; ok && def != "" {
 			catalog.defaults[provider.ID] = def
 		}
-		for modelID, model := range provider.Models {
+		for _, model := range provider.Models {
+			// E4b: connected model rows carry their own non-empty id — the
+			// former map-key fallback is deleted (audit-008 W2.2).
+			if model.ID == "" {
+				return nil, fmt.Errorf("opencode-web: provider %s model row missing required id", provider.ID)
+			}
 			id := model.ID
-			if id == "" {
-				id = modelID
-			}
-			if id == "" {
-				continue
-			}
 			qualified := provider.ID + "/" + id
 			window := 0
 			if model.Limit != nil {
@@ -253,14 +264,6 @@ func (a *Agent) modelInCatalog(ctx context.Context, c *Client, providerID, model
 
 // ── C5: official model-selection chain (canonical §6.6, E5b-pinned) ──────────
 
-// ocwConfig is the verified 1.18.18 GET /config response (E5b): a plain
-// object whose OPTIONAL `model` is a "providerID/modelID" string. Everything
-// else in the object is ignored — it is server configuration, never CordCode
-// product state.
-type ocwConfig struct {
-	Model string `json:"model"`
-}
-
 // ocwShapeError marks strict-decode failures: the payload answered but did
 // not match the verified shape. Unlike a transport failure (route down,
 // 404…), a shape error must fail the send — guessing past it is exactly the
@@ -282,17 +285,25 @@ func (a *Agent) fetchConfiguredModel(ctx context.Context, c *Client) (string, er
 	if len(trimmed) == 0 || trimmed[0] != '{' {
 		return "", &ocwShapeError{detail: fmt.Sprintf("opencode-web: config payload must be an object (generation-118 verified shape), got: %s", truncateForError(string(raw)))}
 	}
-	var cfg ocwConfig
-	if err := json.Unmarshal(raw, &cfg); err != nil {
+	// Audit-008 W2.2: only an evidence-proven ABSENT `model` key means "no
+	// configured model". A present-but-null / non-string / empty value is an
+	// unproven shape and fails closed.
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
 		return "", &ocwShapeError{detail: fmt.Sprintf("opencode-web: config payload malformed: %v", err)}
 	}
-	if cfg.Model == "" {
+	rawModel, present := obj["model"]
+	if !present {
 		return "", nil
 	}
-	if _, _, ok := strings.Cut(cfg.Model, "/"); !ok {
-		return "", &ocwShapeError{detail: fmt.Sprintf("opencode-web: configured model %q is not a providerID/modelID pair", cfg.Model)}
+	var model string
+	if err := json.Unmarshal(rawModel, &model); err != nil || model == "" {
+		return "", &ocwShapeError{detail: fmt.Sprintf("opencode-web: config model key present but not a non-empty string (generation-118 unproven shape): %s", truncateForError(string(rawModel)))}
 	}
-	return cfg.Model, nil
+	if _, _, ok := strings.Cut(model, "/"); !ok {
+		return "", &ocwShapeError{detail: fmt.Sprintf("opencode-web: configured model %q is not a providerID/modelID pair", model)}
+	}
+	return model, nil
 }
 
 // catalogValid mirrors the official picker's `valid` (prompt-model-selection.

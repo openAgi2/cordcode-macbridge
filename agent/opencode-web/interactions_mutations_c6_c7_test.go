@@ -79,19 +79,39 @@ func questionAgent(t *testing.T, responses map[string]string) (*Agent, *recordin
 
 const a7AskedFrame = `{"payload":{"type":"question.asked","properties":{"id":"que_1","sessionID":"ses_q","questions":[{"question":"Which fixture color?","header":"Color","options":[{"label":"red","description":"Stop"},{"label":"green","description":"Go"}],"multiple":false}],"tool":{"messageID":"msg_1","callID":"call_1"}}}}`
 
+// armTurn drives the user echo that arms the session's owning turn — every
+// question.asked must correlate to a real armed turn (audit-008 W1.2).
+func armTurn(sub *sseSubscriber, sessionID, userMessageID string) {
+	sub.handleRawEvent(`{"payload":{"type":"message.updated","properties":{"info":{"id":"` + userMessageID + `","role":"user"},"sessionID":"` + sessionID + `"}}}`)
+}
+
 // TestQuestionAskedMapsToCanonicalUserInput: the A7 asked frame translates
-// once into EventUserInputRequested with deterministic option ids and the
+// once into EventUserInputRequested carrying the source-proven identity
+// (owning armed turn + tool.callID) with deterministic option ids and the
 // pending registry armed.
 func TestQuestionAskedMapsToCanonicalUserInput(t *testing.T) {
 	agent, _ := questionAgent(t, map[string]string{"/provider": `{}`})
 	sub := newDrivenSubscriber(t, agent)
+	armTurn(sub, "ses_q", "msg_u0")
 	sub.handleRawEvent(a7AskedFrame)
 
 	events := drain(sub)
-	if len(events) != 1 || events[0].Type != core.EventUserInputRequested {
-		t.Fatalf("asked must emit exactly one user_input_requested, got %+v", events)
+	var asked *core.Event
+	for i := range events {
+		if events[i].Type == core.EventUserInputRequested {
+			asked = &events[i]
+		}
 	}
-	ui := events[0].UserInput
+	if asked == nil {
+		t.Fatalf("asked must emit user_input_requested, got %+v", events)
+	}
+	if asked.TurnID != "msg_u0" {
+		t.Fatalf("asked must carry the source-proven owning turn, got turnID=%q", asked.TurnID)
+	}
+	if asked.ItemID != "call_1" {
+		t.Fatalf("asked must carry tool.callID as the item correlation, got itemID=%q", asked.ItemID)
+	}
+	ui := asked.UserInput
 	if ui == nil || ui.InteractionID != "que_1" || ui.Status != core.UserInputStatusPending || !ui.CanRespond || !ui.CanReject {
 		t.Fatalf("interaction = %+v", ui)
 	}
@@ -104,6 +124,33 @@ func TestQuestionAskedMapsToCanonicalUserInput(t *testing.T) {
 	}
 	if len(q.Options) != 2 || q.Options[0].ID != "que_1/q0/o0" || q.Options[0].Label != "red" || q.Options[1].Label != "green" {
 		t.Fatalf("options = %+v", q.Options)
+	}
+}
+
+// TestQuestionAskedWithoutSourceIdentityFailsClosed: an asked frame with no
+// tool identity, or whose session has no armed turn, must NOT project (no
+// phantom turn, no registry entry).
+func TestQuestionAskedWithoutSourceIdentityFailsClosed(t *testing.T) {
+	agent, _ := questionAgent(t, map[string]string{"/provider": `{}`})
+	sub := newDrivenSubscriber(t, agent)
+
+	// No armed turn at all.
+	sub.handleRawEvent(a7AskedFrame)
+	if events := drain(sub); len(events) != 0 {
+		t.Fatalf("asked without an armed turn must be dropped, got %+v", events)
+	}
+
+	// Armed turn but no tool.messageID.
+	armTurn(sub, "ses_q", "msg_u0")
+	sub.handleRawEvent(`{"payload":{"type":"question.asked","properties":{"id":"que_nt","sessionID":"ses_q","questions":[{"question":"q","options":[{"label":"a"}]}]}}}`)
+	if events := drain(sub); len(events) != 0 {
+		t.Fatalf("asked without tool identity must be dropped, got %+v", events)
+	}
+	agent.questionMu.Lock()
+	pending := len(agent.pendingQuestions)
+	agent.questionMu.Unlock()
+	if pending != 0 {
+		t.Fatalf("fail-closed asks must not enter the pending registry, got %d", pending)
 	}
 }
 
@@ -272,9 +319,10 @@ func TestRenameSessionContract(t *testing.T) {
 // boolean response + catalog signal; completion never depends on
 // session.deleted, and a second delete surfaces the serve's 404.
 func TestDeleteSessionConvergenceWithoutInventedEvents(t *testing.T) {
-	agent, serve := questionAgent(t, map[string]string{
-		"/session/ses_d": `true`,
-	})
+	agent, serve := questionAgent(t, map[string]string{})
+	serve.methodResponses = map[string]string{"DELETE /session/ses_d": `true`}
+	// The by-ID route stays unmatched: pre-fetch and post-delete probes both
+	// 404 (directory unknown → scoped-list check not applicable).
 	if err := agent.DeleteSession(context.Background(), "ses_d"); err != nil {
 		t.Fatalf("delete: %v", err)
 	}

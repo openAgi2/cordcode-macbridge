@@ -27,11 +27,18 @@ func TestDeleteSessionOfficialShapeAndSuccess(t *testing.T) {
 	if err := agent.DeleteSession(context.Background(), "ses_del1"); err != nil {
 		t.Fatalf("DeleteSession: %v", err)
 	}
+	// Convergence sequence on the route: pre-delete by-ID probe (404 —
+	// directory unknown), the DELETE itself, and the post-delete by-ID 404.
 	reqs := serve.requestsFor("/session/ses_del1")
-	if len(reqs) != 1 {
-		t.Fatalf("recorded %d requests, want 1", len(reqs))
+	if len(reqs) != 3 {
+		t.Fatalf("recorded %d requests, want pre-fetch + DELETE + by-ID convergence probe", len(reqs))
 	}
-	req := reqs[0]
+	var req recordedRequest
+	for _, r := range reqs {
+		if r.Method == "DELETE" {
+			req = r
+		}
+	}
 	if req.Method != "DELETE" || !req.Authed {
 		t.Fatalf("request must be an authed DELETE, got %+v", req)
 	}

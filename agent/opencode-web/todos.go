@@ -52,26 +52,43 @@ func (a *Agent) FetchTodos(ctx context.Context, sessionID string) ([]core.Todo, 
 	if len(trimmed) == 0 || trimmed[0] != '[' {
 		return nil, fmt.Errorf("opencode-web: todo payload must be a bare array (generation-118 verified shape), got: %s", truncateForError(string(raw)))
 	}
+	todos, err := decodeTodoRows(raw)
+	if err != nil {
+		return nil, err
+	}
+	return todos, nil
+}
+
+// decodeTodoRows strictly parses the A8-proven replacement list: a bare
+// array whose every row carries EXACTLY the verified {content,status,
+// priority} truth — each field present, string-typed, non-empty. No `text`
+// alias, no pending/normal defaults, no silent row skip: one malformed row
+// fails the whole replacement (audit-008 W2.1).
+func decodeTodoRows(raw []byte) ([]core.Todo, error) {
+	trimmed := trimSpaceBytes(raw)
+	if len(trimmed) == 0 || trimmed[0] != '[' {
+		return nil, fmt.Errorf("opencode-web: todo payload must be a bare array (generation-118 verified shape), got: %s", truncateForError(string(raw)))
+	}
 	var rows []map[string]any
 	if err := json.Unmarshal(raw, &rows); err != nil {
 		return nil, fmt.Errorf("opencode-web: todo payload malformed: %w", err)
 	}
 	todos := make([]core.Todo, 0, len(rows))
 	for i, row := range rows {
-		content, _ := row["content"].(string)
-		if content == "" {
-			content, _ = row["text"].(string)
+		if row == nil {
+			return nil, fmt.Errorf("opencode-web: todo row %d malformed: not an object", i)
 		}
-		if strings.TrimSpace(content) == "" {
+		content, ok := row["content"].(string)
+		if !ok || strings.TrimSpace(content) == "" {
 			return nil, fmt.Errorf("opencode-web: todo row %d missing required content", i)
 		}
-		status, _ := row["status"].(string)
-		if status == "" {
-			status = "pending"
+		status, ok := row["status"].(string)
+		if !ok || status == "" {
+			return nil, fmt.Errorf("opencode-web: todo row %d missing required status", i)
 		}
-		priority, _ := row["priority"].(string)
-		if priority == "" {
-			priority = "normal"
+		priority, ok := row["priority"].(string)
+		if !ok || priority == "" {
+			return nil, fmt.Errorf("opencode-web: todo row %d missing required priority", i)
 		}
 		todos = append(todos, core.Todo{Content: content, Status: status, Priority: priority})
 	}

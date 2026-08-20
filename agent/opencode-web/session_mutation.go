@@ -98,12 +98,14 @@ func (a *Agent) RenameSession(ctx context.Context, sessionID, title string) (*co
 	if err := json.Unmarshal(raw, &entry); err != nil {
 		return nil, fmt.Errorf("opencode-web: rename session %s: response decode: %w", sessionID, err)
 	}
-	info := ocwSessionEntryToInfo(&entry)
-	if info.ID == "" {
-		info.ID = sessionID
+	if entry.ID == "" || entry.ID != sessionID {
+		return nil, fmt.Errorf("opencode-web: rename session %s: response missing or mismatched id %q", sessionID, entry.ID)
+	}
+	if entry.Title != title {
+		return nil, fmt.Errorf("opencode-web: rename session %s: response title %q does not confirm the requested title %q", sessionID, entry.Title, title)
 	}
 	a.signalCatalogRefresh()
-	return info, nil
+	return ocwSessionEntryToInfo(&entry), nil
 }
 
 var _ core.SessionRenamer = (*Agent)(nil)
@@ -118,6 +120,12 @@ func (a *Agent) DeleteSession(ctx context.Context, sessionID string) error {
 	if err != nil {
 		return err
 	}
+	// Convergence needs the session's own directory for the scoped-list
+	// absence check; fetch it BEFORE the delete (E7: list absence + by-ID 404).
+	var directory string
+	if info, err := a.fetchSessionInfo(ctx, c, sessionID); err == nil && info.Directory != "" {
+		directory = info.Directory
+	}
 	path := c.apiPath("/session/" + url.PathEscape(sessionID))
 	code, raw, err := c.doRequest(ctx, http.MethodDelete, c.endpoint(path), nil, a.GetWorkDir(), true)
 	if err != nil {
@@ -126,7 +134,28 @@ func (a *Agent) DeleteSession(ctx context.Context, sessionID string) error {
 	if code >= 400 {
 		return fmt.Errorf("opencode-web: delete session %s: HTTP %d: %s", sessionID, code, truncateForError(string(raw)))
 	}
-	// 1.18 answers the bare boolean `true`; any 2xx is the official success.
+	// E7: the ONLY evidence-proven success body is the bare boolean `true`.
+	// false/null/object/empty/other 2xx bodies all fail (audit-008 W2.3).
+	if strings.TrimSpace(string(raw)) != "true" {
+		return fmt.Errorf("opencode-web: delete session %s: response is not the evidence-proven boolean true (got %q)", sessionID, truncateForError(string(raw)))
+	}
+	// Authoritative convergence: by-ID must 404 and the scoped list must no
+	// longer carry the id. Until every check passes, no catalog signal and
+	// no success claim (§6.10).
+	if _, err := a.fetchSessionInfo(ctx, c, sessionID); err == nil || !strings.Contains(err.Error(), "404") {
+		return fmt.Errorf("opencode-web: delete session %s: session still readable after delete (expected 404): %v", sessionID, err)
+	}
+	if directory != "" {
+		rows, err := a.listSessionsWith(ctx, c, directory)
+		if err != nil {
+			return fmt.Errorf("opencode-web: delete session %s: convergence list check failed: %w", sessionID, err)
+		}
+		for _, row := range rows {
+			if row.ID == sessionID {
+				return fmt.Errorf("opencode-web: delete session %s: session still present in the scoped list", sessionID)
+			}
+		}
+	}
 	a.signalCatalogRefresh()
 	return nil
 }
@@ -158,10 +187,12 @@ func (a *Agent) ArchiveSession(ctx context.Context, sessionID string, archivedAt
 	if err := json.Unmarshal(raw, &entry); err != nil {
 		return nil, fmt.Errorf("opencode-web: archive session %s: response decode: %w", sessionID, err)
 	}
-	info := ocwSessionEntryToInfo(&entry)
-	if info.ID == "" {
-		info.ID = sessionID
+	if entry.ID == "" || entry.ID != sessionID {
+		return nil, fmt.Errorf("opencode-web: archive session %s: response missing or mismatched id %q", sessionID, entry.ID)
+	}
+	if entry.Time == nil || entry.Time.Archived <= 0 {
+		return nil, fmt.Errorf("opencode-web: archive session %s: response missing time.archived", sessionID)
 	}
 	a.signalCatalogRefresh()
-	return info, nil
+	return ocwSessionEntryToInfo(&entry), nil
 }

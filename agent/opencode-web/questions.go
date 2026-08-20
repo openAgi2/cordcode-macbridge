@@ -41,11 +41,26 @@ type ocwQuestion struct {
 	Multiple bool                 `json:"multiple"`
 }
 
+// ocwQuestionTool is the official tool correlation block (A7): messageID =
+// the assistant message of the running turn, callID = the tool item.
+type ocwQuestionTool struct {
+	MessageID string `json:"messageID"`
+	CallID    string `json:"callID"`
+}
+
 // ocwQuestionRequest is the official pending/asked request shape.
 type ocwQuestionRequest struct {
 	ID        string        `json:"id"`
 	SessionID string        `json:"sessionID"`
 	Questions []ocwQuestion `json:"questions"`
+	Tool      ocwQuestionTool `json:"tool"`
+}
+
+func knownToolCallID(req *ocwQuestionRequest) string {
+	if req == nil {
+		return ""
+	}
+	return req.Tool.CallID
 }
 
 // pendingQuestions tracks live asked requests so ResolveUserInput can map the
