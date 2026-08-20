@@ -242,8 +242,36 @@
         "audit_verdict": "rejected",
         "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-008-concentrated-c2-c7-implementation.md"
       }
+    },
+    {
+      "number": 9,
+      "kind": "hole-fill",
+      "title": "Audit-008 concentrated product-path repair",
+      "issued_at": "2026-08-20T18:48:54Z",
+      "status": "pending",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-009-audit008-concentrated-product-path-repair.md",
+      "scope": "Cross-repository MacBridge+iOS concentrated corrective batch",
+      "constraints": [
+        "canonical unchanged; pinned 1.18.18 source and captured samples remain the only external shape truth",
+        "one global SSE connection and exactly one production EventPublisher/Kernel ingest owner per source fact",
+        "question identity must be source-proven from A7 tool fields and verified through Kernel/Projection",
+        "Todo/provider/config/mutation shapes fail closed with no alias/default/silent skip/arbitrary-2xx success",
+        "variant selector must exist in both current iOS model configuration consumers without UI automation",
+        "affected capabilities remain unavailable until full-path owning tests pass; E2 reasoning and OD-3 remain absent",
+        "one concentrated report, then stop for audit-009 before owner UI matrix"
+      ],
+      "linked_commits": [],
+      "resolved_from_audit": 8,
+      "owner_disposition": "Option A confirmed: preserve canonical and repair implementation/full-path tests",
+      "report": {
+        "received_at": null,
+        "markdown_path": null,
+        "audited": false,
+        "audit_verdict": null,
+        "audit_path": null
+      }
     }
   ],
-  "current_directive_number": 8,
-  "last_updated": "2026-08-20T18:41:29Z"
+  "current_directive_number": 9,
+  "last_updated": "2026-08-20T18:48:54Z"
 }

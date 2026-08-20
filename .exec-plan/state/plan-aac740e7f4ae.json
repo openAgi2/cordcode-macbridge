@@ -41,7 +41,7 @@
    "attestation_note": "all evidence self-attested; sandbox/unit/regression replayable; owner UI matrix NOT executed (awaits supervisor audit)"
   }
  },
- "updated_at": "2026-08-20T19:42:00Z",
+ "updated_at": "2026-08-20T19:43:00Z",
  "todos": [
   {
    "id": "gate-a-inventory-impl",
@@ -1585,22 +1585,20 @@
    "id": "concentrated-audit008-review-fix-impl",
    "title": "Audit-008 concentrated product-path repair",
    "description": "After owner disposition, restore one timeline owner/ingest, source-proven question identity through Kernel, strict Todo/provider/config/mutation decoders, and an actual iOS model-variant selector; withdraw incomplete capabilities until full-path proof exists.",
-   "status": "blocked",
+   "status": "pending",
    "phase": "concentrated-audit008-review-fix",
    "kind": "impl",
    "depends_on": [],
    "source": "supervisor audit-008",
-   "notes": "repairable-heavy; blocked pending owner confirmation because supervise hard-reject criterion 4 was hit",
+   "notes": "repairable-heavy; owner confirmed supervisor Option A; authorized only through directive-009",
    "verification": {
     "required": true,
-    "status": "failed",
-    "method": "supervisor-audit",
-    "attestation": "re-verified",
+    "status": "missing",
+    "method": "implementation",
+    "attestation": "self-attested",
     "na_reason": null,
-    "summary": "Implementation correction has not started; audit evidence is durable and the developer must not continue before owner disposition.",
-    "artifacts": [
-     "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-008-concentrated-c2-c7-implementation.md"
-    ]
+    "summary": "",
+    "artifacts": []
    }
   },
   {
