@@ -38,7 +38,7 @@
       "kind": "hole-fill",
       "title": "补洞 C1 unsupported-generation diagnostics",
       "issued_at": "2026-08-20T14:46:25Z",
-      "status": "pending",
+      "status": "in_progress",
       "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-002-c1-diagnostics-hole-fill.md",
       "scope": "Mac-only C1 diagnostics/tests",
       "constraints": [
@@ -49,8 +49,8 @@
       ],
       "linked_commits": [],
       "report": {
-        "received_at": null,
-        "markdown_path": null,
+        "received_at": "2026-08-20T14:56:46Z",
+        "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-002-c1-diagnostics-hole-fill.md",
         "audited": false,
         "audit_verdict": null,
         "audit_path": null
@@ -58,5 +58,5 @@
     }
   ],
   "current_directive_number": 2,
-  "last_updated": "2026-08-20T14:46:25Z"
+  "last_updated": "2026-08-20T14:56:46Z"
 }
