@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-21T01:20:00Z",
+  "updated_at": "2026-08-20T16:54:56Z",
   "todos": [
     {
       "id": "gate-a-inventory-impl",
@@ -870,6 +870,75 @@
       }
     },
     {
+      "id": "stage0-provider-evidence-correction-impl",
+      "title": "Directive-007 E1b/E4b/E5b combined capture",
+      "description": "Evidence-only: capture a two-model provider with distinct default/first ordering, real GET /config valid/invalid/absent responses, safe raw+sanitized /provider provenance, and a non-empty live variants catalog or honest E1b blocker.",
+      "status": "pending",
+      "phase": "stage0-evidence-correction",
+      "kind": "impl",
+      "depends_on": [
+        "stage0-evidence-pack-regression"
+      ],
+      "source": "Canonical §4.1.1; supervisor directive-007",
+      "notes": "No product mapping or code. One combined provider sandbox round only.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "stage0-provider-evidence-correction-tests",
+      "title": "Directive-007 provider/config/variant independent checker",
+      "description": "Derive E1b/E4b/E5b only from raw HTTP/prompt/reload and prove raw/sanitized structural equivalence; destructive mutations cover config/default/connected/models/variants and redaction boundaries.",
+      "status": "pending",
+      "phase": "stage0-evidence-correction",
+      "kind": "tests",
+      "depends_on": [
+        "stage0-provider-evidence-correction-impl"
+      ],
+      "source": "Canonical §4.1.1; supervisor directive-007",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "stage0-provider-evidence-correction-regression",
+      "title": "Directive-007 evidence provenance/isolation regression",
+      "description": "Prove pinned source/runtime, safe raw+sanitized provenance, leak scan, 4398/4399 cleanup, unchanged owner 4096, and zero product/protocol/iOS diffs; stop for design-owner mapping.",
+      "status": "pending",
+      "phase": "stage0-evidence-correction",
+      "kind": "regression",
+      "depends_on": [
+        "stage0-provider-evidence-correction-tests"
+      ],
+      "source": "Canonical §4.1.1; supervisor directive-007",
+      "notes": "Developer agent stops after the report; canonical mapping remains owner-only.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
       "id": "canonical-post-evidence-shape-sync-impl",
       "title": "Design-owner canonical shape and mapping sync",
       "description": "DESIGN OWNER ONLY: inspect returned WP-FIX/E1-E7 raw evidence and update each §6 dossier with exact observed shapes, explicit bridge/SSV2 mapping, errors, tests, and blocked/unsupported decisions. No product code.",
@@ -877,7 +946,7 @@
       "phase": "canonical-shape-sync",
       "kind": "impl",
       "depends_on": [
-        "stage0-evidence-pack-regression"
+        "stage0-provider-evidence-correction-regression"
       ],
       "source": "Canonical §0/§4.1/§6",
       "notes": "External role gate: the evidence/developer agent is forbidden to perform this judgment. Unblock only when the design owner receives and audits the evidence report.",

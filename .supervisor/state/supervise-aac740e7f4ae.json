@@ -2,7 +2,7 @@
   "version": 1,
   "project_root": "/Users/jacklee/Projects/cordcode-macbridge-opencode-web",
   "design_doc": "docs/2026-08-20-opencode-web-source-first-convergence-plan.md",
-  "design_doc_hash": "611497c6bed8755090608c4fc47a84d75fed0975",
+  "design_doc_hash": "2f9bf79f3feeeef4567a64a070f5d02305a1cd57",
   "design_doc_changed": false,
   "activated_at": "2026-08-20T14:40:12Z",
   "active_mode": true,
@@ -145,7 +145,7 @@
       "kind": "diagnostic",
       "title": "Canonical Stage 0 evidence pack（E1–E7 + WP-FIX）",
       "issued_at": "2026-08-20T16:08:13Z",
-      "status": "pending",
+      "status": "in_progress",
       "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-006-canonical-evidence-pack.md",
       "scope": "Mac evidence-only: isolated OpenCode 1.18.18 capture harness, sanitized samples, independent checkers",
       "constraints": [
@@ -155,10 +155,42 @@
         "blocked is honest; no guessed JSON, fake-server substitute, legacy fallback, owner 4096 writes, real provider account, or product install",
         "after evidence report stop; design owner updates canonical dossiers before a new concentrated implementation directive"
       ],
-      "linked_commits": [],
+      "linked_commits": [
+        "git:4a215b0"
+      ],
+      "resolved_by_directive": 7,
       "roadmap_diff": {
         "design_commit": "git:904a0dd",
         "summary": "The convergence plan is now the sole canonical execution design with eleven self-contained feature dossiers. Gate B, SSV2 impact, and sample inventory are evidence appendices only. Product implementation previously authorized by directive-005 is withdrawn until E1-E7 and WP-FIX return and the canonical dossiers are revised with observed shapes.",
+        "checker": "python3 agent/opencode-web/testdata/official-1.18.18/harness/check_canonical_execution_design.py --self-test"
+      },
+      "report": {
+        "received_at": "2026-08-20T16:54:56Z",
+        "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-006-canonical-evidence-pack.md",
+        "audited": true,
+        "audit_verdict": "partial",
+        "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-006-canonical-evidence-pack.md"
+      }
+    },
+    {
+      "number": 7,
+      "kind": "hole-fill",
+      "title": "Final provider evidence correction（E1b/E4b/E5b）",
+      "issued_at": "2026-08-20T16:54:56Z",
+      "status": "pending",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-007-final-provider-evidence-correction.md",
+      "scope": "Mac evidence-only: one combined OpenCode 1.18.18 provider/config/variant sandbox round",
+      "constraints": [
+        "capture non-empty live model variants through official Web selection, prompt, and reload or mark E1b blocked",
+        "archive a safe raw+sanitized provider pair with deterministic provenance and value-class-only redaction",
+        "capture real GET /config valid/invalid/absent responses and a two-model catalog distinguishing provider default from first-model fallback",
+        "no bridge mapping decisions, product code, protocol, WireDescriptor, capability, iOS, build, or install",
+        "stop after checker/report; design owner performs final canonical mapping and then issues one concentrated product directive"
+      ],
+      "linked_commits": [],
+      "roadmap_diff": {
+        "design_commit": "git:8d110f7",
+        "summary": "Audit-006 accepted WP/E2/E3/E6/E7 and narrowed their canonical mappings, but found the last coupled provider evidence gap: no /config response, no non-empty catalog variants, no multi-model fallback distinction, and no raw E4 provenance pair.",
         "checker": "python3 agent/opencode-web/testdata/official-1.18.18/harness/check_canonical_execution_design.py --self-test"
       },
       "report": {
@@ -170,6 +202,6 @@
       }
     }
   ],
-  "current_directive_number": 6,
-  "last_updated": "2026-08-20T16:08:13Z"
+  "current_directive_number": 7,
+  "last_updated": "2026-08-20T16:54:56Z"
 }
