@@ -2,8 +2,8 @@
   "version": 1,
   "project_root": "/Users/jacklee/Projects/cordcode-macbridge-opencode-web",
   "design_doc": "docs/2026-08-20-opencode-web-source-first-convergence-plan.md",
-  "design_doc_hash": "2ebd546cf6f9281d9fc40b979365dc4594ac2696",
-  "design_doc_changed": true,
+  "design_doc_hash": "06fa4bc0f788a25455ce1ad13488f4f6adc9a610",
+  "design_doc_changed": false,
   "activated_at": "2026-08-20T14:40:12Z",
   "active_mode": true,
   "directives": [
@@ -89,8 +89,31 @@
         "audit_verdict": "partial",
         "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-003-c2-official-list-get.md"
       }
+    },
+    {
+      "number": 4,
+      "kind": "hole-fill",
+      "title": "补洞 C2 evidence/decoder fail-closed",
+      "issued_at": "2026-08-20T15:43:18Z",
+      "status": "pending",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-004-c2-evidence-decoder-hole-fill.md",
+      "scope": "Mac-only C2 evidence/project decoder/tests",
+      "constraints": [
+        "workspace.project checker derives only from real http response fields",
+        "generation-118 project decoder accepts bare array only and fails malformed required rows",
+        "roots/limit test claims must match actual fixtures and A10 live replay",
+        "no fallback/protocol/WireDescriptor/capability/iOS writer/C3+ changes"
+      ],
+      "linked_commits": [],
+      "report": {
+        "received_at": null,
+        "markdown_path": null,
+        "audited": false,
+        "audit_verdict": null,
+        "audit_path": null
+      }
     }
   ],
-  "current_directive_number": 3,
-  "last_updated": "2026-08-20T15:41:49Z"
+  "current_directive_number": 4,
+  "last_updated": "2026-08-20T15:43:18Z"
 }
