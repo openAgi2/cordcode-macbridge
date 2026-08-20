@@ -1,0 +1,6739 @@
+{
+  "meta": {
+    "scenario": "A8",
+    "opencodeVersion": "1.18.18",
+    "sourceCommit": "2cba7e227d",
+    "captureStatus": "captured"
+  },
+  "source": {
+    "ui": "packages/app/src/pages/session.tsx todo(); session-todo-dock.tsx",
+    "server": "packages/opencode/src/session/todo.ts persist {content,status,priority} no id; GET /session/:id/todo; event todo.updated"
+  },
+  "http": [
+    {
+      "method": "POST",
+      "path": "/session",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {},
+      "status": 200,
+      "response": {
+        "id": "ses_fixture_001",
+        "slug": "eager-otter",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "path": "private/tmp/ocw-gate-a/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "New session - 2026-08-20T12:53:32.369Z",
+        "version": "1.18.18",
+        "time": {
+          "created": 0,
+          "updated": 0
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:53:31 GMT",
+        "content-length": "399",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/session/ses_fixture_001/prompt_async",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {
+        "messageID": "msg_fixture_002",
+        "agent": "build",
+        "model": {
+          "providerID": "localmock",
+          "modelID": "echo"
+        },
+        "parts": [
+          {
+            "type": "text",
+            "text": "A8_TODOWRITE"
+          }
+        ]
+      },
+      "status": 204,
+      "response": null,
+      "responseHeaders": {
+        "vary": "Origin",
+        "date": "Thu, 20 Aug 2026 12:53:31 GMT",
+        "content-length": "0"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/ses_fixture_001/todo",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": [
+        {
+          "content": "capture A8",
+          "status": "pending",
+          "priority": "high"
+        },
+        {
+          "content": "complete A8",
+          "status": "in_progress",
+          "priority": "medium"
+        }
+      ],
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:53:33 GMT",
+        "content-length": "132",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/session/ses_fixture_001/prompt_async",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {
+        "messageID": "msg_fixture_003",
+        "agent": "build",
+        "model": {
+          "providerID": "localmock",
+          "modelID": "echo"
+        },
+        "parts": [
+          {
+            "type": "text",
+            "text": "A8_TODOWRITE_UPDATE"
+          }
+        ]
+      },
+      "status": 204,
+      "response": null,
+      "responseHeaders": {
+        "vary": "Origin",
+        "date": "Thu, 20 Aug 2026 12:53:41 GMT",
+        "content-length": "0"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/ses_fixture_001/todo",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": [
+        {
+          "content": "capture A8",
+          "status": "completed",
+          "priority": "high"
+        },
+        {
+          "content": "complete A8",
+          "status": "completed",
+          "priority": "medium"
+        }
+      ],
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:53:51 GMT",
+        "content-length": "132",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/ses_fixture_001/message",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": [
+        {
+          "info": {
+            "id": "msg_fixture_002",
+            "sessionID": "ses_fixture_001",
+            "role": "user",
+            "time": {
+              "created": 0
+            },
+            "summary": {
+              "diffs": []
+            },
+            "agent": "build",
+            "model": {
+              "providerID": "localmock",
+              "modelID": "echo"
+            }
+          },
+          "parts": [
+            {
+              "id": "prt_fixture_004",
+              "sessionID": "ses_fixture_001",
+              "messageID": "msg_fixture_002",
+              "type": "text",
+              "text": "A8_TODOWRITE"
+            }
+          ]
+        },
+        {
+          "info": {
+            "id": "msg_fixture_005",
+            "sessionID": "ses_fixture_001",
+            "role": "assistant",
+            "time": {
+              "created": 0,
+              "completed": 0
+            },
+            "parentID": "msg_fixture_002",
+            "modelID": "echo",
+            "providerID": "localmock",
+            "mode": "build",
+            "agent": "build",
+            "path": {
+              "cwd": "/private/tmp/ocw-gate-a/workspace",
+              "root": "/"
+            },
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            },
+            "finish": "tool-calls"
+          },
+          "parts": [
+            {
+              "id": "prt_fixture_006",
+              "sessionID": "ses_fixture_001",
+              "messageID": "msg_fixture_005",
+              "type": "step-start"
+            },
+            {
+              "id": "prt_fixture_007",
+              "sessionID": "ses_fixture_001",
+              "messageID": "msg_fixture_005",
+              "type": "tool",
+              "callID": "call_fixture_008",
+              "tool": "todowrite",
+              "state": {
+                "status": "completed",
+                "input": {
+                  "todos": [
+                    {
+                      "content": "capture A8",
+                      "status": "pending",
+                      "priority": "high"
+                    },
+                    {
+                      "content": "complete A8",
+                      "status": "in_progress",
+                      "priority": "medium"
+                    }
+                  ]
+                },
+                "output": "[\n  {\n    \"content\": \"capture A8\",\n    \"status\": \"pending\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"complete A8\",\n    \"status\": \"in_progress\",\n    \"priority\": \"medium\"\n  }\n]",
+                "title": "2 todos",
+                "metadata": {
+                  "todos": [
+                    {
+                      "content": "capture A8",
+                      "status": "pending",
+                      "priority": "high"
+                    },
+                    {
+                      "content": "complete A8",
+                      "status": "in_progress",
+                      "priority": "medium"
+                    }
+                  ],
+                  "truncated": false
+                },
+                "time": {
+                  "start": 0,
+                  "end": 0
+                }
+              }
+            },
+            {
+              "id": "prt_fixture_009",
+              "sessionID": "ses_fixture_001",
+              "messageID": "msg_fixture_005",
+              "type": "step-finish",
+              "reason": "tool-calls",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              }
+            }
+          ]
+        },
+        {
+          "info": {
+            "id": "msg_fixture_010",
+            "sessionID": "ses_fixture_001",
+            "role": "assistant",
+            "time": {
+              "created": 0,
+              "completed": 0
+            },
+            "parentID": "msg_fixture_002",
+            "modelID": "echo",
+            "providerID": "localmock",
+            "mode": "build",
+            "agent": "build",
+            "path": {
+              "cwd": "/private/tmp/ocw-gate-a/workspace",
+              "root": "/"
+            },
+            "cost": 0,
+            "tokens": {
+              "total": 18,
+              "input": 8,
+              "output": 10,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            },
+            "finish": "stop"
+          },
+          "parts": [
+            {
+              "id": "prt_fixture_011",
+              "sessionID": "ses_fixture_001",
+              "messageID": "msg_fixture_010",
+              "type": "step-start"
+            },
+            {
+              "id": "prt_fixture_012",
+              "sessionID": "ses_fixture_001",
+              "messageID": "msg_fixture_010",
+              "type": "text",
+              "text": "SANDBOX_OK",
+              "time": {
+                "start": 0,
+                "end": 0
+              }
+            },
+            {
+              "id": "prt_fixture_013",
+              "sessionID": "ses_fixture_001",
+              "messageID": "msg_fixture_010",
+              "type": "step-finish",
+              "reason": "stop",
+              "cost": 0,
+              "tokens": {
+                "total": 18,
+                "input": 8,
+                "output": 10,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              }
+            }
+          ]
+        },
+        {
+          "info": {
+            "id": "msg_fixture_003",
+            "sessionID": "ses_fixture_001",
+            "role": "user",
+            "time": {
+              "created": 0
+            },
+            "summary": {
+              "diffs": []
+            },
+            "agent": "build",
+            "model": {
+              "providerID": "localmock",
+              "modelID": "echo"
+            }
+          },
+          "parts": [
+            {
+              "id": "prt_fixture_014",
+              "sessionID": "ses_fixture_001",
+              "messageID": "msg_fixture_003",
+              "type": "text",
+              "text": "A8_TODOWRITE_UPDATE"
+            }
+          ]
+        },
+        {
+          "info": {
+            "id": "msg_fixture_015",
+            "sessionID": "ses_fixture_001",
+            "role": "assistant",
+            "time": {
+              "created": 0,
+              "completed": 0
+            },
+            "parentID": "msg_fixture_003",
+            "modelID": "echo",
+            "providerID": "localmock",
+            "mode": "build",
+            "agent": "build",
+            "path": {
+              "cwd": "/private/tmp/ocw-gate-a/workspace",
+              "root": "/"
+            },
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            },
+            "finish": "tool-calls"
+          },
+          "parts": [
+            {
+              "id": "prt_fixture_016",
+              "sessionID": "ses_fixture_001",
+              "messageID": "msg_fixture_015",
+              "type": "step-start"
+            },
+            {
+              "id": "prt_fixture_017",
+              "sessionID": "ses_fixture_001",
+              "messageID": "msg_fixture_015",
+              "type": "tool",
+              "callID": "call_fixture_018",
+              "tool": "todowrite",
+              "state": {
+                "status": "completed",
+                "input": {
+                  "todos": [
+                    {
+                      "content": "capture A8",
+                      "status": "completed",
+                      "priority": "high"
+                    },
+                    {
+                      "content": "complete A8",
+                      "status": "completed",
+                      "priority": "medium"
+                    }
+                  ]
+                },
+                "output": "[\n  {\n    \"content\": \"capture A8\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"complete A8\",\n    \"status\": \"completed\",\n    \"priority\": \"medium\"\n  }\n]",
+                "title": "0 todos",
+                "metadata": {
+                  "todos": [
+                    {
+                      "content": "capture A8",
+                      "status": "completed",
+                      "priority": "high"
+                    },
+                    {
+                      "content": "complete A8",
+                      "status": "completed",
+                      "priority": "medium"
+                    }
+                  ],
+                  "truncated": false
+                },
+                "time": {
+                  "start": 0,
+                  "end": 0
+                }
+              }
+            },
+            {
+              "id": "prt_fixture_019",
+              "sessionID": "ses_fixture_001",
+              "messageID": "msg_fixture_015",
+              "type": "step-finish",
+              "reason": "tool-calls",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              }
+            }
+          ]
+        },
+        {
+          "info": {
+            "id": "msg_fixture_020",
+            "sessionID": "ses_fixture_001",
+            "role": "assistant",
+            "time": {
+              "created": 0,
+              "completed": 0
+            },
+            "parentID": "msg_fixture_003",
+            "modelID": "echo",
+            "providerID": "localmock",
+            "mode": "build",
+            "agent": "build",
+            "path": {
+              "cwd": "/private/tmp/ocw-gate-a/workspace",
+              "root": "/"
+            },
+            "cost": 0,
+            "tokens": {
+              "total": 18,
+              "input": 8,
+              "output": 10,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            },
+            "finish": "stop"
+          },
+          "parts": [
+            {
+              "id": "prt_fixture_021",
+              "sessionID": "ses_fixture_001",
+              "messageID": "msg_fixture_020",
+              "type": "step-start"
+            },
+            {
+              "id": "prt_fixture_022",
+              "sessionID": "ses_fixture_001",
+              "messageID": "msg_fixture_020",
+              "type": "text",
+              "text": "SANDBOX_OK",
+              "time": {
+                "start": 0,
+                "end": 0
+              }
+            },
+            {
+              "id": "prt_fixture_023",
+              "sessionID": "ses_fixture_001",
+              "messageID": "msg_fixture_020",
+              "type": "step-finish",
+              "reason": "stop",
+              "cost": 0,
+              "tokens": {
+                "total": 18,
+                "input": 8,
+                "output": 10,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:53:51 GMT",
+        "content-length": "6482",
+        "vary": "Origin"
+      }
+    }
+  ],
+  "sseEventTypes": [
+    "server.connected",
+    "models-dev.refreshed",
+    "project.updated",
+    "session.created",
+    "sync",
+    "session.updated",
+    "sync",
+    "message.updated",
+    "sync",
+    "message.part.updated",
+    "sync",
+    "session.updated",
+    "sync",
+    "session.status",
+    "message.updated",
+    "sync",
+    "session.updated",
+    "sync",
+    "session.diff",
+    "message.updated",
+    "sync",
+    "session.updated",
+    "sync",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "catalog.updated",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "reference.updated",
+    "integration.updated",
+    "catalog.updated",
+    "session.status",
+    "message.part.updated",
+    "sync",
+    "message.part.updated",
+    "sync",
+    "todo.updated",
+    "message.part.updated",
+    "sync",
+    "message.part.updated",
+    "sync",
+    "message.part.updated",
+    "sync",
+    "message.updated",
+    "sync",
+    "message.updated",
+    "sync",
+    "session.status",
+    "message.updated",
+    "sync",
+    "session.updated",
+    "sync",
+    "session.diff",
+    "message.updated",
+    "sync",
+    "session.status",
+    "message.part.updated",
+    "sync",
+    "message.part.updated",
+    "sync",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.updated",
+    "sync",
+    "message.part.updated",
+    "sync",
+    "message.updated",
+    "sync",
+    "message.updated",
+    "sync",
+    "session.status",
+    "session.status",
+    "session.idle",
+    "session.updated",
+    "sync",
+    "session.diff",
+    "message.updated",
+    "sync",
+    "server.heartbeat",
+    "message.updated",
+    "sync",
+    "message.part.updated",
+    "sync",
+    "session.updated",
+    "sync",
+    "session.status",
+    "message.updated",
+    "sync",
+    "session.updated",
+    "sync",
+    "session.diff",
+    "message.updated",
+    "sync",
+    "session.status",
+    "message.part.updated",
+    "sync",
+    "message.part.updated",
+    "sync",
+    "todo.updated",
+    "message.part.updated",
+    "sync",
+    "message.part.updated",
+    "sync",
+    "message.part.updated",
+    "sync",
+    "message.updated",
+    "sync",
+    "message.updated",
+    "sync",
+    "session.status",
+    "message.updated",
+    "sync",
+    "session.updated",
+    "sync",
+    "session.diff",
+    "message.updated",
+    "sync",
+    "session.status",
+    "message.part.updated",
+    "sync",
+    "message.part.updated",
+    "sync",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.updated",
+    "sync",
+    "message.part.updated",
+    "sync",
+    "message.updated",
+    "sync",
+    "message.updated",
+    "sync",
+    "session.status",
+    "session.status",
+    "session.idle",
+    "session.updated",
+    "sync",
+    "session.diff",
+    "message.updated",
+    "sync"
+  ],
+  "sse": [
+    {
+      "t": 0,
+      "event": {
+        "payload": {
+          "id": "evt_fixture_024",
+          "type": "server.connected",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "payload": {
+          "id": "evt_fixture_025",
+          "type": "models-dev.refreshed",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "global",
+        "project": "global",
+        "payload": {
+          "type": "project.updated",
+          "properties": {
+            "id": "global",
+            "worktree": "/",
+            "sandboxes": [],
+            "time": {
+              "created": 0,
+              "updated": 0
+            }
+          },
+          "id": "evt_fixture_026"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_027",
+          "type": "session.created",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "ses_fixture_001",
+              "slug": "eager-otter",
+              "version": "1.18.18",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a/workspace",
+              "path": "private/tmp/ocw-gate-a/workspace",
+              "title": "New session - 2026-08-20T12:53:32.369Z",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 0,
+                "updated": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_027",
+            "type": "session.created.1",
+            "seq": 0,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "ses_fixture_001",
+                "slug": "eager-otter",
+                "version": "1.18.18",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a/workspace",
+                "path": "private/tmp/ocw-gate-a/workspace",
+                "title": "New session - 2026-08-20T12:53:32.369Z",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 0,
+                  "updated": 0
+                }
+              }
+            }
+          },
+          "id": "evt_fixture_027"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_028",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "ses_fixture_001",
+              "slug": "eager-otter",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a/workspace",
+              "path": "private/tmp/ocw-gate-a/workspace",
+              "title": "New session - 2026-08-20T12:53:32.369Z",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 0,
+                "updated": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_028",
+            "type": "session.updated.1",
+            "seq": 1,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "ses_fixture_001",
+                "slug": "eager-otter",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a/workspace",
+                "path": "private/tmp/ocw-gate-a/workspace",
+                "title": "New session - 2026-08-20T12:53:32.369Z",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 0,
+                  "updated": 0
+                }
+              }
+            }
+          },
+          "id": "evt_fixture_028"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_029",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "msg_fixture_002",
+              "role": "user",
+              "sessionID": "ses_fixture_001",
+              "time": {
+                "created": 0
+              },
+              "agent": "build",
+              "model": {
+                "providerID": "localmock",
+                "modelID": "echo"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_029",
+            "type": "message.updated.1",
+            "seq": 2,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "msg_fixture_002",
+                "role": "user",
+                "sessionID": "ses_fixture_001",
+                "time": {
+                  "created": 0
+                },
+                "agent": "build",
+                "model": {
+                  "providerID": "localmock",
+                  "modelID": "echo"
+                }
+              }
+            }
+          },
+          "id": "evt_fixture_029"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_030",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "type": "text",
+              "text": "A8_TODOWRITE",
+              "messageID": "msg_fixture_002",
+              "sessionID": "ses_fixture_001",
+              "id": "prt_fixture_004"
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_030",
+            "type": "message.part.updated.1",
+            "seq": 3,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "type": "text",
+                "text": "A8_TODOWRITE",
+                "messageID": "msg_fixture_002",
+                "sessionID": "ses_fixture_001",
+                "id": "prt_fixture_004"
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_030"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_031",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "ses_fixture_001",
+              "slug": "eager-otter",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a/workspace",
+              "path": "private/tmp/ocw-gate-a/workspace",
+              "title": "New session - 2026-08-20T12:53:32.369Z",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 0,
+                "updated": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_031",
+            "type": "session.updated.1",
+            "seq": 4,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "ses_fixture_001",
+                "slug": "eager-otter",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a/workspace",
+                "path": "private/tmp/ocw-gate-a/workspace",
+                "title": "New session - 2026-08-20T12:53:32.369Z",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 0,
+                  "updated": 0
+                }
+              }
+            }
+          },
+          "id": "evt_fixture_031"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_032",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_033",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "msg_fixture_005",
+              "parentID": "msg_fixture_002",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "modelID": "echo",
+              "providerID": "localmock",
+              "time": {
+                "created": 0
+              },
+              "sessionID": "ses_fixture_001"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_033",
+            "type": "message.updated.1",
+            "seq": 5,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "msg_fixture_005",
+                "parentID": "msg_fixture_002",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "modelID": "echo",
+                "providerID": "localmock",
+                "time": {
+                  "created": 0
+                },
+                "sessionID": "ses_fixture_001"
+              }
+            }
+          },
+          "id": "evt_fixture_033"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_034",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "ses_fixture_001",
+              "slug": "eager-otter",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a/workspace",
+              "path": "private/tmp/ocw-gate-a/workspace",
+              "title": "New session - 2026-08-20T12:53:32.369Z",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "summary": {
+                "additions": 0,
+                "deletions": 0,
+                "files": 0
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 0,
+                "updated": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_034",
+            "type": "session.updated.1",
+            "seq": 6,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "ses_fixture_001",
+                "slug": "eager-otter",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a/workspace",
+                "path": "private/tmp/ocw-gate-a/workspace",
+                "title": "New session - 2026-08-20T12:53:32.369Z",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "summary": {
+                  "additions": 0,
+                  "deletions": 0,
+                  "files": 0
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 0,
+                  "updated": 0
+                }
+              }
+            }
+          },
+          "id": "evt_fixture_034"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_035",
+          "type": "session.diff",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "diff": []
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_036",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "role": "user",
+              "time": {
+                "created": 0
+              },
+              "agent": "build",
+              "model": {
+                "providerID": "localmock",
+                "modelID": "echo"
+              },
+              "id": "msg_fixture_002",
+              "sessionID": "ses_fixture_001",
+              "summary": {
+                "diffs": []
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_036",
+            "type": "message.updated.1",
+            "seq": 7,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "role": "user",
+                "time": {
+                  "created": 0
+                },
+                "agent": "build",
+                "model": {
+                  "providerID": "localmock",
+                  "modelID": "echo"
+                },
+                "id": "msg_fixture_002",
+                "sessionID": "ses_fixture_001",
+                "summary": {
+                  "diffs": []
+                }
+              }
+            }
+          },
+          "id": "evt_fixture_036"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_037",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "ses_fixture_001",
+              "slug": "eager-otter",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a/workspace",
+              "path": "private/tmp/ocw-gate-a/workspace",
+              "title": "Fixture session",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "summary": {
+                "additions": 0,
+                "deletions": 0,
+                "files": 0
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 0,
+                "updated": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_037",
+            "type": "session.updated.1",
+            "seq": 8,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "ses_fixture_001",
+                "slug": "eager-otter",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a/workspace",
+                "path": "private/tmp/ocw-gate-a/workspace",
+                "title": "Fixture session",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "summary": {
+                  "additions": 0,
+                  "deletions": 0,
+                  "files": 0
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 0,
+                  "updated": 0
+                }
+              }
+            }
+          },
+          "id": "evt_fixture_037"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_038",
+          "type": "plugin.added",
+          "properties": {
+            "id": "core/config-reference"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_039",
+          "type": "plugin.added",
+          "properties": {
+            "id": "agent"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_040",
+          "type": "plugin.added",
+          "properties": {
+            "id": "command"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_041",
+          "type": "plugin.added",
+          "properties": {
+            "id": "skill"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_042",
+          "type": "plugin.added",
+          "properties": {
+            "id": "models-dev"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_043",
+          "type": "plugin.added",
+          "properties": {
+            "id": "config-agent"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_044",
+          "type": "plugin.added",
+          "properties": {
+            "id": "config-command"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_045",
+          "type": "plugin.added",
+          "properties": {
+            "id": "config-skill"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_046",
+          "type": "plugin.added",
+          "properties": {
+            "id": "alibaba"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_047",
+          "type": "plugin.added",
+          "properties": {
+            "id": "amazon-bedrock"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_048",
+          "type": "plugin.added",
+          "properties": {
+            "id": "anthropic"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_049",
+          "type": "plugin.added",
+          "properties": {
+            "id": "azure-cognitive-services"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_050",
+          "type": "plugin.added",
+          "properties": {
+            "id": "azure"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_051",
+          "type": "plugin.added",
+          "properties": {
+            "id": "cerebras"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_052",
+          "type": "plugin.added",
+          "properties": {
+            "id": "cloudflare-ai-gateway"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_053",
+          "type": "plugin.added",
+          "properties": {
+            "id": "cloudflare-workers-ai"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_054",
+          "type": "plugin.added",
+          "properties": {
+            "id": "cohere"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_055",
+          "type": "plugin.added",
+          "properties": {
+            "id": "deepinfra"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_056",
+          "type": "plugin.added",
+          "properties": {
+            "id": "gateway"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_057",
+          "type": "plugin.added",
+          "properties": {
+            "id": "github-copilot"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_058",
+          "type": "plugin.added",
+          "properties": {
+            "id": "gitlab"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_059",
+          "type": "plugin.added",
+          "properties": {
+            "id": "google"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_060",
+          "type": "plugin.added",
+          "properties": {
+            "id": "google-vertex-anthropic"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_061",
+          "type": "plugin.added",
+          "properties": {
+            "id": "google-vertex"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_062",
+          "type": "plugin.added",
+          "properties": {
+            "id": "groq"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_063",
+          "type": "plugin.added",
+          "properties": {
+            "id": "kilo"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_064",
+          "type": "plugin.added",
+          "properties": {
+            "id": "llmgateway"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_065",
+          "type": "plugin.added",
+          "properties": {
+            "id": "mistral"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_066",
+          "type": "plugin.added",
+          "properties": {
+            "id": "nvidia"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_067",
+          "type": "plugin.added",
+          "properties": {
+            "id": "opencode"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_068",
+          "type": "plugin.added",
+          "properties": {
+            "id": "snowflake-cortex"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_069",
+          "type": "plugin.added",
+          "properties": {
+            "id": "openai-compatible"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_070",
+          "type": "plugin.added",
+          "properties": {
+            "id": "openai"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_071",
+          "type": "plugin.added",
+          "properties": {
+            "id": "openrouter"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_072",
+          "type": "plugin.added",
+          "properties": {
+            "id": "perplexity"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_073",
+          "type": "plugin.added",
+          "properties": {
+            "id": "sap-ai-core"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_074",
+          "type": "plugin.added",
+          "properties": {
+            "id": "togetherai"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_075",
+          "type": "catalog.updated",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_076",
+          "type": "plugin.added",
+          "properties": {
+            "id": "vercel"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_077",
+          "type": "plugin.added",
+          "properties": {
+            "id": "venice"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_078",
+          "type": "plugin.added",
+          "properties": {
+            "id": "xai"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_079",
+          "type": "plugin.added",
+          "properties": {
+            "id": "zenmux"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_080",
+          "type": "plugin.added",
+          "properties": {
+            "id": "dynamic-provider"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_081",
+          "type": "plugin.added",
+          "properties": {
+            "id": "config-plugin"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_082",
+          "type": "plugin.added",
+          "properties": {
+            "id": "config-provider"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_083",
+          "type": "plugin.added",
+          "properties": {
+            "id": "variant"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_084",
+          "type": "reference.updated",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_085",
+          "type": "integration.updated",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_086",
+          "type": "catalog.updated",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_087",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_088",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "id": "prt_fixture_006",
+              "messageID": "msg_fixture_005",
+              "sessionID": "ses_fixture_001",
+              "type": "step-start"
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_088",
+            "type": "message.part.updated.1",
+            "seq": 9,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "id": "prt_fixture_006",
+                "messageID": "msg_fixture_005",
+                "sessionID": "ses_fixture_001",
+                "type": "step-start"
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_088"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_089",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "id": "prt_fixture_007",
+              "messageID": "msg_fixture_005",
+              "sessionID": "ses_fixture_001",
+              "type": "tool",
+              "tool": "todowrite",
+              "callID": "call_fixture_008",
+              "state": {
+                "status": "pending",
+                "input": {},
+                "raw": ""
+              }
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_089",
+            "type": "message.part.updated.1",
+            "seq": 10,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "id": "prt_fixture_007",
+                "messageID": "msg_fixture_005",
+                "sessionID": "ses_fixture_001",
+                "type": "tool",
+                "tool": "todowrite",
+                "callID": "call_fixture_008",
+                "state": {
+                  "status": "pending",
+                  "input": {},
+                  "raw": ""
+                }
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_089"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_090",
+          "type": "todo.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "todos": [
+              {
+                "content": "capture A8",
+                "status": "pending",
+                "priority": "high"
+              },
+              {
+                "content": "complete A8",
+                "status": "in_progress",
+                "priority": "medium"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_091",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "type": "tool",
+              "tool": "todowrite",
+              "callID": "call_fixture_008",
+              "state": {
+                "status": "running",
+                "input": {
+                  "todos": [
+                    {
+                      "content": "capture A8",
+                      "status": "pending",
+                      "priority": "high"
+                    },
+                    {
+                      "content": "complete A8",
+                      "status": "in_progress",
+                      "priority": "medium"
+                    }
+                  ]
+                },
+                "time": {
+                  "start": 0
+                }
+              },
+              "id": "prt_fixture_007",
+              "sessionID": "ses_fixture_001",
+              "messageID": "msg_fixture_005"
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_091",
+            "type": "message.part.updated.1",
+            "seq": 11,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "type": "tool",
+                "tool": "todowrite",
+                "callID": "call_fixture_008",
+                "state": {
+                  "status": "running",
+                  "input": {
+                    "todos": [
+                      {
+                        "content": "capture A8",
+                        "status": "pending",
+                        "priority": "high"
+                      },
+                      {
+                        "content": "complete A8",
+                        "status": "in_progress",
+                        "priority": "medium"
+                      }
+                    ]
+                  },
+                  "time": {
+                    "start": 0
+                  }
+                },
+                "id": "prt_fixture_007",
+                "sessionID": "ses_fixture_001",
+                "messageID": "msg_fixture_005"
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_091"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_092",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "type": "tool",
+              "tool": "todowrite",
+              "callID": "call_fixture_008",
+              "state": {
+                "status": "completed",
+                "input": {
+                  "todos": [
+                    {
+                      "content": "capture A8",
+                      "status": "pending",
+                      "priority": "high"
+                    },
+                    {
+                      "content": "complete A8",
+                      "status": "in_progress",
+                      "priority": "medium"
+                    }
+                  ]
+                },
+                "output": "[\n  {\n    \"content\": \"capture A8\",\n    \"status\": \"pending\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"complete A8\",\n    \"status\": \"in_progress\",\n    \"priority\": \"medium\"\n  }\n]",
+                "metadata": {
+                  "todos": [
+                    {
+                      "content": "capture A8",
+                      "status": "pending",
+                      "priority": "high"
+                    },
+                    {
+                      "content": "complete A8",
+                      "status": "in_progress",
+                      "priority": "medium"
+                    }
+                  ],
+                  "truncated": false
+                },
+                "title": "2 todos",
+                "time": {
+                  "start": 0,
+                  "end": 0
+                }
+              },
+              "id": "prt_fixture_007",
+              "sessionID": "ses_fixture_001",
+              "messageID": "msg_fixture_005"
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_092",
+            "type": "message.part.updated.1",
+            "seq": 12,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "type": "tool",
+                "tool": "todowrite",
+                "callID": "call_fixture_008",
+                "state": {
+                  "status": "completed",
+                  "input": {
+                    "todos": [
+                      {
+                        "content": "capture A8",
+                        "status": "pending",
+                        "priority": "high"
+                      },
+                      {
+                        "content": "complete A8",
+                        "status": "in_progress",
+                        "priority": "medium"
+                      }
+                    ]
+                  },
+                  "output": "[\n  {\n    \"content\": \"capture A8\",\n    \"status\": \"pending\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"complete A8\",\n    \"status\": \"in_progress\",\n    \"priority\": \"medium\"\n  }\n]",
+                  "metadata": {
+                    "todos": [
+                      {
+                        "content": "capture A8",
+                        "status": "pending",
+                        "priority": "high"
+                      },
+                      {
+                        "content": "complete A8",
+                        "status": "in_progress",
+                        "priority": "medium"
+                      }
+                    ],
+                    "truncated": false
+                  },
+                  "title": "2 todos",
+                  "time": {
+                    "start": 0,
+                    "end": 0
+                  }
+                },
+                "id": "prt_fixture_007",
+                "sessionID": "ses_fixture_001",
+                "messageID": "msg_fixture_005"
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_092"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_093",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "id": "prt_fixture_009",
+              "reason": "tool-calls",
+              "messageID": "msg_fixture_005",
+              "sessionID": "ses_fixture_001",
+              "type": "step-finish",
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              },
+              "cost": 0
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_093",
+            "type": "message.part.updated.1",
+            "seq": 13,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "id": "prt_fixture_009",
+                "reason": "tool-calls",
+                "messageID": "msg_fixture_005",
+                "sessionID": "ses_fixture_001",
+                "type": "step-finish",
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "cost": 0
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_093"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_094",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "msg_fixture_005",
+              "parentID": "msg_fixture_002",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              },
+              "modelID": "echo",
+              "providerID": "localmock",
+              "time": {
+                "created": 0,
+                "completed": 0
+              },
+              "sessionID": "ses_fixture_001",
+              "finish": "tool-calls"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_094",
+            "type": "message.updated.1",
+            "seq": 14,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "msg_fixture_005",
+                "parentID": "msg_fixture_002",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "modelID": "echo",
+                "providerID": "localmock",
+                "time": {
+                  "created": 0,
+                  "completed": 0
+                },
+                "sessionID": "ses_fixture_001",
+                "finish": "tool-calls"
+              }
+            }
+          },
+          "id": "evt_fixture_094"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_095",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "msg_fixture_005",
+              "parentID": "msg_fixture_002",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              },
+              "modelID": "echo",
+              "providerID": "localmock",
+              "time": {
+                "created": 0,
+                "completed": 0
+              },
+              "sessionID": "ses_fixture_001",
+              "finish": "tool-calls"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_095",
+            "type": "message.updated.1",
+            "seq": 15,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "msg_fixture_005",
+                "parentID": "msg_fixture_002",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "modelID": "echo",
+                "providerID": "localmock",
+                "time": {
+                  "created": 0,
+                  "completed": 0
+                },
+                "sessionID": "ses_fixture_001",
+                "finish": "tool-calls"
+              }
+            }
+          },
+          "id": "evt_fixture_095"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_096",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_097",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "msg_fixture_010",
+              "parentID": "msg_fixture_002",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "modelID": "echo",
+              "providerID": "localmock",
+              "time": {
+                "created": 0
+              },
+              "sessionID": "ses_fixture_001"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_097",
+            "type": "message.updated.1",
+            "seq": 16,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "msg_fixture_010",
+                "parentID": "msg_fixture_002",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "modelID": "echo",
+                "providerID": "localmock",
+                "time": {
+                  "created": 0
+                },
+                "sessionID": "ses_fixture_001"
+              }
+            }
+          },
+          "id": "evt_fixture_097"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_098",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "ses_fixture_001",
+              "slug": "eager-otter",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a/workspace",
+              "path": "private/tmp/ocw-gate-a/workspace",
+              "title": "Fixture session",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "summary": {
+                "additions": 0,
+                "deletions": 0,
+                "files": 0
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 0,
+                "updated": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_098",
+            "type": "session.updated.1",
+            "seq": 17,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "ses_fixture_001",
+                "slug": "eager-otter",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a/workspace",
+                "path": "private/tmp/ocw-gate-a/workspace",
+                "title": "Fixture session",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "summary": {
+                  "additions": 0,
+                  "deletions": 0,
+                  "files": 0
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 0,
+                  "updated": 0
+                }
+              }
+            }
+          },
+          "id": "evt_fixture_098"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_099",
+          "type": "session.diff",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "diff": []
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_100",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "role": "user",
+              "time": {
+                "created": 0
+              },
+              "agent": "build",
+              "model": {
+                "providerID": "localmock",
+                "modelID": "echo"
+              },
+              "summary": {
+                "diffs": []
+              },
+              "id": "msg_fixture_002",
+              "sessionID": "ses_fixture_001"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_100",
+            "type": "message.updated.1",
+            "seq": 18,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "role": "user",
+                "time": {
+                  "created": 0
+                },
+                "agent": "build",
+                "model": {
+                  "providerID": "localmock",
+                  "modelID": "echo"
+                },
+                "summary": {
+                  "diffs": []
+                },
+                "id": "msg_fixture_002",
+                "sessionID": "ses_fixture_001"
+              }
+            }
+          },
+          "id": "evt_fixture_100"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_101",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_102",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "id": "prt_fixture_011",
+              "messageID": "msg_fixture_010",
+              "sessionID": "ses_fixture_001",
+              "type": "step-start"
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_102",
+            "type": "message.part.updated.1",
+            "seq": 19,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "id": "prt_fixture_011",
+                "messageID": "msg_fixture_010",
+                "sessionID": "ses_fixture_001",
+                "type": "step-start"
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_102"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_103",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "id": "prt_fixture_012",
+              "messageID": "msg_fixture_010",
+              "sessionID": "ses_fixture_001",
+              "type": "text",
+              "text": "",
+              "time": {
+                "start": 0
+              }
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_103",
+            "type": "message.part.updated.1",
+            "seq": 20,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "id": "prt_fixture_012",
+                "messageID": "msg_fixture_010",
+                "sessionID": "ses_fixture_001",
+                "type": "text",
+                "text": "",
+                "time": {
+                  "start": 0
+                }
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_103"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_104",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_010",
+            "partID": "prt_fixture_012",
+            "field": "text",
+            "delta": "S"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_105",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_010",
+            "partID": "prt_fixture_012",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_106",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_010",
+            "partID": "prt_fixture_012",
+            "field": "text",
+            "delta": "N"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_107",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_010",
+            "partID": "prt_fixture_012",
+            "field": "text",
+            "delta": "D"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_108",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_010",
+            "partID": "prt_fixture_012",
+            "field": "text",
+            "delta": "B"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_109",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_010",
+            "partID": "prt_fixture_012",
+            "field": "text",
+            "delta": "O"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_110",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_010",
+            "partID": "prt_fixture_012",
+            "field": "text",
+            "delta": "X"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_111",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_010",
+            "partID": "prt_fixture_012",
+            "field": "text",
+            "delta": "_"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_112",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_010",
+            "partID": "prt_fixture_012",
+            "field": "text",
+            "delta": "O"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_113",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_010",
+            "partID": "prt_fixture_012",
+            "field": "text",
+            "delta": "K"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_114",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "id": "prt_fixture_012",
+              "messageID": "msg_fixture_010",
+              "sessionID": "ses_fixture_001",
+              "type": "text",
+              "text": "SANDBOX_OK",
+              "time": {
+                "start": 0,
+                "end": 0
+              }
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_114",
+            "type": "message.part.updated.1",
+            "seq": 21,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "id": "prt_fixture_012",
+                "messageID": "msg_fixture_010",
+                "sessionID": "ses_fixture_001",
+                "type": "text",
+                "text": "SANDBOX_OK",
+                "time": {
+                  "start": 0,
+                  "end": 0
+                }
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_114"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_115",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "id": "prt_fixture_013",
+              "reason": "stop",
+              "messageID": "msg_fixture_010",
+              "sessionID": "ses_fixture_001",
+              "type": "step-finish",
+              "tokens": {
+                "total": 18,
+                "input": 8,
+                "output": 10,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              },
+              "cost": 0
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_115",
+            "type": "message.part.updated.1",
+            "seq": 22,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "id": "prt_fixture_013",
+                "reason": "stop",
+                "messageID": "msg_fixture_010",
+                "sessionID": "ses_fixture_001",
+                "type": "step-finish",
+                "tokens": {
+                  "total": 18,
+                  "input": 8,
+                  "output": 10,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "cost": 0
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_115"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_116",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "msg_fixture_010",
+              "parentID": "msg_fixture_002",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "total": 18,
+                "input": 8,
+                "output": 10,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              },
+              "modelID": "echo",
+              "providerID": "localmock",
+              "time": {
+                "created": 0,
+                "completed": 0
+              },
+              "sessionID": "ses_fixture_001",
+              "finish": "stop"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_116",
+            "type": "message.updated.1",
+            "seq": 23,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "msg_fixture_010",
+                "parentID": "msg_fixture_002",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "total": 18,
+                  "input": 8,
+                  "output": 10,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "modelID": "echo",
+                "providerID": "localmock",
+                "time": {
+                  "created": 0,
+                  "completed": 0
+                },
+                "sessionID": "ses_fixture_001",
+                "finish": "stop"
+              }
+            }
+          },
+          "id": "evt_fixture_116"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_117",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "msg_fixture_010",
+              "parentID": "msg_fixture_002",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "total": 18,
+                "input": 8,
+                "output": 10,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              },
+              "modelID": "echo",
+              "providerID": "localmock",
+              "time": {
+                "created": 0,
+                "completed": 0
+              },
+              "sessionID": "ses_fixture_001",
+              "finish": "stop"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_117",
+            "type": "message.updated.1",
+            "seq": 24,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "msg_fixture_010",
+                "parentID": "msg_fixture_002",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "total": 18,
+                  "input": 8,
+                  "output": 10,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "modelID": "echo",
+                "providerID": "localmock",
+                "time": {
+                  "created": 0,
+                  "completed": 0
+                },
+                "sessionID": "ses_fixture_001",
+                "finish": "stop"
+              }
+            }
+          },
+          "id": "evt_fixture_117"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_118",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_119",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "status": {
+              "type": "idle"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_120",
+          "type": "session.idle",
+          "properties": {
+            "sessionID": "ses_fixture_001"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_121",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "ses_fixture_001",
+              "slug": "eager-otter",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a/workspace",
+              "path": "private/tmp/ocw-gate-a/workspace",
+              "title": "Fixture session",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "summary": {
+                "additions": 0,
+                "deletions": 0,
+                "files": 0
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 8,
+                "output": 10,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 0,
+                "updated": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_121",
+            "type": "session.updated.1",
+            "seq": 25,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "ses_fixture_001",
+                "slug": "eager-otter",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a/workspace",
+                "path": "private/tmp/ocw-gate-a/workspace",
+                "title": "Fixture session",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "summary": {
+                  "additions": 0,
+                  "deletions": 0,
+                  "files": 0
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 8,
+                  "output": 10,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 0,
+                  "updated": 0
+                }
+              }
+            }
+          },
+          "id": "evt_fixture_121"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_122",
+          "type": "session.diff",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "diff": []
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_123",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "role": "user",
+              "time": {
+                "created": 0
+              },
+              "agent": "build",
+              "model": {
+                "providerID": "localmock",
+                "modelID": "echo"
+              },
+              "summary": {
+                "diffs": []
+              },
+              "id": "msg_fixture_002",
+              "sessionID": "ses_fixture_001"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_123",
+            "type": "message.updated.1",
+            "seq": 26,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "role": "user",
+                "time": {
+                  "created": 0
+                },
+                "agent": "build",
+                "model": {
+                  "providerID": "localmock",
+                  "modelID": "echo"
+                },
+                "summary": {
+                  "diffs": []
+                },
+                "id": "msg_fixture_002",
+                "sessionID": "ses_fixture_001"
+              }
+            }
+          },
+          "id": "evt_fixture_123"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "payload": {
+          "id": "evt_fixture_124",
+          "type": "server.heartbeat",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_125",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "msg_fixture_003",
+              "role": "user",
+              "sessionID": "ses_fixture_001",
+              "time": {
+                "created": 0
+              },
+              "agent": "build",
+              "model": {
+                "providerID": "localmock",
+                "modelID": "echo"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_125",
+            "type": "message.updated.1",
+            "seq": 27,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "msg_fixture_003",
+                "role": "user",
+                "sessionID": "ses_fixture_001",
+                "time": {
+                  "created": 0
+                },
+                "agent": "build",
+                "model": {
+                  "providerID": "localmock",
+                  "modelID": "echo"
+                }
+              }
+            }
+          },
+          "id": "evt_fixture_125"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_126",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "type": "text",
+              "text": "A8_TODOWRITE_UPDATE",
+              "messageID": "msg_fixture_003",
+              "sessionID": "ses_fixture_001",
+              "id": "prt_fixture_014"
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_126",
+            "type": "message.part.updated.1",
+            "seq": 28,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "type": "text",
+                "text": "A8_TODOWRITE_UPDATE",
+                "messageID": "msg_fixture_003",
+                "sessionID": "ses_fixture_001",
+                "id": "prt_fixture_014"
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_126"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_127",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "ses_fixture_001",
+              "slug": "eager-otter",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a/workspace",
+              "path": "private/tmp/ocw-gate-a/workspace",
+              "title": "Fixture session",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "summary": {
+                "additions": 0,
+                "deletions": 0,
+                "files": 0
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 8,
+                "output": 10,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 0,
+                "updated": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_127",
+            "type": "session.updated.1",
+            "seq": 29,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "ses_fixture_001",
+                "slug": "eager-otter",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a/workspace",
+                "path": "private/tmp/ocw-gate-a/workspace",
+                "title": "Fixture session",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "summary": {
+                  "additions": 0,
+                  "deletions": 0,
+                  "files": 0
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 8,
+                  "output": 10,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 0,
+                  "updated": 0
+                }
+              }
+            }
+          },
+          "id": "evt_fixture_127"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_128",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_129",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "msg_fixture_015",
+              "parentID": "msg_fixture_003",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "modelID": "echo",
+              "providerID": "localmock",
+              "time": {
+                "created": 0
+              },
+              "sessionID": "ses_fixture_001"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_129",
+            "type": "message.updated.1",
+            "seq": 30,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "msg_fixture_015",
+                "parentID": "msg_fixture_003",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "modelID": "echo",
+                "providerID": "localmock",
+                "time": {
+                  "created": 0
+                },
+                "sessionID": "ses_fixture_001"
+              }
+            }
+          },
+          "id": "evt_fixture_129"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_130",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "ses_fixture_001",
+              "slug": "eager-otter",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a/workspace",
+              "path": "private/tmp/ocw-gate-a/workspace",
+              "title": "Fixture session",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "summary": {
+                "additions": 0,
+                "deletions": 0,
+                "files": 0
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 8,
+                "output": 10,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 0,
+                "updated": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_130",
+            "type": "session.updated.1",
+            "seq": 31,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "ses_fixture_001",
+                "slug": "eager-otter",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a/workspace",
+                "path": "private/tmp/ocw-gate-a/workspace",
+                "title": "Fixture session",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "summary": {
+                  "additions": 0,
+                  "deletions": 0,
+                  "files": 0
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 8,
+                  "output": 10,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 0,
+                  "updated": 0
+                }
+              }
+            }
+          },
+          "id": "evt_fixture_130"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_131",
+          "type": "session.diff",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "diff": []
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_132",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "role": "user",
+              "time": {
+                "created": 0
+              },
+              "agent": "build",
+              "model": {
+                "providerID": "localmock",
+                "modelID": "echo"
+              },
+              "id": "msg_fixture_003",
+              "sessionID": "ses_fixture_001",
+              "summary": {
+                "diffs": []
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_132",
+            "type": "message.updated.1",
+            "seq": 32,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "role": "user",
+                "time": {
+                  "created": 0
+                },
+                "agent": "build",
+                "model": {
+                  "providerID": "localmock",
+                  "modelID": "echo"
+                },
+                "id": "msg_fixture_003",
+                "sessionID": "ses_fixture_001",
+                "summary": {
+                  "diffs": []
+                }
+              }
+            }
+          },
+          "id": "evt_fixture_132"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_133",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_134",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "id": "prt_fixture_016",
+              "messageID": "msg_fixture_015",
+              "sessionID": "ses_fixture_001",
+              "type": "step-start"
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_134",
+            "type": "message.part.updated.1",
+            "seq": 33,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "id": "prt_fixture_016",
+                "messageID": "msg_fixture_015",
+                "sessionID": "ses_fixture_001",
+                "type": "step-start"
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_134"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_135",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "id": "prt_fixture_017",
+              "messageID": "msg_fixture_015",
+              "sessionID": "ses_fixture_001",
+              "type": "tool",
+              "tool": "todowrite",
+              "callID": "call_fixture_018",
+              "state": {
+                "status": "pending",
+                "input": {},
+                "raw": ""
+              }
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_135",
+            "type": "message.part.updated.1",
+            "seq": 34,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "id": "prt_fixture_017",
+                "messageID": "msg_fixture_015",
+                "sessionID": "ses_fixture_001",
+                "type": "tool",
+                "tool": "todowrite",
+                "callID": "call_fixture_018",
+                "state": {
+                  "status": "pending",
+                  "input": {},
+                  "raw": ""
+                }
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_135"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_136",
+          "type": "todo.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "todos": [
+              {
+                "content": "capture A8",
+                "status": "completed",
+                "priority": "high"
+              },
+              {
+                "content": "complete A8",
+                "status": "completed",
+                "priority": "medium"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_137",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "type": "tool",
+              "tool": "todowrite",
+              "callID": "call_fixture_018",
+              "state": {
+                "status": "running",
+                "input": {
+                  "todos": [
+                    {
+                      "content": "capture A8",
+                      "status": "completed",
+                      "priority": "high"
+                    },
+                    {
+                      "content": "complete A8",
+                      "status": "completed",
+                      "priority": "medium"
+                    }
+                  ]
+                },
+                "time": {
+                  "start": 0
+                }
+              },
+              "id": "prt_fixture_017",
+              "sessionID": "ses_fixture_001",
+              "messageID": "msg_fixture_015"
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_137",
+            "type": "message.part.updated.1",
+            "seq": 35,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "type": "tool",
+                "tool": "todowrite",
+                "callID": "call_fixture_018",
+                "state": {
+                  "status": "running",
+                  "input": {
+                    "todos": [
+                      {
+                        "content": "capture A8",
+                        "status": "completed",
+                        "priority": "high"
+                      },
+                      {
+                        "content": "complete A8",
+                        "status": "completed",
+                        "priority": "medium"
+                      }
+                    ]
+                  },
+                  "time": {
+                    "start": 0
+                  }
+                },
+                "id": "prt_fixture_017",
+                "sessionID": "ses_fixture_001",
+                "messageID": "msg_fixture_015"
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_137"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_138",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "type": "tool",
+              "tool": "todowrite",
+              "callID": "call_fixture_018",
+              "state": {
+                "status": "completed",
+                "input": {
+                  "todos": [
+                    {
+                      "content": "capture A8",
+                      "status": "completed",
+                      "priority": "high"
+                    },
+                    {
+                      "content": "complete A8",
+                      "status": "completed",
+                      "priority": "medium"
+                    }
+                  ]
+                },
+                "output": "[\n  {\n    \"content\": \"capture A8\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"complete A8\",\n    \"status\": \"completed\",\n    \"priority\": \"medium\"\n  }\n]",
+                "metadata": {
+                  "todos": [
+                    {
+                      "content": "capture A8",
+                      "status": "completed",
+                      "priority": "high"
+                    },
+                    {
+                      "content": "complete A8",
+                      "status": "completed",
+                      "priority": "medium"
+                    }
+                  ],
+                  "truncated": false
+                },
+                "title": "0 todos",
+                "time": {
+                  "start": 0,
+                  "end": 0
+                }
+              },
+              "id": "prt_fixture_017",
+              "sessionID": "ses_fixture_001",
+              "messageID": "msg_fixture_015"
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_138",
+            "type": "message.part.updated.1",
+            "seq": 36,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "type": "tool",
+                "tool": "todowrite",
+                "callID": "call_fixture_018",
+                "state": {
+                  "status": "completed",
+                  "input": {
+                    "todos": [
+                      {
+                        "content": "capture A8",
+                        "status": "completed",
+                        "priority": "high"
+                      },
+                      {
+                        "content": "complete A8",
+                        "status": "completed",
+                        "priority": "medium"
+                      }
+                    ]
+                  },
+                  "output": "[\n  {\n    \"content\": \"capture A8\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"complete A8\",\n    \"status\": \"completed\",\n    \"priority\": \"medium\"\n  }\n]",
+                  "metadata": {
+                    "todos": [
+                      {
+                        "content": "capture A8",
+                        "status": "completed",
+                        "priority": "high"
+                      },
+                      {
+                        "content": "complete A8",
+                        "status": "completed",
+                        "priority": "medium"
+                      }
+                    ],
+                    "truncated": false
+                  },
+                  "title": "0 todos",
+                  "time": {
+                    "start": 0,
+                    "end": 0
+                  }
+                },
+                "id": "prt_fixture_017",
+                "sessionID": "ses_fixture_001",
+                "messageID": "msg_fixture_015"
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_138"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_139",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "id": "prt_fixture_019",
+              "reason": "tool-calls",
+              "messageID": "msg_fixture_015",
+              "sessionID": "ses_fixture_001",
+              "type": "step-finish",
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              },
+              "cost": 0
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_139",
+            "type": "message.part.updated.1",
+            "seq": 37,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "id": "prt_fixture_019",
+                "reason": "tool-calls",
+                "messageID": "msg_fixture_015",
+                "sessionID": "ses_fixture_001",
+                "type": "step-finish",
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "cost": 0
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_139"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_140",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "msg_fixture_015",
+              "parentID": "msg_fixture_003",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              },
+              "modelID": "echo",
+              "providerID": "localmock",
+              "time": {
+                "created": 0,
+                "completed": 0
+              },
+              "sessionID": "ses_fixture_001",
+              "finish": "tool-calls"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_140",
+            "type": "message.updated.1",
+            "seq": 38,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "msg_fixture_015",
+                "parentID": "msg_fixture_003",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "modelID": "echo",
+                "providerID": "localmock",
+                "time": {
+                  "created": 0,
+                  "completed": 0
+                },
+                "sessionID": "ses_fixture_001",
+                "finish": "tool-calls"
+              }
+            }
+          },
+          "id": "evt_fixture_140"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_141",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "msg_fixture_015",
+              "parentID": "msg_fixture_003",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              },
+              "modelID": "echo",
+              "providerID": "localmock",
+              "time": {
+                "created": 0,
+                "completed": 0
+              },
+              "sessionID": "ses_fixture_001",
+              "finish": "tool-calls"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_141",
+            "type": "message.updated.1",
+            "seq": 39,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "msg_fixture_015",
+                "parentID": "msg_fixture_003",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "modelID": "echo",
+                "providerID": "localmock",
+                "time": {
+                  "created": 0,
+                  "completed": 0
+                },
+                "sessionID": "ses_fixture_001",
+                "finish": "tool-calls"
+              }
+            }
+          },
+          "id": "evt_fixture_141"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_142",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_143",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "msg_fixture_020",
+              "parentID": "msg_fixture_003",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "modelID": "echo",
+              "providerID": "localmock",
+              "time": {
+                "created": 0
+              },
+              "sessionID": "ses_fixture_001"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_143",
+            "type": "message.updated.1",
+            "seq": 40,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "msg_fixture_020",
+                "parentID": "msg_fixture_003",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "modelID": "echo",
+                "providerID": "localmock",
+                "time": {
+                  "created": 0
+                },
+                "sessionID": "ses_fixture_001"
+              }
+            }
+          },
+          "id": "evt_fixture_143"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_144",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "ses_fixture_001",
+              "slug": "eager-otter",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a/workspace",
+              "path": "private/tmp/ocw-gate-a/workspace",
+              "title": "Fixture session",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "summary": {
+                "additions": 0,
+                "deletions": 0,
+                "files": 0
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 8,
+                "output": 10,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 0,
+                "updated": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_144",
+            "type": "session.updated.1",
+            "seq": 41,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "ses_fixture_001",
+                "slug": "eager-otter",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a/workspace",
+                "path": "private/tmp/ocw-gate-a/workspace",
+                "title": "Fixture session",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "summary": {
+                  "additions": 0,
+                  "deletions": 0,
+                  "files": 0
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 8,
+                  "output": 10,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 0,
+                  "updated": 0
+                }
+              }
+            }
+          },
+          "id": "evt_fixture_144"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_145",
+          "type": "session.diff",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "diff": []
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_146",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "role": "user",
+              "time": {
+                "created": 0
+              },
+              "agent": "build",
+              "model": {
+                "providerID": "localmock",
+                "modelID": "echo"
+              },
+              "summary": {
+                "diffs": []
+              },
+              "id": "msg_fixture_003",
+              "sessionID": "ses_fixture_001"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_146",
+            "type": "message.updated.1",
+            "seq": 42,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "role": "user",
+                "time": {
+                  "created": 0
+                },
+                "agent": "build",
+                "model": {
+                  "providerID": "localmock",
+                  "modelID": "echo"
+                },
+                "summary": {
+                  "diffs": []
+                },
+                "id": "msg_fixture_003",
+                "sessionID": "ses_fixture_001"
+              }
+            }
+          },
+          "id": "evt_fixture_146"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_147",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_148",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "id": "prt_fixture_021",
+              "messageID": "msg_fixture_020",
+              "sessionID": "ses_fixture_001",
+              "type": "step-start"
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_148",
+            "type": "message.part.updated.1",
+            "seq": 43,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "id": "prt_fixture_021",
+                "messageID": "msg_fixture_020",
+                "sessionID": "ses_fixture_001",
+                "type": "step-start"
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_148"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_149",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "id": "prt_fixture_022",
+              "messageID": "msg_fixture_020",
+              "sessionID": "ses_fixture_001",
+              "type": "text",
+              "text": "",
+              "time": {
+                "start": 0
+              }
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_149",
+            "type": "message.part.updated.1",
+            "seq": 44,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "id": "prt_fixture_022",
+                "messageID": "msg_fixture_020",
+                "sessionID": "ses_fixture_001",
+                "type": "text",
+                "text": "",
+                "time": {
+                  "start": 0
+                }
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_149"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_150",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_020",
+            "partID": "prt_fixture_022",
+            "field": "text",
+            "delta": "S"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_151",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_020",
+            "partID": "prt_fixture_022",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_152",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_020",
+            "partID": "prt_fixture_022",
+            "field": "text",
+            "delta": "N"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_153",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_020",
+            "partID": "prt_fixture_022",
+            "field": "text",
+            "delta": "D"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_154",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_020",
+            "partID": "prt_fixture_022",
+            "field": "text",
+            "delta": "B"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_155",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_020",
+            "partID": "prt_fixture_022",
+            "field": "text",
+            "delta": "O"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_156",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_020",
+            "partID": "prt_fixture_022",
+            "field": "text",
+            "delta": "X"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_157",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_020",
+            "partID": "prt_fixture_022",
+            "field": "text",
+            "delta": "_"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_158",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_020",
+            "partID": "prt_fixture_022",
+            "field": "text",
+            "delta": "O"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_159",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_020",
+            "partID": "prt_fixture_022",
+            "field": "text",
+            "delta": "K"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_160",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "id": "prt_fixture_022",
+              "messageID": "msg_fixture_020",
+              "sessionID": "ses_fixture_001",
+              "type": "text",
+              "text": "SANDBOX_OK",
+              "time": {
+                "start": 0,
+                "end": 0
+              }
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_160",
+            "type": "message.part.updated.1",
+            "seq": 45,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "id": "prt_fixture_022",
+                "messageID": "msg_fixture_020",
+                "sessionID": "ses_fixture_001",
+                "type": "text",
+                "text": "SANDBOX_OK",
+                "time": {
+                  "start": 0,
+                  "end": 0
+                }
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_160"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_161",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "id": "prt_fixture_023",
+              "reason": "stop",
+              "messageID": "msg_fixture_020",
+              "sessionID": "ses_fixture_001",
+              "type": "step-finish",
+              "tokens": {
+                "total": 18,
+                "input": 8,
+                "output": 10,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              },
+              "cost": 0
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_161",
+            "type": "message.part.updated.1",
+            "seq": 46,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "id": "prt_fixture_023",
+                "reason": "stop",
+                "messageID": "msg_fixture_020",
+                "sessionID": "ses_fixture_001",
+                "type": "step-finish",
+                "tokens": {
+                  "total": 18,
+                  "input": 8,
+                  "output": 10,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "cost": 0
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_161"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_162",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "msg_fixture_020",
+              "parentID": "msg_fixture_003",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "total": 18,
+                "input": 8,
+                "output": 10,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              },
+              "modelID": "echo",
+              "providerID": "localmock",
+              "time": {
+                "created": 0,
+                "completed": 0
+              },
+              "sessionID": "ses_fixture_001",
+              "finish": "stop"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_162",
+            "type": "message.updated.1",
+            "seq": 47,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "msg_fixture_020",
+                "parentID": "msg_fixture_003",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "total": 18,
+                  "input": 8,
+                  "output": 10,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "modelID": "echo",
+                "providerID": "localmock",
+                "time": {
+                  "created": 0,
+                  "completed": 0
+                },
+                "sessionID": "ses_fixture_001",
+                "finish": "stop"
+              }
+            }
+          },
+          "id": "evt_fixture_162"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_163",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "msg_fixture_020",
+              "parentID": "msg_fixture_003",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "total": 18,
+                "input": 8,
+                "output": 10,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              },
+              "modelID": "echo",
+              "providerID": "localmock",
+              "time": {
+                "created": 0,
+                "completed": 0
+              },
+              "sessionID": "ses_fixture_001",
+              "finish": "stop"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_163",
+            "type": "message.updated.1",
+            "seq": 48,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "msg_fixture_020",
+                "parentID": "msg_fixture_003",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "total": 18,
+                  "input": 8,
+                  "output": 10,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "modelID": "echo",
+                "providerID": "localmock",
+                "time": {
+                  "created": 0,
+                  "completed": 0
+                },
+                "sessionID": "ses_fixture_001",
+                "finish": "stop"
+              }
+            }
+          },
+          "id": "evt_fixture_163"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_164",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_165",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "status": {
+              "type": "idle"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_166",
+          "type": "session.idle",
+          "properties": {
+            "sessionID": "ses_fixture_001"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_167",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "ses_fixture_001",
+              "slug": "eager-otter",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a/workspace",
+              "path": "private/tmp/ocw-gate-a/workspace",
+              "title": "Fixture session",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "summary": {
+                "additions": 0,
+                "deletions": 0,
+                "files": 0
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 16,
+                "output": 20,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 0,
+                "updated": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_167",
+            "type": "session.updated.1",
+            "seq": 49,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "ses_fixture_001",
+                "slug": "eager-otter",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a/workspace",
+                "path": "private/tmp/ocw-gate-a/workspace",
+                "title": "Fixture session",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "summary": {
+                  "additions": 0,
+                  "deletions": 0,
+                  "files": 0
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 16,
+                  "output": 20,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 0,
+                  "updated": 0
+                }
+              }
+            }
+          },
+          "id": "evt_fixture_167"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_168",
+          "type": "session.diff",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "diff": []
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_169",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "role": "user",
+              "time": {
+                "created": 0
+              },
+              "agent": "build",
+              "model": {
+                "providerID": "localmock",
+                "modelID": "echo"
+              },
+              "summary": {
+                "diffs": []
+              },
+              "id": "msg_fixture_003",
+              "sessionID": "ses_fixture_001"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_169",
+            "type": "message.updated.1",
+            "seq": 50,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "role": "user",
+                "time": {
+                  "created": 0
+                },
+                "agent": "build",
+                "model": {
+                  "providerID": "localmock",
+                  "modelID": "echo"
+                },
+                "summary": {
+                  "diffs": []
+                },
+                "id": "msg_fixture_003",
+                "sessionID": "ses_fixture_001"
+              }
+            }
+          },
+          "id": "evt_fixture_169"
+        }
+      }
+    }
+  ],
+  "reload": {
+    "todosAfterFirst": [
+      {
+        "content": "capture A8",
+        "status": "pending",
+        "priority": "high"
+      },
+      {
+        "content": "complete A8",
+        "status": "in_progress",
+        "priority": "medium"
+      }
+    ],
+    "todosAfterUpdate": [
+      {
+        "content": "capture A8",
+        "status": "completed",
+        "priority": "high"
+      },
+      {
+        "content": "complete A8",
+        "status": "completed",
+        "priority": "medium"
+      }
+    ],
+    "messages": [
+      {
+        "info": {
+          "id": "msg_fixture_002",
+          "sessionID": "ses_fixture_001",
+          "role": "user",
+          "time": {
+            "created": 0
+          },
+          "summary": {
+            "diffs": []
+          },
+          "agent": "build",
+          "model": {
+            "providerID": "localmock",
+            "modelID": "echo"
+          }
+        },
+        "parts": [
+          {
+            "id": "prt_fixture_004",
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_002",
+            "type": "text",
+            "text": "A8_TODOWRITE"
+          }
+        ]
+      },
+      {
+        "info": {
+          "id": "msg_fixture_005",
+          "sessionID": "ses_fixture_001",
+          "role": "assistant",
+          "time": {
+            "created": 0,
+            "completed": 0
+          },
+          "parentID": "msg_fixture_002",
+          "modelID": "echo",
+          "providerID": "localmock",
+          "mode": "build",
+          "agent": "build",
+          "path": {
+            "cwd": "/private/tmp/ocw-gate-a/workspace",
+            "root": "/"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "finish": "tool-calls"
+        },
+        "parts": [
+          {
+            "id": "prt_fixture_006",
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_005",
+            "type": "step-start"
+          },
+          {
+            "id": "prt_fixture_007",
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_005",
+            "type": "tool",
+            "callID": "call_fixture_008",
+            "tool": "todowrite",
+            "state": {
+              "status": "completed",
+              "input": {
+                "todos": [
+                  {
+                    "content": "capture A8",
+                    "status": "pending",
+                    "priority": "high"
+                  },
+                  {
+                    "content": "complete A8",
+                    "status": "in_progress",
+                    "priority": "medium"
+                  }
+                ]
+              },
+              "output": "[\n  {\n    \"content\": \"capture A8\",\n    \"status\": \"pending\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"complete A8\",\n    \"status\": \"in_progress\",\n    \"priority\": \"medium\"\n  }\n]",
+              "title": "2 todos",
+              "metadata": {
+                "todos": [
+                  {
+                    "content": "capture A8",
+                    "status": "pending",
+                    "priority": "high"
+                  },
+                  {
+                    "content": "complete A8",
+                    "status": "in_progress",
+                    "priority": "medium"
+                  }
+                ],
+                "truncated": false
+              },
+              "time": {
+                "start": 0,
+                "end": 0
+              }
+            }
+          },
+          {
+            "id": "prt_fixture_009",
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_005",
+            "type": "step-finish",
+            "reason": "tool-calls",
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        ]
+      },
+      {
+        "info": {
+          "id": "msg_fixture_010",
+          "sessionID": "ses_fixture_001",
+          "role": "assistant",
+          "time": {
+            "created": 0,
+            "completed": 0
+          },
+          "parentID": "msg_fixture_002",
+          "modelID": "echo",
+          "providerID": "localmock",
+          "mode": "build",
+          "agent": "build",
+          "path": {
+            "cwd": "/private/tmp/ocw-gate-a/workspace",
+            "root": "/"
+          },
+          "cost": 0,
+          "tokens": {
+            "total": 18,
+            "input": 8,
+            "output": 10,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "finish": "stop"
+        },
+        "parts": [
+          {
+            "id": "prt_fixture_011",
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_010",
+            "type": "step-start"
+          },
+          {
+            "id": "prt_fixture_012",
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_010",
+            "type": "text",
+            "text": "SANDBOX_OK",
+            "time": {
+              "start": 0,
+              "end": 0
+            }
+          },
+          {
+            "id": "prt_fixture_013",
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_010",
+            "type": "step-finish",
+            "reason": "stop",
+            "cost": 0,
+            "tokens": {
+              "total": 18,
+              "input": 8,
+              "output": 10,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        ]
+      },
+      {
+        "info": {
+          "id": "msg_fixture_003",
+          "sessionID": "ses_fixture_001",
+          "role": "user",
+          "time": {
+            "created": 0
+          },
+          "summary": {
+            "diffs": []
+          },
+          "agent": "build",
+          "model": {
+            "providerID": "localmock",
+            "modelID": "echo"
+          }
+        },
+        "parts": [
+          {
+            "id": "prt_fixture_014",
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_003",
+            "type": "text",
+            "text": "A8_TODOWRITE_UPDATE"
+          }
+        ]
+      },
+      {
+        "info": {
+          "id": "msg_fixture_015",
+          "sessionID": "ses_fixture_001",
+          "role": "assistant",
+          "time": {
+            "created": 0,
+            "completed": 0
+          },
+          "parentID": "msg_fixture_003",
+          "modelID": "echo",
+          "providerID": "localmock",
+          "mode": "build",
+          "agent": "build",
+          "path": {
+            "cwd": "/private/tmp/ocw-gate-a/workspace",
+            "root": "/"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "finish": "tool-calls"
+        },
+        "parts": [
+          {
+            "id": "prt_fixture_016",
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_015",
+            "type": "step-start"
+          },
+          {
+            "id": "prt_fixture_017",
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_015",
+            "type": "tool",
+            "callID": "call_fixture_018",
+            "tool": "todowrite",
+            "state": {
+              "status": "completed",
+              "input": {
+                "todos": [
+                  {
+                    "content": "capture A8",
+                    "status": "completed",
+                    "priority": "high"
+                  },
+                  {
+                    "content": "complete A8",
+                    "status": "completed",
+                    "priority": "medium"
+                  }
+                ]
+              },
+              "output": "[\n  {\n    \"content\": \"capture A8\",\n    \"status\": \"completed\",\n    \"priority\": \"high\"\n  },\n  {\n    \"content\": \"complete A8\",\n    \"status\": \"completed\",\n    \"priority\": \"medium\"\n  }\n]",
+              "title": "0 todos",
+              "metadata": {
+                "todos": [
+                  {
+                    "content": "capture A8",
+                    "status": "completed",
+                    "priority": "high"
+                  },
+                  {
+                    "content": "complete A8",
+                    "status": "completed",
+                    "priority": "medium"
+                  }
+                ],
+                "truncated": false
+              },
+              "time": {
+                "start": 0,
+                "end": 0
+              }
+            }
+          },
+          {
+            "id": "prt_fixture_019",
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_015",
+            "type": "step-finish",
+            "reason": "tool-calls",
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        ]
+      },
+      {
+        "info": {
+          "id": "msg_fixture_020",
+          "sessionID": "ses_fixture_001",
+          "role": "assistant",
+          "time": {
+            "created": 0,
+            "completed": 0
+          },
+          "parentID": "msg_fixture_003",
+          "modelID": "echo",
+          "providerID": "localmock",
+          "mode": "build",
+          "agent": "build",
+          "path": {
+            "cwd": "/private/tmp/ocw-gate-a/workspace",
+            "root": "/"
+          },
+          "cost": 0,
+          "tokens": {
+            "total": 18,
+            "input": 8,
+            "output": 10,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "finish": "stop"
+        },
+        "parts": [
+          {
+            "id": "prt_fixture_021",
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_020",
+            "type": "step-start"
+          },
+          {
+            "id": "prt_fixture_022",
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_020",
+            "type": "text",
+            "text": "SANDBOX_OK",
+            "time": {
+              "start": 0,
+              "end": 0
+            }
+          },
+          {
+            "id": "prt_fixture_023",
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_020",
+            "type": "step-finish",
+            "reason": "stop",
+            "cost": 0,
+            "tokens": {
+              "total": 18,
+              "input": 8,
+              "output": 10,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "itemKeys": [
+      "content",
+      "priority",
+      "status"
+    ]
+  },
+  "bridgeMapping": {
+    "controlPlane": true,
+    "stableIdentity": "left to Gate B; do not invent hash/content/position ids",
+    "notTimeline": "todo events must not enter SessionProjection timeline"
+  },
+  "sanitization": {
+    "replaced": [
+      "session/message/part/event ids",
+      "absolute workspace paths",
+      "epoch timestamps > 1e9"
+    ],
+    "kept": [
+      "all JSON keys",
+      "event types",
+      "part types",
+      "HTTP method/path/status"
+    ]
+  }
+}

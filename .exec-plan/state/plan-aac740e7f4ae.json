@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-20T12:21:32Z",
+  "updated_at": "2026-08-20T12:55:00Z",
   "todos": [
     {
       "id": "gate-a-inventory-impl",
@@ -196,7 +196,7 @@
       "id": "gate-a-capture-impl",
       "title": "Capture sanitized 1.18.18 samples for A1–A10",
       "description": "Using the isolated harness, capture official request/response/SSE sequences for A1–A10. Prefer A1, A2, A3, A4, A5, A6, A7, A8, A9, A10. Do not guess missing JSON. Record explicit blockers for unsafe/unreproducible rows.",
-      "status": "in_progress",
+      "status": "done",
       "phase": "gate-a",
       "kind": "impl",
       "depends_on": [
@@ -204,62 +204,76 @@
         "gate-a-inventory-regression"
       ],
       "source": "Gate A",
-      "notes": "A1/A2/A3/A4/A5/A10 captured via independent checker. Remaining A6–A9. Gate A not complete.",
+      "notes": "A1–A10 independently captured from isolated sandboxes. A8 recaptured after todowrite flood fix (177K vs 18M). A6 once/always/reject; A7 reply/reject; A9 text/file/fileMention/image/agent persist. No product code. Gate B/S/C not started.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": "2026-08-20T12:21:32Z"
+        "summary": "Sanitized+raw samples for A1–A10 present. Independent checkers derive from http/sse/reload. A8 todo items {content,status,priority} no id. A9 mock conversion is text-only.",
+        "artifacts": [
+          "agent/opencode-web/testdata/official-1.18.18/samples/a1-first-healthy-text.sanitized.json",
+          "agent/opencode-web/testdata/official-1.18.18/samples/a6-permission.sanitized.json",
+          "agent/opencode-web/testdata/official-1.18.18/samples/a7-question.sanitized.json",
+          "agent/opencode-web/testdata/official-1.18.18/samples/a8-todos.sanitized.json",
+          "agent/opencode-web/testdata/official-1.18.18/samples/a9-prompt-parts.sanitized.json",
+          "docs/2026-08-20-opencode-web-1.18.18-sample-inventory.md"
+        ],
+        "checked_at": "2026-08-20T12:55:00Z"
       }
     },
     {
       "id": "gate-a-capture-tests",
       "title": "Replay-shape check of captured sample pack",
       "description": "Validate each captured sample retains official keys, required sequence items, and sanitization (no real paths, secrets, or owner session IDs).",
-      "status": "pending",
+      "status": "done",
       "phase": "gate-a",
       "kind": "tests",
       "depends_on": [
         "gate-a-capture-impl"
       ],
       "source": "Gate A",
-      "notes": "",
+      "notes": "Independent classifiers + negative mutations for A1–A10. A3/A5 strict target-session proofs.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "python3 check_samples.py --self-test PASS; python3 check_samples.py --require-all → captured A1–A10, empty partial/blocked/missing.",
+        "artifacts": [
+          "agent/opencode-web/testdata/official-1.18.18/harness/check_samples.py",
+          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_samples.py --self-test => self-test PASS",
+          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_samples.py --require-all => captured A1-A10"
+        ],
+        "checked_at": "2026-08-20T12:55:00Z"
       }
     },
     {
       "id": "gate-a-capture-regression",
       "title": "A1–A10 all green or explicit owner-scope removal",
       "description": "Inventory status is green for every P0 row, or the row is marked blocked with a named owner decision to drop the capability from advertisement.",
-      "status": "pending",
+      "status": "done",
       "phase": "gate-a",
       "kind": "regression",
       "depends_on": [
         "gate-a-capture-tests"
       ],
       "source": "Gate A",
-      "notes": "",
+      "notes": "All P0 rows captured. No blocked capability requiring owner scope removal. Gate B not started.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Inventory A1–A10 captured. check_samples --require-all all green. No owner-scope removal. Product code unchanged.",
+        "artifacts": [
+          "docs/2026-08-20-opencode-web-1.18.18-sample-inventory.md",
+          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_samples.py --require-all => captured A1-A10"
+        ],
+        "checked_at": "2026-08-20T12:55:00Z"
       }
     },
     {

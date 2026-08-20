@@ -448,6 +448,42 @@ def classify_a10(doc: dict) -> tuple[str, list[str]]:
     return ("captured" if not bad else "partial"), bad
 
 
+def same_session(p: dict, sid: str | None) -> bool:
+    if not sid:
+        return False
+    return session_of(p) == sid
+
+
+def a3_event_seq(frames: list, sid: str) -> list[str]:
+    """Target-session direct events only. Title/other sessions cannot contribute retries."""
+    seq = []
+    for p in direct_payloads(frames):
+        if not same_session(p, sid):
+            continue
+        if p.get("type") == "session.status":
+            props = p.get("properties") if isinstance(p.get("properties"), dict) else {}
+            if props.get("sessionID") != sid:
+                continue
+            st = props.get("status")
+            typ = st.get("type") if isinstance(st, dict) else st
+            if typ:
+                seq.append(str(typ))
+        elif p.get("type") == "session.error":
+            seq.append("session.error")
+        elif p.get("type") == "session.idle":
+            seq.append("session.idle")
+    return seq
+
+
+def a3_terminal_error(frames: list, sid: str) -> dict | None:
+    last = None
+    for p in direct_payloads(frames):
+        if p.get("type") != "session.error" or not same_session(p, sid):
+            continue
+        last = (p.get("properties") or {}).get("error")
+    return last if isinstance(last, dict) else None
+
+
 def classify_a3(doc: dict) -> tuple[str, list[str]]:
     bad = common(doc)
     created = creates(doc)
@@ -456,20 +492,80 @@ def classify_a3(doc: dict) -> tuple[str, list[str]]:
         bad.append("missing-http")
         return "partial", bad
     sid = (created[0].get("response") or {}).get("id")
-    frames = doc.get("sse") or []
-    if retry_count(frames, sid or "") < 2:
-        bad.append("retry-count=" + str(retry_count(frames, sid or "")))
-    if not has_busy_then_idle(frames, sid or ""):
-        bad.append("no-busy-then-idle")
-    err_payloads = [p for p in direct_payloads(frames) if p.get("type") == "session.error"]
+    if not sid or sid not in str(prompts[0].get("path") or ""):
+        bad.append("prompt-session-mismatch")
+        return "partial", bad
+    seq = a3_event_seq(doc.get("sse") or [], sid)
+    busy_at = next((i for i, t in enumerate(seq) if t == "busy"), -1)
+    retry_idx = [i for i, t in enumerate(seq) if t == "retry"]
+    err_at = next((i for i, t in enumerate(seq) if t == "session.error"), -1)
+    idle_at = next((i for i, t in enumerate(seq) if t in ("idle", "session.idle")), -1)
+    if busy_at == -1:
+        bad.append("missing-busy")
+    if len(retry_idx) < 2:
+        bad.append("retry-count=" + str(len(retry_idx)))
+    if err_at == -1:
+        bad.append("missing-session-error")
+    if idle_at == -1:
+        bad.append("missing-idle")
+    if retry_idx and busy_at != -1 and retry_idx[0] < busy_at:
+        bad.append("retry-before-busy")
+    if err_at != -1 and retry_idx and err_at < retry_idx[-1]:
+        bad.append("error-before-retries")
+    if idle_at != -1 and err_at != -1 and idle_at < err_at:
+        bad.append("idle-before-error")
+    err = a3_terminal_error(doc.get("sse") or [], sid) or {}
+    data = err.get("data") if isinstance(err.get("data"), dict) else {}
+    if err:
+        if err.get("name") != "APIError":
+            bad.append("error-name")
+        if data.get("statusCode") != 400:
+            bad.append("error-statusCode")
+        if data.get("isRetryable") is not False:
+            bad.append("error-retryable")
     messages = reload_messages(doc)
     assistants = [m for m in messages if msg_role(m) == "assistant"]
-    reload_err = assistant_error(assistants[0]) if assistants else None
-    if not err_payloads and not reload_err:
-        bad.append("missing-final-error")
     if not assistants:
         bad.append("no-assistant")
+    else:
+        rerr = assistant_error(assistants[0]) or {}
+        rdata = rerr.get("data") if isinstance(rerr.get("data"), dict) else {}
+        if rerr.get("name") != "APIError" or rdata.get("statusCode") != 400 or rdata.get("isRetryable") is not False:
+            bad.append("reload-error-mismatch")
+        if assistant_finish(assistants[0]) in ("stop", "completed"):
+            bad.append("healthy-finish")
+    status_map = (doc.get("reload") or {}).get("status")
+    if isinstance(status_map, dict) and sid in status_map:
+        bad.append("status-map-still-present")
     return ("captured" if not bad else "partial"), bad
+
+
+A5_EXPECTED_TEXT = "A5_PARTIAL_" + ("ABCDEFGHIJ" * 8)
+
+
+def _disconnect_busy(snap: Any, sid: str | None) -> bool:
+    if not isinstance(snap, dict) or not sid:
+        return False
+    st = snap.get(sid)
+    if isinstance(st, dict):
+        return st.get("type") == "busy"
+    return False
+
+
+def a5_status_seq(frames: list, sid: str) -> list[str]:
+    seq = []
+    for p in direct_payloads(frames):
+        if not same_session(p, sid):
+            continue
+        if p.get("type") == "session.status":
+            props = p.get("properties") if isinstance(p.get("properties"), dict) else {}
+            st = props.get("status")
+            typ = st.get("type") if isinstance(st, dict) else st
+            if typ:
+                seq.append(str(typ))
+        elif p.get("type") == "session.idle":
+            seq.append("session.idle")
+    return seq
 
 
 def classify_a5(doc: dict) -> tuple[str, list[str]]:
@@ -480,36 +576,490 @@ def classify_a5(doc: dict) -> tuple[str, list[str]]:
         bad.append("missing-http")
         return "partial", bad
     sid = (created[0].get("response") or {}).get("id")
+    if not sid or sid not in str(prompts[0].get("path") or ""):
+        bad.append("prompt-session-mismatch")
+        return "partial", bad
     before = doc.get("sseBefore") or []
-    after = doc.get("sseAfterReconnect") or doc.get("sseAfter") or []
+    after = doc.get("sseAfterReconnect") or []
     if not before:
         bad.append("missing-sse-before")
-    seq_before = status_seq(before, sid or "")
+    if not after:
+        bad.append("missing-sse-after")
+    seq_before = a5_status_seq(before, sid)
     if "busy" not in seq_before:
         bad.append("disconnect-without-busy")
-    partial = any(
-        p.get("type") in ("message.part.delta", "message.part.updated") and session_of(p) in (None, sid)
-        for p in direct_payloads(before)
+    delta_before = any(
+        p.get("type") == "message.part.delta" and same_session(p, sid) for p in direct_payloads(before)
     )
-    if not partial:
+    if not delta_before:
         bad.append("disconnect-without-partial")
-    snap = (doc.get("reload") or {}).get("statusAtDisconnect") or (doc.get("meta") or {}).get("statusAtDisconnect")
-    if isinstance(snap, dict):
-        st = snap.get(sid) if sid in snap else snap
-        typ = st.get("type") if isinstance(st, dict) else None
-        if typ and typ != "busy":
-            bad.append(f"status-at-disconnect={typ}")
-    else:
-        bad.append("missing-status-at-disconnect")
-    after_idle = has_busy_then_idle(after, sid or "") or "idle" in status_seq(after, sid or "") or "session.idle" in status_seq(after, sid or "")
-    reload_status = (doc.get("reload") or {}).get("status")
-    reload_idle = isinstance(reload_status, dict) and sid not in reload_status
-    if not after_idle and not reload_idle:
-        bad.append("reconnect-no-terminal")
+    snap = (doc.get("reload") or {}).get("statusAtDisconnect")
+    if not _disconnect_busy(snap, sid):
+        bad.append("status-at-disconnect-not-busy")
+    after_direct = [p for p in direct_payloads(after)]
+    if not after_direct or after_direct[0].get("type") != "server.connected":
+        bad.append("reconnect-first-not-connected")
+    live_delta = False
+    seen_connected = False
+    created_after = False
+    for p in after_direct:
+        if p.get("type") == "server.connected":
+            seen_connected = True
+            continue
+        if p.get("type") == "session.created":
+            created_after = True
+        if seen_connected and p.get("type") == "message.part.delta" and same_session(p, sid):
+            live_delta = True
+    if not live_delta:
+        bad.append("reconnect-without-live-delta")
+    if created_after and not live_delta:
+        bad.append("session-created-is-not-replay")
+    after_seq = a5_status_seq(after, sid)
+    if "idle" not in after_seq and "session.idle" not in after_seq:
+        bad.append("second-sse-missing-terminal")
     messages = reload_messages(doc)
-    if [msg_role(m) for m in messages][:1] != ["user"]:
-        bad.append("reload-roles")
+    roles = [msg_role(m) for m in messages]
+    if roles != ["user", "assistant"]:
+        bad.append(f"roles={roles}")
+    assistants = [m for m in messages if msg_role(m) == "assistant"]
+    if not assistants:
+        bad.append("no-assistant")
+    else:
+        if assistant_finish(assistants[0]) != "stop":
+            bad.append("assistant-finish")
+        texts = []
+        for part in assistants[0].get("parts") or []:
+            if isinstance(part, dict) and part.get("type") == "text":
+                texts.append(part.get("text") or "")
+        joined = "".join(texts)
+        if joined != A5_EXPECTED_TEXT:
+            bad.append("assistant-text-incomplete")
+    status_map = (doc.get("reload") or {}).get("status")
+    if isinstance(status_map, dict) and sid in status_map:
+        bad.append("status-map-still-present")
     return ("captured" if not bad else "partial"), bad
+
+
+def http_messages_for(doc: dict, sid: str) -> list[dict]:
+    suffix = f"/session/{sid}/message"
+    rows = [
+        h
+        for h in http_rows(doc)
+        if h.get("method") == "GET" and str(h.get("path") or "") == suffix and h.get("status") == 200
+    ]
+    if not rows:
+        return []
+    resp = rows[-1].get("response")
+    return resp if isinstance(resp, list) else []
+
+
+def http_status_map(doc: dict) -> dict:
+    rows = [
+        h
+        for h in http_rows(doc)
+        if h.get("method") == "GET" and str(h.get("path") or "") == "/session/status" and h.get("status") == 200
+    ]
+    if not rows:
+        return {}
+    resp = rows[-1].get("response")
+    return resp if isinstance(resp, dict) else {}
+
+
+def asked_props(p: dict) -> dict:
+    props = p.get("properties") if isinstance(p.get("properties"), dict) else {}
+    return props or p
+
+
+def sse_of_type(frames: list, typ: str, sid: str | None = None) -> list[dict]:
+    out = []
+    for p in direct_payloads(frames):
+        if p.get("type") != typ:
+            continue
+        if sid is not None and not same_session(p, sid) and asked_props(p).get("sessionID") != sid:
+            continue
+        out.append(p)
+    return out
+
+
+def pending_for_sid(resp: Any, sid: str) -> list[dict]:
+    if not isinstance(resp, list):
+        return []
+    return [p for p in resp if isinstance(p, dict) and p.get("sessionID") == sid]
+
+
+def classify_a6(doc: dict) -> tuple[str, list[str]]:
+    bad = common(doc)
+    frames = doc.get("sse") or []
+    asked_all = sse_of_type(frames, "permission.asked")
+    if not asked_all:
+        return "blocked", bad + ["no-permission-asked"]
+    created = creates(doc)
+    if len(created) < 3:
+        bad.append("need-three-sessions")
+        return "partial", bad
+    http = http_rows(doc)
+    replies = [
+        h
+        for h in http
+        if h.get("method") == "POST"
+        and "/session/" in str(h.get("path") or "")
+        and "/permissions/" in str(h.get("path") or "")
+    ]
+    by_response: dict[str, dict] = {}
+    for h in replies:
+        body = h.get("body") if isinstance(h.get("body"), dict) else {}
+        resp = body.get("response")
+        if resp in ("once", "always", "reject") and resp not in by_response:
+            by_response[resp] = h
+    for needed in ("once", "always", "reject"):
+        if needed not in by_response:
+            bad.append(f"missing-reply-{needed}")
+
+    def slice_for(reply: dict | None) -> tuple[str | None, list[dict], list[dict]]:
+        if not reply:
+            return None, [], []
+        path = str(reply.get("path") or "")
+        sid = None
+        parts = path.split("/")
+        if len(parts) >= 3 and parts[1] == "session":
+            sid = parts[2]
+        idx = http.index(reply) if reply in http else -1
+        before = http[:idx] if idx >= 0 else []
+        after = http[idx:] if idx >= 0 else []
+        return sid, before, after
+
+    def check_flow(kind: str) -> None:
+        reply = by_response.get(kind)
+        sid, before, after = slice_for(reply)
+        if not sid:
+            return
+        prompt = next(
+            (
+                h
+                for h in reversed(before)
+                if h.get("method") == "POST" and str(h.get("path") or "") == f"/session/{sid}/prompt_async"
+            ),
+            None,
+        )
+        if not prompt or prompt.get("status") not in (200, 204):
+            bad.append(f"{kind}-missing-prompt")
+        asked = sse_of_type(frames, "permission.asked", sid)
+        if not asked:
+            bad.append(f"{kind}-missing-asked")
+            return
+        req = asked_props(asked[0])
+        for key in ("id", "sessionID", "permission"):
+            if key not in req:
+                bad.append(f"{kind}-asked-missing-{key}")
+        pending_gets = [h for h in before if h.get("method") == "GET" and h.get("path") == "/permission"]
+        if not pending_gets:
+            bad.append(f"{kind}-missing-pending-get")
+        else:
+            pending = pending_for_sid(pending_gets[-1].get("response"), sid)
+            if not pending:
+                bad.append(f"{kind}-pending-empty")
+            elif req.get("id") and pending[0].get("id") != req.get("id"):
+                bad.append(f"{kind}-pending-id-mismatch")
+        if reply and reply.get("status") not in (200, 204):
+            bad.append(f"{kind}-reply-http")
+        replied = sse_of_type(frames, "permission.replied", sid)
+        if not replied:
+            bad.append(f"{kind}-missing-replied")
+        after_gets = [h for h in after[1:] if h.get("method") == "GET" and h.get("path") == "/permission"]
+        if after_gets:
+            leftover = pending_for_sid(after_gets[0].get("response"), sid)
+            if leftover:
+                bad.append(f"{kind}-pending-not-cleared")
+        else:
+            bad.append(f"{kind}-missing-pending-after")
+        seq = a5_status_seq(frames, sid)
+        if "idle" not in seq and "session.idle" not in seq:
+            bad.append(f"{kind}-missing-idle")
+        msgs = http_messages_for(doc, sid)
+        assistants = [m for m in msgs if msg_role(m) == "assistant"]
+        if kind == "reject":
+            for m in assistants:
+                if assistant_finish(m) in ("stop", "completed") and not assistant_error(m):
+                    bad.append("reject-healthy-finish")
+        elif kind == "once":
+            if not any(assistant_finish(m) == "stop" for m in assistants):
+                bad.append("once-did-not-continue")
+        elif kind == "always":
+            prompts_for = [
+                h
+                for h in http
+                if h.get("method") == "POST" and str(h.get("path") or "") == f"/session/{sid}/prompt_async"
+            ]
+            if len(prompts_for) < 2:
+                bad.append("always-missing-followup")
+            # Live result: asked-again is observed when this session has >1 permission.asked.
+            # Do not fail closed either way; both outcomes are valid captured facts.
+
+    for kind in ("once", "always", "reject"):
+        check_flow(kind)
+    return ("captured" if not bad else "partial"), bad
+
+
+def classify_a7(doc: dict) -> tuple[str, list[str]]:
+    bad = common(doc)
+    frames = doc.get("sse") or []
+    asked_all = sse_of_type(frames, "question.asked")
+    if not asked_all:
+        return "blocked", bad + ["no-question-asked"]
+    if any(p.get("type") in ("question_resolved", "question.resolved") for p in direct_payloads(frames)):
+        bad.append("invented-question-resolved")
+    for p in asked_all:
+        req = asked_props(p)
+        if "questions" not in req:
+            bad.append("asked-missing-questions")
+        if req.get("permission") and "questions" not in req:
+            bad.append("permission-mapped-as-question")
+    created = creates(doc)
+    if len(created) < 2:
+        bad.append("need-two-sessions")
+        return "partial", bad
+    http = http_rows(doc)
+    replies = [h for h in http if h.get("method") == "POST" and str(h.get("path") or "").endswith("/reply")]
+    rejects = [h for h in http if h.get("method") == "POST" and str(h.get("path") or "").endswith("/reject")]
+    if not replies:
+        bad.append("missing-reply")
+        return "partial", bad
+    if not rejects:
+        bad.append("missing-reject")
+
+    def sid_from_create(row: dict) -> str | None:
+        resp = row.get("response") if isinstance(row.get("response"), dict) else {}
+        return resp.get("id")
+
+    reply_sid = sid_from_create(created[0])
+    reject_sid = sid_from_create(created[1]) if len(created) > 1 else None
+
+    def check_pending(sid: str, before_action: list[dict], after_action: list[dict], label: str) -> dict | None:
+        gets = [h for h in before_action if h.get("method") == "GET" and h.get("path") == "/question"]
+        if not gets:
+            bad.append(f"{label}-missing-pending-get")
+            return None
+        pending = pending_for_sid(gets[-1].get("response"), sid)
+        if not pending:
+            bad.append(f"{label}-pending-empty")
+            return None
+        after_gets = [h for h in after_action if h.get("method") == "GET" and h.get("path") == "/question"]
+        if not after_gets:
+            bad.append(f"{label}-missing-pending-after")
+        else:
+            leftover = pending_for_sid(after_gets[0].get("response"), sid)
+            if leftover:
+                bad.append(f"{label}-pending-not-cleared")
+        return pending[0]
+
+    reply = replies[0]
+    reply_idx = http.index(reply)
+    if not reply_sid:
+        bad.append("reply-missing-sid")
+    else:
+        asked = sse_of_type(frames, "question.asked", reply_sid)
+        if not asked:
+            bad.append("reply-missing-asked")
+        req = check_pending(reply_sid, http[:reply_idx], http[reply_idx + 1 :], "reply")
+        answers = (reply.get("body") or {}).get("answers") if isinstance(reply.get("body"), dict) else None
+        if not (isinstance(answers, list) and answers and all(isinstance(row, list) for row in answers)):
+            bad.append("answers-not-string-array-array")
+        elif req:
+            questions = req.get("questions") if isinstance(req.get("questions"), list) else []
+            if len(answers) != len(questions):
+                bad.append("answers-question-order")
+            elif questions:
+                q0 = questions[0] if isinstance(questions[0], dict) else {}
+                options = q0.get("options") if isinstance(q0.get("options"), list) else []
+                labels = [o.get("label") for o in options if isinstance(o, dict)]
+                if answers[0] and answers[0][0] not in labels:
+                    bad.append("answer-not-in-options")
+        if reply.get("status") not in (200, 204):
+            bad.append("reply-http")
+        if not sse_of_type(frames, "question.replied", reply_sid):
+            bad.append("missing-replied-event")
+        seq = a5_status_seq(frames, reply_sid)
+        if "idle" not in seq and "session.idle" not in seq:
+            bad.append("reply-missing-idle")
+        msgs = http_messages_for(doc, reply_sid)
+        if not any(assistant_finish(m) == "stop" for m in msgs if msg_role(m) == "assistant"):
+            bad.append("reply-did-not-continue")
+
+    if rejects and reject_sid:
+        reject = rejects[0]
+        reject_idx = http.index(reject)
+        asked = sse_of_type(frames, "question.asked", reject_sid)
+        if not asked:
+            bad.append("reject-missing-asked")
+        check_pending(reject_sid, http[:reject_idx], http[reject_idx + 1 :], "reject")
+        if reject.get("status") not in (200, 204):
+            bad.append("reject-http")
+        if not sse_of_type(frames, "question.rejected", reject_sid):
+            bad.append("missing-rejected-event")
+        seq = a5_status_seq(frames, reject_sid)
+        if "idle" not in seq and "session.idle" not in seq:
+            bad.append("reject-missing-idle")
+        msgs = http_messages_for(doc, reject_sid)
+        for m in msgs:
+            if msg_role(m) == "assistant" and assistant_finish(m) in ("stop", "completed") and not assistant_error(m):
+                bad.append("reject-healthy-finish")
+    return ("captured" if not bad else "partial"), bad
+
+
+def _todo_items(value: Any) -> list[dict]:
+    if isinstance(value, list):
+        return [i for i in value if isinstance(i, dict)]
+    return []
+
+
+def classify_a8(doc: dict) -> tuple[str, list[str]]:
+    bad = common(doc)
+    created = creates(doc)
+    prompts = prompt_asyncs(doc)
+    if not created or not prompts:
+        bad.append("missing-http")
+        return "partial", bad
+    sid = (created[0].get("response") or {}).get("id")
+    frames = doc.get("sse") or []
+    updated = sse_of_type(frames, "todo.updated", sid)
+    if not updated:
+        return "blocked", bad + ["no-todo-updated"]
+    todos_http = [
+        h
+        for h in http_rows(doc)
+        if h.get("method") == "GET" and str(h.get("path") or "") == f"/session/{sid}/todo"
+    ]
+    if len(todos_http) < 2:
+        bad.append("need-two-todo-gets")
+    snapshots = [_todo_items(h.get("response")) for h in todos_http]
+    event_snaps = [_todo_items((p.get("properties") or {}).get("todos")) for p in updated]
+    if snapshots:
+        first = snapshots[0]
+        if not first:
+            bad.append("empty-todo-list")
+        matching_event = any(items == first for items in event_snaps)
+        if first and not matching_event:
+            bad.append("todo-get-event-mismatch")
+        keys: set[str] = set()
+        for snap in snapshots + event_snaps:
+            for item in snap:
+                keys.update(item.keys())
+                if "id" in item:
+                    bad.append("invented-id-present")
+        extra = sorted(k for k in keys if k not in ("content", "status", "priority"))
+        if extra:
+            bad.append(f"unexpected-todo-keys={extra}")
+        if len(snapshots) >= 2 and snapshots[0] == snapshots[-1]:
+            bad.append("todo-no-replacement-update")
+        elif len(event_snaps) >= 2 and event_snaps[0] == event_snaps[-1] and (
+            len(snapshots) < 2 or snapshots[0] == snapshots[-1]
+        ):
+            bad.append("todo-no-replacement-update")
+    seq = a5_status_seq(frames, sid or "")
+    if "idle" not in seq and "session.idle" not in seq:
+        bad.append("missing-idle")
+    return ("captured" if not bad else "partial"), bad
+
+
+def _part_kind(body: dict) -> str | None:
+    parts = body.get("parts") if isinstance(body.get("parts"), list) else []
+    typed = [p for p in parts if isinstance(p, dict)]
+    has_agent = any(p.get("type") == "agent" for p in typed)
+    files = [p for p in typed if p.get("type") == "file"]
+    if has_agent:
+        return "agent"
+    if files:
+        f0 = files[0]
+        mime = str(f0.get("mime") or "")
+        if f0.get("source"):
+            return "fileMention"
+        if mime.startswith("image/"):
+            return "image"
+        return "file"
+    if any(p.get("type") == "text" for p in typed):
+        return "text"
+    return None
+
+
+def classify_a9(doc: dict) -> tuple[str, list[str]]:
+    bad = common(doc)
+    created = creates(doc)
+    prompts = prompt_asyncs(doc)
+    if not created or not prompts:
+        bad.append("missing-http")
+        return "partial", bad
+    frames = doc.get("sse") or []
+    sub: dict[str, str] = {}
+    wanted = ("text", "file", "fileMention", "image", "agent")
+    found: dict[str, dict] = {}
+    for prompt in prompts:
+        body = prompt.get("body") if isinstance(prompt.get("body"), dict) else {}
+        kind = _part_kind(body)
+        if kind and kind not in found:
+            found[kind] = prompt
+    reload = doc.get("reload") or {}
+    for name in wanted:
+        prompt = found.get(name)
+        if not prompt:
+            sub[name] = "missing"
+            bad.append(f"{name}-missing")
+            continue
+        path = str(prompt.get("path") or "")
+        sid = path.split("/")[2] if path.startswith("/session/") else None
+        accepted = prompt.get("status") in (200, 204)
+        msgs = http_messages_for(doc, sid) if sid else []
+        user = next((m for m in msgs if msg_role(m) == "user"), None)
+        persisted = user.get("parts") if isinstance(user, dict) else []
+        types = [p.get("type") for p in persisted if isinstance(p, dict)]
+        want_type = {"text": "text", "file": "file", "fileMention": "file", "image": "file", "agent": "agent"}[name]
+        source_ok = True
+        if name == "fileMention":
+            source_ok = any(isinstance(p, dict) and p.get("type") == "file" and p.get("source") for p in persisted)
+        if name == "agent":
+            source_ok = any(isinstance(p, dict) and p.get("type") == "agent" and p.get("source") for p in persisted)
+        idle_ok = False
+        if sid:
+            seq = a5_status_seq(frames, sid)
+            idle_ok = "idle" in seq or "session.idle" in seq
+        mock_obs = []
+        item = reload.get(name) if isinstance(reload.get(name), dict) else {}
+        if isinstance(item.get("mockObservations"), list):
+            mock_obs = item.get("mockObservations")
+        mock_ok = True
+        if not mock_obs:
+            mock_ok = False
+            bad.append(f"{name}-mock-observation-missing")
+        if not accepted:
+            sub[name] = "blocked"
+            bad.append(f"{name}-rejected")
+            continue
+        if want_type not in types or not source_ok:
+            sub[name] = "partial"
+            bad.append(f"{name}-not-persisted")
+            continue
+        if not idle_ok:
+            sub[name] = "partial"
+            bad.append(f"{name}-missing-idle")
+            continue
+        if not mock_ok:
+            sub[name] = "partial"
+            continue
+        sub[name] = "captured"
+    for name, part_status in sub.items():
+        if part_status != "captured":
+            bad.append(f"part:{name}={part_status}")
+    captured_n = sum(1 for v in sub.values() if v == "captured")
+    blocked_n = sum(1 for v in sub.values() if v == "blocked")
+    real_bad = [x for x in bad if not x.startswith("part:")]
+    if captured_n == len(wanted) and not real_bad:
+        status = "captured"
+    elif blocked_n == len(wanted) and captured_n == 0:
+        status = "blocked"
+    else:
+        status = "partial"
+        if captured_n and blocked_n:
+            bad.append("mixed-part-results")
+    return status, bad
 
 
 CLASSIFIERS = {
@@ -518,6 +1068,10 @@ CLASSIFIERS = {
     "A3": classify_a3,
     "A4": classify_a4,
     "A5": classify_a5,
+    "A6": classify_a6,
+    "A7": classify_a7,
+    "A8": classify_a8,
+    "A9": classify_a9,
     "A10": classify_a10,
 }
 
@@ -580,6 +1134,176 @@ def _mutate_a10_child(doc: dict) -> dict:
     return out
 
 
+def _a3_drop_retry(doc: dict) -> dict:
+    out = copy.deepcopy(doc)
+    dropped = False
+    kept = []
+    for frame in out.get("sse") or []:
+        p = payload(frame)
+        st = ((p.get("properties") or {}).get("status") or {})
+        if not dropped and p.get("type") == "session.status" and st.get("type") == "retry":
+            dropped = True
+            continue
+        kept.append(frame)
+    out["sse"] = kept
+    return out
+
+
+def _a3_retryable_true(doc: dict) -> dict:
+    out = copy.deepcopy(doc)
+    for frame in out.get("sse") or []:
+        p = payload(frame)
+        if p.get("type") == "session.error":
+            err = (p.get("properties") or {}).get("error") or {}
+            data = err.get("data") if isinstance(err.get("data"), dict) else {}
+            data["isRetryable"] = True
+            err["data"] = data
+            (p.get("properties") or {})["error"] = err
+    for m in (out.get("reload") or {}).get("messages") or []:
+        info = m.get("info") if isinstance(m.get("info"), dict) else None
+        if info and info.get("role") == "assistant" and isinstance(info.get("error"), dict):
+            data = info["error"].setdefault("data", {})
+            if isinstance(data, dict):
+                data["isRetryable"] = True
+    return out
+
+
+def _a3_drop_errors(doc: dict) -> dict:
+    out = copy.deepcopy(doc)
+    out["sse"] = [f for f in (out.get("sse") or []) if payload(f).get("type") != "session.error"]
+    for m in (out.get("reload") or {}).get("messages") or []:
+        info = m.get("info") if isinstance(m.get("info"), dict) else None
+        if info and info.get("role") == "assistant":
+            info.pop("error", None)
+    return out
+
+
+def _a3_finish_stop(doc: dict) -> dict:
+    out = copy.deepcopy(doc)
+    for m in (out.get("reload") or {}).get("messages") or []:
+        info = m.get("info") if isinstance(m.get("info"), dict) else None
+        if info and info.get("role") == "assistant":
+            info["finish"] = "stop"
+    return out
+
+
+def _a5_drop_live_delta(doc: dict) -> dict:
+    out = copy.deepcopy(doc)
+    out["sseAfterReconnect"] = [
+        frame
+        for frame in (out.get("sseAfterReconnect") or [])
+        if payload(frame).get("type") != "message.part.delta"
+    ]
+    return out
+
+
+def _a5_drop_second_terminal(doc: dict) -> dict:
+    out = copy.deepcopy(doc)
+    kept = []
+    for frame in out.get("sseAfterReconnect") or []:
+        p = payload(frame)
+        st = ((p.get("properties") or {}).get("status") or {})
+        if p.get("type") == "session.idle" or (p.get("type") == "session.status" and st.get("type") == "idle"):
+            continue
+        kept.append(frame)
+    out["sseAfterReconnect"] = kept
+    out.setdefault("reload", {})["status"] = {}
+    return out
+
+
+def _a5_disconnect_idle(doc: dict) -> dict:
+    out = copy.deepcopy(doc)
+    snap = (out.get("reload") or {}).get("statusAtDisconnect")
+    if isinstance(snap, dict):
+        out["reload"]["statusAtDisconnect"] = {k: {"type": "idle"} for k in snap}
+    return out
+
+
+def _a5_truncate_text(doc: dict) -> dict:
+    out = copy.deepcopy(doc)
+    for m in (out.get("reload") or {}).get("messages") or []:
+        info = m.get("info") if isinstance(m.get("info"), dict) else None
+        if info and info.get("role") == "assistant":
+            info["finish"] = None
+            for part in m.get("parts") or []:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    part["text"] = (part.get("text") or "")[:8]
+    return out
+
+
+def _a6_drop_asked(doc: dict) -> dict:
+    out = copy.deepcopy(doc)
+    for h in out.get("http") or []:
+        body = h.get("body")
+        if isinstance(body, dict) and body.get("response") == "once":
+            body["response"] = "nope"
+            break
+    return out
+
+
+def _a6_drop_replied(doc: dict) -> dict:
+    out = copy.deepcopy(doc)
+    out["sse"] = [f for f in (out.get("sse") or []) if payload(f).get("type") != "permission.replied"]
+    return out
+
+
+def _a7_scramble_answers(doc: dict) -> dict:
+    out = copy.deepcopy(doc)
+    for h in out.get("http") or []:
+        if str(h.get("path") or "").endswith("/reply") and isinstance(h.get("body"), dict):
+            h["body"]["answers"] = "red"
+            break
+    return out
+
+
+def _a7_drop_rejected(doc: dict) -> dict:
+    out = copy.deepcopy(doc)
+    out["sse"] = [f for f in (out.get("sse") or []) if payload(f).get("type") != "question.rejected"]
+    return out
+
+
+def _a8_inject_id(doc: dict) -> dict:
+    out = copy.deepcopy(doc)
+    for h in out.get("http") or []:
+        if h.get("method") == "GET" and str(h.get("path") or "").endswith("/todo") and isinstance(h.get("response"), list):
+            h["response"] = [{**item, "id": "invented"} if isinstance(item, dict) else item for item in h["response"]]
+    return out
+
+
+def _a8_same_todos(doc: dict) -> dict:
+    out = copy.deepcopy(doc)
+    first = None
+    for h in out.get("http") or []:
+        if h.get("method") == "GET" and str(h.get("path") or "").endswith("/todo") and isinstance(h.get("response"), list):
+            if first is None:
+                first = h.get("response")
+            else:
+                h["response"] = copy.deepcopy(first)
+    for frame in out.get("sse") or []:
+        p = payload(frame)
+        if p.get("type") == "todo.updated" and first is not None:
+            props = p.get("properties") if isinstance(p.get("properties"), dict) else {}
+            props["todos"] = copy.deepcopy(first)
+    return out
+
+
+def _a9_drop_file_parts(doc: dict) -> dict:
+    out = copy.deepcopy(doc)
+    for h in out.get("http") or []:
+        if h.get("method") != "GET" or not str(h.get("path") or "").endswith("/message"):
+            continue
+        resp = h.get("response")
+        if not isinstance(resp, list):
+            continue
+        for m in resp:
+            if not isinstance(m, dict):
+                continue
+            if (m.get("info") or {}).get("role") != "user":
+                continue
+            m["parts"] = [p for p in (m.get("parts") or []) if not (isinstance(p, dict) and p.get("type") == "file")]
+    return out
+
+
 def _mutate_a10_dir(doc: dict) -> dict:
     out = copy.deepcopy(doc)
     extra = {"id": "ses_injected_other_dir", "directory": "/tmp/ocw-gate-a/workspace"}
@@ -600,8 +1324,24 @@ def self_test() -> int:
         ("A2", "a2-follow-up.sanitized.json", _mutate_prompt_id, "messageID"),
         ("A2", "a2-follow-up.sanitized.json", _strip_idle, "idle"),
         ("A4", "a4-abort.sanitized.json", _mutate_abort_error, "abort-error"),
+        ("A3", "a3-provider-error.sanitized.json", _a3_drop_retry, "drop-retry"),
+        ("A3", "a3-provider-error.sanitized.json", _a3_retryable_true, "retryable-true"),
+        ("A3", "a3-provider-error.sanitized.json", _a3_drop_errors, "drop-errors"),
+        ("A3", "a3-provider-error.sanitized.json", _a3_finish_stop, "finish-stop"),
+        ("A3", "a3-provider-error.sanitized.json", _strip_idle, "idle"),
+        ("A5", "a5-sse-reconnect.sanitized.json", _a5_drop_live_delta, "drop-live-delta"),
+        ("A5", "a5-sse-reconnect.sanitized.json", _a5_drop_second_terminal, "drop-second-terminal"),
+        ("A5", "a5-sse-reconnect.sanitized.json", _a5_disconnect_idle, "disconnect-idle"),
+        ("A5", "a5-sse-reconnect.sanitized.json", _a5_truncate_text, "truncate-text"),
         ("A10", "a10-session-listing.sanitized.json", _mutate_a10_child, "child/roots"),
         ("A10", "a10-session-listing.sanitized.json", _mutate_a10_dir, "directory-id"),
+        ("A6", "a6-permission.sanitized.json", _a6_drop_asked, "drop-asked"),
+        ("A6", "a6-permission.sanitized.json", _a6_drop_replied, "drop-replied"),
+        ("A7", "a7-question.sanitized.json", _a7_scramble_answers, "scramble-answers"),
+        ("A7", "a7-question.sanitized.json", _a7_drop_rejected, "drop-rejected"),
+        ("A8", "a8-todos.sanitized.json", _a8_inject_id, "inject-id"),
+        ("A8", "a8-todos.sanitized.json", _a8_same_todos, "same-todos"),
+        ("A9", "a9-prompt-parts.sanitized.json", _a9_drop_file_parts, "drop-file-parts"),
     ]
     print("self-test mutations:")
     for sid, name, mut, label in cases:
@@ -613,8 +1353,7 @@ def self_test() -> int:
         orig_status, _ = classify(sid, original)
         mutated = mut(original)
         new_status, problems = classify(sid, mutated)
-        ok = orig_status == "captured" and new_status == "partial"
-        # A10 current fixture may already be partial; mutation must not stay captured.
+        ok = orig_status == "captured" and new_status in ("partial", "blocked")
         if orig_status != "captured":
             ok = new_status != "captured"
         print(f"  {sid} {label}: {orig_status} -> {new_status} problems={problems[:6]} {'OK' if ok else 'FAIL'}")

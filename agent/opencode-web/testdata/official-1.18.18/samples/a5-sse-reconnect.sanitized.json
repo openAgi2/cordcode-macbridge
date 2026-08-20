@@ -3474,7 +3474,7 @@
     },
     "status": {},
     "statusAtDisconnect": {
-      "ses_fe0e39a01ffeZK76F50A5xloUQ": {
+      "ses_fixture_001": {
         "type": "busy"
       }
     }

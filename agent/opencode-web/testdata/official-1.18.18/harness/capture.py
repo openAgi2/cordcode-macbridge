@@ -226,7 +226,11 @@ def has_type(frames: list[dict[str, Any]], wanted: str) -> bool:
 
 def sanitize(value: Any, table: dict[str, str], workspace: str) -> Any:
     if isinstance(value, dict):
-        return {k: sanitize(v, table, workspace) for k, v in value.items()}
+        out = {}
+        for k, v in value.items():
+            nk = sanitize(k, table, workspace) if isinstance(k, str) else k
+            out[nk] = sanitize(v, table, workspace)
+        return out
     if isinstance(value, list):
         return [sanitize(v, table, workspace) for v in value]
     if isinstance(value, str):
@@ -880,30 +884,83 @@ def capture_a5(c: Client, sse: SSE, out: Path, workspace: str) -> None:
         print(f"A5 classified {capture_status}: last={last}", file=sys.stderr)
 
 
+def _count_type(frames: list[dict[str, Any]], typ: str, start: int = 0) -> int:
+    n = 0
+    for i, t in enumerate(event_types(frames)):
+        if i < start:
+            continue
+        if t == typ:
+            n += 1
+    return n
+
+
 def capture_a6(c: Client, sse: SSE, out: Path, workspace: str) -> None:
-    _, created, _ = c.request("POST", "/session", body={})
-    sid = created["id"]
-    body = prompt_body("A6_READ_OUTSIDE")
-    c.request("POST", f"/session/{sid}/prompt_async", body=body, timeout=20)
-    sse.wait_until(lambda frames: "permission.asked" in event_types(frames), 20)
-    time.sleep(0.5)
-    _, pending, _ = c.request("GET", "/permission")
-    reply_http = None
-    if isinstance(pending, list) and pending:
-        req = pending[0]
+    def one(response: str, extra_follow: bool) -> dict[str, Any]:
+        mark = len(sse.frames)
+        st, created, _ = c.request("POST", "/session", body={})
+        if st >= 300 or not isinstance(created, dict):
+            raise RuntimeError(f"A6 create failed {st}")
+        sid = created["id"]
+        body = prompt_body("A6_READ_OUTSIDE")
+        code, resp, _ = c.request("POST", f"/session/{sid}/prompt_async", body=body, timeout=20)
+        asked = sse.wait_until(lambda frames: _count_type(frames, "permission.asked", mark) >= 1, 20)
+        time.sleep(0.3)
+        _, pending, _ = c.request("GET", "/permission")
+        pending_for = [p for p in pending if isinstance(pending, list) and isinstance(p, dict) and p.get("sessionID") == sid]
+        if not asked or not pending_for:
+            wait_idle(sse, sid, 10)
+            return {
+                "sessionID": sid,
+                "asked": False,
+                "promptHttpStatus": code,
+                "pending": pending,
+                "blocked": True,
+            }
+        req = pending_for[0]
         pid = req.get("id")
-        # Official v1 Web path: POST /session/:id/permissions/:permissionID {response}
-        code, resp, _ = c.request(
+        rcode, rresp, _ = c.request(
             "POST",
             f"/session/{sid}/permissions/{pid}",
-            body={"response": "once"},
+            body={"response": response},
             timeout=15,
         )
-        reply_http = {"status": code, "response": resp, "permissionID": pid}
-        sse.wait_until(lambda frames: "permission.replied" in event_types(frames), 10)
-    time.sleep(1.0)
-    _, pending_after, _ = c.request("GET", "/permission")
-    _, messages, _ = c.request("GET", f"/session/{sid}/message")
+        sse.wait_until(lambda frames: _count_type(frames, "permission.replied", mark) >= 1, 10)
+        _, pending_after, _ = c.request("GET", "/permission")
+        idle1, last1 = wait_idle(sse, sid, 25)
+        asked_again = None
+        follow = None
+        if extra_follow:
+            mark2 = len(sse.frames)
+            follow_body = prompt_body("A6_READ_OUTSIDE")
+            fcode, _, _ = c.request("POST", f"/session/{sid}/prompt_async", body=follow_body, timeout=20)
+            asked_again = sse.wait_until(lambda frames: _count_type(frames, "permission.asked", mark2) >= 1, 12)
+            wait_idle(sse, sid, 25)
+            follow = {"promptHttpStatus": fcode, "askedAgain": asked_again}
+        _, messages, _ = c.request("GET", f"/session/{sid}/message")
+        _, status_map, _ = c.request("GET", "/session/status")
+        return {
+            "sessionID": sid,
+            "asked": True,
+            "blocked": False,
+            "promptHttpStatus": code,
+            "pendingRequest": req,
+            "replyHttpStatus": rcode,
+            "replyResponse": rresp,
+            "replyBody": {"response": response},
+            "pendingAfter": pending_after,
+            "idle": idle1,
+            "lastStatus": last1,
+            "follow": follow,
+            "messages": messages,
+            "status": status_map,
+        }
+
+    # reject first: an earlier always would persist the pattern for the
+    # workspace and suppress later asks.
+    reject = one("reject", False)
+    once = one("once", False)
+    always = one("always", True)
+    blocked = once.get("blocked") or always.get("blocked") or reject.get("blocked")
     write_sample(
         out / "a6-permission.sanitized.json",
         {
@@ -911,40 +968,74 @@ def capture_a6(c: Client, sse: SSE, out: Path, workspace: str) -> None:
                 "scenario": "A6",
                 "opencodeVersion": OPENCODE_VERSION,
                 "sourceCommit": SOURCE_COMMIT,
-                "reply": reply_http,
+                "captureStatus": "blocked" if blocked else "captured",
+            },
+            "source": {
+                "ui": "packages/app/src/utils/server-compat.ts:496-503 permission.respond; session-permission-dock.tsx",
+                "server": "POST /session/:id/permissions/:id {response: once|always|reject}; GET /permission; events permission.asked/replied",
             },
             "http": c.http,
             "sseEventTypes": event_types(sse.frames),
             "sse": sse.frames,
-            "reload": {"pendingBeforeReply": pending, "pendingAfter": pending_after, "messages": messages},
+            "reload": {"once": once, "always": always, "reject": reject},
+            "bridgeMapping": {
+                "decision": "permission is control-plane plus Kernel-canonical state; raw permission must not write iOS messages[]",
+                "v1Reply": "session-scoped {response}",
+            },
+            "sanitization": SANITIZATION,
         },
         workspace,
     )
+    if blocked:
+        print("A6 blocked: permission.asked not observed for at least one subscenario", file=sys.stderr)
 
 
 def capture_a7(c: Client, sse: SSE, out: Path, workspace: str) -> None:
-    _, created, _ = c.request("POST", "/session", body={})
-    sid = created["id"]
-    body = prompt_body("A7_QUESTION")
-    c.request("POST", f"/session/{sid}/prompt_async", body=body, timeout=20)
-    sse.wait_until(lambda frames: "question.asked" in event_types(frames), 20)
-    time.sleep(0.5)
-    _, pending, _ = c.request("GET", "/question")
-    reply_http = None
-    if isinstance(pending, list) and pending:
-        req = pending[0]
+    def one(kind: str) -> dict[str, Any]:
+        mark = len(sse.frames)
+        st, created, _ = c.request("POST", "/session", body={})
+        sid = created["id"]
+        body = prompt_body("A7_QUESTION")
+        code, _, _ = c.request("POST", f"/session/{sid}/prompt_async", body=body, timeout=20)
+        asked = sse.wait_until(lambda frames: _count_type(frames, "question.asked", mark) >= 1, 20)
+        time.sleep(0.3)
+        _, pending, _ = c.request("GET", "/question")
+        pending_for = [p for p in pending if isinstance(pending, list) and isinstance(p, dict) and p.get("sessionID") == sid]
+        if not asked or not pending_for:
+            wait_idle(sse, sid, 10)
+            return {"sessionID": sid, "asked": False, "blocked": True, "pending": pending}
+        req = pending_for[0]
         qid = req.get("id")
-        code, resp, _ = c.request(
-            "POST",
-            f"/question/{qid}/reply",
-            body={"answers": [["red"]]},
-            timeout=15,
-        )
-        reply_http = {"status": code, "response": resp, "requestID": qid}
-        sse.wait_until(lambda frames: "question.replied" in event_types(frames), 10)
-    time.sleep(1.0)
-    _, pending_after, _ = c.request("GET", "/question")
-    _, messages, _ = c.request("GET", f"/session/{sid}/message")
+        if kind == "reply":
+            answers = [["red"]]
+            rcode, rresp, _ = c.request("POST", f"/question/{qid}/reply", body={"answers": answers}, timeout=15)
+            sse.wait_until(lambda frames: _count_type(frames, "question.replied", mark) >= 1, 10)
+            action = {"path": f"/question/{qid}/reply", "body": {"answers": answers}, "status": rcode, "response": rresp}
+        else:
+            rcode, rresp, _ = c.request("POST", f"/question/{qid}/reject", timeout=15)
+            sse.wait_until(lambda frames: _count_type(frames, "question.rejected", mark) >= 1, 10)
+            action = {"path": f"/question/{qid}/reject", "status": rcode, "response": rresp}
+        _, pending_after, _ = c.request("GET", "/question")
+        idle, last = wait_idle(sse, sid, 25)
+        _, messages, _ = c.request("GET", f"/session/{sid}/message")
+        _, status_map, _ = c.request("GET", "/session/status")
+        return {
+            "sessionID": sid,
+            "asked": True,
+            "blocked": False,
+            "promptHttpStatus": code,
+            "pendingRequest": req,
+            "action": action,
+            "pendingAfter": pending_after,
+            "idle": idle,
+            "lastStatus": last,
+            "messages": messages,
+            "status": status_map,
+        }
+
+    reply = one("reply")
+    reject = one("reject")
+    blocked = reply.get("blocked") or reject.get("blocked")
     write_sample(
         out / "a7-question.sanitized.json",
         {
@@ -952,62 +1043,234 @@ def capture_a7(c: Client, sse: SSE, out: Path, workspace: str) -> None:
                 "scenario": "A7",
                 "opencodeVersion": OPENCODE_VERSION,
                 "sourceCommit": SOURCE_COMMIT,
-                "reply": reply_http,
+                "captureStatus": "blocked" if blocked else "captured",
+            },
+            "source": {
+                "ui": "packages/app/src/pages/session/composer/session-question-dock.tsx reply answers:string[][]",
+                "server": "GET /question; POST /question/:id/reply {answers:string[][]}; POST /question/:id/reject; events asked/replied/rejected",
             },
             "http": c.http,
             "sseEventTypes": event_types(sse.frames),
             "sse": sse.frames,
-            "reload": {"pending": pending, "pendingAfter": pending_after, "messages": messages},
+            "reload": {"reply": reply, "reject": reject},
+            "bridgeMapping": {
+                "decision": "question is distinct from permission; canonical path is user_input_requested/resolved; do not invent question_resolved",
+            },
+            "sanitization": SANITIZATION,
         },
         workspace,
     )
+    if blocked:
+        print("A7 blocked: question.asked not observed", file=sys.stderr)
+
+
+def _todo_updated_count(frames: list[dict[str, Any]], sid: str, start: int = 0) -> int:
+    n = 0
+    for i, frame in enumerate(frames):
+        if i < start:
+            continue
+        ev = frame.get("event") if isinstance(frame, dict) else None
+        payload = ev.get("payload") if isinstance(ev, dict) and isinstance(ev.get("payload"), dict) else ev
+        if not isinstance(payload, dict) or payload.get("type") != "todo.updated":
+            continue
+        props = payload.get("properties") if isinstance(payload.get("properties"), dict) else {}
+        if props.get("sessionID") not in (None, sid):
+            continue
+        n += 1
+    return n
 
 
 def capture_a8(c: Client, sse: SSE, out: Path, workspace: str) -> None:
-    _, created, _ = c.request("POST", "/session", body={})
+    st, created, _ = c.request("POST", "/session", body={})
     sid = created["id"]
+    mark = len(sse.frames)
     body = prompt_body("A8_TODOWRITE")
     c.request("POST", f"/session/{sid}/prompt_async", body=body, timeout=20)
-    sse.wait_until(lambda frames: "todo.updated" in event_types(frames) or "permission.asked" in event_types(frames), 20)
-    time.sleep(1.5)
-    _, todos, _ = c.request("GET", f"/session/{sid}/todo")
+    updated = sse.wait_until(
+        lambda frames: _todo_updated_count(frames, sid, mark) >= 1 or _todo_updated_count(frames, sid, mark) > 20,
+        20,
+    )
+    if _todo_updated_count(sse.frames, sid, mark) > 20:
+        print("A8 warning: todo.updated flood on first write; stopping extra wait", file=sys.stderr)
+    time.sleep(0.4)
+    _, todos1, _ = c.request("GET", f"/session/{sid}/todo")
+    if not updated:
+        wait_idle(sse, sid, 10)
+        write_sample(
+            out / "a8-todos.sanitized.json",
+            {
+                "meta": {
+                    "scenario": "A8",
+                    "opencodeVersion": OPENCODE_VERSION,
+                    "sourceCommit": SOURCE_COMMIT,
+                    "captureStatus": "blocked",
+                },
+                "source": {"server": "GET /session/:id/todo; event todo.updated; tool todowrite"},
+                "http": c.http,
+                "sse": sse.frames,
+                "reload": {"todosAfterFirst": todos1},
+                "bridgeMapping": {
+                    "controlPlane": True,
+                    "stableIdentity": "Gate B",
+                    "notTimeline": True,
+                },
+                "sanitization": SANITIZATION,
+            },
+            workspace,
+        )
+        print("A8 blocked: todo.updated not observed", file=sys.stderr)
+        return
+    wait_idle(sse, sid, 20)
+    mark2 = len(sse.frames)
+    body2 = prompt_body("A8_TODOWRITE_UPDATE")
+    c.request("POST", f"/session/{sid}/prompt_async", body=body2, timeout=20)
+    sse.wait_until(
+        lambda frames: _todo_updated_count(frames, sid, mark2) >= 1 or _todo_updated_count(frames, sid, mark2) > 20,
+        20,
+    )
+    if _todo_updated_count(sse.frames, sid, mark2) > 20:
+        print("A8 warning: todo.updated flood on update; stopping extra wait", file=sys.stderr)
+    wait_idle(sse, sid, 20)
+    _, todos2, _ = c.request("GET", f"/session/{sid}/todo")
     _, messages, _ = c.request("GET", f"/session/{sid}/message")
+    keys = []
+    if isinstance(todos2, list) and todos2 and isinstance(todos2[0], dict):
+        keys = sorted(todos2[0].keys())
     write_sample(
         out / "a8-todos.sanitized.json",
         {
-            "meta": {"scenario": "A8", "opencodeVersion": OPENCODE_VERSION, "sourceCommit": SOURCE_COMMIT},
+            "meta": {
+                "scenario": "A8",
+                "opencodeVersion": OPENCODE_VERSION,
+                "sourceCommit": SOURCE_COMMIT,
+                "captureStatus": "captured",
+            },
+            "source": {
+                "ui": "packages/app/src/pages/session.tsx todo(); session-todo-dock.tsx",
+                "server": "packages/opencode/src/session/todo.ts persist {content,status,priority} no id; GET /session/:id/todo; event todo.updated",
+            },
             "http": c.http,
             "sseEventTypes": event_types(sse.frames),
             "sse": sse.frames,
-            "reload": {"todos": todos, "messages": messages},
+            "reload": {"todosAfterFirst": todos1, "todosAfterUpdate": todos2, "messages": messages, "itemKeys": keys},
+            "bridgeMapping": {
+                "controlPlane": True,
+                "stableIdentity": "left to Gate B; do not invent hash/content/position ids",
+                "notTimeline": "todo events must not enter SessionProjection timeline",
+            },
+            "sanitization": SANITIZATION,
         },
         workspace,
     )
 
 
+def _mock_base() -> str:
+    return os.environ.get("OCW_MOCK_BASE", "http://127.0.0.1:4399")
+
+
+def fetch_mock_observations() -> list[dict[str, Any]]:
+    url = _mock_base().rstrip("/") + "/_debug/observations"
+    try:
+        with urlopen(url, timeout=2) as resp:
+            data = json.loads(resp.read().decode("utf-8") or "[]")
+            return data if isinstance(data, list) else []
+    except Exception as exc:  # noqa: BLE001
+        return [{"error": str(exc)}]
+
+
+def reset_mock_observations() -> None:
+    url = _mock_base().rstrip("/") + "/_debug/reset"
+    try:
+        req = Request(url, data=b"{}", method="POST", headers={"Content-Type": "application/json"})
+        with urlopen(req, timeout=2) as resp:
+            resp.read()
+    except Exception:
+        pass
+
+
 def capture_a9(c: Client, sse: SSE, out: Path, workspace: str) -> None:
-    _, created, _ = c.request("POST", "/session", body={})
-    sid = created["id"]
     readme = Path(workspace) / "README.md"
-    file_url = "file://" + str(readme)
-    extra = [
-        {
-            "type": "file",
-            "mime": "text/plain",
-            "url": file_url,
-            "filename": "README.md",
-            "source": {
+    png = Path(workspace) / "pixel.png"
+    png.write_bytes(
+        bytes.fromhex(
+            "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082"
+        )
+    )
+
+    def run(label: str, extra: list[dict] | None, text: str) -> dict[str, Any]:
+        reset_mock_observations()
+        st, created, _ = c.request("POST", "/session", body={})
+        sid = created["id"]
+        body = prompt_body(text, extra_parts=extra)
+        code, resp, _ = c.request("POST", f"/session/{sid}/prompt_async", body=body, timeout=20)
+        accepted = code in (200, 204)
+        if accepted:
+            wait_idle(sse, sid, 25)
+        _, messages, _ = c.request("GET", f"/session/{sid}/message") if accepted else (0, None, {})
+        user_parts = []
+        if isinstance(messages, list) and messages:
+            user = next((m for m in messages if (m.get("info") or {}).get("role") == "user"), None)
+            if user:
+                user_parts = user.get("parts") or []
+        _, status_map, _ = c.request("GET", "/session/status") if accepted else (0, None, {})
+        mock_obs = [
+            rec
+            for rec in fetch_mock_observations()
+            if isinstance(rec, dict) and rec.get("path") in ("/v1/chat/completions", "/chat/completions")
+        ]
+        return {
+            "label": label,
+            "sessionID": sid,
+            "promptHttpStatus": code,
+            "promptResponse": resp,
+            "accepted": accepted,
+            "promptBody": body,
+            "persistedUserParts": user_parts,
+            "messages": messages,
+            "status": status_map,
+            "mockObservations": mock_obs,
+        }
+
+    text = run("text", None, "A9_TEXT_ONLY")
+    file_plain = run(
+        "file",
+        [{"type": "file", "mime": "text/plain", "url": "file://" + str(readme), "filename": "README.md"}],
+        "A9_FILE_PART",
+    )
+    file_mention = run(
+        "fileMention",
+        [
+            {
                 "type": "file",
-                "text": {"value": "README.md", "start": 0, "end": 9},
-                "path": str(readme),
-            },
-        },
-        {"type": "agent", "name": "plan", "source": {"value": "@plan", "start": 0, "end": 5}},
-    ]
-    body = prompt_body("A9_PROMPT_PARTS mention README and @plan", extra_parts=extra)
-    code, resp, _ = c.request("POST", f"/session/{sid}/prompt_async", body=body, timeout=20)
-    time.sleep(2.5)
-    _, messages, _ = c.request("GET", f"/session/{sid}/message")
+                "mime": "text/plain",
+                "url": "file://" + str(readme),
+                "filename": "README.md",
+                "source": {
+                    "type": "file",
+                    "text": {"value": "README.md", "start": 0, "end": 9},
+                    "path": str(readme),
+                },
+            }
+        ],
+        "A9_FILE_MENTION README.md",
+    )
+    image = run(
+        "image",
+        [
+            {
+                "type": "file",
+                "mime": "image/png",
+                "url": "file://" + str(png),
+                "filename": "pixel.png",
+            }
+        ],
+        "A9_IMAGE_PART",
+    )
+    agent = run(
+        "agent",
+        [{"type": "agent", "name": "plan", "source": {"value": "@plan", "start": 0, "end": 5}}],
+        "A9_AGENT_PART @plan",
+    )
     write_sample(
         out / "a9-prompt-parts.sanitized.json",
         {
@@ -1015,13 +1278,26 @@ def capture_a9(c: Client, sse: SSE, out: Path, workspace: str) -> None:
                 "scenario": "A9",
                 "opencodeVersion": OPENCODE_VERSION,
                 "sourceCommit": SOURCE_COMMIT,
-                "promptHttpStatus": code,
-                "promptResponse": resp,
+                "captureStatus": "captured",
+            },
+            "source": {
+                "ui": "packages/app/src/utils/server-compat.ts:207-228 text/file/agent parts",
+                "server": "packages/opencode/src/session/prompt.ts PromptInput.parts",
             },
             "http": c.http,
             "sseEventTypes": event_types(sse.frames),
             "sse": sse.frames,
-            "reload": {"messages": messages},
+            "reload": {
+                "text": text,
+                "file": file_plain,
+                "fileMention": file_mention,
+                "image": image,
+                "agent": agent,
+            },
+            "bridgeMapping": {
+                "decision": "each part type is independently captured; unsupported parts fail closed later in C3",
+            },
+            "sanitization": SANITIZATION,
         },
         workspace,
     )
