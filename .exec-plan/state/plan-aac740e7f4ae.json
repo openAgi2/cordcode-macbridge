@@ -30,18 +30,18 @@
  },
  "reports": {
   "completion_report_path": "docs/2026-08-20-opencode-web-source-first-convergence-plan完成情况.md",
-  "completion_report_status": "missing",
+  "completion_report_status": "invalidated",
   "last_generated_at": null,
   "based_on_queue_hash": null,
   "completion": {
    "path": "docs/2026-08-20-opencode-web-source-first-convergence-plan完成情况.md",
-   "status": "current",
-   "based_on_queue_hash": "all-57-done",
+   "status": "invalidated",
+   "based_on_queue_hash": "audit-008-rejected",
    "generated": "2026-08-20T19:40:00Z",
    "attestation_note": "all evidence self-attested; sandbox/unit/regression replayable; owner UI matrix NOT executed (awaits supervisor audit)"
   }
  },
- "updated_at": "2026-08-20T19:41:00Z",
+ "updated_at": "2026-08-20T19:42:00Z",
  "todos": [
   {
    "id": "gate-a-inventory-impl",
@@ -1556,7 +1556,7 @@
    "id": "concentrated-activation-regression",
    "title": "Concentrated build, install, runtime, and final regression",
    "description": "Run bounded targeted regression, Mac Release build/install/runtime 8777 verification, required iOS targeted build/tests and connected-device install, secret/diff/status checks, then produce one audit-ready report without claiming owner UI completion.",
-   "status": "done",
+   "status": "blocked",
    "phase": "concentrated-activation",
    "kind": "regression",
    "depends_on": [
@@ -1566,18 +1566,85 @@
    "notes": "Owner UI matrix remains a separate final track after supervisor audit.",
    "verification": {
     "required": true,
-    "status": "present",
-    "method": "regression",
-    "attestation": "self-attested",
+    "status": "failed",
+    "method": "independent-supervisor-audit",
+    "attestation": "re-verified",
     "na_reason": null,
-    "summary": "Full-repo go build/vet/test sweep green (all packages, no failures). Mac unsigned Release rebuilt at final commit 293df9bc1a76 and overwrite-installed to /Applications/CordCodeLink.app; 8777 served by PID 9309 whose binary path is /Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime (drivers incl. opencode-web). The mandated killall+reinstall respawned the app-managed 4096 serve (PID 71333→9258, parent = reinstalled app; harness never touched 4096; 4398/4399 reclaimed). iOS Release built for physical iPhone 16 Pro (BFC431AC), installed and launched (org.openagi.cordcode); no UI automation. Both repos committed; CHANGELOGs updated.",
+    "summary": "Audit-008 independently reproduced green builds/tests but rejected product completion: active route plus passive tap can double-ingest one SSE event; question events lack Kernel turn identity; Todo/provider/mutation decoders are not fail-closed; iOS variant UI is not wired. Release/install evidence remains valid but cannot satisfy the product regression gate.",
     "artifacts": [
      "cmd:./scripts/build-unsigned-release.sh => commit 293df9bc1a76",
      "cmd:lsof -iTCP:8777 => PID 9309 /Applications/CordCodeLink.app",
      "cmd:xcrun devicectl device install/launch BFC431AC… => installed+launched",
      "mac-commit:293df9b",
-     "ios-commit:b3919de+e74883b"
+     "ios-commit:b3919de+e74883b",
+     "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-008-concentrated-c2-c7-implementation.md"
     ]
+   }
+  },
+  {
+   "id": "concentrated-audit008-review-fix-impl",
+   "title": "Audit-008 concentrated product-path repair",
+   "description": "After owner disposition, restore one timeline owner/ingest, source-proven question identity through Kernel, strict Todo/provider/config/mutation decoders, and an actual iOS model-variant selector; withdraw incomplete capabilities until full-path proof exists.",
+   "status": "blocked",
+   "phase": "concentrated-audit008-review-fix",
+   "kind": "impl",
+   "depends_on": [],
+   "source": "supervisor audit-008",
+   "notes": "repairable-heavy; blocked pending owner confirmation because supervise hard-reject criterion 4 was hit",
+   "verification": {
+    "required": true,
+    "status": "failed",
+    "method": "supervisor-audit",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "Implementation correction has not started; audit evidence is durable and the developer must not continue before owner disposition.",
+    "artifacts": [
+     "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-008-concentrated-c2-c7-implementation.md"
+    ]
+   }
+  },
+  {
+   "id": "concentrated-audit008-review-fix-tests",
+   "title": "Audit-008 full-path owning tests",
+   "description": "Prove one EventPublisher/Kernel commit with active+passive present; question asked/resolved reaches Projection; strict negative shapes fail; variant selector drives the wire.",
+   "status": "pending",
+   "phase": "concentrated-audit008-review-fix",
+   "kind": "tests",
+   "depends_on": [
+    "concentrated-audit008-review-fix-impl"
+   ],
+   "source": "supervisor audit-008",
+   "notes": "review-fix-for:concentrated-activation-regression",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "tests",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": []
+   }
+  },
+  {
+   "id": "concentrated-audit008-review-fix-regression",
+   "title": "Audit-008 concentrated regression and install",
+   "description": "Run bounded Mac/iOS regressions, reinstall both products, submit one report, and wait for supervisor re-audit before owner UI matrix.",
+   "status": "pending",
+   "phase": "concentrated-audit008-review-fix",
+   "kind": "regression",
+   "depends_on": [
+    "concentrated-audit008-review-fix-tests"
+   ],
+   "source": "supervisor audit-008",
+   "notes": "review-fix-for:concentrated-activation-regression",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "regression",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": []
    }
   }
  ]

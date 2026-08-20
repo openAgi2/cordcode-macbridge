@@ -208,7 +208,7 @@
       "kind": "implementation",
       "title": "C2-review-fix + C3-C7 concentrated implementation",
       "issued_at": "2026-08-20T17:11:51Z",
-      "status": "pending",
+      "status": "rejected",
       "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-008-concentrated-c2-c7-implementation.md",
       "scope": "Cross-repository MacBridge+iOS concentrated product batch",
       "constraints": [
@@ -219,21 +219,31 @@
         "targeted tests/builds only with watchdog and owned-process cleanup; no UI tests or simulator automation",
         "Mac Release install and required iOS physical-device install occur only after owning tests pass"
       ],
-      "linked_commits": [],
+      "linked_commits": [
+        "git:06dc62e",
+        "git:3c42e2d",
+        "git:50f7b81",
+        "git:85e0549",
+        "git:293df9b",
+        "git:0be804a",
+        "git:ff4e5d0",
+        "ios-git:b3919de",
+        "ios-git:e74883b"
+      ],
       "roadmap_diff": {
         "design_commit": "git:9bb72db",
         "summary": "Directive-007 evidence is verified. E1b/E4b/E5b close variant/provider/config mapping; canonical §6.11.2 converts the remaining roadmap into one concentrated C2 review-fix plus C3-C7 batch with a single final activation/audit gate.",
         "checker": "python3 agent/opencode-web/testdata/official-1.18.18/harness/check_canonical_execution_design.py --self-test"
       },
       "report": {
-        "received_at": null,
-        "markdown_path": null,
-        "audited": false,
-        "audit_verdict": null,
-        "audit_path": null
+        "received_at": "2026-08-20T18:41:29Z",
+        "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-008-concentrated-c2-c7-implementation.md",
+        "audited": true,
+        "audit_verdict": "rejected",
+        "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-008-concentrated-c2-c7-implementation.md"
       }
     }
   ],
   "current_directive_number": 8,
-  "last_updated": "2026-08-20T17:11:51Z"
+  "last_updated": "2026-08-20T18:41:29Z"
 }

@@ -1,5 +1,7 @@
 # OpenCode Web source-first convergence — 指令 8 号集中实施完成报告
 
+> **AUDIT INVALIDATED（2026-08-20，监工审计 8 号）**：本报告中的构建、测试和安装结果仍可作为历史证据，但“57/57 完成”结论已失效。独立审计发现 C4 active/passive 双 ingest、C6 question 缺 Kernel identity、strict decoder/mutation fail-closed 缺口和 iOS variant UI 未接入。权威结论见 `docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-008-concentrated-c2-c7-implementation.md`。
+
 - 日期：2026-08-20（UTC）
 - 执行：开发 agent（exec-plan 队列 `plan-aac740e7f4ae`，57/57 done）
 - 唯一设计权威：`docs/2026-08-20-opencode-web-source-first-convergence-plan.md`（canonical，commit `9728d92` 起）
