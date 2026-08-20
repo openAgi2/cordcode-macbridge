@@ -1,12 +1,12 @@
 {
   "meta": {
-    "title": "OpenCode Web Gate S S1/S2 SSV2 impact",
+    "title": "OpenCode Web Gate S S1/S2/S3 SSV2 impact",
     "date": "2026-08-20",
     "opencodeVersion": "1.18.18",
     "sourceCommit": "2cba7e227d",
     "gateACommit": "aad4b24",
     "gateBCommit": "883513b",
-    "s3Started": false,
+    "s3Started": true,
     "s4Started": false,
     "gateCStarted": false,
     "productCodeFrozen": true,
@@ -18,7 +18,7 @@
       "docs/protocol/bridge-v1.md",
       "GO_BRIDGE_ARCHITECTURE.md",
       "docs/2026-08-20-opencode-web-gate-b-capability-map.json",
-      "docs/2026-08-20-opencode-web-source-first-convergence-plan.md §5.1 S1/S2"
+      "docs/2026-08-20-opencode-web-source-first-convergence-plan.md §5.1 S1/S2/S3"
     ]
   },
   "s1": [
@@ -305,5 +305,240 @@
     "question SSE/HTTP not implemented in opencode-web (C6).",
     "permission ToolAuthorizer exists but permission_resolve is not advertised; C6 must complete once/always/reject without forging healthy reject completion.",
     "Seven Gate B source-only supported-now surfaces require 实现前补样本 before translators (rename, delete, reasoning, project, providers, default_model, external_turns)."
+  ],
+  "s3": [
+    {
+      "id": "C1",
+      "name": "version/transport",
+      "truthOwner": "OpenCode 1.18.18 serve is the only verified generation fact owner for health/session-shape/SSE transport. CordCode timeline remains the Mac ProjectionKernel; transport never writes messages[].",
+      "onlyWriter": "none on timeline. probeInstance/Client are control-plane. Kernel IngestLive/hydrate and iOS ProjectionStore.applyFrame stay the only timeline writers (C4/S1).",
+      "transactionDomain": "request/control (transport/auth/timeouts). Not hydrate, not live ingest, not reconnect Kernel recovery.",
+      "newDataPath": "GET /global/health (authed Basic Auth) plus GET /session bare-array shape → agent/opencode-web/probe.go probeInstance → Client.gen must be generation118. SSE uses client.go streamClient with no body timeout and events.go Subscribe bounded reconnect. Directory scope remains a request header. Unverified v2 is quarantined and does not enter Kernel.",
+      "activeWriteInventory": "probe.go probeInstance/probeHealth: no timeline write, allowed control. client.go doRequest/streamClient: no timeline write, allowed transport. events.go Subscribe reconnect loop: transport only, must not manufacture turns. session.go generationV2 POST /prompt and /interrupt: sealed/quarantine, not a product path. Recursive JSON search for model/event nodes: forbidden, must not exist.",
+      "failurePresentation": "Unsupported/unverified generation (generationV2 or unknown) fails closed with diagnosable unsupported-generation / quarantine; zero Kernel ingest. 401 is unauthorized. Unreachable is healthFailed. No-auth 200 is server_unauthenticated. Missing health is not inferred 1.18 success. No legacy parser fallback.",
+      "antiDoubleWriteProof": "Existing agent/opencode-web/probe_test.go distinguishes 1.18 vs v2 vs unauthenticated. Planned: TestGenerationV2QuarantineZeroPromptAndZeroKernelIngest; TestSSEReconnectIsTransportOnly. Must not treat HTTP health 200 as a confirmed turn.",
+      "preSampleGate": "none — C1 has no Gate B supported-now source-only surface. 1.18.18 health/SSE transport is evidenced by A1/A5; this is not an implementation grant.",
+      "gateBSurfaces": [
+        "observation.global_events",
+        "turns.prompt"
+      ],
+      "gateASamples": [
+        "A1",
+        "A5"
+      ],
+      "currentPaths": "agent/opencode-web/probe.go probeHealth/probeInstance; agent/opencode-web/client.go generation118/generationV2, Basic Auth, streamClient no Timeout; agent/opencode-web/events.go Subscribe bounded reconnect; agent/opencode-web/session.go still contains generationV2 POST /prompt as a live branch (gap to quarantine).",
+      "plannedAdd": "Product-path explicit verified-generation gate: only 1.18.18/generation118 is selectable; unsupported generation status in diagnostics.",
+      "plannedModify": "probeInstance: generationV2 must fail closed/quarantine on the product adapter, not silently switch prompt routes.",
+      "plannedSeal": "session.go generationV2 prompt/interrupt as quarantined unused path; any unknown-shape recursive search.",
+      "plannedDelete": "Do not restore legacy adapter parsers. Delete/disable unverified v2 as a normal selection.",
+      "protocolChange": "no protocol change. Existing hello/diagnostics and backend status already carry diagnosable errors; capability advertisement is frozen. Cite docs/protocol/bridge-v1.md hello_ack backends[] and GO_BRIDGE_ARCHITECTURE.md OpenCode server probe.",
+      "plannedTestsMac": "Existing: agent/opencode-web/probe_test.go. Planned (not written): TestVerified118Only; TestV2FailClosedQuarantine; TestBasicAuthDirectoryTimeoutAreControlNotTimeline.",
+      "plannedTestsIOS": "None required for transport. iOS must keep displaying honest backend diagnostics; no iOS writer change. Existing ArchitectureGuardrailTests.swift must remain sealed.",
+      "outOfScope": "C4 Kernel live ingest and reconnect recovery; C5 catalog; v2 evidence pack and v2 parity; capability advertisement changes."
+    },
+    {
+      "id": "C2",
+      "name": "list/get",
+      "truthOwner": "OpenCode serve is the catalog fact owner for session list/get/create metadata. Mac Kernel is not a catalog store. iOS ProjectionStore does not write the session list from raw HTTP.",
+      "onlyWriter": "Catalog metadata only via ListSessions/FetchSessionInfo/signalCatalogRefresh. Timeline messages[] remain Kernel + ProjectionStore. list/get must not manufacture turns.",
+      "transactionDomain": "request/control (catalog). Timeline effects none.",
+      "newDataPath": "Official directory-scoped GET /session with roots/limit → sessions.go ListSessions / ListSessionsInDirectory → bridge session catalog. OD-1: default home/global list hides time.archived; GET-by-id FetchSessionInfo keeps archived. OD-2: iOS global list aggregates one official scoped GET per project worktree; directory requests stay scoped. GET /session/:id refreshes metadata only.",
+      "activeWriteInventory": "sessions.go ListSessions/ListSessionsInDirectory: catalog only, allowed. session_mutation.go FetchSessionInfo: catalog/metadata, allowed. session.go ensureServerSession POST /session {}: session id fact, allowed control; Kernel starts empty. events.go session.created/deleted → signalCatalogRefresh: catalog invalidation, allowed. HTTP list/get writing messages[]: forbidden sealed. filesystem existence as session truth: forbidden.",
+      "failurePresentation": "List/get HTTP errors surface as catalog failures. Missing worktree is a documented product rule, not a silent filesystem substitute. Archived hidden in default list is not a deleted session. Empty catalog is empty, not inferred sessions. No history fallback into messages[].",
+      "antiDoubleWriteProof": "Existing agent/opencode-web/sessions_test.go and session_mutation_test.go. Planned: TestListRootsLimitArchiveHideByIdKeep; TestGlobalAggregatePerWorktree; TestListGetDoesNotWriteMessages. iOS catalog tests must not call ProjectionStore for list rows.",
+      "preSampleGate": "workspace.project is supported now + source-only: 实现前补样本 before any project-registry translator/parity claim. OD-2 aggregation may use current ListSessions fan-out as the product overlay, but project worktree identity must not be declared source-parity until a same-version captured sample exists.",
+      "gateBSurfaces": [
+        "sessions.list",
+        "sessions.get",
+        "sessions.create",
+        "workspace.project"
+      ],
+      "gateASamples": [
+        "A1",
+        "A10"
+      ],
+      "currentPaths": "agent/opencode-web/sessions.go ListSessions / ListSessionsInDirectory (directory-scoped GET /session without roots/limit); session_mutation.go FetchSessionInfo; session.go ensureServerSession POST /session {}; projects.go ListProjectSuggestions / projectDirectories.",
+      "plannedAdd": "Official roots=true and limit query mapping; explicit missing-worktree product rule; default-list archive hide (OD-1).",
+      "plannedModify": "ListSessions to official roots/limit per directory; keep by-id get for archived/mutated sessions.",
+      "plannedSeal": "filesystem existence as silent session truth; list HTTP as messages[] or turn factory.",
+      "plannedDelete": "Do not restore a global unscoped list that ignores directory. Do not flatten children into the home list (children remain C7/OD-3 future).",
+      "protocolChange": "no protocol change. Existing get_session / session list RPCs and catalog events already exist in docs/protocol/bridge-v1.md. Do not advertise session_pagination unless limit/cursor is actually implemented (WireDescriptor frozen this round).",
+      "plannedTestsMac": "Existing: agent/opencode-web/sessions_test.go, session_mutation_test.go. Planned: TestOfficialRootsLimit; TestArchivedHiddenInDefaultListKeptById; TestMissingWorktreeRule; TestCreateBodyEmptyMatchesV1.",
+      "plannedTestsIOS": "Planned: global list aggregation per worktree vs directory-scoped request (OD-2). Must not write ChatViewModel.messages[] from list/get. Existing session list UI remains catalog-only.",
+      "outOfScope": "sessions.children/fork product UI (OD-3 future); C7 rename/archive/delete mutations; workspace.file_* ; timeline hydrate of messages (C4)."
+    },
+    {
+      "id": "C3",
+      "name": "submit",
+      "truthOwner": "OpenCode serve persists the user message and emits SSE; that persist is upstream fact. Mac ProjectionKernel is the only CordCode timeline. iOS ProjectionStore is the only SSV2 messages[] writer. HTTP 204 is admission only.",
+      "onlyWriter": "Kernel IngestLive/hydrate for CordCode timeline; ProjectionStore.applyFrame for iOS messages[]. Authoritative stable messageID is correlation-only for request ↔ persisted user message ↔ projection. iOS local composer placeholder is presentation-only. no iOS writer on the active timeline.",
+      "transactionDomain": "request/control admits the turn; live observation (C4) is the Kernel ingest. Submit must not write SessionProjection itself.",
+      "newDataPath": "iOS send RPC presentation-only placeholder → go-bridge/handlers.go handleSendMessage → agent/opencode-web/session.go Send POST /session/:id/prompt_async {messageID, agent, model{providerID,modelID}, variant?, parts}. 204/200 is admission. Persisted user message and assistant stream re-enter via C4 unique Kernel ingest. Unsupported parts fail before network I/O.",
+      "activeWriteInventory": "session.go Send HTTP 204 return: no timeline write, allowed admission. handleSendMessage: request/control, must not confirm turns. iOS composer placeholder: presentation-only, sealed from messages[]. Optimistic/history/raw second writer: forbidden. Send currently omits messageID/agent/variant/file/agent parts: gap, not a writer. generationV2 /prompt: C1 quarantine, not C3 product.",
+      "failurePresentation": "HTTP 204 must not present as confirmed turn or assistant completion. Unsupported part fails before POST with capability-consistent error (zero prompt). Unavailable model: zero prompt POST. Network/HTTP error stays failed/running until C4 terminal evidence. No inferred success, no timeout completion.",
+      "antiDoubleWriteProof": "Existing session_test.go / official_shapes_test.go assert prompt_async keys but not messageID. Planned: TestPromptAsyncMessageIDAgentModelPartsFromA1A2A9; TestHTTP204IsAdmissionNotTurn; TestUnsupportedPartFailsBeforeNetwork; TestIOSComposerPlaceholderDoesNotWriteMessages. iOS ArchitectureGuardrailTests.swift must keep sessionSyncV2Active HARD-GATE.",
+      "preSampleGate": "Selected variant is 实现前补样本: A1 omit-when-unset is not a selected-variant sample and must not be used to derive variant cycling. configuration.variants selected-variant UI stays unimplemented until a same-version captured sample exists. Supported text/file/image persist/file mention/agent mention derive from A1/A2/A9; vision remains unsupported (A9 text-only mock).",
+      "gateBSurfaces": [
+        "turns.prompt_async",
+        "turns.abort",
+        "content.text",
+        "content.file.persist",
+        "content.image.persist",
+        "content.file_mention",
+        "content.agent_mention",
+        "configuration.agents",
+        "configuration.variants",
+        "sessions.create"
+      ],
+      "gateASamples": [
+        "A1",
+        "A2",
+        "A4",
+        "A9"
+      ],
+      "currentPaths": "agent/opencode-web/session.go Send body {parts:[text], model} only; ensureServerSession POST /session {}; CancelTurn POST /abort; go-bridge/handlers.go handleSendMessage / handleAbortGeneration. iOS composer still presentation; sessionSyncV2Active seals loadMessages.",
+      "plannedAdd": "prompt_async fields messageID, agent, parts for supported A1/A2/A9 types; adapter-generated authoritative messageID for correlation-only; fail-before-network for unsupported parts.",
+      "plannedModify": "Send to official PromptInput; abort remains control then C4 terminal.",
+      "plannedSeal": "HTTP 204 as turn_completed; iOS optimistic messages[] writer; history/raw second writer; omit-when-unset used as selected-variant proof.",
+      "plannedDelete": "Do not dual-call sync POST /session/:id/message (turns.prompt is not applicable for v1).",
+      "protocolChange": "no protocol change if authoritative messageID is generated in the Mac adapter and correlated to existing SessionProjectionTurn.messageId (go-bridge/projection_types.go; docs/protocol/bridge-v1.md Session Projection Stream). If C3 later requires a new send-RPC client field, that is canonical-first only: Mac docs/protocol/schema → Go types → iOS mirror/Swift/web types → dual-repo tests. This round does not change protocol.",
+      "plannedTestsMac": "Existing: session_test.go, official_shapes_test.go, sandbox_e2e_test.go. Planned: A1/A2/A9 replay of prompt_async body; TestZeroPromptOnUnsupportedPart; TestAbortIsControlNotHealthyStop (terminal belongs to C4 A4).",
+      "plannedTestsIOS": "Existing: ArchitectureGuardrailTests.swift sessionSyncV2Active. Planned: composer placeholder presentation-only; send 204 does not append messages[]; ProjectionStore remains no iOS writer for submit.",
+      "outOfScope": "turns.prompt sync route; content.file.vision / content.image.vision (unsupported); selected variant UI until sample; C4 event mapping of parts; C5 fallback chain details; C6 permission/question."
+    },
+    {
+      "id": "C4",
+      "name": "event/reconnect",
+      "truthOwner": "OpenCode 1.18.18 direct SSE and GET /session/:id/message are upstream facts. One Mac ProjectionKernel per (backendId, sessionId) is CordCode timeline truth. iOS ProjectionStore is the only SSV2 client writer.",
+      "onlyWriter": "Hydrate: ProjectionKernel.BeginHydrateTransaction/ApplyHydrateEvent/CommitHydrateTransaction. Live: unique Kernel ingest EventPublisher.publish → ProjectionKernel.IngestLive. iOS: ProjectionStore.applyFrame. kernel==nil → projection.Apply is a sealed second reducer, not a writer.",
+      "transactionDomain": "hydrate, live, reconnect, and projection delivery. Nested sync is an explicit skip domain, not an ingest domain.",
+      "newDataPath": "unique pre-Kernel normalization point: agent/opencode-web/events.go sseSubscriber.handleRawEvent unwraps payload then sseSubscriber.handleServerEvent is the exclusive type switch. nested sync skip: payload.type==sync is explicitly skipped at that unique point before any core.Event mapping (official server-sdk.tsx:284). Direct SSE maps to core.Event → go-bridge/events.go mapAgentEvent → unique Kernel ingest EventPublisher.publish → ProjectionKernel.IngestLive. reconnect same Kernel: validate/invalidate/rehydrate the same (backendId, sessionId) Kernel; history/status supply hydrate facts only. Direct+sync dual ingest is forbidden.",
+      "activeWriteInventory": "events.go handleRawEvent/handleServerEvent: mapper only. EventPublisher.publish → kernel.IngestLive: allowed unique live writer. projection_kernel.go hydrate transaction: allowed hydrate writer. event_publisher.go kernel==nil → p.projection.Apply: sealed second reducer, must be sealed unused. handlers_projection.go streamBackendRichHistoryProjectionEvents opencode-web: hydrate facts only. Nested sync ingest: forbidden. Consumer-side dedup/referee: forbidden. iOS history merge: sealed.",
+      "failurePresentation": "A3: APIError 400 isRetryable=false, retry statuses then idle; not a healthy completion. A4: abort → MessageAbortedError, idle, not finish=stop success. A5: busy-at-disconnect; reconnect first direct server.connected then live deltas; terminal idle on second SSE — never synthesize finish=stop from empty reload status. Missing terminal stays running/failed. No inferred success.",
+      "antiDoubleWriteProof": "Existing: events_test.go, handlers_projection_ocweb_test.go, session_sync_v2_test.go. Planned: TestNestedSyncSkipAtHandleServerEventOnly; TestDirectAndSyncDoNotBothAdvanceSyncRev; TestKernelNilProjectionApplySealed; TestReconnectSameKernelA5Sequence; TestHistoryStatusCannotBypassKernel. iOS: ProjectionStore scheduleRecoveryPull/applyFrame; ArchitectureGuardrailTests.swift no history merge.",
+      "preSampleGate": "content.reasoning is supported now + source-only: 实现前补样本 before a reasoning translator/parity claim (A1 may contain reasoning frames as capture, but Gate B classified the surface source-only — do not treat inventory presence as parity). observation.external_turns is supported now + source-only: 实现前补样本 before advertising two-client external-turn translator completeness; current WireDescriptor external_turn_streaming is frozen this round and is not proof.",
+      "gateBSurfaces": [
+        "observation.direct_sse",
+        "observation.nested_sync",
+        "observation.reconnect",
+        "observation.status",
+        "observation.global_events",
+        "observation.external_turns",
+        "sessions.messages",
+        "content.reasoning",
+        "content.tool",
+        "content.text"
+      ],
+      "gateASamples": [
+        "A1",
+        "A2",
+        "A3",
+        "A4",
+        "A5"
+      ],
+      "currentPaths": "agent/opencode-web/events.go handleRawEvent/handleServerEvent (sync is implicit default-drop, not a named exclusive skip); go-bridge/events.go mapAgentEvent; go-bridge/event_publisher.go publish/IngestLive and kernel==nil projection.Apply fallback; go-bridge/projection_kernel.go hydrate/IngestLive/RestoreCheckpoint; handlers_projection.go streamBackendRichHistoryProjectionEvents case opencode-web; iOS ProjectionStore.swift applyFrame/scheduleRecoveryPull.",
+      "plannedAdd": "Named exclusive nested sync skip at handleServerEvent; A1–A5 deterministic replay into Kernel; reconnect same-Kernel recovery tests.",
+      "plannedModify": "Replace implicit default-drop with explicit sync skip at the unique pre-Kernel normalization point; map captured error/abort/retry/reconnect sequences instead of inferred lifecycle comments.",
+      "plannedSeal": "kernel==nil → projection.Apply second reducer; consumer-side dedup/referee; direct+sync dual ingest; history/status bypass of Kernel; iOS history merge/similarity/timeout completion.",
+      "plannedDelete": "Do not add a second reducer. Do not restore raw OpenCode history into iOS messages[].",
+      "protocolChange": "no protocol change. Existing projection_snapshot/projection_patch/sync_invalidate and SessionProjection shapes in docs/protocol/bridge-v1.md Session Projection Stream and go-bridge/projection_types.go. Capability advertisement frozen.",
+      "plannedTestsMac": "Existing: events_test.go, projection_kernel tests, session_sync_v2_test.go, handlers_projection_ocweb_test.go. Planned: A1–A5 replay including duplicates, A3 retry/error, A4 abort, A5 reconnect; TestSinglePreKernelSyncSkip; TestSealKernelNilFallback.",
+      "plannedTestsIOS": "Existing: ArchitectureGuardrailTests.swift; ProjectionStore applyFrame/recovery. Planned: reconnect does not call loadMessages; gap/invalidate pulls get_session_projection only.",
+      "outOfScope": "C3 prompt field mapping; C6 permission/question/todo ownership implementation; C5 catalog; selected variant; protocol field additions."
+    },
+    {
+      "id": "C5",
+      "name": "model/agent",
+      "truthOwner": "OpenCode serve provider/agent catalogs are upstream facts. Selected model/agent on prompt_async is a request field, not timeline content. Mac Kernel does not own the catalog. iOS ProjectionStore does not write catalog rows into messages[].",
+      "onlyWriter": "Control-plane catalog: models.go AvailableModels, agents.go ListAgents. Timeline writers remain Kernel + ProjectionStore. Unavailable choice must produce zero prompt POST.",
+      "transactionDomain": "request/control (catalog). Prompt field carry is C3; C5 owns fallback levels and connected-only catalog.",
+      "newDataPath": "GET /provider connected-only and GET /agent → AvailableModels/ListAgents. Fallback levels kept distinct: (1) current choice (2) agent model (3) configured default (4) recent (5) connected fallback. Only connected providers. No recursive catalog search. Selected model/agent ride C3 prompt_async; catalog refresh does not write SessionProjection.",
+      "activeWriteInventory": "models.go AvailableModels/fetchModelCatalog connected-only: catalog, allowed. session.go resolveSendModel: request-time choice, allowed control, must not invent ids. agents.go ListAgents: catalog, allowed. Recursive catalog JSON search: forbidden. Catalog rows into messages[]: forbidden. Unconnected provider POST: forbidden (zero prompt).",
+      "failurePresentation": "Unavailable/not-connected choice → zero prompt POST and a diagnosable model error. Missing catalog fails closed. Do not invent a model id. Distinct fixtures per fallback level; collapsing levels is a failure, not success.",
+      "antiDoubleWriteProof": "Existing models.go tests and session.go catalog check before POST. Planned: TestFallbackLevelCurrent; TestFallbackLevelAgentModel; TestFallbackLevelConfiguredDefaultRequiresSample; TestFallbackLevelRecent; TestFallbackLevelConnected; TestUnavailableChoiceZeroPrompt; TestNoRecursiveCatalogSearch.",
+      "preSampleGate": "configuration.providers is supported now + source-only: 实现前补样本 before provider-catalog translator parity. configuration.default_model is supported now + source-only: 实现前补样本 before implementing/honoring configured default as a distinct fallback level. Do not derive configured-default behavior from omit-when-unset or from first connected model.",
+      "gateBSurfaces": [
+        "configuration.models",
+        "configuration.providers",
+        "configuration.default_model",
+        "configuration.agents"
+      ],
+      "gateASamples": [
+        "A1",
+        "A2"
+      ],
+      "currentPaths": "agent/opencode-web/models.go AvailableModels / fetchModelCatalog connected-only; session.go resolveSendModel session-adopted then first connected default (shorter than official 5-level chain); agents.go ListAgents; Send currently omits agent (C3 field).",
+      "plannedAdd": "Distinct fixture per official fallback level; connected-only enforcement with zero prompt on miss; agent selection catalog already listed, field send is C3.",
+      "plannedModify": "resolveSendModel to named levels or explicit exclusion of a level with a recorded product rule.",
+      "plannedSeal": "recursive catalog parsing; inventing model ids; treating first connected model as configured default without sample.",
+      "plannedDelete": "Legacy recursive catalog search if present; v2 postModel as product path (C1 quarantine).",
+      "protocolChange": "no protocol change. Existing list_models / model_switch shapes in docs/protocol/bridge-v1.md. agent_selection advertisement is WireDescriptor and remains frozen this round; C5 must not advertise until the field is actually forwarded (C3) and catalog path is proven.",
+      "plannedTestsMac": "Existing: models tests, session.go modelInCatalog. Planned: five-level fallback fixtures; zero-prompt unavailable; connected-only.",
+      "plannedTestsIOS": "Planned: model picker shows connected catalog only; selecting unavailable model does not send. No messages[] writes from catalog RPCs.",
+      "outOfScope": "configuration.variants selected-variant (C3 pre-sample); provider_auth (iOS must not collect keys); C3 parts mapping; timeline."
+    },
+    {
+      "id": "C6",
+      "name": "interaction",
+      "truthOwner": "OpenCode serve owns permission/question/todo facts (asked/replied/rejected; todo.updated items). Canonical permission state and canonical question state are reduced by Mac ProjectionKernel. Todos remain control-plane facts, not SessionProjection timeline. iOS ProjectionStore is the only SSV2 writer for projected permission/question cards.",
+      "onlyWriter": "Permission: Kernel reduces canonical permission_request/permission_resolved; raw control presentation must not write messages[]. Question: Kernel reduces canonical user_input_requested/user_input_resolved only. Todo: no timeline writer; control-plane publisher only if advertised. ProjectionStore applies projected cards.",
+      "transactionDomain": "live (canonical Kernel ingest for permission/question) plus explicit control-plane (permission raw presentation; todo). Not hydrate-as-messages for these surfaces.",
+      "newDataPath": "permission.asked SSE + GET /permission → handlePermissionAsked → EventPermissionRequest → unique Kernel ingest. Reply POST /session/:id/permissions/:id {response:once|always|reject} is control; reject is not a healthy completion. question.asked/replied/rejected → canonical user_input_requested/user_input_resolved into Kernel; do not invent official question_resolved; legacy question_asked/question_resolved are one-way presentation and must not enter Kernel or SSV2 raw. todo.updated + GET /todo {content,status,priority} no id → control-plane only; must not enter SessionProjection; do not create hash/content/position IDs.",
+      "activeWriteInventory": "permissions.go RespondSessionPermission: control reply, allowed. events.go handlePermissionAsked: mapper, allowed then Kernel. event_publisher.go isDerivedLegacyQuestionEvent skip IngestLive: sealed legacy. session.go RespondQuestion/RejectQuestion currently ErrNotSupported: absence, not a fake resolve. events.go todo.updated ignored: absence, not implemented. Todo into SessionProjection: forbidden. Raw permission into messages[]: forbidden. Capability advertisement before full path: forbidden (frozen).",
+      "failurePresentation": "A6 reject: finish=tool-calls, idle, pending cleared — not healthy stop. A7 reject: idle, pending cleared, not healthy stop. Reply HTTP errors stay pending/failed. Missing question/todo path is unsupported/absent, not inferred success. Do not advertise permission_resolve/question_reply/todos until the full real path exists.",
+      "antiDoubleWriteProof": "Existing: projection_reducer_permission_test.go; event_publisher derived-legacy question skip. Planned: A6 once/always/reject replay; A7 answers string[][] and reject; A8 todo control-plane replacement with no id; TestPermissionRawDoesNotWriteMessages; TestLegacyQuestionNotIngestedAndNotSentToSSV2; TestTodoNotInSessionProjection.",
+      "preSampleGate": "none of the seven Gate B source-only supported-now items belong to C6. A6/A7/A8 already captured same-version samples; C6 still must not advertise capabilities until the full request/event/reload/error path exists. Source citations are not an advertisement grant.",
+      "gateBSurfaces": [
+        "interaction.permission.once",
+        "interaction.permission.always",
+        "interaction.permission.reject",
+        "interaction.question.reply",
+        "interaction.question.reject",
+        "interaction.todo"
+      ],
+      "gateASamples": [
+        "A6",
+        "A7",
+        "A8"
+      ],
+      "currentPaths": "agent/opencode-web/events.go handlePermissionAsked; permissions.go RespondSessionPermission folds allow→once, always→always, deny→reject; session.go RespondQuestion/RejectQuestion return ErrNotSupported; events.go todo.updated comment-ignored; go-bridge/events.go EventPermissionRequest and EventUserInputRequested; event_publisher.go isDerivedLegacyQuestionEvent; WireDescriptor StaticCapabilities currently only external_turn_streaming (frozen).",
+      "plannedAdd": "Question SSE/HTTP mapper to user_input_requested/resolved; todo control-plane mapping without ids; A6–A8 replay.",
+      "plannedModify": "Permission once/always/reject to match A6 including always askedAgain=false on same isolated serve only.",
+      "plannedSeal": "raw permission writing messages[]; legacy question presentation re-entering Kernel or SSV2; todo as timeline parts; inventing question_resolved; hash/content/position todo ids; advertising capabilities before the full path.",
+      "plannedDelete": "Do not restore permission-as-question folding as a product path.",
+      "protocolChange": "no protocol change. Existing permission_request/permission_resolved and user_input_requested/user_input_resolved plus todos_updated control-plane events already live in docs/protocol/bridge-v1.md and go-bridge/events.go. Capability advertisement (permission_resolve, question_reply, structured_user_input_v1, todos) is WireDescriptor and remains frozen this round; C6 may only advertise after the full real path exists (Gate C, later).",
+      "plannedTestsMac": "Existing: projection_reducer_permission_test.go, events_test.go permission frames. Planned: A6/A7/A8 sandbox replay; TestRejectIsNotHealthyCompletion; TestTodoControlPlaneNoTimeline.",
+      "plannedTestsIOS": "Existing: StructuredUserInputIOSRegressionTests.swift applyFrame user_input. Planned: SSV2 client never receives raw question_*; permission card from projection not messages[] raw; todo dock control-plane only.",
+      "outOfScope": "C4 text/tool/reasoning mapping; C7 mutations; advertising capabilities this round; inventing todo ids; moving todos onto SessionProjection without a separate approved projection-shape decision."
+    },
+    {
+      "id": "C7",
+      "name": "mutation/secondary",
+      "truthOwner": "OpenCode serve owns session title/archived/deleted facts. Catalog metadata may refresh on HTTP success. Timeline changes still re-enter the same Kernel. iOS ProjectionStore does not merge mutation HTTP into messages[].",
+      "onlyWriter": "Catalog/metadata for rename/archive/delete. Kernel for any resulting timeline. ProjectionStore for iOS timeline. Mutation HTTP success is not a turn factory.",
+      "transactionDomain": "request/control (mutation/catalog). Timeline effects re-enter observation/Kernel (C4).",
+      "newDataPath": "First round only: rename PATCH title, archive PATCH time.archived, delete DELETE /session/:id. Archive uses A10. Rename and delete are source-only and must not implement translators until 实现前补样本. HTTP success → FetchSessionInfo / list invalidation only. OD-3 future/unsupported extras stay out of this slice.",
+      "activeWriteInventory": "session_mutation.go ArchiveSession: catalog metadata, allowed. DeleteSession: catalog invalidation, exists but delete remains 实现前补样本 before translator/parity. SessionRenamer: currently absent, not a silent success. HTTP mutation writing messages[]: forbidden. Fork/share/command/shell/summarize/revert/diff/VCS/file as this slice: forbidden (OD-3).",
+      "failurePresentation": "Mutation HTTP errors are mutation failures. Missing SessionRenamer is absence, not a no-op success. Delete 404 after success is expected. Archived hidden in default list is OD-1/C2, not deletion. Do not keep a local ghost session after delete. No inferred timeline rewrite.",
+      "antiDoubleWriteProof": "Existing session_mutation_test.go archive shapes. Planned after samples: TestArchiveA10MetadataOnly; TestRenameAfterSampleCatalogOnly; TestDeleteAfterSampleCatalogOnly; TestMutationHTTPDoesNotWriteMessages; TestOD3ExtrasNotImplemented.",
+      "preSampleGate": "sessions.rename is supported now + source-only: 实现前补样本 before SessionRenamer/translator. sessions.delete is supported now + source-only: 实现前补样本 before delete parity/translator even though DeleteSession exists. Archive is A10, not source-only.",
+      "gateBSurfaces": [
+        "sessions.rename",
+        "sessions.archive",
+        "sessions.delete"
+      ],
+      "gateASamples": [
+        "A10"
+      ],
+      "currentPaths": "agent/opencode-web/session_mutation.go ArchiveSession / DeleteSession / FetchSessionInfo. No SessionRenamer on opencode-web. events.go session.deleted → signalCatalogRefresh.",
+      "plannedAdd": "SessionRenamer only after rename sample; targeted delete replay after delete sample; archive hide remains C2 OD-1.",
+      "plannedModify": "Archive/delete catalog refresh to by-id + list invalidation; no timeline manufacture.",
+      "plannedSeal": "generic API coverage milestone; mutation HTTP as confirmed turn; implementing OD-3 extras in this slice.",
+      "plannedDelete": "Do not pull fork/share/unshare/children/command/shell/summarize/revert/unrevert/diff/VCS/file into C7 first round.",
+      "protocolChange": "no protocol change. Existing session mutation RPCs (rename/archive/delete) already exist in docs/protocol/bridge-v1.md when the agent implements SessionRenamer/Archiver/Deleter. WireDescriptor frozen this round.",
+      "plannedTestsMac": "Existing: session_mutation_test.go. Planned: A10 archive replay; rename/delete tests only after 实现前补样本 fixtures.",
+      "plannedTestsIOS": "Planned: list/detail match server after archive; by-id still opens archived; rename/delete UI only after samples. No messages[] rewrite from mutation HTTP.",
+      "outOfScope": "OD-3 keep-mapped-future-or-unsupported: sessions.fork, sessions.share, sessions.unshare, sessions.children, turns.command, turns.shell, turns.summarize, turns.revert, turns.unrevert, workspace.session_diff, workspace.vcs, workspace.file_list, workspace.file_read, workspace.file_search. Each remains future/unsupported and needs its own source → sample → mapping → test chain later. No generic API coverage."
+    }
   ]
 }

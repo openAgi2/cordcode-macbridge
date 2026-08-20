@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-20T14:55:00Z",
+  "updated_at": "2026-08-20T16:40:00Z",
   "todos": [
     {
       "id": "gate-a-inventory-impl",
@@ -438,30 +438,34 @@
       "id": "gate-s-s3-impact-impl",
       "title": "Gate S S3 impact records for C1–C7",
       "description": "For each C1–C7 slice, write an S3 impact record with all seven fields: truth owner, only writer, transaction domain, new data path, active write inventory, failure presentation, anti-double-write proof. C3 must state stable messageID is authoritative correlation only, not an iOS optimistic timeline writer. C4 must name the single pre-Kernel normalization point and the single Kernel ingest path. C6 must classify permission raw control, canonical question, legacy question, and todo ownership. Missing any field blocks that slice from coding.",
-      "status": "pending",
+      "status": "done",
       "phase": "gate-s",
       "kind": "impl",
       "depends_on": [
         "gate-s-s1-s2-regression"
       ],
       "source": "Gate S",
-      "notes": "",
+      "notes": "Docs/checker only. Product code, protocol, WireDescriptor unchanged. S4/C not started.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "C1–C7 S3 impact records added to ssv2-impact.md/json with eight required fields plus Gate B surfaces, samples, current/planned paths, tests, out-of-scope, protocol change, and 实现前补样本. S4/C not started.",
+        "artifacts": [
+          "docs/2026-08-20-opencode-web-ssv2-impact.md",
+          "docs/2026-08-20-opencode-web-ssv2-impact.json",
+          "agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s3.py"
+        ],
+        "checked_at": "2026-08-20T16:40:00Z"
       }
     },
     {
       "id": "gate-s-s3-impact-tests",
       "title": "Gate S S3 every C slice has all seven fields",
       "description": "Automated check that C1–C7 each have non-empty S3 fields and that C3/C4/C6 special invariants are present.",
-      "status": "pending",
+      "status": "done",
       "phase": "gate-s",
       "kind": "tests",
       "depends_on": [
@@ -471,36 +475,43 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s3.py → gate-s s3 ok: slices=7 source-only-gates=7 s4Started=False gateCStarted=False productCodeFrozen=True; --self-test PASS (drop-c-slice, drop-eight-field, c3-optimistic-writer, c4-dual-ingest-allowed, c6-todo-in-timeline, drop-source-only-gate).",
+        "artifacts": [
+          "agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s3.py",
+          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s3.py => gate-s s3 ok: slices=7 source-only-gates=7",
+          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s3.py --self-test => self-test PASS"
+        ],
+        "checked_at": "2026-08-20T16:40:00Z"
       }
     },
     {
       "id": "gate-s-s3-impact-regression",
       "title": "Gate S S3 records are documentation",
       "description": "Impact records are evidence; product code stays frozen until Gate C is authorized.",
-      "status": "pending",
+      "status": "done",
       "phase": "gate-s",
       "kind": "regression",
       "depends_on": [
         "gate-s-s3-impact-tests"
       ],
       "source": "Gate S",
-      "notes": "",
+      "notes": "Docs/checker only. Product code, protocol, WireDescriptor unchanged. S4/C not started.",
       "verification": {
         "required": false,
-        "status": "missing",
+        "status": "present",
         "method": "manual",
         "attestation": "self-attested",
         "na_reason": "per-slice impact records are documentation; completeness covered by gate-s-s3-impact-tests",
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "git diff of agent/opencode-web/*.go go-bridge MacBridge core docs/protocol is empty. S4/Gate C not started.",
+        "artifacts": [
+          "docs/2026-08-20-opencode-web-ssv2-impact.md",
+          "agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s3.py"
+        ],
+        "checked_at": "2026-08-20T16:40:00Z"
       }
     },
     {

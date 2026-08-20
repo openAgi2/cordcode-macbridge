@@ -70,8 +70,6 @@ def load() -> dict:
 def problems(doc: dict, md_text: str | None) -> list[str]:
     bad: list[str] = []
     meta = doc.get("meta") if isinstance(doc.get("meta"), dict) else {}
-    if meta.get("s3Started") is not False:
-        bad.append("s3-must-not-be-started")
     if meta.get("s4Started") is not False:
         bad.append("s4-must-not-be-started")
     if meta.get("gateCStarted") is not False:
