@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "project_root": "/Users/jacklee/Projects/cordcode-macbridge-opencode-web",
+  "design_doc": "docs/2026-08-20-opencode-web-source-first-convergence-plan.md",
+  "design_doc_hash": "777591c8334a76987474ab6d52ee481606ce8a4c",
+  "design_doc_changed": false,
+  "activated_at": "2026-08-20T14:40:12Z",
+  "active_mode": true,
+  "directives": [
+    {
+      "number": 1,
+      "kind": "implementation",
+      "title": "Gate S 正式退出并实施 C1",
+      "issued_at": "2026-08-20T14:40:12Z",
+      "status": "in_progress",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-001-gate-s-exit-and-c1.md",
+      "scope": "Mac-only C1",
+      "constraints": [
+        "Gate S exit 与 C1 必须为独立 commit",
+        "仅 1.18.18 verified；v2/unknown fail closed",
+        "no protocol/WireDescriptor/capability/iOS writer changes",
+        "完成 C1 后停止，不进入 C2"
+      ],
+      "linked_commits": [
+        "git:bc4fcdd",
+        "git:5c82ecc"
+      ],
+      "report": {
+        "received_at": "2026-08-20T14:40:12Z",
+        "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-001-gate-s-exit-and-c1.md",
+        "audited": false,
+        "audit_verdict": null,
+        "audit_path": null
+      }
+    }
+  ],
+  "current_directive_number": 1,
+  "last_updated": "2026-08-20T14:40:12Z"
+}
