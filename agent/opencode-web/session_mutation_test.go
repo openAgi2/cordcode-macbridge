@@ -118,25 +118,40 @@ func TestArchiveSessionPropagatesHTTPError(t *testing.T) {
 
 // Live 1.18 caveat: the default GET /session list keeps returning archived
 // rows — the mapper must surface time.archived so clients can hide them.
-func TestListSessionsMapsArchivedAt(t *testing.T) {
-	archived := float64(time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC).UnixMilli())
+func TestArchivedAtMappingKeptForByIDReads(t *testing.T) {
+	// OD-1 (C2): archived rows are hidden from DEFAULT enumeration, but the
+	// by-ID read keeps the row and its ArchivedAt mapping (hide != delete).
+	archived := float64(time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC).UnixMilli())
 	payload, _ := json.Marshal([]map[string]any{{
-		"id":        "ses_archived_row",
+		"id":        "ses_archived",
 		"title":     "已归档",
 		"directory": "/tmp/proj",
 		"time":      map[string]any{"created": archived - 2000, "updated": archived - 1000, "archived": archived},
 	}})
-	agent, _ := newDataAgent(t, map[string]string{"/session": string(payload)}, "/tmp/proj")
-	sessions, err := agent.ListSessions(context.Background())
+	byID, _ := json.Marshal(map[string]any{
+		"id":        "ses_archived",
+		"title":     "已归档",
+		"directory": "/tmp/proj",
+		"time":      map[string]any{"created": archived - 2000, "updated": archived - 1000, "archived": archived},
+	})
+	agent, _ := newDataAgent(t, map[string]string{
+		"/session":              string(payload),
+		"/session/ses_archived": string(byID),
+	}, "/tmp/proj")
+	scoped, err := agent.ListSessionsInDirectory(context.Background(), "/tmp/proj")
 	if err != nil {
-		t.Fatalf("ListSessions: %v", err)
+		t.Fatalf("scoped listing: %v", err)
 	}
-	if len(sessions) != 1 {
-		t.Fatalf("len = %d, want 1", len(sessions))
+	if len(scoped) != 0 {
+		t.Fatalf("archived row must be hidden from the default scoped enumeration, got %+v", scoped)
+	}
+	info, err := agent.FetchSessionInfo(context.Background(), "ses_archived")
+	if err != nil {
+		t.Fatalf("FetchSessionInfo must keep the archived row: %v", err)
 	}
 	want := time.UnixMilli(int64(archived)).UTC()
-	if !sessions[0].ArchivedAt.Equal(want) {
-		t.Fatalf("ArchivedAt = %v, want %v", sessions[0].ArchivedAt, want)
+	if !info.ArchivedAt.Equal(want) {
+		t.Fatalf("ArchivedAt = %v, want %v", info.ArchivedAt, want)
 	}
 	// Interface conformance for the bridge capability gates.
 	if _, ok := interface{}(agent).(core.SessionDeleter); !ok {

@@ -149,7 +149,8 @@ func TestListSessionsMapsFieldsAndDirectoryHeader(t *testing.T) {
 	}})
 	agent, serve := newDataAgent(t, map[string]string{"/session": string(payload)}, "/tmp/proj")
 
-	sessions, err := agent.ListSessions(context.Background())
+	// C2: the default enumeration is the scoped official list (roots+limit).
+	sessions, err := agent.ListSessionsInDirectory(context.Background(), "/tmp/proj")
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
 	}

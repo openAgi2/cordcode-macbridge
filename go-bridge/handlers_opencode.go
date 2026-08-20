@@ -314,12 +314,14 @@ func (h *Handlers) injectClaudeReasoningEffort(mapped map[string]interface{}, ag
 
 // ── ocProxy: list_sessions ────────────────────────────────────────────────────
 
-// openCodeSessionFetchLimit is the single upstream fetch budget. OpenCode server
-// is array-only in stable (no cursor on /session), so the only way to know the
-// real total is to ask for a large page once. 100 matches the server-side default
-// upper bound and keeps one request bounded; the per-client page is then sliced
-// in-memory by paginateSessionList with a real cursor, exactly like Codex/Claude.
-const openCodeSessionFetchLimit = 100
+// openCodeSessionFetchLimit is the single upstream fetch budget, shared with
+// the opencode-web adapter via core.OpenCodeSessionFetchLimit (C2: one frozen
+// number across every OpenCode list path). OpenCode server is array-only in
+// stable (no cursor on /session), so the only way to know the real total is to
+// ask for a large page once. 100 matches the server-side default upper bound
+// and keeps one request bounded; the per-client page is then sliced in-memory
+// by paginateSessionList with a real cursor, exactly like Codex/Claude.
+const openCodeSessionFetchLimit = core.OpenCodeSessionFetchLimit
 
 // openCodeCatalogWireCache 返回 per-Handlers 的 OpenCode wire-map 快照缓存，首次使用时懒加载。
 // 缓存是进程级 scope 元数据（per-scope enriched wire maps + epoch），跨 list_sessions 调用复用

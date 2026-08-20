@@ -80,29 +80,29 @@ func visibleProjectDir(dir string) (string, bool) {
 	return clean, true
 }
 
-// projectDirectories returns the deduped serve-truth worktree list, cached
-// briefly so the discovery poller does not hammer /project. On a transient
-// fetch error the last good view is kept rather than flashing an empty
-// catalog.
-func (a *Agent) projectDirectories(ctx context.Context) []string {
+// projectWorktreeDirs returns the deduped serve-truth worktree list used by
+// the OD-2 global aggregation, cached briefly on SUCCESS only (TTL + SSE
+// catalog-signal invalidation). A /project fetch/decode failure is returned
+// as an error — a stale cached view must never impersonate this round's
+// registry (directive-003). An empty registry is an empty list, not a
+// fallback target. The missing-worktree visibility overlay (visibleProjectDir)
+// applies HERE only: / is the serve's global pseudo-project, non-absolute
+// paths, duplicates, and worktrees that no longer exist on disk are not
+// listable CordCode workspaces. This is a CordCode catalog visibility/safety
+// overlay — the serve remains the registry fact owner and rows stay on the
+// server; nothing is deleted or rewritten server-side.
+func (a *Agent) projectWorktreeDirs(ctx context.Context, c *Client) ([]string, error) {
 	a.projectsMu.Lock()
 	if a.projectDirs != nil && time.Since(a.projectDirsAt) < projectCacheTTL {
 		cached := append([]string(nil), a.projectDirs...)
 		a.projectsMu.Unlock()
-		return cached
+		return cached, nil
 	}
 	a.projectsMu.Unlock()
 
-	c, err := a.clientFor(ctx)
-	if err != nil {
-		return nil
-	}
 	entries, err := a.fetchProjects(ctx, c)
 	if err != nil {
-		a.projectsMu.Lock()
-		cached := append([]string(nil), a.projectDirs...)
-		a.projectsMu.Unlock()
-		return cached
+		return nil, err
 	}
 
 	seen := make(map[string]bool, len(entries))
@@ -121,7 +121,7 @@ func (a *Agent) projectDirectories(ctx context.Context) []string {
 	a.projectDirs = dirs
 	a.projectDirsAt = time.Now()
 	a.projectsMu.Unlock()
-	return append([]string(nil), dirs...)
+	return append([]string(nil), dirs...), nil
 }
 
 // invalidateProjectCache is called from the SSE catalog signal path so a
