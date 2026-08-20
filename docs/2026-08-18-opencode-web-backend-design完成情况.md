@@ -225,6 +225,20 @@ owner 指出理想路径是 dsh-web 式「读官方 web 源码→穷举 API→�
 
 **装机**：Mac Release 已覆盖 `/Applications`（runtime `58a1261244d0`，11:04 构建，已重启在线）；iOS 侧本轮无改动（`79c1a12` 已在真机）。待 owner 复测同场景：预期输入框持续 executing + 流式回复 + 正常收口。
 
+## 四·补十二、首回合 ~1s completed 闪烁收口（owner 复测 2026-08-20 11:1x，Mac `4e42185`）
+
+**症状**：补十一后复测——攒帧已消（能流式输出、收口正常），残留：发送后输入框 executing→completed 持续约 1s→executing 流式。owner 问询「为啥中间有大概 1 秒变成完成态」。
+
+**根因**（两个残余竞态，均取证时已识别为次级路径）：
+1. **registry rebind 滞后**：real id 在 `Send` 内同步解析（懒建会话），但 registry 的 pending→real rebind 原要等 relay 消费首个 real-id SSE 事件。窗口内首拉虽能解析 real id，`getSession(real)` 却落空——补十一的 seal 覆盖与 sourceIsLive 采样双双失效。
+2. **首 prompt 持久化竞态**：首拉可在 user 消息 durable 前命中冷源 `GET /session/{id}/message` 返回 0 条 → 按「真空会话」commit 空 idle 基线 → iOS 渲染 idle 翻完成；echo/流式帧到达（~1s）→ running 投影 → 翻回 executing。这正是 owner 观察到的 1s 窗口。
+
+**修复**（Mac `4e42185`，两处）：① `handleSendMessage` 在 Send 成功后立即 `rebindSessionIDIfResolved`（幂等；relay 逐事件 rebind 保留为兜底）——seal 覆盖/sourceIsLive 自 Send 返回即刻生效；② opencode-web 冷源对「registry-live 且 0 条消息」短暂重拉（200ms×6，上限 1.2s）再放行空基线——首 prompt 持久化窗口内不再 commit 空 idle；死会话与其他 backend 保持单次拉取（web 空会话冷开不受影响，对照测试钉死）。
+
+**回归**：`TestOpenCodeWebSendRebindsPendingToRealBeforeFirstEvent`（行为级，sendHook 模拟 Send 内解析 real id；断言 real 键即时可用 + pending 别名同对象）；`TestOpenCodeWebLiveEmptyColdSourceRepollsForFirstPromptPersist` / `TestOpenCodeWebDeadEmptyColdSourceSingleFetch`。全仓 go test 绿。
+
+**装机**：Mac Release 覆盖 `/Applications`（runtime `4e42185`，11:2x，已重启在线）；iOS 侧仍无改动。待 owner 三测同场景：预期全程 executing 无闪烁 + 流式 + 收口。
+
 
 
 
