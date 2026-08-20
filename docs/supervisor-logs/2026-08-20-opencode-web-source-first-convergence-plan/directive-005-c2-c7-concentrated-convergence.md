@@ -3,8 +3,10 @@
 > **路线图**：`docs/2026-08-20-opencode-web-source-first-convergence-plan.md`
 > **范围**：双仓按需；OpenCode 1.18.18 evidence、Mac `opencode-web`/Kernel/control-plane、必要的 iOS 既有协议接线与定向测试
 > **下发时间**：2026-08-20T15:48:22Z
-> **状态**：待转发给开发 agent
+> **状态**：已由 directive-006 取代；不得执行本指令的产品实施阶段
 > **kind**：implementation（owner 明确授权集中批次；包含并取代 directive-004）
+
+> **2026-08-20 supersession note**：canonical 设计经 source-shape 审计后确认 E1–E7 与 WP evidence ownership 尚未闭环。本指令原授予的 C2 decoder、C3–C7 translator/capability/安装权限已撤销。当前唯一有效工作为 directive-006 的 evidence-only capture/checker；样本返回并由设计 owner 更新 canonical §6 后，才会另发集中产品实施指令。
 
 ## 0. 执行方式变更
 

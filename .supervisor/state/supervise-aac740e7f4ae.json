@@ -2,7 +2,7 @@
   "version": 1,
   "project_root": "/Users/jacklee/Projects/cordcode-macbridge-opencode-web",
   "design_doc": "docs/2026-08-20-opencode-web-source-first-convergence-plan.md",
-  "design_doc_hash": "06fa4bc0f788a25455ce1ad13488f4f6adc9a610",
+  "design_doc_hash": "611497c6bed8755090608c4fc47a84d75fed0975",
   "design_doc_changed": false,
   "activated_at": "2026-08-20T14:40:12Z",
   "active_mode": true,
@@ -119,7 +119,7 @@
       "kind": "implementation",
       "title": "C2–C7 集中收敛实施",
       "issued_at": "2026-08-20T15:48:22Z",
-      "status": "pending",
+      "status": "superseded",
       "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-005-c2-c7-concentrated-convergence.md",
       "scope": "Cross-repo as needed: remaining evidence, Mac C2-C7, targeted iOS wiring/tests",
       "constraints": [
@@ -131,6 +131,36 @@
         "one final centralized audit and release install, no UI automation"
       ],
       "linked_commits": [],
+      "superseded_by_directive": 6,
+      "report": {
+        "received_at": null,
+        "markdown_path": null,
+        "audited": false,
+        "audit_verdict": null,
+        "audit_path": null
+      }
+    },
+    {
+      "number": 6,
+      "kind": "diagnostic",
+      "title": "Canonical Stage 0 evidence pack（E1–E7 + WP-FIX）",
+      "issued_at": "2026-08-20T16:08:13Z",
+      "status": "pending",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-006-canonical-evidence-pack.md",
+      "scope": "Mac evidence-only: isolated OpenCode 1.18.18 capture harness, sanitized samples, independent checkers",
+      "constraints": [
+        "supersedes directive-005 product implementation authorization; C2 decoder and C3-C7 product code remain frozen",
+        "capture E1-E7 and correct WP evidence ownership from real same-version raw HTTP/SSE/reload only",
+        "developer agent records physical shapes but does not decide bridge mapping, SSV2 ownership, fallback, product semantics, or capability activation",
+        "blocked is honest; no guessed JSON, fake-server substitute, legacy fallback, owner 4096 writes, real provider account, or product install",
+        "after evidence report stop; design owner updates canonical dossiers before a new concentrated implementation directive"
+      ],
+      "linked_commits": [],
+      "roadmap_diff": {
+        "design_commit": "git:904a0dd",
+        "summary": "The convergence plan is now the sole canonical execution design with eleven self-contained feature dossiers. Gate B, SSV2 impact, and sample inventory are evidence appendices only. Product implementation previously authorized by directive-005 is withdrawn until E1-E7 and WP-FIX return and the canonical dossiers are revised with observed shapes.",
+        "checker": "python3 agent/opencode-web/testdata/official-1.18.18/harness/check_canonical_execution_design.py --self-test"
+      },
       "report": {
         "received_at": null,
         "markdown_path": null,
@@ -140,6 +170,6 @@
       }
     }
   ],
-  "current_directive_number": 5,
-  "last_updated": "2026-08-20T15:48:22Z"
+  "current_directive_number": 6,
+  "last_updated": "2026-08-20T16:08:13Z"
 }
