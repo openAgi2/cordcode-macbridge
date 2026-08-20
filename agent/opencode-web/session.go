@@ -172,23 +172,6 @@ func (s *serverSession) Send(prompt string, images []core.ImageAttachment, files
 		return err
 	}
 
-	if s.client.Generation() == generationV2 {
-		// v2: model rides the dedicated switch endpoint; prompt body carries
-		// only the text (design §3.2 v2 column).
-		if err := s.postModel(resolved, chatID); err != nil {
-			return err
-		}
-		body := map[string]any{"prompt": prompt}
-		code, raw, err := s.client.doRequest(s.ctx, http.MethodPost, s.client.endpoint(s.client.apiPath("/session/")+chatID+"/prompt"), body, s.directoryHeader(), true)
-		if err != nil {
-			return fmt.Errorf("opencode-web prompt: %w", err)
-		}
-		if code == 204 || code == 200 {
-			return nil
-		}
-		return fmt.Errorf("opencode-web prompt HTTP %d: %s", code, truncateForError(string(raw)))
-	}
-
 	// Live-pinned on 1.18.18 (sandbox E2E 2026-08-19): prompt_async's model
 	// object uses `modelID` (400 "Missing key at [model][modelID]" with `id`),
 	// while POST /session create uses `id` — the two write routes differ.
@@ -239,7 +222,7 @@ func (s *serverSession) ensureServerSession(model ocwModelRef) (string, error) {
 		return "", fmt.Errorf("opencode-web create session HTTP %d: %s", code, truncateForError(string(raw)))
 	}
 	var resp struct {
-		ID  string `json:"id"`
+		ID   string `json:"id"`
 		Data struct {
 			ID string `json:"id"`
 		} `json:"data"`
@@ -260,37 +243,19 @@ func (s *serverSession) ensureServerSession(model ocwModelRef) (string, error) {
 	return created, nil
 }
 
-// postModel applies the v2 session-level model switch endpoint.
-// Official v2 shape (V2SessionSwitchModelData): POST /api/session/{id}/model
-// body {"model": ModelRef{id, providerID, variant?}} — nested, NOT flattened
-// (the old flat {providerID, modelID} body was a shape drift, 2026-08-19 audit).
-func (s *serverSession) postModel(model ocwModelRef, chatID string) error {
-	body := map[string]any{"model": map[string]any{"id": model.ID, "providerID": model.ProviderID}}
-	code, raw, err := s.client.doRequest(s.ctx, http.MethodPost, s.client.endpoint(s.client.apiPath("/session/")+chatID+"/model"), body, s.directoryHeader(), true)
-	if err != nil {
-		return fmt.Errorf("opencode-web switch model: %w", err)
-	}
-	if code >= 300 {
-		return fmt.Errorf("opencode-web switch model HTTP %d: %s", code, truncateForError(string(raw)))
-	}
-	return nil
-}
-
-// CancelTurn implements core.TurnCanceler: abort (1.18) / interrupt (v2).
+// CancelTurn implements core.TurnCanceler. C1 quarantines unverified
+// generations at clientFor, so only the verified 1.18.18 abort route exists —
+// the former v2 /interrupt product path is deleted, not merely unreachable.
 func (s *serverSession) CancelTurn(ctx context.Context) error {
 	chatID := s.CurrentSessionID()
 	if chatID == "" {
 		return nil
 	}
 	path := "/session/" + chatID + "/abort"
-	if s.client.Generation() == generationV2 {
-		path = s.client.apiPath("/session/") + chatID + "/interrupt"
-	}
 	actx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	// Official shape: abort (v1 SessionAbortData) and interrupt (v2
-	// V2SessionInterruptData) are both `body?: never` — no JSON body (the
-	// former empty-object body was tolerated drift, 2026-08-19 audit).
+	// Official shape: abort (v1 SessionAbortData) is `body?: never` — no JSON
+	// body (the former empty-object body was tolerated drift, 2026-08-19 audit).
 	code, raw, err := s.client.doRequest(actx, http.MethodPost, s.client.endpoint(path), nil, s.directoryHeader(), true)
 	if err != nil {
 		return fmt.Errorf("opencode-web abort: %w", err)

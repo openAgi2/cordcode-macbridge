@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-20T18:30:00Z",
+  "updated_at": "2026-08-20T19:30:00Z",
   "todos": [
     {
       "id": "gate-a-inventory-impl",
@@ -607,30 +607,36 @@
       "id": "c1-version-transport-impl",
       "title": "C1 version and transport boundary",
       "description": "Make 1.18.18 the verified adapter; quarantine unverified v2; remove unknown-shape recursive fallbacks; preserve auth, directory scoping, SSE reconnect.",
-      "status": "pending",
+      "status": "done",
       "phase": "c1",
       "kind": "impl",
       "depends_on": [
         "gate-s-s4-test-map-regression"
       ],
       "source": "Gate C1",
-      "notes": "blocked-until: Gate A + Gate B + Gate S all exit",
+      "notes": "C1 only. clientFor is the single verified-generation gate: generation118 is the only generation handed out; v2/unknown fail closed (distinct quarantine error, zero prompt/SSE/Kernel/capability). InstanceStatus now distinguishes unsupported-generation from probe failures. v2 write paths deleted (Send v2 branch, postModel, CancelTurn /interrupt, SSE /api/event dial). Catalog legacy recursive walk deleted (fail closed on unknown shape). Basic Auth/directory scoping/HTTP timeout/SSE no-lifetime-timeout/bounded reconnect unchanged and transport-only.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Version/transport boundary per plan §6 C1 + S3 record C1: 1.18.18-only verified adapter; v2 quarantine at clientFor/InstanceStatus with diagnosable states (supported/unauthorized/unreachable/unsupported-generation/server_unauthenticated); unknown-shape recursive fallbacks removed (catalog legacy walk + dead collectModelWindows); v2 product write paths deleted; no protocol/WireDescriptor/capability/iOS changes.",
+        "artifacts": [
+          "agent/opencode-web/opencodeweb.go",
+          "agent/opencode-web/session.go",
+          "agent/opencode-web/events.go",
+          "agent/opencode-web/models.go",
+          "agent/opencode-web/context_usage.go"
+        ],
+        "checked_at": "2026-08-20T19:30:00Z"
       }
     },
     {
       "id": "c1-version-transport-tests",
       "title": "C1 probe distinguishes supported/unauthorized/unreachable/unsupported version",
       "description": "Targeted Go tests for generation probe and fail-closed unknown version.",
-      "status": "pending",
+      "status": "done",
       "phase": "c1",
       "kind": "tests",
       "depends_on": [
@@ -640,20 +646,24 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "automated",
-        "attestation": "self-attested",
+        "status": "present",
+        "method": "tests",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Five required tests in agent/opencode-web/version_transport_c1_test.go: TestVerified118Only / TestV2FailClosedQuarantine / TestGenerationV2QuarantineZeroPromptAndZeroKernelIngest / TestBasicAuthDirectoryTimeoutAreControlNotTimeline / TestSSEReconnectIsTransportOnly — all PASS. v2-dependent tests rewritten to quarantine semantics (TestCancelTurnV2Interrupt, TestListSessionsV2EnvelopeQuarantined, TestProjectsNotSupportedOnV2, TestIsSessionActiveV2QuarantineStaysConservative, TestPermissionFoldV2QuarantinedZeroReplies); v2 write-path shape tests deleted (postModel/interrupt). Full package: go test ./agent/opencode-web/ -count=1 -timeout 180s => ok 2.7s.",
+        "artifacts": [
+          "agent/opencode-web/version_transport_c1_test.go",
+          "cmd:go test ./agent/opencode-web/ -run TestVerified118Only|TestV2FailClosedQuarantine|TestGenerationV2Quarantine|TestBasicAuthDirectoryTimeout|TestSSEReconnectIsTransportOnly -count=1 => all PASS",
+          "cmd:go test ./agent/opencode-web/ -count=1 -timeout 180s => ok"
+        ],
+        "checked_at": "2026-08-20T19:30:00Z"
       }
     },
     {
       "id": "c1-version-transport-regression",
       "title": "C1 no v2 parity claim in wire/capability",
       "description": "Confirm unknown generation is not advertised and v2 branches are quarantined.",
-      "status": "pending",
+      "status": "done",
       "phase": "c1",
       "kind": "regression",
       "depends_on": [
@@ -663,13 +673,18 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "mixed",
+        "status": "present",
+        "method": "regression",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "go build ./... OK; go vet ./agent/opencode-web/ clean; go test ./agent/opencode-web/ full package ok; go-bridge targeted (OpenCodeWeb|SessionSyncV2|Projection|EventPublisher|BridgeEpoch) ok 4.5s; ./core/ ok. Freeze check: git diff touches only agent/opencode-web/*.go (+state/plan docs) — docs/protocol, WireDescriptor (wire_descriptor.go), capability advertisement, iOS untouched. Zero prompt/zero Kernel ingest negative proofs in TestGenerationV2QuarantineZeroPromptAndZeroKernelIngest. No A1/A5-uncovered translation semantics introduced.",
+        "artifacts": [
+          "cmd:go build ./... => OK",
+          "cmd:go test ./go-bridge/ -run OpenCodeWeb|SessionSyncV2|Projection|EventPublisher|BridgeEpoch -count=1 => ok 4.5s",
+          "cmd:go test ./core/ -count=1 => ok",
+          "agent/opencode-web/version_transport_c1_test.go"
+        ],
+        "checked_at": "2026-08-20T19:30:00Z"
       }
     },
     {

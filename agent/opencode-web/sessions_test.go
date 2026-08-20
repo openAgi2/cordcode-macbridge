@@ -180,7 +180,10 @@ func TestListSessionsMapsFieldsAndDirectoryHeader(t *testing.T) {
 	}
 }
 
-func TestListSessionsV2EnvelopeAndStableOrder(t *testing.T) {
+func TestListSessionsV2EnvelopeQuarantined(t *testing.T) {
+	// C1: the v2 envelope shape is still DETECTED by the probe (honest status),
+	// but the endpoint is quarantined — list must fail closed with the
+	// unsupported-generation error, and zero writes may reach the wire.
 	older := float64(time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC).UnixMilli())
 	newer := float64(time.Date(2026, 8, 18, 0, 0, 0, 0, time.UTC).UnixMilli())
 	s := &recordingServe{responses: map[string]string{
@@ -198,16 +201,16 @@ func TestListSessionsV2EnvelopeAndStableOrder(t *testing.T) {
 		"opencode_web_pass": "pw",
 	})
 	agent := a.(*Agent)
-	// Shape arbiter: /session missing (404) + /api/session envelope → v2.
-	if _, err := agent.clientFor(context.Background()); err != nil {
-		t.Fatalf("clientFor: %v", err)
+	// Shape arbiter: /session missing (404) + /api/session envelope → probe
+	// detects v2, then clientFor quarantines it.
+	if _, err := agent.clientFor(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported/unverified generation") {
+		t.Fatalf("v2 must fail closed at clientFor, got err=%v", err)
 	}
-	sessions, err := agent.ListSessions(context.Background())
-	if err != nil {
-		t.Fatalf("ListSessions: %v", err)
+	if _, err := agent.ListSessions(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported/unverified generation") {
+		t.Fatalf("ListSessions on v2 must fail closed, got err=%v", err)
 	}
-	if len(sessions) != 2 || sessions[0].ID != "ses_new" || sessions[1].ID != "ses_old" {
-		t.Fatalf("order/rows = %+v", sessions)
+	if posts := countRequests(s, "POST", ""); len(posts) != 0 {
+		t.Fatalf("v2 quarantine must issue ZERO POSTs, got %+v", posts)
 	}
 }
 
@@ -476,6 +479,8 @@ func TestListAgentsMapsAndEmptyIsLegal(t *testing.T) {
 }
 
 func TestProjectsNotSupportedOnV2(t *testing.T) {
+	// C1: v2 is quarantined at clientFor — project suggestions never issue a
+	// request; the unsupported-generation error surfaces verbatim.
 	s := &recordingServe{responses: map[string]string{
 		"/global/health": `{"healthy":true}`,
 		"/api/health":    `{"healthy":true}`,
@@ -488,11 +493,11 @@ func TestProjectsNotSupportedOnV2(t *testing.T) {
 		"opencode_web_pass": "pw",
 	})
 	agent := a.(*Agent)
-	if _, err := agent.clientFor(context.Background()); err != nil {
-		t.Fatalf("clientFor: %v", err)
+	if _, err := agent.clientFor(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported/unverified generation") {
+		t.Fatalf("v2 must fail closed at clientFor, got err=%v", err)
 	}
-	if _, err := agent.ListProjectSuggestions(context.Background()); err == nil || !strings.Contains(err.Error(), "not supported") {
-		t.Fatalf("v2 project list must be not_supported (no /api/location misuse), got %v", err)
+	if _, err := agent.ListProjectSuggestions(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported/unverified generation") {
+		t.Fatalf("v2 endpoint must surface the quarantine error, got %v", err)
 	}
 }
 

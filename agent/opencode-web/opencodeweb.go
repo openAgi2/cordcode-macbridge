@@ -279,7 +279,10 @@ func (a *Agent) replayableRetrySnapshot(sessionID string) (retrySnapshot, bool) 
 const instanceStatusProbeTTL = 15 * time.Second
 
 // InstanceStatus mirrors the endpoint state for hello_ack detection. The probe
-// is a read-only GET sequence; it never spawns, binds, or writes.
+// is a read-only GET sequence; it never spawns, binds, or writes. States stay
+// distinct (C1): not configured / probe failed (unreachable, unauthorized,
+// server_unauthenticated — the probe error names which) / unsupported
+// generation (detected but quarantined) / supported 1.18.18.
 func (a *Agent) InstanceStatus() (available bool, detail string) {
 	if a.baseURL == "" {
 		return false, NotConfiguredDetail
@@ -297,6 +300,9 @@ func (a *Agent) InstanceStatus() (available bool, detail string) {
 	}
 	if res.err != nil {
 		return false, "probe failed: " + res.err.Error()
+	}
+	if res.gen != generation118 {
+		return false, fmt.Sprintf("unsupported-generation (quarantined): probe detected generation %s; the only verified product generation is OpenCode 1.18.18 — no prompt, no SSE ingest, no Kernel writes; %s", res.gen, res.detail)
 	}
 	return true, res.detail
 }
@@ -327,6 +333,12 @@ func (a *Agent) runProbe(ctx context.Context) {
 // clientFor returns an HTTP client pinned to the probed API generation,
 // re-probing on demand when the cached outcome is missing, failed, or stale.
 // This is the single entry every data-plane operation goes through.
+//
+// C1 version boundary: OpenCode 1.18.18 (generation118) is the ONLY verified
+// product generation. Any other detected generation (v2 or otherwise) fails
+// closed here — quarantined out of normal adapter selection with zero prompt,
+// zero SSE ingest, zero Kernel writes, and no capability claim. Read-side v2
+// shape helpers elsewhere in the package are unreachable behind this gate.
 func (a *Agent) clientFor(ctx context.Context) (*Client, error) {
 	if a.baseURL == "" {
 		return nil, fmt.Errorf("%s", NotConfiguredDetail)
@@ -343,6 +355,9 @@ func (a *Agent) clientFor(ctx context.Context) (*Client, error) {
 			detail = res.err.Error()
 		}
 		return nil, fmt.Errorf("opencode-web endpoint not usable: %s", detail)
+	}
+	if res.gen != generation118 {
+		return nil, fmt.Errorf("opencode-web: unsupported/unverified generation %q at %s — quarantined; the only verified product generation is OpenCode 1.18.18 (no prompt, no SSE ingest, no Kernel writes, no capability)", res.gen, a.baseURL)
 	}
 	c := newClient(a.baseURL, a.user, a.pass)
 	c.setGeneration(res.gen)

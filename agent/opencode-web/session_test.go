@@ -310,28 +310,34 @@ func TestCancelTurnByGeneration(t *testing.T) {
 }
 
 func TestCancelTurnV2Interrupt(t *testing.T) {
-	// v2 endpoint: only /api/session/:id/interrupt is mapped — a wrong path
-	// (e.g. the 1.18 abort route) would 404 and fail CancelTurn.
-	mux := newMuxWithStatuses(t, map[string]routeResponse{
-		"/global/health":               {404, ``},
-		"/api/health":                  {200, `{"healthy":true}`},
-		"/api/session":                 {200, `{"data":[]}`},
-		"/provider":                    {200, testProviderCatalog},
-		"/session/ses_x":               {200, `{"id":"ses_x","model":{"id":"glm-4.7","providerID":"zhipuai-coding-plan"}}`},
-		"/api/session/ses_x/interrupt": {200, `{}`},
+	// C1 quarantine: a v2-shaped endpoint must fail closed before any session,
+	// prompt, or interrupt exists. The former v2 /interrupt product path is
+	// deleted; only the verified 1.18.18 abort route remains (see
+	// TestCancelTurnByGeneration).
+	s := &recordingServe{responses: map[string]string{
+		"/api/health":                  `{"healthy":true}`,
+		"/api/session":                 `{"data":[]}`,
+		"/provider":                    testProviderCatalog,
+		"/session/ses_x":               `{"id":"ses_x","model":{"id":"glm-4.7","providerID":"zhipuai-coding-plan"}}`,
+		"/api/session/ses_x/interrupt": `{}`,
+	}}
+	base := s.start(t)
+	a, _ := New(map[string]any{
+		"opencode_web_url":  base,
+		"opencode_web_user": "u",
+		"opencode_web_pass": "pw",
 	})
-	agent := agentAgainstMux(t, mux)
-	if c, err := agent.clientFor(context.Background()); err != nil || c.Generation() != generationV2 {
-		t.Fatalf("generation must resolve to v2, got %v err=%v", c.Generation(), err)
+	agent := a.(*Agent)
+	if c, err := agent.clientFor(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported/unverified generation") {
+		t.Fatalf("v2 must fail closed at clientFor (quarantined), got client=%v err=%v", c, err)
 	}
-	sess, err := agent.StartSession(context.Background(), "ses_x")
-	if err != nil {
-		t.Fatalf("StartSession: %v", err)
+	if _, err := agent.StartSession(context.Background(), "ses_x"); err == nil || !strings.Contains(err.Error(), "unsupported/unverified generation") {
+		t.Fatalf("StartSession on v2 must fail closed, got err=%v", err)
 	}
-	defer sess.Close()
-	canceler := sess.(core.TurnCanceler)
-	if err := canceler.CancelTurn(context.Background()); err != nil {
-		t.Fatalf("CancelTurn on v2 must POST /api/session/:id/interrupt: %v", err)
+	// Zero writes: no prompt, no abort/interrupt, no model switch reached the
+	// wire — only the read-only probe GETs may exist.
+	if posts := countRequests(s, "POST", ""); len(posts) != 0 {
+		t.Fatalf("v2 quarantine must issue ZERO POSTs, got %+v", posts)
 	}
 }
 

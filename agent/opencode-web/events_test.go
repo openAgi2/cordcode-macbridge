@@ -466,7 +466,10 @@ func TestIsSessionActiveThreeStates(t *testing.T) {
 	}
 }
 
-func TestIsSessionActiveV2MissStaysConservative(t *testing.T) {
+func TestIsSessionActiveV2QuarantineStaysConservative(t *testing.T) {
+	// C1: a v2 endpoint is quarantined at clientFor. IsSessionActive treats any
+	// probe/generation failure as active (unknown ⇒ active — never falsely
+	// settle a live turn); no /api/session/active request may be attempted.
 	s := &recordingServe{responses: map[string]string{
 		"/global/health":      `{"healthy":true}`,
 		"/api/health":         `{"healthy":true}`,
@@ -480,14 +483,14 @@ func TestIsSessionActiveV2MissStaysConservative(t *testing.T) {
 		"opencode_web_pass": "pw",
 	})
 	agent := a.(*Agent)
-	if _, err := agent.clientFor(context.Background()); err != nil {
-		t.Fatalf("clientFor: %v", err)
+	if _, err := agent.clientFor(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported/unverified generation") {
+		t.Fatalf("v2 must fail closed at clientFor, got err=%v", err)
 	}
 	if !agent.IsSessionActive(context.Background(), "ses_idle") {
-		t.Fatal("v2 /api/session/active absence is NOT a global idle verdict — must stay active")
+		t.Fatal("quarantined generation must stay conservative-active, never idle")
 	}
-	if !agent.IsSessionActive(context.Background(), "ses_other") {
-		t.Fatal("v2 active hit must report active")
+	if active := s.requestsFor("/api/session/active"); len(active) != 0 {
+		t.Fatalf("quarantine must not probe /api/session/active, got %+v", active)
 	}
 }
 

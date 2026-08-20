@@ -1,7 +1,7 @@
 # OpenCode Web source-first convergence plan
 
 - Date: 2026-08-20
-- Status: **Gate A exited. Gate B exited. Gate S exited 2026-08-20: S1/S2/S3/S4 each independently audited (S4 audit verdict PASS). Gate S exit basis: 9 layers · existing=67 · planned=29 · affectedSlices=C1–C7 · pre-sample-order=8 · S4 self-test 10/10 · Gate B、S1/S2、S3、S4 checker 与 self-test 全部通过. Owner has authorized C1 only; C2–C7 not started. Protocol, WireDescriptor, and capability advertisement remain unchanged by C1.**
+- Status: **Gate A exited. Gate B exited. Gate S exited 2026-08-20: S1/S2/S3/S4 each independently audited (S4 audit verdict PASS). C1 (version/transport boundary) implemented 2026-08-20 under owner authorization: 1.18.18-only verified adapter, v2/unknown fail-closed quarantine, unknown-shape recursive fallbacks removed; Basic Auth/directory scoping/timeouts/bounded SSE reconnect preserved as transport-only control plane. C2–C7 not started. Protocol, WireDescriptor, and capability advertisement remain unchanged.**
 - Audit input: [2026-08-20-opencode-web-source-parity-audit.md](2026-08-20-opencode-web-source-parity-audit.md)
 - Historical input only: [2026-08-18-opencode-web-backend-design.md](2026-08-18-opencode-web-backend-design.md) and its completion report
 - Goal: make `opencode-web` a faithful, bounded adapter of the official OpenCode Web behavior, rather than a cleaned-up copy of the legacy OpenCode backend

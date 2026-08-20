@@ -3,6 +3,7 @@ package opencodeweb
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
@@ -97,7 +98,10 @@ func (a *Agent) fetchModelCatalog(ctx context.Context, c *Client) (*ocwModelCata
 	if err != nil {
 		return nil, err
 	}
-	catalog := parseProviderCatalog(raw)
+	catalog, err := parseProviderCatalog(raw)
+	if err != nil {
+		return nil, err
+	}
 
 	a.catalogEntryMu.Lock()
 	a.catalogEntry = &catalogCacheEntry{catalog: catalog, at: time.Now()}
@@ -111,115 +115,57 @@ func (a *Agent) fetchModelCatalog(ctx context.Context, c *Client) (*ocwModelCata
 	return catalog, nil
 }
 
-// parseProviderCatalog builds the connected-filtered catalog; falls back to
-// the legacy recursive walk when the envelope shape is absent (other
-// generations / future drift).
-func parseProviderCatalog(raw []byte) *ocwModelCatalog {
+// parseProviderCatalog builds the connected-filtered catalog from the verified
+// 1.18.18 {all, connected, default} envelope. C1 fail-closed rule: any other
+// shape is a diagnosable error — the former legacy recursive walk over
+// arbitrary model-shaped JSON nodes is deleted (unknown-shape guessing can
+// produce plausible-but-false catalogs; the catalog simply becomes
+// unavailable and Send/list_models report it honestly).
+func parseProviderCatalog(raw []byte) (*ocwModelCatalog, error) {
 	var envelope ocwProviderEnvelope
-	if err := json.Unmarshal(raw, &envelope); err == nil && len(envelope.All) > 0 {
-		connected := map[string]bool{}
-		for _, id := range envelope.Connected {
-			connected[id] = true
-		}
-		catalog := &ocwModelCatalog{
-			windows:  map[string]int{},
-			defaults: map[string]string{},
-		}
-		var rows []core.ModelOption
-		for _, provider := range envelope.All {
-			if provider.ID == "" || len(provider.Models) == 0 {
-				continue
-			}
-			if !connected[provider.ID] {
-				continue // 未配置凭据的 provider 不进选择框（对齐官方网页）；connected 为空 = 无可用模型
-			}
-			catalog.connectedOrder = append(catalog.connectedOrder, provider.ID)
-			if def, ok := envelope.Default[provider.ID]; ok && def != "" {
-				catalog.defaults[provider.ID] = def
-			}
-			for _, model := range provider.Models {
-				id := model.ID
-				if id == "" {
-					continue
-				}
-				window := 0
-				if model.Limit != nil {
-					window = model.Limit.Context
-				}
-				if window > 0 {
-					catalog.windows[id] = window
-					catalog.windows[provider.ID+"/"+id] = window
-				}
-				desc := model.Name
-				rows = append(rows, core.ModelOption{Name: provider.ID + "/" + id, Desc: desc})
-			}
-		}
-		sort.SliceStable(rows, func(i, j int) bool { return rows[i].Name < rows[j].Name })
-		catalog.Models = rows
-		return catalog
+	if err := json.Unmarshal(raw, &envelope); err != nil || len(envelope.All) == 0 {
+		return nil, fmt.Errorf("opencode-web: provider catalog shape not recognized — expected the verified 1.18.18 {all,connected,default} envelope; failing closed instead of recursive shape guessing (C1): body=%s", truncateForError(string(raw)))
 	}
-
-	// Legacy/unknown shape: recursive walk of any model-shaped node.
-	var root any
-	if err := json.Unmarshal(raw, &root); err != nil {
-		return &ocwModelCatalog{windows: map[string]int{}}
+	connected := map[string]bool{}
+	for _, id := range envelope.Connected {
+		connected[id] = true
+	}
+	catalog := &ocwModelCatalog{
+		windows:  map[string]int{},
+		defaults: map[string]string{},
 	}
 	var rows []core.ModelOption
-	seen := map[string]bool{}
-	windows := map[string]int{}
-	collectCatalogModels(root, "", &rows, seen, windows)
-	catalog := &ocwModelCatalog{windows: windows, defaults: map[string]string{}}
-	for _, row := range rows {
-		catalog.Models = append(catalog.Models, row)
-	}
-	return catalog
-}
-
-type catalogRow struct {
-	qualified string
-	desc      string
-}
-
-// collectCatalogModels is the legacy fallback walk (envelope absent).
-func collectCatalogModels(node any, providerID string, rows *[]core.ModelOption, seen map[string]bool, windows map[string]int) {
-	switch typed := node.(type) {
-	case map[string]any:
-		id, _ := typed["id"].(string)
-		limit, _ := typed["limit"].(map[string]any)
-		window := 0
-		if limit != nil {
-			window = anyInt(limit["context"])
+	for _, provider := range envelope.All {
+		if provider.ID == "" || len(provider.Models) == 0 {
+			continue
 		}
-		if id != "" && window > 0 {
-			qualified := id
-			if providerID != "" {
-				qualified = providerID + "/" + id
-			}
-			windows[id] = window
-			if providerID != "" {
-				windows[qualified] = window
-			}
-			if !seen[qualified] {
-				seen[qualified] = true
-				name, _ := typed["name"].(string)
-				*rows = append(*rows, core.ModelOption{Name: qualified, Desc: name})
-			}
+		if !connected[provider.ID] {
+			continue // 未配置凭据的 provider 不进选择框（对齐官方网页）；connected 为空 = 无可用模型
 		}
-		scope := providerID
-		if id != "" && typed["models"] != nil {
-			scope = id
+		catalog.connectedOrder = append(catalog.connectedOrder, provider.ID)
+		if def, ok := envelope.Default[provider.ID]; ok && def != "" {
+			catalog.defaults[provider.ID] = def
 		}
-		for key, child := range typed {
-			if key == "limit" {
+		for _, model := range provider.Models {
+			id := model.ID
+			if id == "" {
 				continue
 			}
-			collectCatalogModels(child, scope, rows, seen, windows)
-		}
-	case []any:
-		for _, child := range typed {
-			collectCatalogModels(child, providerID, rows, seen, windows)
+			window := 0
+			if model.Limit != nil {
+				window = model.Limit.Context
+			}
+			if window > 0 {
+				catalog.windows[id] = window
+				catalog.windows[provider.ID+"/"+id] = window
+			}
+			desc := model.Name
+			rows = append(rows, core.ModelOption{Name: provider.ID + "/" + id, Desc: desc})
 		}
 	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].Name < rows[j].Name })
+	catalog.Models = rows
+	return catalog, nil
 }
 
 // SetModel implements core.ModelSwitcher. The official 1.18 API has no

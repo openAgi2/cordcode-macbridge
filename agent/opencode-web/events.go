@@ -120,11 +120,10 @@ func (s *sseSubscriber) connect() error {
 // kills the stream mid-turn; owner-verified 2026-08-19: turn 2 died at the
 // 30s mark mid-stream).
 func (s *sseSubscriber) dial() (*http.Response, error) {
-	eventPath := "/global/event"
-	if s.client.Generation() == generationV2 {
-		eventPath = "/api/event"
-	}
-	sseURL := s.client.endpoint(eventPath)
+	// C1: the verified 1.18.18 event stream is /global/event only; the former
+	// v2 /api/event branch is deleted — clientFor quarantines other generations
+	// before any subscriber can exist.
+	sseURL := s.client.endpoint("/global/event")
 
 	req, err := http.NewRequestWithContext(s.ctx, http.MethodGet, sseURL, nil)
 	if err != nil {
@@ -188,13 +187,9 @@ func (s *sseSubscriber) run(body io.ReadCloser) {
 // healArmedTurnsAfterDrop settles turns that armed before a stream drop and
 // went idle during the gap (their terminal event was lost): 1.18
 // GET /session/status is the definitive busy map, so any armed session no
-// longer busy gets its one-shot result now. v2's /api/session/active has
-// foreground-drain-only semantics — absence is not an idle verdict, so v2
-// stays conservative (no heal).
+// longer busy gets its one-shot result now. (The former v2 no-heal branch is
+// gone — clientFor quarantines non-1.18.18 generations before subscribing.)
 func (s *sseSubscriber) healArmedTurnsAfterDrop() {
-	if s.client.Generation() == generationV2 {
-		return
-	}
 	s.stateMu.Lock()
 	armed := make([]string, 0, len(s.activeTurns))
 	for sessionID := range s.activeTurns {
