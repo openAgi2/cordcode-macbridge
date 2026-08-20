@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-20T14:10:00Z",
+  "updated_at": "2026-08-20T14:55:00Z",
   "todos": [
     {
       "id": "gate-a-inventory-impl",
@@ -360,69 +360,78 @@
       "id": "gate-s-s1-s2-impl",
       "title": "Gate S S1/S2 truth owners and transaction domains",
       "description": "Write docs/2026-08-20-opencode-web-ssv2-impact.md covering S1 owners/only-writers and S2 transaction domains. Cite iOS CLAUDE.md Session Sync v2 架构路线护栏, the 2026-07-24/2026-07-26 iOS plans, and MacBridge docs/protocol. No product code. Explicitly record: OpenCode serve is upstream fact source; Mac ProjectionKernel is the only CordCode timeline truth; iOS ProjectionStore is the only SSV2 client writer.",
-      "status": "pending",
+      "status": "done",
       "phase": "gate-s",
       "kind": "impl",
       "depends_on": [
         "gate-b-capability-map-regression"
       ],
       "source": "Gate S",
-      "notes": "",
+      "notes": "S1/S2 impact from live Mac/iOS writer inventory. Gaps recorded, not patched. S3 not started. No product code.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Wrote docs/2026-08-20-opencode-web-ssv2-impact.md/.json. S1 four owners with file:symbol. S2 ten domains with required/forbidden/current/status. Seven source-only pre-sample gates. Sealed writers listed.",
+        "artifacts": [
+          "docs/2026-08-20-opencode-web-ssv2-impact.md",
+          "docs/2026-08-20-opencode-web-ssv2-impact.json"
+        ],
+        "checked_at": "2026-08-20T14:55:00Z"
       }
     },
     {
       "id": "gate-s-s1-s2-tests",
       "title": "Gate S S1/S2 completeness check",
       "description": "Verify the SSV2 impact doc has every S1 concern (OpenCode facts, Kernel timeline, ProjectionStore, protocol) and every S2 domain (cold hydrate, live SSE, nested sync, reconnect, requests/mutations, control plane, permission/question/todo).",
-      "status": "pending",
+      "status": "done",
       "phase": "gate-s",
       "kind": "tests",
       "depends_on": [
         "gate-s-s1-s2-impl"
       ],
       "source": "Gate S",
-      "notes": "",
+      "notes": "Completeness checker covers S1/S2 required ids, permission/question/todo ownership, dual-ingest ban, source-only 实现前补样本, forbidden allowed-paths.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "python3 check_gate_s_s1_s2.py → ok s1=4 s2=10 source-only-gates=7; --self-test PASS.",
+        "artifacts": [
+          "agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s1_s2.py",
+          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s1_s2.py => gate-s s1/s2 ok: s1=4 s2=10 source-only-gates=7",
+          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s1_s2.py --self-test => self-test PASS"
+        ],
+        "checked_at": "2026-08-20T14:55:00Z"
       }
     },
     {
       "id": "gate-s-s1-s2-regression",
       "title": "Gate S S1/S2 is architecture proof, not a UX change",
       "description": "S1/S2 document only; product code remains frozen.",
-      "status": "pending",
+      "status": "done",
       "phase": "gate-s",
       "kind": "regression",
       "depends_on": [
         "gate-s-s1-s2-tests"
       ],
       "source": "Gate S",
-      "notes": "",
+      "notes": "Docs/checker only. Product code, protocol, WireDescriptor unchanged. S3/S4/C not started.",
       "verification": {
         "required": false,
-        "status": "missing",
+        "status": "present",
         "method": "manual",
         "attestation": "self-attested",
-        "na_reason": "architecture proof document; covered by gate-s-s1-s2-tests",
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "na_reason": "S1/S2 is architecture proof documentation; no UX/product-code surface",
+        "summary": "git diff of agent/opencode-web/*.go go-bridge MacBridge core iOS product sources is empty.",
+        "artifacts": [
+          "docs/2026-08-20-opencode-web-ssv2-impact.md"
+        ],
+        "checked_at": "2026-08-20T14:55:00Z"
       }
     },
     {

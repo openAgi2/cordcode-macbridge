@@ -170,6 +170,11 @@ The continuing architecture authority is the iOS repository `CLAUDE.md` section 
 - `docs/2026-07-26-session-sync-v2-cold-start-kernel-restart-plan.md` in the iOS repository;
 - the MacBridge canonical protocol pack under `docs/protocol/`.
 
+S1/S2 working proof (documentation only; S3/S4 not started):
+
+- [2026-08-20-opencode-web-ssv2-impact.md](2026-08-20-opencode-web-ssv2-impact.md)
+- checker: `python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s1_s2.py`
+
 ### S1. Truth owners and single writers
 
 | Concern | Authority / only writer | Explicitly forbidden |

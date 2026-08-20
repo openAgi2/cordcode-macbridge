@@ -1,0 +1,309 @@
+{
+  "meta": {
+    "title": "OpenCode Web Gate S S1/S2 SSV2 impact",
+    "date": "2026-08-20",
+    "opencodeVersion": "1.18.18",
+    "sourceCommit": "2cba7e227d",
+    "gateACommit": "aad4b24",
+    "gateBCommit": "883513b",
+    "s3Started": false,
+    "s4Started": false,
+    "gateCStarted": false,
+    "productCodeFrozen": true,
+    "authoritiesRead": [
+      "../cordcode-ios/CLAUDE.md Session Sync v2 架构路线护栏",
+      "../cordcode-ios/docs/2026-07-24-single-source-multidevice-sync-design.md",
+      "../cordcode-ios/docs/2026-07-26-session-sync-v2-cold-start-kernel-restart-plan.md",
+      "docs/protocol/README.md",
+      "docs/protocol/bridge-v1.md",
+      "GO_BRIDGE_ARCHITECTURE.md",
+      "docs/2026-08-20-opencode-web-gate-b-capability-map.json",
+      "docs/2026-08-20-opencode-web-source-first-convergence-plan.md §5.1 S1/S2"
+    ]
+  },
+  "s1": [
+    {
+      "id": "s1.opencode-facts",
+      "concern": "OpenCode session/message/status facts",
+      "target": "OpenCode 1.18.18 serve is the upstream fact owner for session/message/status. The adapter may observe and translate; local guesses, legacy adapter state, and iOS state are not OpenCode server truth.",
+      "onlyWriter": "opencode serve HTTP/SSE (GET/POST /session, /session/:id/message, /session/status, GET /global/event)",
+      "currentSource": "agent/opencode-web/session.go Send/ensureServerSession; agent/opencode-web/history.go GetRichSessionHistory; agent/opencode-web/events.go handleRawEvent/handleServerEvent; agent/opencode-web/session_mutation.go FetchSessionInfo/ArchiveSession/DeleteSession; agent/opencode-web/activity.go IsSessionActive",
+      "currentStatus": "satisfied-as-owner",
+      "gap": "Translation completeness is Gate C (prompt fields, parts, list roots/limit). Ownership of facts is already the official serve, not a second store."
+    },
+    {
+      "id": "s1.kernel-timeline",
+      "concern": "CordCode active timeline and execution",
+      "target": "Exactly one Mac ProjectionKernel / SessionProjection per (backendId, sessionId). Push and pull read the same committed Kernel head. OpenCode history or raw SSE must not become a second reducer.",
+      "onlyWriter": "go-bridge ProjectionKernel → ProjectionReducer.Apply (hydrate transaction or IngestLive)",
+      "currentSource": "go-bridge/projection_kernel.go BeginHydrateTransaction/ApplyHydrateEvent/IngestLive/CommitHydrateTransaction/Snapshot; go-bridge/projection_types.go SessionProjection; go-bridge/event_publisher.go publish → kernel.IngestLive; go-bridge/server.go advertiseSessionSyncV2Backend includes opencode-web",
+      "currentStatus": "satisfied-as-architecture",
+      "gap": "EventPublisher.publish still has a kernel==nil fallback to p.projection.Apply (go-bridge/event_publisher.go). Production installs a Kernel; that fallback is a sealed second-reducer path and must stay unused. C4 must keep the single ingest."
+    },
+    {
+      "id": "s1.projectionstore",
+      "concern": "iOS messages[], turn state, generation under negotiated session_sync_v2",
+      "target": "ProjectionStore is the only client-side projection writer from t=0. Ownership is mode + selected backend session_sync_v2, not projection arrival. loading/empty/failed must not re-enable legacy writers.",
+      "onlyWriter": "OpenCodeiOS/OpenCodeiOS/Models/ProjectionStore.swift applyFrame → ProjectionReplica.applyPatch/snapshot → commitIfObserved",
+      "currentSource": "ProjectionStore.swift applyFrame/commitIfObserved/lifecycle; ChatViewModel+MessageSync.swift loadMessages/replaceMessagesFromServer guards on sessionSyncV2Active; ArchitectureGuardrailTests.swift seals pump/applyFrame; go-bridge/server.go advertiseSessionSyncV2Backend for opencode-web",
+      "currentStatus": "satisfied-as-architecture",
+      "gap": "loadMessages comment still says “codex+v2” in one place; the live gate is sessionSyncV2Active which follows the selected backend descriptor, including opencode-web. No code change this round."
+    },
+    {
+      "id": "s1.protocol",
+      "concern": "protocol and projection shapes",
+      "target": "MacBridge docs/protocol is the only canonical pack. iOS docs/protocol, Swift models, and web types are synchronized consumers.",
+      "onlyWriter": "docs/protocol/bridge-v1.md + go-bridge/bridge_v1_schema.go (canonical); iOS OpenCodeiOS/.../BridgeModels.swift is consumer",
+      "currentSource": "docs/protocol/README.md; docs/protocol/bridge-v1.md Session Projection Stream; go-bridge/bridge_v1_schema.go; go-bridge/projection_types.go; iOS docs/protocol is a mirror per iOS CLAUDE.md",
+      "currentStatus": "satisfied-as-architecture",
+      "gap": "C-gates that change projection/capability must still land canonical-first. This S1/S2 round does not change protocol."
+    }
+  ],
+  "s2": [
+    {
+      "id": "s2.hydrate",
+      "name": "cold hydrate/reopen",
+      "producer": "Official GET /session/:id/message via agent/opencode-web/history.go GetRichSessionHistory",
+      "mapper": "go-bridge/handlers_projection.go streamBackendRichHistoryProjectionEvents (opencode-web case, not the legacy opencode helper)",
+      "kernelOrControlEntry": "ProjectionKernel.BeginHydrateTransaction → ApplyHydrateEvent on a private reducer → CommitHydrateTransaction",
+      "consumer": "Handlers.handleGetSessionProjection returns Kernel Snapshot; iOS ProjectionStore applies snapshot",
+      "onlyWriter": "Kernel private hydrate transaction",
+      "forbiddenBypass": "Must not enter ordinary live seq, EventBuffer, live buffer, offline queue, mailbox, or raw client fanout. Must not wrap get_session_messages for the client to merge.",
+      "currentSource": "go-bridge/handlers_projection.go handleGetSessionProjection, streamBackendRichHistoryProjectionEvents case opencode-web; go-bridge/projection_kernel.go BeginHydrateTransaction/ApplyHydrateEvent/CommitHydrateTransaction; agent/opencode-web/history.go GetRichSessionHistory",
+      "status": "satisfied-as-architecture",
+      "requiredPath": "verified OpenCode messages → pathless rich-history mapper → Kernel private hydrate under one source cut → committed projection",
+      "forbiddenPath": "HTTP history directly into iOS messages[]; PublishLogical as cold hydrate; concurrent file-scan and live publisher mutating the committed reducer",
+      "failurePresentation": "handleGetSessionProjection returns honest hydrating/failed errors (projection.hydrating / timeout). iOS ProjectionStore lifecycle stays loading/failed. No inferred empty-success, no history fallback.",
+      "cSlice": "C2/C4 (list/get semantics and event mapping of history parts)"
+    },
+    {
+      "id": "s2.live-direct-sse",
+      "name": "live direct SSE",
+      "producer": "Official GET /global/event direct payload.type (message.part.delta, session.status, session.error, permission.asked, …)",
+      "mapper": "agent/opencode-web/events.go handleRawEvent unwraps payload; handleServerEvent maps direct types to core.Event; go-bridge/events.go mapAgentEvent to wire names",
+      "kernelOrControlEntry": "EventPublisher.publish → ProjectionKernel.IngestLive",
+      "consumer": "SSV2 connections receive projection_patch/snapshot only (shouldDeliverRawEventLocked seals raw timeline). ProjectionStore.applyFrame.",
+      "onlyWriter": "Kernel IngestLive for timeline; ProjectionStore for iOS messages[]",
+      "forbiddenBypass": "Raw OpenCode SSE or raw bridge text_delta must not write iOS messages[]. One upstream event → at most one Kernel ingest.",
+      "currentSource": "agent/opencode-web/events.go handleRawEvent/handleServerEvent; go-bridge/events.go mapAgentEvent; go-bridge/event_publisher.go publish/IngestLive/shouldDeliverRawEventLocked",
+      "status": "gap",
+      "requiredPath": "verified v1 direct SSE → opencode-web source adapter normalization → EventPublisher/Kernel live ingest → projection patch → ProjectionStore",
+      "forbiddenPath": "direct raw timeline delivery to an SSV2 client; dual ingest with nested sync; inferred terminal from HTTP 204",
+      "failurePresentation": "Provider/session.error maps to terminal error content + idle; abort maps to MessageAbortedError. Missing terminal stays running/failed, never a timeout-completed turn. HTTP 2xx on prompt_async is admission only.",
+      "cSlice": "C4 (pin direct-vs-sync skip as the single pre-Kernel point; replay A1–A5)"
+    },
+    {
+      "id": "s2.nested-sync",
+      "name": "v1 nested sync",
+      "producer": "Official /global/event frames with payload.type==sync (still on the wire)",
+      "mapper": "Intended: one pre-Kernel normalization skip, matching official Web server-sdk.tsx:284",
+      "kernelOrControlEntry": "none — skipped before canonical ingest",
+      "consumer": "evidence capture only (Gate A samples retain sync frames)",
+      "onlyWriter": "none",
+      "forbiddenBypass": "Direct and nested forms must never both advance syncRev for the same semantic event.",
+      "currentSource": "agent/opencode-web/events.go handleServerEvent default + isServerEventType (sync is not a handled type, so it is dropped). Gate A A1 retains nested sync as evidence.",
+      "status": "gap",
+      "requiredPath": "preserve in capture; skip before Kernel ingest at one named pre-Kernel point",
+      "forbiddenPath": "dual ingest of direct payload and nested sync; consumer-side referee; recursive JSON search for nested events",
+      "failurePresentation": "Unknown/unhandled SSE types log debug and drop. They must not be treated as success or as a second event stream.",
+      "cSlice": "C4 (replace implicit default-drop with an explicit exclusive skip at the adapter boundary)"
+    },
+    {
+      "id": "s2.reconnect",
+      "name": "reconnect/recovery",
+      "producer": "Second GET /global/event (A5: first direct frame server.connected then live deltas); GET /session/:id/message and /session/status may supply hydrate facts",
+      "mapper": "Same adapter as live SSE; Kernel validate/invalidate/rehydrate",
+      "kernelOrControlEntry": "ProjectionKernel RestoreCheckpoint / BeginHydrateTransaction / IngestLive on the same (backendId, sessionId) Kernel",
+      "consumer": "ProjectionStore applyFrame snapshot/patch; gap → get_session_projection pull",
+      "onlyWriter": "same Kernel + ProjectionStore apply",
+      "forbiddenBypass": "No iOS history merge, content-similarity dedup, raw catch-up writer, or local completion guess.",
+      "currentSource": "agent/opencode-web/events.go SSE reconnect/subscribe; go-bridge/projection_kernel.go RestoreCheckpoint/BeginHydrateTransaction; iOS ProjectionStore.swift scheduleRecoveryPull/applyFrame; ChatViewModel+MessageSync.swift loadMessages HARD-GATE when sessionSyncV2Active",
+      "status": "gap",
+      "requiredPath": "reconnect observation may read server messages/status, then validate/invalidate/rehydrate the same Kernel, resume via checkpoint/fence/full-or-delta projection",
+      "forbiddenPath": "history merge on iOS; inferred healthy terminal; treating session.created as replay success (A5)",
+      "failurePresentation": "Mismatch/gap → invalidated + pull. Failed pull stays failed/loading. Never synthesize finish=stop from empty reload status.",
+      "cSlice": "C4 (replay A5: busy-at-disconnect, live delta after server.connected, terminal idle on second SSE)"
+    },
+    {
+      "id": "s2.request-mutation-catalog",
+      "name": "prompt/abort/rename/archive/delete/list/model requests",
+      "producer": "iOS RPC → go-bridge handlers → agent/opencode-web HTTP (prompt_async, abort, PATCH, DELETE, GET /session, GET /provider)",
+      "mapper": "request/control path only; timeline effects re-enter through observation/Kernel",
+      "kernelOrControlEntry": "HTTP 2xx may refresh catalog/metadata (signalCatalogRefresh). Prompt/abort do not write SessionProjection themselves.",
+      "consumer": "catalog invalidation; subsequent SSE/hydrate is the timeline path",
+      "onlyWriter": "Kernel for timeline; catalog APIs for session list metadata",
+      "forbiddenBypass": "HTTP 2xx must not manufacture a confirmed turn, assistant completion, or timeline content.",
+      "currentSource": "agent/opencode-web/session.go Send (returns on 204); go-bridge/handlers.go send/abort; session_mutation.go ArchiveSession/DeleteSession; sessions.go ListSessions; models.go AvailableModels; events.go session.created/deleted → signalCatalogRefresh",
+      "status": "pending-C",
+      "requiredPath": "prompt/abort/rename/archive/delete/list/model remain control/request; resulting timeline effects re-enter observation/Kernel",
+      "forbiddenPath": "treating prompt_async 204 as turn_completed; list HTTP as messages[]; filesystem existence as session truth",
+      "failurePresentation": "HTTP errors surface as send/abort/mutation failures. Catalog refresh is not a fake session. Missing SessionRenamer on opencode-web is absence, not a silent no-op success.",
+      "cSlice": "C2 list/get; C3 prompt fields; C5 models; C7 rename (source-only sample gate)"
+    },
+    {
+      "id": "s2.permission",
+      "name": "permission",
+      "producer": "Official permission.asked SSE + GET /permission; reply POST /session/:id/permissions/:id {response:once|always|reject}",
+      "mapper": "events.go handlePermissionAsked → core.EventPermissionRequest; go-bridge/events.go mapAgentEvent → permission_request; permissions.go RespondSessionPermission folds allow→once, always→always, deny→reject",
+      "kernelOrControlEntry": "EventPublisher IngestLive reduces canonical permission_request/permission_resolved. Raw control presentation is allowed but must not write messages[].",
+      "consumer": "SSV2: projected permission part. Legacy: permission_request event sealed from SSV2 raw fanout.",
+      "onlyWriter": "Kernel for canonical permission state; ProjectionStore for iOS timeline card; not ChatViewModel messages[] from raw",
+      "forbiddenBypass": "permission raw control must not write messages[] or execution. Do not treat reject as healthy stop.",
+      "currentSource": "agent/opencode-web/events.go handlePermissionAsked; agent/opencode-web/permissions.go RespondSessionPermission; go-bridge/events.go EventPermissionRequest; go-bridge/projection_reducer_permission_test.go",
+      "status": "pending-C",
+      "requiredPath": "permission_request/resolved through Kernel; raw control presentation without messages[] writes; A6 once/always/reject",
+      "forbiddenPath": "raw permission frames writing messages[]; inferring always as restart-surviving grant; reject → finish=stop",
+      "failurePresentation": "A6 reject: finish=tool-calls, idle, pending cleared. Reply HTTP errors stay pending/failed. No inferred completion.",
+      "cSlice": "C6"
+    },
+    {
+      "id": "s2.question",
+      "name": "structured question",
+      "producer": "Official question.asked / GET /question; POST /question/:id/reply {answers:string[][]} or /reject",
+      "mapper": "Target: core user_input_requested and user_input_resolved only. go-bridge/events.go already maps EventUserInputRequested and treats EventQuestionAsked as derived-legacy (EventPublisher must not ingest question_asked).",
+      "kernelOrControlEntry": "Kernel user_input_requested/resolved. Legacy question_asked/question_resolved are one-way presentation and must not re-enter Kernel.",
+      "consumer": "SSV2: user_input part via ProjectionStore. Must not deliver raw question_* to an SSV2 client.",
+      "onlyWriter": "Kernel for canonical question state",
+      "forbiddenBypass": "Do not invent question_resolved as an official OpenCode event. Do not map permission to question. Do not ingest legacy question frames back into Kernel.",
+      "currentSource": "go-bridge/events.go EventQuestionAsked/EventUserInputRequested; go-bridge/event_publisher.go isDerivedLegacyQuestionEvent skip IngestLive; agent/opencode-web has no question SSE handler yet (C6)",
+      "status": "pending-C",
+      "requiredPath": "official asked/replied/rejected → canonical user_input_requested and user_input_resolved into Kernel",
+      "forbiddenPath": "question_resolved as official OpenCode event; permission-as-question; legacy question raw to SSV2 client; Kernel ingest of question_asked",
+      "failurePresentation": "A7 reject: idle, pending cleared, not healthy stop. Missing question path is unsupported/absent, not a fake resolve.",
+      "cSlice": "C6"
+    },
+    {
+      "id": "s2.todo",
+      "name": "todo",
+      "producer": "Official todo.updated SSE + GET /session/:id/todo items {content,status,priority} no id",
+      "mapper": "Control-plane only. events.go currently ignores todo.updated (phase 1). Target: EventPlan/todos_updated control-plane, not timeline parts.",
+      "kernelOrControlEntry": "Explicit control-plane exception. Must not enter SessionProjection timeline.",
+      "consumer": "iOS todo dock / control-plane events if advertised. Not messages[].",
+      "onlyWriter": "none on timeline; control-plane publisher if C6 advertises todos",
+      "forbiddenBypass": "Do not invent hash/content/position ids. Do not smuggle todos into timeline parts.",
+      "currentSource": "agent/opencode-web/events.go todo.updated comment-ignored; go-bridge/events.go EventPlan → todos_updated; WireDescriptor does not advertise todos",
+      "status": "pending-C",
+      "requiredPath": "todo.updated + GET /todo as control-plane; A8 replacement semantics; UnifiedTodo has no id",
+      "forbiddenPath": "todo events in SessionProjection timeline; synthetic ids; treating ignore-as-implemented",
+      "failurePresentation": "Until C6, todos are absent from advertisement. Absence is honest, not an empty completed plan.",
+      "cSlice": "C6"
+    },
+    {
+      "id": "s2.projection-delivery",
+      "name": "projection delivery",
+      "producer": "ProjectionKernel Snapshot / FlushProjectionPatch after hydrate or live ingest",
+      "mapper": "EventPublisher per-connection dispatch of projection_snapshot / projection_patch / sync_invalidate (same envelope as other events; no parallel websocket)",
+      "kernelOrControlEntry": "EventPublisher.publish with projection frames; shouldDeliverRawEventLocked omits raw timeline to SSV2 connections",
+      "consumer": "iOS CCCodeBridgeTransport routes frames to ProjectionStore.applyFrame",
+      "onlyWriter": "Kernel head is the only payload; connections do not reduce a second copy",
+      "forbiddenBypass": "No parallel projection SSE. Raw timeline-semantic events must not fan out to session_sync_v2 connections.",
+      "currentSource": "go-bridge/event_publisher.go publish/shouldDeliverRawEventLocked; go-bridge/projection_kernel.go Snapshot/FlushProjectionPatch; docs/protocol/bridge-v1.md Session Projection Stream; iOS CCCodeBridgeTransport.swift applyFrame routing",
+      "status": "satisfied-as-architecture",
+      "requiredPath": "one Kernel head → EventPublisher projection frames → SSV2 client applyFrame",
+      "forbiddenPath": "raw text_delta to SSV2; second projection pipe; mailbox raw as active timeline",
+      "failurePresentation": "Delivery failure stays loading/invalidated and pulls get_session_projection. No automatic legacy raw resume.",
+      "cSlice": "C4 reconnect/delivery tests"
+    },
+    {
+      "id": "s2.ios-projection-apply",
+      "name": "iOS projection apply",
+      "producer": "projection_patch / projection_snapshot / get_session_projection result",
+      "mapper": "ProjectionStore.applyFrame (replica applyPatch/snapshot off MainActor; MainActor commitIfObserved)",
+      "kernelOrControlEntry": "n/a — client apply only. Ownership chosen at t=0 from sessionSyncV2Active (mode + backend session_sync_v2).",
+      "consumer": "ChatViewModel observes ProjectionStore; SessionProjectionMapping maps to UI. messages[] updated only via this store when v2 is active.",
+      "onlyWriter": "ProjectionStore",
+      "forbiddenBypass": "loading/empty/failed/invalidated must not re-enable loadMessages, replaceMessagesFromServer, history merge, delayed raw flush, or generation timeout completion.",
+      "currentSource": "OpenCodeiOS/Models/ProjectionStore.swift applyFrame; ChatViewModel+MessageSync.swift sessionSyncV2Active HARD-GATE; ChatViewModel+Generation.swift sessionSyncV2Active seals; ArchitectureGuardrailTests.swift",
+      "status": "satisfied-as-architecture",
+      "requiredPath": "only ProjectionStore applies full/delta/push; baseRev→syncRev; fence; old-generation rejection",
+      "forbiddenPath": "history merge; content similarity; timeout completion; projection failure → get_session_messages fallback; empty projection waits for history",
+      "failurePresentation": "lifecycle failed/invalidated/loading remains visible. Honest empty ready is empty, not a history fill. .off is not a runtime fallback.",
+      "cSlice": "none this round; C-gates must not weaken seals"
+    }
+  ],
+  "sourceOnlyPreSampleGates": [
+    {"id": "sessions.rename", "cSlice": "C7", "gate": "实现前补样本"},
+    {"id": "sessions.delete", "cSlice": "C7", "gate": "实现前补样本"},
+    {"id": "content.reasoning", "cSlice": "C4", "gate": "实现前补样本"},
+    {"id": "workspace.project", "cSlice": "C2", "gate": "实现前补样本"},
+    {"id": "configuration.providers", "cSlice": "C5", "gate": "实现前补样本"},
+    {"id": "configuration.default_model", "cSlice": "C5", "gate": "实现前补样本"},
+    {"id": "observation.external_turns", "cSlice": "C4", "gate": "实现前补样本"}
+  ],
+  "activeWriterInventory": [
+    {
+      "path": "go-bridge/projection_kernel.go ApplyHydrateEvent",
+      "writes": "private hydrate reducer only",
+      "allowed": true,
+      "domain": "s2.hydrate"
+    },
+    {
+      "path": "go-bridge/projection_kernel.go IngestLive",
+      "writes": "committed ProjectionReducer (or queues during hydrate)",
+      "allowed": true,
+      "domain": "s2.live-direct-sse"
+    },
+    {
+      "path": "go-bridge/projection_kernel.go CommitHydrateTransaction",
+      "writes": "atomic baseline publish then pending live",
+      "allowed": true,
+      "domain": "s2.hydrate"
+    },
+    {
+      "path": "go-bridge/event_publisher.go publish → kernel.IngestLive",
+      "writes": "Kernel live ingest under publisher lock",
+      "allowed": true,
+      "domain": "s2.live-direct-sse"
+    },
+    {
+      "path": "go-bridge/event_publisher.go publish → p.projection.Apply when kernel==nil",
+      "writes": "direct ProjectionReducer without Kernel",
+      "allowed": false,
+      "domain": "s2.live-direct-sse",
+      "note": "Sealed second-reducer fallback. Must remain unused in production (Kernel is installed)."
+    },
+    {
+      "path": "go-bridge/handlers_projection.go streamBackendRichHistoryProjectionEvents",
+      "writes": "ApplyHydrateEvent only",
+      "allowed": true,
+      "domain": "s2.hydrate"
+    },
+    {
+      "path": "agent/opencode-web/session.go Send HTTP 204 return",
+      "writes": "none on timeline",
+      "allowed": true,
+      "domain": "s2.request-mutation-catalog",
+      "note": "Admission only. Timeline comes from later SSE/Kernel."
+    },
+    {
+      "path": "iOS ProjectionStore.swift applyFrame",
+      "writes": "iOS SessionProjection mirror / messages[] via mapping",
+      "allowed": true,
+      "domain": "s2.ios-projection-apply"
+    },
+    {
+      "path": "iOS ChatViewModel+MessageSync.swift loadMessages / replaceMessagesFromServer",
+      "writes": "messages[] from get_session_messages",
+      "allowed": false,
+      "domain": "s2.ios-projection-apply",
+      "note": "Hard-gated when sessionSyncV2Active. Must stay sealed for opencode-web v2. Not deleted; listed as a sealed legacy writer."
+    },
+    {
+      "path": "iOS ChatViewModel+Generation.swift timeout/completion helpers",
+      "writes": "generation/turn completion",
+      "allowed": false,
+      "domain": "s2.ios-projection-apply",
+      "note": "Sealed by sessionSyncV2Active. Forbidden as inferred success."
+    }
+  ],
+  "gaps": [
+    "Nested sync skip is implicit default-drop in handleServerEvent, not a named exclusive pre-Kernel skip (C4).",
+    "EventPublisher kernel==nil reducer.Apply is a second-reducer path that must stay unused (C4).",
+    "opencode-web Send omits official messageID/agent/variant/file/agent parts (C3).",
+    "ListSessions lacks official roots/limit (C2).",
+    "todos ignored; not yet control-plane advertised (C6).",
+    "question SSE/HTTP not implemented in opencode-web (C6).",
+    "permission ToolAuthorizer exists but permission_resolve is not advertised; C6 must complete once/always/reject without forging healthy reject completion.",
+    "Seven Gate B source-only supported-now surfaces require 实现前补样本 before translators (rename, delete, reasoning, project, providers, default_model, external_turns)."
+  ]
+}
