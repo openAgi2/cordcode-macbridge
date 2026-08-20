@@ -1,7 +1,7 @@
 # OpenCode Web source-first convergence plan
 
 - Date: 2026-08-20
-- Status: **Gate A exited. Gate B exited. Gate S S1/S2 independently audited. S3 documentation in this round. Do not start S4 or Gate C until independent S3 audit. Product-code work remains forbidden.**
+- Status: **Gate A exited. Gate B exited. Gate S S1/S2/S3 independently audited (S3 PASS 2026-08-20). S4 test map documented this round; Gate S exit pending independent audit. Do not start Gate C until separately authorized. Product-code work remains forbidden.**
 - Audit input: [2026-08-20-opencode-web-source-parity-audit.md](2026-08-20-opencode-web-source-parity-audit.md)
 - Historical input only: [2026-08-18-opencode-web-backend-design.md](2026-08-18-opencode-web-backend-design.md) and its completion report
 - Goal: make `opencode-web` a faithful, bounded adapter of the official OpenCode Web behavior, rather than a cleaned-up copy of the legacy OpenCode backend
@@ -170,12 +170,13 @@ The continuing architecture authority is the iOS repository `CLAUDE.md` section 
 - `docs/2026-07-26-session-sync-v2-cold-start-kernel-restart-plan.md` in the iOS repository;
 - the MacBridge canonical protocol pack under `docs/protocol/`.
 
-S1/S2/S3 working proof (documentation only; S4/Gate C not started; product code frozen):
+S1–S4 working proof (documentation only; Gate C not started; product code frozen):
 
 - [2026-08-20-opencode-web-ssv2-impact.md](2026-08-20-opencode-web-ssv2-impact.md)
 - [2026-08-20-opencode-web-ssv2-impact.json](2026-08-20-opencode-web-ssv2-impact.json)
 - S1/S2 checker: `python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s1_s2.py`
 - S3 checker: `python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s3.py`
+- S4 checker: `python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s4.py`
 
 ### S1. Truth owners and single writers
 

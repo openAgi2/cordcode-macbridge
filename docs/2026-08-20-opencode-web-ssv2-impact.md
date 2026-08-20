@@ -1,13 +1,14 @@
-# OpenCode Web Gate S S1/S2/S3 SSV2 impact
+# OpenCode Web Gate S S1/S2/S3/S4 SSV2 impact
 
 - Date: 2026-08-20
 - OpenCode: 1.18.18 `2cba7e227d`
-- Gate A: `aad4b24` · Gate B: `883513b`
-- **S3 documented. S4/Gate C: not started.** Product code, protocol models, WireDescriptor, and capability advertisement: **frozen.** `s4Started=false`, `gateCStarted=false`, `productCodeFrozen=true`.
+- Gate A: `aad4b24` · Gate B: `883513b` · S3 audit + S4 授权: `c8d732d`
+- **S1–S4 documented. Gate S exit pending independent audit. Gate C: not started.** Product code, protocol models, WireDescriptor, and capability advertisement: **frozen.** `s4Started=true`, `s4Completed=true`, `gateSExited=false`, `gateCStarted=false`, `productCodeFrozen=true`.
 - Machine-readable companion: `docs/2026-08-20-opencode-web-ssv2-impact.json`
 - Checkers:
   - S1/S2: `python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s1_s2.py`
   - S3: `python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s3.py`
+  - S4: `python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s4.py`
 
 ## Authorities read
 
@@ -304,7 +305,7 @@ HTTP 2xx does not manufacture a confirmed turn. Raw OpenCode history/SSE does no
 
 ## S3 — C1–C7 impact records
 
-S3 is documentation only. `s4Started=false`. `gateCStarted=false`. `productCodeFrozen=true`. Each slice records target path vs current code; a satisfied-as-architecture row is not Gate C implementation.
+S3 is documentation only. `gateCStarted=false`. `productCodeFrozen=true`. Each slice records target path vs current code; a satisfied-as-architecture row is not Gate C implementation. (S4 has since been documented; see the S4 section.)
 
 | id | name | protocol | 实现前补样本 |
 |---|---|---|---|
@@ -472,8 +473,169 @@ S3 is documentation only. `s4Started=false`. `gateCStarted=false`. `productCodeF
 - **Planned tests iOS:** list/detail match server after archive; by-id still opens archived; rename/delete UI only after samples.
 - **Out of scope:** OD-3 keep-mapped-future-or-unsupported: `sessions.fork`, `sessions.share`, `sessions.unshare`, `sessions.children`, `turns.command`, `turns.shell`, `turns.summarize`, `turns.revert`, `turns.unrevert`, `workspace.session_diff`, `workspace.vcs`, `workspace.file_list`, `workspace.file_read`, `workspace.file_search`. Each remains future/unsupported and needs its own source → sample → mapping → test chain later. No generic API coverage.
 
+## S4 — acceptance/test map
+
+S4 is documentation only (test map; no test code written this round). `gateSExited=false` — Gate S exit awaits independent audit. `gateCStarted=false`. `productCodeFrozen=true`. Planned tests are **planned**, not passing; existing tests were verified to exist with the named symbol in the named file.
+
+| id | layer | affected slices | status | existing | planned |
+|---|---|---|---|---|---|
+| `s4.adapter` | OpenCode adapter | C1, C3, C4 | partial | 12 | 5 |
+| `s4.kernel-live` | Kernel live | C1, C4 | partial | 5 | 3 |
+| `s4.kernel-hydrate` | Kernel hydrate | C2, C4 | partial | 6 | 3 |
+| `s4.reconnect` | reconnect | C4 | partial | 6 | 3 |
+| `s4.delivery` | delivery | C4, C6 | partial | 7 | 1 |
+| `s4.ios-ownership` | iOS ownership | C1, C4 | partial | 7 | 2 |
+| `s4.ios-application` | iOS application | C3, C4 | partial | 7 | 3 |
+| `s4.interaction` | interaction | C6 | partial | 12 | 7 |
+| `s4.cross-repository` | cross-repository | C1–C7 | partial | 5 | 2 |
+
+affectedSlices 合集覆盖 C1–C7。iOS 文件路径相对 `../cordcode-ios`。
+
+### `s4.adapter` — OpenCode adapter（C1/C3/C4）
+
+- **invariant:** direct SSE 与 nested sync 不能双 ingest；nested sync 在唯一 pre-Kernel normalization point（single-normalization）显式跳过（nested-sync-skip）；stable messageID 在 request、persisted user message、projection 间一致（correlation-only）；unsupported version/shape fail closed；source-only 行必须 **capture-before-translator**（先补同版本样本，再写 translator 测试）。
+- **producer proof:** handleRawEvent 解 envelope 后 handleServerEvent 是唯一类型开关；unknown type log-and-drop 不当成功。
+- **reducer/fence proof:** 一个上游语义事件最多推进一次 syncRev（planned `TestDirectAndSyncDoNotBothAdvanceSyncRev`）；v2/unknown generation 零 Kernel ingest（planned `TestV2FailClosedQuarantine`）。
+- **delivery/client proof:** adapter 不向 SSV2 直投 raw；catalog/todo 信号不进 chat stream（existing `TestSSECatalogSignalsDoNotEnterChatStream` / `TestSSETodoUpdatedIgnoredInPhase1`）。
+- **existing tests:** `agent/opencode-web/events_test.go TestSubscribeStreamsLiveSSEFrames / TestSSEStreamReconnectsAndHealsAfterDrop / TestSSECatalogSignalsDoNotEnterChatStream / TestSSETodoUpdatedIgnoredInPhase1 / TestSSEUserMessageArmsTurnOnce`; `probe_test.go TestProbeShapeArbiterFlipsGeneration / TestProbeRejectsUnauthenticatedServer / TestProbeFailsWhenNoRouteAnswers / TestProbeSelectsV2GenerationWhenLegacyRouteMissing`; `official_shapes_test.go TestOfficialShape_SessionListCarriesDirectoryQuery`; `sessions_test.go TestGetRichSessionHistoryMapsParts`; `opencodeweb_test.go TestInstanceStatusSuccessCarriesGeneration`.
+- **planned tests (planned, not passing):** `events_test.go TestNestedSyncSkipAtHandleServerEventOnly`; `go-bridge/events_test.go TestDirectAndSyncDoNotBothAdvanceSyncRev`; `probe_test.go TestVerified118Only / TestV2FailClosedQuarantine`; `session_test.go TestPromptAsyncMessageIDAgentModelPartsFromA1A2A9`.
+- **sample/evidence dependency:** A1–A10 replay 归属：A1/A2/A3/A4/A5→C4；A6/A7/A8→C6；A9→C3；A10→C2/C7。
+- **negative assertion:** unknown SSE type drop 不算成功；v2/unknown 零 ingest；unsupported part 零 POST；禁止 recursive JSON search 与 legacy parser fallback。
+- **exit condition:** A1–A10 每个 replay 有命名 owner；nested sync 显式跳过有 owning test；每个 source-only translator 行先登记 capture gate。
+- **current status:** partial。
+- **未覆盖边界:** named exclusive sync skip 仍是隐式 default-drop（C4 实现项）；selected variant 无同版本样本；vision remains future，不进入 supported acceptance tests。
+
+### `s4.kernel-live` — Kernel live（C1/C4）
+
+- **invariant:** 一个 canonical event 最多推进一次 Kernel chain（single-ingest）；execution 只从 authoritative status/error/idle 终结；`kernel==nil → projection.Apply` 是要封死的第二 reducer（kernel-nil-seal）；HTTP 204 与 timeout 不得制造 completion。
+- **producer proof:** publisher lock 下 `publish → kernel.IngestLive`；每个 logical event 恰好一条记录（existing `TestEventPublisherAppendsExactlyOneRecordPerLogicalEvent`）。
+- **reducer/fence proof:** revision 只在 projection commit 推进（existing `TestProjectionRevisionAdvancesOnlyOnProjectionCommit`）；kernel-nil fallback 待 seal（planned `TestKernelNilProjectionApplySealed`）。
+- **delivery/client proof:** 零输出 idle 暴露 turn error（existing `TestSSEZeroOutputIdleSurfacesTurnError`）；catalog gate 零 POST（existing `TestSendCatalogGateIsZeroPOST`）。
+- **existing tests:** `go-bridge/event_buffer_test.go TestEventPublisherAppendsExactlyOneRecordPerLogicalEvent`; `go-bridge/projection_kernel_test.go TestProjectionRevisionAdvancesOnlyOnProjectionCommit / TestProjectionSnapshotDeeplyImmutable`; `agent/opencode-web/events_test.go TestSSEZeroOutputIdleSurfacesTurnError`; `agent/opencode-web/session_test.go TestSendCatalogGateIsZeroPOST`.
+- **planned tests (planned, not passing):** `go-bridge/event_publisher_test.go TestKernelNilProjectionApplySealed`; `go-bridge/handlers_projection_test.go TestHistoryStatusCannotBypassKernel`; `agent/opencode-web/session_test.go TestHTTP204IsAdmissionNotTurn`.
+- **sample/evidence dependency:** A3（retry/error 终态）、A4（abort→MessageAbortedError→idle）、A1/A2（authoritative idle）。
+- **negative assertion:** 无 timeout-completion；204 仅 admission；缺 terminal 不推断成功；history/status 不得绕过 Kernel。
+- **exit condition:** kernel-nil seal 与不可绕过各有 owning test；A3/A4 回放证明 terminal 只来自 authoritative 证据。
+- **current status:** partial。
+- **未覆盖边界:** kernel==nil fallback 代码仍在（sealed 待 C4）。
+
+### `s4.kernel-hydrate` — Kernel hydrate（C2/C4）
+
+- **invariant:** cold history 只进 private hydrate transaction（source cut/fence）；hydrate 期间 pending live 按序补追；commit 后 push/pull 同一个 head；不进 EventBuffer、offline queue、mailbox、raw fanout。
+- **producer proof:** opencode-web rich history 只走 ApplyHydrateEvent（existing `TestOpenCodeWebProjectionHydrateFromRichHistory`）。
+- **reducer/fence proof:** Begin/Apply/Commit 原子；checkpoint admission/invalidation（existing `TestProjectionCheckpointAdmissionAppendAndInvalidation`）；restore schema 校验（existing `TestProjectionCheckpointRestoreValidAndEmpty`）。
+- **delivery/client proof:** by-id 优先（existing `TestOpenCodeWebGetSessionPrefersByIDFetcher`）；cold pull 只提交 running partial（existing `TestOpenCodeWebLiveSessionColdPullSkipsSealAndCommitsRunningPartial`）。
+- **existing tests:** `go-bridge/handlers_projection_ocweb_test.go TestOpenCodeWebProjectionHydrateFromRichHistory / TestOpenCodeWebGetSessionPrefersByIDFetcher / TestOpenCodeWebLiveSessionColdPullSkipsSealAndCommitsRunningPartial`; `go-bridge/projection_kernel_test.go TestProjectionHydrateRetryPolicy / TestProjectionCheckpointAdmissionAppendAndInvalidation / TestProjectionCheckpointRestoreValidAndEmpty`.
+- **planned tests (planned, not passing):** `TestHydratePendingLiveCaughtUpInOrder`; `TestPushPullSameHeadAfterCommit`; `TestColdHistoryNeverEntersEventBuffer`（均在 `go-bridge/projection_kernel_test.go`）。
+- **sample/evidence dependency:** A1/A2 reload persisted messages；A5 hydrate facts；A10 by-id archived。
+- **negative assertion:** hydrate 不进 ordinary live seq/EventBuffer/live buffer/offline queue/mailbox/raw fanout；客户端不得自行 merge。
+- **exit condition:** pending-live 顺序、push/pull 同 head、buffer 隔离各有 owning test。
+- **current status:** partial。
+- **未覆盖边界:** 三项 planned test 未落地。
+
+### `s4.reconnect` — reconnect（C4）
+
+- **invariant:** generation/epoch mismatch 拒绝 stale frame；gap/invalidate 只拉 `get_session_projection`；恢复用同一个 Kernel（reconnect-same-Kernel）；iOS 不得 history merge / content similarity / completion timer；A5 busy→server.connected→live delta→idle 有 owning test。
+- **producer proof:** 进程 epoch 注入 EventPublisher 且跨 hello/register 一致（existing `TestServerInjectsProcessEpochIntoEventPublisher` / `TestConcurrentHelloConnectionsShareProcessEpoch` / `TestServerUsesOneInjectedEpochAcrossHelloAndRegister`）。
+- **reducer/fence proof:** checkpoint schema 不匹配即拒绝（existing `TestProjectionCheckpointRejectsPreviousSemanticSchema`）；validate/invalidate/rehydrate 同一 Kernel。
+- **delivery/client proof:** 旧 session projection 响应不改当前 timeline（existing iOS `testOldSessionProjectionResponseDoesNotMutateCurrentTimeline`）；SSE drop 后 heal（existing `TestSSEStreamReconnectsAndHealsAfterDrop`）。
+- **existing tests:** `go-bridge/bridge_epoch_test.go` 三项；`go-bridge/projection_kernel_test.go TestProjectionCheckpointRejectsPreviousSemanticSchema`; `go-bridge/handlers_projection_ocweb_test.go TestOpenCodeWebLiveSessionColdPullWithBusyProbeCommitsRunningPartial`; iOS `ChatViewModelSessionSyncV2Tests.swift testOldSessionProjectionResponseDoesNotMutateCurrentTimeline`.
+- **planned tests (planned, not passing):** `agent/opencode-web/events_test.go TestReconnectSameKernelA5Sequence`; `go-bridge/event_publisher_test.go TestEpochMismatchRejectsStaleFrame`; iOS `testReconnectDoesNotCallLoadMessagesWhenSyncV2Active`.
+- **sample/evidence dependency:** A5 真实序列（busy-at-disconnect；server.connected → live delta；terminal idle；reload finish=stop）。
+- **negative assertion:** 不得从空 reload 合成 finish=stop；无 iOS history merge / similarity / timer；gap 只走 get_session_projection。
+- **exit condition:** A5 序列、epoch 拒绝、iOS 不回调 loadMessages 各有 owning test。
+- **current status:** partial。
+- **未覆盖边界:** 三项 planned（C4 实现项）。
+
+### `s4.delivery` — delivery（C4/C6）
+
+- **invariant:** SSV2 connection 不接收 raw timeline writers；control-plane allowlist 明确且不携带 timeline payload；projection snapshot/patch/invalidate 只走现有这一条 websocket delivery path；push 丢失后 pull 返回同一 Kernel head。
+- **producer proof:** shouldDeliverRawEventLocked 对 SSV2 封印 raw timeline；分类固定（existing `TestSessionSyncV2RawTimelineClassification`）。
+- **reducer/fence proof:** patch 只投 V2 连接（existing `TestProjectionPatchDeliveredToV2ConnOnly`）；canonical user_input projection-only、legacy 单向派生（existing `TestCanonicalUserInputIsProjectionOnlyAndLegacyIsOneWayDerived`）。
+- **delivery/client proof:** control-plane raw 仍可达（existing `TestProjectionOnlyConnStillReceivesControlPlaneRawEvents`）；无订阅不 crash（existing `TestProjectionPatchNoSubscriberNoCrash`）；iOS push 旁路 cursor（existing `testProjectionPatchPublishesDespiteRecoveryCursorAhead`）。
+- **existing tests:** `go-bridge/projection_delivery_test.go TestProjectionPatchDeliveredToV2ConnOnly / TestSessionSyncV2RawTimelineClassification / TestCanonicalUserInputIsProjectionOnlyAndLegacyIsOneWayDerived / TestProjectionOnlyConnStillReceivesControlPlaneRawEvents / TestProjectionPatchNoSubscriberNoCrash`; `go-bridge/session_sync_v2_test.go TestSessionSyncV2DirectTransportResultPrecedesLiveProjectionPatch`; iOS `K4ProjectionPushBypassTests.swift testProjectionPatchPublishesDespiteRecoveryCursorAhead`.
+- **planned tests (planned, not passing):** `go-bridge/projection_delivery_test.go TestPushLostPullReturnsSameKernelHead`.
+- **sample/evidence dependency:** A1/A5 delivery envelope 与现有 websocket 一致。
+- **negative assertion:** raw text_delta / question_* 不发 SSV2；无第二 projection 管道；control-plane 不夹带 timeline payload。
+- **exit condition:** push-lost→pull-same-head 有 owning test。
+- **current status:** partial。
+- **未覆盖边界:** push-lost 直接断言 planned。
+
+### `s4.ios-ownership` — iOS ownership（C1/C4）
+
+- **invariant:** ownership 在 t=0 由 mode + selected backend capability 决定；loading/empty/failed/invalidated 不恢复 legacy writer；loadMessages gate 在 cache/snapshot/network 读取之前；OpenCode Web 属于 projection backend family。
+- **producer proof:** active mode 选择时即持有（existing `testActiveModeOwnsAtSelectionBeforeProjectionArrives`）；off 保留 legacy（existing `testOffModeKeepsLegacyOnly`）。
+- **reducer/fence proof:** capability 按 backend 收敛（existing `TestSessionSyncV2CapabilityScopedToMigratedBackend`；server.go advertiseSessionSyncV2Backend 含 opencode-web）。
+- **delivery/client proof:** loading 只启动有界 disaster retry（existing `testLoadingProjectionStartsOnlyBoundedDisasterRetryTask`）；honest empty 也武装（existing `testActiveModeArmsOnHonestEmptyAndExecutingShell`）；history fallback 复用原事务策略（existing `testHistoryFallbackAndRetryReuseOriginalTransactionPolicy`）。
+- **existing tests:** iOS `ChatViewModelSessionSyncV2Tests.swift testActiveModeOwnsAtSelectionBeforeProjectionArrives / testOffModeKeepsLegacyOnly / testLoadingProjectionStartsOnlyBoundedDisasterRetryTask / testOffModeTransientBridgeDisconnectKeepsEmptyHistoryLoadingWithoutBanner / testActiveModeArmsOnHonestEmptyAndExecutingShell`; iOS `ArchitectureGuardrailTests.swift testHistoryFallbackAndRetryReuseOriginalTransactionPolicy`; mac `go-bridge/session_sync_v2_test.go TestSessionSyncV2CapabilityScopedToMigratedBackend`.
+- **planned tests (planned, not passing):** iOS `testOpenCodeWebSelectedBackendProjectsAtT0`; `testLoadMessagesGateRunsBeforeCacheSnapshotNetworkReads`.
+- **sample/evidence dependency:** A1 首开；A5 断连状态机。
+- **negative assertion:** loading/empty/failed/invalidated 不触发 loadMessages / replaceMessagesFromServer / get_session_messages 兜底 / delayed raw flush。
+- **exit condition:** opencode-web t=0 与 gate 顺序各有 owning test。
+- **current status:** partial。
+- **未覆盖边界:** 两条 planned（C4/C1 实现项）。
+
+### `s4.ios-application` — iOS application（C3/C4）
+
+- **invariant:** 只有 ProjectionStore 应用 full/delta/push；baseRev→syncRev、fence、generation/epoch、stale frame rejection 持续生效；submit path / composer placeholder / HTTP 204 不写 `messages[]`（**submit-zero-writer**；placeholder 仅 presentation-only），只有后续 projection apply 才写。
+- **producer proof:** guard 封印外部双 writer 并固定 ProjectionStore 持有/泵模型（existing `testSessionSyncV2GuardsExternalDualWriters`）。
+- **reducer/fence proof:** 低 rev snapshot 不重开已解决卡片（existing `testStaleLowerRevSnapshotDoesNotReopenResolvedCard`）；gap 对齐权威 snapshot（existing `testGapRecoveryRealignsUserInputCardToAuthoritativeSnapshot`）。
+- **delivery/client proof:** baseline 前 patch 不渲染后 reconcile（existing `testPatchesBeforeBaselineDoNotRenderThenBaselineReconciles`）；无 baseline 不裁决（existing `testNoAdjudicationWhileUnresolved`）；snapshot/invalidate 旁路 cursor（existing `testProjectionSnapshotAndInvalidateAlsoBypassCursorGate`）；send 重绑 pending 到 real（existing `TestOpenCodeWebSendRebindsPendingToRealBeforeFirstEvent`）。
+- **existing tests:** iOS `ArchitectureGuardrailTests.swift testSessionSyncV2GuardsExternalDualWriters`; iOS `StructuredUserInputIOSRegressionTests.swift testStaleLowerRevSnapshotDoesNotReopenResolvedCard / testGapRecoveryRealignsUserInputCardToAuthoritativeSnapshot`; iOS `LiveOnlyProjectionStateTests.swift testPatchesBeforeBaselineDoNotRenderThenBaselineReconciles / testNoAdjudicationWhileUnresolved`; iOS `K4ProjectionPushBypassTests.swift testProjectionSnapshotAndInvalidateAlsoBypassCursorGate`; mac `go-bridge/handlers_projection_ocweb_test.go TestOpenCodeWebSendRebindsPendingToRealBeforeFirstEvent`.
+- **planned tests (planned, not passing):** iOS `testComposerPlaceholderDoesNotWriteMessages`; `testSubmit204DoesNotAppendMessagesUntilProjectionApply`; `ProjectionStoreTests.swift testBaseRevSyncRevFenceRejectsOldGeneration`（文件按 Gate C 落位，须先建 owning 文件）。
+- **sample/evidence dependency:** A1/A2 persisted user message ↔ projection 对齐；A9 parts。
+- **negative assertion:** placeholder 不写/确认/覆盖/裁判 timeline；204 不是 turn_completed；无 optimistic/history/raw 第二 writer。
+- **exit condition:** submit-zero-writer、presentation-only、fence 各有 owning test。
+- **current status:** partial。
+- **未覆盖边界:** 三条 planned（C3 实现项）。
+
+### `s4.interaction` — interaction（C6）
+
+- **invariant:** permission raw control 不写 timeline、canonical permission 只归约一次、reject 不是健康完成；question 只走 canonical `user_input_requested`/`user_input_resolved`，legacy question frame 不进 Kernel 不发 SSV2；todo 只在 control-plane、绝不进 SessionProjection、不造 hash/content/position ID；A6/A7/A8 request/reply/reject/reload 都有 owning test；capability 只在完整真实路径后广告。
+- **producer proof:** `handlePermissionAsked` 只产 canonical 事件；todo.updated phase-1 显式忽略（existing `TestSSETodoUpdatedIgnoredInPhase1`）。
+- **reducer/fence proof:** pending tool + requires action（existing `TestReducerPermissionRequestProjectsPendingToolAndRequiresAction`）；resolved 清 pending 保 running（existing `TestReducerPermissionResolvedClearsPendingAndLeavesRunning`）；deny 拒绝 tool（existing `TestReducerPermissionResolvedDenyRejectsTool`）；active turn 归属（existing `TestReducerUserInputRequestedWithoutTurnIDUsesActiveTurn`）。
+- **delivery/client proof:** canonical user_input projection-only、legacy 单向（existing `TestCanonicalUserInputIsProjectionOnlyAndLegacyIsOneWayDerived`）；iOS 五状态一卡（existing `testSnapshotRoundTrip_AllFiveStatusesMapToExactlyOneCard`）；question 面诚实 ErrNotSupported（existing `TestQuestionsNotSupported`）；WireDescriptor 无 todos/question_reply（existing `TestWireDescriptorMatchesDesign`）。
+- **existing tests:** `go-bridge/projection_reducer_permission_test.go` 五项；`go-bridge/projection_delivery_test.go TestCanonicalUserInputIsProjectionOnlyAndLegacyIsOneWayDerived`; `agent/opencode-web/events_test.go TestSSEPermissionAsked / TestSSETodoUpdatedIgnoredInPhase1`; `agent/opencode-web/session_test.go TestQuestionsNotSupported`; `agent/opencode-web/opencodeweb_test.go TestWireDescriptorMatchesDesign`; iOS `StructuredUserInputIOSRegressionTests.swift testSnapshotRoundTrip_AllFiveStatusesMapToExactlyOneCard / testPatchUpsertUserInput_ResolvesPendingToAnsweredInPlace`.
+- **planned tests (planned, not passing):** `TestPermissionA6OnceAlwaysRejectReplay`; `question_test.go TestQuestionA7AnswersStringMatrixAndReject`; `projection_reducer_todo_test.go TestTodoA8ControlPlaneNoIdNoTimeline / TestTodoNotInSessionProjection`; `TestPermissionRawDoesNotWriteMessages`; `TestLegacyQuestionNotIngestedAndNotSentToSSV2`; `TestRejectIsNotHealthyCompletion`.
+- **sample/evidence dependency:** A6/A7/A8 全路径（request/reply/reject/reload）。
+- **negative assertion:** reject ≠ 健康完成；不发明官方 question_resolved；permission 不折叠为 question；todo 不进 SessionProjection 不合成 ID；完整路径前不广告。
+- **exit condition:** A6/A7/A8 全路径 owning test + 三类所有权 negative test。
+- **current status:** partial。
+- **未覆盖边界:** question/todo 当前诚实缺席；全部 planned 为 C6 实现项。
+
+### `s4.cross-repository` — cross-repository（C1–C7）
+
+- **invariant:** 协议顺序 **canonical-first**：Mac `docs/protocol/schema` → Go types → iOS mirror/Swift/web types → capability advertisement；C1–C7 判定 no protocol change 的 slice 必须有 guard test 证明没有私自新增 wire field；若 Gate C 后来需要协议变更，先完成 canonical-first 双仓 tests 再广告；capability flag 只能在完整 Mac+iOS 路径与相关测试通过后开启。
+- **producer proof:** hello/hello_ack fixture 走 schema 解码/往返（existing `TestBridgeV1HelloFixtureDecodes` / `TestBridgeV1HelloAckFixtureRoundTrips`）。
+- **reducer/fence proof:** capability 按 opt-in 广告/省略（existing `TestSessionSyncV2CapabilityAdvertisedOnOptIn` / `TestSessionSyncV2CapabilityOmittedWithoutOptIn`）。
+- **delivery/client proof:** opencode-web WireDescriptor 恰为 `external_turn_streaming`、无 todos/question_reply（existing `TestWireDescriptorMatchesDesign`）——证明 OD-3 extras 未实施且未广告。
+- **existing tests:** `go-bridge/bridge_v1_schema_test.go TestBridgeV1HelloFixtureDecodes / TestBridgeV1HelloAckFixtureRoundTrips`; `go-bridge/session_sync_v2_test.go TestSessionSyncV2CapabilityAdvertisedOnOptIn / TestSessionSyncV2CapabilityOmittedWithoutOptIn`; `agent/opencode-web/opencodeweb_test.go TestWireDescriptorMatchesDesign`.
+- **planned tests (planned, not passing):** `TestNoUndeclaredWireFieldAdded`; `TestOD3ExtrasNotImplementedAndNotAdvertised`.
+- **sample/evidence dependency:** None（结构守卫行）：证据为 schema fixture 与 WireDescriptor 测试本体。
+- **negative assertion:** OD-3 十四项与 vision 保持 future/unsupported：未实施、未广告、无 owning implementation acceptance；不私加 wire field；完整路径前不开 capability flag。
+- **exit condition:** no-undeclared-wire-field guard 与 OD-3 未实施未广告断言有 owning test。
+- **current status:** partial。
+- **未覆盖边界:** 双仓协议变更流程仅在 Gate C 真正改协议时触发（当前仅 C3 条件性 send-RPC 字段）。
+
+### S4 source-only capture-before-translator 顺序
+
+先 capture/checker，后 translator test；不得直接列 translator test：
+
+| id | C slice | 顺序 |
+|---|---|---|
+| `workspace.project` | C2 | capture/checker → then translator test |
+| `content.reasoning` | C4 | capture/checker → then translator test |
+| `observation.external_turns` | C4 | capture/checker → then translator test |
+| `configuration.providers` | C5 | capture/checker → then translator test |
+| `configuration.default_model` | C5 | capture/checker → then translator test |
+| `sessions.rename` | C7 | capture/checker → then translator test |
+| `sessions.delete` | C7 | capture/checker → then translator test |
+| `selected_variant` | C3 | capture/checker → then translator test（A1 omit-when-unset 不算 selected-variant 样本） |
+
+vision remains future：不进入 supported acceptance tests。
+
 ## S3 protocol and freeze
 
-Every C slice above states **no protocol change** except C3's conditional canonical-first plan if a new send-RPC field is later required. This S3 round does not change `docs/protocol/`, Go types, iOS mirror, WireDescriptor, or capability advertisement.
+Every C slice above states **no protocol change** except C3's conditional canonical-first plan if a new send-RPC field is later required. The S3/S4 rounds do not change `docs/protocol/`, Go types, iOS mirror, WireDescriptor, or capability advertisement.
 
-`s4Started=false`. `gateCStarted=false`. `productCodeFrozen=true`. Do not start S4 or Gate C from this document.
+`s4Started=true`. `s4Completed=true`. `gateSExited=false` — Gate S exit awaits independent audit. `gateCStarted=false`. `productCodeFrozen=true`. Do not start Gate C from this document.

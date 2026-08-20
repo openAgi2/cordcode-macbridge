@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-20T17:30:00Z",
+  "updated_at": "2026-08-20T18:30:00Z",
   "todos": [
     {
       "id": "gate-a-inventory-impl",
@@ -524,30 +524,34 @@
       "id": "gate-s-s4-test-map-impl",
       "title": "Gate S S4 test mapping",
       "description": "Map every S4 row to an existing or planned owning test: adapter single ingest, Kernel live, Kernel hydrate/fence, reconnect generation, raw delivery seal, iOS t=0 ownership, ProjectionStore revision apply, permission/question/todo ownership, cross-repo protocol consistency. Planned tests must name file/symbol; do not invent passing results.",
-      "status": "pending",
+      "status": "done",
       "phase": "gate-s",
       "kind": "impl",
       "depends_on": [
         "gate-s-s3-impact-regression"
       ],
       "source": "Gate S",
-      "notes": "",
+      "notes": "Docs/checker only. Nine-layer S4 test map added to ssv2-impact.md/json (adapter, kernel-live, kernel-hydrate, reconnect, delivery, ios-ownership, ios-application, interaction, cross-repository). Product code, protocol, WireDescriptor unchanged. Gate C not started.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Nine S4 rows each carry affectedSlices/invariant/producer/reducer-fence/delivery proofs, existing tests (real file+symbol, verified on disk), planned tests marked planned, sample dependency, negative assertion, exit condition, uncovered boundaries. s4PreSampleOrder covers 7 source-only + selected_variant as capture-before-translator. meta s4Started=true s4Completed=true gateSExited=false.",
+        "artifacts": [
+          "docs/2026-08-20-opencode-web-ssv2-impact.md",
+          "docs/2026-08-20-opencode-web-ssv2-impact.json",
+          "agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s4.py"
+        ],
+        "checked_at": "2026-08-20T18:30:00Z"
       }
     },
     {
       "id": "gate-s-s4-test-map-tests",
       "title": "Gate S S4 every row names an owning test",
       "description": "Check the S4 matrix has a named existing or planned test path for every required layer, including C3 correlation-not-writer and C4 single-ingest.",
-      "status": "pending",
+      "status": "done",
       "phase": "gate-s",
       "kind": "tests",
       "depends_on": [
@@ -557,20 +561,24 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "automated",
-        "attestation": "self-attested",
+        "status": "present",
+        "method": "tests",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "python3 check_gate_s_s4.py => gate-s s4 ok: layers=9 pre-sample-order=8 s4Started=True s4Completed=True gateSExited=False gateCStarted=False productCodeFrozen=True; --self-test => PASS (10 mutations caught: drop layer, phantom symbol, planned-as-passed, C3 missing submit-zero-writer, C4 raw fallback, C6 todo-in-timeline, dropped capture order, missing canonical-first, premature gateSExited, premature gateCStarted).",
+        "artifacts": [
+          "agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s4.py",
+          "cmd:python3 check_gate_s_s4.py => gate-s s4 ok: layers=9 pre-sample-order=8",
+          "cmd:python3 check_gate_s_s4.py --self-test => self-test PASS"
+        ],
+        "checked_at": "2026-08-20T18:30:00Z"
       }
     },
     {
       "id": "gate-s-s4-test-map-regression",
       "title": "Gate S exit: S4 map plus C3/C4/C6 invariants",
       "description": "Gate S exits only when S1–S3 are in the capability/impact docs, S4 names owning tests, C3 messageID is correlation-only, C4 names one pre-Kernel normalization and one Kernel ingest, and C6 classifies permission/question/todo exactly as the plan.",
-      "status": "pending",
+      "status": "done",
       "phase": "gate-s",
       "kind": "regression",
       "depends_on": [
@@ -580,13 +588,19 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "mixed",
+        "status": "present",
+        "method": "regression",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Regression: S1/S2 checker ok (s1=4 s2=10) + self-test PASS; S3 checker ok (slices=7, s4Started now allowed true) + self-test PASS; S4 checker ok + self-test PASS; Gate B map checker collateral ok (60 surfaces). Freeze verified: git diff touches only ssv2-impact md/json, check_gate_s_s1_s2/s3/s4, plan doc, state json — no product code/protocol/WireDescriptor/capability. gateSExited=false: Gate S exit awaits independent audit.",
+        "artifacts": [
+          "cmd:python3 check_gate_s_s1_s2.py => gate-s s1/s2 ok",
+          "cmd:python3 check_gate_s_s3.py => gate-s s3 ok",
+          "cmd:python3 check_gate_s_s4.py => gate-s s4 ok",
+          "cmd:python3 check_gate_b_map.py => gate-b map ok: 60 surfaces; exited=True",
+          "docs/2026-08-20-opencode-web-ssv2-impact.md"
+        ],
+        "checked_at": "2026-08-20T18:30:00Z"
       }
     },
     {

@@ -1,13 +1,13 @@
 {
   "meta": {
-    "title": "OpenCode Web Gate S S1/S2/S3 SSV2 impact",
+    "title": "OpenCode Web Gate S S1/S2/S3/S4 SSV2 impact",
     "date": "2026-08-20",
     "opencodeVersion": "1.18.18",
     "sourceCommit": "2cba7e227d",
     "gateACommit": "aad4b24",
     "gateBCommit": "883513b",
     "s3Started": true,
-    "s4Started": false,
+    "s4Started": true,
     "gateCStarted": false,
     "productCodeFrozen": true,
     "authoritiesRead": [
@@ -19,7 +19,9 @@
       "GO_BRIDGE_ARCHITECTURE.md",
       "docs/2026-08-20-opencode-web-gate-b-capability-map.json",
       "docs/2026-08-20-opencode-web-source-first-convergence-plan.md §5.1 S1/S2/S3"
-    ]
+    ],
+    "s4Completed": true,
+    "gateSExited": false
   },
   "s1": [
     {
@@ -222,13 +224,41 @@
     }
   ],
   "sourceOnlyPreSampleGates": [
-    {"id": "sessions.rename", "cSlice": "C7", "gate": "实现前补样本"},
-    {"id": "sessions.delete", "cSlice": "C7", "gate": "实现前补样本"},
-    {"id": "content.reasoning", "cSlice": "C4", "gate": "实现前补样本"},
-    {"id": "workspace.project", "cSlice": "C2", "gate": "实现前补样本"},
-    {"id": "configuration.providers", "cSlice": "C5", "gate": "实现前补样本"},
-    {"id": "configuration.default_model", "cSlice": "C5", "gate": "实现前补样本"},
-    {"id": "observation.external_turns", "cSlice": "C4", "gate": "实现前补样本"}
+    {
+      "id": "sessions.rename",
+      "cSlice": "C7",
+      "gate": "实现前补样本"
+    },
+    {
+      "id": "sessions.delete",
+      "cSlice": "C7",
+      "gate": "实现前补样本"
+    },
+    {
+      "id": "content.reasoning",
+      "cSlice": "C4",
+      "gate": "实现前补样本"
+    },
+    {
+      "id": "workspace.project",
+      "cSlice": "C2",
+      "gate": "实现前补样本"
+    },
+    {
+      "id": "configuration.providers",
+      "cSlice": "C5",
+      "gate": "实现前补样本"
+    },
+    {
+      "id": "configuration.default_model",
+      "cSlice": "C5",
+      "gate": "实现前补样本"
+    },
+    {
+      "id": "observation.external_turns",
+      "cSlice": "C4",
+      "gate": "实现前补样本"
+    }
   ],
   "activeWriterInventory": [
     {
@@ -539,6 +569,877 @@
       "plannedTestsMac": "Existing: session_mutation_test.go. Planned: A10 archive replay; rename/delete tests only after 实现前补样本 fixtures.",
       "plannedTestsIOS": "Planned: list/detail match server after archive; by-id still opens archived; rename/delete UI only after samples. No messages[] rewrite from mutation HTTP.",
       "outOfScope": "OD-3 keep-mapped-future-or-unsupported: sessions.fork, sessions.share, sessions.unshare, sessions.children, turns.command, turns.shell, turns.summarize, turns.revert, turns.unrevert, workspace.session_diff, workspace.vcs, workspace.file_list, workspace.file_read, workspace.file_search. Each remains future/unsupported and needs its own source → sample → mapping → test chain later. No generic API coverage."
+    }
+  ],
+  "s4": [
+    {
+      "id": "s4.adapter",
+      "name": "OpenCode adapter",
+      "affectedSlices": [
+        "C1",
+        "C3",
+        "C4"
+      ],
+      "status": "partial",
+      "invariantTags": [
+        "no-dual-ingest",
+        "single-normalization",
+        "nested-sync-skip",
+        "stable-messageID",
+        "fail-closed",
+        "correlation-only"
+      ],
+      "invariant": "direct SSE 与 nested sync 不能双 ingest；nested sync 在唯一 pre-Kernel normalization point 显式跳过；stable messageID 在 request、persisted user message、projection 间保持一致（correlation-only）；unsupported version/shape fail closed；source-only 行必须 capture-before-translator（先补同版本样本再写 translator 测试）。",
+      "producerProof": "adapter 只从 direct payload 产出 core.Event：handleRawEvent 解 envelope 后 handleServerEvent 是唯一类型开关；nested sync 在该点显式跳过（官方 server-sdk.tsx:284 规则）；unknown type log-and-drop 不当成功。",
+      "reducerFenceProof": "一个上游语义事件最多推进一次 Kernel chain / syncRev（planned TestDirectAndSyncDoNotBothAdvanceSyncRev）；v2/unknown generation 零 Kernel ingest（planned TestV2FailClosedQuarantine）。",
+      "deliveryClientProof": "adapter 不向 SSV2 直投 raw；catalog/todo 等非 timeline 信号不进 chat stream（existing TestSSECatalogSignalsDoNotEnterChatStream / TestSSETodoUpdatedIgnoredInPhase1）。",
+      "existingTests": [
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/events_test.go",
+          "symbol": "TestSubscribeStreamsLiveSSEFrames",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/events_test.go",
+          "symbol": "TestSSEStreamReconnectsAndHealsAfterDrop",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/events_test.go",
+          "symbol": "TestSSECatalogSignalsDoNotEnterChatStream",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/events_test.go",
+          "symbol": "TestSSETodoUpdatedIgnoredInPhase1",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/events_test.go",
+          "symbol": "TestSSEUserMessageArmsTurnOnce",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/probe_test.go",
+          "symbol": "TestProbeShapeArbiterFlipsGeneration",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/probe_test.go",
+          "symbol": "TestProbeRejectsUnauthenticatedServer",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/probe_test.go",
+          "symbol": "TestProbeFailsWhenNoRouteAnswers",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/probe_test.go",
+          "symbol": "TestProbeSelectsV2GenerationWhenLegacyRouteMissing",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/official_shapes_test.go",
+          "symbol": "TestOfficialShape_SessionListCarriesDirectoryQuery",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/sessions_test.go",
+          "symbol": "TestGetRichSessionHistoryMapsParts",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/opencodeweb_test.go",
+          "symbol": "TestInstanceStatusSuccessCarriesGeneration",
+          "status": "existing"
+        }
+      ],
+      "plannedTests": [
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/events_test.go",
+          "symbol": "TestNestedSyncSkipAtHandleServerEventOnly",
+          "status": "planned"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/events_test.go",
+          "symbol": "TestDirectAndSyncDoNotBothAdvanceSyncRev",
+          "status": "planned"
+        },
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/probe_test.go",
+          "symbol": "TestVerified118Only",
+          "status": "planned"
+        },
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/probe_test.go",
+          "symbol": "TestV2FailClosedQuarantine",
+          "status": "planned"
+        },
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/session_test.go",
+          "symbol": "TestPromptAsyncMessageIDAgentModelPartsFromA1A2A9",
+          "status": "planned"
+        }
+      ],
+      "sampleEvidence": "A1–A10 replay 归属明确：A1/A2/A3/A4/A5→C4；A6/A7/A8→C6；A9→C3；A10→C2/C7。source-only 行（workspace.project、content.reasoning、observation.external_turns、configuration.providers、configuration.default_model、sessions.rename、sessions.delete）与 selected variant 一律 capture-before-translator。",
+      "negativeAssertion": "unknown/unhandled SSE type 只 log debug 并 drop，不得视为成功或第二事件流；v2/unknown generation fail closed 零 ingest；unsupported part 在网络前失败零 POST；禁止 recursive JSON search 与 legacy parser fallback。",
+      "exitCondition": "A1–A10 每个 replay 都有命名 owner test；nested sync 显式跳过有 owning test；每个 source-only translator 行都先登记 capture gate。",
+      "uncoveredBoundaries": "named exclusive sync skip 仍是隐式 default-drop（C4 实现项）；selected variant 无同版本样本（C3 前置缺口）；vision remains future，不进入 supported acceptance tests。"
+    },
+    {
+      "id": "s4.kernel-live",
+      "name": "Kernel live",
+      "affectedSlices": [
+        "C1",
+        "C4"
+      ],
+      "status": "partial",
+      "invariantTags": [
+        "single-ingest",
+        "authoritative-terminal-only",
+        "kernel-nil-seal"
+      ],
+      "invariant": "一个 canonical event 最多推进一次 Kernel chain；execution 只从 authoritative status/error/idle 终结；`kernel==nil → projection.Apply` 是要封死的第二 reducer；HTTP 204 与 timeout 不得制造 completion。",
+      "producerProof": "EventPublisher.publish 在 publisher lock 下调用 kernel.IngestLive；每个 logical event 恰好 append 一条记录（existing TestEventPublisherAppendsExactlyOneRecordPerLogicalEvent）。",
+      "reducerFenceProof": "revision 只在 projection commit 时推进（existing TestProjectionRevisionAdvancesOnlyOnProjectionCommit）；kernel==nil fallback 待 seal（planned TestKernelNilProjectionApplySealed）。",
+      "deliveryClientProof": "缺 terminal 保持 running/failed；零输出 idle 暴露 turn error（existing TestSSEZeroOutputIdleSurfacesTurnError）；catalog gate 零 POST（existing TestSendCatalogGateIsZeroPOST）。",
+      "existingTests": [
+        {
+          "repo": "mac",
+          "file": "go-bridge/event_buffer_test.go",
+          "symbol": "TestEventPublisherAppendsExactlyOneRecordPerLogicalEvent",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_kernel_test.go",
+          "symbol": "TestProjectionRevisionAdvancesOnlyOnProjectionCommit",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_kernel_test.go",
+          "symbol": "TestProjectionSnapshotDeeplyImmutable",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/events_test.go",
+          "symbol": "TestSSEZeroOutputIdleSurfacesTurnError",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/session_test.go",
+          "symbol": "TestSendCatalogGateIsZeroPOST",
+          "status": "existing"
+        }
+      ],
+      "plannedTests": [
+        {
+          "repo": "mac",
+          "file": "go-bridge/event_publisher_test.go",
+          "symbol": "TestKernelNilProjectionApplySealed",
+          "status": "planned"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/handlers_projection_test.go",
+          "symbol": "TestHistoryStatusCannotBypassKernel",
+          "status": "planned"
+        },
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/session_test.go",
+          "symbol": "TestHTTP204IsAdmissionNotTurn",
+          "status": "planned"
+        }
+      ],
+      "sampleEvidence": "A3（provider retry/error 终态）、A4（abort 终态 MessageAbortedError→idle）、A1/A2（authoritative idle 终态）真实序列回放。",
+      "negativeAssertion": "无 timeout-completion；204 仅 admission；缺 terminal 不得推断成功；history/status 不得绕过 Kernel 直接写 timeline。",
+      "exitCondition": "kernel-nil seal 与 history/status 不可绕过均有 owning test；terminal 只来自 authoritative 证据有 A3/A4 回放证明。",
+      "uncoveredBoundaries": "kernel==nil fallback 代码仍在（sealed 状态待 C4 落地删除/测试封印）。"
+    },
+    {
+      "id": "s4.kernel-hydrate",
+      "name": "Kernel hydrate",
+      "affectedSlices": [
+        "C2",
+        "C4"
+      ],
+      "status": "partial",
+      "invariantTags": [
+        "private-hydrate",
+        "source-cut-fence",
+        "single-head"
+      ],
+      "invariant": "cold history 只进 private hydrate transaction（source cut/fence 下）；hydrate 期间 pending live 按序补追；commit 后 push/pull 是同一个 Kernel head；不进 EventBuffer、offline queue、mailbox 或 raw fanout。",
+      "producerProof": "opencode-web rich history 经 streamBackendRichHistoryProjectionEvents 只走 ApplyHydrateEvent（existing TestOpenCodeWebProjectionHydrateFromRichHistory）。",
+      "reducerFenceProof": "hydrate 事务 Begin/Apply/Commit 原子提交；checkpoint admission/invalidation 受控（existing TestProjectionCheckpointAdmissionAppendAndInvalidation）；restore 校验 schema（existing TestProjectionCheckpointRestoreValidAndEmpty）。",
+      "deliveryClientProof": "commit 后 Snapshot 为唯一 payload；live cold pull 在 busy probe 下只提交 running partial（existing TestOpenCodeWebLiveSessionColdPullWithBusyProbeCommitsRunningPartial 在 reconnect 行引用；本行 owning 为 hydrate-from-rich-history + prefers-by-id）。",
+      "existingTests": [
+        {
+          "repo": "mac",
+          "file": "go-bridge/handlers_projection_ocweb_test.go",
+          "symbol": "TestOpenCodeWebProjectionHydrateFromRichHistory",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/handlers_projection_ocweb_test.go",
+          "symbol": "TestOpenCodeWebGetSessionPrefersByIDFetcher",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/handlers_projection_ocweb_test.go",
+          "symbol": "TestOpenCodeWebLiveSessionColdPullSkipsSealAndCommitsRunningPartial",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_kernel_test.go",
+          "symbol": "TestProjectionHydrateRetryPolicy",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_kernel_test.go",
+          "symbol": "TestProjectionCheckpointAdmissionAppendAndInvalidation",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_kernel_test.go",
+          "symbol": "TestProjectionCheckpointRestoreValidAndEmpty",
+          "status": "existing"
+        }
+      ],
+      "plannedTests": [
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_kernel_test.go",
+          "symbol": "TestHydratePendingLiveCaughtUpInOrder",
+          "status": "planned"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_kernel_test.go",
+          "symbol": "TestPushPullSameHeadAfterCommit",
+          "status": "planned"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_kernel_test.go",
+          "symbol": "TestColdHistoryNeverEntersEventBuffer",
+          "status": "planned"
+        }
+      ],
+      "sampleEvidence": "A1/A2 reload 的 persisted messages；A5 重连的 hydrate facts；by-id get（A10 archived 会话）。",
+      "negativeAssertion": "hydrate 不得进入 ordinary live seq、EventBuffer、live buffer、offline queue、mailbox、raw client fanout；不得让客户端自行 merge get_session_messages。",
+      "exitCondition": "pending-live 按序补追、push/pull 同 head、不进 buffer 三者各有 owning test。",
+      "uncoveredBoundaries": "当前代码已满足架构，但 pending-live 顺序与 buffer 隔离尚无命名 owning test（planned 三项）。"
+    },
+    {
+      "id": "s4.reconnect",
+      "name": "reconnect",
+      "affectedSlices": [
+        "C4"
+      ],
+      "status": "partial",
+      "invariantTags": [
+        "reconnect-same-Kernel",
+        "epoch-reject-stale",
+        "pull-projection-only"
+      ],
+      "invariant": "generation/epoch mismatch 拒绝 stale frame；gap/invalidate 只拉 get_session_projection；恢复使用同一个 (backendId, sessionId) Kernel；iOS 不得调用 history merge、content similarity 或 completion timer；A5 busy→server.connected→live delta→idle 必须有 owning test。",
+      "producerProof": "进程 epoch 注入 EventPublisher 并跨 hello/register 一致（existing TestServerInjectsProcessEpochIntoEventPublisher、TestConcurrentHelloConnectionsShareProcessEpoch）。",
+      "reducerFenceProof": "checkpoint schema 不匹配即拒绝（existing TestProjectionCheckpointRejectsPreviousSemanticSchema）；validate/invalidate/rehydrate 都在同一 Kernel。",
+      "deliveryClientProof": "旧 session 的 projection 响应不改当前 timeline（iOS existing testOldSessionProjectionResponseDoesNotMutateCurrentTimeline）；SSE drop 后 heal（existing TestSSEStreamReconnectsAndHealsAfterDrop）。",
+      "existingTests": [
+        {
+          "repo": "mac",
+          "file": "go-bridge/bridge_epoch_test.go",
+          "symbol": "TestServerInjectsProcessEpochIntoEventPublisher",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/bridge_epoch_test.go",
+          "symbol": "TestConcurrentHelloConnectionsShareProcessEpoch",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/bridge_epoch_test.go",
+          "symbol": "TestServerUsesOneInjectedEpochAcrossHelloAndRegister",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_kernel_test.go",
+          "symbol": "TestProjectionCheckpointRejectsPreviousSemanticSchema",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/handlers_projection_ocweb_test.go",
+          "symbol": "TestOpenCodeWebLiveSessionColdPullWithBusyProbeCommitsRunningPartial",
+          "status": "existing"
+        },
+        {
+          "repo": "ios",
+          "file": "OpenCodeiOS/OpenCodeiOSTests/ChatViewModelSessionSyncV2Tests.swift",
+          "symbol": "testOldSessionProjectionResponseDoesNotMutateCurrentTimeline",
+          "status": "existing"
+        }
+      ],
+      "plannedTests": [
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/events_test.go",
+          "symbol": "TestReconnectSameKernelA5Sequence",
+          "status": "planned"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/event_publisher_test.go",
+          "symbol": "TestEpochMismatchRejectsStaleFrame",
+          "status": "planned"
+        },
+        {
+          "repo": "ios",
+          "file": "OpenCodeiOS/OpenCodeiOSTests/ChatViewModelSessionSyncV2Tests.swift",
+          "symbol": "testReconnectDoesNotCallLoadMessagesWhenSyncV2Active",
+          "status": "planned"
+        }
+      ],
+      "sampleEvidence": "A5 真实序列：busy-at-disconnect；第二条 SSE 首帧 server.connected 然后 live message.part.delta（续流非快照）；terminal idle；reload finish=stop。",
+      "negativeAssertion": "不得从空 reload status 合成 finish=stop；不得 iOS history merge / content-similarity dedup / 本地 completion timer；gap 只能走 get_session_projection。",
+      "exitCondition": "A5 序列 owning test 存在；epoch mismatch 拒绝 stale frame 有 owning test；iOS reconnect 不回调 loadMessages 有 owning test。",
+      "uncoveredBoundaries": "A5 owning test 与 epoch-mismatch 拒绝测试均为 planned（C4 实现项）。"
+    },
+    {
+      "id": "s4.delivery",
+      "name": "delivery",
+      "affectedSlices": [
+        "C4",
+        "C6"
+      ],
+      "status": "partial",
+      "invariantTags": [
+        "no-raw-to-ssv2",
+        "explicit-control-plane-allowlist",
+        "single-delivery-path"
+      ],
+      "invariant": "SSV2 connection 不接收 raw timeline writers；control-plane allowlist 明确且不携带 timeline payload；projection snapshot/patch/invalidate 只走现有这一条 websocket delivery path；push 丢失后 pull 返回同一 Kernel head。",
+      "producerProof": "shouldDeliverRawEventLocked 对 SSV2 连接封印 raw timeline；分类由 TestSessionSyncV2RawTimelineClassification 固定。",
+      "reducerFenceProof": "patch 只投给 V2 连接（existing TestProjectionPatchDeliveredToV2ConnOnly）；canonical user_input projection-only 且 legacy 单向派生（existing TestCanonicalUserInputIsProjectionOnlyAndLegacyIsOneWayDerived）。",
+      "deliveryClientProof": "control-plane raw 仍可达 projection-only 连接（existing TestProjectionOnlyConnStillReceivesControlPlaneRawEvents）；无订阅者不 crash（existing TestProjectionPatchNoSubscriberNoCrash）；iOS push 旁路 recovery cursor（existing testProjectionPatchPublishesDespiteRecoveryCursorAhead）。",
+      "existingTests": [
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_delivery_test.go",
+          "symbol": "TestProjectionPatchDeliveredToV2ConnOnly",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_delivery_test.go",
+          "symbol": "TestSessionSyncV2RawTimelineClassification",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_delivery_test.go",
+          "symbol": "TestCanonicalUserInputIsProjectionOnlyAndLegacyIsOneWayDerived",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_delivery_test.go",
+          "symbol": "TestProjectionOnlyConnStillReceivesControlPlaneRawEvents",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_delivery_test.go",
+          "symbol": "TestProjectionPatchNoSubscriberNoCrash",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/session_sync_v2_test.go",
+          "symbol": "TestSessionSyncV2DirectTransportResultPrecedesLiveProjectionPatch",
+          "status": "existing"
+        },
+        {
+          "repo": "ios",
+          "file": "OpenCodeiOS/OpenCodeiOSTests/K4ProjectionPushBypassTests.swift",
+          "symbol": "testProjectionPatchPublishesDespiteRecoveryCursorAhead",
+          "status": "existing"
+        }
+      ],
+      "plannedTests": [
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_delivery_test.go",
+          "symbol": "TestPushLostPullReturnsSameKernelHead",
+          "status": "planned"
+        }
+      ],
+      "sampleEvidence": "A1/A5 的 delivery 序列（patch/snapshot 到达 iOS 的 envelope 与现有 websocket 一致）。",
+      "negativeAssertion": "raw text_delta / question_* 不得发给 SSV2；不得出现第二 projection 管道；control-plane 事件不得夹带 timeline payload。",
+      "exitCondition": "push-lost→pull-same-head 有 owning test；raw 封印与 allowlist 分类维持 existing 覆盖。",
+      "uncoveredBoundaries": "push 丢失后 pull 同 head 的直接断言是 planned。"
+    },
+    {
+      "id": "s4.ios-ownership",
+      "name": "iOS ownership",
+      "affectedSlices": [
+        "C1",
+        "C4"
+      ],
+      "status": "partial",
+      "invariantTags": [
+        "t0-ownership",
+        "legacy-writer-seal",
+        "gate-before-reads"
+      ],
+      "invariant": "ownership 在 t=0 由 mode + selected backend capability 决定（非 projection 到达）；loading/empty/failed/invalidated 不恢复 legacy writer；loadMessages gate 必须发生在 cache/snapshot/network 读取之前；OpenCode Web 属于 projection backend family。",
+      "producerProof": "active mode 在选择时即持有 timeline（existing testActiveModeOwnsAtSelectionBeforeProjectionArrives）；off mode 保留 legacy（existing testOffModeKeepsLegacyOnly）。",
+      "reducerFenceProof": "capability 按 backend 收敛（existing TestSessionSyncV2CapabilityScopedToMigratedBackend；server.go advertiseSessionSyncV2Backend 含 opencode-web）。",
+      "deliveryClientProof": "loading 只启动有界 disaster retry（existing testLoadingProjectionStartsOnlyBoundedDisasterRetryTask）；transient disconnect 保持 loading 不出 banner（existing testOffModeTransientBridgeDisconnectKeepsEmptyHistoryLoadingWithoutBanner）；history fallback 复用原事务策略（existing testHistoryFallbackAndRetryReuseOriginalTransactionPolicy）。",
+      "existingTests": [
+        {
+          "repo": "ios",
+          "file": "OpenCodeiOS/OpenCodeiOSTests/ChatViewModelSessionSyncV2Tests.swift",
+          "symbol": "testActiveModeOwnsAtSelectionBeforeProjectionArrives",
+          "status": "existing"
+        },
+        {
+          "repo": "ios",
+          "file": "OpenCodeiOS/OpenCodeiOSTests/ChatViewModelSessionSyncV2Tests.swift",
+          "symbol": "testOffModeKeepsLegacyOnly",
+          "status": "existing"
+        },
+        {
+          "repo": "ios",
+          "file": "OpenCodeiOS/OpenCodeiOSTests/ChatViewModelSessionSyncV2Tests.swift",
+          "symbol": "testLoadingProjectionStartsOnlyBoundedDisasterRetryTask",
+          "status": "existing"
+        },
+        {
+          "repo": "ios",
+          "file": "OpenCodeiOS/OpenCodeiOSTests/ChatViewModelSessionSyncV2Tests.swift",
+          "symbol": "testOffModeTransientBridgeDisconnectKeepsEmptyHistoryLoadingWithoutBanner",
+          "status": "existing"
+        },
+        {
+          "repo": "ios",
+          "file": "OpenCodeiOS/OpenCodeiOSTests/ChatViewModelSessionSyncV2Tests.swift",
+          "symbol": "testActiveModeArmsOnHonestEmptyAndExecutingShell",
+          "status": "existing"
+        },
+        {
+          "repo": "ios",
+          "file": "OpenCodeiOS/OpenCodeiOSTests/ArchitectureGuardrailTests.swift",
+          "symbol": "testHistoryFallbackAndRetryReuseOriginalTransactionPolicy",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/session_sync_v2_test.go",
+          "symbol": "TestSessionSyncV2CapabilityScopedToMigratedBackend",
+          "status": "existing"
+        }
+      ],
+      "plannedTests": [
+        {
+          "repo": "ios",
+          "file": "OpenCodeiOS/OpenCodeiOSTests/ChatViewModelSessionSyncV2Tests.swift",
+          "symbol": "testOpenCodeWebSelectedBackendProjectsAtT0",
+          "status": "planned"
+        },
+        {
+          "repo": "ios",
+          "file": "OpenCodeiOS/OpenCodeiOSTests/ArchitectureGuardrailTests.swift",
+          "symbol": "testLoadMessagesGateRunsBeforeCacheSnapshotNetworkReads",
+          "status": "planned"
+        }
+      ],
+      "sampleEvidence": "A1 首开会话；A5 断连状态机（loading/invalidated 不回 legacy）。",
+      "negativeAssertion": "loading/empty/failed/invalidated 不得触发 loadMessages、replaceMessagesFromServer、get_session_messages 兜底或 delayed raw flush。",
+      "exitCondition": "opencode-web t=0 ownership 与 gate-before-reads 顺序各有 owning test。",
+      "uncoveredBoundaries": "opencode-web 专属 t=0 断言与 gate 顺序断言为 planned（C4/C1 实现项）。"
+    },
+    {
+      "id": "s4.ios-application",
+      "name": "iOS application",
+      "affectedSlices": [
+        "C3",
+        "C4"
+      ],
+      "status": "partial",
+      "invariantTags": [
+        "projectionstore-only-writer",
+        "baseRev-syncRev-fence",
+        "submit-zero-writer",
+        "presentation-only"
+      ],
+      "invariant": "只有 ProjectionStore 应用 full/delta/push；baseRev→syncRev、fence、generation/epoch 与 stale frame rejection 持续生效；submit path / composer placeholder / HTTP 204 不写 messages[]（submit-zero-writer），只有后续 projection apply 才写；placeholder 仅 presentation-only。",
+      "producerProof": "guard 测试封印外部双 writer 并要求 ProjectionStore 持有与 applyFrame 泵模型（existing testSessionSyncV2GuardsExternalDualWriters）。",
+      "reducerFenceProof": "低 rev snapshot 不得重开已解决卡片（existing testStaleLowerRevSnapshotDoesNotReopenResolvedCard）；gap recovery 对齐权威 snapshot（existing testGapRecoveryRealignsUserInputCardToAuthoritativeSnapshot）。",
+      "deliveryClientProof": "baseline 前的 patch 不渲染、baseline 到位后 reconcile（existing testPatchesBeforeBaselineDoNotRenderThenBaselineReconciles）；无 baseline 不裁决（existing testNoAdjudicationWhileUnresolved）；snapshot/invalidate 旁路 cursor（existing testProjectionSnapshotAndInvalidateAlsoBypassCursorGate）。",
+      "existingTests": [
+        {
+          "repo": "ios",
+          "file": "OpenCodeiOS/OpenCodeiOSTests/ArchitectureGuardrailTests.swift",
+          "symbol": "testSessionSyncV2GuardsExternalDualWriters",
+          "status": "existing"
+        },
+        {
+          "repo": "ios",
+          "file": "OpenCodeiOS/OpenCodeiOSTests/StructuredUserInputIOSRegressionTests.swift",
+          "symbol": "testStaleLowerRevSnapshotDoesNotReopenResolvedCard",
+          "status": "existing"
+        },
+        {
+          "repo": "ios",
+          "file": "OpenCodeiOS/OpenCodeiOSTests/StructuredUserInputIOSRegressionTests.swift",
+          "symbol": "testGapRecoveryRealignsUserInputCardToAuthoritativeSnapshot",
+          "status": "existing"
+        },
+        {
+          "repo": "ios",
+          "file": "OpenCodeiOS/OpenCodeiOSTests/LiveOnlyProjectionStateTests.swift",
+          "symbol": "testPatchesBeforeBaselineDoNotRenderThenBaselineReconciles",
+          "status": "existing"
+        },
+        {
+          "repo": "ios",
+          "file": "OpenCodeiOS/OpenCodeiOSTests/LiveOnlyProjectionStateTests.swift",
+          "symbol": "testNoAdjudicationWhileUnresolved",
+          "status": "existing"
+        },
+        {
+          "repo": "ios",
+          "file": "OpenCodeiOS/OpenCodeiOSTests/K4ProjectionPushBypassTests.swift",
+          "symbol": "testProjectionSnapshotAndInvalidateAlsoBypassCursorGate",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/handlers_projection_ocweb_test.go",
+          "symbol": "TestOpenCodeWebSendRebindsPendingToRealBeforeFirstEvent",
+          "status": "existing"
+        }
+      ],
+      "plannedTests": [
+        {
+          "repo": "ios",
+          "file": "OpenCodeiOS/OpenCodeiOSTests/ChatViewModelSessionSyncV2Tests.swift",
+          "symbol": "testComposerPlaceholderDoesNotWriteMessages",
+          "status": "planned"
+        },
+        {
+          "repo": "ios",
+          "file": "OpenCodeiOS/OpenCodeiOSTests/ChatViewModelSessionSyncV2Tests.swift",
+          "symbol": "testSubmit204DoesNotAppendMessagesUntilProjectionApply",
+          "status": "planned"
+        },
+        {
+          "repo": "ios",
+          "file": "OpenCodeiOS/OpenCodeiOSTests/ProjectionStoreTests.swift",
+          "symbol": "testBaseRevSyncRevFenceRejectsOldGeneration",
+          "status": "planned"
+        }
+      ],
+      "sampleEvidence": "A1/A2（persisted user message 与 projection 对齐）、A9（parts 映射不入 messages[] 的本地路径）。",
+      "negativeAssertion": "composer placeholder 不得写/确认/覆盖/裁判 active timeline；204 不是 turn_completed；不得出现 optimistic/history/raw 第二 writer。",
+      "exitCondition": "submit-zero-writer、placeholder presentation-only、baseRev→syncRev fence 各有 owning test。",
+      "uncoveredBoundaries": "三条 planned test 尚未落地（C3 实现项）；ProjectionStoreTests.swift 文件名按 Gate C 落位时可调整，但必须先建 owning 文件。"
+    },
+    {
+      "id": "s4.interaction",
+      "name": "interaction",
+      "affectedSlices": [
+        "C6"
+      ],
+      "status": "partial",
+      "invariantTags": [
+        "permission-raw-no-timeline",
+        "question-canonical-user-input",
+        "todo-control-plane-only"
+      ],
+      "invariant": "permission raw control 不写 timeline、canonical permission 只归约一次、reject 不是健康完成；question 只走 canonical user_input_requested/resolved、legacy question frame 不进 Kernel 也不发给 SSV2；todo 只在 control-plane、绝不进 SessionProjection、不造 hash/content/position ID；A6/A7/A8 的 request/reply/reject/reload 都有 owning test；capability 只在完整真实路径后广告。",
+      "producerProof": "handlePermissionAsked 只产 core.EventPermissionRequest；todo.updated phase-1 显式忽略（existing TestSSETodoUpdatedIgnoredInPhase1）。",
+      "reducerFenceProof": "permission pending tool + requires action（existing TestReducerPermissionRequestProjectsPendingToolAndRequiresAction）；resolved 清 pending 保持 running（existing TestReducerPermissionResolvedClearsPendingAndLeavesRunning）；deny 拒绝 tool（existing TestReducerPermissionResolvedDenyRejectsTool）。",
+      "deliveryClientProof": "canonical user_input projection-only、legacy 单向派生不回 Kernel（existing TestCanonicalUserInputIsProjectionOnlyAndLegacyIsOneWayDerived）；iOS 五状态恰好一张卡（existing testSnapshotRoundTrip_AllFiveStatusesMapToExactlyOneCard）；当前 question 面为 ErrNotSupported 诚实缺席（existing TestQuestionsNotSupported）。",
+      "existingTests": [
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_reducer_permission_test.go",
+          "symbol": "TestReducerPermissionRequestProjectsPendingToolAndRequiresAction",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_reducer_permission_test.go",
+          "symbol": "TestReducerPermissionResolvedClearsPendingAndLeavesRunning",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_reducer_permission_test.go",
+          "symbol": "TestReducerPermissionResolvedDenyRejectsTool",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_reducer_permission_test.go",
+          "symbol": "TestReducerUserInputRequestedWithoutTurnIDUsesActiveTurn",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_reducer_permission_test.go",
+          "symbol": "TestReducerQuestionAskedProjectsUserInputDock",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_delivery_test.go",
+          "symbol": "TestCanonicalUserInputIsProjectionOnlyAndLegacyIsOneWayDerived",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/events_test.go",
+          "symbol": "TestSSEPermissionAsked",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/events_test.go",
+          "symbol": "TestSSETodoUpdatedIgnoredInPhase1",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/session_test.go",
+          "symbol": "TestQuestionsNotSupported",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/opencodeweb_test.go",
+          "symbol": "TestWireDescriptorMatchesDesign",
+          "status": "existing"
+        },
+        {
+          "repo": "ios",
+          "file": "OpenCodeiOS/OpenCodeiOSTests/StructuredUserInputIOSRegressionTests.swift",
+          "symbol": "testSnapshotRoundTrip_AllFiveStatusesMapToExactlyOneCard",
+          "status": "existing"
+        },
+        {
+          "repo": "ios",
+          "file": "OpenCodeiOS/OpenCodeiOSTests/StructuredUserInputIOSRegressionTests.swift",
+          "symbol": "testPatchUpsertUserInput_ResolvesPendingToAnsweredInPlace",
+          "status": "existing"
+        }
+      ],
+      "plannedTests": [
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/events_test.go",
+          "symbol": "TestPermissionA6OnceAlwaysRejectReplay",
+          "status": "planned"
+        },
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/question_test.go",
+          "symbol": "TestQuestionA7AnswersStringMatrixAndReject",
+          "status": "planned"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_reducer_todo_test.go",
+          "symbol": "TestTodoA8ControlPlaneNoIdNoTimeline",
+          "status": "planned"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_reducer_permission_test.go",
+          "symbol": "TestPermissionRawDoesNotWriteMessages",
+          "status": "planned"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/event_publisher_test.go",
+          "symbol": "TestLegacyQuestionNotIngestedAndNotSentToSSV2",
+          "status": "planned"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_reducer_todo_test.go",
+          "symbol": "TestTodoNotInSessionProjection",
+          "status": "planned"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/projection_reducer_permission_test.go",
+          "symbol": "TestRejectIsNotHealthyCompletion",
+          "status": "planned"
+        }
+      ],
+      "sampleEvidence": "A6（once/always/reject + replied/resolved + reload）、A7（asked/reply answers:string[][]/reject/resolved/reload）、A8（todo.updated + GET /todo {content,status,priority} 无 id）。",
+      "negativeAssertion": "reject ≠ 健康完成（A6 finish=tool-calls、A7 idle、pending cleared）；不发明官方 question_resolved；permission 不得折叠为 question；todo 不进 SessionProjection、不合成 ID；完整路径存在前不广告 capability。",
+      "exitCondition": "A6/A7/A8 request/reply/reject/reload 全部有 owning test；三类所有权各有 negative test。",
+      "uncoveredBoundaries": "question/todo 路径当前为诚实缺席（ErrNotSupported / phase-1 ignore）；全部 planned tests 为 C6 实现项。"
+    },
+    {
+      "id": "s4.cross-repository",
+      "name": "cross-repository",
+      "affectedSlices": [
+        "C1",
+        "C2",
+        "C3",
+        "C4",
+        "C5",
+        "C6",
+        "C7"
+      ],
+      "status": "partial",
+      "invariantTags": [
+        "canonical-first",
+        "no-undeclared-wire-field",
+        "capability-after-full-path"
+      ],
+      "invariant": "协议顺序 canonical-first：Mac docs/protocol/schema → Go types → iOS mirror/Swift/web types → capability advertisement；C1–C7 判定 no protocol change 的 slice 必须有 guard test 证明没有私自新增 wire field；若 Gate C 后来需要协议变更，必须先完成 canonical-first 双仓 tests 才能广告；capability flag 只能在完整 Mac+iOS 路径与相关测试通过后开启。",
+      "producerProof": "hello/hello_ack fixture 走 bridge-v1 schema 解码与往返（existing TestBridgeV1HelloFixtureDecodes / TestBridgeV1HelloAckFixtureRoundTrips）。",
+      "reducerFenceProof": "capability 按 opt-in 广告/省略（existing TestSessionSyncV2CapabilityAdvertisedOnOptIn / TestSessionSyncV2CapabilityOmittedWithoutOptIn）。",
+      "deliveryClientProof": "opencode-web WireDescriptor 恰为 external_turn_streaming、无 todos/question_reply（existing TestWireDescriptorMatchesDesign）——证明 OD-3 extras 未实施且未广告。",
+      "existingTests": [
+        {
+          "repo": "mac",
+          "file": "go-bridge/bridge_v1_schema_test.go",
+          "symbol": "TestBridgeV1HelloFixtureDecodes",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/bridge_v1_schema_test.go",
+          "symbol": "TestBridgeV1HelloAckFixtureRoundTrips",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/session_sync_v2_test.go",
+          "symbol": "TestSessionSyncV2CapabilityAdvertisedOnOptIn",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "go-bridge/session_sync_v2_test.go",
+          "symbol": "TestSessionSyncV2CapabilityOmittedWithoutOptIn",
+          "status": "existing"
+        },
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/opencodeweb_test.go",
+          "symbol": "TestWireDescriptorMatchesDesign",
+          "status": "existing"
+        }
+      ],
+      "plannedTests": [
+        {
+          "repo": "mac",
+          "file": "go-bridge/bridge_v1_schema_test.go",
+          "symbol": "TestNoUndeclaredWireFieldAdded",
+          "status": "planned"
+        },
+        {
+          "repo": "mac",
+          "file": "agent/opencode-web/opencodeweb_test.go",
+          "symbol": "TestOD3ExtrasNotImplementedAndNotAdvertised",
+          "status": "planned"
+        }
+      ],
+      "sampleEvidence": "None（结构守卫行）：证据为 schema fixture 与 WireDescriptor 测试本体。",
+      "negativeAssertion": "OD-3 十四项（sessions.fork/share/unshare/children、turns.command/shell/summarize/revert/unrevert、workspace.session_diff/vcs/file_list/file_read/file_search）与 vision 保持 future/unsupported：未实施、未广告、无 owning implementation acceptance；不得私加 wire field 或在完整路径前开 capability flag。",
+      "exitCondition": "no-undeclared-wire-field guard 与 OD-3 未实施未广告断言均有 owning test；任何 Gate C 协议变更先走 canonical-first 双仓 tests。",
+      "uncoveredBoundaries": "双仓协议变更流程仅在 Gate C 真正需要协议变化时触发（当前仅 C3 条件性 send-RPC 字段）。"
+    }
+  ],
+  "s4PreSampleOrder": [
+    {
+      "id": "workspace.project",
+      "cSlice": "C2",
+      "captureFirst": true,
+      "order": "capture/checker → then translator test"
+    },
+    {
+      "id": "content.reasoning",
+      "cSlice": "C4",
+      "captureFirst": true,
+      "order": "capture/checker → then translator test"
+    },
+    {
+      "id": "observation.external_turns",
+      "cSlice": "C4",
+      "captureFirst": true,
+      "order": "capture/checker → then translator test"
+    },
+    {
+      "id": "configuration.providers",
+      "cSlice": "C5",
+      "captureFirst": true,
+      "order": "capture/checker → then translator test"
+    },
+    {
+      "id": "configuration.default_model",
+      "cSlice": "C5",
+      "captureFirst": true,
+      "order": "capture/checker → then translator test"
+    },
+    {
+      "id": "sessions.rename",
+      "cSlice": "C7",
+      "captureFirst": true,
+      "order": "capture/checker → then translator test"
+    },
+    {
+      "id": "sessions.delete",
+      "cSlice": "C7",
+      "captureFirst": true,
+      "order": "capture/checker → then translator test"
+    },
+    {
+      "id": "selected_variant",
+      "cSlice": "C3",
+      "captureFirst": true,
+      "order": "capture/checker → then translator test",
+      "note": "A1 omit-when-unset 不是 selected-variant 样本；先补同版本样本"
     }
   ]
 }

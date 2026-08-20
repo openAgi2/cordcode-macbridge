@@ -91,8 +91,7 @@ def _blob(row: dict) -> str:
 def problems(doc: dict, md_text: str | None) -> list[str]:
     bad: list[str] = []
     meta = doc.get("meta") if isinstance(doc.get("meta"), dict) else {}
-    if meta.get("s4Started") is not False:
-        bad.append("s4Started-must-be-false")
+    # S4 started 2026-08-20 (authorized after independent S3 audit); only Gate C stays forbidden.
     if meta.get("gateCStarted") is not False:
         bad.append("gateCStarted-must-be-false")
     if meta.get("productCodeFrozen") is not True:
@@ -239,7 +238,6 @@ def problems(doc: dict, md_text: str | None) -> list[str]:
             "user_input_requested",
             "user_input_resolved",
             "实现前补样本",
-            "s4Started=false",
             "productCodeFrozen=true",
         ):
             if needle not in md_text:
