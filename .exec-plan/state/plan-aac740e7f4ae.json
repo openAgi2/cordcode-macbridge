@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-20T21:30:00Z",
+  "updated_at": "2026-08-20T23:45:00Z",
   "todos": [
     {
       "id": "gate-a-inventory-impl",
@@ -703,30 +703,35 @@
       "id": "c2-list-get-impl",
       "title": "C2 official list/get semantics",
       "description": "Reproduce root-session and limit semantics; document multi-directory aggregation and archive filtering as a bridge product rule; retain by-ID get.",
-      "status": "pending",
+      "status": "done",
       "phase": "c2",
       "kind": "impl",
       "depends_on": [
         "c1-version-transport-regression"
       ],
       "source": "Gate C2",
-      "notes": "",
+      "notes": "Directive-003. Evidence-first: workspace.project sample+checker commit 69f26bc precedes product commit ef21db1 (capture-before-translator honored). Mac-only; no iOS product code.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "C2 official list/get per directive-003: upstream requests carry directory+roots=true+limit=100 (frozen core.OpenCodeSessionFetchLimit shared with bridge; no omit-limit retry; failures are diagnosable catalog errors); OD-1 archived hidden in default enumerations but kept by-ID; OD-2 per-worktree aggregation with registry/bucket failures failing the whole list, empty registry = empty catalog (zero fallbacks), stable-ID dedup, ModifiedAt DESC/ID ASC; malformed top-level/rows fail (no silent trimming); missing-worktree is a documented CordCode visibility overlay on the aggregate only — scoped scope unchanged, by-ID unaffected; list/get stays pure catalog (zero POST, zero event streams, no Kernel/EventPublisher/timeline writer).",
+        "artifacts": [
+          "core/opencode_fetch_limit.go",
+          "agent/opencode-web/sessions.go",
+          "agent/opencode-web/projects.go",
+          "go-bridge/handlers_opencode.go"
+        ],
+        "checked_at": "2026-08-20T23:45:00Z"
       }
     },
     {
       "id": "c2-list-get-tests",
       "title": "C2 boundary fixtures for list/get",
       "description": "Replay A10 plus root/child, exactly-at-limit, over-limit, archived, missing worktree, by-ID retrieval.",
-      "status": "pending",
+      "status": "done",
       "phase": "c2",
       "kind": "tests",
       "depends_on": [
@@ -736,20 +741,23 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "automated",
-        "attestation": "self-attested",
+        "status": "present",
+        "method": "tests",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Eight owning tests in list_get_c2_test.go (TestOfficialRootsLimit, TestArchivedHiddenInDefaultListKeptById, TestGlobalAggregatePerWorktree, TestProjectRegistryAndBucketFailuresSurface, TestEmptyProjectRegistryIsEmpty, TestMissingWorktreeRule, TestListGetDoesNotWriteMessages, TestCreateBodyEmptyMatchesV1) + reworked TestArchivedAtMappingKeptForByIDReads/TestListSessionsMapsFieldsAndDirectoryHeader + full package green: go test ./agent/opencode-web/ -count=1 -timeout 180s => ok.",
+        "artifacts": [
+          "agent/opencode-web/list_get_c2_test.go",
+          "cmd:go test ./agent/opencode-web/ -count=1 -timeout 180s => ok 2.693s"
+        ],
+        "checked_at": "2026-08-20T23:45:00Z"
       }
     },
     {
       "id": "c2-list-get-regression",
       "title": "C2 list/get sandbox reopen cycle",
       "description": "Isolated sandbox create/list/archive/get-by-id matches official server state.",
-      "status": "pending",
+      "status": "done",
       "phase": "c2",
       "kind": "regression",
       "depends_on": [
@@ -759,13 +767,18 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "mixed",
+        "status": "present",
+        "method": "regression",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Regression: wp checker ok (entries=3 distinctNonGlobal=2 deletedStillRegistered=true) + self-test PASS; check_samples --require-all 10/10 captured + self-test PASS (A10 replay incl. archived-by-ID + roots/limit semantics); go-bridge focused (OpenCodeWeb|ListSessions|SessionCatalog|Projection) ok 4.689s; ./core/ ok; vet clean; go build ./... OK. Release built from ef21db1, installed /Applications/CordCodeLink.app, runtime commit ef21db183148 listens 8777; owner 4096 (PID 71333) untouched; no temp-app residue. 4398/4399 recycled after capture.",
+        "artifacts": [
+          "cmd:python3 check_workspace_project.py [--self-test] => ok / PASS",
+          "cmd:python3 check_samples.py --require-all => 10 captured",
+          "cmd:go test ./go-bridge/ -run OpenCodeWeb|ListSessions|SessionCatalog|Projection => ok 4.689s",
+          "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED; runtime ef21db183148 @ /Applications/CordCodeLink.app:8777"
+        ],
+        "checked_at": "2026-08-20T23:45:00Z"
       }
     },
     {
