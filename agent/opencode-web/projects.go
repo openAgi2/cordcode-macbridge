@@ -3,6 +3,7 @@ package opencodeweb
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -44,18 +45,45 @@ func (a *Agent) fetchProjects(ctx context.Context, c *Client) ([]ocwProjectEntry
 	if err != nil {
 		return nil, err
 	}
-	items, err := decodeListPayload(raw)
-	if err != nil {
-		return nil, err
+	return decodeProjectRegistry(raw)
+}
+
+// decodeProjectRegistry parses the verified 1.18.18 GET /project response:
+// a BARE ARRAY of row objects (WP-FIX sample-verified at 4a215b0 — three real
+// responses, rows {id, worktree, time, sandboxes, vcs?}). Any other top level
+// (envelope, null, scalar, object) fails closed — /project never ships a v2
+// {data:[…]} shape, so decodeListPayload's envelope tolerance does not apply
+// here. Every row must be a JSON object whose required id and worktree are
+// non-empty strings; wrong types, nulls, and omissions fail the whole
+// registry instead of being trimmed (a silently shortened registry would
+// shrink the OD-2 aggregate while looking healthy). Unknown extra fields
+// (vcs, time, sandboxes…) are allowed and ignored. worktree "/" is a valid
+// row — the serve's global pseudo-project — and is filtered only later by
+// the CordCode visibility overlay, never by this decoder.
+func decodeProjectRegistry(raw []byte) ([]ocwProjectEntry, error) {
+	trimmed := trimSpaceBytes(raw)
+	if len(trimmed) == 0 || trimmed[0] != '[' {
+		return nil, fmt.Errorf("opencode-web: project registry must be a bare array (generation-118 verified shape), got: %s", truncateForError(string(raw)))
 	}
-	out := make([]ocwProjectEntry, 0, len(items))
-	for _, item := range items {
-		var entry ocwProjectEntry
-		if err := json.Unmarshal(item, &entry); err != nil {
-			continue
+	var rows []json.RawMessage
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return nil, fmt.Errorf("opencode-web: project registry array malformed: %w", err)
+	}
+	out := make([]ocwProjectEntry, 0, len(rows))
+	for i, row := range rows {
+		rowBytes := trimSpaceBytes(row)
+		if len(rowBytes) == 0 || rowBytes[0] != '{' {
+			return nil, fmt.Errorf("opencode-web: project registry row %d must be an object, got: %s", i, truncateForError(string(row)))
 		}
-		if entry.ID == "" || entry.Worktree == "" {
-			continue
+		var entry ocwProjectEntry
+		if err := json.Unmarshal(row, &entry); err != nil {
+			return nil, fmt.Errorf("opencode-web: project registry row %d malformed: %w", i, err)
+		}
+		if entry.ID == "" {
+			return nil, fmt.Errorf("opencode-web: project registry row %d missing required id", i)
+		}
+		if entry.Worktree == "" {
+			return nil, fmt.Errorf("opencode-web: project registry row %d missing required worktree", i)
 		}
 		out = append(out, entry)
 	}

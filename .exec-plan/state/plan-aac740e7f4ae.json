@@ -1,1522 +1,1526 @@
 {
-  "version": 6,
-  "project_root": "/Users/jacklee/Projects/cordcode-macbridge-opencode-web",
-  "plan_file": "docs/2026-08-20-opencode-web-source-first-convergence-plan.md",
-  "state_store": {
-    "canonical_path": ".exec-plan/state/plan-aac740e7f4ae.json",
-    "legacy_path": ".claude/exec-plans/plan-aac740e7f4ae.json",
-    "origin": "new",
-    "migrated_from": null,
-    "migrated_at": null
+ "version": 6,
+ "project_root": "/Users/jacklee/Projects/cordcode-macbridge-opencode-web",
+ "plan_file": "docs/2026-08-20-opencode-web-source-first-convergence-plan.md",
+ "state_store": {
+  "canonical_path": ".exec-plan/state/plan-aac740e7f4ae.json",
+  "legacy_path": ".claude/exec-plans/plan-aac740e7f4ae.json",
+  "origin": "new",
+  "migrated_from": null,
+  "migrated_at": null
+ },
+ "queue_policy": {
+  "todo_md_role": "informational-only",
+  "completion_gate": "proof-carrying-impl-tests-regression",
+  "phase_done_rule": "all-required-todos-done",
+  "audit_rule": "unsupported-done-must-downgrade",
+  "start_exit_rule": "internal-audit-before-success",
+  "audit_failure_policy": "light-repairable-heavy-external-blocker",
+  "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+  "session_mirror_policy": "todo-write-optional-mirror",
+  "invocation_policy": "slash-or-natural-language-equivalent",
+  "persistence_rule": "persist-on-every-status-transition"
+ },
+ "report_policy": {
+  "auto_write_completion_report": true,
+  "report_directory": "docs",
+  "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+  "write_when": "all-required-todos-proven-done",
+  "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+ },
+ "reports": {
+  "completion_report_path": "docs/2026-08-20-opencode-web-source-first-convergence-plan完成情况.md",
+  "completion_report_status": "missing",
+  "last_generated_at": null,
+  "based_on_queue_hash": null
+ },
+ "updated_at": "2026-08-20T17:30:00Z",
+ "todos": [
+  {
+   "id": "gate-a-inventory-impl",
+   "title": "Gate A inventory: official source map for A1–A10",
+   "description": "Write docs/2026-08-20-opencode-web-1.18.18-sample-inventory.md. Each A1–A10 row must cite official Web UI call site, 1.18.18 server/schema/reducer location, capture command, sanitized I/O path, and a pending bridge mapping. Do not invent live JSON.",
+   "status": "done",
+   "phase": "gate-a",
+   "kind": "impl",
+   "depends_on": [],
+   "source": "Gate A",
+   "notes": "Preserved paused Gate A inventory; filled official UI/server paths for A1–A10; escaped table pipes; added SSV2 mapping notes without product code.",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "A1–A10 rows cite official Web UI call sites, 1.18.18 server/schema/reducer, capture command, sample path, pending status, and bridge mapping. No live JSON invented.",
+    "artifacts": [
+     "docs/2026-08-20-opencode-web-1.18.18-sample-inventory.md",
+     "agent/opencode-web/testdata/official-1.18.18/harness/check_inventory.py"
+    ],
+    "checked_at": "2026-08-20T11:41:15Z"
+   }
   },
-  "queue_policy": {
-    "todo_md_role": "informational-only",
-    "completion_gate": "proof-carrying-impl-tests-regression",
-    "phase_done_rule": "all-required-todos-done",
-    "audit_rule": "unsupported-done-must-downgrade",
-    "start_exit_rule": "internal-audit-before-success",
-    "audit_failure_policy": "light-repairable-heavy-external-blocker",
-    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
-    "session_mirror_policy": "todo-write-optional-mirror",
-    "invocation_policy": "slash-or-natural-language-equivalent",
-    "persistence_rule": "persist-on-every-status-transition"
+  {
+   "id": "gate-a-inventory-tests",
+   "title": "Gate A inventory completeness check",
+   "description": "Script/test that every A1–A10 row has UI source, server/schema source, capture command, sample path slot, and mapping decision. Fail if any required citation is empty.",
+   "status": "done",
+   "phase": "gate-a",
+   "kind": "tests",
+   "depends_on": [
+    "gate-a-inventory-impl"
+   ],
+   "source": "Gate A",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "python3 agent/opencode-web/testdata/official-1.18.18/harness/check_inventory.py → inventory ok: 10 P0 rows",
+    "artifacts": [
+     "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_inventory.py => inventory ok: 10 P0 rows",
+     "docs/2026-08-20-opencode-web-1.18.18-sample-inventory.md",
+     "cmd:audit-reverify 2026-08-20: check_inventory.py => inventory ok: 10 P0 rows"
+    ],
+    "checked_at": "2026-08-20T17:30:00Z"
+   }
   },
-  "report_policy": {
-    "auto_write_completion_report": true,
-    "report_directory": "docs",
-    "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
-    "write_when": "all-required-todos-proven-done",
-    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  {
+   "id": "gate-a-inventory-regression",
+   "title": "Gate A inventory has no product UX surface",
+   "description": "Inventory is a source/sample matrix, not a user-facing change.",
+   "status": "done",
+   "phase": "gate-a",
+   "kind": "regression",
+   "depends_on": [
+    "gate-a-inventory-tests"
+   ],
+   "source": "Gate A",
+   "notes": "",
+   "verification": {
+    "required": false,
+    "status": "present",
+    "method": "manual",
+    "attestation": "self-attested",
+    "na_reason": "documentation/source matrix only; completeness is covered by gate-a-inventory-tests",
+    "summary": "No product UX change. git diff of agent/opencode-web go-bridge MacBridge core is empty.",
+    "artifacts": [
+     "docs/2026-08-20-opencode-web-1.18.18-sample-inventory.md"
+    ],
+    "checked_at": "2026-08-20T11:41:15Z"
+   }
   },
-  "reports": {
-    "completion_report_path": "docs/2026-08-20-opencode-web-source-first-convergence-plan完成情况.md",
-    "completion_report_status": "missing",
-    "last_generated_at": null,
-    "based_on_queue_hash": null
+  {
+   "id": "gate-a-harness-impl",
+   "title": "Isolated 1.18.18 serve + local mock provider harness",
+   "description": "Create harness under agent/opencode-web/testdata/official-1.18.18/harness: isolated HOME/XDG, opencode.json with only localmock openai-compatible provider, mock HTTP server, start/stop scripts. Never write to owner managed serve on :4096.",
+   "status": "done",
+   "phase": "gate-a",
+   "kind": "impl",
+   "depends_on": [
+    "gate-a-inventory-impl"
+   ],
+   "source": "Gate A",
+   "notes": "connected-only isolation: /provider.all may contain full registry; connected must be [localmock]; prompt must hit 127.0.0.1:4399.",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Isolated HOME/XDG + localmock openai-compatible mock on 4399 and opencode 1.18.18 serve on 4398. connected-only isolation; prompt hits 4399; 4096 never written.",
+    "artifacts": [
+     "agent/opencode-web/testdata/official-1.18.18/harness/start_sandbox.sh",
+     "agent/opencode-web/testdata/official-1.18.18/harness/stop_sandbox.sh",
+     "agent/opencode-web/testdata/official-1.18.18/harness/mock_provider.py",
+     "agent/opencode-web/testdata/official-1.18.18/harness/health_check.py",
+     "agent/opencode-web/testdata/official-1.18.18/harness/opencode.json"
+    ],
+    "checked_at": "2026-08-20T11:54:59Z"
+   }
   },
-  "updated_at": "2026-08-21T02:50:00Z",
-  "todos": [
-    {
-      "id": "gate-a-inventory-impl",
-      "title": "Gate A inventory: official source map for A1–A10",
-      "description": "Write docs/2026-08-20-opencode-web-1.18.18-sample-inventory.md. Each A1–A10 row must cite official Web UI call site, 1.18.18 server/schema/reducer location, capture command, sanitized I/O path, and a pending bridge mapping. Do not invent live JSON.",
-      "status": "done",
-      "phase": "gate-a",
-      "kind": "impl",
-      "depends_on": [],
-      "source": "Gate A",
-      "notes": "Preserved paused Gate A inventory; filled official UI/server paths for A1–A10; escaped table pipes; added SSV2 mapping notes without product code.",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "implementation",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "A1–A10 rows cite official Web UI call sites, 1.18.18 server/schema/reducer, capture command, sample path, pending status, and bridge mapping. No live JSON invented.",
-        "artifacts": [
-          "docs/2026-08-20-opencode-web-1.18.18-sample-inventory.md",
-          "agent/opencode-web/testdata/official-1.18.18/harness/check_inventory.py"
-        ],
-        "checked_at": "2026-08-20T11:41:15Z"
-      }
-    },
-    {
-      "id": "gate-a-inventory-tests",
-      "title": "Gate A inventory completeness check",
-      "description": "Script/test that every A1–A10 row has UI source, server/schema source, capture command, sample path slot, and mapping decision. Fail if any required citation is empty.",
-      "status": "done",
-      "phase": "gate-a",
-      "kind": "tests",
-      "depends_on": [
-        "gate-a-inventory-impl"
-      ],
-      "source": "Gate A",
-      "notes": "",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "automated",
-        "attestation": "re-verified",
-        "na_reason": null,
-        "summary": "python3 agent/opencode-web/testdata/official-1.18.18/harness/check_inventory.py → inventory ok: 10 P0 rows",
-        "artifacts": [
-          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_inventory.py => inventory ok: 10 P0 rows",
-          "docs/2026-08-20-opencode-web-1.18.18-sample-inventory.md",
-          "cmd:audit-reverify 2026-08-20: check_inventory.py => inventory ok: 10 P0 rows"
-        ],
-        "checked_at": "2026-08-20T17:30:00Z"
-      }
-    },
-    {
-      "id": "gate-a-inventory-regression",
-      "title": "Gate A inventory has no product UX surface",
-      "description": "Inventory is a source/sample matrix, not a user-facing change.",
-      "status": "done",
-      "phase": "gate-a",
-      "kind": "regression",
-      "depends_on": [
-        "gate-a-inventory-tests"
-      ],
-      "source": "Gate A",
-      "notes": "",
-      "verification": {
-        "required": false,
-        "status": "present",
-        "method": "manual",
-        "attestation": "self-attested",
-        "na_reason": "documentation/source matrix only; completeness is covered by gate-a-inventory-tests",
-        "summary": "No product UX change. git diff of agent/opencode-web go-bridge MacBridge core is empty.",
-        "artifacts": [
-          "docs/2026-08-20-opencode-web-1.18.18-sample-inventory.md"
-        ],
-        "checked_at": "2026-08-20T11:41:15Z"
-      }
-    },
-    {
-      "id": "gate-a-harness-impl",
-      "title": "Isolated 1.18.18 serve + local mock provider harness",
-      "description": "Create harness under agent/opencode-web/testdata/official-1.18.18/harness: isolated HOME/XDG, opencode.json with only localmock openai-compatible provider, mock HTTP server, start/stop scripts. Never write to owner managed serve on :4096.",
-      "status": "done",
-      "phase": "gate-a",
-      "kind": "impl",
-      "depends_on": [
-        "gate-a-inventory-impl"
-      ],
-      "source": "Gate A",
-      "notes": "connected-only isolation: /provider.all may contain full registry; connected must be [localmock]; prompt must hit 127.0.0.1:4399.",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "implementation",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "Isolated HOME/XDG + localmock openai-compatible mock on 4399 and opencode 1.18.18 serve on 4398. connected-only isolation; prompt hits 4399; 4096 never written.",
-        "artifacts": [
-          "agent/opencode-web/testdata/official-1.18.18/harness/start_sandbox.sh",
-          "agent/opencode-web/testdata/official-1.18.18/harness/stop_sandbox.sh",
-          "agent/opencode-web/testdata/official-1.18.18/harness/mock_provider.py",
-          "agent/opencode-web/testdata/official-1.18.18/harness/health_check.py",
-          "agent/opencode-web/testdata/official-1.18.18/harness/opencode.json"
-        ],
-        "checked_at": "2026-08-20T11:54:59Z"
-      }
-    },
-    {
-      "id": "gate-a-harness-tests",
-      "title": "Harness health: isolated serve + connected localmock",
-      "description": "Start isolated serve, GET /global/health == 1.18.18, GET /provider.connected == [localmock] (all may include the full registry), localmock echo in connected catalog, prompt hits 127.0.0.1:4399 mock, no writes to 127.0.0.1:4096, start/stop recycles 4398/4399.",
-      "status": "done",
-      "phase": "gate-a",
-      "kind": "tests",
-      "depends_on": [
-        "gate-a-harness-impl"
-      ],
-      "source": "Gate A",
-      "notes": "",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "automated",
-        "attestation": "re-verified",
-        "na_reason": null,
-        "summary": "health_check.py PASS: /global/health 1.18.18; connected=[localmock]; echo in catalog; POST /v1/chat/completions on 127.0.0.1:4399 scenario=text; 4096 pid 71333 unchanged; start/stop recycled 4398/4399.",
-        "artifacts": [
-          "agent/opencode-web/testdata/official-1.18.18/evidence/harness-health.json",
-          "cmd:python3 harness/health_check.py => health_check PASS connected=[localmock] allCount=1 mockHits=2",
-          "cmd:stop_sandbox.sh => 4398 free 4399 free 4096 pid 71333",
-          "cmd:audit-reverify 2026-08-20: start_sandbox.sh + health_check.py => health_check PASS connected=[localmock] allCount=1 mockHits=2; stop_sandbox.sh clean"
-        ],
-        "checked_at": "2026-08-20T17:30:00Z"
-      }
-    },
-    {
-      "id": "gate-a-harness-regression",
-      "title": "Harness isolation has no product UX surface",
-      "description": "Harness is capture infrastructure.",
-      "status": "done",
-      "phase": "gate-a",
-      "kind": "regression",
-      "depends_on": [
-        "gate-a-harness-tests"
-      ],
-      "source": "Gate A",
-      "notes": "",
-      "verification": {
-        "required": false,
-        "status": "present",
-        "method": "manual",
-        "attestation": "self-attested",
-        "na_reason": "internal capture infrastructure; isolation is covered by gate-a-harness-tests",
-        "summary": "Harness isolation is capture infrastructure; no product code changed.",
-        "artifacts": [
-          "agent/opencode-web/testdata/official-1.18.18/evidence/harness-health.json"
-        ],
-        "checked_at": "2026-08-20T11:54:59Z"
-      }
-    },
-    {
-      "id": "gate-a-capture-impl",
-      "title": "Capture sanitized 1.18.18 samples for A1–A10",
-      "description": "Using the isolated harness, capture official request/response/SSE sequences for A1–A10. Prefer A1, A2, A3, A4, A5, A6, A7, A8, A9, A10. Do not guess missing JSON. Record explicit blockers for unsafe/unreproducible rows.",
-      "status": "done",
-      "phase": "gate-a",
-      "kind": "impl",
-      "depends_on": [
-        "gate-a-harness-regression",
-        "gate-a-inventory-regression"
-      ],
-      "source": "Gate A",
-      "notes": "A1–A10 independently captured from isolated sandboxes. A8 recaptured after todowrite flood fix (177K vs 18M). A6 once/always/reject; A7 reply/reject; A9 text/file/fileMention/image/agent persist. No product code. Gate B/S/C not started.",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "implementation",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "Sanitized+raw samples for A1–A10 present. Independent checkers derive from http/sse/reload. A8 todo items {content,status,priority} no id. A9 mock conversion is text-only.",
-        "artifacts": [
-          "agent/opencode-web/testdata/official-1.18.18/samples/a1-first-healthy-text.sanitized.json",
-          "agent/opencode-web/testdata/official-1.18.18/samples/a6-permission.sanitized.json",
-          "agent/opencode-web/testdata/official-1.18.18/samples/a7-question.sanitized.json",
-          "agent/opencode-web/testdata/official-1.18.18/samples/a8-todos.sanitized.json",
-          "agent/opencode-web/testdata/official-1.18.18/samples/a9-prompt-parts.sanitized.json",
-          "docs/2026-08-20-opencode-web-1.18.18-sample-inventory.md"
-        ],
-        "checked_at": "2026-08-20T12:55:00Z"
-      }
-    },
-    {
-      "id": "gate-a-capture-tests",
-      "title": "Replay-shape check of captured sample pack",
-      "description": "Validate each captured sample retains official keys, required sequence items, and sanitization (no real paths, secrets, or owner session IDs).",
-      "status": "done",
-      "phase": "gate-a",
-      "kind": "tests",
-      "depends_on": [
-        "gate-a-capture-impl"
-      ],
-      "source": "Gate A",
-      "notes": "Independent classifiers + negative mutations for A1–A10. A3/A5 strict target-session proofs.",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "automated",
-        "attestation": "re-verified",
-        "na_reason": null,
-        "summary": "python3 check_samples.py --self-test PASS; python3 check_samples.py --require-all → captured A1–A10, empty partial/blocked/missing.",
-        "artifacts": [
-          "agent/opencode-web/testdata/official-1.18.18/harness/check_samples.py",
-          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_samples.py --self-test => self-test PASS",
-          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_samples.py --require-all => captured A1-A10",
-          "cmd:audit-reverify 2026-08-20: check_samples.py --self-test => PASS; --require-all => A1-A10 captured"
-        ],
-        "checked_at": "2026-08-20T17:30:00Z"
-      }
-    },
-    {
-      "id": "gate-a-capture-regression",
-      "title": "A1–A10 all green or explicit owner-scope removal",
-      "description": "Inventory status is green for every P0 row, or the row is marked blocked with a named owner decision to drop the capability from advertisement.",
-      "status": "done",
-      "phase": "gate-a",
-      "kind": "regression",
-      "depends_on": [
-        "gate-a-capture-tests"
-      ],
-      "source": "Gate A",
-      "notes": "All P0 rows captured. No blocked capability requiring owner scope removal. Gate B not started.",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "mixed",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "Inventory A1–A10 captured. check_samples --require-all all green. No owner-scope removal. Product code unchanged.",
-        "artifacts": [
-          "docs/2026-08-20-opencode-web-1.18.18-sample-inventory.md",
-          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_samples.py --require-all => captured A1-A10"
-        ],
-        "checked_at": "2026-08-20T12:55:00Z"
-      }
-    },
-    {
-      "id": "gate-b-capability-map-impl",
-      "title": "Gate B official-surface disposition map",
-      "description": "Classify every official Web surface as supported now / deliberately unsupported / not applicable / future. No implicit endpoint.",
-      "status": "done",
-      "phase": "gate-b",
-      "kind": "impl",
-      "depends_on": [
-        "gate-a-capture-regression"
-      ],
-      "source": "Gate B",
-      "notes": "Owner resolved OD-1/OD-2/OD-3. Gate B exited. Independent audit required before Gate S. No product code.",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "implementation",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "Owner resolved hide-in-default-list-keep-by-id, aggregate-global-list-keep-scoped-list, keep-mapped-future-or-unsupported. meta.gateBExited=true, blockers=[].",
-        "artifacts": [
-          "docs/2026-08-20-opencode-web-gate-b-capability-map.json",
-          "docs/2026-08-20-opencode-web-gate-b-capability-map.md",
-          "docs/2026-08-20-opencode-web-source-first-convergence-plan.md"
-        ],
-        "checked_at": "2026-08-20T14:10:00Z"
-      }
-    },
-    {
-      "id": "gate-b-capability-map-tests",
-      "title": "Gate B map covers official Web inventory",
-      "description": "Check the disposition table against the official session/turn/content/interaction/workspace/config/observation inventory so no surface is implicit.",
-      "status": "done",
-      "phase": "gate-b",
-      "kind": "tests",
-      "depends_on": [
-        "gate-b-capability-map-impl"
-      ],
-      "source": "Gate B",
-      "notes": "Checker now requires resolved OD-1/OD-2/OD-3, empty blockers when exited, JSON/Markdown id+disposition+sample parity, source-only pre-sample gate.",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "automated",
-        "attestation": "re-verified",
-        "na_reason": null,
-        "summary": "python3 check_gate_b_map.py → ok 60 surfaces exited=True; --self-test PASS including exited-unresolved and json-md-disposition-drift.",
-        "artifacts": [
-          "agent/opencode-web/testdata/official-1.18.18/harness/check_gate_b_map.py",
-          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_b_map.py => gate-b map ok: 60 surfaces; exited=True",
-          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_b_map.py --self-test => self-test PASS",
-          "cmd:audit-reverify 2026-08-20: check_gate_b_map.py => 60 surfaces exited=True; --self-test => PASS"
-        ],
-        "checked_at": "2026-08-20T17:30:00Z"
-      }
-    },
-    {
-      "id": "gate-b-capability-map-regression",
-      "title": "Gate B map is a product decision document",
-      "description": "Disposition table is documentation; WireDescriptor changes belong to later C gates.",
-      "status": "done",
-      "phase": "gate-b",
-      "kind": "regression",
-      "depends_on": [
-        "gate-b-capability-map-tests"
-      ],
-      "source": "Gate B",
-      "notes": "Docs/checker only. Gate B exited after owner resolutions. Gate S not started. Product code unchanged.",
-      "verification": {
-        "required": false,
-        "status": "present",
-        "method": "manual",
-        "attestation": "self-attested",
-        "na_reason": "capability map is a written product decision; advertisement changes are C-gate work",
-        "summary": "No product/WireDescriptor edits. Gate B documentation exit recorded; wait independent audit.",
-        "artifacts": [
-          "docs/2026-08-20-opencode-web-gate-b-capability-map.md",
-          "agent/opencode-web/wire_descriptor.go"
-        ],
-        "checked_at": "2026-08-20T14:10:00Z"
-      }
-    },
-    {
-      "id": "gate-s-s1-s2-impl",
-      "title": "Gate S S1/S2 truth owners and transaction domains",
-      "description": "Write docs/2026-08-20-opencode-web-ssv2-impact.md covering S1 owners/only-writers and S2 transaction domains. Cite iOS CLAUDE.md Session Sync v2 架构路线护栏, the 2026-07-24/2026-07-26 iOS plans, and MacBridge docs/protocol. No product code. Explicitly record: OpenCode serve is upstream fact source; Mac ProjectionKernel is the only CordCode timeline truth; iOS ProjectionStore is the only SSV2 client writer.",
-      "status": "done",
-      "phase": "gate-s",
-      "kind": "impl",
-      "depends_on": [
-        "gate-b-capability-map-regression"
-      ],
-      "source": "Gate S",
-      "notes": "S1/S2 impact from live Mac/iOS writer inventory. Gaps recorded, not patched. S3 not started. No product code.",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "implementation",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "Wrote docs/2026-08-20-opencode-web-ssv2-impact.md/.json. S1 four owners with file:symbol. S2 ten domains with required/forbidden/current/status. Seven source-only pre-sample gates. Sealed writers listed.",
-        "artifacts": [
-          "docs/2026-08-20-opencode-web-ssv2-impact.md",
-          "docs/2026-08-20-opencode-web-ssv2-impact.json"
-        ],
-        "checked_at": "2026-08-20T14:55:00Z"
-      }
-    },
-    {
-      "id": "gate-s-s1-s2-tests",
-      "title": "Gate S S1/S2 completeness check",
-      "description": "Verify the SSV2 impact doc has every S1 concern (OpenCode facts, Kernel timeline, ProjectionStore, protocol) and every S2 domain (cold hydrate, live SSE, nested sync, reconnect, requests/mutations, control plane, permission/question/todo).",
-      "status": "done",
-      "phase": "gate-s",
-      "kind": "tests",
-      "depends_on": [
-        "gate-s-s1-s2-impl"
-      ],
-      "source": "Gate S",
-      "notes": "Completeness checker covers S1/S2 required ids, permission/question/todo ownership, dual-ingest ban, source-only 实现前补样本, forbidden allowed-paths.",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "automated",
-        "attestation": "re-verified",
-        "na_reason": null,
-        "summary": "python3 check_gate_s_s1_s2.py → ok s1=4 s2=10 source-only-gates=7; --self-test PASS.",
-        "artifacts": [
-          "agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s1_s2.py",
-          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s1_s2.py => gate-s s1/s2 ok: s1=4 s2=10 source-only-gates=7",
-          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s1_s2.py --self-test => self-test PASS",
-          "cmd:audit-reverify 2026-08-20: check_gate_s_s1_s2.py => s1=4 s2=10 gates=7; --self-test => PASS"
-        ],
-        "checked_at": "2026-08-20T17:30:00Z"
-      }
-    },
-    {
-      "id": "gate-s-s1-s2-regression",
-      "title": "Gate S S1/S2 is architecture proof, not a UX change",
-      "description": "S1/S2 document only; product code remains frozen.",
-      "status": "done",
-      "phase": "gate-s",
-      "kind": "regression",
-      "depends_on": [
-        "gate-s-s1-s2-tests"
-      ],
-      "source": "Gate S",
-      "notes": "Docs/checker only. Product code, protocol, WireDescriptor unchanged. S3/S4/C not started.",
-      "verification": {
-        "required": false,
-        "status": "present",
-        "method": "manual",
-        "attestation": "self-attested",
-        "na_reason": "S1/S2 is architecture proof documentation; no UX/product-code surface",
-        "summary": "git diff of agent/opencode-web/*.go go-bridge MacBridge core iOS product sources is empty.",
-        "artifacts": [
-          "docs/2026-08-20-opencode-web-ssv2-impact.md"
-        ],
-        "checked_at": "2026-08-20T14:55:00Z"
-      }
-    },
-    {
-      "id": "gate-s-s3-impact-impl",
-      "title": "Gate S S3 impact records for C1–C7",
-      "description": "For each C1–C7 slice, write an S3 impact record with all seven fields: truth owner, only writer, transaction domain, new data path, active write inventory, failure presentation, anti-double-write proof. C3 must state stable messageID is authoritative correlation only, not an iOS optimistic timeline writer. C4 must name the single pre-Kernel normalization point and the single Kernel ingest path. C6 must classify permission raw control, canonical question, legacy question, and todo ownership. Missing any field blocks that slice from coding.",
-      "status": "done",
-      "phase": "gate-s",
-      "kind": "impl",
-      "depends_on": [
-        "gate-s-s1-s2-regression"
-      ],
-      "source": "Gate S",
-      "notes": "Docs/checker only. Product code, protocol, WireDescriptor unchanged. S4/C not started.",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "implementation",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "C1–C7 S3 impact records added to ssv2-impact.md/json with eight required fields plus Gate B surfaces, samples, current/planned paths, tests, out-of-scope, protocol change, and 实现前补样本. S4/C not started.",
-        "artifacts": [
-          "docs/2026-08-20-opencode-web-ssv2-impact.md",
-          "docs/2026-08-20-opencode-web-ssv2-impact.json",
-          "agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s3.py"
-        ],
-        "checked_at": "2026-08-20T16:40:00Z"
-      }
-    },
-    {
-      "id": "gate-s-s3-impact-tests",
-      "title": "Gate S S3 every C slice has all seven fields",
-      "description": "Automated check that C1–C7 each have non-empty S3 fields and that C3/C4/C6 special invariants are present.",
-      "status": "done",
-      "phase": "gate-s",
-      "kind": "tests",
-      "depends_on": [
-        "gate-s-s3-impact-impl"
-      ],
-      "source": "Gate S",
-      "notes": "",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "automated",
-        "attestation": "re-verified",
-        "na_reason": null,
-        "summary": "python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s3.py → gate-s s3 ok: slices=7 source-only-gates=7 s4Started=False gateCStarted=False productCodeFrozen=True; --self-test PASS (drop-c-slice, drop-eight-field, c3-optimistic-writer, c4-dual-ingest-allowed, c6-todo-in-timeline, drop-source-only-gate).",
-        "artifacts": [
-          "agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s3.py",
-          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s3.py => gate-s s3 ok: slices=7 source-only-gates=7",
-          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s3.py --self-test => self-test PASS",
-          "cmd:audit-reverify 2026-08-20: check_gate_s_s3.py => slices=7 source-only-gates=7; --self-test => PASS"
-        ],
-        "checked_at": "2026-08-20T17:30:00Z"
-      }
-    },
-    {
-      "id": "gate-s-s3-impact-regression",
-      "title": "Gate S S3 records are documentation",
-      "description": "Impact records are evidence; product code stays frozen until Gate C is authorized.",
-      "status": "done",
-      "phase": "gate-s",
-      "kind": "regression",
-      "depends_on": [
-        "gate-s-s3-impact-tests"
-      ],
-      "source": "Gate S",
-      "notes": "Docs/checker only. Product code, protocol, WireDescriptor unchanged. S4/C not started.",
-      "verification": {
-        "required": false,
-        "status": "present",
-        "method": "manual",
-        "attestation": "self-attested",
-        "na_reason": "per-slice impact records are documentation; completeness covered by gate-s-s3-impact-tests",
-        "summary": "git diff of agent/opencode-web/*.go go-bridge MacBridge core docs/protocol is empty. S4/Gate C not started.",
-        "artifacts": [
-          "docs/2026-08-20-opencode-web-ssv2-impact.md",
-          "agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s3.py"
-        ],
-        "checked_at": "2026-08-20T16:40:00Z"
-      }
-    },
-    {
-      "id": "gate-s-s4-test-map-impl",
-      "title": "Gate S S4 test mapping",
-      "description": "Map every S4 row to an existing or planned owning test: adapter single ingest, Kernel live, Kernel hydrate/fence, reconnect generation, raw delivery seal, iOS t=0 ownership, ProjectionStore revision apply, permission/question/todo ownership, cross-repo protocol consistency. Planned tests must name file/symbol; do not invent passing results.",
-      "status": "done",
-      "phase": "gate-s",
-      "kind": "impl",
-      "depends_on": [
-        "gate-s-s3-impact-regression"
-      ],
-      "source": "Gate S",
-      "notes": "Docs/checker only. Nine-layer S4 test map added to ssv2-impact.md/json (adapter, kernel-live, kernel-hydrate, reconnect, delivery, ios-ownership, ios-application, interaction, cross-repository). Product code, protocol, WireDescriptor unchanged. Gate C not started.",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "implementation",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "Nine S4 rows each carry affectedSlices/invariant/producer/reducer-fence/delivery proofs, existing tests (real file+symbol, verified on disk), planned tests marked planned, sample dependency, negative assertion, exit condition, uncovered boundaries. s4PreSampleOrder covers 7 source-only + selected_variant as capture-before-translator. meta s4Started=true s4Completed=true gateSExited=false.",
-        "artifacts": [
-          "docs/2026-08-20-opencode-web-ssv2-impact.md",
-          "docs/2026-08-20-opencode-web-ssv2-impact.json",
-          "agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s4.py"
-        ],
-        "checked_at": "2026-08-20T18:30:00Z"
-      }
-    },
-    {
-      "id": "gate-s-s4-test-map-tests",
-      "title": "Gate S S4 every row names an owning test",
-      "description": "Check the S4 matrix has a named existing or planned test path for every required layer, including C3 correlation-not-writer and C4 single-ingest.",
-      "status": "done",
-      "phase": "gate-s",
-      "kind": "tests",
-      "depends_on": [
-        "gate-s-s4-test-map-impl"
-      ],
-      "source": "Gate S",
-      "notes": "",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "tests",
-        "attestation": "re-verified",
-        "na_reason": null,
-        "summary": "python3 check_gate_s_s4.py => gate-s s4 ok: layers=9 pre-sample-order=8 s4Started=True s4Completed=True gateSExited=False gateCStarted=False productCodeFrozen=True; --self-test => PASS (10 mutations caught: drop layer, phantom symbol, planned-as-passed, C3 missing submit-zero-writer, C4 raw fallback, C6 todo-in-timeline, dropped capture order, missing canonical-first, premature gateSExited, premature gateCStarted).",
-        "artifacts": [
-          "agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s4.py",
-          "cmd:python3 check_gate_s_s4.py => gate-s s4 ok: layers=9 pre-sample-order=8",
-          "cmd:python3 check_gate_s_s4.py --self-test => self-test PASS"
-        ],
-        "checked_at": "2026-08-20T18:30:00Z"
-      }
-    },
-    {
-      "id": "gate-s-s4-test-map-regression",
-      "title": "Gate S exit: S4 map plus C3/C4/C6 invariants",
-      "description": "Gate S exits only when S1–S3 are in the capability/impact docs, S4 names owning tests, C3 messageID is correlation-only, C4 names one pre-Kernel normalization and one Kernel ingest, and C6 classifies permission/question/todo exactly as the plan.",
-      "status": "done",
-      "phase": "gate-s",
-      "kind": "regression",
-      "depends_on": [
-        "gate-s-s4-test-map-tests"
-      ],
-      "source": "Gate S",
-      "notes": "",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "regression",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "Regression: S1/S2 checker ok (s1=4 s2=10) + self-test PASS; S3 checker ok (slices=7, s4Started now allowed true) + self-test PASS; S4 checker ok + self-test PASS; Gate B map checker collateral ok (60 surfaces). Freeze verified: git diff touches only ssv2-impact md/json, check_gate_s_s1_s2/s3/s4, plan doc, state json — no product code/protocol/WireDescriptor/capability. gateSExited=false: Gate S exit awaits independent audit.",
-        "artifacts": [
-          "cmd:python3 check_gate_s_s1_s2.py => gate-s s1/s2 ok",
-          "cmd:python3 check_gate_s_s3.py => gate-s s3 ok",
-          "cmd:python3 check_gate_s_s4.py => gate-s s4 ok",
-          "cmd:python3 check_gate_b_map.py => gate-b map ok: 60 surfaces; exited=True",
-          "docs/2026-08-20-opencode-web-ssv2-impact.md"
-        ],
-        "checked_at": "2026-08-20T18:30:00Z"
-      }
-    },
-    {
-      "id": "c1-version-transport-impl",
-      "title": "C1 version and transport boundary",
-      "description": "Make 1.18.18 the verified adapter; quarantine unverified v2; remove unknown-shape recursive fallbacks; preserve auth, directory scoping, SSE reconnect.",
-      "status": "done",
-      "phase": "c1",
-      "kind": "impl",
-      "depends_on": [
-        "gate-s-s4-test-map-regression"
-      ],
-      "source": "Gate C1",
-      "notes": "C1 only. clientFor is the single verified-generation gate: generation118 is the only generation handed out; v2/unknown fail closed (distinct quarantine error, zero prompt/SSE/Kernel/capability). InstanceStatus now distinguishes unsupported-generation from probe failures. v2 write paths deleted (Send v2 branch, postModel, CancelTurn /interrupt, SSE /api/event dial). Catalog legacy recursive walk deleted (fail closed on unknown shape). Basic Auth/directory scoping/HTTP timeout/SSE no-lifetime-timeout/bounded reconnect unchanged and transport-only. Hole-fill directive-002 (audit-001 partial): RunDiagnostics now fails ocw_probe with shared unsupported-generation (quarantined) wording and stops before catalog checks; corrected capability wording (no NEW v2 capability; existing array unchanged).",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "implementation",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "Version/transport boundary per plan §6 C1 + S3 record C1: 1.18.18-only verified adapter; v2 quarantine at clientFor/InstanceStatus with diagnosable states (supported/unauthorized/unreachable/unsupported-generation/server_unauthenticated); unknown-shape recursive fallbacks removed (catalog legacy walk + dead collectModelWindows); v2 product write paths deleted; no protocol/WireDescriptor/capability/iOS changes.",
-        "artifacts": [
-          "agent/opencode-web/opencodeweb.go",
-          "agent/opencode-web/session.go",
-          "agent/opencode-web/events.go",
-          "agent/opencode-web/models.go",
-          "agent/opencode-web/context_usage.go",
-          "agent/opencode-web/diagnostics.go",
-          "agent/opencode-web/opencodeweb.go"
-        ],
-        "checked_at": "2026-08-20T20:30:00Z"
-      }
-    },
-    {
-      "id": "c1-version-transport-tests",
-      "title": "C1 probe distinguishes supported/unauthorized/unreachable/unsupported version",
-      "description": "Targeted Go tests for generation probe and fail-closed unknown version.",
-      "status": "done",
-      "phase": "c1",
-      "kind": "tests",
-      "depends_on": [
-        "c1-version-transport-impl"
-      ],
-      "source": "Gate C1",
-      "notes": " Hole-fill directive-002 (audit-001 partial): RunDiagnostics now fails ocw_probe with shared unsupported-generation (quarantined) wording and stops before catalog checks; corrected capability wording (no NEW v2 capability; existing array unchanged).",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "tests",
-        "attestation": "re-verified",
-        "na_reason": null,
-        "summary": "Five required tests in agent/opencode-web/version_transport_c1_test.go: TestVerified118Only / TestV2FailClosedQuarantine / TestGenerationV2QuarantineZeroPromptAndZeroKernelIngest / TestBasicAuthDirectoryTimeoutAreControlNotTimeline / TestSSEReconnectIsTransportOnly — all PASS. v2-dependent tests rewritten to quarantine semantics (TestCancelTurnV2Interrupt, TestListSessionsV2EnvelopeQuarantined, TestProjectsNotSupportedOnV2, TestIsSessionActiveV2QuarantineStaysConservative, TestPermissionFoldV2QuarantinedZeroReplies); v2 write-path shape tests deleted (postModel/interrupt). Full package: go test ./agent/opencode-web/ -count=1 -timeout 180s => ok 2.7s.",
-        "artifacts": [
-          "agent/opencode-web/version_transport_c1_test.go",
-          "cmd:go test ./agent/opencode-web/ -run TestVerified118Only|TestV2FailClosedQuarantine|TestGenerationV2Quarantine|TestBasicAuthDirectoryTimeout|TestSSEReconnectIsTransportOnly -count=1 => all PASS",
-          "cmd:go test ./agent/opencode-web/ -count=1 -timeout 180s => ok",
-          "cmd:go test ./agent/opencode-web/ -run TestV2DiagnosticsQuarantinedStopsAtProbe|TestDiagnostics118StillPassed|TestDiagnosticsUnknownAndUnauthenticatedStayProbeFailures => all PASS (directive-002)",
-          "cmd:go test ./go-bridge/ -run TestOpenCodeWebV2QuarantineDescriptorNotAvailable => PASS"
-        ],
-        "checked_at": "2026-08-20T20:30:00Z"
-      }
-    },
-    {
-      "id": "c1-version-transport-regression",
-      "title": "C1 no v2 parity claim in wire/capability",
-      "description": "Confirm unknown generation is not advertised and v2 branches are quarantined.",
-      "status": "done",
-      "phase": "c1",
-      "kind": "regression",
-      "depends_on": [
-        "c1-version-transport-tests"
-      ],
-      "source": "Gate C1",
-      "notes": " Hole-fill directive-002 (audit-001 partial): RunDiagnostics now fails ocw_probe with shared unsupported-generation (quarantined) wording and stops before catalog checks; corrected capability wording (no NEW v2 capability; existing array unchanged). C1 closed 2026-08-20: three-track done (exec-plan proven + supervisor verified via audit-002-recheck; owner real-device acceptance not required this phase). Awaiting separate C2 directive; C3+ must not be bundled.",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "regression",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "go build ./... OK; go vet ./agent/opencode-web/ clean; go test ./agent/opencode-web/ full package ok; go-bridge targeted (OpenCodeWeb|SessionSyncV2|Projection|EventPublisher|BridgeEpoch) ok 4.5s; ./core/ ok. Freeze check: git diff touches only agent/opencode-web/*.go (+state/plan docs) — docs/protocol, WireDescriptor (wire_descriptor.go), capability advertisement, iOS untouched. Zero prompt/zero Kernel ingest negative proofs in TestGenerationV2QuarantineZeroPromptAndZeroKernelIngest. No A1/A5-uncovered translation semantics introduced.",
-        "artifacts": [
-          "cmd:go build ./... => OK",
-          "cmd:go test ./go-bridge/ -run OpenCodeWeb|SessionSyncV2|Projection|EventPublisher|BridgeEpoch -count=1 => ok 4.5s",
-          "cmd:go test ./core/ -count=1 => ok",
-          "agent/opencode-web/version_transport_c1_test.go",
-          "cmd:go test ./agent/opencode-web/ -count=1 -timeout 180s => ok 2.717s",
-          "cmd:go test ./go-bridge/ -run OpenCodeWeb|AgentDescriptor -count=1 => ok 0.843s",
-          "cmd:go test ./core/ -count=1 => ok; go vet => clean; go build ./... => OK",
-          "supervisor-audit:audit-001-gate-s-exit-and-c1.md (verdict partial, diagnostics hole named)",
-          "supervisor-directive:directive-002-c1-diagnostics-hole-fill.md (hole-fill 5b8451c)",
-          "supervisor-audit:audit-002-c1-diagnostics-hole-fill.md (partial, wording unification left)",
-          "recheck-fix:257f0df (clientFor shares unsupportedGenerationDetail; 14 assertions strengthened)",
-          "supervisor-audit:audit-002-recheck.md (verdict verified, 2026-08-20)"
-        ],
-        "checked_at": "2026-08-20T21:30:00Z"
-      }
-    },
-    {
-      "id": "c2-list-get-impl",
-      "title": "C2 official list/get semantics",
-      "description": "Reproduce root-session and limit semantics; document multi-directory aggregation and archive filtering as a bridge product rule; retain by-ID get.",
-      "status": "done",
-      "phase": "c2",
-      "kind": "impl",
-      "depends_on": [
-        "c1-version-transport-regression"
-      ],
-      "source": "Gate C2",
-      "notes": "Directive-003. Evidence-first: workspace.project sample+checker commit 69f26bc precedes product commit ef21db1 (capture-before-translator honored). Mac-only; no iOS product code.",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "implementation",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "C2 official list/get per directive-003: upstream requests carry directory+roots=true+limit=100 (frozen core.OpenCodeSessionFetchLimit shared with bridge; no omit-limit retry; failures are diagnosable catalog errors); OD-1 archived hidden in default enumerations but kept by-ID; OD-2 per-worktree aggregation with registry/bucket failures failing the whole list, empty registry = empty catalog (zero fallbacks), stable-ID dedup, ModifiedAt DESC/ID ASC; malformed top-level/rows fail (no silent trimming); missing-worktree is a documented CordCode visibility overlay on the aggregate only — scoped scope unchanged, by-ID unaffected; list/get stays pure catalog (zero POST, zero event streams, no Kernel/EventPublisher/timeline writer).",
-        "artifacts": [
-          "core/opencode_fetch_limit.go",
-          "agent/opencode-web/sessions.go",
-          "agent/opencode-web/projects.go",
-          "go-bridge/handlers_opencode.go"
-        ],
-        "checked_at": "2026-08-20T23:45:00Z"
-      }
-    },
-    {
-      "id": "c2-list-get-tests",
-      "title": "C2 boundary fixtures for list/get",
-      "description": "Replay A10 plus root/child, exactly-at-limit, over-limit, archived, missing worktree, by-ID retrieval.",
-      "status": "done",
-      "phase": "c2",
-      "kind": "tests",
-      "depends_on": [
-        "c2-list-get-impl"
-      ],
-      "source": "Gate C2",
-      "notes": "",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "tests",
-        "attestation": "re-verified",
-        "na_reason": null,
-        "summary": "Eight owning tests in list_get_c2_test.go (TestOfficialRootsLimit, TestArchivedHiddenInDefaultListKeptById, TestGlobalAggregatePerWorktree, TestProjectRegistryAndBucketFailuresSurface, TestEmptyProjectRegistryIsEmpty, TestMissingWorktreeRule, TestListGetDoesNotWriteMessages, TestCreateBodyEmptyMatchesV1) + reworked TestArchivedAtMappingKeptForByIDReads/TestListSessionsMapsFieldsAndDirectoryHeader + full package green: go test ./agent/opencode-web/ -count=1 -timeout 180s => ok.",
-        "artifacts": [
-          "agent/opencode-web/list_get_c2_test.go",
-          "cmd:go test ./agent/opencode-web/ -count=1 -timeout 180s => ok 2.693s"
-        ],
-        "checked_at": "2026-08-20T23:45:00Z"
-      }
-    },
-    {
-      "id": "c2-list-get-regression",
-      "title": "C2 list/get sandbox reopen cycle",
-      "description": "Isolated sandbox create/list/archive/get-by-id matches official server state.",
-      "status": "blocked",
-      "phase": "c2",
-      "kind": "regression",
-      "depends_on": [
-        "c2-list-get-tests"
-      ],
-      "source": "Gate C2",
-      "notes": "audit-003 downgrade: WP checker evidence owner is rawPayloads rather than http[].response, and the generation-118 project decoder is not yet proven fail-closed. Product repair is deferred until directive-006 evidence and owner canonical shape sync complete; review-fix-for:c2-list-get-regression.",
-      "verification": {
-        "required": true,
-        "status": "failed",
-        "method": "regression",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "Supervisor audit-003 is partial: prior WP success is not independent proof because the checker derives project claims from rawPayloads rather than archived http[].response. C2 regression remains blocked until WP-FIX and the strict decoder review-fix triplet complete.",
-        "artifacts": [
-          "cmd:python3 check_workspace_project.py [--self-test] => ok / PASS",
-          "cmd:python3 check_samples.py --require-all => 10 captured",
-          "cmd:go test ./go-bridge/ -run OpenCodeWeb|ListSessions|SessionCatalog|Projection => ok 4.689s",
-          "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED; runtime ef21db183148 @ /Applications/CordCodeLink.app:8777",
-          "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-003-c2-official-list-get.md"
-        ],
-        "checked_at": "2026-08-20T16:08:13Z"
-      }
-    },
-    {
-      "id": "stage0-evidence-pack-impl",
-      "title": "Directive-006 WP-FIX and E1-E7 real evidence capture",
-      "description": "Evidence-only: use isolated OpenCode 1.18.18/2cba7e227d to capture WP-FIX, selected variant, reasoning, external turn, providers, configured default model, rename, and delete as raw+sanitized HTTP/SSE/reload. Record physical observations only; do not decide mappings or modify product code.",
-      "status": "done",
-      "phase": "stage0-evidence",
-      "kind": "impl",
-      "depends_on": [
-        "c1-version-transport-regression"
-      ],
-      "source": "Canonical §4.1/§6; supervisor directive-006",
-      "notes": "This is capture/harness implementation, not a product translator. BLOCKED is valid per row; guessed/fake evidence is forbidden.",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "implementation",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "Directive-006 evidence-only captures from the isolated 1.18.18/2cba7e227d sandbox (4398/4399; owner 4096 PID 71333 unchanged before/after; ports reclaimed): WP-FIX recaptured with http[]-owned evidence; E1 selected variant (204 admitted, variant persisted per-message on the user message model, unset control omits); E2 reasoning BLOCKED honestly (serve + @ai-sdk/openai-compatible fails reasoning-bearing streams: AI_APICallError socket closed -> busy/retry loop, two strategies archived); E3 external turn (capture client read only post-terminal, exactly two GETs; global SSE covered create/prompt/deltas/idle; reload converged); E4 providers (top-level {all,default,connected}, row shape; raw withheld by frozen leak policy, checker uses shape-preserving sanitized); E5 configured default (default map identical across valid/invalid/absent = config-independent; config model flows verbatim: invalid still 204 with modelID nonexistent; single-model limitation recorded); E6 rename (PATCH title -> Session.Info, list/by-ID converged, 404 NotFoundError); E7 delete (200 true, by-ID 404, list absence, second delete 404; session.deleted NOT observed — honest negative). No bridge mapping decisions recorded.",
-        "artifacts": [
-          "agent/opencode-web/testdata/official-1.18.18/samples/e1-selected-variant.raw.json",
-          "agent/opencode-web/testdata/official-1.18.18/samples/e2-reasoning.raw.json",
-          "agent/opencode-web/testdata/official-1.18.18/samples/e3-external-turn.raw.json",
-          "agent/opencode-web/testdata/official-1.18.18/samples/e4-providers.sanitized.json",
-          "agent/opencode-web/testdata/official-1.18.18/samples/e5-configured-default-valid.sanitized.json",
-          "agent/opencode-web/testdata/official-1.18.18/samples/e6-rename.raw.json",
-          "agent/opencode-web/testdata/official-1.18.18/samples/e7-delete.raw.json",
-          "agent/opencode-web/testdata/official-1.18.18/samples/wp-workspace-project.raw.json"
-        ],
-        "checked_at": "2026-08-21T01:20:00Z"
-      }
-    },
-    {
-      "id": "stage0-evidence-pack-tests",
-      "title": "Directive-006 independent evidence checkers",
-      "description": "Each WP-FIX/E1-E7 conclusion must be derived from raw transport fields and protected by destructive self-tests; summaries/meta/product fixtures are not evidence owners.",
-      "status": "done",
-      "phase": "stage0-evidence",
-      "kind": "tests",
-      "depends_on": [
-        "stage0-evidence-pack-impl"
-      ],
-      "source": "Canonical §4.1/§6; supervisor directive-006",
-      "notes": "Run canonical design, A1-A10, WP-FIX, and E1-E7 checker/self-test gates with explicit timeouts.",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "tests",
-        "attestation": "re-verified",
-        "na_reason": null,
-        "summary": "check_evidence_queue.py: verdicts {E1 captured, E2 blocked, E3-E7 captured} derived only from raw transport fields (summaries/meta are provenance); 11 destructive self-test mutations all caught (request field, response field, event/order, reload convergence, fake reasoning, polling substitution, mode tamper). check_workspace_project.py rewritten per WP-FIX: every fact derived from http[] status+response; summary copies cross-checked (summary-mismatch FAIL); 6 mutations caught. Both self-tests PASS.",
-        "artifacts": [
-          "agent/opencode-web/testdata/official-1.18.18/harness/check_evidence_queue.py",
-          "agent/opencode-web/testdata/official-1.18.18/harness/check_workspace_project.py",
-          "cmd:python3 check_evidence_queue.py [--self-test] => ok {6 captured,1 blocked} / PASS",
-          "cmd:python3 check_workspace_project.py [--self-test] => ok / PASS"
-        ],
-        "checked_at": "2026-08-21T01:20:00Z"
-      }
-    },
-    {
-      "id": "stage0-evidence-pack-regression",
-      "title": "Directive-006 evidence provenance and isolation regression",
-      "description": "Prove samples originate from the isolated same-version serve, sanitized evidence is leak-free, 4398/4399 are reclaimed, owner 4096 is unchanged, and no product/protocol/capability/iOS file changed.",
-      "status": "done",
-      "phase": "stage0-evidence",
-      "kind": "regression",
-      "depends_on": [
-        "stage0-evidence-pack-tests"
-      ],
-      "source": "Canonical §4.1/§6; supervisor directive-006",
-      "notes": "Developer agent stops after this evidence report. It must not continue into canonical mapping or product work.",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "regression",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "Provenance/isolation regression: check_canonical_execution_design.py ok + self-test PASS; check_samples.py --require-all 10/10 A1-A10 captured (unmodified, E-rows not mixed in) + self-test PASS; leak scan of all new sanitized samples clean (no owner paths/auth/secrets/4096); owner 4096 listener PID 71333 identical before and after all capture cycles; 4398/4399 released after every cycle (verified free); git diff --check clean; zero product/protocol/WireDescriptor/capability/iOS files changed (harness+samples+inventory only).",
-        "artifacts": [
-          "cmd:python3 check_canonical_execution_design.py [--self-test] => ok / PASS",
-          "cmd:python3 check_samples.py --require-all => 10 captured; --self-test => PASS",
-          "docs/2026-08-20-opencode-web-1.18.18-sample-inventory.md"
-        ],
-        "checked_at": "2026-08-21T01:20:00Z"
-      }
-    },
-    {
-      "id": "stage0-provider-evidence-correction-impl",
-      "title": "Directive-007 E1b/E4b/E5b combined capture",
-      "description": "Evidence-only: capture a two-model provider with distinct default/first ordering, real GET /config valid/invalid/absent responses, safe raw+sanitized /provider provenance, and a non-empty live variants catalog or honest E1b blocker.",
-      "status": "done",
-      "phase": "stage0-evidence-correction",
-      "kind": "impl",
-      "depends_on": [
-        "stage0-evidence-pack-regression"
-      ],
-      "source": "Canonical §4.1.1; supervisor directive-007",
-      "notes": "No product mapping or code. One combined provider sandbox round only.",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "implementation",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "Directive-007 joint capture from the isolated 1.18.18/2cba7e227d sandbox (4398/4399 reclaimed each cycle; owner 4096 PID 71333 unchanged). E1b: config-declared models.echo.variants {high,low} surface in raw /provider; prompt with real key high admitted 204 and persisted on the user message model; unset control omits. E4b: raw+sanitized /provider pair with sentinel credential fixture-not-a-secret; key/type/order derived from raw. E5b: three isolated configs — /config.model localmock/alpha (in catalog) / localmock/nonexistent (not in catalog) / key absent; /provider.default=localmock/zeta (custom ranking priority->latest->id-DESC, provider.ts:2019-2025, NOT alphabetical) distinct from configured default; no-model prompt resolved alpha / nonexistent (verbatim) / zeta (=provider default).",
-        "artifacts": [
-          "agent/opencode-web/testdata/official-1.18.18/samples/e1b-catalog-variant.raw.json",
-          "agent/opencode-web/testdata/official-1.18.18/samples/e4b-provider-provenance.raw.json",
-          "agent/opencode-web/testdata/official-1.18.18/samples/e5b-configured-default-valid.raw.json",
-          "agent/opencode-web/testdata/official-1.18.18/harness/opencode.json"
-        ],
-        "checked_at": "2026-08-21T02:50:00Z"
-      }
-    },
-    {
-      "id": "stage0-provider-evidence-correction-tests",
-      "title": "Directive-007 provider/config/variant independent checker",
-      "description": "Derive E1b/E4b/E5b only from raw HTTP/prompt/reload and prove raw/sanitized structural equivalence; destructive mutations cover config/default/connected/models/variants and redaction boundaries.",
-      "status": "done",
-      "phase": "stage0-evidence-correction",
-      "kind": "tests",
-      "depends_on": [
-        "stage0-provider-evidence-correction-impl"
-      ],
-      "source": "Canonical §4.1.1; supervisor directive-007",
-      "notes": "",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "tests",
-        "attestation": "re-verified",
-        "na_reason": null,
-        "summary": "check_final_provider_evidence.py: E1b/E4b/E5b all captured, derived only from raw transport; raw/sanitized structural equivalence verified (only declared value classes may differ); resolveDefaultModel branch order (provider-catalog.ts:29-37) computed from raw inputs per mode; 14 destructive self-test mutations all caught (raw key/order/model-id/credential/default, config.model, connected, default map, catalog injection, absent-key fake, unlisted variant, catalog variants removal, persisted variant, unset control).",
-        "artifacts": [
-          "agent/opencode-web/testdata/official-1.18.18/harness/check_final_provider_evidence.py",
-          "cmd:python3 check_final_provider_evidence.py [--self-test] => ok {E1b,E4b,E5b captured} / PASS"
-        ],
-        "checked_at": "2026-08-21T02:50:00Z"
-      }
-    },
-    {
-      "id": "stage0-provider-evidence-correction-regression",
-      "title": "Directive-007 evidence provenance/isolation regression",
-      "description": "Prove pinned source/runtime, safe raw+sanitized provenance, leak scan, 4398/4399 cleanup, unchanged owner 4096, and zero product/protocol/iOS diffs; stop for design-owner mapping.",
-      "status": "done",
-      "phase": "stage0-evidence-correction",
-      "kind": "regression",
-      "depends_on": [
-        "stage0-provider-evidence-correction-tests"
-      ],
-      "source": "Canonical §4.1.1; supervisor directive-007",
-      "notes": "Developer agent stops after the report; canonical mapping remains owner-only.",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "regression",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "All prior gates stay green: canonical design checker (dossiers=11 evidence-decisions=7 final-corrections=3) + self-test; A1-A10 10/10 + self-test; WP checker + self-test; E1-E7 queue (6 captured, E2 blocked) + self-test; final provider evidence + self-test. Leak scan over all b-round raw+sanitized clean under the sentinel-aware rule (real credentials still fail). 4398/4399 free after every cycle; owner 4096 PID 71333 identical before/after. git diff --check clean; zero product/protocol/WireDescriptor/capability/iOS files touched (harness+samples+inventory+state only).",
-        "artifacts": [
-          "cmd:python3 check_canonical_execution_design.py [--self-test] => ok / PASS",
-          "cmd:python3 check_evidence_queue.py [--self-test] => ok / PASS",
-          "docs/2026-08-20-opencode-web-1.18.18-sample-inventory.md"
-        ],
-        "checked_at": "2026-08-21T02:50:00Z"
-      }
-    },
-    {
-      "id": "canonical-post-evidence-shape-sync-impl",
-      "title": "Design-owner canonical shape and mapping sync",
-      "description": "DESIGN OWNER ONLY: inspect returned WP-FIX/E1-E7 raw evidence and update each §6 dossier with exact observed shapes, explicit bridge/SSV2 mapping, errors, tests, and blocked/unsupported decisions. No product code.",
-      "status": "done",
-      "phase": "canonical-shape-sync",
-      "kind": "impl",
-      "depends_on": [
-        "stage0-provider-evidence-correction-regression"
-      ],
-      "source": "Canonical §0/§4.1/§6",
-      "notes": "Design owner completed the final mapping after supervisor audit-007 verified directive-007 evidence. E2 remains explicitly unsupported; all other E rows are resolved in the canonical dossiers.",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "implementation",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "Canonical §4.1/§6 now records exact E1b variant catalog/request/persistence, E4b raw provider structure/provenance, E5b config/provider-default/catalog-first facts, and the final official Web picker order. §6.11.1 freezes the additive cross-repo mapping; §6.11.2 defines one concentrated product batch.",
-        "artifacts": [
-          "docs/2026-08-20-opencode-web-source-first-convergence-plan.md",
-          "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-007-final-provider-evidence-correction.md"
-        ],
-        "checked_at": "2026-08-20T17:11:51Z"
-      }
-    },
-    {
-      "id": "canonical-post-evidence-shape-sync-tests",
-      "title": "Canonical dossier/sample consistency checks",
-      "description": "Extend and run the canonical design checker so every resolved E-row cites the archived sample and no UNKNOWN/PENDING state is removed without proof.",
-      "status": "done",
-      "phase": "canonical-shape-sync",
-      "kind": "tests",
-      "depends_on": [
-        "canonical-post-evidence-shape-sync-impl"
-      ],
-      "source": "Canonical §0/§4.1/§6",
-      "notes": "",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "automated",
-        "attestation": "re-verified",
-        "na_reason": null,
-        "summary": "Updated canonical checker requires E1/E4/E5 SAMPLE-VERIFIED, final provider-default-over-config mapping, concentrated-batch contract, single writer/normalizer, and explicit protocol boundary. Fresh run and destructive self-test PASS.",
-        "artifacts": [
-          "agent/opencode-web/testdata/official-1.18.18/harness/check_canonical_execution_design.py",
-          "cmd:python3 check_canonical_execution_design.py [--self-test] => productBatchDesignReady=True / PASS"
-        ],
-        "checked_at": "2026-08-20T17:11:51Z"
-      }
-    },
-    {
-      "id": "canonical-post-evidence-shape-sync-regression",
-      "title": "Independent canonical execution-readiness audit",
-      "description": "Confirm the canonical document alone contains source, sample, shape, mapping, SSV2 owner, errors, tests, and exclusions for every dossier before product authorization is restored.",
-      "status": "done",
-      "phase": "canonical-shape-sync",
-      "kind": "regression",
-      "depends_on": [
-        "canonical-post-evidence-shape-sync-tests"
-      ],
-      "source": "Canonical §0/§4.1/§6",
-      "notes": "Directive-008 issued only after the final evidence checker and canonical checker were independently rerun. Product implementation has not started in this design-owner commit.",
-      "verification": {
-        "required": true,
-        "status": "present",
-        "method": "mixed",
-        "attestation": "re-verified",
-        "na_reason": null,
-        "summary": "Final-provider checker derives E1b/E4b/E5b from raw transport and passes 14/14 mutations; canonical checker confirms eleven complete dossiers, seven resolved evidence decisions, three closed corrections, single authority, and concentrated product readiness. Audit-007 verifies the evidence-only commit scope.",
-        "artifacts": [
-          "cmd:python3 check_final_provider_evidence.py [--self-test] => 3/3 captured / PASS",
-          "cmd:python3 check_canonical_execution_design.py [--self-test] => ready / PASS",
-          "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-008-concentrated-c2-c7-implementation.md"
-        ],
-        "checked_at": "2026-08-20T17:11:51Z"
-      }
-    },
-    {
-      "id": "c2-list-get-review-fix-impl",
-      "title": "C2 strict project decoder review fix",
-      "description": "review-fix-for:c2-list-get-regression. After WP-FIX and canonical owner mapping, make the generation-118 project decoder accept only the proven top-level shape and fail malformed required rows without silent trimming/fallback.",
-      "status": "pending",
-      "phase": "c2-review-fix",
-      "kind": "impl",
-      "depends_on": [
-        "canonical-post-evidence-shape-sync-regression"
-      ],
-      "source": "Canonical §6.2; audit-003",
-      "notes": "Product work remains unauthorized until a new supervisor directive.",
-      "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "implementation",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
-      }
-    },
-    {
-      "id": "c2-list-get-review-fix-tests",
-      "title": "C2 strict project decoder negative tests",
-      "description": "review-fix-for:c2-list-get-regression. Replay corrected WP raw response and reject envelopes, null/scalar top levels, non-object rows, and missing/wrong/empty required id/worktree fields.",
-      "status": "pending",
-      "phase": "c2-review-fix",
-      "kind": "tests",
-      "depends_on": [
-        "c2-list-get-review-fix-impl"
-      ],
-      "source": "Canonical §6.2; audit-003",
-      "notes": "",
-      "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "automated",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
-      }
-    },
-    {
-      "id": "c2-list-get-review-fix-regression",
-      "title": "C2 WP evidence-to-decoder regression",
-      "description": "review-fix-for:c2-list-get-regression. Prove the corrected raw sample, checker, strict decoder, project aggregation, and zero-writer behavior agree end to end; then resolve the original blocked regression.",
-      "status": "pending",
-      "phase": "c2-review-fix",
-      "kind": "regression",
-      "depends_on": [
-        "c2-list-get-review-fix-tests"
-      ],
-      "source": "Canonical §6.2; audit-003",
-      "notes": "",
-      "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "mixed",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
-      }
-    },
-    {
-      "id": "c3-prompt-impl",
-      "title": "C3 first message and follow-up submission",
-      "description": "Canonical-first additive protocol/mirror plus session-scoped PromptOptionsSender: atomically carry stable message ID, agent, {providerID,modelID}, model-specific variant, and supported parts. Unsupported inputs fail before network I/O; HTTP admission and composer presentation create zero timeline writers.",
-      "status": "pending",
-      "phase": "c3",
-      "kind": "impl",
-      "depends_on": [
-        "c2-list-get-review-fix-regression",
-        "canonical-post-evidence-shape-sync-regression"
-      ],
-      "source": "Gate C3",
-      "notes": "Authorized only as part of supervisor directive-008 concentrated batch. Mac canonical protocol must precede iOS mirror and product activation.",
-      "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "implementation",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
-      }
-    },
-    {
-      "id": "c3-prompt-tests",
-      "title": "C3 A1/A2/A9 replay tests",
-      "description": "HTTP contract plus replay of first-message, follow-up, and prompt-part samples. HTTP 204 alone is not success.",
-      "status": "pending",
-      "phase": "c3",
-      "kind": "tests",
-      "depends_on": [
-        "c3-prompt-impl"
-      ],
-      "source": "Gate C3",
-      "notes": "",
-      "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "automated",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
-      }
-    },
-    {
-      "id": "c3-prompt-regression",
-      "title": "C3 sandbox create/send/reopen cycle",
-      "description": "Real isolated sandbox: one user action produces one persisted user message and one turn.",
-      "status": "pending",
-      "phase": "c3",
-      "kind": "regression",
-      "depends_on": [
-        "c3-prompt-tests"
-      ],
-      "source": "Gate C3",
-      "notes": "",
-      "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "mixed",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
-      }
-    },
-    {
-      "id": "c4-event-reducer-impl",
-      "title": "C4 event reducer from official source + A1–A5",
-      "description": "Implement the proven direct-event inventory through one pre-Kernel normalizer and one backend-global SSE subscriber; skip nested sync once; preserve text/tool/server errors and explicitly reject unsupported reasoning; recover reconnect/external turns through the same Kernel without synthesizing a healthy terminal.",
-      "status": "pending",
-      "phase": "c4",
-      "kind": "impl",
-      "depends_on": [
-        "c3-prompt-regression"
-      ],
-      "source": "Gate C4",
-      "notes": "",
-      "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "implementation",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
-      }
-    },
-    {
-      "id": "c4-event-reducer-tests",
-      "title": "C4 deterministic replay of A1–A5",
-      "description": "Replay complete captured sequences including duplicates, reconnect, provider error, and abort.",
-      "status": "pending",
-      "phase": "c4",
-      "kind": "tests",
-      "depends_on": [
-        "c4-event-reducer-impl"
-      ],
-      "source": "Gate C4",
-      "notes": "",
-      "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "automated",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
-      }
-    },
-    {
-      "id": "c4-event-reducer-regression",
-      "title": "C4 reconnect does not synthesize healthy terminal",
-      "description": "Sandbox reconnect during/after abort and error matches captured terminal outcome.",
-      "status": "pending",
-      "phase": "c4",
-      "kind": "regression",
-      "depends_on": [
-        "c4-event-reducer-tests"
-      ],
-      "source": "Gate C4",
-      "notes": "",
-      "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "mixed",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
-      }
-    },
-    {
-      "id": "c5-model-agent-impl",
-      "title": "C5 model and agent semantics",
-      "description": "Strictly decode real provider/config/agent shapes; implement the canonical current→agent→provider-default-over-config→recent→connected fallback order; carry agent and model-specific variant end to end; remove legacy recursive parsing and never omit explicit validated model.",
-      "status": "pending",
-      "phase": "c5",
-      "kind": "impl",
-      "depends_on": [
-        "c3-prompt-regression"
-      ],
-      "source": "Gate C5",
-      "notes": "",
-      "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "implementation",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
-      }
-    },
-    {
-      "id": "c5-model-agent-tests",
-      "title": "C5 fallback-level fixtures and zero POST on unavailable choice",
-      "description": "Each fallback level has a distinct fixture; unavailable choices cause zero prompt POSTs.",
-      "status": "pending",
-      "phase": "c5",
-      "kind": "tests",
-      "depends_on": [
-        "c5-model-agent-impl"
-      ],
-      "source": "Gate C5",
-      "notes": "",
-      "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "automated",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
-      }
-    },
-    {
-      "id": "c5-model-agent-regression",
-      "title": "C5 selected request assertion in sandbox",
-      "description": "Sandbox prompt body carries the selected agent/model/variant from the chosen fallback level.",
-      "status": "pending",
-      "phase": "c5",
-      "kind": "regression",
-      "depends_on": [
-        "c5-model-agent-tests"
-      ],
-      "source": "Gate C5",
-      "notes": "",
-      "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "mixed",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
-      }
-    },
-    {
-      "id": "c6-interaction-impl",
-      "title": "C6 permissions, questions, and todos",
-      "description": "Implement only from A6–A8 samples. Keep permission and question separate. Resolve missing todo ID before projecting stable items.",
-      "status": "pending",
-      "phase": "c6",
-      "kind": "impl",
-      "depends_on": [
-        "c2-list-get-review-fix-regression",
-        "canonical-post-evidence-shape-sync-regression"
-      ],
-      "source": "Gate C6",
-      "notes": "",
-      "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "implementation",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
-      }
-    },
-    {
-      "id": "c6-interaction-tests",
-      "title": "C6 request/answer/reject/reload tests",
-      "description": "Replay A6–A8: answer/reject, external answer, reconnect, cold-reload. Capability flags match actual support.",
-      "status": "pending",
-      "phase": "c6",
-      "kind": "tests",
-      "depends_on": [
-        "c6-interaction-impl"
-      ],
-      "source": "Gate C6",
-      "notes": "",
-      "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "automated",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
-      }
-    },
-    {
-      "id": "c6-interaction-regression",
-      "title": "C6 sandbox first-resolution-wins",
-      "description": "Isolated sandbox: first server resolution wins; both clients would converge. No invented resolution events.",
-      "status": "pending",
-      "phase": "c6",
-      "kind": "regression",
-      "depends_on": [
-        "c6-interaction-tests"
-      ],
-      "source": "Gate C6",
-      "notes": "",
-      "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "mixed",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
-      }
-    },
-    {
-      "id": "c7-mutations-impl",
-      "title": "C7 session mutations and selected secondary features",
-      "description": "Add only verified rename/archive/delete with returned/by-ID/list refresh and zero timeline write. All OD-3 fork/share/summarize/revert/diff/file/VCS surfaces remain out of scope and unadvertised.",
-      "status": "pending",
-      "phase": "c7",
-      "kind": "impl",
-      "depends_on": [
-        "c2-list-get-review-fix-regression",
-        "canonical-post-evidence-shape-sync-regression"
-      ],
-      "source": "Gate C7",
-      "notes": "",
-      "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "implementation",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
-      }
-    },
-    {
-      "id": "c7-mutations-tests",
-      "title": "C7 mutation contract tests",
-      "description": "Each advertised mutation has source, sample, mapping, and targeted tests. No generic API-coverage milestone.",
-      "status": "pending",
-      "phase": "c7",
-      "kind": "tests",
-      "depends_on": [
-        "c7-mutations-impl"
-      ],
-      "source": "Gate C7",
-      "notes": "",
-      "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "automated",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
-      }
-    },
-    {
-      "id": "c7-mutations-regression",
-      "title": "C7 mutation convergence without invented events",
-      "description": "Rename/archive/delete converge through HTTP and catalog/by-ID truth, do not depend on or synthesize session.deleted, and do not write timeline. Capability activation remains in the final batch gate.",
-      "status": "pending",
-      "phase": "c7",
-      "kind": "regression",
-      "depends_on": [
-        "c7-mutations-tests"
-      ],
-      "source": "Gate C7",
-      "notes": "",
-      "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "mixed",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
-      }
-    },
-    {
-      "id": "concentrated-activation-impl",
-      "title": "Concentrated capability and cross-repository activation",
-      "description": "After all C2-C7 owning regressions pass, synchronize truthful WireDescriptor/backend capabilities and iOS availability for only the fully implemented paths; E2 reasoning and OD-3 remain absent.",
-      "status": "pending",
-      "phase": "concentrated-activation",
-      "kind": "impl",
-      "depends_on": [
-        "c4-event-reducer-regression",
-        "c5-model-agent-regression",
-        "c6-interaction-regression",
-        "c7-mutations-regression"
-      ],
-      "source": "Canonical §6.11-§6.11.2; supervisor directive-008",
-      "notes": "Do not activate a capability early merely because its Go interface or isolated test exists.",
-      "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "implementation",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
-      }
-    },
-    {
-      "id": "concentrated-activation-tests",
-      "title": "Cross-repository schema, capability, and writer-seal tests",
-      "description": "Prove Mac canonical protocol and iOS mirror round-trip, agent/variant are not dropped, capabilities are absent before owning completion and exact after it, and single-writer/single-ingest invariants remain sealed.",
-      "status": "pending",
-      "phase": "concentrated-activation",
-      "kind": "tests",
-      "depends_on": [
-        "concentrated-activation-impl"
-      ],
-      "source": "Canonical §6.11-§7; supervisor directive-008",
-      "notes": "Targeted Go/Swift tests only; no UI tests or simulator automation.",
-      "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "automated",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
-      }
-    },
-    {
-      "id": "concentrated-activation-regression",
-      "title": "Concentrated build, install, runtime, and final regression",
-      "description": "Run bounded targeted regression, Mac Release build/install/runtime 8777 verification, required iOS targeted build/tests and connected-device install, secret/diff/status checks, then produce one audit-ready report without claiming owner UI completion.",
-      "status": "pending",
-      "phase": "concentrated-activation",
-      "kind": "regression",
-      "depends_on": [
-        "concentrated-activation-tests"
-      ],
-      "source": "Canonical §7-§9; supervisor directive-008",
-      "notes": "Owner UI matrix remains a separate final track after supervisor audit.",
-      "verification": {
-        "required": true,
-        "status": "missing",
-        "method": "mixed",
-        "attestation": "self-attested",
-        "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
-      }
-    }
-  ]
+  {
+   "id": "gate-a-harness-tests",
+   "title": "Harness health: isolated serve + connected localmock",
+   "description": "Start isolated serve, GET /global/health == 1.18.18, GET /provider.connected == [localmock] (all may include the full registry), localmock echo in connected catalog, prompt hits 127.0.0.1:4399 mock, no writes to 127.0.0.1:4096, start/stop recycles 4398/4399.",
+   "status": "done",
+   "phase": "gate-a",
+   "kind": "tests",
+   "depends_on": [
+    "gate-a-harness-impl"
+   ],
+   "source": "Gate A",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "health_check.py PASS: /global/health 1.18.18; connected=[localmock]; echo in catalog; POST /v1/chat/completions on 127.0.0.1:4399 scenario=text; 4096 pid 71333 unchanged; start/stop recycled 4398/4399.",
+    "artifacts": [
+     "agent/opencode-web/testdata/official-1.18.18/evidence/harness-health.json",
+     "cmd:python3 harness/health_check.py => health_check PASS connected=[localmock] allCount=1 mockHits=2",
+     "cmd:stop_sandbox.sh => 4398 free 4399 free 4096 pid 71333",
+     "cmd:audit-reverify 2026-08-20: start_sandbox.sh + health_check.py => health_check PASS connected=[localmock] allCount=1 mockHits=2; stop_sandbox.sh clean"
+    ],
+    "checked_at": "2026-08-20T17:30:00Z"
+   }
+  },
+  {
+   "id": "gate-a-harness-regression",
+   "title": "Harness isolation has no product UX surface",
+   "description": "Harness is capture infrastructure.",
+   "status": "done",
+   "phase": "gate-a",
+   "kind": "regression",
+   "depends_on": [
+    "gate-a-harness-tests"
+   ],
+   "source": "Gate A",
+   "notes": "",
+   "verification": {
+    "required": false,
+    "status": "present",
+    "method": "manual",
+    "attestation": "self-attested",
+    "na_reason": "internal capture infrastructure; isolation is covered by gate-a-harness-tests",
+    "summary": "Harness isolation is capture infrastructure; no product code changed.",
+    "artifacts": [
+     "agent/opencode-web/testdata/official-1.18.18/evidence/harness-health.json"
+    ],
+    "checked_at": "2026-08-20T11:54:59Z"
+   }
+  },
+  {
+   "id": "gate-a-capture-impl",
+   "title": "Capture sanitized 1.18.18 samples for A1–A10",
+   "description": "Using the isolated harness, capture official request/response/SSE sequences for A1–A10. Prefer A1, A2, A3, A4, A5, A6, A7, A8, A9, A10. Do not guess missing JSON. Record explicit blockers for unsafe/unreproducible rows.",
+   "status": "done",
+   "phase": "gate-a",
+   "kind": "impl",
+   "depends_on": [
+    "gate-a-harness-regression",
+    "gate-a-inventory-regression"
+   ],
+   "source": "Gate A",
+   "notes": "A1–A10 independently captured from isolated sandboxes. A8 recaptured after todowrite flood fix (177K vs 18M). A6 once/always/reject; A7 reply/reject; A9 text/file/fileMention/image/agent persist. No product code. Gate B/S/C not started.",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Sanitized+raw samples for A1–A10 present. Independent checkers derive from http/sse/reload. A8 todo items {content,status,priority} no id. A9 mock conversion is text-only.",
+    "artifacts": [
+     "agent/opencode-web/testdata/official-1.18.18/samples/a1-first-healthy-text.sanitized.json",
+     "agent/opencode-web/testdata/official-1.18.18/samples/a6-permission.sanitized.json",
+     "agent/opencode-web/testdata/official-1.18.18/samples/a7-question.sanitized.json",
+     "agent/opencode-web/testdata/official-1.18.18/samples/a8-todos.sanitized.json",
+     "agent/opencode-web/testdata/official-1.18.18/samples/a9-prompt-parts.sanitized.json",
+     "docs/2026-08-20-opencode-web-1.18.18-sample-inventory.md"
+    ],
+    "checked_at": "2026-08-20T12:55:00Z"
+   }
+  },
+  {
+   "id": "gate-a-capture-tests",
+   "title": "Replay-shape check of captured sample pack",
+   "description": "Validate each captured sample retains official keys, required sequence items, and sanitization (no real paths, secrets, or owner session IDs).",
+   "status": "done",
+   "phase": "gate-a",
+   "kind": "tests",
+   "depends_on": [
+    "gate-a-capture-impl"
+   ],
+   "source": "Gate A",
+   "notes": "Independent classifiers + negative mutations for A1–A10. A3/A5 strict target-session proofs.",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "python3 check_samples.py --self-test PASS; python3 check_samples.py --require-all → captured A1–A10, empty partial/blocked/missing.",
+    "artifacts": [
+     "agent/opencode-web/testdata/official-1.18.18/harness/check_samples.py",
+     "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_samples.py --self-test => self-test PASS",
+     "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_samples.py --require-all => captured A1-A10",
+     "cmd:audit-reverify 2026-08-20: check_samples.py --self-test => PASS; --require-all => A1-A10 captured"
+    ],
+    "checked_at": "2026-08-20T17:30:00Z"
+   }
+  },
+  {
+   "id": "gate-a-capture-regression",
+   "title": "A1–A10 all green or explicit owner-scope removal",
+   "description": "Inventory status is green for every P0 row, or the row is marked blocked with a named owner decision to drop the capability from advertisement.",
+   "status": "done",
+   "phase": "gate-a",
+   "kind": "regression",
+   "depends_on": [
+    "gate-a-capture-tests"
+   ],
+   "source": "Gate A",
+   "notes": "All P0 rows captured. No blocked capability requiring owner scope removal. Gate B not started.",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Inventory A1–A10 captured. check_samples --require-all all green. No owner-scope removal. Product code unchanged.",
+    "artifacts": [
+     "docs/2026-08-20-opencode-web-1.18.18-sample-inventory.md",
+     "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_samples.py --require-all => captured A1-A10"
+    ],
+    "checked_at": "2026-08-20T12:55:00Z"
+   }
+  },
+  {
+   "id": "gate-b-capability-map-impl",
+   "title": "Gate B official-surface disposition map",
+   "description": "Classify every official Web surface as supported now / deliberately unsupported / not applicable / future. No implicit endpoint.",
+   "status": "done",
+   "phase": "gate-b",
+   "kind": "impl",
+   "depends_on": [
+    "gate-a-capture-regression"
+   ],
+   "source": "Gate B",
+   "notes": "Owner resolved OD-1/OD-2/OD-3. Gate B exited. Independent audit required before Gate S. No product code.",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Owner resolved hide-in-default-list-keep-by-id, aggregate-global-list-keep-scoped-list, keep-mapped-future-or-unsupported. meta.gateBExited=true, blockers=[].",
+    "artifacts": [
+     "docs/2026-08-20-opencode-web-gate-b-capability-map.json",
+     "docs/2026-08-20-opencode-web-gate-b-capability-map.md",
+     "docs/2026-08-20-opencode-web-source-first-convergence-plan.md"
+    ],
+    "checked_at": "2026-08-20T14:10:00Z"
+   }
+  },
+  {
+   "id": "gate-b-capability-map-tests",
+   "title": "Gate B map covers official Web inventory",
+   "description": "Check the disposition table against the official session/turn/content/interaction/workspace/config/observation inventory so no surface is implicit.",
+   "status": "done",
+   "phase": "gate-b",
+   "kind": "tests",
+   "depends_on": [
+    "gate-b-capability-map-impl"
+   ],
+   "source": "Gate B",
+   "notes": "Checker now requires resolved OD-1/OD-2/OD-3, empty blockers when exited, JSON/Markdown id+disposition+sample parity, source-only pre-sample gate.",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "python3 check_gate_b_map.py → ok 60 surfaces exited=True; --self-test PASS including exited-unresolved and json-md-disposition-drift.",
+    "artifacts": [
+     "agent/opencode-web/testdata/official-1.18.18/harness/check_gate_b_map.py",
+     "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_b_map.py => gate-b map ok: 60 surfaces; exited=True",
+     "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_b_map.py --self-test => self-test PASS",
+     "cmd:audit-reverify 2026-08-20: check_gate_b_map.py => 60 surfaces exited=True; --self-test => PASS"
+    ],
+    "checked_at": "2026-08-20T17:30:00Z"
+   }
+  },
+  {
+   "id": "gate-b-capability-map-regression",
+   "title": "Gate B map is a product decision document",
+   "description": "Disposition table is documentation; WireDescriptor changes belong to later C gates.",
+   "status": "done",
+   "phase": "gate-b",
+   "kind": "regression",
+   "depends_on": [
+    "gate-b-capability-map-tests"
+   ],
+   "source": "Gate B",
+   "notes": "Docs/checker only. Gate B exited after owner resolutions. Gate S not started. Product code unchanged.",
+   "verification": {
+    "required": false,
+    "status": "present",
+    "method": "manual",
+    "attestation": "self-attested",
+    "na_reason": "capability map is a written product decision; advertisement changes are C-gate work",
+    "summary": "No product/WireDescriptor edits. Gate B documentation exit recorded; wait independent audit.",
+    "artifacts": [
+     "docs/2026-08-20-opencode-web-gate-b-capability-map.md",
+     "agent/opencode-web/wire_descriptor.go"
+    ],
+    "checked_at": "2026-08-20T14:10:00Z"
+   }
+  },
+  {
+   "id": "gate-s-s1-s2-impl",
+   "title": "Gate S S1/S2 truth owners and transaction domains",
+   "description": "Write docs/2026-08-20-opencode-web-ssv2-impact.md covering S1 owners/only-writers and S2 transaction domains. Cite iOS CLAUDE.md Session Sync v2 架构路线护栏, the 2026-07-24/2026-07-26 iOS plans, and MacBridge docs/protocol. No product code. Explicitly record: OpenCode serve is upstream fact source; Mac ProjectionKernel is the only CordCode timeline truth; iOS ProjectionStore is the only SSV2 client writer.",
+   "status": "done",
+   "phase": "gate-s",
+   "kind": "impl",
+   "depends_on": [
+    "gate-b-capability-map-regression"
+   ],
+   "source": "Gate S",
+   "notes": "S1/S2 impact from live Mac/iOS writer inventory. Gaps recorded, not patched. S3 not started. No product code.",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Wrote docs/2026-08-20-opencode-web-ssv2-impact.md/.json. S1 four owners with file:symbol. S2 ten domains with required/forbidden/current/status. Seven source-only pre-sample gates. Sealed writers listed.",
+    "artifacts": [
+     "docs/2026-08-20-opencode-web-ssv2-impact.md",
+     "docs/2026-08-20-opencode-web-ssv2-impact.json"
+    ],
+    "checked_at": "2026-08-20T14:55:00Z"
+   }
+  },
+  {
+   "id": "gate-s-s1-s2-tests",
+   "title": "Gate S S1/S2 completeness check",
+   "description": "Verify the SSV2 impact doc has every S1 concern (OpenCode facts, Kernel timeline, ProjectionStore, protocol) and every S2 domain (cold hydrate, live SSE, nested sync, reconnect, requests/mutations, control plane, permission/question/todo).",
+   "status": "done",
+   "phase": "gate-s",
+   "kind": "tests",
+   "depends_on": [
+    "gate-s-s1-s2-impl"
+   ],
+   "source": "Gate S",
+   "notes": "Completeness checker covers S1/S2 required ids, permission/question/todo ownership, dual-ingest ban, source-only 实现前补样本, forbidden allowed-paths.",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "python3 check_gate_s_s1_s2.py → ok s1=4 s2=10 source-only-gates=7; --self-test PASS.",
+    "artifacts": [
+     "agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s1_s2.py",
+     "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s1_s2.py => gate-s s1/s2 ok: s1=4 s2=10 source-only-gates=7",
+     "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s1_s2.py --self-test => self-test PASS",
+     "cmd:audit-reverify 2026-08-20: check_gate_s_s1_s2.py => s1=4 s2=10 gates=7; --self-test => PASS"
+    ],
+    "checked_at": "2026-08-20T17:30:00Z"
+   }
+  },
+  {
+   "id": "gate-s-s1-s2-regression",
+   "title": "Gate S S1/S2 is architecture proof, not a UX change",
+   "description": "S1/S2 document only; product code remains frozen.",
+   "status": "done",
+   "phase": "gate-s",
+   "kind": "regression",
+   "depends_on": [
+    "gate-s-s1-s2-tests"
+   ],
+   "source": "Gate S",
+   "notes": "Docs/checker only. Product code, protocol, WireDescriptor unchanged. S3/S4/C not started.",
+   "verification": {
+    "required": false,
+    "status": "present",
+    "method": "manual",
+    "attestation": "self-attested",
+    "na_reason": "S1/S2 is architecture proof documentation; no UX/product-code surface",
+    "summary": "git diff of agent/opencode-web/*.go go-bridge MacBridge core iOS product sources is empty.",
+    "artifacts": [
+     "docs/2026-08-20-opencode-web-ssv2-impact.md"
+    ],
+    "checked_at": "2026-08-20T14:55:00Z"
+   }
+  },
+  {
+   "id": "gate-s-s3-impact-impl",
+   "title": "Gate S S3 impact records for C1–C7",
+   "description": "For each C1–C7 slice, write an S3 impact record with all seven fields: truth owner, only writer, transaction domain, new data path, active write inventory, failure presentation, anti-double-write proof. C3 must state stable messageID is authoritative correlation only, not an iOS optimistic timeline writer. C4 must name the single pre-Kernel normalization point and the single Kernel ingest path. C6 must classify permission raw control, canonical question, legacy question, and todo ownership. Missing any field blocks that slice from coding.",
+   "status": "done",
+   "phase": "gate-s",
+   "kind": "impl",
+   "depends_on": [
+    "gate-s-s1-s2-regression"
+   ],
+   "source": "Gate S",
+   "notes": "Docs/checker only. Product code, protocol, WireDescriptor unchanged. S4/C not started.",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "C1–C7 S3 impact records added to ssv2-impact.md/json with eight required fields plus Gate B surfaces, samples, current/planned paths, tests, out-of-scope, protocol change, and 实现前补样本. S4/C not started.",
+    "artifacts": [
+     "docs/2026-08-20-opencode-web-ssv2-impact.md",
+     "docs/2026-08-20-opencode-web-ssv2-impact.json",
+     "agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s3.py"
+    ],
+    "checked_at": "2026-08-20T16:40:00Z"
+   }
+  },
+  {
+   "id": "gate-s-s3-impact-tests",
+   "title": "Gate S S3 every C slice has all seven fields",
+   "description": "Automated check that C1–C7 each have non-empty S3 fields and that C3/C4/C6 special invariants are present.",
+   "status": "done",
+   "phase": "gate-s",
+   "kind": "tests",
+   "depends_on": [
+    "gate-s-s3-impact-impl"
+   ],
+   "source": "Gate S",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s3.py → gate-s s3 ok: slices=7 source-only-gates=7 s4Started=False gateCStarted=False productCodeFrozen=True; --self-test PASS (drop-c-slice, drop-eight-field, c3-optimistic-writer, c4-dual-ingest-allowed, c6-todo-in-timeline, drop-source-only-gate).",
+    "artifacts": [
+     "agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s3.py",
+     "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s3.py => gate-s s3 ok: slices=7 source-only-gates=7",
+     "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s3.py --self-test => self-test PASS",
+     "cmd:audit-reverify 2026-08-20: check_gate_s_s3.py => slices=7 source-only-gates=7; --self-test => PASS"
+    ],
+    "checked_at": "2026-08-20T17:30:00Z"
+   }
+  },
+  {
+   "id": "gate-s-s3-impact-regression",
+   "title": "Gate S S3 records are documentation",
+   "description": "Impact records are evidence; product code stays frozen until Gate C is authorized.",
+   "status": "done",
+   "phase": "gate-s",
+   "kind": "regression",
+   "depends_on": [
+    "gate-s-s3-impact-tests"
+   ],
+   "source": "Gate S",
+   "notes": "Docs/checker only. Product code, protocol, WireDescriptor unchanged. S4/C not started.",
+   "verification": {
+    "required": false,
+    "status": "present",
+    "method": "manual",
+    "attestation": "self-attested",
+    "na_reason": "per-slice impact records are documentation; completeness covered by gate-s-s3-impact-tests",
+    "summary": "git diff of agent/opencode-web/*.go go-bridge MacBridge core docs/protocol is empty. S4/Gate C not started.",
+    "artifacts": [
+     "docs/2026-08-20-opencode-web-ssv2-impact.md",
+     "agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s3.py"
+    ],
+    "checked_at": "2026-08-20T16:40:00Z"
+   }
+  },
+  {
+   "id": "gate-s-s4-test-map-impl",
+   "title": "Gate S S4 test mapping",
+   "description": "Map every S4 row to an existing or planned owning test: adapter single ingest, Kernel live, Kernel hydrate/fence, reconnect generation, raw delivery seal, iOS t=0 ownership, ProjectionStore revision apply, permission/question/todo ownership, cross-repo protocol consistency. Planned tests must name file/symbol; do not invent passing results.",
+   "status": "done",
+   "phase": "gate-s",
+   "kind": "impl",
+   "depends_on": [
+    "gate-s-s3-impact-regression"
+   ],
+   "source": "Gate S",
+   "notes": "Docs/checker only. Nine-layer S4 test map added to ssv2-impact.md/json (adapter, kernel-live, kernel-hydrate, reconnect, delivery, ios-ownership, ios-application, interaction, cross-repository). Product code, protocol, WireDescriptor unchanged. Gate C not started.",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Nine S4 rows each carry affectedSlices/invariant/producer/reducer-fence/delivery proofs, existing tests (real file+symbol, verified on disk), planned tests marked planned, sample dependency, negative assertion, exit condition, uncovered boundaries. s4PreSampleOrder covers 7 source-only + selected_variant as capture-before-translator. meta s4Started=true s4Completed=true gateSExited=false.",
+    "artifacts": [
+     "docs/2026-08-20-opencode-web-ssv2-impact.md",
+     "docs/2026-08-20-opencode-web-ssv2-impact.json",
+     "agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s4.py"
+    ],
+    "checked_at": "2026-08-20T18:30:00Z"
+   }
+  },
+  {
+   "id": "gate-s-s4-test-map-tests",
+   "title": "Gate S S4 every row names an owning test",
+   "description": "Check the S4 matrix has a named existing or planned test path for every required layer, including C3 correlation-not-writer and C4 single-ingest.",
+   "status": "done",
+   "phase": "gate-s",
+   "kind": "tests",
+   "depends_on": [
+    "gate-s-s4-test-map-impl"
+   ],
+   "source": "Gate S",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "tests",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "python3 check_gate_s_s4.py => gate-s s4 ok: layers=9 pre-sample-order=8 s4Started=True s4Completed=True gateSExited=False gateCStarted=False productCodeFrozen=True; --self-test => PASS (10 mutations caught: drop layer, phantom symbol, planned-as-passed, C3 missing submit-zero-writer, C4 raw fallback, C6 todo-in-timeline, dropped capture order, missing canonical-first, premature gateSExited, premature gateCStarted).",
+    "artifacts": [
+     "agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s4.py",
+     "cmd:python3 check_gate_s_s4.py => gate-s s4 ok: layers=9 pre-sample-order=8",
+     "cmd:python3 check_gate_s_s4.py --self-test => self-test PASS"
+    ],
+    "checked_at": "2026-08-20T18:30:00Z"
+   }
+  },
+  {
+   "id": "gate-s-s4-test-map-regression",
+   "title": "Gate S exit: S4 map plus C3/C4/C6 invariants",
+   "description": "Gate S exits only when S1–S3 are in the capability/impact docs, S4 names owning tests, C3 messageID is correlation-only, C4 names one pre-Kernel normalization and one Kernel ingest, and C6 classifies permission/question/todo exactly as the plan.",
+   "status": "done",
+   "phase": "gate-s",
+   "kind": "regression",
+   "depends_on": [
+    "gate-s-s4-test-map-tests"
+   ],
+   "source": "Gate S",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "regression",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Regression: S1/S2 checker ok (s1=4 s2=10) + self-test PASS; S3 checker ok (slices=7, s4Started now allowed true) + self-test PASS; S4 checker ok + self-test PASS; Gate B map checker collateral ok (60 surfaces). Freeze verified: git diff touches only ssv2-impact md/json, check_gate_s_s1_s2/s3/s4, plan doc, state json — no product code/protocol/WireDescriptor/capability. gateSExited=false: Gate S exit awaits independent audit.",
+    "artifacts": [
+     "cmd:python3 check_gate_s_s1_s2.py => gate-s s1/s2 ok",
+     "cmd:python3 check_gate_s_s3.py => gate-s s3 ok",
+     "cmd:python3 check_gate_s_s4.py => gate-s s4 ok",
+     "cmd:python3 check_gate_b_map.py => gate-b map ok: 60 surfaces; exited=True",
+     "docs/2026-08-20-opencode-web-ssv2-impact.md"
+    ],
+    "checked_at": "2026-08-20T18:30:00Z"
+   }
+  },
+  {
+   "id": "c1-version-transport-impl",
+   "title": "C1 version and transport boundary",
+   "description": "Make 1.18.18 the verified adapter; quarantine unverified v2; remove unknown-shape recursive fallbacks; preserve auth, directory scoping, SSE reconnect.",
+   "status": "done",
+   "phase": "c1",
+   "kind": "impl",
+   "depends_on": [
+    "gate-s-s4-test-map-regression"
+   ],
+   "source": "Gate C1",
+   "notes": "C1 only. clientFor is the single verified-generation gate: generation118 is the only generation handed out; v2/unknown fail closed (distinct quarantine error, zero prompt/SSE/Kernel/capability). InstanceStatus now distinguishes unsupported-generation from probe failures. v2 write paths deleted (Send v2 branch, postModel, CancelTurn /interrupt, SSE /api/event dial). Catalog legacy recursive walk deleted (fail closed on unknown shape). Basic Auth/directory scoping/HTTP timeout/SSE no-lifetime-timeout/bounded reconnect unchanged and transport-only. Hole-fill directive-002 (audit-001 partial): RunDiagnostics now fails ocw_probe with shared unsupported-generation (quarantined) wording and stops before catalog checks; corrected capability wording (no NEW v2 capability; existing array unchanged).",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Version/transport boundary per plan §6 C1 + S3 record C1: 1.18.18-only verified adapter; v2 quarantine at clientFor/InstanceStatus with diagnosable states (supported/unauthorized/unreachable/unsupported-generation/server_unauthenticated); unknown-shape recursive fallbacks removed (catalog legacy walk + dead collectModelWindows); v2 product write paths deleted; no protocol/WireDescriptor/capability/iOS changes.",
+    "artifacts": [
+     "agent/opencode-web/opencodeweb.go",
+     "agent/opencode-web/session.go",
+     "agent/opencode-web/events.go",
+     "agent/opencode-web/models.go",
+     "agent/opencode-web/context_usage.go",
+     "agent/opencode-web/diagnostics.go",
+     "agent/opencode-web/opencodeweb.go"
+    ],
+    "checked_at": "2026-08-20T20:30:00Z"
+   }
+  },
+  {
+   "id": "c1-version-transport-tests",
+   "title": "C1 probe distinguishes supported/unauthorized/unreachable/unsupported version",
+   "description": "Targeted Go tests for generation probe and fail-closed unknown version.",
+   "status": "done",
+   "phase": "c1",
+   "kind": "tests",
+   "depends_on": [
+    "c1-version-transport-impl"
+   ],
+   "source": "Gate C1",
+   "notes": " Hole-fill directive-002 (audit-001 partial): RunDiagnostics now fails ocw_probe with shared unsupported-generation (quarantined) wording and stops before catalog checks; corrected capability wording (no NEW v2 capability; existing array unchanged).",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "tests",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "Five required tests in agent/opencode-web/version_transport_c1_test.go: TestVerified118Only / TestV2FailClosedQuarantine / TestGenerationV2QuarantineZeroPromptAndZeroKernelIngest / TestBasicAuthDirectoryTimeoutAreControlNotTimeline / TestSSEReconnectIsTransportOnly — all PASS. v2-dependent tests rewritten to quarantine semantics (TestCancelTurnV2Interrupt, TestListSessionsV2EnvelopeQuarantined, TestProjectsNotSupportedOnV2, TestIsSessionActiveV2QuarantineStaysConservative, TestPermissionFoldV2QuarantinedZeroReplies); v2 write-path shape tests deleted (postModel/interrupt). Full package: go test ./agent/opencode-web/ -count=1 -timeout 180s => ok 2.7s.",
+    "artifacts": [
+     "agent/opencode-web/version_transport_c1_test.go",
+     "cmd:go test ./agent/opencode-web/ -run TestVerified118Only|TestV2FailClosedQuarantine|TestGenerationV2Quarantine|TestBasicAuthDirectoryTimeout|TestSSEReconnectIsTransportOnly -count=1 => all PASS",
+     "cmd:go test ./agent/opencode-web/ -count=1 -timeout 180s => ok",
+     "cmd:go test ./agent/opencode-web/ -run TestV2DiagnosticsQuarantinedStopsAtProbe|TestDiagnostics118StillPassed|TestDiagnosticsUnknownAndUnauthenticatedStayProbeFailures => all PASS (directive-002)",
+     "cmd:go test ./go-bridge/ -run TestOpenCodeWebV2QuarantineDescriptorNotAvailable => PASS"
+    ],
+    "checked_at": "2026-08-20T20:30:00Z"
+   }
+  },
+  {
+   "id": "c1-version-transport-regression",
+   "title": "C1 no v2 parity claim in wire/capability",
+   "description": "Confirm unknown generation is not advertised and v2 branches are quarantined.",
+   "status": "done",
+   "phase": "c1",
+   "kind": "regression",
+   "depends_on": [
+    "c1-version-transport-tests"
+   ],
+   "source": "Gate C1",
+   "notes": " Hole-fill directive-002 (audit-001 partial): RunDiagnostics now fails ocw_probe with shared unsupported-generation (quarantined) wording and stops before catalog checks; corrected capability wording (no NEW v2 capability; existing array unchanged). C1 closed 2026-08-20: three-track done (exec-plan proven + supervisor verified via audit-002-recheck; owner real-device acceptance not required this phase). Awaiting separate C2 directive; C3+ must not be bundled.",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "regression",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "go build ./... OK; go vet ./agent/opencode-web/ clean; go test ./agent/opencode-web/ full package ok; go-bridge targeted (OpenCodeWeb|SessionSyncV2|Projection|EventPublisher|BridgeEpoch) ok 4.5s; ./core/ ok. Freeze check: git diff touches only agent/opencode-web/*.go (+state/plan docs) — docs/protocol, WireDescriptor (wire_descriptor.go), capability advertisement, iOS untouched. Zero prompt/zero Kernel ingest negative proofs in TestGenerationV2QuarantineZeroPromptAndZeroKernelIngest. No A1/A5-uncovered translation semantics introduced.",
+    "artifacts": [
+     "cmd:go build ./... => OK",
+     "cmd:go test ./go-bridge/ -run OpenCodeWeb|SessionSyncV2|Projection|EventPublisher|BridgeEpoch -count=1 => ok 4.5s",
+     "cmd:go test ./core/ -count=1 => ok",
+     "agent/opencode-web/version_transport_c1_test.go",
+     "cmd:go test ./agent/opencode-web/ -count=1 -timeout 180s => ok 2.717s",
+     "cmd:go test ./go-bridge/ -run OpenCodeWeb|AgentDescriptor -count=1 => ok 0.843s",
+     "cmd:go test ./core/ -count=1 => ok; go vet => clean; go build ./... => OK",
+     "supervisor-audit:audit-001-gate-s-exit-and-c1.md (verdict partial, diagnostics hole named)",
+     "supervisor-directive:directive-002-c1-diagnostics-hole-fill.md (hole-fill 5b8451c)",
+     "supervisor-audit:audit-002-c1-diagnostics-hole-fill.md (partial, wording unification left)",
+     "recheck-fix:257f0df (clientFor shares unsupportedGenerationDetail; 14 assertions strengthened)",
+     "supervisor-audit:audit-002-recheck.md (verdict verified, 2026-08-20)"
+    ],
+    "checked_at": "2026-08-20T21:30:00Z"
+   }
+  },
+  {
+   "id": "c2-list-get-impl",
+   "title": "C2 official list/get semantics",
+   "description": "Reproduce root-session and limit semantics; document multi-directory aggregation and archive filtering as a bridge product rule; retain by-ID get.",
+   "status": "done",
+   "phase": "c2",
+   "kind": "impl",
+   "depends_on": [
+    "c1-version-transport-regression"
+   ],
+   "source": "Gate C2",
+   "notes": "Directive-003. Evidence-first: workspace.project sample+checker commit 69f26bc precedes product commit ef21db1 (capture-before-translator honored). Mac-only; no iOS product code.",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "C2 official list/get per directive-003: upstream requests carry directory+roots=true+limit=100 (frozen core.OpenCodeSessionFetchLimit shared with bridge; no omit-limit retry; failures are diagnosable catalog errors); OD-1 archived hidden in default enumerations but kept by-ID; OD-2 per-worktree aggregation with registry/bucket failures failing the whole list, empty registry = empty catalog (zero fallbacks), stable-ID dedup, ModifiedAt DESC/ID ASC; malformed top-level/rows fail (no silent trimming); missing-worktree is a documented CordCode visibility overlay on the aggregate only — scoped scope unchanged, by-ID unaffected; list/get stays pure catalog (zero POST, zero event streams, no Kernel/EventPublisher/timeline writer).",
+    "artifacts": [
+     "core/opencode_fetch_limit.go",
+     "agent/opencode-web/sessions.go",
+     "agent/opencode-web/projects.go",
+     "go-bridge/handlers_opencode.go"
+    ],
+    "checked_at": "2026-08-20T23:45:00Z"
+   }
+  },
+  {
+   "id": "c2-list-get-tests",
+   "title": "C2 boundary fixtures for list/get",
+   "description": "Replay A10 plus root/child, exactly-at-limit, over-limit, archived, missing worktree, by-ID retrieval.",
+   "status": "done",
+   "phase": "c2",
+   "kind": "tests",
+   "depends_on": [
+    "c2-list-get-impl"
+   ],
+   "source": "Gate C2",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "tests",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "Eight owning tests in list_get_c2_test.go (TestOfficialRootsLimit, TestArchivedHiddenInDefaultListKeptById, TestGlobalAggregatePerWorktree, TestProjectRegistryAndBucketFailuresSurface, TestEmptyProjectRegistryIsEmpty, TestMissingWorktreeRule, TestListGetDoesNotWriteMessages, TestCreateBodyEmptyMatchesV1) + reworked TestArchivedAtMappingKeptForByIDReads/TestListSessionsMapsFieldsAndDirectoryHeader + full package green: go test ./agent/opencode-web/ -count=1 -timeout 180s => ok.",
+    "artifacts": [
+     "agent/opencode-web/list_get_c2_test.go",
+     "cmd:go test ./agent/opencode-web/ -count=1 -timeout 180s => ok 2.693s"
+    ],
+    "checked_at": "2026-08-20T23:45:00Z"
+   }
+  },
+  {
+   "id": "c2-list-get-regression",
+   "title": "C2 list/get sandbox reopen cycle",
+   "description": "Isolated sandbox create/list/archive/get-by-id matches official server state.",
+   "status": "done",
+   "phase": "c2",
+   "kind": "regression",
+   "depends_on": [
+    "c2-list-get-tests"
+   ],
+   "source": "Gate C2",
+   "notes": "audit-003 downgrade: WP checker evidence owner is rawPayloads rather than http[].response, and the generation-118 project decoder is not yet proven fail-closed. Product repair is deferred until directive-006 evidence and owner canonical shape sync complete; review-fix-for:c2-list-get-regression. | resolved-via:c2-list-get-review-fix-regression (directive-008 Wave 1a).",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "regression",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Resolved via c2-list-get-review-fix-regression: WP-FIX made http[] the evidence owner (4a215b0), the strict generation-118 /project decoder now fails closed on every malformed shape, and the isolated-sandbox create/list/archive/get-by-id cycle matches official server state end to end.",
+    "artifacts": [
+     "resolved-via:c2-list-get-review-fix-regression",
+     "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_workspace_project.py --self-test => PASS",
+     "cmd:OCW_SANDBOX_URL=http://127.0.0.1:4398 go test -run TestSandboxC2ListGetCycle => PASS"
+    ],
+    "checked_at": "2026-08-20T16:08:13Z"
+   }
+  },
+  {
+   "id": "stage0-evidence-pack-impl",
+   "title": "Directive-006 WP-FIX and E1-E7 real evidence capture",
+   "description": "Evidence-only: use isolated OpenCode 1.18.18/2cba7e227d to capture WP-FIX, selected variant, reasoning, external turn, providers, configured default model, rename, and delete as raw+sanitized HTTP/SSE/reload. Record physical observations only; do not decide mappings or modify product code.",
+   "status": "done",
+   "phase": "stage0-evidence",
+   "kind": "impl",
+   "depends_on": [
+    "c1-version-transport-regression"
+   ],
+   "source": "Canonical §4.1/§6; supervisor directive-006",
+   "notes": "This is capture/harness implementation, not a product translator. BLOCKED is valid per row; guessed/fake evidence is forbidden.",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Directive-006 evidence-only captures from the isolated 1.18.18/2cba7e227d sandbox (4398/4399; owner 4096 PID 71333 unchanged before/after; ports reclaimed): WP-FIX recaptured with http[]-owned evidence; E1 selected variant (204 admitted, variant persisted per-message on the user message model, unset control omits); E2 reasoning BLOCKED honestly (serve + @ai-sdk/openai-compatible fails reasoning-bearing streams: AI_APICallError socket closed -> busy/retry loop, two strategies archived); E3 external turn (capture client read only post-terminal, exactly two GETs; global SSE covered create/prompt/deltas/idle; reload converged); E4 providers (top-level {all,default,connected}, row shape; raw withheld by frozen leak policy, checker uses shape-preserving sanitized); E5 configured default (default map identical across valid/invalid/absent = config-independent; config model flows verbatim: invalid still 204 with modelID nonexistent; single-model limitation recorded); E6 rename (PATCH title -> Session.Info, list/by-ID converged, 404 NotFoundError); E7 delete (200 true, by-ID 404, list absence, second delete 404; session.deleted NOT observed — honest negative). No bridge mapping decisions recorded.",
+    "artifacts": [
+     "agent/opencode-web/testdata/official-1.18.18/samples/e1-selected-variant.raw.json",
+     "agent/opencode-web/testdata/official-1.18.18/samples/e2-reasoning.raw.json",
+     "agent/opencode-web/testdata/official-1.18.18/samples/e3-external-turn.raw.json",
+     "agent/opencode-web/testdata/official-1.18.18/samples/e4-providers.sanitized.json",
+     "agent/opencode-web/testdata/official-1.18.18/samples/e5-configured-default-valid.sanitized.json",
+     "agent/opencode-web/testdata/official-1.18.18/samples/e6-rename.raw.json",
+     "agent/opencode-web/testdata/official-1.18.18/samples/e7-delete.raw.json",
+     "agent/opencode-web/testdata/official-1.18.18/samples/wp-workspace-project.raw.json"
+    ],
+    "checked_at": "2026-08-21T01:20:00Z"
+   }
+  },
+  {
+   "id": "stage0-evidence-pack-tests",
+   "title": "Directive-006 independent evidence checkers",
+   "description": "Each WP-FIX/E1-E7 conclusion must be derived from raw transport fields and protected by destructive self-tests; summaries/meta/product fixtures are not evidence owners.",
+   "status": "done",
+   "phase": "stage0-evidence",
+   "kind": "tests",
+   "depends_on": [
+    "stage0-evidence-pack-impl"
+   ],
+   "source": "Canonical §4.1/§6; supervisor directive-006",
+   "notes": "Run canonical design, A1-A10, WP-FIX, and E1-E7 checker/self-test gates with explicit timeouts.",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "tests",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "check_evidence_queue.py: verdicts {E1 captured, E2 blocked, E3-E7 captured} derived only from raw transport fields (summaries/meta are provenance); 11 destructive self-test mutations all caught (request field, response field, event/order, reload convergence, fake reasoning, polling substitution, mode tamper). check_workspace_project.py rewritten per WP-FIX: every fact derived from http[] status+response; summary copies cross-checked (summary-mismatch FAIL); 6 mutations caught. Both self-tests PASS.",
+    "artifacts": [
+     "agent/opencode-web/testdata/official-1.18.18/harness/check_evidence_queue.py",
+     "agent/opencode-web/testdata/official-1.18.18/harness/check_workspace_project.py",
+     "cmd:python3 check_evidence_queue.py [--self-test] => ok {6 captured,1 blocked} / PASS",
+     "cmd:python3 check_workspace_project.py [--self-test] => ok / PASS"
+    ],
+    "checked_at": "2026-08-21T01:20:00Z"
+   }
+  },
+  {
+   "id": "stage0-evidence-pack-regression",
+   "title": "Directive-006 evidence provenance and isolation regression",
+   "description": "Prove samples originate from the isolated same-version serve, sanitized evidence is leak-free, 4398/4399 are reclaimed, owner 4096 is unchanged, and no product/protocol/capability/iOS file changed.",
+   "status": "done",
+   "phase": "stage0-evidence",
+   "kind": "regression",
+   "depends_on": [
+    "stage0-evidence-pack-tests"
+   ],
+   "source": "Canonical §4.1/§6; supervisor directive-006",
+   "notes": "Developer agent stops after this evidence report. It must not continue into canonical mapping or product work.",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "regression",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Provenance/isolation regression: check_canonical_execution_design.py ok + self-test PASS; check_samples.py --require-all 10/10 A1-A10 captured (unmodified, E-rows not mixed in) + self-test PASS; leak scan of all new sanitized samples clean (no owner paths/auth/secrets/4096); owner 4096 listener PID 71333 identical before and after all capture cycles; 4398/4399 released after every cycle (verified free); git diff --check clean; zero product/protocol/WireDescriptor/capability/iOS files changed (harness+samples+inventory only).",
+    "artifacts": [
+     "cmd:python3 check_canonical_execution_design.py [--self-test] => ok / PASS",
+     "cmd:python3 check_samples.py --require-all => 10 captured; --self-test => PASS",
+     "docs/2026-08-20-opencode-web-1.18.18-sample-inventory.md"
+    ],
+    "checked_at": "2026-08-21T01:20:00Z"
+   }
+  },
+  {
+   "id": "stage0-provider-evidence-correction-impl",
+   "title": "Directive-007 E1b/E4b/E5b combined capture",
+   "description": "Evidence-only: capture a two-model provider with distinct default/first ordering, real GET /config valid/invalid/absent responses, safe raw+sanitized /provider provenance, and a non-empty live variants catalog or honest E1b blocker.",
+   "status": "done",
+   "phase": "stage0-evidence-correction",
+   "kind": "impl",
+   "depends_on": [
+    "stage0-evidence-pack-regression"
+   ],
+   "source": "Canonical §4.1.1; supervisor directive-007",
+   "notes": "No product mapping or code. One combined provider sandbox round only.",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Directive-007 joint capture from the isolated 1.18.18/2cba7e227d sandbox (4398/4399 reclaimed each cycle; owner 4096 PID 71333 unchanged). E1b: config-declared models.echo.variants {high,low} surface in raw /provider; prompt with real key high admitted 204 and persisted on the user message model; unset control omits. E4b: raw+sanitized /provider pair with sentinel credential fixture-not-a-secret; key/type/order derived from raw. E5b: three isolated configs — /config.model localmock/alpha (in catalog) / localmock/nonexistent (not in catalog) / key absent; /provider.default=localmock/zeta (custom ranking priority->latest->id-DESC, provider.ts:2019-2025, NOT alphabetical) distinct from configured default; no-model prompt resolved alpha / nonexistent (verbatim) / zeta (=provider default).",
+    "artifacts": [
+     "agent/opencode-web/testdata/official-1.18.18/samples/e1b-catalog-variant.raw.json",
+     "agent/opencode-web/testdata/official-1.18.18/samples/e4b-provider-provenance.raw.json",
+     "agent/opencode-web/testdata/official-1.18.18/samples/e5b-configured-default-valid.raw.json",
+     "agent/opencode-web/testdata/official-1.18.18/harness/opencode.json"
+    ],
+    "checked_at": "2026-08-21T02:50:00Z"
+   }
+  },
+  {
+   "id": "stage0-provider-evidence-correction-tests",
+   "title": "Directive-007 provider/config/variant independent checker",
+   "description": "Derive E1b/E4b/E5b only from raw HTTP/prompt/reload and prove raw/sanitized structural equivalence; destructive mutations cover config/default/connected/models/variants and redaction boundaries.",
+   "status": "done",
+   "phase": "stage0-evidence-correction",
+   "kind": "tests",
+   "depends_on": [
+    "stage0-provider-evidence-correction-impl"
+   ],
+   "source": "Canonical §4.1.1; supervisor directive-007",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "tests",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "check_final_provider_evidence.py: E1b/E4b/E5b all captured, derived only from raw transport; raw/sanitized structural equivalence verified (only declared value classes may differ); resolveDefaultModel branch order (provider-catalog.ts:29-37) computed from raw inputs per mode; 14 destructive self-test mutations all caught (raw key/order/model-id/credential/default, config.model, connected, default map, catalog injection, absent-key fake, unlisted variant, catalog variants removal, persisted variant, unset control).",
+    "artifacts": [
+     "agent/opencode-web/testdata/official-1.18.18/harness/check_final_provider_evidence.py",
+     "cmd:python3 check_final_provider_evidence.py [--self-test] => ok {E1b,E4b,E5b captured} / PASS"
+    ],
+    "checked_at": "2026-08-21T02:50:00Z"
+   }
+  },
+  {
+   "id": "stage0-provider-evidence-correction-regression",
+   "title": "Directive-007 evidence provenance/isolation regression",
+   "description": "Prove pinned source/runtime, safe raw+sanitized provenance, leak scan, 4398/4399 cleanup, unchanged owner 4096, and zero product/protocol/iOS diffs; stop for design-owner mapping.",
+   "status": "done",
+   "phase": "stage0-evidence-correction",
+   "kind": "regression",
+   "depends_on": [
+    "stage0-provider-evidence-correction-tests"
+   ],
+   "source": "Canonical §4.1.1; supervisor directive-007",
+   "notes": "Developer agent stops after the report; canonical mapping remains owner-only.",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "regression",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "All prior gates stay green: canonical design checker (dossiers=11 evidence-decisions=7 final-corrections=3) + self-test; A1-A10 10/10 + self-test; WP checker + self-test; E1-E7 queue (6 captured, E2 blocked) + self-test; final provider evidence + self-test. Leak scan over all b-round raw+sanitized clean under the sentinel-aware rule (real credentials still fail). 4398/4399 free after every cycle; owner 4096 PID 71333 identical before/after. git diff --check clean; zero product/protocol/WireDescriptor/capability/iOS files touched (harness+samples+inventory+state only).",
+    "artifacts": [
+     "cmd:python3 check_canonical_execution_design.py [--self-test] => ok / PASS",
+     "cmd:python3 check_evidence_queue.py [--self-test] => ok / PASS",
+     "docs/2026-08-20-opencode-web-1.18.18-sample-inventory.md"
+    ],
+    "checked_at": "2026-08-21T02:50:00Z"
+   }
+  },
+  {
+   "id": "canonical-post-evidence-shape-sync-impl",
+   "title": "Design-owner canonical shape and mapping sync",
+   "description": "DESIGN OWNER ONLY: inspect returned WP-FIX/E1-E7 raw evidence and update each §6 dossier with exact observed shapes, explicit bridge/SSV2 mapping, errors, tests, and blocked/unsupported decisions. No product code.",
+   "status": "done",
+   "phase": "canonical-shape-sync",
+   "kind": "impl",
+   "depends_on": [
+    "stage0-provider-evidence-correction-regression"
+   ],
+   "source": "Canonical §0/§4.1/§6",
+   "notes": "Design owner completed the final mapping after supervisor audit-007 verified directive-007 evidence. E2 remains explicitly unsupported; all other E rows are resolved in the canonical dossiers.",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Canonical §4.1/§6 now records exact E1b variant catalog/request/persistence, E4b raw provider structure/provenance, E5b config/provider-default/catalog-first facts, and the final official Web picker order. §6.11.1 freezes the additive cross-repo mapping; §6.11.2 defines one concentrated product batch.",
+    "artifacts": [
+     "docs/2026-08-20-opencode-web-source-first-convergence-plan.md",
+     "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-007-final-provider-evidence-correction.md"
+    ],
+    "checked_at": "2026-08-20T17:11:51Z"
+   }
+  },
+  {
+   "id": "canonical-post-evidence-shape-sync-tests",
+   "title": "Canonical dossier/sample consistency checks",
+   "description": "Extend and run the canonical design checker so every resolved E-row cites the archived sample and no UNKNOWN/PENDING state is removed without proof.",
+   "status": "done",
+   "phase": "canonical-shape-sync",
+   "kind": "tests",
+   "depends_on": [
+    "canonical-post-evidence-shape-sync-impl"
+   ],
+   "source": "Canonical §0/§4.1/§6",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "Updated canonical checker requires E1/E4/E5 SAMPLE-VERIFIED, final provider-default-over-config mapping, concentrated-batch contract, single writer/normalizer, and explicit protocol boundary. Fresh run and destructive self-test PASS.",
+    "artifacts": [
+     "agent/opencode-web/testdata/official-1.18.18/harness/check_canonical_execution_design.py",
+     "cmd:python3 check_canonical_execution_design.py [--self-test] => productBatchDesignReady=True / PASS"
+    ],
+    "checked_at": "2026-08-20T17:11:51Z"
+   }
+  },
+  {
+   "id": "canonical-post-evidence-shape-sync-regression",
+   "title": "Independent canonical execution-readiness audit",
+   "description": "Confirm the canonical document alone contains source, sample, shape, mapping, SSV2 owner, errors, tests, and exclusions for every dossier before product authorization is restored.",
+   "status": "done",
+   "phase": "canonical-shape-sync",
+   "kind": "regression",
+   "depends_on": [
+    "canonical-post-evidence-shape-sync-tests"
+   ],
+   "source": "Canonical §0/§4.1/§6",
+   "notes": "Directive-008 issued only after the final evidence checker and canonical checker were independently rerun. Product implementation has not started in this design-owner commit.",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "mixed",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "Final-provider checker derives E1b/E4b/E5b from raw transport and passes 14/14 mutations; canonical checker confirms eleven complete dossiers, seven resolved evidence decisions, three closed corrections, single authority, and concentrated product readiness. Audit-007 verifies the evidence-only commit scope.",
+    "artifacts": [
+     "cmd:python3 check_final_provider_evidence.py [--self-test] => 3/3 captured / PASS",
+     "cmd:python3 check_canonical_execution_design.py [--self-test] => ready / PASS",
+     "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-008-concentrated-c2-c7-implementation.md"
+    ],
+    "checked_at": "2026-08-20T17:11:51Z"
+   }
+  },
+  {
+   "id": "c2-list-get-review-fix-impl",
+   "title": "C2 strict project decoder review fix",
+   "description": "review-fix-for:c2-list-get-regression. After WP-FIX and canonical owner mapping, make the generation-118 project decoder accept only the proven top-level shape and fail malformed required rows without silent trimming/fallback.",
+   "status": "done",
+   "phase": "c2-review-fix",
+   "kind": "impl",
+   "depends_on": [
+    "canonical-post-evidence-shape-sync-regression"
+   ],
+   "source": "Canonical §6.2; audit-003",
+   "notes": "Product work remains unauthorized until a new supervisor directive.",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Wave 1a C2 strict decoder: decodeProjectRegistry (projects.go) accepts ONLY the WP-FIX-proven bare-array shape; envelope/null/scalar/object top levels and non-object rows, wrong-type/missing/empty id/worktree fail the whole registry. No trimming/fallback; worktree \"/\" stays a valid row filtered only by the visibility overlay.",
+    "artifacts": [
+     "agent/opencode-web/projects.go",
+     "cmd:go build ./agent/opencode-web/ => ok"
+    ]
+   }
+  },
+  {
+   "id": "c2-list-get-review-fix-tests",
+   "title": "C2 strict project decoder negative tests",
+   "description": "review-fix-for:c2-list-get-regression. Replay corrected WP raw response and reject envelopes, null/scalar top levels, non-object rows, and missing/wrong/empty required id/worktree fields.",
+   "status": "done",
+   "phase": "c2-review-fix",
+   "kind": "tests",
+   "depends_on": [
+    "c2-list-get-review-fix-impl"
+   ],
+   "source": "Canonical §6.2; audit-003",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "8 review-fix tests: WP sample replay through http[].response (global/worktrees/growth/deleted-still-registered), non-bare-array rejections (8 shapes), malformed-row rejections (14 shapes), unknown-extra-fields allowance, and agent-level malformed-registry failure through ListSessions/ListProjectSuggestions.",
+    "artifacts": [
+     "agent/opencode-web/project_registry_c2_reviewfix_test.go",
+     "cmd:go test ./agent/opencode-web -run TestProjectRegistry => PASS"
+    ]
+   }
+  },
+  {
+   "id": "c2-list-get-review-fix-regression",
+   "title": "C2 WP evidence-to-decoder regression",
+   "description": "review-fix-for:c2-list-get-regression. Prove the corrected raw sample, checker, strict decoder, project aggregation, and zero-writer behavior agree end to end; then resolve the original blocked regression.",
+   "status": "done",
+   "phase": "c2-review-fix",
+   "kind": "regression",
+   "depends_on": [
+    "c2-list-get-review-fix-tests"
+   ],
+   "source": "Canonical §6.2; audit-003",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Real isolated 1.18.18 serve (4398): harness git worktree (realpath /private/tmp) registers as its own /project row; create → global aggregate + scoped list surface the session → archive hides from both default lists while by-ID keeps time.archived → delete converges list-absence + by-ID 404. Registry semantics re-pinned live: serve cwd folds into global \"/\"; only sibling git worktrees with >=1 commit become rows.",
+    "artifacts": [
+     "agent/opencode-web/list_get_c2_sandbox_test.go",
+     "cmd:OCW_SANDBOX_URL=http://127.0.0.1:4398 ... go test -run TestSandboxC2ListGetCycle => PASS"
+    ]
+   }
+  },
+  {
+   "id": "c3-prompt-impl",
+   "title": "C3 first message and follow-up submission",
+   "description": "Canonical-first additive protocol/mirror plus session-scoped PromptOptionsSender: atomically carry stable message ID, agent, {providerID,modelID}, model-specific variant, and supported parts. Unsupported inputs fail before network I/O; HTTP admission and composer presentation create zero timeline writers.",
+   "status": "pending",
+   "phase": "c3",
+   "kind": "impl",
+   "depends_on": [
+    "c2-list-get-review-fix-regression",
+    "canonical-post-evidence-shape-sync-regression"
+   ],
+   "source": "Gate C3",
+   "notes": "Authorized only as part of supervisor directive-008 concentrated batch. Mac canonical protocol must precede iOS mirror and product activation.",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "c3-prompt-tests",
+   "title": "C3 A1/A2/A9 replay tests",
+   "description": "HTTP contract plus replay of first-message, follow-up, and prompt-part samples. HTTP 204 alone is not success.",
+   "status": "pending",
+   "phase": "c3",
+   "kind": "tests",
+   "depends_on": [
+    "c3-prompt-impl"
+   ],
+   "source": "Gate C3",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "automated",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "c3-prompt-regression",
+   "title": "C3 sandbox create/send/reopen cycle",
+   "description": "Real isolated sandbox: one user action produces one persisted user message and one turn.",
+   "status": "pending",
+   "phase": "c3",
+   "kind": "regression",
+   "depends_on": [
+    "c3-prompt-tests"
+   ],
+   "source": "Gate C3",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "c4-event-reducer-impl",
+   "title": "C4 event reducer from official source + A1–A5",
+   "description": "Implement the proven direct-event inventory through one pre-Kernel normalizer and one backend-global SSE subscriber; skip nested sync once; preserve text/tool/server errors and explicitly reject unsupported reasoning; recover reconnect/external turns through the same Kernel without synthesizing a healthy terminal.",
+   "status": "pending",
+   "phase": "c4",
+   "kind": "impl",
+   "depends_on": [
+    "c3-prompt-regression"
+   ],
+   "source": "Gate C4",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "c4-event-reducer-tests",
+   "title": "C4 deterministic replay of A1–A5",
+   "description": "Replay complete captured sequences including duplicates, reconnect, provider error, and abort.",
+   "status": "pending",
+   "phase": "c4",
+   "kind": "tests",
+   "depends_on": [
+    "c4-event-reducer-impl"
+   ],
+   "source": "Gate C4",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "automated",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "c4-event-reducer-regression",
+   "title": "C4 reconnect does not synthesize healthy terminal",
+   "description": "Sandbox reconnect during/after abort and error matches captured terminal outcome.",
+   "status": "pending",
+   "phase": "c4",
+   "kind": "regression",
+   "depends_on": [
+    "c4-event-reducer-tests"
+   ],
+   "source": "Gate C4",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "c5-model-agent-impl",
+   "title": "C5 model and agent semantics",
+   "description": "Strictly decode real provider/config/agent shapes; implement the canonical current→agent→provider-default-over-config→recent→connected fallback order; carry agent and model-specific variant end to end; remove legacy recursive parsing and never omit explicit validated model.",
+   "status": "pending",
+   "phase": "c5",
+   "kind": "impl",
+   "depends_on": [
+    "c3-prompt-regression"
+   ],
+   "source": "Gate C5",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "c5-model-agent-tests",
+   "title": "C5 fallback-level fixtures and zero POST on unavailable choice",
+   "description": "Each fallback level has a distinct fixture; unavailable choices cause zero prompt POSTs.",
+   "status": "pending",
+   "phase": "c5",
+   "kind": "tests",
+   "depends_on": [
+    "c5-model-agent-impl"
+   ],
+   "source": "Gate C5",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "automated",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "c5-model-agent-regression",
+   "title": "C5 selected request assertion in sandbox",
+   "description": "Sandbox prompt body carries the selected agent/model/variant from the chosen fallback level.",
+   "status": "pending",
+   "phase": "c5",
+   "kind": "regression",
+   "depends_on": [
+    "c5-model-agent-tests"
+   ],
+   "source": "Gate C5",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "c6-interaction-impl",
+   "title": "C6 permissions, questions, and todos",
+   "description": "Implement only from A6–A8 samples. Keep permission and question separate. Resolve missing todo ID before projecting stable items.",
+   "status": "pending",
+   "phase": "c6",
+   "kind": "impl",
+   "depends_on": [
+    "c2-list-get-review-fix-regression",
+    "canonical-post-evidence-shape-sync-regression"
+   ],
+   "source": "Gate C6",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "c6-interaction-tests",
+   "title": "C6 request/answer/reject/reload tests",
+   "description": "Replay A6–A8: answer/reject, external answer, reconnect, cold-reload. Capability flags match actual support.",
+   "status": "pending",
+   "phase": "c6",
+   "kind": "tests",
+   "depends_on": [
+    "c6-interaction-impl"
+   ],
+   "source": "Gate C6",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "automated",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "c6-interaction-regression",
+   "title": "C6 sandbox first-resolution-wins",
+   "description": "Isolated sandbox: first server resolution wins; both clients would converge. No invented resolution events.",
+   "status": "pending",
+   "phase": "c6",
+   "kind": "regression",
+   "depends_on": [
+    "c6-interaction-tests"
+   ],
+   "source": "Gate C6",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "c7-mutations-impl",
+   "title": "C7 session mutations and selected secondary features",
+   "description": "Add only verified rename/archive/delete with returned/by-ID/list refresh and zero timeline write. All OD-3 fork/share/summarize/revert/diff/file/VCS surfaces remain out of scope and unadvertised.",
+   "status": "pending",
+   "phase": "c7",
+   "kind": "impl",
+   "depends_on": [
+    "c2-list-get-review-fix-regression",
+    "canonical-post-evidence-shape-sync-regression"
+   ],
+   "source": "Gate C7",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "c7-mutations-tests",
+   "title": "C7 mutation contract tests",
+   "description": "Each advertised mutation has source, sample, mapping, and targeted tests. No generic API-coverage milestone.",
+   "status": "pending",
+   "phase": "c7",
+   "kind": "tests",
+   "depends_on": [
+    "c7-mutations-impl"
+   ],
+   "source": "Gate C7",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "automated",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "c7-mutations-regression",
+   "title": "C7 mutation convergence without invented events",
+   "description": "Rename/archive/delete converge through HTTP and catalog/by-ID truth, do not depend on or synthesize session.deleted, and do not write timeline. Capability activation remains in the final batch gate.",
+   "status": "pending",
+   "phase": "c7",
+   "kind": "regression",
+   "depends_on": [
+    "c7-mutations-tests"
+   ],
+   "source": "Gate C7",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "concentrated-activation-impl",
+   "title": "Concentrated capability and cross-repository activation",
+   "description": "After all C2-C7 owning regressions pass, synchronize truthful WireDescriptor/backend capabilities and iOS availability for only the fully implemented paths; E2 reasoning and OD-3 remain absent.",
+   "status": "pending",
+   "phase": "concentrated-activation",
+   "kind": "impl",
+   "depends_on": [
+    "c4-event-reducer-regression",
+    "c5-model-agent-regression",
+    "c6-interaction-regression",
+    "c7-mutations-regression"
+   ],
+   "source": "Canonical §6.11-§6.11.2; supervisor directive-008",
+   "notes": "Do not activate a capability early merely because its Go interface or isolated test exists.",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "concentrated-activation-tests",
+   "title": "Cross-repository schema, capability, and writer-seal tests",
+   "description": "Prove Mac canonical protocol and iOS mirror round-trip, agent/variant are not dropped, capabilities are absent before owning completion and exact after it, and single-writer/single-ingest invariants remain sealed.",
+   "status": "pending",
+   "phase": "concentrated-activation",
+   "kind": "tests",
+   "depends_on": [
+    "concentrated-activation-impl"
+   ],
+   "source": "Canonical §6.11-§7; supervisor directive-008",
+   "notes": "Targeted Go/Swift tests only; no UI tests or simulator automation.",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "automated",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "concentrated-activation-regression",
+   "title": "Concentrated build, install, runtime, and final regression",
+   "description": "Run bounded targeted regression, Mac Release build/install/runtime 8777 verification, required iOS targeted build/tests and connected-device install, secret/diff/status checks, then produce one audit-ready report without claiming owner UI completion.",
+   "status": "pending",
+   "phase": "concentrated-activation",
+   "kind": "regression",
+   "depends_on": [
+    "concentrated-activation-tests"
+   ],
+   "source": "Canonical §7-§9; supervisor directive-008",
+   "notes": "Owner UI matrix remains a separate final track after supervisor audit.",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  }
+ ]
 }
