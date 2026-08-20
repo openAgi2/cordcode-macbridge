@@ -1,7 +1,7 @@
 # OpenCode Web source-first convergence design（canonical）
 
 - Date: 2026-08-20
-- Canonical status: **This file is the only implementation-design authority for `opencode-web`. Gate B map, SSV2 impact, and sample inventory are evidence appendices, not alternative plans. C1 is supervisor-verified. Directive-006 evidence commit `4a215b0` independently proves WP-FIX plus E3/E6/E7, proves E2 blocked, and partially proves E1/E4/E5. Product implementation remains frozen because the official Web's configured-model input (`GET /config`), a non-empty catalog `variants` map, and a clean provider raw-provenance pair were not captured. The only authorized next work is the single combined E1b/E4b/E5b evidence correction in §4.1.1. After that report, the design owner performs the final §6 mapping sync and issues one concentrated C2–C7 implementation directive. Protocol, WireDescriptor, capability advertisement, and iOS timeline ownership remain unchanged meanwhile.**
+- Canonical status: **This file is the only implementation-design authority for `opencode-web`. Gate B map, SSV2 impact, and sample inventory are evidence appendices, not alternative plans. C1 is supervisor-verified. Directive-006 commit `4a215b0` and directive-007 commit `211bb27` close the remaining WP/E1–E7 evidence queue: E1/E3–E7 are sample-verified, E2 reasoning is honestly blocked/unsupported for this convergence, and E1b/E4b/E5b prove the final variant/provider/config shapes. The §6 mappings below are final. One concentrated C2-review-fix + C3–C7 implementation batch is now design-ready; its internal feature waves do not require per-slice supervisor stops, but capability activation, release installation, owner testing, and the completion claim remain a single final gate.**
 - Audit input: [2026-08-20-opencode-web-source-parity-audit.md](2026-08-20-opencode-web-source-parity-audit.md)
 - Historical input only: [2026-08-18-opencode-web-backend-design.md](2026-08-18-opencode-web-backend-design.md) and its completion report
 - Goal: make `opencode-web` a faithful, bounded adapter of the official OpenCode Web behavior, rather than a cleaned-up copy of the legacy OpenCode backend
@@ -104,27 +104,27 @@ Gate A proved A1–A10, but Gate B later promoted seven `source-only` surfaces t
 
 | ID | Surface | Required real observation | Current status | Product rule before capture |
 |---|---|---|---|---|
-| E1 | selected variant (`configuration.variants`) | a prompt with a non-empty selected variant; exact request field and persisted/reload behavior | `REQUEST-SAMPLE-VERIFIED`; catalog/UI selection remains E1b | top-level prompt `variant` is proven; do not expose choices until non-empty catalog variants are captured |
+| E1 | selected variant (`configuration.variants`) | a prompt with a non-empty selected variant; exact request field and persisted/reload behavior | `SAMPLE-VERIFIED` with E1b | expose only live keys from the selected model's `variants` object; unknown keys fail before POST |
 | E2 | reasoning (`content.reasoning`) | populated reasoning part in HTTP reload and direct SSE, including delta/update ordering | `BLOCKED/UNSUPPORTED` for first convergence | do not map, advertise, fold into answer text, or fake reasoning; explicit unsupported failure if encountered |
 | E3 | external official-Web turn (`observation.external_turns`) | second client creates/sends while bridge observes global SSE through terminal/reload | `SAMPLE-VERIFIED` | global SSE is authoritative; no polling substitute |
-| E4 | providers (`configuration.providers`) | real `/provider` response with connected set and model catalog | `SHAPE-VERIFIED-LIMITED`; raw provenance remains E4b | only key/type/catalog semantics are usable; `env/options` values and auth stay opaque |
-| E5 | configured default model (`configuration.default_model`) | configured-default source, valid/invalid/absent behavior, and relation to connected providers | `PARTIAL-SAMPLE`; `/config` + multi-model distinction remains E5b | never omit an explicit validated model and let an invalid server config select silently |
+| E4 | providers (`configuration.providers`) | real `/provider` response with connected set and model catalog | `SAMPLE-VERIFIED` with E4b | use only connected provider/catalog/default/variant facts; `env/options` values and auth stay opaque |
+| E5 | configured default model (`configuration.default_model`) | configured-default source, valid/invalid/absent behavior, and relation to connected providers | `SAMPLE-VERIFIED` with E5b | follow the official picker order in §6.6 and always POST an explicit validated model |
 | E6 | rename (`sessions.rename`) | PATCH path/body/response plus list/by-ID/event refresh | `SAMPLE-VERIFIED` | PATCH title; refresh metadata only; no timeline write |
 | E7 | delete (`sessions.delete`) | DELETE response, subsequent list/by-ID 404, and `session.deleted` invalidation | `SAMPLE-VERIFIED-WITH-NEGATIVE-EVENT` | success is response + list/by-ID convergence; do not require or invent `session.deleted` |
 
 For E1–E7, official source is vocabulary and a capture recipe, not shape proof. The evidence agent records raw HTTP/SSE/reload and runs independent checkers; it does **not** choose bridge mappings. After capture, the design owner updates the corresponding §6 dossier from `PENDING-SAMPLE` to either `SAMPLE-VERIFIED` or `BLOCKED/UNSUPPORTED`. Only then may an implementation directive authorize that translator.
 
-#### 4.1.1 Final combined evidence correction (E1b/E4b/E5b)
+#### 4.1.1 Final combined evidence correction (E1b/E4b/E5b) — closed
 
-One evidence-only round remains; these three observations share the same provider sandbox and must be captured together:
+Directive-007 captured these three observations together from the isolated OpenCode 1.18.18 sandbox at commit `211bb27`:
 
-| ID | Required observation | Why current evidence is insufficient |
+| ID | Captured observation | Mapping consequence |
 |---|---|---|
-| E1b | `/provider` model with a genuinely non-empty `variants` object, official Web selection of one key, resulting prompt request, and persisted user-message variant | E1 proves prompt acceptance/persistence only; it does not prove how selectable catalog keys reach the UI |
-| E4b | raw + sanitized `/provider` pair using an explicitly non-secret fixture credential, with deterministic proof that sanitization changes only value classes and preserves key/type/order | E4's checker consumes only sanitized evidence, contrary to directive-006's raw+sanitized provenance rule |
-| E5b | actual `GET /config` response for valid/invalid/absent `model`, plus a two-model provider catalog whose `/provider.default` differs from the first-model ordering | E5 observed server resolution after omitting model, but did not capture the official UI's config input and cannot distinguish two fallback branches |
+| E1b | `/provider` exposes `models.echo.variants={high,low}`; selecting `high` produces top-level prompt `variant:"high"`, HTTP 204, and persisted `user.info.model.variant`; unset omits the field | model info exposes only those live keys; selection is model-scoped; an unlisted key is rejected before POST |
+| E4b | raw + sanitized `/provider` are recursively structure-equivalent; top level is `{all,default,connected}`, and provider/model key, type, and order come from raw transport | strict decoder; only declared value classes may be redacted; credentials/options remain opaque and never become product configuration |
+| E5b | real `GET /config` has valid `model:"localmock/alpha"`, invalid `model:"localmock/nonexistent"`, or no `model`; `/provider.default.localmock` is `zeta`, distinct from catalog-first `alpha` | official Web selection uses the exact order in §6.6; server-side omitted-model behavior is evidence only and is not CordCode's selection algorithm |
 
-The combined checker must derive the official picker inputs and expected resolution for all three modes without importing product code. If OpenCode cannot produce a non-empty variants catalog through supported configuration, E1b becomes `BLOCKED/UNSUPPORTED` rather than a guessed fixture. Product code, protocol, capability, and iOS remain frozen through this correction.
+`check_final_provider_evidence.py` derives all three results from raw HTTP/prompt/reload, proves raw/sanitized structural equivalence, and catches fourteen destructive mutations. This closes the pre-implementation evidence queue. E2 remains the sole explicit unsupported content surface; it does not block the other dossiers.
 
 ### 4.2 Mandatory stop lines and method reset
 
@@ -315,10 +315,10 @@ Implementation authorization is per dossier, not per file and not per endpoint. 
 |---|---|---|
 | runtime selection and transport | §6.1 / C1 | closed and verified |
 | session list, detail, project buckets | §6.2 / C2 | product exists; evidence/decoder audit correction required |
-| load/reopen message page | §6.3 / C4 | design-ready for captured shapes; reasoning waits for E2 |
-| create and send first/follow-up message | §6.4 / C3 | base send design-ready; selected variant waits for E1 |
-| live stream, retry, abort, reconnect, external turns | §6.5 / C4 | local flows design-ready; external turns wait for E3 |
-| provider/model/agent selection | §6.6 / C5 | provider/default-model waits for E4/E5 |
+| load/reopen message page | §6.3 / C4 | design-ready for captured shapes; reasoning explicitly unsupported by E2 |
+| create and send first/follow-up message | §6.4 / C3 | design-ready including E1/E1b selected variant |
+| live stream, retry, abort, reconnect, external turns | §6.5 / C4 | design-ready from A1–A5 plus E3 |
+| provider/model/agent selection | §6.6 / C5 | design-ready from E1b/E4b/E5b final mapping |
 | permission dock | §6.7 / C6 | design-ready from A6 |
 | question dock | §6.8 / C6 | design-ready from A7 |
 | Todo Dock | §6.9 / C6 | design-ready from A8 |
@@ -366,41 +366,41 @@ Implementation authorization is per dossier, not per file and not per endpoint. 
 
 ### 6.4 Create session and send first/follow-up messages — C3
 
-- **Status:** `SAMPLE-VERIFIED-DESIGN-READY` for create, text, model, agent, and existing bridge attachment inputs. E1 proves the prompt/persistence half of selected variant; catalog/UI activation waits for E1b.
+- **Status:** `SAMPLE-VERIFIED-DESIGN-READY` for create, text, model, agent, selected variant, and existing bridge attachment inputs. E1+E1b close both catalog selection and prompt/persistence.
 - **User-visible behavior:** create yields one server session; each send yields one persisted user message with the client-stable ID and one authoritative assistant turn. First and follow-up sends use the same official request semantics. Composer placeholders are visual only.
 - **Official UI source:** `server-compat.ts:163-169` create and `server-compat.ts:200-230` `promptAsync`.
 - **Server/schema source:** `POST /session`; `POST /session/:id/prompt_async`; `PromptInput` in `session/prompt.ts:1499-1520`, including text/file/agent part unions.
-- **Same-version samples:** A1 create + first send; A2 two follow-ups with distinct IDs; A9 supported prompt parts. E1 proves `variant:"primary"` at the top level of `prompt_async`, HTTP 204, persistence on that user-message `info.model.variant`, and omission on the unset control. It does not prove an earlier-turn retention claim or a selectable non-empty catalog; E1b owns that remaining observation.
+- **Same-version samples:** A1 create + first send; A2 two follow-ups with distinct IDs; A9 supported prompt parts. E1 proves a top-level selected variant is admitted and persisted; E1b proves live catalog keys `high/low`, selected `high`, and omission when unset. Variant is stored per user message; an unset later message does not erase an earlier message's own persisted value.
 - **Verified transport shape:** create body is `{}` with directory routing. Prompt body contains a Mac-generated-once stable `messageID`, selected `agent`, validated `model:{providerID,modelID}`, optional top-level `variant`, and parts. Existing bridge attachment `{kind,mime,filename?,base64}` maps to official file part `{type:"file",mime,filename?,url:"data:<mime>;base64,<base64>"}`. A9's file-mention `source` and agent-mention part are captured but not expressible by the current iOS composer and remain excluded rather than conflated with attachments/selected agent.
 - **Bridge and SSV2 mapping:** `messageID` is correlation-only. A successful HTTP admission does not write timeline or synthesize a user/assistant message. Authoritative direct SSE enters the single pre-Kernel normalizer and Kernel; iOS composer state never arbitrates projection state.
 - **Error and unsupported behavior:** unsupported parts or unavailable selected model/agent/variant fail before any POST. A variant is accepted only when it is one of the selected model's live catalog keys; otherwise zero POST. HTTP 204 means admission only. No local success, placeholder persistence, retry fallback, or legacy send path.
-- **Owning tests:** exact method/path/query/body tests for A1/A2/A9/E1; two-ID persistence correlation; zero-writer on admission; attachment data-URL conversion; unsupported/file-mention/agent-mention zero-network; unavailable model/agent/variant zero-POST; sandbox create/send/reopen; E1b catalog-to-request replay before variant UI activation.
+- **Owning tests:** exact method/path/query/body tests for A1/A2/A9/E1/E1b; two-ID persistence correlation; zero-writer on admission; attachment data-URL conversion; unsupported/file-mention/agent-mention zero-network; unavailable model/agent/variant zero-POST; catalog-to-request variant replay; sandbox create/send/reopen.
 - **Out of scope:** command/shell/subtask, file mention and agent mention until their source-span input has an approved wire/UI design, vision-provider interpretation beyond A9 persistence, and reasoning output covered by §6.3.
 
 ### 6.5 Live stream, terminal state, abort, reconnect, and external turns — C4
 
 - **Status:** `SAMPLE-VERIFIED-DESIGN-READY` for local direct SSE/status/retry/abort/reconnect from A1-A5 and external official-Web turns from E3.
-- **User-visible behavior:** text/tool/status stream once; retries and real errors remain visible; abort ends non-successfully; reconnect continues the same turn without duplication; a second official Web client will be observed only after E3 proves that path.
+- **User-visible behavior:** text/tool/status stream once; retries and real errors remain visible; abort ends non-successfully; reconnect continues the same turn without duplication; a second official Web client is observed through the same global SSE/Kernel route proven by E3.
 - **Official UI source:** `server-sdk.tsx:268-308` global SSE reconnect and `:284` v1 nested-`sync` skip; `event-reducer.ts` session/message/part reducers; `server-compat.ts:197-198` abort.
 - **Server/schema source:** `GET /global/event`; `POST /session/:id/abort`; session status/error and message part event schemas.
 - **Same-version samples:** A1/A2 healthy busy→idle; A3 retry→terminal API error; A4 abort→`MessageAbortedError`; A5 disconnect→`server.connected`→live delta→idle. E3 proves a second client create/send is visible on global SSE with ten live deltas, terminal idle, and by-ID/message reload convergence; the observer performs no list polling.
 - **Verified transport shape:** v1 direct payload is authoritative; nested `sync` is retained as evidence but skipped exactly once before Kernel normalization. A5 proves reconnect is live continuation, not assumed replay. A3 final non-retryable 400 persists assistant error; A4 abort returns `true` but does not imply healthy completion. E3 proves `/global/event` carries other-client session/message/status facts with directory/session identity.
 - **Bridge and SSV2 mapping:** replace per-session dedicated SSE ownership with one backend-instance global subscriber. It normalizes each direct event once and routes by `(directory,sessionID)` into the existing registered/subscribed session's one `EventPublisher`/Kernel. If no Kernel/subscription exists, only catalog metadata is refreshed; opening later hydrates server truth—do not create a second hidden timeline or broadcast raw content. Reconnect resumes this same subscriber/Kernel route.
-- **Error and unsupported behavior:** unknown event/part shapes fail or remain explicitly unsupported; they are not recursively decoded. A first attempted fix with no symptom change triggers §4.3, not another state-machine guess. External-turn capability remains unproven until E3.
+- **Error and unsupported behavior:** unknown event/part shapes fail or remain explicitly unsupported; they are not recursively decoded. A first attempted fix with no symptom change triggers §4.3, not another state-machine guess. External-turn capability remains inactive until the E3 owning replay, subscriber-count, and same-Kernel tests pass in product code.
 - **Owning tests:** complete-sequence A1-A5/E3 replays; exactly one global SSE connection per backend instance; external subscribed session streams while unopened session is catalog-only then hydrates; direct+sync anti-double-ingest; retry/error/abort negative terminal; reconnect same-Kernel/epoch/stale rejection; kernel-nil seal. `external_turn_streaming` is removed at the first product commit if these tests are not yet green and restored only in final activation.
 - **Out of scope:** raw SSE to iOS, assumed server replay buffer, polling as external-turn parity, inferred idle, and v2 events.
 
 ### 6.6 Provider, model, agent, and selected variant — C5
 
-- **Status:** A1/E1/E4/E5 provide a usable but incomplete base. The dossier remains product-frozen until the combined E1b/E4b/E5b evidence correction resolves catalog variants, raw provenance, `/config`, and multi-model fallback distinction.
+- **Status:** `SAMPLE-VERIFIED-DESIGN-READY`. E1b/E4b/E5b close catalog variants, raw provenance, `/config`, and the provider-default/configured/catalog-first distinction.
 - **User-visible behavior:** choices reflect connected providers and real models/agents; send preserves the selected model and agent; fallback distinguishes current choice, agent model, configured default, recent, and connected fallback rather than collapsing them.
 - **Official UI source:** `packages/app/src/context/global-sync/bootstrap.ts:229-242` loads providers and `:266-269` agents; `packages/app/src/pages/session/composer/prompt-model-selection.ts:16-40` establishes connected validation and fallback order, while `:79-123` selects variants; `packages/app/src/utils/server-compat.ts:200-230` sends model/agent/variant.
 - **Server/schema source:** the 1.18.18 provider/agent HTTP groups (`GET /provider`, `GET /agent`), configuration model source, and `packages/opencode/src/session/prompt.ts:1499-1520` `PromptInput` model/agent/variant fields at commit `2cba7e227d`.
-- **Same-version samples:** A1 proves selected model/agent in an admitted prompt. E4 proves sanitized `/provider` `{all[],default{},connected[]}` with row `{id,name,source,env,options,models}` and connected `localmock`; option values are not mapping evidence. E5 proves `/provider.default` remains the same across valid/invalid/absent config and that omitting explicit model can admit/persist an invalid configured ID. E1 proves selected prompt variant, not catalog discovery. E1b/E4b/E5b complete the inputs.
-- **Verified transport shape:** expose only providers named in `connected`; model IDs and context windows come from that provider's `models` map; `/provider.default` is a per-provider model-ID map and is not the configured model. `env`, `options`, credential/provider-auth data are ignored. The official Web validates every candidate against connected catalog. Exact `/config.model`, non-empty `models[].variants`, and default-vs-first ordering remain `UNKNOWN UNTIL E1b/E4b/E5b`.
-- **Bridge and SSV2 mapping:** catalogs and choice state are control plane and never write timeline. Final resolution must always yield an explicit connected-catalog `{providerID,modelID}` before §6.4 POST; never let the serve implicitly consume an invalid config. Current/recent iOS selections travel as explicit model. Selected agent model, configured model, `/provider.default`, and first-model fallback follow the final captured official order. Variant travels as a model-specific optional selection, not `reasoningEffort`.
-- **Error and unsupported behavior:** unknown catalog/config shape fails closed; no recursive JSON search, fake catalog, cached legacy snapshot, silent substitution, or first-connected-as-configured-default claim. An unavailable explicit or configured choice falls to the next official valid candidate only where E5b proves that branch; if no valid candidate exists, zero prompt POST. Capabilities remain inactive until all owning paths pass.
-- **Owning tests:** E1b/E4b/E5b raw/sanitized checkers and destructive mutations; strict provider/config decoders; one test per official fallback candidate with multi-model distinctions; exact selected model/agent/variant request; unavailable choice zero-POST; catalog refresh control-only; unknown-shape fail-closed.
+- **Same-version samples:** A1 proves selected model/agent in an admitted prompt. E1/E1b prove selected variant and non-empty model-specific choices. E4/E4b prove raw `/provider` `{all,default,connected}`, connected `localmock`, model rows `alpha/echo/zeta`, and raw/sanitized structural equivalence. E5/E5b prove real `/config.model` valid/invalid/absent inputs, `/provider.default.localmock="zeta"`, catalog-first `alpha`, and the distinct server behavior when a prompt omits model. The latter is not reused as the Web picker's algorithm.
+- **Verified transport shape:** `GET /provider` returns `{all:Provider[],default:{[providerID]:modelID},connected:string[]}`. A provider row has `{id,name,source,env,options,models}`; each model is keyed by model ID and may contain `variants:{[variantKey]:object}`. `GET /config` is an object whose optional `model` is a `providerID/modelID` string. Expose only providers named in `connected`; model IDs/context facts and variant keys come from that provider's live model map. Ignore `env`, `options`, credentials, and variant values. E4b's observed catalog order is `alpha,echo,zeta`; provider default is independently `zeta`.
+- **Bridge and SSV2 mapping:** catalogs and choices are control plane and never write timeline. Resolve a model in the official Web order: (1) explicit current iOS selection when still connected/catalog-valid; (2) selected agent's configured model when valid; (3) `resolveDefaultModel(providerDefault, config.model)`, where a defined `/provider.default` wins before legacy `/config.model`; (4) recent session model when valid; (5) the default model of the first connected provider, otherwise that provider's first catalog model. E5b therefore resolves `zeta` in valid/invalid/absent modes while provider default exists; `alpha`/`nonexistent` are server omitted-model outcomes, not picker outcomes. Every prompt carries the resolved explicit `{providerID,modelID}`. Variant is an optional model-specific key and is not `reasoningEffort`.
+- **Error and unsupported behavior:** strict provider/config decode; no recursive JSON search, fake catalog, cached legacy snapshot, silent server-side selection, or first-connected-as-configured-default shortcut. Each candidate is validated before use and an unavailable candidate advances only to the next documented level; if no connected valid model exists, zero prompt POST. An unavailable agent or unlisted variant also yields zero POST. Capability/UI activation waits for every owning positive and negative test.
+- **Owning tests:** E1b/E4b/E5b raw/sanitized checkers and fourteen destructive mutations; strict provider/config decoders; distinct tests for current, agent, provider-default-over-config, config when provider default is absent, recent, provider-default fallback, catalog-first fallback, and no-valid-model zero POST; exact selected model/agent/variant request; catalog refresh control-only; unknown-shape fail-closed.
 - **Out of scope:** v2 catalogs, provider/account management, invented defaults, implicit variant support, and model fallback derived from legacy adapter behavior.
 
 ### 6.7 Permission Dock — C6
@@ -468,9 +468,9 @@ Implementation authorization is per dossier, not per file and not per endpoint. 
 - **Owning tests:** descriptor/capability negative-before-positive tests; no undeclared wire field; unsupported UI absence; cross-repository schema round trip when applicable; OD-3 non-advertisement guard.
 - **Out of scope:** Gate B rows marked future/deliberately unsupported/not applicable, all v2 behavior, and any product surface not explicitly promoted in this canonical section.
 
-#### 6.11.1 Exact cross-repository selection mapping (conditional on E1b/E5b)
+#### 6.11.1 Exact cross-repository selection mapping (final)
 
-If E1b proves non-empty catalog variants and E5b closes configured/default ordering, the product batch uses this canonical-first additive mapping; the implementation agent does not redesign it:
+E1b proves non-empty catalog variants and E5b closes configured/default ordering. The concentrated product batch therefore uses this canonical-first additive mapping; the implementation agent does not redesign it:
 
 1. Mac canonical bridge-v1 `list_models` model item gains optional `variants: string[]`, containing only keys observed in that model's live `/provider.all[].models[modelID].variants` object. Empty/absent means no variant selector.
 2. Existing `send_message.params.model` gains optional `variant: string` beside `id` and `providerId`. It is not `reasoningEffort`. Unknown/unlisted variants fail before network I/O.
@@ -479,7 +479,18 @@ If E1b proves non-empty catalog variants and E5b closes configured/default order
 5. Mac uses a new optional session-scoped interface named `core.PromptOptionsSender` with `SendWithOptions(prompt, images, files, core.PromptOptions)`; `PromptOptions` contains `Agent`, `ProviderID`, `ModelID`, and `Variant`. `opencode-web` implements it. The handler calls it atomically for that request; other backends retain `AgentSession.Send`. Do not add another agent-global mutable variant/agent selection that can race concurrent sessions.
 6. `opencode-web` generates one stable OpenCode `messageID` inside `SendWithOptions`, uses it for the request and correlation, and never asks iOS to become a timeline writer.
 
-This is an additive bridge-v1 revision, not a protocol-major change. Implementation order is mandatory: Mac canonical protocol doc/schema → iOS mirror/models → handler/session implementation → targeted cross-repository tests → final capability/UI activation. If E1b is blocked, omit `variants`/`variant` from the batch and keep the selector absent; do not ship a source-only or fake-catalog implementation.
+This is an additive bridge-v1 revision, not a protocol-major change. Implementation order is mandatory: Mac canonical protocol doc/schema → iOS mirror/models → handler/session implementation → targeted cross-repository tests → final capability/UI activation. No other protocol field or timeline writer is authorized by this batch.
+
+#### 6.11.2 Concentrated implementation contract
+
+The remaining work is one implementation batch, not a chain of owner/supervisor pauses. The developer may use reviewable internal commits and run independent feature waves, then submit one final report:
+
+1. **Foundation wave:** close the C2 strict project decoder audit hole and land the canonical-first additive selection protocol/mirror from §6.11.1.
+2. **Turn wave:** implement C3 submission/options, C4 hydrate/live/global-SSE/reconnect, and C5 provider/model/agent/variant selection. C4 and C5 may proceed independently after the shared C3 protocol/session boundary is stable.
+3. **Independent surface wave:** implement C6 permission/question/todo and C7 rename/archive/delete without waiting for C4/C5, because their evidence and ownership are independent.
+4. **Activation wave:** only after all owning positive/negative/regression tests pass, synchronize truthful capability advertisement, build/install the Mac release, perform required iOS build/install for changed iOS code, and stop for one supervisor audit plus one owner matrix.
+
+Internal failures do not require a supervisor checkpoint unless they hit §4.2/§4.3: evidence contradicts this mapping, a new protocol/product decision is required, a change would add a writer/fallback, or the first fix has no observable effect. In those cases preserve evidence and stop the affected slice; unrelated slices may continue only if they do not share the disputed boundary.
 
 ## 7. Test strategy after implementation resumes
 

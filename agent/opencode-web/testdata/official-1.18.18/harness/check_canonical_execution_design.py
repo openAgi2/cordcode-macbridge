@@ -45,11 +45,11 @@ FIELDS = (
 )
 
 EVIDENCE_STATES = {
-    "E1": ("6.4", "REQUEST-SAMPLE-VERIFIED"),
+    "E1": ("6.4", "SAMPLE-VERIFIED"),
     "E2": ("6.3", "BLOCKED/UNSUPPORTED"),
     "E3": ("6.5", "SAMPLE-VERIFIED"),
-    "E4": ("6.6", "SHAPE-VERIFIED-LIMITED"),
-    "E5": ("6.6", "PARTIAL-SAMPLE"),
+    "E4": ("6.6", "SAMPLE-VERIFIED"),
+    "E5": ("6.6", "SAMPLE-VERIFIED"),
     "E6": ("6.10", "SAMPLE-VERIFIED"),
     "E7": ("6.10", "SAMPLE-VERIFIED-WITH-NEGATIVE-EVENT"),
 }
@@ -118,7 +118,9 @@ def check(text: str) -> list[str]:
         "unsupported content.reasoning for verified 1.18.18 shape",
         "session.deleted` and never manufactures",
         "core.PromptOptionsSender",
-        "UNKNOWN UNTIL E1b/E4b/E5b",
+        "provider-default-over-config",
+        "one implementation batch, not a chain of owner/supervisor pauses",
+        "No other protocol field or timeline writer is authorized by this batch",
     )
     for phrase in required_phrases:
         if phrase not in text:
@@ -144,6 +146,16 @@ def self_test(text: str) -> list[str]:
             1,
         ),
         "drop-e5b-correction": text.replace("| E5b |", "| EXb |", 1),
+        "restore-provider-unknown": text.replace(
+            "provider-default-over-config",
+            "UNKNOWN UNTIL IMPLEMENTATION",
+            1,
+        ),
+        "drop-concentrated-contract": text.replace(
+            "one implementation batch, not a chain of owner/supervisor pauses",
+            "a sequence of per-feature supervisor pauses",
+            1,
+        ),
         "drop-single-writer": text.replace(
             "iOS `ProjectionStore` remains the only `messages[]` writer",
             "iOS may also apply history",
@@ -179,7 +191,7 @@ def main() -> int:
         return 0
     print(
         "canonical design ok: dossiers=11 evidence-decisions=7 final-corrections=3 "
-        "single-authority=True productCodeFrozen=True"
+        "single-authority=True productBatchDesignReady=True"
     )
     return 0
 

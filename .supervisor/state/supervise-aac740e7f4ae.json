@@ -2,7 +2,7 @@
   "version": 1,
   "project_root": "/Users/jacklee/Projects/cordcode-macbridge-opencode-web",
   "design_doc": "docs/2026-08-20-opencode-web-source-first-convergence-plan.md",
-  "design_doc_hash": "2f9bf79f3feeeef4567a64a070f5d02305a1cd57",
+  "design_doc_hash": "3676df7772c783bed63b65aa3e656c81bdb69fb2",
   "design_doc_changed": false,
   "activated_at": "2026-08-20T14:40:12Z",
   "active_mode": true,
@@ -177,7 +177,7 @@
       "kind": "hole-fill",
       "title": "Final provider evidence correction（E1b/E4b/E5b）",
       "issued_at": "2026-08-20T16:54:56Z",
-      "status": "pending",
+      "status": "verified",
       "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-007-final-provider-evidence-correction.md",
       "scope": "Mac evidence-only: one combined OpenCode 1.18.18 provider/config/variant sandbox round",
       "constraints": [
@@ -187,10 +187,42 @@
         "no bridge mapping decisions, product code, protocol, WireDescriptor, capability, iOS, build, or install",
         "stop after checker/report; design owner performs final canonical mapping and then issues one concentrated product directive"
       ],
-      "linked_commits": [],
+      "linked_commits": [
+        "git:211bb27"
+      ],
       "roadmap_diff": {
         "design_commit": "git:8d110f7",
         "summary": "Audit-006 accepted WP/E2/E3/E6/E7 and narrowed their canonical mappings, but found the last coupled provider evidence gap: no /config response, no non-empty catalog variants, no multi-model fallback distinction, and no raw E4 provenance pair.",
+        "checker": "python3 agent/opencode-web/testdata/official-1.18.18/harness/check_canonical_execution_design.py --self-test"
+      },
+      "report": {
+        "received_at": "2026-08-20T17:11:51Z",
+        "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-007-final-provider-evidence-correction.md",
+        "audited": true,
+        "audit_verdict": "verified",
+        "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-007-final-provider-evidence-correction.md"
+      }
+    },
+    {
+      "number": 8,
+      "kind": "implementation",
+      "title": "C2-review-fix + C3-C7 concentrated implementation",
+      "issued_at": "2026-08-20T17:11:51Z",
+      "status": "pending",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-008-concentrated-c2-c7-implementation.md",
+      "scope": "Cross-repository MacBridge+iOS concentrated product batch",
+      "constraints": [
+        "one concentrated implementation and one final report; no per-slice supervisor stops unless a canonical stop line triggers",
+        "canonical-first additive variant protocol only; no other wire fields, no reasoning, no OD-3 surfaces",
+        "Mac Kernel remains the only timeline truth and iOS ProjectionStore the only messages writer",
+        "no legacy/v2 fallback, recursive shape search, fake parity evidence, owner 4096 writes, real provider account, or Relay/VPS changes",
+        "targeted tests/builds only with watchdog and owned-process cleanup; no UI tests or simulator automation",
+        "Mac Release install and required iOS physical-device install occur only after owning tests pass"
+      ],
+      "linked_commits": [],
+      "roadmap_diff": {
+        "design_commit": "pending-current-design-owner-commit",
+        "summary": "Directive-007 evidence is verified. E1b/E4b/E5b close variant/provider/config mapping; canonical §6.11.2 converts the remaining roadmap into one concentrated C2 review-fix plus C3-C7 batch with a single final activation/audit gate.",
         "checker": "python3 agent/opencode-web/testdata/official-1.18.18/harness/check_canonical_execution_design.py --self-test"
       },
       "report": {
@@ -202,6 +234,6 @@
       }
     }
   ],
-  "current_directive_number": 7,
-  "last_updated": "2026-08-20T16:54:56Z"
+  "current_directive_number": 8,
+  "last_updated": "2026-08-20T17:11:51Z"
 }

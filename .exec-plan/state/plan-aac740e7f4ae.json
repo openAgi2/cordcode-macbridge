@@ -954,30 +954,33 @@
       "id": "canonical-post-evidence-shape-sync-impl",
       "title": "Design-owner canonical shape and mapping sync",
       "description": "DESIGN OWNER ONLY: inspect returned WP-FIX/E1-E7 raw evidence and update each §6 dossier with exact observed shapes, explicit bridge/SSV2 mapping, errors, tests, and blocked/unsupported decisions. No product code.",
-      "status": "blocked",
+      "status": "done",
       "phase": "canonical-shape-sync",
       "kind": "impl",
       "depends_on": [
         "stage0-provider-evidence-correction-regression"
       ],
       "source": "Canonical §0/§4.1/§6",
-      "notes": "External role gate: the evidence/developer agent is forbidden to perform this judgment. Unblock only when the design owner receives and audits the evidence report.",
+      "notes": "Design owner completed the final mapping after supervisor audit-007 verified directive-007 evidence. E2 remains explicitly unsupported; all other E rows are resolved in the canonical dossiers.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Canonical §4.1/§6 now records exact E1b variant catalog/request/persistence, E4b raw provider structure/provenance, E5b config/provider-default/catalog-first facts, and the final official Web picker order. §6.11.1 freezes the additive cross-repo mapping; §6.11.2 defines one concentrated product batch.",
+        "artifacts": [
+          "docs/2026-08-20-opencode-web-source-first-convergence-plan.md",
+          "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-007-final-provider-evidence-correction.md"
+        ],
+        "checked_at": "2026-08-20T17:11:51Z"
       }
     },
     {
       "id": "canonical-post-evidence-shape-sync-tests",
       "title": "Canonical dossier/sample consistency checks",
       "description": "Extend and run the canonical design checker so every resolved E-row cites the archived sample and no UNKNOWN/PENDING state is removed without proof.",
-      "status": "pending",
+      "status": "done",
       "phase": "canonical-shape-sync",
       "kind": "tests",
       "depends_on": [
@@ -987,36 +990,43 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Updated canonical checker requires E1/E4/E5 SAMPLE-VERIFIED, final provider-default-over-config mapping, concentrated-batch contract, single writer/normalizer, and explicit protocol boundary. Fresh run and destructive self-test PASS.",
+        "artifacts": [
+          "agent/opencode-web/testdata/official-1.18.18/harness/check_canonical_execution_design.py",
+          "cmd:python3 check_canonical_execution_design.py [--self-test] => productBatchDesignReady=True / PASS"
+        ],
+        "checked_at": "2026-08-20T17:11:51Z"
       }
     },
     {
       "id": "canonical-post-evidence-shape-sync-regression",
       "title": "Independent canonical execution-readiness audit",
       "description": "Confirm the canonical document alone contains source, sample, shape, mapping, SSV2 owner, errors, tests, and exclusions for every dossier before product authorization is restored.",
-      "status": "pending",
+      "status": "done",
       "phase": "canonical-shape-sync",
       "kind": "regression",
       "depends_on": [
         "canonical-post-evidence-shape-sync-tests"
       ],
       "source": "Canonical §0/§4.1/§6",
-      "notes": "A new concentrated product directive may be issued only after this todo is proven.",
+      "notes": "Directive-008 issued only after the final evidence checker and canonical checker were independently rerun. Product implementation has not started in this design-owner commit.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Final-provider checker derives E1b/E4b/E5b from raw transport and passes 14/14 mutations; canonical checker confirms eleven complete dossiers, seven resolved evidence decisions, three closed corrections, single authority, and concentrated product readiness. Audit-007 verifies the evidence-only commit scope.",
+        "artifacts": [
+          "cmd:python3 check_final_provider_evidence.py [--self-test] => 3/3 captured / PASS",
+          "cmd:python3 check_canonical_execution_design.py [--self-test] => ready / PASS",
+          "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-008-concentrated-c2-c7-implementation.md"
+        ],
+        "checked_at": "2026-08-20T17:11:51Z"
       }
     },
     {
@@ -1091,7 +1101,7 @@
     {
       "id": "c3-prompt-impl",
       "title": "C3 first message and follow-up submission",
-      "description": "Carry stable message ID, agent, {providerID,modelID}, variant, and supported parts. Unsupported parts fail before network I/O. Map optimistic echo vs SSE reconciliation.",
+      "description": "Canonical-first additive protocol/mirror plus session-scoped PromptOptionsSender: atomically carry stable message ID, agent, {providerID,modelID}, model-specific variant, and supported parts. Unsupported inputs fail before network I/O; HTTP admission and composer presentation create zero timeline writers.",
       "status": "pending",
       "phase": "c3",
       "kind": "impl",
@@ -1100,7 +1110,7 @@
         "canonical-post-evidence-shape-sync-regression"
       ],
       "source": "Gate C3",
-      "notes": "Product implementation remains frozen by directive-006; a new concentrated directive is required after evidence and canonical owner sync.",
+      "notes": "Authorized only as part of supervisor directive-008 concentrated batch. Mac canonical protocol must precede iOS mirror and product activation.",
       "verification": {
         "required": true,
         "status": "missing",
@@ -1161,7 +1171,7 @@
     {
       "id": "c4-event-reducer-impl",
       "title": "C4 event reducer from official source + A1–A5",
-      "description": "Derive event inventory from official reducer; decide direct vs nested sync dedup; preserve text/reasoning/tool and server errors; recover active turns after reconnect without synthesizing a healthy terminal.",
+      "description": "Implement the proven direct-event inventory through one pre-Kernel normalizer and one backend-global SSE subscriber; skip nested sync once; preserve text/tool/server errors and explicitly reject unsupported reasoning; recover reconnect/external turns through the same Kernel without synthesizing a healthy terminal.",
       "status": "pending",
       "phase": "c4",
       "kind": "impl",
@@ -1230,12 +1240,12 @@
     {
       "id": "c5-model-agent-impl",
       "title": "C5 model and agent semantics",
-      "description": "Map or explicitly exclude each official fallback level; carry agent selection end to end; use connected providers only; remove legacy recursive catalog parsing.",
+      "description": "Strictly decode real provider/config/agent shapes; implement the canonical current→agent→provider-default-over-config→recent→connected fallback order; carry agent and model-specific variant end to end; remove legacy recursive parsing and never omit explicit validated model.",
       "status": "pending",
       "phase": "c5",
       "kind": "impl",
       "depends_on": [
-        "c4-event-reducer-regression"
+        "c3-prompt-regression"
       ],
       "source": "Gate C5",
       "notes": "",
@@ -1304,7 +1314,8 @@
       "phase": "c6",
       "kind": "impl",
       "depends_on": [
-        "c5-model-agent-regression"
+        "c2-list-get-review-fix-regression",
+        "canonical-post-evidence-shape-sync-regression"
       ],
       "source": "Gate C6",
       "notes": "",
@@ -1368,12 +1379,13 @@
     {
       "id": "c7-mutations-impl",
       "title": "C7 session mutations and selected secondary features",
-      "description": "Add verified rename/archive/delete with by-ID refresh. Select fork/share/summarize/revert/diff/file/VCS only from Gate B map. Each feature needs its own evidence packet.",
+      "description": "Add only verified rename/archive/delete with returned/by-ID/list refresh and zero timeline write. All OD-3 fork/share/summarize/revert/diff/file/VCS surfaces remain out of scope and unadvertised.",
       "status": "pending",
       "phase": "c7",
       "kind": "impl",
       "depends_on": [
-        "c6-interaction-regression"
+        "c2-list-get-review-fix-regression",
+        "canonical-post-evidence-shape-sync-regression"
       ],
       "source": "Gate C7",
       "notes": "",
@@ -1413,8 +1425,8 @@
     },
     {
       "id": "c7-mutations-regression",
-      "title": "C7 truthful wire advertisement",
-      "description": "WireDescriptor capabilities match implemented mutations only. Dual-repo protocol sync if fields changed.",
+      "title": "C7 mutation convergence without invented events",
+      "description": "Rename/archive/delete converge through HTTP and catalog/by-ID truth, do not depend on or synthesize session.deleted, and do not write timeline. Capability activation remains in the final batch gate.",
       "status": "pending",
       "phase": "c7",
       "kind": "regression",
@@ -1423,6 +1435,78 @@
       ],
       "source": "Gate C7",
       "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "concentrated-activation-impl",
+      "title": "Concentrated capability and cross-repository activation",
+      "description": "After all C2-C7 owning regressions pass, synchronize truthful WireDescriptor/backend capabilities and iOS availability for only the fully implemented paths; E2 reasoning and OD-3 remain absent.",
+      "status": "pending",
+      "phase": "concentrated-activation",
+      "kind": "impl",
+      "depends_on": [
+        "c4-event-reducer-regression",
+        "c5-model-agent-regression",
+        "c6-interaction-regression",
+        "c7-mutations-regression"
+      ],
+      "source": "Canonical §6.11-§6.11.2; supervisor directive-008",
+      "notes": "Do not activate a capability early merely because its Go interface or isolated test exists.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "concentrated-activation-tests",
+      "title": "Cross-repository schema, capability, and writer-seal tests",
+      "description": "Prove Mac canonical protocol and iOS mirror round-trip, agent/variant are not dropped, capabilities are absent before owning completion and exact after it, and single-writer/single-ingest invariants remain sealed.",
+      "status": "pending",
+      "phase": "concentrated-activation",
+      "kind": "tests",
+      "depends_on": [
+        "concentrated-activation-impl"
+      ],
+      "source": "Canonical §6.11-§7; supervisor directive-008",
+      "notes": "Targeted Go/Swift tests only; no UI tests or simulator automation.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "concentrated-activation-regression",
+      "title": "Concentrated build, install, runtime, and final regression",
+      "description": "Run bounded targeted regression, Mac Release build/install/runtime 8777 verification, required iOS targeted build/tests and connected-device install, secret/diff/status checks, then produce one audit-ready report without claiming owner UI completion.",
+      "status": "pending",
+      "phase": "concentrated-activation",
+      "kind": "regression",
+      "depends_on": [
+        "concentrated-activation-tests"
+      ],
+      "source": "Canonical §7-§9; supervisor directive-008",
+      "notes": "Owner UI matrix remains a separate final track after supervisor audit.",
       "verification": {
         "required": true,
         "status": "missing",
