@@ -3,7 +3,7 @@
   "project_root": "/Users/jacklee/Projects/cordcode-macbridge-opencode-web",
   "design_doc": "docs/2026-08-20-opencode-web-source-first-convergence-plan.md",
   "design_doc_hash": "2ebd546cf6f9281d9fc40b979365dc4594ac2696",
-  "design_doc_changed": false,
+  "design_doc_changed": true,
   "activated_at": "2026-08-20T14:40:12Z",
   "active_mode": true,
   "directives": [
@@ -85,12 +85,12 @@
       "report": {
         "received_at": "2026-08-20T15:37:26Z",
         "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-003-c2-official-list-get.md",
-        "audited": false,
-        "audit_verdict": null,
-        "audit_path": null
+        "audited": true,
+        "audit_verdict": "partial",
+        "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-003-c2-official-list-get.md"
       }
     }
   ],
   "current_directive_number": 3,
-  "last_updated": "2026-08-20T15:37:26Z"
+  "last_updated": "2026-08-20T15:41:49Z"
 }
