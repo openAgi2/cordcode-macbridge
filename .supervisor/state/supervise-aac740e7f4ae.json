@@ -95,7 +95,7 @@
       "kind": "hole-fill",
       "title": "补洞 C2 evidence/decoder fail-closed",
       "issued_at": "2026-08-20T15:43:18Z",
-      "status": "pending",
+      "status": "superseded",
       "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-004-c2-evidence-decoder-hole-fill.md",
       "scope": "Mac-only C2 evidence/project decoder/tests",
       "constraints": [
@@ -103,6 +103,32 @@
         "generation-118 project decoder accepts bare array only and fails malformed required rows",
         "roots/limit test claims must match actual fixtures and A10 live replay",
         "no fallback/protocol/WireDescriptor/capability/iOS writer/C3+ changes"
+      ],
+      "linked_commits": [],
+      "superseded_by_directive": 5,
+      "report": {
+        "received_at": null,
+        "markdown_path": null,
+        "audited": false,
+        "audit_verdict": null,
+        "audit_path": null
+      }
+    },
+    {
+      "number": 5,
+      "kind": "implementation",
+      "title": "C2–C7 集中收敛实施",
+      "issued_at": "2026-08-20T15:48:22Z",
+      "status": "pending",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-005-c2-c7-concentrated-convergence.md",
+      "scope": "Cross-repo as needed: remaining evidence, Mac C2-C7, targeted iOS wiring/tests",
+      "constraints": [
+        "Stage 0 fully subsumes directive-004 before remaining translator work",
+        "capture all remaining source-only surfaces before each translator",
+        "C3+C4+C5 implemented as one Turn/SSV2 core; C6+C7 as interaction/mutation wave",
+        "no intermediate supervisor stops unless an explicit hard-stop condition fires",
+        "single-writer/fail-closed/no-fallback/no-guessed-sample rules remain mandatory",
+        "one final centralized audit and release install, no UI automation"
       ],
       "linked_commits": [],
       "report": {
@@ -114,6 +140,6 @@
       }
     }
   ],
-  "current_directive_number": 4,
-  "last_updated": "2026-08-20T15:43:18Z"
+  "current_directive_number": 5,
+  "last_updated": "2026-08-20T15:48:22Z"
 }
