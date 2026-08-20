@@ -121,6 +121,11 @@ func newDataAgent(t *testing.T, responses map[string]string, workDir string) (*A
 	if _, ok := responses["/session"]; !ok {
 		responses["/session"] = `[]`
 	}
+	if _, ok := responses["/agent"]; !ok {
+		// C3/C5 send path resolves the prompt agent from the live registry;
+		// tests that care about agent semantics override this route.
+		responses["/agent"] = `[{"name":"build","mode":"primary","native":true,"description":"general coding"}]`
+	}
 	s := &recordingServe{responses: responses}
 	base := s.start(t)
 	a, err := New(map[string]any{
@@ -437,7 +442,8 @@ func mustClient(t *testing.T, a *Agent) *Client {
 func TestListProjectsMapsWorktree(t *testing.T) {
 	// 2026-08-19：worktree 可见性要求磁盘存在（幽灵目录不下发）——夹具用真实临时目录。
 	realProj := t.TempDir()
-	projectsPayload := `[{"id":"prj_1","worktree":` + strconv.Quote(realProj) + `,"vcs":{"branch":"main"},"time":{"created":1},"sandboxes":[]},{"id":"prj_2"}]`
+	ghost := filepath.Join(t.TempDir(), "ghost")
+	projectsPayload := `[{"id":"prj_1","worktree":` + strconv.Quote(realProj) + `,"vcs":{"branch":"main"},"time":{"created":1},"sandboxes":[]},{"id":"prj_2","worktree":` + strconv.Quote(ghost) + `}]`
 	agent, _ := newDataAgent(t, map[string]string{
 		"/project": projectsPayload,
 	}, "/tmp")
@@ -446,16 +452,24 @@ func TestListProjectsMapsWorktree(t *testing.T) {
 		t.Fatalf("projects: %v", err)
 	}
 	if len(projects) != 1 {
-		t.Fatalf("entries without worktree dropped, got %+v", projects)
+		t.Fatalf("worktrees missing on disk are hidden by the visibility overlay, got %+v", projects)
 	}
 	if projects[0].Directory != realProj || projects[0].Name != filepath.Base(realProj) || projects[0].ID != "prj_1" {
 		t.Fatalf("mapping = %+v", projects[0])
+	}
+	// C2 strict decoder: a row missing required worktree fails the whole
+	// registry instead of being trimmed (see project_registry_c2_reviewfix_test).
+	bad, _ := newDataAgent(t, map[string]string{
+		"/project": `[{"id":"prj_1"},{"id":"prj_2","worktree":"/x"}]`,
+	}, "/tmp")
+	if _, err := bad.ListProjectSuggestions(context.Background()); err == nil || !strings.Contains(err.Error(), "missing required worktree") {
+		t.Fatalf("row missing worktree must fail the registry, got %v", err)
 	}
 }
 
 func TestListAgentsMapsAndEmptyIsLegal(t *testing.T) {
 	agent, _ := newDataAgent(t, map[string]string{
-		"/agent": `[{"id":"build","mode":"primary","description":"general coding","hidden":false,"native":true},{"name":"plan","mode":"plan"}]`,
+		"/agent": `[{"name":"build","mode":"primary","description":"general coding","hidden":false,"native":true},{"name":"plan","mode":"plan"}]`,
 	}, "/tmp")
 	agents, err := agent.ListAgents(context.Background())
 	if err != nil {

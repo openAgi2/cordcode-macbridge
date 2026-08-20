@@ -34,7 +34,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-20T17:30:00Z",
+ "updated_at": "2026-08-20T18:05:00Z",
  "todos": [
   {
    "id": "gate-a-inventory-impl",
@@ -1106,7 +1106,7 @@
    "id": "c3-prompt-impl",
    "title": "C3 first message and follow-up submission",
    "description": "Canonical-first additive protocol/mirror plus session-scoped PromptOptionsSender: atomically carry stable message ID, agent, {providerID,modelID}, model-specific variant, and supported parts. Unsupported inputs fail before network I/O; HTTP admission and composer presentation create zero timeline writers.",
-   "status": "pending",
+   "status": "done",
    "phase": "c3",
    "kind": "impl",
    "depends_on": [
@@ -1117,20 +1117,28 @@
    "notes": "Authorized only as part of supervisor directive-008 concentrated batch. Mac canonical protocol must precede iOS mirror and product activation.",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "Wave 1b/1c/2a/2c: canonical-first additive protocol (Mac docs/protocol/bridge-v1.md + schema BridgeModelItem.variants / BridgeSendMessageModel.variant, iOS mirror synced); core.PromptOptions{Agent,ProviderID,ModelID,Variant} + PromptOptionsSender/PromptOptionsAgent; SendMessageParams.agent parsed; go-bridge sendPrompt dispatches per-request options and skips agent-global SetModel for option senders; opencode-web SendWithOptions generates one stable msg_<hex> messageID, resolves agent from strict /agent registry, walks the §6.6 chain, gates variant on live catalog keys (zero POST otherwise), maps attachments to official file parts (data: URLs), 204=admission only. iOS: CCCodeBridgeModel/ModelInfo/BackendModelSelection gain variants/variant, sendMessageWithOptions carries agent (the Swift-boundary drop is fixed), ChatViewModel plumbs model-scoped variant selection.",
+    "artifacts": [
+     "core/interfaces.go",
+     "go-bridge/types.go",
+     "go-bridge/handlers.go",
+     "agent/opencode-web/session.go",
+     "agent/opencode-web/models.go",
+     "agent/opencode-web/agents.go",
+     "docs/protocol/bridge-v1.md",
+     "docs/protocol/schema/bridge-v1.types.ts"
+    ]
    }
   },
   {
    "id": "c3-prompt-tests",
    "title": "C3 A1/A2/A9 replay tests",
    "description": "HTTP contract plus replay of first-message, follow-up, and prompt-part samples. HTTP 204 alone is not success.",
-   "status": "pending",
+   "status": "done",
    "phase": "c3",
    "kind": "tests",
    "depends_on": [
@@ -1140,20 +1148,22 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
-    "method": "automated",
+    "status": "present",
+    "method": "tests",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "Owning tests: prompt body shape (msg_ messageID unique per send, agent, model{providerID,modelID}, parts, variant present/omitted); unlisted/foreign variant zero-POST; unavailable agent zero-POST; attachments map to official file parts; invalid-explicit-advance; admission synthesizes nothing.",
+    "artifacts": [
+     "agent/opencode-web/prompt_options_c3_c5_test.go",
+     "cmd:go test ./agent/opencode-web -run \"TestPromptBody|TestVariant|TestUnavailableAgent|TestAdmission\" => PASS"
+    ]
    }
   },
   {
    "id": "c3-prompt-regression",
    "title": "C3 sandbox create/send/reopen cycle",
    "description": "Real isolated sandbox: one user action produces one persisted user message and one turn.",
-   "status": "pending",
+   "status": "done",
    "phase": "c3",
    "kind": "regression",
    "depends_on": [
@@ -1163,13 +1173,15 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
-    "method": "mixed",
+    "status": "present",
+    "method": "regression",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "Real isolated 1.18.18 serve (4398/4399 E1b harness): two SendWithOptions turns persist exactly 2 user + 2 assistant messages; turn-1 user model {localmock,echo,variant=high} reload-verified (E1b persistence); turn-2 without explicit model resolves provider default zeta over config alpha (E5b level-3); unlisted variant fails pre-POST against the real catalog.",
+    "artifacts": [
+     "agent/opencode-web/prompt_options_sandbox_test.go",
+     "cmd:OCW_SANDBOX_URL=http://127.0.0.1:4398 go test -run TestSandboxPromptOptions => PASS"
+    ]
    }
   },
   {
@@ -1245,7 +1257,7 @@
    "id": "c5-model-agent-impl",
    "title": "C5 model and agent semantics",
    "description": "Strictly decode real provider/config/agent shapes; implement the canonical current→agent→provider-default-over-config→recent→connected fallback order; carry agent and model-specific variant end to end; remove legacy recursive parsing and never omit explicit validated model.",
-   "status": "pending",
+   "status": "done",
    "phase": "c5",
    "kind": "impl",
    "depends_on": [
@@ -1255,20 +1267,23 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "Strict /provider (E4b {all,default,connected} + variants keys-only), strict /config (object with optional providerID/modelID string; shape error fails send, transport skip), strict /agent (bare array, required name, optional model). Selection chain exactly §6.6: current → agent model → provider-default-over-config → config-when-no-default → recent(resume) → provider-default fallback → catalog-first fallback; every candidate catalog-valid before use; no-valid-model = zero POST. list_models exposes live variants.",
+    "artifacts": [
+     "agent/opencode-web/models.go",
+     "agent/opencode-web/agents.go",
+     "go-bridge/handlers.go handleListModels"
+    ]
    }
   },
   {
    "id": "c5-model-agent-tests",
    "title": "C5 fallback-level fixtures and zero POST on unavailable choice",
    "description": "Each fallback level has a distinct fixture; unavailable choices cause zero prompt POSTs.",
-   "status": "pending",
+   "status": "done",
    "phase": "c5",
    "kind": "tests",
    "depends_on": [
@@ -1278,20 +1293,22 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
-    "method": "automated",
+    "status": "present",
+    "method": "tests",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "Distinct per-level fixtures: level1 current wins; level2 agent-configured model; level3 provider default zeta over config alpha; level3b config when no provider default; level4 recent resume model; level5 provider-default fallback; level5b catalog-first fallback; no-valid-model zero POST; config shape error fails closed; catalog exposes exactly echo{high,low}.",
+    "artifacts": [
+     "agent/opencode-web/prompt_options_c3_c5_test.go TestSelectionChainLevels et al.",
+     "cmd:go test ./agent/opencode-web -run \"TestSelectionChain|TestNoValidModel|TestConfigShape|TestCatalogVariants\" => PASS"
+    ]
    }
   },
   {
    "id": "c5-model-agent-regression",
    "title": "C5 selected request assertion in sandbox",
    "description": "Sandbox prompt body carries the selected agent/model/variant from the chosen fallback level.",
-   "status": "pending",
+   "status": "done",
    "phase": "c5",
    "kind": "regression",
    "depends_on": [
@@ -1301,13 +1318,15 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
-    "method": "mixed",
+    "status": "present",
+    "method": "regression",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "Sandbox turn-2 assertion proves provider-default-over-config resolution on the real serve (persisted zeta); catalog variants replay E1b keys.",
+    "artifacts": [
+     "agent/opencode-web/prompt_options_sandbox_test.go",
+     "cmd:OCW_SANDBOX_URL=http://127.0.0.1:4398 go test -run TestSandboxPromptOptions => PASS"
+    ]
    }
   },
   {

@@ -111,6 +111,7 @@ type SendMessageParams struct {
 	SessionID       string                 `json:"sessionId"`
 	Content         string                 `json:"content"`
 	Directory       string                 `json:"directory,omitempty"`
+	Agent           string                 `json:"agent,omitempty"`
 	Model           map[string]interface{} `json:"model,omitempty"`
 	ReasoningEffort string                 `json:"reasoningEffort,omitempty"`
 	Attachments     []AttachmentInput      `json:"attachments,omitempty"`

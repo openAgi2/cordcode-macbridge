@@ -753,6 +753,17 @@ Wire behavior:
   healthy empty completion). `abort_generation` maps to `…/abort` (v2:
   `…/interrupt`); closing the iOS view only tears the SSE binding — it never
   aborts the running turn.
+- Canonical additive revision (E1b sample-verified): `send_message.params.model`
+  additionally carries optional `variant: string` — a model-specific OpenCode
+  variant key, NOT `reasoningEffort`. It is accepted only when it is one of the
+  selected model's live `/provider.all[].models[modelID].variants` keys; an
+  unlisted key fails the send RPC with zero POSTs. `send_message.params.agent`
+  (already canonical) selects the official agent and rides the same prompt
+  atomically; per-request options travel session-scoped through
+  `core.PromptOptionsSender` (`PromptOptions{Agent, ProviderID, ModelID,
+  Variant}`) — no agent-global mutable selection. `list_models` model items
+  gain optional `variants: string[]` containing exactly those live keys
+  (empty/absent = no variant selector for that model).
 - Approvals surface through the existing `permission_request` events (SSE
   `permission.asked`) and are answered by folding bridge `allow`/`deny` onto
   the official reply literals (1.18 probes `once`/`reject` first and falls

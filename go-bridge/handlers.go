@@ -1395,7 +1395,7 @@ func (h *Handlers) handleListModels(conn Connection, msg WireMessage, agent core
 		if name == "" {
 			name = id
 		}
-		models = append(models, map[string]interface{}{
+		item := map[string]interface{}{
 			"id":                        m.Name,
 			"name":                      name,
 			"provider":                  provider,
@@ -1405,7 +1405,15 @@ func (h *Handlers) handleListModels(conn Connection, msg WireMessage, agent core
 			"supportedReasoningEfforts": nil,
 			"defaultReasoningEffort":    nil,
 			"isDefault":                 m.Name == currentModel,
-		})
+		}
+		// Canonical additive revision (§6.11.1): live model-specific variant
+		// keys ride the model item; absent/empty means no variant selector.
+		if len(m.Variants) > 0 {
+			variants := make([]string, len(m.Variants))
+			copy(variants, m.Variants)
+			item["variants"] = variants
+		}
+		models = append(models, item)
 	}
 
 	// Per-model effort truth first (roadmap §5.2 / audit N3): a runtime that
@@ -2274,7 +2282,7 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: splitErr.Error()})
 		return
 	}
-	sendErr := sess.Send(params.Content, images, files)
+	sendErr := sendPrompt(sess, params.Content, images, files, promptOptionsFromParams(params))
 	if sendErr != nil {
 		var delivery *core.DeliveryError
 		if errors.As(sendErr, &delivery) && delivery.ReplayAllowed() {
@@ -2305,7 +2313,7 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 				h.mu.Unlock()
 			}
 			h.sessions.markRunning(params.SessionID)
-			if repairErr := sess.Send(params.Content, images, files); repairErr != nil {
+			if repairErr := sendPrompt(sess, params.Content, images, files, promptOptionsFromParams(params)); repairErr != nil {
 				// The repaired attempt fails visibly too — never a second
 				// replay. Evict only a dead session for the next request.
 				var repairDelivery *core.DeliveryError
@@ -2398,9 +2406,15 @@ func retryableSessionError(code, message string) *WireError {
 }
 
 func applySendMessageRuntimeOptions(agent core.Agent, params SendMessageParams, dataDir string) {
-	if modelID := selectedModelParam(agent, params.Model); modelID != "" {
-		if ms, ok := agent.(core.ModelSwitcher); ok {
-			ms.SetModel(modelID)
+	// Session-scoped option senders (canonical §6.11.1 item 5) carry
+	// agent/model/variant per request inside SendWithOptions; applying the
+	// agent-global SetModel here would race concurrent sessions.
+	optionsSender := isPromptOptionsSender(agent)
+	if !optionsSender {
+		if modelID := selectedModelParam(agent, params.Model); modelID != "" {
+			if ms, ok := agent.(core.ModelSwitcher); ok {
+				ms.SetModel(modelID)
+			}
 		}
 	}
 	if params.ReasoningEffort != "" {
@@ -2416,6 +2430,40 @@ func applySendMessageRuntimeOptions(agent core.Agent, params SendMessageParams, 
 			}
 		}
 	}
+}
+
+// isPromptOptionsSender reports whether the agent's sessions carry per-request
+// prompt options (core.PromptOptionsSender) instead of agent-global state.
+func isPromptOptionsSender(agent core.Agent) bool {
+	po, ok := agent.(core.PromptOptionsAgent)
+	return ok && po.UsesPromptOptions()
+}
+
+// promptOptionsFromParams extracts the session-scoped turn options from the
+// send_message wire params. The model map keeps the wire shape
+// {id, providerId, variant?} verbatim; empty fields mean "backend resolves".
+func promptOptionsFromParams(params SendMessageParams) core.PromptOptions {
+	opts := core.PromptOptions{Agent: strings.TrimSpace(params.Agent)}
+	if params.Model == nil {
+		return opts
+	}
+	opts.ModelID, _ = params.Model["id"].(string)
+	if opts.ModelID == "" {
+		opts.ModelID, _ = params.Model["modelId"].(string)
+	}
+	opts.ProviderID, _ = params.Model["providerId"].(string)
+	opts.Variant, _ = params.Model["variant"].(string)
+	return opts
+}
+
+// sendPrompt dispatches one prompt to the session: option senders carry
+// agent/provider/model/variant atomically per request (canonical §6.11.1);
+// every other backend keeps the plain AgentSession.Send semantics.
+func sendPrompt(sess core.AgentSession, prompt string, images []core.ImageAttachment, files []core.FileAttachment, opts core.PromptOptions) error {
+	if sender, ok := sess.(core.PromptOptionsSender); ok {
+		return sender.SendWithOptions(prompt, images, files, opts)
+	}
+	return sess.Send(prompt, images, files)
 }
 
 func selectedModelParam(agent core.Agent, model map[string]interface{}) string {

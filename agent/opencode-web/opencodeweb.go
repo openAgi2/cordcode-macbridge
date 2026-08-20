@@ -110,6 +110,14 @@ type Agent struct {
 
 var _ core.Agent = (*Agent)(nil)
 
+// UsesPromptOptions implements core.PromptOptionsAgent: opencode-web sessions
+// are core.PromptOptionsSenders — the go-bridge send path carries
+// agent/provider/model/variant per request (canonical §6.11.1 item 5) and
+// never mutates agent-global selection state.
+func (a *Agent) UsesPromptOptions() bool { return true }
+
+var _ core.PromptOptionsAgent = (*Agent)(nil)
+
 // New creates the opencode-web agent from options. It never fails on a
 // missing CLI binary — this backend does not use the CLI at all.
 //
