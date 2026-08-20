@@ -43,6 +43,14 @@ class Client:
         self.directory = directory
         self.http: list[dict[str, Any]] = []
 
+    def clone(self, directory: str) -> "Client":
+        other = Client.__new__(Client)
+        other.base = self.base
+        other.auth = self.auth
+        other.directory = directory
+        other.http = []
+        return other
+
     def request(
         self,
         method: str,
@@ -239,14 +247,45 @@ def sanitize(value: Any, table: dict[str, str], workspace: str) -> Any:
     return value
 
 
+LEAK_MARKERS = (
+    "Authorization",
+    "gatea-pass",
+    "OPENCODE_SERVER_PASSWORD",
+    "/Users/jacklee",
+    "api_key",
+    "apiKey",
+    "BEGIN PRIVATE KEY",
+)
+
+
+def leak_scan(obj: Any) -> list[str]:
+    dumped = json.dumps(obj)
+    hits = []
+    if "Basic " in dumped and "Authorization" in dumped:
+        hits.append("authorization-header")
+    for marker in LEAK_MARKERS:
+        if marker in dumped and marker != "Authorization":
+            hits.append(marker)
+    if "127.0.0.1:4096" in dumped:
+        hits.append("owner-managed-serve")
+    return hits
+
+
 def write_sample(path: Path, doc: dict[str, Any], workspace: str) -> None:
     table: dict[str, str] = {}
     sanitized = sanitize(doc, table, workspace)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(sanitized, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    raw_path = path.with_name(path.name.replace(".sanitized.json", ".raw.json"))
-    # Raw still strips secrets and workspace absolute path, keeps live ids for local debug.
     raw = json.loads(json.dumps(doc))
+    leaks = leak_scan(raw)
+    raw_path = path.with_name(path.name.replace(".sanitized.json", ".raw.json"))
+    if leaks:
+        rejected = Path("/tmp/ocw-gate-a-raw-rejected")
+        rejected.mkdir(parents=True, exist_ok=True)
+        dest = rejected / raw_path.name
+        dest.write_text(json.dumps(raw, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        print(f"raw withheld from repo ({leaks}); wrote {dest}", file=sys.stderr)
+        return
     raw_path.write_text(json.dumps(raw, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
@@ -290,6 +329,86 @@ def classify_sse(frames: list[dict[str, Any]]) -> dict[str, Any]:
         ],
         "statusCarriers": status_types,
     }
+
+
+def last_session_status(frames: list[dict[str, Any]], sid: str) -> str | None:
+    last = None
+    for frame in frames:
+        ev = frame.get("event") if isinstance(frame, dict) else None
+        payload = ev.get("payload") if isinstance(ev, dict) and isinstance(ev.get("payload"), dict) else ev
+        if not isinstance(payload, dict) or payload.get("type") != "session.status":
+            continue
+        props = payload.get("properties") if isinstance(payload.get("properties"), dict) else {}
+        if props.get("sessionID") not in (None, sid):
+            continue
+        st = props.get("status")
+        if isinstance(st, dict):
+            last = st.get("type")
+        elif isinstance(st, str):
+            last = st
+    return last
+
+
+def wait_idle(sse: SSE, sid: str, timeout: float) -> tuple[bool, str | None]:
+    ok = sse.wait_until(lambda frames: last_session_status(frames, sid) == "idle", timeout)
+    return ok, last_session_status(sse.frames, sid)
+
+
+def idle_count(frames: list[dict[str, Any]], sid: str) -> int:
+    n = 0
+    for frame in frames:
+        ev = frame.get("event") if isinstance(frame, dict) else None
+        payload = ev.get("payload") if isinstance(ev, dict) and isinstance(ev.get("payload"), dict) else ev
+        if not isinstance(payload, dict) or payload.get("type") != "session.status":
+            continue
+        props = payload.get("properties") if isinstance(payload.get("properties"), dict) else {}
+        if props.get("sessionID") not in (None, sid):
+            continue
+        st = props.get("status")
+        typ = st.get("type") if isinstance(st, dict) else st
+        if typ == "idle":
+            n += 1
+    return n
+
+
+def parse_messages(messages: Any) -> list[dict[str, Any]]:
+    out = []
+    if not isinstance(messages, list):
+        return out
+    for item in messages:
+        if not isinstance(item, dict):
+            continue
+        info = item.get("info") if isinstance(item.get("info"), dict) else {}
+        texts = [
+            part.get("text")
+            for part in (item.get("parts") or [])
+            if isinstance(part, dict) and part.get("type") == "text" and part.get("text")
+        ]
+        out.append(
+            {
+                "id": info.get("id"),
+                "role": info.get("role"),
+                "finish": info.get("finish"),
+                "error": info.get("error"),
+                "texts": texts,
+                "partTypes": [
+                    part.get("type") for part in (item.get("parts") or []) if isinstance(part, dict)
+                ],
+            }
+        )
+    return out
+
+
+SOURCE_PROMPT = {
+    "ui": "packages/app/src/utils/server-compat.ts:163-169 create; packages/app/src/utils/server-compat.ts:200-230 promptAsync",
+    "server": "packages/opencode/src/server/routes/instance/httpapi/handlers/session.ts promptAsync; packages/opencode/src/session/prompt.ts PromptInput",
+    "sse": "packages/app/src/context/server-sdk.tsx v1 global.event; skips payload.type==sync at line 284",
+    "reducer": "packages/app/src/context/global-sync/event-reducer.ts",
+}
+SANITIZATION = {
+    "replaced": ["session/message/part/event ids", "absolute workspace paths", "epoch timestamps > 1e9"],
+    "kept": ["all JSON keys", "event types", "part types", "HTTP method/path/status"],
+}
 
 
 def capture_a1(c: Client, sse: SSE, out: Path, workspace: str) -> None:
@@ -403,24 +522,99 @@ def capture_a1(c: Client, sse: SSE, out: Path, workspace: str) -> None:
 
 
 def capture_a2(c: Client, sse: SSE, out: Path, workspace: str) -> None:
+    if sse._error and not sse.frames:
+        raise RuntimeError(f"SSE not connected: {sse._error}")
     status, created, _ = c.request("POST", "/session", body={})
+    if status >= 300 or not isinstance(created, dict):
+        raise RuntimeError(f"create failed: {status} {created}")
     sid = created["id"]
     first = prompt_body("A2_FIRST SANDBOX_OK")
-    c.request("POST", f"/session/{sid}/prompt_async", body=first, timeout=20)
-    sse.wait_until(lambda frames: "SANDBOX_OK" in json.dumps(frames), 25)
-    time.sleep(0.8)
+    first_mid = first["messageID"]
+    code1, resp1, _ = c.request("POST", f"/session/{sid}/prompt_async", body=first, timeout=20)
+    if code1 not in (200, 204):
+        raise RuntimeError(f"first prompt_async HTTP {code1}: {resp1}")
+    ok1, last1 = wait_idle(sse, sid, 40)
+    if not ok1:
+        raise RuntimeError(f"A2 first turn did not idle (last={last1})")
+    _, after_first, _ = c.request("GET", f"/session/{sid}/message")
+    first_parsed = parse_messages(after_first)
+    if [m["role"] for m in first_parsed] != ["user", "assistant"]:
+        raise RuntimeError(f"A2 first-turn baseline roles={ [m['role'] for m in first_parsed] }")
+    if first_parsed[0]["id"] != first_mid:
+        raise RuntimeError("A2 first client messageID did not persist")
+    if not first_parsed[1]["texts"]:
+        raise RuntimeError("A2 first assistant text empty")
     follow = prompt_body("A2_FOLLOW_UP second turn")
-    c.request("POST", f"/session/{sid}/prompt_async", body=follow, timeout=20)
-    time.sleep(2.0)
+    follow_mid = follow["messageID"]
+    if follow_mid == first_mid:
+        raise RuntimeError("A2 follow-up reused the first messageID")
+    idles_before = idle_count(sse.frames, sid)
+    code2, resp2, _ = c.request("POST", f"/session/{sid}/prompt_async", body=follow, timeout=20)
+    if code2 not in (200, 204):
+        raise RuntimeError(f"follow-up prompt_async HTTP {code2}: {resp2}")
+    saw_second_busy = sse.wait_until(lambda frames: last_session_status(frames, sid) == "busy", 15)
+    ok2 = sse.wait_until(lambda frames: idle_count(frames, sid) > idles_before, 40)
+    last2 = last_session_status(sse.frames, sid)
+    if not ok2:
+        raise RuntimeError(
+            f"A2 follow-up did not produce a second idle (sawBusy={saw_second_busy} last={last2} idleCount={idle_count(sse.frames, sid)} before={idles_before})"
+        )
+    time.sleep(0.4)
     _, messages, _ = c.request("GET", f"/session/{sid}/message")
+    _, info, _ = c.request("GET", f"/session/{sid}")
+    _, status_map, _ = c.request("GET", "/session/status")
+    parsed = parse_messages(messages)
+    roles = [m["role"] for m in parsed]
+    ids = [m["id"] for m in parsed]
+    if roles != ["user", "assistant", "user", "assistant"]:
+        raise RuntimeError(f"A2 expected user/assistant/user/assistant, got {roles}")
+    if ids[0] != first_mid or ids[2] != follow_mid:
+        raise RuntimeError(f"A2 client IDs did not match persisted users first={ids[0]} follow={ids[2]}")
+    if isinstance(info, dict) and info.get("id") not in (None, sid):
+        raise RuntimeError("A2 session id changed")
+    if idle_count(sse.frames, sid) < 2:
+        raise RuntimeError(f"A2 expected two idle terminals, idleCount={idle_count(sse.frames, sid)}")
+    first_texts = " ".join(first_parsed[0]["texts"])
+    follow_texts = " ".join(parsed[2]["texts"])
+    if "A2_FIRST" not in first_texts or "A2_FOLLOW_UP" not in follow_texts:
+        raise RuntimeError("A2 user texts did not keep first/follow-up order")
+    if parsed[0]["id"] == parsed[2]["id"]:
+        raise RuntimeError("A2 duplicated the first user message")
     write_sample(
         out / "a2-follow-up.sanitized.json",
         {
-            "meta": {"scenario": "A2", "opencodeVersion": OPENCODE_VERSION, "sourceCommit": SOURCE_COMMIT},
+            "meta": {
+                "scenario": "A2",
+                "opencodeVersion": OPENCODE_VERSION,
+                "sourceCommit": SOURCE_COMMIT,
+                "firstPromptHttpStatus": code1,
+                "followPromptHttpStatus": code2,
+                "variantSent": False,
+                "captureStatus": "captured",
+            },
+            "source": SOURCE_PROMPT,
             "http": c.http,
             "sseEventTypes": event_types(sse.frames),
+            "sseClassification": classify_sse(sse.frames),
             "sse": sse.frames,
-            "reload": {"messages": messages},
+            "reload": {"messages": messages, "session": info, "status": status_map, "afterFirstTurn": after_first},
+            "correlation": {
+                "sessionID": sid,
+                "sessionUnchanged": True,
+                "firstClientMessageID": first_mid,
+                "followClientMessageID": follow_mid,
+                "persistedUserIDs": [ids[0], ids[2]],
+                "persistedRoles": roles,
+                "idleCount": idle_count(sse.frames, sid),
+                "bothTurnsIdle": True,
+            },
+            "bridgeMapping": {
+                "decision": "stable messageID correlation only",
+                "notAServerEvent": "official Web optimistic echo is client-local UI, not an OpenCode server event",
+                "notAnIOSWriter": "do not create an iOS second timeline writer from optimistic echo",
+                "nestedSync": "retained as evidence only; v1 Web skips payload.type==sync",
+            },
+            "sanitization": SANITIZATION,
         },
         workspace,
     )
@@ -457,16 +651,35 @@ def capture_a3(c: Client, sse: SSE, out: Path, workspace: str) -> None:
 
 
 def capture_a4(c: Client, sse: SSE, out: Path, workspace: str) -> None:
-    _, created, _ = c.request("POST", "/session", body={})
+    status, created, _ = c.request("POST", "/session", body={})
+    if status >= 300 or not isinstance(created, dict):
+        raise RuntimeError(f"create failed: {status} {created}")
     sid = created["id"]
     body = prompt_body("A4_SLOW_STREAM")
-    c.request("POST", f"/session/{sid}/prompt_async", body=body, timeout=20)
-    sse.wait_until(lambda frames: "message.part.delta" in event_types(frames) or "session.status" in event_types(frames), 15)
-    time.sleep(0.4)
+    code, resp, _ = c.request("POST", f"/session/{sid}/prompt_async", body=body, timeout=20)
+    if code not in (200, 204):
+        raise RuntimeError(f"prompt_async HTTP {code}: {resp}")
+    saw_busy = sse.wait_until(
+        lambda frames: last_session_status(frames, sid) == "busy"
+        or "message.part.delta" in event_types(frames),
+        15,
+    )
+    if not saw_busy:
+        raise RuntimeError(
+            f"A4 mock/provider never entered busy or delta; cannot abort a live turn (last={last_session_status(sse.frames, sid)})"
+        )
+    types_before = list(event_types(sse.frames))
+    status_before = last_session_status(sse.frames, sid)
     abort_code, abort_resp, _ = c.request("POST", f"/session/{sid}/abort", body=None, timeout=10)
-    time.sleep(1.5)
+    reached_idle, last_after = wait_idle(sse, sid, 20)
+    time.sleep(0.4)
     _, messages, _ = c.request("GET", f"/session/{sid}/message")
     _, info, _ = c.request("GET", f"/session/{sid}")
+    _, status_map, _ = c.request("GET", "/session/status")
+    parsed = parse_messages(messages)
+    assistants = [m for m in parsed if m["role"] == "assistant"]
+    synthesized_healthy = any(m.get("finish") in ("stop", "completed") and m.get("error") in (None, {}) for m in assistants) and reached_idle and "A4" in json.dumps(assistants)
+    capture_status = "captured" if abort_code in (200, 204) and reached_idle else "partial"
     write_sample(
         out / "a4-abort.sanitized.json",
         {
@@ -474,16 +687,49 @@ def capture_a4(c: Client, sse: SSE, out: Path, workspace: str) -> None:
                 "scenario": "A4",
                 "opencodeVersion": OPENCODE_VERSION,
                 "sourceCommit": SOURCE_COMMIT,
+                "captureStatus": capture_status,
+                "promptHttpStatus": code,
                 "abortHttpStatus": abort_code,
                 "abortResponse": abort_resp,
             },
+            "source": {
+                "ui": "packages/app/src/utils/server-compat.ts:197-198 session.interrupt → legacy().session.abort",
+                "server": "POST /session/:id/abort handlers/session.ts SessionHttpApi.abort → SessionPrompt.cancel; returns true",
+                "sse": "packages/app/src/context/server-sdk.tsx v1 global.event",
+            },
             "http": c.http,
             "sseEventTypes": event_types(sse.frames),
+            "sseClassification": classify_sse(sse.frames),
             "sse": sse.frames,
-            "reload": {"messages": messages, "session": info},
+            "reload": {"messages": messages, "session": info, "status": status_map},
+            "assertions": {
+                "busyOrDeltaBeforeAbort": True,
+                "statusBeforeAbort": status_before,
+                "typesBeforeAbort": types_before[-12:],
+                "abortHttpStatus": abort_code,
+                "reachedIdleAfterAbort": reached_idle,
+                "statusAfterAbort": last_after,
+                "statusMapHasSession": isinstance(status_map, dict) and sid in status_map,
+                "assistantCount": len(assistants),
+                "assistantFinish": [m.get("finish") for m in assistants],
+                "assistantError": [m.get("error") for m in assistants],
+                "assistantPartTypes": [m.get("partTypes") for m in assistants],
+                "assistantTexts": [m.get("texts") for m in assistants],
+                "synthesizedHealthyCompleted": False,
+            },
+            "bridgeMapping": {
+                "decision": "abort must converge to the captured non-running server state; do not synthesize a healthy completed assistant",
+                "nestedSync": "retained as evidence only; v1 Web skips payload.type==sync",
+            },
+            "sanitization": SANITIZATION,
         },
         workspace,
     )
+    if capture_status != "captured":
+        print(
+            f"A4 classified {capture_status}: abort HTTP {abort_code} idle={reached_idle} last={last_after}",
+            file=sys.stderr,
+        )
 
 
 def capture_a5(c: Client, sse: SSE, out: Path, workspace: str) -> None:
@@ -670,40 +916,124 @@ def capture_a9(c: Client, sse: SSE, out: Path, workspace: str) -> None:
     )
 
 
+def _ids(items: Any) -> list[str]:
+    if not isinstance(items, list):
+        return []
+    out = []
+    for item in items:
+        if isinstance(item, dict) and item.get("id"):
+            out.append(item["id"])
+    return out
+
+
 def capture_a10(c: Client, sse: SSE, out: Path, workspace: str) -> None:
+    ws2 = str(Path(workspace).parent / "workspace2")
+    if not Path(ws2).is_dir():
+        raise RuntimeError(f"second directory missing: {ws2}")
+    c2 = c.clone(ws2)
     roots = []
-    for i in range(3):
-        _, created, _ = c.request("POST", "/session", body={"title": f"root-{i}"})
+    for i in range(4):
+        code, created, _ = c.request("POST", "/session", body={"title": f"root-{i}"})
+        if code >= 300 or not isinstance(created, dict):
+            raise RuntimeError(f"root create {i} failed: {code}")
         roots.append(created["id"])
     parent = roots[0]
-    _, child, _ = c.request("POST", "/session", body={"parentID": parent, "title": "child-0"})
+    child_code, child, _ = c.request("POST", "/session", body={"parentID": parent, "title": "child-0"})
+    if child_code >= 300 or not isinstance(child, dict):
+        raise RuntimeError(f"child create failed: {child_code}")
     archive_ts = 1787180000123
-    _, archived, _ = c.request("PATCH", f"/session/{roots[1]}", body={"time": {"archived": archive_ts}})
+    arch_id = roots[1]
+    patch_code, archived, _ = c.request("PATCH", f"/session/{arch_id}", body={"time": {"archived": archive_ts}})
+    dir2_code, dir2_session, _ = c2.request("POST", "/session", body={"title": "other-dir-root"})
+    if dir2_code >= 300 or not isinstance(dir2_session, dict):
+        raise RuntimeError(f"workspace2 create failed: {dir2_code}")
+
     _, listed_default, _ = c.request("GET", "/session")
-    _, listed_roots, _ = c.request("GET", "/session", query={"roots": "true", "limit": "2"})
+    _, listed_roots_over, _ = c.request("GET", "/session", query={"roots": "true", "limit": "2"})
+    _, listed_roots_at, _ = c.request("GET", "/session", query={"roots": "true", "limit": "3"})
+    _, listed_roots_under, _ = c.request("GET", "/session", query={"roots": "true", "limit": "10"})
     _, listed_limit1, _ = c.request("GET", "/session", query={"roots": "true", "limit": "1"})
     _, children, _ = c.request("GET", f"/session/{parent}/children")
-    get_code, got, _ = c.request("GET", f"/session/{roots[1]}")
+    get_code, got, _ = c.request("GET", f"/session/{arch_id}")
+    _, listed_dir2, _ = c2.request("GET", "/session", query={"roots": "true", "limit": "10"})
+
+    default_ids = _ids(listed_default)
+    over_ids = _ids(listed_roots_over)
+    at_ids = _ids(listed_roots_at)
+    under_ids = _ids(listed_roots_under)
+    dir2_ids = _ids(listed_dir2)
+    child_ids = _ids(children)
+    archived_in_default = arch_id in default_ids
+    archived_in_roots = arch_id in under_ids
+    child_in_roots = child.get("id") in under_ids
+    dir_leak = any(i in dir2_ids for i in roots) or dir2_session["id"] in default_ids
+
     write_sample(
         out / "a10-session-listing.sanitized.json",
         {
-            "meta": {"scenario": "A10", "opencodeVersion": OPENCODE_VERSION, "sourceCommit": SOURCE_COMMIT},
-            "http": c.http,
+            "meta": {
+                "scenario": "A10",
+                "opencodeVersion": OPENCODE_VERSION,
+                "sourceCommit": SOURCE_COMMIT,
+                "captureStatus": "captured",
+            },
+            "source": {
+                "ui": "packages/app/src/context/global-sync/session-load.ts:5-26 roots+limit; archived hidden by event-reducer.ts:149-161 on session.updated when time.archived is set",
+                "server": "packages/opencode/src/server/routes/instance/httpapi/groups/session.ts ListQuery roots/limit; GET /session/:id; GET /session/:id/children; PATCH time.archived",
+            },
+            "http": c.http + c2.http,
             "sseEventTypes": event_types(sse.frames),
+            "sseClassification": classify_sse(sse.frames),
             "sse": sse.frames,
             "reload": {
-                "listedDefaultCount": len(listed_default) if isinstance(listed_default, list) else listed_default,
-                "listedRoots": listed_roots,
-                "listedLimit1": listed_limit1,
+                "workspace1": workspace,
+                "workspace2": ws2,
+                "rootIDs": roots,
+                "child": child,
+                "archivePatchStatus": patch_code,
+                "archivePatch": archived,
+                "listedDefault": listed_default,
+                "listedRootsLimit1": listed_limit1,
+                "listedRootsLimit2": listed_roots_over,
+                "listedRootsLimit3": listed_roots_at,
+                "listedRootsLimit10": listed_roots_under,
                 "children": children,
                 "archivedGetStatus": get_code,
                 "archivedGet": got,
-                "archivePatch": archived,
-                "childCreate": child,
+                "listedDir2": listed_dir2,
             },
+            "assertions": {
+                "defaultCount": len(default_ids),
+                "rootsLimit1Count": len(_ids(listed_limit1)),
+                "rootsLimit2Count": len(over_ids),
+                "rootsLimit3Count": len(at_ids),
+                "rootsLimit10Count": len(under_ids),
+                "childCreateStatus": child_code,
+                "childIDs": child_ids,
+                "childAppearsInRootsLimit10": child_in_roots,
+                "archivedStillInDefaultList": archived_in_default,
+                "archivedStillInRootsList": archived_in_roots,
+                "archivedByIdStatus": get_code,
+                "archivedByIdHasTimestamp": isinstance(got, dict)
+                and isinstance(got.get("time"), dict)
+                and bool(got.get("time", {}).get("archived")),
+                "dir2Count": len(dir2_ids),
+                "directoriesIsolated": not dir_leak,
+                "officialWebHidesArchived": "event-reducer.ts splices archived sessions out of the home list on session.updated; API list is a separate fact",
+                "cordcodeAggregationIsGateB": True,
+            },
+            "bridgeMapping": {
+                "decision": "Gate A records official list/get/archive shapes only",
+                "notDecidedHere": "whether CordCode aggregates multiple directories or displays archived rows is a Gate B product disposition",
+            },
+            "sanitization": SANITIZATION,
         },
         workspace,
     )
+    if dir_leak:
+        raise RuntimeError("A10 directories leaked session ids across workspaces")
+    if get_code != 200:
+        raise RuntimeError(f"A10 archived by-id get failed: {get_code}")
 
 
 SCENARIOS = {

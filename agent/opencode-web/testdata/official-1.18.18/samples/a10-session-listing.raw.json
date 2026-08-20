@@ -1,0 +1,2452 @@
+{
+  "meta": {
+    "scenario": "A10",
+    "opencodeVersion": "1.18.18",
+    "sourceCommit": "2cba7e227d",
+    "captureStatus": "captured"
+  },
+  "source": {
+    "ui": "packages/app/src/context/global-sync/session-load.ts:5-26 roots+limit; archived hidden by event-reducer.ts:149-161 on session.updated when time.archived is set",
+    "server": "packages/opencode/src/server/routes/instance/httpapi/groups/session.ts ListQuery roots/limit; GET /session/:id; GET /session/:id/children; PATCH time.archived"
+  },
+  "http": [
+    {
+      "method": "POST",
+      "path": "/session",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {
+        "title": "root-0"
+      },
+      "status": 200,
+      "response": {
+        "id": "ses_fe0eff613ffeh56OuFP23y0WTe",
+        "slug": "silent-canyon",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "root-0",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227539948,
+          "updated": 1787227539948
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
+        "content-length": "369",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/session",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {
+        "title": "root-1"
+      },
+      "status": 200,
+      "response": {
+        "id": "ses_fe0eff60dffeqjoqu4UnaOzRt1",
+        "slug": "quick-sailor",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "root-1",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227539954,
+          "updated": 1787227539954
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
+        "content-length": "368",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/session",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {
+        "title": "root-2"
+      },
+      "status": 200,
+      "response": {
+        "id": "ses_fe0eff601ffeMmjLCKGYZgc1R9",
+        "slug": "neon-star",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "root-2",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227539966,
+          "updated": 1787227539966
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
+        "content-length": "365",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/session",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {
+        "title": "root-3"
+      },
+      "status": 200,
+      "response": {
+        "id": "ses_fe0eff5faffexmzIgTfp9lEPCW",
+        "slug": "mighty-harbor",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "root-3",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227539973,
+          "updated": 1787227539973
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
+        "content-length": "369",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/session",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {
+        "parentID": "ses_fe0eff613ffeh56OuFP23y0WTe",
+        "title": "child-0"
+      },
+      "status": 200,
+      "response": {
+        "id": "ses_fe0eff5f3ffeudQVL170ZGycWg",
+        "slug": "gentle-nebula",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "parentID": "ses_fe0eff613ffeh56OuFP23y0WTe",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "child-0",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227539980,
+          "updated": 1787227539980
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
+        "content-length": "414",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/session/ses_fe0eff60dffeqjoqu4UnaOzRt1",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {
+        "time": {
+          "archived": 1787180000123
+        }
+      },
+      "status": 200,
+      "response": {
+        "id": "ses_fe0eff60dffeqjoqu4UnaOzRt1",
+        "slug": "quick-sailor",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "root-1",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227539954,
+          "updated": 1787227539954,
+          "archived": 1787180000123
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
+        "content-length": "393",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": [
+        {
+          "id": "ses_fe0eff5f3ffeudQVL170ZGycWg",
+          "slug": "gentle-nebula",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "parentID": "ses_fe0eff613ffeh56OuFP23y0WTe",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "child-0",
+          "version": "1.18.18",
+          "time": {
+            "created": 1787227539980,
+            "updated": 1787227539980
+          }
+        },
+        {
+          "id": "ses_fe0eff5faffexmzIgTfp9lEPCW",
+          "slug": "mighty-harbor",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "root-3",
+          "version": "1.18.18",
+          "time": {
+            "created": 1787227539973,
+            "updated": 1787227539973
+          }
+        },
+        {
+          "id": "ses_fe0eff601ffeMmjLCKGYZgc1R9",
+          "slug": "neon-star",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "root-2",
+          "version": "1.18.18",
+          "time": {
+            "created": 1787227539966,
+            "updated": 1787227539966
+          }
+        },
+        {
+          "id": "ses_fe0eff60dffeqjoqu4UnaOzRt1",
+          "slug": "quick-sailor",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "root-1",
+          "version": "1.18.18",
+          "time": {
+            "created": 1787227539954,
+            "updated": 1787227539954,
+            "archived": 1787180000123
+          }
+        },
+        {
+          "id": "ses_fe0eff613ffeh56OuFP23y0WTe",
+          "slug": "silent-canyon",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "root-0",
+          "version": "1.18.18",
+          "time": {
+            "created": 1787227539948,
+            "updated": 1787227539948
+          }
+        },
+        {
+          "id": "ses_fe0f01da5ffer6Av0u6k5mNeM2",
+          "slug": "stellar-star",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "summary": {
+            "additions": 0,
+            "deletions": 0,
+            "files": 0
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "SLOW_STREAM_ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+          "agent": "build",
+          "model": {
+            "id": "echo",
+            "providerID": "localmock",
+            "variant": "default"
+          },
+          "version": "1.18.18",
+          "time": {
+            "created": 1787227529818,
+            "updated": 1787227529864
+          }
+        },
+        {
+          "id": "ses_fe0f098c2ffeoRTPE1wfa79nS5",
+          "slug": "neon-garden",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "summary": {
+            "additions": 0,
+            "deletions": 0,
+            "files": 0
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 16,
+            "output": 20,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "Fixture session",
+          "agent": "build",
+          "model": {
+            "id": "echo",
+            "providerID": "localmock",
+            "variant": "default"
+          },
+          "version": "1.18.18",
+          "time": {
+            "created": 1787227498301,
+            "updated": 1787227503368
+          }
+        },
+        {
+          "id": "ses_fe0f158c7ffeD7HLgyAdUzxg1Y",
+          "slug": "swift-harbor",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "summary": {
+            "additions": 0,
+            "deletions": 0,
+            "files": 0
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 16,
+            "output": 20,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "Fixture session",
+          "agent": "build",
+          "model": {
+            "id": "echo",
+            "providerID": "localmock",
+            "variant": "default"
+          },
+          "version": "1.18.18",
+          "time": {
+            "created": 1787227449144,
+            "updated": 1787227458716
+          }
+        }
+      ],
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
+        "content-length": "3475",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session",
+      "query": {
+        "roots": "true",
+        "limit": "2"
+      },
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": [
+        {
+          "id": "ses_fe0eff5faffexmzIgTfp9lEPCW",
+          "slug": "mighty-harbor",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "root-3",
+          "version": "1.18.18",
+          "time": {
+            "created": 1787227539973,
+            "updated": 1787227539973
+          }
+        },
+        {
+          "id": "ses_fe0eff601ffeMmjLCKGYZgc1R9",
+          "slug": "neon-star",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "root-2",
+          "version": "1.18.18",
+          "time": {
+            "created": 1787227539966,
+            "updated": 1787227539966
+          }
+        }
+      ],
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
+        "content-length": "737",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session",
+      "query": {
+        "roots": "true",
+        "limit": "3"
+      },
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": [
+        {
+          "id": "ses_fe0eff5faffexmzIgTfp9lEPCW",
+          "slug": "mighty-harbor",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "root-3",
+          "version": "1.18.18",
+          "time": {
+            "created": 1787227539973,
+            "updated": 1787227539973
+          }
+        },
+        {
+          "id": "ses_fe0eff601ffeMmjLCKGYZgc1R9",
+          "slug": "neon-star",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "root-2",
+          "version": "1.18.18",
+          "time": {
+            "created": 1787227539966,
+            "updated": 1787227539966
+          }
+        },
+        {
+          "id": "ses_fe0eff60dffeqjoqu4UnaOzRt1",
+          "slug": "quick-sailor",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "root-1",
+          "version": "1.18.18",
+          "time": {
+            "created": 1787227539954,
+            "updated": 1787227539954,
+            "archived": 1787180000123
+          }
+        }
+      ],
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
+        "content-length": "1131",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session",
+      "query": {
+        "roots": "true",
+        "limit": "10"
+      },
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": [
+        {
+          "id": "ses_fe0eff5faffexmzIgTfp9lEPCW",
+          "slug": "mighty-harbor",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "root-3",
+          "version": "1.18.18",
+          "time": {
+            "created": 1787227539973,
+            "updated": 1787227539973
+          }
+        },
+        {
+          "id": "ses_fe0eff601ffeMmjLCKGYZgc1R9",
+          "slug": "neon-star",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "root-2",
+          "version": "1.18.18",
+          "time": {
+            "created": 1787227539966,
+            "updated": 1787227539966
+          }
+        },
+        {
+          "id": "ses_fe0eff60dffeqjoqu4UnaOzRt1",
+          "slug": "quick-sailor",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "root-1",
+          "version": "1.18.18",
+          "time": {
+            "created": 1787227539954,
+            "updated": 1787227539954,
+            "archived": 1787180000123
+          }
+        },
+        {
+          "id": "ses_fe0eff613ffeh56OuFP23y0WTe",
+          "slug": "silent-canyon",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "root-0",
+          "version": "1.18.18",
+          "time": {
+            "created": 1787227539948,
+            "updated": 1787227539948
+          }
+        },
+        {
+          "id": "ses_fe0f01da5ffer6Av0u6k5mNeM2",
+          "slug": "stellar-star",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "summary": {
+            "additions": 0,
+            "deletions": 0,
+            "files": 0
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "SLOW_STREAM_ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+          "agent": "build",
+          "model": {
+            "id": "echo",
+            "providerID": "localmock",
+            "variant": "default"
+          },
+          "version": "1.18.18",
+          "time": {
+            "created": 1787227529818,
+            "updated": 1787227529864
+          }
+        },
+        {
+          "id": "ses_fe0f098c2ffeoRTPE1wfa79nS5",
+          "slug": "neon-garden",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "summary": {
+            "additions": 0,
+            "deletions": 0,
+            "files": 0
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 16,
+            "output": 20,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "Fixture session",
+          "agent": "build",
+          "model": {
+            "id": "echo",
+            "providerID": "localmock",
+            "variant": "default"
+          },
+          "version": "1.18.18",
+          "time": {
+            "created": 1787227498301,
+            "updated": 1787227503368
+          }
+        },
+        {
+          "id": "ses_fe0f158c7ffeD7HLgyAdUzxg1Y",
+          "slug": "swift-harbor",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "summary": {
+            "additions": 0,
+            "deletions": 0,
+            "files": 0
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 16,
+            "output": 20,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "Fixture session",
+          "agent": "build",
+          "model": {
+            "id": "echo",
+            "providerID": "localmock",
+            "variant": "default"
+          },
+          "version": "1.18.18",
+          "time": {
+            "created": 1787227449144,
+            "updated": 1787227458716
+          }
+        }
+      ],
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
+        "content-length": "3060",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session",
+      "query": {
+        "roots": "true",
+        "limit": "1"
+      },
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": [
+        {
+          "id": "ses_fe0eff5faffexmzIgTfp9lEPCW",
+          "slug": "mighty-harbor",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "root-3",
+          "version": "1.18.18",
+          "time": {
+            "created": 1787227539973,
+            "updated": 1787227539973
+          }
+        }
+      ],
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
+        "content-length": "371",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/ses_fe0eff613ffeh56OuFP23y0WTe/children",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": [
+        {
+          "id": "ses_fe0eff5f3ffeudQVL170ZGycWg",
+          "slug": "gentle-nebula",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "parentID": "ses_fe0eff613ffeh56OuFP23y0WTe",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "child-0",
+          "version": "1.18.18",
+          "time": {
+            "created": 1787227539980,
+            "updated": 1787227539980
+          }
+        }
+      ],
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
+        "content-length": "416",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/ses_fe0eff60dffeqjoqu4UnaOzRt1",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": {
+        "id": "ses_fe0eff60dffeqjoqu4UnaOzRt1",
+        "slug": "quick-sailor",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "root-1",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227539954,
+          "updated": 1787227539954,
+          "archived": 1787180000123
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
+        "content-length": "393",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/session",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {
+        "title": "other-dir-root"
+      },
+      "status": 200,
+      "response": {
+        "id": "ses_fe0eff5d5ffeogIT34PDIJt7mH",
+        "slug": "quiet-tiger",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace2",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace2",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "other-dir-root",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227540010,
+          "updated": 1787227540010
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
+        "content-length": "377",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session",
+      "query": {
+        "roots": "true",
+        "limit": "10"
+      },
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": [
+        {
+          "id": "ses_fe0eff5d5ffeogIT34PDIJt7mH",
+          "slug": "quiet-tiger",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace2",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace2",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "other-dir-root",
+          "version": "1.18.18",
+          "time": {
+            "created": 1787227540010,
+            "updated": 1787227540010
+          }
+        }
+      ],
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
+        "content-length": "379",
+        "vary": "Origin"
+      }
+    }
+  ],
+  "sseEventTypes": [
+    "server.connected",
+    "session.updated",
+    "sync",
+    "session.created",
+    "sync",
+    "session.created",
+    "sync",
+    "session.created",
+    "sync",
+    "session.created",
+    "sync",
+    "session.created",
+    "sync",
+    "session.updated",
+    "sync",
+    "project.updated"
+  ],
+  "sseClassification": {
+    "directTypes": [
+      "server.connected",
+      "session.updated",
+      "session.created",
+      "session.created",
+      "session.created",
+      "session.created",
+      "session.created",
+      "session.updated",
+      "project.updated"
+    ],
+    "syncCount": 7,
+    "syncTypes": [
+      "session.updated.1",
+      "session.created.1",
+      "session.created.1",
+      "session.created.1",
+      "session.created.1",
+      "session.created.1",
+      "session.updated.1"
+    ],
+    "statusCarriers": []
+  },
+  "sse": [
+    {
+      "t": 1787227539.91728,
+      "event": {
+        "payload": {
+          "id": "evt_01f0ff8c0001TefTYPuws5y4JK",
+          "type": "server.connected",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 1787227539.952662,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1009ca001LPUKx3rZN2TzFq",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fe0f01da5ffer6Av0u6k5mNeM2",
+            "info": {
+              "id": "ses_fe0f01da5ffer6Av0u6k5mNeM2",
+              "slug": "stellar-star",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "SLOW_STREAM_ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "summary": {
+                "additions": 0,
+                "deletions": 0,
+                "files": 0
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787227529818,
+                "updated": 1787227529864
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787227539.954282,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1009ca001LPUKx3rZN2TzFq",
+            "type": "session.updated.1",
+            "seq": 12,
+            "aggregateID": "ses_fe0f01da5ffer6Av0u6k5mNeM2",
+            "data": {
+              "sessionID": "ses_fe0f01da5ffer6Av0u6k5mNeM2",
+              "info": {
+                "id": "ses_fe0f01da5ffer6Av0u6k5mNeM2",
+                "slug": "stellar-star",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "SLOW_STREAM_ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "summary": {
+                  "additions": 0,
+                  "deletions": 0,
+                  "files": 0
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787227529818,
+                  "updated": 1787227529864
+                }
+              }
+            }
+          },
+          "id": "evt_01f1009ca001LPUKx3rZN2TzFq"
+        }
+      }
+    },
+    {
+      "t": 1787227539.957547,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1009ec002c5VntQZhBWE3ya",
+          "type": "session.created",
+          "properties": {
+            "sessionID": "ses_fe0eff613ffeh56OuFP23y0WTe",
+            "info": {
+              "id": "ses_fe0eff613ffeh56OuFP23y0WTe",
+              "slug": "silent-canyon",
+              "version": "1.18.18",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "root-0",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787227539948,
+                "updated": 1787227539948
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787227539.9584022,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1009ec002c5VntQZhBWE3ya",
+            "type": "session.created.1",
+            "seq": 0,
+            "aggregateID": "ses_fe0eff613ffeh56OuFP23y0WTe",
+            "data": {
+              "sessionID": "ses_fe0eff613ffeh56OuFP23y0WTe",
+              "info": {
+                "id": "ses_fe0eff613ffeh56OuFP23y0WTe",
+                "slug": "silent-canyon",
+                "version": "1.18.18",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "root-0",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787227539948,
+                  "updated": 1787227539948
+                }
+              }
+            }
+          },
+          "id": "evt_01f1009ec002c5VntQZhBWE3ya"
+        }
+      }
+    },
+    {
+      "t": 1787227539.9693801,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1009f2002yoDNIC4nX5HHbo",
+          "type": "session.created",
+          "properties": {
+            "sessionID": "ses_fe0eff60dffeqjoqu4UnaOzRt1",
+            "info": {
+              "id": "ses_fe0eff60dffeqjoqu4UnaOzRt1",
+              "slug": "quick-sailor",
+              "version": "1.18.18",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "root-1",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787227539954,
+                "updated": 1787227539954
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787227539.9705029,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1009f2002yoDNIC4nX5HHbo",
+            "type": "session.created.1",
+            "seq": 0,
+            "aggregateID": "ses_fe0eff60dffeqjoqu4UnaOzRt1",
+            "data": {
+              "sessionID": "ses_fe0eff60dffeqjoqu4UnaOzRt1",
+              "info": {
+                "id": "ses_fe0eff60dffeqjoqu4UnaOzRt1",
+                "slug": "quick-sailor",
+                "version": "1.18.18",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "root-1",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787227539954,
+                  "updated": 1787227539954
+                }
+              }
+            }
+          },
+          "id": "evt_01f1009f2002yoDNIC4nX5HHbo"
+        }
+      }
+    },
+    {
+      "t": 1787227539.9753668,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1009fe002QbFcYx8IzWOyxu",
+          "type": "session.created",
+          "properties": {
+            "sessionID": "ses_fe0eff601ffeMmjLCKGYZgc1R9",
+            "info": {
+              "id": "ses_fe0eff601ffeMmjLCKGYZgc1R9",
+              "slug": "neon-star",
+              "version": "1.18.18",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "root-2",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787227539966,
+                "updated": 1787227539966
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787227539.976118,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1009fe002QbFcYx8IzWOyxu",
+            "type": "session.created.1",
+            "seq": 0,
+            "aggregateID": "ses_fe0eff601ffeMmjLCKGYZgc1R9",
+            "data": {
+              "sessionID": "ses_fe0eff601ffeMmjLCKGYZgc1R9",
+              "info": {
+                "id": "ses_fe0eff601ffeMmjLCKGYZgc1R9",
+                "slug": "neon-star",
+                "version": "1.18.18",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "root-2",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787227539966,
+                  "updated": 1787227539966
+                }
+              }
+            }
+          },
+          "id": "evt_01f1009fe002QbFcYx8IzWOyxu"
+        }
+      }
+    },
+    {
+      "t": 1787227539.982303,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f100a05002alLxN1I1VtU8NQ",
+          "type": "session.created",
+          "properties": {
+            "sessionID": "ses_fe0eff5faffexmzIgTfp9lEPCW",
+            "info": {
+              "id": "ses_fe0eff5faffexmzIgTfp9lEPCW",
+              "slug": "mighty-harbor",
+              "version": "1.18.18",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "root-3",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787227539973,
+                "updated": 1787227539973
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787227539.983274,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f100a05002alLxN1I1VtU8NQ",
+            "type": "session.created.1",
+            "seq": 0,
+            "aggregateID": "ses_fe0eff5faffexmzIgTfp9lEPCW",
+            "data": {
+              "sessionID": "ses_fe0eff5faffexmzIgTfp9lEPCW",
+              "info": {
+                "id": "ses_fe0eff5faffexmzIgTfp9lEPCW",
+                "slug": "mighty-harbor",
+                "version": "1.18.18",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "root-3",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787227539973,
+                  "updated": 1787227539973
+                }
+              }
+            }
+          },
+          "id": "evt_01f100a05002alLxN1I1VtU8NQ"
+        }
+      }
+    },
+    {
+      "t": 1787227539.9917362,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f100a0c002YoPqvOD2iQCpMD",
+          "type": "session.created",
+          "properties": {
+            "sessionID": "ses_fe0eff5f3ffeudQVL170ZGycWg",
+            "info": {
+              "id": "ses_fe0eff5f3ffeudQVL170ZGycWg",
+              "slug": "gentle-nebula",
+              "version": "1.18.18",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "parentID": "ses_fe0eff613ffeh56OuFP23y0WTe",
+              "title": "child-0",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787227539980,
+                "updated": 1787227539980
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787227539.992604,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f100a0c002YoPqvOD2iQCpMD",
+            "type": "session.created.1",
+            "seq": 0,
+            "aggregateID": "ses_fe0eff5f3ffeudQVL170ZGycWg",
+            "data": {
+              "sessionID": "ses_fe0eff5f3ffeudQVL170ZGycWg",
+              "info": {
+                "id": "ses_fe0eff5f3ffeudQVL170ZGycWg",
+                "slug": "gentle-nebula",
+                "version": "1.18.18",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "parentID": "ses_fe0eff613ffeh56OuFP23y0WTe",
+                "title": "child-0",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787227539980,
+                  "updated": 1787227539980
+                }
+              }
+            }
+          },
+          "id": "evt_01f100a0c002YoPqvOD2iQCpMD"
+        }
+      }
+    },
+    {
+      "t": 1787227539.997542,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f100a14001L1wA1VEqC3PEwp",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fe0eff60dffeqjoqu4UnaOzRt1",
+            "info": {
+              "id": "ses_fe0eff60dffeqjoqu4UnaOzRt1",
+              "slug": "quick-sailor",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "root-1",
+              "version": "1.18.18",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787227539954,
+                "updated": 1787227539954,
+                "archived": 1787180000123
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787227539.998435,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f100a14001L1wA1VEqC3PEwp",
+            "type": "session.updated.1",
+            "seq": 1,
+            "aggregateID": "ses_fe0eff60dffeqjoqu4UnaOzRt1",
+            "data": {
+              "sessionID": "ses_fe0eff60dffeqjoqu4UnaOzRt1",
+              "info": {
+                "id": "ses_fe0eff60dffeqjoqu4UnaOzRt1",
+                "slug": "quick-sailor",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "root-1",
+                "version": "1.18.18",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787227539954,
+                  "updated": 1787227539954,
+                  "archived": 1787180000123
+                }
+              }
+            }
+          },
+          "id": "evt_01f100a14001L1wA1VEqC3PEwp"
+        }
+      }
+    },
+    {
+      "t": 1787227540.012901,
+      "event": {
+        "directory": "global",
+        "project": "global",
+        "payload": {
+          "type": "project.updated",
+          "properties": {
+            "id": "global",
+            "worktree": "/",
+            "time": {
+              "created": 1787227449036,
+              "updated": 1787227539995
+            },
+            "sandboxes": []
+          },
+          "id": "evt_01f100a1c001f40Nz70mEQ4222"
+        }
+      }
+    }
+  ],
+  "reload": {
+    "workspace1": "/tmp/ocw-gate-a-20260820/workspace",
+    "workspace2": "/tmp/ocw-gate-a-20260820/workspace2",
+    "rootIDs": [
+      "ses_fe0eff613ffeh56OuFP23y0WTe",
+      "ses_fe0eff60dffeqjoqu4UnaOzRt1",
+      "ses_fe0eff601ffeMmjLCKGYZgc1R9",
+      "ses_fe0eff5faffexmzIgTfp9lEPCW"
+    ],
+    "child": {
+      "id": "ses_fe0eff5f3ffeudQVL170ZGycWg",
+      "slug": "gentle-nebula",
+      "projectID": "global",
+      "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+      "path": "private/tmp/ocw-gate-a-20260820/workspace",
+      "parentID": "ses_fe0eff613ffeh56OuFP23y0WTe",
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "title": "child-0",
+      "version": "1.18.18",
+      "time": {
+        "created": 1787227539980,
+        "updated": 1787227539980
+      }
+    },
+    "archivePatchStatus": 200,
+    "archivePatch": {
+      "id": "ses_fe0eff60dffeqjoqu4UnaOzRt1",
+      "slug": "quick-sailor",
+      "projectID": "global",
+      "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+      "path": "private/tmp/ocw-gate-a-20260820/workspace",
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "title": "root-1",
+      "version": "1.18.18",
+      "time": {
+        "created": 1787227539954,
+        "updated": 1787227539954,
+        "archived": 1787180000123
+      }
+    },
+    "listedDefault": [
+      {
+        "id": "ses_fe0eff5f3ffeudQVL170ZGycWg",
+        "slug": "gentle-nebula",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "parentID": "ses_fe0eff613ffeh56OuFP23y0WTe",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "child-0",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227539980,
+          "updated": 1787227539980
+        }
+      },
+      {
+        "id": "ses_fe0eff5faffexmzIgTfp9lEPCW",
+        "slug": "mighty-harbor",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "root-3",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227539973,
+          "updated": 1787227539973
+        }
+      },
+      {
+        "id": "ses_fe0eff601ffeMmjLCKGYZgc1R9",
+        "slug": "neon-star",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "root-2",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227539966,
+          "updated": 1787227539966
+        }
+      },
+      {
+        "id": "ses_fe0eff60dffeqjoqu4UnaOzRt1",
+        "slug": "quick-sailor",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "root-1",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227539954,
+          "updated": 1787227539954,
+          "archived": 1787180000123
+        }
+      },
+      {
+        "id": "ses_fe0eff613ffeh56OuFP23y0WTe",
+        "slug": "silent-canyon",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "root-0",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227539948,
+          "updated": 1787227539948
+        }
+      },
+      {
+        "id": "ses_fe0f01da5ffer6Av0u6k5mNeM2",
+        "slug": "stellar-star",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "SLOW_STREAM_ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        "agent": "build",
+        "model": {
+          "id": "echo",
+          "providerID": "localmock",
+          "variant": "default"
+        },
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227529818,
+          "updated": 1787227529864
+        }
+      },
+      {
+        "id": "ses_fe0f098c2ffeoRTPE1wfa79nS5",
+        "slug": "neon-garden",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 16,
+          "output": 20,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "Fixture session",
+        "agent": "build",
+        "model": {
+          "id": "echo",
+          "providerID": "localmock",
+          "variant": "default"
+        },
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227498301,
+          "updated": 1787227503368
+        }
+      },
+      {
+        "id": "ses_fe0f158c7ffeD7HLgyAdUzxg1Y",
+        "slug": "swift-harbor",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 16,
+          "output": 20,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "Fixture session",
+        "agent": "build",
+        "model": {
+          "id": "echo",
+          "providerID": "localmock",
+          "variant": "default"
+        },
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227449144,
+          "updated": 1787227458716
+        }
+      }
+    ],
+    "listedRootsLimit1": [
+      {
+        "id": "ses_fe0eff5faffexmzIgTfp9lEPCW",
+        "slug": "mighty-harbor",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "root-3",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227539973,
+          "updated": 1787227539973
+        }
+      }
+    ],
+    "listedRootsLimit2": [
+      {
+        "id": "ses_fe0eff5faffexmzIgTfp9lEPCW",
+        "slug": "mighty-harbor",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "root-3",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227539973,
+          "updated": 1787227539973
+        }
+      },
+      {
+        "id": "ses_fe0eff601ffeMmjLCKGYZgc1R9",
+        "slug": "neon-star",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "root-2",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227539966,
+          "updated": 1787227539966
+        }
+      }
+    ],
+    "listedRootsLimit3": [
+      {
+        "id": "ses_fe0eff5faffexmzIgTfp9lEPCW",
+        "slug": "mighty-harbor",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "root-3",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227539973,
+          "updated": 1787227539973
+        }
+      },
+      {
+        "id": "ses_fe0eff601ffeMmjLCKGYZgc1R9",
+        "slug": "neon-star",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "root-2",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227539966,
+          "updated": 1787227539966
+        }
+      },
+      {
+        "id": "ses_fe0eff60dffeqjoqu4UnaOzRt1",
+        "slug": "quick-sailor",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "root-1",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227539954,
+          "updated": 1787227539954,
+          "archived": 1787180000123
+        }
+      }
+    ],
+    "listedRootsLimit10": [
+      {
+        "id": "ses_fe0eff5faffexmzIgTfp9lEPCW",
+        "slug": "mighty-harbor",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "root-3",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227539973,
+          "updated": 1787227539973
+        }
+      },
+      {
+        "id": "ses_fe0eff601ffeMmjLCKGYZgc1R9",
+        "slug": "neon-star",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "root-2",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227539966,
+          "updated": 1787227539966
+        }
+      },
+      {
+        "id": "ses_fe0eff60dffeqjoqu4UnaOzRt1",
+        "slug": "quick-sailor",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "root-1",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227539954,
+          "updated": 1787227539954,
+          "archived": 1787180000123
+        }
+      },
+      {
+        "id": "ses_fe0eff613ffeh56OuFP23y0WTe",
+        "slug": "silent-canyon",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "root-0",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227539948,
+          "updated": 1787227539948
+        }
+      },
+      {
+        "id": "ses_fe0f01da5ffer6Av0u6k5mNeM2",
+        "slug": "stellar-star",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "SLOW_STREAM_ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        "agent": "build",
+        "model": {
+          "id": "echo",
+          "providerID": "localmock",
+          "variant": "default"
+        },
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227529818,
+          "updated": 1787227529864
+        }
+      },
+      {
+        "id": "ses_fe0f098c2ffeoRTPE1wfa79nS5",
+        "slug": "neon-garden",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 16,
+          "output": 20,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "Fixture session",
+        "agent": "build",
+        "model": {
+          "id": "echo",
+          "providerID": "localmock",
+          "variant": "default"
+        },
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227498301,
+          "updated": 1787227503368
+        }
+      },
+      {
+        "id": "ses_fe0f158c7ffeD7HLgyAdUzxg1Y",
+        "slug": "swift-harbor",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 16,
+          "output": 20,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "Fixture session",
+        "agent": "build",
+        "model": {
+          "id": "echo",
+          "providerID": "localmock",
+          "variant": "default"
+        },
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227449144,
+          "updated": 1787227458716
+        }
+      }
+    ],
+    "children": [
+      {
+        "id": "ses_fe0eff5f3ffeudQVL170ZGycWg",
+        "slug": "gentle-nebula",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "parentID": "ses_fe0eff613ffeh56OuFP23y0WTe",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "child-0",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227539980,
+          "updated": 1787227539980
+        }
+      }
+    ],
+    "archivedGetStatus": 200,
+    "archivedGet": {
+      "id": "ses_fe0eff60dffeqjoqu4UnaOzRt1",
+      "slug": "quick-sailor",
+      "projectID": "global",
+      "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+      "path": "private/tmp/ocw-gate-a-20260820/workspace",
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "title": "root-1",
+      "version": "1.18.18",
+      "time": {
+        "created": 1787227539954,
+        "updated": 1787227539954,
+        "archived": 1787180000123
+      }
+    },
+    "listedDir2": [
+      {
+        "id": "ses_fe0eff5d5ffeogIT34PDIJt7mH",
+        "slug": "quiet-tiger",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace2",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace2",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "other-dir-root",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787227540010,
+          "updated": 1787227540010
+        }
+      }
+    ]
+  },
+  "assertions": {
+    "defaultCount": 8,
+    "rootsLimit1Count": 1,
+    "rootsLimit2Count": 2,
+    "rootsLimit3Count": 3,
+    "rootsLimit10Count": 7,
+    "childCreateStatus": 200,
+    "childIDs": [
+      "ses_fe0eff5f3ffeudQVL170ZGycWg"
+    ],
+    "childAppearsInRootsLimit10": false,
+    "archivedStillInDefaultList": true,
+    "archivedStillInRootsList": true,
+    "archivedByIdStatus": 200,
+    "archivedByIdHasTimestamp": true,
+    "dir2Count": 1,
+    "directoriesIsolated": true,
+    "officialWebHidesArchived": "event-reducer.ts splices archived sessions out of the home list on session.updated; API list is a separate fact",
+    "cordcodeAggregationIsGateB": true
+  },
+  "bridgeMapping": {
+    "decision": "Gate A records official list/get/archive shapes only",
+    "notDecidedHere": "whether CordCode aggregates multiple directories or displays archived rows is a Gate B product disposition"
+  },
+  "sanitization": {
+    "replaced": [
+      "session/message/part/event ids",
+      "absolute workspace paths",
+      "epoch timestamps > 1e9"
+    ],
+    "kept": [
+      "all JSON keys",
+      "event types",
+      "part types",
+      "HTTP method/path/status"
+    ]
+  }
+}

@@ -33,16 +33,18 @@ if [[ "$ver" != "1.18.18" ]]; then
 fi
 
 rm -rf "$ROOT"
-mkdir -p "$ROOT"/{home,xdg/{config,data,cache,state},workspace,outside,logs,run}
+mkdir -p "$ROOT"/{home,xdg/{config,data,cache,state},workspace,workspace2,outside,logs,run}
 printf 'outside-file-for-a6\n' > "$ROOT/outside/secret.txt"
 printf 'workspace-readme\n' > "$ROOT/workspace/README.md"
-cp "$HARNESS_DIR/opencode.json" "$ROOT/workspace/opencode.json"
+printf 'workspace2-readme\n' > "$ROOT/workspace2/README.md"
 python3 - <<PY
-import json, pathlib, os
-p = pathlib.Path("$ROOT/workspace/opencode.json")
-cfg = json.loads(p.read_text())
+import json, pathlib
+src = pathlib.Path("$HARNESS_DIR/opencode.json")
+cfg = json.loads(src.read_text())
 cfg["provider"]["localmock"]["options"]["baseURL"] = "http://127.0.0.1:${MOCK_PORT}/v1"
-p.write_text(json.dumps(cfg, indent=2) + "\n")
+text = json.dumps(cfg, indent=2) + "\n"
+pathlib.Path("$ROOT/workspace/opencode.json").write_text(text)
+pathlib.Path("$ROOT/workspace2/opencode.json").write_text(text)
 PY
 
 export HOME="$ROOT/home"

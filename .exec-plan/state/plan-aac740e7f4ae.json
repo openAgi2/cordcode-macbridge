@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-20T11:54:59Z",
+  "updated_at": "2026-08-20T12:06:55Z",
   "todos": [
     {
       "id": "gate-a-inventory-impl",
@@ -204,7 +204,7 @@
         "gate-a-inventory-regression"
       ],
       "source": "Gate A",
-      "notes": "A1 captured (create, prompt_async with messageID/agent/model/text, SSE direct+sync, idle, reload user/assistant SANDBOX_OK). A2 not started.",
+      "notes": "A1/A2/A4/A10 captured. Remaining A3/A5/A6/A7/A8/A9. Gate A not complete.",
       "verification": {
         "required": true,
         "status": "missing",
@@ -213,7 +213,7 @@
         "na_reason": null,
         "summary": "",
         "artifacts": [],
-        "checked_at": "2026-08-20T11:54:59Z"
+        "checked_at": "2026-08-20T12:06:55Z"
       }
     },
     {
