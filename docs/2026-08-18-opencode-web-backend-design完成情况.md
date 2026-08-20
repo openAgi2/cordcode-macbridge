@@ -256,6 +256,18 @@ owner 指出理想路径是 dsh-web 式「读官方 web 源码→穷举 API→�
 
 **装机**：Mac Release 覆盖 `/Applications` 并重启；iOS 侧无改动（UI 与 RPC 链路本就通，报错来自桥的 not_supported 门）。待 owner 复测：更多设置 → 归档（会话从列表隐藏/带归档标记）、删除（会话消失且不复发）。
 
+## 四·补十四、归档复测收口：get_session 信封解码 + by-id 单取（owner 复测 2026-08-20 傍晚，Mac `6b17c17` / iOS `待提交`）
+
+**症状**：删除 ✅；归档报「未能读取数据，因为数据丢失」。取证（capture conn 实测桥 wire）：`get_session` 返回 `{"session":…,"contextUsage":…}` 信封，而 iOS `getSession` 把 result 直接按 `CCCodeBridgeSession` 解码（要求顶层 `id`）→ keyNotFound。**同雷潜伏于 rename/pin 的回拉流程**——归档只是第一个踩中的。连带风险：`handleGetSession` 走 `ListSessions` 目录列表扫描，归档行可能被 serve 默认列表排除（活体 1.18.18 不稳定行为，补十三已记），回拉会 race 出 `session_not_found`。
+
+**修复（双端）**：
+- Mac：新增 `core.SessionInfoFetcher`（by-id 单读可选接口）；opencode-web 实现为 `GET /session/{id}`（复用既有 `fetchSessionInfo`，v2 `{"data":…}` 信封解包，映射含 `ArchivedAt`）；`handleGetSession` **优先 by-id 单取**，miss 回落列表扫描（legacy 行为不变，非实现 backend 不受影响）。
+- iOS：`CCCodeBridgeClient.getSession` 改解 `CCCodeBridgeGetSessionEnvelope` 取 `.session`（该信封类型本就存在且 `getSessionContextUsage` 用法正确）；缺字段抛新增 `CCCodeBridgeClientDecodingError`（可诊断文案，替代笼统 JSONDecoder 报错）。
+
+**回归**：`TestFetchSessionInfoOfficialShapeAndMapping` / `…PropagatesHTTPError`（agent，GET by-id + archived 映射 + 404）；`TestOpenCodeWebGetSessionPrefersByIDFetcher`（桥 dispatch：列表不含该行仍可解析、带 archivedAtMillis）；归档映射去重为 `ocwSessionEntryToInfo`。全仓 go test 绿；iOS CCCodeTests 全量跑（见 iOS 仓提交）。
+
+**装机**：Mac Release 覆盖重启；iOS Debug 真机重装。待 owner 复测归档：预期无报错、会话从列表消失（乐观移除 + 列表刷新）。
+
 
 
 
