@@ -118,7 +118,7 @@ func TestSSEAssistantDeltasAndSnapshots(t *testing.T) {
 	)
 
 	events := drain(sub)
-	var texts, replaces, thinking []core.Event
+	var texts, replaces, thinking, errorsOut []core.Event
 	for _, ev := range events {
 		switch ev.Type {
 		case core.EventText:
@@ -127,13 +127,20 @@ func TestSSEAssistantDeltasAndSnapshots(t *testing.T) {
 			replaces = append(replaces, ev)
 		case core.EventThinking:
 			thinking = append(thinking, ev)
+		case core.EventError:
+			errorsOut = append(errorsOut, ev)
 		}
 	}
 	if len(texts) != 2 || texts[0].Content != "Hel" || texts[1].Content != "lo" {
 		t.Fatalf("text deltas = %+v", texts)
 	}
-	if len(thinking) != 1 || thinking[0].Content != "hmm" {
-		t.Fatalf("thinking = %+v", thinking)
+	// §6.3/E2: populated reasoning is explicitly unsupported — a diagnosable
+	// EventError with the canonical text, NEVER an EventThinking stream.
+	if len(thinking) != 0 {
+		t.Fatalf("reasoning must not map to thinking, got %+v", thinking)
+	}
+	if len(errorsOut) != 1 || errorsOut[0].Content != "unsupported content.reasoning for verified 1.18.18 shape" {
+		t.Fatalf("reasoning delta must surface the canonical unsupported error, got %+v", errorsOut)
 	}
 	if len(replaces) != 1 || replaces[0].Content != "Everything changed" {
 		t.Fatalf("unrelated snapshot must EventTextReplace, got %+v", replaces)
@@ -871,11 +878,11 @@ func TestRetrySnapshotReplayOnStartSessionAndClearOnIdle(t *testing.T) {
 		t.Fatalf("StartSession: %v", err)
 	}
 	t.Cleanup(func() { _ = sess.Close() })
-	rs := sess.(*serverSession).sub
+	route := sess.(*serverSession).events
 	var replay *core.Event
 	for {
 		select {
-		case ev := <-rs.events:
+		case ev := <-route:
 			if ev.Type == core.EventRetryStatus {
 				e := ev
 				replay = &e

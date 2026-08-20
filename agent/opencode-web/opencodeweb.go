@@ -94,6 +94,26 @@ type Agent struct {
 	terminalTextSet map[string]bool // sessionID → terminal text already emitted this turn
 	retryStatusSeen map[string]int  // sessionID → highest retry attempt already emitted
 
+	// C4 §6.5: ONE backend-instance global SSE subscriber. Every live
+	// serverSession registers a route (sessionID → channel); the subscriber
+	// normalizes each direct event exactly once and routes by SessionID.
+	// Unrouted sessions get catalog-signal refresh only — never a hidden
+	// second timeline. Passive Subscribe taps the same stream (the E3
+	// external-turn observation path); no per-session dedicated connection
+	// exists.
+	globalSubMu   sync.Mutex
+	globalSub     *sseSubscriber
+	globalSubRefs int
+
+	routesMu sync.Mutex
+	// routes maps sessionID → the live session channels entitled to that
+	// session's normalized events (a channel set keeps duplicate registrations
+	// for one id deterministic).
+	routes map[string]map[chan core.Event]struct{}
+
+	passiveMu sync.Mutex
+	passive   map[chan core.Event]struct{}
+
 	// lastRetryMu guards the per-session retry snapshot for re-attach replay.
 	// bridge-v1 session_retry_status is transient by design（不做离线持久化，
 	// 官方 web 也只在实时流显示）——owner 2026-08-19：锁屏/后台窗口会错过

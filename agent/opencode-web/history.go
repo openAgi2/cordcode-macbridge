@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -40,12 +42,16 @@ func (a *Agent) getRichHistory(ctx context.Context, c *Client, sessionID string,
 	}
 
 	result := make([]core.RichHistoryEntry, 0, len(items))
-	for _, item := range items {
+	for i, item := range items {
 		var message map[string]any
 		if err := json.Unmarshal(item, &message); err != nil {
-			continue
+			return nil, fmt.Errorf("opencode-web: history row %d malformed: %w", i, err)
 		}
-		result = append(result, mapRichHistoryEntry(message))
+		entry, err := mapRichHistoryEntry(message)
+		if err != nil {
+			return nil, fmt.Errorf("opencode-web: history row %d: %w", i, err)
+		}
+		result = append(result, entry)
 	}
 	return result, nil
 }
@@ -71,10 +77,17 @@ func (a *Agent) GetSessionHistory(ctx context.Context, sessionID string, limit i
 var _ core.RichHistoryProvider = (*Agent)(nil)
 var _ core.HistoryProvider = (*Agent)(nil)
 
+// errUnsupportedReasoning is the canonical §6.3/§6.5 verdict for populated
+// reasoning parts: E2 proved no verified populated reasoning shape on
+// 1.18.18, so reasoning is explicitly UNSUPPORTED — the hydrate FAILS with
+// this diagnosable error; the part is never mapped, dropped, or folded into
+// answer text.
+var errUnsupportedReasoning = errors.New("unsupported content.reasoning for verified 1.18.18 shape")
+
 // mapRichHistoryEntry maps one official message element to
-// core.RichHistoryEntry. Copied from the legacy provider mapping and owned
-// here (design §4.3.2); unknown fields and part types are ignored.
-func mapRichHistoryEntry(message map[string]any) core.RichHistoryEntry {
+// core.RichHistoryEntry. Unknown part types are ignored; a POPULATED
+// reasoning part fails the mapping (errUnsupportedReasoning).
+func mapRichHistoryEntry(message map[string]any) (core.RichHistoryEntry, error) {
 	info := message
 	if sub, ok := message["info"].(map[string]any); ok {
 		info = sub
@@ -86,7 +99,7 @@ func mapRichHistoryEntry(message map[string]any) core.RichHistoryEntry {
 		parts, _ = info["parts"].([]any)
 	}
 
-	var content, thinking string
+	var content string
 	steps := make([]map[string]any, 0)
 	mappedParts := make([]map[string]any, 0, len(parts))
 
@@ -112,11 +125,9 @@ func mapRichHistoryEntry(message map[string]any) core.RichHistoryEntry {
 			if text == "" {
 				text, _ = part["initial"].(string)
 			}
-			if thinking != "" && text != "" {
-				thinking += "\n"
+			if strings.TrimSpace(text) != "" {
+				return core.RichHistoryEntry{}, errUnsupportedReasoning
 			}
-			thinking += text
-			mappedParts = append(mappedParts, map[string]any{"type": "reasoning", "content": text})
 		case "tool":
 			tool, _ := part["tool"].(map[string]any)
 			if tool == nil {
@@ -196,7 +207,6 @@ func mapRichHistoryEntry(message map[string]any) core.RichHistoryEntry {
 		ID:         id,
 		Role:       role,
 		Content:    content,
-		Thinking:   thinking,
 		Parts:      mappedParts,
 		Steps:      steps,
 		Files:      []map[string]any{},
@@ -205,7 +215,7 @@ func mapRichHistoryEntry(message map[string]any) core.RichHistoryEntry {
 		ModelID:    strValue(info, "modelID"),
 		ProviderID: strValue(info, "providerID"),
 		ModelName:  strValue(info, "modelName"),
-	}
+	}, nil
 }
 
 // errorMessageFromInfo reads info.error.data.message (1.18.18 shape) with

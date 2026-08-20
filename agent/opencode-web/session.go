@@ -26,7 +26,10 @@ type serverSession struct {
 	model  atomic.Value // *ocwModelRef — send model resolved at Send time
 	chatID atomic.Value // string — serve session id (ses_…)
 
-	sub *sseSubscriber // dedicated, session-filtered
+	// sub is the ONE backend-instance global subscriber (§6.5); events is
+	// this session's ROUTE channel — the only timeline feed for the relay.
+	sub    *sseSubscriber
+	events chan core.Event
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -34,8 +37,10 @@ type serverSession struct {
 }
 
 // StartSession implements core.Agent: resume = bind the known id; new = create
-// lazily on first Send (ensureServerSession). Both bind a dedicated filtered
-// SSE subscriber so no other session's events leak.
+// lazily on first Send (ensureServerSession). Both bind a ROUTE on the ONE
+// backend-instance global SSE subscriber (§6.5): the session's channel
+// receives exactly this session's normalized events — no per-session
+// dedicated connection, no other session's events can leak.
 func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentSession, error) {
 	c, err := a.clientFor(ctx)
 	if err != nil {
@@ -45,17 +50,32 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	s := &serverSession{
 		a:      a,
 		client: c,
+		events: make(chan core.Event, 128),
 		ctx:    sessionCtx,
 		cancel: cancel,
 	}
-	if sessionID != "" && sessionID != core.ContinueSession {
+	resume := sessionID != "" && sessionID != core.ContinueSession
+	if resume {
 		s.chatID.Store(sessionID)
+		// Register the route BEFORE the stream starts: the global read loop
+		// may deliver this session's frames the moment the dial completes —
+		// a route registered after connect would race-drop them.
+		a.registerRoute(sessionID, s.events)
 		// Resume: adopt the serve's own session model as the fallback send
 		// model (truth from the server, never a local default).
 		if info, err := a.fetchSessionInfo(ctx, c, sessionID); err == nil && info.Model != nil && info.Model.ID != "" {
 			s.model.Store(&ocwModelRef{ProviderID: info.Model.ProviderID, ID: info.Model.ID})
 		}
 	}
+	sub, err := a.acquireGlobalSubscriber(c)
+	if err != nil {
+		if resume {
+			a.unregisterRoute(sessionID, s.events)
+		}
+		cancel()
+		return nil, fmt.Errorf("opencode-web session: SSE connect: %w", err)
+	}
+	s.sub = sub
 	if pending := a.GetModel(); pending != "" {
 		providerID, modelID := parseQualifiedModel(pending)
 		if modelID != "" {
@@ -64,24 +84,12 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	}
 	s.alive.Store(true)
 
-	sub := newSSESubscriber(sessionCtx, a, c)
-	sub.sessionFilter.Store(s.CurrentSessionID())
-	sub.filterActive.Store(true)
-	if err := sub.connect(); err != nil {
-		cancel()
-		return nil, fmt.Errorf("opencode-web session: SSE connect: %w", err)
-	}
-	s.sub = sub
-	go func() {
-		<-sessionCtx.Done()
-		_ = sub.Close()
-	}()
 	// Re-attach replay: iOS 锁屏/后台窗口会错过瞬态 session_retry_status
 	//（不做离线持久化，官方 web 同语义）。重附时若快照新鲜（2 分钟内、回合
 	// 未收口）则重放一次，回前台/重开会话即见「自动重试中（第 N 次）」。
 	if id := s.CurrentSessionID(); id != "" {
 		if snap, ok := a.replayableRetrySnapshot(id); ok {
-			sub.emit(core.Event{
+			s.replayLocal(core.Event{
 				Type:         core.EventRetryStatus,
 				Content:      snap.Message,
 				SessionID:    id,
@@ -93,6 +101,16 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	return s, nil
 }
 
+// replayLocal delivers a synthetic re-attach event straight into this
+// session's route (bypassing the global decode path — it is a replay of an
+// already-normalized event, not a second ingest of a raw frame).
+func (s *serverSession) replayLocal(ev core.Event) {
+	select {
+	case s.events <- ev:
+	default:
+	}
+}
+
 func (s *serverSession) CurrentSessionID() string {
 	if v, ok := s.chatID.Load().(string); ok {
 		return v
@@ -100,7 +118,7 @@ func (s *serverSession) CurrentSessionID() string {
 	return ""
 }
 
-func (s *serverSession) Events() <-chan core.Event { return s.sub.events }
+func (s *serverSession) Events() <-chan core.Event { return s.events }
 func (s *serverSession) Alive() bool               { return s.alive.Load() }
 
 // fallbackModel mirrors the official picker fallback: the FIRST connected
@@ -298,7 +316,7 @@ func (s *serverSession) ensureServerSession(model ocwModelRef) (string, error) {
 		return "", fmt.Errorf("opencode-web create session: bad response: %s", truncateForError(string(raw)))
 	}
 	s.chatID.Store(created)
-	s.sub.setSessionFilter(created)
+	s.a.registerRoute(created, s.events)
 	return created, nil
 }
 
@@ -345,7 +363,14 @@ func (s *serverSession) RejectQuestion(_ string) error {
 // (explicit CancelTurn owns that) and never touches the serve process.
 func (s *serverSession) Close() error {
 	s.alive.Store(false)
-	s.cancel() // → sub.Close() via the goroutine started in StartSession
+	// Unregister every route binding (resume id and/or created id) and drop
+	// this session's hold on the ONE global subscriber; the last release
+	// tears the shared stream down.
+	if id := s.CurrentSessionID(); id != "" {
+		s.a.unregisterRoute(id, s.events)
+	}
+	s.a.releaseGlobalSubscriber()
+	s.cancel()
 	return nil
 }
 

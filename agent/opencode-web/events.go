@@ -302,6 +302,12 @@ func (s *sseSubscriber) handleServerEvent(payload map[string]any) {
 		s.handlePartUpdated(properties, sessionID)
 	case "session.status":
 		s.handleSessionStatus(properties, sessionID)
+	case "sync":
+		// §6.5 / server-sdk.tsx:284: v1 nested `sync` frames duplicate the
+		// semantic events that also arrive as direct frames. Skipped exactly
+		// once here — BEFORE any normalization — so direct+sync can never
+		// double-ingest. Evidence capture retains the raw frames; canonical
+		// ingest never sees them.
 	case "session.error":
 		// Terminal failure frame (live-pinned 1.18.18: provider APIError with
 		// the real message). Recorded as terminal AND emitted as assistant
@@ -431,10 +437,11 @@ func (s *sseSubscriber) handleMessageUpdated(properties map[string]any, sessionI
 				s.emit(core.Event{Type: eventType, Content: d.content, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
 			}
 		case "reasoning":
-			text := firstString(part, "text", "content")
-			if d := s.deltaForPartSnapshot(sessionID, messageID, partID, kind, text); d.content != "" {
-				turnID := s.owningTurnID(sessionID, messageID)
-				s.emit(core.Event{Type: core.EventThinking, Content: d.content, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
+			// E2 verdict: no populated reasoning shape is verified on
+			// 1.18.18 — explicitly unsupported, never mapped to thinking or
+			// folded into answer text (§6.3).
+			if text := firstString(part, "text", "content"); strings.TrimSpace(text) != "" {
+				s.emit(core.Event{Type: core.EventError, Content: errUnsupportedReasoning.Error(), SessionID: sessionID})
 			}
 		case "tool":
 			s.handleToolPart(part, sessionID, messageID)
@@ -468,9 +475,9 @@ func (s *sseSubscriber) handlePartDelta(properties map[string]any, sessionID str
 	kind := s.kindForPart(sessionID, messageID, partID, field)
 	switch kind {
 	case "reasoning":
-		s.appendPartContent(sessionID, messageID, partID, kind, delta)
-		turnID := s.owningTurnID(sessionID, messageID)
-		s.emit(core.Event{Type: core.EventThinking, Content: delta, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
+		// E2 verdict: populated reasoning is unsupported — diagnosable error,
+		// never a thinking stream (§6.3).
+		s.emit(core.Event{Type: core.EventError, Content: errUnsupportedReasoning.Error(), SessionID: sessionID})
 	case "text", "":
 		s.appendPartContent(sessionID, messageID, partID, "text", delta)
 		turnID := s.owningTurnID(sessionID, messageID)
@@ -527,10 +534,9 @@ func (s *sseSubscriber) handlePartUpdated(properties map[string]any, sessionID s
 			s.emit(core.Event{Type: eventType, Content: d.content, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
 		}
 	case "reasoning":
-		text := firstString(part, "text", "content")
-		if d := s.deltaForPartSnapshot(sessionID, messageID, partID, kind, text); d.content != "" {
-			turnID := s.owningTurnID(sessionID, messageID)
-			s.emit(core.Event{Type: core.EventThinking, Content: d.content, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
+		// E2 verdict: same explicit-unsupported rule as message.updated.
+		if text := firstString(part, "text", "content"); strings.TrimSpace(text) != "" {
+			s.emit(core.Event{Type: core.EventError, Content: errUnsupportedReasoning.Error(), SessionID: sessionID})
 		}
 	case "tool":
 		s.handleToolPart(part, sessionID, messageID)
@@ -1143,12 +1149,6 @@ func extractToolInput(state map[string]any) string {
 }
 
 func (s *sseSubscriber) emit(ev core.Event) {
-	if s.filterActive.Load() {
-		f, _ := s.sessionFilter.Load().(string)
-		if f == "" || ev.SessionID != f {
-			return
-		}
-	}
 	switch ev.Type {
 	case core.EventText, core.EventTextReplace, core.EventThinking, core.EventToolUse, core.EventToolResult:
 		if ev.TurnID != "" {
@@ -1157,6 +1157,33 @@ func (s *sseSubscriber) emit(ev core.Event) {
 			s.stateMu.Unlock()
 		}
 	}
+	// C4 §6.5 routing: the ONE global subscriber normalizes each direct event
+	// once and delivers copies to (a) the registered session route, (b) every
+	// passive observation tap, and (c) the subscriber's own channel (direct-
+	// drive tests and any global consumer). All sends are non-blocking — a
+	// stalled consumer must never stall the single SSE read loop.
+	if ev.SessionID != "" {
+		s.agent.routesMu.Lock()
+		if chans, ok := s.agent.routes[ev.SessionID]; ok {
+			for ch := range chans {
+				select {
+				case ch <- ev:
+				default:
+					slog.Debug("opencode-web SSE: route full, event dropped", "type", ev.Type, "session", ev.SessionID)
+				}
+			}
+		}
+		s.agent.routesMu.Unlock()
+	}
+	s.agent.passiveMu.Lock()
+	for ch := range s.agent.passive {
+		select {
+		case ch <- ev:
+		default:
+			slog.Debug("opencode-web SSE: passive tap full, event dropped", "type", ev.Type)
+		}
+	}
+	s.agent.passiveMu.Unlock()
 	select {
 	case s.events <- ev:
 	case <-s.ctx.Done():
@@ -1198,21 +1225,103 @@ func (s *sseSubscriber) Close() error {
 }
 
 // Subscribe implements core.EventSubscriber for the passive (旁观) stream —
-// every session on the serve, including external web turns.
+// every session on the serve, including external web turns (E3's observation
+// path). It TAPS the same single global subscriber (§6.5: exactly one SSE
+// connection per backend instance); it never dials a second stream.
 func (a *Agent) Subscribe(ctx context.Context) (<-chan core.Event, error) {
 	c, err := a.clientFor(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("opencode-web SSE subscription unavailable: %w", err)
 	}
-	sub := newSSESubscriber(ctx, a, c)
+	if _, err := a.acquireGlobalSubscriber(c); err != nil {
+		return nil, err
+	}
+	tap := make(chan core.Event, 128)
+	a.passiveMu.Lock()
+	if a.passive == nil {
+		a.passive = make(map[chan core.Event]struct{})
+	}
+	a.passive[tap] = struct{}{}
+	a.passiveMu.Unlock()
+	go func() {
+		<-ctx.Done()
+		a.passiveMu.Lock()
+		delete(a.passive, tap)
+		a.passiveMu.Unlock()
+		close(tap)
+		a.releaseGlobalSubscriber()
+	}()
+	return tap, nil
+}
+
+// acquireGlobalSubscriber returns the ONE backend-instance subscriber,
+// dialing it on first use. Refcounted: the last release tears the stream
+// down. The subscriber rides the agent background context — it must outlive
+// any single session's context.
+func (a *Agent) acquireGlobalSubscriber(c *Client) (*sseSubscriber, error) {
+	a.globalSubMu.Lock()
+	defer a.globalSubMu.Unlock()
+	if a.globalSub != nil && a.globalSub.ctx.Err() == nil {
+		a.globalSubRefs++
+		return a.globalSub, nil
+	}
+	sub := newSSESubscriber(a.bgCtx, a, c)
 	if err := sub.connect(); err != nil {
 		return nil, err
 	}
-	go func() {
-		<-sub.ctx.Done()
-		_ = sub.Close()
-	}()
-	return sub.events, nil
+	a.globalSub = sub
+	a.globalSubRefs = 1
+	return sub, nil
+}
+
+func (a *Agent) releaseGlobalSubscriber() {
+	a.globalSubMu.Lock()
+	sub := a.globalSub
+	if sub == nil {
+		a.globalSubMu.Unlock()
+		return
+	}
+	a.globalSubRefs--
+	if a.globalSubRefs > 0 {
+		a.globalSubMu.Unlock()
+		return
+	}
+	a.globalSub = nil
+	a.globalSubRefs = 0
+	a.globalSubMu.Unlock()
+	_ = sub.Close()
+}
+
+// registerRoute entitles one session channel to the session's normalized
+// events. Registering the same channel under multiple ids (resume → create)
+// is fine; unregisterRoute removes every binding.
+func (a *Agent) registerRoute(sessionID string, ch chan core.Event) {
+	if sessionID == "" || ch == nil {
+		return
+	}
+	a.routesMu.Lock()
+	defer a.routesMu.Unlock()
+	if a.routes == nil {
+		a.routes = make(map[string]map[chan core.Event]struct{})
+	}
+	if a.routes[sessionID] == nil {
+		a.routes[sessionID] = make(map[chan core.Event]struct{})
+	}
+	a.routes[sessionID][ch] = struct{}{}
+}
+
+func (a *Agent) unregisterRoute(sessionID string, ch chan core.Event) {
+	if sessionID == "" || ch == nil {
+		return
+	}
+	a.routesMu.Lock()
+	defer a.routesMu.Unlock()
+	if chans, ok := a.routes[sessionID]; ok {
+		delete(chans, ch)
+		if len(chans) == 0 {
+			delete(a.routes, sessionID)
+		}
+	}
 }
 
 var _ core.EventSubscriber = (*Agent)(nil)

@@ -231,7 +231,6 @@ func TestGetRichSessionHistoryMapsParts(t *testing.T) {
 	 "parts":[{"type":"text","text":"hello"}]},
 	{"info":{"id":"msg_2","role":"assistant","modelID":"glm-4.7","providerID":"zhipuai-coding-plan","agent":"build","time":{"created":2000}},
 	 "parts":[
-		{"type":"reasoning","text":"thinking…"},
 		{"type":"text","text":"answer"},
 		{"type":"tool","tool":{"id":"pt_1","toolName":"read","state":{"status":"completed","output":"file contents","durationMs":12}}},
 		{"type":"file","id":"f1","mime":null,"url":"u","filename":"a.txt"}
@@ -244,6 +243,17 @@ func TestGetRichSessionHistoryMapsParts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("history: %v", err)
 	}
+	// §6.3/E2 negative: a POPULATED reasoning part fails the hydrate with the
+	// canonical unsupported error — never mapped, dropped, or folded.
+	badMessages := `[
+	{"info":{"id":"msg_1","role":"assistant","time":{"created":1000}},
+	 "parts":[{"type":"reasoning","text":"thinking…"}]}]`
+	badAgent, _ := newDataAgent(t, map[string]string{
+		"/session/ses_y/message": badMessages,
+	}, "/tmp/proj")
+	if _, err := badAgent.GetRichSessionHistory(context.Background(), "ses_y", 0); err == nil || !strings.Contains(err.Error(), "unsupported content.reasoning for verified 1.18.18 shape") {
+		t.Fatalf("populated reasoning must fail the hydrate, got %v", err)
+	}
 	if len(rich) != 2 {
 		t.Fatalf("len = %d", len(rich))
 	}
@@ -251,7 +261,7 @@ func TestGetRichSessionHistoryMapsParts(t *testing.T) {
 	if user.Role != "user" || user.Content != "hello" {
 		t.Fatalf("user entry %+v", user)
 	}
-	if assistant.Role != "assistant" || assistant.Content != "answer" || assistant.Thinking != "thinking…" {
+	if assistant.Role != "assistant" || assistant.Content != "answer" || assistant.Thinking != "" {
 		t.Fatalf("assistant entry %+v", assistant)
 	}
 	if assistant.ModelID != "glm-4.7" || assistant.ProviderID != "zhipuai-coding-plan" || assistant.AgentName != "build" {

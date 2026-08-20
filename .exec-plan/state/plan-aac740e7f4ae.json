@@ -34,7 +34,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-20T18:05:00Z",
+ "updated_at": "2026-08-20T18:40:00Z",
  "todos": [
   {
    "id": "gate-a-inventory-impl",
@@ -1188,7 +1188,7 @@
    "id": "c4-event-reducer-impl",
    "title": "C4 event reducer from official source + A1–A5",
    "description": "Implement the proven direct-event inventory through one pre-Kernel normalizer and one backend-global SSE subscriber; skip nested sync once; preserve text/tool/server errors and explicitly reject unsupported reasoning; recover reconnect/external turns through the same Kernel without synthesizing a healthy terminal.",
-   "status": "pending",
+   "status": "done",
    "phase": "c4",
    "kind": "impl",
    "depends_on": [
@@ -1198,20 +1198,24 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "C4 §6.3/§6.5: ONE backend-instance global SSE subscriber (refcounted, agent bgCtx) replaces per-session dedicated subscribers; sessions register per-sessionID route channels and the subscriber normalizes each direct event exactly once then routes by SessionID (registered route + passive taps + native). Nested v1 sync frames skipped exactly once before normalization (server-sdk.tsx:284 parity). Passive Subscribe taps the same stream (E3 observation path) — never a second connection. Reconnect heals armed turns via GET /session/status and resumes the same subscriber/route. Populated reasoning is explicitly unsupported on every live carrier (EventError with the canonical §6.3 text) and fails the hydrate (errUnsupportedReasoning); malformed history rows now fail instead of being skipped.",
+    "artifacts": [
+     "agent/opencode-web/events.go",
+     "agent/opencode-web/session.go",
+     "agent/opencode-web/history.go",
+     "agent/opencode-web/opencodeweb.go"
+    ]
    }
   },
   {
    "id": "c4-event-reducer-tests",
    "title": "C4 deterministic replay of A1–A5",
    "description": "Replay complete captured sequences including duplicates, reconnect, provider error, and abort.",
-   "status": "pending",
+   "status": "done",
    "phase": "c4",
    "kind": "tests",
    "depends_on": [
@@ -1221,20 +1225,22 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
-    "method": "automated",
+    "status": "present",
+    "method": "tests",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "Owning tests: real A1 52-frame replay (17 nested sync duplicates prove single ingest — text spells SANDBOX_OK exactly once, one user bubble, one terminal); exactly ONE /global/event dial across 2 sessions + passive Subscribe with holder-survival; E3-shaped external turn reaches the registered route while an unregistered session is catalog-signal-only; reasoning unsupported on all three carriers (no EventThinking); mid-flight drop reconnect keeps the SAME subscriber and route (2 dials total).",
+    "artifacts": [
+     "agent/opencode-web/c4_event_stream_test.go",
+     "cmd:go test ./agent/opencode-web -run \"TestSyncFrames|TestOneGlobalSSE|TestExternalTurnRoutes|TestReasoningExplicitly|TestReconnectKeeps\" => PASS"
+    ]
    }
   },
   {
    "id": "c4-event-reducer-regression",
    "title": "C4 reconnect does not synthesize healthy terminal",
    "description": "Sandbox reconnect during/after abort and error matches captured terminal outcome.",
-   "status": "pending",
+   "status": "done",
    "phase": "c4",
    "kind": "regression",
    "depends_on": [
@@ -1244,13 +1250,15 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
-    "method": "mixed",
+    "status": "present",
+    "method": "regression",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "Real isolated 1.18.18 serve: A3 provider error settles as turn_error with the provider verbatim text (localmock non-retryable provider rejection); A4 abort mid-slow-stream converges to a real non-healthy terminal (err=Aborted); E3 second-client official prompt streams through the single global subscriber into the registered route with user bubble + terminal and zero polling.",
+    "artifacts": [
+     "agent/opencode-web/c4_sandbox_test.go",
+     "cmd:OCW_SANDBOX_URL=http://127.0.0.1:4398 go test -run TestSandboxC4TurnTerminals => PASS"
+    ]
    }
   },
   {
