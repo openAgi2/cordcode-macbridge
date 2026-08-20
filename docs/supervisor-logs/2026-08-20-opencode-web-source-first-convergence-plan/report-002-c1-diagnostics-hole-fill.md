@@ -31,3 +31,10 @@
 - 未进入 C2；未修改 protocol、WireDescriptor、capability advertisement 或 iOS writer。
 - 等待指令 2 号独立审计。
 
+## Recheck 补洞报告（2026-08-20）
+
+- commit：`257f0df`，6 文件，`+15/-15`，工作树干净。
+- `clientFor` 已改用 `unsupportedGenerationDetail(res.gen, res.detail)`；删除独立硬编码与旧 `no capability` 表述。
+- 14 处测试断言统一升级为 `unsupported-generation (quarantined)`，保留 v2 fail-closed、零 prompt/SSE/Kernel、descriptor unavailable 和 unknown/no-auth 非 quarantine 的边界。
+- 开发侧复跑：agent package、focused C1 tests、go-bridge descriptor、core、vet、build 全部通过。
+- 未修改 protocol、WireDescriptor、capability advertisement 或 iOS；未进入 C2；等待 `audit-002-recheck`。

@@ -47,16 +47,20 @@
         "correct zero-capability overclaim without changing product semantics",
         "C2 remains forbidden"
       ],
-      "linked_commits": [],
+      "linked_commits": [
+        "git:5b8451c",
+        "git:257f0df"
+      ],
       "report": {
         "received_at": "2026-08-20T14:56:46Z",
         "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-002-c1-diagnostics-hole-fill.md",
         "audited": true,
         "audit_verdict": "partial",
-        "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-002-c1-diagnostics-hole-fill.md"
+        "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-002-c1-diagnostics-hole-fill.md",
+        "recheck_received_at": "2026-08-20T15:01:32Z"
       }
     }
   ],
   "current_directive_number": 2,
-  "last_updated": "2026-08-20T14:58:03Z"
+  "last_updated": "2026-08-20T15:01:32Z"
 }
