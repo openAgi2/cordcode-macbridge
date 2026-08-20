@@ -67,7 +67,7 @@
       "kind": "implementation",
       "title": "C2 official list/get",
       "issued_at": "2026-08-20T15:11:05Z",
-      "status": "pending",
+      "status": "in_progress",
       "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-003-c2-official-list-get.md",
       "scope": "Mac-only C2 samples/catalog/tests",
       "constraints": [
@@ -77,10 +77,14 @@
         "list/get remain catalog-only with zero Kernel/EventPublisher/messages writes",
         "no protocol/WireDescriptor/capability/iOS writer/C3+ changes"
       ],
-      "linked_commits": [],
+      "linked_commits": [
+        "git:69f26bc",
+        "git:ef21db1",
+        "git:105b393"
+      ],
       "report": {
-        "received_at": null,
-        "markdown_path": null,
+        "received_at": "2026-08-20T15:37:26Z",
+        "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-003-c2-official-list-get.md",
         "audited": false,
         "audit_verdict": null,
         "audit_path": null
@@ -88,5 +92,5 @@
     }
   ],
   "current_directive_number": 3,
-  "last_updated": "2026-08-20T15:11:05Z"
+  "last_updated": "2026-08-20T15:37:26Z"
 }
