@@ -343,9 +343,12 @@ func (s *sseSubscriber) handleServerEvent(payload map[string]any) {
 		s.handleSessionUpdated(properties, sessionID)
 	case "permission.asked":
 		s.handlePermissionAsked(properties, sessionID)
+	case "question.asked":
+		s.handleQuestionAsked(properties, sessionID)
+	case "question.replied", "question.rejected":
+		s.handleQuestionResolved(eventType, properties, sessionID)
 	case "todo.updated":
-		// Phase 1: todos are not advertised (design §4.3.3) — deliberately
-		// ignored, no EventPlan.
+		s.handleTodoUpdated(properties, sessionID)
 	case "server.connected", "message.removed", "message.part.removed", "session.diff":
 		// Not chat content; not catalog-affecting either.
 	case "session.created", "session.deleted":
@@ -715,6 +718,95 @@ func (s *sseSubscriber) handlePermissionAsked(properties map[string]any, session
 	})
 }
 
+// handleQuestionAsked translates the official question.asked frame ONCE into
+// the canonical user_input_requested payload (§6.8): the interaction rides
+// Event.UserInput through the same live route; no legacy single-question
+// presentation, no raw frame to SSV2 clients, no messages[] write.
+func (s *sseSubscriber) handleQuestionAsked(properties map[string]any, sessionID string) {
+	var req ocwQuestionRequest
+	b, err := json.Marshal(properties)
+	if err != nil {
+		return
+	}
+	if err := json.Unmarshal(b, &req); err != nil || req.ID == "" {
+		slog.Debug("opencode-web SSE: malformed question.asked frame", "error", err)
+		return
+	}
+	if req.SessionID != "" {
+		sessionID = req.SessionID
+	}
+	s.agent.noteQuestionAsked(req)
+	s.emit(core.Event{
+		Type:      core.EventUserInputRequested,
+		SessionID: sessionID,
+		UserInput: questionInteraction(req),
+	})
+}
+
+// handleQuestionResolved maps question.replied/rejected to the canonical
+// user_input_resolved terminal. resolutionSource is other_client — the SERVER
+// broadcast this, so the answer may have come from any client.
+func (s *sseSubscriber) handleQuestionResolved(eventType string, properties map[string]any, sessionID string) {
+	requestID := firstString(properties, "requestID", "id")
+	if sid := firstString(properties, "sessionID"); sid != "" {
+		sessionID = sid
+	}
+	if requestID == "" {
+		return
+	}
+	status := core.UserInputStatusAnswered
+	if eventType == "question.rejected" {
+		status = core.UserInputStatusRejected
+	}
+	s.agent.questionResolved(requestID)
+	s.emit(core.Event{
+		Type:      core.EventUserInputResolved,
+		SessionID: sessionID,
+		UserInput: &core.UserInputInteraction{
+			InteractionID:    requestID,
+			Status:           status,
+			CanRespond:       false,
+			CanReject:        false,
+			ResolutionSource: "other_client",
+		},
+	})
+}
+
+// handleTodoUpdated records the official ordered replacement list (A8: items
+// carry exactly content/status/priority — no ids). Todo stays an explicit
+// control-plane surface (§6.9): it NEVER becomes a timeline part.
+func (s *sseSubscriber) handleTodoUpdated(properties map[string]any, sessionID string) {
+	if sid := firstString(properties, "sessionID"); sid != "" {
+		sessionID = sid
+	}
+	if sessionID == "" {
+		return
+	}
+	rawTodos, _ := properties["todos"].([]any)
+	todos := make([]core.Todo, 0, len(rawTodos))
+	for _, item := range rawTodos {
+		row, _ := item.(map[string]any)
+		if row == nil {
+			continue
+		}
+		content := firstString(row, "content", "text")
+		if content == "" {
+			continue // malformed item: skipped WITHOUT inventing content
+		}
+		status := firstString(row, "status")
+		if status == "" {
+			status = "pending"
+		}
+		priority := firstString(row, "priority")
+		if priority == "" {
+			priority = "normal"
+		}
+		todos = append(todos, core.Todo{Content: content, Status: status, Priority: priority})
+	}
+	s.agent.rememberTodos(sessionID, todos)
+	s.emit(core.Event{Type: core.EventPlan, SessionID: sessionID, Plan: todos})
+}
+
 // noteUserPrompt records user prompt text into the live stream. isDelta=true
 // appends; false replaces/grows from a snapshot. Emits EventUserMessage with
 // the accumulated text and EventTurnStarted once per message id.
@@ -1029,7 +1121,7 @@ func partCacheKey(sessionID, messageID, partID, kind string) string {
 
 func isServerEventType(eventType string) bool {
 	switch eventType {
-	case "message.updated", "message.part.delta", "message.part.updated", "session.status", "session.updated", "session.error", "session.idle", "todo.updated", "permission.asked",
+	case "message.updated", "message.part.delta", "message.part.updated", "session.status", "session.updated", "session.error", "session.idle", "todo.updated", "permission.asked", "question.asked", "question.replied", "question.rejected",
 		"server.connected", "session.created", "session.deleted", "message.removed", "message.part.removed", "session.diff":
 		return true
 	default:

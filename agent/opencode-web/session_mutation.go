@@ -68,6 +68,46 @@ func ocwSessionEntryToInfo(entry *ocwSessionEntry) *core.AgentSessionInfo {
 	return info
 }
 
+// RenameSession implements core.SessionRenamer (E6 sample-verified): PATCH
+// /session/{id} body {title} → 200 Session.Info with the new title; a missing
+// id answers 404 NotFoundError. Only a non-empty title is sent; the returned
+// metadata is the refresh truth (no timeline write, no list-only success).
+func (a *Agent) RenameSession(ctx context.Context, sessionID, title string) (*core.AgentSessionInfo, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	title = strings.TrimSpace(title)
+	if sessionID == "" {
+		return nil, fmt.Errorf("opencode-web: rename session: empty session id")
+	}
+	if title == "" {
+		return nil, fmt.Errorf("opencode-web: rename session: empty title (official UpdatePayload accepts only a real title)")
+	}
+	c, err := a.clientFor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	path := c.apiPath("/session/" + url.PathEscape(sessionID))
+	body := map[string]any{"title": title}
+	code, raw, err := c.doRequest(ctx, http.MethodPatch, c.endpoint(path), body, a.GetWorkDir(), true)
+	if err != nil {
+		return nil, fmt.Errorf("opencode-web: rename session %s: %w", sessionID, err)
+	}
+	if code >= 400 {
+		return nil, fmt.Errorf("opencode-web: rename session %s: HTTP %d: %s", sessionID, code, truncateForError(string(raw)))
+	}
+	var entry ocwSessionEntry
+	if err := json.Unmarshal(raw, &entry); err != nil {
+		return nil, fmt.Errorf("opencode-web: rename session %s: response decode: %w", sessionID, err)
+	}
+	info := ocwSessionEntryToInfo(&entry)
+	if info.ID == "" {
+		info.ID = sessionID
+	}
+	a.signalCatalogRefresh()
+	return info, nil
+}
+
+var _ core.SessionRenamer = (*Agent)(nil)
+
 // DeleteSession implements core.SessionDeleter.
 func (a *Agent) DeleteSession(ctx context.Context, sessionID string) error {
 	sessionID = strings.TrimSpace(sessionID)

@@ -34,7 +34,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-20T18:40:00Z",
+ "updated_at": "2026-08-20T19:10:00Z",
  "todos": [
   {
    "id": "gate-a-inventory-impl",
@@ -1341,7 +1341,7 @@
    "id": "c6-interaction-impl",
    "title": "C6 permissions, questions, and todos",
    "description": "Implement only from A6–A8 samples. Keep permission and question separate. Resolve missing todo ID before projecting stable items.",
-   "status": "pending",
+   "status": "done",
    "phase": "c6",
    "kind": "impl",
    "depends_on": [
@@ -1352,20 +1352,24 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "C6 §6.7/§6.8/§6.9: permission folding stays SDK-pinned (once/always/reject) with raw-control zero-timeline proof; NEW questions.go maps question.asked once to canonical user_input_requested (deterministic qN/oN option ids), replied/rejected to user_input_resolved (source=other_client), and ResolveUserInput answers through POST /question/:id/reply {answers:[[label]]} or /reject {} with GET /question recovery and stable §7 error codes (unknown option/question, missing answer, unknown interaction — all zero POST); todos.go implements TodoProvider from GET /session/:id/todo (bare-array strict, order/fields verbatim, no invented ids, no stale-cache resurrection) and todo.updated emits one control-plane plan event.",
+    "artifacts": [
+     "agent/opencode-web/questions.go",
+     "agent/opencode-web/todos.go",
+     "agent/opencode-web/events.go",
+     "agent/opencode-web/permissions.go"
+    ]
    }
   },
   {
    "id": "c6-interaction-tests",
    "title": "C6 request/answer/reject/reload tests",
    "description": "Replay A6–A8: answer/reject, external answer, reconnect, cold-reload. Capability flags match actual support.",
-   "status": "pending",
+   "status": "done",
    "phase": "c6",
    "kind": "tests",
    "depends_on": [
@@ -1375,20 +1379,22 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
-    "method": "automated",
+    "status": "present",
+    "method": "tests",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "A6/A7/A8 replay: exact three permission bodies; permission raw-control zero timeline/zero event-stream; asked→canonical payload with deterministic ids; reply body {\"answers\":[[\"red\"]]}; reject own endpoint; replied/rejected events; invalid answers fail closed zero-POST; todo endpoint order/fields + malformed/envelope rejections; todo.updated one plan event with control-plane snapshot.",
+    "artifacts": [
+     "agent/opencode-web/interactions_mutations_c6_c7_test.go",
+     "cmd:go test ./agent/opencode-web -run \"TestPermission|TestQuestion|TestTodo\" => PASS"
+    ]
    }
   },
   {
    "id": "c6-interaction-regression",
    "title": "C6 sandbox first-resolution-wins",
    "description": "Isolated sandbox: first server resolution wins; both clients would converge. No invented resolution events.",
-   "status": "pending",
+   "status": "done",
    "phase": "c6",
    "kind": "regression",
    "depends_on": [
@@ -1398,20 +1404,22 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
-    "method": "mixed",
+    "status": "present",
+    "method": "regression",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "Real isolated 1.18.18 serve: question asked → answered via official reply route (first server resolution wins, turn converges); todo todowrite → 2 ordered endpoint items → update scenario flips all to completed; permission asked → allow(once) → turn converged. Docks stay control-plane.",
+    "artifacts": [
+     "agent/opencode-web/c6_c7_sandbox_test.go",
+     "cmd:OCW_SANDBOX_URL=http://127.0.0.1:4398 go test -run TestSandboxC6C7 => PASS"
+    ]
    }
   },
   {
    "id": "c7-mutations-impl",
    "title": "C7 session mutations and selected secondary features",
    "description": "Add only verified rename/archive/delete with returned/by-ID/list refresh and zero timeline write. All OD-3 fork/share/summarize/revert/diff/file/VCS surfaces remain out of scope and unadvertised.",
-   "status": "pending",
+   "status": "done",
    "phase": "c7",
    "kind": "impl",
    "depends_on": [
@@ -1422,20 +1430,21 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "C7 §6.10: rename implemented (PATCH /session/:id {title} → 200 Session.Info; empty title pre-request refusal; 404 verbatim). Delete/archive kept on official routes; success = response + catalog signal + list/by-ID convergence; no session.deleted dependency; zero timeline writes.",
+    "artifacts": [
+     "agent/opencode-web/session_mutation.go"
+    ]
    }
   },
   {
    "id": "c7-mutations-tests",
    "title": "C7 mutation contract tests",
    "description": "Each advertised mutation has source, sample, mapping, and targeted tests. No generic API-coverage milestone.",
-   "status": "pending",
+   "status": "done",
    "phase": "c7",
    "kind": "tests",
    "depends_on": [
@@ -1445,20 +1454,22 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
-    "method": "automated",
+    "status": "present",
+    "method": "tests",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "E6/E7 replay: rename exact PATCH body + returned metadata + by-ID convergence + 404; delete boolean success + single DELETE + catalog signal + zero event streams + second-delete 404; archive failure preserves metadata.",
+    "artifacts": [
+     "agent/opencode-web/interactions_mutations_c6_c7_test.go TestRenameSessionContract/TestDeleteSessionConvergence",
+     "cmd:go test ./agent/opencode-web -run \"TestRenameSession|TestDeleteSession|TestMutationFailures\" => PASS"
+    ]
    }
   },
   {
    "id": "c7-mutations-regression",
    "title": "C7 mutation convergence without invented events",
    "description": "Rename/archive/delete converge through HTTP and catalog/by-ID truth, do not depend on or synthesize session.deleted, and do not write timeline. Capability activation remains in the final batch gate.",
-   "status": "pending",
+   "status": "done",
    "phase": "c7",
    "kind": "regression",
    "depends_on": [
@@ -1468,13 +1479,15 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
-    "method": "mixed",
+    "status": "present",
+    "method": "regression",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "Real serve mutations subtest: rename echo + by-ID title convergence → archive hidden from scoped list with ArchivedAt → delete 404 convergence. No invented events anywhere.",
+    "artifacts": [
+     "agent/opencode-web/c6_c7_sandbox_test.go mutations subtest",
+     "cmd:OCW_SANDBOX_URL=http://127.0.0.1:4398 go test -run TestSandboxC6C7 => PASS"
+    ]
    }
   },
   {

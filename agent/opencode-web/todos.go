@@ -1,0 +1,81 @@
+package opencodeweb
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
+)
+
+// todos.go implements the C6 §6.9 Todo surface from the A8 evidence:
+//
+//	GET /session/{id}/todo → ordered replacement list, items exactly
+//	{content, status, priority} — NO server item ids exist.
+//	SSE todo.updated → the same replacement shape.
+//
+// Ownership: todos are an explicit raw control-plane exception. Server order
+// and fields are preserved verbatim; no ids are synthesized (no random/hash
+// identity — A8 proves none exists), and the list never enters the
+// SessionProjection timeline.
+
+// rememberTodos stores the last observed replacement list (control plane).
+func (a *Agent) rememberTodos(sessionID string, todos []core.Todo) {
+	a.todoMu.Lock()
+	defer a.todoMu.Unlock()
+	if a.lastTodos == nil {
+		a.lastTodos = make(map[string][]core.Todo)
+	}
+	a.lastTodos[sessionID] = todos
+}
+
+// FetchTodos implements core.TodoProvider: the official endpoint is the only
+// read truth (A8). The live todo.updated snapshot exists for the SSE control
+// plane only — it must never impersonate a fresh endpoint answer (a serve-
+// side clear would otherwise resurrect dead items). Malformed rows fail
+// loudly — content is never invented.
+func (a *Agent) FetchTodos(ctx context.Context, sessionID string) ([]core.Todo, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, fmt.Errorf("opencode-web: fetch todos: empty session id")
+	}
+	c, err := a.clientFor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := c.fetchJSON(ctx, c.apiPath("/session/"+sessionID+"/todo"), a.GetWorkDir())
+	if err != nil {
+		return nil, err
+	}
+	trimmed := trimSpaceBytes(raw)
+	if len(trimmed) == 0 || trimmed[0] != '[' {
+		return nil, fmt.Errorf("opencode-web: todo payload must be a bare array (generation-118 verified shape), got: %s", truncateForError(string(raw)))
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return nil, fmt.Errorf("opencode-web: todo payload malformed: %w", err)
+	}
+	todos := make([]core.Todo, 0, len(rows))
+	for i, row := range rows {
+		content, _ := row["content"].(string)
+		if content == "" {
+			content, _ = row["text"].(string)
+		}
+		if strings.TrimSpace(content) == "" {
+			return nil, fmt.Errorf("opencode-web: todo row %d missing required content", i)
+		}
+		status, _ := row["status"].(string)
+		if status == "" {
+			status = "pending"
+		}
+		priority, _ := row["priority"].(string)
+		if priority == "" {
+			priority = "normal"
+		}
+		todos = append(todos, core.Todo{Content: content, Status: status, Priority: priority})
+	}
+	return todos, nil
+}
+
+var _ core.TodoProvider = (*Agent)(nil)

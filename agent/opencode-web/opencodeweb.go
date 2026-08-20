@@ -114,6 +114,17 @@ type Agent struct {
 	passiveMu sync.Mutex
 	passive   map[chan core.Event]struct{}
 
+	// C6 §6.8: live structured-question requests (question.asked → pending;
+	// replied/rejected/ResolveUserInput success → cleared). The serve holds
+	// the single answer lock; this map is label-recovery state only.
+	questionMu       sync.Mutex
+	pendingQuestions map[string]ocwQuestionRequest
+
+	// C6 §6.9: the last todo.updated replacement list per session (control
+	// plane only — never a timeline part).
+	todoMu    sync.Mutex
+	lastTodos map[string][]core.Todo
+
 	// lastRetryMu guards the per-session retry snapshot for re-attach replay.
 	// bridge-v1 session_retry_status is transient by design（不做离线持久化，
 	// 官方 web 也只在实时流显示）——owner 2026-08-19：锁屏/后台窗口会错过

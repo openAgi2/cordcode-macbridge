@@ -313,15 +313,32 @@ func TestSSECatalogSignalsDoNotEnterChatStream(t *testing.T) {
 	}
 }
 
-func TestSSETodoUpdatedIgnoredInPhase1(t *testing.T) {
+// §6.9 (A8): todo.updated is the control-plane replacement list — one
+// canonical plan event preserving server order/fields, never a timeline
+// part, never a synthesized id.
+func TestSSETodoUpdatedIsControlPlanePlan(t *testing.T) {
 	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
 	sub := newDrivenSubscriber(t, agent)
 	driveFrames(sub, sseFrame("todo.updated", map[string]any{
 		"sessionID": "ses_1",
-		"todos":     []any{map[string]any{"content": "t", "status": "pending"}},
+		"todos": []any{
+			map[string]any{"content": "capture A8", "status": "completed", "priority": "high"},
+			map[string]any{"content": "complete A8", "status": "in_progress", "priority": "medium"},
+		},
 	}))
-	if events := drain(sub); len(events) != 0 {
-		t.Fatalf("todo.updated must be ignored (todos not advertised), got %+v", events)
+	events := drain(sub)
+	if len(events) != 1 || events[0].Type != core.EventPlan {
+		t.Fatalf("todo.updated must emit exactly one plan event, got %+v", events)
+	}
+	plan := events[0].Plan
+	if len(plan) != 2 || plan[0].Content != "capture A8" || plan[0].Status != "completed" || plan[0].Priority != "high" {
+		t.Fatalf("plan must preserve server order/fields verbatim, got %+v", plan)
+	}
+	agent.todoMu.Lock()
+	cached := agent.lastTodos["ses_1"]
+	agent.todoMu.Unlock()
+	if len(cached) != 2 {
+		t.Fatalf("control-plane snapshot must record the list, got %+v", cached)
 	}
 }
 
