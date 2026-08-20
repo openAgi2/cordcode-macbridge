@@ -411,6 +411,13 @@ SANITIZATION = {
 }
 
 
+def compute_synthesized_healthy_from_parsed(assistants: list[dict[str, Any]]) -> bool:
+    for m in assistants:
+        if m.get("finish") in ("stop", "completed") and not m.get("error"):
+            return True
+    return False
+
+
 def capture_a1(c: Client, sse: SSE, out: Path, workspace: str) -> None:
     if sse._error:
         raise RuntimeError(f"SSE not connected before create: {sse._error}")
@@ -620,18 +627,42 @@ def capture_a2(c: Client, sse: SSE, out: Path, workspace: str) -> None:
     )
 
 
+def _retry_count(frames: list[dict[str, Any]], sid: str) -> int:
+    n = 0
+    for frame in frames:
+        ev = frame.get("event") if isinstance(frame, dict) else None
+        payload = ev.get("payload") if isinstance(ev, dict) and isinstance(ev.get("payload"), dict) else ev
+        if not isinstance(payload, dict) or payload.get("type") != "session.status":
+            continue
+        props = payload.get("properties") if isinstance(payload.get("properties"), dict) else {}
+        if props.get("sessionID") not in (None, sid):
+            continue
+        st = props.get("status")
+        typ = st.get("type") if isinstance(st, dict) else st
+        if typ == "retry":
+            n += 1
+    return n
+
+
 def capture_a3(c: Client, sse: SSE, out: Path, workspace: str) -> None:
-    _, created, _ = c.request("POST", "/session", body={})
+    status, created, _ = c.request("POST", "/session", body={})
+    if status >= 300 or not isinstance(created, dict):
+        raise RuntimeError(f"create failed: {status}")
     sid = created["id"]
     body = prompt_body("A3_PROVIDER_ERROR")
-    c.request("POST", f"/session/{sid}/prompt_async", body=body, timeout=20)
-    sse.wait_until(
-        lambda frames: any("error" in t or "retry" in t.lower() or t == "session.status" for t in event_types(frames)),
-        20,
-    )
-    time.sleep(8.0)  # bounded: first retry window only
+    code, resp, _ = c.request("POST", f"/session/{sid}/prompt_async", body=body, timeout=20)
+    if code not in (200, 204):
+        raise RuntimeError(f"prompt_async HTTP {code}: {resp}")
+    sse.wait_until(lambda frames: _retry_count(frames, sid) >= 1, 30)
+    reached_idle, last = wait_idle(sse, sid, 150)
+    time.sleep(0.4)
     _, messages, _ = c.request("GET", f"/session/{sid}/message")
+    _, info, _ = c.request("GET", f"/session/{sid}")
     _, status_map, _ = c.request("GET", "/session/status")
+    retries = _retry_count(sse.frames, sid)
+    parsed = parse_messages(messages)
+    assistants = [m for m in parsed if m["role"] == "assistant"]
+    capture_status = "captured" if reached_idle and retries >= 2 and assistants else "partial"
     write_sample(
         out / "a3-provider-error.sanitized.json",
         {
@@ -639,15 +670,36 @@ def capture_a3(c: Client, sse: SSE, out: Path, workspace: str) -> None:
                 "scenario": "A3",
                 "opencodeVersion": OPENCODE_VERSION,
                 "sourceCommit": SOURCE_COMMIT,
-                "note": "bounded capture of first retry window; full 3/8/16/34/60s ladder not waited",
+                "captureStatus": capture_status,
+                "promptHttpStatus": code,
+                "note": "mock returns two retryable HTTP 500 then one non-retryable HTTP 400; 150s idle bound",
             },
+            "source": SOURCE_PROMPT,
             "http": c.http,
             "sseEventTypes": event_types(sse.frames),
+            "sseClassification": classify_sse(sse.frames),
             "sse": sse.frames,
-            "reload": {"messages": messages, "status": status_map},
+            "reload": {"messages": messages, "session": info, "status": status_map},
+            "derived": {
+                "retryStatusCount": retries,
+                "reachedIdle": reached_idle,
+                "lastStatus": last,
+                "assistantError": [m.get("error") for m in assistants],
+                "assistantFinish": [m.get("finish") for m in assistants],
+            },
+            "bridgeMapping": {
+                "decision": "retry is not idle; terminal is captured session.error and/or assistant info.error",
+                "nestedSync": "retained as evidence only; v1 Web skips payload.type==sync",
+            },
+            "sanitization": SANITIZATION,
         },
         workspace,
     )
+    if capture_status != "captured":
+        print(
+            f"A3 classified {capture_status}: retries={retries} idle={reached_idle} last={last}",
+            file=sys.stderr,
+        )
 
 
 def capture_a4(c: Client, sse: SSE, out: Path, workspace: str) -> None:
@@ -679,7 +731,8 @@ def capture_a4(c: Client, sse: SSE, out: Path, workspace: str) -> None:
     parsed = parse_messages(messages)
     assistants = [m for m in parsed if m["role"] == "assistant"]
     synthesized_healthy = any(m.get("finish") in ("stop", "completed") and m.get("error") in (None, {}) for m in assistants) and reached_idle and "A4" in json.dumps(assistants)
-    capture_status = "captured" if abort_code in (200, 204) and reached_idle else "partial"
+    synth = compute_synthesized_healthy_from_parsed(assistants)
+    capture_status = "captured" if abort_code in (200, 204) and reached_idle and not synth else "partial"
     write_sample(
         out / "a4-abort.sanitized.json",
         {
@@ -715,7 +768,7 @@ def capture_a4(c: Client, sse: SSE, out: Path, workspace: str) -> None:
                 "assistantError": [m.get("error") for m in assistants],
                 "assistantPartTypes": [m.get("partTypes") for m in assistants],
                 "assistantTexts": [m.get("texts") for m in assistants],
-                "synthesizedHealthyCompleted": False,
+                "synthesizedHealthyCompleted": compute_synthesized_healthy_from_parsed(assistants),
             },
             "bridgeMapping": {
                 "decision": "abort must converge to the captured non-running server state; do not synthesize a healthy completed assistant",
@@ -733,19 +786,51 @@ def capture_a4(c: Client, sse: SSE, out: Path, workspace: str) -> None:
 
 
 def capture_a5(c: Client, sse: SSE, out: Path, workspace: str) -> None:
-    _, created, _ = c.request("POST", "/session", body={})
+    status, created, _ = c.request("POST", "/session", body={})
+    if status >= 300 or not isinstance(created, dict):
+        raise RuntimeError(f"create failed: {status}")
     sid = created["id"]
-    body = prompt_body("A5_RECONNECT")
-    c.request("POST", f"/session/{sid}/prompt_async", body=body, timeout=20)
-    sse.wait_until(lambda frames: len(event_types(frames)) >= 3, 10)
-    before = list(event_types(sse.frames))
+    body = prompt_body("A5_RECONNECT keep streaming")
+    code, resp, _ = c.request("POST", f"/session/{sid}/prompt_async", body=body, timeout=20)
+    if code not in (200, 204):
+        raise RuntimeError(f"prompt_async HTTP {code}: {resp}")
+    ready = sse.wait_until(
+        lambda frames: last_session_status(frames, sid) == "busy"
+        and "message.part.delta" in event_types(frames),
+        20,
+    )
+    if not ready:
+        raise RuntimeError(
+            f"A5 never saw busy+partial (last={last_session_status(sse.frames, sid)} types={event_types(sse.frames)[-8:]})"
+        )
+    _, status_at_disconnect, _ = c.request("GET", "/session/status")
+    disconnect_busy = isinstance(status_at_disconnect, dict) and (status_at_disconnect.get(sid) or {}).get("type") == "busy"
+    if not disconnect_busy:
+        raise RuntimeError(f"A5 /session/status was not busy at disconnect: {status_at_disconnect}")
+    frames_before = list(sse.frames)
+    types_before = list(event_types(sse.frames))
     sse.stop()
-    time.sleep(0.3)
+    time.sleep(0.2)
     sse2 = SSE(c)
     sse2.start()
-    time.sleep(3.0)
+    sse2.wait_until(lambda frames: bool(frames) or bool(sse2._error), 5)
+    reached_idle, last = wait_idle(sse2, sid, 40)
+    if not reached_idle:
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            _, sm, _ = c.request("GET", "/session/status")
+            if not (isinstance(sm, dict) and sid in sm and (sm.get(sid) or {}).get("type") == "busy"):
+                break
+            time.sleep(0.3)
+    time.sleep(0.3)
     _, messages, _ = c.request("GET", f"/session/{sid}/message")
-    _, status_map, _ = c.request("GET", "/session/status")
+    _, info, _ = c.request("GET", f"/session/{sid}")
+    _, status_final, _ = c.request("GET", "/session/status")
+    after_types = event_types(sse2.frames)
+    replayed_deltas = "message.part.delta" in after_types
+    capture_status = "captured" if disconnect_busy else "partial"
+    if last != "idle" and isinstance(status_final, dict) and sid in status_final:
+        capture_status = "partial"
     write_sample(
         out / "a5-sse-reconnect.sanitized.json",
         {
@@ -753,20 +838,46 @@ def capture_a5(c: Client, sse: SSE, out: Path, workspace: str) -> None:
                 "scenario": "A5",
                 "opencodeVersion": OPENCODE_VERSION,
                 "sourceCommit": SOURCE_COMMIT,
-                "typesBeforeDisconnect": before,
+                "captureStatus": capture_status,
+                "promptHttpStatus": code,
                 "sse1Error": sse._error,
                 "sse2Error": sse2._error,
+                "firstAfterReconnect": after_types[:5],
+            },
+            "source": {
+                "ui": "packages/app/src/context/server-sdk.tsx:268-308 reconnect loop; v1 skips sync",
+                "server": "GET /global/event; no assumed replay buffer",
             },
             "http": c.http,
-            "sseBefore": sse.frames,
+            "sseBefore": frames_before,
             "sseAfterReconnect": sse2.frames,
-            "sseEventTypesBefore": event_types(sse.frames),
-            "sseEventTypesAfter": event_types(sse2.frames),
-            "reload": {"messages": messages, "status": status_map},
+            "sseEventTypesBefore": types_before,
+            "sseEventTypesAfter": after_types,
+            "reload": {
+                "messages": messages,
+                "session": info,
+                "status": status_final,
+                "statusAtDisconnect": status_at_disconnect,
+            },
+            "derived": {
+                "statusAtDisconnectBusy": disconnect_busy,
+                "reconnectSawIdle": last == "idle",
+                "reconnectFirstDirectTypes": after_types[:8],
+                "serverReplayedDeltas": replayed_deltas,
+                "note": "replay is observed, not assumed; v1 mapping still skips nested sync",
+            },
+            "bridgeMapping": {
+                "decision": "reconnect recovers via server messages/status and later Kernel rehydrate; Gate A records server facts only",
+                "nestedSync": "retained as evidence only; v1 Web skips payload.type==sync",
+                "notAnIOSWriter": "do not history-merge or raw-write the iOS timeline",
+            },
+            "sanitization": SANITIZATION,
         },
         workspace,
     )
     sse2.stop()
+    if capture_status != "captured":
+        print(f"A5 classified {capture_status}: last={last}", file=sys.stderr)
 
 
 def capture_a6(c: Client, sse: SSE, out: Path, workspace: str) -> None:
@@ -931,6 +1042,10 @@ def capture_a10(c: Client, sse: SSE, out: Path, workspace: str) -> None:
     if not Path(ws2).is_dir():
         raise RuntimeError(f"second directory missing: {ws2}")
     c2 = c.clone(ws2)
+    _, baseline1, _ = c.request("GET", "/session", query={"roots": "true", "limit": "10"})
+    _, baseline2, _ = c2.request("GET", "/session", query={"roots": "true", "limit": "10"})
+    if _ids(baseline1) or _ids(baseline2):
+        raise RuntimeError(f"A10 sandbox not empty baseline w1={_ids(baseline1)} w2={_ids(baseline2)}")
     roots = []
     for i in range(4):
         code, created, _ = c.request("POST", "/session", body={"title": f"root-{i}"})
@@ -988,6 +1103,7 @@ def capture_a10(c: Client, sse: SSE, out: Path, workspace: str) -> None:
             "reload": {
                 "workspace1": workspace,
                 "workspace2": ws2,
+                "baseline": {"workspace1": baseline1, "workspace2": baseline2},
                 "rootIDs": roots,
                 "child": child,
                 "archivePatchStatus": patch_code,

@@ -18,6 +18,7 @@ LOG_PATH = os.environ.get("OCW_MOCK_LOG", "")
 
 _lock = threading.Lock()
 _requests: list[dict] = []
+_a3_calls = 0
 
 
 def _log(event: dict) -> None:
@@ -62,12 +63,14 @@ def _is_title(body: dict) -> bool:
 
 def _scenario(body: dict) -> str:
     text = _user_text(body)
+    if _is_title(body):
+        return "title"
     if "A3_PROVIDER_ERROR" in text:
         return "error"
     if "A4_SLOW_STREAM" in text:
         return "slow"
     if "A5_RECONNECT" in text:
-        return "slow"
+        return "reconnect"
     if "A6_READ_OUTSIDE" in text:
         return "read_outside"
     if "A7_QUESTION" in text:
@@ -223,12 +226,30 @@ class Handler(BaseHTTPRequestHandler):
         rec["scenario"] = scenario
         _log(rec)
         if scenario == "error":
+            global _a3_calls
+            with _lock:
+                _a3_calls += 1
+                n = _a3_calls
+            rec["a3Attempt"] = n
+            _log(rec)
+            if n <= 2:
+                self._json(
+                    500,
+                    {
+                        "error": {
+                            "message": f"localmock retryable 500 attempt {n}",
+                            "type": "server_error",
+                            "code": "localmock_retryable",
+                        }
+                    },
+                )
+                return
             self._json(
-                500,
+                400,
                 {
                     "error": {
-                        "message": "localmock provider rejection (A3)",
-                        "type": "server_error",
+                        "message": "localmock non-retryable provider rejection (A3)",
+                        "type": "invalid_request_error",
                         "code": "localmock_rejected",
                     }
                 },
@@ -239,6 +260,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if scenario == "slow":
             _sse(self, _text_chunks("SLOW_STREAM_ABCDEFGHIJKLMNOPQRSTUVWXYZ"), delay=0.25)
+            return
+        if scenario == "reconnect":
+            _sse(self, _text_chunks("A5_PARTIAL_" + ("ABCDEFGHIJ" * 8)), delay=0.35)
             return
         if scenario == "read_outside":
             _sse(self, _tool_chunks("read", {"filePath": OUTSIDE_FILE}))

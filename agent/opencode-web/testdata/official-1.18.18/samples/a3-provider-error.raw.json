@@ -1,0 +1,2407 @@
+{
+  "meta": {
+    "scenario": "A3",
+    "opencodeVersion": "1.18.18",
+    "sourceCommit": "2cba7e227d",
+    "captureStatus": "captured",
+    "promptHttpStatus": 204,
+    "note": "mock returns two retryable HTTP 500 then one non-retryable HTTP 400; 150s idle bound"
+  },
+  "source": {
+    "ui": "packages/app/src/utils/server-compat.ts:163-169 create; packages/app/src/utils/server-compat.ts:200-230 promptAsync",
+    "server": "packages/opencode/src/server/routes/instance/httpapi/handlers/session.ts promptAsync; packages/opencode/src/session/prompt.ts PromptInput",
+    "sse": "packages/app/src/context/server-sdk.tsx v1 global.event; skips payload.type==sync at line 284",
+    "reducer": "packages/app/src/context/global-sync/event-reducer.ts"
+  },
+  "http": [
+    {
+      "method": "POST",
+      "path": "/session",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {},
+      "status": 200,
+      "response": {
+        "id": "ses_fe0e245aeffeWrvboerw7QNN6X",
+        "slug": "crisp-sailor",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "New session - 2026-08-20T12:20:37.073Z",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787228437073,
+          "updated": 1787228437073
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:20:36 GMT",
+        "content-length": "400",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/session/ses_fe0e245aeffeWrvboerw7QNN6X/prompt_async",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {
+        "messageID": "msg_e51d4d61f84659f38e94bea049",
+        "agent": "build",
+        "model": {
+          "providerID": "localmock",
+          "modelID": "echo"
+        },
+        "parts": [
+          {
+            "type": "text",
+            "text": "A3_PROVIDER_ERROR"
+          }
+        ]
+      },
+      "status": 204,
+      "response": null,
+      "responseHeaders": {
+        "vary": "Origin",
+        "date": "Thu, 20 Aug 2026 12:20:36 GMT",
+        "content-length": "0"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/ses_fe0e245aeffeWrvboerw7QNN6X/message",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": [
+        {
+          "info": {
+            "id": "msg_e51d4d61f84659f38e94bea049",
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "role": "user",
+            "time": {
+              "created": 1787228437103
+            },
+            "summary": {
+              "diffs": []
+            },
+            "agent": "build",
+            "model": {
+              "providerID": "localmock",
+              "modelID": "echo"
+            }
+          },
+          "parts": [
+            {
+              "id": "prt_01f1dba7300166Vc5oY07N5uws",
+              "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+              "messageID": "msg_e51d4d61f84659f38e94bea049",
+              "type": "text",
+              "text": "A3_PROVIDER_ERROR"
+            }
+          ]
+        },
+        {
+          "info": {
+            "id": "msg_01f1dbb28001Yu5eTR0G4kVVQO",
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "role": "assistant",
+            "time": {
+              "created": 1787228437288,
+              "completed": 1787228445293
+            },
+            "error": {
+              "name": "APIError",
+              "data": {
+                "message": "localmock non-retryable provider rejection (A3)",
+                "statusCode": 400,
+                "isRetryable": false,
+                "responseHeaders": {
+                  "connection": "close",
+                  "content-length": "136",
+                  "content-type": "application/json",
+                  "date": "Thu, 20 Aug 2026 12:20:45 GMT",
+                  "server": "BaseHTTP/0.6 Python/3.11.15"
+                },
+                "responseBody": "{\"error\": {\"message\": \"localmock non-retryable provider rejection (A3)\", \"type\": \"invalid_request_error\", \"code\": \"localmock_rejected\"}}",
+                "metadata": {
+                  "url": "http://127.0.0.1:4399/v1/chat/completions"
+                }
+              }
+            },
+            "parentID": "msg_e51d4d61f84659f38e94bea049",
+            "modelID": "echo",
+            "providerID": "localmock",
+            "mode": "build",
+            "agent": "build",
+            "path": {
+              "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "root": "/"
+            },
+            "cost": 0,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          },
+          "parts": []
+        }
+      ],
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:20:46 GMT",
+        "content-length": "1410",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/ses_fe0e245aeffeWrvboerw7QNN6X",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": {
+        "id": "ses_fe0e245aeffeWrvboerw7QNN6X",
+        "slug": "crisp-sailor",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "Fixture session",
+        "agent": "build",
+        "model": {
+          "id": "echo",
+          "providerID": "localmock",
+          "variant": "default"
+        },
+        "version": "1.18.18",
+        "time": {
+          "created": 1787228437073,
+          "updated": 1787228437308
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:20:46 GMT",
+        "content-length": "510",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/status",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": {},
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:20:46 GMT",
+        "content-length": "2",
+        "vary": "Origin"
+      }
+    }
+  ],
+  "sseEventTypes": [
+    "server.connected",
+    "models-dev.refreshed",
+    "project.updated",
+    "session.created",
+    "sync",
+    "session.updated",
+    "sync",
+    "message.updated",
+    "sync",
+    "message.part.updated",
+    "sync",
+    "session.updated",
+    "sync",
+    "session.status",
+    "message.updated",
+    "sync",
+    "session.updated",
+    "sync",
+    "session.diff",
+    "message.updated",
+    "sync",
+    "session.updated",
+    "sync",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "catalog.updated",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "plugin.added",
+    "reference.updated",
+    "integration.updated",
+    "catalog.updated",
+    "session.status",
+    "session.status",
+    "session.status",
+    "session.status",
+    "session.status",
+    "session.error",
+    "session.status",
+    "session.idle",
+    "message.updated",
+    "sync",
+    "session.status",
+    "session.idle"
+  ],
+  "sseClassification": {
+    "directTypes": [
+      "server.connected",
+      "models-dev.refreshed",
+      "project.updated",
+      "session.created",
+      "session.updated",
+      "message.updated",
+      "message.part.updated",
+      "session.updated",
+      "session.status",
+      "message.updated",
+      "session.updated",
+      "session.diff",
+      "message.updated",
+      "session.updated",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "catalog.updated",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "plugin.added",
+      "reference.updated",
+      "integration.updated",
+      "catalog.updated",
+      "session.status",
+      "session.status",
+      "session.status",
+      "session.status",
+      "session.status",
+      "session.error",
+      "session.status",
+      "session.idle",
+      "message.updated",
+      "session.status",
+      "session.idle"
+    ],
+    "syncCount": 10,
+    "syncTypes": [
+      "session.created.1",
+      "session.updated.1",
+      "message.updated.1",
+      "message.part.updated.1",
+      "session.updated.1",
+      "message.updated.1",
+      "session.updated.1",
+      "message.updated.1",
+      "session.updated.1",
+      "message.updated.1"
+    ],
+    "statusCarriers": [
+      {
+        "type": "busy"
+      },
+      {
+        "type": "busy"
+      },
+      {
+        "type": "retry",
+        "attempt": 1,
+        "message": "localmock retryable 500 attempt 1",
+        "next": 1787228440267
+      },
+      {
+        "type": "busy"
+      },
+      {
+        "type": "retry",
+        "attempt": 2,
+        "message": "localmock retryable 500 attempt 2",
+        "next": 1787228445269
+      },
+      {
+        "type": "busy"
+      },
+      {
+        "type": "idle"
+      },
+      {
+        "type": "idle"
+      }
+    ]
+  },
+  "sse": [
+    {
+      "t": 1787228436.913093,
+      "event": {
+        "payload": {
+          "id": "evt_01f1db80d001f45dPj5jvz6hjH",
+          "type": "server.connected",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 1787228436.947105,
+      "event": {
+        "payload": {
+          "id": "evt_01f1db9af001iptIx1bBExAnTn",
+          "type": "models-dev.refreshed",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 1787228437.0784,
+      "event": {
+        "directory": "global",
+        "project": "global",
+        "payload": {
+          "type": "project.updated",
+          "properties": {
+            "id": "global",
+            "worktree": "/",
+            "sandboxes": [],
+            "time": {
+              "created": 1787228436938,
+              "updated": 1787228436938
+            }
+          },
+          "id": "evt_01f1db9ce001ASdvboG1qTWDOl"
+        }
+      }
+    },
+    {
+      "t": 1787228437.1110148,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dba52001kfgljFSQvn3Ru0",
+          "type": "session.created",
+          "properties": {
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "info": {
+              "id": "ses_fe0e245aeffeWrvboerw7QNN6X",
+              "slug": "crisp-sailor",
+              "version": "1.18.18",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "New session - 2026-08-20T12:20:37.073Z",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787228437073,
+                "updated": 1787228437073
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228437.1119099,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1dba52001kfgljFSQvn3Ru0",
+            "type": "session.created.1",
+            "seq": 0,
+            "aggregateID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "data": {
+              "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+              "info": {
+                "id": "ses_fe0e245aeffeWrvboerw7QNN6X",
+                "slug": "crisp-sailor",
+                "version": "1.18.18",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "New session - 2026-08-20T12:20:37.073Z",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787228437073,
+                  "updated": 1787228437073
+                }
+              }
+            }
+          },
+          "id": "evt_01f1dba52001kfgljFSQvn3Ru0"
+        }
+      }
+    },
+    {
+      "t": 1787228437.301197,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dba6f001O9fMfDYzhNpCEP",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "info": {
+              "id": "ses_fe0e245aeffeWrvboerw7QNN6X",
+              "slug": "crisp-sailor",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "New session - 2026-08-20T12:20:37.073Z",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787228437073,
+                "updated": 1787228437103
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228437.302222,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1dba6f001O9fMfDYzhNpCEP",
+            "type": "session.updated.1",
+            "seq": 1,
+            "aggregateID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "data": {
+              "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+              "info": {
+                "id": "ses_fe0e245aeffeWrvboerw7QNN6X",
+                "slug": "crisp-sailor",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "New session - 2026-08-20T12:20:37.073Z",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787228437073,
+                  "updated": 1787228437103
+                }
+              }
+            }
+          },
+          "id": "evt_01f1dba6f001O9fMfDYzhNpCEP"
+        }
+      }
+    },
+    {
+      "t": 1787228437.302709,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dba73001U5g16Z8WESSYE4",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "info": {
+              "id": "msg_e51d4d61f84659f38e94bea049",
+              "role": "user",
+              "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+              "time": {
+                "created": 1787228437103
+              },
+              "agent": "build",
+              "model": {
+                "providerID": "localmock",
+                "modelID": "echo"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228437.303325,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1dba73001U5g16Z8WESSYE4",
+            "type": "message.updated.1",
+            "seq": 2,
+            "aggregateID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "data": {
+              "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+              "info": {
+                "id": "msg_e51d4d61f84659f38e94bea049",
+                "role": "user",
+                "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+                "time": {
+                  "created": 1787228437103
+                },
+                "agent": "build",
+                "model": {
+                  "providerID": "localmock",
+                  "modelID": "echo"
+                }
+              }
+            }
+          },
+          "id": "evt_01f1dba73001U5g16Z8WESSYE4"
+        }
+      }
+    },
+    {
+      "t": 1787228437.314545,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbb21001AZ6DXAxL2JVnBA",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "part": {
+              "type": "text",
+              "text": "A3_PROVIDER_ERROR",
+              "messageID": "msg_e51d4d61f84659f38e94bea049",
+              "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+              "id": "prt_01f1dba7300166Vc5oY07N5uws"
+            },
+            "time": 1787228437281
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228437.3152199,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1dbb21001AZ6DXAxL2JVnBA",
+            "type": "message.part.updated.1",
+            "seq": 3,
+            "aggregateID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "data": {
+              "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+              "part": {
+                "type": "text",
+                "text": "A3_PROVIDER_ERROR",
+                "messageID": "msg_e51d4d61f84659f38e94bea049",
+                "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+                "id": "prt_01f1dba7300166Vc5oY07N5uws"
+              },
+              "time": 1787228437281
+            }
+          },
+          "id": "evt_01f1dbb21001AZ6DXAxL2JVnBA"
+        }
+      }
+    },
+    {
+      "t": 1787228437.316077,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbb23001Yf4545mBdUnVzo",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "info": {
+              "id": "ses_fe0e245aeffeWrvboerw7QNN6X",
+              "slug": "crisp-sailor",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "New session - 2026-08-20T12:20:37.073Z",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787228437073,
+                "updated": 1787228437283
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228437.317098,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1dbb23001Yf4545mBdUnVzo",
+            "type": "session.updated.1",
+            "seq": 4,
+            "aggregateID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "data": {
+              "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+              "info": {
+                "id": "ses_fe0e245aeffeWrvboerw7QNN6X",
+                "slug": "crisp-sailor",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "New session - 2026-08-20T12:20:37.073Z",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787228437073,
+                  "updated": 1787228437283
+                }
+              }
+            }
+          },
+          "id": "evt_01f1dbb23001Yf4545mBdUnVzo"
+        }
+      }
+    },
+    {
+      "t": 1787228437.322839,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbb26001J6WF6ojub5NOtz",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228437.323662,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbb28001Z3GWQZb9NfLY3d",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "info": {
+              "id": "msg_01f1dbb28001Yu5eTR0G4kVVQO",
+              "parentID": "msg_e51d4d61f84659f38e94bea049",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "modelID": "echo",
+              "providerID": "localmock",
+              "time": {
+                "created": 1787228437288
+              },
+              "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228437.324645,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1dbb28001Z3GWQZb9NfLY3d",
+            "type": "message.updated.1",
+            "seq": 5,
+            "aggregateID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "data": {
+              "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+              "info": {
+                "id": "msg_01f1dbb28001Yu5eTR0G4kVVQO",
+                "parentID": "msg_e51d4d61f84659f38e94bea049",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "modelID": "echo",
+                "providerID": "localmock",
+                "time": {
+                  "created": 1787228437288
+                },
+                "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X"
+              }
+            }
+          },
+          "id": "evt_01f1dbb28001Z3GWQZb9NfLY3d"
+        }
+      }
+    },
+    {
+      "t": 1787228437.3400881,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbb3c001wu6PaUDCW01Ooo",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "info": {
+              "id": "ses_fe0e245aeffeWrvboerw7QNN6X",
+              "slug": "crisp-sailor",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "New session - 2026-08-20T12:20:37.073Z",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "summary": {
+                "additions": 0,
+                "deletions": 0,
+                "files": 0
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787228437073,
+                "updated": 1787228437308
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228437.341172,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1dbb3c001wu6PaUDCW01Ooo",
+            "type": "session.updated.1",
+            "seq": 6,
+            "aggregateID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "data": {
+              "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+              "info": {
+                "id": "ses_fe0e245aeffeWrvboerw7QNN6X",
+                "slug": "crisp-sailor",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "New session - 2026-08-20T12:20:37.073Z",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "summary": {
+                  "additions": 0,
+                  "deletions": 0,
+                  "files": 0
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787228437073,
+                  "updated": 1787228437308
+                }
+              }
+            }
+          },
+          "id": "evt_01f1dbb3c001wu6PaUDCW01Ooo"
+        }
+      }
+    },
+    {
+      "t": 1787228437.341414,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbb3d001jIE5SmMqGpFHZc",
+          "type": "session.diff",
+          "properties": {
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "diff": []
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228437.341915,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbb3e001I2OxLBaa9wiT30",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "info": {
+              "role": "user",
+              "time": {
+                "created": 1787228437103
+              },
+              "agent": "build",
+              "model": {
+                "providerID": "localmock",
+                "modelID": "echo"
+              },
+              "id": "msg_e51d4d61f84659f38e94bea049",
+              "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+              "summary": {
+                "diffs": []
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228437.342558,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1dbb3e001I2OxLBaa9wiT30",
+            "type": "message.updated.1",
+            "seq": 7,
+            "aggregateID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "data": {
+              "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+              "info": {
+                "role": "user",
+                "time": {
+                  "created": 1787228437103
+                },
+                "agent": "build",
+                "model": {
+                  "providerID": "localmock",
+                  "modelID": "echo"
+                },
+                "id": "msg_e51d4d61f84659f38e94bea049",
+                "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+                "summary": {
+                  "diffs": []
+                }
+              }
+            }
+          },
+          "id": "evt_01f1dbb3e001I2OxLBaa9wiT30"
+        }
+      }
+    },
+    {
+      "t": 1787228437.9902022,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbb59001A1T2lZVdPba0JJ",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "info": {
+              "id": "ses_fe0e245aeffeWrvboerw7QNN6X",
+              "slug": "crisp-sailor",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "Fixture session",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "summary": {
+                "additions": 0,
+                "deletions": 0,
+                "files": 0
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787228437073,
+                "updated": 1787228437308
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228437.992075,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1dbb59001A1T2lZVdPba0JJ",
+            "type": "session.updated.1",
+            "seq": 8,
+            "aggregateID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "data": {
+              "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+              "info": {
+                "id": "ses_fe0e245aeffeWrvboerw7QNN6X",
+                "slug": "crisp-sailor",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "Fixture session",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "summary": {
+                  "additions": 0,
+                  "deletions": 0,
+                  "files": 0
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787228437073,
+                  "updated": 1787228437308
+                }
+              }
+            }
+          },
+          "id": "evt_01f1dbb59001A1T2lZVdPba0JJ"
+        }
+      }
+    },
+    {
+      "t": 1787228438.000349,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbd06001Qy6Glb0E8O2SOY",
+          "type": "plugin.added",
+          "properties": {
+            "id": "core/config-reference"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.00064,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbd07001BuxH2Aj3tTj1d1",
+          "type": "plugin.added",
+          "properties": {
+            "id": "agent"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.000927,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbd07002Jno0HUt0FZaiUj",
+          "type": "plugin.added",
+          "properties": {
+            "id": "command"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.0012531,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbd08001QVqfyhTi0G3AU1",
+          "type": "plugin.added",
+          "properties": {
+            "id": "skill"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.001565,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbd08002QX0MKvHEaHfc24",
+          "type": "plugin.added",
+          "properties": {
+            "id": "models-dev"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.001843,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbd09001Lk8B3aaiGkScJ8",
+          "type": "plugin.added",
+          "properties": {
+            "id": "config-agent"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.0021172,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbd1a001WKVO7Uspi9Oww7",
+          "type": "plugin.added",
+          "properties": {
+            "id": "config-command"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.00239,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbd1b001Ryj9FB7IoEX6De",
+          "type": "plugin.added",
+          "properties": {
+            "id": "config-skill"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.002655,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbd1c001quJzSEdLvrMKN7",
+          "type": "plugin.added",
+          "properties": {
+            "id": "alibaba"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.002908,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbd1c002LLWlmJiFbEFvah",
+          "type": "plugin.added",
+          "properties": {
+            "id": "amazon-bedrock"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.00311,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbd1d001sxRC4CffGL1QTm",
+          "type": "plugin.added",
+          "properties": {
+            "id": "anthropic"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.003328,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbd1d0020U56w0vVUSXqZ6",
+          "type": "plugin.added",
+          "properties": {
+            "id": "azure-cognitive-services"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.067807,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbde0001ceViG3oUULhjfT",
+          "type": "plugin.added",
+          "properties": {
+            "id": "azure"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.068012,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbde0002SDNzlkq5IbVhPZ",
+          "type": "plugin.added",
+          "properties": {
+            "id": "cerebras"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.068225,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbde10011R38gDgIL0ukKW",
+          "type": "plugin.added",
+          "properties": {
+            "id": "cloudflare-ai-gateway"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.0685241,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbde1002ta5kAM2GXk7RsQ",
+          "type": "plugin.added",
+          "properties": {
+            "id": "cloudflare-workers-ai"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.068716,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbde1003G6zY5QTAateK1s",
+          "type": "plugin.added",
+          "properties": {
+            "id": "cohere"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.068925,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbde1004yMMfkiDFeB952v",
+          "type": "plugin.added",
+          "properties": {
+            "id": "deepinfra"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.069173,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbde2001ssW4LvgfvuTCwU",
+          "type": "plugin.added",
+          "properties": {
+            "id": "gateway"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.0694442,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbde2002wX1CUCbsyhlMkP",
+          "type": "plugin.added",
+          "properties": {
+            "id": "github-copilot"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.070178,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbde20036OvR51gC3OaFfO",
+          "type": "plugin.added",
+          "properties": {
+            "id": "gitlab"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.070526,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbde2004hMgbuBWgDEuQ2V",
+          "type": "plugin.added",
+          "properties": {
+            "id": "google"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.070902,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbde2005uy3LtufxHkR5si",
+          "type": "plugin.added",
+          "properties": {
+            "id": "google-vertex-anthropic"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.071148,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbde2006RVXL00fBdcDJVj",
+          "type": "plugin.added",
+          "properties": {
+            "id": "google-vertex"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.125988,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbde2007YsA6SNiJ23maTC",
+          "type": "plugin.added",
+          "properties": {
+            "id": "groq"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.1261828,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbded001s7vS2BYtx2wjWN",
+          "type": "plugin.added",
+          "properties": {
+            "id": "kilo"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.126687,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbded002doBI7QUbs8U68z",
+          "type": "plugin.added",
+          "properties": {
+            "id": "llmgateway"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.126993,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbded003qTMBw6yPN4oKlv",
+          "type": "plugin.added",
+          "properties": {
+            "id": "mistral"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.127328,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbded004eb2sxoCeN9fn11",
+          "type": "plugin.added",
+          "properties": {
+            "id": "nvidia"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.1275342,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbdee001uCbtOPvUMVuu6A",
+          "type": "plugin.added",
+          "properties": {
+            "id": "opencode"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.127758,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbdee0023L59OfttmqAHHk",
+          "type": "plugin.added",
+          "properties": {
+            "id": "snowflake-cortex"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.128021,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbdee003lR0DDJvexhz9Zc",
+          "type": "plugin.added",
+          "properties": {
+            "id": "openai-compatible"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.1282141,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbdef001ojGF6ZfeKLf6Vb",
+          "type": "plugin.added",
+          "properties": {
+            "id": "openai"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.128722,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbdef002cdtAENJwgVH6ky",
+          "type": "plugin.added",
+          "properties": {
+            "id": "openrouter"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.129323,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbdef0034NB4A0kox0IYF6",
+          "type": "plugin.added",
+          "properties": {
+            "id": "perplexity"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.129835,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbdef004TG50wxrXKQmssp",
+          "type": "plugin.added",
+          "properties": {
+            "id": "sap-ai-core"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.130344,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbdef005jMU6Qr1jvgQE8o",
+          "type": "plugin.added",
+          "properties": {
+            "id": "togetherai"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.130538,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbe2f001B2OKfvm1mMP5UM",
+          "type": "catalog.updated",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 1787228438.1307352,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbe2f002q29Eav5ZFyrTzl",
+          "type": "plugin.added",
+          "properties": {
+            "id": "vercel"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.13093,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbe300014Iha9FfFnJ4ynt",
+          "type": "plugin.added",
+          "properties": {
+            "id": "venice"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.131199,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbe30002EBDgxKBSnJgiot",
+          "type": "plugin.added",
+          "properties": {
+            "id": "xai"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.131393,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbe30003o2PqgLNTfoG0I3",
+          "type": "plugin.added",
+          "properties": {
+            "id": "zenmux"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.131594,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbe30004gQJxOFCz9LTb7l",
+          "type": "plugin.added",
+          "properties": {
+            "id": "dynamic-provider"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.1318889,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbe31001nqF8T8a4AZqB2F",
+          "type": "plugin.added",
+          "properties": {
+            "id": "config-plugin"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.132257,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbe32001sJpl3zgOvtfIHe",
+          "type": "plugin.added",
+          "properties": {
+            "id": "config-provider"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.132545,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbe32002goGezlTrX2GlRZ",
+          "type": "plugin.added",
+          "properties": {
+            "id": "variant"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228438.132735,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbe32003KJCmg5B0Oh95jJ",
+          "type": "reference.updated",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 1787228438.140183,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbe41001hGuTR946NKykBz",
+          "type": "integration.updated",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 1787228438.140367,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbe6d001MB0AU01s4aYdVp",
+          "type": "catalog.updated",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 1787228438.144758,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbe70001IgwXEvbv59IW2V",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228440.2770061,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dbe7f001Jeg2jUoJSuGTyT",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "status": {
+              "type": "retry",
+              "attempt": 1,
+              "message": "localmock retryable 500 attempt 1",
+              "next": 1787228440267
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228440.283396,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dc6d1001XPR4fEri5EX2vW",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228445.275745,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dc6da001e2s7c4Onv43vMs",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "status": {
+              "type": "retry",
+              "attempt": 2,
+              "message": "localmock retryable 500 attempt 2",
+              "next": 1787228445269
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228445.297714,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dda58001mBiMtTePHjS84K",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228446.512929,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dda6c001KAR0WoB4ykhqTZ",
+          "type": "session.error",
+          "properties": {
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "error": {
+              "name": "APIError",
+              "data": {
+                "message": "localmock non-retryable provider rejection (A3)",
+                "statusCode": 400,
+                "isRetryable": false,
+                "responseHeaders": {
+                  "connection": "close",
+                  "content-length": "136",
+                  "content-type": "application/json",
+                  "date": "Thu, 20 Aug 2026 12:20:45 GMT",
+                  "server": "BaseHTTP/0.6 Python/3.11.15"
+                },
+                "responseBody": "{\"error\": {\"message\": \"localmock non-retryable provider rejection (A3)\", \"type\": \"invalid_request_error\", \"code\": \"localmock_rejected\"}}",
+                "metadata": {
+                  "url": "http://127.0.0.1:4399/v1/chat/completions"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228446.513202,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dda6c00278z2owogfhusB9",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "status": {
+              "type": "idle"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228446.5136168,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dda6c003ZsP1lp7JgWT2R9",
+          "type": "session.idle",
+          "properties": {
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228446.515827,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dda6d0013UoSVYL83QQjKf",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "info": {
+              "id": "msg_01f1dbb28001Yu5eTR0G4kVVQO",
+              "parentID": "msg_e51d4d61f84659f38e94bea049",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "modelID": "echo",
+              "providerID": "localmock",
+              "time": {
+                "created": 1787228437288,
+                "completed": 1787228445293
+              },
+              "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+              "error": {
+                "name": "APIError",
+                "data": {
+                  "message": "localmock non-retryable provider rejection (A3)",
+                  "statusCode": 400,
+                  "isRetryable": false,
+                  "responseHeaders": {
+                    "connection": "close",
+                    "content-length": "136",
+                    "content-type": "application/json",
+                    "date": "Thu, 20 Aug 2026 12:20:45 GMT",
+                    "server": "BaseHTTP/0.6 Python/3.11.15"
+                  },
+                  "responseBody": "{\"error\": {\"message\": \"localmock non-retryable provider rejection (A3)\", \"type\": \"invalid_request_error\", \"code\": \"localmock_rejected\"}}",
+                  "metadata": {
+                    "url": "http://127.0.0.1:4399/v1/chat/completions"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228446.518433,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1dda6d0013UoSVYL83QQjKf",
+            "type": "message.updated.1",
+            "seq": 9,
+            "aggregateID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "data": {
+              "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+              "info": {
+                "id": "msg_01f1dbb28001Yu5eTR0G4kVVQO",
+                "parentID": "msg_e51d4d61f84659f38e94bea049",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "modelID": "echo",
+                "providerID": "localmock",
+                "time": {
+                  "created": 1787228437288,
+                  "completed": 1787228445293
+                },
+                "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+                "error": {
+                  "name": "APIError",
+                  "data": {
+                    "message": "localmock non-retryable provider rejection (A3)",
+                    "statusCode": 400,
+                    "isRetryable": false,
+                    "responseHeaders": {
+                      "connection": "close",
+                      "content-length": "136",
+                      "content-type": "application/json",
+                      "date": "Thu, 20 Aug 2026 12:20:45 GMT",
+                      "server": "BaseHTTP/0.6 Python/3.11.15"
+                    },
+                    "responseBody": "{\"error\": {\"message\": \"localmock non-retryable provider rejection (A3)\", \"type\": \"invalid_request_error\", \"code\": \"localmock_rejected\"}}",
+                    "metadata": {
+                      "url": "http://127.0.0.1:4399/v1/chat/completions"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "id": "evt_01f1dda6d0013UoSVYL83QQjKf"
+        }
+      }
+    },
+    {
+      "t": 1787228446.5188391,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dda70001BEDod5iEaPDMdf",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "status": {
+              "type": "idle"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228446.519117,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1dda70002uDZmudfxwXqzpm",
+          "type": "session.idle",
+          "properties": {
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X"
+          }
+        }
+      }
+    }
+  ],
+  "reload": {
+    "messages": [
+      {
+        "info": {
+          "id": "msg_e51d4d61f84659f38e94bea049",
+          "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+          "role": "user",
+          "time": {
+            "created": 1787228437103
+          },
+          "summary": {
+            "diffs": []
+          },
+          "agent": "build",
+          "model": {
+            "providerID": "localmock",
+            "modelID": "echo"
+          }
+        },
+        "parts": [
+          {
+            "id": "prt_01f1dba7300166Vc5oY07N5uws",
+            "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+            "messageID": "msg_e51d4d61f84659f38e94bea049",
+            "type": "text",
+            "text": "A3_PROVIDER_ERROR"
+          }
+        ]
+      },
+      {
+        "info": {
+          "id": "msg_01f1dbb28001Yu5eTR0G4kVVQO",
+          "sessionID": "ses_fe0e245aeffeWrvboerw7QNN6X",
+          "role": "assistant",
+          "time": {
+            "created": 1787228437288,
+            "completed": 1787228445293
+          },
+          "error": {
+            "name": "APIError",
+            "data": {
+              "message": "localmock non-retryable provider rejection (A3)",
+              "statusCode": 400,
+              "isRetryable": false,
+              "responseHeaders": {
+                "connection": "close",
+                "content-length": "136",
+                "content-type": "application/json",
+                "date": "Thu, 20 Aug 2026 12:20:45 GMT",
+                "server": "BaseHTTP/0.6 Python/3.11.15"
+              },
+              "responseBody": "{\"error\": {\"message\": \"localmock non-retryable provider rejection (A3)\", \"type\": \"invalid_request_error\", \"code\": \"localmock_rejected\"}}",
+              "metadata": {
+                "url": "http://127.0.0.1:4399/v1/chat/completions"
+              }
+            }
+          },
+          "parentID": "msg_e51d4d61f84659f38e94bea049",
+          "modelID": "echo",
+          "providerID": "localmock",
+          "mode": "build",
+          "agent": "build",
+          "path": {
+            "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+            "root": "/"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          }
+        },
+        "parts": []
+      }
+    ],
+    "session": {
+      "id": "ses_fe0e245aeffeWrvboerw7QNN6X",
+      "slug": "crisp-sailor",
+      "projectID": "global",
+      "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+      "path": "private/tmp/ocw-gate-a-20260820/workspace",
+      "summary": {
+        "additions": 0,
+        "deletions": 0,
+        "files": 0
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "title": "Fixture session",
+      "agent": "build",
+      "model": {
+        "id": "echo",
+        "providerID": "localmock",
+        "variant": "default"
+      },
+      "version": "1.18.18",
+      "time": {
+        "created": 1787228437073,
+        "updated": 1787228437308
+      }
+    },
+    "status": {}
+  },
+  "derived": {
+    "retryStatusCount": 2,
+    "reachedIdle": true,
+    "lastStatus": "idle",
+    "assistantError": [
+      {
+        "name": "APIError",
+        "data": {
+          "message": "localmock non-retryable provider rejection (A3)",
+          "statusCode": 400,
+          "isRetryable": false,
+          "responseHeaders": {
+            "connection": "close",
+            "content-length": "136",
+            "content-type": "application/json",
+            "date": "Thu, 20 Aug 2026 12:20:45 GMT",
+            "server": "BaseHTTP/0.6 Python/3.11.15"
+          },
+          "responseBody": "{\"error\": {\"message\": \"localmock non-retryable provider rejection (A3)\", \"type\": \"invalid_request_error\", \"code\": \"localmock_rejected\"}}",
+          "metadata": {
+            "url": "http://127.0.0.1:4399/v1/chat/completions"
+          }
+        }
+      }
+    ],
+    "assistantFinish": [
+      null
+    ]
+  },
+  "bridgeMapping": {
+    "decision": "retry is not idle; terminal is captured session.error and/or assistant info.error",
+    "nestedSync": "retained as evidence only; v1 Web skips payload.type==sync"
+  },
+  "sanitization": {
+    "replaced": [
+      "session/message/part/event ids",
+      "absolute workspace paths",
+      "epoch timestamps > 1e9"
+    ],
+    "kept": [
+      "all JSON keys",
+      "event types",
+      "part types",
+      "HTTP method/path/status"
+    ]
+  }
+}

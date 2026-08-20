@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-20T12:06:55Z",
+  "updated_at": "2026-08-20T12:21:32Z",
   "todos": [
     {
       "id": "gate-a-inventory-impl",
@@ -204,7 +204,7 @@
         "gate-a-inventory-regression"
       ],
       "source": "Gate A",
-      "notes": "A1/A2/A4/A10 captured. Remaining A3/A5/A6/A7/A8/A9. Gate A not complete.",
+      "notes": "A1/A2/A3/A4/A5/A10 captured via independent checker. Remaining A6–A9. Gate A not complete.",
       "verification": {
         "required": true,
         "status": "missing",
@@ -213,7 +213,7 @@
         "na_reason": null,
         "summary": "",
         "artifacts": [],
-        "checked_at": "2026-08-20T12:06:55Z"
+        "checked_at": "2026-08-20T12:21:32Z"
       }
     },
     {

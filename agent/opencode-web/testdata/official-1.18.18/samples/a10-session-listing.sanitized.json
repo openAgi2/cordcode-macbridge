@@ -11,6 +11,24 @@
   },
   "http": [
     {
+      "method": "GET",
+      "path": "/session",
+      "query": {
+        "roots": "true",
+        "limit": "10"
+      },
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": [],
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:18:30 GMT",
+        "content-length": "2",
+        "vary": "Origin"
+      }
+    },
+    {
       "method": "POST",
       "path": "/session",
       "query": {},
@@ -21,7 +39,7 @@
       "status": 200,
       "response": {
         "id": "ses_fixture_001",
-        "slug": "silent-canyon",
+        "slug": "swift-nebula",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "path": "private/tmp/ocw-gate-a/workspace",
@@ -44,8 +62,8 @@
       },
       "responseHeaders": {
         "content-type": "application/json",
-        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
-        "content-length": "369",
+        "date": "Thu, 20 Aug 2026 12:18:30 GMT",
+        "content-length": "368",
         "vary": "Origin"
       }
     },
@@ -60,7 +78,7 @@
       "status": 200,
       "response": {
         "id": "ses_fixture_002",
-        "slug": "quick-sailor",
+        "slug": "quick-river",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "path": "private/tmp/ocw-gate-a/workspace",
@@ -83,8 +101,8 @@
       },
       "responseHeaders": {
         "content-type": "application/json",
-        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
-        "content-length": "368",
+        "date": "Thu, 20 Aug 2026 12:18:30 GMT",
+        "content-length": "367",
         "vary": "Origin"
       }
     },
@@ -99,7 +117,7 @@
       "status": 200,
       "response": {
         "id": "ses_fixture_003",
-        "slug": "neon-star",
+        "slug": "proud-garden",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "path": "private/tmp/ocw-gate-a/workspace",
@@ -122,8 +140,8 @@
       },
       "responseHeaders": {
         "content-type": "application/json",
-        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
-        "content-length": "365",
+        "date": "Thu, 20 Aug 2026 12:18:30 GMT",
+        "content-length": "368",
         "vary": "Origin"
       }
     },
@@ -138,7 +156,7 @@
       "status": 200,
       "response": {
         "id": "ses_fixture_004",
-        "slug": "mighty-harbor",
+        "slug": "playful-forest",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "path": "private/tmp/ocw-gate-a/workspace",
@@ -161,8 +179,8 @@
       },
       "responseHeaders": {
         "content-type": "application/json",
-        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
-        "content-length": "369",
+        "date": "Thu, 20 Aug 2026 12:18:30 GMT",
+        "content-length": "370",
         "vary": "Origin"
       }
     },
@@ -178,7 +196,7 @@
       "status": 200,
       "response": {
         "id": "ses_fixture_005",
-        "slug": "gentle-nebula",
+        "slug": "proud-planet",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "path": "private/tmp/ocw-gate-a/workspace",
@@ -202,8 +220,8 @@
       },
       "responseHeaders": {
         "content-type": "application/json",
-        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
-        "content-length": "414",
+        "date": "Thu, 20 Aug 2026 12:18:30 GMT",
+        "content-length": "413",
         "vary": "Origin"
       }
     },
@@ -220,7 +238,7 @@
       "status": 200,
       "response": {
         "id": "ses_fixture_002",
-        "slug": "quick-sailor",
+        "slug": "quick-river",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "path": "private/tmp/ocw-gate-a/workspace",
@@ -244,8 +262,8 @@
       },
       "responseHeaders": {
         "content-type": "application/json",
-        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
-        "content-length": "393",
+        "date": "Thu, 20 Aug 2026 12:18:30 GMT",
+        "content-length": "392",
         "vary": "Origin"
       }
     },
@@ -259,7 +277,7 @@
       "response": [
         {
           "id": "ses_fixture_005",
-          "slug": "gentle-nebula",
+          "slug": "proud-planet",
           "projectID": "global",
           "directory": "/private/tmp/ocw-gate-a/workspace",
           "path": "private/tmp/ocw-gate-a/workspace",
@@ -283,7 +301,7 @@
         },
         {
           "id": "ses_fixture_004",
-          "slug": "mighty-harbor",
+          "slug": "playful-forest",
           "projectID": "global",
           "directory": "/private/tmp/ocw-gate-a/workspace",
           "path": "private/tmp/ocw-gate-a/workspace",
@@ -306,7 +324,7 @@
         },
         {
           "id": "ses_fixture_003",
-          "slug": "neon-star",
+          "slug": "proud-garden",
           "projectID": "global",
           "directory": "/private/tmp/ocw-gate-a/workspace",
           "path": "private/tmp/ocw-gate-a/workspace",
@@ -329,7 +347,7 @@
         },
         {
           "id": "ses_fixture_002",
-          "slug": "quick-sailor",
+          "slug": "quick-river",
           "projectID": "global",
           "directory": "/private/tmp/ocw-gate-a/workspace",
           "path": "private/tmp/ocw-gate-a/workspace",
@@ -353,7 +371,7 @@
         },
         {
           "id": "ses_fixture_001",
-          "slug": "silent-canyon",
+          "slug": "swift-nebula",
           "projectID": "global",
           "directory": "/private/tmp/ocw-gate-a/workspace",
           "path": "private/tmp/ocw-gate-a/workspace",
@@ -373,114 +391,12 @@
             "created": 0,
             "updated": 0
           }
-        },
-        {
-          "id": "ses_fixture_006",
-          "slug": "stellar-star",
-          "projectID": "global",
-          "directory": "/private/tmp/ocw-gate-a/workspace",
-          "path": "private/tmp/ocw-gate-a/workspace",
-          "summary": {
-            "additions": 0,
-            "deletions": 0,
-            "files": 0
-          },
-          "cost": 0,
-          "tokens": {
-            "input": 0,
-            "output": 0,
-            "reasoning": 0,
-            "cache": {
-              "read": 0,
-              "write": 0
-            }
-          },
-          "title": "SLOW_STREAM_ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-          "agent": "build",
-          "model": {
-            "id": "echo",
-            "providerID": "localmock",
-            "variant": "default"
-          },
-          "version": "1.18.18",
-          "time": {
-            "created": 0,
-            "updated": 0
-          }
-        },
-        {
-          "id": "ses_fixture_007",
-          "slug": "neon-garden",
-          "projectID": "global",
-          "directory": "/private/tmp/ocw-gate-a/workspace",
-          "path": "private/tmp/ocw-gate-a/workspace",
-          "summary": {
-            "additions": 0,
-            "deletions": 0,
-            "files": 0
-          },
-          "cost": 0,
-          "tokens": {
-            "input": 16,
-            "output": 20,
-            "reasoning": 0,
-            "cache": {
-              "read": 0,
-              "write": 0
-            }
-          },
-          "title": "Fixture session",
-          "agent": "build",
-          "model": {
-            "id": "echo",
-            "providerID": "localmock",
-            "variant": "default"
-          },
-          "version": "1.18.18",
-          "time": {
-            "created": 0,
-            "updated": 0
-          }
-        },
-        {
-          "id": "ses_fixture_008",
-          "slug": "swift-harbor",
-          "projectID": "global",
-          "directory": "/private/tmp/ocw-gate-a/workspace",
-          "path": "private/tmp/ocw-gate-a/workspace",
-          "summary": {
-            "additions": 0,
-            "deletions": 0,
-            "files": 0
-          },
-          "cost": 0,
-          "tokens": {
-            "input": 16,
-            "output": 20,
-            "reasoning": 0,
-            "cache": {
-              "read": 0,
-              "write": 0
-            }
-          },
-          "title": "Fixture session",
-          "agent": "build",
-          "model": {
-            "id": "echo",
-            "providerID": "localmock",
-            "variant": "default"
-          },
-          "version": "1.18.18",
-          "time": {
-            "created": 0,
-            "updated": 0
-          }
         }
       ],
       "responseHeaders": {
         "content-type": "application/json",
-        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
-        "content-length": "3475",
+        "date": "Thu, 20 Aug 2026 12:18:30 GMT",
+        "content-length": "1917",
         "vary": "Origin"
       }
     },
@@ -497,7 +413,7 @@
       "response": [
         {
           "id": "ses_fixture_004",
-          "slug": "mighty-harbor",
+          "slug": "playful-forest",
           "projectID": "global",
           "directory": "/private/tmp/ocw-gate-a/workspace",
           "path": "private/tmp/ocw-gate-a/workspace",
@@ -520,7 +436,7 @@
         },
         {
           "id": "ses_fixture_003",
-          "slug": "neon-star",
+          "slug": "proud-garden",
           "projectID": "global",
           "directory": "/private/tmp/ocw-gate-a/workspace",
           "path": "private/tmp/ocw-gate-a/workspace",
@@ -544,8 +460,8 @@
       ],
       "responseHeaders": {
         "content-type": "application/json",
-        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
-        "content-length": "737",
+        "date": "Thu, 20 Aug 2026 12:18:30 GMT",
+        "content-length": "741",
         "vary": "Origin"
       }
     },
@@ -562,7 +478,7 @@
       "response": [
         {
           "id": "ses_fixture_004",
-          "slug": "mighty-harbor",
+          "slug": "playful-forest",
           "projectID": "global",
           "directory": "/private/tmp/ocw-gate-a/workspace",
           "path": "private/tmp/ocw-gate-a/workspace",
@@ -585,7 +501,7 @@
         },
         {
           "id": "ses_fixture_003",
-          "slug": "neon-star",
+          "slug": "proud-garden",
           "projectID": "global",
           "directory": "/private/tmp/ocw-gate-a/workspace",
           "path": "private/tmp/ocw-gate-a/workspace",
@@ -608,7 +524,7 @@
         },
         {
           "id": "ses_fixture_002",
-          "slug": "quick-sailor",
+          "slug": "quick-river",
           "projectID": "global",
           "directory": "/private/tmp/ocw-gate-a/workspace",
           "path": "private/tmp/ocw-gate-a/workspace",
@@ -633,8 +549,8 @@
       ],
       "responseHeaders": {
         "content-type": "application/json",
-        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
-        "content-length": "1131",
+        "date": "Thu, 20 Aug 2026 12:18:30 GMT",
+        "content-length": "1134",
         "vary": "Origin"
       }
     },
@@ -651,7 +567,7 @@
       "response": [
         {
           "id": "ses_fixture_004",
-          "slug": "mighty-harbor",
+          "slug": "playful-forest",
           "projectID": "global",
           "directory": "/private/tmp/ocw-gate-a/workspace",
           "path": "private/tmp/ocw-gate-a/workspace",
@@ -674,7 +590,7 @@
         },
         {
           "id": "ses_fixture_003",
-          "slug": "neon-star",
+          "slug": "proud-garden",
           "projectID": "global",
           "directory": "/private/tmp/ocw-gate-a/workspace",
           "path": "private/tmp/ocw-gate-a/workspace",
@@ -697,7 +613,7 @@
         },
         {
           "id": "ses_fixture_002",
-          "slug": "quick-sailor",
+          "slug": "quick-river",
           "projectID": "global",
           "directory": "/private/tmp/ocw-gate-a/workspace",
           "path": "private/tmp/ocw-gate-a/workspace",
@@ -721,7 +637,7 @@
         },
         {
           "id": "ses_fixture_001",
-          "slug": "silent-canyon",
+          "slug": "swift-nebula",
           "projectID": "global",
           "directory": "/private/tmp/ocw-gate-a/workspace",
           "path": "private/tmp/ocw-gate-a/workspace",
@@ -741,114 +657,12 @@
             "created": 0,
             "updated": 0
           }
-        },
-        {
-          "id": "ses_fixture_006",
-          "slug": "stellar-star",
-          "projectID": "global",
-          "directory": "/private/tmp/ocw-gate-a/workspace",
-          "path": "private/tmp/ocw-gate-a/workspace",
-          "summary": {
-            "additions": 0,
-            "deletions": 0,
-            "files": 0
-          },
-          "cost": 0,
-          "tokens": {
-            "input": 0,
-            "output": 0,
-            "reasoning": 0,
-            "cache": {
-              "read": 0,
-              "write": 0
-            }
-          },
-          "title": "SLOW_STREAM_ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-          "agent": "build",
-          "model": {
-            "id": "echo",
-            "providerID": "localmock",
-            "variant": "default"
-          },
-          "version": "1.18.18",
-          "time": {
-            "created": 0,
-            "updated": 0
-          }
-        },
-        {
-          "id": "ses_fixture_007",
-          "slug": "neon-garden",
-          "projectID": "global",
-          "directory": "/private/tmp/ocw-gate-a/workspace",
-          "path": "private/tmp/ocw-gate-a/workspace",
-          "summary": {
-            "additions": 0,
-            "deletions": 0,
-            "files": 0
-          },
-          "cost": 0,
-          "tokens": {
-            "input": 16,
-            "output": 20,
-            "reasoning": 0,
-            "cache": {
-              "read": 0,
-              "write": 0
-            }
-          },
-          "title": "Fixture session",
-          "agent": "build",
-          "model": {
-            "id": "echo",
-            "providerID": "localmock",
-            "variant": "default"
-          },
-          "version": "1.18.18",
-          "time": {
-            "created": 0,
-            "updated": 0
-          }
-        },
-        {
-          "id": "ses_fixture_008",
-          "slug": "swift-harbor",
-          "projectID": "global",
-          "directory": "/private/tmp/ocw-gate-a/workspace",
-          "path": "private/tmp/ocw-gate-a/workspace",
-          "summary": {
-            "additions": 0,
-            "deletions": 0,
-            "files": 0
-          },
-          "cost": 0,
-          "tokens": {
-            "input": 16,
-            "output": 20,
-            "reasoning": 0,
-            "cache": {
-              "read": 0,
-              "write": 0
-            }
-          },
-          "title": "Fixture session",
-          "agent": "build",
-          "model": {
-            "id": "echo",
-            "providerID": "localmock",
-            "variant": "default"
-          },
-          "version": "1.18.18",
-          "time": {
-            "created": 0,
-            "updated": 0
-          }
         }
       ],
       "responseHeaders": {
         "content-type": "application/json",
-        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
-        "content-length": "3060",
+        "date": "Thu, 20 Aug 2026 12:18:30 GMT",
+        "content-length": "1503",
         "vary": "Origin"
       }
     },
@@ -865,7 +679,7 @@
       "response": [
         {
           "id": "ses_fixture_004",
-          "slug": "mighty-harbor",
+          "slug": "playful-forest",
           "projectID": "global",
           "directory": "/private/tmp/ocw-gate-a/workspace",
           "path": "private/tmp/ocw-gate-a/workspace",
@@ -889,8 +703,8 @@
       ],
       "responseHeaders": {
         "content-type": "application/json",
-        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
-        "content-length": "371",
+        "date": "Thu, 20 Aug 2026 12:18:30 GMT",
+        "content-length": "372",
         "vary": "Origin"
       }
     },
@@ -904,7 +718,7 @@
       "response": [
         {
           "id": "ses_fixture_005",
-          "slug": "gentle-nebula",
+          "slug": "proud-planet",
           "projectID": "global",
           "directory": "/private/tmp/ocw-gate-a/workspace",
           "path": "private/tmp/ocw-gate-a/workspace",
@@ -929,8 +743,8 @@
       ],
       "responseHeaders": {
         "content-type": "application/json",
-        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
-        "content-length": "416",
+        "date": "Thu, 20 Aug 2026 12:18:30 GMT",
+        "content-length": "415",
         "vary": "Origin"
       }
     },
@@ -943,7 +757,7 @@
       "status": 200,
       "response": {
         "id": "ses_fixture_002",
-        "slug": "quick-sailor",
+        "slug": "quick-river",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "path": "private/tmp/ocw-gate-a/workspace",
@@ -967,8 +781,26 @@
       },
       "responseHeaders": {
         "content-type": "application/json",
-        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
-        "content-length": "393",
+        "date": "Thu, 20 Aug 2026 12:18:30 GMT",
+        "content-length": "392",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session",
+      "query": {
+        "roots": "true",
+        "limit": "10"
+      },
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": [],
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:18:30 GMT",
+        "content-length": "2",
         "vary": "Origin"
       }
     },
@@ -982,8 +814,8 @@
       },
       "status": 200,
       "response": {
-        "id": "ses_fixture_009",
-        "slug": "quiet-tiger",
+        "id": "ses_fixture_006",
+        "slug": "proud-wizard",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace2",
         "path": "private/tmp/ocw-gate-a/workspace2",
@@ -1006,8 +838,8 @@
       },
       "responseHeaders": {
         "content-type": "application/json",
-        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
-        "content-length": "377",
+        "date": "Thu, 20 Aug 2026 12:18:30 GMT",
+        "content-length": "378",
         "vary": "Origin"
       }
     },
@@ -1023,8 +855,8 @@
       "status": 200,
       "response": [
         {
-          "id": "ses_fixture_009",
-          "slug": "quiet-tiger",
+          "id": "ses_fixture_006",
+          "slug": "proud-wizard",
           "projectID": "global",
           "directory": "/private/tmp/ocw-gate-a/workspace2",
           "path": "private/tmp/ocw-gate-a/workspace2",
@@ -1048,16 +880,17 @@
       ],
       "responseHeaders": {
         "content-type": "application/json",
-        "date": "Thu, 20 Aug 2026 12:05:39 GMT",
-        "content-length": "379",
+        "date": "Thu, 20 Aug 2026 12:18:30 GMT",
+        "content-length": "380",
         "vary": "Origin"
       }
     }
   ],
   "sseEventTypes": [
     "server.connected",
-    "session.updated",
-    "sync",
+    "models-dev.refreshed",
+    "project.updated",
+    "project.updated",
     "session.created",
     "sync",
     "session.created",
@@ -1069,24 +902,23 @@
     "session.created",
     "sync",
     "session.updated",
-    "sync",
-    "project.updated"
+    "sync"
   ],
   "sseClassification": {
     "directTypes": [
       "server.connected",
-      "session.updated",
+      "models-dev.refreshed",
+      "project.updated",
+      "project.updated",
       "session.created",
       "session.created",
       "session.created",
       "session.created",
       "session.created",
-      "session.updated",
-      "project.updated"
+      "session.updated"
     ],
-    "syncCount": 7,
+    "syncCount": 6,
     "syncTypes": [
-      "session.updated.1",
       "session.created.1",
       "session.created.1",
       "session.created.1",
@@ -1101,9 +933,59 @@
       "t": 0,
       "event": {
         "payload": {
-          "id": "evt_fixture_010",
+          "id": "evt_fixture_007",
           "type": "server.connected",
           "properties": {}
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "payload": {
+          "id": "evt_fixture_008",
+          "type": "models-dev.refreshed",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "global",
+        "project": "global",
+        "payload": {
+          "type": "project.updated",
+          "properties": {
+            "id": "global",
+            "worktree": "/",
+            "sandboxes": [],
+            "time": {
+              "created": 0,
+              "updated": 0
+            }
+          },
+          "id": "evt_fixture_009"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "global",
+        "project": "global",
+        "payload": {
+          "type": "project.updated",
+          "properties": {
+            "id": "global",
+            "worktree": "/",
+            "time": {
+              "created": 0,
+              "updated": 0
+            },
+            "sandboxes": []
+          },
+          "id": "evt_fixture_010"
         }
       }
     },
@@ -1114,114 +996,12 @@
         "project": "global",
         "payload": {
           "id": "evt_fixture_011",
-          "type": "session.updated",
-          "properties": {
-            "sessionID": "ses_fixture_006",
-            "info": {
-              "id": "ses_fixture_006",
-              "slug": "stellar-star",
-              "projectID": "global",
-              "directory": "/private/tmp/ocw-gate-a/workspace",
-              "path": "private/tmp/ocw-gate-a/workspace",
-              "title": "SLOW_STREAM_ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-              "agent": "build",
-              "model": {
-                "id": "echo",
-                "providerID": "localmock",
-                "variant": "default"
-              },
-              "version": "1.18.18",
-              "summary": {
-                "additions": 0,
-                "deletions": 0,
-                "files": 0
-              },
-              "cost": 0,
-              "tokens": {
-                "input": 0,
-                "output": 0,
-                "reasoning": 0,
-                "cache": {
-                  "read": 0,
-                  "write": 0
-                }
-              },
-              "time": {
-                "created": 0,
-                "updated": 0
-              }
-            }
-          }
-        }
-      }
-    },
-    {
-      "t": 0,
-      "event": {
-        "directory": "/private/tmp/ocw-gate-a/workspace",
-        "project": "global",
-        "payload": {
-          "type": "sync",
-          "syncEvent": {
-            "id": "evt_fixture_011",
-            "type": "session.updated.1",
-            "seq": 12,
-            "aggregateID": "ses_fixture_006",
-            "data": {
-              "sessionID": "ses_fixture_006",
-              "info": {
-                "id": "ses_fixture_006",
-                "slug": "stellar-star",
-                "projectID": "global",
-                "directory": "/private/tmp/ocw-gate-a/workspace",
-                "path": "private/tmp/ocw-gate-a/workspace",
-                "title": "SLOW_STREAM_ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-                "agent": "build",
-                "model": {
-                  "id": "echo",
-                  "providerID": "localmock",
-                  "variant": "default"
-                },
-                "version": "1.18.18",
-                "summary": {
-                  "additions": 0,
-                  "deletions": 0,
-                  "files": 0
-                },
-                "cost": 0,
-                "tokens": {
-                  "input": 0,
-                  "output": 0,
-                  "reasoning": 0,
-                  "cache": {
-                    "read": 0,
-                    "write": 0
-                  }
-                },
-                "time": {
-                  "created": 0,
-                  "updated": 0
-                }
-              }
-            }
-          },
-          "id": "evt_fixture_011"
-        }
-      }
-    },
-    {
-      "t": 0,
-      "event": {
-        "directory": "/private/tmp/ocw-gate-a/workspace",
-        "project": "global",
-        "payload": {
-          "id": "evt_fixture_012",
           "type": "session.created",
           "properties": {
             "sessionID": "ses_fixture_001",
             "info": {
               "id": "ses_fixture_001",
-              "slug": "silent-canyon",
+              "slug": "swift-nebula",
               "version": "1.18.18",
               "projectID": "global",
               "directory": "/private/tmp/ocw-gate-a/workspace",
@@ -1254,7 +1034,7 @@
         "payload": {
           "type": "sync",
           "syncEvent": {
-            "id": "evt_fixture_012",
+            "id": "evt_fixture_011",
             "type": "session.created.1",
             "seq": 0,
             "aggregateID": "ses_fixture_001",
@@ -1262,7 +1042,7 @@
               "sessionID": "ses_fixture_001",
               "info": {
                 "id": "ses_fixture_001",
-                "slug": "silent-canyon",
+                "slug": "swift-nebula",
                 "version": "1.18.18",
                 "projectID": "global",
                 "directory": "/private/tmp/ocw-gate-a/workspace",
@@ -1285,7 +1065,7 @@
               }
             }
           },
-          "id": "evt_fixture_012"
+          "id": "evt_fixture_011"
         }
       }
     },
@@ -1295,13 +1075,13 @@
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "project": "global",
         "payload": {
-          "id": "evt_fixture_013",
+          "id": "evt_fixture_012",
           "type": "session.created",
           "properties": {
             "sessionID": "ses_fixture_002",
             "info": {
               "id": "ses_fixture_002",
-              "slug": "quick-sailor",
+              "slug": "quick-river",
               "version": "1.18.18",
               "projectID": "global",
               "directory": "/private/tmp/ocw-gate-a/workspace",
@@ -1334,7 +1114,7 @@
         "payload": {
           "type": "sync",
           "syncEvent": {
-            "id": "evt_fixture_013",
+            "id": "evt_fixture_012",
             "type": "session.created.1",
             "seq": 0,
             "aggregateID": "ses_fixture_002",
@@ -1342,7 +1122,7 @@
               "sessionID": "ses_fixture_002",
               "info": {
                 "id": "ses_fixture_002",
-                "slug": "quick-sailor",
+                "slug": "quick-river",
                 "version": "1.18.18",
                 "projectID": "global",
                 "directory": "/private/tmp/ocw-gate-a/workspace",
@@ -1365,7 +1145,7 @@
               }
             }
           },
-          "id": "evt_fixture_013"
+          "id": "evt_fixture_012"
         }
       }
     },
@@ -1375,13 +1155,13 @@
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "project": "global",
         "payload": {
-          "id": "evt_fixture_014",
+          "id": "evt_fixture_013",
           "type": "session.created",
           "properties": {
             "sessionID": "ses_fixture_003",
             "info": {
               "id": "ses_fixture_003",
-              "slug": "neon-star",
+              "slug": "proud-garden",
               "version": "1.18.18",
               "projectID": "global",
               "directory": "/private/tmp/ocw-gate-a/workspace",
@@ -1414,7 +1194,7 @@
         "payload": {
           "type": "sync",
           "syncEvent": {
-            "id": "evt_fixture_014",
+            "id": "evt_fixture_013",
             "type": "session.created.1",
             "seq": 0,
             "aggregateID": "ses_fixture_003",
@@ -1422,7 +1202,7 @@
               "sessionID": "ses_fixture_003",
               "info": {
                 "id": "ses_fixture_003",
-                "slug": "neon-star",
+                "slug": "proud-garden",
                 "version": "1.18.18",
                 "projectID": "global",
                 "directory": "/private/tmp/ocw-gate-a/workspace",
@@ -1445,7 +1225,7 @@
               }
             }
           },
-          "id": "evt_fixture_014"
+          "id": "evt_fixture_013"
         }
       }
     },
@@ -1455,13 +1235,13 @@
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "project": "global",
         "payload": {
-          "id": "evt_fixture_015",
+          "id": "evt_fixture_014",
           "type": "session.created",
           "properties": {
             "sessionID": "ses_fixture_004",
             "info": {
               "id": "ses_fixture_004",
-              "slug": "mighty-harbor",
+              "slug": "playful-forest",
               "version": "1.18.18",
               "projectID": "global",
               "directory": "/private/tmp/ocw-gate-a/workspace",
@@ -1494,7 +1274,7 @@
         "payload": {
           "type": "sync",
           "syncEvent": {
-            "id": "evt_fixture_015",
+            "id": "evt_fixture_014",
             "type": "session.created.1",
             "seq": 0,
             "aggregateID": "ses_fixture_004",
@@ -1502,7 +1282,7 @@
               "sessionID": "ses_fixture_004",
               "info": {
                 "id": "ses_fixture_004",
-                "slug": "mighty-harbor",
+                "slug": "playful-forest",
                 "version": "1.18.18",
                 "projectID": "global",
                 "directory": "/private/tmp/ocw-gate-a/workspace",
@@ -1525,7 +1305,7 @@
               }
             }
           },
-          "id": "evt_fixture_015"
+          "id": "evt_fixture_014"
         }
       }
     },
@@ -1535,13 +1315,13 @@
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "project": "global",
         "payload": {
-          "id": "evt_fixture_016",
+          "id": "evt_fixture_015",
           "type": "session.created",
           "properties": {
             "sessionID": "ses_fixture_005",
             "info": {
               "id": "ses_fixture_005",
-              "slug": "gentle-nebula",
+              "slug": "proud-planet",
               "version": "1.18.18",
               "projectID": "global",
               "directory": "/private/tmp/ocw-gate-a/workspace",
@@ -1575,7 +1355,7 @@
         "payload": {
           "type": "sync",
           "syncEvent": {
-            "id": "evt_fixture_016",
+            "id": "evt_fixture_015",
             "type": "session.created.1",
             "seq": 0,
             "aggregateID": "ses_fixture_005",
@@ -1583,7 +1363,7 @@
               "sessionID": "ses_fixture_005",
               "info": {
                 "id": "ses_fixture_005",
-                "slug": "gentle-nebula",
+                "slug": "proud-planet",
                 "version": "1.18.18",
                 "projectID": "global",
                 "directory": "/private/tmp/ocw-gate-a/workspace",
@@ -1607,7 +1387,7 @@
               }
             }
           },
-          "id": "evt_fixture_016"
+          "id": "evt_fixture_015"
         }
       }
     },
@@ -1617,13 +1397,13 @@
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "project": "global",
         "payload": {
-          "id": "evt_fixture_017",
+          "id": "evt_fixture_016",
           "type": "session.updated",
           "properties": {
             "sessionID": "ses_fixture_002",
             "info": {
               "id": "ses_fixture_002",
-              "slug": "quick-sailor",
+              "slug": "quick-river",
               "projectID": "global",
               "directory": "/private/tmp/ocw-gate-a/workspace",
               "path": "private/tmp/ocw-gate-a/workspace",
@@ -1657,7 +1437,7 @@
         "payload": {
           "type": "sync",
           "syncEvent": {
-            "id": "evt_fixture_017",
+            "id": "evt_fixture_016",
             "type": "session.updated.1",
             "seq": 1,
             "aggregateID": "ses_fixture_002",
@@ -1665,7 +1445,7 @@
               "sessionID": "ses_fixture_002",
               "info": {
                 "id": "ses_fixture_002",
-                "slug": "quick-sailor",
+                "slug": "quick-river",
                 "projectID": "global",
                 "directory": "/private/tmp/ocw-gate-a/workspace",
                 "path": "private/tmp/ocw-gate-a/workspace",
@@ -1689,27 +1469,7 @@
               }
             }
           },
-          "id": "evt_fixture_017"
-        }
-      }
-    },
-    {
-      "t": 0,
-      "event": {
-        "directory": "global",
-        "project": "global",
-        "payload": {
-          "type": "project.updated",
-          "properties": {
-            "id": "global",
-            "worktree": "/",
-            "time": {
-              "created": 0,
-              "updated": 0
-            },
-            "sandboxes": []
-          },
-          "id": "evt_fixture_018"
+          "id": "evt_fixture_016"
         }
       }
     }
@@ -1717,6 +1477,10 @@
   "reload": {
     "workspace1": "/tmp/ocw-gate-a/workspace",
     "workspace2": "/tmp/ocw-gate-a/workspace2",
+    "baseline": {
+      "workspace1": [],
+      "workspace2": []
+    },
     "rootIDs": [
       "ses_fixture_001",
       "ses_fixture_002",
@@ -1725,7 +1489,7 @@
     ],
     "child": {
       "id": "ses_fixture_005",
-      "slug": "gentle-nebula",
+      "slug": "proud-planet",
       "projectID": "global",
       "directory": "/private/tmp/ocw-gate-a/workspace",
       "path": "private/tmp/ocw-gate-a/workspace",
@@ -1750,7 +1514,7 @@
     "archivePatchStatus": 200,
     "archivePatch": {
       "id": "ses_fixture_002",
-      "slug": "quick-sailor",
+      "slug": "quick-river",
       "projectID": "global",
       "directory": "/private/tmp/ocw-gate-a/workspace",
       "path": "private/tmp/ocw-gate-a/workspace",
@@ -1775,7 +1539,7 @@
     "listedDefault": [
       {
         "id": "ses_fixture_005",
-        "slug": "gentle-nebula",
+        "slug": "proud-planet",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "path": "private/tmp/ocw-gate-a/workspace",
@@ -1799,7 +1563,7 @@
       },
       {
         "id": "ses_fixture_004",
-        "slug": "mighty-harbor",
+        "slug": "playful-forest",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "path": "private/tmp/ocw-gate-a/workspace",
@@ -1822,7 +1586,7 @@
       },
       {
         "id": "ses_fixture_003",
-        "slug": "neon-star",
+        "slug": "proud-garden",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "path": "private/tmp/ocw-gate-a/workspace",
@@ -1845,7 +1609,7 @@
       },
       {
         "id": "ses_fixture_002",
-        "slug": "quick-sailor",
+        "slug": "quick-river",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "path": "private/tmp/ocw-gate-a/workspace",
@@ -1869,7 +1633,7 @@
       },
       {
         "id": "ses_fixture_001",
-        "slug": "silent-canyon",
+        "slug": "swift-nebula",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "path": "private/tmp/ocw-gate-a/workspace",
@@ -1889,114 +1653,12 @@
           "created": 0,
           "updated": 0
         }
-      },
-      {
-        "id": "ses_fixture_006",
-        "slug": "stellar-star",
-        "projectID": "global",
-        "directory": "/private/tmp/ocw-gate-a/workspace",
-        "path": "private/tmp/ocw-gate-a/workspace",
-        "summary": {
-          "additions": 0,
-          "deletions": 0,
-          "files": 0
-        },
-        "cost": 0,
-        "tokens": {
-          "input": 0,
-          "output": 0,
-          "reasoning": 0,
-          "cache": {
-            "read": 0,
-            "write": 0
-          }
-        },
-        "title": "SLOW_STREAM_ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-        "agent": "build",
-        "model": {
-          "id": "echo",
-          "providerID": "localmock",
-          "variant": "default"
-        },
-        "version": "1.18.18",
-        "time": {
-          "created": 0,
-          "updated": 0
-        }
-      },
-      {
-        "id": "ses_fixture_007",
-        "slug": "neon-garden",
-        "projectID": "global",
-        "directory": "/private/tmp/ocw-gate-a/workspace",
-        "path": "private/tmp/ocw-gate-a/workspace",
-        "summary": {
-          "additions": 0,
-          "deletions": 0,
-          "files": 0
-        },
-        "cost": 0,
-        "tokens": {
-          "input": 16,
-          "output": 20,
-          "reasoning": 0,
-          "cache": {
-            "read": 0,
-            "write": 0
-          }
-        },
-        "title": "Fixture session",
-        "agent": "build",
-        "model": {
-          "id": "echo",
-          "providerID": "localmock",
-          "variant": "default"
-        },
-        "version": "1.18.18",
-        "time": {
-          "created": 0,
-          "updated": 0
-        }
-      },
-      {
-        "id": "ses_fixture_008",
-        "slug": "swift-harbor",
-        "projectID": "global",
-        "directory": "/private/tmp/ocw-gate-a/workspace",
-        "path": "private/tmp/ocw-gate-a/workspace",
-        "summary": {
-          "additions": 0,
-          "deletions": 0,
-          "files": 0
-        },
-        "cost": 0,
-        "tokens": {
-          "input": 16,
-          "output": 20,
-          "reasoning": 0,
-          "cache": {
-            "read": 0,
-            "write": 0
-          }
-        },
-        "title": "Fixture session",
-        "agent": "build",
-        "model": {
-          "id": "echo",
-          "providerID": "localmock",
-          "variant": "default"
-        },
-        "version": "1.18.18",
-        "time": {
-          "created": 0,
-          "updated": 0
-        }
       }
     ],
     "listedRootsLimit1": [
       {
         "id": "ses_fixture_004",
-        "slug": "mighty-harbor",
+        "slug": "playful-forest",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "path": "private/tmp/ocw-gate-a/workspace",
@@ -2021,7 +1683,7 @@
     "listedRootsLimit2": [
       {
         "id": "ses_fixture_004",
-        "slug": "mighty-harbor",
+        "slug": "playful-forest",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "path": "private/tmp/ocw-gate-a/workspace",
@@ -2044,7 +1706,7 @@
       },
       {
         "id": "ses_fixture_003",
-        "slug": "neon-star",
+        "slug": "proud-garden",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "path": "private/tmp/ocw-gate-a/workspace",
@@ -2069,7 +1731,7 @@
     "listedRootsLimit3": [
       {
         "id": "ses_fixture_004",
-        "slug": "mighty-harbor",
+        "slug": "playful-forest",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "path": "private/tmp/ocw-gate-a/workspace",
@@ -2092,7 +1754,7 @@
       },
       {
         "id": "ses_fixture_003",
-        "slug": "neon-star",
+        "slug": "proud-garden",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "path": "private/tmp/ocw-gate-a/workspace",
@@ -2115,7 +1777,7 @@
       },
       {
         "id": "ses_fixture_002",
-        "slug": "quick-sailor",
+        "slug": "quick-river",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "path": "private/tmp/ocw-gate-a/workspace",
@@ -2141,7 +1803,7 @@
     "listedRootsLimit10": [
       {
         "id": "ses_fixture_004",
-        "slug": "mighty-harbor",
+        "slug": "playful-forest",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "path": "private/tmp/ocw-gate-a/workspace",
@@ -2164,7 +1826,7 @@
       },
       {
         "id": "ses_fixture_003",
-        "slug": "neon-star",
+        "slug": "proud-garden",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "path": "private/tmp/ocw-gate-a/workspace",
@@ -2187,7 +1849,7 @@
       },
       {
         "id": "ses_fixture_002",
-        "slug": "quick-sailor",
+        "slug": "quick-river",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "path": "private/tmp/ocw-gate-a/workspace",
@@ -2211,7 +1873,7 @@
       },
       {
         "id": "ses_fixture_001",
-        "slug": "silent-canyon",
+        "slug": "swift-nebula",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "path": "private/tmp/ocw-gate-a/workspace",
@@ -2231,114 +1893,12 @@
           "created": 0,
           "updated": 0
         }
-      },
-      {
-        "id": "ses_fixture_006",
-        "slug": "stellar-star",
-        "projectID": "global",
-        "directory": "/private/tmp/ocw-gate-a/workspace",
-        "path": "private/tmp/ocw-gate-a/workspace",
-        "summary": {
-          "additions": 0,
-          "deletions": 0,
-          "files": 0
-        },
-        "cost": 0,
-        "tokens": {
-          "input": 0,
-          "output": 0,
-          "reasoning": 0,
-          "cache": {
-            "read": 0,
-            "write": 0
-          }
-        },
-        "title": "SLOW_STREAM_ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-        "agent": "build",
-        "model": {
-          "id": "echo",
-          "providerID": "localmock",
-          "variant": "default"
-        },
-        "version": "1.18.18",
-        "time": {
-          "created": 0,
-          "updated": 0
-        }
-      },
-      {
-        "id": "ses_fixture_007",
-        "slug": "neon-garden",
-        "projectID": "global",
-        "directory": "/private/tmp/ocw-gate-a/workspace",
-        "path": "private/tmp/ocw-gate-a/workspace",
-        "summary": {
-          "additions": 0,
-          "deletions": 0,
-          "files": 0
-        },
-        "cost": 0,
-        "tokens": {
-          "input": 16,
-          "output": 20,
-          "reasoning": 0,
-          "cache": {
-            "read": 0,
-            "write": 0
-          }
-        },
-        "title": "Fixture session",
-        "agent": "build",
-        "model": {
-          "id": "echo",
-          "providerID": "localmock",
-          "variant": "default"
-        },
-        "version": "1.18.18",
-        "time": {
-          "created": 0,
-          "updated": 0
-        }
-      },
-      {
-        "id": "ses_fixture_008",
-        "slug": "swift-harbor",
-        "projectID": "global",
-        "directory": "/private/tmp/ocw-gate-a/workspace",
-        "path": "private/tmp/ocw-gate-a/workspace",
-        "summary": {
-          "additions": 0,
-          "deletions": 0,
-          "files": 0
-        },
-        "cost": 0,
-        "tokens": {
-          "input": 16,
-          "output": 20,
-          "reasoning": 0,
-          "cache": {
-            "read": 0,
-            "write": 0
-          }
-        },
-        "title": "Fixture session",
-        "agent": "build",
-        "model": {
-          "id": "echo",
-          "providerID": "localmock",
-          "variant": "default"
-        },
-        "version": "1.18.18",
-        "time": {
-          "created": 0,
-          "updated": 0
-        }
       }
     ],
     "children": [
       {
         "id": "ses_fixture_005",
-        "slug": "gentle-nebula",
+        "slug": "proud-planet",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace",
         "path": "private/tmp/ocw-gate-a/workspace",
@@ -2364,7 +1924,7 @@
     "archivedGetStatus": 200,
     "archivedGet": {
       "id": "ses_fixture_002",
-      "slug": "quick-sailor",
+      "slug": "quick-river",
       "projectID": "global",
       "directory": "/private/tmp/ocw-gate-a/workspace",
       "path": "private/tmp/ocw-gate-a/workspace",
@@ -2388,8 +1948,8 @@
     },
     "listedDir2": [
       {
-        "id": "ses_fixture_009",
-        "slug": "quiet-tiger",
+        "id": "ses_fixture_006",
+        "slug": "proud-wizard",
         "projectID": "global",
         "directory": "/private/tmp/ocw-gate-a/workspace2",
         "path": "private/tmp/ocw-gate-a/workspace2",
@@ -2413,11 +1973,11 @@
     ]
   },
   "assertions": {
-    "defaultCount": 8,
+    "defaultCount": 5,
     "rootsLimit1Count": 1,
     "rootsLimit2Count": 2,
     "rootsLimit3Count": 3,
-    "rootsLimit10Count": 7,
+    "rootsLimit10Count": 4,
     "childCreateStatus": 200,
     "childIDs": [
       "ses_fixture_005"

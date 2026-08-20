@@ -1,0 +1,3516 @@
+{
+  "meta": {
+    "scenario": "A5",
+    "opencodeVersion": "1.18.18",
+    "sourceCommit": "2cba7e227d",
+    "captureStatus": "captured",
+    "promptHttpStatus": 204,
+    "sse1Error": null,
+    "sse2Error": null,
+    "firstAfterReconnect": [
+      "server.connected",
+      "message.part.delta",
+      "message.part.delta",
+      "message.part.delta",
+      "message.part.delta"
+    ]
+  },
+  "source": {
+    "ui": "packages/app/src/context/server-sdk.tsx:268-308 reconnect loop; v1 skips sync",
+    "server": "GET /global/event; no assumed replay buffer"
+  },
+  "http": [
+    {
+      "method": "POST",
+      "path": "/session",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {},
+      "status": 200,
+      "response": {
+        "id": "ses_fixture_001",
+        "slug": "tidy-mountain",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "path": "private/tmp/ocw-gate-a/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "New session - 2026-08-20T12:19:09.950Z",
+        "version": "1.18.18",
+        "time": {
+          "created": 0,
+          "updated": 0
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:19:09 GMT",
+        "content-length": "401",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/session/ses_fixture_001/prompt_async",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {
+        "messageID": "msg_fixture_002",
+        "agent": "build",
+        "model": {
+          "providerID": "localmock",
+          "modelID": "echo"
+        },
+        "parts": [
+          {
+            "type": "text",
+            "text": "A5_RECONNECT keep streaming"
+          }
+        ]
+      },
+      "status": 204,
+      "response": null,
+      "responseHeaders": {
+        "vary": "Origin",
+        "date": "Thu, 20 Aug 2026 12:19:09 GMT",
+        "content-length": "0"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/status",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": {
+        "ses_fe0e39a01ffeZK76F50A5xloUQ": {
+          "type": "busy"
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:19:10 GMT",
+        "content-length": "50",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/ses_fixture_001/message",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": [
+        {
+          "info": {
+            "id": "msg_fixture_002",
+            "sessionID": "ses_fixture_001",
+            "role": "user",
+            "time": {
+              "created": 0
+            },
+            "summary": {
+              "diffs": []
+            },
+            "agent": "build",
+            "model": {
+              "providerID": "localmock",
+              "modelID": "echo"
+            }
+          },
+          "parts": [
+            {
+              "id": "prt_fixture_003",
+              "sessionID": "ses_fixture_001",
+              "messageID": "msg_fixture_002",
+              "type": "text",
+              "text": "A5_RECONNECT keep streaming"
+            }
+          ]
+        },
+        {
+          "info": {
+            "id": "msg_fixture_004",
+            "sessionID": "ses_fixture_001",
+            "role": "assistant",
+            "time": {
+              "created": 0,
+              "completed": 0
+            },
+            "parentID": "msg_fixture_002",
+            "modelID": "echo",
+            "providerID": "localmock",
+            "mode": "build",
+            "agent": "build",
+            "path": {
+              "cwd": "/private/tmp/ocw-gate-a/workspace",
+              "root": "/"
+            },
+            "cost": 0,
+            "tokens": {
+              "total": 99,
+              "input": 8,
+              "output": 91,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            },
+            "finish": "stop"
+          },
+          "parts": [
+            {
+              "id": "prt_fixture_005",
+              "sessionID": "ses_fixture_001",
+              "messageID": "msg_fixture_004",
+              "type": "step-start"
+            },
+            {
+              "id": "prt_fixture_006",
+              "sessionID": "ses_fixture_001",
+              "messageID": "msg_fixture_004",
+              "type": "text",
+              "text": "A5_PARTIAL_ABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJ",
+              "time": {
+                "start": 0,
+                "end": 0
+              }
+            },
+            {
+              "id": "prt_fixture_007",
+              "sessionID": "ses_fixture_001",
+              "messageID": "msg_fixture_004",
+              "type": "step-finish",
+              "reason": "stop",
+              "cost": 0,
+              "tokens": {
+                "total": 99,
+                "input": 8,
+                "output": 91,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:19:42 GMT",
+        "content-length": "1615",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/ses_fixture_001",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": {
+        "id": "ses_fixture_001",
+        "slug": "tidy-mountain",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "path": "private/tmp/ocw-gate-a/workspace",
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 8,
+          "output": 91,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "A5_PARTIAL_ABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJ",
+        "agent": "build",
+        "model": {
+          "id": "echo",
+          "providerID": "localmock",
+          "variant": "default"
+        },
+        "version": "1.18.18",
+        "time": {
+          "created": 0,
+          "updated": 0
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:19:42 GMT",
+        "content-length": "588",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/status",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": {},
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:19:42 GMT",
+        "content-length": "2",
+        "vary": "Origin"
+      }
+    }
+  ],
+  "sseBefore": [
+    {
+      "t": 0,
+      "event": {
+        "payload": {
+          "id": "evt_fixture_008",
+          "type": "server.connected",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_009",
+          "type": "session.created",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "ses_fixture_001",
+              "slug": "tidy-mountain",
+              "version": "1.18.18",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a/workspace",
+              "path": "private/tmp/ocw-gate-a/workspace",
+              "title": "New session - 2026-08-20T12:19:09.950Z",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 0,
+                "updated": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_009",
+            "type": "session.created.1",
+            "seq": 0,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "ses_fixture_001",
+                "slug": "tidy-mountain",
+                "version": "1.18.18",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a/workspace",
+                "path": "private/tmp/ocw-gate-a/workspace",
+                "title": "New session - 2026-08-20T12:19:09.950Z",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 0,
+                  "updated": 0
+                }
+              }
+            }
+          },
+          "id": "evt_fixture_009"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_010",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "ses_fixture_001",
+              "slug": "tidy-mountain",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a/workspace",
+              "path": "private/tmp/ocw-gate-a/workspace",
+              "title": "New session - 2026-08-20T12:19:09.950Z",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 0,
+                "updated": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_010",
+            "type": "session.updated.1",
+            "seq": 1,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "ses_fixture_001",
+                "slug": "tidy-mountain",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a/workspace",
+                "path": "private/tmp/ocw-gate-a/workspace",
+                "title": "New session - 2026-08-20T12:19:09.950Z",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 0,
+                  "updated": 0
+                }
+              }
+            }
+          },
+          "id": "evt_fixture_010"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_011",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "msg_fixture_002",
+              "role": "user",
+              "sessionID": "ses_fixture_001",
+              "time": {
+                "created": 0
+              },
+              "agent": "build",
+              "model": {
+                "providerID": "localmock",
+                "modelID": "echo"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_011",
+            "type": "message.updated.1",
+            "seq": 2,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "msg_fixture_002",
+                "role": "user",
+                "sessionID": "ses_fixture_001",
+                "time": {
+                  "created": 0
+                },
+                "agent": "build",
+                "model": {
+                  "providerID": "localmock",
+                  "modelID": "echo"
+                }
+              }
+            }
+          },
+          "id": "evt_fixture_011"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_012",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "type": "text",
+              "text": "A5_RECONNECT keep streaming",
+              "messageID": "msg_fixture_002",
+              "sessionID": "ses_fixture_001",
+              "id": "prt_fixture_003"
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_012",
+            "type": "message.part.updated.1",
+            "seq": 3,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "type": "text",
+                "text": "A5_RECONNECT keep streaming",
+                "messageID": "msg_fixture_002",
+                "sessionID": "ses_fixture_001",
+                "id": "prt_fixture_003"
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_012"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_013",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "ses_fixture_001",
+              "slug": "tidy-mountain",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a/workspace",
+              "path": "private/tmp/ocw-gate-a/workspace",
+              "title": "New session - 2026-08-20T12:19:09.950Z",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 0,
+                "updated": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_013",
+            "type": "session.updated.1",
+            "seq": 4,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "ses_fixture_001",
+                "slug": "tidy-mountain",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a/workspace",
+                "path": "private/tmp/ocw-gate-a/workspace",
+                "title": "New session - 2026-08-20T12:19:09.950Z",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 0,
+                  "updated": 0
+                }
+              }
+            }
+          },
+          "id": "evt_fixture_013"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_014",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_015",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "msg_fixture_004",
+              "parentID": "msg_fixture_002",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "modelID": "echo",
+              "providerID": "localmock",
+              "time": {
+                "created": 0
+              },
+              "sessionID": "ses_fixture_001"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_015",
+            "type": "message.updated.1",
+            "seq": 5,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "msg_fixture_004",
+                "parentID": "msg_fixture_002",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "modelID": "echo",
+                "providerID": "localmock",
+                "time": {
+                  "created": 0
+                },
+                "sessionID": "ses_fixture_001"
+              }
+            }
+          },
+          "id": "evt_fixture_015"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_016",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "ses_fixture_001",
+              "slug": "tidy-mountain",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a/workspace",
+              "path": "private/tmp/ocw-gate-a/workspace",
+              "title": "New session - 2026-08-20T12:19:09.950Z",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "summary": {
+                "additions": 0,
+                "deletions": 0,
+                "files": 0
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 0,
+                "updated": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_016",
+            "type": "session.updated.1",
+            "seq": 6,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "ses_fixture_001",
+                "slug": "tidy-mountain",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a/workspace",
+                "path": "private/tmp/ocw-gate-a/workspace",
+                "title": "New session - 2026-08-20T12:19:09.950Z",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "summary": {
+                  "additions": 0,
+                  "deletions": 0,
+                  "files": 0
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 0,
+                  "updated": 0
+                }
+              }
+            }
+          },
+          "id": "evt_fixture_016"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_017",
+          "type": "session.diff",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "diff": []
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_018",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "role": "user",
+              "time": {
+                "created": 0
+              },
+              "agent": "build",
+              "model": {
+                "providerID": "localmock",
+                "modelID": "echo"
+              },
+              "id": "msg_fixture_002",
+              "sessionID": "ses_fixture_001",
+              "summary": {
+                "diffs": []
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_018",
+            "type": "message.updated.1",
+            "seq": 7,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "role": "user",
+                "time": {
+                  "created": 0
+                },
+                "agent": "build",
+                "model": {
+                  "providerID": "localmock",
+                  "modelID": "echo"
+                },
+                "id": "msg_fixture_002",
+                "sessionID": "ses_fixture_001",
+                "summary": {
+                  "diffs": []
+                }
+              }
+            }
+          },
+          "id": "evt_fixture_018"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_019",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_020",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "id": "prt_fixture_005",
+              "messageID": "msg_fixture_004",
+              "sessionID": "ses_fixture_001",
+              "type": "step-start"
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_020",
+            "type": "message.part.updated.1",
+            "seq": 8,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "id": "prt_fixture_005",
+                "messageID": "msg_fixture_004",
+                "sessionID": "ses_fixture_001",
+                "type": "step-start"
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_020"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_021",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "id": "prt_fixture_006",
+              "messageID": "msg_fixture_004",
+              "sessionID": "ses_fixture_001",
+              "type": "text",
+              "text": "",
+              "time": {
+                "start": 0
+              }
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_021",
+            "type": "message.part.updated.1",
+            "seq": 9,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "id": "prt_fixture_006",
+                "messageID": "msg_fixture_004",
+                "sessionID": "ses_fixture_001",
+                "type": "text",
+                "text": "",
+                "time": {
+                  "start": 0
+                }
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_021"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_022",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    }
+  ],
+  "sseAfterReconnect": [
+    {
+      "t": 0,
+      "event": {
+        "payload": {
+          "id": "evt_fixture_023",
+          "type": "server.connected",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_024",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "_"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_025",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "P"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_026",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_027",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "R"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_028",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "T"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_029",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "I"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_030",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_031",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "L"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_032",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "_"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_033",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_034",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "B"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_035",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "C"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_036",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "D"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_037",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "E"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_038",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "F"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_039",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "G"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_040",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "H"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_041",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "I"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_042",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "J"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_043",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_044",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "B"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_045",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "C"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_046",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "D"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_047",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "E"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_048",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "F"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_049",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "G"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_050",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "H"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_051",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "I"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "payload": {
+          "id": "evt_fixture_052",
+          "type": "server.heartbeat",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_053",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "J"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_054",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_055",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "B"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_056",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "C"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_057",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "D"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_058",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "E"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_059",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "F"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_060",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "G"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_061",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "H"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_062",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "I"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_063",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "J"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_064",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_065",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "B"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_066",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "C"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_067",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "D"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_068",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "E"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_069",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "F"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_070",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "G"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_071",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "H"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_072",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "I"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_073",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "J"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_074",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_075",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "B"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_076",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "C"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_077",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "D"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_078",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "E"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_079",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "F"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_080",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "G"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_081",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "H"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "payload": {
+          "id": "evt_fixture_082",
+          "type": "server.heartbeat",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_083",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "I"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_084",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "J"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_085",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_086",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "B"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_087",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "C"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_088",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "D"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_089",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "E"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_090",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "F"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_091",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "G"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_092",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "H"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_093",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "I"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_094",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "J"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_095",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_096",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "B"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_097",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "C"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_098",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "D"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_099",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "E"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_100",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "F"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_101",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "G"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_102",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "H"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_103",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "I"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_104",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "J"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_105",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_106",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "B"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_107",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "C"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_108",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "D"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_109",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "E"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_110",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "F"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "payload": {
+          "id": "evt_fixture_111",
+          "type": "server.heartbeat",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_112",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "G"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_113",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "H"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_114",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "I"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_115",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "partID": "prt_fixture_006",
+            "field": "text",
+            "delta": "J"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_116",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "id": "prt_fixture_006",
+              "messageID": "msg_fixture_004",
+              "sessionID": "ses_fixture_001",
+              "type": "text",
+              "text": "A5_PARTIAL_ABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJ",
+              "time": {
+                "start": 0,
+                "end": 0
+              }
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_116",
+            "type": "message.part.updated.1",
+            "seq": 10,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "id": "prt_fixture_006",
+                "messageID": "msg_fixture_004",
+                "sessionID": "ses_fixture_001",
+                "type": "text",
+                "text": "A5_PARTIAL_ABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJ",
+                "time": {
+                  "start": 0,
+                  "end": 0
+                }
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_116"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_117",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "part": {
+              "id": "prt_fixture_007",
+              "reason": "stop",
+              "messageID": "msg_fixture_004",
+              "sessionID": "ses_fixture_001",
+              "type": "step-finish",
+              "tokens": {
+                "total": 99,
+                "input": 8,
+                "output": 91,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              },
+              "cost": 0
+            },
+            "time": 0
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_117",
+            "type": "message.part.updated.1",
+            "seq": 11,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "part": {
+                "id": "prt_fixture_007",
+                "reason": "stop",
+                "messageID": "msg_fixture_004",
+                "sessionID": "ses_fixture_001",
+                "type": "step-finish",
+                "tokens": {
+                  "total": 99,
+                  "input": 8,
+                  "output": 91,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "cost": 0
+              },
+              "time": 0
+            }
+          },
+          "id": "evt_fixture_117"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_118",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "msg_fixture_004",
+              "parentID": "msg_fixture_002",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "total": 99,
+                "input": 8,
+                "output": 91,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              },
+              "modelID": "echo",
+              "providerID": "localmock",
+              "time": {
+                "created": 0,
+                "completed": 0
+              },
+              "sessionID": "ses_fixture_001",
+              "finish": "stop"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_118",
+            "type": "message.updated.1",
+            "seq": 12,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "msg_fixture_004",
+                "parentID": "msg_fixture_002",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "total": 99,
+                  "input": 8,
+                  "output": 91,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "modelID": "echo",
+                "providerID": "localmock",
+                "time": {
+                  "created": 0,
+                  "completed": 0
+                },
+                "sessionID": "ses_fixture_001",
+                "finish": "stop"
+              }
+            }
+          },
+          "id": "evt_fixture_118"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_119",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "msg_fixture_004",
+              "parentID": "msg_fixture_002",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "total": 99,
+                "input": 8,
+                "output": 91,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              },
+              "modelID": "echo",
+              "providerID": "localmock",
+              "time": {
+                "created": 0,
+                "completed": 0
+              },
+              "sessionID": "ses_fixture_001",
+              "finish": "stop"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_119",
+            "type": "message.updated.1",
+            "seq": 13,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "msg_fixture_004",
+                "parentID": "msg_fixture_002",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "total": 99,
+                  "input": 8,
+                  "output": 91,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "modelID": "echo",
+                "providerID": "localmock",
+                "time": {
+                  "created": 0,
+                  "completed": 0
+                },
+                "sessionID": "ses_fixture_001",
+                "finish": "stop"
+              }
+            }
+          },
+          "id": "evt_fixture_119"
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_120",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_121",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "status": {
+              "type": "idle"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_122",
+          "type": "session.idle",
+          "properties": {
+            "sessionID": "ses_fixture_001"
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_123",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "ses_fixture_001",
+              "slug": "tidy-mountain",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a/workspace",
+              "path": "private/tmp/ocw-gate-a/workspace",
+              "title": "A5_PARTIAL_ABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJ",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "summary": {
+                "additions": 0,
+                "deletions": 0,
+                "files": 0
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 8,
+                "output": 91,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 0,
+                "updated": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_123",
+            "type": "session.updated.1",
+            "seq": 14,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "ses_fixture_001",
+                "slug": "tidy-mountain",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a/workspace",
+                "path": "private/tmp/ocw-gate-a/workspace",
+                "title": "A5_PARTIAL_ABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJ",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "summary": {
+                  "additions": 0,
+                  "deletions": 0,
+                  "files": 0
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 8,
+                  "output": 91,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 0,
+                  "updated": 0
+                }
+              }
+            }
+          },
+          "id": "evt_fixture_123"
+        }
+      }
+    }
+  ],
+  "sseEventTypesBefore": [
+    "server.connected",
+    "session.created",
+    "sync",
+    "session.updated",
+    "sync",
+    "message.updated",
+    "sync",
+    "message.part.updated",
+    "sync",
+    "session.updated",
+    "sync",
+    "session.status",
+    "message.updated",
+    "sync",
+    "session.updated",
+    "sync",
+    "session.diff",
+    "message.updated",
+    "sync",
+    "session.status",
+    "message.part.updated",
+    "sync",
+    "message.part.updated",
+    "sync",
+    "message.part.delta"
+  ],
+  "sseEventTypesAfter": [
+    "server.connected",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "server.heartbeat",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "server.heartbeat",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "server.heartbeat",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.updated",
+    "sync",
+    "message.part.updated",
+    "sync",
+    "message.updated",
+    "sync",
+    "message.updated",
+    "sync",
+    "session.status",
+    "session.status",
+    "session.idle",
+    "session.updated",
+    "sync"
+  ],
+  "reload": {
+    "messages": [
+      {
+        "info": {
+          "id": "msg_fixture_002",
+          "sessionID": "ses_fixture_001",
+          "role": "user",
+          "time": {
+            "created": 0
+          },
+          "summary": {
+            "diffs": []
+          },
+          "agent": "build",
+          "model": {
+            "providerID": "localmock",
+            "modelID": "echo"
+          }
+        },
+        "parts": [
+          {
+            "id": "prt_fixture_003",
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_002",
+            "type": "text",
+            "text": "A5_RECONNECT keep streaming"
+          }
+        ]
+      },
+      {
+        "info": {
+          "id": "msg_fixture_004",
+          "sessionID": "ses_fixture_001",
+          "role": "assistant",
+          "time": {
+            "created": 0,
+            "completed": 0
+          },
+          "parentID": "msg_fixture_002",
+          "modelID": "echo",
+          "providerID": "localmock",
+          "mode": "build",
+          "agent": "build",
+          "path": {
+            "cwd": "/private/tmp/ocw-gate-a/workspace",
+            "root": "/"
+          },
+          "cost": 0,
+          "tokens": {
+            "total": 99,
+            "input": 8,
+            "output": 91,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "finish": "stop"
+        },
+        "parts": [
+          {
+            "id": "prt_fixture_005",
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "type": "step-start"
+          },
+          {
+            "id": "prt_fixture_006",
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "type": "text",
+            "text": "A5_PARTIAL_ABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJ",
+            "time": {
+              "start": 0,
+              "end": 0
+            }
+          },
+          {
+            "id": "prt_fixture_007",
+            "sessionID": "ses_fixture_001",
+            "messageID": "msg_fixture_004",
+            "type": "step-finish",
+            "reason": "stop",
+            "cost": 0,
+            "tokens": {
+              "total": 99,
+              "input": 8,
+              "output": 91,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "session": {
+      "id": "ses_fixture_001",
+      "slug": "tidy-mountain",
+      "projectID": "global",
+      "directory": "/private/tmp/ocw-gate-a/workspace",
+      "path": "private/tmp/ocw-gate-a/workspace",
+      "summary": {
+        "additions": 0,
+        "deletions": 0,
+        "files": 0
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 8,
+        "output": 91,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "title": "A5_PARTIAL_ABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJ",
+      "agent": "build",
+      "model": {
+        "id": "echo",
+        "providerID": "localmock",
+        "variant": "default"
+      },
+      "version": "1.18.18",
+      "time": {
+        "created": 0,
+        "updated": 0
+      }
+    },
+    "status": {},
+    "statusAtDisconnect": {
+      "ses_fe0e39a01ffeZK76F50A5xloUQ": {
+        "type": "busy"
+      }
+    }
+  },
+  "derived": {
+    "statusAtDisconnectBusy": true,
+    "reconnectSawIdle": true,
+    "reconnectFirstDirectTypes": [
+      "server.connected",
+      "message.part.delta",
+      "message.part.delta",
+      "message.part.delta",
+      "message.part.delta",
+      "message.part.delta",
+      "message.part.delta",
+      "message.part.delta"
+    ],
+    "serverReplayedDeltas": true,
+    "note": "replay is observed, not assumed; v1 mapping still skips nested sync"
+  },
+  "bridgeMapping": {
+    "decision": "reconnect recovers via server messages/status and later Kernel rehydrate; Gate A records server facts only",
+    "nestedSync": "retained as evidence only; v1 Web skips payload.type==sync",
+    "notAnIOSWriter": "do not history-merge or raw-write the iOS timeline"
+  },
+  "sanitization": {
+    "replaced": [
+      "session/message/part/event ids",
+      "absolute workspace paths",
+      "epoch timestamps > 1e9"
+    ],
+    "kept": [
+      "all JSON keys",
+      "event types",
+      "part types",
+      "HTTP method/path/status"
+    ]
+  }
+}
