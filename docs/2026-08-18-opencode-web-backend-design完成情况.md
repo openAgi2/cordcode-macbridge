@@ -239,6 +239,23 @@ owner 指出理想路径是 dsh-web 式「读官方 web 源码→穷举 API→�
 
 **装机**：Mac Release 覆盖 `/Applications`（runtime `4e42185`，11:2x，已重启在线）；iOS 侧仍无改动。待 owner 三测同场景：预期全程 executing 无闪烁 + 流式 + 收口。
 
+## 四·补十三、会话归档/删除落地（owner 报障 2026-08-20 下午，「归档失败：session archive not yet supported」/「backend does not support session deletion」）
+
+**设计期状态**：两项均系有意挂起——§4.3.6 `delete_session` ⛔「除非活体钉死 HTTP delete（禁止复制 `opencode session delete` CLI）」、`archive_session` 2️⃣（二期）；§4.1.3 `core.SessionDeleter` 同因 ⛔。桥侧 handler 本就是通用门（agent 实现 `SessionArchiver`/`SessionDeleter` 即通），缺的只是 agent 实现 + 活体钉死。
+
+**官方形状（源码级，~/Projects/opencode = 1.18.18 与 owner serve 同版本）**：
+- 删除：`DELETE /session/{id}`（v1 SDK SessionDeleteData：无 body、query directory 可选；200 = boolean）。
+- 归档：`PATCH /session/{id}` body `{"time":{"archived": <epoch ms>}}`（服务端 UpdatePayload + 官方内部 `Session.setArchived` 同形；v2 SDK SessionUpdateData 明确暴露 time.archived；ArchivedTimestamp = Schema.Finite，官方 caller 用 Date.now() 即毫秒）。v1 SDK 类型只暴露 title——与 permlab 同教训：**以活体为准**。
+- 列表：源码 list 有 `isNull(time_archived)` 过滤，但活体行为不定（见下）。
+
+**活体钉死（沙盒真 1.18.18，隔离 XDG + Basic Auth，4296）**：create → `PATCH time.archived` 200 回显 Session.Info（时间戳精确一致）→ 默认 `GET /session` 对 archived 行为**不稳定**（裸 curl 一次仍含该行、E2E 一次已排除——按两种都兼容处理）→ `DELETE` 200 `true` → GET 404。
+
+**实现（Mac `agent/opencode-web/session_mutation.go` 新文件）**：`DeleteSession`（DELETE，2xx 即成功，catalog 信号）+ `ArchiveSession`（PATCH 官方 body，响应映射 `AgentSessionInfo` 含 `ArchivedAt`）；`ocwTime` 补 `Archived` 字段，列表行映射 `ArchivedAt` → wire `archivedAtMillis`（客户端隐藏已归档）。directory 链复用既有 M2-1 switchDir（dispatch 对 opencode-web 全方法切目录，DeleteSessionParams 带 directory）。归档后显式 `signalCatalogRefresh`。
+
+**回归**：单测 5 个（官方形状级：DELETE 无 body 带目录、PATCH body 恰为 `{"time":{"archived":<ms>}}` 不碰 title、404 透传可诊断、列表行映射 ArchivedAt、接口契合）；沙盒 E2E `TestSandboxArchiveDelete`（环境门控，Agent 全链路：create→archive 回显→列表两态兼容→delete 404）。全仓 go test 绿。
+
+**装机**：Mac Release 覆盖 `/Applications` 并重启；iOS 侧无改动（UI 与 RPC 链路本就通，报错来自桥的 not_supported 门）。待 owner 复测：更多设置 → 归档（会话从列表隐藏/带归档标记）、删除（会话消失且不复发）。
+
 
 
 

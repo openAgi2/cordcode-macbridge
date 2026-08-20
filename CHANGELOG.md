@@ -7,6 +7,7 @@
 版本号对齐 MacBridge Release 构建的 `MARKETING_VERSION`（见 `MacBridge/project.yml`）。日期为协调世界时（UTC）。
 
 ## [Unreleased]
+- **新功能：OpenCode Web 会话归档与删除**：消息页「更多设置」里的「归档」「删除」此前报 `session archive not yet supported` / `backend does not support session deletion`（设计期两项挂起：delete 需活体钉死 HTTP、archive 列为二期）。现已在真 1.18.18 沙盒活体钉死官方路由并实现：归档 = `PATCH /session/{id}` body `{"time":{"archived":<epoch ms>}}`（200 回显 Session.Info）；删除 = `DELETE /session/{id}`（200 `true`，删后 404）。v2 同路由走 `/api` 前缀。列表行带 `time.archived` → `archivedAtMillis`，客户端隐藏已归档会话。
 - **修复：OpenCode Web 新会话首回合输入框闪「完成」**：冷投影把还在跑的第一回合写成 `execution.phase=idle`。已拆掉「历史 0 条就 200ms×6 再拉」的等待（违反 SSV2 护栏：空投影先等 history、用条数猜 ready）。活会话未收口 user turn 现在提交 `phase=running`；hydrate 不得用冷 idle 盖掉已经 live 的 running。pending→real 早 rebind 保留。
 - **新功能：OpenCode Web backend（并存入口）**：新增 `opencode-web` backend——官方 `opencode serve` 的纯 HTTP/SSE 客户端。iPhone 切换框出现「OpenCode Web」：列表/历史/占用/发送/模型/活跃态/审批全部来自官方 HTTP。占用圈按官方网页公式（最后一条 assistant ÷ 模型窗口）出数、发送必带目录内模型（坏模型明确失败不再 81ms 空转）、外部网页 turn 实时旁观、工具审批 Allow/Deny 走官方折叠（绝不自动批）。旧「OpenCode」入口原样并存供对照，成熟验收后再摘（详见 `docs/2026-08-18-opencode-web-backend-design完成情况.md`）。
 - **改进：Claude / Grok Build / OpenCode 上下文圈能出数**：点 ⭕ 不再三家都是「暂无」。Grok 读会话 `signals.json` 的占用和 500K 窗口；OpenCode 读 `GET /session` 的 tokens + 模型 `limit.context`；Claude 用最后一条 assistant 的 prompt occupancy（input+cache）加模型窗口（200K / 1M）。不是 DeepSeek 那种拆分表，只做已用/窗口。

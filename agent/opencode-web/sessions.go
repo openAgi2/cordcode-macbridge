@@ -43,8 +43,9 @@ type ocwSessionEntry struct {
 }
 
 type ocwTime struct {
-	Created float64 `json:"created"`
-	Updated float64 `json:"updated"`
+	Created  float64 `json:"created"`
+	Updated  float64 `json:"updated"`
+	Archived float64 `json:"archived"`
 }
 
 func (t *ocwTime) updatedAt() time.Time {
@@ -52,6 +53,16 @@ func (t *ocwTime) updatedAt() time.Time {
 		return time.Time{}
 	}
 	return time.UnixMilli(int64(t.Updated)).UTC()
+}
+
+// archivedAt maps the official time.archived timestamp (Schema.Finite epoch
+// milliseconds). Live 1.18: the default list keeps returning archived rows —
+// the bridge surfaces this as archivedAtMillis and clients hide them.
+func (t *ocwTime) archivedAt() time.Time {
+	if t == nil || t.Archived <= 0 {
+		return time.Time{}
+	}
+	return time.UnixMilli(int64(t.Archived)).UTC()
 }
 
 // decodeListPayload accepts both list shapes: the 1.18 bare array and the v2
@@ -174,6 +185,7 @@ func (a *Agent) listSessionsWith(ctx context.Context, c *Client, dir string) ([]
 			Summary:    entry.Title,
 			Directory:  entry.Directory,
 			ModifiedAt: entry.Time.updatedAt(),
+			ArchivedAt: entry.Time.archivedAt(),
 		}
 		if entry.Model != nil {
 			info.ModelID = entry.Model.ID
