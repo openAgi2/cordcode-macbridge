@@ -2331,6 +2331,17 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 	}
 	turnCommitted = true
 
+	// Pending→real rebind the moment the send resolved the real id. For
+	// opencode-web the lazy server session is created inside Send, so the real
+	// id is synchronously known here — before the first SSE event reaches the
+	// relay. Without the early rebind, a first-turn projection pull landing in
+	// this window finds no registry entry under the real id: both the
+	// cold-source seal override and the sourceIsLive sampling miss, and the
+	// pull can commit a prematurely idle/terminal baseline (real device
+	// 2026-08-20: ~1s completed flicker on the first turn). Idempotent with
+	// the relay's per-event rebind below.
+	h.rebindSessionIDIfResolved(params.SessionID, sess, "", msg.BackendID, extractDir(msg))
+
 	conn.SendResult(msg.RequestID, &ResultResponse{Ok: true}, nil)
 	// Claude projection content is UUID-keyed via file-relay; agent relay is control-plane
 	// sidecar (may lack itemId). Ensure file-relay is running before/alongside agent so

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -141,14 +142,26 @@ func TestOpenCodeWebProjectionHydrateFromRichHistory(t *testing.T) {
 
 // activityProbingFakeAgent adds core.SessionActivityProbing to fakeAgent for
 // the cold-source seal tests without changing fakeAgent's interface set (every
-// existing fakeAgent user would suddenly consult the probe).
+// existing fakeAgent user would suddenly consult the probe). richHistoryFn,
+// when set, serves per-call dynamic entries (persist-race simulation) and
+// counts fetches through fetchCalls.
 type activityProbingFakeAgent struct {
 	*fakeAgent
-	active bool
+	active        bool
+	richHistoryFn func(call int32) []core.RichHistoryEntry
+	fetchCalls    *atomic.Int32
 }
 
 func (a *activityProbingFakeAgent) IsSessionActive(context.Context, string) bool {
 	return a.active
+}
+
+func (a *activityProbingFakeAgent) GetRichSessionHistory(ctx context.Context, sessionID string, limit int) ([]core.RichHistoryEntry, error) {
+	if a.richHistoryFn == nil {
+		return a.fakeAgent.GetRichSessionHistory(ctx, sessionID, limit)
+	}
+	call := a.fetchCalls.Add(1)
+	return a.richHistoryFn(call), nil
 }
 
 // ocwLiveColdPullAgent builds the first-turn topology: one sent user message
@@ -247,5 +260,125 @@ func TestOpenCodeWebDeadSessionColdPullStillSealsUnansweredTurn(t *testing.T) {
 	}
 	if st := h.projectionKernel.Status("opencode-web", "ocw-live-1"); st.Phase != ProjectionHydrateReady {
 		t.Fatalf("kernel phase = %q, want ready", st.Phase)
+	}
+}
+
+// Real-device 2026-08-20 residual (~1s completed flicker): with the relay's
+// per-event rebind alone, the registry keeps the session under the pending id
+// until the first SSE event — a first-turn pull in that window resolves the
+// real id but finds no live registry entry, so the seal override and the
+// sourceIsLive sampling both miss. Send resolves the real id synchronously
+// (opencode-web creates the server session inside Send); the rebind must not
+// wait for the first event.
+func TestOpenCodeWebSendRebindsPendingToRealBeforeFirstEvent(t *testing.T) {
+	h := newTestHandlers(t)
+	agent := &fakeAgent{
+		name: "opencode-web",
+		sendHook: func(s *fakeAgentSession, _ string) {
+			// ensureServerSession resolves the real server id inside Send.
+			s.id = "ses_ocw_real"
+		},
+	}
+	h.mu.Lock()
+	h.agents = map[string]core.Agent{"opencode-web": agent}
+	h.mu.Unlock()
+
+	serverConn, _, cleanup := openTestConn(t)
+	defer cleanup()
+	h.handleSendMessage(serverConn, WireMessage{
+		BackendID: "opencode-web", Method: "send_message", RequestID: "r-ocw-rebind",
+		Params: []byte(`{"sessionId":"pending-ocw1","content":"讲个猴哥语录"}`),
+	}, agent)
+
+	real, ok := h.getSession("ses_ocw_real")
+	if !ok || real == nil {
+		t.Fatal("registry must hold the real id immediately after Send, before any SSE event")
+	}
+	// rebind keeps the pending alias (resolveSessionIDForActiveSession depends
+	// on it) — both keys must map to the SAME live session object.
+	if pending, ok := h.getSession("pending-ocw1"); !ok || pending != real {
+		t.Fatal("pending alias must map to the same session object as the real id")
+	}
+	if real.CurrentSessionID() != "ses_ocw_real" {
+		t.Fatalf("real id = %q, want ses_ocw_real", real.CurrentSessionID())
+	}
+}
+
+// Real-device 2026-08-20 residual (empty-baseline commit): the first pull can
+// land after the real id resolves but before prompt_async's user row is
+// durable — a zero-entry fetch committed an empty idle baseline and iOS
+// flipped completed until the live echo arrived. A bridge-live session must
+// re-poll instead of committing empty.
+func TestOpenCodeWebLiveEmptyColdSourceRepollsForFirstPromptPersist(t *testing.T) {
+	h := NewHandlers()
+	t.Cleanup(func() { h.Shutdown(context.Background()) })
+	sessionID := "ocw-live-empty"
+	fetchCalls := &atomic.Int32{}
+	agent := &activityProbingFakeAgent{
+		fakeAgent: &fakeAgent{name: "opencode-web"},
+		active:    false, // busy-map race window on top of the persist race
+		richHistoryFn: func(call int32) []core.RichHistoryEntry {
+			if call == 1 {
+				return nil // prompt not yet persisted
+			}
+			return []core.RichHistoryEntry{
+				{ID: "u1", Role: "user", Content: "讲个猴哥语录100字左右"},
+			}
+		},
+		fetchCalls: fetchCalls,
+	}
+	h.mu.Lock()
+	h.agents = map[string]core.Agent{"opencode-web": agent}
+	h.mu.Unlock()
+	h.putSessionWithMeta(sessionID, "opencode-web", "/tmp/proj",
+		&fakeAgentSession{id: sessionID, events: make(chan core.Event, 4)})
+
+	conn := &readFileCaptureConn{}
+	params, _ := json.Marshal(map[string]any{"sessionId": sessionID, "sinceRev": 0})
+	msg := WireMessage{RequestID: "r-ocw-empty", BackendID: "opencode-web", Method: "get_session_projection", Params: params}
+	h.handleGetSessionProjection(conn, msg, agent)
+	if conn.err != nil {
+		t.Fatalf("live empty-then-persisted cold pull must commit, got error: %+v", conn.err)
+	}
+	raw, _ := json.Marshal(conn.data)
+	if !strings.Contains(string(raw), "讲个猴哥语录100字左右") {
+		t.Fatalf("re-poll must surface the persisted user message instead of an empty baseline: %s", string(raw))
+	}
+	if got := fetchCalls.Load(); got < 2 {
+		t.Fatalf("bridge-live empty session must re-poll the cold source, fetch calls = %d", got)
+	}
+}
+
+// Control: dead sessions (not in the registry) keep the single-fetch behavior
+// — an honestly empty session cold-opens as empty without re-poll delay.
+func TestOpenCodeWebDeadEmptyColdSourceSingleFetch(t *testing.T) {
+	h := NewHandlers()
+	t.Cleanup(func() { h.Shutdown(context.Background()) })
+	sessionID := "ocw-dead-empty"
+	fetchCalls := &atomic.Int32{}
+	agent := &activityProbingFakeAgent{
+		fakeAgent: &fakeAgent{name: "opencode-web"},
+		active:    false,
+		richHistoryFn: func(int32) []core.RichHistoryEntry {
+			return nil // honestly empty
+		},
+		fetchCalls: fetchCalls,
+	}
+	h.mu.Lock()
+	h.agents = map[string]core.Agent{"opencode-web": agent}
+	h.mu.Unlock()
+
+	conn := &readFileCaptureConn{}
+	params, _ := json.Marshal(map[string]any{"sessionId": sessionID, "sinceRev": 0})
+	msg := WireMessage{RequestID: "r-ocw-dead-empty", BackendID: "opencode-web", Method: "get_session_projection", Params: params}
+	h.handleGetSessionProjection(conn, msg, agent)
+	if conn.err != nil {
+		t.Fatalf("dead empty-session cold pull must commit empty, got error: %+v", conn.err)
+	}
+	if got := fetchCalls.Load(); got != 1 {
+		t.Fatalf("dead session must fetch exactly once, got %d", got)
+	}
+	if st := h.projectionKernel.Status("opencode-web", sessionID); st.Phase != ProjectionHydrateReady {
+		t.Fatalf("kernel phase = %q, want ready (honest empty commit)", st.Phase)
 	}
 }
