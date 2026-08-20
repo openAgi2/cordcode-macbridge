@@ -1,7 +1,7 @@
 # OpenCode Web source-first convergence plan
 
 - Date: 2026-08-20
-- Status: **owner authorized resumption on 2026-08-20, but only through Gate A → Gate B → Gate S. Product-code work in Gate C remains forbidden until all three gates exit.**
+- Status: **Gate A exited. Gate B exited 2026-08-20 after owner OD-1/OD-2/OD-3 (pending independent audit). Do not start Gate S until that audit. Product-code work in Gate C remains forbidden until A, B, and S all exit.**
 - Audit input: [2026-08-20-opencode-web-source-parity-audit.md](2026-08-20-opencode-web-source-parity-audit.md)
 - Historical input only: [2026-08-18-opencode-web-backend-design.md](2026-08-18-opencode-web-backend-design.md) and its completion report
 - Goal: make `opencode-web` a faithful, bounded adapter of the official OpenCode Web behavior, rather than a cleaned-up copy of the legacy OpenCode backend
@@ -144,13 +144,21 @@ Minimum surfaces to classify:
 
 The map, not accidental interface availability, determines `WireDescriptor` capabilities.
 
-Working map (documentation only; Gate B has **not** exited pending owner OD-1/OD-2):
+Working map (documentation only; **Gate B exited** 2026-08-20 after owner resolutions OD-1/OD-2/OD-3; independent audit still required before Gate S):
 
 - [2026-08-20-opencode-web-gate-b-capability-map.md](2026-08-20-opencode-web-gate-b-capability-map.md)
 - [2026-08-20-opencode-web-gate-b-capability-map.json](2026-08-20-opencode-web-gate-b-capability-map.json)
 - checker: `python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_b_map.py`
 
-Gate B exit: there is no endpoint in the official Web inventory whose CordCode disposition is implicit, **and** owner has judged OD-1/OD-2. Do not enter Gate S until that exit.
+Owner resolutions:
+
+- OD-1 `hide-in-default-list-keep-by-id`
+- OD-2 `aggregate-global-list-keep-scoped-list`
+- OD-3 `keep-mapped-future-or-unsupported`
+
+`supported now` + `source-only` is a product-scope commitment, **not** implementation authorization. Gate S C-slice impact/test maps must register **实现前补样本** for every translated behavior that still lacks a same-version captured sample. Do not write event/response translators from source citations alone.
+
+Gate B exit: there is no endpoint in the official Web inventory whose CordCode disposition is implicit, and owner has judged OD-1/OD-2/OD-3. Stop for independent audit. Do not enter Gate S from this wrap-up.
 
 ## 5.1 Gate S — Session Sync v2 architecture proof
 
@@ -203,6 +211,7 @@ Before implementing C1–C7, the agent must add an impact record to its evidence
 | active write inventory | every code path that could touch timeline content, execution, or `messages[]`, including paths intentionally sealed |
 | failure presentation | exact failed/running/unsupported behavior; no inferred success or automatic legacy fallback |
 | anti-double-write proof | targeted producer, reducer/fence/delivery, and client writer-seal tests |
+| 实现前补样本 | if the Gate B row is `supported now` with `gateASample=source-only`, the slice **must not** write event/response translators until a same-version captured sample exists; record this as a prerequisite gate. Source citations are not implementation authorization |
 
 If the slice cannot prove that it adds no second truth, writer, consumer referee, or automatic fallback, it does not enter implementation.
 
@@ -212,7 +221,7 @@ Gate S must produce a concrete test map before Gate C. As implementation proceed
 
 | Layer | Required proof |
 |---|---|
-| OpenCode adapter | direct + nested `sync` evidence cannot double-ingest; stable IDs survive translation; unsupported shapes fail closed |
+| OpenCode adapter | direct + nested `sync` evidence cannot double-ingest; stable IDs survive translation; unsupported shapes fail closed; every source-only translated behavior lists 实现前补样本 before mapper work |
 | Kernel live | each canonical event advances the one Kernel chain at most once; execution completes only from authoritative terminal evidence |
 | Kernel hydrate | cold history enters private hydrate under source cut/fence; live append during hydrate is caught up in order; push and pull expose the same head |
 | reconnect | epoch/generation mismatch rejects stale frames; gap/invalidate recovers via `get_session_projection`, never raw/history merge |

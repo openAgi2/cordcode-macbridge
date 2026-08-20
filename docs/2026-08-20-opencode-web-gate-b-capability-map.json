@@ -7,13 +7,14 @@
     "gateACommit": "aad4b24",
     "plan": "docs/2026-08-20-opencode-web-source-first-convergence-plan.md §5",
     "inventory": "docs/2026-08-20-opencode-web-1.18.18-sample-inventory.md",
-    "supportedNowMeaning": "Gate C will implement the complete bridge+iOS path. It does not mean current product code already supports the surface.",
+    "supportedNowMeaning": "Gate C will implement the complete bridge+iOS path. It does not mean current product code already supports the surface. supported now + source-only is a product-scope commitment only, not implementation authorization.",
     "productCodeFrozen": true,
-    "gateBExited": false,
-    "gateBExitBlockers": [
-      "OD-1",
-      "OD-2"
-    ]
+    "gateBExited": true,
+    "gateBExitBlockers": [],
+    "supportedNowAndSourceOnly": "Product scope only, not an implementation grant. Source citations alone do not authorize writing event/response translators.",
+    "gateSPreSampleRule": "For every translated behavior whose Gate B row is source-only (no same-version captured sample), the Gate S C-slice impact record and S4 test map MUST register a prerequisite gate of 实现前补样本. Do not start that slice's event/response translation from source citations alone.",
+    "ownerDecisionsResolvedAt": "2026-08-20",
+    "ownerDecisionsResolvedBy": "owner"
   },
   "ownerDecisions": [
     {
@@ -26,7 +27,12 @@
       "recommendation": "Match official Web reducer: default home/global list hides rows with time.archived; GET-by-id still returns archived sessions; do not treat API list membership as UI visibility.",
       "evidence": "A10: API roots=true still includes archived; GET /session/:id returns time.archived; official event-reducer.ts:149-161 splices archived out of the home list. Current CordCode maps ArchivedAt and comments say clients hide them.",
       "impact": "iOS session home list, get_session, archive mutation refresh. Choosing 'show archived in default list' would diverge from official Web.",
-      "defaultIfNoObjection": "hide-in-default-list-keep-by-id"
+      "defaultIfNoObjection": "hide-in-default-list-keep-by-id",
+      "status": "resolved",
+      "resolvedDecision": "hide-in-default-list-keep-by-id",
+      "resolvedSummary": "Default home/global list hides sessions with time.archived; GET-by-id still returns archived sessions.",
+      "resolvedAt": "2026-08-20",
+      "resolvedBy": "owner"
     },
     {
       "id": "OD-2",
@@ -38,7 +44,12 @@
       "recommendation": "Keep CordCode product overlay: iOS global list aggregates one official directory-scoped GET /session per project worktree. Per-directory requests use the official scoped list only. Do not treat the official Web single-directory home list as a ban on CordCode aggregation.",
       "evidence": "A10: two directories do not leak ids. Official session-load.ts lists one directory. Current ListSessions in sessions.go already fans out per projectDirectories.",
       "impact": "iOS global session catalog versus per-workspace filter. Dropping aggregation would hide sessions outside the current work dir.",
-      "defaultIfNoObjection": "aggregate-global-list-keep-scoped-list"
+      "defaultIfNoObjection": "aggregate-global-list-keep-scoped-list",
+      "status": "resolved",
+      "resolvedDecision": "aggregate-global-list-keep-scoped-list",
+      "resolvedSummary": "iOS global list aggregates one official directory-scoped GET /session per project worktree; per-directory requests stay scoped.",
+      "resolvedAt": "2026-08-20",
+      "resolvedBy": "owner"
     },
     {
       "id": "OD-3",
@@ -62,7 +73,12 @@
       "recommendation": "Leave all of these as mapped (future or deliberately unsupported). Do not pull them into the first Gate C slice without a new sample pack.",
       "evidence": "Plan §6 C7 says select only from this map. None of these have a Gate A P0 sample except children/list facts inside A10.",
       "impact": "Advertised iOS session/workspace commands. Promoting any item to supported now expands C7 scope.",
-      "defaultIfNoObjection": "keep-mapped-future-or-unsupported"
+      "defaultIfNoObjection": "keep-mapped-future-or-unsupported",
+      "status": "resolved",
+      "resolvedDecision": "keep-mapped-future-or-unsupported",
+      "resolvedSummary": "First C slice does not promote mapped future or deliberately unsupported C7 extras.",
+      "resolvedAt": "2026-08-20",
+      "resolvedBy": "owner"
     }
   ],
   "surfaces": [
@@ -75,13 +91,16 @@
       "officialServer": "packages/opencode/src/server/routes/instance/httpapi/groups/session.ts ListQuery roots/limit/start/search/scope/path; GET /session",
       "gateASample": "A10",
       "currentCordCodePath": "agent/opencode-web/sessions.go ListSessions / ListSessionsInDirectory — directory-scoped GET /session without roots/limit",
-      "targetProductBehavior": "Official roots+limit semantics per directory. CordCode global list is a product overlay pending OD-2. Archived visibility pending OD-1.",
+      "targetProductBehavior": "Official roots+limit semantics per directory. Default home/global list hides rows with time.archived; GET-by-id still returns archived (OD-1 hide-in-default-list-keep-by-id). iOS global list aggregates one official directory-scoped GET /session per project worktree; directory-scoped requests stay scoped (OD-2 aggregate-global-list-keep-scoped-list).",
       "ssv2Ownership": "OpenCode serve owns session catalog facts. iOS ProjectionStore does not write the catalog from raw HTTP.",
       "ssv2Domain": "request/control (catalog). Timeline effects none.",
       "wireDescriptorImpact": "C2 changes list semantics; no new capability flag. Do not advertise session_pagination unless limit/cursor is actually implemented.",
-      "rationale": "P0 listing is captured. Gate C2 must reproduce roots/limit and define archive/multi-dir as product rules. supported now means C2 will complete the path, not that today's ListSessions is official-parity.",
-      "dependencyOrGap": "OD-1 archive visibility; OD-2 aggregation. Current code missing roots=true and limit.",
-      "ownerDecisionId": "OD-1"
+      "rationale": "P0 listing is captured. Owner resolved OD-1 and OD-2. supported now means C2 will complete roots/limit plus these product rules, not that today's ListSessions is official-parity.",
+      "dependencyOrGap": "Current code missing roots=true and limit. Archive-hide and aggregation rules are owner-resolved, not remaining blockers.",
+      "ownerDecisionId": [
+        "OD-1",
+        "OD-2"
+      ]
     },
     {
       "id": "sessions.get",
@@ -131,8 +150,9 @@
       "ssv2Domain": "request/control",
       "wireDescriptorImpact": "session_mutation already derived from SessionRenamer+Archiver+Deleter; adding RenameSession is C7, still no new flag name",
       "rationale": "Official Web rename is live. Audit 2026-08-20 sandbox renamed via PATCH. Gate A P0 did not recapture rename as its own scenario; C7 still implements it from source + audit sample. supported now = C7 will add SessionRenamer, not that it exists today.",
-      "dependencyOrGap": "No dedicated Gate A sanitized fixture named a-rename; use source + audit PATCH evidence until C7 adds a replay fixture.",
-      "ownerDecisionId": null
+      "dependencyOrGap": "No dedicated Gate A sanitized fixture named a-rename; use source + audit PATCH evidence until C7 adds a replay fixture. supported now + source-only is scope only. Gate S C-slice impact/test map must register 实现前补样本 before writing translators.",
+      "ownerDecisionId": null,
+      "gateSPreSampleGate": "实现前补样本"
     },
     {
       "id": "sessions.archive",
@@ -143,12 +163,12 @@
       "officialServer": "PATCH /session/:id {time:{archived}}; reducer event-reducer.ts:149-161 hides archived from home list",
       "gateASample": "A10",
       "currentCordCodePath": "agent/opencode-web/session_mutation.go ArchiveSession",
-      "targetProductBehavior": "Archive via official PATCH. Default CordCode list visibility follows OD-1 (recommended: hide like Web). By-id GET remains.",
+      "targetProductBehavior": "Archive via official PATCH. Default CordCode home/global list hides archived (OD-1 hide-in-default-list-keep-by-id). By-id GET remains valid for archived sessions. API list membership is not UI visibility.",
       "ssv2Ownership": "OpenCode session.time.archived. Catalog/control-plane, not messages[].",
       "ssv2Domain": "request/control",
-      "wireDescriptorImpact": "existing SessionArchiver; advertisement already possible via session_mutation — C2 must make visibility match the chosen product rule",
-      "rationale": "A10 captured archive PATCH, list still containing archived, by-id GET. Current code archives and maps ArchivedAt. Default visibility is an owner product rule (OD-1), not an implicit leftover from the old module.",
-      "dependencyOrGap": "OD-1 must confirm hide-in-default-list versus show-archived.",
+      "wireDescriptorImpact": "existing SessionArchiver; C2 must hide archived in the default list and keep by-id GET",
+      "rationale": "A10 captured archive PATCH, list still containing archived, by-id GET. Owner resolved OD-1: hide in default list, keep by-id. Not leftover module behavior.",
+      "dependencyOrGap": "",
       "ownerDecisionId": "OD-1"
     },
     {
@@ -165,8 +185,9 @@
       "ssv2Domain": "request/control",
       "wireDescriptorImpact": "existing SessionDeleter",
       "rationale": "Audit sandbox DELETE 200 true then GET 404. Current DeleteSession exists. C7 still needs targeted replay; supported now is the Gate C commitment.",
-      "dependencyOrGap": "No dedicated Gate A delete fixture in the A1-A10 pack.",
-      "ownerDecisionId": null
+      "dependencyOrGap": "No dedicated Gate A delete fixture in the A1-A10 pack. supported now + source-only is scope only. Gate S C-slice impact/test map must register 实现前补样本 before writing translators.",
+      "ownerDecisionId": null,
+      "gateSPreSampleGate": "实现前补样本"
     },
     {
       "id": "sessions.children",
@@ -177,12 +198,12 @@
       "officialServer": "GET /session/:id/children; create with parentID",
       "gateASample": "A10",
       "currentCordCodePath": "none as a product UI; A10 capture only",
-      "targetProductBehavior": "First slice: roots list omits children (covered by sessions.list). Child-session navigation waits on fork product (OD-3).",
+      "targetProductBehavior": "First slice: roots list omits children (covered by sessions.list). Child-session navigation stays future with fork (OD-3 keep-mapped-future-or-unsupported).",
       "ssv2Ownership": "OpenCode parent/child ids. Not a timeline writer.",
       "ssv2Domain": "request/control",
       "wireDescriptorImpact": "none until a child-session UI is advertised",
       "rationale": "A10 proves children endpoint and roots omission. CordCode has no child-session product yet. Do not silently flatten children into the home list.",
-      "dependencyOrGap": "Depends on sessions.fork product (OD-3) and a child-session UX.",
+      "dependencyOrGap": "Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice. Depends on sessions.fork product () and a child-session UX.",
       "ownerDecisionId": "OD-3"
     },
     {
@@ -194,12 +215,12 @@
       "officialServer": "POST /session/:id/fork ForkPayload",
       "gateASample": "source-only",
       "currentCordCodePath": "none",
-      "targetProductBehavior": "Out of first C slice unless OD-3 promotes it. Would create a new session id at a message point.",
+      "targetProductBehavior": "Out of first C slice Would create a new session id at a message point.",
       "ssv2Ownership": "OpenCode new session. New Kernel instance per new session id.",
       "ssv2Domain": "request/control then hydrate",
       "wireDescriptorImpact": "would need a new or extended session_mutation/fork capability if advertised",
       "rationale": "Official Web has fork. No Gate A sample. C7 optional. Do not implement from legacy adapter memory.",
-      "dependencyOrGap": "Need a live fork sample pack before any C-gate work. OD-3.",
+      "dependencyOrGap": "Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice. Need a live fork sample pack before any C-gate work.",
       "ownerDecisionId": "OD-3"
     },
     {
@@ -216,7 +237,7 @@
       "ssv2Domain": "none",
       "wireDescriptorImpact": "must remain absent from hello capabilities",
       "rationale": "Shareable public URLs are an official Web desktop feature with no CordCode client equivalent. Advertising them would be a lie.",
-      "dependencyOrGap": "OD-3 default keep unsupported. A product share-link design would be a new gate.",
+      "dependencyOrGap": "Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice. default keep unsupported. A product share-link design would be a new gate.",
       "ownerDecisionId": "OD-3"
     },
     {
@@ -233,7 +254,7 @@
       "ssv2Domain": "none",
       "wireDescriptorImpact": "must remain absent",
       "rationale": "Paired with share. No CordCode unshare UI.",
-      "dependencyOrGap": "OD-3",
+      "dependencyOrGap": "Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice.",
       "ownerDecisionId": "OD-3"
     },
     {
@@ -283,8 +304,8 @@
       "ssv2Ownership": "Would be a request that yields live Kernel events.",
       "ssv2Domain": "request/control then live",
       "wireDescriptorImpact": "do not advertise command/slash until sampled and implemented",
-      "rationale": "No P0 sample. C7 optional. OD-3.",
-      "dependencyOrGap": "Need command sample pack. OD-3.",
+      "rationale": "No P0 sample. C7 optional. Owner resolved OD-3: keep current future/unsupported mapping.",
+      "dependencyOrGap": "Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice. Need command sample pack.",
       "ownerDecisionId": "OD-3"
     },
     {
@@ -300,8 +321,8 @@
       "ssv2Ownership": "Would be live Kernel if ever implemented.",
       "ssv2Domain": "request/control then live",
       "wireDescriptorImpact": "absent",
-      "rationale": "Official Web shell is desktop-session scoped. No sample. OD-3.",
-      "dependencyOrGap": "OD-3 plus a live shell sample.",
+      "rationale": "Official Web shell is desktop-session scoped. No sample. Owner resolved OD-3: keep current future/unsupported mapping.",
+      "dependencyOrGap": "Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice. plus a live shell sample.",
       "ownerDecisionId": "OD-3"
     },
     {
@@ -334,8 +355,8 @@
       "ssv2Ownership": "Would mutate session messages; Kernel hydrate/live required, never raw iOS rewrite.",
       "ssv2Domain": "request/control then hydrate/live",
       "wireDescriptorImpact": "do not advertise context compression for opencode-web until sampled",
-      "rationale": "C7 optional. No sample. OD-3.",
-      "dependencyOrGap": "Need summarize/compaction SSE sample. OD-3.",
+      "rationale": "C7 optional. No sample. Owner resolved OD-3: keep current future/unsupported mapping.",
+      "dependencyOrGap": "Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice. Need summarize/compaction SSE sample.",
       "ownerDecisionId": "OD-3"
     },
     {
@@ -351,8 +372,8 @@
       "ssv2Ownership": "OpenCode session.revert snapshot. Kernel rehydrate after revert; no iOS local undo writer.",
       "ssv2Domain": "request/control then hydrate",
       "wireDescriptorImpact": "absent",
-      "rationale": "No P0 sample. OD-3.",
-      "dependencyOrGap": "Need revert sample including snapshot/patch. OD-3.",
+      "rationale": "No P0 sample. Owner resolved OD-3: keep current future/unsupported mapping.",
+      "dependencyOrGap": "Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice. Need revert sample including snapshot/patch.",
       "ownerDecisionId": "OD-3"
     },
     {
@@ -368,8 +389,8 @@
       "ssv2Ownership": "OpenCode. Kernel rehydrate.",
       "ssv2Domain": "request/control then hydrate",
       "wireDescriptorImpact": "absent",
-      "rationale": "Paired with revert. OD-3.",
-      "dependencyOrGap": "OD-3",
+      "rationale": "Paired with revert. Owner resolved OD-3: keep current future/unsupported mapping.",
+      "dependencyOrGap": "Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice.",
       "ownerDecisionId": "OD-3"
     },
     {
@@ -403,8 +424,9 @@
       "ssv2Domain": "live / hydrate",
       "wireDescriptorImpact": "existing reasoning events; do not drop the distinction in C4",
       "rationale": "Localmock healthy text turns did not emit reasoning. Mapping is source-backed and already in events.go. C4 replay must keep the distinction when a future sample includes it.",
-      "dependencyOrGap": "No populated reasoning sample in A1-A10. Fail closed if shape unknown; do not invent.",
-      "ownerDecisionId": null
+      "dependencyOrGap": "No populated reasoning sample in A1-A10. Fail closed if shape unknown; do not invent. supported now + source-only is scope only. Gate S C-slice impact/test map must register 实现前补样本 before writing translators.",
+      "ownerDecisionId": null,
+      "gateSPreSampleGate": "实现前补样本"
     },
     {
       "id": "content.tool",
@@ -687,13 +709,14 @@
       "officialServer": "GET /project; worktree list",
       "gateASample": "source-only",
       "currentCordCodePath": "agent/opencode-web/projects.go ListProjectSuggestions / projectDirectories",
-      "targetProductBehavior": "Project/worktree registry feeds directory-scoped session lists (OD-2). Not a timeline writer.",
+      "targetProductBehavior": "Project/worktree registry feeds OD-2: global list aggregates one scoped GET /session per project worktree; directory requests remain official scoped lists. Catalog only, not a timeline writer.",
       "ssv2Ownership": "OpenCode project registry. Catalog.",
       "ssv2Domain": "request/control",
       "wireDescriptorImpact": "none",
-      "rationale": "Audit verified project list shape. Current code already uses /project for directory fan-out. C2 must keep it as catalog, not session truth from the filesystem.",
-      "dependencyOrGap": "OD-2 aggregation rule.",
-      "ownerDecisionId": "OD-2"
+      "rationale": "Audit verified project list shape. Owner resolved OD-2 aggregate-global-list-keep-scoped-list. C2 must keep /project as catalog, not filesystem session truth.",
+      "dependencyOrGap": "source-only catalog shape. Gate S C2 impact/test map must register 实现前补样本 before new project-list translation work. Current fan-out code is not an implementation grant.",
+      "ownerDecisionId": "OD-2",
+      "gateSPreSampleGate": "实现前补样本"
     },
     {
       "id": "workspace.path",
@@ -725,8 +748,8 @@
       "ssv2Ownership": "Would be control/catalog if added.",
       "ssv2Domain": "request/control",
       "wireDescriptorImpact": "absent",
-      "rationale": "C7 optional workspace. OD-3.",
-      "dependencyOrGap": "OD-3 + samples",
+      "rationale": "C7 optional workspace. Owner resolved OD-3: keep current future/unsupported mapping.",
+      "dependencyOrGap": "Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice. + samples",
       "ownerDecisionId": "OD-3"
     },
     {
@@ -742,8 +765,8 @@
       "ssv2Ownership": "n/a as workspace UI",
       "ssv2Domain": "none for first slice",
       "wireDescriptorImpact": "absent",
-      "rationale": "Do not confuse official file API with in-turn read tools. OD-3.",
-      "dependencyOrGap": "OD-3",
+      "rationale": "Do not confuse official file API with in-turn read tools. Owner resolved OD-3: keep current future/unsupported mapping.",
+      "dependencyOrGap": "Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice.",
       "ownerDecisionId": "OD-3"
     },
     {
@@ -759,8 +782,8 @@
       "ssv2Ownership": "n/a",
       "ssv2Domain": "request/control if added",
       "wireDescriptorImpact": "absent",
-      "rationale": "OD-3.",
-      "dependencyOrGap": "OD-3",
+      "rationale": "Owner resolved OD-3: keep current future/unsupported mapping.",
+      "dependencyOrGap": "Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice.",
       "ownerDecisionId": "OD-3"
     },
     {
@@ -776,8 +799,8 @@
       "ssv2Ownership": "OpenCode file diffs. Control/workspace, not messages[].",
       "ssv2Domain": "request/control",
       "wireDescriptorImpact": "do not advertise workspace diff for opencode-web until implemented",
-      "rationale": "Official Web shows session file changes. No Gate A populated diff fixture. OD-3.",
-      "dependencyOrGap": "Need diff sample. OD-3.",
+      "rationale": "Official Web shows session file changes. No Gate A populated diff fixture. Owner resolved OD-3: keep current future/unsupported mapping.",
+      "dependencyOrGap": "Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice. Need diff sample.",
       "ownerDecisionId": "OD-3"
     },
     {
@@ -793,8 +816,8 @@
       "ssv2Ownership": "OpenCode vcs. Control-plane.",
       "ssv2Domain": "request/control",
       "wireDescriptorImpact": "absent",
-      "rationale": "OD-3.",
-      "dependencyOrGap": "OD-3",
+      "rationale": "Owner resolved OD-3: keep current future/unsupported mapping.",
+      "dependencyOrGap": "Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice.",
       "ownerDecisionId": "OD-3"
     },
     {
@@ -811,8 +834,9 @@
       "ssv2Domain": "request/control",
       "wireDescriptorImpact": "existing model catalog; C5 removes leftover recursive parsers",
       "rationale": "Audit verified provider list shape. Current catalog is connected-only, matching official picker validity.",
-      "dependencyOrGap": "",
-      "ownerDecisionId": null
+      "dependencyOrGap": "supported now + source-only is scope only. Gate S C-slice impact/test map must register 实现前补样本 before writing translators.",
+      "ownerDecisionId": null,
+      "gateSPreSampleGate": "实现前补样本"
     },
     {
       "id": "configuration.models",
@@ -845,8 +869,9 @@
       "ssv2Domain": "request/control",
       "wireDescriptorImpact": "C5",
       "rationale": "Part of official picker. Current code has a subset. C5 must not POST a model absent from connected catalog.",
-      "dependencyOrGap": "C5 distinct fixture for configured default.",
-      "ownerDecisionId": null
+      "dependencyOrGap": "C5 distinct fixture for configured default. supported now + source-only is scope only. Gate S C-slice impact/test map must register 实现前补样本 before writing translators.",
+      "ownerDecisionId": null,
+      "gateSPreSampleGate": "实现前补样本"
     },
     {
       "id": "configuration.agents",
@@ -964,8 +989,9 @@
       "ssv2Domain": "live",
       "wireDescriptorImpact": "external_turn_streaming already declared; C4 must keep it honest (SSE actually delivers other-session turns into Kernel, not iOS raw)",
       "rationale": "Transport is the same global SSE proven in A1/A5. A dedicated two-client fixture was not in A1-A10; the broadcast property is source-backed and already the WireDescriptor claim. First C slice still uses this path rather than polling.",
-      "dependencyOrGap": "A two-client external-turn fixture is recommended in C4 but not required to classify the surface; owner matrix row 5 is later acceptance.",
-      "ownerDecisionId": null
+      "dependencyOrGap": "A two-client external-turn fixture is recommended in C4 but not required to classify the surface; owner matrix row 5 is later acceptance. supported now + source-only is scope only. Gate S C-slice impact/test map must register 实现前补样本 before writing translators.",
+      "ownerDecisionId": null,
+      "gateSPreSampleGate": "实现前补样本"
     },
     {
       "id": "observation.reconnect",

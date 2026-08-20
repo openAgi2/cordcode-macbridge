@@ -7,13 +7,22 @@
 - Machine-readable source: `docs/2026-08-20-opencode-web-gate-b-capability-map.json`
 - Completeness checker: `python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_b_map.py`
 - Product code, WireDescriptor, bridge runtime, and iOS capability: **frozen**
-- Gate B exited: **false** (blocked on OD-1, OD-2)
+- Gate B exited: **true**
+- Gate B exit blockers: none
 
 ## Meaning of `supported now`
 
 **supported now 只表示 Gate C 将完成完整 bridge+iOS 路径，不表示当前代码已经支持。**
 
-Gate C will implement the complete bridge+iOS path. It does not mean current product code already supports the surface.
+**supported now + source-only 只是产品范围承诺，不是实施授权。** Source citations alone do not authorize writing event/response translators.
+
+Gate C will implement the complete bridge+iOS path. It does not mean current product code already supports the surface. supported now + source-only is a product-scope commitment only, not implementation authorization.
+
+## Gate S sample gate (input to Gate S, not authorization to start Gate S)
+
+For every translated behavior whose Gate B row is source-only (no same-version captured sample), the Gate S C-slice impact record and S4 test map MUST register a prerequisite gate of 实现前补样本. Do not start that slice's event/response translation from source citations alone.
+
+Each `supported now` row whose Gate A sample is `source-only` carries `gateSPreSampleGate: 实现前补样本`. The corresponding C-slice S3 impact record and S4 test map must list that prerequisite. Do not begin translators from source citations alone.
 
 This document is a product decision map. It must not be used as authorization to change `WireDescriptor`, hello capabilities, or implementation.
 
@@ -27,37 +36,41 @@ This document is a product decision map. It must not be used as authorization to
 | future | 15 |
 | **total** | **60** |
 
-Every official Web surface in plan §5 is present exactly once (permission/question/file/image split as required). Extra official Web surfaces (messages, init, provider auth, PTY, MCP) are also classified so they cannot remain implicit.
+## Owner decisions (resolved 2026-08-20)
 
-## Owner decisions (Gate B does not exit until these are judged)
-
-| ID | Topic | Recommended default | Affects |
+| ID | Topic | Status | Resolved decision |
 |---|---|---|---|
-| OD-1 | Archived session default visibility | `hide-in-default-list-keep-by-id` | `sessions.archive`, `sessions.list` |
-| OD-2 | Multi-directory session aggregation | `aggregate-global-list-keep-scoped-list` | `sessions.list`, `workspace.project` |
-| OD-3 | C7 extras in the first convergence slice | `keep-mapped-future-or-unsupported` | `sessions.fork`, `sessions.share`, `sessions.unshare`, `sessions.children`, `turns.command`, `turns.shell`, `turns.summarize`, `turns.revert` |
+| OD-1 | Archived session default visibility | **resolved** | `hide-in-default-list-keep-by-id` |
+| OD-2 | Multi-directory session aggregation | **resolved** | `aggregate-global-list-keep-scoped-list` |
+| OD-3 | C7 extras in the first convergence slice | **resolved** | `keep-mapped-future-or-unsupported` |
 
-Full recommendation, evidence, and impact:
-### OD-1 — Archived session default visibility
+### Resolved statements
+#### OD-1 — Archived session default visibility
 
-- **Recommendation:** Match official Web reducer: default home/global list hides rows with time.archived; GET-by-id still returns archived sessions; do not treat API list membership as UI visibility.
+- **Status:** resolved by owner on 2026-08-20
+- **Resolved decision:** `hide-in-default-list-keep-by-id`
+- **Resolved summary:** Default home/global list hides sessions with time.archived; GET-by-id still returns archived sessions.
 - **Evidence:** A10: API roots=true still includes archived; GET /session/:id returns time.archived; official event-reducer.ts:149-161 splices archived out of the home list. Current CordCode maps ArchivedAt and comments say clients hide them.
 - **Impact:** iOS session home list, get_session, archive mutation refresh. Choosing 'show archived in default list' would diverge from official Web.
-- **Default if no objection:** `hide-in-default-list-keep-by-id`
+- **Historical recommendation (now superseded as the decision):** Match official Web reducer: default home/global list hides rows with time.archived; GET-by-id still returns archived sessions; do not treat API list membership as UI visibility.
 
-### OD-2 — Multi-directory session aggregation
+#### OD-2 — Multi-directory session aggregation
 
-- **Recommendation:** Keep CordCode product overlay: iOS global list aggregates one official directory-scoped GET /session per project worktree. Per-directory requests use the official scoped list only. Do not treat the official Web single-directory home list as a ban on CordCode aggregation.
+- **Status:** resolved by owner on 2026-08-20
+- **Resolved decision:** `aggregate-global-list-keep-scoped-list`
+- **Resolved summary:** iOS global list aggregates one official directory-scoped GET /session per project worktree; per-directory requests stay scoped.
 - **Evidence:** A10: two directories do not leak ids. Official session-load.ts lists one directory. Current ListSessions in sessions.go already fans out per projectDirectories.
 - **Impact:** iOS global session catalog versus per-workspace filter. Dropping aggregation would hide sessions outside the current work dir.
-- **Default if no objection:** `aggregate-global-list-keep-scoped-list`
+- **Historical recommendation (now superseded as the decision):** Keep CordCode product overlay: iOS global list aggregates one official directory-scoped GET /session per project worktree. Per-directory requests use the official scoped list only. Do not treat the official Web single-directory home list as a ban on CordCode aggregation.
 
-### OD-3 — C7 extras in the first convergence slice
+#### OD-3 — C7 extras in the first convergence slice
 
-- **Recommendation:** Leave all of these as mapped (future or deliberately unsupported). Do not pull them into the first Gate C slice without a new sample pack.
+- **Status:** resolved by owner on 2026-08-20
+- **Resolved decision:** `keep-mapped-future-or-unsupported`
+- **Resolved summary:** First C slice does not promote mapped future or deliberately unsupported C7 extras.
 - **Evidence:** Plan §6 C7 says select only from this map. None of these have a Gate A P0 sample except children/list facts inside A10.
 - **Impact:** Advertised iOS session/workspace commands. Promoting any item to supported now expands C7 scope.
-- **Default if no objection:** `keep-mapped-future-or-unsupported`
+- **Historical recommendation (now superseded as the decision):** Leave all of these as mapped (future or deliberately unsupported). Do not pull them into the first Gate C slice without a new sample pack.
 
 ## Semantic bounds already encoded (not owner-optional)
 
@@ -65,7 +78,9 @@ Full recommendation, evidence, and impact:
 - **A7** question is not permission. Official events are asked/replied/rejected. Canonical SSV2 path is `user_input_requested` / `user_input_resolved`. Do not invent `question_resolved`.
 - **A8** todo is control-plane, not SessionProjection timeline. Live item keys are `content`/`status`/`priority` with **no id**. UnifiedTodo also has no id, so this is not silently adapted with a fake id.
 - **A9** persist and provider understanding are separate. Vision/file-understanding cannot be `supported now` from the text-only mock conversion.
-- **A10** API list still returns archived; official Web reducer hides them; by-id GET still works. Default CordCode visibility is OD-1, not leftover module behavior.
+- **A10 / OD-1:** API list still returns archived; official Web reducer hides them; by-id GET still works. CordCode default list **hides** archived; by-id remains.
+- **OD-2:** global list aggregates per project worktree; directory requests stay official scoped lists.
+- **OD-3:** mapped future / deliberately unsupported C7 extras stay out of the first slice.
 - **Observation:** direct SSE is the 1.18.18 ingest. Nested `sync` is evidence-only and skipped at pre-Kernel normalization. Dual ingest is forbidden.
 
 ## Surfaces by group
@@ -97,13 +112,14 @@ Full recommendation, evidence, and impact:
 - **Server/schema/reducer:** packages/opencode/src/server/routes/instance/httpapi/groups/session.ts ListQuery roots/limit/start/search/scope/path; GET /session
 - **Gate A sample:** A10
 - **Current CordCode path:** agent/opencode-web/sessions.go ListSessions / ListSessionsInDirectory — directory-scoped GET /session without roots/limit
-- **Target product behavior:** Official roots+limit semantics per directory. CordCode global list is a product overlay pending OD-2. Archived visibility pending OD-1.
+- **Target product behavior:** Official roots+limit semantics per directory. Default home/global list hides rows with time.archived; GET-by-id still returns archived (OD-1 hide-in-default-list-keep-by-id). iOS global list aggregates one official directory-scoped GET /session per project worktree; directory-scoped requests stay scoped (OD-2 aggregate-global-list-keep-scoped-list).
 - **SSV2 ownership:** OpenCode serve owns session catalog facts. iOS ProjectionStore does not write the catalog from raw HTTP.
 - **SSV2 domain:** request/control (catalog). Timeline effects none.
 - **WireDescriptor/capability future impact:** C2 changes list semantics; no new capability flag. Do not advertise session_pagination unless limit/cursor is actually implemented.
-- **Rationale:** P0 listing is captured. Gate C2 must reproduce roots/limit and define archive/multi-dir as product rules. supported now means C2 will complete the path, not that today's ListSessions is official-parity.
-- **Dependency / evidence gap:** OD-1 archive visibility; OD-2 aggregation. Current code missing roots=true and limit.
-- **Owner decision:** OD-1
+- **Rationale:** P0 listing is captured. Owner resolved OD-1 and OD-2. supported now means C2 will complete roots/limit plus these product rules, not that today's ListSessions is official-parity.
+- **Dependency / evidence gap:** Current code missing roots=true and limit. Archive-hide and aggregation rules are owner-resolved, not remaining blockers.
+- **Owner decision:** OD-1,OD-2
+- **Gate S pre-sample gate:** —
 
 #### `sessions.get`
 
@@ -119,6 +135,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A10 proves archived-by-id 200 with time.archived. C2 retains by-id refresh.
 - **Dependency / evidence gap:** —
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `sessions.create`
 
@@ -134,6 +151,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A1 captured create 200 and subsequent prompt. Current create body already matches v1.
 - **Dependency / evidence gap:** —
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `sessions.rename`
 
@@ -147,8 +165,9 @@ Full recommendation, evidence, and impact:
 - **SSV2 domain:** request/control
 - **WireDescriptor/capability future impact:** session_mutation already derived from SessionRenamer+Archiver+Deleter; adding RenameSession is C7, still no new flag name
 - **Rationale:** Official Web rename is live. Audit 2026-08-20 sandbox renamed via PATCH. Gate A P0 did not recapture rename as its own scenario; C7 still implements it from source + audit sample. supported now = C7 will add SessionRenamer, not that it exists today.
-- **Dependency / evidence gap:** No dedicated Gate A sanitized fixture named a-rename; use source + audit PATCH evidence until C7 adds a replay fixture.
+- **Dependency / evidence gap:** No dedicated Gate A sanitized fixture named a-rename; use source + audit PATCH evidence until C7 adds a replay fixture. supported now + source-only is scope only. Gate S C-slice impact/test map must register 实现前补样本 before writing translators.
 - **Owner decision:** —
+- **Gate S pre-sample gate:** 实现前补样本
 
 #### `sessions.archive`
 
@@ -157,13 +176,14 @@ Full recommendation, evidence, and impact:
 - **Server/schema/reducer:** PATCH /session/:id {time:{archived}}; reducer event-reducer.ts:149-161 hides archived from home list
 - **Gate A sample:** A10
 - **Current CordCode path:** agent/opencode-web/session_mutation.go ArchiveSession
-- **Target product behavior:** Archive via official PATCH. Default CordCode list visibility follows OD-1 (recommended: hide like Web). By-id GET remains.
+- **Target product behavior:** Archive via official PATCH. Default CordCode home/global list hides archived (OD-1 hide-in-default-list-keep-by-id). By-id GET remains valid for archived sessions. API list membership is not UI visibility.
 - **SSV2 ownership:** OpenCode session.time.archived. Catalog/control-plane, not messages[].
 - **SSV2 domain:** request/control
-- **WireDescriptor/capability future impact:** existing SessionArchiver; advertisement already possible via session_mutation — C2 must make visibility match the chosen product rule
-- **Rationale:** A10 captured archive PATCH, list still containing archived, by-id GET. Current code archives and maps ArchivedAt. Default visibility is an owner product rule (OD-1), not an implicit leftover from the old module.
-- **Dependency / evidence gap:** OD-1 must confirm hide-in-default-list versus show-archived.
+- **WireDescriptor/capability future impact:** existing SessionArchiver; C2 must hide archived in the default list and keep by-id GET
+- **Rationale:** A10 captured archive PATCH, list still containing archived, by-id GET. Owner resolved OD-1: hide in default list, keep by-id. Not leftover module behavior.
+- **Dependency / evidence gap:** —
 - **Owner decision:** OD-1
+- **Gate S pre-sample gate:** —
 
 #### `sessions.delete`
 
@@ -177,8 +197,9 @@ Full recommendation, evidence, and impact:
 - **SSV2 domain:** request/control
 - **WireDescriptor/capability future impact:** existing SessionDeleter
 - **Rationale:** Audit sandbox DELETE 200 true then GET 404. Current DeleteSession exists. C7 still needs targeted replay; supported now is the Gate C commitment.
-- **Dependency / evidence gap:** No dedicated Gate A delete fixture in the A1-A10 pack.
+- **Dependency / evidence gap:** No dedicated Gate A delete fixture in the A1-A10 pack. supported now + source-only is scope only. Gate S C-slice impact/test map must register 实现前补样本 before writing translators.
 - **Owner decision:** —
+- **Gate S pre-sample gate:** 实现前补样本
 
 #### `sessions.children`
 
@@ -187,13 +208,14 @@ Full recommendation, evidence, and impact:
 - **Server/schema/reducer:** GET /session/:id/children; create with parentID
 - **Gate A sample:** A10
 - **Current CordCode path:** none as a product UI; A10 capture only
-- **Target product behavior:** First slice: roots list omits children (covered by sessions.list). Child-session navigation waits on fork product (OD-3).
+- **Target product behavior:** First slice: roots list omits children (covered by sessions.list). Child-session navigation stays future with fork (OD-3 keep-mapped-future-or-unsupported).
 - **SSV2 ownership:** OpenCode parent/child ids. Not a timeline writer.
 - **SSV2 domain:** request/control
 - **WireDescriptor/capability future impact:** none until a child-session UI is advertised
 - **Rationale:** A10 proves children endpoint and roots omission. CordCode has no child-session product yet. Do not silently flatten children into the home list.
-- **Dependency / evidence gap:** Depends on sessions.fork product (OD-3) and a child-session UX.
+- **Dependency / evidence gap:** Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice. Depends on sessions.fork product () and a child-session UX.
 - **Owner decision:** OD-3
+- **Gate S pre-sample gate:** —
 
 #### `sessions.fork`
 
@@ -202,13 +224,14 @@ Full recommendation, evidence, and impact:
 - **Server/schema/reducer:** POST /session/:id/fork ForkPayload
 - **Gate A sample:** source-only
 - **Current CordCode path:** none
-- **Target product behavior:** Out of first C slice unless OD-3 promotes it. Would create a new session id at a message point.
+- **Target product behavior:** Out of first C slice Would create a new session id at a message point.
 - **SSV2 ownership:** OpenCode new session. New Kernel instance per new session id.
 - **SSV2 domain:** request/control then hydrate
 - **WireDescriptor/capability future impact:** would need a new or extended session_mutation/fork capability if advertised
 - **Rationale:** Official Web has fork. No Gate A sample. C7 optional. Do not implement from legacy adapter memory.
-- **Dependency / evidence gap:** Need a live fork sample pack before any C-gate work. OD-3.
+- **Dependency / evidence gap:** Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice. Need a live fork sample pack before any C-gate work.
 - **Owner decision:** OD-3
+- **Gate S pre-sample gate:** —
 
 #### `sessions.share`
 
@@ -222,8 +245,9 @@ Full recommendation, evidence, and impact:
 - **SSV2 domain:** none
 - **WireDescriptor/capability future impact:** must remain absent from hello capabilities
 - **Rationale:** Shareable public URLs are an official Web desktop feature with no CordCode client equivalent. Advertising them would be a lie.
-- **Dependency / evidence gap:** OD-3 default keep unsupported. A product share-link design would be a new gate.
+- **Dependency / evidence gap:** Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice. default keep unsupported. A product share-link design would be a new gate.
 - **Owner decision:** OD-3
+- **Gate S pre-sample gate:** —
 
 #### `sessions.unshare`
 
@@ -237,8 +261,9 @@ Full recommendation, evidence, and impact:
 - **SSV2 domain:** none
 - **WireDescriptor/capability future impact:** must remain absent
 - **Rationale:** Paired with share. No CordCode unshare UI.
-- **Dependency / evidence gap:** OD-3
+- **Dependency / evidence gap:** Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice.
 - **Owner decision:** OD-3
+- **Gate S pre-sample gate:** —
 
 #### `sessions.messages`
 
@@ -254,6 +279,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A1-A5 reload GET /message. Current GetRichSessionHistory exists. supported now is the hydrate path, not an iOS second writer.
 - **Dependency / evidence gap:** —
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `sessions.init`
 
@@ -269,6 +295,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** Desktop repo-bootstrap feature. No CordCode iOS equivalent. Capability absent and UI unavailable.
 - **Dependency / evidence gap:** —
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 </details>
 
@@ -302,6 +329,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** Official 1.18.18 Web composer does not use the blocking prompt route. CordCode first generation is v1 prompt_async.
 - **Dependency / evidence gap:** v2 prompt is a different generation pack.
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `turns.prompt_async`
 
@@ -317,6 +345,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A1/A2/A9 captured 204 + persist. Current Send is incomplete. supported now is the C3 commitment.
 - **Dependency / evidence gap:** Implementation must not ship until C3 replay of A1/A2/A9.
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `turns.command`
 
@@ -329,9 +358,10 @@ Full recommendation, evidence, and impact:
 - **SSV2 ownership:** Would be a request that yields live Kernel events.
 - **SSV2 domain:** request/control then live
 - **WireDescriptor/capability future impact:** do not advertise command/slash until sampled and implemented
-- **Rationale:** No P0 sample. C7 optional. OD-3.
-- **Dependency / evidence gap:** Need command sample pack. OD-3.
+- **Rationale:** No P0 sample. C7 optional. Owner resolved OD-3: keep current future/unsupported mapping.
+- **Dependency / evidence gap:** Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice. Need command sample pack.
 - **Owner decision:** OD-3
+- **Gate S pre-sample gate:** —
 
 #### `turns.shell`
 
@@ -344,9 +374,10 @@ Full recommendation, evidence, and impact:
 - **SSV2 ownership:** Would be live Kernel if ever implemented.
 - **SSV2 domain:** request/control then live
 - **WireDescriptor/capability future impact:** absent
-- **Rationale:** Official Web shell is desktop-session scoped. No sample. OD-3.
-- **Dependency / evidence gap:** OD-3 plus a live shell sample.
+- **Rationale:** Official Web shell is desktop-session scoped. No sample. Owner resolved OD-3: keep current future/unsupported mapping.
+- **Dependency / evidence gap:** Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice. plus a live shell sample.
 - **Owner decision:** OD-3
+- **Gate S pre-sample gate:** —
 
 #### `turns.abort`
 
@@ -362,6 +393,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A4 captured abort 200 true, MessageAbortedError/Aborted, finish unset, idle, status map without session.
 - **Dependency / evidence gap:** —
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `turns.summarize`
 
@@ -374,9 +406,10 @@ Full recommendation, evidence, and impact:
 - **SSV2 ownership:** Would mutate session messages; Kernel hydrate/live required, never raw iOS rewrite.
 - **SSV2 domain:** request/control then hydrate/live
 - **WireDescriptor/capability future impact:** do not advertise context compression for opencode-web until sampled
-- **Rationale:** C7 optional. No sample. OD-3.
-- **Dependency / evidence gap:** Need summarize/compaction SSE sample. OD-3.
+- **Rationale:** C7 optional. No sample. Owner resolved OD-3: keep current future/unsupported mapping.
+- **Dependency / evidence gap:** Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice. Need summarize/compaction SSE sample.
 - **Owner decision:** OD-3
+- **Gate S pre-sample gate:** —
 
 #### `turns.revert`
 
@@ -389,9 +422,10 @@ Full recommendation, evidence, and impact:
 - **SSV2 ownership:** OpenCode session.revert snapshot. Kernel rehydrate after revert; no iOS local undo writer.
 - **SSV2 domain:** request/control then hydrate
 - **WireDescriptor/capability future impact:** absent
-- **Rationale:** No P0 sample. OD-3.
-- **Dependency / evidence gap:** Need revert sample including snapshot/patch. OD-3.
+- **Rationale:** No P0 sample. Owner resolved OD-3: keep current future/unsupported mapping.
+- **Dependency / evidence gap:** Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice. Need revert sample including snapshot/patch.
 - **Owner decision:** OD-3
+- **Gate S pre-sample gate:** —
 
 #### `turns.unrevert`
 
@@ -404,9 +438,10 @@ Full recommendation, evidence, and impact:
 - **SSV2 ownership:** OpenCode. Kernel rehydrate.
 - **SSV2 domain:** request/control then hydrate
 - **WireDescriptor/capability future impact:** absent
-- **Rationale:** Paired with revert. OD-3.
-- **Dependency / evidence gap:** OD-3
+- **Rationale:** Paired with revert. Owner resolved OD-3: keep current future/unsupported mapping.
+- **Dependency / evidence gap:** Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice.
 - **Owner decision:** OD-3
+- **Gate S pre-sample gate:** —
 
 </details>
 
@@ -444,6 +479,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A1/A9 captured text persist and deltas.
 - **Dependency / evidence gap:** —
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `content.reasoning`
 
@@ -457,8 +493,9 @@ Full recommendation, evidence, and impact:
 - **SSV2 domain:** live / hydrate
 - **WireDescriptor/capability future impact:** existing reasoning events; do not drop the distinction in C4
 - **Rationale:** Localmock healthy text turns did not emit reasoning. Mapping is source-backed and already in events.go. C4 replay must keep the distinction when a future sample includes it.
-- **Dependency / evidence gap:** No populated reasoning sample in A1-A10. Fail closed if shape unknown; do not invent.
+- **Dependency / evidence gap:** No populated reasoning sample in A1-A10. Fail closed if shape unknown; do not invent. supported now + source-only is scope only. Gate S C-slice impact/test map must register 实现前补样本 before writing translators.
 - **Owner decision:** —
+- **Gate S pre-sample gate:** 实现前补样本
 
 #### `content.tool`
 
@@ -474,6 +511,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A6-A8 persisted tool-calls. Observe-only mapping is in scope for C4.
 - **Dependency / evidence gap:** —
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `content.file.persist`
 
@@ -489,6 +527,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A9: prompt_async 204 and persisted type=file. Current product rejects attachments. supported now is C3 work, not today's behavior.
 - **Dependency / evidence gap:** C3 implementation + capability advertisement in the same slice.
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `content.file.vision`
 
@@ -504,6 +543,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A9 split: persist captured; provider mock conversion is text-only. Cannot mark vision supported now.
 - **Dependency / evidence gap:** Need a vision-capable provider round trip sample.
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `content.image.persist`
 
@@ -519,6 +559,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A9 persisted image/png file part after 204.
 - **Dependency / evidence gap:** C3. Vision is a separate surface.
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `content.image.vision`
 
@@ -534,6 +575,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A9 explicitly proves persist without vision. Cannot list visual understanding as supported now.
 - **Dependency / evidence gap:** Real vision provider sample required.
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `content.file_mention`
 
@@ -549,6 +591,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A9 persisted file + source.
 - **Dependency / evidence gap:** C3 composer mention mapping.
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `content.agent_mention`
 
@@ -564,6 +607,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A9 persisted type=agent name=plan with source.
 - **Dependency / evidence gap:** C3. ListAgents today is catalog only.
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `content.patch`
 
@@ -579,6 +623,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** Official Web does not treat patch as user-visible content. CordCode has no product equivalent as a message bubble.
 - **Dependency / evidence gap:** Revert/diff may consume snapshots separately (future).
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `content.snapshot`
 
@@ -594,6 +639,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** Depends on turns.revert. OD-3.
 - **Dependency / evidence gap:** OD-3
 - **Owner decision:** OD-3
+- **Gate S pre-sample gate:** —
 
 #### `content.step_markers`
 
@@ -609,6 +655,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** Official Web skips these parts. No CordCode step-marker bubble.
 - **Dependency / evidence gap:** —
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 </details>
 
@@ -640,6 +687,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A6 captured asked, pending GET, session-scoped {response:once}, replied, pending cleared, turn continued.
 - **Dependency / evidence gap:** C6. Do not advertise until all three replies work.
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `interaction.permission.always`
 
@@ -655,6 +703,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A6 always then same pattern askedAgain=false on that isolated serve only. Do not enlarge this to a restart-surviving or cross-device authorization.
 - **Dependency / evidence gap:** No sample of serve restart wiping or keeping always rules. Do not document restart-surviving authorization.
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `interaction.permission.reject`
 
@@ -670,6 +719,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A6 reject captured replied, pending cleared, idle, finish=tool-calls. Not a healthy completed assistant.
 - **Dependency / evidence gap:** —
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `interaction.question.reply`
 
@@ -685,6 +735,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A7 captured asked, pending questions[], POST answers:[['red']], question.replied, pending cleared, turn continued. Permission is a different surface.
 - **Dependency / evidence gap:** C6. Current WireDescriptor correctly omits the flag.
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `interaction.question.reject`
 
@@ -700,6 +751,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A7 captured reject HTTP 200, question.rejected, pending cleared, idle, assistant not healthy stop.
 - **Dependency / evidence gap:** C6
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `interaction.todo`
 
@@ -715,6 +767,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A8 items keys exactly content/priority/status, two snapshots replace pending/in_progress with completed, no id. UnifiedTodo has no id so this is not blocked on protocol. If a future protocol revision required id, this row would move to future rather than silently adapt.
 - **Dependency / evidence gap:** C6 control-plane mapping. Identity remains the official (content,status,priority) row replacement semantics.
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 </details>
 
@@ -742,13 +795,14 @@ Full recommendation, evidence, and impact:
 - **Server/schema/reducer:** GET /project; worktree list
 - **Gate A sample:** source-only
 - **Current CordCode path:** agent/opencode-web/projects.go ListProjectSuggestions / projectDirectories
-- **Target product behavior:** Project/worktree registry feeds directory-scoped session lists (OD-2). Not a timeline writer.
+- **Target product behavior:** Project/worktree registry feeds OD-2: global list aggregates one scoped GET /session per project worktree; directory requests remain official scoped lists. Catalog only, not a timeline writer.
 - **SSV2 ownership:** OpenCode project registry. Catalog.
 - **SSV2 domain:** request/control
 - **WireDescriptor/capability future impact:** none
-- **Rationale:** Audit verified project list shape. Current code already uses /project for directory fan-out. C2 must keep it as catalog, not session truth from the filesystem.
-- **Dependency / evidence gap:** OD-2 aggregation rule.
+- **Rationale:** Audit verified project list shape. Owner resolved OD-2 aggregate-global-list-keep-scoped-list. C2 must keep /project as catalog, not filesystem session truth.
+- **Dependency / evidence gap:** source-only catalog shape. Gate S C2 impact/test map must register 实现前补样本 before new project-list translation work. Current fan-out code is not an implementation grant.
 - **Owner decision:** OD-2
+- **Gate S pre-sample gate:** 实现前补样本
 
 #### `workspace.path`
 
@@ -764,6 +818,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** Official v1 Web does not use path.get. No CordCode equivalent.
 - **Dependency / evidence gap:** —
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `workspace.file_list`
 
@@ -776,9 +831,10 @@ Full recommendation, evidence, and impact:
 - **SSV2 ownership:** Would be control/catalog if added.
 - **SSV2 domain:** request/control
 - **WireDescriptor/capability future impact:** absent
-- **Rationale:** C7 optional workspace. OD-3.
-- **Dependency / evidence gap:** OD-3 + samples
+- **Rationale:** C7 optional workspace. Owner resolved OD-3: keep current future/unsupported mapping.
+- **Dependency / evidence gap:** Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice. + samples
 - **Owner decision:** OD-3
+- **Gate S pre-sample gate:** —
 
 #### `workspace.file_read`
 
@@ -791,9 +847,10 @@ Full recommendation, evidence, and impact:
 - **SSV2 ownership:** n/a as workspace UI
 - **SSV2 domain:** none for first slice
 - **WireDescriptor/capability future impact:** absent
-- **Rationale:** Do not confuse official file API with in-turn read tools. OD-3.
-- **Dependency / evidence gap:** OD-3
+- **Rationale:** Do not confuse official file API with in-turn read tools. Owner resolved OD-3: keep current future/unsupported mapping.
+- **Dependency / evidence gap:** Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice.
 - **Owner decision:** OD-3
+- **Gate S pre-sample gate:** —
 
 #### `workspace.file_search`
 
@@ -806,9 +863,10 @@ Full recommendation, evidence, and impact:
 - **SSV2 ownership:** n/a
 - **SSV2 domain:** request/control if added
 - **WireDescriptor/capability future impact:** absent
-- **Rationale:** OD-3.
-- **Dependency / evidence gap:** OD-3
+- **Rationale:** Owner resolved OD-3: keep current future/unsupported mapping.
+- **Dependency / evidence gap:** Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice.
 - **Owner decision:** OD-3
+- **Gate S pre-sample gate:** —
 
 #### `workspace.session_diff`
 
@@ -821,9 +879,10 @@ Full recommendation, evidence, and impact:
 - **SSV2 ownership:** OpenCode file diffs. Control/workspace, not messages[].
 - **SSV2 domain:** request/control
 - **WireDescriptor/capability future impact:** do not advertise workspace diff for opencode-web until implemented
-- **Rationale:** Official Web shows session file changes. No Gate A populated diff fixture. OD-3.
-- **Dependency / evidence gap:** Need diff sample. OD-3.
+- **Rationale:** Official Web shows session file changes. No Gate A populated diff fixture. Owner resolved OD-3: keep current future/unsupported mapping.
+- **Dependency / evidence gap:** Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice. Need diff sample.
 - **Owner decision:** OD-3
+- **Gate S pre-sample gate:** —
 
 #### `workspace.vcs`
 
@@ -836,9 +895,10 @@ Full recommendation, evidence, and impact:
 - **SSV2 ownership:** OpenCode vcs. Control-plane.
 - **SSV2 domain:** request/control
 - **WireDescriptor/capability future impact:** absent
-- **Rationale:** OD-3.
-- **Dependency / evidence gap:** OD-3
+- **Rationale:** Owner resolved OD-3: keep current future/unsupported mapping.
+- **Dependency / evidence gap:** Owner resolved OD-3 keep-mapped-future-or-unsupported. Do not pull into the first Gate C slice.
 - **Owner decision:** OD-3
+- **Gate S pre-sample gate:** —
 
 #### `workspace.pty`
 
@@ -854,6 +914,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** Official Web desktop terminals have no CordCode phone equivalent.
 - **Dependency / evidence gap:** —
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `workspace.mcp`
 
@@ -869,6 +930,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** MCP is a desktop/serve configuration surface. CordCode iOS has no MCP admin UI in this convergence.
 - **Dependency / evidence gap:** —
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 </details>
 
@@ -898,8 +960,9 @@ Full recommendation, evidence, and impact:
 - **SSV2 domain:** request/control
 - **WireDescriptor/capability future impact:** existing model catalog; C5 removes leftover recursive parsers
 - **Rationale:** Audit verified provider list shape. Current catalog is connected-only, matching official picker validity.
-- **Dependency / evidence gap:** —
+- **Dependency / evidence gap:** supported now + source-only is scope only. Gate S C-slice impact/test map must register 实现前补样本 before writing translators.
 - **Owner decision:** —
+- **Gate S pre-sample gate:** 实现前补样本
 
 #### `configuration.models`
 
@@ -915,6 +978,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A1 sends model{providerID,modelID}. Official picker has five levels; current resolveSendModel is not full parity. supported now = C5 will finish it.
 - **Dependency / evidence gap:** C5 fixtures per fallback level. No sample of variant-selected prompt.
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `configuration.default_model`
 
@@ -928,8 +992,9 @@ Full recommendation, evidence, and impact:
 - **SSV2 domain:** request/control
 - **WireDescriptor/capability future impact:** C5
 - **Rationale:** Part of official picker. Current code has a subset. C5 must not POST a model absent from connected catalog.
-- **Dependency / evidence gap:** C5 distinct fixture for configured default.
+- **Dependency / evidence gap:** C5 distinct fixture for configured default. supported now + source-only is scope only. Gate S C-slice impact/test map must register 实现前补样本 before writing translators.
 - **Owner decision:** —
+- **Gate S pre-sample gate:** 实现前补样本
 
 #### `configuration.agents`
 
@@ -945,6 +1010,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A1/A2 captured agent=build. ListAgents exists. C3 must add the field to Send.
 - **Dependency / evidence gap:** C3 prompt body.agent.
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `configuration.variants`
 
@@ -960,6 +1026,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A1 proves omit-when-unset. Sending a selected variant is still source-only. Disposition is supported now for omit parity; selected-variant UI stays unimplemented until sampled — documented in dependencyOrGap, not as a second implicit surface.
 - **Dependency / evidence gap:** Need a live sample with variant set before advertising variant cycling in iOS.
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `configuration.provider_auth`
 
@@ -975,6 +1042,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** Official Web can connect providers. CordCode product keeps provider credentials on the Mac. Advertising iOS provider-auth would be false.
 - **Dependency / evidence gap:** —
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 </details>
 
@@ -1007,6 +1075,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A3 retry+APIError; A4 abort error; A5 busy-at-disconnect then idle on second SSE.
 - **Dependency / evidence gap:** —
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `observation.global_events`
 
@@ -1022,6 +1091,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** All Gate A scenarios used /global/event.
 - **Dependency / evidence gap:** —
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `observation.direct_sse`
 
@@ -1037,6 +1107,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A1-A5 prove direct busy/delta/idle/error/retry. Official Web also uses direct after skipping sync.
 - **Dependency / evidence gap:** —
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `observation.nested_sync`
 
@@ -1052,6 +1123,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** Official v1 Web skips nested sync. Gate A kept frames as evidence only. Dual ingest is forbidden.
 - **Dependency / evidence gap:** C4 + Gate S anti-double-ingest tests after this map.
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `observation.external_turns`
 
@@ -1065,8 +1137,9 @@ Full recommendation, evidence, and impact:
 - **SSV2 domain:** live
 - **WireDescriptor/capability future impact:** external_turn_streaming already declared; C4 must keep it honest (SSE actually delivers other-session turns into Kernel, not iOS raw)
 - **Rationale:** Transport is the same global SSE proven in A1/A5. A dedicated two-client fixture was not in A1-A10; the broadcast property is source-backed and already the WireDescriptor claim. First C slice still uses this path rather than polling.
-- **Dependency / evidence gap:** A two-client external-turn fixture is recommended in C4 but not required to classify the surface; owner matrix row 5 is later acceptance.
+- **Dependency / evidence gap:** A two-client external-turn fixture is recommended in C4 but not required to classify the surface; owner matrix row 5 is later acceptance. supported now + source-only is scope only. Gate S C-slice impact/test map must register 实现前补样本 before writing translators.
 - **Owner decision:** —
+- **Gate S pre-sample gate:** 实现前补样本
 
 #### `observation.reconnect`
 
@@ -1082,6 +1155,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** A5 captured disconnect during busy+partial, status still busy, reconnect first direct server.connected then live deltas, terminal idle, full text, finish=stop.
 - **Dependency / evidence gap:** —
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 #### `observation.catalog_refresh`
 
@@ -1097,6 +1171,7 @@ Full recommendation, evidence, and impact:
 - **Rationale:** Current path already treats created/deleted as catalog signals. Keep that boundary.
 - **Dependency / evidence gap:** —
 - **Owner decision:** —
+- **Gate S pre-sample gate:** —
 
 </details>
 
@@ -1105,4 +1180,4 @@ Full recommendation, evidence, and impact:
 - It does not change `agent/opencode-web/wire_descriptor.go`.
 - It does not add `todos`, `structured_user_input_v1`, or attachment kinds to hello capabilities.
 - It does not implement C1–C7.
-- It does not start Gate S. SSV2 columns here are disposition constraints for later Gate S proof, not Gate S completion.
+- It does not start Gate S. SSV2 columns and the 实现前补样本 gate are inputs for a later Gate S session after independent audit.
