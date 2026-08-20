@@ -55,6 +55,16 @@ Independent audit-006 accepts E2/E3/E6/E7 and WP for canonical decisions, accept
 
 These are evidence corrections, not new product features. If supported configuration cannot produce E1b, mark it blocked and keep variant UI/protocol mapping out of the first product batch.
 
+## 0.2 Final provider evidence correction (directive-007)
+
+| ID | Surface | Captured raw facts (checker-derived) | Status |
+|---|---|---|---|
+| E1b | non-empty catalog variant | config-declared `models.echo.variants {high,low}` surfaces in raw `/provider` (merge path provider.ts:1671-1682); prompt with REAL key `high` admitted 204 and persisted `variant:"high"` on the user message model; unset control's latest user message omits variant; unlisted keys are not options | `captured` |
+| E4b | provider raw provenance | raw+sanitized pair archived (sentinel credential `fixture-not-a-secret`); top-level `{all,default,connected}`, row/model key/type/order derived from raw; sanitized≡raw structurally (only declared value classes differ); credential is sentinel-only | `captured` |
+| E5b | configured/default/fallback | three isolated configs: `/config.model` present `localmock/alpha` (valid, in catalog) / present `localmock/nonexistent` (invalid, NOT in catalog) / key ABSENT; `/provider.default=localmock/zeta` (sort-first, provider.ts:2019-2025 priority→latest→id-DESC ranking, NOT alphabetical) differs from configured default; no-model prompt resolved alpha / nonexistent (verbatim passthrough) / zeta (=provider default) — serve-side fallback order distinguishable from raw inputs; `resolveDefaultModel` branches computable per mode | `captured` |
+
+Checkers: `harness/check_final_provider_evidence.py` (+14 destructive self-test mutations).
+
 ## 0. Official Web transport (shared by all rows)
 
 | Layer | 1.18.18 source |

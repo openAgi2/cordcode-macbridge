@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-20T16:54:56Z",
+  "updated_at": "2026-08-21T02:50:00Z",
   "todos": [
     {
       "id": "gate-a-inventory-impl",
@@ -873,7 +873,7 @@
       "id": "stage0-provider-evidence-correction-impl",
       "title": "Directive-007 E1b/E4b/E5b combined capture",
       "description": "Evidence-only: capture a two-model provider with distinct default/first ordering, real GET /config valid/invalid/absent responses, safe raw+sanitized /provider provenance, and a non-empty live variants catalog or honest E1b blocker.",
-      "status": "pending",
+      "status": "done",
       "phase": "stage0-evidence-correction",
       "kind": "impl",
       "depends_on": [
@@ -883,20 +883,25 @@
       "notes": "No product mapping or code. One combined provider sandbox round only.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Directive-007 joint capture from the isolated 1.18.18/2cba7e227d sandbox (4398/4399 reclaimed each cycle; owner 4096 PID 71333 unchanged). E1b: config-declared models.echo.variants {high,low} surface in raw /provider; prompt with real key high admitted 204 and persisted on the user message model; unset control omits. E4b: raw+sanitized /provider pair with sentinel credential fixture-not-a-secret; key/type/order derived from raw. E5b: three isolated configs — /config.model localmock/alpha (in catalog) / localmock/nonexistent (not in catalog) / key absent; /provider.default=localmock/zeta (custom ranking priority->latest->id-DESC, provider.ts:2019-2025, NOT alphabetical) distinct from configured default; no-model prompt resolved alpha / nonexistent (verbatim) / zeta (=provider default).",
+        "artifacts": [
+          "agent/opencode-web/testdata/official-1.18.18/samples/e1b-catalog-variant.raw.json",
+          "agent/opencode-web/testdata/official-1.18.18/samples/e4b-provider-provenance.raw.json",
+          "agent/opencode-web/testdata/official-1.18.18/samples/e5b-configured-default-valid.raw.json",
+          "agent/opencode-web/testdata/official-1.18.18/harness/opencode.json"
+        ],
+        "checked_at": "2026-08-21T02:50:00Z"
       }
     },
     {
       "id": "stage0-provider-evidence-correction-tests",
       "title": "Directive-007 provider/config/variant independent checker",
       "description": "Derive E1b/E4b/E5b only from raw HTTP/prompt/reload and prove raw/sanitized structural equivalence; destructive mutations cover config/default/connected/models/variants and redaction boundaries.",
-      "status": "pending",
+      "status": "done",
       "phase": "stage0-evidence-correction",
       "kind": "tests",
       "depends_on": [
@@ -906,20 +911,23 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "automated",
-        "attestation": "self-attested",
+        "status": "present",
+        "method": "tests",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "check_final_provider_evidence.py: E1b/E4b/E5b all captured, derived only from raw transport; raw/sanitized structural equivalence verified (only declared value classes may differ); resolveDefaultModel branch order (provider-catalog.ts:29-37) computed from raw inputs per mode; 14 destructive self-test mutations all caught (raw key/order/model-id/credential/default, config.model, connected, default map, catalog injection, absent-key fake, unlisted variant, catalog variants removal, persisted variant, unset control).",
+        "artifacts": [
+          "agent/opencode-web/testdata/official-1.18.18/harness/check_final_provider_evidence.py",
+          "cmd:python3 check_final_provider_evidence.py [--self-test] => ok {E1b,E4b,E5b captured} / PASS"
+        ],
+        "checked_at": "2026-08-21T02:50:00Z"
       }
     },
     {
       "id": "stage0-provider-evidence-correction-regression",
       "title": "Directive-007 evidence provenance/isolation regression",
       "description": "Prove pinned source/runtime, safe raw+sanitized provenance, leak scan, 4398/4399 cleanup, unchanged owner 4096, and zero product/protocol/iOS diffs; stop for design-owner mapping.",
-      "status": "pending",
+      "status": "done",
       "phase": "stage0-evidence-correction",
       "kind": "regression",
       "depends_on": [
@@ -929,13 +937,17 @@
       "notes": "Developer agent stops after the report; canonical mapping remains owner-only.",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "mixed",
+        "status": "present",
+        "method": "regression",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "All prior gates stay green: canonical design checker (dossiers=11 evidence-decisions=7 final-corrections=3) + self-test; A1-A10 10/10 + self-test; WP checker + self-test; E1-E7 queue (6 captured, E2 blocked) + self-test; final provider evidence + self-test. Leak scan over all b-round raw+sanitized clean under the sentinel-aware rule (real credentials still fail). 4398/4399 free after every cycle; owner 4096 PID 71333 identical before/after. git diff --check clean; zero product/protocol/WireDescriptor/capability/iOS files touched (harness+samples+inventory+state only).",
+        "artifacts": [
+          "cmd:python3 check_canonical_execution_design.py [--self-test] => ok / PASS",
+          "cmd:python3 check_evidence_queue.py [--self-test] => ok / PASS",
+          "docs/2026-08-20-opencode-web-1.18.18-sample-inventory.md"
+        ],
+        "checked_at": "2026-08-21T02:50:00Z"
       }
     },
     {

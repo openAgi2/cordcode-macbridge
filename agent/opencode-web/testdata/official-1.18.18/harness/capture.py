@@ -262,13 +262,29 @@ LEAK_MARKERS = (
 )
 
 
+# The one explicitly non-secret sentinel credential designed for safe RAW
+# archiving (directive-007). An apiKey/api_key occurrence is a hit ONLY when
+# its value is not this exact sentinel — real credentials still fail.
+SENTINEL_CREDENTIAL = "fixture-not-a-secret"
+
+
 def leak_scan(obj: Any) -> list[str]:
     dumped = json.dumps(obj)
     hits = []
     if "Basic " in dumped and "Authorization" in dumped:
         hits.append("authorization-header")
     for marker in LEAK_MARKERS:
-        if marker in dumped and marker != "Authorization":
+        if marker == "Authorization":
+            continue
+        if marker in ("apiKey", "api_key"):
+            import re as _re
+
+            for m in _re.finditer(r'"(?:apiKey|api_key)"\s*:\s*"([^"]*)"', dumped):
+                if m.group(1) != SENTINEL_CREDENTIAL:
+                    hits.append(marker)
+                    break
+            continue
+        if marker in dumped:
             hits.append(marker)
     if "127.0.0.1:4096" in dumped:
         hits.append("owner-managed-serve")
@@ -1743,6 +1759,135 @@ def capture_e7(c: Client, sse: SSE, out: Path, workspace: str) -> None:
     )
 
 
+
+# ── directive-007 final provider evidence correction: E1b/E4b/E5b ──────────
+
+
+def _catalog_variants(catalog: Any) -> dict[tuple[str, str], list[str]]:
+    """Real variant keys per (providerID, modelID), derived from the raw catalog."""
+    out: dict[tuple[str, str], list[str]] = {}
+    if not isinstance(catalog, dict):
+        return out
+    for prov in catalog.get("all") or []:
+        if not isinstance(prov, dict):
+            continue
+        for mid, model in (prov.get("models") or {}).items():
+            if isinstance(model, dict) and isinstance(model.get("variants"), dict) and model["variants"]:
+                out[(str(prov.get("id")), str(mid))] = [str(k) for k in model["variants"].keys()]
+    return out
+
+
+def capture_e4b(c: Client, sse: SSE, out: Path, workspace: str) -> None:
+    """E4b provider provenance: raw + sanitized pair over the real /provider
+    (sentinel credential makes the raw safely archivable)."""
+    c.request("GET", "/provider", query={})
+    write_sample(
+        out / "e4b-provider-provenance.sanitized.json",
+        {
+            "meta": {"scenario": "E4b", "opencodeVersion": OPENCODE_VERSION, "sourceCommit": SOURCE_COMMIT},
+            "source": {
+                "ui": "packages/app/src/utils/server-compat.ts provider list consumption",
+                "server": "packages/opencode/src/server/routes/instance/httpapi/handlers/provider.ts:40-57 list -> {all, default: Provider.defaultModelIDs, connected}; provider.ts:1107-1109 defaultModelIDs = sorted-first model per provider; provider.ts:1671-1682 config-declared model variants merge",
+            },
+            "http": c.http,
+            "sentinel": "fixture-not-a-secret (explicit non-secret; designed for safe raw archiving)",
+            "observation": {},
+        },
+        workspace,
+    )
+
+
+def capture_e1b(c: Client, sse: SSE, out: Path, workspace: str) -> None:
+    """E1b non-empty catalog variant: select a REAL variant key from the live
+    /provider catalog, send it, observe persistence; unset control alongside.
+    If the supported config path yields no variants, archive the attempt and
+    mark the observation honestly (checker turns it into BLOCKED)."""
+    _, catalog, _ = c.request("GET", "/provider", query={})
+    variants = _catalog_variants(catalog)
+    if not variants:
+        write_sample(
+            out / "e1b-catalog-variant.sanitized.json",
+            {
+                "meta": {"scenario": "E1b", "opencodeVersion": OPENCODE_VERSION, "sourceCommit": SOURCE_COMMIT},
+                "source": {
+                    "ui": "packages/app/src/utils/server-compat.ts:206 promptAsync variant; model-variant.ts variant resolution",
+                    "server": "packages/core/src/v1/config/provider.ts:69-77 config models may declare variants; packages/opencode/src/provider/provider.ts:1671-1682 config variants mergeDeep into model.variants; provider.ts:1281-1288 computed variants from ProviderTransform",
+                    "harnessConfig": "provider.localmock.models.echo.variants = {high, low} (supported config path attempted)",
+                },
+                "http": c.http,
+                "observation": {"variantsPresentInCatalog": False, "attemptedConfig": "opencode.json models.echo.variants {high,low}"},
+            },
+            workspace,
+        )
+        return
+    (provider_id, model_id), keys = sorted(variants.items())[0]
+    sid = _fresh_session(c, "e1b-variant")
+    body_set = prompt_body("E1b real catalog variant probe")
+    body_set["model"] = {"providerID": provider_id, "modelID": model_id}
+    body_set["variant"] = keys[0]
+    c.request("POST", f"/session/{sid}/prompt_async", body=body_set)
+    ok_set, _ = wait_idle(sse, sid, 45)
+    c.request("GET", f"/session/{sid}")
+    msgs_set = _messages_of(c, sid)
+
+    body_unset = prompt_body("E1b unset variant control")
+    body_unset["model"] = {"providerID": provider_id, "modelID": model_id}
+    c.request("POST", f"/session/{sid}/prompt_async", body=body_unset)
+    ok_unset, _ = wait_idle(sse, sid, 45)
+    c.request("GET", f"/session/{sid}")
+    msgs_unset = _messages_of(c, sid)
+
+    write_sample(
+        out / "e1b-catalog-variant.sanitized.json",
+        {
+            "meta": {"scenario": "E1b", "opencodeVersion": OPENCODE_VERSION, "sourceCommit": SOURCE_COMMIT},
+            "source": {
+                "ui": "packages/app/src/utils/server-compat.ts:206 promptAsync variant; packages/app/src/context/model-variant.ts cycleModelVariant/getConfiguredAgentVariant",
+                "server": "packages/core/src/v1/config/provider.ts:69-77 variants config schema; packages/opencode/src/provider/provider.ts:1671-1682 config variants merge; packages/opencode/src/session/prompt.ts:649-666 variant resolution, :1006 persistence",
+            },
+            "http": c.http,
+            "sse": sse.frames,
+            "reload": {"messagesWithVariantSet": msgs_set, "messagesWithVariantUnset": msgs_unset},
+            "observation": {
+                "catalogVariantSource": {"providerID": provider_id, "modelID": model_id, "variantKeys": keys},
+                "sentVariant": keys[0],
+                "idleAfterSet": ok_set,
+                "idleAfterUnset": ok_unset,
+            },
+        },
+        workspace,
+    )
+
+
+def capture_e5b(c: Client, sse: SSE, out: Path, workspace: str, mode: str) -> None:
+    """E5b official configured/default/fallback inputs for one config mode:
+    GET /config + GET /provider + a no-model prompt through reload."""
+    c.request("GET", "/config", query={})
+    c.request("GET", "/provider", query={})
+    sid = _fresh_session(c, f"e5b-{mode}")
+    body = prompt_body(f"E5b configured-default probe ({mode})")
+    body.pop("model", None)
+    c.request("POST", f"/session/{sid}/prompt_async", body=body)
+    ok, _ = wait_idle(sse, sid, 45)
+    _, by_id, _ = c.request("GET", f"/session/{sid}")
+    msgs = _messages_of(c, sid)
+    write_sample(
+        out / f"e5b-configured-default-{mode}.sanitized.json",
+        {
+            "meta": {"scenario": "E5b", "configMode": mode, "opencodeVersion": OPENCODE_VERSION, "sourceCommit": SOURCE_COMMIT},
+            "source": {
+                "ui": "packages/app/src/context/local.tsx:153 resolveDefaultModel(providers.defaultModel(), sync().data.config.model); packages/app/src/hooks/provider-catalog.ts:29-37 branch order; prompt-model-selection.ts:39-41 picker chain",
+                "server": "packages/opencode/src/server/routes/instance/httpapi/groups/config.ts:10-18 GET /config -> ConfigV1.Info (model optional string provider/model — core/src/v1/config/config.ts:74-75); provider.ts:1107-1109 defaultModelIDs",
+            },
+            "http": c.http,
+            "sse": sse.frames,
+            "reload": {"sessionByID": by_id, "messages": msgs},
+            "observation": {"idleReached": ok},
+        },
+        workspace,
+    )
+
+
 SCENARIOS = {
     "a1": capture_a1,
     "a2": capture_a2,
@@ -1779,6 +1924,33 @@ def _e5_absent(c: Client, sse: SSE, out: Path, ws: str) -> None:
 SCENARIOS["e5a"] = _e5_valid
 SCENARIOS["e5b"] = _e5_invalid
 SCENARIOS["e5c"] = _e5_absent
+
+
+def _e1b(c: Client, sse: SSE, out: Path, ws: str) -> None:
+    capture_e1b(c, sse, out, ws)
+
+
+def _e4b(c: Client, sse: SSE, out: Path, ws: str) -> None:
+    capture_e4b(c, sse, out, ws)
+
+
+def _e5b_valid(c: Client, sse: SSE, out: Path, ws: str) -> None:
+    capture_e5b(c, sse, out, ws, "valid")
+
+
+def _e5b_invalid(c: Client, sse: SSE, out: Path, ws: str) -> None:
+    capture_e5b(c, sse, out, ws, "invalid")
+
+
+def _e5b_absent(c: Client, sse: SSE, out: Path, ws: str) -> None:
+    capture_e5b(c, sse, out, ws, "absent")
+
+
+SCENARIOS["e1b"] = _e1b
+SCENARIOS["e4b"] = _e4b
+SCENARIOS["f5a"] = _e5b_valid
+SCENARIOS["f5b"] = _e5b_invalid
+SCENARIOS["f5c"] = _e5b_absent
 
 
 def main() -> int:

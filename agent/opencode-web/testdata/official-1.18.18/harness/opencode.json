@@ -1,8 +1,10 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "localmock/echo",
+  "model": "localmock/alpha",
   "small_model": "localmock/echo",
-  "enabled_providers": ["localmock"],
+  "enabled_providers": [
+    "localmock"
+  ],
   "disabled_providers": [
     "openai",
     "anthropic",
@@ -22,13 +24,39 @@
       "env": [],
       "options": {
         "baseURL": "http://127.0.0.1:4399/v1",
-        "apiKey": "local-mock-key"
+        "apiKey": "fixture-not-a-secret"
       },
       "models": {
+        "alpha": {
+          "name": "Alpha",
+          "limit": {
+            "context": 32000,
+            "output": 2048
+          }
+        },
         "echo": {
           "name": "Echo",
           "tool_call": true,
           "attachment": true,
+          "limit": {
+            "context": 32000,
+            "output": 2048
+          },
+          "variants": {
+            "high": {
+              "reasoning": {
+                "effort": "high"
+              }
+            },
+            "low": {
+              "reasoning": {
+                "effort": "low"
+              }
+            }
+          }
+        },
+        "zeta": {
+          "name": "Zeta",
           "limit": {
             "context": 32000,
             "output": 2048
