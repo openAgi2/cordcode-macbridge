@@ -271,6 +271,29 @@ brief `连接中` blip on iOS clients.
 涉及 iOS 连接、配对、重连或 session 同步时，同时读取相邻
 `../cordcode-ios/IOS_MAC_INTERACTION_FLOW.md`；不要只看 Mac 侧推断客户端行为。
 
+## 外部 Web/API backend 的 source-first 纪律（必须）
+
+接入 OpenCode Web、dsh Web 或其他外部工具的官方 Web/API 时，目标是翻译官方产品语义，
+不是把本仓旧 adapter 改成 HTTP。设计、实施和评审必须按以下证据顺序：
+
+1. 先读目标版本官方 Web UI 的真实调用链，以及服务端 route/schema/reducer；列全用户可见
+   surface，并逐项标成 supported / deliberately unsupported / not applicable / future。
+2. 每个 request、response、event 的内容形状必须有目标版本的真实、脱敏样本。SDK/OpenAPI
+   只能证明声明契约；与活体冲突时必须记录版本漂移，不能任选一个继续实现。
+3. 再定义 bridge-v1 翻译和 capability。只有 request、事件/响应、冷拉、错误、重连路径完整
+   时才能广告能力；endpoint 返回 2xx 不等于官方 Web 语义等价。
+4. 测试 fixture 必须来自已归档的真实样本或官方仓库 fixture。根据本仓实现/设计手写的 fake
+   server 只能验证内部行为，不能反向证明外部协议形状正确。
+
+禁止把本仓 legacy backend 的请求体、历史映射、事件顺序或 fallback parser 当成外部协议
+证据；legacy 代码只可用于发现旧坑和本仓接线点。不得为“可能的旧版/新版”加入未经样本证明
+的递归解析或静默 fallback。每个支持的 generation 必须分别绑定版本范围、source commit、
+样本包和契约测试；未知 generation 应 fail closed 并给出可诊断状态。
+
+涉及首条消息、事件生命周期、permission/question/todo、附件或分页等嵌套形状时，设计评审
+必须包含至少两种独立提取/核对方法，并解释差异；未取得真实样本的项只能列为阻塞或明确移出
+capability，不能用“实现期再确认”放行编码。
+
 ## Backend runtime model (必须理解)
 
 iOS 只连接 Bridge `8777` / `8778` 或 Relay，不直连下面的 backend 端口。

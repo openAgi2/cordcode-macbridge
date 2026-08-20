@@ -903,3 +903,20 @@ seal，commits e00b389/8eabd6e），canonical `docs/protocol/bridge-v1.md` 事�
 
 - 官方输入框底下那一行来自整本日志投影：`sessionStats`（轮/步/llmMs/toolMs/ttft/decode）+ `tokenUsage`（uncached/cacheRead/cacheWrite/output）。缓存命中 = cacheRead / (uncached+cacheRead+cacheWrite)。窗口内节点 fold 只是没投影时的 fallback，分页/压缩会改窗口，不能当账单。
 - iOS 放在已有 ⭕ 表的「本会话」，不另做 composer footer。数字只转发官方投影，不从手机消息列表加总。
+
+## 2026-08-20 OpenCode Web：HTTP 纯度不等于官方 Web 语义一致
+
+- owner 在实施/真机测试中发现，`opencode-web` 虽然已经只走官方 HTTP/SSE，创建 session 后首条
+  消息、模型/agent 参数、事件终态等仍反复出错。复审确认根因在原设计的方法：允许从 legacy
+  `agent/opencode` 复制 prompt/SSE/history 语义，再以 endpoint 可达和同源 fake-server 测试证明
+  “对齐官方 Web”；这是一条循环证据链。
+- 2026-08-20 对安装版 1.18.18、同版本官方源码和隔离 serve 三方核验后，已确认的系统缺口包括：
+  官方 prompt 携带 messageID/agent/model/variant/多类 parts，现实现只发 text+model；官方模型选择
+  有五级链，现实现只覆盖部分；官方 session list 使用 roots/limit，现实现按 `/project` 聚合且不带
+  limit；真实 SSE 同时出现 direct payload 与嵌套 `sync`，现解析器忽略后者；question/todo 未接；
+  v2 没有当前活体样本。todo 活体项还与生成 SDK 的 `id` 声明发生漂移。
+- 原 `docs/2026-08-18-opencode-web-backend-design.md` 及完成情况已降为历史记录，禁止继续据此施工。
+  当前证据和后续阶段门分别见 `docs/2026-08-20-opencode-web-source-parity-audit.md`、
+  `docs/2026-08-20-opencode-web-source-first-convergence-plan.md`。owner 当前暂停产品代码实施。
+- 长期纪律已写入 `CLAUDE.md`：官方 UI/source → 目标版本真实样本 → bridge 映射 → 实现/测试；
+  legacy 只能当反例和接线索引，endpoint 2xx、SDK 类型或从设计手写的 fixture 都不能单独证明 parity。

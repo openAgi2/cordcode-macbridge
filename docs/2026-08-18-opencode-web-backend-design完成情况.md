@@ -1,5 +1,10 @@
 # OpenCode Web Backend 完成情况（opencode-web）
 
+> [!CAUTION]
+> **历史施工记录，不是当前完成性证明或后续实施入口。** 2026-08-20 的 source-parity 审计确认：虽然 HTTP/SSE backend 已落地，但官方 Web 语义仍有系统性缺口，尤其是首条消息、列表限制、模型回退、SSE `sync`、question/todo 与未取证的 v2。当前结论与后续边界见
+> [source-parity audit](2026-08-20-opencode-web-source-parity-audit.md) 和
+> [source-first convergence plan](2026-08-20-opencode-web-source-first-convergence-plan.md)。产品代码实施已由 owner 暂停。
+
 - 日期：2026-08-19
 - 对应设计：[2026-08-18-opencode-web-backend-design.md](2026-08-18-opencode-web-backend-design.md)（v3.1，两轮评审 APPROVE）
 - 状态：**§8 八项中 1–7 项全数完成并落证；§8-8 Release 已覆盖安装，现网矩阵行 1–6 待 owner 执行**（本文「验收矩阵」节）。沙盒绿不替代现网验收（设计 §6 红线）。
