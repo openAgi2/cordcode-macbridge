@@ -2,7 +2,7 @@
   "version": 1,
   "project_root": "/Users/jacklee/Projects/cordcode-macbridge-opencode-web",
   "design_doc": "docs/2026-08-20-opencode-web-source-first-convergence-plan.md",
-  "design_doc_hash": "777591c8334a76987474ab6d52ee481606ce8a4c",
+  "design_doc_hash": "2ebd546cf6f9281d9fc40b979365dc4594ac2696",
   "design_doc_changed": false,
   "activated_at": "2026-08-20T14:40:12Z",
   "active_mode": true,
@@ -61,8 +61,32 @@
         "recheck_received_at": "2026-08-20T15:01:32Z",
         "recheck_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-002-recheck.md"
       }
+    },
+    {
+      "number": 3,
+      "kind": "implementation",
+      "title": "C2 official list/get",
+      "issued_at": "2026-08-20T15:11:05Z",
+      "status": "pending",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-003-c2-official-list-get.md",
+      "scope": "Mac-only C2 samples/catalog/tests",
+      "constraints": [
+        "workspace.project same-version sample and independent checker before product code",
+        "official directory+roots=true+limit=100 with OD-1/OD-2 and explicit missing-worktree rule",
+        "catalog errors/empty registry fail honestly with no stale/current-dir/partial/history/legacy fallback",
+        "list/get remain catalog-only with zero Kernel/EventPublisher/messages writes",
+        "no protocol/WireDescriptor/capability/iOS writer/C3+ changes"
+      ],
+      "linked_commits": [],
+      "report": {
+        "received_at": null,
+        "markdown_path": null,
+        "audited": false,
+        "audit_verdict": null,
+        "audit_path": null
+      }
     }
   ],
-  "current_directive_number": 2,
-  "last_updated": "2026-08-20T15:02:47Z"
+  "current_directive_number": 3,
+  "last_updated": "2026-08-20T15:11:05Z"
 }
