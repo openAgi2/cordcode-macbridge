@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-20T20:30:00Z",
+  "updated_at": "2026-08-20T21:30:00Z",
   "todos": [
     {
       "id": "gate-a-inventory-impl",
@@ -674,7 +674,7 @@
         "c1-version-transport-tests"
       ],
       "source": "Gate C1",
-      "notes": " Hole-fill directive-002 (audit-001 partial): RunDiagnostics now fails ocw_probe with shared unsupported-generation (quarantined) wording and stops before catalog checks; corrected capability wording (no NEW v2 capability; existing array unchanged).",
+      "notes": " Hole-fill directive-002 (audit-001 partial): RunDiagnostics now fails ocw_probe with shared unsupported-generation (quarantined) wording and stops before catalog checks; corrected capability wording (no NEW v2 capability; existing array unchanged). C1 closed 2026-08-20: three-track done (exec-plan proven + supervisor verified via audit-002-recheck; owner real-device acceptance not required this phase). Awaiting separate C2 directive; C3+ must not be bundled.",
       "verification": {
         "required": true,
         "status": "present",
@@ -689,9 +689,14 @@
           "agent/opencode-web/version_transport_c1_test.go",
           "cmd:go test ./agent/opencode-web/ -count=1 -timeout 180s => ok 2.717s",
           "cmd:go test ./go-bridge/ -run OpenCodeWeb|AgentDescriptor -count=1 => ok 0.843s",
-          "cmd:go test ./core/ -count=1 => ok; go vet => clean; go build ./... => OK"
+          "cmd:go test ./core/ -count=1 => ok; go vet => clean; go build ./... => OK",
+          "supervisor-audit:audit-001-gate-s-exit-and-c1.md (verdict partial, diagnostics hole named)",
+          "supervisor-directive:directive-002-c1-diagnostics-hole-fill.md (hole-fill 5b8451c)",
+          "supervisor-audit:audit-002-c1-diagnostics-hole-fill.md (partial, wording unification left)",
+          "recheck-fix:257f0df (clientFor shares unsupportedGenerationDetail; 14 assertions strengthened)",
+          "supervisor-audit:audit-002-recheck.md (verdict verified, 2026-08-20)"
         ],
-        "checked_at": "2026-08-20T20:30:00Z"
+        "checked_at": "2026-08-20T21:30:00Z"
       }
     },
     {
