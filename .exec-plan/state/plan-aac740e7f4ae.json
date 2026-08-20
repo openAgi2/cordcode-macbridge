@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-20T12:55:00Z",
+  "updated_at": "2026-08-20T13:40:00Z",
   "todos": [
     {
       "id": "gate-a-inventory-impl",
@@ -280,69 +280,79 @@
       "id": "gate-b-capability-map-impl",
       "title": "Gate B official-surface disposition map",
       "description": "Classify every official Web surface as supported now / deliberately unsupported / not applicable / future. No implicit endpoint.",
-      "status": "pending",
+      "status": "done",
       "phase": "gate-b",
       "kind": "impl",
       "depends_on": [
         "gate-a-capture-regression"
       ],
       "source": "Gate B",
-      "notes": "",
+      "notes": "60 official Web surfaces classified. Gate B NOT exited: OD-1 archive visibility and OD-2 multi-directory aggregation await owner. No product code. Gate S not started.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Wrote docs/2026-08-20-opencode-web-gate-b-capability-map.json + .md. 34 supported now, 5 deliberately unsupported, 6 not applicable, 15 future. A6/A7/A8/A9/A10/observation bounds encoded. OD-1/OD-2/OD-3 collected.",
+        "artifacts": [
+          "docs/2026-08-20-opencode-web-gate-b-capability-map.json",
+          "docs/2026-08-20-opencode-web-gate-b-capability-map.md"
+        ],
+        "checked_at": "2026-08-20T13:40:00Z"
       }
     },
     {
       "id": "gate-b-capability-map-tests",
       "title": "Gate B map covers official Web inventory",
       "description": "Check the disposition table against the official session/turn/content/interaction/workspace/config/observation inventory so no surface is implicit.",
-      "status": "pending",
+      "status": "done",
       "phase": "gate-b",
       "kind": "tests",
       "depends_on": [
         "gate-b-capability-map-impl"
       ],
       "source": "Gate B",
-      "notes": "",
+      "notes": "Completeness checker covers §5 required ids, legal dispositions, empty rationale, A6-A9/A10/observation semantics, markdown coverage, negative self-test.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "python3 harness/check_gate_b_map.py → gate-b map ok: 60 surfaces; --self-test PASS.",
+        "artifacts": [
+          "agent/opencode-web/testdata/official-1.18.18/harness/check_gate_b_map.py",
+          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_b_map.py => gate-b map ok: 60 surfaces; supported now=34 deliberately unsupported=5 not applicable=6 future=15",
+          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_b_map.py --self-test => self-test PASS"
+        ],
+        "checked_at": "2026-08-20T13:40:00Z"
       }
     },
     {
       "id": "gate-b-capability-map-regression",
       "title": "Gate B map is a product decision document",
       "description": "Disposition table is documentation; WireDescriptor changes belong to later C gates.",
-      "status": "pending",
+      "status": "done",
       "phase": "gate-b",
       "kind": "regression",
       "depends_on": [
         "gate-b-capability-map-tests"
       ],
       "source": "Gate B",
-      "notes": "",
+      "notes": "Docs/checker only. WireDescriptor and product code unchanged. Gate B still not exited pending OD-1/OD-2.",
       "verification": {
         "required": false,
-        "status": "missing",
+        "status": "present",
         "method": "manual",
         "attestation": "self-attested",
         "na_reason": "capability map is a written product decision; advertisement changes are C-gate work",
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "git diff of agent/opencode-web/*.go go-bridge MacBridge core iOS is empty. Map does not modify WireDescriptor.",
+        "artifacts": [
+          "docs/2026-08-20-opencode-web-gate-b-capability-map.md",
+          "agent/opencode-web/wire_descriptor.go"
+        ],
+        "checked_at": "2026-08-20T13:40:00Z"
       }
     },
     {

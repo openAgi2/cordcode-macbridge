@@ -144,7 +144,13 @@ Minimum surfaces to classify:
 
 The map, not accidental interface availability, determines `WireDescriptor` capabilities.
 
-Gate B exit: there is no endpoint in the official Web inventory whose CordCode disposition is implicit.
+Working map (documentation only; Gate B has **not** exited pending owner OD-1/OD-2):
+
+- [2026-08-20-opencode-web-gate-b-capability-map.md](2026-08-20-opencode-web-gate-b-capability-map.md)
+- [2026-08-20-opencode-web-gate-b-capability-map.json](2026-08-20-opencode-web-gate-b-capability-map.json)
+- checker: `python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_b_map.py`
+
+Gate B exit: there is no endpoint in the official Web inventory whose CordCode disposition is implicit, **and** owner has judged OD-1/OD-2. Do not enter Gate S until that exit.
 
 ## 5.1 Gate S — Session Sync v2 architecture proof
 
