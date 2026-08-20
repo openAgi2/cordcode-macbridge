@@ -1,14 +1,14 @@
 # OpenCode Web source-first convergence plan
 
 - Date: 2026-08-20
-- Status: **documentation ready; all product-code implementation is paused until the owner explicitly resumes it**
+- Status: **owner authorized resumption on 2026-08-20, but only through Gate A → Gate B → Gate S. Product-code work in Gate C remains forbidden until all three gates exit.**
 - Audit input: [2026-08-20-opencode-web-source-parity-audit.md](2026-08-20-opencode-web-source-parity-audit.md)
 - Historical input only: [2026-08-18-opencode-web-backend-design.md](2026-08-18-opencode-web-backend-design.md) and its completion report
 - Goal: make `opencode-web` a faithful, bounded adapter of the official OpenCode Web behavior, rather than a cleaned-up copy of the legacy OpenCode backend
 
 ## 0. Execution boundary
 
-This document is the next implementation contract, but **not an instruction to start coding now**. While paused, an agent may read and audit; it must not modify product code, run write operations against the owner's managed serve, use a real provider account, install a build, or execute the owner test matrix.
+This document is the implementation contract. The owner has authorized work to resume, beginning with evidence and architecture gates. During Gate A, Gate B, and Gate S, an agent may inspect source, build isolated capture infrastructure, collect/sanitize samples, write capability/SSV2 mappings, and add evidence-validation tooling; it must not modify product code, run write operations against the owner's managed serve, use a real provider account without new authorization, install a product build, or execute the owner test matrix.
 
 When the owner resumes implementation, work proceeds through the gates below in order. A gate cannot be marked complete by prose, endpoint reachability, or a fake fixture derived from the implementation.
 
@@ -146,9 +146,90 @@ The map, not accidental interface availability, determines `WireDescriptor` capa
 
 Gate B exit: there is no endpoint in the official Web inventory whose CordCode disposition is implicit.
 
+## 5.1 Gate S — Session Sync v2 architecture proof
+
+Gate S is mandatory after Gate B and before any Gate C product-code change. OpenCode Web parity does not replace CordCode's Session Sync v2 architecture. The official serve defines upstream facts; it is **not** a second active timeline writer for CordCode clients.
+
+The continuing architecture authority is the iOS repository `CLAUDE.md` section “Session Sync v2 架构路线护栏”, together with:
+
+- `docs/2026-07-24-single-source-multidevice-sync-design.md` in the iOS repository;
+- `docs/2026-07-26-session-sync-v2-cold-start-kernel-restart-plan.md` in the iOS repository;
+- the MacBridge canonical protocol pack under `docs/protocol/`.
+
+### S1. Truth owners and single writers
+
+| Concern | Authority / only writer | Explicitly forbidden |
+|---|---|---|
+| OpenCode session/message/status facts | the verified 1.18.18 `opencode serve` API/SSE is the upstream source; the adapter may observe and translate it | treating local guesses, legacy adapter state, or iOS state as OpenCode server truth |
+| CordCode active timeline and execution | one Mac `ProjectionKernel` / `SessionProjection` per `(backendId, sessionId)`; push and pull read the same committed Kernel head | sending OpenCode history or raw SSE directly into the active iOS timeline; maintaining a second reducer beside the Kernel |
+| iOS `messages[]`, turn state, and generation | `ProjectionStore` is the single client-side projection writer from t=0 whenever the selected backend advertises negotiated `session_sync_v2` | optimistic/history/raw/legacy writers, delayed raw flush, content comparison, or a timeout-based completion writer |
+| protocol and projection shapes | MacBridge `docs/protocol/` is canonical; iOS mirror, Swift models, and web types are synchronized consumers | changing only one repository or using an implementation-private field as an undeclared wire contract |
+
+“Server-semantic parity” in §2 therefore means that the adapter feeds correct canonical facts into the existing Kernel. It never means that the official Web reducer, raw HTTP history, or raw SSE may bypass the Kernel and become a client writer.
+
+### S2. Transaction domains and allowed data paths
+
+| Domain | Required path | Boundary |
+|---|---|---|
+| cold hydrate/reopen | verified OpenCode message/history source → existing pathless rich-history mapper → Kernel private hydrate transaction under one source cut/fence → committed projection | hydrate does not enter ordinary live seq, EventBuffer, offline queue, mailbox, or raw client fanout |
+| live OpenCode events | verified v1 direct SSE payload → `opencode-web` source adapter normalization → shared `EventPublisher`/Kernel live ingest → projection patch/snapshot → iOS `ProjectionStore` | one upstream event produces at most one canonical Kernel ingest; no direct raw timeline delivery to an SSV2 client |
+| v1 nested `sync` events | preserve in evidence capture, but follow the verified official v1 rule and skip them before canonical ingest unless later same-version evidence changes the contract | direct and nested forms must never both advance `syncRev` for the same semantic event |
+| reconnect/recovery | reconnect observation may read verified server messages/status, then validate/invalidate/rehydrate the same Kernel and resume via checkpoint/fence/full-or-delta projection | no history merge, raw catch-up writer, local similarity dedup, or inferred healthy terminal on iOS |
+| requests/mutations/catalog | prompt/abort/rename/archive/delete/list/model calls remain control/request paths; their resulting timeline effects re-enter through the authoritative observation/Kernel path | an HTTP 2xx may refresh metadata but cannot directly manufacture a confirmed timeline turn or completion |
+| explicitly allowed control plane | session catalog, model/agent catalog, diagnostics, context usage, and todos remain outside `messages[]` unless a separately approved projection design moves them | a control-plane exception cannot carry text/reasoning/tool/turn state or mutate projection execution |
+
+Permissions and structured questions require special handling:
+
+- `permission_request` / `permission_resolved` may continue through the existing explicit control-plane presentation while their canonical state is also reduced by the Kernel; the raw control path must not write `messages[]` or execution.
+- structured questions use canonical `user_input_requested` / `user_input_resolved` into the Kernel. `question_asked` / `question_resolved` are one-way legacy presentation only and must not be delivered raw to an SSV2 client or ingested back into the Kernel.
+- todos stay an explicit raw control-plane exception in this convergence unless Gate B and a separate projection-shape decision deliberately migrate them. Todo events must not be smuggled into timeline parts.
+
+### S3. Impact declaration required before each Gate C slice
+
+Before implementing C1–C7, the agent must add an impact record to its evidence/completion log with all fields below. “No change” is a valid value only with a source/code citation.
+
+| Required field | What must be stated |
+|---|---|
+| truth owner | upstream OpenCode fact owner and CordCode timeline owner |
+| only writer | Mac Kernel ingest site and iOS ProjectionStore apply site |
+| transaction domain | request/control, hydrate, live, reconnect, or projection delivery |
+| new data path | every new or changed producer → mapper → Kernel/control → consumer edge |
+| active write inventory | every code path that could touch timeline content, execution, or `messages[]`, including paths intentionally sealed |
+| failure presentation | exact failed/running/unsupported behavior; no inferred success or automatic legacy fallback |
+| anti-double-write proof | targeted producer, reducer/fence/delivery, and client writer-seal tests |
+
+If the slice cannot prove that it adds no second truth, writer, consumer referee, or automatic fallback, it does not enter implementation.
+
+### S4. Mandatory SSV2 acceptance matrix
+
+Gate S must produce a concrete test map before Gate C. As implementation proceeds, the owning slice must satisfy the applicable rows:
+
+| Layer | Required proof |
+|---|---|
+| OpenCode adapter | direct + nested `sync` evidence cannot double-ingest; stable IDs survive translation; unsupported shapes fail closed |
+| Kernel live | each canonical event advances the one Kernel chain at most once; execution completes only from authoritative terminal evidence |
+| Kernel hydrate | cold history enters private hydrate under source cut/fence; live append during hydrate is caught up in order; push and pull expose the same head |
+| reconnect | epoch/generation mismatch rejects stale frames; gap/invalidate recovers via `get_session_projection`, never raw/history merge |
+| delivery | SSV2 connections do not receive raw timeline writers; control-plane allowlist remains explicit and carries no timeline payload |
+| iOS ownership | negotiated per-backend capability selects projection ownership at t=0; loading/empty/failed projection never re-enables legacy writers |
+| iOS application | only `ProjectionStore` applies full/delta/push; `baseRev → syncRev`, fence, and old-generation rejection remain enforced |
+| interaction | permission raw control does not mutate timeline; canonical question projects once; legacy question frames are suppressed for SSV2 |
+| cross-repository | canonical protocol, iOS mirror/Swift/web types, capability advertisement, and guard tests change coherently |
+
+Gate S exits only when:
+
+1. S1–S3 are reflected in the Gate B capability map and per-slice impact records;
+2. the S4 test map names the existing or planned owning test for every affected row;
+3. C3 optimistic correlation is based on an authoritative stable message ID and does not create an iOS timeline writer;
+4. C4 direct/`sync` handling and reconnect recovery identify the single pre-Kernel normalization point and the single Kernel ingest path;
+5. C6 classifies permission, canonical question, legacy question presentation, and todo ownership exactly as above;
+6. protocol/projection changes, if any, have a canonical-first cross-repository change plan.
+
+Any violation discovered during Gate C triggers the §4.1 stop line and §4.2 method reset. It may not be “temporarily” bypassed with `.off`, history fallback, raw delivery, local completion timers, or content-similarity reconciliation.
+
 ## 6. Gate C — implementation order
 
-After the owner resumes coding, implement in this order.
+After Gate A, Gate B, and Gate S exit, implement in this order.
 
 ### C1. Version and transport boundary
 
@@ -174,17 +255,17 @@ Acceptance: boundary fixtures cover root/child, exactly-at-limit, over-limit, ar
 - carry selected agent, `{providerID,modelID}`, and variant;
 - translate all supported request parts from iOS through bridge-v1;
 - make unsupported parts fail before network I/O with a capability-consistent error;
-- map optimistic echo and SSE reconciliation so one user action produces one persisted user message and one turn.
+- correlate the request and authoritative projection with a stable message ID so one user action produces one persisted user message and one turn; any local composer placeholder remains presentation-only and may not write or arbitrate the active timeline.
 
 Acceptance: A1/A2/A9 replay tests plus a real sandbox create/send/reopen cycle. “HTTP 204” alone is not success.
 
 ### C4. Event reducer
 
 - derive the event inventory from official reducer/schema source;
-- decide how direct payload and nested `sync` events relate and deduplicate by stable IDs/revisions;
+- apply the verified v1 direct-versus-`sync` rule at the source-adapter normalization boundary so one semantic event enters the Kernel at most once; do not create a consumer-side referee;
 - replace inferred lifecycle comments with captured ordering;
 - preserve text/reasoning/tool distinctions and server errors;
-- recover active turns after reconnect from server state without synthesizing a healthy terminal.
+- recover active turns by validating/invalidating/rehydrating the same Kernel and resuming projection delivery; server reads may supply hydrate facts but must not bypass the Kernel or synthesize a healthy terminal.
 
 Acceptance: deterministic replay of A1–A5, including duplicates, reconnect, provider error, and abort.
 
@@ -202,7 +283,7 @@ Acceptance: each fallback level has a distinct fixture and selected request asse
 - implement only from A6–A8 samples;
 - keep permission and question as separate bridge semantics;
 - answer multi-question batches without collapsing IDs or inventing resolution events;
-- resolve the missing todo ID problem explicitly before projecting stable items.
+- resolve the missing todo ID problem explicitly before publishing stable control-plane todo items; do not place todos into timeline projection without a separate approved projection-shape decision.
 
 Acceptance: request, answer/reject, external answer, reconnect, and cold-reload tests pass; capability flags match actual support.
 
@@ -222,7 +303,7 @@ Testing is layered and targeted:
 2. HTTP contract tests assert exact method/path/query/body and replay real response fixtures;
 3. SSE reducer tests replay complete captured sequences, not hand-selected single events;
 4. deterministic sandbox integration covers create/send/reopen/mutation/interaction without external accounts;
-5. MacBridge and iOS targeted tests cover only changed bridge capabilities and projections;
+5. MacBridge and iOS targeted tests cover changed bridge capabilities/projections plus the applicable Gate S producer, reducer/fence/delivery, connection-generation, and client writer-seal rows;
 6. owner real-device matrix runs once at the feature gate, not after every small edit.
 
 The test suite must prove negative behavior too: unsupported content fails before POST, unknown versions fail closed, duplicate events do not duplicate messages, and a diagnostic timeout cannot masquerade as an active turn.
@@ -234,6 +315,7 @@ No UI tests or simulator automation are authorized by this plan. No unbounded bu
 No release or owner matrix begins until:
 
 - Gates A and B are complete;
+- Gate S is complete and every implemented slice carries its S3 impact record;
 - all implemented capability descriptors match reality;
 - targeted Go/Swift tests and builds pass;
 - the runtime is installed only under the repository's normal release rule;
@@ -263,6 +345,8 @@ The convergence work is complete only when:
 - official Web call sites and server schemas are cited for every mapped operation;
 - first-message, follow-up, external-turn, reconnect, error, permission, question, and selected mutation paths pass their gates;
 - unsupported and future capabilities are absent from advertisement and UI;
+- Mac Projection Kernel remains the only CordCode timeline truth, iOS ProjectionStore remains the only active client writer, and hydrate/live/reconnect all use that same Kernel;
+- all applicable Gate S anti-double-write, revision/fence, connection-generation, delivery, and client writer-seal tests pass;
 - a completion report links evidence rather than restating claims;
 - no mandatory stop-line event remains unresolved, and every failed-fix escalation names its final first divergence;
 - no v2 parity is claimed without a separate v2 evidence pack.

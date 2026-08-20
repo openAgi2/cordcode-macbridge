@@ -31,6 +31,8 @@ The current backend does use official HTTP/SSE endpoints; it is not secretly fal
 - some comments and tests assert event ordering that a fresh sandbox did not reproduce;
 - the v2 path is claimed but has no current live sample set.
 
+Source parity does not authorize a new client data path. OpenCode serve is the upstream fact source, while the Mac `ProjectionKernel` remains CordCode's only active timeline truth and iOS `ProjectionStore` remains the only active client writer under negotiated `session_sync_v2`. Raw SSE, HTTP history, reconnect reads, and the official Web reducer may inform the source adapter or Kernel hydrate; none may write the active iOS timeline directly. The mandatory ownership, transaction-domain, control-plane, and anti-double-write proof is Gate S of the convergence plan.
+
 This explains why basic create-and-send required repeated repair during `opencode-web`, while `dsh-web` was more stable: the latter plan made the official Web protocol the implementation boundary before coding; the former plan used the legacy adapter as a shortcut for several content shapes.
 
 ## 2. Evidence rules used in this audit
@@ -242,8 +244,8 @@ Those checks are circular. A test that encodes an inferred event sequence only p
 | P0 | freeze the old design as historical; adopt the convergence plan | no agent can mistake v3.1 or its completion report for current truth |
 | P0 | build a versioned source/sample matrix for first turn, lifecycle, permissions, questions, todos, and prompt parts | sanitized raw fixtures plus source citations; no guessed keys |
 | P0 | define bridge product parity: supported, deliberately unsupported, or not applicable for every official Web surface | owner-reviewable capability matrix with no “later” ambiguity |
+| P0 | prove Session Sync v2 ownership before product changes | Gate S records truth owner, only writer, hydrate/live/reconnect paths, explicit control exceptions, and anti-double-write tests |
 | P1 | replace copied legacy semantics in list/send/events/history with source-derived mappings | contract tests replay real samples; targeted integration tests pass |
 | P1 | repair first-message and follow-up equivalence before broad feature expansion | create/send/reopen/external-turn matrix passes in sandbox and owner environment |
 | P2 | add selected mutations and user-facing Web features in dependency order | each capability has source, sample, mapping, test, and truthful advertisement |
 | P3 | evaluate v2 only after a real supported v2 runtime is available | separate v2 sample pack and compatibility matrix |
-
