@@ -124,8 +124,10 @@ def problems(doc: dict, md_text: str | None) -> list[str]:
         bad.append("s4Started-must-be-true")
     if meta.get("s4Completed") is not True:
         bad.append("s4Completed-must-be-true")
-    if meta.get("gateSExited") is not False:
-        bad.append("gateSExited-must-be-false-until-exit-audit")
+    # gateSExited may flip true ONLY when every exit condition holds (added at Gate S exit).
+    # gateCStarted must still be false; product code stays frozen in the Gate S snapshot.
+    if meta.get("gateSExited") not in (True, False):
+        bad.append("gateSExited-must-be-boolean")
     if meta.get("gateCStarted") is not False:
         bad.append("gateCStarted-must-be-false")
     if meta.get("productCodeFrozen") is not True:
@@ -257,7 +259,7 @@ def problems(doc: dict, md_text: str | None) -> list[str]:
             "reconnect-same-Kernel",
             "kernel-nil-seal",
             "vision remains future",
-            "gateSExited=false",
+            "gateSExited=true",
             "gateCStarted=false",
             "productCodeFrozen=true",
         ):
@@ -266,6 +268,22 @@ def problems(doc: dict, md_text: str | None) -> list[str]:
         for sid in PRE_SAMPLE_IDS:
             if sid not in md_text:
                 bad.append(f"markdown-missing-pre-sample:{sid}")
+
+    # Gate S exit ordering: gateSExited=true is legal only with every exit condition met.
+    if meta.get("gateSExited") is True:
+        layers = doc.get("s4") or []
+        presample = doc.get("s4PreSampleOrder") or []
+        unmet = []
+        if meta.get("s4Completed") is not True:
+            unmet.append("s4Completed")
+        if len(layers) != 9:
+            unmet.append(f"layers={len(layers)}")
+        if len(presample) != 8:
+            unmet.append(f"preSampleOrder={len(presample)}")
+        if bad:
+            unmet.append(f"other-problems={len(bad)}")
+        if unmet:
+            bad.append(f"gateSExited-with-unmet-conditions:{','.join(unmet)}")
     return bad
 
 
@@ -328,8 +346,10 @@ def self_test() -> int:
                 r["invariant"] = "每个仓库自行加 wire field 即可"
         return d
 
-    def premature_gate_s_exit(d):
-        d["meta"]["gateSExited"] = True
+    def exit_with_unmet_conditions(d):
+        # Gate S has legitimately exited; yank a required condition while keeping
+        # gateSExited=true — the checker must reject exit-with-unmet-conditions.
+        d["meta"]["s4Completed"] = False
         return d
 
     def premature_gate_c(d):
@@ -344,7 +364,7 @@ def self_test() -> int:
     expect(todo_timeline, "c6-todo-into-timeline")
     expect(drop_source_order, "drop-source-only-capture-order")
     expect(no_canonical_first, "cross-repo-missing-canonical-first")
-    expect(premature_gate_s_exit, "premature-gateSExited")
+    expect(exit_with_unmet_conditions, "gateSExited-with-unmet-conditions")
     expect(premature_gate_c, "premature-gateCStarted")
     if failures:
         print("self-test FAIL", failures, file=sys.stderr)

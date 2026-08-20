@@ -3,7 +3,8 @@
 - Date: 2026-08-20
 - OpenCode: 1.18.18 `2cba7e227d`
 - Gate A: `aad4b24` · Gate B: `883513b` · S3 audit + S4 授权: `c8d732d`
-- **S1–S4 documented. Gate S exit pending independent audit. Gate C: not started.** Product code, protocol models, WireDescriptor, and capability advertisement: **frozen.** `s4Started=true`, `s4Completed=true`, `gateSExited=false`, `gateCStarted=false`, `productCodeFrozen=true`.
+- **S1–S4 documented and independently audited. Gate S exited 2026-08-20.** Gate C: not started (`gateCStarted=false`). Product code, protocol models, WireDescriptor, and capability advertisement remain frozen as of the Gate S exit snapshot. `s4Started=true`, `s4Completed=true`, `gateSExited=true`, `gateCStarted=false`, `productCodeFrozen=true`.
+- **Gate S exit basis:** 9 layers · existing=67 · planned=29 · affectedSlices=C1–C7 · pre-sample-order=8 · S4 self-test 10/10 · Gate B、S1/S2、S3、S4 checker 与 self-test 全部通过。S1/S2/S3/S4 均已完成独立审计（S4 审计裁决 PASS）。
 - Machine-readable companion: `docs/2026-08-20-opencode-web-ssv2-impact.json`
 - Checkers:
   - S1/S2: `python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s1_s2.py`
@@ -475,7 +476,7 @@ S3 is documentation only. `gateCStarted=false`. `productCodeFrozen=true`. Each s
 
 ## S4 — acceptance/test map
 
-S4 is documentation only (test map; no test code written this round). `gateSExited=false` — Gate S exit awaits independent audit. `gateCStarted=false`. `productCodeFrozen=true`. Planned tests are **planned**, not passing; existing tests were verified to exist with the named symbol in the named file.
+S4 is documentation only (test map; no test code written this round). **Gate S exited 2026-08-20 after independent S4 audit PASS** (`gateSExited=true`). `gateCStarted=false`. `productCodeFrozen=true` (Gate S exit snapshot). Planned tests are **planned**, not passing; existing tests were verified to exist with the named symbol in the named file.
 
 | id | layer | affected slices | status | existing | planned |
 |---|---|---|---|---|---|
@@ -638,4 +639,4 @@ vision remains future：不进入 supported acceptance tests。
 
 Every C slice above states **no protocol change** except C3's conditional canonical-first plan if a new send-RPC field is later required. The S3/S4 rounds do not change `docs/protocol/`, Go types, iOS mirror, WireDescriptor, or capability advertisement.
 
-`s4Started=true`. `s4Completed=true`. `gateSExited=false` — Gate S exit awaits independent audit. `gateCStarted=false`. `productCodeFrozen=true`. Do not start Gate C from this document.
+`s4Started=true`. `s4Completed=true`. `gateSExited=true` — Gate S exited 2026-08-20 after independent audit. `gateCStarted=false`. `productCodeFrozen=true` (Gate S exit snapshot). Gate C slices require separate owner authorization per slice; do not start them from this document.

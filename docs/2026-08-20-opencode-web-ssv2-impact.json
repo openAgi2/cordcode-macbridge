@@ -21,7 +21,38 @@
       "docs/2026-08-20-opencode-web-source-first-convergence-plan.md §5.1 S1/S2/S3"
     ],
     "s4Completed": true,
-    "gateSExited": false
+    "gateSExited": true,
+    "gateSExitRecord": {
+      "date": "2026-08-20",
+      "audit": "S1/S2/S3/S4 each independently audited; supervisor verdict: Gate S S4 independent audit PASS",
+      "lineage": {
+        "gateA": "aad4b24",
+        "gateB": "883513b",
+        "s1s2": "3916362",
+        "s3": "b5d3bb9",
+        "s3AuditAndS4Authorization": "c8d732d",
+        "s4": "7ce846c"
+      },
+      "basis": {
+        "layers": 9,
+        "existingTests": 67,
+        "plannedTests": 29,
+        "affectedSlices": [
+          "C1",
+          "C2",
+          "C3",
+          "C4",
+          "C5",
+          "C6",
+          "C7"
+        ],
+        "preSampleOrder": 8,
+        "s4SelfTest": "10/10 mutations caught",
+        "checkers": "Gate B + S1/S2 + S3 + S4 checkers and self-tests all pass"
+      },
+      "gateCStarted": false,
+      "productCodeFrozen": true
+    }
   },
   "s1": [
     {
