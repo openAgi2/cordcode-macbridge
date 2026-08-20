@@ -85,6 +85,42 @@ Use a deterministic local provider harness that never contacts a billable/extern
 
 Gate A exit: all P0 rows are green, or an explicit owner decision removes the corresponding capability from scope and advertisement.
 
+### 4.1 Mandatory stop lines and method reset
+
+The following are not review suggestions. Each signal **stops feature implementation immediately**. While stopped, the agent may preserve logs, add isolated capture tooling, sanitize real samples, and update the evidence ledger; it may not stack another product-code hypothesis on top of the failed or unverified one.
+
+| Danger signal | Why the evidence is invalid | Mandatory action | Work may resume only when |
+|---|---|---|---|
+| A product-code patch is prepared or committed before Gate A is complete | implementation has started defining the external contract it is supposed to discover | stop the patch series; mark the affected A-row unverified; return to official UI/server source and real capture | the affected row has source citations, a same-version real sample, and a bridge mapping decision; all Gate A exit conditions still hold |
+| The sandbox invalid-model HTTP 400 is cited as a healthy first-turn sample | it proves schema rejection and field spelling only; it proves no admitted turn, user echo, assistant stream, or terminal ordering | label it `negative-schema-sample`; do not use it for A1/A2/A3/A4/A5 acceptance | a healthy deterministic provider trace covers create/prompt through persisted messages and terminal state |
+| A fake-server response or SSE sequence is used to fill a missing real sample | a fixture authored from the design or implementation creates circular proof | remove the parity claim; retain the fake only as an internal unit-test aid, clearly labelled with its real-sample provenance or lack thereof | the fixture is regenerated or reviewed against an archived same-version real sample and official source |
+| Capture difficulty leads to restoring a legacy parser, recursive search, speculative generation branch, or silent fallback | uncertainty is being hidden as compatibility and can produce plausible but false success | fail closed with a diagnosable unsupported/unverified state; record the missing sample and version | the exact generation/shape has its own source commit, sample pack, mapping, and contract test |
+| One targeted fix produces no observable change in the reported symptom | the working causal model has been falsified or the edited path is not active | do not attempt a second fix in the same state-machine model; preserve the failed result and capture the real request/event/bridge/iOS timeline, then locate the first divergence from official Web | a revised causal statement names the first observed divergence and a new minimal experiment can falsify it |
+| A report says “tests pass” without naming sample provenance and official source locations | internal consistency is being presented as external semantic proof | reject the completion claim; classify each test as fixture replay, HTTP contract, SSE replay, sandbox integration, or bridge/iOS regression | the report links the archived sample or explicitly states that the test is internal-only, cites official call sites/schemas, and includes the exact targeted command/result |
+
+For every translated behavior, the required proof tuple is:
+
+```text
+official UI call site + official server/schema source
+                    + same-version real sample
+                    + explicit bridge-v1 mapping
+                    + targeted replay/integration result
+```
+
+Missing any member means “not yet proven,” not “probably compatible.” A test can prove internal correctness without proving OpenCode parity; reports must state which claim each test actually supports.
+
+### 4.2 First-failed-fix escalation record
+
+If a targeted fix leaves the owner-visible symptom unchanged, the next progress report must contain, before any new product patch:
+
+1. the original causal hypothesis and the exact observation that falsified it;
+2. the real timeline across OpenCode request/response/SSE, MacBridge event translation, bridge-v1/SSV2, and iOS projection where available;
+3. the official Web behavior for the same operation, with source and sample references;
+4. the first observed divergence, or an honest statement that it is not yet located;
+5. one minimal discriminating experiment, not a bundle of additional fixes.
+
+Owner prompting is not required to trigger this escalation. “The previous patch did not change the symptom” is itself the trigger.
+
 ## 5. Gate B — product capability map
 
 Before code changes, map every official user-facing surface to exactly one disposition:
@@ -228,7 +264,7 @@ The convergence work is complete only when:
 - first-message, follow-up, external-turn, reconnect, error, permission, question, and selected mutation paths pass their gates;
 - unsupported and future capabilities are absent from advertisement and UI;
 - a completion report links evidence rather than restating claims;
+- no mandatory stop-line event remains unresolved, and every failed-fix escalation names its final first divergence;
 - no v2 parity is claimed without a separate v2 evidence pack.
 
 Until then, the honest product status is: **OpenCode Web transport exists and several flows work, but source-level parity is incomplete.**
-
