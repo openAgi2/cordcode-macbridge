@@ -16,6 +16,33 @@ Status values:
 
 Bridge mapping in this document is a **decision slot**, not an implementation. Product code stays frozen until Gates A, B, and S exit.
 
+## 0.1 Post-Gate-A evidence queue
+
+Gate A's A1–A10 pack is complete, but later capability review exposed seven physical shapes that official source alone cannot prove. These rows are evidence assignments only. The capture agent records and validates raw behavior; it does not choose bridge mappings, SSV2 ownership, capability activation, or product fallbacks. Those decisions live only in the canonical convergence design.
+
+| ID | Surface | Required isolated capture | Independent checker must prove | Status |
+|---|---|---|---|---|
+| E1 | selected variant | admitted prompt with a genuinely non-empty variant, followed through SSE and reload | exact request field/value, omission when unset, persisted/reload behavior | `PENDING-SAMPLE` |
+| E2 | reasoning | deterministic provider produces populated reasoning, observed in direct SSE and message reload | exact part keys, delta/update ordering, terminal persistence, separation from answer text | `PENDING-SAMPLE` |
+| E3 | external official-Web turn | second client creates/sends while the capture client observes global SSE through terminal and reload | directory/session correlation, first/last event, no polling substitution, persisted convergence | `PENDING-SAMPLE` |
+| E4 | providers | `GET /provider` from isolated 1.18.18 with deterministic configured providers | exact top-level/row/model shapes, connected set, malformed-shape negative mutations | `PENDING-SAMPLE` |
+| E5 | configured default model | configured valid, invalid, and absent default against the same provider catalog | exact source/field and behavior in all three cases; first-connected is not accepted as proof | `PENDING-SAMPLE` |
+| E6 | rename | rename one captured session and observe HTTP, list, by-ID, and SSE | exact PATCH body/response plus metadata convergence and failure case | `PENDING-SAMPLE` |
+| E7 | delete | delete one captured session and observe HTTP, list, by-ID, and SSE | exact response, subsequent absence/404, deletion invalidation, and failure case | `PENDING-SAMPLE` |
+| WP-FIX | workspace project evidence ownership | recapture or normalize WP so `http[].response` contains the actual `/project` payload | derive every asserted project fact only from raw HTTP response; fail if a duplicate summary disagrees | `PENDING-EVIDENCE-CORRECTION` |
+
+For E1–E7 and WP-FIX:
+
+1. use isolated `HOME`/XDG, ports 4398/4399, the pinned 1.18.18 checkout, and deterministic local providers only;
+2. never write to the owner's managed `127.0.0.1:4096` serve;
+3. archive raw plus sanitized HTTP/SSE/reload material with leak scans;
+4. derive status independently from raw fields; `meta.captureStatus`, summaries, or implementation fixtures are not evidence;
+5. include destructive self-tests that mutate each claimed field/order and must downgrade or fail;
+6. mark a genuinely unavailable path `BLOCKED` with the attempted method—do not create guessed JSON or a fake server substitute;
+7. make no product translator, protocol, WireDescriptor, capability, or iOS production change in the evidence commit.
+
+After a row passes, its sample is still not implementation authorization. The design owner first writes the observed shape and mapping into the matching §6 dossier of `2026-08-20-opencode-web-source-first-convergence-plan.md`.
+
 ## 0. Official Web transport (shared by all rows)
 
 | Layer | 1.18.18 source |
@@ -45,7 +72,7 @@ Bridge mapping in this document is a **decision slot**, not an implementation. P
 | A8 | todos | `packages/app/src/pages/session.tsx` loads `sync().session.todo(id)`; dock `packages/app/src/pages/session/composer/session-todo-dock.tsx`; reducer `todo.updated` | Tool `todowrite` `packages/opencode/src/tool/todo.ts` (asks `todowrite` permission then `Todo.update`); persist `packages/opencode/src/session/todo.ts` rows are `{content,status,priority}` **no id**; `GET /session/:id/todo`; event `todo.updated` | `harness/capture.py --scenario a8` | `samples/a8-todos.sanitized.json` | captured | Live items keys exactly content/priority/status, no id. Second todowrite replaces statuses pending/in_progress → completed. Control-plane only; stable identity is Gate B. |
 | A9 | prompt parts | `packages/app/src/utils/server-compat.ts:207-228` maps text / file (mime+url+filename, optional `source` mention) / agent (`type: agent`, `name`, optional mention `source`) | `packages/opencode/src/session/prompt.ts` `PromptInput.parts` union: TextPartInput / FilePartInput / AgentPartInput / SubtaskPartInput | `harness/capture.py --scenario a9` | `samples/a9-prompt-parts.sanitized.json` | captured | prompt_async 204 for text, file, file-mention, image/png, and agent; persisted user parts keep those types (file mention and agent keep `source`). Provider mock received **text-only** OpenAI messages (`hasImage=false`, `hasFile=false`) — persist does not require a vision provider. |
 | A10 | session listing | `packages/app/src/context/global-sync/session-load.ts:5-26` roots + limit; archived sessions dropped from home list by reducer `session.updated` when `time.archived` set (`packages/app/src/context/global-sync/event-reducer.ts:149-161`) | `packages/opencode/src/server/routes/instance/httpapi/groups/session.ts` `ListQuery` `roots/limit/start/search/scope/path`; `GET /session/:id`; `GET /session/:id/children`; archive via `PATCH` `time.archived` | `harness/capture.py --scenario a10` | `samples/a10-session-listing.sanitized.json` | captured | API `roots=true` omits children; archived rows remain in list and remain GET-by-id; two directories do not leak ids. Official Web UI hides archived via reducer. CordCode multi-directory aggregation and archive visibility remain Gate B. |
-| WP | workspace.project registry (C2 pre-sample, directive-003 Phase 0) | `packages/app/src/utils/server-compat.ts:304` `legacy().project.list()` (`data ?? []`) | `packages/opencode/src/server/routes/instance/httpapi/handlers/project.ts:15-17` list → `Project.list`; `packages/opencode/src/project/project.ts:336` list, `:35-56` fromRow, `:217` global pseudo-project `worktree="/"`, `:243-244` non-worktree directory folds into sandboxes; `packages/core/src/project.ts:105-119` git rootCommits/remote derive project id | `harness/capture.py --scenario wp` | `samples/wp-workspace-project.sanitized.json` | captured | Bare array; non-git directories fold into global (`worktree="/"`), only git worktrees with ≥1 commit become distinct project rows (`vcs:"git"`, hash ids, realpath worktrees); deleting a harness git worktree leaves the registry row — server owns registry truth, missing-worktree is client-side visibility only. Independent checker `harness/check_workspace_project.py` derives everything from raw. |
+| WP | workspace.project registry (C2 pre-sample, directive-003 Phase 0) | `packages/app/src/utils/server-compat.ts:304` `legacy().project.list()` (`data ?? []`) | `packages/opencode/src/server/routes/instance/httpapi/handlers/project.ts:15-17` list → `Project.list`; `packages/opencode/src/project/project.ts:336` list, `:35-56` fromRow, `:217` global pseudo-project `worktree="/"`, `:243-244` non-worktree directory folds into sandboxes; `packages/core/src/project.ts:105-119` git rootCommits/remote derive project id | `harness/capture.py --scenario wp` | `samples/wp-workspace-project.sanitized.json` | evidence correction pending | The existing checker reads a duplicate summary (`rawPayloads`) rather than deriving exclusively from archived `http[].response`. Until WP-FIX passes, the bare-array/row claims are hypotheses supported by capture notes, not decoder authorization. Server-registry ownership and the missing-worktree product overlay remain owner decisions, but physical JSON shape must be re-proven. |
 
 ## 2. Shared capture contract
 

@@ -1,14 +1,27 @@
-# OpenCode Web source-first convergence plan
+# OpenCode Web source-first convergence design（canonical）
 
 - Date: 2026-08-20
-- Status: **Gate A exited. Gate B exited. Gate S exited 2026-08-20: S1/S2/S3/S4 each independently audited (S4 audit verdict PASS). C1 (version/transport boundary) implemented and closed 2026-08-20 — supervisor audit-002-recheck verdict `verified` (diagnostics quarantine included: shared `unsupportedGenerationDetail` across InstanceStatus/clientFor/RunDiagnostics); three-track done, owner real-device acceptance not required this phase. C2 (official list/get) implemented 2026-08-20 under directive-003: workspace.project same-version sample + independent checker (69f26bc) landed BEFORE the product commit (ef21db1); scoped roots=true+limit=100, OD-1/OD-2, fail-closed catalog semantics, missing-worktree as client-side visibility overlay only. C3–C7 not started (awaiting separate directives). Protocol, WireDescriptor, and capability advertisement remain unchanged.**
+- Canonical status: **This file is the only implementation-design authority for `opencode-web`. Gate B map, SSV2 impact, and sample inventory are evidence appendices, not alternative plans. C1 is supervisor-verified. C2 product code exists but audit-003 is `partial`: WP HTTP-evidence ownership and the generation-118 project decoder still require the Stage-0 corrections specified below. C3–C7 product implementation is frozen. The only authorized next work is capture/checker work for E1–E7 plus the C2 evidence correction; after those samples return, this file must be revised with the observed shapes before C3–C7 code begins. Protocol, WireDescriptor, capability advertisement, and iOS timeline ownership remain unchanged.**
 - Audit input: [2026-08-20-opencode-web-source-parity-audit.md](2026-08-20-opencode-web-source-parity-audit.md)
 - Historical input only: [2026-08-18-opencode-web-backend-design.md](2026-08-18-opencode-web-backend-design.md) and its completion report
 - Goal: make `opencode-web` a faithful, bounded adapter of the official OpenCode Web behavior, rather than a cleaned-up copy of the legacy OpenCode backend
 
 ## 0. Execution boundary
 
-This document is the implementation contract. The owner has authorized work to resume, beginning with evidence and architecture gates. During Gate A, Gate B, and Gate S, an agent may inspect source, build isolated capture infrastructure, collect/sanitize samples, write capability/SSV2 mappings, and add evidence-validation tooling; it must not modify product code, run write operations against the owner's managed serve, use a real provider account without new authorization, install a product build, or execute the owner test matrix.
+This document is the implementation contract and the **single canonical design**. An implementation agent must not reconstruct behavior by mentally joining several companion files. Every supported feature has an execution dossier in §6 containing its official source, same-version sample, transport shape, bridge mapping, SSV2 ownership, failure behavior, tests, and exclusions.
+
+Companion files have deliberately narrower roles:
+
+| Companion | Role | Cannot authorize |
+|---|---|---|
+| `2026-08-20-opencode-web-1.18.18-sample-inventory.md` + `testdata/official-1.18.18/samples/` | raw/sanitized evidence ledger and capture provenance | a translator, product decision, capability, or inferred field path |
+| `2026-08-20-opencode-web-gate-b-capability-map.{md,json}` | exhaustive 60-surface disposition evidence and owner decisions OD-1/OD-2/OD-3 | implementation of a `source-only` row |
+| `2026-08-20-opencode-web-ssv2-impact.{md,json}` | writer inventory, transaction domains, and acceptance-map evidence | a second writer, reducer, fallback, or raw timeline route |
+| supervisor directives/reports | bounded work authorization and audit record | a change to this design's product semantics or external shape |
+
+If a companion conflicts with this file, implementation stops. The conflict is resolved here first; an agent may not select the more convenient statement.
+
+During an evidence-only gate, an agent may inspect official source, build isolated capture infrastructure, collect/sanitize samples, and add evidence-validation tooling. It must not modify the corresponding product translator, run writes against the owner's managed serve, use a real provider account without new authorization, install a product build, or execute the owner test matrix.
 
 When the owner resumes implementation, work proceeds through the gates below in order. A gate cannot be marked complete by prose, endpoint reachability, or a fake fixture derived from the implementation.
 
@@ -71,7 +84,7 @@ Required P0 scenarios:
 | # | Scenario | Required captured sequence |
 |---|---|---|
 | A1 | create + first healthy text message | create response; direct and `sync` SSE; user message; assistant text/reasoning/tool; terminal state |
-| A2 | follow-up message | prompt request including messageID/agent/model/variant; optimistic echo reconciliation; terminal state |
+| A2 | follow-up message | two prompt requests with distinct messageID plus agent/model/text; variant is **absent when unset**; persisted user IDs correlate with the two request IDs; terminal state |
 | A3 | provider rejection/retry | retry statuses, final error carrier, assistant `info.error`, idle ordering |
 | A4 | abort | busy turn, abort response, resulting status/events, final persisted messages |
 | A5 | SSE disconnect/reconnect | last event before disconnect, status recovery, duplicate direct/`sync` behavior, terminal outcome |
@@ -85,7 +98,23 @@ Use a deterministic local provider harness that never contacts a billable/extern
 
 Gate A exit: all P0 rows are green, or an explicit owner decision removes the corresponding capability from scope and advertisement.
 
-### 4.1 Mandatory stop lines and method reset
+### 4.1 Post-Gate-A source-only evidence queue
+
+Gate A proved A1–A10, but Gate B later promoted seven `source-only` surfaces to `supported now`. They are not implementation-ready. These IDs are the only remaining pre-implementation capture queue:
+
+| ID | Surface | Required real observation | Current status | Product rule before capture |
+|---|---|---|---|---|
+| E1 | selected variant (`configuration.variants`) | a prompt with a non-empty selected variant; exact request field and persisted/reload behavior | `PENDING-SAMPLE` | omit variant when unset; do not implement variant selection |
+| E2 | reasoning (`content.reasoning`) | populated reasoning part in HTTP reload and direct SSE, including delta/update ordering | `PENDING-SAMPLE` | do not map an assumed reasoning shape or fold it into answer text |
+| E3 | external official-Web turn (`observation.external_turns`) | second client creates/sends while bridge observes global SSE through terminal/reload | `PENDING-SAMPLE` | do not claim two-client completeness from the capability string or polling |
+| E4 | providers (`configuration.providers`) | real `/provider` response with connected set and model catalog | `PENDING-SAMPLE` | do not recursively search JSON or advertise provider selection |
+| E5 | configured default model (`configuration.default_model`) | configured-default source, valid/invalid/absent behavior, and relation to connected providers | `PENDING-SAMPLE` | first connected model is not a configured default |
+| E6 | rename (`sessions.rename`) | PATCH path/body/response plus list/by-ID/event refresh | `PENDING-SAMPLE` | no `SessionRenamer` implementation/advertisement |
+| E7 | delete (`sessions.delete`) | DELETE response, subsequent list/by-ID 404, and `session.deleted` invalidation | `PENDING-SAMPLE` | existing code is not parity authorization; do not advertise completion |
+
+For E1–E7, official source is vocabulary and a capture recipe, not shape proof. The evidence agent records raw HTTP/SSE/reload and runs independent checkers; it does **not** choose bridge mappings. After capture, the design owner updates the corresponding §6 dossier from `PENDING-SAMPLE` to either `SAMPLE-VERIFIED` or `BLOCKED/UNSUPPORTED`. Only then may an implementation directive authorize that translator.
+
+### 4.2 Mandatory stop lines and method reset
 
 The following are not review suggestions. Each signal **stops feature implementation immediately**. While stopped, the agent may preserve logs, add isolated capture tooling, sanitize real samples, and update the evidence ledger; it may not stack another product-code hypothesis on top of the failed or unverified one.
 
@@ -109,7 +138,7 @@ official UI call site + official server/schema source
 
 Missing any member means “not yet proven,” not “probably compatible.” A test can prove internal correctness without proving OpenCode parity; reports must state which claim each test actually supports.
 
-### 4.2 First-failed-fix escalation record
+### 4.3 First-failed-fix escalation record
 
 If a targeted fix leaves the owner-visible symptom unchanged, the next progress report must contain, before any new product patch:
 
@@ -249,75 +278,183 @@ Gate S exits only when:
 5. C6 classifies permission, canonical question, legacy question presentation, and todo ownership exactly as above;
 6. protocol/projection changes, if any, have a canonical-first cross-repository change plan.
 
-Any violation discovered during Gate C triggers the §4.1 stop line and §4.2 method reset. It may not be “temporarily” bypassed with `.off`, history fallback, raw delivery, local completion timers, or content-similarity reconciliation.
+Any violation discovered during Gate C triggers the §4.2 stop line and §4.3 method reset. It may not be “temporarily” bypassed with `.off`, history fallback, raw delivery, local completion timers, or content-similarity reconciliation.
 
-## 6. Gate C — implementation order
+## 6. Canonical execution dossiers
 
-After Gate A, Gate B, and Gate S exit, implement in this order.
+This section replaces the old seven-bullet implementation sketch. It is the only place from which product translators may be implemented. Gate B and Gate S remain auditable evidence, but an implementation agent is not expected or permitted to invent a missing conclusion by joining them.
 
-### C1. Version and transport boundary
+Every dossier uses these fixed fields:
 
-- make 1.18.18 the explicit verified adapter;
-- quarantine unverified v2 behavior from normal selection and capability claims;
-- remove unknown-shape recursive fallbacks;
-- preserve Basic Auth, directory scoping, timeouts, SSE no-lifetime timeout, and bounded reconnect.
+- **Status:** `IMPLEMENTED-VERIFIED`, `IMPLEMENTED-AUDIT-PARTIAL`, `SAMPLE-VERIFIED-DESIGN-READY`, `PENDING-SAMPLE`, or `FUTURE/UNSUPPORTED`.
+- **User-visible behavior:** the CordCode promise, not an endpoint list.
+- **Official UI source:** the 1.18.18 call site/reducer that establishes intent.
+- **Server/schema source:** the 1.18.18 route/type that establishes vocabulary.
+- **Same-version samples:** archived raw/sanitized evidence that establishes physical shape and ordering.
+- **Verified transport shape:** exact request/response/event facts derived from those samples. A pending field says `UNKNOWN UNTIL E#`; source types do not fill it.
+- **Bridge and SSV2 mapping:** the decided translation, truth owner, transaction domain, and only writer.
+- **Error and unsupported behavior:** fail-closed behavior and capability effect.
+- **Owning tests:** positive, negative, replay/integration, and regression proof required for this dossier.
+- **Out of scope:** nearby surfaces that this dossier must not opportunistically implement.
 
-Acceptance: probe and error states distinguish supported, unauthorized, unreachable, and unsupported version.
+Implementation authorization is per dossier, not per file and not per endpoint. Independent dossiers may be developed in one batch after all of their sample gates are green, but a `PENDING-SAMPLE` dossier remains frozen even if another dossier in that batch is ready.
 
-### C2. Official list/get semantics
+| Product surface | Dossier | Current authorization |
+|---|---|---|
+| runtime selection and transport | §6.1 / C1 | closed and verified |
+| session list, detail, project buckets | §6.2 / C2 | product exists; evidence/decoder audit correction required |
+| load/reopen message page | §6.3 / C4 | design-ready for captured shapes; reasoning waits for E2 |
+| create and send first/follow-up message | §6.4 / C3 | base send design-ready; selected variant waits for E1 |
+| live stream, retry, abort, reconnect, external turns | §6.5 / C4 | local flows design-ready; external turns wait for E3 |
+| provider/model/agent selection | §6.6 / C5 | provider/default-model waits for E4/E5 |
+| permission dock | §6.7 / C6 | design-ready from A6 |
+| question dock | §6.8 / C6 | design-ready from A7 |
+| Todo Dock | §6.9 / C6 | design-ready from A8 |
+| rename/archive/delete | §6.10 / C7 | archive design-ready; rename/delete wait for E6/E7 |
+| advertisement and excluded surfaces | §6.11 | activate only after owning dossier passes |
 
-- reproduce root-session and limit semantics from official Web;
-- define multi-directory aggregation and archive filtering as a bridge product rule;
-- retain by-ID get for mutation refresh and archived sessions;
-- do not use filesystem existence as a silent substitute for server/project truth without a documented product rule.
+### 6.1 Runtime version and transport boundary — C1
 
-Acceptance: boundary fixtures cover root/child, exactly-at-limit, over-limit, archived, missing worktree, and direct by-ID retrieval.
+- **Status:** `IMPLEMENTED-VERIFIED` at product commit `5c82ecc`, diagnostics correction `5b8451c`, shared-message correction `257f0df`, and closeout `40452cc`.
+- **User-visible behavior:** only a verified OpenCode 1.18.18 serve is selectable. Unreachable, unauthorized, unknown-shape, and recognized-but-unverified generation states remain distinguishable and diagnosable.
+- **Official UI source:** `packages/app/src/context/server-sdk.tsx:268-308` for v1 global SSE reconnect; `packages/app/src/utils/server-compat.ts` for v1 HTTP calls.
+- **Server/schema source:** 1.18.18 HTTP groups under `packages/opencode/src/server/routes/instance/httpapi/`; global event route and health/probe shapes at official commit `2cba7e227d`.
+- **Same-version samples:** A1 establishes healthy v1 HTTP/SSE; A5 establishes disconnect/reconnect. No v2 sample exists.
+- **Verified transport shape:** data-plane access passes the single generation-118 gate; Basic Auth and directory query/header are control metadata; HTTP has a 30-second request timeout; SSE has no lifetime timeout and reconnects with bounded 1-to-15-second backoff. v2/unknown never reaches prompt, SSE ingest, or Kernel.
+- **Bridge and SSV2 mapping:** transport/probe/catalog do not write timeline. The only timeline entry remains normalized v1 SSE through shared `EventPublisher` into the one Kernel.
+- **Error and unsupported behavior:** `unsupported-generation (quarantined)` is shared by selection, diagnostics, and client acquisition. Unknown/unreachable/unauthorized are not mislabeled as quarantine. No recursive shape search or v2 fallback.
+- **Owning tests:** `TestVerified118Only`, `TestV2FailClosedQuarantine`, `TestGenerationV2QuarantineZeroPromptAndZeroKernelIngest`, transport-control negative tests, diagnostics quarantine tests, and go-bridge descriptor availability test.
+- **Out of scope:** v2 compatibility, speculative generations, protocol or capability additions.
 
-### C3. First message and follow-up submission
+### 6.2 Session list, session detail, and project buckets — C2
 
-- carry a stable message ID;
-- carry selected agent, `{providerID,modelID}`, and variant;
-- translate all supported request parts from iOS through bridge-v1;
-- make unsupported parts fail before network I/O with a capability-consistent error;
-- correlate the request and authoritative projection with a stable message ID so one user action produces one persisted user message and one turn; any local composer placeholder remains presentation-only and may not write or arbitrate the active timeline.
+- **Status:** `IMPLEMENTED-AUDIT-PARTIAL`. C2 code is present at `ef21db1`, but it is not closed until the WP capture/checker and decoder strictness correction described here pass independent audit.
+- **User-visible behavior:** the global session list aggregates official directory-scoped root lists for registered project worktrees, hides archived sessions, deduplicates stable IDs, and sorts deterministically. A scoped list stays scoped. By-ID retrieval remains available for archived and mutation-refresh paths. Missing worktrees are hidden only by the global visibility overlay; they are not deleted from server truth.
+- **Official UI source:** `packages/app/src/context/global-sync/session-load.ts:5-26` (`roots:true`, bounded `limit`); `packages/app/src/utils/server-compat.ts:170-173` by-ID get; `server-compat.ts:304` project list; `event-reducer.ts:149-161` archived removal.
+- **Server/schema source:** `httpapi/groups/session.ts` `ListQuery` and `GET /session/:id`; `handlers/project.ts:15-17`; `project/project.ts:35-56,217,243-244,336`; `packages/core/src/project.ts:105-119`.
+- **Same-version samples:** A10 covers root/child, limits, archived by-ID, and directory separation. WP covers `/project`, but its checker currently derives from a duplicate summary field instead of the archived `http[].response`; therefore WP is evidence-pending until recaptured or normalized so the raw HTTP response is the sole proof.
+- **Verified transport shape:** session list is `GET /session?directory=<dir>&roots=true&limit=100`; failure is returned, not retried without `limit`. By-ID is `GET /session/:id` with directory scope. A10 proves archived remains API-visible and by-ID-readable while the Web hides it. WP's exact `/project` top-level/row shape is **not authorized for decoder work until the corrected checker proves it from `http[].response`**.
+- **Bridge and SSV2 mapping:** list/get/project are catalog/metadata reads only. They do not subscribe to SSE, call `EventPublisher`, ingest Kernel events, or write iOS `messages[]`. OpenCode project registry owns project facts; CordCode's missing-worktree filtering is a documented presentation overlay.
+- **Error and unsupported behavior:** project registry failure, any bucket failure, malformed top-level shape, or malformed required row fails the entire operation. Empty registry returns empty catalog. There is no stale/partial/legacy fallback. The generation-118 project decoder must reject an envelope and malformed required rows unless a corrected real sample proves otherwise.
+- **Owning tests:** A10 replay; corrected WP checker with destructive mutations against `http[].response`; roots/limit request-count test; archived hidden/by-ID retained; per-worktree aggregation; empty/failure/malformed cases; missing-worktree three-boundary test; list/get zero-writer test.
+- **Out of scope:** pagination capability advertisement, project mutation, children/fork/share, and any timeline construction from list/detail responses.
 
-Acceptance: A1/A2/A9 replay tests plus a real sandbox create/send/reopen cycle. “HTTP 204” alone is not success.
+### 6.3 Load, reopen, and hydrate the message page — C4
 
-### C4. Event reducer
+- **Status:** `SAMPLE-VERIFIED-DESIGN-READY` for text/tool/file facts captured by A1/A2/A4/A5/A6/A7/A8/A9. Reasoning translation is `PENDING-SAMPLE` on E2.
+- **User-visible behavior:** opening or reopening a session presents the server-persisted message history once, preserves roles/parts/errors/terminal state, and converges with live events without replacing or duplicating an active projection.
+- **Official UI source:** `packages/app/src/context/server-session.ts:568` calls `client.session.messages({sessionID,limit,before})`; `packages/app/src/context/global-sync/event-reducer.ts` applies message/session live facts.
+- **Server/schema source:** `packages/opencode/src/server/routes/instance/httpapi/groups/session.ts:43-48,85-86,179-190` defines `MessagesQuery` and `GET /session/:sessionID/message`; message/part schemas live under `packages/opencode/src/session/`.
+- **Same-version samples:** A1/A2 healthy persisted user/assistant order; A4 aborted assistant with `MessageAbortedError`; A5 partial-to-complete reconnect/reload; A6-A8 tool/interactions; A9 persisted text/file/image/file-source/agent-source parts. E2 is required for populated reasoning in reload and SSE.
+- **Verified transport shape:** persisted parts proven today are text; file with `mime`, `url`, optional `filename` and optional file `source`; agent with `name` and optional mention `source`; tool state; assistant error/finish facts. The populated reasoning part shape and delta/update ordering are `UNKNOWN UNTIL E2`.
+- **Bridge and SSV2 mapping:** HTTP history enters only a private Kernel hydrate transaction under source cut/fence. Live events arriving during hydrate enter pending-live and commit afterward in order. Push and pull expose the same Kernel head. iOS `ProjectionStore` remains the only `messages[]` writer from t=0.
+- **Error and unsupported behavior:** malformed supported parts fail the hydrate instead of being silently dropped. An unsupported part cannot be coerced to text. Loading/empty/failed projection cannot re-enable `loadMessages` or `replaceMessagesFromServer`. Aborted/error assistants do not become healthy `finish=stop`.
+- **Owning tests:** full A1/A2/A4/A5/A6/A7/A8/A9 history replay; E2 replay before reasoning code; hydrate pending-live ordering; source cut/fence; push/pull same head; malformed-part failure; iOS writer-seal and stale-revision rejection.
+- **Out of scope:** raw history delivery to iOS, history merge fallback, local similarity dedup, reasoning before E2, patch/snapshot/step parts marked future in Gate B.
 
-- derive the event inventory from official reducer/schema source;
-- apply the verified v1 direct-versus-`sync` rule at the source-adapter normalization boundary so one semantic event enters the Kernel at most once; do not create a consumer-side referee;
-- replace inferred lifecycle comments with captured ordering;
-- preserve text/reasoning/tool distinctions and server errors;
-- recover active turns by validating/invalidating/rehydrating the same Kernel and resuming projection delivery; server reads may supply hydrate facts but must not bypass the Kernel or synthesize a healthy terminal.
+### 6.4 Create session and send first/follow-up messages — C3
 
-Acceptance: deterministic replay of A1–A5, including duplicates, reconnect, provider error, and abort.
+- **Status:** `SAMPLE-VERIFIED-DESIGN-READY` for create, text, model, agent, file/image persist, file mention, and agent mention. Selected variant is `PENDING-SAMPLE` on E1.
+- **User-visible behavior:** create yields one server session; each send yields one persisted user message with the client-stable ID and one authoritative assistant turn. First and follow-up sends use the same official request semantics. Composer placeholders are visual only.
+- **Official UI source:** `server-compat.ts:163-169` create and `server-compat.ts:200-230` `promptAsync`.
+- **Server/schema source:** `POST /session`; `POST /session/:id/prompt_async`; `PromptInput` in `session/prompt.ts:1499-1520`, including text/file/agent part unions.
+- **Same-version samples:** A1 create + first send; A2 two follow-ups with distinct IDs; A9 supported prompt parts. E1 must capture a genuinely non-empty selected variant.
+- **Verified transport shape:** create body is `{}` with directory routing. A1/A2 prompt body contains a fresh `messageID`, `agent:"build"`, `model:{providerID:"localmock",modelID:"echo"}`, and text part; unset variant is omitted. A9 proves file `{type,mime,url,filename?}`, optional file mention `source`, image as file part with image MIME, and agent `{type:"agent",name,source?}`. The selected-variant field's accepted value and persistence behavior are `UNKNOWN UNTIL E1`.
+- **Bridge and SSV2 mapping:** `messageID` is correlation-only. A successful HTTP admission does not write timeline or synthesize a user/assistant message. Authoritative direct SSE enters the single pre-Kernel normalizer and Kernel; iOS composer state never arbitrates projection state.
+- **Error and unsupported behavior:** unsupported parts or unavailable selected model/agent/variant fail before any POST. HTTP 204 means admission only. No local success, placeholder persistence, retry fallback, or legacy send path.
+- **Owning tests:** exact method/path/query/body tests for A1/A2/A9; two-ID persistence correlation; zero-writer on admission; unsupported-part zero-network; unavailable selection zero-POST; sandbox create/send/reopen; E1 capture/checker and replay before variant implementation.
+- **Out of scope:** command/shell/subtask, variant before E1, vision-provider interpretation beyond A9 persistence, and any protocol expansion not separately approved canonical-first.
 
-### C5. Model and agent semantics
+### 6.5 Live stream, terminal state, abort, reconnect, and external turns — C4
 
-- implement or explicitly exclude each official fallback level: current choice, agent model, configured default, recent, connected fallback;
-- carry agent selection end to end instead of dropping it at the bridge boundary;
-- use only connected providers and real catalog windows;
-- remove legacy recursive catalog parsing.
+- **Status:** `SAMPLE-VERIFIED-DESIGN-READY` for local direct SSE/status/retry/abort/reconnect from A1-A5. External official-Web turns are `PENDING-SAMPLE` on E3.
+- **User-visible behavior:** text/tool/status stream once; retries and real errors remain visible; abort ends non-successfully; reconnect continues the same turn without duplication; a second official Web client will be observed only after E3 proves that path.
+- **Official UI source:** `server-sdk.tsx:268-308` global SSE reconnect and `:284` v1 nested-`sync` skip; `event-reducer.ts` session/message/part reducers; `server-compat.ts:197-198` abort.
+- **Server/schema source:** `GET /global/event`; `POST /session/:id/abort`; session status/error and message part event schemas.
+- **Same-version samples:** A1/A2 healthy busy→idle; A3 retry→terminal API error; A4 abort→`MessageAbortedError`; A5 disconnect→`server.connected`→live delta→idle. E3 must capture a second client from request through reload while the bridge observes global SSE.
+- **Verified transport shape:** v1 direct payload is authoritative; nested `sync` is retained as evidence but skipped exactly once before Kernel normalization. A5 proves reconnect is live continuation, not assumed replay. A3 final non-retryable 400 persists assistant error; A4 abort returns `true` but does not imply healthy completion. External-turn directory/session/event coverage is `UNKNOWN UNTIL E3`.
+- **Bridge and SSV2 mapping:** one source adapter normalizes direct SSE, then one `EventPublisher`/Kernel ingest. Reconnect validates/invalidate/rehydrates the same Kernel and resumes projection; no second reducer, consumer referee, raw delivery, or iOS timer completion.
+- **Error and unsupported behavior:** unknown event/part shapes fail or remain explicitly unsupported; they are not recursively decoded. A first attempted fix with no symptom change triggers §4.3, not another state-machine guess. External-turn capability remains unproven until E3.
+- **Owning tests:** complete-sequence A1-A5 replays; direct+sync anti-double-ingest; retry/error/abort negative terminal tests; reconnect same-Kernel/epoch/stale rejection; kernel-nil seal; E3 second-client capture/checker/replay before external-turn completion claim.
+- **Out of scope:** raw SSE to iOS, assumed server replay buffer, polling as external-turn parity, inferred idle, and v2 events.
 
-Acceptance: each fallback level has a distinct fixture and selected request assertion; unavailable choices cause zero prompt POSTs.
+### 6.6 Provider, model, agent, and selected variant — C5
 
-### C6. Permissions, questions, and todos
+- **Status:** models and agent request vocabulary are sample-backed by A1; providers are `PENDING-SAMPLE` on E4, configured default model on E5, and selected variant on E1. The dossier is not product-authorized until E1/E4/E5 are resolved.
+- **User-visible behavior:** choices reflect connected providers and real models/agents; send preserves the selected model and agent; fallback distinguishes current choice, agent model, configured default, recent, and connected fallback rather than collapsing them.
+- **Official UI source:** `packages/app/src/context/global-sync/bootstrap.ts:229-242` loads providers and `:266-269` agents; `packages/app/src/pages/session/composer/prompt-model-selection.ts:16-40` establishes connected validation and fallback order, while `:79-123` selects variants; `packages/app/src/utils/server-compat.ts:200-230` sends model/agent/variant.
+- **Server/schema source:** the 1.18.18 provider/agent HTTP groups (`GET /provider`, `GET /agent`), configuration model source, and `packages/opencode/src/session/prompt.ts:1499-1520` `PromptInput` model/agent/variant fields at commit `2cba7e227d`.
+- **Same-version samples:** A1 proves selected model/agent in an admitted prompt. E4 must archive the provider response and connected subset; E5 must prove configured valid/invalid/absent default; E1 must prove a non-empty selected variant.
+- **Verified transport shape:** exact `/provider` top-level shape, connected-provider field, configured-default location, invalid-default behavior, and selected-variant persistence are respectively `UNKNOWN UNTIL E4/E5/E1`. A first connected model is not evidence of a configured default.
+- **Bridge and SSV2 mapping:** catalogs and choice state are control plane and never write timeline. Prompt selection crosses into §6.4 only as request metadata; message/turn facts return through SSE/Kernel.
+- **Error and unsupported behavior:** unknown catalog shape fails closed; no recursive JSON search, fake catalog, cached legacy snapshot, or silent model substitution. An unavailable explicit choice causes zero prompt POST. Capabilities remain unadvertised until all owning paths pass.
+- **Owning tests:** E4/E5/E1 independent checkers with destructive mutations; one test per fallback level; exact selected request assertion; unavailable choice zero-POST; catalog refresh remains control-only; unknown-shape fail-closed regression.
+- **Out of scope:** v2 catalogs, provider/account management, invented defaults, implicit variant support, and model fallback derived from legacy adapter behavior.
 
-- implement only from A6–A8 samples;
-- keep permission and question as separate bridge semantics;
-- answer multi-question batches without collapsing IDs or inventing resolution events;
-- resolve the missing todo ID problem explicitly before publishing stable control-plane todo items; do not place todos into timeline projection without a separate approved projection-shape decision.
+### 6.7 Permission Dock — C6
 
-Acceptance: request, answer/reject, external answer, reconnect, and cold-reload tests pass; capability flags match actual support.
+- **Status:** `SAMPLE-VERIFIED-DESIGN-READY` from A6.
+- **User-visible behavior:** pending permission appears once; once/always/reject sends the official response; external resolution clears the pending request; rejection is not rendered as healthy assistant completion.
+- **Official UI source:** `session-permission-dock.tsx`; v1 response mapping `server-compat.ts:496-503`.
+- **Server/schema source:** v1 permission schema; `GET /permission`; `POST /session/:id/permissions/:permissionID`; `permission.asked` and `permission.replied`.
+- **Same-version samples:** A6 contains once, always, reject, pending/reload, and repeated-pattern behavior.
+- **Verified transport shape:** request includes `id`, `sessionID`, `permission`, `patterns`, `metadata`, `always`, and `tool`; reply body is `{response:"once"|"always"|"reject"}`. Always suppresses a repeated matching ask in the isolated serve. Reject may leave assistant `finish=tool-calls` and is not a success terminal.
+- **Bridge and SSV2 mapping:** permission raw control may present the dock but cannot write `messages[]`; canonical permission state enters Kernel exactly once. Resolution uses the existing permission semantics and capability only after end-to-end support.
+- **Error and unsupported behavior:** unknown response/request shape fails visibly; no automatic approval, fake resolution, question conversion, or healthy completion on reject.
+- **Owning tests:** A6 full replay; exact three response bodies; pending/reload/external resolution; reject negative terminal; raw-control zero timeline write; canonical single-ingest; capability lag test.
+- **Out of scope:** structured questions, todo items, permission policy editing, and synthetic resolution events.
 
-### C7. Session mutations and selected secondary features
+### 6.8 Structured Question Dock — C6
 
-- add verified rename, archive, and delete behavior with by-ID refresh/list invalidation;
-- select fork/share/summarize/revert/diff/file/VCS work only from the Gate B product map;
-- each feature repeats the source → sample → bridge mapping → test chain.
+- **Status:** `SAMPLE-VERIFIED-DESIGN-READY` from A7.
+- **User-visible behavior:** a question batch preserves its request ID and answer groups; reply or reject resolves once; permission UI and question UI remain distinct.
+- **Official UI source:** `session-question-dock.tsx:226-227`; v1 mapping `server-compat.ts:507-515`.
+- **Server/schema source:** v1 question schema; `GET /question`; `POST /question/:requestID/reply`; `POST /question/:requestID/reject`; asked/replied/rejected events.
+- **Same-version samples:** A7 includes asked, reply `{answers:[["red"]]}`, reject, direct events, and reload.
+- **Verified transport shape:** reply body is `{answers:string[][]}` and reject has its own endpoint. 1.18.18 emits `question.replied` or `question.rejected`; no `question_resolved` event is observed.
+- **Bridge and SSV2 mapping:** translate once to canonical `user_input_requested` / `user_input_resolved` through Kernel. Legacy question presentation is one-way and suppressed for SSV2; it cannot be ingested back or write `messages[]`.
+- **Error and unsupported behavior:** do not invent `question_resolved`, collapse answer groups, reuse permission RPCs, or claim support when reply/reject is unavailable.
+- **Owning tests:** A7 replay; multi-group body preservation; reply/reject/external resolution/reload; canonical single-ingest; legacy-frame suppression; zero `messages[]` writer; capability truth test.
+- **Out of scope:** free-form UI redesign, permission conversion, guessed question event names, and protocol changes beyond an independently approved canonical-first plan.
 
-Acceptance: no generic “API coverage” milestone; each capability has its own evidence packet and truthful wire advertisement.
+### 6.9 Todo Dock — C6
+
+- **Status:** `SAMPLE-VERIFIED-DESIGN-READY` from A8.
+- **User-visible behavior:** the dock shows the authoritative ordered list and its pending/in-progress/completed transitions. It does not pretend each item has a server ID.
+- **Official UI source:** `pages/session.tsx` todo load, `session-todo-dock.tsx`, and `event-reducer.ts` `todo.updated`.
+- **Server/schema source:** `GET /session/:id/todo`; `session/todo.ts`; `todowrite` tool and `todo.updated` event.
+- **Same-version samples:** A8 captures 197 frames and two replacements, proving items with exactly `content`, `status`, and `priority`, with no `id`.
+- **Verified transport shape:** endpoint and event carry an ordered replacement list; the second write transitions the captured pending/in-progress items to completed. No stable server item ID is present.
+- **Bridge and SSV2 mapping:** todo is an explicit control-plane advertisement, not a `SessionProjection` timeline part. Preserve server order and fields; do not synthesize IDs or use item identity as a timeline key.
+- **Error and unsupported behavior:** malformed items fail the todo update; absence of IDs must not be hidden with random/hash IDs. Todo transport cannot write answer/reasoning/tool execution into timeline.
+- **Owning tests:** A8 endpoint/event/reload replay; ordered replacement and completion transition; no-ID negative assertion; control-plane allowlist; zero Kernel timeline part / zero iOS `messages[]` write; capability truth test.
+- **Out of scope:** editing todos independently of server tools, invented stable identity, projection migration, and question/permission reuse.
+
+### 6.10 Rename, archive, and delete sessions — C7
+
+- **Status:** archive is `SAMPLE-VERIFIED-DESIGN-READY` from A10. Rename is `PENDING-SAMPLE` on E6; delete is `PENDING-SAMPLE` on E7. This dossier is not batch-authorized until E6/E7 are resolved.
+- **User-visible behavior:** rename updates server-owned title; archive disappears from default lists but remains by-ID retrievable; delete disappears and becomes by-ID not found. Metadata refreshes do not manufacture timeline events.
+- **Official UI source:** `server-compat.ts:183-185` rename, archive/home reducer behavior, and `server-compat.ts:189-191` delete.
+- **Server/schema source:** `PATCH /session/:id` `UpdatePayload.title`; `PATCH /session/:id` `time.archived`; `DELETE /session/:id`; session updated/deleted events.
+- **Same-version samples:** A10 proves archive API/list/by-ID behavior. E6 must prove rename request/response/list/by-ID/event. E7 must prove delete response/list/by-ID 404/`session.deleted` invalidation.
+- **Verified transport shape:** archive uses PATCH with `time.archived` and remains present in API list/by-ID while CordCode hides it by OD-1. Rename and delete exact response/event ordering are `UNKNOWN UNTIL E6/E7`.
+- **Bridge and SSV2 mapping:** HTTP success refreshes catalog metadata only. Timeline content changes only if an authoritative observation is normalized into the existing Kernel; delete invalidates catalog/session ownership without fabricating a healthy turn.
+- **Error and unsupported behavior:** failed/malformed mutation surfaces a real error and leaves prior metadata; no optimistic permanent mutation, list-only success, legacy fallback, or capability advertisement before replay and integration proof.
+- **Owning tests:** A10 archive replay and default-list/by-ID rules; E6/E7 independent capture checkers; exact method/path/body/response; list/by-ID/event convergence; failure preservation; zero timeline writer; truthful capability activation.
+- **Out of scope:** fork/share/unshare/summarize/revert/unrevert/diff/file/VCS and all fourteen OD-3 future/unsupported surfaces.
+
+### 6.11 Capability activation and explicit exclusions
+
+- **Status:** `FUTURE/UNSUPPORTED` until each owning dossier is sample-verified, implemented, and passes its positive and negative acceptance set.
+- **User-visible behavior:** the iOS UI offers only end-to-end supported operations. A Go interface method, route, fake-server test, or Gate B `supported now` row does not itself make a capability available.
+- **Official UI source:** the owning dossier's official call site; there is no generic “API coverage” source.
+- **Server/schema source:** the owning dossier's verified route/schema; source-only rows remain vocabulary, not physical-shape proof.
+- **Same-version samples:** every advertised translated behavior must cite A1-A10, corrected WP, or E1-E7. Missing evidence means absent capability.
+- **Verified transport shape:** there is no generic envelope or recursive decoder. Each capability uses only its dossier's proven shape.
+- **Bridge and SSV2 mapping:** `WireDescriptor` and `backend_capabilities` change only after the owning request, observation/reload, Kernel/control ownership, and iOS consumption paths are complete. Protocol changes require Mac canonical-first plus synchronized iOS mirror/models/tests.
+- **Error and unsupported behavior:** absent/unverified capability remains unavailable with an honest diagnostic; never advertise and then silently fallback, return fake data, or route through legacy.
+- **Owning tests:** descriptor/capability negative-before-positive tests; no undeclared wire field; unsupported UI absence; cross-repository schema round trip when applicable; OD-3 non-advertisement guard.
+- **Out of scope:** Gate B rows marked future/deliberately unsupported/not applicable, all v2 behavior, and any product surface not explicitly promoted in this canonical section.
 
 ## 7. Test strategy after implementation resumes
 
