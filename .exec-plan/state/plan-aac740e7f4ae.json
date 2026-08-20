@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-20T16:08:13Z",
+  "updated_at": "2026-08-21T01:20:00Z",
   "todos": [
     {
       "id": "gate-a-inventory-impl",
@@ -786,7 +786,7 @@
       "id": "stage0-evidence-pack-impl",
       "title": "Directive-006 WP-FIX and E1-E7 real evidence capture",
       "description": "Evidence-only: use isolated OpenCode 1.18.18/2cba7e227d to capture WP-FIX, selected variant, reasoning, external turn, providers, configured default model, rename, and delete as raw+sanitized HTTP/SSE/reload. Record physical observations only; do not decide mappings or modify product code.",
-      "status": "pending",
+      "status": "done",
       "phase": "stage0-evidence",
       "kind": "impl",
       "depends_on": [
@@ -796,20 +796,29 @@
       "notes": "This is capture/harness implementation, not a product translator. BLOCKED is valid per row; guessed/fake evidence is forbidden.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Directive-006 evidence-only captures from the isolated 1.18.18/2cba7e227d sandbox (4398/4399; owner 4096 PID 71333 unchanged before/after; ports reclaimed): WP-FIX recaptured with http[]-owned evidence; E1 selected variant (204 admitted, variant persisted per-message on the user message model, unset control omits); E2 reasoning BLOCKED honestly (serve + @ai-sdk/openai-compatible fails reasoning-bearing streams: AI_APICallError socket closed -> busy/retry loop, two strategies archived); E3 external turn (capture client read only post-terminal, exactly two GETs; global SSE covered create/prompt/deltas/idle; reload converged); E4 providers (top-level {all,default,connected}, row shape; raw withheld by frozen leak policy, checker uses shape-preserving sanitized); E5 configured default (default map identical across valid/invalid/absent = config-independent; config model flows verbatim: invalid still 204 with modelID nonexistent; single-model limitation recorded); E6 rename (PATCH title -> Session.Info, list/by-ID converged, 404 NotFoundError); E7 delete (200 true, by-ID 404, list absence, second delete 404; session.deleted NOT observed — honest negative). No bridge mapping decisions recorded.",
+        "artifacts": [
+          "agent/opencode-web/testdata/official-1.18.18/samples/e1-selected-variant.raw.json",
+          "agent/opencode-web/testdata/official-1.18.18/samples/e2-reasoning.raw.json",
+          "agent/opencode-web/testdata/official-1.18.18/samples/e3-external-turn.raw.json",
+          "agent/opencode-web/testdata/official-1.18.18/samples/e4-providers.sanitized.json",
+          "agent/opencode-web/testdata/official-1.18.18/samples/e5-configured-default-valid.sanitized.json",
+          "agent/opencode-web/testdata/official-1.18.18/samples/e6-rename.raw.json",
+          "agent/opencode-web/testdata/official-1.18.18/samples/e7-delete.raw.json",
+          "agent/opencode-web/testdata/official-1.18.18/samples/wp-workspace-project.raw.json"
+        ],
+        "checked_at": "2026-08-21T01:20:00Z"
       }
     },
     {
       "id": "stage0-evidence-pack-tests",
       "title": "Directive-006 independent evidence checkers",
       "description": "Each WP-FIX/E1-E7 conclusion must be derived from raw transport fields and protected by destructive self-tests; summaries/meta/product fixtures are not evidence owners.",
-      "status": "pending",
+      "status": "done",
       "phase": "stage0-evidence",
       "kind": "tests",
       "depends_on": [
@@ -819,20 +828,25 @@
       "notes": "Run canonical design, A1-A10, WP-FIX, and E1-E7 checker/self-test gates with explicit timeouts.",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "automated",
-        "attestation": "self-attested",
+        "status": "present",
+        "method": "tests",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "check_evidence_queue.py: verdicts {E1 captured, E2 blocked, E3-E7 captured} derived only from raw transport fields (summaries/meta are provenance); 11 destructive self-test mutations all caught (request field, response field, event/order, reload convergence, fake reasoning, polling substitution, mode tamper). check_workspace_project.py rewritten per WP-FIX: every fact derived from http[] status+response; summary copies cross-checked (summary-mismatch FAIL); 6 mutations caught. Both self-tests PASS.",
+        "artifacts": [
+          "agent/opencode-web/testdata/official-1.18.18/harness/check_evidence_queue.py",
+          "agent/opencode-web/testdata/official-1.18.18/harness/check_workspace_project.py",
+          "cmd:python3 check_evidence_queue.py [--self-test] => ok {6 captured,1 blocked} / PASS",
+          "cmd:python3 check_workspace_project.py [--self-test] => ok / PASS"
+        ],
+        "checked_at": "2026-08-21T01:20:00Z"
       }
     },
     {
       "id": "stage0-evidence-pack-regression",
       "title": "Directive-006 evidence provenance and isolation regression",
       "description": "Prove samples originate from the isolated same-version serve, sanitized evidence is leak-free, 4398/4399 are reclaimed, owner 4096 is unchanged, and no product/protocol/capability/iOS file changed.",
-      "status": "pending",
+      "status": "done",
       "phase": "stage0-evidence",
       "kind": "regression",
       "depends_on": [
@@ -842,13 +856,17 @@
       "notes": "Developer agent stops after this evidence report. It must not continue into canonical mapping or product work.",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "mixed",
+        "status": "present",
+        "method": "regression",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Provenance/isolation regression: check_canonical_execution_design.py ok + self-test PASS; check_samples.py --require-all 10/10 A1-A10 captured (unmodified, E-rows not mixed in) + self-test PASS; leak scan of all new sanitized samples clean (no owner paths/auth/secrets/4096); owner 4096 listener PID 71333 identical before and after all capture cycles; 4398/4399 released after every cycle (verified free); git diff --check clean; zero product/protocol/WireDescriptor/capability/iOS files changed (harness+samples+inventory only).",
+        "artifacts": [
+          "cmd:python3 check_canonical_execution_design.py [--self-test] => ok / PASS",
+          "cmd:python3 check_samples.py --require-all => 10 captured; --self-test => PASS",
+          "docs/2026-08-20-opencode-web-1.18.18-sample-inventory.md"
+        ],
+        "checked_at": "2026-08-21T01:20:00Z"
       }
     },
     {

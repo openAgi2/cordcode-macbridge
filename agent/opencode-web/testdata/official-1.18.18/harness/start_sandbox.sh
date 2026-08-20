@@ -37,11 +37,20 @@ mkdir -p "$ROOT"/{home,xdg/{config,data,cache,state},workspace,workspace2,outsid
 printf 'outside-file-for-a6\n' > "$ROOT/outside/secret.txt"
 printf 'workspace-readme\n' > "$ROOT/workspace/README.md"
 printf 'workspace2-readme\n' > "$ROOT/workspace2/README.md"
+# OCW_CONFIG_MODEL (evidence-only, E5): "valid" keeps the configured default,
+# "invalid" points it at a nonexistent model, "absent" removes the key. The
+# harness never fabricates a server response — the serve decides what /provider
+# reports under each configuration.
 python3 - <<PY
-import json, pathlib
+import json, os, pathlib
 src = pathlib.Path("$HARNESS_DIR/opencode.json")
 cfg = json.loads(src.read_text())
 cfg["provider"]["localmock"]["options"]["baseURL"] = "http://127.0.0.1:${MOCK_PORT}/v1"
+mode = os.environ.get("OCW_CONFIG_MODEL", "valid")
+if mode == "invalid":
+    cfg["model"] = "localmock/nonexistent"
+elif mode == "absent":
+    cfg.pop("model", None)
 text = json.dumps(cfg, indent=2) + "\n"
 pathlib.Path("$ROOT/workspace/opencode.json").write_text(text)
 pathlib.Path("$ROOT/workspace2/opencode.json").write_text(text)

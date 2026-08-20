@@ -1442,16 +1442,19 @@ def _git_worktree(root: Path, name: str) -> str:
 
 
 def capture_wp(c: Client, sse: SSE, out: Path, workspace: str) -> None:
-    """Workspace.project registry sample (directive-003 Phase 0).
+    """Workspace.project registry sample (directive-006 WP-FIX).
 
-    Observed facts (1.18.18 @2cba7e227d): a plain non-git directory folds
-    into the global pseudo-project (worktree='/', directory appended to
-    global.sandboxes — core/project.ts resolve + project.ts:243-244); only a
-    git worktree with at least one commit becomes its own project row
-    (core/project.ts:105-119 rootCommits/remote derive the id). The capture
-    therefore registers two harness-owned git worktrees, then deletes one
-    (harness-owned dir only) to observe whether the server registry keeps the
-    entry — registry truth vs local existence overlay.
+    Evidence ownership lives in http[]: every real GET /project (and the
+    session-creation writes that grow the registry) is archived with its
+    status and response payload. The afterCreate/afterDelete blocks below are
+    NON-AUTHORITATIVE copies — the independent checker re-derives every fact
+    from http[] and fails on any copy/raw disagreement.
+
+    Registry facts pinned by source: a plain non-git directory folds into the
+    global pseudo-project (worktree='/' — core/project.ts resolve +
+    project.ts:243-244); only a git worktree with >=1 commit becomes its own
+    project row (core/project.ts:105-119). The deletion observation uses a
+    harness-owned git worktree only.
     """
     import shutil
 
@@ -1460,10 +1463,8 @@ def capture_wp(c: Client, sse: SSE, out: Path, workspace: str) -> None:
     if not Path(ws2).is_dir():
         raise RuntimeError(f"second directory missing: {ws2}")
     c2 = c.clone(ws2)
-
-    # Baseline: opening non-git harness workspaces registers only the global
-    # pseudo-project (the directories fold into global.sandboxes).
     c2.request("GET", "/session", query={"roots": "true", "limit": "1"})
+
     code0, base_projects, _ = c.request("GET", "/project", query={})
     if code0 != 200 or not isinstance(base_projects, list):
         raise RuntimeError(f"GET /project baseline failed: {code0}")
@@ -1472,8 +1473,8 @@ def capture_wp(c: Client, sse: SSE, out: Path, workspace: str) -> None:
     g2 = _git_worktree(root, "wsgit2")
     cg1 = c.clone(g1)
     cg2 = c.clone(g2)
-    s1_code, s1, _ = cg1.request("POST", "/session", body={"title": "wp-git-1"})
-    s2_code, s2, _ = cg2.request("POST", "/session", body={"title": "wp-git-2"})
+    s1_code, _, _ = cg1.request("POST", "/session", body={"title": "wp-git-1"})
+    s2_code, _, _ = cg2.request("POST", "/session", body={"title": "wp-git-2"})
     if s1_code >= 300 or s2_code >= 300:
         raise RuntimeError(f"git-worktree session create failed: {s1_code}/{s2_code}")
     _, after_create, _ = c.request("GET", "/project", query={})
@@ -1485,39 +1486,17 @@ def capture_wp(c: Client, sse: SSE, out: Path, workspace: str) -> None:
     if not isinstance(after_delete, list):
         raise RuntimeError("GET /project after delete was not a list")
 
-    def worktrees(items: Any) -> list[str]:
-        return [str(item.get("worktree") or "") for item in items if isinstance(item, dict)]
-
-    def entry_map(items: Any) -> dict[str, dict[str, Any]]:
-        outm: dict[str, dict[str, Any]] = {}
-        for item in items:
-            if isinstance(item, dict) and item.get("id"):
-                outm[str(item["id"])] = item
-        return outm
-
     import os as _os
 
     def real(p: str) -> str:
         return _os.path.realpath(p)
 
+    def worktrees(items: Any) -> list[str]:
+        return [str(item.get("worktree") or "") for item in items if isinstance(item, dict)]
+
     wts = worktrees(after_create)
     if real(g1) not in wts or real(g2) not in wts:
         raise RuntimeError(f"git worktrees not registered as projects: {wts}")
-    distinct = [w for w in wts if w not in ("/", "")]
-    if len(distinct) < 2:
-        raise RuntimeError(f"need >=2 distinct worktree entries, got {wts}")
-
-    presence = [
-        {
-            "id": bool(item.get("id")),
-            "worktree": bool(item.get("worktree")),
-            "vcs": "vcs" in item,
-            "time": "time" in item,
-            "sandboxes": "sandboxes" in item,
-        }
-        for item in after_create
-        if isinstance(item, dict)
-    ]
 
     write_sample(
         out / "wp-workspace-project.sanitized.json",
@@ -1526,26 +1505,20 @@ def capture_wp(c: Client, sse: SSE, out: Path, workspace: str) -> None:
                 "scenario": "WP",
                 "opencodeVersion": OPENCODE_VERSION,
                 "sourceCommit": SOURCE_COMMIT,
+                # provenance only — NOT evidence; the checker derives status
                 "captureStatus": "captured",
             },
             "source": {
                 "ui": "packages/app/src/utils/server-compat.ts:304 legacy().project.list() (data ?? [])",
-                "server": "packages/opencode/src/server/routes/instance/httpapi/handlers/project.ts:15-17 list -> Project.list; packages/opencode/src/project/project.ts:336 list (DB rows), :35-56 fromRow, :217 global pseudo-project worktree='/', :243-244 non-worktree directory folds into sandboxes; packages/core/src/project.ts:105-119 git rootCommits/remote derive project id",
+                "server": "packages/opencode/src/server/routes/instance/httpapi/handlers/project.ts:15-17 list -> Project.list; packages/opencode/src/project/project.ts:336 list, :35-56 fromRow, :217 global pseudo-project worktree='/', :243-244 non-worktree directory folds into sandboxes; packages/core/src/project.ts:105-119 git rootCommits/remote derive project id",
             },
-            "http": [
-                {"step": "baseline", "method": "GET", "path": "/project", "status": code0},
-                {"step": "git1-session", "method": "POST", "path": "/session", "status": s1_code},
-                {"step": "git2-session", "method": "POST", "path": "/session", "status": s2_code},
-                {"step": "after-create", "method": "GET", "path": "/project", "status": 200},
-                {"step": "after-delete", "method": "GET", "path": "/project", "status": 200},
-            ],
-            "baseline": {"count": len(base_projects), "worktrees": worktrees(base_projects)},
+            "http": c.http,
+            "httpClones": {"git1": cg1.http, "git2": cg2.http},
+            # NON-AUTHORITATIVE copies — checker re-derives and cross-checks
             "afterCreate": {
                 "count": len(after_create),
                 "worktrees": wts,
                 "gitWorktreesRegistered": [real(g1) in wts, real(g2) in wts],
-                "distinctNonGlobalWorktrees": len(distinct),
-                "realpathNote": "registry stores os.path.realpath worktrees (/private/tmp on macOS); git worktrees registered only with >=1 commit",
             },
             "afterDelete": {
                 "count": len(after_delete),
@@ -1554,12 +1527,217 @@ def capture_wp(c: Client, sse: SSE, out: Path, workspace: str) -> None:
                 "deletedDirectory": g2,
                 "note": "harness-owned temp dir; observation only — CordCode missing-worktree handling is a client-side visibility overlay, never a server claim",
             },
-            "fieldPresenceObserved": presence,
-            "rawPayloads": {
-                "baseline": base_projects,
-                "afterCreate": after_create,
-                "afterDelete": after_delete,
+        },
+        workspace,
+    )
+
+
+
+
+# ── directive-006 evidence queue: E1–E7 (evidence-only) ─────────────────────
+# Every sample archives raw transport (http status+response, SSE frames,
+# reload) plus official source citations. The sample carries NO conclusions —
+# check_evidence_queue.py derives each verdict from the raw fields alone.
+
+
+def _fresh_session(c: Client, title: str) -> str:
+    code, created, _ = c.request("POST", "/session", body={"title": title})
+    if code >= 300 or not isinstance(created, dict) or not created.get("id"):
+        raise RuntimeError(f"session create failed for {title}: {code}")
+    return str(created["id"])
+
+
+def _messages_of(c: Client, sid: str) -> Any:
+    _, messages, _ = c.request("GET", f"/session/{sid}/message")
+    return messages
+
+
+def capture_e1(c: Client, sse: SSE, out: Path, workspace: str) -> None:
+    """E1 selected variant: non-empty variant prompt + SSE + reload, plus the
+    unset-omission control. Observation only — accept/reject/persist behavior
+    is whatever the serve does."""
+    sid = _fresh_session(c, "e1-variant")
+    body_set = prompt_body("E1 selected variant probe")
+    body_set["variant"] = "primary"
+    c.request("POST", f"/session/{sid}/prompt_async", body=body_set)
+    ok_set, _ = wait_idle(sse, sid, 45)
+    c.request("GET", f"/session/{sid}")
+    msgs_set = _messages_of(c, sid)
+
+    body_unset = prompt_body("E1 unset variant control")
+    c.request("POST", f"/session/{sid}/prompt_async", body=body_unset)
+    ok_unset, _ = wait_idle(sse, sid, 45)
+    c.request("GET", f"/session/{sid}")
+    msgs_unset = _messages_of(c, sid)
+
+    write_sample(
+        out / "e1-selected-variant.sanitized.json",
+        {
+            "meta": {"scenario": "E1", "opencodeVersion": OPENCODE_VERSION, "sourceCommit": SOURCE_COMMIT},
+            "source": {
+                "ui": "packages/app/src/utils/server-compat.ts:206 promptAsync carries variant: value.variant; composer variant cycle prompt-model-selection.ts:11",
+                "server": "packages/opencode/src/session/prompt.ts:1511 PromptInput variant: Schema.optional(Schema.String); :649-666 variant resolution (input wins); :1006 persisted as model.variant",
             },
+            "http": c.http,
+            "sse": sse.frames,
+            "reload": {"messagesWithVariantSet": msgs_set, "messagesWithVariantUnset": msgs_unset},
+            "observation": {"idleAfterSet": ok_set, "idleAfterUnset": ok_unset},
+        },
+        workspace,
+    )
+
+
+def capture_e2(c: Client, sse: SSE, out: Path, workspace: str) -> None:
+    """E2 reasoning: deterministic provider streams reasoning deltas; whether
+    the serve maps them onto reasoning parts is observed, never assumed."""
+    sid = _fresh_session(c, "e2-reasoning")
+    c.request("POST", f"/session/{sid}/prompt_async", body=prompt_body("E2_REASONING probe"))
+    ok, _ = wait_idle(sse, sid, 45)
+    msgs = _messages_of(c, sid)
+    write_sample(
+        out / "e2-reasoning.sanitized.json",
+        {
+            "meta": {"scenario": "E2", "opencodeVersion": OPENCODE_VERSION, "sourceCommit": SOURCE_COMMIT},
+            "source": {
+                "ui": "packages/app/src (reasoning rendered as its own part kind; no answer-text folding)",
+                "server": "packages/opencode/src/session/message.ts:50-55 ReasoningPart {type:'reasoning', text, providerMetadata?}; packages/opencode/src/session/llm/ai-sdk.ts:158-169 reasoning-start/reasoning-delta stream mapping",
+                "provider": "mock_provider.py _reasoning_chunks emits OpenRouter-style delta.reasoning; the @ai-sdk/openai-compatible mapping is the empirical unknown",
+            },
+            "http": c.http,
+            "sse": sse.frames,
+            "reload": {"messages": msgs},
+            "observation": {"idleReached": ok},
+        },
+        workspace,
+    )
+
+
+def capture_e3(c: Client, sse: SSE, out: Path, workspace: str) -> None:
+    """E3 external turn: a SECOND client creates/sends; the capture client
+    only observes global SSE through terminal, then reloads once (no polling).
+    """
+    c2 = c.clone(workspace)
+    sid = _fresh_session(c2, "e3-external")
+    body = prompt_body("E3 external official-Web turn")
+    c2.request("POST", f"/session/{sid}/prompt_async", body=body)
+    ok, _ = wait_idle(sse, sid, 60)
+    # Only AFTER terminal does the capture client read anything.
+    _, by_id, _ = c.request("GET", f"/session/{sid}")
+    msgs = _messages_of(c, sid)
+    write_sample(
+        out / "e3-external-turn.sanitized.json",
+        {
+            "meta": {"scenario": "E3", "opencodeVersion": OPENCODE_VERSION, "sourceCommit": SOURCE_COMMIT},
+            "source": {
+                "ui": "packages/app/src/context/server-sdk.tsx:268-308 global event subscribe (legacy envelope payload+directory)",
+                "server": "packages/opencode/src/server/routes/instance/httpapi/handlers/event.ts global SSE route",
+            },
+            "httpCaptureClient": c.http,
+            "httpExternalClient": c2.http,
+            "sse": sse.frames,
+            "reload": {"sessionByID": by_id, "messages": msgs},
+            "observation": {"idleReached": ok, "externalSessionID": sid},
+        },
+        workspace,
+    )
+
+
+def capture_e4(c: Client, sse: SSE, out: Path, workspace: str) -> None:
+    """E4 providers: the real GET /provider request/status/response."""
+    c.request("GET", "/provider", query={})
+    write_sample(
+        out / "e4-providers.sanitized.json",
+        {
+            "meta": {"scenario": "E4", "opencodeVersion": OPENCODE_VERSION, "sourceCommit": SOURCE_COMMIT},
+            "source": {
+                "ui": "packages/app/src/utils/server-compat.ts provider list consumption (model picker source)",
+                "server": "packages/opencode/src/server/routes/instance/httpapi/handlers/provider.ts:40-57 list -> {providers/all, default: Provider.defaultModelIDs, connected}; provider.ts:1107-1109 defaultModelIDs = alphabetically-first model per provider (NOT config model)",
+            },
+            "http": c.http,
+            "sse": [],
+            "reload": {},
+            "observation": {},
+        },
+        workspace,
+    )
+
+
+def capture_e5(c: Client, sse: SSE, out: Path, workspace: str, mode: str) -> None:
+    """E5 configured default model under one config mode (valid/invalid/absent).
+    Observes BOTH /provider.default (derived first-model map) and a prompt
+    sent WITHOUT a model field — the configured default's real behavior."""
+    c.request("GET", "/provider", query={})
+    sid = _fresh_session(c, f"e5-{mode}")
+    body = prompt_body(f"E5 configured-default probe ({mode})")
+    body.pop("model", None)
+    c.request("POST", f"/session/{sid}/prompt_async", body=body)
+    ok, _ = wait_idle(sse, sid, 45)
+    _, by_id, _ = c.request("GET", f"/session/{sid}")
+    msgs = _messages_of(c, sid)
+    write_sample(
+        out / f"e5-configured-default-{mode}.sanitized.json",
+        {
+            "meta": {"scenario": "E5", "configMode": mode, "opencodeVersion": OPENCODE_VERSION, "sourceCommit": SOURCE_COMMIT},
+            "source": {
+                "ui": "packages/app/src/pages/session/composer/prompt-model-selection.ts:39-41 fallback chain (configured default is one level)",
+                "server": "packages/opencode/src/server/routes/instance/httpapi/handlers/provider.ts:40-57; packages/opencode/src/provider/provider.ts:1107-1109 defaultModelIDs; config model field resolved in prompt fallback (prompt.ts model resolution)",
+            },
+            "http": c.http,
+            "sse": sse.frames,
+            "reload": {"sessionByID": by_id, "messages": msgs},
+            "observation": {"idleReached": ok},
+        },
+        workspace,
+    )
+
+
+def capture_e6(c: Client, sse: SSE, out: Path, workspace: str) -> None:
+    """E6 rename: PATCH title + response + list/by-ID convergence + failure."""
+    sid = _fresh_session(c, "e6-original")
+    c.request("GET", f"/session/{sid}")
+    c.request("PATCH", f"/session/{sid}", body={"title": "e6-renamed"})
+    time.sleep(0.5)
+    _, listed, _ = c.request("GET", "/session", query={"roots": "true", "limit": "10"})
+    c.request("GET", f"/session/{sid}")
+    fail_code, fail_resp, _ = c.request("PATCH", "/session/ses_e6doesnotexist", body={"title": "x"})
+    write_sample(
+        out / "e6-rename.sanitized.json",
+        {
+            "meta": {"scenario": "E6", "opencodeVersion": OPENCODE_VERSION, "sourceCommit": SOURCE_COMMIT},
+            "source": {
+                "ui": "packages/app/src/utils/server-compat.ts:184 session.update({sessionID, title})",
+                "server": "packages/opencode/src/server/routes/instance/httpapi/groups/session.ts:49-50 UpdatePayload {title?}; :227-236 PATCH update -> Session.Info | BadRequest/NotFound",
+            },
+            "http": c.http,
+            "sse": sse.frames,
+            "reload": {"listAfterRename": listed},
+            "observation": {"renameFailureStatus": fail_code, "renameFailureResponse": fail_resp},
+        },
+        workspace,
+    )
+
+
+def capture_e7(c: Client, sse: SSE, out: Path, workspace: str) -> None:
+    """E7 delete: DELETE + response + list absence + by-ID 404 + event + failure."""
+    sid = _fresh_session(c, "e7-delete-me")
+    c.request("GET", f"/session/{sid}")
+    c.request("DELETE", f"/session/{sid}")
+    time.sleep(0.5)
+    _, listed, _ = c.request("GET", "/session", query={"roots": "true", "limit": "10"})
+    c.request("GET", f"/session/{sid}")
+    fail_code, fail_resp, _ = c.request("DELETE", f"/session/{sid}")
+    write_sample(
+        out / "e7-delete.sanitized.json",
+        {
+            "meta": {"scenario": "E7", "opencodeVersion": OPENCODE_VERSION, "sourceCommit": SOURCE_COMMIT},
+            "source": {
+                "ui": "packages/app/src/utils/server-compat.ts:190 session.delete(value)",
+                "server": "packages/opencode/src/server/routes/instance/httpapi/groups/session.ts:215-224 DELETE remove -> Boolean | BadRequest/NotFound",
+            },
+            "http": c.http,
+            "sse": sse.frames,
+            "reload": {"listAfterDelete": listed},
+            "observation": {"deleteFailureStatus": fail_code, "deleteFailureResponse": fail_resp},
         },
         workspace,
     )
@@ -1577,7 +1755,30 @@ SCENARIOS = {
     "a9": capture_a9,
     "a10": capture_a10,
     "wp": capture_wp,
+    "e1": capture_e1,
+    "e2": capture_e2,
+    "e3": capture_e3,
+    "e4": capture_e4,
+    "e6": capture_e6,
+    "e7": capture_e7,
 }
+
+
+def _e5_valid(c: Client, sse: SSE, out: Path, ws: str) -> None:
+    capture_e5(c, sse, out, ws, "valid")
+
+
+def _e5_invalid(c: Client, sse: SSE, out: Path, ws: str) -> None:
+    capture_e5(c, sse, out, ws, "invalid")
+
+
+def _e5_absent(c: Client, sse: SSE, out: Path, ws: str) -> None:
+    capture_e5(c, sse, out, ws, "absent")
+
+
+SCENARIOS["e5a"] = _e5_valid
+SCENARIOS["e5b"] = _e5_invalid
+SCENARIOS["e5c"] = _e5_absent
 
 
 def main() -> int:

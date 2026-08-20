@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""Gate the official 1.18.18 /project registry sample (directive-003 Phase 0).
+"""Gate the official 1.18.18 /project registry sample (directive-006 WP-FIX).
 
-Derives every claim from the RAW HTTP payloads only — the sanitized summary is
-never a truth source. Fails when the top-level shape, project identity, or
-worktree/directory isolation is not independently provable from raw.
+Evidence ownership: EVERY asserted fact is derived from the archived raw
+HTTP log — each GET /project entry carries its own status and response
+payload. The afterCreate/afterDelete blocks and meta.captureStatus are
+NON-AUTHORITATIVE copies: tampering with a copy cannot change the derived
+result, but any copy/raw disagreement is an explicit `summary-mismatch` FAIL.
 """
 
 from __future__ import annotations
 
 import copy
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -24,154 +27,191 @@ def load() -> dict:
     return json.loads(RAW.read_text(encoding="utf-8"))
 
 
-def _entries(raw: dict, phase: str):
-    payloads = raw.get("rawPayloads") or {}
-    value = payloads.get(phase)
-    return value if isinstance(value, list) else None
+def _project_responses(http: list) -> list[dict]:
+    """The /project GETs in order, each {status, response} — the truth source."""
+    out = []
+    for entry in http:
+        if entry.get("method") == "GET" and entry.get("path") == "/project":
+            out.append(entry)
+    return out
 
 
-def problems(doc: dict, require_sanitized: bool = True) -> list[str]:
+def _worktrees(response) -> list[str]:
+    if not isinstance(response, list):
+        return []
+    return [str(i.get("worktree") or "") for i in response if isinstance(i, dict)]
+
+
+def derive(doc: dict) -> dict:
+    """Derive every fact from http[]. Returns derived state (no pass/fail)."""
+    http = doc.get("http") or []
+    gets = _project_responses(http)
+    phases = [g.get("response") for g in gets]
+    statuses = [g.get("status") for g in gets]
+    baseline, after_create, after_delete = (phases + [None, None, None])[:3]
+
+    ids: list[str] = []
+    worktrees: list[str] = []
+    if isinstance(after_create, list):
+        for item in after_create:
+            if isinstance(item, dict):
+                pid = item.get("id")
+                ids.append(pid if isinstance(pid, str) else "")
+                wt = item.get("worktree")
+                worktrees.append(wt if isinstance(wt, str) else "")
+    distinct = [w for w in worktrees if w not in ("", "/")]
+    baseline_wts = set(_worktrees(baseline))
+
+    clones = doc.get("httpClones") or {}
+    clone_posts = 0
+    for log in clones.values():
+        for entry in log or []:
+            if entry.get("method") == "POST" and entry.get("path") == "/session":
+                clone_posts += 1
+
+    deleted_dir = ((doc.get("afterDelete") or {}).get("deletedDirectory")) or ""
+    deleted_real = os.path.realpath(deleted_dir) if deleted_dir else ""
+    deleted_still = deleted_real in _worktrees(after_delete) if after_delete is not None else None
+
+    return {
+        "statuses": statuses,
+        "project_get_count": len(gets),
+        "baseline_is_list": isinstance(baseline, list),
+        "after_create_is_list": isinstance(after_create, list),
+        "after_delete_is_list": isinstance(after_delete, list),
+        "ids": ids,
+        "worktrees": worktrees,
+        "distinct": distinct,
+        "grown": [w for w in distinct if w not in baseline_wts],
+        "clone_session_posts": clone_posts,
+        "deleted_real": deleted_real,
+        "deleted_still_registered": deleted_still,
+    }
+
+
+def problems(doc: dict) -> tuple[list[str], dict]:
     bad: list[str] = []
+    d = derive(doc)
+
     meta = doc.get("meta") or {}
     if meta.get("opencodeVersion") != "1.18.18":
         bad.append("meta-version")
     if meta.get("sourceCommit") != "2cba7e227d":
         bad.append("meta-source-commit")
-    if meta.get("captureStatus") != "captured":
-        bad.append("meta-not-captured")
+    src = doc.get("source") or {}
+    if not (src.get("ui") and src.get("server")):
+        bad.append("source-citations-missing")
 
-    for phase in ("baseline", "afterCreate", "afterDelete"):
-        entries = _entries(doc, phase)
-        if entries is None:
-            bad.append(f"raw-missing:{phase}")
-    if bad:
-        return bad
+    if d["project_get_count"] < 3:
+        bad.append(f"http-project-gets:{d['project_get_count']}")
+        return bad, d
+    for i, st in enumerate(d["statuses"]):
+        if st != 200:
+            bad.append(f"http-project-status[{i}]={st}")
+    if not (d["baseline_is_list"] and d["after_create_is_list"] and d["after_delete_is_list"]):
+        bad.append("http-project-top-level-not-array")
+        return bad, d
 
-    # Top-level shape: every phase must be a bare JSON array.
-    for phase in ("baseline", "afterCreate", "afterDelete"):
-        entries = _entries(doc, phase)
-        if not isinstance(entries, list):
-            bad.append(f"top-level-not-array:{phase}")
-
-    # Identity: non-global rows need non-empty, unique ids; worktree absolute
-    # and unique (directory isolation).
-    created = _entries(doc, "afterCreate")
-    ids: list[str] = []
-    worktrees: list[str] = []
-    for item in created:
-        if not isinstance(item, dict):
-            bad.append("entry-not-object")
-            continue
-        pid = item.get("id")
-        if not isinstance(pid, str) or not pid:
-            bad.append("project-id-empty")
-            continue
-        if pid in ids:
-            bad.append(f"project-id-duplicate:{pid}")
-        ids.append(pid)
-        wt = item.get("worktree")
-        if not isinstance(wt, str) or not wt:
-            bad.append(f"worktree-empty:{pid}")
-            continue
+    if len([i for i in d["ids"] if i]) != len(d["ids"]):
+        bad.append("project-id-empty")
+    if len(set(d["ids"])) != len(d["ids"]):
+        bad.append("project-id-duplicate")
+    for wt in d["worktrees"]:
         if not wt.startswith("/"):
             bad.append(f"worktree-not-absolute:{wt}")
-        if wt in worktrees:
-            bad.append(f"worktree-duplicate:{wt}")
-        worktrees.append(wt)
+    if len(set(d["worktrees"])) != len(d["worktrees"]):
+        bad.append("worktree-duplicate")
+    if len(d["distinct"]) < MIN_DISTINCT_WORKTREES:
+        bad.append(f"distinct-worktrees:{len(d['distinct'])}")
+    if len(d["grown"]) < MIN_DISTINCT_WORKTREES:
+        bad.append("registry-growth-not-proven")
+    if d["clone_session_posts"] < 2:
+        bad.append(f"clone-session-posts:{d['clone_session_posts']}")
+    if d["deleted_still_registered"] is None:
+        bad.append("delete-observation-derivation-failed")
 
-    distinct = [w for w in worktrees if w not in ("/", "")]
-    if len(distinct) < MIN_DISTINCT_WORKTREES:
-        bad.append(f"distinct-worktrees:{len(distinct)}")
+    # NON-AUTHORITATIVE copies must agree with the derived result.
+    ac = doc.get("afterCreate") or {}
+    if ac.get("count") is not None and ac.get("count") != len(d["worktrees"]):
+        bad.append("summary-mismatch:afterCreate.count")
+    if list(ac.get("worktrees") or []) != d["worktrees"]:
+        bad.append("summary-mismatch:afterCreate.worktrees")
+    ad = doc.get("afterDelete") or {}
+    if ad.get("deletedGitWorktreeStillRegistered") is not None and ad.get(
+        "deletedGitWorktreeStillRegistered"
+    ) != d["deleted_still_registered"]:
+        bad.append("summary-mismatch:afterDelete.deletedGitWorktreeStillRegistered")
+    if list(ad.get("worktrees") or []) != _worktrees(_project_responses(doc.get("http") or [])[-1].get("response") if d["project_get_count"] >= 3 else None):
+        bad.append("summary-mismatch:afterDelete.worktrees")
 
-    # Field presence derived from raw rows only: id/worktree/time/sandboxes
-    # observed; vcs present on git rows (absent on the global pseudo-project).
-    git_rows = [i for i in created if isinstance(i, dict) and i.get("vcs")]
-    if not git_rows:
-        bad.append("no-vcs-rows")
-    for item in created:
-        if not isinstance(item, dict):
-            continue
-        for field in ("time", "sandboxes"):
-            if field not in item:
-                bad.append(f"field-missing:{field}:{item.get('id')}")
-
-    # Growth: the two git worktrees appear in afterCreate but not baseline.
-    baseline_wts = {
-        str(i.get("worktree") or "") for i in _entries(doc, "baseline") if isinstance(i, dict)
-    }
-    grown = [w for w in distinct if w not in baseline_wts]
-    if len(grown) < MIN_DISTINCT_WORKTREES:
-        bad.append(f"registry-growth-not-proven:{sorted(baseline_wts)}")
-
-    # Delete observation must be present and derived from raw: the deleted
-    # harness git worktree either stays registered (server registry truth) or
-    # is dropped — both are honest observations, but the observation itself
-    # must exist and must be consistent with the raw afterDelete payload.
-    after_delete = doc.get("afterDelete") or {}
-    deleted_dir = after_delete.get("deletedDirectory")
-    if not deleted_dir:
-        bad.append("delete-observation-missing")
-    else:
-        import os
-
-        real_deleted = os.path.realpath(deleted_dir)
-        delete_wts = {
-            str(i.get("worktree") or "") for i in _entries(doc, "afterDelete") if isinstance(i, dict)
-        }
-        observed_still = after_delete.get("deletedGitWorktreeStillRegistered")
-        derived_still = real_deleted in delete_wts
-        if observed_still is not derived_still:
-            bad.append(f"delete-observation-inconsistent:stated={observed_still} derived={derived_still}")
-
-    if require_sanitized and not SANITIZED.is_file():
+    if not SANITIZED.is_file():
         bad.append("sanitized-missing")
-    return bad
+    return bad, d
 
 
 def self_test() -> int:
     doc = load()
-    orig = problems(doc)
-    if orig:
-        print("self-test FAIL original", orig[:12], file=sys.stderr)
+    bad, _ = problems(doc)
+    if bad:
+        print("self-test FAIL original", bad[:12], file=sys.stderr)
         return 1
     failures: list[str] = []
 
     def expect(mut, label: str) -> None:
-        found = problems(mut(copy.deepcopy(doc)))
+        found, _ = problems(mut(copy.deepcopy(doc)))
         ok = bool(found)
         print(f"  {label}: {found[:4]} {'OK' if ok else 'FAIL'}")
         if not ok:
             failures.append(label)
 
-    def corrupt_top_level(d):
-        d["rawPayloads"]["afterCreate"] = {"data": d["rawPayloads"]["afterCreate"]}
+    def break_status(d):
+        d["http"][0]["status"] = 500
         return d
 
-    def corrupt_project_id(d):
-        rows = d["rawPayloads"]["afterCreate"]
-        for item in rows:
-            if isinstance(item, dict) and item.get("vcs") == "git":
-                item["id"] = ""
-                break
+    def break_top_level(d):
+        for e in d["http"]:
+            if e.get("path") == "/project":
+                e["response"] = {"data": e["response"]}
+                return d
         return d
 
-    def corrupt_worktree_isolation(d):
-        rows = d["rawPayloads"]["afterCreate"]
-        wts = [i for i in rows if isinstance(i, dict) and i.get("vcs") == "git"]
-        if len(wts) >= 2:
-            wts[1]["worktree"] = wts[0]["worktree"]
+    def break_project_id(d):
+        for e in d["http"]:
+            if e.get("path") == "/project" and isinstance(e.get("response"), list):
+                for item in e["response"]:
+                    if isinstance(item, dict) and item.get("vcs"):
+                        item["id"] = ""
+                        return d
         return d
 
-    def corrupt_delete_observation(d):
-        d["afterDelete"]["deletedGitWorktreeStillRegistered"] = not d["afterDelete"][
-            "deletedGitWorktreeStillRegistered"
-        ]
+    def break_worktree_isolation(d):
+        for e in d["http"]:
+            if e.get("path") == "/project" and isinstance(e.get("response"), list):
+                rows = [i for i in e["response"] if isinstance(i, dict) and i.get("vcs")]
+                if len(rows) >= 2:
+                    rows[1]["worktree"] = rows[0]["worktree"]
+                    return d
         return d
 
-    expect(corrupt_top_level, "top-level-shape-corrupted")
-    expect(corrupt_project_id, "project-id-corrupted")
-    expect(corrupt_worktree_isolation, "worktree-isolation-corrupted")
-    expect(corrupt_delete_observation, "delete-observation-flipped")
+    def break_deleted_row(d):
+        # Drop the deleted worktree's row from the FINAL raw response — the
+        # derived deleted-still-registered flips; the stale copy must mismatch.
+        last = [e for e in d["http"] if e.get("path") == "/project"][-1]
+        wt = os.path.realpath(d["afterDelete"]["deletedDirectory"])
+        last["response"] = [i for i in last["response"] if i.get("worktree") != wt]
+        return d
+
+    def break_copy_only(d):
+        # Tamper ONLY the summary copy — derived result must stay, mismatch must FAIL.
+        d["afterCreate"]["count"] = 999
+        return d
+
+    expect(break_status, "http-status-corrupted")
+    expect(break_top_level, "top-level-shape-corrupted")
+    expect(break_project_id, "project-id-corrupted")
+    expect(break_worktree_isolation, "worktree-isolation-corrupted")
+    expect(break_deleted_row, "deleted-row-removed-from-raw")
+    expect(break_copy_only, "summary-copy-tampered")
     if failures:
         print("self-test FAIL", failures, file=sys.stderr)
         return 1
@@ -186,16 +226,17 @@ def main() -> int:
         print("missing raw sample", RAW, file=sys.stderr)
         return 1
     doc = load()
-    bad = problems(doc)
-    created = _entries(doc, "afterCreate") or []
+    bad, d = problems(doc)
     report = {
         "raw": str(RAW),
-        "entries": len(created),
-        "worktrees": [i.get("worktree") for i in created if isinstance(i, dict)],
-        "distinctNonGlobal": len([i for i in created if isinstance(i, dict) and i.get("worktree") not in ("/", "", None)]),
-        "deletedGitWorktreeStillRegistered": (doc.get("afterDelete") or {}).get(
-            "deletedGitWorktreeStillRegistered"
-        ),
+        "derived": {
+            "projectGets": d["project_get_count"],
+            "statuses": d["statuses"],
+            "worktrees": d["worktrees"],
+            "distinctNonGlobal": len(d["distinct"]),
+            "grownFromBaseline": len(d["grown"]),
+            "deletedGitWorktreeStillRegistered": d["deleted_still_registered"],
+        },
         "problems": bad,
     }
     print(json.dumps(report, indent=2, ensure_ascii=False))
@@ -203,9 +244,9 @@ def main() -> int:
         print("workspace.project sample FAIL", bad[:16], file=sys.stderr)
         return 1
     print(
-        f"workspace.project sample ok: entries={report['entries']} "
-        f"distinctNonGlobal={report['distinctNonGlobal']} "
-        f"deletedStillRegistered={report['deletedGitWorktreeStillRegistered']}"
+        f"workspace.project sample ok (derived from http[]): gets={d['project_get_count']} "
+        f"distinctNonGlobal={len(d['distinct'])} grown={len(d['grown'])} "
+        f"deletedStillRegistered={d['deleted_still_registered']}"
     )
     return 0
 

@@ -141,6 +141,8 @@ def _scenario(body: dict) -> str:
         return "question"
     if "A8_TODOWRITE_UPDATE" in text:
         return "todowrite_update"
+    if "E2_REASONING" in text:
+        return "reasoning"
     if "A8_TODOWRITE" in text:
         return "todowrite"
     return "text"
@@ -189,6 +191,31 @@ def _text_chunks(text: str) -> list[str]:
             }
         )
     )
+    return out
+
+
+def _reasoning_chunks(reasoning: str, text: str) -> list[str]:
+    """OpenRouter/OpenAI-compatible reasoning deltas followed by answer text.
+
+    Whether the serve maps `delta.reasoning` onto reasoning parts is an
+    EMPIRICAL question this evidence pack answers from the real SSE stream —
+    the mock only provides deterministic provider-side chunks.
+    """
+    # Single full-string reasoning delta (per-character deltas made the
+    # official serve's fetch abort the stream with AI_APICallError — see the
+    # e2 evidence archive; whole-string is the second capture attempt).
+    out: list[str] = [
+        json.dumps(
+            {
+                "id": "chatcmpl-mock",
+                "object": "chat.completion.chunk",
+                "choices": [
+                    {"index": 0, "delta": {"role": "assistant", "reasoning": reasoning}, "finish_reason": None}
+                ],
+            }
+        )
+    ]
+    out.extend(_text_chunks(text))
     return out
 
 
@@ -340,6 +367,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if scenario == "after_tool":
             _sse(self, _text_chunks("SANDBOX_OK"))
+            return
+        if scenario == "reasoning":
+            self._sse(_reasoning_chunks("plan: verify the evidence pack ", "reasoning-answer-body"))
             return
         if scenario == "todowrite_update":
             with _lock:
