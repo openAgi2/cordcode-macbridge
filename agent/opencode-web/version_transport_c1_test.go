@@ -76,7 +76,7 @@ func TestVerified118Only(t *testing.T) {
 	if c, err := unknown.clientFor(context.Background()); err == nil || !strings.Contains(err.Error(), "not usable") {
 		t.Fatalf("unknown shape must fail closed as probe-unusable, got client=%v err=%v", c, err)
 	}
-	if _, err := unknown.clientFor(context.Background()); err != nil && strings.Contains(err.Error(), "unsupported/unverified generation") {
+	if _, err := unknown.clientFor(context.Background()); err != nil && strings.Contains(err.Error(), "unsupported-generation (quarantined)") {
 		t.Fatalf("unknown shape is NOT the v2 quarantine verdict, got %v", err)
 	}
 	okU, detailU := unknown.InstanceStatus()
@@ -103,13 +103,13 @@ func TestV2FailClosedQuarantine(t *testing.T) {
 	}
 
 	// Fail closed at the single gate and at every surface.
-	if c, err := agent.clientFor(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported/unverified generation") {
+	if c, err := agent.clientFor(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported-generation (quarantined)") {
 		t.Fatalf("clientFor must quarantine v2, got client=%v err=%v", c, err)
 	}
-	if _, err := agent.ListSessions(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported/unverified generation") {
+	if _, err := agent.ListSessions(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported-generation (quarantined)") {
 		t.Fatalf("ListSessions must fail closed, got %v", err)
 	}
-	if _, err := agent.StartSession(context.Background(), "ses_x"); err == nil || !strings.Contains(err.Error(), "unsupported/unverified generation") {
+	if _, err := agent.StartSession(context.Background(), "ses_x"); err == nil || !strings.Contains(err.Error(), "unsupported-generation (quarantined)") {
 		t.Fatalf("StartSession must fail closed, got %v", err)
 	}
 	if models := agent.AvailableModels(context.Background()); len(models) != 0 {
@@ -135,7 +135,7 @@ func TestGenerationV2QuarantineZeroPromptAndZeroKernelIngest(t *testing.T) {
 	})
 
 	sess, err := agent.StartSession(context.Background(), "ses_x")
-	if err == nil || !strings.Contains(err.Error(), "unsupported/unverified generation") {
+	if err == nil || !strings.Contains(err.Error(), "unsupported-generation (quarantined)") {
 		t.Fatalf("StartSession must fail closed on v2, got sess=%v err=%v", sess, err)
 	}
 	if sess != nil {

@@ -191,10 +191,10 @@ func TestPermissionFoldV2QuarantinedZeroReplies(t *testing.T) {
 	// v2 reply route.
 	f := &permissionFake{gen: generationV2, accept: map[string]bool{"once": true, "reject": true}}
 	agent := newPermissionAgent(t, f)
-	if c, err := agent.clientFor(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported/unverified generation") {
+	if c, err := agent.clientFor(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported-generation (quarantined)") {
 		t.Fatalf("v2 must fail closed at clientFor, got client=%v err=%v", c, err)
 	}
-	if err := agent.RespondSessionPermission(context.Background(), "ses_1", "pr_1", core.PermissionResult{Behavior: "allow"}); err == nil || !strings.Contains(err.Error(), "unsupported/unverified generation") {
+	if err := agent.RespondSessionPermission(context.Background(), "ses_1", "pr_1", core.PermissionResult{Behavior: "allow"}); err == nil || !strings.Contains(err.Error(), "unsupported-generation (quarantined)") {
 		t.Fatalf("v2 permission reply must fail closed, got err=%v", err)
 	}
 	if rec := f.recorded(); len(rec) != 0 {

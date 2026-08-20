@@ -364,7 +364,7 @@ func (a *Agent) clientFor(ctx context.Context) (*Client, error) {
 		return nil, fmt.Errorf("opencode-web endpoint not usable: %s", detail)
 	}
 	if res.gen != generation118 {
-		return nil, fmt.Errorf("opencode-web: unsupported/unverified generation %q at %s — quarantined; the only verified product generation is OpenCode 1.18.18 (no prompt, no SSE ingest, no Kernel writes, no capability)", res.gen, a.baseURL)
+		return nil, fmt.Errorf("opencode-web: %s", unsupportedGenerationDetail(res.gen, res.detail))
 	}
 	c := newClient(a.baseURL, a.user, a.pass)
 	c.setGeneration(res.gen)

@@ -483,7 +483,7 @@ func TestIsSessionActiveV2QuarantineStaysConservative(t *testing.T) {
 		"opencode_web_pass": "pw",
 	})
 	agent := a.(*Agent)
-	if _, err := agent.clientFor(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported/unverified generation") {
+	if _, err := agent.clientFor(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported-generation (quarantined)") {
 		t.Fatalf("v2 must fail closed at clientFor, got err=%v", err)
 	}
 	if !agent.IsSessionActive(context.Background(), "ses_idle") {

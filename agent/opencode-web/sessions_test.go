@@ -203,10 +203,10 @@ func TestListSessionsV2EnvelopeQuarantined(t *testing.T) {
 	agent := a.(*Agent)
 	// Shape arbiter: /session missing (404) + /api/session envelope → probe
 	// detects v2, then clientFor quarantines it.
-	if _, err := agent.clientFor(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported/unverified generation") {
+	if _, err := agent.clientFor(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported-generation (quarantined)") {
 		t.Fatalf("v2 must fail closed at clientFor, got err=%v", err)
 	}
-	if _, err := agent.ListSessions(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported/unverified generation") {
+	if _, err := agent.ListSessions(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported-generation (quarantined)") {
 		t.Fatalf("ListSessions on v2 must fail closed, got err=%v", err)
 	}
 	if posts := countRequests(s, "POST", ""); len(posts) != 0 {
@@ -493,10 +493,10 @@ func TestProjectsNotSupportedOnV2(t *testing.T) {
 		"opencode_web_pass": "pw",
 	})
 	agent := a.(*Agent)
-	if _, err := agent.clientFor(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported/unverified generation") {
+	if _, err := agent.clientFor(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported-generation (quarantined)") {
 		t.Fatalf("v2 must fail closed at clientFor, got err=%v", err)
 	}
-	if _, err := agent.ListProjectSuggestions(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported/unverified generation") {
+	if _, err := agent.ListProjectSuggestions(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported-generation (quarantined)") {
 		t.Fatalf("v2 endpoint must surface the quarantine error, got %v", err)
 	}
 }

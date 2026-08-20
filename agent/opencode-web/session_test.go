@@ -328,10 +328,10 @@ func TestCancelTurnV2Interrupt(t *testing.T) {
 		"opencode_web_pass": "pw",
 	})
 	agent := a.(*Agent)
-	if c, err := agent.clientFor(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported/unverified generation") {
+	if c, err := agent.clientFor(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported-generation (quarantined)") {
 		t.Fatalf("v2 must fail closed at clientFor (quarantined), got client=%v err=%v", c, err)
 	}
-	if _, err := agent.StartSession(context.Background(), "ses_x"); err == nil || !strings.Contains(err.Error(), "unsupported/unverified generation") {
+	if _, err := agent.StartSession(context.Background(), "ses_x"); err == nil || !strings.Contains(err.Error(), "unsupported-generation (quarantined)") {
 		t.Fatalf("StartSession on v2 must fail closed, got err=%v", err)
 	}
 	// Zero writes: no prompt, no abort/interrupt, no model switch reached the
