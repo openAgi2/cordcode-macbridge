@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-20T23:45:00Z",
+  "updated_at": "2026-08-20T16:08:13Z",
   "todos": [
     {
       "id": "gate-a-inventory-impl",
@@ -757,28 +757,236 @@
       "id": "c2-list-get-regression",
       "title": "C2 list/get sandbox reopen cycle",
       "description": "Isolated sandbox create/list/archive/get-by-id matches official server state.",
-      "status": "done",
+      "status": "blocked",
       "phase": "c2",
       "kind": "regression",
       "depends_on": [
         "c2-list-get-tests"
       ],
       "source": "Gate C2",
-      "notes": "",
+      "notes": "audit-003 downgrade: WP checker evidence owner is rawPayloads rather than http[].response, and the generation-118 project decoder is not yet proven fail-closed. Product repair is deferred until directive-006 evidence and owner canonical shape sync complete; review-fix-for:c2-list-get-regression.",
       "verification": {
         "required": true,
-        "status": "present",
+        "status": "failed",
         "method": "regression",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "Regression: wp checker ok (entries=3 distinctNonGlobal=2 deletedStillRegistered=true) + self-test PASS; check_samples --require-all 10/10 captured + self-test PASS (A10 replay incl. archived-by-ID + roots/limit semantics); go-bridge focused (OpenCodeWeb|ListSessions|SessionCatalog|Projection) ok 4.689s; ./core/ ok; vet clean; go build ./... OK. Release built from ef21db1, installed /Applications/CordCodeLink.app, runtime commit ef21db183148 listens 8777; owner 4096 (PID 71333) untouched; no temp-app residue. 4398/4399 recycled after capture.",
+        "summary": "Supervisor audit-003 is partial: prior WP success is not independent proof because the checker derives project claims from rawPayloads rather than archived http[].response. C2 regression remains blocked until WP-FIX and the strict decoder review-fix triplet complete.",
         "artifacts": [
           "cmd:python3 check_workspace_project.py [--self-test] => ok / PASS",
           "cmd:python3 check_samples.py --require-all => 10 captured",
           "cmd:go test ./go-bridge/ -run OpenCodeWeb|ListSessions|SessionCatalog|Projection => ok 4.689s",
-          "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED; runtime ef21db183148 @ /Applications/CordCodeLink.app:8777"
+          "cmd:./scripts/build-unsigned-release.sh => BUILD SUCCEEDED; runtime ef21db183148 @ /Applications/CordCodeLink.app:8777",
+          "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-003-c2-official-list-get.md"
         ],
-        "checked_at": "2026-08-20T23:45:00Z"
+        "checked_at": "2026-08-20T16:08:13Z"
+      }
+    },
+    {
+      "id": "stage0-evidence-pack-impl",
+      "title": "Directive-006 WP-FIX and E1-E7 real evidence capture",
+      "description": "Evidence-only: use isolated OpenCode 1.18.18/2cba7e227d to capture WP-FIX, selected variant, reasoning, external turn, providers, configured default model, rename, and delete as raw+sanitized HTTP/SSE/reload. Record physical observations only; do not decide mappings or modify product code.",
+      "status": "pending",
+      "phase": "stage0-evidence",
+      "kind": "impl",
+      "depends_on": [
+        "c1-version-transport-regression"
+      ],
+      "source": "Canonical §4.1/§6; supervisor directive-006",
+      "notes": "This is capture/harness implementation, not a product translator. BLOCKED is valid per row; guessed/fake evidence is forbidden.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "stage0-evidence-pack-tests",
+      "title": "Directive-006 independent evidence checkers",
+      "description": "Each WP-FIX/E1-E7 conclusion must be derived from raw transport fields and protected by destructive self-tests; summaries/meta/product fixtures are not evidence owners.",
+      "status": "pending",
+      "phase": "stage0-evidence",
+      "kind": "tests",
+      "depends_on": [
+        "stage0-evidence-pack-impl"
+      ],
+      "source": "Canonical §4.1/§6; supervisor directive-006",
+      "notes": "Run canonical design, A1-A10, WP-FIX, and E1-E7 checker/self-test gates with explicit timeouts.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "stage0-evidence-pack-regression",
+      "title": "Directive-006 evidence provenance and isolation regression",
+      "description": "Prove samples originate from the isolated same-version serve, sanitized evidence is leak-free, 4398/4399 are reclaimed, owner 4096 is unchanged, and no product/protocol/capability/iOS file changed.",
+      "status": "pending",
+      "phase": "stage0-evidence",
+      "kind": "regression",
+      "depends_on": [
+        "stage0-evidence-pack-tests"
+      ],
+      "source": "Canonical §4.1/§6; supervisor directive-006",
+      "notes": "Developer agent stops after this evidence report. It must not continue into canonical mapping or product work.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "canonical-post-evidence-shape-sync-impl",
+      "title": "Design-owner canonical shape and mapping sync",
+      "description": "DESIGN OWNER ONLY: inspect returned WP-FIX/E1-E7 raw evidence and update each §6 dossier with exact observed shapes, explicit bridge/SSV2 mapping, errors, tests, and blocked/unsupported decisions. No product code.",
+      "status": "blocked",
+      "phase": "canonical-shape-sync",
+      "kind": "impl",
+      "depends_on": [
+        "stage0-evidence-pack-regression"
+      ],
+      "source": "Canonical §0/§4.1/§6",
+      "notes": "External role gate: the evidence/developer agent is forbidden to perform this judgment. Unblock only when the design owner receives and audits the evidence report.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "canonical-post-evidence-shape-sync-tests",
+      "title": "Canonical dossier/sample consistency checks",
+      "description": "Extend and run the canonical design checker so every resolved E-row cites the archived sample and no UNKNOWN/PENDING state is removed without proof.",
+      "status": "pending",
+      "phase": "canonical-shape-sync",
+      "kind": "tests",
+      "depends_on": [
+        "canonical-post-evidence-shape-sync-impl"
+      ],
+      "source": "Canonical §0/§4.1/§6",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "canonical-post-evidence-shape-sync-regression",
+      "title": "Independent canonical execution-readiness audit",
+      "description": "Confirm the canonical document alone contains source, sample, shape, mapping, SSV2 owner, errors, tests, and exclusions for every dossier before product authorization is restored.",
+      "status": "pending",
+      "phase": "canonical-shape-sync",
+      "kind": "regression",
+      "depends_on": [
+        "canonical-post-evidence-shape-sync-tests"
+      ],
+      "source": "Canonical §0/§4.1/§6",
+      "notes": "A new concentrated product directive may be issued only after this todo is proven.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "c2-list-get-review-fix-impl",
+      "title": "C2 strict project decoder review fix",
+      "description": "review-fix-for:c2-list-get-regression. After WP-FIX and canonical owner mapping, make the generation-118 project decoder accept only the proven top-level shape and fail malformed required rows without silent trimming/fallback.",
+      "status": "pending",
+      "phase": "c2-review-fix",
+      "kind": "impl",
+      "depends_on": [
+        "canonical-post-evidence-shape-sync-regression"
+      ],
+      "source": "Canonical §6.2; audit-003",
+      "notes": "Product work remains unauthorized until a new supervisor directive.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "c2-list-get-review-fix-tests",
+      "title": "C2 strict project decoder negative tests",
+      "description": "review-fix-for:c2-list-get-regression. Replay corrected WP raw response and reject envelopes, null/scalar top levels, non-object rows, and missing/wrong/empty required id/worktree fields.",
+      "status": "pending",
+      "phase": "c2-review-fix",
+      "kind": "tests",
+      "depends_on": [
+        "c2-list-get-review-fix-impl"
+      ],
+      "source": "Canonical §6.2; audit-003",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "c2-list-get-review-fix-regression",
+      "title": "C2 WP evidence-to-decoder regression",
+      "description": "review-fix-for:c2-list-get-regression. Prove the corrected raw sample, checker, strict decoder, project aggregation, and zero-writer behavior agree end to end; then resolve the original blocked regression.",
+      "status": "pending",
+      "phase": "c2-review-fix",
+      "kind": "regression",
+      "depends_on": [
+        "c2-list-get-review-fix-tests"
+      ],
+      "source": "Canonical §6.2; audit-003",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
       }
     },
     {
@@ -789,10 +997,11 @@
       "phase": "c3",
       "kind": "impl",
       "depends_on": [
-        "c2-list-get-regression"
+        "c2-list-get-review-fix-regression",
+        "canonical-post-evidence-shape-sync-regression"
       ],
       "source": "Gate C3",
-      "notes": "",
+      "notes": "Product implementation remains frozen by directive-006; a new concentrated directive is required after evidence and canonical owner sync.",
       "verification": {
         "required": true,
         "status": "missing",
