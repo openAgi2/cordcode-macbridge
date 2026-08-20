@@ -1286,35 +1286,6 @@ func (h *Handlers) streamBackendRichHistoryProjectionEvents(
 	if err != nil {
 		return err
 	}
-	// First-prompt persistence race (opencode-web): the lazy server session is
-	// created inside Send, so the first projection pull can resolve the real
-	// id and reach this fetch before prompt_async's user row is durable — zero
-	// entries would commit an empty idle baseline and iOS flips completed for
-	// ~1s until the live echo arrives (real device 2026-08-20). A bridge-live
-	// session with zero messages is that window, not an honest empty session
-	// (opencode-web real ids only exist because this bridge sent a prompt):
-	// re-poll briefly before letting an empty baseline through. Dead sessions
-	// and other backends keep the single-fetch behavior.
-	if agentName == "opencode-web" && len(entries) == 0 && ctx.Err() == nil {
-		if _, live := h.getSession(sessionID); live {
-			for attempt := 0; attempt < 6 && ctx.Err() == nil; attempt++ {
-				select {
-				case <-time.After(200 * time.Millisecond):
-				case <-ctx.Done():
-				}
-				if ctx.Err() != nil {
-					break
-				}
-				entries, err = provider.GetRichSessionHistory(ctx, sessionID, 0)
-				if err != nil {
-					return err
-				}
-				if len(entries) > 0 {
-					break
-				}
-			}
-		}
-	}
 	// Seal trailing unanswered user turns only when the backend confirms the
 	// session is idle (no turn in flight). Backends without activity probing
 	// keep the previous behavior — the commit gate waits rather than guessing.
@@ -1362,7 +1333,7 @@ func streamRichHistoryProjectionEntries(
 			delete(unanswered, currentTurnID)
 		}
 		emitted := 0
-		for _, ev := range openCodeRichHistoryEntryToProjectionEvents(entry, &currentTurnID) {
+		for _, ev := range openCodeRichHistoryEntryToProjectionEvents(entry, &currentTurnID, sealTrailingUnanswered) {
 			emitted++
 			if !emit(ev) {
 				return ctx.Err()
@@ -1399,6 +1370,7 @@ func streamRichHistoryProjectionEntries(
 func openCodeRichHistoryEntryToProjectionEvents(
 	entry core.RichHistoryEntry,
 	currentTurnID *string,
+	completeAssistantSnapshots bool,
 ) []projectionHydrateEvent {
 	role := strings.ToLower(strings.TrimSpace(entry.Role))
 	identity := strings.TrimSpace(entry.ID)
@@ -1530,12 +1502,19 @@ func openCodeRichHistoryEntryToProjectionEvents(
 		if hasPendingUserInput {
 			return out
 		}
-		// Other rich history rows are complete snapshots; seal the turn.
-		out = append(out, projectionHydrateEvent{
-			Event:    "turn_completed",
-			Data:     map[string]interface{}{"turnId": turnID, "done": true, "reason": "rich_history"},
-			TurnDone: true,
-		})
+		// Dead/idle sessions treat every assistant row as a complete snapshot.
+		// Live sessions still seal assistant rows that produced content (prior
+		// finished turns), but an empty in-flight assistant shell is not a
+		// completion — emitting turn_completed here commits execution.phase=
+		// idle over a turn the bridge is still running (real device 2026-08-20:
+		// 1 user row + empty assistant → {"phase":"idle"} snapshot mid-turn).
+		if completeAssistantSnapshots || emittedContent {
+			out = append(out, projectionHydrateEvent{
+				Event:    "turn_completed",
+				Data:     map[string]interface{}{"turnId": turnID, "done": true, "reason": "rich_history"},
+				TurnDone: true,
+			})
+		}
 		return out
 	case "system":
 		text := strings.TrimSpace(entry.Content)

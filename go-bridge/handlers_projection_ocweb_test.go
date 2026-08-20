@@ -214,6 +214,13 @@ func TestOpenCodeWebLiveSessionColdPullSkipsSealAndCommitsRunningPartial(t *test
 	if conn.err != nil {
 		t.Fatalf("live mid-turn cold pull must commit a running partial, got error: %+v", conn.err)
 	}
+	proj := projectionFromCapture(t, conn)
+	if proj.Execution.Phase != "running" {
+		t.Fatalf("execution phase = %q, want running (SSV2 completion is projection phase)", proj.Execution.Phase)
+	}
+	if proj.Execution.ActiveTurnID == "" {
+		t.Fatalf("running partial must arm activeTurnId: %+v", proj.Execution)
+	}
 	raw, _ := json.Marshal(conn.data)
 	if strings.Contains(string(raw), `"status":"error"`) {
 		t.Fatalf("registry-live session must not seal the just-sent turn as terminal: %s", string(raw))
@@ -235,12 +242,77 @@ func TestOpenCodeWebLiveSessionColdPullWithBusyProbeCommitsRunningPartial(t *tes
 	if conn.err != nil {
 		t.Fatalf("live mid-turn cold pull must commit a running partial, got error: %+v", conn.err)
 	}
+	proj := projectionFromCapture(t, conn)
+	if proj.Execution.Phase != "running" {
+		t.Fatalf("execution phase = %q, want running", proj.Execution.Phase)
+	}
 	raw, _ := json.Marshal(conn.data)
 	if strings.Contains(string(raw), `"status":"error"`) {
 		t.Fatalf("busy session must not seal the in-flight turn as terminal: %s", string(raw))
 	}
 	if st := h.projectionKernel.Status("opencode-web", "ocw-live-1"); st.Phase != ProjectionHydrateReady {
 		t.Fatalf("kernel phase = %q, want ready (running partial commit)", st.Phase)
+	}
+}
+
+func projectionFromCapture(t *testing.T, conn *readFileCaptureConn) SessionProjection {
+	t.Helper()
+	dataMap, ok := conn.data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("data not map: %T", conn.data)
+	}
+	proj, ok := dataMap["projection"].(SessionProjection)
+	if !ok {
+		t.Fatalf("expected committed projection, got %T %+v", dataMap["projection"], dataMap)
+	}
+	return proj
+}
+
+// Real-device 2026-08-20 shape: registry-live, busy-map miss, 1 user row plus
+// an empty in-flight assistant shell. Completing that shell is what produced
+// {"phase":"idle"} (executionBytes=16, headRev=2). The cold commit must stay
+// running — do not wait/re-poll history, do not seal.
+func TestOpenCodeWebLiveSessionColdPullEmptyAssistantCommitsRunning(t *testing.T) {
+	h := NewHandlers()
+	t.Cleanup(func() { h.Shutdown(context.Background()) })
+	prevTimeout := coldHydrateTimeout
+	coldHydrateTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { coldHydrateTimeout = prevTimeout })
+
+	sessionID := "ocw-live-empty-asst"
+	agent := &activityProbingFakeAgent{
+		fakeAgent: &fakeAgent{
+			name: "opencode-web",
+			richHistory: []core.RichHistoryEntry{
+				{ID: "u1", Role: "user", Content: "讲个猴哥语录100字左右"},
+				{ID: "a1", Role: "assistant", Content: ""},
+			},
+		},
+		active: false,
+	}
+	h.mu.Lock()
+	h.agents = map[string]core.Agent{"opencode-web": agent}
+	h.mu.Unlock()
+	h.putSessionWithMeta(sessionID, "opencode-web", "/tmp/proj",
+		&fakeAgentSession{id: sessionID, events: make(chan core.Event, 4)})
+
+	conn := &readFileCaptureConn{}
+	params, _ := json.Marshal(map[string]any{"sessionId": sessionID, "sinceRev": 0})
+	msg := WireMessage{RequestID: "r-ocw-empty-asst", BackendID: "opencode-web", Method: "get_session_projection", Params: params}
+	h.handleGetSessionProjection(conn, msg, agent)
+	if conn.err != nil {
+		t.Fatalf("live empty-assistant cold pull must commit, got error: %+v", conn.err)
+	}
+	proj := projectionFromCapture(t, conn)
+	if proj.Execution.Phase != "running" {
+		t.Fatalf("execution phase = %q, want running (empty assistant is in-flight, not idle)", proj.Execution.Phase)
+	}
+	if proj.Execution.ActiveTurnID != "u1" {
+		t.Fatalf("activeTurnId = %q, want u1", proj.Execution.ActiveTurnID)
+	}
+	raw, _ := json.Marshal(conn.data)
+	if strings.Contains(string(raw), `"status":"error"`) {
+		t.Fatalf("must not seal the in-flight turn: %s", string(raw))
 	}
 }
 
@@ -304,26 +376,19 @@ func TestOpenCodeWebSendRebindsPendingToRealBeforeFirstEvent(t *testing.T) {
 	}
 }
 
-// Real-device 2026-08-20 residual (empty-baseline commit): the first pull can
-// land after the real id resolves but before prompt_async's user row is
-// durable — a zero-entry fetch committed an empty idle baseline and iOS
-// flipped completed until the live echo arrived. A bridge-live session must
-// re-poll instead of committing empty.
-func TestOpenCodeWebLiveEmptyColdSourceRepollsForFirstPromptPersist(t *testing.T) {
+// SSV2 rules 4/6: a live session with 0 history rows must not wait or guess
+// from count. One fetch, then commit the honest empty source. In-flight
+// execution is preserved by the kernel merge when live already armed running.
+func TestOpenCodeWebLiveEmptyColdSourceDoesNotRepoll(t *testing.T) {
 	h := NewHandlers()
 	t.Cleanup(func() { h.Shutdown(context.Background()) })
 	sessionID := "ocw-live-empty"
 	fetchCalls := &atomic.Int32{}
 	agent := &activityProbingFakeAgent{
 		fakeAgent: &fakeAgent{name: "opencode-web"},
-		active:    false, // busy-map race window on top of the persist race
-		richHistoryFn: func(call int32) []core.RichHistoryEntry {
-			if call == 1 {
-				return nil // prompt not yet persisted
-			}
-			return []core.RichHistoryEntry{
-				{ID: "u1", Role: "user", Content: "讲个猴哥语录100字左右"},
-			}
+		active:    false,
+		richHistoryFn: func(int32) []core.RichHistoryEntry {
+			return nil
 		},
 		fetchCalls: fetchCalls,
 	}
@@ -338,14 +403,13 @@ func TestOpenCodeWebLiveEmptyColdSourceRepollsForFirstPromptPersist(t *testing.T
 	msg := WireMessage{RequestID: "r-ocw-empty", BackendID: "opencode-web", Method: "get_session_projection", Params: params}
 	h.handleGetSessionProjection(conn, msg, agent)
 	if conn.err != nil {
-		t.Fatalf("live empty-then-persisted cold pull must commit, got error: %+v", conn.err)
+		t.Fatalf("live empty cold pull must commit, got error: %+v", conn.err)
 	}
-	raw, _ := json.Marshal(conn.data)
-	if !strings.Contains(string(raw), "讲个猴哥语录100字左右") {
-		t.Fatalf("re-poll must surface the persisted user message instead of an empty baseline: %s", string(raw))
+	if got := fetchCalls.Load(); got != 1 {
+		t.Fatalf("bridge-live empty session must fetch exactly once, got %d", got)
 	}
-	if got := fetchCalls.Load(); got < 2 {
-		t.Fatalf("bridge-live empty session must re-poll the cold source, fetch calls = %d", got)
+	if st := h.projectionKernel.Status("opencode-web", sessionID); st.Phase != ProjectionHydrateReady {
+		t.Fatalf("kernel phase = %q, want ready (honest empty commit, no history wait)", st.Phase)
 	}
 }
 

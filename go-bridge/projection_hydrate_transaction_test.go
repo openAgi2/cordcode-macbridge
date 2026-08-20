@@ -1061,3 +1061,68 @@ func TestColdHydrateNonLiveNonTerminalStillGates(t *testing.T) {
 		t.Fatal("non-live non-terminal turn became ready")
 	}
 }
+
+// Pathless opencode-web rebuild starts from an empty tx reducer. Live
+// user_message that landed before BeginHydrate is not in pendingLive, so a
+// cold idle baseline would Restore over running (real device 2026-08-20
+// pendingLive=0). Commit must keep the live in-flight execution.
+func TestCommitHydrateDoesNotRegressLiveRunningToIdle(t *testing.T) {
+	kernel := NewProjectionKernel(nil, nil)
+	const (
+		backendID = "opencode-web"
+		sessionID = "ses-live-run"
+		turnID    = "u1"
+	)
+	source := ProjectionSourceDescriptor{Identity: sessionID, Path: "", Cursor: 0}
+	first, err := kernel.BeginHydrateTransaction(backendID, sessionID, source, false, false, true)
+	if err != nil || !first.Leader {
+		t.Fatalf("first admission=%+v err=%v", first, err)
+	}
+	if !kernel.ApplyHydrateEvent(backendID, sessionID, "epoch", "user_message",
+		map[string]interface{}{"turnId": turnID, "itemId": turnID, "text": "讲个猴哥语录100字左右"}) {
+		t.Fatal("seed user_message not applied")
+	}
+	kernel.MarkHydrateSourceIngestComplete(backendID, sessionID)
+	if err := kernel.WaitHydrateCommitReady(context.Background(), backendID, sessionID); err != nil {
+		t.Fatalf("seed commit not ready: %v", err)
+	}
+	seed, err := kernel.CommitHydrateTransaction(backendID, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seed.Projection.Execution.Phase != "running" {
+		t.Fatalf("seed phase=%q, want running", seed.Projection.Execution.Phase)
+	}
+
+	rebuild, err := kernel.BeginHydrateTransaction(backendID, sessionID, source, false, true, true)
+	if err != nil || !rebuild.Leader || rebuild.AlreadyReady {
+		t.Fatalf("pathless rebuild admission=%+v err=%v", rebuild, err)
+	}
+	// Cold source idle: user + turn_completed (empty assistant shell) and
+	// pendingLive=0 — the captured first-turn snapshot shape.
+	if !kernel.ApplyHydrateEvent(backendID, sessionID, "epoch", "user_message",
+		map[string]interface{}{"turnId": turnID, "itemId": turnID, "text": "讲个猴哥语录100字左右"}) {
+		t.Fatal("cold user_message not applied")
+	}
+	if !kernel.ApplyHydrateEvent(backendID, sessionID, "epoch", "turn_completed",
+		map[string]interface{}{"turnId": turnID, "done": true, "reason": "rich_history"}) {
+		t.Fatal("cold turn_completed not applied")
+	}
+	kernel.MarkHydrateSourceIngestComplete(backendID, sessionID)
+	if err := kernel.WaitHydrateCommitReady(context.Background(), backendID, sessionID); err != nil {
+		t.Fatalf("rebuild not ready: %v", err)
+	}
+	commit, err := kernel.CommitHydrateTransaction(backendID, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commit.PendingLive != 0 {
+		t.Fatalf("pendingLive=%d, want 0", commit.PendingLive)
+	}
+	if commit.Projection.Execution.Phase != "running" {
+		t.Fatalf("hydrate must not Restore idle over live running, phase=%q", commit.Projection.Execution.Phase)
+	}
+	if commit.Projection.Execution.ActiveTurnID != turnID {
+		t.Fatalf("activeTurnId=%q, want %s", commit.Projection.Execution.ActiveTurnID, turnID)
+	}
+}

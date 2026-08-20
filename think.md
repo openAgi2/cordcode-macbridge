@@ -1,5 +1,19 @@
 # Claude Code 冷启动既有 session 首轮流式从头重播：跨仓排查结论
 
+## 2026-08-20：opencode-web 新会话首回合完成态闪烁
+
+### 现象
+iPhone 新开 OpenCode Web 会话发第一条，输入框立刻（&lt;0.5s）变完成态，等到第一条 `text_delta` 才回到执行中。第二条和 dsh-web 首条不闪。
+
+### 根因
+冷 `get_session_projection sinceRev=0` 提交 `execution.phase=idle`（`executionBytes=16`）。活会话未收口 user turn + 空 assistant 壳被当成完整快照 `turn_completed`；pathless hydrate 从空 reducer 起，`CommitHydrateTransaction` Restore 冷 idle 盖掉已经 live 的 running（`pendingLive=0`）。R2 的「registry-live 且历史 0 条就 200ms×6 再拉」打不中这条（真机是 1 条用户消息），且违反 SSV2 第 4/6 条。
+
+### 修复（只动 Mac Kernel）
+拆掉 0 条重拉。live 空 assistant 不再 `turn_completed`。`CommitHydrateTransaction` 禁止 running/requires_action → idle。pending→real 早 rebind 保留。不要在 iOS 用 localSend 否决投影 idle。
+
+### 真机验收（2026-08-20）
+owner：新建 session，输入发送后输入框一直执行中，可正常流式，输出完变为完成态。符合预期。
+
 ## 2026-08-17：Claude / Grok / OpenCode 点 ⭕ 没数据
 
 ### 现象

@@ -1545,6 +1545,49 @@ func TestRichHistoryTrailingUnansweredUserTurnNotSealedWhenLive(t *testing.T) {
 	}
 }
 
+// Live in-flight assistant shells have no content yet. Treating that row as a
+// complete snapshot emits turn_completed and commits execution.phase=idle
+// (real device 2026-08-20: headRev=2, executionBytes=16, one user part).
+func TestRichHistoryEmptyAssistantNotCompletedWhenLive(t *testing.T) {
+	entries := []core.RichHistoryEntry{
+		{ID: "msg_u1", Role: "user", Content: "讲个猴哥语录100字左右"},
+		{ID: "msg_a1", Role: "assistant", Content: ""},
+	}
+	events, projection := collectRichHistoryEvents(t, entries, false)
+	for _, event := range events {
+		if event.Event == "turn_completed" || event.Event == "turn_error" {
+			t.Fatalf("live empty assistant must not be sealed: %+v", events)
+		}
+	}
+	if projection.Execution.Phase != "running" {
+		t.Fatalf("execution phase = %q, want running", projection.Execution.Phase)
+	}
+	if projection.Execution.ActiveTurnID != "msg_u1" {
+		t.Fatalf("activeTurnId = %q, want msg_u1", projection.Execution.ActiveTurnID)
+	}
+}
+
+// Dead sessions keep the complete-snapshot seal on an empty assistant row.
+func TestRichHistoryEmptyAssistantCompletedWhenIdle(t *testing.T) {
+	entries := []core.RichHistoryEntry{
+		{ID: "msg_u1", Role: "user", Content: "讲个猴哥语录100字左右"},
+		{ID: "msg_a1", Role: "assistant", Content: ""},
+	}
+	events, projection := collectRichHistoryEvents(t, entries, true)
+	found := false
+	for _, event := range events {
+		if event.Event == "turn_completed" && event.Data["turnId"] == "msg_u1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("dead empty assistant must still complete: %+v", events)
+	}
+	if projection.Execution.Phase != "idle" {
+		t.Fatalf("execution phase = %q, want idle after complete snapshot", projection.Execution.Phase)
+	}
+}
+
 // Turns that DID get an assistant reply are sealed by turn_completed; no
 // synthetic turn_error may appear.
 func TestRichHistoryAnsweredTurnsNotErrorSealed(t *testing.T) {
@@ -1700,7 +1743,7 @@ func TestStreamClaudeTranscriptProjectionEventsCompactionBoundaryFiltersInternal
 func TestOpenCodeRichHistoryEntryToProjectionEvents(t *testing.T) {
 	current := ""
 	user := core.RichHistoryEntry{ID: "u-oc-1", Role: "user", Content: "hello opencode"}
-	evs := openCodeRichHistoryEntryToProjectionEvents(user, &current)
+	evs := openCodeRichHistoryEntryToProjectionEvents(user, &current, true)
 	if len(evs) != 1 || evs[0].Event != "user_message" || evs[0].Data["turnId"] != "u-oc-1" {
 		t.Fatalf("user → %+v", evs)
 	}
@@ -1721,7 +1764,7 @@ func TestOpenCodeRichHistoryEntryToProjectionEvents(t *testing.T) {
 			}},
 		},
 	}
-	evs = openCodeRichHistoryEntryToProjectionEvents(asst, &current)
+	evs = openCodeRichHistoryEntryToProjectionEvents(asst, &current, true)
 	if len(evs) < 4 {
 		t.Fatalf("assistant → %d events: %+v", len(evs), evs)
 	}
@@ -1745,7 +1788,7 @@ func TestRichHistorySystemEntryToProjectionEvent(t *testing.T) {
 		Content:   "已压缩对话 · 节省 160.7k tokens",
 		Timestamp: time.Date(2026, 7, 29, 8, 17, 51, 0, time.UTC),
 	}
-	events := openCodeRichHistoryEntryToProjectionEvents(entry, &current)
+	events := openCodeRichHistoryEntryToProjectionEvents(entry, &current, true)
 	if len(events) != 1 || events[0].Event != "system_message" {
 		t.Fatalf("system rich history events = %+v", events)
 	}
