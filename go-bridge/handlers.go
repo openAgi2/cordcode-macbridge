@@ -1388,33 +1388,7 @@ func (h *Handlers) handleListModels(conn Connection, msg WireMessage, agent core
 	ccModels := ms.AvailableModels(context.Background())
 	currentModel := ms.GetModel()
 
-	var models []map[string]interface{}
-	for _, m := range ccModels {
-		id, provider, providerID := modelProviderForAgent(agent, m.Name)
-		name := m.Desc
-		if name == "" {
-			name = id
-		}
-		item := map[string]interface{}{
-			"id":                        m.Name,
-			"name":                      name,
-			"provider":                  provider,
-			"providerId":                providerID,
-			"reasoning":                 false,
-			"limit":                     nil,
-			"supportedReasoningEfforts": nil,
-			"defaultReasoningEffort":    nil,
-			"isDefault":                 m.Name == currentModel,
-		}
-		// Canonical additive revision (§6.11.1): live model-specific variant
-		// keys ride the model item; absent/empty means no variant selector.
-		if len(m.Variants) > 0 {
-			variants := make([]string, len(m.Variants))
-			copy(variants, m.Variants)
-			item["variants"] = variants
-		}
-		models = append(models, item)
-	}
+	models := modelItemsForWire(agent, ccModels, currentModel)
 
 	// Per-model effort truth first (roadmap §5.2 / audit N3): a runtime that
 	// declares per-model efforts (dsh-web llm.models) fills each model's own
@@ -1456,6 +1430,39 @@ func (h *Handlers) handleListModels(conn Connection, msg WireMessage, agent core
 		"source":            "catalog",
 		"generatedAtMillis": time.Now().UnixMilli(),
 	}, nil)
+}
+
+// modelItemsForWire builds the list_models wire items from the runtime
+// catalog. Canonical additive revision (§6.11.1): a model declaring live
+// variant keys exposes exactly them; absent/empty means no selector (the
+// key is omitted entirely, never an empty array).
+func modelItemsForWire(agent core.Agent, ccModels []core.ModelOption, currentModel string) []map[string]interface{} {
+	var models []map[string]interface{}
+	for _, m := range ccModels {
+		id, provider, providerID := modelProviderForAgent(agent, m.Name)
+		name := m.Desc
+		if name == "" {
+			name = id
+		}
+		item := map[string]interface{}{
+			"id":                        m.Name,
+			"name":                      name,
+			"provider":                  provider,
+			"providerId":                providerID,
+			"reasoning":                 false,
+			"limit":                     nil,
+			"supportedReasoningEfforts": nil,
+			"defaultReasoningEffort":    nil,
+			"isDefault":                 m.Name == currentModel,
+		}
+		if len(m.Variants) > 0 {
+			variants := make([]string, len(m.Variants))
+			copy(variants, m.Variants)
+			item["variants"] = variants
+		}
+		models = append(models, item)
+	}
+	return models
 }
 
 func (h *Handlers) handleListProviders(conn Connection, msg WireMessage, agent core.Agent) {
