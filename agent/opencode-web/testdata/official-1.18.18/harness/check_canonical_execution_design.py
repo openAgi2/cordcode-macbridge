@@ -44,15 +44,17 @@ FIELDS = (
     "Out of scope",
 )
 
-PENDING = {
-    "E1": "6.4",
-    "E2": "6.3",
-    "E3": "6.5",
-    "E4": "6.6",
-    "E5": "6.6",
-    "E6": "6.10",
-    "E7": "6.10",
+EVIDENCE_STATES = {
+    "E1": ("6.4", "REQUEST-SAMPLE-VERIFIED"),
+    "E2": ("6.3", "BLOCKED/UNSUPPORTED"),
+    "E3": ("6.5", "SAMPLE-VERIFIED"),
+    "E4": ("6.6", "SHAPE-VERIFIED-LIMITED"),
+    "E5": ("6.6", "PARTIAL-SAMPLE"),
+    "E6": ("6.10", "SAMPLE-VERIFIED"),
+    "E7": ("6.10", "SAMPLE-VERIFIED-WITH-NEGATIVE-EVENT"),
 }
+
+CORRECTIONS = ("E1b", "E4b", "E5b")
 
 
 def sections(text: str) -> dict[str, str]:
@@ -89,13 +91,17 @@ def check(text: str) -> list[str]:
             if f"**{field}:**" not in body:
                 problems.append(f"{dossier_id}: missing field {field}")
 
-    for evidence_id, dossier_id in PENDING.items():
-        queue_pattern = rf"\| {evidence_id} \|[^\n]+`PENDING-SAMPLE`"
+    for evidence_id, (dossier_id, state) in EVIDENCE_STATES.items():
+        queue_pattern = rf"\| {evidence_id} \|[^\n]+`{re.escape(state)}`"
         if not re.search(queue_pattern, text):
-            problems.append(f"{evidence_id}: pending queue row missing")
+            problems.append(f"{evidence_id}: queue state {state} missing")
         body = found.get(dossier_id, "")
-        if evidence_id not in body or "PENDING-SAMPLE" not in body:
-            problems.append(f"{evidence_id}: missing pending gate in dossier {dossier_id}")
+        if evidence_id not in body:
+            problems.append(f"{evidence_id}: missing evidence reference in dossier {dossier_id}")
+
+    for correction_id in CORRECTIONS:
+        if not re.search(rf"\| {correction_id} \|[^\n]+", text):
+            problems.append(f"{correction_id}: final correction row missing")
 
     for sample_id in (f"A{i}" for i in range(1, 11)):
         if not re.search(rf"\b{sample_id}\b", text):
@@ -106,13 +112,13 @@ def check(text: str) -> list[str]:
         "Only then may an implementation directive authorize that translator",
         "HTTP 204 means admission only",
         "iOS `ProjectionStore` remains the only `messages[]` writer",
-        "one source adapter normalizes direct SSE",
+        "normalizes each direct event once",
         "do not synthesize IDs",
-        "UNKNOWN UNTIL E1",
-        "UNKNOWN UNTIL E2",
-        "UNKNOWN UNTIL E3",
-        "UNKNOWN UNTIL E4/E5/E1",
-        "UNKNOWN UNTIL E6/E7",
+        "one backend-instance global subscriber",
+        "unsupported content.reasoning for verified 1.18.18 shape",
+        "session.deleted` and never manufactures",
+        "core.PromptOptionsSender",
+        "UNKNOWN UNTIL E1b/E4b/E5b",
     )
     for phrase in required_phrases:
         if phrase not in text:
@@ -132,7 +138,12 @@ def self_test(text: str) -> list[str]:
         ),
         "restore-obsolete-sketch": text + "\n## 6. Gate C — implementation order\n",
         "drop-e1-queue-state": text.replace("| E1 | selected variant", "| EX | selected variant", 1),
-        "drop-e2-unknown": text.replace("UNKNOWN UNTIL E2", "assume reasoning", 1),
+        "drop-e2-unsupported": text.replace(
+            "unsupported content.reasoning for verified 1.18.18 shape",
+            "silently ignore reasoning",
+            1,
+        ),
+        "drop-e5b-correction": text.replace("| E5b |", "| EXb |", 1),
         "drop-single-writer": text.replace(
             "iOS `ProjectionStore` remains the only `messages[]` writer",
             "iOS may also apply history",
@@ -167,7 +178,7 @@ def main() -> int:
         print("self-test PASS")
         return 0
     print(
-        "canonical design ok: dossiers=11 pending-evidence=7 "
+        "canonical design ok: dossiers=11 evidence-decisions=7 final-corrections=3 "
         "single-authority=True productCodeFrozen=True"
     )
     return 0
