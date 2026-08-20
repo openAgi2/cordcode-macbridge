@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-20T16:40:00Z",
+  "updated_at": "2026-08-20T17:30:00Z",
   "todos": [
     {
       "id": "gate-a-inventory-impl",
@@ -81,9 +81,10 @@
         "summary": "python3 agent/opencode-web/testdata/official-1.18.18/harness/check_inventory.py → inventory ok: 10 P0 rows",
         "artifacts": [
           "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_inventory.py => inventory ok: 10 P0 rows",
-          "docs/2026-08-20-opencode-web-1.18.18-sample-inventory.md"
+          "docs/2026-08-20-opencode-web-1.18.18-sample-inventory.md",
+          "cmd:audit-reverify 2026-08-20: check_inventory.py => inventory ok: 10 P0 rows"
         ],
-        "checked_at": "2026-08-20T11:41:15Z"
+        "checked_at": "2026-08-20T17:30:00Z"
       }
     },
     {
@@ -162,9 +163,10 @@
         "artifacts": [
           "agent/opencode-web/testdata/official-1.18.18/evidence/harness-health.json",
           "cmd:python3 harness/health_check.py => health_check PASS connected=[localmock] allCount=1 mockHits=2",
-          "cmd:stop_sandbox.sh => 4398 free 4399 free 4096 pid 71333"
+          "cmd:stop_sandbox.sh => 4398 free 4399 free 4096 pid 71333",
+          "cmd:audit-reverify 2026-08-20: start_sandbox.sh + health_check.py => health_check PASS connected=[localmock] allCount=1 mockHits=2; stop_sandbox.sh clean"
         ],
-        "checked_at": "2026-08-20T11:54:59Z"
+        "checked_at": "2026-08-20T17:30:00Z"
       }
     },
     {
@@ -245,9 +247,10 @@
         "artifacts": [
           "agent/opencode-web/testdata/official-1.18.18/harness/check_samples.py",
           "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_samples.py --self-test => self-test PASS",
-          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_samples.py --require-all => captured A1-A10"
+          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_samples.py --require-all => captured A1-A10",
+          "cmd:audit-reverify 2026-08-20: check_samples.py --self-test => PASS; --require-all => A1-A10 captured"
         ],
-        "checked_at": "2026-08-20T12:55:00Z"
+        "checked_at": "2026-08-20T17:30:00Z"
       }
     },
     {
@@ -325,9 +328,10 @@
         "artifacts": [
           "agent/opencode-web/testdata/official-1.18.18/harness/check_gate_b_map.py",
           "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_b_map.py => gate-b map ok: 60 surfaces; exited=True",
-          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_b_map.py --self-test => self-test PASS"
+          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_b_map.py --self-test => self-test PASS",
+          "cmd:audit-reverify 2026-08-20: check_gate_b_map.py => 60 surfaces exited=True; --self-test => PASS"
         ],
-        "checked_at": "2026-08-20T14:10:00Z"
+        "checked_at": "2026-08-20T17:30:00Z"
       }
     },
     {
@@ -404,9 +408,10 @@
         "artifacts": [
           "agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s1_s2.py",
           "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s1_s2.py => gate-s s1/s2 ok: s1=4 s2=10 source-only-gates=7",
-          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s1_s2.py --self-test => self-test PASS"
+          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s1_s2.py --self-test => self-test PASS",
+          "cmd:audit-reverify 2026-08-20: check_gate_s_s1_s2.py => s1=4 s2=10 gates=7; --self-test => PASS"
         ],
-        "checked_at": "2026-08-20T14:55:00Z"
+        "checked_at": "2026-08-20T17:30:00Z"
       }
     },
     {
@@ -483,9 +488,10 @@
         "artifacts": [
           "agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s3.py",
           "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s3.py => gate-s s3 ok: slices=7 source-only-gates=7",
-          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s3.py --self-test => self-test PASS"
+          "cmd:python3 agent/opencode-web/testdata/official-1.18.18/harness/check_gate_s_s3.py --self-test => self-test PASS",
+          "cmd:audit-reverify 2026-08-20: check_gate_s_s3.py => slices=7 source-only-gates=7; --self-test => PASS"
         ],
-        "checked_at": "2026-08-20T16:40:00Z"
+        "checked_at": "2026-08-20T17:30:00Z"
       }
     },
     {
