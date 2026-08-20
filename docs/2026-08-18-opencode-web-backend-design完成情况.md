@@ -210,6 +210,21 @@ owner 指出理想路径是 dsh-web 式「读官方 web 源码→穷举 API→�
 
 **新暴露 backlog（先存、7 项，基线证实）**：SessionsViewModelServerSwitchTests ×4（initialize 重试未发生）、testSessionRefreshNotification_isCoalescedForCodex（1≠2）、testCodexSessionResumeWaits…（1≠0）、testAuthoritativeEmptyTodoFetchClearsStaleCacheAndDock（权威空拉取未清陈旧 todo 缓存）——均为产品语义漂移，需逐个判读意图后修，另立任务。
 
+## 四·补十一、新会话首回合残留双症状修复（owner 复测 2026-08-20 上午，Mac `58a1261`）
+
+**症状**（iOS 真机，opencode-web chat 目录新建会话发第 1 条消息）：输入框立即 executing→**立即 completed**→数秒后回复**整段一次性**到达（非流式）；第 2 条消息起完全正常；dsh-web（同为 web API+协议转换）首回合正常。§补九/补十的双端修复（`6fcad07`/`a0b623d`/iOS `79c1a12`）已让内容可渲染，本轮清的是残留时序病。
+
+**根因**（三处同根于首回合 pending→real 懒建会话窗口，双端勘察收敛）：
+1. **裸 idle 假终态**（agent `events.go emitResultOnce`）：`POST /session` 的创建广播（`session.updated/status idle`）在 user echo 之前穿过 SSE filter，`turnID==""` 落兜底分支发出健康 `EventResult`——假终态让 relay 退出（opencode-web 不跨回合存活），**首回合 live feed 断供**（第二回合 send 重启 relay 故正常）。
+2. **seal 竞态**（go-bridge `streamBackendRichHistoryProjectionEvents`）：iOS 首拉落在 prompt_async 已入队、serve busy-map 未登记的窗口，1.18 缺 key 判**确定性 idle**→刚发出的 user turn 被 seal 成 `turn_error{rich_history_unanswered}`→提前 commit 终态基线→iOS 输入框翻完成。
+3. **sourceIsLive 缺失**（go-bridge `ensureProjectionHydrated`）：opencode-web 不在 §3.1 live 信号采样名单（只有 claude/claudecode/codex），首拉必然 mid-turn 的提交闸门只能等 cold-armed 在飞 turn 的终态——期间所有 live 帧攒在 `pendingLive`，回合结束才一张 patch 放出整段回复。dsh-web 首回合正常 = real id 同步返回（首拉在发送前、空会话瞬时 commit），无此窗口。
+
+**修复**（Mac `58a1261`，三处）：① `emitResultOnce` 裸 idle（无 armed turn 且无 terminal error）不 emit、不置 `completed`；② seal 决策加桥 registry-live 覆盖（桥持有 live 的会话不得 seal；死会话冷开 seal 语义保留，2026-08-14 空 turn 修复不回归）；③ opencode-web 补 `sourceIsLive` 采样（registry liveness）→ 首拉 mid-turn 按 §3.1 提交诚实 running partial，流式照常。注：dsh-web 的 live-only admission 分支**不适用**于 opencode-web——`pathlessRichHistoryBackend` 含 opencode-web，live-only source 会走 empty-rebuild 分支清空基线，故选 sourceIsLive 路线。
+
+**回归**：`TestFreshSessionIdleBeforeUserEchoDoesNotEmitResult`（agent，含真回合收口恰好一次）；`TestOpenCodeWebLiveSessionColdPullSkipsSealAndCommitsRunningPartial`（busy-map 竞态+seal 覆盖）/ `…WithBusyProbeCommitsRunningPartial`（sourceIsLive 单独钉死）/ `…DeadSessionColdPullStillSealsUnansweredTurn`（死会话 seal 保留对照）。全仓 go test 绿（2069 项全过，含先存）。
+
+**装机**：Mac Release 已覆盖 `/Applications`（runtime `58a1261244d0`，11:04 构建，已重启在线）；iOS 侧本轮无改动（`79c1a12` 已在真机）。待 owner 复测同场景：预期输入框持续 executing + 流式回复 + 正常收口。
+
 
 
 
