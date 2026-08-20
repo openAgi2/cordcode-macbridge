@@ -1,0 +1,71 @@
+{
+  "meta": {
+    "opencodeVersionExpected": "1.18.18",
+    "base": "http://127.0.0.1:4398",
+    "directory": "/tmp/ocw-gate-a/workspace",
+    "managed4096PidBefore": "71333"
+  },
+  "health": {
+    "status": 200,
+    "body": {
+      "healthy": true,
+      "version": "1.18.18"
+    }
+  },
+  "providerStatus": 200,
+  "provider": {
+    "allCount": 1,
+    "allIdsSample": [
+      "localmock"
+    ],
+    "connected": [
+      "localmock"
+    ],
+    "localmockModels": [
+      "echo"
+    ],
+    "note": "all may include the full official registry; only connected is the isolation gate"
+  },
+  "isolatedCredentialFiles": [],
+  "create": {
+    "status": 200,
+    "idPresent": true
+  },
+  "prompt": {
+    "status": 204,
+    "response": null,
+    "messageID": "msg0000000XWjAsCj6qd990b1e94f"
+  },
+  "mock": {
+    "hitChatCompletions": true,
+    "newRequestCount": 2,
+    "newRequests": [
+      {
+        "ts": 1787226837.106625,
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "host": "127.0.0.1:4399",
+        "scenario": "title",
+        "model": "echo",
+        "userChars": 73
+      },
+      {
+        "ts": 1787226837.888545,
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "host": "127.0.0.1:4399",
+        "scenario": "text",
+        "model": "echo",
+        "userChars": 32
+      }
+    ]
+  },
+  "managed4096": {
+    "pidBefore": "71333",
+    "pidAfter": "71333",
+    "listen": "COMMAND     PID    USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME\nopencode. 71333 jacklee   10u  IPv4 0xbb6ef98709f32e9e      0t0  TCP 127.0.0.1:4096 (LISTEN)",
+    "writesFromThisScript": false,
+    "note": "health_check never opens 4096; pid must remain the owner managed listener"
+  },
+  "ok": true
+}

@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-20T11:47:05Z",
+  "updated_at": "2026-08-20T11:54:59Z",
   "todos": [
     {
       "id": "gate-a-inventory-impl",
@@ -115,7 +115,7 @@
       "id": "gate-a-harness-impl",
       "title": "Isolated 1.18.18 serve + local mock provider harness",
       "description": "Create harness under agent/opencode-web/testdata/official-1.18.18/harness: isolated HOME/XDG, opencode.json with only localmock openai-compatible provider, mock HTTP server, start/stop scripts. Never write to owner managed serve on :4096.",
-      "status": "in_progress",
+      "status": "done",
       "phase": "gate-a",
       "kind": "impl",
       "depends_on": [
@@ -125,20 +125,26 @@
       "notes": "connected-only isolation: /provider.all may contain full registry; connected must be [localmock]; prompt must hit 127.0.0.1:4399.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": "2026-08-20T11:47:05Z"
+        "summary": "Isolated HOME/XDG + localmock openai-compatible mock on 4399 and opencode 1.18.18 serve on 4398. connected-only isolation; prompt hits 4399; 4096 never written.",
+        "artifacts": [
+          "agent/opencode-web/testdata/official-1.18.18/harness/start_sandbox.sh",
+          "agent/opencode-web/testdata/official-1.18.18/harness/stop_sandbox.sh",
+          "agent/opencode-web/testdata/official-1.18.18/harness/mock_provider.py",
+          "agent/opencode-web/testdata/official-1.18.18/harness/health_check.py",
+          "agent/opencode-web/testdata/official-1.18.18/harness/opencode.json"
+        ],
+        "checked_at": "2026-08-20T11:54:59Z"
       }
     },
     {
       "id": "gate-a-harness-tests",
       "title": "Harness health: isolated serve + connected localmock",
       "description": "Start isolated serve, GET /global/health == 1.18.18, GET /provider.connected == [localmock] (all may include the full registry), localmock echo in connected catalog, prompt hits 127.0.0.1:4399 mock, no writes to 127.0.0.1:4096, start/stop recycles 4398/4399.",
-      "status": "pending",
+      "status": "done",
       "phase": "gate-a",
       "kind": "tests",
       "depends_on": [
@@ -148,20 +154,24 @@
       "notes": "",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "health_check.py PASS: /global/health 1.18.18; connected=[localmock]; echo in catalog; POST /v1/chat/completions on 127.0.0.1:4399 scenario=text; 4096 pid 71333 unchanged; start/stop recycled 4398/4399.",
+        "artifacts": [
+          "agent/opencode-web/testdata/official-1.18.18/evidence/harness-health.json",
+          "cmd:python3 harness/health_check.py => health_check PASS connected=[localmock] allCount=1 mockHits=2",
+          "cmd:stop_sandbox.sh => 4398 free 4399 free 4096 pid 71333"
+        ],
+        "checked_at": "2026-08-20T11:54:59Z"
       }
     },
     {
       "id": "gate-a-harness-regression",
       "title": "Harness isolation has no product UX surface",
       "description": "Harness is capture infrastructure.",
-      "status": "pending",
+      "status": "done",
       "phase": "gate-a",
       "kind": "regression",
       "depends_on": [
@@ -171,20 +181,22 @@
       "notes": "",
       "verification": {
         "required": false,
-        "status": "missing",
+        "status": "present",
         "method": "manual",
         "attestation": "self-attested",
         "na_reason": "internal capture infrastructure; isolation is covered by gate-a-harness-tests",
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Harness isolation is capture infrastructure; no product code changed.",
+        "artifacts": [
+          "agent/opencode-web/testdata/official-1.18.18/evidence/harness-health.json"
+        ],
+        "checked_at": "2026-08-20T11:54:59Z"
       }
     },
     {
       "id": "gate-a-capture-impl",
       "title": "Capture sanitized 1.18.18 samples for A1–A10",
       "description": "Using the isolated harness, capture official request/response/SSE sequences for A1–A10. Prefer A1, A2, A3, A4, A5, A6, A7, A8, A9, A10. Do not guess missing JSON. Record explicit blockers for unsafe/unreproducible rows.",
-      "status": "pending",
+      "status": "in_progress",
       "phase": "gate-a",
       "kind": "impl",
       "depends_on": [
@@ -192,7 +204,7 @@
         "gate-a-inventory-regression"
       ],
       "source": "Gate A",
-      "notes": "",
+      "notes": "A1 captured (create, prompt_async with messageID/agent/model/text, SSE direct+sync, idle, reload user/assistant SANDBOX_OK). A2 not started.",
       "verification": {
         "required": true,
         "status": "missing",
@@ -201,7 +213,7 @@
         "na_reason": null,
         "summary": "",
         "artifacts": [],
-        "checked_at": null
+        "checked_at": "2026-08-20T11:54:59Z"
       }
     },
     {
