@@ -34,7 +34,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-20T19:10:00Z",
+ "updated_at": "2026-08-20T19:30:00Z",
  "todos": [
   {
    "id": "gate-a-inventory-impl",
@@ -1494,7 +1494,7 @@
    "id": "concentrated-activation-impl",
    "title": "Concentrated capability and cross-repository activation",
    "description": "After all C2-C7 owning regressions pass, synchronize truthful WireDescriptor/backend capabilities and iOS availability for only the fully implemented paths; E2 reasoning and OD-3 remain absent.",
-   "status": "pending",
+   "status": "done",
    "phase": "concentrated-activation",
    "kind": "impl",
    "depends_on": [
@@ -1507,20 +1507,21 @@
    "notes": "Do not activate a capability early merely because its Go interface or isolated test exists.",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "Wave 4 activation: AttachmentSupporter declares image/file (official file-part mapping now real); interface-derived capabilities (todos/structured_user_input_v1/session_mutation/session_delete/permission_resolve) light up with implementations; external_turn_streaming retained with C4/E3 owning tests green; stale descriptor comment replaced with the final truth table. WireDescriptor StaticCapabilities unchanged (external_turn_streaming).",
+    "artifacts": [
+     "agent/opencode-web/wire_descriptor.go"
+    ]
    }
   },
   {
    "id": "concentrated-activation-tests",
    "title": "Cross-repository schema, capability, and writer-seal tests",
    "description": "Prove Mac canonical protocol and iOS mirror round-trip, agent/variant are not dropped, capabilities are absent before owning completion and exact after it, and single-writer/single-ingest invariants remain sealed.",
-   "status": "pending",
+   "status": "done",
    "phase": "concentrated-activation",
    "kind": "tests",
    "depends_on": [
@@ -1530,20 +1531,25 @@
    "notes": "Targeted Go/Swift tests only; no UI tests or simulator automation.",
    "verification": {
     "required": true,
-    "status": "missing",
-    "method": "automated",
+    "status": "present",
+    "method": "tests",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "Advertisement-truth tests: derived set exactly equals the implemented paths (9 entries sorted-match) with question_reply/reasoning/compression/checkpoint/summarize/revert/share/fork absent and legacy RespondQuestion still ErrNotSupported. go-bridge concentrated tests: agent+variant survive SendMessageParams parse and promptOptionsFromParams; sendPrompt dispatches SendWithOptions atomically while applySendMessageRuntimeOptions never SetModels an option sender; modelItemsForWire carries variants (absent key for none); Mac/iOS protocol mirror byte-identity (bridge-v1.md + schema). iOS OpencodeWebVariantAgentWireTests 4/4 (variants decode, ModelInfo/selection carry variant, agent+variant pass the BackendClient boundary, unset omits keys).",
+    "artifacts": [
+     "agent/opencode-web/capability_activation_test.go",
+     "go-bridge/concentrated_activation_test.go",
+     "OpenCodeiOS/OpenCodeiOSTests/OpencodeWebVariantAgentWireTests.swift",
+     "cmd:go test ./go-bridge -run \"TestSendMessageAgentVariant|TestSendPrompt|TestListModelsWireItem|TestProtocolMirror\" => PASS",
+     "cmd:xcodebuild test -only-testing:CCCodeTests/OpencodeWebVariantAgentWireTests => 4/4 PASS"
+    ]
    }
   },
   {
    "id": "concentrated-activation-regression",
    "title": "Concentrated build, install, runtime, and final regression",
    "description": "Run bounded targeted regression, Mac Release build/install/runtime 8777 verification, required iOS targeted build/tests and connected-device install, secret/diff/status checks, then produce one audit-ready report without claiming owner UI completion.",
-   "status": "pending",
+   "status": "done",
    "phase": "concentrated-activation",
    "kind": "regression",
    "depends_on": [
@@ -1553,13 +1559,18 @@
    "notes": "Owner UI matrix remains a separate final track after supervisor audit.",
    "verification": {
     "required": true,
-    "status": "missing",
-    "method": "mixed",
+    "status": "present",
+    "method": "regression",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "Full-repo go build/vet/test sweep green (all packages, no failures). Mac unsigned Release rebuilt at final commit 293df9bc1a76 and overwrite-installed to /Applications/CordCodeLink.app; 8777 served by PID 9309 whose binary path is /Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime (drivers incl. opencode-web). The mandated killall+reinstall respawned the app-managed 4096 serve (PID 71333→9258, parent = reinstalled app; harness never touched 4096; 4398/4399 reclaimed). iOS Release built for physical iPhone 16 Pro (BFC431AC), installed and launched (org.openagi.cordcode); no UI automation. Both repos committed; CHANGELOGs updated.",
+    "artifacts": [
+     "cmd:./scripts/build-unsigned-release.sh => commit 293df9bc1a76",
+     "cmd:lsof -iTCP:8777 => PID 9309 /Applications/CordCodeLink.app",
+     "cmd:xcrun devicectl device install/launch BFC431AC… => installed+launched",
+     "mac-commit:293df9b",
+     "ios-commit:b3919de+e74883b"
+    ]
    }
   }
  ]

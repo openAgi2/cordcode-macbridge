@@ -7,6 +7,14 @@
 版本号对齐 MacBridge Release 构建的 `MARKETING_VERSION`（见 `MacBridge/project.yml`）。日期为协调世界时（UTC）。
 
 ## [Unreleased]
+- **新功能：OpenCode Web 官方 parity 集中实施（指令 8 号批次）**：以 canonical 收敛设计为唯一权威，一次批次补齐 C2–C7：
+  - **发送即带官方选项**：`send_message` 现在逐请求携带 agent、`{providerId,id}` 模型和模型专属 `variant`（不是 reasoningEffort）。Mac 在请求内生成一次稳定 `messageID`；不在目录里的模型/agent/variant 在 POST 前就明确失败（零网络写入）。图片/文件附件按官方 file part（data URL）随 prompt 上送。
+  - **官方模型选择链**：current → agent 模型 → provider default（优先于 legacy `/config.model`，E5b 钉死）→ config → 最近会话模型 → 首个已连接 provider 默认/首模型；`list_models` 模型行带 live `variants` 键（E1b），选择器只在有键时出现。
+  - **单一全局 SSE 订阅**：每个 backend 实例只开一条 `/global/event` 连接，事件按 sessionID 路由到已打开会话；外部网页 turn（E3）经同一条流实时旁观；嵌套 `sync` 帧在归一化前精确跳过一次（官方 server-sdk 同规则）；断线重连后同一条订阅/路由继续，armed 回合经 `GET /session/status` 治愈，绝不伪造健康终态。
+  - **reasoning 显式不支持**：E2 取证证明 1.18.18 无已验证的 populated reasoning 形状——遇到即返回 `unsupported content.reasoning`，绝不折叠进正文。
+  - **问答/待办/改名**：官方 `question.asked` 一次性翻译为结构化用户输入卡（回答走 `POST /question/:id/reply {answers:[[label]]}` / reject，首个服务器裁决生效）；`GET /session/:id/todo` 顺序/字段原样（不造 ID）；`PATCH /session/:id {title}` 改名收敛到返回元数据。
+  - **严格 project 解码**：`GET /project` 只接受已验证的裸数组形状，畸形行整体失败（不再静默裁剪）。
+  - **能力如实点亮**：todos、structured_user_input_v1、session_mutation、session_delete、permission_resolve、image/file 附件、external_turn_streaming 随实现广告；E2 reasoning 与 OD-3 十四项未来面保持不广告。
 - **新功能：OpenCode Web 会话归档与删除**：消息页「更多设置」里的「归档」「删除」此前报 `session archive not yet supported` / `backend does not support session deletion`（设计期两项挂起：delete 需活体钉死 HTTP、archive 列为二期）。现已在真 1.18.18 沙盒活体钉死官方路由并实现：归档 = `PATCH /session/{id}` body `{"time":{"archived":<epoch ms>}}`（200 回显 Session.Info）；删除 = `DELETE /session/{id}`（200 `true`，删后 404）。v2 同路由走 `/api` 前缀。列表行带 `time.archived` → `archivedAtMillis`，客户端隐藏已归档会话。
 - **修复：OpenCode Web 新会话首回合输入框闪「完成」**：冷投影把还在跑的第一回合写成 `execution.phase=idle`。已拆掉「历史 0 条就 200ms×6 再拉」的等待（违反 SSV2 护栏：空投影先等 history、用条数猜 ready）。活会话未收口 user turn 现在提交 `phase=running`；hydrate 不得用冷 idle 盖掉已经 live 的 running。pending→real 早 rebind 保留。
 - **新功能：OpenCode Web backend（并存入口）**：新增 `opencode-web` backend——官方 `opencode serve` 的纯 HTTP/SSE 客户端。iPhone 切换框出现「OpenCode Web」：列表/历史/占用/发送/模型/活跃态/审批全部来自官方 HTTP。占用圈按官方网页公式（最后一条 assistant ÷ 模型窗口）出数、发送必带目录内模型（坏模型明确失败不再 81ms 空转）、外部网页 turn 实时旁观、工具审批 Allow/Deny 走官方折叠（绝不自动批）。旧「OpenCode」入口原样并存供对照，成熟验收后再摘（详见 `docs/2026-08-18-opencode-web-backend-design完成情况.md`）。
