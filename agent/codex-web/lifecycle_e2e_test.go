@@ -66,6 +66,13 @@ wire_api = "responses"
 	}
 	t.Cleanup(func() {
 		_ = exec.Command(bin, "app-server", "daemon", "stop").Run()
+		if daemonRunning(t, bin, home) {
+			// stop 失败兜底：按 home 路径定位本测试拉起的进程回收（仅限 cw-e2e 前缀目录）
+			out, _ := exec.Command("pgrep", "-f", home).Output()
+			for _, id := range strings.Fields(string(out)) {
+				_ = exec.Command("kill", id).Run()
+			}
+		}
 		_ = os.RemoveAll(home)
 		_ = os.RemoveAll(workDir)
 	})
