@@ -65,11 +65,20 @@ wire_api = "responses"
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = exec.Command(bin, "app-server", "daemon", "stop").Run()
+		// daemon stop 必须带 CODEX_HOME：stop 面向的是该 home 的 control socket，
+		// 不带 env 会打到用户默认 ~/.codex daemon（绝不触碰）。
+		stop := exec.Command(bin, "app-server", "daemon", "stop")
+		stop.Env = append(os.Environ(), "CODEX_HOME="+home)
+		_ = stop.Run()
 		if daemonRunning(t, bin, home) {
-			// stop 失败兜底：按 home 路径定位本测试拉起的进程回收（仅限 cw-e2e 前缀目录）
-			out, _ := exec.Command("pgrep", "-f", home).Output()
+			// stop 失败兜底：回收持有本测试 home 文件的残留 daemon（仅限 cw-e2e 前缀；
+			// 用 lsof 判归属，绝不按进程名误杀用户 daemon）
+			out, _ := exec.Command("pgrep", "-f", "app-server --listen unix://").Output()
 			for _, id := range strings.Fields(string(out)) {
+				files, _ := exec.Command("lsof", "-p", id).Output()
+				if !strings.Contains(string(files), home) {
+					continue
+				}
 				_ = exec.Command("kill", id).Run()
 			}
 		}
