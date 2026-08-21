@@ -41,7 +41,7 @@
       "attestation_note": "all evidence self-attested; sandbox/unit/regression replayable; owner UI matrix NOT executed (awaits supervisor audit)"
     }
   },
-  "updated_at": "2026-08-21T03:19:21.344613+00:00",
+  "updated_at": "2026-08-21T03:53:20.909965+00:00",
   "todos": [
     {
       "id": "gate-a-inventory-impl",
@@ -1839,7 +1839,7 @@
       "id": "audit011-terminal-reply-map-review-fix-impl",
       "title": "Audit-011 terminal reply-mapping implementation seal",
       "description": "Make terminal/duplicate lifecycle admission reject late asked and stale recovery before either can repopulate the resolve reply mapping; preserve the single terminal Projection owner.",
-      "status": "pending",
+      "status": "done",
       "phase": "audit011-terminal-reply-map-review-fix",
       "kind": "impl",
       "depends_on": [],
@@ -1847,20 +1847,23 @@
       "notes": "review-fix-for:audit010-resolution-race-review-fix-regression",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Directive-012 implementation (commit \"fix(opencode-web): directive-012 terminal reply-mapping seal\"): gateAdmitRequested now decides the lifecycle verdict BEFORE any pendingQuestions write — terminal/duplicate asked and stale recovery rows no longer re-open the reply mapping, so a settled interaction cannot be submitted again from this process; the recovery terminal-settle path no longer pre-writes the row shape; lookupQuestion's GET fallback records shapes through notePendingShape, which consults the lifecycle under the same questionMu lock (invariant: terminal => no mapping entry — one admission order, no third referee, no sleep/404-normalization). gateAdmitResolved keeps clearing the mapping; the server broadcast/reconciliation remains the only projection terminal owner.",
+        "artifacts": [
+          "agent/opencode-web/questions.go",
+          "go-bridge/audit012_fullpath_test.go"
+        ],
+        "checked_at": "2026-08-21T03:53:20.909965+00:00"
       }
     },
     {
       "id": "audit011-terminal-reply-map-review-fix-tests",
       "title": "Audit-011 terminal reply-mapping owning negative tests",
       "description": "Prove answer/reject terminal plus late asked and barrier-controlled stale recovery produce zero second official POST through the concrete resolve handler while Projection remains one terminal part.",
-      "status": "pending",
+      "status": "done",
       "phase": "audit011-terminal-reply-map-review-fix",
       "kind": "tests",
       "depends_on": [
@@ -1870,20 +1873,23 @@
       "notes": "review-fix-for:audit010-resolution-race-review-fix-regression",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Red-first owning negatives (go-bridge/audit012_fullpath_test.go, confirmed RED on pre-fix code): TestAudit012_TerminalThenLateAskedSecondResolveZeroPOST (answered + rejected subtests — after the terminal broadcast and a late duplicate asked, repeated real resolve_user_input attempts through the concrete opencode-web responder returned accepted+POST pre-fix; post-fix every attempt returns interaction_not_found with ZERO official POSTs and the projection keeps the single terminal part); TestAudit012_BarrierStaleRecoverySecondResolveZeroPOST (barrier: stale pending GET response parked, live terminal lands first, release — pre-fix accepted+POST, post-fix refused with zero POSTs). Regression: go test ./go-bridge -run TestAudit01[12] -count=20 PASS (200.9s); go test -race ./agent/opencode-web -run 'TestAudit01[012]|TestQuestion' -count=20 PASS; go test ./... all green; vet/build green.",
+        "artifacts": [
+          "agent/opencode-web/questions.go",
+          "go-bridge/audit012_fullpath_test.go"
+        ],
+        "checked_at": "2026-08-21T03:53:20.909965+00:00"
       }
     },
     {
       "id": "audit011-terminal-reply-map-review-fix-regression",
       "title": "Audit-011 terminal reply-mapping bounded regression and Mac install",
       "description": "Re-run directive-011/012 20x barrier and race suites, full Go/vet/build, real 1.18.18 question reload/resolve regressions, port cleanup, and Mac Release install; iOS remains unchanged.",
-      "status": "pending",
+      "status": "done",
       "phase": "audit011-terminal-reply-map-review-fix",
       "kind": "regression",
       "depends_on": [
@@ -1893,13 +1899,16 @@
       "notes": "review-fix-for:audit010-resolution-race-review-fix-regression; on proven completion restore blocked parent regressions and record resolved-via",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Real isolated 1.18.18 sandbox: TestSandboxC6C7 all green (question official reply, question-reload pending cold reload, question-reopen-after-answer/reject terminal reloads), C4 turn terminals + e2e green. 4398/4399 reclaimed after use; 4096 owner-managed untouched (PID 48742 throughout). Mac product changed -> Release rebuilt (runtime commit 01ca143) and reinstalled via the mandated flow; 8777 = PID 99662 from /Applications/CordCodeLink.app runtime. iOS untouched per directive. Both repos clean after report commit.",
+        "artifacts": [
+          "agent/opencode-web/questions.go",
+          "go-bridge/audit012_fullpath_test.go"
+        ],
+        "checked_at": "2026-08-21T03:53:20.909965+00:00"
       }
     }
   ]
