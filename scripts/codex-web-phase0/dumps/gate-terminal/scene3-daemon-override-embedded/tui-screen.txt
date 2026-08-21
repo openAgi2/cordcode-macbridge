@@ -1,0 +1,37 @@
+[>4;0m[>7umock-model default · /private/tmp/cw-gate-ws-s3[0 q[0 q[0 qMMMMMMMMMM
+╭──────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.149.0-alpha.4)           │
+│                                              │
+│ model:     mock-model low   /model to change │
+│ directory: /private/tmp/cw-gate-ws-s3        │
+╰──────────────────────────────────────────────╯
+
+  Tip: Our most capable model yet. GPT-5.6 Sol can tackle complex code changes, dig into research, produce polished
+  documents, and take on your most ambitious work. Sol is highly capable at lower reasoning efforts—try starting lower,
+  then turn it up for harder jobs.  › Ask Codex to do anything   mock-model low · /private/tmp/cw-gate-ws-s3[0 q[0 q[0 qMOCK:SLOW gate scene threeoverridemessage[0 qMMMM
+
+
+› MOCK:SLOW gate scene three override message
+Ask Codex to do anything[0 q[0 qMMM
+
+⚠ Model metadata for `mock-model` not found. Defaulting to fallback metadata; this can degrade performance and cause
+  issues.[0 q • Working (0s • esc to interrupt)  › Ask Codex to do anything   mock-model low · /private/tmp/cw-gate-ws-s3[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 qW[0 q[0 q[0 q◦Wo[0 q[0 qor[0 q[0 qrk[0 q[0 qki[0 q[0 qin[0 q[0 qWng[0 q1[0 qWog[0 q[0 q[0 qor[0 q[0 q•rk[0 q[0 qki[0 q[0 qin[0 q[0 qng[0 q[0 qg[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q◦[0 q[0 q[0 q[0 q[0 q[0 q2[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q•[0 q[0 q[0 qW[0 q[0 q[0 qWo[0 q[0 qor[0 q[0 qrk[0 q[0 qki[0 q[0 qin[0 q[0 qWng[0 q◦3[0 qWog[0 q[0 q[0 qor[0 q[0 qrk[0 q[0 qki[0 q[0 qin[0 q[0 qng[0 q[0 qg[0 q[0 q[0 q•[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q4[0 q[0 q[0 q[0 q[0 q[0 q◦[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 qW[0 q[0 qWo[0 q[0 qor[0 q[0 q[0 qrk[0 q•[0 qki[0 q[0 qin[0 q[0 qWng[0 q5[0 qWog[0 q[0 qor[0 q[0 qrk[0 q[0 qki[0 q[0 q[0 qin[0 q◦[0 qng[0 q[0 qg[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q•6[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 qW[0 q[0 q◦Wo[0 q[0 qor[0 q[0 qrk[0 q[0 qki[0 q[0 qin[0 q[0 qWng[0 q7[0 qWog[0 q[0 qor[0 q[0 qrk[0 q•[0 qki[0 q[0 q[0 qin[0 q[0 qng[0 q[0 qg[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q◦[0 q[0 q[0 q[0 q[0 q[0 q8[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q•[0 q[0 q[0 q[0 qW[0 q[0 qWo[0 q[0 qor[0 q[0 qrk[0 q[0 qki[0 q[0 q[0 qin[0 q[0 qWng[0 q◦9[0 qWog[0 q[0 qor[0 q[0 qrk[0 q[0 qki[0 q[0 qin[0 q[0 q[0 qng[0 q[0 qg[0 q[0 q[0 q•[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q10s • esc to interupt)[0 q[0 q[0 q[0 q[0 q[0 q◦[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 qW[0 q[0 qWo[0 q[0 qor[0 q[0 qrk[0 q•[0 qki[0 q[0 qin[0 q[0 qWng[0 q1[0 qWog[0 q[0 qor[0 q[0 q[0 qrk[0 q[0 qki[0 q[0 qin[0 q[0 q◦ng[0 q[0 qg[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q•2[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 qW[0 q[0 q◦Wo[0 q[0 qor[0 q[0 qrk[0 q[0 qki[0 q[0 q[0 qin[0 q[0 qWng3[0 q[0 qWog[0 q[0 qor[0 q[0 q•rk[0 q[0 qki[0 q[0 qin[0 q[0 qng[0 q[0 q[0 qg[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q◦[0 q[0 q[0 q[0 q[0 q4[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q•[0 q[0 q[0 qW[0 q[0 q[0 qWo[0 q[0 qor[0 q[0 qrk[0 q[0 qki[0 q[0 qin[0 q[0 qWng[0 q◦5[0 q[0 qWog[0 q[0 qor[0 q[0 qrk[0 q[0 qki[0 q[0 qin[0 q[0 qng[0 q[0 qg[0 q[0 q[0 q•[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q6[0 q[0 q[0 q[0 q[0 q[0 q◦[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 q[0 qW[0 q[0 qWo[0 q[0 q[0 qor[0 q[0 qrk[0 q•[0 qki[0 q[0 qin[0 q[0 qWng[0 q7[0 qWog[0 q  › Ask Codex to do anything   mock-model low · /private/tmp/cw-gate-ws-s3[0 qMMMMMMMMMMMMMMMMMMM
+╭──────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.149.0-alpha.4)           │
+│                                              │
+│ model:     mock-model low   /model to change │
+│ directory: /private/tmp/cw-gate-ws-s3        │
+╰──────────────────────────────────────────────╯
+
+  Tip: Our most capable model yet. GPT-5.6 Sol can tackle complex code changes, dig into research, produce polished
+  documents, and take on your most ambitious work. Sol is highly capable at lower reasoning efforts—try starting lower,
+  then turn it up for harder jobs.
+
+
+› MOCK:SLOW gate scene three override message
+
+
+⚠ Model metadata for `mock-model` not found. Defaulting to fallback metadata; this can degrade performance and cause
+  issues.
+
+• slow completed  › Ask Codex to do anything   mock-model low · /private/tmp/cw-gate-ws-s3[0 q[0 q[0 q[0 q[0 q[0 q[0 q

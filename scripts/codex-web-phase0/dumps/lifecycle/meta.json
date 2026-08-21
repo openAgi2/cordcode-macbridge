@@ -1,7 +1,7 @@
 {
   "cli_version": "codex-cli 0.149.0-alpha.4",
   "transport": "stdio (newline-delimited JSON-RPC)",
-  "collected_at": "2026-08-22T00:41:14+0800",
+  "collected_at": "2026-08-22T00:50:49+0800",
   "model_upstream": "local mock Responses provider (mock_provider.py) — 只控制上游脚本；app-server 全部行为为真实官方二进制",
   "sanitization": "隔离 CODEX_HOME/workspace 路径替换为 $CODEX_HOME/$WORKSPACE；内容全为 MOCK:* 合成文本",
   "entries": {
@@ -12,6 +12,7 @@
     "daemon_start": "captured",
     "daemon_version_running": "captured",
     "daemon_stop": "captured",
-    "covers": "daemon absent/running/start/version/stop + managed WS healthz/readyz（隔离 CODEX_HOME，daemon 用后即停）"
+    "covers": "daemon absent/running/start/version/stop + managed WS healthz/readyz（短路径隔离 CODEX_HOME + standalone 符号链种子，daemon 用后即停）",
+    "prereq_facts": "daemon start 需要 $CODEX_HOME/packages/standalone/current/codex（installer 管理副本）；control socket 路径超 macOS SUN_LEN(104) 会报 'path must be shorter than SUN_LEN'（首轮长临时目录已实录该错误，见 git 历史 7e3d77e 前版 dumps）"
   }
 }

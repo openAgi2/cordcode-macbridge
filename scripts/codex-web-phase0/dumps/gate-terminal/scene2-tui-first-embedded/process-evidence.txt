@@ -1,0 +1,9 @@
+=== daemon absent ===
+Error: failed to connect to /private/tmp/cw-gate-home-s2/app-server-control/app-server-control.sock
+
+Caused by:
+    No such file or directory (os error 2)
+=== control socket exists during TUI ===
+False
+=== TUI children ===
+

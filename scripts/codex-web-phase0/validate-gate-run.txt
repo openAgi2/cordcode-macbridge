@@ -1,0 +1,20 @@
+[PASS] s1-daemon-started
+[PASS] s1-tui-thread-loaded-in-daemon — LocalDaemon 权威证据（thread/loaded/list）
+[PASS] s1-observer-resume-ok — 同 daemon 多连接 resume 无 writer 冲突
+[PASS] s1-live-deltas — 17 条实时 delta
+[PASS] s1-item-lifecycle — item/completed=1（item/started 同属 mid-turn attach 边界：本次 0）
+[PASS] s1-turn-completed — 唯一终态
+[PASS] s1-thread-started-global-before-subscribe — 全局通知在订阅前到达
+[PASS] s1-status-transitions — 2 次 status/changed
+[PASS] s1-ordering — 首事件 → deltas 递增 → completed 有序
+[PASS] s1-turn-started-boundary-recorded — turn/started 边界如实记录（mid-turn attach 不重放）
+[PASS] s2-daemon-absent-confirmed
+[PASS] s2-socket-absent-while-embedded
+[PASS] s2-list-read-available
+[PASS] s2-no-fake-live-replay
+[PASS] s3-daemon-running
+[PASS] s3-tui-not-connected-to-daemon
+[PASS] s3-no-live-leak
+[PASS] gate-sanitization — clean
+
+ALL PASS

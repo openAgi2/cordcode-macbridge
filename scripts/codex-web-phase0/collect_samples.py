@@ -567,8 +567,15 @@ def free_port():
 def collect_lifecycle():
     raw = str(DUMPS / "_tmp_lifecycle.jsonl")
     entries = {}
+    # daemon 子命令需要 installer 管理的 standalone 副本 + 短路径（Unix socket SUN_LEN 限制）
+    home = pathlib.Path("/tmp/cw-p0-lifecycle-home")
+    shutil.rmtree(home, ignore_errors=True)
+    home.mkdir(parents=True)
+    pkg = home / "packages" / "standalone" / "current"
+    pkg.mkdir(parents=True)
+    os.symlink(CODEX, pkg / "codex")
     env = dict(os.environ)
-    env["CODEX_HOME"] = SANITIZE_HOME
+    env["CODEX_HOME"] = str(home)
     p = subprocess.run([CODEX, "app-server", "daemon", "version"], capture_output=True, text=True, env=env, timeout=30)
     entries["daemon_version_absent"] = {"stdout": p.stdout.strip()[:400], "stderr": p.stderr.strip()[:300], "rc": p.returncode}
     srv_port = free_port()
@@ -601,7 +608,9 @@ def collect_lifecycle():
     with open(raw, "w", encoding="utf-8") as f:
         f.write(json.dumps({"entry": "lifecycle summary (subprocess captured)", "entries": sanitize_obj(entries)}, ensure_ascii=False) + "\n")
     dump("lifecycle", raw)
-    write_meta("lifecycle", {k: "captured" for k in entries} | {"covers": "daemon absent/running/start/version/stop + managed WS healthz/readyz（隔离 CODEX_HOME，daemon 用后即停）"})
+    shutil.rmtree(home, ignore_errors=True)
+    write_meta("lifecycle", {k: "captured" for k in entries} | {"covers": "daemon absent/running/start/version/stop + managed WS healthz/readyz（短路径隔离 CODEX_HOME + standalone 符号链种子，daemon 用后即停）",
+                 "prereq_facts": "daemon start 需要 $CODEX_HOME/packages/standalone/current/codex（installer 管理副本）；control socket 路径超 macOS SUN_LEN(104) 会报 'path must be shorter than SUN_LEN'（首轮长临时目录已实录该错误，见 git 历史 7e3d77e 前版 dumps）"})
     os.remove(raw)
     return entries
 

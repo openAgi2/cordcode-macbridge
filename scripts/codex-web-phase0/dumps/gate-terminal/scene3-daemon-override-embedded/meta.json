@@ -1,0 +1,15 @@
+{
+  "cli_version": "codex-cli 0.149.0-alpha.4",
+  "entries": {
+    "daemon_running": true,
+    "tui_composer_ready": true,
+    "tui_connected_to_socket": false,
+    "new_threads_visible_to_observer": 1,
+    "live_events_at_observer": 0
+  },
+  "expectation": "TUI=Embedded（-c 覆盖不复用 daemon）；观察端 0 live 事件",
+  "verdict_input": {
+    "tui_connected": false,
+    "live_events": 0
+  }
+}

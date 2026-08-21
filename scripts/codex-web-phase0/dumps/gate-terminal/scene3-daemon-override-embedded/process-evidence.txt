@@ -1,0 +1,6 @@
+=== daemon version ===
+{"status":"running","backend":"pid","managedCodexPath":"/private/tmp/cw-gate-home-s3/packages/standalone/current/codex","managedCodexVersion":"0.149.0-alpha.4","socketPath":"/private/tmp/cw-gate-home-
+=== lsof socket (non-daemon) ===
+
+=== TUI children ===
+

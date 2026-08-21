@@ -1,0 +1,31 @@
+{
+  "cli_version": "codex-cli 0.149.0-alpha.4",
+  "entries": {
+    "daemon_start_rc": 0,
+    "daemon_version": "{\"status\":\"running\",\"backend\":\"pid\",\"managedCodexPath\":\"/private/tmp/cw-gate-home-s1/packages/standalone/current/codex\",\"managedCodexVersion\":\"0.149.0-alpha.4\",\"socketPath\":\"/private/tmp/cw-gate-home-s1/app-server-control/app-server-control.sock\",\"cliVersion\":\"0.149.0-alpha.4\",\"appServerVersion\":\"0.",
+    "observer_initialize": true,
+    "tui_composer_ready": true,
+    "new_thread_found": "01a02565-f48f-7a20-a392-61e0c0d608b5",
+    "observer_resume": "ok",
+    "lsof_during_turn": "",
+    "loaded_threads_during_turn": {
+      "data": [
+        "01a02565-f48f-7a20-a392-61e0c0d608b5"
+      ],
+      "nextCursor": null
+    },
+    "tui_connected_to_socket": false,
+    "observer_turn_started": 0,
+    "observer_delta_count": 17,
+    "observer_turn_completed": 1
+  },
+  "expectation": "TUI=LocalDaemon；观察端收到 started/多delta/completed",
+  "verdict_input": {
+    "tui_connected": false,
+    "observer_events": [
+      0,
+      17,
+      1
+    ]
+  }
+}
