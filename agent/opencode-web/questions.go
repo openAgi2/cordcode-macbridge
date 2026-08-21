@@ -65,25 +65,29 @@ func knownToolCallID(req *ocwQuestionRequest) string {
 }
 
 // notePendingShape records one official row's reply mapping — the shape
-// ResolveUserInput maps canonical option ids back to official labels with.
-// Directive-012 seal: it consults the lifecycle under the same lock first, so
-// a row the gate has already settled terminal in this process never re-opens
-// its mapping (absent/creation is fine — a later recovery may still project
-// the dock). This keeps the two tables consistent in one admission order:
-// terminal ⇒ no mapping entry.
-func (a *Agent) notePendingShape(sessionID string, req ocwQuestionRequest) {
+// ResolveUserInput maps canonical option ids back to official labels with —
+// and returns whether the row was ADMITTED. Directive-013: the lifecycle
+// verdict under the same lock decides both the write and the return, so a
+// row the gate settled terminal in this process is neither written nor
+// usable as a reply shape by the caller (a still-listed stale GET row
+// cannot produce a second POST). Absent/creation is fine — a cold restart's
+// genuinely pending row (no lifecycle yet) stays submittable, preserving the
+// directive-010 pending reload. One admission order: terminal ⇒ no mapping
+// entry AND no lookup success.
+func (a *Agent) notePendingShape(sessionID string, req ocwQuestionRequest) bool {
 	if req.ID == "" {
-		return
+		return false
 	}
 	a.questionMu.Lock()
 	defer a.questionMu.Unlock()
 	if lc, ok := a.questions[questionLifecycleKey(sessionID, req.ID)]; ok && lc != nil && lc.status != core.UserInputStatusPending {
-		return
+		return false
 	}
 	if a.pendingQuestions == nil {
 		a.pendingQuestions = make(map[string]ocwQuestionRequest)
 	}
 	a.pendingQuestions[req.ID] = req
+	return true
 }
 
 // forgetQuestion drops the reply-mapping entry ONLY (directive-011): the
@@ -515,7 +519,12 @@ func (a *Agent) lookupQuestion(ctx context.Context, c *Client, interactionID str
 		return nil, err
 	}
 	for _, p := range pending {
-		a.notePendingShape(p.SessionID, p)
+		// The lifecycle gate decides admission BEFORE the row can serve as a
+		// reply shape: a terminal interaction stays unsubmittable even while
+		// the server's GET still lists it (directive-013).
+		if !a.notePendingShape(p.SessionID, p) {
+			continue
+		}
 		if p.ID == interactionID {
 			return &p, nil
 		}
