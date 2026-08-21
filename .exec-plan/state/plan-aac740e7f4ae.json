@@ -1875,40 +1875,107 @@
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "Red-first owning negatives (go-bridge/audit012_fullpath_test.go, confirmed RED on pre-fix code): TestAudit012_TerminalThenLateAskedSecondResolveZeroPOST (answered + rejected subtests — after the terminal broadcast and a late duplicate asked, repeated real resolve_user_input attempts through the concrete opencode-web responder returned accepted+POST pre-fix; post-fix every attempt returns interaction_not_found with ZERO official POSTs and the projection keeps the single terminal part); TestAudit012_BarrierStaleRecoverySecondResolveZeroPOST (barrier: stale pending GET response parked, live terminal lands first, release — pre-fix accepted+POST, post-fix refused with zero POSTs). Regression: go test ./go-bridge -run TestAudit01[12] -count=20 PASS (200.9s); go test -race ./agent/opencode-web -run 'TestAudit01[012]|TestQuestion' -count=20 PASS; go test ./... all green; vet/build green.",
+        "summary": "Supervisor audit-012 re-verified the quoted 20x directive-011/012 full-path suite (200.8s), 20x selected agent race suite (12.4s), full Go tests, vet, and build. The late-asked and parked stale-recovery memory-mapping negatives pass and prove terminal Projection plus zero POST when the current GET is empty. Coverage is incomplete for lookupQuestion: notePendingShape can reject a current stale GET row, but lookupQuestion unconditionally returns that row anyway; no test preserves the stale current GET through the second resolve.",
         "artifacts": [
           "agent/opencode-web/questions.go",
           "go-bridge/audit012_fullpath_test.go"
         ],
-        "checked_at": "2026-08-21T03:53:20.909965+00:00"
+        "checked_at": "2026-08-21T04:08:00Z"
       }
     },
     {
       "id": "audit011-terminal-reply-map-review-fix-regression",
       "title": "Audit-011 terminal reply-mapping bounded regression and Mac install",
       "description": "Re-run directive-011/012 20x barrier and race suites, full Go/vet/build, real 1.18.18 question reload/resolve regressions, port cleanup, and Mac Release install; iOS remains unchanged.",
-      "status": "done",
+      "status": "blocked",
       "phase": "audit011-terminal-reply-map-review-fix",
       "kind": "regression",
       "depends_on": [
         "audit011-terminal-reply-map-review-fix-tests"
       ],
       "source": "supervisor audit-011; directive-012",
-      "notes": "review-fix-for:audit010-resolution-race-review-fix-regression; on proven completion restore blocked parent regressions and record resolved-via",
+      "notes": "review-fix-for:audit010-resolution-race-review-fix-regression; supervisor audit-012 partial: memory mapping seal passes, but lookupQuestion returns a lifecycle-rejected current GET row and can still POST; assigned directive-013",
       "verification": {
         "required": true,
-        "status": "present",
+        "status": "failed",
         "method": "mixed",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "Real isolated 1.18.18 sandbox: TestSandboxC6C7 all green (question official reply, question-reload pending cold reload, question-reopen-after-answer/reject terminal reloads), C4 turn terminals + e2e green. 4398/4399 reclaimed after use; 4096 owner-managed untouched (PID 48742 throughout). Mac product changed -> Release rebuilt (runtime commit 01ca143) and reinstalled via the mandated flow; 8777 = PID 99662 from /Applications/CordCodeLink.app runtime. iOS untouched per directive. Both repos clean after report commit.",
+        "summary": "Supervisor audit-012 independently re-ran the 20x full-path, selected race, full Go, vet, and build commands; all pass, and runtime/port cleanup claims are read-only consistent (4096 PID 48742, 8777 PID 99662 from /Applications, 4398/4399 free). Regression remains incomplete because lookupQuestion ignores notePendingShape's terminal rejection and returns the stale GET row as a successful resolve shape. Classified repairable-heavy; directive-013 owns the single lookup gate.",
         "artifacts": [
           "agent/opencode-web/questions.go",
           "go-bridge/audit012_fullpath_test.go"
         ],
-        "checked_at": "2026-08-21T03:53:20.909965+00:00"
+        "checked_at": "2026-08-21T04:08:00Z"
+      }
+    },
+    {
+      "id": "audit012-lookup-terminal-gate-review-fix-impl",
+      "title": "Audit-012 lookupQuestion terminal gate implementation",
+      "description": "Propagate lifecycle admission from pending-shape observation into lookupQuestion so a terminal-rejected current GET row cannot be returned or submitted.",
+      "status": "pending",
+      "phase": "audit012-lookup-terminal-gate-review-fix",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "supervisor audit-012; directive-013",
+      "notes": "review-fix-for:audit011-terminal-reply-map-review-fix-regression",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "audit012-lookup-terminal-gate-review-fix-tests",
+      "title": "Audit-012 stale-current-GET owning negative",
+      "description": "Keep the stale question row present during a real second resolve and prove answered/rejected terminal lifecycle returns a non-submittable result with zero POST while pending cold restart remains functional.",
+      "status": "pending",
+      "phase": "audit012-lookup-terminal-gate-review-fix",
+      "kind": "tests",
+      "depends_on": [
+        "audit012-lookup-terminal-gate-review-fix-impl"
+      ],
+      "source": "supervisor audit-012; directive-013",
+      "notes": "review-fix-for:audit011-terminal-reply-map-review-fix-regression",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "audit012-lookup-terminal-gate-review-fix-regression",
+      "title": "Audit-012 bounded lookup gate regression and Mac install",
+      "description": "Run quoted directive-011/012/013 20x and race suites, full Go/vet/build, real 1.18.18 question regressions, port cleanup, and Mac Release install; iOS remains unchanged.",
+      "status": "pending",
+      "phase": "audit012-lookup-terminal-gate-review-fix",
+      "kind": "regression",
+      "depends_on": [
+        "audit012-lookup-terminal-gate-review-fix-tests"
+      ],
+      "source": "supervisor audit-012; directive-013",
+      "notes": "review-fix-for:audit011-terminal-reply-map-review-fix-regression; on proven completion restore blocked parent regressions and record resolved-via",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
       }
     }
   ]

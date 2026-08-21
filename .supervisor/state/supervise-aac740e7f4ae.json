@@ -349,7 +349,7 @@
       "kind": "hole-fill",
       "title": "Question terminal reply-mapping final seal",
       "issued_at": "2026-08-21T03:39:35Z",
-      "status": "pending",
+      "status": "in_progress",
       "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-012-question-terminal-reply-mapping-seal.md",
       "scope": "Mac opencode-web terminal reply mapping and owning negative tests only",
       "constraints": [
@@ -360,8 +360,38 @@
         "bounded 20-run barrier/race/full/sandbox regression and Mac Release reinstall",
         "one report then stop for audit-012"
       ],
-      "linked_commits": [],
+      "linked_commits": [
+        "git:01ca143",
+        "git:b79b273"
+      ],
       "resolved_from_audit": 11,
+      "resolved_by_directive": 13,
+      "report": {
+        "received_at": "2026-08-21T04:08:00Z",
+        "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-012-question-terminal-reply-mapping-seal.md",
+        "audited": true,
+        "audit_verdict": "partial",
+        "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-012-question-terminal-reply-mapping-seal.md"
+      }
+    },
+    {
+      "number": 13,
+      "kind": "hole-fill",
+      "title": "Question lookup terminal gate final seal",
+      "issued_at": "2026-08-21T04:08:00Z",
+      "status": "pending",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-013-question-lookup-terminal-gate.md",
+      "scope": "Mac opencode-web lookupQuestion lifecycle result and one owning negative only",
+      "constraints": [
+        "a GET row rejected by terminal lifecycle cannot be returned as a successful reply shape",
+        "stale current GET owning test must preserve the row while proving zero POST through concrete resolve handler",
+        "pending fresh-process reload remains supported",
+        "no lifecycle/history/Projection/canonical/protocol/capability/iOS changes",
+        "quoted reproducible regex commands, bounded 20x/race/full/sandbox and Mac Release reinstall",
+        "one report then stop for audit-013"
+      ],
+      "linked_commits": [],
+      "resolved_from_audit": 12,
       "report": {
         "received_at": null,
         "markdown_path": null,
@@ -371,6 +401,6 @@
       }
     }
   ],
-  "current_directive_number": 12,
-  "last_updated": "2026-08-21T03:39:35Z"
+  "current_directive_number": 13,
+  "last_updated": "2026-08-21T04:08:00Z"
 }
