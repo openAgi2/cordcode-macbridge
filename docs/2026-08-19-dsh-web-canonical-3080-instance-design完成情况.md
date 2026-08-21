@@ -53,7 +53,13 @@
 ### 4.2 Regression evidence
 
 - 各 phase regression todo 证据:`agent/dsh/...`(旧件零改动)+ `go-bridge/...` 全量反复通过;根模块全量 `go test ./... -count=1`(re-verified)。
-- 真机行(设计 §8 矩阵的设备部分):**未执行,移交 owner 真机矩阵**——含 17s 重启真机回归、浏览器实时看 iOS 消息、EADDRINUSE 提示文案、Link 退出浏览器不断。Attestation: n/a(队列范围外,设计 §8 已列为 owner 验收)。
+- 真机行(设计 §8 矩阵的设备部分):**owner 于 2026-08-21 真机验收通过四行**(部署 commit `252e78d4219f`,Release 覆盖安装 `/Applications`):
+  1. App 运行中杀掉 dsh → bridge 在宽限到期后于座位(3080)补拉 → iOS 发消息、Mac 浏览器实时同步 ✅(= §8.2 watcher/宽限到期行 + 单向实时行的设备面);
+  2. 先退 App(留任:dsh 存活)再杀 dsh → 3080 浏览器不可达、iOS 显示"正在重新连接" ✅(= §8.10 留任行 + 无 bridge 时无人补拉的如实行为;iOS 的"重新连接"是 bridge 传输层重连,非实例宽限);
+  3. 重新打开 App → 冷启动自动在座位拉起 dsh → iOS 可发消息、Mac 同步 ✅(= §8.3 冷启动行);
+  4. 部署首启日志 `instance resolved source=external reason=seat-adopt`(收养用户自启 3080,全机单实例) ✅(= §8.4 进程重启=冷启动收养行的设备面)。
+  Attestation: **owner 真机回报(2026-08-21,对话记录)**,非 agent 自测。
+  **仍未实测**:§8.1 宽限窗口内的 17s 重启行(backend_unavailable 气泡 + grace-rebind)与 §8.9 EADDRINUSE 提示文案——前者单测已覆盖同形路径,设备面待后续顺带观察即可。
 
 ### 4.3 Audit downgrade summary
 
