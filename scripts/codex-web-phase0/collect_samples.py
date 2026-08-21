@@ -518,12 +518,23 @@ def collect_ownership(home, ws):
             rpc_b.close()
         un = rpc_a.request("thread/unsubscribe", {"threadId": tid})
         entries["unsubscribe_status"] = (un.get("result") or {}).get("status") or un.get("error")
+        # unsubscribe 后 thread 仍驻留（不卸载；官方 30min TTL 见 thread_lifecycle.rs:7）
+        ld = rpc_a.request("thread/loaded/list", {})
+        entries["loaded_after_unsubscribe"] = tid in ((ld.get("result") or {}).get("data") or [])
+        # delete 冲突（写者仍活跃时由第二连接删）
+        rpc_c = JsonRpcStdio(home, ws, raw)
+        try:
+            rpc_c.initialize()
+            dl = rpc_c.request("thread/delete", {"threadId": tid})
+            entries["delete_conflict"] = dl.get("error") or "ok"
+        finally:
+            rpc_c.close()
         wait_turn_completed(rpc_a, tid, writer_turn, timeout=120)
         return entries
     finally:
         rpc_a.close()
         dump("ownership", raw)
-        write_meta("ownership", entries | {"covers": "写者活跃时第二连接 resume/archive 冲突与只读可用性 / unsubscribe 返回语义"})
+        write_meta("ownership", entries | {"covers": "双进程写者 resume/archive/delete 三冲突(-32600)与冲突期只读可用 / unsubscribe 返回 unsubscribed 且 thread 保持 loaded"})
         os.remove(raw)
 
 
@@ -548,6 +559,28 @@ def collect_reconnect(home, ws):
         entries["read_after_reconnect_turns"] = len(rd["result"].get("thread", {}).get("turns") or [])
         res = rpc2.request("thread/resume", {"threadId": tid})
         entries["resume_after_reconnect"] = res.get("error") or "ok"
+        # 断线期间 pending server request 的真实行为：发起审批 → 断线 → 新连接观察
+        t3 = rpc2.request("thread/start", {"cwd": str(ws), "model": "mock-model", "modelProvider": "mockpi",
+                                           "approvalPolicy": "untrusted"})
+        tid3 = t3["result"]["thread"]["id"]
+        tq3 = rpc2.request("turn/start", {"threadId": tid3, "input": text_input("MOCK:CMD:echo reconnect-pending")})
+        turn3 = tq3["result"]["turn"]["id"]
+        pend = rpc2.wait_server_request("item/commandExecution/requestApproval", timeout=60)
+        entries["pending_request_before_disconnect"] = bool(pend)
+        rpc2.close()  # 审批未答复即断线
+        time.sleep(1)
+        rpc3 = JsonRpcStdio(home, ws, raw)
+        try:
+            rpc3.initialize()
+            # 新连接不应被重放旧连接的 pending request；thread 状态经 read 校准
+            replay = rpc3.wait_server_request("item/commandExecution/requestApproval", timeout=8)
+            entries["pending_replayed_to_new_connection"] = bool(replay)
+            rd3 = rpc3.request("thread/read", {"threadId": tid3, "includeTurns": True})
+            th3 = (rd3.get("result") or {}).get("thread") or {}
+            entries["thread3_status_after_reconnect"] = (th3.get("status") or {}).get("type") if isinstance(th3.get("status"), dict) else th3.get("status")
+            entries["thread3_turns_after_reconnect"] = len(th3.get("turns") or [])
+        finally:
+            rpc3.close()
         return entries
     finally:
         rpc2.close()
