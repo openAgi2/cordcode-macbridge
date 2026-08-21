@@ -1,0 +1,29 @@
+[PASS] all-schema-files-parse — 692 files
+[PASS] s1-model-list-shape — keys=['data', 'nextCursor']
+[PASS] s1-model-no-provider — Model 字段数=18
+[PASS] s2-thread-start-model-provider-stable
+[PASS] s2-thread-start-experimental-stripped
+[PASS] s3-turn-start-model-optional-no-provider
+[PASS] s4-turn-steer-expected-turn-id-required — required=['expectedTurnId', 'input', 'threadId']
+[PASS] s4-turn-steer-experimental-stripped
+[PASS] s5-config-read-params-no-experimental — keys=['cwd', 'includeLayers']
+[PASS] s5-config-snake-case-model-provider — snake keys=['approval_policy', 'approvals_reviewer', 'compact_prompt']...
+[PASS] s5-config-flatten-additional
+[PASS] s5-config-apps-field-experimental
+[PASS] s6-request-user-input-in-stable-server-request
+[PASS] s6-request-user-input-batch-shape
+[PASS] s6-question-has-id-options
+[PASS] s7-command-approval-experimental-fields-schema-stripped
+[PASS] s7-command-approval-base-stable
+[PASS] s8-permission-approval-shape
+[PASS] s9-elicitation-variants — variants=['_meta', 'elicitationId', 'message', 'mode', 'requestedSchema', 'url']
+[PASS] s10-plan-delta-in-stable-bundle
+[PASS] s11-turn-completed-items-view — enum=['full', 'notLoaded', 'summary']
+[PASS] s11-turn-has-status-error-items
+[PASS] s12-thread-turns-list-experimental-only
+[PASS] s12-core-stable-methods-present
+[PASS] s13-source-strip-only-additional-permissions — strip_experimental_fields 只置空 additional_permissions（availableDecisions 不剥）
+[PASS] s13-plan-delta-no-attr-gating — PlanDelta 注册无 #[experimental] 属性，仅 doc 注释
+[PASS] s13-mcp-openai-form-capability
+
+ALL PASS
