@@ -31,17 +31,17 @@
   "reports": {
     "completion_report_path": "docs/2026-08-20-opencode-web-source-first-convergence-plan完成情况.md",
     "completion_report_status": "current",
-    "last_generated_at": "2026-08-21T04:58:21Z",
-    "based_on_queue_hash": "audit-014-verified-owner-ui-pending",
+    "last_generated_at": "2026-08-21T11:32:03Z",
+    "based_on_queue_hash": "owner-accepted-2026-08-21",
     "completion": {
       "path": "docs/2026-08-20-opencode-web-source-first-convergence-plan完成情况.md",
       "status": "current",
-      "based_on_queue_hash": "audit-014-verified-owner-ui-pending",
-      "generated": "2026-08-21T04:58:21Z",
-      "attestation_note": "exec-plan 75/75 proven and supervisor audit-014 verified the E2b technical repair; owner message-page UI retry remains a separate pending completion track"
+      "based_on_queue_hash": "owner-accepted-2026-08-21",
+      "generated": "2026-08-21T11:32:03Z",
+      "attestation_note": "All three completion tracks are closed: exec-plan 75/75 proven, supervisor audit-014 verified, and owner accepted the 12-row real-device product matrix for closeout on 2026-08-21. Row 5 had no individual checkmark and is covered only by the owner's explicit overall acceptance judgement."
     }
   },
-  "updated_at": "2026-08-21T04:58:21Z",
+  "updated_at": "2026-08-21T11:32:03Z",
   "todos": [
     {
       "id": "gate-a-inventory-impl",

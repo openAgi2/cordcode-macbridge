@@ -1,49 +1,45 @@
 # OpenCode Web source-first convergence 完成情况
 
-> **产品状态（2026-08-21）**：directive-014 E2b 技术修复已经 exec-plan proven + 监工 audit-014 verified；现在放行 owner 真机重新打开 OpenCode session。owner 回报前产品仍不得标记 done。
+> **产品状态（2026-08-21）**：已完成并收口。exec-plan 75/75 proven、supervisor audit-014 verified、owner 真机集中验收 accepted，三条完成轨道全部闭合。
 
 ## 1. 权威与范围
 
 - canonical：`docs/2026-08-20-opencode-web-source-first-convergence-plan.md`
-- 同版本事实源：OpenCode 1.18.18源码 + A1–A10/WP/E1–E7/E1b/E4b/E5b真实样本 + bridge mapping。
-- 已实施：C1–C7、SSV2单写者/单ingest约束、严格shape、协议variant/agent镜像、iOS variant UI、能力真实性。
-- 新证据：E2b 已证明真实 1.18.18 HTTP history 含 populated reasoning；原“遇到 reasoning 整体 hydrate fail”的设计结论已撤回。direct-SSE reasoning、v2 generation、OD-3 future/unsupported项仍未实施。
+- 同版本事实源：OpenCode 1.18.18 源码、A1–A10/WP/E1–E7/E1b/E4b/E5b 真实样本及 bridge mapping。
+- 已实施并验收：C1–C7、SSV2 单写者/单 ingest、严格 shape、协议 variant/agent 镜像、iOS variant UI、能力真实性，以及 E2b persisted reasoning hydrate 修复。
+- direct-SSE reasoning、v2 generation 与 OD-3 future/unsupported 项仍按设计保持未实施。
 
-## 2. 最终review-fix链
+## 2. Review-fix 收敛链
 
 | 审计 | 发现 | 最终状态 |
 |---|---|---|
-| audit-008 | C4双ingest、question identity、strict shape、variant UI | directive-009/010修复 |
-| audit-009 | question source identity/cold recovery与strict tail | directive-010修复 |
-| audit-010 | SSE gap terminal reconciliation与真实并发缺口 | directive-011修复 |
-| audit-011 | terminal后late asked/stale recovery重开reply mapping | directive-012修复 |
-| audit-012 | lifecycle拒绝GET row后lookup仍无条件返回 | directive-013修复 |
-| audit-013 | 无新增缺口 | **verified** |
-| owner UI / directive-014 | 任意抽样 OpenCode session 立即 `projection.hydrate_failed`；根因为 E2 结论错误地拒绝真实 HTTP persisted reasoning | **technical repair verified；owner retest pending** |
+| audit-008 | C4 双 ingest、question identity、strict shape、variant UI | directive-009/010 修复 |
+| audit-009 | question source identity/cold recovery 与 strict tail | directive-010 修复 |
+| audit-010 | SSE gap terminal reconciliation 与真实并发缺口 | directive-011 修复 |
+| audit-011 | terminal 后 late asked/stale recovery 重开 reply mapping | directive-012 修复 |
+| audit-012 | lifecycle 拒绝 GET row 后 lookup 仍无条件返回 | directive-013 修复 |
+| audit-013 | 无新增技术缺口 | verified |
+| owner UI / audit-014 | persisted reasoning 导致任意 OpenCode session hydrate 失败 | directive-014 修复并 verified；owner 重测通过 |
 
-## 3. 最终独立证据
+## 3. 最终三轨状态
 
-- `go test ./go-bridge -run 'TestAudit01[123]' -count=20 -timeout 6m`：PASS（201.7s）。
-- `go test -race ./agent/opencode-web -run 'TestAudit01[0123]|TestQuestion' -count=20 -timeout 5m`：PASS（12.3s）。
-- `go test ./... -count=1 -timeout 10m`、vet、build：PASS。
-- fresh隔离OpenCode 1.18.18 `TestSandboxC6C7`：question、pending reload、answer/reject reopen、todo、permission、mutation全部PASS。
-- runtime：8777来自 `/Applications/CordCodeLink.app`；4096 owner-managed保持；4398/4399回收。
-- iOS相关代码沿用directive-010已验证的11/11定向测试与真机安装证据；audit-011至013无iOS改动。
+| 轨道 | 状态 | 证据 |
+|---|---|---|
+| exec-plan | ✅ 75/75 proven | `.exec-plan/state/plan-aac740e7f4ae.json` |
+| supervisor | ✅ verified | audit-014 |
+| owner 真机产品验收 | ✅ accepted for closeout | `owner-acceptance-2026-08-21.md` |
 
-## 4. 核心架构结论
+owner 在 iPhone + MacBridge 的真实路径上覆盖了 12 类场景：首轮/多轮消息、历史重进、模型/agent/variant、provider error、Abort、官方 Web 外部 turn、permission、question、Todo Dock、rename/archive/delete、断网重连。第 1–4、6–12 项有逐项 ✅；第 5 项没有单独勾选，本报告仅依据 owner 明确的整体判断“测试结果基本符合预期，可以收尾”将产品轨道关闭，不把它伪记为逐项显式通过。
 
-- OpenCode 1.18.18是唯一verified generation；v2/unknown fail closed。
-- timeline只有一个EventPublisher/Kernel ingest owner；iOS ProjectionStore仍是唯一messages writer。
-- question pending、terminal、recovery与resolve由同一lifecycle admission控制；terminal不会回pending、恢复mapping或经stale GET再次提交。
-- pending fresh-process reload恢复原interaction Dock；resolved fresh-process history没有原 `que_…` ID，只hydrate证据支持的tool activity，不伪造Dock。
-- provider/config/agent/todo/mutation均严格按同版本shape处理；无legacy fallback、递归shape搜索或假成功。
+## 4. 最终技术边界
 
-## 5. 三轨状态
+- OpenCode 1.18.18 是唯一 verified generation；v2/unknown fail closed。
+- timeline 只有一个 EventPublisher/Kernel ingest owner；iOS ProjectionStore 是唯一 messages writer。
+- question pending、terminal、recovery 与 resolve 由同一 lifecycle admission 控制，terminal 不会回 pending 或被 stale GET 再提交。
+- provider/config/agent/todo/mutation 均严格按同版本 shape 处理，无 legacy fallback、递归 shape 搜索或假成功。
+- persisted HTTP history reasoning 已支持 hydrate；direct-SSE live reasoning 因缺同版本真实样本继续不实现、不广告。
+- directive-014 广域 race 中发现的 Claude 测试 fixture 全局状态竞争可在基线复现，是独立技术债，不阻塞本计划关闭。
 
-| 轨道 | 状态 |
-|---|---|
-| exec-plan proven | ✅ 75/75 |
-| supervisor verified | ✅ audit-014 |
-| owner真机UI矩阵 | ⏳ message-page 重试已放行 |
+## 5. 收口结论
 
-developer完成directive-014、监工独立审计通过、owner重新执行canonical §8测试矩阵并逐项回报后，才能宣布OpenCode Web产品验收done。
+OpenCode Web source-first convergence 计划已完成，监工模式退出，不再下发后续 directive。其他 agent 当前进行中的独立产品改动不属于本计划的完成证据，也未被本次收口提交吸收。

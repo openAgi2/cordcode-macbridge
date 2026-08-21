@@ -5,7 +5,16 @@
   "design_doc_hash": "b09c4c46c2bb8217fc17ec1951d5c939c166d3bb",
   "design_doc_changed": true,
   "activated_at": "2026-08-20T14:40:12Z",
-  "active_mode": true,
+  "active_mode": false,
+  "owner_acceptance": {
+    "status": "accepted",
+    "received_at": "2026-08-21T11:32:03Z",
+    "artifact": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/owner-acceptance-2026-08-21.md",
+    "matrix_rows": 12,
+    "explicit_pass_rows": [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12],
+    "overall_owner_verdict": "accepted-for-closeout",
+    "row_5_note": "No individual checkmark was supplied; acceptance is based on the owner's explicit overall closeout judgement and is not recorded as an explicit per-row pass."
+  },
   "directives": [
     {
       "number": 1,
@@ -439,5 +448,5 @@
     }
   ],
   "current_directive_number": 14,
-  "last_updated": "2026-08-21T04:58:21Z"
+  "last_updated": "2026-08-21T11:32:03Z"
 }
