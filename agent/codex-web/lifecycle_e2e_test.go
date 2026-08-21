@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +32,43 @@ func e2eEnabled(t *testing.T) bool {
 }
 
 func e2eSetup(t *testing.T) (bin, home, workDir string) {
+	t.Helper()
+	return e2eSetupBase(t, "http://127.0.0.1:1/v1", nil)
+}
+
+// e2eMockProvider 启动 Phase 0 的本地 mock Responses provider（stdlib 脚本，
+// 只控制上游模型行为），返回其 base_url。
+func e2eMockProvider(t *testing.T) string {
+	t.Helper()
+	script, err := filepath.Abs(filepath.Join("..", "..", "scripts", "codex-web-phase0", "mock_provider.py"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var outBuf strings.Builder
+	cmd := exec.Command("python3", "-u", script, "0")
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &outBuf
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start mock provider: %v", err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		// 脚本打印实际监听端口（纯数字一行；取首个纯数字 token，容忍 stderr 交错）
+		for _, field := range strings.Fields(outBuf.String()) {
+			if _, err := strconv.Atoi(field); err == nil {
+				return "http://127.0.0.1:" + field + "/v1"
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("mock provider 未就绪：%s", outBuf.String())
+	return ""
+}
+
+// e2eSetupBase 是 e2e 环境组装：短路径 CODEX_HOME + standalone 种子 + mockpi 配置。
+// providerBaseURL 指向不可达端口（lifecycle 用）或本地 mock provider（history/turn 用）。
+func e2eSetupBase(t *testing.T, providerBaseURL string, _ []string) (bin, home, workDir string) {
 	t.Helper()
 	bin, err := ResolveCodexBinary()
 	if err != nil {
@@ -50,14 +88,14 @@ func e2eSetup(t *testing.T) (bin, home, workDir string) {
 	if err := os.Symlink(bin, filepath.Join(cur, "codex")); err != nil {
 		t.Fatal(err)
 	}
-	cfg := `model = "mock-model"
+	cfg := fmt.Sprintf(`model = "mock-model"
 model_provider = "mockpi"
 
 [model_providers.mockpi]
 name = "Mock"
-base_url = "http://127.0.0.1:1/v1"
+base_url = %q
 wire_api = "responses"
-`
+`, providerBaseURL)
 	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
