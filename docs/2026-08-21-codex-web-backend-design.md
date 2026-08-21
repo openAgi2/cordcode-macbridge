@@ -1,7 +1,7 @@
 # codex-web Backend 设计（官方 app-server API 调用 + bridge-v1 协议翻译）
 
 - 日期：2026-08-21
-- 状态：**评审冻结版 v1.5；四轮评审最终 APPROVE，评审周期结束；未实施；下一步仅执行 Phase 0 真实样本冻结与共享运行时 Gate**
+- 状态：**v1.6；评审冻结（v1.5，四轮 APPROVE）+ Phase 0 已完成并裁决 PASS（2026-08-22，见 [gate-verdict](2026-08-21-codex-web-phase0-gate-verdict.md)）；v1.6 仅按 §3.0/§21.2 回写 Phase 0 实测分歧（§22）；下一步 Phase 1**
 - 参考方案：[2026-08-16-dsh-web-backend-design.md](2026-08-16-dsh-web-backend-design.md)
 - 一轮评审：[2026-08-21-codex-web-backend-design-review.md](2026-08-21-codex-web-backend-design-review.md)
 - 二轮评审：[2026-08-21-codex-web-backend-design-review-r2.md](2026-08-21-codex-web-backend-design-review-r2.md)
@@ -9,7 +9,7 @@
 - 四轮确认评审：[2026-08-21-codex-web-backend-design-review-r4.md](2026-08-21-codex-web-backend-design-review-r4.md)
 - 历史前置分析（仅作问题来源，已降级，不授权实施）：[2026-08-21-codex-web-backend-feasibility-analysis.md](2026-08-21-codex-web-backend-feasibility-analysis.md)
 - Codex 源码 pin：`536f86e5cc9ec1ff38457d099bf320b9d08eeeba`
-- 本机官方二进制：`codex-cli 0.148.0-alpha.21`
+- 本机官方二进制：`codex-cli 0.148.0-alpha.21`（设计时）；**Phase 0 实施时实测 `0.149.0-alpha.4`**（ChatGPT.app 内嵌，版本漂移已按 §3.2 记录，schema 与 pin 逐项吻合）
 - 不变约束：CordCode 初衷 + SSV2 十二条护栏 + source-first/真实样本纪律
 
 > [!IMPORTANT]
@@ -400,13 +400,14 @@ SSV2 key 必须包含 backend id，禁止只按 thread id 合并。实验期 UI 
    `codex app-server --listen ws://127.0.0.1:<managed-port>`；这仍是官方 runtime，
    但必须在诊断中标为 `managed-loopback-ws`，不能冒充用户已有共享 daemon。
 
-连接 daemon control socket 有两种实现路径：
+连接 daemon control socket 有两种实现路径（Phase 0 实测修正，见 §22-2）：
 
-- Go 直接连接 Unix domain socket并讲 app-server JSON-RPC；或
-- 启动轻量 `codex app-server proxy --sock <path>`，由 proxy 把 stdio 字节转发到官方 socket。
+- Go 直连 Unix domain socket，**讲 WebSocket over UDS**（control socket 由官方 `accept_async` 做
+  WS 升级；裸 newline JSON 连接会被立即关闭；每个 JSON-RPC 消息一个 WS text 帧）；或
+- 启动轻量 `codex app-server proxy --sock <path>`——它是**纯字节中继**，客户端仍需自行讲 WS。
 
 proxy 只是 transport adapter，不拥有 agent session；与旧 backend “每 session 启一个 app-server”不同。
-最终选型必须由 Phase 0 的断线、server request 与多连接样本决定，不依据实现便利拍板。
+Phase 0 已完成断线、server request 与多连接取样（dumps/ownership、reconnect、gate-terminal）。
 
 ### 6.2 探活不等于能力就绪
 
@@ -459,7 +460,7 @@ CordCode 产品能力仍有证据/目录缺口，不得广告；♻️ Bridge �
 | MCP/dynamic tool | item + server request | ✅ | 仅对真实取样过的 variant 广告 |
 | plan/todos | plan item/notification | ✅/🧪 | plan item started/completed 生命周期 ✅；`item/plan/delta` 流式为 experimental 🧪，取样和版本门控后才消费 |
 | context usage | `thread/tokenUsage/updated` | ✅ | 使用官方窗口与累计量，不本地估算 |
-| command approval | `item/commandExecution/requestApproval` | ✅/🧪 | 基础 request/response ✅；`availableDecisions`/`additionalPermissions` 为 experimental 字段，未开 `experimentalApi` 时被 server 剥除，一期 UI 必须按剥除后形状可用 |
+| command approval | `item/commandExecution/requestApproval` | ✅/🧪 | 基础 request/response ✅；`availableDecisions`/`additionalPermissions` 为 experimental 字段（stable schema 剥除）。**Phase 0 实测修正（§22-1）**：`additionalPermissions` 未开 `experimentalApi` 时被 server 出站剥除，但 `availableDecisions` 在未声明 experimentalApi 的连接上仍**物理到达**（accept / acceptWithExecpolicyAmendment / cancel）；一期 UI 仍按可能缺失兼容，不依赖其稳定性；合法 decision 为 accept/cancel/结构化变体，cancel 后 turn 终态 interrupted |
 | file approval | `item/fileChange/requestApproval` | ✅ | 不把“发送 response 成功”提前显示为修改成功 |
 | permission request | `item/permissions/requestApproval` | ✅ | 呈现官方 `RequestPermissionProfile`，响应 `GrantedPermissionProfile + scope`；该载荷没有 `availableDecisions` |
 | structured questions | `item/tool/requestUserInput` | 🧪 | README/类型均标 experimental；core config 当前默认启用且不由 `experimentalApi` 门控，仍须按 🧪 取得 1–3 题真实样本并版本门控 |
@@ -490,6 +491,10 @@ CordCode 产品能力仍有证据/目录缺口，不得广告；♻️ Bridge �
 - delta 与 completed snapshot 必须避免双发；codec 从官方 reducer/样本独立实现，旧 codec 只作输出回归对照；
 - 未识别通知记录 method/version，不能导致连接崩溃；若它影响已广告 capability，则该 capability
   fail closed，而不是递归猜字段；
+- **通知分级（Phase 0 实测，§22-4）**：`thread/started`、`thread/status/changed` 等全局通知在订阅前
+  也会到达所有连接；`turn/started`、`item/*`、`turn/completed` 只发已订阅连接且**不重放**。
+  mid-turn attach 收到后续 delta 与唯一终态，但 `turn/started` 不补发——turn 开始事实由
+  `thread/status/changed(active)` + `item/started` 推导，完成仍只认 `turn/completed`；
 - JSON-RPC error 的 code/message/data 原样进入诊断，面向 iOS 的错误可以本地化，但不能丢原文。
 
 ### 7.2 审批与提问
@@ -516,9 +521,9 @@ Phase 0 设计采样与 adapter skeleton；它**不是 wire fixture**。每一�
 | `thread/start` | stable `model`、`modelProvider` 可选；provider 仅创建时输入 | 字段剥除/默认值、custom provider id 来源、thread 回显的 effective model/provider |
 | `turn/start` | 可选 `model`，对本 turn 及后续 turn 生效；无 `modelProvider` | model override 的生效范围、失败原文及 completed 回显 |
 | `turn/steer` | `expectedTurnId` 必填；仅 active regular turn | regular/review/compact 三类结果与 stale turnId error |
-| `config/read` | response `config` 内部是 snake_case；typed `model_provider`；flatten `additional`；response/config 带 `ExperimentalApi` | `additional.model_providers` 的存在性、组成、形状与 experimental 剥除；敏感值脱敏 |
+| `config/read` | response `config` 内部是 snake_case；typed `model_provider`；flatten `additional`；response/config 带 `ExperimentalApi` | **Phase 0 已裁决（§22-3）**：0.149.0-alpha.4 实测 `additional = {}`，不含 `model_providers`；样本 dumps/models-config |
 | `item/tool/requestUserInput` | experimental；批 questions，答案按 question id 返回 | 1–3 题、单选/多选/自由文本、blocking 与 response 的完整物理载荷 |
-| command approval | 基础 request/response 稳定；`availableDecisions`/`additionalPermissions` experimental，未启用时可被剥除 | 开/关 `experimentalApi` 两组 fixture 与 resolved/completed 顺序 |
+| command approval | 基础 request/response 稳定；两字段 experimental（schema 剥除）；**Phase 0：wire 上 availableDecisions 不剥除、additionalPermissions 剥除**；decision 枚举 accept/cancel/结构化，cancel→interrupted | Phase 0 已采（dumps/interaction）；resolved→completed 顺序已入样本 |
 | permission approval | `RequestPermissionProfile` → `GrantedPermissionProfile + scope`；没有 command 的 `availableDecisions` | allow/deny/scope 与失败/断线行为 |
 | MCP elicitation | Form / `openai/form` / Url；`openai/form` 依赖 initialize capability | 三 variant request/response、capability absent 与取消/失败行为 |
 | plan | item started/completed 生命周期稳定；`item/plan/delta` experimental | 无 delta 与有 delta 两组 reducer 时间线 |
@@ -969,3 +974,21 @@ PASS/PARTIAL/FAIL 口径，也不提前广告任何 experimental capability。
 
 纯措辞偏好、重复总结、没有新证据的“再评一轮”不解除冻结。出现有效反证时，不允许静默补 fallback：
 必须保留样本、标注受影响 capability，按 §3.0 回写设计并重新裁决相关 Phase 0 Gate。
+
+## 22. Phase 0 采纳记录（2026-08-22，PASS）
+
+对应裁决文档：[2026-08-21-codex-web-phase0-gate-verdict.md](2026-08-21-codex-web-phase0-gate-verdict.md)。
+证据：`scripts/codex-web-phase0/`（schemas 692 文件、§12 九组样本、TUI 三场景、宿主实测；四套
+validate 共 136 断言全 PASS，可复跑）。共享运行时 Gate：**PASS**（Terminal daemon+默认 TUI 路径
+成立；Desktop 独立 stdio runtime、VS Code 未安装如实 blocked，见 gate-hosts/README.md）。
+
+| # | 回写项 | 证据落点 |
+|---|---|---|
+| 1 | command approval `availableDecisions` 未声明 experimentalApi 也物理到达（`additionalPermissions` 被剥除）；decision accept/cancel/结构化，cancel→interrupted | dumps/interaction + validate_schemas s13 |
+| 2 | control socket = WebSocket over UDS（JSON-RPC 每 WS text 帧一消息）；`app-server proxy` 为纯字节中继 | unix_socket.rs `accept_async` + gate-terminal 实测 |
+| 3 | `config/read` 的 flatten `additional` 实测为空，不含 `model_providers` | dumps/models-config |
+| 4 | 通知分级与不重放边界（全局 vs 订阅者级） | gate-terminal README 关键发现 2 |
+
+未回写技术路线：Phase 0 全部实测与 v1.5 冻结设计一致或仅作事实修正；Phase 1–6 计划不变。
+实施注意的新事实清单（daemon 前置、同 daemon 多连接 resume 无冲突、`excludeTurns` 需
+experimentalApi、pending server request 不重放、TUI PTY 驱动细节等）见裁决文档 §4。
