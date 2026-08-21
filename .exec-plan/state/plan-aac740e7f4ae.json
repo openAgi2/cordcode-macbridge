@@ -30,18 +30,18 @@
   },
   "reports": {
     "completion_report_path": "docs/2026-08-20-opencode-web-source-first-convergence-plan完成情况.md",
-    "completion_report_status": "stale",
-    "last_generated_at": "2026-08-21T04:35:09Z",
-    "based_on_queue_hash": "directive-014-owner-ui-reopened",
+    "completion_report_status": "current",
+    "last_generated_at": "2026-08-21T04:58:21Z",
+    "based_on_queue_hash": "audit-014-verified-owner-ui-pending",
     "completion": {
       "path": "docs/2026-08-20-opencode-web-source-first-convergence-plan完成情况.md",
-      "status": "stale",
-      "based_on_queue_hash": "directive-014-owner-ui-reopened",
-      "generated": "2026-08-21T04:35:09Z",
-      "attestation_note": "owner UI failed message-page acceptance; directive-014 reopened persisted-reasoning hydrate implementation/tests/regression"
+      "status": "current",
+      "based_on_queue_hash": "audit-014-verified-owner-ui-pending",
+      "generated": "2026-08-21T04:58:21Z",
+      "attestation_note": "exec-plan 75/75 proven and supervisor audit-014 verified the E2b technical repair; owner message-page UI retry remains a separate pending completion track"
     }
   },
-  "updated_at": "2026-08-21T04:52:33.133996+00:00",
+  "updated_at": "2026-08-21T04:58:21Z",
   "todos": [
     {
       "id": "gate-a-inventory-impl",
@@ -2028,15 +2028,15 @@
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "Red-first: agent-level TestAudit014_E2bHistoryReasoningMapping reproduced errUnsupportedReasoning on the old code (correspondence control without reasoning passed); full-path TestAudit014_ProjectionHydrateWithReasoning reproduced the get_session_projection hydrate error on the old code and now hydrates with each assistant turn's reasoning exactly once, step markers producing zero parts, answer text unpolluted. Stale E2-conclusion tests updated: TestGetRichSessionHistoryMapsParts now pins mapping + fail-closed/whitespace negatives; TestReasoningExplicitlyUnsupportedOnAllCarriers renamed to ...OnLiveCarriers with the corrected scope. Live reasoning still surfaces the unsupported error and never EventThinking.",
+        "summary": "Supervisor audit-014 independently re-ran the adapter and real handler hydrate suites, full tests, and a 20x race run restricted to affected E2b/live-boundary tests. E2b maps reasoning once per turn in order, step markers remain absent, answer text remains separate, and live reasoning stays explicitly unsupported. The broad Projection|Hydrate race command still hits a baseline Claude fixture race outside this change.",
         "artifacts": [
           "agent/opencode-web/history.go",
           "agent/opencode-web/audit014_reasoning_test.go",
           "go-bridge/audit014_fullpath_test.go"
         ],
-        "checked_at": "2026-08-21T04:52:33.133996+00:00"
+        "checked_at": "2026-08-21T04:58:21Z"
       }
     },
     {
@@ -2055,15 +2055,15 @@
         "required": true,
         "status": "present",
         "method": "mixed",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "Regressions: go test ./agent/opencode-web -run 'Reasoning|RichSessionHistory|History' -count=1 PASS; go test ./go-bridge -run 'OpenCodeWeb|Projection|Hydrate|Audit01' -count=1 PASS; go test ./... -count=1 all green; go vet/build PASS; check_canonical_execution_design.py --self-test PASS. Race: the directive command's go-bridge leg hits a PRE-EXISTING race in TestClaudeFileRelayStartedBeforeHydrate (claude_file_relay_test.go:23 vs handlers_relay.go:725) reproduced on the base commit with my changes stashed — unrelated Claude relay surface, not introduced by this fix; with that pair skipped the full command passes. Real-owner read-only preflight via a local instance of the SAME product build (auth dev-mode, opencode-web pointed at the owner-managed 4096 read-only): 100 listed sessions, 87 reasoning-bearing; the 3 sessions matching the exact convicted shape (4 rows / 2 assistant / 2 populated reasoning) ALL hydrate OK with reasoning exactly once per turn (turns=2, reasoning=2, multi=0); heavy shapes 643/383/378/324/279 reasoning parts also hydrate OK, zero multi-reasoning turns, zero hydrate_failed. 4096 untouched (reads only, PID 48742 unchanged); no 4398/4399 used; local preflight instance reclaimed by PID. Mac Release rebuilt (runtime be6a1d7) and reinstalled: 8777 = PID 32592 from /Applications/CordCodeLink.app. iOS unchanged per directive.",
+        "summary": "Supervisor audit-014 independently verified targeted/full/vet/build/canonical checks, affected 20x race coverage, and installed binary commit/path. The broad race failure was reproduced at pre-fix commit 04d54e2 and is the same out-of-scope Claude test-fixture race. Developer owner-data statistics remain explicitly self-attested because no reusable artifact was retained; pre-directive owner HTTP evidence plus independent E2b full-path tests are sufficient to release the owner UI retry. 4096 remains owner-managed and 4398/4399 are free; iOS is unchanged.",
         "artifacts": [
           "agent/opencode-web/history.go",
           "agent/opencode-web/audit014_reasoning_test.go",
           "go-bridge/audit014_fullpath_test.go"
         ],
-        "checked_at": "2026-08-21T04:52:33.133996+00:00"
+        "checked_at": "2026-08-21T04:58:21Z"
       }
     }
   ]

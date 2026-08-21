@@ -1,6 +1,6 @@
 # OpenCode Web source-first convergence 完成情况
 
-> **产品状态（2026-08-21）**：owner UI 首轮验收失败 ❌——抽样 OpenCode session 均返回 `projection.hydrate_failed`；其他 backend 正常。audit-013 仅代表此前技术轨检查通过，不能覆盖本次真实产品失败。监工指令14已下发，exec-plan与完成报告重新打开。
+> **产品状态（2026-08-21）**：directive-014 E2b 技术修复已经 exec-plan proven + 监工 audit-014 verified；现在放行 owner 真机重新打开 OpenCode session。owner 回报前产品仍不得标记 done。
 
 ## 1. 权威与范围
 
@@ -19,7 +19,7 @@
 | audit-011 | terminal后late asked/stale recovery重开reply mapping | directive-012修复 |
 | audit-012 | lifecycle拒绝GET row后lookup仍无条件返回 | directive-013修复 |
 | audit-013 | 无新增缺口 | **verified** |
-| owner UI / directive-014 | 任意抽样 OpenCode session 立即 `projection.hydrate_failed`；根因为 E2 结论错误地拒绝真实 HTTP persisted reasoning | **repair in progress** |
+| owner UI / directive-014 | 任意抽样 OpenCode session 立即 `projection.hydrate_failed`；根因为 E2 结论错误地拒绝真实 HTTP persisted reasoning | **technical repair verified；owner retest pending** |
 
 ## 3. 最终独立证据
 
@@ -42,8 +42,8 @@
 
 | 轨道 | 状态 |
 |---|---|
-| exec-plan proven | ❌ directive-014 reopened |
-| supervisor verified | ⏳ audit-014 pending（audit-013仅覆盖旧边界） |
-| owner真机UI矩阵 | ❌ message-page 场景失败，修复后重测 |
+| exec-plan proven | ✅ 75/75 |
+| supervisor verified | ✅ audit-014 |
+| owner真机UI矩阵 | ⏳ message-page 重试已放行 |
 
 developer完成directive-014、监工独立审计通过、owner重新执行canonical §8测试矩阵并逐项回报后，才能宣布OpenCode Web产品验收done。

@@ -408,7 +408,7 @@
       "kind": "owner-acceptance-repair",
       "title": "Owner UI reasoning hydrate repair",
       "issued_at": "2026-08-21T04:35:09Z",
-      "status": "issued",
+      "status": "verified",
       "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-014-owner-ui-reasoning-hydrate-repair.md",
       "scope": "Mac opencode-web persisted reasoning history/hydrate and owning tests; iOS unchanged",
       "constraints": [
@@ -421,19 +421,23 @@
       ],
       "resolved_from_owner_acceptance": true,
       "roadmap_diff": {
-        "design_commit": null,
+        "design_commit": "git:04d54e2",
         "summary": "E2b read-only owner evidence proves populated reasoning already exists in 1.18.18 HTTP history. Canonical §6.3 now supports persisted reasoning hydrate while keeping direct-SSE reasoning separately blocked; audit-013 cannot constitute product completion after the owner UI failure.",
         "checker": "python3 agent/opencode-web/testdata/official-1.18.18/harness/check_canonical_execution_design.py --self-test"
       },
+      "linked_commits": [
+        "git:be6a1d7",
+        "git:eba2a94"
+      ],
       "report": {
-        "received_at": null,
-        "markdown_path": null,
-        "audited": false,
-        "audit_verdict": null,
-        "audit_path": null
+        "received_at": "2026-08-21T04:58:21Z",
+        "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-014-owner-ui-reasoning-hydrate-repair.md",
+        "audited": true,
+        "audit_verdict": "verified",
+        "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-014-owner-ui-reasoning-hydrate-repair.md"
       }
     }
   ],
   "current_directive_number": 14,
-  "last_updated": "2026-08-21T04:35:09Z"
+  "last_updated": "2026-08-21T04:58:21Z"
 }
