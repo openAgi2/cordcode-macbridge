@@ -106,7 +106,7 @@ func countingSSEServe(t *testing.T) (*httptest.Server, *int32) {
 		case "/session":
 			_, _ = w.Write([]byte(`[]`))
 		case "/agent":
-			_, _ = w.Write([]byte(`[{"name":"build","mode":"primary","native":true}]`))
+			_, _ = w.Write([]byte(`[{"name":"build","mode":"primary","native":true,"description":"general coding"}]`))
 		case "/provider":
 			_, _ = w.Write([]byte(testProviderCatalog))
 		case "/global/event":
@@ -343,7 +343,7 @@ func TestReconnectKeepsSingleSubscriberRoute(t *testing.T) {
 		case "/session":
 			_, _ = w.Write([]byte(`[]`))
 		case "/agent":
-			_, _ = w.Write([]byte(`[{"name":"build","mode":"primary","native":true}]`))
+			_, _ = w.Write([]byte(`[{"name":"build","mode":"primary","native":true,"description":"general coding"}]`))
 		case "/provider":
 			_, _ = w.Write([]byte(testProviderCatalog))
 		case "/global/event":

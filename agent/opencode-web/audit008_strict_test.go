@@ -90,7 +90,7 @@ func TestAudit008_ProviderCatalogStrictDestructive(t *testing.T) {
 	}{
 		{"connected model row without id (map-key fallback must die)", base(`"echo":{"name":"Echo"}`), "missing required id"},
 		{"connected model row wrong id type", base(`"echo":{"id":42}`), "malformed"},
-		{"connected provider row without id", `{"all":[{"models":{"x":{"id":"x"}}}],"connected":["localmock"]}`, "missing required provider id"},
+		{"connected provider row without id", `{"all":[{"models":{"x":{"id":"x"}}}],"default":{},"connected":["localmock"]}`, "missing required provider id"},
 		{"envelope without all", `{"default":{},"connected":["localmock"]}`, "shape not recognized"},
 		{"top-level array", `[]`, "shape not recognized"},
 	}
@@ -102,7 +102,7 @@ func TestAudit008_ProviderCatalogStrictDestructive(t *testing.T) {
 	}
 	// Unconnected providers with imperfect rows are FILTERED (not guessed into
 	// the catalog) — the physical row is never repaired.
-	loose, err := parseProviderCatalog([]byte(`{"all":[{"id":"localmock","models":{"echo":{"id":"echo"}}},{"id":"unconnected","models":{"weird":{}}}],"connected":["localmock"]}`))
+	loose, err := parseProviderCatalog([]byte(`{"all":[{"id":"localmock","models":{"echo":{"id":"echo"}}},{"id":"unconnected","models":{"weird":{}}}],"default":{},"connected":["localmock"]}`))
 	if err != nil {
 		t.Fatalf("unconnected sloppy rows must be filtered, not fatal: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestAudit008_AgentRegistryStrictDestructive(t *testing.T) {
 		wantFail string
 	}{
 		{"row missing name", `[{"mode":"primary"}]`, "missing required name"},
-		{"row wrong name type", `[{"name":42}]`, "malformed"},
+		{"row wrong name type", `[{"name":42}]`, "must be a string"},
 		{"non-object row", `[7]`, "must be an object"},
 		{"envelope", `{"data":[]}`, "bare array"},
 		{"scalar", `42`, "bare array"},

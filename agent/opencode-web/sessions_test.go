@@ -33,7 +33,11 @@ type recordingServe struct {
 	// statusAfter answers METHOD /path with a bare code once more than
 	// `after` matching requests have been served (200-then-404 convergence
 	// probes: {"code":404,"after":1} keeps the first GET 200).
-	statusAfter  map[string]recordingStatusAfter
+	statusAfter map[string]recordingStatusAfter
+	// statusBodies ("METHOD /path" → {code, body}) answers with an arbitrary
+	// status AND body — the destructive matrix needs e.g. 202 + body `true`
+	// to prove non-200 codes fail even with a success-shaped body.
+	statusBodies map[string]recordingStatusBody
 	hitCounters map[string]int
 	requests    []recordedRequest
 }
@@ -41,6 +45,11 @@ type recordingServe struct {
 type recordingStatusAfter struct {
 	code int
 	after int
+}
+
+type recordingStatusBody struct {
+	code int
+	body string
 }
 
 type recordedRequest struct {
@@ -89,6 +98,13 @@ func (s *recordingServe) handler() http.HandlerFunc {
 		if code, ok := s.statusOverrides[key]; ok {
 			s.mu.Unlock()
 			w.WriteHeader(code)
+			return
+		}
+		if sb, ok := s.statusBodies[key]; ok {
+			s.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(sb.code)
+			_, _ = io.WriteString(w, sb.body)
 			return
 		}
 		if sa, ok := s.statusAfter[key]; ok {
@@ -348,7 +364,7 @@ func TestUsageZeroTopLevelStillComputesFromMessages(t *testing.T) {
 	agent, _ := newDataAgent(t, map[string]string{
 		"/session/ses_x":         `{"id":"ses_x","tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}},"model":null}`,
 		"/session/ses_x/message": lastAssistantPayload(),
-		"/provider":              `{"all":[{"id":"zhipuai-coding-plan","models":{"glm-4.7":{"id":"glm-4.7","limit":{"context":128000}}}}],"connected":["zhipuai-coding-plan"]}`,
+		"/provider":              `{"all":[{"id":"zhipuai-coding-plan","models":{"glm-4.7":{"id":"glm-4.7","limit":{"context":128000}}}}],"connected":["zhipuai-coding-plan"],"default":{}}`,
 	}, "/tmp/proj")
 
 	usage, err := agent.GetSessionContextUsage(context.Background(), "ses_x")
@@ -376,7 +392,7 @@ func TestUsageZeroTopLevelStillComputesFromMessages(t *testing.T) {
 func TestUsageNoWindowReturnsNilNotFabricated(t *testing.T) {
 	agent, _ := newDataAgent(t, map[string]string{
 		"/session/ses_x/message": lastAssistantPayload(),
-		"/provider":              `{"all":[{"id":"someprov","models":{"glm-4.7":{"id":"glm-4.7"}}}],"connected":["someprov"]}`,
+		"/provider":              `{"all":[{"id":"someprov","models":{"glm-4.7":{"id":"glm-4.7"}}}],"connected":["someprov"],"default":{}}`,
 	}, "/tmp/proj")
 	usage, err := agent.GetSessionContextUsage(context.Background(), "ses_x")
 	if err != nil {
@@ -390,7 +406,7 @@ func TestUsageNoWindowReturnsNilNotFabricated(t *testing.T) {
 func TestUsageNoAssistantTokensReturnsNil(t *testing.T) {
 	agent, _ := newDataAgent(t, map[string]string{
 		"/session/ses_x/message": `[{"info":{"role":"assistant"},"parts":[]}]`,
-		"/provider":              `{"all":[{"id":"p","models":{"m":{"id":"m","limit":{"context":1000}}}}],"connected":["p"]}`,
+		"/provider":              `{"all":[{"id":"p","models":{"m":{"id":"m","limit":{"context":1000}}}}],"connected":["p"],"default":{}}`,
 	}, "/tmp")
 	usage, err := agent.GetSessionContextUsage(context.Background(), "ses_x")
 	if err != nil || usage != nil {
@@ -406,7 +422,7 @@ func TestAvailableModelsQualifiedNamesAndWindows(t *testing.T) {
 			"glm-4.6":{"id":"glm-4.6","limit":{"context":64000}}}},
 		{"id":"never-configured","name":"Stranger","models":{
 			"stranger-model":{"id":"stranger-model","limit":{"context":999000}}}}
-	],"connected":["zhipuai-coding-plan"]}`,
+	],"connected":["zhipuai-coding-plan"],"default":{}}`,
 	}, "/tmp")
 	models := agent.AvailableModels(context.Background())
 	if len(models) != 2 {
@@ -509,7 +525,7 @@ func TestListProjectsMapsWorktree(t *testing.T) {
 
 func TestListAgentsMapsAndEmptyIsLegal(t *testing.T) {
 	agent, _ := newDataAgent(t, map[string]string{
-		"/agent": `[{"name":"build","mode":"primary","description":"general coding","hidden":false,"native":true},{"name":"plan","mode":"plan"}]`,
+		"/agent": `[{"name":"build","mode":"primary","description":"general coding","hidden":false,"native":true},{"name":"plan","mode":"subagent","description":"planning","native":false}]`,
 	}, "/tmp")
 	agents, err := agent.ListAgents(context.Background())
 	if err != nil {
@@ -521,7 +537,7 @@ func TestListAgentsMapsAndEmptyIsLegal(t *testing.T) {
 	if agents[0].Name != "build" || agents[0].Mode != "primary" || !agents[0].Native {
 		t.Fatalf("first = %+v", agents[0])
 	}
-	if agents[1].Name != "plan" || agents[1].Mode != "plan" {
+	if agents[1].Name != "plan" || agents[1].Mode != "subagent" {
 		t.Fatalf("second = %+v", agents[1])
 	}
 

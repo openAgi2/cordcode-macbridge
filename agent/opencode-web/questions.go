@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -82,7 +83,152 @@ func (a *Agent) questionResolved(id string) (ocwQuestionRequest, bool) {
 	if ok {
 		delete(a.pendingQuestions, id)
 	}
+	if a.projectedQuestions != nil {
+		delete(a.projectedQuestions, id)
+	}
 	return req, ok
+}
+
+// claimQuestionProjection is the exactly-once gate for projecting an
+// interaction into the Kernel route (directive-010): test-and-set under the
+// question lock, so the live question.asked emission and the GET /question
+// recovery converge to ONE projection per interaction instead of double
+// ingesting. The claim clears when the interaction resolves.
+func (a *Agent) claimQuestionProjection(id string) bool {
+	if id == "" {
+		return false
+	}
+	a.questionMu.Lock()
+	defer a.questionMu.Unlock()
+	if a.projectedQuestions == nil {
+		a.projectedQuestions = make(map[string]bool)
+	}
+	if a.projectedQuestions[id] {
+		return false
+	}
+	a.projectedQuestions[id] = true
+	return true
+}
+
+// recoverPendingQuestions is the directive-010 cold/gap recovery: pull the
+// official GET /question list, keep ONLY the target session's rows, and
+// re-present still-pending interactions through the ONE Kernel route. The
+// owning turn comes from the same source-proven rules as the live path —
+// subscriber-observed facts first, then ONE authoritative history transaction
+// (the assistant message's parentID, with the parent verified as a real user
+// message of that same transaction). No ActiveTurnID fallback, no phantom
+// turn, no raw second path: rows that cannot be proven are dropped with a
+// warning. `directory` is the session's own directory when the caller already
+// knows it (StartSession resume fetched it), else "" falls back to the agent
+// work dir.
+func (a *Agent) recoverPendingQuestions(ctx context.Context, c *Client, sub *sseSubscriber, sessionID, directory string) {
+	if sessionID == "" || sub == nil {
+		return
+	}
+	if strings.TrimSpace(directory) == "" {
+		directory = a.GetWorkDir()
+	}
+	rows, err := a.fetchPendingQuestions(ctx, c)
+	if err != nil {
+		slog.Warn("opencode-web: pending-question recovery fetch failed (no recovery this cycle)",
+			"session", sessionID, "error", err)
+		return
+	}
+	for _, row := range rows {
+		if row.SessionID != sessionID {
+			continue // the official list is serve-wide; only the target session is processed
+		}
+		if row.ID == "" || row.Tool.MessageID == "" || row.Tool.CallID == "" {
+			slog.Warn("opencode-web: recovered pending question lacks tool identity — dropped",
+				"session", sessionID, "question", row.ID)
+			continue
+		}
+		turnID, ok := sub.provenQuestionTurn(sessionID, row.Tool)
+		if !ok {
+			turnID, ok = a.historyProvenQuestionTurn(ctx, c, sessionID, row.Tool.MessageID, directory)
+		}
+		if !ok {
+			slog.Warn("opencode-web: recovered pending question failed source-proven owning-turn correlation — dropped (no phantom turn)",
+				"session", sessionID, "question", row.ID, "toolMessageID", row.Tool.MessageID)
+			continue
+		}
+		a.noteQuestionAsked(row)
+		if !a.claimQuestionProjection(row.ID) {
+			// The live asked frame won the GET+live race — already projected once.
+			continue
+		}
+		sub.emit(core.Event{
+			Type:      core.EventUserInputRequested,
+			SessionID: sessionID,
+			TurnID:    turnID,
+			ItemID:    row.Tool.CallID,
+			UserInput: questionInteraction(row),
+		})
+		slog.Info("opencode-web: recovered pending question through the Kernel route",
+			"session", sessionID, "question", row.ID, "turn", turnID)
+	}
+}
+
+// historyProvenQuestionTurn maps tool.messageID to its owning turn from ONE
+// authoritative GET /session/{id}/message transaction (directive-010): the
+// row must exist, be an assistant message, carry a parentID, and that parent
+// must be a real user message of the same transaction — the same A7 shape
+// the live path observes as frames. Anything else fails closed.
+func (a *Agent) historyProvenQuestionTurn(ctx context.Context, c *Client, sessionID, messageID, directory string) (string, bool) {
+	if sessionID == "" || messageID == "" {
+		return "", false
+	}
+	raw, err := c.fetchJSON(ctx, c.apiPath("/session/")+sessionID+"/message", directory)
+	if err != nil {
+		return "", false
+	}
+	items, err := decodeListPayload(raw)
+	if err != nil {
+		return "", false
+	}
+	type rowFacts struct{ id, role, sessionID, parentID string }
+	rows := make([]rowFacts, 0, len(items))
+	for _, item := range items {
+		var message map[string]any
+		if err := json.Unmarshal(item, &message); err != nil {
+			continue
+		}
+		info := message
+		if sub, ok := message["info"].(map[string]any); ok {
+			info = sub
+		}
+		rows = append(rows, rowFacts{
+			id:        firstString(info, "id"),
+			role:      firstString(info, "role"),
+			sessionID: firstString(info, "sessionID"),
+			parentID:  firstString(info, "parentID"),
+		})
+	}
+	var parentID string
+	for _, row := range rows {
+		if row.id != messageID {
+			continue
+		}
+		if row.role != "assistant" {
+			return "", false
+		}
+		// The endpoint is session-scoped; an explicit other-session id in the
+		// row is a provenance violation, not a membership proof.
+		if row.sessionID != "" && row.sessionID != sessionID {
+			return "", false
+		}
+		parentID = row.parentID
+		break
+	}
+	if parentID == "" {
+		return "", false
+	}
+	for _, row := range rows {
+		if row.id == parentID && row.role == "user" {
+			return parentID, true
+		}
+	}
+	return "", false
 }
 
 // questionInteraction maps the official asked request to the canonical

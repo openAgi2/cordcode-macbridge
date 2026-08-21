@@ -42,7 +42,12 @@ type sseSubscriber struct {
 	stateMu      sync.Mutex
 	messageRoles map[string]string
 	messageIDs   map[string]string
-	partKinds    map[string]string
+	// assistantTurns is the directive-010 source-proven turn fact: assistant
+	// messageID → info.parentID (the user message that owns the turn). A7
+	// proves the live assistant message.updated frames carry parentID, so the
+	// fact is frame-derived — never guessed from position or timing.
+	assistantTurns map[string]string
+	partKinds      map[string]string
 	partContent  map[string]string
 	completed    map[string]bool
 	activeTurns  map[string]string // sessionID -> owning user/message turn id
@@ -85,6 +90,7 @@ func newSSESubscriber(ctx context.Context, a *Agent, c *Client) *sseSubscriber {
 		cancel:                 cancel,
 		messageRoles:           make(map[string]string),
 		messageIDs:             make(map[string]string),
+		assistantTurns:         make(map[string]string),
 		partKinds:              make(map[string]string),
 		partContent:            make(map[string]string),
 		completed:              make(map[string]bool),
@@ -173,6 +179,10 @@ func (s *sseSubscriber) run(body io.ReadCloser) {
 			resp, err := s.dial()
 			if err == nil {
 				body = resp.Body
+				// Directive-010: an asked frame lost inside the stream gap is
+				// re-derived after the redial from GET /question plus the same
+				// source-proven rules (bounded; failure = honest no-recovery).
+				s.recoverPendingAfterReconnect()
 				break
 			}
 			if s.ctx.Err() != nil {
@@ -215,6 +225,25 @@ func (s *sseSubscriber) healArmedTurnsAfterDrop() {
 			slog.Info("opencode-web SSE: settling turn that went idle during stream gap", "session", sessionID)
 			s.emitResultOnce(sessionID)
 		}
+	}
+}
+
+// recoverPendingAfterReconnect reconciles pending questions for every routed
+// session right after a redial (directive-010): asked frames lost inside the
+// stream gap are re-derived from GET /question under the same source-proven
+// rules and re-presented through the existing Kernel route — never a second
+// stream, never a raw second path.
+func (s *sseSubscriber) recoverPendingAfterReconnect() {
+	s.agent.routesMu.Lock()
+	sessions := make([]string, 0, len(s.agent.routes))
+	for sessionID := range s.agent.routes {
+		sessions = append(sessions, sessionID)
+	}
+	s.agent.routesMu.Unlock()
+	for _, sessionID := range sessions {
+		ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+		s.agent.recoverPendingQuestions(ctx, s.client, s, sessionID, "")
+		cancel()
 	}
 }
 
@@ -377,6 +406,15 @@ func (s *sseSubscriber) handleMessageUpdated(properties map[string]any, sessionI
 			s.messageIDs[messageID] = sessionID
 		}
 		s.stateMu.Unlock()
+	}
+	// Directive-010: record the assistant→owning-turn fact (info.parentID) the
+	// question correlation verifies against. Only assistant rows carry it.
+	if sessionID != "" && messageID != "" && role == "assistant" {
+		if parentID := firstString(info, "parentID"); parentID != "" {
+			s.stateMu.Lock()
+			s.assistantTurns[messageID] = parentID
+			s.stateMu.Unlock()
+		}
 	}
 	if sessionID != "" && role == "user" {
 		s.resetCompletion(sessionID)
@@ -735,20 +773,26 @@ func (s *sseSubscriber) handleQuestionAsked(properties map[string]any, sessionID
 	if req.SessionID != "" {
 		sessionID = req.SessionID
 	}
-	// Audit-008 W1.2 — source-proven identity ONLY. The A7 asked frame carries
-	// tool.messageID (the assistant message of the running turn) and
-	// tool.callID (the tool item). The owning TURN is the subscriber's own
-	// armed turn correlation for this session — never a guess from array
-	// position, time, or random values. An asked frame whose session has no
-	// armed turn (or no tool identity) is fail-closed: it must not project a
-	// phantom turn.
-	turnID := s.activeTurn(sessionID)
-	if turnID == "" || req.Tool.MessageID == "" {
-		slog.Warn("opencode-web SSE: question.asked without source-proven turn identity — dropped (no phantom turn)",
-			"session", sessionID, "question", req.ID, "toolMessageID", req.Tool.MessageID)
+	// Audit-009/directive-010 — source-proven identity ONLY. The asked frame
+	// must carry BOTH tool.messageID (a subscriber-OBSERVED assistant message
+	// of this same session) and tool.callID. The owning TURN is that message's
+	// parentID fact, cross-checked against the armed turn: activeTurn is the
+	// verification, never the source of identity (a stale previous-turn or
+	// other-session messageID fails closed — no phantom turn, no registry
+	// entry, no canonical event).
+	turnID, ok := s.provenQuestionTurn(sessionID, req.Tool)
+	if !ok {
+		slog.Warn("opencode-web SSE: question.asked failed source-proven correlation — dropped (no phantom turn)",
+			"session", sessionID, "question", req.ID,
+			"toolMessageID", req.Tool.MessageID, "toolCallID", req.Tool.CallID)
 		return
 	}
 	s.agent.noteQuestionAsked(req)
+	if !s.agent.claimQuestionProjection(req.ID) {
+		// The interaction was already projected once (GET /question recovery
+		// won the race) — converging to one part means no second emission.
+		return
+	}
 	s.emit(core.Event{
 		Type:      core.EventUserInputRequested,
 		SessionID: sessionID,
@@ -758,9 +802,36 @@ func (s *sseSubscriber) handleQuestionAsked(properties map[string]any, sessionID
 	})
 }
 
+// provenQuestionTurn is the live correlation gate (directive-010): tool.messageID
+// must map through the subscriber's own frame-derived facts to an assistant
+// message of THIS session whose parentID owning turn is the session's armed
+// turn. Unknown, other-session, non-assistant, parentless, and stale
+// previous-turn message ids all fail closed.
+func (s *sseSubscriber) provenQuestionTurn(sessionID string, tool ocwQuestionTool) (string, bool) {
+	if sessionID == "" || tool.MessageID == "" || tool.CallID == "" {
+		return "", false
+	}
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	if s.messageIDs[tool.MessageID] != sessionID {
+		return "", false
+	}
+	if s.messageRoles[tool.MessageID] != "assistant" {
+		return "", false
+	}
+	turn := s.assistantTurns[tool.MessageID]
+	if turn == "" || turn != s.activeTurns[sessionID] {
+		return "", false
+	}
+	return turn, true
+}
+
 // handleQuestionResolved maps question.replied/rejected to the canonical
 // user_input_resolved terminal. resolutionSource is other_client — the SERVER
-// broadcast this, so the answer may have come from any client.
+// broadcast this, so the answer may have come from any client. The turn rides
+// the same frame-derived facts that projected the pending part (registry
+// tool.messageID → parentID); the reducer settles it in place via the stored
+// interaction identity, so no activeTurn fallback exists here.
 func (s *sseSubscriber) handleQuestionResolved(eventType string, properties map[string]any, sessionID string) {
 	requestID := firstString(properties, "requestID", "id")
 	if sid := firstString(properties, "sessionID"); sid != "" {
@@ -774,10 +845,16 @@ func (s *sseSubscriber) handleQuestionResolved(eventType string, properties map[
 		status = core.UserInputStatusRejected
 	}
 	req, _ := s.agent.questionResolved(requestID)
+	turnID := ""
+	if req.Tool.MessageID != "" {
+		s.stateMu.Lock()
+		turnID = s.assistantTurns[req.Tool.MessageID]
+		s.stateMu.Unlock()
+	}
 	s.emit(core.Event{
 		Type:      core.EventUserInputResolved,
 		SessionID: sessionID,
-		TurnID:    s.activeTurn(sessionID),
+		TurnID:    turnID,
 		ItemID:    knownToolCallID(&req),
 		UserInput: &core.UserInputInteraction{
 			InteractionID:    requestID,

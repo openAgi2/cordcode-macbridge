@@ -198,7 +198,7 @@ func TestSelectionChainLevels(t *testing.T) {
 	t.Run("level2-agent-model", func(t *testing.T) {
 		// planner pins a model; no explicit selection → agent model rides.
 		agent, serve := newC3C5Agent(t, map[string]string{
-			"/agent": `[{"name":"build","mode":"primary","native":true},{"name":"planner","mode":"primary","model":"localmock/alpha"}]`,
+			"/agent": `[{"name":"build","mode":"primary","native":true,"description":"d"},{"name":"planner","mode":"primary","native":false,"description":"p","model":"localmock/alpha"}]`,
 			"/config": `{"model":"localmock/alpha"}`,
 		})
 		sess, _ := agent.StartSession(context.Background(), "")
@@ -233,7 +233,7 @@ func TestSelectionChainLevels(t *testing.T) {
 	t.Run("level3b-config-when-no-provider-default", func(t *testing.T) {
 		// No /provider default → legacy /config.model decides.
 		agent, serve := newC3C5Agent(t, map[string]string{
-			"/provider": `{"all":[{"id":"localmock","models":{"alpha":{"id":"alpha"},"echo":{"id":"echo"},"zeta":{"id":"zeta"}}}],"connected":["localmock"]}`,
+			"/provider": `{"all":[{"id":"localmock","models":{"alpha":{"id":"alpha"},"echo":{"id":"echo"},"zeta":{"id":"zeta"}}}],"connected":["localmock"],"default":{}}`,
 			"/config":   `{"model":"localmock/alpha"}`,
 		})
 		sess, _ := agent.StartSession(context.Background(), "")
@@ -252,7 +252,7 @@ func TestSelectionChainLevels(t *testing.T) {
 		// No explicit, no agent model, no provider default, no /config route:
 		// the resume-adopted server session model (recent) rides the send.
 		agent, serve := newC3C5Agent(t, map[string]string{
-			"/provider":    `{"all":[{"id":"localmock","models":{"alpha":{"id":"alpha"},"echo":{"id":"echo"},"zeta":{"id":"zeta"}}}],"connected":["localmock"]}`,
+			"/provider":    `{"all":[{"id":"localmock","models":{"alpha":{"id":"alpha"},"echo":{"id":"echo"},"zeta":{"id":"zeta"}}}],"connected":["localmock"],"default":{}}`,
 			"/session/ses_x":              `{"id":"ses_x","directory":"/tmp/proj","model":{"id":"echo","providerID":"localmock"}}`,
 			"/session/ses_x/prompt_async": `{}`,
 		})
@@ -290,7 +290,7 @@ func TestSelectionChainLevels(t *testing.T) {
 		// No default anywhere: the provider's first catalog model (stable
 		// sorted → alpha) is the fallback.
 		agent, serve := newC3C5Agent(t, map[string]string{
-			"/provider": `{"all":[{"id":"localmock","models":{"alpha":{"id":"alpha"},"echo":{"id":"echo"},"zeta":{"id":"zeta"}}}],"connected":["localmock"]}`,
+			"/provider": `{"all":[{"id":"localmock","models":{"alpha":{"id":"alpha"},"echo":{"id":"echo"},"zeta":{"id":"zeta"}}}],"connected":["localmock"],"default":{}}`,
 		})
 		sess, _ := agent.StartSession(context.Background(), "")
 		defer sess.Close()
@@ -308,7 +308,7 @@ func TestSelectionChainLevels(t *testing.T) {
 // validate — the honest zero-POST error.
 func TestNoValidModelZeroPOST(t *testing.T) {
 	agent, serve := newC3C5Agent(t, map[string]string{
-		"/provider": `{"all":[{"id":"localmock","models":{"alpha":{"id":"alpha"}}}],"connected":[]}`,
+		"/provider": `{"all":[{"id":"localmock","models":{"alpha":{"id":"alpha"}}}],"connected":[],"default":{}}`,
 		"/config":   `{"model":"localmock/alpha"}`,
 	})
 	sess, _ := agent.StartSession(context.Background(), "")
@@ -328,7 +328,7 @@ func TestNoValidModelZeroPOST(t *testing.T) {
 // consulted when the provider default is absent (resolveDefaultModel order).
 func TestConfigShapeErrorFailsClosed(t *testing.T) {
 	agent, serve := newC3C5Agent(t, map[string]string{
-		"/provider": `{"all":[{"id":"localmock","models":{"alpha":{"id":"alpha"},"zeta":{"id":"zeta"}}}],"connected":["localmock"]}`,
+		"/provider": `{"all":[{"id":"localmock","models":{"alpha":{"id":"alpha"},"zeta":{"id":"zeta"}}}],"connected":["localmock"],"default":{}}`,
 		"/config":   `["not","an","object"]`,
 	})
 	sess, _ := agent.StartSession(context.Background(), "")

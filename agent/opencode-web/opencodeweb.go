@@ -117,8 +117,11 @@ type Agent struct {
 	// C6 §6.8: live structured-question requests (question.asked → pending;
 	// replied/rejected/ResolveUserInput success → cleared). The serve holds
 	// the single answer lock; this map is label-recovery state only.
-	questionMu       sync.Mutex
-	pendingQuestions map[string]ocwQuestionRequest
+	// projectedQuestions is the directive-010 exactly-once Kernel-projection
+	// claim per interactionID (live asked vs GET /question recovery converge).
+	questionMu          sync.Mutex
+	pendingQuestions    map[string]ocwQuestionRequest
+	projectedQuestions  map[string]bool
 
 	// C6 §6.9: the last todo.updated replacement list per session (control
 	// plane only — never a timeline part).

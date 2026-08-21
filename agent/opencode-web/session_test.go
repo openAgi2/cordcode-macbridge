@@ -98,7 +98,7 @@ func TestSendCarriesCatalogModelOnCreateAndPrompt(t *testing.T) {
 // error belongs to "no connected valid model at any level".
 func TestSendInvalidExplicitModelAdvances(t *testing.T) {
 	agent, serve := newSendAgent(t, map[string]string{
-		"/provider": `{"all":[{"id":"other-provider","models":{"other-model":{"id":"other-model","limit":{"context":1000}}}}],"connected":["other-provider"]}`,
+		"/provider": `{"all":[{"id":"other-provider","models":{"other-model":{"id":"other-model","limit":{"context":1000}}}}],"connected":["other-provider"],"default":{}}`,
 		"/session/ses_new/prompt_async": `{}`,
 	})
 	withCreateRoute(serve, `{"id":"ses_new"}`)
@@ -145,7 +145,7 @@ func TestSendFallsBackToConnectedDefaultModel(t *testing.T) {
 // Empty connected catalog = nothing usable: honest error, zero POST.
 func TestSendFailsWhenConnectedCatalogEmpty(t *testing.T) {
 	agent, serve := newSendAgent(t, map[string]string{
-		"/provider": `{"all":[{"id":"other-provider","models":{"other-model":{"id":"other-model","limit":{"context":1000}}}}],"connected":[]}`,
+		"/provider": `{"all":[{"id":"other-provider","models":{"other-model":{"id":"other-model","limit":{"context":1000}}}}],"connected":[],"default":{}}`,
 	})
 	sess, err := agent.StartSession(context.Background(), "")
 	if err != nil {
@@ -268,7 +268,7 @@ func TestSendHTTPErrorSurfacesBody(t *testing.T) {
 		"POST /session":                 {200, `{"id":"ses_new"}`},
 		"/session/ses_new/prompt_async": {400, "model glm-9.9 not available on this provider"},
 		"/provider":                     {200, testProviderCatalog},
-		"/agent":                         {200, `[{"name":"build","mode":"primary","native":true}]`},
+		"/agent":                         {200, `[{"name":"build","mode":"primary","native":true,"description":"general coding"}]`},
 	})
 	agent := agentAgainstMux(t, mux)
 	agent.SetModel("zhipuai-coding-plan/glm-4.7")

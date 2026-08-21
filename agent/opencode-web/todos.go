@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -89,6 +90,18 @@ func decodeTodoRows(raw []byte) ([]core.Todo, error) {
 		priority, ok := row["priority"].(string)
 		if !ok || priority == "" {
 			return nil, fmt.Errorf("opencode-web: todo row %d missing required priority", i)
+		}
+		// Directive-010 tail: the verified row is EXACTLY
+		// {content,status,priority} — an extra or alias key (e.g. a `text`
+		// alias next to a real content) fails the whole replacement too; the
+		// last-known snapshot stays untouched.
+		if len(row) != 3 {
+			keys := make([]string, 0, len(row))
+			for key := range row {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			return nil, fmt.Errorf("opencode-web: todo row %d carries keys beyond the verified {content,status,priority} (alias/unknown keys rejected): %v", i, keys)
 		}
 		todos = append(todos, core.Todo{Content: content, Status: status, Priority: priority})
 	}

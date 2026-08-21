@@ -137,15 +137,38 @@ func parseProviderCatalog(raw []byte) (*ocwModelCatalog, error) {
 	if trimmed := trimSpaceBytes(raw); len(trimmed) == 0 || trimmed[0] != '{' {
 		return nil, fmt.Errorf("opencode-web: provider catalog shape not recognized — expected the verified 1.18.18 {all,connected,default} envelope; failing closed instead of recursive shape guessing (C1): body=%s", truncateForError(string(raw)))
 	}
+	// Directive-010 tail: the three top-level keys must be EXPLICITLY present
+	// with the verified types — missing and null are shape failures, legal
+	// empties are not (`{"all":[],"default":{},"connected":[]}` parses to an
+	// honest empty catalog).
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		return nil, fmt.Errorf("opencode-web: provider catalog malformed (wrong types in a verified row): %w", err)
+	}
+	for _, key := range []string{"all", "default", "connected"} {
+		value, ok := top[key]
+		if !ok || string(trimSpaceBytes(value)) == "null" {
+			return nil, fmt.Errorf("opencode-web: provider catalog shape not recognized — top-level %q must be explicitly present with the verified type (missing/null is not the legal empty); failing closed (C1)", key)
+		}
+	}
+	var allRows []json.RawMessage
+	if err := json.Unmarshal(top["all"], &allRows); err != nil {
+		return nil, fmt.Errorf("opencode-web: provider catalog malformed: top-level \"all\" must be an array: %w", err)
+	}
+	var connectedIDs []string
+	if err := json.Unmarshal(top["connected"], &connectedIDs); err != nil {
+		return nil, fmt.Errorf("opencode-web: provider catalog malformed: top-level \"connected\" must be a string array: %w", err)
+	}
+	var defaults map[string]string
+	if err := json.Unmarshal(top["default"], &defaults); err != nil {
+		return nil, fmt.Errorf("opencode-web: provider catalog malformed: top-level \"default\" must be the provider→model object: %w", err)
+	}
 	var envelope ocwProviderEnvelope
 	if err := json.Unmarshal(raw, &envelope); err != nil {
 		return nil, fmt.Errorf("opencode-web: provider catalog malformed (wrong types in a verified row): %w", err)
 	}
-	if len(envelope.All) == 0 {
-		return nil, fmt.Errorf("opencode-web: provider catalog shape not recognized — expected the verified 1.18.18 {all,connected,default} envelope; failing closed instead of recursive shape guessing (C1): body=%s", truncateForError(string(raw)))
-	}
 	connected := map[string]bool{}
-	for _, id := range envelope.Connected {
+	for _, id := range connectedIDs {
 		connected[id] = true
 	}
 	catalog := &ocwModelCatalog{

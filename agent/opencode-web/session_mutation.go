@@ -91,8 +91,10 @@ func (a *Agent) RenameSession(ctx context.Context, sessionID, title string) (*co
 	if err != nil {
 		return nil, fmt.Errorf("opencode-web: rename session %s: %w", sessionID, err)
 	}
-	if code >= 400 {
-		return nil, fmt.Errorf("opencode-web: rename session %s: HTTP %d: %s", sessionID, code, truncateForError(string(raw)))
+	// Directive-010: evidence-proven success is HTTP 200 EXACTLY (E6). Other
+	// 2xx codes are unproven for this route and fail closed.
+	if code != http.StatusOK {
+		return nil, fmt.Errorf("opencode-web: rename session %s: evidence-proven success is HTTP 200 only, got %d: %s", sessionID, code, truncateForError(string(raw)))
 	}
 	var entry ocwSessionEntry
 	if err := json.Unmarshal(raw, &entry); err != nil {
@@ -131,8 +133,11 @@ func (a *Agent) DeleteSession(ctx context.Context, sessionID string) error {
 	if err != nil {
 		return fmt.Errorf("opencode-web: delete session %s: %w", sessionID, err)
 	}
-	if code >= 400 {
-		return fmt.Errorf("opencode-web: delete session %s: HTTP %d: %s", sessionID, code, truncateForError(string(raw)))
+	// Directive-010: evidence-proven success is HTTP 200 EXACTLY (E7) — a
+	// non-200 answer fails even when the body reads `true`, and no catalog
+	// signal is sent on that path.
+	if code != http.StatusOK {
+		return fmt.Errorf("opencode-web: delete session %s: evidence-proven success is HTTP 200 only, got %d: %s", sessionID, code, truncateForError(string(raw)))
 	}
 	// E7: the ONLY evidence-proven success body is the bare boolean `true`.
 	// false/null/object/empty/other 2xx bodies all fail (audit-008 W2.3).
@@ -180,8 +185,9 @@ func (a *Agent) ArchiveSession(ctx context.Context, sessionID string, archivedAt
 	if err != nil {
 		return nil, fmt.Errorf("opencode-web: archive session %s: %w", sessionID, err)
 	}
-	if code >= 400 {
-		return nil, fmt.Errorf("opencode-web: archive session %s: HTTP %d: %s", sessionID, code, truncateForError(string(raw)))
+	// Directive-010: evidence-proven success is HTTP 200 EXACTLY.
+	if code != http.StatusOK {
+		return nil, fmt.Errorf("opencode-web: archive session %s: evidence-proven success is HTTP 200 only, got %d: %s", sessionID, code, truncateForError(string(raw)))
 	}
 	var entry ocwSessionEntry
 	if err := json.Unmarshal(raw, &entry); err != nil {
@@ -190,8 +196,16 @@ func (a *Agent) ArchiveSession(ctx context.Context, sessionID string, archivedAt
 	if entry.ID == "" || entry.ID != sessionID {
 		return nil, fmt.Errorf("opencode-web: archive session %s: response missing or mismatched id %q", sessionID, entry.ID)
 	}
-	if entry.Time == nil || entry.Time.Archived <= 0 {
-		return nil, fmt.Errorf("opencode-web: archive session %s: response missing time.archived", sessionID)
+	// Directive-010: the serve echoes the archived timestamp it persisted for
+	// THIS request — missing, zero, or a different value than the requested
+	// ms is a failed confirmation, not success. (Epoch-ms integers are exact
+	// in float64; the direct comparison also rejects fractional echoes.)
+	var archived float64
+	if entry.Time != nil {
+		archived = entry.Time.Archived
+	}
+	if archived != float64(ms) {
+		return nil, fmt.Errorf("opencode-web: archive session %s: response time.archived %.0f does not confirm the requested %d", sessionID, archived, ms)
 	}
 	a.signalCatalogRefresh()
 	return ocwSessionEntryToInfo(&entry), nil

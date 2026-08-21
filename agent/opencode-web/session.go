@@ -55,6 +55,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 		cancel: cancel,
 	}
 	resume := sessionID != "" && sessionID != core.ContinueSession
+	resumeDirectory := ""
 	if resume {
 		s.chatID.Store(sessionID)
 		// Register the route BEFORE the stream starts: the global read loop
@@ -65,6 +66,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 		// model (truth from the server, never a local default).
 		if info, err := a.fetchSessionInfo(ctx, c, sessionID); err == nil && info.Model != nil && info.Model.ID != "" {
 			s.model.Store(&ocwModelRef{ProviderID: info.Model.ProviderID, ID: info.Model.ID})
+			resumeDirectory = info.Directory
 		}
 	}
 	sub, err := a.acquireGlobalSubscriber(c)
@@ -76,6 +78,15 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 		return nil, fmt.Errorf("opencode-web session: SSE connect: %w", err)
 	}
 	s.sub = sub
+	if resume {
+		// Directive-010: route re-established — reconcile this session's
+		// still-pending questions (process restart, missed asked frames) via
+		// GET /question under the same source-proven rules, projected through
+		// this one Kernel route. Bounded; failure = honest no-recovery.
+		rctx, rcancel := context.WithTimeout(ctx, 5*time.Second)
+		a.recoverPendingQuestions(rctx, c, sub, sessionID, resumeDirectory)
+		rcancel()
+	}
 	if pending := a.GetModel(); pending != "" {
 		providerID, modelID := parseQualifiedModel(pending)
 		if modelID != "" {

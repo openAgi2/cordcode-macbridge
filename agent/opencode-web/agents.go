@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
@@ -27,13 +28,11 @@ type ocwAgentEntry struct {
 }
 
 func (e ocwAgentEntry) descriptor() core.AgentDescriptor {
-	mode := e.Mode
-	if mode == "" {
-		mode = "primary"
-	}
+	// Directive-010: mode is guaranteed non-empty by the strict decoder — the
+	// former missing-mode→primary default is deleted (audit-009 tail).
 	d := core.AgentDescriptor{
 		Name:        e.Name,
-		Mode:        mode,
+		Mode:        e.Mode,
 		Hidden:      e.Hidden,
 		Native:      e.Native,
 		Description: e.Description,
@@ -45,6 +44,10 @@ func (e ocwAgentEntry) descriptor() core.AgentDescriptor {
 }
 
 // decodeAgentRegistry strictly parses the verified bare-array /agent shape.
+// Directive-010 tail: every verified row must EXPLICITLY carry name,
+// description, mode, and native with the correct type (the 1.18.18 built-ins
+// all do) — missing or null fails the whole list; only same-version-evidenced
+// optional fields (model/displayName/hidden) stay optional.
 func decodeAgentRegistry(raw []byte) ([]ocwAgentEntry, error) {
 	trimmed := trimSpaceBytes(raw)
 	if len(trimmed) == 0 || trimmed[0] != '[' {
@@ -60,12 +63,48 @@ func decodeAgentRegistry(raw []byte) ([]ocwAgentEntry, error) {
 		if len(rowBytes) == 0 || rowBytes[0] != '{' {
 			return nil, fmt.Errorf("opencode-web: agent registry row %d must be an object, got: %s", i, truncateForError(string(row)))
 		}
+		var presence struct {
+			Name        json.RawMessage `json:"name"`
+			Description json.RawMessage `json:"description"`
+			Mode        json.RawMessage `json:"mode"`
+			Native      json.RawMessage `json:"native"`
+		}
+		if err := json.Unmarshal(row, &presence); err != nil {
+			return nil, fmt.Errorf("opencode-web: agent registry row %d malformed: %w", i, err)
+		}
+		type requiredField struct {
+			key    string
+			raw    json.RawMessage
+			isBool bool
+		}
+		for _, field := range []requiredField{
+			{"name", presence.Name, false},
+			{"description", presence.Description, false},
+			{"mode", presence.Mode, false},
+			{"native", presence.Native, true},
+		} {
+			if len(field.raw) == 0 || string(trimSpaceBytes(field.raw)) == "null" {
+				return nil, fmt.Errorf("opencode-web: agent registry row %d missing required %s (explicit presence + type are evidence-proven; no defaults)", i, field.key)
+			}
+			if field.isBool {
+				var b bool
+				if err := json.Unmarshal(field.raw, &b); err != nil {
+					return nil, fmt.Errorf("opencode-web: agent registry row %d field %s must be a boolean: %w", i, field.key, err)
+				}
+				continue
+			}
+			var s string
+			if err := json.Unmarshal(field.raw, &s); err != nil {
+				return nil, fmt.Errorf("opencode-web: agent registry row %d field %s must be a string: %w", i, field.key, err)
+			}
+			// name/mode are identifiers — empty strings carry no agent truth.
+			if field.key != "description" && strings.TrimSpace(s) == "" {
+				return nil, fmt.Errorf("opencode-web: agent registry row %d field %s must be non-empty", i, field.key)
+			}
+		}
 		var entry ocwAgentEntry
 		if err := json.Unmarshal(row, &entry); err != nil {
 			return nil, fmt.Errorf("opencode-web: agent registry row %d malformed: %w", i, err)
-		}
-		if entry.Name == "" {
-			return nil, fmt.Errorf("opencode-web: agent registry row %d missing required name", i)
 		}
 		out = append(out, entry)
 	}
@@ -123,10 +162,12 @@ func (a *Agent) resolvePromptAgent(ctx context.Context, c *Client, requested str
 		return "", "", fmt.Errorf("opencode-web: agent %q is not in the server's agent registry; refresh agents and pick one from list_agents", requested)
 	}
 	for _, entry := range entries {
+		// Mode is strict-decoded non-empty; the primary pick stays
+		// evidence-driven (the official composer's initial agent).
 		if entry.Hidden {
 			continue
 		}
-		if entry.Mode == "" || entry.Mode == "primary" {
+		if entry.Mode == "primary" {
 			return entry.Name, entry.Model, nil
 		}
 	}

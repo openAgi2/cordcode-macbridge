@@ -85,14 +85,22 @@ func armTurn(sub *sseSubscriber, sessionID, userMessageID string) {
 	sub.handleRawEvent(`{"payload":{"type":"message.updated","properties":{"info":{"id":"` + userMessageID + `","role":"user"},"sessionID":"` + sessionID + `"}}}`)
 }
 
+// armAssistant records the source-proven turn fact (directive-010): the
+// assistant message.updated frame carries info.parentID = the owning user
+// message (A7 frames 14→77: the fact precedes question.asked).
+func armAssistant(sub *sseSubscriber, sessionID, assistantMessageID, parentTurnID string) {
+	sub.handleRawEvent(`{"payload":{"type":"message.updated","properties":{"info":{"id":"` + assistantMessageID + `","role":"assistant","parentID":"` + parentTurnID + `"},"sessionID":"` + sessionID + `"}}}`)
+}
+
 // TestQuestionAskedMapsToCanonicalUserInput: the A7 asked frame translates
 // once into EventUserInputRequested carrying the source-proven identity
-// (owning armed turn + tool.callID) with deterministic option ids and the
-// pending registry armed.
+// (observed assistant message's parentID turn + tool.callID) with
+// deterministic option ids and the pending registry armed.
 func TestQuestionAskedMapsToCanonicalUserInput(t *testing.T) {
 	agent, _ := questionAgent(t, map[string]string{"/provider": `{}`})
 	sub := newDrivenSubscriber(t, agent)
 	armTurn(sub, "ses_q", "msg_u0")
+	armAssistant(sub, "ses_q", "msg_1", "msg_u0")
 	sub.handleRawEvent(a7AskedFrame)
 
 	events := drain(sub)
@@ -202,6 +210,8 @@ func TestQuestionRejectUsesOwnEndpoint(t *testing.T) {
 func TestQuestionResolutionEventsFromServer(t *testing.T) {
 	agent, _ := questionAgent(t, map[string]string{"/provider": `{}`})
 	sub := newDrivenSubscriber(t, agent)
+	armTurn(sub, "ses_q", "msg_u0")
+	armAssistant(sub, "ses_q", "msg_1", "msg_u0")
 	sub.handleRawEvent(a7AskedFrame)
 	drain(sub)
 
@@ -310,7 +320,7 @@ func TestRenameSessionContract(t *testing.T) {
 	}
 	// 404 NotFoundError preserved.
 	agent2, _ := questionAgent(t, map[string]string{})
-	if _, err := agent2.RenameSession(context.Background(), "ses_missing", "x"); err == nil || !strings.Contains(err.Error(), "HTTP 404") {
+	if _, err := agent2.RenameSession(context.Background(), "ses_missing", "x"); err == nil || !strings.Contains(err.Error(), "404") {
 		t.Fatalf("missing session rename must surface 404, got %v", err)
 	}
 }
@@ -347,7 +357,7 @@ func TestDeleteSessionConvergenceWithoutInventedEvents(t *testing.T) {
 	// Second delete on a 404-answering serve surfaces the error — never a
 	// fabricated success.
 	agent2, _ := questionAgent(t, map[string]string{})
-	if err := agent2.DeleteSession(context.Background(), "ses_gone"); err == nil || !strings.Contains(err.Error(), "HTTP 404") {
+	if err := agent2.DeleteSession(context.Background(), "ses_gone"); err == nil || !strings.Contains(err.Error(), "404") {
 		t.Fatalf("second delete must surface 404, got %v", err)
 	}
 }
@@ -356,7 +366,7 @@ func TestDeleteSessionConvergenceWithoutInventedEvents(t *testing.T) {
 // and return no fabricated metadata.
 func TestMutationFailuresPreserveMetadata(t *testing.T) {
 	agent, _ := questionAgent(t, map[string]string{})
-	if _, err := agent.ArchiveSession(context.Background(), "ses_x", mustTime()); err == nil || !strings.Contains(err.Error(), "HTTP 404") {
+	if _, err := agent.ArchiveSession(context.Background(), "ses_x", mustTime()); err == nil || !strings.Contains(err.Error(), "404") {
 		t.Fatalf("archive on missing session must fail visibly, got %v", err)
 	}
 }

@@ -33,11 +33,26 @@ type ssePushServe struct {
 	frames chan string
 	subbed chan struct{} // closed on first SSE dial
 	dials  int
+	// Directive-010 recovery surfaces: the official pending-question list and
+	// the per-session message history the cold/gap recovery reads. Defaults
+	// (empty list / empty history) keep directive-009 behavior untouched.
+	pendingQuestionsJSON string
+	historyBySession     map[string]string
+	questionFetches      int
+	// connDrops holds one done-channel per live SSE connection; drop() closes
+	// them all to simulate a mid-flight stream gap.
+	connDrops []chan struct{}
 }
 
 func newSSEPushServe(t *testing.T) *ssePushServe {
 	t.Helper()
-	s := &ssePushServe{t: t, frames: make(chan string, 256), subbed: make(chan struct{})}
+	s := &ssePushServe{
+		t:                    t,
+		frames:               make(chan string, 256),
+		subbed:               make(chan struct{}),
+		pendingQuestionsJSON: "[]",
+		historyBySession:     map[string]string{},
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		_, pass, ok := r.BasicAuth()
@@ -51,15 +66,23 @@ func newSSEPushServe(t *testing.T) *ssePushServe {
 		case "/session":
 			_, _ = w.Write([]byte(`[]`))
 		case "/agent":
-			_, _ = w.Write([]byte(`[{"name":"build","mode":"primary","native":true}]`))
+			_, _ = w.Write([]byte(`[{"name":"build","mode":"primary","native":true,"description":"general coding"}]`))
 		case "/provider":
 			_, _ = w.Write([]byte(`{"all":[{"id":"localmock","models":{"echo":{"id":"echo","variants":{"high":{},"low":{}}}}}],"default":{"localmock":"echo"},"connected":["localmock"]}`))
 		case "/config":
 			_, _ = w.Write([]byte(`{}`))
+		case "/question":
+			s.mu.Lock()
+			s.questionFetches++
+			body := s.pendingQuestionsJSON
+			s.mu.Unlock()
+			_, _ = w.Write([]byte(body))
 		case "/global/event":
+			drop := make(chan struct{})
 			s.mu.Lock()
 			s.dials++
 			first := s.dials == 1
+			s.connDrops = append(s.connDrops, drop)
 			s.mu.Unlock()
 			if first {
 				close(s.subbed)
@@ -71,17 +94,56 @@ func newSSEPushServe(t *testing.T) *ssePushServe {
 				case frame := <-s.frames:
 					_, _ = fmt.Fprintf(w, "data: %s\n\n", frame)
 					w.(http.Flusher).Flush()
+				case <-drop:
+					return
 				case <-r.Context().Done():
 					return
 				}
 			}
 		default:
+			// Per-session message history (the authoritative recovery truth).
+			if strings.HasPrefix(r.URL.Path, "/session/") && strings.HasSuffix(r.URL.Path, "/message") {
+				sid := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/session/"), "/message")
+				s.mu.Lock()
+				body := s.historyBySession[sid]
+				s.mu.Unlock()
+				if body == "" {
+					body = "[]"
+				}
+				_, _ = w.Write([]byte(body))
+				return
+			}
 			w.WriteHeader(http.StatusNotFound)
 		}
 	})
 	s.server = httptest.NewServer(mux)
 	t.Cleanup(s.server.Close)
 	return s
+}
+
+// setPendingQuestions installs the official GET /question answer.
+func (s *ssePushServe) setPendingQuestions(body string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pendingQuestionsJSON = body
+}
+
+// setHistory installs the per-session GET /session/{id}/message answer.
+func (s *ssePushServe) setHistory(sessionID, body string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.historyBySession[sessionID] = body
+}
+
+// drop closes every live SSE connection — the subscriber must heal, redial,
+// and reconcile pending questions for its routed sessions (directive-010).
+func (s *ssePushServe) drop() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, drop := range s.connDrops {
+		close(drop)
+	}
+	s.connDrops = nil
 }
 
 func (s *ssePushServe) push(payload map[string]any) {
@@ -106,8 +168,16 @@ func (s *ssePushServe) dialCount() int {
 // relay for the session, and the passive subscription — all at once, exactly
 // like the running bridge.
 func newAuditHarness(t *testing.T) (*Handlers, *ssePushServe) {
+	return newAuditHarnessWithOptions(t, func(*ssePushServe) {})
+}
+
+// newAuditHarnessWithOptions lets a test shape the serve (pending questions,
+// history) BEFORE the adapter connects — the directive-010 recovery reads
+// them during StartSession.
+func newAuditHarnessWithOptions(t *testing.T, configure func(*ssePushServe)) (*Handlers, *ssePushServe) {
 	t.Helper()
 	serve := newSSEPushServe(t)
+	configure(serve)
 	agentAny, err := ocweb.New(map[string]any{
 		"work_dir":          "/tmp/audit008",
 		"opencode_web_url":  serve.server.URL,
@@ -257,6 +327,12 @@ func TestAudit008_QuestionReachesProjection(t *testing.T) {
 	// started by the user echo).
 	serve.push(map[string]any{"type": "message.updated", "properties": map[string]any{
 		"info": map[string]any{"id": "msg_u1", "role": "user"}, "sessionID": "ses_ocw1"}})
+	// Directive-010: the assistant message fact (info.parentID = owning turn)
+	// precedes question.asked on the real stream (A7 frames 14→77) — the
+	// correlation is messageID-proven, not activeTurn-assumed.
+	serve.push(map[string]any{"type": "message.updated", "properties": map[string]any{
+		"info": map[string]any{"id": "msg_a7_tool", "role": "assistant", "parentID": "msg_u1"},
+		"sessionID": "ses_ocw1"}})
 	// The real A7 asked frame shape (sanitized sample, identities preserved).
 	serve.push(map[string]any{"type": "question.asked", "properties": map[string]any{
 		"id": "que_a7", "sessionID": "ses_ocw1",
