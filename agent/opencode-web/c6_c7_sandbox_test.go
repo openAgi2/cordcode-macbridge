@@ -111,6 +111,83 @@ func TestSandboxC6C7(t *testing.T) {
 		t.Logf("question %s answered through the official reply route", interactionID)
 	})
 
+	// ── directive-010 question cold reload: a FRESH adapter process must ──
+	// re-present the still-pending interaction through GET /question + the
+	// authoritative history transaction (assistant parentID), on the real serve.
+	t.Run("question-reload", func(t *testing.T) {
+		sid := newSession()
+		sess, err := agent.StartSession(ctx, sid)
+		if err != nil {
+			t.Fatalf("StartSession: %v", err)
+		}
+		if err := sess.(core.PromptOptionsSender).SendWithOptions("A7_QUESTION pick red", nil, nil, core.PromptOptions{Agent: "build"}); err != nil {
+			t.Fatalf("send: %v", err)
+		}
+		var liveInteractionID, liveTurn string
+		deadline := time.After(60 * time.Second)
+		for liveInteractionID == "" {
+			select {
+			case ev := <-sess.Events():
+				if ev.Type == core.EventUserInputRequested && ev.UserInput != nil {
+					liveInteractionID = ev.UserInput.InteractionID
+					liveTurn = ev.TurnID
+				}
+			case <-deadline:
+				t.Fatal("live asked never surfaced; cannot stage the reload scenario")
+			}
+		}
+		// Leave the question PENDING and drop the session binding. The FRESH
+		// Agent below is the restarted process; the staging adapter only
+		// closes its route (Stop would cancel the shared suite agent).
+		_ = sess.Close()
+
+		freshAny, err := New(map[string]any{
+			"work_dir":          ws,
+			"opencode_web_url":  base,
+			"opencode_web_user": os.Getenv("OCW_SANDBOX_USER"),
+			"opencode_web_pass": os.Getenv("OCW_SANDBOX_PASS"),
+		})
+		if err != nil {
+			t.Fatalf("fresh New: %v", err)
+		}
+		fresh := freshAny.(*Agent)
+		defer fresh.Stop()
+		freshSess, err := fresh.StartSession(ctx, sid)
+		if err != nil {
+			t.Fatalf("fresh StartSession: %v", err)
+		}
+		defer freshSess.Close()
+
+		var recovered core.Event
+		deadline = time.After(20 * time.Second)
+		for recovered.Type != core.EventUserInputRequested {
+			select {
+			case ev := <-freshSess.Events():
+				if ev.Type == core.EventUserInputRequested {
+					recovered = ev
+				}
+			case <-deadline:
+				t.Fatal("cold reload did not recover the pending question from GET /question + history")
+			}
+		}
+		if recovered.UserInput == nil || recovered.UserInput.InteractionID != liveInteractionID {
+			t.Fatalf("recovered interaction = %+v want %s", recovered.UserInput, liveInteractionID)
+		}
+		if recovered.TurnID == "" || recovered.TurnID != liveTurn {
+			t.Fatalf("recovery must attribute the same source-proven turn: live=%q recovered=%q", liveTurn, recovered.TurnID)
+		}
+		// The recovered dock answers through the same official route.
+		res, err := fresh.ResolveUserInput(ctx, liveInteractionID, "act_sb_reload", core.UserInputActionAnswer, []core.UserInputAnswer{{
+			QuestionID: liveInteractionID + "/q0",
+			Values:     []core.UserInputValue{{Kind: core.UserInputValueOption, OptionID: liveInteractionID + "/q0/o0"}},
+		}})
+		if err != nil || res.Outcome != core.UserInputOutcomeAccepted {
+			t.Fatalf("recovered reply: %+v err=%v", res, err)
+		}
+		waitTurnTerminal(t, freshSess.Events(), 90*time.Second)
+		t.Logf("question %s cold-reloaded onto turn %s and answered", liveInteractionID, recovered.TurnID)
+	})
+
 	// ── §6.9 todo: replacement list via endpoint, order/fields verbatim ────
 	t.Run("todo", func(t *testing.T) {
 		sid := newSession()

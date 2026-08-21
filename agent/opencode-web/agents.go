@@ -68,6 +68,7 @@ func decodeAgentRegistry(raw []byte) ([]ocwAgentEntry, error) {
 			Description json.RawMessage `json:"description"`
 			Mode        json.RawMessage `json:"mode"`
 			Native      json.RawMessage `json:"native"`
+			Hidden      bool            `json:"hidden"`
 		}
 		if err := json.Unmarshal(row, &presence); err != nil {
 			return nil, fmt.Errorf("opencode-web: agent registry row %d malformed: %w", i, err)
@@ -79,7 +80,6 @@ func decodeAgentRegistry(raw []byte) ([]ocwAgentEntry, error) {
 		}
 		for _, field := range []requiredField{
 			{"name", presence.Name, false},
-			{"description", presence.Description, false},
 			{"mode", presence.Mode, false},
 			{"native", presence.Native, true},
 		} {
@@ -97,10 +97,22 @@ func decodeAgentRegistry(raw []byte) ([]ocwAgentEntry, error) {
 			if err := json.Unmarshal(field.raw, &s); err != nil {
 				return nil, fmt.Errorf("opencode-web: agent registry row %d field %s must be a string: %w", i, field.key, err)
 			}
-			// name/mode are identifiers — empty strings carry no agent truth.
-			if field.key != "description" && strings.TrimSpace(s) == "" {
+			if strings.TrimSpace(s) == "" {
 				return nil, fmt.Errorf("opencode-web: agent registry row %d field %s must be non-empty", i, field.key)
 			}
+		}
+		// description: the official schema is optional and the same-version
+		// real serve exercises exactly one pattern — the hidden internal
+		// agents (compaction/summary/title) omit it; every non-hidden row
+		// carries it. Evidence-gated optionality: present must be a string
+		// (null fails), absent is legal ONLY on a hidden row.
+		if descRaw := trimSpaceBytes(presence.Description); len(descRaw) > 0 && string(descRaw) != "null" {
+			var s string
+			if err := json.Unmarshal(presence.Description, &s); err != nil {
+				return nil, fmt.Errorf("opencode-web: agent registry row %d field description must be a string: %w", i, err)
+			}
+		} else if !presence.Hidden {
+			return nil, fmt.Errorf("opencode-web: agent registry row %d missing required description (only hidden internal agents omit it on 1.18.18)", i)
 		}
 		var entry ocwAgentEntry
 		if err := json.Unmarshal(row, &entry); err != nil {

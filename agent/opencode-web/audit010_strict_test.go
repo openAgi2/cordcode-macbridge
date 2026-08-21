@@ -23,15 +23,16 @@ func TestAudit010_AgentRegistryExplicitFields(t *testing.T) {
 		payload  string
 		wantFail string
 	}{
-		{"missing description", `[{"name":"build","mode":"primary","native":true}]`, "missing required description"},
+		{"missing description on non-hidden row", `[{"name":"build","mode":"primary","native":true}]`, "missing required description"},
 		{"null description", `[{"name":"build","mode":"primary","native":true,"description":null}]`, "missing required description"},
+		{"description wrong type", `[{"name":"build","mode":"primary","native":true,"description":7}]`, "description must be a string"},
 		{"missing mode (primary default deleted)", `[{"name":"build","description":"d","native":true}]`, "missing required mode"},
 		{"missing native", `[{"name":"build","description":"d","mode":"primary"}]`, "missing required native"},
 		{"null native", `[{"name":"build","description":"d","mode":"primary","native":null}]`, "missing required native"},
 		{"native wrong type", `[{"name":"build","description":"d","mode":"primary","native":"yes"}]`, "must be a boolean"},
 		{"mode wrong type", `[{"name":"build","description":"d","mode":7,"native":true}]`, "must be a string"},
 		{"empty mode", `[{"name":"build","description":"d","mode":"","native":true}]`, "must be non-empty"},
-		{"second row missing fields fails whole list", `[{"name":"build","description":"d","mode":"primary","native":true},{"name":"plan"}]`, "row 1 missing required description"},
+		{"second row missing fields fails whole list", `[{"name":"build","description":"d","mode":"primary","native":true},{"name":"plan"}]`, "row 1 missing required mode"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -41,10 +42,16 @@ func TestAudit010_AgentRegistryExplicitFields(t *testing.T) {
 			}
 		})
 	}
-	// The full verified row still passes.
+	// The full verified row passes.
 	rows, err := decodeAgentRegistry([]byte(`[{"name":"build","description":"general coding","mode":"primary","native":true,"hidden":false}]`))
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("verified row must pass, got %+v err=%v", rows, err)
+	}
+	// Same-version evidence: the hidden internal agents (compaction/summary/
+	// title on the real 1.18.18 serve) omit description and must pass.
+	hiddenRows, err := decodeAgentRegistry([]byte(`[{"name":"compaction","mode":"primary","native":true,"hidden":true}]`))
+	if err != nil || len(hiddenRows) != 1 {
+		t.Fatalf("hidden internal row without description is the evidenced shape, got %+v err=%v", hiddenRows, err)
 	}
 }
 
