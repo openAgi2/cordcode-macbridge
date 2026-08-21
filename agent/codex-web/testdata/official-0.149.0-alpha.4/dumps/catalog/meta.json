@@ -1,0 +1,50 @@
+{
+  "cli_version": "codex-cli 0.149.0-alpha.4",
+  "transport": "stdio (newline-delimited JSON-RPC)",
+  "collected_at": "2026-08-22T00:41:21+0800",
+  "model_upstream": "local mock Responses provider (mock_provider.py) — 只控制上游脚本；app-server 全部行为为真实官方二进制",
+  "sanitization": "隔离 CODEX_HOME/workspace 路径替换为 $CODEX_HOME/$WORKSPACE；内容全为 MOCK:* 合成文本",
+  "entries": {
+    "thread_list_empty": 0,
+    "thread_start_effective": {
+      "model": null,
+      "modelProvider": "mockpi",
+      "cwd": "$WORKSPACE",
+      "status": {
+        "type": "idle"
+      }
+    },
+    "turn_start_response_status": "inProgress",
+    "turn_completed": true,
+    "delta_count": 10,
+    "turn_lifecycle_methods": [
+      "item/agentMessage/delta",
+      "item/completed",
+      "item/started",
+      "thread/status/changed",
+      "thread/tokenUsage/updated",
+      "turn/completed",
+      "turn/started",
+      "warning"
+    ],
+    "thread_list_all": 4,
+    "cursor_pagination": "2026-08-22T00:41:14Z",
+    "cursor_page2_count": 0,
+    "archived_list": 1,
+    "thread_read_turns": 1,
+    "turns_after_reason": 2,
+    "turn2_itemsView": "full",
+    "failed_turn_status": "failed",
+    "steer_same_turn_id_queue_semantics": false,
+    "steer_result": {
+      "turnId": "01a02532-caae-7863-b3f5-a2b667db87a5"
+    },
+    "steer_stale_error": {
+      "code": -32600,
+      "message": "no active turn to steer"
+    },
+    "interrupt": true,
+    "interrupt_turn_status": "interrupted",
+    "covers": "空/多 thread 列表、archive 列表、cursor 分页、thread/read(includeTurns)、rename、turn 生命周期(started/deltas/completed/failed)、reasoning turn、steer、interrupt"
+  }
+}

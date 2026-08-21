@@ -1,0 +1,25 @@
+{
+  "cli_version": "codex-cli 0.149.0-alpha.4",
+  "transport": "stdio (newline-delimited JSON-RPC)",
+  "collected_at": "2026-08-22T01:44:39+0800",
+  "model_upstream": "local mock Responses provider (mock_provider.py) — 只控制上游脚本；app-server 全部行为为真实官方二进制",
+  "sanitization": "隔离 CODEX_HOME/workspace 路径替换为 $CODEX_HOME/$WORKSPACE；内容全为 MOCK:* 合成文本",
+  "entries": {
+    "second_resume": {
+      "code": -32600,
+      "message": "thread 01a0256a-ecaf-7e92-b057-649b2b6eaaf9 already has an active writer"
+    },
+    "readonly_during_writer": true,
+    "archive_conflict": {
+      "code": -32600,
+      "message": "thread 01a0256a-ecaf-7e92-b057-649b2b6eaaf9 already has an active writer"
+    },
+    "unsubscribe_status": "unsubscribed",
+    "loaded_after_unsubscribe": true,
+    "delete_conflict": {
+      "code": -32600,
+      "message": "thread 01a0256a-ecaf-7e92-b057-649b2b6eaaf9 already has an active writer"
+    },
+    "covers": "双进程写者 resume/archive/delete 三冲突(-32600)与冲突期只读可用 / unsubscribe 返回 unsubscribed 且 thread 保持 loaded（30min TTL 机制即时证据）"
+  }
+}

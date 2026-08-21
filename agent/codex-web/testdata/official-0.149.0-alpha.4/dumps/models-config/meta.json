@@ -1,0 +1,36 @@
+{
+  "cli_version": "codex-cli 0.149.0-alpha.4",
+  "transport": "stdio (newline-delimited JSON-RPC)",
+  "collected_at": "2026-08-22T00:42:52+0800",
+  "model_upstream": "local mock Responses provider (mock_provider.py) — 只控制上游脚本；app-server 全部行为为真实官方二进制",
+  "sanitization": "隔离 CODEX_HOME/workspace 路径替换为 $CODEX_HOME/$WORKSPACE；内容全为 MOCK:* 合成文本",
+  "entries": {
+    "model_list_count": 5,
+    "model_fields": [
+      "additionalSpeedTiers",
+      "availabilityNux",
+      "defaultReasoningEffort",
+      "defaultServiceTier",
+      "description",
+      "displayName",
+      "hidden",
+      "id",
+      "inputModalities",
+      "isDefault",
+      "model",
+      "modelSpecialty",
+      "multiAgentVersion",
+      "serviceTiers",
+      "supportedReasoningEfforts",
+      "supportsPersonality",
+      "upgrade",
+      "upgradeInfo"
+    ],
+    "model_has_provider_field": false,
+    "config_model_provider": "mockpi",
+    "config_additional_keys": [],
+    "config_has_model_providers": false,
+    "permission_profiles_ok": true,
+    "covers": "model/list（custom provider 目录）/ config/read typed model_provider + additional.model_providers 存在性与组成 / permissionProfile/list"
+  }
+}

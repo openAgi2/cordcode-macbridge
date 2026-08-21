@@ -1,0 +1,48 @@
+{
+  "cli_version": "codex-cli 0.149.0-alpha.4",
+  "transport": "stdio (newline-delimited JSON-RPC)",
+  "collected_at": "2026-08-22T00:42:52+0800",
+  "model_upstream": "local mock Responses provider (mock_provider.py) — 只控制上游脚本；app-server 全部行为为真实官方二进制",
+  "sanitization": "隔离 CODEX_HOME/workspace 路径替换为 $CODEX_HOME/$WORKSPACE；内容全为 MOCK:* 合成文本",
+  "entries": {
+    "command_approval_params_keys": [
+      "availableDecisions",
+      "command",
+      "commandActions",
+      "cwd",
+      "environmentId",
+      "itemId",
+      "proposedExecpolicyAmendment",
+      "startedAtMs",
+      "threadId",
+      "turnId"
+    ],
+    "availableDecisions_present": true,
+    "additionalPermissions_present": false,
+    "turn_completed_after_accept": true,
+    "ask1_questions": 1,
+    "ask1_isBlocking": false,
+    "ask1_resolved": true,
+    "file_approval_keys": [
+      "grantRoot",
+      "itemId",
+      "reason",
+      "startedAtMs",
+      "threadId",
+      "turnId"
+    ],
+    "permission_approval_keys": [
+      "cwd",
+      "environmentId",
+      "itemId",
+      "permissions",
+      "reason",
+      "startedAtMs",
+      "threadId",
+      "turnId"
+    ],
+    "permission_request_profile": "{\"network\": null, \"fileSystem\": {\"read\": null, \"write\": [\"/private$WORKSPACE\", \"/var/folders/b1/1vwf1b_j28b9mf4p6gtp71000000gn/T/shared\"],",
+    "deny_branch_status": "interrupted",
+    "covers": "command approval accept/deny（on-request）；availableDecisions 物理存在性 = §7.3 分歧裁决证据"
+  }
+}

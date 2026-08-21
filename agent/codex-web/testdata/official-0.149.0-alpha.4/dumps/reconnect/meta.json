@@ -1,0 +1,16 @@
+{
+  "cli_version": "codex-cli 0.149.0-alpha.4",
+  "transport": "stdio (newline-delimited JSON-RPC)",
+  "collected_at": "2026-08-22T01:44:50+0800",
+  "model_upstream": "local mock Responses provider (mock_provider.py) — 只控制上游脚本；app-server 全部行为为真实官方二进制",
+  "sanitization": "隔离 CODEX_HOME/workspace 路径替换为 $CODEX_HOME/$WORKSPACE；内容全为 MOCK:* 合成文本",
+  "entries": {
+    "read_after_reconnect_turns": 1,
+    "resume_after_reconnect": "ok",
+    "pending_request_before_disconnect": true,
+    "pending_replayed_to_new_connection": false,
+    "thread3_status_after_reconnect": "notLoaded",
+    "thread3_turns_after_reconnect": 1,
+    "covers": "连接关闭→新连接 initialize→thread/read 冷校准→resume / 挂起审批断线后不向新连接重放、read 恢复 turns"
+  }
+}
