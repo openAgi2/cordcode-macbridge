@@ -30,18 +30,18 @@
   },
   "reports": {
     "completion_report_path": "docs/2026-08-20-opencode-web-source-first-convergence-plan完成情况.md",
-    "completion_report_status": "invalidated",
-    "last_generated_at": null,
-    "based_on_queue_hash": null,
+    "completion_report_status": "current",
+    "last_generated_at": "2026-08-21T04:18:00Z",
+    "based_on_queue_hash": "audit-013-verified",
     "completion": {
       "path": "docs/2026-08-20-opencode-web-source-first-convergence-plan完成情况.md",
-      "status": "invalidated",
-      "based_on_queue_hash": "audit-008-rejected",
-      "generated": "2026-08-20T19:40:00Z",
-      "attestation_note": "all evidence self-attested; sandbox/unit/regression replayable; owner UI matrix NOT executed (awaits supervisor audit)"
+      "status": "current",
+      "based_on_queue_hash": "audit-013-verified",
+      "generated": "2026-08-21T04:18:00Z",
+      "attestation_note": "exec-plan proven and supervisor audit-013 re-verified; owner UI matrix remains a separate pending completion track"
     }
   },
-  "updated_at": "2026-08-21T04:10:45.249003+00:00",
+  "updated_at": "2026-08-21T04:18:00Z",
   "todos": [
     {
       "id": "gate-a-inventory-impl",
@@ -1635,21 +1635,21 @@
       "id": "concentrated-audit008-review-fix-regression",
       "title": "Audit-008 concentrated regression and install",
       "description": "Run bounded Mac/iOS regressions, reinstall both products, submit one report, and wait for supervisor re-audit before owner UI matrix.",
-      "status": "blocked",
+      "status": "done",
       "phase": "concentrated-audit008-review-fix",
       "kind": "regression",
       "depends_on": [
         "concentrated-audit008-review-fix-tests"
       ],
       "source": "supervisor audit-008",
-      "notes": "review-fix-for:concentrated-activation-regression | supervisor audit-009 partial: main repair verified, but question source correlation/cold recovery, strict decoder tail, and connected-device installation remain unresolved | resolved-by:audit009-tail-review-fix-regression",
+      "notes": "review-fix-for:concentrated-activation-regression | resolved-via:audit012-lookup-terminal-gate-review-fix-regression; final supervisor audit-013 verified the complete directive-009..013 repair chain",
       "verification": {
         "required": true,
-        "status": "failed",
+        "status": "present",
         "method": "regression",
         "attestation": "re-verified",
         "na_reason": null,
-        "summary": "Supervisor audit-009 independently re-ran the claimed Go/iOS targeted tests and real 1.18.18 sandbox paths; one-ingest and the main repairs pass. Regression remains incomplete: live question correlation trusts any non-empty messageID and permits empty callID; pending GET /question is not projected during route/reconnect/cold reload; several evidence-proven strict shapes/statuses remain permissive; physical iOS install was deferred even though the device became available during audit. Classified repairable-heavy and assigned directive-010.",
+        "summary": "Resolved through directives 010–013. Supervisor audit-013 independently verified the final source identity, strict shapes, one-ingest ownership, question cold/gap/terminal lifecycle, stale mapping/GET seals, 20x/race/full tests, fresh 1.18.18 sandbox, runtime path, and port cleanup. Owner UI remains a separate track.",
         "artifacts": [
           "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-009-audit008-concentrated-product-path-repair.md",
           "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-010-question-recovery-strict-tail-and-ios-install.md",
@@ -1657,7 +1657,7 @@
           "cmd:go test -race ./agent/opencode-web and go test ./... => PASS (re-verified)",
           "cmd:xcodebuild targeted ModelVariantSelectionTests + OpencodeWebVariantAgentWireTests => 11/11 PASS (re-verified)"
         ],
-        "checked_at": "2026-08-21T01:35:48Z"
+        "checked_at": "2026-08-21T04:18:00Z"
       }
     },
     {
@@ -1722,21 +1722,21 @@
       "id": "audit009-tail-review-fix-regression",
       "title": "Audit-009 sandbox regression and connected-device install",
       "description": "Run bounded Go/race/build/vet and real isolated 1.18.18 question/mutation regressions, reinstall the changed Mac product, rerun the two iOS targeted classes, and install/launch on the currently available paired iPhone without UI automation.",
-      "status": "blocked",
+      "status": "done",
       "phase": "audit009-tail-review-fix",
       "kind": "regression",
       "depends_on": [
         "audit009-tail-review-fix-tests"
       ],
       "source": "supervisor audit-009; directive-010",
-      "notes": "review-fix-for:concentrated-audit008-review-fix-regression | supervisor audit-010 partial: pending reload and strict tail verified, but resolution/recovery ordering and resolved cold reconciliation remain incomplete | resolved-by:audit010-resolution-race-review-fix-regression",
+      "notes": "review-fix-for:concentrated-audit008-review-fix-regression | resolved-via:audit012-lookup-terminal-gate-review-fix-regression; final supervisor audit-013 verified",
       "verification": {
         "required": true,
-        "status": "failed",
+        "status": "present",
         "method": "mixed",
         "attestation": "re-verified",
         "na_reason": null,
-        "summary": "Supervisor audit-010 re-verified targeted/race/full Go tests, iOS 11/11, installed app presence, runtime paths, and a fresh real 1.18.18 pending-reload/mutation sandbox. Main tail passes. Regression remains incomplete because recovery only adds rows returned by GET /question; it cannot settle a projected pending interaction whose replied/rejected SSE event was lost and whose server pending row disappeared. The bool claim also permits resolved-before-requested ordering inversion, while both named GET/live race tests are sequential. Classified repairable-heavy and assigned directive-011.",
+        "summary": "Resolved through directives 011–013. Supervisor audit-013 re-verified barrier-controlled ordering, lost-terminal reconciliation, reply mapping/lookup terminal seals, actual resolve RPC full path, fresh 1.18.18 pending and resolved reloads, full/race tests, and runtime cleanup.",
         "artifacts": [
           "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-010-question-recovery-strict-tail-and-ios-install.md",
           "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-011-question-terminal-reconciliation.md",
@@ -1744,7 +1744,7 @@
           "cmd:real isolated 1.18.18 TestSandboxC6C7/question|question-reload|mutations => PASS (re-verified)",
           "cmd:xcodebuild selected ModelVariantSelectionTests + OpencodeWebVariantAgentWireTests => 11/11 PASS (re-verified)"
         ],
-        "checked_at": "2026-08-21T02:42:00Z"
+        "checked_at": "2026-08-21T04:18:00Z"
       }
     },
     {
@@ -1809,21 +1809,21 @@
       "id": "audit010-resolution-race-review-fix-regression",
       "title": "Audit-010 real 1.18.18 terminal reload regression and Mac install",
       "description": "Re-verify pending/answered/rejected cold reopen against isolated 1.18.18, run bounded Go/race/full/vet/build, reinstall Mac Release, validate 8777/4096/4398/4399, and submit one audit-ready report without rerunning unchanged iOS work.",
-      "status": "blocked",
+      "status": "done",
       "phase": "audit010-resolution-race-review-fix",
       "kind": "regression",
       "depends_on": [
         "audit010-resolution-race-review-fix-tests"
       ],
       "source": "supervisor audit-010; directive-011",
-      "notes": "review-fix-for:audit009-tail-review-fix-regression; supervisor audit-011 partial: source fence/history reconciliation/full path pass, but terminal late asked/stale recovery rewrites pendingQuestions and reopens resolve RPC; assigned directive-012",
+      "notes": "review-fix-for:audit009-tail-review-fix-regression; resolved-via:audit012-lookup-terminal-gate-review-fix-regression; final supervisor audit-013 verified",
       "verification": {
         "required": true,
-        "status": "failed",
+        "status": "present",
         "method": "mixed",
         "attestation": "re-verified",
         "na_reason": null,
-        "summary": "Supervisor audit-011 independently re-ran the 20x barrier/full-path suite, 20x selected race suite, full Go tests, vet, and build; all pass. A7 raw also proves the documented fresh-process identity boundary. Regression is nevertheless incomplete: gateAdmitRequested writes pendingQuestions before rejecting an already-terminal lifecycle, so a late asked or stale recovery row can make a resolved interaction answerable again and trigger a second official POST. Classified repairable-heavy; directive-012 owns the narrow seal.",
+        "summary": "Resolved through directives 012–013. Supervisor audit-013 verified terminal admission precedence, zero mapping restoration, zero stale-GET lookup success/POST, unchanged Projection identity, 20x/race/full tests, and fresh 1.18.18 sandbox paths.",
         "artifacts": [
           "agent/opencode-web/questions.go",
           "agent/opencode-web/events.go",
@@ -1832,7 +1832,7 @@
           "agent/opencode-web/audit010_question_test.go",
           "agent/opencode-web/c6_c7_sandbox_test.go"
         ],
-        "checked_at": "2026-08-21T03:39:35Z"
+        "checked_at": "2026-08-21T04:18:00Z"
       }
     },
     {
@@ -1889,26 +1889,26 @@
       "id": "audit011-terminal-reply-map-review-fix-regression",
       "title": "Audit-011 terminal reply-mapping bounded regression and Mac install",
       "description": "Re-run directive-011/012 20x barrier and race suites, full Go/vet/build, real 1.18.18 question reload/resolve regressions, port cleanup, and Mac Release install; iOS remains unchanged.",
-      "status": "blocked",
+      "status": "done",
       "phase": "audit011-terminal-reply-map-review-fix",
       "kind": "regression",
       "depends_on": [
         "audit011-terminal-reply-map-review-fix-tests"
       ],
       "source": "supervisor audit-011; directive-012",
-      "notes": "review-fix-for:audit010-resolution-race-review-fix-regression; supervisor audit-012 partial: memory mapping seal passes, but lookupQuestion returns a lifecycle-rejected current GET row and can still POST; assigned directive-013",
+      "notes": "review-fix-for:audit010-resolution-race-review-fix-regression; resolved-via:audit012-lookup-terminal-gate-review-fix-regression; final supervisor audit-013 verified",
       "verification": {
         "required": true,
-        "status": "failed",
+        "status": "present",
         "method": "mixed",
         "attestation": "re-verified",
         "na_reason": null,
-        "summary": "Supervisor audit-012 independently re-ran the 20x full-path, selected race, full Go, vet, and build commands; all pass, and runtime/port cleanup claims are read-only consistent (4096 PID 48742, 8777 PID 99662 from /Applications, 4398/4399 free). Regression remains incomplete because lookupQuestion ignores notePendingShape's terminal rejection and returns the stale GET row as a successful resolve shape. Classified repairable-heavy; directive-013 owns the single lookup gate.",
+        "summary": "Resolved by directive-013. Supervisor audit-013 verified lifecycle admission is propagated into lookupQuestion, stale current GET rows cannot be returned or posted, pending cold restart remains admissible, and all 20x/race/full/fresh-sandbox/runtime checks pass.",
         "artifacts": [
           "agent/opencode-web/questions.go",
           "go-bridge/audit012_fullpath_test.go"
         ],
-        "checked_at": "2026-08-21T04:08:00Z"
+        "checked_at": "2026-08-21T04:18:00Z"
       }
     },
     {
@@ -1951,14 +1951,14 @@
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "Red-first owning negative: TestAudit013_StaleCurrentGetRowSecondResolveZeroPOST (go-bridge/audit013_fullpath_test.go) — terminal landed, in-memory mapping empty, the serve KEEPS returning the stale row for the whole test, POST fixture answers plain 200 true (no 404/409 masking); answered+answer and rejected+reject both RED pre-fix (outcome accepted + official POST) and GREEN post-fix (authoritative interaction_not_found, ZERO POSTs, projection keeps the single terminal part que_a7/msg_u1).",
+        "summary": "Supervisor audit-013 independently re-verified TestAudit013_StaleCurrentGetRowSecondResolveZeroPOST as part of the quoted 20x go-bridge suite (201.7s): the endpoint keeps the stale row, answered+answer and rejected+reject return interaction_not_found, emit zero POSTs, and keep one terminal Projection part. Source inspection confirms the admission bool gates both mapping write and lookup return.",
         "artifacts": [
           "agent/opencode-web/questions.go",
           "go-bridge/audit013_fullpath_test.go"
         ],
-        "checked_at": "2026-08-21T04:10:45.249003+00:00"
+        "checked_at": "2026-08-21T04:18:00Z"
       }
     },
     {
@@ -1972,19 +1972,19 @@
         "audit012-lookup-terminal-gate-review-fix-tests"
       ],
       "source": "supervisor audit-012; directive-013",
-      "notes": "review-fix-for:audit011-terminal-reply-map-review-fix-regression; on proven completion restore blocked parent regressions and record resolved-via",
+      "notes": "review-fix-for:audit011-terminal-reply-map-review-fix-regression; supervisor audit-013 verified; parent regression chain restored via this todo",
       "verification": {
         "required": true,
         "status": "present",
         "method": "mixed",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "Regressions with the zsh-reproducible quoted commands: go test ./go-bridge -run 'TestAudit01[123]' -count=20 -timeout 6m PASS (201.9s); go test -race ./agent/opencode-web -run 'TestAudit01[0123]|TestQuestion' -count=20 -timeout 5m PASS (13.0s); go test ./... -count=1 all green; vet/build green. Real isolated 1.18.18: TestSandboxC6C7 all green (question official reply, question-reload pending cold reload, question-reopen-after-answer/reject), TestSandboxEndToEnd green; 4398/4399 reclaimed, 4096 owner-managed untouched (PID 48742). Mac product changed -> Release rebuilt (runtime commit ac3c268) and reinstalled via the mandated flow; 8777 = PID 10968 from /Applications/CordCodeLink.app runtime. iOS untouched. Both repos clean after report commit.",
+        "summary": "Supervisor audit-013 independently ran the quoted 20x go-bridge suite (201.7s), 20x selected agent race suite (12.3s), full go test ./..., vet, build, and a fresh isolated OpenCode 1.18.18 TestSandboxC6C7. Question reply, pending cold reload, answer/reject reopen, todo, permission, and mutations pass; 4398/4399 reclaimed; 4096 PID 48742 unchanged; 8777 PID 10968 runs the /Applications runtime. iOS is unchanged. Technical regression is re-verified; owner UI remains separate.",
         "artifacts": [
           "agent/opencode-web/questions.go",
           "go-bridge/audit013_fullpath_test.go"
         ],
-        "checked_at": "2026-08-21T04:10:45.249003+00:00"
+        "checked_at": "2026-08-21T04:18:00Z"
       }
     }
   ]

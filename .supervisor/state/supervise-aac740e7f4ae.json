@@ -248,7 +248,7 @@
       "kind": "hole-fill",
       "title": "Audit-008 concentrated product-path repair",
       "issued_at": "2026-08-20T18:48:54Z",
-      "status": "in_progress",
+      "status": "verified",
       "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-009-audit008-concentrated-product-path-repair.md",
       "scope": "Cross-repository MacBridge+iOS concentrated corrective batch",
       "constraints": [
@@ -282,7 +282,7 @@
       "kind": "hole-fill",
       "title": "Question recovery, strict tail, and iOS install",
       "issued_at": "2026-08-21T01:35:48Z",
-      "status": "in_progress",
+      "status": "verified",
       "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-010-question-recovery-strict-tail-and-ios-install.md",
       "scope": "Mac targeted repair plus iOS targeted regression/install",
       "constraints": [
@@ -313,7 +313,7 @@
       "kind": "hole-fill",
       "title": "Question terminal reconciliation final closure",
       "issued_at": "2026-08-21T02:42:00Z",
-      "status": "in_progress",
+      "status": "verified",
       "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-011-question-terminal-reconciliation.md",
       "scope": "Mac opencode-web question lifecycle and owning tests only",
       "constraints": [
@@ -349,7 +349,7 @@
       "kind": "hole-fill",
       "title": "Question terminal reply-mapping final seal",
       "issued_at": "2026-08-21T03:39:35Z",
-      "status": "in_progress",
+      "status": "verified",
       "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-012-question-terminal-reply-mapping-seal.md",
       "scope": "Mac opencode-web terminal reply mapping and owning negative tests only",
       "constraints": [
@@ -379,7 +379,7 @@
       "kind": "hole-fill",
       "title": "Question lookup terminal gate final seal",
       "issued_at": "2026-08-21T04:08:00Z",
-      "status": "pending",
+      "status": "verified",
       "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-013-question-lookup-terminal-gate.md",
       "scope": "Mac opencode-web lookupQuestion lifecycle result and one owning negative only",
       "constraints": [
@@ -390,17 +390,20 @@
         "quoted reproducible regex commands, bounded 20x/race/full/sandbox and Mac Release reinstall",
         "one report then stop for audit-013"
       ],
-      "linked_commits": [],
+      "linked_commits": [
+        "git:ac3c268",
+        "git:c43fef6"
+      ],
       "resolved_from_audit": 12,
       "report": {
-        "received_at": null,
-        "markdown_path": null,
-        "audited": false,
-        "audit_verdict": null,
-        "audit_path": null
+        "received_at": "2026-08-21T04:18:00Z",
+        "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-013-question-lookup-terminal-gate.md",
+        "audited": true,
+        "audit_verdict": "verified",
+        "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-013-question-lookup-terminal-gate.md"
       }
     }
   ],
   "current_directive_number": 13,
-  "last_updated": "2026-08-21T04:08:00Z"
+  "last_updated": "2026-08-21T04:18:00Z"
 }
