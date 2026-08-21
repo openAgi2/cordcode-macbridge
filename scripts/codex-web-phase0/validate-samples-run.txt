@@ -1,0 +1,22 @@
+[PASS] all-fixtures-parse — 509 JSON docs/lines
+[PASS] sanitization-scan — clean
+[PASS] group-initialize — 4 entries
+[PASS] group-lifecycle — 8 entries
+[PASS] group-catalog — 20 entries
+[PASS] group-interaction — 12 entries
+[PASS] group-models-config — 8 entries
+[PASS] group-ownership — 5 entries
+[PASS] group-reconnect — 3 entries
+[PASS] wire-availableDecisions-present — §7.3 分歧裁决：字段物理到达
+[PASS] wire-permission-approval-shape
+[PASS] wire-file-approval-no-availableDecisions
+[PASS] wire-requestUserInput-batch
+[PASS] wire-serverRequest-resolved
+[PASS] wire-ownership-minus32600
+[PASS] wire-turn-lifecycle — deltas=71
+[PASS] wire-turn-completed-itemsView — summary
+[PASS] wire-config-additional-empty — §7.3 additional.model_providers 不存在（样本裁决）
+[PASS] wire-interrupt-terminal
+[PASS] wire-failed-terminal
+
+ALL PASS

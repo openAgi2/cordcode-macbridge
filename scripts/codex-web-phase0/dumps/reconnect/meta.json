@@ -1,0 +1,12 @@
+{
+  "cli_version": "codex-cli 0.149.0-alpha.4",
+  "transport": "stdio (newline-delimited JSON-RPC)",
+  "collected_at": "2026-08-22T00:42:54+0800",
+  "model_upstream": "local mock Responses provider (mock_provider.py) — 只控制上游脚本；app-server 全部行为为真实官方二进制",
+  "sanitization": "隔离 CODEX_HOME/workspace 路径替换为 $CODEX_HOME/$WORKSPACE；内容全为 MOCK:* 合成文本",
+  "entries": {
+    "read_after_reconnect_turns": 1,
+    "resume_after_reconnect": "ok",
+    "covers": "连接关闭 → 新连接 initialize → thread/read 冷校准 → resume"
+  }
+}

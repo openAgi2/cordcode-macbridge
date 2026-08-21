@@ -1,0 +1,18 @@
+{
+  "cli_version": "codex-cli 0.149.0-alpha.4",
+  "transport": "stdio (newline-delimited JSON-RPC)",
+  "collected_at": "2026-08-22T00:41:13+0800",
+  "model_upstream": "local mock Responses provider (mock_provider.py) — 只控制上游脚本；app-server 全部行为为真实官方二进制",
+  "sanitization": "隔离 CODEX_HOME/workspace 路径替换为 $CODEX_HOME/$WORKSPACE；内容全为 MOCK:* 合成文本",
+  "entries": {
+    "initialize_ok": true,
+    "server_info": {
+      "userAgent": "codex-web-phase0/0.149.0-alpha.4 (Mac OS 27.0.0; arm64) xterm-256color (codex-web-phase0; 0.0.1)",
+      "codexHome": "/private$CODEX_HOME",
+      "platformFamily": "unix",
+      "platformOs": "macos"
+    },
+    "experimental_init_ok": true,
+    "covers": "initialize 请求/响应（含 capabilities 实验开关两组）+ initialized 通知"
+  }
+}
