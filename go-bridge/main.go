@@ -736,7 +736,7 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 
 		for ev := range events {
 			eventName, data, _ := mapAgentEvent(ev)
-			if eventName == "todos_updated" || eventName == "turn_started" || eventName == "turn_completed" || eventName == "error" || eventName == "text_delta" || eventName == "permission_request" || eventName == "permission_resolved" || eventName == "question_asked" || eventName == "question_resolved" || eventName == "user_input_requested" || eventName == "user_input_resolved" {
+			if eventName == "todos_updated" || eventName == "turn_started" || eventName == "turn_completed" || eventName == "error" || eventName == "text_delta" || eventName == "permission_request" || eventName == "permission_resolved" || eventName == "question_asked" || eventName == "question_resolved" || eventName == "user_input_requested" || eventName == "user_input_resolved" || eventName == "session_retry_status" {
 				slog.Info("go-bridge: passive event", "backend", backendID, "session", ev.SessionID, "event", eventName)
 			} else {
 				slog.Debug("go-bridge: passive event", "backend", backendID, "session", ev.SessionID, "event", eventName)

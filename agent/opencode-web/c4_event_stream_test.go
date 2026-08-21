@@ -282,14 +282,17 @@ func (a *Agent) nextRoutedFor(sessionID string) *core.Event {
 	return nil
 }
 
-// TestReasoningExplicitlyUnsupportedOnLiveCarriers (directive-014 scope):
-// populated reasoning on LIVE carriers — message.updated parts, part.updated
-// snapshots, part.delta fields — is still unevidenced (E2 never sampled
-// direct-SSE reasoning), so it surfaces the canonical unsupported error and
-// NEVER EventThinking. The HTTP history surface is E2b-evidenced and mapped
-// separately (audit014_reasoning_test.go); do not enable live reasoning here
-// without a same-version live sample.
-func TestReasoningExplicitlyUnsupportedOnLiveCarriers(t *testing.T) {
+// TestReasoningSkippedUntranslatedAndNonFatal: populated reasoning on LIVE
+// carriers — message.updated parts, part.updated snapshots, part.delta
+// fields — is still unevidenced (E2 never sampled direct-SSE reasoning), so
+// it stays untranslated and NEVER EventThinking. The HTTP history surface is
+// E2b-evidenced and mapped separately (audit014_reasoning_test.go).
+// Reasoning on live carriers stays untranslated (no thinking, no answer-text
+// folding) but MUST be non-fatal: the former EventError settled every
+// reasoning-model turn as turn_error and tore relayEvents down mid-stream
+// (owner 真机 2026-08-21). A same-version direct-SSE sample is still required
+// before live reasoning may be translated.
+func TestReasoningSkippedUntranslatedAndNonFatal(t *testing.T) {
 	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
 	sub := newDrivenSubscriber(t, agent)
 
@@ -312,15 +315,13 @@ func TestReasoningExplicitlyUnsupportedOnLiveCarriers(t *testing.T) {
 	for _, ev := range drain(sub) {
 		switch ev.Type {
 		case core.EventError:
-			if ev.Content == "unsupported content.reasoning for verified 1.18.18 live shape" {
-				unsupported++
-			}
+			unsupported++
 		case core.EventThinking:
 			thinking++
 		}
 	}
-	if unsupported == 0 {
-		t.Fatal("populated live reasoning must surface the canonical unsupported error on every carrier")
+	if unsupported != 0 {
+		t.Fatalf("live reasoning must not poison the turn with EventError, got %d", unsupported)
 	}
 	if thinking != 0 {
 		t.Fatalf("reasoning must never map to thinking, got %d events", thinking)
@@ -433,5 +434,93 @@ func TestReconnectKeepsSingleSubscriberRoute(t *testing.T) {
 terminalOK:
 	if dialSnapshot() != 2 {
 		t.Fatalf("exactly two dials (initial + one reconnect) expected, got %d", dialSnapshot())
+	}
+}
+
+// TestStaleSessionDoubleCloseDoesNotTearRespawnedSSE is the 2026-08-21
+// owner 真机 silence: idle cleanup Closes the AgentSession (release 1),
+// but relayEvents stays blocked because Events() is never closed, so
+// startRelayIfNotRunning still holds that stale session and Closes it
+// AGAIN after the respawned StartSession acquired a new global SSE.
+// Without closeOnce the second Close releases the NEW stream (refs 1→0)
+// and iOS sees send_message + "SSE subscriber connected" + relayEvents
+// started + zero forwarding, while the serve completes the turn.
+func TestStaleSessionDoubleCloseDoesNotTearRespawnedSSE(t *testing.T) {
+	srv, dials := countingSSEServe(t)
+	agent := agentForSSE(t, srv.URL)
+
+	s1, err := agent.StartSession(context.Background(), "ses_fdd00e2a")
+	if err != nil {
+		t.Fatalf("first StartSession: %v", err)
+	}
+	if n := atomicLoadInt32(dials); n != 1 {
+		t.Fatalf("first acquire must dial once, got %d", n)
+	}
+
+	if err := s1.Close(); err != nil {
+		t.Fatalf("idle Close: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		agent.globalSubMu.Lock()
+		dead := agent.globalSub == nil
+		agent.globalSubMu.Unlock()
+		if dead {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	agent.globalSubMu.Lock()
+	if agent.globalSub != nil {
+		agent.globalSubMu.Unlock()
+		t.Fatal("idle Close must release the last holder and tear the stream")
+	}
+	agent.globalSubMu.Unlock()
+
+	s2, err := agent.StartSession(context.Background(), "ses_fdd00e2a")
+	if err != nil {
+		t.Fatalf("respawn StartSession: %v", err)
+	}
+	defer s2.Close()
+	if n := atomicLoadInt32(dials); n != 2 {
+		t.Fatalf("respawn must dial a new stream, got %d", n)
+	}
+
+	// Production: startRelayIfNotRunning closes the stale session object.
+	if err := s1.Close(); err != nil {
+		t.Fatalf("stale Close: %v", err)
+	}
+	time.Sleep(80 * time.Millisecond)
+
+	agent.globalSubMu.Lock()
+	refs := agent.globalSubRefs
+	sub := agent.globalSub
+	agent.globalSubMu.Unlock()
+	if sub == nil || sub.ctx.Err() != nil || refs != 1 {
+		t.Fatalf("stale.Close must not tear the respawned SSE (double-release): alive=%v refs=%d", sub != nil && sub.ctx.Err() == nil, refs)
+	}
+	if n := atomicLoadInt32(dials); n != 2 {
+		t.Fatalf("no extra dial expected after stale Close, got %d", n)
+	}
+
+	driveFrames(sub,
+		sseFrame("message.updated", map[string]any{
+			"info": map[string]any{
+				"id":   "msg_live",
+				"role": "user",
+				"parts": []any{
+					map[string]any{"type": "text", "text": "still routed"},
+				},
+			},
+			"sessionID": "ses_fdd00e2a",
+		}),
+	)
+	select {
+	case ev := <-s2.(*serverSession).events:
+		if ev.Type != core.EventUserMessage {
+			t.Fatalf("respawned route got type %v", ev.Type)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("respawned route received no event after stale.Close — SSE was silently dead")
 	}
 }

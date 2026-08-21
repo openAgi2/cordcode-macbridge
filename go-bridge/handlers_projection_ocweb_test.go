@@ -141,6 +141,82 @@ func TestOpenCodeWebProjectionHydrateFromRichHistory(t *testing.T) {
 	}
 }
 
+// Official HTTP tool parts hydrate as tool_started/tool_finished. The
+// previous mapper skipped them (tool is a string, not a nested object), so
+// iPhone cold-open of an OpenCode Web session showed text but no 已读取/已编辑.
+func TestOpenCodeWebProjectionHydrateOfficialToolSteps(t *testing.T) {
+	h := NewHandlers()
+	t.Cleanup(func() { h.Shutdown(context.Background()) })
+	sessionID := "ocw-tools-1"
+	readStep := map[string]any{
+		"id": "prt_read1", "toolName": "read", "status": "completed",
+		"title": "story.txt",
+		"toolInput": map[string]any{"filePath": "/tmp/story.txt"},
+		"output":    map[string]any{"kind": "inline", "text": "file contents"},
+	}
+	editStep := map[string]any{
+		"id": "prt_edit1", "toolName": "edit", "status": "completed",
+		"title": "story.txt",
+		"fileChanges": []map[string]any{{
+			"path": "/tmp/story.txt", "kind": "edit", "diff": "+scene",
+		}},
+		"output": map[string]any{"kind": "inline", "text": "Edit applied successfully."},
+	}
+	agent := &fakeAgent{
+		name: "opencode-web",
+		richHistory: []core.RichHistoryEntry{
+			{ID: "u1", Role: "user", Content: "再增加情节"},
+			{
+				ID: "a1", Role: "assistant", Content: "先看当前文件结构：",
+				Thinking: "Let me read the file.",
+				Parts: []map[string]any{
+					{"type": "reasoning", "content": "Let me read the file."},
+					{"type": "text", "content": "先看当前文件结构："},
+					{"type": "tool", "step": readStep},
+				},
+				Steps: []map[string]any{readStep},
+			},
+			{
+				ID: "a2", Role: "assistant", Content: "已写入。",
+				Thinking: "I'll insert a scene.",
+				Parts: []map[string]any{
+					{"type": "reasoning", "content": "I'll insert a scene."},
+					{"type": "text", "content": "已写入。"},
+					{"type": "tool", "step": editStep},
+				},
+				Steps: []map[string]any{editStep},
+			},
+		},
+	}
+	h.mu.Lock()
+	h.agents = map[string]core.Agent{"opencode-web": agent}
+	h.mu.Unlock()
+
+	conn := &readFileCaptureConn{}
+	params, _ := json.Marshal(map[string]any{"sessionId": sessionID, "sinceRev": 0})
+	msg := WireMessage{RequestID: "r-ocw-tools", BackendID: "opencode-web", Method: "get_session_projection", Params: params}
+	h.handleGetSessionProjection(conn, msg, nil)
+	if conn.err != nil {
+		t.Fatalf("pathless hydrate error: %+v", conn.err)
+	}
+	raw, _ := json.Marshal(conn.data)
+	for _, want := range []string{
+		"再增加情节",
+		"先看当前文件结构：",
+		"Let me read the file.",
+		"已写入。",
+		`"toolName":"read"`,
+		`"toolName":"edit"`,
+		"story.txt",
+		"prt_read1",
+		"prt_edit1",
+	} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("projection missing %q: %s", want, string(raw))
+		}
+	}
+}
+
 // activityProbingFakeAgent adds core.SessionActivityProbing to fakeAgent for
 // the cold-source seal tests without changing fakeAgent's interface set (every
 // existing fakeAgent user would suddenly consult the probe). richHistoryFn,

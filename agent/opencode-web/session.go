@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -34,6 +35,13 @@ type serverSession struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	alive  atomic.Bool
+
+	// closeOnce makes Close idempotent. go-bridge startRelayIfNotRunning
+	// Closes the previous AgentSession when respawning after idle cleanup;
+	// without this, the second Close releases the NEW global SSE that the
+	// respawned session just acquired (owner 真机 2026-08-21: send_message +
+	// "SSE subscriber connected" + relayEvents started + zero forwarding).
+	closeOnce sync.Once
 }
 
 // StartSession implements core.Agent: resume = bind the known id; new = create
@@ -373,15 +381,20 @@ func (s *serverSession) RejectQuestion(_ string) error {
 // Close tears down the SSE binding ONLY — it never aborts the running turn
 // (explicit CancelTurn owns that) and never touches the serve process.
 func (s *serverSession) Close() error {
-	s.alive.Store(false)
-	// Unregister every route binding (resume id and/or created id) and drop
-	// this session's hold on the ONE global subscriber; the last release
-	// tears the shared stream down.
-	if id := s.CurrentSessionID(); id != "" {
-		s.a.unregisterRoute(id, s.events)
-	}
-	s.a.releaseGlobalSubscriber()
-	s.cancel()
+	s.closeOnce.Do(func() {
+		s.alive.Store(false)
+		// Unregister every route binding (resume id and/or created id) and
+		// drop this session's hold on the ONE global subscriber; the last
+		// release tears the shared stream down. Unregister happens BEFORE
+		// events is closed so emit (which holds routesMu while sending)
+		// cannot send on a closed channel.
+		if id := s.CurrentSessionID(); id != "" {
+			s.a.unregisterRoute(id, s.events)
+		}
+		s.a.releaseGlobalSubscriber()
+		s.cancel()
+		close(s.events)
+	})
 	return nil
 }
 

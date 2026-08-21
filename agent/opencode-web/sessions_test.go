@@ -311,6 +311,9 @@ func TestGetRichSessionHistoryMapsParts(t *testing.T) {
 	if len(reasoningParts) != 1 || reasoningParts[0]["content"] != "thinking…" {
 		t.Fatalf("reasoning part = %+v", reasoningParts)
 	}
+	if reasoningRich[0].Thinking != "thinking…" {
+		t.Fatalf("Thinking field = %q, want reasoning text for overlay hydrate", reasoningRich[0].Thinking)
+	}
 	for _, badBody := range []string{
 		`[{"info":{"id":"m","role":"assistant"},"parts":[{"type":"reasoning"}]}]`,
 		`[{"info":{"id":"m","role":"assistant"},"parts":[{"type":"reasoning","text":7}]}]`,
@@ -364,6 +367,103 @@ func TestGetRichSessionHistoryMapsParts(t *testing.T) {
 	plain, err := agent.GetSessionHistory(context.Background(), "ses_x", 0)
 	if err != nil || len(plain) != 2 || plain[1].Content != "answer" {
 		t.Fatalf("plain history = %+v err=%v", plain, err)
+	}
+}
+
+func TestGetRichSessionHistoryMapsOfficialToolPart(t *testing.T) {
+	// Official 1.18.18 ToolPart: tool is a STRING, state is a sibling
+	// (schema v1/session.ts ToolPart; live GET /session/:id/message on 4096;
+	// samples a6/a8). The nested {tool:{toolName,state}} fixture is not this
+	// generation — mapping it as the only shape dropped every real tool card
+	// on iPhone cold-open.
+	messages := `[
+	{"info":{"id":"msg_u","role":"user","time":{"created":1000}},
+	 "parts":[{"type":"text","text":"再增加林黛玉和贾宝玉游玩的情节"}]},
+	{"info":{"id":"msg_a1","role":"assistant","parentID":"msg_u","time":{"created":2000}},
+	 "parts":[
+		{"type":"step-start"},
+		{"type":"reasoning","text":"Let me read the file."},
+		{"type":"text","text":"先看当前文件结构："},
+		{"id":"prt_read1","sessionID":"ses_x","messageID":"msg_a1","type":"tool","callID":"call_1","tool":"read",
+		 "state":{"status":"completed","input":{"filePath":"/tmp/story.txt","limit":10},
+		          "output":"file contents","title":"story.txt",
+		          "time":{"start":1000,"end":3500}}},
+		{"type":"step-finish","reason":"tool-calls"}
+	 ]},
+	{"info":{"id":"msg_a2","role":"assistant","parentID":"msg_u","time":{"created":3000}},
+	 "parts":[
+		{"type":"reasoning","text":"I'll insert a scene."},
+		{"type":"text","text":"插入一段情节："},
+		{"id":"prt_edit1","type":"tool","callID":"call_2","tool":"edit",
+		 "state":{"status":"completed",
+		          "input":{"filePath":"/tmp/story.txt","oldString":"a","newString":"ab"},
+		          "output":"Edit applied successfully.","title":"story.txt",
+		          "metadata":{"diff":"--- a\n+++ b\n",
+		                      "filediff":{"file":"/tmp/story.txt","patch":"@@ -1 +1 @@\n-a\n+ab\n","additions":1,"deletions":0}},
+		          "time":{"start":4000,"end":4010}}}
+	 ]},
+	{"info":{"id":"msg_a3","role":"assistant","parentID":"msg_u","time":{"created":4000}},
+	 "parts":[
+		{"type":"tool","id":"prt_todo","callID":"call_3","tool":"todowrite",
+		 "state":{"status":"completed","input":{"todos":[]},"output":"[]","title":"0 todos"}}
+	 ]}
+	]`
+	agent, _ := newDataAgent(t, map[string]string{
+		"/session/ses_x/message": messages,
+	}, "/tmp/proj")
+
+	rich, err := agent.GetRichSessionHistory(context.Background(), "ses_x", 0)
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	if len(rich) != 4 {
+		t.Fatalf("len = %d, want 4", len(rich))
+	}
+
+	read := rich[1]
+	if read.Thinking != "Let me read the file." {
+		t.Fatalf("read thinking = %q", read.Thinking)
+	}
+	if read.Content != "先看当前文件结构：" {
+		t.Fatalf("read content = %q", read.Content)
+	}
+	if len(read.Steps) != 1 {
+		t.Fatalf("read steps = %+v (official string tool must not be dropped)", read.Steps)
+	}
+	rs := read.Steps[0]
+	if rs["id"] != "prt_read1" || rs["toolName"] != "read" || rs["status"] != "completed" {
+		t.Fatalf("read step identity = %+v", rs)
+	}
+	if rs["title"] != "story.txt" {
+		t.Fatalf("read title = %v, want official state.title", rs["title"])
+	}
+	input, _ := rs["toolInput"].(map[string]any)
+	if input["filePath"] != "/tmp/story.txt" {
+		t.Fatalf("read toolInput = %+v", rs["toolInput"])
+	}
+	if rs["duration"] != float64(2500) {
+		t.Fatalf("read duration = %v, want 2500ms from state.time", rs["duration"])
+	}
+	out := rs["output"].(map[string]any)
+	if out["kind"] != "inline" || out["text"] != "file contents" {
+		t.Fatalf("read output = %+v", out)
+	}
+
+	edit := rich[2]
+	if len(edit.Steps) != 1 || edit.Steps[0]["toolName"] != "edit" {
+		t.Fatalf("edit steps = %+v", edit.Steps)
+	}
+	changes, _ := edit.Steps[0]["fileChanges"].([]map[string]any)
+	if len(changes) != 1 || changes[0]["path"] != "/tmp/story.txt" || changes[0]["kind"] != "edit" {
+		t.Fatalf("edit fileChanges = %+v", edit.Steps[0]["fileChanges"])
+	}
+	if changes[0]["diff"] != "@@ -1 +1 @@\n-a\n+ab\n" {
+		t.Fatalf("edit diff = %v", changes[0]["diff"])
+	}
+
+	todo := rich[3]
+	if len(todo.Steps) != 0 {
+		t.Fatalf("todowrite must stay hidden like official session-ui HIDDEN_TOOLS, got %+v", todo.Steps)
 	}
 }
 

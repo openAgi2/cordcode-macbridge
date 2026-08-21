@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,7 +19,10 @@ import (
 // x-opencode-directory 头按目录返回；不带头的响应是一份陈旧的百条切片
 // （实测最新条目停在 7 月 6 日，当天新建的会话完全不在里面）。官方桌面端
 // （@opencode-ai/desktop，Electron——本质是 web 程序）按「已打开目录」逐目录
-// 拉列表；/project 就是 serve 侧的工程注册表（桌面端的目录选择器同源）。
+// 拉列表；/project 就是 serve 侧的工程注册表（目录选择器同源）。Desktop 关掉
+// 某个 tab 并不会从 GET /project 删除该行（WP：deleted-still-registered）；
+// 「当前打开的 6 个」是 Desktop 本地窗口态，不是这份注册表。CordCode 列表
+// 跟注册表，不跟 Desktop tab。
 // 因此本 backend 的会话目录发现/分组以 /project 为准，不再依赖全局 /session。
 //
 // 评审 S2 活体：元素是 {id, worktree, vcs, time, sandboxes}——directory 建议
@@ -128,15 +132,47 @@ func (a *Agent) projectWorktreeDirs(ctx context.Context, c *Client) ([]string, e
 	}
 	a.projectsMu.Unlock()
 
-	entries, err := a.fetchProjects(ctx, c)
+	dirs, source, err := a.loadHomeProjectDirs(ctx, c)
 	if err != nil {
 		return nil, err
 	}
+	slog.Info("opencode-web: home project list", "source", source, "count", len(dirs), "url", c.baseURL)
 
-	seen := make(map[string]bool, len(entries))
-	dirs := make([]string, 0, len(entries))
+	a.projectsMu.Lock()
+	a.projectDirs = dirs
+	a.projectDirsAt = time.Now()
+	a.projectsMu.Unlock()
+	return append([]string(nil), dirs...), nil
+}
+
+// loadHomeProjectDirs prefers Desktop's opened-tab persist (official home
+// sidebar). GET /project is the serve registry of every worktree ever seen —
+// using it as the iOS session-list grouping is why Desktop showed 6 tabs and
+// iPhone showed ~17. Fallback to GET /project only when persist has no row
+// for this serve URL (no Desktop install / different machine).
+func (a *Agent) loadHomeProjectDirs(ctx context.Context, c *Client) ([]string, string, error) {
+	if opened, src := readDesktopOpenedWorktrees(c.baseURL); len(opened) > 0 {
+		dirs := visibleDirsFromWorktrees(opened)
+		if len(dirs) > 0 {
+			return dirs, "desktop-persist:" + src, nil
+		}
+	}
+	entries, err := a.fetchProjects(ctx, c)
+	if err != nil {
+		return nil, "", err
+	}
+	worktrees := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		clean, ok := visibleProjectDir(entry.Worktree)
+		worktrees = append(worktrees, entry.Worktree)
+	}
+	return visibleDirsFromWorktrees(worktrees), "get-project-registry", nil
+}
+
+func visibleDirsFromWorktrees(worktrees []string) []string {
+	seen := make(map[string]bool, len(worktrees))
+	dirs := make([]string, 0, len(worktrees))
+	for _, wt := range worktrees {
+		clean, ok := visibleProjectDir(wt)
 		if !ok || seen[clean] {
 			continue
 		}
@@ -144,12 +180,7 @@ func (a *Agent) projectWorktreeDirs(ctx context.Context, c *Client) ([]string, e
 		dirs = append(dirs, clean)
 	}
 	sort.Strings(dirs)
-
-	a.projectsMu.Lock()
-	a.projectDirs = dirs
-	a.projectDirsAt = time.Now()
-	a.projectsMu.Unlock()
-	return append([]string(nil), dirs...), nil
+	return dirs
 }
 
 // invalidateProjectCache is called from the SSE catalog signal path so a
@@ -168,6 +199,18 @@ func (a *Agent) ListProjectSuggestions(ctx context.Context) ([]core.ProjectSugge
 	c, err := a.clientFor(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if opened, _ := readDesktopOpenedWorktrees(c.baseURL); len(opened) > 0 {
+		dirs := visibleDirsFromWorktrees(opened)
+		out := make([]core.ProjectSuggestion, 0, len(dirs))
+		for _, dir := range dirs {
+			out = append(out, core.ProjectSuggestion{
+				ID:        dir,
+				Directory: dir,
+				Name:      filepath.Base(dir),
+			})
+		}
+		return out, nil
 	}
 	entries, err := a.fetchProjects(ctx, c)
 	if err != nil {

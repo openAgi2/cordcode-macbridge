@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -17,9 +16,12 @@ func trimSpaceBytes(raw []byte) []byte {
 }
 
 // GetRichSessionHistory implements core.RichHistoryProvider: GET
-// /session/:id/message (v2: /api prefix). The mapping copies the legacy
-// semantics (info 下沉、parts[].type text/reasoning/tool/file、tool
-// state.status/output) — copied per design §7 兜底, owned by this package.
+// /session/:id/message (v2: /api prefix). Parts follow official 1.18.18
+// MessageV2: info 下沉, parts[].type text/reasoning/tool/file. Tool parts
+// are schema ToolPart (`tool` is the name string, `state` is a sibling) —
+// the same shape official Desktop loads via session.messages and renders
+// through session-ui renderable()/groupParts. Nested `tool: {toolName,state}`
+// is only kept so the copied legacy fixture still maps.
 func (a *Agent) GetRichSessionHistory(ctx context.Context, sessionID string, limit int) ([]core.RichHistoryEntry, error) {
 	c, err := a.clientFor(ctx)
 	if err != nil {
@@ -77,18 +79,17 @@ func (a *Agent) GetSessionHistory(ctx context.Context, sessionID string, limit i
 var _ core.RichHistoryProvider = (*Agent)(nil)
 var _ core.HistoryProvider = (*Agent)(nil)
 
-// errUnsupportedReasoning is the canonical §6.3 verdict for populated
-// reasoning on LIVE carriers ONLY (directive-014: the E2 synthetic capture
-// never sampled direct-SSE reasoning deltas, so the live mapper stays
-// unsupported and emits this diagnosable error). The authoritative HTTP
-// history is a different evidence surface — E2b proved populated reasoning
-// parts exist there — and mapRichHistoryEntry maps them as first-class
-// content; the hydrate never fails on history reasoning anymore.
-var errUnsupportedReasoning = errors.New("unsupported content.reasoning for verified 1.18.18 live shape")
+// errUnsupportedReasoning was the pre-2026-08-21 live verdict for populated
+// reasoning. It is retired: emitting it as core.EventError settled every
+// reasoning-model turn as turn_error and tore the live relay down mid-stream
+// (owner 真机 2026-08-21). Live carriers now SKIP populated reasoning
+// untranslated (skipLiveReasoning); E2b-verified HTTP history maps it as
+// first-class content via mapRichHistoryEntry.
 
 // mapRichHistoryEntry maps one official message element to
 // core.RichHistoryEntry. Unknown part types are ignored; a POPULATED
-// reasoning part fails the mapping (errUnsupportedReasoning).
+// reasoning part maps as first-class content in server order (E2b,
+// directive-014).
 func mapRichHistoryEntry(message map[string]any) (core.RichHistoryEntry, error) {
 	info := message
 	if sub, ok := message["info"].(map[string]any); ok {
@@ -101,7 +102,7 @@ func mapRichHistoryEntry(message map[string]any) (core.RichHistoryEntry, error) 
 		parts, _ = info["parts"].([]any)
 	}
 
-	var content string
+	var content, thinking string
 	steps := make([]map[string]any, 0)
 	mappedParts := make([]map[string]any, 0, len(parts))
 
@@ -141,45 +142,19 @@ func mapRichHistoryEntry(message map[string]any) (core.RichHistoryEntry, error) 
 			if strings.TrimSpace(text) == "" {
 				continue
 			}
+			if thinking != "" {
+				thinking += "\n"
+			}
+			thinking += text
 			mappedParts = append(mappedParts, map[string]any{"type": "reasoning", "content": text})
 		case "step-start", "step-finish", "patch":
 			// Official Web skip list (E2b officialWeb.skipParts) — lifecycle
 			// markers, never projection content. Only these evidenced types
 			// are skipped; this is not a general unknown-part amnesty.
 		case "tool":
-			tool, _ := part["tool"].(map[string]any)
-			if tool == nil {
+			step := mapToolStepFromPart(part)
+			if step == nil {
 				continue
-			}
-			toolID, _ := tool["id"].(string)
-			if toolID == "" {
-				toolID, _ = tool["toolName"].(string)
-			}
-			toolName, _ := tool["toolName"].(string)
-			if toolName == "" {
-				toolName, _ = tool["name"].(string)
-			}
-			state, _ := tool["state"].(map[string]any)
-			status := "completed"
-			if state != nil {
-				if value, ok := state["status"].(string); ok && value != "" {
-					status = value
-				}
-			}
-			var output any
-			var duration any
-			if state != nil {
-				output = state["output"]
-				duration = state["durationMs"]
-			}
-			step := map[string]any{
-				"id":                             toolID,
-				"toolName":                       toolName,
-				"status":                         status,
-				"output":                         makeToolOutput(output),
-				"duration":                       duration,
-				"requiresPermissionConfirmation": false,
-				"availablePermissionOptions":     []any{},
 			}
 			steps = append(steps, step)
 			mappedParts = append(mappedParts, map[string]any{"type": "tool", "step": step})
@@ -225,6 +200,7 @@ func mapRichHistoryEntry(message map[string]any) (core.RichHistoryEntry, error) 
 		ID:         id,
 		Role:       role,
 		Content:    content,
+		Thinking:   thinking,
 		Parts:      mappedParts,
 		Steps:      steps,
 		Files:      []map[string]any{},
@@ -234,6 +210,130 @@ func mapRichHistoryEntry(message map[string]any) (core.RichHistoryEntry, error) 
 		ProviderID: strValue(info, "providerID"),
 		ModelName:  strValue(info, "modelName"),
 	}, nil
+}
+
+// mapToolStepFromPart translates one official (or legacy-nested) tool part
+// into the projection step map hydrateToolEventsFromStep consumes.
+//
+// Official 1.18.18 ToolPart (packages/schema/src/v1/session.ts; live GET
+// /session/:id/message on 4096; sample a6/a8):
+//
+//	{type:"tool", id, callID, tool:"read"|"edit"|..., state:{status,input,output,title,metadata,time}}
+//
+// `tool` is a STRING name. The previous mapper type-asserted it to
+// map[string]any and skipped every official part — cold hydrate therefore
+// had reasoning/text but zero tool cards (owner 2026-08-21, 红楼梦 session).
+func mapToolStepFromPart(part map[string]any) map[string]any {
+	if part == nil {
+		return nil
+	}
+	toolName := ""
+	toolID := firstString(part, "id", "callID")
+	state := firstMap(part, "state")
+	switch toolVal := part["tool"].(type) {
+	case string:
+		toolName = strings.TrimSpace(toolVal)
+	case map[string]any:
+		// Copied-legacy fixture shape (tool nested object). Not the 1.18.18
+		// HTTP part; kept so existing tests and the live SSE nested fallback
+		// stay consistent.
+		if toolName == "" {
+			toolName = firstString(toolVal, "toolName", "name")
+		}
+		if toolID == "" {
+			toolID = firstString(toolVal, "id", "toolName")
+		}
+		if state == nil {
+			state = firstMap(toolVal, "state")
+		}
+	}
+	if toolName == "" {
+		toolName = firstString(part, "name")
+	}
+	if toolName == "" && toolID == "" {
+		return nil
+	}
+	// Official session-ui HIDDEN_TOOLS: todowrite lives in the todo dock, not
+	// the timeline (packages/session-ui/src/components/message-part.tsx).
+	if toolName == "todowrite" {
+		return nil
+	}
+	if toolID == "" {
+		toolID = toolName
+	}
+	status := "completed"
+	if s := firstString(state, "status"); s != "" {
+		status = s
+	}
+	var output any
+	var duration any
+	if state != nil {
+		output = state["output"]
+		if output == nil {
+			output = state["error"]
+		}
+		duration = state["durationMs"]
+		if duration == nil {
+			if timeMap := firstMap(state, "time"); timeMap != nil {
+				start := firstNumeric(timeMap, "start")
+				end := firstNumeric(timeMap, "end")
+				if end > start && start > 0 {
+					duration = end - start
+				}
+			}
+		}
+	}
+	step := map[string]any{
+		"id":                             toolID,
+		"toolName":                       toolName,
+		"status":                         status,
+		"output":                         makeToolOutput(output),
+		"duration":                       duration,
+		"requiresPermissionConfirmation": false,
+		"availablePermissionOptions":     []any{},
+	}
+	if title := firstString(state, "title"); title != "" {
+		step["title"] = title
+	}
+	if state != nil {
+		if input := state["input"]; input != nil {
+			step["toolInput"] = input
+		}
+	}
+	if changes := fileChangesFromToolState(state); len(changes) > 0 {
+		step["fileChanges"] = changes
+	}
+	return step
+}
+
+// fileChangesFromToolState reads official edit metadata.filediff
+// ({file, patch, additions, deletions}) into the projection fileChanges
+// vocabulary iOS already renders for Claude/Codex.
+func fileChangesFromToolState(state map[string]any) []map[string]any {
+	meta := firstMap(state, "metadata")
+	if meta == nil {
+		return nil
+	}
+	filediff := firstMap(meta, "filediff")
+	if filediff == nil {
+		return nil
+	}
+	path := firstString(filediff, "file", "path")
+	if path == "" {
+		return nil
+	}
+	diff := firstString(filediff, "patch")
+	if diff == "" {
+		diff = firstString(meta, "diff")
+	}
+	change := map[string]any{
+		"path": path,
+		"kind": "edit",
+	}
+	if diff != "" {
+		change["diff"] = diff
+	}
+	return []map[string]any{change}
 }
 
 // errorMessageFromInfo reads info.error.data.message (1.18.18 shape) with

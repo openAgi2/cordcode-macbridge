@@ -380,9 +380,12 @@ func (s *sseSubscriber) handleServerEvent(payload map[string]any) {
 		s.handleTodoUpdated(properties, sessionID)
 	case "server.connected", "message.removed", "message.part.removed", "session.diff":
 		// Not chat content; not catalog-affecting either.
-	case "session.created", "session.deleted":
-		// Catalog-affecting: ask the bridge for an immediate fingerprint
-		// rescan → sessions_changed. Never enters the chat stream.
+	case "session.created", "session.deleted", "project.updated", "catalog.updated":
+		// Catalog-affecting (Gate B observation.catalog_refresh): official
+		// home refresh is session.created/deleted AND project.updated /
+		// catalog.updated. Desktop opening a worktree emits the latter pair
+		// before any session exists — ignoring them leaves iOS on a stale
+		// GET /project snapshot until the next discovery poll.
 		s.agent.signalCatalogRefresh()
 	default:
 		slog.Debug("opencode-web SSE: unhandled server event", "type", eventType)
@@ -479,10 +482,14 @@ func (s *sseSubscriber) handleMessageUpdated(properties map[string]any, sessionI
 			}
 		case "reasoning":
 			// E2 verdict: no populated reasoning shape is verified on
-			// 1.18.18 — explicitly unsupported, never mapped to thinking or
-			// folded into answer text (§6.3).
+			// 1.18.18 — untranslated, never mapped to thinking or folded
+			// into answer text (§6.3). Non-fatal: an unsupported content
+			// type must not poison an otherwise healthy turn (owner 真机
+			// 2026-08-21: the former EventError settled every
+			// reasoning-model turn as turn_error and tore down relayEvents
+			// mid-stream).
 			if text := firstString(part, "text", "content"); strings.TrimSpace(text) != "" {
-				s.emit(core.Event{Type: core.EventError, Content: errUnsupportedReasoning.Error(), SessionID: sessionID})
+				s.skipLiveReasoning(sessionID, messageID, partID)
 			}
 		case "tool":
 			s.handleToolPart(part, sessionID, messageID)
@@ -516,9 +523,9 @@ func (s *sseSubscriber) handlePartDelta(properties map[string]any, sessionID str
 	kind := s.kindForPart(sessionID, messageID, partID, field)
 	switch kind {
 	case "reasoning":
-		// E2 verdict: populated reasoning is unsupported — diagnosable error,
-		// never a thinking stream (§6.3).
-		s.emit(core.Event{Type: core.EventError, Content: errUnsupportedReasoning.Error(), SessionID: sessionID})
+		// E2 verdict: populated reasoning is untranslated — skipped without
+		// poisoning the turn (see skipLiveReasoning; §6.3).
+		s.skipLiveReasoning(sessionID, messageID, partID)
 	case "text", "":
 		s.appendPartContent(sessionID, messageID, partID, "text", delta)
 		turnID := s.owningTurnID(sessionID, messageID)
@@ -575,9 +582,10 @@ func (s *sseSubscriber) handlePartUpdated(properties map[string]any, sessionID s
 			s.emit(core.Event{Type: eventType, Content: d.content, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
 		}
 	case "reasoning":
-		// E2 verdict: same explicit-unsupported rule as message.updated.
+		// E2 verdict: same untranslated rule as message.updated — skip
+		// without poisoning the turn (see skipLiveReasoning; §6.3).
 		if text := firstString(part, "text", "content"); strings.TrimSpace(text) != "" {
-			s.emit(core.Event{Type: core.EventError, Content: errUnsupportedReasoning.Error(), SessionID: sessionID})
+			s.skipLiveReasoning(sessionID, messageID, partID)
 		}
 	case "tool":
 		s.handleToolPart(part, sessionID, messageID)
@@ -1107,6 +1115,20 @@ func (s *sseSubscriber) owningTurnID(sessionID, messageID string) string {
 	return messageID
 }
 
+// skipLiveReasoning applies the canonical E2 verdict WITHOUT poisoning the
+// turn: populated reasoning on live carriers stays untranslated — no
+// thinking stream, no answer-text folding, no wire error — until a
+// same-version direct-SSE capture exists (§6.3). It must never surface as
+// core.EventError: go-bridge settles any non-claude EventError as
+// turn_error and tears relayEvents down mid-stream, which killed every
+// reasoning-model turn on owner devices (真机 2026-08-21: 正文只同步半截、
+// 会话卡执行中). The reasoning itself remains available through the E2b
+// HTTP-history hydrate path.
+func (s *sseSubscriber) skipLiveReasoning(sessionID, messageID, partID string) {
+	slog.Debug("opencode-web SSE: populated live reasoning skipped untranslated (E2; non-fatal)",
+		"sessionID", sessionID, "messageID", messageID, "partID", partID)
+}
+
 func (s *sseSubscriber) kindForPart(sessionID, messageID, partID, field string) string {
 	if field == "reasoning" {
 		return "reasoning"
@@ -1180,7 +1202,7 @@ func partCacheKey(sessionID, messageID, partID, kind string) string {
 func isServerEventType(eventType string) bool {
 	switch eventType {
 	case "message.updated", "message.part.delta", "message.part.updated", "session.status", "session.updated", "session.error", "session.idle", "todo.updated", "permission.asked", "question.asked", "question.replied", "question.rejected",
-		"server.connected", "session.created", "session.deleted", "message.removed", "message.part.removed", "session.diff":
+		"server.connected", "session.created", "session.deleted", "project.updated", "catalog.updated", "message.removed", "message.part.removed", "session.diff":
 		return true
 	default:
 		return false
@@ -1445,6 +1467,7 @@ func (a *Agent) releaseGlobalSubscriber() {
 	a.globalSub = nil
 	a.globalSubRefs = 0
 	a.globalSubMu.Unlock()
+	slog.Info("opencode-web SSE: last holder released, tearing stream")
 	_ = sub.Close()
 }
 

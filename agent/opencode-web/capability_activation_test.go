@@ -58,6 +58,7 @@ func TestCapabilityInputsMatchImplementedPaths(t *testing.T) {
 	if err := sess.RejectQuestion("q1"); err != core.ErrNotSupported {
 		t.Fatalf("RejectQuestion must stay ErrNotSupported, got %v", err)
 	}
-	// E2 verdict on the wire: populated reasoning fails the hydrate.
-	var _ = errUnsupportedReasoning
+	// E2 verdict on the wire: populated live reasoning stays untranslated
+	// and non-fatal (2026-08-21: the former EventError killed healthy turns).
+	// Hydrate-side mapping is owned by audit014_reasoning_test.go.
 }
