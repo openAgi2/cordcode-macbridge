@@ -41,7 +41,7 @@
    "attestation_note": "all evidence self-attested; sandbox/unit/regression replayable; owner UI matrix NOT executed (awaits supervisor audit)"
   }
  },
- "updated_at": "2026-08-20T20:10:00Z",
+ "updated_at": "2026-08-21T01:35:48Z",
  "todos": [
   {
    "id": "gate-a-inventory-impl",
@@ -1635,28 +1635,96 @@
    "id": "concentrated-audit008-review-fix-regression",
    "title": "Audit-008 concentrated regression and install",
    "description": "Run bounded Mac/iOS regressions, reinstall both products, submit one report, and wait for supervisor re-audit before owner UI matrix.",
-   "status": "done",
+   "status": "blocked",
    "phase": "concentrated-audit008-review-fix",
    "kind": "regression",
    "depends_on": [
     "concentrated-audit008-review-fix-tests"
    ],
    "source": "supervisor audit-008",
-   "notes": "review-fix-for:concentrated-activation-regression",
+   "notes": "review-fix-for:concentrated-activation-regression | supervisor audit-009 partial: main repair verified, but question source correlation/cold recovery, strict decoder tail, and connected-device installation remain unresolved | resolved-by:audit009-tail-review-fix-regression",
    "verification": {
     "required": true,
-    "status": "present",
+    "status": "failed",
     "method": "regression",
+    "attestation": "re-verified",
+    "na_reason": null,
+    "summary": "Supervisor audit-009 independently re-ran the claimed Go/iOS targeted tests and real 1.18.18 sandbox paths; one-ingest and the main repairs pass. Regression remains incomplete: live question correlation trusts any non-empty messageID and permits empty callID; pending GET /question is not projected during route/reconnect/cold reload; several evidence-proven strict shapes/statuses remain permissive; physical iOS install was deferred even though the device became available during audit. Classified repairable-heavy and assigned directive-010.",
+    "artifacts": [
+     "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-009-audit008-concentrated-product-path-repair.md",
+     "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-010-question-recovery-strict-tail-and-ios-install.md",
+     "cmd:go test ./go-bridge ./agent/opencode-web -run TestAudit008 => PASS (re-verified)",
+     "cmd:go test -race ./agent/opencode-web and go test ./... => PASS (re-verified)",
+     "cmd:xcodebuild targeted ModelVariantSelectionTests + OpencodeWebVariantAgentWireTests => 11/11 PASS (re-verified)"
+    ],
+    "checked_at": "2026-08-21T01:35:48Z"
+   }
+  },
+  {
+   "id": "audit009-tail-review-fix-impl",
+   "title": "Audit-009 question recovery and strict-tail repair",
+   "description": "Implement source-correlated live and cold-recovered questions through the single Kernel route; close exact HTTP/status/payload validation for mutations, agent/provider catalogs, and Todo rows without fallback.",
+   "status": "pending",
+   "phase": "audit009-tail-review-fix",
+   "kind": "impl",
+   "depends_on": [],
+   "source": "supervisor audit-009; directive-010",
+   "notes": "review-fix-for:concentrated-audit008-review-fix-regression",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "Full sweep: go build/vet/test ./... green; go test -race ./agent/opencode-web green (5.2s); ALL sandbox regressions re-pass on the real isolated 1.18.18 serve (C2 cycle, C3/C5 prompt options incl. variant persistence + zeta fallback, C4 A3/A4/E3 terminals, C6 question/todo/permission, C7 mutations incl. strict delete convergence); 4398/4399 reclaimed, 4096 PID 9258→67389 solely from the mandated killall+reinstall (parent = reinstalled app, PPID 67358). iOS: ModelVariantSelectionTests 7/7 + OpencodeWebVariantAgentWireTests 4/4; Release BUILD SUCCEEDED for device; iPhone 16 Pro became unavailable (locked) before install — install/launch deferred to device availability, no UI automation. Mac Release rebuilt at cb1d8e6da767, installed to /Applications, 8777 PID 67457 from the installed path.",
-    "artifacts": [
-     "cmd:go test ./... => all ok",
-     "cmd:go test -race ./agent/opencode-web/ => ok",
-     "cmd:OCW_SANDBOX_URL=… go test -run \"TestSandbox.*\" => all PASS",
-     "cmd:xcodebuild test -only-testing:ModelVariantSelectionTests => 7/7",
-     "commit:293df9b→cb1d8e6da767 mac, 71007a4 ios"
-    ]
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "audit009-tail-review-fix-tests",
+   "title": "Audit-009 full-path and destructive owning tests",
+   "description": "Prove question source identity, GET/live convergence, reply/reject/external/reconnect/cold reload through Kernel/Projection and reject every strict-tail malformed or wrong-status case without state pollution.",
+   "status": "pending",
+   "phase": "audit009-tail-review-fix",
+   "kind": "tests",
+   "depends_on": [
+    "audit009-tail-review-fix-impl"
+   ],
+   "source": "supervisor audit-009; directive-010",
+   "notes": "review-fix-for:concentrated-audit008-review-fix-regression",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "automated",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "audit009-tail-review-fix-regression",
+   "title": "Audit-009 sandbox regression and connected-device install",
+   "description": "Run bounded Go/race/build/vet and real isolated 1.18.18 question/mutation regressions, reinstall the changed Mac product, rerun the two iOS targeted classes, and install/launch on the currently available paired iPhone without UI automation.",
+   "status": "pending",
+   "phase": "audit009-tail-review-fix",
+   "kind": "regression",
+   "depends_on": [
+    "audit009-tail-review-fix-tests"
+   ],
+   "source": "supervisor audit-009; directive-010",
+   "notes": "review-fix-for:concentrated-audit008-review-fix-regression; on proven completion restore the parent regression to done and record resolved-via",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
    }
   }
  ]

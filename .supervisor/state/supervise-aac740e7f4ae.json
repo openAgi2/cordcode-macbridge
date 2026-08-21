@@ -248,7 +248,7 @@
       "kind": "hole-fill",
       "title": "Audit-008 concentrated product-path repair",
       "issued_at": "2026-08-20T18:48:54Z",
-      "status": "pending",
+      "status": "in_progress",
       "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-009-audit008-concentrated-product-path-repair.md",
       "scope": "Cross-repository MacBridge+iOS concentrated corrective batch",
       "constraints": [
@@ -260,9 +260,41 @@
         "affected capabilities remain unavailable until full-path owning tests pass; E2 reasoning and OD-3 remain absent",
         "one concentrated report, then stop for audit-009 before owner UI matrix"
       ],
-      "linked_commits": [],
+      "linked_commits": [
+        "git:851c2c6",
+        "git:cb1d8e6",
+        "git:d763d82",
+        "ios-git:71007a4"
+      ],
       "resolved_from_audit": 8,
+      "resolved_by_directive": 10,
       "owner_disposition": "Option A confirmed: preserve canonical and repair implementation/full-path tests",
+      "report": {
+        "received_at": "2026-08-21T01:35:48Z",
+        "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-009-audit008-concentrated-product-path-repair.md",
+        "audited": true,
+        "audit_verdict": "partial",
+        "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-009-audit008-concentrated-product-path-repair.md"
+      }
+    },
+    {
+      "number": 10,
+      "kind": "hole-fill",
+      "title": "Question recovery, strict tail, and iOS install",
+      "issued_at": "2026-08-21T01:35:48Z",
+      "status": "pending",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-010-question-recovery-strict-tail-and-ios-install.md",
+      "scope": "Mac targeted repair plus iOS targeted regression/install",
+      "constraints": [
+        "source-proven question messageID/callID correlation with cold GET/history recovery through the one Kernel route",
+        "exact HTTP 200 mutation responses and remaining agent/provider/todo strict destructive cases",
+        "preserve directive-009 verified C4 one-ingest and variant UI paths",
+        "no protocol/canonical/second-writer/fallback/reasoning/OD-3 changes",
+        "developer performs bounded iOS targeted tests and available paired-device install; no UI automation",
+        "one report then stop for audit-010"
+      ],
+      "linked_commits": [],
+      "resolved_from_audit": 9,
       "report": {
         "received_at": null,
         "markdown_path": null,
@@ -272,6 +304,6 @@
       }
     }
   ],
-  "current_directive_number": 9,
-  "last_updated": "2026-08-20T18:48:54Z"
+  "current_directive_number": 10,
+  "last_updated": "2026-08-21T01:35:48Z"
 }
