@@ -228,6 +228,10 @@ func detectAgentStatus(id string, agent core.Agent, codexBackendMode string, cfg
 		// 纯 HTTP/SSE 客户端：可用性 = 探针镜像的 serve 状态（设计 §4.2，
 		// 坑 12——默认分支会把空 URL 也报成 available）。
 		return detectInstanceStatusProber("opencode-web", agent)
+	case "codex-web":
+		// 官方 app-server 客户端：可用性 = 生命周期探针镜像（源/版本/官方失败原文）；
+		// 探测本身由首次目录/历史请求触发，descriptor 只读镜像（设计 §9.1 第 8 条）。
+		return detectInstanceStatusProber("codex-web", agent)
 	default:
 		return AgentStatusAvailable, ""
 	}

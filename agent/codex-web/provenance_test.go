@@ -21,6 +21,21 @@ func forbiddenImportPrefixes() []string {
 	}
 }
 
+// forbiddenImportSubstrings 覆盖 §9.1 第 11 条的其余禁区措辞：旧 store、rollout
+// parser、file relay、session scanner——任何 import 路径含这些词都属于越界。
+func forbiddenImportSubstrings() []string {
+	return []string{
+		"/transcriptindex",
+		"rolloutparser",
+		"rollout-parser",
+		"filerelay",
+		"file-relay",
+		"sessionscanner",
+		"session-scanner",
+		"transcriptscanner",
+	}
+}
+
 func TestProvenanceNoForbiddenImports(t *testing.T) {
 	fset := token.NewFileSet()
 	pkgs, err := parser.ParseDir(fset, ".", nil, 0)
@@ -35,6 +50,39 @@ func TestProvenanceNoForbiddenImports(t *testing.T) {
 					if path == forbidden || strings.HasPrefix(path, forbidden+"/") {
 						t.Errorf("%s imports forbidden package %s（设计 §2.2 空目录原则）", fname, path)
 					}
+				}
+				lower := strings.ToLower(path)
+				for _, substr := range forbiddenImportSubstrings() {
+					if strings.Contains(lower, substr) {
+						t.Errorf("%s imports forbidden package %s（设计 §9.1 provenance 禁区）", fname, path)
+					}
+				}
+			}
+		}
+	}
+}
+
+// TestProvenanceNoRolloutPathAccess 本包源码不得出现 rollout 路径操作（生成/查找/
+// 借用 session 文件路径——§9.1 hydrate source 行红线）。
+func TestProvenanceNoRolloutPathAccess(t *testing.T) {
+	fset := token.NewFileSet()
+	pkgs, err := parser.ParseDir(fset, ".", nil, 0)
+	if err != nil {
+		t.Fatalf("parse package: %v", err)
+	}
+	for _, pkg := range pkgs {
+		for fname := range pkg.Files {
+			if strings.HasSuffix(fname, "_test.go") {
+				continue
+			}
+			b, err := os.ReadFile(fname)
+			if err != nil {
+				t.Fatalf("read %s: %v", fname, err)
+			}
+			src := string(b)
+			for _, forbidden := range []string{"rollout-", "sessions/rollout", `threadStore`, `.jsonl"`} {
+				if strings.Contains(src, forbidden) {
+					t.Errorf("%s 引用旧 rollout/store 路径词汇 %q（§9.1 禁区）", fname, forbidden)
 				}
 			}
 		}

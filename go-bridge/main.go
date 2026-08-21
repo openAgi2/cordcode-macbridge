@@ -20,6 +20,7 @@ import (
 	// Register cc-connect agents via init()
 	_ "github.com/openAgi2/cordcode-macbridge/agent/claudecode"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/codex"
+	_ "github.com/openAgi2/cordcode-macbridge/agent/codex-web"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/dsh"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/dsh-web"
 	_ "github.com/openAgi2/cordcode-macbridge/agent/grokbuild"
@@ -40,6 +41,9 @@ func Main() {
 	showVersion := flag.Bool("version", false, "Print runtime version and exit")
 	codexBackend := flag.String("codex-backend", envOr("GO_BRIDGE_CODEX_BACKEND", "exec"), "Codex backend mode: exec or app_server")
 	codexAppServerURL := flag.String("codex-app-server-url", envOr("GO_BRIDGE_CODEX_APP_SERVER_URL", ""), "Optional Codex app-server listen URL")
+	// codex-web：官方长驻 app-server 的 JSON-RPC 客户端 backend（设计 §6.1 第 1 优先级）。
+	// 显式共享服务 URL；空 = 官方 daemon 复用→managed start→托管 loopback WS 顺序。
+	codexWebAppServerURL := flag.String("codex-web-app-server-url", envOr("GO_BRIDGE_CODEX_WEB_APP_SERVER_URL", ""), "Optional shared Codex app-server URL for the codex-web backend (loopback ws://)")
 
 	// opencode direct HTTP API。默认空 = 未配置（不隐式回落 64667）；显式 loopback URL 时
 	// 连接用户/运维已启动的 stable `opencode serve`。URL 经 MacBridge 校验为 loopback 后传入。
@@ -163,6 +167,7 @@ func Main() {
 			openCodeWebPass:   *ocwPass,
 			codexBackend:      *codexBackend,
 			codexAppServerURL: *codexAppServerURL,
+			codexWebAppSrvURL: *codexWebAppServerURL,
 			pinStore:          pinStore,
 			dataDir:           *dataDirPath,
 		})
@@ -824,17 +829,18 @@ func shouldStartPassiveSubscription(backendID, codexBackendMode, codexAppServerU
 }
 
 type agentOptionsConfig struct {
-	workDir           string
-	openCodeURL       string
-	openCodeUser      string
-	openCodePass      string
-	openCodeWebURL    string
-	openCodeWebUser   string
-	openCodeWebPass   string
-	codexBackend      string
-	codexAppServerURL string
-	pinStore          *pinstore.Store
-	dataDir           string
+	workDir            string
+	openCodeURL        string
+	openCodeUser       string
+	openCodePass       string
+	openCodeWebURL     string
+	openCodeWebUser    string
+	openCodeWebPass    string
+	codexBackend       string
+	codexAppServerURL  string
+	codexWebAppSrvURL  string
+	pinStore           *pinstore.Store
+	dataDir            string
 }
 
 func buildAgentOptions(id string, cfg agentOptionsConfig) map[string]any {
@@ -863,6 +869,13 @@ func buildAgentOptions(id string, cfg agentOptionsConfig) map[string]any {
 		opts["opencode_web_url"] = cfg.openCodeWebURL
 		opts["opencode_web_user"] = cfg.openCodeWebUser
 		opts["opencode_web_pass"] = cfg.openCodeWebPass
+	}
+
+	if id == "codex-web" {
+		// codex-web 读自己的键（§5.1 独立身份）——绝不复用 codex_app_server_url：
+		// 旧 codex 的共享 URL 是 app_server 模式选项，codex-web 的显式服务是 §6.1
+		// 第 1 优先级探测输入，两者语义/回退行为不同。
+		opts["codex_web_app_server_url"] = cfg.codexWebAppSrvURL
 	}
 
 	return opts

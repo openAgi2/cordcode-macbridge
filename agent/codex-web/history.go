@@ -7,7 +7,7 @@ package codexweb
 // dumps/interaction（command/file 变体的 item 帧，与历史视图同一 ThreadItem 形状）。
 //
 // 身份纪律（§9.1 live/cold 同一官方 identity）：
-//   - HistoryTurn.TurnID = 官方 turn.id（不是 user item id——那是 opencode 家族约定，
+//   - core.TurnScopedHistoryTurn.TurnID = 官方 turn.id（不是 user item id——那是 opencode 家族约定，
 //     Codex live 事件带官方 turn id，冷基线必须同 id 才能 merge）；
 //   - item 身份 = 官方 item.id（userMessage/agentMessage/commandExecution/...）；
 //   - 禁止编造合成 id；无 agentMessage 的 turn 用 turn 自身作为 assistant 边界载体，
@@ -31,6 +31,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // TurnItemsView 官方枚举。
@@ -58,14 +60,14 @@ type TurnErrorInfo struct {
 // TurnInfo 是官方 Turn wire 形状。Items 保留原始 JSON（官方 variant 众多，
 // 映射按 variant 白名单进行，见 item codec）。
 type TurnInfo struct {
-	ID         string            `json:"id"`
-	Items      []json.RawMessage `json:"items"`
-	ItemsView  string            `json:"itemsView"`
-	Status     string            `json:"status"`
-	Error      *TurnErrorInfo    `json:"error"`
-	StartedAt  *int64            `json:"startedAt"`
+	ID          string            `json:"id"`
+	Items       []json.RawMessage `json:"items"`
+	ItemsView   string            `json:"itemsView"`
+	Status      string            `json:"status"`
+	Error       *TurnErrorInfo    `json:"error"`
+	StartedAt   *int64            `json:"startedAt"`
 	CompletedAt *int64            `json:"completedAt"`
-	DurationMs *int64            `json:"durationMs"`
+	DurationMs  *int64            `json:"durationMs"`
 }
 
 // ReadThread 发送 thread/read。includeTurns=true 时返回官方持久化 turns
@@ -138,8 +140,8 @@ type ThreadItem struct {
 	Text string
 
 	// reasoning（summary 与 content 不重复：优先 summary）
-	Summary         []string
-	ReasoningTail   []string
+	Summary       []string
+	ReasoningTail []string
 
 	// commandExecution
 	Command         string
@@ -198,14 +200,14 @@ func decodeThreadItem(raw json.RawMessage) ThreadItem {
 		it.Summary, it.ReasoningTail = v.Summary, v.Content
 	case "commandExecution":
 		var v struct {
-			Command         string  `json:"command"`
-			Cwd             string  `json:"cwd"`
-			Status          string  `json:"status"`
+			Command          string  `json:"command"`
+			Cwd              string  `json:"cwd"`
+			Status           string  `json:"status"`
 			AggregatedOutput *string `json:"aggregatedOutput"`
-			ExitCode        *int32  `json:"exitCode"`
-			ProcessID       *string `json:"processId"`
-			Source          string  `json:"source"`
-			DurationMs      *int64  `json:"durationMs"`
+			ExitCode         *int32  `json:"exitCode"`
+			ProcessID        *string `json:"processId"`
+			Source           string  `json:"source"`
+			DurationMs       *int64  `json:"durationMs"`
 		}
 		_ = json.Unmarshal(raw, &v)
 		it.Command, it.CommandCwd, it.CommandStatus = v.Command, v.Cwd, v.Status
@@ -214,7 +216,7 @@ func decodeThreadItem(raw json.RawMessage) ThreadItem {
 	case "fileChange":
 		var v struct {
 			Changes []FileUpdateChange `json:"changes"`
-			Status  string            `json:"status"`
+			Status  string             `json:"status"`
 		}
 		_ = json.Unmarshal(raw, &v)
 		it.Changes, it.PatchStatus = v.Changes, v.Status
@@ -232,10 +234,10 @@ func decodeThreadItem(raw json.RawMessage) ThreadItem {
 		it.ToolStatus, it.Result, it.ToolError = v.Status, v.Result, v.Error
 	case "dynamicToolCall":
 		var v struct {
-			Tool       string          `json:"tool"`
-			Arguments  json.RawMessage `json:"arguments"`
-			Status     string          `json:"status"`
-			Success    *bool           `json:"success"`
+			Tool      string          `json:"tool"`
+			Arguments json.RawMessage `json:"arguments"`
+			Status    string          `json:"status"`
+			Success   *bool           `json:"success"`
 		}
 		_ = json.Unmarshal(raw, &v)
 		it.Tool, it.Arguments, it.ToolStatus = v.Tool, v.Arguments, v.Status
@@ -249,42 +251,19 @@ func decodeThreadItem(raw json.RawMessage) ThreadItem {
 	return it
 }
 
-// ---- turn-scoped 冷基线（官方 identity） ----
-
-// HistoryTurn 是一个官方 turn 的冷基线：TurnID 为官方 turn.id；Parts 按服务端 item
-// 顺序映射为 projection 约定的 part/step 词汇（text/reasoning/tool）。
-type HistoryTurn struct {
-	TurnID       string
-	Status       string // 官方 TurnStatus
-	ErrorMessage string // 仅 failed 时官方 TurnError.message
-	StartedAt    time.Time
-	CompletedAt  time.Time
-	HasTime      bool
-
-	UserItemID string // 官方 userMessage item.id（无 userMessage 的 turn 为空）
-	UserText   string // text parts 拼接（仅 text；image 不映射）
-
-	Parts []map[string]any // assistant 侧有序 part/step（见 mapHistoryItem）
-
-	// SystemNotes 官方系统边界事实（contextCompaction 等）；文本为官方 type 名，
-	// 不编造细节。
-	SystemNotes []string
-
-	// SkippedTypes 记录被跳过的 item 官方 type（诊断用；不猜测映射）。
-	SkippedTypes []string
-}
+// ---- turn-scoped 冷基线（官方 identity；类型为 core.TurnScopedHistoryTurn） ----
 
 // ReadThreadRich 读取 includeTurns 历史并映射为官方 identity 的 turn 冷基线。
 // limit>0 时只保留最新 limit 个 turn（官方升序，取尾部）；thread/read 本身无稳定
 // 分页（excludeTurns+cursor 属 experimental 面），有界加载在客户端裁剪。
-func ReadThreadRich(ctx context.Context, cl *Client, threadID string, limit int) ([]HistoryTurn, *RPCError, error) {
+func ReadThreadRich(ctx context.Context, cl *Client, threadID string, limit int) ([]core.TurnScopedHistoryTurn, *RPCError, error) {
 	th, rpcErr, err := ReadThread(ctx, cl, threadID, true)
 	if err != nil || rpcErr != nil {
 		return nil, rpcErr, err
 	}
-	turns := make([]HistoryTurn, 0, len(th.Turns))
+	turns := make([]core.TurnScopedHistoryTurn, 0, len(th.Turns))
 	for _, t := range th.Turns {
-		ht := HistoryTurn{TurnID: t.ID, Status: t.Status}
+		ht := core.TurnScopedHistoryTurn{TurnID: t.ID, Status: t.Status}
 		if t.Error != nil {
 			ht.ErrorMessage = t.Error.Message
 		}
@@ -311,8 +290,8 @@ func ReadThreadRich(ctx context.Context, cl *Client, threadID string, limit int)
 	return turns, nil, nil
 }
 
-// mapHistoryItem 把一个官方 item 映射进 HistoryTurn。身份/命名纪律见文件头。
-func mapHistoryItem(ht *HistoryTurn, it ThreadItem) {
+// mapHistoryItem 把一个官方 item 映射进 core.TurnScopedHistoryTurn。身份/命名纪律见文件头。
+func mapHistoryItem(ht *core.TurnScopedHistoryTurn, it ThreadItem) {
 	switch it.Type {
 	case "userMessage":
 		if ht.UserItemID != "" {
@@ -457,3 +436,120 @@ func commandStepStatus(official string) string {
 		return official
 	}
 }
+
+// ---- core provider 面（SSV2 pathless hydrate 消费） ----
+
+// GetTurnScopedRichHistory 实现 core.TurnScopedRichHistoryProvider：官方 turn
+// identity 的冷基线（§9.1 live/cold 同一官方 identity 合并）。
+func (a *Agent) GetTurnScopedRichHistory(ctx context.Context, sessionID string, limit int) ([]core.TurnScopedHistoryTurn, error) {
+	var out []core.TurnScopedHistoryTurn
+	err := a.withClient(ctx, func(cl *Client) error {
+		turns, rpcErr, err := ReadThreadRich(ctx, cl, sessionID, limit)
+		if err != nil {
+			return err
+		}
+		if rpcErr != nil {
+			return rpcErr
+		}
+		out = turns
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// GetRichSessionHistory 实现 core.RichHistoryProvider（扁平兼容面）：turn-scoped
+// 冷基线折叠为 user/assistant 行。assistant 行 ID 用官方 agentMessage 之外的
+// turn 边界（Parts 为空的 turn 折叠时无内容行——不编造）。
+func (a *Agent) GetRichSessionHistory(ctx context.Context, sessionID string, limit int) ([]core.RichHistoryEntry, error) {
+	turns, err := a.GetTurnScopedRichHistory(ctx, sessionID, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]core.RichHistoryEntry, 0, len(turns)*2)
+	for _, t := range turns {
+		started := t.StartedAt
+		if !t.HasTime {
+			started = t.CompletedAt
+		}
+		if t.UserItemID != "" && t.UserText != "" {
+			out = append(out, core.RichHistoryEntry{
+				ID:        t.UserItemID,
+				Role:      "user",
+				Content:   t.UserText,
+				Timestamp: started,
+			})
+		}
+		if len(t.Parts) == 0 && t.ErrorMessage == "" && len(t.SystemNotes) == 0 {
+			continue
+		}
+		entry := core.RichHistoryEntry{
+			// assistant 行身份：官方 turn id（本 backend 的扁平兼容面不进入
+			// SSV2 冷基线 dispatch——dispatch 走 turn-scoped provider）。
+			ID:              t.TurnID,
+			Role:            "assistant",
+			Parts:           t.Parts,
+			Timestamp:       started,
+			TurnStartedAt:   timeOrZero(t.HasTime, t.StartedAt),
+			TurnCompletedAt: timeOrZero(t.HasTime, t.CompletedAt),
+		}
+		if t.ErrorMessage != "" {
+			entry.Content = "官方 turn 失败：" + t.ErrorMessage
+		}
+		out = append(out, entry)
+		for _, note := range t.SystemNotes {
+			out = append(out, core.RichHistoryEntry{
+				ID: t.TurnID + ":" + note, Role: "system", Content: note, Timestamp: started,
+			})
+		}
+	}
+	return out, nil
+}
+
+func timeOrZero(has bool, t time.Time) *time.Time {
+	if !has || t.IsZero() {
+		return nil
+	}
+	v := t
+	return &v
+}
+
+// GetSessionHistory 实现 core.HistoryProvider（legacy 兼容面）。
+func (a *Agent) GetSessionHistory(ctx context.Context, sessionID string, limit int) ([]core.HistoryEntry, error) {
+	rich, err := a.GetRichSessionHistory(ctx, sessionID, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]core.HistoryEntry, 0, len(rich))
+	for _, e := range rich {
+		out = append(out, core.HistoryEntry{Role: e.Role, Content: e.Content, Timestamp: e.Timestamp})
+	}
+	return out, nil
+}
+
+// IsSessionActive 实现 core.SessionActivityProbing：官方 thread.status 是 activity
+// 真相（active=有 turn 在跑；§9.2 不另造本地 detector）。读失败保守按 active 处理。
+func (a *Agent) IsSessionActive(ctx context.Context, sessionID string) bool {
+	active := true
+	_ = a.withClient(ctx, func(cl *Client) error {
+		th, rpcErr, err := ReadThread(ctx, cl, sessionID, false)
+		if err != nil {
+			return nil // 保守：错误按 active
+		}
+		if rpcErr != nil {
+			return nil
+		}
+		active = th.Status.Type == ThreadStatusActive
+		return nil
+	})
+	return active
+}
+
+var (
+	_ core.TurnScopedRichHistoryProvider = (*Agent)(nil)
+	_ core.RichHistoryProvider           = (*Agent)(nil)
+	_ core.HistoryProvider               = (*Agent)(nil)
+	_ core.SessionActivityProbing        = (*Agent)(nil)
+)

@@ -12,6 +12,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 func jraw(s string) json.RawMessage { return json.RawMessage(s) }
@@ -84,7 +86,7 @@ func TestHistoryFixtureTurnMapping(t *testing.T) {
 }
 
 // turnsFromThread 用包内映射处理一个已解码 thread（测试脚手架）。
-func turnsFromThread(t *testing.T, th *ThreadInfo, limit int) []HistoryTurn {
+func turnsFromThread(t *testing.T, th *ThreadInfo, limit int) []core.TurnScopedHistoryTurn {
 	t.Helper()
 	client, _ := historyClientWithThread(t, th)
 	hts, rpcErr, err := ReadThreadRich(context.Background(), client, th.ID, limit)

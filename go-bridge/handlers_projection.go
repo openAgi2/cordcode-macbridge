@@ -114,7 +114,8 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 		(msg.BackendID == "opencode" || msg.BackendID == "opencode-web" ||
 			msg.BackendID == "grokbuild" ||
 			msg.BackendID == "claude" || msg.BackendID == "claudecode" ||
-			msg.BackendID == "deepseek" || msg.BackendID == "dsh-web")
+			msg.BackendID == "deepseek" || msg.BackendID == "dsh-web" ||
+			msg.BackendID == "codex-web")
 	// Claude cold open starts the live file relay BEFORE the hydrate wait (aligned with
 	// codex/opencode above) so in-flight terminal events can feed the commit gate, and passes
 	// the hydrate admission cut so the relay's initial scan range is disjoint from the
@@ -344,12 +345,14 @@ var errProjectionSessionNotFound = errors.New("live-only session has no kernel s
 // dsh web instance (dsh-web design §4.3.2).
 func backendSupportsProjectionHydrate(backendID string) bool {
 	switch backendID {
-	case "codex", "claude", "claudecode", "opencode", "grokbuild", "deepseek", "dsh-web", "opencode-web":
+	case "codex", "claude", "claudecode", "opencode", "grokbuild", "deepseek", "dsh-web", "opencode-web", "codex-web":
 		// K5: Codex/Claude use JSONL transcript hydrate; OpenCode uses HTTP rich-history
 		// full rebuild (no transcript file / no file-prefix checkpoint); grokbuild and
 		// deepseek use the same pathless rich-history rebuild from local session logs;
 		// dsh-web rebuilds pathless from the official session.history API; opencode-web
-		// rebuilds pathless from the official GET /session/:id/message API.
+		// rebuilds pathless from the official GET /session/:id/message API; codex-web
+		// rebuilds pathless from the official app-server thread/read(includeTurns) API
+		// (design §9.1 — official identity, no rollout path).
 		return true
 	default:
 		return false
@@ -493,8 +496,11 @@ func (h *Handlers) ensureProjectionHydrated(
 		return err
 	}
 	// Pathless re-open: force full GetRichSessionHistory rebuild when already Ready.
+	// codex-web belongs here too: its projection baseline key is the official app-server
+	// identity — a daemon restart/endpoint change or official archive/source change
+	// invalidates any carried checkpoint (design §9.1 request-level forceCold).
 	sourceChanged := forceColdInspection && ready &&
-		(backendID == "opencode" || backendID == "grokbuild" || backendID == "deepseek" || backendID == "dsh-web" || backendID == "opencode-web") && source.Path == ""
+		(backendID == "opencode" || backendID == "grokbuild" || backendID == "deepseek" || backendID == "dsh-web" || backendID == "opencode-web" || backendID == "codex-web") && source.Path == ""
 	// Hydrate owns the source cut. Hand it to any pre-hydrate hook (Claude cold-open starts
 	// its live file relay here so in-flight terminal events can feed the commit gate; the relay
 	// inherits the admission cut so its initial scan is disjoint from the cold-source baseline).
@@ -595,6 +601,8 @@ func (h *Handlers) prepareProjectionHydrateSource(
 		agentName = "dsh-web"
 	case "opencode-web":
 		agentName = "opencode-web"
+	case "codex-web":
+		agentName = "codex-web"
 	default:
 		return ProjectionSourceDescriptor{}, errProjectionBackendNotMigrated
 	}
@@ -671,11 +679,13 @@ func (h *Handlers) prepareProjectionHydrateSource(
 	// OpenCode has no JSONL transcript path; grokbuild's chat_history.jsonl is a structured
 	// turn snapshot, not a raw transcript with stable byte cursors; deepseek's store logs
 	// are zstd-compressed (web artifacts); dsh-web's baseline is the official
-	// session.history API; opencode-web's baseline is the official message API. All
-	// pathless members cold-hydrate as a full rich-history rebuild keyed
-	// by session identity only (Cursor=0, Path empty). Checkpoint file-prefix validation
-	// does not apply; re-open always rebuilds from GetRichSessionHistory.
-	if backendID == "opencode" || backendID == "grokbuild" || backendID == "deepseek" || backendID == "dsh-web" || backendID == "opencode-web" {
+	// session.history API; opencode-web's baseline is the official message API; codex-web's
+	// baseline is the official app-server thread/read(includeTurns) API. All pathless
+	// members cold-hydrate as a full rich-history rebuild keyed by session identity only
+	// (Cursor=0, Path empty). Checkpoint file-prefix validation does not apply; re-open
+	// always rebuilds from GetRichSessionHistory. codex-web MUST NOT generate, look up,
+	// or borrow a rollout path here (design §9.1 hydrate-source row).
+	if backendID == "opencode" || backendID == "grokbuild" || backendID == "deepseek" || backendID == "dsh-web" || backendID == "opencode-web" || backendID == "codex-web" {
 		if _, ok := agent.(core.RichHistoryProvider); !ok {
 			if h.eventPublisher.ProjectionTurnCount(backendID, sessionID) > 0 {
 				return ProjectionSourceDescriptor{Identity: sessionID}, nil
@@ -1050,7 +1060,7 @@ func (h *Handlers) produceProjectionHydrateRange(
 	emit func(projectionHydrateEvent) bool,
 ) error {
 	if backendID != "opencode" && backendID != "grokbuild" && backendID != "deepseek" &&
-		backendID != "dsh-web" && backendID != "opencode-web" &&
+		backendID != "dsh-web" && backendID != "opencode-web" && backendID != "codex-web" &&
 		backendID != "claude" && backendID != "claudecode" &&
 		(path == "" || startOffset == endOffset) {
 		return nil
@@ -1114,6 +1124,12 @@ func (h *Handlers) produceProjectionHydrateRange(
 		return h.streamBackendRichHistoryProjectionEvents(ctx, "dsh", sessionID, emit)
 	case "dsh-web":
 		return h.streamBackendRichHistoryProjectionEvents(ctx, "dsh-web", sessionID, emit)
+	case "codex-web":
+		// NOT streamBackendRichHistoryProjectionEvents — that helper folds entries
+		// through the OpenCode flat convention (user message id as turnId). codex-web
+		// live events carry OFFICIAL turn ids, so the cold baseline must use the
+		// turn-scoped surface to merge on one identity (design §9.1 live/cold row).
+		return h.streamCodexWebRichHistoryProjectionEvents(ctx, sessionID, emit)
 	default:
 		return errProjectionBackendNotMigrated
 	}
@@ -1241,6 +1257,135 @@ func copyOptionalStepField(target map[string]interface{}, step map[string]any, k
 		}
 		target[key] = v
 	}
+}
+
+// streamCodexWebRichHistoryProjectionEvents rebuilds a codex-web projection baseline
+// from the OFFICIAL app-server thread/read(includeTurns) API via the turn-scoped
+// rich-history surface (design §9.1). Turn identity is the official turn id — the same
+// id live turn events carry — so cold and live merge on one identity.
+//
+// §9.2 terminal sealing: only the official turn status seals a turn.
+//   - completed → turn_completed；failed → turn_error（官方 error.message 透传）；
+//     interrupted → turn_aborted；
+//   - inProgress → NO terminal event：官方未宣告完成的 turn 不本地封口
+//     （active/unknown/NotLoaded 同理——见 turnScopedHistoryTurnToProjectionEvents）。
+func (h *Handlers) streamCodexWebRichHistoryProjectionEvents(
+	ctx context.Context,
+	sessionID string,
+	emit func(projectionHydrateEvent) bool,
+) error {
+	if h == nil {
+		return errProjectionSourceUnavailable
+	}
+	agent, ok := h.getFirstAgentByName("codex-web")
+	if !ok {
+		return errProjectionSourceUnavailable
+	}
+	provider, ok := agent.(core.TurnScopedRichHistoryProvider)
+	if !ok {
+		return errProjectionSourceUnavailable
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	turns, err := provider.GetTurnScopedRichHistory(ctx, sessionID, 0)
+	if err != nil {
+		return err
+	}
+	for _, ev := range turnScopedHistoryTurnToProjectionEvents(turns) {
+		if !emit(ev) {
+			return nil
+		}
+	}
+	return nil
+}
+
+// turnScopedHistoryTurnToProjectionEvents 把官方 turn 冷基线映射为 projection 事件流。
+// 纯函数（fixture 可冻结）；identity 全部官方：turnId=turn.id，itemId=item.id。
+func turnScopedHistoryTurnToProjectionEvents(turns []core.TurnScopedHistoryTurn) []projectionHydrateEvent {
+	var out []projectionHydrateEvent
+	for _, t := range turns {
+		if strings.TrimSpace(t.TurnID) == "" {
+			// 无官方 turn id 的行不能归属（§9.1 identity 红线）——跳过，不合成。
+			continue
+		}
+		if t.UserItemID != "" && strings.TrimSpace(t.UserText) != "" {
+			out = append(out, projectionHydrateEvent{
+				Event: "user_message",
+				Data: map[string]interface{}{
+					"itemId": t.UserItemID,
+					"turnId": t.TurnID,
+					"text":   t.UserText,
+				},
+			})
+		}
+		for _, part := range t.Parts {
+			itemID := strings.TrimSpace(fmt.Sprint(part["itemId"]))
+			if itemID == "" || itemID == "<nil>" {
+				itemID = t.TurnID
+			}
+			switch ptype := strings.TrimSpace(fmt.Sprint(part["type"])); ptype {
+			case "text":
+				chunk := strings.TrimSpace(fmt.Sprint(part["content"]))
+				if chunk == "" || chunk == "<nil>" {
+					continue
+				}
+				out = append(out, projectionHydrateEvent{
+					Event: "text_delta",
+					Data:  map[string]interface{}{"itemId": itemID, "turnId": t.TurnID, "delta": chunk},
+				})
+			case "reasoning":
+				chunk := strings.TrimSpace(fmt.Sprint(part["content"]))
+				if chunk == "" || chunk == "<nil>" {
+					continue
+				}
+				out = append(out, projectionHydrateEvent{
+					Event: "reasoning_delta",
+					Data:  map[string]interface{}{"itemId": itemID, "turnId": t.TurnID, "delta": chunk},
+				})
+			case "tool":
+				step, _ := part["step"].(map[string]any)
+				if step == nil {
+					continue
+				}
+				out = append(out, hydrateToolEventsFromStep(step)...)
+			}
+		}
+		for _, note := range t.SystemNotes {
+			out = append(out, projectionHydrateEvent{
+				Event: "system_message",
+				Data: map[string]interface{}{
+					"itemId": t.TurnID + ":" + note,
+					"turnId": t.TurnID,
+					"text":   note,
+				},
+			})
+		}
+		// §9.2：只按官方 turn status 封口。
+		switch t.Status {
+		case "completed":
+			out = append(out, projectionHydrateEvent{
+				Event:    "turn_completed",
+				Data:     map[string]interface{}{"turnId": t.TurnID, "done": true, "reason": "official_turn_status"},
+				TurnDone: true,
+			})
+		case "failed":
+			out = append(out, projectionHydrateEvent{
+				Event:    "turn_error",
+				Data:     map[string]interface{}{"turnId": t.TurnID, "error": t.ErrorMessage, "reason": "official_turn_status"},
+				TurnDone: true,
+			})
+		case "interrupted":
+			out = append(out, projectionHydrateEvent{
+				Event:    "turn_aborted",
+				Data:     map[string]interface{}{"turnId": t.TurnID, "reason": "official_turn_status"},
+				TurnDone: true,
+			})
+		default:
+			// inProgress / unknown / itemsView=NotLoaded：不封口（§9.2 红线）。
+		}
+	}
+	return out
 }
 
 // streamOpenCodeRichHistoryProjectionEvents rebuilds a full projection baseline from

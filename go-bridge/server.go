@@ -281,7 +281,8 @@ func advertiseSessionSyncV2Backend(backends []AgentProviderDescriptor) {
 			id == "opencode-web" || kind == "opencode-web" ||
 			id == "grokbuild" || kind == "grokbuild" ||
 			id == "deepseek" || kind == "deepseek" ||
-			id == "dsh-web" || kind == "deepseek-web" {
+			id == "dsh-web" || kind == "deepseek-web" ||
+			id == "codex-web" || kind == "codex-web" {
 			backends[i].Capabilities = appendUniqueCapability(
 				backends[i].Capabilities,
 				"session_sync_v2",

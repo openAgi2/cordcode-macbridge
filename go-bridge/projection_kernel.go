@@ -687,10 +687,12 @@ func (k *ProjectionKernel) finishHydrateLocked(session *projectionKernelSession)
 
 // pathlessRichHistoryBackend reports whether a backend can perform a pathless hydrate
 // (source.Path == "") that replays content through a rich-history builder: Claude and
-// OpenCode. Codex is file-based and excluded.
+// OpenCode. The legacy "codex" driver is file-based and excluded; codex-web is pathless
+// by design — its baseline is the official app-server API, and checkpoints must never
+// carry a session file path (design §9.1 pathless-family row).
 func pathlessRichHistoryBackend(backendID string) bool {
 	switch backendID {
-	case "opencode", "grokbuild", "claude", "claudecode", "opencode-web":
+	case "opencode", "grokbuild", "claude", "claudecode", "opencode-web", "codex-web":
 		return true
 	default:
 		return false

@@ -1,7 +1,200 @@
 package codexweb
 
-// session.go —— thin thread binding + turn actions（§5.2/§7）。
+// session.go —— Agent 组装根：官方服务连接的持有/复用与 catalog/history 的
+// core.Agent 面（§5.1/§5.2/§9.1）。
 //
-// turn 语义（Phase 0 实测）：steer 必填 expectedTurnId（turn/start 响应的 turn.id）；
-// interrupt 必填 turnId；turn/start 响应先于 active-turn 注册（同毫秒操作报
-// no active turn）；terminal 只认 turn/completed（completed/failed/interrupted）。
+// 生命周期纪律：
+//   - 连接懒建立（第一次目录/历史请求时 Probe），复用同一 ServiceEndpoint；
+//   - 断线（Request 返回 connection closed/lost）→ 丢弃 endpoint 重 Probe 一次；
+//     仍失败则错误上浮，不静默降级（§6.2）；
+//   - Stop 只走 ServiceEndpoint.Close 的归属语义：复用/自启 daemon 不 stop，
+//     托管 WS 独占回收（§6.3）。
+//
+// StartSession/turn 生命周期属 Phase 3——当前显式报错，不假装可用（fail closed）。
+//
+// turn 语义备忘（Phase 0 实测，Phase 3 落地）：steer 必填 expectedTurnId
+// （turn/start 响应的 turn.id）；interrupt 必填 turnId；turn/start 响应先于
+// active-turn 注册（同毫秒操作报 no active turn）；terminal 只认 turn/completed
+// （completed/failed/interrupted）。
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
+)
+
+// Agent 实现 core.Agent（注册名 codex-web）。
+type Agent struct {
+	workDir     string
+	explicitURL string
+	codexHome   string
+
+	mu       sync.Mutex
+	endpoint *ServiceEndpoint
+	// lastStatus 缓存最近一次 probe 结果供 InstanceStatus 只读镜像（不主动探测）。
+	lastStatus *ProbeSnapshot
+}
+
+// ProbeSnapshot 是一次生命周期的只读快照（descriptor 镜像用）。
+type ProbeSnapshot struct {
+	Available  bool
+	Source     ServiceSource
+	Detail     string
+	CLIVersion string
+	At         time.Time
+}
+
+// New 按 opts 构造（main.go buildAgentOptions 的键：work_dir、
+// codex_web_app_server_url、codex_web_codex_home）。
+func New(opts map[string]any) *Agent {
+	a := &Agent{}
+	if opts == nil {
+		return a
+	}
+	a.workDir, _ = opts["work_dir"].(string)
+	a.explicitURL, _ = opts["codex_web_app_server_url"].(string)
+	a.codexHome, _ = opts["codex_web_codex_home"].(string)
+	return a
+}
+
+func (a *Agent) Name() string { return BackendID }
+
+// probeOptions 组装 Probe 入参。
+func (a *Agent) probeOptions() ProbeOptions {
+	return ProbeOptions{
+		ExplicitURL: strings.TrimSpace(a.explicitURL),
+		CodexHome:   a.codexHome,
+		WorkDir:     a.workDir,
+	}
+}
+
+// endpointFor 返回可用的 ServiceEndpoint；断线时重 Probe 一次。
+func (a *Agent) endpointFor(ctx context.Context) (*ServiceEndpoint, *Client, error) {
+	a.mu.Lock()
+	ep := a.endpoint
+	a.mu.Unlock()
+	if ep != nil && ep.Client() != nil {
+		return ep, ep.Client(), nil
+	}
+	return a.reprobe(ctx)
+}
+
+func (a *Agent) reprobe(ctx context.Context) (*ServiceEndpoint, *Client, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	ep, err := Probe(a.probeOptions())
+	a.mu.Lock()
+	a.endpoint = ep
+	if err != nil {
+		a.lastStatus = &ProbeSnapshot{Available: false, Detail: err.Error(), At: time.Now()}
+	} else {
+		a.lastStatus = &ProbeSnapshot{
+			Available:  true,
+			Source:     ep.Source,
+			CLIVersion: ep.CLIVersion,
+			Detail:     fmt.Sprintf("source=%s cli=%s", ep.Source, ep.CLIVersion),
+			At:         time.Now(),
+		}
+	}
+	a.mu.Unlock()
+	if err != nil {
+		return nil, nil, err
+	}
+	return ep, ep.Client(), nil
+}
+
+// withClient 执行一次官方 API 调用；连接类失败自动重 Probe 一次后重试。
+func (a *Agent) withClient(ctx context.Context, fn func(*Client) error) error {
+	ep, cl, err := a.endpointFor(ctx)
+	if err != nil {
+		return err
+	}
+	if err := fn(cl); err == nil {
+		return nil
+	} else if !isConnectionLoss(err) {
+		return err
+	}
+	slog.Info("codexweb: connection lost, re-probing official service")
+	_ = ep.Close()
+	a.mu.Lock()
+	a.endpoint = nil
+	a.mu.Unlock()
+	_, cl2, err := a.reprobe(ctx)
+	if err != nil {
+		return err
+	}
+	return fn(cl2)
+}
+
+func isConnectionLoss(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "connection closed") ||
+		strings.Contains(msg, "connection lost") ||
+		strings.Contains(msg, "websocket: close")
+}
+
+// ListSessions 实现 core.Agent：官方 thread/list 聚合（服务端默认页大小单页覆盖，
+// §22-6 同秒 cursor 跳过边界），字段映射保持官方真相：
+//   - Summary = 官方 name 优先，否则 preview（§7）；
+//   - ModifiedAt = 官方 updatedAt；Directory = 官方 cwd；ProviderID = modelProvider；
+//   - ModelID 官方列表不提供（thread/read 亦无）——保持空，不编造；
+//   - ArchivedAt 官方 wire 无该时间戳——保持零值（§7.3）。
+func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, error) {
+	var out []core.AgentSessionInfo
+	err := a.withClient(ctx, func(cl *Client) error {
+		threads, rpcErr, err := ListAllThreads(ctx, cl, ListThreadsParams{})
+		if err != nil {
+			return err
+		}
+		if rpcErr != nil {
+			return rpcErr
+		}
+		out = make([]core.AgentSessionInfo, 0, len(threads))
+		for i := range threads {
+			th := threads[i]
+			info := core.AgentSessionInfo{
+				ID:         th.ID,
+				Summary:    th.Title(),
+				Directory:  th.Cwd,
+				ProviderID: th.ModelProvider,
+				ModifiedAt: time.Unix(th.UpdatedAt, 0).UTC(),
+			}
+			if th.GitInfo != nil && th.GitInfo.Branch != nil {
+				info.GitBranch = *th.GitInfo.Branch
+			}
+			out = append(out, info)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// StartSession 属 Phase 3（turn 生命周期）；当前显式不可用，不返回假会话。
+func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentSession, error) {
+	return nil, errors.New("codex-web: session turn lifecycle lands in Phase 3 (start/resume/turn stream); catalog/history surfaces are live")
+}
+
+// Stop 关闭持有的连接（共享 daemon 不 stop；托管 WS 独占回收——§6.3）。
+func (a *Agent) Stop() error {
+	a.mu.Lock()
+	ep := a.endpoint
+	a.endpoint = nil
+	a.mu.Unlock()
+	if ep == nil {
+		return nil
+	}
+	return ep.Close()
+}

@@ -224,6 +224,39 @@ type RichHistoryProvider interface {
 	GetRichSessionHistory(ctx context.Context, sessionID string, limit int) ([]RichHistoryEntry, error)
 }
 
+// TurnScopedHistoryTurn is one official turn of a cold baseline for backends
+// whose official history carries distinct turn identities (Codex app-server).
+// TurnID is the OFFICIAL turn id — the same id live turn events carry — so the
+// cold baseline and the live reducer merge on one identity. Status is the
+// official turn status vocabulary (completed/interrupted/failed/inProgress);
+// producers must not locally guess a terminal state the official source did
+// not report. Parts follow the projection step conventions (text/reasoning/
+// tool with nested step map).
+type TurnScopedHistoryTurn struct {
+	TurnID       string
+	Status       string
+	ErrorMessage string
+	StartedAt    time.Time
+	CompletedAt  time.Time
+	HasTime      bool
+
+	UserItemID string
+	UserText   string
+
+	Parts        []map[string]any
+	SystemNotes  []string
+	SkippedTypes []string
+}
+
+// TurnScopedRichHistoryProvider is an optional RichHistoryProvider extension
+// for backends that can return their rich history grouped by official turn
+// identity. Cold-hydrate dispatch prefers this surface over the flat
+// RichHistoryEntry convention (whose turn identity is the owning user message
+// id) whenever the backend's live events carry official turn ids.
+type TurnScopedRichHistoryProvider interface {
+	GetTurnScopedRichHistory(ctx context.Context, sessionID string, limit int) ([]TurnScopedHistoryTurn, error)
+}
+
 // SessionActivityProbing is an optional interface for agents whose backend can
 // report whether a session currently has a turn in flight. Cold-hydrate
 // producers use it to decide whether a trailing unanswered user turn is a dead

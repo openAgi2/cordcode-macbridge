@@ -14,8 +14,11 @@
 //   - 通知分级：thread/started、thread/status/changed 全局广播；turn/*、item/* 仅发
 //     已订阅连接且不重放（§7.1）。
 //
-// 当前状态：Phase 1 骨架。文件职责见各文件头；行为实现随 Phase 1–4 落地。
+// Agent 组装根在 session.go；catalog 在 sessions.go；history 在 history.go；
+// descriptor/diagnostics 在 wire_descriptor.go/diagnostics.go。
 package codexweb
+
+import "github.com/openAgi2/cordcode-macbridge/core"
 
 // BackendID 是 wire/backend identity（设计 §5.1，独立于旧 "codex"）。
 const BackendID = "codex-web"
@@ -23,13 +26,16 @@ const BackendID = "codex-web"
 // WireKind 是 iOS 侧 backend kind（与 BackendID 一致）。
 const WireKind = "codex-web"
 
-// Agent 是 codex-web backend 的组装根（dsh-web 式依赖组装；语义实现分布于同包各文件）。
-type Agent struct {
-	// Phase 1：lifecycle/transport/rpc 组装；Phase 2 起 catalog/history/SSV2 接线。
+// NewAgentFactory 返回注册用工厂（core.RegisterAgent 签名）。
+func NewAgentFactory(opts map[string]any) (core.Agent, error) {
+	return New(opts), nil
 }
 
-// New 返回空骨架 Agent。注册进 main.go 默认 drivers 属 Phase 5（设计 §9.1/Phase 5）。
-func New() *Agent { return &Agent{} }
+func init() {
+	// 独立注册（§9.1 第 9 条）：不覆盖、不别名到旧 "codex"。默认 drivers 是否
+	// 包含 codex-web 属 Phase 5 产品接线决策（main.go drivers flag）。
+	core.RegisterAgent(BackendID, NewAgentFactory)
+}
 
 // Identity 返回 (threadID, turnID, itemID) 三元组——§2.5/§9 的事务 identity 基础。
 // 禁止以文件路径或本地别名代替官方 identity。
