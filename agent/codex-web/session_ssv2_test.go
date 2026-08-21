@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // fakeEndpoint 把 scripted Client 注入 Agent（包内可见未导出字段）。
@@ -154,10 +156,21 @@ func TestAgentIsSessionActiveConservativeOnError(t *testing.T) {
 	}
 }
 
-func TestAgentStartSessionHonestError(t *testing.T) {
-	a := New(nil)
-	if _, err := a.StartSession(context.Background(), "s"); err == nil {
-		t.Fatal("Phase 3 前 StartSession 必须显式报错（fail closed），不得返回假会话")
+func TestAgentInteractionSurfacesFailClosedBeforePhase4(t *testing.T) {
+	// Phase 3 前（现已实现 turn 面）：审批/提问应答仍 fail closed
+	s := &agentSession{agent: New(nil), threadID: "th", events: make(chan core.Event, 1)}
+	if err := s.RespondPermission("r", core.PermissionResult{}); err == nil {
+		t.Fatal("RespondPermission 在 Phase 4 前必须 fail closed")
+	}
+	if err := s.RespondQuestion("q", nil); err == nil {
+		t.Fatal("RespondQuestion 在 Phase 4 前必须 fail closed")
+	}
+	// 未采样输入 kind / 不支持的 turn 选项 fail closed
+	if err := s.SendWithOptions("hi", []core.ImageAttachment{{}}, nil, core.PromptOptions{}); err == nil {
+		t.Fatal("image 输入未采样必须显式拒绝")
+	}
+	if err := s.SendWithOptions("hi", nil, nil, core.PromptOptions{ProviderID: "p"}); err == nil {
+		t.Fatal("turn 级 provider 覆盖官方不支持，必须显式拒绝（§7）")
 	}
 }
 

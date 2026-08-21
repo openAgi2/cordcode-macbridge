@@ -19,7 +19,6 @@ package codexweb
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -39,6 +38,11 @@ type Agent struct {
 	endpoint *ServiceEndpoint
 	// lastStatus 缓存最近一次 probe 结果供 InstanceStatus 只读镜像（不主动探测）。
 	lastStatus *ProbeSnapshot
+
+	// 中央泵（events.go）：一条连接一套 codec，session 按 threadID 注册监听。
+	liveCodec   *LiveCodec
+	listeners   map[string]map[chan core.Event]struct{}
+	pumpRunning bool
 }
 
 // ProbeSnapshot 是一次生命周期的只读快照（descriptor 镜像用）。
@@ -53,7 +57,7 @@ type ProbeSnapshot struct {
 // New 按 opts 构造（main.go buildAgentOptions 的键：work_dir、
 // codex_web_app_server_url、codex_web_codex_home）。
 func New(opts map[string]any) *Agent {
-	a := &Agent{}
+	a := &Agent{liveCodec: NewLiveCodec(), listeners: map[string]map[chan core.Event]struct{}{}}
 	if opts == nil {
 		return a
 	}
@@ -130,6 +134,7 @@ func (a *Agent) withClient(ctx context.Context, fn func(*Client) error) error {
 	if err != nil {
 		return err
 	}
+	a.ensurePump()
 	return fn(cl2)
 }
 
@@ -182,10 +187,7 @@ func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, erro
 	return out, nil
 }
 
-// StartSession 属 Phase 3（turn 生命周期）；当前显式不可用，不返回假会话。
-func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentSession, error) {
-	return nil, errors.New("codex-web: session turn lifecycle lands in Phase 3 (start/resume/turn stream); catalog/history surfaces are live")
-}
+// StartSession/turn 生命周期实现在 events.go（agentSession）。
 
 // Stop 关闭持有的连接（共享 daemon 不 stop；托管 WS 独占回收——§6.3）。
 func (a *Agent) Stop() error {
