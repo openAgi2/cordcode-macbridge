@@ -64,12 +64,22 @@ func knownToolCallID(req *ocwQuestionRequest) string {
 	return req.Tool.CallID
 }
 
-// pendingQuestions tracks live asked requests so ResolveUserInput can map the
-// canonical option ids back to official labels. Entries are cleared on
-// replied/rejected; a process restart recovers them via GET /question.
-func (a *Agent) noteQuestionAsked(req ocwQuestionRequest) {
+// notePendingShape records one official row's reply mapping — the shape
+// ResolveUserInput maps canonical option ids back to official labels with.
+// Directive-012 seal: it consults the lifecycle under the same lock first, so
+// a row the gate has already settled terminal in this process never re-opens
+// its mapping (absent/creation is fine — a later recovery may still project
+// the dock). This keeps the two tables consistent in one admission order:
+// terminal ⇒ no mapping entry.
+func (a *Agent) notePendingShape(sessionID string, req ocwQuestionRequest) {
+	if req.ID == "" {
+		return
+	}
 	a.questionMu.Lock()
 	defer a.questionMu.Unlock()
+	if lc, ok := a.questions[questionLifecycleKey(sessionID, req.ID)]; ok && lc != nil && lc.status != core.UserInputStatusPending {
+		return
+	}
 	if a.pendingQuestions == nil {
 		a.pendingQuestions = make(map[string]ocwQuestionRequest)
 	}
@@ -110,21 +120,24 @@ func questionLifecycleKey(sessionID, interactionID string) string {
 
 // gateAdmitRequested admits a pending fact. Terminal precedence: an
 // interaction that is already pending (idempotent) or terminal (late/duplicate
-// asked, stale recovery row) never re-emits requested.
+// asked, stale recovery row) never re-emits requested — and, directive-012,
+// never re-opens the reply mapping: the lifecycle verdict happens BEFORE any
+// pendingQuestions write, so a settled interaction cannot be submitted again
+// from this process.
 func (a *Agent) gateAdmitRequested(sub *sseSubscriber, sessionID string, req ocwQuestionRequest, turnID string) bool {
 	if sub == nil || sessionID == "" || req.ID == "" || turnID == "" {
 		return false
 	}
 	a.questionMu.Lock()
 	defer a.questionMu.Unlock()
-	if a.pendingQuestions == nil {
-		a.pendingQuestions = make(map[string]ocwQuestionRequest)
-	}
-	a.pendingQuestions[req.ID] = req
 	key := questionLifecycleKey(sessionID, req.ID)
 	if lc, ok := a.questions[key]; ok && lc != nil && lc.status != "" {
 		return false
 	}
+	if a.pendingQuestions == nil {
+		a.pendingQuestions = make(map[string]ocwQuestionRequest)
+	}
+	a.pendingQuestions[req.ID] = req
 	if a.questions == nil {
 		a.questions = make(map[string]*questionLifecycle)
 	}
@@ -373,10 +386,10 @@ func (a *Agent) recoverPendingQuestions(ctx context.Context, c *Client, sub *sse
 		}
 		serverPending[row.ID] = true
 		// Server terminal beats a stale pending row: the reply may have landed
-		// between the GET snapshot and the history fetch.
+		// between the GET snapshot and the history fetch. Terminal settle never
+		// opens the reply mapping (directive-012).
 		if f := history(); f != nil {
 			if term, ok := f.terminals[row.Tool.MessageID+"\x00"+row.Tool.CallID]; ok {
-				a.noteQuestionAsked(row)
 				a.gateAdmitResolved(sub, sessionID, row.ID, term.status)
 				slog.Info("opencode-web: recovered question settled terminal instead of pending",
 					"session", sessionID, "question", row.ID, "status", term.status)
@@ -502,7 +515,7 @@ func (a *Agent) lookupQuestion(ctx context.Context, c *Client, interactionID str
 		return nil, err
 	}
 	for _, p := range pending {
-		a.noteQuestionAsked(p)
+		a.notePendingShape(p.SessionID, p)
 		if p.ID == interactionID {
 			return &p, nil
 		}
