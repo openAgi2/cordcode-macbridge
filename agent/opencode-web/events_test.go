@@ -139,7 +139,7 @@ func TestSSEAssistantDeltasAndSnapshots(t *testing.T) {
 	if len(thinking) != 0 {
 		t.Fatalf("reasoning must not map to thinking, got %+v", thinking)
 	}
-	if len(errorsOut) != 1 || errorsOut[0].Content != "unsupported content.reasoning for verified 1.18.18 shape" {
+	if len(errorsOut) != 1 || errorsOut[0].Content != "unsupported content.reasoning for verified 1.18.18 live shape" {
 		t.Fatalf("reasoning delta must surface the canonical unsupported error, got %+v", errorsOut)
 	}
 	if len(replaces) != 1 || replaces[0].Content != "Everything changed" {

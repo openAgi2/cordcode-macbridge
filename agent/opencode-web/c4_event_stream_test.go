@@ -282,10 +282,14 @@ func (a *Agent) nextRoutedFor(sessionID string) *core.Event {
 	return nil
 }
 
-// TestReasoningExplicitlyUnsupportedOnAllCarriers: populated reasoning on
-// message.updated parts, part.updated snapshots, and part.delta fields all
-// surface the canonical unsupported error and NEVER EventThinking.
-func TestReasoningExplicitlyUnsupportedOnAllCarriers(t *testing.T) {
+// TestReasoningExplicitlyUnsupportedOnLiveCarriers (directive-014 scope):
+// populated reasoning on LIVE carriers — message.updated parts, part.updated
+// snapshots, part.delta fields — is still unevidenced (E2 never sampled
+// direct-SSE reasoning), so it surfaces the canonical unsupported error and
+// NEVER EventThinking. The HTTP history surface is E2b-evidenced and mapped
+// separately (audit014_reasoning_test.go); do not enable live reasoning here
+// without a same-version live sample.
+func TestReasoningExplicitlyUnsupportedOnLiveCarriers(t *testing.T) {
 	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
 	sub := newDrivenSubscriber(t, agent)
 
@@ -308,7 +312,7 @@ func TestReasoningExplicitlyUnsupportedOnAllCarriers(t *testing.T) {
 	for _, ev := range drain(sub) {
 		switch ev.Type {
 		case core.EventError:
-			if ev.Content == "unsupported content.reasoning for verified 1.18.18 shape" {
+			if ev.Content == "unsupported content.reasoning for verified 1.18.18 live shape" {
 				unsupported++
 			}
 		case core.EventThinking:
@@ -316,7 +320,7 @@ func TestReasoningExplicitlyUnsupportedOnAllCarriers(t *testing.T) {
 		}
 	}
 	if unsupported == 0 {
-		t.Fatal("populated reasoning must surface the canonical unsupported error on every carrier")
+		t.Fatal("populated live reasoning must surface the canonical unsupported error on every carrier")
 	}
 	if thinking != 0 {
 		t.Fatalf("reasoning must never map to thinking, got %d events", thinking)

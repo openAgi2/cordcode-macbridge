@@ -289,16 +289,48 @@ func TestGetRichSessionHistoryMapsParts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("history: %v", err)
 	}
-	// §6.3/E2 negative: a POPULATED reasoning part fails the hydrate with the
-	// canonical unsupported error — never mapped, dropped, or folded.
-	badMessages := `[
+	// §6.3 (corrected, directive-014/E2b): populated reasoning in the HTTP
+	// history maps as a first-class part with the exact text; missing or
+	// non-string text fails closed; whitespace-only is skipped.
+	reasoningMessages := `[
 	{"info":{"id":"msg_1","role":"assistant","time":{"created":1000}},
-	 "parts":[{"type":"reasoning","text":"thinking…"}]}]`
-	badAgent, _ := newDataAgent(t, map[string]string{
-		"/session/ses_y/message": badMessages,
+	 "parts":[{"type":"reasoning","text":"thinking…"},{"type":"text","text":"a"}]}]`
+	reasoningAgent, _ := newDataAgent(t, map[string]string{
+		"/session/ses_y/message": reasoningMessages,
 	}, "/tmp/proj")
-	if _, err := badAgent.GetRichSessionHistory(context.Background(), "ses_y", 0); err == nil || !strings.Contains(err.Error(), "unsupported content.reasoning for verified 1.18.18 shape") {
-		t.Fatalf("populated reasoning must fail the hydrate, got %v", err)
+	reasoningRich, err := reasoningAgent.GetRichSessionHistory(context.Background(), "ses_y", 0)
+	if err != nil {
+		t.Fatalf("populated history reasoning must hydrate, got %v", err)
+	}
+	var reasoningParts []map[string]any
+	for _, p := range reasoningRich[0].Parts {
+		if p["type"] == "reasoning" {
+			reasoningParts = append(reasoningParts, p)
+		}
+	}
+	if len(reasoningParts) != 1 || reasoningParts[0]["content"] != "thinking…" {
+		t.Fatalf("reasoning part = %+v", reasoningParts)
+	}
+	for _, badBody := range []string{
+		`[{"info":{"id":"m","role":"assistant"},"parts":[{"type":"reasoning"}]}]`,
+		`[{"info":{"id":"m","role":"assistant"},"parts":[{"type":"reasoning","text":7}]}]`,
+	} {
+		badAgent, _ := newDataAgent(t, map[string]string{"/session/ses_z/message": badBody}, "/tmp/proj")
+		if _, err := badAgent.GetRichSessionHistory(context.Background(), "ses_z", 0); err == nil || !strings.Contains(err.Error(), "reasoning part") {
+			t.Fatalf("malformed reasoning text must fail closed, got %v", err)
+		}
+	}
+	wsAgent, _ := newDataAgent(t, map[string]string{
+		"/session/ses_w/message": `[{"info":{"id":"m","role":"assistant"},"parts":[{"type":"reasoning","text":"   "},{"type":"text","text":"a"}]}]`,
+	}, "/tmp/proj")
+	wsRich, err := wsAgent.GetRichSessionHistory(context.Background(), "ses_w", 0)
+	if err != nil {
+		t.Fatalf("whitespace reasoning must be skipped without failing, got %v", err)
+	}
+	for _, p := range wsRich[0].Parts {
+		if p["type"] == "reasoning" {
+			t.Fatalf("whitespace-only reasoning must not map, got %+v", p)
+		}
 	}
 	if len(rich) != 2 {
 		t.Fatalf("len = %d", len(rich))

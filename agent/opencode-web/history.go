@@ -77,12 +77,14 @@ func (a *Agent) GetSessionHistory(ctx context.Context, sessionID string, limit i
 var _ core.RichHistoryProvider = (*Agent)(nil)
 var _ core.HistoryProvider = (*Agent)(nil)
 
-// errUnsupportedReasoning is the canonical §6.3/§6.5 verdict for populated
-// reasoning parts: E2 proved no verified populated reasoning shape on
-// 1.18.18, so reasoning is explicitly UNSUPPORTED — the hydrate FAILS with
-// this diagnosable error; the part is never mapped, dropped, or folded into
-// answer text.
-var errUnsupportedReasoning = errors.New("unsupported content.reasoning for verified 1.18.18 shape")
+// errUnsupportedReasoning is the canonical §6.3 verdict for populated
+// reasoning on LIVE carriers ONLY (directive-014: the E2 synthetic capture
+// never sampled direct-SSE reasoning deltas, so the live mapper stays
+// unsupported and emits this diagnosable error). The authoritative HTTP
+// history is a different evidence surface — E2b proved populated reasoning
+// parts exist there — and mapRichHistoryEntry maps them as first-class
+// content; the hydrate never fails on history reasoning anymore.
+var errUnsupportedReasoning = errors.New("unsupported content.reasoning for verified 1.18.18 live shape")
 
 // mapRichHistoryEntry maps one official message element to
 // core.RichHistoryEntry. Unknown part types are ignored; a POPULATED
@@ -121,13 +123,29 @@ func mapRichHistoryEntry(message map[string]any) (core.RichHistoryEntry, error) 
 			content += text
 			mappedParts = append(mappedParts, map[string]any{"type": "text", "content": text})
 		case "reasoning":
-			text, _ := part["text"].(string)
-			if text == "" {
-				text, _ = part["initial"].(string)
+			// Canonical §6.3 (corrected, directive-014): populated reasoning
+			// in the authoritative HTTP history is E2b-evidenced and maps as a
+			// first-class part with the exact server text, order preserved —
+			// never folded into Content, dropped, or truncated. Missing or
+			// non-string text is a shape violation (fail closed); a
+			// whitespace-only text is not populated and is skipped, matching
+			// the live-carrier population check.
+			raw, exists := part["text"]
+			if !exists {
+				return core.RichHistoryEntry{}, fmt.Errorf("opencode-web: reasoning part missing required text")
 			}
-			if strings.TrimSpace(text) != "" {
-				return core.RichHistoryEntry{}, errUnsupportedReasoning
+			text, ok := raw.(string)
+			if !ok {
+				return core.RichHistoryEntry{}, fmt.Errorf("opencode-web: reasoning part text must be a string")
 			}
+			if strings.TrimSpace(text) == "" {
+				continue
+			}
+			mappedParts = append(mappedParts, map[string]any{"type": "reasoning", "content": text})
+		case "step-start", "step-finish", "patch":
+			// Official Web skip list (E2b officialWeb.skipParts) — lifecycle
+			// markers, never projection content. Only these evidenced types
+			// are skipped; this is not a general unknown-part amnesty.
 		case "tool":
 			tool, _ := part["tool"].(map[string]any)
 			if tool == nil {
