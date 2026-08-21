@@ -2,8 +2,8 @@
   "version": 1,
   "project_root": "/Users/jacklee/Projects/cordcode-macbridge-opencode-web",
   "design_doc": "docs/2026-08-20-opencode-web-source-first-convergence-plan.md",
-  "design_doc_hash": "3676df7772c783bed63b65aa3e656c81bdb69fb2",
-  "design_doc_changed": false,
+  "design_doc_hash": "b09c4c46c2bb8217fc17ec1951d5c939c166d3bb",
+  "design_doc_changed": true,
   "activated_at": "2026-08-20T14:40:12Z",
   "active_mode": true,
   "directives": [
@@ -313,7 +313,7 @@
       "kind": "hole-fill",
       "title": "Question terminal reconciliation final closure",
       "issued_at": "2026-08-21T02:42:00Z",
-      "status": "pending",
+      "status": "in_progress",
       "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-011-question-terminal-reconciliation.md",
       "scope": "Mac opencode-web question lifecycle and owning tests only",
       "constraints": [
@@ -324,8 +324,44 @@
         "actual resolve_user_input handler through concrete opencode-web and Kernel/headRev",
         "no canonical/protocol/capability/iOS changes, no second writer, no owner UI matrix"
       ],
-      "linked_commits": [],
+      "linked_commits": [
+        "git:1506628",
+        "git:d6ba0b4",
+        "git:42702ed"
+      ],
       "resolved_from_audit": 10,
+      "resolved_by_directive": 12,
+      "roadmap_diff": {
+        "design_commit": "git:80ebf10",
+        "summary": "A7 raw proves resolved history retains messageID/callID/tool terminal but not the original que_ interaction ID. Canonical §6.8 now distinguishes pending fresh-process Dock recovery from resolved fresh-process tool-activity hydration, forbids invented interaction IDs, and requires terminal state to close the reply mapping.",
+        "checker": "manual A7 raw source-shape audit plus existing canonical design checker"
+      },
+      "report": {
+        "received_at": "2026-08-21T03:39:35Z",
+        "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-011-question-terminal-reconciliation.md",
+        "audited": true,
+        "audit_verdict": "partial",
+        "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-011-question-terminal-reconciliation.md"
+      }
+    },
+    {
+      "number": 12,
+      "kind": "hole-fill",
+      "title": "Question terminal reply-mapping final seal",
+      "issued_at": "2026-08-21T03:39:35Z",
+      "status": "pending",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-012-question-terminal-reply-mapping-seal.md",
+      "scope": "Mac opencode-web terminal reply mapping and owning negative tests only",
+      "constraints": [
+        "terminal lifecycle admission must reject late asked/stale recovery before writing reply mapping",
+        "terminal and stale-recovery negative tests must prove zero second official POST through the concrete responder",
+        "preserve directive-011 source fence, A7 reconciliation, one Kernel owner, and resolve full path",
+        "no canonical/protocol/capability/Kernel/iOS changes and no owner UI matrix",
+        "bounded 20-run barrier/race/full/sandbox regression and Mac Release reinstall",
+        "one report then stop for audit-012"
+      ],
+      "linked_commits": [],
+      "resolved_from_audit": 11,
       "report": {
         "received_at": null,
         "markdown_path": null,
@@ -335,6 +371,6 @@
       }
     }
   ],
-  "current_directive_number": 11,
-  "last_updated": "2026-08-21T02:42:00Z"
+  "current_directive_number": 12,
+  "last_updated": "2026-08-21T03:39:35Z"
 }

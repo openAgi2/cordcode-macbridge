@@ -1791,9 +1791,9 @@
         "required": true,
         "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "Red-first barrier destructive tests (go-bridge/audit011_fullpath_test.go, all confirmed RED on pre-fix code where applicable): (1) TestAudit011_GapLostTerminalReconcilesInPlace answered+rejected — RED pre-fix (part stayed pending through both 8s timeouts), GREEN post-fix (in-place settle, identity unchanged); (2) TestAudit011_RecoveryRequestedCannotOverwriteTerminal — RED pre-fix (\"recovery re-projected a stale requested over the terminal\"), GREEN post-fix; (3) TestAudit011_StaleEmptySnapshotKeepsNewerLiveAsk — fence guard (red against any absence-implies-resolved patch); (4) TestAudit011_LateAskedAfterResolvedDoesNotRearm — RED pre-fix (pending re-armed), GREEN post-fix. Owning full-chain: TestAudit011_ResolveUserInputFullChainAnswer/Reject (real handleResolveUserInput -> opencode-web responder -> official POST fixture with broadcast -> adapter -> EventPublisher/Kernel -> authoritative headRev>0 + currentStatus). TestAudit011_ReopenAfterResolveKeepsInPlace guard. Agent-level: TestAudit011_ReconcileRejectEvidence + TestAudit011_ReconcileFailClosedOnUnknownTerminal. go test ./go-bridge -run TestAudit011 -count=20 PASS (103.9s); go test -race -run 'TestAudit011|TestQuestion|TestAudit010' -count=20 PASS; TestQuestionResolutionEventsFromServer updated to the identity-less-terminal no-emission semantics.",
+        "summary": "Supervisor audit-011 re-verified the barrier/full-path suite: go test ./go-bridge -run TestAudit011 -count=20 PASS (103.7s), agent opencode-web race selection -count=20 PASS (12.6s), and full Go/vet/build PASS. Lost-terminal history reconciliation, source fences, in-place terminal projection, and the actual resolve handler chain are proven. Coverage remains incomplete for reply-map closure: late asked and stale recovery tests assert terminal Projection state but never attempt a second resolve or assert zero additional official POST.",
         "artifacts": [
           "agent/opencode-web/questions.go",
           "agent/opencode-web/events.go",
@@ -1802,28 +1802,28 @@
           "agent/opencode-web/audit010_question_test.go",
           "agent/opencode-web/c6_c7_sandbox_test.go"
         ],
-        "checked_at": "2026-08-21T03:19:21.344613+00:00"
+        "checked_at": "2026-08-21T03:39:35Z"
       }
     },
     {
       "id": "audit010-resolution-race-review-fix-regression",
       "title": "Audit-010 real 1.18.18 terminal reload regression and Mac install",
       "description": "Re-verify pending/answered/rejected cold reopen against isolated 1.18.18, run bounded Go/race/full/vet/build, reinstall Mac Release, validate 8777/4096/4398/4399, and submit one audit-ready report without rerunning unchanged iOS work.",
-      "status": "done",
+      "status": "blocked",
       "phase": "audit010-resolution-race-review-fix",
       "kind": "regression",
       "depends_on": [
         "audit010-resolution-race-review-fix-tests"
       ],
       "source": "supervisor audit-010; directive-011",
-      "notes": "review-fix-for:audit009-tail-review-fix-regression; on proven completion restore both blocked parent regressions and record resolved-via",
+      "notes": "review-fix-for:audit009-tail-review-fix-regression; supervisor audit-011 partial: source fence/history reconciliation/full path pass, but terminal late asked/stale recovery rewrites pendingQuestions and reopens resolve RPC; assigned directive-012",
       "verification": {
         "required": true,
-        "status": "present",
+        "status": "failed",
         "method": "mixed",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "Real isolated 1.18.18 sandbox: TestSandboxC6C7 all green incl. question, question-reload (pending cold reload), NEW question-reopen-after-answer + question-reopen-after-reject (in-process reopen re-projects nothing; fresh-process reopen fabricates no dock from resolved history — real resolved history + GET empty; no TCP kill faked, gap ordering barrier-proven), todo/permission/mutations. C4/C2/prompt-options/e2e/archive-delete families PASS. 4398/4399 reclaimed; 4096 owner-managed untouched (PID 48742 throughout; orphaned PPID 1 after the mandated app reinstall — harness never talks to it). Mac product changed -> Release rebuilt (commit d6ba0b4 runtime) and reinstalled via the mandated flow; 8777 = PID 81262 from /Applications/CordCodeLink.app runtime. go test ./... all green; vet/build green; Mac repo clean; iOS untouched per directive (directive-10 install evidence stands).",
+        "summary": "Supervisor audit-011 independently re-ran the 20x barrier/full-path suite, 20x selected race suite, full Go tests, vet, and build; all pass. A7 raw also proves the documented fresh-process identity boundary. Regression is nevertheless incomplete: gateAdmitRequested writes pendingQuestions before rejecting an already-terminal lifecycle, so a late asked or stale recovery row can make a resolved interaction answerable again and trigger a second official POST. Classified repairable-heavy; directive-012 owns the narrow seal.",
         "artifacts": [
           "agent/opencode-web/questions.go",
           "agent/opencode-web/events.go",
@@ -1832,7 +1832,74 @@
           "agent/opencode-web/audit010_question_test.go",
           "agent/opencode-web/c6_c7_sandbox_test.go"
         ],
-        "checked_at": "2026-08-21T03:19:21.344613+00:00"
+        "checked_at": "2026-08-21T03:39:35Z"
+      }
+    },
+    {
+      "id": "audit011-terminal-reply-map-review-fix-impl",
+      "title": "Audit-011 terminal reply-mapping implementation seal",
+      "description": "Make terminal/duplicate lifecycle admission reject late asked and stale recovery before either can repopulate the resolve reply mapping; preserve the single terminal Projection owner.",
+      "status": "pending",
+      "phase": "audit011-terminal-reply-map-review-fix",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "supervisor audit-011; directive-012",
+      "notes": "review-fix-for:audit010-resolution-race-review-fix-regression",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "audit011-terminal-reply-map-review-fix-tests",
+      "title": "Audit-011 terminal reply-mapping owning negative tests",
+      "description": "Prove answer/reject terminal plus late asked and barrier-controlled stale recovery produce zero second official POST through the concrete resolve handler while Projection remains one terminal part.",
+      "status": "pending",
+      "phase": "audit011-terminal-reply-map-review-fix",
+      "kind": "tests",
+      "depends_on": [
+        "audit011-terminal-reply-map-review-fix-impl"
+      ],
+      "source": "supervisor audit-011; directive-012",
+      "notes": "review-fix-for:audit010-resolution-race-review-fix-regression",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "audit011-terminal-reply-map-review-fix-regression",
+      "title": "Audit-011 terminal reply-mapping bounded regression and Mac install",
+      "description": "Re-run directive-011/012 20x barrier and race suites, full Go/vet/build, real 1.18.18 question reload/resolve regressions, port cleanup, and Mac Release install; iOS remains unchanged.",
+      "status": "pending",
+      "phase": "audit011-terminal-reply-map-review-fix",
+      "kind": "regression",
+      "depends_on": [
+        "audit011-terminal-reply-map-review-fix-tests"
+      ],
+      "source": "supervisor audit-011; directive-012",
+      "notes": "review-fix-for:audit010-resolution-race-review-fix-regression; on proven completion restore blocked parent regressions and record resolved-via",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
       }
     }
   ]
