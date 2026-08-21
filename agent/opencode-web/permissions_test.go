@@ -185,27 +185,20 @@ func TestPermissionFoldDenySendsRejectOnly(t *testing.T) {
 	}
 }
 
-func TestPermissionFoldV2SendsReplyLiteral(t *testing.T) {
+func TestPermissionFoldV2QuarantinedZeroReplies(t *testing.T) {
+	// C1: a v2 endpoint is quarantined at clientFor — permission replies fail
+	// closed with the unsupported-generation error and ZERO requests reach the
+	// v2 reply route.
 	f := &permissionFake{gen: generationV2, accept: map[string]bool{"once": true, "reject": true}}
 	agent := newPermissionAgent(t, f)
-	if c, err := agent.clientFor(context.Background()); err != nil || c.Generation() != generationV2 {
-		t.Fatalf("generation must resolve v2, got %v err=%v", c.Generation(), err)
+	if c, err := agent.clientFor(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported-generation (quarantined)") {
+		t.Fatalf("v2 must fail closed at clientFor, got client=%v err=%v", c, err)
 	}
-	if err := agent.RespondSessionPermission(context.Background(), "ses_1", "pr_1", core.PermissionResult{Behavior: "allow"}); err != nil {
-		t.Fatalf("v2 allow: %v", err)
+	if err := agent.RespondSessionPermission(context.Background(), "ses_1", "pr_1", core.PermissionResult{Behavior: "allow"}); err == nil || !strings.Contains(err.Error(), "unsupported-generation (quarantined)") {
+		t.Fatalf("v2 permission reply must fail closed, got err=%v", err)
 	}
-	if err := agent.RespondSessionPermission(context.Background(), "ses_1", "pr_2", core.PermissionResult{Behavior: "deny"}); err != nil {
-		t.Fatalf("v2 deny: %v", err)
-	}
-	rec := f.recorded()
-	if len(rec) != 2 {
-		t.Fatalf("v2 replies = %v", rec)
-	}
-	if !strings.Contains(rec[0], "/api/session/ses_1/permission/pr_1/reply") || !strings.Contains(rec[0], `"reply":"once"`) {
-		t.Fatalf("v2 allow must POST {reply:once} to the v2 route, got %v", rec)
-	}
-	if !strings.Contains(rec[1], `"reply":"reject"`) {
-		t.Fatalf("v2 deny must POST {reply:reject}, got %v", rec)
+	if rec := f.recorded(); len(rec) != 0 {
+		t.Fatalf("v2 quarantine must send ZERO permission replies, got %v", rec)
 	}
 }
 

@@ -3,6 +3,8 @@ package opencodeweb
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
@@ -42,6 +44,10 @@ type ocwModelCatalog struct {
 	// connectedOrder preserves the envelope's connected provider order (the
 	// official fallback takes the FIRST connected provider's default).
 	connectedOrder []string
+	// variants maps qualified "providerID/modelID" → its live variant keys
+	// (E1b: models[modelID].variants object keys; values are ignored — only
+	// the keys are selectable).
+	variants map[string][]string
 }
 
 // catalogCacheTTL bounds catalog freshness; one 5MB fetch per window at most.
@@ -64,7 +70,10 @@ func parseQualifiedModel(model string) (providerID, modelID string) {
 	return "", model
 }
 
-// ocwProviderEnvelope is the live 1.18 /provider shape.
+// ocwProviderEnvelope is the live 1.18 /provider shape (E4b-proven:
+// top level is exactly {all, default, connected}; provider rows carry
+// {id,name,source,env,options,models}; model rows may carry a variants
+// object whose KEYS are selectable and whose values stay opaque).
 type ocwProviderEnvelope struct {
 	All []struct {
 		ID     string `json:"id"`
@@ -76,6 +85,7 @@ type ocwProviderEnvelope struct {
 			Limit *struct {
 				Context int `json:"context"`
 			} `json:"limit"`
+			Variants map[string]json.RawMessage `json:"variants"`
 		} `json:"models"`
 	} `json:"all"`
 	Default   map[string]string `json:"default"`
@@ -97,7 +107,10 @@ func (a *Agent) fetchModelCatalog(ctx context.Context, c *Client) (*ocwModelCata
 	if err != nil {
 		return nil, err
 	}
-	catalog := parseProviderCatalog(raw)
+	catalog, err := parseProviderCatalog(raw)
+	if err != nil {
+		return nil, err
+	}
 
 	a.catalogEntryMu.Lock()
 	a.catalogEntry = &catalogCacheEntry{catalog: catalog, at: time.Now()}
@@ -111,115 +124,109 @@ func (a *Agent) fetchModelCatalog(ctx context.Context, c *Client) (*ocwModelCata
 	return catalog, nil
 }
 
-// parseProviderCatalog builds the connected-filtered catalog; falls back to
-// the legacy recursive walk when the envelope shape is absent (other
-// generations / future drift).
-func parseProviderCatalog(raw []byte) *ocwModelCatalog {
-	var envelope ocwProviderEnvelope
-	if err := json.Unmarshal(raw, &envelope); err == nil && len(envelope.All) > 0 {
-		connected := map[string]bool{}
-		for _, id := range envelope.Connected {
-			connected[id] = true
-		}
-		catalog := &ocwModelCatalog{
-			windows:  map[string]int{},
-			defaults: map[string]string{},
-		}
-		var rows []core.ModelOption
-		for _, provider := range envelope.All {
-			if provider.ID == "" || len(provider.Models) == 0 {
-				continue
-			}
-			if !connected[provider.ID] {
-				continue // 未配置凭据的 provider 不进选择框（对齐官方网页）；connected 为空 = 无可用模型
-			}
-			catalog.connectedOrder = append(catalog.connectedOrder, provider.ID)
-			if def, ok := envelope.Default[provider.ID]; ok && def != "" {
-				catalog.defaults[provider.ID] = def
-			}
-			for _, model := range provider.Models {
-				id := model.ID
-				if id == "" {
-					continue
-				}
-				window := 0
-				if model.Limit != nil {
-					window = model.Limit.Context
-				}
-				if window > 0 {
-					catalog.windows[id] = window
-					catalog.windows[provider.ID+"/"+id] = window
-				}
-				desc := model.Name
-				rows = append(rows, core.ModelOption{Name: provider.ID + "/" + id, Desc: desc})
-			}
-		}
-		sort.SliceStable(rows, func(i, j int) bool { return rows[i].Name < rows[j].Name })
-		catalog.Models = rows
-		return catalog
+// parseProviderCatalog builds the connected-filtered catalog from the verified
+// 1.18.18 {all, connected, default} envelope. C1 fail-closed rule: any other
+// shape is a diagnosable error — the former legacy recursive walk over
+// arbitrary model-shaped JSON nodes is deleted (unknown-shape guessing can
+// produce plausible-but-false catalogs; the catalog simply becomes
+// unavailable and Send/list_models report it honestly).
+func parseProviderCatalog(raw []byte) (*ocwModelCatalog, error) {
+	// Shape first (E4b: the top level is exactly {all,connected,default});
+	// a non-object top level is a shape violation, while type errors inside
+	// otherwise-object rows are row malformations (audit-008 W2.2).
+	if trimmed := trimSpaceBytes(raw); len(trimmed) == 0 || trimmed[0] != '{' {
+		return nil, fmt.Errorf("opencode-web: provider catalog shape not recognized — expected the verified 1.18.18 {all,connected,default} envelope; failing closed instead of recursive shape guessing (C1): body=%s", truncateForError(string(raw)))
 	}
-
-	// Legacy/unknown shape: recursive walk of any model-shaped node.
-	var root any
-	if err := json.Unmarshal(raw, &root); err != nil {
-		return &ocwModelCatalog{windows: map[string]int{}}
+	// Directive-010 tail: the three top-level keys must be EXPLICITLY present
+	// with the verified types — missing and null are shape failures, legal
+	// empties are not (`{"all":[],"default":{},"connected":[]}` parses to an
+	// honest empty catalog).
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		return nil, fmt.Errorf("opencode-web: provider catalog malformed (wrong types in a verified row): %w", err)
+	}
+	for _, key := range []string{"all", "default", "connected"} {
+		value, ok := top[key]
+		if !ok || string(trimSpaceBytes(value)) == "null" {
+			return nil, fmt.Errorf("opencode-web: provider catalog shape not recognized — top-level %q must be explicitly present with the verified type (missing/null is not the legal empty); failing closed (C1)", key)
+		}
+	}
+	var allRows []json.RawMessage
+	if err := json.Unmarshal(top["all"], &allRows); err != nil {
+		return nil, fmt.Errorf("opencode-web: provider catalog malformed: top-level \"all\" must be an array: %w", err)
+	}
+	var connectedIDs []string
+	if err := json.Unmarshal(top["connected"], &connectedIDs); err != nil {
+		return nil, fmt.Errorf("opencode-web: provider catalog malformed: top-level \"connected\" must be a string array: %w", err)
+	}
+	var defaults map[string]string
+	if err := json.Unmarshal(top["default"], &defaults); err != nil {
+		return nil, fmt.Errorf("opencode-web: provider catalog malformed: top-level \"default\" must be the provider→model object: %w", err)
+	}
+	var envelope ocwProviderEnvelope
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil, fmt.Errorf("opencode-web: provider catalog malformed (wrong types in a verified row): %w", err)
+	}
+	connected := map[string]bool{}
+	for _, id := range connectedIDs {
+		connected[id] = true
+	}
+	catalog := &ocwModelCatalog{
+		windows:  map[string]int{},
+		defaults: map[string]string{},
+		variants: map[string][]string{},
 	}
 	var rows []core.ModelOption
-	seen := map[string]bool{}
-	windows := map[string]int{}
-	collectCatalogModels(root, "", &rows, seen, windows)
-	catalog := &ocwModelCatalog{windows: windows, defaults: map[string]string{}}
-	for _, row := range rows {
-		catalog.Models = append(catalog.Models, row)
-	}
-	return catalog
-}
-
-type catalogRow struct {
-	qualified string
-	desc      string
-}
-
-// collectCatalogModels is the legacy fallback walk (envelope absent).
-func collectCatalogModels(node any, providerID string, rows *[]core.ModelOption, seen map[string]bool, windows map[string]int) {
-	switch typed := node.(type) {
-	case map[string]any:
-		id, _ := typed["id"].(string)
-		limit, _ := typed["limit"].(map[string]any)
-		window := 0
-		if limit != nil {
-			window = anyInt(limit["context"])
+	for _, provider := range envelope.All {
+		// Audit-008 W2.2: a row without `id` is an unidentifiable physical
+		// row of the verified `all` array — fail closed, never silently
+		// skipped and never repaired with a guess.
+		if provider.ID == "" {
+			return nil, fmt.Errorf("opencode-web: provider catalog row missing required provider id")
 		}
-		if id != "" && window > 0 {
-			qualified := id
-			if providerID != "" {
-				qualified = providerID + "/" + id
-			}
-			windows[id] = window
-			if providerID != "" {
-				windows[qualified] = window
-			}
-			if !seen[qualified] {
-				seen[qualified] = true
-				name, _ := typed["name"].(string)
-				*rows = append(*rows, core.ModelOption{Name: qualified, Desc: name})
-			}
+		if !connected[provider.ID] {
+			continue // 未配置凭据的 provider 不进选择框（对齐官方网页）；connected 为空 = 无可用模型
 		}
-		scope := providerID
-		if id != "" && typed["models"] != nil {
-			scope = id
+		catalog.connectedOrder = append(catalog.connectedOrder, provider.ID)
+		if def, ok := envelope.Default[provider.ID]; ok && def != "" {
+			catalog.defaults[provider.ID] = def
 		}
-		for key, child := range typed {
-			if key == "limit" {
-				continue
+		for _, model := range provider.Models {
+			// E4b: connected model rows carry their own non-empty id — the
+			// former map-key fallback is deleted (audit-008 W2.2).
+			if model.ID == "" {
+				return nil, fmt.Errorf("opencode-web: provider %s model row missing required id", provider.ID)
 			}
-			collectCatalogModels(child, scope, rows, seen, windows)
-		}
-	case []any:
-		for _, child := range typed {
-			collectCatalogModels(child, providerID, rows, seen, windows)
+			id := model.ID
+			qualified := provider.ID + "/" + id
+			window := 0
+			if model.Limit != nil {
+				window = model.Limit.Context
+			}
+			if window > 0 {
+				catalog.windows[id] = window
+				catalog.windows[qualified] = window
+			}
+			// E1b: only the live variant KEYS are selectable; the values
+			// (reasoning config etc.) stay opaque and never become product
+			// configuration. Key order follows the raw object.
+			if len(model.Variants) > 0 {
+				keys := make([]string, 0, len(model.Variants))
+				for key := range model.Variants {
+					if key != "" {
+						keys = append(keys, key)
+					}
+				}
+				sort.Strings(keys)
+				catalog.variants[qualified] = keys
+			}
+			desc := model.Name
+			rows = append(rows, core.ModelOption{Name: qualified, Desc: desc, Variants: catalog.variants[qualified]})
 		}
 	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].Name < rows[j].Name })
+	catalog.Models = rows
+	return catalog, nil
 }
 
 // SetModel implements core.ModelSwitcher. The official 1.18 API has no
@@ -276,4 +283,150 @@ func (a *Agent) modelInCatalog(ctx context.Context, c *Client, providerID, model
 		}
 	}
 	return ocwModelRef{}, false
+}
+
+// ── C5: official model-selection chain (canonical §6.6, E5b-pinned) ──────────
+
+// ocwShapeError marks strict-decode failures: the payload answered but did
+// not match the verified shape. Unlike a transport failure (route down,
+// 404…), a shape error must fail the send — guessing past it is exactly the
+// silent-fallback §6.6 forbids.
+type ocwShapeError struct{ detail string }
+
+func (e *ocwShapeError) Error() string { return e.detail }
+
+// fetchConfiguredModel strictly decodes GET /config and returns the optional
+// configured default model ("providerID/modelID", "" when absent). A
+// non-object or malformed response is an ocwShapeError — /config answers, so
+// its shape is evidence, not a guess.
+func (a *Agent) fetchConfiguredModel(ctx context.Context, c *Client) (string, error) {
+	raw, err := c.fetchJSON(ctx, c.apiPath("/config"), a.GetWorkDir())
+	if err != nil {
+		return "", err // transport: the caller skips this level
+	}
+	trimmed := trimSpaceBytes(raw)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return "", &ocwShapeError{detail: fmt.Sprintf("opencode-web: config payload must be an object (generation-118 verified shape), got: %s", truncateForError(string(raw)))}
+	}
+	// Audit-008 W2.2: only an evidence-proven ABSENT `model` key means "no
+	// configured model". A present-but-null / non-string / empty value is an
+	// unproven shape and fails closed.
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return "", &ocwShapeError{detail: fmt.Sprintf("opencode-web: config payload malformed: %v", err)}
+	}
+	rawModel, present := obj["model"]
+	if !present {
+		return "", nil
+	}
+	var model string
+	if err := json.Unmarshal(rawModel, &model); err != nil || model == "" {
+		return "", &ocwShapeError{detail: fmt.Sprintf("opencode-web: config model key present but not a non-empty string (generation-118 unproven shape): %s", truncateForError(string(rawModel)))}
+	}
+	if _, _, ok := strings.Cut(model, "/"); !ok {
+		return "", &ocwShapeError{detail: fmt.Sprintf("opencode-web: configured model %q is not a providerID/modelID pair", model)}
+	}
+	return model, nil
+}
+
+// catalogValid mirrors the official picker's `valid` (prompt-model-selection.
+// ts:19-23): the provider row exists in `all`, carries the model, and the
+// provider is connected.
+func (c *ocwModelCatalog) catalogValid(providerID, modelID string) (ocwModelRef, bool) {
+	if providerID == "" || modelID == "" {
+		return ocwModelRef{}, false
+	}
+	for _, m := range c.Models {
+		if m.Name == providerID+"/"+modelID {
+			return ocwModelRef{ProviderID: providerID, ID: modelID}, true
+		}
+	}
+	return ocwModelRef{}, false
+}
+
+// configuredDefault implements selection level 3: resolveDefaultModel(
+// providerDefault, config.model) — provider-catalog.ts:29-37 branch order,
+// E5b-pinned. A defined /provider default for the FIRST connected provider
+// wins BEFORE legacy /config.model; the config string is only consulted when
+// that provider default is absent. A /config SHAPE error fails the chain
+// (strict decode); a transport failure skips the level exactly like the
+// official picker's configured() yielding undefined.
+func (a *Agent) configuredDefault(ctx context.Context, c *Client, catalog *ocwModelCatalog) (ocwModelRef, bool, error) {
+	if len(catalog.connectedOrder) > 0 {
+		first := catalog.connectedOrder[0]
+		if modelID, ok := catalog.defaults[first]; ok && modelID != "" {
+			if ref, valid := catalog.catalogValid(first, modelID); valid {
+				return ref, true, nil
+			}
+		}
+	}
+	configured, err := a.fetchConfiguredModel(ctx, c)
+	if err != nil {
+		var shape *ocwShapeError
+		if errors.As(err, &shape) {
+			return ocwModelRef{}, false, err
+		}
+		return ocwModelRef{}, false, nil
+	}
+	if configured == "" {
+		return ocwModelRef{}, false, nil
+	}
+	providerID, modelID := parseQualifiedModel(configured)
+	ref, valid := catalog.catalogValid(providerID, modelID)
+	return ref, valid, nil
+}
+
+// resolvePromptModel walks the official chain (canonical §6.6): current →
+// agent model → provider-default-over-config → recent → first-connected
+// fallback. Each candidate must be catalog-valid before use; an invalid
+// candidate advances to the next documented level, never to a guess. When no
+// candidate validates the caller must issue ZERO prompt POSTs.
+func (s *serverSession) resolvePromptModel(ctx context.Context, c *Client, explicit ocwModelRef, agentModel string) (ocwModelRef, error) {
+	catalog, err := s.a.fetchModelCatalog(ctx, c)
+	if err != nil {
+		return ocwModelRef{}, fmt.Errorf("opencode-web: provider catalog unavailable: %w", err)
+	}
+	// (1) explicit current selection (per-request option or legacy pending).
+	candidates := []ocwModelRef{explicit}
+	if pending := s.a.GetModel(); pending != "" {
+		p, id := parseQualifiedModel(pending)
+		candidates = append(candidates, ocwModelRef{ProviderID: p, ID: id})
+	}
+	// (2) selected agent's configured model.
+	if agentModel != "" {
+		p, id := parseQualifiedModel(agentModel)
+		candidates = append(candidates, ocwModelRef{ProviderID: p, ID: id})
+	}
+	for _, cand := range candidates {
+		if ref, ok := catalog.catalogValid(cand.ProviderID, cand.ID); ok {
+			return ref, nil
+		}
+	}
+	// (3) resolveDefaultModel(providerDefault, config.model).
+	if ref, ok, err := s.a.configuredDefault(ctx, c, catalog); err != nil {
+		return ocwModelRef{}, err // strict shape error — zero POSTs
+	} else if ok {
+		return ref, nil
+	}
+	// (4) recent session model (resume-adopted server truth).
+	if m, ok := s.model.Load().(*ocwModelRef); ok && m != nil {
+		if ref, valid := catalog.catalogValid(m.ProviderID, m.ID); valid {
+			return ref, nil
+		}
+	}
+	// (5) first connected provider's default ?? its first catalog model.
+	if ref, ok := catalog.fallbackModel(); ok {
+		return ref, nil
+	}
+	return ocwModelRef{}, fmt.Errorf("opencode-web: no connected valid model — zero prompt POSTs (configure a provider in OpenCode first)")
+}
+
+// modelVariants returns the live variant keys for a resolved model
+// (nil = the model declares no variants).
+func (a *Agent) modelVariants(ctx context.Context, c *Client, providerID, modelID string) []string {
+	catalog, err := a.fetchModelCatalog(ctx, c)
+	if err != nil {
+		return nil
+	}
+	return catalog.variants[providerID+"/"+modelID]
 }

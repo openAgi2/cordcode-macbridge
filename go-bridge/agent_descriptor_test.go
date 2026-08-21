@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openAgi2/cordcode-macbridge/agent/opencode-web"
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
@@ -820,5 +821,50 @@ func TestDetectCodexAppServerFallsBackToRunningProcess(t *testing.T) {
 	}
 	if reason != "" {
 		t.Fatalf("codex reason = %q, want empty", reason)
+	}
+}
+
+// Directive-002 (C1 hole-fill): a detected-then-quarantined v2 endpoint must
+// mirror into the descriptor as NOT available with the quarantine reason.
+// The capability ARRAY is deliberately not asserted empty — the frozen
+// WireDescriptor set stays as-is; quarantine means "backend unavailable + no
+// NEW v2 capability", not "zero capabilities".
+func TestOpenCodeWebV2QuarantineDescriptorNotAvailable(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		_, pass, ok := r.BasicAuth()
+		if !ok || pass != "pw" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/api/health":
+			_, _ = w.Write([]byte(`{"healthy":true}`))
+		case "/api/session":
+			_, _ = w.Write([]byte(`{"data":[]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	a, err := opencodeweb.New(map[string]any{
+		"work_dir":          "/tmp/proj",
+		"opencode_web_url":  srv.URL,
+		"opencode_web_user": "u",
+		"opencode_web_pass": "pw",
+	})
+	if err != nil {
+		t.Fatalf("opencodeweb.New: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Stop() })
+
+	status, reason := detectInstanceStatusProber("opencode-web", a)
+	if status == AgentStatusAvailable {
+		t.Fatalf("quarantined v2 endpoint must not be available, got reason=%q", reason)
+	}
+	if !strings.Contains(reason, "unsupported-generation") || !strings.Contains(reason, "quarantined") {
+		t.Fatalf("reason must name the quarantine verdict, got %q", reason)
 	}
 }

@@ -1,0 +1,3516 @@
+{
+  "meta": {
+    "scenario": "A5",
+    "opencodeVersion": "1.18.18",
+    "sourceCommit": "2cba7e227d",
+    "captureStatus": "captured",
+    "promptHttpStatus": 204,
+    "sse1Error": null,
+    "sse2Error": null,
+    "firstAfterReconnect": [
+      "server.connected",
+      "message.part.delta",
+      "message.part.delta",
+      "message.part.delta",
+      "message.part.delta"
+    ]
+  },
+  "source": {
+    "ui": "packages/app/src/context/server-sdk.tsx:268-308 reconnect loop; v1 skips sync",
+    "server": "GET /global/event; no assumed replay buffer"
+  },
+  "http": [
+    {
+      "method": "POST",
+      "path": "/session",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {},
+      "status": 200,
+      "response": {
+        "id": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+        "slug": "tidy-mountain",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "New session - 2026-08-20T12:19:09.950Z",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787228349950,
+          "updated": 1787228349950
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:19:09 GMT",
+        "content-length": "401",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/session/ses_fe0e39a01ffeZK76F50A5xloUQ/prompt_async",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {
+        "messageID": "msg_0c5b9ca5fc63cf9997a9a0f04a",
+        "agent": "build",
+        "model": {
+          "providerID": "localmock",
+          "modelID": "echo"
+        },
+        "parts": [
+          {
+            "type": "text",
+            "text": "A5_RECONNECT keep streaming"
+          }
+        ]
+      },
+      "status": 204,
+      "response": null,
+      "responseHeaders": {
+        "vary": "Origin",
+        "date": "Thu, 20 Aug 2026 12:19:09 GMT",
+        "content-length": "0"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/status",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": {
+        "ses_fe0e39a01ffeZK76F50A5xloUQ": {
+          "type": "busy"
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:19:10 GMT",
+        "content-length": "50",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/ses_fe0e39a01ffeZK76F50A5xloUQ/message",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": [
+        {
+          "info": {
+            "id": "msg_0c5b9ca5fc63cf9997a9a0f04a",
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "role": "user",
+            "time": {
+              "created": 1787228349963
+            },
+            "summary": {
+              "diffs": []
+            },
+            "agent": "build",
+            "model": {
+              "providerID": "localmock",
+              "modelID": "echo"
+            }
+          },
+          "parts": [
+            {
+              "id": "prt_01f1c660d001Lj3ODqSje659pW",
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "messageID": "msg_0c5b9ca5fc63cf9997a9a0f04a",
+              "type": "text",
+              "text": "A5_RECONNECT keep streaming"
+            }
+          ]
+        },
+        {
+          "info": {
+            "id": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "role": "assistant",
+            "time": {
+              "created": 1787228349970,
+              "completed": 1787228382528
+            },
+            "parentID": "msg_0c5b9ca5fc63cf9997a9a0f04a",
+            "modelID": "echo",
+            "providerID": "localmock",
+            "mode": "build",
+            "agent": "build",
+            "path": {
+              "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "root": "/"
+            },
+            "cost": 0,
+            "tokens": {
+              "total": 99,
+              "input": 8,
+              "output": 91,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            },
+            "finish": "stop"
+          },
+          "parts": [
+            {
+              "id": "prt_01f1c6792001NhTk5OOA3R2dDY",
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+              "type": "step-start"
+            },
+            {
+              "id": "prt_01f1c67980018rcc0APl7oTJKJ",
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+              "type": "text",
+              "text": "A5_PARTIAL_ABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJ",
+              "time": {
+                "start": 1787228350360,
+                "end": 1787228382500
+              }
+            },
+            {
+              "id": "prt_01f1ce538001n0TrwLhq7HJRoi",
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+              "type": "step-finish",
+              "reason": "stop",
+              "cost": 0,
+              "tokens": {
+                "total": 99,
+                "input": 8,
+                "output": 91,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:19:42 GMT",
+        "content-length": "1615",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/ses_fe0e39a01ffeZK76F50A5xloUQ",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": {
+        "id": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+        "slug": "tidy-mountain",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 8,
+          "output": 91,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "A5_PARTIAL_ABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJ",
+        "agent": "build",
+        "model": {
+          "id": "echo",
+          "providerID": "localmock",
+          "variant": "default"
+        },
+        "version": "1.18.18",
+        "time": {
+          "created": 1787228349950,
+          "updated": 1787228382541
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:19:42 GMT",
+        "content-length": "588",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/status",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": {},
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 12:19:42 GMT",
+        "content-length": "2",
+        "vary": "Origin"
+      }
+    }
+  ],
+  "sseBefore": [
+    {
+      "t": 1787228349.955369,
+      "event": {
+        "payload": {
+          "id": "evt_01f1c5247001Fcb38aHV7z3UI8",
+          "type": "server.connected",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 1787228349.975831,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c65fe002wc7DlvsmkgUC6y",
+          "type": "session.created",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "info": {
+              "id": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "slug": "tidy-mountain",
+              "version": "1.18.18",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "New session - 2026-08-20T12:19:09.950Z",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787228349950,
+                "updated": 1787228349950
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228349.9770722,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1c65fe002wc7DlvsmkgUC6y",
+            "type": "session.created.1",
+            "seq": 0,
+            "aggregateID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "data": {
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "info": {
+                "id": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+                "slug": "tidy-mountain",
+                "version": "1.18.18",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "New session - 2026-08-20T12:19:09.950Z",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787228349950,
+                  "updated": 1787228349950
+                }
+              }
+            }
+          },
+          "id": "evt_01f1c65fe002wc7DlvsmkgUC6y"
+        }
+      }
+    },
+    {
+      "t": 1787228349.981032,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c660c0012BxmCwbpu5duWg",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "info": {
+              "id": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "slug": "tidy-mountain",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "New session - 2026-08-20T12:19:09.950Z",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787228349950,
+                "updated": 1787228349963
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228349.9822762,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1c660c0012BxmCwbpu5duWg",
+            "type": "session.updated.1",
+            "seq": 1,
+            "aggregateID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "data": {
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "info": {
+                "id": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+                "slug": "tidy-mountain",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "New session - 2026-08-20T12:19:09.950Z",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787228349950,
+                  "updated": 1787228349963
+                }
+              }
+            }
+          },
+          "id": "evt_01f1c660c0012BxmCwbpu5duWg"
+        }
+      }
+    },
+    {
+      "t": 1787228349.982872,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c660e001kHx2oQ6ZIfTeFl",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "info": {
+              "id": "msg_0c5b9ca5fc63cf9997a9a0f04a",
+              "role": "user",
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "time": {
+                "created": 1787228349963
+              },
+              "agent": "build",
+              "model": {
+                "providerID": "localmock",
+                "modelID": "echo"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228349.983628,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1c660e001kHx2oQ6ZIfTeFl",
+            "type": "message.updated.1",
+            "seq": 2,
+            "aggregateID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "data": {
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "info": {
+                "id": "msg_0c5b9ca5fc63cf9997a9a0f04a",
+                "role": "user",
+                "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+                "time": {
+                  "created": 1787228349963
+                },
+                "agent": "build",
+                "model": {
+                  "providerID": "localmock",
+                  "modelID": "echo"
+                }
+              }
+            }
+          },
+          "id": "evt_01f1c660e001kHx2oQ6ZIfTeFl"
+        }
+      }
+    },
+    {
+      "t": 1787228349.984185,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c660e0024hwH0ozJYfIMb3",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "part": {
+              "type": "text",
+              "text": "A5_RECONNECT keep streaming",
+              "messageID": "msg_0c5b9ca5fc63cf9997a9a0f04a",
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "id": "prt_01f1c660d001Lj3ODqSje659pW"
+            },
+            "time": 1787228349966
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228349.9849222,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1c660e0024hwH0ozJYfIMb3",
+            "type": "message.part.updated.1",
+            "seq": 3,
+            "aggregateID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "data": {
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "part": {
+                "type": "text",
+                "text": "A5_RECONNECT keep streaming",
+                "messageID": "msg_0c5b9ca5fc63cf9997a9a0f04a",
+                "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+                "id": "prt_01f1c660d001Lj3ODqSje659pW"
+              },
+              "time": 1787228349966
+            }
+          },
+          "id": "evt_01f1c660e0024hwH0ozJYfIMb3"
+        }
+      }
+    },
+    {
+      "t": 1787228349.985874,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c661000184hZxPbDA7kHiD",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "info": {
+              "id": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "slug": "tidy-mountain",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "New session - 2026-08-20T12:19:09.950Z",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787228349950,
+                "updated": 1787228349967
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228349.9870021,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1c661000184hZxPbDA7kHiD",
+            "type": "session.updated.1",
+            "seq": 4,
+            "aggregateID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "data": {
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "info": {
+                "id": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+                "slug": "tidy-mountain",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "New session - 2026-08-20T12:19:09.950Z",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787228349950,
+                  "updated": 1787228349967
+                }
+              }
+            }
+          },
+          "id": "evt_01f1c661000184hZxPbDA7kHiD"
+        }
+      }
+    },
+    {
+      "t": 1787228349.988788,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c6612001L7V4AhAwqH3knB",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228349.9897149,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c661200253CsvZ57VKJsKo",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "info": {
+              "id": "msg_01f1c6612001DJMD0FHBrcyHjx",
+              "parentID": "msg_0c5b9ca5fc63cf9997a9a0f04a",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "modelID": "echo",
+              "providerID": "localmock",
+              "time": {
+                "created": 1787228349970
+              },
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228349.990719,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1c661200253CsvZ57VKJsKo",
+            "type": "message.updated.1",
+            "seq": 5,
+            "aggregateID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "data": {
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "info": {
+                "id": "msg_01f1c6612001DJMD0FHBrcyHjx",
+                "parentID": "msg_0c5b9ca5fc63cf9997a9a0f04a",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "modelID": "echo",
+                "providerID": "localmock",
+                "time": {
+                  "created": 1787228349970
+                },
+                "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ"
+              }
+            }
+          },
+          "id": "evt_01f1c661200253CsvZ57VKJsKo"
+        }
+      }
+    },
+    {
+      "t": 1787228349.9946089,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c6618001HqxIPeXjdkeG4V",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "info": {
+              "id": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "slug": "tidy-mountain",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "New session - 2026-08-20T12:19:09.950Z",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "summary": {
+                "additions": 0,
+                "deletions": 0,
+                "files": 0
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787228349950,
+                "updated": 1787228349975
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228349.995754,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1c6618001HqxIPeXjdkeG4V",
+            "type": "session.updated.1",
+            "seq": 6,
+            "aggregateID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "data": {
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "info": {
+                "id": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+                "slug": "tidy-mountain",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "New session - 2026-08-20T12:19:09.950Z",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "summary": {
+                  "additions": 0,
+                  "deletions": 0,
+                  "files": 0
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787228349950,
+                  "updated": 1787228349975
+                }
+              }
+            }
+          },
+          "id": "evt_01f1c6618001HqxIPeXjdkeG4V"
+        }
+      }
+    },
+    {
+      "t": 1787228349.995986,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c6619001f791A0bOo6sP3P",
+          "type": "session.diff",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "diff": []
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228349.9964721,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c661a001COCK54xvIQpwpL",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "info": {
+              "role": "user",
+              "time": {
+                "created": 1787228349963
+              },
+              "agent": "build",
+              "model": {
+                "providerID": "localmock",
+                "modelID": "echo"
+              },
+              "id": "msg_0c5b9ca5fc63cf9997a9a0f04a",
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "summary": {
+                "diffs": []
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228349.997107,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1c661a001COCK54xvIQpwpL",
+            "type": "message.updated.1",
+            "seq": 7,
+            "aggregateID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "data": {
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "info": {
+                "role": "user",
+                "time": {
+                  "created": 1787228349963
+                },
+                "agent": "build",
+                "model": {
+                  "providerID": "localmock",
+                  "modelID": "echo"
+                },
+                "id": "msg_0c5b9ca5fc63cf9997a9a0f04a",
+                "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+                "summary": {
+                  "diffs": []
+                }
+              }
+            }
+          },
+          "id": "evt_01f1c661a001COCK54xvIQpwpL"
+        }
+      }
+    },
+    {
+      "t": 1787228350.367449,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c662500149Umg9BiE5aiJq",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228350.713315,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c6792001wutV3WZWWTSWSB",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "part": {
+              "id": "prt_01f1c6792001NhTk5OOA3R2dDY",
+              "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "type": "step-start"
+            },
+            "time": 1787228350354
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228350.714166,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1c6792001wutV3WZWWTSWSB",
+            "type": "message.part.updated.1",
+            "seq": 8,
+            "aggregateID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "data": {
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "part": {
+                "id": "prt_01f1c6792001NhTk5OOA3R2dDY",
+                "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+                "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+                "type": "step-start"
+              },
+              "time": 1787228350354
+            }
+          },
+          "id": "evt_01f1c6792001wutV3WZWWTSWSB"
+        }
+      }
+    },
+    {
+      "t": 1787228350.715013,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c6798001QyLqaeWPSqEyHP",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "part": {
+              "id": "prt_01f1c67980018rcc0APl7oTJKJ",
+              "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "type": "text",
+              "text": "",
+              "time": {
+                "start": 1787228350360
+              }
+            },
+            "time": 1787228350360
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228350.7164521,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1c6798001QyLqaeWPSqEyHP",
+            "type": "message.part.updated.1",
+            "seq": 9,
+            "aggregateID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "data": {
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "part": {
+                "id": "prt_01f1c67980018rcc0APl7oTJKJ",
+                "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+                "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+                "type": "text",
+                "text": "",
+                "time": {
+                  "start": 1787228350360
+                }
+              },
+              "time": 1787228350360
+            }
+          },
+          "id": "evt_01f1c6798001QyLqaeWPSqEyHP"
+        }
+      }
+    },
+    {
+      "t": 1787228350.717233,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c679c001KgFtlFsasq5LAN",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    }
+  ],
+  "sseAfterReconnect": [
+    {
+      "t": 1787228351.055948,
+      "event": {
+        "payload": {
+          "id": "evt_01f1c69d3001BvZiBgxM3HNglQ",
+          "type": "server.connected",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 1787228351.412132,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c6a4e001jY5Jea9FCVvV1X",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "_"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228351.764135,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c6bae001PmK9uTUTK2d8j4",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "P"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228352.1145852,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c6d1200145u7dzD6Tb9X02",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228352.4704409,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c6e70001sgMLOFGXqDvCp8",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "R"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228352.823487,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c6fd4001wqvKG60E1GHfwV",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "T"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228353.174996,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c71340017bYYY8fiaUCqKQ",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "I"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228353.526981,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c7294001G5zPLkPmOCD3go",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228353.883347,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c73f4001y8oBOsga8kgZE3",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "L"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228354.2379992,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c75570015h4LE1KIkuMlUj",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "_"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228354.588853,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c76b8001Y7AMdCBX8e4Q3l",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228354.946314,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c781a001m2Z5lI8hpBOCXK",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "B"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228355.2971609,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c797e001UPK7NzbOOlaMdz",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "C"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228355.6467788,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c7adb001xpclJ3l5iy8OIe",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "D"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228355.9972968,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c7c3c001jX8Zo0FvtEqNfV",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "E"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228356.354592,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c7d9b001KwCs1QKq5XuFx8",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "F"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228356.707139,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c7eff001ViS02EnBrgKI3M",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "G"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228357.059125,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c80600015HBbyRFPEGDRIs",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "H"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228357.417202,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c81c1001Z2sY5PHkXV2LYe",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "I"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228357.773209,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c8325001zyHYgIxCorinYg",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "J"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228358.1267788,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c848a0016r8JmiQlJ3DObb",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228358.477961,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c85eb001ZlznJ6E8siyAyH",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "B"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228358.8348758,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c874b001m7elSc7z53aiBW",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "C"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228359.188498,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c88ae001h0xT4MV275ehgl",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "D"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228359.537925,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c8a100016r07tf08l6MEOz",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "E"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228359.88752,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c8b6e001GBUiG3YLUJAba6",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "F"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228360.241863,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c8cce0016OSStFMOUrsld1",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "G"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228360.596002,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c8e30001zN0INaMBYCGpVk",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "H"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228360.936063,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c8f910011xAVmvNA1Bc2m4",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "I"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228360.947169,
+      "event": {
+        "payload": {
+          "id": "evt_01f1c90e6001Fl4ZJlRbScn5oL",
+          "type": "server.heartbeat",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 1787228361.305739,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c90f2001Sx35iCAbYYccPq",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "J"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228361.655746,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c9256001xqyL7NcWAkwzRp",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228362.008903,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c93b4001SvHJJUqkHZnrKM",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "B"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228362.3632991,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c9516001k2gPXODo3rZnv0",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "C"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228362.718082,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c9678001DhImV1Dy11udCW",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "D"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228363.0676858,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c97da0014NkNuufCSVpuuF",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "E"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228363.422538,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c9938001r5P9MAMefuhrbI",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "F"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228363.775945,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c9a9c0011HYsjEYcSQ0Jw5",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "G"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228364.127666,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c9bfe001uHIVu4jyYU02W3",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "H"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228364.48431,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c9d5d001pm3Zf9P5TY9Owd",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "I"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228364.8363788,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1c9ec0001m44iFjF3kZdjv8",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "J"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228365.188586,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1ca020001n3UVCIiXksnD81",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228365.542754,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1ca1820010dFpNa44suZYpM",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "B"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228365.8915179,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1ca2e4001xmOU6uRgScnL8v",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "C"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228366.2440581,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1ca441001D34N5lKaF9k2fN",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "D"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228366.599334,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1ca5a2001RmU2WjVug38EdH",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "E"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228366.954112,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1ca705001RximXx759IOnBW",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "F"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228367.303484,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1ca867001Xn4NCvHg6Vrlol",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "G"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228367.657639,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1ca9c5001Jt56hTIzrYWH1a",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "H"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228368.0081139,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cab27001kWMSuGc7gMShdJ",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "I"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228368.3609228,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cac86001kuAd0gifHXHIjY",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "J"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228368.711275,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cade6001cU92F47pb3RJ0J",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228369.068461,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1caf450015mbOBrZqSbpYVu",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "B"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228369.421159,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cb0a8001N40hg8MJQJlAMT",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "C"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228369.773833,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cb20a001Kb3IKKlYARC2yZ",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "D"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228370.1244102,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cb36b001QURkqxiAILnxtu",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "E"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228370.474821,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cb4c9001fCxv2pcleSGA7H",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "F"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228370.8293262,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cb628001ZUrbV7zEZmziZ9",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "G"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228370.9444458,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cb78a001R4tZv57wSHZAKK",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "H"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228371.181134,
+      "event": {
+        "payload": {
+          "id": "evt_01f1cb7ff0015n1EQBBYx5zhy7",
+          "type": "server.heartbeat",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 1787228371.532203,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cb8eb001bYa5c5vXor8DM9",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "I"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228371.887885,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cba49001XnAHFXEWbVvvys",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "J"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228372.2414029,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cbbae001mKFdnwVeZZ8q2v",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228372.593608,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cbd0f001fS7ZLdicHR3z3O",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "B"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228372.94894,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cbe6f0017FGWxRY1vLXf3C",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "C"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228373.303773,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cbfd2001292SJe4Qk9FAM1",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "D"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228373.654578,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cc133001htut8dW0cyCA9q",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "E"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228374.008539,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cc2940014wpcZ12Yx5nWSv",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "F"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228374.364127,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cc3f600119uLbUcHHBqpSw",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "G"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228374.719641,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cc5590010TN2eL3dXNr3iN",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "H"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228375.0720189,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cc6bc001rUs19bTLsHBryE",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "I"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228375.427755,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cc81d001DzzQtW14gS7tXy",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "J"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228375.782677,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cc981001XLwFn34zCNY7kW",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228376.137934,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1ccae4001MilXs7xNnc07VD",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "B"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228376.4918149,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1ccc47001o73HgKnroCsVvr",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "C"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228376.8468978,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1ccda90011J7xR3i3Rd8NK9",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "D"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228377.201229,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1ccf0c001wyaKrEy4ZCZqL4",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "E"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228377.555041,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cd06e001UpRqIIjwqCX2cg",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "F"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228377.904854,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cd1d00015Ng9IOQdYarZK0",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "G"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228378.259551,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cd32e0011TI8EcVILADeSA",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "H"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228378.6103418,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cd491001lcudZ44S7cq6w8",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "I"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228378.9637818,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cd5f0001kUulDxo79jfU8s",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "J"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228379.315095,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cd751001bGsLqwnTA5z88k",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228379.6699462,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cd8b1001tgE5Z8Fvs0GYbM",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "B"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228380.02025,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cda14001j2th2WYPoq6k37",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "C"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228380.374932,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cdb73001VrQe31vnHtSeW3",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "D"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228380.7268732,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cdcd3001CrEVT1b9gmlyLk",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "E"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228380.946069,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cde34001qJvlAb4f72UHS8",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "F"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228381.0772,
+      "event": {
+        "payload": {
+          "id": "evt_01f1cdf10001HmeTq982P794sM",
+          "type": "server.heartbeat",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 1787228381.434495,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1cdf940012u5hUvweDGmoah",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "G"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228381.787603,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1ce0f7001aEEbVx1NNBW2TG",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "H"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228382.141879,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1ce258001lvGF5i6MVlXeXO",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "I"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228382.546815,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1ce3bb0015cwVhhJPWQR5ZP",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "partID": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "field": "text",
+            "delta": "J"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228382.547735,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1ce527001LYLcgeBBdROgWH",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "part": {
+              "id": "prt_01f1c67980018rcc0APl7oTJKJ",
+              "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "type": "text",
+              "text": "A5_PARTIAL_ABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJ",
+              "time": {
+                "start": 1787228350360,
+                "end": 1787228382500
+              }
+            },
+            "time": 1787228382502
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228382.548845,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1ce527001LYLcgeBBdROgWH",
+            "type": "message.part.updated.1",
+            "seq": 10,
+            "aggregateID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "data": {
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "part": {
+                "id": "prt_01f1c67980018rcc0APl7oTJKJ",
+                "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+                "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+                "type": "text",
+                "text": "A5_PARTIAL_ABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJ",
+                "time": {
+                  "start": 1787228350360,
+                  "end": 1787228382500
+                }
+              },
+              "time": 1787228382502
+            }
+          },
+          "id": "evt_01f1ce527001LYLcgeBBdROgWH"
+        }
+      }
+    },
+    {
+      "t": 1787228382.5497012,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1ce5390016v37MhRPQ1jxdw",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "part": {
+              "id": "prt_01f1ce538001n0TrwLhq7HJRoi",
+              "reason": "stop",
+              "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "type": "step-finish",
+              "tokens": {
+                "total": 99,
+                "input": 8,
+                "output": 91,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              },
+              "cost": 0
+            },
+            "time": 1787228382521
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228382.550911,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1ce5390016v37MhRPQ1jxdw",
+            "type": "message.part.updated.1",
+            "seq": 11,
+            "aggregateID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "data": {
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "part": {
+                "id": "prt_01f1ce538001n0TrwLhq7HJRoi",
+                "reason": "stop",
+                "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+                "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+                "type": "step-finish",
+                "tokens": {
+                  "total": 99,
+                  "input": 8,
+                  "output": 91,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "cost": 0
+              },
+              "time": 1787228382521
+            }
+          },
+          "id": "evt_01f1ce5390016v37MhRPQ1jxdw"
+        }
+      }
+    },
+    {
+      "t": 1787228382.552219,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1ce53d001puxMHSfB6PqyNG",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "info": {
+              "id": "msg_01f1c6612001DJMD0FHBrcyHjx",
+              "parentID": "msg_0c5b9ca5fc63cf9997a9a0f04a",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "total": 99,
+                "input": 8,
+                "output": 91,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              },
+              "modelID": "echo",
+              "providerID": "localmock",
+              "time": {
+                "created": 1787228349970,
+                "completed": 1787228382528
+              },
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "finish": "stop"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228382.553947,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1ce53d001puxMHSfB6PqyNG",
+            "type": "message.updated.1",
+            "seq": 12,
+            "aggregateID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "data": {
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "info": {
+                "id": "msg_01f1c6612001DJMD0FHBrcyHjx",
+                "parentID": "msg_0c5b9ca5fc63cf9997a9a0f04a",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "total": 99,
+                  "input": 8,
+                  "output": 91,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "modelID": "echo",
+                "providerID": "localmock",
+                "time": {
+                  "created": 1787228349970,
+                  "completed": 1787228382528
+                },
+                "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+                "finish": "stop"
+              }
+            }
+          },
+          "id": "evt_01f1ce53d001puxMHSfB6PqyNG"
+        }
+      }
+    },
+    {
+      "t": 1787228382.5552561,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1ce540001vsuPgJfdNl7S6v",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "info": {
+              "id": "msg_01f1c6612001DJMD0FHBrcyHjx",
+              "parentID": "msg_0c5b9ca5fc63cf9997a9a0f04a",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "total": 99,
+                "input": 8,
+                "output": 91,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              },
+              "modelID": "echo",
+              "providerID": "localmock",
+              "time": {
+                "created": 1787228349970,
+                "completed": 1787228382528
+              },
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "finish": "stop"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228382.556781,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1ce540001vsuPgJfdNl7S6v",
+            "type": "message.updated.1",
+            "seq": 13,
+            "aggregateID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "data": {
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "info": {
+                "id": "msg_01f1c6612001DJMD0FHBrcyHjx",
+                "parentID": "msg_0c5b9ca5fc63cf9997a9a0f04a",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "total": 99,
+                  "input": 8,
+                  "output": 91,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "modelID": "echo",
+                "providerID": "localmock",
+                "time": {
+                  "created": 1787228349970,
+                  "completed": 1787228382528
+                },
+                "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+                "finish": "stop"
+              }
+            }
+          },
+          "id": "evt_01f1ce540001vsuPgJfdNl7S6v"
+        }
+      }
+    },
+    {
+      "t": 1787228382.557143,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1ce543001q0tFPYqPnmVxQ1",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228382.5574982,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1ce546001SaQC1H8ISDgOry",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "status": {
+              "type": "idle"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228382.557801,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1ce546002MHq6L3eHPcgH6J",
+          "type": "session.idle",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228382.559245,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f1ce549001pulkU508MRVCj2",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "info": {
+              "id": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "slug": "tidy-mountain",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "A5_PARTIAL_ABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJ",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "summary": {
+                "additions": 0,
+                "deletions": 0,
+                "files": 0
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 8,
+                "output": 91,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787228349950,
+                "updated": 1787228349975
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787228382.561009,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f1ce549001pulkU508MRVCj2",
+            "type": "session.updated.1",
+            "seq": 14,
+            "aggregateID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "data": {
+              "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+              "info": {
+                "id": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+                "slug": "tidy-mountain",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "A5_PARTIAL_ABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJ",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "summary": {
+                  "additions": 0,
+                  "deletions": 0,
+                  "files": 0
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 8,
+                  "output": 91,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787228349950,
+                  "updated": 1787228349975
+                }
+              }
+            }
+          },
+          "id": "evt_01f1ce549001pulkU508MRVCj2"
+        }
+      }
+    }
+  ],
+  "sseEventTypesBefore": [
+    "server.connected",
+    "session.created",
+    "sync",
+    "session.updated",
+    "sync",
+    "message.updated",
+    "sync",
+    "message.part.updated",
+    "sync",
+    "session.updated",
+    "sync",
+    "session.status",
+    "message.updated",
+    "sync",
+    "session.updated",
+    "sync",
+    "session.diff",
+    "message.updated",
+    "sync",
+    "session.status",
+    "message.part.updated",
+    "sync",
+    "message.part.updated",
+    "sync",
+    "message.part.delta"
+  ],
+  "sseEventTypesAfter": [
+    "server.connected",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "server.heartbeat",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "server.heartbeat",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "server.heartbeat",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.updated",
+    "sync",
+    "message.part.updated",
+    "sync",
+    "message.updated",
+    "sync",
+    "message.updated",
+    "sync",
+    "session.status",
+    "session.status",
+    "session.idle",
+    "session.updated",
+    "sync"
+  ],
+  "reload": {
+    "messages": [
+      {
+        "info": {
+          "id": "msg_0c5b9ca5fc63cf9997a9a0f04a",
+          "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+          "role": "user",
+          "time": {
+            "created": 1787228349963
+          },
+          "summary": {
+            "diffs": []
+          },
+          "agent": "build",
+          "model": {
+            "providerID": "localmock",
+            "modelID": "echo"
+          }
+        },
+        "parts": [
+          {
+            "id": "prt_01f1c660d001Lj3ODqSje659pW",
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_0c5b9ca5fc63cf9997a9a0f04a",
+            "type": "text",
+            "text": "A5_RECONNECT keep streaming"
+          }
+        ]
+      },
+      {
+        "info": {
+          "id": "msg_01f1c6612001DJMD0FHBrcyHjx",
+          "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+          "role": "assistant",
+          "time": {
+            "created": 1787228349970,
+            "completed": 1787228382528
+          },
+          "parentID": "msg_0c5b9ca5fc63cf9997a9a0f04a",
+          "modelID": "echo",
+          "providerID": "localmock",
+          "mode": "build",
+          "agent": "build",
+          "path": {
+            "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+            "root": "/"
+          },
+          "cost": 0,
+          "tokens": {
+            "total": 99,
+            "input": 8,
+            "output": 91,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "finish": "stop"
+        },
+        "parts": [
+          {
+            "id": "prt_01f1c6792001NhTk5OOA3R2dDY",
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "type": "step-start"
+          },
+          {
+            "id": "prt_01f1c67980018rcc0APl7oTJKJ",
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "type": "text",
+            "text": "A5_PARTIAL_ABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJ",
+            "time": {
+              "start": 1787228350360,
+              "end": 1787228382500
+            }
+          },
+          {
+            "id": "prt_01f1ce538001n0TrwLhq7HJRoi",
+            "sessionID": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+            "messageID": "msg_01f1c6612001DJMD0FHBrcyHjx",
+            "type": "step-finish",
+            "reason": "stop",
+            "cost": 0,
+            "tokens": {
+              "total": 99,
+              "input": 8,
+              "output": 91,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "session": {
+      "id": "ses_fe0e39a01ffeZK76F50A5xloUQ",
+      "slug": "tidy-mountain",
+      "projectID": "global",
+      "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+      "path": "private/tmp/ocw-gate-a-20260820/workspace",
+      "summary": {
+        "additions": 0,
+        "deletions": 0,
+        "files": 0
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 8,
+        "output": 91,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "title": "A5_PARTIAL_ABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJABCDEFGHIJ",
+      "agent": "build",
+      "model": {
+        "id": "echo",
+        "providerID": "localmock",
+        "variant": "default"
+      },
+      "version": "1.18.18",
+      "time": {
+        "created": 1787228349950,
+        "updated": 1787228382541
+      }
+    },
+    "status": {},
+    "statusAtDisconnect": {
+      "ses_fe0e39a01ffeZK76F50A5xloUQ": {
+        "type": "busy"
+      }
+    }
+  },
+  "derived": {
+    "statusAtDisconnectBusy": true,
+    "reconnectSawIdle": true,
+    "reconnectFirstDirectTypes": [
+      "server.connected",
+      "message.part.delta",
+      "message.part.delta",
+      "message.part.delta",
+      "message.part.delta",
+      "message.part.delta",
+      "message.part.delta",
+      "message.part.delta"
+    ],
+    "serverReplayedDeltas": true,
+    "note": "replay is observed, not assumed; v1 mapping still skips nested sync"
+  },
+  "bridgeMapping": {
+    "decision": "reconnect recovers via server messages/status and later Kernel rehydrate; Gate A records server facts only",
+    "nestedSync": "retained as evidence only; v1 Web skips payload.type==sync",
+    "notAnIOSWriter": "do not history-merge or raw-write the iOS timeline"
+  },
+  "sanitization": {
+    "replaced": [
+      "session/message/part/event ids",
+      "absolute workspace paths",
+      "epoch timestamps > 1e9"
+    ],
+    "kept": [
+      "all JSON keys",
+      "event types",
+      "part types",
+      "HTTP method/path/status"
+    ]
+  }
+}

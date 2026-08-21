@@ -159,3 +159,87 @@ var _ = func() bool {
 	_ = rand.Int
 	return true
 }()
+
+// TestSandboxArchiveDelete live-pins the two session-mutation routes on the
+// real serve binary through the Agent methods (design §4.3.6 deferred items,
+// pinned 2026-08-20 on 1.18.18): PATCH time.archived echoes Session.Info,
+// the default list still returns the archived row (clients hide via
+// archivedAtMillis), DELETE answers `true` and the session is gone.
+func TestSandboxArchiveDelete(t *testing.T) {
+	base := strings.TrimSpace(os.Getenv("OCW_SANDBOX_URL"))
+	if base == "" {
+		t.Skip("set OCW_SANDBOX_URL (and OCW_SANDBOX_USER/PASS) to run the sandbox E2E")
+	}
+	a, err := New(map[string]any{
+		"work_dir":          "/tmp",
+		"opencode_web_url":  base,
+		"opencode_web_user": os.Getenv("OCW_SANDBOX_USER"),
+		"opencode_web_pass": os.Getenv("OCW_SANDBOX_PASS"),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	agent := a.(*Agent)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Throwaway session via the official create route (directory query, empty body).
+	c, err := agent.clientFor(ctx)
+	if err != nil {
+		t.Fatalf("clientFor: %v", err)
+	}
+	code, raw, err := c.doRequest(ctx, "POST", c.endpoint(c.apiPath("/session")+"?directory=/tmp"), map[string]any{}, "/tmp", true)
+	if err != nil || code >= 400 {
+		t.Fatalf("sandbox create: code=%d err=%v body=%s", code, err, truncateForError(string(raw)))
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &created); err != nil || created.ID == "" {
+		t.Fatalf("sandbox create decode: %v %s", err, truncateForError(string(raw)))
+	}
+	sid := created.ID
+	t.Logf("created %s", sid)
+
+	archivedAt := time.Now().UTC().Add(-time.Second).Truncate(time.Millisecond)
+	info, err := agent.ArchiveSession(ctx, sid, archivedAt)
+	if err != nil {
+		t.Fatalf("ArchiveSession: %v", err)
+	}
+	if info.ID != sid {
+		t.Fatalf("archived info id = %q, want %q", info.ID, sid)
+	}
+	if info.ArchivedAt.IsZero() {
+		t.Fatalf("archived info must carry time.archived: %+v", info)
+	}
+	t.Logf("archived at %v (serve echoed %v)", archivedAt, info.ArchivedAt)
+
+	// Live 1.18 caveat: the default list still contains the archived row —
+	// surfaced via AgentSessionInfo.ArchivedAt for clients to hide.
+	listed := false
+	sessions, listErr := agent.ListSessions(ctx)
+	if listErr != nil {
+		t.Fatalf("list after archive: %v", listErr)
+	}
+	for _, s := range sessions {
+		if s.ID == sid {
+			listed = true
+			if s.ArchivedAt.IsZero() {
+				t.Fatalf("list row for archived session must carry ArchivedAt: %+v", s)
+			}
+		}
+	}
+	if !listed {
+		t.Logf("note: serve excluded the archived row from the default list (newer behavior)")
+	}
+
+	if err := agent.DeleteSession(ctx, sid); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+	if _, err := c.fetchJSON(ctx, c.apiPath("/session/"+sid), "/tmp"); err == nil {
+		t.Fatal("session must be gone after delete (GET must fail)")
+	} else if !strings.Contains(err.Error(), "404") {
+		t.Fatalf("expected 404 after delete, got: %v", err)
+	}
+	t.Log("delete verified: session gone (404)")
+}

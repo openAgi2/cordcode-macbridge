@@ -1,0 +1,2172 @@
+{
+  "meta": {
+    "scenario": "A1",
+    "opencodeVersion": "1.18.18",
+    "sourceCommit": "2cba7e227d",
+    "promptHttpStatus": 204,
+    "promptResponse": null,
+    "clientMessageID": "msg_8ca2d8200011a9328c94cdba43",
+    "variantSent": false,
+    "variantReason": "localmock/echo has no official variant; Web omits the field when unset"
+  },
+  "source": {
+    "ui": "packages/app/src/utils/server-compat.ts:163-169 create; packages/app/src/utils/server-compat.ts:200-230 promptAsync",
+    "server": "packages/opencode/src/server/routes/instance/httpapi/handlers/session.ts promptAsync; packages/opencode/src/session/prompt.ts PromptInput",
+    "sse": "packages/app/src/context/server-sdk.tsx v1 global.event; skips payload.type==sync at line 284",
+    "reducer": "packages/app/src/context/global-sync/event-reducer.ts"
+  },
+  "http": [
+    {
+      "method": "POST",
+      "path": "/session",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {},
+      "status": 200,
+      "response": {
+        "id": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+        "slug": "jolly-wizard",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "New session - 2026-08-20T11:54:03.219Z",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787226843219,
+          "updated": 1787226843219
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 11:54:03 GMT",
+        "content-length": "400",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/session/ses_fe0fa97acffe3yYKOpX5SGA71a/prompt_async",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {
+        "messageID": "msg_8ca2d8200011a9328c94cdba43",
+        "agent": "build",
+        "model": {
+          "providerID": "localmock",
+          "modelID": "echo"
+        },
+        "parts": [
+          {
+            "type": "text",
+            "text": "A1_HEALTHY_TEXT reply with SANDBOX_OK"
+          }
+        ]
+      },
+      "status": 204,
+      "response": null,
+      "responseHeaders": {
+        "vary": "Origin",
+        "date": "Thu, 20 Aug 2026 11:54:03 GMT",
+        "content-length": "0"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/ses_fe0fa97acffe3yYKOpX5SGA71a/message",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": [
+        {
+          "info": {
+            "id": "msg_8ca2d8200011a9328c94cdba43",
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "role": "user",
+            "time": {
+              "created": 1787226843230
+            },
+            "summary": {
+              "diffs": []
+            },
+            "agent": "build",
+            "model": {
+              "providerID": "localmock",
+              "modelID": "echo"
+            }
+          },
+          "parts": [
+            {
+              "id": "prt_01f056860001fDWUuFqOfriN3E",
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "messageID": "msg_8ca2d8200011a9328c94cdba43",
+              "type": "text",
+              "text": "A1_HEALTHY_TEXT reply with SANDBOX_OK"
+            }
+          ]
+        },
+        {
+          "info": {
+            "id": "msg_01f056863001APnBRd8bgUzhDn",
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "role": "assistant",
+            "time": {
+              "created": 1787226843235,
+              "completed": 1787226843260
+            },
+            "parentID": "msg_8ca2d8200011a9328c94cdba43",
+            "modelID": "echo",
+            "providerID": "localmock",
+            "mode": "build",
+            "agent": "build",
+            "path": {
+              "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "root": "/"
+            },
+            "cost": 0,
+            "tokens": {
+              "total": 18,
+              "input": 8,
+              "output": 10,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            },
+            "finish": "stop"
+          },
+          "parts": [
+            {
+              "id": "prt_01f0568770010iMrMEKozi5Ihv",
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "messageID": "msg_01f056863001APnBRd8bgUzhDn",
+              "type": "step-start"
+            },
+            {
+              "id": "prt_01f056878001RG9h3k0atVecew",
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "messageID": "msg_01f056863001APnBRd8bgUzhDn",
+              "type": "text",
+              "text": "SANDBOX_OK",
+              "time": {
+                "start": 1787226843256,
+                "end": 1787226843258
+              }
+            },
+            {
+              "id": "prt_01f05687b0016eT543z8ElP53U",
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "messageID": "msg_01f056863001APnBRd8bgUzhDn",
+              "type": "step-finish",
+              "reason": "stop",
+              "cost": 0,
+              "tokens": {
+                "total": 18,
+                "input": 8,
+                "output": 10,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 11:54:08 GMT",
+        "content-length": "1544",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/ses_fe0fa97acffe3yYKOpX5SGA71a",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": {
+        "id": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+        "slug": "jolly-wizard",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 8,
+          "output": 10,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "Fixture session",
+        "agent": "build",
+        "model": {
+          "id": "echo",
+          "providerID": "localmock",
+          "variant": "default"
+        },
+        "version": "1.18.18",
+        "time": {
+          "created": 1787226843219,
+          "updated": 1787226843262
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 11:54:08 GMT",
+        "content-length": "511",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/status",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": {},
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 11:54:08 GMT",
+        "content-length": "2",
+        "vary": "Origin"
+      }
+    }
+  ],
+  "sseEventTypes": [
+    "server.connected",
+    "session.created",
+    "sync",
+    "session.updated",
+    "sync",
+    "message.updated",
+    "sync",
+    "message.part.updated",
+    "sync",
+    "session.updated",
+    "sync",
+    "session.status",
+    "message.updated",
+    "sync",
+    "session.updated",
+    "sync",
+    "session.diff",
+    "message.updated",
+    "sync",
+    "session.status",
+    "session.updated",
+    "sync",
+    "message.part.updated",
+    "sync",
+    "message.part.updated",
+    "sync",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.delta",
+    "message.part.updated",
+    "sync",
+    "message.part.updated",
+    "sync",
+    "message.updated",
+    "sync",
+    "message.updated",
+    "sync",
+    "session.status",
+    "session.status",
+    "session.idle",
+    "session.updated",
+    "sync",
+    "session.diff",
+    "message.updated",
+    "sync"
+  ],
+  "sseClassification": {
+    "directTypes": [
+      "server.connected",
+      "session.created",
+      "session.updated",
+      "message.updated",
+      "message.part.updated",
+      "session.updated",
+      "session.status",
+      "message.updated",
+      "session.updated",
+      "session.diff",
+      "message.updated",
+      "session.status",
+      "session.updated",
+      "message.part.updated",
+      "message.part.updated",
+      "message.part.delta",
+      "message.part.delta",
+      "message.part.delta",
+      "message.part.delta",
+      "message.part.delta",
+      "message.part.delta",
+      "message.part.delta",
+      "message.part.delta",
+      "message.part.delta",
+      "message.part.delta",
+      "message.part.updated",
+      "message.part.updated",
+      "message.updated",
+      "message.updated",
+      "session.status",
+      "session.status",
+      "session.idle",
+      "session.updated",
+      "session.diff",
+      "message.updated"
+    ],
+    "syncCount": 17,
+    "syncTypes": [
+      "session.created.1",
+      "session.updated.1",
+      "message.updated.1",
+      "message.part.updated.1",
+      "session.updated.1",
+      "message.updated.1",
+      "session.updated.1",
+      "message.updated.1",
+      "session.updated.1",
+      "message.part.updated.1",
+      "message.part.updated.1",
+      "message.part.updated.1",
+      "message.part.updated.1",
+      "message.updated.1",
+      "message.updated.1",
+      "session.updated.1",
+      "message.updated.1"
+    ],
+    "statusCarriers": [
+      {
+        "type": "busy"
+      },
+      {
+        "type": "busy"
+      },
+      {
+        "type": "busy"
+      },
+      {
+        "type": "idle"
+      }
+    ]
+  },
+  "sse": [
+    {
+      "t": 1787226843.222593,
+      "event": {
+        "payload": {
+          "id": "evt_01f0554c2001d7Qgme1xOmwLEQ",
+          "type": "server.connected",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 1787226843.2394629,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f056854001q8zWkpBYGF48oA",
+          "type": "session.created",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "info": {
+              "id": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "slug": "jolly-wizard",
+              "version": "1.18.18",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "New session - 2026-08-20T11:54:03.219Z",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787226843219,
+                "updated": 1787226843219
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.240588,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f056854001q8zWkpBYGF48oA",
+            "type": "session.created.1",
+            "seq": 0,
+            "aggregateID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "data": {
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "info": {
+                "id": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+                "slug": "jolly-wizard",
+                "version": "1.18.18",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "New session - 2026-08-20T11:54:03.219Z",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787226843219,
+                  "updated": 1787226843219
+                }
+              }
+            }
+          },
+          "id": "evt_01f056854001q8zWkpBYGF48oA"
+        }
+      }
+    },
+    {
+      "t": 1787226843.242649,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f05685f001I1o4GeTfWdXF30",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "info": {
+              "id": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "slug": "jolly-wizard",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "New session - 2026-08-20T11:54:03.219Z",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787226843219,
+                "updated": 1787226843230
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.243797,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f05685f001I1o4GeTfWdXF30",
+            "type": "session.updated.1",
+            "seq": 1,
+            "aggregateID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "data": {
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "info": {
+                "id": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+                "slug": "jolly-wizard",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "New session - 2026-08-20T11:54:03.219Z",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787226843219,
+                  "updated": 1787226843230
+                }
+              }
+            }
+          },
+          "id": "evt_01f05685f001I1o4GeTfWdXF30"
+        }
+      }
+    },
+    {
+      "t": 1787226843.244321,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f056860001khYYOT3ZBpvYz1",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "info": {
+              "id": "msg_8ca2d8200011a9328c94cdba43",
+              "role": "user",
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "time": {
+                "created": 1787226843230
+              },
+              "agent": "build",
+              "model": {
+                "providerID": "localmock",
+                "modelID": "echo"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.245002,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f056860001khYYOT3ZBpvYz1",
+            "type": "message.updated.1",
+            "seq": 2,
+            "aggregateID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "data": {
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "info": {
+                "id": "msg_8ca2d8200011a9328c94cdba43",
+                "role": "user",
+                "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+                "time": {
+                  "created": 1787226843230
+                },
+                "agent": "build",
+                "model": {
+                  "providerID": "localmock",
+                  "modelID": "echo"
+                }
+              }
+            }
+          },
+          "id": "evt_01f056860001khYYOT3ZBpvYz1"
+        }
+      }
+    },
+    {
+      "t": 1787226843.245555,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f056861001kumxxLJsMppTx5",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "part": {
+              "type": "text",
+              "text": "A1_HEALTHY_TEXT reply with SANDBOX_OK",
+              "messageID": "msg_8ca2d8200011a9328c94cdba43",
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "id": "prt_01f056860001fDWUuFqOfriN3E"
+            },
+            "time": 1787226843233
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.246285,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f056861001kumxxLJsMppTx5",
+            "type": "message.part.updated.1",
+            "seq": 3,
+            "aggregateID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "data": {
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "part": {
+                "type": "text",
+                "text": "A1_HEALTHY_TEXT reply with SANDBOX_OK",
+                "messageID": "msg_8ca2d8200011a9328c94cdba43",
+                "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+                "id": "prt_01f056860001fDWUuFqOfriN3E"
+              },
+              "time": 1787226843233
+            }
+          },
+          "id": "evt_01f056861001kumxxLJsMppTx5"
+        }
+      }
+    },
+    {
+      "t": 1787226843.2473128,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f0568610022LdqhDjomVfXJs",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "info": {
+              "id": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "slug": "jolly-wizard",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "New session - 2026-08-20T11:54:03.219Z",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787226843219,
+                "updated": 1787226843233
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.248509,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f0568610022LdqhDjomVfXJs",
+            "type": "session.updated.1",
+            "seq": 4,
+            "aggregateID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "data": {
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "info": {
+                "id": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+                "slug": "jolly-wizard",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "New session - 2026-08-20T11:54:03.219Z",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787226843219,
+                  "updated": 1787226843233
+                }
+              }
+            }
+          },
+          "id": "evt_01f0568610022LdqhDjomVfXJs"
+        }
+      }
+    },
+    {
+      "t": 1787226843.248794,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f05686300161rHimOiYQPJog",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.249554,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f056863002zdIzrigSHbhIBG",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "info": {
+              "id": "msg_01f056863001APnBRd8bgUzhDn",
+              "parentID": "msg_8ca2d8200011a9328c94cdba43",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "modelID": "echo",
+              "providerID": "localmock",
+              "time": {
+                "created": 1787226843235
+              },
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.250415,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f056863002zdIzrigSHbhIBG",
+            "type": "message.updated.1",
+            "seq": 5,
+            "aggregateID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "data": {
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "info": {
+                "id": "msg_01f056863001APnBRd8bgUzhDn",
+                "parentID": "msg_8ca2d8200011a9328c94cdba43",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "modelID": "echo",
+                "providerID": "localmock",
+                "time": {
+                  "created": 1787226843235
+                },
+                "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a"
+              }
+            }
+          },
+          "id": "evt_01f056863002zdIzrigSHbhIBG"
+        }
+      }
+    },
+    {
+      "t": 1787226843.255544,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f0568670019VmHILwd9XP9kQ",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "info": {
+              "id": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "slug": "jolly-wizard",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "New session - 2026-08-20T11:54:03.219Z",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "summary": {
+                "additions": 0,
+                "deletions": 0,
+                "files": 0
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787226843219,
+                "updated": 1787226843238
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.25666,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f0568670019VmHILwd9XP9kQ",
+            "type": "session.updated.1",
+            "seq": 6,
+            "aggregateID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "data": {
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "info": {
+                "id": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+                "slug": "jolly-wizard",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "New session - 2026-08-20T11:54:03.219Z",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "summary": {
+                  "additions": 0,
+                  "deletions": 0,
+                  "files": 0
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787226843219,
+                  "updated": 1787226843238
+                }
+              }
+            }
+          },
+          "id": "evt_01f0568670019VmHILwd9XP9kQ"
+        }
+      }
+    },
+    {
+      "t": 1787226843.256897,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f056868001LxHobPEzAolL0M",
+          "type": "session.diff",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "diff": []
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.257441,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f056868002vIFqweStPl7rWW",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "info": {
+              "role": "user",
+              "time": {
+                "created": 1787226843230
+              },
+              "agent": "build",
+              "model": {
+                "providerID": "localmock",
+                "modelID": "echo"
+              },
+              "id": "msg_8ca2d8200011a9328c94cdba43",
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "summary": {
+                "diffs": []
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.258075,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f056868002vIFqweStPl7rWW",
+            "type": "message.updated.1",
+            "seq": 7,
+            "aggregateID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "data": {
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "info": {
+                "role": "user",
+                "time": {
+                  "created": 1787226843230
+                },
+                "agent": "build",
+                "model": {
+                  "providerID": "localmock",
+                  "modelID": "echo"
+                },
+                "id": "msg_8ca2d8200011a9328c94cdba43",
+                "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+                "summary": {
+                  "diffs": []
+                }
+              }
+            }
+          },
+          "id": "evt_01f056868002vIFqweStPl7rWW"
+        }
+      }
+    },
+    {
+      "t": 1787226843.264033,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f056871001gYlUbZo9Nm0eDU",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.2648718,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f056874001wLdM0W3WNXxcXr",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "info": {
+              "id": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "slug": "jolly-wizard",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "Fixture session",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "summary": {
+                "additions": 0,
+                "deletions": 0,
+                "files": 0
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787226843219,
+                "updated": 1787226843238
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.265886,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f056874001wLdM0W3WNXxcXr",
+            "type": "session.updated.1",
+            "seq": 8,
+            "aggregateID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "data": {
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "info": {
+                "id": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+                "slug": "jolly-wizard",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "Fixture session",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "summary": {
+                  "additions": 0,
+                  "deletions": 0,
+                  "files": 0
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787226843219,
+                  "updated": 1787226843238
+                }
+              }
+            }
+          },
+          "id": "evt_01f056874001wLdM0W3WNXxcXr"
+        }
+      }
+    },
+    {
+      "t": 1787226843.266313,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f056877001E3erHS53sk2bBY",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "part": {
+              "id": "prt_01f0568770010iMrMEKozi5Ihv",
+              "messageID": "msg_01f056863001APnBRd8bgUzhDn",
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "type": "step-start"
+            },
+            "time": 1787226843255
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.266866,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f056877001E3erHS53sk2bBY",
+            "type": "message.part.updated.1",
+            "seq": 9,
+            "aggregateID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "data": {
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "part": {
+                "id": "prt_01f0568770010iMrMEKozi5Ihv",
+                "messageID": "msg_01f056863001APnBRd8bgUzhDn",
+                "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+                "type": "step-start"
+              },
+              "time": 1787226843255
+            }
+          },
+          "id": "evt_01f056877001E3erHS53sk2bBY"
+        }
+      }
+    },
+    {
+      "t": 1787226843.267319,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f056878001DVbXbINq4xk2N0",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "part": {
+              "id": "prt_01f056878001RG9h3k0atVecew",
+              "messageID": "msg_01f056863001APnBRd8bgUzhDn",
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "type": "text",
+              "text": "",
+              "time": {
+                "start": 1787226843256
+              }
+            },
+            "time": 1787226843256
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.267915,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f056878001DVbXbINq4xk2N0",
+            "type": "message.part.updated.1",
+            "seq": 10,
+            "aggregateID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "data": {
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "part": {
+                "id": "prt_01f056878001RG9h3k0atVecew",
+                "messageID": "msg_01f056863001APnBRd8bgUzhDn",
+                "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+                "type": "text",
+                "text": "",
+                "time": {
+                  "start": 1787226843256
+                }
+              },
+              "time": 1787226843256
+            }
+          },
+          "id": "evt_01f056878001DVbXbINq4xk2N0"
+        }
+      }
+    },
+    {
+      "t": 1787226843.2682528,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f0568790016DTmwzaiUdnrW6",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "messageID": "msg_01f056863001APnBRd8bgUzhDn",
+            "partID": "prt_01f056878001RG9h3k0atVecew",
+            "field": "text",
+            "delta": "S"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.268585,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f0568790029JF6tHyrvf9G05",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "messageID": "msg_01f056863001APnBRd8bgUzhDn",
+            "partID": "prt_01f056878001RG9h3k0atVecew",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.268917,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f056879003aZ2UuKXHR56BEO",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "messageID": "msg_01f056863001APnBRd8bgUzhDn",
+            "partID": "prt_01f056878001RG9h3k0atVecew",
+            "field": "text",
+            "delta": "N"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.269249,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f056879004zmefm2A8m0uHaI",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "messageID": "msg_01f056863001APnBRd8bgUzhDn",
+            "partID": "prt_01f056878001RG9h3k0atVecew",
+            "field": "text",
+            "delta": "D"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.2695942,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f056879005GJzP2CkHQ13W8e",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "messageID": "msg_01f056863001APnBRd8bgUzhDn",
+            "partID": "prt_01f056878001RG9h3k0atVecew",
+            "field": "text",
+            "delta": "B"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.26994,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f056879006GB5qDmLfBvPP7V",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "messageID": "msg_01f056863001APnBRd8bgUzhDn",
+            "partID": "prt_01f056878001RG9h3k0atVecew",
+            "field": "text",
+            "delta": "O"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.270272,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f05687a001FnTGOJbz3Lp7gQ",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "messageID": "msg_01f056863001APnBRd8bgUzhDn",
+            "partID": "prt_01f056878001RG9h3k0atVecew",
+            "field": "text",
+            "delta": "X"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.270607,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f05687a002yBeNIi6R3tZHuM",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "messageID": "msg_01f056863001APnBRd8bgUzhDn",
+            "partID": "prt_01f056878001RG9h3k0atVecew",
+            "field": "text",
+            "delta": "_"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.2709389,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f05687a003AdJfcNm0X74AFK",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "messageID": "msg_01f056863001APnBRd8bgUzhDn",
+            "partID": "prt_01f056878001RG9h3k0atVecew",
+            "field": "text",
+            "delta": "O"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.271276,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f05687a004L4SSjH1GWyxiAQ",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "messageID": "msg_01f056863001APnBRd8bgUzhDn",
+            "partID": "prt_01f056878001RG9h3k0atVecew",
+            "field": "text",
+            "delta": "K"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.271768,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f05687a005xsLHJWAUNJ6CcZ",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "part": {
+              "id": "prt_01f056878001RG9h3k0atVecew",
+              "messageID": "msg_01f056863001APnBRd8bgUzhDn",
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "type": "text",
+              "text": "SANDBOX_OK",
+              "time": {
+                "start": 1787226843256,
+                "end": 1787226843258
+              }
+            },
+            "time": 1787226843258
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.2724118,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f05687a005xsLHJWAUNJ6CcZ",
+            "type": "message.part.updated.1",
+            "seq": 11,
+            "aggregateID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "data": {
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "part": {
+                "id": "prt_01f056878001RG9h3k0atVecew",
+                "messageID": "msg_01f056863001APnBRd8bgUzhDn",
+                "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+                "type": "text",
+                "text": "SANDBOX_OK",
+                "time": {
+                  "start": 1787226843256,
+                  "end": 1787226843258
+                }
+              },
+              "time": 1787226843258
+            }
+          },
+          "id": "evt_01f05687a005xsLHJWAUNJ6CcZ"
+        }
+      }
+    },
+    {
+      "t": 1787226843.2729442,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f05687b001opah6InUBsOhg1",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "part": {
+              "id": "prt_01f05687b0016eT543z8ElP53U",
+              "reason": "stop",
+              "messageID": "msg_01f056863001APnBRd8bgUzhDn",
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "type": "step-finish",
+              "tokens": {
+                "total": 18,
+                "input": 8,
+                "output": 10,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              },
+              "cost": 0
+            },
+            "time": 1787226843259
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226843.2736168,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f05687b001opah6InUBsOhg1",
+            "type": "message.part.updated.1",
+            "seq": 12,
+            "aggregateID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "data": {
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "part": {
+                "id": "prt_01f05687b0016eT543z8ElP53U",
+                "reason": "stop",
+                "messageID": "msg_01f056863001APnBRd8bgUzhDn",
+                "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+                "type": "step-finish",
+                "tokens": {
+                  "total": 18,
+                  "input": 8,
+                  "output": 10,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "cost": 0
+              },
+              "time": 1787226843259
+            }
+          },
+          "id": "evt_01f05687b001opah6InUBsOhg1"
+        }
+      }
+    },
+    {
+      "t": 1787226848.212311,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f05687c001hAgvwIyXe1Vk0Q",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "info": {
+              "id": "msg_01f056863001APnBRd8bgUzhDn",
+              "parentID": "msg_8ca2d8200011a9328c94cdba43",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "total": 18,
+                "input": 8,
+                "output": 10,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              },
+              "modelID": "echo",
+              "providerID": "localmock",
+              "time": {
+                "created": 1787226843235,
+                "completed": 1787226843260
+              },
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "finish": "stop"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226848.213525,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f05687c001hAgvwIyXe1Vk0Q",
+            "type": "message.updated.1",
+            "seq": 13,
+            "aggregateID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "data": {
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "info": {
+                "id": "msg_01f056863001APnBRd8bgUzhDn",
+                "parentID": "msg_8ca2d8200011a9328c94cdba43",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "total": 18,
+                  "input": 8,
+                  "output": 10,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "modelID": "echo",
+                "providerID": "localmock",
+                "time": {
+                  "created": 1787226843235,
+                  "completed": 1787226843260
+                },
+                "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+                "finish": "stop"
+              }
+            }
+          },
+          "id": "evt_01f05687c001hAgvwIyXe1Vk0Q"
+        }
+      }
+    },
+    {
+      "t": 1787226848.214519,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f05687c002ucTbGX3q6gHyfW",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "info": {
+              "id": "msg_01f056863001APnBRd8bgUzhDn",
+              "parentID": "msg_8ca2d8200011a9328c94cdba43",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "total": 18,
+                "input": 8,
+                "output": 10,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              },
+              "modelID": "echo",
+              "providerID": "localmock",
+              "time": {
+                "created": 1787226843235,
+                "completed": 1787226843260
+              },
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "finish": "stop"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226848.215713,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f05687c002ucTbGX3q6gHyfW",
+            "type": "message.updated.1",
+            "seq": 14,
+            "aggregateID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "data": {
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "info": {
+                "id": "msg_01f056863001APnBRd8bgUzhDn",
+                "parentID": "msg_8ca2d8200011a9328c94cdba43",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "total": 18,
+                  "input": 8,
+                  "output": 10,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "modelID": "echo",
+                "providerID": "localmock",
+                "time": {
+                  "created": 1787226843235,
+                  "completed": 1787226843260
+                },
+                "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+                "finish": "stop"
+              }
+            }
+          },
+          "id": "evt_01f05687c002ucTbGX3q6gHyfW"
+        }
+      }
+    },
+    {
+      "t": 1787226848.215934,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f05687d001TnWe0nObXxTM8r",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226848.2161741,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f05687e001qKr0o53XzsKAbW",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "status": {
+              "type": "idle"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226848.2163851,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f05687e002kRDSl0HwHFJ6Bw",
+          "type": "session.idle",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226848.217241,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f05687e003vp5egZ8yRWUdlX",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "info": {
+              "id": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "slug": "jolly-wizard",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "Fixture session",
+              "agent": "build",
+              "model": {
+                "id": "echo",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "summary": {
+                "additions": 0,
+                "deletions": 0,
+                "files": 0
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 8,
+                "output": 10,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787226843219,
+                "updated": 1787226843262
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226848.218281,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f05687e003vp5egZ8yRWUdlX",
+            "type": "session.updated.1",
+            "seq": 15,
+            "aggregateID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "data": {
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "info": {
+                "id": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+                "slug": "jolly-wizard",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "Fixture session",
+                "agent": "build",
+                "model": {
+                  "id": "echo",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "summary": {
+                  "additions": 0,
+                  "deletions": 0,
+                  "files": 0
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 8,
+                  "output": 10,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787226843219,
+                  "updated": 1787226843262
+                }
+              }
+            }
+          },
+          "id": "evt_01f05687e003vp5egZ8yRWUdlX"
+        }
+      }
+    },
+    {
+      "t": 1787226848.218507,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f05687f001meQiLTTOCfB3ai",
+          "type": "session.diff",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "diff": []
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226848.218981,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01f05687f002x489o8QUGQykdE",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "info": {
+              "role": "user",
+              "time": {
+                "created": 1787226843230
+              },
+              "agent": "build",
+              "model": {
+                "providerID": "localmock",
+                "modelID": "echo"
+              },
+              "summary": {
+                "diffs": []
+              },
+              "id": "msg_8ca2d8200011a9328c94cdba43",
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787226848.219695,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01f05687f002x489o8QUGQykdE",
+            "type": "message.updated.1",
+            "seq": 16,
+            "aggregateID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "data": {
+              "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+              "info": {
+                "role": "user",
+                "time": {
+                  "created": 1787226843230
+                },
+                "agent": "build",
+                "model": {
+                  "providerID": "localmock",
+                  "modelID": "echo"
+                },
+                "summary": {
+                  "diffs": []
+                },
+                "id": "msg_8ca2d8200011a9328c94cdba43",
+                "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a"
+              }
+            }
+          },
+          "id": "evt_01f05687f002x489o8QUGQykdE"
+        }
+      }
+    }
+  ],
+  "reload": {
+    "messages": [
+      {
+        "info": {
+          "id": "msg_8ca2d8200011a9328c94cdba43",
+          "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+          "role": "user",
+          "time": {
+            "created": 1787226843230
+          },
+          "summary": {
+            "diffs": []
+          },
+          "agent": "build",
+          "model": {
+            "providerID": "localmock",
+            "modelID": "echo"
+          }
+        },
+        "parts": [
+          {
+            "id": "prt_01f056860001fDWUuFqOfriN3E",
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "messageID": "msg_8ca2d8200011a9328c94cdba43",
+            "type": "text",
+            "text": "A1_HEALTHY_TEXT reply with SANDBOX_OK"
+          }
+        ]
+      },
+      {
+        "info": {
+          "id": "msg_01f056863001APnBRd8bgUzhDn",
+          "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+          "role": "assistant",
+          "time": {
+            "created": 1787226843235,
+            "completed": 1787226843260
+          },
+          "parentID": "msg_8ca2d8200011a9328c94cdba43",
+          "modelID": "echo",
+          "providerID": "localmock",
+          "mode": "build",
+          "agent": "build",
+          "path": {
+            "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+            "root": "/"
+          },
+          "cost": 0,
+          "tokens": {
+            "total": 18,
+            "input": 8,
+            "output": 10,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "finish": "stop"
+        },
+        "parts": [
+          {
+            "id": "prt_01f0568770010iMrMEKozi5Ihv",
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "messageID": "msg_01f056863001APnBRd8bgUzhDn",
+            "type": "step-start"
+          },
+          {
+            "id": "prt_01f056878001RG9h3k0atVecew",
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "messageID": "msg_01f056863001APnBRd8bgUzhDn",
+            "type": "text",
+            "text": "SANDBOX_OK",
+            "time": {
+              "start": 1787226843256,
+              "end": 1787226843258
+            }
+          },
+          {
+            "id": "prt_01f05687b0016eT543z8ElP53U",
+            "sessionID": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+            "messageID": "msg_01f056863001APnBRd8bgUzhDn",
+            "type": "step-finish",
+            "reason": "stop",
+            "cost": 0,
+            "tokens": {
+              "total": 18,
+              "input": 8,
+              "output": 10,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "session": {
+      "id": "ses_fe0fa97acffe3yYKOpX5SGA71a",
+      "slug": "jolly-wizard",
+      "projectID": "global",
+      "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+      "path": "private/tmp/ocw-gate-a-20260820/workspace",
+      "summary": {
+        "additions": 0,
+        "deletions": 0,
+        "files": 0
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 8,
+        "output": 10,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "title": "Fixture session",
+      "agent": "build",
+      "model": {
+        "id": "echo",
+        "providerID": "localmock",
+        "variant": "default"
+      },
+      "version": "1.18.18",
+      "time": {
+        "created": 1787226843219,
+        "updated": 1787226843262
+      }
+    },
+    "status": {}
+  },
+  "correlation": {
+    "clientMessageID": "msg_8ca2d8200011a9328c94cdba43",
+    "persistedMessageIDs": [
+      "msg_8ca2d8200011a9328c94cdba43",
+      "msg_01f056863001APnBRd8bgUzhDn"
+    ],
+    "persistedRoles": [
+      "user",
+      "assistant"
+    ],
+    "clientIdPersisted": true
+  },
+  "sanitization": {
+    "replaced": [
+      "session/message/part/event ids",
+      "absolute workspace paths",
+      "epoch timestamps > 1e9"
+    ],
+    "kept": [
+      "all JSON keys",
+      "event types",
+      "part types",
+      "HTTP method/path/status"
+    ]
+  }
+}

@@ -42,7 +42,12 @@ type sseSubscriber struct {
 	stateMu      sync.Mutex
 	messageRoles map[string]string
 	messageIDs   map[string]string
-	partKinds    map[string]string
+	// assistantTurns is the directive-010 source-proven turn fact: assistant
+	// messageID → info.parentID (the user message that owns the turn). A7
+	// proves the live assistant message.updated frames carry parentID, so the
+	// fact is frame-derived — never guessed from position or timing.
+	assistantTurns map[string]string
+	partKinds      map[string]string
 	partContent  map[string]string
 	completed    map[string]bool
 	activeTurns  map[string]string // sessionID -> owning user/message turn id
@@ -85,6 +90,7 @@ func newSSESubscriber(ctx context.Context, a *Agent, c *Client) *sseSubscriber {
 		cancel:                 cancel,
 		messageRoles:           make(map[string]string),
 		messageIDs:             make(map[string]string),
+		assistantTurns:         make(map[string]string),
 		partKinds:              make(map[string]string),
 		partContent:            make(map[string]string),
 		completed:              make(map[string]bool),
@@ -120,11 +126,10 @@ func (s *sseSubscriber) connect() error {
 // kills the stream mid-turn; owner-verified 2026-08-19: turn 2 died at the
 // 30s mark mid-stream).
 func (s *sseSubscriber) dial() (*http.Response, error) {
-	eventPath := "/global/event"
-	if s.client.Generation() == generationV2 {
-		eventPath = "/api/event"
-	}
-	sseURL := s.client.endpoint(eventPath)
+	// C1: the verified 1.18.18 event stream is /global/event only; the former
+	// v2 /api/event branch is deleted — clientFor quarantines other generations
+	// before any subscriber can exist.
+	sseURL := s.client.endpoint("/global/event")
 
 	req, err := http.NewRequestWithContext(s.ctx, http.MethodGet, sseURL, nil)
 	if err != nil {
@@ -174,6 +179,10 @@ func (s *sseSubscriber) run(body io.ReadCloser) {
 			resp, err := s.dial()
 			if err == nil {
 				body = resp.Body
+				// Directive-010: an asked frame lost inside the stream gap is
+				// re-derived after the redial from GET /question plus the same
+				// source-proven rules (bounded; failure = honest no-recovery).
+				s.recoverPendingAfterReconnect()
 				break
 			}
 			if s.ctx.Err() != nil {
@@ -188,13 +197,9 @@ func (s *sseSubscriber) run(body io.ReadCloser) {
 // healArmedTurnsAfterDrop settles turns that armed before a stream drop and
 // went idle during the gap (their terminal event was lost): 1.18
 // GET /session/status is the definitive busy map, so any armed session no
-// longer busy gets its one-shot result now. v2's /api/session/active has
-// foreground-drain-only semantics — absence is not an idle verdict, so v2
-// stays conservative (no heal).
+// longer busy gets its one-shot result now. (The former v2 no-heal branch is
+// gone — clientFor quarantines non-1.18.18 generations before subscribing.)
 func (s *sseSubscriber) healArmedTurnsAfterDrop() {
-	if s.client.Generation() == generationV2 {
-		return
-	}
 	s.stateMu.Lock()
 	armed := make([]string, 0, len(s.activeTurns))
 	for sessionID := range s.activeTurns {
@@ -220,6 +225,25 @@ func (s *sseSubscriber) healArmedTurnsAfterDrop() {
 			slog.Info("opencode-web SSE: settling turn that went idle during stream gap", "session", sessionID)
 			s.emitResultOnce(sessionID)
 		}
+	}
+}
+
+// recoverPendingAfterReconnect reconciles pending questions for every routed
+// session right after a redial (directive-010): asked frames lost inside the
+// stream gap are re-derived from GET /question under the same source-proven
+// rules and re-presented through the existing Kernel route — never a second
+// stream, never a raw second path.
+func (s *sseSubscriber) recoverPendingAfterReconnect() {
+	s.agent.routesMu.Lock()
+	sessions := make([]string, 0, len(s.agent.routes))
+	for sessionID := range s.agent.routes {
+		sessions = append(sessions, sessionID)
+	}
+	s.agent.routesMu.Unlock()
+	for _, sessionID := range sessions {
+		ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+		s.agent.recoverPendingQuestions(ctx, s.client, s, sessionID, "")
+		cancel()
 	}
 }
 
@@ -307,6 +331,12 @@ func (s *sseSubscriber) handleServerEvent(payload map[string]any) {
 		s.handlePartUpdated(properties, sessionID)
 	case "session.status":
 		s.handleSessionStatus(properties, sessionID)
+	case "sync":
+		// §6.5 / server-sdk.tsx:284: v1 nested `sync` frames duplicate the
+		// semantic events that also arrive as direct frames. Skipped exactly
+		// once here — BEFORE any normalization — so direct+sync can never
+		// double-ingest. Evidence capture retains the raw frames; canonical
+		// ingest never sees them.
 	case "session.error":
 		// Terminal failure frame (live-pinned 1.18.18: provider APIError with
 		// the real message). Recorded as terminal AND emitted as assistant
@@ -342,14 +372,20 @@ func (s *sseSubscriber) handleServerEvent(payload map[string]any) {
 		s.handleSessionUpdated(properties, sessionID)
 	case "permission.asked":
 		s.handlePermissionAsked(properties, sessionID)
+	case "question.asked":
+		s.handleQuestionAsked(properties, sessionID)
+	case "question.replied", "question.rejected":
+		s.handleQuestionResolved(eventType, properties, sessionID)
 	case "todo.updated":
-		// Phase 1: todos are not advertised (design §4.3.3) — deliberately
-		// ignored, no EventPlan.
+		s.handleTodoUpdated(properties, sessionID)
 	case "server.connected", "message.removed", "message.part.removed", "session.diff":
 		// Not chat content; not catalog-affecting either.
-	case "session.created", "session.deleted":
-		// Catalog-affecting: ask the bridge for an immediate fingerprint
-		// rescan → sessions_changed. Never enters the chat stream.
+	case "session.created", "session.deleted", "project.updated", "catalog.updated":
+		// Catalog-affecting (Gate B observation.catalog_refresh): official
+		// home refresh is session.created/deleted AND project.updated /
+		// catalog.updated. Desktop opening a worktree emits the latter pair
+		// before any session exists — ignoring them leaves iOS on a stale
+		// GET /project snapshot until the next discovery poll.
 		s.agent.signalCatalogRefresh()
 	default:
 		slog.Debug("opencode-web SSE: unhandled server event", "type", eventType)
@@ -373,6 +409,15 @@ func (s *sseSubscriber) handleMessageUpdated(properties map[string]any, sessionI
 			s.messageIDs[messageID] = sessionID
 		}
 		s.stateMu.Unlock()
+	}
+	// Directive-010: record the assistant→owning-turn fact (info.parentID) the
+	// question correlation verifies against. Only assistant rows carry it.
+	if sessionID != "" && messageID != "" && role == "assistant" {
+		if parentID := firstString(info, "parentID"); parentID != "" {
+			s.stateMu.Lock()
+			s.assistantTurns[messageID] = parentID
+			s.stateMu.Unlock()
+		}
 	}
 	if sessionID != "" && role == "user" {
 		s.resetCompletion(sessionID)
@@ -436,10 +481,15 @@ func (s *sseSubscriber) handleMessageUpdated(properties map[string]any, sessionI
 				s.emit(core.Event{Type: eventType, Content: d.content, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
 			}
 		case "reasoning":
-			text := firstString(part, "text", "content")
-			if d := s.deltaForPartSnapshot(sessionID, messageID, partID, kind, text); d.content != "" {
-				turnID := s.owningTurnID(sessionID, messageID)
-				s.emit(core.Event{Type: core.EventThinking, Content: d.content, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
+			// E2 verdict: no populated reasoning shape is verified on
+			// 1.18.18 — untranslated, never mapped to thinking or folded
+			// into answer text (§6.3). Non-fatal: an unsupported content
+			// type must not poison an otherwise healthy turn (owner 真机
+			// 2026-08-21: the former EventError settled every
+			// reasoning-model turn as turn_error and tore down relayEvents
+			// mid-stream).
+			if text := firstString(part, "text", "content"); strings.TrimSpace(text) != "" {
+				s.skipLiveReasoning(sessionID, messageID, partID)
 			}
 		case "tool":
 			s.handleToolPart(part, sessionID, messageID)
@@ -473,9 +523,9 @@ func (s *sseSubscriber) handlePartDelta(properties map[string]any, sessionID str
 	kind := s.kindForPart(sessionID, messageID, partID, field)
 	switch kind {
 	case "reasoning":
-		s.appendPartContent(sessionID, messageID, partID, kind, delta)
-		turnID := s.owningTurnID(sessionID, messageID)
-		s.emit(core.Event{Type: core.EventThinking, Content: delta, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
+		// E2 verdict: populated reasoning is untranslated — skipped without
+		// poisoning the turn (see skipLiveReasoning; §6.3).
+		s.skipLiveReasoning(sessionID, messageID, partID)
 	case "text", "":
 		s.appendPartContent(sessionID, messageID, partID, "text", delta)
 		turnID := s.owningTurnID(sessionID, messageID)
@@ -532,10 +582,10 @@ func (s *sseSubscriber) handlePartUpdated(properties map[string]any, sessionID s
 			s.emit(core.Event{Type: eventType, Content: d.content, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
 		}
 	case "reasoning":
-		text := firstString(part, "text", "content")
-		if d := s.deltaForPartSnapshot(sessionID, messageID, partID, kind, text); d.content != "" {
-			turnID := s.owningTurnID(sessionID, messageID)
-			s.emit(core.Event{Type: core.EventThinking, Content: d.content, SessionID: sessionID, TurnID: turnID, ItemID: turnID})
+		// E2 verdict: same untranslated rule as message.updated — skip
+		// without poisoning the turn (see skipLiveReasoning; §6.3).
+		if text := firstString(part, "text", "content"); strings.TrimSpace(text) != "" {
+			s.skipLiveReasoning(sessionID, messageID, partID)
 		}
 	case "tool":
 		s.handleToolPart(part, sessionID, messageID)
@@ -714,6 +764,115 @@ func (s *sseSubscriber) handlePermissionAsked(properties map[string]any, session
 	})
 }
 
+// handleQuestionAsked translates the official question.asked frame ONCE into
+// the canonical user_input_requested payload (§6.8): the interaction rides
+// Event.UserInput through the same live route; no legacy single-question
+// presentation, no raw frame to SSV2 clients, no messages[] write.
+func (s *sseSubscriber) handleQuestionAsked(properties map[string]any, sessionID string) {
+	var req ocwQuestionRequest
+	b, err := json.Marshal(properties)
+	if err != nil {
+		return
+	}
+	if err := json.Unmarshal(b, &req); err != nil || req.ID == "" {
+		slog.Debug("opencode-web SSE: malformed question.asked frame", "error", err)
+		return
+	}
+	if req.SessionID != "" {
+		sessionID = req.SessionID
+	}
+	// Audit-009/directive-010 — source-proven identity ONLY. The asked frame
+	// must carry BOTH tool.messageID (a subscriber-OBSERVED assistant message
+	// of this same session) and tool.callID. The owning TURN is that message's
+	// parentID fact, cross-checked against the armed turn: activeTurn is the
+	// verification, never the source of identity (a stale previous-turn or
+	// other-session messageID fails closed — no phantom turn, no registry
+	// entry, no canonical event).
+	turnID, ok := s.provenQuestionTurn(sessionID, req.Tool)
+	if !ok {
+		slog.Warn("opencode-web SSE: question.asked failed source-proven correlation — dropped (no phantom turn)",
+			"session", sessionID, "question", req.ID,
+			"toolMessageID", req.Tool.MessageID, "toolCallID", req.Tool.CallID)
+		return
+	}
+	// Directive-011: admission + emission happen atomically inside the
+	// lifecycle gate — a terminal admitted anywhere between can never be
+	// overwritten by this requested.
+	s.agent.gateAdmitRequested(s, sessionID, req, turnID)
+}
+
+// provenQuestionTurn is the live correlation gate (directive-010): tool.messageID
+// must map through the subscriber's own frame-derived facts to an assistant
+// message of THIS session whose parentID owning turn is the session's armed
+// turn. Unknown, other-session, non-assistant, parentless, and stale
+// previous-turn message ids all fail closed.
+func (s *sseSubscriber) provenQuestionTurn(sessionID string, tool ocwQuestionTool) (string, bool) {
+	if sessionID == "" || tool.MessageID == "" || tool.CallID == "" {
+		return "", false
+	}
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	if s.messageIDs[tool.MessageID] != sessionID {
+		return "", false
+	}
+	if s.messageRoles[tool.MessageID] != "assistant" {
+		return "", false
+	}
+	turn := s.assistantTurns[tool.MessageID]
+	if turn == "" || turn != s.activeTurns[sessionID] {
+		return "", false
+	}
+	return turn, true
+}
+
+// handleQuestionResolved maps question.replied/rejected to the canonical
+// user_input_resolved terminal. resolutionSource is other_client — the SERVER
+// broadcast this, so the answer may have come from any client. The admission
+// (and its in-place emission, when a pending part exists) rides the
+// directive-011 lifecycle gate: the stored interaction identity carries the
+// turn/call facts, duplicates are idempotent, and identity-less terminals are
+// recorded but never emitted (no phantom).
+func (s *sseSubscriber) handleQuestionResolved(eventType string, properties map[string]any, sessionID string) {
+	requestID := firstString(properties, "requestID", "id")
+	if sid := firstString(properties, "sessionID"); sid != "" {
+		sessionID = sid
+	}
+	if requestID == "" {
+		return
+	}
+	status := core.UserInputStatusAnswered
+	if eventType == "question.rejected" {
+		status = core.UserInputStatusRejected
+	}
+	s.agent.gateAdmitResolved(s, sessionID, requestID, status)
+}
+
+// handleTodoUpdated records the official ordered replacement list (A8: items
+// carry exactly content/status/priority — no ids). Todo stays an explicit
+// control-plane surface (§6.9): it NEVER becomes a timeline part.
+func (s *sseSubscriber) handleTodoUpdated(properties map[string]any, sessionID string) {
+	if sid := firstString(properties, "sessionID"); sid != "" {
+		sessionID = sid
+	}
+	if sessionID == "" {
+		return
+	}
+	// Audit-008 W2.1: decode the ENTIRE replacement first (strict A8 shape);
+	// a malformed row fails the whole update — the last-known snapshot is
+	// untouched and NO partial plan event is emitted.
+	b, err := json.Marshal(properties["todos"])
+	if err != nil {
+		return
+	}
+	todos, err := decodeTodoRows(b)
+	if err != nil {
+		slog.Warn("opencode-web SSE: malformed todo.updated replacement ignored", "session", sessionID, "error", err)
+		return
+	}
+	s.agent.rememberTodos(sessionID, todos)
+	s.emit(core.Event{Type: core.EventPlan, SessionID: sessionID, Plan: todos})
+}
+
 // noteUserPrompt records user prompt text into the live stream. isDelta=true
 // appends; false replaces/grows from a snapshot. Emits EventUserMessage with
 // the accumulated text and EventTurnStarted once per message id.
@@ -798,11 +957,26 @@ func (s *sseSubscriber) emitResultOnce(sessionID string) {
 		s.stateMu.Unlock()
 		return
 	}
-	s.completed[sessionID] = true
 	turnID := s.activeTurns[sessionID]
+	terminal := s.lastTerminalError[sessionID]
+	if turnID == "" && terminal == "" {
+		// Fresh-session idle: POST /session makes the serve broadcast the new
+		// session's initial session.updated/session.status idle, and that
+		// creation broadcast races the first prompt_async through the same SSE
+		// filter — it can arrive before the user echo arms a turn. A bare idle
+		// with no armed turn and no terminal error completes nothing: emitting
+		// EventResult here fakes a healthy turn terminal, which exits the
+		// bridge relay (opencode-web does not survive turn boundaries) and
+		// kills the live feed for the whole first turn (real device
+		// 2026-08-20: input flips completed instantly, the reply lands as one
+		// bulk patch seconds later). Leave `completed` unset so the real
+		// turn-end idle still emits exactly once.
+		s.stateMu.Unlock()
+		return
+	}
+	s.completed[sessionID] = true
 	hadOutput := turnID != "" && s.turnSawAssistantOutput[turnID]
 	delete(s.turnSawAssistantOutput, turnID)
-	terminal := s.lastTerminalError[sessionID]
 	delete(s.lastTerminalError, sessionID)
 	s.stateMu.Unlock()
 	if terminal != "" {
@@ -941,6 +1115,20 @@ func (s *sseSubscriber) owningTurnID(sessionID, messageID string) string {
 	return messageID
 }
 
+// skipLiveReasoning applies the canonical E2 verdict WITHOUT poisoning the
+// turn: populated reasoning on live carriers stays untranslated — no
+// thinking stream, no answer-text folding, no wire error — until a
+// same-version direct-SSE capture exists (§6.3). It must never surface as
+// core.EventError: go-bridge settles any non-claude EventError as
+// turn_error and tears relayEvents down mid-stream, which killed every
+// reasoning-model turn on owner devices (真机 2026-08-21: 正文只同步半截、
+// 会话卡执行中). The reasoning itself remains available through the E2b
+// HTTP-history hydrate path.
+func (s *sseSubscriber) skipLiveReasoning(sessionID, messageID, partID string) {
+	slog.Debug("opencode-web SSE: populated live reasoning skipped untranslated (E2; non-fatal)",
+		"sessionID", sessionID, "messageID", messageID, "partID", partID)
+}
+
 func (s *sseSubscriber) kindForPart(sessionID, messageID, partID, field string) string {
 	if field == "reasoning" {
 		return "reasoning"
@@ -1013,8 +1201,8 @@ func partCacheKey(sessionID, messageID, partID, kind string) string {
 
 func isServerEventType(eventType string) bool {
 	switch eventType {
-	case "message.updated", "message.part.delta", "message.part.updated", "session.status", "session.updated", "session.error", "session.idle", "todo.updated", "permission.asked",
-		"server.connected", "session.created", "session.deleted", "message.removed", "message.part.removed", "session.diff":
+	case "message.updated", "message.part.delta", "message.part.updated", "session.status", "session.updated", "session.error", "session.idle", "todo.updated", "permission.asked", "question.asked", "question.replied", "question.rejected",
+		"server.connected", "session.created", "session.deleted", "project.updated", "catalog.updated", "message.removed", "message.part.removed", "session.diff":
 		return true
 	default:
 		return false
@@ -1133,12 +1321,6 @@ func extractToolInput(state map[string]any) string {
 }
 
 func (s *sseSubscriber) emit(ev core.Event) {
-	if s.filterActive.Load() {
-		f, _ := s.sessionFilter.Load().(string)
-		if f == "" || ev.SessionID != f {
-			return
-		}
-	}
 	switch ev.Type {
 	case core.EventText, core.EventTextReplace, core.EventThinking, core.EventToolUse, core.EventToolResult:
 		if ev.TurnID != "" {
@@ -1146,6 +1328,39 @@ func (s *sseSubscriber) emit(ev core.Event) {
 			s.turnSawAssistantOutput[ev.TurnID] = true
 			s.stateMu.Unlock()
 		}
+	}
+	// C4 §6.5 single timeline-ingest owner (audit-008 W1.1): a session with a
+	// registered route delivers EXCLUSIVELY through that route — its relay is
+	// the one deltaBatcher/EventPublisher/Kernel ingest owner. Passive taps
+	// never see routed sessions' events, so the same fact cannot be ingested
+	// twice. Passive taps DO receive unrouted sessions' events (external-turn
+	// observation for subscribed clients; the bridge gates unopened+unsub-
+	// scribable sessions to catalog-only). All sends are non-blocking.
+	routed := false
+	if ev.SessionID != "" {
+		s.agent.routesMu.Lock()
+		if chans, ok := s.agent.routes[ev.SessionID]; ok {
+			routed = true
+			for ch := range chans {
+				select {
+				case ch <- ev:
+				default:
+					slog.Debug("opencode-web SSE: route full, event dropped", "type", ev.Type, "session", ev.SessionID)
+				}
+			}
+		}
+		s.agent.routesMu.Unlock()
+	}
+	if !routed {
+		s.agent.passiveMu.Lock()
+		for ch := range s.agent.passive {
+			select {
+			case ch <- ev:
+			default:
+				slog.Debug("opencode-web SSE: passive tap full, event dropped", "type", ev.Type)
+			}
+		}
+		s.agent.passiveMu.Unlock()
 	}
 	select {
 	case s.events <- ev:
@@ -1188,21 +1403,114 @@ func (s *sseSubscriber) Close() error {
 }
 
 // Subscribe implements core.EventSubscriber for the passive (旁观) stream —
-// every session on the serve, including external web turns.
+// every session on the serve, including external web turns (E3's observation
+// path). It TAPS the same single global subscriber (§6.5: exactly one SSE
+// connection per backend instance); it never dials a second stream.
 func (a *Agent) Subscribe(ctx context.Context) (<-chan core.Event, error) {
 	c, err := a.clientFor(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("opencode-web SSE subscription unavailable: %w", err)
 	}
-	sub := newSSESubscriber(ctx, a, c)
+	if _, err := a.acquireGlobalSubscriber(c); err != nil {
+		return nil, err
+	}
+	tap := make(chan core.Event, 128)
+	a.passiveMu.Lock()
+	if a.passive == nil {
+		a.passive = make(map[chan core.Event]struct{})
+	}
+	a.passive[tap] = struct{}{}
+	a.passiveMu.Unlock()
+	go func() {
+		<-ctx.Done()
+		a.passiveMu.Lock()
+		delete(a.passive, tap)
+		a.passiveMu.Unlock()
+		close(tap)
+		a.releaseGlobalSubscriber()
+	}()
+	return tap, nil
+}
+
+// acquireGlobalSubscriber returns the ONE backend-instance subscriber,
+// dialing it on first use. Refcounted: the last release tears the stream
+// down. The subscriber rides the agent background context — it must outlive
+// any single session's context.
+func (a *Agent) acquireGlobalSubscriber(c *Client) (*sseSubscriber, error) {
+	a.globalSubMu.Lock()
+	defer a.globalSubMu.Unlock()
+	if a.globalSub != nil && a.globalSub.ctx.Err() == nil {
+		a.globalSubRefs++
+		return a.globalSub, nil
+	}
+	sub := newSSESubscriber(a.bgCtx, a, c)
 	if err := sub.connect(); err != nil {
 		return nil, err
 	}
-	go func() {
-		<-sub.ctx.Done()
-		_ = sub.Close()
-	}()
-	return sub.events, nil
+	a.globalSub = sub
+	a.globalSubRefs = 1
+	return sub, nil
+}
+
+func (a *Agent) releaseGlobalSubscriber() {
+	a.globalSubMu.Lock()
+	sub := a.globalSub
+	if sub == nil {
+		a.globalSubMu.Unlock()
+		return
+	}
+	a.globalSubRefs--
+	if a.globalSubRefs > 0 {
+		a.globalSubMu.Unlock()
+		return
+	}
+	a.globalSub = nil
+	a.globalSubRefs = 0
+	a.globalSubMu.Unlock()
+	slog.Info("opencode-web SSE: last holder released, tearing stream")
+	_ = sub.Close()
+}
+
+// registerRoute entitles one session channel to the session's normalized
+// events. Registering the same channel under multiple ids (resume → create)
+// is fine; unregisterRoute removes every binding.
+// HasPassiveTaps reports whether at least one passive observation tap is
+// attached to the global subscriber (full-path test determinism probe: the
+// directive-009 reproducers wait for the bridge's passive loop to attach
+// before injecting wire frames).
+func (a *Agent) HasPassiveTaps() bool {
+	a.passiveMu.Lock()
+	defer a.passiveMu.Unlock()
+	return len(a.passive) > 0
+}
+
+func (a *Agent) registerRoute(sessionID string, ch chan core.Event) {
+	if sessionID == "" || ch == nil {
+		return
+	}
+	a.routesMu.Lock()
+	defer a.routesMu.Unlock()
+	if a.routes == nil {
+		a.routes = make(map[string]map[chan core.Event]struct{})
+	}
+	if a.routes[sessionID] == nil {
+		a.routes[sessionID] = make(map[chan core.Event]struct{})
+	}
+	a.routes[sessionID][ch] = struct{}{}
+}
+
+func (a *Agent) unregisterRoute(sessionID string, ch chan core.Event) {
+	if sessionID == "" || ch == nil {
+		return
+	}
+	a.routesMu.Lock()
+	defer a.routesMu.Unlock()
+	if chans, ok := a.routes[sessionID]; ok {
+		delete(chans, ch)
+		if len(chans) == 0 {
+			delete(a.routes, sessionID)
+		}
+	}
 }
 
 var _ core.EventSubscriber = (*Agent)(nil)

@@ -67,6 +67,34 @@ type SessionPermissionResponder interface {
 	RespondSessionPermission(ctx context.Context, sessionID, requestID string, result PermissionResult) error
 }
 
+// PromptOptions carries the per-request turn options that ride a single
+// prompt atomically (canonical §6.11.1: session-scoped, never an agent-global
+// mutable selection that can race concurrent sessions). Empty fields mean
+// "no explicit choice for that axis" and the implementing backend resolves
+// the value itself (e.g. opencode-web applies the official §6.6 order).
+type PromptOptions struct {
+	Agent      string // official agent id, "" = backend default
+	ProviderID string // explicit model provider, "" = backend resolves
+	ModelID    string // explicit model id, "" = backend resolves
+	Variant    string // model-specific variant key, "" = unset; NOT reasoningEffort
+}
+
+// PromptOptionsSender is an optional AgentSession interface for backends that
+// carry agent/provider/model/variant per request instead of mutating
+// agent-global state. The handler calls SendWithOptions exactly once per
+// request; backends without it keep AgentSession.Send semantics.
+type PromptOptionsSender interface {
+	SendWithOptions(prompt string, images []ImageAttachment, files []FileAttachment, opts PromptOptions) error
+}
+
+// PromptOptionsAgent is the agent-level companion to PromptOptionsSender: a
+// backend whose sessions accept per-request options. The go-bridge send path
+// uses it to skip agent-global model mutation and dispatch the request's
+// PromptOptions through SendWithOptions instead (canonical §6.11.1 item 5).
+type PromptOptionsAgent interface {
+	UsesPromptOptions() bool
+}
+
 // PermissionResult represents the user's decision on a permission request.
 type PermissionResult struct {
 	Behavior     string         `json:"behavior"`               // "allow" or "deny"
@@ -348,6 +376,9 @@ type ModelOption struct {
 	Name  string // model identifier passed to CLI
 	Desc  string // short description (display_name or empty)
 	Alias string // optional short alias for the /model command (e.g. "codex" for "gpt-5.3-codex")
+	// Variants (canonical §6.11.1 additive revision, opencode-web): the live
+	// model-specific variant keys from /provider. nil/empty = no selector.
+	Variants []string
 }
 
 // UsageReporter is an optional interface for agents that can report account or
@@ -532,6 +563,15 @@ type SkillProvider interface {
 // SessionDeleter is an optional interface for agents that support deleting sessions.
 type SessionDeleter interface {
 	DeleteSession(ctx context.Context, sessionID string) error
+}
+
+// SessionInfoFetcher is an optional single-session read. Backends with a real
+// by-id endpoint implement it so the bridge's get_session does not depend on
+// the directory-scoped list scan — archived sessions can be excluded from the
+// default list while remaining individually readable (live 1.18.18), and a
+// list-scan also misses sessions outside the current work dir.
+type SessionInfoFetcher interface {
+	FetchSessionInfo(ctx context.Context, sessionID string) (*AgentSessionInfo, error)
 }
 
 // SessionRenamer is an optional interface for agents that support renaming sessions.

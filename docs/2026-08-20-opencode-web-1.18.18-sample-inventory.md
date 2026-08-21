@@ -1,0 +1,138 @@
+# OpenCode 1.18.18 sample inventory (Gate A)
+
+- Date: 2026-08-20
+- Runtime: installed `/opt/homebrew/bin/opencode` = **1.18.18**
+- Official source: `/Users/jacklee/Projects/opencode` commit **2cba7e227d** (`packages/opencode/package.json` = 1.18.18)
+- Capture target: isolated XDG/`HOME` `opencode serve --pure` + local openai-compatible mock
+- Forbidden: owner managed serve write (`127.0.0.1:4096`), real provider accounts, guessed JSON, product-code patches in this gate
+- Sample pack: `agent/opencode-web/testdata/official-1.18.18/`
+
+Status values:
+
+- **pending**: source cited; live capture not yet written
+- **captured**: sanitized request/response/SSE present and replayable
+- **blocked**: cannot be captured safely without owner authorization or an official local hook; no guessed fixture
+- **out-of-scope**: owner removed the capability from advertisement (none yet)
+
+Bridge mapping in this document is a **decision slot**, not an implementation. Product code stays frozen until Gates A, B, and S exit.
+
+## 0.1 Post-Gate-A evidence queue
+
+Gate A's A1–A10 pack is complete, but later capability review exposed seven physical shapes that official source alone cannot prove. These rows are evidence assignments only. The capture agent records and validates raw behavior; it does not choose bridge mappings, SSV2 ownership, capability activation, or product fallbacks. Those decisions live only in the canonical convergence design.
+
+| ID | Surface | Required isolated capture | Independent checker must prove | Status |
+|---|---|---|---|---|
+| E1 | selected variant | admitted prompt with a genuinely non-empty variant, followed through SSE and reload | exact request field/value, omission when unset, persisted/reload behavior | `captured` (variant persisted per-message on the user message model; unset follow-up omits it) |
+| E2 | reasoning | deterministic provider produces populated reasoning, observed in direct SSE and message reload | exact part keys, delta/update ordering, terminal persistence, separation from answer text | `blocked` — official serve + @ai-sdk/openai-compatible fails reasoning-bearing streams (AI_APICallError socket closed → busy/retry loop, no terminal); two deterministic strategies archived, no reasoning part ever materialized |
+| E3 | external official-Web turn | second client creates/sends while the capture client observes global SSE through terminal and reload | directory/session correlation, first/last event, no polling substitution, persisted convergence | `captured` (capture client read only after terminal: exactly two GETs; external turn observed via global SSE incl. live deltas + terminal) |
+| E4 | providers | `GET /provider` from isolated 1.18.18 with deterministic configured providers | exact top-level/row/model shapes, connected set, malformed-shape negative mutations | `captured` (top-level {all[],default{},connected[]}; row {id,name,source,env,options,models}; raw withheld by frozen leak policy — checker derives from shape-preserving sanitized) |
+| E5 | configured default model | configured valid, invalid, and absent default against the same provider catalog | exact source/field and behavior in all three cases; first-connected is not accepted as proof | `captured` (/provider.default identical across valid/invalid/absent — config-independent first-model map; config model flows verbatim into the no-model prompt: valid→echo, invalid→nonexistent still 204, absent→echo; single-model catalog limitation recorded) |
+| E6 | rename | rename one captured session and observe HTTP, list, by-ID, and SSE | exact PATCH body/response plus metadata convergence and failure case | `captured` (PATCH {title} → 200 Session.Info renamed; list/by-ID converged; unknown id → 404 NotFoundError) |
+| E7 | delete | delete one captured session and observe HTTP, list, by-ID, and SSE | exact response, subsequent absence/404, deletion invalidation, and failure case | `captured` (DELETE → 200 `true`; by-ID 404; list absence; second DELETE 404 NotFoundError; `session.deleted` NOT observed in the capture window — recorded as an honest negative) |
+| WP-FIX | workspace project evidence ownership | recapture or normalize WP so `http[].response` contains the actual `/project` payload | derive every asserted project fact only from raw HTTP response; fail if a duplicate summary disagrees | `captured` (WP-FIX applied: every fact re-derived from http[] status+response; summary copies cross-checked; 6 destructive mutations caught) |
+
+For E1–E7 and WP-FIX:
+
+1. use isolated `HOME`/XDG, ports 4398/4399, the pinned 1.18.18 checkout, and deterministic local providers only;
+2. never write to the owner's managed `127.0.0.1:4096` serve;
+3. archive raw plus sanitized HTTP/SSE/reload material with leak scans;
+4. derive status independently from raw fields; `meta.captureStatus`, summaries, or implementation fixtures are not evidence;
+5. include destructive self-tests that mutate each claimed field/order and must downgrade or fail;
+6. mark a genuinely unavailable path `BLOCKED` with the attempted method—do not create guessed JSON or a fake server substitute;
+7. make no product translator, protocol, WireDescriptor, capability, or iOS production change in the evidence commit.
+
+After a row passes, its sample is still not implementation authorization. The design owner first writes the observed shape and mapping into the matching §6 dossier of `2026-08-20-opencode-web-source-first-convergence-plan.md`.
+
+### 0.1.1 Independent audit correction queue
+
+Independent audit-006 accepts E2/E3/E6/E7 and WP for canonical decisions, accepts E4 only for sanitized key/type semantics, and rejects the claim that E1/E4/E5 fully close catalog selection. One combined provider sandbox round remains:
+
+| ID | Capture requirement | Status |
+|---|---|---|
+| E1b | non-empty live model `variants` catalog → official Web selection → prompt → persisted user-message variant | `pending` |
+| E4b | raw + sanitized provider pair with an explicitly non-secret fixture credential; deterministic key/type/order equivalence and value-class-only redaction | `pending` |
+| E5b | real `GET /config` valid/invalid/absent responses plus a two-model catalog separating provider-default from first-model fallback | `pending` |
+
+These are evidence corrections, not new product features. If supported configuration cannot produce E1b, mark it blocked and keep variant UI/protocol mapping out of the first product batch.
+
+## 0.2 Final provider evidence correction (directive-007)
+
+| ID | Surface | Captured raw facts (checker-derived) | Status |
+|---|---|---|---|
+| E1b | non-empty catalog variant | config-declared `models.echo.variants {high,low}` surfaces in raw `/provider` (merge path provider.ts:1671-1682); prompt with REAL key `high` admitted 204 and persisted `variant:"high"` on the user message model; unset control's latest user message omits variant; unlisted keys are not options | `captured` |
+| E4b | provider raw provenance | raw+sanitized pair archived (sentinel credential `fixture-not-a-secret`); top-level `{all,default,connected}`, row/model key/type/order derived from raw; sanitized≡raw structurally (only declared value classes differ); credential is sentinel-only | `captured` |
+| E5b | configured/default/fallback | three isolated configs: `/config.model` present `localmock/alpha` (valid, in catalog) / present `localmock/nonexistent` (invalid, NOT in catalog) / key ABSENT; `/provider.default=localmock/zeta` (sort-first, provider.ts:2019-2025 priority→latest→id-DESC ranking, NOT alphabetical) differs from configured default; no-model prompt resolved alpha / nonexistent (verbatim passthrough) / zeta (=provider default) — serve-side fallback order distinguishable from raw inputs; `resolveDefaultModel` branches computable per mode | `captured` |
+
+Checkers: `harness/check_final_provider_evidence.py` (+14 destructive self-test mutations).
+
+## 0. Official Web transport (shared by all rows)
+
+| Layer | 1.18.18 source |
+|---|---|
+| v1 Web event subscribe | `packages/app/src/context/server-sdk.tsx` `kind === "v1"` → `eventSdk.global.event()` (legacy envelope has `payload` + `directory`) |
+| v1 Web **skips nested sync** | `server-sdk.tsx:284` `if (legacy && event.payload.type === "sync") continue` |
+| v1 prompt | `packages/app/src/utils/server-compat.ts:200-230` `legacy().session.promptAsync({ messageID, agent, model, variant, parts })` |
+| v1 create | `server-compat.ts:163-169` create reduces to `session.create({ directory })` — no model/agent in body |
+| v1 list roots | `packages/app/src/context/global-sync/session-load.ts:19-26` `session.list({ directory, roots: true, limit })` |
+| event reducer | `packages/app/src/context/global-sync/event-reducer.ts` `applyDirectoryEvent` / `SESSION_CONTENT_EVENTS` |
+| model fallback | `packages/app/src/pages/session/composer/prompt-model-selection.ts:39-41` current → agent model → configured default → recent → connected fallback |
+| HTTP prompt schema | `packages/opencode/src/session/prompt.ts:1499-1520` `PromptInput`; route `POST /session/:id/prompt_async` in `httpapi/groups/session.ts:96,329-341` |
+| HTTP list schema | `httpapi/groups/session.ts:30-38` `ListQuery` (`roots`, `limit`, `directory` via workspace routing) |
+| SSE encode | `httpapi/handlers/event.ts` instance `/event`; v1 Web uses **global** `/global/event` |
+
+## 1. P0 scenario matrix
+
+| # | Scenario | Official UI | Official server/schema/reducer | Capture command | Sanitized sample | Capture status | Bridge mapping (decision only) |
+|---|---|---|---|---|---|---|---|
+| A1 | create + first healthy text | `packages/app/src/utils/server-compat.ts:163-169` create; `packages/app/src/utils/server-compat.ts:200-230` `promptAsync` with client `messageID` + text part | `packages/opencode/src/server/routes/instance/httpapi/handlers/session.ts` `SessionHttpApi.create` + `promptAsync`; `packages/opencode/src/session/prompt.ts` `PromptInput`; reducer `packages/app/src/context/global-sync/event-reducer.ts` `session.created` / `message.updated` / `message.part.delta` / `session.status` | `harness/capture.py --scenario a1` | `samples/a1-first-healthy-text.sanitized.json` | captured | Invocation must send `messageID` + `agent` + `model{providerID,modelID}` + text part. Observation uses **direct** v1 payload; nested `sync` is ignored by official Web on 1.18.18. Terminal = captured idle/error, never inferred. Direct vs nested `sync` is pre-Kernel adapter normalization, not an iOS writer. Variant omitted when unset, matching official JSON omit. |
+| A2 | follow-up | `packages/app/src/utils/server-compat.ts:200-230` same `promptAsync` path; optimistic echo is client-side (`promptAsync` returns synthetic `{id, sessionID, type:"user"}` then SSE reconciles) | `packages/opencode/src/session/prompt.ts` `PromptInput`; persisted user message must reuse client `messageID` | `harness/capture.py --scenario a2` | `samples/a2-follow-up.sanitized.json` | captured | Stable `messageID` correlation only. Official Web optimistic echo is client-local UI, not a server event, and must not become an iOS second writer. Nested `sync` is evidence-only. |
+| A3 | provider rejection/retry | `packages/app/src/context/global-sync/event-reducer.ts` renders `session.status` retry + assistant `info.error` via `session.status` / `message.updated` | `packages/opencode/src/server/routes/instance/httpapi/handlers/session.ts:316-323` `promptAsync` fork logs `prompt_async failed` then `Session.Event.Error`; status machine in `packages/opencode/src/session/status.ts`; retry policy `packages/opencode/src/session/retry.ts` | `harness/capture.py --scenario a3` | `samples/a3-provider-error.sanitized.json` | captured | Mock: two HTTP 500 then one HTTP 400. Live seq busy → retry → busy → retry → busy → idle. Assistant persists `APIError` statusCode 400 isRetryable false. Invalid-model 400 is still not this sample. |
+| A4 | abort | `packages/app/src/utils/server-compat.ts:197-198` `legacy().session.abort` via `session.interrupt` | `POST /session/:id/abort` (`packages/opencode/src/server/routes/instance/httpapi/groups/session.ts` `SessionPaths.abort`); `packages/opencode/src/session/prompt.ts` `SessionPrompt.cancel` | `harness/capture.py --scenario a4` | `samples/a4-abort.sanitized.json` | captured | Live 1.18.18: abort HTTP 200 true; assistant persists with `MessageAbortedError`/`Aborted`, finish unset, partial text; `session.error` then idle; `/session/status` no longer lists the session. Do not synthesize a healthy completed assistant. |
+| A5 | SSE disconnect/reconnect | `packages/app/src/context/server-sdk.tsx:268-308` reconnect loop (`RECONNECT_DELAY_MS`) after stream error; still skips `sync` | v1 Web uses `GET /global/event`; instance encode in `packages/opencode/src/server/routes/instance/httpapi/handlers/event.ts`; no server-side replay buffer assumed until captured | `harness/capture.py --scenario a5` | `samples/a5-sse-reconnect.sanitized.json` | captured | Disconnect during busy+partial; `/session/status` still busy. Second SSE first frames: `server.connected` then live `message.part.delta` (continuation, not a snapshot replay). Terminal idle; reload assistant finish=stop. Nested sync evidence-only. |
+| A6 | permission | `packages/app/src/pages/session/composer/session-permission-dock.tsx`; v1 reply `packages/app/src/utils/server-compat.ts:496-503` `permission.respond({sessionID, permissionID, response})` | Schema `packages/schema/src/v1/permission.ts` (`once` / `always` / `reject`); list `GET /permission`; deprecated session route `POST /session/:id/permissions/:permissionID`; newer `POST /permission/:requestID/reply`; events `permission.asked` / `permission.replied`; reducer cases in `packages/app/src/context/global-sync/event-reducer.ts` | `harness/capture.py --scenario a6` | `samples/a6-permission.sanitized.json` | captured | Live 1.18.18 `external_directory` request keys: id, sessionID, permission, patterns, metadata{filepath,parentDir}, always, tool. once/always/reject all asked. always then same pattern `askedAgain=false`. reject leaves assistant finish=tool-calls, not a healthy stop. |
+| A7 | question | `packages/app/src/pages/session/composer/session-question-dock.tsx:226-227` `sdk().api.question.reply({ sessionID, requestID, answers })`; v1 `packages/app/src/utils/server-compat.ts:507-515` `answers: string[][]` | Tool `packages/opencode/src/tool/question.ts`; schema `packages/schema/src/v1/question.ts`; `GET /question`; `POST /question/:requestID/reply` body `{answers: string[][]}`; `POST /question/:requestID/reject`; events `question.asked/replied/rejected` | `harness/capture.py --scenario a7` | `samples/a7-question.sanitized.json` | captured | Request keys id/sessionID/questions/tool. Reply `{answers:[["red"]]}` then `question.replied`. Reject then `question.rejected`. No `question_resolved`. Distinct from permission. |
+| A8 | todos | `packages/app/src/pages/session.tsx` loads `sync().session.todo(id)`; dock `packages/app/src/pages/session/composer/session-todo-dock.tsx`; reducer `todo.updated` | Tool `todowrite` `packages/opencode/src/tool/todo.ts` (asks `todowrite` permission then `Todo.update`); persist `packages/opencode/src/session/todo.ts` rows are `{content,status,priority}` **no id**; `GET /session/:id/todo`; event `todo.updated` | `harness/capture.py --scenario a8` | `samples/a8-todos.sanitized.json` | captured | Live items keys exactly content/priority/status, no id. Second todowrite replaces statuses pending/in_progress → completed. Control-plane only; stable identity is Gate B. |
+| A9 | prompt parts | `packages/app/src/utils/server-compat.ts:207-228` maps text / file (mime+url+filename, optional `source` mention) / agent (`type: agent`, `name`, optional mention `source`) | `packages/opencode/src/session/prompt.ts` `PromptInput.parts` union: TextPartInput / FilePartInput / AgentPartInput / SubtaskPartInput | `harness/capture.py --scenario a9` | `samples/a9-prompt-parts.sanitized.json` | captured | prompt_async 204 for text, file, file-mention, image/png, and agent; persisted user parts keep those types (file mention and agent keep `source`). Provider mock received **text-only** OpenAI messages (`hasImage=false`, `hasFile=false`) — persist does not require a vision provider. |
+| A10 | session listing | `packages/app/src/context/global-sync/session-load.ts:5-26` roots + limit; archived sessions dropped from home list by reducer `session.updated` when `time.archived` set (`packages/app/src/context/global-sync/event-reducer.ts:149-161`) | `packages/opencode/src/server/routes/instance/httpapi/groups/session.ts` `ListQuery` `roots/limit/start/search/scope/path`; `GET /session/:id`; `GET /session/:id/children`; archive via `PATCH` `time.archived` | `harness/capture.py --scenario a10` | `samples/a10-session-listing.sanitized.json` | captured | API `roots=true` omits children; archived rows remain in list and remain GET-by-id; two directories do not leak ids. Official Web UI hides archived via reducer. CordCode multi-directory aggregation and archive visibility remain Gate B. |
+| WP | workspace.project registry (C2 pre-sample, directive-003 Phase 0) | `packages/app/src/utils/server-compat.ts:304` `legacy().project.list()` (`data ?? []`) | `packages/opencode/src/server/routes/instance/httpapi/handlers/project.ts:15-17` list → `Project.list`; `packages/opencode/src/project/project.ts:336` list, `:35-56` fromRow, `:217` global pseudo-project `worktree="/"`, `:243-244` non-worktree directory folds into sandboxes; `packages/core/src/project.ts:105-119` git rootCommits/remote derive project id | `harness/capture.py --scenario wp` | `samples/wp-workspace-project.sanitized.json` | captured | WP-FIX stores every GET `/project` status+response in `http[]`; the checker derives the bare array, required id/worktree, growth and deleted-still-registered facts only from raw HTTP, cross-checks summaries, and catches six destructive mutations. Server registry remains truth; missing-worktree filtering is the documented CordCode visibility overlay. |
+
+## 2. Shared capture contract
+
+Each captured sample file must contain:
+
+1. `meta.opencodeVersion` = `1.18.18`
+2. `meta.sourceCommit` = `2cba7e227d`
+3. `meta.scenario` = `A1`…`A10`
+4. `source.ui` / `source.server` citations (copied from this table)
+5. `http[]` raw method/path/query/headers-names/body/status/response (secrets stripped)
+6. `sse[]` raw parsed frames in arrival order, including `payload.type` (and nested `sync` if present, even if Web ignores it)
+7. `reload[]` GET after terminal (messages, session, pending permission/question/todo as applicable)
+8. `sanitization` note listing replaced value classes (ids, paths, timestamps)
+
+Sanitization keeps **all keys** and part/event **types**. Values replaced: session/message/part/permission/question IDs, absolute directories, timestamps, auth headers.
+
+## 3. Current code vs this inventory (not implementation work)
+
+Checked at HEAD `299337c` against `agent/opencode-web`:
+
+- `session.go` create body is `{}` + directory header — matches official v1 create.
+- `session.go` prompt body is **only** `{parts:[{type:text,text}], model:{providerID,modelID}}` — missing official `messageID`, `agent`, `variant`, file/agent parts.
+- `events.go` unwraps payload and **ignores `sync`**. Official 1.18.18 Web also skips `sync` (`server-sdk.tsx:284`). The missing evidence is a healthy trace proving direct payloads are sufficient, plus reconnect/duplicate behavior.
+- Questions and todos now have 1.18.18 populated traces (`A7`, `A8`). Permissions have a fresh once/always/reject trace (`A6`). Product advertisement is still Gate B/C; this pack is evidence only.
+
+## 4. Blockers already known (do not fill with guesses)
+
+| Item | Why it may block | Required to unblock |
+|---|---|---|
+| A3 full retry ladder | Resolved in this pack: two target-session `retry` then terminal `APIError` 400 `isRetryable=false`. Longer 3/8/16s backoff is not required once the non-retryable terminal is captured. | — |
+| A7 / A8 | Resolved: localmock `question` / `todowrite` tool names are accepted by 1.18.18. A8 item shape is `{content,status,priority}` with no `id`. | — |
+| A9 image/file bytes | Resolved for persist: `FilePartInput` accepted without a vision model. Mock conversion is text-only (`hasImage=false`). | A vision-faithful provider round trip is not in this pack; persist evidence is sufficient for Gate A. |
+| v2 | No live v2 serve. | Separate generation pack. Fail closed. |
+
+## 5. This-round closed loop
+
+1. Freeze this inventory (source citations).
+2. Bring up isolated harness (no :4096 writes).
+3. Capture A1–A10 in isolated sandboxes. Independent checkers derive from `http`/`sse`/`reload` (A5 uses `sseBefore`/`sseAfterReconnect`); `meta.captureStatus` is never evidence.
+4. Any row still pending after the attempt is **blocked**, not faked. This pack: A1–A10 `captured`, none `blocked`.
+5. Gate B starts only after owner review of this pack. Do not enter Gate B/S/C from this capture round.

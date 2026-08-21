@@ -3,6 +3,8 @@ package opencodeweb
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,7 +19,10 @@ import (
 // x-opencode-directory 头按目录返回；不带头的响应是一份陈旧的百条切片
 // （实测最新条目停在 7 月 6 日，当天新建的会话完全不在里面）。官方桌面端
 // （@opencode-ai/desktop，Electron——本质是 web 程序）按「已打开目录」逐目录
-// 拉列表；/project 就是 serve 侧的工程注册表（桌面端的目录选择器同源）。
+// 拉列表；/project 就是 serve 侧的工程注册表（目录选择器同源）。Desktop 关掉
+// 某个 tab 并不会从 GET /project 删除该行（WP：deleted-still-registered）；
+// 「当前打开的 6 个」是 Desktop 本地窗口态，不是这份注册表。CordCode 列表
+// 跟注册表，不跟 Desktop tab。
 // 因此本 backend 的会话目录发现/分组以 /project 为准，不再依赖全局 /session。
 //
 // 评审 S2 活体：元素是 {id, worktree, vcs, time, sandboxes}——directory 建议
@@ -44,18 +49,45 @@ func (a *Agent) fetchProjects(ctx context.Context, c *Client) ([]ocwProjectEntry
 	if err != nil {
 		return nil, err
 	}
-	items, err := decodeListPayload(raw)
-	if err != nil {
-		return nil, err
+	return decodeProjectRegistry(raw)
+}
+
+// decodeProjectRegistry parses the verified 1.18.18 GET /project response:
+// a BARE ARRAY of row objects (WP-FIX sample-verified at 4a215b0 — three real
+// responses, rows {id, worktree, time, sandboxes, vcs?}). Any other top level
+// (envelope, null, scalar, object) fails closed — /project never ships a v2
+// {data:[…]} shape, so decodeListPayload's envelope tolerance does not apply
+// here. Every row must be a JSON object whose required id and worktree are
+// non-empty strings; wrong types, nulls, and omissions fail the whole
+// registry instead of being trimmed (a silently shortened registry would
+// shrink the OD-2 aggregate while looking healthy). Unknown extra fields
+// (vcs, time, sandboxes…) are allowed and ignored. worktree "/" is a valid
+// row — the serve's global pseudo-project — and is filtered only later by
+// the CordCode visibility overlay, never by this decoder.
+func decodeProjectRegistry(raw []byte) ([]ocwProjectEntry, error) {
+	trimmed := trimSpaceBytes(raw)
+	if len(trimmed) == 0 || trimmed[0] != '[' {
+		return nil, fmt.Errorf("opencode-web: project registry must be a bare array (generation-118 verified shape), got: %s", truncateForError(string(raw)))
 	}
-	out := make([]ocwProjectEntry, 0, len(items))
-	for _, item := range items {
-		var entry ocwProjectEntry
-		if err := json.Unmarshal(item, &entry); err != nil {
-			continue
+	var rows []json.RawMessage
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return nil, fmt.Errorf("opencode-web: project registry array malformed: %w", err)
+	}
+	out := make([]ocwProjectEntry, 0, len(rows))
+	for i, row := range rows {
+		rowBytes := trimSpaceBytes(row)
+		if len(rowBytes) == 0 || rowBytes[0] != '{' {
+			return nil, fmt.Errorf("opencode-web: project registry row %d must be an object, got: %s", i, truncateForError(string(row)))
 		}
-		if entry.ID == "" || entry.Worktree == "" {
-			continue
+		var entry ocwProjectEntry
+		if err := json.Unmarshal(row, &entry); err != nil {
+			return nil, fmt.Errorf("opencode-web: project registry row %d malformed: %w", i, err)
+		}
+		if entry.ID == "" {
+			return nil, fmt.Errorf("opencode-web: project registry row %d missing required id", i)
+		}
+		if entry.Worktree == "" {
+			return nil, fmt.Errorf("opencode-web: project registry row %d missing required worktree", i)
 		}
 		out = append(out, entry)
 	}
@@ -80,35 +112,67 @@ func visibleProjectDir(dir string) (string, bool) {
 	return clean, true
 }
 
-// projectDirectories returns the deduped serve-truth worktree list, cached
-// briefly so the discovery poller does not hammer /project. On a transient
-// fetch error the last good view is kept rather than flashing an empty
-// catalog.
-func (a *Agent) projectDirectories(ctx context.Context) []string {
+// projectWorktreeDirs returns the deduped serve-truth worktree list used by
+// the OD-2 global aggregation, cached briefly on SUCCESS only (TTL + SSE
+// catalog-signal invalidation). A /project fetch/decode failure is returned
+// as an error — a stale cached view must never impersonate this round's
+// registry (directive-003). An empty registry is an empty list, not a
+// fallback target. The missing-worktree visibility overlay (visibleProjectDir)
+// applies HERE only: / is the serve's global pseudo-project, non-absolute
+// paths, duplicates, and worktrees that no longer exist on disk are not
+// listable CordCode workspaces. This is a CordCode catalog visibility/safety
+// overlay — the serve remains the registry fact owner and rows stay on the
+// server; nothing is deleted or rewritten server-side.
+func (a *Agent) projectWorktreeDirs(ctx context.Context, c *Client) ([]string, error) {
 	a.projectsMu.Lock()
 	if a.projectDirs != nil && time.Since(a.projectDirsAt) < projectCacheTTL {
 		cached := append([]string(nil), a.projectDirs...)
 		a.projectsMu.Unlock()
-		return cached
+		return cached, nil
 	}
 	a.projectsMu.Unlock()
 
-	c, err := a.clientFor(ctx)
+	dirs, source, err := a.loadHomeProjectDirs(ctx, c)
 	if err != nil {
-		return nil
+		return nil, err
+	}
+	slog.Info("opencode-web: home project list", "source", source, "count", len(dirs), "url", c.baseURL)
+
+	a.projectsMu.Lock()
+	a.projectDirs = dirs
+	a.projectDirsAt = time.Now()
+	a.projectsMu.Unlock()
+	return append([]string(nil), dirs...), nil
+}
+
+// loadHomeProjectDirs prefers Desktop's opened-tab persist (official home
+// sidebar). GET /project is the serve registry of every worktree ever seen —
+// using it as the iOS session-list grouping is why Desktop showed 6 tabs and
+// iPhone showed ~17. Fallback to GET /project only when persist has no row
+// for this serve URL (no Desktop install / different machine).
+func (a *Agent) loadHomeProjectDirs(ctx context.Context, c *Client) ([]string, string, error) {
+	if opened, src := readDesktopOpenedWorktrees(c.baseURL); len(opened) > 0 {
+		dirs := visibleDirsFromWorktrees(opened)
+		if len(dirs) > 0 {
+			return dirs, "desktop-persist:" + src, nil
+		}
 	}
 	entries, err := a.fetchProjects(ctx, c)
 	if err != nil {
-		a.projectsMu.Lock()
-		cached := append([]string(nil), a.projectDirs...)
-		a.projectsMu.Unlock()
-		return cached
+		return nil, "", err
 	}
-
-	seen := make(map[string]bool, len(entries))
-	dirs := make([]string, 0, len(entries))
+	worktrees := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		clean, ok := visibleProjectDir(entry.Worktree)
+		worktrees = append(worktrees, entry.Worktree)
+	}
+	return visibleDirsFromWorktrees(worktrees), "get-project-registry", nil
+}
+
+func visibleDirsFromWorktrees(worktrees []string) []string {
+	seen := make(map[string]bool, len(worktrees))
+	dirs := make([]string, 0, len(worktrees))
+	for _, wt := range worktrees {
+		clean, ok := visibleProjectDir(wt)
 		if !ok || seen[clean] {
 			continue
 		}
@@ -116,12 +180,7 @@ func (a *Agent) projectDirectories(ctx context.Context) []string {
 		dirs = append(dirs, clean)
 	}
 	sort.Strings(dirs)
-
-	a.projectsMu.Lock()
-	a.projectDirs = dirs
-	a.projectDirsAt = time.Now()
-	a.projectsMu.Unlock()
-	return append([]string(nil), dirs...)
+	return dirs
 }
 
 // invalidateProjectCache is called from the SSE catalog signal path so a
@@ -140,6 +199,18 @@ func (a *Agent) ListProjectSuggestions(ctx context.Context) ([]core.ProjectSugge
 	c, err := a.clientFor(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if opened, _ := readDesktopOpenedWorktrees(c.baseURL); len(opened) > 0 {
+		dirs := visibleDirsFromWorktrees(opened)
+		out := make([]core.ProjectSuggestion, 0, len(dirs))
+		for _, dir := range dirs {
+			out = append(out, core.ProjectSuggestion{
+				ID:        dir,
+				Directory: dir,
+				Name:      filepath.Base(dir),
+			})
+		}
+		return out, nil
 	}
 	entries, err := a.fetchProjects(ctx, c)
 	if err != nil {

@@ -260,6 +260,31 @@ export interface BridgeRequest<TParams = Record<string, unknown>> {
   params?: TParams;
 }
 
+// Model item in `list_models` results. `variants` (canonical additive revision,
+// E1b sample-verified) carries exactly the live `/provider…models[modelID].variants`
+// keys for that model — empty/absent means the model has no variant selector.
+export interface BridgeModelItem {
+  id: string;
+  name: string;
+  provider: string;
+  providerId: string;
+  reasoning: boolean;
+  supportedReasoningEfforts?: string[];
+  defaultReasoningEffort?: string;
+  isDefault?: boolean;
+  variants?: string[];
+}
+
+// `send_message` model parameter. `variant` (canonical additive revision, E1b
+// sample-verified) is a model-specific OpenCode variant key — NOT reasoningEffort.
+// An unlisted key fails the RPC with zero POSTs. `agent` (already canonical,
+// `send_message.params.agent`) selects the official agent for the same prompt.
+export interface BridgeSendMessageModel {
+  id: string;
+  providerId: string;
+  variant?: string;
+}
+
 export interface BridgeResult<TData = unknown> {
   type?: "result";
   requestId?: string;

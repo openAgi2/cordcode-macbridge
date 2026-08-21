@@ -5071,3 +5071,40 @@ func TestDetectClaudeTranscriptState_UnknownWhenNoMeaningfulEntry(t *testing.T) 
 		t.Fatalf("empty transcript state = %q, want unknown", got)
 	}
 }
+
+// 回归（owner 现网 2026-08-20）：opencode-web 新会话 create_session 曾走
+// waitForSessionID(15s) 空等——它是惰性建会话 backend（首个 Send 才落
+// serve 会话），等待永不可能成功，iOS 每次新会话发送固定卡 15 秒
+// （create 01:06:18.160 → send 01:06:33.492）。必须走 codex/claude 同款
+// 快速 pending-id 路径。
+func TestCreateSessionOpenCodeWebReturnsPendingFastWithout15sWait(t *testing.T) {
+	agent := &fakeAgent{name: "opencode-web"}
+	// fakeAgentSession 无 id：模拟惰性建会话（StartSession 后
+	// CurrentSessionID 为空，直到首个 Send）。
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("opencode-web", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	start := time.Now()
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "opencode-web",
+		Method:    "create_session",
+		RequestID: "create-ocw-fast",
+		Params:    mustJSONRaw(t, map[string]any{"directory": "/tmp/work"}),
+	})
+	messages := readJSONMaps(t, clientConn, 2)
+	elapsed := time.Since(start)
+
+	if got := messages[0]["event"]; got != "session_state_changed" {
+		t.Fatalf("first message event = %#v, want session_state_changed", got)
+	}
+	data, _ := messages[1]["data"].(map[string]any)
+	sessionID, _ := data["id"].(string)
+	if !strings.HasPrefix(sessionID, "pending-") {
+		t.Fatalf("created session id = %q, want pending- id (lazy backend)", sessionID)
+	}
+	if elapsed >= 3*time.Second {
+		t.Fatalf("create_session took %v for lazy backend; must return fast (<3s), not waitForSessionID(15s)", elapsed)
+	}
+}

@@ -1,0 +1,2190 @@
+{
+  "meta": {
+    "scenario": "E5b",
+    "configMode": "valid",
+    "opencodeVersion": "1.18.18",
+    "sourceCommit": "2cba7e227d"
+  },
+  "source": {
+    "ui": "packages/app/src/context/local.tsx:153 resolveDefaultModel(providers.defaultModel(), sync().data.config.model); packages/app/src/hooks/provider-catalog.ts:29-37 branch order; prompt-model-selection.ts:39-41 picker chain",
+    "server": "packages/opencode/src/server/routes/instance/httpapi/groups/config.ts:10-18 GET /config -> ConfigV1.Info (model optional string provider/model — core/src/v1/config/config.ts:74-75); provider.ts:1107-1109 defaultModelIDs"
+  },
+  "http": [
+    {
+      "method": "GET",
+      "path": "/config",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": {
+        "$schema": "https://opencode.ai/config.json",
+        "command": {},
+        "plugin": [],
+        "disabled_providers": [
+          "openai",
+          "anthropic",
+          "opencode",
+          "google",
+          "groq",
+          "openrouter",
+          "xai",
+          "mistral",
+          "deepseek",
+          "togetherai"
+        ],
+        "enabled_providers": [
+          "localmock"
+        ],
+        "model": "localmock/alpha",
+        "small_model": "localmock/echo",
+        "username": "jacklee",
+        "mode": {},
+        "agent": {},
+        "provider": {
+          "localmock": {
+            "name": "Local Mock",
+            "env": [],
+            "npm": "@ai-sdk/openai-compatible",
+            "options": {
+              "apiKey": "fixture-not-a-secret",
+              "baseURL": "http://127.0.0.1:4399/v1"
+            },
+            "models": {
+              "alpha": {
+                "name": "Alpha",
+                "limit": {
+                  "context": 32000,
+                  "output": 2048
+                }
+              },
+              "echo": {
+                "name": "Echo",
+                "attachment": true,
+                "tool_call": true,
+                "limit": {
+                  "context": 32000,
+                  "output": 2048
+                },
+                "variants": {
+                  "high": {
+                    "reasoning": {
+                      "effort": "high"
+                    }
+                  },
+                  "low": {
+                    "reasoning": {
+                      "effort": "low"
+                    }
+                  }
+                }
+              },
+              "zeta": {
+                "name": "Zeta",
+                "limit": {
+                  "context": 32000,
+                  "output": 2048
+                }
+              }
+            }
+          }
+        },
+        "formatter": false,
+        "lsp": false,
+        "permission": {
+          "read": "allow",
+          "edit": "deny",
+          "bash": "deny",
+          "external_directory": "ask",
+          "todowrite": "allow",
+          "question": "allow",
+          "webfetch": "deny",
+          "websearch": "deny"
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 17:03:27 GMT",
+        "content-length": "1015",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/provider",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": {
+        "all": [
+          {
+            "id": "localmock",
+            "name": "Local Mock",
+            "source": "config",
+            "env": [],
+            "options": {
+              "baseURL": "http://127.0.0.1:4399/v1",
+              "apiKey": "fixture-not-a-secret"
+            },
+            "models": {
+              "alpha": {
+                "id": "alpha",
+                "providerID": "localmock",
+                "api": {
+                  "id": "alpha",
+                  "url": "",
+                  "npm": "@ai-sdk/openai-compatible"
+                },
+                "name": "Alpha",
+                "family": "",
+                "capabilities": {
+                  "temperature": false,
+                  "reasoning": false,
+                  "attachment": false,
+                  "toolcall": true,
+                  "input": {
+                    "text": true,
+                    "audio": false,
+                    "image": false,
+                    "video": false,
+                    "pdf": false
+                  },
+                  "output": {
+                    "text": true,
+                    "audio": false,
+                    "image": false,
+                    "video": false,
+                    "pdf": false
+                  },
+                  "interleaved": false
+                },
+                "cost": {
+                  "input": 0,
+                  "output": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "limit": {
+                  "context": 32000,
+                  "output": 2048
+                },
+                "status": "active",
+                "options": {},
+                "headers": {},
+                "release_date": "",
+                "variants": {}
+              },
+              "echo": {
+                "id": "echo",
+                "providerID": "localmock",
+                "api": {
+                  "id": "echo",
+                  "url": "",
+                  "npm": "@ai-sdk/openai-compatible"
+                },
+                "name": "Echo",
+                "family": "",
+                "capabilities": {
+                  "temperature": false,
+                  "reasoning": false,
+                  "attachment": true,
+                  "toolcall": true,
+                  "input": {
+                    "text": true,
+                    "audio": false,
+                    "image": false,
+                    "video": false,
+                    "pdf": false
+                  },
+                  "output": {
+                    "text": true,
+                    "audio": false,
+                    "image": false,
+                    "video": false,
+                    "pdf": false
+                  },
+                  "interleaved": false
+                },
+                "cost": {
+                  "input": 0,
+                  "output": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "limit": {
+                  "context": 32000,
+                  "output": 2048
+                },
+                "status": "active",
+                "options": {},
+                "headers": {},
+                "release_date": "",
+                "variants": {
+                  "high": {
+                    "reasoning": {
+                      "effort": "high"
+                    }
+                  },
+                  "low": {
+                    "reasoning": {
+                      "effort": "low"
+                    }
+                  }
+                }
+              },
+              "zeta": {
+                "id": "zeta",
+                "providerID": "localmock",
+                "api": {
+                  "id": "zeta",
+                  "url": "",
+                  "npm": "@ai-sdk/openai-compatible"
+                },
+                "name": "Zeta",
+                "family": "",
+                "capabilities": {
+                  "temperature": false,
+                  "reasoning": false,
+                  "attachment": false,
+                  "toolcall": true,
+                  "input": {
+                    "text": true,
+                    "audio": false,
+                    "image": false,
+                    "video": false,
+                    "pdf": false
+                  },
+                  "output": {
+                    "text": true,
+                    "audio": false,
+                    "image": false,
+                    "video": false,
+                    "pdf": false
+                  },
+                  "interleaved": false
+                },
+                "cost": {
+                  "input": 0,
+                  "output": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "limit": {
+                  "context": 32000,
+                  "output": 2048
+                },
+                "status": "active",
+                "options": {},
+                "headers": {},
+                "release_date": "",
+                "variants": {}
+              }
+            }
+          }
+        ],
+        "default": {
+          "localmock": "zeta"
+        },
+        "connected": [
+          "localmock"
+        ]
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 17:03:27 GMT",
+        "content-length": "2021",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/session",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {
+        "title": "e5b-valid"
+      },
+      "status": 200,
+      "response": {
+        "id": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+        "slug": "cosmic-mountain",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "e5b-valid",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787245407897,
+          "updated": 1787245407897
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 17:03:27 GMT",
+        "content-length": "374",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/session/ses_fdfdf5166ffeV0xh8wGWaKaP3l/prompt_async",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {
+        "messageID": "msg_534c051fd12b40128e1ce7e844",
+        "agent": "build",
+        "parts": [
+          {
+            "type": "text",
+            "text": "E5b configured-default probe (valid)"
+          }
+        ]
+      },
+      "status": 204,
+      "response": null,
+      "responseHeaders": {
+        "vary": "Origin",
+        "date": "Thu, 20 Aug 2026 17:03:27 GMT",
+        "content-length": "0"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": {
+        "id": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+        "slug": "cosmic-mountain",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 8,
+          "output": 10,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "e5b-valid",
+        "agent": "build",
+        "model": {
+          "id": "alpha",
+          "providerID": "localmock",
+          "variant": "default"
+        },
+        "version": "1.18.18",
+        "time": {
+          "created": 1787245407897,
+          "updated": 1787245407960
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 17:03:32 GMT",
+        "content-length": "509",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/ses_fdfdf5166ffeV0xh8wGWaKaP3l/message",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": [
+        {
+          "info": {
+            "id": "msg_534c051fd12b40128e1ce7e844",
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "role": "user",
+            "time": {
+              "created": 1787245407914
+            },
+            "summary": {
+              "diffs": []
+            },
+            "agent": "build",
+            "model": {
+              "providerID": "localmock",
+              "modelID": "alpha"
+            }
+          },
+          "parts": [
+            {
+              "id": "prt_02020aead00175WnjU8LJ6RTvE",
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "messageID": "msg_534c051fd12b40128e1ce7e844",
+              "type": "text",
+              "text": "E5b configured-default probe (valid)"
+            }
+          ]
+        },
+        {
+          "info": {
+            "id": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "role": "assistant",
+            "time": {
+              "created": 1787245407926,
+              "completed": 1787245407957
+            },
+            "parentID": "msg_534c051fd12b40128e1ce7e844",
+            "modelID": "alpha",
+            "providerID": "localmock",
+            "mode": "build",
+            "agent": "build",
+            "path": {
+              "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "root": "/"
+            },
+            "cost": 0,
+            "tokens": {
+              "total": 18,
+              "input": 8,
+              "output": 10,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            },
+            "finish": "stop"
+          },
+          "parts": [
+            {
+              "id": "prt_02020aecc001KUKoh0nLui1hQi",
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "messageID": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+              "type": "step-start"
+            },
+            {
+              "id": "prt_02020aece001l3uxG8sMuX2u4Z",
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "messageID": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+              "type": "text",
+              "text": "SANDBOX_OK",
+              "time": {
+                "start": 1787245407950,
+                "end": 1787245407953
+              }
+            },
+            {
+              "id": "prt_02020aed3001O93qk17AWhGgNa",
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "messageID": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+              "type": "step-finish",
+              "reason": "stop",
+              "cost": 0,
+              "tokens": {
+                "total": 18,
+                "input": 8,
+                "output": 10,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 17:03:32 GMT",
+        "content-length": "1545",
+        "vary": "Origin"
+      }
+    }
+  ],
+  "sse": [
+    {
+      "t": 1787245407.904098,
+      "event": {
+        "payload": {
+          "id": "evt_020209ad3001fdxqpssbn1sqhV",
+          "type": "server.connected",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 1787245407.9310238,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020ae9a001izvDhW2QB2Sest",
+          "type": "session.created",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "info": {
+              "id": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "slug": "cosmic-mountain",
+              "version": "1.18.18",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "e5b-valid",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787245407897,
+                "updated": 1787245407897
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.9320042,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_02020ae9a001izvDhW2QB2Sest",
+            "type": "session.created.1",
+            "seq": 0,
+            "aggregateID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "data": {
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "info": {
+                "id": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+                "slug": "cosmic-mountain",
+                "version": "1.18.18",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "e5b-valid",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787245407897,
+                  "updated": 1787245407897
+                }
+              }
+            }
+          },
+          "id": "evt_02020ae9a001izvDhW2QB2Sest"
+        }
+      }
+    },
+    {
+      "t": 1787245407.9395788,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aeaa001YetafwuDsDI0af",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "info": {
+              "id": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "slug": "cosmic-mountain",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "e5b-valid",
+              "agent": "build",
+              "model": {
+                "id": "alpha",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787245407897,
+                "updated": 1787245407914
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.940659,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_02020aeaa001YetafwuDsDI0af",
+            "type": "session.updated.1",
+            "seq": 1,
+            "aggregateID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "data": {
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "info": {
+                "id": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+                "slug": "cosmic-mountain",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "e5b-valid",
+                "agent": "build",
+                "model": {
+                  "id": "alpha",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787245407897,
+                  "updated": 1787245407914
+                }
+              }
+            }
+          },
+          "id": "evt_02020aeaa001YetafwuDsDI0af"
+        }
+      }
+    },
+    {
+      "t": 1787245407.941112,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aeae001lCt1DdAiBhLYO9",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "info": {
+              "id": "msg_534c051fd12b40128e1ce7e844",
+              "role": "user",
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "time": {
+                "created": 1787245407914
+              },
+              "agent": "build",
+              "model": {
+                "providerID": "localmock",
+                "modelID": "alpha"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.941707,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_02020aeae001lCt1DdAiBhLYO9",
+            "type": "message.updated.1",
+            "seq": 2,
+            "aggregateID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "data": {
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "info": {
+                "id": "msg_534c051fd12b40128e1ce7e844",
+                "role": "user",
+                "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+                "time": {
+                  "created": 1787245407914
+                },
+                "agent": "build",
+                "model": {
+                  "providerID": "localmock",
+                  "modelID": "alpha"
+                }
+              }
+            }
+          },
+          "id": "evt_02020aeae001lCt1DdAiBhLYO9"
+        }
+      }
+    },
+    {
+      "t": 1787245407.94224,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aeaf0013Bqtyun6f5eM6Z",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "part": {
+              "type": "text",
+              "text": "E5b configured-default probe (valid)",
+              "messageID": "msg_534c051fd12b40128e1ce7e844",
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "id": "prt_02020aead00175WnjU8LJ6RTvE"
+            },
+            "time": 1787245407919
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.944018,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_02020aeaf0013Bqtyun6f5eM6Z",
+            "type": "message.part.updated.1",
+            "seq": 3,
+            "aggregateID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "data": {
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "part": {
+                "type": "text",
+                "text": "E5b configured-default probe (valid)",
+                "messageID": "msg_534c051fd12b40128e1ce7e844",
+                "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+                "id": "prt_02020aead00175WnjU8LJ6RTvE"
+              },
+              "time": 1787245407919
+            }
+          },
+          "id": "evt_02020aeaf0013Bqtyun6f5eM6Z"
+        }
+      }
+    },
+    {
+      "t": 1787245407.944866,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aeb1001v9YmB2hNmR4KT6",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "info": {
+              "id": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "slug": "cosmic-mountain",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "e5b-valid",
+              "agent": "build",
+              "model": {
+                "id": "alpha",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787245407897,
+                "updated": 1787245407921
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.945837,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_02020aeb1001v9YmB2hNmR4KT6",
+            "type": "session.updated.1",
+            "seq": 4,
+            "aggregateID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "data": {
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "info": {
+                "id": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+                "slug": "cosmic-mountain",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "e5b-valid",
+                "agent": "build",
+                "model": {
+                  "id": "alpha",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787245407897,
+                  "updated": 1787245407921
+                }
+              }
+            }
+          },
+          "id": "evt_02020aeb1001v9YmB2hNmR4KT6"
+        }
+      }
+    },
+    {
+      "t": 1787245407.9635258,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aeb4001hYkPXZEkAN3vmb",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.964268,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aeb60010MisUk1GCqXO0U",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "info": {
+              "id": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+              "parentID": "msg_534c051fd12b40128e1ce7e844",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "modelID": "alpha",
+              "providerID": "localmock",
+              "time": {
+                "created": 1787245407926
+              },
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.965131,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_02020aeb60010MisUk1GCqXO0U",
+            "type": "message.updated.1",
+            "seq": 5,
+            "aggregateID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "data": {
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "info": {
+                "id": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+                "parentID": "msg_534c051fd12b40128e1ce7e844",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "modelID": "alpha",
+                "providerID": "localmock",
+                "time": {
+                  "created": 1787245407926
+                },
+                "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l"
+              }
+            }
+          },
+          "id": "evt_02020aeb60010MisUk1GCqXO0U"
+        }
+      }
+    },
+    {
+      "t": 1787245407.96596,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aec0001kzg5SUTTdBzFOJ",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "info": {
+              "id": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "slug": "cosmic-mountain",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "e5b-valid",
+              "agent": "build",
+              "model": {
+                "id": "alpha",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "summary": {
+                "additions": 0,
+                "deletions": 0,
+                "files": 0
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787245407897,
+                "updated": 1787245407936
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.967018,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_02020aec0001kzg5SUTTdBzFOJ",
+            "type": "session.updated.1",
+            "seq": 6,
+            "aggregateID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "data": {
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "info": {
+                "id": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+                "slug": "cosmic-mountain",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "e5b-valid",
+                "agent": "build",
+                "model": {
+                  "id": "alpha",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "summary": {
+                  "additions": 0,
+                  "deletions": 0,
+                  "files": 0
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787245407897,
+                  "updated": 1787245407936
+                }
+              }
+            }
+          },
+          "id": "evt_02020aec0001kzg5SUTTdBzFOJ"
+        }
+      }
+    },
+    {
+      "t": 1787245407.967294,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aec1001k3ksjgprLM2MC6",
+          "type": "session.diff",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "diff": []
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.967836,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aec1002HFs7rN1ZW6u4y6",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "info": {
+              "role": "user",
+              "time": {
+                "created": 1787245407914
+              },
+              "agent": "build",
+              "model": {
+                "providerID": "localmock",
+                "modelID": "alpha"
+              },
+              "id": "msg_534c051fd12b40128e1ce7e844",
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "summary": {
+                "diffs": []
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.968531,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_02020aec1002HFs7rN1ZW6u4y6",
+            "type": "message.updated.1",
+            "seq": 7,
+            "aggregateID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "data": {
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "info": {
+                "role": "user",
+                "time": {
+                  "created": 1787245407914
+                },
+                "agent": "build",
+                "model": {
+                  "providerID": "localmock",
+                  "modelID": "alpha"
+                },
+                "id": "msg_534c051fd12b40128e1ce7e844",
+                "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+                "summary": {
+                  "diffs": []
+                }
+              }
+            }
+          },
+          "id": "evt_02020aec1002HFs7rN1ZW6u4y6"
+        }
+      }
+    },
+    {
+      "t": 1787245407.9687748,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aec4001lUXxN8irrsMFKJ",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.969207,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aecc001FCHv1kdXTgjO9K",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "part": {
+              "id": "prt_02020aecc001KUKoh0nLui1hQi",
+              "messageID": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "type": "step-start"
+            },
+            "time": 1787245407948
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.9697669,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_02020aecc001FCHv1kdXTgjO9K",
+            "type": "message.part.updated.1",
+            "seq": 8,
+            "aggregateID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "data": {
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "part": {
+                "id": "prt_02020aecc001KUKoh0nLui1hQi",
+                "messageID": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+                "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+                "type": "step-start"
+              },
+              "time": 1787245407948
+            }
+          },
+          "id": "evt_02020aecc001FCHv1kdXTgjO9K"
+        }
+      }
+    },
+    {
+      "t": 1787245407.970228,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aece001MPX333iGmLMr6X",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "part": {
+              "id": "prt_02020aece001l3uxG8sMuX2u4Z",
+              "messageID": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "type": "text",
+              "text": "",
+              "time": {
+                "start": 1787245407950
+              }
+            },
+            "time": 1787245407950
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.970871,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_02020aece001MPX333iGmLMr6X",
+            "type": "message.part.updated.1",
+            "seq": 9,
+            "aggregateID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "data": {
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "part": {
+                "id": "prt_02020aece001l3uxG8sMuX2u4Z",
+                "messageID": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+                "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+                "type": "text",
+                "text": "",
+                "time": {
+                  "start": 1787245407950
+                }
+              },
+              "time": 1787245407950
+            }
+          },
+          "id": "evt_02020aece001MPX333iGmLMr6X"
+        }
+      }
+    },
+    {
+      "t": 1787245407.971215,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aecf001w0dm3TKFhRRgag",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "messageID": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+            "partID": "prt_02020aece001l3uxG8sMuX2u4Z",
+            "field": "text",
+            "delta": "S"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.971562,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aecf002oMR2bmmqbH0rjl",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "messageID": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+            "partID": "prt_02020aece001l3uxG8sMuX2u4Z",
+            "field": "text",
+            "delta": "A"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.971908,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aecf003SaXUr4CnDug26D",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "messageID": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+            "partID": "prt_02020aece001l3uxG8sMuX2u4Z",
+            "field": "text",
+            "delta": "N"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.972308,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aed000123HQw3wg701Tjb",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "messageID": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+            "partID": "prt_02020aece001l3uxG8sMuX2u4Z",
+            "field": "text",
+            "delta": "D"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.972663,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aed00025AIy0LmWjVyZXC",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "messageID": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+            "partID": "prt_02020aece001l3uxG8sMuX2u4Z",
+            "field": "text",
+            "delta": "B"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.973006,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aed0003sN08ey4L0qYCHj",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "messageID": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+            "partID": "prt_02020aece001l3uxG8sMuX2u4Z",
+            "field": "text",
+            "delta": "O"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.973359,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aed0004xyG6TNiQ0IAesq",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "messageID": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+            "partID": "prt_02020aece001l3uxG8sMuX2u4Z",
+            "field": "text",
+            "delta": "X"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.973711,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aed0005PEHE24rGR7R22Y",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "messageID": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+            "partID": "prt_02020aece001l3uxG8sMuX2u4Z",
+            "field": "text",
+            "delta": "_"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.9740841,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aed0006f42AJo94CXYKbF",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "messageID": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+            "partID": "prt_02020aece001l3uxG8sMuX2u4Z",
+            "field": "text",
+            "delta": "O"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.974449,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aed00073axdye3H81E5O3",
+          "type": "message.part.delta",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "messageID": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+            "partID": "prt_02020aece001l3uxG8sMuX2u4Z",
+            "field": "text",
+            "delta": "K"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.974944,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aed1001jGI7y5dHvyr09K",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "part": {
+              "id": "prt_02020aece001l3uxG8sMuX2u4Z",
+              "messageID": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "type": "text",
+              "text": "SANDBOX_OK",
+              "time": {
+                "start": 1787245407950,
+                "end": 1787245407953
+              }
+            },
+            "time": 1787245407953
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.975571,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_02020aed1001jGI7y5dHvyr09K",
+            "type": "message.part.updated.1",
+            "seq": 10,
+            "aggregateID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "data": {
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "part": {
+                "id": "prt_02020aece001l3uxG8sMuX2u4Z",
+                "messageID": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+                "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+                "type": "text",
+                "text": "SANDBOX_OK",
+                "time": {
+                  "start": 1787245407950,
+                  "end": 1787245407953
+                }
+              },
+              "time": 1787245407953
+            }
+          },
+          "id": "evt_02020aed1001jGI7y5dHvyr09K"
+        }
+      }
+    },
+    {
+      "t": 1787245407.976535,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aed3001Fn9es7Fov2Xu3D",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "part": {
+              "id": "prt_02020aed3001O93qk17AWhGgNa",
+              "reason": "stop",
+              "messageID": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "type": "step-finish",
+              "tokens": {
+                "total": 18,
+                "input": 8,
+                "output": 10,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              },
+              "cost": 0
+            },
+            "time": 1787245407955
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245407.9772859,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_02020aed3001Fn9es7Fov2Xu3D",
+            "type": "message.part.updated.1",
+            "seq": 11,
+            "aggregateID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "data": {
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "part": {
+                "id": "prt_02020aed3001O93qk17AWhGgNa",
+                "reason": "stop",
+                "messageID": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+                "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+                "type": "step-finish",
+                "tokens": {
+                  "total": 18,
+                  "input": 8,
+                  "output": 10,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "cost": 0
+              },
+              "time": 1787245407955
+            }
+          },
+          "id": "evt_02020aed3001Fn9es7Fov2Xu3D"
+        }
+      }
+    },
+    {
+      "t": 1787245412.8493388,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aed4001QY2daO5pRRwq51",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "info": {
+              "id": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+              "parentID": "msg_534c051fd12b40128e1ce7e844",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "total": 18,
+                "input": 8,
+                "output": 10,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              },
+              "modelID": "alpha",
+              "providerID": "localmock",
+              "time": {
+                "created": 1787245407926,
+                "completed": 1787245407957
+              },
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "finish": "stop"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245412.851676,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_02020aed4001QY2daO5pRRwq51",
+            "type": "message.updated.1",
+            "seq": 12,
+            "aggregateID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "data": {
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "info": {
+                "id": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+                "parentID": "msg_534c051fd12b40128e1ce7e844",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "total": 18,
+                  "input": 8,
+                  "output": 10,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "modelID": "alpha",
+                "providerID": "localmock",
+                "time": {
+                  "created": 1787245407926,
+                  "completed": 1787245407957
+                },
+                "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+                "finish": "stop"
+              }
+            }
+          },
+          "id": "evt_02020aed4001QY2daO5pRRwq51"
+        }
+      }
+    },
+    {
+      "t": 1787245412.852951,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aed5001ax1zk93Fd9slnb",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "info": {
+              "id": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+              "parentID": "msg_534c051fd12b40128e1ce7e844",
+              "role": "assistant",
+              "mode": "build",
+              "agent": "build",
+              "path": {
+                "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "root": "/"
+              },
+              "cost": 0,
+              "tokens": {
+                "total": 18,
+                "input": 8,
+                "output": 10,
+                "reasoning": 0,
+                "cache": {
+                  "write": 0,
+                  "read": 0
+                }
+              },
+              "modelID": "alpha",
+              "providerID": "localmock",
+              "time": {
+                "created": 1787245407926,
+                "completed": 1787245407957
+              },
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "finish": "stop"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245412.853927,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_02020aed5001ax1zk93Fd9slnb",
+            "type": "message.updated.1",
+            "seq": 13,
+            "aggregateID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "data": {
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "info": {
+                "id": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+                "parentID": "msg_534c051fd12b40128e1ce7e844",
+                "role": "assistant",
+                "mode": "build",
+                "agent": "build",
+                "path": {
+                  "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+                  "root": "/"
+                },
+                "cost": 0,
+                "tokens": {
+                  "total": 18,
+                  "input": 8,
+                  "output": 10,
+                  "reasoning": 0,
+                  "cache": {
+                    "write": 0,
+                    "read": 0
+                  }
+                },
+                "modelID": "alpha",
+                "providerID": "localmock",
+                "time": {
+                  "created": 1787245407926,
+                  "completed": 1787245407957
+                },
+                "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+                "finish": "stop"
+              }
+            }
+          },
+          "id": "evt_02020aed5001ax1zk93Fd9slnb"
+        }
+      }
+    },
+    {
+      "t": 1787245412.8541791,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aed6001wd5EwBS5X35JAG",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245412.854434,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aed7001vTTSeqjJb0STzy",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "status": {
+              "type": "idle"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245412.854679,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aed8001rDEgD3Hx8vdOhL",
+          "type": "session.idle",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245412.8554728,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aed8002BNDd9daBEjlqiE",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "info": {
+              "id": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "slug": "cosmic-mountain",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "e5b-valid",
+              "agent": "build",
+              "model": {
+                "id": "alpha",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "summary": {
+                "additions": 0,
+                "deletions": 0,
+                "files": 0
+              },
+              "cost": 0,
+              "tokens": {
+                "input": 8,
+                "output": 10,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787245407897,
+                "updated": 1787245407960
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245412.856895,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_02020aed8002BNDd9daBEjlqiE",
+            "type": "session.updated.1",
+            "seq": 14,
+            "aggregateID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "data": {
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "info": {
+                "id": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+                "slug": "cosmic-mountain",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "e5b-valid",
+                "agent": "build",
+                "model": {
+                  "id": "alpha",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "summary": {
+                  "additions": 0,
+                  "deletions": 0,
+                  "files": 0
+                },
+                "cost": 0,
+                "tokens": {
+                  "input": 8,
+                  "output": 10,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787245407897,
+                  "updated": 1787245407960
+                }
+              }
+            }
+          },
+          "id": "evt_02020aed8002BNDd9daBEjlqiE"
+        }
+      }
+    },
+    {
+      "t": 1787245412.8570921,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aed9001dxriFobrBrcXs8",
+          "type": "session.diff",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "diff": []
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245412.857633,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020aeda001ZDLvLUYVBNfIMP",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "info": {
+              "role": "user",
+              "time": {
+                "created": 1787245407914
+              },
+              "agent": "build",
+              "model": {
+                "providerID": "localmock",
+                "modelID": "alpha"
+              },
+              "summary": {
+                "diffs": []
+              },
+              "id": "msg_534c051fd12b40128e1ce7e844",
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245412.858776,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_02020aeda001ZDLvLUYVBNfIMP",
+            "type": "message.updated.1",
+            "seq": 15,
+            "aggregateID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "data": {
+              "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+              "info": {
+                "role": "user",
+                "time": {
+                  "created": 1787245407914
+                },
+                "agent": "build",
+                "model": {
+                  "providerID": "localmock",
+                  "modelID": "alpha"
+                },
+                "summary": {
+                  "diffs": []
+                },
+                "id": "msg_534c051fd12b40128e1ce7e844",
+                "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l"
+              }
+            }
+          },
+          "id": "evt_02020aeda001ZDLvLUYVBNfIMP"
+        }
+      }
+    }
+  ],
+  "reload": {
+    "sessionByID": {
+      "id": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+      "slug": "cosmic-mountain",
+      "projectID": "global",
+      "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+      "path": "private/tmp/ocw-gate-a-20260820/workspace",
+      "summary": {
+        "additions": 0,
+        "deletions": 0,
+        "files": 0
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 8,
+        "output": 10,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "title": "e5b-valid",
+      "agent": "build",
+      "model": {
+        "id": "alpha",
+        "providerID": "localmock",
+        "variant": "default"
+      },
+      "version": "1.18.18",
+      "time": {
+        "created": 1787245407897,
+        "updated": 1787245407960
+      }
+    },
+    "messages": [
+      {
+        "info": {
+          "id": "msg_534c051fd12b40128e1ce7e844",
+          "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+          "role": "user",
+          "time": {
+            "created": 1787245407914
+          },
+          "summary": {
+            "diffs": []
+          },
+          "agent": "build",
+          "model": {
+            "providerID": "localmock",
+            "modelID": "alpha"
+          }
+        },
+        "parts": [
+          {
+            "id": "prt_02020aead00175WnjU8LJ6RTvE",
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "messageID": "msg_534c051fd12b40128e1ce7e844",
+            "type": "text",
+            "text": "E5b configured-default probe (valid)"
+          }
+        ]
+      },
+      {
+        "info": {
+          "id": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+          "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+          "role": "assistant",
+          "time": {
+            "created": 1787245407926,
+            "completed": 1787245407957
+          },
+          "parentID": "msg_534c051fd12b40128e1ce7e844",
+          "modelID": "alpha",
+          "providerID": "localmock",
+          "mode": "build",
+          "agent": "build",
+          "path": {
+            "cwd": "/private/tmp/ocw-gate-a-20260820/workspace",
+            "root": "/"
+          },
+          "cost": 0,
+          "tokens": {
+            "total": 18,
+            "input": 8,
+            "output": 10,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "finish": "stop"
+        },
+        "parts": [
+          {
+            "id": "prt_02020aecc001KUKoh0nLui1hQi",
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "messageID": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+            "type": "step-start"
+          },
+          {
+            "id": "prt_02020aece001l3uxG8sMuX2u4Z",
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "messageID": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+            "type": "text",
+            "text": "SANDBOX_OK",
+            "time": {
+              "start": 1787245407950,
+              "end": 1787245407953
+            }
+          },
+          {
+            "id": "prt_02020aed3001O93qk17AWhGgNa",
+            "sessionID": "ses_fdfdf5166ffeV0xh8wGWaKaP3l",
+            "messageID": "msg_02020aeb5001Z5wK7SZ505D3Xz",
+            "type": "step-finish",
+            "reason": "stop",
+            "cost": 0,
+            "tokens": {
+              "total": 18,
+              "input": 8,
+              "output": 10,
+              "reasoning": 0,
+              "cache": {
+                "read": 0,
+                "write": 0
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "observation": {
+    "idleReached": true
+  }
+}

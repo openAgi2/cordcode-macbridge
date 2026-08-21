@@ -44,13 +44,22 @@ func (a *Agent) RunDiagnostics(ctx context.Context, progress func(core.Diagnosti
 			"官方 serve 凭据模型仅覆盖 loopback；非 loopback 端点不在托管范围内")
 	}
 
-	// 3. Generation + health probe (fresh, not the cached mirror).
+	// 3. Generation + health probe (fresh, not the cached mirror). The verdict
+	// reuses the C1 gate semantics: a successfully DETECTED non-1.18.18
+	// generation is unsupported-generation (quarantined) — a failed check, and
+	// the report stops here (no catalog/model probing on a quarantined
+	// endpoint; no POST, no SSE, no session, no Kernel).
 	c := newClient(a.baseURL, a.user, a.pass)
 	probe := probeInstance(ctx, c)
 	if probe.err != nil {
 		emit("ocw_probe", "API generation", "failed", "probe failed: "+probe.err.Error(), "error",
 			"确认 serve 进程存活与凭据；探针按序尝试 /global/health 与 /api/health")
 		report.OverallStatus = "failed"
+	} else if probe.gen != generation118 {
+		emit("ocw_probe", "API generation", "failed", unsupportedGenerationDetail(probe.gen, probe.detail), "error",
+			"OpenCode 1.18.18 是唯一 verified 产品代；v2/未知代端点已隔离（无 prompt、无 SSE ingest、无 Kernel、无新增 capability）。请改用 1.18.18 serve")
+		report.OverallStatus = "failed"
+		return report, nil
 	} else {
 		c.setGeneration(probe.gen)
 		emit("ocw_probe", "API generation", "passed", probe.detail, "", "")

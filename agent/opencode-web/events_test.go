@@ -118,7 +118,7 @@ func TestSSEAssistantDeltasAndSnapshots(t *testing.T) {
 	)
 
 	events := drain(sub)
-	var texts, replaces, thinking []core.Event
+	var texts, replaces, thinking, errorsOut []core.Event
 	for _, ev := range events {
 		switch ev.Type {
 		case core.EventText:
@@ -127,13 +127,21 @@ func TestSSEAssistantDeltasAndSnapshots(t *testing.T) {
 			replaces = append(replaces, ev)
 		case core.EventThinking:
 			thinking = append(thinking, ev)
+		case core.EventError:
+			errorsOut = append(errorsOut, ev)
 		}
 	}
 	if len(texts) != 2 || texts[0].Content != "Hel" || texts[1].Content != "lo" {
 		t.Fatalf("text deltas = %+v", texts)
 	}
-	if len(thinking) != 1 || thinking[0].Content != "hmm" {
-		t.Fatalf("thinking = %+v", thinking)
+	// §6.3/E2: populated reasoning stays untranslated — no thinking stream,
+	// and (2026-08-21) NO EventError: the wire "error" event settles the turn
+	// as failed and tears relayEvents down mid-stream.
+	if len(thinking) != 0 {
+		t.Fatalf("reasoning must not map to thinking, got %+v", thinking)
+	}
+	if len(errorsOut) != 0 {
+		t.Fatalf("reasoning must not poison the turn with EventError, got %+v", errorsOut)
 	}
 	if len(replaces) != 1 || replaces[0].Content != "Everything changed" {
 		t.Fatalf("unrelated snapshot must EventTextReplace, got %+v", replaces)
@@ -294,34 +302,59 @@ func TestSSECatalogSignalsDoNotEnterChatStream(t *testing.T) {
 	driveFrames(sub,
 		sseFrame("session.created", map[string]any{"sessionID": "ses_new"}),
 		sseFrame("session.deleted", map[string]any{"sessionID": "ses_gone"}),
+		sseFrame("project.updated", map[string]any{"projectID": "prj_new"}),
+		sseFrame("catalog.updated", map[string]any{}),
 	)
 
 	if events := drain(sub); len(events) != 0 {
 		t.Fatalf("catalog frames must not enter the chat stream, got %+v", events)
 	}
-	select {
-	case <-agent.CatalogRefreshSignals():
-	default:
-		t.Fatal("session.created/deleted must signal catalog refresh")
+	got := 0
+	for i := 0; i < 4; i++ {
+		select {
+		case <-agent.CatalogRefreshSignals():
+			got++
+		default:
+		}
+	}
+	if got != 4 {
+		t.Fatalf("session.created/deleted and project.updated/catalog.updated must each signal catalog refresh, got %d", got)
 	}
 }
 
-func TestSSETodoUpdatedIgnoredInPhase1(t *testing.T) {
+// §6.9 (A8): todo.updated is the control-plane replacement list — one
+// canonical plan event preserving server order/fields, never a timeline
+// part, never a synthesized id.
+func TestSSETodoUpdatedIsControlPlanePlan(t *testing.T) {
 	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
 	sub := newDrivenSubscriber(t, agent)
 	driveFrames(sub, sseFrame("todo.updated", map[string]any{
 		"sessionID": "ses_1",
-		"todos":     []any{map[string]any{"content": "t", "status": "pending"}},
+		"todos": []any{
+			map[string]any{"content": "capture A8", "status": "completed", "priority": "high"},
+			map[string]any{"content": "complete A8", "status": "in_progress", "priority": "medium"},
+		},
 	}))
-	if events := drain(sub); len(events) != 0 {
-		t.Fatalf("todo.updated must be ignored (todos not advertised), got %+v", events)
+	events := drain(sub)
+	if len(events) != 1 || events[0].Type != core.EventPlan {
+		t.Fatalf("todo.updated must emit exactly one plan event, got %+v", events)
+	}
+	plan := events[0].Plan
+	if len(plan) != 2 || plan[0].Content != "capture A8" || plan[0].Status != "completed" || plan[0].Priority != "high" {
+		t.Fatalf("plan must preserve server order/fields verbatim, got %+v", plan)
+	}
+	agent.todoMu.Lock()
+	cached := agent.lastTodos["ses_1"]
+	agent.todoMu.Unlock()
+	if len(cached) != 2 {
+		t.Fatalf("control-plane snapshot must record the list, got %+v", cached)
 	}
 }
 
 func TestSSESessionUpdatedRecomputesUsageFromMessages(t *testing.T) {
 	agent, _ := newDataAgent(t, map[string]string{
 		"/session/ses_1/message": lastAssistantPayload(),
-		"/provider":              `{"all":[{"id":"zhipuai-coding-plan","models":{"glm-4.7":{"id":"glm-4.7","limit":{"context":128000}}}}],"connected":["zhipuai-coding-plan"]}`,
+		"/provider":              `{"all":[{"id":"zhipuai-coding-plan","models":{"glm-4.7":{"id":"glm-4.7","limit":{"context":128000}}}}],"connected":["zhipuai-coding-plan"],"default":{}}`,
 	}, "/tmp")
 	sub := newDrivenSubscriber(t, agent)
 
@@ -466,7 +499,10 @@ func TestIsSessionActiveThreeStates(t *testing.T) {
 	}
 }
 
-func TestIsSessionActiveV2MissStaysConservative(t *testing.T) {
+func TestIsSessionActiveV2QuarantineStaysConservative(t *testing.T) {
+	// C1: a v2 endpoint is quarantined at clientFor. IsSessionActive treats any
+	// probe/generation failure as active (unknown ⇒ active — never falsely
+	// settle a live turn); no /api/session/active request may be attempted.
 	s := &recordingServe{responses: map[string]string{
 		"/global/health":      `{"healthy":true}`,
 		"/api/health":         `{"healthy":true}`,
@@ -480,14 +516,14 @@ func TestIsSessionActiveV2MissStaysConservative(t *testing.T) {
 		"opencode_web_pass": "pw",
 	})
 	agent := a.(*Agent)
-	if _, err := agent.clientFor(context.Background()); err != nil {
-		t.Fatalf("clientFor: %v", err)
+	if _, err := agent.clientFor(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported-generation (quarantined)") {
+		t.Fatalf("v2 must fail closed at clientFor, got err=%v", err)
 	}
 	if !agent.IsSessionActive(context.Background(), "ses_idle") {
-		t.Fatal("v2 /api/session/active absence is NOT a global idle verdict — must stay active")
+		t.Fatal("quarantined generation must stay conservative-active, never idle")
 	}
-	if !agent.IsSessionActive(context.Background(), "ses_other") {
-		t.Fatal("v2 active hit must report active")
+	if active := s.requestsFor("/api/session/active"); len(active) != 0 {
+		t.Fatalf("quarantine must not probe /api/session/active, got %+v", active)
 	}
 }
 
@@ -868,11 +904,11 @@ func TestRetrySnapshotReplayOnStartSessionAndClearOnIdle(t *testing.T) {
 		t.Fatalf("StartSession: %v", err)
 	}
 	t.Cleanup(func() { _ = sess.Close() })
-	rs := sess.(*serverSession).sub
+	route := sess.(*serverSession).events
 	var replay *core.Event
 	for {
 		select {
-		case ev := <-rs.events:
+		case ev := <-route:
 			if ev.Type == core.EventRetryStatus {
 				e := ev
 				replay = &e
@@ -909,5 +945,92 @@ drained:
 		default:
 			return
 		}
+	}
+}
+
+// TestReasoningModelTurnStreamsTextAndCompletes reproduces the owner 真机
+// failure (2026-08-21, existing-session turn): a reasoning-model turn emits
+// populated reasoning frames alongside the answer text. On the old
+// implementation the first identified reasoning frame raised EventError,
+// which go-bridge settles as wire turn_error while tearing relayEvents down
+// mid-stream — iOS saw partial text and a stuck/failed turn while the Mac
+// finished fine. The full 1.18.18 frame choreography (A1-pinned shapes plus
+// the reasoning part family) must stream every text delta and close with
+// exactly one terminal result, zero EventError.
+func TestReasoningModelTurnStreamsTextAndCompletes(t *testing.T) {
+	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
+	sub := newDrivenSubscriber(t, agent)
+
+	driveFrames(sub,
+		sseFrame("message.updated", map[string]any{
+			"info":      map[string]any{"id": "msg_u1", "role": "user"},
+			"sessionID": "ses_1",
+		}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1", "status": map[string]any{"type": "busy"}}),
+		sseFrame("message.updated", map[string]any{
+			"info":      map[string]any{"id": "msg_a1", "role": "assistant", "parentID": "msg_u1"},
+			"sessionID": "ses_1",
+		}),
+		sseFrame("message.part.updated", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1",
+			"part": map[string]any{"id": "pt_step1", "type": "step-start"},
+		}),
+		sseFrame("message.part.updated", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1",
+			"part": map[string]any{"id": "pt_r1", "type": "reasoning", "text": "", "time": map[string]any{"start": 0}},
+		}),
+		sseFrame("message.part.delta", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_r1", "field": "reasoning", "delta": "thinking",
+		}),
+		sseFrame("message.part.delta", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_r1", "field": "reasoning", "delta": " hard",
+		}),
+		sseFrame("message.part.updated", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1",
+			"part": map[string]any{"id": "pt_r1", "type": "reasoning", "text": "thinking hard", "time": map[string]any{"start": 0, "end": 1}},
+		}),
+		sseFrame("message.part.updated", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1",
+			"part": map[string]any{"id": "pt_t1", "type": "text", "text": "", "time": map[string]any{"start": 2}},
+		}),
+		sseFrame("message.part.delta", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_t1", "field": "text", "delta": "答案第一段。",
+		}),
+		sseFrame("message.part.delta", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_t1", "field": "text", "delta": "第二段完整收尾。",
+		}),
+		sseFrame("message.part.updated", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1",
+			"part": map[string]any{"id": "pt_t1", "type": "text", "text": "答案第一段。第二段完整收尾。", "time": map[string]any{"start": 2, "end": 3}},
+		}),
+		sseFrame("message.part.updated", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1",
+			"part": map[string]any{"id": "pt_fin1", "type": "step-finish", "tokens": map[string]any{"total": 42}},
+		}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1", "status": map[string]any{"type": "idle"}}),
+		sseFrame("session.idle", map[string]any{"sessionID": "ses_1"}),
+	)
+
+	var texts []string
+	var results, errorsOut int
+	for _, ev := range drain(sub) {
+		switch ev.Type {
+		case core.EventText:
+			texts = append(texts, ev.Content)
+		case core.EventResult:
+			results++
+		case core.EventError:
+			errorsOut++
+		}
+	}
+	joined := strings.Join(texts, "")
+	if !strings.Contains(joined, "答案第一段。") || !strings.Contains(joined, "第二段完整收尾。") {
+		t.Fatalf("answer text must stream in full past the reasoning frames, got %q", joined)
+	}
+	if errorsOut != 0 {
+		t.Fatalf("a healthy reasoning-model turn must emit zero EventError, got %d", errorsOut)
+	}
+	if results != 1 {
+		t.Fatalf("turn must close with exactly one terminal result, got %d", results)
 	}
 }

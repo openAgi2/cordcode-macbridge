@@ -1,5 +1,10 @@
 # OpenCode Web Backend 完成情况（opencode-web）
 
+> [!CAUTION]
+> **历史施工记录，不是当前完成性证明或后续实施入口。** 2026-08-20 的 source-parity 审计确认：虽然 HTTP/SSE backend 已落地，但官方 Web 语义仍有系统性缺口，尤其是首条消息、列表限制、模型回退、SSE `sync`、question/todo 与未取证的 v2。当前结论与后续边界见
+> [source-parity audit](2026-08-20-opencode-web-source-parity-audit.md) 和
+> [source-first convergence plan](2026-08-20-opencode-web-source-first-convergence-plan.md)。产品代码实施已由 owner 暂停。
+
 - 日期：2026-08-19
 - 对应设计：[2026-08-18-opencode-web-backend-design.md](2026-08-18-opencode-web-backend-design.md)（v3.1，两轮评审 APPROVE）
 - 状态：**§8 八项中 1–7 项全数完成并落证；§8-8 Release 已覆盖安装，现网矩阵行 1–6 待 owner 执行**（本文「验收矩阵」节）。沙盒绿不替代现网验收（设计 §6 红线）。
@@ -209,6 +214,64 @@ owner 指出理想路径是 dsh-web 式「读官方 web 源码→穷举 API→�
 - **如实声明**：v2 无现网验证（owner serve 1.18）；location 绑定（LocationRef/workspace 流）未实现——v2 create 在 serve 默认 location 落点，接入 v2 现网前需补核。
 
 **新暴露 backlog（先存、7 项，基线证实）**：SessionsViewModelServerSwitchTests ×4（initialize 重试未发生）、testSessionRefreshNotification_isCoalescedForCodex（1≠2）、testCodexSessionResumeWaits…（1≠0）、testAuthoritativeEmptyTodoFetchClearsStaleCacheAndDock（权威空拉取未清陈旧 todo 缓存）——均为产品语义漂移，需逐个判读意图后修，另立任务。
+
+## 四·补十一、新会话首回合残留双症状修复（owner 复测 2026-08-20 上午，Mac `58a1261`）
+
+**症状**（iOS 真机，opencode-web chat 目录新建会话发第 1 条消息）：输入框立即 executing→**立即 completed**→数秒后回复**整段一次性**到达（非流式）；第 2 条消息起完全正常；dsh-web（同为 web API+协议转换）首回合正常。§补九/补十的双端修复（`6fcad07`/`a0b623d`/iOS `79c1a12`）已让内容可渲染，本轮清的是残留时序病。
+
+**根因**（三处同根于首回合 pending→real 懒建会话窗口，双端勘察收敛）：
+1. **裸 idle 假终态**（agent `events.go emitResultOnce`）：`POST /session` 的创建广播（`session.updated/status idle`）在 user echo 之前穿过 SSE filter，`turnID==""` 落兜底分支发出健康 `EventResult`——假终态让 relay 退出（opencode-web 不跨回合存活），**首回合 live feed 断供**（第二回合 send 重启 relay 故正常）。
+2. **seal 竞态**（go-bridge `streamBackendRichHistoryProjectionEvents`）：iOS 首拉落在 prompt_async 已入队、serve busy-map 未登记的窗口，1.18 缺 key 判**确定性 idle**→刚发出的 user turn 被 seal 成 `turn_error{rich_history_unanswered}`→提前 commit 终态基线→iOS 输入框翻完成。
+3. **sourceIsLive 缺失**（go-bridge `ensureProjectionHydrated`）：opencode-web 不在 §3.1 live 信号采样名单（只有 claude/claudecode/codex），首拉必然 mid-turn 的提交闸门只能等 cold-armed 在飞 turn 的终态——期间所有 live 帧攒在 `pendingLive`，回合结束才一张 patch 放出整段回复。dsh-web 首回合正常 = real id 同步返回（首拉在发送前、空会话瞬时 commit），无此窗口。
+
+**修复**（Mac `58a1261`，三处）：① `emitResultOnce` 裸 idle（无 armed turn 且无 terminal error）不 emit、不置 `completed`；② seal 决策加桥 registry-live 覆盖（桥持有 live 的会话不得 seal；死会话冷开 seal 语义保留，2026-08-14 空 turn 修复不回归）；③ opencode-web 补 `sourceIsLive` 采样（registry liveness）→ 首拉 mid-turn 按 §3.1 提交诚实 running partial，流式照常。注：dsh-web 的 live-only admission 分支**不适用**于 opencode-web——`pathlessRichHistoryBackend` 含 opencode-web，live-only source 会走 empty-rebuild 分支清空基线，故选 sourceIsLive 路线。
+
+**回归**：`TestFreshSessionIdleBeforeUserEchoDoesNotEmitResult`（agent，含真回合收口恰好一次）；`TestOpenCodeWebLiveSessionColdPullSkipsSealAndCommitsRunningPartial`（busy-map 竞态+seal 覆盖）/ `…WithBusyProbeCommitsRunningPartial`（sourceIsLive 单独钉死）/ `…DeadSessionColdPullStillSealsUnansweredTurn`（死会话 seal 保留对照）。全仓 go test 绿（2069 项全过，含先存）。
+
+**装机**：Mac Release 已覆盖 `/Applications`（runtime `58a1261244d0`，11:04 构建，已重启在线）；iOS 侧本轮无改动（`79c1a12` 已在真机）。待 owner 复测同场景：预期输入框持续 executing + 流式回复 + 正常收口。
+
+## 四·补十二、首回合 ~1s completed 闪烁收口（owner 复测 2026-08-20 11:1x，Mac `4e42185`）
+
+**症状**：补十一后复测——攒帧已消（能流式输出、收口正常），残留：发送后输入框 executing→completed 持续约 1s→executing 流式。owner 问询「为啥中间有大概 1 秒变成完成态」。
+
+**根因**（两个残余竞态，均取证时已识别为次级路径）：
+1. **registry rebind 滞后**：real id 在 `Send` 内同步解析（懒建会话），但 registry 的 pending→real rebind 原要等 relay 消费首个 real-id SSE 事件。窗口内首拉虽能解析 real id，`getSession(real)` 却落空——补十一的 seal 覆盖与 sourceIsLive 采样双双失效。
+2. **首 prompt 持久化竞态**：首拉可在 user 消息 durable 前命中冷源 `GET /session/{id}/message` 返回 0 条 → 按「真空会话」commit 空 idle 基线 → iOS 渲染 idle 翻完成；echo/流式帧到达（~1s）→ running 投影 → 翻回 executing。这正是 owner 观察到的 1s 窗口。
+
+**修复**（Mac `4e42185`，两处）：① `handleSendMessage` 在 Send 成功后立即 `rebindSessionIDIfResolved`（幂等；relay 逐事件 rebind 保留为兜底）——seal 覆盖/sourceIsLive 自 Send 返回即刻生效；② opencode-web 冷源对「registry-live 且 0 条消息」短暂重拉（200ms×6，上限 1.2s）再放行空基线——首 prompt 持久化窗口内不再 commit 空 idle；死会话与其他 backend 保持单次拉取（web 空会话冷开不受影响，对照测试钉死）。
+
+**回归**：`TestOpenCodeWebSendRebindsPendingToRealBeforeFirstEvent`（行为级，sendHook 模拟 Send 内解析 real id；断言 real 键即时可用 + pending 别名同对象）；`TestOpenCodeWebLiveEmptyColdSourceRepollsForFirstPromptPersist` / `TestOpenCodeWebDeadEmptyColdSourceSingleFetch`。全仓 go test 绿。
+
+**装机**：Mac Release 覆盖 `/Applications`（runtime `4e42185`，11:2x，已重启在线）；iOS 侧仍无改动。待 owner 三测同场景：预期全程 executing 无闪烁 + 流式 + 收口。
+
+## 四·补十三、会话归档/删除落地（owner 报障 2026-08-20 下午，「归档失败：session archive not yet supported」/「backend does not support session deletion」）
+
+**设计期状态**：两项均系有意挂起——§4.3.6 `delete_session` ⛔「除非活体钉死 HTTP delete（禁止复制 `opencode session delete` CLI）」、`archive_session` 2️⃣（二期）；§4.1.3 `core.SessionDeleter` 同因 ⛔。桥侧 handler 本就是通用门（agent 实现 `SessionArchiver`/`SessionDeleter` 即通），缺的只是 agent 实现 + 活体钉死。
+
+**官方形状（源码级，~/Projects/opencode = 1.18.18 与 owner serve 同版本）**：
+- 删除：`DELETE /session/{id}`（v1 SDK SessionDeleteData：无 body、query directory 可选；200 = boolean）。
+- 归档：`PATCH /session/{id}` body `{"time":{"archived": <epoch ms>}}`（服务端 UpdatePayload + 官方内部 `Session.setArchived` 同形；v2 SDK SessionUpdateData 明确暴露 time.archived；ArchivedTimestamp = Schema.Finite，官方 caller 用 Date.now() 即毫秒）。v1 SDK 类型只暴露 title——与 permlab 同教训：**以活体为准**。
+- 列表：源码 list 有 `isNull(time_archived)` 过滤，但活体行为不定（见下）。
+
+**活体钉死（沙盒真 1.18.18，隔离 XDG + Basic Auth，4296）**：create → `PATCH time.archived` 200 回显 Session.Info（时间戳精确一致）→ 默认 `GET /session` 对 archived 行为**不稳定**（裸 curl 一次仍含该行、E2E 一次已排除——按两种都兼容处理）→ `DELETE` 200 `true` → GET 404。
+
+**实现（Mac `agent/opencode-web/session_mutation.go` 新文件）**：`DeleteSession`（DELETE，2xx 即成功，catalog 信号）+ `ArchiveSession`（PATCH 官方 body，响应映射 `AgentSessionInfo` 含 `ArchivedAt`）；`ocwTime` 补 `Archived` 字段，列表行映射 `ArchivedAt` → wire `archivedAtMillis`（客户端隐藏已归档）。directory 链复用既有 M2-1 switchDir（dispatch 对 opencode-web 全方法切目录，DeleteSessionParams 带 directory）。归档后显式 `signalCatalogRefresh`。
+
+**回归**：单测 5 个（官方形状级：DELETE 无 body 带目录、PATCH body 恰为 `{"time":{"archived":<ms>}}` 不碰 title、404 透传可诊断、列表行映射 ArchivedAt、接口契合）；沙盒 E2E `TestSandboxArchiveDelete`（环境门控，Agent 全链路：create→archive 回显→列表两态兼容→delete 404）。全仓 go test 绿。
+
+**装机**：Mac Release 覆盖 `/Applications` 并重启；iOS 侧无改动（UI 与 RPC 链路本就通，报错来自桥的 not_supported 门）。待 owner 复测：更多设置 → 归档（会话从列表隐藏/带归档标记）、删除（会话消失且不复发）。
+
+## 四·补十四、归档复测收口：get_session 信封解码 + by-id 单取（owner 复测 2026-08-20 傍晚，Mac `6b17c17` / iOS `待提交`）
+
+**症状**：删除 ✅；归档报「未能读取数据，因为数据丢失」。取证（capture conn 实测桥 wire）：`get_session` 返回 `{"session":…,"contextUsage":…}` 信封，而 iOS `getSession` 把 result 直接按 `CCCodeBridgeSession` 解码（要求顶层 `id`）→ keyNotFound。**同雷潜伏于 rename/pin 的回拉流程**——归档只是第一个踩中的。连带风险：`handleGetSession` 走 `ListSessions` 目录列表扫描，归档行可能被 serve 默认列表排除（活体 1.18.18 不稳定行为，补十三已记），回拉会 race 出 `session_not_found`。
+
+**修复（双端）**：
+- Mac：新增 `core.SessionInfoFetcher`（by-id 单读可选接口）；opencode-web 实现为 `GET /session/{id}`（复用既有 `fetchSessionInfo`，v2 `{"data":…}` 信封解包，映射含 `ArchivedAt`）；`handleGetSession` **优先 by-id 单取**，miss 回落列表扫描（legacy 行为不变，非实现 backend 不受影响）。
+- iOS：`CCCodeBridgeClient.getSession` 改解 `CCCodeBridgeGetSessionEnvelope` 取 `.session`（该信封类型本就存在且 `getSessionContextUsage` 用法正确）；缺字段抛新增 `CCCodeBridgeClientDecodingError`（可诊断文案，替代笼统 JSONDecoder 报错）。
+
+**回归**：`TestFetchSessionInfoOfficialShapeAndMapping` / `…PropagatesHTTPError`（agent，GET by-id + archived 映射 + 404）；`TestOpenCodeWebGetSessionPrefersByIDFetcher`（桥 dispatch：列表不含该行仍可解析、带 archivedAtMillis）；归档映射去重为 `ocwSessionEntryToInfo`。全仓 go test 绿；iOS CCCodeTests 全量跑（见 iOS 仓提交）。
+
+**装机**：Mac Release 覆盖重启；iOS Debug 真机重装。待 owner 复测归档：预期无报错、会话从列表消失（乐观移除 + 列表刷新）。
 
 
 

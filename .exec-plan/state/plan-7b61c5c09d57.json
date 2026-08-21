@@ -34,7 +34,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-19T23:51:45.178485",
+  "updated_at": "2026-08-20T03:07:27.895531",
   "todos": [
     {
       "id": "s8-1-skeleton-impl",
@@ -1768,11 +1768,11 @@
         "ios-7-failures-triage-v2"
       ],
       "source": "owner 批准（修法按评审收紧）",
-      "notes": "TodoRefreshGenerationTests 8/8；全量 2069/0（两轮）",
+      "notes": "TodoRefreshGenerationTests 8/8；全量 2069/0（两轮）；r2 评审 APPROVE（29/29 定向复跑）；P2 四项已落（iOS 仓 docs/CHANGELOG）。真机验收受阻（结构性，非修复问题）：当前 runtime 无任何在册 backend 广告 todos 能力（唯一有的老 opencode 已按 owner 指令移除；opencode-web todo 接口未实现故有意不广告），且 sessionTodoCache 为内存态（App 重启即空）——幽灵 dock 在当前配置下无法构造。修复已随真机构建安装（含 d6cfbfd）；待 todos 能力 backend 回归（opencode-web todo 支持或老 opencode 临时恢复）时补做。",
       "verification": {
         "required": true,
         "status": "present",
-        "evidence": "全量套件两次 2069 过 0 用例失败"
+        "evidence": "单测 8/8 + r2 定向 29/29 + r2 源码核验主路径 .open 派发；真机 live 验收结构性受阻（无 todos backend），已如实记录"
       }
     },
     {
@@ -1789,6 +1789,40 @@
         "required": true,
         "status": "pending",
         "evidence": ""
+      }
+    },
+    {
+      "id": "ocw-newsession-15s-create",
+      "title": "opencode-web 新会话 create_session 15s 空等修复（快速 pending-id）",
+      "description": "owner 现网 2026-08-20：chat 目录新会话首条消息回显卡 ~15s。根因：handleCreateSession 对惰性建会话的 opencode-web 走 waitForSessionID(15s) 必空等（首个 Send 才建 serve 会话）。修复：并入 codex/claude 快速 pending-id 分支；回归测试 <3s 双断言。send 后 iOS 无内容症状待 owner 带 15s 修复复测后判（Mac 侧 text/permission patch 全部 delivered，iOS pending→real 绑定链在位但存在已知 first-turn blank body 风险面）。",
+      "status": "done",
+      "phase": "ocw-newsess",
+      "kind": "fix",
+      "depends_on": [],
+      "source": "owner 现网 2026-08-20 01:06",
+      "notes": "commit 6fcad07；runtime 6fcad077a564 已覆盖安装 pid 54614",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "TestCreateSessionOpenCodeWebReturnsPendingFast… 绿 + 双套件绿；owner 复测待回"
+      }
+    },
+    {
+      "id": "ocw-newsess-render-fix",
+      "title": "新会话首回合「执行中无回复」双端修复（hydrate 名单 + rebind 观察集）",
+      "description": "owner 现网 2026-08-20 复测（15s 修复生效后仍无回复）。沙盒 E2E（真 ChatViewModel+真 transport 直连 mock serve）复现并收口三处：① Mac forceColdInspection 家族名单漏 opencode-web（a0b623d）→ 新会话首拉 hydrate 卡死 15s；② iOS rebindPendingSessionIdIfNeeded 不同步 projectionStore 观察集 → patch 全走 background-apply 永不渲染；③ E2E 诊断测试留作常驻回归（真 iOS 管线；保真三件 attach/scope/模型；沙盒缺位 XCTSkip）。E2E 绿（syncRev=7 助手渲染 1.4s）；iOS 130 用例套件绿。",
+      "status": "done",
+      "phase": "ocw-newsess2",
+      "kind": "fix",
+      "depends_on": [
+        "ocw-newsession-15s-create"
+      ],
+      "source": "owner 现网复测 2026-08-20 01:16",
+      "notes": "Mac a0b623d（runtime a0b623d228a6 已覆盖安装）；iOS 已提交（rebind 观察集 + E2E 回归）；真机装机因设备 unavailable（锁屏/离网）暂未完成，待手机可达后 run.sh device 补装并 owner 复测",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "E2E 测试通过 + 双仓套件绿；owner 真机复测待装机"
       }
     }
   ]

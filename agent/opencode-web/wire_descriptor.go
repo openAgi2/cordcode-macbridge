@@ -5,23 +5,23 @@ import (
 )
 
 // WireDescriptor (design §4.1.4): opencode-web talks to the official
-// `opencode serve` whose /global/event (or /api/event) SSE stream is a
-// SERVER-LEVEL BROADCAST covering every session — including turns the user
-// starts on the Mac web UI — so external turns stream live and no
-// external-turn polling is required (unlike the legacy hybrid whose watchdog
-// kept polling).
+// `opencode serve` whose /global/event SSE stream is a SERVER-LEVEL
+// BROADCAST covering every session — including turns the user starts on the
+// Mac web UI — so external turns stream live through the ONE backend-instance
+// global subscriber (§6.5; E3 owning replay + single-connection tests green)
+// and no external-turn polling exists.
 //
 // StaticCapabilities is the honest positive set:
 //   - external_turn_streaming: the SSE stream pushes external turns live.
 //
-// Not declared (design §4.1.3/§4.1.4): todos (interface unimplemented),
-// question_reply / structured_user_input_v1 (question answering is ⛔ phase 1),
-// attachment kinds (text-only phase 1 — declared kinds are semantic claims and
-// AttachmentSupporter stays unimplemented so the bridge's attachment gate
-// rejects image/file uploads instead of silently dropping them).
-// permission_resolve is derived by the bridge from the ToolAuthorizer type
-// assertion (lands with the approvals phase) — it must never be hand-written
-// here without the implementation.
+// Everything else is interface-derived by the bridge (negative-before-
+// positive): todos (core.TodoProvider — §6.9), structured_user_input_v1
+// (core.UserInputResponder + StructuredUserInputProvider — §6.8), session_
+// mutation (SessionRenamer+SessionArchiver — §6.10), session_delete
+// (SessionDeleter), permission_resolve (ToolAuthorizer → §3.4 folding).
+// Legacy question_reply is deliberately NOT advertised — structured
+// questions resolve exclusively through resolve_user_input (§6.8). E2
+// reasoning and all OD-3 future surfaces stay unadvertised.
 func (a *Agent) WireDescriptor() *core.WireDescriptor {
 	return &core.WireDescriptor{
 		Kind:                        WireKind, // "opencode-web" — iOS BackendKind.openCodeWeb
@@ -33,6 +33,17 @@ func (a *Agent) WireDescriptor() *core.WireDescriptor {
 }
 
 var _ core.WireDescriptorProvider = (*Agent)(nil)
+
+// SupportedAttachmentKinds implements core.AttachmentSupporter: both image
+// and file attachments ride the official prompt file part
+// {type:"file", mime, filename?, url:"data:<mime>;base64,…} (§6.4 verified
+// transport shape; A9 persisted file/image parts). This positive declaration
+// is what the bridge's attachment gate keys on.
+func (a *Agent) SupportedAttachmentKinds() []string {
+	return []string{"image", "file"}
+}
+
+var _ core.AttachmentSupporter = (*Agent)(nil)
 
 // ToolAuthorizer lights up the bridge-derived permission_resolve capability:
 // approvals surface through SSE permission.asked and resolve via the §3.4

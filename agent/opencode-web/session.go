@@ -2,9 +2,14 @@ package opencodeweb
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -22,16 +27,28 @@ type serverSession struct {
 	model  atomic.Value // *ocwModelRef — send model resolved at Send time
 	chatID atomic.Value // string — serve session id (ses_…)
 
-	sub *sseSubscriber // dedicated, session-filtered
+	// sub is the ONE backend-instance global subscriber (§6.5); events is
+	// this session's ROUTE channel — the only timeline feed for the relay.
+	sub    *sseSubscriber
+	events chan core.Event
 
 	ctx    context.Context
 	cancel context.CancelFunc
 	alive  atomic.Bool
+
+	// closeOnce makes Close idempotent. go-bridge startRelayIfNotRunning
+	// Closes the previous AgentSession when respawning after idle cleanup;
+	// without this, the second Close releases the NEW global SSE that the
+	// respawned session just acquired (owner 真机 2026-08-21: send_message +
+	// "SSE subscriber connected" + relayEvents started + zero forwarding).
+	closeOnce sync.Once
 }
 
 // StartSession implements core.Agent: resume = bind the known id; new = create
-// lazily on first Send (ensureServerSession). Both bind a dedicated filtered
-// SSE subscriber so no other session's events leak.
+// lazily on first Send (ensureServerSession). Both bind a ROUTE on the ONE
+// backend-instance global SSE subscriber (§6.5): the session's channel
+// receives exactly this session's normalized events — no per-session
+// dedicated connection, no other session's events can leak.
 func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentSession, error) {
 	c, err := a.clientFor(ctx)
 	if err != nil {
@@ -41,16 +58,42 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	s := &serverSession{
 		a:      a,
 		client: c,
+		events: make(chan core.Event, 128),
 		ctx:    sessionCtx,
 		cancel: cancel,
 	}
-	if sessionID != "" && sessionID != core.ContinueSession {
+	resume := sessionID != "" && sessionID != core.ContinueSession
+	resumeDirectory := ""
+	if resume {
 		s.chatID.Store(sessionID)
+		// Register the route BEFORE the stream starts: the global read loop
+		// may deliver this session's frames the moment the dial completes —
+		// a route registered after connect would race-drop them.
+		a.registerRoute(sessionID, s.events)
 		// Resume: adopt the serve's own session model as the fallback send
 		// model (truth from the server, never a local default).
 		if info, err := a.fetchSessionInfo(ctx, c, sessionID); err == nil && info.Model != nil && info.Model.ID != "" {
 			s.model.Store(&ocwModelRef{ProviderID: info.Model.ProviderID, ID: info.Model.ID})
+			resumeDirectory = info.Directory
 		}
+	}
+	sub, err := a.acquireGlobalSubscriber(c)
+	if err != nil {
+		if resume {
+			a.unregisterRoute(sessionID, s.events)
+		}
+		cancel()
+		return nil, fmt.Errorf("opencode-web session: SSE connect: %w", err)
+	}
+	s.sub = sub
+	if resume {
+		// Directive-010: route re-established — reconcile this session's
+		// still-pending questions (process restart, missed asked frames) via
+		// GET /question under the same source-proven rules, projected through
+		// this one Kernel route. Bounded; failure = honest no-recovery.
+		rctx, rcancel := context.WithTimeout(ctx, 5*time.Second)
+		a.recoverPendingQuestions(rctx, c, sub, sessionID, resumeDirectory)
+		rcancel()
 	}
 	if pending := a.GetModel(); pending != "" {
 		providerID, modelID := parseQualifiedModel(pending)
@@ -60,24 +103,12 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	}
 	s.alive.Store(true)
 
-	sub := newSSESubscriber(sessionCtx, a, c)
-	sub.sessionFilter.Store(s.CurrentSessionID())
-	sub.filterActive.Store(true)
-	if err := sub.connect(); err != nil {
-		cancel()
-		return nil, fmt.Errorf("opencode-web session: SSE connect: %w", err)
-	}
-	s.sub = sub
-	go func() {
-		<-sessionCtx.Done()
-		_ = sub.Close()
-	}()
 	// Re-attach replay: iOS 锁屏/后台窗口会错过瞬态 session_retry_status
 	//（不做离线持久化，官方 web 同语义）。重附时若快照新鲜（2 分钟内、回合
 	// 未收口）则重放一次，回前台/重开会话即见「自动重试中（第 N 次）」。
 	if id := s.CurrentSessionID(); id != "" {
 		if snap, ok := a.replayableRetrySnapshot(id); ok {
-			sub.emit(core.Event{
+			s.replayLocal(core.Event{
 				Type:         core.EventRetryStatus,
 				Content:      snap.Message,
 				SessionID:    id,
@@ -89,6 +120,16 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	return s, nil
 }
 
+// replayLocal delivers a synthetic re-attach event straight into this
+// session's route (bypassing the global decode path — it is a replay of an
+// already-normalized event, not a second ingest of a raw frame).
+func (s *serverSession) replayLocal(ev core.Event) {
+	select {
+	case s.events <- ev:
+	default:
+	}
+}
+
 func (s *serverSession) CurrentSessionID() string {
 	if v, ok := s.chatID.Load().(string); ok {
 		return v
@@ -96,34 +137,8 @@ func (s *serverSession) CurrentSessionID() string {
 	return ""
 }
 
-func (s *serverSession) Events() <-chan core.Event { return s.sub.events }
+func (s *serverSession) Events() <-chan core.Event { return s.events }
 func (s *serverSession) Alive() bool               { return s.alive.Load() }
-
-// resolveSendModel picks the send model with the official picker's chain
-// (prompt-model-selection.ts): current pending selection → session-adopted
-// model → first connected provider's default ?? its first model. Every
-// candidate still passes the catalog gate below — the fallback never escapes
-// the connected catalog, so the legacy default-model failure mode (a made-up
-// model id) cannot recur.
-func (s *serverSession) resolveSendModel() (ocwModelRef, error) {
-	if pending := s.a.GetModel(); pending != "" {
-		providerID, modelID := parseQualifiedModel(pending)
-		if modelID != "" {
-			return ocwModelRef{ProviderID: providerID, ID: modelID}, nil
-		}
-	}
-	if m, ok := s.model.Load().(*ocwModelRef); ok && m != nil && m.ID != "" {
-		return *m, nil
-	}
-	catalog, err := s.a.fetchModelCatalog(s.ctx, s.client)
-	if err != nil {
-		return ocwModelRef{}, fmt.Errorf("opencode-web: no model selected and the catalog is unavailable: %w", err)
-	}
-	if ref, ok := catalog.fallbackModel(); ok {
-		return ref, nil
-	}
-	return ocwModelRef{}, fmt.Errorf("opencode-web: no usable model — the server's connected provider catalog is empty (configure a provider in OpenCode first)")
-}
 
 // fallbackModel mirrors the official picker fallback: the FIRST connected
 // provider's default model, else its first listed model.
@@ -141,60 +156,124 @@ func (c *ocwModelCatalog) fallbackModel() (ocwModelRef, bool) {
 	return ocwModelRef{}, false
 }
 
-// Send implements core.AgentSession. Phase 1 is text-only: non-empty image or
-// file attachments fail loudly instead of being silently dropped (design
-// §4.3.4). The model is validated against the runtime catalog BEFORE any
-// POST — a model outside the catalog is an immediate, diagnosable error.
+// Send implements core.AgentSession by delegating to SendWithOptions with no
+// per-request options (the backend resolves agent/model/variant itself).
 func (s *serverSession) Send(prompt string, images []core.ImageAttachment, files []core.FileAttachment) error {
+	return s.SendWithOptions(prompt, images, files, core.PromptOptions{})
+}
+
+// newMessageID generates the Mac-side stable OpenCode message id, exactly
+// once per prompt (canonical §6.4/§6.11.1 item 6). It is correlation-only:
+// the id rides the request and matches the persisted user message; it never
+// makes iOS a timeline writer.
+func newMessageID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("msg_%d_%d", time.Now().UnixNano(), atomic.AddUint64(&messageIDSeq, 1))
+	}
+	return "msg_" + hex.EncodeToString(b[:])
+}
+
+var messageIDSeq uint64
+
+// attachmentParts maps existing bridge attachments onto the official prompt
+// file part (§6.4 verified transport shape): both images and files become
+// {type:"file", mime, filename?, url:"data:<mime>;base64,<base64>"}.
+func attachmentParts(images []core.ImageAttachment, files []core.FileAttachment) []map[string]any {
+	parts := make([]map[string]any, 0, len(images)+len(files))
+	for _, img := range images {
+		if len(img.Data) == 0 {
+			continue
+		}
+		mime := img.MimeType
+		if mime == "" {
+			mime = "application/octet-stream"
+		}
+		part := map[string]any{
+			"type": "file",
+			"mime": mime,
+			"url":  "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(img.Data),
+		}
+		if img.FileName != "" {
+			part["filename"] = img.FileName
+		}
+		parts = append(parts, part)
+	}
+	for _, f := range files {
+		if len(f.Data) == 0 {
+			continue
+		}
+		mime := f.MimeType
+		if mime == "" {
+			mime = "application/octet-stream"
+		}
+		part := map[string]any{
+			"type": "file",
+			"mime": mime,
+			"url":  "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(f.Data),
+		}
+		if f.FileName != "" {
+			part["filename"] = f.FileName
+		}
+		parts = append(parts, part)
+	}
+	return parts
+}
+
+// SendWithOptions implements core.PromptOptionsSender (canonical §6.4/§6.11.1):
+// one atomic prompt carrying the Mac-generated-once stable messageID, the
+// resolved agent, the §6.6-resolved validated model, an optional live variant
+// key, and the supported parts. Unsupported inputs (unlisted variant,
+// unavailable agent/model) fail BEFORE any POST — zero network I/O. A 204
+// answer is ADMISSION ONLY: no timeline write, no synthesized message.
+func (s *serverSession) SendWithOptions(prompt string, images []core.ImageAttachment, files []core.FileAttachment, opts core.PromptOptions) error {
 	if !s.alive.Load() {
 		return fmt.Errorf("session is closed")
 	}
-	if len(images) > 0 || len(files) > 0 {
-		return fmt.Errorf("opencode-web: image/file attachments are not supported in phase 1 (text only); attachment was rejected, not silently dropped")
+	if strings.TrimSpace(prompt) == "" && len(images) == 0 && len(files) == 0 {
+		return fmt.Errorf("opencode-web: prompt is empty (no text and no attachments)")
 	}
 
-	model, err := s.resolveSendModel()
+	agentID, agentModel, err := s.a.resolvePromptAgent(s.ctx, s.client, opts.Agent)
 	if err != nil {
 		return err
 	}
-	resolved, ok := s.a.modelInCatalog(s.ctx, s.client, model.ProviderID, model.ID)
-	if !ok {
-		qualified := model.ID
-		if model.ProviderID != "" {
-			qualified = model.ProviderID + "/" + model.ID
-		}
-		return fmt.Errorf("opencode-web: model %q is not in the server's provider catalog; refresh models and pick one from list_models", qualified)
+	explicit := ocwModelRef{ProviderID: opts.ProviderID, ID: opts.ModelID}
+	resolved, err := s.resolvePromptModel(s.ctx, s.client, explicit, agentModel)
+	if err != nil {
+		return err
 	}
 	s.model.Store(&resolved)
+
+	if opts.Variant != "" {
+		live := s.a.modelVariants(s.ctx, s.client, resolved.ProviderID, resolved.ID)
+		found := false
+		for _, key := range live {
+			if key == opts.Variant {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("opencode-web: variant %q is not a live key of model %s/%s (live keys: %v) — zero POSTs", opts.Variant, resolved.ProviderID, resolved.ID, live)
+		}
+	}
 
 	chatID, err := s.ensureServerSession(resolved)
 	if err != nil {
 		return err
 	}
 
-	if s.client.Generation() == generationV2 {
-		// v2: model rides the dedicated switch endpoint; prompt body carries
-		// only the text (design §3.2 v2 column).
-		if err := s.postModel(resolved, chatID); err != nil {
-			return err
-		}
-		body := map[string]any{"prompt": prompt}
-		code, raw, err := s.client.doRequest(s.ctx, http.MethodPost, s.client.endpoint(s.client.apiPath("/session/")+chatID+"/prompt"), body, s.directoryHeader(), true)
-		if err != nil {
-			return fmt.Errorf("opencode-web prompt: %w", err)
-		}
-		if code == 204 || code == 200 {
-			return nil
-		}
-		return fmt.Errorf("opencode-web prompt HTTP %d: %s", code, truncateForError(string(raw)))
-	}
-
-	// Live-pinned on 1.18.18 (sandbox E2E 2026-08-19): prompt_async's model
-	// object uses `modelID` (400 "Missing key at [model][modelID]" with `id`),
-	// while POST /session create uses `id` — the two write routes differ.
+	parts := []map[string]any{{"type": "text", "text": prompt}}
+	parts = append(parts, attachmentParts(images, files)...)
 	body := map[string]any{
-		"parts": []map[string]any{{"type": "text", "text": prompt}},
-		"model": map[string]any{"modelID": resolved.ID, "providerID": resolved.ProviderID},
+		"messageID": newMessageID(),
+		"agent":     agentID,
+		"model":     map[string]any{"providerID": resolved.ProviderID, "modelID": resolved.ID},
+		"parts":     parts,
+	}
+	if opts.Variant != "" {
+		body["variant"] = opts.Variant
 	}
 	code, raw, err := s.client.doRequest(s.ctx, http.MethodPost, s.client.endpoint("/session/"+chatID+"/prompt_async"), body, s.directoryHeader(), true)
 	if err != nil {
@@ -239,7 +318,7 @@ func (s *serverSession) ensureServerSession(model ocwModelRef) (string, error) {
 		return "", fmt.Errorf("opencode-web create session HTTP %d: %s", code, truncateForError(string(raw)))
 	}
 	var resp struct {
-		ID  string `json:"id"`
+		ID   string `json:"id"`
 		Data struct {
 			ID string `json:"id"`
 		} `json:"data"`
@@ -256,41 +335,23 @@ func (s *serverSession) ensureServerSession(model ocwModelRef) (string, error) {
 		return "", fmt.Errorf("opencode-web create session: bad response: %s", truncateForError(string(raw)))
 	}
 	s.chatID.Store(created)
-	s.sub.setSessionFilter(created)
+	s.a.registerRoute(created, s.events)
 	return created, nil
 }
 
-// postModel applies the v2 session-level model switch endpoint.
-// Official v2 shape (V2SessionSwitchModelData): POST /api/session/{id}/model
-// body {"model": ModelRef{id, providerID, variant?}} — nested, NOT flattened
-// (the old flat {providerID, modelID} body was a shape drift, 2026-08-19 audit).
-func (s *serverSession) postModel(model ocwModelRef, chatID string) error {
-	body := map[string]any{"model": map[string]any{"id": model.ID, "providerID": model.ProviderID}}
-	code, raw, err := s.client.doRequest(s.ctx, http.MethodPost, s.client.endpoint(s.client.apiPath("/session/")+chatID+"/model"), body, s.directoryHeader(), true)
-	if err != nil {
-		return fmt.Errorf("opencode-web switch model: %w", err)
-	}
-	if code >= 300 {
-		return fmt.Errorf("opencode-web switch model HTTP %d: %s", code, truncateForError(string(raw)))
-	}
-	return nil
-}
-
-// CancelTurn implements core.TurnCanceler: abort (1.18) / interrupt (v2).
+// CancelTurn implements core.TurnCanceler. C1 quarantines unverified
+// generations at clientFor, so only the verified 1.18.18 abort route exists —
+// the former v2 /interrupt product path is deleted, not merely unreachable.
 func (s *serverSession) CancelTurn(ctx context.Context) error {
 	chatID := s.CurrentSessionID()
 	if chatID == "" {
 		return nil
 	}
 	path := "/session/" + chatID + "/abort"
-	if s.client.Generation() == generationV2 {
-		path = s.client.apiPath("/session/") + chatID + "/interrupt"
-	}
 	actx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	// Official shape: abort (v1 SessionAbortData) and interrupt (v2
-	// V2SessionInterruptData) are both `body?: never` — no JSON body (the
-	// former empty-object body was tolerated drift, 2026-08-19 audit).
+	// Official shape: abort (v1 SessionAbortData) is `body?: never` — no JSON
+	// body (the former empty-object body was tolerated drift, 2026-08-19 audit).
 	code, raw, err := s.client.doRequest(actx, http.MethodPost, s.client.endpoint(path), nil, s.directoryHeader(), true)
 	if err != nil {
 		return fmt.Errorf("opencode-web abort: %w", err)
@@ -320,8 +381,20 @@ func (s *serverSession) RejectQuestion(_ string) error {
 // Close tears down the SSE binding ONLY — it never aborts the running turn
 // (explicit CancelTurn owns that) and never touches the serve process.
 func (s *serverSession) Close() error {
-	s.alive.Store(false)
-	s.cancel() // → sub.Close() via the goroutine started in StartSession
+	s.closeOnce.Do(func() {
+		s.alive.Store(false)
+		// Unregister every route binding (resume id and/or created id) and
+		// drop this session's hold on the ONE global subscriber; the last
+		// release tears the shared stream down. Unregister happens BEFORE
+		// events is closed so emit (which holds routesMu while sending)
+		// cannot send on a closed channel.
+		if id := s.CurrentSessionID(); id != "" {
+			s.a.unregisterRoute(id, s.events)
+		}
+		s.a.releaseGlobalSubscriber()
+		s.cancel()
+		close(s.events)
+	})
 	return nil
 }
 
@@ -332,5 +405,6 @@ func (s *serverSession) GetContextUsage() *core.ContextUsage {
 }
 
 var _ core.AgentSession = (*serverSession)(nil)
+var _ core.PromptOptionsSender = (*serverSession)(nil)
 var _ core.TurnCanceler = (*serverSession)(nil)
 var _ core.ContextUsageReporter = (*serverSession)(nil)

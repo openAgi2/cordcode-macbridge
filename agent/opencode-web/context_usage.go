@@ -159,41 +159,6 @@ func (a *Agent) cachedModelWindows() (map[string]int, bool) {
 	return a.modelWindows, true
 }
 
-// collectModelWindows recursively records every node carrying both id and
-// limit.context, keyed by bare id and (when derivable) providerID/id. The
-// provider-qualified key is attached while descending a provider object.
-func collectModelWindows(node any, into map[string]int, providerIDs ...string) {
-	switch typed := node.(type) {
-	case map[string]any:
-		id, _ := typed["id"].(string)
-		limit, _ := typed["limit"].(map[string]any)
-		if id != "" && limit != nil {
-			if window := anyInt(limit["context"]); window > 0 {
-				into[id] = window
-				if len(providerIDs) > 0 {
-					into[providerIDs[0]+"/"+id] = window
-				}
-			}
-		}
-		// A node with models + an id (but maybe no limit of its own) scopes
-		// its children's qualified keys.
-		scope := providerIDs
-		if id != "" && typed["models"] != nil {
-			scope = []string{id}
-		}
-		for key, child := range typed {
-			if key == "limit" {
-				continue
-			}
-			collectModelWindows(child, into, scope...)
-		}
-	case []any:
-		for _, child := range typed {
-			collectModelWindows(child, into, providerIDs...)
-		}
-	}
-}
-
 // rememberContextUsage / cachedContextUsage cache the last computed usage per
 // session so the live ContextUsageReporter surface can serve it without a
 // refetch and transient failures fall back to the last known value.

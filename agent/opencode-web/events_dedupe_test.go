@@ -144,3 +144,61 @@ func TestTerminalClaimRearmsOnNextTurn(t *testing.T) {
 		t.Fatalf("new turn must re-arm the terminal-text claim exactly once, got %d", textCount)
 	}
 }
+
+// Real-device 2026-08-20 first-turn regression: POST /session's creation
+// broadcast (session.updated/session.status idle on the fresh session) hits
+// the freshly-bound SSE filter BEFORE the first prompt's user echo arms a
+// turn. The bare idle must not emit EventResult — the fake terminal exits the
+// bridge relay (opencode-web does not survive turn boundaries) and kills the
+// live feed for the whole first turn. The real turn-end idle after a normal
+// turn still emits exactly once.
+func TestFreshSessionIdleBeforeUserEchoDoesNotEmitResult(t *testing.T) {
+	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
+	sub := newDrivenSubscriber(t, agent)
+
+	driveFrames(sub,
+		sseFrame("session.updated", map[string]any{
+			"info":      map[string]any{"id": "ses_new", "status": "idle"},
+			"sessionID": "ses_new",
+		}),
+		sseFrame("session.status", map[string]any{
+			"sessionID": "ses_new", "status": map[string]any{"type": "idle"},
+		}),
+		sseFrame("session.idle", map[string]any{"sessionID": "ses_new"}),
+	)
+	for _, ev := range drain(sub) {
+		if ev.Type == core.EventResult {
+			t.Fatalf("bare fresh-session idle must not emit EventResult before any turn armed: %+v", ev)
+		}
+	}
+
+	// The first real turn after the suppressed idle still terminalizes exactly
+	// once, as a healthy completion (assistant output was seen).
+	driveFrames(sub,
+		sseFrame("message.updated", map[string]any{
+			"info": map[string]any{"id": "msg_u1", "role": "user",
+				"parts": []any{map[string]any{"type": "text", "text": "讲个猴哥语录100字左右"}}},
+			"sessionID": "ses_new",
+		}),
+		sseFrame("message.updated", map[string]any{
+			"info": map[string]any{"id": "msg_a1", "role": "assistant",
+				"parts": []any{map[string]any{"type": "text", "text": "俺老孙来也！"}}},
+			"sessionID": "ses_new",
+		}),
+		sseFrame("session.status", map[string]any{
+			"sessionID": "ses_new", "status": map[string]any{"type": "idle"},
+		}),
+	)
+	results := 0
+	for _, ev := range drain(sub) {
+		if ev.Type == core.EventResult {
+			results++
+			if ev.Error != nil {
+				t.Fatalf("turn with assistant output must complete healthy, got error: %v", ev.Error)
+			}
+		}
+	}
+	if results != 1 {
+		t.Fatalf("real turn-end idle must emit exactly one EventResult, got %d", results)
+	}
+}

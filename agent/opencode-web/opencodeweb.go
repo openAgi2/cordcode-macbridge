@@ -94,6 +94,45 @@ type Agent struct {
 	terminalTextSet map[string]bool // sessionID → terminal text already emitted this turn
 	retryStatusSeen map[string]int  // sessionID → highest retry attempt already emitted
 
+	// C4 §6.5: ONE backend-instance global SSE subscriber. Every live
+	// serverSession registers a route (sessionID → channel); the subscriber
+	// normalizes each direct event exactly once and routes by SessionID.
+	// Unrouted sessions get catalog-signal refresh only — never a hidden
+	// second timeline. Passive Subscribe taps the same stream (the E3
+	// external-turn observation path); no per-session dedicated connection
+	// exists.
+	globalSubMu   sync.Mutex
+	globalSub     *sseSubscriber
+	globalSubRefs int
+
+	routesMu sync.Mutex
+	// routes maps sessionID → the live session channels entitled to that
+	// session's normalized events (a channel set keeps duplicate registrations
+	// for one id deterministic).
+	routes map[string]map[chan core.Event]struct{}
+
+	passiveMu sync.Mutex
+	passive   map[chan core.Event]struct{}
+
+	// C6 §6.8: live structured-question requests (question.asked → pending;
+	// replied/rejected/ResolveUserInput success → cleared). The serve holds
+	// the single answer lock; this map is label-recovery state only.
+	// questions is the directive-011 lifecycle gate: per-(session,
+	// interaction) pending/terminal state. The map plus questionMu IS the
+	// serial reduction order for every question fact (live asked, live
+	// terminal, recovery requested, recovery terminal) — admissions and
+	// their emissions happen under the lock, so the Kernel receives facts in
+	// admission order, terminal always beats a stale pending, and each fact
+	// ingests at most once.
+	questionMu       sync.Mutex
+	pendingQuestions map[string]ocwQuestionRequest
+	questions        map[string]*questionLifecycle
+
+	// C6 §6.9: the last todo.updated replacement list per session (control
+	// plane only — never a timeline part).
+	todoMu    sync.Mutex
+	lastTodos map[string][]core.Todo
+
 	// lastRetryMu guards the per-session retry snapshot for re-attach replay.
 	// bridge-v1 session_retry_status is transient by design（不做离线持久化，
 	// 官方 web 也只在实时流显示）——owner 2026-08-19：锁屏/后台窗口会错过
@@ -109,6 +148,14 @@ type Agent struct {
 }
 
 var _ core.Agent = (*Agent)(nil)
+
+// UsesPromptOptions implements core.PromptOptionsAgent: opencode-web sessions
+// are core.PromptOptionsSenders — the go-bridge send path carries
+// agent/provider/model/variant per request (canonical §6.11.1 item 5) and
+// never mutates agent-global selection state.
+func (a *Agent) UsesPromptOptions() bool { return true }
+
+var _ core.PromptOptionsAgent = (*Agent)(nil)
 
 // New creates the opencode-web agent from options. It never fails on a
 // missing CLI binary — this backend does not use the CLI at all.
@@ -278,8 +325,18 @@ func (a *Agent) replayableRetrySnapshot(sessionID string) (retrySnapshot, bool) 
 // before InstanceStatus re-probes (read-only GETs against a loopback server).
 const instanceStatusProbeTTL = 15 * time.Second
 
+// unsupportedGenerationDetail is the single shared quarantine wording used by
+// InstanceStatus, clientFor, and RunDiagnostics so the status mirror, the
+// product gate, and the diagnostics report cannot drift (C1).
+func unsupportedGenerationDetail(gen generation, detail string) string {
+	return fmt.Sprintf("unsupported-generation (quarantined): probe detected generation %s; the only verified product generation is OpenCode 1.18.18 — no prompt, no SSE ingest, no Kernel writes; %s", gen, detail)
+}
+
 // InstanceStatus mirrors the endpoint state for hello_ack detection. The probe
-// is a read-only GET sequence; it never spawns, binds, or writes.
+// is a read-only GET sequence; it never spawns, binds, or writes. States stay
+// distinct (C1): not configured / probe failed (unreachable, unauthorized,
+// server_unauthenticated — the probe error names which) / unsupported
+// generation (detected but quarantined) / supported 1.18.18.
 func (a *Agent) InstanceStatus() (available bool, detail string) {
 	if a.baseURL == "" {
 		return false, NotConfiguredDetail
@@ -297,6 +354,9 @@ func (a *Agent) InstanceStatus() (available bool, detail string) {
 	}
 	if res.err != nil {
 		return false, "probe failed: " + res.err.Error()
+	}
+	if res.gen != generation118 {
+		return false, unsupportedGenerationDetail(res.gen, res.detail)
 	}
 	return true, res.detail
 }
@@ -327,6 +387,12 @@ func (a *Agent) runProbe(ctx context.Context) {
 // clientFor returns an HTTP client pinned to the probed API generation,
 // re-probing on demand when the cached outcome is missing, failed, or stale.
 // This is the single entry every data-plane operation goes through.
+//
+// C1 version boundary: OpenCode 1.18.18 (generation118) is the ONLY verified
+// product generation. Any other detected generation (v2 or otherwise) fails
+// closed here — quarantined out of normal adapter selection with zero prompt,
+// zero SSE ingest, zero Kernel writes, and no capability claim. Read-side v2
+// shape helpers elsewhere in the package are unreachable behind this gate.
 func (a *Agent) clientFor(ctx context.Context) (*Client, error) {
 	if a.baseURL == "" {
 		return nil, fmt.Errorf("%s", NotConfiguredDetail)
@@ -343,6 +409,9 @@ func (a *Agent) clientFor(ctx context.Context) (*Client, error) {
 			detail = res.err.Error()
 		}
 		return nil, fmt.Errorf("opencode-web endpoint not usable: %s", detail)
+	}
+	if res.gen != generation118 {
+		return nil, fmt.Errorf("opencode-web: %s", unsupportedGenerationDetail(res.gen, res.detail))
 	}
 	c := newClient(a.baseURL, a.user, a.pass)
 	c.setGeneration(res.gen)

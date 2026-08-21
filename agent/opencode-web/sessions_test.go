@@ -27,7 +27,29 @@ type recordingServe struct {
 	responses       map[string]string
 	methodResponses map[string]string
 	dirResponses    map[string]string
-	requests        []recordedRequest
+	// statusOverrides ("METHOD /path" → HTTP status) answers with a bare
+	// status and no body (404 convergence probes etc.).
+	statusOverrides map[string]int
+	// statusAfter answers METHOD /path with a bare code once more than
+	// `after` matching requests have been served (200-then-404 convergence
+	// probes: {"code":404,"after":1} keeps the first GET 200).
+	statusAfter map[string]recordingStatusAfter
+	// statusBodies ("METHOD /path" → {code, body}) answers with an arbitrary
+	// status AND body — the destructive matrix needs e.g. 202 + body `true`
+	// to prove non-200 codes fail even with a success-shaped body.
+	statusBodies map[string]recordingStatusBody
+	hitCounters map[string]int
+	requests    []recordedRequest
+}
+
+type recordingStatusAfter struct {
+	code int
+	after int
+}
+
+type recordingStatusBody struct {
+	code int
+	body string
 }
 
 type recordedRequest struct {
@@ -72,6 +94,30 @@ func (s *recordingServe) handler() http.HandlerFunc {
 			return
 		}
 		s.mu.Lock()
+		key := r.Method + " " + r.URL.Path
+		if code, ok := s.statusOverrides[key]; ok {
+			s.mu.Unlock()
+			w.WriteHeader(code)
+			return
+		}
+		if sb, ok := s.statusBodies[key]; ok {
+			s.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(sb.code)
+			_, _ = io.WriteString(w, sb.body)
+			return
+		}
+		if sa, ok := s.statusAfter[key]; ok {
+			if s.hitCounters == nil {
+				s.hitCounters = make(map[string]int)
+			}
+			s.hitCounters[key]++
+			if s.hitCounters[key] > sa.after {
+				s.mu.Unlock()
+				w.WriteHeader(sa.code)
+				return
+			}
+		}
 		body, found := s.responses[r.URL.Path]
 		if mBody, mFound := s.methodResponses[r.Method+" "+r.URL.Path]; mFound {
 			body, found = mBody, true
@@ -121,6 +167,11 @@ func newDataAgent(t *testing.T, responses map[string]string, workDir string) (*A
 	if _, ok := responses["/session"]; !ok {
 		responses["/session"] = `[]`
 	}
+	if _, ok := responses["/agent"]; !ok {
+		// C3/C5 send path resolves the prompt agent from the live registry;
+		// tests that care about agent semantics override this route.
+		responses["/agent"] = `[{"name":"build","mode":"primary","native":true,"description":"general coding"}]`
+	}
 	s := &recordingServe{responses: responses}
 	base := s.start(t)
 	a, err := New(map[string]any{
@@ -149,7 +200,8 @@ func TestListSessionsMapsFieldsAndDirectoryHeader(t *testing.T) {
 	}})
 	agent, serve := newDataAgent(t, map[string]string{"/session": string(payload)}, "/tmp/proj")
 
-	sessions, err := agent.ListSessions(context.Background())
+	// C2: the default enumeration is the scoped official list (roots+limit).
+	sessions, err := agent.ListSessionsInDirectory(context.Background(), "/tmp/proj")
 	if err != nil {
 		t.Fatalf("ListSessions: %v", err)
 	}
@@ -180,7 +232,10 @@ func TestListSessionsMapsFieldsAndDirectoryHeader(t *testing.T) {
 	}
 }
 
-func TestListSessionsV2EnvelopeAndStableOrder(t *testing.T) {
+func TestListSessionsV2EnvelopeQuarantined(t *testing.T) {
+	// C1: the v2 envelope shape is still DETECTED by the probe (honest status),
+	// but the endpoint is quarantined — list must fail closed with the
+	// unsupported-generation error, and zero writes may reach the wire.
 	older := float64(time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC).UnixMilli())
 	newer := float64(time.Date(2026, 8, 18, 0, 0, 0, 0, time.UTC).UnixMilli())
 	s := &recordingServe{responses: map[string]string{
@@ -198,16 +253,16 @@ func TestListSessionsV2EnvelopeAndStableOrder(t *testing.T) {
 		"opencode_web_pass": "pw",
 	})
 	agent := a.(*Agent)
-	// Shape arbiter: /session missing (404) + /api/session envelope → v2.
-	if _, err := agent.clientFor(context.Background()); err != nil {
-		t.Fatalf("clientFor: %v", err)
+	// Shape arbiter: /session missing (404) + /api/session envelope → probe
+	// detects v2, then clientFor quarantines it.
+	if _, err := agent.clientFor(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported-generation (quarantined)") {
+		t.Fatalf("v2 must fail closed at clientFor, got err=%v", err)
 	}
-	sessions, err := agent.ListSessions(context.Background())
-	if err != nil {
-		t.Fatalf("ListSessions: %v", err)
+	if _, err := agent.ListSessions(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported-generation (quarantined)") {
+		t.Fatalf("ListSessions on v2 must fail closed, got err=%v", err)
 	}
-	if len(sessions) != 2 || sessions[0].ID != "ses_new" || sessions[1].ID != "ses_old" {
-		t.Fatalf("order/rows = %+v", sessions)
+	if posts := countRequests(s, "POST", ""); len(posts) != 0 {
+		t.Fatalf("v2 quarantine must issue ZERO POSTs, got %+v", posts)
 	}
 }
 
@@ -222,7 +277,6 @@ func TestGetRichSessionHistoryMapsParts(t *testing.T) {
 	 "parts":[{"type":"text","text":"hello"}]},
 	{"info":{"id":"msg_2","role":"assistant","modelID":"glm-4.7","providerID":"zhipuai-coding-plan","agent":"build","time":{"created":2000}},
 	 "parts":[
-		{"type":"reasoning","text":"thinking…"},
 		{"type":"text","text":"answer"},
 		{"type":"tool","tool":{"id":"pt_1","toolName":"read","state":{"status":"completed","output":"file contents","durationMs":12}}},
 		{"type":"file","id":"f1","mime":null,"url":"u","filename":"a.txt"}
@@ -235,6 +289,52 @@ func TestGetRichSessionHistoryMapsParts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("history: %v", err)
 	}
+	// §6.3 (corrected, directive-014/E2b): populated reasoning in the HTTP
+	// history maps as a first-class part with the exact text; missing or
+	// non-string text fails closed; whitespace-only is skipped.
+	reasoningMessages := `[
+	{"info":{"id":"msg_1","role":"assistant","time":{"created":1000}},
+	 "parts":[{"type":"reasoning","text":"thinking…"},{"type":"text","text":"a"}]}]`
+	reasoningAgent, _ := newDataAgent(t, map[string]string{
+		"/session/ses_y/message": reasoningMessages,
+	}, "/tmp/proj")
+	reasoningRich, err := reasoningAgent.GetRichSessionHistory(context.Background(), "ses_y", 0)
+	if err != nil {
+		t.Fatalf("populated history reasoning must hydrate, got %v", err)
+	}
+	var reasoningParts []map[string]any
+	for _, p := range reasoningRich[0].Parts {
+		if p["type"] == "reasoning" {
+			reasoningParts = append(reasoningParts, p)
+		}
+	}
+	if len(reasoningParts) != 1 || reasoningParts[0]["content"] != "thinking…" {
+		t.Fatalf("reasoning part = %+v", reasoningParts)
+	}
+	if reasoningRich[0].Thinking != "thinking…" {
+		t.Fatalf("Thinking field = %q, want reasoning text for overlay hydrate", reasoningRich[0].Thinking)
+	}
+	for _, badBody := range []string{
+		`[{"info":{"id":"m","role":"assistant"},"parts":[{"type":"reasoning"}]}]`,
+		`[{"info":{"id":"m","role":"assistant"},"parts":[{"type":"reasoning","text":7}]}]`,
+	} {
+		badAgent, _ := newDataAgent(t, map[string]string{"/session/ses_z/message": badBody}, "/tmp/proj")
+		if _, err := badAgent.GetRichSessionHistory(context.Background(), "ses_z", 0); err == nil || !strings.Contains(err.Error(), "reasoning part") {
+			t.Fatalf("malformed reasoning text must fail closed, got %v", err)
+		}
+	}
+	wsAgent, _ := newDataAgent(t, map[string]string{
+		"/session/ses_w/message": `[{"info":{"id":"m","role":"assistant"},"parts":[{"type":"reasoning","text":"   "},{"type":"text","text":"a"}]}]`,
+	}, "/tmp/proj")
+	wsRich, err := wsAgent.GetRichSessionHistory(context.Background(), "ses_w", 0)
+	if err != nil {
+		t.Fatalf("whitespace reasoning must be skipped without failing, got %v", err)
+	}
+	for _, p := range wsRich[0].Parts {
+		if p["type"] == "reasoning" {
+			t.Fatalf("whitespace-only reasoning must not map, got %+v", p)
+		}
+	}
 	if len(rich) != 2 {
 		t.Fatalf("len = %d", len(rich))
 	}
@@ -242,7 +342,7 @@ func TestGetRichSessionHistoryMapsParts(t *testing.T) {
 	if user.Role != "user" || user.Content != "hello" {
 		t.Fatalf("user entry %+v", user)
 	}
-	if assistant.Role != "assistant" || assistant.Content != "answer" || assistant.Thinking != "thinking…" {
+	if assistant.Role != "assistant" || assistant.Content != "answer" || assistant.Thinking != "" {
 		t.Fatalf("assistant entry %+v", assistant)
 	}
 	if assistant.ModelID != "glm-4.7" || assistant.ProviderID != "zhipuai-coding-plan" || assistant.AgentName != "build" {
@@ -267,6 +367,103 @@ func TestGetRichSessionHistoryMapsParts(t *testing.T) {
 	plain, err := agent.GetSessionHistory(context.Background(), "ses_x", 0)
 	if err != nil || len(plain) != 2 || plain[1].Content != "answer" {
 		t.Fatalf("plain history = %+v err=%v", plain, err)
+	}
+}
+
+func TestGetRichSessionHistoryMapsOfficialToolPart(t *testing.T) {
+	// Official 1.18.18 ToolPart: tool is a STRING, state is a sibling
+	// (schema v1/session.ts ToolPart; live GET /session/:id/message on 4096;
+	// samples a6/a8). The nested {tool:{toolName,state}} fixture is not this
+	// generation — mapping it as the only shape dropped every real tool card
+	// on iPhone cold-open.
+	messages := `[
+	{"info":{"id":"msg_u","role":"user","time":{"created":1000}},
+	 "parts":[{"type":"text","text":"再增加林黛玉和贾宝玉游玩的情节"}]},
+	{"info":{"id":"msg_a1","role":"assistant","parentID":"msg_u","time":{"created":2000}},
+	 "parts":[
+		{"type":"step-start"},
+		{"type":"reasoning","text":"Let me read the file."},
+		{"type":"text","text":"先看当前文件结构："},
+		{"id":"prt_read1","sessionID":"ses_x","messageID":"msg_a1","type":"tool","callID":"call_1","tool":"read",
+		 "state":{"status":"completed","input":{"filePath":"/tmp/story.txt","limit":10},
+		          "output":"file contents","title":"story.txt",
+		          "time":{"start":1000,"end":3500}}},
+		{"type":"step-finish","reason":"tool-calls"}
+	 ]},
+	{"info":{"id":"msg_a2","role":"assistant","parentID":"msg_u","time":{"created":3000}},
+	 "parts":[
+		{"type":"reasoning","text":"I'll insert a scene."},
+		{"type":"text","text":"插入一段情节："},
+		{"id":"prt_edit1","type":"tool","callID":"call_2","tool":"edit",
+		 "state":{"status":"completed",
+		          "input":{"filePath":"/tmp/story.txt","oldString":"a","newString":"ab"},
+		          "output":"Edit applied successfully.","title":"story.txt",
+		          "metadata":{"diff":"--- a\n+++ b\n",
+		                      "filediff":{"file":"/tmp/story.txt","patch":"@@ -1 +1 @@\n-a\n+ab\n","additions":1,"deletions":0}},
+		          "time":{"start":4000,"end":4010}}}
+	 ]},
+	{"info":{"id":"msg_a3","role":"assistant","parentID":"msg_u","time":{"created":4000}},
+	 "parts":[
+		{"type":"tool","id":"prt_todo","callID":"call_3","tool":"todowrite",
+		 "state":{"status":"completed","input":{"todos":[]},"output":"[]","title":"0 todos"}}
+	 ]}
+	]`
+	agent, _ := newDataAgent(t, map[string]string{
+		"/session/ses_x/message": messages,
+	}, "/tmp/proj")
+
+	rich, err := agent.GetRichSessionHistory(context.Background(), "ses_x", 0)
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	if len(rich) != 4 {
+		t.Fatalf("len = %d, want 4", len(rich))
+	}
+
+	read := rich[1]
+	if read.Thinking != "Let me read the file." {
+		t.Fatalf("read thinking = %q", read.Thinking)
+	}
+	if read.Content != "先看当前文件结构：" {
+		t.Fatalf("read content = %q", read.Content)
+	}
+	if len(read.Steps) != 1 {
+		t.Fatalf("read steps = %+v (official string tool must not be dropped)", read.Steps)
+	}
+	rs := read.Steps[0]
+	if rs["id"] != "prt_read1" || rs["toolName"] != "read" || rs["status"] != "completed" {
+		t.Fatalf("read step identity = %+v", rs)
+	}
+	if rs["title"] != "story.txt" {
+		t.Fatalf("read title = %v, want official state.title", rs["title"])
+	}
+	input, _ := rs["toolInput"].(map[string]any)
+	if input["filePath"] != "/tmp/story.txt" {
+		t.Fatalf("read toolInput = %+v", rs["toolInput"])
+	}
+	if rs["duration"] != float64(2500) {
+		t.Fatalf("read duration = %v, want 2500ms from state.time", rs["duration"])
+	}
+	out := rs["output"].(map[string]any)
+	if out["kind"] != "inline" || out["text"] != "file contents" {
+		t.Fatalf("read output = %+v", out)
+	}
+
+	edit := rich[2]
+	if len(edit.Steps) != 1 || edit.Steps[0]["toolName"] != "edit" {
+		t.Fatalf("edit steps = %+v", edit.Steps)
+	}
+	changes, _ := edit.Steps[0]["fileChanges"].([]map[string]any)
+	if len(changes) != 1 || changes[0]["path"] != "/tmp/story.txt" || changes[0]["kind"] != "edit" {
+		t.Fatalf("edit fileChanges = %+v", edit.Steps[0]["fileChanges"])
+	}
+	if changes[0]["diff"] != "@@ -1 +1 @@\n-a\n+ab\n" {
+		t.Fatalf("edit diff = %v", changes[0]["diff"])
+	}
+
+	todo := rich[3]
+	if len(todo.Steps) != 0 {
+		t.Fatalf("todowrite must stay hidden like official session-ui HIDDEN_TOOLS, got %+v", todo.Steps)
 	}
 }
 
@@ -299,7 +496,7 @@ func TestUsageZeroTopLevelStillComputesFromMessages(t *testing.T) {
 	agent, _ := newDataAgent(t, map[string]string{
 		"/session/ses_x":         `{"id":"ses_x","tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}},"model":null}`,
 		"/session/ses_x/message": lastAssistantPayload(),
-		"/provider":              `{"all":[{"id":"zhipuai-coding-plan","models":{"glm-4.7":{"id":"glm-4.7","limit":{"context":128000}}}}],"connected":["zhipuai-coding-plan"]}`,
+		"/provider":              `{"all":[{"id":"zhipuai-coding-plan","models":{"glm-4.7":{"id":"glm-4.7","limit":{"context":128000}}}}],"connected":["zhipuai-coding-plan"],"default":{}}`,
 	}, "/tmp/proj")
 
 	usage, err := agent.GetSessionContextUsage(context.Background(), "ses_x")
@@ -327,7 +524,7 @@ func TestUsageZeroTopLevelStillComputesFromMessages(t *testing.T) {
 func TestUsageNoWindowReturnsNilNotFabricated(t *testing.T) {
 	agent, _ := newDataAgent(t, map[string]string{
 		"/session/ses_x/message": lastAssistantPayload(),
-		"/provider":              `{"all":[{"id":"someprov","models":{"glm-4.7":{"id":"glm-4.7"}}}],"connected":["someprov"]}`,
+		"/provider":              `{"all":[{"id":"someprov","models":{"glm-4.7":{"id":"glm-4.7"}}}],"connected":["someprov"],"default":{}}`,
 	}, "/tmp/proj")
 	usage, err := agent.GetSessionContextUsage(context.Background(), "ses_x")
 	if err != nil {
@@ -341,7 +538,7 @@ func TestUsageNoWindowReturnsNilNotFabricated(t *testing.T) {
 func TestUsageNoAssistantTokensReturnsNil(t *testing.T) {
 	agent, _ := newDataAgent(t, map[string]string{
 		"/session/ses_x/message": `[{"info":{"role":"assistant"},"parts":[]}]`,
-		"/provider":              `{"all":[{"id":"p","models":{"m":{"id":"m","limit":{"context":1000}}}}],"connected":["p"]}`,
+		"/provider":              `{"all":[{"id":"p","models":{"m":{"id":"m","limit":{"context":1000}}}}],"connected":["p"],"default":{}}`,
 	}, "/tmp")
 	usage, err := agent.GetSessionContextUsage(context.Background(), "ses_x")
 	if err != nil || usage != nil {
@@ -357,7 +554,7 @@ func TestAvailableModelsQualifiedNamesAndWindows(t *testing.T) {
 			"glm-4.6":{"id":"glm-4.6","limit":{"context":64000}}}},
 		{"id":"never-configured","name":"Stranger","models":{
 			"stranger-model":{"id":"stranger-model","limit":{"context":999000}}}}
-	],"connected":["zhipuai-coding-plan"]}`,
+	],"connected":["zhipuai-coding-plan"],"default":{}}`,
 	}, "/tmp")
 	models := agent.AvailableModels(context.Background())
 	if len(models) != 2 {
@@ -433,7 +630,8 @@ func mustClient(t *testing.T, a *Agent) *Client {
 func TestListProjectsMapsWorktree(t *testing.T) {
 	// 2026-08-19：worktree 可见性要求磁盘存在（幽灵目录不下发）——夹具用真实临时目录。
 	realProj := t.TempDir()
-	projectsPayload := `[{"id":"prj_1","worktree":` + strconv.Quote(realProj) + `,"vcs":{"branch":"main"},"time":{"created":1},"sandboxes":[]},{"id":"prj_2"}]`
+	ghost := filepath.Join(t.TempDir(), "ghost")
+	projectsPayload := `[{"id":"prj_1","worktree":` + strconv.Quote(realProj) + `,"vcs":{"branch":"main"},"time":{"created":1},"sandboxes":[]},{"id":"prj_2","worktree":` + strconv.Quote(ghost) + `}]`
 	agent, _ := newDataAgent(t, map[string]string{
 		"/project": projectsPayload,
 	}, "/tmp")
@@ -442,16 +640,24 @@ func TestListProjectsMapsWorktree(t *testing.T) {
 		t.Fatalf("projects: %v", err)
 	}
 	if len(projects) != 1 {
-		t.Fatalf("entries without worktree dropped, got %+v", projects)
+		t.Fatalf("worktrees missing on disk are hidden by the visibility overlay, got %+v", projects)
 	}
 	if projects[0].Directory != realProj || projects[0].Name != filepath.Base(realProj) || projects[0].ID != "prj_1" {
 		t.Fatalf("mapping = %+v", projects[0])
+	}
+	// C2 strict decoder: a row missing required worktree fails the whole
+	// registry instead of being trimmed (see project_registry_c2_reviewfix_test).
+	bad, _ := newDataAgent(t, map[string]string{
+		"/project": `[{"id":"prj_1"},{"id":"prj_2","worktree":"/x"}]`,
+	}, "/tmp")
+	if _, err := bad.ListProjectSuggestions(context.Background()); err == nil || !strings.Contains(err.Error(), "missing required worktree") {
+		t.Fatalf("row missing worktree must fail the registry, got %v", err)
 	}
 }
 
 func TestListAgentsMapsAndEmptyIsLegal(t *testing.T) {
 	agent, _ := newDataAgent(t, map[string]string{
-		"/agent": `[{"id":"build","mode":"primary","description":"general coding","hidden":false,"native":true},{"name":"plan","mode":"plan"}]`,
+		"/agent": `[{"name":"build","mode":"primary","description":"general coding","hidden":false,"native":true},{"name":"plan","mode":"subagent","description":"planning","native":false}]`,
 	}, "/tmp")
 	agents, err := agent.ListAgents(context.Background())
 	if err != nil {
@@ -463,7 +669,7 @@ func TestListAgentsMapsAndEmptyIsLegal(t *testing.T) {
 	if agents[0].Name != "build" || agents[0].Mode != "primary" || !agents[0].Native {
 		t.Fatalf("first = %+v", agents[0])
 	}
-	if agents[1].Name != "plan" || agents[1].Mode != "plan" {
+	if agents[1].Name != "plan" || agents[1].Mode != "subagent" {
 		t.Fatalf("second = %+v", agents[1])
 	}
 
@@ -476,6 +682,8 @@ func TestListAgentsMapsAndEmptyIsLegal(t *testing.T) {
 }
 
 func TestProjectsNotSupportedOnV2(t *testing.T) {
+	// C1: v2 is quarantined at clientFor — project suggestions never issue a
+	// request; the unsupported-generation error surfaces verbatim.
 	s := &recordingServe{responses: map[string]string{
 		"/global/health": `{"healthy":true}`,
 		"/api/health":    `{"healthy":true}`,
@@ -488,11 +696,11 @@ func TestProjectsNotSupportedOnV2(t *testing.T) {
 		"opencode_web_pass": "pw",
 	})
 	agent := a.(*Agent)
-	if _, err := agent.clientFor(context.Background()); err != nil {
-		t.Fatalf("clientFor: %v", err)
+	if _, err := agent.clientFor(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported-generation (quarantined)") {
+		t.Fatalf("v2 must fail closed at clientFor, got err=%v", err)
 	}
-	if _, err := agent.ListProjectSuggestions(context.Background()); err == nil || !strings.Contains(err.Error(), "not supported") {
-		t.Fatalf("v2 project list must be not_supported (no /api/location misuse), got %v", err)
+	if _, err := agent.ListProjectSuggestions(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported-generation (quarantined)") {
+		t.Fatalf("v2 endpoint must surface the quarantine error, got %v", err)
 	}
 }
 
