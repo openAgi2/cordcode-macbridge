@@ -41,7 +41,7 @@
       "attestation_note": "all evidence self-attested; sandbox/unit/regression replayable; owner UI matrix NOT executed (awaits supervisor audit)"
     }
   },
-  "updated_at": "2026-08-21T02:29:59.893339+00:00",
+  "updated_at": "2026-08-21T02:42:00Z",
   "todos": [
     {
       "id": "gate-a-inventory-impl",
@@ -1722,25 +1722,96 @@
       "id": "audit009-tail-review-fix-regression",
       "title": "Audit-009 sandbox regression and connected-device install",
       "description": "Run bounded Go/race/build/vet and real isolated 1.18.18 question/mutation regressions, reinstall the changed Mac product, rerun the two iOS targeted classes, and install/launch on the currently available paired iPhone without UI automation.",
-      "status": "done",
+      "status": "blocked",
       "phase": "audit009-tail-review-fix",
       "kind": "regression",
       "depends_on": [
         "audit009-tail-review-fix-tests"
       ],
       "source": "supervisor audit-009; directive-010",
-      "notes": "review-fix-for:concentrated-audit008-review-fix-regression; on proven completion restore the parent regression to done and record resolved-via",
+      "notes": "review-fix-for:concentrated-audit008-review-fix-regression | supervisor audit-010 partial: pending reload and strict tail verified, but resolution/recovery ordering and resolved cold reconciliation remain incomplete | resolved-by:audit010-resolution-race-review-fix-regression",
       "verification": {
         "required": true,
-        "status": "present",
+        "status": "failed",
+        "method": "mixed",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "Supervisor audit-010 re-verified targeted/race/full Go tests, iOS 11/11, installed app presence, runtime paths, and a fresh real 1.18.18 pending-reload/mutation sandbox. Main tail passes. Regression remains incomplete because recovery only adds rows returned by GET /question; it cannot settle a projected pending interaction whose replied/rejected SSE event was lost and whose server pending row disappeared. The bool claim also permits resolved-before-requested ordering inversion, while both named GET/live race tests are sequential. Classified repairable-heavy and assigned directive-011.",
+        "artifacts": [
+          "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-010-question-recovery-strict-tail-and-ios-install.md",
+          "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-011-question-terminal-reconciliation.md",
+          "cmd:go test ./agent/opencode-web ./go-bridge -run TestAudit010 => PASS (re-verified)",
+          "cmd:real isolated 1.18.18 TestSandboxC6C7/question|question-reload|mutations => PASS (re-verified)",
+          "cmd:xcodebuild selected ModelVariantSelectionTests + OpencodeWebVariantAgentWireTests => 11/11 PASS (re-verified)"
+        ],
+        "checked_at": "2026-08-21T02:42:00Z"
+      }
+    },
+    {
+      "id": "audit010-resolution-race-review-fix-impl",
+      "title": "Audit-010 Question terminal reconciliation implementation",
+      "description": "Replace add-only boolean projection claims with a source-ordered per-session interaction lifecycle; reconcile A7-proven answered/rejected history after missed SSE terminal events without absence guesses or a second writer.",
+      "status": "pending",
+      "phase": "audit010-resolution-race-review-fix",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "supervisor audit-010; directive-011",
+      "notes": "review-fix-for:audit009-tail-review-fix-regression",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "audit010-resolution-race-review-fix-tests",
+      "title": "Audit-010 barrier and actual resolve full-path tests",
+      "description": "Use controlled barriers to prove GET/live/resolved ordering, missed-terminal reconnect and resolved cold hydrate; exercise actual resolve_user_input through concrete opencode-web, official route fixtures, Kernel, and authoritative headRev.",
+      "status": "pending",
+      "phase": "audit010-resolution-race-review-fix",
+      "kind": "tests",
+      "depends_on": [
+        "audit010-resolution-race-review-fix-impl"
+      ],
+      "source": "supervisor audit-010; directive-011",
+      "notes": "review-fix-for:audit009-tail-review-fix-regression",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "audit010-resolution-race-review-fix-regression",
+      "title": "Audit-010 real 1.18.18 terminal reload regression and Mac install",
+      "description": "Re-verify pending/answered/rejected cold reopen against isolated 1.18.18, run bounded Go/race/full/vet/build, reinstall Mac Release, validate 8777/4096/4398/4399, and submit one audit-ready report without rerunning unchanged iOS work.",
+      "status": "pending",
+      "phase": "audit010-resolution-race-review-fix",
+      "kind": "regression",
+      "depends_on": [
+        "audit010-resolution-race-review-fix-tests"
+      ],
+      "source": "supervisor audit-010; directive-011",
+      "notes": "review-fix-for:audit009-tail-review-fix-regression; on proven completion restore both blocked parent regressions and record resolved-via",
+      "verification": {
+        "required": true,
+        "status": "missing",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "Directive-010 regression: go test ./... all green; go test -race ./agent/opencode-web green; vet/build green. Real isolated 1.18.18 sandbox (4398/4399, reclaimed after): TestSandboxC6C7 all subtests incl. NEW question-reload (fresh-adapter cold recovery via GET /question + real history parentID, then official reply), C4/C2/prompt-options/e2e/archive-delete all pass. Mac product code changed -> Release rebuilt and reinstalled per mandated flow; 8777 = PID 48806 from /Applications/CordCodeLink.app runtime; 4096 owner-managed (app-respawned PID 48742 after mandated reinstall, parent = app). iOS targeted tests ModelVariantSelectionTests 7/7 + OpencodeWebVariantAgentWireTests 4/4 (no UI tests); physical paired iPhone Debug build+install+launch completed via scripts/run.sh device (no UI automation, device id not recorded). Both repos clean.",
-        "artifacts": [
-          "docs/2026-08-20-opencode-web-audit010-repair完成情况.md"
-        ],
-        "checked_at": "2026-08-21T02:29:59.893339+00:00"
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
       }
     }
   ]

@@ -282,7 +282,7 @@
       "kind": "hole-fill",
       "title": "Question recovery, strict tail, and iOS install",
       "issued_at": "2026-08-21T01:35:48Z",
-      "status": "pending",
+      "status": "in_progress",
       "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-010-question-recovery-strict-tail-and-ios-install.md",
       "scope": "Mac targeted repair plus iOS targeted regression/install",
       "constraints": [
@@ -293,8 +293,39 @@
         "developer performs bounded iOS targeted tests and available paired-device install; no UI automation",
         "one report then stop for audit-010"
       ],
-      "linked_commits": [],
+      "linked_commits": [
+        "git:4a2afb6",
+        "git:5b11ba3",
+        "git:44cae1a"
+      ],
       "resolved_from_audit": 9,
+      "resolved_by_directive": 11,
+      "report": {
+        "received_at": "2026-08-21T02:42:00Z",
+        "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-010-question-recovery-strict-tail-and-ios-install.md",
+        "audited": true,
+        "audit_verdict": "partial",
+        "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-010-question-recovery-strict-tail-and-ios-install.md"
+      }
+    },
+    {
+      "number": 11,
+      "kind": "hole-fill",
+      "title": "Question terminal reconciliation final closure",
+      "issued_at": "2026-08-21T02:42:00Z",
+      "status": "pending",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-011-question-terminal-reconciliation.md",
+      "scope": "Mac opencode-web question lifecycle and owning tests only",
+      "constraints": [
+        "preserve directive-010 verified identity, strict tail, variant UI, and installation results",
+        "replace add-only boolean claim with source-ordered pending/resolved lifecycle under one Kernel route",
+        "reconcile missed terminal events from A7-proven history without treating absence alone as answered/rejected",
+        "barrier-controlled real interleavings; sequential calls may not be labeled race",
+        "actual resolve_user_input handler through concrete opencode-web and Kernel/headRev",
+        "no canonical/protocol/capability/iOS changes, no second writer, no owner UI matrix"
+      ],
+      "linked_commits": [],
+      "resolved_from_audit": 10,
       "report": {
         "received_at": null,
         "markdown_path": null,
@@ -304,6 +335,6 @@
       }
     }
   ],
-  "current_directive_number": 10,
-  "last_updated": "2026-08-21T01:35:48Z"
+  "current_directive_number": 11,
+  "last_updated": "2026-08-21T02:42:00Z"
 }
