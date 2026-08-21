@@ -77,8 +77,10 @@ func (c *LiveCodec) Decode(n Notification) []core.Event {
 	case "turn/completed":
 		return c.decodeTurnCompleted(n)
 	case "item/agentMessage/delta":
+		c.resetRetry(n)
 		return decodeAgentMessageDelta(n)
 	case "item/reasoning/summaryTextDelta", "item/reasoning/textDelta":
+		c.resetRetry(n)
 		return decodeReasoningDelta(n)
 	case "item/started":
 		return c.decodeItemStarted(n)
@@ -86,6 +88,8 @@ func (c *LiveCodec) Decode(n Notification) []core.Event {
 		return decodeItemCompleted(n)
 	case "thread/tokenUsage/updated":
 		return decodeTokenUsage(n)
+	case "turn/plan/updated":
+		return decodePlanUpdated(n)
 	case "error":
 		return c.decodeErrorNotification(n)
 	case "warning":
@@ -101,6 +105,18 @@ func (c *LiveCodec) Decode(n Notification) []core.Event {
 		c.unknown[n.Method]++
 		c.mu.Unlock()
 		return nil
+	}
+}
+
+// resetRetry 正文恢复流动后清零重试计数（provider 重连成功的官方证据）。
+func (c *LiveCodec) resetRetry(n Notification) {
+	var p struct {
+		ThreadID string `json:"threadId"`
+	}
+	if json.Unmarshal(n.Params, &p) == nil && p.ThreadID != "" {
+		c.mu.Lock()
+		delete(c.retryByThread, p.ThreadID)
+		c.mu.Unlock()
 	}
 }
 
@@ -303,6 +319,8 @@ func decodeItemCompleted(n Notification) []core.Event {
 			ev.ToolResult = string(it.ToolError)
 		}
 		return []core.Event{ev}
+	case "contextCompaction":
+		return []core.Event{{Type: core.EventContextCompressed, SessionID: p.ThreadID, TurnID: p.TurnID, ThreadID: p.ThreadID}}
 	case "dynamicToolCall":
 		return []core.Event{{
 			Type:       core.EventToolResult,
@@ -429,6 +447,57 @@ func (c *LiveCodec) decodeErrorNotification(n Notification) []core.Event {
 		ThreadID:  p.ThreadID,
 		Error:     &officialError{msg: p.Error.Message},
 	}}
+}
+
+// decodePlanUpdated 官方 turn/plan/updated {threadId, turnId, plan:[{step,status}],
+// explanation}（stable schema TurnPlanStep：pending/inProgress/completed）→ EventPlan。
+// item/plan/delta 流式属 experimental（§7 🧪），未取样不消费。
+func decodePlanUpdated(n Notification) []core.Event {
+	var p struct {
+		ThreadID     string `json:"threadId"`
+		TurnID       string `json:"turnId"`
+		Explanation  *string `json:"explanation"`
+		Plan         []struct {
+			Step   string `json:"step"`
+			Status string `json:"status"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal(n.Params, &p); err != nil || p.ThreadID == "" {
+		return nil
+	}
+	todos := make([]core.Todo, 0, len(p.Plan))
+	for _, entry := range p.Plan {
+		step := strings.TrimSpace(entry.Step)
+		if step == "" {
+			continue
+		}
+		todos = append(todos, core.Todo{
+			Content:  step,
+			Status:   normalizePlanStepStatus(entry.Status),
+			Priority: "normal",
+		})
+	}
+	if len(todos) == 0 {
+		return nil
+	}
+	return []core.Event{{
+		Type:      core.EventPlan,
+		SessionID: p.ThreadID,
+		TurnID:    p.TurnID,
+		ThreadID:  p.ThreadID,
+		Plan:      todos,
+	}}
+}
+
+func normalizePlanStepStatus(official string) string {
+	switch official {
+	case "inProgress":
+		return "in_progress"
+	case "pending", "completed":
+		return official
+	default:
+		return official // 官方枚举外原样保留（不猜）
+	}
 }
 
 func jsonOrEmpty(raw json.RawMessage, key string) string {
