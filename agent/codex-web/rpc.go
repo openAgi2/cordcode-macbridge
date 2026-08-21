@@ -108,6 +108,11 @@ func (c *Client) Notifications() <-chan Notification { return c.notifications }
 func (c *Client) ServerRequests() <-chan ServerRequest { return c.serverRequests }
 
 func (c *Client) readLoop() {
+	defer func() {
+		// 单一生产者关闭消费者通道：泵/被动订阅的 range 随连接终结退出。
+		close(c.notifications)
+		close(c.serverRequests)
+	}()
 	for {
 		payload, err := c.transport.Recv()
 		if err != nil {

@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
@@ -45,19 +46,18 @@ func (a *Agent) ensurePump() {
 		for n := range cl.Notifications() {
 			for _, ev := range codec.Decode(n) {
 				a.dispatchEvent(ev)
+				a.recordMetrics(ev)
 			}
 		}
-		// 连接断开：关闭全部监听者（上层触发重连）；监听者注册表清空。
+		// 连接断开（§8.3）：session 监听者保留（事件在重连前丢弃，缺口由冷校准
+		// 覆盖）；标记失连并启动后台重连。不向监听者发任何合成事件——无法证明
+		// 完成的交互保持未知，不本地合成成功。
 		a.mu.Lock()
 		a.pumpRunning = false
-		listeners := a.listeners
-		a.listeners = map[string]map[chan core.Event]struct{}{}
+		epoch := cl.Epoch()
 		a.mu.Unlock()
-		for _, set := range listeners {
-			for ch := range set {
-				close(ch)
-			}
-		}
+		slog.Info("codexweb: connection lost, starting background re-probe", "epoch", epoch)
+		go a.reconnectLoop()
 	}()
 	go func() {
 		for sr := range cl.ServerRequests() {
@@ -89,6 +89,39 @@ func (a *Agent) dispatchEvent(ev core.Event) {
 // Phase 4；官方超时/取消路径收口）。
 func (a *Agent) dispatchServerRequest(sr ServerRequest) {
 	slog.Debug("codexweb: server request pending (Phase 4 registry)", "method", sr.Method, "thread", sr.ThreadID)
+}
+
+// reconnectLoop §8.3 断线恢复：退避重 Probe 直到成功（或 Agent 停止）；成功后
+// 六步就绪 + 中央泵重启。缺口由上层冷校准（thread/read includeTurns）覆盖，
+// 不重放、不合成。
+func (a *Agent) reconnectLoop() {
+	backoff := 2 * time.Second
+	const maxBackoff = 60 * time.Second
+	for {
+		a.mu.Lock()
+		stopped := a.stopped
+		running := a.pumpRunning
+		a.mu.Unlock()
+		if stopped || running {
+			return
+		}
+		ep, err := Probe(a.probeOptions())
+		a.mu.Lock()
+		if err != nil {
+			a.lastStatus = &ProbeSnapshot{Available: false, Detail: err.Error(), At: time.Now()}
+			a.mu.Unlock()
+			time.Sleep(backoff)
+			backoff = min(backoff*2, maxBackoff)
+			continue
+		}
+		a.endpoint = ep
+		a.lastStatus = &ProbeSnapshot{Available: true, Source: ep.Source, CLIVersion: ep.CLIVersion,
+			Detail: "source=" + string(ep.Source) + " cli=" + ep.CLIVersion, At: time.Now()}
+		a.mu.Unlock()
+		a.ensurePump()
+		slog.Info("codexweb: re-connected to official service", "source", ep.Source)
+		return
+	}
 }
 
 func (a *Agent) addListener(threadID string) chan core.Event {
@@ -208,6 +241,7 @@ func (s *agentSession) SendWithOptions(prompt string, images []core.ImageAttachm
 	if prompt != "" {
 		parts = append(parts, TextPart(prompt))
 	}
+	sendAt := time.Now()
 	res, rpcErr, err := TurnStart(ctx, cl, s.threadID, parts, opts.ModelID)
 	switch {
 	case err != nil:
@@ -218,6 +252,7 @@ func (s *agentSession) SendWithOptions(prompt string, images []core.ImageAttachm
 	s.mu.Lock()
 	s.activeTurnID = res.ID
 	s.mu.Unlock()
+	s.agent.noteSend(s.threadID, sendAt)
 	return nil
 }
 

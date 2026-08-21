@@ -43,6 +43,12 @@ type Agent struct {
 	liveCodec   *LiveCodec
 	listeners   map[string]map[chan core.Event]struct{}
 	pumpRunning bool
+	stopped     bool
+
+	// metricsMu 保护 §13.2 帧级指标（per thread+turn）。
+	metricsMu sync.Mutex
+	turnMetrics map[string]*TurnMetrics // key: threadID + "/" + turnID
+	sendAt     map[string]time.Time     // key: threadID（Send 时刻，started 到达时结算）
 }
 
 // ProbeSnapshot 是一次生命周期的只读快照（descriptor 镜像用）。
@@ -57,7 +63,7 @@ type ProbeSnapshot struct {
 // New 按 opts 构造（main.go buildAgentOptions 的键：work_dir、
 // codex_web_app_server_url、codex_web_codex_home）。
 func New(opts map[string]any) *Agent {
-	a := &Agent{liveCodec: NewLiveCodec(), listeners: map[string]map[chan core.Event]struct{}{}}
+	a := &Agent{liveCodec: NewLiveCodec(), listeners: map[string]map[chan core.Event]struct{}{}, turnMetrics: map[string]*TurnMetrics{}, sendAt: map[string]time.Time{}}
 	if opts == nil {
 		return a
 	}
@@ -192,6 +198,7 @@ func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, erro
 // Stop 关闭持有的连接（共享 daemon 不 stop；托管 WS 独占回收——§6.3）。
 func (a *Agent) Stop() error {
 	a.mu.Lock()
+	a.stopped = true
 	ep := a.endpoint
 	a.endpoint = nil
 	a.mu.Unlock()
