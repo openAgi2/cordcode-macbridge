@@ -188,6 +188,99 @@ func TestSandboxC6C7(t *testing.T) {
 		t.Logf("question %s cold-reloaded onto turn %s and answered", liveInteractionID, recovered.TurnID)
 	})
 
+	// ── directive-011 terminal reloads: answer/reject then reopen proves ──
+	// the real resolved history + GET /question empty never resurrect a
+	// pending dock (gap ordering itself is barrier-proven in the owning
+	// tests — no TCP kill is faked here).
+	reopenScenario := func(t *testing.T, prompt string, answer bool) {
+		sid := newSession()
+		sess, err := agent.StartSession(ctx, sid)
+		if err != nil {
+			t.Fatalf("StartSession: %v", err)
+		}
+		defer sess.Close()
+		if err := sess.(core.PromptOptionsSender).SendWithOptions(prompt, nil, nil, core.PromptOptions{Agent: "build"}); err != nil {
+			t.Fatalf("send: %v", err)
+		}
+		var interactionID string
+		deadline := time.After(60 * time.Second)
+		for interactionID == "" {
+			select {
+			case ev := <-sess.Events():
+				if ev.Type == core.EventUserInputRequested && ev.UserInput != nil {
+					interactionID = ev.UserInput.InteractionID
+				}
+			case <-deadline:
+				t.Fatal("question.asked never surfaced; cannot stage the scenario")
+			}
+		}
+		if answer {
+			_, err := agent.ResolveUserInput(ctx, interactionID, "act_sb_reopen", core.UserInputActionAnswer, []core.UserInputAnswer{{
+				QuestionID: interactionID + "/q0",
+				Values:     []core.UserInputValue{{Kind: core.UserInputValueOption, OptionID: interactionID + "/q0/o0"}},
+			}})
+			if err != nil {
+				t.Fatalf("reply: %v", err)
+			}
+		} else {
+			if _, err := agent.ResolveUserInput(ctx, interactionID, "act_sb_reopen", core.UserInputActionReject, nil); err != nil {
+				t.Fatalf("reject: %v", err)
+			}
+		}
+		waitTurnTerminal(t, sess.Events(), 90*time.Second)
+
+		// In-process reopen: same agent, route re-established with the real
+		// resolved history + empty pending set — nothing may re-project.
+		sess2, err := agent.StartSession(ctx, sid)
+		if err != nil {
+			t.Fatalf("reopen StartSession: %v", err)
+		}
+		defer sess2.Close()
+		select {
+		case ev := <-sess2.Events():
+			if ev.Type == core.EventUserInputRequested {
+				t.Fatalf("resolved interaction must not re-project a pending dock, got %+v", ev)
+			}
+		case <-time.After(300 * time.Millisecond):
+		}
+
+		// Cross-process reopen: a FRESH adapter has no lifecycle for the
+		// interaction and GET /question is empty — no phantom dock may appear
+		// (the authoritative history carries the terminal tool, and official
+		// parity renders it as the question activity row).
+		freshAny, err := New(map[string]any{
+			"work_dir":          ws,
+			"opencode_web_url":  base,
+			"opencode_web_user": os.Getenv("OCW_SANDBOX_USER"),
+			"opencode_web_pass": os.Getenv("OCW_SANDBOX_PASS"),
+		})
+		if err != nil {
+			t.Fatalf("fresh New: %v", err)
+		}
+		fresh := freshAny.(*Agent)
+		defer fresh.Stop()
+		freshSess, err := fresh.StartSession(ctx, sid)
+		if err != nil {
+			t.Fatalf("fresh StartSession: %v", err)
+		}
+		defer freshSess.Close()
+		select {
+		case ev := <-freshSess.Events():
+			if ev.Type == core.EventUserInputRequested {
+				t.Fatalf("fresh process must not fabricate a pending dock from resolved history, got %+v", ev)
+			}
+		case <-time.After(300 * time.Millisecond):
+		}
+		t.Logf("terminal reload verified for %s (%s)", interactionID, map[bool]string{true: "answered", false: "rejected"}[answer])
+	}
+
+	t.Run("question-reopen-after-answer", func(t *testing.T) {
+		reopenScenario(t, "A7_QUESTION pick red", true)
+	})
+	t.Run("question-reopen-after-reject", func(t *testing.T) {
+		reopenScenario(t, "A7_QUESTION pick red", false)
+	})
+
 	// ── §6.9 todo: replacement list via endpoint, order/fields verbatim ────
 	t.Run("todo", func(t *testing.T) {
 		sid := newSession()
