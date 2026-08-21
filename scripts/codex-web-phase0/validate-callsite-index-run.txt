@@ -1,0 +1,67 @@
+[PASS] cli/src/main.rs:2588 ~ agents_overview
+[PASS] cli/src/main.rs:2596 ~ codex_app_server_daemon::run
+[PASS] tui/src/lib.rs:275 ~ enum AppServerTarget
+[PASS] tui/src/lib.rs:436 ~ maybe_probe_default_daemon_socket
+[PASS] tui/src/lib.rs:851 ~ fn app_server_target_for_launch
+[PASS] tui/src/lib.rs:912 ~ fn can_reuse_implicit_local_daemon
+[PASS] tui/src/startup_orchestration.rs:135 ~ reuse_implicit_local_daemon
+[PASS] tui/src/startup_orchestration.rs:186 ~ app_server_target_for_launch
+[PASS] tui/src/app/session_lifecycle.rs:365 ~ attach_live_thread_for_selection
+[PASS] tui/src/app/session_lifecycle.rs:462 ~ select_agent_thread
+[PASS] tui/src/app/session_lifecycle.rs:617 ~ handle_startup_thread_started
+[PASS] tui/src/app/session_lifecycle.rs:796 ~ replace_chat_widget_with_app_server_thread
+[PASS] tui/src/app/session_lifecycle.rs:225 ~ is_terminal_thread_read_error
+[PASS] tui/src/app/app_server_events.rs:54 ~ handle_app_server_event
+[PASS] app-server-client/src/lib.rs:300 ~ InProcessAppServerClient
+[PASS] app-server-client/src/lib.rs:516 ~ resolve_server_request
+[PASS] app-server-client/src/lib.rs:574 ~ next_event
+[PASS] app-server-client/src/remote.rs:72 ~ enum RemoteAppServerEndpoint
+[PASS] app-server-client/src/remote.rs:166 ~ async fn connect
+[PASS] app-server-client/src/remote.rs:541 ~ resolve_server_request
+[PASS] app-server/src/thread_state.rs:533 ~ try_ensure_connection_subscribed
+[PASS] app-server/src/thread_state.rs:560 ~ try_add_connection_to_thread
+[PASS] app-server/src/request_processors/thread_processor.rs:960 ~ thread_unsubscribe_response_inner
+[PASS] app-server/src/request_processors/thread_lifecycle.rs:7 ~ THREAD_UNLOADING_DELAY
+[PASS] app-server/src/error_code.rs:3 ~ INVALID_REQUEST_ERROR_CODE
+[PASS] app-server/src/request_processors/thread_processor.rs:531 ~ thread_resume
+[PASS] app-server/src/request_processors/thread_processor.rs:3479 ~ thread_resume_inner
+[PASS] app-server/src/bespoke_event_handling.rs:714 ~ available_decisions: Some
+[PASS] app-server/src/transport.rs:175 ~ filter_outgoing_message_for_connection
+[PASS] app-server/src/transport.rs:189 ~ strip_experimental_fields
+[PASS] app-server-protocol/src/protocol/v2/item.rs:1512 ~ strip_experimental_fields
+[PASS] app-server-transport/src/transport/websocket.rs:149 ~ /readyz
+[PASS] app-server-transport/src/transport/websocket.rs:135 ~ is_unauthenticated_non_loopback_listener
+[PASS] app-server-daemon/src/lib.rs:191 ~ pub async fn run
+[PASS] thread-store/src/local/writer_lock.rs:39 ~ fn acquire
+[PASS] thread-store/src/local/mod.rs:302 ~ acquire_writer_locks
+[PASS] thread-store/src/local/archive_thread.rs:24 ~ writer_lock_thread_ids
+[PASS] exists app-server/tests/suite/v2/initialize.rs
+[PASS] exists app-server/tests/suite/v2/connection_handling_websocket.rs
+[PASS] exists app-server/tests/suite/v2/connection_handling_websocket_unix.rs
+[PASS] exists app-server/tests/suite/v2/session_end.rs
+[PASS] exists app-server/tests/suite/v2/thread_list.rs
+[PASS] exists app-server/tests/suite/v2/thread_loaded_list.rs
+[PASS] exists app-server/tests/suite/v2/thread_read.rs
+[PASS] exists app-server/tests/suite/v2/thread_resume.rs
+[PASS] exists app-server/tests/suite/v2/thread_start.rs
+[PASS] exists app-server/tests/suite/v2/thread_archive.rs
+[PASS] exists app-server/tests/suite/v2/thread_unarchive.rs
+[PASS] exists app-server/tests/suite/v2/thread_delete.rs
+[PASS] exists app-server/tests/suite/v2/thread_fork.rs
+[PASS] exists app-server/tests/suite/v2/thread_unsubscribe.rs
+[PASS] exists app-server/tests/suite/v2/thread_name_websocket.rs
+[PASS] exists app-server/tests/suite/v2/thread_status.rs
+[PASS] exists app-server/tests/suite/v2/turn_start.rs
+[PASS] exists app-server/tests/suite/v2/turn_steer.rs
+[PASS] exists app-server/tests/suite/v2/turn_interrupt.rs
+[PASS] exists app-server/tests/suite/v2/request_user_input.rs
+[PASS] exists app-server/tests/suite/v2/mcp_server_elicitation.rs
+[PASS] exists app-server/tests/suite/v2/experimental_api.rs
+[PASS] exists app-server/tests/suite/v2/command_exec.rs
+[PASS] exists app-server/tests/suite/v2/compaction.rs
+[PASS] exists app-server/tests/suite/v2/account_thread_usage.rs
+[PASS] exists app-server/tests/suite/v2/review.rs
+[PASS] exists app-server/tests/suite/v2/config_rpc.rs
+[PASS] index doc non-trivial
+
+ALL PASS (65 checks)
