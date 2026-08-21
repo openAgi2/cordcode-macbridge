@@ -179,7 +179,7 @@ func TestAudit010_QuestionRejectResolvesInPlace(t *testing.T) {
 // re-present it through the ONE Kernel route as exactly one pending part on
 // the history-proven turn. No live asked frame exists.
 func TestAudit010_QuestionColdReloadRecoversPending(t *testing.T) {
-	h, _ := newAuditHarnessWithOptions(t, func(s *ssePushServe) {
+	h, _, _ := newAuditHarnessWithOptions(t, func(s *ssePushServe) {
 		s.setPendingQuestions(a7PendingRowForOCW1)
 		s.setHistory("ses_ocw1", a7HistoryForOCW1)
 	})
@@ -221,7 +221,7 @@ func TestAudit010_QuestionReconnectRecoversPending(t *testing.T) {
 // projection must end with exactly ONE pending part (claim convergence + the
 // reducer's interactionID upsert), never two.
 func TestAudit010_QuestionGetLiveRaceSinglePart(t *testing.T) {
-	h, serve := newAuditHarnessWithOptions(t, func(s *ssePushServe) {
+	h, serve, _ := newAuditHarnessWithOptions(t, func(s *ssePushServe) {
 		s.setPendingQuestions(a7PendingRowForOCW1)
 		s.setHistory("ses_ocw1", a7HistoryForOCW1)
 	})

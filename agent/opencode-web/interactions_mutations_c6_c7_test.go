@@ -219,14 +219,24 @@ func TestQuestionResolutionEventsFromServer(t *testing.T) {
 	sub.handleRawEvent(`{"payload":{"type":"question.rejected","properties":{"sessionID":"ses_q2","requestID":"que_2"}}}`)
 
 	events := drain(sub)
-	if len(events) != 2 || events[0].Type != core.EventUserInputResolved || events[1].Type != core.EventUserInputResolved {
-		t.Fatalf("replied+rejected must each map to user_input_resolved, got %+v", events)
+	// Directive-011: the projected interaction settles in place; an
+	// identity-less terminal (que_2 was never projected) is recorded at the
+	// gate but emits nothing — no phantom resolution.
+	if len(events) != 1 || events[0].Type != core.EventUserInputResolved {
+		t.Fatalf("replied must emit exactly one user_input_resolved (identity-less rejected emits none), got %+v", events)
 	}
 	if events[0].UserInput.Status != core.UserInputStatusAnswered || events[0].UserInput.ResolutionSource != "other_client" {
 		t.Fatalf("replied = %+v", events[0].UserInput)
 	}
-	if events[1].UserInput.Status != core.UserInputStatusRejected || events[1].UserInput.InteractionID != "que_2" {
-		t.Fatalf("rejected = %+v", events[1].UserInput)
+	if events[0].TurnID != "msg_u0" || events[0].ItemID != "call_1" {
+		t.Fatalf("resolved must carry the lifecycle turn/call facts, got turn=%q item=%q", events[0].TurnID, events[0].ItemID)
+	}
+	// A late asked for the resolved interaction must not re-arm.
+	sub.handleRawEvent(a7AskedFrame)
+	for _, ev := range drain(sub) {
+		if ev.Type == core.EventUserInputRequested {
+			t.Fatalf("late asked after resolved must not re-arm, got %+v", ev)
+		}
 	}
 }
 

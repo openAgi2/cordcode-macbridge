@@ -76,118 +76,169 @@ func (a *Agent) noteQuestionAsked(req ocwQuestionRequest) {
 	a.pendingQuestions[req.ID] = req
 }
 
-func (a *Agent) questionResolved(id string) (ocwQuestionRequest, bool) {
+// forgetQuestion drops the reply-mapping entry ONLY (directive-011): the
+// terminal projection belongs to the server broadcast / reconciliation, never
+// to the RPC's own bookkeeping.
+func (a *Agent) forgetQuestion(id string) {
 	a.questionMu.Lock()
 	defer a.questionMu.Unlock()
-	req, ok := a.pendingQuestions[id]
-	if ok {
-		delete(a.pendingQuestions, id)
-	}
-	if a.projectedQuestions != nil {
-		delete(a.projectedQuestions, id)
-	}
-	return req, ok
+	delete(a.pendingQuestions, id)
 }
 
-// claimQuestionProjection is the exactly-once gate for projecting an
-// interaction into the Kernel route (directive-010): test-and-set under the
-// question lock, so the live question.asked emission and the GET /question
-// recovery converge to ONE projection per interaction instead of double
-// ingesting. The claim clears when the interaction resolves.
-func (a *Agent) claimQuestionProjection(id string) bool {
-	if id == "" {
+// ── directive-011 lifecycle gate ─────────────────────────────────────────────
+//
+// questionLifecycle is the per-(session, interaction) state. All question
+// facts — live question.asked, live question.replied/rejected broadcasts,
+// recovery requested, recovery terminal — are admitted through ONE mutex, and
+// an admitted fact is emitted while still holding it. The route channel then
+// carries the facts in admission order, which is the provable serial
+// reduction order the audit demanded: a terminal admitted before a stale
+// requested means the requested is fenced out at the gate (it can never be
+// enqueued ahead of the terminal), and duplicate facts never re-emit.
+type questionLifecycle struct {
+	sessionID     string
+	interactionID string
+	toolMessageID string
+	toolCallID    string
+	turnID        string
+	status        core.UserInputStatus
+}
+
+func questionLifecycleKey(sessionID, interactionID string) string {
+	return sessionID + "\x00" + interactionID
+}
+
+// gateAdmitRequested admits a pending fact. Terminal precedence: an
+// interaction that is already pending (idempotent) or terminal (late/duplicate
+// asked, stale recovery row) never re-emits requested.
+func (a *Agent) gateAdmitRequested(sub *sseSubscriber, sessionID string, req ocwQuestionRequest, turnID string) bool {
+	if sub == nil || sessionID == "" || req.ID == "" || turnID == "" {
 		return false
 	}
 	a.questionMu.Lock()
 	defer a.questionMu.Unlock()
-	if a.projectedQuestions == nil {
-		a.projectedQuestions = make(map[string]bool)
+	if a.pendingQuestions == nil {
+		a.pendingQuestions = make(map[string]ocwQuestionRequest)
 	}
-	if a.projectedQuestions[id] {
+	a.pendingQuestions[req.ID] = req
+	key := questionLifecycleKey(sessionID, req.ID)
+	if lc, ok := a.questions[key]; ok && lc != nil && lc.status != "" {
 		return false
 	}
-	a.projectedQuestions[id] = true
+	if a.questions == nil {
+		a.questions = make(map[string]*questionLifecycle)
+	}
+	a.questions[key] = &questionLifecycle{
+		sessionID:     sessionID,
+		interactionID: req.ID,
+		toolMessageID: req.Tool.MessageID,
+		toolCallID:    req.Tool.CallID,
+		turnID:        turnID,
+		status:        core.UserInputStatusPending,
+	}
+	sub.emit(core.Event{
+		Type:      core.EventUserInputRequested,
+		SessionID: sessionID,
+		TurnID:    turnID,
+		ItemID:    req.Tool.CallID,
+		UserInput: questionInteraction(req),
+	})
 	return true
 }
 
-// recoverPendingQuestions is the directive-010 cold/gap recovery: pull the
-// official GET /question list, keep ONLY the target session's rows, and
-// re-present still-pending interactions through the ONE Kernel route. The
-// owning turn comes from the same source-proven rules as the live path —
-// subscriber-observed facts first, then ONE authoritative history transaction
-// (the assistant message's parentID, with the parent verified as a real user
-// message of that same transaction). No ActiveTurnID fallback, no phantom
-// turn, no raw second path: rows that cannot be proven are dropped with a
-// warning. `directory` is the session's own directory when the caller already
-// knows it (StartSession resume fetched it), else "" falls back to the agent
-// work dir.
-func (a *Agent) recoverPendingQuestions(ctx context.Context, c *Client, sub *sseSubscriber, sessionID, directory string) {
-	if sessionID == "" || sub == nil {
+// gateAdmitResolved admits a server-terminal fact. A projected pending part
+// settles in place (the reducer keys the update on the stored interaction
+// identity); a terminal stays (first server resolution wins); an interaction
+// never projected here is recorded but NOT emitted — the reducer drops
+// identity-less terminals, so emitting one would be a phantom.
+func (a *Agent) gateAdmitResolved(sub *sseSubscriber, sessionID, interactionID string, status core.UserInputStatus) {
+	if sub == nil || sessionID == "" || interactionID == "" {
 		return
 	}
-	if strings.TrimSpace(directory) == "" {
-		directory = a.GetWorkDir()
-	}
-	rows, err := a.fetchPendingQuestions(ctx, c)
-	if err != nil {
-		slog.Warn("opencode-web: pending-question recovery fetch failed (no recovery this cycle)",
-			"session", sessionID, "error", err)
+	if status != core.UserInputStatusAnswered && status != core.UserInputStatusRejected {
 		return
 	}
-	for _, row := range rows {
-		if row.SessionID != sessionID {
-			continue // the official list is serve-wide; only the target session is processed
+	a.questionMu.Lock()
+	defer a.questionMu.Unlock()
+	delete(a.pendingQuestions, interactionID)
+	key := questionLifecycleKey(sessionID, interactionID)
+	lc, ok := a.questions[key]
+	if !ok || lc == nil {
+		if a.questions == nil {
+			a.questions = make(map[string]*questionLifecycle)
 		}
-		if row.ID == "" || row.Tool.MessageID == "" || row.Tool.CallID == "" {
-			slog.Warn("opencode-web: recovered pending question lacks tool identity — dropped",
-				"session", sessionID, "question", row.ID)
-			continue
-		}
-		turnID, ok := sub.provenQuestionTurn(sessionID, row.Tool)
-		if !ok {
-			turnID, ok = a.historyProvenQuestionTurn(ctx, c, sessionID, row.Tool.MessageID, directory)
-		}
-		if !ok {
-			slog.Warn("opencode-web: recovered pending question failed source-proven owning-turn correlation — dropped (no phantom turn)",
-				"session", sessionID, "question", row.ID, "toolMessageID", row.Tool.MessageID)
-			continue
-		}
-		a.noteQuestionAsked(row)
-		if !a.claimQuestionProjection(row.ID) {
-			// The live asked frame won the GET+live race — already projected once.
-			continue
-		}
-		sub.emit(core.Event{
-			Type:      core.EventUserInputRequested,
-			SessionID: sessionID,
-			TurnID:    turnID,
-			ItemID:    row.Tool.CallID,
-			UserInput: questionInteraction(row),
-		})
-		slog.Info("opencode-web: recovered pending question through the Kernel route",
-			"session", sessionID, "question", row.ID, "turn", turnID)
+		a.questions[key] = &questionLifecycle{sessionID: sessionID, interactionID: interactionID, status: status}
+		return
 	}
+	if lc.status != core.UserInputStatusPending {
+		if lc.status != status {
+			slog.Warn("opencode-web: question terminal conflict — first server resolution wins",
+				"session", sessionID, "interaction", interactionID, "recorded", lc.status, "incoming", status)
+		}
+		return
+	}
+	lc.status = status
+	sub.emit(core.Event{
+		Type:      core.EventUserInputResolved,
+		SessionID: sessionID,
+		TurnID:    lc.turnID,
+		ItemID:    lc.toolCallID,
+		UserInput: &core.UserInputInteraction{
+			InteractionID:    interactionID,
+			Status:           status,
+			CanRespond:       false,
+			CanReject:        false,
+			ResolutionSource: "other_client",
+		},
+	})
 }
 
-// historyProvenQuestionTurn maps tool.messageID to its owning turn from ONE
-// authoritative GET /session/{id}/message transaction (directive-010): the
-// row must exist, be an assistant message, carry a parentID, and that parent
-// must be a real user message of the same transaction — the same A7 shape
-// the live path observes as frames. Anything else fails closed.
-func (a *Agent) historyProvenQuestionTurn(ctx context.Context, c *Client, sessionID, messageID, directory string) (string, bool) {
-	if sessionID == "" || messageID == "" {
-		return "", false
+// gatePendingSnapshot copies the pending lifecycle entries of one session —
+// taken BEFORE the recovery's GET /question is issued. Reconciliation only
+// considers this pre-snapshot set, so a live ask landing after the snapshot
+// can never be cleared by the (older) empty result.
+func (a *Agent) gatePendingSnapshot(sessionID string) map[string]questionLifecycle {
+	a.questionMu.Lock()
+	defer a.questionMu.Unlock()
+	out := make(map[string]questionLifecycle)
+	for _, lc := range a.questions {
+		if lc == nil || lc.sessionID != sessionID || lc.status != core.UserInputStatusPending {
+			continue
+		}
+		out[lc.interactionID] = *lc
 	}
-	raw, err := c.fetchJSON(ctx, c.apiPath("/session/")+sessionID+"/message", directory)
-	if err != nil {
-		return "", false
+	return out
+}
+
+// questionHistoryFacts is ONE authoritative GET /session/{id}/message
+// transaction distilled for question recovery (directive-011): the
+// assistant→owning-turn parentage and the A7-proven question-tool terminal
+// evidence.
+type questionHistoryFacts struct {
+	assistantParent map[string]string            // assistant messageID → parentID
+	parentIsUser    map[string]bool             // messageID → row is a user message
+	terminals       map[string]questionTerminalEvidence
+}
+
+type questionTerminalEvidence struct {
+	status core.UserInputStatus // answered | rejected
+	turnID string
+}
+
+// questionRejectedErrorText is the official RejectedError message the serve
+// records on the question tool when a client dismisses it (A7 reload/reject).
+const questionRejectedErrorText = "The user dismissed this question"
+
+// buildQuestionHistoryFacts walks the transaction rows. Terminal evidence is
+// strictly A7-shaped: completed + captured metadata.answers → answered;
+// error + the official dismissed text → rejected. Any other shape (or another
+// session's row) contributes nothing — fail closed, never a guessed status.
+func buildQuestionHistoryFacts(items []json.RawMessage, sessionID string) *questionHistoryFacts {
+	facts := &questionHistoryFacts{
+		assistantParent: make(map[string]string),
+		parentIsUser:    make(map[string]bool),
+		terminals:       make(map[string]questionTerminalEvidence),
 	}
-	items, err := decodeListPayload(raw)
-	if err != nil {
-		return "", false
-	}
-	type rowFacts struct{ id, role, sessionID, parentID string }
-	rows := make([]rowFacts, 0, len(items))
 	for _, item := range items {
 		var message map[string]any
 		if err := json.Unmarshal(item, &message); err != nil {
@@ -197,38 +248,183 @@ func (a *Agent) historyProvenQuestionTurn(ctx context.Context, c *Client, sessio
 		if sub, ok := message["info"].(map[string]any); ok {
 			info = sub
 		}
-		rows = append(rows, rowFacts{
-			id:        firstString(info, "id"),
-			role:      firstString(info, "role"),
-			sessionID: firstString(info, "sessionID"),
-			parentID:  firstString(info, "parentID"),
-		})
-	}
-	var parentID string
-	for _, row := range rows {
-		if row.id != messageID {
+		// The endpoint is session-scoped; an explicit other-session id is a
+		// provenance violation — the row contributes nothing.
+		if sid := firstString(info, "sessionID"); sid != "" && sid != sessionID {
 			continue
 		}
-		if row.role != "assistant" {
-			return "", false
+		id := firstString(info, "id")
+		if id == "" {
+			continue
 		}
-		// The endpoint is session-scoped; an explicit other-session id in the
-		// row is a provenance violation, not a membership proof.
-		if row.sessionID != "" && row.sessionID != sessionID {
-			return "", false
+		switch firstString(info, "role") {
+		case "user":
+			facts.parentIsUser[id] = true
+		case "assistant":
+			if parent := firstString(info, "parentID"); parent != "" {
+				facts.assistantParent[id] = parent
+			}
 		}
-		parentID = row.parentID
-		break
+		parts, _ := message["parts"].([]any)
+		for _, partValue := range parts {
+			part, _ := partValue.(map[string]any)
+			if part == nil || firstString(part, "type") != "tool" {
+				continue
+			}
+			if toolName, _ := part["tool"].(string); toolName != "question" {
+				continue
+			}
+			messageID := firstString(part, "messageID")
+			callID := firstString(part, "callID")
+			if messageID == "" || callID == "" {
+				continue
+			}
+			state, _ := part["state"].(map[string]any)
+			if state == nil {
+				continue
+			}
+			switch firstString(state, "status") {
+			case "completed":
+				metadata, _ := state["metadata"].(map[string]any)
+				if _, ok := metadata["answers"].([]any); !ok {
+					continue // completed without captured answers is not evidence
+				}
+				facts.terminals[messageID+"\x00"+callID] = questionTerminalEvidence{
+					status: core.UserInputStatusAnswered,
+					turnID: facts.assistantParent[messageID],
+				}
+			case "error":
+				if firstString(state, "error") != questionRejectedErrorText {
+					continue // unknown failure shape — fail closed
+				}
+				facts.terminals[messageID+"\x00"+callID] = questionTerminalEvidence{
+					status: core.UserInputStatusRejected,
+					turnID: facts.assistantParent[messageID],
+				}
+			}
+		}
 	}
-	if parentID == "" {
+	return facts
+}
+
+// provenTurn maps an assistant message to its owning turn from the same
+// transaction: the parent must exist and be a real user row (no phantom).
+func (f *questionHistoryFacts) provenTurn(messageID string) (string, bool) {
+	parent, ok := f.assistantParent[messageID]
+	if !ok || parent == "" || !f.parentIsUser[parent] {
 		return "", false
 	}
+	return parent, true
+}
+
+// recoverPendingQuestions is the directive-010/011 recovery: pull the official
+// GET /question list, keep ONLY the target session's rows, and re-present
+// still-pending interactions through the ONE Kernel route with source-proven
+// identity (subscriber facts first, then the authoritative history
+// transaction). Directive-011 adds terminal precedence and reconciliation: a
+// pending row whose history already carries an evidence-proven terminal is
+// settled instead of armed, and locally-pending interactions (snapshot BEFORE
+// the GET — the source fence) that the server no longer lists are reconciled
+// from the SAME history transaction. Absence alone decides NOTHING; unknown
+// terminal shapes fail closed with a diagnostic and stay pending for the next
+// cycle. No ActiveTurnID fallback, no phantom turn, no raw second path.
+func (a *Agent) recoverPendingQuestions(ctx context.Context, c *Client, sub *sseSubscriber, sessionID, directory string) {
+	if sessionID == "" || sub == nil {
+		return
+	}
+	if strings.TrimSpace(directory) == "" {
+		directory = a.GetWorkDir()
+	}
+
+	localPending := a.gatePendingSnapshot(sessionID)
+
+	rows, err := a.fetchPendingQuestions(ctx, c)
+	if err != nil {
+		slog.Warn("opencode-web: pending-question recovery fetch failed (no recovery this cycle)",
+			"session", sessionID, "error", err)
+		return
+	}
+	var facts *questionHistoryFacts
+	history := func() *questionHistoryFacts {
+		if facts != nil {
+			return facts
+		}
+		raw, err := c.fetchJSON(ctx, c.apiPath("/session/")+sessionID+"/message", directory)
+		if err != nil {
+			return nil
+		}
+		items, err := decodeListPayload(raw)
+		if err != nil {
+			return nil
+		}
+		facts = buildQuestionHistoryFacts(items, sessionID)
+		return facts
+	}
+
+	serverPending := make(map[string]bool)
 	for _, row := range rows {
-		if row.id == parentID && row.role == "user" {
-			return parentID, true
+		if row.SessionID != sessionID {
+			continue // the official list is serve-wide; only the target session is processed
+		}
+		if row.ID == "" || row.Tool.MessageID == "" || row.Tool.CallID == "" {
+			slog.Warn("opencode-web: recovered pending question lacks tool identity — dropped",
+				"session", sessionID, "question", row.ID)
+			continue
+		}
+		serverPending[row.ID] = true
+		// Server terminal beats a stale pending row: the reply may have landed
+		// between the GET snapshot and the history fetch.
+		if f := history(); f != nil {
+			if term, ok := f.terminals[row.Tool.MessageID+"\x00"+row.Tool.CallID]; ok {
+				a.noteQuestionAsked(row)
+				a.gateAdmitResolved(sub, sessionID, row.ID, term.status)
+				slog.Info("opencode-web: recovered question settled terminal instead of pending",
+					"session", sessionID, "question", row.ID, "status", term.status)
+				continue
+			}
+		}
+		turnID, ok := sub.provenQuestionTurn(sessionID, row.Tool)
+		if !ok {
+			if f := history(); f != nil {
+				turnID, ok = f.provenTurn(row.Tool.MessageID)
+			}
+		}
+		if !ok {
+			slog.Warn("opencode-web: recovered pending question failed source-proven owning-turn correlation — dropped (no phantom turn)",
+				"session", sessionID, "question", row.ID, "toolMessageID", row.Tool.MessageID)
+			continue
+		}
+		if a.gateAdmitRequested(sub, sessionID, row, turnID) {
+			slog.Info("opencode-web: recovered pending question through the Kernel route",
+				"session", sessionID, "question", row.ID, "turn", turnID)
 		}
 	}
-	return "", false
+
+	// Terminal reconciliation (directive-011): locally-pending interactions —
+	// fixed BEFORE the snapshot was requested — that the server no longer
+	// lists. The same authoritative history transaction must carry an
+	// evidence-proven terminal; otherwise fail closed (kept pending, retried
+	// on the next recovery cycle).
+	for interactionID, lc := range localPending {
+		if serverPending[interactionID] {
+			continue
+		}
+		f := history()
+		if f == nil {
+			slog.Warn("opencode-web: pending-question reconciliation could not read the authoritative history — keeping pending (retry next cycle)",
+				"session", sessionID, "interaction", interactionID)
+			continue
+		}
+		term, ok := f.terminals[lc.toolMessageID+"\x00"+lc.toolCallID]
+		if !ok {
+			slog.Warn("opencode-web: server no longer lists a locally-pending question but the history carries no evidence-proven terminal — fail closed, keeping pending",
+				"session", sessionID, "interaction", interactionID, "toolMessageID", lc.toolMessageID)
+			continue
+		}
+		a.gateAdmitResolved(sub, sessionID, interactionID, term.status)
+		slog.Info("opencode-web: reconciled missed question terminal through the Kernel route",
+			"session", sessionID, "interaction", interactionID, "status", term.status)
+	}
 }
 
 // questionInteraction maps the official asked request to the canonical
@@ -337,13 +533,13 @@ func (a *Agent) ResolveUserInput(ctx context.Context, interactionID string, clie
 			return core.UserInputResolution{}, fmt.Errorf("opencode-web question reject: %w", err)
 		}
 		if code == 404 || code == 409 {
-			a.questionResolved(interactionID)
+			a.forgetQuestion(interactionID)
 			return core.UserInputResolution{Outcome: core.UserInputOutcomeAlreadyResolved, CurrentStatus: core.UserInputStatusRejected}, nil
 		}
 		if code >= 400 {
 			return core.UserInputResolution{}, fmt.Errorf("opencode-web question reject HTTP %d: %s", code, truncateForError(string(raw)))
 		}
-		a.questionResolved(interactionID)
+		a.forgetQuestion(interactionID)
 		return core.UserInputResolution{Outcome: core.UserInputOutcomeAccepted, CurrentStatus: core.UserInputStatusRejected}, nil
 	}
 
@@ -406,13 +602,13 @@ func (a *Agent) ResolveUserInput(ctx context.Context, interactionID string, clie
 		return core.UserInputResolution{}, fmt.Errorf("opencode-web question reply: %w", err)
 	}
 	if code == 404 || code == 409 {
-		a.questionResolved(interactionID)
+		a.forgetQuestion(interactionID)
 		return core.UserInputResolution{Outcome: core.UserInputOutcomeAlreadyResolved, CurrentStatus: core.UserInputStatusAnswered}, nil
 	}
 	if code >= 400 {
 		return core.UserInputResolution{}, fmt.Errorf("opencode-web question reply HTTP %d: %s", code, truncateForError(string(raw)))
 	}
-	a.questionResolved(interactionID)
+	a.forgetQuestion(interactionID)
 	return core.UserInputResolution{Outcome: core.UserInputOutcomeAccepted, CurrentStatus: core.UserInputStatusAnswered}, nil
 }
 

@@ -787,19 +787,10 @@ func (s *sseSubscriber) handleQuestionAsked(properties map[string]any, sessionID
 			"toolMessageID", req.Tool.MessageID, "toolCallID", req.Tool.CallID)
 		return
 	}
-	s.agent.noteQuestionAsked(req)
-	if !s.agent.claimQuestionProjection(req.ID) {
-		// The interaction was already projected once (GET /question recovery
-		// won the race) — converging to one part means no second emission.
-		return
-	}
-	s.emit(core.Event{
-		Type:      core.EventUserInputRequested,
-		SessionID: sessionID,
-		TurnID:    turnID,
-		ItemID:    req.Tool.CallID,
-		UserInput: questionInteraction(req),
-	})
+	// Directive-011: admission + emission happen atomically inside the
+	// lifecycle gate — a terminal admitted anywhere between can never be
+	// overwritten by this requested.
+	s.agent.gateAdmitRequested(s, sessionID, req, turnID)
 }
 
 // provenQuestionTurn is the live correlation gate (directive-010): tool.messageID
@@ -828,10 +819,11 @@ func (s *sseSubscriber) provenQuestionTurn(sessionID string, tool ocwQuestionToo
 
 // handleQuestionResolved maps question.replied/rejected to the canonical
 // user_input_resolved terminal. resolutionSource is other_client — the SERVER
-// broadcast this, so the answer may have come from any client. The turn rides
-// the same frame-derived facts that projected the pending part (registry
-// tool.messageID → parentID); the reducer settles it in place via the stored
-// interaction identity, so no activeTurn fallback exists here.
+// broadcast this, so the answer may have come from any client. The admission
+// (and its in-place emission, when a pending part exists) rides the
+// directive-011 lifecycle gate: the stored interaction identity carries the
+// turn/call facts, duplicates are idempotent, and identity-less terminals are
+// recorded but never emitted (no phantom).
 func (s *sseSubscriber) handleQuestionResolved(eventType string, properties map[string]any, sessionID string) {
 	requestID := firstString(properties, "requestID", "id")
 	if sid := firstString(properties, "sessionID"); sid != "" {
@@ -844,26 +836,7 @@ func (s *sseSubscriber) handleQuestionResolved(eventType string, properties map[
 	if eventType == "question.rejected" {
 		status = core.UserInputStatusRejected
 	}
-	req, _ := s.agent.questionResolved(requestID)
-	turnID := ""
-	if req.Tool.MessageID != "" {
-		s.stateMu.Lock()
-		turnID = s.assistantTurns[req.Tool.MessageID]
-		s.stateMu.Unlock()
-	}
-	s.emit(core.Event{
-		Type:      core.EventUserInputResolved,
-		SessionID: sessionID,
-		TurnID:    turnID,
-		ItemID:    knownToolCallID(&req),
-		UserInput: &core.UserInputInteraction{
-			InteractionID:    requestID,
-			Status:           status,
-			CanRespond:       false,
-			CanReject:        false,
-			ResolutionSource: "other_client",
-		},
-	})
+	s.agent.gateAdmitResolved(s, sessionID, requestID, status)
 }
 
 // handleTodoUpdated records the official ordered replacement list (A8: items

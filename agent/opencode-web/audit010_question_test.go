@@ -367,3 +367,67 @@ func TestAudit010_RecoveryFailsClosedOnServeErrors(t *testing.T) {
 		})
 	}
 }
+
+// ── directive-011 terminal reconciliation (agent level) ─────────────────────
+
+// runRecovery drives one recovery cycle against the given serve responses
+// with a live-fact-free subscriber (process-restart semantics).
+func runRecovery(t *testing.T, responses map[string]string, sub *sseSubscriber, agent *Agent) {
+	t.Helper()
+	c, err := agent.clientFor(context.Background())
+	if err != nil {
+		t.Fatalf("clientFor: %v", err)
+	}
+	agent.recoverPendingQuestions(context.Background(), c, sub, "ses_q", "")
+}
+
+// TestAudit011_ReconcileRejectEvidence: a locally-pending interaction absent
+// from GET /question settles rejected when the history carries the official
+// dismissed-error shape.
+func TestAudit011_ReconcileRejectEvidence(t *testing.T) {
+	const rejectedHistory = `[{"info":{"id":"msg_u0","sessionID":"ses_q","role":"user"},"parts":[]},{"info":{"id":"msg_1","sessionID":"ses_q","role":"assistant","parentID":"msg_u0"},"parts":[{"type":"tool","callID":"call_1","messageID":"msg_1","tool":"question","state":{"status":"error","input":{"questions":[]},"error":"The user dismissed this question"}}]}]`
+	agent, _ := questionAgent(t, map[string]string{
+		"/question":              `[]`,
+		"/session/ses_q/message": rejectedHistory,
+	})
+	sub := newDrivenSubscriber(t, agent)
+	armTurn(sub, "ses_q", "msg_u0")
+	armAssistant(sub, "ses_q", "msg_1", "msg_u0")
+	sub.handleRawEvent(askedFrame("que_1", "ses_q", "msg_1", "call_1"))
+	drain(sub)
+	runRecovery(t, nil, sub, agent)
+
+	events := drain(sub)
+	if len(events) != 1 || events[0].Type != core.EventUserInputResolved {
+		t.Fatalf("reconciliation must emit exactly one resolved, got %+v", events)
+	}
+	if events[0].UserInput.Status != core.UserInputStatusRejected || events[0].TurnID != "msg_u0" || events[0].ItemID != "call_1" {
+		t.Fatalf("reconciled terminal = %+v", events[0])
+	}
+}
+
+// TestAudit011_ReconcileFailClosedOnUnknownTerminal: absence from GET plus a
+// history tool that is NOT an evidence-proven terminal (completed without
+// captured answers) decides nothing — no emission, pending survives.
+func TestAudit011_ReconcileFailClosedOnUnknownTerminal(t *testing.T) {
+	agent, _ := questionAgent(t, map[string]string{
+		"/question": `[]`,
+		"/session/ses_q/message": `[{"info":{"id":"msg_u0","sessionID":"ses_q","role":"user"},"parts":[]},{"info":{"id":"msg_1","sessionID":"ses_q","role":"assistant","parentID":"msg_u0"},"parts":[{"type":"tool","callID":"call_1","messageID":"msg_1","tool":"question","state":{"status":"completed","input":{"questions":[]}}}]}`,
+	})
+	sub := newDrivenSubscriber(t, agent)
+	armTurn(sub, "ses_q", "msg_u0")
+	armAssistant(sub, "ses_q", "msg_1", "msg_u0")
+	sub.handleRawEvent(askedFrame("que_1", "ses_q", "msg_1", "call_1"))
+	drain(sub)
+
+	runRecovery(t, map[string]string{}, sub, agent)
+	if events := drain(sub); len(events) != 0 {
+		t.Fatalf("unknown terminal shape must fail closed (no emission), got %+v", events)
+	}
+	agent.questionMu.Lock()
+	lc := agent.questions[questionLifecycleKey("ses_q", "que_1")]
+	agent.questionMu.Unlock()
+	if lc == nil || lc.status != core.UserInputStatusPending {
+		t.Fatalf("lifecycle must stay pending after a fail-closed reconciliation, got %+v", lc)
+	}
+}

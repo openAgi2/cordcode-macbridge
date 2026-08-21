@@ -117,11 +117,16 @@ type Agent struct {
 	// C6 §6.8: live structured-question requests (question.asked → pending;
 	// replied/rejected/ResolveUserInput success → cleared). The serve holds
 	// the single answer lock; this map is label-recovery state only.
-	// projectedQuestions is the directive-010 exactly-once Kernel-projection
-	// claim per interactionID (live asked vs GET /question recovery converge).
-	questionMu          sync.Mutex
-	pendingQuestions    map[string]ocwQuestionRequest
-	projectedQuestions  map[string]bool
+	// questions is the directive-011 lifecycle gate: per-(session,
+	// interaction) pending/terminal state. The map plus questionMu IS the
+	// serial reduction order for every question fact (live asked, live
+	// terminal, recovery requested, recovery terminal) — admissions and
+	// their emissions happen under the lock, so the Kernel receives facts in
+	// admission order, terminal always beats a stale pending, and each fact
+	// ingests at most once.
+	questionMu       sync.Mutex
+	pendingQuestions map[string]ocwQuestionRequest
+	questions        map[string]*questionLifecycle
 
 	// C6 §6.9: the last todo.updated replacement list per session (control
 	// plane only — never a timeline part).

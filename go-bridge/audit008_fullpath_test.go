@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -39,9 +40,25 @@ type ssePushServe struct {
 	pendingQuestionsJSON string
 	historyBySession     map[string]string
 	questionFetches      int
+	// questionGate / historyGate park the corresponding recovery responses
+	// until closed — the directive-011 barrier control for real interleavings
+	// (nil = open).
+	questionGate chan struct{}
+	historyGate  chan struct{}
+	// replyBroadcasts/rejectBroadcasts toggle the official POST side effects:
+	// POST /question/{id}/reply|reject answers `true` AND broadcasts the
+	// question.replied/rejected frame on the SSE stream (real server order).
+	replyBroadcasts   bool
+	rejectBroadcasts  bool
+	questionPOSTs     []recordedQuestionPOST
 	// connDrops holds one done-channel per live SSE connection; drop() closes
 	// them all to simulate a mid-flight stream gap.
 	connDrops []chan struct{}
+}
+
+type recordedQuestionPOST struct {
+	Path string
+	Body string
 }
 
 func newSSEPushServe(t *testing.T) *ssePushServe {
@@ -75,7 +92,11 @@ func newSSEPushServe(t *testing.T) *ssePushServe {
 			s.mu.Lock()
 			s.questionFetches++
 			body := s.pendingQuestionsJSON
+			gate := s.questionGate
 			s.mu.Unlock()
+			if gate != nil {
+				<-gate
+			}
 			_, _ = w.Write([]byte(body))
 		case "/global/event":
 			drop := make(chan struct{})
@@ -101,12 +122,46 @@ func newSSEPushServe(t *testing.T) *ssePushServe {
 				}
 			}
 		default:
+			// Official question reply/reject POSTs: answer `true` and, when
+			// the test enables broadcasting, publish the server frame on the
+			// live stream (the real serve's POST→broadcast order).
+			if strings.HasPrefix(r.URL.Path, "/question/") && r.Method == http.MethodPost {
+				bodyBytes, _ := io.ReadAll(r.Body)
+				s.mu.Lock()
+				s.questionPOSTs = append(s.questionPOSTs, recordedQuestionPOST{Path: r.URL.Path, Body: string(bodyBytes)})
+				broadcast := false
+				if strings.HasSuffix(r.URL.Path, "/reply") && s.replyBroadcasts {
+					broadcast = true
+				}
+				if strings.HasSuffix(r.URL.Path, "/reject") && s.rejectBroadcasts {
+					broadcast = true
+				}
+				s.mu.Unlock()
+				_, _ = w.Write([]byte(`true`))
+				if broadcast {
+					id := strings.TrimSuffix(strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/question/"), "/reply"), "/reject")
+					kind := "question.replied"
+					if strings.HasSuffix(r.URL.Path, "/reject") {
+						kind = "question.rejected"
+					}
+					props := map[string]any{"sessionID": "ses_ocw1", "requestID": id}
+					if kind == "question.replied" {
+						props["answers"] = [][]string{{"red"}}
+					}
+					s.push(map[string]any{"type": kind, "properties": props})
+				}
+				return
+			}
 			// Per-session message history (the authoritative recovery truth).
 			if strings.HasPrefix(r.URL.Path, "/session/") && strings.HasSuffix(r.URL.Path, "/message") {
 				sid := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/session/"), "/message")
 				s.mu.Lock()
 				body := s.historyBySession[sid]
+				gate := s.historyGate
 				s.mu.Unlock()
+				if gate != nil {
+					<-gate
+				}
 				if body == "" {
 					body = "[]"
 				}
@@ -146,6 +201,15 @@ func (s *ssePushServe) drop() {
 	s.connDrops = nil
 }
 
+// recordedQuestionPOSTs snapshots the official reply/reject POSTs.
+func (s *ssePushServe) recordedQuestionPOSTs() []recordedQuestionPOST {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]recordedQuestionPOST, len(s.questionPOSTs))
+	copy(out, s.questionPOSTs)
+	return out
+}
+
 func (s *ssePushServe) push(payload map[string]any) {
 	s.t.Helper()
 	b, err := json.Marshal(map[string]any{"payload": payload})
@@ -168,13 +232,16 @@ func (s *ssePushServe) dialCount() int {
 // relay for the session, and the passive subscription — all at once, exactly
 // like the running bridge.
 func newAuditHarness(t *testing.T) (*Handlers, *ssePushServe) {
-	return newAuditHarnessWithOptions(t, func(*ssePushServe) {})
+	h, serve, _ := newAuditHarnessWithOptions(t, func(*ssePushServe) {})
+	return h, serve
 }
 
 // newAuditHarnessWithOptions lets a test shape the serve (pending questions,
 // history) BEFORE the adapter connects — the directive-010 recovery reads
-// them during StartSession.
-func newAuditHarnessWithOptions(t *testing.T, configure func(*ssePushServe)) (*Handlers, *ssePushServe) {
+// them during StartSession. It also returns the live harness agent so
+// directive-011 barrier tests can open a SECOND session on the SAME agent
+// (shared lifecycle gate + routes).
+func newAuditHarnessWithOptions(t *testing.T, configure func(*ssePushServe)) (*Handlers, *ssePushServe, core.Agent) {
 	t.Helper()
 	serve := newSSEPushServe(t)
 	configure(serve)
@@ -222,7 +289,7 @@ func newAuditHarnessWithOptions(t *testing.T, configure func(*ssePushServe)) (*H
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
-	return h, serve
+	return h, serve, agent
 }
 
 // snapshotText concatenates the assistant text of every turn part (the
