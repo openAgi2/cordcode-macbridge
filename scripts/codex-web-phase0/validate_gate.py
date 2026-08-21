@@ -76,3 +76,22 @@ if failures:
     print(f"FAILED {len(failures)}: {failures}")
     sys.exit(1)
 print("ALL PASS")
+
+
+# ---- 宿主（p0-gate-hosts）断言 ----
+HOSTS = HERE / "dumps" / "gate-hosts"
+hosts_doc = (HOSTS / "README.md").read_text()
+check("hosts-desktop-embedded-stdio-documented",
+      "stdio" in hosts_doc and "-c features.code_mode_host=true" in hosts_doc
+      and "不能隐式复用 daemon" in hosts_doc)
+check("hosts-no-user-daemon-documented", "无用户 daemon" in hosts_doc or "不存在" in hosts_doc)
+check("hosts-vscode-blocked-honestly", "未安装" in hosts_doc and "不从 Terminal/Desktop 类推" in hosts_doc)
+check("hosts-store-level-relay-documented", "list/read" in hosts_doc)
+check("hosts-owner-matrix-present", "最短 owner 验证矩阵" in hosts_doc)
+check("hosts-process-evidence-archived", (HOSTS / "process-evidence.txt").exists())
+
+print()
+if failures:
+    print(f"FAILED {len(failures)}: {failures}")
+    sys.exit(1)
+print("ALL PASS (gate + hosts)")

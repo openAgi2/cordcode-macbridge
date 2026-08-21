@@ -18,3 +18,11 @@
 [PASS] gate-sanitization — clean
 
 ALL PASS
+[PASS] hosts-desktop-embedded-stdio-documented
+[PASS] hosts-no-user-daemon-documented
+[PASS] hosts-vscode-blocked-honestly
+[PASS] hosts-store-level-relay-documented
+[PASS] hosts-owner-matrix-present
+[PASS] hosts-process-evidence-archived
+
+ALL PASS (gate + hosts)

@@ -1,0 +1,27 @@
+# 采集时间：2026-08-22 00:5x 本地；只读 ps/lsof/ls
+$ ps aux | grep -i ChatGPT | grep -v grep
+44842 /Applications/ChatGPT.app/Contents/MacOS/ChatGPT
+（另有多个 Codex Framework Renderer/Service/crashpad 子进程）
+
+$ ps -o pid,ppid,command -p 44958
+44958 44842 /Applications/ChatGPT.app/Contents/Resources/codex -c features.code_mode_host=true app-server --analytics-default-enabled
+
+$ lsof -p 44958 (摘要)
+codex 44958 0u unix 0x...->0x...   (stdin pipe)
+codex 44958 1u unix 0x...->0x...   (stdout pipe)
+codex 44958 2u unix 0x...->0x...   (stderr pipe)
+codex 44958 7u/8u/9u unix socketpair
+（无 TCP LISTEN、无 control socket 连接）
+
+$ ps -o pid,ppid,command -p 2244
+2244 2236 codex app-server
+2236 /Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime -port 8777 -drivers ... -codex-backend app_server ...
+
+$ ls ~/.codex/app-server-control/ ; ls ~/.codex/packages/standalone/current/
+（两者均不存在 → 本机无用户 daemon）
+
+$ ls ~/.codex/sessions/
+2026/ ...（store 存在，仅存在性检查）
+
+$ ls ~/.vscode/extensions/ | grep -iE "openai|chatgpt|codex"
+（无 → VS Code Codex 扩展未安装）
