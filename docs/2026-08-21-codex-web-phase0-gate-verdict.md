@@ -71,7 +71,8 @@
 
 - 多题 blocking requestUserInput、MCP elicitation 三 variant 实样本：Phase 4 版本门控后另采
   （schema + 官方 v2 test 已核对）。
-- VS Code 宿主：未安装；owner 矩阵 4 步（gate-hosts/README.md）。
+- VS Code 宿主：未安装；**owner 2026-08-22 决定不补测**——覆盖面保持「未安装/不测」的既成事实，
+  codex-web 不对 VS Code 宿主广告实时旁观（gate-hosts/README.md 的 4 步矩阵仅存档备查，不再是待办）。
 - `thread/turns/list`（experimental 分页）：一期不用（§7 🧪 行维持）。
 - turn/started 的 mid-turn attach 窗口：codex-web Go 实现用常驻连接 + 通知驱动 attach 消除；
   Phase 3 真实实现时复核（本裁决 3-4 条已给出推导依据：status/changed(active)+item/started）。

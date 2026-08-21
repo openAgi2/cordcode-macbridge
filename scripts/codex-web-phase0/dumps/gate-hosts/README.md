@@ -31,7 +31,10 @@
 - 与 Terminal TUI 场景 1 的共享 daemon 路径**互不影响**：TUI 场景 1 的结论对 Desktop 不成立、
   也无需成立——两宿主形态不同，分别记录，不从 TUI 类推（本节即实测）。
 
-## VS Code Codex extension——未安装（如实记录为 blocked）
+## VS Code Codex extension——未安装；**owner 2026-08-22 裁决：不补测**
+
+覆盖面结论固定为「未安装/不测」，codex-web 不对 VS Code 宿主广告实时旁观；下方矩阵仅存档备查。
+（原状态：如实记录为 blocked）
 
 - 本机已装 Visual Studio Code.app，但 `~/.vscode/extensions/` 无 openai/chatgpt/codex 相关扩展。
 - 未安装 → 无法实测 endpoint/transport/进程归属/事件覆盖；**不从 Terminal/Desktop 类推**。
