@@ -11,6 +11,7 @@ package codexweb
 //   - Close 有界（复用 transport 的有界关闭）。
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -193,6 +194,12 @@ func (c *Client) failAllPending(err error) {
 
 // Request 发送 id 请求并等待响应（相关性与并发归位由 pending map 保证）。
 func (c *Client) Request(method string, params any) (json.RawMessage, *RPCError, error) {
+	return c.RequestContext(context.Background(), method, params)
+}
+
+// RequestContext 是 Request 的 ctx 感知形式：catalog/history/turn 调用方用请求
+// ctx 取消长等待；超时仍由 requestTimeout 兜底。
+func (c *Client) RequestContext(ctx context.Context, method string, params any) (json.RawMessage, *RPCError, error) {
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
@@ -222,14 +229,21 @@ func (c *Client) Request(method string, params any) (json.RawMessage, *RPCError,
 		return nil, nil, err
 	}
 
+	timer := time.NewTimer(requestTimeout)
+	defer timer.Stop()
 	select {
 	case out := <-ch:
 		return out.result, out.rpcErr, out.err
-	case <-time.After(requestTimeout):
+	case <-timer.C:
 		c.mu.Lock()
 		delete(c.pending, id)
 		c.mu.Unlock()
 		return nil, nil, fmt.Errorf("codexweb: request %s timed out after %s", method, requestTimeout)
+	case <-ctx.Done():
+		c.mu.Lock()
+		delete(c.pending, id)
+		c.mu.Unlock()
+		return nil, nil, fmt.Errorf("codexweb: request %s canceled: %w", method, ctx.Err())
 	case <-c.done:
 		return nil, nil, fmt.Errorf("codexweb: connection lost: %v", c.readErr)
 	}

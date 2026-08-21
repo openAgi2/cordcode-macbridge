@@ -988,6 +988,8 @@ validate 共 136 断言全 PASS，可复跑）。共享运行时 Gate：**PASS**
 | 2 | control socket = WebSocket over UDS（JSON-RPC 每 WS text 帧一消息）；`app-server proxy` 为纯字节中继 | unix_socket.rs `accept_async` + gate-terminal 实测 |
 | 3 | `config/read` 的 flatten `additional` 实测为空，不含 `model_providers` | dumps/models-config |
 | 4 | 通知分级与不重放边界（全局 vs 订阅者级） | gate-terminal README 关键发现 2 |
+| 5 | **Phase 2 实测补充**：从未有过 turn 的 thread 不出现在 `thread/list`（rollout 未物化，list 为 scan-and-repair + state DB 视图；`thread/start` 后立即 `turn/start` 即可见，turn 是否完成无关）。catalog 不得为此伪造条目或改用 loaded 集合冒充列表 | p2-catalog e2e（agent/codex-web/sessions_e2e_test.go 空条目断言）|
+| 6 | **Phase 2 实测补充**：`thread/list` 默认 created_at（秒粒度）cursor 翻页会跳过与 cursor 同秒创建的兄弟条目（官方 `should_skip` 只认严格 `ts < cursor.ts`，tie-breaker id 在遍历层不生效）；dumps/catalog 的 `cursor_page2_count:0`（同秒 4 条）即此行为。CodCode 聚合 catalog 用服务端默认页大小（单页覆盖），不依赖小页深翻页补全 | rollout/src/list.rs `should_skip` + p2-catalog e2e limit=1 边界断言 |
 
 未回写技术路线：Phase 0 全部实测与 v1.5 冻结设计一致或仅作事实修正；Phase 1–6 计划不变。
 实施注意的新事实清单（daemon 前置、同 daemon 多连接 resume 无冲突、`excludeTurns` 需
