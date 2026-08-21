@@ -1,7 +1,13 @@
 # OpenCode Web Backend 设计（官方 HTTP/SSE 转发 + bridge-v1 翻译）
 
+> [!CAUTION]
+> **历史文档，已于 2026-08-20 停止作为实施依据。** 本文保留当时设计与评审轨迹，不能再作为开发 agent 的“唯一真值”，也不得从本文继续排任务或补丁。后续工作以
+> [source-parity audit](2026-08-20-opencode-web-source-parity-audit.md) 和
+> [source-first convergence plan](2026-08-20-opencode-web-source-first-convergence-plan.md)
+> 为准；当前产品代码实施仍由 owner 暂停。已知原因包括：本文允许复制 legacy HTTP/SSE/历史映射、若干请求键和事件顺序未经真实样本证明、以及 endpoint 存在性被误当成官方 Web 语义等价。
+
 - 日期：2026-08-18（v2：实施真值；v3：一轮评审 M1-M3+S1-S9；v3.1：二轮评审 **APPROVE** 收口——diff 逐项核验通过、S7 亲核修正独立复核属实、audit-plan 背书盘点通过，三条实施期提示落稿，见文末「评审采纳记录」。中间稿/讨论轨迹见 [初稿](2026-08-18-opencode-web-backend-design-初稿.md)）
-- 状态：**待评审后实施**。本文是开发 agent 的唯一真值；初稿不作实施依据。批准前不写 `agent/opencode-web` 代码。
+- 状态：**已实施过、现已被替代，仅供历史追溯**。原“开发 agent 的唯一真值”声明作废。
 - 背景：旧 `opencode` 在 iOS 上占用圈空、部分会话发了没回；官方网页（本机 `opencode serve`）同会话有数。owner 要求 **新开独立 backend**，与旧包物理隔离，成熟后再摘旧入口、代码不删。
 - 对照：结构、纪律、接线密度效仿 [2026-08-16-dsh-web-backend-design.md](2026-08-16-dsh-web-backend-design.md)。**不要**把 dsh 的 JSON-RPC 信封、双 WebSocket、`/api/respond` 批问答原样抄过来。本路线的载波是 **HTTP + SSE**，不是 WebSocket。
 - 不变约束：探测-复用-未启动、零迁移、双向接力、SSV2 十二条护栏。不写用户 OpenCode 会话库。不 import `agent/opencode`。不删 `agent/opencode/`。

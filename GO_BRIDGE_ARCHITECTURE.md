@@ -232,16 +232,31 @@ shadow-tree 启动）子进程，协议是 SDK JSON-RPC 2.0 over stdio，不是�
 官方 `dsh web` 的请求转发器 + bridge-v1 翻译器。iOS 几乎零新渲染逻辑；标题、
 模型、权限预设、上下文用量、工作区归组都取自官方 API，MacBridge 不发明这些事实。
 
-**实例生命周期（探测复用优先）：**
+**实例生命周期（权威端口/座位模型，2026-08-19 设计
+`docs/2026-08-19-dsh-web-canonical-3080-instance-design.md`）：**
 
-1. 启动时后台 `host.describe` 探测用户自己的实例（默认 `127.0.0.1:3080`）；
-2. 未命中则 managed spawn：`dsh --profile web --host 127.0.0.1 --port 3096…3196`，
-   状态写入 data dir 的 `dsh-web-managed-server.json`（0600，无凭据——dsh v1
-   无认证面）；
-3. 两态都失败 → hello_ack `not_configured`，不代装。
+1. **座位 = 探测列表首位**（默认 `127.0.0.1:3080`；用户显式配置 `dsh_web_url`
+   则配置端口即座位）。座位是唯一实例位子——**端口即身份**，应答即用，无论谁
+   拉起（3096–3196 私有端口区间已退役，旧孤儿由一次性迁移清理按 PID 安全收尸）；
+2. **失联 → 宽限 120s**（`lostAt` 置位）：不收养、不补拉，`Resolve` 返回类型化
+   `ErrInstanceReconnecting`，handler 映射 wire 码 `backend_unavailable`
+   （send 三处 + list 四处；**禁止** `not_configured`——hello 侧
+   `InstanceStatus` 宽限内特判 `available=true` + reconnecting detail，防止
+   `detectInstanceStatusProber` 把 `available=false` 一律折成 `not_configured`）；
+   running 会话在边沿收一条 turn 终态错误事件（边沿序号幂等，坑 8 红线）；
+3. **冷启动（本进程从未持有）或宽限到期 → 在座位上补拉**：
+   `dsh --profile web --host 127.0.0.1 --port <座位端口>`（安全红线不变：仅
+   loopback、永不 `--trusted-host`/`0.0.0.0`）；spawn 失败按 PID/端口占用如实
+   报错并 5s 退避重试；
+4. 锁纪律：`resolver.mu` 只护缓存字段，探活/spawn 锁外，single-flight +
+   失联探活 ≤1s 负缓存；补拉期间并发 RPC 立即 `backend_unavailable` 不阻塞；
+5. **Link 退出不杀座位实例**（不杀+下次收养）：浏览器跨 bridge 重启不断流；
+   升级 dsh 后手动重启一次（诊断可见 pid + ps 启动时间）。
 
-hello_ack 的 `detectDSHWebInstance` 只镜像 driver 已解析的实例状态，自己不再
-探测或 spawn。
+`run_diagnostics` 是**会突变**的判别手段（内部走 `Resolve`，可能触发补拉）；
+只读判别用 `lsof` + `dsh-web-managed-server.json` + `InstanceStatus`。
+`dsh-web-managed-server.json`（0600，无凭据）只写不读：诊断与迁移清理消费，
+解析不读。
 
 **两条常驻 WebSocket（官方 v1 无 `since`，重连 = 重开流 + history/forceCold）：**
 

@@ -224,6 +224,10 @@ func detectAgentStatus(id string, agent core.Agent, codexBackendMode string, cfg
 		return detectDSHRuntime()
 	case "dsh-web":
 		return detectDSHWebInstance(agent)
+	case "opencode-web":
+		// 纯 HTTP/SSE 客户端：可用性 = 探针镜像的 serve 状态（设计 §4.2，
+		// 坑 12——默认分支会把空 URL 也报成 available）。
+		return detectInstanceStatusProber("opencode-web", agent)
 	default:
 		return AgentStatusAvailable, ""
 	}
@@ -233,9 +237,16 @@ func detectAgentStatus(id string, agent core.Agent, codexBackendMode string, cfg
 // (external probe hit / managed spawn / both failed). Detection itself never
 // probes or spawns — the driver's startup background resolution owns that.
 func detectDSHWebInstance(agent core.Agent) (AgentStatus, string) {
+	return detectInstanceStatusProber("dsh-web", agent)
+}
+
+// detectInstanceStatusProber mirrors an instanceStatusProber driver's
+// endpoint state. The prober's own probe is read-only; detection never
+// resolves or spawns anything itself.
+func detectInstanceStatusProber(backendID string, agent core.Agent) (AgentStatus, string) {
 	prober, ok := agent.(instanceStatusProber)
 	if !ok {
-		return AgentStatusNotConfigured, "dsh-web driver does not expose instance status"
+		return AgentStatusNotConfigured, backendID + " driver does not expose instance status"
 	}
 	available, detail := prober.InstanceStatus()
 	if available {

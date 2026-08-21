@@ -222,6 +222,11 @@ final class MacBridgeBehaviorTests: XCTestCase {
             return XCTFail("argv must contain -opencode-url")
         }
         XCTAssertEqual(args[idx + 1], "http://127.0.0.1:4096")
+        // opencode-web 并存期与旧 backend 同一已解析 URL（设计 §4.1.6）。
+        guard let webIdx = args.firstIndex(of: "-opencode-web-url") else {
+            return XCTFail("argv must contain -opencode-web-url when the URL is resolved")
+        }
+        XCTAssertEqual(args[webIdx + 1], "http://127.0.0.1:4096")
         // password 是 secret，绝不出现在 argv。
         XCTAssertFalse(args.contains("super-secret-password"))
         // external_http 不隐式写 64667。
@@ -240,8 +245,26 @@ final class MacBridgeBehaviorTests: XCTestCase {
         )
         let args = RuntimeManager.processArguments(for: config)
         XCTAssertFalse(args.contains("-opencode-url"))
+        XCTAssertFalse(args.contains("-opencode-web-url"))
         XCTAssertFalse(args.contains("64667"))
         XCTAssertFalse(args.contains("localhost"))
+    }
+
+    func testProcessArgumentsDriversIncludeOpenCodeWeb() {
+        let config = RuntimeConfig(
+            executablePath: "/usr/bin/false",
+            dataDir: "/tmp/cccode-t-\(UUID().uuidString)",
+            logDir: "/tmp"
+        )
+        let args = RuntimeManager.processArguments(for: config)
+        guard let idx = args.firstIndex(of: "-drivers") else {
+            return XCTFail("argv must contain -drivers")
+        }
+        let drivers = args[idx + 1].split(separator: ",").map(String.init)
+        XCTAssertTrue(drivers.contains("opencode-web"), "drivers must include opencode-web")
+        // 老 opencode driver 已移除（owner 2026-08-19：与 opencode-web 双订阅同一
+        // serve，双事件/双投影流互覆干扰测试）。回滚 = 从列表加回并翻转此断言。
+        XCTAssertFalse(drivers.contains("opencode"), "legacy opencode driver must stay removed (dual-subscription interference)")
     }
 
     func testProcessEnvironmentCarriesOpenCodeCreds() {
@@ -261,6 +284,8 @@ final class MacBridgeBehaviorTests: XCTestCase {
         )
         XCTAssertEqual(env["OPENCODE_SERVER_USERNAME"], "alice")
         XCTAssertEqual(env["OPENCODE_SERVER_PASSWORD"], "super-secret-password")
+        XCTAssertEqual(env["OPENCODE_WEB_SERVER_USERNAME"], "alice")
+        XCTAssertEqual(env["OPENCODE_WEB_SERVER_PASSWORD"], "super-secret-password")
         XCTAssertEqual(env["CORDCODE_MANAGEMENT_TOKEN"], "mgmt-token")
         XCTAssertNotNil(env["PATH"])
     }

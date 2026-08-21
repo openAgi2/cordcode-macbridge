@@ -1,0 +1,46 @@
+{
+  "evidenceID": "E2b",
+  "source": {
+    "generation": "OpenCode 1.18.18",
+    "commit": "2cba7e227d68a7e7e4a2aa9c85b808e8ecb14daf",
+    "transport": "GET /session/:id/message",
+    "captureMode": "read-only owner acceptance structural sanitization",
+    "capturedAt": "2026-08-21T04:35:09Z"
+  },
+  "privacy": {
+    "rawArchived": false,
+    "reason": "owner message text, paths, credentials, and stable IDs are intentionally not retained",
+    "preserved": ["object keys", "value types", "non-empty text fact", "part counts", "ordering classes"]
+  },
+  "reproductions": [
+    {
+      "session": "owner_session_1",
+      "hydrateOutcome": "projection.hydrate_failed",
+      "messageRows": 4,
+      "partTypesInOrder": ["text", "step-start", "reasoning", "text", "step-finish", "text", "step-start", "reasoning", "text", "step-finish"],
+      "populatedReasoningParts": 2
+    },
+    {
+      "session": "owner_session_2",
+      "hydrateOutcome": "projection.hydrate_failed",
+      "messageRows": 4,
+      "partTypesInOrder": ["text", "step-start", "reasoning", "text", "step-finish", "text", "step-start", "reasoning", "text", "step-finish"],
+      "populatedReasoningParts": 2
+    }
+  ],
+  "reasoningPartShape": {
+    "id": "<non-empty string>",
+    "sessionID": "<non-empty string>",
+    "messageID": "<non-empty string>",
+    "type": "reasoning",
+    "text": "<non-empty string>",
+    "time": {
+      "start": "<number>",
+      "end": "<number>"
+    }
+  },
+  "officialWeb": {
+    "skipParts": ["patch", "step-start", "step-finish"],
+    "reasoningDisposition": "retain as first-class message part"
+  }
+}

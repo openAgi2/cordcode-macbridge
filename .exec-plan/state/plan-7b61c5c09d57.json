@@ -1,0 +1,1829 @@
+{
+  "version": 6,
+  "project_root": "/Users/jacklee/Projects/cordcode-macbridge-opencode-web",
+  "plan_file": "docs/2026-08-18-opencode-web-backend-design.md",
+  "state_store": {
+    "canonical_path": ".exec-plan/state/plan-7b61c5c09d57.json",
+    "legacy_path": ".claude/exec-plans/plan-7b61c5c09d57.json",
+    "origin": "new",
+    "migrated_from": null,
+    "migrated_at": null
+  },
+  "queue_policy": {
+    "todo_md_role": "informational-only",
+    "completion_gate": "proof-carrying-impl-tests-regression",
+    "phase_done_rule": "all-required-todos-done",
+    "audit_rule": "unsupported-done-must-downgrade",
+    "start_exit_rule": "internal-audit-before-success",
+    "audit_failure_policy": "light-repairable-heavy-external-blocker",
+    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+    "session_mirror_policy": "todo-write-optional-mirror",
+    "invocation_policy": "slash-or-natural-language-equivalent",
+    "persistence_rule": "persist-on-every-status-transition"
+  },
+  "report_policy": {
+    "auto_write_completion_report": true,
+    "report_directory": "docs",
+    "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+    "write_when": "all-required-todos-proven-done",
+    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  },
+  "reports": {
+    "completion_report_path": "docs/2026-08-18-opencode-web-backend-design完成情况.md",
+    "completion_report_status": "missing",
+    "last_generated_at": null,
+    "based_on_queue_hash": null
+  },
+  "updated_at": "2026-08-20T03:07:27.895531",
+  "todos": [
+    {
+      "id": "s8-1-skeleton-impl",
+      "title": "§8-1 骨架：agent/opencode-web 注册/Client/双代探针/WireDescriptor/InstanceStatus + go-bridge 骨架接线",
+      "description": "新建 agent/opencode-web/（包名 opencodeweb，import github.com/openAgi2/cordcode-macbridge/agent/opencode-web，注册名/驱动 id=opencode-web，wire kind=opencode-web，显示名 OpenCode Web）。agent/opencode/ 一行不改、不 import、不删。实现：(a) opencodeweb.go——init() core.RegisterAgent、New(opts)、Agent 结构、Name/Stop、InstanceStatus（URL 空→(false,\"OpenCode Web endpoint not configured\")；探针失败→(false,\"probe failed: …\")；成功→(true,\"generation=… url=…\")）。New 读 opts：opencode_web_url/opencode_web_user/opencode_web_pass/work_dir/data_dir/pin_store，绝不读 opencode_url；URL 空=not_configured 但 New 不失败；禁止 LookPath(opencode)。(b) client.go——HTTP 客户端：BaseURL 规范化、Basic Auth、x-opencode-directory 请求头、双代路径前缀（1.18 无 /api 前缀，v2 有）、doRequest/fetchJSON。(c) probe.go——§3.2 启动探针按序：GET /global/health（可 401 再带 Basic Auth）→ 404/非 JSON 试 /api/health → /session 或 /api/session 看裸数组 vs {data} 信封 → 失败 not_configured 诊断写清试过路径，不猜 64667。注意本机 1.18.18 双面共存（/api/health 也 200）：互斥依据=v2 无 /global/health 路由，最终形状判据=数组 vs {data}。(d) wire_descriptor.go——WireDescriptor{Kind:\"opencode-web\",DisplayName:\"OpenCode Web\",LiveEventModel:core.LiveEventBroadcast,RequiresExternalTurnPolling:false,StaticCapabilities:[\"external_turn_streaming\"]}。(e) go-bridge 接线（rg 按符号复核，勿信设计行号）：main.go import 块加 _ import；默认 -drivers 追加 opencode-web；新增 -opencode-web-url/-opencode-web-user/-opencode-web-pass flags；buildAgentOptions 在 id==\"opencode-web\" 时写 opencode_web_*；shouldStartPassiveSubscription 对 opencode-web 仅 URL 非空才 true；detectAgentStatus 加 case \"opencode-web\" 走 instanceStatusProber（dsh-web 先例）；RegisterOpenCodeProxy 不为 opencode-web 注册。设计 §4.1.1/§4.1.2/§4.1.3(仅基座)/§4.1.4/§4.1.5 骨架行/§4.2。",
+      "status": "done",
+      "phase": "s8-1",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "§8-1",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "agent/opencode-web 骨架落地：opencodeweb.go（注册 opencode-web、New 读 opencode_web_url/user/pass+work_dir/data_dir/pin_store、Name/Stop、InstanceStatus 空 URL=not_configured/探针失败=probe failed/成功=generation=… url=…、WorkDirSwitcher、StartSession/ListSessions 骨架期响亮失败）、client.go（BaseURL 规范化、Basic Auth、x-opencode-directory 头、apiPath 双代前缀、doRequest/fetchJSON 错误原文不折叠）、probe.go（§3.2 探针按序 /global/health→404 再 /api/health→session 形状终裁；401 先无认证再带认证；无认证 200=server_unauthenticated 拒绝；不猜任何固定端口）、wire_descriptor.go（§4.1.4 字段全对齐，StaticCapabilities 恰为 external_turn_streaming）。go-bridge 接线：main.go import+默认 drivers 追加 opencode-web+三条 opencode-web-* flags（env 默认 OPENCODE_WEB_*）+buildAgentOptions id==opencode-web 写 opencode_web_* 键+shouldStartPassiveSubscription 空返回 false+clearControlPlaneEnv 清扫 OPENCODE_WEB_SERVER_*；agent_descriptor.go detectAgentStatus 加 case 走 instanceStatusProber（detectInstanceStatusProber 泛化，dsh-web 复用）。RegisterOpenCodeProxy 未为新 id 注册。go build ./go-bridge/... ./agent/... 全绿。",
+        "artifacts": [
+          "agent/opencode-web/opencodeweb.go",
+          "agent/opencode-web/client.go",
+          "agent/opencode-web/probe.go",
+          "agent/opencode-web/wire_descriptor.go",
+          "go-bridge/main.go",
+          "go-bridge/agent_descriptor.go"
+        ],
+        "checked_at": "2026-08-19T02:23:17+0800"
+      }
+    },
+    {
+      "id": "s8-1-skeleton-tests",
+      "title": "§8-1 单测：httptest 假 serve 探针选代/401+BasicAuth/import 守卫/InstanceStatus",
+      "description": "httptest 假 serve 覆盖（设计 §6 单测表相关行）：探针选代——/global/health 200→gen=1.18；404 再 /api/health→gen=v2；本机双面共存场景（/api/health 也 200）时靠 /global/health 存在+session 形状判 1.18；401+BasicAuth——无密码失败、有密码通过；无密码 health 200 拒绝（server_unauthenticated，legacy_64667 例外不适用新包）；InstanceStatus——空 URL→not_configured、探针失败→not_configured、成功→available+detail 含 generation。import_guard_test.go：扫描新包全部源文件禁止出现 sqlite3、`opencode run`、`session list` CLI、`opencode models`、*.opencode-models.json、64667 回落字面量；go list 断言 import 图不含 agent/opencode。禁止写死 4097。设计 §2.1 坑 10、§4.5 防双写。",
+      "status": "done",
+      "phase": "s8-1",
+      "kind": "tests",
+      "depends_on": [
+        "s8-1-skeleton-impl"
+      ],
+      "source": "§8-1/§6",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "15 用例全过（go test ./agent/opencode-web/... -count=1 → ok 0.611s）：探针选代（1.18 双面共存仍判 1.18/v2 路由缺失判 v2/形状仲裁翻转）、401 无凭据失败、无认证 200 拒绝（server_unauthenticated）、无路由失败记录全部试过路径、InstanceStatus 三态（空 URL/探针失败/成功含 generation+url）、clientFor 失败与钉代、CreateAgent 注册名、WireDescriptor 逐字段、WorkDirSwitcher、import 守卫三件（禁符号扫描/直连 import 解析/go list -deps 传递闭包）。",
+        "artifacts": [
+          "agent/opencode-web/import_guard_test.go",
+          "agent/opencode-web/probe_test.go",
+          "agent/opencode-web/opencodeweb_test.go",
+          "go-bridge/main_test.go"
+        ],
+        "checked_at": "2026-08-19T02:23:17+0800"
+      }
+    },
+    {
+      "id": "s8-1-skeleton-regression",
+      "title": "§8-1 回归：go-bridge 全量测试零失败增量 + 旧包 git diff 必须空",
+      "description": "go build ./go-bridge && go test ./agent/opencode-web/... ./go-bridge/... -count=1 零失败；git diff --stat agent/opencode 必须为空（旧包一行不改）；main_test.go 的 shouldStartPassiveSubscription 测试加 opencode-web 空 URL/有 URL 两行断言。本项不涉及 Mac App/iOS，Release 安装留给 §8-8。",
+      "status": "done",
+      "phase": "s8-1",
+      "kind": "regression",
+      "depends_on": [
+        "s8-1-skeleton-tests"
+      ],
+      "source": "§8-1/§6 回归",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "go build ./go-bridge/... ./agent/... 绿；go test ./agent/opencode-web/... ok；go test ./go-bridge/... -count=1 失败集与干净树（git stash 对照）完全一致：仅 TestCanonicalUserInputIsProjectionOnlyAndLegacyIsOneWayDerived（顺序依赖 flaky，单跑两树 4/4 都挂、全量两树间歇挂，先存问题非本次引入）；agent/dsh-web TestGetBackgroundTaskDetailFoundAndMissing 同为先存失败（两树同挂）。git diff --stat agent/opencode 为空。main_test.go 补 shouldStartPassiveSubscription opencode-web 空/有 URL 两行 + buildAgentOptions opencode_web_* 分键断言。",
+        "artifacts": [
+          "go-bridge/main_test.go",
+          "/tmp/clean-fails.txt(对照记录，未入库)"
+        ],
+        "checked_at": "2026-08-19T02:23:17+0800"
+      }
+    },
+    {
+      "id": "s8-2-list-history-usage-impl",
+      "title": "§8-2 列表/历史/占用：sessions.go/history.go/context_usage.go/projects.go/agents.go HTTP 映射",
+      "description": "实现 §4.3.1/§4.3.2（列表/详情/历史）+ §3.3 占用公式 + §4.3.7 list_projects + §4.1.3 相关接口：(a) sessions.go——ListSessions=GET /session（1.18 裸数组；v2 解 {data}），映射 id/title→Summary/time.updated(毫秒)→ModifiedAt/directory；get_session=GET /session/:id；请求头 x-opencode-directory=当前 workDir（list）/该会话 directory（get）。子 agent/空会话未核实前不过滤，单测钉「未知字段忽略」。(b) history.go——GetRichSessionHistory/GetSessionHistory=GET /session/:id/message，映射复制 mapRichHistoryEntry 语义（agent/opencode/providers.go:190-315 对照复制，复制后归属新包）：info 下沉、parts[].type=text/reasoning/tool/file、tool state.status/output。(c) context_usage.go——§3.3 官方公式：从消息倒找最后一条 tokenTotal>0 的 assistant；total=input+output+reasoning+cache.read+cache.write；usage%=round(total/model.limit.context)；映射 core.ContextUsage 全字段（ContextWindow=/provider 里该模型 limit.context）；顶层 session.tokens=0 必回落 /message；无窗口返回 nil 禁止谎报 200k；模型 id 用 last assistant 的 providerID+modelID（info 上），不用 session 顶层 model；禁止把 v2 GET …/context 当占用。实现 GetSessionContextUsage（duck type）+ core.ContextUsageReporter（session 上）。(d) models.go——GET /provider（递归收集任意节点上同时有 id 与 limit.context 的对象，窗口 map key 同时记 id 与 providerID/id）→ list_providers/list_models/SetModel；1.18 无独立 switch 口则记 pending 下次 prompt 带新 model 并诊断注明。(e) projects.go——GET /project（不是 /api/location），元素 {id,worktree,vcs,time,sandboxes}，目录建议取 worktree 字段。(f) agents.go——GET /agent 裸数组 {name|id,mode,description,hidden,native}→list_agents；空数组合法。设计 §3.3/§3.6/§4.1.1/§4.3.1/§4.3.2/§4.3.5/§4.3.7。",
+      "status": "done",
+      "phase": "s8-2",
+      "kind": "impl",
+      "depends_on": [
+        "s8-1-skeleton-regression"
+      ],
+      "source": "§8-2",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "sessions.go（ListSessions=GET /session 裸数组+v2 {data} 解码、id/title→Summary/time.updated 毫秒→ModifiedAt/directory/model 映射、未知字段忽略、ModifiedAt desc+ID 稳定排序、请求头 x-opencode-directory=workDir；fetchSessionInfo=GET /session/:id）；history.go（GetRichSessionHistory/GetSessionHistory=GET message 路由、mapRichHistoryEntry 语义复制（info 下沉/text/reasoning/tool state.status/output/file）、limit 裁尾）；context_usage.go（§3.3 公式：倒找 last assistant tokenTotal>0、total=五项和、消息级 info.tokens 唯一来源、模型取 info.providerID+modelID、窗口 /provider 递归收集双键（id 与 providerID/id）5min TTL、无窗口→nil 禁谎报、缓存 remember/cached 供 session 面与失败回落）；models.go（fetchModelCatalog 递归收集模型形节点、qualified providerID/modelID 名、AvailableModels/SetModel/GetModel pending 语义、窗口图与占用共享、modelInCatalog 发送门）；projects.go（GET /project worktree 字段→Directory，v2 返回 not_supported 不用 /api/location）；agents.go（GET /agent 映射，空数组合法）。",
+        "artifacts": [
+          "agent/opencode-web/sessions.go",
+          "agent/opencode-web/history.go",
+          "agent/opencode-web/context_usage.go",
+          "agent/opencode-web/models.go",
+          "agent/opencode-web/projects.go",
+          "agent/opencode-web/agents.go",
+          "agent/opencode-web/opencodeweb.go"
+        ],
+        "checked_at": "2026-08-19T02:29:49+0800"
+      }
+    },
+    {
+      "id": "s8-2-list-history-usage-tests",
+      "title": "§8-2 单测：列表映射/占用公式两红线/目录头断言",
+      "description": "设计 §6 单测表相关行：列表映射——id/title/directory/updated；x-opencode-directory 头出现在 httptest 收到的请求（list 与 get 各断言）。占用 tokens=0——session.tokens 全 0 + message last assistant 有数→used/window 仍出。占用无窗口——last assistant 有 tokens 但 provider 无 limit→返回 nil 不谎报 200k。两级 tokens 形状（S1）：顶层无 total 字段、message 级 info.tokens 才有 total——夹具按 §3.6 样板。history 映射——text/reasoning/tool(parts[].type) 状态映射、未知字段忽略。provider 递归收集 + 窗口 key 双记（id 与 providerID/id）。project worktree 字段映射。1.18 裸数组 + 一组 v2 {data} 信封双覆盖。",
+      "status": "done",
+      "phase": "s8-2",
+      "kind": "tests",
+      "depends_on": [
+        "s8-2-list-history-usage-impl"
+      ],
+      "source": "§8-2/§6",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "11 个新用例（包内共 26 全过，go test ./agent/opencode-web/... -count=1 ok）：列表映射+目录头+认证头断言（探针形状请求区分）；v2 信封+稳定排序；history parts/steps/tool output 映射+目录头+limit 裁尾+HistoryProvider 折叠；占用——顶层 tokens 全 0 仍从消息级出数（used=18457 五项和）、无窗口→nil 不谎报、无 assistant tokens→nil；AvailableModels qualified 名+Desc+窗口图双键共享+SetModel/GetModel；project worktree 映射+无 worktree 行丢弃；agent 映射+空数组合法；v2 下 projects not_supported。",
+        "artifacts": [
+          "agent/opencode-web/sessions_test.go"
+        ],
+        "checked_at": "2026-08-19T02:29:49+0800"
+      }
+    },
+    {
+      "id": "s8-2-list-history-usage-regression",
+      "title": "§8-2 回归：全量 go 测试 + 旧包零增量",
+      "description": "go test ./agent/opencode-web/... ./go-bridge/... -count=1 零失败；git diff --stat agent/opencode 为空。",
+      "status": "done",
+      "phase": "s8-2",
+      "kind": "regression",
+      "depends_on": [
+        "s8-2-list-history-usage-tests"
+      ],
+      "source": "§8-2/§6 回归",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "go test ./go-bridge/... 失败集与 §8-1 基线 diff 为空（零增量）；./agent/opencode/... ok 11.3s；git diff --stat agent/opencode 为空。",
+        "artifacts": [
+          "/tmp/mine-fails2.txt(对照记录)"
+        ],
+        "checked_at": "2026-08-19T02:29:49+0800"
+      }
+    },
+    {
+      "id": "s8-3-sse-activity-impl",
+      "title": "§8-3 SSE + SessionActivityProbing：events.go/activity.go——旁观/重连/零输出 turn_error/catalog 刷新",
+      "description": "实现 core.EventSubscriber（常驻 SSE，按代选 /global/event 或 /api/event）+ core.SessionActivityProbing + core.CatalogRefreshSignaler。对照复制 agent/opencode/sse_subscriber.go（复制后归属新包、删除 CLI NDJSON 面可保留兼容解包）：事件表 §4.3.3——message.updated role=user→EventUserMessage+一次 EventTurnStarted；message.part.delta field=text→EventText（user 消息累加 prompt）；field=reasoning→EventThinking；message.part.updated type=text→EventText/EventTextReplace；type=reasoning→EventThinking；type=tool→EventToolUse，status completed/error→EventToolResult（RequestID=part.id）；session.status type=running→清 completion；type=idle→emitResultOnce（唯一 turn 终态，零输出→EventResult{Error:\"model produced no output (model or provider may be unavailable on the server)\",Done:true}）；session.updated idle/running→同上+按 §3.3 重算占用发 EventContextUsageUpdated（禁止顶层 tokens）；permission.asked→EventPermissionRequest（RequestID=id）；todo.updated 一期忽略；session.created/deleted→CatalogRefreshSignaler 不进 chat 流；server.connected/session.diff/message.removed 忽略。红线：不在 step_finish 或 assistant time.completed 上发 EventResult；HTTP 4xx/5xx 原文进诊断；SSE 帧解 payload 包装也兼容顶层 type；断线重开 SSE+重拉 message+forceCold；surface 判据=bridge registry 命中该 session。activity.go——IsSessionActive=1.18 /session/status 有该 id（key 在=busy，缺席=idle）；解析失败或 HTTP 失败→true（保守）；禁止只用 v2 /session/active 当全局 idle。设计 §4.3.2 活跃/§4.3.3 全表。",
+      "status": "done",
+      "phase": "s8-3",
+      "kind": "impl",
+      "depends_on": [
+        "s8-2-list-history-usage-regression"
+      ],
+      "source": "§8-3",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "events.go：SSE 订阅器对照复制旧 sse_subscriber 并按设计 deltas——按代选 /global/event 或 /api/event；payload 包装解开+顶层 server type 兼容（无 CLI NDJSON handler）；事件表 §4.3.3（message.updated user→EventUserMessage+单次 EventTurnStarted、delta text/reasoning、part.updated snapshot→EventText/EventTextReplace、tool→EventToolUse+completed/error→EventToolResult RequestID=part.id、session.status running 清 completion/idle 唯一终态、permission.asked→EventPermissionRequest）；session.updated 重算占用走 §3.3 消息级公式（禁顶层 tokens）发 EventContextUsageUpdated；todo.updated 一期忽略；session.created/deleted→CatalogRefreshSignaler 不进 chat 流；零输出 idle→EventResult{Error 含 may be unavailable 文案,Done}；红线：assistant time.completed/工具完成不发 EventResult。相对旧复制的两处修正（活体形状对齐）：tool 名回退补 toolName 键、state 可嵌套 tool 对象内；工具事件带 TurnID 归因（健康多步工具 turn 不再被误判零输出——旧包缺口，新包修复并留注释）。Subscribe/close 不变量（events 仅在 readLoop 退出后 close）照抄。activity.go：IsSessionActive 1.18 /session/status（缺席=definitive idle）；v2 /api/session/active（缺席≠全局 idle→保守 active）；HTTP/解析失败→active。",
+        "artifacts": [
+          "agent/opencode-web/events.go",
+          "agent/opencode-web/activity.go",
+          "agent/opencode-web/history.go(fetchMessageMapsWithClient)",
+          "agent/opencode-web/opencodeweb.go(catalog 字段)"
+        ],
+        "checked_at": "2026-08-19T02:42:31+0800"
+      }
+    },
+    {
+      "id": "s8-3-sse-activity-tests",
+      "title": "§8-3 单测：零输出 idle turn_error/多步不提前完成/三态活跃/目录头（switchDir M2-1 前置）",
+      "description": "设计 §6 单测表相关行：零输出 idle——session.status=idle 且无 assistant part→EventResult.Error 含 may be unavailable。多步不提前完成——tool time.completed 不发 EventResult，只在 session.status idle 发。SSE 事件表逐行（user 消息/delta text/delta reasoning/part.updated tool completed/error/permission.asked/catalog 刷新信号）。IsSessionActive 三态——status map 有 id=busy、缺席=idle、HTTP 失败=active 保守。占用重算——session.updated 触发 EventContextUsageUpdated 且读 message 级非顶层。switchDir 特判四读方法携带 directory 头（httptest 断言请求头；此为 §8-5 M2-1 的包内前置断言）。",
+      "status": "done",
+      "phase": "s8-3",
+      "kind": "tests",
+      "depends_on": [
+        "s8-3-sse-activity-impl"
+      ],
+      "source": "§8-3/§6",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "13 个新用例（包内共 45 全过）：user 消息累计+单次 turn_started；assistant delta/snapshot（无关 snapshot→TextReplace）；tool 生命周期（running/completed 两跳、RequestID=part id）+多步红线（tool completed 与 assistant time.completed 都不发 EventResult，仅 session idle 收口一次）；零输出 idle→turn_error 文案含 may be unavailable；permission.asked；catalog 信号不进 chat；todo.updated 忽略；session.updated 重算占用走消息级（used=18457 非 7）；live SSE 端到端（header 先 flush 防死锁）；IsSessionActive 三态+v2 保守语义。",
+        "artifacts": [
+          "agent/opencode-web/events_test.go"
+        ],
+        "checked_at": "2026-08-19T02:42:31+0800"
+      }
+    },
+    {
+      "id": "s8-3-sse-activity-regression",
+      "title": "§8-3 回归：全量 go 测试 + 旧包零增量",
+      "description": "go test ./agent/opencode-web/... ./go-bridge/... -count=1 零失败；git diff --stat agent/opencode 为空。",
+      "status": "done",
+      "phase": "s8-3",
+      "kind": "regression",
+      "depends_on": [
+        "s8-3-sse-activity-tests"
+      ],
+      "source": "§8-3/§6 回归",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "go vet 干净；go test ./go-bridge/... 失败集仅含已定性先存 flaky TestCanonicalUserInputIsProjectionOnlyAndLegacyIsOneWayDerived（单跑/全量在干净树与工作树均随机翻转，多轮取证与本改动无因果）；git diff --stat agent/opencode 为空。",
+        "artifacts": [],
+        "checked_at": "2026-08-19T02:42:31+0800"
+      }
+    },
+    {
+      "id": "s8-4-send-models-impl",
+      "title": "§8-4 发送 + 模型：session.go create/prompt 带 catalog 模型、停止按代、catalog 校验、附件拒绝",
+      "description": "实现 StartSession/AgentSession/Send/CancelTurn（core.TurnCanceler session 上）：create=POST /session {directory,model:{id,providerID}}（directory 同时作 x-opencode-directory 头）；续聊 prompt_async（1.18）/prompt（v2）**必带 catalog 内 model**；成功=204 或 200，4xx/5xx 原文进 send 错误。catalog 校验：模型不在 /provider→send 错误、零 POST。非空 images/files→返回错误不静默丢。停止按代 abort/interrupt；Close 只拆 SSE 绑定不杀 serve。resume_session=对已有 id StartSession+订 SSE。Send 前 catalog 校验 + 零输出 idle turn_error 两条都要。不声明 AttachmentSupporter。设计 §4.3.4。",
+      "status": "done",
+      "phase": "s8-4",
+      "kind": "impl",
+      "depends_on": [
+        "s8-3-sse-activity-regression"
+      ],
+      "source": "§8-4",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "session.go：StartSession（resume 绑定已知 id 并采纳 serve 会话模型作回退真值；新会话首 Send 懒创建；绑定专用过滤 SSE）；Send（附件非空→响亮错误不静默丢；resolveSendModel=pending(SetModel)→StartSession 采纳值→诚报 no model selected 零 POST；modelInCatalog 门控不过→错误零 POST；create POST /session 带 directory+model+头；1.18 prompt_async 带 model{id,providerID}+parts；v2 先 POST …/model 再 prompt{prompt}；4xx/5xx 原文透传）；CancelTurn 按代 abort/interrupt（TurnCanceler）；Close 只拆 SSE 不 abort 不杀 serve；GetContextUsage 缓存面（ContextUsageReporter）；问答 core.ErrNotSupported。permissions.go 一并落地（session 接口依赖）：§3.4 折叠 1.18 allow→once 4xx 回退 allow/deny→reject 回退 deny、v2 once/reject、探针结果 noteFoldAttempt 进诊断 foldDiagnostics、SessionPermissionResponder 旁观面。",
+        "artifacts": [
+          "agent/opencode-web/session.go",
+          "agent/opencode-web/permissions.go",
+          "agent/opencode-web/opencodeweb.go"
+        ],
+        "checked_at": "2026-08-19T02:48:29+0800"
+      }
+    },
+    {
+      "id": "s8-4-send-models-tests",
+      "title": "§8-4 单测：发送带 model/catalog 拦截零 POST/附件拒绝/停止按代",
+      "description": "设计 §6 单测表：发送带 model——POST body 含 model.id+providerID（create 与续聊都断言）。catalog 拦截——模型不在 /provider→错误、零 prompt POST（httptest 计数器断言）。附件——非空 images/files→Send 返回错误。停止——1.18 POST abort、v2 POST interrupt。create 响应 {id:ses_…} 解析。4xx 原文透传进 send 错误不折叠。",
+      "status": "done",
+      "phase": "s8-4",
+      "kind": "tests",
+      "depends_on": [
+        "s8-4-send-models-impl"
+      ],
+      "source": "§8-4/§6",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "10 个新用例（包内共 46 全过）：create+prompt 均带 catalog model{id,providerID} 且 directory 头/体齐；catalog 拦截零 POST；无模型诚实错误零 POST；附件拒绝零 POST；4xx 原文进 send 错误（HTTP 400+body）；resume 采纳 serve 会话模型+会话自身 directory 头+零 create；1.18 abort 停止且 Close 不 abort；v2 interrupt 停止；问答 ErrNotSupported。",
+        "artifacts": [
+          "agent/opencode-web/session_test.go",
+          "agent/opencode-web/sessions_test.go(方法级路由扩展)"
+        ],
+        "checked_at": "2026-08-19T02:48:29+0800"
+      }
+    },
+    {
+      "id": "s8-4-send-models-regression",
+      "title": "§8-4 回归：全量 go 测试 + 旧包零增量",
+      "description": "go test ./agent/opencode-web/... ./go-bridge/... -count=1 零失败；git diff --stat agent/opencode 为空。",
+      "status": "done",
+      "phase": "s8-4",
+      "kind": "regression",
+      "depends_on": [
+        "s8-4-send-models-tests"
+      ],
+      "source": "§8-4/§6 回归",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "go vet 干净；go test ./go-bridge/... 失败集仅含先存 flaky（多轮两树取证已定性）；git diff --stat agent/opencode 为空。",
+        "artifacts": [],
+        "checked_at": "2026-08-19T02:48:29+0800"
+      }
+    },
+    {
+      "id": "s8-5-projection-wiring-impl",
+      "title": "§8-5 投影与 go-bridge 接线：§4.3.2 表逐项 + §4.1.5 全表 + iOS sessionSyncV2ProjectionBackend",
+      "description": "go-bridge 接线全表（rg 按符号复核，设计行号已漂移）：dispatchRPC switchDir 特判（M2-1）——Name()==\"opencode\"||shouldSwitchWorkDirForMethod() 特判扩含 opencode-web（四读方法 list/get/messages/projection 携带会话 directory 头）；disablesRelayIdleTimeout（M2-2）加 case（dsh-web 在列先例）；resubscribeObservationSessions（M3）加入名单（行为级测试或名单提为可测常量二选一，实施时定）；catalogCapabilityRequiredFor 不加入（S7）；backend_capabilities permission_resolve 排除名单无需改动（S5）；handlers_session_pin resolvePinWire 走 default（禁止 resolveOpenCodePin）；backendKindForAgent 显式 case；backendSupportsProjectionHydrate 加 opencode-web；prepareProjectionHydrateSource case agentName=opencode-web；pathless 分支加入（与 dsh-web 同组）；forceCold 加入；produceProjectionHydrateRange 前置加入 + switch case 用 streamBackendRichHistoryProjectionEvents(ctx,\"opencode-web\",sessionID,emit)（禁用 streamOpenCodeRichHistoryProjectionEvents）；pathlessRichHistoryBackend 加 opencode-web；advertiseSessionSyncV2Backend id/kind==opencode-web；backendHasNoExternalEventSource 不进；handlers_opencode.go 不为 opencode-web 开门。iOS：ChatViewModel.swift sessionSyncV2ProjectionBackend 加 .openCodeWeb（坑 9）。测试风格对齐 TestDSHWeb*。设计 §4.1.5/§4.3.2 表。",
+      "status": "done",
+      "phase": "s8-5",
+      "kind": "impl",
+      "depends_on": [
+        "s8-2-list-history-usage-regression",
+        "s8-3-sse-activity-regression"
+      ],
+      "source": "§8-5",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "§4.1.5/§4.3.2 全表接线（rg 按符号复核）：M2-1 dispatchRPC switchDir 特判扩含 opencode-web（四读方法切目录防坑 5）；M2-2 disablesRelayIdleTimeout 加 case；M3 resubscribeObservationSessions 名单提为包级 observationResubscribeBackends 常量并加入 opencode-web（二选一取可测常量形态；dsh-web 缺口注释保留待 owner）；backendKindForAgent 显式 case；backendSupportsProjectionHydrate/pathless 分支/forceCold sourceChanged/produceProjectionHydrateRange 前置+switch（用 streamBackendRichHistoryProjectionEvents(ctx,opencode-web)，未用 streamOpenCode* 专用 helper）/pathlessRichHistoryBackend/advertiseSessionSyncV2Backend(id/kind) 全部加入。不进：catalogCapabilityRequiredFor（S7）、backendHasNoExternalEventSource、handlers_opencode.go、resolvePinWire（default）、backend_capabilities（自动放行）。iOS sessionSyncV2ProjectionBackend 单行因枚举 case 未建会破坏编译，随 §8-7 一体落地（顺序调整如实记录）。",
+        "artifacts": [
+          "go-bridge/handlers.go",
+          "go-bridge/handlers_relay.go",
+          "go-bridge/handlers_projection.go",
+          "go-bridge/projection_kernel.go",
+          "go-bridge/server.go"
+        ],
+        "checked_at": "2026-08-19T02:52:26+0800"
+      }
+    },
+    {
+      "id": "s8-5-projection-wiring-tests",
+      "title": "§8-5 单测：TestOpenCodeWebProjectionWiring + M2-1/M2-2/M3 断言",
+      "description": "go-bridge/handlers_projection_dshweb_test.go 风格加 TestOpenCodeWebProjectionWiring。设计 §6 相关行：relay 空闲超时——disablesRelayIdleTimeout(\"opencode-web\") 为 true；observation re-attach（M3）——名单含 opencode-web（行为级测试或常量断言二选一）；switchDir 特判（M2-1）——四读方法携带 directory 头（httptest 断言请求头）；SSV2 广告——advertiseSessionSyncV2Backend 含 opencode-web。iOS：ChatViewModelSessionSyncV2Tests 加 openCodeWeb 为 true（可留 §8-7 统一跑，此处 Mac 侧为准）。",
+      "status": "done",
+      "phase": "s8-5",
+      "kind": "tests",
+      "depends_on": [
+        "s8-5-projection-wiring-impl"
+      ],
+      "source": "§8-5/§6",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "TestOpenCodeWebProjectionWiring（pathless 两清单成员+两个不进清单 S7/外部事件源+M2-2+M3 常量含 opencode-web+backendKind 显式 case+SSV2 id/kind 双形态广告+pathless 源准备 Identity-only）+ TestDispatchRPCSwitchDirCoversOpenCodeWebReads（M2-1 行为级：四读方法带 directory 必切 workDir）+ TestOpenCodeWebProjectionHydrateFromRichHistory（冷 pull 全量重建 kernel Ready，对照 DSHWeb 风格）全过。",
+        "artifacts": [
+          "go-bridge/handlers_projection_ocweb_test.go"
+        ],
+        "checked_at": "2026-08-19T02:52:26+0800"
+      }
+    },
+    {
+      "id": "s8-5-projection-wiring-regression",
+      "title": "§8-5 回归：全量 go 测试 + 旧包零增量",
+      "description": "go test ./agent/opencode-web/... ./go-bridge/... -count=1 零失败；git diff --stat agent/opencode 为空。iOS 侧单行改动（sessionSyncV2ProjectionBackend）如已做，补定向 -only-testing:CCCodeTests/ChatViewModelSessionSyncV2Tests（iOS 分支 opencode/web 上）。",
+      "status": "done",
+      "phase": "s8-5",
+      "kind": "regression",
+      "depends_on": [
+        "s8-5-projection-wiring-tests"
+      ],
+      "source": "§8-5/§6 回归",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "go build+vet 干净；go test ./go-bridge/... 失败集仅含先存 flaky（多轮定性）；git diff --stat agent/opencode 为空。iOS 侧单行延至 §8-7（见 impl notes）。",
+        "artifacts": [],
+        "checked_at": "2026-08-19T02:52:26+0800"
+      }
+    },
+    {
+      "id": "s8-6-permissions-impl",
+      "title": "§8-6 审批：permissions.go 折叠 reply + SessionPermissionResponder + ToolAuthorizer；问答 ⛔",
+      "description": "wire_descriptor.go 点亮 ToolAuthorizer（permission_resolve 由类型断言推导，不手写进 StaticCapabilities）。permissions.go：SSE permission.asked→EventPermissionRequest（§8-3 已有事件面）；回复按 §3.4 折叠表——1.18 {response}：allow（含 Always 标签）先探 once 若 4xx 再试 allow；deny 先探 reject 若 4xx 再试 deny；v2 {reply}：allow→once、deny→reject；探针结果写入诊断（1.18 权限字面量先探，实施期挂账）。core.SessionPermissionResponder 覆盖旁观（registry 判据=bridge registry 命中该 session；网页先答→收 resolved 关卡，先答者得）。RespondQuestion/RejectQuestion 返回 core.ErrNotSupported；不实现 UserInputResponder/SessionQuestionResponder；不广告 question_reply/structured_user_input_v1。设计 §3.4/§4.3.4。",
+      "status": "done",
+      "phase": "s8-6",
+      "kind": "impl",
+      "depends_on": [
+        "s8-5-projection-wiring-regression"
+      ],
+      "source": "§8-6",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "折叠 impl 已随 §8-4 落地（permissions.go：1.18 allow→先探 once 4xx 回退 allow、deny→先探 reject 4xx 回退 deny；v2 once/reject；noteFoldAttempt 探针结果进 foldDiagnostics；SessionPermissionResponder 旁观面）。本项补齐：wire_descriptor.go ToolAuthorizer（AddAllowedTools/GetAllowedTools verbatim——permission_resolve 经类型断言点亮）；diagnostics.go RunDiagnostics（endpoint 源/loopback 检查/双代探针 generation 进诊断/目录与所选模型成员检查含 1.18 pending 语义提示/权限折叠状态行）。问答保持 ⛔（session RespondQuestion/RejectQuestion=core.ErrNotSupported，§8-4 已测）。",
+        "artifacts": [
+          "agent/opencode-web/wire_descriptor.go",
+          "agent/opencode-web/diagnostics.go",
+          "agent/opencode-web/permissions.go(§8-4)"
+        ],
+        "checked_at": "2026-08-19T02:55:45+0800"
+      }
+    },
+    {
+      "id": "s8-6-permissions-tests",
+      "title": "§8-6 单测：权限折叠 allow→once（4xx 回退）/deny→reject；问答 not_supported",
+      "description": "设计 §6 单测表：权限折叠——allow→once（或活体钉死的 1.18 值；4xx 时回退 allow 并记诊断）；deny→reject（4xx 回退 deny）。POST /session/:id/permissions/:requestID 请求体断言。问答——RespondQuestion/RejectQuestion 返回 core.ErrNotSupported。iOS 侧 autoApprove 不把 .openCodeWeb 算进去（坑 11 断言留 §8-7 BridgeModelsTests/代码审查）。",
+      "status": "done",
+      "phase": "s8-6",
+      "kind": "tests",
+      "depends_on": [
+        "s8-6-permissions-impl"
+      ],
+      "source": "§8-6/§6",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "6 个新用例（包内共 52 全过）：allow 先 once 命中即止（单 POST body=response:once）/once 4xx 回退 allow（两连 POST 顺序断言）；deny 同构 reject/deny；v2 双行为 reply:once/reject 且路由 /api/session/:id/permission/:rid/reply；空 id 拒绝；ToolAuthorizer verbatim 回读；RunDiagnostics 携带 generation=1.18 与折叠状态、空 URL failed+共享文案。",
+        "artifacts": [
+          "agent/opencode-web/permissions_test.go"
+        ],
+        "checked_at": "2026-08-19T02:55:45+0800"
+      }
+    },
+    {
+      "id": "s8-6-permissions-regression",
+      "title": "§8-6 回归：全量 go 测试 + 旧包零增量",
+      "description": "go test ./agent/opencode-web/... ./go-bridge/... -count=1 零失败；git diff --stat agent/opencode 为空。1.18 活体权限字面量探针：只读方式核对现网 4096 serve 权限路径字面量（禁止写请求）；结果写进诊断与完成报告挂账。",
+      "status": "done",
+      "phase": "s8-6",
+      "kind": "regression",
+      "depends_on": [
+        "s8-6-permissions-tests"
+      ],
+      "source": "§8-6/§6 回归",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "go vet 干净；go test ./go-bridge/... ./agent/... 失败集仅含两条已定性先存失败（projection flaky 双树随机翻转 + dsh-web TestGetBackgroundTaskDetailFoundAndMissing 两树同挂）；git diff --stat agent/opencode 为空。1.18 活体字面量只读取证：/opt/homebrew/bin/opencode（1.18.18）strings 含 once×2/reject×2/always×3（S4 复证），上下文不排他——维持先探+4xx 回退策略，活体钉死依赖 owner 现网审批流（矩阵行 6），探针接受结果运行时进诊断 foldDiagnostics。对现网 4096 零写请求。",
+        "artifacts": [],
+        "checked_at": "2026-08-19T02:55:45+0800"
+      }
+    },
+    {
+      "id": "s8-7-ios-kind-protocol-impl",
+      "title": "§8-7 iOS kind + protocol mirror：§4.1.7 两类接线（switch 穷举 + if 比较型 3 文件 ≥12 处）+ Mac drivers",
+      "description": "iOS 仓 /Users/jacklee/Projects/cordcode-ios 分支 opencode/web（先 git checkout opencode/web）。switch 穷举类（§4.1.7 表逐行）：BackendModels.swift fromWireKind（\"opencode-web\"/\"openCodeWeb\"→.openCodeWeb；\"opencode_web\"→nil）/isDeprecated=false/prefersComposerPermissionModes=false/displayName=\"OpenCode Web\"/iconName=\"opencode_logo\"/isCustomAsset 与 .openCode 同组 true/connectionSetupHelpText 新文案/inputBarModelTitle=\"Model\"/emptyModel* 与 openCode 同组/historyOnlySessionHelperText=nil/usesBackendLiveEventStream=true/usesRootOnlySessionCatalog=false；ChatViewModel.swift sessionSyncV2ProjectionBackend 加 .openCodeWeb（若 §8-5 未做）；ChatViewModel+Generation.swift :2460/:2490 与 .openCode 同组（expectedProviderIDs=nil，effort=nil）；ChatViewModel+CodexStreaming.swift fallback name 新 case 返回 \"opencode-web\" 或 \"assistant\"；autoApproveBridgePermissionIfNeeded **禁止**把 .openCodeWeb 算进去（坑 11）；ChatUIKitContainerView.swift agent title=\"OpenCode Web\"/model 校验与 openCode 同组 break/timeline fallback/输入条目录隐藏；SelectionSheets.swift :214「OpenCode Web：工具审批经 Bridge 应答」；ServerViewModel.swift :990 超时文案；SessionLifecycleDiagnosticPhase.swift :70；CCCodeBridgeBackendClient.swift :25 默认 backend id \"opencode-web\"；ModelManagementService.swift :286 与 openCode 同组。if 比较型 3 文件 ≥12 处（M1，rg 人工核对）：SessionsView.swift :916/:2117/:2130/:2134/:2663/:2685/:2715 与 .openCode 同组；SidebarView.swift :91/:281/:388 与 .openCode 同组；ChatViewModel+SessionManagement.swift :1134/:1140 agent 过滤与 .openCode 同组；ChatViewModel+DirectoryPreferences.swift :107 附近 rg 核对归组。默认值类 5 文件不改。Mac 侧：RuntimeConfig.drivers 追加 opencode-web；processArguments URL 非空时追加 -opencode-web-url（与 -opencode-url 同值）；processEnvironment OPENCODE_WEB_SERVER_USERNAME/PASSWORD（或复用 OPENCODE_* 但 flag 分开）；OpenCodeManagedServer 一行不改。协议 pack：docs/protocol/bridge-v1.md 加 Backend: opencode-web 节（Mac 真值+iOS mirror 双仓各自 commit）；schema/bridge-v1.types.ts kind 联合类型追加。设计 §4.1.6/§4.1.7/§4.1.8。",
+      "status": "done",
+      "phase": "s8-7",
+      "kind": "impl",
+      "depends_on": [
+        "s8-4-send-models-regression"
+      ],
+      "source": "§8-7",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "iOS（分支 opencode/web，commit 6cd4594）：BackendKind.openCodeWeb 枚举+fromWireKind（opencode-web/openCodeWeb→case；opencode_web→nil）；switch 穷举全量归组（BackendModels 12 位：displayName OpenCode Web/iconName opencode_logo/isCustomAsset true/connectionSetupHelpText 新文案/inputBarModelTitle Model/emptyModel* 同组/historyOnly=nil/usesBackendLiveEventStream=true/usesRootOnlySessionCatalog=false 与 openCode 同组/isDeprecated=false/prefersComposer=false；ChatViewModel SSV2 投影族+Generation 两处 expectedProviderIDs=nil effort=nil；CodexStreaming backendLiveAgentName=assistant 且 autoApproveBridgePermissionIfNeeded 保持只认 .openCode（坑 11 显式注释）；ChatUIKitContainerView agent title/model 校验 break/timeline fallback 多 agent 才显示/输入条目录隐藏；SelectionSheets 权限文案；ServerViewModel 超时文案；SessionLifecycleDiagnosticPhase 全字段；CCCodeBridgeBackendClient normalized 兜底 opencode-web；ModelManagementService 同组）。if 比较型 13 处全改（SessionsView 7/SidebarView 3/SessionManagement 2/ChatUIKitContainerView 目录 1，与 .openCode 同组）；DirectoryPreferences rg 核对无 openCode 位（如实记录）；默认值类 5 文件不改。Mac（commit c304756）：drivers 追加 opencode-web、URL 非空时 -opencode-web-url 同值、env OPENCODE_WEB_SERVER_USERNAME/PASSWORD 分键、OpenCodeManagedServer 零改动。协议 pack：canonical de71b94 + iOS mirror 6624f36 双落盘 commit（docs 立即 commit 规则），bridge-v1.md 新增 opencode-web backend 节 + types.ts kind 联合。",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Backend/BackendModels.swift",
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel.swift",
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Views/Session/SessionsView.swift",
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Views/Components/SidebarView.swift",
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel+SessionManagement.swift",
+          "MacBridge/MacBridge/Services/RuntimeManager.swift",
+          "docs/protocol/bridge-v1.md"
+        ],
+        "checked_at": "2026-08-19T03:05:34+0800"
+      }
+    },
+    {
+      "id": "s8-7-ios-kind-protocol-tests",
+      "title": "§8-7 单测：BridgeModelsTests + SSV2 测试 + MacBridgeBehaviorTests argv",
+      "description": "iOS（-only-testing:CCCodeTests）：BridgeTransportTests 加 .openCodeWeb 断言——usesRootOnly=false、usesBackendLiveEventStream=true、fromWireKind(\"opencode-web\")==.openCodeWeb、fromWireKind(\"opencode_web\")==nil；ChatViewModelSessionSyncV2Tests 加 openCodeWeb 为 true。Mac：MacBridgeBehaviorTests argv 测试——drivers 含 opencode-web、有 URL 时 -opencode-web-url 与 -opencode-url 都在。iOS if 比较类归组行为断言（设计 §6）：SessionsView/SidebarView/SessionManagement 的 .openCodeWeb 分支（项目合并、目录侧栏显示、agent 过滤）——能写成单测的写成单测，不能的以 rg 全量核对记录进 artifacts。",
+      "status": "done",
+      "phase": "s8-7",
+      "kind": "tests",
+      "depends_on": [
+        "s8-7-ios-kind-protocol-impl"
+      ],
+      "source": "§8-7/§6",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "iOS -only-testing:CCCodeTests：BridgeModelsTests 50 全过（新增 fromWireKind 三态+semantics 全断言）、ChatViewModelSessionSyncV2Tests 55 全过（新增 openCodeWeb 为 true——坑 9）。Mac -only-testing:CordCodeLinkTests/MacBridgeBehaviorTests 20 全过（drivers 含 opencode-web+双 URL flag+空 URL 均无+WEB env 分键）。iOS app build 0 error（编译器穷举强制全过=switch 类无漏）。",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/BridgeTransportTests.swift",
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/ChatViewModelSessionSyncV2Tests.swift",
+          "MacBridge/MacBridgeTests/MacBridgeBehaviorTests.swift"
+        ],
+        "checked_at": "2026-08-19T03:05:34+0800"
+      }
+    },
+    {
+      "id": "s8-7-ios-kind-protocol-regression",
+      "title": "§8-7 回归：iOS 定向 build+unit test、Mac 定向 build、真机安装、协议 mirror 双 commit",
+      "description": "iOS：定向 build（iPhone 17 Pro Max simulator）+ -only-testing:CCCodeTests 定向（BridgeModelsTests 相关类+ChatViewModelSessionSyncV2Tests）；有 connected 真机则 scripts/run.sh device 安装（不授权 UI 操作）。Mac：xcodebuild Debug build 验证编译。协议 pack canonical（MacBridge）与 mirror（iOS）各自落盘 commit（docs/ 修改立即 commit 硬规则）。旧 .openCode 入口与 kind 全部保留。",
+      "status": "done",
+      "phase": "s8-7",
+      "kind": "regression",
+      "depends_on": [
+        "s8-7-ios-kind-protocol-tests"
+      ],
+      "source": "§8-7/§6 回归",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "iOS 定向 build 0 error；两测试类全过；connected 真机 scripts/run.sh device 构建安装启动成功（bundle org.openagi.cordcode，非 UI 操作）；Mac Debug build 0 error；协议 canonical/mirror 各自单独 commit（de71b94/6624f36）；旧 .openCode kind 与入口全部保留（isDeprecated 未动）。",
+        "artifacts": [],
+        "checked_at": "2026-08-19T03:05:34+0800"
+      }
+    },
+    {
+      "id": "s8-8-release-impl",
+      "title": "§8-8 Release：Release 构建覆盖安装 /Applications + 重启",
+      "description": "按 CLAUDE.md 硬约束：构建 Release → 覆盖安装到 /Applications/CordCodeLink.app → killall CordCodeLink → open 重启 → 核对 pgrep 只有 /Applications 路径、8777 监听者为内嵌 cordcode-bridge-runtime、go-bridge.log 无启动失败。严禁临时构建产物。核对 hello_ack.backends 含 opencode-web（日志或 Management API 只读探测）。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "impl",
+      "depends_on": [
+        "s8-6-permissions-regression",
+        "s8-7-ios-kind-protocol-regression"
+      ],
+      "source": "§8-8",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "build-unsigned-release.sh BUILD SUCCEEDED；最终 runtime commit 78b72f1（含 modelID 活体修正）killall→rm→cp→open 两次重装；8777 监听者为 /Applications 内嵌 runtime（77481）；runtime_ready drivers 含 opencode-web；Management API 只读：opencode-web available+generation=1.18 url=4096、caps 含 permission_resolve 无 todos；旧 opencode 并存原样。",
+        "artifacts": [
+          "build/unsigned-release/Build/Products/Release/CordCodeLink.app",
+          "dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip"
+        ],
+        "checked_at": "2026-08-19T03:07:01+0800"
+      }
+    },
+    {
+      "id": "s8-8-release-tests",
+      "title": "§8-8 验证：现网 serve 只读探针 + 假 serve 沙盒端到端",
+      "description": "本机 4096 owner 真实 serve 只读探针（health/GET/SSE 连接可以；禁止任何写请求、禁止真实 prompt）：health 200、GET /session 200、SSE 连接成功。沙盒端到端（4296…4396 + 独立数据目录，若本机 opencode CLI 可用）：完整 create/send/SSE/审批折叠/abort 链路。现网矩阵 §6 表 1-6 中 owner 才能执行的行整理成测试矩阵表交 owner。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "tests",
+      "depends_on": [
+        "s8-8-release-impl"
+      ],
+      "source": "§8-8/§6",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "现网 4096 只读探针（零写请求）：authed health 200、GET /session 200（100 会话）、SSE 连接 200 且 3s 窗口收 server.connected payload 帧。沙盒端到端（4296+独立 XDG 数据目录+Basic Auth，已停）：TestSandboxEndToEnd 环境门控测试在真 1.18.18 二进制全链路 PASS——判代/列表/6572 模型/create+发送 204/SSE 用户气泡/真实 provider 缺失 turn 零输出 turn_error/abort 2xx/诊断。过程中活体钉死 1.18 写路由模型键形（prompt_async=modelID、create=id，设计样板失真已修正 commit 78b72f1）。",
+        "artifacts": [
+          "agent/opencode-web/sandbox_e2e_test.go",
+          "/tmp/ocw-sandbox/(隔离数据目录，已停)"
+        ],
+        "checked_at": "2026-08-19T03:10:32+0800"
+      }
+    },
+    {
+      "id": "s8-8-release-regression",
+      "title": "§8-8 回归：现网矩阵 §6 表 1-6（owner 执行）+ 完成情况报告",
+      "description": "现网 serve 矩阵 §6 表 1-6 全过（owner 执行；重点：占用圈有数、坏模型明确失败、审批 Allow/Deny 可用且不自动批、旧 OpenCode 入口保持原样）——owner 未验收前本 todo 只能停在 pending/blocked，不得用沙盒绿冒充。全部 proven 后写 docs/2026-08-18-opencode-web-backend-design完成情况.md（含实施期挂账处置、自评/复核标注）。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "regression",
+      "depends_on": [
+        "s8-8-release-tests"
+      ],
+      "source": "§8-8/§6 真机",
+      "notes": "owner 真机验收 2026-08-19（三轮）：行1 占用圈✅ 行3 历史一致✅ 行4 实时旁观✅ 行6 审批 Allow/Deny+网页先答收口✅；行2 坏模型回合初判❌→真因 relay prekey 耗尽（非翻译层，沙盒证明链路正确）→修复 b2d934c 后复测通过（终态+错误文案与 Mac 一致，重试瞬态行缺席属瞬态设计，owner 记过）；行5 旧入口不可用=按 owner 指令移除（§补七），预期行为",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual-verification",
+        "attestation": "owner 2026-08-19 20:2x 矩阵执行 + 21:0x 行2复测「这一条可以算过了」",
+        "summary": "现网矩阵 6/6 闭环",
+        "artifacts": [
+          "docs/2026-08-18-opencode-web-backend-design完成情况.md §四·补六~补九、§五"
+        ],
+        "checked_at": "2026-08-19"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-catalog-impl",
+      "title": "owner 报障修复：模型目录 connected 过滤 + 单飞缓存",
+      "description": "owner 2026-08-19 报：iOS opencode-web 模型列表出现数百个未配置 provider 模型（zeldoc/siliconflow 等）且全模式卡顿。根因：1.18 GET /provider 为三段信封 {all:[192 provider×全量 models.dev≈5MB], default, connected:[已配置 provider]}；旧实现递归收集 all 全量（6637 模型）且 list_models/发送门控/占用窗口每次重新拉 5MB 无缓存。修复：models.go 改 typed 信封解析、只收 connected provider（对齐官方网页选择框；connected 空=空目录）、60s catalogCacheTTL 单飞缓存全消费方共享；context_usage.go 窗口改走同一缓存。活体钉死：/provider 5,055,947 bytes、connected=[zhipuai-coding-plan,deepseek,opencode-go,openai,xai,opencode,Vertex]=65 模型。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "impl",
+      "depends_on": [
+        "s8-8-release-tests"
+      ],
+      "source": "owner 报障 2026-08-19",
+      "notes": "review-fix-for:s8-8-release-tests",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "models.go 信封解析+connected 过滤+60s 缓存；context_usage 窗口共享缓存；沙盒复跑 catalog 6572→9（connected=opencode+Vertex）。",
+        "artifacts": [
+          "agent/opencode-web/models.go",
+          "agent/opencode-web/context_usage.go",
+          "agent/opencode-web/opencodeweb.go"
+        ],
+        "checked_at": "2026-08-19T03:34:35+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-catalog-tests",
+      "title": "目录过滤/缓存单测+沙盒 E2E 复跑",
+      "description": "夹具全部改活体信封形状；新增未配置 provider 不入 picker/windows 断言与 5MB 单飞断言。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "tests",
+      "depends_on": [
+        "s8-8-review-fix-catalog-impl"
+      ],
+      "source": "owner 报障",
+      "notes": "review-fix-for:s8-8-review-fix-catalog-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "52 用例全过（含 TestProviderCatalogFetchedOncePerTTL 单飞断言、never-configured 排除断言）；沙盒 E2E PASS（catalog=9）。",
+        "artifacts": [
+          "agent/opencode-web/sessions_test.go",
+          "agent/opencode-web/session_test.go",
+          "agent/opencode-web/events_test.go",
+          "agent/opencode-web/sandbox_e2e_test.go"
+        ],
+        "checked_at": "2026-08-19T03:34:35+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-catalog-regression",
+      "title": "回归+Release 重装（b8030e3）+现网 descriptor 复核",
+      "description": "go-bridge 失败集零增量；Release 重建覆盖安装 commit b8030e3；现网 descriptor available/generation=1.18。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "regression",
+      "depends_on": [
+        "s8-8-review-fix-catalog-tests"
+      ],
+      "source": "owner 报障",
+      "notes": "review-fix-for:s8-8-review-fix-catalog-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "git diff agent/opencode 空；diff 干净树失败集仅先存两条；现网只读数学核对：修复后 iOS 将显示 65 模型（7 provider）。owner 复测待回报。",
+        "artifacts": [
+          "/tmp/mine-fails7.txt"
+        ],
+        "checked_at": "2026-08-19T03:34:35+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-sse-timeout-impl",
+      "title": "owner 报障修复：SSE 流 30s 客户端超时杀流→重连+idle 治愈",
+      "description": "owner 2026-08-19 复测：turn1 完整、turn2 流到一半 iOS 停滞且永远「执行中」，Mac 网页正常完成。根因：Client 的 http.Client.Timeout=30s 被共用到 SSE GET——Go 该超时覆盖响应体读取全程，>30s 的 turn 被客户端中途杀流；readLoop 静默退出且无重连，终端 session-idle 事件随连接丢失→iOS 卡执行中。旧包用 DefaultClient（无超时）故无此病。修复：(1) streamClient 无超时专用；(2) run() 拥有重连循环（1s..15s 退避）；(3) healArmedTurnsAfterDrop——重连前拉 /session/status，掉线期已 idle 的 armed turn 立即 emitResultOnce（v2 保守不治愈）；(4) recomputeUsage 移出读循环（异步，防 5MB 目录拉取阻塞 delta）。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "impl",
+      "depends_on": [
+        "s8-8-review-fix-catalog-regression"
+      ],
+      "source": "owner 报障 2026-08-19 第二轮",
+      "notes": "review-fix-for:s8-8-review-fix-catalog-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "events.go dial/run/heal 重构+client.go streamClient；沙盒与单测全绿。",
+        "artifacts": [
+          "agent/opencode-web/events.go",
+          "agent/opencode-web/client.go"
+        ],
+        "checked_at": "2026-08-19T10:39:06+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-sse-timeout-tests",
+      "title": "断线重连+治愈行为级测试",
+      "description": "TestSSEStreamReconnectsAndHealsAfterDrop：连接1 发 user+半程 delta 后中途断；/session/status 空 map；断言治愈发干净 EventResult（有 pre-drop 输出不误报零输出）且重连建立第二条连接。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "tests",
+      "depends_on": [
+        "s8-8-review-fix-sse-timeout-impl"
+      ],
+      "source": "owner 报障",
+      "notes": "review-fix-for:s8-8-review-fix-sse-timeout-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "包内 54 用例全过（含重连治愈+异步重算轮询改造）；无挂起。",
+        "artifacts": [
+          "agent/opencode-web/events_test.go"
+        ],
+        "checked_at": "2026-08-19T10:39:06+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-sse-timeout-regression",
+      "title": "回归+Release 重装（3f91726）",
+      "description": "go-bridge 失败集零增量；Release 重建覆盖安装，现网 descriptor available。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "regression",
+      "depends_on": [
+        "s8-8-review-fix-sse-timeout-tests"
+      ],
+      "source": "owner 报障",
+      "notes": "review-fix-for:s8-8-review-fix-sse-timeout-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "git diff agent/opencode 空；失败集仅先存 flaky；runtime 3f91726 已装、descriptor available generation=1.18。owner 复测待回报。",
+        "artifacts": [
+          "/tmp/mine-fails8.txt"
+        ],
+        "checked_at": "2026-08-19T10:39:06+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-provider-error-impl",
+      "title": "owner 矩阵行 2 反馈：provider 报错透传三面",
+      "description": "iOS 选过期模型发送，Mac web 显示套餐错误而 iOS 无显示。errlab 沙盒 mock provider 抓帧钉死 1.18 失败链路（busy→retry×N→session.error→idle+session.idle→info.error）；订阅器补 session.error/session.idle 事件类型、retry.message 记录、assistant info.error 记录；零输出终端改用服务端原文；新 turn 清记录；冷历史失败消息显 error 文案。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "owner 矩阵行 2 实测反馈",
+      "notes": "review-fix-for:s8-8-review-fix-sse-timeout-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "events.go/history.go 三面接住+错误记录+原文终端。",
+        "artifacts": [
+          "agent/opencode-web/events.go",
+          "agent/opencode-web/history.go"
+        ],
+        "checked_at": "2026-08-19T11:31:49+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-provider-error-tests",
+      "title": "抓包帧回放测试（驱动式+真实 SSE 传输）",
+      "description": "复现智谱 1302 场景：retry+session.error+idle+session.idle 帧序列→终端携带服务端原文；retry-only 种子；陈旧错误清除；传输级回放。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "tests",
+      "depends_on": [
+        "s8-8-review-fix-provider-error-impl"
+      ],
+      "source": "owner 反馈",
+      "notes": "review-fix-for:s8-8-review-fix-provider-error-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "包内 59 用例全过（新增 4）。",
+        "artifacts": [
+          "agent/opencode-web/events_test.go",
+          "agent/opencode-web/sandbox_e2e_test.go"
+        ],
+        "checked_at": "2026-08-19T11:31:49+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-provider-error-regression",
+      "title": "回归+Release 重装（e404af7）",
+      "description": "go-bridge 零增量；Release 重建覆盖安装。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "regression",
+      "depends_on": [
+        "s8-8-review-fix-provider-error-tests"
+      ],
+      "source": "owner 反馈",
+      "notes": "review-fix-for:s8-8-review-fix-provider-error-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "git diff agent/opencode 空；失败集仅先存 flaky；runtime e404af7 已装。owner 复测待回报（预期：iOS 在 turn 终态显示服务端原文；重试期间 iOS 保持执行中=对齐 Mac web 的 Retrying 行为）。",
+        "artifacts": [
+          "/tmp/mine-fails9.txt",
+          "/tmp/ocw-errlab/(取证现场，serve 已停)"
+        ],
+        "checked_at": "2026-08-19T11:31:49+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-model-revert-impl",
+      "title": "owner 报障：发送后模型选择器回退旧模型（iOS 8a8f69b）",
+      "description": "现象：打开会话显示旧模型→手选 GLM→发送（turn 实际用 GLM；serve session.model/消息两 端点只读核实均=GLM）→UI 回退旧模型。根因 iOS：打开时快照 currentSessionMetadataModelID=旧值，selectModel 不更新快照，发送后消息刷新「快照非空→restore 快照」拉回旧值。修复：selectModel 显式选择时同步快照。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "owner 报障 2026-08-19 第三轮",
+      "notes": "review-fix-for:s8-8-review-fix-provider-error-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "iOS ChatViewModel+ModelSelection.swift 快照同步。",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/ViewModels/ChatViewModel+ModelSelection.swift"
+        ],
+        "checked_at": "2026-08-19T12:12:35+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-model-revert-tests",
+      "title": "回归测试（56 全过）",
+      "description": "testSelectModelSyncsSessionMetadataSnapshot。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "tests",
+      "depends_on": [
+        "s8-8-review-fix-model-revert-impl"
+      ],
+      "source": "owner 报障",
+      "notes": "review-fix-for:s8-8-review-fix-model-revert-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "ChatViewModelSessionSyncV2Tests 56 全过。",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/ChatViewModelSessionSyncV2Tests.swift"
+        ],
+        "checked_at": "2026-08-19T12:12:35+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-model-revert-regression",
+      "title": "回归：真机安装启动",
+      "description": "build 0 error；iPhone 16 Pro 安装启动成功。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "regression",
+      "depends_on": [
+        "s8-8-review-fix-model-revert-tests"
+      ],
+      "source": "owner 报障",
+      "notes": "review-fix-for:s8-8-review-fix-model-revert-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "owner 复测待回报。",
+        "artifacts": [],
+        "checked_at": "2026-08-19T12:12:35+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-stuck-running-impl",
+      "title": "owner 报障：重试结束后 iOS 仍执行中（iOS turn_error 未解码 493310f）",
+      "description": "日志取证：12:30:49 turn_error+套餐文案补丁（syncRev56-59）已送达 iPhone LAN 通道、投影 execution idle 已下发——Mac 侧完整。根因 iOS：CCCodeBridgeBackendClient 事件解码 switch 无 turn_error case（仅 turn_started/completed/aborted），wire turn_error 落 default 丢弃；runtimeStateStore 只在 .turnCompleted/.error 收口→执行中永不解除。修复：补 turn_error{turnId,message}→.error(sessionId,message) 映射（对所有 backend 失败收口生效）。另：日志暴露 relay prekey exhausted（两设备）与旧 opencode backend 对同一 serve 的并行广播（opencode rev1-2 与 opencode-web rev55-59 同会话双流）——均如实上报待 owner 关注。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "owner 报障 2026-08-19 第四轮+官方源码阅读指令",
+      "notes": "review-fix-for:s8-8-review-fix-model-revert-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "iOS 事件解码补 turn_error→.error；官方源码阅读结论：retry 期间官方 web 显示错误卡片（Card variant=error+原文80字截断+倒计时），终态由 session.status idle 驱动。",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOS/Services/Bridge/CCCodeBridgeBackendClient.swift"
+        ],
+        "checked_at": "2026-08-19T12:40:03+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-stuck-running-tests",
+      "title": "解码回归测试（RemoteRunningSessionTests 64 全过）",
+      "description": "testMapBridgeEvent_TurnError_MapsToErrorWithMessage：套餐原文逐字断言。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "tests",
+      "depends_on": [
+        "s8-8-review-fix-stuck-running-impl"
+      ],
+      "source": "owner 报障",
+      "notes": "review-fix-for:s8-8-review-fix-stuck-running-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "CCCodeTests/RemoteRunningSessionTests 64 全过（新增 1）。",
+        "artifacts": [
+          "../cordcode-ios/OpenCodeiOS/OpenCodeiOSTests/RemoteRunningSessionTests.swift"
+        ],
+        "checked_at": "2026-08-19T12:40:03+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-stuck-running-regression",
+      "title": "回归：真机安装+遗留观察项落档",
+      "description": "iPhone 16 Pro 安装启动成功。重试期间 iOS 无瞬态提示（官方有错误卡片+倒计时）——bridge-v1 无该瞬态载体，列为协议演进项待 owner 裁决。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "regression",
+      "depends_on": [
+        "s8-8-review-fix-stuck-running-tests"
+      ],
+      "source": "owner 报障",
+      "notes": "review-fix-for:s8-8-review-fix-stuck-running-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "真机安装启动（非 UI 操作）；owner 复测：重试结束后应显示套餐原文并解除执行态。",
+        "artifacts": [],
+        "checked_at": "2026-08-19T12:40:03+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-coldopen-stuck-impl",
+      "title": "owner 报障：冷启动后失败会话仍执行中且停止无效（go-bridge 注册表旧洞 ed42513）",
+      "description": "serve 真相只读核实：busy 表空、失败 assistant time.completed 有值——serve 侧早已终局；冷开 hydrate 映射正确（失败 assistant→text+turn_completed）。根因在 go-bridge 通用层：passive 事件循环的注册表 markIdle 只认 turn_completed/error，漏 turn_error/turn_aborted——失败 turn 后 registry 永远 running；opencode-web 无 RunningSessionLister，列表 runtimeState 回退 registry → iOS 冷开被种成执行中，停止按钮无法清除。老 opencode 81ms 零输出 turn 同样中招（owner 直觉『和老 opencode 问题类似』正确）。修复：markIdle 分支补 turn_error/turn_aborted（bridge-v1.md settle 语义）。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "owner 报障 2026-08-19 第五轮",
+      "notes": "review-fix-for:s8-8-review-fix-stuck-running-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "main.go passive 循环 markIdle 补两事件名+注释。",
+        "artifacts": [
+          "go-bridge/main.go"
+        ],
+        "checked_at": "2026-08-19T12:48:03+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-coldopen-stuck-tests",
+      "title": "回归测试 TestPassiveTurnErrorSettlesRegistryIdle",
+      "description": "turn_started→running；settle→idle；列表 runtimeState（nil runningMap 回退 registry）=idle。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "tests",
+      "depends_on": [
+        "s8-8-review-fix-coldopen-stuck-impl"
+      ],
+      "source": "owner 报障",
+      "notes": "review-fix-for:s8-8-review-fix-coldopen-stuck-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "PASS；go-bridge 失败集零增量（仅先存 flaky）。",
+        "artifacts": [
+          "go-bridge/list_enrich_test.go"
+        ],
+        "checked_at": "2026-08-19T12:48:03+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-coldopen-stuck-regression",
+      "title": "回归+Release 重装（ed42513）",
+      "description": "bridge 重启即清掉旧注册表 stuck 状态；后续失败 turn 不再卡。",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "regression",
+      "depends_on": [
+        "s8-8-review-fix-coldopen-stuck-tests"
+      ],
+      "source": "owner 报障",
+      "notes": "review-fix-for:s8-8-review-fix-coldopen-stuck-impl",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "runtime ed42513 已装。owner 复测：重启 iPhone App 冷开该会话应显示失败文案且非执行中。",
+        "artifacts": [],
+        "checked_at": "2026-08-19T12:48:03+0800"
+      }
+    },
+    {
+      "id": "s8-8-review-fix-list-scope-impl",
+      "title": "会话列表目录限定（桌面端新建会话 iOS 不可见 + 目录污染）（实现）",
+      "description": "会话列表目录限定（桌面端新建会话 iOS 不可见 + 目录污染）",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "implementation",
+      "depends_on": [],
+      "source": "owner 报障（2026-08-19 午后）",
+      "notes": "review-fix group list-scope; commit 9315b62",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "见 tests todo 与完成情况报告 §四·补三"
+      },
+      "created_at": "2026-08-19T13:57:45",
+      "updated_at": "2026-08-19T13:57:45"
+    },
+    {
+      "id": "s8-8-review-fix-list-scope-tests",
+      "title": "会话列表目录限定（桌面端新建会话 iOS 不可见 + 目录污染）（测试）",
+      "description": "impl+tests 成对",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "tests",
+      "depends_on": [
+        "s8-8-review-fix-list-scope-impl"
+      ],
+      "source": "owner 报障",
+      "notes": "agent: list_scope_test×3 + events_dedupe_test×3；bridge: handlers_list_scope_test×3 + TestMapAgentEventRetryStatus；iOS: testMapBridgeEvent_SessionRetryStatus + RunningStatusBar retry×2（12/12）；app BUILD SUCCEEDED",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "go test agent+bridge 绿（仅先存 flaky）；vitest 绿（3 先存 App 权限测试失败与本轮无关，stash 复跑证实）"
+      },
+      "created_at": "2026-08-19T13:57:45",
+      "updated_at": "2026-08-19T13:57:45"
+    },
+    {
+      "id": "s8-8-review-fix-list-scope-regression",
+      "title": "会话列表目录限定（桌面端新建会话 iOS 不可见 + 目录污染）（回归+Release）",
+      "description": "Release 覆盖安装 + 活体验证",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "regression",
+      "depends_on": [
+        "s8-8-review-fix-list-scope-tests"
+      ],
+      "source": "owner 报障",
+      "notes": "commit 9315b62; runtime pid 16873 @13:49",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual-verification",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "二进制含 session_retry_status 确认；opencode-web 发现快照 100(陈旧)→780(31 目录合并真值)@360ms；owner 真机复测项：①列表见红楼梦会话（无需重启）②目录列表去幽灵 ③重试行 ④文案单条 ⑤失败后不卡执行中（需装含 493310f 的新 iOS 构建）"
+      },
+      "created_at": "2026-08-19T13:57:45",
+      "updated_at": "2026-08-19T13:57:45"
+    },
+    {
+      "id": "s8-8-review-fix-retry-transient-impl",
+      "title": "retry 瞬态事件链（重试期无提示，owner 两次报障）（实现）",
+      "description": "retry 瞬态事件链（重试期无提示，owner 两次报障）",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "implementation",
+      "depends_on": [],
+      "source": "owner 报障（2026-08-19 午后）",
+      "notes": "review-fix group retry-transient; commit 9315b62",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "见 tests todo 与完成情况报告 §四·补三"
+      },
+      "created_at": "2026-08-19T13:57:45",
+      "updated_at": "2026-08-19T13:57:45"
+    },
+    {
+      "id": "s8-8-review-fix-retry-transient-tests",
+      "title": "retry 瞬态事件链（重试期无提示，owner 两次报障）（测试）",
+      "description": "impl+tests 成对",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "tests",
+      "depends_on": [
+        "s8-8-review-fix-retry-transient-impl"
+      ],
+      "source": "owner 报障",
+      "notes": "agent: list_scope_test×3 + events_dedupe_test×3；bridge: handlers_list_scope_test×3 + TestMapAgentEventRetryStatus；iOS: testMapBridgeEvent_SessionRetryStatus + RunningStatusBar retry×2（12/12）；app BUILD SUCCEEDED",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "go test agent+bridge 绿（仅先存 flaky）；vitest 绿（3 先存 App 权限测试失败与本轮无关，stash 复跑证实）"
+      },
+      "created_at": "2026-08-19T13:57:45",
+      "updated_at": "2026-08-19T13:57:45"
+    },
+    {
+      "id": "s8-8-review-fix-retry-transient-regression",
+      "title": "retry 瞬态事件链（重试期无提示，owner 两次报障）（回归+Release）",
+      "description": "Release 覆盖安装 + 活体验证",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "regression",
+      "depends_on": [
+        "s8-8-review-fix-retry-transient-tests"
+      ],
+      "source": "owner 报障",
+      "notes": "commit 9315b62; runtime pid 16873 @13:49",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual-verification",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "二进制含 session_retry_status 确认；opencode-web 发现快照 100(陈旧)→780(31 目录合并真值)@360ms；owner 真机复测项：①列表见红楼梦会话（无需重启）②目录列表去幽灵 ③重试行 ④文案单条 ⑤失败后不卡执行中（需装含 493310f 的新 iOS 构建）"
+      },
+      "created_at": "2026-08-19T13:57:45",
+      "updated_at": "2026-08-19T13:57:45"
+    },
+    {
+      "id": "s8-8-review-fix-terminal-dedupe-impl",
+      "title": "终态错误文案 3× 去重（双订阅线 + trailing info.error 重发）（实现）",
+      "description": "终态错误文案 3× 去重（双订阅线 + trailing info.error 重发）",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "implementation",
+      "depends_on": [],
+      "source": "owner 报障（2026-08-19 午后）",
+      "notes": "review-fix group terminal-dedupe; commit 9315b62",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "见 tests todo 与完成情况报告 §四·补三"
+      },
+      "created_at": "2026-08-19T13:57:45",
+      "updated_at": "2026-08-19T13:57:45"
+    },
+    {
+      "id": "s8-8-review-fix-terminal-dedupe-tests",
+      "title": "终态错误文案 3× 去重（双订阅线 + trailing info.error 重发）（测试）",
+      "description": "impl+tests 成对",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "tests",
+      "depends_on": [
+        "s8-8-review-fix-terminal-dedupe-impl"
+      ],
+      "source": "owner 报障",
+      "notes": "agent: list_scope_test×3 + events_dedupe_test×3；bridge: handlers_list_scope_test×3 + TestMapAgentEventRetryStatus；iOS: testMapBridgeEvent_SessionRetryStatus + RunningStatusBar retry×2（12/12）；app BUILD SUCCEEDED",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "test-execution",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "go test agent+bridge 绿（仅先存 flaky）；vitest 绿（3 先存 App 权限测试失败与本轮无关，stash 复跑证实）"
+      },
+      "created_at": "2026-08-19T13:57:45",
+      "updated_at": "2026-08-19T13:57:45"
+    },
+    {
+      "id": "s8-8-review-fix-terminal-dedupe-regression",
+      "title": "终态错误文案 3× 去重（双订阅线 + trailing info.error 重发）（回归+Release）",
+      "description": "Release 覆盖安装 + 活体验证",
+      "status": "done",
+      "phase": "s8-8",
+      "kind": "regression",
+      "depends_on": [
+        "s8-8-review-fix-terminal-dedupe-tests"
+      ],
+      "source": "owner 报障",
+      "notes": "commit 9315b62; runtime pid 16873 @13:49",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "method": "manual-verification",
+        "attestation": "re-verified",
+        "na_reason": null,
+        "summary": "二进制含 session_retry_status 确认；opencode-web 发现快照 100(陈旧)→780(31 目录合并真值)@360ms；owner 真机复测项：①列表见红楼梦会话（无需重启）②目录列表去幽灵 ③重试行 ④文案单条 ⑤失败后不卡执行中（需装含 493310f 的新 iOS 构建）"
+      },
+      "created_at": "2026-08-19T13:57:45",
+      "updated_at": "2026-08-19T13:57:45"
+    },
+    {
+      "id": "s9-1-official-permission-forensics",
+      "title": "权限框对齐官方：取证（官方源码 + 1.18.18 活体帧 + always 语义）",
+      "description": "owner 对比 Mac 官方权限框（信息量更高 + 始终允许按钮）。官方源码：permission.asked 载荷 {id,sessionID,permission,patterns[],metadata{},always[],tool{messageID,callID}}；桌面渲染 i18n settings.permissions.tool.{kind}.description + patterns 逐行 + 三按钮拒绝/始终允许/允许一次（once|always|reject）。活体：permlab 裸 1.18.18 + mock 模型（read 目录外文件）→ /global/event 真帧捕获 + GET /permission 同形 + always 回复 200 + permission.replied{reply:always} + pending 清空。旧 handlePermissionAsked 读 tool/title/description 全是虚构字段（真帧无此字段，tool 是对象）。",
+      "status": "done",
+      "phase": "s9-1",
+      "kind": "forensics",
+      "depends_on": [],
+      "source": "owner 2026-08-19 18:15 对比反馈",
+      "notes": "取证现场 /tmp/ocw-permlab（已清理）；官方 zh.ts 类别表 14 键全量入 iOS OfficialPermissionCatalog",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "sse_global.txt 真帧 + serve.log asking 行 + always 回复 200"
+      }
+    },
+    {
+      "id": "s9-2-official-permission-agent-payload",
+      "title": "agent 载荷加厚 + always 行为链（core.Event 新字段 + replyLiteral always + 三 backend 容错）",
+      "description": "core.Event 加 PermissionKind/PermissionPatterns；handlePermissionAsked 按活体帧重写（kind/patterns/metadata.filepath）；replyLiteral allow→once/always→always/deny→reject（v2 分支同映射）；claudecode/grokbuild/dsh-web 把 Behavior==always 容错为一次性 allow（防御纵深）；go-bridge permission_request 载荷加 permissionKind/patterns（additive，薄载荷向后兼容）。",
+      "status": "done",
+      "phase": "s9-2",
+      "kind": "impl",
+      "depends_on": [
+        "s9-1-official-permission-forensics"
+      ],
+      "source": "owner 对比反馈",
+      "notes": "go build ✅；events_test 重写为活体帧夹具；TestMapAgentEventPermissionRequestOfficialPayload 双向断言",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "go test ./agent/opencode-web ./go-bridge -run Permission/MapAgentEvent 全绿"
+      }
+    },
+    {
+      "id": "s9-3-official-permission-ios-card",
+      "title": "iOS 官方三按钮权限卡（ToolStep 官方字段 + TaskDock 官方布局 + always wire）",
+      "description": "ToolStep 加 permissionKind/permissionPatterns（Codable 兼容旧缓存）；bridge mapBridgeEvent 解码官方字段；event pump 记录 official 标记；approveAlways 官方请求回 wire always（否则降级 allow）；TaskDock 官方布局（需要权限 + 类别行 + patterns 逐行 + 拒绝/始终允许/允许一次，bordered 中键样式）；消息流卡标题「需要权限」+ 副标题类别行；OfficialPermissionCatalog 镜像官方 zh.ts 14 键（未知键不渲染）。非官方载荷两按钮卡原样。",
+      "status": "done",
+      "phase": "s9-3",
+      "kind": "impl",
+      "depends_on": [
+        "s9-2-official-permission-agent-payload"
+      ],
+      "source": "owner 对比反馈",
+      "notes": "新文件并入既有文件（xcodeproj 显式引用无 gem）；BUILD SUCCEEDED；wire/catalog/dock 单测新增 8 个",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "xcodebuild test -only-testing 定向套件全绿"
+      }
+    },
+    {
+      "id": "s9-4-official-permission-protocol-docs",
+      "title": "bridge-v1 协议文档 + 双仓 schema 同步（Official permission payload + behavior always）",
+      "description": "bridge-v1.md 双仓：resolve_permission.behavior 加 always（仅官方载荷发送，其他 backend 容错为 allow）；permission_request 增补 permissionKind/patterns 语义与官方渲染规则。schema bridge-v1.types.ts 双仓加 BridgePermissionRequestExtras + 补齐 Mac 侧缺的 session_retry_status 联合项，两文件恢复逐字节一致。",
+      "status": "done",
+      "phase": "s9-4",
+      "kind": "docs",
+      "depends_on": [
+        "s9-2-official-permission-agent-payload"
+      ],
+      "source": "owner 对比反馈",
+      "notes": "diff 双仓 schema 一致",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "diff -q 相同"
+      }
+    },
+    {
+      "id": "s9-5-official-permission-release",
+      "title": "双仓提交 + Release 覆盖安装 + 真机重装",
+      "description": "Mac 仓提交 + Release 构建 cordcode-bridge-runtime 覆盖 /Applications/CordCodeLink.app；iOS 仓提交 + scripts/run.sh device 装真机；完成情况文档补六落档。",
+      "status": "done",
+      "phase": "s9-5",
+      "kind": "release",
+      "depends_on": [
+        "s9-3-official-permission-ios-card",
+        "s9-4-official-permission-protocol-docs"
+      ],
+      "source": "owner 对比反馈",
+      "notes": "Mac 65597cb（Release runtime 65597cbefe5f 覆盖 /Applications，新 pid 98826 @18:59 已验 -version + health 鉴权响应）；iOS 8863d30（scripts/run.sh device 真机 Debug 构建安装启动成功）；文档 §四·补六 落档",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "runtime -version 输出 65597cbefe5f；run.sh exit=0 全部完成"
+      }
+    },
+    {
+      "id": "s10-1-permission-recheck-forensics",
+      "title": "权限卡复测根因：投影 SoT 缺官方字段 + 双 backend 同 serve 互扰",
+      "description": "日志实锤：同一 permission.asked 被老 opencode 与 opencode-web 双发（同 per_id 薄/厚）+ 双投影流（独立 syncRev）灌进 iOS 同一 replica（applyPatch 不分 backend）后到者胜；投影 part 从未带官方字段；unknown=mapToolStep 的 toolName ?? unknown。",
+      "status": "done",
+      "phase": "s10-1",
+      "kind": "forensics",
+      "depends_on": [],
+      "source": "owner 复测 2026-08-19 19:23",
+      "notes": "go-bridge.log 19:23:39 双 passive event + 双 K4Patch flush",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "runtime log"
+      }
+    },
+    {
+      "id": "s10-2-permission-projection-sot",
+      "title": "投影 SoT 补官方字段（内核 reducer/part/clone + iOS 模型/mapping + schema）",
+      "description": "ProjectionPart 加 permissionKind/patterns；reducer 读取 + mergeToolPart 非空不回退 + clone 深拷贝；schema BridgeProjectionPart additive；iOS SessionProjectionPart/mapToolStep 透传。",
+      "status": "done",
+      "phase": "s10-2",
+      "kind": "impl",
+      "depends_on": [
+        "s10-1-permission-recheck-forensics"
+      ],
+      "source": "owner 复测",
+      "notes": "TestReducerPermissionRequestCarriesOfficialPayloadAndThinMergeKeepsIt 绿",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "go test"
+      }
+    },
+    {
+      "id": "s10-3-permission-ios-race-defense",
+      "title": "iOS 双流竞态防御（mergedToolStepOnUpsert + official 标记只升不降）",
+      "description": "同 id 权限步骤 upsert 合并：官方字段不回退、已解析卡不被迟到 pending 重开；recordPendingPermissionOfficial sticky。",
+      "status": "done",
+      "phase": "s10-3",
+      "kind": "impl",
+      "depends_on": [
+        "s10-1-permission-recheck-forensics"
+      ],
+      "source": "owner 复测",
+      "notes": "testMergedToolStepOnUpsertKeepsOfficialFieldsAgainstThinDuplicate 绿",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "xcodebuild test"
+      }
+    },
+    {
+      "id": "s10-4-remove-legacy-opencode-backend",
+      "title": "老 opencode backend 移除（owner 指令，消除双订阅干扰）",
+      "description": "Swift 默认驱动列表 + go flag 默认移除 opencode；代码保留可回滚；驱动列表测试断言翻转；新 runtime 注册表验证无 backend=opencode。",
+      "status": "done",
+      "phase": "s10-4",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "owner 指令 2026-08-19",
+      "notes": "commit 6a50a75；runtime pid 15611 drivers=claude,codex,grokbuild,dsh-web,opencode-web",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "runtime log agent registered 列表"
+      }
+    },
+    {
+      "id": "s10-5-permission-recheck-release",
+      "title": "双仓提交 + Release 覆盖安装 + 真机重装 + 文档补七",
+      "description": "Mac 6a50a75（runtime 6a50a759d301 覆盖安装 pid 15611）；iOS f334e95 真机安装启动；完成情况 §四·补七。",
+      "status": "done",
+      "phase": "s10-5",
+      "kind": "release",
+      "depends_on": [
+        "s10-2-permission-projection-sot",
+        "s10-3-permission-ios-race-defense",
+        "s10-4-remove-legacy-opencode-backend"
+      ],
+      "source": "owner 复测",
+      "notes": "run.sh exit=0；go 全绿；iOS 定向套件绿",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "runtime -version + driver list"
+      }
+    },
+    {
+      "id": "s11-1-readask-forensics",
+      "title": "读问薄卡取证：全栈沙盒复现证明 Mac 侧双链均厚（wire 4× rich + 内核/PartOp 直通）",
+      "description": "owner 复测：读问两按钮、写问三按钮、Mac 两问均三按钮。独立复现栈（mock serve+沙盒 bridge 8799+配对 WS 客户端含 observation full_stream）：两问 wire 事件全部 kind+patterns；薄卡为 iOS 侧未定位路径（真机 Wi-Fi 无 syslog；模拟器无 idb）。",
+      "status": "done",
+      "phase": "s11-1",
+      "kind": "forensics",
+      "depends_on": [],
+      "source": "owner 复测 2026-08-19 19:42",
+      "notes": "沙盒已清理（serve/mock/bridge/模拟器 app 均停）",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "client.mjs 输出 asks=8 全 rich"
+      }
+    },
+    {
+      "id": "s11-2-official-triple-unconditional",
+      "title": "官方三按钮无条件渲染（对齐官方 dock 本义）+ opencode-web always wire",
+      "description": "官方 session-permission-dock.tsx 三按钮无条件渲染。iOS：PermissionDockModel.offersOfficialActions（openCodeWeb 会话恒 true）；TaskDock 双条件官方卡；approveAlways 对 openCodeWeb 直发 always。其他 backend 不变。",
+      "status": "done",
+      "phase": "s11-2",
+      "kind": "impl",
+      "depends_on": [
+        "s11-1-readask-forensics"
+      ],
+      "source": "owner 复测",
+      "notes": "iOS c1762c6 真机已装",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "testOpenCodeWebSessionOffersOfficialActionsEvenWithoutKind 绿 + TaskDock/WireBehavior 套件绿"
+      }
+    },
+    {
+      "id": "s12-1-badmodel-forensics",
+      "title": "验收行2取证：沙盒证明 Mac 翻译链正确，真因 relay prekey 耗尽",
+      "description": "owner 验收 5/6 过。行2空等：现网日志 prekey exhausted（两设备）+ iPhone 零次 get_delivery_prekey_status；沙盒全链路（mock 403）retry→turn_error→idle→错误文本全对。真因：直连 transport relayCredentials:nil→维护跳过→池只耗不补；durable 里程碑走信箱，瞬断窗口投递丢失。",
+      "status": "done",
+      "phase": "s12-1",
+      "kind": "forensics",
+      "depends_on": [],
+      "source": "owner 验收 2026-08-19",
+      "notes": "沙盒已清理",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "client2.mjs 输出终态收口 YES"
+      }
+    },
+    {
+      "id": "s12-2-prekey-direct-maintenance",
+      "title": "iOS：直连 prekey 维护（SavedBridgeStore 装载凭据）+ 5 分钟周期水位检查",
+      "description": "loadRelayCredentialsForMaintenance（同源 connector 语义）；replenish 改走装载器；维护任务周期循环。",
+      "status": "done",
+      "phase": "s12-2",
+      "kind": "impl",
+      "depends_on": [
+        "s12-1-badmodel-forensics"
+      ],
+      "source": "owner 验收",
+      "notes": "iOS b2d934c 真机已装",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "MailboxReplay/RelayFrame/Phase2 套件绿"
+      }
+    },
+    {
+      "id": "t1-projection-derived-frame-filter",
+      "title": "Mac：投影派生帧过滤（SSV2 不收 question raw）",
+      "description": "shouldDeliverRawEventLocked 拦截 isDerivedLegacyQuestionEvent（SSV2）；deny-list 注释同步。",
+      "status": "done",
+      "phase": "t1",
+      "kind": "fix",
+      "depends_on": [],
+      "source": "owner backlog 指令",
+      "notes": "9796432",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "TestCanonicalUserInput… -count=3 绿"
+      }
+    },
+    {
+      "id": "t2-dshweb-test-semantics",
+      "title": "Mac：dsh-web 后台任务详情测试语义（Phase 5）",
+      "description": "断言更新为 running 可取消/终态不可取消。",
+      "status": "done",
+      "phase": "t2",
+      "kind": "fix",
+      "depends_on": [],
+      "source": "owner backlog",
+      "notes": "9796432",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "dsh-web 套件绿"
+      }
+    },
+    {
+      "id": "t3-v2-shape-audit",
+      "title": "Mac：v2 形状复核（3 处漂移修复 + 5 契约测试 + 信封兼容）",
+      "description": "postModel 嵌套/interrupt 无 body/directory 收敛/create+info 信封；location 绑定未实现如实声明。",
+      "status": "done",
+      "phase": "t3",
+      "kind": "fix",
+      "depends_on": [],
+      "source": "owner backlog",
+      "notes": "9796432；v2 无现网",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "TestOfficialShape_V2_* 绿"
+      }
+    },
+    {
+      "id": "t4-ios-coldcache-hang",
+      "title": "iOS：ColdCache 挂起修复（全量套件 2059/7 败可跑完）",
+      "description": "codex 去重用例补 preset；store 30s 挂起兜底。",
+      "status": "done",
+      "phase": "t4",
+      "kind": "fix",
+      "depends_on": [],
+      "source": "owner backlog",
+      "notes": "a049625",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "全量 CCCodeTests 完整跑完"
+      }
+    },
+    {
+      "id": "t5-ios-pinch-zoom",
+      "title": "iOS：pinch-zoom（nil 手势判定）",
+      "description": "isViewportZoomDisabled 对 nil pinchGestureRecognizer 按 scale 锁死判定。",
+      "status": "done",
+      "phase": "t5",
+      "kind": "fix",
+      "depends_on": [],
+      "source": "owner backlog",
+      "notes": "a049625",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "MessageWebLifecycle 绿"
+      }
+    },
+    {
+      "id": "t6-ios-legacy-opencode-entry",
+      "title": "iOS：旧 OpenCode 入口移除（兼容层保留）",
+      "description": "serverCreationCases 去 openCode + isDeprecated；默认 .claudeCode；枚举/解码保留。",
+      "status": "done",
+      "phase": "t6",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "owner backlog（决策：入口移除、可回滚）",
+      "notes": "a049625 真机已装",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "BridgeTransport/HeaderMenu 套件绿"
+      }
+    },
+    {
+      "id": "t7-retry-transient-compensation",
+      "title": "重试瞬态行补偿（Mac 重附重放 + iOS 前台补显）",
+      "description": "Agent 快照 2min 新鲜窗 StartSession 重放、idle 清除；iOS didBecomeActive 补显 .retrying。",
+      "status": "done",
+      "phase": "t7",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "owner 验收遗留小缺口",
+      "notes": "Mac 9796432（runtime 已覆盖安装 pid 73947）/ iOS a049625",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "TestRetrySnapshotReplay… 绿；iOS 构建+套件绿"
+      }
+    },
+    {
+      "id": "t8-backlog-cleanup-closeout",
+      "title": "双仓提交 + 全量验证 + Release 覆盖 + 文档补十",
+      "description": "Mac 9796432（六包全绿）；iOS a049625（全量 2059/7，7 个先存入档）；runtime 9796432d5e77 覆盖安装。",
+      "status": "done",
+      "phase": "t8",
+      "kind": "release",
+      "depends_on": [
+        "t1-projection-derived-frame-filter",
+        "t2-dshweb-test-semantics",
+        "t3-v2-shape-audit",
+        "t4-ios-coldcache-hang",
+        "t5-ios-pinch-zoom",
+        "t6-ios-legacy-opencode-entry",
+        "t7-retry-transient-compensation"
+      ],
+      "source": "owner backlog",
+      "notes": "新暴露 7 项先存失败入 backlog",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "双仓提交 + 安装验证"
+      }
+    },
+    {
+      "id": "backlog-ios-7-preexisting-failures",
+      "title": "backlog：iOS 新暴露 7 项先存测试失败（基线证实，产品语义漂移）",
+      "description": "SessionsViewModelServerSwitchTests ×4（initialize 重试未发生）、SessionRefreshNotification isCoalescedForCodex（1≠2）、CodexSessionResumeWaits（1≠0）、AuthoritativeEmptyTodoFetchClearsStale（权威空拉取未清陈旧 todo 缓存）。此前被 ColdCache 挂起掩蔽，全量套件修复后暴露；需逐个判读产品意图后修。",
+      "status": "pending",
+      "phase": "backlog",
+      "kind": "debt",
+      "depends_on": [],
+      "source": "全量套件首次完整跑完（2026-08-19）",
+      "notes": "基线 stash 证实非本批引入",
+      "verification": {
+        "required": true,
+        "status": "pending",
+        "evidence": ""
+      }
+    },
+    {
+      "id": "ios-7-failures-triage-v2",
+      "title": "iOS 7 项先存失败：分诊报告 v2（评审全采纳）",
+      "description": "评审三处事实指正复核属实（f0db3e5d 引入空保留/75d4e40 仅静默/无现成守护）；#7 修法收紧为 purpose 区分；#6 核查落定维持 A。",
+      "status": "done",
+      "phase": "triage",
+      "kind": "docs",
+      "depends_on": [],
+      "source": "owner 评审 2026-08-19",
+      "notes": "iOS docs/2026-08-19-preexisting-test-failures-triage.md v2",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "git show 复核"
+      }
+    },
+    {
+      "id": "ios-7-failures-batch1",
+      "title": "第一批 A×5：侧栏可见 setup + reload 反向用例",
+      "description": "b231021 门控语义；9/9 绿。",
+      "status": "done",
+      "phase": "b1",
+      "kind": "fix",
+      "depends_on": [
+        "ios-7-failures-triage-v2"
+      ],
+      "source": "owner 批准",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "SessionsViewModelServerSwitchTests 9/9"
+      }
+    },
+    {
+      "id": "ios-7-failures-batch2",
+      "title": "第二批 #6：codex resume 单事务语义改测试",
+      "description": "6215bbc 语义 + 第二信号幂等断言；零产品改动。",
+      "status": "done",
+      "phase": "b2",
+      "kind": "fix",
+      "depends_on": [
+        "ios-7-failures-triage-v2"
+      ],
+      "source": "owner 批准",
+      "notes": "",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "用例绿"
+      }
+    },
+    {
+      "id": "ios-7-failures-batch3",
+      "title": "第三批 #7（B）：todo purpose 区分 + 守护测试先行",
+      "description": "loadSessionTodos purpose .open/.poll（默认安全）；四处 .open；applySessionTodos allowsEmptyClear；两枚守护测试钉 f0db3e5d 保护面。真机复验待 owner。",
+      "status": "done",
+      "phase": "b3",
+      "kind": "fix",
+      "depends_on": [
+        "ios-7-failures-triage-v2"
+      ],
+      "source": "owner 批准（修法按评审收紧）",
+      "notes": "TodoRefreshGenerationTests 8/8；全量 2069/0（两轮）；r2 评审 APPROVE（29/29 定向复跑）；P2 四项已落（iOS 仓 docs/CHANGELOG）。真机验收受阻（结构性，非修复问题）：当前 runtime 无任何在册 backend 广告 todos 能力（唯一有的老 opencode 已按 owner 指令移除；opencode-web todo 接口未实现故有意不广告），且 sessionTodoCache 为内存态（App 重启即空）——幽灵 dock 在当前配置下无法构造。修复已随真机构建安装（含 d6cfbfd）；待 todos 能力 backend 回归（opencode-web todo 支持或老 opencode 临时恢复）时补做。",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "单测 8/8 + r2 定向 29/29 + r2 源码核验主路径 .open 派发；真机 live 验收结构性受阻（无 todos backend），已如实记录"
+      }
+    },
+    {
+      "id": "ios-backlog-memory-evict-crash",
+      "title": "backlog：内存告警驱逐与异步渲染的数组越界崩溃（全量负载暴露）",
+      "description": "Fatal error: Index out of range（ContiguousArrayBuffer:695），触发窗口在 Memory warning evict 之后的消息渲染期间；单跑不触发、内存压力依赖。疑似消息缓存驱逐与 timeline 渲染竞态。需专项诊断（定位数组/线程 + 压测复现），真机低内存可感。",
+      "status": "pending",
+      "phase": "backlog",
+      "kind": "bug",
+      "depends_on": [],
+      "source": "全量套件第三/四轮（2026-08-19 23:36）",
+      "notes": "证据：/tmp/full-cctests4.log 2591-2652 行窗口",
+      "verification": {
+        "required": true,
+        "status": "pending",
+        "evidence": ""
+      }
+    },
+    {
+      "id": "ocw-newsession-15s-create",
+      "title": "opencode-web 新会话 create_session 15s 空等修复（快速 pending-id）",
+      "description": "owner 现网 2026-08-20：chat 目录新会话首条消息回显卡 ~15s。根因：handleCreateSession 对惰性建会话的 opencode-web 走 waitForSessionID(15s) 必空等（首个 Send 才建 serve 会话）。修复：并入 codex/claude 快速 pending-id 分支；回归测试 <3s 双断言。send 后 iOS 无内容症状待 owner 带 15s 修复复测后判（Mac 侧 text/permission patch 全部 delivered，iOS pending→real 绑定链在位但存在已知 first-turn blank body 风险面）。",
+      "status": "done",
+      "phase": "ocw-newsess",
+      "kind": "fix",
+      "depends_on": [],
+      "source": "owner 现网 2026-08-20 01:06",
+      "notes": "commit 6fcad07；runtime 6fcad077a564 已覆盖安装 pid 54614",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "TestCreateSessionOpenCodeWebReturnsPendingFast… 绿 + 双套件绿；owner 复测待回"
+      }
+    },
+    {
+      "id": "ocw-newsess-render-fix",
+      "title": "新会话首回合「执行中无回复」双端修复（hydrate 名单 + rebind 观察集）",
+      "description": "owner 现网 2026-08-20 复测（15s 修复生效后仍无回复）。沙盒 E2E（真 ChatViewModel+真 transport 直连 mock serve）复现并收口三处：① Mac forceColdInspection 家族名单漏 opencode-web（a0b623d）→ 新会话首拉 hydrate 卡死 15s；② iOS rebindPendingSessionIdIfNeeded 不同步 projectionStore 观察集 → patch 全走 background-apply 永不渲染；③ E2E 诊断测试留作常驻回归（真 iOS 管线；保真三件 attach/scope/模型；沙盒缺位 XCTSkip）。E2E 绿（syncRev=7 助手渲染 1.4s）；iOS 130 用例套件绿。",
+      "status": "done",
+      "phase": "ocw-newsess2",
+      "kind": "fix",
+      "depends_on": [
+        "ocw-newsession-15s-create"
+      ],
+      "source": "owner 现网复测 2026-08-20 01:16",
+      "notes": "Mac a0b623d（runtime a0b623d228a6 已覆盖安装）；iOS 已提交（rebind 观察集 + E2E 回归）；真机装机因设备 unavailable（锁屏/离网）暂未完成，待手机可达后 run.sh device 补装并 owner 复测",
+      "verification": {
+        "required": true,
+        "status": "present",
+        "evidence": "E2E 测试通过 + 双仓套件绿；owner 真机复测待装机"
+      }
+    }
+  ]
+}

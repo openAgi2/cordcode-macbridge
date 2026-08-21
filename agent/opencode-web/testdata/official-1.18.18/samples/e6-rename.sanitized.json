@@ -1,0 +1,555 @@
+{
+  "meta": {
+    "scenario": "E6",
+    "opencodeVersion": "1.18.18",
+    "sourceCommit": "2cba7e227d"
+  },
+  "source": {
+    "ui": "packages/app/src/utils/server-compat.ts:184 session.update({sessionID, title})",
+    "server": "packages/opencode/src/server/routes/instance/httpapi/groups/session.ts:49-50 UpdatePayload {title?}; :227-236 PATCH update -> Session.Info | BadRequest/NotFound"
+  },
+  "http": [
+    {
+      "method": "POST",
+      "path": "/session",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {
+        "title": "e6-original"
+      },
+      "status": 200,
+      "response": {
+        "id": "ses_fixture_001",
+        "slug": "stellar-otter",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "path": "private/tmp/ocw-gate-a/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "e6-original",
+        "version": "1.18.18",
+        "time": {
+          "created": 0,
+          "updated": 0
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 16:23:38 GMT",
+        "content-length": "374",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/ses_fixture_001",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": {
+        "id": "ses_fixture_001",
+        "slug": "stellar-otter",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "path": "private/tmp/ocw-gate-a/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "e6-original",
+        "version": "1.18.18",
+        "time": {
+          "created": 0,
+          "updated": 0
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 16:23:38 GMT",
+        "content-length": "374",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/session/ses_fixture_001",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {
+        "title": "e6-renamed"
+      },
+      "status": 200,
+      "response": {
+        "id": "ses_fixture_001",
+        "slug": "stellar-otter",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "path": "private/tmp/ocw-gate-a/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "e6-renamed",
+        "version": "1.18.18",
+        "time": {
+          "created": 0,
+          "updated": 0
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 16:23:38 GMT",
+        "content-length": "373",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session",
+      "query": {
+        "roots": "true",
+        "limit": "10"
+      },
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": [
+        {
+          "id": "ses_fixture_001",
+          "slug": "stellar-otter",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a/workspace",
+          "path": "private/tmp/ocw-gate-a/workspace",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "e6-renamed",
+          "version": "1.18.18",
+          "time": {
+            "created": 0,
+            "updated": 0
+          }
+        },
+        {
+          "id": "ses_fixture_002",
+          "slug": "misty-canyon",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a/workspace",
+          "path": "private/tmp/ocw-gate-a/workspace",
+          "summary": {
+            "additions": 0,
+            "deletions": 0,
+            "files": 0
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 8,
+            "output": 10,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "e5-valid",
+          "agent": "build",
+          "model": {
+            "id": "echo",
+            "providerID": "localmock",
+            "variant": "default"
+          },
+          "version": "1.18.18",
+          "time": {
+            "created": 0,
+            "updated": 0
+          }
+        },
+        {
+          "id": "ses_fixture_003",
+          "slug": "quiet-harbor",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a/workspace",
+          "path": "private/tmp/ocw-gate-a/workspace",
+          "summary": {
+            "additions": 0,
+            "deletions": 0,
+            "files": 0
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 8,
+            "output": 10,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "e3-external",
+          "agent": "build",
+          "model": {
+            "id": "echo",
+            "providerID": "localmock",
+            "variant": "default"
+          },
+          "version": "1.18.18",
+          "time": {
+            "created": 0,
+            "updated": 0
+          }
+        },
+        {
+          "id": "ses_fixture_004",
+          "slug": "happy-island",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a/workspace",
+          "path": "private/tmp/ocw-gate-a/workspace",
+          "summary": {
+            "additions": 0,
+            "deletions": 0,
+            "files": 0
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "e2-reasoning",
+          "agent": "build",
+          "model": {
+            "id": "echo",
+            "providerID": "localmock",
+            "variant": "default"
+          },
+          "version": "1.18.18",
+          "time": {
+            "created": 0,
+            "updated": 0
+          }
+        }
+      ],
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 16:23:38 GMT",
+        "content-length": "1896",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/ses_fixture_001",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": {
+        "id": "ses_fixture_001",
+        "slug": "stellar-otter",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "path": "private/tmp/ocw-gate-a/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "e6-renamed",
+        "version": "1.18.18",
+        "time": {
+          "created": 0,
+          "updated": 0
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 16:23:38 GMT",
+        "content-length": "373",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/session/ses_fixture_005",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {
+        "title": "x"
+      },
+      "status": 404,
+      "response": {
+        "name": "NotFoundError",
+        "data": {
+          "message": "Session not found: ses_fixture_005"
+        }
+      }
+    }
+  ],
+  "sse": [
+    {
+      "t": 0,
+      "event": {
+        "payload": {
+          "id": "evt_fixture_006",
+          "type": "server.connected",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_fixture_007",
+          "type": "session.created",
+          "properties": {
+            "sessionID": "ses_fixture_001",
+            "info": {
+              "id": "ses_fixture_001",
+              "slug": "stellar-otter",
+              "version": "1.18.18",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a/workspace",
+              "path": "private/tmp/ocw-gate-a/workspace",
+              "title": "e6-original",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 0,
+                "updated": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 0,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_fixture_007",
+            "type": "session.created.1",
+            "seq": 0,
+            "aggregateID": "ses_fixture_001",
+            "data": {
+              "sessionID": "ses_fixture_001",
+              "info": {
+                "id": "ses_fixture_001",
+                "slug": "stellar-otter",
+                "version": "1.18.18",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a/workspace",
+                "path": "private/tmp/ocw-gate-a/workspace",
+                "title": "e6-original",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 0,
+                  "updated": 0
+                }
+              }
+            }
+          },
+          "id": "evt_fixture_007"
+        }
+      }
+    }
+  ],
+  "reload": {
+    "listAfterRename": [
+      {
+        "id": "ses_fixture_001",
+        "slug": "stellar-otter",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "path": "private/tmp/ocw-gate-a/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "e6-renamed",
+        "version": "1.18.18",
+        "time": {
+          "created": 0,
+          "updated": 0
+        }
+      },
+      {
+        "id": "ses_fixture_002",
+        "slug": "misty-canyon",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "path": "private/tmp/ocw-gate-a/workspace",
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 8,
+          "output": 10,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "e5-valid",
+        "agent": "build",
+        "model": {
+          "id": "echo",
+          "providerID": "localmock",
+          "variant": "default"
+        },
+        "version": "1.18.18",
+        "time": {
+          "created": 0,
+          "updated": 0
+        }
+      },
+      {
+        "id": "ses_fixture_003",
+        "slug": "quiet-harbor",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "path": "private/tmp/ocw-gate-a/workspace",
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 8,
+          "output": 10,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "e3-external",
+        "agent": "build",
+        "model": {
+          "id": "echo",
+          "providerID": "localmock",
+          "variant": "default"
+        },
+        "version": "1.18.18",
+        "time": {
+          "created": 0,
+          "updated": 0
+        }
+      },
+      {
+        "id": "ses_fixture_004",
+        "slug": "happy-island",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a/workspace",
+        "path": "private/tmp/ocw-gate-a/workspace",
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "e2-reasoning",
+        "agent": "build",
+        "model": {
+          "id": "echo",
+          "providerID": "localmock",
+          "variant": "default"
+        },
+        "version": "1.18.18",
+        "time": {
+          "created": 0,
+          "updated": 0
+        }
+      }
+    ]
+  },
+  "observation": {
+    "renameFailureStatus": 404,
+    "renameFailureResponse": {
+      "name": "NotFoundError",
+      "data": {
+        "message": "Session not found: ses_fixture_005"
+      }
+    }
+  }
+}

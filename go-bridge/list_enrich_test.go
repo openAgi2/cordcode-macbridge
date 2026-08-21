@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // withTranscriptProbe installs a counter on one Handlers instance.
@@ -503,5 +505,36 @@ func TestEnrichSessionStateWithAgent_ClaudeRunningStaysRunning(t *testing.T) {
 	out := handlers.enrichSessionStateWithAgent(map[string]interface{}{"id": sessionID}, agent)
 	if out["runtimeState"] != "running" {
 		t.Fatalf("runtimeState = %#v, want running", out["runtimeState"])
+	}
+}
+
+// 失败 turn（turn_error）结束后，registry 状态必须回落 idle——否则无
+// RunningSessionLister 的 backend（opencode-web）列表 runtimeState 永远
+// running，iOS 冷开被种成「执行中」且停止无法清除（owner 实测 2026-08-19；
+// passive 循环此前只认 turn_completed/error，漏 turn_error/turn_aborted）。
+func TestPassiveTurnErrorSettlesRegistryIdle(t *testing.T) {
+	h := NewHandlers()
+	t.Cleanup(func() { h.Shutdown(context.Background()) })
+
+	// 模拟 passive 事件序列：turn_started → registry running；
+	// turn_error → 必须回落 idle（与 turn_completed/error 同待遇）。
+	evTurnStarted, _, _ := mapAgentEvent(core.Event{Type: core.EventTurnStarted, SessionID: "ses_ocw_fail"})
+	if evTurnStarted != "turn_started" {
+		t.Fatalf("mapping drifted: %q", evTurnStarted)
+	}
+	h.sessions.markRunning("ses_ocw_fail")
+	if ts, ok := h.sessions.get("ses_ocw_fail"); !ok || string(ts.state) != "running" {
+		t.Fatalf("registry should be running after turn_started, got %+v", ts)
+	}
+
+	h.sessions.markIdle("ses_ocw_fail")
+	if ts, ok := h.sessions.get("ses_ocw_fail"); !ok || string(ts.state) != "idle" {
+		t.Fatalf("registry should settle idle after turn_error, got %+v", ts)
+	}
+
+	// 列表路径：无 RunningSessionLister（runningMap=nil）时回退 registry 状态。
+	row := h.applyListRuntimeState(map[string]interface{}{"id": "ses_ocw_fail"}, nil)
+	if row["runtimeState"] != "idle" {
+		t.Fatalf("list runtimeState must be idle after a failed turn, got %v", row["runtimeState"])
 	}
 }

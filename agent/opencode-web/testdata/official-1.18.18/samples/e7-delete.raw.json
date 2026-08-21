@@ -1,0 +1,506 @@
+{
+  "meta": {
+    "scenario": "E7",
+    "opencodeVersion": "1.18.18",
+    "sourceCommit": "2cba7e227d"
+  },
+  "source": {
+    "ui": "packages/app/src/utils/server-compat.ts:190 session.delete(value)",
+    "server": "packages/opencode/src/server/routes/instance/httpapi/groups/session.ts:215-224 DELETE remove -> Boolean | BadRequest/NotFound"
+  },
+  "http": [
+    {
+      "method": "POST",
+      "path": "/session",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {
+        "title": "e7-delete-me"
+      },
+      "status": 200,
+      "response": {
+        "id": "ses_fe003ae6fffex92LPzsKBkJKJJ",
+        "slug": "neon-cabin",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "e7-delete-me",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787243024784,
+          "updated": 1787243024784
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 16:23:44 GMT",
+        "content-length": "372",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/ses_fe003ae6fffex92LPzsKBkJKJJ",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": {
+        "id": "ses_fe003ae6fffex92LPzsKBkJKJJ",
+        "slug": "neon-cabin",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "e7-delete-me",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787243024784,
+          "updated": 1787243024784
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 16:23:44 GMT",
+        "content-length": "372",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/session/ses_fe003ae6fffex92LPzsKBkJKJJ",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": true,
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 16:23:44 GMT",
+        "content-length": "4",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session",
+      "query": {
+        "roots": "true",
+        "limit": "10"
+      },
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": [
+        {
+          "id": "ses_fe003c54cffe2FSoB6Nan1x3uB",
+          "slug": "stellar-otter",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "e6-renamed",
+          "version": "1.18.18",
+          "time": {
+            "created": 1787243018931,
+            "updated": 1787243018931
+          }
+        },
+        {
+          "id": "ses_fe003f863ffepfhHriVgzujXEb",
+          "slug": "misty-canyon",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "summary": {
+            "additions": 0,
+            "deletions": 0,
+            "files": 0
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 8,
+            "output": 10,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "e5-valid",
+          "agent": "build",
+          "model": {
+            "id": "echo",
+            "providerID": "localmock",
+            "variant": "default"
+          },
+          "version": "1.18.18",
+          "time": {
+            "created": 1787243005852,
+            "updated": 1787243005894
+          }
+        },
+        {
+          "id": "ses_fe0042aebffe51Qb4g9kcE2h8l",
+          "slug": "quiet-harbor",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "summary": {
+            "additions": 0,
+            "deletions": 0,
+            "files": 0
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 8,
+            "output": 10,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "e3-external",
+          "agent": "build",
+          "model": {
+            "id": "echo",
+            "providerID": "localmock",
+            "variant": "default"
+          },
+          "version": "1.18.18",
+          "time": {
+            "created": 1787242992916,
+            "updated": 1787242992977
+          }
+        },
+        {
+          "id": "ses_fe004eff2ffeKmYc44b9W6Ea2K",
+          "slug": "happy-island",
+          "projectID": "global",
+          "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+          "path": "private/tmp/ocw-gate-a-20260820/workspace",
+          "summary": {
+            "additions": 0,
+            "deletions": 0,
+            "files": 0
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "e2-reasoning",
+          "agent": "build",
+          "model": {
+            "id": "echo",
+            "providerID": "localmock",
+            "variant": "default"
+          },
+          "version": "1.18.18",
+          "time": {
+            "created": 1787242942477,
+            "updated": 1787242942675
+          }
+        }
+      ],
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 16:23:44 GMT",
+        "content-length": "1896",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/ses_fe003ae6fffex92LPzsKBkJKJJ",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 404,
+      "response": {
+        "name": "NotFoundError",
+        "data": {
+          "message": "Session not found: ses_fe003ae6fffex92LPzsKBkJKJJ"
+        }
+      }
+    },
+    {
+      "method": "DELETE",
+      "path": "/session/ses_fe003ae6fffex92LPzsKBkJKJJ",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 404,
+      "response": {
+        "name": "NotFoundError",
+        "data": {
+          "message": "Session not found: ses_fe003ae6fffex92LPzsKBkJKJJ"
+        }
+      }
+    }
+  ],
+  "sse": [
+    {
+      "t": 1787243024.788872,
+      "event": {
+        "payload": {
+          "id": "evt_01ffc3e02001ugHPrw9psyW19B",
+          "type": "server.connected",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 1787243024.8087082,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_01ffc5191001HkQVnDszo8jzK7",
+          "type": "session.created",
+          "properties": {
+            "sessionID": "ses_fe003ae6fffex92LPzsKBkJKJJ",
+            "info": {
+              "id": "ses_fe003ae6fffex92LPzsKBkJKJJ",
+              "slug": "neon-cabin",
+              "version": "1.18.18",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "e7-delete-me",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787243024784,
+                "updated": 1787243024784
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787243024.809574,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_01ffc5191001HkQVnDszo8jzK7",
+            "type": "session.created.1",
+            "seq": 0,
+            "aggregateID": "ses_fe003ae6fffex92LPzsKBkJKJJ",
+            "data": {
+              "sessionID": "ses_fe003ae6fffex92LPzsKBkJKJJ",
+              "info": {
+                "id": "ses_fe003ae6fffex92LPzsKBkJKJJ",
+                "slug": "neon-cabin",
+                "version": "1.18.18",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "e7-delete-me",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787243024784,
+                  "updated": 1787243024784
+                }
+              }
+            }
+          },
+          "id": "evt_01ffc5191001HkQVnDszo8jzK7"
+        }
+      }
+    }
+  ],
+  "reload": {
+    "listAfterDelete": [
+      {
+        "id": "ses_fe003c54cffe2FSoB6Nan1x3uB",
+        "slug": "stellar-otter",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "e6-renamed",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787243018931,
+          "updated": 1787243018931
+        }
+      },
+      {
+        "id": "ses_fe003f863ffepfhHriVgzujXEb",
+        "slug": "misty-canyon",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 8,
+          "output": 10,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "e5-valid",
+        "agent": "build",
+        "model": {
+          "id": "echo",
+          "providerID": "localmock",
+          "variant": "default"
+        },
+        "version": "1.18.18",
+        "time": {
+          "created": 1787243005852,
+          "updated": 1787243005894
+        }
+      },
+      {
+        "id": "ses_fe0042aebffe51Qb4g9kcE2h8l",
+        "slug": "quiet-harbor",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 8,
+          "output": 10,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "e3-external",
+        "agent": "build",
+        "model": {
+          "id": "echo",
+          "providerID": "localmock",
+          "variant": "default"
+        },
+        "version": "1.18.18",
+        "time": {
+          "created": 1787242992916,
+          "updated": 1787242992977
+        }
+      },
+      {
+        "id": "ses_fe004eff2ffeKmYc44b9W6Ea2K",
+        "slug": "happy-island",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "summary": {
+          "additions": 0,
+          "deletions": 0,
+          "files": 0
+        },
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "e2-reasoning",
+        "agent": "build",
+        "model": {
+          "id": "echo",
+          "providerID": "localmock",
+          "variant": "default"
+        },
+        "version": "1.18.18",
+        "time": {
+          "created": 1787242942477,
+          "updated": 1787242942675
+        }
+      }
+    ]
+  },
+  "observation": {
+    "deleteFailureStatus": 404,
+    "deleteFailureResponse": {
+      "name": "NotFoundError",
+      "data": {
+        "message": "Session not found: ses_fe003ae6fffex92LPzsKBkJKJJ"
+      }
+    }
+  }
+}

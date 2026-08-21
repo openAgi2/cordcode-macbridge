@@ -1,5 +1,80 @@
 # Claude Code 冷启动既有 session 首轮流式从头重播：跨仓排查结论
 
+## 2026-08-21 OpenCode Web：无权限模型重试时 iPhone 只显示执行中（owner 关闭）
+
+### 现象
+选没有套餐权限的模型发消息。Mac Desktop 立刻显示「当前订阅套餐暂未开放… / 重试中 N 秒后 - 第 M 次尝试」。iPhone 全程「执行中」，等重试全部失败才出报错。
+
+### 官方 Desktop
+`packages/session-ui/src/components/session-retry.tsx`：`session.status.type==="retry"` 时画重试行，正文是 `status.message`，副行是 retrying + inSeconds(`next`) + attempt。SSE 形状 `{type:"retry", attempt, message, next}`。1.18.18 serve 经 `SessionStatus.set({type:"retry",…})` 发 `session.status`（`packages/opencode/src/session/status.ts` + processor retry policy）。
+
+### 关闭结论（2026-08-21，owner）
+两轮真机仍看不到执行中的重试行。owner：属于锦上添花，**不再修**。idle 后的终态报错已经有（`session.error` → text + `turn_error`），产品可接受。树里留下的 gap 绕过 / `runtimeStatusRevision` **不得当已修好广告**，CHANGELOG 不记「修复」。
+
+### 两轮弯路（下次若重开，先证明 wire）
+1. **只绕 envelope gap**：以为和 todo deck 同一扇门。`session_retry_status` 不进投影 deny-list、raw 是设计上的唯一载体；syncV2 跳号会让 gap 门整帧丢掉。绕过后真机仍失败。
+2. **再补时间线重画**：runtimeStatus 字典不是 `@Published`，重试期间没有 messages/投影补丁，`scheduleRender` 不跑。加了 `runtimeStatusRevision` 后真机仍失败。
+
+活体日志（ses_fef7，约 19:38 send → 19:39:58 终态）：中间约 70s **没有任何** INFO 级 `session_retry_status`（当时它只打 Debug）。终态是 `passive event text_delta` + `K4Patch turn_error`——这就是 iPhone「等重试结束才出报错」的载体。**没有在重试窗口里证明 Mac 把 retry 帧发出去了。** 第二轮才把该事件升到 INFO，但 owner 已关题，未再取证。
+
+### 若重开：最短证据顺序
+1. 再发一条无权限模型，立刻 grep go-bridge.log 的 `session_retry_status`（现已 INFO）。没有这条，先修 Mac SSE 解析/发射，不要再动 iOS 渲染。
+2. 有这条，再看 iOS 是否收到、`runtimeStatusRevision` 是否 +1、RunningStatusBar 是否带 subtitle。用户看的也可能是输入框「执行中」（`isGenerating`），不是状态条。
+3. 官方对照：Desktop 行来自 `session.status` 的 `message` + `next` + `attempt`，不是终态 `session.error`。
+
+不要再猜「再加一层 iOS 门」而不看 70s 窗口的 wire。
+
+## 2026-08-21 OpenCode Web：重启 App 后历史没有思考过程和工具调用
+
+## 2026-08-21 OpenCode Web：重启 App 后历史没有思考过程和工具调用
+
+### 现象
+iPhone OpenCode Web 打开正在写文件的 session：直播能看到思考过程 +「已读取文件 / 已编辑文件」。杀 App 再进同一位置：只剩一段拼在一起的正文，「过程」里没有思考、没有工具卡。Claude / Codex / 旧 OpenCode 的历史工具调用都正常。
+
+### 教训（又一次：先看官方 Desktop/web）
+不要猜「是不是 iOS 渲染」或沿用本仓 legacy `mapRichHistoryEntry` 的嵌套 `tool` 对象。官方 web 冷开历史跟直播走同一份 `session.messages` 的 `{info, parts}`，时间线用 `renderable(part)` + `groupParts`：`type=reasoning` 有 text 就显示，`type=tool` 且 `tool` 不是 `todowrite` 就显示工具卡。
+
+本轮如果先读：
+- `packages/schema/src/v1/session.ts` `ToolPart`：`tool: Schema.String`，`state` 是兄弟字段
+- `packages/app/src/context/server-session.ts` `client.session.messages`
+- `packages/session-ui/src/components/message-part.tsx` `renderable`
+
+活体 `GET /session/ses_fe7908102ffeGCC5opsX3UbGt2/message`（红楼梦，directory=cordcode-ios）立刻对上：25 条 tool 全是 `"tool":"read"|"edit"`，38 条 reasoning 带 `text`。本仓测试夹具却写成了 `tool: {id, toolName, state}`——那是从旧 `agent/opencode/providers.go` 抄来的，从来不是 1.18.18 HTTP 形状。
+
+### 根因
+`mapRichHistoryEntry`：
+
+```
+tool, _ := part["tool"].(map[string]any)
+if tool == nil { continue }
+```
+
+官方 `tool` 是字符串，断言失败，**每一条工具 part 被丢弃**。冷投影因此只有 text（+ reasoning parts），iPhone 重启后看不到工具卡；过程区只剩拼起来的中文正文。直播不走这条 mapper（SSE `handleToolPart` 已经 `firstString(part, "tool")`），所以当场有工具卡。
+
+### 修复
+按官方 ToolPart 映射：`tool` 字符串 + 兄弟 `state.{status,input,output,title,metadata,time}` → 投影 step（id=part.id，title、toolInput、duration、edit 的 `metadata.filediff` → fileChanges）。`todowrite` 跟官方 `HIDDEN_TOOLS` 一样不进时间线（todo dock 另走）。reasoning 继续进 Parts，并写入 `Thinking` 给 overlay。单测用官方字符串形状，不再把嵌套对象当 1.18.18 真值。
+
+### 不要再做的
+- 不要用 legacy adapter / 手写 fake server 的 tool 形状证明外部协议。
+- 不要在 iOS 上为「冷开没有过程」加启发式。Mac 把 part 译对，投影 hydrate 已经会发 `reasoning_delta` / `tool_started`。
+
+### 真机验收（2026-08-21）
+owner：测试结果基本符合预期。
+
+## 2026-08-20：opencode-web 新会话首回合完成态闪烁
+
+### 现象
+iPhone 新开 OpenCode Web 会话发第一条，输入框立刻（&lt;0.5s）变完成态，等到第一条 `text_delta` 才回到执行中。第二条和 dsh-web 首条不闪。
+
+### 根因
+冷 `get_session_projection sinceRev=0` 提交 `execution.phase=idle`（`executionBytes=16`）。活会话未收口 user turn + 空 assistant 壳被当成完整快照 `turn_completed`；pathless hydrate 从空 reducer 起，`CommitHydrateTransaction` Restore 冷 idle 盖掉已经 live 的 running（`pendingLive=0`）。R2 的「registry-live 且历史 0 条就 200ms×6 再拉」打不中这条（真机是 1 条用户消息），且违反 SSV2 第 4/6 条。
+
+### 修复（只动 Mac Kernel）
+拆掉 0 条重拉。live 空 assistant 不再 `turn_completed`。`CommitHydrateTransaction` 禁止 running/requires_action → idle。pending→real 早 rebind 保留。不要在 iOS 用 localSend 否决投影 idle。
+
+### 真机验收（2026-08-20）
+owner：新建 session，输入发送后输入框一直执行中，可正常流式，输出完变为完成态。符合预期。
+
 ## 2026-08-17：Claude / Grok / OpenCode 点 ⭕ 没数据
 
 ### 现象
@@ -889,3 +964,121 @@ seal，commits e00b389/8eabd6e），canonical `docs/protocol/bridge-v1.md` 事�
 
 - 官方输入框底下那一行来自整本日志投影：`sessionStats`（轮/步/llmMs/toolMs/ttft/decode）+ `tokenUsage`（uncached/cacheRead/cacheWrite/output）。缓存命中 = cacheRead / (uncached+cacheRead+cacheWrite)。窗口内节点 fold 只是没投影时的 fallback，分页/压缩会改窗口，不能当账单。
 - iOS 放在已有 ⭕ 表的「本会话」，不另做 composer footer。数字只转发官方投影，不从手机消息列表加总。
+
+## 2026-08-20 OpenCode Web：HTTP 纯度不等于官方 Web 语义一致
+
+- owner 在实施/真机测试中发现，`opencode-web` 虽然已经只走官方 HTTP/SSE，创建 session 后首条
+  消息、模型/agent 参数、事件终态等仍反复出错。复审确认根因在原设计的方法：允许从 legacy
+  `agent/opencode` 复制 prompt/SSE/history 语义，再以 endpoint 可达和同源 fake-server 测试证明
+  “对齐官方 Web”；这是一条循环证据链。
+- 2026-08-20 对安装版 1.18.18、同版本官方源码和隔离 serve 三方核验后，已确认的系统缺口包括：
+  官方 prompt 携带 messageID/agent/model/variant/多类 parts，现实现只发 text+model；官方模型选择
+  有五级链，现实现只覆盖部分；官方 session list 使用 roots/limit，现实现按 `/project` 聚合且不带
+  limit；真实 SSE 同时出现 direct payload 与嵌套 `sync`，现解析器忽略后者；question/todo 未接；
+  v2 没有当前活体样本。todo 活体项还与生成 SDK 的 `id` 声明发生漂移。
+- 原 `docs/2026-08-18-opencode-web-backend-design.md` 及完成情况已降为历史记录，禁止继续据此施工。
+  当前证据和后续阶段门分别见 `docs/2026-08-20-opencode-web-source-parity-audit.md`、
+  `docs/2026-08-20-opencode-web-source-first-convergence-plan.md`。owner 当前暂停产品代码实施。
+- 长期纪律已写入 `CLAUDE.md`：官方 UI/source → 目标版本真实样本 → bridge 映射 → 实现/测试；
+  legacy 只能当反例和接线索引，endpoint 2xx、SDK 类型或从设计手写的 fixture 都不能单独证明 parity。
+
+## 2026-08-21 OpenCode Web：todo dock / 任务同步修了三层才绿（owner 真机）
+
+owner 现象叠了三轮才完整：iPhone 发消息后卡「正在生成」或正文只到一半；多步任务 Mac Desktop
+正常跑完 todo，iPhone 全程没有任务卡。数据源**从来不是文件反推**——opencode-web 的 todo 只有
+官方 `GET /session/{id}/todo` 和 SSE `todo.updated`（形状 A8：`{content,status,priority}`
+全量替换，无 item id）。每修一层，下一层才露出。不要先去扫 JSONL / transcript，也不要先当
+server SSE bug（#28729）或传输 keepalive。
+
+### 层 1 — live reasoning 被当成终态错误，拆掉 relayEvents
+
+- 推理模型每轮都有 populated reasoning。live 载体按 E2「不翻译」走 `emit(EventError)`。
+- `go-bridge/handlers_relay.go` 对非 claude 的任意 `EventError` 合成 wire `turn_error` 并
+  `return`，relayEvents 当场拆除。正文半截、会话卡执行中；Mac Desktop 不受影响。
+- 修：`events.go` 改为 `skipLiveReasoning`（Debug 跳过，不发 EventError、不上 Thinking）。
+  E2 语义仍是「live 不翻译」；历史 hydrate（directive-014）继续显示思考块。
+- 测试：`TestReasoningSkippedUntranslatedAndNonFatal`、`TestReasoningModelTurnStreamsTextAndCompletes`。
+- **不要放松**「非 claude EventError = 终态」本身——那是进程崩溃收口。上游不得再把可折叠的
+  非致命问题丢进这条路径。
+
+### 层 2 — 空闲后再发：全局 SSE 被二次 Close 拆掉（整条链路静默）
+
+- 日志指纹：`send_message` → `session not found` → `SSE subscriber connected` →
+  `replacing stale agent relay after session respawn` → `relayEvents started` →
+  **零 forwarding / 零 passive**。4096 日志证明 turn 在 server 侧跑完。当天 13:39 那条
+  首个 SSE 上是流式正常的。
+- `serverSession.Close()` 无 closeOnce、且不关 `events` 通道。idle cleanup 第一次 Close
+  已把 global SSE refs 减到 0；`relayEvents` 因通道永不关闭而僵尸驻留，`agentRelaySess`
+  仍指向旧 session。下次 send 的 `startRelayIfNotRunning` 对**同一旧对象再 Close 一次**——
+  此时 `globalSub` 已经是新流，第二次 `releaseGlobalSubscriber` 把 refs 1→0，刚 dial 的
+  `/global/event` 当场被拆掉。14:58 重连后立刻出现的 2 条 desktop `passive event` 正好卡在
+  connect 与 stale.Close 之间（~112ms），之后全沉默，是同一机制。
+- 旁证：`relayEvents exited` 在 idle 之后缺失。
+- 修：`Close` 幂等（closeOnce）+ unregister 之后 `close(s.events)` 让僵尸 relay 退出；
+  最后 holder 释放打 `opencode-web SSE: last holder released, tearing stream`。
+- 测试：`TestStaleSessionDoubleCloseDoesNotTearRespawnedSSE`（先红后绿）。
+
+### 层 3 — iOS syncV2 envelope gap 把门把已到达的 todos_updated 整轮丢掉
+
+Mac 侧投递没问题之后，iPhone 仍可能没有 dock。syncV2 下正文/工具走 projection_patch（另一套
+syncRev），raw 子集 `perSessionSeq` 必然跳号；`handleRoutedLiveEvent` 入口的
+`timelineStore.acceptance` 把 `todos_updated` 判 gap 整轮丢弃。todo deck 是控制面全量替换
+快照，不是投影真相源，不该过这扇门。修在 iOS：
+`ChatViewModel+CodexStreaming.swift` 入口前置拦截 `.todosUpdated` 直接 `handleTodoUpdate`。
+测试 `testRoutedTodosUpdatedBypassesEnvelopeGapGate`。细节见相邻 iOS 仓 `think.md`
+「2026-08-21 OpenCode Web：todos_updated 被 envelope gap 门整轮丢掉」。
+这和 2026-07 的 `handleCodexLiveEvent` v2 早退是**另一扇门**，不要合并成同一个 bug。
+
+### 排查顺序（再出现「有任务无 dock / 正在生成」）
+
+1. go-bridge：有没有 `relayEvents forwarding` / `passive event` / `todos_updated`。
+   零 forwarding + `replacing stale agent relay` → 层 2。有 forwarding 但 iPhone 无 dock → 层 3。
+   有 text 半截 + `turn_error` 且错误像 reasoning unsupported → 层 1。
+2. 4096 server 日志（只读）确认 turn 是否在跑。Mac Desktop 正常 ≠ bridge 收到了 SSE。
+3. iOS「正在生成」是本地乐观态，不能当事件到达证据。
+
+## 2026-08-21 OpenCode Web：iPhone 目录数对不上 Desktop（17 vs 6）——先看官方源码
+
+owner 验收（2026-08-21 晚）：修完后 iOS OpenCode Web 会话列表与 Mac Desktop **基本上一样**。
+
+### 教训（下次 opencode-web 排障第一条）
+
+**先打开 `../opencode/packages/app` 里 Desktop/web 首页的真实调用链，再写假设。**
+不要从本仓旧 adapter、GET 探活、iOS prefix、缓存冲刷往下猜。本轮走了弯路：先当
+iOS 只预拉 6 个工程、再当 GET /project 就是首页。owner 当场指出「昨天刚修过同类问题，
+是看官方 web 才找到正确调用」——对。昨天是 `session.list({directory, roots:true, limit})`；
+今天是「对哪些 directory 去调」。同一纪律。
+
+### 走弯路（不要再走）
+
+1. 把 `GET /project`（服务端注册表，活体 31 行、deleted-still-registered）当成 Desktop
+   首页侧栏。关掉 tab 不会从注册表消失，所以 iPhone 出现 17 个还在磁盘上的目录。
+2. 在 iOS 上修 `prefix(6)` / 添加目录冲刷。那是次要：即便每个注册表目录都打对了
+   `session.list`，目录集合仍然是错的。
+3. 活体乱探 `GET /project/current`（返回 `worktree="/"`）当「当前 6 个」。那是当前
+   instance 的 current project，不是打开集合。
+
+### 官方真相（1.18.18 `packages/app`）
+
+- **首页目录集合**：`home-controller.ts` `project.list` =
+  `createServerProjects`（`server.tsx`）。数据在 Desktop persist
+  `~/Library/Application Support/ai.opencode.desktop/opencode.global.dat`
+  的 `server.projects["http://127.0.0.1:4096"]`。`closeHomeProject` 只改这份列表 +
+  recentlyClosed，**没有**对应的 HTTP DELETE。活体该 key 7 行（含今天的
+  `cordcode-macbridge`）；owner 目视约 6 个，同一集合。
+- **每个打开目录的会话**：`global-sync/session-load.ts`
+  `loadRootSessionsV1` → `client.session.list({ directory, roots: true, limit })`。
+  不带 directory 的 `GET /session` 是陈旧全局切片（2026-08-19 已钉：当天新会话缺席）。
+
+### 最终修
+
+Mac `desktop_home_projects.go`：list_projects / 聚合 catalog 只读 Desktop 该 serve URL
+的打开集合（只读 persist，不写）。没有 persist 才回落 `GET /project`。运行日志：
+`home project list source=desktop-persist:... count=7 url=http://127.0.0.1:4096`。
+每个打开目录仍走官方 `session.list({directory, roots:true, limit})`。
+测试：`TestParseDesktopOpenedWorktreesMatchesServerURL`、
+`TestProjectWorktreeDirsPrefersDesktopOpenSetOverRegistry`。
+iOS：打开集合里每个工程都拉 bucket（不再名字序 prefix(6)）；添加目录后立刻拉该目录。
+
+没有「当前打开集合」HTTP。对齐 Desktop 首页就要读官方 UI 同一份 persist，不能发明
+GET /project 过滤规则。

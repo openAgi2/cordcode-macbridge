@@ -1,0 +1,236 @@
+{
+  "meta": {
+    "scenario": "WP",
+    "opencodeVersion": "1.18.18",
+    "sourceCommit": "2cba7e227d",
+    "captureStatus": "captured"
+  },
+  "source": {
+    "ui": "packages/app/src/utils/server-compat.ts:304 legacy().project.list() (data ?? [])",
+    "server": "packages/opencode/src/server/routes/instance/httpapi/handlers/project.ts:15-17 list -> Project.list; packages/opencode/src/project/project.ts:336 list, :35-56 fromRow, :217 global pseudo-project worktree='/', :243-244 non-worktree directory folds into sandboxes; packages/core/src/project.ts:105-119 git rootCommits/remote derive project id"
+  },
+  "http": [
+    {
+      "method": "GET",
+      "path": "/project",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": [
+        {
+          "id": "global",
+          "worktree": "/",
+          "time": {
+            "created": 1787242936715,
+            "updated": 1787242936829
+          },
+          "sandboxes": []
+        }
+      ],
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 16:22:16 GMT",
+        "content-length": "104",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/project",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": [
+        {
+          "id": "global",
+          "worktree": "/",
+          "time": {
+            "created": 1787242936715,
+            "updated": 1787242936829
+          },
+          "sandboxes": []
+        },
+        {
+          "id": "7e9cad9b34015e1b9c6712adf3e71f6601c29437",
+          "worktree": "/private/tmp/ocw-gate-a-20260820/wsgit1",
+          "vcs": "git",
+          "time": {
+            "created": 1787242937046,
+            "updated": 1787242937046
+          },
+          "sandboxes": []
+        },
+        {
+          "id": "9e20bb53b0b18504e815c2be208430fe6eb008a4",
+          "worktree": "/private/tmp/ocw-gate-a-20260820/wsgit2",
+          "vcs": "git",
+          "time": {
+            "created": 1787242937120,
+            "updated": 1787242937120
+          },
+          "sandboxes": []
+        }
+      ],
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 16:22:16 GMT",
+        "content-length": "478",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/project",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": [
+        {
+          "id": "global",
+          "worktree": "/",
+          "time": {
+            "created": 1787242936715,
+            "updated": 1787242936829
+          },
+          "sandboxes": []
+        },
+        {
+          "id": "7e9cad9b34015e1b9c6712adf3e71f6601c29437",
+          "worktree": "/private/tmp/ocw-gate-a-20260820/wsgit1",
+          "vcs": "git",
+          "time": {
+            "created": 1787242937046,
+            "updated": 1787242937046
+          },
+          "sandboxes": []
+        },
+        {
+          "id": "9e20bb53b0b18504e815c2be208430fe6eb008a4",
+          "worktree": "/private/tmp/ocw-gate-a-20260820/wsgit2",
+          "vcs": "git",
+          "time": {
+            "created": 1787242937120,
+            "updated": 1787242937120
+          },
+          "sandboxes": []
+        }
+      ],
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 16:22:16 GMT",
+        "content-length": "478",
+        "vary": "Origin"
+      }
+    }
+  ],
+  "httpClones": {
+    "git1": [
+      {
+        "method": "POST",
+        "path": "/session",
+        "query": {},
+        "queryHasDirectory": true,
+        "body": {
+          "title": "wp-git-1"
+        },
+        "status": 200,
+        "response": {
+          "id": "ses_fe0050523ffeye6TMaoWRBVKEz",
+          "slug": "silent-rocket",
+          "projectID": "7e9cad9b34015e1b9c6712adf3e71f6601c29437",
+          "directory": "/private/tmp/ocw-gate-a-20260820/wsgit1",
+          "path": "",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "wp-git-1",
+          "version": "1.18.18",
+          "time": {
+            "created": 1787242937052,
+            "updated": 1787242937052
+          }
+        },
+        "responseHeaders": {
+          "content-type": "application/json",
+          "date": "Thu, 20 Aug 2026 16:22:16 GMT",
+          "content-length": "361",
+          "vary": "Origin"
+        }
+      }
+    ],
+    "git2": [
+      {
+        "method": "POST",
+        "path": "/session",
+        "query": {},
+        "queryHasDirectory": true,
+        "body": {
+          "title": "wp-git-2"
+        },
+        "status": 200,
+        "response": {
+          "id": "ses_fe00504daffePAql0wshDoYdYV",
+          "slug": "mighty-knight",
+          "projectID": "9e20bb53b0b18504e815c2be208430fe6eb008a4",
+          "directory": "/private/tmp/ocw-gate-a-20260820/wsgit2",
+          "path": "",
+          "cost": 0,
+          "tokens": {
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          },
+          "title": "wp-git-2",
+          "version": "1.18.18",
+          "time": {
+            "created": 1787242937125,
+            "updated": 1787242937125
+          }
+        },
+        "responseHeaders": {
+          "content-type": "application/json",
+          "date": "Thu, 20 Aug 2026 16:22:16 GMT",
+          "content-length": "361",
+          "vary": "Origin"
+        }
+      }
+    ]
+  },
+  "afterCreate": {
+    "count": 3,
+    "worktrees": [
+      "/",
+      "/private/tmp/ocw-gate-a-20260820/wsgit1",
+      "/private/tmp/ocw-gate-a-20260820/wsgit2"
+    ],
+    "gitWorktreesRegistered": [
+      true,
+      true
+    ]
+  },
+  "afterDelete": {
+    "count": 3,
+    "worktrees": [
+      "/",
+      "/private/tmp/ocw-gate-a-20260820/wsgit1",
+      "/private/tmp/ocw-gate-a-20260820/wsgit2"
+    ],
+    "deletedGitWorktreeStillRegistered": true,
+    "deletedDirectory": "/tmp/ocw-gate-a-20260820/wsgit2",
+    "note": "harness-owned temp dir; observation only — CordCode missing-worktree handling is a client-side visibility overlay, never a server claim"
+  }
+}

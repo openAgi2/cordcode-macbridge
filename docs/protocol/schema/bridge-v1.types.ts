@@ -93,7 +93,7 @@ export interface BridgeSecurityProfile {
 
 export interface BridgeBackendInfo {
   id: string;
-  kind: "claude_code" | "opencode" | "codex" | string;
+  kind: "claude_code" | "opencode" | "codex" | "opencode-web" | string;
   displayName?: string;
   /**
    * Backend-scoped capabilities. `session_sync_v2` here (not only hello_ack) selects ownership;
@@ -260,6 +260,31 @@ export interface BridgeRequest<TParams = Record<string, unknown>> {
   params?: TParams;
 }
 
+// Model item in `list_models` results. `variants` (canonical additive revision,
+// E1b sample-verified) carries exactly the live `/provider…models[modelID].variants`
+// keys for that model — empty/absent means the model has no variant selector.
+export interface BridgeModelItem {
+  id: string;
+  name: string;
+  provider: string;
+  providerId: string;
+  reasoning: boolean;
+  supportedReasoningEfforts?: string[];
+  defaultReasoningEffort?: string;
+  isDefault?: boolean;
+  variants?: string[];
+}
+
+// `send_message` model parameter. `variant` (canonical additive revision, E1b
+// sample-verified) is a model-specific OpenCode variant key — NOT reasoningEffort.
+// An unlisted key fails the RPC with zero POSTs. `agent` (already canonical,
+// `send_message.params.agent`) selects the official agent for the same prompt.
+export interface BridgeSendMessageModel {
+  id: string;
+  providerId: string;
+  variant?: string;
+}
+
 export interface BridgeResult<TData = unknown> {
   type?: "result";
   requestId?: string;
@@ -285,6 +310,18 @@ export interface BridgeToolEventData {
   matches?: ToolMatches;
   streamId?: string;
   parentStreamId?: string;
+}
+
+// Official permission payload extras (opencode-web v1.18 permission.asked,
+// live-pinned 1.18.18 /global/event): permissionKind = official category key
+// (rendered via the official i18n catalog settings.permissions.tool.{kind}.description),
+// patterns = official pattern rows. Additive; absent on other backends — clients
+// keep the legacy two-button card verbatim. Requests carrying them offer the
+// official reject/always/once triple (wire deny/always/allow).
+// Canonical doc: bridge-v1.md「Official permission payload」(2026-08-19).
+export interface BridgePermissionRequestExtras {
+  permissionKind?: string;
+  patterns?: string[];
 }
 
 export type BridgeEventName =
@@ -317,6 +354,10 @@ export type BridgeEventName =
   // Phase 1 = Codex rollout path only; driver/local-send/web are Phase 3+.
   | "projection_patch"
   | "projection_snapshot"
+  // Transient provider-retry notice (opencode-web 1.18 session.status{type:"retry"}):
+  // {attempt, message, next?}. Turn stays alive — control-plane only, never settles
+  // turn state, not mailbox-durable. Canonical doc: bridge-v1.md (2026-08-19).
+  | "session_retry_status"
   | "sync_invalidate";
 
 export interface BridgeEvent<TData = unknown> {
@@ -495,6 +536,14 @@ export type BridgeProjectionPart =
        * on older producers. Clients map to the existing permission card.
        */
       requiresPermissionConfirmation?: boolean;
+      /**
+       * Official permission payload (opencode-web v1.18 permission.asked, live-pinned):
+       * category key + pattern rows carried on the projected permission part so SSV2
+       * clients render the official card (需要权限 + category line + patterns +
+       * reject/always/once). Mirrors the wire permission_request extras; additive.
+       */
+      permissionKind?: string;
+      permissionPatterns?: string[];
     }
   | { type: "file"; path?: string; kind?: string; diff?: string; movePath?: string }
   | {

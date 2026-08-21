@@ -1,0 +1,452 @@
+{
+  "version": 1,
+  "project_root": "/Users/jacklee/Projects/cordcode-macbridge-opencode-web",
+  "design_doc": "docs/2026-08-20-opencode-web-source-first-convergence-plan.md",
+  "design_doc_hash": "b09c4c46c2bb8217fc17ec1951d5c939c166d3bb",
+  "design_doc_changed": true,
+  "activated_at": "2026-08-20T14:40:12Z",
+  "active_mode": false,
+  "owner_acceptance": {
+    "status": "accepted",
+    "received_at": "2026-08-21T11:32:03Z",
+    "artifact": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/owner-acceptance-2026-08-21.md",
+    "matrix_rows": 12,
+    "explicit_pass_rows": [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12],
+    "overall_owner_verdict": "accepted-for-closeout",
+    "row_5_note": "No individual checkmark was supplied; acceptance is based on the owner's explicit overall closeout judgement and is not recorded as an explicit per-row pass."
+  },
+  "directives": [
+    {
+      "number": 1,
+      "kind": "implementation",
+      "title": "Gate S 正式退出并实施 C1",
+      "issued_at": "2026-08-20T14:40:12Z",
+      "status": "verified",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-001-gate-s-exit-and-c1.md",
+      "scope": "Mac-only C1",
+      "constraints": [
+        "Gate S exit 与 C1 必须为独立 commit",
+        "仅 1.18.18 verified；v2/unknown fail closed",
+        "no protocol/WireDescriptor/capability/iOS writer changes",
+        "完成 C1 后停止，不进入 C2"
+      ],
+      "linked_commits": [
+        "git:bc4fcdd",
+        "git:5c82ecc"
+      ],
+      "resolved_by_directive": 2,
+      "report": {
+        "received_at": "2026-08-20T14:40:12Z",
+        "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-001-gate-s-exit-and-c1.md",
+        "audited": true,
+        "audit_verdict": "partial",
+        "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-001-gate-s-exit-and-c1.md"
+      }
+    },
+    {
+      "number": 2,
+      "kind": "hole-fill",
+      "title": "补洞 C1 unsupported-generation diagnostics",
+      "issued_at": "2026-08-20T14:46:25Z",
+      "status": "verified",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-002-c1-diagnostics-hole-fill.md",
+      "scope": "Mac-only C1 diagnostics/tests",
+      "constraints": [
+        "unsupported generation diagnostics fails closed before catalog",
+        "no protocol/WireDescriptor/capability/iOS writer changes",
+        "correct zero-capability overclaim without changing product semantics",
+        "C2 remains forbidden"
+      ],
+      "linked_commits": [
+        "git:5b8451c",
+        "git:257f0df"
+      ],
+      "report": {
+        "received_at": "2026-08-20T14:56:46Z",
+        "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-002-c1-diagnostics-hole-fill.md",
+        "audited": true,
+        "audit_verdict": "verified",
+        "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-002-c1-diagnostics-hole-fill.md",
+        "recheck_received_at": "2026-08-20T15:01:32Z",
+        "recheck_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-002-recheck.md"
+      }
+    },
+    {
+      "number": 3,
+      "kind": "implementation",
+      "title": "C2 official list/get",
+      "issued_at": "2026-08-20T15:11:05Z",
+      "status": "in_progress",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-003-c2-official-list-get.md",
+      "scope": "Mac-only C2 samples/catalog/tests",
+      "constraints": [
+        "workspace.project same-version sample and independent checker before product code",
+        "official directory+roots=true+limit=100 with OD-1/OD-2 and explicit missing-worktree rule",
+        "catalog errors/empty registry fail honestly with no stale/current-dir/partial/history/legacy fallback",
+        "list/get remain catalog-only with zero Kernel/EventPublisher/messages writes",
+        "no protocol/WireDescriptor/capability/iOS writer/C3+ changes"
+      ],
+      "linked_commits": [
+        "git:69f26bc",
+        "git:ef21db1",
+        "git:105b393"
+      ],
+      "report": {
+        "received_at": "2026-08-20T15:37:26Z",
+        "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-003-c2-official-list-get.md",
+        "audited": true,
+        "audit_verdict": "partial",
+        "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-003-c2-official-list-get.md"
+      }
+    },
+    {
+      "number": 4,
+      "kind": "hole-fill",
+      "title": "补洞 C2 evidence/decoder fail-closed",
+      "issued_at": "2026-08-20T15:43:18Z",
+      "status": "superseded",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-004-c2-evidence-decoder-hole-fill.md",
+      "scope": "Mac-only C2 evidence/project decoder/tests",
+      "constraints": [
+        "workspace.project checker derives only from real http response fields",
+        "generation-118 project decoder accepts bare array only and fails malformed required rows",
+        "roots/limit test claims must match actual fixtures and A10 live replay",
+        "no fallback/protocol/WireDescriptor/capability/iOS writer/C3+ changes"
+      ],
+      "linked_commits": [],
+      "superseded_by_directive": 5,
+      "report": {
+        "received_at": null,
+        "markdown_path": null,
+        "audited": false,
+        "audit_verdict": null,
+        "audit_path": null
+      }
+    },
+    {
+      "number": 5,
+      "kind": "implementation",
+      "title": "C2–C7 集中收敛实施",
+      "issued_at": "2026-08-20T15:48:22Z",
+      "status": "superseded",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-005-c2-c7-concentrated-convergence.md",
+      "scope": "Cross-repo as needed: remaining evidence, Mac C2-C7, targeted iOS wiring/tests",
+      "constraints": [
+        "Stage 0 fully subsumes directive-004 before remaining translator work",
+        "capture all remaining source-only surfaces before each translator",
+        "C3+C4+C5 implemented as one Turn/SSV2 core; C6+C7 as interaction/mutation wave",
+        "no intermediate supervisor stops unless an explicit hard-stop condition fires",
+        "single-writer/fail-closed/no-fallback/no-guessed-sample rules remain mandatory",
+        "one final centralized audit and release install, no UI automation"
+      ],
+      "linked_commits": [],
+      "superseded_by_directive": 6,
+      "report": {
+        "received_at": null,
+        "markdown_path": null,
+        "audited": false,
+        "audit_verdict": null,
+        "audit_path": null
+      }
+    },
+    {
+      "number": 6,
+      "kind": "diagnostic",
+      "title": "Canonical Stage 0 evidence pack（E1–E7 + WP-FIX）",
+      "issued_at": "2026-08-20T16:08:13Z",
+      "status": "in_progress",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-006-canonical-evidence-pack.md",
+      "scope": "Mac evidence-only: isolated OpenCode 1.18.18 capture harness, sanitized samples, independent checkers",
+      "constraints": [
+        "supersedes directive-005 product implementation authorization; C2 decoder and C3-C7 product code remain frozen",
+        "capture E1-E7 and correct WP evidence ownership from real same-version raw HTTP/SSE/reload only",
+        "developer agent records physical shapes but does not decide bridge mapping, SSV2 ownership, fallback, product semantics, or capability activation",
+        "blocked is honest; no guessed JSON, fake-server substitute, legacy fallback, owner 4096 writes, real provider account, or product install",
+        "after evidence report stop; design owner updates canonical dossiers before a new concentrated implementation directive"
+      ],
+      "linked_commits": [
+        "git:4a215b0"
+      ],
+      "resolved_by_directive": 7,
+      "roadmap_diff": {
+        "design_commit": "git:904a0dd",
+        "summary": "The convergence plan is now the sole canonical execution design with eleven self-contained feature dossiers. Gate B, SSV2 impact, and sample inventory are evidence appendices only. Product implementation previously authorized by directive-005 is withdrawn until E1-E7 and WP-FIX return and the canonical dossiers are revised with observed shapes.",
+        "checker": "python3 agent/opencode-web/testdata/official-1.18.18/harness/check_canonical_execution_design.py --self-test"
+      },
+      "report": {
+        "received_at": "2026-08-20T16:54:56Z",
+        "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-006-canonical-evidence-pack.md",
+        "audited": true,
+        "audit_verdict": "partial",
+        "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-006-canonical-evidence-pack.md"
+      }
+    },
+    {
+      "number": 7,
+      "kind": "hole-fill",
+      "title": "Final provider evidence correction（E1b/E4b/E5b）",
+      "issued_at": "2026-08-20T16:54:56Z",
+      "status": "verified",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-007-final-provider-evidence-correction.md",
+      "scope": "Mac evidence-only: one combined OpenCode 1.18.18 provider/config/variant sandbox round",
+      "constraints": [
+        "capture non-empty live model variants through official Web selection, prompt, and reload or mark E1b blocked",
+        "archive a safe raw+sanitized provider pair with deterministic provenance and value-class-only redaction",
+        "capture real GET /config valid/invalid/absent responses and a two-model catalog distinguishing provider default from first-model fallback",
+        "no bridge mapping decisions, product code, protocol, WireDescriptor, capability, iOS, build, or install",
+        "stop after checker/report; design owner performs final canonical mapping and then issues one concentrated product directive"
+      ],
+      "linked_commits": [
+        "git:211bb27"
+      ],
+      "roadmap_diff": {
+        "design_commit": "git:8d110f7",
+        "summary": "Audit-006 accepted WP/E2/E3/E6/E7 and narrowed their canonical mappings, but found the last coupled provider evidence gap: no /config response, no non-empty catalog variants, no multi-model fallback distinction, and no raw E4 provenance pair.",
+        "checker": "python3 agent/opencode-web/testdata/official-1.18.18/harness/check_canonical_execution_design.py --self-test"
+      },
+      "report": {
+        "received_at": "2026-08-20T17:11:51Z",
+        "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-007-final-provider-evidence-correction.md",
+        "audited": true,
+        "audit_verdict": "verified",
+        "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-007-final-provider-evidence-correction.md"
+      }
+    },
+    {
+      "number": 8,
+      "kind": "implementation",
+      "title": "C2-review-fix + C3-C7 concentrated implementation",
+      "issued_at": "2026-08-20T17:11:51Z",
+      "status": "rejected",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-008-concentrated-c2-c7-implementation.md",
+      "scope": "Cross-repository MacBridge+iOS concentrated product batch",
+      "constraints": [
+        "one concentrated implementation and one final report; no per-slice supervisor stops unless a canonical stop line triggers",
+        "canonical-first additive variant protocol only; no other wire fields, no reasoning, no OD-3 surfaces",
+        "Mac Kernel remains the only timeline truth and iOS ProjectionStore the only messages writer",
+        "no legacy/v2 fallback, recursive shape search, fake parity evidence, owner 4096 writes, real provider account, or Relay/VPS changes",
+        "targeted tests/builds only with watchdog and owned-process cleanup; no UI tests or simulator automation",
+        "Mac Release install and required iOS physical-device install occur only after owning tests pass"
+      ],
+      "linked_commits": [
+        "git:06dc62e",
+        "git:3c42e2d",
+        "git:50f7b81",
+        "git:85e0549",
+        "git:293df9b",
+        "git:0be804a",
+        "git:ff4e5d0",
+        "ios-git:b3919de",
+        "ios-git:e74883b"
+      ],
+      "roadmap_diff": {
+        "design_commit": "git:9bb72db",
+        "summary": "Directive-007 evidence is verified. E1b/E4b/E5b close variant/provider/config mapping; canonical §6.11.2 converts the remaining roadmap into one concentrated C2 review-fix plus C3-C7 batch with a single final activation/audit gate.",
+        "checker": "python3 agent/opencode-web/testdata/official-1.18.18/harness/check_canonical_execution_design.py --self-test"
+      },
+      "report": {
+        "received_at": "2026-08-20T18:41:29Z",
+        "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-008-concentrated-c2-c7-implementation.md",
+        "audited": true,
+        "audit_verdict": "rejected",
+        "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-008-concentrated-c2-c7-implementation.md"
+      }
+    },
+    {
+      "number": 9,
+      "kind": "hole-fill",
+      "title": "Audit-008 concentrated product-path repair",
+      "issued_at": "2026-08-20T18:48:54Z",
+      "status": "verified",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-009-audit008-concentrated-product-path-repair.md",
+      "scope": "Cross-repository MacBridge+iOS concentrated corrective batch",
+      "constraints": [
+        "canonical unchanged; pinned 1.18.18 source and captured samples remain the only external shape truth",
+        "one global SSE connection and exactly one production EventPublisher/Kernel ingest owner per source fact",
+        "question identity must be source-proven from A7 tool fields and verified through Kernel/Projection",
+        "Todo/provider/config/mutation shapes fail closed with no alias/default/silent skip/arbitrary-2xx success",
+        "variant selector must exist in both current iOS model configuration consumers without UI automation",
+        "affected capabilities remain unavailable until full-path owning tests pass; E2 reasoning and OD-3 remain absent",
+        "one concentrated report, then stop for audit-009 before owner UI matrix"
+      ],
+      "linked_commits": [
+        "git:851c2c6",
+        "git:cb1d8e6",
+        "git:d763d82",
+        "ios-git:71007a4"
+      ],
+      "resolved_from_audit": 8,
+      "resolved_by_directive": 10,
+      "owner_disposition": "Option A confirmed: preserve canonical and repair implementation/full-path tests",
+      "report": {
+        "received_at": "2026-08-21T01:35:48Z",
+        "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-009-audit008-concentrated-product-path-repair.md",
+        "audited": true,
+        "audit_verdict": "partial",
+        "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-009-audit008-concentrated-product-path-repair.md"
+      }
+    },
+    {
+      "number": 10,
+      "kind": "hole-fill",
+      "title": "Question recovery, strict tail, and iOS install",
+      "issued_at": "2026-08-21T01:35:48Z",
+      "status": "verified",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-010-question-recovery-strict-tail-and-ios-install.md",
+      "scope": "Mac targeted repair plus iOS targeted regression/install",
+      "constraints": [
+        "source-proven question messageID/callID correlation with cold GET/history recovery through the one Kernel route",
+        "exact HTTP 200 mutation responses and remaining agent/provider/todo strict destructive cases",
+        "preserve directive-009 verified C4 one-ingest and variant UI paths",
+        "no protocol/canonical/second-writer/fallback/reasoning/OD-3 changes",
+        "developer performs bounded iOS targeted tests and available paired-device install; no UI automation",
+        "one report then stop for audit-010"
+      ],
+      "linked_commits": [
+        "git:4a2afb6",
+        "git:5b11ba3",
+        "git:44cae1a"
+      ],
+      "resolved_from_audit": 9,
+      "resolved_by_directive": 11,
+      "report": {
+        "received_at": "2026-08-21T02:42:00Z",
+        "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-010-question-recovery-strict-tail-and-ios-install.md",
+        "audited": true,
+        "audit_verdict": "partial",
+        "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-010-question-recovery-strict-tail-and-ios-install.md"
+      }
+    },
+    {
+      "number": 11,
+      "kind": "hole-fill",
+      "title": "Question terminal reconciliation final closure",
+      "issued_at": "2026-08-21T02:42:00Z",
+      "status": "verified",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-011-question-terminal-reconciliation.md",
+      "scope": "Mac opencode-web question lifecycle and owning tests only",
+      "constraints": [
+        "preserve directive-010 verified identity, strict tail, variant UI, and installation results",
+        "replace add-only boolean claim with source-ordered pending/resolved lifecycle under one Kernel route",
+        "reconcile missed terminal events from A7-proven history without treating absence alone as answered/rejected",
+        "barrier-controlled real interleavings; sequential calls may not be labeled race",
+        "actual resolve_user_input handler through concrete opencode-web and Kernel/headRev",
+        "no canonical/protocol/capability/iOS changes, no second writer, no owner UI matrix"
+      ],
+      "linked_commits": [
+        "git:1506628",
+        "git:d6ba0b4",
+        "git:42702ed"
+      ],
+      "resolved_from_audit": 10,
+      "resolved_by_directive": 12,
+      "roadmap_diff": {
+        "design_commit": "git:80ebf10",
+        "summary": "A7 raw proves resolved history retains messageID/callID/tool terminal but not the original que_ interaction ID. Canonical §6.8 now distinguishes pending fresh-process Dock recovery from resolved fresh-process tool-activity hydration, forbids invented interaction IDs, and requires terminal state to close the reply mapping.",
+        "checker": "manual A7 raw source-shape audit plus existing canonical design checker"
+      },
+      "report": {
+        "received_at": "2026-08-21T03:39:35Z",
+        "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-011-question-terminal-reconciliation.md",
+        "audited": true,
+        "audit_verdict": "partial",
+        "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-011-question-terminal-reconciliation.md"
+      }
+    },
+    {
+      "number": 12,
+      "kind": "hole-fill",
+      "title": "Question terminal reply-mapping final seal",
+      "issued_at": "2026-08-21T03:39:35Z",
+      "status": "verified",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-012-question-terminal-reply-mapping-seal.md",
+      "scope": "Mac opencode-web terminal reply mapping and owning negative tests only",
+      "constraints": [
+        "terminal lifecycle admission must reject late asked/stale recovery before writing reply mapping",
+        "terminal and stale-recovery negative tests must prove zero second official POST through the concrete responder",
+        "preserve directive-011 source fence, A7 reconciliation, one Kernel owner, and resolve full path",
+        "no canonical/protocol/capability/Kernel/iOS changes and no owner UI matrix",
+        "bounded 20-run barrier/race/full/sandbox regression and Mac Release reinstall",
+        "one report then stop for audit-012"
+      ],
+      "linked_commits": [
+        "git:01ca143",
+        "git:b79b273"
+      ],
+      "resolved_from_audit": 11,
+      "resolved_by_directive": 13,
+      "report": {
+        "received_at": "2026-08-21T04:08:00Z",
+        "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-012-question-terminal-reply-mapping-seal.md",
+        "audited": true,
+        "audit_verdict": "partial",
+        "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-012-question-terminal-reply-mapping-seal.md"
+      }
+    },
+    {
+      "number": 13,
+      "kind": "hole-fill",
+      "title": "Question lookup terminal gate final seal",
+      "issued_at": "2026-08-21T04:08:00Z",
+      "status": "verified",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-013-question-lookup-terminal-gate.md",
+      "scope": "Mac opencode-web lookupQuestion lifecycle result and one owning negative only",
+      "constraints": [
+        "a GET row rejected by terminal lifecycle cannot be returned as a successful reply shape",
+        "stale current GET owning test must preserve the row while proving zero POST through concrete resolve handler",
+        "pending fresh-process reload remains supported",
+        "no lifecycle/history/Projection/canonical/protocol/capability/iOS changes",
+        "quoted reproducible regex commands, bounded 20x/race/full/sandbox and Mac Release reinstall",
+        "one report then stop for audit-013"
+      ],
+      "linked_commits": [
+        "git:ac3c268",
+        "git:c43fef6"
+      ],
+      "resolved_from_audit": 12,
+      "report": {
+        "received_at": "2026-08-21T04:18:00Z",
+        "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-013-question-lookup-terminal-gate.md",
+        "audited": true,
+        "audit_verdict": "verified",
+        "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-013-question-lookup-terminal-gate.md"
+      }
+    },
+    {
+      "number": 14,
+      "kind": "owner-acceptance-repair",
+      "title": "Owner UI reasoning hydrate repair",
+      "issued_at": "2026-08-21T04:35:09Z",
+      "status": "verified",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-014-owner-ui-reasoning-hydrate-repair.md",
+      "scope": "Mac opencode-web persisted reasoning history/hydrate and owning tests; iOS unchanged",
+      "constraints": [
+        "map E2b persisted reasoning through the existing rich-history and single Kernel hydrate path",
+        "do not fold reasoning into answer text, drop it, or add a second writer/fallback/protocol field",
+        "official Web skip applies to step-start/step-finish; no generic unknown-part permissiveness",
+        "direct-SSE reasoning remains blocked until a same-version live sample exists",
+        "full-path red-first tests and read-only preflight of the two failing owner shapes are required",
+        "Mac Release reinstall, owned-process cleanup, one report, then stop for audit-014"
+      ],
+      "resolved_from_owner_acceptance": true,
+      "roadmap_diff": {
+        "design_commit": "git:04d54e2",
+        "summary": "E2b read-only owner evidence proves populated reasoning already exists in 1.18.18 HTTP history. Canonical §6.3 now supports persisted reasoning hydrate while keeping direct-SSE reasoning separately blocked; audit-013 cannot constitute product completion after the owner UI failure.",
+        "checker": "python3 agent/opencode-web/testdata/official-1.18.18/harness/check_canonical_execution_design.py --self-test"
+      },
+      "linked_commits": [
+        "git:be6a1d7",
+        "git:eba2a94"
+      ],
+      "report": {
+        "received_at": "2026-08-21T04:58:21Z",
+        "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/report-014-owner-ui-reasoning-hydrate-repair.md",
+        "audited": true,
+        "audit_verdict": "verified",
+        "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-014-owner-ui-reasoning-hydrate-repair.md"
+      }
+    }
+  ],
+  "current_directive_number": 14,
+  "last_updated": "2026-08-21T11:32:03Z"
+}

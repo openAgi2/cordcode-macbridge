@@ -690,7 +690,7 @@ func (k *ProjectionKernel) finishHydrateLocked(session *projectionKernelSession)
 // OpenCode. Codex is file-based and excluded.
 func pathlessRichHistoryBackend(backendID string) bool {
 	switch backendID {
-	case "opencode", "grokbuild", "claude", "claudecode":
+	case "opencode", "grokbuild", "claude", "claudecode", "opencode-web":
 		return true
 	default:
 		return false
@@ -1026,6 +1026,7 @@ func (k *ProjectionKernel) CommitHydrateTransaction(
 	// physical row during hydrate (§3.2 hydrate routing), so the post-cut live events are
 	// authoritative same-owner rows, not uncorrelated overlap. CommitHydrateTransaction applies
 	// them after the baseline in their stamped order.
+	liveSnap, liveOK := k.reducer.Snapshot(backendID, sessionID)
 	baseline, ok := tx.reducer.Snapshot(backendID, sessionID)
 	if !ok {
 		baseline = SessionProjection{
@@ -1034,6 +1035,14 @@ func (k *ProjectionKernel) CommitHydrateTransaction(
 			Turns:     []TurnProjection{},
 		}
 	}
+	// Pathless full rebuild starts from an empty tx reducer (do NOT Restore live
+	// turns — live row-UUID vs builder turn ids duplicate). Events that landed
+	// on the main reducer before BeginHydrate are therefore not in pendingLive.
+	// Restore of a cold idle baseline must not clobber an already-live in-flight
+	// execution (real device 2026-08-20: user_message patches then sinceRev=0
+	// hydrate committed {"phase":"idle"}). Turns still come from the cold source;
+	// execution takes the in-flight max (running/requires_action > idle).
+	baseline = mergeHydrateBaselineWithLiveExecution(baseline, liveSnap, liveOK)
 	k.reducer.Restore(backendID, sessionID, baseline)
 	for _, msg := range tx.pendingLive {
 		k.reducer.Apply(msg)
@@ -1054,6 +1063,40 @@ func (k *ProjectionKernel) CommitHydrateTransaction(
 		PendingLive:  len(tx.pendingLive),
 		PendingPatch: patch,
 	}, nil
+}
+
+func executionInFlight(e ExecutionView) bool {
+	switch e.Phase {
+	case "running", "requires_action":
+		return true
+	default:
+		return false
+	}
+}
+
+// mergeHydrateBaselineWithLiveExecution keeps an already-live in-flight execution
+// when the cold baseline would otherwise Restore idle. Cold turns/content stay
+// the hydrate baseline; this is not a second writer — commit is still one Restore.
+func mergeHydrateBaselineWithLiveExecution(cold, live SessionProjection, liveOK bool) SessionProjection {
+	if !liveOK || !executionInFlight(live.Execution) || executionInFlight(cold.Execution) {
+		return cold
+	}
+	cold.Execution = live.Execution
+	active := live.Execution.ActiveTurnID
+	if active == "" {
+		return cold
+	}
+	for i := range cold.Turns {
+		if cold.Turns[i].TurnID != active {
+			continue
+		}
+		switch cold.Turns[i].Status {
+		case "completed", "aborted", "error":
+			cold.Turns[i].Status = "running"
+			cold.Turns[i].CompletedAt = 0
+		}
+	}
+	return cold
 }
 
 func (k *ProjectionKernel) HydrateSource(backendID, sessionID string) (ProjectionSourceDescriptor, bool) {

@@ -986,7 +986,9 @@ func (cs *claudeSession) respondPermissionContext(ctx context.Context, requestID
 	}
 
 	var permResponse map[string]any
-	if result.Behavior == "allow" {
+	// "always" (opencode-web official reply) is not a Claude concept; treat it
+	// as a one-time allow instead of falling through to the deny branch.
+	if result.Behavior == "allow" || result.Behavior == "always" {
 		updatedInput := result.UpdatedInput
 		if updatedInput == nil {
 			updatedInput = make(map[string]any)

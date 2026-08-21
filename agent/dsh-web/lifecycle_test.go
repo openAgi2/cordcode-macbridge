@@ -316,7 +316,9 @@ func TestResolveExternalProbeHit(t *testing.T) {
 type countingStarter struct {
 	ln     net.Listener
 	starts int
+	stops  int
 	fail   bool
+	pid    int // reported child pid; defaults to the test process (alive)
 }
 
 func (s *countingStarter) Start(ctx context.Context, port int) (int, error) {
@@ -330,24 +332,29 @@ func (s *countingStarter) Start(ctx context.Context, port int) (int, error) {
 	}
 	s.ln = ln
 	go func() { _ = http.Serve(ln, http.HandlerFunc(describeHandler)) }()
-	return 1, nil // fake pid; >0
+	if s.pid != 0 {
+		return s.pid, nil
+	}
+	return os.Getpid(), nil // "our child": alive from the resolver's viewpoint
 }
 
 func (s *countingStarter) Stop() error {
+	s.stops++
 	if s.ln != nil {
 		return s.ln.Close()
 	}
 	return nil
 }
 
-func TestResolveManagedSpawnPersistsStateAndReadopts(t *testing.T) {
-	// Probe misses (bogus port); managed starter serves host.describe on the
-	// resolver-chosen port; state file must be written 0600; a SECOND resolver
-	// sharing the data dir must re-adopt without spawning again.
+func TestResolveColdStartSpawnsOnSeatAndSeatIdentityAdopts(t *testing.T) {
+	// Canonical-seat model (08-19 design §3.1): cold start spawns ON the seat
+	// (never a private port range); a second resolver finds the same instance
+	// through the seat itself — port = identity, no state-file adoption.
+	seat := freeLoopbackSeat(t)
 	dataDir := t.TempDir()
 	starter := &countingStarter{}
 	r1 := NewResolver(
-		WithProbeURLs([]string{"http://127.0.0.1:1"}),
+		WithProbeURLs([]string{seat}),
 		WithDataDir(dataDir),
 		withManagedStarter(starter),
 	)
@@ -358,8 +365,8 @@ func TestResolveManagedSpawnPersistsStateAndReadopts(t *testing.T) {
 	if inst.Source != SourceManaged {
 		t.Fatalf("expected managed, got %s", inst.Source)
 	}
-	if inst.Port < managedPortMin || inst.Port > managedPortMax {
-		t.Fatalf("port %d outside managed range", inst.Port)
+	if inst.BaseURL != seat {
+		t.Fatalf("spawn must bind the seat %s, got %s", seat, inst.BaseURL)
 	}
 	if starter.starts != 1 {
 		t.Fatalf("starter ran %d times", starter.starts)
@@ -378,15 +385,15 @@ func TestResolveManagedSpawnPersistsStateAndReadopts(t *testing.T) {
 	if err := json.Unmarshal(b, &st); err != nil {
 		t.Fatal(err)
 	}
-	if st.Source != "managed" || st.Port != inst.Port || st.URL != inst.BaseURL {
+	if st.Source != "managed" || st.Port != inst.Port || st.URL != seat {
 		t.Fatalf("state mismatch: %+v vs %+v", st, inst)
 	}
 
-	// Second resolver (fresh process simulation) re-adopts the recorded
-	// instance: no further spawn.
+	// Second resolver (fresh process simulation): the seat is the identity —
+	// it adopts the still-live instance without spawning.
 	starter2 := &countingStarter{}
 	r2 := NewResolver(
-		WithProbeURLs([]string{"http://127.0.0.1:1"}),
+		WithProbeURLs([]string{seat}),
 		WithDataDir(dataDir),
 		withManagedStarter(starter2),
 	)
@@ -394,14 +401,14 @@ func TestResolveManagedSpawnPersistsStateAndReadopts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve(2): %v", err)
 	}
-	if inst2.Source != SourceManaged || inst2.Port != inst.Port {
-		t.Fatalf("readoption mismatch: %+v vs %+v", inst2, inst)
+	if inst2.Source != SourceExternal || inst2.BaseURL != seat {
+		t.Fatalf("seat-identity adoption mismatch: %+v", inst2)
 	}
 	if starter2.starts != 0 {
-		t.Fatalf("second resolver spawned instead of adopting (%d starts)", starter2.starts)
+		t.Fatalf("second resolver spawned instead of adopting via seat (%d starts)", starter2.starts)
 	}
 
-	// Cached fast path: resolving again does not re-probe externally.
+	// Cached fast path: resolving again does not re-spawn.
 	if _, err := r1.Resolve(context.Background()); err != nil {
 		t.Fatalf("cached Resolve: %v", err)
 	}
@@ -411,6 +418,19 @@ func TestResolveManagedSpawnPersistsStateAndReadopts(t *testing.T) {
 
 	_ = r1.Stop()
 	_ = r2.Stop()
+	_ = starter.Stop()
+}
+
+// freeLoopbackSeat reserves an OS-chosen loopback port and releases it so a
+// test's fake starter (or fake dsh server) can bind the seat for real.
+func freeLoopbackSeat(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	return fmt.Sprintf("http://127.0.0.1:%d", ln.Addr().(*net.TCPAddr).Port)
 }
 
 func TestResolveBothFailReturnsError(t *testing.T) {

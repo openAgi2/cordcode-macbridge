@@ -481,7 +481,8 @@ func (a *Agent) respondApproval(ctx context.Context, sessionID, requestID string
 		return err
 	}
 	outcome := "rejected"
-	if result.Behavior == "allow" {
+	// "always" (opencode-web official reply) has no dsh-web equivalent; degrade to allow-once.
+	if result.Behavior == "allow" || result.Behavior == "always" {
 		outcome = "allowed-once"
 	}
 	// The respond echoes the FRAME envelope's rpcId (the host's pending table

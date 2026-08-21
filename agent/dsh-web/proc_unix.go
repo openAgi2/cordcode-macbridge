@@ -3,6 +3,8 @@
 package dshweb
 
 import (
+	"strconv"
+	"strings"
 	"errors"
 	"os/exec"
 	"syscall"
@@ -51,4 +53,23 @@ func terminateProcessGroup(cmd *exec.Cmd) error {
 		}
 		time.Sleep(killPollInterval)
 	}
+}
+
+// processCommandLine returns the full command line of a pid via ps (unix).
+func processCommandLine(pid int) (string, bool) {
+	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=").Output()
+	if err != nil || len(out) == 0 {
+		return "", false
+	}
+	return strings.TrimSpace(string(out)), true
+}
+
+// processStartTime returns the pid's start time via ps (design S9 —
+// host.describe has no such field).
+func processStartTime(pid int) string {
+	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "lstart=").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }

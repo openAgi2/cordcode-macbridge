@@ -134,7 +134,14 @@ func (s *dshSession) Send(prompt string, images []core.ImageAttachment, files []
 		return fmt.Errorf("dsh-web: attachments are not supported in phase 1 (text-only)")
 	}
 	if s.closed.Load() {
-		return fmt.Errorf("dsh-web: session closed")
+		return fmt.Errorf("dsh web: session closed")
+	}
+	// Canonical-seat grace (design §12.1-2): a bound session's client bypasses
+	// Resolve, so surface the grace window explicitly — handlers map this to
+	// backend_unavailable, and the in-flight turn died with the instance (the
+	// terminal producer closes it; reconnect re-pulls history).
+	if inGrace, until := s.agent.resolver.GraceState(); inGrace {
+		return &ErrInstanceReconnecting{BaseURL: s.agent.resolver.seatURL(), Until: until}
 	}
 	req := sessionPromptRequest{
 		SessionID: s.CurrentSessionID(),
@@ -245,6 +252,18 @@ func (sb *sessionBindings) get(id string) (*dshSession, bool) {
 	defer sb.mu.RUnlock()
 	s, ok := sb.sessions[id]
 	return s, ok
+}
+
+// snapshot copies the live session objects for edge consumers (seat-loss
+// terminal producer, design §12 item 3).
+func (sb *sessionBindings) snapshot() []*dshSession {
+	sb.mu.RLock()
+	defer sb.mu.RUnlock()
+	out := make([]*dshSession, 0, len(sb.sessions))
+	for _, s := range sb.sessions {
+		out = append(out, s)
+	}
+	return out
 }
 
 // noteActiveSession records the most recently started session id — the

@@ -105,8 +105,14 @@ func (h *Handlers) handleGetSessionProjection(conn Connection, msg WireMessage, 
 	// A cold open inspects sources even when the Kernel is Ready. OpenCode uses
 	// this to heal its pathless HTTP baseline; Claude uses it to detect a new
 	// compact continuation or advanced segment cut.
+	// opencode-web belongs to the same pathless rich-history family as the
+	// source list below (§657 家族) — it was missing here, so a first pull on a
+	// live-reduced new session skipped the cold baseline commit and stayed
+	// errProjectionHydrating (sandbox E2E 2026-08-20: pulls returned
+	// projection.hydrating until the 15s budget expired, iOS rendered nothing).
 	forceColdInspection := params.SinceRev == 0 &&
-		(msg.BackendID == "opencode" || msg.BackendID == "grokbuild" ||
+		(msg.BackendID == "opencode" || msg.BackendID == "opencode-web" ||
+			msg.BackendID == "grokbuild" ||
 			msg.BackendID == "claude" || msg.BackendID == "claudecode" ||
 			msg.BackendID == "deepseek" || msg.BackendID == "dsh-web")
 	// Claude cold open starts the live file relay BEFORE the hydrate wait (aligned with
@@ -338,11 +344,12 @@ var errProjectionSessionNotFound = errors.New("live-only session has no kernel s
 // dsh web instance (dsh-web design §4.3.2).
 func backendSupportsProjectionHydrate(backendID string) bool {
 	switch backendID {
-	case "codex", "claude", "claudecode", "opencode", "grokbuild", "deepseek", "dsh-web":
+	case "codex", "claude", "claudecode", "opencode", "grokbuild", "deepseek", "dsh-web", "opencode-web":
 		// K5: Codex/Claude use JSONL transcript hydrate; OpenCode uses HTTP rich-history
 		// full rebuild (no transcript file / no file-prefix checkpoint); grokbuild and
 		// deepseek use the same pathless rich-history rebuild from local session logs;
-		// dsh-web rebuilds pathless from the official session.history API.
+		// dsh-web rebuilds pathless from the official session.history API; opencode-web
+		// rebuilds pathless from the official GET /session/:id/message API.
 		return true
 	default:
 		return false
@@ -487,7 +494,7 @@ func (h *Handlers) ensureProjectionHydrated(
 	}
 	// Pathless re-open: force full GetRichSessionHistory rebuild when already Ready.
 	sourceChanged := forceColdInspection && ready &&
-		(backendID == "opencode" || backendID == "grokbuild" || backendID == "deepseek" || backendID == "dsh-web") && source.Path == ""
+		(backendID == "opencode" || backendID == "grokbuild" || backendID == "deepseek" || backendID == "dsh-web" || backendID == "opencode-web") && source.Path == ""
 	// Hydrate owns the source cut. Hand it to any pre-hydrate hook (Claude cold-open starts
 	// its live file relay here so in-flight terminal events can feed the commit gate; the relay
 	// inherits the admission cut so its initial scan is disjoint from the cold-source baseline).
@@ -512,6 +519,21 @@ func (h *Handlers) ensureProjectionHydrated(
 			// goroutine has run its first tick. The detector requires the non-terminal tail turn
 			// to have produced content (§3.3 rule #2 / D6): a bare task_started shell stays
 			// hydrating instead of being exposed as a ready empty running turn.
+			sourceIsLive = true
+		}
+	}
+	if backendID == "opencode-web" {
+		// opencode-web's real session id exists only after the first Send creates
+		// it server-side (create_session returns a pending id), so the first
+		// projection pull always lands mid-turn. Without a live signal the commit
+		// gate blocks on the cold-armed in-flight turn's terminal event — an
+		// event only the cold source can observe, which itself lags the prompt
+		// queue — and the transaction holds every live frame in pendingLive
+		// until the turn ends, delivering the whole reply as one patch (real
+		// device 2026-08-20: reply landed in bulk seconds after send). Registry
+		// liveness is this backend's honest §3.1 signal: a session the bridge is
+		// running may have a turn in flight and commits as a running partial.
+		if _, live := h.getSession(sessionID); live {
 			sourceIsLive = true
 		}
 	}
@@ -571,6 +593,8 @@ func (h *Handlers) prepareProjectionHydrateSource(
 		agentName = "dsh"
 	case "dsh-web":
 		agentName = "dsh-web"
+	case "opencode-web":
+		agentName = "opencode-web"
 	default:
 		return ProjectionSourceDescriptor{}, errProjectionBackendNotMigrated
 	}
@@ -647,10 +671,11 @@ func (h *Handlers) prepareProjectionHydrateSource(
 	// OpenCode has no JSONL transcript path; grokbuild's chat_history.jsonl is a structured
 	// turn snapshot, not a raw transcript with stable byte cursors; deepseek's store logs
 	// are zstd-compressed (web artifacts); dsh-web's baseline is the official
-	// session.history API. All four cold-hydrate as a full rich-history rebuild keyed
+	// session.history API; opencode-web's baseline is the official message API. All
+	// pathless members cold-hydrate as a full rich-history rebuild keyed
 	// by session identity only (Cursor=0, Path empty). Checkpoint file-prefix validation
 	// does not apply; re-open always rebuilds from GetRichSessionHistory.
-	if backendID == "opencode" || backendID == "grokbuild" || backendID == "deepseek" || backendID == "dsh-web" {
+	if backendID == "opencode" || backendID == "grokbuild" || backendID == "deepseek" || backendID == "dsh-web" || backendID == "opencode-web" {
 		if _, ok := agent.(core.RichHistoryProvider); !ok {
 			if h.eventPublisher.ProjectionTurnCount(backendID, sessionID) > 0 {
 				return ProjectionSourceDescriptor{Identity: sessionID}, nil
@@ -1025,7 +1050,7 @@ func (h *Handlers) produceProjectionHydrateRange(
 	emit func(projectionHydrateEvent) bool,
 ) error {
 	if backendID != "opencode" && backendID != "grokbuild" && backendID != "deepseek" &&
-		backendID != "dsh-web" &&
+		backendID != "dsh-web" && backendID != "opencode-web" &&
 		backendID != "claude" && backendID != "claudecode" &&
 		(path == "" || startOffset == endOffset) {
 		return nil
@@ -1079,6 +1104,10 @@ func (h *Handlers) produceProjectionHydrateRange(
 		)
 	case "opencode":
 		return h.streamOpenCodeRichHistoryProjectionEvents(ctx, sessionID, emit)
+	case "opencode-web":
+		// NOT streamOpenCodeRichHistoryProjectionEvents — that helper resolves
+		// the agent by name "opencode"; opencode-web is its own driver.
+		return h.streamBackendRichHistoryProjectionEvents(ctx, "opencode-web", sessionID, emit)
 	case "grokbuild":
 		return h.streamBackendRichHistoryProjectionEvents(ctx, "grokbuild", sessionID, emit)
 	case "deepseek":
@@ -1264,6 +1293,18 @@ func (h *Handlers) streamBackendRichHistoryProjectionEvents(
 	if prober, ok := agent.(core.SessionActivityProbing); ok {
 		sealTrailingUnanswered = !prober.IsSessionActive(ctx, sessionID)
 	}
+	// Registry liveness overrides a remote idle verdict: a prompt this bridge
+	// just queued (opencode-web prompt_async) can race the serve's busy map —
+	// 1.18 answers a missing key as definitive idle — and sealing the
+	// just-sent turn commits a prematurely-terminal baseline (real device
+	// 2026-08-20: iOS input flipped completed mid-turn). A session this
+	// bridge holds live may still have a turn in flight; only dead sessions
+	// may seal.
+	if sealTrailingUnanswered {
+		if _, live := h.getSession(sessionID); live {
+			sealTrailingUnanswered = false
+		}
+	}
 	return streamRichHistoryProjectionEntries(ctx, entries, sealTrailingUnanswered, emit)
 }
 
@@ -1292,7 +1333,7 @@ func streamRichHistoryProjectionEntries(
 			delete(unanswered, currentTurnID)
 		}
 		emitted := 0
-		for _, ev := range openCodeRichHistoryEntryToProjectionEvents(entry, &currentTurnID) {
+		for _, ev := range openCodeRichHistoryEntryToProjectionEvents(entry, &currentTurnID, sealTrailingUnanswered) {
 			emitted++
 			if !emit(ev) {
 				return ctx.Err()
@@ -1329,6 +1370,7 @@ func streamRichHistoryProjectionEntries(
 func openCodeRichHistoryEntryToProjectionEvents(
 	entry core.RichHistoryEntry,
 	currentTurnID *string,
+	completeAssistantSnapshots bool,
 ) []projectionHydrateEvent {
 	role := strings.ToLower(strings.TrimSpace(entry.Role))
 	identity := strings.TrimSpace(entry.ID)
@@ -1460,12 +1502,19 @@ func openCodeRichHistoryEntryToProjectionEvents(
 		if hasPendingUserInput {
 			return out
 		}
-		// Other rich history rows are complete snapshots; seal the turn.
-		out = append(out, projectionHydrateEvent{
-			Event:    "turn_completed",
-			Data:     map[string]interface{}{"turnId": turnID, "done": true, "reason": "rich_history"},
-			TurnDone: true,
-		})
+		// Dead/idle sessions treat every assistant row as a complete snapshot.
+		// Live sessions still seal assistant rows that produced content (prior
+		// finished turns), but an empty in-flight assistant shell is not a
+		// completion — emitting turn_completed here commits execution.phase=
+		// idle over a turn the bridge is still running (real device 2026-08-20:
+		// 1 user row + empty assistant → {"phase":"idle"} snapshot mid-turn).
+		if completeAssistantSnapshots || emittedContent {
+			out = append(out, projectionHydrateEvent{
+				Event:    "turn_completed",
+				Data:     map[string]interface{}{"turnId": turnID, "done": true, "reason": "rich_history"},
+				TurnDone: true,
+			})
+		}
 		return out
 	case "system":
 		text := strings.TrimSpace(entry.Content)

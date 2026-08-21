@@ -152,6 +152,24 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 			"message": msg,
 		}), true
 
+	case core.EventRetryStatus:
+		// Transient provider-retry notice (opencode-web 1.18 session.status
+		// {type:"retry"}): the turn stays alive, so this must NOT settle any
+		// turn state — clients render it as a transient row (official web
+		// parity). Not in IsDurableMilestone (no mailbox persistence) and not
+		// in the syncV2 raw deny-list (control-plane raw delivery is the only
+		// carrier; the projection kernel ignores it).
+		payload := map[string]interface{}{
+			"message": ev.Content,
+		}
+		if ev.RetryAttempt > 0 {
+			payload["attempt"] = ev.RetryAttempt
+		}
+		if ev.RetryNext > 0 {
+			payload["next"] = ev.RetryNext
+		}
+		return "session_retry_status", eventData(ev, payload), false
+
 	case core.EventPermissionRequest:
 		payload := map[string]interface{}{
 			"requestId":    ev.RequestID,
@@ -161,6 +179,15 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 		}
 		if ev.Content != "" {
 			payload["reason"] = ev.Content
+		}
+		// Official permission.asked payload (opencode-web v1.18, live-pinned):
+		// clients render the category line + pattern rows from these and offer
+		// the official reject/always/once triple; absent on other backends.
+		if ev.PermissionKind != "" {
+			payload["permissionKind"] = ev.PermissionKind
+		}
+		if len(ev.PermissionPatterns) > 0 {
+			payload["patterns"] = ev.PermissionPatterns
 		}
 		return "permission_request", payload, false
 

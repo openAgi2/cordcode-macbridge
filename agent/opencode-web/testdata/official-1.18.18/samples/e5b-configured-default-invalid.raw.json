@@ -1,0 +1,1016 @@
+{
+  "meta": {
+    "scenario": "E5b",
+    "configMode": "invalid",
+    "opencodeVersion": "1.18.18",
+    "sourceCommit": "2cba7e227d"
+  },
+  "source": {
+    "ui": "packages/app/src/context/local.tsx:153 resolveDefaultModel(providers.defaultModel(), sync().data.config.model); packages/app/src/hooks/provider-catalog.ts:29-37 branch order; prompt-model-selection.ts:39-41 picker chain",
+    "server": "packages/opencode/src/server/routes/instance/httpapi/groups/config.ts:10-18 GET /config -> ConfigV1.Info (model optional string provider/model — core/src/v1/config/config.ts:74-75); provider.ts:1107-1109 defaultModelIDs"
+  },
+  "http": [
+    {
+      "method": "GET",
+      "path": "/config",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": {
+        "$schema": "https://opencode.ai/config.json",
+        "command": {},
+        "plugin": [],
+        "disabled_providers": [
+          "openai",
+          "anthropic",
+          "opencode",
+          "google",
+          "groq",
+          "openrouter",
+          "xai",
+          "mistral",
+          "deepseek",
+          "togetherai"
+        ],
+        "enabled_providers": [
+          "localmock"
+        ],
+        "model": "localmock/nonexistent",
+        "small_model": "localmock/echo",
+        "username": "jacklee",
+        "mode": {},
+        "agent": {},
+        "provider": {
+          "localmock": {
+            "name": "Local Mock",
+            "env": [],
+            "npm": "@ai-sdk/openai-compatible",
+            "options": {
+              "apiKey": "fixture-not-a-secret",
+              "baseURL": "http://127.0.0.1:4399/v1"
+            },
+            "models": {
+              "alpha": {
+                "name": "Alpha",
+                "limit": {
+                  "context": 32000,
+                  "output": 2048
+                }
+              },
+              "echo": {
+                "name": "Echo",
+                "attachment": true,
+                "tool_call": true,
+                "limit": {
+                  "context": 32000,
+                  "output": 2048
+                },
+                "variants": {
+                  "high": {
+                    "reasoning": {
+                      "effort": "high"
+                    }
+                  },
+                  "low": {
+                    "reasoning": {
+                      "effort": "low"
+                    }
+                  }
+                }
+              },
+              "zeta": {
+                "name": "Zeta",
+                "limit": {
+                  "context": 32000,
+                  "output": 2048
+                }
+              }
+            }
+          }
+        },
+        "formatter": false,
+        "lsp": false,
+        "permission": {
+          "read": "allow",
+          "edit": "deny",
+          "bash": "deny",
+          "external_directory": "ask",
+          "todowrite": "allow",
+          "question": "allow",
+          "webfetch": "deny",
+          "websearch": "deny"
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 17:03:35 GMT",
+        "content-length": "1021",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/provider",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": {
+        "all": [
+          {
+            "id": "localmock",
+            "name": "Local Mock",
+            "source": "config",
+            "env": [],
+            "options": {
+              "baseURL": "http://127.0.0.1:4399/v1",
+              "apiKey": "fixture-not-a-secret"
+            },
+            "models": {
+              "alpha": {
+                "id": "alpha",
+                "providerID": "localmock",
+                "api": {
+                  "id": "alpha",
+                  "url": "",
+                  "npm": "@ai-sdk/openai-compatible"
+                },
+                "name": "Alpha",
+                "family": "",
+                "capabilities": {
+                  "temperature": false,
+                  "reasoning": false,
+                  "attachment": false,
+                  "toolcall": true,
+                  "input": {
+                    "text": true,
+                    "audio": false,
+                    "image": false,
+                    "video": false,
+                    "pdf": false
+                  },
+                  "output": {
+                    "text": true,
+                    "audio": false,
+                    "image": false,
+                    "video": false,
+                    "pdf": false
+                  },
+                  "interleaved": false
+                },
+                "cost": {
+                  "input": 0,
+                  "output": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "limit": {
+                  "context": 32000,
+                  "output": 2048
+                },
+                "status": "active",
+                "options": {},
+                "headers": {},
+                "release_date": "",
+                "variants": {}
+              },
+              "echo": {
+                "id": "echo",
+                "providerID": "localmock",
+                "api": {
+                  "id": "echo",
+                  "url": "",
+                  "npm": "@ai-sdk/openai-compatible"
+                },
+                "name": "Echo",
+                "family": "",
+                "capabilities": {
+                  "temperature": false,
+                  "reasoning": false,
+                  "attachment": true,
+                  "toolcall": true,
+                  "input": {
+                    "text": true,
+                    "audio": false,
+                    "image": false,
+                    "video": false,
+                    "pdf": false
+                  },
+                  "output": {
+                    "text": true,
+                    "audio": false,
+                    "image": false,
+                    "video": false,
+                    "pdf": false
+                  },
+                  "interleaved": false
+                },
+                "cost": {
+                  "input": 0,
+                  "output": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "limit": {
+                  "context": 32000,
+                  "output": 2048
+                },
+                "status": "active",
+                "options": {},
+                "headers": {},
+                "release_date": "",
+                "variants": {
+                  "high": {
+                    "reasoning": {
+                      "effort": "high"
+                    }
+                  },
+                  "low": {
+                    "reasoning": {
+                      "effort": "low"
+                    }
+                  }
+                }
+              },
+              "zeta": {
+                "id": "zeta",
+                "providerID": "localmock",
+                "api": {
+                  "id": "zeta",
+                  "url": "",
+                  "npm": "@ai-sdk/openai-compatible"
+                },
+                "name": "Zeta",
+                "family": "",
+                "capabilities": {
+                  "temperature": false,
+                  "reasoning": false,
+                  "attachment": false,
+                  "toolcall": true,
+                  "input": {
+                    "text": true,
+                    "audio": false,
+                    "image": false,
+                    "video": false,
+                    "pdf": false
+                  },
+                  "output": {
+                    "text": true,
+                    "audio": false,
+                    "image": false,
+                    "video": false,
+                    "pdf": false
+                  },
+                  "interleaved": false
+                },
+                "cost": {
+                  "input": 0,
+                  "output": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "limit": {
+                  "context": 32000,
+                  "output": 2048
+                },
+                "status": "active",
+                "options": {},
+                "headers": {},
+                "release_date": "",
+                "variants": {}
+              }
+            }
+          }
+        ],
+        "default": {
+          "localmock": "zeta"
+        },
+        "connected": [
+          "localmock"
+        ]
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 17:03:36 GMT",
+        "content-length": "2021",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/session",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {
+        "title": "e5b-invalid"
+      },
+      "status": 200,
+      "response": {
+        "id": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+        "slug": "gentle-panda",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "e5b-invalid",
+        "version": "1.18.18",
+        "time": {
+          "created": 1787245416351,
+          "updated": 1787245416351
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 17:03:36 GMT",
+        "content-length": "373",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/session/ses_fdfdf3060ffeIAqBcQEXXSbQ3G/prompt_async",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": {
+        "messageID": "msg_5433d95b344ff77020f83a6448",
+        "agent": "build",
+        "parts": [
+          {
+            "type": "text",
+            "text": "E5b configured-default probe (invalid)"
+          }
+        ]
+      },
+      "status": 204,
+      "response": null,
+      "responseHeaders": {
+        "vary": "Origin",
+        "date": "Thu, 20 Aug 2026 17:03:36 GMT",
+        "content-length": "0"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": {
+        "id": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+        "slug": "gentle-panda",
+        "projectID": "global",
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "path": "private/tmp/ocw-gate-a-20260820/workspace",
+        "cost": 0,
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "title": "e5b-invalid",
+        "agent": "build",
+        "model": {
+          "id": "nonexistent",
+          "providerID": "localmock",
+          "variant": "default"
+        },
+        "version": "1.18.18",
+        "time": {
+          "created": 1787245416351,
+          "updated": 1787245416375
+        }
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 17:03:45 GMT",
+        "content-length": "463",
+        "vary": "Origin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/session/ses_fdfdf3060ffeIAqBcQEXXSbQ3G/message",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": [
+        {
+          "info": {
+            "id": "msg_5433d95b344ff77020f83a6448",
+            "sessionID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+            "role": "user",
+            "time": {
+              "created": 1787245416369
+            },
+            "agent": "build",
+            "model": {
+              "providerID": "localmock",
+              "modelID": "nonexistent"
+            }
+          },
+          "parts": [
+            {
+              "id": "prt_02020cfb4001Sks6jlIvdh4V0h",
+              "sessionID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+              "messageID": "msg_5433d95b344ff77020f83a6448",
+              "type": "text",
+              "text": "E5b configured-default probe (invalid)"
+            }
+          ]
+        }
+      ],
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 17:03:45 GMT",
+        "content-length": "419",
+        "vary": "Origin"
+      }
+    }
+  ],
+  "sse": [
+    {
+      "t": 1787245416.008718,
+      "event": {
+        "payload": {
+          "id": "evt_02020cbdd001lvQvqPJq09Ty1n",
+          "type": "server.connected",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 1787245416.042022,
+      "event": {
+        "payload": {
+          "id": "evt_02020ce47001VwmzUSg28Ebjys",
+          "type": "models-dev.refreshed",
+          "properties": {}
+        }
+      }
+    },
+    {
+      "t": 1787245416.3556428,
+      "event": {
+        "directory": "global",
+        "project": "global",
+        "payload": {
+          "type": "project.updated",
+          "properties": {
+            "id": "global",
+            "worktree": "/",
+            "sandboxes": [],
+            "time": {
+              "created": 1787245416035,
+              "updated": 1787245416035
+            }
+          },
+          "id": "evt_02020ce66001hogBfdn80eEfdB"
+        }
+      }
+    },
+    {
+      "t": 1787245416.382138,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020cf9f002aaRud16H76tRVZ",
+          "type": "session.created",
+          "properties": {
+            "sessionID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+            "info": {
+              "id": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+              "slug": "gentle-panda",
+              "version": "1.18.18",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "e5b-invalid",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787245416351,
+                "updated": 1787245416351
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245416.382991,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_02020cf9f002aaRud16H76tRVZ",
+            "type": "session.created.1",
+            "seq": 0,
+            "aggregateID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+            "data": {
+              "sessionID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+              "info": {
+                "id": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+                "slug": "gentle-panda",
+                "version": "1.18.18",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "e5b-invalid",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787245416351,
+                  "updated": 1787245416351
+                }
+              }
+            }
+          },
+          "id": "evt_02020cf9f002aaRud16H76tRVZ"
+        }
+      }
+    },
+    {
+      "t": 1787245416.387338,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020cfb1001q5uEQklA94aAXo",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+            "info": {
+              "id": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+              "slug": "gentle-panda",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "e5b-invalid",
+              "agent": "build",
+              "model": {
+                "id": "nonexistent",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787245416351,
+                "updated": 1787245416369
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245416.388364,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_02020cfb1001q5uEQklA94aAXo",
+            "type": "session.updated.1",
+            "seq": 1,
+            "aggregateID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+            "data": {
+              "sessionID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+              "info": {
+                "id": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+                "slug": "gentle-panda",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "e5b-invalid",
+                "agent": "build",
+                "model": {
+                  "id": "nonexistent",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787245416351,
+                  "updated": 1787245416369
+                }
+              }
+            }
+          },
+          "id": "evt_02020cfb1001q5uEQklA94aAXo"
+        }
+      }
+    },
+    {
+      "t": 1787245416.388847,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020cfb4001b8Jb02fs1sdAnG",
+          "type": "message.updated",
+          "properties": {
+            "sessionID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+            "info": {
+              "id": "msg_5433d95b344ff77020f83a6448",
+              "role": "user",
+              "sessionID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+              "time": {
+                "created": 1787245416369
+              },
+              "agent": "build",
+              "model": {
+                "providerID": "localmock",
+                "modelID": "nonexistent"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245416.389487,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_02020cfb4001b8Jb02fs1sdAnG",
+            "type": "message.updated.1",
+            "seq": 2,
+            "aggregateID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+            "data": {
+              "sessionID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+              "info": {
+                "id": "msg_5433d95b344ff77020f83a6448",
+                "role": "user",
+                "sessionID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+                "time": {
+                  "created": 1787245416369
+                },
+                "agent": "build",
+                "model": {
+                  "providerID": "localmock",
+                  "modelID": "nonexistent"
+                }
+              }
+            }
+          },
+          "id": "evt_02020cfb4001b8Jb02fs1sdAnG"
+        }
+      }
+    },
+    {
+      "t": 1787245416.389982,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020cfb60012vzYOYPloNAEG6",
+          "type": "message.part.updated",
+          "properties": {
+            "sessionID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+            "part": {
+              "type": "text",
+              "text": "E5b configured-default probe (invalid)",
+              "messageID": "msg_5433d95b344ff77020f83a6448",
+              "sessionID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+              "id": "prt_02020cfb4001Sks6jlIvdh4V0h"
+            },
+            "time": 1787245416374
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245416.390612,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_02020cfb60012vzYOYPloNAEG6",
+            "type": "message.part.updated.1",
+            "seq": 3,
+            "aggregateID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+            "data": {
+              "sessionID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+              "part": {
+                "type": "text",
+                "text": "E5b configured-default probe (invalid)",
+                "messageID": "msg_5433d95b344ff77020f83a6448",
+                "sessionID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+                "id": "prt_02020cfb4001Sks6jlIvdh4V0h"
+              },
+              "time": 1787245416374
+            }
+          },
+          "id": "evt_02020cfb60012vzYOYPloNAEG6"
+        }
+      }
+    },
+    {
+      "t": 1787245416.391419,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020cfb7001d5AjzRtVeXpVlT",
+          "type": "session.updated",
+          "properties": {
+            "sessionID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+            "info": {
+              "id": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+              "slug": "gentle-panda",
+              "projectID": "global",
+              "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+              "path": "private/tmp/ocw-gate-a-20260820/workspace",
+              "title": "e5b-invalid",
+              "agent": "build",
+              "model": {
+                "id": "nonexistent",
+                "providerID": "localmock",
+                "variant": "default"
+              },
+              "version": "1.18.18",
+              "cost": 0,
+              "tokens": {
+                "input": 0,
+                "output": 0,
+                "reasoning": 0,
+                "cache": {
+                  "read": 0,
+                  "write": 0
+                }
+              },
+              "time": {
+                "created": 1787245416351,
+                "updated": 1787245416375
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245416.392431,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "type": "sync",
+          "syncEvent": {
+            "id": "evt_02020cfb7001d5AjzRtVeXpVlT",
+            "type": "session.updated.1",
+            "seq": 4,
+            "aggregateID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+            "data": {
+              "sessionID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+              "info": {
+                "id": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+                "slug": "gentle-panda",
+                "projectID": "global",
+                "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+                "path": "private/tmp/ocw-gate-a-20260820/workspace",
+                "title": "e5b-invalid",
+                "agent": "build",
+                "model": {
+                  "id": "nonexistent",
+                  "providerID": "localmock",
+                  "variant": "default"
+                },
+                "version": "1.18.18",
+                "cost": 0,
+                "tokens": {
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "time": {
+                  "created": 1787245416351,
+                  "updated": 1787245416375
+                }
+              }
+            }
+          },
+          "id": "evt_02020cfb7001d5AjzRtVeXpVlT"
+        }
+      }
+    },
+    {
+      "t": 1787245425.40089,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020cfbb00157Wd7QYCouSvuN",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+            "status": {
+              "type": "busy"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245425.402465,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020cfbc001pmCQ90UDE00H2k",
+          "type": "session.error",
+          "properties": {
+            "sessionID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+            "error": {
+              "name": "UnknownError",
+              "data": {
+                "message": "Model not found: localmock/nonexistent."
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245425.403328,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020cfbc0025GYo8PNg5ppNke",
+          "type": "session.status",
+          "properties": {
+            "sessionID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+            "status": {
+              "type": "idle"
+            }
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245425.403935,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020cfbc003yknW6wwRBjH7Z6",
+          "type": "session.idle",
+          "properties": {
+            "sessionID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G"
+          }
+        }
+      }
+    },
+    {
+      "t": 1787245425.407934,
+      "event": {
+        "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+        "project": "global",
+        "payload": {
+          "id": "evt_02020cfbd001yW61frlEuKnngk",
+          "type": "session.error",
+          "properties": {
+            "sessionID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+            "error": {
+              "name": "UnknownError",
+              "data": {
+                "message": "ProviderModelNotFoundError: Model not found: localmock/nonexistent.\n    at <anonymous> (/$bunfs/root/chunk-dfdqwmkx.js:439:90316)\n    at SessionPrompt.getModel (/$bunfs/root/chunk-174j9rck.js:1096:11490)\n    at SessionPrompt.getModel (definition) (/$bunfs/root/chunk-174j9rck.js:1096:908)\n    at SessionPrompt.run (/$bunfs/root/chunk-174j9rck.js:1096:15306)\n    at SessionPrompt.run (definition) (/$bunfs/root/chunk-174j9rck.js:1096:10498)\n    at SessionRunState.ensureRunning (/$bunfs/root/chunk-174j9rck.js:1096:15275)\n    at SessionRunState.ensureRunning (definition) (/$bunfs/root/chunk-174j9rck.js:2:8179)\n    at SessionPrompt.loop (/$bunfs/root/chunk-174j9rck.js:1096:10220)\n    at SessionPrompt.loop (definition) (/$bunfs/root/chunk-174j9rck.js:1096:15211)\n    at SessionPrompt.prompt (/$bunfs/root/chunk-wrjsh8a1.js:4:13492)\n    at SessionPrompt.prompt (definition) (/$bunfs/root/chunk-174j9rck.js:1096:9838)"
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "reload": {
+    "sessionByID": {
+      "id": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+      "slug": "gentle-panda",
+      "projectID": "global",
+      "directory": "/private/tmp/ocw-gate-a-20260820/workspace",
+      "path": "private/tmp/ocw-gate-a-20260820/workspace",
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      },
+      "title": "e5b-invalid",
+      "agent": "build",
+      "model": {
+        "id": "nonexistent",
+        "providerID": "localmock",
+        "variant": "default"
+      },
+      "version": "1.18.18",
+      "time": {
+        "created": 1787245416351,
+        "updated": 1787245416375
+      }
+    },
+    "messages": [
+      {
+        "info": {
+          "id": "msg_5433d95b344ff77020f83a6448",
+          "sessionID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+          "role": "user",
+          "time": {
+            "created": 1787245416369
+          },
+          "agent": "build",
+          "model": {
+            "providerID": "localmock",
+            "modelID": "nonexistent"
+          }
+        },
+        "parts": [
+          {
+            "id": "prt_02020cfb4001Sks6jlIvdh4V0h",
+            "sessionID": "ses_fdfdf3060ffeIAqBcQEXXSbQ3G",
+            "messageID": "msg_5433d95b344ff77020f83a6448",
+            "type": "text",
+            "text": "E5b configured-default probe (invalid)"
+          }
+        ]
+      }
+    ]
+  },
+  "observation": {
+    "idleReached": true
+  }
+}

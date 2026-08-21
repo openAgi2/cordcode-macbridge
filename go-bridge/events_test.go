@@ -153,6 +153,86 @@ func TestMapAgentEventTextDelta(t *testing.T) {
 	}
 }
 
+// session_retry_status is control-plane only: it must not be a durable
+// milestone (no mailbox persistence) and must not settle turn state —
+// the opencode-web 1.18 retry backoff keeps the turn alive.
+func TestMapAgentEventRetryStatus(t *testing.T) {
+	name, data, done := mapAgentEvent(core.Event{
+		Type:         core.EventRetryStatus,
+		Content:      "当前订阅套餐暂未开放GLM-5.2-Highspeed权限",
+		SessionID:    "ses_1",
+		RetryAttempt: 3,
+		RetryNext:    1787109167553,
+	})
+	if name != "session_retry_status" {
+		t.Fatalf("event name = %q, want session_retry_status", name)
+	}
+	if done {
+		t.Fatal("retry status must not be a terminal (done=false)")
+	}
+	if IsDurableMilestone(name) {
+		t.Fatal("session_retry_status must not persist to the mailbox")
+	}
+	payload, ok := data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("payload type = %T, want map[string]interface{}", data)
+	}
+	if got := payload["message"]; got != "当前订阅套餐暂未开放GLM-5.2-Highspeed权限" {
+		t.Fatalf("message = %#v", got)
+	}
+	if got := payload["attempt"]; got != 3 {
+		t.Fatalf("attempt = %#v, want 3", got)
+	}
+	if got := payload["next"]; got != int64(1787109167553) {
+		t.Fatalf("next = %#v, want 1787109167553", got)
+	}
+}
+
+func TestMapAgentEventPermissionRequestOfficialPayload(t *testing.T) {
+	name, data, done := mapAgentEvent(core.Event{
+		Type:               core.EventPermissionRequest,
+		RequestID:          "per_9",
+		ToolName:           "external_directory",
+		ToolInput:          "/Users/jacklee/Projects/Chat/红楼梦故事.txt",
+		SessionID:          "ses_1",
+		PermissionKind:     "external_directory",
+		PermissionPatterns: []string{"/Users/jacklee/Projects/Chat/*"},
+	})
+	if name != "permission_request" {
+		t.Fatalf("event name = %q, want permission_request", name)
+	}
+	if done {
+		t.Fatal("permission_request must not be terminal")
+	}
+	payload, ok := data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("payload type = %T", data)
+	}
+	if got := payload["permissionKind"]; got != "external_directory" {
+		t.Fatalf("permissionKind = %#v, want external_directory", got)
+	}
+	patterns, ok := payload["patterns"].([]string)
+	if !ok || len(patterns) != 1 || patterns[0] != "/Users/jacklee/Projects/Chat/*" {
+		t.Fatalf("patterns = %#v", payload["patterns"])
+	}
+	// Thin payload (backends without official shape) must stay backward compatible.
+	name2, data2, _ := mapAgentEvent(core.Event{
+		Type:      core.EventPermissionRequest,
+		RequestID: "req_1",
+		ToolName:  "bash",
+	})
+	payload2 := data2.(map[string]interface{})
+	if _, present := payload2["permissionKind"]; present {
+		t.Fatal("permissionKind must be absent for non-official permission requests")
+	}
+	if _, present := payload2["patterns"]; present {
+		t.Fatal("patterns must be absent for non-official permission requests")
+	}
+	if name2 != "permission_request" {
+		t.Fatalf("legacy event name = %q", name2)
+	}
+}
+
 func TestMapAgentEventToolStarted(t *testing.T) {
 	name, data, done := mapAgentEvent(core.Event{
 		Type:         core.EventToolUse,

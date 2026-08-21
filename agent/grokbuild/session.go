@@ -451,7 +451,8 @@ func (s *grokSession) RespondPermission(requestID string, result core.Permission
 	}
 
 	var outcome outcomePayload
-	if result.Behavior == "allow" {
+	// "always" (opencode-web official reply) has no grok option; degrade to allow.
+	if result.Behavior == "allow" || result.Behavior == "always" {
 		optionID, found := selectPermissionOption(options, "allow")
 		if !found {
 			return fmt.Errorf("grokbuild: no allow option in permission request %s", requestID)

@@ -114,7 +114,10 @@ struct RuntimeConfig {
         port: Int = 8777,
         dataDir: String,
         logDir: String,
-        drivers: [String] = ["claude", "opencode", "codex", "grokbuild", "dsh-web"],
+        // 老 opencode backend 已从驱动列表移除（owner 2026-08-19：与 opencode-web
+        // 双订阅同一 serve，事件/投影双流互相覆盖，干扰 opencode-web 测试）。
+        // agent/opencode 代码保留未删，回滚只需把 "opencode" 加回此列表。
+        drivers: [String] = ["claude", "codex", "grokbuild", "dsh-web", "opencode-web"],
         workDir: String = FileManager.default.homeDirectoryForCurrentUser.path,
         codexBackend: String = "app_server",
         codexAppServerURL: String = "",
@@ -1083,6 +1086,10 @@ class RuntimeManager: ObservableObject {
         // descriptor 返回 not_configured，绝不隐式 dial 64667。
         if !config.opencodeURL.isEmpty {
             arguments += ["-opencode-url", config.opencodeURL]
+            // opencode-web 并存期是同一已解析 URL 的第二个客户端（设计
+            // docs/2026-08-18-opencode-web-backend-design.md §4.1.6）；凭据仍走
+            // env（OPENCODE_WEB_SERVER_*），不进 argv。
+            arguments += ["-opencode-web-url", config.opencodeURL]
         }
         if !config.remoteURL.isEmpty {
             arguments += ["-remote-url", config.remoteURL]
@@ -1116,6 +1123,18 @@ class RuntimeManager: ObservableObject {
             environment["OPENCODE_SERVER_PASSWORD"] = config.opencodePass
         } else {
             environment.removeValue(forKey: "OPENCODE_SERVER_PASSWORD")
+        }
+        // opencode-web 的凭据键与旧 backend 分开（go-bridge flag 的 env 默认
+        // 读 OPENCODE_WEB_SERVER_*；不与旧 backend 共用即满足键名隔离）。
+        if !config.opencodeUser.isEmpty {
+            environment["OPENCODE_WEB_SERVER_USERNAME"] = config.opencodeUser
+        } else {
+            environment.removeValue(forKey: "OPENCODE_WEB_SERVER_USERNAME")
+        }
+        if !config.opencodePass.isEmpty {
+            environment["OPENCODE_WEB_SERVER_PASSWORD"] = config.opencodePass
+        } else {
+            environment.removeValue(forKey: "OPENCODE_WEB_SERVER_PASSWORD")
         }
         if !config.relayEndpoint.isEmpty {
             environment["CORDCODE_RELAY_ENDPOINT"] = config.relayEndpoint

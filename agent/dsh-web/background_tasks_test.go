@@ -108,8 +108,22 @@ func TestGetBackgroundTaskDetailFoundAndMissing(t *testing.T) {
 	if detail.Task.TaskID != "sub-1111" || detail.Instruction != detail.Task.Title {
 		t.Fatalf("detail = %+v", detail)
 	}
-	if detail.CanCancel || detail.CanRetry {
-		t.Fatal("Phase 4 read-only: capabilities must be false")
+	// Phase 5 语义（commit 361e5c2）：running 的官方子会话可经 session.cancel
+	// 取消（CanCancel=true）；无 retry 面（CanRetry 恒 false，不提供假按钮）。
+	if !detail.CanCancel {
+		t.Fatal("Phase 5: running task must be cancellable (session.cancel surface)")
+	}
+	if detail.CanRetry {
+		t.Fatal("no retry surface exists; CanRetry must stay false")
+	}
+
+	// 终态任务不可取消。
+	doneDetail, err := a.GetBackgroundTaskDetail(context.Background(), "sub-2222")
+	if err != nil {
+		t.Fatalf("done detail: %v", err)
+	}
+	if doneDetail.CanCancel {
+		t.Fatal("completed task must not be cancellable (no fake buttons)")
 	}
 
 	if _, err := a.GetBackgroundTaskDetail(context.Background(), "no-such"); err == nil {

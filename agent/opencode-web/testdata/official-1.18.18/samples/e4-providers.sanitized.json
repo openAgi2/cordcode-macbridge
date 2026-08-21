@@ -1,0 +1,101 @@
+{
+  "meta": {
+    "scenario": "E4",
+    "opencodeVersion": "1.18.18",
+    "sourceCommit": "2cba7e227d"
+  },
+  "source": {
+    "ui": "packages/app/src/utils/server-compat.ts provider list consumption (model picker source)",
+    "server": "packages/opencode/src/server/routes/instance/httpapi/handlers/provider.ts:40-57 list -> {providers/all, default: Provider.defaultModelIDs, connected}; provider.ts:1107-1109 defaultModelIDs = alphabetically-first model per provider (NOT config model)"
+  },
+  "http": [
+    {
+      "method": "GET",
+      "path": "/provider",
+      "query": {},
+      "queryHasDirectory": true,
+      "body": null,
+      "status": 200,
+      "response": {
+        "all": [
+          {
+            "id": "localmock",
+            "name": "Local Mock",
+            "source": "config",
+            "env": [],
+            "options": {
+              "baseURL": "http://127.0.0.1:4399/v1",
+              "apiKey": "local-mock-key"
+            },
+            "models": {
+              "echo": {
+                "id": "echo",
+                "providerID": "localmock",
+                "api": {
+                  "id": "echo",
+                  "url": "",
+                  "npm": "@ai-sdk/openai-compatible"
+                },
+                "name": "Echo",
+                "family": "",
+                "capabilities": {
+                  "temperature": false,
+                  "reasoning": false,
+                  "attachment": true,
+                  "toolcall": true,
+                  "input": {
+                    "text": true,
+                    "audio": false,
+                    "image": false,
+                    "video": false,
+                    "pdf": false
+                  },
+                  "output": {
+                    "text": true,
+                    "audio": false,
+                    "image": false,
+                    "video": false,
+                    "pdf": false
+                  },
+                  "interleaved": false
+                },
+                "cost": {
+                  "input": 0,
+                  "output": 0,
+                  "cache": {
+                    "read": 0,
+                    "write": 0
+                  }
+                },
+                "limit": {
+                  "context": 32000,
+                  "output": 2048
+                },
+                "status": "active",
+                "options": {},
+                "headers": {},
+                "release_date": "",
+                "variants": {}
+              }
+            }
+          }
+        ],
+        "default": {
+          "localmock": "echo"
+        },
+        "connected": [
+          "localmock"
+        ]
+      },
+      "responseHeaders": {
+        "content-type": "application/json",
+        "date": "Thu, 20 Aug 2026 16:23:22 GMT",
+        "content-length": "790",
+        "vary": "Origin"
+      }
+    }
+  ],
+  "sse": [],
+  "reload": {},
+  "observation": {}
+}

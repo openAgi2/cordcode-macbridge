@@ -19,6 +19,7 @@ import (
 
 	"github.com/openAgi2/cordcode-macbridge/agent/claudecode"
 	"github.com/openAgi2/cordcode-macbridge/agent/dsh"
+	dshweb "github.com/openAgi2/cordcode-macbridge/agent/dsh-web"
 	"github.com/openAgi2/cordcode-macbridge/core"
 	"github.com/openAgi2/cordcode-macbridge/go-bridge/admission"
 	"github.com/openAgi2/cordcode-macbridge/go-bridge/filepool"
@@ -26,6 +27,24 @@ import (
 	"github.com/openAgi2/cordcode-macbridge/pinstore"
 	"github.com/openAgi2/cordcode-macbridge/transcriptindex"
 )
+
+// wireErrorWithReconnect maps the dsh-web seat-grace typed error to the
+// protocol code backend_unavailable (canonical-3080 design §3.2): the seat is
+// expected back, so the backend is NOT unconfigured — not_configured is
+// forbidden for this state. Every other error keeps the caller's current code
+// (send_failed / list_failed).
+func wireErrorWithReconnect(err error, fallbackCode string) *WireError {
+	code := fallbackCode
+	var re *dshweb.ErrInstanceReconnecting
+	if errors.As(err, &re) {
+		code = "backend_unavailable"
+	}
+	return &WireError{Code: code, Message: err.Error()}
+}
+
+func sendWireError(err error) *WireError { return wireErrorWithReconnect(err, "send_failed") }
+
+func listWireError(err error) *WireError { return wireErrorWithReconnect(err, "list_failed") }
 
 var hiddenDirectoryBases = map[string]bool{
 	"claudeprobe": true,
@@ -372,6 +391,13 @@ func (h *Handlers) replaceConnection(old, new Connection) {
 	h.eventPublisher.FlushLiveFrameBufferForDevice(new)
 }
 
+// observationResubscribeBackends is the authoritative re-attach list for
+// relay reconnects: every backend whose external turns a device may observe.
+// Package-level (not inline) so tests can assert membership (评审 M3 —— 名单
+// 提为可测常量). dsh-web's absence is a known pre-existing gap reported to
+// the owner separately (opencode-web design §4.1.5 M3).
+var observationResubscribeBackends = []string{"codex", "claudecode", "opencode", "grokbuild", "claude", "opencode-web"}
+
 // resubscribeObservationSessions re-attaches broadcaster session keys for every
 // backend/session still listed in the device's observation scope.
 func (h *Handlers) resubscribeObservationSessions(conn Connection) {
@@ -382,7 +408,7 @@ func (h *Handlers) resubscribeObservationSessions(conn Connection) {
 	if device == nil {
 		return
 	}
-	for _, backendID := range []string{"codex", "claudecode", "opencode", "grokbuild", "claude"} {
+	for _, backendID := range observationResubscribeBackends {
 		scope := h.observation.GetScope(device.DeviceID, backendID)
 		if scope == nil {
 			continue
@@ -1233,7 +1259,11 @@ func (h *Handlers) handleDeliveryRPC(conn Connection, msg WireMessage) bool {
 
 func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agent) {
 	if dir := extractDir(msg); dir != "" {
-		if agent.Name() == "opencode" || shouldSwitchWorkDirForMethod(msg.Method) {
+		// opencode/opencode-web 的四个读方法（list/get/messages/projection）被
+		// shouldSwitchWorkDirForMethod 排除在通用切目录外，但它们的每会话
+		// x-opencode-directory 头正是靠这里切 workDir——不加特判则读路径的
+		// 目录头恒为启动值，坑 5 原样复发（评审 M2-1）。
+		if agent.Name() == "opencode" || agent.Name() == "opencode-web" || shouldSwitchWorkDirForMethod(msg.Method) {
 			switchDir(agent, dir)
 		}
 	}
@@ -1377,25 +1407,7 @@ func (h *Handlers) handleListModels(conn Connection, msg WireMessage, agent core
 	ccModels := ms.AvailableModels(context.Background())
 	currentModel := ms.GetModel()
 
-	var models []map[string]interface{}
-	for _, m := range ccModels {
-		id, provider, providerID := modelProviderForAgent(agent, m.Name)
-		name := m.Desc
-		if name == "" {
-			name = id
-		}
-		models = append(models, map[string]interface{}{
-			"id":                        m.Name,
-			"name":                      name,
-			"provider":                  provider,
-			"providerId":                providerID,
-			"reasoning":                 false,
-			"limit":                     nil,
-			"supportedReasoningEfforts": nil,
-			"defaultReasoningEffort":    nil,
-			"isDefault":                 m.Name == currentModel,
-		})
-	}
+	models := modelItemsForWire(agent, ccModels, currentModel)
 
 	// Per-model effort truth first (roadmap §5.2 / audit N3): a runtime that
 	// declares per-model efforts (dsh-web llm.models) fills each model's own
@@ -1437,6 +1449,39 @@ func (h *Handlers) handleListModels(conn Connection, msg WireMessage, agent core
 		"source":            "catalog",
 		"generatedAtMillis": time.Now().UnixMilli(),
 	}, nil)
+}
+
+// modelItemsForWire builds the list_models wire items from the runtime
+// catalog. Canonical additive revision (§6.11.1): a model declaring live
+// variant keys exposes exactly them; absent/empty means no selector (the
+// key is omitted entirely, never an empty array).
+func modelItemsForWire(agent core.Agent, ccModels []core.ModelOption, currentModel string) []map[string]interface{} {
+	var models []map[string]interface{}
+	for _, m := range ccModels {
+		id, provider, providerID := modelProviderForAgent(agent, m.Name)
+		name := m.Desc
+		if name == "" {
+			name = id
+		}
+		item := map[string]interface{}{
+			"id":                        m.Name,
+			"name":                      name,
+			"provider":                  provider,
+			"providerId":                providerID,
+			"reasoning":                 false,
+			"limit":                     nil,
+			"supportedReasoningEfforts": nil,
+			"defaultReasoningEffort":    nil,
+			"isDefault":                 m.Name == currentModel,
+		}
+		if len(m.Variants) > 0 {
+			variants := make([]string, len(m.Variants))
+			copy(variants, m.Variants)
+			item["variants"] = variants
+		}
+		models = append(models, item)
+	}
+	return models
 }
 
 func (h *Handlers) handleListProviders(conn Connection, msg WireMessage, agent core.Agent) {
@@ -1527,7 +1572,7 @@ func (h *Handlers) handleListAgents(conn Connection, msg WireMessage, agent core
 			conn.SendResult(msg.RequestID, nil, &WireError{Code: "not_supported", Message: "backend does not support agent listing"})
 			return
 		}
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
+		conn.SendResult(msg.RequestID, nil, listWireError(err))
 		return
 	}
 
@@ -1592,7 +1637,7 @@ func (h *Handlers) handleListProjects(conn Connection, msg WireMessage, agent co
 		if lister, ok := agent.(core.ProjectLister); ok {
 			suggestions, err := lister.ListProjectSuggestions(h.ctx)
 			if err != nil {
-				conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
+				conn.SendResult(msg.RequestID, nil, listWireError(err))
 				return
 			}
 			projects := make([]map[string]interface{}, 0, len(suggestions))
@@ -2043,7 +2088,16 @@ func (h *Handlers) handleCreateSession(conn Connection, msg WireMessage, agent c
 		}
 	}
 
-	if agent.Name() == "codex" || agent.Name() == "claudecode" {
+	// Fast pending-id path: these backends materialize the server-side session
+	// lazily at first Send (codex/claude lazy create; opencode-web's
+	// ensureServerSession creates on the first prompt — the catalog model rides
+	// prompt_async, design §3.2). waitForSessionID below can NEVER observe an
+	// id pre-send for them: opencode-web paid a guaranteed 15s stall on every
+	// iOS new-session send (owner 现网 2026-08-20: create_session 01:06:18.160
+	// → send_message 01:06:33.492, user echo delayed ~15s). The pending→real
+	// rebind machinery (bridge live-target rebind + iOS projection.frame
+	// rebind) is the designed continuation.
+	if agent.Name() == "codex" || agent.Name() == "claudecode" || agent.Name() == "opencode-web" {
 		sessionID := fmt.Sprintf("pending-%s", generateShortID())
 		result := map[string]interface{}{
 			"id":    sessionID,
@@ -2254,7 +2308,7 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "invalid_params", Message: splitErr.Error()})
 		return
 	}
-	sendErr := sess.Send(params.Content, images, files)
+	sendErr := sendPrompt(sess, params.Content, images, files, promptOptionsFromParams(params))
 	if sendErr != nil {
 		var delivery *core.DeliveryError
 		if errors.As(sendErr, &delivery) && delivery.ReplayAllowed() {
@@ -2270,7 +2324,7 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 			sess, respawnErr = agent.StartSession(h.ctx, resumeID)
 			if respawnErr != nil {
 				slog.Error("go-bridge: handleSendMessage: respawn failed", "sessionID", params.SessionID, "error", respawnErr)
-				conn.SendResult(msg.RequestID, nil, &WireError{Code: "send_failed", Message: sendErr.Error()})
+				conn.SendResult(msg.RequestID, nil, sendWireError(sendErr))
 				return
 			}
 			// Double-checked put: a concurrent send may have won the slot.
@@ -2285,14 +2339,14 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 				h.mu.Unlock()
 			}
 			h.sessions.markRunning(params.SessionID)
-			if repairErr := sess.Send(params.Content, images, files); repairErr != nil {
+			if repairErr := sendPrompt(sess, params.Content, images, files, promptOptionsFromParams(params)); repairErr != nil {
 				// The repaired attempt fails visibly too — never a second
 				// replay. Evict only a dead session for the next request.
 				var repairDelivery *core.DeliveryError
 				if errors.As(repairErr, &repairDelivery) && !sess.Alive() {
 					h.evictSessionCAS(params.SessionID, sess)
 				}
-				conn.SendResult(msg.RequestID, nil, &WireError{Code: "send_failed", Message: repairErr.Error()})
+				conn.SendResult(msg.RequestID, nil, sendWireError(repairErr))
 				return
 			}
 		} else {
@@ -2305,11 +2359,22 @@ func (h *Handlers) handleSendMessage(conn Connection, msg WireMessage, agent cor
 			}
 			slog.Warn("go-bridge: handleSendMessage: send failed (no replay)",
 				"sessionID", params.SessionID, "backendID", msg.BackendID, "error", sendErr.Error())
-			conn.SendResult(msg.RequestID, nil, &WireError{Code: "send_failed", Message: sendErr.Error()})
+			conn.SendResult(msg.RequestID, nil, sendWireError(sendErr))
 			return
 		}
 	}
 	turnCommitted = true
+
+	// Pending→real rebind the moment the send resolved the real id. For
+	// opencode-web the lazy server session is created inside Send, so the real
+	// id is synchronously known here — before the first SSE event reaches the
+	// relay. Without the early rebind, a first-turn projection pull landing in
+	// this window finds no registry entry under the real id: both the
+	// cold-source seal override and the sourceIsLive sampling miss, and the
+	// pull can commit a prematurely idle/terminal baseline (real device
+	// 2026-08-20: ~1s completed flicker on the first turn). Idempotent with
+	// the relay's per-event rebind below.
+	h.rebindSessionIDIfResolved(params.SessionID, sess, "", msg.BackendID, extractDir(msg))
 
 	conn.SendResult(msg.RequestID, &ResultResponse{Ok: true}, nil)
 	// Claude projection content is UUID-keyed via file-relay; agent relay is control-plane
@@ -2367,9 +2432,15 @@ func retryableSessionError(code, message string) *WireError {
 }
 
 func applySendMessageRuntimeOptions(agent core.Agent, params SendMessageParams, dataDir string) {
-	if modelID := selectedModelParam(agent, params.Model); modelID != "" {
-		if ms, ok := agent.(core.ModelSwitcher); ok {
-			ms.SetModel(modelID)
+	// Session-scoped option senders (canonical §6.11.1 item 5) carry
+	// agent/model/variant per request inside SendWithOptions; applying the
+	// agent-global SetModel here would race concurrent sessions.
+	optionsSender := isPromptOptionsSender(agent)
+	if !optionsSender {
+		if modelID := selectedModelParam(agent, params.Model); modelID != "" {
+			if ms, ok := agent.(core.ModelSwitcher); ok {
+				ms.SetModel(modelID)
+			}
 		}
 	}
 	if params.ReasoningEffort != "" {
@@ -2385,6 +2456,40 @@ func applySendMessageRuntimeOptions(agent core.Agent, params SendMessageParams, 
 			}
 		}
 	}
+}
+
+// isPromptOptionsSender reports whether the agent's sessions carry per-request
+// prompt options (core.PromptOptionsSender) instead of agent-global state.
+func isPromptOptionsSender(agent core.Agent) bool {
+	po, ok := agent.(core.PromptOptionsAgent)
+	return ok && po.UsesPromptOptions()
+}
+
+// promptOptionsFromParams extracts the session-scoped turn options from the
+// send_message wire params. The model map keeps the wire shape
+// {id, providerId, variant?} verbatim; empty fields mean "backend resolves".
+func promptOptionsFromParams(params SendMessageParams) core.PromptOptions {
+	opts := core.PromptOptions{Agent: strings.TrimSpace(params.Agent)}
+	if params.Model == nil {
+		return opts
+	}
+	opts.ModelID, _ = params.Model["id"].(string)
+	if opts.ModelID == "" {
+		opts.ModelID, _ = params.Model["modelId"].(string)
+	}
+	opts.ProviderID, _ = params.Model["providerId"].(string)
+	opts.Variant, _ = params.Model["variant"].(string)
+	return opts
+}
+
+// sendPrompt dispatches one prompt to the session: option senders carry
+// agent/provider/model/variant atomically per request (canonical §6.11.1);
+// every other backend keeps the plain AgentSession.Send semantics.
+func sendPrompt(sess core.AgentSession, prompt string, images []core.ImageAttachment, files []core.FileAttachment, opts core.PromptOptions) error {
+	if sender, ok := sess.(core.PromptOptionsSender); ok {
+		return sender.SendWithOptions(prompt, images, files, opts)
+	}
+	return sess.Send(prompt, images, files)
 }
 
 func selectedModelParam(agent core.Agent, model map[string]interface{}) string {
@@ -2792,9 +2897,23 @@ func (h *Handlers) handleGetSession(conn Connection, msg WireMessage, agent core
 		}
 	}
 
+	// Prefer the backend's by-id read when available: a directory-scoped list
+	// scan misses sessions outside the current work dir, and archived sessions
+	// can be excluded from the default list while remaining individually
+	// readable (live 1.18.18) — the archive refetch must not race that filter.
+	// Any fetcher miss falls through to the list scan below (legacy behavior).
+	if fetcher, ok := agent.(core.SessionInfoFetcher); ok {
+		if info, err := fetcher.FetchSessionInfo(context.Background(), params.SessionID); err == nil && info != nil {
+			mergeSessionModelSelection(context.Background(), agent, info)
+			wireSession := sessionsToWire([]core.AgentSessionInfo{*info})[0]
+			conn.SendResult(msg.RequestID, h.sessionResultWithContextUsage(wireSession, agent, params.SessionID), nil)
+			return
+		}
+	}
+
 	sessions, err := agent.ListSessions(context.Background())
 	if err != nil {
-		conn.SendResult(msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
+		conn.SendResult(msg.RequestID, nil, listWireError(err))
 		return
 	}
 
@@ -2900,7 +3019,24 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 
 	// 非 canonical catalog backend 的 internal/test agents 仍可复用 generic list helper。
 	if agent.Name() != "claudecode" {
-		sessions, err := agent.ListSessions(ctx)
+		var sessions []core.AgentSessionInfo
+		var err error
+		requestedDir := extractDir(msg)
+		if requestedDir != "" {
+			if dl, ok := agent.(core.DirectorySessionLister); ok {
+				// opencode-web 1.18: GET /session is x-opencode-directory-scoped
+				// and its headerless global response is a stale bounded slice
+				// (2026-08-19 live probe: same-day sessions entirely missing).
+				// A directory-filtered request MUST be a scoped fetch — the old
+				// post-filter-of-global path could never see brand-new sessions
+				// in other directories (owner 真机: desktop 新建会话 iOS 不可见).
+				sessions, err = dl.ListSessionsInDirectory(ctx, requestedDir)
+			} else {
+				sessions, err = agent.ListSessions(ctx)
+			}
+		} else {
+			sessions, err = agent.ListSessions(ctx)
+		}
 		if err != nil {
 			// Live-only backends (e.g. dsh) return core.ErrNotSupported —
 			// surface not_supported instead of a misleading list_failed.
@@ -2908,17 +3044,24 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 				metrics.sendResult(conn, msg.RequestID, nil, &WireError{Code: "not_supported", Message: "backend does not support session listing"})
 				return
 			}
-			metrics.sendResult(conn, msg.RequestID, nil, &WireError{Code: "list_failed", Message: err.Error()})
+			metrics.sendResult(conn, msg.RequestID, nil, listWireError(err))
 			return
 		}
 		mappingStarted := time.Now()
 		wireSessions := sessionsToWire(sessions)
+		// Serve-registry backends (opencode-web) list per project worktree and
+		// can still carry rows whose directory died since the registry fetch —
+		// apply the same ghost-directory visibility rule the other catalogs
+		// use, so iOS never grows "已关闭目录" groups the Mac side no longer shows.
+		if _, scoped := agent.(core.DirectorySessionLister); scoped {
+			wireSessions = filterSessionsMissingWorkspace(wireSessions)
+		}
 		wireSessions = h.enrichSessionStatesForList(wireSessions, agent, h.getRunningMap(ctx, agent))
 		h.overlayPinnedState(wireSessions, agentBackendID(agent))
 		// iOS「查看更多」带 directory 深挖；dsh-web/deepseek 等 generic 列表一次全量，
 		// 必须在 bridge 侧按 directory 过滤，否则 sheet 会混进所有工作区。
-		if dir := extractDir(msg); dir != "" {
-			wireSessions = filterWireSessionsByDirectory(wireSessions, dir)
+		if requestedDir != "" {
+			wireSessions = filterWireSessionsByDirectory(wireSessions, requestedDir)
 		}
 		result := paginateSessionList(wireSessions, extractStringParam(msg, "cursor"), limit)
 		metrics.wireMapping += time.Since(mappingStarted)
@@ -4292,6 +4435,8 @@ func backendKindForAgent(agent core.Agent) string {
 		return "codex"
 	case "opencode":
 		return "opencode"
+	case "opencode-web":
+		return "opencode-web"
 	default:
 		return agent.Name()
 	}

@@ -7,6 +7,22 @@
 版本号对齐 MacBridge Release 构建的 `MARKETING_VERSION`（见 `MacBridge/project.yml`）。日期为协调世界时（UTC）。
 
 ## [Unreleased]
+- **修复：OpenCode Web 重启后历史没有思考过程和工具调用**：官方消息里工具 part 是 `tool: "read"|"edit"` 加旁边的 `state`，跟 Desktop 时间线同一份 `GET /session/:id/message`。冷拉却按旧 adapter 把 `tool` 当成嵌套对象，断言失败就把全部工具卡丢掉——直播走 SSE 所以当场看得到，杀 App 再进只剩正文。现按官方 ToolPart 映射（含文件路径、edit diff），思考块继续进历史；`todowrite` 仍只走任务卡、不进时间线。
+- **修复：OpenCode Web iPhone 会话列表目录远多于 Desktop**：官方首页侧栏不是 `GET /project`（那是服务端注册表，本机 31 行），而是 Desktop 本地打开的 tab（`Persist.global("server").projects[serveURL]`）。iPhone 误把注册表当首页，所以 17 个目录对不上 Desktop 的 6 个。现只列出该 4096 服务在 Desktop 里打开的 worktree，每个目录仍走官方 `session.list({directory, roots:true, limit})`。
+- **修复：OpenCode Web 工程注册表变更要等发现轮询才进 iPhone 列表**：官方 SSE 的 `project.updated` / `catalog.updated`（Desktop 打开目录时先发这两类，会话可能还没有）此前被忽略，目录缓存要等到下一轮 discovery 才失效。现与 `session.created/deleted` 一样立刻重扫 catalog。
+- **修复：OpenCode Web 空闲后再发消息整条实时流静默断裂（2026-08-21 真机）**：会话被空闲回收后，转发协程仍堵在从未关闭的事件通道上；下一次发送会再建一条 SSE，同时把旧会话再 Close 一次。第二次 Close 把刚建好的新流引用减到 0 当场拆掉——iPhone 只看到「正在生成」，Mac 上同一回合其实跑完了。现改为 Close 只释放一次，并在关闭时结束事件通道，空闲后再发能继续流式。
+- **修复：OpenCode Web 已开会话发消息卡死、正文只同步半截（2026-08-21 真机回归）**：推理模型每轮都输出思考内容，而 live 流把「已识别的 populated reasoning」按 E2 判定发成错误事件；go-bridge 对该错误一律按终态处理——回合被判失败、实时转发链路当场拆除。结果：Mac 端正常流式收尾，iPhone 端正文只到一半、会话一直卡「执行中」。现改为：live 思考内容保持不翻译（等有同版本 SSE 取证再决定是否上屏），但绝不再中断回合——正文完整流式、回合正常收口；历史里的思考块仍按 directive-014 正常显示。
+- **新功能：OpenCode Web 官方 parity 集中实施（指令 8 号批次）**：以 canonical 收敛设计为唯一权威，一次批次补齐 C2–C7：
+  - **发送即带官方选项**：`send_message` 现在逐请求携带 agent、`{providerId,id}` 模型和模型专属 `variant`（不是 reasoningEffort）。Mac 在请求内生成一次稳定 `messageID`；不在目录里的模型/agent/variant 在 POST 前就明确失败（零网络写入）。图片/文件附件按官方 file part（data URL）随 prompt 上送。
+  - **官方模型选择链**：current → agent 模型 → provider default（优先于 legacy `/config.model`，E5b 钉死）→ config → 最近会话模型 → 首个已连接 provider 默认/首模型；`list_models` 模型行带 live `variants` 键（E1b），选择器只在有键时出现。
+  - **单一全局 SSE 订阅**：每个 backend 实例只开一条 `/global/event` 连接，事件按 sessionID 路由到已打开会话；外部网页 turn（E3）经同一条流实时旁观；嵌套 `sync` 帧在归一化前精确跳过一次（官方 server-sdk 同规则）；断线重连后同一条订阅/路由继续，armed 回合经 `GET /session/status` 治愈，绝不伪造健康终态。
+  - **reasoning live 不翻译且不毒化回合**：E2 取证证明 1.18.18 无已验证的 populated reasoning 形状——live 流遇到即跳过（不折叠进正文、不上屏思考），历史 hydrate 按 E2b 正常映射；绝不再因它中断回合。
+  - **问答/待办/改名**：官方 `question.asked` 一次性翻译为结构化用户输入卡（回答走 `POST /question/:id/reply {answers:[[label]]}` / reject，首个服务器裁决生效）；`GET /session/:id/todo` 顺序/字段原样（不造 ID）；`PATCH /session/:id {title}` 改名收敛到返回元数据。
+  - **严格 project 解码**：`GET /project` 只接受已验证的裸数组形状，畸形行整体失败（不再静默裁剪）。
+  - **能力如实点亮**：todos、structured_user_input_v1、session_mutation、session_delete、permission_resolve、image/file 附件、external_turn_streaming 随实现广告；E2 reasoning 与 OD-3 十四项未来面保持不广告。
+- **新功能：OpenCode Web 会话归档与删除**：消息页「更多设置」里的「归档」「删除」此前报 `session archive not yet supported` / `backend does not support session deletion`（设计期两项挂起：delete 需活体钉死 HTTP、archive 列为二期）。现已在真 1.18.18 沙盒活体钉死官方路由并实现：归档 = `PATCH /session/{id}` body `{"time":{"archived":<epoch ms>}}`（200 回显 Session.Info）；删除 = `DELETE /session/{id}`（200 `true`，删后 404）。v2 同路由走 `/api` 前缀。列表行带 `time.archived` → `archivedAtMillis`，客户端隐藏已归档会话。
+- **修复：OpenCode Web 新会话首回合输入框闪「完成」**：冷投影把还在跑的第一回合写成 `execution.phase=idle`。已拆掉「历史 0 条就 200ms×6 再拉」的等待（违反 SSV2 护栏：空投影先等 history、用条数猜 ready）。活会话未收口 user turn 现在提交 `phase=running`；hydrate 不得用冷 idle 盖掉已经 live 的 running。pending→real 早 rebind 保留。
+- **新功能：OpenCode Web backend（并存入口）**：新增 `opencode-web` backend——官方 `opencode serve` 的纯 HTTP/SSE 客户端。iPhone 切换框出现「OpenCode Web」：列表/历史/占用/发送/模型/活跃态/审批全部来自官方 HTTP。占用圈按官方网页公式（最后一条 assistant ÷ 模型窗口）出数、发送必带目录内模型（坏模型明确失败不再 81ms 空转）、外部网页 turn 实时旁观、工具审批 Allow/Deny 走官方折叠（绝不自动批）。旧「OpenCode」入口原样并存供对照，成熟验收后再摘（详见 `docs/2026-08-18-opencode-web-backend-design完成情况.md`）。
 - **改进：Claude / Grok Build / OpenCode 上下文圈能出数**：点 ⭕ 不再三家都是「暂无」。Grok 读会话 `signals.json` 的占用和 500K 窗口；OpenCode 读 `GET /session` 的 tokens + 模型 `limit.context`；Claude 用最后一条 assistant 的 prompt occupancy（input+cache）加模型窗口（200K / 1M）。不是 DeepSeek 那种拆分表，只做已用/窗口。
 - **修复：长 DeepSeek Harness 会话 iPhone 打不开投影**：官方 history 按「消息数」分页，一条消息里可能有几千条 chunk。以前一页要 2000 条消息，Exec plan 那种会话单页 55MB，超过 32MB 读取上限后 JSON 被截断，iPhone 显示「无法加载会话投影」。现按官方默认每页 50 条消息，超大页会自动缩小再拉。
 - **改进：DeepSeek Harness 已开会话显示当前预设**：列表和打开会话时带上官方 `agentPreset`，iPhone 标题旁能看到「标准模式 / PTC模式 / 极简模式 / 创造模式」，和官方 web 标题左那枚芯片一样。

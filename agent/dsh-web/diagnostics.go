@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
@@ -56,26 +57,46 @@ func (a *Agent) RunDiagnostics(ctx context.Context, progress func(core.Diagnosti
 	return &core.DiagnosticReport{Results: results, OverallStatus: status}, nil
 }
 
-// diagInstance resolves (probe→managed) and reports the instance source.
+// diagInstance resolves and reports the instance source. NOTE: Resolve is a
+// MUTATING call (canonical-3080 design §0.1/S2 — it may spawn on the seat);
+// read-only discrimination is lsof + the state file + InstanceStatus.
 func (a *Agent) diagInstance(ctx context.Context) core.DiagnosticResult {
+	// Grace window first: the seat is down but expected back — report the
+	// window, not a hard failure.
+	if inGrace, until := a.resolver.GraceState(); inGrace {
+		return core.DiagnosticResult{
+			Status:  diagStatusFailed,
+			Message: fmt.Sprintf("座位 %s 失联，宽限重连中（至 %s）；期间 RPC 返回 backend_unavailable，不收养不补拉", a.resolver.seatURL(), until.Format(time.RFC3339)),
+		}
+	}
 	inst, err := a.resolver.Resolve(ctx)
 	if err != nil {
+		msg := fmt.Sprintf("未找到可用的 dsh web 实例：%v", err)
+		fix := "安装 dsh（npm i -g @deepseek-ai/dsh）；若权威端口被非 dsh 进程占用，请释放端口后重试"
+		if sp := a.resolver.LastSpawnErr(); sp != nil && strings.Contains(sp.Error(), "non-dsh") {
+			msg = fmt.Sprintf("权威端口被非 dsh 进程占用：%v", sp)
+		}
 		return core.DiagnosticResult{
 			Status:        diagStatusFailed,
-			Message:       fmt.Sprintf("未找到可用的 dsh web 实例：%v", err),
-			FixSuggestion: "安装 dsh（npm i -g @deepseek-ai/dsh）或自行启动 dsh web（默认 127.0.0.1:3080）",
+			Message:       msg,
+			FixSuggestion: fix,
 		}
 	}
 	switch inst.Source {
 	case SourceExternal:
 		return core.DiagnosticResult{
 			Status:  diagStatusPassed,
-			Message: fmt.Sprintf("复用用户自启实例 %s（探测命中，未另起进程）", inst.BaseURL),
+			Message: fmt.Sprintf("复用权威端口上的实例 %s（探测命中，未另起进程；谁拉起的即归谁，端口即身份）", inst.BaseURL),
 		}
 	case SourceManaged:
+		start := processStartTime(inst.PID)
+		extra := ""
+		if start != "" {
+			extra = fmt.Sprintf("，启动于 %s", start)
+		}
 		return core.DiagnosticResult{
 			Status:  diagStatusPassed,
-			Message: fmt.Sprintf("托管实例 %s（本 Bridge 拉起并保活，pid %d）", inst.BaseURL, inst.PID),
+			Message: fmt.Sprintf("托管实例 %s（本 Bridge 在权威端口拉起，pid %d%s；Link 退出不杀，下次经座位收养）", inst.BaseURL, inst.PID, extra),
 		}
 	}
 	return core.DiagnosticResult{Status: diagStatusFailed, Message: "unknown instance source"}

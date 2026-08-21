@@ -1,0 +1,80 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "localmock/alpha",
+  "small_model": "localmock/echo",
+  "enabled_providers": [
+    "localmock"
+  ],
+  "disabled_providers": [
+    "openai",
+    "anthropic",
+    "opencode",
+    "google",
+    "groq",
+    "openrouter",
+    "xai",
+    "mistral",
+    "deepseek",
+    "togetherai"
+  ],
+  "provider": {
+    "localmock": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Local Mock",
+      "env": [],
+      "options": {
+        "baseURL": "http://127.0.0.1:4399/v1",
+        "apiKey": "fixture-not-a-secret"
+      },
+      "models": {
+        "alpha": {
+          "name": "Alpha",
+          "limit": {
+            "context": 32000,
+            "output": 2048
+          }
+        },
+        "echo": {
+          "name": "Echo",
+          "tool_call": true,
+          "attachment": true,
+          "limit": {
+            "context": 32000,
+            "output": 2048
+          },
+          "variants": {
+            "high": {
+              "reasoning": {
+                "effort": "high"
+              }
+            },
+            "low": {
+              "reasoning": {
+                "effort": "low"
+              }
+            }
+          }
+        },
+        "zeta": {
+          "name": "Zeta",
+          "limit": {
+            "context": 32000,
+            "output": 2048
+          }
+        }
+      }
+    }
+  },
+  "permission": {
+    "todowrite": "allow",
+    "question": "allow",
+    "read": "allow",
+    "edit": "deny",
+    "bash": "deny",
+    "external_directory": "ask",
+    "webfetch": "deny",
+    "websearch": "deny"
+  },
+  "lsp": false,
+  "formatter": false
+}

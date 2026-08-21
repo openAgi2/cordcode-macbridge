@@ -1,0 +1,389 @@
+package opencodeweb
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
+)
+
+const testProviderCatalog = `{"all":[{"id":"zhipuai-coding-plan","name":"Zhipu","models":{"glm-4.7":{"id":"glm-4.7","name":"GLM 4.7","limit":{"context":128000}},"glm-4.6":{"id":"glm-4.6","limit":{"context":64000}}}}],"default":{"zhipuai-coding-plan":"glm-4.7"},"connected":["zhipuai-coding-plan"]}`
+
+func countRequests(s *recordingServe, method, pathPrefix string) []recordedRequest {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []recordedRequest
+	for _, req := range s.requests {
+		if req.Method == method && strings.HasPrefix(req.Path, pathPrefix) {
+			out = append(out, req)
+		}
+	}
+	return out
+}
+
+func newSendAgent(t *testing.T, responses map[string]string) (*Agent, *recordingServe) {
+	t.Helper()
+	if _, ok := responses["/provider"]; !ok {
+		responses["/provider"] = testProviderCatalog
+	}
+	return newDataAgent(t, responses, "/tmp/proj")
+}
+
+// withCreateRoute wires the POST /session create response on top of the
+// GET /session list route the probe needs.
+func withCreateRoute(s *recordingServe, createBody string) {
+	s.methodResponses = map[string]string{"POST /session": createBody}
+}
+
+func TestSendCarriesCatalogModelOnCreateAndPrompt(t *testing.T) {
+	agent, serve := newSendAgent(t, map[string]string{
+		"/session/ses_new/prompt_async": `{}`,
+	})
+	withCreateRoute(serve, `{"id":"ses_new"}`)
+	agent.SetModel("zhipuai-coding-plan/glm-4.7")
+
+	sess, err := agent.StartSession(context.Background(), "")
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	defer sess.Close()
+	if err := sess.Send("hello", nil, nil); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	creates := countRequests(serve, "POST", "/session")
+	var create, prompt recordedRequest
+	for _, req := range creates {
+		if strings.HasSuffix(req.Path, "/prompt_async") {
+			prompt = req
+		} else if req.Path == "/session" {
+			create = req
+		}
+	}
+	if create.Path == "" {
+		t.Fatal("create POST /session missing")
+	}
+	// Official v1 SDK shape (SessionCreateData, sandbox-verified on 1.18.18):
+	// directory rides the QUERY param; the body is optional {parentID,title} —
+	// no directory, no model (the first prompt_async binds the model).
+	if bd := strings.TrimSpace(create.Body); bd != "{}" {
+		t.Fatalf("create body must be the official optional-empty shape {}, got %s", bd)
+	}
+	if !strings.Contains(create.Query, "directory=") {
+		t.Fatalf("create must carry ?directory= query (official SDK shape), got %q", create.Query)
+	}
+	if create.Directory != "/tmp/proj" {
+		t.Fatalf("create must send x-opencode-directory header, got %q", create.Directory)
+	}
+	if prompt.Path == "" {
+		t.Fatal("prompt POST missing")
+	}
+	if !strings.Contains(prompt.Body, `"model"`) || !strings.Contains(prompt.Body, `"modelID":"glm-4.7"`) || !strings.Contains(prompt.Body, `"providerID":"zhipuai-coding-plan"`) {
+		t.Fatalf("prompt body must carry model {modelID, providerID} (live-pinned 1.18), got %s", prompt.Body)
+	}
+	if !strings.Contains(prompt.Body, `"parts"`) || !strings.Contains(prompt.Body, "hello") {
+		t.Fatalf("prompt body must carry text parts, got %s", prompt.Body)
+	}
+	if sess.CurrentSessionID() != "ses_new" {
+		t.Fatalf("session id = %q, want ses_new", sess.CurrentSessionID())
+	}
+}
+
+// Canonical §6.6: an unavailable EXPLICIT selection advances to the next
+// documented level (the official picker's find(valid)) — it is not a hard
+// error, and the send never carries an unvalidated model. The zero-POST
+// error belongs to "no connected valid model at any level".
+func TestSendInvalidExplicitModelAdvances(t *testing.T) {
+	agent, serve := newSendAgent(t, map[string]string{
+		"/provider": `{"all":[{"id":"other-provider","models":{"other-model":{"id":"other-model","limit":{"context":1000}}}}],"connected":["other-provider"],"default":{}}`,
+		"/session/ses_new/prompt_async": `{}`,
+	})
+	withCreateRoute(serve, `{"id":"ses_new"}`)
+	agent.SetModel("zhipuai-coding-plan/glm-9.9") // not in this catalog
+
+	sess, err := agent.StartSession(context.Background(), "")
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	defer sess.Close()
+	if err := sess.Send("hello", nil, nil); err != nil {
+		t.Fatalf("invalid explicit selection must advance, got %v", err)
+	}
+	prompts := countRequests(serve, "POST", "/session/ses_new/prompt_async")
+	if len(prompts) != 1 || !strings.Contains(prompts[0].Body, `"modelID":"other-model"`) {
+		t.Fatalf("send must carry the ADVANCED validated model other-model, got %+v", prompts)
+	}
+}
+
+// Official picker semantics (prompt-model-selection.ts): with no explicit
+// selection, the FIRST connected provider's default model rides the send —
+// never an invented id.
+func TestSendFallsBackToConnectedDefaultModel(t *testing.T) {
+	agent, serve := newSendAgent(t, map[string]string{
+		"/session/ses_new/prompt_async": `{}`,
+	})
+	withCreateRoute(serve, `{"id":"ses_new"}`)
+	// No SetModel, no resume id — fallback must pick zhipuai-coding-plan's
+	// default glm-4.7 from the envelope `default` map.
+	sess, err := agent.StartSession(context.Background(), "")
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	defer sess.Close()
+	if err := sess.Send("hello", nil, nil); err != nil {
+		t.Fatalf("Send via fallback: %v", err)
+	}
+	prompts := countRequests(serve, "POST", "/session/ses_new/prompt_async")
+	if len(prompts) != 1 || !strings.Contains(prompts[0].Body, `"modelID":"glm-4.7"`) {
+		t.Fatalf("fallback must send the connected default glm-4.7, got %+v", prompts)
+	}
+}
+
+// Empty connected catalog = nothing usable: honest error, zero POST.
+func TestSendFailsWhenConnectedCatalogEmpty(t *testing.T) {
+	agent, serve := newSendAgent(t, map[string]string{
+		"/provider": `{"all":[{"id":"other-provider","models":{"other-model":{"id":"other-model","limit":{"context":1000}}}}],"connected":[],"default":{}}`,
+	})
+	sess, err := agent.StartSession(context.Background(), "")
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	defer sess.Close()
+	err = sess.Send("hello", nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "no connected valid model") {
+		t.Fatalf("expected honest empty-catalog error, got %v", err)
+	}
+	if posts := countRequests(serve, "POST", "/session"); len(posts) != 0 {
+		t.Fatalf("empty-catalog send must yield ZERO POSTs, got %+v", posts)
+	}
+}
+
+// §6.4 verified transport shape: bridge attachments map onto official prompt
+// file parts {type:"file", mime, filename?, url:"data:<mime>;base64,<b64>"}.
+func TestSendAttachmentsMapToOfficialFileParts(t *testing.T) {
+	agent, serve := newSendAgent(t, map[string]string{
+		"/session/ses_new/prompt_async": `{}`,
+	})
+	withCreateRoute(serve, `{"id":"ses_new"}`)
+	agent.SetModel("zhipuai-coding-plan/glm-4.7")
+	sess, err := agent.StartSession(context.Background(), "")
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	defer sess.Close()
+	if err := sess.Send("see this",
+		[]core.ImageAttachment{{MimeType: "image/png", FileName: "shot.png", Data: []byte("imgbytes")}},
+		[]core.FileAttachment{{MimeType: "text/plain", FileName: "a.txt", Data: []byte("filebytes")}},
+	); err != nil {
+		t.Fatalf("attachments must map onto file parts: %v", err)
+	}
+	prompts := countRequests(serve, "POST", "/session/ses_new/prompt_async")
+	if len(prompts) != 1 {
+		t.Fatalf("exactly one prompt expected, got %+v", prompts)
+	}
+	body := prompts[0].Body
+	for _, want := range []string{
+		`"type":"file"`,
+		`"mime":"image/png"`,
+		`"filename":"shot.png"`,
+		`"url":"data:image/png;base64,`,
+		`"mime":"text/plain"`,
+		`"filename":"a.txt"`,
+		`"url":"data:text/plain;base64,`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("prompt body must carry official file part fragment %s, got %s", want, body)
+		}
+	}
+	// Attachments never fabricate message content on their own: an empty
+	// prompt with no attachments is a pre-POST error.
+	sess2, _ := agent.StartSession(context.Background(), "")
+	defer sess2.Close()
+	if err := sess2.Send("   ", nil, nil); err == nil || !strings.Contains(err.Error(), "prompt is empty") {
+		t.Fatalf("empty prompt must fail before POST, got %v", err)
+	}
+}
+
+// routeResponse is one canned route for the 4xx-passthrough mux.
+type routeResponse struct {
+	status int
+	body   string
+}
+
+// newMuxWithStatuses builds an authed mux with per-route status codes; keys
+// are "METHOD /path" (a bare "/path" matches any method); event streams hang
+// open like the real serve.
+func newMuxWithStatuses(t *testing.T, routes map[string]routeResponse) *http.ServeMux {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		_, pass, ok := r.BasicAuth()
+		if !ok || pass != "pw" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/event") {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+			return
+		}
+		route, found := routes[r.Method+" "+r.URL.Path]
+		if !found {
+			route, found = routes[r.URL.Path]
+		}
+		if !found {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(route.status)
+		_, _ = w.Write([]byte(route.body))
+	})
+	return mux
+}
+
+func agentAgainstMux(t *testing.T, mux *http.ServeMux) *Agent {
+	t.Helper()
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	a, err := New(map[string]any{
+		"opencode_web_url":  srv.URL,
+		"opencode_web_user": "u",
+		"opencode_web_pass": "pw",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return a.(*Agent)
+}
+
+func TestSendHTTPErrorSurfacesBody(t *testing.T) {
+	mux := newMuxWithStatuses(t, map[string]routeResponse{
+		"/global/health":                {200, `{"healthy":true}`},
+		"GET /session":                  {200, `[]`},
+		"POST /session":                 {200, `{"id":"ses_new"}`},
+		"/session/ses_new/prompt_async": {400, "model glm-9.9 not available on this provider"},
+		"/provider":                     {200, testProviderCatalog},
+		"/agent":                         {200, `[{"name":"build","mode":"primary","native":true,"description":"general coding"}]`},
+	})
+	agent := agentAgainstMux(t, mux)
+	agent.SetModel("zhipuai-coding-plan/glm-4.7")
+	sess, err := agent.StartSession(context.Background(), "")
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	defer sess.Close()
+	err = sess.Send("hello", nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 400") || !strings.Contains(err.Error(), "not available on this provider") {
+		t.Fatalf("4xx body must flow verbatim into the send error, got %v", err)
+	}
+}
+
+func TestResumeAdoptsServeSessionModel(t *testing.T) {
+	agent, serve := newSendAgent(t, map[string]string{
+		"/session/ses_x":              `{"id":"ses_x","directory":"/tmp/proj","model":{"id":"glm-4.7","providerID":"zhipuai-coding-plan"}}`,
+		"/session/ses_x/prompt_async": `{"messageID":"msg_1"}`,
+	})
+	sess, err := agent.StartSession(context.Background(), "ses_x")
+	if err != nil {
+		t.Fatalf("StartSession resume: %v", err)
+	}
+	defer sess.Close()
+	if err := sess.Send("continue", nil, nil); err != nil {
+		t.Fatalf("Send with adopted model: %v", err)
+	}
+	prompts := countRequests(serve, "POST", "/session/ses_x/prompt_async")
+	if len(prompts) != 1 || !strings.Contains(prompts[0].Body, `"modelID":"glm-4.7"`) {
+		t.Fatalf("resume send must carry the serve session model (modelID key), got %+v", prompts)
+	}
+	if prompts[0].Directory != "/tmp/proj" {
+		t.Fatalf("resume send must use the session's own directory header, got %q", prompts[0].Directory)
+	}
+	var creates []recordedRequest
+	for _, req := range countRequests(serve, "POST", "/session") {
+		if req.Path == "/session" {
+			creates = append(creates, req)
+		}
+	}
+	if len(creates) != 0 {
+		t.Fatalf("resume must not create a new session, got %+v", creates)
+	}
+}
+
+func TestCancelTurnByGeneration(t *testing.T) {
+	agent, serve := newSendAgent(t, map[string]string{
+		"/session/ses_x":       `{"id":"ses_x","model":{"id":"glm-4.7","providerID":"zhipuai-coding-plan"}}`,
+		"/session/ses_x/abort": `{}`,
+	})
+	sess, err := agent.StartSession(context.Background(), "ses_x")
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	defer sess.Close()
+	canceler, ok := sess.(core.TurnCanceler)
+	if !ok {
+		t.Fatal("session must implement core.TurnCanceler")
+	}
+	if err := canceler.CancelTurn(context.Background()); err != nil {
+		t.Fatalf("CancelTurn: %v", err)
+	}
+	aborts := countRequests(serve, "POST", "/session/ses_x/abort")
+	if len(aborts) != 1 {
+		t.Fatalf("1.18 cancel must POST /session/:id/abort, got %+v", aborts)
+	}
+	// Close must NOT abort (design §4.3.4: Close only tears the SSE binding).
+	before := len(countRequests(serve, "POST", "/session/ses_x/abort"))
+	_ = sess.Close()
+	after := len(countRequests(serve, "POST", "/session/ses_x/abort"))
+	if after != before {
+		t.Fatalf("Close must not abort the turn (%d → %d)", before, after)
+	}
+}
+
+func TestCancelTurnV2Interrupt(t *testing.T) {
+	// C1 quarantine: a v2-shaped endpoint must fail closed before any session,
+	// prompt, or interrupt exists. The former v2 /interrupt product path is
+	// deleted; only the verified 1.18.18 abort route remains (see
+	// TestCancelTurnByGeneration).
+	s := &recordingServe{responses: map[string]string{
+		"/api/health":                  `{"healthy":true}`,
+		"/api/session":                 `{"data":[]}`,
+		"/provider":                    testProviderCatalog,
+		"/session/ses_x":               `{"id":"ses_x","model":{"id":"glm-4.7","providerID":"zhipuai-coding-plan"}}`,
+		"/api/session/ses_x/interrupt": `{}`,
+	}}
+	base := s.start(t)
+	a, _ := New(map[string]any{
+		"opencode_web_url":  base,
+		"opencode_web_user": "u",
+		"opencode_web_pass": "pw",
+	})
+	agent := a.(*Agent)
+	if c, err := agent.clientFor(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported-generation (quarantined)") {
+		t.Fatalf("v2 must fail closed at clientFor (quarantined), got client=%v err=%v", c, err)
+	}
+	if _, err := agent.StartSession(context.Background(), "ses_x"); err == nil || !strings.Contains(err.Error(), "unsupported-generation (quarantined)") {
+		t.Fatalf("StartSession on v2 must fail closed, got err=%v", err)
+	}
+	// Zero writes: no prompt, no abort/interrupt, no model switch reached the
+	// wire — only the read-only probe GETs may exist.
+	if posts := countRequests(s, "POST", ""); len(posts) != 0 {
+		t.Fatalf("v2 quarantine must issue ZERO POSTs, got %+v", posts)
+	}
+}
+
+func TestQuestionsNotSupported(t *testing.T) {
+	agent, _ := newSendAgent(t, map[string]string{})
+	sess, _ := agent.StartSession(context.Background(), "ses_x")
+	defer sess.Close()
+	if err := sess.RespondQuestion("q1", []string{"a"}); err != core.ErrNotSupported {
+		t.Fatalf("RespondQuestion must be core.ErrNotSupported, got %v", err)
+	}
+	if err := sess.RejectQuestion("q1"); err != core.ErrNotSupported {
+		t.Fatalf("RejectQuestion must be core.ErrNotSupported, got %v", err)
+	}
+}

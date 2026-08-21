@@ -1,20 +1,31 @@
 package dshweb
 
-// Instance lifecycle: probe the user's own dsh web instance first, then fall
-// back to a managed loopback spawn (design §4.2). Both fail ⇒ the caller
-// reports backend not_configured honestly — nothing is installed on the
-// user's behalf (CordCode 初衷: 探测-复用-未启动).
+// Instance lifecycle under the canonical-seat model (design
+// docs/2026-08-19-dsh-web-canonical-3080-instance-design.md §3): the seat —
+// probeURLs[0], default 127.0.0.1:3080 — is the ONLY place a dsh web instance
+// may live. Resolution always targets the seat; if it answers, it is used no
+// matter who spawned it (port = identity). If the seat goes dark after this
+// process held an instance, a grace window (default 120s) holds: no adoption
+// of stray ports, no respawn — callers get the typed ErrInstanceReconnecting
+// so handlers can surface backend_unavailable (§3.2). Cold start (this
+// process never held an instance) spawns directly ON the seat (§3.1). The
+// 3096–3196 managed port range is retired.
 //
-// Managed spawn hard red lines (§4.4): loopback host only, NEVER
-// --trusted-host, NEVER 0.0.0.0. The managed instance is an unauthenticated
-// loopback service (dsh v1 has no auth layer — trust fence is not auth);
-// loopback binding + Bridge-fronting is the entire defense, mirrored in
-// diagnostics output.
+// Lock discipline (§3.3): mu guards only the cached decision fields
+// (resolved/lostAt/negUntil/spawning); probes and the spawn boot-wait run
+// outside the lock. Concurrent Resolve callers during an in-flight spawn get
+// an immediate typed error — never a 30s block. A ≤1s negative cache bounds
+// probe frequency while the seat is dark.
+//
+// Managed spawn red lines (design §4.4) are unchanged: loopback host only,
+// never --trusted-host, never 0.0.0.0.
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -32,27 +43,53 @@ import (
 type InstanceSource string
 
 const (
-	// SourceExternal: a dsh web instance the user started themselves (probe
-	// hit, e.g. their own `dsh web` on 3080).
+	// SourceExternal: an instance on the seat this backend did not spawn
+	// (the user's own `dsh web`, or a previous bridge's leftover).
 	SourceExternal InstanceSource = "external"
-	// SourceManaged: an instance this backend spawned and owns.
+	// SourceManaged: an instance this backend spawned and whose child still
+	// holds the seat (design §4 race 1: probe the endpoint, label by
+	// ownership — a dead child never lends its PID).
 	SourceManaged InstanceSource = "managed"
 )
 
 // DefaultProbePort is the dsh web default port (dsh web --help: default 3080).
 const DefaultProbePort = 3080
 
-// managedPortRange mirrors the opencode managed-local precedent: 3096..3196.
-const (
-	managedPortMin = 3096
-	managedPortMax = 3196
-)
+// gracePeriodDefault bounds the reconnect grace window after a live seat goes
+// dark (design §3.1: 90–120s covering the 60s watcher interval, a human
+// restart, and the 30s spawn budget). Package-level var so tests can shrink
+// it; per-resolver override via withGracePeriod.
+var gracePeriodDefault = 120 * time.Second
 
-// managedStateFile persists the managed instance's identity so a bridge
-// restart can re-adopt its own still-running instance instead of racing a
-// second spawn (opencode-managed-server.json precedent; no credentials — dsh
-// v1 has no auth surface to record, design S11).
+// seatProbeNegativeCache bounds how often a dark seat is re-probed (§3.3:
+// mux + host + RPC must not each pay the probe timeout on every call).
+const seatProbeNegativeCache = 1 * time.Second
+
+// spawnRetryBackoff spaces respawn attempts after a failed spawn (e.g. seat
+// held by a non-dsh service) so a spawn storm cannot form.
+const spawnRetryBackoff = 5 * time.Second
+
+// managedStateFile persists the managed instance's identity for diagnostics
+// and one-time legacy cleanup (§6). Resolution never reads it — the seat is
+// the identity (no adoption-by-state-file under the canonical-seat model).
 const managedStateFile = "dsh-web-managed-server.json"
+
+// ErrInstanceReconnecting is the typed grace/boot error callers may match
+// with errors.As (design §12.1-1). Handlers map it to the wire code
+// backend_unavailable; it must NEVER surface as not_configured (§3.2).
+type ErrInstanceReconnecting struct {
+	BaseURL  string
+	Until    time.Time // grace deadline; zero when Starting
+	Starting bool      // true = spawn/boot in flight (not a lost instance)
+}
+
+func (e *ErrInstanceReconnecting) Error() string {
+	if e.Starting {
+		return fmt.Sprintf("dsh web instance starting on %s", e.BaseURL)
+	}
+	return fmt.Sprintf("dsh web instance reconnecting on %s (grace until %s)",
+		e.BaseURL, e.Until.Format(time.RFC3339))
+}
 
 // ResolvedInstance is one live dsh web instance this backend talks to.
 type ResolvedInstance struct {
@@ -93,8 +130,8 @@ const probeTimeout = 2 * time.Second
 // generous rather than flapping between spawn attempts).
 const managedBootTimeout = 30 * time.Second
 
-// managedStarter abstracts "get a dsh web server running on this port" so the
-// resolver logic is unit-testable without a real dsh install.
+// managedStarter abstracts "get a dsh web server running on this port" so
+// the resolver logic is unit-testable without a real dsh install.
 type managedStarter interface {
 	// Start brings a server up on 127.0.0.1:port. It returns the server PID.
 	Start(ctx context.Context, port int) (int, error)
@@ -159,25 +196,37 @@ func (s *execManagedStarter) Stop() error {
 	return err
 }
 
-// Resolver owns the probe→managed lifecycle for one dshweb Agent.
+// Resolver owns the seat lifecycle for one dshweb Agent.
 type Resolver struct {
-	probeURLs []string // external candidates, probe order
-	binPath   string   // dsh executable for managed spawn ("" = LookPath)
-	extraArgs []string
-	dshHome   string // optional DSH_HOME override (sandbox experiments/tests)
-	dataDir   string // managed-state persistence dir ("" = no persistence)
+	probeURLs   []string      // seat = probeURLs[0] (authoritative, design §9)
+	binPath     string        // dsh executable for spawn ("" = LookPath)
+	extraArgs   []string
+	dshHome     string        // optional DSH_HOME override (sandbox experiments/tests)
+	dataDir     string        // state persistence dir ("" = no persistence)
+	gracePeriod time.Duration // zero = gracePeriodDefault
 
 	httpClient   *http.Client
 	managedStart managedStarter
 
-	mu       sync.Mutex
-	resolved *ResolvedInstance
+	// mu guards exactly these fields (§3.3); all network I/O and spawn
+	// waits happen outside the lock.
+	mu           sync.Mutex
+	resolved     *ResolvedInstance // nil while dark
+	everResolved bool              // this process once held a live seat
+	lostAt       time.Time         // seat went dark at; zero while healthy
+	lossSeq      uint64            // alive→dark edges seen (terminal-producer idempotence key)
+	negUntil     time.Time         // dark-seat probe cache / spawn backoff
+	spawning     bool              // a spawn/boot-wait is in flight
+	spawnErr     error             // last spawn failure (diagnostics)
+	onLost       func()            // fired once per alive→dark transition
 }
 
 // ResolverOption configures a Resolver.
 type ResolverOption func(*Resolver)
 
-// WithProbeURLs overrides the external probe list (default: 127.0.0.1:3080).
+// WithProbeURLs overrides the probe list. The FIRST entry is the seat: it is
+// probed, and it is the only port a spawn may bind (design §9 — a configured
+// URL makes that port the identity, replacing the 3080 default).
 func WithProbeURLs(urls []string) ResolverOption {
 	return func(r *Resolver) {
 		r.probeURLs = normalizeBaseURLs(urls)
@@ -193,8 +242,8 @@ func WithManagedBinary(bin string, extraArgs []string) ResolverOption {
 }
 
 // WithDSHHome overrides DSH_HOME for the managed spawn (sandbox experiments).
-// Production leaves it empty: the managed instance must share the user's real
-// ~/.dsh store (design §5).
+// Production leaves it empty: the spawned instance must share the user's real
+// ~/.dsh store.
 func WithDSHHome(home string) ResolverOption {
 	return func(r *Resolver) { r.dshHome = home }
 }
@@ -214,6 +263,11 @@ func withManagedStarter(starter managedStarter) ResolverOption {
 	return func(r *Resolver) { r.managedStart = starter }
 }
 
+// withGracePeriod overrides the grace window (tests only).
+func withGracePeriod(d time.Duration) ResolverOption {
+	return func(r *Resolver) { r.gracePeriod = d }
+}
+
 func normalizeBaseURLs(urls []string) []string {
 	out := make([]string, 0, len(urls))
 	for _, u := range urls {
@@ -225,8 +279,8 @@ func normalizeBaseURLs(urls []string) []string {
 	return out
 }
 
-// NewResolver builds the lifecycle manager. Default probe list is the single
-// dsh web default port on loopback.
+// NewResolver builds the seat lifecycle manager. Default seat is the dsh web
+// default port on loopback.
 func NewResolver(opts ...ResolverOption) *Resolver {
 	r := &Resolver{
 		probeURLs: []string{fmt.Sprintf("http://127.0.0.1:%d", DefaultProbePort)},
@@ -250,10 +304,63 @@ func NewResolver(opts ...ResolverOption) *Resolver {
 	if r.httpClient == nil {
 		r.httpClient = &http.Client{}
 	}
+	if r.gracePeriod <= 0 {
+		r.gracePeriod = gracePeriodDefault
+	}
 	return r
 }
 
-// managedState is the persisted managed-instance record (0600).
+// seatURL returns the authoritative seat endpoint.
+func (r *Resolver) seatURL() string {
+	if len(r.probeURLs) > 0 && r.probeURLs[0] != "" {
+		return r.probeURLs[0]
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d", DefaultProbePort)
+}
+
+// SetLostCallback registers a callback fired (outside the resolver lock) once
+// per alive→dark transition of a held instance. The turn-terminal producer
+// (design §12 item 3) hangs off this.
+func (r *Resolver) SetLostCallback(fn func()) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onLost = fn
+}
+
+// LossSeq returns how many alive→dark edges this resolver has seen. The
+// terminal producer keys its idempotence on this sequence: however many
+// probe/stream paths notice one death, each edge fires at most once per
+// session, and a later edge re-arms (design §12.1-3).
+func (r *Resolver) LossSeq() uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lossSeq
+}
+
+// GraceState reports whether the seat is inside a reconnect grace window and
+// the window's deadline. InstanceStatus consults this to keep the backend
+// visible during grace (§3.2 / §12.1-4: never let Current()==nil fall through
+// the detector as not_configured while a rebind is still expected).
+func (r *Resolver) GraceState() (bool, time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.graceStateLocked()
+}
+
+func (r *Resolver) graceStateLocked() (bool, time.Time) {
+	if r.lostAt.IsZero() {
+		return false, time.Time{}
+	}
+	until := r.lostAt.Add(r.gracePeriod)
+	if !time.Now().Before(until) {
+		return false, time.Time{}
+	}
+	return true, until
+}
+
+// managedState is the persisted managed-instance record (0600). Write-only
+// under the seat model: diagnostics and one-time legacy cleanup read it;
+// resolution never does.
 type managedState struct {
 	Version   int    `json:"version"`
 	Source    string `json:"source"` // "managed"
@@ -272,28 +379,9 @@ func (r *Resolver) statePath() string {
 	return r.dataDir + string(os.PathSeparator) + managedStateFile
 }
 
-func (r *Resolver) loadState() *managedState {
-	path := r.statePath()
-	if path == "" {
-		return nil
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	var st managedState
-	if err := json.Unmarshal(b, &st); err != nil {
-		return nil
-	}
-	if st.Source != string(SourceManaged) || st.Port <= 0 || st.URL == "" {
-		return nil
-	}
-	return &st
-}
-
 func (r *Resolver) saveState(inst *ResolvedInstance) {
 	path := r.statePath()
-	if path == "" {
+	if path == "" || inst.Source != SourceManaged {
 		return
 	}
 	st := managedState{
@@ -310,94 +398,194 @@ func (r *Resolver) saveState(inst *ResolvedInstance) {
 	}
 	_ = os.MkdirAll(r.dataDir, 0o700)
 	// 0600: port + pid of a loopback service (opencode-managed-server.json
-	// precedent; no credentials exist to protect — S11 — but keep the mode).
+	// precedent; no credentials exist to protect — but keep the mode).
 	_ = core.AtomicWriteFile(path, b, 0o600)
 }
 
-// Resolve returns the live instance, probing external first, then re-adopting
-// or spawning managed. The decision is cached: while the cached instance
-// answers, it is returned as-is (§4.2 S3 — probing happens once per instance
-// lifetime, not per call; a user starting 3080 later coexists with managed).
+// Resolve returns the live instance on the seat. Decision matrix (§3.1):
+//
+//   - seat answers             → use it (label by ownership, never a dead PID)
+//   - held instance died       → grace window: typed error, no adopt, no spawn
+//   - grace elapsed, or cold
+//     start (never held)       → spawn ON the seat (single-flight, outside mu)
+//
+// All probes and boot-waits run outside mu; concurrent callers never block on
+// a spawn — they receive the typed starting/reconnecting error (§3.3).
 func (r *Resolver) Resolve(ctx context.Context) (*ResolvedInstance, error) {
+	seat := r.seatURL()
+
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	// 1. Cached instance still answering?
 	if r.resolved != nil {
-		if _, err := probeInstance(ctx, r.httpClient, r.resolved.BaseURL); err == nil {
-			return r.resolved, nil
+		inst := r.resolved
+		if time.Now().Before(r.negUntil) {
+			// A probe failed <1s ago and the loss transition already ran;
+			// defensively re-run it for the resolved!=nil case.
+			err := r.loseSeatLocked(inst)
+			r.mu.Unlock()
+			return nil, err
 		}
-		// Cached instance died: fall through and re-resolve. A managed
-		// instance that died is NOT silently respawned here unless the whole
-		// managed path below succeeds again (which it will attempt).
-		r.resolved = nil
-	}
-
-	// 2. External probe (user's own instance wins).
-	for _, base := range r.probeURLs {
-		if _, err := probeInstance(ctx, r.httpClient, base); err == nil {
-			r.resolved = &ResolvedInstance{
-				BaseURL: base,
-				Port:    portOf(base),
-				Source:  SourceExternal,
-			}
-			return r.resolved, nil
+		r.mu.Unlock()
+		if _, err := probeInstance(ctx, r.httpClient, inst.BaseURL); err == nil {
+			return inst, nil
 		}
-	}
-
-	// 3. Managed: re-adopt a previously spawned instance first (bridge restart
-	// without the child dying), then spawn fresh.
-	if st := r.loadState(); st != nil {
-		if _, err := probeInstance(ctx, r.httpClient, st.URL); err == nil {
-			r.resolved = &ResolvedInstance{
-				BaseURL: st.URL,
-				Port:    st.Port,
-				Source:  SourceManaged,
-				PID:     st.PID,
-			}
-			// Adopted but no longer owned by this process's starter; Stop()
-			// therefore does not kill it. That is correct: an adopted instance
-			// outlived one bridge restart already and the next spawn will
-			// simply target a different port if this one stays alive.
-			return r.resolved, nil
-		}
-	}
-
-	inst, err := r.spawnManaged(ctx)
-	if err != nil {
+		r.mu.Lock()
+		err := r.loseSeatLocked(inst)
+		r.mu.Unlock()
 		return nil, err
 	}
+
+	if inGrace, until := r.graceStateLocked(); inGrace {
+		if time.Now().Before(r.negUntil) {
+			err := &ErrInstanceReconnecting{BaseURL: seat, Until: until}
+			r.mu.Unlock()
+			return nil, err
+		}
+		r.mu.Unlock()
+		if _, err := probeInstance(ctx, r.httpClient, seat); err == nil {
+			inst := &ResolvedInstance{BaseURL: seat, Port: portOf(seat), Source: SourceExternal}
+			r.mu.Lock()
+			r.rebindLocked(inst, "grace-rebind")
+			r.mu.Unlock()
+			return inst, nil
+		}
+		r.mu.Lock()
+		r.negUntil = time.Now().Add(seatProbeNegativeCache)
+		err := &ErrInstanceReconnecting{BaseURL: seat, Until: r.lostAt.Add(r.gracePeriod)}
+		r.mu.Unlock()
+		return nil, err
+	}
+
+	// Dark seat, no grace: cold start or grace expiry. Probe the seat first —
+	// a fresh process must adopt an already-running instance (external) before
+	// ever spawning (§3.1 step 1; the 08-16 "external wins" invariant).
+	if time.Now().Before(r.negUntil) {
+		err := &ErrInstanceReconnecting{BaseURL: seat, Starting: true}
+		r.mu.Unlock()
+		return nil, err
+	}
+	r.mu.Unlock()
+	if _, err := probeInstance(ctx, r.httpClient, seat); err == nil {
+		inst := &ResolvedInstance{BaseURL: seat, Port: portOf(seat), Source: SourceExternal}
+		r.mu.Lock()
+		r.rebindLocked(inst, "seat-adopt")
+		r.mu.Unlock()
+		return inst, nil
+	}
+	r.mu.Lock()
+	if r.spawning {
+		err := &ErrInstanceReconnecting{BaseURL: seat, Starting: true}
+		r.mu.Unlock()
+		return nil, err
+	}
+	r.spawning = true
+	everResolved := r.everResolved
+	r.mu.Unlock()
+
+	inst, err := r.spawnOnSeat(ctx, seat)
+
+	r.mu.Lock()
+	r.spawning = false
+	if err != nil {
+		r.spawnErr = err
+		r.negUntil = time.Now().Add(spawnRetryBackoff)
+		r.mu.Unlock()
+		return nil, err
+	}
+	r.spawnErr = nil
 	r.resolved = inst
-	r.saveState(inst)
+	r.everResolved = true
+	r.lostAt = time.Time{}
+	r.mu.Unlock()
+	slog.Info("dsh-web: instance resolved",
+		"source", string(inst.Source), "baseURL", inst.BaseURL,
+		"reason", spawnReason(everResolved))
 	return inst, nil
 }
 
-// spawnManaged picks a free port in the managed range, starts the server, and
-// waits for its first successful host.describe.
-func (r *Resolver) spawnManaged(ctx context.Context) (*ResolvedInstance, error) {
-	port, err := pickFreePort(managedPortMin, managedPortMax, r.preferredPort())
-	if err != nil {
-		return nil, fmt.Errorf("dshweb: managed port range %d..%d unavailable: %w", managedPortMin, managedPortMax, err)
+// loseSeatLocked transitions a held instance into the grace window and
+// returns the typed error for the current caller.
+func (r *Resolver) loseSeatLocked(prev *ResolvedInstance) error {
+	r.resolved = nil
+	r.lostAt = time.Now()
+	r.lossSeq++
+	r.negUntil = r.lostAt.Add(seatProbeNegativeCache)
+	until := r.lostAt.Add(r.gracePeriod)
+	slog.Info("dsh-web: seat lost — grace window, no adopt/no spawn",
+		"baseURL", prev.BaseURL, "source", string(prev.Source),
+		"graceUntil", until.Format(time.RFC3339))
+	if cb := r.onLost; cb != nil {
+		go cb()
+	}
+	return &ErrInstanceReconnecting{BaseURL: prev.BaseURL, Until: until}
+}
+
+// rebindLocked restores a live instance (recovered after grace).
+func (r *Resolver) rebindLocked(inst *ResolvedInstance, reason string) {
+	r.resolved = inst
+	r.everResolved = true
+	r.lostAt = time.Time{}
+	r.negUntil = time.Time{}
+	slog.Info("dsh-web: instance resolved", "source", string(inst.Source),
+		"baseURL", inst.BaseURL, "reason", reason)
+}
+
+func spawnReason(everResolved bool) string {
+	if everResolved {
+		return "grace-expiry-respawn"
+	}
+	return "cold-start"
+}
+
+// spawnOnSeat spawns a managed instance bound to the seat and waits for its
+// first host.describe — probing the ENDPOINT (not the child), so a user
+// instance winning the bind race is adopted as external with no dead PID
+// (design §4 race 1 / M5).
+func (r *Resolver) spawnOnSeat(ctx context.Context, seat string) (*ResolvedInstance, error) {
+	port := portOf(seat)
+	if port <= 0 {
+		return nil, fmt.Errorf("dshweb: seat URL %q has no port to bind", seat)
 	}
 	pid, err := r.managedStart.Start(ctx, port)
 	if err != nil {
 		return nil, err
 	}
-	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 
 	deadline := time.Now().Add(managedBootTimeout)
 	for {
-		if _, err := probeInstance(ctx, r.httpClient, baseURL); err == nil {
-			return &ResolvedInstance{
-				BaseURL: baseURL,
-				Port:    port,
-				Source:  SourceManaged,
-				PID:     pid,
-			}, nil
+		if _, err := probeInstance(ctx, r.httpClient, seat); err == nil {
+			inst := &ResolvedInstance{BaseURL: seat, Port: port, Source: SourceExternal}
+			if processIsAlive(pid) {
+				// Our child still holds the port → we own it.
+				inst.Source = SourceManaged
+				inst.PID = pid
+			}
+			r.saveState(inst)
+			if inst.Source == SourceManaged {
+				slog.Info("dsh-web: spawned managed instance on seat",
+					"baseURL", seat, "pid", pid)
+			} else {
+				slog.Info("dsh-web: seat won by external instance during spawn",
+					"baseURL", seat, "deadChildPid", pid)
+			}
+			return inst, nil
 		}
 		if time.Now().After(deadline) {
 			_ = r.managedStart.Stop()
-			return nil, fmt.Errorf("dshweb: managed dsh web on 127.0.0.1:%d did not answer host.describe within %s", port, managedBootTimeout)
+			return nil, fmt.Errorf("dshweb: managed dsh web on %s did not answer host.describe within %s", seat, managedBootTimeout)
+		}
+		if !processIsAlive(pid) {
+			// Child died (likely EADDRINUSE against a squatter). Give the
+			// seat one more beat for a real instance, then fail honestly.
+			time.Sleep(300 * time.Millisecond)
+			if _, err := probeInstance(ctx, r.httpClient, seat); err == nil {
+				inst := &ResolvedInstance{BaseURL: seat, Port: port, Source: SourceExternal}
+				r.saveState(inst)
+				slog.Info("dsh-web: seat won by external instance; spawn child exited",
+					"baseURL", seat, "deadChildPid", pid)
+				return inst, nil
+			}
+			_ = r.managedStart.Stop()
+			return nil, fmt.Errorf("dshweb: managed dsh web child (pid %d) exited; port %d is not answering (occupied by a non-dsh service or spawn failed)", pid, port)
 		}
 		select {
 		case <-ctx.Done():
@@ -408,33 +596,34 @@ func (r *Resolver) spawnManaged(ctx context.Context) (*ResolvedInstance, error) 
 	}
 }
 
-// preferredPort reuses the persisted managed port when it is still free,
-// keeping the instance address stable across restarts.
-func (r *Resolver) preferredPort() int {
-	if st := r.loadState(); st != nil {
-		return st.Port
-	}
-	return 0
-}
-
-// Current returns the cached instance without probing (nil if unresolved).
+// Current returns the cached instance without probing (nil while dark/in
+// grace — InstanceStatus consults GraceState first, §12.1-4).
 func (r *Resolver) Current() *ResolvedInstance {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.resolved
 }
 
-// Stop kills the managed instance this process spawned (bridge shutdown).
-// External and adopted instances are left running — they are not ours.
+// LastSpawnErr exposes the most recent spawn failure for diagnostics.
+func (r *Resolver) LastSpawnErr() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.spawnErr
+}
+
+// dataDirOf exposes the persistence dir for the one-time legacy cleanup.
+func (r *Resolver) dataDirOf() string { return r.dataDir }
+
+// Stop disconnects the resolver WITHOUT killing the instance this process
+// spawned (design §5 "不杀 + 下次收养"): the seat keeps serving the user's
+// browser across bridge restarts, and the next run adopts it via the seat.
+// Failed-spawn children are reaped inside spawnOnSeat itself; this path never
+// owns a live child's death anymore. Tests clean up via their own starters.
 func (r *Resolver) Stop() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	var stopErr error
-	if r.managedStart != nil {
-		stopErr = r.managedStart.Stop()
-	}
 	r.resolved = nil
-	return stopErr
+	return nil
 }
 
 func portOf(baseURL string) int {
@@ -446,35 +635,13 @@ func portOf(baseURL string) int {
 	return 0
 }
 
-// pickFreePort scans the inclusive range for a port that can be bound on
-// loopback right now (preferred tried first when in range and free).
-func pickFreePort(min, max, preferred int) (int, error) {
-	try := func(port int) (int, bool) {
-		ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
-		if err != nil {
-			return 0, false
-		}
-		_ = ln.Close()
-		return port, true
-	}
-	if preferred >= min && preferred <= max {
-		if p, ok := try(preferred); ok {
-			return p, nil
-		}
-	}
-	for p := min; p <= max; p++ {
-		if port, ok := try(p); ok {
-			return port, nil
-		}
-	}
-	return 0, fmt.Errorf("no free port")
-}
-
-// processIsAlive reports whether pid exists (signal 0). Unexported helper for
-// adoption checks; errors conservative (no pid ⇒ not alive).
+// processIsAlive reports whether pid exists (signal 0; EPERM still means the
+// process exists). The spawn path uses it to label ownership and never record
+// a dead PID (design M5).
 func processIsAlive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
-	return syscall.Kill(pid, 0) == nil
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
 }

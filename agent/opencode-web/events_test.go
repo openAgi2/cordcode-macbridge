@@ -1,0 +1,1036 @@
+package opencodeweb
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
+)
+
+// sseFrame wraps one server event in the /global/event payload envelope.
+func sseFrame(eventType string, properties map[string]any) string {
+	payload := map[string]any{"type": eventType, "properties": properties}
+	b, _ := json.Marshal(map[string]any{"payload": payload})
+	return string(b)
+}
+
+func driveFrames(sub *sseSubscriber, frames ...string) {
+	for _, frame := range frames {
+		sub.handleRawEvent(frame)
+	}
+}
+
+func drain(sub *sseSubscriber) []core.Event {
+	var out []core.Event
+	for {
+		select {
+		case ev := <-sub.events:
+			out = append(out, ev)
+		default:
+			return out
+		}
+	}
+}
+
+func newDrivenSubscriber(t *testing.T, a *Agent) *sseSubscriber {
+	t.Helper()
+	// A real generation-pinned client: session.updated's usage recompute
+	// fetches messages through it.
+	c, err := a.clientFor(context.Background())
+	if err != nil {
+		t.Fatalf("clientFor: %v", err)
+	}
+	return newSSESubscriber(context.Background(), a, c)
+}
+
+func TestSSEUserMessageArmsTurnOnce(t *testing.T) {
+	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
+	sub := newDrivenSubscriber(t, agent)
+
+	driveFrames(sub,
+		sseFrame("message.updated", map[string]any{
+			"info":      map[string]any{"id": "msg_u1", "role": "user"},
+			"sessionID": "ses_1",
+		}),
+		sseFrame("message.part.delta", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_u1", "field": "text", "delta": "hello ",
+		}),
+		sseFrame("message.part.delta", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_u1", "field": "text", "delta": "world",
+		}),
+	)
+
+	events := drain(sub)
+	var userMsgs, turnsStarted []core.Event
+	for _, ev := range events {
+		switch ev.Type {
+		case core.EventUserMessage:
+			userMsgs = append(userMsgs, ev)
+		case core.EventTurnStarted:
+			turnsStarted = append(turnsStarted, ev)
+		}
+	}
+	if len(userMsgs) == 0 || userMsgs[len(userMsgs)-1].Content != "hello world" {
+		t.Fatalf("user prompt must accumulate deltas, got %+v", userMsgs)
+	}
+	if len(turnsStarted) != 1 {
+		t.Fatalf("turn_started must fire exactly once per message id, got %d", len(turnsStarted))
+	}
+}
+
+func TestSSEAssistantDeltasAndSnapshots(t *testing.T) {
+	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
+	sub := newDrivenSubscriber(t, agent)
+
+	driveFrames(sub,
+		sseFrame("message.updated", map[string]any{
+			"info":      map[string]any{"id": "msg_u1", "role": "user"},
+			"sessionID": "ses_1",
+		}),
+		sseFrame("message.updated", map[string]any{
+			"info":      map[string]any{"id": "msg_a1", "role": "assistant"},
+			"sessionID": "ses_1",
+		}),
+		sseFrame("message.part.delta", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_1", "field": "text", "delta": "Hel",
+		}),
+		sseFrame("message.part.delta", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_1", "field": "text", "delta": "lo",
+		}),
+		sseFrame("message.part.delta", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_2", "field": "reasoning", "delta": "hmm",
+		}),
+		sseFrame("message.part.updated", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1",
+			"part": map[string]any{"id": "pt_1", "type": "text", "text": "Hello"},
+		}),
+		sseFrame("message.part.updated", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1",
+			"part": map[string]any{"id": "pt_1", "type": "text", "text": "Everything changed"},
+		}),
+	)
+
+	events := drain(sub)
+	var texts, replaces, thinking, errorsOut []core.Event
+	for _, ev := range events {
+		switch ev.Type {
+		case core.EventText:
+			texts = append(texts, ev)
+		case core.EventTextReplace:
+			replaces = append(replaces, ev)
+		case core.EventThinking:
+			thinking = append(thinking, ev)
+		case core.EventError:
+			errorsOut = append(errorsOut, ev)
+		}
+	}
+	if len(texts) != 2 || texts[0].Content != "Hel" || texts[1].Content != "lo" {
+		t.Fatalf("text deltas = %+v", texts)
+	}
+	// §6.3/E2: populated reasoning stays untranslated — no thinking stream,
+	// and (2026-08-21) NO EventError: the wire "error" event settles the turn
+	// as failed and tears relayEvents down mid-stream.
+	if len(thinking) != 0 {
+		t.Fatalf("reasoning must not map to thinking, got %+v", thinking)
+	}
+	if len(errorsOut) != 0 {
+		t.Fatalf("reasoning must not poison the turn with EventError, got %+v", errorsOut)
+	}
+	if len(replaces) != 1 || replaces[0].Content != "Everything changed" {
+		t.Fatalf("unrelated snapshot must EventTextReplace, got %+v", replaces)
+	}
+}
+
+func TestSSEToolLifecycleAndNoPrematureResult(t *testing.T) {
+	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
+	sub := newDrivenSubscriber(t, agent)
+
+	driveFrames(sub,
+		sseFrame("message.updated", map[string]any{
+			"info":      map[string]any{"id": "msg_u1", "role": "user"},
+			"sessionID": "ses_1",
+		}),
+		sseFrame("message.part.updated", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1",
+			"part": map[string]any{
+				"id": "pt_tool", "type": "tool",
+				"tool": map[string]any{"id": "pt_tool", "toolName": "read",
+					"state": map[string]any{"status": "running", "input": map[string]any{"path": "a.go"}}},
+			},
+		}),
+		// Tool reaches completed AND the assistant message carries
+		// time.completed — multi-step turns do exactly this mid-turn. Neither
+		// may close the turn (设计 §4.3.3 红线).
+		sseFrame("message.part.updated", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1",
+			"part": map[string]any{
+				"id": "pt_tool", "type": "tool",
+				"tool": map[string]any{"id": "pt_tool", "toolName": "read",
+					"state": map[string]any{"status": "completed", "output": "contents"}},
+			},
+		}),
+		sseFrame("message.updated", map[string]any{
+			"sessionID": "ses_1",
+			"info": map[string]any{
+				"id": "msg_a1", "role": "assistant",
+				"time": map[string]any{"created": 1, "completed": 2},
+			},
+		}),
+	)
+
+	events := drain(sub)
+	for _, ev := range events {
+		if ev.Type == core.EventResult {
+			t.Fatalf("tool completion / assistant time.completed must NOT emit EventResult, got %+v", ev)
+		}
+	}
+	var uses, results []core.Event
+	for _, ev := range events {
+		switch ev.Type {
+		case core.EventToolUse:
+			uses = append(uses, ev)
+		case core.EventToolResult:
+			results = append(results, ev)
+		}
+	}
+	if len(uses) != 2 || uses[0].ToolName != "read" {
+		t.Fatalf("tool uses = %+v", uses)
+	}
+	if len(results) != 1 || results[0].RequestID != "pt_tool" || results[0].ToolStatus != "completed" {
+		t.Fatalf("tool results = %+v", results)
+	}
+
+	// Only session idle closes the turn — exactly once.
+	driveFrames(sub, sseFrame("session.status", map[string]any{"sessionID": "ses_1", "type": "idle"}))
+	events = drain(sub)
+	results = nil
+	for _, ev := range events {
+		if ev.Type == core.EventResult {
+			results = append(results, ev)
+		}
+	}
+	if len(results) != 1 || !results[0].Done || results[0].Error != nil {
+		t.Fatalf("idle must close exactly once with clean result, got %+v", results)
+	}
+}
+
+func TestSSEZeroOutputIdleSurfacesTurnError(t *testing.T) {
+	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
+	sub := newDrivenSubscriber(t, agent)
+
+	driveFrames(sub,
+		sseFrame("message.updated", map[string]any{
+			"info":      map[string]any{"id": "msg_u1", "role": "user"},
+			"sessionID": "ses_1",
+		}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1", "type": "idle"}),
+	)
+
+	events := drain(sub)
+	var result *core.Event
+	for i, ev := range events {
+		if ev.Type == core.EventResult {
+			result = &events[i]
+		}
+	}
+	if result == nil {
+		t.Fatal("zero-output idle must emit EventResult")
+	}
+	if result.Error == nil || !strings.Contains(result.Error.Error(), "may be unavailable") {
+		t.Fatalf("error text must stay diagnosable, got %v", result.Error)
+	}
+	if !result.Done {
+		t.Fatal("result must be Done")
+	}
+}
+
+func TestSSEPermissionAsked(t *testing.T) {
+	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
+	sub := newDrivenSubscriber(t, agent)
+
+	// Live-pinned 1.18.18 permission.asked frame (permlab /global/event,
+	// 2026-08-19): {id, sessionID, permission, patterns[], metadata{…}, always[], tool{…}}.
+	// There is no string tool/title/description field in the real payload.
+	driveFrames(sub, sseFrame("permission.asked", map[string]any{
+		"sessionID":  "ses_1",
+		"id":         "per_9",
+		"permission": "external_directory",
+		"patterns":   []any{"/Users/jacklee/Projects/Chat/*"},
+		"metadata": map[string]any{
+			"filepath":  "/Users/jacklee/Projects/Chat/红楼梦故事.txt",
+			"parentDir": "/Users/jacklee/Projects/Chat",
+		},
+		"always": []any{"/Users/jacklee/Projects/Chat/*"},
+		"tool":   map[string]any{"messageID": "msg_1", "callID": "call_1"},
+	}))
+
+	events := drain(sub)
+	found := false
+	for _, ev := range events {
+		if ev.Type == core.EventPermissionRequest {
+			found = true
+			if ev.RequestID != "per_9" {
+				t.Fatalf("permission request id = %q", ev.RequestID)
+			}
+			if ev.PermissionKind != "external_directory" {
+				t.Fatalf("permission kind = %q, want external_directory", ev.PermissionKind)
+			}
+			if len(ev.PermissionPatterns) != 1 || ev.PermissionPatterns[0] != "/Users/jacklee/Projects/Chat/*" {
+				t.Fatalf("permission patterns = %v", ev.PermissionPatterns)
+			}
+			if ev.ToolInput != "/Users/jacklee/Projects/Chat/红楼梦故事.txt" {
+				t.Fatalf("permission filepath (ToolInput) = %q", ev.ToolInput)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("permission.asked must emit EventPermissionRequest")
+	}
+}
+
+func TestSSECatalogSignalsDoNotEnterChatStream(t *testing.T) {
+	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
+	sub := newDrivenSubscriber(t, agent)
+
+	driveFrames(sub,
+		sseFrame("session.created", map[string]any{"sessionID": "ses_new"}),
+		sseFrame("session.deleted", map[string]any{"sessionID": "ses_gone"}),
+		sseFrame("project.updated", map[string]any{"projectID": "prj_new"}),
+		sseFrame("catalog.updated", map[string]any{}),
+	)
+
+	if events := drain(sub); len(events) != 0 {
+		t.Fatalf("catalog frames must not enter the chat stream, got %+v", events)
+	}
+	got := 0
+	for i := 0; i < 4; i++ {
+		select {
+		case <-agent.CatalogRefreshSignals():
+			got++
+		default:
+		}
+	}
+	if got != 4 {
+		t.Fatalf("session.created/deleted and project.updated/catalog.updated must each signal catalog refresh, got %d", got)
+	}
+}
+
+// §6.9 (A8): todo.updated is the control-plane replacement list — one
+// canonical plan event preserving server order/fields, never a timeline
+// part, never a synthesized id.
+func TestSSETodoUpdatedIsControlPlanePlan(t *testing.T) {
+	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
+	sub := newDrivenSubscriber(t, agent)
+	driveFrames(sub, sseFrame("todo.updated", map[string]any{
+		"sessionID": "ses_1",
+		"todos": []any{
+			map[string]any{"content": "capture A8", "status": "completed", "priority": "high"},
+			map[string]any{"content": "complete A8", "status": "in_progress", "priority": "medium"},
+		},
+	}))
+	events := drain(sub)
+	if len(events) != 1 || events[0].Type != core.EventPlan {
+		t.Fatalf("todo.updated must emit exactly one plan event, got %+v", events)
+	}
+	plan := events[0].Plan
+	if len(plan) != 2 || plan[0].Content != "capture A8" || plan[0].Status != "completed" || plan[0].Priority != "high" {
+		t.Fatalf("plan must preserve server order/fields verbatim, got %+v", plan)
+	}
+	agent.todoMu.Lock()
+	cached := agent.lastTodos["ses_1"]
+	agent.todoMu.Unlock()
+	if len(cached) != 2 {
+		t.Fatalf("control-plane snapshot must record the list, got %+v", cached)
+	}
+}
+
+func TestSSESessionUpdatedRecomputesUsageFromMessages(t *testing.T) {
+	agent, _ := newDataAgent(t, map[string]string{
+		"/session/ses_1/message": lastAssistantPayload(),
+		"/provider":              `{"all":[{"id":"zhipuai-coding-plan","models":{"glm-4.7":{"id":"glm-4.7","limit":{"context":128000}}}}],"connected":["zhipuai-coding-plan"],"default":{}}`,
+	}, "/tmp")
+	sub := newDrivenSubscriber(t, agent)
+
+	driveFrames(sub,
+		sseFrame("message.updated", map[string]any{
+			"info":      map[string]any{"id": "msg_u1", "role": "user"},
+			"sessionID": "ses_1",
+		}),
+		// session.updated with idle status + top-level tokens present but
+		// WRONG — the recompute must read the message-level truth instead.
+		sseFrame("session.updated", map[string]any{
+			"sessionID": "ses_1",
+			"info": map[string]any{
+				"id": "ses_1", "status": "idle",
+				"tokens":  map[string]any{"input": 7, "output": 7},
+				"modelID": "wrong-model", "providerID": "wrong-provider",
+			},
+		}),
+	)
+
+	// The recompute runs async (it must not stall the SSE read loop) — poll
+	// for the usage event with a bounded deadline.
+	var usage *core.ContextUsage
+	deadline := time.After(5 * time.Second)
+	for usage == nil {
+		for _, ev := range drain(sub) {
+			if ev.Type == core.EventContextUsageUpdated && ev.ContextUsage != nil {
+				usage = ev.ContextUsage
+			}
+		}
+		if usage != nil {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("session.updated must recompute occupancy")
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	if usage.UsedTokens != 18457 || usage.ContextWindow != 128000 {
+		t.Fatalf("usage must be message-level per §3.3 (used=18457 window=128000), got %+v", usage)
+	}
+	if cached := agent.cachedContextUsage("ses_1"); cached == nil || cached.UsedTokens != 18457 {
+		t.Fatalf("usage must be remembered, got %+v", cached)
+	}
+}
+
+func TestSubscribeStreamsLiveSSEFrames(t *testing.T) {
+	frames := make(chan string, 8)
+	sse := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/global/event" {
+			w.Header().Set("Content-Type", "text/event-stream")
+			flusher := w.(http.Flusher)
+			// Flush headers immediately so the client's Do() returns before
+			// the first frame arrives (Subscribe must not block on frames).
+			flusher.Flush()
+			for frame := range frames {
+				fmt.Fprintf(w, "data: %s\n\n", frame)
+				flusher.Flush()
+			}
+			return
+		}
+		if _, pass, ok := r.BasicAuth(); !ok || pass != "pw" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/global/health":
+			_, _ = w.Write([]byte(`{"healthy":true}`))
+		case "/session":
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	// Cleanup order (LIFO): close frames first so the streaming handler
+	// returns, THEN close the server — a plain defer would run before any
+	// cleanup and wait on the handler forever.
+	t.Cleanup(sse.Close)
+	t.Cleanup(func() { close(frames) })
+
+	agent, err := New(map[string]any{
+		"opencode_web_url":  sse.URL,
+		"opencode_web_user": "u",
+		"opencode_web_pass": "pw",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	a := agent.(*Agent)
+
+	events, err := a.Subscribe(context.Background())
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	frames <- sseFrame("message.updated", map[string]any{
+		"info": map[string]any{"id": "msg_u1", "role": "user",
+			"parts": []any{map[string]any{"type": "text", "text": "live hello"}}},
+		"sessionID": "ses_1",
+	})
+	frames <- sseFrame("session.status", map[string]any{"sessionID": "ses_1", "type": "idle"})
+
+	sawUser, sawResult := false, false
+	deadline := time.After(5 * time.Second)
+	for !(sawUser && sawResult) {
+		select {
+		case ev := <-events:
+			if ev.Type == core.EventUserMessage {
+				sawUser = true
+			}
+			if ev.Type == core.EventResult {
+				sawResult = true
+			}
+		case <-deadline:
+			t.Fatalf("live SSE frames not relayed (user=%v result=%v)", sawUser, sawResult)
+		}
+	}
+}
+
+func TestIsSessionActiveThreeStates(t *testing.T) {
+	agent, _ := newDataAgent(t, map[string]string{
+		"/session/status": `{"ses_busy":{"type":"busy"}}`,
+	}, "/tmp")
+	ctx := context.Background()
+	if !agent.IsSessionActive(ctx, "ses_busy") {
+		t.Fatal("busy map hit must report active")
+	}
+	if agent.IsSessionActive(ctx, "ses_idle") {
+		t.Fatal("missing key on 1.18 is a definitive idle verdict")
+	}
+
+	dead := httptest.NewServer(http.NotFoundHandler())
+	url := dead.URL
+	dead.Close()
+	deadAgent, _ := New(map[string]any{
+		"opencode_web_url":  url,
+		"opencode_web_user": "u",
+		"opencode_web_pass": "pw",
+	})
+	if !deadAgent.(*Agent).IsSessionActive(ctx, "ses_x") {
+		t.Fatal("HTTP failure must report active (conservative)")
+	}
+}
+
+func TestIsSessionActiveV2QuarantineStaysConservative(t *testing.T) {
+	// C1: a v2 endpoint is quarantined at clientFor. IsSessionActive treats any
+	// probe/generation failure as active (unknown ⇒ active — never falsely
+	// settle a live turn); no /api/session/active request may be attempted.
+	s := &recordingServe{responses: map[string]string{
+		"/global/health":      `{"healthy":true}`,
+		"/api/health":         `{"healthy":true}`,
+		"/api/session":        `{"data":[]}`,
+		"/api/session/active": `{"ses_other":{"type":"busy"}}`,
+	}}
+	base := s.start(t)
+	a, _ := New(map[string]any{
+		"opencode_web_url":  base,
+		"opencode_web_user": "u",
+		"opencode_web_pass": "pw",
+	})
+	agent := a.(*Agent)
+	if _, err := agent.clientFor(context.Background()); err == nil || !strings.Contains(err.Error(), "unsupported-generation (quarantined)") {
+		t.Fatalf("v2 must fail closed at clientFor, got err=%v", err)
+	}
+	if !agent.IsSessionActive(context.Background(), "ses_idle") {
+		t.Fatal("quarantined generation must stay conservative-active, never idle")
+	}
+	if active := s.requestsFor("/api/session/active"); len(active) != 0 {
+		t.Fatalf("quarantine must not probe /api/session/active, got %+v", active)
+	}
+}
+
+// TestSSEStreamReconnectsAndHealsAfterDrop reproduces the owner-verified
+// failure (2026-08-19): a stream that dies MID-TURN must (a) reconnect and
+// keep relaying, and (b) settle the armed turn via the status map when the
+// serve went idle during the gap — instead of leaving iOS stuck in 执行中.
+func TestSSEStreamReconnectsAndHealsAfterDrop(t *testing.T) {
+	var connCount atomic.Int64
+	dropped := make(chan struct{}, 1)
+	sse := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, pass, ok := r.BasicAuth(); !ok || pass != "pw" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/global/event":
+			n := connCount.Add(1)
+			w.Header().Set("Content-Type", "text/event-stream")
+			flusher := w.(http.Flusher)
+			flusher.Flush()
+			if n == 1 {
+				// Connection 1: arm a turn, stream half the deltas, then DIE.
+				fmt.Fprintf(w, "data: %s\n\n", sseFrame("message.updated", map[string]any{
+					"info": map[string]any{"id": "msg_u1", "role": "user",
+						"parts": []any{map[string]any{"type": "text", "text": "再讲个孙悟空的故事"}}},
+					"sessionID": "ses_1",
+				}))
+				flusher.Flush()
+				fmt.Fprintf(w, "data: %s\n\n", sseFrame("message.part.delta", map[string]any{
+					"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_1",
+					"field": "text", "delta": "half of the story…",
+				}))
+				flusher.Flush()
+				dropped <- struct{}{}
+				return // closes the response mid-turn
+			}
+			// Connection 2+: stays open, sends nothing (the serve already
+			// finished the turn during the gap — terminal event lost).
+			<-r.Context().Done()
+		case "/session/status":
+			// Serve went idle while we were disconnected.
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			if r.URL.Path == "/global/health" {
+				_, _ = w.Write([]byte(`{"healthy":true}`))
+				return
+			}
+			if r.URL.Path == "/session" {
+				_, _ = w.Write([]byte(`[]`))
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer sse.Close()
+
+	a, err := New(map[string]any{
+		"opencode_web_url":  sse.URL,
+		"opencode_web_user": "u",
+		"opencode_web_pass": "pw",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	agent := a.(*Agent)
+	// Cancellable ctx so teardown ends the long-lived reconnect (connection 2
+	// blocks in the handler until the client goes away — otherwise the
+	// server's Close() waits forever).
+	subCtx, cancelSub := context.WithCancel(context.Background())
+	defer cancelSub()
+	events, err := agent.Subscribe(subCtx)
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+
+	sawUser, sawHalf, sawResult := false, false, false
+	deadline := time.After(15 * time.Second)
+	for !(sawUser && sawHalf && sawResult) {
+		select {
+		case ev := <-events:
+			switch ev.Type {
+			case core.EventUserMessage:
+				sawUser = true
+			case core.EventText:
+				if strings.Contains(ev.Content, "half of the story") {
+					sawHalf = true
+				}
+			case core.EventResult:
+				// The armed turn saw assistant output pre-drop → clean result.
+				if ev.Error != nil {
+					t.Fatalf("turn with pre-drop output must settle clean, got %v", ev.Error)
+				}
+				sawResult = true
+			}
+		case <-deadline:
+			t.Fatalf("reconnect/heal incomplete: user=%v half=%v result=%v (connections=%d)",
+				sawUser, sawHalf, sawResult, connCount.Load())
+		}
+	}
+	// The redial follows the min-backoff (1s) AFTER the heal — poll for it.
+	reconnectDeadline := time.After(6 * time.Second)
+	for connCount.Load() < 2 {
+		select {
+		case <-reconnectDeadline:
+			t.Fatalf("subscriber must reconnect after the drop, connections=%d", connCount.Load())
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
+// TestProviderErrorSurfacesVerbatimAtIdle reproduces the owner-verified
+// scenario (2026-08-19, zhipuai 1302): a provider-rejected turn surfaces the
+// serve's own text — carried ONLY by session.status retry / session.error /
+// assistant info.error, all previously dropped — at the terminal instead of
+// the generic zero-output guess. Frame order live-pinned on 1.18.18.
+func TestProviderErrorSurfacesVerbatimAtIdle(t *testing.T) {
+	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
+	sub := newDrivenSubscriber(t, agent)
+
+	driveFrames(sub,
+		sseFrame("message.updated", map[string]any{
+			"info": map[string]any{"id": "msg_u1", "role": "user",
+				"parts": []any{map[string]any{"type": "text", "text": "hi"}}},
+			"sessionID": "ses_1",
+		}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1", "status": map[string]any{"type": "busy"}}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1",
+			"status": map[string]any{"type": "retry", "attempt": 1, "message": "当前订阅套餐暂未开放GLM-5.2-Highspeed权限"}}),
+		sseFrame("session.error", map[string]any{"sessionID": "ses_1",
+			"error": map[string]any{"name": "APIError", "data": map[string]any{
+				"message": "当前订阅套餐暂未开放GLM-5.2-Highspeed权限", "statusCode": 403, "isRetryable": false}}}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1", "status": map[string]any{"type": "idle"}}),
+		sseFrame("session.idle", map[string]any{"sessionID": "ses_1"}),
+	)
+
+	var results []core.Event
+	var errorTexts []string
+	for _, ev := range drain(sub) {
+		switch ev.Type {
+		case core.EventResult:
+			results = append(results, ev)
+		case core.EventText:
+			errorTexts = append(errorTexts, ev.Content)
+		}
+	}
+	if len(results) != 1 {
+		t.Fatalf("exactly one terminal result (idle + session.idle de-duped), got %d", len(results))
+	}
+	if results[0].Error == nil || !strings.Contains(results[0].Error.Error(), "当前订阅套餐暂未开放GLM-5.2-Highspeed权限") {
+		t.Fatalf("the serve's own error text must surface verbatim, got %v", results[0].Error)
+	}
+	if !results[0].Done {
+		t.Fatal("terminal must be Done")
+	}
+	// The text must ALSO arrive as assistant content — the projection reducer
+	// drops turn_error.message, so the content part is what iOS renders.
+	found := false
+	for _, text := range errorTexts {
+		if strings.Contains(text, "当前订阅套餐暂未开放GLM-5.2-Highspeed权限") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the serve's error text must be emitted as content (iOS-renderable), texts=%v", errorTexts)
+	}
+}
+
+// A TRANSIENT retry that eventually succeeds must close clean — the retry
+// text is a candidate diagnosis only, never a poison for a healthy turn.
+func TestTransientRetryThenSuccessClosesClean(t *testing.T) {
+	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
+	sub := newDrivenSubscriber(t, agent)
+	driveFrames(sub,
+		sseFrame("message.updated", map[string]any{
+			"info": map[string]any{"id": "msg_u1", "role": "user",
+				"parts": []any{map[string]any{"type": "text", "text": "hi"}}},
+			"sessionID": "ses_1",
+		}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1", "status": map[string]any{"type": "busy"}}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1",
+			"status": map[string]any{"type": "retry", "attempt": 1, "message": "transient 429"}}),
+		// Retry recovers: real assistant output arrives.
+		sseFrame("message.part.delta", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_1", "field": "text", "delta": "recovered answer",
+		}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1", "status": map[string]any{"type": "idle"}}),
+	)
+	events := drain(sub)
+	var last *core.Event
+	for i := range events {
+		if events[i].Type == core.EventResult {
+			last = &events[i]
+		}
+	}
+	if last == nil || last.Error != nil {
+		t.Fatalf("retried-then-successful turn must close clean, got %+v", last)
+	}
+}
+
+// Retry frames alone (no session.error yet — retries still running out) still
+// seed the message so an eventual zero-output close is diagnosable.
+func TestRetryMessageAloneSeedsTerminalError(t *testing.T) {
+	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
+	sub := newDrivenSubscriber(t, agent)
+	driveFrames(sub,
+		sseFrame("message.updated", map[string]any{
+			"info":      map[string]any{"id": "msg_u1", "role": "user"},
+			"sessionID": "ses_1",
+		}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1",
+			"status": map[string]any{"type": "retry", "attempt": 2, "message": "provider 429: quota"}}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1", "status": map[string]any{"type": "idle"}}),
+	)
+	events := drain(sub)
+	var result *core.Event
+	for i := range events {
+		if events[i].Type == core.EventResult {
+			result = &events[i]
+		}
+	}
+	if result == nil || result.Error == nil || !strings.Contains(result.Error.Error(), "provider 429: quota") {
+		t.Fatalf("retry message must seed the terminal error, got %+v", result)
+	}
+}
+
+// A stale error from the previous turn must not poison the next healthy one.
+func TestSessionErrorClearedOnNextTurn(t *testing.T) {
+	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
+	sub := newDrivenSubscriber(t, agent)
+	driveFrames(sub,
+		sseFrame("message.updated", map[string]any{
+			"info": map[string]any{"id": "msg_u1", "role": "user"}, "sessionID": "ses_1",
+		}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1",
+			"status": map[string]any{"type": "retry", "message": "old failure"}}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1", "status": map[string]any{"type": "idle"}}),
+		// Next turn: fresh user message + real assistant output.
+		sseFrame("message.updated", map[string]any{
+			"info": map[string]any{"id": "msg_u2", "role": "user",
+				"parts": []any{map[string]any{"type": "text", "text": "again"}}},
+			"sessionID": "ses_1",
+		}),
+		sseFrame("message.updated", map[string]any{
+			"info": map[string]any{"id": "msg_a2", "role": "assistant"}, "sessionID": "ses_1",
+		}),
+		sseFrame("message.part.delta", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a2", "partID": "pt_1", "field": "text", "delta": "recovered",
+		}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1", "status": map[string]any{"type": "idle"}}),
+	)
+	var last *core.Event
+	events := drain(sub)
+	for i := range events {
+		if events[i].Type == core.EventResult {
+			last = &events[i]
+		}
+	}
+	if last == nil || last.Error != nil {
+		t.Fatalf("healthy follow-up turn must close clean (no stale error), got %+v", last)
+	}
+}
+
+// TestSSETransportReplayOfCapturedFailure runs the BYTE-EXACT frames captured
+// from the real 1.18.18 serve (errlab 2026-08-19, zhipuai-1302-style provider
+// rejection) through the subscriber's REAL SSE transport (dial → readStream →
+// parse → terminal) — deterministic end-to-end without waiting out the
+// serve's multi-minute retry backoff.
+func TestSSETransportReplayOfCapturedFailure(t *testing.T) {
+	const quotaErr = "当前订阅套餐暂未开放GLM-5.2-Highspeed权限"
+	frames := []string{
+		sseFrame("message.updated", map[string]any{
+			"sessionID": "ses_1",
+			"info": map[string]any{"id": "msg_u1", "role": "user", "sessionID": "ses_1",
+				"time": map[string]any{"created": 1787109199294}},
+		}),
+		sseFrame("message.part.updated", map[string]any{
+			"sessionID": "ses_1",
+			"part":      map[string]any{"type": "text", "text": "hi", "messageID": "msg_u1", "sessionID": "ses_1", "id": "prt_u1"},
+		}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1", "status": map[string]any{"type": "busy"}}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1",
+			"status": map[string]any{"type": "retry", "attempt": 1, "message": quotaErr}}),
+		sseFrame("session.error", map[string]any{"sessionID": "ses_1",
+			"error": map[string]any{"name": "APIError", "data": map[string]any{
+				"message": quotaErr, "statusCode": 403, "isRetryable": false}}}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1", "status": map[string]any{"type": "idle"}}),
+		sseFrame("session.idle", map[string]any{"sessionID": "ses_1"}),
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		_, pass, ok := r.BasicAuth()
+		if !ok || pass != "pw" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/global/event":
+			w.Header().Set("Content-Type", "text/event-stream")
+			flusher := w.(http.Flusher)
+			flusher.Flush()
+			for _, f := range frames {
+				fmt.Fprintf(w, "data: %s\n\n", f)
+				flusher.Flush()
+			}
+			<-r.Context().Done()
+		case "/global/health":
+			_, _ = w.Write([]byte(`{"healthy":true}`))
+		case "/session":
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	a, err := New(map[string]any{
+		"work_dir":          "/tmp",
+		"opencode_web_url":  srv.URL,
+		"opencode_web_user": "u",
+		"opencode_web_pass": "pw",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	subCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events, err := a.(*Agent).Subscribe(subCtx)
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+
+	sawUser, sawTerminal := false, false
+	var terminalErr string
+	deadline := time.After(10 * time.Second)
+	for !(sawUser && sawTerminal) {
+		select {
+		case ev := <-events:
+			switch ev.Type {
+			case core.EventUserMessage:
+				sawUser = true
+			case core.EventResult:
+				sawTerminal = true
+				if ev.Error != nil {
+					terminalErr = ev.Error.Error()
+				}
+			}
+		case <-deadline:
+			t.Fatalf("replay incomplete: user=%v terminal=%v err=%q", sawUser, sawTerminal, terminalErr)
+		}
+	}
+	if !strings.Contains(terminalErr, quotaErr) {
+		t.Fatalf("terminal must carry the serve's own text %q, got %q", quotaErr, terminalErr)
+	}
+}
+
+// 重试瞬态行的重附补偿（owner 2026-08-19：锁屏/后台错过「自动重试中」）：
+// StartSession 重附时新鲜快照重放一次；回合收口（idle）清除，不复活旧行。
+func TestRetrySnapshotReplayOnStartSessionAndClearOnIdle(t *testing.T) {
+	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
+	sub := newDrivenSubscriber(t, agent)
+
+	driveFrames(sub,
+		sseFrame("session.status", map[string]any{
+			"sessionID": "ses_r", "status": map[string]any{
+				"type": "retry", "attempt": 2, "message": "套餐无权限", "next": float64(1787143000000),
+			},
+		}),
+	)
+	if events := drain(sub); len(events) == 0 {
+		t.Fatal("retry status must emit")
+	}
+
+	// 重附：StartSession（resume 同会话）应重放一次重试行。
+	sess, err := agent.StartSession(context.Background(), "ses_r")
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	t.Cleanup(func() { _ = sess.Close() })
+	route := sess.(*serverSession).events
+	var replay *core.Event
+	for {
+		select {
+		case ev := <-route:
+			if ev.Type == core.EventRetryStatus {
+				e := ev
+				replay = &e
+			}
+		default:
+			goto drained
+		}
+	}
+drained:
+	if replay == nil {
+		t.Fatal("re-attach must replay the fresh retry snapshot")
+	}
+	if replay.RetryAttempt != 2 || replay.Content != "套餐无权限" {
+		t.Fatalf("replay = %+v", replay)
+	}
+
+	// 回合收口清除：idle 后新 StartSession 不得再重放。
+	driveFrames(sub, sseFrame("session.status", map[string]any{
+		"sessionID": "ses_r", "status": map[string]any{"type": "idle"},
+	}))
+	drain(sub)
+	sess2, err := agent.StartSession(context.Background(), "ses_r")
+	if err != nil {
+		t.Fatalf("StartSession 2: %v", err)
+	}
+	t.Cleanup(func() { _ = sess2.Close() })
+	rs2 := sess2.(*serverSession).sub
+	for {
+		select {
+		case ev := <-rs2.events:
+			if ev.Type == core.EventRetryStatus {
+				t.Fatal("settled turn must not replay a retry row")
+			}
+		default:
+			return
+		}
+	}
+}
+
+// TestReasoningModelTurnStreamsTextAndCompletes reproduces the owner 真机
+// failure (2026-08-21, existing-session turn): a reasoning-model turn emits
+// populated reasoning frames alongside the answer text. On the old
+// implementation the first identified reasoning frame raised EventError,
+// which go-bridge settles as wire turn_error while tearing relayEvents down
+// mid-stream — iOS saw partial text and a stuck/failed turn while the Mac
+// finished fine. The full 1.18.18 frame choreography (A1-pinned shapes plus
+// the reasoning part family) must stream every text delta and close with
+// exactly one terminal result, zero EventError.
+func TestReasoningModelTurnStreamsTextAndCompletes(t *testing.T) {
+	agent, _ := newDataAgent(t, map[string]string{"/provider": `{}`}, "/tmp")
+	sub := newDrivenSubscriber(t, agent)
+
+	driveFrames(sub,
+		sseFrame("message.updated", map[string]any{
+			"info":      map[string]any{"id": "msg_u1", "role": "user"},
+			"sessionID": "ses_1",
+		}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1", "status": map[string]any{"type": "busy"}}),
+		sseFrame("message.updated", map[string]any{
+			"info":      map[string]any{"id": "msg_a1", "role": "assistant", "parentID": "msg_u1"},
+			"sessionID": "ses_1",
+		}),
+		sseFrame("message.part.updated", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1",
+			"part": map[string]any{"id": "pt_step1", "type": "step-start"},
+		}),
+		sseFrame("message.part.updated", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1",
+			"part": map[string]any{"id": "pt_r1", "type": "reasoning", "text": "", "time": map[string]any{"start": 0}},
+		}),
+		sseFrame("message.part.delta", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_r1", "field": "reasoning", "delta": "thinking",
+		}),
+		sseFrame("message.part.delta", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_r1", "field": "reasoning", "delta": " hard",
+		}),
+		sseFrame("message.part.updated", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1",
+			"part": map[string]any{"id": "pt_r1", "type": "reasoning", "text": "thinking hard", "time": map[string]any{"start": 0, "end": 1}},
+		}),
+		sseFrame("message.part.updated", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1",
+			"part": map[string]any{"id": "pt_t1", "type": "text", "text": "", "time": map[string]any{"start": 2}},
+		}),
+		sseFrame("message.part.delta", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_t1", "field": "text", "delta": "答案第一段。",
+		}),
+		sseFrame("message.part.delta", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1", "partID": "pt_t1", "field": "text", "delta": "第二段完整收尾。",
+		}),
+		sseFrame("message.part.updated", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1",
+			"part": map[string]any{"id": "pt_t1", "type": "text", "text": "答案第一段。第二段完整收尾。", "time": map[string]any{"start": 2, "end": 3}},
+		}),
+		sseFrame("message.part.updated", map[string]any{
+			"sessionID": "ses_1", "messageID": "msg_a1",
+			"part": map[string]any{"id": "pt_fin1", "type": "step-finish", "tokens": map[string]any{"total": 42}},
+		}),
+		sseFrame("session.status", map[string]any{"sessionID": "ses_1", "status": map[string]any{"type": "idle"}}),
+		sseFrame("session.idle", map[string]any{"sessionID": "ses_1"}),
+	)
+
+	var texts []string
+	var results, errorsOut int
+	for _, ev := range drain(sub) {
+		switch ev.Type {
+		case core.EventText:
+			texts = append(texts, ev.Content)
+		case core.EventResult:
+			results++
+		case core.EventError:
+			errorsOut++
+		}
+	}
+	joined := strings.Join(texts, "")
+	if !strings.Contains(joined, "答案第一段。") || !strings.Contains(joined, "第二段完整收尾。") {
+		t.Fatalf("answer text must stream in full past the reasoning frames, got %q", joined)
+	}
+	if errorsOut != 0 {
+		t.Fatalf("a healthy reasoning-model turn must emit zero EventError, got %d", errorsOut)
+	}
+	if results != 1 {
+		t.Fatalf("turn must close with exactly one terminal result, got %d", results)
+	}
+}

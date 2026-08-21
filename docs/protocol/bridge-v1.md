@@ -282,6 +282,7 @@ turn_diff_ready
 projection_patch
 projection_snapshot
 sync_invalidate
+session_retry_status
 ```
 
 `turn_error` / `turn_aborted` settle a turn as failed/aborted at the Kernel (turn status
@@ -292,6 +293,14 @@ subscriber (zero-output turns — provider resolution failures that the server o
 closes silently), and the idle-verified cold-hydrate seal for trailing unanswered user
 turns (`reason: rich_history_unanswered`). Before that date the events existed in the
 reducer/mailbox contract only, with no producer.
+
+`session_retry_status` (2026-08-19, producer: opencode-web) is a **transient** control-plane
+notice: the serve is retrying the provider call with backoff and the turn stays alive. Shape:
+`{sessionId, attempt: number, message: string, next?: number(epoch-ms of the next attempt)}`.
+It must NOT settle turn state, is not a durable milestone (no mailbox persistence), and is
+NOT in the session-sync-v2 raw deny-list — raw delivery is its only carrier (the projection
+kernel ignores it). Clients render it as a transient row (official web parity: the serve's
+`session.status {type:"retry"}` row); older clients that do not know the name ignore it.
 
 `tool_started` / `tool_finished` may carry an optional `data.matches` field. It is the
 single structured truth for explore/search results and has exactly one of these shapes:
@@ -346,17 +355,37 @@ field, type, or wire value was changed.
   allow, `rejected` on deny). Producers: `resolve_permission` RPC success, and
   dsh-web host `approval/resolved`. Payload: `{ requestId, behavior }` where
   `behavior` is `allow` or `deny`. Idempotent.
-- `resolve_permission.behavior` wire values are exactly `"allow"` / `"deny"`.
-  This is the MacBridge/agent wire contract (`core.PermissionResult.behavior`).
-  Claude's permission responder treats ONLY `behavior == "allow"` as allow; any
-  other value (including legacy `approve`/`approve_always`/`reject`/
-  `reject_always`) is deny.
+- `resolve_permission.behavior` wire values are `"allow"` / `"deny"` /
+  `"always"`. `"always"` is only sent by clients for `permission_request`
+  events that carry the official payload (below); backends without an official
+  always concept degrade it to a one-time allow (never deny).
 - The iOS UI/native action enum (`approve` / `approveAlways` / `reject` /
   `rejectAlways`) is a **different layer** from the bridge wire `behavior`. iOS
   translates the UI action to the wire value before calling `resolve_permission`
-  (`approve`/`approveAlways` → `"allow"`, `reject`/`rejectAlways` → `"deny"`).
-  Clients MUST send `allow`/`deny` on the wire; legacy snake_case values are a
-  bug, not an alternate vocabulary.
+  (`approve` → `"allow"`, `approveAlways` → `"always"` for official-payload
+  requests or `"allow"` otherwise, `reject`/`rejectAlways` → `"deny"`).
+  Clients MUST send `allow`/`deny`/`always` on the wire; legacy snake_case
+  values are a bug, not an alternate vocabulary.
+- **Official permission payload (opencode-web, v1.18)** — `permission_request`
+  gains two additive, optional fields mirroring the live-pinned official
+  `permission.asked` SSE frame (1.18.18 `/global/event`, 2026-08-19):
+  - `permissionKind?: string` — official category key, e.g.
+    `"external_directory"`. Clients render the category line via the official
+    i18n catalog (`settings.permissions.tool.{kind}.description`, e.g.
+    「访问项目目录之外的文件」); unknown keys render no category line.
+  - `patterns?: string[]` — official patterns, e.g. `["/Users/x/Projects/Chat/*"]`,
+    rendered one row each (monospace, break-all) like the official desktop dock.
+  - Requests carrying these fields offer the official button triple
+    拒绝/始终允许/允许一次 → wire `"deny"` / `"always"` / `"allow"`. Requests
+    without them keep the legacy two-button card verbatim.
+  - Field names/values are shape-pinned to the official frame
+    (`agent/opencode-web` permlab capture + official desktop
+    session-permission-dock.tsx); absence on other backends is by design.
+  - The Session Projection part carries the same two fields
+    (`permissionKind` / `permissionPatterns`) — the projected part is the
+    permission-card SoT for SSV2 clients, so the kernel copies them from the
+    wire event on reduce (non-empty merge: a thin duplicate from a same-serve
+    legacy backend must not erase them).
 - v1 limitations (enforced at MacBridge parse time, never reach iOS):
   - Only single-question, single-select AskUserQuestion prompts are emitted as
     `question_asked`.
@@ -672,6 +701,90 @@ Wire behavior:
 - `run_diagnostics` reports the instance source (external probe hit / managed spawn,
   port, loopback-only disclosure) and the full provider registry with state bits; the
   `host.describe` version is an API-level identifier, NOT the npm package version.
+
+Adding the backend is a non-breaking extension of the descriptor space (new
+`backends[].kind` value; clients that do not know it ignore the backend).
+
+### Backend: `opencode-web` (kind `opencode-web`)
+
+The `opencode-web` backend (hello_ack `backends[].id = "opencode-web"`,
+`kind = "opencode-web"`, display name "OpenCode Web") is the official
+`opencode serve` HTTP/SSE client (design
+`docs/2026-08-18-opencode-web-backend-design.md`). It coexists with the legacy
+hybrid `opencode` backend until retirement: the Swift-managed server
+(`opencode-managed-server.json`, port range `4096..4196`) keeps serving both —
+`opencode-web` is a second client of the same resolved URL, never a second
+supervisor, and never binds or spawns anything itself.
+
+Wire behavior:
+
+- `liveEvents = "broadcast"`, `requiresPollingForExternalTurns = false`: the
+  official `/global/event` SSE (v2: `/api/event`) covers every session on the
+  serve; external web turns stream live with `external_turn_streaming`
+  advertised. Catalog changes (`session.created`/`session.deleted`) trigger
+  `sessions_changed` through the catalog refresh signal on top of the generic
+  discovery watcher. Empty URL ⇒ descriptor `not_configured` (no SSE
+  subscription, no implicit legacy-port dialing).
+- API generation is probed at startup (`/global/health` exists ⇒ 1.18
+  un-prefixed routes; otherwise `/api/health` ⇒ v2 `/api` routes); the probe
+  result (`generation=… url=…`) rides the descriptor reason and
+  `run_diagnostics`. Bare-array vs `{data}` envelope is the final shape
+  arbiter (1.18.18 also answers `/api/*` — dual presence is not proof of v2).
+- Reads carry the session's own `x-opencode-directory` header (list uses the
+  request directory; the go-bridge switchDir special-case keeps it correct
+  for the four read methods —坑 5 修复). `session_history` / rich history /
+  SSV2 cold hydrate derive from `GET /session/:id/message` (pathless family:
+  re-open rebuilds fully). `session_sync_v2` is advertised.
+- Context usage follows the official web formula: the LAST assistant message
+  with positive token total over the runtime catalog's `limit.context`
+  (`total = input+output+reasoning+cache.read+cache.write`). A missing window
+  yields no usage value (iOS shows 暂无) — never a fabricated 200k. The v2
+  `…/context` route (post-compact in-context messages) is NOT an occupancy
+  source. `IsSessionActive` reads 1.18 `GET /session/status` (missing key =
+  definitive idle; v2 `/api/session/active` absence is NOT a global idle
+  verdict).
+- `send_message` maps to `POST /session/:id/prompt_async` (v2:
+  `…/prompt` after a session-scoped model switch) and ALWAYS carries a
+  catalog model `{id, providerID}`. A model outside the runtime provider
+  catalog fails the send RPC with zero POSTs; attachments are NOT declared
+  in phase 1 (image/file uploads are rejected loudly, never silently
+  dropped). A turn that arms but produces zero assistant output surfaces as
+  `turn_error` with the diagnosable "model produced no output" text (never a
+  healthy empty completion). `abort_generation` maps to `…/abort` (v2:
+  `…/interrupt`); closing the iOS view only tears the SSE binding — it never
+  aborts the running turn.
+- Canonical additive revision (E1b sample-verified): `send_message.params.model`
+  additionally carries optional `variant: string` — a model-specific OpenCode
+  variant key, NOT `reasoningEffort`. It is accepted only when it is one of the
+  selected model's live `/provider.all[].models[modelID].variants` keys; an
+  unlisted key fails the send RPC with zero POSTs. `send_message.params.agent`
+  (already canonical) selects the official agent and rides the same prompt
+  atomically; per-request options travel session-scoped through
+  `core.PromptOptionsSender` (`PromptOptions{Agent, ProviderID, ModelID,
+  Variant}`) — no agent-global mutable selection. `list_models` model items
+  gain optional `variants: string[]` containing exactly those live keys
+  (empty/absent = no variant selector for that model).
+- Approvals surface through the existing `permission_request` events (SSE
+  `permission.asked`) and are answered by folding bridge `allow`/`deny` onto
+  the official reply literals (1.18 probes `once`/`reject` first and falls
+  back to `allow`/`deny` on 4xx; v2 replies `once`/`reject` directly). The
+  serve holds the single answer lock: the first answerer (web UI or iOS)
+  wins. Questions are NOT supported in phase 1 (`not_supported`; no banner).
+- `list_providers`/`list_models` come from `GET /provider` (recursive runtime
+  catalog; qualified `providerID/modelID` ids); `switch_model` records a
+  pending selection that rides the next prompt (1.18 has no dedicated switch
+  endpoint — the NEXT reply uses the new model; v2 switches via
+  `POST …/model`). `list_agents` maps `GET /agent`; `list_projects` maps
+  `GET /project` reading the `worktree` field (v2's `/api/location` is a
+  single-location parser, NOT a project list — `not_supported` there).
+- Not supported in phase 1: `fetch_todos` (todos not advertised),
+  `get_usage`, memory files, diff suite, git surface,
+  `list_permission_modes`/`set_permission_mode`, `set_agent_preset`,
+  `delete_session` (HTTP delete not live-pinned), `rename_session` (until
+  live-pinned), `share_session`, `resolve_user_input`.
+- `run_diagnostics` reports the endpoint source, loopback-only disclosure,
+  the generation probe detail, catalog/selected-model membership, and the
+  permission-literal folding state.
 
 Adding the backend is a non-breaking extension of the descriptor space (new
 `backends[].kind` value; clients that do not know it ignore the backend).
@@ -1228,6 +1341,7 @@ in `docs/protocol/schema/bridge-v1.types.ts`.
 | `title?: string` | Path-bearing display title (Claude Edit/Write `file_path`, Codex patch target, etc.). Clients use it for activity-row labels and `extractPrimaryPath` when structured file path is otherwise missing. |
 | `fileChanges?: { path, kind?, movePath?, diff? }[]` | Structured file mutations for this tool step (Codex Patch / apply_patch). Same shape as UnifiedFileChange. |
 | `requiresPermissionConfirmation?: boolean` | Pending tool must be approved before the turn continues (`permission_request`). Clients map to the existing permission card. Absent/false on older producers. |
+| `permissionKind?: string` / `permissionPatterns?: string[]` | Official permission payload (opencode-web v1.18) carried on the projected permission part: category key + pattern rows so SSV2 clients render the official card (category line + patterns + reject/always/once). Mirrors the `permission_request` extras; additive, absent on other backends. |
 
 Producers (live `tool_started`/`tool_finished` and cold hydrate) must pass these through the
 Projection Kernel reducer so snapshot/patch parts retain them. Clients map them read-only; when
