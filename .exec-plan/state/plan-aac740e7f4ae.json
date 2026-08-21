@@ -41,7 +41,7 @@
       "attestation_note": "all evidence self-attested; sandbox/unit/regression replayable; owner UI matrix NOT executed (awaits supervisor audit)"
     }
   },
-  "updated_at": "2026-08-21T02:14:37.363249+00:00",
+  "updated_at": "2026-08-21T02:29:59.893339+00:00",
   "todos": [
     {
       "id": "gate-a-inventory-impl",
@@ -1722,7 +1722,7 @@
       "id": "audit009-tail-review-fix-regression",
       "title": "Audit-009 sandbox regression and connected-device install",
       "description": "Run bounded Go/race/build/vet and real isolated 1.18.18 question/mutation regressions, reinstall the changed Mac product, rerun the two iOS targeted classes, and install/launch on the currently available paired iPhone without UI automation.",
-      "status": "pending",
+      "status": "done",
       "phase": "audit009-tail-review-fix",
       "kind": "regression",
       "depends_on": [
@@ -1732,13 +1732,15 @@
       "notes": "review-fix-for:concentrated-audit008-review-fix-regression; on proven completion restore the parent regression to done and record resolved-via",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Directive-010 regression: go test ./... all green; go test -race ./agent/opencode-web green; vet/build green. Real isolated 1.18.18 sandbox (4398/4399, reclaimed after): TestSandboxC6C7 all subtests incl. NEW question-reload (fresh-adapter cold recovery via GET /question + real history parentID, then official reply), C4/C2/prompt-options/e2e/archive-delete all pass. Mac product code changed -> Release rebuilt and reinstalled per mandated flow; 8777 = PID 48806 from /Applications/CordCodeLink.app runtime; 4096 owner-managed (app-respawned PID 48742 after mandated reinstall, parent = app). iOS targeted tests ModelVariantSelectionTests 7/7 + OpencodeWebVariantAgentWireTests 4/4 (no UI tests); physical paired iPhone Debug build+install+launch completed via scripts/run.sh device (no UI automation, device id not recorded). Both repos clean.",
+        "artifacts": [
+          "docs/2026-08-20-opencode-web-audit010-repair完成情况.md"
+        ],
+        "checked_at": "2026-08-21T02:29:59.893339+00:00"
       }
     }
   ]
