@@ -41,7 +41,7 @@
       "attestation_note": "all evidence self-attested; sandbox/unit/regression replayable; owner UI matrix NOT executed (awaits supervisor audit)"
     }
   },
-  "updated_at": "2026-08-21T02:42:00Z",
+  "updated_at": "2026-08-21T03:19:21.344613+00:00",
   "todos": [
     {
       "id": "gate-a-inventory-impl",
@@ -1751,7 +1751,7 @@
       "id": "audit010-resolution-race-review-fix-impl",
       "title": "Audit-010 Question terminal reconciliation implementation",
       "description": "Replace add-only boolean projection claims with a source-ordered per-session interaction lifecycle; reconcile A7-proven answered/rejected history after missed SSE terminal events without absence guesses or a second writer.",
-      "status": "pending",
+      "status": "done",
       "phase": "audit010-resolution-race-review-fix",
       "kind": "impl",
       "depends_on": [],
@@ -1759,20 +1759,27 @@
       "notes": "review-fix-for:audit009-tail-review-fix-regression",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Directive-011 implementation (commit 09dc464-equivalent, see git log: \"fix(opencode-web): directive-011 question terminal reconciliation with a serial lifecycle gate\"): the projectedQuestions bool claim is deleted and replaced by a per-(session,interaction) questionLifecycle map — every question fact (live asked, live terminal broadcast, recovery requested, recovery terminal) is admitted AND emitted under the single questionMu, so the route channel carries facts in admission order: terminal always beats a stale requested, duplicates never re-emit, each fact ingests at most once, no new reducer/writer. Recovery gains terminal precedence + reconciliation: pending rows whose authoritative history already carries an evidence-proven terminal settle instead of arming; locally-pending interactions (gatePendingSnapshot taken BEFORE GET /question — the source fence) absent from the server list are reconciled from the SAME history transaction using A7 evidence (completed+metadata.answers => answered; error+\"The user dismissed this question\" => rejected; anything else fail-closed with diagnostics — absence alone decides nothing). ResolveUserInput only forgets the reply mapping; terminal projection stays owned by the broadcast/reconciliation.",
+        "artifacts": [
+          "agent/opencode-web/questions.go",
+          "agent/opencode-web/events.go",
+          "agent/opencode-web/opencodeweb.go",
+          "go-bridge/audit011_fullpath_test.go",
+          "agent/opencode-web/audit010_question_test.go",
+          "agent/opencode-web/c6_c7_sandbox_test.go"
+        ],
+        "checked_at": "2026-08-21T03:19:21.344613+00:00"
       }
     },
     {
       "id": "audit010-resolution-race-review-fix-tests",
       "title": "Audit-010 barrier and actual resolve full-path tests",
       "description": "Use controlled barriers to prove GET/live/resolved ordering, missed-terminal reconnect and resolved cold hydrate; exercise actual resolve_user_input through concrete opencode-web, official route fixtures, Kernel, and authoritative headRev.",
-      "status": "pending",
+      "status": "done",
       "phase": "audit010-resolution-race-review-fix",
       "kind": "tests",
       "depends_on": [
@@ -1782,20 +1789,27 @@
       "notes": "review-fix-for:audit009-tail-review-fix-regression",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Red-first barrier destructive tests (go-bridge/audit011_fullpath_test.go, all confirmed RED on pre-fix code where applicable): (1) TestAudit011_GapLostTerminalReconcilesInPlace answered+rejected — RED pre-fix (part stayed pending through both 8s timeouts), GREEN post-fix (in-place settle, identity unchanged); (2) TestAudit011_RecoveryRequestedCannotOverwriteTerminal — RED pre-fix (\"recovery re-projected a stale requested over the terminal\"), GREEN post-fix; (3) TestAudit011_StaleEmptySnapshotKeepsNewerLiveAsk — fence guard (red against any absence-implies-resolved patch); (4) TestAudit011_LateAskedAfterResolvedDoesNotRearm — RED pre-fix (pending re-armed), GREEN post-fix. Owning full-chain: TestAudit011_ResolveUserInputFullChainAnswer/Reject (real handleResolveUserInput -> opencode-web responder -> official POST fixture with broadcast -> adapter -> EventPublisher/Kernel -> authoritative headRev>0 + currentStatus). TestAudit011_ReopenAfterResolveKeepsInPlace guard. Agent-level: TestAudit011_ReconcileRejectEvidence + TestAudit011_ReconcileFailClosedOnUnknownTerminal. go test ./go-bridge -run TestAudit011 -count=20 PASS (103.9s); go test -race -run 'TestAudit011|TestQuestion|TestAudit010' -count=20 PASS; TestQuestionResolutionEventsFromServer updated to the identity-less-terminal no-emission semantics.",
+        "artifacts": [
+          "agent/opencode-web/questions.go",
+          "agent/opencode-web/events.go",
+          "agent/opencode-web/opencodeweb.go",
+          "go-bridge/audit011_fullpath_test.go",
+          "agent/opencode-web/audit010_question_test.go",
+          "agent/opencode-web/c6_c7_sandbox_test.go"
+        ],
+        "checked_at": "2026-08-21T03:19:21.344613+00:00"
       }
     },
     {
       "id": "audit010-resolution-race-review-fix-regression",
       "title": "Audit-010 real 1.18.18 terminal reload regression and Mac install",
       "description": "Re-verify pending/answered/rejected cold reopen against isolated 1.18.18, run bounded Go/race/full/vet/build, reinstall Mac Release, validate 8777/4096/4398/4399, and submit one audit-ready report without rerunning unchanged iOS work.",
-      "status": "pending",
+      "status": "done",
       "phase": "audit010-resolution-race-review-fix",
       "kind": "regression",
       "depends_on": [
@@ -1805,13 +1819,20 @@
       "notes": "review-fix-for:audit009-tail-review-fix-regression; on proven completion restore both blocked parent regressions and record resolved-via",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Real isolated 1.18.18 sandbox: TestSandboxC6C7 all green incl. question, question-reload (pending cold reload), NEW question-reopen-after-answer + question-reopen-after-reject (in-process reopen re-projects nothing; fresh-process reopen fabricates no dock from resolved history — real resolved history + GET empty; no TCP kill faked, gap ordering barrier-proven), todo/permission/mutations. C4/C2/prompt-options/e2e/archive-delete families PASS. 4398/4399 reclaimed; 4096 owner-managed untouched (PID 48742 throughout; orphaned PPID 1 after the mandated app reinstall — harness never talks to it). Mac product changed -> Release rebuilt (commit d6ba0b4 runtime) and reinstalled via the mandated flow; 8777 = PID 81262 from /Applications/CordCodeLink.app runtime. go test ./... all green; vet/build green; Mac repo clean; iOS untouched per directive (directive-10 install evidence stands).",
+        "artifacts": [
+          "agent/opencode-web/questions.go",
+          "agent/opencode-web/events.go",
+          "agent/opencode-web/opencodeweb.go",
+          "go-bridge/audit011_fullpath_test.go",
+          "agent/opencode-web/audit010_question_test.go",
+          "agent/opencode-web/c6_c7_sandbox_test.go"
+        ],
+        "checked_at": "2026-08-21T03:19:21.344613+00:00"
       }
     }
   ]
