@@ -30,18 +30,18 @@
   },
   "reports": {
     "completion_report_path": "docs/2026-08-20-opencode-web-source-first-convergence-plan完成情况.md",
-    "completion_report_status": "current",
-    "last_generated_at": "2026-08-21T04:18:00Z",
-    "based_on_queue_hash": "audit-013-verified",
+    "completion_report_status": "stale",
+    "last_generated_at": "2026-08-21T04:35:09Z",
+    "based_on_queue_hash": "directive-014-owner-ui-reopened",
     "completion": {
       "path": "docs/2026-08-20-opencode-web-source-first-convergence-plan完成情况.md",
-      "status": "current",
-      "based_on_queue_hash": "audit-013-verified",
-      "generated": "2026-08-21T04:18:00Z",
-      "attestation_note": "exec-plan proven and supervisor audit-013 re-verified; owner UI matrix remains a separate pending completion track"
+      "status": "stale",
+      "based_on_queue_hash": "directive-014-owner-ui-reopened",
+      "generated": "2026-08-21T04:35:09Z",
+      "attestation_note": "owner UI failed message-page acceptance; directive-014 reopened persisted-reasoning hydrate implementation/tests/regression"
     }
   },
-  "updated_at": "2026-08-21T04:18:00Z",
+  "updated_at": "2026-08-21T04:35:09Z",
   "todos": [
     {
       "id": "gate-a-inventory-impl",
@@ -1985,6 +1985,69 @@
           "go-bridge/audit013_fullpath_test.go"
         ],
         "checked_at": "2026-08-21T04:18:00Z"
+      }
+    },
+    {
+      "id": "owner-ui-reasoning-hydrate-repair-impl",
+      "title": "Owner UI E2b persisted reasoning hydrate implementation",
+      "description": "Map the E2b populated HTTP history reasoning shape into existing RichHistoryEntry reasoning parts and the single private Kernel hydrate transaction without enabling unverified direct-SSE reasoning.",
+      "status": "pending",
+      "phase": "owner-ui-reasoning-hydrate-repair",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "owner UI failure; canonical E2b; supervisor directive-014",
+      "notes": "review-fix-for product acceptance; audit-013 technical verification remains historical and does not satisfy this reopened boundary",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": null,
+        "na_reason": null,
+        "summary": null,
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "owner-ui-reasoning-hydrate-repair-tests",
+      "title": "Owner UI E2b reasoning hydrate owning tests",
+      "description": "Red-first adapter and full projection hydrate replay proving populated reasoning is preserved once, step boundaries are skipped, answer text remains separate, and live reasoning stays unadvertised.",
+      "status": "pending",
+      "phase": "owner-ui-reasoning-hydrate-repair",
+      "kind": "tests",
+      "depends_on": ["owner-ui-reasoning-hydrate-repair-impl"],
+      "source": "owner UI failure; canonical E2b; supervisor directive-014",
+      "notes": "must include a pre-fix red reproduction of errUnsupportedReasoning and projection.hydrate_failed",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": null,
+        "na_reason": null,
+        "summary": null,
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "owner-ui-reasoning-hydrate-repair-regression",
+      "title": "Owner UI E2b bounded regression, read-only preflight, and Mac install",
+      "description": "Run targeted/full/race regressions, install Mac Release, prove the two formerly failing owner session shapes hydrate successfully via read-only bridge preflight, and clean owned processes before audit-014.",
+      "status": "pending",
+      "phase": "owner-ui-reasoning-hydrate-repair",
+      "kind": "regression",
+      "depends_on": ["owner-ui-reasoning-hydrate-repair-tests"],
+      "source": "owner UI failure; canonical E2b; supervisor directive-014",
+      "notes": "no owner UI automation and no iOS code/install in this Mac-only repair",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": null,
+        "na_reason": null,
+        "summary": null,
+        "artifacts": [],
+        "checked_at": null
       }
     }
   ]

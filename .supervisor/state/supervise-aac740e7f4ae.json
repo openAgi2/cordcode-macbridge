@@ -402,8 +402,38 @@
         "audit_verdict": "verified",
         "audit_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/audit-013-question-lookup-terminal-gate.md"
       }
+    },
+    {
+      "number": 14,
+      "kind": "owner-acceptance-repair",
+      "title": "Owner UI reasoning hydrate repair",
+      "issued_at": "2026-08-21T04:35:09Z",
+      "status": "issued",
+      "markdown_path": "docs/supervisor-logs/2026-08-20-opencode-web-source-first-convergence-plan/directive-014-owner-ui-reasoning-hydrate-repair.md",
+      "scope": "Mac opencode-web persisted reasoning history/hydrate and owning tests; iOS unchanged",
+      "constraints": [
+        "map E2b persisted reasoning through the existing rich-history and single Kernel hydrate path",
+        "do not fold reasoning into answer text, drop it, or add a second writer/fallback/protocol field",
+        "official Web skip applies to step-start/step-finish; no generic unknown-part permissiveness",
+        "direct-SSE reasoning remains blocked until a same-version live sample exists",
+        "full-path red-first tests and read-only preflight of the two failing owner shapes are required",
+        "Mac Release reinstall, owned-process cleanup, one report, then stop for audit-014"
+      ],
+      "resolved_from_owner_acceptance": true,
+      "roadmap_diff": {
+        "design_commit": null,
+        "summary": "E2b read-only owner evidence proves populated reasoning already exists in 1.18.18 HTTP history. Canonical §6.3 now supports persisted reasoning hydrate while keeping direct-SSE reasoning separately blocked; audit-013 cannot constitute product completion after the owner UI failure.",
+        "checker": "python3 agent/opencode-web/testdata/official-1.18.18/harness/check_canonical_execution_design.py --self-test"
+      },
+      "report": {
+        "received_at": null,
+        "markdown_path": null,
+        "audited": false,
+        "audit_verdict": null,
+        "audit_path": null
+      }
     }
   ],
-  "current_directive_number": 13,
-  "last_updated": "2026-08-21T04:18:00Z"
+  "current_directive_number": 14,
+  "last_updated": "2026-08-21T04:35:09Z"
 }

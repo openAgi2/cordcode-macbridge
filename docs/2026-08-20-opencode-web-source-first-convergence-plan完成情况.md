@@ -1,13 +1,13 @@
 # OpenCode Web source-first convergence 完成情况
 
-> **技术轨状态（2026-08-21）**：exec-plan proven ✅；监工 audit-013 verified ✅；owner真机UI矩阵尚未执行。三轨全部完成前，产品不得标记done。
+> **产品状态（2026-08-21）**：owner UI 首轮验收失败 ❌——抽样 OpenCode session 均返回 `projection.hydrate_failed`；其他 backend 正常。audit-013 仅代表此前技术轨检查通过，不能覆盖本次真实产品失败。监工指令14已下发，exec-plan与完成报告重新打开。
 
 ## 1. 权威与范围
 
 - canonical：`docs/2026-08-20-opencode-web-source-first-convergence-plan.md`
 - 同版本事实源：OpenCode 1.18.18源码 + A1–A10/WP/E1–E7/E1b/E4b/E5b真实样本 + bridge mapping。
 - 已实施：C1–C7、SSV2单写者/单ingest约束、严格shape、协议variant/agent镜像、iOS variant UI、能力真实性。
-- 明确未实施：E2 reasoning、v2 generation、OD-3 future/unsupported项。
+- 新证据：E2b 已证明真实 1.18.18 HTTP history 含 populated reasoning；原“遇到 reasoning 整体 hydrate fail”的设计结论已撤回。direct-SSE reasoning、v2 generation、OD-3 future/unsupported项仍未实施。
 
 ## 2. 最终review-fix链
 
@@ -19,6 +19,7 @@
 | audit-011 | terminal后late asked/stale recovery重开reply mapping | directive-012修复 |
 | audit-012 | lifecycle拒绝GET row后lookup仍无条件返回 | directive-013修复 |
 | audit-013 | 无新增缺口 | **verified** |
+| owner UI / directive-014 | 任意抽样 OpenCode session 立即 `projection.hydrate_failed`；根因为 E2 结论错误地拒绝真实 HTTP persisted reasoning | **repair in progress** |
 
 ## 3. 最终独立证据
 
@@ -41,8 +42,8 @@
 
 | 轨道 | 状态 |
 |---|---|
-| exec-plan proven | ✅ |
-| supervisor verified | ✅ audit-013 |
-| owner真机UI矩阵 | ⏳ pending |
+| exec-plan proven | ❌ directive-014 reopened |
+| supervisor verified | ⏳ audit-014 pending（audit-013仅覆盖旧边界） |
+| owner真机UI矩阵 | ❌ message-page 场景失败，修复后重测 |
 
-owner完成canonical §8测试矩阵并逐项回报后，才能宣布OpenCode Web产品验收done。
+developer完成directive-014、监工独立审计通过、owner重新执行canonical §8测试矩阵并逐项回报后，才能宣布OpenCode Web产品验收done。

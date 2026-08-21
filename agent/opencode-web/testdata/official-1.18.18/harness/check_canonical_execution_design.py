@@ -54,7 +54,7 @@ EVIDENCE_STATES = {
     "E7": ("6.10", "SAMPLE-VERIFIED-WITH-NEGATIVE-EVENT"),
 }
 
-CORRECTIONS = ("E1b", "E4b", "E5b")
+CORRECTIONS = ("E1b", "E2b", "E4b", "E5b")
 
 
 def sections(text: str) -> dict[str, str]:
@@ -115,7 +115,8 @@ def check(text: str) -> list[str]:
         "normalizes each direct event once",
         "do not synthesize IDs",
         "one backend-instance global subscriber",
-        "unsupported content.reasoning for verified 1.18.18 shape",
+        "persisted reasoning is a supported hydrate fact",
+        "Direct-SSE reasoning ordering is still unverified",
         "session.deleted` and never manufactures",
         "core.PromptOptionsSender",
         "provider-default-over-config",
@@ -140,9 +141,14 @@ def self_test(text: str) -> list[str]:
         ),
         "restore-obsolete-sketch": text + "\n## 6. Gate C — implementation order\n",
         "drop-e1-queue-state": text.replace("| E1 | selected variant", "| EX | selected variant", 1),
-        "drop-e2-unsupported": text.replace(
-            "unsupported content.reasoning for verified 1.18.18 shape",
-            "silently ignore reasoning",
+        "drop-e2b-hydrate-mapping": text.replace(
+            "persisted reasoning is a supported hydrate fact",
+            "persisted reasoning is discarded",
+            1,
+        ),
+        "drop-e2-live-boundary": text.replace(
+            "Direct-SSE reasoning ordering is still unverified",
+            "Direct-SSE reasoning may be inferred from history",
             1,
         ),
         "drop-e5b-correction": text.replace("| E5b |", "| EXb |", 1),
@@ -190,7 +196,7 @@ def main() -> int:
         print("self-test PASS")
         return 0
     print(
-        "canonical design ok: dossiers=11 evidence-decisions=7 final-corrections=3 "
+        "canonical design ok: dossiers=11 evidence-decisions=7 final-corrections=4 "
         "single-authority=True productBatchDesignReady=True"
     )
     return 0

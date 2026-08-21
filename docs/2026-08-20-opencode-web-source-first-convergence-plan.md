@@ -1,7 +1,7 @@
 # OpenCode Web source-first convergence design（canonical）
 
 - Date: 2026-08-20
-- Canonical status: **This file is the only implementation-design authority for `opencode-web`. Gate B map, SSV2 impact, and sample inventory are evidence appendices, not alternative plans. C1 is supervisor-verified. Directive-006 commit `4a215b0` and directive-007 commit `211bb27` close the remaining WP/E1–E7 evidence queue: E1/E3–E7 are sample-verified, E2 reasoning is honestly blocked/unsupported for this convergence, and E1b/E4b/E5b prove the final variant/provider/config shapes. The §6 mappings below are final. One concentrated C2-review-fix + C3–C7 implementation batch is now design-ready; its internal feature waves do not require per-slice supervisor stops, but capability activation, release installation, owner testing, and the completion claim remain a single final gate.**
+- Canonical status: **This file is the only implementation-design authority for `opencode-web`. Gate B map, SSV2 impact, and sample inventory are evidence appendices, not alternative plans. C1 is supervisor-verified. Directive-006 commit `4a215b0` and directive-007 commit `211bb27` closed the original WP/E1–E7 queue. Owner UI acceptance on 2026-08-21 then exposed a design error in E2: the failed synthetic live capture did not justify rejecting populated reasoning already present in the official HTTP history. E2b now sample-verifies that persisted 1.18.18 shape for hydrate; direct-SSE reasoning remains separately blocked until captured. The §6 mappings below are authoritative. Capability activation, release installation, owner testing, and the completion claim remain a final gate.**
 - Audit input: [2026-08-20-opencode-web-source-parity-audit.md](2026-08-20-opencode-web-source-parity-audit.md)
 - Historical input only: [2026-08-18-opencode-web-backend-design.md](2026-08-18-opencode-web-backend-design.md) and its completion report
 - Goal: make `opencode-web` a faithful, bounded adapter of the official OpenCode Web behavior, rather than a cleaned-up copy of the legacy OpenCode backend
@@ -105,7 +105,7 @@ Gate A proved A1–A10, but Gate B later promoted seven `source-only` surfaces t
 | ID | Surface | Required real observation | Current status | Product rule before capture |
 |---|---|---|---|---|
 | E1 | selected variant (`configuration.variants`) | a prompt with a non-empty selected variant; exact request field and persisted/reload behavior | `SAMPLE-VERIFIED` with E1b | expose only live keys from the selected model's `variants` object; unknown keys fail before POST |
-| E2 | reasoning (`content.reasoning`) | populated reasoning part in HTTP reload and direct SSE, including delta/update ordering | `BLOCKED/UNSUPPORTED` for first convergence | do not map, advertise, fold into answer text, or fake reasoning; explicit unsupported failure if encountered |
+| E2 | live reasoning (`content.reasoning`) | populated reasoning part in direct SSE, including delta/update ordering | `BLOCKED/UNSUPPORTED` for live translation | do not guess direct-SSE ordering or advertise live reasoning until a same-version capture exists |
 | E3 | external official-Web turn (`observation.external_turns`) | second client creates/sends while bridge observes global SSE through terminal/reload | `SAMPLE-VERIFIED` | global SSE is authoritative; no polling substitute |
 | E4 | providers (`configuration.providers`) | real `/provider` response with connected set and model catalog | `SAMPLE-VERIFIED` with E4b | use only connected provider/catalog/default/variant facts; `env/options` values and auth stay opaque |
 | E5 | configured default model (`configuration.default_model`) | configured-default source, valid/invalid/absent behavior, and relation to connected providers | `SAMPLE-VERIFIED` with E5b | follow the official picker order in §6.6 and always POST an explicit validated model |
@@ -124,7 +124,17 @@ Directive-007 captured these three observations together from the isolated OpenC
 | E4b | raw + sanitized `/provider` are recursively structure-equivalent; top level is `{all,default,connected}`, and provider/model key, type, and order come from raw transport | strict decoder; only declared value classes may be redacted; credentials/options remain opaque and never become product configuration |
 | E5b | real `GET /config` has valid `model:"localmock/alpha"`, invalid `model:"localmock/nonexistent"`, or no `model`; `/provider.default.localmock` is `zeta`, distinct from catalog-first `alpha` | official Web selection uses the exact order in §6.6; server-side omitted-model behavior is evidence only and is not CordCode's selection algorithm |
 
-`check_final_provider_evidence.py` derives all three results from raw HTTP/prompt/reload, proves raw/sanitized structural equivalence, and catches fourteen destructive mutations. This closes the pre-implementation evidence queue. E2 remains the sole explicit unsupported content surface; it does not block the other dossiers.
+#### 4.1.2 Owner acceptance correction (E2b persisted reasoning) — captured
+
+Owner UI acceptance on 2026-08-21 found that every sampled real OpenCode session failed immediately with `projection.hydrate_failed`. Read-only inspection of two failing 1.18.18 sessions proved that each history payload contained populated reasoning parts. The privacy-preserving structural sample is archived at `agent/opencode-web/testdata/official-1.18.18/samples/e2b-owner-history-reasoning.sanitized.json`; message text, credentials, owner paths, and source IDs are not retained.
+
+| Evidence | Physical fact | Mapping decision |
+|---|---|---|
+| E2b | `GET /session/:id/message` returns a bare message array whose assistant `parts[]` include `{id,sessionID,messageID,type:"reasoning",text,time:{start,end}}`; two failing sessions each contained two non-empty reasoning parts, alongside text and official UI-skipped `step-start`/`step-finish` parts | persisted reasoning is a supported hydrate fact: preserve part order and map non-empty `text` to the existing canonical `reasoning_delta`/Projection reasoning part; do not fold it into answer text and do not create a second writer |
+
+E2b corrects only HTTP history/hydrate. It does not turn the failed E2 live experiment into a direct-SSE sample and does not authorize guessed `message.part.delta`/`message.part.updated` ordering.
+
+`check_final_provider_evidence.py` derives the provider corrections from raw HTTP/prompt/reload, proves raw/sanitized structural equivalence, and catches fourteen destructive mutations. E2 direct-SSE reasoning remains the sole blocked content transport; E2b independently closes persisted HTTP reasoning for hydrate.
 
 ### 4.2 Mandatory stop lines and method reset
 
@@ -315,7 +325,7 @@ Implementation authorization is per dossier, not per file and not per endpoint. 
 |---|---|---|
 | runtime selection and transport | §6.1 / C1 | closed and verified |
 | session list, detail, project buckets | §6.2 / C2 | product exists; evidence/decoder audit correction required |
-| load/reopen message page | §6.3 / C4 | design-ready for captured shapes; reasoning explicitly unsupported by E2 |
+| load/reopen message page | §6.3 / C4 | owner acceptance failed; E2b requires persisted-reasoning hydrate repair |
 | create and send first/follow-up message | §6.4 / C3 | design-ready including E1/E1b selected variant |
 | live stream, retry, abort, reconnect, external turns | §6.5 / C4 | design-ready from A1–A5 plus E3 |
 | provider/model/agent selection | §6.6 / C5 | design-ready from E1b/E4b/E5b final mapping |
@@ -353,16 +363,16 @@ Implementation authorization is per dossier, not per file and not per endpoint. 
 
 ### 6.3 Load, reopen, and hydrate the message page — C4
 
-- **Status:** `SAMPLE-VERIFIED-DESIGN-READY` for text/tool/file facts captured by A1/A2/A4/A5/A6/A7/A8/A9. E2 is `BLOCKED/UNSUPPORTED` for reasoning in the first convergence.
+- **Status:** `IMPLEMENTED-AUDIT-PARTIAL / OWNER-ACCEPTANCE-FAILED`. Text/tool/file remain sample-verified by A1/A2/A4/A5/A6/A7/A8/A9. E2b sample-verifies persisted reasoning for HTTP hydrate and authorizes directive-014 repair; E2 direct-SSE reasoning remains `BLOCKED/UNSUPPORTED` until separately captured.
 - **User-visible behavior:** opening or reopening a session presents the server-persisted message history once, preserves roles/parts/errors/terminal state, and converges with live events without replacing or duplicating an active projection.
 - **Official UI source:** `packages/app/src/context/server-session.ts:568` calls `client.session.messages({sessionID,limit,before})`; `packages/app/src/context/global-sync/event-reducer.ts` applies message/session live facts.
 - **Server/schema source:** `packages/opencode/src/server/routes/instance/httpapi/groups/session.ts:43-48,85-86,179-190` defines `MessagesQuery` and `GET /session/:sessionID/message`; message/part schemas live under `packages/opencode/src/session/`.
-- **Same-version samples:** A1/A2 healthy persisted user/assistant order; A4 aborted assistant with `MessageAbortedError`; A5 partial-to-complete reconnect/reload; A6-A8 tool/interactions; A9 persisted text/file/image/file-source/agent-source parts. E2 archives two failed reasoning-stream strategies, repeated busy/retry, zero reasoning part, and no terminal.
-- **Verified transport shape:** persisted parts proven today are text; file with `mime`, `url`, optional `filename` and optional file `source`; agent with `name` and optional mention `source`; tool state; assistant error/finish facts. No populated reasoning HTTP/SSE shape is verified. Reasoning remains an explicit unsupported part, not an empty/text alias.
+- **Same-version samples:** A1/A2 healthy persisted user/assistant order; A4 aborted assistant with `MessageAbortedError`; A5 partial-to-complete reconnect/reload; A6-A8 tool/interactions; A9 persisted text/file/image/file-source/agent-source parts. E2 archives two failed reasoning-stream strategies and therefore remains negative evidence only for live transport. E2b is a sanitized structural dump derived read-only from two owner sessions that both reproduced `projection.hydrate_failed` on OpenCode 1.18.18.
+- **Verified transport shape:** persisted parts include text; reasoning `{id,sessionID,messageID,type,text,time:{start,end}}`; file with `mime`, `url`, optional `filename` and optional file `source`; agent with `name` and optional mention `source`; tool state; assistant error/finish facts. Official Web skips `patch`, `step-start`, and `step-finish` from its message store but retains populated reasoning as a first-class part. Direct-SSE reasoning ordering is still unverified.
 - **Bridge and SSV2 mapping:** HTTP history enters only a private Kernel hydrate transaction under source cut/fence. Live events arriving during hydrate enter pending-live and commit afterward in order. Push and pull expose the same Kernel head. iOS `ProjectionStore` remains the only `messages[]` writer from t=0.
-- **Error and unsupported behavior:** malformed supported parts fail the hydrate instead of being silently dropped. Encountering a reasoning part returns a diagnosable `unsupported content.reasoning for verified 1.18.18 shape` and leaves capability absent; it is never dropped or folded into answer text. Loading/empty/failed projection cannot re-enable legacy writers. Aborted/error assistants do not become healthy `finish=stop`.
-- **Owning tests:** full A1/A2/A4/A5/A6/A7/A8/A9 history replay; E2 negative replay proving no reasoning mapper/advertisement; explicit-reasoning-shape failure; hydrate pending-live ordering; source cut/fence; push/pull same head; malformed-part failure; iOS writer-seal and stale-revision rejection.
-- **Out of scope:** raw history delivery to iOS, history merge fallback, local similarity dedup, reasoning until a separate populated same-version sample exists, and patch/snapshot/step parts marked future in Gate B.
+- **Error and unsupported behavior:** malformed supported parts fail the hydrate instead of being silently dropped. A populated E2b history reasoning part must no longer fail the whole session, be dropped, or be folded into answer text. Direct live reasoning remains explicitly unavailable until its own sample exists; this restriction must not poison an otherwise valid cold hydrate. Loading/empty/failed projection cannot re-enable legacy writers. Aborted/error assistants do not become healthy `finish=stop`.
+- **Owning tests:** full A1/A2/A4/A5/A6/A7/A8/A9 history replay; E2b replay through adapter → rich history → private Kernel hydrate → Projection snapshot proving reasoning order/content and one ingest; destructive E2b tests for missing/wrong `text` and identity; regression proving `step-start`/`step-finish` are skipped exactly as official Web; two formerly failing owner session shapes must return a non-error projection. Retain E2 live negative proof and no live-reasoning advertisement. Also retain hydrate pending-live ordering, source cut/fence, push/pull same head, malformed-part failure, iOS writer-seal, and stale-revision rejection.
+- **Out of scope:** raw history delivery to iOS, history merge fallback, local similarity dedup, direct-SSE reasoning until separately captured, and patch/snapshot/step parts marked future in Gate B.
 
 ### 6.4 Create session and send first/follow-up messages — C3
 
