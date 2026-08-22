@@ -2,6 +2,7 @@ package codexweb
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sync"
@@ -132,17 +133,27 @@ func TestSubscribeUsesObserverConnectionOnSameSharedDaemon(t *testing.T) {
 	}
 }
 
-func TestManagedRecordModeAndStrictMismatchDoesNotKill(t *testing.T) {
-	dir := t.TempDir()
-	opts := ProbeOptions{DataDir: dir, CodexHome: "/tmp/cw-home"}
-	ep := &ServiceEndpoint{managed: &managedProcess{
-		pid: 42, port: 45678, startTime: "Sat Aug 22 14:00:00 2026",
-		binary: "/fake/codex", url: "ws://127.0.0.1:45678",
-	}}
-	if err := persistManagedRecord(opts, ep); err != nil {
-		t.Fatalf("persistManagedRecord: %v", err)
+func writeLegacyManagedRecord(t *testing.T, dir string, state managedState) string {
+	t.Helper()
+	raw, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		t.Fatal(err)
 	}
 	path := filepath.Join(dir, managedStateFile)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestLegacyManagedRecordStrictMismatchDoesNotKill(t *testing.T) {
+	dir := t.TempDir()
+	opts := ProbeOptions{DataDir: dir, CodexHome: "/tmp/cw-home"}
+	path := writeLegacyManagedRecord(t, dir, managedState{
+		Version: managedStateVersion, Source: string(SourceManagedLoopbackWS),
+		PID: 42, Port: 45678, ProcessStart: "Sat Aug 22 14:00:00 2026",
+		Binary: "/fake/codex", URL: "ws://127.0.0.1:45678", CodexHome: opts.CodexHome,
+	})
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
@@ -173,13 +184,11 @@ func TestManagedRecordModeAndStrictMismatchDoesNotKill(t *testing.T) {
 func TestCleanupRecordedManagedTerminatesVerifiedLegacyService(t *testing.T) {
 	dir := t.TempDir()
 	opts := ProbeOptions{DataDir: dir, CodexHome: "/tmp/cw-home"}
-	seed := &ServiceEndpoint{managed: &managedProcess{
-		pid: 77, port: 45679, startTime: "Sat Aug 22 14:01:00 2026",
-		binary: "/fake/codex", url: "ws://127.0.0.1:45679",
-	}}
-	if err := persistManagedRecord(opts, seed); err != nil {
-		t.Fatal(err)
-	}
+	writeLegacyManagedRecord(t, dir, managedState{
+		Version: managedStateVersion, Source: string(SourceManagedLoopbackWS),
+		PID: 77, Port: 45679, ProcessStart: "Sat Aug 22 14:01:00 2026",
+		Binary: "/fake/codex", URL: "ws://127.0.0.1:45679", CodexHome: opts.CodexHome,
+	})
 	var terminated atomic.Int32
 	deps := LifecycleDeps{
 		InspectProcess: func(int) (string, string, bool) {

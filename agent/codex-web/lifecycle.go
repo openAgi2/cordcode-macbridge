@@ -72,23 +72,9 @@ type ServiceEndpoint struct {
 	StartedByCordCode bool
 
 	client     *Client
-	managed    *managedProcess
 	deps       LifecycleDeps
-	probeOpts  ProbeOptions
-	statePath  string
 	closeOnce  *sync.Once
 	closeError error
-}
-
-// managedProcess 记录托管 WS 子进程（§6.3：由 MacBridge 独占并负责回收）。
-type managedProcess struct {
-	cmd       *exec.Cmd
-	pid       int
-	port      int
-	startTime string
-	binary    string
-	url       string
-	terminate func(pid int) error
 }
 
 // StatusError 是结构化失败（step 指明六步中的哪一步；official 保留官方原文）。
@@ -163,23 +149,37 @@ func DefaultDeps() LifecycleDeps {
 	}
 }
 
-// ResolveCodexBinary 按序解析官方 codex：env CODEX_WEB_CODEX_BIN → PATH → ChatGPT.app
-// 内嵌（与 MacBridge runtime 合并 PATH 的既有事实一致；Phase 0 即用该路径）。
+// ResolveCodexBinary resolves the official standalone under the default
+// CODEX_HOME. Desktop shared-daemon mode must not start a daemon from PATH or
+// the Desktop embedded binary: either could differ from the host version and
+// silently force Desktop back to its private stdio runtime.
 func ResolveCodexBinary() (string, error) {
+	home, err := ResolveCodexHome("")
+	if err != nil {
+		return "", err
+	}
+	return ResolveCodexBinaryForHome(home)
+}
+
+// ResolveCodexBinaryForHome keeps the explicit test override, then requires the
+// official managed standalone belonging to the active CODEX_HOME. There is no
+// PATH/Desktop fallback on the product daemon-start path.
+func ResolveCodexBinaryForHome(codexHome string) (string, error) {
 	if p := os.Getenv("CODEX_WEB_CODEX_BIN"); p != "" {
 		if _, err := os.Stat(p); err == nil {
 			return p, nil
 		}
 		return "", fmt.Errorf("CODEX_WEB_CODEX_BIN=%s 不存在", p)
 	}
-	if p, err := exec.LookPath("codex"); err == nil {
-		return p, nil
+	home, err := ResolveCodexHome(codexHome)
+	if err != nil {
+		return "", err
 	}
-	const appBundle = "/Applications/ChatGPT.app/Contents/Resources/codex"
-	if _, err := os.Stat(appBundle); err == nil {
-		return appBundle, nil
+	standalone := filepath.Join(home, "packages", "standalone", "current", "codex")
+	if _, err := os.Stat(standalone); err == nil {
+		return standalone, nil
 	}
-	return "", errors.New("codex binary not found（PATH 与 ChatGPT.app 内嵌均缺失）")
+	return "", fmt.Errorf("official managed standalone not found: %s", standalone)
 }
 
 // ControlSocketPath 推导官方 control socket 路径（app-server-transport transport/mod.rs:58；
@@ -222,38 +222,6 @@ func runDaemonStart(bin, codexHome string) (string, error) {
 	return string(out), nil
 }
 
-func (m *managedProcess) kill() error {
-	if m == nil {
-		return nil
-	}
-	if m.pid <= 0 && m.cmd != nil && m.cmd.Process != nil {
-		m.pid = m.cmd.Process.Pid
-	}
-	if m.pid <= 0 {
-		return nil
-	}
-	if m.cmd != nil && m.cmd.ProcessState != nil {
-		return nil
-	}
-	if m.cmd != nil {
-		_ = m.cmd.Process.Signal(os.Interrupt)
-		done := make(chan error, 1)
-		go func() { done <- m.cmd.Wait() }()
-		select {
-		case <-done:
-			return nil
-		case <-time.After(5 * time.Second):
-			_ = m.cmd.Process.Kill()
-			<-done
-			return nil
-		}
-	}
-	if m.terminate != nil {
-		return m.terminate(m.pid)
-	}
-	return terminateManagedProcess(m.pid)
-}
-
 // Probe 按 §6.1 顺序建立连接并完成 §6.2 六步就绪判定。
 func Probe(opts ProbeOptions) (*ServiceEndpoint, error) {
 	return ProbeWith(LifecycleDeps{}, opts)
@@ -261,25 +229,32 @@ func Probe(opts ProbeOptions) (*ServiceEndpoint, error) {
 
 // ProbeWith 允许注入 deps（单测）。
 func ProbeWith(deps LifecycleDeps, opts ProbeOptions) (*ServiceEndpoint, error) {
-	fillDeps(&deps)
 	resolvedHome, err := ResolveCodexHome(opts.CodexHome)
 	if err != nil {
 		return nil, notConfigured("resolve-codex-home", err)
 	}
 	opts.CodexHome = resolvedHome
-	bin, err := deps.ResolveCodexBinary()
-	if err != nil {
-		return nil, notConfigured("resolve-binary", err)
+	if deps.ResolveCodexBinary == nil {
+		deps.ResolveCodexBinary = func() (string, error) {
+			return ResolveCodexBinaryForHome(resolvedHome)
+		}
 	}
-	_ = bin // 就绪链使用 transport 层；bin 供 daemon start/托管路径使用（经 deps 闭包）
+	fillDeps(&deps)
 
 	if opts.ExplicitURL != "" {
 		// 显式配置存在时以它为准，失败直接报错（设计 §1"失败可见"：不静默降级到其他路径）。
 		ep, err := probeExplicit(deps, opts)
 		if err == nil {
-			cleanupRecordedManaged(opts, bin, deps)
+			if bin, resolveErr := deps.ResolveCodexBinary(); resolveErr == nil {
+				cleanupRecordedManaged(opts, bin, deps)
+			}
 		}
 		return ep, err
+	}
+
+	bin, err := deps.ResolveCodexBinary()
+	if err != nil {
+		return nil, notConfigured("resolve-standalone", err)
 	}
 
 	// daemon 复用：socket 存在即尝试连接。注意语义区分：
@@ -304,8 +279,7 @@ func ProbeWith(deps LifecycleDeps, opts ProbeOptions) (*ServiceEndpoint, error) 
 
 	// daemon managed start。Desktop 产品要求单一官方 daemon；失败不得另起 loopback
 	// app-server，否则会重现跨进程 writer lock 与 live 订阅分裂。
-	bin2, _ := deps.ResolveCodexBinary()
-	daemonStartOut, daemonStartErr := deps.RunDaemonStart(bin2, opts.CodexHome)
+	daemonStartOut, daemonStartErr := deps.RunDaemonStart(bin, opts.CodexHome)
 	if daemonStartErr == nil && serr == nil &&
 		waitSocket(deps, socketPath, 30*time.Second) {
 		if t, derr2 := deps.DialUDS(context.Background(), socketPath); derr2 == nil {
@@ -337,14 +311,6 @@ func probeExplicit(deps LifecycleDeps, opts ProbeOptions) (*ServiceEndpoint, err
 		return nil, notConfigured("explicit-url-dial", err)
 	}
 	return establishOnTransport(deps, opts, t, ServiceEndpoint{Source: SourceExplicitURL, TCPEndpoint: opts.ExplicitURL})
-}
-
-func establish(deps LifecycleDeps, opts ProbeOptions, ep ServiceEndpoint) (*ServiceEndpoint, error) {
-	t, err := deps.DialTCP(context.Background(), ep.TCPEndpoint)
-	if err != nil {
-		return nil, notConfigured("managed-dial", err)
-	}
-	return establishOnTransport(deps, opts, t, ep)
 }
 
 func establishOnTransport(deps LifecycleDeps, opts ProbeOptions, t Transport, ep ServiceEndpoint) (*ServiceEndpoint, error) {
@@ -417,8 +383,6 @@ func establishOnTransport(deps LifecycleDeps, opts ProbeOptions, t Transport, ep
 
 	ep.client = c
 	ep.deps = deps
-	ep.probeOpts = opts
-	ep.statePath = managedStatePath(opts.DataDir)
 	ep.CLIVersion = extractVersionFromUserAgent(init.UserAgent)
 	ep.AppServerVersion = ep.CLIVersion
 	ep.CodexHome = init.CodexHome
@@ -513,7 +477,8 @@ func (e *ServiceEndpoint) OpenClient(ctx context.Context, opts ProbeOptions) (*C
 // Source 返回归属（§6.3 诊断区分用）。
 func (e *ServiceEndpoint) SourceKind() ServiceSource { return e.Source }
 
-// Close 关闭连接。外部/自启 daemon 一律不停（§6.3）；托管 WS 进程独占回收。
+// Close only closes this connection. Shared daemon ownership is external even
+// when CordCode initially started it, so Close never stops a runtime process.
 func (e *ServiceEndpoint) Close() error {
 	if e.closeOnce == nil {
 		e.closeOnce = &sync.Once{}
@@ -523,12 +488,6 @@ func (e *ServiceEndpoint) Close() error {
 			if err := e.client.Close(); err != nil && e.closeError == nil {
 				e.closeError = err
 			}
-		}
-		if e.managed != nil {
-			if err := e.managed.kill(); err != nil && e.closeError == nil {
-				e.closeError = err
-			}
-			removeManagedRecordIfOwned(e.statePath, e.managed)
 		}
 	})
 	return e.closeError

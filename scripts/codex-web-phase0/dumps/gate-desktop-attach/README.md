@@ -90,3 +90,25 @@ Release `74fc3866d18c` 覆盖安装后：
 
 PID/FD 仍只代表本次采样。owner 当前正在使用的主 Desktop 是设置环境前启动的进程；为了不终止
 官方客户端及本 Codex 会话，本轮没有自动重启它。owner 真机矩阵前必须手动重启 Desktop 一次。
+
+## v2.0 可复跑拓扑检查
+
+只读检查脚本：
+
+```text
+scripts/codex-web-phase0/verify_shared_daemon_topology.sh
+```
+
+默认验证 active `CODEX_HOME` standalone 与 Desktop 内嵌 CLI exact version、launchd attach 环境、
+daemon listener 和零 managed-loopback。提供隔离 Desktop/CordCode Release PID 后还会用 Unix FD peer
+证明它们连接同一 daemon：
+
+```text
+CODEX_DESKTOP_PID=<isolated-desktop-pid> \
+CORDCODE_RUNTIME_PID=<installed-runtime-pid> \
+scripts/codex-web-phase0/verify_shared_daemon_topology.sh
+```
+
+v2.0 hardening 同时从正式 Go lifecycle 删除了 managed process 的构造、持久化与 Close 回收面；只保留
+旧 record 的严格 PID/argv/start-time/port 校验清理。daemon start binary 固定解析 active
+`CODEX_HOME/packages/standalone/current/codex`，不再从 PATH 或 Desktop 内嵌 CLI 降级选择。

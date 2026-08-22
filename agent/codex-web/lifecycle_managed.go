@@ -7,15 +7,11 @@ package codexweb
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
-
-	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 const (
@@ -40,31 +36,6 @@ func managedStatePath(dataDir string) string {
 		return ""
 	}
 	return filepath.Join(dataDir, managedStateFile)
-}
-
-func persistManagedRecord(opts ProbeOptions, ep *ServiceEndpoint) error {
-	path := managedStatePath(opts.DataDir)
-	if path == "" || ep == nil || ep.managed == nil {
-		return nil
-	}
-	m := ep.managed
-	if m.pid <= 0 || m.port <= 0 || m.url == "" || m.binary == "" || m.startTime == "" {
-		return fmt.Errorf("managed process identity incomplete: pid=%d port=%d url=%q binary=%q start=%q", m.pid, m.port, m.url, m.binary, m.startTime)
-	}
-	state := managedState{
-		Version: managedStateVersion, Source: string(SourceManagedLoopbackWS),
-		URL: m.url, Port: m.port, PID: m.pid, ProcessStart: m.startTime,
-		Binary: filepath.Clean(m.binary), CodexHome: opts.CodexHome,
-		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
-	}
-	raw, err := json.MarshalIndent(state, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(opts.DataDir, 0o700); err != nil {
-		return err
-	}
-	return core.AtomicWriteFile(path, raw, 0o600)
 }
 
 func readManagedRecord(path string) (*managedState, error) {
@@ -123,17 +94,4 @@ func cleanupRecordedManaged(opts ProbeOptions, expectedBinary string, deps Lifec
 		_ = deps.TerminateProcess(state.PID)
 	}
 	_ = os.Remove(path)
-}
-
-func removeManagedRecordIfOwned(path string, process *managedProcess) {
-	if path == "" || process == nil {
-		return
-	}
-	state, err := readManagedRecord(path)
-	if err != nil || state == nil {
-		return
-	}
-	if state.PID == process.pid && state.Port == process.port && state.ProcessStart == process.startTime {
-		_ = os.Remove(path)
-	}
 }

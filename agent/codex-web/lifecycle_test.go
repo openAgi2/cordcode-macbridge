@@ -10,6 +10,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -347,6 +349,68 @@ func TestResolveCodexHomeUsesOfficialPrecedence(t *testing.T) {
 	t.Setenv("CODEX_HOME", "")
 	if got, err := ResolveCodexHome(""); err != nil || got != "/Users/tester/.codex" {
 		t.Fatalf("default CODEX_HOME=%q err=%v", got, err)
+	}
+}
+
+func TestResolveCodexBinaryForHomeRequiresActiveStandalone(t *testing.T) {
+	t.Setenv("CODEX_WEB_CODEX_BIN", "")
+	home := t.TempDir()
+	standalone := filepath.Join(home, "packages", "standalone", "current", "codex")
+	if err := os.MkdirAll(filepath.Dir(standalone), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(standalone, []byte("test"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ResolveCodexBinaryForHome(home)
+	if err != nil || got != standalone {
+		t.Fatalf("standalone=%q err=%v, want %q", got, err, standalone)
+	}
+}
+
+func TestResolveCodexBinaryForHomeDoesNotFallBackToPATHOrDesktop(t *testing.T) {
+	t.Setenv("CODEX_WEB_CODEX_BIN", "")
+	t.Setenv("PATH", t.TempDir())
+	home := t.TempDir()
+	if _, err := ResolveCodexBinaryForHome(home); err == nil || !strings.Contains(err.Error(), "official managed standalone not found") {
+		t.Fatalf("missing active standalone must fail closed, got %v", err)
+	}
+}
+
+func TestProbeDaemonStartUsesActiveHomeStandalone(t *testing.T) {
+	t.Setenv("CODEX_WEB_CODEX_BIN", "")
+	home, err := os.MkdirTemp("/tmp", "cwbh-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(home) })
+	standalone := filepath.Join(home, "packages", "standalone", "current", "codex")
+	if err := os.MkdirAll(filepath.Dir(standalone), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(standalone, []byte("test"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	peer := newFakePeer()
+	peer.install(happyHandlers())
+	var startedWith string
+	socketReady := false
+	deps := LifecycleDeps{
+		RunDaemonStart: func(bin, _ string) (string, error) {
+			startedWith = bin
+			socketReady = true
+			return `{"status":"started"}`, nil
+		},
+		SocketExists: func(string) bool { return socketReady },
+		DialUDS:      func(context.Context, string) (Transport, error) { return peer, nil },
+	}
+	ep, err := ProbeWith(deps, ProbeOptions{CodexHome: home})
+	if err != nil {
+		t.Fatalf("ProbeWith: %v", err)
+	}
+	t.Cleanup(func() { _ = ep.Close() })
+	if startedWith != standalone {
+		t.Fatalf("daemon start binary=%q, want active CODEX_HOME standalone %q", startedWith, standalone)
 	}
 }
 
