@@ -1,7 +1,7 @@
 # codex-web Backend v2.0（Desktop 同 daemon 拓扑 + 官方 app-server 翻译）
 
 - 日期：2026-08-21
-- 状态：**v2.0 topology-first 施工合同；取代 v1.5 中“Terminal Gate 可单独放行产品实施”的冲突规则。Desktop 与 CordCode 连接同一官方 daemon 是产品代码开工和继续扩面的共同硬门；任何 PARTIAL、独立 runtime 或 managed-loopback 结果均不得放行。最新实施证据以 `/Users/jacklee/Projects/cordcode-macbridge-codex-web` 同名文档为准。**
+- 状态：**v2.0 topology-first 施工合同；取代 v1.5–v1.7 中“Terminal Gate 可单独放行产品实施”的冲突规则。Desktop 与 CordCode 连接同一官方 daemon 是产品代码开工和继续扩面的共同硬门；任何 PARTIAL、独立 runtime 或 managed-loopback 结果均不得放行。**
 - 参考方案：[2026-08-16-dsh-web-backend-design.md](2026-08-16-dsh-web-backend-design.md)
 - 一轮评审：[2026-08-21-codex-web-backend-design-review.md](2026-08-21-codex-web-backend-design-review.md)
 - 二轮评审：[2026-08-21-codex-web-backend-design-review-r2.md](2026-08-21-codex-web-backend-design-review-r2.md)
@@ -9,7 +9,7 @@
 - 四轮确认评审：[2026-08-21-codex-web-backend-design-review-r4.md](2026-08-21-codex-web-backend-design-review-r4.md)
 - 历史前置分析（仅作问题来源，已降级，不授权实施）：[2026-08-21-codex-web-backend-feasibility-analysis.md](2026-08-21-codex-web-backend-feasibility-analysis.md)
 - Codex 源码 pin：`536f86e5cc9ec1ff38457d099bf320b9d08eeeba`
-- 本机官方二进制：`codex-cli 0.148.0-alpha.21`
+- 本机官方二进制：`codex-cli 0.148.0-alpha.21`（设计时）；**Phase 0 实施时实测 `0.149.0-alpha.4`**（ChatGPT.app 内嵌，版本漂移已按 §3.2 记录，schema 与 pin 逐项吻合）
 - 不变约束：CordCode 初衷 + SSV2 十二条护栏 + source-first/真实样本纪律
 
 > [!IMPORTANT]
@@ -426,28 +426,33 @@ SSV2 key 必须包含 backend id，禁止只按 thread id 合并。实验期 UI 
 
 Desktop 产品路径只允许一个运行时真相源：
 
-1. **官方 daemon 复用**：探测 Codex 官方 control socket/`daemon version`，已运行则复用；
-2. **官方 daemon managed start**：未运行且当前 Codex 支持 daemon 时，调用
-   `codex app-server daemon start`，再通过 control socket 连接；
-3. **Desktop attach**：CordCode Link 在用户 launchd domain 设置
-   `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1`，Desktop 下一次启动连接同一 control socket；
-4. **失败可见**：standalone 缺失、daemon 启动失败、版本不兼容或环境配置失败时，
+1. **官方 daemon 是登录级座位，不是 MacBridge 子进程**：用户 LaunchAgent 周期执行官方
+   `daemon start`（已运行则 `alreadyRunning`，不换 PID）。MacBridge 启动只探测/补位；
+   停止或退出 **不得** `daemon stop`、不得 bootout 该 daemon、不得杀掉 Desktop。
+2. **官方 daemon 复用**：探测 Codex 官方 control socket/`daemon version`，已运行则复用；
+3. **官方 daemon managed start**：座位尚未起来时调用 `codex app-server daemon start`，
+   再通过 control socket 连接；
+4. **Desktop attach**：登录域设置 `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1`。Desktop **启动时**
+   探测成功则连同一 control socket；已附着后，MacBridge 退出不应要求再重启 Desktop。
+5. **失败可见**：standalone 缺失、daemon 启动失败、版本不兼容或环境配置失败时，
    `codex-web` 标为 `not_configured`/`incompatible`，不得另起 app-server 假装可用。
 
-这不是“优先级列表”，而是串行前置条件。第 1–3 步未全部成立时没有第 4 种可用 transport。
-Desktop 已在运行但尚未继承 attach 环境时，产品必须明确提示一次正常重启；不得 kill/steal Desktop，
-也不得趁其仍在 Embedded runtime 时启动第二服务继续工作。
+这不是“优先级列表”，而是串行前置条件。官方 Desktop 一旦探测失败会锁死私有 stdio，且没有
+远程翻回 API。这只允许作为异常恢复（Desktop 已经掉线），**不是** MacBridge 正常退出流程。
+不得 kill/steal Desktop，也不得趁其仍在 Embedded runtime 时启动第二服务继续工作。
 
-`-codex-web-app-server-url` 只允许隔离 contract/e2e 与明确的非 Desktop 实验；Desktop 产品模式禁止使用。
-`managed-loopback-ws` 只保留为历史失败证据与旧 owned-process 清理输入，不是产品 fallback。
+`-codex-web-app-server-url` 只保留给隔离 contract/e2e 与明确的非 Desktop 实验；Desktop 产品模式
+不能使用它，因为当前 Desktop 已证明的入口是 local daemon Unix socket，而不是任意 loopback URL。
+此前的 `managed-loopback-ws` 只保留为历史失败证据与旧 owned-process 清理输入，不再是产品 fallback。
 
-连接 daemon control socket 有两种实现路径：
+连接 daemon control socket 有两种实现路径（Phase 0 实测修正，见 §22-2）：
 
-- Go 直接连接 Unix domain socket并讲 app-server JSON-RPC；或
-- 启动轻量 `codex app-server proxy --sock <path>`，由 proxy 把 stdio 字节转发到官方 socket。
+- Go 直连 Unix domain socket，**讲 WebSocket over UDS**（control socket 由官方 `accept_async` 做
+  WS 升级；裸 newline JSON 连接会被立即关闭；每个 JSON-RPC 消息一个 WS text 帧）；或
+- 启动轻量 `codex app-server proxy --sock <path>`——它是**纯字节中继**，客户端仍需自行讲 WS。
 
 proxy 只是 transport adapter，不拥有 agent session；与旧 backend “每 session 启一个 app-server”不同。
-最终选型必须由 Phase 0 的断线、server request 与多连接样本决定，不依据实现便利拍板。
+Phase 0 已完成断线、server request 与多连接取样（dumps/ownership、reconnect、gate-terminal）。
 
 ### 6.2 探活不等于能力就绪
 
@@ -501,10 +506,10 @@ CordCode 产品能力仍有证据/目录缺口，不得广告；♻️ Bridge �
 | MCP/dynamic tool | item + server request | ✅ | 仅对真实取样过的 variant 广告 |
 | plan/todos | plan item/notification | ✅/🧪 | plan item started/completed 生命周期 ✅；`item/plan/delta` 流式为 experimental 🧪，取样和版本门控后才消费 |
 | context usage | `thread/tokenUsage/updated` | ✅ | 使用官方窗口与累计量，不本地估算 |
-| command approval | `item/commandExecution/requestApproval` | ✅/🧪 | 基础 request/response ✅；`availableDecisions`/`additionalPermissions` 为 experimental 字段，未开 `experimentalApi` 时被 server 剥除，一期 UI 必须按剥除后形状可用 |
+| command approval | `item/commandExecution/requestApproval` | ✅/🧪 | 基础 request/response ✅；`availableDecisions`/`additionalPermissions` 为 experimental 字段（stable schema 剥除）。**Phase 0 实测修正（§22-1）**：`additionalPermissions` 未开 `experimentalApi` 时被 server 出站剥除，但 `availableDecisions` 在未声明 experimentalApi 的连接上仍**物理到达**（accept / acceptWithExecpolicyAmendment / cancel）；一期 UI 仍按可能缺失兼容，不依赖其稳定性；合法 decision 为 accept/cancel/结构化变体，cancel 后 turn 终态 interrupted |
 | file approval | `item/fileChange/requestApproval` | ✅ | 不把“发送 response 成功”提前显示为修改成功 |
 | permission request | `item/permissions/requestApproval` | ✅ | 呈现官方 `RequestPermissionProfile`，响应 `GrantedPermissionProfile + scope`；该载荷没有 `availableDecisions` |
-| structured questions | `item/tool/requestUserInput` | 🧪 | README/类型均标 experimental；core config 当前默认启用且不由 `experimentalApi` 门控，仍须按 🧪 取得 1–3 题真实样本并版本门控 |
+| structured questions | `item/tool/requestUserInput` | 🧪 | README/类型均标 experimental；stdio 与 daemon WS 均已取得真实样本。**Phase 4 实测补充（§22-7）**：官方 `request_user_input` tool 要求每题 2–3 个非空 options，并自动加入自由文本 Other；合法三题在隔离 daemon WS 下完成 request → answers map → resolved → turn completed。仍须版本门控 |
 | MCP elicitation | `mcpServer/elicitation/request` | 🧪 | Form / `openai/form` / Url 三类；`openai/form` 还需 initialize capability `mcpServerOpenaiFormElicitation` |
 | list_models | `model/list` | ✅ | 当前 configured provider 的模型目录；顺序、hidden、reasoning efforts 全由官方目录提供，不冒充 provider 目录 |
 | effective provider | `config/read` → `config.model_provider` | 🧪 只读 | v2 `Config` 是 snake_case 特例；读取 typed 当前有效 provider，保证继承用户第三方配置。`ConfigReadResponse`/嵌套 `Config` 带 `ExperimentalApi` 标记，字段形状按 Phase 0 样本冻结；不写 `config.toml` |
@@ -532,6 +537,10 @@ CordCode 产品能力仍有证据/目录缺口，不得广告；♻️ Bridge �
 - delta 与 completed snapshot 必须避免双发；codec 从官方 reducer/样本独立实现，旧 codec 只作输出回归对照；
 - 未识别通知记录 method/version，不能导致连接崩溃；若它影响已广告 capability，则该 capability
   fail closed，而不是递归猜字段；
+- **通知分级（Phase 0 实测，§22-4）**：`thread/started`、`thread/status/changed` 等全局通知在订阅前
+  也会到达所有连接；`turn/started`、`item/*`、`turn/completed` 只发已订阅连接且**不重放**。
+  mid-turn attach 收到后续 delta 与唯一终态，但 `turn/started` 不补发——turn 开始事实由
+  `thread/status/changed(active)` + `item/started` 推导，完成仍只认 `turn/completed`；
 - JSON-RPC error 的 code/message/data 原样进入诊断，面向 iOS 的错误可以本地化，但不能丢原文。
 
 ### 7.2 审批与提问
@@ -544,6 +553,8 @@ server-initiated request 必须有独立 registry：
 - `serverRequest/resolved` 或相关 item completed 才是 UI 收口信号；
 - 断线时清理旧 epoch pending，不向新连接重放旧 response；
 - 多题 `requestUserInput` 必须用真实样本确认官方批结构，再映射到 iOS 单题提交模型；
+- **transport 证据不可类推**：stdio 与 daemon WS 分别保留真实样本；模型 tool 输入若违反官方
+  “每题非空 options”约束会收到 function-call error，不能误判成 server-request 路由失败；
 - Mac 与 iOS 同时可答时必须实测“先答者得”行为，不能沿用 DSH 的结论。
 
 ### 7.3 源码推导的 wire shape 索引（待 Phase 0 样本确认）
@@ -558,9 +569,9 @@ Phase 0 设计采样与 adapter skeleton；它**不是 wire fixture**。每一�
 | `thread/start` | stable `model`、`modelProvider` 可选；provider 仅创建时输入 | 字段剥除/默认值、custom provider id 来源、thread 回显的 effective model/provider |
 | `turn/start` | 可选 `model`，对本 turn 及后续 turn 生效；无 `modelProvider` | model override 的生效范围、失败原文及 completed 回显 |
 | `turn/steer` | `expectedTurnId` 必填；仅 active regular turn | regular/review/compact 三类结果与 stale turnId error |
-| `config/read` | response `config` 内部是 snake_case；typed `model_provider`；flatten `additional`；response/config 带 `ExperimentalApi` | `additional.model_providers` 的存在性、组成、形状与 experimental 剥除；敏感值脱敏 |
-| `item/tool/requestUserInput` | experimental；批 questions，答案按 question id 返回 | 1–3 题、单选/多选/自由文本、blocking 与 response 的完整物理载荷 |
-| command approval | 基础 request/response 稳定；`availableDecisions`/`additionalPermissions` experimental，未启用时可被剥除 | 开/关 `experimentalApi` 两组 fixture 与 resolved/completed 顺序 |
+| `config/read` | response `config` 内部是 snake_case；typed `model_provider`；flatten `additional`；response/config 带 `ExperimentalApi` | **Phase 0 已裁决（§22-3）**：0.149.0-alpha.4 实测 `additional = {}`，不含 `model_providers`；样本 dumps/models-config |
+| `item/tool/requestUserInput` | experimental；批 questions，答案按 question id 返回；官方 tool 输入每题必须 2–3 个 options，server params `isOther=true` 允许自由文本 Other；stdio 单题与 daemon-WS 三题已冻结（§22-7） | blocking(Plan mode) 与失败/取消的完整物理载荷仍待补样 |
+| command approval | 基础 request/response 稳定；两字段 experimental（schema 剥除）；**Phase 0：wire 上 availableDecisions 不剥除、additionalPermissions 剥除**；decision 枚举 accept/cancel/结构化，cancel→interrupted | Phase 0 已采（dumps/interaction）；resolved→completed 顺序已入样本 |
 | permission approval | `RequestPermissionProfile` → `GrantedPermissionProfile + scope`；没有 command 的 `availableDecisions` | allow/deny/scope 与失败/断线行为 |
 | MCP elicitation | Form / `openai/form` / Url；`openai/form` 依赖 initialize capability | 三 variant request/response、capability absent 与取消/失败行为 |
 | plan | item started/completed 生命周期稳定；`item/plan/delta` experimental | 无 delta 与有 delta 两组 reducer 时间线 |
@@ -1047,7 +1058,33 @@ PASS/PARTIAL/FAIL 口径”只描述当时决策，已被 v2.0 §8.2 的 PASS/EV
 纯措辞偏好、重复总结、没有新证据的“再评一轮”不解除冻结。出现有效反证时，不允许静默补 fallback：
 必须保留样本、标注受影响 capability，按 §3.0 回写设计并重新裁决相关 Phase 0 Gate。
 
-## 22. v2.0 施工防偏航清单
+## 22. Phase 0 采纳与纠偏记录（2026-08-22）
+
+对应裁决文档：[2026-08-21-codex-web-phase0-gate-verdict.md](2026-08-21-codex-web-phase0-gate-verdict.md)。
+证据：`scripts/codex-web-phase0/`（schemas 692 文件、§12 九组样本、TUI 三场景、宿主实测；四套
+validate 共 136 断言全 PASS，可复跑）。历史裁决曾把“Terminal daemon+默认 TUI 路径成立”登记为
+共享运行时 Gate PASS，同时只记录 Desktop 独立 stdio runtime。**v2.0 判定该 PASS 口径无效**：
+Terminal 只能证明 daemon transport，不能放行 Desktop 产品路线。§22-8/9 的 Desktop attach 与产品接线
+证据才满足新的 T0；T1 owner 双向真机结果仍必须独立记账。
+
+| # | 回写项 | 证据落点 |
+|---|---|---|
+| 1 | command approval `availableDecisions` 未声明 experimentalApi 也物理到达（`additionalPermissions` 被剥除）；decision accept/cancel/结构化，cancel→interrupted | dumps/interaction + validate_schemas s13 |
+| 2 | control socket = WebSocket over UDS（JSON-RPC 每 WS text 帧一消息）；`app-server proxy` 为纯字节中继 | unix_socket.rs `accept_async` + gate-terminal 实测 |
+| 3 | `config/read` 的 flatten `additional` 实测为空，不含 `model_providers` | dumps/models-config |
+| 4 | 通知分级与不重放边界（全局 vs 订阅者级） | gate-terminal README 关键发现 2 |
+| 5 | **Phase 2 实测补充**：从未有过 turn 的 thread 不出现在 `thread/list`（rollout 未物化，list 为 scan-and-repair + state DB 视图；`thread/start` 后立即 `turn/start` 即可见，turn 是否完成无关）。catalog 不得为此伪造条目或改用 loaded 集合冒充列表 | p2-catalog e2e（agent/codex-web/sessions_e2e_test.go 空条目断言）|
+| 6 | **Phase 2 实测补充**：`thread/list` 默认 created_at（秒粒度）cursor 翻页会跳过与 cursor 同秒创建的兄弟条目（官方 `should_skip` 只认严格 `ts < cursor.ts`，tie-breaker id 在遍历层不生效）；dumps/catalog 的 `cursor_page2_count:0`（同秒 4 条）即此行为。CodCode 聚合 catalog 用服务端默认页大小（单页覆盖），不依赖小页深翻页补全 | rollout/src/list.rs `should_skip` + p2-catalog e2e limit=1 边界断言 |
+| 7 | **Phase 4 daemon-WS 实测补充**：首次 ASK3 失败根因不是 transport，而是旧 mock fixture 第二题缺 options；官方 `normalize_request_user_input_tool_args` 明确拒绝任一空 options，并把错误作为 function_call_output 回给模型。修正为每题 2–3 options 后，同版本隔离 daemon WS 当前连接真实收到三题 `item/tool/requestUserInput`，adapter 写 option/text(Other)/option answers map，随后收到 `serverRequest/resolved` 且 turn completed | [requestUserInput daemon-WS Gate](2026-08-22-codex-web-userinput-daemon-gate.md)；`codex-rs/core/src/tools/handlers/request_user_input_spec.rs`；`TestE2EInteractionUserInput` |
+| 8 | **Desktop attach Gate 补充**：当前 ChatGPT `26.818.31338` 宿主在 `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1`、无强制 CLI 覆盖且 daemon 版本兼容时，以 WebSocket-over-UDS 连接 `~/.codex/app-server-control/app-server-control.sock`；隔离 Desktop 无私有 app-server 子进程，FD peer 与 daemon 监听 socket 相同。由此撤销“Desktop 只能独立 stdio”的旧覆盖面结论，并禁止产品回落 `managed-loopback-ws` | [Desktop attach Gate](../scripts/codex-web-phase0/dumps/gate-desktop-attach/README.md)；当前 Desktop `app.asar` 本地只读检查；隔离进程树/FD/initialize 日志 |
+| 9 | **Gate 2 产品接线**：MacBridge 先做 Desktop/standalone exact-version gate、启动官方 daemon、再向用户 launchd domain 写 attach 开关；codex-web 产品空 home 按官方规则解析为 `CODEX_HOME`/`~/.codex`；daemon 失败直接 `shared-daemon-required`，managed-loopback 只留旧 record 安全清理。Release 中 CordCode 两 connection 与隔离 Desktop 的 FD 均落在同一 daemon | commit `74fc3866d18c`；`RuntimeManager.configureCodexDesktopSharedRuntime`；`ResolveCodexHome`；[Desktop attach Gate](../scripts/codex-web-phase0/dumps/gate-desktop-attach/README.md) |
+
+§22-7 补齐 daemon 主路径 structured-user-input 真实证据；§22-8 由 owner 真机反证触发重新开门；
+§22-9 将 Desktop 产品拓扑修正并部署为官方单 daemon 多 connection。自动拓扑 Gate 不替代 owner 真机矩阵。
+实施注意的新事实清单（daemon 前置、同 daemon 多连接 resume 无冲突、`excludeTurns` 需
+experimentalApi、pending server request 不重放、TUI PTY 驱动细节等）见裁决文档 §4。
+
+## 23. v2.0 施工防偏航清单
 
 新 agent 接手时必须先回答并附证据；任一项回答为“否/未知”时，只能调查，不能扩展产品功能：
 
