@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T09:38:00Z",
+ "updated_at": "2026-08-22T09:39:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -1280,14 +1280,14 @@
    "id": "p3-stream-regression",
    "title": "Phase3 A/B 帧级对照实测",
    "description": "同网络/provider/模型/prompt 下旧 codex 与 codex-web 帧级指标对照报告落盘（§13.2 全项）。",
-   "status": "blocked",
+   "status": "done",
    "phase": "phase3",
    "kind": "regression",
    "depends_on": [
     "p3-stream-tests"
    ],
    "source": "design §14/phase3",
-   "notes": "audit 2026-08-22：Phase3 Subscribe 在 agent/codex-web/events.go 独立调用 Probe；daemon 路径偶然复用同一服务，但 managed-loopback 路径会拉起第二 app-server，违背设计 §2.3/§4/§6 单一 shared service。repairable-heavy；review-fix-for:p5-single-service-review-fix-regression。",
+   "notes": "A/B 帧级证据保持有效；单服务拓扑缺口已由 p5-single-service-review-fix-regression 与 v2.0 topology-first hardening 闭环。resolved-via:p5-single-service-review-fix-regression。",
    "verification": {
     "required": true,
     "status": "present",
