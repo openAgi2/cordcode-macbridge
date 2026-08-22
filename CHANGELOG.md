@@ -8,6 +8,7 @@
 
 ## [Unreleased]
 
+- **修复：Codex Web 会话重命名误报不支持**：官方 `thread/name/set` 与 `thread/read` 确认链路已经存在，但 driver 漏接 Bridge 的 `SessionRenamer` 能力，请求在进入 app-server 前就被拒绝。现重命名直达官方写面，并以随后读取到的官方 thread 元数据作为唯一返回真相，同时即时刷新会话列表。
 - **修复：Codex Web 在项目目录新建的会话跑到用户根目录**：`create_session`/`send_message` 已携带项目目录，但 codex-web driver 漏实现 Bridge 既有的工作目录切换接口，官方 `thread/start.cwd` 因而恒为 Link 启动目录 `/Users/<用户名>`。现请求目录会原样进入官方 `thread/start`，会话列表继续按官方 `thread.cwd` 分组；Chat 中新建的会话会留在 Chat，不依赖客户端重分组或缓存纠偏。
 - **修复：Codex Web 连续发送时第二条用户消息不显示**：官方 `item/started` 已携带每轮 `userMessage` 的完整正文和 `threadId/turnId/itemId`，但 live codec 此前只转发 assistant delta，导致首轮靠冷水合偶然补回、后续轮只见回复。现按官方事件语义在 `item/started` 唯一投影用户消息，`item/completed` 保持静默防止双发；连续多轮均由同一 Mac Projection Kernel 实时归并。
 - **新功能：Codex Web 独立并存 backend**：CordCode Link 默认同时注册旧 `codex` 与新 `codex-web`。新入口只读官方 app-server lifecycle/catalog/history/live 事件，模型与 reasoning effort 来自官方目录；审批与批量用户输入经官方应答帧收口。backend/wire/config/cache identity 全部独立，旧 Codex rollout 路径和行为不变。

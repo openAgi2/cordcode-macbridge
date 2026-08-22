@@ -126,6 +126,49 @@ func TestAgentCatalogRefreshSignalCoalesces(t *testing.T) {
 	}
 }
 
+func TestAgentRenameSessionUsesOfficialNameAndMetadata(t *testing.T) {
+	s := newScripted()
+	cl := NewClient(s, 1)
+	t.Cleanup(func() { _ = cl.Close() })
+	go drainNotifications(cl)
+
+	officialName := "official normalized title"
+	branch := "feature/chat"
+	setCalls := captureParams(s, "thread/name/set", map[string]any{})
+	readCalls := captureParams(s, "thread/read", map[string]any{"thread": ThreadInfo{
+		ID: "thread-rename", Name: &officialName, Preview: "old preview",
+		Cwd: "/Users/developer/Projects/Chat", ModelProvider: "openai",
+		UpdatedAt: 1787333760, GitInfo: &GitInfo{Branch: &branch},
+	}})
+	ep := &ServiceEndpoint{Source: SourceExternalDaemonReused, CLIVersion: "0.149.0-alpha.4"}
+	ep.client = cl
+	a := New(nil)
+	a.endpoint = ep
+	signals := a.CatalogRefreshSignals()
+
+	got, err := a.RenameSession(context.Background(), "thread-rename", "  user typed title  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != "thread-rename" || got.Summary != officialName ||
+		got.Directory != "/Users/developer/Projects/Chat" || got.ProviderID != "openai" ||
+		got.GitBranch != branch || got.ModifiedAt.Unix() != 1787333760 {
+		t.Fatalf("rename 必须返回官方 thread/read 元数据：%+v", got)
+	}
+	if len(*setCalls) != 1 || len(*readCalls) != 1 {
+		t.Fatalf("calls set/read=%d/%d", len(*setCalls), len(*readCalls))
+	}
+	expectParams(t, (*setCalls)[0], map[string]any{
+		"threadId": "thread-rename", "name": "user typed title",
+	})
+	expectParams(t, (*readCalls)[0], map[string]any{"threadId": "thread-rename"})
+	select {
+	case <-signals:
+	case <-time.After(time.Second):
+		t.Fatal("confirmed rename must wake authoritative catalog refresh")
+	}
+}
+
 func TestAgentTurnScopedAndFlatHistory(t *testing.T) {
 	a := agentWithScript(t, func(method string) any {
 		if method != "thread/read" {

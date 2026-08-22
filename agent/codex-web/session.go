@@ -101,6 +101,7 @@ func (a *Agent) Name() string { return BackendID }
 
 var _ core.WorkDirSwitcher = (*Agent)(nil)
 var _ core.CatalogRefreshSignaler = (*Agent)(nil)
+var _ core.SessionRenamer = (*Agent)(nil)
 
 // SetWorkDir implements the Bridge's existing per-request directory seam. The
 // selected directory is consumed by the next thread/start; existing official
@@ -276,18 +277,7 @@ func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, erro
 		}
 		out = make([]core.AgentSessionInfo, 0, len(threads))
 		for i := range threads {
-			th := threads[i]
-			info := core.AgentSessionInfo{
-				ID:         th.ID,
-				Summary:    th.Title(),
-				Directory:  th.Cwd,
-				ProviderID: th.ModelProvider,
-				ModifiedAt: time.Unix(th.UpdatedAt, 0).UTC(),
-			}
-			if th.GitInfo != nil && th.GitInfo.Branch != nil {
-				info.GitBranch = *th.GitInfo.Branch
-			}
-			out = append(out, info)
+			out = append(out, threadToAgentSessionInfo(&threads[i]))
 		}
 		return nil
 	})
@@ -295,6 +285,56 @@ func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, erro
 		return nil, err
 	}
 	return out, nil
+}
+
+func threadToAgentSessionInfo(th *ThreadInfo) core.AgentSessionInfo {
+	info := core.AgentSessionInfo{
+		ID:         th.ID,
+		Summary:    th.Title(),
+		Directory:  th.Cwd,
+		ProviderID: th.ModelProvider,
+		ModifiedAt: time.Unix(th.UpdatedAt, 0).UTC(),
+	}
+	if th.GitInfo != nil && th.GitInfo.Branch != nil {
+		info.GitBranch = *th.GitInfo.Branch
+	}
+	return info
+}
+
+// RenameSession maps the bridge RPC directly onto the official
+// thread/name/set operation and returns the subsequent thread/read result.
+// The requested title is never used as an optimistic local result.
+func (a *Agent) RenameSession(ctx context.Context, sessionID, title string) (*core.AgentSessionInfo, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	title = strings.TrimSpace(title)
+	if sessionID == "" {
+		return nil, fmt.Errorf("codexweb: rename session: empty session id")
+	}
+	if title == "" {
+		return nil, fmt.Errorf("codexweb: rename session: empty title")
+	}
+	var th *ThreadInfo
+	err := a.withClient(ctx, func(cl *Client) error {
+		var rpcErr *RPCError
+		var err error
+		th, rpcErr, err = setThreadNameAndRead(ctx, cl, sessionID, title)
+		return errOwnershipOrRPC("thread/name/set", a.endpointSource(), sessionID, rpcErr, err)
+	})
+	if err != nil {
+		return nil, err
+	}
+	info := threadToAgentSessionInfo(th)
+	a.signalCatalogRefresh()
+	return &info, nil
+}
+
+func (a *Agent) endpointSource() ServiceSource {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.endpoint == nil {
+		return ""
+	}
+	return a.endpoint.Source
 }
 
 // StartSession/turn 生命周期实现在 events.go（agentSession）。

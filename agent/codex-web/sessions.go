@@ -206,6 +206,18 @@ func voidThreadOp(ctx context.Context, cl *Client, method, threadID string) *RPC
 // SetThreadName 重命名并重读确认（不做本地乐观真相）。返回服务端观测到的 name；
 // nil 表示重读时官方 name 为空（官方允许置空/重置）。
 func SetThreadName(ctx context.Context, cl *Client, threadID, name string) (*string, *RPCError, error) {
+	th, rpcErr, err := setThreadNameAndRead(ctx, cl, threadID, name)
+	if err != nil || rpcErr != nil {
+		return nil, rpcErr, err
+	}
+	return th.Name, nil, nil
+}
+
+// setThreadNameAndRead returns the complete authoritative thread metadata so
+// the Agent capability can answer rename_session without reconstructing a row
+// from the requested title. SetThreadName keeps the narrower fixture-facing
+// API above for callers that only need the confirmed official name.
+func setThreadNameAndRead(ctx context.Context, cl *Client, threadID, name string) (*ThreadInfo, *RPCError, error) {
 	raw, rpcErr, err := cl.RequestContext(ctx, "thread/name/set", map[string]string{
 		"threadId": threadID,
 		"name":     name,
@@ -226,7 +238,7 @@ func SetThreadName(ctx context.Context, cl *Client, threadID, name string) (*str
 	if err != nil || rpcErr != nil {
 		return nil, rpcErr, err
 	}
-	return th.Name, nil, nil
+	return th, nil, nil
 }
 
 // ---- ownership 冲突翻译（§10.2） ----

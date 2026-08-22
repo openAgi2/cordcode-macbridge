@@ -2445,14 +2445,95 @@
    "id": "p5-directory-review-fix-regression",
    "title": "Phase5 Codex Web Chat 目录新建与列表归组真机回归",
    "description": "安装 Release 后 owner 在 iOS Chat 目录新建 session、连续发送两轮并返回列表；session 应立即出现在 Chat 组，App 切后台再回来仍留在 Chat，不得进入 /Users/jacklee 根目录组。",
-   "status": "in_progress",
+   "status": "done",
    "phase": "phase5",
    "kind": "regression",
    "depends_on": [
     "p5-directory-review-fix-tests"
    ],
    "source": "owner device failure 2026-08-22 14:46",
-   "notes": "自动门禁完成；Release 412ecf7572bd 已安装到 /Applications/CordCodeLink.app，runtime PID 47002，codex-web passive subscription 已启动；managed 官方 app-server 保持同一 PID 31580/127.0.0.1:59339、record 0600。无 iOS 代码变更、未运行 UI tests；待 owner 用修复后新建的 session 完成 Chat 目录/回列表/前后台切换真机确认。",
+   "notes": "自动门禁完成；Release 412ecf7572bd 已安装到 /Applications/CordCodeLink.app，runtime PID 47002，codex-web passive subscription 已启动；managed 官方 app-server 保持同一 PID 31580/127.0.0.1:59339、record 0600。无 iOS 代码变更、未运行 UI tests；owner 2026-08-22 确认修复后新建 session 立即出现在 Chat 目录且前后台切换后归组保持正确。",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "owner 真机确认 Codex Web 新 session 即时列表发现与官方 cwd 归组均符合预期。",
+    "artifacts": [
+     "owner report 2026-08-22: 测试结果符合预期"
+    ],
+    "checked_at": "2026-08-22T07:06:53Z"
+   }
+  },
+  {
+   "id": "p5-rename-review-fix-impl",
+   "title": "Phase5 Codex Web 会话重命名能力接线",
+   "description": "review-fix-for:p5-directory-review-fix-regression；按设计 §7 rename 行，把既有官方 thread/name/set → thread/read 确认链路接入 core.SessionRenamer；不得返回请求标题作为本地乐观真相。",
+   "status": "done",
+   "phase": "phase5",
+   "kind": "impl",
+   "depends_on": [
+    "p5-directory-review-fix-regression"
+   ],
+   "source": "owner device failure 2026-08-22 + design §7 + official app-server source",
+   "notes": "根因是 codex-web.Agent 漏实现 core.SessionRenamer，Bridge 类型断言直接返回 not_supported。现请求直达官方 thread/name/set，随后 thread/read 的官方元数据映射为响应并唤醒权威 catalog；未新增协议、缓存标题或 fallback。",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "SessionRenamer 接线完成，rename 返回官方重读元数据并触发 catalog 刷新。",
+    "artifacts": [
+     "agent/codex-web/session.go",
+     "agent/codex-web/sessions.go",
+     "CHANGELOG.md",
+     "/Users/jacklee/Projects/codex/codex-rs/app-server/src/request_processors/thread_processor.rs"
+    ],
+    "checked_at": "2026-08-22T07:06:53Z"
+   }
+  },
+  {
+   "id": "p5-rename-review-fix-tests",
+   "title": "Phase5 Codex Web 会话重命名测试",
+   "description": "覆盖 SessionRenamer 接口、官方 thread/name/set 请求形状、thread/read 权威结果映射、catalog 即时刷新；运行 codex-web race 与全仓 Go 门禁。",
+   "status": "done",
+   "phase": "phase5",
+   "kind": "tests",
+   "depends_on": [
+    "p5-rename-review-fix-impl"
+   ],
+   "source": "owner device failure 2026-08-22 + design §13.1",
+   "notes": "定向 Agent/Bridge rename 测试、codex-web race、全仓 test/vet 全过；未运行 UI tests。",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "官方请求与确认链、Bridge handler 能力接线、catalog signal 均由自动测试覆盖。",
+    "artifacts": [
+     "agent/codex-web/session_ssv2_test.go",
+     "go test -race ./agent/codex-web -count=1",
+     "go test ./... -count=1",
+     "go vet ./..."
+    ],
+    "checked_at": "2026-08-22T07:06:53Z"
+   }
+  },
+  {
+   "id": "p5-rename-review-fix-regression",
+   "title": "Phase5 Codex Web 会话重命名真机回归",
+   "description": "安装 Release 后 owner 在 iOS Codex Web 模式重命名现有 session；不得再报 not supported，列表与会话页应显示官方确认后的新标题，前后台切换后保持一致。",
+   "status": "in_progress",
+   "phase": "phase5",
+   "kind": "regression",
+   "depends_on": [
+    "p5-rename-review-fix-tests"
+   ],
+   "source": "owner device failure 2026-08-22",
+   "notes": "自动门禁完成；待 Release 构建安装及 owner 真机确认。",
    "verification": {
     "required": true,
     "status": "missing",
