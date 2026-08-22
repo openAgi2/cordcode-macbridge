@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T06:37:23Z",
+ "updated_at": "2026-08-22T06:39:29Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2370,7 +2370,7 @@
     "p5-followup-user-message-review-fix-tests"
    ],
    "source": "owner device failure 2026-08-22 14:24",
-   "notes": "自动门禁已完成；待 Release 安装与 owner iOS 连续两轮产品面确认。",
+   "notes": "自动门禁已完成；Release ef2cfa961238 已构建并安装到 /Applications/CordCodeLink.app，runtime PID 39786，codex-web passive subscription 已启动；managed 官方 app-server 保持同一 PID 31580/127.0.0.1:59339、record 0600。未改 iOS、未跑 UI test；待 owner iOS 连续两轮产品面确认。",
    "verification": {
     "required": true,
     "status": "missing",
