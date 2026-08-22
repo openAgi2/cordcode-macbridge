@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // StartThreadOptions 是 thread/start 的已验证字段集（cwd 必填；model/modelProvider
@@ -33,9 +34,9 @@ type StartThreadOptions struct {
 // ThreadStartResult 是 thread/start / thread/resume 响应（官方字段原样保留）。
 type ThreadStartResult struct {
 	Thread          ThreadInfo `json:"thread"`
-	Model           *string    `json:"model"`
-	ModelProvider   *string    `json:"modelProvider"`
-	Cwd             *string    `json:"cwd"`
+	Model           string     `json:"model"`
+	ModelProvider   string     `json:"modelProvider"`
+	Cwd             string     `json:"cwd"`
 	ApprovalPolicy  *string    `json:"approvalPolicy"`
 	ReasoningEffort *string    `json:"reasoningEffort"`
 }
@@ -63,8 +64,8 @@ func StartThread(ctx context.Context, cl *Client, opts StartThreadOptions) (*Thr
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return nil, nil, fmt.Errorf("codexweb: thread/start decode: %w", err)
 	}
-	if res.Thread.ID == "" {
-		return nil, nil, fmt.Errorf("codexweb: thread/start response missing thread id")
+	if err := validateThreadSettingsResult("thread/start", &res); err != nil {
+		return nil, nil, err
 	}
 	return &res, nil, nil
 }
@@ -85,10 +86,23 @@ func ResumeThread(ctx context.Context, cl *Client, threadID string) (*ThreadStar
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return nil, nil, nil, fmt.Errorf("codexweb: thread/resume decode: %w", err)
 	}
-	if res.Thread.ID == "" {
-		return nil, nil, nil, fmt.Errorf("codexweb: thread/resume response missing thread id")
+	if err := validateThreadSettingsResult("thread/resume", &res); err != nil {
+		return nil, nil, nil, err
 	}
 	return &res, nil, nil, nil
+}
+
+func validateThreadSettingsResult(method string, result *ThreadStartResult) error {
+	if result.Thread.ID == "" {
+		return fmt.Errorf("codexweb: %s response missing thread id", method)
+	}
+	if strings.TrimSpace(result.Model) == "" {
+		return fmt.Errorf("codexweb: %s response missing effective model", method)
+	}
+	if strings.TrimSpace(result.ModelProvider) == "" {
+		return fmt.Errorf("codexweb: %s response missing effective model provider", method)
+	}
+	return nil
 }
 
 // InputPart 是 turn 输入 part。一期只实现 text（Phase 0 已采样）；
@@ -124,15 +138,26 @@ type TurnStartResult struct {
 	ItemsView string `json:"itemsView"`
 }
 
-// TurnStart 发起 turn。model 覆盖对本 turn 及后续 turn 生效（§7 switch_model）。
-func TurnStart(ctx context.Context, cl *Client, threadID string, parts []InputPart, model string) (*TurnStartResult, *RPCError, error) {
+// TurnStartOptions 镜像官方 turn/start 的一期稳定 override：model 与 effort 对本
+// turn 及后续 turn 生效；provider 不属于 turn/start，由 thread effective settings
+// 持有并校验。
+type TurnStartOptions struct {
+	Model  string
+	Effort string
+}
+
+// TurnStart 发起 turn。只发送官方 TurnStartParams 支持的字段。
+func TurnStart(ctx context.Context, cl *Client, threadID string, parts []InputPart, opts TurnStartOptions) (*TurnStartResult, *RPCError, error) {
 	input, err := encodeInput(parts)
 	if err != nil {
 		return nil, nil, err
 	}
 	params := map[string]any{"threadId": threadID, "input": input}
-	if model != "" {
-		params["model"] = model
+	if opts.Model != "" {
+		params["model"] = opts.Model
+	}
+	if opts.Effort != "" {
+		params["effort"] = opts.Effort
 	}
 	raw, rpcErr, err := cl.RequestContext(ctx, "turn/start", params)
 	if err != nil {

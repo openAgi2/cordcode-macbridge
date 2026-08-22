@@ -21,7 +21,9 @@ package codexweb
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -173,11 +175,14 @@ type agentSession struct {
 	agent    *Agent
 	threadID string
 
-	mu           sync.Mutex
-	activeTurnID string
-	closed       bool
-	unsubscribed bool
-	events       chan core.Event
+	mu              sync.Mutex
+	activeTurnID    string
+	effectiveModel  string
+	modelProvider   string
+	reasoningEffort string
+	closed          bool
+	unsubscribed    bool
+	events          chan core.Event
 }
 
 // StartSession 建立或恢复一个官方 thread：共享连接上 start/resume（订阅自动
@@ -188,7 +193,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	if err != nil {
 		return nil, err
 	}
-	var threadID string
+	var settings *ThreadStartResult
 	if sessionID == "" {
 		model, provider := a.selectedModelForStart()
 		res, rpcErr, err := StartThread(ctx, cl, StartThreadOptions{Cwd: a.workDir, Model: model, ModelProvider: provider})
@@ -198,7 +203,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 		case rpcErr != nil:
 			return nil, rpcErr
 		}
-		threadID = res.Thread.ID
+		settings = res
 	} else {
 		res, oc, rpcErr, err := ResumeThread(ctx, cl, sessionID)
 		switch {
@@ -209,15 +214,26 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 		case rpcErr != nil:
 			return nil, rpcErr
 		}
-		threadID = res.Thread.ID
+		settings = res
 	}
+	threadID := settings.Thread.ID
 	a.ensurePump()
 	s := &agentSession{
-		agent:    a,
-		threadID: threadID,
-		events:   a.addListener(threadID),
+		agent:           a,
+		threadID:        threadID,
+		effectiveModel:  settings.Model,
+		modelProvider:   settings.ModelProvider,
+		reasoningEffort: stringValue(settings.ReasoningEffort),
+		events:          a.addListener(threadID),
 	}
 	return s, nil
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
 }
 
 // client 经 Agent 解析当前连接（断线重连后自动指向新连接）。
@@ -241,17 +257,39 @@ func (s *agentSession) Send(prompt string, images []core.ImageAttachment, files 
 	return s.SendWithOptions(prompt, images, files, core.PromptOptions{})
 }
 
-// SendWithOptions 携带 per-request 选项；ModelID 映射官方 turn/start{model}（对本
-// turn 及后续 turn 生效，§7）；ProviderID/Agent/Variant 官方 turn/start 不支持——
-// 非空时显式报错，不静默忽略。
+// SendWithOptions 携带 per-request 选项。官方源码锚点：
+// codex-rs/app-server-protocol/src/protocol/v2/turn.rs::TurnStartParams 不含 provider；
+// codex-rs/tui/src/app_server_session.rs 先把 thread start/resume response 转为
+// ThreadSessionState，再在 turn_start 只发送 model/effort 等官方 override。
+// iOS 的 ProviderID 是模型目录命名空间：与 thread provider 一致时用于校验，不作为
+// turn 字段发送；不一致才是官方不支持的 running-thread provider switch。
 func (s *agentSession) SendWithOptions(prompt string, images []core.ImageAttachment, files []core.FileAttachment, opts core.PromptOptions) error {
 	if len(images) > 0 || len(files) > 0 {
 		return errUnsampledInputKind
 	}
-	if opts.ProviderID != "" || opts.Agent != "" || opts.Variant != "" {
+	if opts.Agent != "" || opts.Variant != "" {
 		return errUnsupportedTurnOption
 	}
-	model, err := s.agent.modelForTurn(opts.ModelID)
+	s.mu.Lock()
+	threadProvider := s.modelProvider
+	threadModel := s.effectiveModel
+	s.mu.Unlock()
+	requestedProvider := strings.TrimSpace(opts.ProviderID)
+	if requestedProvider != "" && requestedProvider != threadProvider {
+		return &userError{fmt.Sprintf("codex-web: provider switch %q -> %q is not supported by official turn/start", threadProvider, requestedProvider)}
+	}
+	model, modelProvider, err := s.agent.modelForTurn(opts.ModelID)
+	if err != nil {
+		return err
+	}
+	if modelProvider != "" && modelProvider != threadProvider {
+		return &userError{fmt.Sprintf("codex-web: model %q belongs to provider %q, but thread provider is %q", opts.ModelID, modelProvider, threadProvider)}
+	}
+	modelKey := qualifyModel(threadProvider, threadModel)
+	if model != "" {
+		modelKey = qualifyModel(threadProvider, model)
+	}
+	effort, err := s.agent.effortForTurn(modelKey, opts.ReasoningEffort)
 	if err != nil {
 		return err
 	}
@@ -265,7 +303,7 @@ func (s *agentSession) SendWithOptions(prompt string, images []core.ImageAttachm
 		parts = append(parts, TextPart(prompt))
 	}
 	sendAt := time.Now()
-	res, rpcErr, err := TurnStart(ctx, cl, s.threadID, parts, model)
+	res, rpcErr, err := TurnStart(ctx, cl, s.threadID, parts, TurnStartOptions{Model: model, Effort: effort})
 	switch {
 	case err != nil:
 		return err
@@ -274,13 +312,19 @@ func (s *agentSession) SendWithOptions(prompt string, images []core.ImageAttachm
 	}
 	s.mu.Lock()
 	s.activeTurnID = res.ID
+	if model != "" {
+		s.effectiveModel = model
+	}
+	if effort != "" {
+		s.reasoningEffort = effort
+	}
 	s.mu.Unlock()
 	s.agent.noteSend(s.threadID, sendAt)
 	return nil
 }
 
 var errUnsampledInputKind = &userError{"codex-web: image/file 输入 part 未取得官方真实样本，fail closed（Phase 0 §12 边界）"}
-var errUnsupportedTurnOption = &userError{"codex-web: 官方 turn/start 不支持 provider/agent/variant 逐 turn 覆盖（§7）"}
+var errUnsupportedTurnOption = &userError{"codex-web: 官方 turn/start 不支持 agent/variant 逐 turn 覆盖（§7）"}
 
 type userError struct{ msg string }
 

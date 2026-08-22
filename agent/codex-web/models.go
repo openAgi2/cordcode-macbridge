@@ -227,18 +227,33 @@ func (a *Agent) selectedModelForStart() (model, provider string) {
 	return a.selectedModel, a.modelProvider
 }
 
-func (a *Agent) modelForTurn(raw string) (string, error) {
+func (a *Agent) modelForTurn(raw string) (model, provider string, err error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	bare, ok := a.modelKnown[raw]
+	if !ok {
+		return "", "", fmt.Errorf("codex-web: model %q is outside the official catalog", raw)
+	}
+	return bare, a.modelProvider, nil
+}
+
+func (a *Agent) effortForTurn(modelKey, raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", nil
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	bare, ok := a.modelKnown[raw]
-	if !ok {
-		return "", fmt.Errorf("codex-web: model %q is outside the official catalog", raw)
+	for _, effort := range a.modelEfforts[modelKey] {
+		if effort == raw {
+			return raw, nil
+		}
 	}
-	return bare, nil
+	return "", fmt.Errorf("codex-web: effort %q is outside the official catalog for model %q", raw, modelKey)
 }
 
 func (a *Agent) ListPermissionProfiles(ctx context.Context) ([]PermissionProfile, error) {

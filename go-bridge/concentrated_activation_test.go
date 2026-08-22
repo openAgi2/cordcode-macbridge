@@ -24,6 +24,7 @@ func TestSendMessageAgentVariantSurviveParse(t *testing.T) {
 		"sessionId": "ses_1",
 		"content": "hi",
 		"agent": "planner",
+		"reasoningEffort": "high",
 		"model": {"id": "echo", "providerId": "localmock", "variant": "high"}
 	}`
 	var params SendMessageParams
@@ -34,7 +35,7 @@ func TestSendMessageAgentVariantSurviveParse(t *testing.T) {
 		t.Fatalf("agent = %q (the Swift-boundary drop must be fixed end to end)", params.Agent)
 	}
 	opts := promptOptionsFromParams(params)
-	if opts.Agent != "planner" || opts.ModelID != "echo" || opts.ProviderID != "localmock" || opts.Variant != "high" {
+	if opts.Agent != "planner" || opts.ModelID != "echo" || opts.ProviderID != "localmock" || opts.Variant != "high" || opts.ReasoningEffort != "high" {
 		t.Fatalf("options = %+v", opts)
 	}
 	// Absent optional fields stay empty — the backend then resolves itself.
@@ -59,7 +60,7 @@ func (a *optionsAgent) Name() string { return "opt-fixture" }
 func (a *optionsAgent) StartSession(ctx context.Context, id string) (core.AgentSession, error) {
 	return &optionsSession{agent: a}, nil
 }
-func (a *optionsAgent) Stop() error { return nil }
+func (a *optionsAgent) Stop() error             { return nil }
 func (a *optionsAgent) UsesPromptOptions() bool { return true }
 func (a *optionsAgent) SetModel(m string)       { a.setModel = m }
 
@@ -77,12 +78,12 @@ func (s *optionsSession) SendWithOptions(prompt string, images []core.ImageAttac
 	return nil
 }
 func (s *optionsSession) RespondPermission(string, core.PermissionResult) error { return nil }
-func (s *optionsSession) Events() <-chan core.Event                            { return nil }
-func (s *optionsSession) CurrentSessionID() string                            { return "" }
-func (s *optionsSession) Alive() bool                                          { return true }
-func (s *optionsSession) Close() error                                         { return nil }
-func (s *optionsSession) RespondQuestion(string, []string) error              { return nil }
-func (s *optionsSession) RejectQuestion(string) error                          { return nil }
+func (s *optionsSession) Events() <-chan core.Event                             { return nil }
+func (s *optionsSession) CurrentSessionID() string                              { return "" }
+func (s *optionsSession) Alive() bool                                           { return true }
+func (s *optionsSession) Close() error                                          { return nil }
+func (s *optionsSession) RespondQuestion(string, []string) error                { return nil }
+func (s *optionsSession) RejectQuestion(string) error                           { return nil }
 
 // TestSendPromptDispatchesOptionsAtomically: an option-sender session
 // receives SendWithOptions with the request's exact options; a plain session

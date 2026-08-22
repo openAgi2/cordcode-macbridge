@@ -73,10 +73,11 @@ type SessionPermissionResponder interface {
 // "no explicit choice for that axis" and the implementing backend resolves
 // the value itself (e.g. opencode-web applies the official §6.6 order).
 type PromptOptions struct {
-	Agent      string // official agent id, "" = backend default
-	ProviderID string // explicit model provider, "" = backend resolves
-	ModelID    string // explicit model id, "" = backend resolves
-	Variant    string // model-specific variant key, "" = unset; NOT reasoningEffort
+	Agent           string // official agent id, "" = backend default
+	ProviderID      string // explicit model provider, "" = backend resolves
+	ModelID         string // explicit model id, "" = backend resolves
+	Variant         string // model-specific variant key, "" = unset; NOT reasoningEffort
+	ReasoningEffort string // official reasoning effort, "" = backend resolves
 }
 
 // PromptOptionsSender is an optional AgentSession interface for backends that

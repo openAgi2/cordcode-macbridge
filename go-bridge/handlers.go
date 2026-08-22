@@ -2469,7 +2469,10 @@ func isPromptOptionsSender(agent core.Agent) bool {
 // send_message wire params. The model map keeps the wire shape
 // {id, providerId, variant?} verbatim; empty fields mean "backend resolves".
 func promptOptionsFromParams(params SendMessageParams) core.PromptOptions {
-	opts := core.PromptOptions{Agent: strings.TrimSpace(params.Agent)}
+	opts := core.PromptOptions{
+		Agent:           strings.TrimSpace(params.Agent),
+		ReasoningEffort: strings.TrimSpace(params.ReasoningEffort),
+	}
 	if params.Model == nil {
 		return opts
 	}

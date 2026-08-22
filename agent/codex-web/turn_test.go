@@ -6,6 +6,7 @@ package codexweb
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -21,7 +22,7 @@ func TestTurnOpsRequestShapesFrozen(t *testing.T) {
 
 	thread := ThreadInfo{ID: "th-1"}
 	capStart := captureParams(s, "thread/start", map[string]any{"thread": thread, "model": "m", "modelProvider": "mockpi"})
-	capResume := captureParams(s, "thread/resume", map[string]any{"thread": thread})
+	capResume := captureParams(s, "thread/resume", map[string]any{"thread": thread, "model": "m", "modelProvider": "mockpi"})
 	capTurn := captureParams(s, "turn/start", map[string]any{"turn": map[string]any{"id": "turn-1", "status": "inProgress"}})
 	capSteer := captureParams(s, "turn/steer", map[string]any{"turnId": "turn-1"})
 	capInt := captureParams(s, "turn/interrupt", map[string]any{})
@@ -43,15 +44,15 @@ func TestTurnOpsRequestShapesFrozen(t *testing.T) {
 	}
 	expectParams(t, (*capResume)[0], map[string]any{"threadId": "th-1"})
 
-	if _, _, err := TurnStart(ctx, c, "th-1", []InputPart{TextPart("hi")}, ""); err != nil {
+	if _, _, err := TurnStart(ctx, c, "th-1", []InputPart{TextPart("hi")}, TurnStartOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	expectParams(t, (*capTurn)[0], map[string]any{"threadId": "th-1", "input": []any{map[string]any{"type": "text", "text": "hi"}}})
 
-	if _, _, err := TurnStart(ctx, c, "th-1", []InputPart{TextPart("hi")}, "gpt-x"); err != nil {
+	if _, _, err := TurnStart(ctx, c, "th-1", []InputPart{TextPart("hi")}, TurnStartOptions{Model: "gpt-x", Effort: "high"}); err != nil {
 		t.Fatal(err)
 	}
-	expectParams(t, (*capTurn)[1], map[string]any{"threadId": "th-1", "input": []any{map[string]any{"type": "text", "text": "hi"}}, "model": "gpt-x"})
+	expectParams(t, (*capTurn)[1], map[string]any{"threadId": "th-1", "input": []any{map[string]any{"type": "text", "text": "hi"}}, "model": "gpt-x", "effort": "high"})
 
 	if _, _, err := TurnSteer(ctx, c, "th-1", "turn-1", []InputPart{TextPart("more")}); err != nil {
 		t.Fatal(err)
@@ -75,10 +76,10 @@ func TestTurnOpsRequestShapesFrozen(t *testing.T) {
 	if _, _, err := TurnSteer(ctx, c, "th-1", "", []InputPart{TextPart("x")}); err == nil || !strings.Contains(err.Error(), "expectedTurnId") {
 		t.Fatalf("无 expectedTurnId 的 steer 必须显式拒绝：%v", err)
 	}
-	if _, _, err := TurnStart(ctx, c, "th-1", []InputPart{{Type: "image"}}, ""); err == nil || !strings.Contains(err.Error(), "fail closed") {
+	if _, _, err := TurnStart(ctx, c, "th-1", []InputPart{{Type: "image"}}, TurnStartOptions{}); err == nil || !strings.Contains(err.Error(), "fail closed") {
 		t.Fatalf("未采样 input kind 必须显式拒绝：%v", err)
 	}
-	if _, _, err := TurnStart(ctx, c, "th-1", nil, ""); err == nil {
+	if _, _, err := TurnStart(ctx, c, "th-1", nil, TurnStartOptions{}); err == nil {
 		t.Fatal("空输入必须拒绝")
 	}
 }
@@ -124,10 +125,85 @@ func newTestSession(t *testing.T) (*agentSession, *scriptedTransport) {
 	ep.client = cl
 	ag := New(nil)
 	ag.endpoint = ep
+	ag.modelProvider = "mockpi"
+	ag.modelKnown = map[string]string{"mockpi/gpt-a": "gpt-a"}
+	ag.modelEfforts = map[string][]string{"mockpi/gpt-a": {"low", "high"}}
 	ag.ensurePump()
-	sess := &agentSession{agent: ag, threadID: "th-1"}
+	sess := &agentSession{agent: ag, threadID: "th-1", effectiveModel: "gpt-a", modelProvider: "mockpi"}
 	sess.events = ag.addListener("th-1")
 	return sess, s
+}
+
+func TestStartAndResumeSessionCaptureOfficialEffectiveSettings(t *testing.T) {
+	s := newScripted()
+	cl := NewClient(s, 1)
+	t.Cleanup(func() { _ = cl.Close() })
+	ep := &ServiceEndpoint{Source: SourceExternalDaemonReused, CLIVersion: "t"}
+	ep.client = cl
+	ag := New(map[string]any{"work_dir": "/ws"})
+	ag.endpoint = ep
+	captureParams(s, "thread/start", map[string]any{
+		"thread": map[string]any{"id": "th-new"},
+		"model":  "gpt-new", "modelProvider": "mockpi", "reasoningEffort": "high",
+	})
+	captureParams(s, "thread/resume", map[string]any{
+		"thread": map[string]any{"id": "th-old"},
+		"model":  "gpt-old", "modelProvider": "mockpi", "reasoningEffort": "low",
+	})
+
+	newRaw, err := ag.StartSession(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldRaw, err := ag.StartSession(context.Background(), "th-old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newSession := newRaw.(*agentSession)
+	oldSession := oldRaw.(*agentSession)
+	newSession.mu.Lock()
+	newSettings := []string{newSession.effectiveModel, newSession.modelProvider, newSession.reasoningEffort}
+	newSession.mu.Unlock()
+	oldSession.mu.Lock()
+	oldSettings := []string{oldSession.effectiveModel, oldSession.modelProvider, oldSession.reasoningEffort}
+	oldSession.mu.Unlock()
+	if !reflect.DeepEqual(newSettings, []string{"gpt-new", "mockpi", "high"}) {
+		t.Fatalf("new thread effective settings = %v", newSettings)
+	}
+	if !reflect.DeepEqual(oldSettings, []string{"gpt-old", "mockpi", "low"}) {
+		t.Fatalf("resumed thread effective settings = %v", oldSettings)
+	}
+}
+
+func TestSessionSendMapsOfficialModelEffortAndTreatsProviderAsNamespace(t *testing.T) {
+	sess, s := newTestSession(t)
+	capTurn := captureParams(s, "turn/start", map[string]any{"turn": map[string]any{"id": "turn-model", "status": "inProgress"}})
+
+	err := sess.SendWithOptions("hello", nil, nil, core.PromptOptions{
+		ModelID:         "mockpi/gpt-a",
+		ProviderID:      "mockpi",
+		ReasoningEffort: "high",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectParams(t, (*capTurn)[0], map[string]any{
+		"threadId": "th-1",
+		"input":    []any{map[string]any{"type": "text", "text": "hello"}},
+		"model":    "gpt-a",
+		"effort":   "high",
+	})
+}
+
+func TestSessionSendRejectsActualProviderSwitch(t *testing.T) {
+	sess, _ := newTestSession(t)
+	err := sess.SendWithOptions("hello", nil, nil, core.PromptOptions{
+		ModelID:    "mockpi/gpt-a",
+		ProviderID: "other-provider",
+	})
+	if err == nil || !strings.Contains(err.Error(), "provider switch") {
+		t.Fatalf("cross-provider turn must fail closed: %v", err)
+	}
 }
 
 func TestSessionSendTracksActiveTurn(t *testing.T) {

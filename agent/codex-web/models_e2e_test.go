@@ -46,7 +46,12 @@ func TestE2EModelsCustomProviderReadOnly(t *testing.T) {
 	}
 	defer func() { _ = sess.Close() }()
 	events, _ := collectEvents(sess)
-	if err := sess.Send("MOCK:STREAM model inheritance", nil, nil); err != nil {
+	options := core.PromptOptions{
+		ModelID:         models[0].Name,
+		ProviderID:      "mockpi",
+		ReasoningEffort: "low",
+	}
+	if err := sess.(core.PromptOptionsSender).SendWithOptions("MOCK:STREAM model inheritance", nil, nil, options); err != nil {
 		t.Fatal(err)
 	}
 	turnID := sess.(*agentSession).activeTurnSnapshot()
@@ -67,6 +72,21 @@ func TestE2EModelsCustomProviderReadOnly(t *testing.T) {
 	}
 	if provider != "mockpi" {
 		t.Fatalf("thread effective provider = %q, want mockpi", provider)
+	}
+
+	resumed, err := a.StartSession(context.Background(), sess.CurrentSessionID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resumed.Close() }()
+	resumedEvents, _ := collectEvents(resumed)
+	if err := resumed.(core.PromptOptionsSender).SendWithOptions("MOCK:STREAM resumed model inheritance", nil, nil, options); err != nil {
+		t.Fatal(err)
+	}
+	resumedTurnID := resumed.(*agentSession).activeTurnSnapshot()
+	resumedResult := waitForTurnEvent(t, resumedEvents, core.EventResult, resumedTurnID, 30*time.Second)
+	if !resumedResult.Done {
+		t.Fatalf("resumed turn result = %+v", resumedResult)
 	}
 
 	after, err := os.ReadFile(configPath)

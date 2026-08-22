@@ -53,8 +53,8 @@ func TestAgentListSessionsMapping(t *testing.T) {
 		return ThreadListPage{Data: []ThreadInfo{{
 			ID: "th-1", Preview: "preview text", Name: &name, Cwd: "/ws",
 			ModelProvider: "mockpi", UpdatedAt: 1787330474,
-			Status:        ThreadStatus{Type: ThreadStatusIdle},
-			GitInfo:       &GitInfo{Branch: &branch},
+			Status:  ThreadStatus{Type: ThreadStatusIdle},
+			GitInfo: &GitInfo{Branch: &branch},
 		}}}
 	})
 	sessions, err := a.ListSessions(context.Background())
@@ -169,8 +169,8 @@ func TestAgentInteractionSurfacesFailClosedBeforePhase4(t *testing.T) {
 	if err := s.SendWithOptions("hi", []core.ImageAttachment{{}}, nil, core.PromptOptions{}); err == nil {
 		t.Fatal("image 输入未采样必须显式拒绝")
 	}
-	if err := s.SendWithOptions("hi", nil, nil, core.PromptOptions{ProviderID: "p"}); err == nil {
-		t.Fatal("turn 级 provider 覆盖官方不支持，必须显式拒绝（§7）")
+	if err := s.SendWithOptions("hi", nil, nil, core.PromptOptions{Agent: "planner"}); err == nil {
+		t.Fatal("turn 级 agent 覆盖官方不支持，必须显式拒绝（§7）")
 	}
 }
 
