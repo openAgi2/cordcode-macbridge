@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T04:04:00Z",
+ "updated_at": "2026-08-22T04:20:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -1952,11 +1952,80 @@
     "p5-deploy-tests"
    ],
    "source": "design §14/phase5",
-   "notes": "等待 owner 按 docs/2026-08-22-codex-web-owner-device-acceptance.md 执行 14 行真机视觉/交互矩阵并逐行回报；自动安装与日志可达性不得替代人工结果。",
+   "notes": "owner 真机 FAIL：Codex Web 对已有 session 与新 session 发送均返回‘官方 turn/start 不支持 provider/agent/variant in turn (§7)’。repairable-heavy；review-fix-for:p5-deploy-regression；等待 p5-turn-start-review-fix-regression 闭环后重跑受影响矩阵行。",
    "verification": {
     "required": true,
     "status": "missing",
     "method": "manual",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "p5-turn-start-review-fix-impl",
+   "title": "Phase5 turn/start 官方参数语义修复",
+   "description": "review-fix-for:p5-deploy-regression；直接依据 /Users/jacklee/Projects/codex 官方源码修正 agent/codex-web turn/start 参数来源与允许字段；禁止读取/复用旧 agent/codex。",
+   "status": "in_progress",
+   "phase": "phase5",
+   "kind": "impl",
+   "depends_on": [
+    "p5-deploy-tests"
+   ],
+   "source": "owner device failure 2026-08-22 + design §7",
+   "notes": "review-fix-for:p5-deploy-regression",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "p5-turn-start-review-fix-tests",
+   "title": "Phase5 turn/start 官方参数定向测试",
+   "description": "review-fix-for:p5-deploy-regression；覆盖已有/新 session、provider/agent/variant 非法透传拒绝与官方允许字段映射，运行 agent/codex-web 和 Go 回归门。",
+   "status": "pending",
+   "phase": "phase5",
+   "kind": "tests",
+   "depends_on": [
+    "p5-turn-start-review-fix-impl"
+   ],
+   "source": "owner device failure 2026-08-22 + design §7",
+   "notes": "review-fix-for:p5-deploy-regression",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "automated",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "p5-turn-start-review-fix-regression",
+   "title": "Phase5 turn/start 真机回归",
+   "description": "review-fix-for:p5-deploy-regression；Release 覆盖安装、iOS 真机安装/启动后，由 owner 重跑已有与新 session 发送；不得以自动日志替代 owner 结果。",
+   "status": "pending",
+   "phase": "phase5",
+   "kind": "regression",
+   "depends_on": [
+    "p5-turn-start-review-fix-tests"
+   ],
+   "source": "owner device failure 2026-08-22 + design §7",
+   "notes": "review-fix-for:p5-deploy-regression",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "mixed",
     "attestation": "self-attested",
     "na_reason": null,
     "summary": "",
