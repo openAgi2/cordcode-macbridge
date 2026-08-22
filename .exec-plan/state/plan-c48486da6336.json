@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T03:29:18Z",
+ "updated_at": "2026-08-22T04:04:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -1749,76 +1749,92 @@
    "id": "p5-mac-wire-tests",
    "title": "Phase5 Mac 接线测试",
    "description": "descriptor/registration/identity 定向测试；旧 codex 行为零改动回归；protocol pack 与 iOS mirror 同步检查。",
-   "status": "in_progress",
+   "status": "done",
    "phase": "phase5",
    "kind": "tests",
    "depends_on": [
     "p5-mac-wire-impl"
    ],
    "source": "design §14/phase5",
-   "notes": "Mac descriptor/registration/identity 定向测试与 go test ./... / go vet 均 PASS；显式 CORDCODE_IOS_MIRROR 检查失败，且首差异 session_retry_status 早于本轮 codex-web 文档。按仓库约束不得未经用户允许创建 p5 iOS 分支/worktree，保留失败现场等待授权后同步 mirror。",
+   "notes": "历史 mirror 漂移已在 iOS 分支 codex/codex-web-backend-ios 同步；protocol gate 重跑通过。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "automated",
-    "attestation": "self-attested",
+    "attestation": "re-verified",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "descriptor/registration/config identity 定向测试 PASS，旧 codex exec 不新增 permission_resolve；Mac canonical bridge-v1.md 与 schema/bridge-v1.types.ts 已和 iOS 独立 worktree mirror 字节一致，显式 mirror gate PASS。",
+    "artifacts": [
+     "go-bridge/agent_descriptor_test.go",
+     "go-bridge/main_test.go",
+     "ios-git:9f2c7c8",
+     "ios-git:9ded229",
+     "cmd:CORDCODE_IOS_MIRROR=/Users/jacklee/Projects/cordcode-ios-codex-web-backend/docs/protocol go test ./go-bridge -run ^TestProtocolMirrorInSync$ -count=1"
+    ],
+    "checked_at": "2026-08-22T03:43:37Z"
    }
   },
   {
    "id": "p5-mac-wire-regression",
    "title": "Phase5 Mac 定向回归",
    "description": "go test 全量（go-bridge+agent）+ Release 构建 + 覆盖安装 /Applications/CordCodeLink.app + 运行进程核对（CLAUDE.md 交付条件）。",
-   "status": "pending",
+   "status": "done",
    "phase": "phase5",
    "kind": "regression",
    "depends_on": [
     "p5-mac-wire-tests"
    ],
    "source": "design §14/phase5",
-   "notes": "先行证据已完成但依赖测试门未闭合：Release build PASS（runtime commit 4e28845d85d7）；已覆盖安装 /Applications/CordCodeLink.app，PID 56204 从 /Applications 内嵌 runtime 监听 8777；argv 同时含 codex/codex-web；Management /internal/agents 返回 codex-web available、kind=codex-web、broadcast/no polling、interaction capabilities。待 mirror gate 通过后方可按依赖标 done。",
+   "notes": "mirror gate 已通过；Release、覆盖安装、进程/端口/Management descriptor 证据全部闭合。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "mixed",
-    "attestation": "self-attested",
+    "attestation": "re-verified",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "Go 全仓回归重跑 PASS；Release app 已覆盖安装且内嵌 runtime 版本指向 4e28845d85d7；仅 /Applications/CordCodeLink.app 的 launcher/runtime 在运行，PID 56204 监听 8777，argv 同时注册 codex 与 codex-web。",
+    "artifacts": [
+     "cmd:go test ./... -count=1",
+     "cmd:./scripts/build-unsigned-release.sh",
+     "app:/Applications/CordCodeLink.app",
+     "runtime:cordcode-bridge-runtime 0.1.0 commit 4e28845d85d7"
+    ],
+    "checked_at": "2026-08-22T03:45:08Z"
    }
   },
   {
    "id": "p5-ios-wire-impl",
    "title": "Phase5 iOS mirror 接线",
    "description": "从最新 iOS main 建 codex/codex-web-backend-ios 分支+独立 worktree（不污染 iOS main 工作树）；iOS protocol mirror、BackendKind.codexWeb、按审计确认的穷举 switch 与 cache scope、Swift 模型；coherent change。",
-   "status": "pending",
+   "status": "done",
    "phase": "phase5",
    "kind": "impl",
    "depends_on": [
     "p5-mac-wire-regression"
    ],
    "source": "design §14/phase5",
-   "notes": "",
+   "notes": "已从 iOS main@2cdb490f 建 codex/codex-web-backend-ios 独立 worktree；protocol mirror 提交 9f2c7c8/9ded229；iOS coherent change 提交 2f3df78。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "iOS 独立 codexWeb backend 完成：wire id/kind=codex-web，发现/切换、server/cache/session identity 独立；按 capability 接入 SSV2、官方模型目录/每模型 effort、审批与结构化问答；未继承旧 Codex rollout polling、provider allowlist、默认 xhigh 或 legacy permission-mode catalog。",
+    "artifacts": [
+     "ios-git:2f3df78",
+     "ios-git:9f2c7c8",
+     "ios-git:9ded229",
+     "ios:CHANGELOG.md"
+    ],
+    "checked_at": "2026-08-22T04:00:00Z"
    }
   },
   {
    "id": "p5-ios-wire-tests",
    "title": "Phase5 iOS 定向测试",
    "description": "新 BackendKind/capability/cache scope/切换/列表/消息 reducer 定向单测（CCCodeTests only，禁 UI Tests）；定向 build。",
-   "status": "pending",
+   "status": "done",
    "phase": "phase5",
    "kind": "tests",
    "depends_on": [
@@ -1828,20 +1844,24 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "automated",
-    "attestation": "self-attested",
+    "attestation": "re-verified",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "定向 CCCodeTests PASS：discovery/upsert、BackendKind 与独立 cache scope、空 descriptor id、SSV2 capability 有/无两侧、第三方 provider 官方 effort、permission allow/deny、structured user input 与 runtime status 均覆盖 codex-web。",
+    "artifacts": [
+     "ios-test-log:/tmp/cordcode-ios-codex-web-tests.log",
+     "ios-test-log:/tmp/cordcode-ios-codex-web-server-tests.log",
+     "cmd:xcodebuild test targeted CCCodeTests Codex Web gate"
+    ],
+    "checked_at": "2026-08-22T04:00:00Z"
    }
   },
   {
    "id": "p5-ios-wire-regression",
    "title": "Phase5 iOS 真机安装",
    "description": "检测真机（devicectl）可用时自动构建/安装/启动（不点击不视觉验收）；不可用时如实记录。",
-   "status": "pending",
+   "status": "done",
    "phase": "phase5",
    "kind": "regression",
    "depends_on": [
@@ -1851,20 +1871,25 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "mixed",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "Swift 生产与测试目标编译、定向测试及 diff whitespace gate 通过；连接的物理 iPhone 可用，Debug device build 完成并安装、成功启动 org.openagi.cordcode。未运行 UI test/snapshot/simulator automation。",
+    "artifacts": [
+     "cmd:git diff --check",
+     "cmd:xcrun devicectl list devices",
+     "cmd:scripts/run.sh device --device <connected-physical-device>",
+     "device-app:org.openagi.cordcode"
+    ],
+    "checked_at": "2026-08-22T04:00:00Z"
    }
   },
   {
    "id": "p5-deploy-impl",
    "title": "Phase5 部署与真机矩阵准备",
    "description": "Mac Release 覆盖安装后 8777/进程核对；§13.3 14 行 owner 真机验收矩阵一次性给出（含前提/动作/应看到）。",
-   "status": "pending",
+   "status": "done",
    "phase": "phase5",
    "kind": "impl",
    "depends_on": [
@@ -1874,20 +1899,24 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "Mac Release/8777 与物理 iPhone 安装前提已核对；§13.3 的 14 行 owner 矩阵已一次性固化，逐行包含前提、动作、应看到、结果与证据栏，全部诚实标记 NOT RUN，并给出回报模板与完成条件。",
+    "artifacts": [
+     "docs/2026-08-22-codex-web-owner-device-acceptance.md",
+     "docs/evidence/2026-08-22-codex-web-phase5-deploy-check.md",
+     "git:26f3194"
+    ],
+    "checked_at": "2026-08-22T04:04:00Z"
    }
   },
   {
    "id": "p5-deploy-tests",
    "title": "Phase5 部署核对",
    "description": "lsof/pgrep/go-bridge 日志核对命令输出归档；matrix 文档与§13.3 一致。",
-   "status": "pending",
+   "status": "done",
    "phase": "phase5",
    "kind": "tests",
    "depends_on": [
@@ -1897,27 +1926,33 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "automated",
-    "attestation": "self-attested",
+    "attestation": "re-verified",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "部署核对 PASS：Release launcher/runtime 精确进程路径正确，内嵌 runtime 在 8777 监听且 driver 列表含 codex 与 codex-web；运行日志出现真机 codex-web list_models/projection/observation 请求；validator 证明矩阵含 14 个有序 NOT RUN 行和 §13.3 关键契约。",
+    "artifacts": [
+     "scripts/codex-web-phase5/verify_owner_matrix.py",
+     "cmd:python3 scripts/codex-web-phase5/verify_owner_matrix.py",
+     "cmd:ps -axo pid=,command= filtered exact Release paths",
+     "cmd:lsof -nP -iTCP:8777 -sTCP:LISTEN",
+     "docs/evidence/2026-08-22-codex-web-phase5-deploy-check.md"
+    ],
+    "checked_at": "2026-08-22T04:04:00Z"
    }
   },
   {
    "id": "p5-deploy-regression",
    "title": "Phase5 owner 真机验收矩阵",
    "description": "owner 执行§13.3 矩阵逐行回报；未完成行保留真实阻塞，不得伪造通过。",
-   "status": "pending",
+   "status": "blocked",
    "phase": "phase5",
    "kind": "regression",
    "depends_on": [
     "p5-deploy-tests"
    ],
    "source": "design §14/phase5",
-   "notes": "",
+   "notes": "等待 owner 按 docs/2026-08-22-codex-web-owner-device-acceptance.md 执行 14 行真机视觉/交互矩阵并逐行回报；自动安装与日志可达性不得替代人工结果。",
    "verification": {
     "required": true,
     "status": "missing",
