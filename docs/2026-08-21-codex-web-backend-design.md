@@ -8,6 +8,7 @@
 - 三轮评审：[2026-08-21-codex-web-backend-design-review-r3.md](2026-08-21-codex-web-backend-design-review-r3.md)
 - 四轮确认评审：[2026-08-21-codex-web-backend-design-review-r4.md](2026-08-21-codex-web-backend-design-review-r4.md)
 - 历史前置分析（仅作问题来源，已降级，不授权实施）：[2026-08-21-codex-web-backend-feasibility-analysis.md](2026-08-21-codex-web-backend-feasibility-analysis.md)
+- **连续性合同（v2.0 拓扑之后、禁止按现象单修）**：[2026-08-22-codex-web-continuity-architecture.md](2026-08-22-codex-web-continuity-architecture.md)
 - Codex 源码 pin：`536f86e5cc9ec1ff38457d099bf320b9d08eeeba`
 - 本机官方二进制：`codex-cli 0.148.0-alpha.21`（设计时）；**Phase 0 实施时实测 `0.149.0-alpha.4`**（ChatGPT.app 内嵌，版本漂移已按 §3.2 记录，schema 与 pin 逐项吻合）
 - 不变约束：CordCode 初衷 + SSV2 十二条护栏 + source-first/真实样本纪律
