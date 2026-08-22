@@ -8,6 +8,10 @@
 
 ## [Unreleased]
 
+- **修复：退出 CordCode Link 不应要求重启 Codex Desktop**：官方 daemon 改为登录级座位（LaunchAgent 只跑幂等的 `daemon start`），随登录存在、不随 Link 退出。Desktop 已附着后，停掉 MacBridge 不再把 daemon 带走。Desktop 若已锁死私有 stdio，仍只能由 Desktop 自己重开才能翻回——那是异常恢复，不是退出 Link 的正常步骤。
+- **修复：Codex Web 在 iOS 发完一轮后收不到 Mac Desktop 的实时流**：iOS 自己的转发协程在 `turn_completed` 后立即退出，而观察连接又没有在 iOS 打开会话时 resume 该 thread。现让 `codex-web` 的 live relay 跨回合常驻，并在 `set_observation_scope` / `thread/started` 上把观察连接 attach 到同一 thread。
+- **修复：MacBridge 重启后 iOS resume 报 active writer、Mac 看不到新 session**：这是 Desktop 脱离共享 daemon、回退私有 stdio 的拓扑分裂。冲突文案改为要求完全退出并重开 Codex Desktop 以重新附着 daemon，不再暗示“关掉另一端抢锁”。
+- **修复：重启 MacBridge 会弹出 DeepSeek Harness 3080 网页**：官方 `dsh web` 默认打开浏览器。托管启动现带 `--no-open`，只在本机 3080 补座位，不再抢前台。
 - **修复：Codex Web 会话重命名误报不支持**：官方 `thread/name/set` 与 `thread/read` 确认链路已经存在，但 driver 漏接 Bridge 的 `SessionRenamer` 能力，请求在进入 app-server 前就被拒绝。现重命名直达官方写面，并以随后读取到的官方 thread 元数据作为唯一返回真相，同时即时刷新会话列表。
 - **修复：Codex Web 在项目目录新建的会话跑到用户根目录**：`create_session`/`send_message` 已携带项目目录，但 codex-web driver 漏实现 Bridge 既有的工作目录切换接口，官方 `thread/start.cwd` 因而恒为 Link 启动目录 `/Users/<用户名>`。现请求目录会原样进入官方 `thread/start`，会话列表继续按官方 `thread.cwd` 分组；Chat 中新建的会话会留在 Chat，不依赖客户端重分组或缓存纠偏。
 - **修复：Codex Web 连续发送时第二条用户消息不显示**：官方 `item/started` 已携带每轮 `userMessage` 的完整正文和 `threadId/turnId/itemId`，但 live codec 此前只转发 assistant delta，导致首轮靠冷水合偶然补回、后续轮只见回复。现按官方事件语义在 `item/started` 唯一投影用户消息，`item/completed` 保持静默防止双发；连续多轮均由同一 Mac Projection Kernel 实时归并。

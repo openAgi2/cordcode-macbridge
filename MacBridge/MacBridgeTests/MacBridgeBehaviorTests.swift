@@ -290,6 +290,28 @@ final class MacBridgeBehaviorTests: XCTestCase {
         XCTAssertEqual(calls[1].1, ["setenv", "CODEX_APP_SERVER_USE_LOCAL_DAEMON", "1"])
     }
 
+    func testCodexSharedDaemonSeatScriptIsIdempotentOfficialStart() {
+        let script = CodexSharedDaemonSeat.scriptContents(
+            daemonBinary: "/tmp/codex",
+            codexHome: "/tmp/codex-home"
+        )
+        XCTAssertTrue(script.contains("app-server daemon start"))
+        XCTAssertTrue(script.contains("CODEX_APP_SERVER_USE_LOCAL_DAEMON 1"))
+        XCTAssertFalse(script.contains("daemon stop"))
+        XCTAssertFalse(script.contains("daemon restart"))
+    }
+
+    func testCodexSharedDaemonSeatPlistIsLoginJobNotGoBridge() {
+        let plist = CodexSharedDaemonSeat.plistContents(scriptPath: "/tmp/ensure-codex-shared-daemon.sh")
+        XCTAssertTrue(plist.contains(CodexSharedDaemonSeat.label))
+        XCTAssertTrue(plist.contains("RunAtLoad"))
+        XCTAssertTrue(plist.contains("StartInterval"))
+        XCTAssertTrue(plist.contains("/tmp/ensure-codex-shared-daemon.sh"))
+        XCTAssertFalse(plist.contains("go-bridge"))
+        XCTAssertFalse(plist.contains("8777"))
+        XCTAssertFalse(plist.contains("KeepAlive"))
+    }
+
     func testCodexDesktopSharedRuntimeSetupFailsClosedWhenStandaloneMissing() {
         var commandCount = 0
         let result = RuntimeManager.configureCodexDesktopSharedRuntime(

@@ -86,6 +86,62 @@ enum CodexDesktopSharedRuntimeSetupResult: Equatable, Sendable {
     case failed(String)
 }
 
+/// Official Codex daemon seat independent of CordCode Link lifetime.
+/// Desktop falls back to private stdio if `daemon version` fails at connect/reconnect
+/// and then never reattaches. MacBridge must not own this process; a login LaunchAgent
+/// only runs idempotent `daemon start` + attach env.
+enum CodexSharedDaemonSeat {
+    static let label = "org.openagi.cordcode.codex-app-server-daemon"
+
+    static func scriptContents(daemonBinary: String, codexHome: String) -> String {
+        """
+        #!/bin/bash
+        set -euo pipefail
+        export CODEX_HOME=\(shellEscape(codexHome))
+        bin=\(shellEscape(daemonBinary))
+        if [ ! -x "$bin" ]; then
+          exit 0
+        fi
+        "$bin" app-server daemon start >/dev/null
+        /bin/launchctl setenv CODEX_APP_SERVER_USE_LOCAL_DAEMON 1
+        """
+    }
+
+    static func plistContents(scriptPath: String) -> String {
+        """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+          <key>Label</key>
+          <string>\(label)</string>
+          <key>RunAtLoad</key>
+          <true/>
+          <key>StartInterval</key>
+          <integer>60</integer>
+          <key>ProgramArguments</key>
+          <array>
+            <string>/bin/bash</string>
+            <string>\(xmlEscape(scriptPath))</string>
+          </array>
+        </dict>
+        </plist>
+        """
+    }
+
+    private static func shellEscape(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    private static func xmlEscape(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+    }
+}
+
 // MARK: - Runtime 启动配置
 
 struct RuntimeConfig {
@@ -1084,7 +1140,57 @@ class RuntimeManager: ObservableObject {
                 result: launchctl
             ))
         }
+
+        // Login seat: daemon outlives CordCode Link. Only install against the
+        // real user home so tests using a fake homeDirectory do not write plists.
+        let liveHome = FileManager.default.homeDirectoryForCurrentUser.path
+        if (homeDirectory as NSString).standardizingPath == (liveHome as NSString).standardizingPath {
+            installCodexDaemonSeat(
+                daemonBinary: daemonBinary,
+                codexHome: codexHome.path,
+                run: run
+            )
+        }
         return .configured(daemonBinary: daemonBinary)
+    }
+
+    /// Installs a user LaunchAgent that periodically runs official
+    /// `daemon start` (idempotent) and refreshes the Desktop attach env.
+    /// CordCode Link stop/quit must not bootout this job or stop the daemon.
+    private nonisolated static func installCodexDaemonSeat(
+        daemonBinary: String,
+        codexHome: String,
+        run: (String, [String], [String: String]?) -> RuntimeCommandResult
+    ) {
+        let fm = FileManager.default
+        let supportBin = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/CordCode Link/bin", isDirectory: true)
+        let scriptURL = supportBin.appendingPathComponent("ensure-codex-shared-daemon.sh")
+        let plistURL = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents/\(CodexSharedDaemonSeat.label).plist")
+        do {
+            try fm.createDirectory(at: supportBin, withIntermediateDirectories: true)
+            try CodexSharedDaemonSeat.scriptContents(daemonBinary: daemonBinary, codexHome: codexHome)
+                .write(to: scriptURL, atomically: true, encoding: .utf8)
+            try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: scriptURL.path)
+            try fm.createDirectory(at: plistURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try CodexSharedDaemonSeat.plistContents(scriptPath: scriptURL.path)
+                .write(to: plistURL, atomically: true, encoding: .utf8)
+        } catch {
+            NSLog("[RuntimeManager] 无法写入 Codex daemon seat: \(error.localizedDescription)")
+            return
+        }
+
+        let uid = getuid()
+        let domain = "gui/\(uid)"
+        let target = "\(domain)/\(CodexSharedDaemonSeat.label)"
+        _ = run("/bin/launchctl", ["bootout", target], nil)
+        let bootstrap = run("/bin/launchctl", ["bootstrap", domain, plistURL.path], nil)
+        if bootstrap.terminationStatus != 0 {
+            NSLog("[RuntimeManager] Codex daemon seat bootstrap: \(bootstrap.standardError)")
+        }
+        _ = run("/bin/launchctl", ["kickstart", target], nil)
+        NSLog("[RuntimeManager] Codex daemon seat installed: \(CodexSharedDaemonSeat.label)")
     }
 
     private nonisolated static func commandFailureDetail(
