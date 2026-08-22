@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T09:25:00Z",
+ "updated_at": "2026-08-22T09:27:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -1978,7 +1978,7 @@
    "notes": "review-fix-for:p5-deploy-regression；官方源码确认 provider 属 thread start/resume effective settings，turn/start 只接受 model/effort 等 override；实现提交 3f10df2。",
    "verification": {
     "required": true,
-    "status": "pass",
+    "status": "present",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
@@ -2006,9 +2006,9 @@
    "notes": "review-fix-for:p5-deploy-regression；新建/恢复 session、同 provider model+effort、跨 provider 拒绝及完整 Go 回归均通过。",
    "verification": {
     "required": true,
-    "status": "pass",
+    "status": "present",
     "method": "automated",
-    "attestation": "self-attested",
+    "attestation": "re-verified",
     "na_reason": null,
     "summary": "agent/codex-web、go-bridge 定向测试、全量 go test/vet 与真实 Codex app-server 协议 e2e 通过。",
     "artifacts": [
@@ -2018,7 +2018,7 @@
      "go test ./... -count=1",
      "CODEXWEB_E2E=1 go test ./agent/codex-web -run ^TestE2EModelsCustomProviderReadOnly$ -count=1 -v"
     ],
-    "checked_at": "2026-08-22T05:13:55Z"
+    "checked_at": "2026-08-22T09:27:00Z"
    }
   },
   {
@@ -2066,7 +2066,7 @@
    "notes": "review-fix-for:p5-turn-start-review-fix-regression；实现提交 28526bf：turn_error 官方 message 写入同 turn 的 system projection，保持 diagnostic truth，不伪装 assistant reply。",
    "verification": {
     "required": true,
-    "status": "pass",
+    "status": "present",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
@@ -2092,9 +2092,9 @@
    "notes": "review-fix-for:p5-turn-start-review-fix-regression；定向 reducer 测试、全量 go-bridge、vet 与 owner matrix validator 通过。",
    "verification": {
     "required": true,
-    "status": "pass",
+    "status": "present",
     "method": "automated",
-    "attestation": "self-attested",
+    "attestation": "re-verified",
     "na_reason": null,
     "summary": "turn_error 原文保留、terminal error 状态与 idle 收口均有自动化证据。",
     "artifacts": [
@@ -2103,7 +2103,7 @@
      "go vet ./go-bridge",
      "python3 scripts/codex-web-phase5/verify_owner_matrix.py"
     ],
-    "checked_at": "2026-08-22T05:30:44Z"
+    "checked_at": "2026-08-22T09:27:00Z"
    }
   },
   {
@@ -2120,7 +2120,7 @@
    "notes": "review-fix-for:p5-turn-start-review-fix-regression；owner 13:35 真机截图确认官方 invalid_id_prefix 400 原文完整显示，空白完成问题已闭环。",
    "verification": {
     "required": true,
-    "status": "pass",
+    "status": "present",
     "method": "manual",
     "attestation": "self-attested",
     "na_reason": null,
@@ -2148,7 +2148,7 @@
    "notes": "MacBridge commit f9a6913；iOS commit e43e0c6。官方 app-server 0.149.0-alpha.4 实时 model/list 证明当前目录顺序为 Sol/Terra/Luna/5.5/5.4/5.4-Mini。",
    "verification": {
     "required": true,
-    "status": "pass",
+    "status": "present",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
@@ -2229,7 +2229,7 @@
    "notes": "已按设计 §2.3/§4/§5.1/§6 收口：Agent endpoint singleflight，主 RPC 与 passive observer 只在同一 resolved service 上开多 connection；managed record 0600 持久化并按 PID+启动时间+精确 argv+监听端口校验后收养/清理；Stop 等待在途 Probe 并回收托管进程。",
    "verification": {
     "required": true,
-    "status": "pass",
+    "status": "present",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
@@ -2259,9 +2259,9 @@
    "notes": "覆盖 endpoint singleflight、managed 主连接+passive observer 仅 spawn 一次、同 endpoint 多 connection、record 0600、启动时间不匹配 fail-closed、验证后收养及 Stop 回收；race、全仓测试/vet 与 Windows 编译通过。",
    "verification": {
     "required": true,
-    "status": "pass",
+    "status": "present",
     "method": "automated",
-    "attestation": "self-attested",
+    "attestation": "re-verified",
     "na_reason": null,
     "summary": "Codex Web 单实例生命周期定向测试及 Go 全量门禁通过。",
     "artifacts": [
@@ -2271,7 +2271,7 @@
      "go vet ./...",
      "GOOS=windows GOARCH=amd64 go test -c ./agent/codex-web"
     ],
-    "checked_at": "2026-08-22T06:17:22Z"
+    "checked_at": "2026-08-22T09:27:00Z"
    }
   },
   {
