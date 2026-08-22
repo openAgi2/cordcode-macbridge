@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T05:30:44Z",
+ "updated_at": "2026-08-22T05:32:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2115,7 +2115,7 @@
     "p5-turn-error-visibility-review-fix-tests"
    ],
    "source": "owner device failure 2026-08-22 13:16 + design §7.1/§9.2",
-   "notes": "review-fix-for:p5-turn-start-review-fix-regression",
+   "notes": "review-fix-for:p5-turn-start-review-fix-regression；unsigned Release 已覆盖安装并启动，embedded runtime commit=2e1ec779ae56；重启同时终止旧 app-server writer 进程，释放本次失败 session 的跨进程 ownership。等待 owner 真机确认下一次官方 turn failure 原文可见。旧 App 可从 ~/.Trash/CordCodeLink.app.before-error-visibility-20260822-1332 恢复。",
    "verification": {
     "required": true,
     "status": "missing",
@@ -2123,7 +2123,11 @@
     "attestation": "self-attested",
     "na_reason": null,
     "summary": "",
-    "artifacts": [],
+    "artifacts": [
+     "dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip",
+     "/Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime -version => commit 2e1ec779ae56",
+     "/Users/jacklee/Library/Application Support/CordCode Link/logs/go-bridge.log runtime_ready at 2026-08-22T13:31:52+08:00"
+    ],
     "checked_at": null
    }
   },
