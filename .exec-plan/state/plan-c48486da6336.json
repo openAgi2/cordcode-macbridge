@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T08:50:00Z",
+ "updated_at": "2026-08-22T08:51:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2886,7 +2886,7 @@
    "id": "p0-desktop-attach-review-fix-tests",
    "title": "Phase0 Desktop 共享 runtime 可复跑证据门",
    "description": "对 Gate 结论建立可复跑证据：进程/FD/socket/endpoint 与同 server connection/subscription；若发现官方 attach 入口，必须证明 Desktop 不再持有独立 Embedded writer 且 CordCode 为同 server 第二 connection；若未发现，保留穷尽范围与负面证据，禁止用共享 store 代替。",
-   "status": "in_progress",
+   "status": "done",
    "phase": "phase0",
    "kind": "tests",
    "depends_on": [
@@ -2896,13 +2896,22 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "automated",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "Go 单元/集成测试与 vet、MacBridge 定向 Swift 测试、unsigned Release 构建均通过；安装态 Release 中 CordCode 主/observer 两条 UDS connection 及隔离 Desktop connection 均指向同一官方 daemon，Desktop 无私有 app-server，且无 managed-loopback listener。",
+    "artifacts": [
+     "go test ./agent/codex-web -count=1:pass",
+     "go test ./go-bridge -count=1:pass",
+     "go vet ./agent/codex-web ./go-bridge:pass",
+     "xcodebuild test -only-testing:CordCodeLinkTests/MacBridgeBehaviorTests CODE_SIGNING_ALLOWED=NO:pass",
+     "scripts/build-unsigned-release.sh:pass",
+     "dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip",
+     "scripts/codex-web-phase0/dumps/gate-desktop-attach/README.md",
+     "commit:016f60b"
+    ],
+    "checked_at": "2026-08-22T08:51:00Z"
    }
   },
   {
