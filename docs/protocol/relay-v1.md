@@ -422,6 +422,30 @@ foreground. On lease expiration or background transition,
 Mac switches that device to `milestones_only`; iOS renews the lease only while foreground and
 connected.
 
+Result `data` (schemaRevision `2026-08-23`, additive) carries per-session Subscribe +
+observer-attach outcome. `ok` is true only when every requested session is subscribed and,
+if the backend implements observer attach, actually attached. A backend whose observer
+connection is not ready, or a thread held by another app-server writer, MUST NOT return
+unconditional `{ok:true}`. Failure uses wire error `observation_attach_failed` and the same
+`data.sessions` payload:
+
+```json
+{
+  "ok": false,
+  "sessions": [
+    {
+      "sessionId": "...",
+      "subscribed": true,
+      "attached": false,
+      "error": "observer connection not ready"
+    }
+  ]
+}
+```
+
+Clients MUST treat `ok: false` or `observation_attach_failed` as “not observing”, not as a
+successful reconnect.
+
 ### 9.3 Cursor and ack ordering
 
 `deliveryCursor` is Relay-assigned and monotonic per destination mailbox. Replay responses
