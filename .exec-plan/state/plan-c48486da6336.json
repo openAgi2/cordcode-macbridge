@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T09:11:00Z",
+ "updated_at": "2026-08-22T09:12:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2920,14 +2920,14 @@
    "id": "p0-desktop-attach-review-fix-regression",
    "title": "Phase0 Desktop ↔ iOS 双向接力真机门",
    "description": "仅在同一官方 app-server Gate PASS 且共享 lifecycle 产品实现完成后，由 owner 在两端同时打开时验证：双向创建/续聊、Mac turn 实时 delta、审批/提问与重连；退出另一客户端不得作为前置条件。",
-   "status": "in_progress",
+   "status": "blocked",
    "phase": "phase0",
    "kind": "regression",
    "depends_on": [
     "p0-desktop-attach-review-fix-tests"
    ],
    "source": "owner real-device failure 2026-08-22 + design §13.3",
-   "notes": "自动拓扑与产品 Gate 已通过；等待 owner 正常重启一次 Desktop 后，按 docs/2026-08-22-codex-web-owner-device-acceptance.md 执行双向真机矩阵。不得以退出另一客户端作为通过条件。",
+   "notes": "v2.0 audit：T0 自动拓扑已通过，但正式 lifecycle 仍有 dormant managed 构造面与 CODEX_HOME standalone 解析硬化缺口，先由 p0-topology-v2-hardening-* 修复；原回归仅在新 T1 通过后恢复。review-fix-for:p0-topology-v2-hardening-regression。",
    "verification": {
     "required": true,
     "status": "missing",
