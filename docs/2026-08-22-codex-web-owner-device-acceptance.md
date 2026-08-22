@@ -6,7 +6,7 @@
 
 - Mac Release：`/Applications/CordCodeLink.app` 已覆盖安装并运行。
 - Bridge：Release 内嵌 `cordcode-bridge-runtime` 正在监听 TCP 8777，启动参数同时包含独立的 `codex` 与 `codex-web`。
-- iOS：`codex/codex-web-backend-ios` 的 `2f3df78` 已构建、安装到连接的物理 iPhone，并成功启动。
+- iOS：`codex/codex-web-backend-ios` 的 `e43e0c6` 已构建并安装到连接的物理 iPhone；Codex Web 模型目录现保留官方 `model/list` 顺序与 description。
 - 运行路径：真机启动后 Bridge 日志已出现 `backendId=codex-web` 的 `list_models`、`get_session_projection`、`set_observation_scope` 与 snapshot hydrate；这只证明接线可达，不代替下列 owner 视觉/交互验收。
 
 ## 执行规则
@@ -21,7 +21,7 @@
 
 | # | 前提条件 | 动作 | 应看到 | 结果 | 证据/备注 |
 |---:|---|---|---|---|---|
-| 1 | LAN；Codex Web；新 session | iPhone 发一个足以产生长回答的请求 | 首 token 后连续流式；正文不重复；完成态只收口一次 | FAIL | 首轮 provider 误拒绝已由 `3f10df2` 修复。13:16 owner 复测已有 session `01a0236d…`：实际 backend 为 `codex-web`；turn 已进入 `turn_started`，随后官方 remote compact 用历史模型 `x-preview-f-free` 返回 400（ChatGPT 账号不支持），因此无用户/回复 item；当前打包版 `codex-cli 0.149.0-alpha.4` 未表现出官方源码 `172ab264bd` 的 selected-model compact retry。新 session 尚待复测。截图中的“已在另一个应用中打开”符合该失败 turn 后 app-server writer ownership 仍被持有的官方契约。 |
+| 1 | LAN；Codex Web；新 session | iPhone 发一个足以产生长回答的请求 | 首 token 后连续流式；正文不重复；完成态只收口一次 | FAIL | 首轮 provider 误拒绝已由 `3f10df2` 修复。13:35 owner 复测已有 session `01a0236d…`，官方 API 拒绝历史 assistant item `resp_2026082116260046da0120a8a24374_msg`：Message ID 必须以 `msg` 开头。官方当前源码 `core/src/client.rs::prepare_response_items_for_request` 只调用 `ResponseItemId::is_prefixed`，而后者接受任意非空 prefix/suffix，故 `resp_…_msg` 未被剥离；这是官方 runtime 的历史兼容缺口，不在 iOS/MacBridge wire 映射层。禁止直接改 rollout、自动 rollback 或假 fork。新 session 尚待复测。`28526bf` 的错误可见性已由本次截图确认 PASS。 |
 | 2 | Relay；Codex Web；新 session | 使用与第 1 行等价的长回答请求 | 内容与 LAN 一致；无整段延迟后一次性跳出；无重复 | NOT RUN | 记录 Relay 状态、session 前缀、录屏 |
 | 3 | LAN；daemon 已运行；Terminal Codex 默认配置；active session | Mac 发长回答，iPhone 打开同一 session | TUI 使用 LocalDaemon；iPhone 实时进入执行中并连续显示 delta | NOT RUN | 记录 daemon/TUI 选择证据与 session 前缀 |
 | 4 | LAN；daemon 未运行；先启动 Terminal Codex 默认配置 | Mac 发长回答，再打开 Codex Web | TUI 使用 Embedded；iPhone 不伪造 live stream，只按已验证的 list/read 边界显示 | NOT RUN | 记录进程与事件时间线 |

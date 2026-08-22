@@ -2032,7 +2032,7 @@
     "p5-turn-start-review-fix-tests"
    ],
    "source": "owner device failure 2026-08-22 + design §7",
-   "notes": "review-fix-for:p5-deploy-regression；13:16 owner 复测已有 session 01a0236d…：provider 误拒绝已消失，turn/start 成功并进入 turn_started；随后官方 remote compact 使用历史模型 x-preview-f-free，被 ChatGPT 账号以 400 拒绝。当前打包版 codex-cli 0.149.0-alpha.4 未表现出官方源码修复 172ab264bd 的 selected-model compact retry，属于目标官方运行时版本阻塞；新 session 尚待复测。ownership 截图符合 resume 后 writer 被 app-server 持有的官方契约。",
+   "notes": "review-fix-for:p5-deploy-regression；13:16 owner 复测已有 session 01a0236d…：provider 误拒绝已消失，turn/start 成功。13:35 再次复测同 session，官方 Responses API 拒绝历史 assistant item id=resp_2026082116260046da0120a8a24374_msg（Message 要求 msg_ 前缀）。/Users/jacklee/Projects/codex 当前源码 core/src/client.rs::prepare_response_items_for_request 仅调用 ResponseItemId::is_prefixed（任意非空 prefix+suffix 即通过），没有按 ResponseItem::id_prefix 校验，因此该官方历史不兼容无法在 MacBridge 层无损修复；禁止直接改 rollout、自动 rollback 或假 fork。新 session 尚待 owner 复测。",
    "verification": {
     "required": true,
     "status": "missing",
@@ -2045,7 +2045,9 @@
      "/Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime -version => commit 3516a5ed5370",
      "/Users/jacklee/Library/Application Support/CordCode Link/logs/go-bridge.log 2026-08-22 13:16:53-58",
      "/Users/jacklee/.codex/sessions/2026/08/21/rollout-2026-08-21T16-25-48-01a0236d-1d5f-7650-bb6c-d302e1ac8b23.jsonl",
-     "/Users/jacklee/Projects/codex git:172ab264bd"
+      "/Users/jacklee/Projects/codex git:172ab264bd",
+      "/Users/jacklee/Projects/codex/codex-rs/core/src/client.rs:958",
+      "/Users/jacklee/Projects/codex/codex-rs/protocol/src/response_item_id.rs:35"
     ],
     "checked_at": null
    }
@@ -2108,14 +2110,100 @@
    "id": "p5-turn-error-visibility-review-fix-regression",
    "title": "Phase5 turn error 真机可见性回归",
    "description": "review-fix-for:p5-turn-start-review-fix-regression；Release 覆盖安装后由 owner 确认官方 turn failure 原文可见，不再表现为空白完成。",
-   "status": "in_progress",
+   "status": "done",
    "phase": "phase5",
    "kind": "regression",
    "depends_on": [
     "p5-turn-error-visibility-review-fix-tests"
    ],
    "source": "owner device failure 2026-08-22 13:16 + design §7.1/§9.2",
-   "notes": "review-fix-for:p5-turn-start-review-fix-regression；unsigned Release 已覆盖安装并启动，embedded runtime commit=2e1ec779ae56；重启同时终止旧 app-server writer 进程，释放本次失败 session 的跨进程 ownership。等待 owner 真机确认下一次官方 turn failure 原文可见。旧 App 可从 ~/.Trash/CordCodeLink.app.before-error-visibility-20260822-1332 恢复。",
+   "notes": "review-fix-for:p5-turn-start-review-fix-regression；owner 13:35 真机截图确认官方 invalid_id_prefix 400 原文完整显示，空白完成问题已闭环。",
+   "verification": {
+    "required": true,
+    "status": "pass",
+    "method": "manual",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "owner 真机确认 turn_error 官方 JSON 原文已作为 system content 可见。",
+    "artifacts": [
+     "dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip",
+     "/Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime -version => commit 2e1ec779ae56",
+      "/Users/jacklee/Library/Application Support/CordCode Link/logs/go-bridge.log runtime_ready at 2026-08-22T13:31:52+08:00",
+      "/var/folders/b1/1vwf1b_j28b9mf4p6gtp71000000gn/T/codex-clipboard-be4cb683-f8ae-41c8-8ba2-34f44b23d64b.jpg"
+    ],
+    "checked_at": "2026-08-22T05:35:00Z"
+   }
+  },
+  {
+   "id": "p5-model-catalog-parity-review-fix-impl",
+   "title": "Phase5 Codex Web 官方模型目录等价修复",
+   "description": "保持官方 model/list 的目录顺序、displayName、description、default 与 per-model efforts；iOS Codex Web 禁止二次字母排序或本地说明猜测。",
+   "status": "done",
+   "phase": "phase5",
+   "kind": "impl",
+   "depends_on": [
+    "p5-deploy-tests"
+   ],
+   "source": "owner device failure 2026-08-22 13:36 + design §7 list_models",
+   "notes": "MacBridge commit f9a6913；iOS commit e43e0c6。官方 app-server 0.149.0-alpha.4 实时 model/list 证明当前目录顺序为 Sol/Terra/Luna/5.5/5.4/5.4-Mini。",
+   "verification": {
+    "required": true,
+    "status": "pass",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "MacBridge 完整下发官方 description；iOS Codex Web 保留官方顺序并优先显示官方说明。",
+    "artifacts": [
+     "git:f9a6913",
+     "/Users/jacklee/Projects/cordcode-ios-codex-web-backend git:e43e0c6",
+     "/Users/jacklee/Projects/codex/codex-rs/app-server/src/request_processors/catalog_processor.rs",
+     "/Users/jacklee/Projects/codex/codex-rs/tui/src/app_server_session.rs"
+    ],
+    "checked_at": "2026-08-22T05:46:00Z"
+   }
+  },
+  {
+   "id": "p5-model-catalog-parity-review-fix-tests",
+   "title": "Phase5 Codex Web 官方模型目录等价测试",
+   "description": "覆盖官方 description 下发、iOS 解码/展示、Codex Web 目录顺序保留，并运行 Go 与 iOS 定向 build/unit tests。",
+   "status": "blocked",
+   "phase": "phase5",
+   "kind": "tests",
+   "depends_on": [
+    "p5-model-catalog-parity-review-fix-impl"
+   ],
+   "source": "owner device failure 2026-08-22 13:36 + design §7 list_models",
+   "notes": "Go tests/vet、iPhone Debug build 与 iOS build-for-testing 已通过。定向 unit test 执行被现有 test target/UI runner 签名配置阻塞：test targets 未配置 Development Team；显式使用项目 Team 后，UI test runner 又缺少 provisioning profile。未运行 UI tests，也未用自动签名更新改变 Apple provisioning 状态；按 proof 契约保持 blocked，不把仅编译成功伪报为测试执行通过。",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "automated",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Go 自动化验证通过，iOS unit/UI test bundle 编译通过，但 unit test body 未执行；真机 test action 被 UI runner provisioning 阻塞。",
+    "artifacts": [
+     "go test ./agent/codex-web ./go-bridge ./core -count=1",
+     "go vet ./agent/codex-web ./go-bridge ./core",
+     "xcodebuild CordCode Debug destination=00008140-001E69503453001C build",
+     "xcodebuild CordCode destination=generic/platform=iOS CODE_SIGNING_ALLOWED=NO build-for-testing => TEST BUILD SUCCEEDED",
+     "xcodebuild CordCodeTests destination=00008140-001E69503453001C test => test targets require a development team",
+     "xcodebuild CordCodeTests destination=00008140-001E69503453001C DEVELOPMENT_TEAM=HB8YMMP798 test => CordCodeUITests-Runner provisioning profile missing"
+    ],
+    "checked_at": "2026-08-22T05:50:40Z"
+   }
+  },
+  {
+   "id": "p5-model-catalog-parity-review-fix-regression",
+   "title": "Phase5 Codex Web 官方模型目录真机回归",
+   "description": "Mac/iPhone 覆盖安装后 owner 确认 Codex Web 模型条目、顺序和说明与 Mac Codex 官方 picker 一致。",
+   "status": "pending",
+   "phase": "phase5",
+   "kind": "regression",
+   "depends_on": [
+    "p5-model-catalog-parity-review-fix-tests"
+   ],
+   "source": "owner device failure 2026-08-22 13:36 + design §7 list_models",
+   "notes": "Mac Release 与 iPhone app 已覆盖安装；依赖的 iOS unit test 执行门被 test runner provisioning 阻塞，因此本项尚不可派生为 in_progress；owner 视觉复测结果仍可作为后续证据补入。",
    "verification": {
     "required": true,
     "status": "missing",
@@ -2123,11 +2211,7 @@
     "attestation": "self-attested",
     "na_reason": null,
     "summary": "",
-    "artifacts": [
-     "dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip",
-     "/Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime -version => commit 2e1ec779ae56",
-     "/Users/jacklee/Library/Application Support/CordCode Link/logs/go-bridge.log runtime_ready at 2026-08-22T13:31:52+08:00"
-    ],
+    "artifacts": [],
     "checked_at": null
    }
   },
