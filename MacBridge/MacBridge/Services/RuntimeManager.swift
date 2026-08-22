@@ -1096,33 +1096,25 @@ class RuntimeManager: ObservableObject {
             )
         }
 
-        // Desktop 宿主会自行做 daemon 版本兼容判定并在不兼容时回到私有 stdio。
-        // 产品侧先做更严格的 exact-version gate，避免 Desktop 静默回退后再次形成双 runtime。
+        // Desktop's attach probe is `daemon version` then
+        // appServerVersion >= 0.141.0. Exact `codex --version` string
+        // equality is stricter than that probe and currently fails closed
+        // on patch skew (e.g. Desktop alpha.4.1 vs standalone alpha.4),
+        // which skipped the login seat and left Desktop to lock into stdio.
+        // Log skew; still start the official daemon and install the seat.
+        // Desktop itself decides websocket vs stdio on the next connect.
         let desktopBundledBinary = "/Applications/ChatGPT.app/Contents/Resources/codex"
         if fileExists(desktopBundledBinary) {
             let desktopVersion = run(desktopBundledBinary, ["--version"], nil)
-            guard desktopVersion.terminationStatus == 0 else {
-                return .failed(commandFailureDetail(
-                    prefix: "无法读取 Codex Desktop 内嵌 CLI 版本",
-                    result: desktopVersion
-                ))
-            }
             let standaloneVersion = run(daemonBinary, ["--version"], nil)
-            guard standaloneVersion.terminationStatus == 0 else {
-                return .failed(commandFailureDetail(
-                    prefix: "无法读取官方 managed standalone 版本",
-                    result: standaloneVersion
-                ))
-            }
-            let desktop = desktopVersion.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
-            let standalone = standaloneVersion.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !desktop.isEmpty, desktop == standalone else {
-                return .failed(
-                    "Codex Desktop 与 managed standalone 版本不一致" +
-                    "（Desktop=\(desktop.isEmpty ? "unknown" : desktop)，" +
-                    "standalone=\(standalone.isEmpty ? "unknown" : standalone)）。" +
-                    "请用官方 installer 更新 standalone；未设置 Desktop attach 环境。"
-                )
+            if desktopVersion.terminationStatus == 0, standaloneVersion.terminationStatus == 0 {
+                let desktop = desktopVersion.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+                let standalone = standaloneVersion.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !desktop.isEmpty, !standalone.isEmpty, desktop != standalone {
+                    NSLog(
+                        "[RuntimeManager] Codex Desktop CLI (\(desktop)) differs from managed standalone (\(standalone)); continuing official daemon seat. Desktop attach still depends on daemon version compatibility."
+                    )
+                }
             }
         }
 

@@ -358,8 +358,8 @@ final class MacBridgeBehaviorTests: XCTestCase {
         XCTAssertEqual(calls, [["app-server", "daemon", "start"]])
     }
 
-    func testCodexDesktopSharedRuntimeSetupRejectsDesktopStandaloneVersionMismatch() {
-        var calls: [[String]] = []
+    func testCodexDesktopSharedRuntimeSetupContinuesWhenDesktopStandaloneVersionsDiffer() {
+        var calls: [(String, [String])] = []
         let result = RuntimeManager.configureCodexDesktopSharedRuntime(
             drivers: ["codex-web"],
             homeDirectory: "/Users/tester",
@@ -368,10 +368,10 @@ final class MacBridgeBehaviorTests: XCTestCase {
                     path == "/Applications/ChatGPT.app/Contents/Resources/codex"
             },
             run: { path, arguments, _ in
-                calls.append(arguments)
+                calls.append((path, arguments))
                 let version = path.hasPrefix("/Applications/ChatGPT.app")
-                    ? "codex-cli 0.150.0"
-                    : "codex-cli 0.149.0"
+                    ? "codex-cli 0.149.0-alpha.4.1"
+                    : "codex-cli 0.149.0-alpha.4"
                 return RuntimeCommandResult(
                     terminationStatus: 0,
                     standardOutput: version,
@@ -380,11 +380,13 @@ final class MacBridgeBehaviorTests: XCTestCase {
             }
         )
 
-        guard case let .failed(detail) = result else {
-            return XCTFail("version mismatch must fail")
-        }
-        XCTAssertTrue(detail.contains("版本不一致"))
-        XCTAssertEqual(calls, [["--version"], ["--version"]])
+        XCTAssertEqual(result, .configured(daemonBinary: "/Users/tester/.codex/packages/standalone/current/codex"))
+        XCTAssertEqual(calls.map(\.1), [
+            ["--version"],
+            ["--version"],
+            ["app-server", "daemon", "start"],
+            ["setenv", "CODEX_APP_SERVER_USE_LOCAL_DAEMON", "1"]
+        ])
     }
 
     func testProcessEnvironmentCarriesOpenCodeCreds() {

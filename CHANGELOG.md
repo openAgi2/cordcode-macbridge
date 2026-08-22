@@ -8,7 +8,7 @@
 
 ## [Unreleased]
 
-- **修复：退出 CordCode Link 不应要求重启 Codex Desktop**：官方 daemon 改为登录级座位（LaunchAgent 以 KeepAlive 循环跑幂等的 `daemon start`，0.25s 补位），随登录存在、不随 Link 退出。Desktop 已附着后，停掉 MacBridge 不再把 daemon 带走。官方 Desktop 一旦 `daemon version` 探测失败会把 transport 锁死成私有 stdio，之后再也不会试 websocket——那是异常恢复，不是退出 Link 的正常步骤。
+- **修复：退出 CordCode Link 不应要求重启 Codex Desktop**：官方 daemon 改为登录级座位（LaunchAgent 以 KeepAlive 循环跑幂等的 `daemon start`，0.25s 补位），随登录存在、不随 Link 退出。Desktop 已附着后，停掉 MacBridge 不再把 daemon 带走。官方 Desktop 一旦 `daemon version` 探测失败会把 transport 锁死成私有 stdio，之后再也不会试 websocket——那是异常恢复，不是退出 Link 的正常步骤。Desktop 与 standalone 的 CLI 小版本不一致不再挡住座位安装。
 - **修复：Codex Web 在 iOS 发完一轮后收不到 Mac Desktop 的实时流**：iOS 自己的转发协程在 `turn_completed` 后立即退出，而观察连接又没有在 iOS 打开会话时 resume 该 thread。现让 `codex-web` 的 live relay 跨回合常驻，并在 `set_observation_scope` / `thread/started` 上把观察连接 attach 到同一 thread。
 - **修复：MacBridge 重启后 iOS resume 报 active writer、Mac 看不到新 session**：这是 Desktop 脱离共享 daemon、回退私有 stdio 的拓扑分裂。冲突文案改为要求完全退出并重开 Codex Desktop 以重新附着 daemon，不再暗示“关掉另一端抢锁”。
 - **修复：重启 MacBridge 会弹出 DeepSeek Harness 3080 网页**：官方 `dsh web` 默认打开浏览器。托管启动现带 `--no-open`，只在本机 3080 补座位，不再抢前台。
