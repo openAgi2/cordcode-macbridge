@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T09:43:00Z",
+ "updated_at": "2026-08-22T09:44:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2176,30 +2176,33 @@
    "id": "p5-model-catalog-parity-review-fix-tests",
    "title": "Phase5 Codex Web 官方模型目录等价测试",
    "description": "覆盖官方 description 下发、iOS 解码/展示、Codex Web 目录顺序保留，并运行 Go 与 iOS 定向 build/unit tests。",
-   "status": "blocked",
+   "status": "done",
    "phase": "phase5",
    "kind": "tests",
    "depends_on": [
     "p5-model-catalog-parity-review-fix-impl"
    ],
    "source": "owner device failure 2026-08-22 13:36 + design §7 list_models",
-   "notes": "Go tests/vet、iPhone Debug build 与 iOS build-for-testing 已通过。定向 unit test 执行被现有 test target/UI runner 签名配置阻塞：test targets 未配置 Development Team；显式使用项目 Team 后，UI test runner 又缺少 provisioning profile。未运行 UI tests，也未用自动签名更新改变 Apple provisioning 状态；按 proof 契约保持 blocked，不把仅编译成功伪报为测试执行通过。",
+   "notes": "新增共享 CordCodeUnitTests scheme，将 unit target 与 UI runner provisioning 解耦；连接的物理 iPhone 上定向模型目录、description 解码与 reasoning truth 三项 unit test 已真实执行通过。未运行 UI tests，未开启 provisioning 更新。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "automated",
-    "attestation": "self-attested",
+    "attestation": "re-verified",
     "na_reason": null,
-    "summary": "Go 自动化验证通过，iOS unit/UI test bundle 编译通过，但 unit test body 未执行；真机 test action 被 UI runner provisioning 阻塞。",
+    "summary": "Go tests/vet 与 iOS build gate 通过；新增 unit-only scheme 后，在连接的物理 iPhone 上实际执行并通过 Codex Web 官方目录顺序、官方 description 解码、reasoning effort/catalog truth 定向测试。",
     "artifacts": [
      "go test ./agent/codex-web ./go-bridge ./core -count=1",
      "go vet ./agent/codex-web ./go-bridge ./core",
      "xcodebuild CordCode Debug destination=00008140-001E69503453001C build",
      "xcodebuild CordCode destination=generic/platform=iOS CODE_SIGNING_ALLOWED=NO build-for-testing => TEST BUILD SUCCEEDED",
      "xcodebuild CordCodeTests destination=00008140-001E69503453001C test => test targets require a development team",
-     "xcodebuild CordCodeTests destination=00008140-001E69503453001C DEVELOPMENT_TEAM=HB8YMMP798 test => CordCodeUITests-Runner provisioning profile missing"
+     "xcodebuild CordCodeTests destination=00008140-001E69503453001C DEVELOPMENT_TEAM=HB8YMMP798 test => CordCodeUITests-Runner provisioning profile missing",
+     "iOS git:53e7d79",
+     "cmd:xcodebuild CordCodeUnitTests on physical iPhone; 3 targeted unit tests; exit 0",
+     "/Users/jacklee/Library/Developer/Xcode/DerivedData/CordCode-ditfvluletdhecbduxwrcnwdzmbi/Logs/Test/Test-CordCodeUnitTests-2026.08.22_17-41-05-+0800.xcresult"
     ],
-    "checked_at": "2026-08-22T05:50:40Z"
+    "checked_at": "2026-08-22T09:44:00Z"
    }
   },
   {
