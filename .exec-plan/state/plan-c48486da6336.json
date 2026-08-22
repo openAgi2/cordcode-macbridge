@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T09:52:00Z",
+ "updated_at": "2026-08-22T09:53:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2209,14 +2209,14 @@
    "id": "p5-model-catalog-parity-review-fix-regression",
    "title": "Phase5 Codex Web 官方模型目录真机回归",
    "description": "Mac/iPhone 覆盖安装后 owner 确认 Codex Web 模型条目、顺序和说明与 Mac Codex 官方 picker 一致。",
-   "status": "pending",
+   "status": "in_progress",
    "phase": "phase5",
    "kind": "regression",
    "depends_on": [
     "p5-model-catalog-parity-review-fix-tests"
    ],
    "source": "owner device failure 2026-08-22 13:36 + design §7 list_models",
-   "notes": "Mac Release 与 iPhone app 已覆盖安装；依赖的 iOS unit test 执行门被 test runner provisioning 阻塞，因此本项尚不可派生为 in_progress；owner 视觉复测结果仍可作为后续证据补入。",
+   "notes": "unit-only scheme 已解除 UI runner provisioning 阻塞，物理 iPhone 三项定向 unit test 已通过。现进入最终集中 owner 批次：与 interaction rows 10–11、完整矩阵/观察期一起执行。",
    "verification": {
     "required": true,
     "status": "missing",
