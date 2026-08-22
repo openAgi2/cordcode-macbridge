@@ -2533,7 +2533,7 @@
     "p5-rename-review-fix-tests"
    ],
    "source": "owner device failure 2026-08-22",
-   "notes": "自动门禁完成；待 Release 构建安装及 owner 真机确认。",
+   "notes": "自动门禁完成；Release 9748e69603f4 已安装到 /Applications/CordCodeLink.app，runtime PID 53019，codex-web passive subscription 已启动；managed 官方 app-server 保持同一 PID 31580/127.0.0.1:59339、record 0600。无 iOS 代码变更、未运行 UI tests；待 owner 真机确认重命名及前后台标题一致性。",
    "verification": {
     "required": true,
     "status": "missing",
