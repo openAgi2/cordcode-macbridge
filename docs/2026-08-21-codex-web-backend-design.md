@@ -1,7 +1,7 @@
-# codex-web Backend 设计（官方 app-server API 调用 + bridge-v1 协议翻译）
+# codex-web Backend v2.0（Desktop 同 daemon 拓扑 + 官方 app-server 翻译）
 
 - 日期：2026-08-21
-- 状态：**v1.7；评审冻结（v1.5，四轮 APPROVE）+ Phase 0 已完成并裁决 PASS（2026-08-22，见 [gate-verdict](2026-08-21-codex-web-phase0-gate-verdict.md)）；v1.6 回写 Phase 0 分歧，v1.7 按 §3.0 回写 Phase 4 requestUserInput 真实 daemon-WS 门与 tool 输入约束（§22-7）**
+- 状态：**v2.0 topology-first 施工合同；取代 v1.5–v1.7 中“Terminal Gate 可单独放行产品实施”的冲突规则。Desktop 与 CordCode 连接同一官方 daemon 是产品代码开工和继续扩面的共同硬门；任何 PARTIAL、独立 runtime 或 managed-loopback 结果均不得放行。**
 - 参考方案：[2026-08-16-dsh-web-backend-design.md](2026-08-16-dsh-web-backend-design.md)
 - 一轮评审：[2026-08-21-codex-web-backend-design-review.md](2026-08-21-codex-web-backend-design-review.md)
 - 二轮评审：[2026-08-21-codex-web-backend-design-review-r2.md](2026-08-21-codex-web-backend-design-review-r2.md)
@@ -18,15 +18,53 @@
 > MacBridge 只负责调用官方 API，并把官方 Thread / Turn / Item / ServerRequest 语义翻译成
 > CordCode `bridge-v1`；它不拥有模型推理、不重建 Codex runtime，也不成为 session 真相源。
 
-> [!NOTE]
-> **评审周期已经结束。** r4 对 v1.4 给出最终 APPROVE；v1.5 只归档该确认结论，不改变已批准的
-> 技术设计。后续不得以“继续完善设计”为由启动第五轮纯文字评审。只有 Phase 0 真实样本、目标二进制
-> schema、pinned/升级后官方源码或实施中第一处分歧提供了新反证，才允许按 §3.0 回写相关章节；
-> 回写必须同时更新 §7.3 shape、fixture/contract 预期和受影响的 Gate/能力分级。
+> [!WARNING]
+> **v2.0 是唯一施工解释。** v1.5 的四轮 APPROVE、旧 Phase 0 Terminal PASS、历史完成报告和
+> exec-plan `done` 状态都不能覆盖本版拓扑硬门。若任务队列、旧评审或 companion 文档与本文冲突，
+> 立即停止产品代码，先修正文档和队列；禁止选择更容易标记完成的解释继续施工。
 
 ## 0. 结论与路线裁决
 
-新增一个与现有 `codex` 完全独立的 `codex-web` backend，先并行验证，达到本文退役门槛后再下线旧入口。
+`codex-web` 不是“另一个能调用 Codex API 的 backend”，而是 Mac Codex Desktop 官方工作流在 iOS
+上的第二个 connection。产品成立的必要拓扑只有一种：
+
+```text
+Codex Desktop ───── WebSocket over UDS ────┐
+                                            ├─ 同一个官方 codex app-server daemon
+CordCode codex-web ─ WebSocket over UDS ───┘
+```
+
+共享 `~/.codex`、能互相 `thread/list/read`、使用同版本官方二进制，均不能替代“同一 daemon”的证明。
+只共享磁盘而各自持有 app-server，会产生 active writer 冲突、收不到对方 live 事件，也不满足 CordCode
+初衷。
+
+### 0.1 不可协商的宿主拓扑不变量
+
+以下条件缺一即停止产品施工：
+
+1. Desktop 不持有私有 Embedded/stdio app-server；CordCode 不持有第二个 managed-loopback app-server；
+2. Desktop 与 CordCode 的实际 FD/peer 指向同一官方 daemon control socket；
+3. 两端用同一官方 thread identity 双向创建和续聊，不迁移、不复制、不抢 writer；
+4. Desktop 发起的 turn 能通过同一 daemon 让 CordCode 实时进入 active、接收 item/delta 与唯一终态；
+5. iOS 发起的 turn 能被仍然打开的 Desktop 实时看到并继续；测试不得要求先退出另一客户端；
+6. daemon、Desktop 内嵌 CLI 与 standalone 版本不兼容时 fail closed，不另起服务伪造可用。
+
+`managed-loopback-ws`、每 session stdio app-server、共享 store + 独立 writer 都是本产品路线的
+**架构失败态**，不是可接受的兼容模式。它们只可用于历史清理、隔离协议实验或旧 backend 回归，
+不得出现在 `codex-web` 正式启动选择中。
+
+### 0.2 成功先例的正确迁移方式
+
+从 dsh-web/opencode-web 迁移的第一原则不是 adapter 文件布局，而是：
+
+> 先让官方 GUI 连接将被 CordCode 复用的那个官方服务实例，再把 CordCode 作为第二客户端接入。
+
+模块分层、事件泵、session binding、SSV2 和 capability 组织只能在该宿主拓扑已经证明后借鉴。
+不能先完成一个自有官方 runtime 的完整 adapter，再把 Desktop 接线留到产品末期。
+
+### 0.3 代码隔离仍然成立
+
+新增实现与现有 `codex` backend 保持代码来源独立，达到本文退役门槛后再下线旧入口。
 
 这里的“独立”首先是代码来源上的独立：
 
@@ -43,15 +81,9 @@
 > session 列表、历史、创建、续聊、流式事件、审批、提问、模型和用量均优先以官方 API 为唯一数据面；
 > MacBridge 不直接解析或写入 `~/.codex/sessions/**/*.jsonl` 来补造这些事实。
 
-本路线不是把现有 `agent/codex` 改名，也不是简单把 stdio 换成 WebSocket。它要验证两个更强的命题：
-
-1. 一个官方长驻 app-server 能否稳定承担 CordCode 的 catalog、history、turn 和 live stream；
-2. Mac 上由**默认启动配置、且已复用同一 daemon** 的官方 Codex 客户端发起的 turn，能否通过
-   同一个官方服务向 `codex-web` 提供真实增量事件，从而解决 iOS 旁观外部 turn 时“一段段出现”
-   的问题；带 `-c`/strict/non-replayable 覆盖而进入 Embedded runtime 的隔离边界见 §3.3。
-
-第二项是本设计的核心 Gate。未通过时，`codex-web` 即使能完成 iOS 发起 turn，也不能宣称实现了
-CordCode 的完整“双向实时接力”，旧 `codex` backend 不得因此退役。
+本路线不是把现有 `agent/codex` 改名，也不是简单把 stdio 换成 WebSocket。它必须先证明 §0.1 的
+宿主拓扑，再证明同一 daemon 可以承担 catalog、history、turn、interaction 和 live stream。
+顺序不可倒置：iOS 自己发消息成功、adapter 单测通过或 TUI 共用 daemon，均不能单独授权后续产品面。
 
 ## 1. CordCode 初衷如何约束本设计
 
@@ -293,9 +325,9 @@ agent/codex-web/
    `try_add_connection_to_thread` 支持多个 connection 订阅同一 thread
    （`app-server/src/thread_state.rs:533-581`）。
 
-因此核心 Gate 不再问“机制是否存在”，而是验证目标二进制和各官方宿主的实际覆盖范围、事件完整性与
-多连接行为。只有“daemon 已运行 + 默认启动配置 TUI”路径需要得到共享运行时 PASS；daemon 未运行或
-覆盖启动进入 Embedded 属于已知隔离边界，不能误判为整个 `codex-web` 方案 FAIL。
+因此核心 Gate 不再问“机制是否存在”，而是验证目标二进制和 Desktop 宿主的实际接线、事件完整性与
+多连接行为。Terminal 的 LocalDaemon 路径只证明机制和 transport；只有 Desktop 与 CordCode 同 daemon
+且 T1 双向竖切通过，才能得到产品 PASS。Desktop 进入 Embedded 是产品阻断，不得用 Terminal PASS 抵消。
 
 ### 3.4 Bug 修复纪律：先找官方实现的第一处分歧
 
@@ -338,8 +370,8 @@ CordCode Link / go-bridge
         │   └── diagnostics / version-contract gate
         │
         ▼
-Official Codex app-server daemon / shared service
-        │
+Official Codex app-server daemon / shared service ◄──── Codex Desktop
+        │                                               （第二 connection，禁止 Embedded）
         ├── user Codex auth and config
         ├── official/custom provider and model resolution
         ├── official thread/turn/item lifecycle
@@ -362,7 +394,7 @@ MacBridge 不把官方 JSON-RPC 原样暴露给 iOS。翻译边界固定在 MacB
 - wire kind：`codex-web`
 - iOS：`BackendKind.codexWeb`
 - 产品显示名：`Codex Web`（实验期；退役旧入口时再决定是否恢复显示为 `Codex`）
-- managed state：`codex-web-managed-server.json`，不得复用旧 Codex session/cache 文件
+- legacy cleanup state：`codex-web-managed-server.json` 只识别并安全清理旧 owned process；正式路径不得创建
 
 同一个官方 `thread.id` 在 `codex` 与 `codex-web` 中会作为两个 backend scope 的 session 出现。
 SSV2 key 必须包含 backend id，禁止只按 thread id 合并。实验期 UI 出现两个模式下的同名 session
@@ -374,7 +406,7 @@ SSV2 key 必须包含 backend id，禁止只按 thread id 合并。实验期 UI 
 
 | 组件 | 职责 |
 |---|---|
-| lifecycle | 探测官方 daemon/共享 URL、启动官方服务、记录归属、诊断 |
+| lifecycle | exact-version gate、探测/启动官方 daemon、配置 Desktop attach、记录归属、fail-closed 诊断 |
 | transport | WebSocket、Unix socket 或官方 proxy 的字节传输与重连 |
 | rpc client | initialize、request id、pending response、server request response、通知分发 |
 | catalog | `thread/list`、archive list、分页、官方排序 |
@@ -401,6 +433,10 @@ Desktop 产品路径只允许一个运行时真相源：
    `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1`，Desktop 下一次启动连接同一 control socket；
 4. **失败可见**：standalone 缺失、daemon 启动失败、版本不兼容或环境配置失败时，
    `codex-web` 标为 `not_configured`/`incompatible`，不得另起 app-server 假装可用。
+
+这不是“优先级列表”，而是串行前置条件。第 1–3 步未全部成立时没有第 4 种可用 transport。
+Desktop 已在运行但尚未继承 attach 环境时，产品必须明确提示一次正常重启；不得 kill/steal Desktop，
+也不得趁其仍在 Embedded runtime 时启动第二服务继续工作。
 
 `-codex-web-app-server-url` 只保留给隔离 contract/e2e 与明确的非 Desktop 实验；Desktop 产品模式
 不能使用它，因为当前 Desktop 已证明的入口是 local daemon Unix socket，而不是任意 loopback URL。
@@ -560,28 +596,28 @@ Phase 0 设计采样与 adapter skeleton；它**不是 wire fixture**。每一�
 
 ### 8.2 Mac 官方客户端发起的外部 turn
 
-这是决定 `codex-web` 是否值得替换旧 backend 的硬门槛。Phase 0 必须逐宿主验证，并控制 daemon
-状态与客户端启动配置：
+这是决定 `codex-web` 是否允许存在产品实现的硬门槛，不只是退役旧 backend 的比较项。Phase 0
+必须逐宿主验证，并控制 daemon 状态与客户端启动配置：
 
 | 宿主/场景 | 前提条件 | 必须观察到的官方证据 | 判定 |
 |---|---|---|---|
-| Terminal 普通 `codex` TUI | **daemon 已运行；默认启动配置；无 `-c`/strict/non-replayable override** | TUI 选择 LocalDaemon；codex-web 收到同一 thread 的 `turn/started`、多个 delta、`turn/completed` | 核心共享运行时 Gate，必须 PASS |
+| Terminal 普通 `codex` TUI | **daemon 已运行；默认启动配置；无 `-c`/strict/non-replayable override** | TUI 选择 LocalDaemon；codex-web 收到同一 thread 的 `turn/started`、多个 delta、`turn/completed` | transport/daemon 佐证；不能代替 Desktop Gate |
 | Terminal 普通 `codex` TUI | daemon 未运行；先启动 TUI | TUI 选择 Embedded；之后启动 daemon/codex-web 不应伪称收到该 live turn；list/read 能力另测 | 已知隔离边界，不计整体 FAIL |
 | Terminal 普通 `codex` TUI | daemon 已运行；带 `-c`、strict 或不可重放覆盖 | TUI 选择 Embedded，codex-web 不应串入该 live stream | 已知隔离边界，不计整体 FAIL |
-| Codex Desktop / ChatGPT Codex | daemon 已运行；`CODEX_APP_SERVER_USE_LOCAL_DAEMON=1`；CLI/daemon 版本兼容；Desktop 重新启动并继承环境 | Desktop 无私有 Embedded app-server 子进程；FD 指向同一 control socket；codex-web 收到同一 thread 全生命周期 | Desktop attach Gate 已隔离实证 PASS；产品真机矩阵仍需完成 |
+| Codex Desktop / ChatGPT Codex | daemon 已运行；`CODEX_APP_SERVER_USE_LOCAL_DAEMON=1`；CLI/daemon 版本兼容；Desktop 重新启动并继承环境 | Desktop 无私有 Embedded app-server 子进程；FD 指向同一 control socket；codex-web 收到同一 thread 全生命周期 | **产品拓扑 Gate；必须 PASS** |
 | VS Code Codex extension | 记录其实际 app-server endpoint/进程归属 | 同上；若连接独立 app-server，记录隔离事实 | Phase 0 实测，不从 TUI 推断 |
 | codex-web/iOS 自己发起 | daemon 运行，记录 Mac 客户端启动模式 | Mac 官方客户端能看到并续聊同一官方 thread | 双向串行接力 Gate |
 
-判定规则：
+判定规则（取代 v1.x）：
 
-- **PASS**：daemon 已运行 + 默认配置 Terminal TUI 路径确实共用事件源，iOS 无文件扫描即可实时收到
-  外部 turn；Desktop/VS Code 分别报告实际覆盖范围；
-- **PARTIAL**：只能 list/read 外部 session，不能收到 live delta；双向串行接力成立，但实时旁观不成立；
-- **FAIL**：在受控的“daemon 已运行 + 默认配置 TUI”路径仍无法共享事件，或连官方历史/续聊身份也
-  不能一致；停止实施，不以 JSONL fallback 掩盖。Embedded 两条隔离对照符合预期时不算 FAIL。
+- **PASS**：Desktop 与 CordCode 的进程/FD/socket 证据证明同一 daemon；Desktop→CordCode live turn、
+  CordCode→Desktop 同 thread 续聊、双方同时打开无 writer 冲突三项均通过；Terminal 结果仅作旁证；
+- **EVIDENCE-ONLY**：TUI 共用 daemon，或 Desktop/CordCode 只能共享 list/read/store。只允许继续源码、
+  宿主、进程和最小探针调查；不得创建/扩展 catalog、history、turn、interaction、model 或 iOS 产品功能；
+- **FAIL/BLOCKED**：Desktop 仍持有独立 runtime、任一端必须退出另一端才能写、出现 active writer
+  冲突、无法观察外部 live turn，或只能靠 managed-loopback 工作。停止产品实施并重新打开设计。
 
-PARTIAL 不等于项目失败，但它不满足“通过新 backend 解决 Mac 外部 turn 分块输出”的核心目标，
-不能据此退役旧 backend。
+不存在能放行后续 Phase 的 `PARTIAL`。共享 store 的串行可见性不是双向接力，也不能被登记为产品 PASS。
 
 ### 8.3 重连
 
@@ -690,7 +726,7 @@ code review 与定向测试清单，而不是实现提示。
 - 公开 OpenAI Docs 当前不足以代替 app-server wire contract，实施以目标二进制生成 schema、
   官方源码和真实脱敏捕获三者交叉核对。
 
-## 12. Phase 0 真实样本包（编码前硬门槛）
+## 12. Phase 0A 真实样本包（能力编码前硬门槛；不替代 Phase 0 宿主拓扑门）
 
 必须在隔离 `CODEX_HOME` 与脱敏 workspace 中采集，不读取或提交用户真实 prompt/token/path：
 
@@ -713,19 +749,36 @@ code review 与定向测试清单，而不是实现提示。
 
 ## 13. 测试与验收
 
+### 13.0 风险优先验收顺序
+
+验收不再等“完整 adapter 实施完成后一次性覆盖”。固定顺序为：
+
+1. **T0 宿主拓扑门（产品代码前）**：Desktop attach、同 daemon FD/socket、无私有/managed 第二 runtime；
+2. **T1 最小双向竖切门（只完成最小 text turn 接线后）**：Desktop 创建→iOS 发现并实时旁观、iOS
+   创建→Desktop 发现并续聊、双方同时打开同一 thread 无 writer 冲突；
+3. **T2 能力扩面门**：T1 owner 真机 PASS 后，才允许 catalog/history 完整面、interaction、models、
+   mutations、SSV2 边界逐项实施；
+4. **T3 完整回归与退役门**：全矩阵、LAN/Relay、重连、旧 backend 回滚。
+
+T0/T1 任一失败立即冻结后续能力。adapter 内部测试只能证明翻译器内部一致性，不能替代 T0/T1。
+
 ### 13.1 自动化测试
 
 - contract：真实 fixture 逐字段冻结 request/response/notification/server request；
 - provenance：检查 `agent/codex-web` 不 import `agent/codex`、`transcriptindex` 或任何旧
   rollout/file-relay/session scanner 包，无旧 session/history/cache type alias 或 wrapper；首版代码审查
   必须确认不是目录 copy/rename；
-- lifecycle：external daemon、CordCode-started daemon、managed WS、双失败、旧版本 incompatible；
+- lifecycle：external daemon、CordCode-started daemon、Desktop attach、双失败、旧版本 incompatible、
+  managed WS 产品路径零启动；遗留 managed record 只测严格身份校验后的安全清理；
+- topology：Desktop 无私有子进程、Desktop/CordCode FD 指向同一 control socket、产品进程树无
+  `app-server --listen`；
 - transport：request id correlation、并发响应、unknown notification、断线 epoch、server request response；
 - catalog/history：cursor、archive、官方排序、pathless hydrate、长历史有界加载；
 - codec：每个 Item variant 的 started/delta/completed，exact identity 去重；
 - terminal：completed/failed/interrupted/error 均产生唯一终态；
 - interaction：审批/提问/resolved、断线清理、重复提交、Mac 先答；
-- ownership：第二 writer 收到 `-32600`，不得 kill/steal；
+- ownership：隔离 contract 证明第二独立 writer 会收到 `-32600`；产品拓扑回归必须证明同 daemon
+  多 connection 不走该失败路径，且不得 kill/steal；
 - provider：custom provider/model 不被过滤或替换；
 - SSV2：删除本地 projection 后，只靠官方 API 可完整重建；
 - 历史故障回归：§2.5 四项分别有定向测试，证明新路径用官方 identity/status/reducer/帧级证据消除，
@@ -751,7 +804,8 @@ code review 与定向测试清单，而不是实现提示。
 
 ### 13.3 owner 真机验收矩阵
 
-实施完成后一次性覆盖：
+按 §13.0 分批执行。第 6–8 行属于 T1，必须在 Phase 1 最小竖切后先执行并 PASS；其余行不能
+把第 6–8 行后置或抵消：
 
 | # | 前提条件（网络、模式、session 状态） | 动作 | 应看到 |
 |---:|---|---|---|
@@ -760,9 +814,9 @@ code review 与定向测试清单，而不是实现提示。
 | 3 | LAN；daemon 已运行；Terminal Codex 默认配置；active session | Mac 发长回答，iPhone 打开同 session | TUI 使用 LocalDaemon；iPhone 实时进入执行中并连续显示 delta |
 | 4 | LAN；daemon 未运行；先启动 Terminal Codex 默认配置 | Mac 发长回答，再打开 Codex Web | TUI 使用 Embedded；iPhone 不伪造 live stream，只按已验证的 list/read 边界显示 |
 | 5 | LAN；daemon 已运行；Terminal Codex 带 `-c`/strict/non-replayable 覆盖 | Mac 发长回答，iPhone 打开同 session | TUI 使用 Embedded；iPhone 不串入该隔离 turn |
-| 6 | LAN；Codex Desktop/VS Code active session | Mac 发消息 | 按 Phase 0 已确认的宿主覆盖面显示；session id/history 与官方宿主一致 |
-| 7 | Codex Web 创建并完成 | 在 Mac 官方客户端续聊 | 原 session、原 cwd、原 effective provider/model 可继续 |
-| 8 | Mac 官方客户端创建并完成 | 在 iPhone 续聊 | 原 session 可继续，无迁移/复制 |
+| 6 | LAN；Desktop 与 CordCode 已证明同 daemon；双方保持打开 | Desktop 发消息 | iPhone 立即进入执行态，连续显示同 turn delta 与唯一终态；不得切 session/刷新才出现 |
+| 7 | 双方保持打开；Codex Web 创建并完成 | 在 Desktop 原地发现并续聊 | 原 session、原 cwd、原 effective provider/model 可继续；不得重启/复制/迁移 |
+| 8 | 双方保持打开；Desktop 创建并完成 | 在 iPhone 发现并续聊 | 原 session 可继续且 Desktop 同时打开不报 active writer；不得退出任一端 |
 | 9 | custom provider 已由 Codex 配置为 effective provider | 新建与续聊各一次 | 继承同一 effective provider，模型目录不被手写替换；iOS 不显示未实现的 provider 切换 |
 | 10 | turn 请求 command/file approval | iPhone 允许/拒绝 | 官方 turn 继续/拒绝，状态由 resolved/completed 收口 |
 | 11 | requestUserInput 多题 | iPhone 完整作答 | 一次官方 response，turn 继续，卡片不丢题/不提前完成 |
@@ -772,26 +826,39 @@ code review 与定向测试清单，而不是实现提示。
 
 ## 14. 实施拆分
 
-### Phase 0：证据冻结与核心 Gate
+### Phase 0：Desktop 共享宿主拓扑 Gate（任何产品代码前）
+
+0. 先检查 Desktop 宿主，而不只检查 `codex-rs` server：读取当前安装包宿主实现、启动环境、内嵌 CLI、
+   官方 standalone/daemon 版本与 feature flags；默认现场出现私有 stdio 子进程不是调查终点；
+1. 启动版本完全匹配的官方 daemon，并配置 Desktop 官方 attach 入口；
+2. 正常重启隔离 Desktop，采集进程树、FD、control socket peer，证明没有私有 Embedded app-server；
+3. CordCode 最小探针作为第二 connection 接入同一 daemon，采集 initialize、全局通知、thread subscription；
+4. 在两 connection 同时存在时验证同 thread read/resume/turn、live event 与 writer ownership；
+5. Terminal/VS Code 只作为逐宿主覆盖证据，不能替代 Desktop 产品 Gate；
+6. 输出 PASS/EVIDENCE-ONLY/FAIL。只有 §8.2 的 PASS 可解冻 Phase 0A；其余结果不得新建产品实现目录、
+   接 iOS 产品入口或启动 managed-loopback。
+
+### Phase 0A：协议与真实样本冻结
 
 1. 生成目标二进制 stable/experimental JSON schema；
 2. 建立官方客户端 call-site / server / protocol / test 的逐能力索引；
 3. 完成 §12 真实脱敏样本包；
-4. 受控验证 Terminal 的“daemon 已运行/未运行 × 默认启动/带覆盖启动”，记录 LocalDaemon/Embedded
-   选择、实际 endpoint 与 codex-web 实收事件；Desktop/VS Code 分别采集 endpoint、transport、进程归属，
-   不从 Terminal 结果类推；
-5. 验证 writer ownership、unsubscribe/close 和重连行为；
-6. 输出 PASS/PARTIAL/FAIL，不新建产品实现目录、不改产品入口。
+4. 验证 writer ownership、unsubscribe/close、server request 和重连行为；
+5. 每项能力必须具备“官方宿主/客户端 call site + server/schema source + 同版本真实 daemon 样本 +
+   bridge 映射 + 定向测试”；缺一保持未证明。
 
-### Phase 1：独立 package 与官方服务生命周期
+### Phase 1：独立 package、官方生命周期与最小双向竖切
 
 1. 从空目录新建 `agent/codex-web`；不得复制/import/包装 `agent/codex`，旧目录零行为改动；
 2. 按 dsh-web 的职责分层搭骨架，但不复制任何 DSH 协议语义；
-3. 按 Codex 官方 app-server-client/daemon 源码实现 probe → daemon reuse/start → compatible managed WS；
-4. 按官方 client queue 实现 initialize、RPC correlation、ordered events、server request、epoch、shutdown；
-5. 增加 provenance、contract、lifecycle tests。
+3. 产品 lifecycle 只实现 official daemon reuse/start + Desktop attach + fail closed；**不得实现 compatible
+   managed WS 产品 fallback**；
+4. 按官方 client queue 实现 initialize、RPC correlation、ordered events、epoch、shutdown；
+5. 只接通完成 T1 所需的最小 list/read/create/resume/text turn/live delta 与 iOS backend 竖切；
+6. 立即由 owner 执行 §13.3 第 6–8 行及“双方同时打开无 writer 冲突”。未 PASS 时冻结 Phase 2–6，
+   不得以继续完善 adapter 为由绕过。
 
-### Phase 2：catalog + history + SSV2
+### Phase 2：catalog + history + SSV2（依赖 T1 owner PASS）
 
 1. `thread/list` catalog；
 2. `thread/read(includeTurns)` rich history；
@@ -800,21 +867,21 @@ code review 与定向测试清单，而不是实现提示。
 5. archive、rename/delete；
 6. 禁止旧 store、rollout、file relay、parser、`transcriptindex` import 的结构测试。
 
-### Phase 3：turn + live stream
+### Phase 3：turn + live stream 完整面（依赖 T1 owner PASS）
 
 1. start/resume/turn start/steer/interrupt；
 2. Thread/Turn/Item 全映射；
 3. error/usage/status/reconnect；
 4. 帧级性能对照。
 
-### Phase 4：交互与模型
+### Phase 4：交互与模型（依赖 T1 owner PASS）
 
 1. command/file/permission approvals；
 2. requestUserInput，必要时 MCP elicitation 单独 gate；
 3. model/list、custom provider 继承、permission profiles；
 4. interaction/provider fixtures 与定向测试。
 
-### Phase 5：双仓产品接线
+### Phase 5：双仓完整产品接线
 
 1. **先提交 iOS 文件级影响审计，再改产品代码**：从当前 iOS HEAD 重新扫描 `BackendKind`、wire kind、
    backend discovery/switch、server creation、display/icon、capability gate、model/permission/agent mapping、
@@ -825,7 +892,8 @@ code review 与定向测试清单，而不是实现提示。
 3. Mac wire descriptor/canonical protocol pack；
 4. iOS mirror、`BackendKind.codexWeb`、经审计确认的穷举 switch 与 cache scope；
 5. Mac 默认 drivers 增列但不替换 `codex`；
-6. 按影响审计选择定向 build/test、Release 安装与 §13.3 真机验收矩阵。审计缺失时 Phase 5 不得开工。
+6. Phase 1 已只完成最小 iOS 竖切；本阶段扩展完整 capability/UI，并按影响审计选择定向 build/test、
+   Release 安装与 §13.3 剩余真机矩阵。审计缺失或 T1 未 PASS 时 Phase 5 不得开工。
 
 ### Phase 6：并行观察与退役裁决
 
@@ -839,7 +907,7 @@ code review 与定向测试清单，而不是实现提示。
 以下条件缺一不可：
 
 1. iOS 发起 turn 的首帧、连续性、终态不低于旧 backend；
-2. **Mac 官方客户端外部 turn 的真实增量流 Gate 为 PASS**，或 owner 明确裁决接受 PARTIAL；
+2. **Mac Desktop 与 CordCode 的 T0/T1 均为 PASS**；PARTIAL/EVIDENCE-ONLY 不允许退役，也不允许继续扩面；
 3. session list、完整历史、archive/rename/delete、长 session 分页无能力倒退；
 4. iOS ↔ Mac 官方客户端双向接力通过，cwd/provider/model 不变；
 5. custom provider 真实验收通过；
@@ -950,10 +1018,14 @@ Phase 0 的文档前置条件；“满足文档前置”不代表 `config.additi
 | §6.4 协议 shape 沉淀 | 全部采纳 | 新增 §7.3 集中索引已核实 shape，并明确它只是 pinned-source 推导，必须经 Phase 0 schema + 真实样本升级后才能成为 contract fixture，禁止据此生成递归猜测器 |
 
 三轮评审没有新增需要拒绝的路线建议。仍然有效的两处部分采纳只有 §18 的一轮 M2 与 §19 的二轮
-R2-M1，其不采纳理由均保留；r3 已独立复核这两项理由成立。v1.4 的新增内容不改变 Phase 0
-PASS/PARTIAL/FAIL 口径，也不提前广告任何 experimental capability。
+R2-M1，其不采纳理由均保留；r3 已独立复核这两项理由成立。以下“v1.4 不改变
+PASS/PARTIAL/FAIL 口径”只描述当时决策，已被 v2.0 §8.2 的 PASS/EVIDENCE-ONLY/FAIL 取代。
 
 ## 21. 四轮确认评审与设计冻结记录
+
+> **历史记录，不再授权施工。** v1.5 的冻结结论未发现“产品目标要求 Desktop、PASS 规则却只强制
+> Terminal”的矛盾。2026-08-22 owner 真机反证和 Desktop attach 源码/活体证据已满足重新开设计条件，
+> 因而由 v2.0 取代。以下内容只用于追溯当时决策。
 
 对应确认报告：
 [2026-08-21-codex-web-backend-design-review-r4.md](2026-08-21-codex-web-backend-design-review-r4.md)。
@@ -967,9 +1039,8 @@ PASS/PARTIAL/FAIL 口径，也不提前广告任何 experimental capability。
 
 ### 21.1 唯一执行入口
 
-执行 agent 必须从 §14 Phase 0 开始，并依次完成：目标二进制 stable/experimental schema、官方 call-site
-索引、§12 脱敏样本包、受控共享运行时实验、PASS/PARTIAL/FAIL 裁决。未完成 Phase 0 时不得创建
-`agent/codex-web` 产品实现目录或接入 iOS 产品入口。
+执行 agent 必须从 v2.0 §14 Phase 0 开始，先完成 Desktop 共享宿主拓扑 Gate，再进入 Phase 0A
+协议样本。旧 Terminal-only PASS、旧 exec-plan 状态和本节历史措辞均不能越过该依赖。
 
 ### 21.2 允许重新打开设计的条件
 
@@ -984,12 +1055,14 @@ PASS/PARTIAL/FAIL 口径，也不提前广告任何 experimental capability。
 纯措辞偏好、重复总结、没有新证据的“再评一轮”不解除冻结。出现有效反证时，不允许静默补 fallback：
 必须保留样本、标注受影响 capability，按 §3.0 回写设计并重新裁决相关 Phase 0 Gate。
 
-## 22. Phase 0 采纳记录（2026-08-22，PASS）
+## 22. Phase 0 采纳与纠偏记录（2026-08-22）
 
 对应裁决文档：[2026-08-21-codex-web-phase0-gate-verdict.md](2026-08-21-codex-web-phase0-gate-verdict.md)。
 证据：`scripts/codex-web-phase0/`（schemas 692 文件、§12 九组样本、TUI 三场景、宿主实测；四套
-validate 共 136 断言全 PASS，可复跑）。共享运行时 Gate：**PASS**（Terminal daemon+默认 TUI 路径
-成立；最初 Desktop 独立 stdio runtime、VS Code 未安装如实记录，见 gate-hosts/README.md）。
+validate 共 136 断言全 PASS，可复跑）。历史裁决曾把“Terminal daemon+默认 TUI 路径成立”登记为
+共享运行时 Gate PASS，同时只记录 Desktop 独立 stdio runtime。**v2.0 判定该 PASS 口径无效**：
+Terminal 只能证明 daemon transport，不能放行 Desktop 产品路线。§22-8/9 的 Desktop attach 与产品接线
+证据才满足新的 T0；T1 owner 双向真机结果仍必须独立记账。
 
 | # | 回写项 | 证据落点 |
 |---|---|---|
@@ -1007,3 +1080,29 @@ validate 共 136 断言全 PASS，可复跑）。共享运行时 Gate：**PASS**
 §22-9 将 Desktop 产品拓扑修正并部署为官方单 daemon 多 connection。自动拓扑 Gate 不替代 owner 真机矩阵。
 实施注意的新事实清单（daemon 前置、同 daemon 多连接 resume 无冲突、`excludeTurns` 需
 experimentalApi、pending server request 不重放、TUI PTY 驱动细节等）见裁决文档 §4。
+
+## 23. v2.0 施工防偏航清单
+
+新 agent 接手时必须先回答并附证据；任一项回答为“否/未知”时，只能调查，不能扩展产品功能：
+
+| 问题 | 合格证据 | 不合格替代品 |
+|---|---|---|
+| Desktop 是否连接官方共享 daemon？ | Desktop 进程树无私有 app-server；FD/peer 指向 control socket | 共享 `CODEX_HOME`、能 `thread/list` |
+| CordCode 是否连接同一个实例？ | daemon 端接受两 connection，socket inode/peer 可关联 | CLI 版本相同、URL 看起来相似 |
+| Mac turn 是否实时到 iOS？ | 同 turn 的 active→item/delta→terminal 时间线 | 切 session 后重拉历史可见 |
+| iOS turn 是否实时到 Desktop？ | Desktop 保持打开时看到同 thread/turn 并可继续 | 退出 Desktop 后 resume 成功 |
+| 是否只有一个 writer/runtime？ | 同时打开无 `already has an active writer` | 捕获错误并给出友好文案 |
+| 是否 fail closed？ | attach/版本/daemon 失败时 codex-web 不可用且保留原错 | 启动 managed-loopback、stdio 或 store fallback |
+
+强制停线信号：
+
+1. owner 报告“修复后现象不变”；
+2. 需要退出另一个官方客户端才能继续同一 session；
+3. Desktop 出现私有 app-server，或 CordCode 出现 `app-server --listen`；
+4. 只能在刷新、切 session、重启后看到对方消息；
+5. 自动测试只证明 adapter request/response，没有宿主进程/FD/socket 或双向时间线；
+6. exec-plan 准备把下游能力标 done，但 T0/T1 仍 missing、PARTIAL 或仅 self-attested。
+
+停线后固定动作：保留失败现场 → 记录原假设与反证 → 从 Desktop 宿主、官方 client、daemon server
+三层寻找第一处分歧 → 用一个最小实验证伪新假设 → 回写本文与任务依赖 → 才能恢复施工。禁止连续堆叠
+adapter 补丁，也禁止用更多局部 PASS 稀释宿主拓扑失败。
