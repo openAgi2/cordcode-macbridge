@@ -169,6 +169,99 @@ func TestAgentRenameSessionUsesOfficialNameAndMetadata(t *testing.T) {
 	}
 }
 
+func TestAgentFetchSessionInfoUsesOfficialRead(t *testing.T) {
+	s := newScripted()
+	cl := NewClient(s, 1)
+	t.Cleanup(func() { _ = cl.Close() })
+	go drainNotifications(cl)
+
+	name := "archived official thread"
+	readCalls := captureParams(s, "thread/read", map[string]any{"thread": ThreadInfo{
+		ID: "thread-archived", Name: &name, Cwd: "/Users/developer/Projects/Archive",
+		ModelProvider: "openai", UpdatedAt: 1787334000,
+	}})
+	ep := &ServiceEndpoint{Source: SourceExternalDaemonReused, CLIVersion: "0.149.0-alpha.4"}
+	ep.client = cl
+	a := New(nil)
+	a.endpoint = ep
+
+	got, err := a.FetchSessionInfo(context.Background(), "thread-archived")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != "thread-archived" || got.Summary != name || got.Directory != "/Users/developer/Projects/Archive" {
+		t.Fatalf("get_session must return official thread/read metadata: %+v", got)
+	}
+	if len(*readCalls) != 1 {
+		t.Fatalf("thread/read calls=%d", len(*readCalls))
+	}
+	expectParams(t, (*readCalls)[0], map[string]any{"threadId": "thread-archived"})
+}
+
+func TestAgentArchiveSessionUsesOfficialArchiveAndRead(t *testing.T) {
+	s := newScripted()
+	cl := NewClient(s, 1)
+	t.Cleanup(func() { _ = cl.Close() })
+	go drainNotifications(cl)
+
+	name := "official archived title"
+	archiveCalls := captureParams(s, "thread/archive", map[string]any{})
+	readCalls := captureParams(s, "thread/read", map[string]any{"thread": ThreadInfo{
+		ID: "thread-archive", Name: &name, Cwd: "/Users/developer/Projects/Chat",
+		ModelProvider: "openai", UpdatedAt: 1787334060,
+	}})
+	ep := &ServiceEndpoint{Source: SourceExternalDaemonReused, CLIVersion: "0.149.0-alpha.4"}
+	ep.client = cl
+	a := New(nil)
+	a.endpoint = ep
+	signals := a.CatalogRefreshSignals()
+
+	got, err := a.ArchiveSession(context.Background(), "thread-archive", time.UnixMilli(1787334060123))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != "thread-archive" || got.Summary != name || !got.ArchivedAt.IsZero() {
+		t.Fatalf("archive must return official metadata without inventing archive timestamp: %+v", got)
+	}
+	if len(*archiveCalls) != 1 || len(*readCalls) != 1 {
+		t.Fatalf("calls archive/read=%d/%d", len(*archiveCalls), len(*readCalls))
+	}
+	expectParams(t, (*archiveCalls)[0], map[string]any{"threadId": "thread-archive"})
+	expectParams(t, (*readCalls)[0], map[string]any{"threadId": "thread-archive"})
+	select {
+	case <-signals:
+	case <-time.After(time.Second):
+		t.Fatal("confirmed archive must wake authoritative catalog refresh")
+	}
+}
+
+func TestAgentDeleteSessionUsesOfficialDelete(t *testing.T) {
+	s := newScripted()
+	cl := NewClient(s, 1)
+	t.Cleanup(func() { _ = cl.Close() })
+	go drainNotifications(cl)
+
+	deleteCalls := captureParams(s, "thread/delete", map[string]any{})
+	ep := &ServiceEndpoint{Source: SourceExternalDaemonReused, CLIVersion: "0.149.0-alpha.4"}
+	ep.client = cl
+	a := New(nil)
+	a.endpoint = ep
+	signals := a.CatalogRefreshSignals()
+
+	if err := a.DeleteSession(context.Background(), "thread-delete"); err != nil {
+		t.Fatal(err)
+	}
+	if len(*deleteCalls) != 1 {
+		t.Fatalf("thread/delete calls=%d", len(*deleteCalls))
+	}
+	expectParams(t, (*deleteCalls)[0], map[string]any{"threadId": "thread-delete"})
+	select {
+	case <-signals:
+	case <-time.After(time.Second):
+		t.Fatal("confirmed delete must wake authoritative catalog refresh")
+	}
+}
+
 func TestAgentTurnScopedAndFlatHistory(t *testing.T) {
 	a := agentWithScript(t, func(method string) any {
 		if method != "thread/read" {

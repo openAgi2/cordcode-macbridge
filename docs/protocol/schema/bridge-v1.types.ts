@@ -544,6 +544,8 @@ export type BridgeProjectionPart =
        */
       permissionKind?: string;
       permissionPatterns?: string[];
+      /** Exact client actions supported by this pending request. */
+      permissionActions?: Array<"approve" | "approveAlways" | "reject" | "rejectAlways">;
     }
   | { type: "file"; path?: string; kind?: string; diff?: string; movePath?: string }
   | {

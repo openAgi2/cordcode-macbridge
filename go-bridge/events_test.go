@@ -197,6 +197,7 @@ func TestMapAgentEventPermissionRequestOfficialPayload(t *testing.T) {
 		SessionID:          "ses_1",
 		PermissionKind:     "external_directory",
 		PermissionPatterns: []string{"/Users/jacklee/Projects/Chat/*"},
+		PermissionActions:  []string{"approve", "reject"},
 	})
 	if name != "permission_request" {
 		t.Fatalf("event name = %q, want permission_request", name)
@@ -214,6 +215,10 @@ func TestMapAgentEventPermissionRequestOfficialPayload(t *testing.T) {
 	patterns, ok := payload["patterns"].([]string)
 	if !ok || len(patterns) != 1 || patterns[0] != "/Users/jacklee/Projects/Chat/*" {
 		t.Fatalf("patterns = %#v", payload["patterns"])
+	}
+	actions, ok := payload["permissionActions"].([]string)
+	if !ok || len(actions) != 2 || actions[0] != "approve" || actions[1] != "reject" {
+		t.Fatalf("permissionActions = %#v", payload["permissionActions"])
 	}
 	// Thin payload (backends without official shape) must stay backward compatible.
 	name2, data2, _ := mapAgentEvent(core.Event{

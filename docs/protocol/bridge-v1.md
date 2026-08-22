@@ -1375,6 +1375,7 @@ in `docs/protocol/schema/bridge-v1.types.ts`.
 | `fileChanges?: { path, kind?, movePath?, diff? }[]` | Structured file mutations for this tool step (Codex Patch / apply_patch). Same shape as UnifiedFileChange. |
 | `requiresPermissionConfirmation?: boolean` | Pending tool must be approved before the turn continues (`permission_request`). Clients map to the existing permission card. Absent/false on older producers. |
 | `permissionKind?: string` / `permissionPatterns?: string[]` | Official permission payload (opencode-web v1.18) carried on the projected permission part: category key + pattern rows so SSV2 clients render the official card (category line + patterns + reject/always/once). Mirrors the `permission_request` extras; additive, absent on other backends. |
+| `permissionActions?: string[]` | Exact actions supported by this request (`approve`, `approveAlways`, `reject`, `rejectAlways`). When present, clients must render only these actions. Codex Web emits `approve`/`reject` because its official approval response has no distinct persistent “always” decision. Absent preserves the legacy client policy. |
 
 Producers (live `tool_started`/`tool_finished` and cold hydrate) must pass these through the
 Projection Kernel reducer so snapshot/patch parts retain them. Clients map them read-only; when

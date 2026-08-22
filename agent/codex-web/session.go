@@ -101,7 +101,10 @@ func (a *Agent) Name() string { return BackendID }
 
 var _ core.WorkDirSwitcher = (*Agent)(nil)
 var _ core.CatalogRefreshSignaler = (*Agent)(nil)
+var _ core.SessionInfoFetcher = (*Agent)(nil)
 var _ core.SessionRenamer = (*Agent)(nil)
+var _ core.SessionArchiver = (*Agent)(nil)
+var _ core.SessionDeleter = (*Agent)(nil)
 
 // SetWorkDir implements the Bridge's existing per-request directory seam. The
 // selected directory is consumed by the next thread/start; existing official
@@ -301,6 +304,27 @@ func threadToAgentSessionInfo(th *ThreadInfo) core.AgentSessionInfo {
 	return info
 }
 
+// FetchSessionInfo reads one official thread by id. Unlike thread/list, this
+// path remains valid for archived threads and threads outside the selected cwd.
+func (a *Agent) FetchSessionInfo(ctx context.Context, sessionID string) (*core.AgentSessionInfo, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, fmt.Errorf("codexweb: get session: empty session id")
+	}
+	var th *ThreadInfo
+	err := a.withClient(ctx, func(cl *Client) error {
+		var rpcErr *RPCError
+		var err error
+		th, rpcErr, err = ReadThread(ctx, cl, sessionID, false)
+		return errOwnershipOrRPC("thread/read", a.endpointSource(), sessionID, rpcErr, err)
+	})
+	if err != nil {
+		return nil, err
+	}
+	info := threadToAgentSessionInfo(th)
+	return &info, nil
+}
+
 // RenameSession maps the bridge RPC directly onto the official
 // thread/name/set operation and returns the subsequent thread/read result.
 // The requested title is never used as an optimistic local result.
@@ -326,6 +350,56 @@ func (a *Agent) RenameSession(ctx context.Context, sessionID, title string) (*co
 	info := threadToAgentSessionInfo(th)
 	a.signalCatalogRefresh()
 	return &info, nil
+}
+
+// ArchiveSession persists archive state through the official thread/archive
+// operation, then re-reads the official row. The wire does not expose an
+// archive timestamp, so archivedAt is intentionally not copied into metadata.
+func (a *Agent) ArchiveSession(ctx context.Context, sessionID string, _ time.Time) (*core.AgentSessionInfo, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, fmt.Errorf("codexweb: archive session: empty session id")
+	}
+	var th *ThreadInfo
+	err := a.withClient(ctx, func(cl *Client) error {
+		if rpcErr := ArchiveThread(ctx, cl, sessionID); rpcErr != nil {
+			return errOwnershipOrRPC("thread/archive", a.endpointSource(), sessionID, rpcErr, nil)
+		}
+		var rpcErr *RPCError
+		var err error
+		th, rpcErr, err = ReadThread(ctx, cl, sessionID, false)
+		return errOwnershipOrRPC("thread/read", a.endpointSource(), sessionID, rpcErr, err)
+	})
+	if err != nil {
+		return nil, err
+	}
+	info := threadToAgentSessionInfo(th)
+	a.signalCatalogRefresh()
+	return &info, nil
+}
+
+// DeleteSession maps directly to official thread/delete. A successful empty
+// official response is the mutation acknowledgement; catalog refresh remains
+// sourced from the subsequent official thread/list.
+func (a *Agent) DeleteSession(ctx context.Context, sessionID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return fmt.Errorf("codexweb: delete session: empty session id")
+	}
+	err := a.withClient(ctx, func(cl *Client) error {
+		return errOwnershipOrRPC(
+			"thread/delete",
+			a.endpointSource(),
+			sessionID,
+			DeleteThread(ctx, cl, sessionID),
+			nil,
+		)
+	})
+	if err != nil {
+		return err
+	}
+	a.signalCatalogRefresh()
+	return nil
 }
 
 func (a *Agent) endpointSource() ServiceSource {

@@ -47,7 +47,8 @@ func (a *Agent) ensurePump() {
 	codec := a.liveCodec
 	go func() {
 		for n := range cl.Notifications() {
-			if n.Method == "thread/started" || n.Method == "thread/name/updated" {
+			if n.Method == "thread/started" || n.Method == "thread/name/updated" ||
+				n.Method == "thread/archived" || n.Method == "thread/deleted" {
 				a.signalCatalogRefresh()
 			}
 			var extra []core.Event
@@ -500,6 +501,10 @@ func (a *Agent) Subscribe(ctx context.Context) (<-chan core.Event, error) {
 					resume(p.Thread.ID)
 				}
 				continue
+			}
+			if n.Method == "thread/name/updated" || n.Method == "thread/archived" ||
+				n.Method == "thread/deleted" {
+				a.signalCatalogRefresh()
 			}
 			for _, ev := range codec.Decode(n) {
 				select {

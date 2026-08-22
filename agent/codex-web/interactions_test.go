@@ -126,6 +126,9 @@ func TestApprovalOfficialRequestsAndDecisionVocabulary(t *testing.T) {
 			if len(events) != 1 || events[0].Type != core.EventPermissionRequest || events[0].ToolName != tt.tool {
 				t.Fatalf("approval event mismatch: %+v", events)
 			}
+			if !reflect.DeepEqual(events[0].PermissionActions, []string{"approve", "reject"}) {
+				t.Fatalf("Codex Web must not advertise unsupported always actions: %v", events[0].PermissionActions)
+			}
 			wantID := interactionID(sr.ThreadID, events[0].ItemID)
 			if events[0].RequestID != wantID {
 				t.Fatalf("interaction id = %q, want %q", events[0].RequestID, wantID)

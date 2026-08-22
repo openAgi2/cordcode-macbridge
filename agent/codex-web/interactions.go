@@ -229,6 +229,10 @@ func (a *Agent) approvalEvent(it *Interaction, toolName string) core.Event {
 		ThreadID:  it.ThreadID,
 		ToolName:  toolName,
 		RequestID: it.InteractionID,
+		// Official Codex approvals are one-shot accept/cancel (or a granted
+		// permission profile scoped to this session). There is no distinct
+		// persistent "always" decision, so do not advertise a fake one.
+		PermissionActions: []string{"approve", "reject"},
 	}
 	var raw map[string]any
 	if json.Unmarshal(it.Params, &raw) == nil {

@@ -27,10 +27,10 @@ import (
 // LiveCodec 把官方通知解码为 core.Event（有状态：per-thread 当前 turn、
 // willRetry 连续计数）。
 type LiveCodec struct {
-	mu          sync.Mutex
-	turnByThread map[string]string
+	mu            sync.Mutex
+	turnByThread  map[string]string
 	retryByThread map[string]int
-	unknown     map[string]int
+	unknown       map[string]int
 }
 
 func NewLiveCodec() *LiveCodec {
@@ -95,7 +95,7 @@ func (c *LiveCodec) Decode(n Notification) []core.Event {
 	case "warning":
 		return nil // 官方提示性警告（如 under-development features）；不映射事件
 	case "thread/status/changed", "thread/started", "thread/name/updated",
-		"thread/archived", "account/rateLimits/updated", "remoteControl/status/changed",
+		"thread/archived", "thread/deleted", "account/rateLimits/updated", "remoteControl/status/changed",
 		"serverRequest/resolved", "thread/goal/cleared", "turn/diff/updated":
 		// 已知但不映射 core 事件的官方面：catalog 刷新由 bridge discovery 轮询；
 		// status 真相由 turn/completed 唯一承载；rateLimits 无 usage 字段（0.149 样本）。
@@ -146,9 +146,9 @@ func (c *LiveCodec) decodeTurnCompleted(n Notification) []core.Event {
 	var p struct {
 		ThreadID string `json:"threadId"`
 		Turn     struct {
-			ID     string          `json:"id"`
-			Status string          `json:"status"`
-			Error  *TurnErrorInfo  `json:"error"`
+			ID     string         `json:"id"`
+			Status string         `json:"status"`
+			Error  *TurnErrorInfo `json:"error"`
 		} `json:"turn"`
 	}
 	if err := json.Unmarshal(n.Params, &p); err != nil || p.ThreadID == "" {
@@ -317,13 +317,13 @@ func decodeItemCompleted(n Notification) []core.Event {
 		return []core.Event{ev}
 	case "mcpToolCall":
 		ev := core.Event{
-			Type:      core.EventToolResult,
-			SessionID: p.ThreadID,
-			TurnID:    p.TurnID,
-			ItemID:    it.ID,
-			ThreadID:  p.ThreadID,
-			ToolName:  "MCP",
-			RequestID: it.ID,
+			Type:       core.EventToolResult,
+			SessionID:  p.ThreadID,
+			TurnID:     p.TurnID,
+			ItemID:     it.ID,
+			ThreadID:   p.ThreadID,
+			ToolName:   "MCP",
+			RequestID:  it.ID,
 			ToolStatus: it.ToolStatus,
 		}
 		if len(it.Result) > 0 {
@@ -394,7 +394,7 @@ func fileChangesFromItem(it ThreadItem) []core.FileChange {
 
 func decodeTokenUsage(n Notification) []core.Event {
 	var p struct {
-		ThreadID string `json:"threadId"`
+		ThreadID   string `json:"threadId"`
 		TokenUsage struct {
 			Total struct {
 				TotalTokens           int `json:"totalTokens"`
@@ -410,13 +410,13 @@ func decodeTokenUsage(n Notification) []core.Event {
 		return nil
 	}
 	usage := &core.ContextUsage{
-		UsedTokens:           p.TokenUsage.Total.TotalTokens,
-		TotalTokens:          p.TokenUsage.Total.TotalTokens,
-		InputTokens:          p.TokenUsage.Total.InputTokens,
-		CachedInputTokens:    p.TokenUsage.Total.CachedInputTokens,
-		OutputTokens:         p.TokenUsage.Total.OutputTokens,
+		UsedTokens:            p.TokenUsage.Total.TotalTokens,
+		TotalTokens:           p.TokenUsage.Total.TotalTokens,
+		InputTokens:           p.TokenUsage.Total.InputTokens,
+		CachedInputTokens:     p.TokenUsage.Total.CachedInputTokens,
+		OutputTokens:          p.TokenUsage.Total.OutputTokens,
 		ReasoningOutputTokens: p.TokenUsage.Total.ReasoningOutputTokens,
-		ContextWindow:        p.TokenUsage.ModelContextWindow,
+		ContextWindow:         p.TokenUsage.ModelContextWindow,
 	}
 	return []core.Event{{
 		Type:         core.EventContextUsageUpdated,
@@ -447,11 +447,11 @@ func (c *LiveCodec) decodeErrorNotification(n Notification) []core.Event {
 		attempt := c.retryByThread[p.ThreadID]
 		c.mu.Unlock()
 		return []core.Event{{
-			Type:        core.EventRetryStatus,
-			SessionID:  p.ThreadID,
-			ThreadID:    p.ThreadID,
+			Type:         core.EventRetryStatus,
+			SessionID:    p.ThreadID,
+			ThreadID:     p.ThreadID,
 			RetryAttempt: attempt,
-			Content:     p.Error.Message,
+			Content:      p.Error.Message,
 		}}
 	}
 	return []core.Event{{
@@ -467,10 +467,10 @@ func (c *LiveCodec) decodeErrorNotification(n Notification) []core.Event {
 // item/plan/delta 流式属 experimental（§7 🧪），未取样不消费。
 func decodePlanUpdated(n Notification) []core.Event {
 	var p struct {
-		ThreadID     string `json:"threadId"`
-		TurnID       string `json:"turnId"`
-		Explanation  *string `json:"explanation"`
-		Plan         []struct {
+		ThreadID    string  `json:"threadId"`
+		TurnID      string  `json:"turnId"`
+		Explanation *string `json:"explanation"`
+		Plan        []struct {
 			Step   string `json:"step"`
 			Status string `json:"status"`
 		} `json:"plan"`

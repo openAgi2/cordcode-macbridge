@@ -215,6 +215,8 @@ func TestCodexWebDescriptorUsesIndependentIdentityAndTruthfulCapabilities(t *tes
 	}
 	for _, capability := range []string{
 		"session_history",
+		"session_mutation",
+		"session_delete",
 		"external_turn_streaming",
 		"permission_resolve",
 		"structured_user_input_v1",

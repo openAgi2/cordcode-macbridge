@@ -42,6 +42,7 @@ type ProjectionPart struct {
 	// other backends. See bridge-v1.md「Official permission payload」.
 	PermissionKind     string   `json:"permissionKind,omitempty"`
 	PermissionPatterns []string `json:"permissionPatterns,omitempty"`
+	PermissionActions  []string `json:"permissionActions,omitempty"`
 
 	// file
 	Path     string `json:"path,omitempty"`

@@ -189,6 +189,9 @@ func mapAgentEvent(ev core.Event) (eventName string, data interface{}, done bool
 		if len(ev.PermissionPatterns) > 0 {
 			payload["patterns"] = ev.PermissionPatterns
 		}
+		if len(ev.PermissionActions) > 0 {
+			payload["permissionActions"] = ev.PermissionActions
+		}
 		return "permission_request", payload, false
 
 	case core.EventPermissionResolved:

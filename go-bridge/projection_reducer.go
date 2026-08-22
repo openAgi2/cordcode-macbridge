@@ -904,6 +904,9 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		if patterns := dataStringSlice(data, "patterns"); len(patterns) > 0 {
 			part.PermissionPatterns = patterns
 		}
+		if actions := dataStringSlice(data, "permissionActions"); len(actions) > 0 {
+			part.PermissionActions = actions
+		}
 		found := false
 		for i := range t.Assistant.Parts {
 			if t.Assistant.Parts[i].Type == "tool" && t.Assistant.Parts[i].ItemID == callID {
@@ -1271,6 +1274,9 @@ func mergeToolPart(dst *ProjectionPart, src ProjectionPart) {
 	}
 	if len(src.PermissionPatterns) > 0 {
 		dst.PermissionPatterns = src.PermissionPatterns
+	}
+	if len(src.PermissionActions) > 0 {
+		dst.PermissionActions = src.PermissionActions
 	}
 	if src.RequiresPermissionConfirmation {
 		dst.RequiresPermissionConfirmation = true

@@ -32,7 +32,11 @@ const (
 	// capability 在 P6 由 backend descriptor 独立广告（Codex/Claude 各自 readiness），P3 落地 Kernel
 	// reducer/events/schema 后才广告。MacBridge 本常量与 iOS `CCCodeBridgeProtocol.schemaRevision`
 	// 必须同值（设计 §13）。
-	BridgeProtocolSchemaRevision = "2026-08-02"
+	// 2026-08-22: permissionActions is an additive optional field on raw
+	// permission_request and projected tool parts. It prevents clients from
+	// presenting persistent "always" choices when the backend only supports a
+	// one-shot official approval vocabulary.
+	BridgeProtocolSchemaRevision = "2026-08-22"
 )
 
 type BridgeV1Protocol struct {

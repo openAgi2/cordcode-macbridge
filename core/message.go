@@ -443,37 +443,41 @@ type ToolMatches struct {
 
 // Event represents a single piece of agent output streamed back to the engine.
 type Event struct {
-	Type           EventType
-	Content        string
-	ToolName       string         // populated for EventToolUse, EventPermissionRequest
-	ToolInput      string         // human-readable summary of tool input
-	ToolInputRaw   map[string]any // raw tool input (for EventPermissionRequest, used in allow response)
-	ToolResult     string         // populated for EventToolResult
-	ToolStatus     string         // optional status for EventToolResult (e.g. completed/failed)
-	ToolExitCode   *int           // optional exit code for EventToolResult
-	ToolSuccess    *bool          // optional success flag for EventToolResult
-	SessionID      string         // agent-managed session ID for conversation continuity
-	RequestID      string         // unique request ID for EventPermissionRequest
+	Type         EventType
+	Content      string
+	ToolName     string         // populated for EventToolUse, EventPermissionRequest
+	ToolInput    string         // human-readable summary of tool input
+	ToolInputRaw map[string]any // raw tool input (for EventPermissionRequest, used in allow response)
+	ToolResult   string         // populated for EventToolResult
+	ToolStatus   string         // optional status for EventToolResult (e.g. completed/failed)
+	ToolExitCode *int           // optional exit code for EventToolResult
+	ToolSuccess  *bool          // optional success flag for EventToolResult
+	SessionID    string         // agent-managed session ID for conversation continuity
+	RequestID    string         // unique request ID for EventPermissionRequest
 	// Official permission.asked payload (opencode-web v1.18, live-pinned):
 	// permission kind + patterns are what the official desktop renders
 	// (category line + pattern rows); "always" replies persist these.
 	PermissionKind     string   // e.g. "external_directory"; empty for backends without official payload
 	PermissionPatterns []string // e.g. ["/Users/x/Projects/Chat/*"]
-	TurnID         string         // source-proven turn identity (Codex/Claude/OpenCode turn id; projection lifecycle)
-	ItemID         string         // source-proven item identity (assistant text/reasoning/tool part id)
-	Questions      []UserQuestion // populated when ToolName == "AskUserQuestion"
-	Plan           []Todo         `json:",omitempty"`
-	Done           bool
-	Error          error
-	InputTokens    int // token usage from agent result events
-	OutputTokens   int
-	ContextUsage   *ContextUsage
-	FileChanges    []FileChange
-	ToolMatches    *ToolMatches
-	StreamID       string // stable child stream identity; empty means the main stream
-	ParentStreamID string // optional parent child-stream identity
-	RetryAttempt   int    // populated for EventRetryStatus (1-based serve retry attempt)
-	RetryNext      int64  // populated for EventRetryStatus (serve epoch-ms when the next attempt fires)
+	// PermissionActions is the exact UI action vocabulary supported by this
+	// pending request. Empty preserves the legacy client default; Codex Web sets
+	// approve/reject because its official wire has no persistent "always" reply.
+	PermissionActions []string       // approve | approveAlways | reject | rejectAlways
+	TurnID            string         // source-proven turn identity (Codex/Claude/OpenCode turn id; projection lifecycle)
+	ItemID            string         // source-proven item identity (assistant text/reasoning/tool part id)
+	Questions         []UserQuestion // populated when ToolName == "AskUserQuestion"
+	Plan              []Todo         `json:",omitempty"`
+	Done              bool
+	Error             error
+	InputTokens       int // token usage from agent result events
+	OutputTokens      int
+	ContextUsage      *ContextUsage
+	FileChanges       []FileChange
+	ToolMatches       *ToolMatches
+	StreamID          string // stable child stream identity; empty means the main stream
+	ParentStreamID    string // optional parent child-stream identity
+	RetryAttempt      int    // populated for EventRetryStatus (1-based serve retry attempt)
+	RetryNext         int64  // populated for EventRetryStatus (serve epoch-ms when the next attempt fires)
 	// question 相关字段
 	QuestionID   string           // question 唯一标识 (Codex ask)
 	QuestionText string           // question prompt 文本
