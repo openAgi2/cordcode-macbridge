@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T09:20:00Z",
+ "updated_at": "2026-08-22T09:23:29Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2972,7 +2972,7 @@
    "id": "p0-topology-v2-hardening-tests",
    "title": "Phase0 v2.0 单 daemon 静态与运行门",
    "description": "覆盖 CODEX_HOME standalone 优先、版本/daemon 失败可见、产品 Probe 零 managed spawn、旧 record 仅严格身份清理、主/observer 同 endpoint；运行 Go、vet、MacBridge 定向测试与 Release 构建。",
-   "status": "in_progress",
+   "status": "done",
    "phase": "phase0",
    "kind": "tests",
    "depends_on": [
@@ -2982,13 +2982,24 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "automated",
-    "attestation": "self-attested",
+    "attestation": "re-verified",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "Go unit/race/integration、vet、Windows 编译、MacBridge 定向测试与 unsigned Release 构建均通过；已安装 Release runtime 与 LaunchServices 隔离 Desktop 分别以 2/1 个 Unix FD peer 连接同一官方 daemon，CLI 版本完全一致且 managed-loopback 为零。",
+    "artifacts": [
+     "cmd:go test ./agent/codex-web -count=1",
+     "cmd:go test -race ./agent/codex-web -count=1",
+     "cmd:go test ./go-bridge -count=1",
+     "cmd:go vet ./agent/codex-web ./go-bridge",
+     "cmd:CODEXWEB_E2E=1 targeted official-daemon tests",
+     "cmd:GOOS=windows GOARCH=amd64 go test -c ./agent/codex-web",
+     "cmd:xcodebuild MacBridgeBehaviorTests",
+     "dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip",
+     "scripts/codex-web-phase0/dumps/gate-desktop-attach/README.md",
+     "git:eb6a590"
+    ],
+    "checked_at": "2026-08-22T09:23:29Z"
    }
   },
   {
