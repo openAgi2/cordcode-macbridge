@@ -1,11 +1,11 @@
 # Codex Web 连续性架构：同一 daemon 上的观察、执行态与 Desktop 附着
 
-- 日期：2026-08-22（2026-08-23 按评审修订）
-- 状态：**施工前合同 / 整体设计草案。禁止按现象单修。**
+- 日期：2026-08-22（2026-08-23 按一轮、二轮评审修订）
+- 状态：**施工前合同 / 整体设计草案。禁止按现象单修。L2 开工前必须先满足 §6.2.1 对 RPC 成功的定义（现状 `Ok:true` 是假验证）。**
 - 适用仓库：MacBridge 本文件为权威；iOS 仓 `docs/` 下同名文件是给 iOS workspace agent 的工作镜像，冲突以本文件为准
 - 前置合同：[2026-08-21-codex-web-backend-design.md](2026-08-21-codex-web-backend-design.md)（v2.0 topology-first）
 - 问题来源：[2026-08-22-codex-web-desktop-bidirectional-handoff-gap.md](2026-08-22-codex-web-desktop-bidirectional-handoff-gap.md)
-- 评审：[2026-08-23-codex-web-continuity-architecture-review.md](2026-08-23-codex-web-continuity-architecture-review.md)（双仓源码核验；修订处置见本文 §10）
+- 评审：一轮 [2026-08-23-codex-web-continuity-architecture-review.md](2026-08-23-codex-web-continuity-architecture-review.md)；二轮 [2026-08-23-codex-web-continuity-architecture-review-r2.md](2026-08-23-codex-web-continuity-architecture-review-r2.md)。修订处置见本文 §10 / §11
 - 活体复盘：MacBridge `think.md` 2026-08-22 条目
 - 不变约束：CordCode 初衷 + SSV2 十二条 + 官方 Desktop 不可改 asar
 
@@ -19,8 +19,10 @@
 > [!WARNING]
 > 本文授权的是整体设计与按层施工。未完成本文 §6 的层合同之前，禁止再开「发现一个修一个」
 > 的任务。已经落地的座位 / `set_observation_scope` 三件事 / relay 常驻只是 L0–L2 的局部实现，
-> 不能当成连续性已完成。2026-08-23 评审纠正了两处会修错面的根因指认（旁观路径 256 chan、
-> 「没有重连声明链」）；机制代码直证仍须 §7 矩阵确认真机归因，不得把候选写成已证实。
+> 不能当成连续性已完成。一轮评审纠正了两处会修错面的根因指认（旁观路径 256 chan、
+> 「没有重连声明链」）。二轮评审纠正：`set_observation_scope` 的 `Ok:true` 不表示 attach
+> 生效（§6.2.1）；权威 pull 不得只读零目标窗口内未被 ingest 的内存 Kernel（§6.3.1）。
+> 机制代码直证仍须 §7 矩阵确认真机归因，不得把候选写成已证实。
 
 ## 0. 一句话
 
@@ -46,12 +48,13 @@ CordCode 是用户官方 Mac Codex 工作流的 iOS 延伸。官方 `codex app-s
 | C3 | Desktop 一旦 `daemon version` 失败会锁死 `kind=stdio`，进程内不可远程翻回 | 用 kill/steal stdio 子进程、SQLite 假同步、第二 app-server 继续工作 |
 | C4 | 活跃 thread 的 writer 在 daemon 进程内。第二连接只能观察或在无 writer 时 resume | iOS 对 Desktop 正在写的 thread 抢锁；stdio 热接 daemon 上的 in-flight turn |
 | C5 | iPhone `isGenerating` 只认投影 `execution.phase`。正文到齐不等于回合收口 | timer、输入框、Stop 本地态、字数/静默时间猜完成 |
-| C6 | iPhone 正在看的 session，在 **新的 go-bridge 进程** 上必须从 t=0 就有**已生效**的观察范围和 observer attach | 只 spawn 声明不等待结果；hello 成功冒充已在听；靠切 session 当重连修复 |
+| C6 | iPhone 正在看的 session，在 **新的 go-bridge 进程** 上必须从 t=0 就有**已生效**的观察范围和 observer attach | 只 spawn 声明不等待结果；hello 成功或 `ResultResponse{Ok:true}` 冒充已在听；靠切 session 当重连修复 |
 | C7 | 长任务的执行点在 daemon，不在 Link。Link 进出不得中断 daemon 上的 turn | 把「列表闪一下」当成服务死了；用重启 Desktop 续跑 |
 
 C3 是官方 Desktop 宿主事实，本产品改不了 asar。合同只能是：**永不制造 Desktop 的探测失败窗口**；已经锁死的 Desktop 只能完整退出一次，且这不是退出 Link 的正常步骤。
 
-C6 说的是**生效的旁观**，不是「曾经发出过 `set_observation_scope`」。重连声明链已经存在（§4.3）；缺的是可验证、失败升级、以及新进程上空 scope 时的诚实。
+C6 说的是**生效的旁观**，不是「曾经发出过 `set_observation_scope`」、也不是 wire 上的 `Ok:true`。
+重连声明链已经存在（§4.3）；缺的是可验证（含 attach 结果）、失败升级、以及新进程上空 scope 时的诚实。
 
 ## 2. 官方 Desktop 不可改的宿主事实
 
@@ -112,8 +115,8 @@ L1  Desktop 附着
             │
 L2  观察连续性（iOS 正在看的 session）
     观察范围的权威在「当前打开的 session」
-    go-bridge 侧 `set_observation_scope` 已是单一充分入口（Subscribe + AttachLiveThread + flush）
-    缺的是：新进程上声明必须可验证地生效。hello/重连成功 ≠ 已在听
+    go-bridge 侧 `set_observation_scope` 是单一充分**入口**（会触发 Subscribe + AttachLiveThread + flush）
+    现状 RPC `Ok:true` 不证明 attach 生效。缺的是：声明必须可验证地生效。hello/`Ok:true` ≠ 已在听
             │
 L3  执行连续性（投影相位）
     旁观路径上 `turn/completed` 跨断连窗口必须仍能进入 Kernel 相位
@@ -150,14 +153,18 @@ MacBridge 在这张图里只出现在 L0 的「探测/补位」和 L2/L3 的「�
 
 这是当前真机「重启 Link 后不同步、切 session 才好」的合同缺口。
 
-**go-bridge 侧已建待验（单一充分入口）：** `handleSetObservationScope` 一个 RPC 同时完成
-(1) `broadcaster.Subscribe` 当前连接（单独即可过 Kernel-ingest 订阅者门，不必先 `get_session`）、
-(2) `AttachLiveThread`（observer `thread/resume`）、
-(3) `FlushLiveFrameBufferForDevice`。hello 不触发 attach。订阅按 conn 键，换连接必须重发；
-经 Relay 送达的 scope 走同一 `HandleRPC`，同样生效。
+**go-bridge 侧入口已建、生效信号未建（单一充分入口，不是单一充分验证）：**
+`handleSetObservationScope` 一个 RPC **会触发**三件事：
+(1) 同步 `broadcaster.Subscribe` 当前连接（单独即可过 Kernel-ingest 订阅者门，不必先 `get_session`）、
+(2) **异步** `go AttachLiveThread`（observer `thread/resume`）、
+(3) `FlushLiveFrameBufferForDevice`。然后**无条件** `ResultResponse{Ok: true}`。
+hello 不触发 attach。订阅按 conn 键，换连接必须重发；经 Relay 送达的 scope 走同一 `HandleRPC`。
 
-实施 agent **不得**把 §6.2 读成「从零建造 Subscribe + attach」。L2 剩余工作几乎全在
-**声明是否生效**，以及新进程上空 scope 的诚实。
+因此：入口不必从零再造；**不得**把 `Ok:true` 读成 C6「已生效」。Subscribe 同步成功只证明 ingest 门打开；
+observer resume 可能根本没发生（见断裂点 5）。
+
+实施 agent **不得**把 §6.2 读成「从零建造 Subscribe + attach」。L2 剩余工作是
+**声明是否生效（含 attach 结果回传）**，以及新进程上空 scope 的诚实。
 
 今天仍成立的断裂点：
 
@@ -173,6 +180,11 @@ MacBridge 在这张图里只出现在 L0 的「探测/补位」和 L2/L3 的「�
    - 事件流 rebind 有 15-strike 退避，停机后要等下一次事务/前台/发送才拉起。
    新 go-bridge 刚起来时，重声明与对端 hello/agent ready 竞态，失败即静默——这是
    「切 session 才好」的**归因候选**（切 session 会再走一遍打开路径，相当于强制可观察的重声明）。
+5. **go-bridge 侧假验证（代码直证，开工前必须修进合同验收）：**
+   `AttachLiveThread` 以 `go` 发射，RPC 不等待；`observeThread` 对 transport 错误、
+   `-32600` ownership、「官方 rpcErr」全部 `slog.Warn` 后返回；`obsClient == nil`
+   （观察连接还在 backoff）时 attach **静默 no-op**。Desktop 已离开共享 daemon、
+   或新进程 observer 未就绪时，scope RPC 仍然绿、live 流永不来。C6 禁止这种绿。
 
 必须写进合同的结构性事实（代码直证，不是立刻要建的第二套观察）：
 
@@ -190,8 +202,9 @@ MacBridge 在这张图里只出现在 L0 的「探测/补位」和 L2/L3 的「�
 
 - **权威**：iPhone 当前打开的 `(backendId, sessionId)` 是观察意图的唯一来源。
 - **t=0**：新 go-bridge 进程上，hello 成功后必须有一次**已确认生效**的 `set_observation_scope`
-  （或等价声明）。生效 = scope 非空 + 当前 conn 已 Subscribe + observer 已 resume 该 thread。
-  失败必须让恢复事务失败或可重试升级，不得只打日志。
+  （或等价声明）。生效 = scope 非空 + 当前 conn 已 Subscribe + **observer 已 resume 该 thread
+  （结果必须出现在 RPC 响应里，不能靠 `Ok:true`）**。
+  失败必须让恢复事务失败或可重试升级，不得只打日志、不得异步吞错。
 - 租约循环必须每次迭代解析**当前** `backendClient`，不得捕获旧 client。
 - **hello 成功、Relay 已连、列表能拉、甚至收到 milestone，一律不算「正在旁观」。**
 - 切走再切回可以当作回归对照，**不得**当作正常重连步骤写进验收。
@@ -222,8 +235,13 @@ iOS 另有 10s stall watchdog：只有显式 idle 才收口，V2 下投影 execu
 ```
 
 `dispatchEvent` 的 256 满即丢（`agent/codex-web/events.go` 中央泵 → session listener）
-**不在旁观链上**。它只服务 iPhone 自己发 turn 的写路径 → `relayEvents`。把它当 L3
+**不在纯旁观链上**。它服务 iPhone 自己发 turn 的写路径 → `relayEvents`。把它当 L3
 主断点去加「终态优先 / 独立完成通道」，会修错面；写路径隐患仍要记，但不得冒充旁观根因。
+
+注脚：若 bridge 在同一 thread 上**已经持有写 session**（iPhone 早前对它发过消息），
+同一外部回合也会经写连接进 `dispatchEvent`，与旁观泵两路并行、投影层去重。取证时在
+日志里看到 `dispatchEvent` **不等于**「这次是写路径根因、旁观合同修错了」。纯旁观
+（iPhone 从未对该 thread Send）仍只走观察泵。
 
 今天旁观路径上更可能同时解释「正文到了 + 相位卡执行中」的机制（**归因候选，机制代码直证**，
 须 §7 #7 确认）：
@@ -252,8 +270,11 @@ LiveFrameBuffer，completed 进 mailbox 或被丢 → 重连 flush 回放全文�
 目标形态：
 
 - 旁观路径上跨断连窗口的 **durable 终态必须仍能进入 Kernel 相位**（LAN 重连不得只回放正文）。
-  实现可以是：completed 进入可对 LAN 回放的缓冲、或重连后权威 pull 必须能收口相位；选一种写进
-  实现合同。不允许「live 回放拉起执行中、completed 只在 relay mailbox」。
+  实现可以是：(a) completed 进入可对 LAN 回放的缓冲，或 (b) 重连后权威 pull 收口相位。
+  选 (b) 的前提：零目标窗口内事件在 `HasSessionSubscriber` 门（`main.go` 被动泵）就被丢掉，
+  **进不了 go-bridge 内存 Kernel**。因此 pull 的终态数据源必须能溯到官方 `thread/read`
+  （或等价官方冷校准），不得只读断连期间未被 ingest 的内存投影——否则是假绿。
+  选型前必须核实 projection pull 的数据源链。不允许「live 回放拉起执行中、completed 只在 relay mailbox」。
 - 写路径 256 满丢是另一面，允许单独测试，不得当作旁观验收。
 - Kernel 必须能从官方 `turn/completed`（以及失败/中断语义）落到 `execution.phase=idle|failed`，
   iPhone 只跟这一相位。
@@ -276,6 +297,8 @@ LiveFrameBuffer，completed 进 mailbox 或被丢 → 重连 flush 回放全文�
 8. 不在 L2 未生效时用冷投影或 milestone 泄漏冒充「已经在 live 旁观」。
 9. 不把旁观路径的完成帧问题修到写路径 `dispatchEvent` 256 chan 上。
 10. 不为「有个 watcher」给 `codex-web` 复制 `StartCodexRelayWatcher` 当 L2 完成证明。
+11. 不把 `set_observation_scope` 的 `ResultResponse{Ok:true}` 当 attach 生效；不把「等到 Ok」写成 L2 完成。
+12. 不把零目标窗口之后的内存 Kernel pull 当权威收口，除非已证明该 pull 溯源官方 `thread/read`。
 
 ## 6. 施工切面（按层，禁止按 bug 开 PR）
 
@@ -301,16 +324,22 @@ LiveFrameBuffer，completed 进 mailbox 或被丢 → 重连 flush 回放全文�
 
 目标：iPhone 开着 session 时重启 Link，重连成功后 **不必切 session**，Mac 再发就能进执行态并 **delta 流式**。
 
-go-bridge 侧 `set_observation_scope` 三件事**已建待验**，不要从零再造。必须整体处理、缺一不算 L2 完成：
+go-bridge 侧 `set_observation_scope` 会触发三件事，**不要从零再造入口**。必须整体处理、缺一不算 L2 完成：
 
-1. **声明可验证**：现有重连声明链保留。恢复事务必须等到 scope RPC 成功，或失败升级（可见 / 重试），不得 fire-and-forget。
+1. **声明可验证（开工前必须）：** 现有重连声明链保留。恢复事务必须等到 scope RPC **按下面的成功定义**成功，或失败升级（可见 / 重试），不得 fire-and-forget。
+   **RPC 成功的定义必须包含逐 session 的 Subscribe + attach 结果。** 现状
+   `ResultResponse{Ok: true}` 无条件返回，不区分 attach 成败（`handlers.go`：`go AttachLiveThread`
+   之后立刻 Ok；`events.go`：`obsClient==nil` 静默跳过，transport/`-32600`/rpcErr 全部 Warn 吞掉）。
+   按字面「等到 scope RPC 成功」是**永远绿色的假验证**，违反 C6。L2 施工必须把 attach/subscribe
+   结果带回 RPC 响应（或使失败的 attach 让该 RPC 失败）；禁止继续用 `Ok:true` 当生效信号。
 2. **循环解析当前 client**：租约循环每次迭代取当前 `backendClient`，禁止捕获创建时的旧 client。
-3. **空 scope 诚实**：`resubscribeObservationSessions` 在新进程上无 scope 时不得假装已在听；第一次生效的 scope 必须 Subscribe + `AttachLiveThread` + flush（已在同一 RPC 内，验的是它真的被调用成功）。
-4. 验收断言 **delta 流式**，不能只看到 `turn_started` / `sessions_changed` 里程碑（无 scope 时可能泄漏）。
+3. **空 scope 诚实**：`resubscribeObservationSessions` 在新进程上无 scope 时不得假装已在听；第一次生效的 scope 必须 Subscribe + `AttachLiveThread` + flush，且 **attach 结果可见**。
+4. 验收断言 **delta 流式**，不能只看到 `turn_started` / `sessions_changed` 里程碑（无 scope 时可能泄漏），也不能只看到 scope RPC `ok: true`。
 
-定向测试至少覆盖：go-bridge 进程重启、observation 内存为空、iOS 重连、当前 session 未 switch、
-随后外部 `turn/started` **和 text_delta** 能进 Kernel。禁止只测「切 session 之后」。禁止只测
-「重连后发了 set_observation_scope」而不验 Subscribe/attach 是否发生。
+定向测试至少覆盖：go-bridge 进程重启、observation 内存为空、observer 尚未就绪（`obsClient==nil`）
+时发 scope 不得报成功、iOS 重连、当前 session 未 switch、随后外部 `turn/started` **和 text_delta**
+能进 Kernel。禁止只测「切 session 之后」。禁止只测「重连后发了 set_observation_scope 且 Ok」。
+覆盖 Desktop 持有私有 stdio writer 时 attach 失败必须出现在 RPC 结果里（诚实失败，不是绿旁观）。
 
 ### 6.3 L3 收口（旁观终态跨断连仍达相位）
 
@@ -318,8 +347,12 @@ go-bridge 侧 `set_observation_scope` 三件事**已建待验**，不要从零�
 
 必须整体处理：
 
-1. **主合同**：durable `turn_completed` 在 LAN 重连后仍能进入 Kernel 相位（回放缓冲含 completed，
-   或重连后权威 pull 收口；禁止只靠 relay mailbox）。
+1. **主合同**：durable `turn_completed` 在 LAN 重连后仍能进入 Kernel 相位（禁止只靠 relay mailbox）。
+   实现二选一，写进该层实现合同：
+   - (a) completed 进入可对 LAN 回放的缓冲；或
+   - (b) 重连后权威 pull 收口相位。**选型前必须核实 pull 数据源链**：零目标窗口事件在
+     `HasSessionSubscriber` 门就被丢掉、**不会**进内存 Kernel，因此 (b) 的 pull 必须能从
+     官方 `thread/read`（或等价官方冷校准）重建终态。只读 go-bridge 内存投影 = 假绿。
 2. 覆盖其余丢失点中与本层验收直接相关的：offlineQueue nil 静默丢、K4Patch 溢出不重发、
    iOS `handler=nil` 丢帧。sink 溢出断连表现为断连，按 L2 重声明闭环处理，不单独发明假完成。
 3. iPhone Stop：writer 是 Desktop 时失败可见；投影 running 时不得被本地 aborted 骗成完成。
@@ -358,23 +391,24 @@ go-bridge 侧 `set_observation_scope` 三件事**已建待验**，不要从零�
 | 4 | 3 刚结束 | 不要再靠「发一条短的」救状态；若已完成则直接停在完成态 | 后续 Mac 短消息正常开跑、正常收口 |
 | 5 | iPhone 开着该 session | 重启 Link，Mac 在重连成功后发 | 与 #2 相同；切 session 只作为对照，不是必做步骤 |
 | 6 | 对照：任务中途 **完整退出 Codex App** | 再打开 Desktop | 允许换 runtime；正在飞的那一轮接不上，只能看到已写下的历史。这不是退出 Link 的对照失败 |
-| 7 | 两边都在 daemon，Mac 正在打长回合 | 回合**收尾前后**让 iPhone 锁屏/退后台再回前台，或重启 Link | 正文可补齐，**且 Desktop 完成后 iPhone 必须收口**；若只有正文回放、输入框一直执行中，即 durable 路由未收口（L3） |
+| 7 | 两边都在 daemon，Mac 正在打长回合 | **必测强变体：** 回合收尾前后 **重启 Link**（真零目标，durable 路由不对称的强形式）。补充变体：iPhone 锁屏/退后台再回前台（连接可能未断，只走 per-conn 缓冲，durable 未修时也可能过） | 强变体：正文可补齐，**且 Desktop 完成后 iPhone 必须收口**；若只有正文回放、输入框一直执行中，即 durable 路由未收口（L3）。锁屏变体不得单独当作 L3 通过 |
 
-#1 失败才去查 L0/L1。#2/#5 失败是 L2（须看到 delta，不能只看到里程碑）。#3/#4/#7 失败是 L3。#6 是官方宿主边界，用来防止把「退出 Desktop」误写成产品主路径。
+#1 失败才去查 L0/L1。#2/#5 失败是 L2（须看到 delta，不能只看到里程碑或 `Ok:true`）。#3/#4/#7 失败是 L3；#7 以重启 Link 为准。#6 是官方宿主边界，用来防止把「退出 Desktop」误写成产品主路径。
 
 ## 8. 给后续 agent 的阅读顺序与禁令
 
 阅读顺序：
 
-1. 本文全文（合同）与 §10 评审处置
-2. 评审原文 [2026-08-23-codex-web-continuity-architecture-review.md](2026-08-23-codex-web-continuity-architecture-review.md)（源码行号以当时工作树为准，施工前应再核）
+1. 本文全文（合同）与 §10 / §11 评审处置
+2. 一轮 [2026-08-23-codex-web-continuity-architecture-review.md](2026-08-23-codex-web-continuity-architecture-review.md)、二轮 [2026-08-23-codex-web-continuity-architecture-review-r2.md](2026-08-23-codex-web-continuity-architecture-review-r2.md)（源码行号以当时工作树为准，施工前应再核）
 3. v2.0 设计 §0 与 §6.1（拓扑，不可退回 managed-loopback）
 4. `think.md` 2026-08-22 Desktop stdio 锁与 CLI patch 偏差
-5. 再读源码：`RuntimeManager.swift` 座位、`handlers.go` `set_observation_scope` / `resubscribeObservationSessions`、`agent/codex-web/events.go` 观察泵 vs `dispatchEvent`、`handlers_relay.go` durable mailbox、`live_frame_buffer.go` 回放白名单、iOS `setObservationForeground` / `applyPresentationChangeSet` / `activateGenerationIfNeeded`
+5. 再读源码：`RuntimeManager.swift` 座位、`handlers.go` `set_observation_scope`（注意 `go AttachLiveThread` 与无条件 Ok）、`resubscribeObservationSessions`、`agent/codex-web/events.go` 观察泵 vs `dispatchEvent` 与 `obsClient==nil`、`main.go` `HasSessionSubscriber` 门、`handlers_relay.go` durable mailbox、`live_frame_buffer.go` 回放白名单、iOS `setObservationForeground` / `applyPresentationChangeSet` / `activateGenerationIfNeeded`
 
 禁令：
 
-- 不得只修 iOS 或只修 Mac 来掩盖另一侧缺口。L2 是双仓：iOS 可验证地声明当前 session，Mac 新进程在那次 RPC 里 Subscribe+attach（已实现，须验成功）。
+- 不得只修 iOS 或只修 Mac 来掩盖另一侧缺口。L2 是双仓：iOS 可验证地声明当前 session，Mac 在那次 RPC 里 Subscribe+attach **并把 attach 结果放进响应**（入口已实现，生效信号未建）。
+- 不得把 `ResultResponse{Ok:true}` 或「发过 set_observation_scope」写成 L2 测试通过。
 - 不得把切 session、再发短消息、重启 Desktop 写进正常用户步骤。
 - 不得在未跑 §7 矩阵时声称「双向 live 已完成」。自动拓扑脚本 PASS 仍然不够。
 - 发现新现象时，先在 §3 表里归层；归不进四层，先改本文，再改代码。
@@ -384,7 +418,7 @@ go-bridge 侧 `set_observation_scope` 三件事**已建待验**，不要从零�
 
 下列改动是本架构的局部实现，不是完成证明：
 
-- `codex-web` 列入 relay 跨回合常驻、`set_observation_scope` 同时 Subscribe + `AttachLiveThread` + flush live buffer（L2 go-bridge 侧已建待验）
+- `codex-web` 列入 relay 跨回合常驻、`set_observation_scope` 会触发 Subscribe + 异步 `AttachLiveThread` + flush（L2 **入口**已建；`Ok:true` **不是**生效信号，见 §6.2.1 / §11 F1）
 - `codex-web` 禁用 relay idle timeout 合成假 `turn_completed`（禁止假完成的已有落地）
 - 登录 LaunchAgent 座位、0.25s KeepAlive 循环
 - 取消 exact CLI 版本 fail-closed，避免挡住座位
@@ -417,3 +451,19 @@ go-bridge 侧 `set_observation_scope` 三件事**已建待验**，不要从零�
 | 用扩 `dispatchEvent` 256 / 终态优先修旁观卡执行中 | **不采纳** | 修错通道 |
 | 为 CPU 放慢座位 0.25s 或停被动订阅 | **不采纳** | 采样否定这两条是 40% 来源 |
 | 现在重反编译 asar 改 §2 数字 | **不采纳** | 仓内多源一致；Desktop 升级时再核，不把评审「未复核」当成数字作废 |
+
+## 11. 二轮评审处置（2026-08-23 r2）
+
+对象：[2026-08-23-codex-web-continuity-architecture-review-r2.md](2026-08-23-codex-web-continuity-architecture-review-r2.md)（评审对象为修订版合同 `cc61709`）。
+
+| 评审项 | 处置 | 理由 |
+|---|---|---|
+| F1 `Ok:true` 假验证；attach 异步吞错；`obsClient==nil` 静默跳过 | **采纳，开工前** | 源码直证。写入 §4.3 断裂点 5、C6 反例、§6.2.1 成功定义。L2 不得按「等到 Ok」落地 |
+| F2 选项 b pull 必须溯源官方 `thread/read` | **采纳为选型前提** | 订阅者门在 Kernel ingest 之前。写入 §4.4 目标形态与 §6.3.1。不在此刻选定 (a) 或 (b) |
+| F3 dispatchEvent 在已有写 session 时两路并行 | **采纳为注脚** | 写入 §4.4。不改变「纯旁观不走 dispatchEvent」主判断 |
+| F4 #7 以重启 Link 为必测强变体，锁屏为补充 | **采纳** | 写入 §7 #7。锁屏单独通过 ≠ L3 完成 |
+| 把 F1 做成新的观察协议方法 / 第二 RPC | **不采纳** | 合同要的是**现有** `set_observation_scope` 的成功定义含 attach 结果。另开方法会变成第二入口，违反单一充分入口 |
+| attach 必须同步阻塞到 Desktop 释放 writer 才返回 Ok | **不采纳** | Desktop 在私有 stdio 时 writer 可能一直不放。正确行为是 **诚实失败**（结果里可见），不是挂起恢复事务 |
+| 为让 (b) 变绿而拆掉 `HasSessionSubscriber` 门、无订阅也 ingest Kernel | **不采纳** | 评审只要求 (b) 的数据源前提。拆门会给未打开的 session 建隐藏时间线，与被动泵现有纪律相反 |
+| 用锁屏/退后台变体单独关闭 L3 | **不采纳** | 连接未断时走 per-conn 缓冲，会假绿 |
+| 因 F1 宣布「单一充分入口」作废、从零再造 L2 | **不采纳** | 入口仍是这一个 RPC；缺的是生效信号，不是再造三条触发路径 |
