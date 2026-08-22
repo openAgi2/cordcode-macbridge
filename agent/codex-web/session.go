@@ -33,9 +33,15 @@ type Agent struct {
 	workDir     string
 	explicitURL string
 	codexHome   string
+	dataDir     string
+	// lifecycleDeps is nil in production; tests inject the same deterministic
+	// lifecycle seam used by ProbeWith without changing product configuration.
+	lifecycleDeps *LifecycleDeps
 
-	mu       sync.Mutex
-	endpoint *ServiceEndpoint
+	mu        sync.Mutex
+	endpoint  *ServiceEndpoint
+	probing   bool
+	probeDone chan struct{}
 	// lastStatus 缓存最近一次 probe 结果供 InstanceStatus 只读镜像（不主动探测）。
 	lastStatus *ProbeSnapshot
 
@@ -43,6 +49,7 @@ type Agent struct {
 	liveCodec   *LiveCodec
 	listeners   map[string]map[chan core.Event]struct{}
 	pumpRunning bool
+	pumpClient  *Client
 	stopped     bool
 
 	// metricsMu 保护 §13.2 帧级指标（per thread+turn）。
@@ -83,6 +90,7 @@ func New(opts map[string]any) *Agent {
 	a.workDir, _ = opts["work_dir"].(string)
 	a.explicitURL, _ = opts["codex_web_app_server_url"].(string)
 	a.codexHome, _ = opts["codex_web_codex_home"].(string)
+	a.dataDir, _ = opts["data_dir"].(string)
 	return a
 }
 
@@ -94,43 +102,83 @@ func (a *Agent) probeOptions() ProbeOptions {
 		ExplicitURL: strings.TrimSpace(a.explicitURL),
 		CodexHome:   a.codexHome,
 		WorkDir:     a.workDir,
+		DataDir:     a.dataDir,
 	}
 }
 
 // endpointFor 返回可用的 ServiceEndpoint；断线时重 Probe 一次。
 func (a *Agent) endpointFor(ctx context.Context) (*ServiceEndpoint, *Client, error) {
-	a.mu.Lock()
-	ep := a.endpoint
-	a.mu.Unlock()
-	if ep != nil && ep.Client() != nil {
+	for {
+		a.mu.Lock()
+		if a.stopped {
+			a.mu.Unlock()
+			return nil, nil, fmt.Errorf("codexweb: agent stopped")
+		}
+		if ep := a.endpoint; ep != nil && ep.Client() != nil {
+			a.mu.Unlock()
+			return ep, ep.Client(), nil
+		}
+		if a.probing {
+			done := a.probeDone
+			a.mu.Unlock()
+			select {
+			case <-done:
+				continue
+			case <-ctx.Done():
+				return nil, nil, ctx.Err()
+			}
+		}
+		a.probing = true
+		a.probeDone = make(chan struct{})
+		done := a.probeDone
+		a.mu.Unlock()
+
+		ep, err := a.probeEndpoint()
+		a.mu.Lock()
+		stopped := a.stopped
+		if err == nil && !stopped {
+			a.endpoint = ep
+			a.lastStatus = &ProbeSnapshot{
+				Available: true, Source: ep.Source, CLIVersion: ep.CLIVersion,
+				Detail: fmt.Sprintf("source=%s cli=%s", ep.Source, ep.CLIVersion), At: time.Now(),
+			}
+		} else {
+			a.lastStatus = &ProbeSnapshot{Available: false, Detail: err.Error(), At: time.Now()}
+		}
+		a.probing = false
+		close(done)
+		a.mu.Unlock()
+		if stopped {
+			if ep != nil {
+				_ = ep.Close()
+			}
+			return nil, nil, fmt.Errorf("codexweb: agent stopped")
+		}
+		if err != nil {
+			return nil, nil, err
+		}
 		return ep, ep.Client(), nil
 	}
-	return a.reprobe(ctx)
 }
 
-func (a *Agent) reprobe(ctx context.Context) (*ServiceEndpoint, *Client, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, nil, err
+func (a *Agent) probeEndpoint() (*ServiceEndpoint, error) {
+	if a.lifecycleDeps != nil {
+		return ProbeWith(*a.lifecycleDeps, a.probeOptions())
 	}
-	ep, err := Probe(a.probeOptions())
+	return Probe(a.probeOptions())
+}
+
+func (a *Agent) invalidateEndpoint(expected *ServiceEndpoint) {
 	a.mu.Lock()
-	a.endpoint = ep
-	if err != nil {
-		a.lastStatus = &ProbeSnapshot{Available: false, Detail: err.Error(), At: time.Now()}
-	} else {
-		a.lastStatus = &ProbeSnapshot{
-			Available:  true,
-			Source:     ep.Source,
-			CLIVersion: ep.CLIVersion,
-			Detail:     fmt.Sprintf("source=%s cli=%s", ep.Source, ep.CLIVersion),
-			At:         time.Now(),
-		}
+	if a.endpoint != expected {
+		a.mu.Unlock()
+		return
 	}
+	a.endpoint = nil
 	a.mu.Unlock()
-	if err != nil {
-		return nil, nil, err
+	if expected != nil {
+		_ = expected.Close()
 	}
-	return ep, ep.Client(), nil
 }
 
 // withClient 执行一次官方 API 调用；连接类失败自动重 Probe 一次后重试。
@@ -145,11 +193,8 @@ func (a *Agent) withClient(ctx context.Context, fn func(*Client) error) error {
 		return err
 	}
 	slog.Info("codexweb: connection lost, re-probing official service")
-	_ = ep.Close()
-	a.mu.Lock()
-	a.endpoint = nil
-	a.mu.Unlock()
-	_, cl2, err := a.reprobe(ctx)
+	a.invalidateEndpoint(ep)
+	_, cl2, err := a.endpointFor(ctx)
 	if err != nil {
 		return err
 	}
@@ -214,9 +259,15 @@ func (a *Agent) Stop() error {
 	a.stopped = true
 	ep := a.endpoint
 	a.endpoint = nil
+	done := a.probeDone
+	probing := a.probing
 	a.mu.Unlock()
-	if ep == nil {
-		return nil
+	var closeErr error
+	if ep != nil {
+		closeErr = ep.Close()
 	}
-	return ep.Close()
+	if probing {
+		<-done
+	}
+	return closeErr
 }

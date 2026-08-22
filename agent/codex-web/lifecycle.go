@@ -33,6 +33,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -70,15 +71,24 @@ type ServiceEndpoint struct {
 	// 共享 daemon（避免中断官方客户端）；只有托管 WS 进程被独占回收。
 	StartedByCordCode bool
 
-	client    *Client
-	managed   *managedProcess
-	closeOnce struct{ once bool }
+	client     *Client
+	managed    *managedProcess
+	deps       LifecycleDeps
+	probeOpts  ProbeOptions
+	statePath  string
+	closeOnce  *sync.Once
+	closeError error
 }
 
 // managedProcess 记录托管 WS 子进程（§6.3：由 MacBridge 独占并负责回收）。
 type managedProcess struct {
-	cmd  *exec.Cmd
-	port int
+	cmd       *exec.Cmd
+	pid       int
+	port      int
+	startTime string
+	binary    string
+	url       string
+	terminate func(pid int) error
 }
 
 // StatusError 是结构化失败（step 指明六步中的哪一步；official 保留官方原文）。
@@ -111,6 +121,8 @@ type ProbeOptions struct {
 	ExplicitURL string
 	CodexHome   string
 	WorkDir     string
+	// DataDir 持久化 codex-web-managed-server.json（§5.1/§6.3；不含凭据/内容）。
+	DataDir string
 	// ExperimentalAPI 让 initialize capabilities 声明 experimentalApi（experimental 面
 	// 逐项版本门控后才由调用方打开；§11.2）。
 	ExperimentalAPI bool
@@ -131,6 +143,11 @@ type LifecycleDeps struct {
 	StartManagedWS func(bin, codexHome, workDir string) (string, *managedProcess, error)
 	// HTTPHealth 探测 /healthz（托管路径）。
 	HTTPHealth func(url string) error
+	// 托管实例遗留校验/收口。必须同时核对 PID、argv、启动时间与监听端口，
+	// 任一不匹配只删除陈旧 record，绝不终止进程。
+	InspectProcess   func(pid int) (command, startTime string, alive bool)
+	ProcessOwnsPort  func(pid, port int) bool
+	TerminateProcess func(pid int) error
 }
 
 // DefaultDeps 返回生产实现。
@@ -142,10 +159,13 @@ func DefaultDeps() LifecycleDeps {
 			_, err := os.Stat(p)
 			return err == nil
 		},
-		DialUDS:        DialWSUnix,
-		DialTCP:        DialWSTCP,
-		StartManagedWS: startManagedLoopbackWS,
-		HTTPHealth:     httpHealthCheck,
+		DialUDS:          DialWSUnix,
+		DialTCP:          DialWSTCP,
+		StartManagedWS:   startManagedLoopbackWS,
+		HTTPHealth:       httpHealthCheck,
+		InspectProcess:   inspectManagedProcess,
+		ProcessOwnsPort:  managedProcessOwnsPort,
+		TerminateProcess: terminateManagedProcess,
 	}
 }
 
@@ -216,7 +236,10 @@ func startManagedLoopbackWS(bin, codexHome, workDir string) (string, *managedPro
 	if err := cmd.Start(); err != nil {
 		return "", nil, fmt.Errorf("managed app-server start: %w", err)
 	}
-	mp := &managedProcess{cmd: cmd, port: port}
+	mp := &managedProcess{
+		cmd: cmd, pid: cmd.Process.Pid, port: port, startTime: managedProcessStartTime(cmd.Process.Pid),
+		binary: bin, url: wsURL,
+	}
 	// /healthz 就绪轮询（Phase 0：healthz/readyz 200）
 	healthURL := fmt.Sprintf("http://127.0.0.1:%d/healthz", port)
 	deadline := time.Now().Add(60 * time.Second)
@@ -235,15 +258,35 @@ func startManagedLoopbackWS(bin, codexHome, workDir string) (string, *managedPro
 }
 
 func (m *managedProcess) kill() error {
-	if m.cmd == nil || m.cmd.Process == nil {
+	if m == nil {
 		return nil
 	}
-	if m.cmd.ProcessState != nil {
+	if m.pid <= 0 && m.cmd != nil && m.cmd.Process != nil {
+		m.pid = m.cmd.Process.Pid
+	}
+	if m.pid <= 0 {
 		return nil
 	}
-	_ = m.cmd.Process.Kill()
-	_ = m.cmd.Wait() // 回收并设置 ProcessState
-	return nil
+	if m.cmd != nil && m.cmd.ProcessState != nil {
+		return nil
+	}
+	if m.cmd != nil {
+		_ = m.cmd.Process.Signal(os.Interrupt)
+		done := make(chan error, 1)
+		go func() { done <- m.cmd.Wait() }()
+		select {
+		case <-done:
+			return nil
+		case <-time.After(5 * time.Second):
+			_ = m.cmd.Process.Kill()
+			<-done
+			return nil
+		}
+	}
+	if m.terminate != nil {
+		return m.terminate(m.pid)
+	}
+	return terminateManagedProcess(m.pid)
 }
 
 func freeLoopbackPort() (int, error) {
@@ -271,7 +314,11 @@ func ProbeWith(deps LifecycleDeps, opts ProbeOptions) (*ServiceEndpoint, error) 
 
 	if opts.ExplicitURL != "" {
 		// 显式配置存在时以它为准，失败直接报错（设计 §1"失败可见"：不静默降级到其他路径）。
-		return probeExplicit(deps, opts)
+		ep, err := probeExplicit(deps, opts)
+		if err == nil {
+			cleanupRecordedManaged(opts, bin, deps)
+		}
+		return ep, err
 	}
 
 	// daemon 复用：socket 存在即尝试连接。注意语义区分：
@@ -289,6 +336,7 @@ func ProbeWith(deps LifecycleDeps, opts ProbeOptions) (*ServiceEndpoint, error) 
 				_ = t.Close()
 				return nil, rerr
 			}
+			cleanupRecordedManaged(opts, bin, deps)
 			return ep, nil
 		}
 	}
@@ -308,12 +356,18 @@ func ProbeWith(deps LifecycleDeps, opts ProbeOptions) (*ServiceEndpoint, error) 
 				_ = t.Close()
 				return nil, rerr
 			}
+			cleanupRecordedManaged(opts, bin, deps)
 			return ep, nil
 		}
 	}
 
 	// 兼容托管 loopback WS
 	bin3, _ := deps.ResolveCodexBinary()
+	if ep, ok, rerr := recoverRecordedManaged(deps, opts, bin3); rerr != nil {
+		return nil, notConfigured("managed-record-recovery", rerr)
+	} else if ok {
+		return ep, nil
+	}
 	wsURL, mp, merr := deps.StartManagedWS(bin3, opts.CodexHome, opts.WorkDir)
 	if merr != nil {
 		return nil, notConfigured("managed-loopback-ws", fmt.Errorf(
@@ -332,6 +386,10 @@ func ProbeWith(deps LifecycleDeps, opts ProbeOptions) (*ServiceEndpoint, error) 
 	if err != nil {
 		_ = mp.kill()
 		return nil, err
+	}
+	if err := persistManagedRecord(opts, ep); err != nil {
+		_ = ep.Close()
+		return nil, notConfigured("managed-state-write", err)
 	}
 	return ep, nil
 }
@@ -353,6 +411,9 @@ func establish(deps LifecycleDeps, opts ProbeOptions, ep ServiceEndpoint) (*Serv
 }
 
 func establishOnTransport(deps LifecycleDeps, opts ProbeOptions, t Transport, ep ServiceEndpoint) (*ServiceEndpoint, error) {
+	if ep.closeOnce == nil {
+		ep.closeOnce = &sync.Once{}
+	}
 	// 步 1：transport 建立（此处已成立）
 	// 步 2：initialize
 	c := NewClient(t, ConnectionEpoch(time.Now().UnixNano()))
@@ -361,7 +422,7 @@ func establishOnTransport(deps LifecycleDeps, opts ProbeOptions, t Transport, ep
 		caps["experimentalApi"] = true
 	}
 	initParams := map[string]any{
-		"clientInfo": map[string]any{"name": "cordcode-codex-web", "version": "0.0.1"},
+		"clientInfo":   map[string]any{"name": "cordcode-codex-web", "version": "0.0.1"},
 		"capabilities": caps,
 	}
 	raw, rpcErr, err := c.Request("initialize", initParams)
@@ -418,6 +479,9 @@ func establishOnTransport(deps LifecycleDeps, opts ProbeOptions, t Transport, ep
 	}
 
 	ep.client = c
+	ep.deps = deps
+	ep.probeOpts = opts
+	ep.statePath = managedStatePath(opts.DataDir)
 	ep.CLIVersion = extractVersionFromUserAgent(init.UserAgent)
 	ep.AppServerVersion = ep.CLIVersion
 	ep.CodexHome = init.CodexHome
@@ -480,27 +544,57 @@ func waitSocket(deps LifecycleDeps, socketPath string, timeout time.Duration) bo
 // Client 返回就绪连接上的 JSON-RPC 客户端（事件泵/会话层的入口）。
 func (e *ServiceEndpoint) Client() *Client { return e.client }
 
+// OpenClient 在已经解析出的同一个官方服务实例上建立另一条 initialized connection。
+// 它只 dial e 的固定 UDS/TCP endpoint，绝不重新执行 Probe 或启动服务。
+func (e *ServiceEndpoint) OpenClient(ctx context.Context, opts ProbeOptions) (*Client, error) {
+	var (
+		t   Transport
+		err error
+	)
+	switch {
+	case e.UnixSocket != "":
+		t, err = e.deps.DialUDS(ctx, e.UnixSocket)
+	case e.TCPEndpoint != "":
+		t, err = e.deps.DialTCP(ctx, e.TCPEndpoint)
+	default:
+		return nil, notConfigured("shared-endpoint-dial", errors.New("resolved endpoint has no UDS or TCP address"))
+	}
+	if err != nil {
+		return nil, notConfigured("shared-endpoint-dial", err)
+	}
+	copyEndpoint := ServiceEndpoint{
+		Source: e.Source, UnixSocket: e.UnixSocket, TCPEndpoint: e.TCPEndpoint,
+		StartedByCordCode: e.StartedByCordCode,
+	}
+	opened, err := establishOnTransport(e.deps, opts, t, copyEndpoint)
+	if err != nil {
+		return nil, err
+	}
+	return opened.Client(), nil
+}
+
 // Source 返回归属（§6.3 诊断区分用）。
 func (e *ServiceEndpoint) SourceKind() ServiceSource { return e.Source }
 
 // Close 关闭连接。外部/自启 daemon 一律不停（§6.3）；托管 WS 进程独占回收。
 func (e *ServiceEndpoint) Close() error {
-	if e.closeOnce.once {
-		return nil
+	if e.closeOnce == nil {
+		e.closeOnce = &sync.Once{}
 	}
-	e.closeOnce.once = true
-	var firstErr error
-	if e.client != nil {
-		if err := e.client.Close(); err != nil && firstErr == nil {
-			firstErr = err
+	e.closeOnce.Do(func() {
+		if e.client != nil {
+			if err := e.client.Close(); err != nil && e.closeError == nil {
+				e.closeError = err
+			}
 		}
-	}
-	if e.managed != nil {
-		if err := e.managed.kill(); err != nil && firstErr == nil {
-			firstErr = err
+		if e.managed != nil {
+			if err := e.managed.kill(); err != nil && e.closeError == nil {
+				e.closeError = err
+			}
+			removeManagedRecordIfOwned(e.statePath, e.managed)
 		}
-	}
-	return firstErr
+	})
+	return e.closeError
 }
 
 func fillDeps(d *LifecycleDeps) {
@@ -525,5 +619,14 @@ func fillDeps(d *LifecycleDeps) {
 	}
 	if d.HTTPHealth == nil {
 		d.HTTPHealth = def.HTTPHealth
+	}
+	if d.InspectProcess == nil {
+		d.InspectProcess = def.InspectProcess
+	}
+	if d.ProcessOwnsPort == nil {
+		d.ProcessOwnsPort = def.ProcessOwnsPort
+	}
+	if d.TerminateProcess == nil {
+		d.TerminateProcess = def.TerminateProcess
 	}
 }

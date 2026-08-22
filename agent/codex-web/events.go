@@ -34,15 +34,16 @@ import (
 func (a *Agent) ensurePump() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.pumpRunning {
-		return
-	}
 	ep := a.endpoint
 	if ep == nil || ep.Client() == nil {
 		return
 	}
-	a.pumpRunning = true
 	cl := ep.Client()
+	if a.pumpRunning && a.pumpClient == cl {
+		return
+	}
+	a.pumpRunning = true
+	a.pumpClient = cl
 	codec := a.liveCodec
 	go func() {
 		for n := range cl.Notifications() {
@@ -70,9 +71,23 @@ func (a *Agent) ensurePump() {
 		// 覆盖）；标记失连并启动后台重连。不向监听者发任何合成事件——无法证明
 		// 完成的交互保持未知，不本地合成成功。
 		a.mu.Lock()
+		if a.pumpClient != cl {
+			a.mu.Unlock()
+			return
+		}
 		a.pumpRunning = false
+		a.pumpClient = nil
+		failedEndpoint := a.endpoint
+		if failedEndpoint != nil && failedEndpoint.Client() == cl {
+			a.endpoint = nil
+		} else {
+			failedEndpoint = nil
+		}
 		epoch := cl.Epoch()
 		a.mu.Unlock()
+		if failedEndpoint != nil {
+			_ = failedEndpoint.Close()
+		}
 		slog.Info("codexweb: connection lost, starting background re-probe", "epoch", epoch)
 		go a.reconnectLoop()
 	}()
@@ -125,19 +140,12 @@ func (a *Agent) reconnectLoop() {
 		if stopped || running {
 			return
 		}
-		ep, err := Probe(a.probeOptions())
-		a.mu.Lock()
+		ep, _, err := a.endpointFor(context.Background())
 		if err != nil {
-			a.lastStatus = &ProbeSnapshot{Available: false, Detail: err.Error(), At: time.Now()}
-			a.mu.Unlock()
 			time.Sleep(backoff)
 			backoff = min(backoff*2, maxBackoff)
 			continue
 		}
-		a.endpoint = ep
-		a.lastStatus = &ProbeSnapshot{Available: true, Source: ep.Source, CLIVersion: ep.CLIVersion,
-			Detail: "source=" + string(ep.Source) + " cli=" + ep.CLIVersion, At: time.Now()}
-		a.mu.Unlock()
 		a.ensurePump()
 		slog.Info("codexweb: re-connected to official service", "source", ep.Source)
 		return
@@ -428,17 +436,18 @@ func (s *agentSession) Close() error {
 
 // ---- 被动订阅（外部 turn 实时旁观，§8.2 Gate PASS 的产品面） ----
 
-// Subscribe 实现 core.EventSubscriber：专用连接订阅全部 loaded threads，流出
-// 官方 live 事件（SessionID=thread.id）。断线即关闭通道。
+// Subscribe 实现 core.EventSubscriber：在 Agent 唯一解析出的 ServiceEndpoint 上
+// 新建观察 connection，订阅全部 loaded threads。这里禁止再次 Probe：daemon 路径下
+// 重复 Probe 会碰巧回到同一 daemon，但 managed-loopback 路径会拉起第二 app-server，
+// 直接违反设计 §4/§6 的 single shared service。
 func (a *Agent) Subscribe(ctx context.Context) (<-chan core.Event, error) {
-	ep, err := Probe(a.probeOptions())
+	ep, _, err := a.endpointFor(ctx)
 	if err != nil {
 		return nil, err
 	}
-	cl := ep.Client()
-	if cl == nil {
-		_ = ep.Close()
-		return nil, &userError{"codexweb: probe ready but no client"}
+	cl, err := ep.OpenClient(ctx, a.probeOptions())
+	if err != nil {
+		return nil, err
 	}
 
 	codec := NewLiveCodec()
@@ -474,7 +483,7 @@ func (a *Agent) Subscribe(ctx context.Context) (<-chan core.Event, error) {
 
 	go func() {
 		defer close(events)
-		defer func() { _ = ep.Close() }()
+		defer func() { _ = cl.Close() }()
 		for n := range cl.Notifications() {
 			// 新 thread 广播 → 补订阅（此前的 turn 事件不重放，官方边界；冷基线补齐）
 			if n.Method == "thread/started" {

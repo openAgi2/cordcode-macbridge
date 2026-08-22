@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T05:32:00Z",
+ "updated_at": "2026-08-22T06:17:22Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -725,14 +725,14 @@
    "id": "p1-lifecycle-regression",
    "title": "Phase1 真实 daemon e2e",
    "description": "本机目标二进制受控运行：真实 daemon 探测/复用/拉起/托管 WS 全路径 e2e，记录进程、socket/端口、诊断输出与归属标记；不触碰用户真实 daemon（若正在运行只探测复用并记录）。",
-   "status": "done",
+   "status": "blocked",
    "phase": "phase1",
    "kind": "regression",
    "depends_on": [
     "p1-lifecycle-tests"
    ],
    "source": "design §14/phase1",
-   "notes": "",
+   "notes": "audit 2026-08-22：managed-loopback 仅验证单 endpoint 正常 Close，未覆盖设计 §5.1 managed record、异常退出后的 PID-safe 收养/清理，也未覆盖主 RPC + passive 必须复用同一服务实例；当前 PPID=1 的旧 CordCode app-server 实际持有 thread writer lock。repairable-heavy；review-fix-for:p5-single-service-review-fix-regression。",
    "verification": {
     "required": true,
     "status": "present",
@@ -1280,14 +1280,14 @@
    "id": "p3-stream-regression",
    "title": "Phase3 A/B 帧级对照实测",
    "description": "同网络/provider/模型/prompt 下旧 codex 与 codex-web 帧级指标对照报告落盘（§13.2 全项）。",
-   "status": "done",
+   "status": "blocked",
    "phase": "phase3",
    "kind": "regression",
    "depends_on": [
     "p3-stream-tests"
    ],
    "source": "design §14/phase3",
-   "notes": "",
+   "notes": "audit 2026-08-22：Phase3 Subscribe 在 agent/codex-web/events.go 独立调用 Probe；daemon 路径偶然复用同一服务，但 managed-loopback 路径会拉起第二 app-server，违背设计 §2.3/§4/§6 单一 shared service。repairable-heavy；review-fix-for:p5-single-service-review-fix-regression。",
    "verification": {
     "required": true,
     "status": "present",
@@ -2208,6 +2208,88 @@
     "required": true,
     "status": "missing",
     "method": "manual",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "p5-single-service-review-fix-impl",
+   "title": "Phase5 Codex Web 单一官方服务实例修复",
+   "description": "review-fix-for:p1-lifecycle-regression,p3-stream-regression；严格按设计 §2.3/§4/§5.1/§6：Agent 只解析并拥有一个官方 ServiceEndpoint；主 RPC 与 passive observer 在同一 endpoint 上建立不同 connection，不得由 Subscribe 再次 Probe/拉起服务；managed-loopback 写 codex-web-managed-server.json（仅 endpoint/PID/start time/version/ownership），启动时按 PID+可执行文件+参数+端口四项核验后收养或清理遗留实例，禁止盲 kill/删 writer lock。",
+   "status": "done",
+   "phase": "phase5",
+   "kind": "impl",
+   "depends_on": [
+    "p5-turn-start-review-fix-tests"
+   ],
+   "source": "owner device failure 2026-08-22 13:53 + design §2.3/§4/§5.1/§6",
+   "notes": "已按设计 §2.3/§4/§5.1/§6 收口：Agent endpoint singleflight，主 RPC 与 passive observer 只在同一 resolved service 上开多 connection；managed record 0600 持久化并按 PID+启动时间+精确 argv+监听端口校验后收养/清理；Stop 等待在途 Probe 并回收托管进程。",
+   "verification": {
+    "required": true,
+    "status": "pass",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "单一官方服务实例、managed 生命周期记录与 PID-safe 遗留恢复实现完成。",
+    "artifacts": [
+     "agent/codex-web/session.go",
+     "agent/codex-web/events.go",
+     "agent/codex-web/lifecycle.go",
+     "agent/codex-web/lifecycle_managed.go",
+     "agent/codex-web/lifecycle_process_unix.go",
+     "agent/codex-web/lifecycle_process_windows.go"
+    ],
+    "checked_at": "2026-08-22T06:17:22Z"
+   }
+  },
+  {
+   "id": "p5-single-service-review-fix-tests",
+   "title": "Phase5 Codex Web 单实例生命周期测试",
+   "description": "review-fix-for:p1-lifecycle-regression,p3-stream-regression；覆盖 daemon/explicit/managed 三来源的同 endpoint 多连接；managed 主 RPC+passive 只 spawn 一次；managed record 0600、PID/argv/port 校验、异常退出遗留收养/清理；旧/不匹配 PID fail closed；Close/Stop 不误杀外部 daemon。",
+   "status": "done",
+   "phase": "phase5",
+   "kind": "tests",
+   "depends_on": [
+    "p5-single-service-review-fix-impl"
+   ],
+   "source": "owner device failure 2026-08-22 13:53 + design §2.3/§4/§5.1/§6",
+   "notes": "覆盖 endpoint singleflight、managed 主连接+passive observer 仅 spawn 一次、同 endpoint 多 connection、record 0600、启动时间不匹配 fail-closed、验证后收养及 Stop 回收；race、全仓测试/vet 与 Windows 编译通过。",
+   "verification": {
+    "required": true,
+    "status": "pass",
+    "method": "automated",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "Codex Web 单实例生命周期定向测试及 Go 全量门禁通过。",
+    "artifacts": [
+     "agent/codex-web/single_service_test.go",
+     "go test ./agent/codex-web -race -count=1",
+     "go test ./... -count=1",
+     "go vet ./...",
+     "GOOS=windows GOARCH=amd64 go test -c ./agent/codex-web"
+    ],
+    "checked_at": "2026-08-22T06:17:22Z"
+   }
+  },
+  {
+   "id": "p5-single-service-review-fix-regression",
+   "title": "Phase5 Codex Web 单实例真实服务回归",
+   "description": "review-fix-for:p1-lifecycle-regression,p3-stream-regression；真实目标二进制验证 managed fallback 下主 RPC+passive 共用一个 app-server、Bridge 重启无新增孤儿、同服务两 connection resume 无 ownership 冲突；覆盖安装后 owner 新 session 发送复测。",
+   "status": "pending",
+   "phase": "phase5",
+   "kind": "regression",
+   "depends_on": [
+    "p5-single-service-review-fix-tests"
+   ],
+   "source": "owner device failure 2026-08-22 13:53 + design §2.3/§4/§5.1/§6",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "mixed",
     "attestation": "self-attested",
     "na_reason": null,
     "summary": "",
