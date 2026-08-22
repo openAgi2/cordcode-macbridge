@@ -8,6 +8,8 @@
 
 ccswitch 改完 `config.toml` 之后，正确杠杆是官方 `codex app-server daemon restart`（让同一 daemon 读新配置），不是把 daemon 杀掉等 Desktop 自己掉 stdio。restart 期间如果 Desktop 先探测失败，仍会锁死，所以 restart 必须快于上述窗口。
 
+本机 2026-08-22 活体：Desktop 内嵌 CLI `codex-cli 0.149.0-alpha.4.1`，managed standalone `0.149.0-alpha.4`。exact `--version` 字符串门把登录座位和 attach env 整段 fail-closed 掉了，但 Desktop 自己的 `fg(appServerVersion)` 只要求 ≥ `0.141.0`，这个 daemon 其实过得去。座位补位不得再被这条更严的门挡住。
+
 ## 2026-08-21 OpenCode Web：无权限模型重试时 iPhone 只显示执行中（owner 关闭）
 
 ### 现象
