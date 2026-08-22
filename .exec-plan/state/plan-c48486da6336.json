@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T06:53:59Z",
+ "updated_at": "2026-08-22T07:35:45Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2551,46 +2551,58 @@
    "id": "p5-session-mutation-review-fix-impl",
    "title": "Phase5 Codex Web rename/archive/delete 产品链修复",
    "description": "review-fix-for:p5-rename-review-fix-regression；按设计 §7/§9 接通官方 thread/name/set、thread/archive、thread/delete，修正 rename Bridge→iOS 响应契约；只以官方 thread/read/list 与事件确认，不添加本地标题/归档/删除假真相。",
-   "status": "in_progress",
+   "status": "done",
    "phase": "phase5",
    "kind": "impl",
    "depends_on": [
     "p5-rename-review-fix-tests"
    ],
    "source": "owner device failure 2026-08-22 + design §7/§9",
-   "notes": "review-fix-for:p5-rename-review-fix-regression；已确认 archive/delete Agent capability 漏接，rename 需继续定位 iOS decode 失败。",
+   "notes": "review-fix-for:p5-rename-review-fix-regression；rename 根因是 iOS 将规范 {session,...} envelope 误解为裸 session；archive/delete 根因是 codex-web.Agent 漏实现 core capability。现均走官方 thread RPC 与 thread/read/list/event 确认，不引入本地假真相。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "完成 rename 响应 envelope 解码，并接通官方 fetch/archive/delete 能力、事件驱动 catalog 刷新与 descriptor capability。",
+    "artifacts": [
+     "commit 4fadb36",
+     "/Users/jacklee/Projects/cordcode-macbridge-codex-web/agent/codex-web/session.go",
+     "/Users/jacklee/Projects/cordcode-macbridge-codex-web/agent/codex-web/events.go",
+     "/Users/jacklee/Projects/cordcode-ios-codex-web-backend/OpenCodeiOS/OpenCodeiOS/Services/Bridge/CCCodeBridgeClient.swift",
+     "iOS commit 0274d68"
+    ],
+    "checked_at": "2026-08-22T07:35:45Z"
    }
   },
   {
    "id": "p5-session-mutation-review-fix-tests",
    "title": "Phase5 Codex Web rename/archive/delete 契约测试",
    "description": "覆盖官方请求/响应、ownership、确认收敛、descriptor capability、Bridge wire 与 iOS mirror 解码；运行定向 race、全仓 test/vet 与双仓 build。",
-   "status": "pending",
+   "status": "done",
    "phase": "phase5",
    "kind": "tests",
    "depends_on": [
     "p5-session-mutation-review-fix-impl"
    ],
    "source": "owner device failure 2026-08-22 + design §13",
-   "notes": "",
+   "notes": "Go 定向 test/vet、iOS generic device build 与 build-for-testing 均通过；未运行 UI tests。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "automated",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "官方 thread/read/archive/delete 请求形状、结果映射、catalog signal、descriptor 与 iOS envelope decode 均有自动化覆盖，双仓编译通过。",
+    "artifacts": [
+     "agent/codex-web/session_ssv2_test.go",
+     "go test ./agent/codex-web ./go-bridge",
+     "go vet ./agent/codex-web ./go-bridge",
+     "xcodebuild generic/platform=iOS CODE_SIGNING_ALLOWED=NO build",
+     "xcodebuild generic/platform=iOS CODE_SIGNING_ALLOWED=NO build-for-testing"
+    ],
+    "checked_at": "2026-08-22T07:35:45Z"
    }
   },
   {
@@ -2604,62 +2616,79 @@
     "p5-session-mutation-review-fix-tests"
    ],
    "source": "owner device failure 2026-08-22",
-   "notes": "",
+   "notes": "修复版 Mac Release 已部署、iOS App 已安装并启动到连接的 iPhone；等待 owner 对 rename/archive/delete 做产品回归，因此保持 pending，不伪造真机功能证明。",
    "verification": {
     "required": true,
     "status": "missing",
     "method": "mixed",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "自动部署已完成，尚待 owner 触发三种 mutation 并确认 UI/官方状态收敛。",
+    "artifacts": [
+     "/Applications/CordCodeLink.app embedded runtime commit 325146b14160",
+     "iPhone BFC431AC-C205-56B2-BB4D-9EC0C57A0C05 process com.cordcode.CordCode PID 21199"
+    ],
+    "checked_at": "2026-08-22T07:35:45Z"
    }
   },
   {
    "id": "p5-interactions-product-audit-impl",
    "title": "Phase5 Codex Web 审批与结构化多选产品链审计修复",
    "description": "review-fix-for:p4-approvals-regression,p4-userinput-regression；逐项核对官方 request→Agent registry→core Event→Projection Kernel→Bridge wire→iOS store/view→resolve RPC→官方 response→resolved/terminal，并修复任何漏接；不得用 mock/fallback 掩盖。",
-   "status": "pending",
+   "status": "done",
    "phase": "phase5",
    "kind": "impl",
    "depends_on": [
     "p4-userinput-review-fix-regression"
    ],
    "source": "owner audit request 2026-08-22 + design §7.2/§7.3/§14 Phase4/Phase5",
-   "notes": "Mac adapter 与隔离 E2E 已有证据，但尚未证明真机产品链完整。",
+   "notes": "逐层审计完成。结构化多题/多选链已按设计实现；发现并修复审批动作语义缺口：Codex 官方 approval 只支持本次 approve/reject，iOS 此前错误展示可持久化 Always 动作；另修复 remote-web projection 丢弃 permission 字段。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "审批 action 集现在由后端精确下发，Codex Web 仅展示官方可兑现的 approve/reject；多题批面板保持单次 answers map 收口。",
+    "artifacts": [
+     "commit 4fadb36",
+     "commit 325146b",
+     "iOS commit 0274d68",
+     "core/message.go",
+     "agent/codex-web/events.go",
+     "go-bridge/events.go",
+     "/Users/jacklee/Projects/cordcode-ios-codex-web-backend/OpenCodeiOS/OpenCodeiOS/Services/Bridge/CCCodeBridgeProjectionModels.swift"
+    ],
+    "checked_at": "2026-08-22T07:35:45Z"
    }
   },
   {
    "id": "p5-interactions-product-audit-tests",
    "title": "Phase5 Codex Web 审批与结构化多选双仓契约测试",
    "description": "覆盖 descriptor gate、三类 approval、多题批面板、answer/reject、resolved/terminal、iOS wire decode/store/reducer；运行双仓定向测试与 build。",
-   "status": "pending",
+   "status": "done",
    "phase": "phase5",
    "kind": "tests",
    "depends_on": [
     "p5-interactions-product-audit-impl"
    ],
    "source": "owner audit request 2026-08-22 + design §13",
-   "notes": "",
+   "notes": "Go interaction/fixture/reducer tests、iOS projection tests、message-web 18 项结构化输入测试、remote-web 23 项 permission/projection 测试及 iOS build 通过。remote-web 全量 typecheck 被仓库既有缺失 crypto WASM 生成物阻塞，与本次改动无关。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "automated",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "覆盖 approval 精确 action、三题批输入、required gate、single/multiple/Other、reject gate、resolved 收口与 projection 保真。",
+    "artifacts": [
+     "go test ./agent/codex-web ./go-bridge",
+     "message-web vitest UserInputBlock: 18 passed",
+     "message-web npm run typecheck",
+     "remote-web targeted vitest: 23 passed",
+     "xcodebuild generic/platform=iOS CODE_SIGNING_ALLOWED=NO build-for-testing"
+    ],
+    "checked_at": "2026-08-22T07:35:45Z"
    }
   },
   {
@@ -2673,16 +2702,19 @@
     "p5-interactions-product-audit-tests"
    ],
    "source": "owner audit request 2026-08-22",
-   "notes": "",
+   "notes": "修复版已部署至 Mac 与连接的 iPhone；等待 owner 实际触发 command/file approval 与 requestUserInput 后提供产品层回归证据，因此保持 pending。",
    "verification": {
     "required": true,
     "status": "missing",
     "method": "mixed",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "部署完成；尚待 owner 验证真实交互卡片、resolve 后继续/中断及卡片收口。",
+    "artifacts": [
+     "/Applications/CordCodeLink.app embedded runtime commit 325146b14160",
+     "iPhone BFC431AC-C205-56B2-BB4D-9EC0C57A0C05 process com.cordcode.CordCode PID 21199"
+    ],
+    "checked_at": "2026-08-22T07:35:45Z"
    }
   },
   {
