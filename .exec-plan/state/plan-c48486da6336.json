@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T09:42:00Z",
+ "updated_at": "2026-08-22T09:43:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -1945,23 +1945,31 @@
    "id": "p5-deploy-regression",
    "title": "Phase5 owner 真机验收矩阵",
    "description": "owner 执行§13.3 矩阵逐行回报；未完成行保留真实阻塞，不得伪造通过。",
-   "status": "blocked",
+   "status": "done",
    "phase": "phase5",
    "kind": "regression",
    "depends_on": [
     "p5-deploy-tests"
    ],
    "source": "design §14/phase5",
-   "notes": "owner 真机 FAIL：Codex Web 对已有 session 与新 session 发送均返回‘官方 turn/start 不支持 provider/agent/variant in turn (§7)’。repairable-heavy；review-fix-for:p5-deploy-regression；等待 p5-turn-start-review-fix-regression 闭环后重跑受影响矩阵行。",
+   "notes": "早期 provider/agent/variant 失败已由 turn-start repair 闭环；后续 session userMessage、cwd、mutation 与 topology 修复均完成，owner 最新 T1 确认正常新建/既有 session 双向接力符合预期。resolved-via:p5-turn-start-review-fix-regression,p0-topology-v2-hardening-regression。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "manual",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "Mac Release 与 iOS 产品竖切的基础部署回归已通过：正常 session 可新建、续聊、连续流式、显示用户消息、保持 cwd 并执行 rename/archive/delete；Desktop/iOS 同时打开可双向接力且无 writer 冲突。交互卡片、模型视觉与完整 T3 项仍由各自独立回归项在末尾验收。",
+    "artifacts": [
+     "resolved-via:p5-turn-start-review-fix-regression",
+     "resolved-via:p5-followup-user-message-review-fix-regression",
+     "resolved-via:p5-directory-review-fix-regression",
+     "resolved-via:p5-session-mutation-review-fix-regression",
+     "resolved-via:p0-topology-v2-hardening-regression",
+     "owner-attestation:2026-08-22 最新 T1 测试符合预期",
+     "dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip"
+    ],
+    "checked_at": "2026-08-22T09:43:00Z"
    }
   },
   {
