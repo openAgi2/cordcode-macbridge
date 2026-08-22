@@ -426,17 +426,20 @@ SSV2 key 必须包含 backend id，禁止只按 thread id 合并。实验期 UI 
 
 Desktop 产品路径只允许一个运行时真相源：
 
-1. **官方 daemon 复用**：探测 Codex 官方 control socket/`daemon version`，已运行则复用；
-2. **官方 daemon managed start**：未运行且当前 Codex 支持 daemon 时，调用
-   `codex app-server daemon start`，再通过 control socket 连接；
-3. **Desktop attach**：CordCode Link 在用户 launchd domain 设置
-   `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1`，Desktop 下一次启动连接同一 control socket；
-4. **失败可见**：standalone 缺失、daemon 启动失败、版本不兼容或环境配置失败时，
+1. **官方 daemon 是登录级座位，不是 MacBridge 子进程**：用户 LaunchAgent 周期执行官方
+   `daemon start`（已运行则 `alreadyRunning`，不换 PID）。MacBridge 启动只探测/补位；
+   停止或退出 **不得** `daemon stop`、不得 bootout 该 daemon、不得杀掉 Desktop。
+2. **官方 daemon 复用**：探测 Codex 官方 control socket/`daemon version`，已运行则复用；
+3. **官方 daemon managed start**：座位尚未起来时调用 `codex app-server daemon start`，
+   再通过 control socket 连接；
+4. **Desktop attach**：登录域设置 `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1`。Desktop **启动时**
+   探测成功则连同一 control socket；已附着后，MacBridge 退出不应要求再重启 Desktop。
+5. **失败可见**：standalone 缺失、daemon 启动失败、版本不兼容或环境配置失败时，
    `codex-web` 标为 `not_configured`/`incompatible`，不得另起 app-server 假装可用。
 
-这不是“优先级列表”，而是串行前置条件。第 1–3 步未全部成立时没有第 4 种可用 transport。
-Desktop 已在运行但尚未继承 attach 环境时，产品必须明确提示一次正常重启；不得 kill/steal Desktop，
-也不得趁其仍在 Embedded runtime 时启动第二服务继续工作。
+这不是“优先级列表”，而是串行前置条件。官方 Desktop 一旦探测失败会锁死私有 stdio，且没有
+远程翻回 API。这只允许作为异常恢复（Desktop 已经掉线），**不是** MacBridge 正常退出流程。
+不得 kill/steal Desktop，也不得趁其仍在 Embedded runtime 时启动第二服务继续工作。
 
 `-codex-web-app-server-url` 只保留给隔离 contract/e2e 与明确的非 Desktop 实验；Desktop 产品模式
 不能使用它，因为当前 Desktop 已证明的入口是 local daemon Unix socket，而不是任意 loopback URL。
