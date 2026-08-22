@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T03:07:15Z",
+ "updated_at": "2026-08-22T03:18:32Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -1642,7 +1642,7 @@
    "id": "p5-ios-audit-impl",
    "title": "Phase5 iOS 文件级影响审计（硬门槛）",
    "description": "从届时最新 iOS main 的当前 HEAD 重新扫描 12 类面：BackendKind/wire kind/backend discovery/switch/server creation/display/capability gate/model-permission-agent mapping/cache scope/stream-recovery 特例/protocol mirror/tests；逐文件标记 must change/verified generic/intentionally codex-only/N/A；两项强制裁决：禁止机械 `|| .codexWeb`（每处继承由 capability/协议事实裁决）、backend/cache/session identity 独立（禁复用旧 cache key）。审计落盘 docs/ 并 commit；审计缺失 Phase5 不得开工。",
-   "status": "pending",
+   "status": "done",
    "phase": "phase5",
    "kind": "impl",
    "depends_on": [
@@ -1652,20 +1652,23 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "iOS main@2cdb490f 文件级硬门槛审计完成：12 类扫描面逐文件标记 must change/verified generic/intentionally codex-only/N/A；明确 codex-web 独立 enum/wire/cache/session identity；SSV2/model/reasoning 按 capability/目录继承，旧 Codex rollout probe/provider allowlist/default xhigh/permission-mode catalog 不继承。",
+    "artifacts": [
+     "docs/2026-08-22-codex-web-ios-impact-audit.md",
+     "git-ios:2cdb490f17ce98b36a03c6f3cf59c86e3257feda"
+    ],
+    "checked_at": "2026-08-22T03:18:32Z"
    }
   },
   {
    "id": "p5-ios-audit-tests",
    "title": "Phase5 审计完备性核对",
    "description": "脚本核对：扫描面 12 类各有逐文件结论；must change 文件清单与代码实际 switch/引用吻合（grep 验证）；无未裁决的穷举 switch。",
-   "status": "pending",
+   "status": "done",
    "phase": "phase5",
    "kind": "tests",
    "depends_on": [
@@ -1675,20 +1678,23 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "automated",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "审计完备性脚本 PASS：固定 commit 可读；12 类扫描面齐全；16 个含旧 Codex 分支/词汇的 production Swift 文件全部入表裁决；关键实现、测试与双仓 protocol 文件清单完整；基线确认尚无 codexWeb，证明为实施前审计。",
+    "artifacts": [
+     "scripts/codex-web-phase5/verify_ios_impact_audit.py",
+     "cmd:python3 scripts/codex-web-phase5/verify_ios_impact_audit.py"
+    ],
+    "checked_at": "2026-08-22T03:18:32Z"
    }
   },
   {
    "id": "p5-ios-audit-regression",
    "title": "Phase5 审计归档(N/A)",
    "description": "审计文档门槛产物。",
-   "status": "pending",
+   "status": "done",
    "phase": "phase5",
    "kind": "regression",
    "depends_on": [
@@ -1698,13 +1704,15 @@
    "notes": "",
    "verification": {
     "required": false,
-    "status": "missing",
+    "status": "present",
     "method": "manual",
     "attestation": "self-attested",
     "na_reason": "审计是 Phase5 开工硬门槛的文档产物；其效果由 p5-ios-wire-* 按审计实施与定向测试验证。",
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "N/A 按 na_reason：审计是实施前门槛文档，本项无运行时回归面；后续 p5-ios-wire-* 必须严格消费审计清单并以定向 build/unit test 验证。",
+    "artifacts": [
+     "docs/2026-08-22-codex-web-ios-impact-audit.md"
+    ],
+    "checked_at": "2026-08-22T03:18:32Z"
    }
   },
   {
