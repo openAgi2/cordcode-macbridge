@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T05:13:37Z",
+ "updated_at": "2026-08-22T05:13:55Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -1996,30 +1996,36 @@
    "id": "p5-turn-start-review-fix-tests",
    "title": "Phase5 turn/start 官方参数定向测试",
    "description": "review-fix-for:p5-deploy-regression；覆盖已有/新 session、provider/agent/variant 非法透传拒绝与官方允许字段映射，运行 agent/codex-web 和 Go 回归门。",
-   "status": "in_progress",
+   "status": "done",
    "phase": "phase5",
    "kind": "tests",
    "depends_on": [
     "p5-turn-start-review-fix-impl"
    ],
    "source": "owner device failure 2026-08-22 + design §7",
-   "notes": "review-fix-for:p5-deploy-regression",
+   "notes": "review-fix-for:p5-deploy-regression；新建/恢复 session、同 provider model+effort、跨 provider 拒绝及完整 Go 回归均通过。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "pass",
     "method": "automated",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "agent/codex-web、go-bridge 定向测试、全量 go test/vet 与真实 Codex app-server 协议 e2e 通过。",
+    "artifacts": [
+     "go test ./agent/codex-web -count=1",
+     "go test ./go-bridge -count=1",
+     "go vet ./...",
+     "go test ./... -count=1",
+     "CODEXWEB_E2E=1 go test ./agent/codex-web -run ^TestE2EModelsCustomProviderReadOnly$ -count=1 -v"
+    ],
+    "checked_at": "2026-08-22T05:13:55Z"
    }
   },
   {
    "id": "p5-turn-start-review-fix-regression",
    "title": "Phase5 turn/start 真机回归",
    "description": "review-fix-for:p5-deploy-regression；Release 覆盖安装、iOS 真机安装/启动后，由 owner 重跑已有与新 session 发送；不得以自动日志替代 owner 结果。",
-   "status": "pending",
+   "status": "in_progress",
    "phase": "phase5",
    "kind": "regression",
    "depends_on": [
