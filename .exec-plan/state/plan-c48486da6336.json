@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T09:46:00Z",
+ "updated_at": "2026-08-22T09:50:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2738,7 +2738,7 @@
    "id": "p6-observation-impl",
    "title": "Phase6 A/B 并行观察",
    "description": "两 backend 独立 session A/B（同网络/provider/模型/prompt）；汇总功能/流式/provider/ownership/重连/资源结果。",
-   "status": "in_progress",
+   "status": "done",
    "phase": "phase6",
    "kind": "impl",
    "depends_on": [
@@ -2746,16 +2746,21 @@
     "p0-topology-v2-hardening-regression"
    ],
    "source": "design §14/phase6",
-   "notes": "",
+   "notes": "Phase 6 观察包已建立：同步 T1 rows 6–8 owner PASS，汇总自动/owner 证据，建立 §15 十二项退役账本与最终集中人工批次；当前明确 PREPARED 且禁止提前退役。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "已建立 codex-web/旧 codex 独立 session A/B 观察合同、证据索引、十二项退役门账本和集中 owner 批次；未把未执行人工项或发布观察窗伪报为通过。",
+    "artifacts": [
+     "git:ad5c015",
+     "docs/2026-08-22-codex-web-phase6-observation.md",
+     "docs/2026-08-22-codex-web-owner-device-acceptance.md",
+     "scripts/codex-web-phase6/verify_observation_pack.py"
+    ],
+    "checked_at": "2026-08-22T09:50:00Z"
    }
   },
   {
