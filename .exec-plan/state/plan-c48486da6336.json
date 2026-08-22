@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T09:27:00Z",
+ "updated_at": "2026-08-22T09:29:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2657,7 +2657,7 @@
      "core/message.go",
      "agent/codex-web/events.go",
      "go-bridge/events.go",
-     "/Users/jacklee/Projects/cordcode-ios-codex-web-backend/OpenCodeiOS/OpenCodeiOS/Services/Bridge/CCCodeBridgeProjectionModels.swift"
+     "/Users/jacklee/Projects/cordcode-ios-codex-web-backend/OpenCodeiOS/OpenCodeiOS/Services/Bridge/CCCodeBridgeModels.swift"
     ],
     "checked_at": "2026-08-22T07:35:45Z"
    }
