@@ -1466,6 +1466,7 @@ func modelItemsForWire(agent core.Agent, ccModels []core.ModelOption, currentMod
 		item := map[string]interface{}{
 			"id":                        m.Name,
 			"name":                      name,
+			"description":               m.Description,
 			"provider":                  provider,
 			"providerId":                providerID,
 			"reasoning":                 false,

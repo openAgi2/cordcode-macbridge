@@ -407,9 +407,10 @@ type ModelEffortCatalog interface {
 
 // ModelOption describes a selectable model.
 type ModelOption struct {
-	Name  string // model identifier passed to CLI
-	Desc  string // short description (display_name or empty)
-	Alias string // optional short alias for the /model command (e.g. "codex" for "gpt-5.3-codex")
+	Name        string // model identifier passed to CLI
+	Desc        string // display name (or empty)
+	Description string // runtime-provided model description (or empty)
+	Alias       string // optional short alias for the /model command (e.g. "codex" for "gpt-5.3-codex")
 	// Variants (canonical §6.11.1 additive revision, opencode-web): the live
 	// model-specific variant keys from /provider. nil/empty = no selector.
 	Variants []string
@@ -656,6 +657,7 @@ type BackgroundTaskDetailReader interface {
 type SessionModelSelectionReader interface {
 	GetSessionModelSelection(ctx context.Context, sessionID string) (SessionModelSelection, bool)
 }
+
 // SessionPinner is an optional interface for agents that support pinning (置顶) sessions.
 // Pin state is MacBridge-owned session metadata (NOT agent-local storage): each driver
 // persists it in its prescribed store (Claude → .cc-connect-session-meta sidecar;

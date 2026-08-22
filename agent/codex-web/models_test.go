@@ -70,6 +70,9 @@ func TestModelsOfficialCatalogEffectiveProviderAndEfforts(t *testing.T) {
 	if models[0].Name != "mockpi/gpt-5.6-sol" || models[0].Desc != "GPT-5.6-Sol" {
 		t.Fatalf("first model = %+v", models[0])
 	}
+	if models[0].Description != "Latest frontier agentic coding model." {
+		t.Fatalf("first model description = %q", models[0].Description)
+	}
 	// config.model=mock-model 不在官方目录中：保持真实 effective selection，
 	// 不把 catalog isDefault 的内置模型冒充当前 custom-provider model。
 	if got := a.GetModel(); got != "mockpi/mock-model" {

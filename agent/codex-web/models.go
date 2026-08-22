@@ -140,11 +140,15 @@ func (a *Agent) AvailableModels(ctx context.Context) []core.ModelOption {
 			continue
 		}
 		qualified := qualifyModel(cfg.ModelProvider, id)
-		desc := strings.TrimSpace(model.DisplayName)
-		if desc == "" {
-			desc = strings.TrimSpace(model.Description)
+		displayName := strings.TrimSpace(model.DisplayName)
+		if displayName == "" {
+			displayName = id
 		}
-		options = append(options, core.ModelOption{Name: qualified, Desc: desc})
+		options = append(options, core.ModelOption{
+			Name:        qualified,
+			Desc:        displayName,
+			Description: strings.TrimSpace(model.Description),
+		})
 		known[qualified] = id
 		for _, effort := range model.SupportedReasoningEffort {
 			if value := strings.TrimSpace(effort.ReasoningEffort); value != "" {
