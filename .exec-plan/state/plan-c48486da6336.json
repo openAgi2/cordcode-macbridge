@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T04:20:00Z",
+ "updated_at": "2026-08-22T05:13:37Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -1968,30 +1968,35 @@
    "id": "p5-turn-start-review-fix-impl",
    "title": "Phase5 turn/start 官方参数语义修复",
    "description": "review-fix-for:p5-deploy-regression；直接依据 /Users/jacklee/Projects/codex 官方源码修正 agent/codex-web turn/start 参数来源与允许字段；禁止读取/复用旧 agent/codex。",
-   "status": "in_progress",
+   "status": "done",
    "phase": "phase5",
    "kind": "impl",
    "depends_on": [
     "p5-deploy-tests"
    ],
    "source": "owner device failure 2026-08-22 + design §7",
-   "notes": "review-fix-for:p5-deploy-regression",
+   "notes": "review-fix-for:p5-deploy-regression；官方源码确认 provider 属 thread start/resume effective settings，turn/start 只接受 model/effort 等 override；实现提交 3f10df2。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "pass",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "按 /Users/jacklee/Projects/codex 官方 v2 协议与 TUI session state 路径修复 provider/model/effort 映射，并 fail-closed 拒绝跨 provider switch。",
+    "artifacts": [
+     "git:3f10df2",
+     "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/turn.rs",
+     "/Users/jacklee/Projects/codex/codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
+     "/Users/jacklee/Projects/codex/codex-rs/tui/src/app_server_session.rs"
+    ],
+    "checked_at": "2026-08-22T05:13:37Z"
    }
   },
   {
    "id": "p5-turn-start-review-fix-tests",
    "title": "Phase5 turn/start 官方参数定向测试",
    "description": "review-fix-for:p5-deploy-regression；覆盖已有/新 session、provider/agent/variant 非法透传拒绝与官方允许字段映射，运行 agent/codex-web 和 Go 回归门。",
-   "status": "pending",
+   "status": "in_progress",
    "phase": "phase5",
    "kind": "tests",
    "depends_on": [
