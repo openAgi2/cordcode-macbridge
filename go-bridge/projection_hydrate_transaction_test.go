@@ -904,7 +904,7 @@ func TestProjectionHydrateErrorTurnWithSourceCompleteReady(t *testing.T) {
 	kernel.ApplyHydrateEvent("codex", "error-src", "epoch", "turn_started",
 		map[string]interface{}{"turnId": "turn-err"})
 	kernel.ApplyHydrateEvent("codex", "error-src", "epoch", "turn_error",
-		map[string]interface{}{"turnId": "turn-err"})
+		map[string]interface{}{"turnId": "turn-err", "message": "official compact failure"})
 	kernel.MarkHydrateSourceIngestComplete("codex", "error-src")
 
 	if err := kernel.WaitHydrateCommitReady(context.Background(), "codex", "error-src"); err != nil {
@@ -919,6 +919,10 @@ func TestProjectionHydrateErrorTurnWithSourceCompleteReady(t *testing.T) {
 	}
 	if got := commit.Projection.Turns[0].Status; got != "error" {
 		t.Fatalf("error turn status=%q, want \"error\"", got)
+	}
+	system := commit.Projection.Turns[0].System
+	if system == nil || system.Role != "system" || len(system.Parts) != 1 || system.Parts[0].Text != "official compact failure" {
+		t.Fatalf("official turn error must remain visible as system content, got %+v", system)
 	}
 }
 

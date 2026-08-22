@@ -21,7 +21,7 @@
 
 | # | 前提条件 | 动作 | 应看到 | 结果 | 证据/备注 |
 |---:|---|---|---|---|---|
-| 1 | LAN；Codex Web；新 session | iPhone 发一个足以产生长回答的请求 | 首 token 后连续流式；正文不重复；完成态只收口一次 | FAIL | 2026-08-22 owner：新 session 与已有 session 均在发送前报“官方 turn/start 不支持 provider/agent/variant”；review-fix `p5-turn-start-review-fix-*` 处理中 |
+| 1 | LAN；Codex Web；新 session | iPhone 发一个足以产生长回答的请求 | 首 token 后连续流式；正文不重复；完成态只收口一次 | FAIL | 首轮 provider 误拒绝已由 `3f10df2` 修复。13:16 owner 复测已有 session `01a0236d…`：实际 backend 为 `codex-web`；turn 已进入 `turn_started`，随后官方 remote compact 用历史模型 `x-preview-f-free` 返回 400（ChatGPT 账号不支持），因此无用户/回复 item；当前打包版 `codex-cli 0.149.0-alpha.4` 未表现出官方源码 `172ab264bd` 的 selected-model compact retry。新 session 尚待复测。截图中的“已在另一个应用中打开”符合该失败 turn 后 app-server writer ownership 仍被持有的官方契约。 |
 | 2 | Relay；Codex Web；新 session | 使用与第 1 行等价的长回答请求 | 内容与 LAN 一致；无整段延迟后一次性跳出；无重复 | NOT RUN | 记录 Relay 状态、session 前缀、录屏 |
 | 3 | LAN；daemon 已运行；Terminal Codex 默认配置；active session | Mac 发长回答，iPhone 打开同一 session | TUI 使用 LocalDaemon；iPhone 实时进入执行中并连续显示 delta | NOT RUN | 记录 daemon/TUI 选择证据与 session 前缀 |
 | 4 | LAN；daemon 未运行；先启动 Terminal Codex 默认配置 | Mac 发长回答，再打开 Codex Web | TUI 使用 Embedded；iPhone 不伪造 live stream，只按已验证的 list/read 边界显示 | NOT RUN | 记录进程与事件时间线 |

@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T05:15:27Z",
+ "updated_at": "2026-08-22T05:28:28Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2025,14 +2025,14 @@
    "id": "p5-turn-start-review-fix-regression",
    "title": "Phase5 turn/start 真机回归",
    "description": "review-fix-for:p5-deploy-regression；Release 覆盖安装、iOS 真机安装/启动后，由 owner 重跑已有与新 session 发送；不得以自动日志替代 owner 结果。",
-   "status": "in_progress",
+   "status": "blocked",
    "phase": "phase5",
    "kind": "regression",
    "depends_on": [
     "p5-turn-start-review-fix-tests"
    ],
    "source": "owner device failure 2026-08-22 + design §7",
-   "notes": "review-fix-for:p5-deploy-regression；unsigned Release 已构建并覆盖安装 /Applications/CordCodeLink.app，runtime commit=3516a5ed5370；启动日志确认 codex-web 注册、passive subscription 与 iOS 真机客户端重连。未修改 iOS 代码，沿用已安装真机 App；等待 owner 重跑已有/新 session 发送。旧 Mac app 可从 ~/.Trash/CordCodeLink.app.before-turn-start-fix-20260822-1315 恢复。",
+   "notes": "review-fix-for:p5-deploy-regression；13:16 owner 复测已有 session 01a0236d…：provider 误拒绝已消失，turn/start 成功并进入 turn_started；随后官方 remote compact 使用历史模型 x-preview-f-free，被 ChatGPT 账号以 400 拒绝。当前打包版 codex-cli 0.149.0-alpha.4 未表现出官方源码修复 172ab264bd 的 selected-model compact retry，属于目标官方运行时版本阻塞；新 session 尚待复测。ownership 截图符合 resume 后 writer 被 app-server 持有的官方契约。",
    "verification": {
     "required": true,
     "status": "missing",
@@ -2043,8 +2043,79 @@
     "artifacts": [
      "dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip",
      "/Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime -version => commit 3516a5ed5370",
-     "/Users/jacklee/Library/Application Support/CordCode Link/logs/go-bridge.log runtime_ready + codex-web registration + iOS client connected"
+     "/Users/jacklee/Library/Application Support/CordCode Link/logs/go-bridge.log 2026-08-22 13:16:53-58",
+     "/Users/jacklee/.codex/sessions/2026/08/21/rollout-2026-08-21T16-25-48-01a0236d-1d5f-7650-bb6c-d302e1ac8b23.jsonl",
+     "/Users/jacklee/Projects/codex git:172ab264bd"
     ],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "p5-turn-error-visibility-review-fix-impl",
+   "title": "Phase5 turn error projection 可见性修复",
+   "description": "review-fix-for:p5-turn-start-review-fix-regression；保留官方 turn_error message，在无 user/assistant item 的 pre-turn failure 中也通过 projection 显示诊断 system message。",
+   "status": "in_progress",
+   "phase": "phase5",
+   "kind": "impl",
+   "depends_on": [
+    "p5-turn-start-review-fix-tests"
+   ],
+   "source": "owner device failure 2026-08-22 13:16 + design §7.1/§9.2",
+   "notes": "review-fix-for:p5-turn-start-review-fix-regression",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "p5-turn-error-visibility-review-fix-tests",
+   "title": "Phase5 turn error projection 定向测试",
+   "description": "review-fix-for:p5-turn-start-review-fix-regression；验证 turn_error 官方原文进入 system projection 且不影响 terminal/idle 收口。",
+   "status": "pending",
+   "phase": "phase5",
+   "kind": "tests",
+   "depends_on": [
+    "p5-turn-error-visibility-review-fix-impl"
+   ],
+   "source": "owner device failure 2026-08-22 13:16 + design §7.1/§9.2",
+   "notes": "review-fix-for:p5-turn-start-review-fix-regression",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "automated",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "p5-turn-error-visibility-review-fix-regression",
+   "title": "Phase5 turn error 真机可见性回归",
+   "description": "review-fix-for:p5-turn-start-review-fix-regression；Release 覆盖安装后由 owner 确认官方 turn failure 原文可见，不再表现为空白完成。",
+   "status": "pending",
+   "phase": "phase5",
+   "kind": "regression",
+   "depends_on": [
+    "p5-turn-error-visibility-review-fix-tests"
+   ],
+   "source": "owner device failure 2026-08-22 13:16 + design §7.1/§9.2",
+   "notes": "review-fix-for:p5-turn-start-review-fix-regression",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "manual",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
     "checked_at": null
    }
   },

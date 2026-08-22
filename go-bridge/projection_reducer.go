@@ -1207,7 +1207,25 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			status = "error"
 		}
 		commit()
-		ps.upsertTurn(TurnProjection{TurnID: turnID, Status: status, CompletedAt: ps.projection.UpdatedAt})
+		terminal := TurnProjection{TurnID: turnID, Status: status, CompletedAt: ps.projection.UpdatedAt}
+		// turn_error carries the official backend failure text. Preserve it in the
+		// projection as a system message so a content-less pre-turn failure remains
+		// visible after the optimistic iOS row is reconciled away. This is diagnostic
+		// truth, not an assistant reply.
+		if msg.Event == "turn_error" {
+			if errorMessage := strings.TrimSpace(dataString(data, "message")); errorMessage != "" {
+				terminal.System = &MessageProjection{
+					ID:   turnID + "-error",
+					Role: "system",
+					Parts: []ProjectionPart{{
+						Type:         "text",
+						Text:         errorMessage,
+						Presentation: "final",
+					}},
+				}
+			}
+		}
+		ps.upsertTurn(terminal)
 		if turn := ps.turnByID(turnID); turn != nil {
 			classifyProjectionTextPresentation(turn.Assistant, true)
 			ps.upsertTurns[turnID] = *turn
