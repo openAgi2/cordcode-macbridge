@@ -111,13 +111,12 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 			defer hintTicker.Stop()
 		}
 	}
-	// dsh-web 即时层 (design §4.3.1): host-stream frames signal an immediate
-	// rescan instead of a fixed fast cadence — event-driven, not polled.
+	// Event-capable catalogs signal an immediate authoritative rescan instead
+	// of waiting for the safety-net cadence. The signal carries no catalog data;
+	// fingerprint/list remain the sole truth.
 	var refreshC <-chan struct{}
-	if id == "dsh-web" {
-		if signaler, ok := agent.(core.CatalogRefreshSignaler); ok {
-			refreshC = signaler.CatalogRefreshSignals()
-		}
+	if signaler, ok := agent.(core.CatalogRefreshSignaler); ok {
+		refreshC = signaler.CatalogRefreshSignals()
 	}
 	var hintSeen string
 	hintSeeded := false

@@ -69,6 +69,30 @@ type discoveryFastGrokAgent struct {
 	state *discoveryFastGrokState
 }
 
+type signaledDiscoveryAgent struct {
+	*fakeAgent
+	mu      sync.Mutex
+	infos   []core.AgentSessionInfo
+	refresh chan struct{}
+	seeded  chan struct{}
+	once    sync.Once
+}
+
+func (a *signaledDiscoveryAgent) ListSessions(context.Context) ([]core.AgentSessionInfo, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.once.Do(func() { close(a.seeded) })
+	return append([]core.AgentSessionInfo(nil), a.infos...), nil
+}
+
+func (a *signaledDiscoveryAgent) CatalogRefreshSignals() <-chan struct{} { return a.refresh }
+
+func (a *signaledDiscoveryAgent) setInfos(infos []core.AgentSessionInfo) {
+	a.mu.Lock()
+	a.infos = append([]core.AgentSessionInfo(nil), infos...)
+	a.mu.Unlock()
+}
+
 func (a *discoveryFastGrokAgent) FetchSessionList(context.Context) ([]core.AgentSessionInfo, error) {
 	a.state.mu.Lock()
 	defer a.state.mu.Unlock()
@@ -163,6 +187,45 @@ func TestSessionDiscoveryBroadcastsOnNewSession(t *testing.T) {
 		deliveryLog["candidateTargets"] != float64(1) || deliveryLog["enqueued"] != float64(1) ||
 		deliveryLog["overflowed"] != float64(0) {
 		t.Fatalf("catalog sink outcome incomplete: %+v\n%s", deliveryLog, logs.String())
+	}
+}
+
+func TestSessionDiscoveryUsesGenericCatalogRefreshSignal(t *testing.T) {
+	handlers := newTestHandlers(t)
+	agent := &signaledDiscoveryAgent{
+		fakeAgent: &fakeAgent{name: "codex-web"},
+		infos:     []core.AgentSessionInfo{{ID: "s1", Directory: "/workspace"}},
+		refresh:   make(chan struct{}, 1),
+		seeded:    make(chan struct{}),
+	}
+	handlers.RegisterAgent("codex-web", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	t.Cleanup(cleanup)
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "codex-web", SessionID: "list-view"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go handlers.runBackendSessionDiscovery(ctx, "codex-web", agent, time.Hour, time.Hour, time.Hour)
+	select {
+	case <-agent.seeded:
+	case <-time.After(2 * time.Second):
+		t.Fatal("discovery seed timed out")
+	}
+	agent.setInfos([]core.AgentSessionInfo{
+		{ID: "s2", Directory: "/workspace"},
+		{ID: "s1", Directory: "/workspace"},
+	})
+	agent.refresh <- struct{}{}
+
+	if err := clientConn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := clientConn.ReadJSON(&payload); err != nil {
+		t.Fatalf("read sessions_changed: %v", err)
+	}
+	if payload["event"] != "sessions_changed" || payload["backendId"] != "codex-web" {
+		t.Fatalf("unexpected catalog signal payload: %#v", payload)
 	}
 }
 

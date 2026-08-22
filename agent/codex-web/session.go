@@ -30,7 +30,10 @@ import (
 
 // Agent 实现 core.Agent（注册名 codex-web）。
 type Agent struct {
+	workDirMu   sync.RWMutex
 	workDir     string
+	catalogMu   sync.Mutex
+	catalogWake chan struct{}
 	explicitURL string
 	codexHome   string
 	dataDir     string
@@ -96,12 +99,55 @@ func New(opts map[string]any) *Agent {
 
 func (a *Agent) Name() string { return BackendID }
 
+var _ core.WorkDirSwitcher = (*Agent)(nil)
+var _ core.CatalogRefreshSignaler = (*Agent)(nil)
+
+// SetWorkDir implements the Bridge's existing per-request directory seam. The
+// selected directory is consumed by the next thread/start; existing official
+// threads keep their source-owned cwd unchanged.
+func (a *Agent) SetWorkDir(dir string) {
+	a.workDirMu.Lock()
+	a.workDir = strings.TrimSpace(dir)
+	a.workDirMu.Unlock()
+}
+
+func (a *Agent) GetWorkDir() string {
+	a.workDirMu.RLock()
+	dir := a.workDir
+	a.workDirMu.RUnlock()
+	return dir
+}
+
+// CatalogRefreshSignals exposes official thread lifecycle changes to the
+// Bridge discovery worker. The worker still reads thread/list as the sole
+// catalog truth; this channel only removes the polling delay.
+func (a *Agent) CatalogRefreshSignals() <-chan struct{} {
+	a.catalogMu.Lock()
+	defer a.catalogMu.Unlock()
+	if a.catalogWake == nil {
+		a.catalogWake = make(chan struct{}, 1)
+	}
+	return a.catalogWake
+}
+
+func (a *Agent) signalCatalogRefresh() {
+	a.catalogMu.Lock()
+	if a.catalogWake == nil {
+		a.catalogWake = make(chan struct{}, 1)
+	}
+	select {
+	case a.catalogWake <- struct{}{}:
+	default:
+	}
+	a.catalogMu.Unlock()
+}
+
 // probeOptions 组装 Probe 入参。
 func (a *Agent) probeOptions() ProbeOptions {
 	return ProbeOptions{
 		ExplicitURL: strings.TrimSpace(a.explicitURL),
 		CodexHome:   a.codexHome,
-		WorkDir:     a.workDir,
+		WorkDir:     a.GetWorkDir(),
 		DataDir:     a.dataDir,
 	}
 }

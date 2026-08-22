@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T06:39:29Z",
+ "updated_at": "2026-08-22T06:53:59Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2363,14 +2363,96 @@
    "id": "p5-followup-user-message-review-fix-regression",
    "title": "Phase5 Codex Web 多轮发送真机回归",
    "description": "安装 Release 后 owner 在 iOS codex-web 新 session 连续发送两轮，确认两条 user message 与两条 assistant reply 均实时显示、顺序正确且无重复。",
-   "status": "in_progress",
+   "status": "done",
    "phase": "phase5",
    "kind": "regression",
    "depends_on": [
     "p5-followup-user-message-review-fix-tests"
    ],
    "source": "owner device failure 2026-08-22 14:24",
-   "notes": "自动门禁已完成；Release ef2cfa961238 已构建并安装到 /Applications/CordCodeLink.app，runtime PID 39786，codex-web passive subscription 已启动；managed 官方 app-server 保持同一 PID 31580/127.0.0.1:59339、record 0600。未改 iOS、未跑 UI test；待 owner iOS 连续两轮产品面确认。",
+   "notes": "自动门禁已完成；Release ef2cfa961238 已构建并安装到 /Applications/CordCodeLink.app，runtime PID 39786，codex-web passive subscription 已启动；managed 官方 app-server 保持同一 PID 31580/127.0.0.1:59339、record 0600。owner 2026-08-22 14:46 确认连续两轮吞用户消息问题解决。",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "owner 真机确认 Codex Web 新 session 连续两轮均显示用户消息并正常流式输出。",
+    "artifacts": [
+     "owner report 2026-08-22: 吞用户消息的问题解决"
+    ],
+    "checked_at": "2026-08-22T06:48:24Z"
+   }
+  },
+  {
+   "id": "p5-directory-review-fix-impl",
+   "title": "Phase5 Codex Web 新会话目录透传修复",
+   "description": "review-fix-for:p5-followup-user-message-review-fix-regression；严格按设计 §5.1/§9：让 codex-web 实现既有 WorkDirSwitcher，使 create_session/send_message 的 directory 成为官方 thread/start.cwd；列表继续只按官方 thread.cwd 分组，不增加客户端重分组或缓存纠偏。",
+   "status": "done",
+   "phase": "phase5",
+   "kind": "impl",
+   "depends_on": [
+    "p5-followup-user-message-review-fix-tests"
+   ],
+   "source": "owner device failure 2026-08-22 14:46 + official rollout session_meta + design §5.1/§9",
+   "notes": "现场 session 01a02834 官方 cwd=/Users/jacklee；Bridge create_session.directory 未生效，因为 codex-web.Agent 漏实现 core.WorkDirSwitcher。现通过既有接口把请求目录送入官方 thread/start.cwd；官方 thread/started/name 只触发权威 thread/list 即时重扫，列表数据仍由官方 catalog 唯一提供。真相 owner=官方 thread.cwd；唯一 writer=thread/start；无 iOS 重分组/fallback。",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "codex-web 接入既有 WorkDirSwitcher 与 CatalogRefreshSignaler；目录写入官方 thread/start，官方生命周期仅唤醒 thread/list 指纹重扫。",
+    "artifacts": [
+     "agent/codex-web/session.go",
+     "agent/codex-web/events.go",
+     "go-bridge/session_discovery.go",
+     "CHANGELOG.md"
+    ],
+    "checked_at": "2026-08-22T06:52:30Z"
+   }
+  },
+  {
+   "id": "p5-directory-review-fix-tests",
+   "title": "Phase5 Codex Web thread/start.cwd 测试",
+   "description": "覆盖 WorkDirSwitcher 接口、目录切换后新建 session 的官方 thread/start.cwd 精确等于请求目录、列表映射继续读取官方 cwd、官方 catalog signal 触发即时权威重扫；运行 codex-web race 与全仓 Go 门禁。",
+   "status": "done",
+   "phase": "phase5",
+   "kind": "tests",
+   "depends_on": [
+    "p5-directory-review-fix-impl"
+   ],
+   "source": "owner device failure 2026-08-22 14:46 + design §13.1",
+   "notes": "thread/start.cwd、列表官方 cwd 映射、catalog signal 即时重扫定向测试通过；codex-web race、全仓 test/vet 全过。",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "请求目录精确进入官方 thread/start.cwd；catalog signal 触发权威 fingerprint 重扫；race 与全仓 Go 门禁通过。",
+    "artifacts": [
+     "agent/codex-web/session_ssv2_test.go",
+     "go-bridge/session_discovery_test.go",
+     "go test -race ./agent/codex-web -count=1",
+     "go test ./... -count=1",
+     "go vet ./..."
+    ],
+    "checked_at": "2026-08-22T06:53:59Z"
+   }
+  },
+  {
+   "id": "p5-directory-review-fix-regression",
+   "title": "Phase5 Codex Web Chat 目录新建与列表归组真机回归",
+   "description": "安装 Release 后 owner 在 iOS Chat 目录新建 session、连续发送两轮并返回列表；session 应立即出现在 Chat 组，App 切后台再回来仍留在 Chat，不得进入 /Users/jacklee 根目录组。",
+   "status": "in_progress",
+   "phase": "phase5",
+   "kind": "regression",
+   "depends_on": [
+    "p5-directory-review-fix-tests"
+   ],
+   "source": "owner device failure 2026-08-22 14:46",
+   "notes": "自动门禁完成；待 Release 安装及 owner Chat 目录新建/回列表/前后台切换真机确认。",
    "verification": {
     "required": true,
     "status": "missing",

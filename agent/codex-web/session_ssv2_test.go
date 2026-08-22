@@ -77,6 +77,55 @@ func TestAgentListSessionsMapping(t *testing.T) {
 	}
 }
 
+func TestAgentWorkDirSwitcherFeedsOfficialThreadStartCwd(t *testing.T) {
+	s := newScripted()
+	cl := NewClient(s, 1)
+	t.Cleanup(func() { _ = cl.Close() })
+	go drainNotifications(cl)
+
+	started := ThreadInfo{ID: "thread-chat", Cwd: "/Users/developer/Projects/Chat"}
+	captured := captureParams(s, "thread/start", map[string]any{
+		"thread": started, "model": "gpt-5.6-luna", "modelProvider": "openai",
+	})
+	ep := &ServiceEndpoint{Source: SourceExternalDaemonReused, CLIVersion: "0.149.0-alpha.4"}
+	ep.client = cl
+	a := New(map[string]any{"work_dir": "/Users/developer"})
+	a.endpoint = ep
+
+	a.SetWorkDir("/Users/developer/Projects/Chat")
+	if got := a.GetWorkDir(); got != "/Users/developer/Projects/Chat" {
+		t.Fatalf("GetWorkDir()=%q", got)
+	}
+	sess, err := a.StartSession(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sess.CurrentSessionID() != "thread-chat" {
+		t.Fatalf("session id=%q", sess.CurrentSessionID())
+	}
+	if len(*captured) != 1 {
+		t.Fatalf("thread/start calls=%d", len(*captured))
+	}
+	expectParams(t, (*captured)[0], map[string]any{"cwd": "/Users/developer/Projects/Chat"})
+}
+
+func TestAgentCatalogRefreshSignalCoalesces(t *testing.T) {
+	a := New(nil)
+	signals := a.CatalogRefreshSignals()
+	a.signalCatalogRefresh()
+	a.signalCatalogRefresh()
+	select {
+	case <-signals:
+	case <-time.After(time.Second):
+		t.Fatal("missing catalog refresh signal")
+	}
+	select {
+	case <-signals:
+		t.Fatal("catalog refresh burst must coalesce")
+	default:
+	}
+}
+
 func TestAgentTurnScopedAndFlatHistory(t *testing.T) {
 	a := agentWithScript(t, func(method string) any {
 		if method != "thread/read" {

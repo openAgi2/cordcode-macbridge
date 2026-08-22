@@ -47,6 +47,9 @@ func (a *Agent) ensurePump() {
 	codec := a.liveCodec
 	go func() {
 		for n := range cl.Notifications() {
+			if n.Method == "thread/started" || n.Method == "thread/name/updated" {
+				a.signalCatalogRefresh()
+			}
 			var extra []core.Event
 			switch n.Method {
 			case "serverRequest/resolved":
@@ -204,7 +207,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	var settings *ThreadStartResult
 	if sessionID == "" {
 		model, provider := a.selectedModelForStart()
-		res, rpcErr, err := StartThread(ctx, cl, StartThreadOptions{Cwd: a.workDir, Model: model, ModelProvider: provider})
+		res, rpcErr, err := StartThread(ctx, cl, StartThreadOptions{Cwd: a.GetWorkDir(), Model: model, ModelProvider: provider})
 		switch {
 		case err != nil:
 			return nil, err
@@ -487,6 +490,7 @@ func (a *Agent) Subscribe(ctx context.Context) (<-chan core.Event, error) {
 		for n := range cl.Notifications() {
 			// 新 thread 广播 → 补订阅（此前的 turn 事件不重放，官方边界；冷基线补齐）
 			if n.Method == "thread/started" {
+				a.signalCatalogRefresh()
 				var p struct {
 					Thread struct {
 						ID string `json:"id"`
