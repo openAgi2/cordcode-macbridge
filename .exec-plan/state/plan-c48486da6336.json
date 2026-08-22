@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T09:19:00Z",
+ "updated_at": "2026-08-22T09:20:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2972,7 +2972,7 @@
    "id": "p0-topology-v2-hardening-tests",
    "title": "Phase0 v2.0 单 daemon 静态与运行门",
    "description": "覆盖 CODEX_HOME standalone 优先、版本/daemon 失败可见、产品 Probe 零 managed spawn、旧 record 仅严格身份清理、主/observer 同 endpoint；运行 Go、vet、MacBridge 定向测试与 Release 构建。",
-   "status": "pending",
+   "status": "in_progress",
    "phase": "phase0",
    "kind": "tests",
    "depends_on": [
