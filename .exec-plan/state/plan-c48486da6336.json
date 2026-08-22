@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T09:23:29Z",
+ "updated_at": "2026-08-22T09:25:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -3006,7 +3006,7 @@
    "id": "p0-topology-v2-hardening-regression",
    "title": "Phase0 v2.0 Desktop ↔ iOS T1 双向竖切门",
    "description": "Release 部署后由 owner 保持 Desktop 与 iOS 同时打开，验证 Desktop→iOS live active/delta/terminal、iOS→Desktop 同 thread 发现/续聊、双方同时打开无 active writer；不得以刷新、切 session、退出或重启另一端作为通过条件。",
-   "status": "pending",
+   "status": "in_progress",
    "phase": "phase0",
    "kind": "regression",
    "depends_on": [
