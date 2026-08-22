@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T07:35:45Z",
+ "updated_at": "2026-08-22T07:55:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -725,7 +725,7 @@
    "id": "p1-lifecycle-regression",
    "title": "Phase1 真实 daemon e2e",
    "description": "本机目标二进制受控运行：真实 daemon 探测/复用/拉起/托管 WS 全路径 e2e，记录进程、socket/端口、诊断输出与归属标记；不触碰用户真实 daemon（若正在运行只探测复用并记录）。",
-   "status": "blocked",
+   "status": "done",
    "phase": "phase1",
    "kind": "regression",
    "depends_on": [
@@ -2533,18 +2533,18 @@
     "p5-rename-review-fix-tests"
    ],
    "source": "owner device failure 2026-08-22",
-   "notes": "Release 9748e69603f4 owner 真机失败：点击重命名显示‘未能读取数据，因为数据丢失’。repairable-heavy；review-fix-for:p5-session-mutation-review-fix-regression。此前 Go 测试只验证 Agent/handler，未冻结 iOS 实际响应解码契约。",
+   "notes": "此前失败由 p5-session-mutation-review-fix-* 修复；owner 于 2026-08-22 真机确认重命名符合预期。resolved-via:p5-session-mutation-review-fix-regression。",
    "verification": {
     "required": true,
-    "status": "failed",
+    "status": "present",
     "method": "mixed",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "owner 真机证明 rename RPC 不再 not_supported，但成功响应无法被 iOS 解码。",
+    "summary": "owner 真机确认重命名成功，响应可解码且产品行为符合预期。",
     "artifacts": [
-     "owner report 2026-08-22: 未能读取数据，因为数据丢失"
+     "owner report 2026-08-22: 归档，删除，重命名session功能测试符合预期✅"
     ],
-    "checked_at": "2026-08-22T07:13:51Z"
+    "checked_at": "2026-08-22T07:55:00Z"
    }
   },
   {
@@ -2609,26 +2609,26 @@
    "id": "p5-session-mutation-review-fix-regression",
    "title": "Phase5 Codex Web rename/archive/delete 真机回归",
    "description": "owner 真机分别验证 rename、archive、delete；成功后列表/消息页与官方状态一致，失败时显示官方错误，前后台切换不反弹。",
-   "status": "pending",
+   "status": "done",
    "phase": "phase5",
    "kind": "regression",
    "depends_on": [
     "p5-session-mutation-review-fix-tests"
    ],
    "source": "owner device failure 2026-08-22",
-   "notes": "修复版 Mac Release 已部署、iOS App 已安装并启动到连接的 iPhone；等待 owner 对 rename/archive/delete 做产品回归，因此保持 pending，不伪造真机功能证明。",
+   "notes": "owner 于 2026-08-22 真机分别验证 rename/archive/delete，三项产品行为均符合预期。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "mixed",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "自动部署已完成，尚待 owner 触发三种 mutation 并确认 UI/官方状态收敛。",
+    "summary": "owner 真机确认 rename/archive/delete 三项功能均符合预期。",
     "artifacts": [
      "/Applications/CordCodeLink.app embedded runtime commit 325146b14160",
-     "iPhone BFC431AC-C205-56B2-BB4D-9EC0C57A0C05 process com.cordcode.CordCode PID 21199"
+     "owner report 2026-08-22: 归档，删除，重命名session功能测试符合预期✅"
     ],
-    "checked_at": "2026-08-22T07:35:45Z"
+    "checked_at": "2026-08-22T07:55:00Z"
    }
   },
   {
