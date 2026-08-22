@@ -112,3 +112,20 @@ scripts/codex-web-phase0/verify_shared_daemon_topology.sh
 v2.0 hardening 同时从正式 Go lifecycle 删除了 managed process 的构造、持久化与 Close 回收面；只保留
 旧 record 的严格 PID/argv/start-time/port 校验清理。daemon start binary 固定解析 active
 `CODEX_HOME/packages/standalone/current/codex`，不再从 PATH 或 Desktop 内嵌 CLI 降级选择。
+
+## v2.0 Release 拓扑复验（2026-08-22）
+
+由当前源码构建并覆盖安装的 unsigned Release：
+
+- runtime：`cordcode-bridge-runtime 0.1.0 (commit: 364dec7ce099, built: 2026-08-22T09:19:11Z)`；
+- CordCode Link PID `16518`，其 Release runtime PID `16645`；
+- 使用独立 `--user-data-dir`、经 LaunchServices 启动的隔离 Desktop PID `16837`；
+- 官方 daemon PID `85510`；standalone 与 Desktop CLI 均为 `codex-cli 0.149.0-alpha.4`；
+- `verify_shared_daemon_topology.sh` 实测 `desktop_shared_peers=1`、
+  `cordcode_shared_peers=2`、`managed_loopback_count=0`、`topology_gate=PASS`；
+- 隔离 Desktop 进程树没有私有 `codex app-server` 子进程；验证后只终止了隔离 Desktop 及其
+  crashpad helper，owner 正在使用的主 Desktop 未被修改。
+
+这证明已安装 Release 和继承 launchd 环境的新 Desktop 可以同时附着同一个官方 daemon。owner 主
+Desktop PID `68040` 启动早于环境设置，仍保留其旧私有 stdio app-server；必须由 owner 手动退出并重开
+一次，才能进入 v2.0 T1 双端最小闭环验收。PID 仅为本次证据，不是产品常量。
