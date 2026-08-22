@@ -435,8 +435,11 @@ Desktop 产品路径只允许一个运行时真相源：
    再通过 control socket 连接；
 4. **Desktop attach**：登录域设置 `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1`。Desktop **启动时**
    探测成功则连同一 control socket；已附着后，MacBridge 退出不应要求再重启 Desktop。
-5. **失败可见**：standalone 缺失、daemon 启动失败、版本不兼容或环境配置失败时，
+5. **失败可见**：standalone 缺失、daemon 启动失败或环境配置失败时，
    `codex-web` 标为 `not_configured`/`incompatible`，不得另起 app-server 假装可用。
+   Desktop 是否附着由它自己的 `daemon version` 兼容检查决定（当前宿主是
+   app-server ≥ 0.141.0），不是 `codex --version` 字符串全等。CLI patch 级
+   偏差只记日志，不得因此跳过 daemon start / 登录座位。
 
 这不是“优先级列表”，而是串行前置条件。官方 Desktop 在每次 `transport.connect()`
 （含 reconnect）都会再跑 `codex app-server daemon version`（spawn timeout 2500ms）。
