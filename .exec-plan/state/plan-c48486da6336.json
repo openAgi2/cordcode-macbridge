@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T05:29:15Z",
+ "updated_at": "2026-08-22T05:30:44Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2080,30 +2080,35 @@
    "id": "p5-turn-error-visibility-review-fix-tests",
    "title": "Phase5 turn error projection 定向测试",
    "description": "review-fix-for:p5-turn-start-review-fix-regression；验证 turn_error 官方原文进入 system projection 且不影响 terminal/idle 收口。",
-   "status": "in_progress",
+   "status": "done",
    "phase": "phase5",
    "kind": "tests",
    "depends_on": [
     "p5-turn-error-visibility-review-fix-impl"
    ],
    "source": "owner device failure 2026-08-22 13:16 + design §7.1/§9.2",
-   "notes": "review-fix-for:p5-turn-start-review-fix-regression",
+   "notes": "review-fix-for:p5-turn-start-review-fix-regression；定向 reducer 测试、全量 go-bridge、vet 与 owner matrix validator 通过。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "pass",
     "method": "automated",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "turn_error 原文保留、terminal error 状态与 idle 收口均有自动化证据。",
+    "artifacts": [
+     "go test ./go-bridge -run TestProjectionHydrateErrorTurnWithSourceCompleteReady|Test.*TurnError -count=1",
+     "go test ./go-bridge -count=1",
+     "go vet ./go-bridge",
+     "python3 scripts/codex-web-phase5/verify_owner_matrix.py"
+    ],
+    "checked_at": "2026-08-22T05:30:44Z"
    }
   },
   {
    "id": "p5-turn-error-visibility-review-fix-regression",
    "title": "Phase5 turn error 真机可见性回归",
    "description": "review-fix-for:p5-turn-start-review-fix-regression；Release 覆盖安装后由 owner 确认官方 turn failure 原文可见，不再表现为空白完成。",
-   "status": "pending",
+   "status": "in_progress",
    "phase": "phase5",
    "kind": "regression",
    "depends_on": [
