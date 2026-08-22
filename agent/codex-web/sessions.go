@@ -249,7 +249,8 @@ const (
 )
 
 // OwnershipConflictError 表示目标 thread 正由另一个 Codex app-server writer 持有。
-// 携带 §10.2 要求的全部事实；建议回到当前持有者完成/退出，而非 MacBridge 抢进程。
+// 携带 §10.2 要求的全部事实；官方 app-server 在 turn 完成后仍会保留
+// loaded thread/writer，须等待其卸载或退出持有者，而非 MacBridge 抢进程。
 type OwnershipConflictError struct {
 	ThreadID        string
 	Method          string
@@ -260,7 +261,7 @@ type OwnershipConflictError struct {
 
 func (e *OwnershipConflictError) Error() string {
 	return fmt.Sprintf(
-		"该会话正由另一个 Codex app-server 持有：thread %s（方法 %s，transport 来源 %s）。官方错误 %d: %s。请在当前持有该会话的 Codex 客户端完成或退出后重试；CordCode 不会终止其他官方进程。",
+		"该会话正由另一个 Codex app-server 持有：thread %s（方法 %s，transport 来源 %s）。官方错误 %d: %s。即使当前回复已经完成，官方 app-server 仍可能继续持有该会话；请关闭持有它的 Codex 客户端，或等待官方卸载后再重试。CordCode 不会终止其他官方进程。",
 		e.ThreadID, e.Method, e.TransportSource, e.OfficialCode, e.OfficialMessage,
 	)
 }

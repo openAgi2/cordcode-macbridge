@@ -43,10 +43,10 @@ func fixtureDump(t *testing.T, group string) (map[string]json.RawMessage, []stri
 			continue
 		}
 		var m struct {
-			ID     *json.Number     `json:"id"`
-			Method string           `json:"method"`
-			Result json.RawMessage  `json:"result"`
-			Error  json.RawMessage  `json:"error"`
+			ID     *json.Number    `json:"id"`
+			Method string          `json:"method"`
+			Result json.RawMessage `json:"result"`
+			Error  json.RawMessage `json:"error"`
 		}
 		if err := json.Unmarshal(e.Msg, &m); err != nil {
 			continue
@@ -447,8 +447,11 @@ func TestOwnershipConflictTranslation(t *testing.T) {
 		oc.OfficialCode != -32600 || !strings.Contains(oc.OfficialMessage, "active writer") {
 		t.Fatalf("冲突翻译字段缺失：%+v", oc)
 	}
-	if !strings.Contains(oc.Error(), "另一个 Codex app-server") || !strings.Contains(oc.Error(), "不会终止") {
-		t.Fatalf("冲突提示应包含持有者语义与不抢进程承诺：%s", oc.Error())
+	if !strings.Contains(oc.Error(), "另一个 Codex app-server") ||
+		!strings.Contains(oc.Error(), "回复已经完成") ||
+		!strings.Contains(oc.Error(), "等待官方卸载") ||
+		!strings.Contains(oc.Error(), "不会终止") {
+		t.Fatalf("冲突提示应说明完成回复不释放 writer、官方卸载条件与不抢进程承诺：%s", oc.Error())
 	}
 
 	wrapped := errOwnershipOrRPC("thread/delete", SourceCordCodeStartedDaemon, "th-9", official, nil)
