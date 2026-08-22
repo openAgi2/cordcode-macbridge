@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T09:12:00Z",
+ "updated_at": "2026-08-22T09:13:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2943,7 +2943,7 @@
    "id": "p0-topology-v2-hardening-impl",
    "title": "Phase0 v2.0 topology-first 产品路径硬化",
    "description": "review-fix-for:p0-desktop-attach-review-fix-regression；按 v2.0 §0/§6/§14 删除仍可构造 managed-loopback 的 dormant 产品代码，使 daemon start 始终解析当前 CODEX_HOME 下官方 standalone，并补齐 fail-closed/同 daemon 诊断边界。不得读取旧 agent/codex。",
-   "status": "pending",
+   "status": "in_progress",
    "phase": "phase0",
    "kind": "impl",
    "depends_on": [
