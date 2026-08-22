@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T09:44:00Z",
+ "updated_at": "2026-08-22T09:46:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2738,7 +2738,7 @@
    "id": "p6-observation-impl",
    "title": "Phase6 A/B 并行观察",
    "description": "两 backend 独立 session A/B（同网络/provider/模型/prompt）；汇总功能/流式/provider/ownership/重连/资源结果。",
-   "status": "pending",
+   "status": "in_progress",
    "phase": "phase6",
    "kind": "impl",
    "depends_on": [
