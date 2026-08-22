@@ -5,12 +5,13 @@
 ## 自动前置核对（已完成）
 
 - Mac Release：`/Applications/CordCodeLink.app` 已覆盖安装并运行，内嵌 runtime commit
-  `74fc3866d18c`，TCP 8777 监听者来自安装目录。
+  `364dec7ce099`，TCP 8777 监听者来自安装目录。
 - Shared runtime：官方 standalone/daemon 与 Desktop 内嵌 CLI 均为 `0.149.0-alpha.4`；
   `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1` 已写入用户 launchd domain；CordCode 主/observer
   connection 与隔离 Desktop 已由 UDS FD 证明连接同一 daemon，且无 managed-loopback 进程。
 - Bridge：Release 内嵌 `cordcode-bridge-runtime` 正在监听 TCP 8777，启动参数同时包含独立的 `codex` 与 `codex-web`。
-- iOS：`codex/codex-web-backend-ios` 的 `e43e0c6` 已构建并安装到连接的物理 iPhone；Codex Web 模型目录现保留官方 `model/list` 顺序与 description。
+- iOS：`codex/codex-web-backend-ios` 已构建并安装到连接的物理 iPhone；Codex Web 模型目录保留官方
+  `model/list` 顺序与 description；物理 iPhone 上的定向 unit test 已通过，测试基础设施提交为 `53e7d79`。
 - 运行路径：真机启动后 Bridge 日志已出现 `backendId=codex-web` 的 `list_models`、`get_session_projection`、`set_observation_scope` 与 snapshot hydrate；这只证明接线可达，不代替下列 owner 视觉/交互验收。
 - Desktop 前置：当前主 Desktop 在环境写入前已运行，本轮没有自动终止它。执行第 6–8、10–11 行前，
   owner 必须先正常退出并重新打开 Desktop 一次；之后各行不得再以“退出另一客户端”为切换条件。
@@ -32,9 +33,9 @@
 | 3 | LAN；daemon 已运行；Terminal Codex 默认配置；active session | Mac 发长回答，iPhone 打开同一 session | TUI 使用 LocalDaemon；iPhone 实时进入执行中并连续显示 delta | NOT RUN | 记录 daemon/TUI 选择证据与 session 前缀 |
 | 4 | LAN；daemon 未运行；先启动 Terminal Codex 默认配置 | Mac 发长回答，再打开 Codex Web | TUI 使用 Embedded；iPhone 不伪造 live stream，只按已验证的 list/read 边界显示 | NOT RUN | 记录进程与事件时间线 |
 | 5 | LAN；daemon 已运行；Terminal Codex 带 `-c`、strict 或 non-replayable 覆盖 | Mac 发长回答，iPhone 打开同一 session | TUI 使用 Embedded；iPhone 不串入该隔离 turn | NOT RUN | 写明具体覆盖参数；记录隔离证据 |
-| 6 | Codex Desktop 或 VS Code；active session | 在官方宿主发消息 | 仅按 Phase 0 已确认的宿主覆盖面显示；session id/history 与官方宿主一致 | NOT RUN | 写明 Desktop/VS Code 与实际覆盖结论 |
-| 7 | Codex Web 创建并完成一个 session | 在 Mac 官方客户端续聊 | 原 session、原 cwd、原 effective provider/model 可继续 | NOT RUN | 对照续聊前后 session/cwd/provider/model |
-| 8 | Mac 官方客户端创建并完成一个 session | 在 iPhone 续聊 | 原 session 直接继续，无迁移或复制 | NOT RUN | 对照官方与 iPhone session identity |
+| 6 | LAN；Desktop 与 CordCode 已证明同 daemon；双方保持打开 | Desktop 发消息 | iPhone 立即进入执行态，连续显示同 turn delta 与唯一终态；不得切 session/刷新才出现 | PASS | owner 2026-08-22 在重启 Desktop 后复测并确认符合预期；T0 FD/socket 证据见 `scripts/codex-web-phase0/dumps/gate-desktop-attach/README.md` |
+| 7 | 双方保持打开；Codex Web 创建并完成 | 在 Desktop 原地发现并续聊 | 原 session、原 cwd、原 effective provider/model 可继续；不得重启/复制/迁移 | PASS | owner 2026-08-22 确认 T1 双向接力符合预期；exec-plan 证据 `p0-topology-v2-hardening-regression` |
+| 8 | 双方保持打开；Desktop 创建并完成 | 在 iPhone 发现并续聊 | 原 session 可继续且 Desktop 同时打开不报 active writer；不得退出任一端 | PASS | owner 2026-08-22 确认 T1 双向接力符合预期；无 active writer 冲突 |
 | 9 | custom provider 已配置为 effective provider | 新建与续聊各一次 | 继承同一 effective provider；模型目录不被手写替换；iOS 不显示未实现的 provider 切换 | NOT RUN | 记录真实 provider、model 与目录截图 |
 | 10 | turn 请求 command/file approval | iPhone 分别执行允许与拒绝 | 官方 turn 对应继续或拒绝；状态由 resolved/completed 收口；卡片消失一次 | NOT RUN | 允许/拒绝各留一条 interaction/session 证据 |
 | 11 | turn 发出多题 `requestUserInput` | iPhone 完整作答并提交 | 只发送一次官方 response；turn 继续；题目不丢失、不提前完成 | NOT RUN | 记录题数、答案提交与卡片收口 |
