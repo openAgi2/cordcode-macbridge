@@ -426,9 +426,10 @@ SSV2 key 必须包含 backend id，禁止只按 thread id 合并。实验期 UI 
 
 Desktop 产品路径只允许一个运行时真相源：
 
-1. **官方 daemon 是登录级座位，不是 MacBridge 子进程**：用户 LaunchAgent 周期执行官方
-   `daemon start`（已运行则 `alreadyRunning`，不换 PID）。MacBridge 启动只探测/补位；
-   停止或退出 **不得** `daemon stop`、不得 bootout 该 daemon、不得杀掉 Desktop。
+1. **官方 daemon 是登录级座位，不是 MacBridge 子进程**：用户 LaunchAgent 以 KeepAlive
+   循环执行官方 `daemon start`（已运行则 `alreadyRunning`，不换 PID），补位间隔必须
+   短于 Desktop 断线后的首次重连（约 1s）。MacBridge 启动只探测/补位；停止或退出
+   **不得** `daemon stop`、不得 bootout 该 daemon、不得杀掉 Desktop。
 2. **官方 daemon 复用**：探测 Codex 官方 control socket/`daemon version`，已运行则复用；
 3. **官方 daemon managed start**：座位尚未起来时调用 `codex app-server daemon start`，
    再通过 control socket 连接；
@@ -437,9 +438,13 @@ Desktop 产品路径只允许一个运行时真相源：
 5. **失败可见**：standalone 缺失、daemon 启动失败、版本不兼容或环境配置失败时，
    `codex-web` 标为 `not_configured`/`incompatible`，不得另起 app-server 假装可用。
 
-这不是“优先级列表”，而是串行前置条件。官方 Desktop 一旦探测失败会锁死私有 stdio，且没有
-远程翻回 API。这只允许作为异常恢复（Desktop 已经掉线），**不是** MacBridge 正常退出流程。
+这不是“优先级列表”，而是串行前置条件。官方 Desktop 在每次 `transport.connect()`
+（含 reconnect）都会再跑 `codex app-server daemon version`（spawn timeout 2500ms）。
+control socket 不在时该命令通常立刻失败，不会等满 2.5s。失败就把 `kind` 写成
+`stdio`，`supportsReconnect()` 变为 false，该 Desktop 进程没有远程翻回 API。
+这只允许作为异常恢复（Desktop 已经掉到私有 stdio），**不是** MacBridge 正常退出流程。
 不得 kill/steal Desktop，也不得趁其仍在 Embedded runtime 时启动第二服务继续工作。
+登录座位必须在 Desktop 首次重连探测前把官方 daemon 补回来；60s 周期补位盖不住这个窗口。
 
 `-codex-web-app-server-url` 只保留给隔离 contract/e2e 与明确的非 Desktop 实验；Desktop 产品模式
 不能使用它，因为当前 Desktop 已证明的入口是 local daemon Unix socket，而不是任意 loopback URL。
