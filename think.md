@@ -1,5 +1,13 @@
 # Claude Code 冷启动既有 session 首轮流式从头重播：跨仓排查结论
 
+## 2026-08-22 Codex Desktop：daemon 探测失败会锁死私有 stdio
+
+官方 Desktop（当前 ChatGPT `app.asar`）每次 `transport.connect()`——包括断线重连——都会再跑 `codex app-server daemon version`，spawn timeout 2500ms。control socket 不在时该命令通常立刻失败，不会等满 2.5s。失败就把 `kind` 写成 `stdio`，`supportsReconnect()` 变 false，这个 Desktop 进程再也回不去 websocket。首次重连大约在 websocket 断开后 1s。
+
+这不是 MacBridge 能翻的开关，也不能靠退出 Link 修好。已经锁死的 Desktop 只能完整退出一次。登录座位必须在那 1s 窗口内把官方 daemon 补回；60s 周期 `daemon start` 盖不住。MacBridge 退出本来就不会 `daemon stop`。
+
+ccswitch 改完 `config.toml` 之后，正确杠杆是官方 `codex app-server daemon restart`（让同一 daemon 读新配置），不是把 daemon 杀掉等 Desktop 自己掉 stdio。restart 期间如果 Desktop 先探测失败，仍会锁死，所以 restart 必须快于上述窗口。
+
 ## 2026-08-21 OpenCode Web：无权限模型重试时 iPhone 只显示执行中（owner 关闭）
 
 ### 现象
