@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T09:13:00Z",
+ "updated_at": "2026-08-22T09:19:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2943,7 +2943,7 @@
    "id": "p0-topology-v2-hardening-impl",
    "title": "Phase0 v2.0 topology-first 产品路径硬化",
    "description": "review-fix-for:p0-desktop-attach-review-fix-regression；按 v2.0 §0/§6/§14 删除仍可构造 managed-loopback 的 dormant 产品代码，使 daemon start 始终解析当前 CODEX_HOME 下官方 standalone，并补齐 fail-closed/同 daemon 诊断边界。不得读取旧 agent/codex。",
-   "status": "in_progress",
+   "status": "done",
    "phase": "phase0",
    "kind": "impl",
    "depends_on": [
@@ -2953,13 +2953,19 @@
    "notes": "review-fix-for:p0-desktop-attach-review-fix-regression；设计漂移审计发现 lifecycle 仍保留 dormant managedProcess/persist/establish 构造面，且 daemon binary 解析未把 active CODEX_HOME standalone 作为第一官方路径。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "正式 lifecycle 已删除 managed process 构造、record 持久化和 Close 回收面，只保留旧 record 严格清理；daemon start 只解析 active CODEX_HOME 官方 standalone，不再从 PATH/Desktop 内嵌 CLI 降级；新增可复跑的进程/版本/socket/FD 拓扑检查。",
+    "artifacts": [
+     "git:92b82b8",
+     "agent/codex-web/lifecycle.go",
+     "agent/codex-web/lifecycle_managed.go",
+     "scripts/codex-web-phase0/verify_shared_daemon_topology.sh",
+     "scripts/codex-web-phase0/dumps/gate-desktop-attach/README.md"
+    ],
+    "checked_at": "2026-08-22T09:19:00Z"
    }
   },
   {
