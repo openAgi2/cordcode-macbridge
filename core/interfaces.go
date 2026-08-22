@@ -811,6 +811,13 @@ type EventSubscriber interface {
 	Subscribe(ctx context.Context) (<-chan Event, error)
 }
 
+// ThreadLiveAttacher is optional. Codex app-server only fans out turn/item
+// events to connections that have attached to that thread. set_observation_scope
+// must attach the backend observer; opening a session on iOS is not enough.
+type ThreadLiveAttacher interface {
+	AttachLiveThread(ctx context.Context, threadID string)
+}
+
 // CatalogRefreshSignaler is an optional interface for backends that can detect
 // catalog-affecting changes the moment they happen (e.g. dsh-web's host
 // WebSocket stream) instead of waiting for the discovery watcher's polling

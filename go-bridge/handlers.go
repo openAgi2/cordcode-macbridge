@@ -1133,6 +1133,16 @@ func (h *Handlers) handleSetObservationScope(conn Connection, msg WireMessage) {
 			SessionID: sid,
 		})
 	}
+	if agent, ok := h.getAgent(req.BackendID); ok {
+		if attacher, ok := agent.(core.ThreadLiveAttacher); ok {
+			for _, sid := range observedSessions {
+				if sid == "" {
+					continue
+				}
+				go attacher.AttachLiveThread(context.Background(), sid)
+			}
+		}
+	}
 	// INFO so flapping/delivery-gap forensics can see mode without Debug log level.
 	// hasSubscriber after Subscribe is the forensic for candidateTargets=0 regressions.
 	hasSub := false

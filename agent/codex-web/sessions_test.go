@@ -448,10 +448,10 @@ func TestOwnershipConflictTranslation(t *testing.T) {
 		t.Fatalf("冲突翻译字段缺失：%+v", oc)
 	}
 	if !strings.Contains(oc.Error(), "另一个 Codex app-server") ||
-		!strings.Contains(oc.Error(), "回复已经完成") ||
-		!strings.Contains(oc.Error(), "等待官方卸载") ||
+		!strings.Contains(oc.Error(), "私有 stdio") ||
+		!strings.Contains(oc.Error(), "重新打开 Codex Desktop") ||
 		!strings.Contains(oc.Error(), "不会终止") {
-		t.Fatalf("冲突提示应说明完成回复不释放 writer、官方卸载条件与不抢进程承诺：%s", oc.Error())
+		t.Fatalf("共享 daemon 冲突提示应说明 Desktop 回退与重附着，且不抢进程：%s", oc.Error())
 	}
 
 	wrapped := errOwnershipOrRPC("thread/delete", SourceCordCodeStartedDaemon, "th-9", official, nil)

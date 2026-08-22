@@ -455,24 +455,13 @@ func (a *Agent) Subscribe(ctx context.Context) (<-chan core.Event, error) {
 		return nil, err
 	}
 
+	a.obsMu.Lock()
+	a.obsClient = cl
+	a.obsSubscribed = map[string]bool{}
+	a.obsMu.Unlock()
+
 	codec := NewLiveCodec()
 	events := make(chan core.Event, 256)
-	subscribed := map[string]bool{}
-
-	resume := func(threadID string) {
-		if threadID == "" || subscribed[threadID] {
-			return
-		}
-		_, _, rpcErr, err := ResumeThread(ctx, cl, threadID)
-		switch {
-		case err != nil:
-			slog.Debug("codexweb passive: resume transport error", "thread", threadID, "error", err)
-		case rpcErr != nil:
-			slog.Debug("codexweb passive: resume rejected", "thread", threadID, "official", rpcErr.Message)
-		default:
-			subscribed[threadID] = true
-		}
-	}
 
 	// 初始订阅面：loaded 集合（可产生事件的全部官方 thread）。
 	if raw, rpcErr, err := cl.RequestContext(ctx, "thread/loaded/list", map[string]any{}); err == nil && rpcErr == nil {
@@ -481,14 +470,22 @@ func (a *Agent) Subscribe(ctx context.Context) (<-chan core.Event, error) {
 		}
 		if json.Unmarshal(raw, &list) == nil {
 			for _, id := range list.Data {
-				resume(id)
+				a.observeThread(ctx, cl, id)
 			}
 		}
 	}
 
 	go func() {
 		defer close(events)
-		defer func() { _ = cl.Close() }()
+		defer func() {
+			_ = cl.Close()
+			a.obsMu.Lock()
+			if a.obsClient == cl {
+				a.obsClient = nil
+				a.obsSubscribed = nil
+			}
+			a.obsMu.Unlock()
+		}()
 		for n := range cl.Notifications() {
 			// 新 thread 广播 → 补订阅（此前的 turn 事件不重放，官方边界；冷基线补齐）
 			if n.Method == "thread/started" {
@@ -498,8 +495,8 @@ func (a *Agent) Subscribe(ctx context.Context) (<-chan core.Event, error) {
 						ID string `json:"id"`
 					} `json:"thread"`
 				}
-				if json.Unmarshal(n.Params, &p) == nil {
-					resume(p.Thread.ID)
+				if json.Unmarshal(n.Params, &p) == nil && p.Thread.ID != "" {
+					go a.observeThread(context.Background(), cl, p.Thread.ID)
 				}
 				continue
 			}
@@ -527,7 +524,54 @@ func (a *Agent) Subscribe(ctx context.Context) (<-chan core.Event, error) {
 	return events, nil
 }
 
+// AttachLiveThread 让观察 connection 订阅 iOS 正在看的 thread。thread/start 只
+// attach 写连接；Mac 后续 turn 的 item/* 若观察连接未 resume，iOS 就收不到实时流。
+func (a *Agent) AttachLiveThread(ctx context.Context, threadID string) {
+	a.obsMu.Lock()
+	cl := a.obsClient
+	a.obsMu.Unlock()
+	if cl == nil {
+		return
+	}
+	a.observeThread(ctx, cl, threadID)
+}
+
+func (a *Agent) observeThread(ctx context.Context, cl *Client, threadID string) {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" || cl == nil {
+		return
+	}
+	a.obsMu.Lock()
+	if a.obsClient != cl || a.obsSubscribed[threadID] {
+		a.obsMu.Unlock()
+		return
+	}
+	a.obsMu.Unlock()
+
+	_, oc, rpcErr, err := ResumeThread(ctx, cl, threadID)
+	switch {
+	case err != nil:
+		slog.Warn("codexweb passive: resume transport error", "thread", threadID, "error", err)
+	case oc != nil:
+		slog.Warn("codexweb passive: thread held by another app-server; Desktop likely left the shared daemon",
+			"thread", threadID, "official", oc.OfficialMessage)
+	case rpcErr != nil:
+		slog.Warn("codexweb passive: resume rejected", "thread", threadID, "official", rpcErr.Message)
+	default:
+		a.obsMu.Lock()
+		if a.obsClient == cl {
+			if a.obsSubscribed == nil {
+				a.obsSubscribed = map[string]bool{}
+			}
+			a.obsSubscribed[threadID] = true
+		}
+		a.obsMu.Unlock()
+		slog.Info("codexweb passive: subscribed", "thread", threadID)
+	}
+}
+
 var _ core.AgentSession = (*agentSession)(nil)
 var _ core.EventSubscriber = (*Agent)(nil)
+var _ core.ThreadLiveAttacher = (*Agent)(nil)
 var _ core.PromptOptionsSender = (*agentSession)(nil)
 var _ core.TurnCanceler = (*agentSession)(nil)

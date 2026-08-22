@@ -472,7 +472,7 @@ func TestManagedStartArgsLoopbackOnly(t *testing.T) {
 	s := &execManagedStarter{}
 	args := s.startArgs(3099)
 	joined := strings.Join(args, " ")
-	for _, want := range []string{"--profile web", "--host 127.0.0.1", "--port 3099"} {
+	for _, want := range []string{"--profile web", "--host 127.0.0.1", "--port 3099", "--no-open"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("argv %v missing %q", args, want)
 		}

@@ -154,7 +154,7 @@ type execManagedStarter struct {
 // loopback host, explicit port, profile web — and provably never
 // --trusted-host (§4.4 red line).
 func (s *execManagedStarter) startArgs(port int) []string {
-	args := []string{"--profile", "web", "--host", "127.0.0.1", "--port", strconv.Itoa(port)}
+	args := []string{"--profile", "web", "--host", "127.0.0.1", "--port", strconv.Itoa(port), "--no-open"}
 	return append(args, s.extraArgs...)
 }
 

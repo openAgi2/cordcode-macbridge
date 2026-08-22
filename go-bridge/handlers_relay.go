@@ -2420,11 +2420,14 @@ var (
 
 func disablesRelayIdleTimeout(backendID string) bool {
 	switch backendID {
-	case "claude", "claudecode", "codex", "opencode", "dsh-web", "opencode-web":
+	case "claude", "claudecode", "codex", "codex-web", "opencode", "dsh-web", "opencode-web":
 		// dsh-web mux 在审批等待期间不再吐 text_delta。60s 空闲超时会
 		// auto-complete 并退出 relayEvents（真机 18:10:41，审批已 surface
 		// 仍被收口），iOS 权限卡来不及停留。opencode-web 同理：审批等待期
 		// 同样无 text_delta（评审 M2-2，一期必接审批）。
+		// codex-web：官方 turn 事件只发给仍订阅的 connection。iOS 自己的
+		// AgentSession 在 turn_completed 后若被 idle timeout 拆掉，Mac Desktop
+		// 的后续 delta 会在观察连接补订阅完成前被丢弃（owner 2026-08-22 阶段 A）。
 		return true
 	default:
 		return false
@@ -2437,7 +2440,7 @@ func disablesRelayIdleTimeout(backendID string) bool {
 // object while startRelayIfNotRunning no-ops, and iOS misses later approvals.
 func relaySurvivesTurnBoundary(backendID string) bool {
 	switch backendID {
-	case "claude", "claudecode", "dsh-web":
+	case "claude", "claudecode", "dsh-web", "codex-web":
 		return true
 	default:
 		return false

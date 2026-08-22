@@ -63,6 +63,12 @@ type Agent struct {
 	// registry 是官方 server request 生命周期账本（interactions.go，§7.2）。
 	registry *InteractionRegistry
 
+	// 观察 connection（EventSubscriber）。turn/item 只发给已 attach 的 connection；
+	// iOS set_observation_scope 必须在这条连接上 resume，不能只靠写连接的 turn relay。
+	obsMu         sync.Mutex
+	obsClient     *Client
+	obsSubscribed map[string]bool
+
 	// 官方 model/list + typed config/read 的只读快照（models.go）。仅用于校验用户
 	// 从刚取得目录中选择的 model；读取失败不回退到该快照冒充新结果。
 	modelProvider      string
