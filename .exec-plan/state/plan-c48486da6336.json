@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T05:28:28Z",
+ "updated_at": "2026-08-22T05:29:15Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2054,30 +2054,33 @@
    "id": "p5-turn-error-visibility-review-fix-impl",
    "title": "Phase5 turn error projection 可见性修复",
    "description": "review-fix-for:p5-turn-start-review-fix-regression；保留官方 turn_error message，在无 user/assistant item 的 pre-turn failure 中也通过 projection 显示诊断 system message。",
-   "status": "in_progress",
+   "status": "done",
    "phase": "phase5",
    "kind": "impl",
    "depends_on": [
     "p5-turn-start-review-fix-tests"
    ],
    "source": "owner device failure 2026-08-22 13:16 + design §7.1/§9.2",
-   "notes": "review-fix-for:p5-turn-start-review-fix-regression",
+   "notes": "review-fix-for:p5-turn-start-review-fix-regression；实现提交 28526bf：turn_error 官方 message 写入同 turn 的 system projection，保持 diagnostic truth，不伪装 assistant reply。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "pass",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "content-less pre-turn failure 现在保留官方错误原文并可被现有 iOS system-message 映射显示。",
+    "artifacts": [
+     "git:28526bf",
+     "go-bridge/projection_reducer.go"
+    ],
+    "checked_at": "2026-08-22T05:29:15Z"
    }
   },
   {
    "id": "p5-turn-error-visibility-review-fix-tests",
    "title": "Phase5 turn error projection 定向测试",
    "description": "review-fix-for:p5-turn-start-review-fix-regression；验证 turn_error 官方原文进入 system projection 且不影响 terminal/idle 收口。",
-   "status": "pending",
+   "status": "in_progress",
    "phase": "phase5",
    "kind": "tests",
    "depends_on": [
