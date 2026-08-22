@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T08:18:00Z",
+ "updated_at": "2026-08-22T08:49:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2859,7 +2859,7 @@
    "id": "p0-desktop-attach-review-fix-impl",
    "title": "Phase0 Desktop 官方共享 app-server attach 复核与方案收口",
    "description": "review-fix-for:p5-deploy-regression；吸收 owner 真机反证与分析师审阅，修正问题文档中 Phase0 窄 PASS/Desktop FAIL 的口径；只读检查 ChatGPT/Codex Desktop 的真实子进程、FD、socket、环境、bundle 配置与官方源码，寻找免注入连接既有 daemon/WS/remote app-server 的官方入口。没有同一 app-server 证据前禁止修改 adapter 产品代码。",
-   "status": "in_progress",
+   "status": "done",
    "phase": "phase0",
    "kind": "impl",
    "depends_on": [],
@@ -2867,13 +2867,19 @@
    "notes": "review-fix-for:p5-deploy-regression；Terminal TUI shared-daemon Gate 的窄 PASS 保留；Desktop store 可读≠续聊接力，Desktop attach 能力重新开 Gate。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "已按设计文档改为官方单 daemon：MacBridge 完成 Desktop/standalone exact-version preflight、启动 daemon 并设置 launchd attach 开关；codex-web fail-closed 连接真实 control socket，移除 managed-loopback 产品 fallback，并修正空 CODEX_HOME 解析。",
+    "artifacts": [
+     "commit:74fc3866d18c",
+     "MacBridge/MacBridge/Services/RuntimeManager.swift",
+     "agent/codex-web/lifecycle.go",
+     "go-bridge/main.go",
+     "docs/2026-08-22-codex-web-desktop-bidirectional-handoff-gap.md"
+    ],
+    "checked_at": "2026-08-22T08:49:00Z"
    }
   },
   {
