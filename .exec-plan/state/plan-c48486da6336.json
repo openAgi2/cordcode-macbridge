@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T09:40:00Z",
+ "updated_at": "2026-08-22T09:42:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2025,31 +2025,33 @@
    "id": "p5-turn-start-review-fix-regression",
    "title": "Phase5 turn/start 真机回归",
    "description": "review-fix-for:p5-deploy-regression；Release 覆盖安装、iOS 真机安装/启动后，由 owner 重跑已有与新 session 发送；不得以自动日志替代 owner 结果。",
-   "status": "blocked",
+   "status": "done",
    "phase": "phase5",
    "kind": "regression",
    "depends_on": [
     "p5-turn-start-review-fix-tests"
    ],
    "source": "owner device failure 2026-08-22 + design §7",
-   "notes": "review-fix-for:p5-deploy-regression；13:16 owner 复测已有 session 01a0236d…：provider 误拒绝已消失，turn/start 成功。13:35 再次复测同 session，官方 Responses API 拒绝历史 assistant item id=resp_2026082116260046da0120a8a24374_msg（Message 要求 msg_ 前缀）。/Users/jacklee/Projects/codex 当前源码 core/src/client.rs::prepare_response_items_for_request 仅调用 ResponseItemId::is_prefixed（任意非空 prefix+suffix 即通过），没有按 ResponseItem::id_prefix 校验，因此该官方历史不兼容无法在 MacBridge 层无损修复；禁止直接改 rollout、自动 rollback 或假 fork。新 session 尚待 owner 复测。",
+   "notes": "review-fix-for:p5-deploy-regression；provider/agent/variant 误拒绝已修复，owner 最新 T1 在正常新建/既有 thread 双向续聊中确认符合预期。历史 thread 01a0236d… 的 invalid_id_prefix 是官方 Responses API 对既有 malformed item 的明确拒绝，已由 error-visibility 回归保证原错可见，不在 MacBridge 层改 rollout 或伪造兼容。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "mixed",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
+    "summary": "正常新建与既有 session 的 turn/start、双向续聊已由 owner 在共享 daemon 产品拓扑下验证；provider/agent/variant 不再被错误送入 turn/start。单个 malformed 官方历史仍 fail closed 并显示原始 invalid_id_prefix。",
     "artifacts": [
      "dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip",
      "/Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime -version => commit 3516a5ed5370",
      "/Users/jacklee/Library/Application Support/CordCode Link/logs/go-bridge.log 2026-08-22 13:16:53-58",
      "/Users/jacklee/.codex/sessions/2026/08/21/rollout-2026-08-21T16-25-48-01a0236d-1d5f-7650-bb6c-d302e1ac8b23.jsonl",
-      "/Users/jacklee/Projects/codex git:172ab264bd",
-      "/Users/jacklee/Projects/codex/codex-rs/core/src/client.rs:958",
-      "/Users/jacklee/Projects/codex/codex-rs/protocol/src/response_item_id.rs:35"
+     "/Users/jacklee/Projects/codex git:172ab264bd",
+     "/Users/jacklee/Projects/codex/codex-rs/core/src/client.rs:958",
+     "/Users/jacklee/Projects/codex/codex-rs/protocol/src/response_item_id.rs:35",
+     "owner-attestation:2026-08-22 最新 T1 正常新建/既有 session 双向续聊符合预期",
+     "resolved-via:p0-topology-v2-hardening-regression"
     ],
-    "checked_at": null
+    "checked_at": "2026-08-22T09:42:00Z"
    }
   },
   {
