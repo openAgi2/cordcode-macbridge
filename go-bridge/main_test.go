@@ -64,6 +64,34 @@ func TestBuildAgentOptions_CodexAppServerUsesFullAuto(t *testing.T) {
 	}
 }
 
+func TestDefaultDriversKeepCodexAndCodexWebIndependent(t *testing.T) {
+	drivers := strings.Split(defaultDrivers, ",")
+	want := map[string]bool{"codex": false, "codex-web": false}
+	for _, driver := range drivers {
+		if _, ok := want[driver]; ok {
+			want[driver] = true
+		}
+	}
+	for driver, present := range want {
+		if !present {
+			t.Fatalf("default drivers %q missing %q", defaultDrivers, driver)
+		}
+	}
+}
+
+func TestBuildAgentOptions_CodexWebUsesIndependentURLKey(t *testing.T) {
+	opts := buildAgentOptions("codex-web", agentOptionsConfig{
+		codexAppServerURL: "ws://127.0.0.1:4141",
+		codexWebAppSrvURL: "ws://127.0.0.1:5151",
+	})
+	if got := opts["codex_web_app_server_url"]; got != "ws://127.0.0.1:5151" {
+		t.Fatalf("codex_web_app_server_url = %#v, want independent codex-web URL", got)
+	}
+	if _, ok := opts["app_server_url"]; ok {
+		t.Fatalf("codex-web options leaked legacy codex app_server_url: %#v", opts)
+	}
+}
+
 func TestShouldStartPassiveSubscription_CodexRequiresExplicitSharedURL(t *testing.T) {
 	if shouldStartPassiveSubscription("codex", "app_server", "", "", "") {
 		t.Fatal("codex implicit app_server should not start process-level passive subscription")

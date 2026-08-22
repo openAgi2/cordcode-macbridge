@@ -25,4 +25,10 @@ func (a *Agent) WireDescriptor() *core.WireDescriptor {
 	}
 }
 
+// StructuredUserInputReady is true only because the production request adapter,
+// official v2 responder, and canonical interaction producer are enabled together.
+// Capability derivation uses this interface instead of a backend-id exception.
+func (a *Agent) StructuredUserInputReady() bool { return true }
+
 var _ core.WireDescriptorProvider = (*Agent)(nil)
+var _ core.StructuredUserInputProvider = (*Agent)(nil)

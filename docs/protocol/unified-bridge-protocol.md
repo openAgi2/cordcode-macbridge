@@ -83,6 +83,12 @@
       "kind": "codex",
       "displayName": "Codex",
       "capabilities": ["text", "permission", "model_switch", "turns", "tool_output_delta"]
+    },
+    {
+      "id": "codex-web",
+      "kind": "codex-web",
+      "displayName": "Codex Web",
+      "capabilities": ["model_switch", "session_history", "external_turn_streaming", "permission_resolve", "structured_user_input_v1"]
     }
   ],
   "recovery": null
@@ -91,7 +97,7 @@
 
 **`backends[].capabilities`** 只暴露当前 build 中可实际调用的方法能力；未来 phase 的预留能力在 feature gate 打开前不得提前 advertise。
 
-**`backends[].kind`** 使用冻结枚举：`claude_code` | `opencode` | `codex` | `copilot` | `unified_bridge`
+**`backends[].kind`** 使用冻结枚举：`claude_code` | `opencode` | `codex` | `codex-web` | `copilot` | `unified_bridge`
 
 ---
 
@@ -985,6 +991,7 @@ type DiagnosticCheck = {
 | `claude_code` | Claude Code / ThinBridge | Phase 1b 实现 |
 | `opencode` | OpenCode HTTP server | Phase 1c 实现 |
 | `codex` | Codex app-server | Phase 1d 实现 |
+| `codex-web` | Codex 官方长驻 app-server（独立 backend，与 `codex` 并存） | Phase 5 实现 |
 | `copilot` | Copilot ACP | Phase 3 实现 |
 | `unified_bridge` | 统一 Bridge 自身 | — |
 

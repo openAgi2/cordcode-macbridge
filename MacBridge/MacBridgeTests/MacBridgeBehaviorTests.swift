@@ -250,7 +250,7 @@ final class MacBridgeBehaviorTests: XCTestCase {
         XCTAssertFalse(args.contains("localhost"))
     }
 
-    func testProcessArgumentsDriversIncludeOpenCodeWeb() {
+    func testProcessArgumentsDriversIncludeIndependentWebBackends() {
         let config = RuntimeConfig(
             executablePath: "/usr/bin/false",
             dataDir: "/tmp/cccode-t-\(UUID().uuidString)",
@@ -262,6 +262,8 @@ final class MacBridgeBehaviorTests: XCTestCase {
         }
         let drivers = args[idx + 1].split(separator: ",").map(String.init)
         XCTAssertTrue(drivers.contains("opencode-web"), "drivers must include opencode-web")
+        XCTAssertTrue(drivers.contains("codex"), "legacy codex must coexist during the migration")
+        XCTAssertTrue(drivers.contains("codex-web"), "drivers must include the independent codex-web backend")
         // 老 opencode driver 已移除（owner 2026-08-19：与 opencode-web 双订阅同一
         // serve，双事件/双投影流互覆干扰测试）。回滚 = 从列表加回并翻转此断言。
         XCTAssertFalse(drivers.contains("opencode"), "legacy opencode driver must stay removed (dual-subscription interference)")

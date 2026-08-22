@@ -411,10 +411,12 @@ The v1 and v2 paths MUST NOT be mixed for the same interaction, and v2 MUST NOT 
   `diagnosticCode?` (e.g. `invalid_backend_request`). Each question is
   `{ id, header?, prompt, answerMode: "single"|"multiple"|"text", options[], allowsCustomAnswer,
   isSecret, required }`; each option is `{ id, label, description? }`. Stable ids are derived
-  (lowercase SHA-256 prefix `"ui_"`): Codex `interactionId = "ui_"+sha256("codex\0"+requestIdType+
+  (lowercase SHA-256 prefix `"ui_"`): legacy Codex `interactionId = "ui_"+sha256("codex\0"+requestIdType+
   "\0"+requestIdValue+"\0"+threadId+"\0"+turnId+"\0"+itemId)[:32]`, Claude
   `interactionId = "ui_"+sha256("claudecode\0"+requestId)[:32]`; `questionId = interactionId+"_q_"+i`,
-  `optionId = questionId+"_o_"+j`.
+  `optionId = questionId+"_o_"+j`. The independent `codex-web` backend preserves the official
+  request identity as `interactionId = threadId + ":" + itemId`; its question and option ids are
+  deterministic children of that interaction id.
 - `user_input_resolved` carries `turnId`, `interactionId`, `status` (`answered`|`rejected`|
   `auto_resolved`|`unavailable`|`failed`), `source` (`ios`|`mac`|`other_client`|`backend`), and
   `resolvedAt`. The projection never stores answer text (esp. for `isSecret`); the resolved event
@@ -651,6 +653,37 @@ until one does.
 
 Both are extensible `capabilities` strings; adding them is non-breaking (no major version bump).
 No backend-id hard-branching; derivation is by type assertion on the driver.
+
+### Backend: `codex-web` (kind `codex-web`)
+
+The `codex-web` backend is an independent official app-server client. It coexists with the legacy
+`codex` backend: `backends[].id`, `backends[].kind`, registry identity, configuration keys, session
+scope, and client cache scope are all `codex-web` and MUST NOT alias or migrate through `codex`.
+
+Wire behavior:
+
+- `displayName = "Codex Web"`, `liveEvents = "broadcast"`, and
+  `requiresPollingForExternalTurns = false`. The Phase 0 daemon gate proves external Mac-hosted
+  turns arrive through official app-server notifications, so `external_turn_streaming` is
+  advertised; no rollout-file relay or discovery polling is used.
+- Availability is the read-only lifecycle probe snapshot. Before a real service connection is
+  established, the descriptor reports `not_configured`; it never claims availability from a
+  placeholder endpoint. Catalog/history use official `thread/list`, `thread/read`, and subscription
+  RPCs, so `session_history` and `session_sync_v2` are truthful capabilities.
+- Tool approvals use the official server-request response frame and decision vocabulary
+  (`accept`, `cancel`, or official `permissions`). The bridge advertises `permission_resolve`
+  because the agent implements the session-level responder used for externally originated turns.
+- Official `item/tool/requestUserInput` batches project through `structured_user_input_v1`.
+  Each question contains two or three official options; the official `isOther` option is the free
+  text path. Answers return as the official question-id-to-answer map. The backend has no verified
+  reject response, so `canReject=false` and reject attempts fail closed.
+- Models and supported reasoning efforts come from the official model catalog. Provider
+  configuration is read-only unless an official write surface is separately proven; legacy Codex
+  provider allowlists, default `xhigh`, rollout history, and permission-mode catalogs are not
+  inherited.
+
+Adding `codex-web` is a non-breaking extension of the descriptor space. Clients that do not know
+the new kind ignore that backend while legacy `codex` continues unchanged.
 
 ### Backend: `dsh-web` (kind `deepseek-web`)
 

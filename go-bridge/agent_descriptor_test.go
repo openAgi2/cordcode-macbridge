@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	codexweb "github.com/openAgi2/cordcode-macbridge/agent/codex-web"
 	"github.com/openAgi2/cordcode-macbridge/agent/opencode-web"
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
@@ -196,6 +197,48 @@ func TestUnknownDescriptorDefaultStatusAvailable(t *testing.T) {
 	d := BuildAgentDescriptor("custom", &descriptorFakeAgent{name: "custom"}, "", nil)
 	if d.Status != AgentStatusAvailable {
 		t.Fatalf("Status = %q, want available", d.Status)
+	}
+}
+
+func TestCodexWebDescriptorUsesIndependentIdentityAndTruthfulCapabilities(t *testing.T) {
+	agent := codexweb.New(map[string]any{"work_dir": "/tmp/project"})
+	d := BuildAgentDescriptor(codexweb.BackendID, agent, "exec", nil)
+
+	if d.ID != "codex-web" || d.Kind != "codex-web" || d.DisplayName != "Codex Web" {
+		t.Fatalf("codex-web identity collapsed into legacy codex: %+v", d)
+	}
+	if d.LiveEvents != string(core.LiveEventBroadcast) || d.RequiresPollingForExternalTurns {
+		t.Fatalf("codex-web live descriptor = %+v, want broadcast without polling", d)
+	}
+	if d.Status != AgentStatusNotConfigured || !strings.Contains(d.Reason, "尚未建立官方服务连接") {
+		t.Fatalf("cold codex-web status = %q (%q), want fail-closed not_configured", d.Status, d.Reason)
+	}
+	for _, capability := range []string{
+		"session_history",
+		"external_turn_streaming",
+		"permission_resolve",
+		"structured_user_input_v1",
+	} {
+		if !descriptorHasCapability(d.Capabilities, capability) {
+			t.Errorf("codex-web missing truthful capability %q: %v", capability, d.Capabilities)
+		}
+	}
+}
+
+func TestCodexAndCodexWebFactoriesCoexist(t *testing.T) {
+	legacy, err := core.CreateAgent("codex", map[string]any{"work_dir": "/tmp/project"})
+	if err != nil {
+		t.Fatalf("create legacy codex: %v", err)
+	}
+	web, err := core.CreateAgent("codex-web", map[string]any{"work_dir": "/tmp/project"})
+	if err != nil {
+		t.Fatalf("create codex-web: %v", err)
+	}
+	if legacy.Name() != "codex" || web.Name() != "codex-web" {
+		t.Fatalf("factory identities = (%q, %q), want independent codex/codex-web", legacy.Name(), web.Name())
+	}
+	if descriptorHasCapability(deriveBackendCapabilities("codex", legacy, "exec"), "permission_resolve") {
+		t.Fatal("legacy codex exec behavior changed: permission_resolve must remain absent")
 	}
 }
 

@@ -54,7 +54,13 @@ func deriveBackendCapabilities(id string, agent core.Agent, codexBackendMode str
 	if _, ok := agent.(core.SessionPinner); ok {
 		caps = append(caps, "session_pin")
 	}
-	if id != "opencode" && id != "codex" {
+	// SessionPermissionResponder is the truthful agent-level path used when a client is
+	// observing a Mac-originated turn without a live bridge AgentSession. Prefer that
+	// explicit capability over legacy ToolAuthorizer inference. The old codex/opencode
+	// agents implement neither path here and therefore keep their historical descriptor.
+	if _, ok := agent.(core.SessionPermissionResponder); ok {
+		caps = append(caps, "permission_resolve")
+	} else if id != "opencode" && id != "codex" {
 		if _, ok := agent.(core.ToolAuthorizer); ok {
 			caps = append(caps, "permission_resolve")
 		}

@@ -7,6 +7,8 @@
 版本号对齐 MacBridge Release 构建的 `MARKETING_VERSION`（见 `MacBridge/project.yml`）。日期为协调世界时（UTC）。
 
 ## [Unreleased]
+
+- **新功能：Codex Web 独立并存 backend**：CordCode Link 默认同时注册旧 `codex` 与新 `codex-web`。新入口只读官方 app-server lifecycle/catalog/history/live 事件，模型与 reasoning effort 来自官方目录；审批与批量用户输入经官方应答帧收口。backend/wire/config/cache identity 全部独立，旧 Codex rollout 路径和行为不变。
 - **修复：OpenCode Web 重启后历史没有思考过程和工具调用**：官方消息里工具 part 是 `tool: "read"|"edit"` 加旁边的 `state`，跟 Desktop 时间线同一份 `GET /session/:id/message`。冷拉却按旧 adapter 把 `tool` 当成嵌套对象，断言失败就把全部工具卡丢掉——直播走 SSE 所以当场看得到，杀 App 再进只剩正文。现按官方 ToolPart 映射（含文件路径、edit diff），思考块继续进历史；`todowrite` 仍只走任务卡、不进时间线。
 - **修复：OpenCode Web iPhone 会话列表目录远多于 Desktop**：官方首页侧栏不是 `GET /project`（那是服务端注册表，本机 31 行），而是 Desktop 本地打开的 tab（`Persist.global("server").projects[serveURL]`）。iPhone 误把注册表当首页，所以 17 个目录对不上 Desktop 的 6 个。现只列出该 4096 服务在 Desktop 里打开的 worktree，每个目录仍走官方 `session.list({directory, roots:true, limit})`。
 - **修复：OpenCode Web 工程注册表变更要等发现轮询才进 iPhone 列表**：官方 SSE 的 `project.updated` / `catalog.updated`（Desktop 打开目录时先发这两类，会话可能还没有）此前被忽略，目录缓存要等到下一轮 discovery 才失效。现与 `session.created/deleted` 一样立刻重扫 catalog。

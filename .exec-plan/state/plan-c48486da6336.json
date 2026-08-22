@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T03:18:32Z",
+ "updated_at": "2026-08-22T03:27:41Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -1719,7 +1719,7 @@
    "id": "p5-mac-wire-impl",
    "title": "Phase5 Mac wire 接线",
    "description": "agent_descriptor.go 真实 instance status/history/live/interaction 能力（Gate 未过 fail closed）；docs/protocol canonical pack 更新；main.go 默认 drivers 增列 codex-web 不替换 codex；server.go backend/wire/cache identity 独立并存。",
-   "status": "pending",
+   "status": "done",
    "phase": "phase5",
    "kind": "impl",
    "depends_on": [
@@ -1729,27 +1729,34 @@
    "notes": "",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "implementation",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "Mac wire 接线完成：默认产品 drivers 同时注册 codex/codex-web；codex-web descriptor 真实镜像 instance status、broadcast live/no polling、history/interaction 能力；审批与结构化输入能力从真实 responder/readiness 接口派生；配置与 registry identity 独立；canonical protocol、运行文档和 changelog 已更新。",
+    "artifacts": [
+     "go-bridge/main.go",
+     "go-bridge/backend_capabilities.go",
+     "agent/codex-web/wire_descriptor.go",
+     "MacBridge/MacBridge/Services/RuntimeManager.swift",
+     "docs/protocol/bridge-v1.md",
+     "docs/protocol/unified-bridge-protocol.md"
+    ],
+    "checked_at": "2026-08-22T03:27:41Z"
    }
   },
   {
    "id": "p5-mac-wire-tests",
    "title": "Phase5 Mac 接线测试",
    "description": "descriptor/registration/identity 定向测试；旧 codex 行为零改动回归；protocol pack 与 iOS mirror 同步检查。",
-   "status": "pending",
+   "status": "in_progress",
    "phase": "phase5",
    "kind": "tests",
    "depends_on": [
     "p5-mac-wire-impl"
    ],
    "source": "design §14/phase5",
-   "notes": "",
+   "notes": "Mac 定向测试与 Go 全量均 PASS；显式 iOS mirror 检查失败，且首差异 session_retry_status 早于本轮 codex-web 文档。按仓库约束不得未经用户允许创建 p5 iOS 分支/worktree，保留失败现场等待授权后同步 mirror。",
    "verification": {
     "required": true,
     "status": "missing",
