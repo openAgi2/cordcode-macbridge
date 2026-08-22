@@ -74,6 +74,18 @@ struct OpenCodeDesktopSyncResult: Equatable {
     let didProjectsMerge: Bool
 }
 
+struct RuntimeCommandResult: Equatable, Sendable {
+    let terminationStatus: Int32
+    let standardOutput: String
+    let standardError: String
+}
+
+enum CodexDesktopSharedRuntimeSetupResult: Equatable, Sendable {
+    case skipped
+    case configured(daemonBinary: String)
+    case failed(String)
+}
+
 // MARK: - Runtime 启动配置
 
 struct RuntimeConfig {
@@ -388,8 +400,30 @@ class RuntimeManager: ObservableObject {
             port: config.port
         )
         let generation = launchGeneration
+        let drivers = config.drivers
+        let homeDirectory = FileManager.default.homeDirectoryForCurrentUser.path
         Task { [weak self] in
             guard let self else { return }
+            let codexDesktopSetup = await Task.detached(priority: .utility) {
+                Self.configureCodexDesktopSharedRuntime(
+                    drivers: drivers,
+                    homeDirectory: homeDirectory,
+                    fileExists: { FileManager.default.isExecutableFile(atPath: $0) },
+                    run: { Self.runCommandResult($0, $1, environment: $2, timeout: 30) }
+                )
+            }.value
+            guard generation == self.launchGeneration else { return }
+            switch codexDesktopSetup {
+            case .skipped:
+                break
+            case let .configured(daemonBinary):
+                NSLog("[RuntimeManager] Codex Desktop 已配置共享 daemon: \(daemonBinary)")
+            case let .failed(detail):
+                // Bridge 仍启动以服务其他 backend；codex-web 自身会以
+                // shared-daemon-required/not_configured 暴露同一真实失败，绝不另起 runtime。
+                self.lastError = detail
+                NSLog("[RuntimeManager] Codex Desktop 共享 daemon 配置失败: \(detail)")
+            }
             do {
                 let pid = try await self.processController.launch(spec)
                 guard generation == self.launchGeneration else {
@@ -970,6 +1004,99 @@ class RuntimeManager: ObservableObject {
         )
     }
 
+    /// 配置 Codex Desktop 与 codex-web 共用官方 local daemon。
+    ///
+    /// 顺序固定为 daemon ready → launchd env：Desktop 只会在下一次启动时继承环境，
+    /// CordCode 不终止或重启已运行的官方客户端。standalone 缺失/命令失败直接返回真实错误；
+    /// 调用方可以继续启动其他 backend，但不得为 codex-web 创建 managed-loopback fallback。
+    internal nonisolated static func configureCodexDesktopSharedRuntime(
+        drivers: [String],
+        homeDirectory: String,
+        fileExists: (String) -> Bool,
+        run: (String, [String], [String: String]?) -> RuntimeCommandResult
+    ) -> CodexDesktopSharedRuntimeSetupResult {
+        guard drivers.contains("codex-web") else { return .skipped }
+
+        let codexHome = URL(fileURLWithPath: homeDirectory, isDirectory: true)
+            .appendingPathComponent(".codex", isDirectory: true)
+        let daemonBinary = codexHome
+            .appendingPathComponent("packages/standalone/current/codex", isDirectory: false)
+            .path
+        guard fileExists(daemonBinary) else {
+            return .failed(
+                "codex-web 需要官方 managed standalone：缺少 \(daemonBinary)。" +
+                "请使用官方 Codex installer 安装后重启 CordCode Link；未启动替代 app-server。"
+            )
+        }
+
+        // Desktop 宿主会自行做 daemon 版本兼容判定并在不兼容时回到私有 stdio。
+        // 产品侧先做更严格的 exact-version gate，避免 Desktop 静默回退后再次形成双 runtime。
+        let desktopBundledBinary = "/Applications/ChatGPT.app/Contents/Resources/codex"
+        if fileExists(desktopBundledBinary) {
+            let desktopVersion = run(desktopBundledBinary, ["--version"], nil)
+            guard desktopVersion.terminationStatus == 0 else {
+                return .failed(commandFailureDetail(
+                    prefix: "无法读取 Codex Desktop 内嵌 CLI 版本",
+                    result: desktopVersion
+                ))
+            }
+            let standaloneVersion = run(daemonBinary, ["--version"], nil)
+            guard standaloneVersion.terminationStatus == 0 else {
+                return .failed(commandFailureDetail(
+                    prefix: "无法读取官方 managed standalone 版本",
+                    result: standaloneVersion
+                ))
+            }
+            let desktop = desktopVersion.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+            let standalone = standaloneVersion.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !desktop.isEmpty, desktop == standalone else {
+                return .failed(
+                    "Codex Desktop 与 managed standalone 版本不一致" +
+                    "（Desktop=\(desktop.isEmpty ? "unknown" : desktop)，" +
+                    "standalone=\(standalone.isEmpty ? "unknown" : standalone)）。" +
+                    "请用官方 installer 更新 standalone；未设置 Desktop attach 环境。"
+                )
+            }
+        }
+
+        var daemonEnvironment = ProcessInfo.processInfo.environment
+        daemonEnvironment["CODEX_HOME"] = codexHome.path
+        let daemon = run(
+            daemonBinary,
+            ["app-server", "daemon", "start"],
+            daemonEnvironment
+        )
+        guard daemon.terminationStatus == 0 else {
+            return .failed(commandFailureDetail(
+                prefix: "官方 Codex daemon 启动失败",
+                result: daemon
+            ))
+        }
+
+        let launchctl = run(
+            "/bin/launchctl",
+            ["setenv", "CODEX_APP_SERVER_USE_LOCAL_DAEMON", "1"],
+            nil
+        )
+        guard launchctl.terminationStatus == 0 else {
+            return .failed(commandFailureDetail(
+                prefix: "无法为 Codex Desktop 配置官方 local-daemon 环境",
+                result: launchctl
+            ))
+        }
+        return .configured(daemonBinary: daemonBinary)
+    }
+
+    private nonisolated static func commandFailureDetail(
+        prefix: String,
+        result: RuntimeCommandResult
+    ) -> String {
+        let official = [result.standardError, result.standardOutput]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty }) ?? "无命令输出"
+        return "\(prefix)（exit \(result.terminationStatus)）：\(official)"
+    }
+
     private nonisolated static func migrateOpenCodeDesktopProjects(
         in server: inout [String: Any],
         to serverURL: String,
@@ -1192,6 +1319,47 @@ class RuntimeManager: ObservableObject {
         } catch {
             return ""
         }
+    }
+
+    private nonisolated static func runCommandResult(
+        _ launchPath: String,
+        _ arguments: [String],
+        environment: [String: String]?,
+        timeout: TimeInterval
+    ) -> RuntimeCommandResult {
+        let process = Process()
+        let stdout = Pipe()
+        let stderr = Pipe()
+        let terminated = DispatchSemaphore(value: 0)
+        process.executableURL = URL(fileURLWithPath: launchPath)
+        process.arguments = arguments
+        process.environment = environment
+        process.standardOutput = stdout
+        process.standardError = stderr
+        process.terminationHandler = { _ in terminated.signal() }
+        do {
+            try process.run()
+        } catch {
+            return RuntimeCommandResult(
+                terminationStatus: -1,
+                standardOutput: "",
+                standardError: error.localizedDescription
+            )
+        }
+        if terminated.wait(timeout: .now() + timeout) == .timedOut {
+            process.terminate()
+            _ = terminated.wait(timeout: .now() + 2)
+            return RuntimeCommandResult(
+                terminationStatus: -2,
+                standardOutput: String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "",
+                standardError: "命令在 \(Int(timeout)) 秒内未完成"
+            )
+        }
+        return RuntimeCommandResult(
+            terminationStatus: process.terminationStatus,
+            standardOutput: String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "",
+            standardError: String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        )
     }
 }
 

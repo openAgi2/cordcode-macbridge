@@ -2,14 +2,14 @@ package codexweb
 
 // lifecycle.go —— 官方服务生命周期与归属（设计 §5.2/§6）。
 //
-// 选择顺序（§6.1，Phase 0 修正版）：
-//  1. 显式 -codex-web-app-server-url（loopback WebSocket）；
-//  2. 官方 daemon 复用：探测 $CODEX_HOME/app-server-control/app-server-control.sock
+// 选择顺序（§6.1，Desktop attach Gate 修正版）：
+//  1. 显式 -codex-web-app-server-url（仅隔离测试/非 Desktop 实验）；
+//  2. Desktop 产品路径复用官方 daemon：探测 $CODEX_HOME/app-server-control/app-server-control.sock
 //     （WS-over-UDS 连接成功即复用，绝不 stop/restart 外部 daemon）；
 //  3. 官方 daemon managed start：`codex app-server daemon start`
 //     （前置：$CODEX_HOME/packages/standalone/current/codex；socket 路径 < SUN_LEN 104）；
-//  4. 兼容托管 `codex app-server --listen ws://127.0.0.1:<port>`，诊断标 managed-loopback-ws，
-//     由本 backend 独占并在 Close 时回收。
+//  4. daemon 不可用时 fail closed。禁止另起 managed-loopback app-server，因为 Desktop
+//     无法连接该实例；两个 app-server 共享 store 仍会分裂 writer/订阅/实时事件。
 //
 // 官方源码锚点：cli/src/main.rs:2588-2601（agents 入口自动启动 daemon）、
 // tui/src/lib.rs:275/436/851/912-925（AppServerTarget/socket 探测/复用判定）、
@@ -27,8 +27,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,7 +42,9 @@ const (
 	SourceExplicitURL           ServiceSource = "explicit-url"
 	SourceExternalDaemonReused  ServiceSource = "external-daemon-reused"
 	SourceCordCodeStartedDaemon ServiceSource = "cordcode-started-daemon"
-	SourceManagedLoopbackWS     ServiceSource = "managed-loopback-ws"
+	// SourceManagedLoopbackWS 只用于识别并安全清理旧版本留下的 owned record，
+	// 不再是 Probe 的可选产品结果。
+	SourceManagedLoopbackWS ServiceSource = "managed-loopback-ws"
 )
 
 // Backend 状态码（§6.2：任一步失败标 not_configured 或 incompatible）。
@@ -121,7 +121,7 @@ type ProbeOptions struct {
 	ExplicitURL string
 	CodexHome   string
 	WorkDir     string
-	// DataDir 持久化 codex-web-managed-server.json（§5.1/§6.3；不含凭据/内容）。
+	// DataDir 仅用于查找并安全清理旧版 codex-web-managed-server.json；新产品路径不再写入。
 	DataDir string
 	// ExperimentalAPI 让 initialize capabilities 声明 experimentalApi（experimental 面
 	// 逐项版本门控后才由调用方打开；§11.2）。
@@ -139,10 +139,6 @@ type LifecycleDeps struct {
 	// DialUDS / DialTCP 建立 Transport。
 	DialUDS func(ctx context.Context, socketPath string) (Transport, error)
 	DialTCP func(ctx context.Context, url string) (Transport, error)
-	// StartManagedWS 启动托管 loopback app-server（返回 ws url）。
-	StartManagedWS func(bin, codexHome, workDir string) (string, *managedProcess, error)
-	// HTTPHealth 探测 /healthz（托管路径）。
-	HTTPHealth func(url string) error
 	// 托管实例遗留校验/收口。必须同时核对 PID、argv、启动时间与监听端口，
 	// 任一不匹配只删除陈旧 record，绝不终止进程。
 	InspectProcess   func(pid int) (command, startTime string, alive bool)
@@ -161,8 +157,6 @@ func DefaultDeps() LifecycleDeps {
 		},
 		DialUDS:          DialWSUnix,
 		DialTCP:          DialWSTCP,
-		StartManagedWS:   startManagedLoopbackWS,
-		HTTPHealth:       httpHealthCheck,
 		InspectProcess:   inspectManagedProcess,
 		ProcessOwnsPort:  managedProcessOwnsPort,
 		TerminateProcess: terminateManagedProcess,
@@ -198,6 +192,24 @@ func ControlSocketPath(codexHome string) (string, error) {
 	return p, nil
 }
 
+// ResolveCodexHome mirrors the official CLI convention: explicit option, then
+// CODEX_HOME, then ~/.codex. Product wiring intentionally leaves the option empty,
+// so treating it as a relative directory would miss the real daemon and recreate
+// the split-runtime bug.
+func ResolveCodexHome(explicit string) (string, error) {
+	if home := strings.TrimSpace(explicit); home != "" {
+		return filepath.Clean(home), nil
+	}
+	if home := strings.TrimSpace(os.Getenv("CODEX_HOME")); home != "" {
+		return filepath.Clean(home), nil
+	}
+	userHome, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(userHome) == "" {
+		return "", fmt.Errorf("resolve default CODEX_HOME: %w", err)
+	}
+	return filepath.Join(userHome, ".codex"), nil
+}
+
 func runDaemonStart(bin, codexHome string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -208,53 +220,6 @@ func runDaemonStart(bin, codexHome string) (string, error) {
 		return string(out), fmt.Errorf("daemon start rc=%v: %s", err, strings.TrimSpace(string(out)))
 	}
 	return string(out), nil
-}
-
-func httpHealthCheck(url string) error {
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get(url)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("healthz status %d", resp.StatusCode)
-	}
-	return nil
-}
-
-// startManagedLoopbackWS 在随机 loopback 端口启动官方 app-server（兼容托管形态；仅 127.0.0.1）。
-func startManagedLoopbackWS(bin, codexHome, workDir string) (string, *managedProcess, error) {
-	port, err := freeLoopbackPort()
-	if err != nil {
-		return "", nil, err
-	}
-	wsURL := fmt.Sprintf("ws://127.0.0.1:%d", port)
-	cmd := exec.Command(bin, "app-server", "--listen", wsURL)
-	cmd.Env = append(os.Environ(), "CODEX_HOME="+codexHome)
-	cmd.Dir = workDir
-	if err := cmd.Start(); err != nil {
-		return "", nil, fmt.Errorf("managed app-server start: %w", err)
-	}
-	mp := &managedProcess{
-		cmd: cmd, pid: cmd.Process.Pid, port: port, startTime: managedProcessStartTime(cmd.Process.Pid),
-		binary: bin, url: wsURL,
-	}
-	// /healthz 就绪轮询（Phase 0：healthz/readyz 200）
-	healthURL := fmt.Sprintf("http://127.0.0.1:%d/healthz", port)
-	deadline := time.Now().Add(60 * time.Second)
-	for time.Now().Before(deadline) {
-		if httpHealthCheck(healthURL) == nil {
-			return wsURL, mp, nil
-		}
-		if cmd.ProcessState != nil {
-			_ = mp.kill()
-			return "", nil, fmt.Errorf("managed app-server exited during startup")
-		}
-		time.Sleep(300 * time.Millisecond)
-	}
-	_ = mp.kill()
-	return "", nil, fmt.Errorf("managed app-server healthz 未就绪（60s）")
 }
 
 func (m *managedProcess) kill() error {
@@ -289,15 +254,6 @@ func (m *managedProcess) kill() error {
 	return terminateManagedProcess(m.pid)
 }
 
-func freeLoopbackPort() (int, error) {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
-	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port, nil
-}
-
 // Probe 按 §6.1 顺序建立连接并完成 §6.2 六步就绪判定。
 func Probe(opts ProbeOptions) (*ServiceEndpoint, error) {
 	return ProbeWith(LifecycleDeps{}, opts)
@@ -306,6 +262,11 @@ func Probe(opts ProbeOptions) (*ServiceEndpoint, error) {
 // ProbeWith 允许注入 deps（单测）。
 func ProbeWith(deps LifecycleDeps, opts ProbeOptions) (*ServiceEndpoint, error) {
 	fillDeps(&deps)
+	resolvedHome, err := ResolveCodexHome(opts.CodexHome)
+	if err != nil {
+		return nil, notConfigured("resolve-codex-home", err)
+	}
+	opts.CodexHome = resolvedHome
 	bin, err := deps.ResolveCodexBinary()
 	if err != nil {
 		return nil, notConfigured("resolve-binary", err)
@@ -341,7 +302,8 @@ func ProbeWith(deps LifecycleDeps, opts ProbeOptions) (*ServiceEndpoint, error) 
 		}
 	}
 
-	// daemon managed start（前置缺失/启动失败 → 落到托管 WS）
+	// daemon managed start。Desktop 产品要求单一官方 daemon；失败不得另起 loopback
+	// app-server，否则会重现跨进程 writer lock 与 live 订阅分裂。
 	bin2, _ := deps.ResolveCodexBinary()
 	daemonStartOut, daemonStartErr := deps.RunDaemonStart(bin2, opts.CodexHome)
 	if daemonStartErr == nil && serr == nil &&
@@ -361,37 +323,12 @@ func ProbeWith(deps LifecycleDeps, opts ProbeOptions) (*ServiceEndpoint, error) 
 		}
 	}
 
-	// 兼容托管 loopback WS
-	bin3, _ := deps.ResolveCodexBinary()
-	if ep, ok, rerr := recoverRecordedManaged(deps, opts, bin3); rerr != nil {
-		return nil, notConfigured("managed-record-recovery", rerr)
-	} else if ok {
-		return ep, nil
-	}
-	wsURL, mp, merr := deps.StartManagedWS(bin3, opts.CodexHome, opts.WorkDir)
-	if merr != nil {
-		return nil, notConfigured("managed-loopback-ws", fmt.Errorf(
-			"daemon 路径与托管 WS 均失败：daemon start err=%v socketPathErr=%v；managed err=%v（daemon start 输出：%s）",
-			daemonStartErr, serr, merr, strings.TrimSpace(daemonStartOut)))
-	}
-	if err := deps.HTTPHealth(fmt.Sprintf("http://127.0.0.1:%d/healthz", mp.port)); err != nil {
-		_ = mp.kill()
-		return nil, notConfigured("managed-healthz", err)
-	}
-	ep, err := establish(deps, opts, ServiceEndpoint{
-		Source:      SourceManagedLoopbackWS,
-		TCPEndpoint: wsURL,
-		managed:     mp,
-	})
-	if err != nil {
-		_ = mp.kill()
-		return nil, err
-	}
-	if err := persistManagedRecord(opts, ep); err != nil {
-		_ = ep.Close()
-		return nil, notConfigured("managed-state-write", err)
-	}
-	return ep, nil
+	// 新版本不再恢复或启动 managed-loopback。若旧产品留下 verified owned record，
+	// 只做安全回收，随后保留 daemon 的真实失败原文。
+	cleanupRecordedManaged(opts, bin, deps)
+	return nil, notConfigured("shared-daemon-required", fmt.Errorf(
+		"Desktop 共享运行时要求官方 local daemon；daemon start err=%v socketPathErr=%v（daemon start 输出：%s）",
+		daemonStartErr, serr, strings.TrimSpace(daemonStartOut)))
 }
 
 func probeExplicit(deps LifecycleDeps, opts ProbeOptions) (*ServiceEndpoint, error) {
@@ -613,12 +550,6 @@ func fillDeps(d *LifecycleDeps) {
 	}
 	if d.DialTCP == nil {
 		d.DialTCP = def.DialTCP
-	}
-	if d.StartManagedWS == nil {
-		d.StartManagedWS = def.StartManagedWS
-	}
-	if d.HTTPHealth == nil {
-		d.HTTPHealth = def.HTTPHealth
 	}
 	if d.InspectProcess == nil {
 		d.InspectProcess = def.InspectProcess

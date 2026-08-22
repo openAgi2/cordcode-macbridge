@@ -7,8 +7,8 @@ package codexweb
 //   - 连接懒建立（第一次目录/历史请求时 Probe），复用同一 ServiceEndpoint；
 //   - 断线（Request 返回 connection closed/lost）→ 丢弃 endpoint 重 Probe 一次；
 //     仍失败则错误上浮，不静默降级（§6.2）；
-//   - Stop 只走 ServiceEndpoint.Close 的归属语义：复用/自启 daemon 不 stop，
-//     托管 WS 独占回收（§6.3）。
+//   - Stop 只走 ServiceEndpoint.Close 的归属语义：复用/自启 daemon 不 stop；旧版本
+//     managed WS record 仅在 Probe 时安全清理，不再恢复或新建（§6.3）。
 //
 // StartSession/turn 生命周期属 Phase 3——当前显式报错，不假装可用（fail closed）。
 //

@@ -43,8 +43,9 @@ func Main() {
 	showVersion := flag.Bool("version", false, "Print runtime version and exit")
 	codexBackend := flag.String("codex-backend", envOr("GO_BRIDGE_CODEX_BACKEND", "exec"), "Codex backend mode: exec or app_server")
 	codexAppServerURL := flag.String("codex-app-server-url", envOr("GO_BRIDGE_CODEX_APP_SERVER_URL", ""), "Optional Codex app-server listen URL")
-	// codex-web：官方长驻 app-server 的 JSON-RPC 客户端 backend（设计 §6.1 第 1 优先级）。
-	// 显式共享服务 URL；空 = 官方 daemon 复用→managed start→托管 loopback WS 顺序。
+	// codex-web：官方长驻 app-server 的 JSON-RPC 客户端 backend。显式 URL 只用于
+	// 隔离测试/非 Desktop 实验；产品空值 = 官方 daemon 复用→managed start，失败可见，
+	// 禁止回落到 Desktop 无法连接的第二个 loopback app-server。
 	codexWebAppServerURL := flag.String("codex-web-app-server-url", envOr("GO_BRIDGE_CODEX_WEB_APP_SERVER_URL", ""), "Optional shared Codex app-server URL for the codex-web backend (loopback ws://)")
 
 	// opencode direct HTTP API。默认空 = 未配置（不隐式回落 64667）；显式 loopback URL 时

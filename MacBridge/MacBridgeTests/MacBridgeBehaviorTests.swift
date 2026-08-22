@@ -269,6 +269,98 @@ final class MacBridgeBehaviorTests: XCTestCase {
         XCTAssertFalse(drivers.contains("opencode"), "legacy opencode driver must stay removed (dual-subscription interference)")
     }
 
+    func testCodexDesktopSharedRuntimeSetupStartsDaemonBeforeSettingLaunchdEnvironment() {
+        var calls: [(String, [String], [String: String]?)] = []
+        let result = RuntimeManager.configureCodexDesktopSharedRuntime(
+            drivers: ["codex-web"],
+            homeDirectory: "/Users/tester",
+            fileExists: { $0 == "/Users/tester/.codex/packages/standalone/current/codex" },
+            run: { path, arguments, environment in
+                calls.append((path, arguments, environment))
+                return RuntimeCommandResult(terminationStatus: 0, standardOutput: "ok", standardError: "")
+            }
+        )
+
+        XCTAssertEqual(result, .configured(daemonBinary: "/Users/tester/.codex/packages/standalone/current/codex"))
+        XCTAssertEqual(calls.count, 2)
+        XCTAssertEqual(calls[0].0, "/Users/tester/.codex/packages/standalone/current/codex")
+        XCTAssertEqual(calls[0].1, ["app-server", "daemon", "start"])
+        XCTAssertEqual(calls[0].2?["CODEX_HOME"], "/Users/tester/.codex")
+        XCTAssertEqual(calls[1].0, "/bin/launchctl")
+        XCTAssertEqual(calls[1].1, ["setenv", "CODEX_APP_SERVER_USE_LOCAL_DAEMON", "1"])
+    }
+
+    func testCodexDesktopSharedRuntimeSetupFailsClosedWhenStandaloneMissing() {
+        var commandCount = 0
+        let result = RuntimeManager.configureCodexDesktopSharedRuntime(
+            drivers: ["codex-web", "dsh-web"],
+            homeDirectory: "/Users/tester",
+            fileExists: { _ in false },
+            run: { _, _, _ in
+                commandCount += 1
+                return RuntimeCommandResult(terminationStatus: 0, standardOutput: "", standardError: "")
+            }
+        )
+
+        guard case let .failed(detail) = result else {
+            return XCTFail("missing standalone must fail")
+        }
+        XCTAssertTrue(detail.contains("managed standalone"))
+        XCTAssertEqual(commandCount, 0, "must not set Desktop env without a ready official daemon")
+    }
+
+    func testCodexDesktopSharedRuntimeSetupDoesNotSetEnvironmentAfterDaemonFailure() {
+        var calls: [[String]] = []
+        let result = RuntimeManager.configureCodexDesktopSharedRuntime(
+            drivers: ["codex-web"],
+            homeDirectory: "/Users/tester",
+            fileExists: { $0 == "/Users/tester/.codex/packages/standalone/current/codex" },
+            run: { _, arguments, _ in
+                calls.append(arguments)
+                return RuntimeCommandResult(
+                    terminationStatus: 7,
+                    standardOutput: "",
+                    standardError: "official daemon version mismatch"
+                )
+            }
+        )
+
+        guard case let .failed(detail) = result else {
+            return XCTFail("daemon failure must fail")
+        }
+        XCTAssertTrue(detail.contains("official daemon version mismatch"))
+        XCTAssertEqual(calls, [["app-server", "daemon", "start"]])
+    }
+
+    func testCodexDesktopSharedRuntimeSetupRejectsDesktopStandaloneVersionMismatch() {
+        var calls: [[String]] = []
+        let result = RuntimeManager.configureCodexDesktopSharedRuntime(
+            drivers: ["codex-web"],
+            homeDirectory: "/Users/tester",
+            fileExists: { path in
+                path == "/Users/tester/.codex/packages/standalone/current/codex" ||
+                    path == "/Applications/ChatGPT.app/Contents/Resources/codex"
+            },
+            run: { path, arguments, _ in
+                calls.append(arguments)
+                let version = path.hasPrefix("/Applications/ChatGPT.app")
+                    ? "codex-cli 0.150.0"
+                    : "codex-cli 0.149.0"
+                return RuntimeCommandResult(
+                    terminationStatus: 0,
+                    standardOutput: version,
+                    standardError: ""
+                )
+            }
+        )
+
+        guard case let .failed(detail) = result else {
+            return XCTFail("version mismatch must fail")
+        }
+        XCTAssertTrue(detail.contains("版本不一致"))
+        XCTAssertEqual(calls, [["--version"], ["--version"]])
+    }
+
     func testProcessEnvironmentCarriesOpenCodeCreds() {
         let config = RuntimeConfig(
             executablePath: "/usr/bin/false",

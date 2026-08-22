@@ -1,17 +1,16 @@
 package codexweb
 
 // lifecycle_test.go —— 生命周期单元测试（§13.1 lifecycle：external daemon / cordcode-started
-// daemon / managed WS / 双失败 / incompatible / 就绪逐步失败）。
+// daemon / shared-daemon fail-closed / incompatible / 就绪逐步失败）。
 //
 // 证据边界：fakePeer 只模拟官方 app-server 的 JSON-RPC 应答形状（内部逻辑测试）；
 // 官方 wire 真值来自 testdata/official-0.149.0-alpha.4 fixture 与 e2e（lifecycle_e2e_test.go）。
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
-	"os/exec"
 	"strings"
-	"context"
 	"sync"
 	"testing"
 	"time"
@@ -71,9 +70,9 @@ func (f *fakePeer) install(handlers map[string]func(int64, json.RawMessage) (any
 
 func (f *fakePeer) Send(payload []byte) error {
 	var req struct {
-		ID     *int64           `json:"id"`
-		Method string           `json:"method"`
-		Params json.RawMessage  `json:"params"`
+		ID     *int64          `json:"id"`
+		Method string          `json:"method"`
+		Params json.RawMessage `json:"params"`
 	}
 	if err := json.Unmarshal(payload, &req); err != nil {
 		return err
@@ -132,8 +131,6 @@ type fakeDeps struct {
 	daemonErr   error
 	udsDials    int
 	tcpDials    int
-	mp          *managedProcess
-	mpURL       string
 }
 
 func (fd *fakeDeps) deps() LifecycleDeps {
@@ -158,13 +155,6 @@ func (fd *fakeDeps) deps() LifecycleDeps {
 			fd.tcpDials++
 			return fd.peer, nil
 		},
-		StartManagedWS: func(bin, home, wd string) (string, *managedProcess, error) {
-			if fd.mp == nil {
-				return "", nil, errors.New("managed start unavailable（standalone 缺失）")
-			}
-			return fd.mpURL, fd.mp, nil
-		},
-		HTTPHealth: func(string) error { return nil },
 	}
 }
 
@@ -216,30 +206,18 @@ func TestProbeCordCodeStartedDaemon(t *testing.T) {
 	}
 }
 
-func TestProbeManagedLoopbackFallback(t *testing.T) {
-	// 托管子进程用真实 sleep 进程占位，Close 后应被回收（§6.3 独占回收）。
-	sleep := exec.Command("sleep", "30")
-	if err := sleep.Start(); err != nil {
-		t.Skipf("无法启动 sleep: %v", err)
+func TestProbeManagedLoopbackFallbackForbidden(t *testing.T) {
+	fd := &fakeDeps{socketNow: false, daemonErr: errors.New("managed standalone Codex install not found")}
+	_, err := ProbeWith(fd.deps(), ProbeOptions{CodexHome: "/tmp/cw-fake-home"})
+	se := statusErr(t, err)
+	if se.Step != "shared-daemon-required" {
+		t.Fatalf("step=%s，期望 shared-daemon-required", se.Step)
 	}
-	fd := &fakeDeps{
-		socketNow: false,
-		daemonErr: errors.New("managed standalone Codex install not found"),
-		mp:        &managedProcess{cmd: sleep, port: 45678},
-		mpURL:     "ws://127.0.0.1:45678",
+	if fd.tcpDials != 0 {
+		t.Fatalf("daemon 失败后不得 dial managed loopback，tcp dials=%d", fd.tcpDials)
 	}
-	ep, err := ProbeWith(fd.deps(), ProbeOptions{CodexHome: "/tmp/cw-fake-home"})
-	if err != nil {
-		t.Fatalf("probe: %v", err)
-	}
-	if ep.Source != SourceManagedLoopbackWS {
-		t.Fatalf("source = %s，期望 managed-loopback-ws", ep.Source)
-	}
-	if err := ep.Close(); err != nil {
-		t.Fatalf("close: %v", err)
-	}
-	if sleep.ProcessState == nil {
-		t.Fatal("Close 必须回收托管 app-server 进程")
+	if !strings.Contains(se.Error(), "managed standalone Codex install not found") {
+		t.Fatalf("错误须保留 daemon 原因：%v", se)
 	}
 }
 
@@ -353,6 +331,22 @@ func TestControlSocketPathSUNLenGuard(t *testing.T) {
 	}
 	if !strings.HasSuffix(p, "app-server-control/app-server-control.sock") {
 		t.Fatalf("路径形状错误: %s", p)
+	}
+}
+
+func TestResolveCodexHomeUsesOfficialPrecedence(t *testing.T) {
+	t.Setenv("HOME", "/Users/tester")
+	t.Setenv("CODEX_HOME", "/tmp/from-env")
+
+	if got, err := ResolveCodexHome("/tmp/explicit"); err != nil || got != "/tmp/explicit" {
+		t.Fatalf("explicit CODEX_HOME=%q err=%v", got, err)
+	}
+	if got, err := ResolveCodexHome(""); err != nil || got != "/tmp/from-env" {
+		t.Fatalf("env CODEX_HOME=%q err=%v", got, err)
+	}
+	t.Setenv("CODEX_HOME", "")
+	if got, err := ResolveCodexHome(""); err != nil || got != "/Users/tester/.codex" {
+		t.Fatalf("default CODEX_HOME=%q err=%v", got, err)
 	}
 }
 

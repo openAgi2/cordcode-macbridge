@@ -2,7 +2,6 @@ package codexweb
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -41,19 +40,19 @@ func TestServiceEndpointOpenClientDialsSameResolvedService(t *testing.T) {
 	}
 }
 
-func TestAgentEndpointResolutionSingleFlightManagedFallback(t *testing.T) {
+func TestAgentEndpointResolutionSingleFlightSharedDaemonStart(t *testing.T) {
 	var starts atomic.Int32
 	var dials atomic.Int32
+	var socketReady atomic.Bool
 	deps := LifecycleDeps{
 		ResolveCodexBinary: func() (string, error) { return "/fake/codex", nil },
-		RunDaemonStart:     func(string, string) (string, error) { return "", errors.New("no daemon") },
-		SocketExists:       func(string) bool { return false },
-		StartManagedWS: func(string, string, string) (string, *managedProcess, error) {
+		RunDaemonStart: func(string, string) (string, error) {
 			starts.Add(1)
-			return "ws://127.0.0.1:45678", &managedProcess{port: 45678}, nil
+			socketReady.Store(true)
+			return `{"status":"started"}`, nil
 		},
-		HTTPHealth: func(string) error { return nil },
-		DialTCP: func(context.Context, string) (Transport, error) {
+		SocketExists: func(string) bool { return socketReady.Load() },
+		DialUDS: func(context.Context, string) (Transport, error) {
 			dials.Add(1)
 			return readyPeer(), nil
 		},
@@ -79,7 +78,7 @@ func TestAgentEndpointResolutionSingleFlightManagedFallback(t *testing.T) {
 		}
 	}
 	if got := starts.Load(); got != 1 {
-		t.Fatalf("managed service spawned %d times, want exactly 1", got)
+		t.Fatalf("shared daemon start called %d times, want exactly 1", got)
 	}
 	if got := dials.Load(); got != 1 {
 		t.Fatalf("readiness connection dialed %d times, want exactly 1", got)
@@ -87,21 +86,21 @@ func TestAgentEndpointResolutionSingleFlightManagedFallback(t *testing.T) {
 	_ = a.Stop()
 }
 
-func TestSubscribeUsesObserverConnectionOnSameManagedService(t *testing.T) {
+func TestSubscribeUsesObserverConnectionOnSameSharedDaemon(t *testing.T) {
 	var starts atomic.Int32
 	var dials atomic.Int32
+	var socketReady atomic.Bool
 	var peersMu sync.Mutex
 	var peers []*fakePeer
 	deps := LifecycleDeps{
 		ResolveCodexBinary: func() (string, error) { return "/fake/codex", nil },
-		RunDaemonStart:     func(string, string) (string, error) { return "", errors.New("no daemon") },
-		SocketExists:       func(string) bool { return false },
-		StartManagedWS: func(string, string, string) (string, *managedProcess, error) {
+		RunDaemonStart: func(string, string) (string, error) {
 			starts.Add(1)
-			return "ws://127.0.0.1:45680", &managedProcess{port: 45680}, nil
+			socketReady.Store(true)
+			return `{"status":"started"}`, nil
 		},
-		HTTPHealth: func(string) error { return nil },
-		DialTCP: func(context.Context, string) (Transport, error) {
+		SocketExists: func(string) bool { return socketReady.Load() },
+		DialUDS: func(context.Context, string) (Transport, error) {
 			dials.Add(1)
 			peer := readyPeer()
 			peersMu.Lock()
@@ -118,7 +117,7 @@ func TestSubscribeUsesObserverConnectionOnSameManagedService(t *testing.T) {
 		t.Fatalf("Subscribe: %v", err)
 	}
 	if got := starts.Load(); got != 1 {
-		t.Fatalf("Subscribe spawned %d managed services, want exactly 1", got)
+		t.Fatalf("Subscribe started shared daemon %d times, want exactly 1", got)
 	}
 	if got := dials.Load(); got != 2 {
 		t.Fatalf("main plus observer should dial same service twice, got %d", got)
@@ -171,7 +170,7 @@ func TestManagedRecordModeAndStrictMismatchDoesNotKill(t *testing.T) {
 	}
 }
 
-func TestRecoverRecordedManagedAdoptsVerifiedService(t *testing.T) {
+func TestCleanupRecordedManagedTerminatesVerifiedLegacyService(t *testing.T) {
 	dir := t.TempDir()
 	opts := ProbeOptions{DataDir: dir, CodexHome: "/tmp/cw-home"}
 	seed := &ServiceEndpoint{managed: &managedProcess{
@@ -183,8 +182,6 @@ func TestRecoverRecordedManagedAdoptsVerifiedService(t *testing.T) {
 	}
 	var terminated atomic.Int32
 	deps := LifecycleDeps{
-		DialTCP:    func(context.Context, string) (Transport, error) { return readyPeer(), nil },
-		HTTPHealth: func(string) error { return nil },
 		InspectProcess: func(int) (string, string, bool) {
 			return "/fake/codex app-server --listen ws://127.0.0.1:45679", "Sat Aug 22 14:01:00 2026", true
 		},
@@ -195,18 +192,9 @@ func TestRecoverRecordedManagedAdoptsVerifiedService(t *testing.T) {
 		},
 	}
 	fillDeps(&deps)
-	ep, ok, err := recoverRecordedManaged(deps, opts, "/fake/codex")
-	if err != nil || !ok {
-		t.Fatalf("recover=%v ok=%v", err, ok)
-	}
-	if ep.Source != SourceManagedLoopbackWS || ep.managed == nil || ep.managed.cmd != nil {
-		t.Fatalf("adopted endpoint=%+v managed=%+v", ep, ep.managed)
-	}
-	if err := ep.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
+	cleanupRecordedManaged(opts, "/fake/codex", deps)
 	if terminated.Load() != 1 {
-		t.Fatalf("adopted managed service termination count=%d, want 1", terminated.Load())
+		t.Fatalf("legacy managed service termination count=%d, want 1", terminated.Load())
 	}
 	if _, err := os.Stat(filepath.Join(dir, managedStateFile)); !os.IsNotExist(err) {
 		t.Fatalf("owned record remains after Close: %v", err)

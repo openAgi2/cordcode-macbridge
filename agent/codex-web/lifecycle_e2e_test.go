@@ -8,12 +8,10 @@ package codexweb
 //   1. daemon 缺失时 Probe 走 cordcode-started-daemon 且六步就绪全过（真实 initialize/
 //      thread/list /model/list 响应）；
 //   2. §6.3：Close 不停共享 daemon（socket 仍在、daemon version=running）；
-//   3. daemon start 不可用时落托管 loopback WS（真实 app-server + healthz + 就绪），
-//      Close 独占回收。
+//   3. daemon start 不可用时 fail closed，不启动 managed loopback app-server。
 
 import (
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -171,7 +169,7 @@ func TestE2ECordCodeStartedDaemon(t *testing.T) {
 	}
 }
 
-func TestE2EManagedLoopbackFallback(t *testing.T) {
+func TestE2ESharedDaemonRequiredFailClosed(t *testing.T) {
 	if !e2eEnabled(t) {
 		return
 	}
@@ -181,30 +179,9 @@ func TestE2EManagedLoopbackFallback(t *testing.T) {
 	deps.RunDaemonStart = func(string, string) (string, error) {
 		return "", fmt.Errorf("simulated: managed standalone install not found")
 	}
-	ep, err := ProbeWith(deps, ProbeOptions{CodexHome: home, WorkDir: workDir})
-	if err != nil {
-		t.Fatalf("probe: %v", err)
+	_, err := ProbeWith(deps, ProbeOptions{CodexHome: home, WorkDir: workDir})
+	se := statusErr(t, err)
+	if se.Step != "shared-daemon-required" || !strings.Contains(se.Error(), "simulated: managed standalone install not found") {
+		t.Fatalf("daemon 失败必须原样 fail closed：%v", se)
 	}
-	if ep.Source != SourceManagedLoopbackWS {
-		t.Fatalf("source=%s，期望 managed-loopback-ws", ep.Source)
-	}
-	healthURL := strings.Replace(ep.TCPEndpoint, "ws://", "http://", 1) + "/healthz"
-	if resp, err := http.Get(healthURL); err != nil || resp.StatusCode != http.StatusOK {
-		t.Fatalf("托管 WS healthz 应为 200：%v", err)
-	} else {
-		resp.Body.Close()
-	}
-
-	// 托管进程独占回收
-	if err := ep.Close(); err != nil {
-		t.Fatalf("close: %v", err)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := http.Get(healthURL); err != nil {
-			return // 端口已关 → 回收完成
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	t.Fatal("Close 后托管 app-server 端口应关闭（独占回收）")
 }

@@ -1,9 +1,9 @@
 package codexweb
 
-// Managed-loopback persistence and recovery (design §5.1/§6.3).
-// The record contains lifecycle identity only. A recorded PID is never trusted
-// by itself: executable, exact --listen argv, process start time, and owning
-// listen port must all still match before this package adopts or terminates it.
+// Managed-loopback legacy record cleanup (design §5.1/§6.3).
+// 新产品路径不再创建或恢复该服务；这里只保留旧 owned process 的安全收口。
+// A recorded PID is never trusted by itself: executable, exact --listen argv,
+// process start time, and owning listen port must all still match before termination.
 
 import (
 	"encoding/json"
@@ -111,40 +111,6 @@ func validateManagedRecord(state *managedState, expectedBinary string, deps Life
 		return false
 	}
 	return deps.ProcessOwnsPort(state.PID, state.Port)
-}
-
-func healthURL(wsURL string) string {
-	return "http" + strings.TrimPrefix(wsURL, "ws") + "/healthz"
-}
-
-func recoverRecordedManaged(deps LifecycleDeps, opts ProbeOptions, expectedBinary string) (*ServiceEndpoint, bool, error) {
-	path := managedStatePath(opts.DataDir)
-	state, err := readManagedRecord(path)
-	if err != nil || state == nil {
-		return nil, false, err
-	}
-	if !validateManagedRecord(state, expectedBinary, deps) {
-		_ = os.Remove(path)
-		return nil, false, nil
-	}
-	if err := deps.HTTPHealth(healthURL(state.URL)); err != nil {
-		if killErr := deps.TerminateProcess(state.PID); killErr != nil {
-			return nil, false, fmt.Errorf("recorded managed process unhealthy and could not be terminated: %w", killErr)
-		}
-		_ = os.Remove(path)
-		return nil, false, nil
-	}
-	mp := &managedProcess{
-		pid: state.PID, port: state.Port, startTime: state.ProcessStart,
-		binary: state.Binary, url: state.URL, terminate: deps.TerminateProcess,
-	}
-	ep, err := establish(deps, opts, ServiceEndpoint{
-		Source: SourceManagedLoopbackWS, TCPEndpoint: state.URL, managed: mp,
-	})
-	if err != nil {
-		return nil, false, err
-	}
-	return ep, true, nil
 }
 
 func cleanupRecordedManaged(opts ProbeOptions, expectedBinary string, deps LifecycleDeps) {

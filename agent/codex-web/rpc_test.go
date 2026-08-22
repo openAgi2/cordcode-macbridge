@@ -76,6 +76,9 @@ func (s *scriptedTransport) sentFrames() []string {
 	return out
 }
 
+
+
+
 // autoResponder 让 scripted 按 method+id 生成结果（延迟可注入以制造乱序；多次调用组合生效）。
 func autoResponder(s *scriptedTransport, method string, result any, delay time.Duration) {
 	s.mu.Lock()
@@ -373,4 +376,3 @@ func splitLines(s string) []string {
 	out = append(out, s[start:])
 	return out
 }
-

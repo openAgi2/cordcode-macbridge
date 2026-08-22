@@ -442,9 +442,9 @@ func (s *agentSession) Close() error {
 // ---- 被动订阅（外部 turn 实时旁观，§8.2 Gate PASS 的产品面） ----
 
 // Subscribe 实现 core.EventSubscriber：在 Agent 唯一解析出的 ServiceEndpoint 上
-// 新建观察 connection，订阅全部 loaded threads。这里禁止再次 Probe：daemon 路径下
-// 重复 Probe 会碰巧回到同一 daemon，但 managed-loopback 路径会拉起第二 app-server，
-// 直接违反设计 §4/§6 的 single shared service。
+// 新建观察 connection，订阅全部 loaded threads。这里禁止再次 Probe：endpoint 已冻结为
+// 同一个官方 daemon，观察 connection 必须通过 OpenClient 复用该解析结果；任何重新解析并
+// 另起 service 的行为都直接违反设计 §4/§6 的 single shared service。
 func (a *Agent) Subscribe(ctx context.Context) (<-chan core.Event, error) {
 	ep, _, err := a.endpointFor(ctx)
 	if err != nil {

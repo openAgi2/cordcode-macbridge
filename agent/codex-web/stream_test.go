@@ -4,6 +4,7 @@ package codexweb
 // 与 §13.2 帧级指标。
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -14,6 +15,14 @@ import (
 // 不合成任何事件；重连后泵重启、事件恢复。
 func TestStreamConnectionLossKeepsSessions(t *testing.T) {
 	ag := New(nil)
+	// Unit test must not re-probe the user's real default ~/.codex daemon after
+	// the injected connection closes. Keep reconnect deterministic and fail closed
+	// until the test injects ep2 below.
+	ag.lifecycleDeps = &LifecycleDeps{
+		ResolveCodexBinary: func() (string, error) { return "/fake/codex", nil },
+		RunDaemonStart:     func(string, string) (string, error) { return "", errors.New("offline") },
+		SocketExists:       func(string) bool { return false },
+	}
 	s := newScripted()
 	cl := NewClient(s, 1)
 	ep := &ServiceEndpoint{Source: SourceExternalDaemonReused, CLIVersion: "t"}
