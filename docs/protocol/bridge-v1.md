@@ -141,6 +141,11 @@ set_observation_scope
 enable_relay_pairing
 ```
 
+`set_observation_scope` result `data` (schemaRevision `2026-08-23`) is additive:
+`{ok, sessions:[{sessionId, subscribed, attached, error?}]}`. `ok` requires Subscribe
+plus observer attach when the backend supports it. Failure code `observation_attach_failed`.
+See relay-v1 §9.2.
+
 ## RPC Scopes (§6.3)
 
 Every backend RPC is mapped to one of seven scope tokens. The scope table is the single
