@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T07:55:00Z",
+ "updated_at": "2026-08-22T08:18:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2854,9 +2854,76 @@
     "artifacts": [],
     "checked_at": null
    }
+  },
+  {
+   "id": "p0-desktop-attach-review-fix-impl",
+   "title": "Phase0 Desktop 官方共享 app-server attach 复核与方案收口",
+   "description": "review-fix-for:p5-deploy-regression；吸收 owner 真机反证与分析师审阅，修正问题文档中 Phase0 窄 PASS/Desktop FAIL 的口径；只读检查 ChatGPT/Codex Desktop 的真实子进程、FD、socket、环境、bundle 配置与官方源码，寻找免注入连接既有 daemon/WS/remote app-server 的官方入口。没有同一 app-server 证据前禁止修改 adapter 产品代码。",
+   "status": "in_progress",
+   "phase": "phase0",
+   "kind": "impl",
+   "depends_on": [],
+   "source": "owner real-device failure 2026-08-22 + analyst review + design §1/§8.2/§13.3/§15/§21.2",
+   "notes": "review-fix-for:p5-deploy-regression；Terminal TUI shared-daemon Gate 的窄 PASS 保留；Desktop store 可读≠续聊接力，Desktop attach 能力重新开 Gate。",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "p0-desktop-attach-review-fix-tests",
+   "title": "Phase0 Desktop 共享 runtime 可复跑证据门",
+   "description": "对 Gate 结论建立可复跑证据：进程/FD/socket/endpoint 与同 server connection/subscription；若发现官方 attach 入口，必须证明 Desktop 不再持有独立 Embedded writer 且 CordCode 为同 server 第二 connection；若未发现，保留穷尽范围与负面证据，禁止用共享 store 代替。",
+   "status": "pending",
+   "phase": "phase0",
+   "kind": "tests",
+   "depends_on": [
+    "p0-desktop-attach-review-fix-impl"
+   ],
+   "source": "owner real-device failure 2026-08-22 + design §8.2/§12/§13",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "automated",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "p0-desktop-attach-review-fix-regression",
+   "title": "Phase0 Desktop ↔ iOS 双向接力真机门",
+   "description": "仅在同一官方 app-server Gate PASS 且共享 lifecycle 产品实现完成后，由 owner 在两端同时打开时验证：双向创建/续聊、Mac turn 实时 delta、审批/提问与重连；退出另一客户端不得作为前置条件。",
+   "status": "pending",
+   "phase": "phase0",
+   "kind": "regression",
+   "depends_on": [
+    "p0-desktop-attach-review-fix-tests"
+   ],
+   "source": "owner real-device failure 2026-08-22 + design §13.3",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "manual",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
   }
  ],
- "notes_phase0": "Phase 0 完成：verdict=PASS；产品实现解锁（Phase 1 可开工）；外部 turn 实时旁观仅对 daemon 形态宿主广告（Terminal TUI），Desktop=store 接力、VS Code 待补测；owner 2026-08-22 裁决：VS Code 宿主覆盖面不补测（遗留关闭，覆盖事实=未安装/不测，不广告该宿主实时旁观）",
+ "notes_phase0": "Phase 0 原 verdict 的窄结论仍成立：Terminal TUI 在 daemon 已运行且默认配置时共享 runtime=PASS。2026-08-22 owner 真机反证 Desktop 的‘store 级续聊接力可用’：Desktop 独立 stdio app-server 与 CordCode managed WS 仅共享持久化 store，不能双向续聊或实时旁观；Desktop Gate 已通过 p0-desktop-attach-review-fix-* 重新打开，未通过前不得宣称完整双向接力或退役旧 backend。VS Code=未安装/不测。",
  "notes": {
   "phase2_catalog": "官方物化/同秒 cursor 两事实入档 §22-5/6；e2e 清理修复(daemon stop 带 CODEX_HOME)"
  }
