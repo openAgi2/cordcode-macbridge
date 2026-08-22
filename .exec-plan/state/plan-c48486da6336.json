@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T06:17:22Z",
+ "updated_at": "2026-08-22T06:21:22Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2278,23 +2278,30 @@
    "id": "p5-single-service-review-fix-regression",
    "title": "Phase5 Codex Web 单实例真实服务回归",
    "description": "review-fix-for:p1-lifecycle-regression,p3-stream-regression；真实目标二进制验证 managed fallback 下主 RPC+passive 共用一个 app-server、Bridge 重启无新增孤儿、同服务两 connection resume 无 ownership 冲突；覆盖安装后 owner 新 session 发送复测。",
-   "status": "pending",
+   "status": "in_progress",
    "phase": "phase5",
    "kind": "regression",
    "depends_on": [
     "p5-single-service-review-fix-tests"
    ],
    "source": "owner device failure 2026-08-22 13:53 + design §2.3/§4/§5.1/§6",
-   "notes": "",
+   "notes": "自动/真实服务部分已过：Release 安装后 codex-web available；主连接+passive 仅一个 managed app-server；record 0600；SIGTERM Bridge 后新 runtime 收养同 PID/端口且未 spawn 第二实例。按仓库约束未主动跑 UI test；仍待 owner 在 iOS 新/旧 session 各发送一次完成产品面验收。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "mixed",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "真实 Release/runtime 生命周期回归通过；iOS owner 发送验收待完成。",
+    "artifacts": [
+     "git:ec7ea51",
+     "./scripts/build-unsigned-release.sh",
+     "/Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime --version",
+     "managed record mode 0600; pid=31580 port=59339",
+     "runtime restart 31578 -> 32056; managed pid remained 31580",
+     "/internal/agents codex-web status=available"
+    ],
+    "checked_at": "2026-08-22T06:21:22Z"
    }
   },
   {
