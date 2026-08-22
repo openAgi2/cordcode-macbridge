@@ -15,13 +15,13 @@
 2. 每行记录 `PASS`、`FAIL` 或 `BLOCKED`，不得用“看起来正常”代替结果；失败时保留 Bridge 日志时间窗、session id 前 8 位与 iPhone 录屏/截图。
 3. 涉及 provider/model 的行，记录界面实际显示值与官方客户端实际值；不要抄配置期望值。
 4. Relay 行应关闭 LAN 直连条件后再执行，并从连接状态确认确实走 Relay。
-5. 当前全部 owner 行均为 `NOT RUN`；自动安装和日志可达性不计作人工验收通过。
+5. 自动安装和日志可达性不计作人工验收通过；owner 的真实失败必须保留为 `FAIL`，修复后在同一行追加复测结果。
 
 ## 14 行矩阵
 
 | # | 前提条件 | 动作 | 应看到 | 结果 | 证据/备注 |
 |---:|---|---|---|---|---|
-| 1 | LAN；Codex Web；新 session | iPhone 发一个足以产生长回答的请求 | 首 token 后连续流式；正文不重复；完成态只收口一次 | NOT RUN | 记录 session 前缀、首 token/完成时间、录屏 |
+| 1 | LAN；Codex Web；新 session | iPhone 发一个足以产生长回答的请求 | 首 token 后连续流式；正文不重复；完成态只收口一次 | FAIL | 2026-08-22 owner：新 session 与已有 session 均在发送前报“官方 turn/start 不支持 provider/agent/variant”；review-fix `p5-turn-start-review-fix-*` 处理中 |
 | 2 | Relay；Codex Web；新 session | 使用与第 1 行等价的长回答请求 | 内容与 LAN 一致；无整段延迟后一次性跳出；无重复 | NOT RUN | 记录 Relay 状态、session 前缀、录屏 |
 | 3 | LAN；daemon 已运行；Terminal Codex 默认配置；active session | Mac 发长回答，iPhone 打开同一 session | TUI 使用 LocalDaemon；iPhone 实时进入执行中并连续显示 delta | NOT RUN | 记录 daemon/TUI 选择证据与 session 前缀 |
 | 4 | LAN；daemon 未运行；先启动 Terminal Codex 默认配置 | Mac 发长回答，再打开 Codex Web | TUI 使用 Embedded；iPhone 不伪造 live stream，只按已验证的 list/read 边界显示 | NOT RUN | 记录进程与事件时间线 |

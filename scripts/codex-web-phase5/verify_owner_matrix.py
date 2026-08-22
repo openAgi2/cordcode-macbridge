@@ -29,10 +29,12 @@ matrix_rows = table_rows(MATRIX.read_text(), "## 14 行矩阵")
 assert len(design_rows) == 14, f"design row count changed: {len(design_rows)}"
 assert len(matrix_rows) == 14, f"owner matrix row count: {len(matrix_rows)}"
 
+valid_results = {"NOT RUN", "PASS", "FAIL", "BLOCKED"}
 for index, (design_row, matrix_row) in enumerate(zip(design_rows, matrix_rows), 1):
     assert design_row.startswith(f"| {index} |"), f"design row order broken at {index}"
     assert matrix_row.startswith(f"| {index} |"), f"matrix row order broken at {index}"
-    assert "| NOT RUN |" in matrix_row, f"row {index} falsely claims an owner result"
+    cells = [cell.strip() for cell in matrix_row.strip().strip("|").split("|")]
+    assert cells[4] in valid_results, f"row {index} has invalid result: {cells[4]}"
 
 required_terms = [
     "Relay", "LocalDaemon", "Embedded", "custom provider", "requestUserInput",
@@ -42,4 +44,4 @@ matrix_text = MATRIX.read_text()
 for term in required_terms:
     assert term in matrix_text, f"missing matrix contract term: {term}"
 
-print("PASS: owner matrix has 14 ordered NOT RUN rows and required §13.3 contracts")
+print("PASS: owner matrix has 14 ordered rows, valid honest results, and required §13.3 contracts")
