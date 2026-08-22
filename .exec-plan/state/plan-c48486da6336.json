@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T09:39:00Z",
+ "updated_at": "2026-08-22T09:40:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2529,7 +2529,7 @@
    "id": "p5-rename-review-fix-regression",
    "title": "Phase5 Codex Web 会话重命名真机回归",
    "description": "安装 Release 后 owner 在 iOS Codex Web 模式重命名现有 session；不得再报 not supported，列表与会话页应显示官方确认后的新标题，前后台切换后保持一致。",
-   "status": "blocked",
+   "status": "done",
    "phase": "phase5",
    "kind": "regression",
    "depends_on": [
