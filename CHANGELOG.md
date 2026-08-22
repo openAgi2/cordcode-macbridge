@@ -8,6 +8,7 @@
 
 ## [Unreleased]
 
+- **修复：Codex Web 连续发送时第二条用户消息不显示**：官方 `item/started` 已携带每轮 `userMessage` 的完整正文和 `threadId/turnId/itemId`，但 live codec 此前只转发 assistant delta，导致首轮靠冷水合偶然补回、后续轮只见回复。现按官方事件语义在 `item/started` 唯一投影用户消息，`item/completed` 保持静默防止双发；连续多轮均由同一 Mac Projection Kernel 实时归并。
 - **新功能：Codex Web 独立并存 backend**：CordCode Link 默认同时注册旧 `codex` 与新 `codex-web`。新入口只读官方 app-server lifecycle/catalog/history/live 事件，模型与 reasoning effort 来自官方目录；审批与批量用户输入经官方应答帧收口。backend/wire/config/cache identity 全部独立，旧 Codex rollout 路径和行为不变。
 - **修复：OpenCode Web 重启后历史没有思考过程和工具调用**：官方消息里工具 part 是 `tool: "read"|"edit"` 加旁边的 `state`，跟 Desktop 时间线同一份 `GET /session/:id/message`。冷拉却按旧 adapter 把 `tool` 当成嵌套对象，断言失败就把全部工具卡丢掉——直播走 SSE 所以当场看得到，杀 App 再进只剩正文。现按官方 ToolPart 映射（含文件路径、edit diff），思考块继续进历史；`todowrite` 仍只走任务卡、不进时间线。
 - **修复：OpenCode Web iPhone 会话列表目录远多于 Desktop**：官方首页侧栏不是 `GET /project`（那是服务端注册表，本机 31 行），而是 Desktop 本地打开的 tab（`Persist.global("server").projects[serveURL]`）。iPhone 误把注册表当首页，所以 17 个目录对不上 Desktop 的 6 个。现只列出该 4096 服务在 Desktop 里打开的 worktree，每个目录仍走官方 `session.list({directory, roots:true, limit})`。

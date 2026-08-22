@@ -229,8 +229,9 @@ func decodeReasoningDelta(n Notification) []core.Event {
 	}}
 }
 
-// decodeItemStarted 工具/系统类 item 开始（agentMessage/reasoning/userMessage 的
-// started 不发正文——delta/completed 承载，避免双发）。
+// decodeItemStarted 映射 item 的 live 起点。userMessage 没有独立 delta，官方
+// item/started 已携带完整 content，因此必须在这里发一次 EventUserMessage；
+// item/completed 对 userMessage 保持静默，避免重复。assistant/reasoning 正文仍只走 delta。
 func (c *LiveCodec) decodeItemStarted(n Notification) []core.Event {
 	var p itemNotification
 	if err := json.Unmarshal(n.Params, &p); err != nil {
@@ -238,6 +239,18 @@ func (c *LiveCodec) decodeItemStarted(n Notification) []core.Event {
 	}
 	it := decodeThreadItem(p.Item)
 	switch it.Type {
+	case "userMessage":
+		if p.ThreadID == "" || p.TurnID == "" || it.ID == "" {
+			return nil
+		}
+		return []core.Event{{
+			Type:      core.EventUserMessage,
+			SessionID: p.ThreadID,
+			TurnID:    p.TurnID,
+			ItemID:    it.ID,
+			ThreadID:  p.ThreadID,
+			Content:   it.UserText(),
+		}}
 	case "contextCompaction":
 		return []core.Event{{Type: core.EventContextCompressing, SessionID: p.ThreadID, ThreadID: p.ThreadID}}
 	case "commandExecution":
@@ -258,8 +271,8 @@ func (c *LiveCodec) decodeItemStarted(n Notification) []core.Event {
 	}
 }
 
-// decodeItemCompleted 工具结果；agentMessage/reasoning completed 不再发正文
-// （delta 已流式——§7.1 双发红线）。
+// decodeItemCompleted 工具结果；userMessage 已由 item/started 发出，
+// agentMessage/reasoning 已由 delta 流式发出，因此三者 completed 均不重复正文。
 func decodeItemCompleted(n Notification) []core.Event {
 	var p itemNotification
 	if err := json.Unmarshal(n.Params, &p); err != nil {

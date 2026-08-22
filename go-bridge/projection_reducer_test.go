@@ -153,6 +153,50 @@ func TestReducerUserMessageAttribution(t *testing.T) {
 	}
 }
 
+// TestReducerConsecutiveTurnsKeepBothUserMessages covers the live sequence that
+// regressed on device: after the first turn completes, the second userMessage
+// must create a distinct turn instead of relying on a later cold hydrate.
+func TestReducerConsecutiveTurnsKeepBothUserMessages(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex-web", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "codex-web", "s1", "user_message", map[string]interface{}{"itemId": "u1", "turnId": "T1", "text": "问题1"}))
+	r.Apply(ev(3, "codex-web", "s1", "text_delta", map[string]interface{}{"itemId": "T1", "delta": "回复1"}))
+	r.Apply(ev(4, "codex-web", "s1", "turn_completed", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(5, "codex-web", "s1", "turn_started", map[string]interface{}{"turnId": "T2"}))
+	r.Apply(ev(6, "codex-web", "s1", "user_message", map[string]interface{}{"itemId": "u2", "turnId": "T2", "text": "问题2"}))
+	r.Apply(ev(7, "codex-web", "s1", "text_delta", map[string]interface{}{"itemId": "T2", "delta": "回复2"}))
+	r.Apply(ev(8, "codex-web", "s1", "turn_completed", map[string]interface{}{"turnId": "T2"}))
+
+	proj, ok := r.Snapshot("codex-web", "s1")
+	if !ok || len(proj.Turns) != 2 {
+		t.Fatalf("projection turns = %+v, ok=%v; want exactly two", proj.Turns, ok)
+	}
+	want := []struct {
+		turnID, userID, userText, assistantText string
+	}{
+		{"T1", "u1", "问题1", "回复1"},
+		{"T2", "u2", "问题2", "回复2"},
+	}
+	for i, expected := range want {
+		turn := proj.Turns[i]
+		if turn.TurnID != expected.turnID || turn.User == nil || turn.User.ID != expected.userID ||
+			len(turn.User.Parts) != 1 || turn.User.Parts[0].Text != expected.userText {
+			t.Fatalf("turn[%d] user = %+v; want turn=%s user=%s text=%q", i, turn, expected.turnID, expected.userID, expected.userText)
+		}
+		var assistantText string
+		if turn.Assistant != nil {
+			for _, part := range turn.Assistant.Parts {
+				if part.Type == "text" {
+					assistantText += part.Text
+				}
+			}
+		}
+		if assistantText != expected.assistantText {
+			t.Fatalf("turn[%d] assistant text = %q, want %q", i, assistantText, expected.assistantText)
+		}
+	}
+}
+
 func TestReducerSystemMessageDoesNotArmExecution(t *testing.T) {
 	r := newTestReducer()
 	r.Apply(ev(1, "claudecode", "s1", "system_message", map[string]interface{}{

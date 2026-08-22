@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T06:21:22Z",
+ "updated_at": "2026-08-22T06:37:23Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2278,14 +2278,14 @@
    "id": "p5-single-service-review-fix-regression",
    "title": "Phase5 Codex Web 单实例真实服务回归",
    "description": "review-fix-for:p1-lifecycle-regression,p3-stream-regression；真实目标二进制验证 managed fallback 下主 RPC+passive 共用一个 app-server、Bridge 重启无新增孤儿、同服务两 connection resume 无 ownership 冲突；覆盖安装后 owner 新 session 发送复测。",
-   "status": "in_progress",
+   "status": "blocked",
    "phase": "phase5",
    "kind": "regression",
    "depends_on": [
     "p5-single-service-review-fix-tests"
    ],
    "source": "owner device failure 2026-08-22 13:53 + design §2.3/§4/§5.1/§6",
-   "notes": "自动/真实服务部分已过：Release 安装后 codex-web available；主连接+passive 仅一个 managed app-server；record 0600；SIGTERM Bridge 后新 runtime 收养同 PID/端口且未 spawn 第二实例。按仓库约束未主动跑 UI test；仍待 owner 在 iOS 新/旧 session 各发送一次完成产品面验收。",
+   "notes": "自动/真实服务部分已过：Release 安装后 codex-web available；主连接+passive 仅一个 managed app-server；record 0600；SIGTERM Bridge 后新 runtime 收养同 PID/端口且未 spawn 第二实例。owner 2026-08-22 14:24 真机新 session 两轮发送：两轮 assistant 正常流式，但第二轮 user message 不显示；官方 thread/read 两轮完整，live codec 未发 userMessage。repairable-heavy；review-fix-for:p5-followup-user-message-review-fix-regression。",
    "verification": {
     "required": true,
     "status": "present",
@@ -2302,6 +2302,84 @@
      "/internal/agents codex-web status=available"
     ],
     "checked_at": "2026-08-22T06:21:22Z"
+   }
+  },
+  {
+   "id": "p5-followup-user-message-review-fix-impl",
+   "title": "Phase5 Codex Web 后续轮 user message live projection 修复",
+   "description": "review-fix-for:p5-single-service-review-fix-regression；严格按设计 §5.2/§7.1/§9：把官方 item/started userMessage 以官方 threadId/turnId/itemId/text 翻译为唯一 core.EventUserMessage，使第二轮及后续轮无需冷 hydrate 即进入 Projection Kernel；item/completed 不重复正文，不增加 iOS optimistic/raw/history writer。",
+   "status": "done",
+   "phase": "phase5",
+   "kind": "impl",
+   "depends_on": [
+    "p5-single-service-review-fix-tests"
+   ],
+   "source": "owner device failure 2026-08-22 14:24 + official thread/read + design §5.2/§7.1/§9",
+   "notes": "真相 owner=官方 app-server→Mac Projection Kernel；唯一 writer=Projection Kernel；受影响事务域=codex-web live item translation；无新增数据路径/fallback。item/started userMessage 现以官方 identity/text 生成唯一 EventUserMessage；item/completed 静默。",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "官方 item/started userMessage 进入既有 Projection Kernel，completed 不重复；未增加 iOS writer 或替代路径。",
+    "artifacts": [
+     "agent/codex-web/codec.go",
+     "CHANGELOG.md"
+    ],
+    "checked_at": "2026-08-22T06:33:25Z"
+   }
+  },
+  {
+   "id": "p5-followup-user-message-review-fix-tests",
+   "title": "Phase5 Codex Web 多轮 user message 投影测试",
+   "description": "覆盖 item/started userMessage 官方 identity/text 映射、item/completed 不重复、连续两轮 turn 的 user+assistant 均落入 projection 且顺序稳定；运行 codex-web、projection 与全仓 Go 门禁。",
+   "status": "done",
+   "phase": "phase5",
+   "kind": "tests",
+   "depends_on": [
+    "p5-followup-user-message-review-fix-impl"
+   ],
+   "source": "owner device failure 2026-08-22 14:24 + design §13.1 codec/SSV2",
+   "notes": "定向 codec 官方 replay、连续两轮 reducer、codex-web race、全仓 Go test/vet 全过。",
+   "verification": {
+    "required": true,
+    "status": "present",
+    "method": "automated",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "官方 started/completed exact-once、多轮 user identity/text、Projection Kernel 两轮保留、race 与全仓门禁均通过。",
+    "artifacts": [
+     "agent/codex-web/codec_test.go",
+     "go-bridge/projection_reducer_test.go",
+     "go test -race ./agent/codex-web -count=1",
+     "go test ./... -count=1",
+     "go vet ./..."
+    ],
+    "checked_at": "2026-08-22T06:37:23Z"
+   }
+  },
+  {
+   "id": "p5-followup-user-message-review-fix-regression",
+   "title": "Phase5 Codex Web 多轮发送真机回归",
+   "description": "安装 Release 后 owner 在 iOS codex-web 新 session 连续发送两轮，确认两条 user message 与两条 assistant reply 均实时显示、顺序正确且无重复。",
+   "status": "in_progress",
+   "phase": "phase5",
+   "kind": "regression",
+   "depends_on": [
+    "p5-followup-user-message-review-fix-tests"
+   ],
+   "source": "owner device failure 2026-08-22 14:24",
+   "notes": "自动门禁已完成；待 Release 安装与 owner iOS 连续两轮产品面确认。",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
    }
   },
   {

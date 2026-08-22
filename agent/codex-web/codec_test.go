@@ -66,7 +66,7 @@ func TestCodecOfficialReplayNoLostIdentity(t *testing.T) {
 			t.Fatalf("事件缺官方 threadId：%+v", ev)
 		}
 		switch ev.Type {
-		case core.EventText, core.EventThinking:
+		case core.EventText, core.EventThinking, core.EventUserMessage:
 			if ev.TurnID == "" || ev.ItemID == "" {
 				t.Fatalf("正文事件缺官方 turnId/itemId：%+v", ev)
 			}
@@ -87,6 +87,85 @@ func TestCodecOfficialReplayNoLostIdentity(t *testing.T) {
 	for turnID, n := range terminals {
 		if n != 1 {
 			t.Fatalf("turn %s 终态事件 %d 个（必须唯一）", turnID, n)
+		}
+	}
+}
+
+// TestCodecUserMessageStartedEmitsOnce freezes the official live rule that was
+// missing in the first implementation: unlike assistant/reasoning, userMessage
+// has no delta, so item/started is its one projection event and completed is silent.
+func TestCodecUserMessageStartedEmitsOnce(t *testing.T) {
+	codec := NewLiveCodec()
+	var started, completed *Notification
+	for _, n := range replayServerFrames(t, "catalog") {
+		if n.Method != "item/started" && n.Method != "item/completed" {
+			continue
+		}
+		var p itemNotification
+		if json.Unmarshal(n.Params, &p) != nil || decodeThreadItem(p.Item).Type != "userMessage" {
+			continue
+		}
+		copy := n
+		if n.Method == "item/started" && started == nil {
+			started = &copy
+		}
+		if n.Method == "item/completed" && completed == nil {
+			completed = &copy
+		}
+		if started != nil && completed != nil {
+			break
+		}
+	}
+	if started == nil || completed == nil {
+		t.Fatal("official fixture missing userMessage started/completed pair")
+	}
+	var p itemNotification
+	_ = json.Unmarshal(started.Params, &p)
+	it := decodeThreadItem(p.Item)
+	events := codec.Decode(*started)
+	if len(events) != 1 {
+		t.Fatalf("userMessage item/started events=%+v, want exactly one", events)
+	}
+	ev := events[0]
+	if ev.Type != core.EventUserMessage || ev.SessionID != p.ThreadID || ev.ThreadID != p.ThreadID ||
+		ev.TurnID != p.TurnID || ev.ItemID != it.ID || ev.Content != it.UserText() {
+		t.Fatalf("userMessage live identity/text drift: event=%+v item=%+v", ev, it)
+	}
+	if duplicate := codec.Decode(*completed); len(duplicate) != 0 {
+		t.Fatalf("userMessage item/completed duplicated live content: %+v", duplicate)
+	}
+}
+
+func TestCodecOfficialReplayEmitsEveryUserMessageAcrossTurns(t *testing.T) {
+	codec := NewLiveCodec()
+	want := map[string]string{}
+	got := map[string]string{}
+	for _, n := range replayServerFrames(t, "catalog", "interaction") {
+		var p itemNotification
+		isUserItem := (n.Method == "item/started" || n.Method == "item/completed") &&
+			json.Unmarshal(n.Params, &p) == nil && decodeThreadItem(p.Item).Type == "userMessage"
+		if isUserItem && n.Method == "item/started" {
+			want[p.TurnID+"/"+decodeThreadItem(p.Item).ID] = decodeThreadItem(p.Item).UserText()
+		}
+		for _, ev := range codec.Decode(n) {
+			if ev.Type == core.EventUserMessage {
+				key := ev.TurnID + "/" + ev.ItemID
+				if _, duplicate := got[key]; duplicate {
+					t.Fatalf("duplicate user_message for official identity %s", key)
+				}
+				got[key] = ev.Content
+			}
+		}
+	}
+	if len(want) < 2 {
+		t.Fatalf("fixture must cover multiple user messages/turns, got %d", len(want))
+	}
+	if len(got) != len(want) {
+		t.Fatalf("live user_message count=%d, want=%d; got=%v want=%v", len(got), len(want), got, want)
+	}
+	for identity, text := range want {
+		if got[identity] != text {
+			t.Fatalf("user_message %s text=%q, want=%q", identity, got[identity], text)
 		}
 	}
 }
