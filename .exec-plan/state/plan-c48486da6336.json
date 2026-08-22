@@ -2452,7 +2452,7 @@
     "p5-directory-review-fix-tests"
    ],
    "source": "owner device failure 2026-08-22 14:46",
-   "notes": "自动门禁完成；待 Release 安装及 owner Chat 目录新建/回列表/前后台切换真机确认。",
+   "notes": "自动门禁完成；Release 412ecf7572bd 已安装到 /Applications/CordCodeLink.app，runtime PID 47002，codex-web passive subscription 已启动；managed 官方 app-server 保持同一 PID 31580/127.0.0.1:59339、record 0600。无 iOS 代码变更、未运行 UI tests；待 owner 用修复后新建的 session 完成 Chat 目录/回列表/前后台切换真机确认。",
    "verification": {
     "required": true,
     "status": "missing",
