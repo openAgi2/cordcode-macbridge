@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T03:27:41Z",
+ "updated_at": "2026-08-22T03:29:18Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -1756,7 +1756,7 @@
     "p5-mac-wire-impl"
    ],
    "source": "design §14/phase5",
-   "notes": "Mac 定向测试与 Go 全量均 PASS；显式 iOS mirror 检查失败，且首差异 session_retry_status 早于本轮 codex-web 文档。按仓库约束不得未经用户允许创建 p5 iOS 分支/worktree，保留失败现场等待授权后同步 mirror。",
+   "notes": "Mac descriptor/registration/identity 定向测试与 go test ./... / go vet 均 PASS；显式 CORDCODE_IOS_MIRROR 检查失败，且首差异 session_retry_status 早于本轮 codex-web 文档。按仓库约束不得未经用户允许创建 p5 iOS 分支/worktree，保留失败现场等待授权后同步 mirror。",
    "verification": {
     "required": true,
     "status": "missing",
@@ -1779,7 +1779,7 @@
     "p5-mac-wire-tests"
    ],
    "source": "design §14/phase5",
-   "notes": "",
+   "notes": "先行证据已完成但依赖测试门未闭合：Release build PASS（runtime commit 4e28845d85d7）；已覆盖安装 /Applications/CordCodeLink.app，PID 56204 从 /Applications 内嵌 runtime 监听 8777；argv 同时含 codex/codex-web；Management /internal/agents 返回 codex-web available、kind=codex-web、broadcast/no polling、interaction capabilities。待 mirror gate 通过后方可按依赖标 done。",
    "verification": {
     "required": true,
     "status": "missing",
