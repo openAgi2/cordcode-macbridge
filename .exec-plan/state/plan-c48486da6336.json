@@ -2526,14 +2526,154 @@
    "id": "p5-rename-review-fix-regression",
    "title": "Phase5 Codex Web 会话重命名真机回归",
    "description": "安装 Release 后 owner 在 iOS Codex Web 模式重命名现有 session；不得再报 not supported，列表与会话页应显示官方确认后的新标题，前后台切换后保持一致。",
-   "status": "in_progress",
+   "status": "blocked",
    "phase": "phase5",
    "kind": "regression",
    "depends_on": [
     "p5-rename-review-fix-tests"
    ],
    "source": "owner device failure 2026-08-22",
-   "notes": "自动门禁完成；Release 9748e69603f4 已安装到 /Applications/CordCodeLink.app，runtime PID 53019，codex-web passive subscription 已启动；managed 官方 app-server 保持同一 PID 31580/127.0.0.1:59339、record 0600。无 iOS 代码变更、未运行 UI tests；待 owner 真机确认重命名及前后台标题一致性。",
+   "notes": "Release 9748e69603f4 owner 真机失败：点击重命名显示‘未能读取数据，因为数据丢失’。repairable-heavy；review-fix-for:p5-session-mutation-review-fix-regression。此前 Go 测试只验证 Agent/handler，未冻结 iOS 实际响应解码契约。",
+   "verification": {
+    "required": true,
+    "status": "failed",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "owner 真机证明 rename RPC 不再 not_supported，但成功响应无法被 iOS 解码。",
+    "artifacts": [
+     "owner report 2026-08-22: 未能读取数据，因为数据丢失"
+    ],
+    "checked_at": "2026-08-22T07:13:51Z"
+   }
+  },
+  {
+   "id": "p5-session-mutation-review-fix-impl",
+   "title": "Phase5 Codex Web rename/archive/delete 产品链修复",
+   "description": "review-fix-for:p5-rename-review-fix-regression；按设计 §7/§9 接通官方 thread/name/set、thread/archive、thread/delete，修正 rename Bridge→iOS 响应契约；只以官方 thread/read/list 与事件确认，不添加本地标题/归档/删除假真相。",
+   "status": "in_progress",
+   "phase": "phase5",
+   "kind": "impl",
+   "depends_on": [
+    "p5-rename-review-fix-tests"
+   ],
+   "source": "owner device failure 2026-08-22 + design §7/§9",
+   "notes": "review-fix-for:p5-rename-review-fix-regression；已确认 archive/delete Agent capability 漏接，rename 需继续定位 iOS decode 失败。",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "p5-session-mutation-review-fix-tests",
+   "title": "Phase5 Codex Web rename/archive/delete 契约测试",
+   "description": "覆盖官方请求/响应、ownership、确认收敛、descriptor capability、Bridge wire 与 iOS mirror 解码；运行定向 race、全仓 test/vet 与双仓 build。",
+   "status": "pending",
+   "phase": "phase5",
+   "kind": "tests",
+   "depends_on": [
+    "p5-session-mutation-review-fix-impl"
+   ],
+   "source": "owner device failure 2026-08-22 + design §13",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "automated",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "p5-session-mutation-review-fix-regression",
+   "title": "Phase5 Codex Web rename/archive/delete 真机回归",
+   "description": "owner 真机分别验证 rename、archive、delete；成功后列表/消息页与官方状态一致，失败时显示官方错误，前后台切换不反弹。",
+   "status": "pending",
+   "phase": "phase5",
+   "kind": "regression",
+   "depends_on": [
+    "p5-session-mutation-review-fix-tests"
+   ],
+   "source": "owner device failure 2026-08-22",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "mixed",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "p5-interactions-product-audit-impl",
+   "title": "Phase5 Codex Web 审批与结构化多选产品链审计修复",
+   "description": "review-fix-for:p4-approvals-regression,p4-userinput-regression；逐项核对官方 request→Agent registry→core Event→Projection Kernel→Bridge wire→iOS store/view→resolve RPC→官方 response→resolved/terminal，并修复任何漏接；不得用 mock/fallback 掩盖。",
+   "status": "pending",
+   "phase": "phase5",
+   "kind": "impl",
+   "depends_on": [
+    "p4-userinput-review-fix-regression"
+   ],
+   "source": "owner audit request 2026-08-22 + design §7.2/§7.3/§14 Phase4/Phase5",
+   "notes": "Mac adapter 与隔离 E2E 已有证据，但尚未证明真机产品链完整。",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "p5-interactions-product-audit-tests",
+   "title": "Phase5 Codex Web 审批与结构化多选双仓契约测试",
+   "description": "覆盖 descriptor gate、三类 approval、多题批面板、answer/reject、resolved/terminal、iOS wire decode/store/reducer；运行双仓定向测试与 build。",
+   "status": "pending",
+   "phase": "phase5",
+   "kind": "tests",
+   "depends_on": [
+    "p5-interactions-product-audit-impl"
+   ],
+   "source": "owner audit request 2026-08-22 + design §13",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "automated",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "p5-interactions-product-audit-regression",
+   "title": "Phase5 Codex Web 审批与结构化多选真机回归",
+   "description": "owner 真机验证 command/file/permission approval allow/deny 与多题 option/Other/reject；卡片只出现一次、官方 turn 正确继续/中断并收口。",
+   "status": "pending",
+   "phase": "phase5",
+   "kind": "regression",
+   "depends_on": [
+    "p5-interactions-product-audit-tests"
+   ],
+   "source": "owner audit request 2026-08-22",
+   "notes": "",
    "verification": {
     "required": true,
     "status": "missing",
