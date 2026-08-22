@@ -87,23 +87,32 @@ enum CodexDesktopSharedRuntimeSetupResult: Equatable, Sendable {
 }
 
 /// Official Codex daemon seat independent of CordCode Link lifetime.
-/// Desktop falls back to private stdio if `daemon version` fails at connect/reconnect
-/// and then never reattaches. MacBridge must not own this process; a login LaunchAgent
-/// only runs idempotent `daemon start` + attach env.
+///
+/// Codex Desktop re-runs `codex app-server daemon version` (2500ms spawn
+/// timeout) on every `transport.connect()`, including reconnect. A missing
+/// control socket usually fails immediately, not after 2.5s. Any failure sets
+/// `kind=stdio` and `supportsReconnect()==false` for the rest of that Desktop
+/// process. Desktop's first reconnect is ~1s after the websocket drops, so
+/// this seat must restore the official daemon well inside that window.
+/// MacBridge must not own the daemon process; the login job only loops
+/// idempotent `daemon start` + attach env.
 enum CodexSharedDaemonSeat {
     static let label = "org.openagi.cordcode.codex-app-server-daemon"
+    static let recoverIntervalSeconds = "0.25"
 
     static func scriptContents(daemonBinary: String, codexHome: String) -> String {
         """
         #!/bin/bash
-        set -euo pipefail
+        set -uo pipefail
         export CODEX_HOME=\(shellEscape(codexHome))
         bin=\(shellEscape(daemonBinary))
-        if [ ! -x "$bin" ]; then
-          exit 0
-        fi
-        "$bin" app-server daemon start >/dev/null
-        /bin/launchctl setenv CODEX_APP_SERVER_USE_LOCAL_DAEMON 1
+        while true; do
+          if [ -x "$bin" ]; then
+            "$bin" app-server daemon start >/dev/null 2>&1 || true
+            /bin/launchctl setenv CODEX_APP_SERVER_USE_LOCAL_DAEMON 1 || true
+          fi
+          /bin/sleep \(recoverIntervalSeconds)
+        done
         """
     }
 
@@ -117,8 +126,10 @@ enum CodexSharedDaemonSeat {
           <string>\(label)</string>
           <key>RunAtLoad</key>
           <true/>
-          <key>StartInterval</key>
-          <integer>60</integer>
+          <key>KeepAlive</key>
+          <true/>
+          <key>ThrottleInterval</key>
+          <integer>1</integer>
           <key>ProgramArguments</key>
           <array>
             <string>/bin/bash</string>
@@ -1141,8 +1152,9 @@ class RuntimeManager: ObservableObject {
             ))
         }
 
-        // Login seat: daemon outlives CordCode Link. Only install against the
-        // real user home so tests using a fake homeDirectory do not write plists.
+        // Login seat: daemon outlives CordCode Link and is restored inside
+        // Desktop's ~1s reconnect window. Only install against the real user
+        // home so tests using a fake homeDirectory do not write plists.
         let liveHome = FileManager.default.homeDirectoryForCurrentUser.path
         if (homeDirectory as NSString).standardizingPath == (liveHome as NSString).standardizingPath {
             installCodexDaemonSeat(
@@ -1154,9 +1166,10 @@ class RuntimeManager: ObservableObject {
         return .configured(daemonBinary: daemonBinary)
     }
 
-    /// Installs a user LaunchAgent that periodically runs official
-    /// `daemon start` (idempotent) and refreshes the Desktop attach env.
-    /// CordCode Link stop/quit must not bootout this job or stop the daemon.
+    /// Installs a user LaunchAgent that keeps official `daemon start`
+    /// (idempotent) inside Desktop's reconnect window and refreshes the
+    /// attach env. CordCode Link stop/quit must not bootout this job or
+    /// stop the daemon.
     private nonisolated static func installCodexDaemonSeat(
         daemonBinary: String,
         codexHome: String,
