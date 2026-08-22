@@ -123,7 +123,10 @@ wire_api = "responses"
 		_ = os.RemoveAll(home)
 		_ = os.RemoveAll(workDir)
 	})
-	_ = exec.Command(bin, "app-server", "daemon", "stop").Run()
+	// 预清理也必须显式绑定测试 home；绝不能命中用户默认 ~/.codex daemon。
+	preStop := exec.Command(bin, "app-server", "daemon", "stop")
+	preStop.Env = append(os.Environ(), "CODEX_HOME="+home)
+	_ = preStop.Run()
 	return bin, home, workDir
 }
 

@@ -276,6 +276,19 @@ func (c *Client) RespondServerRequest(id json.Number, result any) error {
 	return c.transport.Send(payload)
 }
 
+// RespondServerRequestError 回 JSON-RPC error 帧（仅协议层不可解析的 server request：
+// 无 thread/item 身份可登记时，不让官方挂起等待；语义层失败不走此路径）。
+func (c *Client) RespondServerRequestError(id json.Number, code int64, message string) error {
+	payload, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0", "id": id,
+		"error": map[string]any{"code": code, "message": message},
+	})
+	if err != nil {
+		return err
+	}
+	return c.transport.Send(payload)
+}
+
 // Close 有界关闭：关 transport → reader 结束 → 清空 pending。
 func (c *Client) Close() error {
 	c.mu.Lock()

@@ -44,7 +44,22 @@ func (a *Agent) ensurePump() {
 	codec := a.liveCodec
 	go func() {
 		for n := range cl.Notifications() {
-			for _, ev := range codec.Decode(n) {
+			var extra []core.Event
+			switch n.Method {
+			case "serverRequest/resolved":
+				extra = a.resolvedEvents(n)
+			case "item/completed":
+				var p struct {
+					ThreadID string `json:"threadId"`
+					Item     struct {
+						ID string `json:"id"`
+					} `json:"item"`
+				}
+				if json.Unmarshal(n.Params, &p) == nil {
+					extra = a.itemCompletedResolution(p.ThreadID, p.Item.ID)
+				}
+			}
+			for _, ev := range append(codec.Decode(n), extra...) {
 				a.dispatchEvent(ev)
 				a.recordMetrics(ev)
 			}
@@ -61,7 +76,16 @@ func (a *Agent) ensurePump() {
 	}()
 	go func() {
 		for sr := range cl.ServerRequests() {
-			a.dispatchServerRequest(sr)
+			for _, ev := range a.handleServerRequest(sr) {
+				a.dispatchEvent(ev)
+				a.recordMetrics(ev)
+			}
+		}
+		// 连接终结：清理该 epoch 的 pending 交互（官方 request id 已失效；
+		// 重连后只认官方重发——§8.3-5）
+		dropped := a.registry.DropEpoch(cl.Epoch())
+		if dropped > 0 {
+			slog.Info("codexweb: dropped pending interactions of dead epoch", "epoch", cl.Epoch(), "count", dropped)
 		}
 	}()
 }
@@ -83,12 +107,6 @@ func (a *Agent) dispatchEvent(ev core.Event) {
 			slog.Warn("codexweb: session listener overflow, dropping event", "thread", ev.SessionID, "type", string(ev.Type))
 		}
 	}
-}
-
-// dispatchServerRequest Phase 3 最小诚实处理：记录不代答（审批/提问 registry 属
-// Phase 4；官方超时/取消路径收口）。
-func (a *Agent) dispatchServerRequest(sr ServerRequest) {
-	slog.Debug("codexweb: server request pending (Phase 4 registry)", "method", sr.Method, "thread", sr.ThreadID)
 }
 
 // reconnectLoop §8.3 断线恢复：退避重 Probe 直到成功（或 Agent 停止）；成功后
@@ -172,7 +190,8 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	}
 	var threadID string
 	if sessionID == "" {
-		res, rpcErr, err := StartThread(ctx, cl, StartThreadOptions{Cwd: a.workDir})
+		model, provider := a.selectedModelForStart()
+		res, rpcErr, err := StartThread(ctx, cl, StartThreadOptions{Cwd: a.workDir, Model: model, ModelProvider: provider})
 		switch {
 		case err != nil:
 			return nil, err
@@ -232,6 +251,10 @@ func (s *agentSession) SendWithOptions(prompt string, images []core.ImageAttachm
 	if opts.ProviderID != "" || opts.Agent != "" || opts.Variant != "" {
 		return errUnsupportedTurnOption
 	}
+	model, err := s.agent.modelForTurn(opts.ModelID)
+	if err != nil {
+		return err
+	}
 	ctx := context.Background()
 	cl, err := s.client(ctx)
 	if err != nil {
@@ -242,7 +265,7 @@ func (s *agentSession) SendWithOptions(prompt string, images []core.ImageAttachm
 		parts = append(parts, TextPart(prompt))
 	}
 	sendAt := time.Now()
-	res, rpcErr, err := TurnStart(ctx, cl, s.threadID, parts, opts.ModelID)
+	res, rpcErr, err := TurnStart(ctx, cl, s.threadID, parts, model)
 	switch {
 	case err != nil:
 		return err
@@ -314,19 +337,19 @@ func (s *agentSession) Steer(ctx context.Context, prompt string) (string, error)
 	return steered, nil
 }
 
-// RespondPermission / RespondQuestion / RejectQuestion 属 Phase 4（审批/提问
-// registry）；当前显式 fail closed，不假装成功。
+// RespondPermission 应答审批（requestID = registry interactionID =
+// threadId ":" itemId；官方 decision 词汇见 interactions.go）。
 func (s *agentSession) RespondPermission(requestID string, result core.PermissionResult) error {
-	return errInteractionPhase4
-}
-func (s *agentSession) RespondQuestion(questionID string, optionIDs []string) error {
-	return errInteractionPhase4
-}
-func (s *agentSession) RejectQuestion(questionID string) error {
-	return errInteractionPhase4
+	return s.agent.respondPermission(context.Background(), s.threadID, requestID, result)
 }
 
-var errInteractionPhase4 = &userError{"codex-web: approval/question response lands in Phase 4 (registry + official decision vocabulary)"}
+// RespondQuestion / RejectQuestion 应答 requestUserInput（interactionID 级整批提交）。
+func (s *agentSession) RespondQuestion(questionID string, optionIDs []string) error {
+	return s.agent.respondUserInput(context.Background(), questionID, optionIDs, false)
+}
+func (s *agentSession) RejectQuestion(questionID string) error {
+	return s.agent.respondUserInput(context.Background(), questionID, nil, true)
+}
 
 // observeEvent 由中央泵外的事件路径（测试）维护 active turn。
 func (s *agentSession) observeEvent(ev core.Event) {

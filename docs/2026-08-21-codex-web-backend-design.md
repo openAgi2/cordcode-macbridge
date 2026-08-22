@@ -1,7 +1,7 @@
 # codex-web Backend 设计（官方 app-server API 调用 + bridge-v1 协议翻译）
 
 - 日期：2026-08-21
-- 状态：**v1.6；评审冻结（v1.5，四轮 APPROVE）+ Phase 0 已完成并裁决 PASS（2026-08-22，见 [gate-verdict](2026-08-21-codex-web-phase0-gate-verdict.md)）；v1.6 仅按 §3.0/§21.2 回写 Phase 0 实测分歧（§22）；下一步 Phase 1**
+- 状态：**v1.7；评审冻结（v1.5，四轮 APPROVE）+ Phase 0 已完成并裁决 PASS（2026-08-22，见 [gate-verdict](2026-08-21-codex-web-phase0-gate-verdict.md)）；v1.6 回写 Phase 0 分歧，v1.7 按 §3.0 回写 Phase 4 requestUserInput 真实 daemon-WS 门与 tool 输入约束（§22-7）**
 - 参考方案：[2026-08-16-dsh-web-backend-design.md](2026-08-16-dsh-web-backend-design.md)
 - 一轮评审：[2026-08-21-codex-web-backend-design-review.md](2026-08-21-codex-web-backend-design-review.md)
 - 二轮评审：[2026-08-21-codex-web-backend-design-review-r2.md](2026-08-21-codex-web-backend-design-review-r2.md)
@@ -463,7 +463,7 @@ CordCode 产品能力仍有证据/目录缺口，不得广告；♻️ Bridge �
 | command approval | `item/commandExecution/requestApproval` | ✅/🧪 | 基础 request/response ✅；`availableDecisions`/`additionalPermissions` 为 experimental 字段（stable schema 剥除）。**Phase 0 实测修正（§22-1）**：`additionalPermissions` 未开 `experimentalApi` 时被 server 出站剥除，但 `availableDecisions` 在未声明 experimentalApi 的连接上仍**物理到达**（accept / acceptWithExecpolicyAmendment / cancel）；一期 UI 仍按可能缺失兼容，不依赖其稳定性；合法 decision 为 accept/cancel/结构化变体，cancel 后 turn 终态 interrupted |
 | file approval | `item/fileChange/requestApproval` | ✅ | 不把“发送 response 成功”提前显示为修改成功 |
 | permission request | `item/permissions/requestApproval` | ✅ | 呈现官方 `RequestPermissionProfile`，响应 `GrantedPermissionProfile + scope`；该载荷没有 `availableDecisions` |
-| structured questions | `item/tool/requestUserInput` | 🧪 | README/类型均标 experimental；core config 当前默认启用且不由 `experimentalApi` 门控，仍须按 🧪 取得 1–3 题真实样本并版本门控 |
+| structured questions | `item/tool/requestUserInput` | 🧪 | README/类型均标 experimental；stdio 与 daemon WS 均已取得真实样本。**Phase 4 实测补充（§22-7）**：官方 `request_user_input` tool 要求每题 2–3 个非空 options，并自动加入自由文本 Other；合法三题在隔离 daemon WS 下完成 request → answers map → resolved → turn completed。仍须版本门控 |
 | MCP elicitation | `mcpServer/elicitation/request` | 🧪 | Form / `openai/form` / Url 三类；`openai/form` 还需 initialize capability `mcpServerOpenaiFormElicitation` |
 | list_models | `model/list` | ✅ | 当前 configured provider 的模型目录；顺序、hidden、reasoning efforts 全由官方目录提供，不冒充 provider 目录 |
 | effective provider | `config/read` → `config.model_provider` | 🧪 只读 | v2 `Config` 是 snake_case 特例；读取 typed 当前有效 provider，保证继承用户第三方配置。`ConfigReadResponse`/嵌套 `Config` 带 `ExperimentalApi` 标记，字段形状按 Phase 0 样本冻结；不写 `config.toml` |
@@ -507,6 +507,8 @@ server-initiated request 必须有独立 registry：
 - `serverRequest/resolved` 或相关 item completed 才是 UI 收口信号；
 - 断线时清理旧 epoch pending，不向新连接重放旧 response；
 - 多题 `requestUserInput` 必须用真实样本确认官方批结构，再映射到 iOS 单题提交模型；
+- **transport 证据不可类推**：stdio 与 daemon WS 分别保留真实样本；模型 tool 输入若违反官方
+  “每题非空 options”约束会收到 function-call error，不能误判成 server-request 路由失败；
 - Mac 与 iOS 同时可答时必须实测“先答者得”行为，不能沿用 DSH 的结论。
 
 ### 7.3 源码推导的 wire shape 索引（待 Phase 0 样本确认）
@@ -522,7 +524,7 @@ Phase 0 设计采样与 adapter skeleton；它**不是 wire fixture**。每一�
 | `turn/start` | 可选 `model`，对本 turn 及后续 turn 生效；无 `modelProvider` | model override 的生效范围、失败原文及 completed 回显 |
 | `turn/steer` | `expectedTurnId` 必填；仅 active regular turn | regular/review/compact 三类结果与 stale turnId error |
 | `config/read` | response `config` 内部是 snake_case；typed `model_provider`；flatten `additional`；response/config 带 `ExperimentalApi` | **Phase 0 已裁决（§22-3）**：0.149.0-alpha.4 实测 `additional = {}`，不含 `model_providers`；样本 dumps/models-config |
-| `item/tool/requestUserInput` | experimental；批 questions，答案按 question id 返回 | 1–3 题、单选/多选/自由文本、blocking 与 response 的完整物理载荷 |
+| `item/tool/requestUserInput` | experimental；批 questions，答案按 question id 返回；官方 tool 输入每题必须 2–3 个 options，server params `isOther=true` 允许自由文本 Other；stdio 单题与 daemon-WS 三题已冻结（§22-7） | blocking(Plan mode) 与失败/取消的完整物理载荷仍待补样 |
 | command approval | 基础 request/response 稳定；两字段 experimental（schema 剥除）；**Phase 0：wire 上 availableDecisions 不剥除、additionalPermissions 剥除**；decision 枚举 accept/cancel/结构化，cancel→interrupted | Phase 0 已采（dumps/interaction）；resolved→completed 顺序已入样本 |
 | permission approval | `RequestPermissionProfile` → `GrantedPermissionProfile + scope`；没有 command 的 `availableDecisions` | allow/deny/scope 与失败/断线行为 |
 | MCP elicitation | Form / `openai/form` / Url；`openai/form` 依赖 initialize capability | 三 variant request/response、capability absent 与取消/失败行为 |
@@ -990,7 +992,8 @@ validate 共 136 断言全 PASS，可复跑）。共享运行时 Gate：**PASS**
 | 4 | 通知分级与不重放边界（全局 vs 订阅者级） | gate-terminal README 关键发现 2 |
 | 5 | **Phase 2 实测补充**：从未有过 turn 的 thread 不出现在 `thread/list`（rollout 未物化，list 为 scan-and-repair + state DB 视图；`thread/start` 后立即 `turn/start` 即可见，turn 是否完成无关）。catalog 不得为此伪造条目或改用 loaded 集合冒充列表 | p2-catalog e2e（agent/codex-web/sessions_e2e_test.go 空条目断言）|
 | 6 | **Phase 2 实测补充**：`thread/list` 默认 created_at（秒粒度）cursor 翻页会跳过与 cursor 同秒创建的兄弟条目（官方 `should_skip` 只认严格 `ts < cursor.ts`，tie-breaker id 在遍历层不生效）；dumps/catalog 的 `cursor_page2_count:0`（同秒 4 条）即此行为。CodCode 聚合 catalog 用服务端默认页大小（单页覆盖），不依赖小页深翻页补全 | rollout/src/list.rs `should_skip` + p2-catalog e2e limit=1 边界断言 |
+| 7 | **Phase 4 daemon-WS 实测补充**：首次 ASK3 失败根因不是 transport，而是旧 mock fixture 第二题缺 options；官方 `normalize_request_user_input_tool_args` 明确拒绝任一空 options，并把错误作为 function_call_output 回给模型。修正为每题 2–3 options 后，同版本隔离 daemon WS 当前连接真实收到三题 `item/tool/requestUserInput`，adapter 写 option/text(Other)/option answers map，随后收到 `serverRequest/resolved` 且 turn completed | [requestUserInput daemon-WS Gate](2026-08-22-codex-web-userinput-daemon-gate.md)；`codex-rs/core/src/tools/handlers/request_user_input_spec.rs`；`TestE2EInteractionUserInput` |
 
-未回写技术路线：Phase 0 全部实测与 v1.5 冻结设计一致或仅作事实修正；Phase 1–6 计划不变。
+§22-7 补齐 daemon 主路径 structured-user-input 真实证据；其余技术路线未变。
 实施注意的新事实清单（daemon 前置、同 daemon 多连接 resume 无冲突、`excludeTurns` 需
 experimentalApi、pending server request 不重放、TUI PTY 驱动细节等）见裁决文档 §4。

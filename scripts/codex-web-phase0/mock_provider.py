@@ -163,7 +163,13 @@ class Handler(BaseHTTPRequestHandler):
         else:
             _lf = open("/tmp/codexweb-p0-provider-req.log", "a")
         if _lf:
-                _lf.write(json.dumps({"path": self.path, "input_types": [it.get("type") if isinstance(it, dict) else str(it)[:30] for it in (body.get("input") or [])], "last_user": extract_last_user_text(body)[:80]}) + "\n")
+                _lf.write(json.dumps({
+                    "path": self.path,
+                    "input_types": [it.get("type") if isinstance(it, dict) else str(it)[:30] for it in (body.get("input") or [])],
+                    "last_user": extract_last_user_text(body)[:80],
+                    "tool_names": [tool.get("name") for tool in (body.get("tools") or []) if isinstance(tool, dict)],
+                    "function_outputs": [it.get("output") for it in (body.get("input") or []) if isinstance(it, dict) and it.get("type") == "function_call_output"],
+                }) + "\n")
         text = extract_last_user_text(body) or ""
         CALL_COUNTER["n"] += 1
         call_n = CALL_COUNTER["n"]
@@ -206,6 +212,10 @@ class Handler(BaseHTTPRequestHandler):
                         "id": "free_text_note",
                         "header": "Note",
                         "question": "Any extra note?",
+                        "options": [
+                            {"label": "No note (Recommended)", "description": "Continue without an extra note."},
+                            {"label": "Add note", "description": "Provide a free-form note using Other."},
+                        ],
                     }
                     q3q = {
                         "id": "pick_size",

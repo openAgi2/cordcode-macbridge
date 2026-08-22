@@ -46,9 +46,22 @@ type Agent struct {
 	stopped     bool
 
 	// metricsMu 保护 §13.2 帧级指标（per thread+turn）。
-	metricsMu sync.Mutex
+	metricsMu   sync.Mutex
 	turnMetrics map[string]*TurnMetrics // key: threadID + "/" + turnID
-	sendAt     map[string]time.Time     // key: threadID（Send 时刻，started 到达时结算）
+	sendAt      map[string]time.Time    // key: threadID（Send 时刻，started 到达时结算）
+
+	// registry 是官方 server request 生命周期账本（interactions.go，§7.2）。
+	registry *InteractionRegistry
+
+	// 官方 model/list + typed config/read 的只读快照（models.go）。仅用于校验用户
+	// 从刚取得目录中选择的 model；读取失败不回退到该快照冒充新结果。
+	modelProvider      string
+	effectiveModel     string
+	selectedModel      string
+	modelExplicit      bool
+	modelKnown         map[string]string
+	modelEfforts       map[string][]string
+	modelDefaultEffort map[string]string
 }
 
 // ProbeSnapshot 是一次生命周期的只读快照（descriptor 镜像用）。
@@ -63,7 +76,7 @@ type ProbeSnapshot struct {
 // New 按 opts 构造（main.go buildAgentOptions 的键：work_dir、
 // codex_web_app_server_url、codex_web_codex_home）。
 func New(opts map[string]any) *Agent {
-	a := &Agent{liveCodec: NewLiveCodec(), listeners: map[string]map[chan core.Event]struct{}{}, turnMetrics: map[string]*TurnMetrics{}, sendAt: map[string]time.Time{}}
+	a := &Agent{liveCodec: NewLiveCodec(), listeners: map[string]map[chan core.Event]struct{}{}, turnMetrics: map[string]*TurnMetrics{}, sendAt: map[string]time.Time{}, registry: NewInteractionRegistry(), modelKnown: map[string]string{}, modelEfforts: map[string][]string{}, modelDefaultEffort: map[string]string{}}
 	if opts == nil {
 		return a
 	}
