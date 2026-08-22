@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T05:13:55Z",
+ "updated_at": "2026-08-22T05:15:27Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2032,7 +2032,7 @@
     "p5-turn-start-review-fix-tests"
    ],
    "source": "owner device failure 2026-08-22 + design §7",
-   "notes": "review-fix-for:p5-deploy-regression",
+   "notes": "review-fix-for:p5-deploy-regression；unsigned Release 已构建并覆盖安装 /Applications/CordCodeLink.app，runtime commit=3516a5ed5370；启动日志确认 codex-web 注册、passive subscription 与 iOS 真机客户端重连。未修改 iOS 代码，沿用已安装真机 App；等待 owner 重跑已有/新 session 发送。旧 Mac app 可从 ~/.Trash/CordCodeLink.app.before-turn-start-fix-20260822-1315 恢复。",
    "verification": {
     "required": true,
     "status": "missing",
@@ -2040,7 +2040,11 @@
     "attestation": "self-attested",
     "na_reason": null,
     "summary": "",
-    "artifacts": [],
+    "artifacts": [
+     "dist/CordCodeLink-0.1.0-macos-arm64-unsigned.zip",
+     "/Applications/CordCodeLink.app/Contents/Resources/cordcode-bridge-runtime -version => commit 3516a5ed5370",
+     "/Users/jacklee/Library/Application Support/CordCode Link/logs/go-bridge.log runtime_ready + codex-web registration + iOS client connected"
+    ],
     "checked_at": null
    }
   },
