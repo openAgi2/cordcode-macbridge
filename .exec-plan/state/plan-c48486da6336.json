@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T08:49:00Z",
+ "updated_at": "2026-08-22T08:50:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2886,7 +2886,7 @@
    "id": "p0-desktop-attach-review-fix-tests",
    "title": "Phase0 Desktop 共享 runtime 可复跑证据门",
    "description": "对 Gate 结论建立可复跑证据：进程/FD/socket/endpoint 与同 server connection/subscription；若发现官方 attach 入口，必须证明 Desktop 不再持有独立 Embedded writer 且 CordCode 为同 server 第二 connection；若未发现，保留穷尽范围与负面证据，禁止用共享 store 代替。",
-   "status": "pending",
+   "status": "in_progress",
    "phase": "phase0",
    "kind": "tests",
    "depends_on": [
