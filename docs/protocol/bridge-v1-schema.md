@@ -1,6 +1,6 @@
 # CordCode Bridge v1 Schema 对照表
 
-> Schema revision：2026-08-02
+> Schema revision：2026-08-22
 > Protocol：`cordcode-bridge` version `1`
 > Canonical source：`cordcode-macbridge/docs/protocol/bridge-v1-schema.md`
 

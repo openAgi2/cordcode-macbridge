@@ -450,7 +450,7 @@ The v1 and v2 paths MUST NOT be mixed for the same interaction, and v2 MUST NOT 
   for legacy connections; `session_sync_v2` connections receive only projection updates. Legacy raw
   events never feed back into the Kernel and never create a second writable registry.
 
-`schemaRevision` is bumped to `2026-08-02` for this additive set (new capability, RPC, part
+`schemaRevision` was bumped to `2026-08-02` for this additive set (new capability, RPC, part
 variant, part op, event names); the protocol major version is unchanged and old clients ignore
 the unknown names.
 
