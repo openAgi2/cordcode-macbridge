@@ -1001,8 +1001,9 @@ validate 共 136 断言全 PASS，可复跑）。共享运行时 Gate：**PASS**
 | 6 | **Phase 2 实测补充**：`thread/list` 默认 created_at（秒粒度）cursor 翻页会跳过与 cursor 同秒创建的兄弟条目（官方 `should_skip` 只认严格 `ts < cursor.ts`，tie-breaker id 在遍历层不生效）；dumps/catalog 的 `cursor_page2_count:0`（同秒 4 条）即此行为。CodCode 聚合 catalog 用服务端默认页大小（单页覆盖），不依赖小页深翻页补全 | rollout/src/list.rs `should_skip` + p2-catalog e2e limit=1 边界断言 |
 | 7 | **Phase 4 daemon-WS 实测补充**：首次 ASK3 失败根因不是 transport，而是旧 mock fixture 第二题缺 options；官方 `normalize_request_user_input_tool_args` 明确拒绝任一空 options，并把错误作为 function_call_output 回给模型。修正为每题 2–3 options 后，同版本隔离 daemon WS 当前连接真实收到三题 `item/tool/requestUserInput`，adapter 写 option/text(Other)/option answers map，随后收到 `serverRequest/resolved` 且 turn completed | [requestUserInput daemon-WS Gate](2026-08-22-codex-web-userinput-daemon-gate.md)；`codex-rs/core/src/tools/handlers/request_user_input_spec.rs`；`TestE2EInteractionUserInput` |
 | 8 | **Desktop attach Gate 补充**：当前 ChatGPT `26.818.31338` 宿主在 `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1`、无强制 CLI 覆盖且 daemon 版本兼容时，以 WebSocket-over-UDS 连接 `~/.codex/app-server-control/app-server-control.sock`；隔离 Desktop 无私有 app-server 子进程，FD peer 与 daemon 监听 socket 相同。由此撤销“Desktop 只能独立 stdio”的旧覆盖面结论，并禁止产品回落 `managed-loopback-ws` | [Desktop attach Gate](../scripts/codex-web-phase0/dumps/gate-desktop-attach/README.md)；当前 Desktop `app.asar` 本地只读检查；隔离进程树/FD/initialize 日志 |
+| 9 | **Gate 2 产品接线**：MacBridge 先做 Desktop/standalone exact-version gate、启动官方 daemon、再向用户 launchd domain 写 attach 开关；codex-web 产品空 home 按官方规则解析为 `CODEX_HOME`/`~/.codex`；daemon 失败直接 `shared-daemon-required`，managed-loopback 只留旧 record 安全清理。Release 中 CordCode 两 connection 与隔离 Desktop 的 FD 均落在同一 daemon | commit `74fc3866d18c`；`RuntimeManager.configureCodexDesktopSharedRuntime`；`ResolveCodexHome`；[Desktop attach Gate](../scripts/codex-web-phase0/dumps/gate-desktop-attach/README.md) |
 
-§22-7 补齐 daemon 主路径 structured-user-input 真实证据；§22-8 由 owner 真机反证触发重新开门，
-并将 Desktop 产品拓扑修正为官方单 daemon 双 connection。
+§22-7 补齐 daemon 主路径 structured-user-input 真实证据；§22-8 由 owner 真机反证触发重新开门；
+§22-9 将 Desktop 产品拓扑修正并部署为官方单 daemon 多 connection。自动拓扑 Gate 不替代 owner 真机矩阵。
 实施注意的新事实清单（daemon 前置、同 daemon 多连接 resume 无冲突、`excludeTurns` 需
 experimentalApi、pending server request 不重放、TUI PTY 驱动细节等）见裁决文档 §4。

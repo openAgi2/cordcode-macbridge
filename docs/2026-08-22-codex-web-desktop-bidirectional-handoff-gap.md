@@ -1,11 +1,11 @@
 # Codex Web 与 Mac Codex Desktop 双向接力缺口：现状、根因与解决路线
 
 - 日期：2026-08-22
-- 状态：问题已由 owner 真机复现；根因已定位；Desktop 官方 local-daemon attach 入口已实证，产品接线待完成
+- 状态：问题已由 owner 真机复现；根因已定位；Desktop 官方 local-daemon attach 与产品单 daemon 接线均已自动化实证，owner 双向真机矩阵待复测
 - 适用仓库：`cordcode-macbridge-codex-web`
 - 上游源码：`/Users/jacklee/Projects/codex`
 - 当前官方二进制：`codex-cli 0.149.0-alpha.4`
-- 当前结论：**Terminal TUI 的窄 Gate 仍为 PASS；Desktop 路线 A 也已通过隔离活体验证：设置 `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1` 后，当前 Desktop 会连接官方 daemon control socket，不再 spawn 私有 stdio app-server。现有产品接线尚未完成，因此 owner 当前版本仍不具备 Mac Codex Desktop ↔ iOS 的完整双向实时接力。**
+- 当前结论：**Terminal TUI 的窄 Gate、Desktop 路线 A 和 CordCode Link 产品接线自动 Gate 均为 PASS：Release 会先启动版本匹配的官方 daemon，设置 `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1`，codex-web 只连接真实 `~/.codex` control socket，且不再回落 managed-loopback。完整 Mac Desktop ↔ iOS 双向实时接力仍需 owner 在重启 Desktop 后按矩阵复测，不能由自动拓扑证据代替。**
 
 当前能力必须分开记账：
 
@@ -18,6 +18,7 @@
 | Desktop 常开时 iOS 续聊同一 thread | FAIL |
 | iOS session 被 Desktop 实时发现并继续 | 未通过 |
 | Desktop 官方 attach 能力（隔离 Gate） | PASS |
+| CordCode Link 单 daemon 产品接线（自动 Gate） | PASS |
 | CordCode 完整双向接力初衷 | 未达成 |
 
 ## 1. 为什么这是阻断问题
@@ -333,13 +334,15 @@ codex remote-control pair
 
 ### Gate 2：共享服务实现
 
-仅 Gate 1 PASS 后实施：
+状态：**自动 Gate PASS，owner 真机待验**。已实施：
 
 1. lifecycle 选择顺序改为官方共享 daemon 为产品必需条件；
 2. Desktop 场景禁止静默降到 managed-loopback-ws；
-3. CordCode 常驻 connection 接收全局 lifecycle 并按 thread subscription 接收 turn/item；
-4. 创建、resume、审批、提问全部在同一 server request registry；
-5. diagnostics 明确显示 Desktop connection 与 CordCode connection 的同 runtime 证据。
+3. 产品空 `codex_web_codex_home` 按官方顺序解析为显式值 → `CODEX_HOME` → `~/.codex`，不再误用相对目录；
+4. CordCode Link 先核对 Desktop/standalone CLI exact version、启动 daemon，再设置 launchd attach 环境；
+5. Release 活体中 CordCode 主/observer connection 与隔离 Desktop 均已通过 FD 证明连接同一 daemon；
+6. CordCode 常驻 connection 接收全局 lifecycle 并按 thread subscription 接收 turn/item；
+7. 创建、resume、审批、提问全部在同一 server request registry。
 
 ### Gate 3：自动化与真机
 

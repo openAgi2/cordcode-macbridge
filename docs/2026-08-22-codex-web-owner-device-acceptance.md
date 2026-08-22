@@ -4,10 +4,16 @@
 
 ## 自动前置核对（已完成）
 
-- Mac Release：`/Applications/CordCodeLink.app` 已覆盖安装并运行。
+- Mac Release：`/Applications/CordCodeLink.app` 已覆盖安装并运行，内嵌 runtime commit
+  `74fc3866d18c`，TCP 8777 监听者来自安装目录。
+- Shared runtime：官方 standalone/daemon 与 Desktop 内嵌 CLI 均为 `0.149.0-alpha.4`；
+  `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1` 已写入用户 launchd domain；CordCode 主/observer
+  connection 与隔离 Desktop 已由 UDS FD 证明连接同一 daemon，且无 managed-loopback 进程。
 - Bridge：Release 内嵌 `cordcode-bridge-runtime` 正在监听 TCP 8777，启动参数同时包含独立的 `codex` 与 `codex-web`。
 - iOS：`codex/codex-web-backend-ios` 的 `e43e0c6` 已构建并安装到连接的物理 iPhone；Codex Web 模型目录现保留官方 `model/list` 顺序与 description。
 - 运行路径：真机启动后 Bridge 日志已出现 `backendId=codex-web` 的 `list_models`、`get_session_projection`、`set_observation_scope` 与 snapshot hydrate；这只证明接线可达，不代替下列 owner 视觉/交互验收。
+- Desktop 前置：当前主 Desktop 在环境写入前已运行，本轮没有自动终止它。执行第 6–8、10–11 行前，
+  owner 必须先正常退出并重新打开 Desktop 一次；之后各行不得再以“退出另一客户端”为切换条件。
 
 ## 执行规则
 

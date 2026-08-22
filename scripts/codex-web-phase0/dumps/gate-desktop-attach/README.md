@@ -73,3 +73,20 @@ PID/FD 仅是本次活体采样值，不是产品常量。
 4. 禁止 `managed-loopback-ws` 作为 Desktop 产品 fallback；
 5. 首次启用或登录环境重建后，已经运行的 Desktop 需要重启一次以继承环境；CordCode 不自动终止它。
 
+## Gate 2 产品接线复验
+
+Release `74fc3866d18c` 覆盖安装后：
+
+- `/Applications/CordCodeLink.app` 内嵌 runtime 版本为
+  `cordcode-bridge-runtime 0.1.0 (commit: 74fc3866d18c, ...)`；
+- 旧 `managed-loopback-ws` 进程与 record 已清理，进程树不再出现
+  `codex app-server --listen ws://127.0.0.1:<managed-port>`；
+- CordCode runtime PID `98206` 的 UDS FD `4`/`24` 分别指向官方 daemon PID `85510`
+  接受的 control-socket FD `19`/`20`（主 connection + observer connection）；
+- 由已安装 CordCode Link 设置 launchd 环境后，经 LaunchServices 正常启动的隔离 Desktop
+  PID `98498` 没有私有 app-server 子进程，其 FD `140` 指向同一 daemon control-socket
+  listener；
+- `codex-web` passive subscription 与 catalog seed 均在该 daemon 上成功。
+
+PID/FD 仍只代表本次采样。owner 当前正在使用的主 Desktop 是设置环境前启动的进程；为了不终止
+官方客户端及本 Codex 会话，本轮没有自动重启它。owner 真机矩阵前必须手动重启 Desktop 一次。
