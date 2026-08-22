@@ -6,6 +6,7 @@ package codexweb
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -111,6 +112,29 @@ func TestResumeOwnershipConflictTranslated(t *testing.T) {
 	}
 	if oc == nil || !strings.Contains(oc.Error(), "另一个 Codex app-server") {
 		t.Fatalf("resume 冲突必须翻译为 OwnershipConflictError：%v", oc)
+	}
+}
+
+func TestStartSessionOwnershipConflictCarriesEndpointSource(t *testing.T) {
+	peer := newFakePeer()
+	peer.install(happyHandlers())
+	peer.on("thread/resume", func(int64, json.RawMessage) (any, *fakeRPCError) {
+		return nil, &fakeRPCError{Code: -32600, Message: "thread th-owned already has an active writer"}
+	})
+	a := New(nil)
+	a.endpoint = &ServiceEndpoint{
+		Source: SourceManagedLoopbackWS,
+		client: NewClient(peer, 1),
+	}
+	t.Cleanup(func() { _ = a.Stop() })
+
+	_, err := a.StartSession(context.Background(), "th-owned")
+	var conflict *OwnershipConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("StartSession error = %v, want OwnershipConflictError", err)
+	}
+	if conflict.TransportSource != SourceManagedLoopbackWS {
+		t.Fatalf("ownership source = %q, want %q", conflict.TransportSource, SourceManagedLoopbackWS)
 	}
 }
 

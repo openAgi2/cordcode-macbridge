@@ -222,6 +222,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 		case err != nil:
 			return nil, err
 		case oc != nil:
+			oc.TransportSource = a.endpointSource()
 			return nil, oc
 		case rpcErr != nil:
 			return nil, rpcErr

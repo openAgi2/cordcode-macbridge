@@ -396,7 +396,7 @@ func (h *Handlers) replaceConnection(old, new Connection) {
 // Package-level (not inline) so tests can assert membership (评审 M3 —— 名单
 // 提为可测常量). dsh-web's absence is a known pre-existing gap reported to
 // the owner separately (opencode-web design §4.1.5 M3).
-var observationResubscribeBackends = []string{"codex", "claudecode", "opencode", "grokbuild", "claude", "opencode-web"}
+var observationResubscribeBackends = []string{"codex", "codex-web", "claudecode", "opencode", "grokbuild", "claude", "opencode-web"}
 
 // resubscribeObservationSessions re-attaches broadcaster session keys for every
 // backend/session still listed in the device's observation scope.

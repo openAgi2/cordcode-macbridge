@@ -83,6 +83,19 @@ func TestOpenCodeWebProjectionWiring(t *testing.T) {
 	}
 }
 
+func TestCodexWebObservationReattachWiring(t *testing.T) {
+	found := false
+	for _, backendID := range observationResubscribeBackends {
+		if backendID == "codex-web" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("observation re-attach list must contain codex-web: %v", observationResubscribeBackends)
+	}
+}
+
 // M2-1 行为级断言：带 directory 的读方法 RPC 必须切换 opencode-web 的
 // workDir（四读方法在 shouldSwitchWorkDirForMethod 之外，全靠 Name 特判），
 // 否则 x-opencode-directory 恒为启动值，坑 5 复发。
@@ -150,7 +163,7 @@ func TestOpenCodeWebProjectionHydrateOfficialToolSteps(t *testing.T) {
 	sessionID := "ocw-tools-1"
 	readStep := map[string]any{
 		"id": "prt_read1", "toolName": "read", "status": "completed",
-		"title": "story.txt",
+		"title":     "story.txt",
 		"toolInput": map[string]any{"filePath": "/tmp/story.txt"},
 		"output":    map[string]any{"kind": "inline", "text": "file contents"},
 	}
