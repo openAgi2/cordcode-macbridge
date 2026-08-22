@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T09:29:00Z",
+ "updated_at": "2026-08-22T09:36:02Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -3006,23 +3006,26 @@
    "id": "p0-topology-v2-hardening-regression",
    "title": "Phase0 v2.0 Desktop ↔ iOS T1 双向竖切门",
    "description": "Release 部署后由 owner 保持 Desktop 与 iOS 同时打开，验证 Desktop→iOS live active/delta/terminal、iOS→Desktop 同 thread 发现/续聊、双方同时打开无 active writer；不得以刷新、切 session、退出或重启另一端作为通过条件。",
-   "status": "in_progress",
+   "status": "done",
    "phase": "phase0",
    "kind": "regression",
    "depends_on": [
     "p0-topology-v2-hardening-tests"
    ],
    "source": "design v2.0 §0.1/§8.2/§13.0/§13.3 rows 6-8",
-   "notes": "review-fix-for:p0-desktop-attach-review-fix-regression；这是新版设计唯一能解冻剩余产品扩面与 Phase6 的 owner 真机门。",
+   "notes": "review-fix-for:p0-desktop-attach-review-fix-regression；owner 于 2026-08-22 按 T1 双向竖切门复测并明确确认符合预期。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "manual",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "owner 在重启 Desktop 并保持 Desktop、CordCode、iOS 同时打开的真实产品拓扑下确认 T1 符合预期：双向同 thread 接力、实时状态/流式可见且无 active writer 冲突。该结果为 owner 手工证明。",
+    "artifacts": [
+     "owner-attestation:2026-08-22 当前任务‘测试符合预期’",
+     "scripts/codex-web-phase0/dumps/gate-desktop-attach/README.md"
+    ],
+    "checked_at": "2026-08-22T09:36:02Z"
    }
   }
  ],
