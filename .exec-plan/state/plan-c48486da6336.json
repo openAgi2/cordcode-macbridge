@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T09:51:00Z",
+ "updated_at": "2026-08-22T09:52:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2767,23 +2767,31 @@
    "id": "p6-observation-tests",
    "title": "Phase6 观察数据核对",
    "description": "A/B 数据完整覆盖§13.2 指标 + §15 门槛对应项。",
-   "status": "in_progress",
+   "status": "done",
    "phase": "phase6",
    "kind": "tests",
    "depends_on": [
     "p6-observation-impl"
    ],
    "source": "design §14/phase6",
-   "notes": "",
+   "notes": "观察包 fail-closed validator、owner 14 行矩阵、十二项退役账本、共享 daemon 拓扑、全仓 Go test/vet 与物理 iPhone unit-only 模型测试均重新执行通过；devicectl 诊断收集有非测试失败 warning，但 xcodebuild test exit=0。",
    "verification": {
     "required": true,
-    "status": "missing",
+    "status": "present",
     "method": "automated",
-    "attestation": "self-attested",
+    "attestation": "re-verified",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "Phase 6 自动观察门通过：全仓 Go test/vet、owner matrix/observation pack validators、当前 Release 单 daemon 拓扑和物理 iPhone 三项模型 unit test 均为 PASS。",
+    "artifacts": [
+     "cmd:go test ./... -count=1",
+     "cmd:go vet ./...",
+     "cmd:python3 scripts/codex-web-phase5/verify_owner_matrix.py",
+     "cmd:python3 scripts/codex-web-phase6/verify_observation_pack.py",
+     "cmd:scripts/codex-web-phase0/verify_shared_daemon_topology.sh with installed runtime PID",
+     "cmd:xcodebuild CordCodeUnitTests physical iPhone; 3 targeted model tests; exit 0",
+     "/Users/jacklee/Library/Developer/Xcode/DerivedData/CordCode-ditfvluletdhecbduxwrcnwdzmbi/Logs/Test/Test-CordCodeUnitTests-2026.08.22_17-44-44-+0800.xcresult"
+    ],
+    "checked_at": "2026-08-22T09:52:00Z"
    }
   },
   {
