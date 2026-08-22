@@ -1,11 +1,24 @@
 # Codex Web 与 Mac Codex Desktop 双向接力缺口：现状、根因与解决路线
 
 - 日期：2026-08-22
-- 状态：问题已由 owner 真机复现；根因已定位；尚无已证明可行的 Desktop 共享运行时入口
+- 状态：问题已由 owner 真机复现；根因已定位；Desktop 官方 local-daemon attach 入口已实证，产品接线待完成
 - 适用仓库：`cordcode-macbridge-codex-web`
 - 上游源码：`/Users/jacklee/Projects/codex`
 - 当前官方二进制：`codex-cli 0.149.0-alpha.4`
-- 当前结论：**现有 `codex-web` 只在 CordCode 自己或已接入同一 daemon 的 Terminal TUI 范围内成立；它没有实现 Mac Codex Desktop ↔ iOS 的完整双向实时接力。**
+- 当前结论：**Terminal TUI 的窄 Gate 仍为 PASS；Desktop 路线 A 也已通过隔离活体验证：设置 `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1` 后，当前 Desktop 会连接官方 daemon control socket，不再 spawn 私有 stdio app-server。现有产品接线尚未完成，因此 owner 当前版本仍不具备 Mac Codex Desktop ↔ iOS 的完整双向实时接力。**
+
+当前能力必须分开记账：
+
+| 范围 | 当前判定 |
+|---|---|
+| Terminal TUI + shared daemon 实时接力 | PASS |
+| CordCode 自有 session | 基本可用 |
+| Desktop 与 CordCode 冷 `thread/list/read` | 可用 |
+| Desktop → iOS 实时旁观 | FAIL |
+| Desktop 常开时 iOS 续聊同一 thread | FAIL |
+| iOS session 被 Desktop 实时发现并继续 | 未通过 |
+| Desktop 官方 attach 能力（隔离 Gate） | PASS |
+| CordCode 完整双向接力初衷 | 未达成 |
 
 ## 1. 为什么这是阻断问题
 
@@ -126,7 +139,7 @@ THREAD_UNLOADING_DELAY = 30 * 60 seconds
 
 因此“等 Mac 回复完成后由 iOS resume”不是可靠接力协议；“要求用户退出 Mac App”也不满足 CordCode 的无感双向接力初衷。
 
-### 4.4 Terminal 支持共享目标，不等于 Desktop 支持
+### 4.4 Desktop 当前安装包已提供官方 local-daemon attach 入口
 
 官方 TUI 有明确的：
 
@@ -145,24 +158,47 @@ enum AppServerTarget {
 /Users/jacklee/Projects/codex/codex-rs/cli/src/main.rs
 ```
 
-但当前 Mac Codex Desktop 的实际启动命令固定为 stdio app-server，没有观察到 `--remote`、daemon socket 或可复用监听端点。不能把 Terminal 的 LocalDaemon PASS 推导为 Desktop PASS。
+不能从 Terminal 的 LocalDaemon PASS 推导 Desktop 能力；因此本次直接检查了当前 Desktop 宿主安装包并做隔离活体验证。ChatGPT `26.818.31338` 的宿主逻辑在满足以下条件时选择 local daemon：
+
+- local host、非 Windows；
+- `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1`；
+- 未设置 `CODEX_APP_SERVER_FORCE_CLI=1`；
+- 没有 `CODEX_CLI_PATH` / host `codex_cli_command` 覆盖；
+- `codex app-server daemon version` 成功且版本兼容；
+- 未命中该 bundle 的强制 CLI 条件。
+
+满足条件后，Desktop transport 切为 WebSocket，并经 Unix socket 连接：
+
+```text
+~/.codex/app-server-control/app-server-control.sock
+```
+
+隔离 Desktop 的日志实录 `Transport start success ... transport=websocket` 与 initialize 成功；进程树中没有新的私有 `codex app-server` 子进程，Desktop FD 的 peer 与 daemon 监听 socket object 相同。再用 `launchctl setenv` 后经 LaunchServices 正常启动第二个隔离实例，结果相同。完整证据见：
+
+```text
+scripts/codex-web-phase0/dumps/gate-desktop-attach/README.md
+```
+
+因此路线 A 已由 Desktop 自身宿主实现和活体 FD 双重证明，不再依赖 TUI 类推。
 
 ## 5. 此前实施与设计的第一处分歧
 
-### 5.1 Phase 0 裁决扩大了 PASS 的含义
+### 5.1 Phase 0 的 Terminal 窄 PASS 成立，Desktop 推论不成立
 
 Phase 0 证明的是：
 
 - daemon 已运行时，默认 Terminal TUI 可以选择 LocalDaemon；
 - CordCode 作为第二 connection 可以收到同 runtime 的真实增量。
 
-但裁决同时声称 Desktop 虽为独立 stdio runtime，仍有“store 级 list/read/续聊接力”。现在的真机证据表明：
+因此不能把 Phase 0 整体重写成 FAIL。真正的错误是裁决同时声称 Desktop 虽为独立 stdio runtime，仍有“store 级 list/read/续聊接力”。现在的真机证据表明：
 
 - list/read 成立；
 - Desktop 正常打开时的续聊不成立；
 - 所以该句把“同一 thread 可读”误写成了“同一 thread 可接力”。
 
-按原设计 §8.2，PARTIAL 的前提仍是“双向串行接力成立”；当前 Desktop 路径连这个前提也没有满足。
+按原设计 §8.2，PARTIAL 的前提仍是“双向串行接力成立”；当前 Desktop 路径连这个前提也没有满足。后续实施把 Terminal 的窄 PASS 用来支撑 Desktop 产品主张，才是需要撤销的结论。
+
+原设计内部也存在三种不同强度的门：§1 要求 Mac 官方客户端双向接力；§8.2 把 Phase 0 的必须 PASS 路径收窄到 Terminal TUI；§13.3 #7/#8 与 §15 #4 又把官方客户端双向接力列为最终验收/退役门槛。实施按最窄门进入编码，却没有在产品发布前回到最强门验收，导致顺序倒置。
 
 ### 5.2 managed-loopback-ws 被当成了产品主路径
 
@@ -221,23 +257,21 @@ Phase 0 证明的是：
 
 ## 8. 推荐解决路线
 
-### 路线 A：找到并使用 Desktop 官方的共享 app-server attach 能力（唯一首选）
+### 路线 A：使用 Desktop 官方 local-daemon attach 能力（已证明，唯一产品路线）
 
-先做只读/隔离 spike，不继续修改产品 adapter：
+Gate 1 隔离 spike 已完成并 PASS。产品接线固定为：
 
-1. 检查 Mac Codex Desktop 实际宿主代码、启动配置、环境变量和 feature flags，寻找官方支持的 app-server endpoint/daemon attach 入口；
-2. 重点验证 Desktop 是否能像 TUI 一样选择：
-   - local daemon Unix socket；
-   - loopback WebSocket endpoint；
-   -受支持的 remote app-server endpoint；
-3. 若存在入口：
-   - CordCode 只负责 ensure/start 一个官方 daemon；
-   - Desktop 连接该 daemon；
-   - CordCode 作为第二 connection 连接同一 daemon；
-   - managed-loopback-ws 不再作为 Desktop 双向接力路径；
-4. 以真实 Desktop UI 完成 §11 的验收矩阵，再恢复产品实施。
+1. CordCode 只 ensure/start 官方 managed standalone daemon；
+2. CordCode Link 在用户 launchd domain 设置 `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1`；
+3. Desktop 下一次正常启动连接该 daemon；
+4. CordCode 作为第二 connection 连接同一 control socket；
+5. `managed-loopback-ws` 从 Desktop 产品路径删除，daemon/版本/环境配置失败必须可见；
+6. 首次启用或登录环境重建后，已经运行的 Desktop 需由用户重启一次以继承环境；CordCode 不自动终止官方客户端；
+7. 以真实 Desktop UI 完成 §11 的验收矩阵。
 
 完成标准不是“两个进程能 list 同一 session”，而是进程检查必须显示 Desktop 不再拥有独立 Embedded writer，并且两连接可在同一 app-server 的 `thread/loaded/list`/订阅状态中观察到。
+
+ChatGPT/Codex Desktop 的关键宿主选择逻辑不在本次读取的开源 Rust 主链中，而在实际 Desktop App bundle；所以未来 Desktop 升级必须重新验证 bundle 条件、CLI/daemon 版本兼容、进程树与 FD，不能只跑 Rust contract test。
 
 ### 路线 B：评估新版官方 `remote-control`，但不得预设它等于本地共享服务
 
@@ -288,18 +322,14 @@ codex remote-control pair
 
 ### Gate 0：纠正状态
 
-1. 将 Phase 0 Desktop “续聊接力可用”降级为被真机反证；
+1. 保留 Phase 0 Terminal TUI shared-daemon 的窄 PASS；将 Desktop “续聊接力可用”子结论降级为被真机反证；
 2. 将 Desktop 双向接力 regression 标为 failed；
 3. 暂停以 Desktop 完整支持为前提的后续“完成/退役”结论；
 4. 保留当前失败日志、进程树、writer lock 和 session ID 作为 artifacts。
 
 ### Gate 1：官方 Desktop attach spike
 
-1. 启动一个官方 daemon；
-2. 尝试所有有源码/宿主证据的 Desktop endpoint 配置入口；
-3. 捕获 Desktop 子进程命令行、FD、socket、initialize 和 thread subscription；
-4. 只接受“Desktop 与观察客户端在同一 app-server 内”的证据；
-5. 若无入口，输出 FAIL，不写产品 fallback。
+状态：**PASS**。当前 Desktop 在上述环境变量与兼容 daemon 前提下使用 WebSocket-over-UDS；隔离实例没有私有 Embedded writer，FD 指向同一 daemon control socket。证据见 `scripts/codex-web-phase0/dumps/gate-desktop-attach/README.md`。
 
 ### Gate 2：共享服务实现
 
@@ -374,6 +404,7 @@ Desktop 是否有官方方式连接现有 local/remote app-server？
 
 - 原设计：`docs/2026-08-21-codex-web-backend-design.md`
 - Phase 0 裁决：`docs/2026-08-21-codex-web-phase0-gate-verdict.md`
+- Desktop attach Gate：`scripts/codex-web-phase0/dumps/gate-desktop-attach/README.md`
 - writer lock：`/Users/jacklee/Projects/codex/codex-rs/thread-store/src/local/writer_lock.rs`
 - thread unload：`/Users/jacklee/Projects/codex/codex-rs/app-server/src/request_processors/thread_lifecycle.rs`
 - 同 server 多 connection：`/Users/jacklee/Projects/codex/codex-rs/app-server/src/thread_state.rs`
@@ -389,6 +420,6 @@ Desktop 是否有官方方式连接现有 local/remote app-server？
 
 修复顺序必须倒回来：
 
-> **先证明 Mac Codex Desktop 能与 CordCode 连接同一个官方 app-server，再继续谈实时事件、审批、模型和旧 backend 退役。**
+> **使用已证明的 Desktop local-daemon 入口，把 Mac Codex Desktop 与 CordCode 接到同一个官方 app-server；在此之前不得继续以 managed-loopback 路径宣称产品完成。**
 
 在这个 Gate 通过以前，任何局部 adapter 修补都不能解决 owner 当前报告的 Desktop ↔ iOS 双向接力失败。

@@ -392,13 +392,19 @@ SSV2 key 必须包含 backend id，禁止只按 thread id 合并。实验期 UI 
 
 ### 6.1 选择顺序
 
-1. **显式共享服务优先**：如果配置了 `-codex-web-app-server-url`，先探测该 loopback WebSocket；
-2. **官方 daemon 复用**：探测 Codex 官方 control socket/`daemon version`，已运行则复用；
-3. **官方 daemon managed start**：未运行且当前 Codex 支持 daemon 时，调用
+Desktop 产品路径只允许一个运行时真相源：
+
+1. **官方 daemon 复用**：探测 Codex 官方 control socket/`daemon version`，已运行则复用；
+2. **官方 daemon managed start**：未运行且当前 Codex 支持 daemon 时，调用
    `codex app-server daemon start`，再通过 control socket 连接；
-4. **兼容托管服务**：目标版本没有 daemon 时，才允许启动官方
-   `codex app-server --listen ws://127.0.0.1:<managed-port>`；这仍是官方 runtime，
-   但必须在诊断中标为 `managed-loopback-ws`，不能冒充用户已有共享 daemon。
+3. **Desktop attach**：CordCode Link 在用户 launchd domain 设置
+   `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1`，Desktop 下一次启动连接同一 control socket；
+4. **失败可见**：standalone 缺失、daemon 启动失败、版本不兼容或环境配置失败时，
+   `codex-web` 标为 `not_configured`/`incompatible`，不得另起 app-server 假装可用。
+
+`-codex-web-app-server-url` 只保留给隔离 contract/e2e 与明确的非 Desktop 实验；Desktop 产品模式
+不能使用它，因为当前 Desktop 已证明的入口是 local daemon Unix socket，而不是任意 loopback URL。
+此前的 `managed-loopback-ws` 只保留为历史失败证据与旧 owned-process 清理输入，不再是产品 fallback。
 
 连接 daemon control socket 有两种实现路径（Phase 0 实测修正，见 §22-2）：
 
@@ -432,7 +438,8 @@ WebSocket `/healthz` 或 daemon socket 可连接，只能证明进程活着。ba
   会自动 attach 该 daemon；这会把原本 Embedded 的运行位置静默改为共享 runtime。诊断必须区分
   `external-daemon-reused` 与 `cordcode-started-daemon`，后者还应显示是否观察到用户 TUI connection/thread，
   供 ownership 冲突排查；不得把两种来源都简化成 `connected`；
-- 兼容托管 loopback WS：由 MacBridge 独占并负责回收，只能绑定 `127.0.0.1`；
+- 旧版本遗留的 owned `managed-loopback-ws` 仅可按 PID/argv/start-time/listen-port 四重校验后回收；
+  不得恢复、复用或新建为 Desktop 产品服务；
 - managed record 只存 transport 来源、端点、PID/启动时间/版本等生命周期事实，不存 token、session 内容；
 - 不修改用户 Codex 自动更新、账号、provider 或全局配置。
 
@@ -561,7 +568,7 @@ Phase 0 设计采样与 adapter skeleton；它**不是 wire fixture**。每一�
 | Terminal 普通 `codex` TUI | **daemon 已运行；默认启动配置；无 `-c`/strict/non-replayable override** | TUI 选择 LocalDaemon；codex-web 收到同一 thread 的 `turn/started`、多个 delta、`turn/completed` | 核心共享运行时 Gate，必须 PASS |
 | Terminal 普通 `codex` TUI | daemon 未运行；先启动 TUI | TUI 选择 Embedded；之后启动 daemon/codex-web 不应伪称收到该 live turn；list/read 能力另测 | 已知隔离边界，不计整体 FAIL |
 | Terminal 普通 `codex` TUI | daemon 已运行；带 `-c`、strict 或不可重放覆盖 | TUI 选择 Embedded，codex-web 不应串入该 live stream | 已知隔离边界，不计整体 FAIL |
-| Codex Desktop / ChatGPT Codex | 记录其实际 app-server endpoint/进程归属 | 若共用 daemon：收到同一 thread 全生命周期；否则记录独立 runtime 与只读接力能力 | Phase 0 实测，不从 TUI 推断 |
+| Codex Desktop / ChatGPT Codex | daemon 已运行；`CODEX_APP_SERVER_USE_LOCAL_DAEMON=1`；CLI/daemon 版本兼容；Desktop 重新启动并继承环境 | Desktop 无私有 Embedded app-server 子进程；FD 指向同一 control socket；codex-web 收到同一 thread 全生命周期 | Desktop attach Gate 已隔离实证 PASS；产品真机矩阵仍需完成 |
 | VS Code Codex extension | 记录其实际 app-server endpoint/进程归属 | 同上；若连接独立 app-server，记录隔离事实 | Phase 0 实测，不从 TUI 推断 |
 | codex-web/iOS 自己发起 | daemon 运行，记录 Mac 客户端启动模式 | Mac 官方客户端能看到并续聊同一官方 thread | 双向串行接力 Gate |
 
@@ -982,7 +989,7 @@ PASS/PARTIAL/FAIL 口径，也不提前广告任何 experimental capability。
 对应裁决文档：[2026-08-21-codex-web-phase0-gate-verdict.md](2026-08-21-codex-web-phase0-gate-verdict.md)。
 证据：`scripts/codex-web-phase0/`（schemas 692 文件、§12 九组样本、TUI 三场景、宿主实测；四套
 validate 共 136 断言全 PASS，可复跑）。共享运行时 Gate：**PASS**（Terminal daemon+默认 TUI 路径
-成立；Desktop 独立 stdio runtime、VS Code 未安装如实 blocked，见 gate-hosts/README.md）。
+成立；最初 Desktop 独立 stdio runtime、VS Code 未安装如实记录，见 gate-hosts/README.md）。
 
 | # | 回写项 | 证据落点 |
 |---|---|---|
@@ -993,7 +1000,9 @@ validate 共 136 断言全 PASS，可复跑）。共享运行时 Gate：**PASS**
 | 5 | **Phase 2 实测补充**：从未有过 turn 的 thread 不出现在 `thread/list`（rollout 未物化，list 为 scan-and-repair + state DB 视图；`thread/start` 后立即 `turn/start` 即可见，turn 是否完成无关）。catalog 不得为此伪造条目或改用 loaded 集合冒充列表 | p2-catalog e2e（agent/codex-web/sessions_e2e_test.go 空条目断言）|
 | 6 | **Phase 2 实测补充**：`thread/list` 默认 created_at（秒粒度）cursor 翻页会跳过与 cursor 同秒创建的兄弟条目（官方 `should_skip` 只认严格 `ts < cursor.ts`，tie-breaker id 在遍历层不生效）；dumps/catalog 的 `cursor_page2_count:0`（同秒 4 条）即此行为。CodCode 聚合 catalog 用服务端默认页大小（单页覆盖），不依赖小页深翻页补全 | rollout/src/list.rs `should_skip` + p2-catalog e2e limit=1 边界断言 |
 | 7 | **Phase 4 daemon-WS 实测补充**：首次 ASK3 失败根因不是 transport，而是旧 mock fixture 第二题缺 options；官方 `normalize_request_user_input_tool_args` 明确拒绝任一空 options，并把错误作为 function_call_output 回给模型。修正为每题 2–3 options 后，同版本隔离 daemon WS 当前连接真实收到三题 `item/tool/requestUserInput`，adapter 写 option/text(Other)/option answers map，随后收到 `serverRequest/resolved` 且 turn completed | [requestUserInput daemon-WS Gate](2026-08-22-codex-web-userinput-daemon-gate.md)；`codex-rs/core/src/tools/handlers/request_user_input_spec.rs`；`TestE2EInteractionUserInput` |
+| 8 | **Desktop attach Gate 补充**：当前 ChatGPT `26.818.31338` 宿主在 `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1`、无强制 CLI 覆盖且 daemon 版本兼容时，以 WebSocket-over-UDS 连接 `~/.codex/app-server-control/app-server-control.sock`；隔离 Desktop 无私有 app-server 子进程，FD peer 与 daemon 监听 socket 相同。由此撤销“Desktop 只能独立 stdio”的旧覆盖面结论，并禁止产品回落 `managed-loopback-ws` | [Desktop attach Gate](../scripts/codex-web-phase0/dumps/gate-desktop-attach/README.md)；当前 Desktop `app.asar` 本地只读检查；隔离进程树/FD/initialize 日志 |
 
-§22-7 补齐 daemon 主路径 structured-user-input 真实证据；其余技术路线未变。
+§22-7 补齐 daemon 主路径 structured-user-input 真实证据；§22-8 由 owner 真机反证触发重新开门，
+并将 Desktop 产品拓扑修正为官方单 daemon 双 connection。
 实施注意的新事实清单（daemon 前置、同 daemon 多连接 resume 无冲突、`excludeTurns` 需
 experimentalApi、pending server request 不重放、TUI PTY 驱动细节等）见裁决文档 §4。
