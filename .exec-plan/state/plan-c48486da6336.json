@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T08:52:00Z",
+ "updated_at": "2026-08-22T09:11:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2699,7 +2699,8 @@
    "phase": "phase5",
    "kind": "regression",
    "depends_on": [
-    "p5-interactions-product-audit-tests"
+    "p5-interactions-product-audit-tests",
+    "p0-topology-v2-hardening-regression"
    ],
    "source": "owner audit request 2026-08-22",
    "notes": "修复版已部署至 Mac 与连接的 iPhone；等待 owner 实际触发 command/file approval 与 requestUserInput 后提供产品层回归证据，因此保持 pending。",
@@ -2725,7 +2726,8 @@
    "phase": "phase6",
    "kind": "impl",
    "depends_on": [
-    "p5-deploy-regression"
+    "p5-deploy-regression",
+    "p0-topology-v2-hardening-regression"
    ],
    "source": "design §14/phase6",
    "notes": "",
@@ -2789,7 +2791,7 @@
   {
    "id": "p6-retirement-impl",
    "title": "Phase6 退役裁决",
-   "description": "§15 十二条退役门槛逐项核对（每条真实证据）；owner 明确裁决（含 PARTIAL 接受/provider/memory 差距接受）；通过后移除旧产品入口（源码保留观察窗口）。",
+   "description": "§15 退役门槛逐项核对（每条真实证据）；T0/T1 必须 PASS，PARTIAL/EVIDENCE-ONLY 不得退役；通过后移除旧产品入口（源码保留观察窗口）。",
    "status": "pending",
    "phase": "phase6",
    "kind": "impl",
@@ -2936,9 +2938,78 @@
     "artifacts": [],
     "checked_at": null
    }
+  },
+  {
+   "id": "p0-topology-v2-hardening-impl",
+   "title": "Phase0 v2.0 topology-first 产品路径硬化",
+   "description": "review-fix-for:p0-desktop-attach-review-fix-regression；按 v2.0 §0/§6/§14 删除仍可构造 managed-loopback 的 dormant 产品代码，使 daemon start 始终解析当前 CODEX_HOME 下官方 standalone，并补齐 fail-closed/同 daemon 诊断边界。不得读取旧 agent/codex。",
+   "status": "pending",
+   "phase": "phase0",
+   "kind": "impl",
+   "depends_on": [
+    "p0-desktop-attach-review-fix-tests"
+   ],
+   "source": "design v2.0 §0.1/§6.1/§13.0/§14 Phase0 + audit 2026-08-22",
+   "notes": "review-fix-for:p0-desktop-attach-review-fix-regression；设计漂移审计发现 lifecycle 仍保留 dormant managedProcess/persist/establish 构造面，且 daemon binary 解析未把 active CODEX_HOME standalone 作为第一官方路径。",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "implementation",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "p0-topology-v2-hardening-tests",
+   "title": "Phase0 v2.0 单 daemon 静态与运行门",
+   "description": "覆盖 CODEX_HOME standalone 优先、版本/daemon 失败可见、产品 Probe 零 managed spawn、旧 record 仅严格身份清理、主/observer 同 endpoint；运行 Go、vet、MacBridge 定向测试与 Release 构建。",
+   "status": "pending",
+   "phase": "phase0",
+   "kind": "tests",
+   "depends_on": [
+    "p0-topology-v2-hardening-impl"
+   ],
+   "source": "design v2.0 §6.1/§13.1/§23",
+   "notes": "",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "automated",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
+  },
+  {
+   "id": "p0-topology-v2-hardening-regression",
+   "title": "Phase0 v2.0 Desktop ↔ iOS T1 双向竖切门",
+   "description": "Release 部署后由 owner 保持 Desktop 与 iOS 同时打开，验证 Desktop→iOS live active/delta/terminal、iOS→Desktop 同 thread 发现/续聊、双方同时打开无 active writer；不得以刷新、切 session、退出或重启另一端作为通过条件。",
+   "status": "pending",
+   "phase": "phase0",
+   "kind": "regression",
+   "depends_on": [
+    "p0-topology-v2-hardening-tests"
+   ],
+   "source": "design v2.0 §0.1/§8.2/§13.0/§13.3 rows 6-8",
+   "notes": "review-fix-for:p0-desktop-attach-review-fix-regression；这是新版设计唯一能解冻剩余产品扩面与 Phase6 的 owner 真机门。",
+   "verification": {
+    "required": true,
+    "status": "missing",
+    "method": "manual",
+    "attestation": "self-attested",
+    "na_reason": null,
+    "summary": "",
+    "artifacts": [],
+    "checked_at": null
+   }
   }
  ],
- "notes_phase0": "Phase 0 原 verdict 的窄结论仍成立：Terminal TUI 在 daemon 已运行且默认配置时共享 runtime=PASS。2026-08-22 owner 真机反证 Desktop 的‘store 级续聊接力可用’：Desktop 独立 stdio app-server 与 CordCode managed WS 仅共享持久化 store，不能双向续聊或实时旁观；Desktop Gate 已通过 p0-desktop-attach-review-fix-* 重新打开，未通过前不得宣称完整双向接力或退役旧 backend。VS Code=未安装/不测。",
+ "notes_phase0": "v2.0 取代旧 Terminal-only PASS：Terminal LocalDaemon 只作 transport 旁证。产品 PASS 必须由 Desktop 与 CordCode 同一官方 daemon 的 T0 证据和 owner T1 双向真机门共同组成；PARTIAL/EVIDENCE-ONLY、共享 store、managed-loopback 均不得放行扩面或退役。VS Code=未安装/不测。",
  "notes": {
   "phase2_catalog": "官方物化/同秒 cursor 两事实入档 §22-5/6；e2e 清理修复(daemon stop 带 CODEX_HOME)"
  }
