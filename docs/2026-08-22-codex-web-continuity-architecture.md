@@ -395,6 +395,20 @@ go-bridge 侧 `set_observation_scope` 会触发三件事，**不要从零再造�
 
 #1 失败才去查 L0/L1。#2/#5 失败是 L2（须看到 delta，不能只看到里程碑或 `Ok:true`）。#3/#4/#7 失败是 L3；#7 以重启 Link 为准。#6 是官方宿主边界，用来防止把「退出 Desktop」误写成产品主路径。
 
+### 7.1 owner 真机执行记录（2026-08-23，iPhone 16 Pro；MacBridge bd6dc29 runtime + iOS 8f3ad3e→3ba4a35）
+
+| # | 结果 | 证据 |
+|---|---|---|
+| 1 | ✅（由 #5/#7 场景覆盖） | 两次重启 Link 均在 Desktop 附着的长任务运行中执行；官方 daemon 与任务全程存活，仅 MacBridge 重建被动订阅 |
+| 2 | ✅ | 12:01:28 / 12:03 Mac 发「小猫笑话」「蛤蟆笑话」：iOS 实时渲染（用户气泡+逐段流式），未切 session |
+| 3 | ✅ | 12:05:55 `turn_completed`（rev 483）交付；1000 字正文在 iOS 完整收口，输入框无假执行中 |
+| 4 | ✅ | 12:31-12:33 Todo 5/6 步骤依次开跑并收口（各 20s+笑文本体），后续步骤无卡执行中 |
+| 5 | ✅ | 12:05:00 重启 Link（纪元 8b66706f→cc0416ec）→ 12:05:23 Mac 首发（rev 127，base 126 接续快照）即时流式 |
+| 6 | 未测（对照项，非阻断） | 完整退出 Codex Desktop 的宿主边界，本轮未纳入 |
+| 7 | ✅ | 12:29:52 重启 Link（纪元→2946234b）发生在长任务运行中；iOS 3s 重连，`sinceRev=54`→`headRev=19` 按 `full(epoch_change)` 快照强制采纳；turn_completed rev 148 / 194 均交付（write_err 空）且 12:33 截图输入框收口 |
+
+归因补充：本轮全部行均在 **iOS `3ba4a35`（epoch-change 全量恢复强制采纳）+ MacBridge `67f920a` / `bd6dc29`** 下通过。修复前的差异对照：2026-08-23 10:33 美国笑话轮在旧 iOS 二进制下整段丢失——桥重启后新纪元 rev 106-147（均 ≤ 旧纪元 appliedRev 147）被 `applyFull` 单调门全部 STALE-DROP，直到 rev 148 起恢复；修复后同一轮数据在新纪元全量快照下恢复可见。
+
 ## 8. 给后续 agent 的阅读顺序与禁令
 
 阅读顺序：
