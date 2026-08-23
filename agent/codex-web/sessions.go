@@ -50,6 +50,34 @@ type GitInfo struct {
 	SHA       *string `json:"sha"`
 }
 
+// ThreadSection 是官方 thread 的 section 归属。0.149.0-alpha.4 活体 wire 实测为
+// {id,name,appearance} 对象（2026-08-23 探针样本）；更早 wire 可能只有裸字符串名。
+// 两者都接受，避免 thread/list 因该字段类型变化整体解码失败（会话发现 "no broadcast"）。
+type ThreadSection struct {
+	ID         string          `json:"id"`
+	Name       string          `json:"name"`
+	Appearance json.RawMessage `json:"appearance"`
+}
+
+// UnmarshalJSON 接受对象（当前官方形状）、字符串（旧 wire 视为名称）与 null。
+func (s *ThreadSection) UnmarshalJSON(data []byte) error {
+	var obj struct {
+		ID         string          `json:"id"`
+		Name       string          `json:"name"`
+		Appearance json.RawMessage `json:"appearance"`
+	}
+	if err := json.Unmarshal(data, &obj); err != nil {
+		var name string
+		if err2 := json.Unmarshal(data, &name); err2 == nil {
+			*s = ThreadSection{Name: name}
+			return nil
+		}
+		return err
+	}
+	*s = ThreadSection(obj)
+	return nil
+}
+
 // ThreadInfo 是官方 Thread wire 形状（dumps/catalog 冻结；schema Thread 未列出而
 // 实测存在的 extra/historyMode/canAcceptDirectInput 按样本保留，§3.0 样本优先）。
 type ThreadInfo struct {
@@ -60,7 +88,7 @@ type ThreadInfo struct {
 	ParentThreadID   *string         `json:"parentThreadId"`
 	Preview          string          `json:"preview"`
 	Ephemeral        bool            `json:"ephemeral"`
-	Section          *string         `json:"section"`
+	Section          *ThreadSection  `json:"section"`
 	SectionEnteredAt *int64          `json:"sectionEnteredAt"`
 	ProjectID        *string         `json:"projectId"`
 	HistoryMode      string          `json:"historyMode"`

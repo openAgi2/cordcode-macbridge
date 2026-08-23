@@ -516,3 +516,41 @@ func TestCatalogBadResponseShape(t *testing.T) {
 	}
 	_ = fmt.Sprint()
 }
+
+func TestThreadListDecodesLiveSectionShapes(t *testing.T) {
+	raw, err := os.ReadFile("testdata/official-0.149.0-alpha.4/dumps/catalog-live/raw.jsonl")
+	if err != nil {
+		t.Fatalf("read live sample: %v", err)
+	}
+	var page ThreadListPage
+	if err := json.Unmarshal(raw, &page); err != nil {
+		t.Fatalf("live thread/list wire must decode: %v", err)
+	}
+	if len(page.Data) < 4 {
+		t.Fatalf("sample rows missing: %d", len(page.Data))
+	}
+	objectSection := 0
+	for _, th := range page.Data {
+		switch {
+		case th.Section != nil && th.Section.ID != "":
+			objectSection++
+		case th.Section == nil:
+			// null section must stay nil, not error out
+		default:
+			t.Fatalf("unexpected section value shape: %+v", th.Section)
+		}
+	}
+	if objectSection == 0 {
+		t.Fatal("live sample must include object-shaped section rows")
+	}
+}
+
+func TestThreadSectionDecodeAcceptsLegacyString(t *testing.T) {
+	var th ThreadInfo
+	if err := json.Unmarshal([]byte(`{"id":"t1","section":"Pinned","status":{"type":"idle"}}`), &th); err != nil {
+		t.Fatalf("legacy string section must decode: %v", err)
+	}
+	if th.Section == nil || th.Section.Name != "Pinned" {
+		t.Fatalf("want name Pinned, got %+v", th.Section)
+	}
+}
