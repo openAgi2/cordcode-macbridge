@@ -419,9 +419,19 @@ struct WorkspaceView: View {
                 .padding(.leading, 13)
             Spacer().frame(width: 27) // 13 + 28 + 27 = 68px. 起点完全锁定在 68px (x≈200)！
 
-            Text(agent.displayName)
-                .font(.system(size: 17, weight: .semibold))
-                .frame(width: 403, alignment: .leading)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(agent.displayName)
+                    .font(.system(size: 17, weight: .semibold))
+                    .frame(width: 403, alignment: .leading)
+                if agent.kind.lowercased() == "codex-web", runtimeManager.codexDaemonConfigChanged {
+                    Text(L10n.codexConfigChangedHint)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(L10n.codexConfigChangedHintFull)
+                }
+            }
 
             HStack(spacing: 12) {
                 Image(systemName: agent.isAvailable ? "checkmark.circle" : "exclamationmark.circle")
@@ -472,14 +482,6 @@ struct WorkspaceView: View {
                 .fill(Color.white.opacity(0.15))
                 .frame(height: 0.5)
                 .offset(y: -3) // 分割线也跟随上移 3px
-        }
-
-        if agent.kind.lowercased() == "codex-web", runtimeManager.codexDaemonConfigChanged {
-            Text(L10n.codexConfigChangedHint)
-                .font(.caption)
-                .foregroundStyle(.orange)
-                .padding(.leading, 16)
-                .padding(.bottom, 6)
         }
     }
 
