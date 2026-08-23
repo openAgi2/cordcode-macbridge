@@ -14,6 +14,7 @@ struct WorkspaceView: View {
     @ObservedObject var backendViewModel: BackendStatusViewModel
     @ObservedObject var deviceStore: DeviceStore
     @ObservedObject var pairingViewModel: PairingViewModel
+    @ObservedObject var runtimeManager: RuntimeManager
     let onStartBridge: () -> Void
     let onStopBridge: () -> Void
     let onRestartBridge: () -> Void
@@ -26,6 +27,13 @@ struct WorkspaceView: View {
     @State private var showRemoveConfirmation = false
     @State private var copiedWebLinkId: String? = nil
     @State private var generatingWebLinkId: String? = nil
+    @State private var isRestartingCodexDaemon = false
+    @State private var codexRestartMessage: String? = nil
+
+    /// 活跃 turn / pending 交互（每 3s 轮询更新）；>0 时重启共享 daemon 会打断任务。
+    private var hasActiveCodexTurns: Bool {
+        runtimeManager.codexWebActiveTurns > 0 || runtimeManager.codexWebPendingInteractions > 0
+    }
 
     private var agents: [BackendAgentStatus] {
         if !backendViewModel.agents.isEmpty {
@@ -88,6 +96,17 @@ struct WorkspaceView: View {
             Button(L10n.cancel, role: .cancel) {}
         } message: {
             Text(L10n.devicesRevokeMessage)
+        }
+        .alert(
+            L10n.codexRestartSharedService,
+            isPresented: Binding(
+                get: { codexRestartMessage != nil },
+                set: { if !$0 { codexRestartMessage = nil } }
+            )
+        ) {
+            Button(L10n.ok, role: .cancel) { codexRestartMessage = nil }
+        } message: {
+            Text(codexRestartMessage ?? "")
         }
     }
 
@@ -393,6 +412,7 @@ struct WorkspaceView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    @ViewBuilder
     private func agentRow(for agent: BackendAgentStatus) -> some View {
         HStack(spacing: 0) {
             AgentBrandMark(kind: agent.kind)
@@ -415,6 +435,25 @@ struct WorkspaceView: View {
 
             Spacer()
 
+            if agent.kind.lowercased() == "codex-web" {
+                Button {
+                    restartSharedCodexDaemon()
+                } label: {
+                    if isRestartingCodexDaemon {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                        Text(L10n.codexRestartSharedService)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(isRestartingCodexDaemon || hasActiveCodexTurns)
+                .help(hasActiveCodexTurns ? L10n.codexRestartRejectedActiveTurns : L10n.codexRestartSharedService)
+                .frame(width: 172, height: 32)
+            }
+
             if !agent.isAvailable {
                 Button(L10n.workspaceRecheck) {
                     Task { await backendViewModel.testAgent(id: agent.id) }
@@ -433,6 +472,31 @@ struct WorkspaceView: View {
                 .fill(Color.white.opacity(0.15))
                 .frame(height: 0.5)
                 .offset(y: -3) // 分割线也跟随上移 3px
+        }
+
+        if agent.kind.lowercased() == "codex-web", runtimeManager.codexDaemonConfigChanged {
+            Text(L10n.codexConfigChangedHint)
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .padding(.leading, 16)
+                .padding(.bottom, 6)
+        }
+    }
+
+    private func restartSharedCodexDaemon() {
+        guard !isRestartingCodexDaemon else { return }
+        isRestartingCodexDaemon = true
+        Task { @MainActor in
+            let outcome = await runtimeManager.restartSharedCodexDaemon()
+            isRestartingCodexDaemon = false
+            switch outcome {
+            case .restarted:
+                codexRestartMessage = L10n.codexRestartSuccess
+            case .rejectedActiveTurns:
+                codexRestartMessage = L10n.codexRestartRejectedActiveTurns
+            case let .failed(detail):
+                codexRestartMessage = String(format: L10n.codexRestartFailed, detail)
+            }
         }
     }
 
@@ -615,14 +679,12 @@ private extension BridgeStatus {
     }
 }
 
-/// 工作站唯一主操作的轻量动效：蓝色底色保持原有状态语义，扫光与呼吸只用于提示可开始配对。
+/// 工作站主操作：静态蓝底白字，不做扫光/呼吸（持续动画长期占用 CPU）；悬停时轻微放大。
+/// 首次使用（无设备）与常规头部共用，减少视觉层级干扰。
 private struct PairDeviceButton: View {
     let title: String
     let action: () -> Void
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isBreathing = false
-    @State private var sweepProgress = false
     @State private var isHovering = false
 
     var body: some View {
@@ -641,52 +703,23 @@ private struct PairDeviceButton: View {
         .background {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .fill(Color.accentColor)
-                .overlay {
-                    GeometryReader { proxy in
-                        LinearGradient(
-                            colors: [.clear, .white.opacity(0.18), .clear],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                        .frame(width: proxy.size.width * 0.38)
-                        .offset(x: sweepProgress ? proxy.size.width : -proxy.size.width * 0.38)
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-                    .allowsHitTesting(false)
-                }
         }
         .overlay {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .stroke(.white.opacity(isBreathing ? 0.34 : 0.18), lineWidth: 1)
+                .stroke(.white.opacity(0.18), lineWidth: 1)
         }
         .shadow(
             color: Color.accentColor.opacity(0.12),
-            radius: isBreathing ? 8 : 4,
-            y: isBreathing ? 3 : 1
+            radius: 4,
+            y: 1
         )
-        .scaleEffect(isHovering ? 1.02 : (isBreathing ? 1.008 : 1))
+        .scaleEffect(isHovering ? 1.02 : 1)
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.16)) {
                 isHovering = hovering
             }
         }
-        .onAppear(perform: startMotion)
-        .onChange(of: reduceMotion) { _, _ in startMotion() }
         .accessibilityHint(L10n.pairNewDevice)
-    }
-
-    private func startMotion() {
-        guard !reduceMotion else {
-            isBreathing = false
-            sweepProgress = false
-            return
-        }
-        withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
-            isBreathing = true
-        }
-        withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
-            sweepProgress = true
-        }
     }
 }
 

@@ -94,6 +94,11 @@ enum L10n {
     static var workspacePausedSubtitle: String { tr("workspace_paused_subtitle") }
     static var workspaceStart: String { tr("workspace_start") }
     static var workspaceRecheck: String { tr("workspace_recheck") }
+    static var codexRestartSharedService: String { tr("codex_restart_shared_service") }
+    static var codexConfigChangedHint: String { tr("codex_config_changed_hint") }
+    static var codexRestartSuccess: String { tr("codex_restart_success") }
+    static var codexRestartRejectedActiveTurns: String { tr("codex_restart_rejected_active_turns") }
+    static var codexRestartFailed: String { tr("codex_restart_failed") }
     static var workspaceNoToolsTitle: String { tr("workspace_no_tools_title") }
     static var workspaceNoToolsSubtitle: String { tr("workspace_no_tools_subtitle") }
 
@@ -468,6 +473,11 @@ enum L10n {
             "workspace_recheck": "Recheck",
             "workspace_no_tools_title": "One step away",
             "workspace_no_tools_subtitle": "CordCode Link is running, but no AI tools are available yet.",
+            "codex_restart_shared_service": "Restart Shared Codex Service",
+            "codex_config_changed_hint": "Codex config changed (e.g. provider switch). Restart the shared Codex service to apply it.",
+            "codex_restart_success": "Shared Codex service restarted. If the Codex desktop app did not recover automatically, quit and reopen it.",
+            "codex_restart_rejected_active_turns": "A task is still running. Wait for it to finish before restarting the shared Codex service.",
+            "codex_restart_failed": "Restarting the shared Codex service failed: %@",
             "cccode_bridge": "CordCode Link",
             "status": "Status",
             "bridge_running": "Bridge running",
@@ -803,6 +813,11 @@ enum L10n {
             "workspace_recheck": "重新检查",
             "workspace_no_tools_title": "还差一步才能开始",
             "workspace_no_tools_subtitle": "CordCode Link 正在运行，但还没有可用的 AI 工具。",
+            "codex_restart_shared_service": "重启共享 Codex 服务",
+            "codex_config_changed_hint": "检测到 Codex 配置变更（如 provider 切换），重启共享 Codex 服务后才会生效。",
+            "codex_restart_success": "已重启共享 Codex 服务。如果 Codex 桌面应用没有自动恢复，请完全退出并重新打开它。",
+            "codex_restart_rejected_active_turns": "当前仍有任务在执行，请等任务结束后再重启共享 Codex 服务。",
+            "codex_restart_failed": "重启共享 Codex 服务失败：%@",
             "cccode_bridge": "CordCode Link",
             "status": "状态",
             "bridge_running": "Bridge 运行中",

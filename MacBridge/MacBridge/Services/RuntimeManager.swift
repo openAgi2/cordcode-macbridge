@@ -283,6 +283,12 @@ class RuntimeManager: ObservableObject {
     @Published private(set) var lastError: String?
     @Published private(set) var agents: [AgentInfo] = []
     @Published private(set) var supervisorState: RuntimeSupervisorState = .idle
+    // codex-web 页「重启共享 Codex 服务」按钮的活动计数（来自 management status v1.activity，
+    // 每 3s 轮询更新）。>0 表示有活跃 turn / 待处理交互，重启 daemon 会打断它们，按钮禁用。
+    @Published private(set) var codexWebActiveTurns: UInt32 = 0
+    @Published private(set) var codexWebPendingInteractions: UInt32 = 0
+    // ~/.codex/config.toml 变更检测（cc-switch 切 provider 后提示重启共享 daemon 生效）。
+    @Published private(set) var codexDaemonConfigChanged = false
 
     var supervisorObservation: RuntimeSupervisorObservation {
         RuntimeSupervisorObservation(supervisorState: supervisorState)
@@ -562,6 +568,7 @@ class RuntimeManager: ObservableObject {
                     await self.pollManagementAPI()
                     self.evaluateAutoRestart()
                 }
+                self.refreshCodexDaemonConfigMonitor()
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
             }
         }
@@ -843,6 +850,10 @@ class RuntimeManager: ObservableObject {
             }
             latestManagementStatus = resp
             applyManagementStatus(resp.status)
+            if let activity = resp.v1?.activity {
+                codexWebActiveTurns = activity.bridgeOwnedActiveTurns
+                codexWebPendingInteractions = activity.pendingInteractions
+            }
             managementFailureCount = 0
             if resp.v1?.fileReadHealth.restartRecommended == true {
                 triggerAutoRestart(reason: "文件读取运行时已退化，自动安全重启")
@@ -1070,6 +1081,128 @@ class RuntimeManager: ObservableObject {
             didProjectsMerge: didProjectsMerge
         )
     }
+
+    /// 重启官方共享 Codex daemon 的 UI 结果。
+    enum CodexSharedDaemonRestartOutcome: Equatable, Sendable {
+        case restarted
+        case rejectedActiveTurns(activeTurns: UInt32, pendingInteractions: UInt32)
+        case failed(String)
+    }
+
+    /// 注入式静态结果（单元测试同构），与 `CodexSharedDaemonRestartOutcome` 不同层。
+    enum CodexSharedDaemonRestartResult: Equatable, Sendable {
+        case restarted
+        case skipped
+        case failed(String)
+    }
+
+    /// 重启官方共享 Codex daemon：cc-switch 改完 `~/.codex/config.toml` 后，进程内配置
+    /// 副本不会自动更新，`daemon restart` 是唯一生效杠杆（官方原子命令，重启后重读
+    /// config.toml）。seat 的幂等 `daemon start` 不会覆盖此动作。控制 socket 必须在等待
+    /// 窗口内重建，与 codex-web lifecycle 的 30s 窗口一致。
+    internal nonisolated static func restartCodexSharedDaemon(
+        homeDirectory: String,
+        fileExists: (String) -> Bool,
+        run: (String, [String], [String: String]?) -> RuntimeCommandResult
+    ) -> CodexSharedDaemonRestartResult {
+        let codexHome = URL(fileURLWithPath: homeDirectory, isDirectory: true)
+            .appendingPathComponent(".codex", isDirectory: true)
+        let daemonBinary = codexHome
+            .appendingPathComponent("packages/standalone/current/codex", isDirectory: false)
+            .path
+        guard fileExists(daemonBinary) else {
+            return .failed(
+                "codex-web 需要官方 managed standalone：缺少 \(daemonBinary)。" +
+                "请使用官方 Codex installer 安装后重启 CordCode Link。"
+            )
+        }
+
+        var daemonEnvironment = ProcessInfo.processInfo.environment
+        daemonEnvironment["CODEX_HOME"] = codexHome.path
+        let restart = run(daemonBinary, ["app-server", "daemon", "restart"], daemonEnvironment)
+        guard restart.terminationStatus == 0 else {
+            return .failed(commandFailureDetail(prefix: "官方 Codex daemon 重启失败", result: restart))
+        }
+
+        let socketPath = codexHome
+            .appendingPathComponent("app-server-control/app-server-control.sock", isDirectory: false)
+            .path
+        let deadline = Date().addingTimeInterval(30)
+        while Date() < deadline {
+            if fileExists(socketPath) {
+                return .restarted
+            }
+            Thread.sleep(forTimeInterval: 0.25)
+        }
+        return .failed("重启命令成功，但控制 socket 未在 30 秒内恢复（\(socketPath)）")
+    }
+
+    /// codex-web 页按钮动作：预检活跃 turn → 重启共享 daemon → 更新 config 基线。
+    /// 预检避免打断进程内 loaded thread/writer；文件变更提示在重启成功后消除。
+    func restartSharedCodexDaemon() async -> CodexSharedDaemonRestartOutcome {
+        if let client = apiClient,
+           let status = try? await client.getStatus(),
+           let activity = status.v1?.activity,
+           activity.bridgeOwnedActiveTurns > 0 || activity.pendingInteractions > 0 {
+            return .rejectedActiveTurns(
+                activeTurns: activity.bridgeOwnedActiveTurns,
+                pendingInteractions: activity.pendingInteractions
+            )
+        }
+        let homeDirectory = FileManager.default.homeDirectoryForCurrentUser.path
+        let result = await Task.detached(priority: .utility) {
+            Self.restartCodexSharedDaemon(
+                homeDirectory: homeDirectory,
+                fileExists: { FileManager.default.fileExists(atPath: $0) },
+                run: { Self.runCommandResult($0, $1, environment: $2, timeout: 30) }
+            )
+        }.value
+        switch result {
+        case .restarted:
+            markCodexDaemonConfigApplied()
+            return .restarted
+        case .skipped:
+            return .failed("codex-web 后端未启用")
+        case let .failed(detail):
+            return .failed(detail)
+        }
+    }
+
+    var codexDaemonConfigURL: URL? {
+        guard config.drivers.contains("codex-web") else { return nil }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex/config.toml", isDirectory: false)
+    }
+
+    /// 检测 `~/.codex/config.toml` 是否在「上次重启生效」之后被改动（cc-switch 会重写它）。
+    /// 首次运行不提示：记录当前 mtime 为基线，避免历史陈旧改动误报。
+    func refreshCodexDaemonConfigMonitor() {
+        guard let url = codexDaemonConfigURL,
+              let mtime = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date else {
+            codexDaemonConfigChanged = false
+            return
+        }
+        let key = Self.codexDaemonConfigMtimeKey
+        if UserDefaults.standard.object(forKey: key) == nil {
+            UserDefaults.standard.set(mtime.timeIntervalSinceReferenceDate, forKey: key)
+            codexDaemonConfigChanged = false
+            return
+        }
+        let applied = UserDefaults.standard.double(forKey: key)
+        codexDaemonConfigChanged = abs(mtime.timeIntervalSinceReferenceDate - applied) > 0.001
+    }
+
+    private func markCodexDaemonConfigApplied() {
+        codexDaemonConfigChanged = false
+        guard let url = codexDaemonConfigURL,
+              let mtime = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date else {
+            return
+        }
+        UserDefaults.standard.set(mtime.timeIntervalSinceReferenceDate, forKey: Self.codexDaemonConfigMtimeKey)
+    }
+
+    /// 配置基线持久化键：重启 daemon 成功（或首次观察）时写入 config.toml 的 mtime。
+    private static let codexDaemonConfigMtimeKey = "codexDaemon.configMtimeApplied"
 
     /// 配置 Codex Desktop 与 codex-web 共用官方 local daemon。
     ///

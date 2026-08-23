@@ -389,6 +389,60 @@ final class MacBridgeBehaviorTests: XCTestCase {
         ])
     }
 
+    func testCodexSharedDaemonRestartRunsOfficialRestartAndWaitsForSocket() {
+        var calls: [(path: String, arguments: [String], environment: [String: String]?)] = []
+        let result = RuntimeManager.restartCodexSharedDaemon(
+            homeDirectory: "/Users/tester",
+            fileExists: { path in
+                path == "/Users/tester/.codex/packages/standalone/current/codex" ||
+                    path == "/Users/tester/.codex/app-server-control/app-server-control.sock"
+            },
+            run: { path, arguments, environment in
+                calls.append((path, arguments, environment))
+                return RuntimeCommandResult(terminationStatus: 0, standardOutput: "restarted", standardError: "")
+            }
+        )
+
+        XCTAssertEqual(result, .restarted)
+        XCTAssertEqual(calls.count, 1)
+        XCTAssertEqual(calls[0].path, "/Users/tester/.codex/packages/standalone/current/codex")
+        XCTAssertEqual(calls[0].arguments, ["app-server", "daemon", "restart"])
+        XCTAssertEqual(calls[0].environment?["CODEX_HOME"], "/Users/tester/.codex")
+    }
+
+    func testCodexSharedDaemonRestartFailsClosedWithoutStandalone() {
+        var commandCount = 0
+        let result = RuntimeManager.restartCodexSharedDaemon(
+            homeDirectory: "/Users/tester",
+            fileExists: { _ in false },
+            run: { _, _, _ in
+                commandCount += 1
+                return RuntimeCommandResult(terminationStatus: 0, standardOutput: "", standardError: "")
+            }
+        )
+
+        guard case let .failed(detail) = result else {
+            return XCTFail("missing standalone must fail without touching the daemon")
+        }
+        XCTAssertTrue(detail.contains("managed standalone"))
+        XCTAssertEqual(commandCount, 0)
+    }
+
+    func testCodexSharedDaemonRestartSurfacesOfficialError() {
+        let result = RuntimeManager.restartCodexSharedDaemon(
+            homeDirectory: "/Users/tester",
+            fileExists: { $0 == "/Users/tester/.codex/packages/standalone/current/codex" },
+            run: { _, _, _ in
+                RuntimeCommandResult(terminationStatus: 9, standardOutput: "", standardError: "daemon not running")
+            }
+        )
+
+        guard case let .failed(detail) = result else {
+            return XCTFail("non-zero restart must fail")
+        }
+        XCTAssertTrue(detail.contains("daemon not running"))
+    }
+
     func testProcessEnvironmentCarriesOpenCodeCreds() {
         let config = RuntimeConfig(
             executablePath: "/usr/bin/false",

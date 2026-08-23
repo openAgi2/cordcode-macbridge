@@ -8,6 +8,8 @@
 
 ## [Unreleased]
 
+- **新功能：Codex Web 行新增「重启共享 Codex 服务」按钮**：cc-switch 等工具改完 `~/.codex/config.toml` 后，运行中的共享 daemon 不会重读配置（进程内副本），切换 provider 需要让 daemon 重启才是生效杠杆。按钮执行官方 `app-server daemon restart` 并在控制 socket 恢复后提示；有任务正在执行时禁用；重启后 Codex 桌面若未自动恢复会提示完全退出并重新打开。检测到 `config.toml` 变更时，该行会先行提示「重启后生效」。
+- **改进：工作站主操作按钮不再做扫光/呼吸**：配对主按钮的持续动画（1.5s 扫光 + 1.8s 呼吸循环）长期占用 CPU，改为静态样式，仅保留悬停反馈。
 - **修复：codex-web 会话目录（thread/list）不再因 `section` 字段类型变化整体解码失败**：官方 0.149.0-alpha.4 的 `section` 实测是 `{id,name,appearance}` 对象（部分线程为 `null`），旧解析器只接受 string，导致会话发现轮询每次解码失败（`no broadcast`）、iOS 会话目录长期无法实时刷新。现已按真实 wire 样本兼容对象/字符串/null 三种形状。
 - **修复：重启 Link 后 iPhone 仍开着的 Codex 会话应立刻旁观**：`set_observation_scope` 不再无条件返回成功。观察连接未就绪或 Desktop 持有私有 writer 时会失败可见；成功则表示已 Subscribe 并 attach。零目标窗口内仍观察的会话会继续进入投影，`turn_completed` 会进入 LAN 回放缓冲，长回合收尾后不应只剩正文、输入框一直执行中。
 - **修复：退出 CordCode Link 不应要求重启 Codex Desktop**：官方 daemon 改为登录级座位（LaunchAgent 以 KeepAlive 循环跑幂等的 `daemon start`，0.25s 补位），随登录存在、不随 Link 退出。Desktop 已附着后，停掉 MacBridge 不再把 daemon 带走。官方 Desktop 一旦 `daemon version` 探测失败会把 transport 锁死成私有 stdio，之后再也不会试 websocket——那是异常恢复，不是退出 Link 的正常步骤。Desktop 与 standalone 的 CLI 小版本不一致不再挡住座位安装。
