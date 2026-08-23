@@ -623,13 +623,11 @@ struct PairingStepTracker: View {
     }
 }
 
+/// 配对确认主操作：静态蓝底白字，不做扫光/呼吸（持续动画长期占用 CPU）；悬停时轻微放大。
 private struct ApproveDeviceButton: View {
     let title: String
     let action: () -> Void
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isBreathing = false
-    @State private var sweepProgress = false
     @State private var isHovering = false
 
     var body: some View {
@@ -646,50 +644,21 @@ private struct ApproveDeviceButton: View {
         .background {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(Color.accentColor)
-                .overlay {
-                    GeometryReader { proxy in
-                        LinearGradient(
-                            colors: [.clear, .white.opacity(0.18), .clear],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                        .frame(width: proxy.size.width * 0.38)
-                        .offset(x: sweepProgress ? proxy.size.width : -proxy.size.width * 0.38)
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .allowsHitTesting(false)
-                }
         }
         .overlay {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(.white.opacity(isBreathing ? 0.34 : 0.18), lineWidth: 1)
+                .stroke(.white.opacity(0.18), lineWidth: 1)
         }
         .shadow(
             color: Color.accentColor.opacity(0.12),
-            radius: isBreathing ? 8 : 4,
-            y: isBreathing ? 3 : 1
+            radius: 4,
+            y: 1
         )
-        .scaleEffect(isHovering ? 1.02 : (isBreathing ? 1.008 : 1))
+        .scaleEffect(isHovering ? 1.02 : 1)
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.16)) {
                 isHovering = hovering
             }
-        }
-        .onAppear(perform: startMotion)
-        .onChange(of: reduceMotion) { _, _ in startMotion() }
-    }
-
-    private func startMotion() {
-        guard !reduceMotion else {
-            isBreathing = false
-            sweepProgress = false
-            return
-        }
-        withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
-            isBreathing = true
-        }
-        withAnimation(.linear(duration: 1.5).repeatForever(autoreverses: false)) {
-            sweepProgress = true
         }
     }
 }
