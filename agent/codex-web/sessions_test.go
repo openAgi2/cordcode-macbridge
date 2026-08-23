@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -448,10 +449,10 @@ func TestOwnershipConflictTranslation(t *testing.T) {
 		t.Fatalf("冲突翻译字段缺失：%+v", oc)
 	}
 	if !strings.Contains(oc.Error(), "另一个 Codex app-server") ||
-		!strings.Contains(oc.Error(), "私有 stdio") ||
-		!strings.Contains(oc.Error(), "重新打开 Codex Desktop") ||
+		!strings.Contains(oc.Error(), "打开着的该会话窗口") ||
+		!strings.Contains(oc.Error(), "只读投影") ||
 		!strings.Contains(oc.Error(), "不会终止") {
-		t.Fatalf("共享 daemon 冲突提示应说明 Desktop 回退与重附着，且不抢进程：%s", oc.Error())
+		t.Fatalf("共享 daemon 冲突提示应说明 writer 被同 daemon 另一客户端持有（2026-08-23 实测），且不抢进程：%s", oc.Error())
 	}
 
 	wrapped := errOwnershipOrRPC("thread/delete", SourceCordCodeStartedDaemon, "th-9", official, nil)
@@ -552,5 +553,31 @@ func TestThreadSectionDecodeAcceptsLegacyString(t *testing.T) {
 	}
 	if th.Section == nil || th.Section.Name != "Pinned" {
 		t.Fatalf("want name Pinned, got %+v", th.Section)
+	}
+}
+
+// TestIsConnectionLossCoversDeadSocketShapes — daemon restart 后旧连接写出即
+// broken pipe（"write: broken pipe" / syscall.EPIPE 包装）；漏判则 withClient 永不
+// 重 Probe（2026-08-23 真机回归：水化/目录/指纹全部停在死连接直到 MacBridge 重启）。
+func TestIsConnectionLossCoversDeadSocketShapes(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"write broken pipe text", fmt.Errorf("write unix ->/x/app-server-control.sock: write: broken pipe"), true},
+		{"syscall EPIPE wrapped", &os.SyscallError{Syscall: "write", Err: syscall.EPIPE}, true},
+		{"connection reset text", fmt.Errorf("read unix ->/x.sock: read: connection reset by peer"), true},
+		{"connection refused text", fmt.Errorf("dial unix /x.sock: connect: connection refused"), true},
+		{"closed network connection", fmt.Errorf("use of closed network connection"), true},
+		{"ws close", fmt.Errorf("websocket: close 1005"), true},
+		{"connection closed", fmt.Errorf("connection closed"), true},
+		{"nil", nil, false},
+		{"rpc rejection must stay out", &RPCError{Code: -32000, Message: "boom"}, false},
+	}
+	for _, c := range cases {
+		if got := isConnectionLoss(c.err); got != c.want {
+			t.Fatalf("%s: isConnectionLoss=%v want %v (%v)", c.name, got, c.want, c.err)
+		}
 	}
 }

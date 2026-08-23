@@ -10,8 +10,11 @@ package codexweb
 //   - 被动订阅（Subscribe）使用专用连接（观察面，不答请求）。
 //
 // Phase 0 通知分级（§7.1）：thread/started、thread/status/changed 全局；turn/*、item/*
-// 仅订阅连接且不重放。订阅路径 = thread/start/resume 自动 attach；同 daemon 多连接
-// resume 无 writer 冲突（dumps/ownership）。
+// 为 daemon 对全部连接（含观察连接）的全局广播（dumps/ownership 连接 #2 在
+// resume 前即收到 turn/started 与 item/completed），不重放。订阅路径 =
+// thread/start/resume 自动 attach；writer 座位按进程独占——另一 app-server 已在
+// resume 的线程会得到 -32600 "already has an active writer"（dumps/ownership
+// second_resume），该冲突不影响广播事件与只读 thread/read。
 //
 // 被动订阅（core.EventSubscriber，§8.2 外部 turn Gate 的产品面）：
 //   - 专用连接；对 loaded 集合逐 thread resume 订阅；全局 thread/started 广播补订阅；
@@ -558,7 +561,13 @@ func (a *Agent) observeThread(ctx context.Context, cl *Client, threadID string) 
 		slog.Warn("codexweb passive: resume transport error", "thread", threadID, "error", err)
 		return err
 	case oc != nil:
-		slog.Warn("codexweb passive: thread held by another app-server; Desktop likely left the shared daemon",
+		// 官方预期（dumps/ownership second_resume：-32600 "already has an active
+		// writer"）：writer 座位按进程独占，本观察连接拿不到。turn/item 事件是
+		// daemon 对全部连接的全局广播（dump 连接 #2 在 resume 前即收到事件），
+		// 只读 thread/read 在 writer 持有期同样可用，故 attach 失败不影响
+		// 实时事件流与投影——仅记录该事实，不要把「握有 writer 的进程」误判为
+		// 「Desktop 离开了共享 daemon」。
+		slog.Warn("codexweb passive: thread writer held by another app-server (expected); read-only paths remain",
 			"thread", threadID, "official", oc.OfficialMessage)
 		return oc
 	case rpcErr != nil:

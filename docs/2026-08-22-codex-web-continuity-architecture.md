@@ -1,6 +1,6 @@
 # Codex Web 连续性架构：同一 daemon 上的观察、执行态与 Desktop 附着
 
-- 日期：2026-08-22（2026-08-23 按一轮、二轮评审修订；2026-08-23 晚按 §7.1 矩阵与代码状态收尾）
+- 日期：2026-08-22（2026-08-23 按一轮、二轮评审修订；2026-08-23 晚按 §7.1 矩阵与代码状态收尾；daemon restart 回归现场记录见 §12）
 - 状态：**合同已按层施工并通过 owner 真机矩阵（§7.1）。本文保留合同全文；§4/§6 内已落地项均已标注，未标注者仍为待办。**
 - 适用仓库：MacBridge 本文件为权威；iOS 仓 `docs/` 下同名文件是给 iOS workspace agent 的工作镜像，冲突以本文件为准
 - 前置合同：[2026-08-21-codex-web-backend-design.md](2026-08-21-codex-web-backend-design.md)（v2.0 topology-first）
@@ -71,6 +71,9 @@ C6 说的是**生效的旁观**，不是「曾经发出过 `set_observation_scop
    官方探测过得去，exact CLI 门却把座位安装整段 fail-closed 掉。
 6. 私有 stdio 是另一个 app-server 进程。它不能接管 daemon 上已持有 writer 的 in-flight
    turn（`-32600 already has an active writer`）。官方也没有 stdio ↔ daemon 热迁移。
+   注意：**同 daemon 的另一个客户端（如 Desktop 打开着该会话）同样独占 writer**——
+   observer 的 resume 也会得到同一 -32600，这不是「Desktop 离开共享 daemon」的证据
+   （2026-08-23 实测，见 §12.2/12.3）。
 7. 空闲 thread 内存卸载延迟 30 分钟，那是卸载计时，不是崩溃恢复，也不是跨进程续跑。
 
 以上数值来自 2026-08-22 对本机 asar 的只读提取，并与 `think.md`、`RuntimeManager`
@@ -511,3 +514,59 @@ go-bridge 侧 `set_observation_scope` 会触发三件事，**不要从零再造�
 | 为让 (b) 变绿而拆掉 `HasSessionSubscriber` 门、无订阅也 ingest Kernel | **不采纳** | 评审只要求 (b) 的数据源前提。拆门会给未打开的 session 建隐藏时间线，与被动泵现有纪律相反 |
 | 用锁屏/退后台变体单独关闭 L3 | **不采纳** | 连接未断时走 per-conn 缓冲，会假绿 |
 | 因 F1 宣布「单一充分入口」作废、从零再造 L2 | **不采纳** | 入口仍是这一个 RPC；缺的是生效信号，不是再造三条触发路径 |
+
+## 12. 现场记录（2026-08-23 下午：daemon restart 后的同步回归与两处认知修正）
+
+背景：owner 重启 MacBridge 后，Mac 端发消息 iOS 端不同步；在 MacBridge 点击「重启共享
+Codex 服务」后打开 session 仍显示「无法加载会话投影。重新打开会话可重试」。本节记录本次
+诊断的根因与两处对早前判断的修正；修复随本节同提交。
+
+### 12.1 根因：`withClient` 断线判定漏掉 `broken pipe`，daemon restart 后 RPC 泵永久死连接
+
+实测证据链（go-bridge.log，2026-08-23 16:34–16:39）：
+
+- 16:35:39 `daemon restart`（按钮动作）替换控制 socket。观察连接按 §8.3 backoff 在
+  16:35:41 重连成功；但中央泵的主 RPC 连接进入「半死不通知」状态——整份日志
+  `connection lost, starting background re-probe` 出现 **0 次**，泵从不主动感知失败。
+- 16:36:02 投影命中内存 shadow（`delta_at_head`，未走 wire），随后 16:36:02.522 起
+  `official model catalog unavailable: write unix ->…: write: broken pipe` 持续刷；
+  16:36:06/14 `list_sessions error_code=list_failed`；16:36:11/13/15 水化
+  `projection.hydrate_failed`（3ms 即失败＝写死连接）——iOS 的「无法加载会话投影」即
+  16:36:15 `req_112` 该结果的面上映射。
+- 根因在 `agent/codex-web/session.go isConnectionLoss`：只认 `connection closed / connection
+  lost / websocket: close` 三种子串。daemon restart 的断流形状是 **`write: broken pipe`**，
+  不命中 → `withClient`（唯一带自动重 Probe 的入口）永不刷新 endpoint → 水化、目录、指纹、
+  模型清单全部停在死连接上，直到 MacBridge 自身重启。
+
+修复：`isConnectionLoss` 增加 broken pipe / connection reset / connection refused /
+use of closed network connection 子串，并按 `syscall.EPIPE/ECONNRESET/ECONNREFUSED/
+ECONNABORTED` errno 识别包装错误；`TestIsConnectionLossCoversDeadSocketShapes` 覆盖
+各形状并断言官方 `RPCError` 不误判。这同时恢复了 §8.3 冷校准路径（`thread/read` 只读
+水化）在 restart 后继续工作的闭环——L2 capture（`set_observation_scope` 重订阅循环每
+轮走 `withClient`）与 L3 投影都会在 restart 后数秒内自愈，不再要求 reopen session。
+
+### 12.2 认知修正 A：同 daemon 另一客户端持有 writer 时，observer resume 同样 -32600
+
+此前代码 WARN 与 `OwnershipConflictError` 文案把 `-32600 already has an active writer`
+解释为「Desktop 已回退到私有 stdio app-server，请完全退出并重开 Desktop」。本次实测否定了
+该归因：Desktop（ChatGPT 内嵌 `codex app-server`，`CODEX_APP_SERVER_USE_LOCAL_DAEMON=1`）
+打开着目标 session 时，**同一共享 daemon 上** observer 的 `thread/resume` 也得到同样
+错误——writer 座位按进程/客户端独占。这正是 dumps/ownership `second_resume` 的本来含义
+（此前注释误读为「同 daemon 多连接 resume 无 writer 冲突」，指错了方向）。
+
+修正：WARN 文案改为中性事实（writer 被另一 app-server 持有，只读路径仍可用）；冲突提示
+改为「关闭持有该会话的 Codex 客户端窗口或等待官方卸载；只读投影（thread/read）与事件
+广播不受影响」，不再给出「Desktop 离开了共享 daemon」的错误诊断。
+
+### 12.3 认知修正 B：turn/item 事件是全局广播，观察订阅不依赖 resume 成功
+
+dumps/ownership `raw.jsonl` 明示：连接 #2（第二 app-server）**尚未 resume、也没做任何
+订阅请求**时，即收到 `thread/started`、`turn/started`、`item/started`、`item/completed`
+广播（时间戳早于其 `thread/resume` 请求）。即：
+
+- 事件流 ≠ writer 座位。`attachOk=false`（resume 冲突）不代表 iOS 收不到实时事件；
+- 冲突期 `thread/read` 可用（`readonly_during_writer: true`），投影与 §8.3 冷校准依然成立；
+- L2 失败语义应读作「attach（writer 地位）未获得」，不是「观察断流」。
+
+正文 §2 宿主事实 #6 与 §4.3/§4.4 的相关表述按本节修正口径理解；§10/§11 中引用「Desktop
+私有 stdio 时 writer 不放」的行保留（那是另一个真实失败模式，与本节 A 场景共存）。

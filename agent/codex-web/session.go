@@ -19,10 +19,14 @@ package codexweb
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -258,14 +262,32 @@ func (a *Agent) withClient(ctx context.Context, fn func(*Client) error) error {
 	return fn(cl2)
 }
 
+// isConnectionLoss 判定官方长连接是否已经失效。daemon restart（app-server daemon
+// restart）会替换控制 socket：旧连接既收不到 channel close（泵不退出），写出又立刻
+// 得到 EPERM/EPIPE（"write: broken pipe"）。若漏判该形状，withClient 就永不重
+// Probe——水化、目录、指纹、模型清单全部停留在一个死连接上，直到 MacBridge 重启。
 func isConnectionLoss(err error) bool {
 	if err == nil {
 		return false
 	}
 	msg := err.Error()
-	return strings.Contains(msg, "connection closed") ||
+	if strings.Contains(msg, "connection closed") ||
 		strings.Contains(msg, "connection lost") ||
-		strings.Contains(msg, "websocket: close")
+		strings.Contains(msg, "websocket: close") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "use of closed network connection") {
+		return true
+	}
+	var sysErr *os.SyscallError
+	if errors.As(err, &sysErr) {
+		errno, ok := sysErr.Err.(syscall.Errno)
+		return ok && (errno == syscall.EPIPE || errno == syscall.ECONNRESET ||
+			errno == syscall.ECONNREFUSED || errno == syscall.ECONNABORTED)
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 // ListSessions 实现 core.Agent：官方 thread/list 聚合（服务端默认页大小单页覆盖，

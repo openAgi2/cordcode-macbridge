@@ -288,10 +288,11 @@ type OwnershipConflictError struct {
 }
 
 func (e *OwnershipConflictError) Error() string {
-	advice := "即使当前回复已经完成，官方 app-server 仍可能继续持有该会话；请关闭持有它的 Codex 客户端，或等待官方卸载后再重试。"
-	if e.TransportSource == SourceExternalDaemonReused || e.TransportSource == SourceCordCodeStartedDaemon {
-		advice = "这通常表示 Mac Codex Desktop 已回退到私有 stdio app-server，与 CordCode 不再共用官方 daemon。请完全退出并重新打开 Codex Desktop，让它重新附着 local daemon；不要关闭另一端来抢锁。"
-	}
+	// 2026-08-23 实测修正：同一 daemon 的另一个 app-server 客户端（如
+	// Codex Desktop 正打开该会话）正常持有 writer 座位时也会得到此冲突——
+	// dumps/ownership second_resume 就是该形状，不代表持有者离开了共享
+	// daemon。桌面侧只需关闭该会话窗口（或等官方卸载），CordCode 不抢进程。
+	advice := "该会话的 writer 座位正被另一个 Codex app-server（通常是 Mac Codex Desktop 中打开着的该会话窗口）持有；即使回复已完成，官方也会保留 loaded thread。请关闭持有该会话的 Codex 客户端窗口，或等待官方卸载后再重试。只读投影（thread/read）与事件广播不受影响。"
 	return fmt.Sprintf(
 		"该会话正由另一个 Codex app-server 持有：thread %s（方法 %s，transport 来源 %s）。官方错误 %d: %s。%s CordCode 不会终止其他官方进程。",
 		e.ThreadID, e.Method, e.TransportSource, e.OfficialCode, e.OfficialMessage, advice,
