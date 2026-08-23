@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // ─── Observation Scope 测试 ─────────────────────────────────────────────
@@ -87,10 +89,32 @@ func TestObservationRebindSessionIDRewritesPendingAlias(t *testing.T) {
 	}
 }
 
+type observationResultConn struct {
+	relayBroadcastCaptureConn
+	result interface{}
+	err    *WireError
+}
+
+func (c *observationResultConn) SendResult(_ string, data interface{}, err *WireError) {
+	c.result = data
+	c.err = err
+}
+
+type attachAgent struct {
+	fakeAgent
+	err   error
+	calls []string
+}
+
+func (a *attachAgent) AttachLiveThread(_ context.Context, threadID string) error {
+	a.calls = append(a.calls, threadID)
+	return a.err
+}
+
 func TestSetObservationScopeRPCRequiresAuthenticatedDeviceAndStoresScope(t *testing.T) {
 	h := NewHandlers()
 	defer h.Shutdown(context.Background())
-	conn := &relayBroadcastCaptureConn{device: &TrustedDeviceRecord{DeviceID: "dev-rpc"}}
+	conn := &observationResultConn{relayBroadcastCaptureConn: relayBroadcastCaptureConn{device: &TrustedDeviceRecord{DeviceID: "dev-rpc"}}}
 	params := json.RawMessage(`{"backendId":"codex","sessionIds":["s1"],"deliveryMode":"full_stream","includeRunningSessionSignals":true,"leaseSeconds":45}`)
 	h.handleSetObservationScope(conn, WireMessage{RequestID: "req", BackendID: "codex", Params: params})
 
@@ -103,6 +127,43 @@ func TestSetObservationScopeRPCRequiresAuthenticatedDeviceAndStoresScope(t *test
 	targets := h.broadcaster.Targets("codex", "s1", "")
 	if len(targets) != 1 || targets[0] != conn {
 		t.Fatalf("set_observation_scope must Subscribe session for live targets, got %#v", targets)
+	}
+	result, ok := conn.result.(ObservationScopeRPCResult)
+	if !ok || !result.Ok {
+		t.Fatalf("backends without ThreadLiveAttacher must succeed after Subscribe, got %#v err=%v", conn.result, conn.err)
+	}
+}
+
+func TestSetObservationScopeRPCFailsWhenObserverNotReady(t *testing.T) {
+	h := NewHandlers()
+	defer h.Shutdown(context.Background())
+	h.RegisterAgent("codex-web", &attachAgent{
+		fakeAgent: fakeAgent{name: "codex-web"},
+		err:       core.ErrObserverNotReady,
+	})
+	conn := &observationResultConn{relayBroadcastCaptureConn: relayBroadcastCaptureConn{device: &TrustedDeviceRecord{DeviceID: "dev-rpc"}}}
+	params := json.RawMessage(`{"backendId":"codex-web","sessionIds":["th-1"],"deliveryMode":"full_stream","leaseSeconds":45}`)
+	h.handleSetObservationScope(conn, WireMessage{RequestID: "req", BackendID: "codex-web", Params: params})
+	if conn.err == nil || conn.err.Code != "observation_attach_failed" {
+		t.Fatalf("want observation_attach_failed, got %#v", conn.err)
+	}
+	result, ok := conn.result.(ObservationScopeRPCResult)
+	if !ok || result.Ok || len(result.Sessions) != 1 || result.Sessions[0].Attached {
+		t.Fatalf("attach failure must be in result, got %#v", conn.result)
+	}
+}
+
+func TestObservationHasSessionInterest(t *testing.T) {
+	om := NewObservationManager()
+	if om.HasSessionInterest("codex-web", "th-1") {
+		t.Fatal("empty manager must not report interest")
+	}
+	om.SetScope("dev", ObservationScope{BackendID: "codex-web", SessionIDs: []string{"th-1"}, DeliveryMode: scopeFullStream})
+	if !om.HasSessionInterest("codex-web", "th-1") {
+		t.Fatal("scoped session must count as interest while the live conn is down")
+	}
+	if om.HasSessionInterest("codex-web", "th-other") {
+		t.Fatal("unlisted session must not count")
 	}
 }
 

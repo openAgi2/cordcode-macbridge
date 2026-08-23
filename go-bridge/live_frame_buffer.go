@@ -105,7 +105,8 @@ func isLiveBufferableEvent(eventName string) bool {
 	switch eventName {
 	case "text_delta", "reasoning_delta", "tool_output_delta",
 		"tool_started", "tool_finished",
-		"turn_started", "user_message", "session_state_changed",
+		"turn_started", "turn_completed", "turn_error", "turn_aborted",
+		"user_message", "session_state_changed",
 		"assistant_message_started", "assistant_message_delta", "assistant_message_finished",
 		"reasoning_started", "reasoning_finished",
 		"context_usage_updated":

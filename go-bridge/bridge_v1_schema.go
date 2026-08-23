@@ -36,7 +36,11 @@ const (
 	// permission_request and projected tool parts. It prevents clients from
 	// presenting persistent "always" choices when the backend only supports a
 	// one-shot official approval vocabulary.
-	BridgeProtocolSchemaRevision = "2026-08-22"
+	//
+	// 2026-08-23: set_observation_scope result data includes per-session
+	// Subscribe + observer-attach outcome. Unconditional {ok:true} is forbidden
+	// when attach is required and failed. Failure code observation_attach_failed.
+	BridgeProtocolSchemaRevision = "2026-08-23"
 )
 
 type BridgeV1Protocol struct {

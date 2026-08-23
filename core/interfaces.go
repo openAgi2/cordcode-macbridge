@@ -811,11 +811,18 @@ type EventSubscriber interface {
 	Subscribe(ctx context.Context) (<-chan Event, error)
 }
 
+// ErrObserverNotReady means the backend observer connection is not up yet
+// (typically still backing off after go-bridge start). set_observation_scope
+// must not report success in this state.
+var ErrObserverNotReady = errors.New("observer connection not ready")
+
 // ThreadLiveAttacher is optional. Codex app-server only fans out turn/item
 // events to connections that have attached to that thread. set_observation_scope
 // must attach the backend observer; opening a session on iOS is not enough.
+// A nil error means the observer is subscribed to that thread. Failures
+// (not ready, ownership, transport) must surface to the RPC result.
 type ThreadLiveAttacher interface {
-	AttachLiveThread(ctx context.Context, threadID string)
+	AttachLiveThread(ctx context.Context, threadID string) error
 }
 
 // CatalogRefreshSignaler is an optional interface for backends that can detect

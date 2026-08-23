@@ -1124,6 +1124,13 @@ func (h *Handlers) handleSetObservationScope(conn Connection, msg WireMessage) {
 			h.eventPublisher.NoteLiveInterest(device.DeviceID, req.BackendID, sid)
 		}
 	}
+	var attacher core.ThreadLiveAttacher
+	if agent, ok := h.getAgent(req.BackendID); ok {
+		attacher, _ = agent.(core.ThreadLiveAttacher)
+	}
+	sessions := make([]ObservationSessionAttach, 0, len(observedSessions))
+	ok := true
+	var firstErr string
 	for _, sid := range observedSessions {
 		if sid == "" {
 			continue
@@ -1132,16 +1139,33 @@ func (h *Handlers) handleSetObservationScope(conn Connection, msg WireMessage) {
 			BackendID: req.BackendID,
 			SessionID: sid,
 		})
-	}
-	if agent, ok := h.getAgent(req.BackendID); ok {
-		if attacher, ok := agent.(core.ThreadLiveAttacher); ok {
-			for _, sid := range observedSessions {
-				if sid == "" {
-					continue
+		row := ObservationSessionAttach{
+			SessionID:  sid,
+			Subscribed: h.broadcaster.HasSessionSubscriber(req.BackendID, sid),
+			Attached:   attacher == nil,
+		}
+		if attacher != nil {
+			if err := attacher.AttachLiveThread(context.Background(), sid); err != nil {
+				row.Attached = false
+				row.Error = err.Error()
+				ok = false
+				if firstErr == "" {
+					firstErr = err.Error()
 				}
-				go attacher.AttachLiveThread(context.Background(), sid)
+			} else {
+				row.Attached = true
 			}
 		}
+		if !row.Subscribed {
+			ok = false
+			if firstErr == "" {
+				firstErr = "session not subscribed"
+			}
+			if row.Error == "" {
+				row.Error = "session not subscribed"
+			}
+		}
+		sessions = append(sessions, row)
 	}
 	// INFO so flapping/delivery-gap forensics can see mode without Debug log level.
 	// hasSubscriber after Subscribe is the forensic for candidateTargets=0 regressions.
@@ -1158,10 +1182,19 @@ func (h *Handlers) handleSetObservationScope(conn Connection, msg WireMessage) {
 		"includeRunning", req.IncludeRunningSignals,
 		"leaseSeconds", req.LeaseSeconds,
 		"hasSessionSubscriber", hasSub,
+		"attachOk", ok,
 	)
 	// After full_stream re-assert (post-reconnect), flush buffered live frames.
 	h.eventPublisher.FlushLiveFrameBufferForDevice(conn)
-	conn.SendResult(msg.RequestID, &ResultResponse{Ok: true}, nil)
+	result := ObservationScopeRPCResult{Ok: ok, Sessions: sessions}
+	if !ok {
+		conn.SendResult(msg.RequestID, result, &WireError{
+			Code:    "observation_attach_failed",
+			Message: firstErr,
+		})
+		return
+	}
+	conn.SendResult(msg.RequestID, result, nil)
 }
 
 // HandleRelayInbound 处理通过 relay 加密通道收到的 iOS→Mac 业务消息。

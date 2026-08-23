@@ -275,6 +275,40 @@ func (om *ObservationManager) RemoveDevice(deviceID string) {
 	delete(om.devices, deviceID)
 }
 
+// HasSessionInterest reports whether any device still lists this session in
+// observation scope. Used so passive ingest can feed the Kernel while the
+// live connection is down but the user still has the session open.
+func (om *ObservationManager) HasSessionInterest(backendID, sessionID string) bool {
+	if om == nil || backendID == "" || sessionID == "" {
+		return false
+	}
+	om.mu.RLock()
+	defer om.mu.RUnlock()
+	for _, dev := range om.devices {
+		if dev == nil {
+			continue
+		}
+		dev.mu.Lock()
+		scope, ok := dev.scopes[backendID]
+		if !ok || scope == nil {
+			dev.mu.Unlock()
+			continue
+		}
+		if len(scope.SessionIDs) == 0 {
+			dev.mu.Unlock()
+			return true
+		}
+		for _, sid := range scope.SessionIDs {
+			if sid == sessionID || sid == "*" {
+				dev.mu.Unlock()
+				return true
+			}
+		}
+		dev.mu.Unlock()
+	}
+	return false
+}
+
 // DeviceIDs returns a snapshot of device IDs with any observation state.
 // Used by LiveFrameBuffer to find interested devices when targets are empty.
 func (om *ObservationManager) DeviceIDs() []string {

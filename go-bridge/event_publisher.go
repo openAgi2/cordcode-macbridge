@@ -989,9 +989,9 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 	// observation filter means the frame will not reach any online device.
 	// Buffer live frames for interested degraded devices so reconnect can flush
 	// instead of permanent jump via history bulk (live-frame-buffer design).
-	if enqueued == 0 && len(overflowed) == 0 && len(rawEligible) > 0 && !logical.Offline {
+	if enqueued == 0 && len(overflowed) == 0 {
 		switch logical.Event {
-		case "text_delta", "reasoning_delta", "turn_started", "tool_started", "tool_finished":
+		case "text_delta", "reasoning_delta", "turn_started", "turn_completed", "tool_started", "tool_finished":
 			slog.Warn("event-publisher: live event has zero online targets",
 				"event", logical.Event,
 				"backendID", logical.BackendID,

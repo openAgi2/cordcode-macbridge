@@ -526,25 +526,29 @@ func (a *Agent) Subscribe(ctx context.Context) (<-chan core.Event, error) {
 
 // AttachLiveThread 让观察 connection 订阅 iOS 正在看的 thread。thread/start 只
 // attach 写连接；Mac 后续 turn 的 item/* 若观察连接未 resume，iOS 就收不到实时流。
-func (a *Agent) AttachLiveThread(ctx context.Context, threadID string) {
+func (a *Agent) AttachLiveThread(ctx context.Context, threadID string) error {
 	a.obsMu.Lock()
 	cl := a.obsClient
 	a.obsMu.Unlock()
 	if cl == nil {
-		return
+		return core.ErrObserverNotReady
 	}
-	a.observeThread(ctx, cl, threadID)
+	return a.observeThread(ctx, cl, threadID)
 }
 
-func (a *Agent) observeThread(ctx context.Context, cl *Client, threadID string) {
+func (a *Agent) observeThread(ctx context.Context, cl *Client, threadID string) error {
 	threadID = strings.TrimSpace(threadID)
 	if threadID == "" || cl == nil {
-		return
+		return core.ErrObserverNotReady
 	}
 	a.obsMu.Lock()
-	if a.obsClient != cl || a.obsSubscribed[threadID] {
+	if a.obsClient != cl {
 		a.obsMu.Unlock()
-		return
+		return core.ErrObserverNotReady
+	}
+	if a.obsSubscribed[threadID] {
+		a.obsMu.Unlock()
+		return nil
 	}
 	a.obsMu.Unlock()
 
@@ -552,11 +556,14 @@ func (a *Agent) observeThread(ctx context.Context, cl *Client, threadID string) 
 	switch {
 	case err != nil:
 		slog.Warn("codexweb passive: resume transport error", "thread", threadID, "error", err)
+		return err
 	case oc != nil:
 		slog.Warn("codexweb passive: thread held by another app-server; Desktop likely left the shared daemon",
 			"thread", threadID, "official", oc.OfficialMessage)
+		return oc
 	case rpcErr != nil:
 		slog.Warn("codexweb passive: resume rejected", "thread", threadID, "official", rpcErr.Message)
+		return rpcErr
 	default:
 		a.obsMu.Lock()
 		if a.obsClient == cl {
@@ -567,6 +574,7 @@ func (a *Agent) observeThread(ctx context.Context, cl *Client, threadID string) 
 		}
 		a.obsMu.Unlock()
 		slog.Info("codexweb passive: subscribed", "thread", threadID)
+		return nil
 	}
 }
 

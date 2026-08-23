@@ -793,7 +793,8 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 			// relayed sessions never reach this loop at all — the adapter
 			// routes their events exclusively to the session route whose
 			// relay is the ingest owner.
-			if ev.SessionID == "" || h.broadcaster.HasSessionSubscriber(backendID, ev.SessionID) {
+			if ev.SessionID == "" || h.broadcaster.HasSessionSubscriber(backendID, ev.SessionID) ||
+				(h.observation != nil && h.observation.HasSessionInterest(backendID, ev.SessionID)) {
 				h.deltaBatcher.Send(LogicalEvent{
 					SessionID: ev.SessionID,
 					BackendID: backendID,

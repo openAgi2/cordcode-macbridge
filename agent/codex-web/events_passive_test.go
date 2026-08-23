@@ -3,9 +3,12 @@ package codexweb
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 func TestPassiveSubscribeResumesLoadedAndStartedThreads(t *testing.T) {
@@ -142,7 +145,9 @@ func TestAttachLiveThreadResumesObservedSession(t *testing.T) {
 	if _, err := agent.Subscribe(ctx); err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
-	agent.AttachLiveThread(context.Background(), "th-open")
+	if err := agent.AttachLiveThread(context.Background(), "th-open"); err != nil {
+		t.Fatalf("AttachLiveThread: %v", err)
+	}
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		mu.Lock()
@@ -155,5 +160,12 @@ func TestAttachLiveThreadResumesObservedSession(t *testing.T) {
 			t.Fatal("AttachLiveThread did not resume the observed thread")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestAttachLiveThreadFailsWhenObserverMissing(t *testing.T) {
+	agent := &Agent{workDir: "/tmp"}
+	if err := agent.AttachLiveThread(context.Background(), "th-open"); !errors.Is(err, core.ErrObserverNotReady) {
+		t.Fatalf("want ErrObserverNotReady, got %v", err)
 	}
 }

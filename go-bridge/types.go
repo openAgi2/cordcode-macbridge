@@ -83,6 +83,23 @@ type ResultResponse struct {
 	Data interface{} `json:"data,omitempty"`
 }
 
+// ObservationSessionAttach is one session's Subscribe + observer attach outcome.
+// Additive optional field on set_observation_scope (schemaRevision 2026-08-23).
+type ObservationSessionAttach struct {
+	SessionID  string `json:"sessionId"`
+	Subscribed bool   `json:"subscribed"`
+	Attached   bool   `json:"attached"`
+	Error      string `json:"error,omitempty"`
+}
+
+// ObservationScopeRPCResult is the set_observation_scope data payload.
+// Ok is true only when every requested session is subscribed and, if the
+// backend implements ThreadLiveAttacher, observer-attached.
+type ObservationScopeRPCResult struct {
+	Ok       bool                       `json:"ok"`
+	Sessions []ObservationSessionAttach `json:"sessions,omitempty"`
+}
+
 // EventMessage is pushed from server to client for agent events.
 type EventMessage struct {
 	Type          string      `json:"type"`

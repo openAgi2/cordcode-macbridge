@@ -36,9 +36,17 @@ func TestLiveFrameBufferAppendAndSnapshot(t *testing.T) {
 
 func TestLiveFrameBufferIgnoresNonLiveEvents(t *testing.T) {
 	b := NewLiveFrameBuffer()
-	b.Append([]string{"dev_a"}, EventMessage{Event: "turn_completed", BackendID: "codex", SessionID: "s1"})
+	b.Append([]string{"dev_a"}, EventMessage{Event: "sessions_changed", BackendID: "codex", SessionID: "s1"})
 	if b.FrameCount("dev_a") != 0 {
-		t.Fatal("durable milestone must not enter live buffer")
+		t.Fatal("catalog control-plane must not enter live buffer")
+	}
+}
+
+func TestLiveFrameBufferKeepsTurnCompletedForLANReplay(t *testing.T) {
+	b := NewLiveFrameBuffer()
+	b.Append([]string{"dev_a"}, EventMessage{Event: "turn_completed", BackendID: "codex", SessionID: "s1", Seq: 9})
+	if b.FrameCount("dev_a") != 1 {
+		t.Fatal("turn_completed must enter live buffer so LAN reconnect can settle phase")
 	}
 }
 
@@ -84,7 +92,7 @@ func TestIsLiveBufferableEvent(t *testing.T) {
 	if !isLiveBufferableEvent("reasoning_delta") || !isLiveBufferableEvent("tool_started") {
 		t.Fatal("expected live deltas bufferable")
 	}
-	if isLiveBufferableEvent("turn_completed") {
-		t.Fatal("turn_completed must stay on durable outbox path only")
+	if !isLiveBufferableEvent("turn_completed") {
+		t.Fatal("turn_completed must be LAN-replayable in addition to the durable mailbox")
 	}
 }
