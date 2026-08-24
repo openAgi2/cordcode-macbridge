@@ -390,7 +390,7 @@ enum TopologyDesktopAggregate: String, Codable, Sendable {
 }
 
 /// 单个维度观测（enum 为原始字符串证据，展示用；stale 由 service 裁决，客户端不比较本地时钟）。
-struct TopologyMonitorDimension: Codable, Sendable {
+struct TopologyMonitorDimension: Codable, Sendable, Equatable {
     let enumValue: String
     let ageMs: Int64?
     let stale: Bool?
@@ -408,7 +408,7 @@ struct TopologyMonitorDimension: Codable, Sendable {
 
 /// 固定 8 键 dimensions（§2.4）。键缺失 = nil（诊断失败由 syncHealth=.unknown 表达，反例：
 /// enabled 快照缺键说明服务端形状异常，此时不默认 healthy）。
-struct TopologyMonitorDimensions: Codable, Sendable {
+struct TopologyMonitorDimensions: Codable, Sendable, Equatable {
     let topologyBridgeAttachment: TopologyMonitorDimension?
     let topologyDesktopAggregate: TopologyMonitorDimension?
     let seatHealthDaemon: TopologyMonitorDimension?
@@ -420,7 +420,7 @@ struct TopologyMonitorDimensions: Codable, Sendable {
 }
 
 /// GET /internal/topology/snapshot 响应（always-200 + state）。disabled 时 syncHealth/dimensions 缺省。
-struct TopologyMonitorStatus: Codable, Sendable {
+struct TopologyMonitorStatus: Codable, Sendable, Equatable {
     let schemaVersion: String?
     let state: TopologySnapshotState
     let bridgeEpoch: Int64?
@@ -429,14 +429,14 @@ struct TopologyMonitorStatus: Codable, Sendable {
     let dimensions: TopologyMonitorDimensions?
     let instances: [TopologyMonitorInstance]?
 
-    struct TopologyMonitorInstance: Codable, Sendable {
+    struct TopologyMonitorInstance: Codable, Sendable, Equatable {
         let pid: Int
         let startTime: String
         let classification: String
         let evidence: [TopologyMonitorEvidence]?
     }
 
-    struct TopologyMonitorEvidence: Codable, Sendable {
+    struct TopologyMonitorEvidence: Codable, Sendable, Equatable {
         let kind: String
         let state: String
     }

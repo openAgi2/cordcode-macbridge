@@ -294,6 +294,13 @@ class RuntimeManager: ObservableObject {
         RuntimeSupervisorObservation(supervisorState: supervisorState)
     }
 
+    /// 当前 runtime identity 的数值 bridgeEpoch（Management v1 `runtimeIdentity.bridgeEpoch`，
+    /// 与 topology snapshot 的 bridgeEpoch 同源：go-bridge main.go managementBridgeEpoch）。
+    /// 尚未从 /internal/status 解出 v1 时返回 nil（此时快照 epoch 校验跳过）。
+    var runtimeIdentityEpoch: UInt64? {
+        latestManagementStatus?.v1?.runtimeIdentity.bridgeEpoch
+    }
+
     private var apiClient: ManagementAPIClient?
     private var latestManagementStatus: ManagementStatus?
     private var openCodeManagedServer: OpenCodeManagedServer?

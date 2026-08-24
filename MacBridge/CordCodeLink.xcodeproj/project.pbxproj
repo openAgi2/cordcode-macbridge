@@ -10,6 +10,7 @@
 		060AAD30FED3CB9F10307692 /* OpenCodeCredentialsGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BE70B669DDB9B3C1522465B /* OpenCodeCredentialsGenerator.swift */; };
 		0A0B7AE785F788173FEA48D0 /* OpenCodeCredentialsGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BE70B669DDB9B3C1522465B /* OpenCodeCredentialsGenerator.swift */; };
 		12130C2708D1C62CBA31EF54 /* SettingsNativeInformationArchitectureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21F3F59070DF74BE2D52C5E0 /* SettingsNativeInformationArchitectureTests.swift */; };
+		CB1AA215280C461A510A803D /* TopologyMonitorStatusStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6D5EE5A6F68722192D0F483 /* TopologyMonitorStatusStoreTests.swift */; };
 		1D81901D44708D56630436AB /* WorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A4CAD0F5FF22B0EA70BF382 /* WorkspaceView.swift */; };
 		2E07EDF1D105A17DF1E32E1C /* AppDependencies.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDEFE8AC08BD94B695F061C5 /* AppDependencies.swift */; };
 		2F13DA49FFD6659B0A28799B /* SidebarIAInformationArchitectureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2E4475F08A85992D9DB31BA /* SidebarIAInformationArchitectureTests.swift */; };
@@ -41,6 +42,7 @@
 		97A80C6E8F2C1E1E5E3B861B /* SettingsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0981650921FA2296D640F294 /* SettingsViewModel.swift */; };
 		994A46DC8D86071D4388F8CA /* OpenCodeManagedServerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44FFCCB621A45144903369DD /* OpenCodeManagedServerTests.swift */; };
 		9DAF2027CAA9BC1167BF1E35 /* RuntimeProcessController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A183F62A649B623AA5D1FBA /* RuntimeProcessController.swift */; };
+		52EB53625E75C49D9D24A676 /* TopologyMonitorStatusStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0B2D9403A6D3229B84CC969 /* TopologyMonitorStatusStore.swift */; };
 		9DCAB02C23C6F97F756A87AC /* OpenCodeLaunchAgentCredentials.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2D28621DF47FFFEA3F80696 /* OpenCodeLaunchAgentCredentials.swift */; };
 		A1813AFBDA386D0DE9E1B84C /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53BCC29BA17D8F56035A8068 /* ContentView.swift */; };
 		A70F8A382D3EAEC8305B0C15 /* AgentStatusRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59ACDDE8C5E5047CD28C7B85 /* AgentStatusRow.swift */; };
@@ -84,6 +86,7 @@
 		1A4CAD0F5FF22B0EA70BF382 /* WorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceView.swift; sourceTree = "<group>"; };
 		2036DC77D36E009E80B5713D /* OpenCodeEndpointResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeEndpointResolver.swift; sourceTree = "<group>"; };
 		21F3F59070DF74BE2D52C5E0 /* SettingsNativeInformationArchitectureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsNativeInformationArchitectureTests.swift; sourceTree = "<group>"; };
+		B6D5EE5A6F68722192D0F483 /* TopologyMonitorStatusStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopologyMonitorStatusStoreTests.swift; sourceTree = "<group>"; };
 		2988639F5FD9CE1DC59A5338 /* RemoteAccessView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteAccessView.swift; sourceTree = "<group>"; };
 		2A183F62A649B623AA5D1FBA /* RuntimeProcessController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeProcessController.swift; sourceTree = "<group>"; };
 		2BE70B669DDB9B3C1522465B /* OpenCodeCredentialsGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeCredentialsGenerator.swift; sourceTree = "<group>"; };
@@ -100,6 +103,7 @@
 		4738E918EA61DF9B9286BDDE /* BackendStatusViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendStatusViewModel.swift; sourceTree = "<group>"; };
 		49E751A7558843194506DCEC /* ManagementV1CodecTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementV1CodecTests.swift; sourceTree = "<group>"; };
 		4F2414D249C8A25F8F5F81D5 /* BridgeStatusViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeStatusViewModel.swift; sourceTree = "<group>"; };
+		E0B2D9403A6D3229B84CC969 /* TopologyMonitorStatusStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopologyMonitorStatusStore.swift; sourceTree = "<group>"; };
 		53BCC29BA17D8F56035A8068 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		59ACDDE8C5E5047CD28C7B85 /* AgentStatusRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentStatusRow.swift; sourceTree = "<group>"; };
 		684E9C0C288ED1ED58423396 /* CordCodeLinkTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CordCodeLinkTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -209,6 +213,7 @@
 				3DBE09B439CABFD23581BB11 /* RuntimeProcessControllerTests.swift */,
 				21F3F59070DF74BE2D52C5E0 /* SettingsNativeInformationArchitectureTests.swift */,
 				B2E4475F08A85992D9DB31BA /* SidebarIAInformationArchitectureTests.swift */,
+				B6D5EE5A6F68722192D0F483 /* TopologyMonitorStatusStoreTests.swift */,
 				1777CBA637CD29BC8A23D7F8 /* TopologyMonitorDecodeTests.swift */,
 				E116F8D2EB44EF494A149825 /* WorkspaceViewTests.swift */,
 			);
@@ -261,6 +266,7 @@
 				2036DC77D36E009E80B5713D /* OpenCodeEndpointResolver.swift */,
 				907DBA7297AA1E62F927C199 /* OpenCodeManagedServer.swift */,
 				BAAF39AC99F7BCB4449CD1B1 /* RuntimeManager.swift */,
+				E0B2D9403A6D3229B84CC969 /* TopologyMonitorStatusStore.swift */,
 				2A183F62A649B623AA5D1FBA /* RuntimeProcessController.swift */,
 			);
 			path = Services;
@@ -400,6 +406,7 @@
 				54874B8A27F019CA85BC36D0 /* RuntimeProcessControllerTests.swift in Sources */,
 				12130C2708D1C62CBA31EF54 /* SettingsNativeInformationArchitectureTests.swift in Sources */,
 				2F13DA49FFD6659B0A28799B /* SidebarIAInformationArchitectureTests.swift in Sources */,
+				CB1AA215280C461A510A803D /* TopologyMonitorStatusStoreTests.swift in Sources */,
 				F291CEA02C5190A602C0C82C /* TopologyMonitorDecodeTests.swift in Sources */,
 				7BE491FC9C32F55DFDD8366F /* WorkspaceViewTests.swift in Sources */,
 			);
@@ -436,6 +443,7 @@
 				F58F901D587D8FF0447D960F /* RemoteAccessView.swift in Sources */,
 				C79D8133ED6E5322FDA50842 /* RuntimeManager.swift in Sources */,
 				9DAF2027CAA9BC1167BF1E35 /* RuntimeProcessController.swift in Sources */,
+				52EB53625E75C49D9D24A676 /* TopologyMonitorStatusStore.swift in Sources */,
 				89D029E10473B44EAF99CC03 /* SettingsView.swift in Sources */,
 				97A80C6E8F2C1E1E5E3B861B /* SettingsViewModel.swift in Sources */,
 				1D81901D44708D56630436AB /* WorkspaceView.swift in Sources */,
