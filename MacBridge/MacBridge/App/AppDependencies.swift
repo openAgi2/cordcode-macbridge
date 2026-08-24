@@ -11,6 +11,9 @@ class AppDependencies: ObservableObject {
     let pairingViewModel: PairingViewModel
     let settingsViewModel: SettingsViewModel
     let notificationCoordinator: NotificationCoordinator
+    /// Desktop 同步拓扑监视轮询 owner（UI-3 消费 phase 渲染面板）。
+    /// epoch 新鲜度对比 v1 runtime identity（快照 bridgeEpoch 同源：sha256 摘要）。
+    let topologyStore: TopologyMonitorStatusStore
 
     private let dataDir: String
     private var hasStartedBridge = false
@@ -147,6 +150,12 @@ class AppDependencies: ObservableObject {
         )
 
         self.runtimeManager = RuntimeManager(config: config)
+        // epoch 新鲜度：store 轮询时对比当前 runtime identity epoch（同源校验，代际变化作废旧快照）。
+        self.topologyStore = TopologyMonitorStatusStore(
+            expectedEpochProvider: { [weak runtimeManager] in
+                runtimeManager?.runtimeIdentityEpoch
+            }
+        )
         self.statusViewModel = BridgeStatusViewModel()
         self.statusViewModel.runtimeManager = runtimeManager
         self.pairingViewModel = PairingViewModel()
@@ -172,6 +181,8 @@ class AppDependencies: ObservableObject {
             }
             .sink { [weak self] client in
                 self?.pairingViewModel.configure(apiClient: client)
+                // 拓扑监视共享同一 client；轮询由 store 自持（configure 即开始）。
+                self?.topologyStore.configure(apiClient: client)
             }
             .store(in: &cancellables)
 

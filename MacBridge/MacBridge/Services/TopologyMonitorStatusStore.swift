@@ -183,3 +183,71 @@ final class TopologyMonitorStatusStore: ObservableObject {
         lastDiagnosticDetail = detail
     }
 }
+
+// MARK: - 展示推导（§4.3 表；纯逻辑，UI 只按分支渲染）
+
+/// 拓扑面板展示语义（implementation plan v2 UI-3）。
+enum TopologyDisplay: Equatable {
+    /// healthy / disabled / idle：面板不显示（健康不打扰；服务端关闭不冒充 healthy）。
+    case hidden
+    /// not_applicable：可选中性「未检测到 Codex App」。
+    case infoNotApplicable
+    /// degraded：高警示，按维度证据细分文案。
+    case warning(TopologyWarningKind)
+    /// unknown / 网络 / 401 / 解码失败：中性「诊断失败」，绝不伪装成 split。
+    case diagnosticFailure
+}
+
+enum TopologyWarningKind: Equatable {
+    /// bridge=shared × aggregate=split_present：Desktop 未接共享 daemon。
+    case desktopDetached
+    /// bridge=shared × aggregate=mixed：仅部分 Desktop 实例同步。
+    case partialSync
+    /// bridge=partial/absent × 任意：CordCode observer/main 未完整附着；不得归咎 Desktop。
+    case observerUnattached
+    /// degraded 但证据不足以细分：通用高警示（不臆断归责对象）。
+    case general
+}
+
+extension TopologyMonitorStatusStore.Phase {
+    /// 从当前 phase 派生展示分支（维度 enum 是 raw 证据字符串，按 §4.3 表判定）。
+    var display: TopologyDisplay {
+        switch self {
+        case .idle, .disabled:
+            return .hidden
+        case .diagnostic:
+            return .diagnosticFailure
+        case .enabled(let status):
+            switch status.syncHealth {
+            case .healthy:
+                return .hidden
+            case .notApplicable:
+                return .infoNotApplicable
+            case .unknown, nil:
+                // enabled 但 syncHealth 未知/缺失：fail-closed 中性诊断失败。
+                return .diagnosticFailure
+            case .degraded:
+                return .warning(warningKind(for: status.dimensions, fallback: .general))
+            }
+        }
+    }
+
+    private func warningKind(for dims: TopologyMonitorDimensions?, fallback: TopologyWarningKind) -> TopologyWarningKind {
+        guard let dims else { return fallback }
+        // §4.3：bridge=partial/absent × 任意 aggregate → observer/main 未完整附着（不得归咎 Desktop）。
+        switch dims.topologyBridgeAttachment?.enumValue {
+        case "partial", "absent":
+            return .observerUnattached
+        default:
+            break
+        }
+        switch dims.topologyDesktopAggregate?.enumValue {
+        case "split_present":
+            return .desktopDetached
+        case "mixed":
+            return .partialSync
+        default:
+            return fallback
+        }
+    }
+}

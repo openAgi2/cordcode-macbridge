@@ -75,6 +75,107 @@ final class WorkspaceViewTests: XCTestCase {
         // 安全连接段与 Toolbar 都用 connectionStatus，不复用旧的 remoteAccessTab。
         XCTAssertNotEqual(L10n.connectionStatus, L10n.remoteAccessTab)
     }
+
+    // MARK: - 拓扑面板（UI-3：各 state 渲染分支 + 失败可见）
+
+    private func status(
+        syncHealth: TopologySyncHealth,
+        bridge: String? = "shared",
+        desktopAggregate: String? = "all_shared"
+    ) -> TopologyMonitorStatus {
+        TopologyMonitorStatus(
+            schemaVersion: "topology-monitor.v1",
+            state: .enabled,
+            bridgeEpoch: 1710893634113558,
+            sampledAtMs: 1_700_000_000_000,
+            syncHealth: syncHealth,
+            dimensions: TopologyMonitorDimensions(
+                topologyBridgeAttachment: TopologyMonitorDimension(enumValue: bridge ?? "unresolved", ageMs: 1200, stale: false, source: "provider_snapshot", errorCode: "none"),
+                topologyDesktopAggregate: TopologyMonitorDimension(enumValue: desktopAggregate ?? "unknown", ageMs: 1200, stale: false, source: "process_tree", errorCode: "none"),
+                seatHealthDaemon: nil,
+                seatHealthLaunchAgent: nil,
+                attachConfig: nil,
+                versionCompatibility: nil,
+                legacyManagedLoopback: nil,
+                legacyDesktopPrivate: nil
+            ),
+            instances: nil
+        )
+    }
+
+    func testDisplayHealthyIsHidden() {
+        let display = TopologyMonitorStatusStore.Phase.enabled(status(syncHealth: .healthy)).display
+        XCTAssertEqual(display, .hidden)
+    }
+
+    func testDisplayDisabledIsHidden() {
+        // store phase .disabled / .idle → 不显示（不冒充 healthy，也不出现诊断）。
+        let display = TopologyMonitorStatusStore.Phase.disabled.display
+        XCTAssertEqual(display, .hidden)
+        XCTAssertEqual(TopologyMonitorStatusStore.Phase.idle.display, .hidden)
+    }
+
+    func testDisplayUnknownIsNeutralDiagnostic() {
+        let display = TopologyMonitorStatusStore.Phase.enabled(status(syncHealth: .unknown)).display
+        XCTAssertEqual(display, .diagnosticFailure)
+    }
+
+    func testDisplayNotApplicableHasOptionalCopy() {
+        let display = TopologyMonitorStatusStore.Phase.enabled(status(syncHealth: .notApplicable)).display
+        XCTAssertEqual(display, .infoNotApplicable)
+    }
+
+    func testDisplayDiagnosticFailureFromStoreKind() {
+        // 采样失败/网络失败（§6：诊断失败，绝不伪装成 split）。
+        let display = TopologyMonitorStatusStore.Phase.diagnostic(.network).display
+        XCTAssertEqual(display, .diagnosticFailure)
+        XCTAssertNotEqual(display, .warning(.observerUnattached))
+        XCTAssertNotEqual(display, .warning(.partialSync))
+    }
+
+    func testDisplayDegradedKindsFromEvidence() {
+        // §4.3 表：shared×split_present → Desktop 未接共享 daemon。
+        XCTAssertEqual(
+            TopologyMonitorStatusStore.Phase.enabled(status(syncHealth: .degraded, bridge: "shared", desktopAggregate: "split_present")).display,
+            .warning(.desktopDetached)
+        )
+        // shared×mixed → 仅部分实例同步。
+        XCTAssertEqual(
+            TopologyMonitorStatusStore.Phase.enabled(status(syncHealth: .degraded, bridge: "shared", desktopAggregate: "mixed")).display,
+            .warning(.partialSync)
+        )
+        // partial/absent × 任意 → observer/main 未完整附着；不得归咎 Desktop。
+        XCTAssertEqual(
+            TopologyMonitorStatusStore.Phase.enabled(status(syncHealth: .degraded, bridge: "partial", desktopAggregate: "all_shared")).display,
+            .warning(.observerUnattached)
+        )
+        XCTAssertEqual(
+            TopologyMonitorStatusStore.Phase.enabled(status(syncHealth: .degraded, bridge: "absent", desktopAggregate: "mixed")).display,
+            .warning(.observerUnattached)
+        )
+    }
+
+    func testDisplayDegradedWithoutDimEvidenceFallsBackToGeneral() {
+        // 缺维度证据时不得臆断归责对象：降级通用高警示。
+        let display = TopologyMonitorStatusStore.Phase.enabled(
+            status(syncHealth: .degraded, bridge: nil, desktopAggregate: nil)
+        ).display
+        XCTAssertEqual(display, .warning(.general))
+    }
+
+    func testTopologyCopyKeysPresentAndNonEmpty() {
+        for key: String in [
+            L10n.topologyTitle,
+            L10n.topologyDiagnosticFailed,
+            L10n.topologyNotApplicable,
+            L10n.topologyWarningDevDesktopDetached,
+            L10n.topologyWarningPartialSync,
+            L10n.topologyWarningObserverUnattached,
+            L10n.topologyWarningGeneral,
+        ] {
+            XCTAssertFalse(key.isEmpty)
+        }
+    }
 }
 
 private final class DeviceAPIStubForWorkspace: DeviceAPIProviding {

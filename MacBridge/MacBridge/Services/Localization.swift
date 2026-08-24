@@ -102,6 +102,14 @@ enum L10n {
     static var codexRestartFailed: String { tr("codex_restart_failed") }
     static var workspaceNoToolsTitle: String { tr("workspace_no_tools_title") }
     static var workspaceNoToolsSubtitle: String { tr("workspace_no_tools_subtitle") }
+    static var topologyTitle: String { tr("topology_title") }
+    static var topologyDiagnosticFailed: String { tr("topology_diagnostic_failed") }
+    static var topologyNotApplicable: String { tr("topology_not_applicable") }
+    static var topologyWarningDevDesktopDetached: String { tr("topology_warning_dev_desktop_detached") }
+    static var topologyWarningPartialSync: String { tr("topology_warning_partial_sync") }
+    static var topologyWarningObserverUnattached: String { tr("topology_warning_observer_unattached") }
+    static var topologyWarningGeneral: String { tr("topology_warning_general") }
+    static var topologyUpdatedPrefix: String { tr("topology_updated_prefix") }
 
     // MARK: - Overview
 
@@ -474,6 +482,14 @@ enum L10n {
             "workspace_recheck": "Recheck",
             "workspace_no_tools_title": "One step away",
             "workspace_no_tools_subtitle": "CordCode Link is running, but no AI tools are available yet.",
+            "topology_title": "Desktop Sync",
+            "topology_diagnostic_failed": "Cannot determine Desktop sync status — diagnostics failed.",
+            "topology_not_applicable": "No Codex app detected on this Mac.",
+            "topology_warning_dev_desktop_detached": "Codex Desktop is not attached to the shared daemon.",
+            "topology_warning_partial_sync": "Only some Codex Desktop instances are in sync.",
+            "topology_warning_observer_unattached": "CordCode is not fully attached; do not blame Desktop.",
+            "topology_warning_general": "Desktop sync is in a warning state.",
+            "topology_updated_prefix": "Checked",
             "codex_restart_shared_service": "Restart Shared Codex Service",
             "codex_config_changed_hint": "Config changed; restart the shared Codex service to apply.",
             "codex_config_changed_hint_full": "Detected a Codex config change (e.g. provider switch); restart the shared Codex service to apply it.",
@@ -815,6 +831,14 @@ enum L10n {
             "workspace_recheck": "重新检查",
             "workspace_no_tools_title": "还差一步才能开始",
             "workspace_no_tools_subtitle": "CordCode Link 正在运行，但还没有可用的 AI 工具。",
+            "topology_title": "Desktop 同步",
+            "topology_diagnostic_failed": "无法确定 Desktop 同步状态——诊断失败。",
+            "topology_not_applicable": "本机未检测到 Codex App。",
+            "topology_warning_dev_desktop_detached": "Codex Desktop 未接入共享 daemon。",
+            "topology_warning_partial_sync": "仅部分 Codex Desktop 实例处于同步状态。",
+            "topology_warning_observer_unattached": "CordCode observer/main 未完整附着；不得归咎 Desktop。",
+            "topology_warning_general": "Desktop 同步处于警告状态。",
+            "topology_updated_prefix": "检测于",
             "codex_restart_shared_service": "重启共享 Codex 服务",
             "codex_config_changed_hint": "配置已变更，重启共享 Codex 服务后生效",
             "codex_config_changed_hint_full": "检测到 Codex 配置变更（如 provider 切换），重启共享 Codex 服务后才会生效。",

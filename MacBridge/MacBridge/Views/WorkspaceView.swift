@@ -15,6 +15,7 @@ struct WorkspaceView: View {
     @ObservedObject var deviceStore: DeviceStore
     @ObservedObject var pairingViewModel: PairingViewModel
     @ObservedObject var runtimeManager: RuntimeManager
+    @ObservedObject var topologyStore: TopologyMonitorStatusStore
     let onStartBridge: () -> Void
     let onStopBridge: () -> Void
     let onRestartBridge: () -> Void
@@ -64,6 +65,7 @@ struct WorkspaceView: View {
                     .padding(.top, 20)
                 Divider()
                     .padding(.top, 10)
+                topologySection
                 devicesSection
                 toolsAndConnectionSection
             }
@@ -212,10 +214,88 @@ struct WorkspaceView: View {
         }
     }
 
+    // MARK: - Desktop 同步状态（UI-3）
+
+    /// 只按 store 的 display 分支渲染；healthy/disabled/idle 返回空视图。
+    @ViewBuilder
+    private var topologySection: some View {
+        switch topologyStore.phase.display {
+        case .hidden:
+            EmptyView()
+        case .infoNotApplicable:
+            topologyCard(
+                icon: "desktopcomputer",
+                tint: Color.secondary,
+                title: L10n.topologyNotApplicable,
+                body: nil
+            )
+        case .diagnosticFailure:
+            topologyCard(
+                icon: "info.circle",
+                tint: Color.secondary,
+                title: L10n.topologyDiagnosticFailed,
+                body: topologyStore.lastDiagnosticDetail
+            )
+        case .warning(let kind):
+            topologyCard(
+                icon: "exclamationmark.triangle.fill",
+                tint: .orange,
+                title: warningTitle(kind),
+                body: nil
+            )
+        }
+    }
+
+    private func warningTitle(_ kind: TopologyWarningKind) -> String {
+        switch kind {
+        case .desktopDetached: return L10n.topologyWarningDevDesktopDetached
+        case .partialSync: return L10n.topologyWarningPartialSync
+        case .observerUnattached: return L10n.topologyWarningObserverUnattached
+        case .general: return L10n.topologyWarningGeneral
+        }
+    }
+
+    private func topologyCard(icon: String, tint: Color, title: String, body: String?) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 22, weight: .light))
+                .foregroundStyle(tint)
+                .frame(width: 24, height: 24)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Text(L10n.topologyTitle)
+                        .font(.system(size: 17, weight: .semibold))
+                    Text(title)
+                        .font(.system(size: 14))
+                        .foregroundStyle(tint)
+                }
+                if let body {
+                    Text(body)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let updatedAt = topologyStore.lastUpdatedAt {
+                    Text("\(L10n.topologyUpdatedPrefix) \(Self.timeFormatter.string(from: updatedAt))")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            Spacer()
+        }
+        .padding(.vertical, 10)
+    }
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
     // MARK: - 设备与配对
 
-    private var devicesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+    private var devicesSection: some View {        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 Text(L10n.authorizedDevices)
                     .font(.title3.weight(.semibold))

@@ -150,7 +150,7 @@ struct PairingSessionStatus: Codable {
 // MARK: - Management API 客户端
 
 /// 管理 API 的 HTTP 客户端，所有请求带 Bearer token
-class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIProviding {
+class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIProviding, TopologyAPIProviding {
     let baseURL: URL
     let token: String
     /// T07: 专用 ephemeral URLSession，短请求/资源超时，防慢响应阻塞监控循环。
