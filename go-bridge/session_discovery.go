@@ -48,6 +48,9 @@ var grokDiscoveryFastInterval = 5 * time.Second
 // StartSessionDiscoveryWatcher launches the background new-session watcher. The
 // first scan seeds the snapshot without broadcasting (no startup burst).
 func (h *Handlers) StartSessionDiscoveryWatcher(ctx context.Context) {
+	if h.forensics == nil {
+		h.forensics = forensicsFactory()
+	}
 	go h.runSessionDiscovery(ctx)
 }
 
@@ -93,7 +96,7 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 		}
 	}()
 	seen := map[string]string{}
-	h.snapshotBackendSession(ctx, seen, true, id, agent)
+	h.snapshotBackendSessionT(ctx, seen, true, id, agent, string(forensicsTriggerSeed), "")
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	var hintTicker *time.Ticker
@@ -122,17 +125,18 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 		refreshC = signaler.CatalogRefreshSignals()
 	}
 	var hintSeen string
+	var hintSampleID string
 	hintSeeded := false
 	for {
 		select {
 		case <-ctx.Done():
 			return false
 		case <-ticker.C:
-			h.snapshotBackendSession(ctx, seen, false, id, agent)
+			h.snapshotBackendSessionT(ctx, seen, false, id, agent, string(forensicsTriggerPeriodicTick), "")
 		case <-refreshC:
 			// Coalesced by the signaler's buffered channel; the fingerprint
 			// diff itself decides whether sessions_changed fires.
-			h.snapshotBackendSession(ctx, seen, false, id, agent)
+			h.snapshotBackendSessionT(ctx, seen, false, id, agent, string(forensicsTriggerCatalogSignal), "")
 		case <-hintC:
 			if !h.broadcaster.HasConnections() {
 				continue
@@ -141,11 +145,11 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 				// Unlike Codex, Grok has no cheap bounded head RPC. This call is already the
 				// authoritative native fingerprint, so it directly owns fence/seen/publish and
 				// must not be followed by a duplicate full fetch.
-				h.snapshotBackendSession(ctx, seen, false, id, agent)
+				h.snapshotBackendSessionT(ctx, seen, false, id, agent, string(forensicsTriggerPeriodicTick), "")
 				continue
 			}
 			probeStarted := time.Now()
-			current, err := h.codexDiscoveryHintFingerprint(ctx, agent)
+			current, headSampleID, err := h.codexDiscoveryHintFingerprint(ctx, agent)
 			probeDuration := time.Since(probeStarted)
 			if err != nil {
 				slog.Warn("go-bridge: Codex discovery head probe error (no full refresh)",
@@ -154,36 +158,51 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 			}
 			if !hintSeeded {
 				hintSeen = current
+				hintSampleID = headSampleID
 				hintSeeded = true
 				continue
 			}
 			if current == hintSeen {
+				hintSampleID = headSampleID
 				continue
 			}
 			slog.Info("go-bridge: Codex discovery head changed; running authoritative full refresh",
 				"headProbeDurationMs", probeDuration.Milliseconds())
-			if h.snapshotBackendSession(ctx, seen, false, id, agent) {
+			if h.snapshotBackendSessionT(ctx, seen, false, id, agent, string(forensicsTriggerHeadChanged), hintSampleID) {
 				hintSeen = current
+				hintSampleID = headSampleID
 			}
 		}
 	}
 }
 
-func (h *Handlers) codexDiscoveryHintFingerprint(ctx context.Context, agent core.Agent) (string, error) {
+func (h *Handlers) codexDiscoveryHintFingerprint(ctx context.Context, agent core.Agent) (string, string, error) {
 	lister, ok := agent.(codexThreadHeadLister)
 	if !ok {
-		return "", fmt.Errorf("Codex agent does not support native head probe")
+		return "", "", fmt.Errorf("Codex agent does not support native head probe")
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, catalogRequestTimeout)
 	defer cancel()
 	infos, err := lister.FetchThreadListHead(probeCtx, "", codexDiscoveryHeadLimit)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	wire := filterCodexCatalogSessions(sessionsToWire(infos))
+	// head 探针自身与 60s ticker 同用 periodic_tick；corpusKind 区分二者（§3.3）。
+	var sample *forensicsSample
+	if h.forensics != nil {
+		sample = h.forensics.capture(agent.Name(), forensicsCorpusHead, forensicsTriggerPeriodicTick, wire, len(infos))
+	}
 	// 只用顺序+id：语义指纹（含 updatedAt）会在流式 turn 中随每个 delta 变化，
 	// 让长任务执行期间每 3s 误触发一次全量刷新（2026-08-23 真机风暴）。
-	return listOrderFingerprint(wire), nil
+	fp := listOrderFingerprint(wire)
+	if sample != nil {
+		// head 不推进 generation：before/after 同值（§3.2 实现约束 4）。
+		gen := h.catalogGeneration.Load()
+		h.forensics.commit(sample, fp, gen, gen, "")
+		return fp, sample.sampleID, nil
+	}
+	return fp, "", nil
 }
 
 // snapshotSessions samples every backend's catalog fingerprint once and broadcasts
@@ -196,12 +215,33 @@ func (h *Handlers) snapshotSessions(ctx context.Context, seen map[string]string,
 }
 
 func (h *Handlers) snapshotBackendSession(ctx context.Context, seen map[string]string, seed bool, id string, agent core.Agent) bool {
+	return h.snapshotBackendSessionT(ctx, seen, seed, id, agent, "", "")
+}
+
+// snapshotBackendSessionT 是 snapshotBackendSession 的取证扩展：triggerKind 与
+// correlationID 只用于观测（v5 §3.2），返回值、错误和状态推进语义不变。
+// trigger 为空串（保留调用点、测试）时不采样。
+func (h *Handlers) snapshotBackendSessionT(ctx context.Context, seen map[string]string, seed bool, id string, agent core.Agent, trigger string, correlationID string) bool {
 	tag := "poll"
 	if seed {
 		tag = "seed"
 	}
+	var fib *forensicsCtx
+	if h.forensics != nil && trigger != "" {
+		fib = &forensicsCtx{run: h.forensics, backend: id, trigger: forensicsTrigger(trigger), correlation: correlationID}
+	}
+	genBefore := h.catalogGeneration.Load()
+	current := ""
+	defer func() {
+		// Commit 在原路径状态推进完成后执行：generationAfter 取 defer 时现场值。
+		if fib != nil && fib.sample != nil {
+			fib.run.commit(fib.sample, current, genBefore, h.catalogGeneration.Load(), fib.correlation)
+		}
+	}()
 	started := time.Now()
-	current, count, rawCount, err := h.discoveryFingerprint(ctx, id, agent)
+	var count, rawCount int
+	var err error
+	current, count, rawCount, err = h.discoveryFingerprint(ctx, id, agent, fib)
 	duration := time.Since(started)
 	if err != nil {
 		// Live-only backends (dsh) have no list by design — a quiet skip, not
@@ -286,7 +326,7 @@ func (h *Handlers) snapshotBackendSession(ctx context.Context, seen map[string]s
 // 返回 (fingerprint, filteredCount, rawCount, error)。raw/filter 同出一次 fetch
 // （Codex 的 thread/list 全量只拉一次，过滤前后计数用于日志审计 438/429 差异）。
 // error → 调用方 skip 本周期（不更新 seen、不广播）。
-func (h *Handlers) discoveryFingerprint(ctx context.Context, id string, agent core.Agent) (string, int, int, error) {
+func (h *Handlers) discoveryFingerprint(ctx context.Context, id string, agent core.Agent, fib *forensicsCtx) (string, int, int, error) {
 	if id == "claude" && h.claudeSessions != nil {
 		all := h.claudeSessions.list("", nil)
 		visible := make([]map[string]interface{}, 0, len(all))
@@ -315,6 +355,9 @@ func (h *Handlers) discoveryFingerprint(ctx context.Context, id string, agent co
 		wire, rawCount, err := h.codexVisibleMembershipCounts(listCtx, id, "")
 		if err != nil {
 			return "", 0, 0, err
+		}
+		if fib != nil {
+			fib.sample = fib.run.capture(fib.backend, forensicsCorpusAuthoritative, fib.trigger, wire, rawCount)
 		}
 		return listSemanticFingerprint(wire), len(wire), rawCount, nil
 	}

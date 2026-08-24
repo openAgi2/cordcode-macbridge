@@ -71,6 +71,10 @@ type Handlers struct {
 	catalogWireCache    *catalogWireSnapshotCache
 	catalogWireInitOnce sync.Once
 	catalogGeneration   atomic.Uint64
+	// forensics 是 v5 取证执行稿 §3 的发现取证 observer（默认关闭；仅
+	// GO_BRIDGE_CODEX_CATALOG_TRACE=1 启动时构造）。只读取证：从不发起第二次
+	// thread/list，不改变 fingerprint/generation/投递；nil 时零成本。
+	forensics *forensicsRun
 	// catalogProcRegistry 跟踪 catalog 子进程（§4.3/§11，Phase 1E）。Phase 2-5 catalog client 经
 	// h.catalogProcessRegistry() Register 其 stdio 单例子进程；handlers.Shutdown 经其 Shutdown 确定性
 	// 回收。OpenCode 无子进程不经此。lazy init（sync.Once），构造路径不改。
