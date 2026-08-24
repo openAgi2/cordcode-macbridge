@@ -70,6 +70,9 @@ func Main() {
 	logDirPath := flag.String("log-dir", "", "Log directory")
 	remoteURL := flag.String("remote-url", "", "外部可达的 Bridge WebSocket URL（如 wss://my-tailscale:8777/bridge）")
 	tlsPort := flag.Int("tls-port", 8778, "TLS listen port for wss:// remote access (0 = disabled)")
+	// topologyMonitor 默认 off（plan v2 §2.6：负态分类经 owner 人工门验证前，产品默认路径
+	// 不展示诊断结论；门后由独立提交切换）。
+	topologyMonitor := flag.Bool("topology-monitor", envOr("CODEX_TOPOLOGY_MONITOR", "") == "1", "Enable read-only topology monitor (default off; negative-state classification awaits owner gate)")
 	// devInsecureWS 仅用于本地开发：允许 Tailscale 远程候选在 TLS 不可用时降级为明文 ws://。
 	// 产品模式下不得启用——TLS 失败应禁用候选而非明文暴露 bearer token/业务内容（P1-4）。
 	devInsecureWS := flag.Bool("dev-insecure-ws", envOr("CORDCODE_DEV_INSECURE_WS", "") != "", "DEV ONLY: allow plaintext ws:// Tailscale remote when TLS unavailable (fail-open). Product must leave unset.")
@@ -277,6 +280,26 @@ func Main() {
 			relayConfigured = false
 		}
 	}
+	// topology monitor（默认 off；codex-web 后端提供 transport identity provider）。
+	var topologyProvider TopologyProvider
+	if *topologyMonitor {
+		provCfg := TopologyMonitorConfig{Collector: NewTopologyCollector(),
+			BridgeEpoch: func() uint64 { return managementBridgeEpoch(bridgeEpoch) }}
+		if ag, ok := handlers.Agents()["codex-web"]; ok {
+			if idProv, idOK := ag.(core.CodexWebTransportIdentityProvider); idOK {
+				provCfg.Identity = idProv
+			} else {
+				slog.Warn("go-bridge: codex-web agent does not implement transport identity provider; topology bridge dimension stays unresolved")
+			}
+		} else {
+			slog.Warn("go-bridge: codex-web agent not present; topology bridge dimension stays unresolved")
+		}
+		svc := NewTopologyMonitorService(provCfg)
+		svc.Start(ctx)
+		topologyProvider = svc
+		slog.Info("go-bridge: topology monitor enabled")
+	}
+
 	if *managementHost != "" && *managementToken != "" {
 		displayName := loadOrCreateDisplayName(dataDir)
 
@@ -313,6 +336,7 @@ func Main() {
 			RuntimeIdentity: admission.RuntimeIdentity{
 				PID: int32(os.Getpid()), BridgeEpoch: managementBridgeEpoch(bridgeEpoch),
 			},
+			TopologyProvider: topologyProvider,
 		}
 		mgmtSrv = NewManagementServer(mgmtCfg)
 

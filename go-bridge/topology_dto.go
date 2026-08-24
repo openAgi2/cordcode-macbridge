@@ -156,9 +156,7 @@ func (s *TopologySnapshotV1) Validate() error {
 		if s.SyncHealth != "" || len(s.Dimensions) != 0 || len(s.Instances) != 0 {
 			return fmt.Errorf("topology snapshot: disabled state must not carry syncHealth/dimensions/instances")
 		}
-		if s.BridgeEpoch == 0 || s.SampledAtMs == 0 {
-			return fmt.Errorf("topology snapshot: disabled state requires nonzero bridgeEpoch/sampledAtMs")
-		}
+		// bridgeEpoch/sampledAtMs 允许 0：0 = 未初始化（无 runtime identity），如实呈现不造假。
 		return nil
 	case TopologyStateEnabled:
 		// 落空即报错（不默认 healthy）。

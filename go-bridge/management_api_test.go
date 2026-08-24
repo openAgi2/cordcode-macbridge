@@ -1152,3 +1152,74 @@ func TestMgmtRemoteStatus_RelayDisabled(t *testing.T) {
 		t.Errorf("qrPayload = %s, should not contain relay info when disabled", qrPayload)
 	}
 }
+
+// ── GET /internal/topology/snapshot ───────────────────────────────────────────
+
+type fakeTopologyProvider struct {
+	snap *TopologySnapshotV1
+}
+
+func (f *fakeTopologyProvider) TopologySnapshot(context.Context) (*TopologySnapshotV1, error) {
+	return f.snap, nil
+}
+
+func TestTopologySnapshotDisabledWithoutProvider(t *testing.T) {
+	srv := newTestMgmtServer(nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, authRequest(http.MethodGet, "/internal/topology/snapshot"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (always-200, P2-4)", rec.Code)
+	}
+	snap, err := DecodeTopologySnapshot(rec.Body.Bytes())
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if snap.State != TopologyStateDisabled {
+		t.Fatalf("state = %q, want disabled", snap.State)
+	}
+	if snap.SyncHealth != "" || len(snap.Dimensions) != 0 || len(snap.Instances) != 0 {
+		t.Fatalf("disabled carries extra fields: %+v", snap)
+	}
+}
+
+func TestTopologySnapshotWithProvider(t *testing.T) {
+	srv := newTestMgmtServer(nil)
+	srv.cfg.TopologyProvider = &fakeTopologyProvider{snap: &TopologySnapshotV1{
+		SchemaVersion: TopologySchemaVersion,
+		State:         TopologyStateEnabled,
+		BridgeEpoch:   9,
+		SampledAtMs:   1000,
+		SyncHealth:    string(SyncHealthy),
+		Dimensions: map[string]TopologyDim{
+			DimBridgeAttachment:     {Enum: string(AttachmentShared), AgeMs: 500, Stale: false, Source: DimSourceProviderSnap, ErrorCode: ErrorNone},
+			DimDesktopAggregate:     {Enum: string(AggregateAllShared), AgeMs: 500, Stale: false, Source: DimSourceProcessTree, ErrorCode: ErrorNone},
+			DimSeatHealthDaemon:     {Enum: "running", AgeMs: 500, Stale: false, Source: DimSourceVersionProbe, ErrorCode: ErrorNone},
+			DimSeatHealthLaunch:     {Enum: "healthy", AgeMs: 500, Stale: false, Source: DimSourceLaunchdProbe, ErrorCode: ErrorNone},
+			DimAttachConfig:         {Enum: "enabled", AgeMs: 500, Stale: false, Source: DimSourceLaunchdProbe, ErrorCode: ErrorNone},
+			DimVersionCompatibility: {Enum: "effective_compatible", AgeMs: 500, Stale: false, Source: DimSourceVersionProbe, ErrorCode: ErrorNone},
+			DimLegacyManaged:        {Enum: "absent", AgeMs: 500, Stale: false, Source: DimSourceProcessTree, ErrorCode: ErrorNone},
+			DimLegacyDesktop:        {Enum: "absent", AgeMs: 500, Stale: false, Source: DimSourceProcessTree, ErrorCode: ErrorNone},
+		},
+	}}
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, authRequest(http.MethodGet, "/internal/topology/snapshot"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	snap, err := DecodeTopologySnapshot(rec.Body.Bytes())
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if snap.State != TopologyStateEnabled || snap.SyncHealth != string(SyncHealthy) || snap.BridgeEpoch != 9 {
+		t.Fatalf("snapshot = %+v", snap)
+	}
+}
+
+func TestTopologySnapshotRejectsNoAuth(t *testing.T) {
+	srv := newTestMgmtServer(nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, noAuthRequest(http.MethodGet, "/internal/topology/snapshot"))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}

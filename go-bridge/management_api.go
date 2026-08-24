@@ -56,6 +56,9 @@ type ManagementConfig struct {
 	TLSPin             *BridgeV1TLSPin
 	// RuntimeIdentity 非零时启用 additive Management v1；零值保留 observed v0 fixture/旧 runtime。
 	RuntimeIdentity admission.RuntimeIdentity
+	// TopologyProvider：/internal/topology/snapshot 的只读数据源。nil = monitor 未启用
+	// → 该端点始终 200 且返回 state=disabled（P2-4，拒绝 501）。
+	TopologyProvider TopologyProvider
 }
 
 // ── 管理 API 服务器 ─────────────────────────────────────────────────────────
@@ -283,12 +286,43 @@ func (s *ManagementServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleRemoteStatus(w, r)
 	case path == "/internal/relay/delivery-prekeys" && r.Method == http.MethodGet:
 		s.handleRelayDeliveryPrekeys(w, r)
+	case path == "/internal/topology/snapshot" && r.Method == http.MethodGet:
+		s.handleTopologySnapshot(w, r)
 	default:
 		writeMgmtJSON(w, http.StatusNotFound, map[string]interface{}{
 			"error":   "not_found",
 			"message": fmt.Sprintf("端点 %s %s 不存在", r.Method, path),
 		})
 	}
+}
+
+// ── GET /internal/topology/snapshot ──────────────────────────────────────────
+// handleTopologySnapshot 恒 200（P2-4：禁用/未接线返回 state=disabled，不 501）。
+func (s *ManagementServer) handleTopologySnapshot(w http.ResponseWriter, r *http.Request) {
+	var snap *TopologySnapshotV1
+	if s.cfg.TopologyProvider == nil {
+		snap = &TopologySnapshotV1{SchemaVersion: TopologySchemaVersion, State: TopologyStateDisabled}
+	} else {
+		got, err := s.cfg.TopologyProvider.TopologySnapshot(r.Context())
+		if err != nil || got == nil {
+			// 正常路径不可达（provider 内部已做失败可见，恒返回有效 DTO）；兜底 disabled。
+			snap = &TopologySnapshotV1{SchemaVersion: TopologySchemaVersion, State: TopologyStateDisabled}
+		} else {
+			snap = got
+		}
+	}
+	data, err := snap.Marshal()
+	if err != nil {
+		// 形状兜底：disabled 形状必然合法，绝不输出坏 payload。
+		data, err = (&TopologySnapshotV1{SchemaVersion: TopologySchemaVersion, State: TopologyStateDisabled}).Marshal()
+		if err != nil {
+			writeMgmtJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": "internal"})
+			return
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }
 
 // ── 认证中间件 ───────────────────────────────────────────────────────────────

@@ -161,14 +161,17 @@ type dimDisplay struct {
 	everSeen    bool   // 是否已有完成样本（区分 sample_pending）
 }
 
-// TopologyDisplayState 是逐维度防抖状态机（纯内存、无 I/O；调用方负责并发边界）。
+// TopologyDisplayState 是展示防抖状态机（纯内存、无 I/O；调用方负责并发边界）。
 //
-// 冻结规则（§2.5）：
+// 冻结规则（§2.5，作用于展示值——service 用它防抖派生 syncHealth 徽章；
+// 维度原始 enum 在快照里原样呈现证据，不延迟）：
 //   - 完成首个采样前：sample_pending；首个完成样本立即展示（无可数历史）。
-//   - 值是不确定态（unknown/unresolved）或桌面聚合 desktop_absent：立即展示。
+//   - 值是不确定态（unknown/unresolved）、桌面聚合 desktop_absent 或派生
+//     not_applicable（只能由 desktop_absent 这个实例枚举正结果派生）→ 立即展示。
 //   - 当前展示为不确定态：单一完成样本即正证据，立即展示（防抖只用于确定→确定变化）。
 //   - 其余确定→确定变化：新值 = degraded → N=2 连续同样；否则 N=3（恢复/其它）。
-//   - stale 样本按 unresolved 参与（证据不足必须立刻可见，防抖≠隐瞒）。
+//   - 过期样本由 service 先映射为不确定枚举再喂入（证据不足必须立刻可见，
+//     防抖≠隐瞒）；状态机不感知时钟（ageMs/staleAfter 是 service 层职责）。
 //   - Reset：清空（bridge epoch 变更时调用）。
 type TopologyDisplayState struct {
 	dims map[string]*dimDisplay
@@ -179,12 +182,10 @@ func NewTopologyDisplayState() *TopologyDisplayState {
 	return &TopologyDisplayState{dims: map[string]*dimDisplay{}}
 }
 
-// Observe 喂入维度 key 的一次完成采样（value 为维度枚举或 DisplayUncertain；
-// stale=true 表示该样本已过期，等价证据不足），返回该维度当前展示值。
-func (s *TopologyDisplayState) Observe(key, value string, stale bool) string {
-	if stale {
-		value = DisplayUncertain
-	}
+// Observe 喂入维度 key 的一次完成采样（value 为维度枚举或该维度的不确定枚举
+// unresolved/unknown；样本过期时由调用方先映射为不确定枚举——staleAfter/ageMs 是
+// service 层职责，状态机不感知时钟），返回该维度当前展示值。
+func (s *TopologyDisplayState) Observe(key, value string) string {
 	d := s.dims[key]
 	if d == nil {
 		d = &dimDisplay{displayed: DisplaySamplePending}
@@ -211,8 +212,9 @@ func (s *TopologyDisplayState) Observe(key, value string, stale bool) string {
 		d.consecutive = 0
 		return d.displayed
 	}
-	if value == string(AggregateDesktopAbsent) {
-		// desktop_absent 是实例枚举的确定结果，立即展示。
+	if value == string(AggregateDesktopAbsent) || value == string(SyncNotApplicable) {
+		// desktop_absent 是实例枚举的确定结果（正负态证据）；not_applicable 只能由它派生，
+		// 两者均立即展示（§2.5 冻结行）。
 		d.displayed = value
 		d.pending = ""
 		d.consecutive = 0
