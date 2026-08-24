@@ -215,6 +215,9 @@ ACK 只证明取消请求被接受，不是完成证据；Projection Kernel 保�
 | iOS 定向单测执行 | 未执行：`CCCodeTests` 现有 target 未配置 development team，测试 host 安装被签名配置阻塞；不得写成 tests passed |
 | iPhone 安装 | 已安装 `org.openagi.cordcode`，未自动启动或执行 UI test |
 | Mac runtime 重建+重启（含 §8.2 两修复） | 通过：go-bridge 全量测试绿后重建，app 换入新 binary（codesign 校验通过），被动泵 1:1 健康（62 条 delta = 62 条 passive event） |
+| Mac `go test ./go-bridge -count=1`（含 §8.2 第三根因回归） | 通过（66.2s） |
+| Mac `go test ./agent/... ./core/... ./transcriptindex/... -count=1` | 通过（agent/codex-web 0.75s 等，全模块绿） |
+| Mac runtime 重建+重启（含第三根因修复，13:16） | 通过：Release 构建成功（runtime 内含新代码字符串校验），app 重启后 runtime PID 32061 新进程，iOS 已连上新桥（list_models/workspace_diff/fetch_todos） |
 
 （2026-08-24 晚间专报与此处各自独立；本条审计记录不覆盖后续 `[PIPE]`/`[ROUTE]` 桩的构建结果，见对应提交。）
 
@@ -270,6 +273,16 @@ scripts/forensics-todo-render-pipe.sh /tmp/cordcode-fgtrace/fg-trace.log
 - 12:02:49.930 `req_141`：注册表会话已被第一次删除 → 走 `abortObservedThread` 直达 `turn/interrupt`（955ms 内 ACK）→ 官方 `turn/completed`（interrupted）经观察流收口 → 两侧一致。
 - 修复合入：注册表路径对共享 daemon 后端（codex-web，及 app_server 模式的 codex = `sharedDaemonCodexBackend`）不再合成终态/不再 `recordPendingNotification`——与 9cf9287 (b) 规则对齐（ACK 只代表请求被接受，投影保持 running 等官方收口）；`CancelTurn` 失败升级为可见 Info。私有进程后端（Close 即真实终止）保持合成行为不变。
 - 回归：`TestAbortRegistrySharedDaemonCancelFailureKeepsProjectionRunning`、`TestAbortRegistrySharedDaemonCancelSuccessKeepsProjectionRunning`（均断言 SyncRev/Phase/ActiveTurnID 不变）、`TestAbortRegistryPrivateBackendSyntheticIdlePreserved`（非共享后端合成 idle 仍推进）。
+
+**停止生效但两端 UI 卡住（12:55:49-12:58 波次：iOS 永久「执行中」，Mac「待执行」stub）。**
+
+- 12:52:48 iOS `send_message`（长任务）→ 注册表路径 AgentSession + agent relay 启动；12:53:51 turn A 自然完成（relay 转发 seq=601），Mac Desktop 于 12:55:31 在同 thread 发起 turn B（`turn_started` 12:55:31.743）——agentSession 的 `activeTurnID` 仍停在 turn A（`observeEvent` 无调用者，只有本端 TurnStart 返回值被记录），于是 12:55:49.420 第一次 `abort_generation req_11` 用过期 turnID → 官方拒绝 `-32600 expected active turn id 01a0321d but found 01a0321f`。**该次请求仍执行了 `deleteSession` + `sess.Close()`（removeListener）**。
+- 12:55:55.907 第二次 `req_13` 注册表会话已删 → 走 `abortObservedThread` 直达成功（用 liveCodec 观测到的 01a0321f）；官方 `turn/completed`（interrupted）12:55:55.929 广播——**但只到达被动泵**：relay 的监听者已被 removeListener，relay goroutine 挂在永远收不到事件也永不关闭的通道上（僵尸）；`agentRelayRunning` 残留 true 让被动泵门（单一摄入所有者）永久挡掉这一帧 → Projection Kernel 停在 syncRev=443（tool_started），Execution 永久 running → iOS 按钮「执行中」；被动泵 `markIdle`（在门之前无条件执行）给已删会话建了 `sessionStateIdle` stub → Mac 列表「待执行」。
+- 修复合入（三点联动）：
+  1. `agentSession` 事件流改为「监听者→转发」链（`startEventForward`）：转发前调用 `observeEvent`，`activeTurnID` 随官方 turn/started 与 turn/completed 更新（外部 turn 覆盖、完成清空）；`Close()` 关闭对外 `events` 通道——relayEvents 的 `!ok` 分支据此退出 relay 并清理 `agentRelayRunning`，官方后续帧改由被动泵摄入（不再有僵尸挡门）。`currentTurnForControl` 改为中央泵观测（liveCodec）优先、本端返回值兜底。
+  2. `handleAbortGeneration` 注册表路径对共享 daemon 后端**不再 deleteSession / 不再 Close**——relay 保留直到官方 turn/completed 经它到达 Kernel（取消是否停住只能由官方帧证明）；首次失败也不破坏摄入链路。
+  3. `relayEvents` `!ok`（通道关闭）分支对共享 daemon 后端不再合成 `turn_completed{events_channel_closed}`——那是本端判断，官方 turn 可能仍在跑，合成必被后续官方帧打回（9cf9287 (b) 同规则）；私有进程后端（Close 即真实终止）保持合成。
+- 回归：`TestEventForwardMaintainsActiveTurn`、`TestEventForwardObservedTurnWins`、`TestSessionCloseClosesEvents`（agent pkg）；`TestAbortRegistrySharedDaemonCancelFailureKeepsProjectionRunning` / `...Success...` 断言翻转为「会话保留、未 Close、不合成」；`TestAbortRegistryPrivateBackendSyntheticIdlePreserved` 补「会话删除 + Close」断言；`TestRelayEventsSharedDaemonChannelClosedDoesNotSynthesize`。
 
 ## 9. 实施边界（2026-08-24 桩整改后补注）
 

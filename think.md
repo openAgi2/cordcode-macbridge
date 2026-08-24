@@ -137,6 +137,27 @@ app_server 模式 codex），不是 registry 有无；合成终态只留给真�
 审计教训：**verdict 不能只数 iOS 侧 `messages[]` 写点**；Mac 侧合成事件进 Kernel 才是
 同一违规的高级形态（护栏 7 的「完成态只认权威投影」）。
 
+**P2 第三次边界（2026-08-24 真机 12:55-12:58，本窗口）**：「不合成」够不够？不够——
+合成只是违规的一种形态。12:52-12:58 真机序列：iOS 发起 turn A（12:52:48 send_message，
+注册表路径 AgentSession + agent relay）→ turn A 自然完成（12:53:51，relay 转发
+seq=601）→ Mac Desktop 在同一 thread 发起 turn B（12:55:31.743）→ iOS 点停止：
+第一次（12:55:49 req_11）用过期 turnID（agentSession.activeTurnID 停在 turn A——
+`observeEvent` 无调用者，只有本端 TurnStart 返回值被记录）→ 官方 `-32600 expected
+active turn id A but found B`；**该请求仍执行 deleteSession+sess.Close（removeListener）**
+→ relay 从此读不到任何官方帧，但事件通道永不关闭，relay goroutine 成僵尸；
+agentRelayRunning 残留 true → 被动泵「单一摄入所有者」门永久挡掉官方帧 → 第二次
+abort（12:55:55 req_13，走观察直达）成功、官方 turn/completed（interrupted）只有
+被动泵收到并被门丢弃 → Kernel 停在 syncRev=443（tool_started）、Execution 永久
+running → iOS「执行中」；被动泵 markIdle（门内之前无条件执行）给已删除会话建 idle
+stub → Mac「待执行」。**修法三件套**：①agentSession 事件改为监听→转发链，转发前
+observeEvent 维护 activeTurnID（外部 turn 覆盖、完成清空），Close 关闭对外 events
+通道——relayEvents `!ok` 据此退出并清 agentRelayRunning，官方后续帧由被动泵接管
+（僵尸不再挡门）；currentTurnForControl 改为中央泵观测优先、本端返回值兜底。②共享
+daemon 注册表 abort 不删会话不 Close（relay 保留，官方收口经它进 Kernel）。③relayEvents
+`!ok` 对共享 daemon 不合成 events_channel_closed（同一「不得抢先写终态」规则；私有后端
+保留）。注册表路径 12:55:49 的「失败仍删除」已被②消灭：第一次停止即用观测 turnID
+成功，无需第二次点击。
+
 ## 2026-08-22 Codex Desktop：daemon 探测失败会锁死私有 stdio
 
 官方 Desktop（当前 ChatGPT `app.asar`）每次 `transport.connect()`——包括断线重连——都会再跑 `codex app-server daemon version`，spawn timeout 2500ms。control socket 不在时该命令通常立刻失败，不会等满 2.5s。失败就把 `kind` 写成 `stdio`，`supportsReconnect()` 变 false，这个 Desktop 进程再也回不去 websocket。首次重连大约在 websocket 断开后 1s。

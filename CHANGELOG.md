@@ -8,6 +8,7 @@
 
 ## [Unreleased]
 
+- **修复：停止生效后 iOS 不再卡「执行中」，且第一次点停止即生效**：此前停止共享 daemon 上运行中的 turn 时，若第一次请求被官方以过期 turnID 拒绝（同一会话又被另一客户端发起新 turn，本地记录的 turn 身份没随事件流更新），bridge 会删除本地会话并关闭事件监听——agent relay 从此读不到官方帧但永不退出（运行标记残留并挡住被动观察泵），官方 `turn/completed`（interrupted）无人摄入 Kernel，iOS 按钮永久「执行中」、Mac 列表只剩「待执行」占位。现共享 daemon 上中断后的会话与 relay 保留至官方收口；turn 身份改以中央泵观测流为准（事件驱动更新）；会话关闭时 relay 正常退出、官方后续帧交给被动泵，并对共享 daemon 不再合成「通道关闭」伪终态。
 - **修复：iOS 发送长任务时流式正文逐段重复（如「第二个笑话」显示成「第二第二个个笑话笑话」）**：同一官方 text_delta 被两条管线各投递一次（session route 中继 + 被动观察泵），两拷贝在批处理器内合并成一份双倍增量写入 Projection Kernel，iOS 按投影逐段叠加后出现字词级重复。现按审计-008 单一摄入所有者收敛：中继会话由 relayEvents 单点摄入，被动泵只补「无中继但有观察兴趣」的会话（codex-web 外部 turn 仍需它兜底，判据是中继运行状态而非「是否有订阅者」）。Mac 端 kernel 文本从此为严格增量，iOS 无需改动。
 - **修复：iOS 停止共享 daemon 上的长任务时「停止 1 秒后又变回执行中」**：注册表路径（iOS 发起的 turn）在官方 `turn/interrupt` 失败时仍合成 `turn_completed{aborted}` + `session_state_changed: idle`，投影被抢先改写为 idle；但 daemon 回合实际还在跑，继续到达的官方事件又把投影挂回 running——即「1 秒已停止闪变」。现共享 daemon 后端（codex-web / app_server 模式 codex）的 abort 只回执接受，不再合成终态，执行态等待官方 `turn/completed` 权威收口；`CancelTurn` 失败此时可见记录。私有进程后端（关闭即真实终止）保持原有合成行为。
 - **修复：Mac 新建 Codex 会话 iPhone 列表不再等重启才出现（codex-web 目录同源）**：codex-web 此前因 `agent.Name()=="codex"` 的字符串分派被排除在 list_sessions / discovery fingerprint / 3s hint 的 thread/list 富管线之外，目录指纹与 Mac 侧不同源；Mac 新建会话时 `sessions_changed` 触发面脱节，iOS 只能靠重启刷新。现 codex-web 实现 `FetchThreadList`/`FetchThreadListHead` 与 codex 共用同一 catalog seam，三处分派改为能力断言，3s 头部提示对 codex-web 同样生效，发现日志同时打印过滤前后计数（raw/filter）便于核对。
