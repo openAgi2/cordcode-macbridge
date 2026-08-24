@@ -44,6 +44,74 @@ turnID 取观测 `liveCodec.ActiveTurn`，miss 时 thread/read 冷基线兜底�
 **被观测的 turn 的停止，身份来源只能是观测流**——本地 turn/start 回执不存在的场景下，
 「订阅前已运行」的 turn 靠冷基线找 inProgress。
 
+## 2026-08-24 iOS 首次发送后 3–5 秒无反应：先 paint，再做控制面 RPC
+
+### 现象为什么只像“首条慢”
+
+真机同时出现两种同源现象：打开既有 session 后发第一条消息，以及新建 session 后发第一条
+消息，点击发送后界面会像没响应一样停 3–5 秒；同一 session 的第二条通常立即显示。原因不是
+模型首 token 慢，也不是 WebSocket 没发出去，而是第二条命中了 session directory / projection
+缓存，第一条仍在等待 `createSession`、`getSession`、目录解析或第一张 projection echo。
+
+旧实现把这些**控制面前置条件**误当成了**展示用户刚刚提交内容的前置条件**。SSV2 路径还以
+“ProjectionStore 是唯一 writer”为由完全不写本地 user row / assistant placeholder，于是发送
+动作要等 Mac 权威投影绕一圈回来后才有任何可见反馈。
+
+### 正确分层：乐观展示不是伪造权威状态
+
+发送入口应同步完成 presentation paint，然后才异步等待真实 RPC：
+
+1. 立即把 user message 和空的 streaming assistant placeholder 写入 `messages[]`，清输入框、
+   滚到底部，并建立 `.localSend` generation ownership。
+2. 新 session 随后才执行真实 `createSession`；既有冷 session 随后才执行真实 `getSession` /
+   directory resolution；最后执行真实 send。不得用假 session、假回执或 fallback 冒充成功。
+3. `createSession` 回来后把本地 generation 绑定到真实 session id。若回执没带 directory，保留
+   本次请求时捕获的真实 directory，避免为了同一事实再阻塞一次 catalog/getSession 往返。
+4. RPC 真失败时，把既有 placeholder 转成真实错误并走 generation finalize；不能删除乐观行制造
+   “从未发送”，也不能把请求已发等同于服务端已完成。
+
+这里的本地两行只是短生命周期的 presentation overlay；turn 的完成、失败、abort 仍只认 Mac
+Projection Kernel。SSV2 的“单一权威 writer”约束禁止客户端编造 projection 终态，不禁止客户端
+即时呈现自己刚输入的文本。
+
+### 必须有 revision fence，否则乐观行会被旧 projection 擦掉
+
+只在 `sendMessage` 前面 append 两行仍不够。发送后马上可能触发 loading、旧 Ready snapshot 或
+changeset render；它们的 `syncRev` 尚未越过发送前 head，会把 `messages[]` 重画为空/旧历史，形成
+“出现一下 → 消失 → 几秒后整段弹出”。
+
+修复采用 local-send paint fence：append 完成后记录发送前 `appliedRev` 和乐观消息快照。只要当前
+generation 仍是同 session 的未完成 `.localSend`，且 projection 尚无 ready head 或
+`projection.syncRev <= baselineRev`，render 就恢复/保留该快照并维持 generating；当权威 head
+首次满足 `syncRev > baselineRev` 时释放 fence，之后完全由 projection 渲染。切换 session、结束
+generation、失效或错误路径必须清 fence，避免 overlay 泄漏到别的会话。
+
+不要用时间窗、首 token、消息数量或文本相等猜 fence 何时释放；唯一稳定边界是 projection revision
+越过发送前基线。
+
+### 测试要卡住真实慢点，而不是只测最终结果
+
+最有辨识力的两个 seam 测试分别阻塞 `createSession` 和 `getSession`，在解除阻塞**之前**断言：
+
+- `messages` 已有 user + streaming assistant placeholder；
+- user 内容就是刚提交的 draft；
+- 既有 session 已进入 generating；
+- 后端 send 尚未被允许完成。
+
+这样才能证明 paint-before-RPC，而不是仅证明 RPC 很快时最终能显示。SSV2 还需覆盖 fence 矩阵：
+loading 保留、相同/落后 rev 保留、head 越界释放、changeset 路径同样受 fence、session switch 清理。
+
+另一个测试坑：`sendMessage` 为了先 paint，会把 wire submission 放入 `streamTask`。断言 UI paint
+可以在 `sendMessage` 返回后立即做；断言 `sentContents` 必须再 `await streamTask?.value`，否则测到的
+只是 unstructured task 调度竞态。旧测试名/断言若仍坚持“SSV2 不得 optimistic timeline writer”，
+应更新为“允许 presentation overlay，但权威 settlement 仍来自 projection”。
+
+### 验收与落地
+
+iOS commit `15bb645` 在 Codex 分支落地；SessionSyncV2Tests 59/59、Codex 首发 seam 5/5，signed
+真机包安装后 owner 验证：打开既有 session 的首条、新建 session 的首条都可立即显示。这个问题的
+验收点是“点击发送后的同一帧级可见反馈”，不能以最终消息成功到达代替。
+
 ## 2026-08-23 ccswitch 变更 provider：运行中 daemon 不重读 config.toml
 
 ccswitch 改完 `config.toml` 后运行中的共享 daemon 不重读配置（进程内副本）。正确杠杆是
