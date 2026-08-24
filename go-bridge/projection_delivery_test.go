@@ -160,6 +160,7 @@ func TestSessionSyncV2RawTimelineClassification(t *testing.T) {
 		"turn_started", "turn_completed", "user_message",
 		"text_delta", "message_updated", "reasoning_delta",
 		"tool_started", "tool_finished",
+		"permission_request", "permission_resolved", "permission_asked",
 		"context_compressing", "context_compressed",
 		"session_state_changed", "delivery_reconcile_required", "error",
 	} {
@@ -170,13 +171,40 @@ func TestSessionSyncV2RawTimelineClassification(t *testing.T) {
 	for _, event := range []string{
 		"todos_updated", "context_usage_updated", "sessions_changed",
 		"diagnostic_progress", "permission_mode_changed",
-		// permission/question 仍当 raw 控制面投递给 SSV2（投影已吃 permission_*，raw 兜底）。
-		"permission_request", "permission_resolved", "permission_asked",
+		// Derived question frames are rejected by a dedicated syncV2 delivery gate;
+		// they remain outside the generic timeline classifier for legacy delivery.
 		"question_asked", "question_resolved",
 	} {
 		if isSessionSyncV2RawTimelineEvent(event) {
 			t.Errorf("%s must remain control-plane", event)
 		}
+	}
+}
+
+func TestProjectionOnlyConnRejectsRawPermissionTimelineFrames(t *testing.T) {
+	ep := NewEventPublisher("epoch-permission-seal")
+	v2 := newPublisherCaptureConn(nil)
+	v2.device = &TrustedDeviceRecord{DeviceID: "dev-v2-permission-seal"}
+	legacy := newPublisherCaptureConn(nil)
+	legacy.device = &TrustedDeviceRecord{DeviceID: "dev-legacy-permission"}
+	ep.SetConnSyncV2(v2, true)
+
+	for _, event := range []string{"permission_request", "permission_resolved", "permission_asked"} {
+		ep.PublishLogical(LogicalEvent{
+			BackendID: "codex-web",
+			SessionID: "s-permission",
+			Event:     event,
+			Targets:   []Connection{v2, legacy},
+			Data:      map[string]interface{}{"requestId": "req-1"},
+		})
+	}
+
+	legacy.waitCount(t, 3)
+	if got := len(rawEventFrames(v2.snapshot(), "permission_request", "permission_resolved", "permission_asked")); got != 0 {
+		t.Fatalf("v2 received %d raw permission frames, want 0", got)
+	}
+	if got := len(rawEventFrames(legacy.snapshot(), "permission_request", "permission_resolved", "permission_asked")); got != 3 {
+		t.Fatalf("legacy received %d raw permission frames, want 3", got)
 	}
 }
 

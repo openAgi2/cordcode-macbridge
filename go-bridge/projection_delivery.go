@@ -62,10 +62,12 @@ func isSessionSyncV2RawTimelineEvent(event string) bool {
 		"text_delta", "message_updated", "message_content",
 		"reasoning_delta", "thinking_delta",
 		"tool_started", "tool_finished", "tool_content",
-		// permission_request / permission_resolved 仍走 raw 控制面（不在此
-		// deny-list）：投影已吃 permission_*，raw 作兜底。question_asked /
-		// question_resolved 为派生 legacy 帧——SSV2 不发 raw（见
-		// shouldDeliverRawEventLocked），SSV2 靠 canonical user_input 投影。
+		// Permission cards are projected tool parts. Delivering raw permission events
+		// to a syncV2 client would recreate a second timeline writer. permission_asked
+		// is retained here as an old wire spelling so it cannot bypass the seal.
+		"permission_request", "permission_resolved", "permission_asked",
+		// question_asked / question_resolved are derived legacy frames. The dedicated
+		// guard in shouldDeliverRawEventLocked also keeps them legacy-only.
 		"context_compressing", "context_compressed",
 		"session_state_changed", "session_running_signal",
 		"delivery_reconcile_required",
