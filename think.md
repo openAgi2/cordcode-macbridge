@@ -1,5 +1,128 @@
 # Claude Code 冷启动既有 session 首轮流式从头重播：跨仓排查结论
 
+## 2026-08-24 codex-web 共享 daemon 拓扑：共享 server 与私有 stdio 之别
+
+### 正确的拓扑（2026-08-24 之前文档写错过）
+
+Codex Desktop 和 codex-web adapter 是**同一个官方 app-server daemon 的两个客户端**，不是
+两个 runtime。daemon 由 `codex app-server daemon` 持有一个 control socket（UDS），Desktop
+和 adapter 各自 dial 它；codex-web **不**另起 stdio 独占 runtime。旧分析文档把 codex-web
+写成 `work_dir=~/` 的 stdio 子进程是错误拓扑——那正是「另起一个 adapter-owned runtime」
+的老路，本轮明确放弃。
+
+这条拓扑决定了两件事：codex-web 是观察/被动型（thread/observe 订阅，不持有写会话），
+iOS 侧的 turn 由 Mac 发起点（Desktop）或 iOS 发起（adapter 的观察连接）都落在同一
+daemon 的同一 thread 上。也决定了下面所有「断在分派」而不是「断在投递」的 bug 形态。
+
+### 让 codex App 「看见」共享 daemon 上的会话：目录必须同源
+
+第一轮真机：Mac 新建 session，iOS 列表不刷新（目录指纹恒 438，而 thread/list 已经是
+429/430——新 session 进了旧数据源）。根因不是投递，是**分派**：`discoveryFingerprint` /
+`handleListSessions` / 3s hint 三处都用 `agent.Name() == "codex"` 字符串分派，codex-web
+的 `Name() == "codex-web"` 不满足 `codexThreadLister`，只能走旧 `agent.ListSessions()`
+（ListAllThreads）——与 thread/list 富管线不同源，指纹永远不含新 session。
+
+教训：**能力用接口断言，不要用 `Name() ==` 字符串**。修复为 capability 断言
+（`codexThreadLister` / `codexThreadHeadLister`），codex-web 实现
+`FetchThreadList`/`FetchThreadListHead` 进入同一 catalog seam，三处分派同源。
+
+### 同源之后立刻踩到风暴：语义指纹在流式 turn 中每 3s 触发全量刷新
+
+3s hint 探测用与权威全量相同的语义指纹（含 `updatedAtMillis`）：流式 turn 每个 delta 都
+改写 updatedAt → 每次探测「head changed」→ 全量刷新 → 指纹又变 → `sessions_changed`
+风暴（generation 每 3s +1，当天到 108）。`codexDiscoveryHintFingerprint` 改成
+`listOrderFingerprint`（顺序+id）：新增/删除/recency 变化仍触发，updatedAt churn 不再。
+日志同时打 raw/filter 两个计数，438 vs 429 这类差异才能审计。
+
+### 观察/被动会话的停止：注册表里没有它
+
+codex-web 会话不进 go-bridge 会话 registry（被动泵只建 `session == nil` 的 stub）。
+iOS 点「停止」时旧路径 `handleAbortGeneration` 只区分「未命中/空」——裸 stub 被当命中，
+删掉 stub 后 no-op，daemon 上的 Mac turn 继续跑（真机两次 abort 后 text_delta 接着流式）。
+修复：`abortObservedThread` 按 threadID 直达官方 `turn/interrupt`（`ThreadTurnCanceler`，
+turnID 取观测 `liveCodec.ActiveTurn`，miss 时 thread/read 冷基线兜底，fail closed）。
+**被观测的 turn 的停止，身份来源只能是观测流**——本地 turn/start 回执不存在的场景下，
+「订阅前已运行」的 turn 靠冷基线找 inProgress。
+
+## 2026-08-23 ccswitch 变更 provider：运行中 daemon 不重读 config.toml
+
+ccswitch 改完 `config.toml` 后运行中的共享 daemon 不重读配置（进程内副本）。正确杠杆是
+官方 `codex app-server daemon restart`（同一 daemon 读新配置），不是杀掉等 Desktop 掉回
+stdio（见上方 2026-08-22 条目——Desktop 探测失败就锁死私有 stdio，且 restart 必须快于
+其 2500ms/1s 探测窗口）。
+
+本轮补上人机杠杆：Codex Web 行「重启共享 Codex 服务」按钮（执行 daemon restart，控制
+socket 恢复后提示；有任务执行时禁用；Desktop 未自动恢复则提示完整退出重开）；检测到
+`config.toml` 变更时该行提示「重启后生效」，避免用户以为已生效。
+
+iOS 侧的连带坑：daemon restart 换控制 socket → bridge transport 退避重连 → iOS 预建
+bridge client 的激活健康检查一次性采样（旧实现 2 次 × 500ms）落在重连窗口内 → server
+不激活 + 错误横幅固定显示直到 App 重启。修复：`waitForBridgeClientHealth` 按
+pollInterval 轮询最多 maxAttempts 次，窗口覆盖一次完整退避（1/2/4/8s…），耗尽仍不健康
+才报错。教训：**任何「重启全局服务」的改动都必须按完整退避窗口规划客户端激活态竞态**，
+多试一次不够。
+
+## 2026-08-23 codex-web todo dock：官方没有持久化 todo 查询接口
+
+### 事实与数据源归属
+
+官方 `turn/plan/updated` 是 todo **唯一**结构化真相（`{step,status}`）；`thread/read` 的
+plan item 只有 text（无结构）。没有「fetch todos」官方 API——所以**不能靠 JSONL/history
+反推**，也不能把 raw `todos_updated` 当稳定真值（当天 6 组事件 ×2 帧重复，全天
+`[TODO] sse-case` 0 次——raw 路由未定点，不归因不修）。8s 轮询本来就是兜底设计。
+
+### 修了什么
+
+- Mac：codex-web 实现 `core.TodoProvider`——`planCache` 镜像官方 EventPlan（中央泵与
+  订阅解码两条路径都写），`FetchTodos` 返回副本，无缓存返回空而非 `not_supported`；
+  会话删除清缓存；1024 条上限超限重置（plan 是易失状态，宁重拉不泄漏）。
+- iOS（详见 iOS 仓 think.md）：轮询门控从「缓存含 active 项」改为「后端支持 todos 且
+  会话打开」——冷打开时 plan 可能晚于首次 fetch，空列表 **不是** 全完成；停止条件 =
+  非生成态 + todos 全完成；`discardStaleCompletedTodoPlanForNewGeneration` 清空旧完成
+  计划后立即重启 8s 轮询（原实现停表，新任务全程无数据源）。
+
+### 教训
+
+「用户看到 dock 不动」的三层取证顺序：Mac 有没有 EventPlan → bridge 投递有没有 →
+iOS 轮询/分支是否活着。**不要把架设在脆弱 raw 帧上的修复当验收**——raw `todos_updated`
+当天 0 次进 VM，dock 能修好靠的是轮询兜底 + 事件缓存。
+
+## 2026-08-24 MacBridge「启动失败」：runtime.json 删除 + alreadyRunning 楔子
+
+截图「启动失败 / Bridge runtime 已在运行 (PID 95026)」，点重启也失败。
+
+根因链条：`RuntimeManager` 每次 launch **前删除 runtime.json** → launch 抛
+`alreadyRunning`（controller 持有健康进程——这**不是**启动失败）→ 被删除的 runtime.json
+无人补写 → `pollManagementAPI` 每轮 early-return → UI 永久卡死。两端修复：Go 侧 15s
+周期原子重写（`RewriteRuntimeJSON`，删除窗口自愈）；App 侧采纳已运行 PID 转「等待管理
+接口就绪」而不是展示失败。
+
+教训：**`alreadyRunning` ≠ 失败**；「启动前清理」类状态文件操作必须先想清楚「谁是写回
+方」——本场景有两个进程生命周期（controller 持有 vs launch 发起），第二个 launch 的
+清理动作会摧毁第一个进程的写回契约。
+
+## 2026-08-24 SSV2 护栏违规收口：谁写 messages[] 是一半，谁写 Kernel 是全部
+
+发本轮审计（12 条护栏 + 专项声明）确认的违规清单并全部收口：
+
+- raw permission/question 落回 timeline（曾「投影已吃 permission_*，raw 作兜底」——）
+  兜底=双写）；Mac delivery seal + iOS 只留通知/控制动作。
+- 乐观发送（`localSendProjectionBaselineRev`/`localSendOptimisticPaint` hold/restore）
+  用 revision 猜「何时保留本地消息」= consumer referee，删除。
+- abort 先 `settleLocalAbortState`（RPC 成功后本地置终态）= 冒充权威完成态，改为只发请求
+  等投影。
+- 发送 RPC 直返的 assistant Message 写 timeline——SSV2 下硬拒绝。
+
+**遗留 P2（未改代码，已如实记录）**：`abortObservedThread` 在官方 `turn/interrupt` ACK
+成功后合成发布 `turn_completed{reason:aborted}`，该事件经 Kernel `IngestLive` 提前写终态。
+缓解：发生在官方确认之后（不是猜）；官方 codex-web interrupted 终态同为
+turn/completed（completed+idle），收敛一致；SSV2 客户端只收到投影 patch。但按护栏 8
+「control-plane 例外逐项列举」，文档未列举该合成终态——建议列举为显式例外或删除合成、
+完全依赖观察流官方帧。
+
+审计教训：**verdict 不能只数 iOS 侧 `messages[]` 写点**；Mac 侧合成事件进 Kernel 才是
+同一违规的高级形态（护栏 7 的「完成态只认权威投影」）。
+
 ## 2026-08-22 Codex Desktop：daemon 探测失败会锁死私有 stdio
 
 官方 Desktop（当前 ChatGPT `app.asar`）每次 `transport.connect()`——包括断线重连——都会再跑 `codex app-server daemon version`，spawn timeout 2500ms。control socket 不在时该命令通常立刻失败，不会等满 2.5s。失败就把 `kind` 写成 `stdio`，`supportsReconnect()` 变 false，这个 Desktop 进程再也回不去 websocket。首次重连大约在 websocket 断开后 1s。
