@@ -192,8 +192,8 @@ ACK 只证明取消请求被接受，不是完成证据；Projection Kernel 保�
 | --- | --- | --- | --- |
 | H1 | dock 无数据源 = cleared 分支停 poll + raw todo 未进入 VM | 停 poll：已证实并修复；raw routing：中高但未定点 | mapper output、acceptance、router、VM switch 四段同一 event id 日志 |
 | H2 | `EVT-RECV → VM` 中间存在 mapping/routing/acceptance 丢弃 | 中高 | 记录 event 名、session id、current session、mapping result、acceptance result |
-| H3 | 文本已进入 ChatViewModel，但 MessageWeb/presentation/viewport 没有逐次可见提交 | 中高 | 每个 syncRev 对齐 schedule、snapshot id、WebView ack、visible bottom/scroll state |
-| H4 | 6 组 todo 每组重复 2 帧来自双通道发布，并可能触发 duplicate gate | 中；尚无因果证据 | 为两帧记录 source/seq/event id，确认去重发生层级 |
+| H3 | 文本已进入 ChatViewModel，但 MessageWeb/presentation/viewport 没有逐次可见提交 | ~~中高~~ **已关闭（§8.2）**：iOS 全程 0 条 text 类路由日志，正文唯一通道是投影链；双路发生在 kernel 摄入（relay+passive），不在渲染层 | — |
+| H4 | 6 组 todo 每组重复 2 帧来自双通道发布，并可能触发 duplicate gate | ~~中~~ **已定案为文本双路变体（§8.2）**：todo 双帧在 gate 按 eventID 正常 duplicate；正文双收来自 relay+passive 两个 `deltaBatcher.Send` 合并 | — |
 | H5 | 新 session 在 catalog/list/iOS filter 某层被丢弃 | 中；未证实 | 目标 session id/workdir + Mac filter decision + wire payload + iOS final list |
 
 ## 6. 后续实施顺序
@@ -209,11 +209,12 @@ ACK 只证明取消请求被接受，不是完成证据；Projection Kernel 保�
 | 验证 | 结果 |
 | --- | --- |
 | Mac 定向 projection delivery tests | 通过 |
-| Mac `go test ./go-bridge -count=1` | 通过（65.267s） |
+| Mac `go test ./go-bridge -count=1` | 通过（62.4s，含 §8.2 新增回归） |
 | iOS 产品 target 真机签名 build | 通过 |
 | iOS `build-for-testing`（generic iOS，禁签名） | 通过（`TEST BUILD SUCCEEDED`） |
 | iOS 定向单测执行 | 未执行：`CCCodeTests` 现有 target 未配置 development team，测试 host 安装被签名配置阻塞；不得写成 tests passed |
 | iPhone 安装 | 已安装 `org.openagi.cordcode`，未自动启动或执行 UI test |
+| Mac runtime 重建+重启（含 §8.2 两修复） | 通过：go-bridge 全量测试绿后重建，app 换入新 binary（codesign 校验通过），被动泵 1:1 健康（62 条 delta = 62 条 passive event） |
 
 （2026-08-24 晚间专报与此处各自独立；本条审计记录不覆盖后续 `[PIPE]`/`[ROUTE]` 桩的构建结果，见对应提交。）
 
@@ -253,8 +254,27 @@ scripts/forensics-todo-render-pipe.sh /tmp/cordcode-fgtrace/fg-trace.log
 - **rev**：`WebTimelineSnapshot.revision`，每 `makeSnapshot` +1，贯穿 `[PIPE] snapshot → enqueue → ack`。`snapshot rev=X` 后无 `enqueue rev=X` = MessageWeb 未排队；`enqueue rev=X state=sent seq=S` 后无 `ack ... rev=X` = WebView 未回 snapshotApplied（H3 证据方向）。
 - 断链判定顺序：`sink` 有而无 `schedule` ＝ 调度未发生；`schedule` 有而无 `snapshot` ＝ coalesce 吞（streaming 节流）；`snapshot` 有而无 `enqueue` ＝ not-ready/awaiting 挂起（行尾 `state=` 标识）；`enqueue sent` 无 `ack` ＝ WebView 卡住或 ack 超时；`ack` 有而无对应起点的 `scroll` ＝ 滚动策略问题（Web owns scroll 契约内）。
 
+### 8.2 根因定案与修复（2026-08-24 真机 12:01-12:10 波次 + 自采 daemon 流证明）
+
+**重复文本（H3 定案 = H4 变异形态：单一摄入所有者被双路违反）。**
+
+- iOS 全程 0 条 `DELTA-APPLY`、0 条 text 类 `EVT-RECV`：正文唯一通道是 K4Patch 投影链，渲染层无重复写入方（排除 H3）。
+- 自采 daemon `item/agentMessage/delta` 流（`codex app-server proxy` + WS-over-UDS 直连 control socket，60/59/62 条分三轮）：官方 `delta` 是严格追加式；对 captured 流做「最大后缀-前缀重叠去重」差分 = 0 重叠。
+- 因此 kernel 文本重复只能来自摄入侧重复：`relayEvents`（handlers_relay.go，session route 中继）对每个事件 `deltaBatcher.Send`，而被动泵门（main.go，旧判据 `HasSessionSubscriber || HasSessionInterest`）对同一官方增量 **再次** `Send`。两份拷贝落在同一个 batcher accumulator 里合并成 `D+D` 的 append_text；两次 `PublishLogical` 分配不同 perSessionSeq，kernel 的 seq 去重无法识别。真机观测：每条 delta 后文本尾部出现 1-8 字符重复（正是单条官方 delta 的体量），且随流式逐段出现。
+- 修复合入（代码提交）：被动泵门改为「该会话 **无 agent relay 在跑** 且 **有观察兴趣**」才补投（`agentRelayRunningFor`）；有 relay 的中继会话由 relayEvents 单点摄入。**判据必须是 relay 在跑而不是「有订阅者」**：codex 文件 relay 只覆盖 "codex" backend，codex-web 外部 turn（Mac 发起、bridge 无 AgentSession）有订阅者但没有 relay——被动泵必须继续兜底，否则外部观察 turn 会饿死 kernel。
+- 回归：`TestPassiveFeedAllowedSingleIngestOwner`（门真值表：relayed-only / relayed-and-observed / observed-only / untracked 四象限）。
+
+**首次「停止」1 秒后回到执行中（第二次停止才生效）。**
+
+- 12:02:38.593 `abort_generation req_137`：注册表路径命中（iOS 发起的 turn 持有 AgentSession），`CancelTurn` 失败（错误仅 DEBUG 不可见），随后按旧逻辑**合成** `turn_completed{aborted}` + `session_state_changed:idle`（flush syncRev=816，offline=true）——iOS 显示停滞 1 秒；但共享 daemon 上的官方 turn 并未停（官方流继续 → flush 817/818 tool 事件重挂 running）。
+- 12:02:49.930 `req_141`：注册表会话已被第一次删除 → 走 `abortObservedThread` 直达 `turn/interrupt`（955ms 内 ACK）→ 官方 `turn/completed`（interrupted）经观察流收口 → 两侧一致。
+- 修复合入：注册表路径对共享 daemon 后端（codex-web，及 app_server 模式的 codex = `sharedDaemonCodexBackend`）不再合成终态/不再 `recordPendingNotification`——与 9cf9287 (b) 规则对齐（ACK 只代表请求被接受，投影保持 running 等官方收口）；`CancelTurn` 失败升级为可见 Info。私有进程后端（Close 即真实终止）保持合成行为不变。
+- 回归：`TestAbortRegistrySharedDaemonCancelFailureKeepsProjectionRunning`、`TestAbortRegistrySharedDaemonCancelSuccessKeepsProjectionRunning`（均断言 SyncRev/Phase/ActiveTurnID 不变）、`TestAbortRegistryPrivateBackendSyntheticIdlePreserved`（非共享后端合成 idle 仍推进）。
+
 ## 9. 实施边界（2026-08-24 桩整改后补注）
 
 第 6.2/6.3 的桩只做层间取证，任何结论都必须按护栏 9 落到 owner 层修复；桩在 H3/H2/H4 结论得出后可按边界裁剪，但 **gate 的 `[ROUTE]` 判决行建议保留**——它是当前唯一能审计「SFV2 下 raw control-plane 帧为何消失」的持久证据（此前 `.accept/.duplicate` 完全无声）。
+
+H3/H4 已随 §8.2 根因定案关闭（不是 presentation 层、不是 todo 双通道，是 kernel 摄入双路）；H1/H2 的 todo 链四段关联桩保留，供 owner 真机复核；H5 待 §6.4 唯一标题会话流程。
 
 本报告的排障边界是：先证明 owner 层，再修 owner 层。后续任何方案若需要恢复 raw/history/optimistic writer 才能“看起来正常”，即视为违反 Session Sync v2，不进入实现。
