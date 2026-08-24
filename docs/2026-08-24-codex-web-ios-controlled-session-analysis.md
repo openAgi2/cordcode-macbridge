@@ -168,11 +168,18 @@ Mac 日志中的 `raw=433 / kept=189 / codex_roots=12` 只能说明 catalog filt
 
 该改动没有把 todo 误封：todo 仍是当前明确登记的 control-plane 例外。
 
+Mac 的 observed-thread 取消路径也遵守同一权威边界：官方 `turn/interrupt`
+返回 ACK 后不再合成 `turn_completed{reason: aborted}` 或 `session_state_changed: idle`。
+ACK 只证明取消请求被接受，不是完成证据；Projection Kernel 保持原 rev、active turn
+和 running phase，直到共享 daemon 的官方 `turn/completed` 经观察流到达。该路径是控制
+请求，不是 control-plane 终态例外。
+
 ### 4.3 防回归守卫
 
 新增或调整的定向守卫覆盖：
 
 - Mac：SSV2 raw permission 三类事件 0 投递、legacy 仍投递。
+- Mac：observed-thread interrupt ACK 不改变 projection rev/active turn/running phase。
 - iOS：raw permission 不写 timeline。
 - iOS：SSV2 send 不创建 optimistic row / placeholder / local turn。
 - iOS：projection 到达时直接替换任何未确认的 client-authored row，不做 referee。
