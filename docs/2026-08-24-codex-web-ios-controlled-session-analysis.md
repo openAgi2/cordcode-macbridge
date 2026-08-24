@@ -199,8 +199,8 @@ ACK 只证明取消请求被接受，不是完成证据；Projection Kernel 保�
 ## 6. 后续实施顺序
 
 1. owner 真机复测本轮 writer seal 与 todo poll：iOS 发送长任务时，用户消息只能由 projection 回显；dock 应在下一次 8 秒 fetch 或有效 `todos_updated` 后出现；取消后必须等 projection 才变为 settled。
-2. 若文本仍“结束时一次出现”，只在 MessageWeb presentation 链加同一 `syncRev/snapshotID` 的 schedule/apply/ack/viewport 桩，定位 H3；不修改 Kernel writer 结构。
-3. 为 todo raw 帧加入 mapper → acceptance → router → VM 的单次关联标识，定位 H2/H4。poll 是保留的 control-plane 路径，不是 timeline fallback。
+2. ~~若文本仍“结束时一次出现”，只在 MessageWeb presentation 链加同一 `syncRev/snapshotID` 的 schedule/apply/ack/viewport 桩，定位 H3~~ —— **已实施（2026-08-24）**：`[PIPE]` 桩（sink/schedule/snapshot/enqueue/ack/scroll 六步，贯通 `syncRev + snapshot.revision`），见 §8 新命令；仍不修改 Kernel writer 结构。
+3. ~~为 todo raw 帧加入 mapper → acceptance → router → VM 的单次关联标识，定位 H2/H4~~ —— **已实施（2026-08-24）**：`EVT-RECV` 与 `[ROUTE]`（accept/duplicate/gap/non-current）与 `[TODO] sse-case`/`handleTodoUpdate` 全部携带同一 `eventID`（bridge `epoch:seq`）；gate 的 `.accept/.duplicate` 从此可审计。poll 仍是保留的 control-plane 路径，不是 timeline fallback。
 4. 新建一个带唯一标题的 Mac session，记录 id/workdir，抓 Mac catalog decision、`list_sessions` 响应和 iOS 接收后的列表，完成 H5 闭环。
 5. 若未来决定把 plan 纳入 projection，必须先改 Mac canonical protocol pack，再同步 iOS mirror、Swift/web types、reducer/fence/delivery 测试，并在新路径证明后删除 raw/poll。不能把它作为本轮临时补丁单端加入。
 
@@ -214,6 +214,8 @@ ACK 只证明取消请求被接受，不是完成证据；Projection Kernel 保�
 | iOS `build-for-testing`（generic iOS，禁签名） | 通过（`TEST BUILD SUCCEEDED`） |
 | iOS 定向单测执行 | 未执行：`CCCodeTests` 现有 target 未配置 development team，测试 host 安装被签名配置阻塞；不得写成 tests passed |
 | iPhone 安装 | 已安装 `org.openagi.cordcode`，未自动启动或执行 UI test |
+
+（2026-08-24 晚间专报与此处各自独立；本条审计记录不覆盖后续 `[PIPE]`/`[ROUTE]` 桩的构建结果，见对应提交。）
 
 ## 8. 取证命令
 
@@ -235,5 +237,24 @@ rg 'event=todos_updated|EVT-RECV event=todos_updated|\[TODO\] sse-case' \
 rg 'K4Patch.*delivered|fetch_todos result|passive event' \
   "$HOME/Library/Application Support/CordCode Link/logs/go-bridge.log"
 ```
+
+### 8.1 H3/H2/H4 关联取证（2026-08-24 桩，iOS 仓 `scripts/forensics-todo-render-pipe.sh`）
+
+```sh
+# 一键对齐：todo 同 eventID 四段（EVT-RECV→ROUTE→sse-case→handleTodoUpdate）+
+# 渲染链六步（sink→schedule→snapshot→enqueue→ack→scroll）
+scripts/forensics-todo-render-pipe.sh /tmp/cordcode-fgtrace/fg-trace.log
+```
+
+关联键与语义（必须逐段取读，禁止一次 grep 后下结论）：
+
+- **eventID**（bridge 帧 `epoch:seq`）贯穿四段：`EVT-RECV`（mapper 入口）→ `[ROUTE] accept|duplicate|gap|non-current-enqueue`（acceptance gate 判决与 current-session 路由）→ `[TODO] sse-case v2|legacy`（VM switch 执行）→ `[TODO] handleTodoUpdate ... eventID=`（应用为 dock）。**同 eventID 在 gate 缺席 = 门内丢失；在 gate 出现但 VM 缺席 = 路由/分支丢弃；`duplicate` = 双通道重复由 gate 判掉（H4 证据方向）**。
+- **syncRev**：`projectionStore.appliedRev`（VM 已应用的投影 rev），出现在 `[PIPE] sink/snapshot`。
+- **rev**：`WebTimelineSnapshot.revision`，每 `makeSnapshot` +1，贯穿 `[PIPE] snapshot → enqueue → ack`。`snapshot rev=X` 后无 `enqueue rev=X` = MessageWeb 未排队；`enqueue rev=X state=sent seq=S` 后无 `ack ... rev=X` = WebView 未回 snapshotApplied（H3 证据方向）。
+- 断链判定顺序：`sink` 有而无 `schedule` ＝ 调度未发生；`schedule` 有而无 `snapshot` ＝ coalesce 吞（streaming 节流）；`snapshot` 有而无 `enqueue` ＝ not-ready/awaiting 挂起（行尾 `state=` 标识）；`enqueue sent` 无 `ack` ＝ WebView 卡住或 ack 超时；`ack` 有而无对应起点的 `scroll` ＝ 滚动策略问题（Web owns scroll 契约内）。
+
+## 9. 实施边界（2026-08-24 桩整改后补注）
+
+第 6.2/6.3 的桩只做层间取证，任何结论都必须按护栏 9 落到 owner 层修复；桩在 H3/H2/H4 结论得出后可按边界裁剪，但 **gate 的 `[ROUTE]` 判决行建议保留**——它是当前唯一能审计「SFV2 下 raw control-plane 帧为何消失」的持久证据（此前 `.accept/.duplicate` 完全无声）。
 
 本报告的排障边界是：先证明 owner 层，再修 owner 层。后续任何方案若需要恢复 raw/history/optimistic writer 才能“看起来正常”，即视为违反 Session Sync v2，不进入实现。
