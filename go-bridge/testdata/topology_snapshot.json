@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "topology-monitor.v1",
+  "state": "enabled",
+  "bridgeEpoch": 1710893634113558,
+  "sampledAtMs": 1710893634113558,
+  "syncHealth": "healthy",
+  "dimensions": {
+    "topologyBridgeAttachment": { "enum": "shared", "ageMs": 1200, "stale": false, "source": "provider_snapshot", "errorCode": "none" },
+    "topologyDesktopAggregate":  { "enum": "all_shared", "ageMs": 1200, "stale": false, "source": "process_tree", "errorCode": "none" },
+    "seatHealthDaemon":         { "enum": "running", "ageMs": 1200, "stale": false, "source": "version_probe", "errorCode": "none" },
+    "seatHealthLaunchAgent":    { "enum": "healthy", "ageMs": 1200, "stale": false, "source": "launchd_probe", "errorCode": "none" },
+    "attachConfig":             { "enum": "enabled", "ageMs": 1200, "stale": false, "source": "launchd_probe", "errorCode": "none" },
+    "versionCompatibility":     { "enum": "effective_compatible", "ageMs": 1200, "stale": false, "source": "version_probe", "errorCode": "none" },
+    "legacyManagedLoopback":    { "enum": "absent", "ageMs": 1200, "stale": false, "source": "process_tree", "errorCode": "none" },
+    "legacyDesktopPrivate":     { "enum": "absent", "ageMs": 1200, "stale": false, "source": "process_tree", "errorCode": "none" }
+  },
+  "instances": [
+    { "pid": 4242, "startTime": "2026-08-24T17:00:00Z", "classification": "shared_only",
+      "evidence": [ { "kind": "shared_fd", "state": "confirmed" }, { "kind": "private_stdio", "state": "unavailable" } ] }
+  ]
+}
