@@ -118,6 +118,30 @@ func TestShouldStartPassiveSubscription_CodexRequiresExplicitSharedURL(t *testin
 	}
 }
 
+func TestPassiveFeedAllowedSingleIngestOwner(t *testing.T) {
+	// 审计-008 单一摄入所有者：被动泵只补「无 agent relay、仅有观察兴趣」的
+	// 会话；agent relay 在跑时由 relayEvents 单点摄入——双路摄入把同一官方
+	// 增量合并成 D+D 的 append_text（owner 2026-08-24 真机：流式正文重复）。
+	// 「有订阅者不代表有 relay」（codex-web 外部 turn 只有被动泵兜底），
+	// 因此判据是 agentRelayRunning 而不是订阅者存在。
+	for _, tc := range []struct {
+		name              string
+		agentRelayRunning bool
+		hasObservation    bool
+		want              bool
+	}{
+		{"relayed-only", true, false, false},
+		{"relayed-and-observed", true, true, false},
+		{"observed-only", false, true, true},
+		{"untracked", false, false, false},
+	} {
+		if got := passiveFeedAllowed(tc.agentRelayRunning, tc.hasObservation); got != tc.want {
+			t.Errorf("%s: passiveFeedAllowed(%v,%v)=%v, want %v",
+				tc.name, tc.agentRelayRunning, tc.hasObservation, got, tc.want)
+		}
+	}
+}
+
 func TestDisablesRelayIdleTimeoutIncludesOpenCode(t *testing.T) {
 	if !disablesRelayIdleTimeout("opencode") {
 		t.Fatal("opencode relay idle timeout should be disabled")

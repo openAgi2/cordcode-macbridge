@@ -799,18 +799,20 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 			}
 
 			// Audit-008 W1.1 — single timeline-ingest owner. The passive
-			// path may only PUBLISH events for sessions a client actually
-			// observes (set_observation_scope / session subscription): that
-			// is the E3 subscribed-external-turn route, delivered once
-			// through this single publisher. Sessions with no live
-			// subscriber are catalog/control-only (§6.5): the registry
-			// bookkeeping above already ran; feeding the Kernel here would
-			// build a hidden timeline for a session nobody opened. Actively
-			// relayed sessions never reach this loop at all — the adapter
-			// routes their events exclusively to the session route whose
-			// relay is the ingest owner.
-			if ev.SessionID == "" || h.broadcaster.HasSessionSubscriber(backendID, ev.SessionID) ||
-				(h.observation != nil && h.observation.HasSessionInterest(backendID, ev.SessionID)) {
+			// path may only PUBLISH events for sessions that are observed
+			// WITHOUT an active session-route relay (set_observation_scope
+			// only): the relay loop (relayEvents) is the ingest owner for
+			// every session that has a live subscriber, and both pipelines
+			// decode the same daemon broadcast — feeding the Kernel twice
+			// reproduces every text delta inside a single batched
+			// append_text (owner 2026-08-24 真机: 流式正文逐 delta 重复).
+			// Sessions with neither subscription nor observation interest are
+			// catalog/control-only (§6.5): the registry bookkeeping above
+			// already ran; feeding the Kernel here would build a hidden
+			// timeline for a session nobody opened.
+			if ev.SessionID == "" || passiveFeedAllowed(
+				h.agentRelayRunningFor(ev.SessionID),
+				h.observation != nil && h.observation.HasSessionInterest(backendID, ev.SessionID)) {
 				h.deltaBatcher.Send(LogicalEvent{
 					SessionID: ev.SessionID,
 					BackendID: backendID,
@@ -829,6 +831,17 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 		case <-time.After(2 * time.Second):
 		}
 	}
+}
+
+// passiveFeedAllowed 决定被动泵是否向 kernel 补投该 session 的事件：只有
+// 「有观察兴趣且该会话没有运行中的 agent relay」的会话由被动泵摄入；agent
+// relay（relayEvents）是它生命周期的唯一摄入者，双路摄入会把同一官方增量
+// 合并进同一次 append_text（审计-008 单一摄入所有者；owner 2026-08-24 真机
+// 流式正文逐段重复）。以 agentRelayRunning 而不是「有订阅者」为界：外部观察
+// 会话（Mac 发起、无 bridge AgentSession、codex 文件 relay 只覆盖 codex
+// backend）有订阅者但没有 relay——被动泵必须继续兜底。
+func passiveFeedAllowed(agentRelayRunning, hasObservation bool) bool {
+	return !agentRelayRunning && hasObservation
 }
 
 func shouldStartPassiveSubscription(backendID, codexBackendMode, codexAppServerURL, openCodeURL, openCodeWebURL string) bool {

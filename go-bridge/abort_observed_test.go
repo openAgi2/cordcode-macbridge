@@ -6,7 +6,10 @@ package gobridge
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	"github.com/openAgi2/cordcode-macbridge/core"
 )
 
 // abortObservedStub 实现 core.ThreadTurnCanceler 的假后端，只记录调用。
@@ -165,5 +168,126 @@ func TestAbortObservedThreadRegistryStubRoutesToObservedCancel(t *testing.T) {
 	// 观察路径不动 registry：stub 保留（被动泵继续拥有该会话的运行态簿记）。
 	if stub, ok := h.sessions.get("th-stubbed"); !ok || stub.session != nil {
 		t.Fatalf("abortObservedThread 不应删除 stub registry 条目（ok=%v session=%v）", ok, stub.session)
+	}
+}
+
+// ── 注册表路径（iOS 发起、bridge 持有 AgentSession 的会话）─────────────────
+
+// abortRegistryStubSession 带 TurnCanceler 的注册表假 session：关闭本地会话
+// 不会终止共享 daemon 上的 turn，与 codex-web 真实代理一致。
+type abortRegistryStubSession struct {
+	*fakeAgentSession
+	cancelErr   error
+	cancelCalls int
+}
+
+func (s *abortRegistryStubSession) CancelTurn(ctx context.Context) error {
+	s.cancelCalls++
+	return s.cancelErr
+}
+
+// TestAbortRegistrySharedDaemonCancelFailureKeepsProjectionRunning 共享 daemon
+// 会话取消失败（2026-08-24 真机 12:02:38 首次停止）：删除注册表会话后不得合成
+// turn_completed/idle——官方的 turn 仍在继续，投影必须保持 running 等官方收口。
+func TestAbortRegistrySharedDaemonCancelFailureKeepsProjectionRunning(t *testing.T) {
+	h := newTestHandlers(t)
+	sess := &abortRegistryStubSession{
+		fakeAgentSession: &fakeAgentSession{id: "th-reg-cw", events: make(chan core.Event, 8)},
+		cancelErr:        errors.New("turn/interrupt rejected"),
+	}
+	h.putSessionWithMeta("th-reg-cw", "codex-web", "", sess)
+	h.projectionKernel.IngestLive(ev(1, "codex-web", "th-reg-cw", "turn_started",
+		map[string]interface{}{"turnId": "official-turn"}))
+	before, ok := h.projectionKernel.reducer.Snapshot("codex-web", "th-reg-cw")
+	if !ok || before.Execution.Phase != "running" {
+		t.Fatalf("precondition: projection = %+v ok=%v, want running", before, ok)
+	}
+
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+	h.handleAbortGeneration(serverConn, WireMessage{
+		BackendID: "codex-web", Method: "abort_generation", RequestID: "r1",
+		Params: []byte(`{"sessionId":"th-reg-cw"}`),
+	})
+	if frames := readJSONMaps(t, clientConn, 1); frames[0]["ok"] != true {
+		t.Fatalf("abort 须先回执 Ok：%v", frames[0])
+	}
+	if sess.cancelCalls != 1 {
+		t.Fatalf("CancelTurn calls = %d, want 1", sess.cancelCalls)
+	}
+	if _, ok := h.getSession("th-reg-cw"); ok {
+		t.Fatal("共享 daemon abort 仍应删除注册表会话（后续停止走观察直达）")
+	}
+	after, ok := h.projectionKernel.reducer.Snapshot("codex-web", "th-reg-cw")
+	if !ok {
+		t.Fatal("projection 不应消失")
+	}
+	if after.SyncRev != before.SyncRev || after.Execution.Phase != "running" ||
+		after.Execution.ActiveTurnID != "official-turn" {
+		t.Fatalf("取消失败时不得合成终态: before=%+v after=%+v", before, after)
+	}
+}
+
+// TestAbortRegistrySharedDaemonCancelSuccessKeepsProjectionRunning 取消失败
+// 以外的常态：CancelTurn 成功后同样不得合成终态——官方 turn/completed
+// （interrupted）是唯一收口（9cf9287 (b) 规则扫到注册表路径）。
+func TestAbortRegistrySharedDaemonCancelSuccessKeepsProjectionRunning(t *testing.T) {
+	h := newTestHandlers(t)
+	sess := &abortRegistryStubSession{
+		fakeAgentSession: &fakeAgentSession{id: "th-reg-cw-ok", events: make(chan core.Event, 8)},
+	}
+	h.putSessionWithMeta("th-reg-cw-ok", "codex-web", "", sess)
+	h.projectionKernel.IngestLive(ev(1, "codex-web", "th-reg-cw-ok", "turn_started",
+		map[string]interface{}{"turnId": "official-turn"}))
+	before, ok := h.projectionKernel.reducer.Snapshot("codex-web", "th-reg-cw-ok")
+	if !ok {
+		t.Fatal("precondition: projection missing")
+	}
+
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+	h.handleAbortGeneration(serverConn, WireMessage{
+		BackendID: "codex-web", Method: "abort_generation", RequestID: "r1",
+		Params: []byte(`{"sessionId":"th-reg-cw-ok"}`),
+	})
+	_ = readJSONMaps(t, clientConn, 1)
+	if sess.cancelCalls != 1 {
+		t.Fatalf("CancelTurn calls = %d, want 1", sess.cancelCalls)
+	}
+	after, ok := h.projectionKernel.reducer.Snapshot("codex-web", "th-reg-cw-ok")
+	if !ok || after.SyncRev != before.SyncRev || after.Execution.Phase != "running" {
+		t.Fatalf("CancelTurn 成功也不得合成终态: before=%+v after=%+v", before, after)
+	}
+}
+
+// TestAbortRegistryPrivateBackendSyntheticIdlePreserved 私有进程后端（不存在
+// 独立官方收口的 daemon）保持既有合成终态：Close 即真实终止，turn_completed →
+// idle 由本层收口（回归护栏，防止误伤非共享后端）。
+func TestAbortRegistryPrivateBackendSyntheticIdlePreserved(t *testing.T) {
+	h := newTestHandlers(t)
+	sess := &abortRegistryStubSession{
+		fakeAgentSession: &fakeAgentSession{id: "th-reg-ds", events: make(chan core.Event, 8)},
+	}
+	h.putSessionWithMeta("th-reg-ds", "deepseek", "", sess)
+	h.projectionKernel.IngestLive(ev(1, "deepseek", "th-reg-ds", "turn_started",
+		map[string]interface{}{"turnId": "official-turn"}))
+	before, ok := h.projectionKernel.reducer.Snapshot("deepseek", "th-reg-ds")
+	if !ok {
+		t.Fatal("precondition: projection missing")
+	}
+
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+	h.handleAbortGeneration(serverConn, WireMessage{
+		BackendID: "deepseek", Method: "abort_generation", RequestID: "r1",
+		Params: []byte(`{"sessionId":"th-reg-ds"}`),
+	})
+	_ = readJSONMaps(t, clientConn, 1)
+	after, ok := h.projectionKernel.reducer.Snapshot("deepseek", "th-reg-ds")
+	if !ok || after.SyncRev <= before.SyncRev {
+		t.Fatalf("私有后端 abort 必须合成终态并推进 syncRev: before=%+v after=%+v", before, after)
+	}
+	if after.Execution.Phase != "idle" || after.Execution.ActiveTurnID != "" {
+		t.Fatalf("私有后端合成 idle 缺失: after=%+v", after)
 	}
 }

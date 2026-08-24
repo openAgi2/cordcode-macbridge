@@ -2434,6 +2434,17 @@ func disablesRelayIdleTimeout(backendID string) bool {
 	}
 }
 
+// agentRelayRunningFor 报告该会话是否已有 agent relay 在跑。relayEvents 是其
+// 生命周期内 kernel 摄入的唯一 owner（审计-008）；被动泵以它为界跳过补投，
+// 避免同一官方增量被双路合并成 D+D（owner 2026-08-24 真机流式正文重复）。
+// 注意以「订阅者」为界的旧判据会误伤外部观察会话：codex file relay 只覆盖
+// "codex" backend，codex-web 外部 turn 有订阅者但没有 relay，仍需被动泵兜底。
+func (h *Handlers) agentRelayRunningFor(sessionID string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.agentRelayRunning[sessionID]
+}
+
 // relaySurvivesTurnBoundary reports backends whose AgentSession outlives a
 // single turn. Exiting relayEvents on EventResult/EventError leaves a zombie
 // if Close does not close Events() — the next send starts a new session
