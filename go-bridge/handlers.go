@@ -2799,6 +2799,26 @@ func (h *Handlers) handleAbortGeneration(conn Connection, msg WireMessage) {
 	sessionID := params.SessionID
 	slog.Info("go-bridge: handleAbortGeneration: aborting session", "sessionID", sessionID, "backendID", backendID)
 
+	// 共享 daemon 后端（codex-web / app_server 模式的 codex）：注册表会话与事件
+	// relay 必须保留。删除会话并 Close 会 removeListener，relay 从此读不到任何
+	// 官方帧但永不退出（agentRelayRunning 残留），被动泵被单一摄入所有者门永久
+	// 挡掉——官方 turn/completed（interrupted）无人摄入，Projection Kernel 永久
+	// running（owner 2026-08-24 12:55:55 真机：停止生效、iOS 按钮卡「执行中」、
+	// Mac 列表因被动泵 markIdle 变成无 registry 的「待执行」stub）。取消能否停住
+	// 官方 turn 只能由官方 turn/completed 证明：CancelTurn 失败仅记录（daemon
+	// turn 会继续到官方收口），成功同样等官方帧到达 relay → Kernel。
+	if sharedDaemonCodexBackend(backendID, h.codexBackendMode) {
+		if tc, ok := t.session.(core.TurnCanceler); ok {
+			cancelCtx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+			if err := tc.CancelTurn(cancelCtx); err != nil {
+				slog.Info("go-bridge: CancelTurn failed; official turn continues until its own completion",
+					"sessionID", sessionID, "backendID", backendID, "error", err)
+			}
+			cancel()
+		}
+		return
+	}
+
 	h.mu.Lock()
 	sess, deleted := h.deleteSession(sessionID)
 	h.mu.Unlock()
@@ -2809,10 +2829,9 @@ func (h *Handlers) handleAbortGeneration(conn Connection, msg WireMessage) {
 		if tc, ok := sess.(core.TurnCanceler); ok {
 			cancelCtx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 			if err := tc.CancelTurn(cancelCtx); err != nil {
-				// 共享 daemon 上的 CancelTurn 失败必须可见：daemon turn 仍会继续，
-				// 只回执 Ok 会让两端都误以为（并展示）已停止（owner 2026-08-24 真机
-				// 12:02:38：首次停止后 iOS 显示停止 1 秒又回到执行中，Mac 全程执行中）。
-				slog.Info("go-bridge: CancelTurn failed; official turn continues until its own completion",
+				// 私有进程后端即使 CancelTurn 失败，下面 Close 也会真正终止进程——
+				// 官方 turn/completed 不会再来，合成收口是唯一真相来源。
+				slog.Info("go-bridge: CancelTurn failed; closing process session",
 					"sessionID", sessionID, "backendID", backendID, "error", err)
 			}
 			cancel()
@@ -2820,11 +2839,9 @@ func (h *Handlers) handleAbortGeneration(conn Connection, msg WireMessage) {
 		_ = sess.Close()
 	}
 
-	// 共享 daemon 后端（codex-web / app_server 模式的 codex）没有可供 Close 终止的
-	// 进程：取消能否停住官方 turn 只能由官方 turn/completed 证明，本层不得合成
-	// turn_completed / session_state_changed:idle（9cf9287 的 (b) 规则扩展到注册表
-	// 路径——控制面回执不得抢先改写投影终态；2026-08-24 真机：合成的 idle 被随后
-	// 继续到达的官方事件打回 running，屏幕上出现 1 秒「已停止」闪变）。
+	// 私有进程后端（claude/opencode/dsh…）没有独立官方收口的 daemon：Close 即
+	// 真实终止，turn_completed → idle 由本层合成收口。共享 daemon 后端在本分支已
+	// 提前返回（见上），不适用。
 	if deleted && !sharedDaemonCodexBackend(backendID, h.codexBackendMode) {
 		h.publishEvent(LogicalEvent{
 			BackendID: backendID,

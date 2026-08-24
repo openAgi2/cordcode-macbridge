@@ -31,7 +31,7 @@ func TestStreamConnectionLossKeepsSessions(t *testing.T) {
 	ag.ensurePump()
 
 	sess := &agentSession{agent: ag, threadID: "th-1"}
-	sess.events = ag.addListener("th-1")
+	attachSessionForward(sess)
 
 	// 连接断开（transport 关闭 → Notifications 关闭 → 泵退出）
 	_ = s.Close()

@@ -2531,6 +2531,15 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 		select {
 		case ev, ok := <-events:
 			if !ok {
+				if sharedDaemonCodexBackend(backendID, h.codexBackendMode) {
+					// 共享 daemon：通道关闭只说明本端监听者被注销（Close/respawn），
+					// daemon 上的官方 turn 可能仍在继续，收口真相只会是官方
+					// turn/completed——它仍会经被动观察泵到达（defer 清理
+					// agentRelayRunning 后单一摄入者门即放行）。此处合成
+					// turn_completed 会抢先改写投影终态，被随后到达的官方事件打回
+					// running（9cf9287 (b) 的同一规则）。
+					return
+				}
 				if !h.sessions.isIdle(sessionID) {
 					h.mu.Lock()
 					dir := h.sessions.directoryForSession(sessionID)

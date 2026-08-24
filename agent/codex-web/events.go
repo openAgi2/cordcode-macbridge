@@ -250,7 +250,9 @@ type agentSession struct {
 	reasoningEffort string
 	closed          bool
 	unsubscribed    bool
-	events          chan core.Event
+	rawEvents       chan core.Event // 中央泵监听者通道（addListener），只在 Close 解注册
+	quit            chan struct{}   // Close 关闭，驱动事件转发退出并关闭 events
+	events          chan core.Event // 对外消费通道（relayEvents），由 startEventForward 填
 }
 
 // StartSession 建立或恢复一个官方 thread：共享连接上 start/resume（订阅自动
@@ -287,15 +289,50 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	}
 	threadID := settings.Thread.ID
 	a.ensurePump()
+	raw := a.addListener(threadID)
 	s := &agentSession{
 		agent:           a,
 		threadID:        threadID,
 		effectiveModel:  settings.Model,
 		modelProvider:   settings.ModelProvider,
 		reasoningEffort: stringValue(settings.ReasoningEffort),
-		events:          a.addListener(threadID),
+		rawEvents:       raw,
+		quit:            make(chan struct{}),
+		events:          make(chan core.Event, 256),
 	}
+	s.startEventForward()
 	return s, nil
+}
+
+// startEventForward 把中央泵分发的原始事件转发到 s.events（relayEvents 消费），
+// 并在转发前用事件流维护本 session 的 active turn 状态。activeTurnID 的唯一真相
+// 是官方 turn/started 与 turn/completed：本端 TurnStart 的返回 id 只代表请求被
+// 接受，同一 thread 上由 Mac Desktop 等其他客户端发起的 turn 也会经中央泵广播，
+// 二者必须合流（2026-08-24 真机：外部 turn 开始后 activeTurnID 停留在旧值，停止
+// 请求报 -32600 expected active turn id ... but found ...）。Close 时关闭
+// s.events——这是 relayEvents（go-bridge）对该会话事件通道的关闭信号，退出 agent
+// relay、释放 agentRelayRunning，让被动观察泵接管官方后续帧（防止关掉监听者后
+// relay 变成读不到事件的僵尸并永久挡住被动泵摄入）。
+func (s *agentSession) startEventForward() {
+	go func() {
+		defer close(s.events)
+		for {
+			select {
+			case <-s.quit:
+				return
+			case ev, ok := <-s.rawEvents:
+				if !ok {
+					return
+				}
+				s.observeEvent(ev)
+				select {
+				case s.events <- ev:
+				case <-s.quit:
+					return
+				}
+			}
+		}
+	}()
 }
 
 func stringValue(value *string) string {
@@ -415,19 +452,24 @@ func (s *agentSession) CancelTurn(ctx context.Context) error {
 	return nil
 }
 
-// currentTurnForControl 取 steer/interrupt 的 turn 身份：本端 turn/start 返回 id
-// 优先；否则中央泵 codec 观测（外部 turn/started）。Phase 0 同毫秒边界：立即控制
-// 可能报官方 -32600——原样透传，不重试伪装。
+// currentTurnForControl 取 steer/interrupt 的 turn 身份：中央泵观测（liveCodec）
+// 优先，本端 turn/start 返回 id 兜底。后者在同一 thread 上被外部客户端（共享
+// daemon 上的 Mac Desktop）发起的 turn 取代后过期——external turn 的
+// turn/started 广播先到中央泵，liveCodec 才是当前 turn 的权威身份（2026-08-24
+// 真机：过期 local 使首次停止报 -32600 expected active turn id ... but found ...）。
+// liveCodec 无观测时（本端 turn/start 已返回、turn/started 事件到达前的毫秒窗口）
+// 回退 local。Phase 0 同毫秒边界：立即控制仍可能报官方 -32600——原样透传，
+// 不重试伪装。
 func (s *agentSession) currentTurnForControl() string {
-	s.mu.Lock()
-	local := s.activeTurnID
-	s.mu.Unlock()
-	if local != "" {
-		return local
-	}
 	s.agent.mu.Lock()
-	defer s.agent.mu.Unlock()
-	return s.agent.liveCodec.ActiveTurn(s.threadID)
+	observed := s.agent.liveCodec.ActiveTurn(s.threadID)
+	s.agent.mu.Unlock()
+	if observed != "" {
+		return observed
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.activeTurnID
 }
 
 // CancelTurnForThread 对观测/被动订阅的 thread 执行官方 turn/interrupt
@@ -511,7 +553,7 @@ func (s *agentSession) RejectQuestion(questionID string) error {
 	return s.agent.respondUserInput(context.Background(), questionID, nil, true)
 }
 
-// observeEvent 由中央泵外的事件路径（测试）维护 active turn。
+// observeEvent 由事件转发（startEventForward）维护 active turn。
 func (s *agentSession) observeEvent(ev core.Event) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -525,11 +567,14 @@ func (s *agentSession) observeEvent(ev core.Event) {
 	}
 }
 
-// Close 注销监听者。共享连接纪律：多个 session 复用 Agent 的一条连接，而官方
-// thread/unsubscribe 的作用域是**连接**——任何 session 在共享连接上 unsubscribe
-// 都会把同 thread 的其他 session 一并断流（真实故障：第二 session Close 后
-// 后续 turn 事件不再到达）。因此 per-session Close 只注销监听者；订阅随连接
-// 生命周期（Agent.Stop / 断线重连）释放，loaded 保持由官方 30min 策略管理（§7）。
+// Close 注销监听者并关闭事件通道。共享连接纪律：多个 session 复用 Agent 的一条
+// 连接，而官方 thread/unsubscribe 的作用域是**连接**——任何 session 在共享连接上
+// unsubscribe 都会把同 thread 的其他 session 一并断流（真实故障：第二 session
+// Close 后后续 turn 事件不再到达）。因此 per-session Close 只注销监听者、不向
+// daemon 发 unsubscribe；订阅随连接生命周期（Agent.Stop / 断线重连）释放，
+// loaded 保持由官方 30min 策略管理（§7）。events 通道随 Close 关闭：go-bridge 的
+// relayEvents 据此退出（官方 turn 事件改由被动观察泵摄入，详见
+// startEventForward 注释）。
 func (s *agentSession) Close() error {
 	s.mu.Lock()
 	if s.closed {
@@ -538,7 +583,10 @@ func (s *agentSession) Close() error {
 	}
 	s.closed = true
 	s.mu.Unlock()
-	s.agent.removeListener(s.threadID, s.events)
+	if s.quit != nil {
+		close(s.quit)
+	}
+	s.agent.removeListener(s.threadID, s.rawEvents)
 	return nil
 }
 

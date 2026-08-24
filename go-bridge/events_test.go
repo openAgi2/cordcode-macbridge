@@ -1652,3 +1652,60 @@ func TestBroadcasterNoFallbackToOtherBackend(t *testing.T) {
 		t.Fatalf("codex conn should receive codex fallback event: %v", err)
 	}
 }
+
+// TestRelayEventsSharedDaemonChannelClosedDoesNotSynthesize 共享 daemon 后端
+// （codex-web / app_server codex）的事件通道被关闭（本端监听者注销）时 relayEvents
+// 不得合成 turn_completed/session_state_changed（events_channel_closed）——官方
+// turn 可能仍在跑，合成终态会被随后的官方帧打回 running（9cf9287 (b) 同一规则）。
+// relay 直接退出并清理 agentRelayRunning，官方后续帧改由被动观察泵摄入
+// （2026-08-24 12:55 真机：僵尸 relay 残留导致官方 turn_completed 无人摄入）。
+func TestRelayEventsSharedDaemonChannelClosedDoesNotSynthesize(t *testing.T) {
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+
+	handlers := NewHandlers()
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{
+		BackendID: "codex-web",
+		SessionID: "ses_cw_closed",
+	})
+	session := &fakeAgentSession{
+		id:     "ses_cw_closed",
+		events: make(chan core.Event, 2),
+	}
+	handlers.putSessionWithMeta("ses_cw_closed", "codex-web", "", session)
+	handlers.sessions.markRunning("ses_cw_closed") // 非 idle：合成路径会产出终态事件
+	handlers.mu.Lock()
+	handlers.agentRelayRunning["ses_cw_closed"] = true
+	handlers.mu.Unlock()
+
+	session.events <- core.Event{Type: core.EventText, Content: "hello"}
+	close(session.events)
+
+	done := make(chan struct{})
+	go func() {
+		handlers.relayEvents(serverConn, session, "ses_cw_closed", "codex-web")
+		close(done)
+	}()
+
+	events := readEventNames(t, clientConn, 1)
+	if events[0] != "text_delta" {
+		t.Fatalf("events = %#v, want [text_delta]", events)
+	}
+	// 合成禁令：text_delta 之后短超时内不得再有终态事件。
+	_ = clientConn.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+	var extra map[string]interface{}
+	if err := clientConn.ReadJSON(&extra); err == nil {
+		t.Fatalf("共享 daemon 通道关闭不得合成终态事件: %v", extra["event"])
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("relayEvents 未在通道关闭后退出")
+	}
+	handlers.mu.Lock()
+	running := handlers.agentRelayRunning["ses_cw_closed"]
+	handlers.mu.Unlock()
+	if running {
+		t.Fatal("relayEvents 退出后必须清理 agentRelayRunning（被动泵据此接管官方帧）")
+	}
+}

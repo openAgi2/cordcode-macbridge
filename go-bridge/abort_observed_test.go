@@ -187,8 +187,12 @@ func (s *abortRegistryStubSession) CancelTurn(ctx context.Context) error {
 }
 
 // TestAbortRegistrySharedDaemonCancelFailureKeepsProjectionRunning 共享 daemon
-// 会话取消失败（2026-08-24 真机 12:02:38 首次停止）：删除注册表会话后不得合成
+// 会话取消失败（2026-08-24 真机 12:02:38 首次停止）：不得合成
 // turn_completed/idle——官方的 turn 仍在继续，投影必须保持 running 等官方收口。
+// 2026-08-24 12:55:49 真机后补充：注册表会话与事件 relay 必须保留（不删除、
+// 不 Close）——删除会 removeListener，relay 读不到官方收口帧且 agentRelayRunning
+// 残留挡住被动泵，官方 turn/completed 无人摄入（12:55:55 真机：停止生效但 iOS
+// 永久「执行中」、Mac 成「待执行」stub）。
 func TestAbortRegistrySharedDaemonCancelFailureKeepsProjectionRunning(t *testing.T) {
 	h := newTestHandlers(t)
 	sess := &abortRegistryStubSession{
@@ -215,8 +219,11 @@ func TestAbortRegistrySharedDaemonCancelFailureKeepsProjectionRunning(t *testing
 	if sess.cancelCalls != 1 {
 		t.Fatalf("CancelTurn calls = %d, want 1", sess.cancelCalls)
 	}
-	if _, ok := h.getSession("th-reg-cw"); ok {
-		t.Fatal("共享 daemon abort 仍应删除注册表会话（后续停止走观察直达）")
+	if got, ok := h.getSession("th-reg-cw"); !ok || got == nil || got != sess {
+		t.Fatal("共享 daemon abort 必须保留注册表会话（relay 靠它摄入官方 turn/completed）")
+	}
+	if sess.closed {
+		t.Fatal("共享 daemon abort 不得 Close 会话（Close 会 removeListener，relay 变僵尸）")
 	}
 	after, ok := h.projectionKernel.reducer.Snapshot("codex-web", "th-reg-cw")
 	if !ok {
@@ -254,6 +261,12 @@ func TestAbortRegistrySharedDaemonCancelSuccessKeepsProjectionRunning(t *testing
 	if sess.cancelCalls != 1 {
 		t.Fatalf("CancelTurn calls = %d, want 1", sess.cancelCalls)
 	}
+	if got, ok := h.getSession("th-reg-cw-ok"); !ok || got != sess {
+		t.Fatal("共享 daemon abort（成功路径）同样必须保留注册表会话")
+	}
+	if sess.closed {
+		t.Fatal("共享 daemon abort（成功路径）不得 Close 会话")
+	}
 	after, ok := h.projectionKernel.reducer.Snapshot("codex-web", "th-reg-cw-ok")
 	if !ok || after.SyncRev != before.SyncRev || after.Execution.Phase != "running" {
 		t.Fatalf("CancelTurn 成功也不得合成终态: before=%+v after=%+v", before, after)
@@ -283,6 +296,12 @@ func TestAbortRegistryPrivateBackendSyntheticIdlePreserved(t *testing.T) {
 		Params: []byte(`{"sessionId":"th-reg-ds"}`),
 	})
 	_ = readJSONMaps(t, clientConn, 1)
+	if got, ok := h.getSession("th-reg-ds"); ok && got == sess {
+		t.Fatal("私有后端 abort 必须删除会话（Close 是真实终止）")
+	}
+	if !sess.closed {
+		t.Fatal("私有后端 abort 必须 Close 会话")
+	}
 	after, ok := h.projectionKernel.reducer.Snapshot("deepseek", "th-reg-ds")
 	if !ok || after.SyncRev <= before.SyncRev {
 		t.Fatalf("私有后端 abort 必须合成终态并推进 syncRev: before=%+v after=%+v", before, after)

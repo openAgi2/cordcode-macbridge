@@ -154,7 +154,7 @@ func newTestSession(t *testing.T) (*agentSession, *scriptedTransport) {
 	ag.modelEfforts = map[string][]string{"mockpi/gpt-a": {"low", "high"}}
 	ag.ensurePump()
 	sess := &agentSession{agent: ag, threadID: "th-1", effectiveModel: "gpt-a", modelProvider: "mockpi"}
-	sess.events = ag.addListener("th-1")
+	attachSessionForward(sess)
 	return sess, s
 }
 
