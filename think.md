@@ -113,12 +113,17 @@ iOS 轮询/分支是否活着。**不要把架设在脆弱 raw 帧上的修复�
   等投影。
 - 发送 RPC 直返的 assistant Message 写 timeline——SSV2 下硬拒绝。
 
-**遗留 P2（未改代码，已如实记录）**：`abortObservedThread` 在官方 `turn/interrupt` ACK
-成功后合成发布 `turn_completed{reason:aborted}`，该事件经 Kernel `IngestLive` 提前写终态。
-缓解：发生在官方确认之后（不是猜）；官方 codex-web interrupted 终态同为
-turn/completed（completed+idle），收敛一致；SSV2 客户端只收到投影 patch。但按护栏 8
-「control-plane 例外逐项列举」，文档未列举该合成终态——建议列举为显式例外或删除合成、
-完全依赖观察流官方帧。
+**P2 已收口（2026-08-24，选择 (b) 删除合成，9cf9287）**：`abortObservedThread` 此前在
+官方 `turn/interrupt` ACK 成功后合成发布 `turn_completed{reason:aborted}` 与
+`session_state_changed: idle`，经 Kernel `IngestLive` 提前写终态——control-plane 请求
+不能产生 timeline 终态，否则仍是第二 writer（护栏 8 的例外只适用于非 timeline 控制面，
+护栏 7 的完成态只认权威投影）。收口后：ACK 只证明取消请求被接受，不再合成任何终态；
+Projection Kernel 保持原 rev、active turn、running phase，直到共享 daemon 的官方
+`turn/completed` 经观察流到达。新测试 `TestAbortObservedThreadDirectCancel` 在
+turn_started→running 预置后断言 ACK 前后 `SyncRev/Phase/ActiveTurnID` 逐一不变。
+注意边界：registry 路径（bridge 拥有生命周期的进程型 agent session，CancelTurn+Close
+后官方事件流随进程终止）仍保留合成收口——与本例「共享 daemon 上官方帧仍会来」的观察
+路径是两种 context，勿混用。
 
 审计教训：**verdict 不能只数 iOS 侧 `messages[]` 写点**；Mac 侧合成事件进 Kernel 才是
 同一违规的高级形态（护栏 7 的「完成态只认权威投影」）。
