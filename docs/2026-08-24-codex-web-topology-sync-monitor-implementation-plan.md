@@ -6,7 +6,22 @@ v2 裁决（先冻结，避免实现 agent 临场决定）：
 - **Phase 1 仅实现 topology monitor**（P1-7 选优：改名，标题不再承诺 sync monitor）；catalog/per-transport health 依据 verdict run3 判定（低频 updatedAt churn 不为故障、不改 fingerprint）→ **另立证据与计划**，本计划不含其任务。
 - **临时 catalog forensics observer：产品发布前删除运行时路径**（P1-8 选优：保留提取器/测试工具与已脱敏 verdict，删除 observer 代码、env seam 与插点）。
 - **禁用语义采用 always-200 + `state=disabled`**（P2-4 选优，拒绝 501：避免管理客户端把非 2xx 一律泛化）。
-- 本计划只冻结设计与任务；**不施工**。评审通过后按 §5 开发顺序执行，不得提前。
+- v2 初稿冻结时只定义设计与任务，当时尚未施工；后续实际执行状态以下方 §0 收尾表为准。
+
+## 0. 执行收尾状态（2026-08-24 晚间）
+
+| 队列项 | 状态 | 当前证据/处置 |
+|---|---|---|
+| Phase 0 S0/A1/A2 | **DONE** | provider、纯聚合、strict DTO/fixtures 已提交；provider 定向 8/8 重验通过 |
+| Phase 0/1 Go 回归 | **DONE** | `go test ./go-bridge/... -count=1` 全绿（65.280s），`go vet` / `go build` / `git diff --check` 通过 |
+| Darwin collector + stub | **DONE** | 真实环境 smoke 重验：1 个 `shared_only` Desktop，聚合 `all_shared`，seat/launch agent/attach 正常 |
+| Management API + Mac decode/store/UI | **DONE** | 实现提交 `c7246bd`/`758e64f`/`bd80799`/`ddbbc5e`；定向 Swift 单测 36/36 通过（无 UI automation） |
+| 临时 catalog observer 清理 | **DONE** | 运行时 observer、env seam、capture/commit 插点与耦合测试已删除；extractor + verdict 保留且独立复跑通过 |
+| Mac topology UI 手工冒烟/失败注入 | **PENDING / 队尾** | 旧状态缺证却标 done，本次已降级；需 UI 操作授权，未擅自运行 |
+| owner 人工拓扑负态门 S2–S5 | **BLOCKED / 队尾** | 需隔离 Desktop UI 实例、进程级 force-stdio，其中 split_present 还需 owner 自愿关闭全部 shared Desktop；本轮未运行、未伪造 |
+| 默认 on | **BLOCKED / 不执行** | 负态分类尚无 owner 活体证据，保持默认 off 是 fail-closed 发布门；不为“形式完成”提前开启 |
+
+本表是当前唯一执行状态。旧分析中的取证 instrumentation、catalog health、iOS capability 不会被暗中重启；它们若要继续，必须另立新证据与计划。
 
 ## 1. 范围与边界（Phase 1 = topology monitor）
 

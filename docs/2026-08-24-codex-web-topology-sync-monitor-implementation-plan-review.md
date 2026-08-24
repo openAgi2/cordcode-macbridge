@@ -5,7 +5,9 @@
 - 被评审提交：`38becfb`
 - 证据补洞提交：`d9d2a32`、`4f56738`
 - 评审方式：代码锚点复核、证据 verdict 对照、当前 HEAD 定向/全量 Go 测试与 vet
-- 结论：**取证门通过；产品计划暂不通过开发开工门。修订 v2 后可以进入 Phase 1。**
+- 结论：**DONE / SUPERSEDED。** 本报告对 v1 的 NO-GO 已由 v2 计划全量吸收；不得再把本文档当成当前开发阻断或实现队列
+
+> 2026-08-24 晚间复核：v2 已冻结 provider seam、Darwin collector、strict DTO/always-200 disabled 语义、采样 freshness/防抖、Mac 解码/轮询/UI、non-Darwin 与 iOS 脱敏边界；对应 Phase 0/1 代码已实施。本评审的作用到此结束，剩余状态只看 v2 计划的收尾表。
 
 ## 1. 已确认通过
 

@@ -1,7 +1,7 @@
 # codex-web 拓扑分裂与同步监视 —— 取证分析与执行约束（修订 v5）
 
 - 日期：2026-08-24
-- 状态：**取证执行稿，不是产品 implementation plan**。
+- 状态：**DONE（取证阶段已收口；不再是执行队列）**。产品实现以 v2 implementation plan 为唯一队列
 - 使用范围：可以交给取证 agent 实现受限 instrumentation、执行证据实验并输出裁决；**不得据此直接开发产品 monitor、管理 API、MacBridge/iOS UI 或同步协议**。
 - 涉及仓库：Mac `cordcode-macbridge-codex-web`；iOS `cordcode-ios-codex-web-backend` 仅作协议边界引用，本阶段不改。
 - 架构护栏：Session Sync v2。timeline 真相 owner 仍是 Projection Kernel；诊断只属于 control plane，不得写 timeline、增加 writer、改变官方 daemon 生命周期或推进 projection revision。
@@ -12,6 +12,8 @@
   - [v4 复审](./2026-08-24-codex-web-topology-split-and-sync-monitor-analysis-v4-review.md)
 
 ## 0. v5 修订裁决
+
+> 2026-08-24 晚间收尾：catalog 取证已由 evidence verdict 二版判定 PASS；本文要求的临时 observer 也已在产品发布门中移除。未执行的 Experiment A 活体 private/mixed/split 样本已转入 v2 计划的 owner 人工门，排在所有可自动化任务之后；禁止从本分析重复开发 monitor/API/UI。
 
 v5 对 v4 复审的 6 个 P1、3 个 P2 全部落实：
 

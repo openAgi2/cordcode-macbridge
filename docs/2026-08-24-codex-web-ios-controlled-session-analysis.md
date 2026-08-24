@@ -1,13 +1,17 @@
 # codex-web iOS 控制会话分析与 Session Sync v2 收口
 
 - 日期：2026-08-24
-- 状态：已纠正原始分析；已完成已知 Session Sync v2 违规路径的代码收口，待 owner 真机回归
+- 状态：**DONE（代码与 owner 真机回归已收口）**；H5 目录列表取证不属于本轮修复，作为独立 backlog 保留
 - 涉及仓库：
   - Mac：`cordcode-macbridge-codex-web`
   - iOS：`cordcode-ios-codex-web-backend`
 - 证据：Mac `go-bridge.log`、iOS `/tmp/cordcode-fgtrace/fg-trace.log`、双端当前源码
 
 ## 0. 结论
+
+> 2026-08-24 晚间收尾：owner 已验证已有 session 与新建 session 的首条发送均能立即显示，并验证 Mac 发起的长任务终态可正常收口到 iOS。相关修复已提交、部署，本文档不再作为开发队列。§6.4/H5 只是尚未补齐的 catalog 取证，不得为它回退 SSV2 单 writer、首发即时占位或终态修复。
+>
+> 本文 §1.2/§4.1 对“不创建任何 optimistic row”的旧表述已被后续 cold-send fence 设计取代：当前允许 client-authored 首发即时占位，但它不是 server timeline 真相 writer，最终仍由 projection 确认/替换。当前契约与回归证据见根目录 `think.md` 的“codex-web cold send 首发即时显示”章节。
 
 本轮日志不能支持“Mac 没有投递”或“iOS 60 秒没有进入渲染映射”这两个判断。
 

@@ -1,5 +1,7 @@
 # codex-web 目录取证 v5 §7.3 证据判决书（二版：证据补洞修订）
 
+> **收尾状态：DONE。** run2 + run3 的 PASS 判定保持不变；临时运行时 observer/env seam/capture 插点已在 2026-08-24 晚间按产品计划删除，离线 extractor、已脱敏 verdict 与 git-ignored 证据包保留。Experiment A 仍为 `blocked_manual_owner_close`，已转 v2 计划队尾，不影响本取证判决收口。
+
 日期：2026-08-24（二版）
 关联蓝图：docs/2026-08-24-codex-web-topology-split-and-sync-monitor-analysis.md §7.3（交付门）
 一版：63ddf57。二版改动（依独立复核）：
