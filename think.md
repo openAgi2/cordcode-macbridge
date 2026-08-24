@@ -125,6 +125,15 @@ turn_started→running 预置后断言 ACK 前后 `SyncRev/Phase/ActiveTurnID` �
 后官方事件流随进程终止）仍保留合成收口——与本例「共享 daemon 上官方帧仍会来」的观察
 路径是两种 context，勿混用。
 
+**P2 边界更正（2026-08-24 真机，e87be32）**：registry 路径不是天然「进程型」——共享
+daemon 的 codex-web 会话在 registry 里照样有 AgentSession（iOS 发起的 turn），但 Close
+并不会终止 daemon 上的 turn。12:02:38 真机：注册表路径 CancelTurn 失败（错误仅 DEBUG）
+后仍合成 `turn_completed{aborted}`+`idle`（flush syncRev=816），官方 turn 继续 → 官方
+工具帧把投影挂回 running → iOS 屏幕上「停止 1 秒后恢复执行中」（第二次停止走观察直达
+才真停）。因此判据是后端是否共享 daemon（`sharedDaemonCodexBackend`：codex-web /
+app_server 模式 codex），不是 registry 有无；合成终态只留给真正 Close 即终止的私有
+进程后端。CancelTurn 失败同时升级为 Info 可见。
+
 审计教训：**verdict 不能只数 iOS 侧 `messages[]` 写点**；Mac 侧合成事件进 Kernel 才是
 同一违规的高级形态（护栏 7 的「完成态只认权威投影」）。
 
