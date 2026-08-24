@@ -44,6 +44,15 @@ const (
 	RuntimeErrorBootstrapPersistFailed = "runtime_error.bootstrap_persist_failed"
 )
 
+// lastReadyFrameBytes / lastReadyDataDir 保存最近一次就绪帧及其 data-dir，
+// 供 RewriteRuntimeJSON 周期重写 runtime.json。只写一次不够：Mac App 每次
+// launchBridgeProcess 都先删除 runtime.json；若该次 launch 因 controller 持有
+// 健康进程而抛 alreadyRunning（用户点「重新启动」的常态），删除后无人补写，
+// App 管理轮询逐轮 early-return，UI 永久卡在「启动失败」（2026-08-24 真机复现：
+// runtime 健康、8017 端口在线、App 显示「启动失败 已在运行 (PID …)」）。
+var lastReadyFrameBytes []byte
+var lastReadyDataDir string
+
 // WriteReadyFrame 将就绪帧以 JSON 形式写入 stdout 并追加换行，并把同一帧原子写入
 // data-dir/runtime.json 供 MacBridge 发现。返回 runtime.json 写入错误（T06 fail-fast）：
 // 调用方应在 product 模式下据此写 runtime_error.bootstrap_persist_failed 并 exit(1)，
@@ -63,6 +72,8 @@ func WriteReadyFrame(port int, drivers []string, managementURL string, dataDirPa
 	data, _ := json.Marshal(frame)
 	fmt.Fprintf(os.Stdout, "%s\n", data)
 	os.Stdout.Sync()
+	lastReadyFrameBytes = data
+	lastReadyDataDir = dataDirPath
 
 	// 写入 data-dir/runtime.json 供 MacBridge 发现外部启动的 go-bridge
 	if dataDirPath != "" {
@@ -75,6 +86,16 @@ func WriteReadyFrame(port int, drivers []string, managementURL string, dataDirPa
 		}
 	}
 	return nil
+}
+
+// RewriteRuntimeJSON 原子重写最近一次就绪帧到 runtime.json（幂等，无 data-dir 时 no-op）。
+// 由主循环周期性调用：runtime.json 被 Mac App 的 launch 前删除（且该次 launch 因
+// alreadyRunning 未走到 runtime 重启）时，窗口最多一个周期后自愈。
+func RewriteRuntimeJSON() error {
+	if lastReadyDataDir == "" || len(lastReadyFrameBytes) == 0 {
+		return nil
+	}
+	return core.AtomicWriteFile(lastReadyDataDir+"/runtime.json", lastReadyFrameBytes, 0o600)
 }
 
 // WriteErrorFrame 将错误帧以 JSON 形式写入 stderr 并追加换行。

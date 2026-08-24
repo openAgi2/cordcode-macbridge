@@ -222,3 +222,46 @@ func TestWriteReadyFrame_EmptyDataDirNoError(t *testing.T) {
 		t.Fatalf("WriteReadyFrame with empty dataDir returned error: %v", err)
 	}
 }
+
+// TestRewriteRuntimeJSON_RestoresDeletedRuntimeJSON covers the 2026-08-24 wedge:
+// Mac App 每次 launchBridgeProcess 先删除 runtime.json；若 launch 因 controller 持有
+// 健康进程抛 alreadyRunning，删除后无人补写 → App 管理轮询卡死。周期重写必须把被删的
+// runtime.json 原样恢复（同内容，含 pid/epoch/managementUrl）。
+func TestRewriteRuntimeJSON_RestoresDeletedRuntimeJSON(t *testing.T) {
+	dataDir := t.TempDir()
+	if err := WriteReadyFrame(8777, []string{"claude"}, "http://127.0.0.1:9999", dataDir, "rewrite-epoch"); err != nil {
+		t.Fatalf("WriteReadyFrame error: %v", err)
+	}
+	original, err := os.ReadFile(filepath.Join(dataDir, "runtime.json"))
+	if err != nil {
+		t.Fatalf("read runtime.json: %v", err)
+	}
+
+	// 模拟 App launch 前的删除
+	if err := os.Remove(filepath.Join(dataDir, "runtime.json")); err != nil {
+		t.Fatalf("remove runtime.json: %v", err)
+	}
+
+	if err := RewriteRuntimeJSON(); err != nil {
+		t.Fatalf("RewriteRuntimeJSON error: %v", err)
+	}
+
+	restored, err := os.ReadFile(filepath.Join(dataDir, "runtime.json"))
+	if err != nil {
+		t.Fatalf("runtime.json not restored by RewriteRuntimeJSON: %v", err)
+	}
+	if string(restored) != string(original) {
+		t.Fatalf("rewritten runtime.json mismatch:\n original=%s\n restored=%s", original, restored)
+	}
+}
+
+// TestRewriteRuntimeJSON_EmptyDataDirNoOp 验证 dev 模式（无 data-dir）下重写是 no-op，
+// 不产生文件也不报错。
+func TestRewriteRuntimeJSON_EmptyDataDirNoOp(t *testing.T) {
+	if err := WriteReadyFrame(8777, []string{"claude"}, "", "", "noop-epoch"); err != nil {
+		t.Fatalf("WriteReadyFrame error: %v", err)
+	}
+	if err := RewriteRuntimeJSON(); err != nil {
+		t.Fatalf("RewriteRuntimeJSON with empty dataDir must not error: %v", err)
+	}
+}

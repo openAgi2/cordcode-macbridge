@@ -630,6 +630,22 @@ func Main() {
 	}
 
 	slog.Info("go-bridge: listening", "addr", addr, "drivers", *drivers)
+
+	// runtime.json 周期重写（产品模式）：只写一次的话，Mac App 每次 launch 前删除该文件；
+	// 若该次 launch 因 controller 持有健康进程抛 alreadyRunning，删除后无人补写，
+	// App 管理轮询逐轮 early-return，UI 卡死「启动失败」。15s 原子重写使删除窗口自愈。
+	if *dataDirPath != "" {
+		go func() {
+			ticker := time.NewTicker(15 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				if err := RewriteRuntimeJSON(); err != nil {
+					slog.Error("go-bridge: runtime.json 周期重写失败", "error", err)
+				}
+			}
+		}()
+	}
+
 	if err := httpServer.Serve(listener); err != nil && ctx.Err() == nil {
 		slog.Error("go-bridge: server error", "error", err)
 		os.Exit(1)

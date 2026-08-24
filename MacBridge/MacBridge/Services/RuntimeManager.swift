@@ -511,6 +511,20 @@ class RuntimeManager: ObservableObject {
                 NSLog("[RuntimeManager] go-bridge 启动 PID=\(pid)")
             } catch {
                 guard generation == self.launchGeneration else { return }
+                // 「重新启动」点击时 runtime 常是健康活进程（controller 持有）——launch 只会
+                // 抛 alreadyRunning。这不是启动失败：采纳该 PID，等 pollManagementAPI 从
+                // runtime.json（Go 侧 15s 周期重写）恢复 ready。旧行为按失败展示后，
+                // runtime.json 已被本 launch 删除、无人补写，UI 永久卡死（2026-08-24 真机）。
+                if case RuntimeProcessControllerError.alreadyRunning(let runningPID) = error {
+                    self.lastLaunchedPID = runningPID
+                    self.managementFailureCount = 0
+                    self.lastLaunchedAt = Date()
+                    self.autoRestartPending = false
+                    self.supervisorState = .pending
+                    self.setStatus(.starting, "Bridge runtime 已在运行，正在确认管理接口...")
+                    NSLog("[RuntimeManager] runtime 已在运行(PID=\(runningPID))，转等待管理接口就绪")
+                    return
+                }
                 self.setStatus(.crashed, "启动失败: \(error.localizedDescription)")
                 self.lastError = error.localizedDescription
                 self.supervisorState = .restartFailed
