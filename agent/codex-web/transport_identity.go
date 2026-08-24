@@ -26,13 +26,19 @@ func (a *Agent) snapshotTransportIdentity() core.CodexWebTransportIdentity {
 	stopped := a.stopped
 	probing := a.probing
 	probeDone := a.probeDone
-	pump := a.pumpClient
+	var main *Client
+	if ep != nil {
+		// endpoint.Client is the established main transport. pumpClient only
+		// records whether a session listener currently owns its notification
+		// pump; idle must not be reported as detached.
+		main = ep.Client()
+	}
 	a.mu.Unlock()
 
 	id.Endpoint = endpointOf(ep)
 
-	if pump != nil {
-		id.Main = a.roleState(stopped, pump)
+	if main != nil {
+		id.Main = a.roleState(stopped, main)
 		if id.Main.Attached {
 			id.Main.PeerKey = peerKey(id.Endpoint, id.Main.Epoch)
 		}

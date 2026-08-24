@@ -29,11 +29,15 @@ func identityTestAgent() *Agent {
 	return a
 }
 
+func setIdentityMain(a *Agent, client *Client) {
+	a.endpoint.client = client
+}
+
 var _ core.CodexWebTransportIdentityProvider = (*Agent)(nil)
 
 func TestTransportIdentityMainOnly(t *testing.T) {
 	a := identityTestAgent()
-	a.pumpClient = NewClient(&fakeIdentityTransport{}, ConnectionEpoch(100))
+	setIdentityMain(a, NewClient(&fakeIdentityTransport{}, ConnectionEpoch(100)))
 	snap, err := a.TransportIdentitySnapshot(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +73,7 @@ func TestTransportIdentityObserverOnly(t *testing.T) {
 
 func TestTransportIdentityBothShared(t *testing.T) {
 	a := identityTestAgent()
-	a.pumpClient = NewClient(&fakeIdentityTransport{}, ConnectionEpoch(100))
+	setIdentityMain(a, NewClient(&fakeIdentityTransport{}, ConnectionEpoch(100)))
 	a.obsClient = NewClient(&fakeIdentityTransport{}, ConnectionEpoch(200))
 	snap, _ := a.TransportIdentitySnapshot(t.Context())
 	if !snap.Main.Attached || !snap.Observer.Attached {
@@ -86,7 +90,7 @@ func TestTransportIdentityBothShared(t *testing.T) {
 func TestTransportIdentityReconnectNoStaleAttach(t *testing.T) {
 	a := identityTestAgent()
 	old := NewClient(&fakeIdentityTransport{}, ConnectionEpoch(100))
-	a.pumpClient = old
+	setIdentityMain(a, old)
 	snap, _ := a.TransportIdentitySnapshot(t.Context())
 	if !snap.Main.Attached {
 		t.Fatalf("fresh client must attach: %+v", snap.Main)
@@ -96,7 +100,7 @@ func TestTransportIdentityReconnectNoStaleAttach(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 重连：新连接 epoch 递增。
-	a.pumpClient = NewClient(&fakeIdentityTransport{}, ConnectionEpoch(300))
+	setIdentityMain(a, NewClient(&fakeIdentityTransport{}, ConnectionEpoch(300)))
 	snap, _ = a.TransportIdentitySnapshot(t.Context())
 	if !snap.Main.Attached || snap.Main.Epoch != 300 {
 		t.Fatalf("reconnected role: %+v", snap.Main)
@@ -112,7 +116,7 @@ func TestTransportIdentityClosedClientNotAttached(t *testing.T) {
 	if err := c.Close(); err != nil {
 		t.Fatal(err)
 	}
-	a.pumpClient = c
+	setIdentityMain(a, c)
 	snap, _ := a.TransportIdentitySnapshot(t.Context())
 	if snap.Main.Attached {
 		t.Fatalf("closed client must not be attached: %+v", snap.Main)
@@ -134,7 +138,7 @@ func TestTransportIdentityProbePendingUnknown(t *testing.T) {
 
 func TestTransportIdentityStoppedDetaches(t *testing.T) {
 	a := identityTestAgent()
-	a.pumpClient = NewClient(&fakeIdentityTransport{}, ConnectionEpoch(100))
+	setIdentityMain(a, NewClient(&fakeIdentityTransport{}, ConnectionEpoch(100)))
 	a.stopped = true
 	snap, _ := a.TransportIdentitySnapshot(t.Context())
 	if snap.Main.Attached {
@@ -145,7 +149,7 @@ func TestTransportIdentityStoppedDetaches(t *testing.T) {
 func TestTransportIdentityEndpointPrecedence(t *testing.T) {
 	a := identityTestAgent()
 	a.endpoint = &ServiceEndpoint{TCPEndpoint: "ws://127.0.0.1:4096/v1"}
-	a.pumpClient = NewClient(&fakeIdentityTransport{}, ConnectionEpoch(100))
+	setIdentityMain(a, NewClient(&fakeIdentityTransport{}, ConnectionEpoch(100)))
 	snap, _ := a.TransportIdentitySnapshot(t.Context())
 	if snap.Endpoint != "ws://127.0.0.1:4096/v1" {
 		t.Fatalf("endpoint: %+v", snap.Endpoint)
