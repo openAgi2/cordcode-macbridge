@@ -35,7 +35,7 @@
 ```text
 Codex Desktop 正在使用的官方共享 app-server daemon
         ▲
-        │ managed loopback WebSocket（daemon endpoint 经 UDS 管理）
+        │ WebSocket over UDS（两端 FD/peer 指向同一 daemon control socket）
         │ thread/observe、thread/read、turn/start、plan 等官方协议
         ▼
 codex-web adapter（共享 daemon 的客户端，不启动 stdio 独占 runtime）
