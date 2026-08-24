@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -468,6 +469,50 @@ func TestForensicsLimitRespectsMaxSamples(t *testing.T) {
 	}
 	if runSummaries != 1 {
 		t.Fatalf("run_summary count=%d want 1", runSummaries)
+	}
+}
+
+// TestForensicsByteCapAtomic：预算按事件原子检查——证据总量（含唯一 run_summary）
+// 恒 ≤ maxBytes，越界事件本身不被写入。
+func TestForensicsByteCapAtomic(t *testing.T) {
+	logs := newForensicsBuf(t)
+	cfg := forensicsConfig{enabled: true, maxSamples: 1000, maxBytes: 4096, now: time.Now}
+	run := newForensicsRun(cfg)
+	ids := make([]string, 20)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("s%02d", i)
+	}
+	for i := 0; !run.stopped && i < 500; i++ {
+		run.commit(run.capture("codex", forensicsCorpusAuthoritative, forensicsTriggerPeriodicTick, codexWireN(ids...), len(ids)),
+			fmt.Sprintf("fp-%d", i), 0, 0, "")
+	}
+	if !run.stopped || run.stoppedErr != forensicsErrorLimitReached {
+		t.Fatalf("run must stop via limit: stopped=%v err=%v", run.stopped, run.stoppedErr)
+	}
+	events := forensicsEvents(t, logs)
+	var exported, summaries, runSummaries int
+	for _, e := range events {
+		if b, err := json.Marshal(e); err == nil {
+			exported += len(b) + 1 // 与 jsonl 导出一致
+		}
+		switch e["recordKind"] {
+		case "sample_summary":
+			summaries++
+		case "run_summary":
+			runSummaries++
+			if e["observerError"] != string(forensicsErrorLimitReached) {
+				t.Fatalf("run summary err=%v", e["observerError"])
+			}
+		}
+	}
+	if summaries == 0 {
+		t.Fatal("no samples emitted before stop")
+	}
+	if runSummaries != 1 {
+		t.Fatalf("run_summary count=%d want 1", runSummaries)
+	}
+	if exported > int(cfg.maxBytes) {
+		t.Fatalf("exported bytes=%d exceed maxBytes=%d", exported, cfg.maxBytes)
 	}
 }
 

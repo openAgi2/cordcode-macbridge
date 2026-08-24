@@ -9,8 +9,9 @@ package gobridge
 //   - 不写 timeline/Projection Kernel，不增加 writer，不成为 catalog 数据源；
 //   - 不修改 fingerprint、seen、fence、generation、投递、轮询 cadence 或 coalescing；
 //   - 所有错误被边界捕获转成有界 observerError，不得使 discovery 失败；
-//   - 有界：maxSamples（默认 256，>512 钳制 512）+ 总量 1 MiB，先到者停止并输出
-//     单个 run_summary。
+//   - 有界：maxSamples（默认 256，>512 钳制 512）+ 总量 1 MiB，任一事件写入前
+//     原子检查，先到者停止（越界事件本身不写入）并输出单个 run_summary；为
+//     run_summary 预留空间，证据总量（含终报）恒 ≤ maxBytes。
 //
 // 输出：结构化日志事件 msg=go-bridge: catalog_forensics，event=紧凑 JSON
 // （schema catalog-forensics.v1）。提取入口 scripts/codex-web-phase0/extract_catalog_forensics.sh。
@@ -38,6 +39,9 @@ const (
 	forensicsMaxSamplesDefault = 256
 	forensicsMaxSamplesCap     = 512
 	forensicsMaxBytes          = 1 << 20 // 1 MiB
+	// forensicsBudgetReserve 为 run_summary 预留字节：事件预算按 maxBytes-reserve
+	// 判定，保证导出的证据总量（含唯一一条 run_summary）恒 ≤ maxBytes。
+	forensicsBudgetReserve = 4096
 
 	forensicsTraceEnv   = "GO_BRIDGE_CODEX_CATALOG_TRACE"
 	forensicsMaxEnv     = "GO_BRIDGE_CODEX_CATALOG_TRACE_MAX_SAMPLES"
@@ -328,21 +332,27 @@ func (r *forensicsRun) commit(s *forensicsSample, fingerprint string, genBefore,
 		}
 	}
 	if !r.emitSampleSummary(s, fingerprint, genBefore, genAfter, correlationID, len(diffs)) {
-		r.forensicDropLocked(forensicsErrorWriteFailed)
+		r.commitFailedLocked()
 		return
 	}
 	for _, d := range diffs {
 		if !r.emitRowDiff(s, d, fingerprint, genBefore, genAfter) {
-			r.forensicDropLocked(forensicsErrorWriteFailed)
+			r.commitFailedLocked()
 			return
 		}
 	}
 	r.prev[key] = next
-	if r.samples >= r.cfg.maxSamples || r.bytes >= r.cfg.maxBytes {
-		r.stopped = true
-		r.stoppedErr = forensicsErrorLimitReached
-		r.emitRunSummary(forensicsErrorLimitReached)
+}
+
+// commitFailedLocked 是单次提交发射失败的边界（调用方持锁）：预算拒绝时 run 已
+// 由 emit 停止并输出过 run_summary，这里仅计数被拒事件；其余失败（编码）按
+// dropped 语义停止并输出 run_summary。
+func (r *forensicsRun) commitFailedLocked() {
+	if r.stopped {
+		r.dropped++
+		return
 	}
+	r.forensicDropLocked(forensicsErrorEncodeFailed)
 }
 
 // rowKeyHMAC 由稳定 raw ID 计算；key/salt 不写日志与证据包，跨 run 不可关联。
@@ -374,10 +384,9 @@ func (r *forensicsRun) emitSampleSummary(s *forensicsSample, fingerprint string,
 		"observerError":           string(forensicsErrorNone),
 		"droppedCount":            nil,
 	}
-	if !r.emit(event) {
+	if !r.emit(event, true) {
 		return false
 	}
-	r.samples++
 	return true
 }
 
@@ -403,7 +412,7 @@ func (r *forensicsRun) emitRowDiff(s *forensicsSample, d forensicsRowDiff, finge
 		"observerError":           string(forensicsErrorNone),
 		"droppedCount":            nil,
 	}
-	return r.emit(event)
+	return r.emit(event, false)
 }
 
 func (r *forensicsRun) emitRunSummary(err forensicsObserverError) {
@@ -431,14 +440,56 @@ func (r *forensicsRun) emitRunSummary(err forensicsObserverError) {
 	r.writeEvent(event)
 }
 
-// emit 输出一条样本事件；编码失败返回 false（已尽 best-effort，不 panic）。
-func (r *forensicsRun) emit(event map[string]interface{}) bool {
+// emit 逐事件原子预算写入：任一事件写入前先验证字节与样本预算均未达上限，
+// 越界时本事件不写入并立即停止（输出唯一 run_summary=limit_reached）。样本数
+// 上限只限制新的 sample_summary，当前样本的 row_diff 序列不因此被截断；
+// run_summary 由 forensicsBudgetReserve 预留，故导出总量恒 ≤ maxBytes。
+func (r *forensicsRun) emit(event map[string]interface{}, isSampleSummary bool) bool {
 	encoded, err := json.Marshal(event)
 	if err != nil {
 		return false
 	}
-	r.bytes += int64(len(encoded) + 1) // + '\n'
+	sz := int64(len(encoded) + 1) // + '\n'
+	if !r.budgetCheckLocked(sz, isSampleSummary) {
+		return false
+	}
+	r.bytes += sz
+	if isSampleSummary {
+		r.samples++
+	}
 	return r.writeEventRaw(encoded)
+}
+
+// budgetCheckLocked 调用方持锁。
+func (r *forensicsRun) budgetCheckLocked(sz int64, isSampleSummary bool) bool {
+	if r.stopped {
+		return false
+	}
+	if (isSampleSummary && r.samples >= r.cfg.maxSamples) || r.bytes+sz > r.budgetRoomLocked() {
+		r.forensicsStopLocked(forensicsErrorLimitReached)
+		return false
+	}
+	return true
+}
+
+// budgetRoomLocked 是事件预算上限：maxBytes-预留。极小预算（测试向量）下预留
+// 退化为四分之一，避免把事件预算清零。
+func (r *forensicsRun) budgetRoomLocked() int64 {
+	reserve := int64(forensicsBudgetReserve)
+	if r.cfg.maxBytes-reserve < r.cfg.maxBytes/4 {
+		reserve = r.cfg.maxBytes / 4
+	}
+	return r.cfg.maxBytes - reserve
+}
+
+// forensicsStopLocked 调用方持锁；仅首次停止输出唯一 run_summary。
+func (r *forensicsRun) forensicsStopLocked(err forensicsObserverError) {
+	if r.stopped {
+		return
+	}
+	r.stopped = true
+	r.stoppedErr = err
+	r.emitRunSummary(err)
 }
 
 func (r *forensicsRun) writeEvent(event map[string]interface{}) {
@@ -454,14 +505,10 @@ func (r *forensicsRun) writeEventRaw(encoded []byte) bool {
 	return true
 }
 
-// forensicDropLocked 在 stopped 后才允许（调用方持锁）：dropped 计数 + 首次停止输出 run_summary。
+// forensicDropLocked 调用方持锁：被拒/失败事件计数 + 首次停止输出 run_summary。
 func (r *forensicsRun) forensicDropLocked(err forensicsObserverError) {
 	r.dropped++
-	if !r.stopped {
-		r.stopped = true
-		r.stoppedErr = err
-		r.emitRunSummary(err)
-	}
+	r.forensicsStopLocked(err)
 }
 
 // forensicsCtx 贯穿一次 authoritative 取样的取证上下文。sample 由 discovery 路径
