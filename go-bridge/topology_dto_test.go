@@ -2,6 +2,7 @@ package gobridge
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"reflect"
 	"strings"
@@ -59,6 +60,29 @@ func TestDecodeDisabledFixture(t *testing.T) {
 	}
 	if s.State != TopologyStateDisabled || s.SyncHealth != "" || s.Dimensions != nil || s.Instances != nil {
 		t.Fatalf("disabled snapshot carries forbidden fields: %+v", s)
+	}
+}
+
+func TestBridgeEpochPreservesUnsignedIdentityBitPattern(t *testing.T) {
+	liveEpoch := uint64(1<<63) + 42
+	wireEpoch := int64(liveEpoch)
+	data := loadFixture(t, "topology_snapshot.json")
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	raw["bridgeEpoch"] = json.RawMessage([]byte(fmt.Sprintf("%d", wireEpoch)))
+	patched, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := DecodeTopologySnapshot(patched)
+	if err != nil {
+		t.Fatalf("decode signed bridge epoch bit pattern: %v", err)
+	}
+	if uint64(s.BridgeEpoch) != liveEpoch {
+		t.Fatalf("bridgeEpoch bits = %d, want %d", uint64(s.BridgeEpoch), liveEpoch)
 	}
 }
 

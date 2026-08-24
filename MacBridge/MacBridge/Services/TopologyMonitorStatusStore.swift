@@ -163,7 +163,7 @@ final class TopologyMonitorStatusStore: ObservableObject {
             // epoch 新鲜度：快照 epoch 与 runtime identity 不一致 = 旧代数据，作废。
             if let expected = expectedEpochProvider(), expected != 0,
                let actual = status.bridgeEpoch, actual != 0,
-               actual != Int64(expected) {
+               UInt64(bitPattern: actual) != expected {
                 fail(.staleEpoch, "快照 bridgeEpoch(\(actual)) ≠ runtime identity(\(expected))，数据来自旧代")
                 return false
             }

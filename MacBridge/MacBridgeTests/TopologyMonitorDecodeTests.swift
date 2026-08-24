@@ -80,6 +80,19 @@ final class TopologyMonitorDecodeTests: XCTestCase {
         XCTAssertEqual(instances[0].evidence?[1].state, "unavailable")
     }
 
+    func testBridgeEpochPreservesUnsignedIdentityBitPattern() throws {
+        let liveEpoch = UInt64(Int64.max) + 42
+        let wireEpoch = Int64(bitPattern: liveEpoch)
+        let json = enabledFixture.replacingOccurrences(
+            of: "1710893634113558",
+            with: String(wireEpoch)
+        )
+
+        let status = try decode(json)
+
+        XCTAssertEqual(UInt64(bitPattern: try XCTUnwrap(status.bridgeEpoch)), liveEpoch)
+    }
+
     func testDisabledMirrorDecodes() throws {
         let status = try decode(disabledFixture)
         // state=disabled 是独立分支，与解码失败/网络失败严格分开。

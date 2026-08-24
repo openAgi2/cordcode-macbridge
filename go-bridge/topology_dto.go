@@ -84,13 +84,16 @@ type TopologyInstance struct {
 
 // TopologySnapshotV1 是 GET /internal/topology/snapshot 的响应体（始终 200，state 区分启用）。
 type TopologySnapshotV1 struct {
-	SchemaVersion string                 `json:"schemaVersion"`
-	State         string                 `json:"state"`
-	BridgeEpoch   int64                  `json:"bridgeEpoch"`
-	SampledAtMs   int64                  `json:"sampledAtMs"`
-	SyncHealth    string                 `json:"syncHealth,omitempty"` // disabled 省略
-	Dimensions    map[string]TopologyDim `json:"dimensions,omitempty"` // disabled 省略；enabled 恒 8 键
-	Instances     []TopologyInstance     `json:"instances,omitempty"`  // 禁用省略
+	SchemaVersion string `json:"schemaVersion"`
+	State         string `json:"state"`
+	// BridgeEpoch transports the Management v1 UInt64 identity as its signed
+	// two's-complement bit pattern. JSON/Foundation cannot represent the full
+	// UInt64 number domain, while int64 preserves every identity bit on wire.
+	BridgeEpoch int64                  `json:"bridgeEpoch"`
+	SampledAtMs int64                  `json:"sampledAtMs"`
+	SyncHealth  string                 `json:"syncHealth,omitempty"` // disabled 省略
+	Dimensions  map[string]TopologyDim `json:"dimensions,omitempty"` // disabled 省略；enabled 恒 8 键
+	Instances   []TopologyInstance     `json:"instances,omitempty"`  // 禁用省略
 }
 
 // 每维度 enum 白名单（§4.4 修订列；证据不足态为各维度自身枚举：多数为

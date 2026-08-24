@@ -423,6 +423,7 @@ struct TopologyMonitorDimensions: Codable, Sendable, Equatable {
 struct TopologyMonitorStatus: Codable, Sendable, Equatable {
     let schemaVersion: String?
     let state: TopologySnapshotState
+    /// Management v1's UInt64 identity transported as an Int64 bit pattern.
     let bridgeEpoch: Int64?
     let sampledAtMs: Int64?
     let syncHealth: TopologySyncHealth?

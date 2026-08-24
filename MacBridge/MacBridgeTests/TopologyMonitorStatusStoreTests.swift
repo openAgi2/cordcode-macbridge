@@ -101,6 +101,22 @@ final class TopologyMonitorStatusStoreTests: XCTestCase {
         XCTAssertEqual(store.phase, .diagnostic(.staleEpoch))
     }
 
+    func testEpochAboveInt64MaxPublishesWithoutOverflow() async {
+        let liveEpoch = UInt64(Int64.max) + 42
+        store = TopologyMonitorStatusStore(
+            cadence: 0.05, baseBackoff: 0.02, maxBackoff: 0.2,
+            expectedEpochProvider: { liveEpoch }
+        )
+        store.configure(apiClient: api!)
+        let wireEpoch = Int64(bitPattern: liveEpoch)
+        api.stub = .success(enabledStatus(bridgeEpoch: wireEpoch))
+
+        let ok = await store.pollOnce()
+
+        XCTAssertTrue(ok)
+        XCTAssertEqual(store.phase, .enabled(enabledStatus(bridgeEpoch: wireEpoch)))
+    }
+
     func testZeroEpochSkippedWhenProviderUnknown() async {
         store = TopologyMonitorStatusStore(
             cadence: 0.05, baseBackoff: 0.02, maxBackoff: 0.2,
