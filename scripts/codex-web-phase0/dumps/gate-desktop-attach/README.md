@@ -1,5 +1,38 @@
 # Gate Desktop Attach：当前 Codex Desktop 连接官方 local daemon
 
+## 当前构建复核（2026-08-24）
+
+- Desktop：ChatGPT `26.818.41509`（bundle `6962`）
+- Desktop 内嵌 CLI：`codex-cli 0.149.0-alpha.4.1`
+- standalone CLI：`codex-cli 0.149.0-alpha.4`
+- `app.asar` SHA-256：`8eb91bd9efbf9a4dd04b9b0afdbfcb4e0bab5da18c1919ad74ca327c00c7e791`
+- 内嵌 `codex` SHA-256：`09db9560f6f9dec139d3324254fb3c8fdbad5ecce1d8c794113dc15294f6aefd`
+
+对当前 `app.asar` 做本地只读解包后，`.vite/build/src-CLzQUgbV.js` 中的本地 transport 逻辑再次确认：
+
+1. local、非 Windows host；
+2. `CODEX_APP_SERVER_USE_LOCAL_DAEMON=1`；
+3. `CODEX_APP_SERVER_FORCE_CLI!=1`；
+4. 没有 `CODEX_CLI_PATH`、host `codex_cli_command` 或 bundle 强制 CLI 覆盖；
+5. 使用当前选择的 CLI 在 2500ms 内执行 `app-server daemon version`，返回的 `appServerVersion` 通过 Desktop 自己的兼容检查；
+
+以上条件同时满足时，transport 将 `kind` 从 `stdio` 改为 `websocket`，连接
+`$CODEX_HOME/app-server-control/app-server-control.sock`；任一条件不满足或 probe 抛错时，代码明确落入
+`stdio` 的 `QB(...)` 分支。该 transport 的 `supportsReconnect()` 仅在 `kind=websocket` 时返回 true。
+`CODEX_APP_SERVER_FORCE_CLI=1` 是当前构建仍存在的、仅供隔离取证使用的强制 stdio 入口；不得进入产品 fallback。
+
+同日只读现场复核（PID 仅代表本次采样）：
+
+- Desktop 主进程有 `1` 个 Unix FD peer 命中 daemon control-socket object；
+- CordCode runtime 有 `2` 个 Unix FD peer 命中同一 daemon；该数量与主 connection + observer 的预期形态一致，但单靠 FD 数量不能独立证明两个逻辑 client 的身份；
+- `launchctl getenv CODEX_APP_SERVER_USE_LOCAL_DAEMON` 为 `1`；
+- daemon `version` 返回 `status=running`；
+- 未为本次复核启动隔离 Desktop、未终止 owner 进程。
+
+因此当前构建的**静态 Attach Gate 与当前 shared 活体状态通过**。强制 stdio/private 与 mixed 聚合仍须按分析文档的隔离实验协议补采；在补采前不得把旧构建的 private/mixed 活体样本冒充当前构建证据。
+
+以下 2026-08-22 内容保留为历史基线，不覆盖本节当前构建结论。
+
 - 采集日期：2026-08-22
 - Desktop：ChatGPT `26.818.31338`（bundle `6892`）
 - Desktop 内嵌 CLI：`codex-cli 0.149.0-alpha.4`
@@ -58,7 +91,7 @@ open -na /Applications/ChatGPT.app --args --user-data-dir=<isolated-dir> --no-fi
 - 隔离 Desktop PID `87111` 没有私有 app-server 子进程；
 - Desktop FD `144` 的 peer 为 daemon 监听 socket object；
 - daemon PID `85510` 的 FD `10` 监听
-  `/Users/jacklee/.codex/app-server-control/app-server-control.sock`；
+  `$CODEX_HOME/app-server-control/app-server-control.sock`；
 - 因而 `launchctl setenv` 可以作为 CordCode Link 配置“下一次正常启动 Desktop 使用共享 daemon”的产品入口。
 
 PID/FD 仅是本次活体采样值，不是产品常量。
