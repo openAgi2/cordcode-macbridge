@@ -74,12 +74,12 @@ func TestDiscoveryFingerprintUsesNativeMembershipWithoutEnrichmentOrDiskScan(t *
 	}}
 	h := newTestHandlers(t)
 	h.RegisterAgent("codex", agent)
-	first, count, err := h.discoveryFingerprint(context.Background(), "codex", agent)
+	first, count, _, err := h.discoveryFingerprint(context.Background(), "codex", agent)
 	if err != nil || count != 1 || first == "" {
 		t.Fatalf("first fingerprint=%q count=%d err=%v", first, count, err)
 	}
 	native[0].Summary = "title-b"
-	second, _, err := h.discoveryFingerprint(context.Background(), "codex", agent)
+	second, _, _, err := h.discoveryFingerprint(context.Background(), "codex", agent)
 	if err != nil || second == first {
 		t.Fatalf("title-only native change did not rotate fingerprint: first=%q second=%q err=%v", first, second, err)
 	}
@@ -93,7 +93,7 @@ func TestDiscoveryFingerprintUsesNativeMembershipWithoutEnrichmentOrDiskScan(t *
 		return append([]core.AgentSessionInfo(nil), grokNative...), nil
 	}}
 	h.RegisterAgent("grokbuild", grok)
-	if got, count, err := h.discoveryFingerprint(context.Background(), "grokbuild", grok); err != nil || count != 1 || got == "" {
+	if got, count, _, err := h.discoveryFingerprint(context.Background(), "grokbuild", grok); err != nil || count != 1 || got == "" {
 		t.Fatalf("Grok fingerprint=%q count=%d err=%v", got, count, err)
 	}
 	if grokBase.ListSessionsCallCount() != 0 {
@@ -145,6 +145,34 @@ func mapsClone(input map[string]interface{}) map[string]interface{} {
 		out[key] = value
 	}
 	return out
+}
+
+// TestListOrderFingerprintIgnoresUpdatedAtChurn：head 提示指纹只覆盖顺序+id——
+// 成员 updatedAt（流式 turn 中随 delta 变化）不得改变指纹，变更的只有成员/顺序。
+func TestListOrderFingerprintIgnoresUpdatedAtChurn(t *testing.T) {
+	base := []map[string]interface{}{
+		{"id": "a", "updatedAtMillis": int64(2), "title": "A", "directory": "/tmp/workspace"},
+		{"id": "b", "updatedAtMillis": int64(1), "title": "B", "directory": "/tmp/workspace"},
+	}
+	fingerprint := listOrderFingerprint(base)
+
+	churn := []map[string]interface{}{mapsClone(base[0]), mapsClone(base[1])}
+	churn[0]["updatedAtMillis"] = int64(3)
+	churn[0]["title"] = "changed"
+	churn[1]["updatedAtMillis"] = int64(4)
+	if got := listOrderFingerprint(churn); got != fingerprint {
+		t.Fatal("updatedAt/title churn must not change head order fingerprint")
+	}
+
+	reordered := []map[string]interface{}{mapsClone(base[1]), mapsClone(base[0])}
+	if got := listOrderFingerprint(reordered); got == fingerprint {
+		t.Fatal("recency reorder must change head order fingerprint")
+	}
+
+	added := []map[string]interface{}{mapsClone(base[0])}
+	if got := listOrderFingerprint(added); got == fingerprint {
+		t.Fatal("member set change must change head order fingerprint")
+	}
 }
 
 func TestNativeV2SameTimestampPagination(t *testing.T) {
@@ -242,7 +270,7 @@ func TestNativeListAndPollerPropagateCancellationAndDeadline(t *testing.T) {
 		pollDeadlineRemaining = time.Until(deadline)
 		return nil, ctx.Err()
 	}
-	if _, _, err := h.discoveryFingerprint(pollCtx, "codex", agent); err == nil || !sawPollDeadline || pollDeadlineRemaining <= 0 || pollDeadlineRemaining > catalogRequestTimeout {
+	if _, _, _, err := h.discoveryFingerprint(pollCtx, "codex", agent); err == nil || !sawPollDeadline || pollDeadlineRemaining <= 0 || pollDeadlineRemaining > catalogRequestTimeout {
 		t.Fatalf("poller cancellation/deadline did not reach native fetch: deadline=%v remaining=%s err=%v", sawPollDeadline, pollDeadlineRemaining, err)
 	}
 	if base.ListSessionsCallCount() != 0 {

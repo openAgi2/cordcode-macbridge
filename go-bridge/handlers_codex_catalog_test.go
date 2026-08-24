@@ -186,6 +186,40 @@ func TestCodexBuildEnrichedSessions_PreservesUpstreamOrder(t *testing.T) {
 	}
 }
 
+// TestCodexCatalog_V2Declared_RoutesCodexWebToThreadFetch：codex-web（Name()=="codex-web"）
+// 注册为 codexThreadLister 后，list_sessions 必须路由到 thread/list 富 catalog 路径
+// （P0-4 能力断言替代 Name()=="codex" 字符串分派——此前 codex-web 走 generic ListSessions，
+// 与 discovery fingerprint 不同源，Mac 新建 session 时 sessions_changed 触发面脱节）。
+func TestCodexCatalog_V2Declared_RoutesCodexWebToThreadFetch(t *testing.T) {
+	withCodexRootsDisabled(t)
+	ws := t.TempDir()
+	agent := &fakeCodexCatalogAgent{
+		fakeAgent: &fakeAgent{name: "codex-web", sessionInfos: []core.AgentSessionInfo{
+			{ID: "disk_should_not_appear"},
+		}},
+		fetchFn:  func(context.Context, string) ([]core.AgentSessionInfo, error) { return threadFixtureSessions(ws), nil },
+		workDirV: ws,
+	}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex-web", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	defer cleanup()
+	handlers.eventPublisher.SetConnCatalogCursorEpochV2(serverConn, true) // DECLARED
+
+	handlers.HandleRPC(serverConn, WireMessage{
+		BackendID: "codex-web", Method: "list_sessions", RequestID: "r1",
+		Params: mustJSONRaw(t, map[string]any{}),
+	})
+	msgs := readJSONMaps(t, clientConn, 1)
+	ids := resultSessionIDs(t, msgs[0])
+	if len(ids) != 2 || ids[0] != "thread_a" || ids[1] != "thread_b" {
+		t.Fatalf("codex-web sessions = %v, want thread/list 路径产物 [thread_a thread_b]", ids)
+	}
+	if agent.fetchN != 1 || len(agent.fetchDirs) != 1 || agent.fetchDirs[0] != "" {
+		t.Fatalf("FetchThreadList calls=%d dirs=%v, want 1/[\"\"]（catalog 路径而非 ListSessions）", agent.fetchN, agent.fetchDirs)
+	}
+}
+
 // TestCodexCatalog_FetchFailureReturnsExplicitError_NoSilentFallback：DECLARED 连接 +
 // FetchThreadList 失败 → list_failed 显式错误（§5.1 step 6：删除 catalog 失败时静默回退
 // JSONL 的路径）。断言 envelope ok=false + error.code=list_failed，且不返回任何 session。

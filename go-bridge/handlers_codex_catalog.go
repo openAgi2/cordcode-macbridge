@@ -72,7 +72,7 @@ func (h *Handlers) buildCodexEnrichedSessions(ctx context.Context, backendID, di
 		return nil, err
 	}
 	mapped = h.enrichSessionStatesForList(mapped, agent, h.getRunningMap(ctx, agent))
-	h.overlayPinnedState(mapped, "codex")
+	h.overlayPinnedState(mapped, agentBackendID(agent))
 	return mapped, nil
 }
 

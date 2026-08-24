@@ -212,6 +212,15 @@ type TurnCanceler interface {
 	CancelTurn(ctx context.Context) error
 }
 
+// ThreadTurnCanceler is an optional interface for agents that can interrupt a
+// turn on a specific thread WITHOUT owning that thread's write session. It
+// serves observation/passive clients (e.g. iOS stopping a turn that was started
+// by Mac on a shared daemon), where the turn id must come from the observer
+// stream, not from a local turn/start reply.
+type ThreadTurnCanceler interface {
+	CancelTurnForThread(ctx context.Context, threadID string) error
+}
+
 // HistoryProvider is an optional interface for agents that can retrieve
 // conversation history from their backend session files.
 type HistoryProvider interface {

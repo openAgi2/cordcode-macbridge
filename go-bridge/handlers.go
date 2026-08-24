@@ -1850,7 +1850,16 @@ func (h *Handlers) handleFetchTodos(conn Connection, msg WireMessage, agent core
 		return
 	}
 
-	slog.Info("go-bridge: fetch_todos result", "backendID", msg.BackendID, "sessionID", params.SessionID, "count", len(todos))
+	active := 0
+	finished := 0
+	for _, todo := range todos {
+		if todo.Status == "completed" || todo.Status == "cancelled" {
+			finished++
+		} else {
+			active++
+		}
+	}
+	slog.Info("go-bridge: fetch_todos result", "backendID", msg.BackendID, "sessionID", params.SessionID, "count", len(todos), "active", active, "completed", finished)
 	conn.SendResult(msg.RequestID, map[string]interface{}{"todos": todosToWire(todos)}, nil)
 }
 
@@ -2778,8 +2787,12 @@ func (h *Handlers) handleAbortGeneration(conn Connection, msg WireMessage) {
 	}
 	h.mu.Unlock()
 
-	if !ok || t == nil {
-		slog.Warn("go-bridge: handleAbortGeneration: session not found in registry", "sessionID", params.SessionID)
+	if !ok || t == nil || t.session == nil {
+		// stub（markRunning/markIdle 占位）也不走注册表路径：被动事件泵为观察会话
+		// 建的 stub 没有真实 AgentSession，删掉它只会让 daemon 上的 turn 继续跑
+		// （2026-08-23 真机：Mac 发起的 turn，iOS 停止无效、任务照常流式）。
+		// 观察/被动会话必须按 threadID 直达官方 turn/interrupt。
+		h.abortObservedThread(conn, msg, params)
 		return
 	}
 
@@ -2825,6 +2838,55 @@ func (h *Handlers) handleAbortGeneration(conn Connection, msg WireMessage) {
 
 		h.recordPendingNotification(sessionID, backendID, "completed", "aborted")
 	}
+}
+
+// abortObservedThread 处理注册表缺失的会话（观察/被动路径）：共享 daemon 上由
+// Mac 发起的 turn 不在 h.sessions registry，iOS 的「停止」必须按 threadID 直达
+// 官方 turn/interrupt——turnID 由观测流（liveCodec.ActiveTurn）给出，而不是
+// 静默 Ok。注册表路径的乐观回执（Ok:true 已发）保持不变；官方 turn/completed
+// 仍会经泵广播，这里只发前景反馈事件（背景待通知由官方完成事件自然覆盖，不
+// 重复记录，避免同一 turn 双通知）。
+func (h *Handlers) abortObservedThread(conn Connection, msg WireMessage, params AbortGenerationParams) {
+	agent, ok := h.getAgent(msg.BackendID)
+	if !ok {
+		slog.Warn("go-bridge: abort_generation: session not in registry and backend not found",
+			"sessionID", params.SessionID, "backendID", msg.BackendID)
+		return
+	}
+	tc, ok := agent.(core.ThreadTurnCanceler)
+	if !ok {
+		slog.Warn("go-bridge: abort_generation: session not in registry; agent does not support thread cancel",
+			"sessionID", params.SessionID, "backendID", msg.BackendID, "agent", agent.Name())
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	if err := tc.CancelTurnForThread(ctx, params.SessionID); err != nil {
+		slog.Warn("go-bridge: abort_generation: observed thread cancel failed",
+			"sessionID", params.SessionID, "backendID", msg.BackendID, "error", err)
+		return
+	}
+	slog.Info("go-bridge: abort_generation: observed thread turn interrupted",
+		"sessionID", params.SessionID, "backendID", msg.BackendID, "agent", agent.Name())
+
+	directory := params.Directory
+	h.publishEvent(LogicalEvent{
+		BackendID: msg.BackendID,
+		SessionID: params.SessionID,
+		Directory: directory,
+		Event:     "turn_completed",
+		Data:      map[string]interface{}{"done": true, "reason": "aborted"},
+		Broadcast: true,
+		Offline:   true,
+	})
+	h.publishEvent(LogicalEvent{
+		BackendID: msg.BackendID,
+		SessionID: params.SessionID,
+		Directory: directory,
+		Event:     "session_state_changed",
+		Data:      map[string]interface{}{"state": "idle"},
+		Broadcast: true,
+	})
 }
 
 func (h *Handlers) handleCompressContext(conn Connection, msg WireMessage) {
@@ -3050,7 +3112,9 @@ func (h *Handlers) findClaudeSessionFile(sessionID string, optDir string) (proje
 func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent core.Agent) {
 	// Canonical public routing reaches this function only after catalog_cursor_epoch_v2
 	// negotiation. Claude intentionally keeps its declared v1-shaped compatibility cursor.
-	if agent.Name() == "codex" {
+	// Capability 断言而非 Name()=="codex"：codex-web 与 codex 共用 thread/list 富 catalog
+	// seam（P0-4），Mac 新建 session 时两端的 list_sessions / discovery 同源同新。
+	if _, ok := agent.(codexThreadLister); ok {
 		h.codexHandleListSessions(conn, msg, agent)
 		return
 	}

@@ -47,6 +47,9 @@ type discoveryHintState struct {
 	headSeeded   chan struct{}
 	headSeedOnce sync.Once
 	workspace    string
+	// headChurn > 0 时每次 head 探测返回 s1 的 ModifiedAt 都在变化（模拟流式 turn
+	// 中 updatedAt 随 delta 变化的 daemon 行为）。
+	headChurn int
 }
 
 type discoveryHintCodexAgent struct {
@@ -118,7 +121,11 @@ func (a *discoveryHintCodexAgent) FetchThreadListHead(context.Context, string, i
 		return nil, errors.New("transient native head failure")
 	}
 	a.state.headSeedOnce.Do(func() { close(a.state.headSeeded) })
-	infos := []core.AgentSessionInfo{{ID: "s1", Summary: "one", Directory: a.state.workspace}}
+	info := core.AgentSessionInfo{ID: "s1", Summary: "one", Directory: a.state.workspace}
+	if a.state.headChurn > 0 {
+		info.ModifiedAt = time.Unix(1_700_000_000+int64(a.state.headCalls), 0).UTC()
+	}
+	infos := []core.AgentSessionInfo{info}
 	if a.state.expanded {
 		infos = append([]core.AgentSessionInfo{{ID: "s2", Summary: "two", Directory: a.state.workspace}}, infos...)
 	}
@@ -378,6 +385,144 @@ func TestSessionDiscoveryCodexHeadHintTriggersAuthoritativeRefresh(t *testing.T)
 	state.mu.Unlock()
 	if fullAfterChange != 2 {
 		t.Fatalf("head change full fetches=%d, want seed + one authoritative refresh", fullAfterChange)
+	}
+}
+
+// TestSessionDiscoveryHintArmsForCodexWebBackend：3s recency-head hint 对
+// codex-web（thread/list 富 catalog seam）同样生效——能力断言而非 id=="codex"，
+// Mac 新建 session 后 hint 立即触发 authoritative 全量刷新（P0-4）。
+func TestSessionDiscoveryHintArmsForCodexWebBackend(t *testing.T) {
+	previousInterval := sessionDiscoveryInterval
+	previousHintInterval := codexDiscoveryHintInterval
+	sessionDiscoveryInterval = time.Hour
+	codexDiscoveryHintInterval = 10 * time.Millisecond
+	withCodexRootsDisabled(t)
+
+	state := &discoveryHintState{
+		headErrors: 1,
+		headSeeded: make(chan struct{}),
+		workspace:  t.TempDir(),
+	}
+	base := &fakeCodexCatalogAgent{fakeAgent: &fakeAgent{name: "codex-web"}}
+	base.fetchFn = func(context.Context, string) ([]core.AgentSessionInfo, error) {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		state.fullCalls++
+		infos := []core.AgentSessionInfo{{ID: "s1", Summary: "one", Directory: state.workspace}}
+		if state.expanded {
+			infos = append([]core.AgentSessionInfo{{ID: "s2", Summary: "two", Directory: state.workspace}}, infos...)
+		}
+		return infos, nil
+	}
+	agent := &discoveryHintCodexAgent{fakeCodexCatalogAgent: base, state: state}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex-web", agent)
+	serverConn, clientConn, cleanup := openTestConn(t)
+	t.Cleanup(cleanup)
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "codex-web", SessionID: "list-view"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		handlers.runSessionDiscovery(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-watcherDone:
+		case <-time.After(time.Second):
+			t.Error("session discovery watcher did not stop")
+		}
+		sessionDiscoveryInterval = previousInterval
+		codexDiscoveryHintInterval = previousHintInterval
+	})
+
+	select {
+	case <-state.headSeeded:
+	case <-time.After(time.Second):
+		t.Fatal("codex-web native head probe did not seed")
+	}
+	time.Sleep(30 * time.Millisecond)
+	state.mu.Lock()
+	fullBeforeChange := state.fullCalls
+	state.expanded = true
+	state.mu.Unlock()
+	if fullBeforeChange != 1 {
+		t.Fatalf("stable/error head probes caused %d full fetches, want seed only", fullBeforeChange)
+	}
+
+	msg := readJSONMaps(t, clientConn, 1)[0]
+	if msg["event"] != "sessions_changed" || msg["backendId"] != "codex-web" {
+		t.Fatalf("codex-web hint-triggered refresh event=%#v", msg)
+	}
+	state.mu.Lock()
+	fullAfterChange := state.fullCalls
+	state.mu.Unlock()
+	if fullAfterChange != 2 {
+		t.Fatalf("head change full fetches=%d, want seed + one authoritative refresh", fullAfterChange)
+	}
+}
+
+// TestCodexDiscoveryHintIgnoresUpdatedAtChurn：流式 turn 期间 daemon thread 的
+// updatedAt 随每个 delta 变化，head 提示只覆盖顺序+id 时不得误触发全量刷新
+// （2026-08-23 真机：语义指纹让 codex-web 每 3s 一次全量刷新 + sessions_changed
+// generation 1→108 风暴）。
+func TestCodexDiscoveryHintIgnoresUpdatedAtChurn(t *testing.T) {
+	previousInterval := sessionDiscoveryInterval
+	previousHintInterval := codexDiscoveryHintInterval
+	sessionDiscoveryInterval = time.Hour
+	codexDiscoveryHintInterval = 10 * time.Millisecond
+	withCodexRootsDisabled(t)
+
+	state := &discoveryHintState{
+		headChurn: 1, // 每次探测 ModifiedAt 都变化（模拟流式 delta）
+		headSeeded: make(chan struct{}),
+		workspace:  t.TempDir(),
+	}
+	base := &fakeCodexCatalogAgent{fakeAgent: &fakeAgent{name: "codex-web"}}
+	base.fetchFn = func(context.Context, string) ([]core.AgentSessionInfo, error) {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		state.fullCalls++
+		return []core.AgentSessionInfo{{ID: "s1", Summary: "one", Directory: state.workspace}}, nil
+	}
+	agent := &discoveryHintCodexAgent{fakeCodexCatalogAgent: base, state: state}
+	handlers := newTestHandlers(t)
+	handlers.RegisterAgent("codex-web", agent)
+	serverConn, _, cleanup := openTestConn(t)
+	t.Cleanup(cleanup)
+	handlers.broadcaster.Subscribe(serverConn, SubscriptionKey{BackendID: "codex-web", SessionID: "list-view"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		handlers.runSessionDiscovery(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-watcherDone:
+		case <-time.After(time.Second):
+			t.Error("session discovery watcher did not stop")
+		}
+		sessionDiscoveryInterval = previousInterval
+		codexDiscoveryHintInterval = previousHintInterval
+	})
+
+	select {
+	case <-state.headSeeded:
+	case <-time.After(time.Second):
+		t.Fatal("codex-web native head probe did not seed")
+	}
+	// 多个 hint 周期（≥30ms，hint=10ms）观察：updatedAt churn 不得触发全量刷新。
+	time.Sleep(50 * time.Millisecond)
+	state.mu.Lock()
+	fullCalls := state.fullCalls
+	state.mu.Unlock()
+	if fullCalls != 1 {
+		t.Fatalf("updatedAt churn caused %d full fetches, want 1 (seed only)", fullCalls)
 	}
 }
 

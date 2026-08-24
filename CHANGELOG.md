@@ -8,6 +8,8 @@
 
 ## [Unreleased]
 
+- **修复：Mac 新建 Codex 会话 iPhone 列表不再等重启才出现（codex-web 目录同源）**：codex-web 此前因 `agent.Name()=="codex"` 的字符串分派被排除在 list_sessions / discovery fingerprint / 3s hint 的 thread/list 富管线之外，目录指纹与 Mac 侧不同源；Mac 新建会话时 `sessions_changed` 触发面脱节，iOS 只能靠重启刷新。现 codex-web 实现 `FetchThreadList`/`FetchThreadListHead` 与 codex 共用同一 catalog seam，三处分派改为能力断言，3s 头部提示对 codex-web 同样生效，发现日志同时打印过滤前后计数（raw/filter）便于核对。
+- **修复：codex-web 长任务待办可见，停止真正生效**：codex-web 此前不实现 todo 查询接口，iOS 的 fetch_todos 恒返回 `not_supported`，task dock 只在恰好有投影文本解析的瞬间出现。现 Mac 端缓存官方 `turn/plan/updated`（EventPlan）并应答真实待办（会话删除时清缓存）；iOS 停止 Mac 发起的 turn 时，注册表缺失的观察会话按 threadID 直达官方 `turn/interrupt`（turnID 取自观测流），不再静默 Ok。
 - **新功能：Codex Web 行新增「重启共享 Codex 服务」按钮**：cc-switch 等工具改完 `~/.codex/config.toml` 后，运行中的共享 daemon 不会重读配置（进程内副本），切换 provider 需要让 daemon 重启才是生效杠杆。按钮执行官方 `app-server daemon restart` 并在控制 socket 恢复后提示；有任务正在执行时禁用；重启后 Codex 桌面若未自动恢复会提示完全退出并重新打开。检测到 `config.toml` 变更时，该行会先行提示「重启后生效」。
 - **改进：工作站主操作按钮不再做扫光/呼吸**：配对主按钮的持续动画（1.5s 扫光 + 1.8s 呼吸循环）长期占用 CPU，改为静态样式，仅保留悬停反馈。
 - **修复：codex-web 会话目录（thread/list）不再因 `section` 字段类型变化整体解码失败**：官方 0.149.0-alpha.4 的 `section` 实测是 `{id,name,appearance}` 对象（部分线程为 `null`），旧解析器只接受 string，导致会话发现轮询每次解码失败（`no broadcast`）、iOS 会话目录长期无法实时刷新。现已按真实 wire 样本兼容对象/字符串/null 三种形状。

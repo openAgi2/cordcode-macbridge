@@ -73,6 +73,13 @@ type Agent struct {
 	obsClient     *Client
 	obsSubscribed map[string]bool
 
+	// planCache 是 EventPlan（官方 turn/plan/updated）按 threadID 的最新镜像，供
+	// TodoProvider.FetchTodos 冷拉取。官方没有持久化 todo 查询接口：写连接（泵）与
+	// 观察连接（Subscribe）两端都会经过 EventPlan，各自把最新 plan 记入此缓存，
+	// iOS 打开会话/8s 轮询/继续前拉取都从这里取，避免 turn 已 start 却查不到 todo。
+	// 有界：超过 cap 时全清（plan 是易失状态，宁可重拉不泄漏）。
+	planCache map[string][]core.Todo
+
 	// 官方 model/list + typed config/read 的只读快照（models.go）。仅用于校验用户
 	// 从刚取得目录中选择的 model；读取失败不回退到该快照冒充新结果。
 	modelProvider      string
@@ -96,7 +103,7 @@ type ProbeSnapshot struct {
 // New 按 opts 构造（main.go buildAgentOptions 的键：work_dir、
 // codex_web_app_server_url、codex_web_codex_home）。
 func New(opts map[string]any) *Agent {
-	a := &Agent{liveCodec: NewLiveCodec(), listeners: map[string]map[chan core.Event]struct{}{}, turnMetrics: map[string]*TurnMetrics{}, sendAt: map[string]time.Time{}, registry: NewInteractionRegistry(), modelKnown: map[string]string{}, modelEfforts: map[string][]string{}, modelDefaultEffort: map[string]string{}}
+	a := &Agent{liveCodec: NewLiveCodec(), listeners: map[string]map[chan core.Event]struct{}{}, turnMetrics: map[string]*TurnMetrics{}, sendAt: map[string]time.Time{}, registry: NewInteractionRegistry(), modelKnown: map[string]string{}, modelEfforts: map[string][]string{}, modelDefaultEffort: map[string]string{}, planCache: map[string][]core.Todo{}}
 	if opts == nil {
 		return a
 	}
@@ -426,6 +433,7 @@ func (a *Agent) DeleteSession(ctx context.Context, sessionID string) error {
 	if err != nil {
 		return err
 	}
+	a.forgetPlan(sessionID)
 	a.signalCatalogRefresh()
 	return nil
 }

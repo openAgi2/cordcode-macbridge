@@ -117,6 +117,9 @@ func (a *Agent) ensurePump() {
 // dispatchEvent 按官方 threadID 分发给 session 监听者（无监听者的 thread 丢弃——
 // 目录/历史等非流式操作不注册监听）。
 func (a *Agent) dispatchEvent(ev core.Event) {
+	if ev.Type == core.EventPlan && ev.SessionID != "" {
+		a.rememberPlan(ev.SessionID, ev.Plan)
+	}
 	a.mu.Lock()
 	set := a.listeners[ev.SessionID]
 	chans := make([]chan core.Event, 0, len(set))
@@ -131,6 +134,56 @@ func (a *Agent) dispatchEvent(ev core.Event) {
 			slog.Warn("codexweb: session listener overflow, dropping event", "thread", ev.SessionID, "type", string(ev.Type))
 		}
 	}
+}
+
+// planCacheMaxEntries 是 planCache 的简单有界策略：超过即全清（易失状态，重拉成本
+// 低于长期膨胀；turn 结束后 plan 本就随新 turn 被官方覆盖）。
+const planCacheMaxEntries = 1024
+
+// rememberPlan 记录某 thread 最新的官方 plan（EventPlan 镜像），供 FetchTodos 冷拉取。
+func (a *Agent) rememberPlan(threadID string, todos []core.Todo) {
+	if len(todos) == 0 {
+		return
+	}
+	cp := make([]core.Todo, len(todos))
+	copy(cp, todos)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.planCache == nil {
+		a.planCache = map[string][]core.Todo{}
+	}
+	if len(a.planCache) >= planCacheMaxEntries && a.planCache[threadID] == nil {
+		a.planCache = map[string][]core.Todo{}
+	}
+	a.planCache[threadID] = cp
+}
+
+// forgetPlan 删除某 thread 的 plan 镜像（官方删除/退出会话后该镜像不再可信）。
+func (a *Agent) forgetPlan(threadID string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.planCache != nil {
+		delete(a.planCache, threadID)
+	}
+}
+
+// FetchTodos 实现 core.TodoProvider：返回最近一次 EventPlan 镜像。官方 thread/read
+// 的 plan item 只有 text（无结构化 steps），turn/plan/updated 通知才是结构化
+// {step,status} 的唯一真相，因此数据源是事件缓存而非历史扫描；没有缓存（turn 未
+// 产生过 plan/updated）时返回空列表而非 not_supported，让 iOS 侧留待事件/轮询。
+func (a *Agent) FetchTodos(ctx context.Context, sessionID string) ([]core.Todo, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.planCache == nil {
+		return nil, nil
+	}
+	cached, ok := a.planCache[sessionID]
+	if !ok {
+		return nil, nil
+	}
+	out := make([]core.Todo, len(cached))
+	copy(out, cached)
+	return out, nil
 }
 
 // reconnectLoop §8.3 断线恢复：退避重 Probe 直到成功（或 Agent 停止）；成功后
@@ -377,6 +430,53 @@ func (s *agentSession) currentTurnForControl() string {
 	return s.agent.liveCodec.ActiveTurn(s.threadID)
 }
 
+// CancelTurnForThread 对观测/被动订阅的 thread 执行官方 turn/interrupt
+// （core.ThreadTurnCanceler）：iOS 停止 Mac 在共享 daemon 上发起的 turn 时，
+// 本端没有该 thread 的写会话，turnID 只能取中央泵 liveCodec 观测到的 active turn。
+// 无活动 turn / 官方 -32600 均原样返回，不重试伪装。
+//
+// 订阅前已运行的 turn（2026-08-23 真机 01a02f29）：观察连接在 turn/started 广播
+// 之后才 attach，官方不重放开始事件——liveCodec 永远看不到。此时 thread/read
+// 的 inProgress 状态是官方身份的另一条合法来源（与外置 turn 冷基线同源），
+// 在 liveCodec miss 时兜底查询，仍然 fail closed（找不到才算 no active turn）。
+func (a *Agent) CancelTurnForThread(ctx context.Context, threadID string) error {
+	_, cl, err := a.endpointFor(ctx)
+	if err != nil {
+		return err
+	}
+	turnID := a.liveCodec.ActiveTurn(threadID)
+	if turnID == "" {
+		turnID = a.inProgressTurnFromColdBaseline(ctx, cl, threadID)
+	}
+	if turnID == "" {
+		return &userError{"codex-web: no active turn to interrupt"}
+	}
+	if rpcErr := TurnInterrupt(ctx, cl, threadID, turnID); rpcErr != nil {
+		return rpcErr
+	}
+	return nil
+}
+
+// inProgressTurnFromColdBaseline 读官方 thread/read(includeTurns) 找状态为
+// inProgress 的 turn（订阅前已开始的观察 turn 的兜底身份来源）。
+func (a *Agent) inProgressTurnFromColdBaseline(ctx context.Context, cl *Client, threadID string) string {
+	turns, rpcErr, err := ReadThreadRich(ctx, cl, threadID, 0)
+	if err != nil || rpcErr != nil {
+		if err != nil {
+			slog.Debug("codexweb: cold baseline turn read failed", "thread", threadID, "error", err)
+		} else {
+			slog.Debug("codexweb: cold baseline turn read rejected", "thread", threadID, "official", rpcErr.Message)
+		}
+		return ""
+	}
+	for _, t := range turns {
+		if t.Status == TurnStatusInProgress && t.TurnID != "" {
+			return t.TurnID
+		}
+	}
+	return ""
+}
+
 // Steer 注入输入到 active regular turn。
 func (s *agentSession) Steer(ctx context.Context, prompt string) (string, error) {
 	cl, err := s.client(ctx)
@@ -463,7 +563,12 @@ func (a *Agent) Subscribe(ctx context.Context) (<-chan core.Event, error) {
 	a.obsSubscribed = map[string]bool{}
 	a.obsMu.Unlock()
 
-	codec := NewLiveCodec()
+	// 观察连接解码必须与中央泵共享同一个 liveCodec：turn/started 在此解码后
+	// CancelTurnForThread（外部 turn 停止）才认识该 turn（2026-08-23 真机：
+	// Mac 发起的观察 turn，iOS 停止报 "no active turn to interrupt"——被动
+	// 订阅用独立 codec 时 a.liveCodec 永远不知情）。本地 codec 会 +90s
+	// restart 周期被替换，但不影响正确性——共享对象随 Agent 存活。
+	codec := a.liveCodec
 	events := make(chan core.Event, 256)
 
 	// 初始订阅面：loaded 集合（可产生事件的全部官方 thread）。
@@ -508,6 +613,9 @@ func (a *Agent) Subscribe(ctx context.Context) (<-chan core.Event, error) {
 				a.signalCatalogRefresh()
 			}
 			for _, ev := range codec.Decode(n) {
+				if ev.Type == core.EventPlan && ev.SessionID != "" {
+					a.rememberPlan(ev.SessionID, ev.Plan)
+				}
 				select {
 				case events <- ev:
 				case <-ctx.Done():
@@ -592,3 +700,5 @@ var _ core.EventSubscriber = (*Agent)(nil)
 var _ core.ThreadLiveAttacher = (*Agent)(nil)
 var _ core.PromptOptionsSender = (*agentSession)(nil)
 var _ core.TurnCanceler = (*agentSession)(nil)
+var _ core.TodoProvider = (*Agent)(nil)
+var _ core.ThreadTurnCanceler = (*Agent)(nil)

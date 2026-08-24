@@ -98,8 +98,11 @@ func (h *Handlers) runBackendSessionDiscoveryLoop(ctx context.Context, id string
 	defer ticker.Stop()
 	var hintTicker *time.Ticker
 	var hintC <-chan time.Time
-	if id == "codex" {
-		if _, ok := agent.(codexThreadHeadLister); ok && codexHintInterval > 0 {
+	// 能力断言而非 id=="codex"：codex-web（与 codex 同属 thread/list 富 catalog
+	// seam）同样获得 3s recency-head 探测——Mac 新建 session 时 hint 立即触发
+	// authoritative 全量刷新，无需等 60s scan（P0-4）。
+	if _, ok := agent.(codexThreadHeadLister); ok {
+		if codexHintInterval > 0 {
 			hintTicker = time.NewTicker(codexHintInterval)
 			hintC = hintTicker.C
 			defer hintTicker.Stop()
@@ -178,7 +181,9 @@ func (h *Handlers) codexDiscoveryHintFingerprint(ctx context.Context, agent core
 		return "", err
 	}
 	wire := filterCodexCatalogSessions(sessionsToWire(infos))
-	return listSemanticFingerprint(wire), nil
+	// 只用顺序+id：语义指纹（含 updatedAt）会在流式 turn 中随每个 delta 变化，
+	// 让长任务执行期间每 3s 误触发一次全量刷新（2026-08-23 真机风暴）。
+	return listOrderFingerprint(wire), nil
 }
 
 // snapshotSessions samples every backend's catalog fingerprint once and broadcasts
@@ -196,7 +201,7 @@ func (h *Handlers) snapshotBackendSession(ctx context.Context, seen map[string]s
 		tag = "seed"
 	}
 	started := time.Now()
-	current, count, err := h.discoveryFingerprint(ctx, id, agent)
+	current, count, rawCount, err := h.discoveryFingerprint(ctx, id, agent)
 	duration := time.Since(started)
 	if err != nil {
 		// Live-only backends (dsh) have no list by design — a quiet skip, not
@@ -219,7 +224,7 @@ func (h *Handlers) snapshotBackendSession(ctx context.Context, seen map[string]s
 	if seed || !hadPrev {
 		seen[id] = current
 		slog.Info("go-bridge: session discovery snapshot seeded",
-			"backend", id, "sessionCount", count, "durationMs", duration.Milliseconds())
+			"backend", id, "sessionCount", count, "rawCount", rawCount, "durationMs", duration.Milliseconds())
 		return true
 	}
 	// Phase 7 §442：fingerprint 变化即 catalog 变化（新增/删除/更新任一）→ 触发 sessions_changed。
@@ -235,7 +240,7 @@ func (h *Handlers) snapshotBackendSession(ctx context.Context, seen map[string]s
 		seen[id] = current
 		slog.Info("go-bridge: sessions_changed (catalog fingerprint changed)",
 			"backend", id, "catalogGeneration", catalogGeneration,
-			"sessionCount", count, "durationMs", duration.Milliseconds())
+			"sessionCount", count, "rawCount", rawCount, "durationMs", duration.Milliseconds())
 		if _, err := h.eventPublisher.PublishControlPlane(LogicalEvent{
 			BackendID:         id,
 			Event:             "sessions_changed",
@@ -278,8 +283,10 @@ func (h *Handlers) snapshotBackendSession(ctx context.Context, seen map[string]s
 // resolves only the workDir project and returned 0 sessions in production, so Claude
 // derives from the authoritative global catalog (h.claudeSessions) that list_sessions serves.
 //
-// 返回 (fingerprint, visibleCount, error)。error → 调用方 skip 本周期（不更新 seen、不广播）。
-func (h *Handlers) discoveryFingerprint(ctx context.Context, id string, agent core.Agent) (string, int, error) {
+// 返回 (fingerprint, filteredCount, rawCount, error)。raw/filter 同出一次 fetch
+// （Codex 的 thread/list 全量只拉一次，过滤前后计数用于日志审计 438/429 差异）。
+// error → 调用方 skip 本周期（不更新 seen、不广播）。
+func (h *Handlers) discoveryFingerprint(ctx context.Context, id string, agent core.Agent) (string, int, int, error) {
 	if id == "claude" && h.claudeSessions != nil {
 		all := h.claudeSessions.list("", nil)
 		visible := make([]map[string]interface{}, 0, len(all))
@@ -298,32 +305,34 @@ func (h *Handlers) discoveryFingerprint(ctx context.Context, id string, agent co
 			}
 			visible = append(visible, wire)
 		}
-		return wireFingerprint(visible), len(visible), nil
+		return wireFingerprint(visible), len(visible), len(all), nil
 	}
 	listCtx, cancel := context.WithTimeout(ctx, catalogRequestTimeout)
 	defer cancel()
-	if agent.Name() == "codex" {
-		wire, _, err := h.codexVisibleMembership(listCtx, id, "")
+	// 能力断言而非 Name()=="codex"：codex-web 与 codex 共用同一 thread/list 富
+	// catalog seam（P0-4），discovery fingerprint 与 list_sessions 天然同源。
+	if _, ok := agent.(codexThreadLister); ok {
+		wire, rawCount, err := h.codexVisibleMembershipCounts(listCtx, id, "")
 		if err != nil {
-			return "", 0, err
+			return "", 0, 0, err
 		}
-		return listSemanticFingerprint(wire), len(wire), nil
+		return listSemanticFingerprint(wire), len(wire), rawCount, nil
 	}
 	if agent.Name() == "grokbuild" {
 		wire, _, err := h.grokVisibleMembership(listCtx, id)
 		if err != nil {
-			return "", 0, err
+			return "", 0, 0, err
 		}
-		return listSemanticFingerprint(wire), len(wire), nil
+		return listSemanticFingerprint(wire), len(wire), len(wire), nil
 	}
 	infos, err := agent.ListSessions(listCtx)
 	if err != nil {
-		return "", 0, err
+		return "", 0, 0, err
 	}
 	// fingerprint over the disk-scan wire maps（与 list_sessions v1 同源）。sessionsToWire 把
 	// AgentSessionInfo 映射成 wire map，wireFingerprint 按 id 排序取 id|updatedAtMillis 摘要。
 	wire := sessionsToWire(infos)
-	return wireFingerprint(wire), len(infos), nil
+	return wireFingerprint(wire), len(infos), len(infos), nil
 }
 
 // lineage note：原 sessionIDSet / diffNewSessions / diffRemovedSessions 在 Phase 7 §442
