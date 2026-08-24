@@ -110,8 +110,8 @@ func ParsePsProcessRows(output string) ([]parsePsProcess, error) {
 			return nil, errors.New("ps row short: " + line)
 		}
 		pid, err := parsePid(fields[0])
-		if err != nil {
-			return nil, err
+		if err != nil || pid <= 0 {
+			return nil, errors.New("invalid pid in: " + line)
 		}
 		rows = append(rows, parsePsProcess{
 			PID:     pid,
@@ -122,7 +122,8 @@ func ParsePsProcessRows(output string) ([]parsePsProcess, error) {
 	return rows, nil
 }
 
-// ParsePsTreeRows 解析 ps -axo pid=,ppid=,command=（进程树）。
+// ParsePsTreeRows 解析 ps -axo pid=,ppid=,command=（进程树）。ppid=0（PID 1 的父进程）
+// 合法；pid 列仍必须为正。
 type parsePsTreeNode struct {
 	PID     int
 	PPID    int
@@ -141,8 +142,8 @@ func ParsePsTreeRows(output string) ([]parsePsTreeNode, error) {
 			return nil, errors.New("ps tree row short: " + line)
 		}
 		pid, err := parsePid(fields[0])
-		if err != nil {
-			return nil, err
+		if err != nil || pid <= 0 {
+			return nil, errors.New("invalid pid in: " + line)
 		}
 		ppid, err := parsePid(fields[1])
 		if err != nil {
@@ -160,9 +161,6 @@ func parsePid(s string) (int, error) {
 			return 0, errors.New("invalid pid: " + s)
 		}
 		pid = pid*10 + int(r-'0')
-	}
-	if pid <= 0 {
-		return 0, errors.New("non-positive pid: " + s)
 	}
 	return pid, nil
 }

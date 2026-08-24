@@ -307,6 +307,14 @@ func TestParseHelpers(t *testing.T) {
 	if err != nil || len(tree) != 1 || tree[0].PPID != 5000 {
 		t.Fatalf("tree parse: %+v err=%v", tree, err)
 	}
+	// 真实 macOS ps：PID 1 的 ppid=0 必须合法。
+	tree, err = ParsePsTreeRows("1 0 /sbin/launchd\n")
+	if err != nil || len(tree) != 1 || tree[0].PID != 1 || tree[0].PPID != 0 {
+		t.Fatalf("ppid=0 parse: %+v err=%v", tree, err)
+	}
+	if _, err := ParsePsTreeRows("1 ? /sbin/launchd\n"); err == nil {
+		t.Fatal("non-numeric ppid must error")
+	}
 	// 递归后代：1234 → 5000 → 9001。
 	desc := DescendantsOf([]parsePsTreeNode{{PID: 5000, PPID: 1234}, {PID: 9001, PPID: 5000}},
 		map[int]bool{1234: true})
