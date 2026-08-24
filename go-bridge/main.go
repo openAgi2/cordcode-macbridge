@@ -834,9 +834,13 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 			// catalog/control-only (§6.5): the registry bookkeeping above
 			// already ran; feeding the Kernel here would build a hidden
 			// timeline for a session nobody opened.
+			hasKernelState := h.projectionKernel != nil &&
+				h.projectionKernel.HasReducerState(backendID, ev.SessionID)
 			if ev.SessionID == "" || passiveFeedAllowed(
 				h.agentRelayRunningFor(ev.SessionID),
-				h.observation != nil && h.observation.HasSessionInterest(backendID, ev.SessionID)) {
+				h.observation != nil && h.observation.HasSessionInterest(backendID, ev.SessionID),
+				hasKernelState,
+				eventName) {
 				h.deltaBatcher.Send(LogicalEvent{
 					SessionID: ev.SessionID,
 					BackendID: backendID,
@@ -857,15 +861,36 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 	}
 }
 
-// passiveFeedAllowed 决定被动泵是否向 kernel 补投该 session 的事件：只有
+// passiveFeedAllowed 决定被动泵是否向 kernel 补投该 session 的事件：通常只有
 // 「有观察兴趣且该会话没有运行中的 agent relay」的会话由被动泵摄入；agent
 // relay（relayEvents）是它生命周期的唯一摄入者，双路摄入会把同一官方增量
 // 合并进同一次 append_text（审计-008 单一摄入所有者；owner 2026-08-24 真机
 // 流式正文逐段重复）。以 agentRelayRunning 而不是「有订阅者」为界：外部观察
 // 会话（Mac 发起、无 bridge AgentSession、codex 文件 relay 只覆盖 codex
 // backend）有订阅者但没有 relay——被动泵必须继续兜底。
-func passiveFeedAllowed(agentRelayRunning, hasObservation bool) bool {
-	return !agentRelayRunning && hasObservation
+//
+// 已经入核的外部会话是例外：用户切换到别的 session 后 observation scope 会移走，
+// 但 Mac 发起的长 turn 仍可能稍后完成。terminal milestone 必须继续收口既有 projection，
+// 否则 registry 虽被上面的 markIdle 收口，iOS 重开时拿到的 projection.execution 仍为
+// running。只允许 terminal 且要求既有 kernel state，避免为从未打开的后台 session
+// 构建隐藏 timeline；agent relay 存在时仍严格禁入，保持单一摄入所有者。
+func passiveFeedAllowed(agentRelayRunning, hasObservation, hasKernelState bool, eventName string) bool {
+	if agentRelayRunning {
+		return false
+	}
+	if hasObservation {
+		return true
+	}
+	return hasKernelState && passiveProjectionTerminalEvent(eventName)
+}
+
+func passiveProjectionTerminalEvent(eventName string) bool {
+	switch eventName {
+	case "turn_completed", "turn_error", "turn_aborted":
+		return true
+	default:
+		return false
+	}
 }
 
 func shouldStartPassiveSubscription(backendID, codexBackendMode, codexAppServerURL, openCodeURL, openCodeWebURL string) bool {

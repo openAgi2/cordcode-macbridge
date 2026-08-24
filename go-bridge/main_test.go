@@ -128,16 +128,23 @@ func TestPassiveFeedAllowedSingleIngestOwner(t *testing.T) {
 		name              string
 		agentRelayRunning bool
 		hasObservation    bool
+		hasKernelState    bool
+		eventName         string
 		want              bool
 	}{
-		{"relayed-only", true, false, false},
-		{"relayed-and-observed", true, true, false},
-		{"observed-only", false, true, true},
-		{"untracked", false, false, false},
+		{"relayed-only", true, false, true, "turn_completed", false},
+		{"relayed-and-observed", true, true, true, "text_delta", false},
+		{"observed-only", false, true, false, "text_delta", true},
+		{"untracked", false, false, false, "text_delta", false},
+		{"background-terminal-existing-projection", false, false, true, "turn_completed", true},
+		{"background-error-existing-projection", false, false, true, "turn_error", true},
+		{"background-abort-existing-projection", false, false, true, "turn_aborted", true},
+		{"background-delta-existing-projection", false, false, true, "text_delta", false},
+		{"background-terminal-no-projection", false, false, false, "turn_completed", false},
 	} {
-		if got := passiveFeedAllowed(tc.agentRelayRunning, tc.hasObservation); got != tc.want {
-			t.Errorf("%s: passiveFeedAllowed(%v,%v)=%v, want %v",
-				tc.name, tc.agentRelayRunning, tc.hasObservation, got, tc.want)
+		if got := passiveFeedAllowed(tc.agentRelayRunning, tc.hasObservation, tc.hasKernelState, tc.eventName); got != tc.want {
+			t.Errorf("%s: passiveFeedAllowed(%v,%v,%v,%q)=%v, want %v",
+				tc.name, tc.agentRelayRunning, tc.hasObservation, tc.hasKernelState, tc.eventName, got, tc.want)
 		}
 	}
 }
