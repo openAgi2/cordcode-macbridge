@@ -204,7 +204,7 @@ Mac 日志中的 `raw=433 / kept=189 / codex_roots=12` 只能说明 catalog filt
 | Mac 定向 projection delivery tests | 通过 |
 | Mac `go test ./go-bridge -count=1` | 通过（65.267s） |
 | iOS 产品 target 真机签名 build | 通过 |
-| iOS 新增单测源码编译 | 通过 |
+| iOS `build-for-testing`（generic iOS，禁签名） | 通过（`TEST BUILD SUCCEEDED`） |
 | iOS 定向单测执行 | 未执行：`CCCodeTests` 现有 target 未配置 development team，测试 host 安装被签名配置阻塞；不得写成 tests passed |
 | iPhone 安装 | 已安装 `org.openagi.cordcode`，未自动启动或执行 UI test |
 
