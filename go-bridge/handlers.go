@@ -2844,8 +2844,8 @@ func (h *Handlers) handleAbortGeneration(conn Connection, msg WireMessage) {
 // Mac 发起的 turn 不在 h.sessions registry，iOS 的「停止」必须按 threadID 直达
 // 官方 turn/interrupt——turnID 由观测流（liveCodec.ActiveTurn）给出，而不是
 // 静默 Ok。注册表路径的乐观回执（Ok:true 已发）保持不变；官方 turn/completed
-// 仍会经泵广播，这里只发前景反馈事件（背景待通知由官方完成事件自然覆盖，不
-// 重复记录，避免同一 turn 双通知）。
+// 仍会经观察泵进入 Projection Kernel。turn/interrupt 的 ACK 只确认请求被接受，
+// 不是权威完成证据，因此这里不得合成 turn_completed / idle 或提前推进投影终态。
 func (h *Handlers) abortObservedThread(conn Connection, msg WireMessage, params AbortGenerationParams) {
 	agent, ok := h.getAgent(msg.BackendID)
 	if !ok {
@@ -2868,25 +2868,6 @@ func (h *Handlers) abortObservedThread(conn Connection, msg WireMessage, params 
 	}
 	slog.Info("go-bridge: abort_generation: observed thread turn interrupted",
 		"sessionID", params.SessionID, "backendID", msg.BackendID, "agent", agent.Name())
-
-	directory := params.Directory
-	h.publishEvent(LogicalEvent{
-		BackendID: msg.BackendID,
-		SessionID: params.SessionID,
-		Directory: directory,
-		Event:     "turn_completed",
-		Data:      map[string]interface{}{"done": true, "reason": "aborted"},
-		Broadcast: true,
-		Offline:   true,
-	})
-	h.publishEvent(LogicalEvent{
-		BackendID: msg.BackendID,
-		SessionID: params.SessionID,
-		Directory: directory,
-		Event:     "session_state_changed",
-		Data:      map[string]interface{}{"state": "idle"},
-		Broadcast: true,
-	})
 }
 
 func (h *Handlers) handleCompressContext(conn Connection, msg WireMessage) {

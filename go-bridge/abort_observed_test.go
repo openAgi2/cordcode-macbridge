@@ -26,11 +26,23 @@ func (s *abortObservedStub) CancelTurnForThread(ctx context.Context, threadID st
 func (s *abortObservedStub) Name() string { return "codex-web" }
 
 // TestAbortObservedThreadDirectCancel registry 缺失 + agent 支持线程直达 →
-// 回执 Ok + CancelTurnForThread 恰好一次（threadID 原样）。
+// 回执 Ok + CancelTurnForThread 恰好一次（threadID 原样）。中断 ACK 不是
+// turn/completed；Projection Kernel 必须保持 running，直到官方观察帧到达。
 func TestAbortObservedThreadDirectCancel(t *testing.T) {
 	h := newTestHandlers(t)
 	agent := &abortObservedStub{}
 	h.RegisterAgent("codex-web", agent)
+	h.projectionKernel.IngestLive(ev(
+		1,
+		"codex-web",
+		"th-observed",
+		"turn_started",
+		map[string]interface{}{"turnId": "official-turn"},
+	))
+	before, ok := h.projectionKernel.reducer.Snapshot("codex-web", "th-observed")
+	if !ok || before.Execution.Phase != "running" {
+		t.Fatalf("precondition: projection = %+v ok=%v, want running", before, ok)
+	}
 
 	serverConn, clientConn, cleanup := openTestConn(t)
 	defer cleanup()
@@ -47,6 +59,14 @@ func TestAbortObservedThreadDirectCancel(t *testing.T) {
 	if agent.cancelCalls != 1 || agent.lastThread != "th-observed" {
 		t.Fatalf("直达 CancelTurnForThread 调用次数/threadID = %d/%q，want 1/th-observed",
 			agent.cancelCalls, agent.lastThread)
+	}
+	after, ok := h.projectionKernel.reducer.Snapshot("codex-web", "th-observed")
+	if !ok {
+		t.Fatal("interrupt ACK 后 projection 不应消失")
+	}
+	if after.SyncRev != before.SyncRev || after.Execution.Phase != "running" ||
+		after.Execution.ActiveTurnID != "official-turn" {
+		t.Fatalf("interrupt ACK 提前改写 projection: before=%+v after=%+v", before, after)
 	}
 }
 
