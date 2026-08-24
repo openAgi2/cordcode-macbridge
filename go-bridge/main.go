@@ -70,9 +70,9 @@ func Main() {
 	logDirPath := flag.String("log-dir", "", "Log directory")
 	remoteURL := flag.String("remote-url", "", "外部可达的 Bridge WebSocket URL（如 wss://my-tailscale:8777/bridge）")
 	tlsPort := flag.Int("tls-port", 8778, "TLS listen port for wss:// remote access (0 = disabled)")
-	// topologyMonitor 默认 off（plan v2 §2.6：负态分类经 owner 人工门验证前，产品默认路径
-	// 不展示诊断结论；门后由独立提交切换）。
-	topologyMonitor := flag.Bool("topology-monitor", envOr("CODEX_TOPOLOGY_MONITOR", "") == "1", "Enable read-only topology monitor (default off; negative-state classification awaits owner gate)")
+	// topologyMonitor 默认 on：owner 门已验证 shared-only、mixed 与采样失败三条真实路径；
+	// S2/S5 因本任务运行在 shared Desktop 中按计划记录 blocked_manual_owner_close。
+	topologyMonitor := flag.Bool("topology-monitor", envOr("CODEX_TOPOLOGY_MONITOR", "1") == "1", "Enable read-only topology monitor (default on)")
 	// devInsecureWS 仅用于本地开发：允许 Tailscale 远程候选在 TLS 不可用时降级为明文 ws://。
 	// 产品模式下不得启用——TLS 失败应禁用候选而非明文暴露 bearer token/业务内容（P1-4）。
 	devInsecureWS := flag.Bool("dev-insecure-ws", envOr("CORDCODE_DEV_INSECURE_WS", "") != "", "DEV ONLY: allow plaintext ws:// Tailscale remote when TLS unavailable (fail-open). Product must leave unset.")
