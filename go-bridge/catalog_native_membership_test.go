@@ -74,12 +74,12 @@ func TestDiscoveryFingerprintUsesNativeMembershipWithoutEnrichmentOrDiskScan(t *
 	}}
 	h := newTestHandlers(t)
 	h.RegisterAgent("codex", agent)
-	first, count, _, err := h.discoveryFingerprint(context.Background(), "codex", agent, nil)
+	first, count, _, err := h.discoveryFingerprint(context.Background(), "codex", agent)
 	if err != nil || count != 1 || first == "" {
 		t.Fatalf("first fingerprint=%q count=%d err=%v", first, count, err)
 	}
 	native[0].Summary = "title-b"
-	second, _, _, err := h.discoveryFingerprint(context.Background(), "codex", agent, nil)
+	second, _, _, err := h.discoveryFingerprint(context.Background(), "codex", agent)
 	if err != nil || second == first {
 		t.Fatalf("title-only native change did not rotate fingerprint: first=%q second=%q err=%v", first, second, err)
 	}
@@ -93,7 +93,7 @@ func TestDiscoveryFingerprintUsesNativeMembershipWithoutEnrichmentOrDiskScan(t *
 		return append([]core.AgentSessionInfo(nil), grokNative...), nil
 	}}
 	h.RegisterAgent("grokbuild", grok)
-	if got, count, _, err := h.discoveryFingerprint(context.Background(), "grokbuild", grok, nil); err != nil || count != 1 || got == "" {
+	if got, count, _, err := h.discoveryFingerprint(context.Background(), "grokbuild", grok); err != nil || count != 1 || got == "" {
 		t.Fatalf("Grok fingerprint=%q count=%d err=%v", got, count, err)
 	}
 	if grokBase.ListSessionsCallCount() != 0 {
@@ -270,7 +270,7 @@ func TestNativeListAndPollerPropagateCancellationAndDeadline(t *testing.T) {
 		pollDeadlineRemaining = time.Until(deadline)
 		return nil, ctx.Err()
 	}
-	if _, _, _, err := h.discoveryFingerprint(pollCtx, "codex", agent, nil); err == nil || !sawPollDeadline || pollDeadlineRemaining <= 0 || pollDeadlineRemaining > catalogRequestTimeout {
+	if _, _, _, err := h.discoveryFingerprint(pollCtx, "codex", agent); err == nil || !sawPollDeadline || pollDeadlineRemaining <= 0 || pollDeadlineRemaining > catalogRequestTimeout {
 		t.Fatalf("poller cancellation/deadline did not reach native fetch: deadline=%v remaining=%s err=%v", sawPollDeadline, pollDeadlineRemaining, err)
 	}
 	if base.ListSessionsCallCount() != 0 {
