@@ -111,9 +111,8 @@ final class NotificationCoordinatorTests: XCTestCase {
 
     func testNotifyPairingClaimedWithoutAuthorizationSetsDockBadge() {
         // 未授权时走 fallback(菜单栏/dock 红点),不发真实通知。
-        // 用未授权的 coordinator(canDeliverNotifications=false 默认)。
-        let coordinator = NotificationCoordinator()
-        // 默认 isAuthorized=false 且 authorizationStatus() 在测试环境返回 notDetermined → canDeliver=false。
+        // 显式注入未授权状态，避免依赖运行测试的 Mac 当前通知权限。
+        let coordinator = NotificationCoordinator(authorizationStatusOverride: { .denied })
         XCTAssertFalse(coordinator.canDeliverNotifications)
         // 不应崩溃(走 fallback 分支)。
         coordinator.notifyPairingClaimed(deviceName: "web-client", platform: "web")

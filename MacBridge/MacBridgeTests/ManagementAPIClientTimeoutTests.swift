@@ -30,7 +30,7 @@ final class ManagementAPIClientTimeoutTests: XCTestCase {
     /// 正常 server：status 端点立即返回。status 成功不被慢 agents 端点阻塞（解耦由 pollManagementAPI
     /// 把 agents 放独立 task 保证；这里验证 status 本身对慢 server 也有上限）。
     func testStatusReturnsQuicklyFromHealthyServer() async throws {
-        let server = StubHTTPServer(statusBody: #"{"status":"ready"}"#)
+        let server = StubHTTPServer(statusBody: #"{"status":"ready","bridgeId":"test","displayName":"Test","uptime":"1s","version":"test"}"#)
         try server.start()
         defer { server.stop() }
 

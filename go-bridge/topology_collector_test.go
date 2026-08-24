@@ -43,7 +43,7 @@ func fakeCollector(match func(bin string, args []string) (string, string, error)
 // happyProbe 返回"健康"场景：
 //   - 一个 shared Desktop 主进程 1234，其后代 app-server 9001（含祖父 5000 的递归链）；
 //   - daemon 7777 的 listener object 0xabc；1234/9001 各有一个 peer 命中 0xabc；
-//   - app-server 9001 的 fd 0/1/2 是 UNIX（无 PIPE）→ private absent → shared_only。
+//   - app-server 9001 的 fd 0/1/2 是 CHR（无 stdio IPC）→ private absent → shared_only。
 func happyProbe(mainCmd string, descendants ...string) func(string, []string) (string, string, error) {
 	tree := "1234 1 " + mainCmd + "\n"
 	tree += "5000 1234 /Applications/ChatGPT.app/Contents/Resources/codex app-server --listen ws://127.0.0.1:12345 --parent-pid 1234 --user-data-dir /tmp/ud\n"
@@ -63,8 +63,8 @@ func happyProbe(mainCmd string, descendants ...string) func(string, []string) (s
 			return "7777\n", "", nil
 		case strings.Contains(joined, "-p 7777") && strings.Contains(joined, "-U"):
 			return "codex 7777 user 4u unix 0xabc /fake/codex-home/app-server-control/app-server-control.sock\n", "", nil
-		case strings.Contains(joined, "-d"): // private FD 形态：无 PIPE
-			return "codex 9001 user 0u unix 0xdef /private/tmp/socket\n", "", nil
+		case strings.Contains(joined, "-d"): // private FD 形态：无 PIPE/unix socketpair
+			return "codex 9001 user 2w CHR 3,2 0t0 336 /dev/null\n", "", nil
 		case strings.Contains(joined, "-U") && strings.Contains(joined, "-p "):
 			return "ChatGPT 1234 user 6u unix ->0xabc\ncodex 9001 user 5u unix ->0xabc\n", "", nil
 		case strings.Contains(joined, "daemon version"):

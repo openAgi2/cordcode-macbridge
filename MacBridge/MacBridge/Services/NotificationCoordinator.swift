@@ -46,8 +46,10 @@ final class NotificationCoordinator: NSObject, PairingAuthorizationQuerying {
     var actionHandler: PairingNotificationActionHandling?
 
     private var isAuthorized = false
+    private let authorizationStatusOverride: (() -> UNAuthorizationStatus)?
 
-    override init() {
+    init(authorizationStatusOverride: (() -> UNAuthorizationStatus)? = nil) {
+        self.authorizationStatusOverride = authorizationStatusOverride
         super.init()
         // 默认 action 处理器:转发到当前 PairingViewModel。
         // 用 box 捕获 weak self,避免强引用循环。
@@ -72,7 +74,10 @@ final class NotificationCoordinator: NSObject, PairingAuthorizationQuerying {
 
     /// 同步查询当前授权状态(用于判断是否走 fallback)。单测可注入。
     func authorizationStatus() -> UNAuthorizationStatus {
-        // 单测注入时会 override;默认读取真实 center。
+        // 单测可注入稳定状态；产品默认读取真实 center。
+        if let authorizationStatusOverride {
+            return authorizationStatusOverride()
+        }
         var status: UNAuthorizationStatus = .notDetermined
         let sem = DispatchSemaphore(value: 0)
         UNUserNotificationCenter.current().getNotificationSettings { settings in
