@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync"
 	"time"
 )
@@ -178,26 +179,29 @@ func (s *eventOutboundSink) run() {
 	}
 }
 
-func (s *eventOutboundSink) tryEnqueue(frame eventOutboundFrame) bool {
-	if closed, ok := s.conn.(interface{ isClosed() bool }); ok && closed.isClosed() {
-		return false
+// tryEnqueue 尝试非阻塞入队。失败时返回可判定的唯一原因与当时队列占用
+//（queued = 已缓冲待写帧数），供「overflowed=1」三类原因（conn_closed /
+// sink_stopped / queue_full）的定点取证。
+func (s *eventOutboundSink) tryEnqueue(frame eventOutboundFrame) (ok bool, failReason string, queued int) {
+	if closed, isClosable := s.conn.(interface{ isClosed() bool }); isClosable && closed.isClosed() {
+		return false, "conn_closed", len(s.queue)
 	}
 	select {
 	case <-s.stop:
-		return false
+		return false, "sink_stopped", len(s.queue)
 	default:
 	}
 	select {
 	case s.slots <- struct{}{}:
 		select {
 		case s.queue <- frame:
-			return true
+			return true, "", len(s.queue)
 		case <-s.stop:
 			<-s.slots
-			return false
+			return false, "sink_stopped", len(s.queue)
 		}
 	default:
-		return false
+		return false, "queue_full", len(s.queue)
 	}
 }
 
@@ -401,7 +405,12 @@ func (p *EventPublisher) EnqueueControl(conn Connection, frame interface{}, wait
 		sink.queue <- eventOutboundFrame{value: frame, delivered: delivered}
 		p.mu.Unlock()
 	case <-time.After(bridgeWriteTimeout):
+		gen := p.connectionGenerations[conn]
 		p.mu.Unlock()
+		slog.Info("event-publisher: control queue timeout closing conn",
+			"remote", conn.RemoteAddr(),
+			"generation", gen,
+		)
 		_ = conn.Close()
 		return fmt.Errorf("outbound control queue timeout")
 	}
@@ -409,6 +418,10 @@ func (p *EventPublisher) EnqueueControl(conn Connection, frame interface{}, wait
 		select {
 		case <-delivered:
 		case <-time.After(bridgeWriteTimeout):
+			slog.Info("event-publisher: control delivery timeout closing conn",
+				"remote", conn.RemoteAddr(),
+				"generation", p.connectionGenerations[conn],
+			)
 			_ = conn.Close()
 			return fmt.Errorf("outbound control delivery timeout")
 		}
@@ -418,6 +431,7 @@ func (p *EventPublisher) EnqueueControl(conn Connection, frame interface{}, wait
 
 func (p *EventPublisher) UnregisterConnection(conn Connection) {
 	p.mu.Lock()
+	unregisterGeneration := p.connectionGenerations[conn]
 	sink := p.sinks[conn]
 	delete(p.sinks, conn)
 	delete(p.recoveries, conn)
@@ -446,6 +460,10 @@ func (p *EventPublisher) UnregisterConnection(conn Connection) {
 	if sink != nil {
 		sink.close()
 	}
+	slog.Info("event-publisher: connection unregistered",
+		"remote", conn.RemoteAddr(),
+		"generation", unregisterGeneration,
+	)
 }
 
 // BeginRecovery and Publish share p.mu, making the returned fence the exact
@@ -478,24 +496,31 @@ func (p *EventPublisher) CompleteRecovery(conn Connection, recoveryID string, ap
 		return nil
 	}
 	if recovery == nil || recovery.recoveryID != recoveryID {
+		// Unknown or already-abandoned transaction: a late ack is a no-op.
+		// Closing here turned a slow client ack into a reconnect storm
+		// (2026-08-24: every hello re-entered full_resync and degraded in a
+		// 38-connection loop), so the connection must survive.
 		p.mu.Unlock()
-		_ = conn.Close()
-		return fmt.Errorf("recovery transaction mismatch")
-	}
-	if p.now().Sub(recovery.startedAt) >= recoveryPendingTimeout {
-		delete(p.recoveries, conn)
-		p.mu.Unlock()
-		_ = conn.Close()
-		return fmt.Errorf("recovery transaction timed out")
+		return nil
 	}
 	if recovery.cutBySession != nil {
 		if len(applied) != 1 || !cutMapsEqual(recovery.cutBySession, applied[0]) {
+			// Cut mismatch is a real protocol error, but the penalty must not
+			// be a failed transport. Abandon the transaction and let the
+			// client converge via live events + projection pull.
 			delete(p.recoveries, conn)
+			p.completed[conn] = recoveryID
 			p.mu.Unlock()
-			_ = conn.Close()
-			return fmt.Errorf("recovery cut acknowledgement mismatch")
+			_ = p.EnqueueControl(conn, map[string]interface{}{
+				"type":       "recovery_aborted",
+				"recoveryId": recoveryID,
+			}, false)
+			return nil
 		}
 	}
+	// A late acknowledgement is accepted: the transaction only orders relay
+	// frames, so completing late converges to live delivery just as on-time
+	// completion does. The old timeout-Close has been removed.
 	sink := p.sinkLocked(conn)
 	pending := make([]EventMessage, 0, len(recovery.pending))
 	for _, msg := range recovery.pending {
@@ -704,7 +729,7 @@ func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID strin
 		}
 		// Best-effort enqueue; overflow is recoverable via pull. No live-buffer interest note
 		// (projection frames are reconstructable, not live-bufferable).
-		if sink.tryEnqueue(eventOutboundFrame{value: msg, classHint: classHint, classified: true}) {
+		if ok, reason, queued := sink.tryEnqueue(eventOutboundFrame{value: msg, classHint: classHint, classified: true}); ok {
 			p.projectionSnapshotCuts[key] = patch.SyncRev
 			slog.Info("go-bridge: [K4Patch] delivered",
 				"sessionPrefix", projectionSessionLogPrefix(sessionID),
@@ -722,6 +747,7 @@ func (p *EventPublisher) deliverProjectionPatchLocked(backendID, sessionID strin
 			slog.Info("go-bridge: [K4Patch] drop",
 				"sessionPrefix", projectionSessionLogPrefix(sessionID),
 				"reason", "sink_overflow", "syncRev", patch.SyncRev,
+				"sink", reason, "queued", queued,
 			)
 		}
 	}
@@ -854,6 +880,8 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 	}
 
 	overflowed := make([]Connection, 0)
+	overflowDetail := make(map[Connection]string, 0)
+	recoveryDegraded := make(map[Connection]string, 0)
 	waits := make([]eventDeliveryWait, 0, len(waitTargets))
 	rawEligible := make(map[Connection]struct{}, len(targets))
 	enqueued := 0
@@ -873,14 +901,40 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 		if recovery := p.recoveries[conn]; recovery != nil {
 			encoded, _ := json.Marshal(msg)
 			if p.now().Sub(recovery.startedAt) >= recoveryPendingTimeout || len(recovery.pending)+1 > recoveryPendingMaxEvents || recovery.pendingBytes+len(encoded) > recoveryPendingMaxBytes {
+				// Degrade instead of fail-closed: drop the transaction, replay
+				// its pending buffer in order, deliver this event live, and
+				// notify the client (recovery_aborted) so it stops waiting for
+				// an acknowledgement no one will send. Closing the conn here fed
+				// a reconnect-storm loop in which every hello re-entered
+				// full_resync (2026-08-24 evidence: 38 conns in ~60s).
 				delete(p.recoveries, conn)
-				overflowed = append(overflowed, conn)
+				recoveryDegraded[conn] = recovery.recoveryID
+				sink := p.sinkLocked(conn)
+				replayFailed := false
+				for _, pend := range recovery.pending {
+					if ok, reason, queued := sink.tryEnqueue(eventOutboundFrame{
+						value:      pend,
+						classHint:  classifyRelayEvent(pend.Event),
+						classified: true,
+					}); !ok {
+						overflowed = append(overflowed, conn)
+						overflowDetail[conn] = fmt.Sprintf("recovery_replay tryEnqueue=%s queued=%d", reason, queued)
+						replayFailed = true
+						break
+					} else {
+						enqueued++
+					}
+				}
+				if replayFailed {
+					continue
+				}
+				// Fall through: current event is delivered live below.
+			} else {
+				recovery.pending = append(recovery.pending, msg)
+				recovery.pendingBytes += len(encoded)
+				enqueued++
 				continue
 			}
-			recovery.pending = append(recovery.pending, msg)
-			recovery.pendingBytes += len(encoded)
-			enqueued++
-			continue
 		}
 		sink := p.sinkLocked(conn)
 		var delivered chan struct{}
@@ -888,8 +942,9 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 			delivered = make(chan struct{})
 			waits = append(waits, eventDeliveryWait{conn: conn, delivered: delivered})
 		}
-		if !sink.tryEnqueue(eventOutboundFrame{value: msg, delivered: delivered, classHint: logical.ClassHint, classified: true}) {
+		if ok, reason, queued := sink.tryEnqueue(eventOutboundFrame{value: msg, delivered: delivered, classHint: logical.ClassHint, classified: true}); !ok {
 			overflowed = append(overflowed, conn)
+			overflowDetail[conn] = fmt.Sprintf("tryEnqueue=%s queued=%d", reason, queued)
 		} else {
 			enqueued++
 			if p.liveBuffer != nil {
@@ -932,13 +987,20 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 					continue
 				}
 				sink := p.sinkLocked(conn)
-				if sink.tryEnqueue(eventOutboundFrame{value: msg, classHint: logical.ClassHint, classified: true}) {
+				if ok, reason, queued := sink.tryEnqueue(eventOutboundFrame{value: msg, classHint: logical.ClassHint, classified: true}); ok {
 					enqueued++
 					if p.liveBuffer != nil {
 						if d := conn.AuthedDevice(); d != nil {
 							p.liveBuffer.NoteInterest(d.DeviceID, logical.BackendID, logical.SessionID)
 						}
 					}
+				} else {
+					slog.Warn("event-publisher: rebind retry enqueue failed",
+						"backendID", logical.BackendID,
+						"sessionID", logical.SessionID,
+						"remote", conn.RemoteAddr(),
+						"tryEnqueue", reason, "queued", queued,
+					)
 				}
 			}
 		}
@@ -1032,11 +1094,28 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 			"candidateTargets", len(targets),
 			"enqueued", enqueued,
 			"observationFiltered", observationFiltered,
-			"overflowed", len(overflowed))
+			"overflowed", len(overflowed),
+			"overflowDetail", overflowDetailText(overflowDetail, p))
+	}
+	for conn, recoveryID := range recoveryDegraded {
+		slog.Info("event-publisher: recovery transaction degraded; notifying client",
+			"remote", conn.RemoteAddr(),
+			"generation", p.connectionGenerations[conn],
+			"recoveryID", recoveryID,
+		)
+		_ = p.EnqueueControl(conn, map[string]interface{}{
+			"type":       "recovery_aborted",
+			"recoveryId": recoveryID,
+		}, false)
 	}
 
 	for _, conn := range overflowed {
 		if conn != nil {
+			slog.Info("event-publisher: fail-closed closing conn",
+				"remote", conn.RemoteAddr(),
+				"generation", p.connectionGenerations[conn],
+				"detail", overflowDetail[conn],
+			)
 			_ = conn.Close()
 		}
 	}
@@ -1044,10 +1123,27 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 		select {
 		case <-wait.delivered:
 		case <-time.After(bridgeWriteTimeout):
+			slog.Info("event-publisher: delivery-wait timeout closing conn",
+				"remote", wait.conn.RemoteAddr(),
+				"generation", p.connectionGenerations[wait.conn],
+			)
 			_ = wait.conn.Close()
 		}
 	}
 	return msg, nil
+}
+
+// overflowDetailText 把带 Connection 键的失败明细压成一行日志文本（按 remote 归类）。
+func overflowDetailText(detail map[Connection]string, p *EventPublisher) []string {
+	if len(detail) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(detail))
+	for conn, d := range detail {
+		out = append(out, fmt.Sprintf("%s(gen=%d) %s", conn.RemoteAddr(), p.connectionGenerations[conn], d))
+	}
+	sort.Strings(out)
+	return out
 }
 
 func cloneCutMap(input BridgeSessionCutMap) BridgeSessionCutMap {
@@ -1214,13 +1310,14 @@ func (p *EventPublisher) FlushLiveFrameBufferForDevice(conn Connection) {
 		}
 		p.mu.Lock()
 		sink := p.sinkLocked(conn)
-		ok := sink.tryEnqueue(eventOutboundFrame{value: msg, classHint: classifyRelayEvent(msg.Event), classified: true})
+		ok, enqueueReason, queued := sink.tryEnqueue(eventOutboundFrame{value: msg, classHint: classifyRelayEvent(msg.Event), classified: true})
 		p.mu.Unlock()
 		if !ok {
 			slog.Warn("live-frame-buffer flush enqueue failed",
 				"deviceID", safeID(device.DeviceID),
 				"event", msg.Event,
 				"seq", msg.Seq,
+				"tryEnqueue", enqueueReason, "queued", queued,
 			)
 			// Stop on backpressure; remaining frames stay until next flush/GC.
 			break

@@ -169,6 +169,7 @@ func (c *Conn) CloseWithControl(code int, reason string) error {
 	c.mu.Lock()
 	if c.closed {
 		c.mu.Unlock()
+		slog.Info("go-bridge: conn close repeated", "remote", c.remote, "code", code, "reason", reason)
 		return nil
 	}
 	c.closed = true
@@ -176,6 +177,7 @@ func (c *Conn) CloseWithControl(code int, reason string) error {
 	cleanup := c.onCleanup
 	c.onCleanup = nil
 	c.mu.Unlock()
+	slog.Info("go-bridge: conn close", "remote", c.remote, "code", code, "reason", reason)
 
 	var closeErr error
 	if conn != nil {

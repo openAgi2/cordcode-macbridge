@@ -204,6 +204,10 @@ func (p *EventPublisher) CompleteProjectionSnapshot(
 		}
 		return nil
 	case <-time.After(bridgeWriteTimeout):
+		slog.Info("event-publisher: projection snapshot delivery timeout closing conn",
+			"remote", conn.RemoteAddr(),
+			"generation", p.connectionGenerations[conn],
+		)
 		_ = conn.Close()
 		return fmt.Errorf("projection snapshot response delivery timeout")
 	}
@@ -214,11 +218,17 @@ func (p *EventPublisher) enqueueProjectionInvalidateLocked(conn Connection, back
 	if sink == nil {
 		return
 	}
-	if !sink.tryEnqueue(eventOutboundFrame{
+	if ok, reason, queued := sink.tryEnqueue(eventOutboundFrame{
 		value:      projectionInvalidateEvent(p.bridgeEpoch, backendID, sessionID),
 		classHint:  relayOutboundControl,
 		classified: true,
-	}) {
+	}); !ok {
+		slog.Warn("event-publisher: projection invalidate enqueue failed",
+			"backendID", backendID,
+			"sessionID", sessionID,
+			"remote", conn.RemoteAddr(),
+			"tryEnqueue", reason, "queued", queued,
+		)
 		return
 	}
 }

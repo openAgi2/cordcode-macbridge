@@ -456,20 +456,25 @@ func TestEventPublisherRejectsMissingExtraAndWrongCutEntries(t *testing.T) {
 	for index, applied := range cases {
 		conn := newPublisherCaptureConn(nil)
 		p := NewEventPublisher(fmt.Sprintf("epoch-cut-%d", index))
+		p.RegisterConnection(conn)
 		if _, err := p.BeginRecovery(conn, "recovery", want); err != nil {
 			t.Fatal(err)
 		}
-		if err := p.CompleteRecovery(conn, "recovery", applied); err == nil {
-			t.Fatalf("case %d accepted mismatched cut", index)
+		// Cut mismatch is now degraded (abort + notify), not fail-closed: the
+		// connection survives the bad ack.
+		if err := p.CompleteRecovery(conn, "recovery", applied); err != nil {
+			t.Fatalf("case %d: cut mismatch must be a degraded no-op, got %v", index, err)
 		}
 		conn.mu.Lock()
 		closed := conn.closed
 		conn.mu.Unlock()
-		if !closed {
-			t.Fatalf("case %d did not close connection", index)
+		if closed {
+			t.Fatalf("case %d closed connection on cut mismatch", index)
 		}
-		if len(conn.snapshot()) != 0 {
-			t.Fatalf("case %d exposed completion", index)
+		conn.waitCount(t, 1)
+		aborted, ok := conn.snapshot()[0].(map[string]interface{})
+		if !ok || aborted["type"] != "recovery_aborted" || aborted["recoveryId"] != "recovery" {
+			t.Fatalf("case %d frame = %#v", index, conn.snapshot()[0])
 		}
 	}
 }
@@ -477,61 +482,93 @@ func TestEventPublisherRejectsMissingExtraAndWrongCutEntries(t *testing.T) {
 func TestEventPublisherPendingEventLimitFailsWithoutCompletion(t *testing.T) {
 	conn := newPublisherCaptureConn(nil)
 	p := NewEventPublisher("epoch-overflow")
+	p.RegisterConnection(conn)
 	if _, err := p.BeginRecovery(conn, "overflow"); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i <= recoveryPendingMaxEvents; i++ {
 		p.PublishLogical(LogicalEvent{Event: "turn_started", Targets: []Connection{conn}})
 	}
+	// Cap exceeded: degrade instead of fail-closed. Pending buffer is replayed
+	// in order, the current event goes live, then recovery_aborted is sent.
+	conn.waitCount(t, recoveryPendingMaxEvents+2)
 	conn.mu.Lock()
 	closed := conn.closed
 	conn.mu.Unlock()
-	if !closed {
-		t.Fatal("overflow did not close connection")
+	if closed {
+		t.Fatal("overflow must not close connection")
 	}
-	if len(conn.snapshot()) != 0 {
-		t.Fatalf("overflow exposed frames: %#v", conn.snapshot())
+	frames := conn.snapshot()
+	last, ok := frames[len(frames)-1].(map[string]interface{})
+	if !ok || last["type"] != "recovery_aborted" || last["recoveryId"] != "overflow" {
+		t.Fatalf("last frame = %#v", frames[len(frames)-1])
 	}
-	if err := p.CompleteRecovery(conn, "overflow"); err == nil {
-		t.Fatal("overflowed transaction still completed")
+	eventCount := 0
+	for _, frame := range frames {
+		if _, ok := frame.(EventMessage); ok {
+			eventCount++
+		}
+	}
+	if want := recoveryPendingMaxEvents + 1; eventCount != want {
+		t.Fatalf("replayed+live events=%d want %d", eventCount, want)
+	}
+	if err := p.CompleteRecovery(conn, "overflow"); err != nil {
+		t.Fatalf("overflowed transaction already abandoned, completion must be no-op, got %v", err)
 	}
 }
 
 func TestEventPublisherPendingByteLimitFailsWithoutDroppingOldest(t *testing.T) {
 	conn := newPublisherCaptureConn(nil)
 	p := NewEventPublisher("epoch-byte-overflow")
+	p.RegisterConnection(conn)
 	if _, err := p.BeginRecovery(conn, "overflow"); err != nil {
 		t.Fatal(err)
 	}
 	p.PublishLogical(LogicalEvent{Event: "turn_started", Data: strings.Repeat("x", recoveryPendingMaxBytes), Targets: []Connection{conn}})
+	// Byte cap exceeded on the first pending event: degrade, deliver the event
+	// live, notify aborted, keep the connection.
+	conn.waitCount(t, 2)
 	conn.mu.Lock()
 	closed := conn.closed
 	conn.mu.Unlock()
-	if !closed {
-		t.Fatal("byte overflow did not close connection")
+	if closed {
+		t.Fatal("byte overflow must not close connection")
 	}
-	if len(conn.snapshot()) != 0 {
-		t.Fatal("byte overflow partially flushed")
+	frames := conn.snapshot()
+	if _, ok := frames[0].(EventMessage); !ok {
+		t.Fatalf("first frame = %#v", frames[0])
+	}
+	last, ok := frames[len(frames)-1].(map[string]interface{})
+	if !ok || last["type"] != "recovery_aborted" {
+		t.Fatalf("last frame = %#v", frames[len(frames)-1])
 	}
 }
 
 func TestEventPublisherRecoveryTimeoutUsesInjectedClock(t *testing.T) {
 	conn := newPublisherCaptureConn(nil)
 	p := NewEventPublisher("epoch-timeout")
+	p.RegisterConnection(conn)
 	now := time.Unix(100, 0)
 	p.now = func() time.Time { return now }
 	if _, err := p.BeginRecovery(conn, "timeout"); err != nil {
 		t.Fatal(err)
 	}
 	now = now.Add(recoveryPendingTimeout)
-	if err := p.CompleteRecovery(conn, "timeout"); err == nil {
-		t.Fatal("timed out recovery completed")
+	// A late acknowledgement is now accepted: the transaction converges to live
+	// delivery instead of tearing down the transport (reconnect-storm fix).
+	if err := p.CompleteRecovery(conn, "timeout"); err != nil {
+		t.Fatalf("late completion must be accepted, got %v", err)
 	}
+	conn.waitCount(t, 1)
 	conn.mu.Lock()
 	closed := conn.closed
 	conn.mu.Unlock()
-	if !closed || len(conn.snapshot()) != 0 {
+	if closed || len(conn.snapshot()) != 1 {
 		t.Fatalf("timeout closed=%v frames=%#v", closed, conn.snapshot())
+	}
+	complete, ok := conn.snapshot()[0].(map[string]interface{})
+	if !ok || complete["type"] != "recovery_complete" {
+		t.Fatalf("completion frame = %#v", conn.snapshot()[0])
 	}
 }
 
@@ -600,5 +637,83 @@ func TestBusinessEventConstructionHasNoProductionBypass(t *testing.T) {
 				t.Errorf("production event egress bypass in %s: %q", name, token)
 			}
 		}
+	}
+}
+
+func TestPublishDegradesTimedOutRecoveryInsteadOfClosing(t *testing.T) {
+	conn := newPublisherCaptureConn(nil)
+	publisher := NewEventPublisher("epoch-degrade")
+	publisher.RegisterConnection(conn)
+	if _, err := publisher.BeginRecovery(conn, "degrade-1"); err != nil {
+		t.Fatal(err)
+	}
+	// Freeze the clock so the transaction is already past recoveryPendingTimeout.
+	base := time.Now()
+	publisher.now = func() time.Time { return base.Add(recoveryPendingTimeout + time.Second) }
+	publisher.PublishLogical(LogicalEvent{BackendID: "codex", SessionID: "a", Event: "turn_started", Targets: []Connection{conn}})
+	conn.waitCount(t, 2)
+	frames := conn.snapshot()
+	if conn.isClosed() {
+		t.Fatal("timed-out recovery must not fail-closed the connection")
+	}
+	aborted, ok := frames[1].(map[string]interface{})
+	if !ok || aborted["type"] != "recovery_aborted" || aborted["recoveryId"] != "degrade-1" {
+		t.Fatalf("recovery_aborted frame = %#v", frames[1])
+	}
+	if msg, ok := frames[0].(EventMessage); !ok || msg.Event != "turn_started" {
+		t.Fatalf("live event frame = %#v", frames[0])
+	}
+}
+
+func TestCompleteRecoveryLateAcknowledgementDoesNotClose(t *testing.T) {
+	conn := newPublisherCaptureConn(nil)
+	publisher := NewEventPublisher("epoch-late-ack")
+	publisher.RegisterConnection(conn)
+	if _, err := publisher.BeginRecovery(conn, "late-1"); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Now()
+	publisher.now = func() time.Time { return base.Add(recoveryPendingTimeout + time.Second) }
+	if err := publisher.CompleteRecovery(conn, "late-1"); err != nil {
+		t.Fatalf("late completion must be accepted, got %v", err)
+	}
+	conn.waitCount(t, 1)
+	if conn.isClosed() {
+		t.Fatal("late acknowledgement must not close the connection")
+	}
+	complete, ok := conn.snapshot()[0].(map[string]interface{})
+	if !ok || complete["type"] != "recovery_complete" || complete["recoveryId"] != "late-1" {
+		t.Fatalf("completion frame = %#v", conn.snapshot()[0])
+	}
+}
+
+func TestCompleteRecoveryUnknownOrMismatchedDoesNotClose(t *testing.T) {
+	conn := newPublisherCaptureConn(nil)
+	publisher := NewEventPublisher("epoch-mismatch")
+	publisher.RegisterConnection(conn)
+	// Unknown transaction id: late/no-op ack must keep the connection alive.
+	if err := publisher.CompleteRecovery(conn, "ghost"); err != nil {
+		t.Fatalf("unknown recovery ack must be a no-op, got %v", err)
+	}
+	if conn.isClosed() {
+		t.Fatal("unknown recovery ack must not close the connection")
+	}
+	// Begin with a cut map, complete with a non-matching cut: degrade + notify,
+	// connection survives.
+	cuts := BridgeSessionCutMap{"codex": {"a": {EventID: "epoch:1", Seq: 1}}}
+	if _, err := publisher.BeginRecovery(conn, "mismatch-1", cuts); err != nil {
+		t.Fatal(err)
+	}
+	wrong := BridgeSessionCutMap{"codex": {"a": {EventID: "epoch:2", Seq: 2}}}
+	if err := publisher.CompleteRecovery(conn, "mismatch-1", wrong); err != nil {
+		t.Fatalf("cut mismatch must be a degraded no-op, got %v", err)
+	}
+	conn.waitCount(t, 1)
+	if conn.isClosed() {
+		t.Fatal("cut mismatch must not close the connection")
+	}
+	aborted, ok := conn.snapshot()[0].(map[string]interface{})
+	if !ok || aborted["type"] != "recovery_aborted" || aborted["recoveryId"] != "mismatch-1" {
+		t.Fatalf("recovery_aborted frame = %#v", conn.snapshot()[0])
 	}
 }
