@@ -901,3 +901,39 @@ type LiveSessionLister interface {
 	LiveSessionProcess(ctx context.Context, sessionID string) (LiveSessionProcess, error)
 	IsProcessAlive(ctx context.Context, pid int) bool
 }
+
+// CodexWebTransportIdentityProvider is an optional, read-only identity seam:
+// it exposes the codex-web backend's main (pump) and observer transport roles
+// for the topology monitor. The monitor consumes snapshots only — it never
+// constructs, attaches, or resumes connections.
+type CodexWebTransportIdentityProvider interface {
+	TransportIdentitySnapshot(ctx context.Context) (CodexWebTransportIdentity, error)
+}
+
+// CodexWebTransportIdentity is one role-identity snapshot (implementation plan v2 §2.1).
+type CodexWebTransportIdentity struct {
+	// Epoch is the backend's newest connection generation (max of role epochs);
+	// numeric, same shape as the Management runtime identity epoch.
+	Epoch int64
+	// Endpoint is the transport endpoint: shared-daemon UDS path or explicit WS URL.
+	Endpoint string
+	// Main is the central pump/connection role.
+	Main CodexWebTransportRoleState
+	// Observer is the passive observation-connection role.
+	Observer CodexWebTransportRoleState
+	// SampledAtMs is the snapshot completion time (monotonic ms).
+	SampledAtMs int64
+}
+
+// CodexWebTransportRoleState is one role's attached state in a snapshot.
+type CodexWebTransportRoleState struct {
+	// Attached is true only when the provider confirms the role connection is live.
+	Attached bool
+	// Epoch is the role's connection generation; 0 = never established.
+	Epoch int64
+	// PeerKey is an identity key usable to correlate with actual transport/FD
+	// evidence (endpoint#epoch); empty = not available.
+	PeerKey string
+	// ErrorCode: none | timeout | rpc_failed | unknown.
+	ErrorCode string
+}

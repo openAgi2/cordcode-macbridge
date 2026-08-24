@@ -101,6 +101,13 @@ func NewClient(t Transport, epoch ConnectionEpoch) *Client {
 // Epoch 返回本连接代际。
 func (c *Client) Epoch() ConnectionEpoch { return c.epoch }
 
+// IsClosed 只读报告连接是否已关闭（供 topology monitor 的角色身份快照使用）。
+func (c *Client) IsClosed() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.closed
+}
+
 // Notifications 返回有序通知通道（reader 按到达顺序投递）。
 func (c *Client) Notifications() <-chan Notification { return c.notifications }
 
