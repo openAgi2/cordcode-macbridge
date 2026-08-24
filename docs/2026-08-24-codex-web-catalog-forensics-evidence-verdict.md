@@ -1,6 +1,6 @@
 # codex-web 目录取证 v5 §7.3 证据判决书（二版：证据补洞修订）
 
-> **收尾状态：DONE。** run2 + run3 的 PASS 判定保持不变；临时运行时 observer/env seam/capture 插点已在 2026-08-24 晚间按产品计划删除，离线 extractor、已脱敏 verdict 与 git-ignored 证据包保留。Experiment A 仍为 `blocked_manual_owner_close`，已转 v2 计划队尾，不影响本取证判决收口。
+> **收尾状态：DONE。** run2 + run3 的 PASS 判定保持不变；临时运行时 observer/env seam/capture 插点已删除，离线 extractor、已脱敏 verdict 与 git-ignored 证据包保留。Experiment A 的 mixed 与失败可见路径已在 v2 产品计划收口；仅需关闭 owner Desktop 的 S2/S5 保留 `blocked_manual_owner_close`，不影响本取证判决。
 
 日期：2026-08-24（二版）
 关联蓝图：docs/2026-08-24-codex-web-topology-split-and-sync-monitor-analysis.md §7.3（交付门）
@@ -15,7 +15,7 @@
 - **交付门判定：PASS（依据 run2 + run3，均为 §6.2 意义下的有效 run）**。
 - run2（087e…，397 事件 / 254,098 B，无 run_summary/limit/drop/error）产出四类合法变化因果链；
 - run3（b83259…，1051 事件 / 656,762 B，无 limit/drop/error）单独完成 §6.2 数量门：**118 head + 6 periodic_tick authoritative**，active turn 跨越 4 个 authoritative interval，并在单轮内复现 add→updatedAt→rename→archive→delete 全链路；
-- **实验 A：blocked_manual_owner_close**（诚实声明）——private/mixed 的 Desktop transport 拓扑样本需要隔离 Desktop + 进程级 force-stdio 的人工实验（v5 §2.1/§4.1 判据），本轮未做，未伪造任何 topology 判定，禁止以目录过滤代替；操作指引见 §6；
+- **实验 A 后续结果**：v2 owner 门已取得 shared-only 与 shared+isolated-private 的 `mixed/degraded` 活体证据，并验证 unavailable→unknown；只有必须完全关闭 owner shared Desktop 的 S2/S5 仍为 `blocked_manual_owner_close`，未以目录过滤或忽略 owner PID 冒充；
 - **storm 修正判词**：本轮全部有效观测（run2 + run3）中，目录成员从未发生无因果的变化；存在的 churn 是**单行 updatedAt 变化**——run3 有效观测 1 次（新线程自身 +7 秒，gen 1→2），与"外部会话被触碰"的旧 3 秒级风暴**未复现**；旧风暴频率（run1，无效）不作引用。
 
 ## 1. 运行与工件

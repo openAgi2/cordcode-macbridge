@@ -8,20 +8,22 @@ v2 裁决（先冻结，避免实现 agent 临场决定）：
 - **禁用语义采用 always-200 + `state=disabled`**（P2-4 选优，拒绝 501：避免管理客户端把非 2xx 一律泛化）。
 - v2 初稿冻结时只定义设计与任务，当时尚未施工；后续实际执行状态以下方 §0 收尾表为准。
 
-## 0. 执行收尾状态（2026-08-24 晚间）
+## 0. 执行收尾状态（2026-08-25 owner 门完成）
 
 | 队列项 | 状态 | 当前证据/处置 |
 |---|---|---|
 | Phase 0 S0/A1/A2 | **DONE** | provider、纯聚合、strict DTO/fixtures 已提交；provider 定向 8/8 重验通过 |
-| Phase 0/1 Go 回归 | **DONE** | `go test ./go-bridge/... -count=1` 全绿（65.280s），`go vet` / `go build` / `git diff --check` 通过 |
+| Phase 0/1 Go 回归 | **DONE** | 最终 `go test ./go-bridge/... -count=1` 全绿（65.010s），`go vet` / `go build` / `git diff --check` 通过 |
 | Darwin collector + stub | **DONE** | 真实环境 smoke 重验：1 个 `shared_only` Desktop，聚合 `all_shared`，seat/launch agent/attach 正常 |
-| Management API + Mac decode/store/UI | **DONE** | 实现提交 `c7246bd`/`758e64f`/`bd80799`/`ddbbc5e`；定向 Swift 单测 36/36 通过（无 UI automation） |
+| Management API + Mac decode/store/UI | **DONE** | 实现与 review-fix 已提交；最终 Mac 单测 191 项通过、1 项 skip、0 failure；Release UI 已人工验证 |
 | 临时 catalog observer 清理 | **DONE** | 运行时 observer、env seam、capture/commit 插点与耦合测试已删除；extractor + verdict 保留且独立复跑通过 |
-| Mac topology UI 手工冒烟/失败注入 | **PENDING / 队尾** | 旧状态缺证却标 done，本次已降级；需 UI 操作授权，未擅自运行 |
-| owner 人工拓扑负态门 S2–S5 | **BLOCKED / 队尾** | 需隔离 Desktop UI 实例、进程级 force-stdio，其中 split_present 还需 owner 自愿关闭全部 shared Desktop；本轮未运行、未伪造 |
-| 默认 on | **BLOCKED / 不执行** | 负态分类尚无 owner 活体证据，保持默认 off 是 fail-closed 发布门；不为“形式完成”提前开启 |
+| Mac topology UI 手工冒烟/失败注入 | **DONE** | shared/healthy 隐藏面板；mixed/degraded 显示“仅部分实例”；`private_stdio=unavailable` 显示“诊断失败”而非 split；epoch 边界崩溃已修复且无新 crash |
+| owner 人工拓扑门 S1–S5 | **DONE（含诚实 blocked 记录）** | S1、S3 与失败门 PASS；S2/S5 为 `blocked_manual_owner_close`（当前任务运行在唯一 shared Desktop，按约束不得关闭 owner PID）；S4 仅允许自然观察，本轮未出现 dual、未注入伪造 |
+| 默认 on | **DONE** | owner 门、隔离清理与全套件绿后，由独立提交 `480a39b` 切换默认 on；仍可用 `CODEX_TOPOLOGY_MONITOR=0` 显式关闭 |
 
 本表是当前唯一执行状态。旧分析中的取证 instrumentation、catalog health、iOS capability 不会被暗中重启；它们若要继续，必须另立新证据与计划。
+
+Review-fix 记录：真实 UI 首次开启时发现 `UInt64 bridgeEpoch → Int64` trap（crash report 00:12），以有符号 wire bit-pattern 保留完整身份；Desktop 151 的 private stdio 已从 `PIPE` 变为 Unix socketpair，collector 已按父链 + 0/1/2 IPC 形态兼容；provider 也已改为以已建立的 endpoint client 判断 main attachment，避免空闲时把“泵未启动”误报为“连接未附着”。
 
 ## 1. 范围与边界（Phase 1 = topology monitor）
 

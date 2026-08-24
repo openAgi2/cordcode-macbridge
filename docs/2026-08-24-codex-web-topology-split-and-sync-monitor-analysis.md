@@ -13,7 +13,7 @@
 
 ## 0. v5 修订裁决
 
-> 2026-08-24 晚间收尾：catalog 取证已由 evidence verdict 二版判定 PASS；本文要求的临时 observer 也已在产品发布门中移除。未执行的 Experiment A 活体 private/mixed/split 样本已转入 v2 计划的 owner 人工门，排在所有可自动化任务之后；禁止从本分析重复开发 monitor/API/UI。
+> 2026-08-25 最终收尾：catalog 取证已由 evidence verdict 二版判定 PASS；临时 observer 已移除。Experiment A 的 shared-only、isolated-private+shared mixed 与 failure-visible 路径已由 v2 计划 owner 门验证；仅需关闭当前 owner Desktop 的 private-only/split_present 场景按约束记为 `blocked_manual_owner_close`。禁止从本分析重复开发 monitor/API/UI。
 
 v5 对 v4 复审的 6 个 P1、3 个 P2 全部落实：
 
