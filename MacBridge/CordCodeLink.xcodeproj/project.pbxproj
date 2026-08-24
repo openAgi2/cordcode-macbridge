@@ -58,6 +58,7 @@
 		E424D21FAF49BB0D3791AAF3 /* RemoteAccessNavCollapseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA203BE633607FF96ED2F9C /* RemoteAccessNavCollapseTests.swift */; };
 		E75CD0B17C760CD64FA50E8F /* ManagementV1ProducerFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07A6B4332BC9879A154F32C8 /* ManagementV1ProducerFixtureTests.swift */; };
 		E92AEC04CA61D9B409B7F1E1 /* ManagementV1Codec.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3FA4E481B8955CF8BAEA716 /* ManagementV1Codec.swift */; };
+		F291CEA02C5190A602C0C82C /* TopologyMonitorDecodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1777CBA637CD29BC8A23D7F8 /* TopologyMonitorDecodeTests.swift */; };
 		F2C2A5C336B3D22C91BE32D7 /* ManagementV1CodecTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49E751A7558843194506DCEC /* ManagementV1CodecTests.swift */; };
 		F58F901D587D8FF0447D960F /* RemoteAccessView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2988639F5FD9CE1DC59A5338 /* RemoteAccessView.swift */; };
 		F5C384531F1D839395BC5B28 /* DeviceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD67C512C0B1389963658BDF /* DeviceStore.swift */; };
@@ -90,6 +91,7 @@
 		2F173AAE61BE3560D237E35B /* LayoutConstantsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LayoutConstantsTests.swift; sourceTree = "<group>"; };
 		383EF14F5096F2F068A24503 /* PairingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingViewModel.swift; sourceTree = "<group>"; };
 		3C7D5EABF711F9D1698D2B8E /* MenuBarMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarMenu.swift; sourceTree = "<group>"; };
+		1777CBA637CD29BC8A23D7F8 /* TopologyMonitorDecodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopologyMonitorDecodeTests.swift; sourceTree = "<group>"; };
 		3D63472C43A4F245F5009A40 /* ManagementAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManagementAPIClient.swift; sourceTree = "<group>"; };
 		3DBE09B439CABFD23581BB11 /* RuntimeProcessControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeProcessControllerTests.swift; sourceTree = "<group>"; };
 		3F2FC3E11BEA5EE407C00BC1 /* NotificationCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationCoordinatorTests.swift; sourceTree = "<group>"; };
@@ -207,6 +209,7 @@
 				3DBE09B439CABFD23581BB11 /* RuntimeProcessControllerTests.swift */,
 				21F3F59070DF74BE2D52C5E0 /* SettingsNativeInformationArchitectureTests.swift */,
 				B2E4475F08A85992D9DB31BA /* SidebarIAInformationArchitectureTests.swift */,
+				1777CBA637CD29BC8A23D7F8 /* TopologyMonitorDecodeTests.swift */,
 				E116F8D2EB44EF494A149825 /* WorkspaceViewTests.swift */,
 			);
 			path = MacBridgeTests;
@@ -397,6 +400,7 @@
 				54874B8A27F019CA85BC36D0 /* RuntimeProcessControllerTests.swift in Sources */,
 				12130C2708D1C62CBA31EF54 /* SettingsNativeInformationArchitectureTests.swift in Sources */,
 				2F13DA49FFD6659B0A28799B /* SidebarIAInformationArchitectureTests.swift in Sources */,
+				F291CEA02C5190A602C0C82C /* TopologyMonitorDecodeTests.swift in Sources */,
 				7BE491FC9C32F55DFDD8366F /* WorkspaceViewTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -318,8 +318,133 @@ class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIP
         return try JSONDecoder().decode(AgentInfo.self, from: data)
     }
 
+    // MARK: - Topology Monitor
+
+    func getTopologySnapshot() async throws -> TopologyMonitorStatus {
+        let data = try await performRequest("/internal/topology/snapshot")
+        return try TopologyMonitorStatusCodec.decode(data)
+    }
+
     enum ManagementError: Error {
         case httpError(Int)
         case invalidURL
+    }
+}
+
+// MARK: - Topology Monitor（README: implementation plan v2 §2.4/§6）
+
+/// Topology snapshot 的 API 抽象，供轮询 owner 测试注入。
+protocol TopologyAPIProviding {
+    func getTopologySnapshot() async throws -> TopologyMonitorStatus
+}
+
+/// 快照顶层 state（§2.4）。未知值 fail-closed → .unknown（诊断失败），不得当 healthy/disabled。
+enum TopologySnapshotState: String, Codable, Sendable {
+    case enabled
+    case disabled
+    case unknown
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = TopologySnapshotState(rawValue: raw) ?? .unknown
+    }
+}
+
+/// 决策性枚举：解码未知值一律 fail-closed 为 .unknown（绝不默认 healthy）。
+enum TopologySyncHealth: String, Codable, Sendable {
+    case healthy
+    case notApplicable = "not_applicable"
+    case degraded
+    case unknown
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = TopologySyncHealth(rawValue: raw) ?? .unknown
+    }
+}
+
+enum TopologyBridgeAttachment: String, Codable, Sendable {
+    case shared
+    case partial
+    case absent
+    case unresolved
+    case unknown
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = TopologyBridgeAttachment(rawValue: raw) ?? .unknown
+    }
+}
+
+enum TopologyDesktopAggregate: String, Codable, Sendable {
+    case desktopAbsent = "desktop_absent"
+    case allShared = "all_shared"
+    case mixed
+    case splitPresent = "split_present"
+    case unknown
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = TopologyDesktopAggregate(rawValue: raw) ?? .unknown
+    }
+}
+
+/// 单个维度观测（enum 为原始字符串证据，展示用；stale 由 service 裁决，客户端不比较本地时钟）。
+struct TopologyMonitorDimension: Codable, Sendable {
+    let enumValue: String
+    let ageMs: Int64?
+    let stale: Bool?
+    let source: String?
+    let errorCode: String?
+
+    enum CodingKeys: String, CodingKey {
+        case enumValue = "enum"
+        case ageMs
+        case stale
+        case source
+        case errorCode
+    }
+}
+
+/// 固定 8 键 dimensions（§2.4）。键缺失 = nil（诊断失败由 syncHealth=.unknown 表达，反例：
+/// enabled 快照缺键说明服务端形状异常，此时不默认 healthy）。
+struct TopologyMonitorDimensions: Codable, Sendable {
+    let topologyBridgeAttachment: TopologyMonitorDimension?
+    let topologyDesktopAggregate: TopologyMonitorDimension?
+    let seatHealthDaemon: TopologyMonitorDimension?
+    let seatHealthLaunchAgent: TopologyMonitorDimension?
+    let attachConfig: TopologyMonitorDimension?
+    let versionCompatibility: TopologyMonitorDimension?
+    let legacyManagedLoopback: TopologyMonitorDimension?
+    let legacyDesktopPrivate: TopologyMonitorDimension?
+}
+
+/// GET /internal/topology/snapshot 响应（always-200 + state）。disabled 时 syncHealth/dimensions 缺省。
+struct TopologyMonitorStatus: Codable, Sendable {
+    let schemaVersion: String?
+    let state: TopologySnapshotState
+    let bridgeEpoch: Int64?
+    let sampledAtMs: Int64?
+    let syncHealth: TopologySyncHealth?
+    let dimensions: TopologyMonitorDimensions?
+    let instances: [TopologyMonitorInstance]?
+
+    struct TopologyMonitorInstance: Codable, Sendable {
+        let pid: Int
+        let startTime: String
+        let classification: String
+        let evidence: [TopologyMonitorEvidence]?
+    }
+
+    struct TopologyMonitorEvidence: Codable, Sendable {
+        let kind: String
+        let state: String
+    }
+}
+
+/// 拓扑 snapshot codec：JSONDecoder 直接解码；未知字段忽略；决策性枚举 fail-closed。
+enum TopologyMonitorStatusCodec {
+    static func decode(_ data: Data) throws -> TopologyMonitorStatus {
+        try JSONDecoder().decode(TopologyMonitorStatus.self, from: data)
     }
 }
