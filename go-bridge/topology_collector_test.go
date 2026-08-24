@@ -216,6 +216,36 @@ func TestPrivateOnlyWhenDaemonAbsent(t *testing.T) {
 	}
 }
 
+func TestPrivateOnlyWithDesktop151UnixSocketpairStdio(t *testing.T) {
+	main := "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT --user-data-dir /tmp/isolated"
+	base := happyProbe(main)
+	c := fakeCollector(func(bin string, args []string) (string, string, error) {
+		joined := strings.Join(args, " ")
+		if strings.Contains(joined, "-d 0,1,2") {
+			return "COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n" +
+				"codex 9001 user 0u unix 0xabc 0t0 ->0xdef\n", "", nil
+		}
+		return base(bin, args)
+	})
+
+	out := c.Collect(context.Background(), coreZeroIdentity())
+	if len(out.Instances) != 1 || out.Instances[0].Classification != DesktopClassificationDual {
+		t.Fatalf("Desktop 151 socketpair stdio classification = %+v, want dual", out.Instances)
+	}
+}
+
+func TestHasStdioIPCShapeRejectsUnrelatedFDs(t *testing.T) {
+	if !hasStdioIPCShape("codex 9001 user 0u PIPE 0xabc 16384 ->0xdef\n") {
+		t.Fatal("PIPE fd 0 must be recognized")
+	}
+	if !hasStdioIPCShape("codex 9001 user 1u unix 0xabc 0t0 ->0xdef\n") {
+		t.Fatal("unix socketpair fd 1 must be recognized")
+	}
+	if hasStdioIPCShape("codex 9001 user 6u unix 0xabc 0t0 ->0xdef\n") {
+		t.Fatal("non-stdio unix fd must not be recognized")
+	}
+}
+
 func TestPermissionFailureUnresolved(t *testing.T) {
 	c := fakeCollector(func(bin string, args []string) (string, string, error) {
 		joined := strings.Join(args, " ")

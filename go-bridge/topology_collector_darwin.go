@@ -14,7 +14,8 @@ package gobridge
 //     daemon socket 不存在 = 合法负证据（absent）；lsof 失败/超时 = unavailable。
 //   - private 正证据：(a) user-data-dir 下 24h 内修改的 *.log 含字面 "transport=stdio"
 //     （只 grep 标记字面，不读正文会话内容）；(b) 存在 app-server 后代且
-//     lsof -n -P -a -p <后代> -d 0,1,2 至少有 1 个 TYPE=PIPE（stdio FD 形态）；
+//     lsof -n -P -a -p <后代> -d 0,1,2 至少有 1 个 TYPE=PIPE 或 unix socketpair
+//     （Desktop 151 已把 stdio IPC 从 PIPE 换成 socketpair）；
 //     (c) force-stdio（CODEX_APP_SERVER_FORCE_CLI=1）仅用于 owner 隔离实验取证，
 //     生产不下结论——隔离实例经 (b) 父链/pipe 判据仍可证，无需读 force env。
 //   - 任一证据采样失败（权限/竞态/LookPath 缺失/超时）→ unavailable → 实例 unresolved，
@@ -372,7 +373,8 @@ func (c *darwinCollector) privateEvidence(ctx context.Context, lsofBin string, m
 			unavailable = true
 		}
 	}
-	// (b) 父链 + stdio pipe FD 形态。
+	// (b) 父链 + stdio IPC FD 形态。Electron/Chromium 版本不同会用 PIPE 或
+	// unix socketpair 承载 0/1/2；归属仍由 app-server 的 Desktop 父链保证。
 	shapeFound := false
 	for _, pid := range appServers {
 		n, ok := byPID[pid]
@@ -390,7 +392,7 @@ func (c *darwinCollector) privateEvidence(ctx context.Context, lsofBin string, m
 			_ = code
 			continue
 		}
-		if strings.Contains(out, "PIPE") {
+		if hasStdioIPCShape(out) {
 			shapeFound = true
 		}
 	}
@@ -401,6 +403,23 @@ func (c *darwinCollector) privateEvidence(ctx context.Context, lsofBin string, m
 		return probeUnavailable, ErrorUnknown
 	}
 	return probeAbsent, ErrorNone
+}
+
+func hasStdioIPCShape(lsofOutput string) bool {
+	for _, line := range strings.Split(lsofOutput, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 5 || fields[0] == "COMMAND" {
+			continue
+		}
+		fd := strings.TrimRight(fields[3], "urw")
+		if fd != "0" && fd != "1" && fd != "2" {
+			continue
+		}
+		if fields[4] == "PIPE" || strings.EqualFold(fields[4], "unix") {
+			return true
+		}
+	}
+	return false
 }
 
 // scanTransportStdioLogs 在 dir 下递归找 24h 内修改的 *.log，grep 字面 "transport=stdio"。
