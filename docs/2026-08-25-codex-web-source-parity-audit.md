@@ -167,10 +167,10 @@
 
 exec-plan 的 proven 体系只证明"测试通过"，不证明"未造轮子"。补三个便宜机制：
 
-1. **任务定义/完成报告增加必填字段「上游锚点」**：codex-rs file:line，或豁免卡编号（本文档 §3.2 条目）。缺字段 = 任务不可标 done。
-2. **§3.4 机械化**：supervisor/review 对每个 bug 修复固定问句——"这个修复与官方调用链的第一处分歧在哪里？"修复报告必须含锚点；无锚点的修复默认退回。
+1. **任务定义/完成报告增加必填字段「上游锚点」**：codex-rs file:line，或豁免卡编号（本文档 §3.2 条目）。缺字段 = 任务不可标 done。**已实施（2026-08-25 批次 5）**：exec-plan `references/state-format.md` verification 增加 `upstream_anchor` 字段 + 证明规则 4（移植/对齐类缺锚点 = missing proof → downgrade）；`references/completion-report-template.md` 增加 §2.1 Upstream Anchors 必填节。
+2. **§3.4 机械化**：supervisor/review 对每个 bug 修复固定问句——"这个修复与官方调用链的第一处分歧在哪里？"修复报告必须含锚点；无锚点的修复默认退回。**已实施（2026-08-25 批次 5）**：supervise `references/drift-criteria.md` v4 新增判据 9「上游分歧锚点」（软判据，移植/对齐类任务；补锚点/豁免卡，无法给出 → 驳回）。
 3. **关键词门禁（人工执行，不上 CI）**：review 时对 `agent/codex-web` 新增的 兜底/乐观/fallback/heuristic/猜 关键词，要求附带锚点或豁免卡引用。
-4. 本文档作为**豁免卡登记簿**长期维护：新的架构性发明必须先登记（含不变量与失败模式）再实施。
+4. 本文档作为**豁免卡登记簿**长期维护：新的架构性发明必须先登记（含不变量与失败模式）再实施。**登记状态（2026-08-25）**：B1–B5 全部登记完毕（B1 双泵 fan-out / B2 三源合流 / B3 重连+结构化分类 / B4 RetryAttempt 计数 / B5 由 B5 核实改丢弃处理）；此后新增发明按本节流程先登记再实施。
 
 ## 6. iOS 仓抽查项（轻量）
 

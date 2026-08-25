@@ -97,4 +97,10 @@
 
 ## 批次 5：流程项（待填写）
 
+## 批次 5 完成（2026-08-25，改约定不改产品代码）
+
+1. **exec-plan 模板**：`references/state-format.md` verification 增加 `upstream_anchor` 必填字段（移植/对齐类 todo：file:line 锚点或豁免卡编号）+ 证明规则 4（缺锚点 = missing proof → downgrade pending）；`references/completion-report-template.md` 报告规则 7 + §2.1 Upstream Anchors 必填节（每修复一行：锚点 + 第一处分歧）。
+2. **supervise 固定问句**：`references/drift-criteria.md` v4 新增判据 9「上游分歧锚点」（软判据，移植/对齐类任务；问句="这个修复与官方（上游）调用链的第一处分歧在哪里？"；豁免卡四要素配套）；`report-audit-template.md` verified 条件同步为九条判据。
+3. **豁免卡登记簿**：审计文档 §5 各项补登记状态（B1–B5 全部登记完毕；新发明先登记再实施）。
+
 ## 批次 6：iOS 抽查（待填写）
