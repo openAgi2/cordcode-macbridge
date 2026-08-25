@@ -243,8 +243,12 @@ func (a *Agent) approvalEvent(it *Interaction, toolName string) core.Event {
 		if cmd, ok := raw["command"].(string); ok && cmd != "" {
 			ev.ToolInput = cmd
 		}
+		// 官方 reason（如「需要在 <path>（工作区外路径）…是否允许修改该文件？」）
+		// 单独走 Content → wire permission_request.reason → 投影 part.Title，
+		// iOS 权限卡与 TaskDock 以此显示审批文案；拼进 ToolInput 会让 iOS 把
+		// 命令+文案混成标题（2026-08-25 真机：只显示命令前两行，reason 消失）。
 		if reason, ok := raw["reason"].(string); ok && reason != "" {
-			ev.ToolInput = strings.TrimSpace(ev.ToolInput + " " + reason)
+			ev.Content = reason
 		}
 	}
 	return ev

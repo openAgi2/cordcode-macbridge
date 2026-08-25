@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -400,4 +401,38 @@ func asUserInputError(err error, target **core.UserInputError) bool {
 		*target = got
 	}
 	return ok
+}
+
+// TestApprovalEventReasonSeparateFromCommand：官方 reason 必须单独走 Content
+// （wire permission_request.reason → 投影 part.Title），不得拼进 ToolInput——
+// 拼进后 iOS 会把「命令+文案」混成权限卡标题（2026-08-25 真机只显示命令前两行）。
+func TestApprovalEventReasonSeparateFromCommand(t *testing.T) {
+	a, _, _ := interactionTestAgent(t, 11)
+	const reason = "需要在 /Users/jacklee/Projects/Chat/红楼梦故事.txt（工作区外路径）末尾追加一段故事，是否允许修改该文件？"
+	const command = `/bin/zsh -lc "python3 - <<'PYEOF'
+# -*- coding: utf-8 -*-
+path = \"/Users/jacklee/Projects/Chat/红楼梦故事.txt\"
+PYEOF"`
+	sr := ServerRequest{
+		Epoch: 11, RequestID: "5", ThreadID: "th-1", TurnID: "tu-1",
+		Method: "item/commandExecution/requestApproval",
+		Params: json.RawMessage(fmt.Sprintf(`{"threadId":"th-1","turnId":"tu-1","itemId":"call-1","command":%s,"reason":%s}`,
+			jsonQuote(command), jsonQuote(reason))),
+	}
+	events := a.handleServerRequest(sr)
+	if len(events) != 1 {
+		t.Fatalf("events = %d, want 1", len(events))
+	}
+	ev := events[0]
+	if ev.Content != reason {
+		t.Fatalf("Content = %q, want official reason", ev.Content)
+	}
+	if ev.ToolInput != command {
+		t.Fatalf("ToolInput = %q, want pure command", ev.ToolInput)
+	}
+}
+
+func jsonQuote(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }
