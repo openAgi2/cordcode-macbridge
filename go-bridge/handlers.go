@@ -4265,45 +4265,15 @@ func (h *Handlers) handleResolveUserInput(conn Connection, msg WireMessage, agen
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "resolve_user_input_failed", Message: err.Error()})
 		return
 	}
-	// 与 handleResolvePermission 的 permission_resolved 对称：官方已收答案后立即发布
-	// 收口，kernel/投影直接落 answered/rejected（reducer 幂等，官方 resolved 后续再
-	// 到不会重复）。官方 resolved 双泵 MarkResolved 竞态下不能只依赖被动/主泵事件
-	// （2026-08-25 iOS 发起多选真机：resolved 产出在被动泵但 relay 运行中被拒，
-	// 面板永不收口）。
-	if resolution.Outcome == core.UserInputOutcomeAccepted {
-		// status 按 action 推导（backend 返回的 CurrentStatus 不保证填充）。
-		status := core.UserInputStatusAnswered
-		if params.Action == core.UserInputActionReject {
-			status = core.UserInputStatusRejected
-		}
-		h.publishEvent(LogicalEvent{
-			SessionID: params.SessionID,
-			BackendID: msg.BackendID,
-			Event:     "user_input_resolved",
-			Data: map[string]interface{}{
-				"interactionId": params.InteractionID,
-				"status":        status,
-				"source":        "ios",
-			},
-		})
-	}
+	// 收口只认官方 serverRequest/resolved 驱动的 user_input_resolved（各泵独立
+	// 产出，见 agent/codex-web interactions.go resolvedEvents）——与官方 TUI
+	// dismiss 同构，不做本地乐观收口。此处只等投影 commit 出 canonical 结果。
 	part, headRev, err := h.waitForUserInputResolution(resolveCtx, msg.BackendID, params.SessionID, params.InteractionID, resolution)
 	if err != nil {
 		conn.SendResult(msg.RequestID, nil, &WireError{Code: "resolve_user_input_failed", Message: err.Error()})
 		return
 	}
 	resolution.CurrentStatus = core.UserInputStatus(part.UserInputStatus)
-	if resolution.Outcome == core.UserInputOutcomeAccepted &&
-		resolution.CurrentStatus != core.UserInputStatusAnswered && resolution.CurrentStatus != core.UserInputStatusRejected {
-		// wait 在 publish/batcher commit 的竞态窗口可能读到尚未更新的 part（status
-		// 空或仍 pending）；官方已接受答案，canonical result 按 action 推导权威 status。
-		// 仅 Accepted 生效：in_progress/already_resolved 保持投影原样，不伪造终态。
-		if params.Action == core.UserInputActionReject {
-			resolution.CurrentStatus = core.UserInputStatusRejected
-		} else {
-			resolution.CurrentStatus = core.UserInputStatusAnswered
-		}
-	}
 	resolution.HeadRev = headRev
 
 	conn.SendResult(msg.RequestID, map[string]any{

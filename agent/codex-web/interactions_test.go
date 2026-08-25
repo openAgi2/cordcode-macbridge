@@ -181,9 +181,9 @@ func TestApprovalResolutionIsIdempotentAcrossSignals(t *testing.T) {
 	events := a.handleServerRequest(sr)
 	id := events[0].RequestID
 	resolvedParams, _ := json.Marshal(map[string]any{"threadId": sr.ThreadID, "requestId": sr.RequestID})
-	first := a.resolvedEvents(Notification{Epoch: 3, Method: "serverRequest/resolved", Params: resolvedParams})
+	first := a.resolvedEvents(Notification{Epoch: 3, Method: "serverRequest/resolved", Params: resolvedParams}, 3)
 	second := a.itemCompletedResolution(sr.ThreadID, events[0].ItemID)
-	third := a.resolvedEvents(Notification{Epoch: 3, Method: "serverRequest/resolved", Params: resolvedParams})
+	third := a.resolvedEvents(Notification{Epoch: 3, Method: "serverRequest/resolved", Params: resolvedParams}, 3)
 	if len(first) != 1 || first[0].RequestID != id || len(second) != 0 || len(third) != 0 {
 		t.Fatalf("resolution events = first:%+v second:%+v third:%+v", first, second, third)
 	}
@@ -278,7 +278,7 @@ func TestUserInputOfficialFixtureNormalizationAndWireAnswer(t *testing.T) {
 	}
 	// 收口统一由官方 serverRequest/resolved 驱动（2026-08-25：提前本地收口会让观察
 	// 面板永远不消失）；官方 resolved 后再提交才是 already_resolved。
-	resolved := a.resolvedEvents(Notification{Epoch: 11, Method: "serverRequest/resolved", Params: json.RawMessage(`{"threadId":"` + sr.ThreadID + `","requestId":` + string(sr.RequestID) + `}`)})
+	resolved := a.resolvedEvents(Notification{Epoch: 11, Method: "serverRequest/resolved", Params: json.RawMessage(`{"threadId":"` + sr.ThreadID + `","requestId":` + string(sr.RequestID) + `}`)}, 11)
 	if len(resolved) != 1 || resolved[0].Type != core.EventUserInputResolved {
 		t.Fatalf("resolved events = %+v, want user_input_resolved", resolved)
 	}
@@ -406,7 +406,7 @@ func TestUserInputAnswerValidationAndRejectFailClosed(t *testing.T) {
 		t.Fatalf("skip wire response = id:%s result:%s", frame.ID, frame.Result)
 	}
 	// 收口由官方 resolved 驱动：跳过 → user_input_resolved status=rejected（iOS 显示「已跳过」）。
-	evs := a.resolvedEvents(Notification{Epoch: 12, Method: "serverRequest/resolved", Params: json.RawMessage(`{"threadId":"` + sr.ThreadID + `","requestId":` + string(sr.RequestID) + `}`)})
+	evs := a.resolvedEvents(Notification{Epoch: 12, Method: "serverRequest/resolved", Params: json.RawMessage(`{"threadId":"` + sr.ThreadID + `","requestId":` + string(sr.RequestID) + `}`)}, 12)
 	if len(evs) != 1 || evs[0].UserInput == nil || evs[0].UserInput.Status != core.UserInputStatusRejected {
 		t.Fatalf("skip resolved events = %+v", evs)
 	}
@@ -473,7 +473,7 @@ func TestResolvedEventsUserInputEmitsUserInputResolved(t *testing.T) {
 		Method:        "item/tool/requestUserInput",
 	})
 	params := json.RawMessage(`{"threadId":"th-u2","requestId":31}`)
-	events := a.resolvedEvents(Notification{Epoch: 12, Method: "serverRequest/resolved", Params: params})
+	events := a.resolvedEvents(Notification{Epoch: 12, Method: "serverRequest/resolved", Params: params}, 12)
 	if len(events) != 1 || events[0].Type != core.EventUserInputResolved {
 		t.Fatalf("events = %+v, want user_input_resolved", events)
 	}
@@ -484,8 +484,13 @@ func TestResolvedEventsUserInputEmitsUserInputResolved(t *testing.T) {
 	if pending := a.registry.Lookup("th-u2:call-x"); pending != nil {
 		t.Fatalf("interaction still pending after resolved: %+v", pending)
 	}
-	if again := a.resolvedEvents(Notification{Epoch: 12, Method: "serverRequest/resolved", Params: params}); len(again) != 0 {
-		t.Fatalf("duplicate resolved emitted events: %+v", again)
+	if again := a.resolvedEvents(Notification{Epoch: 12, Method: "serverRequest/resolved", Params: params}, 12); len(again) != 0 {
+		t.Fatalf("same pump resolved twice: %+v", again)
+	}
+	// 每泵各收口一次（官方 resolved 广播给所有订阅连接）：第二泵（不同 epoch）再发一份，
+	// kernel reducer 按 interactionId 幂等吸收。
+	if second := a.resolvedEvents(Notification{Epoch: 21, Method: "serverRequest/resolved", Params: params}, 21); len(second) != 1 || second[0].Type != core.EventUserInputResolved {
+		t.Fatalf("second pump must emit its own close event: %+v", second)
 	}
 }
 

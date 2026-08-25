@@ -58,7 +58,7 @@ func (a *Agent) ensurePump() {
 			var extra []core.Event
 			switch n.Method {
 			case "serverRequest/resolved":
-				extra = a.resolvedEvents(n)
+				extra = a.resolvedEvents(n, cl.Epoch())
 			case "item/completed":
 				var p struct {
 					ThreadID string `json:"threadId"`
@@ -692,7 +692,7 @@ func (a *Agent) Subscribe(ctx context.Context) (<-chan core.Event, error) {
 			var extra []core.Event
 			switch n.Method {
 			case "serverRequest/resolved":
-				extra = a.resolvedEvents(n)
+				extra = a.resolvedEvents(n, cl.Epoch())
 			case "item/completed":
 				var p struct {
 					ThreadID string `json:"threadId"`

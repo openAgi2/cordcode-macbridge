@@ -134,10 +134,7 @@ func TestPassiveFeedAllowedSingleIngestOwner(t *testing.T) {
 	}{
 		{"relayed-only", true, false, true, "turn_completed", false},
 		{"relayed-and-observed", true, true, true, "text_delta", false},
-		{"relayed-user-input-close", true, true, true, "user_input_resolved", true},
-		{"relayed-permission-close", true, false, true, "permission_resolved", true},
-		{"relayed-question-close", true, true, false, "question_resolved", true},
-		{"relayed-requested-still-blocked", true, true, true, "user_input_requested", false},
+		{"relayed-user-input-close", true, true, true, "user_input_resolved", false},
 		{"observed-only", false, true, false, "text_delta", true},
 		{"untracked", false, false, false, "text_delta", false},
 		{"background-terminal-existing-projection", false, false, true, "turn_completed", true},

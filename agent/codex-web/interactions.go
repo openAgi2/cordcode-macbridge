@@ -57,15 +57,30 @@ type Interaction struct {
 	UI *userInputSnapshot
 }
 
+// resolvedRecord 保存已收口交互的官方身份与各连接视角的收口进度（官方把
+// serverRequest/resolved 广播给所有订阅连接——每个客户端视角各自收口一次，
+// TUI app_server_events.rs dismiss 同构；我们的主泵/观察泵即两个视角）。
+type resolvedRecord struct {
+	interactionID string
+	kind          InteractionKind
+	outcome       string
+	notified      map[ConnectionEpoch]bool // 每泵只发一次收口事件
+}
+
 // InteractionRegistry 是 server request 生命周期账本。
 type InteractionRegistry struct {
 	mu      sync.Mutex
 	pending map[string]*Interaction // key: InteractionID
 	history map[string]bool         // 已收口（幂等去重）
+	// resolvedByRequest 记录 (threadId#官方requestId) → 收口信息，供第二个泵
+	// 到达时仍能归属产出自己的那份收口事件（pending 已被首泵移除）。
+	resolvedByRequest map[string]*resolvedRecord
 }
 
+const resolvedRecordMaxEntries = 1024 // 与 planCache 同策略：有界全清（易失低频状态）
+
 func NewInteractionRegistry() *InteractionRegistry {
-	return &InteractionRegistry{pending: map[string]*Interaction{}, history: map[string]bool{}}
+	return &InteractionRegistry{pending: map[string]*Interaction{}, history: map[string]bool{}, resolvedByRequest: map[string]*resolvedRecord{}}
 }
 
 // Register 登记一个 server request；同 interactionID 重复到达（官方重发）刷新
@@ -391,10 +406,16 @@ func (a *Agent) respondPermission(ctx context.Context, _, interactionID string, 
 	return nil
 }
 
-// resolvedEvents 处理 serverRequest/resolved 通知 → 收口 + 事件（只对已登记交互发一次）。
-// 按 Kind 产出：user_input → EventUserInputResolved（投影把 user_input part 从 pending
-// 收为 answered，iOS 面板消失）；审批/其他 → EventPermissionResolved。
-func (a *Agent) resolvedEvents(n Notification) []core.Event {
+// resolvedEvents 处理 serverRequest/resolved 通知 → 收口 + 事件。
+// 官方语义（thread_lifecycle.rs resolve_pending_server_request）：resolved 广播给
+// 该线程的全部订阅连接，每个客户端视角各自收口一次（TUI app_server_events.rs
+// dismiss 同构）。我们的主泵/观察泵是两个视角——**每泵各发一次**收口事件
+// （kernel reducer 按 interactionId 幂等 upsert，双份无害），不共享全局收口权；
+// 此前的全局 MarkResolved 去重让"赢的那条泵"不可控（writer 场景产出落在被动泵
+// 被 passiveFeedAllowed 拒收 → 面板永不收口，2026-08-25 真机）。
+// 按 Kind 产出：user_input → EventUserInputResolved（投影把 user_input part 收为
+// answered/rejected）；审批/其他 → EventPermissionResolved。
+func (a *Agent) resolvedEvents(n Notification, epoch ConnectionEpoch) []core.Event {
 	var p struct {
 		ThreadID  string      `json:"threadId"`
 		RequestID json.Number `json:"requestId"`
@@ -402,28 +423,45 @@ func (a *Agent) resolvedEvents(n Notification) []core.Event {
 	if json.Unmarshal(n.Params, &p) != nil || p.ThreadID == "" {
 		return nil
 	}
-	// 官方 requestId 是连接级数字；收口按 (thread, requestId→interaction) 匹配。
+	if a.registry == nil {
+		return nil
+	}
+	reqKey := p.ThreadID + "#" + p.RequestID.String()
 	a.registry.mu.Lock()
-	var match string
-	var kind InteractionKind
-	var outcome string
-	for id, it := range a.registry.pending {
-		if it.ThreadID == p.ThreadID && it.RequestID == p.RequestID {
-			match = id
-			kind = it.Kind
-			outcome = it.Outcome
-			break
+	record := a.registry.resolvedByRequest[reqKey]
+	if record == nil {
+		// 首泵到达：从 pending 归属（官方 requestId 是连接无关数字，按
+		// (thread, requestId→interaction) 匹配），移入 history/pending 收口，
+		// 并为第二泵留下归属记录。
+		var it *Interaction
+		for _, candidate := range a.registry.pending {
+			if candidate.ThreadID == p.ThreadID && candidate.RequestID == p.RequestID {
+				it = candidate
+				break
+			}
+		}
+		if it != nil {
+			record = &resolvedRecord{
+				interactionID: it.InteractionID,
+				kind:          it.Kind,
+				outcome:       it.Outcome,
+				notified:      map[ConnectionEpoch]bool{},
+			}
+			if len(a.registry.resolvedByRequest) >= resolvedRecordMaxEntries {
+				a.registry.resolvedByRequest = map[string]*resolvedRecord{}
+			}
+			a.registry.resolvedByRequest[reqKey] = record
+			a.registry.history[it.InteractionID] = true
+			delete(a.registry.pending, it.InteractionID)
 		}
 	}
-	// 已收口的不再找 pending——history 里按 (thread,requestId) 无法回查（interactionID
-	// 才是稳定键），resolved 二次到达是官方幂等，直接吞掉。
+	if record == nil || record.notified[epoch] {
+		a.registry.mu.Unlock()
+		return nil
+	}
+	record.notified[epoch] = true
+	interactionID, kind, outcome := record.interactionID, record.kind, record.outcome
 	a.registry.mu.Unlock()
-	if match == "" {
-		return nil
-	}
-	if !a.registry.MarkResolved(match) {
-		return nil
-	}
 	if kind == InteractionUserInput {
 		status := core.UserInputStatusAnswered
 		if outcome == "skipped" {
@@ -434,7 +472,7 @@ func (a *Agent) resolvedEvents(n Notification) []core.Event {
 			SessionID: p.ThreadID,
 			ThreadID:  p.ThreadID,
 			UserInput: &core.UserInputInteraction{
-				InteractionID:    match,
+				InteractionID:    interactionID,
 				Status:           status,
 				ResolutionSource: "official",
 			},
@@ -444,7 +482,7 @@ func (a *Agent) resolvedEvents(n Notification) []core.Event {
 		Type:      core.EventPermissionResolved,
 		SessionID: p.ThreadID,
 		ThreadID:  p.ThreadID,
-		RequestID: match,
+		RequestID: interactionID,
 	}}
 }
 
