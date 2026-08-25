@@ -50,6 +50,9 @@ type Interaction struct {
 	Method        string
 	Params        json.RawMessage
 	Responding    bool // 已 claim 正在/已经写 response，等待官方收口
+	// Outcome 记录本端写官方成功的应答语义（"answered"|"skipped"），供官方
+	// serverRequest/resolved 收口时产出准确终态（投影终态行「回答」/「已跳过」）。
+	Outcome string
 	// UI 仅 kind=user_input：应答映射快照（userinput.go），登记成功时填充。
 	UI *userInputSnapshot
 }
@@ -125,6 +128,16 @@ func (r *InteractionRegistry) ResolvedKnown(interactionID string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.history[interactionID]
+}
+
+// NoteOutcome 记录本端写官方成功的应答语义（官方 resolved 前 pending 保留。
+// 仅在被官方收口前对本端应答生效；Mac 端先答时以官方先到者为准，覆盖本地）。
+func (r *InteractionRegistry) NoteOutcome(interactionID, outcome string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if it := r.pending[interactionID]; it != nil {
+		it.Outcome = outcome
+	}
 }
 
 // DropEpoch 断线清理：移除指定 epoch 的全部 pending（旧连接的官方 request id 已失效）。
@@ -393,10 +406,12 @@ func (a *Agent) resolvedEvents(n Notification) []core.Event {
 	a.registry.mu.Lock()
 	var match string
 	var kind InteractionKind
+	var outcome string
 	for id, it := range a.registry.pending {
 		if it.ThreadID == p.ThreadID && it.RequestID == p.RequestID {
 			match = id
 			kind = it.Kind
+			outcome = it.Outcome
 			break
 		}
 	}
@@ -410,13 +425,17 @@ func (a *Agent) resolvedEvents(n Notification) []core.Event {
 		return nil
 	}
 	if kind == InteractionUserInput {
+		status := core.UserInputStatusAnswered
+		if outcome == "skipped" {
+			status = core.UserInputStatusRejected
+		}
 		return []core.Event{{
 			Type:      core.EventUserInputResolved,
 			SessionID: p.ThreadID,
 			ThreadID:  p.ThreadID,
 			UserInput: &core.UserInputInteraction{
 				InteractionID:    match,
-				Status:           core.UserInputStatusAnswered,
+				Status:           status,
 				ResolutionSource: "official",
 			},
 		}}

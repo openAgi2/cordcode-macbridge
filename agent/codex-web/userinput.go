@@ -14,8 +14,11 @@ package codexweb
 // 直接采用官方原 id（样本保证每题有非空 id；空/重复 → invalid_backend_request failed，
 // 不注册、不回写）。官方 options 无 id，归一化选项 ID 派生为 qid "_o_" 序号，应答时
 // 经快照映射回官方 label。官方 0.149 request_user_input tool 强制每题 2–3 个
-// options；自由文本通过 isOther=true 的 Other 路径表达。canReject=false：无已验证的
-// 官方 reject 语义，fail closed。
+// options；自由文本通过 isOther=true 的 Other 路径表达。
+// 跳过（Mac 面板「跳过」）：官方 wire 无独立 reject 词汇——ToolRequestUserInputResponse
+// 只有 answers，跳过 = 空 answers 响应（官方 client-error 亦回落空 answers 继续 turn，
+// bespoke_event_handling.rs on_request_user_input_response）；canReject=true 让 iOS
+// 渲染「跳过本题」并把跳过按空 answers 应答（2026-08-25 真机对齐 Mac 面板）。
 
 import (
 	"context"
@@ -82,7 +85,11 @@ func (a *Agent) userInputEvents(it *Interaction) []core.Event {
 			Status:        core.UserInputStatusPending,
 			Questions:     normalizedUserInputQuestions(it.InteractionID, p.Questions),
 			CanRespond:    true,
-			CanReject:     false, // 无已验证的官方 reject 语义（§7.2 fail closed）
+			// 官方 wire 没有独立 reject 词汇：跳过 = 空 answers 响应
+			// （ToolRequestUserInputResponse{answers:{}}；官方向错误回退亦为空
+			// answers 继续 turn，Mac 面板「跳过」即此语义，bespoke_event_handling.rs
+			// on_request_user_input_response）。
+			CanReject:     true,
 			ExpiresAt:     expiresAt,
 		},
 	}}
@@ -179,11 +186,7 @@ func (a *Agent) ResolveUserInput(ctx context.Context, interactionID, _ string, a
 }
 
 func (a *Agent) resolveUserInput(ctx context.Context, interactionID string, action core.UserInputAction, answers []core.UserInputAnswer) (core.UserInputResolution, error) {
-	if action == core.UserInputActionReject {
-		// canReject=false：官方无已验证 reject 语义，fail closed 不写 backend（§7.2）。
-		return core.UserInputResolution{}, &core.UserInputError{Code: "response_not_supported", Message: "codex-web structured user input does not support reject"}
-	}
-	if action != core.UserInputActionAnswer {
+	if action != core.UserInputActionAnswer && action != core.UserInputActionReject {
 		return core.UserInputResolution{}, &core.UserInputError{Code: "invalid_answer_shape", Message: "unknown action"}
 	}
 	it := a.registry.Lookup(interactionID)
@@ -197,9 +200,18 @@ func (a *Agent) resolveUserInput(ctx context.Context, interactionID string, acti
 	if it.Kind != InteractionUserInput || it.UI == nil {
 		return core.UserInputResolution{}, &core.UserInputError{Code: "interaction_not_found", Message: "interaction is not a pending structured user input"}
 	}
-	wireAnswers, err := buildUserInputWireAnswers(it.UI, answers)
-	if err != nil {
-		return core.UserInputResolution{}, err
+	var wireAnswers map[string]any
+	if action == core.UserInputActionAnswer {
+		var err error
+		wireAnswers, err = buildUserInputWireAnswers(it.UI, answers)
+		if err != nil {
+			return core.UserInputResolution{}, err
+		}
+	} else {
+		// 跳过：官方 ToolRequestUserInputResponse 只有 answers 字段，Mac 面板「跳过」
+		// 即空 answers（官方对 client error 亦回落空 answers 继续 turn）；不答复会让
+		// 官方永远挂起。
+		wireAnswers = map[string]any{}
 	}
 	it, claimed := a.registry.Claim(interactionID)
 	if it == nil {
@@ -226,12 +238,21 @@ func (a *Agent) resolveUserInput(ctx context.Context, interactionID string, acti
 		return core.UserInputResolution{}, &core.UserInputError{Code: "backend_response_failed", Message: "failed to write official response"}
 	}
 	sent = true
+	outcome := "answered"
+	if action == core.UserInputActionReject {
+		outcome = "skipped"
+	}
+	a.registry.NoteOutcome(interactionID, outcome)
 	// 收口不在这里本地合成：统一交给官方 serverRequest/resolved（resolvedEvents 按
 	// kind 产出 permission_resolved / user_input_resolved，主泵与观察泵都在处理）。
 	// 提前 MarkResolved 会清掉 pending，官方 resolved 到达时无法归属，且观察路径
 	// 收不到任何事件——iOS 的 user_input 面板因此永不消失（2026-08-25 真机：
 	// Mac 面板已消失并继续执行，iOS 面板残留）。与 respondPermission 同一语义。
-	return core.UserInputResolution{Outcome: core.UserInputOutcomeAccepted, CurrentStatus: core.UserInputStatusAnswered}, nil
+	status := core.UserInputStatusAnswered
+	if action == core.UserInputActionReject {
+		status = core.UserInputStatusRejected
+	}
+	return core.UserInputResolution{Outcome: core.UserInputOutcomeAccepted, CurrentStatus: status}, nil
 }
 
 // respondUserInput 是 legacy question_reply/reject 的别名路径（仅 `.off` legacy client，

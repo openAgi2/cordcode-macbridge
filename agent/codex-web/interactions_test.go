@@ -251,7 +251,7 @@ func TestUserInputOfficialFixtureNormalizationAndWireAnswer(t *testing.T) {
 		t.Fatalf("user input event = %+v", events)
 	}
 	ui := events[0].UserInput
-	if ui.InteractionID != interactionID(sr.ThreadID, events[0].ItemID) || ui.Status != core.UserInputStatusPending || !ui.CanRespond || ui.CanReject || len(ui.Questions) != 1 {
+	if ui.InteractionID != interactionID(sr.ThreadID, events[0].ItemID) || ui.Status != core.UserInputStatusPending || !ui.CanRespond || !ui.CanReject || len(ui.Questions) != 1 {
 		t.Fatalf("normalized interaction = %+v", ui)
 	}
 	q := ui.Questions[0]
@@ -398,10 +398,19 @@ func TestUserInputAnswerValidationAndRejectFailClosed(t *testing.T) {
 	a, transport, _ := interactionTestAgent(t, 12)
 	sr := officialInteractionRequest(t, "item/tool/requestUserInput", 0, 12)
 	ui := a.handleServerRequest(sr)[0].UserInput
-	_, err := a.ResolveUserInput(context.Background(), ui.InteractionID, "reject", core.UserInputActionReject, nil)
-	var coded *core.UserInputError
-	if !asUserInputError(err, &coded) || coded.Code != "response_not_supported" || len(transport.sentFrames()) != 0 {
-		t.Fatalf("reject = %#v frames=%v", err, transport.sentFrames())
+	// 跳过 = 官方空 answers 响应（Mac 面板「跳过」语义），turn 由官方继续。
+	resolution, err := a.ResolveUserInput(context.Background(), ui.InteractionID, "reject", core.UserInputActionReject, nil)
+	if err != nil || resolution.CurrentStatus != core.UserInputStatusRejected {
+		t.Fatalf("skip resolution = %+v, %v", resolution, err)
+	}
+	frame := lastServerResponse(t, transport)
+	if frame.ID != sr.RequestID || string(frame.Result) != `{"answers":{}}` {
+		t.Fatalf("skip wire response = id:%s result:%s", frame.ID, frame.Result)
+	}
+	// 收口由官方 resolved 驱动：跳过 → user_input_resolved status=rejected（iOS 显示「已跳过」）。
+	evs := a.resolvedEvents(Notification{Epoch: 12, Method: "serverRequest/resolved", Params: json.RawMessage(`{"threadId":"` + sr.ThreadID + `","requestId":` + string(sr.RequestID) + `}`)})
+	if len(evs) != 1 || evs[0].UserInput == nil || evs[0].UserInput.Status != core.UserInputStatusRejected {
+		t.Fatalf("skip resolved events = %+v", evs)
 	}
 }
 
