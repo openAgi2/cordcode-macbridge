@@ -35,7 +35,13 @@ func (a *Agent) getRichHistory(ctx context.Context, c *Client, sessionID string,
 	if err != nil {
 		return nil, err
 	}
-	items, err := decodeListPayload(raw)
+	return MapMessageListToRichEntries(raw, limit)
+}
+
+// MapMessageListToRichEntries 把 GET /session/:id/message 的响应体（列表）映射为
+// rich history entries。导出供 PERF-S0B fixture 生成测试复用同一真实映射（不复制逻辑）。
+func MapMessageListToRichEntries(body []byte, limit int) ([]core.RichHistoryEntry, error) {
+	items, err := decodeListPayload(body)
 	if err != nil {
 		return nil, err
 	}

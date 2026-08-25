@@ -1,0 +1,63 @@
+{
+  "sessionId": "perf-fixture-opencode-web",
+  "syncRev": 8,
+  "bridgeEpoch": "epoch-webperf-fixture",
+  "updatedAt": 1750000000,
+  "execution": {
+    "phase": "idle"
+  },
+  "turns": [
+    {
+      "turnId": "msg_fixture_002",
+      "status": "completed",
+      "completedAt": 1750000000,
+      "user": {
+        "id": "msg_fixture_002",
+        "role": "user",
+        "parts": [
+          {
+            "type": "text",
+            "text": "A8_TODOWRITE"
+          }
+        ]
+      },
+      "assistant": {
+        "id": "msg_fixture_002",
+        "role": "assistant",
+        "parts": [
+          {
+            "type": "text",
+            "text": "SANDBOX_OK",
+            "presentation": "final"
+          }
+        ]
+      }
+    },
+    {
+      "turnId": "msg_fixture_003",
+      "status": "completed",
+      "completedAt": 1750000000,
+      "user": {
+        "id": "msg_fixture_003",
+        "role": "user",
+        "parts": [
+          {
+            "type": "text",
+            "text": "A8_TODOWRITE_UPDATE"
+          }
+        ]
+      },
+      "assistant": {
+        "id": "msg_fixture_003",
+        "role": "assistant",
+        "parts": [
+          {
+            "type": "text",
+            "text": "SANDBOX_OK",
+            "presentation": "final"
+          }
+        ]
+      }
+    }
+  ]
+}
