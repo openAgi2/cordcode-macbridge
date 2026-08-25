@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 // fixtureDump 解析一个 dump 组，返回（按请求 id 的服务端响应字节、按到达序的客户端请求）。
@@ -574,6 +576,32 @@ func TestIsConnectionLossCoversDeadSocketShapes(t *testing.T) {
 		{"connection closed", fmt.Errorf("connection closed"), true},
 		{"nil", nil, false},
 		{"rpc rejection must stay out", &RPCError{Code: -32000, Message: "boom"}, false},
+	}
+	for _, c := range cases {
+		if got := isConnectionLoss(c.err); got != c.want {
+			t.Fatalf("%s: isConnectionLoss=%v want %v (%v)", c.name, got, c.want, c.err)
+		}
+	}
+}
+
+// TestIsConnectionLossStructuredClassificationFirst（审计 §3.2-B3 加固）：
+// transport 类型化错误（含 %w 链）优先于文案兜底；官方 RPC 拒绝不误判。
+func TestIsConnectionLossStructuredClassificationFirst(t *testing.T) {
+	typed := asTransportConnectionError("ws-io", &websocket.CloseError{Code: 1011, Text: "internal error"})
+	if tce, ok := typed.(*TransportConnectionError); !ok || tce.Kind != "ws-close" || tce.Code != 1011 {
+		t.Fatalf("close error classification = %+v", typed)
+	}
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"typed transport error direct", typed, true},
+		{"typed through wrap chain", fmt.Errorf("rpc wait: %w", typed), true},
+		{"syscall EPIPE structured", &os.SyscallError{Syscall: "write", Err: syscall.EPIPE}, true},
+		{"heuristic fallback still covers", fmt.Errorf("connection closed"), true},
+		{"nil", nil, false},
+		{"official rpc rejection stays out", &RPCError{Code: -32600, Message: "expected active turn id a but found b"}, false},
 	}
 	for _, c := range cases {
 		if got := isConnectionLoss(c.err); got != c.want {

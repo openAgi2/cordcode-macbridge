@@ -438,9 +438,13 @@ func decodeTokenUsage(n Notification) []core.Event {
 }
 
 // decodeErrorNotification 官方 error 通知 {error:{message,...}, willRetry, threadId}。
-// willRetry=true 是瞬时 provider 重试（serve 保持 turn 存活）——映射 EventRetryStatus
-// （连续次数由 codec 计数，任何 delta/completed 重置）；willRetry=false 映射 EventError
-// 保留官方原文。turn 终态仍只认 turn/completed。
+// 呈现对齐官方：willRetry=true → 瞬态重试行（官方 on_stream_error，
+// tui/src/chatwidget/protocol.rs:127-133 + notification.rs:54-55"transient…will not
+// interrupt a turn"），映射 EventRetryStatus；willRetry=false → EventError 保留
+// 官方原文（对齐官方 handle_non_retry_error）。连续计数 RetryAttempt 是本仓附加
+// UX 信号（豁免卡：审计文档 §3.2-B4——iOS 显示「重试中（第 N 次）」，官方无计数；
+// 任何 delta/completed 重置；计数漂移只影响显示不影响终态）。turn 终态仍只认
+// turn/completed。
 func (c *LiveCodec) decodeErrorNotification(n Notification) []core.Event {
 	var p struct {
 		Error struct {

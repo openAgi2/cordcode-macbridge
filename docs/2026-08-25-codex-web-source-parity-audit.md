@@ -99,16 +99,23 @@
 - 失败模式：订阅前已开始的 turn 无 turn/started（官方不重放）→ 冷基线 thread/read inProgress 兜底；仍找不到 = fail closed。
 - **登记状态（2026-08-25 批次 2）**：A3 resync-retry 已回迁（解析器锚点 app.rs:643-692、重试语义 thread_routing.rs:604-627/683-727，代码注释已引用本卡与官方锚点）；三源顺序不变（liveCodec > 本端 start 返回 > 冷基线最后手段）。回归测试 `agent/codex-web/control_race_test.go`。
 
-#### B3 重连循环 + isConnectionLoss 字符串启发式
-- 位置：`events.go:196-217`（reconnectLoop 2s→60s 退避）、`session.go:284-306`（`isConnectionLoss` 匹配 "broken pipe"/"websocket: close" 判连接死活）。
+#### B3 重连循环 + isConnectionLoss 结构化分类
+- 位置：`events.go:196-217`（reconnectLoop 退避）、`session.go:284-306`（`isConnectionLoss`）。
 - 豁免理由：官方无重连（断线即退出），长驻 bridge 必须自愈。
-- 处置（豁免卡 + 实现加固）：连接死亡判定从**错误文案匹配**改为 transport 层结构化分类（WS close frame / 类型化错误），文案匹配仅作兜底并打诊断标记；豁免卡登记退避参数与 §8.3 冷校准顺序。
-- 验收：注入各类 close 错误的分类单测。
+- 登记的不变量与参数（2026-08-25 批次 4）：
+  - 退避参数：`reconnectLoop` 2s 起、×2 递增、上限 60s；重连成功即六步就绪 + 中央泵重启；
+  - 冷校准顺序：缺口由上层 §8.3 冷校准（thread/read includeTurns）覆盖，不重放、不合成；
+  - 连接死亡判定：transport 层 `TransportConnectionError`（含官方 WS close code）类型化优先 → syscall/net 结构化 → 文案匹配仅兜底且命中打 Warn 诊断标记（标记"未被类型化的错误源，需补归类"）。
+- **登记状态（2026-08-25 批次 4）**：结构化分类已实施（transport.go asTransportConnectionError + session.go 分类优先级）；分类单测 `sessions_test.go TestIsConnectionLossStructuredClassificationFirst`；既有死 socket 形状回归保持。
 
 #### B4 retryByThread willRetry 连续计数
 - 位置：`codec.go:29-70,111-121,442-472`。
 - 现状：对官方 error 帧的 willRetry 标志做连续计数、delta 到达清零——发明语义（官方无 attempt 计数）。
-- 处置：核对官方 TUI 对 willRetry error 的呈现方式后，要么对齐官方呈现、要么登记豁免卡（说明 iOS 需要什么官方不提供的信号）。低优先级。
+- **豁免卡（2026-08-25 批次 4 登记）**：
+  - 为什么官方没有：官方 TUI 对 will_retry=true 的呈现 = `on_stream_error` 瞬态行（`tui/src/chatwidget/protocol.rs:127-133`；`app-server-protocol/src/protocol/v2/notification.rs:54-55`"transient…will not interrupt a turn"），每帧独立渲染、无计数；will_retry=false 走 `handle_non_retry_error` 终态。
+  - 我们的不变量：willRetry=true → `EventRetryStatus`（不落 turn 终态、不进 IsDurableMilestone/syncV2 deny-list——与官方「不中断 turn」对齐）；连续计数 `RetryAttempt` 仅作 iOS「重试中（第 N 次）」附加 UX 信号，任何 delta / turn/completed 重置；willRetry=false → `EventError` 官方原文（对齐官方 non-retry 终态）。
+  - 失败模式：计数漂移（帧丢失/重连清零）只影响显示的 attempt 数字，不影响任何终态/投影事实。
+  - 回归测试：codec_test retry 计数与重置既有用例。
 
 #### B5 codec turn/completed 缺 turn.id 的 ActiveTurn 归属
 - 位置：`codec.go:157-163`。

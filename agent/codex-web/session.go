@@ -281,28 +281,46 @@ func (a *Agent) withClient(ctx context.Context, fn func(*Client) error) error {
 // restart）会替换控制 socket：旧连接既收不到 channel close（泵不退出），写出又立刻
 // 得到 EPERM/EPIPE（"write: broken pipe"）。若漏判该形状，withClient 就永不重
 // Probe——水化、目录、指纹、模型清单全部停留在一个死连接上，直到 MacBridge 重启。
+//
+// 分类优先级（审计 §3.2-B3 加固）：transport 层 TransportConnectionError（含
+// 官方 WS close code，经 %w 链可达）> syscall/net 结构化 > 文案匹配兜底（命中
+// 打诊断标记——说明该错误源未被 transport 层类型化，需补归类）。
 func isConnectionLoss(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	if strings.Contains(msg, "connection closed") ||
-		strings.Contains(msg, "connection lost") ||
-		strings.Contains(msg, "websocket: close") ||
-		strings.Contains(msg, "broken pipe") ||
-		strings.Contains(msg, "connection reset") ||
-		strings.Contains(msg, "connection refused") ||
-		strings.Contains(msg, "use of closed network connection") {
+	var tce *TransportConnectionError
+	if errors.As(err, &tce) {
 		return true
 	}
 	var sysErr *os.SyscallError
 	if errors.As(err, &sysErr) {
 		errno, ok := sysErr.Err.(syscall.Errno)
-		return ok && (errno == syscall.EPIPE || errno == syscall.ECONNRESET ||
-			errno == syscall.ECONNREFUSED || errno == syscall.ECONNABORTED)
+		if ok && (errno == syscall.EPIPE || errno == syscall.ECONNRESET ||
+			errno == syscall.ECONNREFUSED || errno == syscall.ECONNABORTED) {
+			return true
+		}
 	}
 	var netErr net.Error
-	return errors.As(err, &netErr) && netErr.Timeout()
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	if messageHeuristicConnectionLoss(err.Error()) {
+		slog.Warn("codexweb: connection loss classified by message heuristic (untyped error source — needs transport classification)", "error", err.Error())
+		return true
+	}
+	return false
+}
+
+// messageHeuristicConnectionLoss 文案兜底（审计 §3.2-B3：仅兜底 + 诊断标记）。
+func messageHeuristicConnectionLoss(msg string) bool {
+	return strings.Contains(msg, "connection closed") ||
+		strings.Contains(msg, "connection lost") ||
+		strings.Contains(msg, "websocket: close") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "use of closed network connection")
 }
 
 // ListSessions 实现 core.Agent：官方 thread/list 聚合（服务端默认页大小单页覆盖，

@@ -81,6 +81,20 @@
 
 ## 批次 4：B3/B4（待填写）
 
+## 批次 4 完成（2026-08-25）
+
+### 4a B3：isConnectionLoss 结构化分类
+
+- **官方实现位置**：官方无重连（`Disconnected`→`FatalExitRequest` 直接退出）——豁免区域；本卡登记 bridge 自愈发明。
+- **我方实现的第一处分歧**：连接死亡判定依赖错误文案匹配（"broken pipe"/"websocket: close" 等七种子串），无类型化分类。
+- **处置**：transport 层新增 `TransportConnectionError`（gorilla `CloseError` → `ws-close` 携带官方 close code；读写网络错误 → `ws-io`），`wsTransport.Send/Recv` 在源头包装；`isConnectionLoss` 分类优先级 = 类型化（errors.As 经 %w 链）→ syscall/net 结构化 → 文案兜底（命中打 Warn 诊断标记"未被类型化的错误源"）。退避参数（2s×2→60s）与 §8.3 冷校准顺序登记入审计文档 B3 卡。
+- **门验证**：分类单测（类型化直连/经包装链/CloseError code 提取/syscall/兜底/RPC 拒绝不误判）PASS；既有死 socket 回归保持。
+
+### 4b B4：willRetry 呈现核对 + 豁免卡登记
+
+- **官方实现位置**：`tui/src/chatwidget/protocol.rs:127-143`——`will_retry=true` → `on_stream_error` 瞬态行（每帧独立渲染、不中断 turn）；`false` → `last_non_retry_error` + 终态处理；`app-server-protocol/src/protocol/v2/notification.rs:54-56` 语义注释。官方**无 attempt 计数**。
+- **核对结论**：我方呈现本体已对齐（EventRetryStatus 瞬态行不落终态 / EventError 官方原文）；唯一发明 = `RetryAttempt` 连续计数（iOS「第 N 次」UX 信号）。按裁决登记豁免卡（审计文档 §3.2-B4：不变量/失败模式/回归测试齐备），代码注释引用。
+
 ## 批次 5：流程项（待填写）
 
 ## 批次 6：iOS 抽查（待填写）

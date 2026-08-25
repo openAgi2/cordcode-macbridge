@@ -14,6 +14,7 @@ package codexweb
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -66,13 +67,53 @@ func DialWSTCP(ctx context.Context, url string) (Transport, error) {
 	return &wsTransport{conn: conn}, nil
 }
 
+// TransportConnectionError 是传输层结构性连接死亡的类型化分类（审计 §3.2-B3
+// 加固：结构化分类优于文案匹配——isConnectionLoss 优先消费本类型，文案匹配仅
+// 兜底并打诊断标记）。Kind：ws-close（Code=官方 WS close code）/ ws-io（读写
+// 途中的网络层错误）。
+type TransportConnectionError struct {
+	Kind string
+	Code int
+	Err  error
+}
+
+func (e *TransportConnectionError) Error() string {
+	if e.Code != 0 {
+		return fmt.Sprintf("codexweb transport %s (close code %d): %v", e.Kind, e.Code, e.Err)
+	}
+	return fmt.Sprintf("codexweb transport %s: %v", e.Kind, e.Err)
+}
+
+func (e *TransportConnectionError) Unwrap() error { return e.Err }
+
+// asTransportConnectionError 把传输错误分类为类型化连接错误；gorilla
+// CloseError（官方 close 帧，含 close code）单列 ws-close。
+func asTransportConnectionError(kind string, err error) error {
+	if err == nil {
+		return nil
+	}
+	tce := &TransportConnectionError{Kind: kind, Err: err}
+	var closeErr *websocket.CloseError
+	if errors.As(err, &closeErr) {
+		tce.Kind = "ws-close"
+		tce.Code = closeErr.Code
+	}
+	return tce
+}
+
 func (t *wsTransport) Send(payload []byte) error {
-	return t.conn.WriteMessage(websocket.TextMessage, payload)
+	if err := t.conn.WriteMessage(websocket.TextMessage, payload); err != nil {
+		return asTransportConnectionError("ws-io", err)
+	}
+	return nil
 }
 
 func (t *wsTransport) Recv() ([]byte, error) {
 	_, data, err := t.conn.ReadMessage()
-	return data, err
+	if err != nil {
+		return nil, asTransportConnectionError("ws-io", err)
+	}
+	return data, nil
 }
 
 func (t *wsTransport) Close() error { return t.conn.Close() }
