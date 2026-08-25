@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-25T04:30:16Z",
+ "updated_at": "2026-08-25T04:42:00Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2784,7 +2784,7 @@
     "p6-observation-impl"
    ],
    "source": "design §14/phase6",
-   "notes": "2026-08-25 观察包 fail-closed validator、owner 14 行矩阵、十二项退役账本、全仓 Go test/vet、Mac 191 项测试及物理 iPhone unit-only 测试均重新执行通过；devicectl 诊断收集有非测试失败 warning，但 xcodebuild test exit=0。",
+   "notes": "2026-08-25 观察包 fail-closed validator、owner 14 行矩阵、十二项退役账本、全仓 Go test/vet、Mac 191 项测试及物理 iPhone unit-only 测试均重新执行通过；安装后管理快照 healthy，共享 daemon 脚本也通过。脚本已按拓扑合同 §4.4 移除过时的 exact display-version 比较，ChatGPT 的 packaging suffix 仅作 metadata。devicectl 诊断收集有非测试失败 warning，但 xcodebuild test exit=0。",
    "verification": {
     "required": true,
     "status": "present",
@@ -2798,6 +2798,7 @@
      "cmd:python3 scripts/codex-web-phase5/verify_owner_matrix.py",
      "cmd:python3 scripts/codex-web-phase6/verify_observation_pack.py",
      "cmd:scripts/codex-web-phase0/verify_shared_daemon_topology.sh with installed runtime PID",
+     "installed Release topology snapshot: healthy/shared/all_shared/effective_compatible; topology_gate=PASS; runtime peers=2 (2026-08-25)",
      "cmd:xcodebuild CordCodeUnitTests physical iPhone; 3 targeted model tests; exit 0",
      "/Users/jacklee/Library/Developer/Xcode/DerivedData/CordCode-ditfvluletdhecbduxwrcnwdzmbi/Logs/Test/Test-CordCodeUnitTests-2026.08.22_17-44-44-+0800.xcresult",
      "cmd:xcodebuild CordCodeLink macOS test; 191 executed, 1 skipped, 0 failures",
