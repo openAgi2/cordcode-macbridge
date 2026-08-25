@@ -892,7 +892,14 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			part.Title = reason
 		}
 		if v, ok := data["toolInput"]; ok {
-			part.ToolInput = v
+			// 空串 toolInput（fileChange 审批官方无 command 字段，wire 恒带空键）
+			// 必须跳过：mergeToolPart 按 nil 判保留旧值，"" 非 nil 会把既有 part
+			// 已投影的工具内容（tool_started 的命令）清掉，SSV2 审批卡只剩按钮
+			// 无文案（2026-08-26 真机：GPT fileChange 审批）。也不回退
+			// toolInputRaw——那是审批请求参数，不是工具内容。
+			if s, isStr := v.(string); !isStr || s != "" {
+				part.ToolInput = v
+			}
 		} else if v, ok := data["toolInputRaw"]; ok {
 			part.ToolInput = v
 		}

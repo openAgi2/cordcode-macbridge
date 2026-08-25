@@ -355,3 +355,65 @@ func TestReducerPermissionResolvedDenyRejectsTool(t *testing.T) {
 	}
 	t.Fatalf("missing denied tool part: %+v", proj.Turns[0].Assistant.Parts)
 }
+
+// 2026-08-26 真机回归：GPT fileChange 审批（官方无 command 字段，wire 恒带空串
+// toolInput）不得清掉同 item 已投影的工具内容——否则 SSV2 审批卡只剩按钮无文案。
+// GLM command 审批（toolInput=命令）行为不变：命令覆盖旧值。
+func TestReducerPermissionRequestEmptyToolInputKeepsProjectedToolContent(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex-web", "th_1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "codex-web", "th_1", "tool_started", map[string]interface{}{
+		"itemId":    "exec-4565",
+		"toolName":  "exec",
+		"toolInput": "apply_patch <<'PATCH'\n*** Update File: docs/a.md\nPATCH",
+	}))
+	r.Apply(ev(3, "codex-web", "th_1", "permission_request", map[string]interface{}{
+		"requestId":    "exec-4565",
+		"toolName":     "FileChange",
+		"toolInput":    "",
+		"toolInputRaw": map[string]interface{}{"itemId": "exec-4565", "reason": nil},
+	}))
+
+	proj, ok := r.Snapshot("codex-web", "th_1")
+	if !ok {
+		t.Fatal("no projection")
+	}
+	for _, p := range proj.Turns[0].Assistant.Parts {
+		if p.Type == "tool" && p.ItemID == "exec-4565" {
+			if !p.RequiresPermissionConfirmation || p.ToolStatus != "pending" {
+				t.Fatalf("pending permission part = %+v", p)
+			}
+			if s, _ := p.ToolInput.(string); s == "" || p.ToolInput == nil {
+				t.Fatalf("empty toolInput wiped projected tool content: %+v", p)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing permission part: %+v", proj.Turns[0].Assistant.Parts)
+}
+
+func TestReducerPermissionRequestCommandToolInputStillOverwrites(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "codex-web", "th_1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+	r.Apply(ev(2, "codex-web", "th_1", "tool_started", map[string]interface{}{
+		"itemId":    "exec-1",
+		"toolName":  "exec",
+		"toolInput": "echo hi",
+	}))
+	r.Apply(ev(3, "codex-web", "th_1", "permission_request", map[string]interface{}{
+		"requestId": "exec-1",
+		"toolName":  "Command",
+		"toolInput": "rm -rf /tmp/probe",
+	}))
+
+	proj, _ := r.Snapshot("codex-web", "th_1")
+	for _, p := range proj.Turns[0].Assistant.Parts {
+		if p.Type == "tool" && p.ItemID == "exec-1" {
+			if s, _ := p.ToolInput.(string); s != "rm -rf /tmp/probe" {
+				t.Fatalf("command approval must overwrite toolInput, got %+v", p.ToolInput)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing permission part: %+v", proj.Turns[0].Assistant.Parts)
+}
