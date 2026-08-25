@@ -120,6 +120,9 @@ func (a *Agent) dispatchEvent(ev core.Event) {
 	if ev.Type == core.EventPlan && ev.SessionID != "" {
 		a.rememberPlan(ev.SessionID, ev.Plan)
 	}
+	if ev.Type == core.EventContextUsageUpdated && ev.SessionID != "" && ev.ContextUsage != nil {
+		a.rememberContextUsage(ev.SessionID, ev.ContextUsage)
+	}
 	a.mu.Lock()
 	set := a.listeners[ev.SessionID]
 	chans := make([]chan core.Event, 0, len(set))
@@ -685,6 +688,9 @@ func (a *Agent) Subscribe(ctx context.Context) (<-chan core.Event, error) {
 			for _, ev := range codec.Decode(n) {
 				if ev.Type == core.EventPlan && ev.SessionID != "" {
 					a.rememberPlan(ev.SessionID, ev.Plan)
+				}
+				if ev.Type == core.EventContextUsageUpdated && ev.SessionID != "" && ev.ContextUsage != nil {
+					a.rememberContextUsage(ev.SessionID, ev.ContextUsage)
 				}
 				select {
 				case events <- ev:

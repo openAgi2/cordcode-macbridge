@@ -79,6 +79,10 @@ type Agent struct {
 	// iOS 打开会话/8s 轮询/继续前拉取都从这里取，避免 turn 已 start 却查不到 todo。
 	// 有界：超过 cap 时全清（plan 是易失状态，宁可重拉不泄漏）。
 	planCache map[string][]core.Todo
+	// usageBySession mirrors official thread/tokenUsage/updated notifications.
+	// It also receives the persisted token_count record exposed by thread.path
+	// when an already-loaded thread cannot replay usage on resume.
+	usageBySession map[string]*core.ContextUsage
 
 	// 官方 model/list + typed config/read 的只读快照（models.go）。仅用于校验用户
 	// 从刚取得目录中选择的 model；读取失败不回退到该快照冒充新结果。
@@ -106,7 +110,7 @@ type ProbeSnapshot struct {
 // New 按 opts 构造（main.go buildAgentOptions 的键：work_dir、
 // codex_web_app_server_url、codex_web_codex_home）。
 func New(opts map[string]any) *Agent {
-	a := &Agent{liveCodec: NewLiveCodec(), listeners: map[string]map[chan core.Event]struct{}{}, turnMetrics: map[string]*TurnMetrics{}, sendAt: map[string]time.Time{}, registry: NewInteractionRegistry(), modelKnown: map[string]string{}, modelEfforts: map[string][]string{}, modelDefaultEffort: map[string]string{}, planCache: map[string][]core.Todo{}, mode: "custom"}
+	a := &Agent{liveCodec: NewLiveCodec(), listeners: map[string]map[chan core.Event]struct{}{}, turnMetrics: map[string]*TurnMetrics{}, sendAt: map[string]time.Time{}, registry: NewInteractionRegistry(), modelKnown: map[string]string{}, modelEfforts: map[string][]string{}, modelDefaultEffort: map[string]string{}, planCache: map[string][]core.Todo{}, usageBySession: map[string]*core.ContextUsage{}, mode: "custom"}
 	if opts == nil {
 		return a
 	}

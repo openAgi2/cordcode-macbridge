@@ -62,8 +62,9 @@ func TestProvenanceNoForbiddenImports(t *testing.T) {
 	}
 }
 
-// TestProvenanceNoRolloutPathAccess 本包源码不得出现 rollout 路径操作（生成/查找/
-// 借用 session 文件路径——§9.1 hydrate source 行红线）。
+// TestProvenanceNoRolloutPathAccess 本包不得生成/查找 rollout 路径。唯一窄例外是
+// context_usage.go 可以读取官方 API 返回的 Thread.path：app-server 对已加载 thread
+// 没有 usage-read RPC。该文件仍不得包含任何路径发现字面量。
 func TestProvenanceNoRolloutPathAccess(t *testing.T) {
 	fset := token.NewFileSet()
 	pkgs, err := parser.ParseDir(fset, ".", nil, 0)
@@ -93,11 +94,11 @@ func TestProvenanceNoRolloutPathAccess(t *testing.T) {
 // （后续 review 以 git 首提交"纯新增"为准）。
 func TestProvenanceFilesAreNewlyAuthored(t *testing.T) {
 	required := map[string]string{
-		"codexweb.go":      "从空目录建立",
-		"lifecycle.go":     "官方服务生命周期",
-		"transport.go":     "WebSocket over Unix socket",
-		"rpc.go":           "app-server-client",
-		"interactions.go":  "availableDecisions",
+		"codexweb.go":     "从空目录建立",
+		"lifecycle.go":    "官方服务生命周期",
+		"transport.go":    "WebSocket over Unix socket",
+		"rpc.go":          "app-server-client",
+		"interactions.go": "availableDecisions",
 	}
 	for fname, marker := range required {
 		b, err := os.ReadFile(filepath.Join(fname))
