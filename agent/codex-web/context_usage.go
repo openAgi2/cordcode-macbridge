@@ -133,7 +133,7 @@ func (a *Agent) GetSessionContextUsage(ctx context.Context, sessionID string) (*
 	// 版本门控（审计 §3.3-C1-2）：initialize 记录的 CLI 版本不在已验证版本族 →
 	// 不走文件路径（弃用 + 诊断，不静默）。
 	if !cliVersionAllowsPersistedUsage(a.cliVersion()) {
-		slog.Info("codexweb usage: skip rollout-tail path (unverified CLI version)",
+		slog.Info("codexweb usage: skip rollout-tail-experimental path (unverified CLI version)",
 			"thread", sessionID, "cli", a.cliVersion(),
 			"usage-source", "rollout-tail-experimental")
 		return a.cachedContextUsage(sessionID), nil

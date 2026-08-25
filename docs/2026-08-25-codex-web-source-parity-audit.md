@@ -50,6 +50,7 @@
 ### 3.1 A 类：官方有算法，实现漂移
 
 #### A1 InteractionRegistry 无移植声明 + history 无界
+- **处置状态**：处置完成（2026-08-25 批次 1，git:3d84b28）
 - 位置：`agent/codex-web/interactions.go:63-84`（registry 结构）、`126-138`（MarkResolved）、`418-487`（resolvedEvents，工作区版本）
 - 现状：pending/history/resolvedByRequest 三 map；per-epoch `notified` 去重；pending 线性扫描按 (thread, requestId) 归属。`resolvedByRequest` 有 1024 界，**`history` map 只增不减（进程生命周期无界）**。
 - 官方锚点：`tui/src/app/app_server_requests.rs:74-360`（PendingAppServerRequests：分类型 HashMap、take_resolution、resolve_notification、会话重置 clear()）。
@@ -61,6 +62,7 @@
   4. 不变量回归测试：每 epoch 恰发一次收口事件；第二泵晚到仍可经 `resolvedByRequest` 归属；`DropEpoch` 后旧 epoch 不再产出。
 
 #### A2 permission 乐观收口未清算（对称性残留）
+- **处置状态**：处置完成（2026-08-25 批次 1a，git:e319ea5；复现=go-bridge permission_closure_audit_test 三用例，收口源断言=官方 serverRequest/resolved 驱动；真机验收留 owner）
 - 位置：`go-bridge/handlers.go` `handleResolvePermission`（publish `permission_resolved` 于 RespondPermission 成功后，约 :4084-4098）。
 - 现状：立即乐观 publish，注释理由 = 等待 host mux 帧导致 SSV2 重映射卡 UI（Task Review / message dock 不消失）。
 - 官方锚点：TUI 收口唯一路径 = `ServerRequestResolved` 通知（`app_server_events.rs:118-142`），发送应答后不本地关闭。
@@ -73,6 +75,7 @@
 - 验收：允许/拒绝后卡片立即收口不回归；收口事件源断言 = `serverRequest/resolved` 驱动；并入 p5-interactions 真机回归。
 
 #### A3 steer/interrupt 失配未采用官方 resync-retry
+- **处置状态**：处置完成（2026-08-25 批次 2，git:cde3cb0；control_race_test 7 用例）
 - 位置：`agent/codex-web/events.go:481-499`（currentTurnForControl，注释明确"原样透传，不重试伪装"）、`501-526`（CancelTurnForThread）。
 - 官方锚点：`tui/src/app.rs:643-703`（steer/interrupt 失配错误解析 + 重同步 + 重试一次，含 Missing 分支）。
 - 定性：官方**有**算法（错误驱动重同步），本仓选择了相反行为（fail-closed 不重试）且未声明理由——属于"官方已有算法时另造更差等价物"。
@@ -87,6 +90,7 @@
 以下各项**不要求回迁官方算法**（官方无对应机制或官方模型不适用双泵架构），处置 = 在本文档登记豁免卡 + 补不变量回归测试。修复实施时逐项填全：为什么官方没有 / 不变量 / 失败模式 / 回归测试。
 
 #### B1 双泵 per-epoch resolved fan-out（工作区已实现）
+- **处置状态**：豁免卡登记+不变量测试完成（2026-08-25 批次 1 首笔，git:3d84b28）
 - 位置：`interactions.go` resolvedEvents（每泵按 epoch 各发一次收口事件）。
 - 豁免理由：产品架构 = 单逻辑客户端、两物理连接（主泵/观察泵）对同一共享 daemon；官方"每客户端视角各自收口"映射为"每泵各发一份"，kernel reducer 按 interactionId 幂等 upsert。
 - 不变量：每 epoch 恰一次；reducer 幂等双投无害；`resolvedByRequest` 有界归属第二泵；泵断线期间 missed resolved 由另一泵 + kernel 投影兜底，重连冷校准遵循 §8.3。
@@ -124,6 +128,7 @@
 ### 3.3 C 类：红线违规
 
 #### C1 context_usage 直接解析 rollout JSONL（owner 已裁决：保留并加固 + 设计修订）
+- **处置状态**：代码加固完成（2026-08-25 批次 3，git:faa9e92：fixture+版本门控+可见性）；§0.3 修订案草案停等 owner 批准
 - 位置：`agent/codex-web/context_usage.go:76-156`（`GetSessionContextUsage` 经官方 `thread/read` 取 path 后，`readPersistedContextUsage` tail 读 8MB 解析 `event_msg/token_count` 记录）。
 - 违反：§0.3（"用量"在官方 API 唯一数据面清单内，禁止解析 `~/.codex/sessions/**/*.jsonl` 补造事实）、§9 旁路禁区（rollout parser）；且 rollout 内部格式**无稳定性契约**，当前形状不吻合时静默回退 cache，属 §1 要禁止的"静默 fallback"。
 - 缓解事实：官方确无冷用量读取 RPC（live 仅有 `thread/tokenUsage/updated` 通知；官方冷用量由 server 侧 resume 时自行解析 rollout）；path 来源是官方 API；功能已随 6f765fc 交付且 owner 已在真机确认上下文占用显示正常。
@@ -135,6 +140,7 @@
 - 验收：fixture 单测 + 版本门控单测 + 设计修订段落落档。
 
 #### C2 history 合成终态与合成身份（低危）
+- **处置状态**：处置完成（2026-08-25 批次 1c，git:8addcb1；plan 状态四态映射单测）
 - 位置：`agent/codex-web/history.go` mapHistoryItem plan 分支（约 :294-320，plan 卡无条件合成 `status:"completed"`）、`GetRichSessionHistory`（约 :484-507，system note 合成 ID `turnID+":"+note`、错误文案前缀"官方 turn 失败："）。
 - 定性：plan 终态属 §1"私自生成 status"字面违反；合成 ID/文案前缀是已注释的 bridge 兼容面，危害低。
 - 处置：plan 卡状态改为从官方 `turn.status` 推导（turn completed → completed，否则 unknown），不再无条件合成；合成 ID 保留但补碰撞不可能性说明（单 turn 内 note 唯一）；文案前缀保留（产品文案非事实编造）。
@@ -187,3 +193,12 @@ iOS 仓（`/Users/jacklee/Projects/cordcode-ios-codex-web-backend`，分支 `cod
 - `agent/codex-web` 逐文件排查手搓状态机（自定义 registry/map/去重/推导）；
 - go-bridge 气味关键词（fallback/兜底/legacy/乐观/启发式）逐条上下文判定；
 - 关键发现均经第二遍源码核读（context_usage.go、events.go currentTurnForControl、handlers.go handleResolvePermission、interactions.go MarkResolved、app.rs resync helpers、thread_lifecycle.rs 广播、app_server_events.rs 收口路径）。
+
+## 8. 附录：iOS 仓抽查结论（批次 6，2026-08-25）
+
+iOS 仓消费 bridge-v1，不直接接触 app-server 语义。按 §6 抽查两处：
+
+1. **70ce93f 模型目录归一化**：iOS 消费两个 bridge 交付的 id 形态（目录 provider-qualified id 与 get_session 裸 id）做匹配——`normalizedModelID` 剥前缀仅用于匹配/显示，不产出 provider 归属事实（provider 真值仍来自目录/get_session）。含一条显示级容忍规则（bare id 相同则不因 provider 别名拒绝匹配，custom/openai 同 daemon 命名空间）：影响面 = 目录行高亮，不影响发送值（发送走显式选择）。已知边界：两个 provider 暴露同一 bare id 时最坏错行高亮（显示级）。**判定：符合「只消费 bridge 事实不自行推导」**；显示级归一化规则记录在案，无需豁免卡。
+2. **27d9b56 会话控制面取值**：投影打开路径显式调 bridge `get_session` 控制面，`applySessionModelSelection` 原样应用 `effectiveModelID/effectiveProviderID`；无真值时诚实标记 `openedSessionLacksModelTruth`（不让全局默认冒充实际模型）。**判定：完全符合**，零本地推导。
+
+抽查结论：iOS 侧无需整改项。

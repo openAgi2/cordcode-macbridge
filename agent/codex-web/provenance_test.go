@@ -65,7 +65,11 @@ func TestProvenanceNoForbiddenImports(t *testing.T) {
 // TestProvenanceNoRolloutPathAccess 本包不得生成/查找 rollout 路径。唯一窄例外是
 // context_usage.go 可以读取官方 API 返回的 Thread.path：app-server 对已加载 thread
 // 没有 usage-read RPC。该文件仍不得包含任何路径发现字面量。
+// 白名单：可见性标记 "rollout-tail-experimental"（owner 裁决 2026-08-25「保留并
+// 加固」，审计 §3.3-C1 豁免卡——契约 fixture + 版本门控 + descriptor 标注）；剥离
+// 该标记后再扫描，其余 rollout/store 词汇仍然禁区。
 func TestProvenanceNoRolloutPathAccess(t *testing.T) {
+	const c1ExemptionMarker = "rollout-tail-experimental"
 	fset := token.NewFileSet()
 	pkgs, err := parser.ParseDir(fset, ".", nil, 0)
 	if err != nil {
@@ -80,7 +84,7 @@ func TestProvenanceNoRolloutPathAccess(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read %s: %v", fname, err)
 			}
-			src := string(b)
+			src := strings.ReplaceAll(string(b), c1ExemptionMarker, "")
 			for _, forbidden := range []string{"rollout-", "sessions/rollout", `threadStore`, `.jsonl"`} {
 				if strings.Contains(src, forbidden) {
 					t.Errorf("%s 引用旧 rollout/store 路径词汇 %q（§9.1 禁区）", fname, forbidden)
