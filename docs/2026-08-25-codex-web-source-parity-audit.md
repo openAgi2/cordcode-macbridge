@@ -97,6 +97,7 @@
 - 豁免理由：官方 TUI 只跟踪自己 start 的 turn id，从不 steer/interrupt 他人 turn；本仓产品需要控制观察 turn（iOS 停止 Mac 发起的 turn）。
 - 不变量：liveCodec 观测为权威；本端 start 返回值仅在无观测时使用（毫秒窗口）；官方 -32600 原样透传（A3 移植后升级为 resync-retry）。
 - 失败模式：订阅前已开始的 turn 无 turn/started（官方不重放）→ 冷基线 thread/read inProgress 兜底；仍找不到 = fail closed。
+- **登记状态（2026-08-25 批次 2）**：A3 resync-retry 已回迁（解析器锚点 app.rs:643-692、重试语义 thread_routing.rs:604-627/683-727，代码注释已引用本卡与官方锚点）；三源顺序不变（liveCodec > 本端 start 返回 > 冷基线最后手段）。回归测试 `agent/codex-web/control_race_test.go`。
 
 #### B3 重连循环 + isConnectionLoss 字符串启发式
 - 位置：`events.go:196-217`（reconnectLoop 2s→60s 退避）、`session.go:284-306`（`isConnectionLoss` 匹配 "broken pipe"/"websocket: close" 判连接死活）。

@@ -484,8 +484,9 @@ func (s *agentSession) CancelTurn(ctx context.Context) error {
 // turn/started 广播先到中央泵，liveCodec 才是当前 turn 的权威身份（2026-08-24
 // 真机：过期 local 使首次停止报 -32600 expected active turn id ... but found ...）。
 // liveCodec 无观测时（本端 turn/start 已返回、turn/started 事件到达前的毫秒窗口）
-// 回退 local。Phase 0 同毫秒边界：立即控制仍可能报官方 -32600——原样透传，
-// 不重试伪装。
+// 回退 local。三源顺序（liveCodec > 本端 start 返回 > 冷基线）见豁免卡审计
+// §3.2-B2；同毫秒边界的官方 -32600 失配由 resync-retry（下方，审计 §3.1-A3）
+// 权威纠正。
 func (s *agentSession) currentTurnForControl() string {
 	s.agent.mu.Lock()
 	observed := s.agent.liveCodec.ActiveTurn(s.threadID)
@@ -498,15 +499,74 @@ func (s *agentSession) currentTurnForControl() string {
 	return s.activeTurnID
 }
 
+// syncControlTurn 重同步控制面 turn 观测：liveCodec（权威）+ session 毫秒窗兜底
+// 同步更新（豁免卡审计 §3.2-B2 的两视角一致）。
+func (s *agentSession) syncControlTurn(turnID string) {
+	s.agent.mu.Lock()
+	s.agent.liveCodec.setActiveTurn(s.threadID, turnID)
+	s.agent.mu.Unlock()
+	s.mu.Lock()
+	s.activeTurnID = turnID
+	s.mu.Unlock()
+}
+
+// steerRace 分类 turn/steer 官方失配错误（官方移植，审计 §3.1-A3）。
+// 锚点 tui/src/app.rs:643-674（active_turn_steer_race）。
+type steerRace struct {
+	missing      bool   // "no active turn to steer"
+	actualTurnID string // "expected active turn id `X` but found `Y`" → Y
+}
+
+func parseSteerRace(msg string) steerRace {
+	// 锚点 app.rs:656-657。
+	if msg == "no active turn to steer" {
+		return steerRace{missing: true}
+	}
+	// 锚点 app.rs:659-674：前缀/分隔/后缀均带反引号，首次出现处切分。
+	const prefix = "expected active turn id `"
+	const sep = "` but found `"
+	rest, ok := strings.CutPrefix(msg, prefix)
+	if !ok {
+		return steerRace{}
+	}
+	mid := strings.Index(rest, sep)
+	if mid < 0 {
+		return steerRace{}
+	}
+	actual, ok := strings.CutSuffix(rest[mid+len(sep):], "`")
+	if !ok {
+		return steerRace{}
+	}
+	return steerRace{actualTurnID: actual}
+}
+
+// parseInterruptMismatch 解析 turn/interrupt 官方失配（官方移植，审计 §3.1-A3）。
+// 锚点 tui/src/app.rs:676-692（active_turn_interrupt_race）：无反引号变体
+// "expected active turn id X but found Y" → Y。
+func parseInterruptMismatch(msg string) string {
+	const prefix = "expected active turn id "
+	const sep = " but found "
+	rest, ok := strings.CutPrefix(msg, prefix)
+	if !ok {
+		return ""
+	}
+	if _, after, found := strings.Cut(rest, sep); found {
+		return after
+	}
+	return ""
+}
+
 // CancelTurnForThread 对观测/被动订阅的 thread 执行官方 turn/interrupt
 // （core.ThreadTurnCanceler）：iOS 停止 Mac 在共享 daemon 上发起的 turn 时，
 // 本端没有该 thread 的写会话，turnID 只能取中央泵 liveCodec 观测到的 active turn。
-// 无活动 turn / 官方 -32600 均原样返回，不重试伪装。
+// 无活动 turn 原样返回。官方 -32600 失配走 resync-retry（审计 §3.1-A3，
+// 官方 thread_routing.rs:604-627）：attempt 0 失配 → 以服务器报告的 actual id
+// 重同步（权威纠正）后重试一次；仍失败才原样返回官方错误。
 //
 // 订阅前已运行的 turn（2026-08-23 真机 01a02f29）：观察连接在 turn/started 广播
 // 之后才 attach，官方不重放开始事件——liveCodec 永远看不到。此时 thread/read
 // 的 inProgress 状态是官方身份的另一条合法来源（与外置 turn 冷基线同源），
-// 在 liveCodec miss 时兜底查询，仍然 fail closed（找不到才算 no active turn）。
+// 在 liveCodec miss 时兜底查询（最后手段，豁免卡 §3.2-B2），仍然 fail closed。
 func (a *Agent) CancelTurnForThread(ctx context.Context, threadID string) error {
 	_, cl, err := a.endpointFor(ctx)
 	if err != nil {
@@ -519,10 +579,23 @@ func (a *Agent) CancelTurnForThread(ctx context.Context, threadID string) error 
 	if turnID == "" {
 		return &userError{"codex-web: no active turn to interrupt"}
 	}
-	if rpcErr := TurnInterrupt(ctx, cl, threadID, turnID); rpcErr != nil {
-		return rpcErr
+	rpcErr := TurnInterrupt(ctx, cl, threadID, turnID)
+	if rpcErr == nil {
+		return nil
 	}
-	return nil
+	// 官方 resync-retry（审计 §3.1-A3；thread_routing.rs:612-618）：
+	if actual := parseInterruptMismatch(rpcErr.Message); actual != "" && actual != turnID {
+		a.mu.Lock()
+		a.liveCodec.setActiveTurn(threadID, actual)
+		a.mu.Unlock()
+		slog.Info("codexweb: interrupt mismatch resync retry",
+			"thread", threadID, "stale", turnID, "actual", actual)
+		if retryErr := TurnInterrupt(ctx, cl, threadID, actual); retryErr != nil {
+			return retryErr
+		}
+		return nil
+	}
+	return rpcErr
 }
 
 // inProgressTurnFromColdBaseline 读官方 thread/read(includeTurns) 找状态为
@@ -556,6 +629,23 @@ func (s *agentSession) Steer(ctx context.Context, prompt string) (string, error)
 		return "", &userError{"codex-web: no active turn to steer (expectedTurnId 必填，§7)"}
 	}
 	steered, rpcErr, err := TurnSteer(ctx, cl, s.threadID, turnID, []InputPart{TextPart(prompt)})
+	if err == nil && rpcErr != nil {
+		// 官方 resync-retry（审计 §3.1-A3；thread_routing.rs:683-727）。
+		if race := parseSteerRace(rpcErr.Message); race.missing {
+			// Missing 分支（thread_routing.rs:691-698）：本地观测过期——清除后按
+			// 官方 should_start_turn 语义转普通 Send（输入进新 turn）。
+			s.syncControlTurn("")
+			if sendErr := s.Send(prompt, nil, nil); sendErr != nil {
+				return "", sendErr
+			}
+			return "", nil
+		} else if race.actualTurnID != "" && race.actualTurnID != turnID {
+			// ExpectedTurnMismatch（thread_routing.rs:704-717）：以服务器报告的
+			// actual id 重同步（权威纠正）后重试一次（actual == 本地 id 不重试）。
+			s.syncControlTurn(race.actualTurnID)
+			steered, rpcErr, err = TurnSteer(ctx, cl, s.threadID, race.actualTurnID, []InputPart{TextPart(prompt)})
+		}
+	}
 	switch {
 	case err != nil:
 		return "", err

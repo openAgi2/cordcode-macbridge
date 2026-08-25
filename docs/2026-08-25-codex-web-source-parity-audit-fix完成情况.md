@@ -44,7 +44,21 @@
 - 门验证：`go test ./... -count=1` 全绿（0 失败）、`go vet ./...` 干净；定向：interactions 不变量 4 用例、permission closure 3 用例、plan 状态映射 4 态、B5 丢弃用例均 PASS。
 - 真机验收（允许/拒绝后卡片立即收口）保留 owner，未代填。
 
-## 批次 2：A3 官方算法回迁（待批次 1 完成后填写）
+## 批次 2：A3 官方算法回迁
+
+### 2a A3：steer/interrupt 失配 resync-retry
+
+- **官方实现位置**：解析 `tui/src/app.rs:643-703`——steer 失配消息 ``expected active turn id `X` but found `Y` ``（反引号包裹，:659-674）、`no active turn to steer` Missing 分支（:656-657）、interrupt 失配 `expected active turn id X but found Y`（无反引号，:676-692）；重试语义 `tui/src/app/thread_routing.rs:604-627`（interrupt attempt 0 失配 → 重同步 `actual` 后 continue 重试一次）与 `:683-727`（steer Missing → 清本地观测转 should_start_turn；ExpectedTurnMismatch 且未重试过且 actual ≠ 本地 id → 重同步重试一次）。
+- **我方实现的第一处分歧**：`events.go` `currentTurnForControl`/`CancelTurnForThread`/`Steer` 对官方 -32600 失配一律「原样透传，不重试伪装」（注释明示）——官方**有**错误驱动的 resync-retry 算法，本仓选择了相反行为且未声明。
+- **处置**：移植两解析器 + 重试一次语义；三源观测顺序保留（liveCodec > 本端 start 返回 > 冷基线，冷基线仍为最后手段，豁免卡 §3.2-B2）；失配 resync 作为权威纠正（actual id 来自服务器错误）。Steer Missing 分支按官方 should_start_turn 语义转普通 Send。
+- **验收**：两种失配消息解析 + 重试单测；正常路径不再因过期 local id 报 -32600。
+
+## 批次 2 完成（2026-08-25）
+
+- 提交：见 git log（A3 resync-retry 回迁 + B2 卡登记状态回写）。
+- 门验证：`go test ./... -count=1` 全绿、`go vet ./...` 干净；定向 7 用例（解析 2 + interrupt 重试成功/持续失败 2 + steer 重试 1 + Missing 转 Send 1）均 PASS。
+- 修复过程事故：初版重试路径 `return TurnInterrupt(...)` 直接返回 nil `*RPCError` → typed-nil error 接口陷阱（err != nil 但打印 <nil>），测试捕获后改为显式判空返回——无生产影响（新代码首次提交前被测试拦下）。
+- 真机验收（iOS 停止 Mac 发起 turn 不再因过期 local id 报 -32600）保留 owner。
 
 ## 批次 3：C1 冷用量加固（待填写）
 
