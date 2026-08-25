@@ -4065,11 +4065,14 @@ func (h *Handlers) handleResolvePermission(conn Connection, msg WireMessage) {
 
 	result := core.PermissionResult{Behavior: params.Behavior}
 	var err error
+	var responder any // 承载应答的 session/agent（乐观收口豁免判定用）
 	if ok && sess != nil {
 		err = sess.RespondPermission(params.RequestID, result)
+		responder = sess
 	} else if agent, aok := h.getAgent(msg.BackendID); aok {
-		if responder, rok := agent.(core.SessionPermissionResponder); rok {
-			err = responder.RespondSessionPermission(h.ctx, params.SessionID, params.RequestID, result)
+		if sr, rok := agent.(core.SessionPermissionResponder); rok {
+			err = sr.RespondSessionPermission(h.ctx, params.SessionID, params.RequestID, result)
+			responder = sr
 		} else {
 			conn.SendResult(msg.RequestID, nil, &WireError{Code: "session_not_found", Message: "no active session for permission response"})
 			return
@@ -4080,10 +4083,15 @@ func (h *Handlers) handleResolvePermission(conn Connection, msg WireMessage) {
 	}
 	if err != nil {
 		slog.Error("go-bridge: RespondPermission failed", "error", err)
-	} else {
+	} else if !officialResolutionSource(responder) {
 		// Close the projection permission card immediately. Waiting for the host
 		// approval/resolved mux frame leaves SSV2 remapping the still-pending tool
-		// (Task Review / message dock stay up after Allow).
+		// (Task Review / message dock stay up after Allow). Origin: 630fb8d
+		// (dsh-web)——宿主无官方 resolved 广播到达投影，本地收口是产品必需。
+		// codex-web 豁免（core.OfficialResolutionSource，审计 §3.1-A2）：官方
+		// serverRequest/resolved 双泵 per-epoch 投递（agent/codex-web
+		// interactions.go resolvedEvents，豁免卡 §3.2-B1）是收口唯一真相，
+		// 本地乐观收口违反「官方 resolved 是唯一收口真相」。
 		h.publishEvent(LogicalEvent{
 			SessionID: params.SessionID,
 			BackendID: msg.BackendID,
@@ -4096,6 +4104,13 @@ func (h *Handlers) handleResolvePermission(conn Connection, msg WireMessage) {
 	}
 
 	conn.SendResult(msg.RequestID, &ResultResponse{Ok: true}, nil)
+}
+
+// officialResolutionSource 判定应答承载方是否为官方 resolved 广播源
+// （core.OfficialResolutionSource，审计 §3.1-A2）。
+func officialResolutionSource(v any) bool {
+	src, ok := v.(core.OfficialResolutionSource)
+	return ok && src.EmitsOfficialResolution()
 }
 
 func (h *Handlers) handleQuestionReply(conn Connection, msg WireMessage) {

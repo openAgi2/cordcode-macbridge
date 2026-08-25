@@ -372,6 +372,12 @@ func (a *Agent) RespondSessionPermission(ctx context.Context, sessionID, request
 	return a.respondPermission(ctx, sessionID, requestID, result)
 }
 
+// EmitsOfficialResolution 声明官方 serverRequest/resolved 广播经双泵 per-epoch
+// 投递到 bridge 事件流（resolvedEvents，豁免卡审计 §3.2-B1）——官方收口唯一路径 =
+// ServerRequestResolved（app_server_events.rs:118-142），bridge 不得在此之上叠加
+// 本地乐观 permission_resolved（审计 §3.1-A2）。
+func (a *Agent) EmitsOfficialResolution() bool { return true }
+
 // respondPermission 把 bridge PermissionResult 映射为官方响应：
 //   - command/file：allow→{"decision":"accept"}，deny→{"decision":"cancel"}；
 //   - permission：deny→{"permissions":{},"scope":"session"}（样本冻结），

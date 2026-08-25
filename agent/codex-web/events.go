@@ -571,6 +571,10 @@ func (s *agentSession) RespondPermission(requestID string, result core.Permissio
 	return s.agent.respondPermission(context.Background(), s.threadID, requestID, result)
 }
 
+// EmitsOfficialResolution 与 *Agent 同：官方 resolved 广播双泵投递是收口唯一
+// 真相（豁免卡审计 §3.2-B1 / §3.1-A2）。
+func (s *agentSession) EmitsOfficialResolution() bool { return true }
+
 // RespondQuestion / RejectQuestion 应答 requestUserInput（interactionID 级整批提交）。
 func (s *agentSession) RespondQuestion(questionID string, optionIDs []string) error {
 	return s.agent.respondUserInput(context.Background(), questionID, optionIDs, false)

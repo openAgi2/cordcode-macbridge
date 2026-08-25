@@ -67,6 +67,18 @@ type SessionPermissionResponder interface {
 	RespondSessionPermission(ctx context.Context, sessionID, requestID string, result PermissionResult) error
 }
 
+// OfficialResolutionSource marks backends whose official protocol broadcasts a
+// resolution notification into the bridge event stream (codex-web:
+// serverRequest/resolved fanned out per subscribed pump —
+// agent/codex-web/interactions.go resolvedEvents, exemption card source-parity
+// audit §3.2-B1; official TUI closes only on ServerRequestResolved,
+// app_server_events.rs:118-142). For these backends official resolution is the
+// single closure truth: handlers must not layer a local optimistic
+// permission_resolved on top (source-parity audit §3.1-A2).
+type OfficialResolutionSource interface {
+	EmitsOfficialResolution() bool
+}
+
 // PromptOptions carries the per-request turn options that ride a single
 // prompt atomically (canonical §6.11.1: session-scoped, never an agent-global
 // mutable selection that can race concurrent sessions). Empty fields mean
