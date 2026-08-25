@@ -9,6 +9,13 @@ package codexweb
 // that case the persisted record is the only current read surface: no
 // thread/tokenUsage/read RPC exists. We only open the exact path returned by
 // official thread/read; this is not session discovery or a second catalog.
+//
+// 记录在案的豁免（owner 裁决 2026-08-25，审计 §3.3-C1「保留并加固 + 设计修订」）：
+// rollout 内部格式无稳定性契约，本路径受三层加固——契约 fixture
+// （testdata/.../dumps/usage/，形状不吻合弃用+诊断）、版本门控
+// （persistedUsageVerifiedCLIFamilies）、可见性（descriptor
+// usage-source: rollout-tail-experimental + 解析失败 warn）。官方提供冷用量
+// RPC 后退役。
 
 import (
 	"bytes"
@@ -16,6 +23,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -23,6 +31,31 @@ import (
 )
 
 const persistedUsageTailBytes int64 = 8 << 20
+
+// persistedUsageVerifiedCLIFamilies：rollout token_count 记录形状按这些 CLI
+// 版本族经 fixture 冻结验证（testdata/official-0.149.0-alpha.4/dumps/usage/；
+// pin 536f86e5 protocol.rs:2094-2164 TokenUsageInfo/TokenCountEvent/TokenUsage +
+// history/src/rollout_payload.rs RolloutItemWire::EventMsg）。官方内部格式无稳定性
+// 契约——版本族外不走文件路径（owner 裁决 2026-08-25，审计 §3.3-C1-2）。
+var persistedUsageVerifiedCLIFamilies = []string{"0.149."}
+
+func cliVersionAllowsPersistedUsage(version string) bool {
+	for _, family := range persistedUsageVerifiedCLIFamilies {
+		if strings.HasPrefix(version, family) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *Agent) cliVersion() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.endpoint == nil {
+		return ""
+	}
+	return a.endpoint.CLIVersion
+}
 
 type persistedTokenBreakdown struct {
 	TotalTokens           int `json:"total_tokens"`
@@ -97,6 +130,14 @@ func (a *Agent) GetSessionContextUsage(ctx context.Context, sessionID string) (*
 	if thread == nil || strings.TrimSpace(thread.Path) == "" {
 		return a.cachedContextUsage(sessionID), nil
 	}
+	// 版本门控（审计 §3.3-C1-2）：initialize 记录的 CLI 版本不在已验证版本族 →
+	// 不走文件路径（弃用 + 诊断，不静默）。
+	if !cliVersionAllowsPersistedUsage(a.cliVersion()) {
+		slog.Info("codexweb usage: skip rollout-tail path (unverified CLI version)",
+			"thread", sessionID, "cli", a.cliVersion(),
+			"usage-source", "rollout-tail-experimental")
+		return a.cachedContextUsage(sessionID), nil
+	}
 	usage, err := readPersistedContextUsage(thread.Path)
 	if err != nil {
 		return nil, err
@@ -135,11 +176,17 @@ func readPersistedContextUsage(path string) (*core.ContextUsage, error) {
 		}
 		var record persistedTokenCountRecord
 		if json.Unmarshal(lines[index], &record) != nil || record.Type != "event_msg" ||
-			record.Payload.Type != "token_count" || record.Payload.Info == nil {
+			record.Payload.Type != "token_count" {
 			continue
 		}
+		// 契约不吻合检测（审计 §3.3-C1-1）：最新一条 token_count 记录与冻结
+		// fixture 形状不符 → 弃用文件路径 + warn 诊断（不静默回退 cache）。
+		// 官方 model_context_window 为 Option（protocol.rs:2097-2099 TODO
+		// "make this not optional"）——null/≤0 时无法计算占用比，同样弃用。
 		info := record.Payload.Info
-		if info.ModelContextWindow <= 0 || info.Last.TotalTokens < 0 {
+		if info == nil || info.ModelContextWindow <= 0 || info.Last.TotalTokens < 0 {
+			slog.Warn("codexweb usage: rollout token_count shape mismatch with frozen fixture — abandoning file path",
+				"path", path, "usage-source", "rollout-tail-experimental")
 			return nil, nil
 		}
 		return &core.ContextUsage{

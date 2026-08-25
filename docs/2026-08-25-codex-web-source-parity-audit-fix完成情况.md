@@ -60,7 +60,24 @@
 - 修复过程事故：初版重试路径 `return TurnInterrupt(...)` 直接返回 nil `*RPCError` → typed-nil error 接口陷阱（err != nil 但打印 <nil>），测试捕获后改为显式判空返回——无生产影响（新代码首次提交前被测试拦下）。
 - 真机验收（iOS 停止 Mac 发起 turn 不再因过期 local id 报 -32600）保留 owner。
 
-## 批次 3：C1 冷用量加固（待填写）
+## 批次 3 完成（代码加固 2026-08-25；§0.3 修订案停等 owner 批准）
+
+### 3a C1：冷用量加固（owner 裁决「保留并加固 + 设计修订」）
+
+- **官方实现位置**：官方确无冷用量读取 RPC（live 仅 `thread/tokenUsage/updated` 通知；官方冷用量由 server 侧 resume 自行解析 rollout）。rollout 记录结构 pin 源码：`protocol/src/protocol.rs:2094-2100`（TokenUsageInfo，model_context_window 为 Option）、`:2072-2088`（TokenUsage 字段族）、`:2160-2164`（TokenCountEvent{info: Option}）、`:1346`（EventMsg::TokenCount）、`history/src/rollout_payload.rs:49-51`（RolloutItemWire::EventMsg 行形状）。
+- **我方实现的第一处分歧**：`context_usage.go` 直接 tail 解析 rollout JSONL，形状不吻合时静默回退 cache（违反 §0.3 数据面红线与 §1「禁止静默 fallback」），且无版本门控、无可见性标注。
+- **处置（三层加固）**：
+  1. 契约 fixture：真实脱敏样本落盘 `agent/codex-web/testdata/official-0.149.0-alpha.4/dumps/usage/rollout-tail.jsonl`（+ README 溯源锚点）；运行时最新一条 token_count 与 fixture 形状不符（Info null / model_context_window null·≤0 / 负用量）→ 弃用文件路径 + warn 诊断，不静默回退；
+  2. 版本门控：`persistedUsageVerifiedCLIFamilies`（当前 0.149.x 族）——initialize 记录的 CLI 版本族外不走文件路径（Info 诊断）；
+  3. 可见性：descriptor `StaticCapabilities` 标注 `usage-source: rollout-tail-experimental`；解析失败/门控跳过均打日志。
+- **门验证**：`go test ./... -count=1` 全绿、`go vet ./...` 干净；定向 4 用例（fixture 读取/版本门控跳过/形状不吻合弃用/版本族单测）PASS。
+
+### 3b 设计文档 §0.3 修订案（草案——停等 owner 批准，批准后回写设计文档）
+
+> **§0.3 修订建议（新增小节「记录在案的豁免：rollout 尾部冷用量」）**：
+> codex-web 的冷用量（已加载 thread 的当前 context 占用）读取，在官方无对应 RPC 的前提下，允许唯一一条受控文件路径：仅打开官方 `thread/read` 返回的 `Thread.path`，tail 读取 8MB 内最新的 `event_msg/token_count` 记录。该路径登记为记录在案的豁免，约束：(1) 契约 fixture 冻结形状，不吻合即弃用并打诊断，不静默回退；(2) CLI 版本门控（已验证版本族外不走文件路径）；(3) descriptor 与日志显式标注 `usage-source: rollout-tail-experimental`；(4) 该路径只读、不做 session 发现或第二目录；(5) 官方提供冷用量 RPC 后立即退役本路径。除本豁免外，§0.3「官方 API 唯一数据面」红线对其余全部用量事实仍然生效。
+
+**状态：本段落为草案，待 owner 批准后回写设计文档 §0.3；代码加固已按裁决先行提交。**
 
 ## 批次 4：B3/B4（待填写）
 

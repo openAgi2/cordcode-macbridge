@@ -14,6 +14,9 @@ import "github.com/openAgi2/cordcode-macbridge/core"
 //     turn/item 事件（Phase 0 Gate scene1 实证；§8.2 PASS）；
 //   - external_turn_streaming：Mac 官方客户端（默认配置 TUI，共享 daemon）发起的
 //     外部 turn 实时旁观成立（Gate 核心 PASS 结论）；
+//   - usage-source: rollout-tail-experimental：冷用量读取走官方 thread/read 返回
+//     的 rollout 尾部 token_count 记录（记录在案的豁免，审计 §3.3-C1；契约
+//     fixture + 版本门控见 context_usage.go，官方提供冷用量 RPC 后退役）；
 //   - RequiresExternalTurnPolling=false：不靠轮询补旁路。
 func (a *Agent) WireDescriptor() *core.WireDescriptor {
 	return &core.WireDescriptor{
@@ -21,7 +24,7 @@ func (a *Agent) WireDescriptor() *core.WireDescriptor {
 		DisplayName:                 "Codex Web",
 		LiveEventModel:              core.LiveEventBroadcast,
 		RequiresExternalTurnPolling: false,
-		StaticCapabilities:          []string{"external_turn_streaming"},
+		StaticCapabilities:          []string{"external_turn_streaming", "usage-source: rollout-tail-experimental"},
 	}
 }
 
