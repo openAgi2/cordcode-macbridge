@@ -6,7 +6,7 @@
   "design_doc_changed": true,
   "design_doc_changed_note": "审计文档被批次5/6按指令要求回写（处置状态/豁免卡/§8附录），非路线漂移",
   "activated_at": "2026-08-26T00:01:00+08:00",
-  "active_mode": true,
+  "active_mode": false,
   "owner_acceptance": {
     "status": "accepted",
     "received_at": "2026-08-26T00:15:00+08:00",
@@ -89,5 +89,7 @@
       }
     }
   ],
-  "next_directive_number": 3
+  "next_directive_number": 3,
+  "cycle_closed_at": "2026-08-26T00:40:00+08:00",
+  "cycle_closure_note": "源码对齐审计周期（指令1+2）verified 收口；主计划 111/111 done+proven+owner 真机矩阵/退役复测 PASS，任务关闭。后续新周期（iOS opencode/web 集成等）从指令 3 号起新开。"
 }
