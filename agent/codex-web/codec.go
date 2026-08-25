@@ -403,6 +403,13 @@ func decodeTokenUsage(n Notification) []core.Event {
 				OutputTokens          int `json:"outputTokens"`
 				ReasoningOutputTokens int `json:"reasoningOutputTokens"`
 			} `json:"total"`
+			Last struct {
+				TotalTokens           int `json:"totalTokens"`
+				InputTokens           int `json:"inputTokens"`
+				CachedInputTokens     int `json:"cachedInputTokens"`
+				OutputTokens          int `json:"outputTokens"`
+				ReasoningOutputTokens int `json:"reasoningOutputTokens"`
+			} `json:"last"`
 			ModelContextWindow int `json:"modelContextWindow"`
 		} `json:"tokenUsage"`
 	}
@@ -410,12 +417,14 @@ func decodeTokenUsage(n Notification) []core.Event {
 		return nil
 	}
 	usage := &core.ContextUsage{
-		UsedTokens:            p.TokenUsage.Total.TotalTokens,
+		// Codex itself computes context occupancy from tokenUsage.last. total is
+		// lifetime accounting and may exceed the model window many times over.
+		UsedTokens:            p.TokenUsage.Last.TotalTokens,
 		TotalTokens:           p.TokenUsage.Total.TotalTokens,
-		InputTokens:           p.TokenUsage.Total.InputTokens,
-		CachedInputTokens:     p.TokenUsage.Total.CachedInputTokens,
-		OutputTokens:          p.TokenUsage.Total.OutputTokens,
-		ReasoningOutputTokens: p.TokenUsage.Total.ReasoningOutputTokens,
+		InputTokens:           p.TokenUsage.Last.InputTokens,
+		CachedInputTokens:     p.TokenUsage.Last.CachedInputTokens,
+		OutputTokens:          p.TokenUsage.Last.OutputTokens,
+		ReasoningOutputTokens: p.TokenUsage.Last.ReasoningOutputTokens,
 		ContextWindow:         p.TokenUsage.ModelContextWindow,
 	}
 	return []core.Event{{

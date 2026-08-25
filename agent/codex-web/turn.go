@@ -26,19 +26,24 @@ import (
 // StartThreadOptions 是 thread/start 的已验证字段集（cwd 必填；model/modelProvider
 // 仅创建时输入，provider id 必须来自已验证官方事实——§7 new-thread provider 行）。
 type StartThreadOptions struct {
-	Cwd           string
-	Model         string
-	ModelProvider string
+	Cwd            string
+	Model          string
+	ModelProvider  string
+	PermissionMode string
 }
 
 // ThreadStartResult 是 thread/start / thread/resume 响应（官方字段原样保留）。
 type ThreadStartResult struct {
-	Thread          ThreadInfo `json:"thread"`
-	Model           string     `json:"model"`
-	ModelProvider   string     `json:"modelProvider"`
-	Cwd             string     `json:"cwd"`
-	ApprovalPolicy  *string    `json:"approvalPolicy"`
-	ReasoningEffort *string    `json:"reasoningEffort"`
+	Thread                  ThreadInfo      `json:"thread"`
+	Model                   string          `json:"model"`
+	ModelProvider           string          `json:"modelProvider"`
+	Cwd                     string          `json:"cwd"`
+	ApprovalPolicy          json.RawMessage `json:"approvalPolicy"`
+	ApprovalsReviewer       string          `json:"approvalsReviewer"`
+	ActivePermissionProfile struct {
+		ID string `json:"id"`
+	} `json:"activePermissionProfile"`
+	ReasoningEffort *string `json:"reasoningEffort"`
 }
 
 // StartThread 创建官方 thread（取得该 thread 的写入面）。
@@ -52,6 +57,9 @@ func StartThread(ctx context.Context, cl *Client, opts StartThreadOptions) (*Thr
 	}
 	if opts.ModelProvider != "" {
 		params["modelProvider"] = opts.ModelProvider
+	}
+	for key, value := range permissionModeParams(opts.PermissionMode) {
+		params[key] = value
 	}
 	raw, rpcErr, err := cl.RequestContext(ctx, "thread/start", params)
 	if err != nil {
@@ -68,6 +76,30 @@ func StartThread(ctx context.Context, cl *Client, opts StartThreadOptions) (*Thr
 		return nil, nil, err
 	}
 	return &res, nil, nil
+}
+
+// UpdateThreadPermissionMode changes subsequent turns on a loaded thread using
+// fields defined by Codex's official ThreadSettingsUpdateParams.
+func UpdateThreadPermissionMode(ctx context.Context, cl *Client, threadID, mode string) error {
+	params := map[string]any{"threadId": threadID}
+	for key, value := range permissionModeParams(mode) {
+		params[key] = value
+	}
+	if len(params) == 1 {
+		return fmt.Errorf("codexweb: permission mode %q has no live override", mode)
+	}
+	raw, rpcErr, err := cl.RequestContext(ctx, "thread/settings/update", params)
+	if err != nil {
+		return err
+	}
+	if rpcErr != nil {
+		return rpcErr
+	}
+	var response map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return fmt.Errorf("codexweb: thread/settings/update decode: %w", err)
+	}
+	return nil
 }
 
 // ResumeThread 恢复官方 thread（写入 ownership）。跨进程冲突按 §10.2 翻译。

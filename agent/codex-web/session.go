@@ -89,6 +89,9 @@ type Agent struct {
 	modelKnown         map[string]string
 	modelEfforts       map[string][]string
 	modelDefaultEffort map[string]string
+	// mode mirrors the latest official thread/resume permission settings. "custom"
+	// means no bridge override: Codex keeps the effective config/profile unchanged.
+	mode string
 }
 
 // ProbeSnapshot 是一次生命周期的只读快照（descriptor 镜像用）。
@@ -103,7 +106,7 @@ type ProbeSnapshot struct {
 // New 按 opts 构造（main.go buildAgentOptions 的键：work_dir、
 // codex_web_app_server_url、codex_web_codex_home）。
 func New(opts map[string]any) *Agent {
-	a := &Agent{liveCodec: NewLiveCodec(), listeners: map[string]map[chan core.Event]struct{}{}, turnMetrics: map[string]*TurnMetrics{}, sendAt: map[string]time.Time{}, registry: NewInteractionRegistry(), modelKnown: map[string]string{}, modelEfforts: map[string][]string{}, modelDefaultEffort: map[string]string{}, planCache: map[string][]core.Todo{}}
+	a := &Agent{liveCodec: NewLiveCodec(), listeners: map[string]map[chan core.Event]struct{}{}, turnMetrics: map[string]*TurnMetrics{}, sendAt: map[string]time.Time{}, registry: NewInteractionRegistry(), modelKnown: map[string]string{}, modelEfforts: map[string][]string{}, modelDefaultEffort: map[string]string{}, planCache: map[string][]core.Todo{}, mode: "custom"}
 	if opts == nil {
 		return a
 	}
@@ -119,6 +122,7 @@ func (a *Agent) Name() string { return BackendID }
 var _ core.WorkDirSwitcher = (*Agent)(nil)
 var _ core.CatalogRefreshSignaler = (*Agent)(nil)
 var _ core.SessionInfoFetcher = (*Agent)(nil)
+var _ core.SessionModelSelectionReader = (*Agent)(nil)
 var _ core.SessionRenamer = (*Agent)(nil)
 var _ core.SessionArchiver = (*Agent)(nil)
 var _ core.SessionDeleter = (*Agent)(nil)
@@ -358,6 +362,41 @@ func (a *Agent) FetchSessionInfo(ctx context.Context, sessionID string) (*core.A
 	}
 	info := threadToAgentSessionInfo(th)
 	return &info, nil
+}
+
+// GetSessionModelSelection obtains the effective per-thread settings from the
+// official thread/resume response. thread/list and thread/read intentionally do
+// not contain the model or effort, so neither can restore a session selection.
+func (a *Agent) GetSessionModelSelection(ctx context.Context, sessionID string) (core.SessionModelSelection, bool) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return core.SessionModelSelection{}, false
+	}
+	var settings *ThreadStartResult
+	err := a.withClient(ctx, func(cl *Client) error {
+		res, ownership, rpcErr, err := ResumeThread(ctx, cl, sessionID)
+		switch {
+		case err != nil:
+			return err
+		case ownership != nil:
+			return ownership
+		case rpcErr != nil:
+			return rpcErr
+		default:
+			settings = res
+			return nil
+		}
+	})
+	if err != nil || settings == nil {
+		slog.Debug("codexweb: official session model settings unavailable", "thread", sessionID, "error", err)
+		return core.SessionModelSelection{}, false
+	}
+	a.rememberPermissionMode(settings)
+	return core.SessionModelSelection{
+		Provider:        strings.TrimSpace(settings.ModelProvider),
+		Model:           strings.TrimSpace(settings.Model),
+		ReasoningEffort: stringValue(settings.ReasoningEffort),
+	}, true
 }
 
 // RenameSession maps the bridge RPC directly onto the official

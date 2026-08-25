@@ -266,7 +266,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	var settings *ThreadStartResult
 	if sessionID == "" {
 		model, provider := a.selectedModelForStart()
-		res, rpcErr, err := StartThread(ctx, cl, StartThreadOptions{Cwd: a.GetWorkDir(), Model: model, ModelProvider: provider})
+		res, rpcErr, err := StartThread(ctx, cl, StartThreadOptions{Cwd: a.GetWorkDir(), Model: model, ModelProvider: provider, PermissionMode: a.GetMode()})
 		switch {
 		case err != nil:
 			return nil, err
@@ -287,6 +287,7 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 		}
 		settings = res
 	}
+	a.rememberPermissionMode(settings)
 	threadID := settings.Thread.ID
 	a.ensurePump()
 	raw := a.addListener(threadID)
@@ -356,6 +357,27 @@ func (s *agentSession) Alive() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return !s.closed
+}
+
+// SetLiveMode applies a composer permission choice through Codex's official
+// thread/settings/update API. "custom" remains config-owned and only affects
+// future sessions because the official API has no clear-override operation.
+func (s *agentSession) SetLiveMode(mode string) bool {
+	mode = normalizePermissionMode(mode)
+	if mode == "custom" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cl, err := s.client(ctx)
+	if err != nil {
+		return false
+	}
+	if err := UpdateThreadPermissionMode(ctx, cl, s.threadID, mode); err != nil {
+		slog.Warn("codexweb: official permission mode update failed", "thread", s.threadID, "mode", mode, "error", err)
+		return false
+	}
+	return true
 }
 
 // Send 发送用户消息（turn/start，仅 text part——image 未采样 fail closed）。

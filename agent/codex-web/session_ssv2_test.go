@@ -198,6 +198,37 @@ func TestAgentFetchSessionInfoUsesOfficialRead(t *testing.T) {
 	expectParams(t, (*readCalls)[0], map[string]any{"threadId": "thread-archived"})
 }
 
+func TestAgentSessionModelSelectionUsesOfficialResumeSettings(t *testing.T) {
+	s := newScripted()
+	cl := NewClient(s, 1)
+	t.Cleanup(func() { _ = cl.Close() })
+	go drainNotifications(cl)
+
+	resumeCalls := captureParams(s, "thread/resume", map[string]any{
+		"thread": map[string]any{"id": "thread-mac"},
+		"model":  "gpt-5.6-sol", "modelProvider": "openai", "reasoningEffort": "medium",
+		"approvalPolicy": "on-request", "approvalsReviewer": "auto_review",
+		"activePermissionProfile": map[string]any{"id": ":workspace"},
+	})
+	ep := &ServiceEndpoint{Source: SourceExternalDaemonReused, CLIVersion: "0.149.0-alpha.4", client: cl}
+	a := New(nil)
+	a.endpoint = ep
+
+	selection, ok := a.GetSessionModelSelection(context.Background(), "thread-mac")
+	if !ok {
+		t.Fatal("official thread/resume settings were not returned")
+	}
+	if selection.Provider != "openai" || selection.Model != "gpt-5.6-sol" || selection.ReasoningEffort != "medium" {
+		t.Fatalf("selection = %+v", selection)
+	}
+	if a.GetMode() != "auto-review" {
+		t.Fatalf("permission mode = %q, want auto-review", a.GetMode())
+	}
+	if len(*resumeCalls) != 1 {
+		t.Fatalf("thread/resume calls=%d", len(*resumeCalls))
+	}
+}
+
 func TestAgentArchiveSessionUsesOfficialArchiveAndRead(t *testing.T) {
 	s := newScripted()
 	cl := NewClient(s, 1)

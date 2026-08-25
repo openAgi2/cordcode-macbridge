@@ -314,6 +314,41 @@ func TestCodecItemVariantsReplay(t *testing.T) {
 	_ = sawCompaction
 }
 
+func TestCodecContextOccupancyUsesOfficialLastUsageNotLifetimeTotal(t *testing.T) {
+	codec := NewLiveCodec()
+	for _, n := range replayServerFrames(t, "interaction") {
+		if n.Method != "thread/tokenUsage/updated" {
+			continue
+		}
+		var wire struct {
+			TokenUsage struct {
+				Total struct {
+					TotalTokens int `json:"totalTokens"`
+				} `json:"total"`
+				Last struct {
+					TotalTokens int `json:"totalTokens"`
+				} `json:"last"`
+			} `json:"tokenUsage"`
+		}
+		if json.Unmarshal(n.Params, &wire) != nil || wire.TokenUsage.Total.TotalTokens == wire.TokenUsage.Last.TotalTokens {
+			continue
+		}
+		for _, ev := range codec.Decode(n) {
+			if ev.Type != core.EventContextUsageUpdated || ev.ContextUsage == nil {
+				continue
+			}
+			if ev.ContextUsage.UsedTokens != wire.TokenUsage.Last.TotalTokens {
+				t.Fatalf("context used=%d, want official last=%d (lifetime total=%d)", ev.ContextUsage.UsedTokens, wire.TokenUsage.Last.TotalTokens, wire.TokenUsage.Total.TotalTokens)
+			}
+			if ev.ContextUsage.TotalTokens != wire.TokenUsage.Total.TotalTokens {
+				t.Fatalf("accounting total=%d, want %d", ev.ContextUsage.TotalTokens, wire.TokenUsage.Total.TotalTokens)
+			}
+			return
+		}
+	}
+	t.Fatal("official fixture did not contain divergent total/last token usage")
+}
+
 // TestCodecPlanUpdated turn/plan/updated → EventPlan（官方枚举映射）。
 func TestCodecPlanUpdated(t *testing.T) {
 	codec := NewLiveCodec()

@@ -28,6 +28,7 @@ func TestTurnOpsRequestShapesFrozen(t *testing.T) {
 	capSteer := captureParams(s, "turn/steer", map[string]any{"turnId": "turn-1"})
 	capInt := captureParams(s, "turn/interrupt", map[string]any{})
 	capUnsub := captureParams(s, "thread/unsubscribe", map[string]any{"status": "unsubscribed"})
+	capSettings := captureParams(s, "thread/settings/update", map[string]any{})
 
 	ctx := context.Background()
 	if _, _, err := StartThread(ctx, c, StartThreadOptions{Cwd: "/ws"}); err != nil {
@@ -39,6 +40,13 @@ func TestTurnOpsRequestShapesFrozen(t *testing.T) {
 		t.Fatal(err)
 	}
 	expectParams(t, (*capStart)[1], map[string]any{"cwd": "/ws", "model": "m", "modelProvider": "mockpi"})
+
+	if _, _, err := StartThread(ctx, c, StartThreadOptions{Cwd: "/ws", PermissionMode: "auto-review"}); err != nil {
+		t.Fatal(err)
+	}
+	expectParams(t, (*capStart)[2], map[string]any{
+		"cwd": "/ws", "permissions": ":workspace", "approvalPolicy": "on-request", "approvalsReviewer": "auto_review",
+	})
 
 	if _, _, _, err := ResumeThread(ctx, c, "th-1"); err != nil {
 		t.Fatal(err)
@@ -72,6 +80,13 @@ func TestTurnOpsRequestShapesFrozen(t *testing.T) {
 		t.Fatal(err)
 	}
 	expectParams(t, (*capUnsub)[0], map[string]any{"threadId": "th-1"})
+
+	if err := UpdateThreadPermissionMode(ctx, c, "th-1", "full-access"); err != nil {
+		t.Fatal(err)
+	}
+	expectParams(t, (*capSettings)[0], map[string]any{
+		"threadId": "th-1", "permissions": ":danger-full-access", "approvalPolicy": "never", "approvalsReviewer": "user",
+	})
 
 	// fail-closed 边界
 	if _, _, err := TurnSteer(ctx, c, "th-1", "", []InputPart{TextPart("x")}); err == nil || !strings.Contains(err.Error(), "expectedTurnId") {
