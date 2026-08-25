@@ -46,14 +46,22 @@ func (a *Agent) PermissionModes() []core.PermissionModeInfo {
 	}
 }
 
+// permissionModeParams 把权限档映射为 thread/start / thread/settings/update 的官方
+// 稳定字段组合。禁止发 `permissions`（命名权限档）——它是 experimental 字段
+// （protocol/v2/thread.rs:93 `#[experimental("thread/start.permissions")]`），本连接
+// 未声明 experimentalApi 时被 server 以 -32600 拒绝（2026-08-26 真机）。官方模式
+// （tui/src/app_server_session.rs:1694-1713 thread_start_params_from_config）：无命名
+// 档时发 sandbox + approvalPolicy + approvalsReviewer（sandbox 仅在 permissions 为
+// None 时携带）。SandboxMode/AskForApproval 均为 kebab-case wire
+// （protocol/src/config_types.rs:103 / protocol.rs:914）。
 func permissionModeParams(mode string) map[string]any {
 	switch normalizePermissionMode(mode) {
 	case "default":
-		return map[string]any{"permissions": ":workspace", "approvalPolicy": "on-request", "approvalsReviewer": "user"}
+		return map[string]any{"sandbox": "workspace-write", "approvalPolicy": "on-request", "approvalsReviewer": "user"}
 	case "auto-review":
-		return map[string]any{"permissions": ":workspace", "approvalPolicy": "on-request", "approvalsReviewer": "auto_review"}
+		return map[string]any{"sandbox": "workspace-write", "approvalPolicy": "on-request", "approvalsReviewer": "auto_review"}
 	case "full-access":
-		return map[string]any{"permissions": ":danger-full-access", "approvalPolicy": "never", "approvalsReviewer": "user"}
+		return map[string]any{"sandbox": "danger-full-access", "approvalPolicy": "never", "approvalsReviewer": "user"}
 	default:
 		return nil
 	}

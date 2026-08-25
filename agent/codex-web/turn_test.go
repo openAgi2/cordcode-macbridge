@@ -45,7 +45,7 @@ func TestTurnOpsRequestShapesFrozen(t *testing.T) {
 		t.Fatal(err)
 	}
 	expectParams(t, (*capStart)[2], map[string]any{
-		"cwd": "/ws", "permissions": ":workspace", "approvalPolicy": "on-request", "approvalsReviewer": "auto_review",
+		"cwd": "/ws", "sandbox": "workspace-write", "approvalPolicy": "on-request", "approvalsReviewer": "auto_review",
 	})
 
 	if _, _, _, err := ResumeThread(ctx, c, "th-1"); err != nil {
@@ -85,7 +85,7 @@ func TestTurnOpsRequestShapesFrozen(t *testing.T) {
 		t.Fatal(err)
 	}
 	expectParams(t, (*capSettings)[0], map[string]any{
-		"threadId": "th-1", "permissions": ":danger-full-access", "approvalPolicy": "never", "approvalsReviewer": "user",
+		"threadId": "th-1", "sandbox": "danger-full-access", "approvalPolicy": "never", "approvalsReviewer": "user",
 	})
 
 	// fail-closed 边界
