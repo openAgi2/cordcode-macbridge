@@ -31,11 +31,11 @@
   },
   "reports": {
     "completion_report_path": "docs/2026-08-21-codex-web-backend-design完成情况.md",
-    "completion_report_status": "missing",
-    "last_generated_at": null,
-    "based_on_queue_hash": null
+    "completion_report_status": "present",
+    "last_generated_at": "2026-08-25T14:50:35Z",
+    "based_on_queue_hash": "c95181e53525"
   },
-  "updated_at": "2026-08-25T14:41:32Z",
+  "updated_at": "2026-08-25T14:50:35Z",
   "todos": [
     {
       "id": "p0-schemas-impl",
@@ -2898,23 +2898,25 @@
       "id": "p6-retirement-regression",
       "title": "Phase6 退役后观察",
       "description": "旧入口移除后的发布观察窗口记录；确认无回滚后再另案删除源码（独立后续）。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase6",
       "kind": "regression",
       "depends_on": [
         "p6-retirement-tests"
       ],
       "source": "design §14/phase6",
-      "notes": "",
+      "notes": "owner 真机复测 PASS（2026-08-25 晚）：backend 列表 codex 已消失、codex-web 会话/交互正常。退役观察窗结论为 owner 真实反馈。源码保留（Mac agent/codex + iOS codex 枚举路径），无回滚需求；若需回滚按 retirement-tests 归档的翻转通道。",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "manual",
-        "attestation": "self-attested",
+        "attestation": "owner-device-accepted",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "owner 真机复测：backend 列表 codex 消失 ✅、codex-web 会话/交互正常 ✅（2026-08-25）。",
+        "artifacts": [
+          "owner message 2026-08-25: 真机测试正常✅"
+        ],
+        "checked_at": "2026-08-25T14:49:52Z"
       }
     },
     {
