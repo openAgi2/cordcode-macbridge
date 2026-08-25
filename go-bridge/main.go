@@ -877,12 +877,27 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 // 构建隐藏 timeline；agent relay 存在时仍严格禁入，保持单一摄入所有者。
 func passiveFeedAllowed(agentRelayRunning, hasObservation, hasKernelState bool, eventName string) bool {
 	if agentRelayRunning {
-		return false
+		// 幂等收口例外（2026-08-25 iOS 发起多选真机）：官方 serverRequest/resolved 双泵
+		// 竞争 MarkResolved，只有一路能产出收口事件；relay 场景若产出落在被动泵，事件
+		// 仍必须进 kernel，否则 user_input/permission 面板永不收口。这类事件 reducer 按
+		// interactionId 状态 upsert（幂等），双投无害——与审计-008 防的 append 内容
+		// 双写是不同维度。
+		return passiveIdempotentCloseEvent(eventName)
 	}
 	if hasObservation {
 		return true
 	}
 	return hasKernelState && passiveProjectionTerminalEvent(eventName)
+}
+
+// passiveIdempotentCloseEvent 是 relay 运行中仍允许被动补投的幂等控制面收口事件。
+func passiveIdempotentCloseEvent(eventName string) bool {
+	switch eventName {
+	case "permission_resolved", "user_input_resolved", "question_resolved":
+		return true
+	default:
+		return false
+	}
 }
 
 func passiveProjectionTerminalEvent(eventName string) bool {

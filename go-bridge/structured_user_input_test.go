@@ -99,7 +99,9 @@ func TestResolveUserInput_SuccessOutcome(t *testing.T) {
 		t.Fatalf("resolver 收到 iid=%q action=%q answers=%d want ui_abc/answer/1", seenIID, seenAction, seenAnswers)
 	}
 	m, _ := conn.data.(map[string]any)
-	if m["interactionId"] != "ui_abc" || m["outcome"] != core.UserInputOutcomeAccepted || m["currentStatus"] != core.UserInputStatusAnswered || m["headRev"] != 2 {
+	// handleResolveUserInput 成功后主动 publish user_input_resolved（2026-08-25 收口
+	// 修复），kernel 多一次 commit：headRev = seed(2) + publish(1)。
+	if m["interactionId"] != "ui_abc" || m["outcome"] != core.UserInputOutcomeAccepted || m["currentStatus"] != core.UserInputStatusAnswered || m["headRev"] != 3 {
 		t.Fatalf("result = %+v want canonical four-field result", conn.data)
 	}
 }
