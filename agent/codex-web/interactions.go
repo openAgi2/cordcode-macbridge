@@ -288,15 +288,24 @@ func (a *Agent) currentClient() *Client {
 }
 
 // clientForEpoch 校验交互登记的连接仍是当前连接（旧 epoch 的官方 request id 已失效）。
+// 观察连接（iOS 打开 session 的 observer 订阅面）持有自己的 epoch：官方只把
+// thread-scoped 的 server request 投递给订阅连接，iOS 打开 session 后重放/新请求
+// 都到达观察连接，应答必须回同一连接——主连接 epoch 不匹配时按 obsClient 路由。
 func (a *Agent) clientForEpoch(ctx context.Context, epoch ConnectionEpoch) (*Client, error) {
 	_, cl, err := a.endpointFor(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if cl.Epoch() != epoch {
-		return nil, fmt.Errorf("codex-web: connection epoch changed (interaction=%d current=%d)；等待官方重发", epoch, cl.Epoch())
+	if cl.Epoch() == epoch {
+		return cl, nil
 	}
-	return cl, nil
+	a.obsMu.Lock()
+	obs := a.obsClient
+	a.obsMu.Unlock()
+	if obs != nil && obs.Epoch() == epoch {
+		return obs, nil
+	}
+	return nil, fmt.Errorf("codex-web: connection epoch changed (interaction=%d current=%d)；等待官方重发", epoch, cl.Epoch())
 }
 
 // RespondSessionPermission 实现 core.SessionPermissionResponder（无 live session 的

@@ -7,7 +7,8 @@ package codexweb
 //     一个消费者（中央泵）。多个 agentSession 复用该连接的 RPC 面，事件经
 //     中央泵按 threadID 分发给注册的 session 监听者——不允许每个 session 各起
 //     泵抢读同一通道（真实竞态：终态事件被随机分到错误 session）；
-//   - 被动订阅（Subscribe）使用专用连接（观察面，不答请求）。
+//   - 被动订阅（Subscribe）使用专用连接（观察面；批准/提问 server request 与主泵
+//     同一处理——iOS 打开 session 收到线程 pending 重放后必须能答，见 clientForEpoch）。
 //
 // Phase 0 通知分级（§7.1）：thread/started、thread/status/changed 全局；turn/*、item/*
 // 为 daemon 对全部连接（含观察连接）的全局广播（dumps/ownership 连接 #2 在
@@ -685,7 +686,25 @@ func (a *Agent) Subscribe(ctx context.Context) (<-chan core.Event, error) {
 				n.Method == "thread/deleted" {
 				a.signalCatalogRefresh()
 			}
-			for _, ev := range codec.Decode(n) {
+			// 收口信号与中央泵同一套：审批/提问的 resolved 与 item/completed。
+			// 官方 thread-scoped 通知只投至订阅连接——观察连接自己收到的请求必须
+			// 自己在同一连接上收口，主泵替不了。
+			var extra []core.Event
+			switch n.Method {
+			case "serverRequest/resolved":
+				extra = a.resolvedEvents(n)
+			case "item/completed":
+				var p struct {
+					ThreadID string `json:"threadId"`
+					Item     struct {
+						ID string `json:"id"`
+					} `json:"item"`
+				}
+				if json.Unmarshal(n.Params, &p) == nil {
+					extra = a.itemCompletedResolution(p.ThreadID, p.Item.ID)
+				}
+			}
+			for _, ev := range append(codec.Decode(n), extra...) {
 				if ev.Type == core.EventPlan && ev.SessionID != "" {
 					a.rememberPlan(ev.SessionID, ev.Plan)
 				}
@@ -702,10 +721,28 @@ func (a *Agent) Subscribe(ctx context.Context) (<-chan core.Event, error) {
 		// 连接断开：通道关闭，startPassiveSubscription 以 backoff 重连；
 		// 重连后的缺口由 §8.3 冷校准（thread/read includeTurns）覆盖。
 	}()
-	// server requests 通道需有消费者（避免 readLoop 阻塞）；被动连接不答请求。
+	// server requests 通道需有消费者（避免 readLoop 阻塞）。观察连接不忽略批准/
+	// 提问请求：iOS 打开 session 时官方 thread/resume 会把该线程 pending 的
+	// server request 重放到本连接（thread_lifecycle.rs replay_requests_to_
+	// connection_for_thread），丢弃 = Mac 等批准、iOS 毫无提示。登记 + 生成产品
+	// 事件（与中央泵同一处理），应答走同一连接（clientForEpoch 按 epoch 路由）。
 	go func() {
 		for sr := range cl.ServerRequests() {
-			slog.Debug("codexweb passive: server request ignored (observer connection)", "method", sr.Method)
+			for _, ev := range a.handleServerRequest(sr) {
+				select {
+				case events <- ev:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+		// 连接终结：清理该 epoch 的 pending 交互（官方 request id 已失效；重连后
+		// AttachLiveThread resume 成功时官方重放，register 以新 epoch 覆盖）。
+		if a.registry != nil {
+			dropped := a.registry.DropEpoch(cl.Epoch())
+			if dropped > 0 {
+				slog.Info("codexweb passive: dropped pending interactions of dead epoch", "epoch", cl.Epoch(), "count", dropped)
+			}
 		}
 	}()
 	return events, nil
