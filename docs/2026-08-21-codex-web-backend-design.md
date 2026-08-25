@@ -2,7 +2,7 @@
 
 - 日期：2026-08-21
 - 状态：**v2.0 topology-first 施工合同；取代 v1.5–v1.7 中“Terminal Gate 可单独放行产品实施”的冲突规则。Desktop 与 CordCode 连接同一官方 daemon 是产品代码开工和继续扩面的共同硬门；任何 PARTIAL、独立 runtime 或 managed-loopback 结果均不得放行。**
-- 执行进度（2026-08-25 晚）：**Phase 0–5 全部完成（107/111 done 均 proven）。** owner 真机矩阵已 PASS：模型目录 parity 与交互回归（command/file/permission 审批允许/拒绝、requestUserInput 作答/跳过/多题、继续/中断、卡片唯一收口，双拓扑）于 2026-08-25 验收，验收缺陷修复链 Mac 0f524d7..202b41c / iOS aeb13d5。剩余：p6-observation-regression 观察期（ready，owner 并行使用）→ Phase 6 退役三连（pending）。持久化真相见 `.exec-plan/state/plan-c48486da6336.json`；观察期与退役门完成前不得生成正向完成报告或退役旧 `codex`。
+- 执行进度（2026-08-25 晚）：**Phase 0–5 全部完成（107/111 done 均 proven）。** owner 真机矩阵已 PASS：模型目录 parity 与交互回归（command/file/permission 审批允许/拒绝、requestUserInput 作答/跳过/多题、继续/中断、卡片唯一收口，双拓扑）于 2026-08-25 验收，验收缺陷修复链 Mac 0f524d7..202b41c / iOS aeb13d5。**Phase 6 退役已执行（2026-08-25）：owner 明示放弃并行观察窗直接退役；Mac drivers 列表移除 `codex`（980d358）、iOS `BackendKind.codex` isDeprecated + 退出 serverCreationCases（b700932），代码全部保留，既有会话数据不动；部署验证 = 新 runtime drivers 无 codex（PID 76570, 22:40:10, port 8777）+ 真机安装启动。** 剩余：p6-retirement-regression owner 退役后复测（codex 入口消失、codex-web 正常）。持久化真相见 `.exec-plan/state/plan-c48486da6336.json`。
 - 参考方案：[2026-08-16-dsh-web-backend-design.md](2026-08-16-dsh-web-backend-design.md)
 - 一轮评审：[2026-08-21-codex-web-backend-design-review.md](2026-08-21-codex-web-backend-design-review.md)
 - 二轮评审：[2026-08-21-codex-web-backend-design-review-r2.md](2026-08-21-codex-web-backend-design-review-r2.md)

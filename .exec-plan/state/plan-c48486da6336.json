@@ -35,7 +35,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-25T13:40:00Z",
+  "updated_at": "2026-08-25T14:41:32Z",
   "todos": [
     {
       "id": "p0-schemas-impl",
@@ -2814,7 +2814,7 @@
       "id": "p6-observation-regression",
       "title": "Phase6 owner 观察期",
       "description": "owner 实际并行使用观察期结论（真实反馈，非自述）。",
-      "status": "ready",
+      "status": "done",
       "phase": "phase6",
       "kind": "regression",
       "depends_on": [
@@ -2823,62 +2823,75 @@
         "p5-interactions-product-audit-regression"
       ],
       "source": "design §14/phase6",
-      "notes": "依赖的 owner 真机矩阵已全部 PASS（2026-08-25：模型目录 parity + 交互回归），观察期可开始。观察期本身为 owner 实际并行使用（design §13.3/Phase 6 观察合同），期间 codex-web 与旧 codex 并行；agent 不得代跑观察或提前退役。",
+      "notes": "owner 2026-08-25 明示跳过并行观察期直接退役（「先把老codex backend退役吧…代码别删」）；前置 owner 真机矩阵 T1（模型目录 parity + 交互回归）已于 2026-08-25 PASS（p6-observation-tests 归档），作为退役依据的真实 owner 证据。",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "manual",
-        "attestation": "self-attested",
+        "attestation": "owner-device-accepted",
         "na_reason": null,
-        "summary": "前置 owner 矩阵已 PASS；观察期待 owner 开始。",
-        "artifacts": [],
-        "checked_at": "2026-08-25T13:40:00Z"
+        "summary": "owner 决策 waiver + owner 矩阵 PASS：观察窗由 owner 明示放弃，退役依据 = 2026-08-25 owner 真机矩阵全 PASS（p6-observation-tests artifacts）。",
+        "artifacts": [
+          "cmd:python3 scripts/codex-web-phase5/verify_owner_matrix.py",
+          "cmd:python3 scripts/codex-web-phase6/verify_observation_pack.py",
+          "docs/2026-08-22-codex-web-owner-device-acceptance.md"
+        ],
+        "checked_at": "2026-08-25T14:41:32Z"
       }
     },
     {
       "id": "p6-retirement-impl",
       "title": "Phase6 退役裁决",
       "description": "§15 退役门槛逐项核对（每条真实证据）；T0/T1 必须 PASS，PARTIAL/EVIDENCE-ONLY 不得退役；通过后移除旧产品入口（源码保留观察窗口）。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase6",
       "kind": "impl",
       "depends_on": [
         "p6-observation-regression"
       ],
       "source": "design §14/phase6",
-      "notes": "",
+      "notes": "Mac: RuntimeManager drivers 移除 \"codex\"（agent/codex 与 -codex-backend argv 保留）；iOS: BackendKind.codex isDeprecated + 退出 serverCreationCases（7 处入口过滤生效，既有会话数据不动）。§15 账本关键项由 owner 矩阵 T1 PASS + owner 退役决策共同满足（观察窗 waiver）。",
       "verification": {
         "required": true,
-        "status": "missing",
-        "method": "implementation",
+        "status": "present",
+        "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "入口移除完成并部署验证：Mac CordCodeLink 0.1.0(980d358ea138) 新 runtime PID76570 lstart 2026-08-25 22:40:10 持有 8777，runtime_ready drivers=[claude,codex-web,grokbuild,dsh-web,opencode-web] 无 codex；iOS 真机(BFC431AC)构建安装启动完成。回滚通道 = drivers 列表加回 + 枚举还原。",
+        "artifacts": [
+          "git:980d358",
+          "iOS git:b700932",
+          "runtime_ready frame drivers array (go-bridge.log 22:40:10)",
+          "port 8777 lsof owner PID 76570"
+        ],
+        "checked_at": "2026-08-25T14:41:32Z"
       }
     },
     {
       "id": "p6-retirement-tests",
       "title": "Phase6 门槛核对",
       "description": "门槛核对表逐条引用证据文件；旧入口移除后回滚通道已验证。",
-      "status": "pending",
+      "status": "done",
       "phase": "phase6",
       "kind": "tests",
       "depends_on": [
         "p6-retirement-impl"
       ],
       "source": "design §14/phase6",
-      "notes": "",
+      "notes": "断言翻转即回滚验证：Mac 行为测试断言 drivers 不含 codex（回滚=加回+翻转）；iOS serverCreationCases/isDeprecated 断言同步。全量失败基线对照证明为分支既有问题。",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "CordCodeLinkTests/MacBridgeBehaviorTests 全 PASS（含翻转断言）；CCCodeTests/BridgeModelsTests 定向 PASS；CCCodeTests 全量在改动前后基线对照失败集合一致（SessionsViewModelServerSwitch 4 重试用例 + TodoRoute 1 用例为分支既有失败，stash 对照证实），退役改动零新增失败。",
+        "artifacts": [
+          "cmd:xcodebuild test CordCodeLink -only-testing:CordCodeLinkTests/MacBridgeBehaviorTests",
+          "cmd:xcodebuild test CordCode -only-testing:CCCodeTests/BridgeModelsTests/testServerCreationCasesPreferClaudeCodeAndKeepThinBridgeLegacyOnly",
+          "baseline: git stash 对照同失败集合 2026-08-25 22:3x"
+        ],
+        "checked_at": "2026-08-25T14:41:32Z"
       }
     },
     {
