@@ -165,6 +165,9 @@ func (a *Agent) handleServerRequest(sr ServerRequest) []core.Event {
 		return nil
 	}
 	kind := classifyServerRequest(sr.Method)
+	slog.Info("codexweb interaction: server request arrived",
+		"method", sr.Method, "thread", sr.ThreadID, "turn", sr.TurnID,
+		"item", probe.ItemID, "rpcId", sr.RequestID, "kind", kind)
 	it := &Interaction{
 		InteractionID: interactionID(sr.ThreadID, probe.ItemID),
 		Kind:          kind,

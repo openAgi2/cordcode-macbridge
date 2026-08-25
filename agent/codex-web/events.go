@@ -728,7 +728,9 @@ func (a *Agent) Subscribe(ctx context.Context) (<-chan core.Event, error) {
 	// 事件（与中央泵同一处理），应答走同一连接（clientForEpoch 按 epoch 路由）。
 	go func() {
 		for sr := range cl.ServerRequests() {
-			for _, ev := range a.handleServerRequest(sr) {
+			evs := a.handleServerRequest(sr)
+			slog.Info("codexweb passive: server request surfaced", "method", sr.Method, "thread", sr.ThreadID, "rpcId", sr.RequestID, "events", len(evs))
+			for _, ev := range evs {
 				select {
 				case events <- ev:
 				case <-ctx.Done():
