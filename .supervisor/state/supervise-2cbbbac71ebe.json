@@ -66,7 +66,7 @@
       "kind": "implementation",
       "title": "§0.3 修订案回写 + 审计 follow-up 口径项",
       "issued_at": "2026-08-26T00:20:00+08:00",
-      "status": "pending",
+      "status": "verified",
       "markdown_path": "docs/supervisor-logs/2026-08-25-codex-web-source-parity-audit/directive-002-amendment-writeback-and-conventions.md",
       "scope": "设计文档 §0.3 豁免小节回写 + codec.go 锚点全路径 + 用例计数口径 + skills 仓通报",
       "constraints": [
@@ -75,8 +75,18 @@
         "skill 变更此后必须在 ~/.agents/skills 仓提交并携带哈希",
         "纯文档+注释，监工 audit 即终审，无需 owner 真机"
       ],
-      "linked_commits": [],
-      "report": null
+      "linked_commits": [
+        "git:fee24fe"
+      ],
+      "report": {
+        "received_at": "2026-08-26T00:28:00+08:00",
+        "channel": "owner-paste",
+        "audited": true,
+        "audit_verdict": "verified",
+        "audit_path": "docs/supervisor-logs/2026-08-25-codex-web-source-parity-audit/audit-002-amendment-writeback-and-conventions.md",
+        "ruling_on_query": "文档内部简写锚点维持现状（§2 参照系作命名空间；门禁执行面是代码注释）",
+        "note": "监工 audit 即终审（纯文档+注释）；指令 2 号 done，审计周期全链收口"
+      }
     }
   ],
   "next_directive_number": 3
