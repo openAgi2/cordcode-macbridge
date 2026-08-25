@@ -133,8 +133,12 @@ func normalizeUserInputQuestions(raw []userInputRawQuestion) (*userInputSnapshot
 			return nil, fmt.Errorf("question[%d] duplicate id %q", i, qid)
 		}
 		snap.Order = append(snap.Order, qid)
-		if len(q.Options) < 2 || len(q.Options) > 3 {
-			return nil, fmt.Errorf("question[%d] options count %d outside official 2-3 range", i, len(q.Options))
+		// 官方约束仅"每题 options 不得为空"（request_user_input_spec.rs
+		// "requires non-empty options"）；Phase 0 样本碰巧 2–3 个被误当成硬限，
+		// 2026-08-25 iOS 发起真机模型生成 4 选项直接 invalid_backend_request。
+		// 对齐官方：非空即可，数量不设上限。
+		if len(q.Options) < 1 {
+			return nil, fmt.Errorf("question[%d] options must not be empty", i)
 		}
 		snap.Mode[qid] = core.UserInputAnswerModeSingle
 		snap.Custom[qid] = q.IsOther

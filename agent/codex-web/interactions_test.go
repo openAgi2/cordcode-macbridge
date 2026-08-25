@@ -293,9 +293,7 @@ func TestUserInputInvalidBackendRequestIsNotRegistered(t *testing.T) {
 		`[]`,
 		`[{"id":"","question":"Q?"}]`,
 		`[{"id":"q","question":"Q?","options":[]}]`,
-		`[{"id":"q","question":"Q?","options":[{"label":"One"}]}]`,
 		`[{"id":"q","question":"Q?","options":[{"label":"   "},{"label":"Two"}]}]`,
-		`[{"id":"q","question":"Q?","options":[{"label":"1"},{"label":"2"},{"label":"3"},{"label":"4"}]}]`,
 		`[{"id":"q","question":"Q?","options":[{"label":"1"},{"label":"2"}]},{"id":"q","question":"Again?","options":[{"label":"1"},{"label":"2"}]}]`,
 	} {
 		a, transport, _ := interactionTestAgent(t, 5)
@@ -488,5 +486,35 @@ func TestResolvedEventsUserInputEmitsUserInputResolved(t *testing.T) {
 	}
 	if again := a.resolvedEvents(Notification{Epoch: 12, Method: "serverRequest/resolved", Params: params}); len(again) != 0 {
 		t.Fatalf("duplicate resolved emitted events: %+v", again)
+	}
+}
+
+// TestUserInputFourOptionsRegistersAndAnswers：官方仅要求每题 options 非空，
+// 数量无上限（request_user_input_spec.rs）；2026-08-25 iOS 发起真机模型生成
+// 4 选项曾被 2-3 硬限误判 invalid_backend_request。4 选项必须正常注册、
+// 应答映射到官方 label。
+func TestUserInputFourOptionsRegistersAndAnswers(t *testing.T) {
+	a, transport, _ := interactionTestAgent(t, 13)
+	params := json.RawMessage(`{"threadId":"th","turnId":"tu","itemId":"it4","questions":[{"id":"pick","question":"选一个","options":[{"label":"甲"},{"label":"乙"},{"label":"丙"},{"label":"丁"}]}]}`)
+	events := a.handleServerRequest(ServerRequest{Epoch: 13, RequestID: "9", ThreadID: "th", TurnID: "tu", Method: "item/tool/requestUserInput", Params: params})
+	if len(events) != 1 || events[0].UserInput == nil || events[0].UserInput.Status != core.UserInputStatusPending {
+		t.Fatalf("4-option event = %+v", events)
+	}
+	if len(events[0].UserInput.Questions[0].Options) != 4 {
+		t.Fatalf("options = %d, want 4", len(events[0].UserInput.Questions[0].Options))
+	}
+	if a.registry.Lookup("th:it4") == nil {
+		t.Fatal("4-option interaction not registered")
+	}
+	resolution, err := a.ResolveUserInput(context.Background(), "th:it4", "act-4", core.UserInputActionAnswer, []core.UserInputAnswer{{
+		QuestionID: "pick",
+		Values:     []core.UserInputValue{{Kind: core.UserInputValueOption, OptionID: "pick_o_3"}},
+	}})
+	if err != nil || resolution.Outcome != core.UserInputOutcomeAccepted {
+		t.Fatalf("4-option resolve = %+v, %v", resolution, err)
+	}
+	frame := lastServerResponse(t, transport)
+	if frame.ID != "9" || string(frame.Result) != `{"answers":{"pick":{"answers":["丁"]}}}` {
+		t.Fatalf("4-option wire response = id:%s result:%s", frame.ID, frame.Result)
 	}
 }
