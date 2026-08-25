@@ -645,8 +645,15 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		})
 
 	case "text_delta":
-		// itemId == lifecycle turn_id == the turn's turnId == the assistant message id.
-		turnID := dataString(data, "itemId")
+		// Turn attribution: legacy/live frames carry the turn id AS itemId (no turnId);
+		// codex-web turn-scoped cold frames carry BOTH (turnId=official turn id,
+		// itemId=official item id) — explicit turnId wins so official turns don't
+		// fragment per item (PERF-S0B fixture generation, real catalog sample: 2
+		// official turns fragmented into 5 without this).
+		turnID := dataString(data, "turnId")
+		if turnID == "" {
+			turnID = dataString(data, "itemId")
+		}
 		delta := dataString(data, "delta")
 		if turnID == "" {
 			return // driver path lacks itemId; skip
@@ -677,7 +684,10 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		ps.markRunning(turnID)
 
 	case "reasoning_delta":
-		turnID := dataString(data, "itemId")
+		turnID := dataString(data, "turnId")
+		if turnID == "" {
+			turnID = dataString(data, "itemId")
+		}
 		delta := dataString(data, "delta")
 		if turnID == "" {
 			return
