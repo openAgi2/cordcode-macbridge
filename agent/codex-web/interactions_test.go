@@ -523,3 +523,75 @@ func TestUserInputFourOptionsRegistersAndAnswers(t *testing.T) {
 		t.Fatalf("4-option wire response = id:%s result:%s", frame.ID, frame.Result)
 	}
 }
+
+// TestApprovalPerEpochResolutionInvariants（豁免卡 §3.2-B1 不变量，审计 §3.1-A1-4）：
+// permission kind 与 user_input 收口同构——同泵重复 resolved 只发第一份（每 epoch
+// 恰一次）；第二泵（不同 epoch）经 resolvedByRequest 归属发自己那份（官方 resolved
+// 广播给全部订阅连接，kernel 幂等吸收双份）。
+func TestApprovalPerEpochResolutionInvariants(t *testing.T) {
+	a, _, _ := interactionTestAgent(t, 3)
+	sr := officialInteractionRequest(t, "item/permissions/requestApproval", 0, 3)
+	events := a.handleServerRequest(sr)
+	if len(events) != 1 || events[0].Type != core.EventPermissionRequest {
+		t.Fatalf("permission request events = %+v", events)
+	}
+	id := events[0].RequestID
+	params, _ := json.Marshal(map[string]any{"threadId": sr.ThreadID, "requestId": sr.RequestID})
+
+	first := a.resolvedEvents(Notification{Epoch: 3, Method: "serverRequest/resolved", Params: params}, 3)
+	if len(first) != 1 || first[0].Type != core.EventPermissionResolved || first[0].RequestID != id {
+		t.Fatalf("first pump events = %+v", first)
+	}
+	if dup := a.resolvedEvents(Notification{Epoch: 3, Method: "serverRequest/resolved", Params: params}, 3); len(dup) != 0 {
+		t.Fatalf("same pump resolved twice must emit once, got %+v", dup)
+	}
+
+	second := a.resolvedEvents(Notification{Epoch: 9, Method: "serverRequest/resolved", Params: params}, 9)
+	if len(second) != 1 || second[0].Type != core.EventPermissionResolved || second[0].RequestID != id {
+		t.Fatalf("second pump must emit its own close via resolvedByRequest, got %+v", second)
+	}
+}
+
+// TestApprovalDropEpochThenDeadResolutionProducesNothing（§3.2-B1）：DropEpoch 清空
+// 该 epoch 全部 pending（官方 clear() 断线等价物）后，死泵 resolved 到达时无 pending
+// 可归属 → 不产出。
+func TestApprovalDropEpochThenDeadResolutionProducesNothing(t *testing.T) {
+	a, _, _ := interactionTestAgent(t, 3)
+	sr := officialInteractionRequest(t, "item/commandExecution/requestApproval", 0, 3)
+	if events := a.handleServerRequest(sr); len(events) != 1 {
+		t.Fatalf("request events = %+v", events)
+	}
+	if dropped := a.registry.DropEpoch(3); dropped != 1 {
+		t.Fatalf("DropEpoch = %d, want 1", dropped)
+	}
+	params, _ := json.Marshal(map[string]any{"threadId": sr.ThreadID, "requestId": sr.RequestID})
+	if ev := a.resolvedEvents(Notification{Epoch: 3, Method: "serverRequest/resolved", Params: params}, 3); len(ev) != 0 {
+		t.Fatalf("dead epoch must not produce closure events, got %+v", ev)
+	}
+}
+
+// TestInteractionHistoryIsBounded（审计 §3.1-A1-2）：history 只增不减违反长驻进程
+// 有界要求；1024 全清后迟到重复 resolved 无 pending 可归属 → 不产出，语义安全。
+func TestInteractionHistoryIsBounded(t *testing.T) {
+	a, _, _ := interactionTestAgent(t, 3)
+	for i := 0; i < interactionHistoryMaxEntries+10; i++ {
+		id := fmt.Sprintf("th-b:%d", i)
+		a.registry.Register(&Interaction{
+			InteractionID: id,
+			Kind:          InteractionCommandApproval,
+			Epoch:         3,
+			RequestID:     json.Number(fmt.Sprintf("%d", i+1)),
+			ThreadID:      fmt.Sprintf("th-b-%d", i),
+			ItemID:        fmt.Sprintf("%d", i),
+		})
+		if !a.registry.MarkResolved(id) {
+			t.Fatalf("resolve %d must transition pending→resolved", i)
+		}
+	}
+	a.registry.mu.Lock()
+	n := len(a.registry.history)
+	a.registry.mu.Unlock()
+	if n > interactionHistoryMaxEntries {
+		t.Fatalf("history entries = %d, want <= %d", n, interactionHistoryMaxEntries)
+	}
+}

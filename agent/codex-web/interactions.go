@@ -2,6 +2,21 @@ package codexweb
 
 // interactions.go —— 审批/提问/elicitation registry（§5.2/§7.2/§7.3）。
 //
+// 移植母本（§2.3，审计 §3.1-A1）：tui/src/app/app_server_requests.rs:74-360
+// PendingAppServerRequests——分类型 HashMap（:74-80）、会话重置 clear()（:89）、
+// note_server_request 登记（:97）、take_resolution 本地决策取走（:201）、
+// resolve_notification 收 resolved 回声清除（:305）；官方收口唯一路径 =
+// ServerRequestResolved 通知（app_server_events.rs:118-142），发送应答后不本地关闭。
+// 与官方的差异清单（豁免卡：源码对齐审计文档 §3.2-B1）：
+//   - 官方单连接单视角 ↔ 本仓长驻 bridge 双泵（主/观察连接）两视角：
+//     serverRequest/resolved 广播每泵各收口一次（resolvedEvents per-epoch
+//     notified 去重），kernel reducer 按 interactionId 幂等吸收双份；
+//   - 官方会话重置 clear()（:89）↔ 本仓 DropEpoch（断线清理旧 epoch pending；
+//     官方重发是重 surface 的唯一真相，重连后 Register 刷新 epoch/requestID）；
+//   - resolvedByRequest（第二泵晚到归属，审计 §3.2-B1）为本仓特有——官方单
+//     连接不存在"另一视角晚到"问题；
+//   - Claim/ReleaseClaim ≈ 官方 take_resolution 的「取走即答」+ 写失败可重试。
+//
 // Phase 0 实测语义：command approval 的 availableDecisions 未声明 experimentalApi 也物理到达
 // （additionalPermissions 被剥除）；decision 枚举 accept/cancel/acceptWithExecpolicyAmendment，
 // cancel → turn 终态 interrupted；requestUserInput 批结构按题 id 应答
@@ -79,6 +94,11 @@ type InteractionRegistry struct {
 
 const resolvedRecordMaxEntries = 1024 // 与 planCache 同策略：有界全清（易失低频状态）
 
+// interactionHistoryMaxEntries 与 resolvedRecordMaxEntries 同策略（审计 §3.1-A1-2）：
+// 本仓进程长驻（官方 TUI 生命周期短 + clear() 兜底），history 仅是幂等去重账本，
+// 全清后迟到重复 resolved 无 pending 可归属 → 不产出，语义安全。
+const interactionHistoryMaxEntries = 1024
+
 func NewInteractionRegistry() *InteractionRegistry {
 	return &InteractionRegistry{pending: map[string]*Interaction{}, history: map[string]bool{}, resolvedByRequest: map[string]*resolvedRecord{}}
 }
@@ -132,6 +152,9 @@ func (r *InteractionRegistry) MarkResolved(interactionID string) bool {
 		return false
 	}
 	r.history[interactionID] = true
+	if len(r.history) >= interactionHistoryMaxEntries {
+		r.history = map[string]bool{}
+	}
 	_, had := r.pending[interactionID]
 	delete(r.pending, interactionID)
 	return had
@@ -413,6 +436,9 @@ func (a *Agent) respondPermission(ctx context.Context, _, interactionID string, 
 // （kernel reducer 按 interactionId 幂等 upsert，双份无害），不共享全局收口权；
 // 此前的全局 MarkResolved 去重让"赢的那条泵"不可控（writer 场景产出落在被动泵
 // 被 passiveFeedAllowed 拒收 → 面板永不收口，2026-08-25 真机）。
+// 豁免卡：源码对齐审计文档 §3.2-B1（双泵 per-epoch resolved fan-out）——不变量：
+// 每 epoch 恰一次；reducer 幂等双投无害；resolvedByRequest 有界归属第二泵；
+// 泵断线期间 missed resolved 由另一泵 + kernel 投影兜底，重连冷校准遵循 §8.3。
 // 按 Kind 产出：user_input → EventUserInputResolved（投影把 user_input part 收为
 // answered/rejected）；审批/其他 → EventPermissionResolved。
 func (a *Agent) resolvedEvents(n Notification, epoch ConnectionEpoch) []core.Event {
