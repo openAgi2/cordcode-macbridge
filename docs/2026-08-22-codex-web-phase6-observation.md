@@ -1,7 +1,7 @@
 # Codex Web Phase 6 并行观察与退役证据包
 
 - 设计基线：`docs/2026-08-21-codex-web-backend-design.md` §13–§15
-- 状态：`PREPARED`——自动证据和 T1 已入包；完整 owner 矩阵与发布观察窗尚未完成
+- 状态：`PREPARED / OWNER-GATED`——自动证据和 T1 已入包；2026-08-25 自动门已复验，完整 owner 矩阵与发布观察窗尚未完成
 - 对照对象：`codex-web` 与旧 `codex`，必须使用各自独立的测试 session
 - 当前裁决：**禁止退役旧入口**。任何人工项未通过、provider/model/memory 差距未裁决或回滚门未通过时均保持并存。
 
@@ -26,6 +26,8 @@
 | approvals/questions | AUTOMATED PASS | daemon requestUserInput Gate、Go/iOS/web projection tests | allow/reject 与多题提交真实卡片（矩阵 10–11） |
 | ownership | T1 PASS | 双端同 daemon 同时打开无 active writer | 旧 backend 独立 session 的冲突诊断（矩阵 12） |
 | reconnect | AUTOMATED CONTRACT PASS | reconnect fixtures、epoch/read 校准测试 | live 断网恢复（矩阵 13） |
+
+2026-08-25 增量证据：物理 iPhone 三项模型 unit-only 测试 3/3 PASS；`go test ./agent/codex-web -count=1`、`go vet ./agent/codex-web`、owner matrix validator 与 observation-pack validator 均通过。owner 还确认首次发送即时显示与 Desktop 长任务终态收口修复符合预期。它们不替代矩阵 1–5、9–14 中尚未执行的具体动作。
 | rollback | 未执行 | 旧 backend 源码与入口仍保留 | 独立旧 Codex session 回滚（矩阵 14） |
 
 ## 3. §15 退役门槛账本
@@ -65,4 +67,3 @@
 - `docs/2026-08-22-codex-web-userinput-daemon-gate.md`
 - `docs/evidence/2026-08-22-codex-web-phase5-deploy-check.md`
 - `.exec-plan/state/plan-c48486da6336.json`
-

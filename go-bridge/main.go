@@ -280,7 +280,8 @@ func Main() {
 			relayConfigured = false
 		}
 	}
-	// topology monitor（默认 off；codex-web 后端提供 transport identity provider）。
+	// topology monitor（owner gate 后默认 on；CODEX_TOPOLOGY_MONITOR=0 可显式关闭；
+	// codex-web 后端提供 transport identity provider）。
 	var topologyProvider TopologyProvider
 	if *topologyMonitor {
 		provCfg := TopologyMonitorConfig{Collector: NewTopologyCollector(),

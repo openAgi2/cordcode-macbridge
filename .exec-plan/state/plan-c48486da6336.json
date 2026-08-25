@@ -35,7 +35,7 @@
   "last_generated_at": null,
   "based_on_queue_hash": null
  },
- "updated_at": "2026-08-22T09:53:00Z",
+ "updated_at": "2026-08-25T04:30:16Z",
  "todos": [
   {
    "id": "p0-schemas-impl",
@@ -2183,14 +2183,14 @@
     "p5-model-catalog-parity-review-fix-impl"
    ],
    "source": "owner device failure 2026-08-22 13:36 + design §7 list_models",
-   "notes": "新增共享 CordCodeUnitTests scheme，将 unit target 与 UI runner provisioning 解耦；连接的物理 iPhone 上定向模型目录、description 解码与 reasoning truth 三项 unit test 已真实执行通过。未运行 UI tests，未开启 provisioning 更新。",
+   "notes": "新增共享 CordCodeUnitTests scheme，将 unit target 与 UI runner provisioning 解耦；2026-08-25 在连接的物理 iPhone 上再次真实执行模型目录、description 解码与 reasoning truth 三项定向 unit test，3/3 通过。未运行 UI tests。",
    "verification": {
     "required": true,
     "status": "present",
     "method": "automated",
     "attestation": "re-verified",
     "na_reason": null,
-    "summary": "Go tests/vet 与 iOS build gate 通过；新增 unit-only scheme 后，在连接的物理 iPhone 上实际执行并通过 Codex Web 官方目录顺序、官方 description 解码、reasoning effort/catalog truth 定向测试。",
+    "summary": "2026-08-25 复验：全仓 Go tests/vet 通过；连接的物理 iPhone 上实际执行并通过 Codex Web 官方目录顺序、官方 description 解码、reasoning effort/catalog truth 三项定向测试。",
     "artifacts": [
      "go test ./agent/codex-web ./go-bridge ./core -count=1",
      "go vet ./agent/codex-web ./go-bridge ./core",
@@ -2200,32 +2200,37 @@
      "xcodebuild CordCodeTests destination=00008140-001E69503453001C DEVELOPMENT_TEAM=HB8YMMP798 test => CordCodeUITests-Runner provisioning profile missing",
      "iOS git:53e7d79",
      "cmd:xcodebuild CordCodeUnitTests on physical iPhone; 3 targeted unit tests; exit 0",
-     "/Users/jacklee/Library/Developer/Xcode/DerivedData/CordCode-ditfvluletdhecbduxwrcnwdzmbi/Logs/Test/Test-CordCodeUnitTests-2026.08.22_17-41-05-+0800.xcresult"
+     "/Users/jacklee/Library/Developer/Xcode/DerivedData/CordCode-ditfvluletdhecbduxwrcnwdzmbi/Logs/Test/Test-CordCodeUnitTests-2026.08.22_17-41-05-+0800.xcresult",
+     "cmd:xcodebuild CordCodeUnitTests on physical iPhone; 3 targeted unit tests; exit 0 (2026-08-25)",
+     "/Users/jacklee/Library/Developer/Xcode/DerivedData/CordCode-ditfvluletdhecbduxwrcnwdzmbi/Logs/Test/Test-CordCodeUnitTests-2026.08.25_12-29-33-+0800.xcresult"
     ],
-    "checked_at": "2026-08-22T09:44:00Z"
+    "checked_at": "2026-08-25T04:36:18Z"
    }
   },
   {
    "id": "p5-model-catalog-parity-review-fix-regression",
    "title": "Phase5 Codex Web 官方模型目录真机回归",
    "description": "Mac/iPhone 覆盖安装后 owner 确认 Codex Web 模型条目、顺序和说明与 Mac Codex 官方 picker 一致。",
-   "status": "in_progress",
+   "status": "blocked",
    "phase": "phase5",
    "kind": "regression",
    "depends_on": [
     "p5-model-catalog-parity-review-fix-tests"
    ],
    "source": "owner device failure 2026-08-22 13:36 + design §7 list_models",
-   "notes": "unit-only scheme 已解除 UI runner provisioning 阻塞，物理 iPhone 三项定向 unit test 已通过。现进入最终集中 owner 批次：与 interaction rows 10–11、完整矩阵/观察期一起执行。",
+   "notes": "external-blocker：2026-08-25 agent 已在连接的物理 iPhone 复跑三项 unit-only 模型测试，3/3 PASS；仍需 owner 目视确认 Codex Web 模型条目、顺序和说明与 Mac 官方 picker 一致。用户明确稍后执行真机验收，因此不得代填 PASS。",
    "verification": {
     "required": true,
     "status": "missing",
     "method": "manual",
     "attestation": "self-attested",
     "na_reason": null,
-    "summary": "",
-    "artifacts": [],
-    "checked_at": null
+    "summary": "自动层已复验：物理 iPhone 上官方目录顺序、官方 description 优先级与 catalog-driven reasoning 三项 unit test 3/3 PASS；产品视觉等价仍待 owner 真机确认。",
+    "artifacts": [
+     "/Users/jacklee/Library/Developer/Xcode/DerivedData/CordCode-ditfvluletdhecbduxwrcnwdzmbi/Logs/Test/Test-CordCodeUnitTests-2026.08.25_12-29-33-+0800.xcresult",
+     "/tmp/codex-web-ios-model-unit-20260825-team.log"
+    ],
+    "checked_at": "2026-08-25T04:30:16Z"
    }
   },
   {
@@ -2689,29 +2694,34 @@
     "p5-interactions-product-audit-impl"
    ],
    "source": "owner audit request 2026-08-22 + design §13",
-   "notes": "Go interaction/fixture/reducer tests、iOS projection tests、message-web 18 项结构化输入测试、remote-web 23 项 permission/projection 测试及 iOS build 通过。remote-web 全量 typecheck 被仓库既有缺失 crypto WASM 生成物阻塞，与本次改动无关。",
+   "notes": "2026-08-25 复验：全仓 Go、物理 iPhone 上 33 项 interaction/SSV2 unit、message-web 18 项、shared renderer 10 项、remote-web 34 项定向测试及三套 Web typecheck 全部通过。remote-web 先用仓库正式 crypto:build 生成忽略的 WASM，再修正测试中 unknown[] step 的显式 WireToolStep 类型；生产逻辑未改。",
    "verification": {
     "required": true,
     "status": "present",
     "method": "automated",
-    "attestation": "self-attested",
+    "attestation": "re-verified",
     "na_reason": null,
-    "summary": "覆盖 approval 精确 action、三题批输入、required gate、single/multiple/Other、reject gate、resolved 收口与 projection 保真。",
+    "summary": "2026-08-25 双仓复验通过：覆盖 approval 精确 action、三题批输入、required gate、single/multiple/Other、reject gate、resolved/terminal 收口、首次发送 fence 与 projection 保真。",
     "artifacts": [
      "go test ./agent/codex-web ./go-bridge",
      "message-web vitest UserInputBlock: 18 passed",
      "message-web npm run typecheck",
      "remote-web targeted vitest: 23 passed",
-     "xcodebuild generic/platform=iOS CODE_SIGNING_ALLOWED=NO build-for-testing"
+     "xcodebuild generic/platform=iOS CODE_SIGNING_ALLOWED=NO build-for-testing",
+     "cmd:xcodebuild CordCodeUnitTests on physical iPhone; 33 targeted interaction/SSV2 tests; exit 0",
+     "/Users/jacklee/Library/Developer/Xcode/DerivedData/CordCode-ditfvluletdhecbduxwrcnwdzmbi/Logs/Test/Test-CordCodeUnitTests-2026.08.25_12-33-10-+0800.xcresult",
+     "message-web UserInputBlock vitest: 18 passed; typecheck passed",
+     "shared renderer UserInputBlock vitest: 10 passed; typecheck passed",
+     "remote-web targeted interaction/projection vitest: 34 passed; app and test typecheck passed"
     ],
-    "checked_at": "2026-08-22T07:35:45Z"
+    "checked_at": "2026-08-25T04:36:18Z"
    }
   },
   {
    "id": "p5-interactions-product-audit-regression",
    "title": "Phase5 Codex Web 审批与结构化多选真机回归",
    "description": "owner 真机验证 command/file/permission approval allow/deny 与多题 option/Other/reject；卡片只出现一次、官方 turn 正确继续/中断并收口。",
-   "status": "pending",
+   "status": "blocked",
    "phase": "phase5",
    "kind": "regression",
    "depends_on": [
@@ -2719,7 +2729,7 @@
     "p0-topology-v2-hardening-regression"
    ],
    "source": "owner audit request 2026-08-22",
-   "notes": "修复版已部署至 Mac 与连接的 iPhone；等待 owner 实际触发 command/file approval 与 requestUserInput 后提供产品层回归证据，因此保持 pending。",
+   "notes": "external-blocker：自动 contract/reducer/projection 覆盖已完成；仍需 owner 在真实产品链触发 command/file/permission approval 与多题 requestUserInput，确认允许/拒绝、继续/中断和卡片唯一收口。用户明确稍后执行真机验收。",
    "verification": {
     "required": true,
     "status": "missing",
@@ -2774,14 +2784,14 @@
     "p6-observation-impl"
    ],
    "source": "design §14/phase6",
-   "notes": "观察包 fail-closed validator、owner 14 行矩阵、十二项退役账本、共享 daemon 拓扑、全仓 Go test/vet 与物理 iPhone unit-only 模型测试均重新执行通过；devicectl 诊断收集有非测试失败 warning，但 xcodebuild test exit=0。",
+   "notes": "2026-08-25 观察包 fail-closed validator、owner 14 行矩阵、十二项退役账本、全仓 Go test/vet、Mac 191 项测试及物理 iPhone unit-only 测试均重新执行通过；devicectl 诊断收集有非测试失败 warning，但 xcodebuild test exit=0。",
    "verification": {
     "required": true,
     "status": "present",
     "method": "automated",
     "attestation": "re-verified",
     "na_reason": null,
-    "summary": "Phase 6 自动观察门通过：全仓 Go test/vet、owner matrix/observation pack validators、当前 Release 单 daemon 拓扑和物理 iPhone 三项模型 unit test 均为 PASS。",
+    "summary": "Phase 6 自动观察门 2026-08-25 通过：全仓 Go test/vet、owner matrix/observation pack validators、Mac 191 项测试和物理 iPhone 定向 unit tests 均为 PASS；人工观察窗仍由 regression 门阻塞。",
     "artifacts": [
      "cmd:go test ./... -count=1",
      "cmd:go vet ./...",
@@ -2789,23 +2799,28 @@
      "cmd:python3 scripts/codex-web-phase6/verify_observation_pack.py",
      "cmd:scripts/codex-web-phase0/verify_shared_daemon_topology.sh with installed runtime PID",
      "cmd:xcodebuild CordCodeUnitTests physical iPhone; 3 targeted model tests; exit 0",
-     "/Users/jacklee/Library/Developer/Xcode/DerivedData/CordCode-ditfvluletdhecbduxwrcnwdzmbi/Logs/Test/Test-CordCodeUnitTests-2026.08.22_17-44-44-+0800.xcresult"
+     "/Users/jacklee/Library/Developer/Xcode/DerivedData/CordCode-ditfvluletdhecbduxwrcnwdzmbi/Logs/Test/Test-CordCodeUnitTests-2026.08.22_17-44-44-+0800.xcresult",
+     "cmd:xcodebuild CordCodeLink macOS test; 191 executed, 1 skipped, 0 failures",
+     "/Users/jacklee/Library/Developer/Xcode/DerivedData/CordCodeLink-gyibdxapazewehcpxljuvfdvcebx/Logs/Test/Test-CordCodeLink-2026.08.25_12-35-46-+0800.xcresult",
+     "cmd:xcodebuild CordCodeUnitTests physical iPhone; 3 model + 33 interaction/SSV2 targeted tests; exit 0"
     ],
-    "checked_at": "2026-08-22T09:52:00Z"
+    "checked_at": "2026-08-25T04:36:18Z"
    }
   },
   {
    "id": "p6-observation-regression",
    "title": "Phase6 owner 观察期",
    "description": "owner 实际并行使用观察期结论（真实反馈，非自述）。",
-   "status": "pending",
+   "status": "blocked",
    "phase": "phase6",
    "kind": "regression",
    "depends_on": [
-    "p6-observation-tests"
+    "p6-observation-tests",
+    "p5-model-catalog-parity-review-fix-regression",
+    "p5-interactions-product-audit-regression"
    ],
    "source": "design §14/phase6",
-   "notes": "",
+   "notes": "external-blocker：按 design §13.3 与 Phase 6 观察合同，必须先完成全部 owner 真机矩阵（含模型与交互回归）才能开始发布观察期；已修正旧队列遗漏的依赖，禁止提前退役。",
    "verification": {
     "required": true,
     "status": "missing",

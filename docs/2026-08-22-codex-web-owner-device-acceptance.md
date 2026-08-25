@@ -2,6 +2,8 @@
 
 对应设计：`docs/2026-08-21-codex-web-backend-design.md` §13.3。
 
+> 2026-08-25 同步：agent 可执行的模型目录三项 unit-only 测试已在连接的物理 iPhone 上重跑，3/3 PASS；Go adapter、owner-matrix validator 与 Phase 6 fail-closed validator 也已复验通过。owner 已确认“新建/既有 session 首次发送即时显示”和“Desktop 长任务完成后 iOS 终态收口”修复符合预期，这些证据补强第 6–8 行，但不替代下表仍标 `NOT RUN` 的真实交互、Relay、provider、断网或旧入口回滚动作。
+
 ## 自动前置核对（已完成）
 
 - Mac Release：`/Applications/CordCodeLink.app` 已覆盖安装并运行，内嵌 runtime commit
@@ -28,13 +30,13 @@
 
 | # | 前提条件 | 动作 | 应看到 | 结果 | 证据/备注 |
 |---:|---|---|---|---|---|
-| 1 | LAN；Codex Web；新 session | iPhone 发一个足以产生长回答的请求 | 首 token 后连续流式；正文不重复；完成态只收口一次 | FAIL | 首轮 provider 误拒绝已由 `3f10df2` 修复。13:35 owner 复测已有 session `01a0236d…`，官方 API 拒绝历史 assistant item `resp_2026082116260046da0120a8a24374_msg`：Message ID 必须以 `msg` 开头。官方当前源码 `core/src/client.rs::prepare_response_items_for_request` 只调用 `ResponseItemId::is_prefixed`，而后者接受任意非空 prefix/suffix，故 `resp_…_msg` 未被剥离；这是官方 runtime 的历史兼容缺口，不在 iOS/MacBridge wire 映射层。禁止直接改 rollout、自动 rollback 或假 fork。新 session 尚待复测。`28526bf` 的错误可见性已由本次截图确认 PASS。 |
+| 1 | LAN；Codex Web；新 session | iPhone 发一个足以产生长回答的请求 | 首 token 后连续流式；正文不重复；完成态只收口一次 | FAIL（历史，待重跑） | 首轮 provider 误拒绝已由 `3f10df2` 修复。13:35 owner 复测已有 session `01a0236d…`，官方 API 拒绝历史 assistant item `resp_2026082116260046da0120a8a24374_msg`：Message ID 必须以 `msg` 开头。官方当前源码 `core/src/client.rs::prepare_response_items_for_request` 只调用 `ResponseItemId::is_prefixed`，而后者接受任意非空 prefix/suffix，故 `resp_…_msg` 未被剥离；这是官方 runtime 的历史兼容缺口，不在 iOS/MacBridge wire 映射层。禁止直接改 rollout、自动 rollback 或假 fork。2026-08-25 首发即时显示已通过，但尚未按本行完整重跑新 session 长回答、连续 delta 与唯一终态，故不升级为 PASS。 |
 | 2 | Relay；Codex Web；新 session | 使用与第 1 行等价的长回答请求 | 内容与 LAN 一致；无整段延迟后一次性跳出；无重复 | NOT RUN | 记录 Relay 状态、session 前缀、录屏 |
 | 3 | LAN；daemon 已运行；Terminal Codex 默认配置；active session | Mac 发长回答，iPhone 打开同一 session | TUI 使用 LocalDaemon；iPhone 实时进入执行中并连续显示 delta | NOT RUN | 记录 daemon/TUI 选择证据与 session 前缀 |
 | 4 | LAN；daemon 未运行；先启动 Terminal Codex 默认配置 | Mac 发长回答，再打开 Codex Web | TUI 使用 Embedded；iPhone 不伪造 live stream，只按已验证的 list/read 边界显示 | NOT RUN | 记录进程与事件时间线 |
 | 5 | LAN；daemon 已运行；Terminal Codex 带 `-c`、strict 或 non-replayable 覆盖 | Mac 发长回答，iPhone 打开同一 session | TUI 使用 Embedded；iPhone 不串入该隔离 turn | NOT RUN | 写明具体覆盖参数；记录隔离证据 |
-| 6 | LAN；Desktop 与 CordCode 已证明同 daemon；双方保持打开 | Desktop 发消息 | iPhone 立即进入执行态，连续显示同 turn delta 与唯一终态；不得切 session/刷新才出现 | PASS | owner 2026-08-22 在重启 Desktop 后复测并确认符合预期；T0 FD/socket 证据见 `scripts/codex-web-phase0/dumps/gate-desktop-attach/README.md` |
-| 7 | 双方保持打开；Codex Web 创建并完成 | 在 Desktop 原地发现并续聊 | 原 session、原 cwd、原 effective provider/model 可继续；不得重启/复制/迁移 | PASS | owner 2026-08-22 确认 T1 双向接力符合预期；exec-plan 证据 `p0-topology-v2-hardening-regression` |
+| 6 | LAN；Desktop 与 CordCode 已证明同 daemon；双方保持打开 | Desktop 发消息 | iPhone 立即进入执行态，连续显示同 turn delta 与唯一终态；不得切 session/刷新才出现 | PASS | owner 2026-08-22 在重启 Desktop 后复测并确认符合预期；2026-08-25 又确认 Desktop 发起的十几分钟长任务结束后 iOS 唯一终态收口修复符合预期；T0 FD/socket 证据见 `scripts/codex-web-phase0/dumps/gate-desktop-attach/README.md` |
+| 7 | 双方保持打开；Codex Web 创建并完成 | 在 Desktop 原地发现并续聊 | 原 session、原 cwd、原 effective provider/model 可继续；不得重启/复制/迁移 | PASS | owner 2026-08-22 确认 T1 双向接力符合预期；2026-08-25 确认新建与既有 session 的首次发送都能立即显示；exec-plan 证据 `p0-topology-v2-hardening-regression` |
 | 8 | 双方保持打开；Desktop 创建并完成 | 在 iPhone 发现并续聊 | 原 session 可继续且 Desktop 同时打开不报 active writer；不得退出任一端 | PASS | owner 2026-08-22 确认 T1 双向接力符合预期；无 active writer 冲突 |
 | 9 | custom provider 已配置为 effective provider | 新建与续聊各一次 | 继承同一 effective provider；模型目录不被手写替换；iOS 不显示未实现的 provider 切换 | NOT RUN | 记录真实 provider、model 与目录截图 |
 | 10 | turn 请求 command/file approval | iPhone 分别执行允许与拒绝 | 官方 turn 对应继续或拒绝；状态由 resolved/completed 收口；卡片消失一次 | NOT RUN | 允许/拒绝各留一条 interaction/session 证据 |

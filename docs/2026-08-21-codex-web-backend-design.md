@@ -2,6 +2,7 @@
 
 - 日期：2026-08-21
 - 状态：**v2.0 topology-first 施工合同；取代 v1.5–v1.7 中“Terminal Gate 可单独放行产品实施”的冲突规则。Desktop 与 CordCode 连接同一官方 daemon 是产品代码开工和继续扩面的共同硬门；任何 PARTIAL、独立 runtime 或 managed-loopback 结果均不得放行。**
+- 执行进度（2026-08-25）：**主体实现已完成，但主任务尚非 DONE。** exec-plan 当前为 105/111 done、3 blocked、3 pending：Phase 0–4 全部完成，Phase 5 仅剩模型目录视觉等价与审批/多题交互的 owner 真机回归，Phase 6 仍需完整 owner 矩阵、发布观察期与旧入口退役链。持久化真相见 `.exec-plan/state/plan-c48486da6336.json`；在这些门完成前不得生成正向完成报告或退役旧 `codex`。
 - 参考方案：[2026-08-16-dsh-web-backend-design.md](2026-08-16-dsh-web-backend-design.md)
 - 一轮评审：[2026-08-21-codex-web-backend-design-review.md](2026-08-21-codex-web-backend-design-review.md)
 - 二轮评审：[2026-08-21-codex-web-backend-design-review-r2.md](2026-08-21-codex-web-backend-design-review-r2.md)
@@ -9,6 +10,7 @@
 - 四轮确认评审：[2026-08-21-codex-web-backend-design-review-r4.md](2026-08-21-codex-web-backend-design-review-r4.md)
 - 历史前置分析（仅作问题来源，已降级，不授权实施）：[2026-08-21-codex-web-backend-feasibility-analysis.md](2026-08-21-codex-web-backend-feasibility-analysis.md)
 - **连续性合同（v2.0 拓扑之后、禁止按现象单修）**：[2026-08-22-codex-web-continuity-architecture.md](2026-08-22-codex-web-continuity-architecture.md)
+- **拓扑可观测性后续计划（已完成，不替代 Phase 6 owner 门）**：[2026-08-24-codex-web-topology-sync-monitor-implementation-plan完成情况.md](2026-08-24-codex-web-topology-sync-monitor-implementation-plan完成情况.md)
 - Codex 源码 pin：`536f86e5cc9ec1ff38457d099bf320b9d08eeeba`
 - 本机官方二进制：`codex-cli 0.148.0-alpha.21`（设计时）；**Phase 0 实施时实测 `0.149.0-alpha.4`**（ChatGPT.app 内嵌，版本漂移已按 §3.2 记录，schema 与 pin 逐项吻合）
 - 不变约束：CordCode 初衷 + SSV2 十二条护栏 + source-first/真实样本纪律
