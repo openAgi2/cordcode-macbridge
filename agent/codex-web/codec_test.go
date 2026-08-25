@@ -428,3 +428,28 @@ func mustJSON(t *testing.T, v any) json.RawMessage {
 	}
 	return b
 }
+
+// TestCodecTurnCompletedMissingTurnIDDropsEvenWithActiveTurn（审计 §3.2-B5）：
+// 官方 Turn.id 必有（thread_data.rs:352 非 Option）；空 id 是 wire 契约异常——
+// 即使本地 ActiveTurn 有观测也必须丢弃（不静默归属），避免掩盖契约破坏。
+func TestCodecTurnCompletedMissingTurnIDDropsEvenWithActiveTurn(t *testing.T) {
+	c := NewLiveCodec()
+	// 建立本地观测：turn/started 带真实 id（官方形状 turn.id）。
+	started := c.Decode(Notification{Method: "turn/started", Params: json.RawMessage(`{"threadId":"th-b5","turn":{"id":"turn-live"}}`)})
+	if len(started) == 0 || started[0].TurnID != "turn-live" {
+		t.Fatalf("started events = %+v", started)
+	}
+	// 契约异常帧：turn.id 空。必须零产出且不清除 ActiveTurn 观测。
+	dropped := c.Decode(Notification{Method: "turn/completed", Params: json.RawMessage(`{"threadId":"th-b5","turn":{"id":"","status":"completed"}}`)})
+	if len(dropped) != 0 {
+		t.Fatalf("missing-id completed must drop, got %+v", dropped)
+	}
+	if got := c.ActiveTurn("th-b5"); got != "turn-live" {
+		t.Fatalf("dropped frame must not mutate active turn, got %q", got)
+	}
+	// 正常帧带 id 仍收口。
+	done := c.Decode(Notification{Method: "turn/completed", Params: json.RawMessage(`{"threadId":"th-b5","turn":{"id":"turn-live","status":"completed"}}`)})
+	if len(done) != 1 || !done[0].Done || done[0].TurnID != "turn-live" {
+		t.Fatalf("normal completed = %+v", done)
+	}
+}

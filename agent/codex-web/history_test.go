@@ -337,3 +337,30 @@ func TestHistoryReadRequestShape(t *testing.T) {
 	}
 	expectParams(t, (*capRead)[1], map[string]any{"threadId": "th-x", "includeTurns": true})
 }
+
+// TestHistoryPlanStatusDerivesFromTurnStatus（审计 §3.3-C2）：官方 plan item 无
+// status 字段（仅 text），plan 卡状态必须从官方 turn.status 推导——completed →
+// completed，其余（interrupted/failed/inProgress/notLoaded）→ unknown，禁止无条件
+// 合成 "completed"（§9.2 不本地猜完成）。
+func TestHistoryPlanStatusDerivesFromTurnStatus(t *testing.T) {
+	for _, tc := range []struct {
+		turnStatus string
+		want       string
+	}{
+		{TurnStatusCompleted, "completed"},
+		{TurnStatusInterrupted, "unknown"},
+		{TurnStatusFailed, "unknown"},
+		{TurnStatusInProgress, "unknown"},
+	} {
+		items := []json.RawMessage{jraw(`{"type":"plan","id":"p-` + tc.turnStatus + `","text":"step"}`)}
+		th := &ThreadInfo{ID: "th-c2", Turns: []TurnInfo{{ID: "turn-c2", Status: tc.turnStatus, Items: items}}}
+		ht := turnsFromThread(t, th, 0)[0]
+		if len(ht.Parts) != 1 {
+			t.Fatalf("%s: parts = %d", tc.turnStatus, len(ht.Parts))
+		}
+		step := ht.Parts[0]["step"].(map[string]any)
+		if step["status"] != tc.want {
+			t.Fatalf("turn status %s → plan step status %v, want %q", tc.turnStatus, step["status"], tc.want)
+		}
+	}
+}

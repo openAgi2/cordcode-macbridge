@@ -26,9 +26,23 @@
 - **处置**：引入 `core.OfficialResolutionSource` 标记接口（codex-web Agent/agentSession 实现）——handler 对标记 backend 不做本地乐观收口；dsh-web/opencode-web 等无官方广播的 backend 保留原行为并补声明注释。若真机复测发现官方路径覆盖不了某场景，按 B 类登记豁免卡（不允许无声明保留）。
 - **验收**：允许/拒绝后卡片立即收口（owner 真机）；测试断言收口事件源 = serverRequest/resolved 驱动（非 handler 本地 publish）。
 
-### 1c C2：plan 合成终态（待实施时填写分歧分析）
+### 1c C2：plan 合成终态
 
-### 1d B5：turn/completed 缺 turn.id 归属（待实施时填写分歧分析）
+- **官方实现位置**：官方 wire 的 plan item 仅携带 text（Phase 0 catalog/interaction 样本，`protocol/v2/item.rs` plan variant 无 status 字段）；turn 级 `turn.status` 是官方唯一终态来源（`protocol/v2/thread.rs` Turn status；设计 §9.2 封口只认官方 turn status）。
+- **我方实现的第一处分歧**：`history.go` `mapHistoryItem` plan 分支无条件合成 `status:"completed"`——turn 处于 interrupted/failed/inProgress 时读取历史也会伪造终态，违反 §9.2「不本地猜完成」。
+- **处置**：plan 卡 status 改为从官方 `ht.Status` 推导（turn completed → completed，否则 unknown）；system note 合成 ID `turnID+":"+note` 保留并补碰撞不可能性注释（官方 turn id 全局唯一 × note 枚举单 turn 内唯一）；文案前缀「官方 turn 失败：」保留（产品文案非事实编造）。单测覆盖三态映射。
+
+### 1d B5：turn/completed 缺 turn.id 归属
+
+- **官方实现位置**：`app-server-protocol/src/protocol/v2/thread_data.rs:352`——`Turn.id: String` 为必有字段（非 Option、无 serde default）；`TurnCompletedNotification { thread_id, turn: Turn }`（turn.rs:407-410）随帧必带 turn.id。
+- **我方实现的第一处分歧**：`codec.go` turn/completed 处理在 `p.Turn.ID == ""` 时静默回退 `ActiveTurn(threadID)` 归属——wire 契约异常（官方不可能发空 id）被本地推断掩盖。
+- **处置**（官方必有 → 诊断 + 丢弃）：空 turn.id 记 warn 诊断并丢弃该帧（不静默归属）；测试断言 ActiveTurn 存在时空 id 帧仍零产出。
+
+## 批次 1 完成（2026-08-25）
+
+- 提交链：`3d84b28`（A1/B1 结构项 + 不变量测试）→ `e319ea5`（A2 官方收口唯一真相）→ 本笔（C2 + B5）。
+- 门验证：`go test ./... -count=1` 全绿（0 失败）、`go vet ./...` 干净；定向：interactions 不变量 4 用例、permission closure 3 用例、plan 状态映射 4 态、B5 丢弃用例均 PASS。
+- 真机验收（允许/拒绝后卡片立即收口）保留 owner，未代填。
 
 ## 批次 2：A3 官方算法回迁（待批次 1 完成后填写）
 

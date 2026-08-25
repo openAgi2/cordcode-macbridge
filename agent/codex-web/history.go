@@ -387,7 +387,14 @@ func mapHistoryItem(ht *core.TurnScopedHistoryTurn, it ThreadItem) {
 		if strings.TrimSpace(it.Text) == "" {
 			return
 		}
-		step := map[string]any{"id": it.ID, "toolName": "Plan", "status": "completed", "output": it.Text}
+		// 审计 §3.3-C2：官方 plan item 无 status 字段（仅 text），turn 级
+		// turn.status 是唯一终态来源——completed → completed，否则 unknown，
+		// 不无条件合成 "completed"（§9.2 不本地猜完成）。
+		status := "unknown"
+		if ht.Status == "completed" {
+			status = "completed"
+		}
+		step := map[string]any{"id": it.ID, "toolName": "Plan", "status": status, "output": it.Text}
 		ht.Parts = append(ht.Parts, map[string]any{"type": "tool", "step": step, "itemId": it.ID})
 	case "webSearch":
 		step := map[string]any{
@@ -500,6 +507,9 @@ func (a *Agent) GetRichSessionHistory(ctx context.Context, sessionID string, lim
 		}
 		out = append(out, entry)
 		for _, note := range t.SystemNotes {
+			// 合成 system 行 ID（审计 §3.3-C2：官方无 system note 行——bridge 兼容
+			// 面发明）：turnID+":"+note。碰撞不可能——官方 turn id 全局唯一 × note
+			// 枚举（当前仅 contextCompaction）在单 turn 内唯一。
 			out = append(out, core.RichHistoryEntry{
 				ID: t.TurnID + ":" + note, Role: "system", Content: note, Timestamp: started,
 			})

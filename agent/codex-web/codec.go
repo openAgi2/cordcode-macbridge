@@ -18,6 +18,7 @@ package codexweb
 
 import (
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"sync"
 
@@ -154,13 +155,14 @@ func (c *LiveCodec) decodeTurnCompleted(n Notification) []core.Event {
 	if err := json.Unmarshal(n.Params, &p); err != nil || p.ThreadID == "" {
 		return nil
 	}
+	// 官方 wire 契约：Turn.id 必有（protocol/v2/thread_data.rs:352，非 Option 无
+	// default；TurnCompletedNotification 随帧必带）。空 id = 契约异常——记诊断
+	// 丢弃，不静默归属 ActiveTurn（审计 §3.2-B5：本地推断会掩盖 wire 契约破坏）。
+	if p.Turn.ID == "" {
+		slog.Warn("codexweb codec: turn/completed missing turn.id (wire contract violation), dropping", "thread", p.ThreadID)
+		return nil
+	}
 	turnID := p.Turn.ID
-	if turnID == "" {
-		turnID = c.ActiveTurn(p.ThreadID)
-	}
-	if turnID == "" {
-		return nil // 无官方身份的完成帧不归属（§9.1 identity 红线）
-	}
 	c.setActiveTurn(p.ThreadID, "")
 	c.mu.Lock()
 	delete(c.retryByThread, p.ThreadID)
