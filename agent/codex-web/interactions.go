@@ -6,7 +6,7 @@ package codexweb
 // PendingAppServerRequests——分类型 HashMap（:74-80）、会话重置 clear()（:89）、
 // note_server_request 登记（:97）、take_resolution 本地决策取走（:201）、
 // resolve_notification 收 resolved 回声清除（:305）；官方收口唯一路径 =
-// ServerRequestResolved 通知（app_server_events.rs:118-142），发送应答后不本地关闭。
+// ServerRequestResolved 通知（tui/src/app/app_server_events.rs:118-142），发送应答后不本地关闭。
 // 与官方的差异清单（豁免卡：源码对齐审计文档 §3.2-B1）：
 //   - 官方单连接单视角 ↔ 本仓长驻 bridge 双泵（主/观察连接）两视角：
 //     serverRequest/resolved 广播每泵各收口一次（resolvedEvents per-epoch
@@ -74,7 +74,7 @@ type Interaction struct {
 
 // resolvedRecord 保存已收口交互的官方身份与各连接视角的收口进度（官方把
 // serverRequest/resolved 广播给所有订阅连接——每个客户端视角各自收口一次，
-// TUI app_server_events.rs dismiss 同构；我们的主泵/观察泵即两个视角）。
+// TUI tui/src/app/app_server_events.rs dismiss 同构；我们的主泵/观察泵即两个视角）。
 type resolvedRecord struct {
 	interactionID string
 	kind          InteractionKind
@@ -374,7 +374,7 @@ func (a *Agent) RespondSessionPermission(ctx context.Context, sessionID, request
 
 // EmitsOfficialResolution 声明官方 serverRequest/resolved 广播经双泵 per-epoch
 // 投递到 bridge 事件流（resolvedEvents，豁免卡审计 §3.2-B1）——官方收口唯一路径 =
-// ServerRequestResolved（app_server_events.rs:118-142），bridge 不得在此之上叠加
+// ServerRequestResolved（tui/src/app/app_server_events.rs:118-142），bridge 不得在此之上叠加
 // 本地乐观 permission_resolved（审计 §3.1-A2）。
 func (a *Agent) EmitsOfficialResolution() bool { return true }
 
@@ -436,8 +436,8 @@ func (a *Agent) respondPermission(ctx context.Context, _, interactionID string, 
 }
 
 // resolvedEvents 处理 serverRequest/resolved 通知 → 收口 + 事件。
-// 官方语义（thread_lifecycle.rs resolve_pending_server_request）：resolved 广播给
-// 该线程的全部订阅连接，每个客户端视角各自收口一次（TUI app_server_events.rs
+// 官方语义（app-server/src/request_processors/thread_lifecycle.rs resolve_pending_server_request）：resolved 广播给
+// 该线程的全部订阅连接，每个客户端视角各自收口一次（TUI tui/src/app/app_server_events.rs
 // dismiss 同构）。我们的主泵/观察泵是两个视角——**每泵各发一次**收口事件
 // （kernel reducer 按 interactionId 幂等 upsert，双份无害），不共享全局收口权；
 // 此前的全局 MarkResolved 去重让"赢的那条泵"不可控（writer 场景产出落在被动泵

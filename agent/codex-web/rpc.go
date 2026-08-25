@@ -3,7 +3,7 @@ package codexweb
 // rpc.go —— JSON-RPC 相关性与服务端请求（设计 §5.2/§7.2）。
 //
 // 移植母本（算法层）：codex-rs/app-server-client/src/lib.rs（request/notify/
-// resolve_server_request/reject_server_request/next_event/shutdown）、remote.rs。
+// resolve_server_request/reject_server_request/next_event/shutdown）、app-server-client/src/remote.rs。
 // 纪律（§3.4）：官方已有 request queue/event queue/server request registry 算法，不重新发明：
 //   - 单 reader goroutine 按 arrival 顺序分发（ordered event queue）；
 //   - pending 以 request id 关联（concurrent response 归位）；

@@ -2189,8 +2189,8 @@ type codexTokenUsage struct {
 // output_text / summary_text block 各一个单元（一条 reasoning 可含多个 summary_text，
 // r5）。空摘要 shape-agnostic 跳过（提取不到非空 summary_text 文本即不发，r3/r4）。message
 // 与 reasoning 两源都解析（event_msg + response_item），由调用方用 per-turn 内容去重合并，
-// 覆盖 Legacy / Paginated / 双写三种 session 模式（policy.rs:108-119，r1/r2/r3）。token 级
-// delta 经 policy.rs:172 不落盘，故天花板为事件/条目级（§2/§3.1 源码实证）。
+// 覆盖 Legacy / Paginated / 双写三种 session 模式（rollout/src/policy.rs:108-119，r1/r2/r3）。token 级
+// delta 经 rollout/src/policy.rs:172 不落盘，故天花板为事件/条目级（§2/§3.1 源码实证）。
 func scanCodexTranscriptRelayEvents(sessPath string, offset int64) []codexRelayEvent {
 	f, err := os.Open(sessPath)
 	if err != nil {
@@ -2250,7 +2250,7 @@ func codexRolloutEntryEvents(entry codexRolloutEntry) []codexRelayEvent {
 				out = append(out, codexRelayEvent{kind: "reasoning", text: p.Text})
 			}
 		case "token_count":
-			// token 级 delta 不落盘（policy.rs:172），但 token_count 是事件级用量记录，
+			// token 级 delta 不落盘（rollout/src/policy.rs:172），但 token_count 是事件级用量记录，
 			// 映射到 context_usage_updated（运行状态条 token 显示）。
 			var tc codexTokenCountPayload
 			if json.Unmarshal(entry.Payload, &tc) == nil {

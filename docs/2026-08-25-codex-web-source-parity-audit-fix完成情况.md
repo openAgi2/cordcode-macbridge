@@ -57,7 +57,7 @@
 ## 批次 2 完成（2026-08-25）
 
 - 提交：见 git log（A3 resync-retry 回迁 + B2 卡登记状态回写）。
-- 门验证：`go test ./... -count=1` 全绿、`go vet ./...` 干净；定向 7 用例（解析 2 + interrupt 重试成功/持续失败 2 + steer 重试 1 + Missing 转 Send 1）均 PASS。
+- 门验证：`go test ./... -count=1` 全绿、`go vet ./...` 干净；定向 6 个 Test 函数（解析 2 + interrupt 重试成功/持续失败 2 + steer 重试 1 + Missing 转 Send 1）均 PASS（口径修正 2026-08-26 监工指令 2 号 F1）。
 - 修复过程事故：初版重试路径 `return TurnInterrupt(...)` 直接返回 nil `*RPCError` → typed-nil error 接口陷阱（err != nil 但打印 <nil>），测试捕获后改为显式判空返回——无生产影响（新代码首次提交前被测试拦下）。
 - 真机验收（owner 2026-08-25 晚 PASS）：A3 Mac 端发起任务、iOS 观察中点停止直接生效，不再出现 -32600 expected active turn id… ✅（失配静默重同步+重试一次）。
 
@@ -103,5 +103,14 @@
 1. **exec-plan 模板**：`references/state-format.md` verification 增加 `upstream_anchor` 必填字段（移植/对齐类 todo：file:line 锚点或豁免卡编号）+ 证明规则 4（缺锚点 = missing proof → downgrade pending）；`references/completion-report-template.md` 报告规则 7 + §2.1 Upstream Anchors 必填节（每修复一行：锚点 + 第一处分歧）。
 2. **supervise 固定问句**：`references/drift-criteria.md` v4 新增判据 9「上游分歧锚点」（软判据，移植/对齐类任务；问句="这个修复与官方（上游）调用链的第一处分歧在哪里？"；豁免卡四要素配套）；`report-audit-template.md` verified 条件同步为九条判据。
 3. **豁免卡登记簿**：审计文档 §5 各项补登记状态（B1–B5 全部登记完毕；新发明先登记再实施）。
+
+## 监工指令 2 号完成（2026-08-26：§0.3 修订案回写 + follow-up 口径项）
+
+- **上游锚点**：本节为文档回写类任务——锚点 = 完成情况文档 §3b 草案引用块（本文档内）+ 监工指令 `docs/supervisor-logs/2026-08-25-codex-web-source-parity-audit/directive-002-amendment-writeback-and-conventions.md`。
+- **1a §0.3.1 豁免小节回写**：设计文档 §0.3 末尾新增「0.3.1 记录在案的豁免：rollout 尾部冷用量」——§3b 草案原文（五条约束 + 退役条件 + 末句红线保留），落款「owner 批准 2026-08-26；源码对齐审计 §3.3-C1；监工指令 2 号」。主文档其余章节零改动（diff 14 行纯新增、0 删改）。审计文档 C1 处置状态同步为「修订案已批准并回写（2026-08-26，监工指令 2 号）」。
+- **1b F3 锚点全路径**：codec.go notification.rs 补全 + 全仓扫描补全 20 处裸锚点（tui/src/app.rs、tui/src/app/thread_routing.rs、tui/src/app/app_server_events.rs、app-server/src/request_processors/thread_lifecycle.rs、app-server/src/bespoke_event_handling.rs、core/src/tools/handlers/request_user_input_spec.rs、protocol/src/protocol.rs、app-server-protocol/src/protocol/v2/{thread_data,notification}.rs、app-server-client/src/remote.rs、app-server-transport/src/transport/{unix_socket,websocket}.rs、rollout/src/{policy,list}.rs）——全部逐一 find 验证过真实路径（policy.rs 经内容核对：rollout/src/policy.rs:108-119 Legacy/Paginated 模式 + :172 瞬态不落盘）。复扫代码文件零裸锚点残留；审计/完成情况文档内的简写锚点不在 F3 范围（文档自身带 §2 参照系）。
+- **1c F1 口径**：control_race_test 实为 6 个 Test 函数（grep -c "func Test" = 6）——审计文档 A3 与本文档批次 2 节同步修正；今后「N 用例」一律按 Test 函数数计。
+- **1d F2 通报已知悉**：~/.agents/skills 已 git 化（4b55ef6）；批次 5 的 skill 变更已含于该基线提交，此后 skill 变更将携带该仓 commit 哈希。
+- **门验证**：`go test ./... -count=1` 0 失败、`go vet ./...` 干净；注释级修正零行为变更（go build 通过，diff 仅注释与文档）。
 
 ## 批次 6：iOS 抽查（待填写）

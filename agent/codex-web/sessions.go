@@ -171,7 +171,7 @@ func ListThreads(ctx context.Context, cl *Client, params ListThreadsParams) (*Th
 // ListAllThreads 沿官方 nextCursor 翻页聚合一侧列表（保持官方页序，不本地重排）。
 // archived 语义由 params（含 Archived 指针）原样携带：true 只列已归档，false/nil 只列未归档。
 //
-// 官方分页边界（§22-6，rollout list.rs should_skip）：默认 created_at 秒粒度 cursor 会
+// 官方分页边界（§22-6，rollout/src/list.rs should_skip）：默认 created_at 秒粒度 cursor 会
 // 跳过与 cursor 同秒创建的兄弟条目。聚合 catalog 应使用服务端默认页大小（单页覆盖），
 // 不要以小 limit 深翻页追求完整性——那会触发官方同秒跳过。
 func ListAllThreads(ctx context.Context, cl *Client, params ListThreadsParams) ([]ThreadInfo, *RPCError, error) {

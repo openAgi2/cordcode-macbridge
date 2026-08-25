@@ -155,7 +155,7 @@ func (c *LiveCodec) decodeTurnCompleted(n Notification) []core.Event {
 	if err := json.Unmarshal(n.Params, &p); err != nil || p.ThreadID == "" {
 		return nil
 	}
-	// 官方 wire 契约：Turn.id 必有（protocol/v2/thread_data.rs:352，非 Option 无
+	// 官方 wire 契约：Turn.id 必有（app-server-protocol/src/protocol/v2/thread_data.rs:352，非 Option 无
 	// default；TurnCompletedNotification 随帧必带）。空 id = 契约异常——记诊断
 	// 丢弃，不静默归属 ActiveTurn（审计 §3.2-B5：本地推断会掩盖 wire 契约破坏）。
 	if p.Turn.ID == "" {
@@ -439,7 +439,7 @@ func decodeTokenUsage(n Notification) []core.Event {
 
 // decodeErrorNotification 官方 error 通知 {error:{message,...}, willRetry, threadId}。
 // 呈现对齐官方：willRetry=true → 瞬态重试行（官方 on_stream_error，
-// tui/src/chatwidget/protocol.rs:127-133 + notification.rs:54-55"transient…will not
+// tui/src/chatwidget/protocol.rs:127-133 + app-server-protocol/src/protocol/v2/notification.rs:54-55"transient…will not
 // interrupt a turn"），映射 EventRetryStatus；willRetry=false → EventError 保留
 // 官方原文（对齐官方 handle_non_retry_error）。连续计数 RetryAttempt 是本仓附加
 // UX 信号（豁免卡：审计文档 §3.2-B4——iOS 显示「重试中（第 N 次）」，官方无计数；

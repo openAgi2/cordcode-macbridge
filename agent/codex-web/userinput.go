@@ -17,7 +17,7 @@ package codexweb
 // options；自由文本通过 isOther=true 的 Other 路径表达。
 // 跳过（Mac 面板「跳过」）：官方 wire 无独立 reject 词汇——ToolRequestUserInputResponse
 // 只有 answers，跳过 = 空 answers 响应（官方 client-error 亦回落空 answers 继续 turn，
-// bespoke_event_handling.rs on_request_user_input_response）；canReject=true 让 iOS
+// app-server/src/app-server/src/bespoke_event_handling.rs on_request_user_input_response）；canReject=true 让 iOS
 // 渲染「跳过本题」并把跳过按空 answers 应答（2026-08-25 真机对齐 Mac 面板）。
 
 import (
@@ -87,7 +87,7 @@ func (a *Agent) userInputEvents(it *Interaction) []core.Event {
 			CanRespond:    true,
 			// 官方 wire 没有独立 reject 词汇：跳过 = 空 answers 响应
 			// （ToolRequestUserInputResponse{answers:{}}；官方向错误回退亦为空
-			// answers 继续 turn，Mac 面板「跳过」即此语义，bespoke_event_handling.rs
+			// answers 继续 turn，Mac 面板「跳过」即此语义，app-server/src/bespoke_event_handling.rs
 			// on_request_user_input_response）。
 			CanReject:     true,
 			ExpiresAt:     expiresAt,
@@ -133,7 +133,7 @@ func normalizeUserInputQuestions(raw []userInputRawQuestion) (*userInputSnapshot
 			return nil, fmt.Errorf("question[%d] duplicate id %q", i, qid)
 		}
 		snap.Order = append(snap.Order, qid)
-		// 官方约束仅"每题 options 不得为空"（request_user_input_spec.rs
+		// 官方约束仅"每题 options 不得为空"（core/src/tools/handlers/request_user_input_spec.rs
 		// "requires non-empty options"）；Phase 0 样本碰巧 2–3 个被误当成硬限，
 		// 2026-08-25 iOS 发起真机模型生成 4 选项直接 invalid_backend_request。
 		// 对齐官方：非空即可，数量不设上限。

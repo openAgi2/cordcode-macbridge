@@ -75,7 +75,7 @@
 - 验收：允许/拒绝后卡片立即收口不回归；收口事件源断言 = `serverRequest/resolved` 驱动；并入 p5-interactions 真机回归。
 
 #### A3 steer/interrupt 失配未采用官方 resync-retry
-- **处置状态**：处置完成（2026-08-25 批次 2，git:cde3cb0；control_race_test 7 用例）
+- **处置状态**：处置完成（2026-08-25 批次 2，git:cde3cb0；control_race_test 6 个 Test 函数——口径修正 2026-08-26 监工指令 2 号 F1：N 用例一律按 Test 函数数计）
 - 位置：`agent/codex-web/events.go:481-499`（currentTurnForControl，注释明确"原样透传，不重试伪装"）、`501-526`（CancelTurnForThread）。
 - 官方锚点：`tui/src/app.rs:643-703`（steer/interrupt 失配错误解析 + 重同步 + 重试一次，含 Missing 分支）。
 - 定性：官方**有**算法（错误驱动重同步），本仓选择了相反行为（fail-closed 不重试）且未声明理由——属于"官方已有算法时另造更差等价物"。
@@ -128,7 +128,7 @@
 ### 3.3 C 类：红线违规
 
 #### C1 context_usage 直接解析 rollout JSONL（owner 已裁决：保留并加固 + 设计修订）
-- **处置状态**：代码加固完成（2026-08-25 批次 3，git:faa9e92：fixture+版本门控+可见性）；§0.3 修订案草案停等 owner 批准
+- **处置状态**：代码加固完成（2026-08-25 批次 3，git:faa9e92：fixture+版本门控+可见性）；**修订案已批准并回写（2026-08-26，监工指令 2 号——owner 委托监工代决，设计文档 §0.3.1 落款）**
 - 位置：`agent/codex-web/context_usage.go:76-156`（`GetSessionContextUsage` 经官方 `thread/read` 取 path 后，`readPersistedContextUsage` tail 读 8MB 解析 `event_msg/token_count` 记录）。
 - 违反：§0.3（"用量"在官方 API 唯一数据面清单内，禁止解析 `~/.codex/sessions/**/*.jsonl` 补造事实）、§9 旁路禁区（rollout parser）；且 rollout 内部格式**无稳定性契约**，当前形状不吻合时静默回退 cache，属 §1 要禁止的"静默 fallback"。
 - 缓解事实：官方确无冷用量读取 RPC（live 仅有 `thread/tokenUsage/updated` 通知；官方冷用量由 server 侧 resume 时自行解析 rollout）；path 来源是官方 API；功能已随 6f765fc 交付且 owner 已在真机确认上下文占用显示正常。

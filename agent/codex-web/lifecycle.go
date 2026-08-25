@@ -13,7 +13,7 @@ package codexweb
 //
 // 官方源码锚点：cli/src/main.rs:2588-2601（agents 入口自动启动 daemon）、
 // tui/src/lib.rs:275/436/851/912-925（AppServerTarget/socket 探测/复用判定）、
-// app-server-daemon/src/lib.rs:191、app-server-transport websocket.rs:135-150
+// app-server-daemon/src/lib.rs:191、app-server-transport/src/transport/websocket.rs:135-150
 // （非 loopback 无 auth 拒绝启动 → 托管只绑 127.0.0.1）。
 //
 // Phase 0 样本：testdata/official-0.149.0-alpha.4/dumps/lifecycle。
@@ -182,7 +182,7 @@ func ResolveCodexBinaryForHome(codexHome string) (string, error) {
 	return "", fmt.Errorf("official managed standalone not found: %s", standalone)
 }
 
-// ControlSocketPath 推导官方 control socket 路径（app-server-transport transport/mod.rs:58；
+// ControlSocketPath 推导官方 control socket 路径（app-server-transport/src/transport/mod.rs:58；
 // 目录 app-server-control、文件 app-server-control.sock）。路径超长返回错误（SUN_LEN）。
 func ControlSocketPath(codexHome string) (string, error) {
 	p := filepath.Join(codexHome, "app-server-control", "app-server-control.sock")

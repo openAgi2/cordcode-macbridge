@@ -34,7 +34,7 @@ const persistedUsageTailBytes int64 = 8 << 20
 
 // persistedUsageVerifiedCLIFamilies：rollout token_count 记录形状按这些 CLI
 // 版本族经 fixture 冻结验证（testdata/official-0.149.0-alpha.4/dumps/usage/；
-// pin 536f86e5 protocol.rs:2094-2164 TokenUsageInfo/TokenCountEvent/TokenUsage +
+// pin 536f86e5 protocol/src/protocol.rs:2094-2164 TokenUsageInfo/TokenCountEvent/TokenUsage +
 // history/src/rollout_payload.rs RolloutItemWire::EventMsg）。官方内部格式无稳定性
 // 契约——版本族外不走文件路径（owner 裁决 2026-08-25，审计 §3.3-C1-2）。
 var persistedUsageVerifiedCLIFamilies = []string{"0.149."}
@@ -181,7 +181,7 @@ func readPersistedContextUsage(path string) (*core.ContextUsage, error) {
 		}
 		// 契约不吻合检测（审计 §3.3-C1-1）：最新一条 token_count 记录与冻结
 		// fixture 形状不符 → 弃用文件路径 + warn 诊断（不静默回退 cache）。
-		// 官方 model_context_window 为 Option（protocol.rs:2097-2099 TODO
+		// 官方 model_context_window 为 Option（protocol/src/protocol.rs:2097-2099 TODO
 		// "make this not optional"）——null/≤0 时无法计算占用比，同样弃用。
 		info := record.Payload.Info
 		if info == nil || info.ModelContextWindow <= 0 || info.Last.TotalTokens < 0 {

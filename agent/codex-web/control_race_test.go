@@ -15,11 +15,11 @@ import (
 )
 
 func TestParseSteerRaceOfficialMessages(t *testing.T) {
-	// Missing 分支（app.rs:656-657）。
+	// Missing 分支（tui/src/app.rs:656-657）。
 	if r := parseSteerRace("no active turn to steer"); !r.missing || r.actualTurnID != "" {
 		t.Fatalf("missing race = %+v", r)
 	}
-	// 失配变体带反引号（app.rs:659-674）。
+	// 失配变体带反引号（tui/src/app.rs:659-674）。
 	if r := parseSteerRace("expected active turn id `turn-old` but found `turn-new`"); r.missing || r.actualTurnID != "turn-new" {
 		t.Fatalf("mismatch race = %+v", r)
 	}
@@ -33,7 +33,7 @@ func TestParseSteerRaceOfficialMessages(t *testing.T) {
 }
 
 func TestParseInterruptMismatchOfficialMessages(t *testing.T) {
-	// interrupt 失配无反引号（app.rs:676-692）。
+	// interrupt 失配无反引号（tui/src/app.rs:676-692）。
 	if got := parseInterruptMismatch("expected active turn id turn-old but found turn-new"); got != "turn-new" {
 		t.Fatalf("mismatch = %q", got)
 	}

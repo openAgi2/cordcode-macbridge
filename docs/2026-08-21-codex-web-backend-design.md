@@ -88,6 +88,20 @@ CordCode codex-web ─ WebSocket over UDS ───┘
 宿主拓扑，再证明同一 daemon 可以承担 catalog、history、turn、interaction 和 live stream。
 顺序不可倒置：iOS 自己发消息成功、adapter 单测通过或 TUI 共用 daemon，均不能单独授权后续产品面。
 
+#### 0.3.1 记录在案的豁免：rollout 尾部冷用量
+
+codex-web 的冷用量（已加载 thread 的当前 context 占用）读取，在官方无对应 RPC 的前提下，允许唯一一条受控文件路径：仅打开官方 `thread/read` 返回的 `Thread.path`，tail 读取 8MB 内最新的 `event_msg/token_count` 记录。该路径登记为记录在案的豁免，约束：
+
+1. 契约 fixture 冻结形状，不吻合即弃用并打诊断，不静默回退；
+2. CLI 版本门控（已验证版本族外不走文件路径）；
+3. descriptor 与日志显式标注 `usage-source: rollout-tail-experimental`；
+4. 该路径只读、不做 session 发现或第二目录；
+5. 官方提供冷用量 RPC 后立即退役本路径。
+
+除本豁免外，§0.3「官方 API 唯一数据面」红线对其余全部用量事实仍然生效。
+
+> 落款：owner 批准 2026-08-26；源码对齐审计 §3.3-C1（[2026-08-25-codex-web-source-parity-audit.md](2026-08-25-codex-web-source-parity-audit.md)）；监工指令 2 号。
+
 ## 1. CordCode 初衷如何约束本设计
 
 CordCode 不是新的 Codex harness。它是用户 Mac 上官方 Codex 工作流的 iOS 延伸：

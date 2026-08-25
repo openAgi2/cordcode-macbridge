@@ -2,7 +2,7 @@ package codexweb
 
 // transport.go —— 字节传输与重连（设计 §5.2/§6.1）。
 //
-// 协议事实（Phase 0 实测 + unix_socket.rs accept_async）：
+// 协议事实（Phase 0 实测 + app-server-transport/src/transport/unix_socket.rs accept_async）：
 //   - app-server stdio transport：newline-delimited JSON（每行一个 JSON-RPC 消息）；
 //   - daemon control socket：WebSocket over Unix socket（WS 升级；每个 JSON-RPC 消息一个
 //     WS text 帧）；裸 newline JSON 连接会被立即关闭；

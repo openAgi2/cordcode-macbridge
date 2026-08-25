@@ -518,11 +518,11 @@ type steerRace struct {
 }
 
 func parseSteerRace(msg string) steerRace {
-	// 锚点 app.rs:656-657。
+	// 锚点 tui/src/app.rs:656-657。
 	if msg == "no active turn to steer" {
 		return steerRace{missing: true}
 	}
-	// 锚点 app.rs:659-674：前缀/分隔/后缀均带反引号，首次出现处切分。
+	// 锚点 tui/src/app.rs:659-674：前缀/分隔/后缀均带反引号，首次出现处切分。
 	const prefix = "expected active turn id `"
 	const sep = "` but found `"
 	rest, ok := strings.CutPrefix(msg, prefix)
@@ -560,7 +560,7 @@ func parseInterruptMismatch(msg string) string {
 // （core.ThreadTurnCanceler）：iOS 停止 Mac 在共享 daemon 上发起的 turn 时，
 // 本端没有该 thread 的写会话，turnID 只能取中央泵 liveCodec 观测到的 active turn。
 // 无活动 turn 原样返回。官方 -32600 失配走 resync-retry（审计 §3.1-A3，
-// 官方 thread_routing.rs:604-627）：attempt 0 失配 → 以服务器报告的 actual id
+// 官方 tui/src/app/thread_routing.rs:604-627）：attempt 0 失配 → 以服务器报告的 actual id
 // 重同步（权威纠正）后重试一次；仍失败才原样返回官方错误。
 //
 // 订阅前已运行的 turn（2026-08-23 真机 01a02f29）：观察连接在 turn/started 广播
@@ -583,7 +583,7 @@ func (a *Agent) CancelTurnForThread(ctx context.Context, threadID string) error 
 	if rpcErr == nil {
 		return nil
 	}
-	// 官方 resync-retry（审计 §3.1-A3；thread_routing.rs:612-618）：
+	// 官方 resync-retry（审计 §3.1-A3；tui/src/app/thread_routing.rs:612-618）：
 	if actual := parseInterruptMismatch(rpcErr.Message); actual != "" && actual != turnID {
 		a.mu.Lock()
 		a.liveCodec.setActiveTurn(threadID, actual)
@@ -630,9 +630,9 @@ func (s *agentSession) Steer(ctx context.Context, prompt string) (string, error)
 	}
 	steered, rpcErr, err := TurnSteer(ctx, cl, s.threadID, turnID, []InputPart{TextPart(prompt)})
 	if err == nil && rpcErr != nil {
-		// 官方 resync-retry（审计 §3.1-A3；thread_routing.rs:683-727）。
+		// 官方 resync-retry（审计 §3.1-A3；tui/src/app/thread_routing.rs:683-727）。
 		if race := parseSteerRace(rpcErr.Message); race.missing {
-			// Missing 分支（thread_routing.rs:691-698）：本地观测过期——清除后按
+			// Missing 分支（tui/src/app/thread_routing.rs:691-698）：本地观测过期——清除后按
 			// 官方 should_start_turn 语义转普通 Send（输入进新 turn）。
 			s.syncControlTurn("")
 			if sendErr := s.Send(prompt, nil, nil); sendErr != nil {
@@ -640,7 +640,7 @@ func (s *agentSession) Steer(ctx context.Context, prompt string) (string, error)
 			}
 			return "", nil
 		} else if race.actualTurnID != "" && race.actualTurnID != turnID {
-			// ExpectedTurnMismatch（thread_routing.rs:704-717）：以服务器报告的
+			// ExpectedTurnMismatch（tui/src/app/thread_routing.rs:704-717）：以服务器报告的
 			// actual id 重同步（权威纠正）后重试一次（actual == 本地 id 不重试）。
 			s.syncControlTurn(race.actualTurnID)
 			steered, rpcErr, err = TurnSteer(ctx, cl, s.threadID, race.actualTurnID, []InputPart{TextPart(prompt)})
@@ -817,7 +817,7 @@ func (a *Agent) Subscribe(ctx context.Context) (<-chan core.Event, error) {
 	}()
 	// server requests 通道需有消费者（避免 readLoop 阻塞）。观察连接不忽略批准/
 	// 提问请求：iOS 打开 session 时官方 thread/resume 会把该线程 pending 的
-	// server request 重放到本连接（thread_lifecycle.rs replay_requests_to_
+	// server request 重放到本连接（app-server/src/request_processors/thread_lifecycle.rs replay_requests_to_
 	// connection_for_thread），丢弃 = Mac 等批准、iOS 毫无提示。登记 + 生成产品
 	// 事件（与中央泵同一处理），应答走同一连接（clientForEpoch 按 epoch 路由）。
 	go func() {
