@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "project_root": "/Users/jacklee/Projects/cordcode-macbridge-codex-web",
+  "design_doc": "docs/2026-08-25-codex-web-source-parity-audit.md",
+  "design_doc_hash": "384c3eb5fea05dd87a32ccfaf9e9a9415e81db27",
+  "design_doc_changed": true,
+  "design_doc_changed_note": "审计文档被批次5/6按指令要求回写（处置状态/豁免卡/§8附录），非路线漂移",
+  "activated_at": "2026-08-26T00:01:00+08:00",
+  "active_mode": true,
+  "owner_acceptance": null,
+  "directives": [
+    {
+      "number": 1,
+      "kind": "implementation",
+      "title": "codex-web 源码对齐审计修复（六批次）",
+      "issued_at": "2026-08-25T22:30:00+08:00",
+      "issued_note": "经 owner 会话转发下发，skill 流程补录为 directive-001；后续指令从 2 号走 issue 流程",
+      "status": "verified",
+      "markdown_path": "docs/supervisor-logs/2026-08-25-codex-web-source-parity-audit/directive-001-source-parity-audit-fix.md",
+      "scope": "Mac 主仓为主（agent/codex-web + go-bridge），iOS 仓轻量抽查",
+      "constraints": [
+        "§3.4 先分歧后代码，锚点/豁免卡入注释",
+        "per-epoch 重构（202b41c）为批次1基础",
+        "真机验收留 owner 禁代填",
+        "每批定向测试+全量 test+vet 过门"
+      ],
+      "linked_commits": [
+        "git:202b41c",
+        "git:3d84b28",
+        "git:e319ea5",
+        "git:8addcb1",
+        "git:cde3cb0",
+        "git:faa9e92",
+        "git:27e5f50",
+        "git:ffcbb81",
+        "git:d18c6ec",
+        "git:6b155ae"
+      ],
+      "report": {
+        "received_at": "2026-08-26T00:00:55+08:00",
+        "markdown_path": "docs/supervisor-logs/2026-08-25-codex-web-source-parity-audit/report-001-source-parity-audit-fix.md",
+        "channel": "owner-paste",
+        "audited": true,
+        "audit_verdict": "verified",
+        "audit_path": "docs/supervisor-logs/2026-08-25-codex-web-source-parity-audit/audit-001-source-parity-audit-fix.md",
+        "audit_findings_nonblocking": [
+          "F1 control_race_test 实为 6 个 Test 函数，报告称 7 用例（计数口径不严）",
+          "F2 批次5 skill 改动位于 ~/.agents/skills（非 git 管理），不可追溯",
+          "F3 codec.go:442 notification.rs 锚点缺 crate 前缀（文件全仓唯一，可定位）"
+        ]
+      },
+      "pending_owner_decisions": [
+        "确认 A2/A3 真机 PASS（6b155ae 已记录）",
+        "裁决 §0.3 修订案草案（完成情况 §3b：rollout 冷用量豁免登记）",
+        "（可选）~/.agents/skills 是否 git 化"
+      ]
+    }
+  ],
+  "next_directive_number": 2
+}
