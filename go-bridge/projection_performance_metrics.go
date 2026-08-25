@@ -6,6 +6,10 @@ import (
 	"time"
 )
 
+// PERF-S0A（iOS 仓 docs/2026-08-23-message-web-gpuix-borrowing-realistic-assessment.md §13）：
+// projection 性能指标 schema 版本。字段变化时递增并记录；before/after 对比必须同版本。
+const projectionPerformanceMetricsSchema = 1
+
 type projectionPayloadBreakdown struct {
 	ProjectionBytes  int
 	ExecutionBytes   int
@@ -77,6 +81,7 @@ func logProjectionResponseMetrics(
 		"data":      data,
 	}
 	attrs := []any{
+		"metricsSchema", projectionPerformanceMetricsSchema,
 		"requestId", msg.RequestID,
 		"backendID", msg.BackendID,
 		"sessionPrefix", projectionSessionLogPrefix(sessionID),
@@ -116,6 +121,7 @@ func logProjectionPatchMetrics(backendID, sessionID, recoveryID string, patch Pr
 	upsertBytes := encodedJSONSize(patch.UpsertTurns)
 	partOpsBytes := encodedJSONSize(patch.PartOps)
 	slog.Info("go-bridge: projection patch metrics",
+		"metricsSchema", projectionPerformanceMetricsSchema,
 		"backendID", backendID,
 		"sessionPrefix", projectionSessionLogPrefix(sessionID),
 		"recoveryID", recoveryID,
