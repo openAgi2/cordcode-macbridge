@@ -4,6 +4,7 @@
 - 驱动：owner 监工指令（codex-web 源码对齐审计修复）
 - 审计文档（豁免卡登记簿 + 事实基准）：[2026-08-25-codex-web-source-parity-audit.md](2026-08-25-codex-web-source-parity-audit.md)
 - 纪律：每个修复先在本文档写明「官方实现位置 + 我方实现的第一处分歧」再动代码（设计 §3.4）；代码注释带上游锚点或豁免卡编号；每批定向测试 + go test ./... + go vet 通过后进下一批。
+- 部署与 owner 验收（2026-08-25 晚）：Mac Release runtime d18c6eccc29b（PID 1980, 23:45:21, port 8777，二进制含三处审计标记）+ iOS 真机 b700932 已部署；**A2 审批收口 / A3 停止外部 turn 两项 owner 真机验收 PASS**。剩余 owner 决定：§0.3 修订案批准与否（§3b 草案）。
 
 ## 批次 1：收口对称性与小修
 
@@ -42,7 +43,7 @@
 
 - 提交链：`3d84b28`（A1/B1 结构项 + 不变量测试）→ `e319ea5`（A2 官方收口唯一真相）→ 本笔（C2 + B5）。
 - 门验证：`go test ./... -count=1` 全绿（0 失败）、`go vet ./...` 干净；定向：interactions 不变量 4 用例、permission closure 3 用例、plan 状态映射 4 态、B5 丢弃用例均 PASS。
-- 真机验收（允许/拒绝后卡片立即收口）保留 owner，未代填。
+- 真机验收（owner 2026-08-25 晚 PASS）：A2 审批允许/拒绝后卡片立即消失 ✅（收口源=官方 serverRequest/resolved 双泵投递，无本地乐观收口）。
 
 ## 批次 2：A3 官方算法回迁
 
@@ -58,7 +59,7 @@
 - 提交：见 git log（A3 resync-retry 回迁 + B2 卡登记状态回写）。
 - 门验证：`go test ./... -count=1` 全绿、`go vet ./...` 干净；定向 7 用例（解析 2 + interrupt 重试成功/持续失败 2 + steer 重试 1 + Missing 转 Send 1）均 PASS。
 - 修复过程事故：初版重试路径 `return TurnInterrupt(...)` 直接返回 nil `*RPCError` → typed-nil error 接口陷阱（err != nil 但打印 <nil>），测试捕获后改为显式判空返回——无生产影响（新代码首次提交前被测试拦下）。
-- 真机验收（iOS 停止 Mac 发起 turn 不再因过期 local id 报 -32600）保留 owner。
+- 真机验收（owner 2026-08-25 晚 PASS）：A3 Mac 端发起任务、iOS 观察中点停止直接生效，不再出现 -32600 expected active turn id… ✅（失配静默重同步+重试一次）。
 
 ## 批次 3 完成（代码加固 2026-08-25；§0.3 修订案停等 owner 批准）
 
