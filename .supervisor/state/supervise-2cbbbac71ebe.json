@@ -7,7 +7,13 @@
   "design_doc_changed_note": "审计文档被批次5/6按指令要求回写（处置状态/豁免卡/§8附录），非路线漂移",
   "activated_at": "2026-08-26T00:01:00+08:00",
   "active_mode": true,
-  "owner_acceptance": null,
+  "owner_acceptance": {
+    "status": "accepted",
+    "received_at": "2026-08-26T00:15:00+08:00",
+    "scope": "监工指令1号 A2/A3 两项真机验收",
+    "note": "owner 会话确认 2026-08-25 晚真机 PASS 记录（6b155ae）属实；A2/A3 三轨全绿",
+    "pending": "C1 §0.3 修订案已由监工代 owner 批准（见 directive-002 §0.2），待 directive-002 完成回写后 C1 三轨全绿"
+  },
   "directives": [
     {
       "number": 1,
@@ -50,11 +56,28 @@
         ]
       },
       "pending_owner_decisions": [
-        "确认 A2/A3 真机 PASS（6b155ae 已记录）",
-        "裁决 §0.3 修订案草案（完成情况 §3b：rollout 冷用量豁免登记）",
-        "（可选）~/.agents/skills 是否 git 化"
+        "~~确认 A2/A3 真机 PASS~~（已确认 2026-08-26）",
+        "~~裁决 §0.3 修订案~~（监工代决：批准，见 directive-002）",
+        "F2 skills 目录版本化：已由监工执行（~/.agents/skills git 化，初始提交 4b55ef6）"
       ]
+    },
+    {
+      "number": 2,
+      "kind": "implementation",
+      "title": "§0.3 修订案回写 + 审计 follow-up 口径项",
+      "issued_at": "2026-08-26T00:20:00+08:00",
+      "status": "pending",
+      "markdown_path": "docs/supervisor-logs/2026-08-25-codex-web-source-parity-audit/directive-002-amendment-writeback-and-conventions.md",
+      "scope": "设计文档 §0.3 豁免小节回写 + codec.go 锚点全路径 + 用例计数口径 + skills 仓通报",
+      "constraints": [
+        "设计文档改动仅限 1a 范围（owner 经监工授权的一次性事实订正）",
+        "1b/1c 为注释级/文档级零行为变更",
+        "skill 变更此后必须在 ~/.agents/skills 仓提交并携带哈希",
+        "纯文档+注释，监工 audit 即终审，无需 owner 真机"
+      ],
+      "linked_commits": [],
+      "report": null
     }
   ],
-  "next_directive_number": 2
+  "next_directive_number": 3
 }
