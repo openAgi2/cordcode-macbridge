@@ -378,8 +378,9 @@ func (a *Agent) respondPermission(ctx context.Context, _, interactionID string, 
 	return nil
 }
 
-// resolvedEvents 处理 serverRequest/resolved 通知 → 收口 + EventPermissionResolved
-// （只对已登记交互发一次）。
+// resolvedEvents 处理 serverRequest/resolved 通知 → 收口 + 事件（只对已登记交互发一次）。
+// 按 Kind 产出：user_input → EventUserInputResolved（投影把 user_input part 从 pending
+// 收为 answered，iOS 面板消失）；审批/其他 → EventPermissionResolved。
 func (a *Agent) resolvedEvents(n Notification) []core.Event {
 	var p struct {
 		ThreadID  string      `json:"threadId"`
@@ -391,9 +392,11 @@ func (a *Agent) resolvedEvents(n Notification) []core.Event {
 	// 官方 requestId 是连接级数字；收口按 (thread, requestId→interaction) 匹配。
 	a.registry.mu.Lock()
 	var match string
+	var kind InteractionKind
 	for id, it := range a.registry.pending {
 		if it.ThreadID == p.ThreadID && it.RequestID == p.RequestID {
 			match = id
+			kind = it.Kind
 			break
 		}
 	}
@@ -405,6 +408,18 @@ func (a *Agent) resolvedEvents(n Notification) []core.Event {
 	}
 	if !a.registry.MarkResolved(match) {
 		return nil
+	}
+	if kind == InteractionUserInput {
+		return []core.Event{{
+			Type:      core.EventUserInputResolved,
+			SessionID: p.ThreadID,
+			ThreadID:  p.ThreadID,
+			UserInput: &core.UserInputInteraction{
+				InteractionID:    match,
+				Status:           core.UserInputStatusAnswered,
+				ResolutionSource: "official",
+			},
+		}}
 	}
 	return []core.Event{{
 		Type:      core.EventPermissionResolved,

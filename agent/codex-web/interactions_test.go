@@ -269,9 +269,22 @@ func TestUserInputOfficialFixtureNormalizationAndWireAnswer(t *testing.T) {
 	if frame.ID != sr.RequestID || string(frame.Result) != `{"answers":{"confirm_path":{"answers":["Yes (Recommended)"]}}}` {
 		t.Fatalf("wire response = id:%s result:%s", frame.ID, frame.Result)
 	}
-	again, err := a.ResolveUserInput(context.Background(), ui.InteractionID, "act-2", core.UserInputActionAnswer, nil)
-	if err != nil || again.Outcome != core.UserInputOutcomeAlreadyResolved || len(transport.sentFrames()) != 1 {
-		t.Fatalf("idempotent resolve = %+v, %v, frames=%v", again, err, transport.sentFrames())
+	again, err := a.ResolveUserInput(context.Background(), ui.InteractionID, "act-2", core.UserInputActionAnswer, []core.UserInputAnswer{{
+		QuestionID: q.ID,
+		Values:     []core.UserInputValue{{Kind: core.UserInputValueOption, OptionID: q.Options[0].ID}},
+	}})
+	if err != nil || again.Outcome != core.UserInputOutcomeInProgress {
+		t.Fatalf("before official resolved should stay in-progress: %+v, %v", again, err)
+	}
+	// 收口统一由官方 serverRequest/resolved 驱动（2026-08-25：提前本地收口会让观察
+	// 面板永远不消失）；官方 resolved 后再提交才是 already_resolved。
+	resolved := a.resolvedEvents(Notification{Epoch: 11, Method: "serverRequest/resolved", Params: json.RawMessage(`{"threadId":"` + sr.ThreadID + `","requestId":` + string(sr.RequestID) + `}`)})
+	if len(resolved) != 1 || resolved[0].Type != core.EventUserInputResolved {
+		t.Fatalf("resolved events = %+v, want user_input_resolved", resolved)
+	}
+	third, err := a.ResolveUserInput(context.Background(), ui.InteractionID, "act-3", core.UserInputActionAnswer, nil)
+	if err != nil || third.Outcome != core.UserInputOutcomeAlreadyResolved || len(transport.sentFrames()) != 1 {
+		t.Fatalf("idempotent resolve = %+v, %v, frames=%v", third, err, transport.sentFrames())
 	}
 }
 
@@ -435,4 +448,36 @@ PYEOF"`
 func jsonQuote(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+// TestResolvedEventsUserInputEmitsUserInputResolved：官方 serverRequest/resolved
+// 对 requestUserInput 交互按 kind 产出 user_input_resolved（投影把面板收为
+// answered）而不是 permission_resolved；幂等（二次 resolved 不再发）。
+func TestResolvedEventsUserInputEmitsUserInputResolved(t *testing.T) {
+	a, _, _ := interactionTestAgent(t, 12)
+	a.registry.Register(&Interaction{
+		InteractionID: "th-u2:call-x",
+		Kind:          InteractionUserInput,
+		Epoch:         12,
+		RequestID:     "31",
+		ThreadID:      "th-u2",
+		TurnID:        "tu-2",
+		ItemID:        "call-x",
+		Method:        "item/tool/requestUserInput",
+	})
+	params := json.RawMessage(`{"threadId":"th-u2","requestId":31}`)
+	events := a.resolvedEvents(Notification{Epoch: 12, Method: "serverRequest/resolved", Params: params})
+	if len(events) != 1 || events[0].Type != core.EventUserInputResolved {
+		t.Fatalf("events = %+v, want user_input_resolved", events)
+	}
+	ui := events[0].UserInput
+	if ui == nil || ui.InteractionID != "th-u2:call-x" || ui.Status != core.UserInputStatusAnswered {
+		t.Fatalf("user input resolution = %+v", ui)
+	}
+	if pending := a.registry.Lookup("th-u2:call-x"); pending != nil {
+		t.Fatalf("interaction still pending after resolved: %+v", pending)
+	}
+	if again := a.resolvedEvents(Notification{Epoch: 12, Method: "serverRequest/resolved", Params: params}); len(again) != 0 {
+		t.Fatalf("duplicate resolved emitted events: %+v", again)
+	}
 }

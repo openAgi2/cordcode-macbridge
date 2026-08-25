@@ -226,21 +226,11 @@ func (a *Agent) resolveUserInput(ctx context.Context, interactionID string, acti
 		return core.UserInputResolution{}, &core.UserInputError{Code: "backend_response_failed", Message: "failed to write official response"}
 	}
 	sent = true
-	if a.registry.MarkResolved(interactionID) {
-		a.dispatchEvent(core.Event{
-			Type:      core.EventUserInputResolved,
-			SessionID: it.ThreadID,
-			TurnID:    it.TurnID,
-			ItemID:    it.ItemID,
-			ThreadID:  it.ThreadID,
-			UserInput: &core.UserInputInteraction{
-				InteractionID:    interactionID,
-				Status:           core.UserInputStatusAnswered,
-				ResolutionSource: "ios",
-			},
-		})
-		a.recordMetrics(core.Event{Type: core.EventUserInputResolved, SessionID: it.ThreadID})
-	}
+	// 收口不在这里本地合成：统一交给官方 serverRequest/resolved（resolvedEvents 按
+	// kind 产出 permission_resolved / user_input_resolved，主泵与观察泵都在处理）。
+	// 提前 MarkResolved 会清掉 pending，官方 resolved 到达时无法归属，且观察路径
+	// 收不到任何事件——iOS 的 user_input 面板因此永不消失（2026-08-25 真机：
+	// Mac 面板已消失并继续执行，iOS 面板残留）。与 respondPermission 同一语义。
 	return core.UserInputResolution{Outcome: core.UserInputOutcomeAccepted, CurrentStatus: core.UserInputStatusAnswered}, nil
 }
 
