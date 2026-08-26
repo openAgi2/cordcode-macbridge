@@ -1542,6 +1542,9 @@ were listed without slicing rules — this paragraph IS normative):
   live tail inside") describe this empty-projection terminal, not a nullable norm.
 - `resume: { kind: "at_head" }` is present iff the window includes the committed tail
   (`hasNewer = false`); otherwise omitted.
+- The byte bound limits ACCUMULATION: the boundary-adjacent turn is always included, so
+  the minimum page is one turn and a single turn larger than `maxWindowEncodedBytes` is
+  served alone (a response never splits a turn, R5).
 - A wire cursor that fails to decode is NOT a distinct error: it maps onto the shared
   `cursor_stale` contract (discard chain, re-issue `window_0`) — the frozen error set has
   no corrupt-cursor code, and recovery semantics are identical.
