@@ -103,7 +103,10 @@ type Handlers struct {
 	deliveryPrekeys         *PrekeyStore
 	// webPush 是 per-bridge VAPID/subscription/ledger store（web_push_store.go）。
 	// nil = 未接线（无 dataDir 的 dev 模式 / 未注入的单元测试）→ capability 不 echo、RPC 关闭。
-	webPush                 *WebPushStore
+	webPush *WebPushStore
+	// webPushPipeline 是 PushIntent→candidate 管线（web_push_candidate.go）。
+	// nil = 未接线：一切通知意图 fail closed。
+	webPushPipeline         *WebPushCandidatePipeline
 	observation             *ObservationManager
 	relayOutbox             *OutboxManager
 	presentation            *PresentationManager
@@ -1314,6 +1317,44 @@ func (h *Handlers) SetWebPushStore(store *WebPushStore) {
 	h.mu.Lock()
 	h.webPush = store
 	h.mu.Unlock()
+}
+
+// SetWebPushPipeline 注入 candidate 管线（main.go 启动时；同时挂到 EventPublisher）。
+func (h *Handlers) SetWebPushPipeline(pipeline *WebPushCandidatePipeline) {
+	h.mu.Lock()
+	h.webPushPipeline = pipeline
+	h.mu.Unlock()
+	if h.eventPublisher != nil {
+		h.eventPublisher.SetWebPushCandidateSink(pipeline)
+	}
+}
+
+// markHydrateFailed 统一 MarkFailed 调用点：kernel 失败后把未提交的 deferred
+// web push candidate 显式丢弃（§8.1：不假发送，记脱敏诊断）。
+func (h *Handlers) markHydrateFailed(backendID, sessionID, code, message string, retryable bool) {
+	_, deferred := h.projectionKernel.MarkFailed(backendID, sessionID, code, message, retryable)
+	if len(deferred) > 0 {
+		h.mu.Lock()
+		pipeline := h.webPushPipeline
+		h.mu.Unlock()
+		if pipeline != nil {
+			pipeline.DiscardDeferred(deferred)
+		}
+	}
+}
+
+// releaseDeferredPushCandidates 在 hydrate commit 成功后（Kernel 锁外）释放被接受的
+// deferred candidate（§8.1：commit 后恰好入队一次，commit 前不入队）。
+func (h *Handlers) releaseDeferredPushCandidates(appliedEventIDs []string) {
+	if len(appliedEventIDs) == 0 {
+		return
+	}
+	h.mu.Lock()
+	pipeline := h.webPushPipeline
+	h.mu.Unlock()
+	if pipeline != nil {
+		pipeline.ReleaseDeferred(appliedEventIDs)
+	}
 }
 
 // WebPushStoreRef 返回当前接线的 web push store（hello 协商用；可能为 nil）。

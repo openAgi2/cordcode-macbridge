@@ -953,7 +953,7 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 				"sessionID", sessionID, "backendID", backendID,
 				"byteStart", scan.Poison.ByteStart, "byteEnd", scan.Poison.ByteEnd,
 				"retryable", true, "retryAfter", quarantineBackoff)
-			h.projectionKernel.MarkFailed(
+			h.markHydrateFailed(
 				backendID, sessionID, "projection.source_poison_record",
 				"Claude transcript contains an invalid complete JSONL record", true,
 			)
@@ -1064,7 +1064,7 @@ func (h *Handlers) applyClaudeLiveSourceRecord(
 			Correlation: correlation, Record: scanned, FileOrderTurnID: *currentTurnID,
 			Transition: "source_state_missing",
 		})
-		h.projectionKernel.MarkFailed(backendID, sessionID, "projection.source_state_missing",
+		h.markHydrateFailed(backendID, sessionID, "projection.source_state_missing",
 			"Claude source ledger not installed for live ingest", true)
 		return
 	}
@@ -1082,7 +1082,7 @@ func (h *Handlers) applyClaudeLiveSourceRecord(
 			Correlation: correlation, Record: scanned, FileOrderTurnID: *currentTurnID,
 			Transition: "batch_build_failed_marked_failed",
 		})
-		h.projectionKernel.MarkFailed(backendID, sessionID, "projection.source_batch_build_failed", err.Error(), true)
+		h.markHydrateFailed(backendID, sessionID, "projection.source_batch_build_failed", err.Error(), true)
 		return
 	}
 	// Keep the loop's file-order turn tracker in sync with the transaction's resolved turn, so
@@ -1103,7 +1103,7 @@ func (h *Handlers) applyClaudeLiveSourceRecord(
 			ProjectionEvents: len(batch.Events), Transition: "rejected",
 			ProjectionTurnID: batch.Record.GraphResolvedTurn,
 		})
-		h.projectionKernel.MarkFailed(backendID, sessionID, "projection.source_batch_rejected", err.Error(), true)
+		h.markHydrateFailed(backendID, sessionID, "projection.source_batch_rejected", err.Error(), true)
 		return
 	}
 	delivered := 0

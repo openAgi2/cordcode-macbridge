@@ -131,6 +131,7 @@ func Main() {
 	handlers.SetRelayEnabled(*relayEnabled)
 	handlers.SetSessionListLimit(*sessionListLimit)
 	handlers.SetDataDir(*dataDirPath)
+	var webPushPipeline *WebPushCandidatePipeline
 	if *dataDirPath != "" {
 		handlers.SetTranscriptIndexBaseDir(*dataDirPath + string(filepath.Separator) + "transcript-index")
 		// Web Push store：损坏按 misconfigured fail-closed（capability 关闭、RPC 拒绝 register，
@@ -141,6 +142,10 @@ func Main() {
 		} else {
 			handlers.SetWebPushStore(webPushStore)
 			globalWebPushStore = webPushStore
+			// candidate 管线：ledger 去重 + 有界队列 + deferred 注册表（dispatcher 为 E1）。
+			pipeline := NewWebPushCandidatePipeline(webPushStore)
+			webPushPipeline = pipeline
+			handlers.SetWebPushPipeline(pipeline)
 			if status, detail := webPushStore.Status(); status == WebPushStoreMisconfigured {
 				slog.Warn("go-bridge: web push store misconfigured（register 关闭，设置页可重置）", "detail", detail)
 			}
@@ -261,6 +266,9 @@ func Main() {
 		slog.Error("go-bridge: Bridge identity 读取失败", "error", err)
 		WriteErrorFrame(RuntimeErrorConfigInvalid, err.Error())
 		os.Exit(1)
+	}
+	if webPushPipeline != nil {
+		webPushPipeline.SetBridgeID(bridgeID)
 	}
 	advertisedLocalURL := BuildBridgeLocalURL(ResolveAdvertisedHost(), *port)
 	// advertisedLocalURLs:全部 LAN 直连候选(主候选 advertisedLocalURL 在前),用于 relay-first completion

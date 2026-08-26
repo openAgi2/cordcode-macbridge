@@ -382,9 +382,11 @@ func (h *Handlers) ensureLiveOnlyProjectionAdmission(backendID, sessionID string
 	if admission.Leader {
 		commit, commitErr := h.projectionKernel.CommitHydrateTransaction(backendID, sessionID)
 		if commitErr != nil {
-			h.projectionKernel.MarkFailed(backendID, sessionID, "projection.commit_failed", commitErr.Error(), true)
+			h.markHydrateFailed(backendID, sessionID, "projection.commit_failed", commitErr.Error(), true)
 			return commitErr
 		}
+		// CommitHydrateTransaction 已解锁返回：此处锁外释放被接受的 deferred candidate。
+		h.releaseDeferredPushCandidates(commit.AppliedPendingEventIDs)
 		slog.Info("go-bridge: projection_shadow",
 			"stage", "live_only_admission_commit",
 			"policyVersion", SessionSyncV2PolicyVersion,
@@ -490,7 +492,7 @@ func (h *Handlers) ensureProjectionHydrated(
 		directory,
 	)
 	if err != nil {
-		h.projectionKernel.MarkFailed(
+		h.markHydrateFailed(
 			backendID, sessionID, "projection.source_inspection_failed", err.Error(), true,
 		)
 		return err
@@ -829,7 +831,7 @@ func (h *Handlers) runProjectionHydrateTransaction(
 	case h.projectionHydrateSlots <- struct{}{}:
 		defer func() { <-h.projectionHydrateSlots }()
 	case <-ctx.Done():
-		h.projectionKernel.MarkFailed(
+		h.markHydrateFailed(
 			backendID,
 			sessionID,
 			"projection.hydrate_queue_timeout",
@@ -871,7 +873,7 @@ func (h *Handlers) runProjectionHydrateTransaction(
 		},
 	)
 	if err != nil {
-		h.projectionKernel.MarkFailed(
+		h.markHydrateFailed(
 			backendID, sessionID, "projection.source_read_failed", err.Error(), true,
 		)
 		return
@@ -918,18 +920,20 @@ func (h *Handlers) runProjectionHydrateTransaction(
 	// count guessing (guardrail #6).
 	h.projectionKernel.MarkHydrateSourceIngestComplete(backendID, sessionID)
 	if err := h.projectionKernel.WaitHydrateCommitReady(ctx, backendID, sessionID); err != nil {
-		h.projectionKernel.MarkFailed(
+		h.markHydrateFailed(
 			backendID, sessionID, "projection.bare_source_wait_failed", err.Error(), true,
 		)
 		return
 	}
 	commit, err := h.projectionKernel.CommitHydrateTransaction(backendID, sessionID)
 	if err != nil {
-		h.projectionKernel.MarkFailed(
+		h.markHydrateFailed(
 			backendID, sessionID, "projection.commit_failed", err.Error(), true,
 		)
 		return
 	}
+	// CommitHydrateTransaction 已解锁返回：此处锁外释放被接受的 deferred candidate。
+	h.releaseDeferredPushCandidates(commit.AppliedPendingEventIDs)
 	slog.Info(
 		"go-bridge: projection_shadow",
 		"stage", "hydrate_commit",
