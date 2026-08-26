@@ -302,10 +302,14 @@ func (ps *projectionSession) markRunning(turnID string) {
 	exec := ExecutionView{Phase: "running", ActiveTurnID: turnID}
 	ps.projection.Execution = exec
 	ps.execution = &exec
-	// Keep turn status running unless already settled (do not un-complete).
+	// Keep turn status running unless already settled (do not un-complete). Do not
+	// stage an already-running turn on every content delta: text/reasoning events
+	// carry their mutation in PartOps, so repeatedly copying the growing assistant
+	// body into upsertTurns makes long streams quadratic on the wire.
 	if t := ps.turnByID(turnID); t != nil && t.Status != "completed" && t.Status != "aborted" && t.Status != "error" {
+		statusChanged := t.Status != "running"
 		t.Status = "running"
-		if ps.upsertTurns != nil {
+		if statusChanged && ps.upsertTurns != nil {
 			ps.upsertTurns[turnID] = *t
 		}
 	}
@@ -664,6 +668,7 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			ps.upsertTurn(TurnProjection{TurnID: turnID, Status: "running"})
 			t = ps.turnByID(turnID)
 		}
+		createdAssistant := t.Assistant == nil
 		if t.Assistant == nil {
 			t.Assistant = &MessageProjection{ID: turnID, Role: "assistant"}
 		}
@@ -680,6 +685,12 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			ps.upsertTurns[turnID] = *t
 		} else {
 			ps.textAppends[turnID] = append(ps.textAppends[turnID], delta)
+			// A persist-only turn_started intentionally did not publish its shell.
+			// The first content-bearing frame must still mount that shell before the
+			// append_text PartOp; later deltas remain PartOp-only.
+			if createdAssistant {
+				ps.upsertTurns[turnID] = *t
+			}
 		}
 		ps.markRunning(turnID)
 
@@ -698,6 +709,7 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 			ps.upsertTurn(TurnProjection{TurnID: turnID, Status: "running"})
 			t = ps.turnByID(turnID)
 		}
+		createdAssistant := t.Assistant == nil
 		if t.Assistant == nil {
 			t.Assistant = &MessageProjection{ID: turnID, Role: "assistant"}
 		}
@@ -715,6 +727,9 @@ func (r *ProjectionReducer) Apply(msg EventMessage) {
 		}
 		rpart.Text += delta
 		ps.thinking[turnID] = rpart.Text
+		if createdAssistant {
+			ps.upsertTurns[turnID] = *t
+		}
 		ps.markRunning(turnID)
 
 	case "tool_started", "tool_finished":
