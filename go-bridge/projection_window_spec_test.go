@@ -384,91 +384,128 @@ func replayProjectionWindow(step windowReplayStep) windowReplayOutcome {
 	return windowReplayOutcome{clientNext: "hello_ack echo only when rollout+descriptor support"}
 }
 
-func TestProjectionWindowTabletopReplay(t *testing.T) {
-	scenarios := []struct {
-		step windowReplayStep
-		want windowReplayOutcome
-		rule string
-	}{
-		{
-			step: windowReplayStep{name: "hello window capability without session_sync_v2", declared: []string{projectionWindowCapability}, rpc: false},
-			want: windowReplayOutcome{errCode: "protocol.invalid_capabilities", clientNext: "hello fails; fix declarations"},
-			rule: "Capability prerequisite",
-		},
-		{
-			step: windowReplayStep{name: "RPC from undeclared connection", declared: []string{"session_sync_v2"}, rolloutOn: true, rpc: true, direction: "window_0", limit: 50, cursorScope: "none"},
-			want: windowReplayOutcome{errCode: "protocol.capability_required", clientNext: "render typed failure; no window field"},
-			rule: "Undeclared peer",
-		},
-		{
-			step: windowReplayStep{name: "RPC while rollout flag off", declared: []string{"session_sync_v2", projectionWindowCapability}, rolloutOn: false, rpc: true, direction: "window_0", limit: 50, cursorScope: "none"},
-			want: windowReplayOutcome{errCode: "protocol.capability_required", clientNext: "render typed failure; no window field"},
-			rule: "Capability echo gate",
-		},
-		{
-			step: windowReplayStep{name: "cross-backend cursor", declared: []string{"session_sync_v2", projectionWindowCapability}, rolloutOn: true, rpc: true, direction: "older", limit: 50, cursorScope: "other-backend"},
-			want: windowReplayOutcome{errCode: "projection_window.cursor_scope_mismatch", clientNext: "render typed failure; never re-issue the cursor"},
-			rule: "R1",
-		},
-		{
-			step: windowReplayStep{name: "cursor from previous bridge epoch (restart)", declared: []string{"session_sync_v2", projectionWindowCapability}, rolloutOn: true, rpc: true, direction: "older", limit: 50, cursorScope: "other-epoch"},
-			want: windowReplayOutcome{errCode: "cursor_stale", retryable: true, clientNext: "discard cursor chain; re-issue window_0"},
-			rule: "R6",
-		},
-		{
-			step: windowReplayStep{name: "limit above maxWindowTurns", declared: []string{"session_sync_v2", projectionWindowCapability}, rolloutOn: true, rpc: true, direction: "window_0", limit: projectionWindowMaxTurns + 1, cursorScope: "none"},
-			want: windowReplayOutcome{errCode: "projection_window.limit_exceeded", clientNext: "render typed failure"},
-			rule: "R5",
-		},
-		{
-			step: windowReplayStep{name: "locate unknown anchor", declared: []string{"session_sync_v2", projectionWindowCapability}, rolloutOn: true, rpc: true, direction: "locate", limit: 50, cursorScope: "none", anchorKnown: false},
-			want: windowReplayOutcome{errCode: "projection_window.locate_out_of_window", clientNext: "full get_session_projection pull (only honest fallback)"},
-			rule: "R8",
-		},
-		{
-			step: windowReplayStep{name: "healthy window_0", declared: []string{"session_sync_v2", projectionWindowCapability}, rolloutOn: true, rpc: true, direction: "window_0", limit: 50, cursorScope: "none"},
-			want: windowReplayOutcome{clientNext: "apply window; chain patches from syncRev (R4)"},
-			rule: "RPC success",
-		},
+// Shared cross-language scenario table: this file AND the iOS mirror's
+// ProjectionWindowSpecTests.swift decode the same JSON and run structurally identical
+// replay functions — Go (server side) and Swift (client side) must agree on every row.
+type tabletopScenario struct {
+	Name  string `json:"name"`
+	Rule  string `json:"rule"`
+	Input struct {
+		Declared    []string `json:"declared"`
+		RolloutOn   bool     `json:"rolloutOn"`
+		RPC         bool     `json:"rpc"`
+		Direction   string   `json:"direction"`
+		CursorScope string   `json:"cursorScope"`
+		Limit       int      `json:"limit"`
+		AnchorKnown bool     `json:"anchorKnown"`
+	} `json:"input"`
+	Expected struct {
+		ErrorCode  string `json:"errorCode"`
+		Retryable  bool   `json:"retryable"`
+		ClientNext string `json:"clientNext"`
+	} `json:"expected"`
+}
+
+func loadTabletopScenarios(t *testing.T) (scenarios []tabletopScenario, newerChainWalk struct {
+	Chain        []string `json:"chain"`
+	AfterTurnID  string   `json:"afterTurnId"`
+	Limit        int      `json:"limit"`
+	ExpectedTurn []string `json:"expectedTurns"`
+}) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "docs", "protocol", "samples", "projection-window-v1", "tabletop-scenarios.json"))
+	if err != nil {
+		t.Fatal(err)
 	}
+	var payload struct {
+		Scenarios      []tabletopScenario `json:"scenarios"`
+		NewerChainWalk struct {
+			Chain        []string `json:"chain"`
+			AfterTurnID  string   `json:"afterTurnId"`
+			Limit        int      `json:"limit"`
+			ExpectedTurn []string `json:"expectedTurns"`
+		} `json:"newerChainWalk"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Scenarios) == 0 {
+		t.Fatal("tabletop-scenarios.json carries no scenarios")
+	}
+	return payload.Scenarios, payload.NewerChainWalk
+}
+
+func (scenario tabletopScenario) step() windowReplayStep {
+	return windowReplayStep{
+		name:        scenario.Name,
+		declared:    scenario.Input.Declared,
+		rolloutOn:   scenario.Input.RolloutOn,
+		rpc:         scenario.Input.RPC,
+		direction:   scenario.Input.Direction,
+		cursorScope: scenario.Input.CursorScope,
+		limit:       scenario.Input.Limit,
+		anchorKnown: scenario.Input.AnchorKnown,
+	}
+}
+
+func (scenario tabletopScenario) want() windowReplayOutcome {
+	return windowReplayOutcome{
+		errCode:    scenario.Expected.ErrorCode,
+		retryable:  scenario.Expected.Retryable,
+		clientNext: scenario.Expected.ClientNext,
+	}
+}
+
+func TestProjectionWindowTabletopReplay(t *testing.T) {
+	scenarios, newerChainWalk := loadTabletopScenarios(t)
 	for _, scenario := range scenarios {
-		t.Run(scenario.rule+": "+scenario.step.name, func(t *testing.T) {
-			got := replayProjectionWindow(scenario.step)
-			if got != scenario.want {
-				t.Fatalf("[%s] replay = %+v, want %+v", scenario.rule, got, scenario.want)
+		t.Run(scenario.Rule+": "+scenario.Name, func(t *testing.T) {
+			got := replayProjectionWindow(scenario.step())
+			if got != scenario.want() {
+				t.Fatalf("[%s] replay = %+v, want %+v", scenario.Rule, got, scenario.want())
 			}
 			// R9: only cursor_stale is retryable; every other typed error is terminal.
 			if got.errCode != "" && got.errCode != "cursor_stale" && got.retryable {
-				t.Fatalf("[%s] %q must not be retryable (R9)", scenario.rule, got.errCode)
+				t.Fatalf("[%s] %q must not be retryable (R9)", scenario.Rule, got.errCode)
 			}
 		})
 	}
 
 	// Transport independence: direct LAN and Relay carry the same protocol decisions —
 	// windows are pull-only RPCs and must not branch on transport.
-	for _, transport := range []string{"direct", "relay"} {
+	for range []string{"direct", "relay"} {
 		for _, scenario := range scenarios {
-			step := scenario.step
-			if got := replayProjectionWindow(step); got != scenario.want {
-				t.Fatalf("%s: decision diverged on transport %s: %+v vs %+v", step.name, transport, got, scenario.want)
+			if got := replayProjectionWindow(scenario.step()); got != scenario.want() {
+				t.Fatalf("%s: decision diverged across transports: %+v vs %+v", scenario.Name, got, scenario.want())
 			}
 		}
 	}
 
 	// R6 two-step recovery: cursor_stale discards the chain and window_0 succeeds.
-	stale := replayProjectionWindow(windowReplayStep{declared: []string{"session_sync_v2", projectionWindowCapability}, rolloutOn: true, rpc: true, direction: "older", limit: 50, cursorScope: "other-epoch"})
-	if stale.errCode != "cursor_stale" || !stale.retryable {
-		t.Fatalf("stale replay = %+v", stale)
+	var staleScenario, healthyScenario *tabletopScenario
+	for index := range scenarios {
+		if scenarios[index].Expected.ErrorCode == "cursor_stale" {
+			staleScenario = &scenarios[index]
+		}
+		if scenarios[index].Expected.ErrorCode == "" && scenarios[index].Input.Direction == "window_0" {
+			healthyScenario = &scenarios[index]
+		}
 	}
-	recovered := replayProjectionWindow(windowReplayStep{declared: []string{"session_sync_v2", projectionWindowCapability}, rolloutOn: true, rpc: true, direction: "window_0", limit: 50, cursorScope: "none"})
-	if recovered.errCode != "" || recovered.clientNext != "apply window; chain patches from syncRev (R4)" {
-		t.Fatalf("window_0 recovery replay = %+v", recovered)
+	if staleScenario == nil || healthyScenario == nil {
+		t.Fatal("scenario table must carry one cursor_stale and one healthy window_0 row for the recovery replay")
+	}
+	stale := replayProjectionWindow(staleScenario.step())
+	if stale != staleScenario.want() {
+		t.Fatalf("stale replay = %+v, want %+v", stale, staleScenario.want())
+	}
+	recovered := replayProjectionWindow(healthyScenario.step())
+	if recovered != healthyScenario.want() {
+		t.Fatalf("window_0 recovery replay = %+v, want %+v", recovered, healthyScenario.want())
 	}
 
 	// R7 strict turn-chain: newer never skips an unloaded turn.
-	chain := []string{"t1", "t2", "t3", "t4", "t5"}
-	newer := chainSliceNewer(chain, "t2", 2)
-	if want := []string{"t3", "t4"}; !reflect.DeepEqual(newer, want) {
+	newer := chainSliceNewer(newerChainWalk.Chain, newerChainWalk.AfterTurnID, newerChainWalk.Limit)
+	if want := newerChainWalk.ExpectedTurn; !reflect.DeepEqual(newer, want) {
 		t.Fatalf("newer walk = %v, want %v (R7 strict order, no skips)", newer, want)
 	}
 }
