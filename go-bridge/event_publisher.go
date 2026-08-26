@@ -855,7 +855,10 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 		// Strictly one-way: canonical user_input -> legacy question presentation. The derived raw
 		// frame is never allowed to become a second projection writer.
 	} else if p.kernel != nil {
-		projectionApplied = p.kernel.IngestLive(msg)
+		// R2-O1 baseline: only ProjectionIngestApplied may trigger the live-path patch
+		// flush below. Deferred rows flush via the hydrate commit's own path; NoChange
+		// (duplicates/no-ops) never flushes (web push §8.1 tri-state).
+		projectionApplied = p.kernel.IngestLive(msg) == ProjectionIngestApplied
 	} else if p.projection != nil {
 		before := p.projection.LastAppliedRev(logical.BackendID, logical.SessionID)
 		p.projection.Apply(msg)

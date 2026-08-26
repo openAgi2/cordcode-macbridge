@@ -362,7 +362,7 @@ func TestProjectionHydrateRetryPolicy(t *testing.T) {
 	if !kernel.BeginHydrate("codex", "session-1", false, false) {
 		t.Fatal("absent session did not begin hydrate")
 	}
-	failed := kernel.MarkFailed("codex", "session-1", "io", "temporary", true)
+	failed, _ := kernel.MarkFailed("codex", "session-1", "io", "temporary", true)
 	if failed.Failure == nil || failed.Failure.Attempts != 1 || !failed.Failure.RetryAt.Equal(now.Add(time.Second)) {
 		t.Fatalf("unexpected retryable failure: %+v", failed)
 	}

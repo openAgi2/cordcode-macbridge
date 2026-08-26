@@ -517,7 +517,30 @@ type ProjectionHydrateCommit struct {
 	Projection   SessionProjection
 	PendingLive  int
 	PendingPatch *ProjectionPatch
+	// AppliedPendingEventIDs lists the EventIDs of pendingLive rows that actually advanced
+	// the committed reducer inside this atomic commit (web push §8.1: callers release the
+	// deferred candidates for exactly these ids outside the Kernel lock). Rows that were
+	// no-ops carry no push side effect.
+	AppliedPendingEventIDs []string
 }
+
+// ProjectionIngestResult is the tri-state outcome of IngestLive (web push §8.1):
+// the old bool conflated "no-op" with "hydrate deferred", which the push candidate
+// path must distinguish. R2-O1 baseline: only Applied may trigger the live-path
+// projection patch flush in EventPublisher; Deferred defers that to the hydrate
+// commit's own flush, NoChange never flushes.
+type ProjectionIngestResult int
+
+const (
+	// ProjectionIngestNoChange: the event was applied to the committed reducer but did
+	// not advance the projection revision (duplicate/no-op).
+	ProjectionIngestNoChange ProjectionIngestResult = iota
+	// ProjectionIngestApplied: the authoritative reducer advanced.
+	ProjectionIngestApplied
+	// ProjectionIngestDeferred: a hydrate transaction is active; the event was queued as
+	// pendingLive and will only reach the committed reducer at CommitHydrateTransaction.
+	ProjectionIngestDeferred
+)
 
 type ProjectionKernel struct {
 	mu               sync.Mutex
@@ -654,10 +677,14 @@ func (k *ProjectionKernel) MarkReady(backendID, sessionID string) {
 	session.failureAttempts = 0
 }
 
+// MarkFailed fails the active hydrate transaction and returns its status plus the
+// EventIDs of the uncommitted pendingLive rows (web push §8.1: callers discard the
+// deferred candidates for exactly these ids outside the Kernel lock and emit a
+// sanitized web_push.deferred_hydrate_failed diagnostic — never a fake send).
 func (k *ProjectionKernel) MarkFailed(
 	backendID, sessionID, code, message string,
 	retryable bool,
-) ProjectionHydrationStatus {
+) (ProjectionHydrationStatus, []string) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	session := k.sessionLocked(backendID, sessionID)
@@ -672,10 +699,18 @@ func (k *ProjectionKernel) MarkFailed(
 	if retryable {
 		failure.RetryAt = k.now().Add(k.retryPolicy.delay(attempts, k.randomUnit()))
 	}
+	var deferredEventIDs []string
+	if session.hydrate != nil {
+		for _, msg := range session.hydrate.pendingLive {
+			if msg.EventID != "" {
+				deferredEventIDs = append(deferredEventIDs, msg.EventID)
+			}
+		}
+	}
 	session.status = ProjectionHydrationStatus{Phase: ProjectionHydrateFailed, Failure: failure}
 	session.hydrate = nil
 	k.finishHydrateLocked(session)
-	return session.status
+	return session.status, deferredEventIDs
 }
 
 func (k *ProjectionKernel) finishHydrateLocked(session *projectionKernelSession) {
@@ -892,10 +927,11 @@ func (k *ProjectionKernel) ApplyHydrateEvent(
 }
 
 // IngestLive is called from EventPublisher under its ordering lock. During hydrate it records
-// a deep immutable pending event; otherwise it applies directly to the committed reducer.
-func (k *ProjectionKernel) IngestLive(msg EventMessage) bool {
+// a deep immutable pending event (ProjectionIngestDeferred); otherwise it applies directly to
+// the committed reducer and reports Applied vs NoChange by whether the revision advanced.
+func (k *ProjectionKernel) IngestLive(msg EventMessage) ProjectionIngestResult {
 	if k == nil {
-		return false
+		return ProjectionIngestNoChange
 	}
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -908,7 +944,7 @@ func (k *ProjectionKernel) IngestLive(msg EventMessage) bool {
 		case session.hydrate.liveArrived <- struct{}{}:
 		default:
 		}
-		return false
+		return ProjectionIngestDeferred
 	}
 	before := k.reducer.LastAppliedRev(msg.BackendID, msg.SessionID)
 	k.reducer.Apply(msg)
@@ -927,7 +963,10 @@ func (k *ProjectionKernel) IngestLive(msg EventMessage) bool {
 			k.stageTurnCheckpoint(msg.BackendID, msg.SessionID, turnN)
 		}
 	}
-	return projectionAdvanced
+	if projectionAdvanced {
+		return ProjectionIngestApplied
+	}
+	return ProjectionIngestNoChange
 }
 
 // MarkHydrateSourceIngestComplete signals that cold-source ingest feeding this hydrate
@@ -1046,8 +1085,13 @@ func (k *ProjectionKernel) CommitHydrateTransaction(
 	// execution takes the in-flight max (running/requires_action > idle).
 	baseline = mergeHydrateBaselineWithLiveExecution(baseline, liveSnap, liveOK)
 	k.reducer.Restore(backendID, sessionID, baseline)
+	appliedPendingIDs := make([]string, 0, len(tx.pendingLive))
 	for _, msg := range tx.pendingLive {
+		before := k.reducer.LastAppliedRev(msg.BackendID, msg.SessionID)
 		k.reducer.Apply(msg)
+		if k.reducer.LastAppliedRev(msg.BackendID, msg.SessionID) != before && msg.EventID != "" {
+			appliedPendingIDs = append(appliedPendingIDs, msg.EventID)
+		}
 	}
 	committed, _ := k.reducer.Snapshot(backendID, sessionID)
 	var patch *ProjectionPatch
@@ -1061,9 +1105,10 @@ func (k *ProjectionKernel) CommitHydrateTransaction(
 	k.finishHydrateLocked(session)
 	session.failureAttempts = 0
 	return ProjectionHydrateCommit{
-		Projection:   committed,
-		PendingLive:  len(tx.pendingLive),
-		PendingPatch: patch,
+		Projection:             committed,
+		PendingLive:            len(tx.pendingLive),
+		PendingPatch:           patch,
+		AppliedPendingEventIDs: appliedPendingIDs,
 	}, nil
 }
 
