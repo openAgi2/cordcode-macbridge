@@ -1274,6 +1274,29 @@ func (k *ProjectionKernel) Snapshot(backendID, sessionID string) (SessionProject
 	}, true
 }
 
+// ActiveTurnID 返回该 session 当前 active/最近 running 的 turn id（web push
+// notification key 的 identity 来源）。与 Snapshot 不同，它不要求 hydrate-ready：
+// relay 循环中的 session 可能从未走过显式 hydrate 事务，但 authoritative reducer
+// 已持有其 running turn。只读，不改状态。
+func (k *ProjectionKernel) ActiveTurnID(backendID, sessionID string) string {
+	if k == nil {
+		return ""
+	}
+	projection, ok := k.reducer.Snapshot(backendID, sessionID)
+	if !ok {
+		return ""
+	}
+	if projection.Execution.ActiveTurnID != "" {
+		return projection.Execution.ActiveTurnID
+	}
+	for i := len(projection.Turns) - 1; i >= 0; i-- {
+		if projection.Turns[i].Status == "running" {
+			return projection.Turns[i].TurnID
+		}
+	}
+	return ""
+}
+
 func (k *ProjectionKernel) StageCheckpoint(checkpoint ProjectionCheckpoint, settled bool) error {
 	if checkpoint.SchemaVersion == 0 {
 		checkpoint.SchemaVersion = projectionCheckpointSchemaVersion

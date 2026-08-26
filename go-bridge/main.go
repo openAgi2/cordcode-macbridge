@@ -882,6 +882,10 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 					Data:      data,
 					Broadcast: true,
 					Offline:   IsDurableMilestone(eventName),
+					// web push §8.1 producer 位点 2：被动泵仅在 passiveFeedAllowed
+					// 放行时补投（单一摄入所有者的被动侧表达——agent relay 在跑时
+					// 该分支不可达）。只认 terminal completion。
+					PushIntent: pushIntentForPassiveEvent(h.projectionKernel, backendID, ev.SessionID, eventName, data),
 				})
 			}
 		}

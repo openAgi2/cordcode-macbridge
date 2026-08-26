@@ -2613,6 +2613,10 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 				Directory: directory,
 				Broadcast: true,
 				Offline:   IsDurableMilestone(eventName),
+				// web push §8.1 producer 位点 1：agent relay loop 是该 session 的
+				// ingest owner（与 passive 侧经 agentRelayRunning 互斥），terminal/
+				// permission 事件在此声明意图；样本门未过时恒为 nil。
+				PushIntent: pushIntentForRelayTerminal(h.projectionKernel, backendID, sessionID, eventName, data),
 			})
 
 			// 持续刷新 lastEventAt，防止 idle cleanup 在长 turn 期间误杀 session。
