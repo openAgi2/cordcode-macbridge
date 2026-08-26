@@ -1,0 +1,16 @@
+{
+  "type": "hello_ack",
+  "ok": true,
+  "capabilities": {
+    "trustedDevices": true,
+    "web_push_v1": true
+  },
+  "webPush": {
+    "schemaVersion": 1,
+    "vapidPublicKey": "BASE64URL_fixture_65byte_uncompressed_p256_public_key"
+  },
+  "bridgeEpoch": "fixture-epoch",
+  "backends": [],
+  "bridgeStatus": "running",
+  "runningSessions": []
+}

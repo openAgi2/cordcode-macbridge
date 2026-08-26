@@ -774,3 +774,65 @@ export interface BridgeGetSessionProjectionWindowResult {
   syncRev: number;
   resume?: { kind: "at_head" };
 }
+
+// ── Web Push (web_push_v1) — additive; see bridge-v1.md "Web Push" section ──────
+
+export type BridgeWebPushClientCapability = "web_push_v1";
+
+/** hello_ack additive field; present only when the client declared web_push_v1 and the store is healthy. */
+export interface BridgeHelloAckWebPush {
+  schemaVersion: 1;
+  /** base64url-unpadded 65-byte uncompressed P-256 public key. Absent when status === "misconfigured". */
+  vapidPublicKey?: string;
+  /** Additive diagnostic; "misconfigured" ⇒ register/send disabled, unregister stays reachable. */
+  status?: "ok" | "misconfigured";
+}
+
+export interface BridgeRegisterPushSubscriptionParams {
+  schemaVersion: 1;
+  platform: string;
+  /** Must equal hello_ack.webPush.vapidPublicKey byte-for-byte. */
+  applicationServerKey: string;
+  subscription: {
+    endpoint: string;
+    expirationTime: number | null;
+    keys: { p256dh: string; auth: string };
+  };
+}
+
+export interface BridgeRegisterPushSubscriptionResult {
+  subscriptionId: string;
+  registeredAtMillis: number;
+}
+
+export interface BridgeUnregisterPushSubscriptionParams {
+  schemaVersion: 1;
+  subscriptionId: string;
+}
+
+export interface BridgeUnregisterPushSubscriptionResult {
+  removed: boolean;
+}
+
+/** MacBridge-side fixed plaintext schema (RFC 8291-encrypted before transport). */
+export interface BridgeWebPushPayloadV1 {
+  schemaVersion: 1;
+  notification: {
+    title: string;
+    body: string;
+    tag: string;
+  };
+  target: {
+    bridgeId: string;
+    backendId: string;
+    sessionId: string;
+    eventId: string;
+    anchor: { kind: "turn" | "interaction"; id: string } | null;
+  };
+}
+
+/** Service Worker → window message on notificationclick (client-side only, never on the wire). */
+export interface BridgePushNavigateMessage {
+  type: "CORDCODE_PUSH_NAVIGATE_V1";
+  target: BridgeWebPushPayloadV1["target"];
+}
