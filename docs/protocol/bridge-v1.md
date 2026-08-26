@@ -1522,6 +1522,30 @@ Response data (success):
 }
 ```
 
+Window anchoring and boundary semantics (frozen; completing S4A where the enum values
+were listed without slicing rules — this paragraph IS normative):
+
+- `window_0` and `latest` are **tail-anchored**: the last `limit` committed turns ending
+  at the committed live tail (`hasNewer = false` always). `window_0` is the session-open
+  baseline; `latest` is the reader-intent re-jump — both produce the same slice for the
+  same `limit`. `limit` omitted = 100 turns. `coverage = "full"` exactly when the window
+  contains every committed turn (`hasOlder = false`), else `"window"`.
+- `older(cursor)` returns up to `limit` turns immediately BEFORE the cursor's boundary
+  turn, truncating (if the byte bound binds first) from the side farthest from that
+  boundary; `newer(cursor)` symmetric after it (R7 strict order). `locate(anchorTurnId)`
+  returns a `limit`-sized window with the anchor inside, ending at
+  `min(anchorIndex + limit/2, tail)`.
+- `headTurnId`/`tailTurnId` are the window's first/last turn ids and are `null` ONLY for
+  an empty projection (zero committed turns: `coverage = "full"`, no cursors,
+  `hasOlder = hasNewer = false`). A non-empty window always carries both ids; the
+  schema comments ("null + hasOlder=false ⇒ absolute head" / "null + hasNewer=false ⇒
+  live tail inside") describe this empty-projection terminal, not a nullable norm.
+- `resume: { kind: "at_head" }` is present iff the window includes the committed tail
+  (`hasNewer = false`); otherwise omitted.
+- A wire cursor that fails to decode is NOT a distinct error: it maps onto the shared
+  `cursor_stale` contract (discard chain, re-issue `window_0`) — the frozen error set has
+  no corrupt-cursor code, and recovery semantics are identical.
+
 ### Frozen rules (each normative "MUST/MUST NOT" is testable)
 
 **R1 — Scope & cursor identity.** A wire cursor is **bridge-owned and opaque**. Its scope is

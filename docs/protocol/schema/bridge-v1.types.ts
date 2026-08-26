@@ -753,9 +753,9 @@ export interface BridgeProjectionWindow {
   /** Monotonic per (backendId, sessionId) within one bridgeEpoch; resets with epoch (R6). */
   generation: number;
   coverage: "full" | "window";
-  /** null + hasOlder=false => absolute projection head. */
+  /** Window's first (oldest) turn id; null ONLY for an empty projection (see bridge-v1.md window anchoring paragraph). */
   headTurnId: string | null;
-  /** null + hasNewer=false => live tail is inside this window. */
+  /** Window's last (newest) turn id; null ONLY for an empty projection; hasNewer=false => this id is the committed live tail. */
   tailTurnId: string | null;
   hasOlder: boolean;
   hasNewer: boolean;
