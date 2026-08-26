@@ -177,6 +177,15 @@ func (p *WebPushCandidatePipeline) DiscardDeferred(eventIDs []string) {
 	p.discarded.Add(int64(dropped))
 }
 
+// C 返回候选队列的接收端（dispatcher worker select 用）。只读；入队仍走 Ingest/Release。
+func (p *WebPushCandidatePipeline) C() <-chan WebPushCandidate {
+	if p == nil {
+		ch := make(chan WebPushCandidate)
+		return ch
+	}
+	return p.queue
+}
+
 // Drain 取走当前排队 candidate（dispatcher worker / 测试用；非阻塞快照式取空）。
 func (p *WebPushCandidatePipeline) Drain() []WebPushCandidate {
 	if p == nil {

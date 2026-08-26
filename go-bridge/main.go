@@ -269,6 +269,10 @@ func Main() {
 	}
 	if webPushPipeline != nil {
 		webPushPipeline.SetBridgeID(bridgeID)
+		// §8.4：固定 worker 数消费有界队列；发送全在锁外。
+		webPushDispatcher := NewWebPushDispatcher(globalWebPushStore, webPushPipeline, WebPushDispatcherConfig{})
+		webPushDispatcher.Start()
+		defer webPushDispatcher.Stop()
 	}
 	advertisedLocalURL := BuildBridgeLocalURL(ResolveAdvertisedHost(), *port)
 	// advertisedLocalURLs:全部 LAN 直连候选(主候选 advertisedLocalURL 在前),用于 relay-first completion
