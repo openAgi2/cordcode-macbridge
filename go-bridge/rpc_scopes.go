@@ -40,15 +40,16 @@ var rpcScopeTable = map[string]string{
 	"hello": "",
 
 	// session.read
-	"get_session":                 ScopeSessionRead,
-	"get_session_messages":        ScopeSessionRead,
-	"get_session_projection":      ScopeSessionRead,
-	"list_sessions":               ScopeSessionRead,
-	"list_pinned_sessions":        ScopeSessionRead,
-	"fetch_todos":                 ScopeSessionRead,
-	"check_pending_notifications": ScopeSessionRead,
-	"get_turn_diff":               ScopeSessionRead,
-	"get_full_thread_diff":        ScopeSessionRead,
+	"get_session":                   ScopeSessionRead,
+	"get_session_messages":          ScopeSessionRead,
+	"get_session_projection":        ScopeSessionRead,
+	"get_session_projection_window": ScopeSessionRead,
+	"list_sessions":                 ScopeSessionRead,
+	"list_pinned_sessions":          ScopeSessionRead,
+	"fetch_todos":                   ScopeSessionRead,
+	"check_pending_notifications":   ScopeSessionRead,
+	"get_turn_diff":                 ScopeSessionRead,
+	"get_full_thread_diff":          ScopeSessionRead,
 
 	// session.write
 	"create_session":        ScopeSessionWrite,

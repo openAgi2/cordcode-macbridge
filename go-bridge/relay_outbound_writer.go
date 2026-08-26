@@ -451,7 +451,7 @@ func classifyRelayRequest(method string) relayOutboundClass {
 		return relayOutboundInteractive
 	case "list_models", "list_permission_modes", "get_git_context", "get_todos", "list_agents", "list_providers", "set_agent_preset":
 		return relayOutboundMetadata
-	case "get_session_messages", "get_session_projection":
+	case "get_session_messages", "get_session_projection", "get_session_projection_window":
 		return relayOutboundBulk
 	// R1.3（§3.6.4）：read_file_v2 的结果可能很大（最高 2 MiB），
 	// 走 bulk 路径以复用 gzip + relay_chunks_v1 公平分块，避免单巨型 Normal 帧在弱网

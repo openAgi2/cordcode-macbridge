@@ -1438,6 +1438,195 @@ checkpoint with a `pending` part whose responder handle was lost after process r
 recovered to `unavailable` via the Kernel private recovery transaction (design §10.3), never left
 as a clickable-but-unanswerable UI.
 
+## Projection Window (server-owned windowing) — FROZEN SPEC (not advertised)
+
+Server-owned projection windows let MacBridge serve **bounded projections** (windows) to
+capable clients instead of always shipping the full `BridgeSessionProjection`, and let a
+client walk history with opaque cursors while live tail continues over the existing
+projection stream. This section FREEZES the wire state machine, capability, ordering and
+recovery semantics BEFORE any Mac/iOS production change. Nothing in this section is
+advertised or implemented by a production MacBridge yet; the rollout flag stays off until
+PERF-S4B/S4C. Design: `docs/2026-08-23-message-web-gpuix-borrowing-realistic-assessment.md`
+§PERF-S4A (that plan is iOS-repo-local; THIS file is the canonical authority).
+
+### Capability: `projection_window_v1`
+
+A CLIENT opt-in capability, mirrored as a backend-scoped server promise, following the
+`session_sync_v2` declaration pattern:
+
+- The client declares `capabilities: ["projection_window_v1"]` in `hello`. MacBridge echoes
+  `capabilities["projection_window_v1"] = true` in `hello_ack` only when BOTH (a) the
+  server-side rollout flag is enabled and (b) the selected backend descriptor's projection
+  kernel supports window admission. Per-backend support is additionally reported on the
+  backend descriptor's `capabilities` list; clients MUST gate window RPCs on the descriptor
+  list, not the global echo.
+- **Prerequisite**: `session_sync_v2` MUST also be declared. A connection declaring
+  `projection_window_v1` without `session_sync_v2` is a protocol violation: `hello` fails
+  with `code = "protocol.invalid_capabilities"` (`retryable = false`). Windows are a
+  projection-surface feature; there is no raw/history window path.
+- **Undeclared peer**: behavior is EXACTLY today's — full `get_session_projection`, full
+  `projection_snapshot`/`projection_patch`. Window RPCs from an undeclared connection fail
+  with `code = "protocol.capability_required"`, `retryable = false`, message containing
+  `projection_window_v1`, and MUST NOT include any success-shaped `window` field. This is an
+  opt-in additive surface; the undeclared path is the compatibility path, not a fallback a
+  declared client may drift back to.
+- **Release ordering** (mirrors `catalog_cursor_epoch_v2`): canonical spec + client
+  implementation (window state machine, cursor-discard recovery, typed-failure rendering)
+  MUST ship before the server begins accepting/enforcing window RPCs; the MacBridge service
+  flip happens last. Retained rollback code does not restore a supported undeclared window
+  contract.
+- **Disable/rollback**: omitting the capability (client) or turning the rollout flag off
+  (server) returns every session to full-projection semantics. There is no per-session mix:
+  once a session has been served a window on a connection, that connection's session state
+  remains projection-owned; a client that wants full projection again simply issues
+  `get_session_projection` (full) — windows never remove data, they bound delivery.
+
+### RPC: `get_session_projection_window`
+
+Pull-only RPC; sits beside `get_session_projection` and reads the SAME committed Kernel head
+(single outbound funnel rules unchanged — windowed patches ride the existing
+`projection_patch` events, there is no second pipe).
+
+Request params (additive):
+
+```ts
+{
+  sessionId: string,
+  directory?: string,
+  backendId: string,            // REQUIRED. Backend identity is part of the request scope.
+  direction: "window_0" | "older" | "newer" | "latest" | "locate",
+  cursor?: string,              // opaque, bridge-owned; required for older/newer
+  limit?: number,               // max TURNS requested; hard cap below
+  anchorTurnId?: string         // locate only
+}
+```
+
+Response data (success):
+
+```ts
+{
+  window: {
+    windowId: string,           // opaque; embeds scope + generation
+    generation: number,         // monotonic per (backendId, sessionId) within one bridgeEpoch
+    coverage: "full" | "window",
+    headTurnId: string | null,  // null + hasOlder=false => absolute head of the projection
+    tailTurnId: string | null,  // null + hasNewer=false => live tail is inside this window
+    hasOlder: boolean,
+    hasNewer: boolean,
+    nextOlderCursor?: string,   // present iff hasOlder
+    nextNewerCursor?: string    // present iff hasNewer
+  },
+  turns: BridgeTurnProjection[], // window content: turn-aligned, ordered, deduplicated by turnId
+  syncRev: number,               // kernel admission cut (baseRev for subsequent patches)
+  resume?: { kind: "at_head" }
+}
+```
+
+Window anchoring and boundary semantics (frozen; completing S4A where the enum values
+were listed without slicing rules — this paragraph IS normative):
+
+- `window_0` and `latest` are **tail-anchored**: the last `limit` committed turns ending
+  at the committed live tail (`hasNewer = false` always). `window_0` is the session-open
+  baseline; `latest` is the reader-intent re-jump — both produce the same slice for the
+  same `limit`. `limit` omitted = 100 turns. `coverage = "full"` exactly when the window
+  contains every committed turn (`hasOlder = false`), else `"window"`.
+- `older(cursor)` returns up to `limit` turns immediately BEFORE the cursor's boundary
+  turn, truncating (if the byte bound binds first) from the side farthest from that
+  boundary; `newer(cursor)` symmetric after it (R7 strict order). `locate(anchorTurnId)`
+  returns a `limit`-sized window with the anchor inside, ending at
+  `min(anchorIndex + limit/2, tail)`.
+- `headTurnId`/`tailTurnId` are the window's first/last turn ids and are `null` ONLY for
+  an empty projection (zero committed turns: `coverage = "full"`, no cursors,
+  `hasOlder = hasNewer = false`). A non-empty window always carries both ids; the
+  schema comments ("null + hasOlder=false ⇒ absolute head" / "null + hasNewer=false ⇒
+  live tail inside") describe this empty-projection terminal, not a nullable norm.
+- `resume: { kind: "at_head" }` is present iff the window includes the committed tail
+  (`hasNewer = false`); otherwise omitted.
+- The byte bound limits ACCUMULATION: the boundary-adjacent turn is always included, so
+  the minimum page is one turn and a single turn larger than `maxWindowEncodedBytes` is
+  served alone (a response never splits a turn, R5).
+- A wire cursor that fails to decode is NOT a distinct error: it maps onto the shared
+  `cursor_stale` contract (discard chain, re-issue `window_0`) — the frozen error set has
+  no corrupt-cursor code, and recovery semantics are identical.
+
+### Frozen rules (each normative "MUST/MUST NOT" is testable)
+
+**R1 — Scope & cursor identity.** A wire cursor is **bridge-owned and opaque**. Its scope is
+the tuple `(backendId, bridgeEpoch, sessionId)`. Clients MUST NOT parse cursor contents,
+persist cursors across bridge epochs, or send a cursor obtained under one `backendId` with a
+request naming another. A scope-mismatched cursor returns the stable typed error
+`projection_window.cursor_scope_mismatch` (`retryable = false`) — never a wrong window, never
+a silent page-0.
+
+**R2 — Producer source-family boundary.** The wire cursor is ALWAYS projection-kernel-owned
+(derived from committed turn ids + admission cut). Upstream pagination artifacts — Codex Web
+`thread/read` cursor/limit, OpenCode Web message-API pagination, Claude/OpenCode transcript
+file offsets — are internal to the Mac producer and MUST NOT be forwarded across the bridge
+boundary or embedded verbatim in a wire cursor. A producer that can only page its source
+API must reduce pages into the kernel first; the cursor the client sees refers to kernel
+turn ids, so cursor stability equals kernel stability, not upstream API stability.
+
+**R3 — Turn-aligned windows; unique page ownership.** Window boundaries are TURN-aligned.
+A turn belongs to EXACTLY ONE window response (ownership by `turnId`); a response MUST NOT
+end mid-turn, and overlapping requests (`older` then `newer`) deduplicate by `turnId` on the
+client via the existing projection apply path — the server never duplicates a turn into two
+pages of the same chain.
+
+**R4 — Snapshot cut & live patch fence.** A window response is admitted at one kernel cut
+and reports that cut as `syncRev`. Live patches after the cut flow through the existing
+`projection_patch` events with `baseRev` fencing exactly as today; a window NEVER carries
+inline live deltas. A patch whose `baseRev` doesn't chain from the window's `syncRev`
+triggers the client's existing `get_session_projection(sinceRev=appliedRev)` alignment —
+unchanged SSV2 recovery, no window-specific repair path.
+
+**R5 — Bounds are assertable limits, not advice.** `maxWindowTurns = 256`,
+`maxWindowEncodedBytes = 4 MiB` (encoded response payload), `limit <= maxWindowTurns`.
+`limit > maxWindowTurns` returns `projection_window.limit_exceeded` (`retryable = false`).
+The server MUST truncate at a turn boundary — when the byte bound binds first, fewer turns
+are returned and `hasOlder`/`hasNewer` + the matching `next*Cursor` express the remainder.
+A response MUST NOT split a turn to satisfy a byte bound.
+
+**R6 — Cursor staleness & recovery.** A cursor is stale when: the projection epoch changed
+(kernel rebuild/rewind), MacBridge restarted (different `bridgeEpoch` — generation is
+epoch-scoped and resets), or kernel retention no longer admits the cursor's anchor turn.
+Stale cursors return `cursor_stale` (shared code, § Cursor invalidity): client discards the
+whole cursor chain and re-issues `window_0`. Relay reconnect/mailbox semantics are
+unchanged — windows are pull-only; after reconnect the client re-establishes via
+`window_0`/`latest`, never via mailbox replay.
+
+**R7 — `latest` and live tail.** `direction: "latest"` returns the window ending at the
+committed live tail (`tailTurnId = null`-semantics expressed via `hasNewer = false`) — the
+reader-intent jump target. `direction: "newer"` walks toward the tail and MUST NOT skip
+unloaded turns (strict turn-chain order).
+
+**R8 — `locate` to an unloaded item.** `direction: "locate"` with `anchorTurnId` targets a
+specific turn. If the turn is retained by the kernel, the server returns the window
+containing it (anchor anywhere inside). If the turn id is unknown or outside retention
+(windowing cannot reach it), the server returns `projection_window.locate_out_of_window`
+(`retryable = false`); the client's ONLY honest fallback is a full
+`get_session_projection` pull — the server MUST NOT fabricate a nearest-neighbor window.
+
+**R9 — Failure rendering.** All typed errors above are protocol results, not UI errors.
+`cursor_stale` is silent-recover (§ Cursor invalidity). `cursor_scope_mismatch`,
+`limit_exceeded`, `locate_out_of_window`, `capability_required` surface once as a typed
+state the client renders explicitly (message/retry affordance); none may be retried
+automatically, none may be answered with a fabricated or empty window.
+
+**R10 — Freeze scope.** This section specifies wire semantics only. It does not change
+`projection_snapshot`/`projection_patch` shapes, does not add a second event pipe, and is
+NOT advertised by any production MacBridge until PERF-S4B/S4C implement and gate the
+producer/replica sides. Open product semantics discovered later are BLOCKERS to be re-frozen
+here first; implementing agents MUST NOT guess them in code.
+
+### Observed-sample contract
+
+`docs/protocol/samples/projection-window-v1/` carries the canonical SYNTHETIC wire-shape
+fixture (clearly labeled `provenance: "synthetic-spec-fixture"` — no production capture
+exists yet because no producer ships). Schema/decoder tests on both platforms MUST decode it
+and assert the frozen field set; when the first real producer capture lands (S4B), it
+replaces the synthetic fixture under the same README discipline as
+`session-projection-v2` (raw hashes + sanitization boundary).
+
 ## Session Pinning
 
 Session pinning (置顶) is a backend-neutral, MacBridge-owned session-metadata capability. iOS does

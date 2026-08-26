@@ -720,3 +720,57 @@ export type BridgeProjectionResume =
 export type BridgeGetSessionProjectionResult =
   | { projection: BridgeSessionProjection; resume?: BridgeProjectionResume }
   | { patches: BridgeProjectionPatch[]; headRev: number; resume?: BridgeProjectionResume };
+
+// ---------------------------------------------------------------------------
+// Projection Window (server-owned windowing) — FROZEN SPEC, not advertised.
+// Canonical rules: docs/protocol/bridge-v1.md §Projection Window (R1–R10).
+// ---------------------------------------------------------------------------
+
+export type BridgeProjectionWindowDirection =
+  | "window_0"
+  | "older"
+  | "newer"
+  | "latest"
+  | "locate";
+
+export interface BridgeGetSessionProjectionWindowParams {
+  sessionId: string;
+  directory?: string;
+  /** R1: backend identity is part of the request scope; cursors never cross backends. */
+  backendId: string;
+  direction: BridgeProjectionWindowDirection;
+  /** Opaque, bridge-owned. Required for older/newer (R1/R2). */
+  cursor?: string;
+  /** Max TURNS requested; hard cap maxWindowTurns (R5). */
+  limit?: number;
+  /** locate only (R8). */
+  anchorTurnId?: string;
+}
+
+export interface BridgeProjectionWindow {
+  /** Opaque; embeds scope (backendId, bridgeEpoch, sessionId) + generation. */
+  windowId: string;
+  /** Monotonic per (backendId, sessionId) within one bridgeEpoch; resets with epoch (R6). */
+  generation: number;
+  coverage: "full" | "window";
+  /** Window's first (oldest) turn id; null ONLY for an empty projection (see bridge-v1.md window anchoring paragraph). */
+  headTurnId: string | null;
+  /** Window's last (newest) turn id; null ONLY for an empty projection; hasNewer=false => this id is the committed live tail. */
+  tailTurnId: string | null;
+  hasOlder: boolean;
+  hasNewer: boolean;
+  /** Present iff hasOlder (R5/R7). */
+  nextOlderCursor?: string;
+  /** Present iff hasNewer (R5/R7). */
+  nextNewerCursor?: string;
+}
+
+/** get_session_projection_window result: turn-aligned window content + admission cut (R3/R4). */
+export interface BridgeGetSessionProjectionWindowResult {
+  window: BridgeProjectionWindow;
+  /** Window content: turn-aligned, ordered, deduplicated by turnId (R3). */
+  turns: BridgeTurnProjection[];
+  /** Kernel admission cut; subsequent projection_patch frames chain from it (R4). */
+  syncRev: number;
+  resume?: { kind: "at_head" };
+}

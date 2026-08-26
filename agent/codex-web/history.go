@@ -261,6 +261,12 @@ func ReadThreadRich(ctx context.Context, cl *Client, threadID string, limit int)
 	if err != nil || rpcErr != nil {
 		return nil, rpcErr, err
 	}
+	return MapThreadInfoToTurnScopedHistory(th, limit), nil, nil
+}
+
+// MapThreadInfoToTurnScopedHistory 把已解码的官方 thread（thread/read includeTurns 响应）
+// 映射为 turn-scoped 冷基线。导出供 PERF-S0B fixture 生成测试复用同一真实映射（不复制逻辑）。
+func MapThreadInfoToTurnScopedHistory(th *ThreadInfo, limit int) []core.TurnScopedHistoryTurn {
 	turns := make([]core.TurnScopedHistoryTurn, 0, len(th.Turns))
 	for _, t := range th.Turns {
 		ht := core.TurnScopedHistoryTurn{TurnID: t.ID, Status: t.Status}
@@ -287,7 +293,7 @@ func ReadThreadRich(ctx context.Context, cl *Client, threadID string, limit int)
 	if limit > 0 && len(turns) > limit {
 		turns = turns[len(turns)-limit:]
 	}
-	return turns, nil, nil
+	return turns
 }
 
 // mapHistoryItem 把一个官方 item 映射进 core.TurnScopedHistoryTurn。身份/命名纪律见文件头。

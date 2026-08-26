@@ -1,6 +1,7 @@
 package gobridge
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -378,6 +379,56 @@ func TestReducerFlushPatchCoalescesAndDeltas(t *testing.T) {
 	}
 	if len(p2.PartOps) != 1 || p2.PartOps[0].Text != "c" {
 		t.Fatalf("patch2 partOps = %+v", p2.PartOps)
+	}
+	if len(p2.UpsertTurns) != 0 {
+		t.Fatalf("steady text delta repeated the whole growing turn: %+v", p2.UpsertTurns)
+	}
+}
+
+// Long steady streams must stay O(delta) on the wire after the first content-bearing
+// patch. Re-sending the accumulated assistant turn on every delta made an N-byte answer
+// consume O(N^2) transport/JSON/MainActor work and caused iOS to catch up only after settle.
+func TestReducerSteadyTextDeltaPatchSizeDoesNotGrowWithAccumulatedBody(t *testing.T) {
+	r := newTestReducer()
+	r.Apply(ev(1, "dsh-web", "s1", "turn_started", map[string]interface{}{"turnId": "T1"}))
+
+	for seq := 2; seq <= 802; seq++ {
+		r.Apply(ev(seq, "dsh-web", "s1", "text_delta", map[string]interface{}{
+			"itemId": "T1",
+			"delta":  "0123456789",
+		}))
+		patch, ok := r.FlushPatch("dsh-web", "s1")
+		if !ok {
+			t.Fatalf("seq %d: missing patch", seq)
+		}
+		if len(patch.PartOps) != 1 || patch.PartOps[0].Text != "0123456789" {
+			t.Fatalf("seq %d: partOps = %+v", seq, patch.PartOps)
+		}
+		if seq == 2 {
+			if len(patch.UpsertTurns) != 1 {
+				t.Fatalf("first content patch must mount one turn shell: %+v", patch.UpsertTurns)
+			}
+			continue
+		}
+		if len(patch.UpsertTurns) != 0 {
+			t.Fatalf("seq %d: repeated accumulated turn in steady patch", seq)
+		}
+		encoded, err := json.Marshal(patch)
+		if err != nil {
+			t.Fatalf("seq %d: marshal patch: %v", seq, err)
+		}
+		if len(encoded) > 512 {
+			t.Fatalf("seq %d: steady patch grew to %d bytes", seq, len(encoded))
+		}
+	}
+
+	snapshot, ok := r.Snapshot("dsh-web", "s1")
+	if !ok || len(snapshot.Turns) != 1 || snapshot.Turns[0].Assistant == nil {
+		t.Fatalf("final snapshot missing assistant turn: %+v", snapshot)
+	}
+	parts := snapshot.Turns[0].Assistant.Parts
+	if len(parts) != 1 || len(parts[0].Text) != 8010 {
+		t.Fatalf("final authoritative text length = %d, want 8010", len(parts[0].Text))
 	}
 }
 

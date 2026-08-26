@@ -1,0 +1,157 @@
+{
+  "provenance": "synthetic-spec-fixture",
+  "note": "PERF-S4A 冻结状态机的 table-top 场景表。Go（go-bridge/projection_window_spec_test.go）与 Swift（OpenCodeiOSTests/ProjectionWindowSpecTests.swift）各自内置同一套决策函数并回放本表，保证双端对 R1–R10 的理解一致。改动本表 = 重新冻结（bridge-v1.md §Projection Window）。",
+  "scenarios": [
+    {
+      "name": "hello window capability without session_sync_v2",
+      "rule": "Capability prerequisite",
+      "input": {
+        "declared": ["projection_window_v1"],
+        "rolloutOn": false,
+        "rpc": false,
+        "direction": "",
+        "cursorScope": "none",
+        "limit": 0,
+        "anchorKnown": false
+      },
+      "expected": {
+        "errorCode": "protocol.invalid_capabilities",
+        "retryable": false,
+        "clientNext": "hello fails; fix declarations"
+      }
+    },
+    {
+      "name": "RPC from undeclared connection",
+      "rule": "Undeclared peer",
+      "input": {
+        "declared": ["session_sync_v2"],
+        "rolloutOn": true,
+        "rpc": true,
+        "direction": "window_0",
+        "cursorScope": "none",
+        "limit": 50,
+        "anchorKnown": false
+      },
+      "expected": {
+        "errorCode": "protocol.capability_required",
+        "retryable": false,
+        "clientNext": "render typed failure; no window field"
+      }
+    },
+    {
+      "name": "RPC while rollout flag off",
+      "rule": "Capability echo gate",
+      "input": {
+        "declared": ["session_sync_v2", "projection_window_v1"],
+        "rolloutOn": false,
+        "rpc": true,
+        "direction": "window_0",
+        "cursorScope": "none",
+        "limit": 50,
+        "anchorKnown": false
+      },
+      "expected": {
+        "errorCode": "protocol.capability_required",
+        "retryable": false,
+        "clientNext": "render typed failure; no window field"
+      }
+    },
+    {
+      "name": "cross-backend cursor",
+      "rule": "R1",
+      "input": {
+        "declared": ["session_sync_v2", "projection_window_v1"],
+        "rolloutOn": true,
+        "rpc": true,
+        "direction": "older",
+        "cursorScope": "other-backend",
+        "limit": 50,
+        "anchorKnown": false
+      },
+      "expected": {
+        "errorCode": "projection_window.cursor_scope_mismatch",
+        "retryable": false,
+        "clientNext": "render typed failure; never re-issue the cursor"
+      }
+    },
+    {
+      "name": "cursor from previous bridge epoch (restart)",
+      "rule": "R6",
+      "input": {
+        "declared": ["session_sync_v2", "projection_window_v1"],
+        "rolloutOn": true,
+        "rpc": true,
+        "direction": "older",
+        "cursorScope": "other-epoch",
+        "limit": 50,
+        "anchorKnown": false
+      },
+      "expected": {
+        "errorCode": "cursor_stale",
+        "retryable": true,
+        "clientNext": "discard cursor chain; re-issue window_0"
+      }
+    },
+    {
+      "name": "limit above maxWindowTurns",
+      "rule": "R5",
+      "input": {
+        "declared": ["session_sync_v2", "projection_window_v1"],
+        "rolloutOn": true,
+        "rpc": true,
+        "direction": "window_0",
+        "cursorScope": "none",
+        "limit": 257,
+        "anchorKnown": false
+      },
+      "expected": {
+        "errorCode": "projection_window.limit_exceeded",
+        "retryable": false,
+        "clientNext": "render typed failure"
+      }
+    },
+    {
+      "name": "locate unknown anchor",
+      "rule": "R8",
+      "input": {
+        "declared": ["session_sync_v2", "projection_window_v1"],
+        "rolloutOn": true,
+        "rpc": true,
+        "direction": "locate",
+        "cursorScope": "none",
+        "limit": 50,
+        "anchorKnown": false
+      },
+      "expected": {
+        "errorCode": "projection_window.locate_out_of_window",
+        "retryable": false,
+        "clientNext": "full get_session_projection pull (only honest fallback)"
+      }
+    },
+    {
+      "name": "healthy window_0",
+      "rule": "RPC success",
+      "input": {
+        "declared": ["session_sync_v2", "projection_window_v1"],
+        "rolloutOn": true,
+        "rpc": true,
+        "direction": "window_0",
+        "cursorScope": "none",
+        "limit": 50,
+        "anchorKnown": false
+      },
+      "expected": {
+        "errorCode": "",
+        "retryable": false,
+        "clientNext": "apply window; chain patches from syncRev (R4)"
+      }
+    }
+  ],
+  "newerChainWalk": {
+    "rule": "R7",
+    "chain": ["t1", "t2", "t3", "t4", "t5"],
+    "afterTurnId": "t2",
+    "limit": 2,
+    "expectedTurns": ["t3", "t4"]
+  }
+}

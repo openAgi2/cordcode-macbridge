@@ -1,0 +1,67 @@
+{
+  "sessionId": "perf-fixture-codex-web",
+  "syncRev": 7,
+  "bridgeEpoch": "epoch-webperf-fixture",
+  "updatedAt": 1750000000,
+  "execution": {
+    "phase": "idle"
+  },
+  "turns": [
+    {
+      "turnId": "01a02532-b0ac-7b92-b342-f9902f46f442",
+      "status": "completed",
+      "completedAt": 1750000000,
+      "user": {
+        "id": "item-1",
+        "role": "user",
+        "parts": [
+          {
+            "type": "text",
+            "text": "MOCK:STREAM catalog first turn"
+          }
+        ]
+      },
+      "assistant": {
+        "id": "01a02532-b0ac-7b92-b342-f9902f46f442",
+        "role": "assistant",
+        "parts": [
+          {
+            "type": "text",
+            "text": "MOCK:STREAM catalog first turn\u003c0\u003e MOCK:STREAM catalog first turn\u003c1\u003e MOCK:STREAM catalog first turn\u003c2\u003e MOCK:STREAM catalog first turn\u003c3\u003e MOCK:STREAM catalog first turn\u003c4\u003e MOCK:STREAM catalog first turn\u003c5\u003e MOCK:STREAM catalog first turn\u003c6\u003e MOCK:STREAM catalog first turn\u003c7\u003e MOCK:STREAM catalog first turn\u003c8\u003e MOCK:STREAM catalog first turn\u003c9\u003e",
+            "presentation": "final"
+          }
+        ]
+      }
+    },
+    {
+      "turnId": "01a02532-b1f9-7b60-979b-f4e87a543da9",
+      "status": "completed",
+      "completedAt": 1750000000,
+      "user": {
+        "id": "item-3",
+        "role": "user",
+        "parts": [
+          {
+            "type": "text",
+            "text": "MOCK:REASON history reasoning sample"
+          }
+        ]
+      },
+      "assistant": {
+        "id": "01a02532-b1f9-7b60-979b-f4e87a543da9",
+        "role": "assistant",
+        "parts": [
+          {
+            "type": "reasoning",
+            "text": "mock summary one\nmock summary two"
+          },
+          {
+            "type": "text",
+            "text": "history reasoning sample(0) history reasoning sample(1) history reasoning sample(2) history reasoning sample(3) history reasoning sample(4) history reasoning sample(5) history reasoning sample(6) history reasoning sample(7) history reasoning sample(8) history reasoning sample(9)",
+            "presentation": "final"
+          }
+        ]
+      }
+    }
+  ]
+}

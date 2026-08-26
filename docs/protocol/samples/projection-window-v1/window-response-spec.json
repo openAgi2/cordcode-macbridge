@@ -1,0 +1,94 @@
+{
+  "provenance": "synthetic-spec-fixture",
+  "note": "PERF-S4A 冻结 spec 的合成 wire-shape 样本（无生产捕获——生产 producer 未实现，S4B 落地后以真实 capture 替换并沿用 README 纪律）。",
+  "rpc": "get_session_projection_window",
+  "response": {
+    "window": {
+      "windowId": "opaque:codex-web|bep-7f3a|session-w1|g4",
+      "generation": 4,
+      "coverage": "window",
+      "headTurnId": "turn-017f",
+      "tailTurnId": "turn-019c",
+      "hasOlder": true,
+      "hasNewer": true,
+      "nextOlderCursor": "opaque:older:cut-2211",
+      "nextNewerCursor": "opaque:newer:cut-2211"
+    },
+    "turns": [
+      {
+        "turnId": "turn-017f",
+        "status": "completed",
+        "user": {
+          "id": "msg-u-17f",
+          "role": "user",
+          "parts": [
+            {
+              "type": "text",
+              "text": "sanitized user text"
+            }
+          ]
+        },
+        "assistant": {
+          "id": "msg-a-17f",
+          "role": "assistant",
+          "parts": [
+            {
+              "type": "text",
+              "text": "sanitized assistant text"
+            }
+          ]
+        }
+      },
+      {
+        "turnId": "turn-019c",
+        "status": "completed",
+        "user": {
+          "id": "msg-u-17f",
+          "role": "user",
+          "parts": [
+            {
+              "type": "text",
+              "text": "sanitized user text"
+            }
+          ]
+        },
+        "assistant": {
+          "id": "msg-a-17f",
+          "role": "assistant",
+          "parts": [
+            {
+              "type": "text",
+              "text": "sanitized assistant text"
+            }
+          ]
+        }
+      }
+    ],
+    "syncRev": 2211,
+    "resume": {
+      "kind": "at_head"
+    }
+  },
+  "errorShapes": [
+    {
+      "code": "projection_window.cursor_scope_mismatch",
+      "retryable": false
+    },
+    {
+      "code": "projection_window.limit_exceeded",
+      "retryable": false
+    },
+    {
+      "code": "projection_window.locate_out_of_window",
+      "retryable": false
+    },
+    {
+      "code": "cursor_stale",
+      "retryable": true
+    },
+    {
+      "code": "protocol.capability_required",
+      "retryable": false
+    }
+  ]
+}

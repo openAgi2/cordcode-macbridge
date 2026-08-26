@@ -29,7 +29,7 @@ func (h *Handlers) handleOpenCodeRPC(conn Connection, msg WireMessage) {
 		"create_git_branch", "create_git_worktree",
 		"rename_session", "archive_session", "compress_context",
 		"delete_session", "list_models", "switch_model",
-		"get_session_messages", "get_session_projection":
+		"get_session_messages", "get_session_projection", "get_session_projection_window":
 		agent, ok := h.getAgent(msg.BackendID)
 		if !ok {
 			conn.SendResult(msg.RequestID, nil, &WireError{Code: "backend_not_found", Message: "opencode agent not registered"})

@@ -137,6 +137,28 @@ func (p *EventPublisher) CompleteProjectionSnapshot(
 	requestID string,
 	data interface{},
 ) error {
+	return p.completeProjectionSnapshot(conn, admission, requestID, data, nil)
+}
+
+// CompleteProjectionSnapshotError releases a fence whose pull failed after admission (e.g. a
+// projection-window typed error) with a WireError result instead of a success payload, so a
+// failed pull never leaves the session's snapshot fence dangling for the next request.
+func (p *EventPublisher) CompleteProjectionSnapshotError(
+	conn Connection,
+	admission ProjectionSnapshotAdmission,
+	requestID string,
+	resultErr *WireError,
+) error {
+	return p.completeProjectionSnapshot(conn, admission, requestID, nil, resultErr)
+}
+
+func (p *EventPublisher) completeProjectionSnapshot(
+	conn Connection,
+	admission ProjectionSnapshotAdmission,
+	requestID string,
+	data interface{},
+	resultErr *WireError,
+) error {
 	if p == nil || conn == nil || requestID == "" {
 		return fmt.Errorf("projection snapshot completion identity is required")
 	}
@@ -176,6 +198,7 @@ func (p *EventPublisher) CompleteProjectionSnapshot(
 	sink.queue <- eventOutboundFrame{
 		requestID:  requestID,
 		resultData: data,
+		resultErr:  resultErr,
 		isResult:   true,
 		resultDone: resultDone,
 		delivered:  responseEnqueued,
