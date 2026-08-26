@@ -101,6 +101,9 @@ type Handlers struct {
 	agentRelayGen           map[string]uint64
 	claudeSourceCorrelation *claudeSourceCorrelationTracker
 	deliveryPrekeys         *PrekeyStore
+	// webPush 是 per-bridge VAPID/subscription/ledger store（web_push_store.go）。
+	// nil = 未接线（无 dataDir 的 dev 模式 / 未注入的单元测试）→ capability 不 echo、RPC 关闭。
+	webPush                 *WebPushStore
 	observation             *ObservationManager
 	relayOutbox             *OutboxManager
 	presentation            *PresentationManager
@@ -1013,6 +1016,9 @@ func (h *Handlers) HandleRPC(conn Connection, msg WireMessage) {
 	if h.handleRelayUpgradeRPC(conn, msg) {
 		return
 	}
+	if h.handleWebPushRPC(conn, msg) {
+		return
+	}
 	if msg.Method == "set_observation_scope" {
 		h.handleSetObservationScope(conn, msg)
 		return
@@ -1298,6 +1304,118 @@ func (h *Handlers) handleDeliveryRPC(conn Connection, msg WireMessage) bool {
 			head = &DeliveryChainHead{}
 		}
 		conn.SendResult(msg.RequestID, head, nil)
+	}
+	return true
+}
+
+// SetWebPushStore 注入 web push store（main.go 启动时从 dataDir 加载）。
+// nil 或未调用 = 未接线：hello 不 echo capability，两个 RPC 返回 web_push.unsupported。
+func (h *Handlers) SetWebPushStore(store *WebPushStore) {
+	h.mu.Lock()
+	h.webPush = store
+	h.mu.Unlock()
+}
+
+// WebPushStoreRef 返回当前接线的 web push store（hello 协商用；可能为 nil）。
+func (h *Handlers) WebPushStoreRef() *WebPushStore {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.webPush
+}
+
+// webPushWireError 把 webPushValidationError 映射为 wire error（retryable 语义与
+// canonical 错误码表一致）。
+func webPushWireError(err *webPushValidationError) *WireError {
+	retryable := err.retryable
+	return &WireError{Code: err.code, Message: err.message, Retryable: &retryable}
+}
+
+// handleWebPushRPC 处理认证 channel 内、与 backend 无关的 web push 管理请求。
+// 沿用 canonical request envelope（backendId 由 envelope 自身约束；本 handler 在
+// agent 路由前分发并忽略该字段的业务语义，不产生第二种 envelope 形状）。
+// 身份只取 authenticated connection 的 deviceID，绝不信任 params 内的 deviceId/bridgeId。
+func (h *Handlers) handleWebPushRPC(conn Connection, msg WireMessage) bool {
+	switch msg.Method {
+	case WebPushMethodRegister, WebPushMethodUnregister:
+	default:
+		return false
+	}
+
+	store := h.WebPushStoreRef()
+	device := conn.AuthedDevice()
+	if device == nil {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "auth.required", Message: "web push RPC requires an authenticated device"})
+		return true
+	}
+
+	switch msg.Method {
+	case WebPushMethodRegister:
+		if store == nil {
+			conn.SendResult(msg.RequestID, nil, webPushWireError(&webPushValidationError{code: WebPushErrUnsupported, message: "web push is not configured on this bridge"}))
+			return true
+		}
+		if status, _ := store.Status(); status != WebPushStoreHealthy {
+			conn.SendResult(msg.RequestID, nil, webPushWireError(&webPushValidationError{code: WebPushErrUnsupported, message: "web push store is " + string(status)}))
+			return true
+		}
+		var params RegisterPushSubscriptionParams
+		if err := json.Unmarshal(msg.Params, &params); err != nil {
+			conn.SendResult(msg.RequestID, nil, webPushWireError(webPushInvalid("invalid register_push_subscription params")))
+			return true
+		}
+		record, verr := ValidateRegisterPushSubscriptionParams(&params, len(msg.Params), store.VapidPublicKey(), time.Now().UTC().UnixMilli())
+		if verr != nil {
+			conn.SendResult(msg.RequestID, nil, webPushWireError(verr))
+			return true
+		}
+		subscriptionID, err := store.Register(device.DeviceID, *record)
+		if err != nil {
+			if wpErr, ok := err.(*webPushValidationError); ok {
+				conn.SendResult(msg.RequestID, nil, webPushWireError(wpErr))
+				return true
+			}
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "internal_error", Message: err.Error()})
+			return true
+		}
+		var registeredAt int64
+		for _, r := range store.Subscriptions() {
+			if r.SubscriptionID == subscriptionID {
+				registeredAt = r.CreatedAt
+				break
+			}
+		}
+		// 日志只记 subscriptionId 与 endpoint host category——不记 endpoint path/query、keys、auth。
+		slog.Info("go-bridge: web push subscription registered",
+			"subscriptionId", subscriptionID,
+			"endpointHostCategory", WebPushEndpointHostCategory(record.Endpoint),
+			"devicePrefix", safeID(device.DeviceID))
+		conn.SendResult(msg.RequestID, &RegisterPushSubscriptionResult{SubscriptionID: subscriptionID, RegisteredAtMillis: registeredAt}, nil)
+	case WebPushMethodUnregister:
+		if store == nil {
+			conn.SendResult(msg.RequestID, nil, webPushWireError(&webPushValidationError{code: WebPushErrUnsupported, message: "web push is not configured on this bridge"}))
+			return true
+		}
+		var params UnregisterPushSubscriptionParams
+		if err := json.Unmarshal(msg.Params, &params); err != nil {
+			conn.SendResult(msg.RequestID, nil, webPushWireError(webPushInvalid("invalid unregister_push_subscription params")))
+			return true
+		}
+		subscriptionID, verr := ValidateUnregisterPushSubscriptionParams(&params, len(msg.Params))
+		if verr != nil {
+			conn.SendResult(msg.RequestID, nil, webPushWireError(verr))
+			return true
+		}
+		removed, err := store.Unregister(device.DeviceID, subscriptionID)
+		if err != nil {
+			if wpErr, ok := err.(*webPushValidationError); ok {
+				conn.SendResult(msg.RequestID, nil, webPushWireError(wpErr))
+				return true
+			}
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "internal_error", Message: err.Error()})
+			return true
+		}
+		slog.Info("go-bridge: web push subscription unregistered", "removed", removed, "devicePrefix", safeID(device.DeviceID))
+		conn.SendResult(msg.RequestID, &UnregisterPushSubscriptionResult{Removed: removed}, nil)
 	}
 	return true
 }

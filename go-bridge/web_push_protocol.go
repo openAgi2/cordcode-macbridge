@@ -104,3 +104,50 @@ func buildWebPushNotificationText(kind WebPushNotificationKind) (title, body str
 		return "", ""
 	}
 }
+
+// helloDeclaresWebPush 判断客户端是否在 hello.capabilities 声明了 web_push_v1。
+func helloDeclaresWebPush(hello *HelloMessage) bool {
+	if hello == nil {
+		return false
+	}
+	for _, c := range hello.Capabilities {
+		if c == WebPushCapability {
+			return true
+		}
+	}
+	return false
+}
+
+// ApplyWebPushHelloProfile 是 direct（server.go handleHello）与 Relay（main.go
+// relayHelloHandler）共享的 web push 协商 helper，保证两条路径语义一致：
+//   - 未声明 capability / store 未接线（无 dataDir 的 dev 模式）→ 不 echo、不下发 webPush；
+//   - healthy → capabilities.web_push_v1=true + webPush{schemaVersion, vapidPublicKey}；
+//   - misconfigured → capabilities.web_push_v1=false + webPush{schemaVersion,
+//     status:"misconfigured"}，绝不携带公钥（fail-closed，不得伪造）。
+func ApplyWebPushHelloProfile(ack *HelloAckMessage, hello *HelloMessage, store *WebPushStore) {
+	if ack == nil || !helloDeclaresWebPush(hello) {
+		return
+	}
+	if store == nil {
+		return
+	}
+	status, _ := store.Status()
+	switch status {
+	case WebPushStoreHealthy:
+		publicKey := store.VapidPublicKey()
+		if publicKey == "" {
+			// healthy 但公钥为空属于 store 内部不一致：按 misconfigured 处理，不下发空 key。
+			ack.Capabilities[WebPushCapability] = false
+			ack.WebPush = &WebPushHelloProfile{SchemaVersion: WebPushSchemaVersion, Status: WebPushStatusMisconfigured}
+			return
+		}
+		ack.Capabilities[WebPushCapability] = true
+		ack.WebPush = &WebPushHelloProfile{SchemaVersion: WebPushSchemaVersion, VapidPublicKey: publicKey}
+	case WebPushStoreMisconfigured:
+		ack.Capabilities[WebPushCapability] = false
+		ack.WebPush = &WebPushHelloProfile{SchemaVersion: WebPushSchemaVersion, Status: WebPushStatusMisconfigured}
+	default:
+		// unconfigured 仅在 LoadWebPushStore 途中存在；到达 hello 时应已落 healthy/
+		// misconfigured。保守处理：不 echo、不下发 profile。
+	}
+}

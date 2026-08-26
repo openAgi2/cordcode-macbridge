@@ -460,3 +460,8 @@ func WebPushNotificationKeyHash(key string) string {
 	sum := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(sum[:])
 }
+
+// globalWebPushStore 是进程级引用（main.go 启动时设置）。management API 的设备撤销
+// 路径经它联动删除该 device 的 subscription（§10 生命周期不变量：撤销 = 同事务删订阅）。
+// dev 模式（无 dataDir）保持 nil。
+var globalWebPushStore *WebPushStore

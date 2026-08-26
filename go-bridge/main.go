@@ -133,6 +133,18 @@ func Main() {
 	handlers.SetDataDir(*dataDirPath)
 	if *dataDirPath != "" {
 		handlers.SetTranscriptIndexBaseDir(*dataDirPath + string(filepath.Separator) + "transcript-index")
+		// Web Push store：损坏按 misconfigured fail-closed（capability 关闭、RPC 拒绝 register，
+		// unregister/显式 Reset 仍可恢复）；仅真实 IO 错误才放弃接线（capability 保持关闭）。
+		webPushStore, webPushErr := LoadWebPushStore(*dataDirPath)
+		if webPushErr != nil {
+			slog.Error("go-bridge: web push store 加载失败（capability 保持关闭）", "error", webPushErr)
+		} else {
+			handlers.SetWebPushStore(webPushStore)
+			globalWebPushStore = webPushStore
+			if status, detail := webPushStore.Status(); status == WebPushStoreMisconfigured {
+				slog.Warn("go-bridge: web push store misconfigured（register 关闭，设置页可重置）", "detail", detail)
+			}
+		}
 	}
 
 	// Process-wide session pin store (置顶). Lives under the bridge data dir so it shares
@@ -431,6 +443,8 @@ func Main() {
 			ack.Bridge.ConnectionPolicy = &server.connectionPolicy
 		}
 		ack.BridgeEpoch = bridgeEpoch
+		// web_push_v1 协商（relay 路径；与 direct server.go handleHello 共用同一 helper）。
+		ApplyWebPushHelloProfile(ack, &hello, handlers.WebPushStoreRef())
 		if ack.Ok && negotiateRelayGzip(conn, hello.Capabilities) {
 			ack.Capabilities[relayGzipCapability] = true
 		}
