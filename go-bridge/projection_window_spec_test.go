@@ -115,10 +115,10 @@ func TestProjectionWindowSpecFixtureFieldSet(t *testing.T) {
 	errors := rawArray(t, fixture["errorShapes"])
 	wantCodes := map[string]bool{
 		"projection_window.cursor_scope_mismatch": false,
-		"projection_window.limit_exceeded":         false,
-		"projection_window.locate_out_of_window":   false,
-		"cursor_stale":                             false,
-		"protocol.capability_required":             false,
+		"projection_window.limit_exceeded":        false,
+		"projection_window.locate_out_of_window":  false,
+		"cursor_stale":                            false,
+		"protocol.capability_required":            false,
 	}
 	for index, entryRaw := range errors {
 		entry := rawObject(t, entryRaw)
@@ -299,21 +299,28 @@ func TestProjectionWindowSpecSectionFrozenRulesPresent(t *testing.T) {
 	}
 }
 
-// 5. R10 release gate (updated by PERF-S4B when the producer landed — the pre-S4B form
-// forbade any production reference). The producer exists behind a rollout flag; the
-// frozen release ordering (client first, server flip last) is enforced statically here:
-// the production default must stay off and nothing outside tests may enable it until
-// S4C/S4D pass the release gates.
+// 5. R10 release gate (updated by PERF-S4B when the producer landed; flipped by PERF-S4D).
+// The rollout enable in main.go must be exactly ONE deliberate call carrying the S4D
+// release-gate comment, so the flip is a conscious, greppable act and rollback is a
+// one-line change back to the frozen full-projection path.
 func TestProjectionWindowProductionRolloutStaysOff(t *testing.T) {
 	if projectionWindowProductionEnabled {
-		t.Fatal("projectionWindowProductionEnabled must remain false until S4C/S4D release gates pass (frozen release ordering)")
+		t.Fatal("projectionWindowProductionEnabled const must remain false; the deliberate enable lives in main.go only")
 	}
 	raw, err := os.ReadFile("main.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(raw), "SetProjectionWindowEnabled") {
-		t.Fatal("main.go must not enable the projection window rollout flag yet (client-first release ordering)")
+	mainSrc := string(raw)
+	enableCalls := strings.Count(mainSrc, "SetProjectionWindowEnabled(true)")
+	if enableCalls != 1 {
+		t.Fatalf("main.go must contain exactly one deliberate SetProjectionWindowEnabled(true) (found %d)", enableCalls)
+	}
+	if !strings.Contains(mainSrc, "PERF-S4D release gate") || !strings.Contains(mainSrc, "Rollback = set false") {
+		t.Fatal("the S4D rollout enable must carry the release-gate + rollback comment")
+	}
+	if strings.Contains(mainSrc, "SetProjectionWindowEnabled(false)") {
+		t.Fatal("a disabled call site would mask the rollout; remove the enable instead")
 	}
 	// Direct + relay hello paths must both route through negotiateProjectionWindowV1 so a
 	// declared-but-not-echoed connection can never call the RPC.

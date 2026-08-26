@@ -365,6 +365,12 @@ func Main() {
 	// K1 builds the complete dark path while production negotiation remains disabled. A later
 	// controlled shadow rollout must deliberately change the versioned gate.
 	server.SetSessionSyncV2Enabled(sessionSyncV2ProductionEnabled)
+	// PERF-S4D release gate (frozen §Projection Window release ordering — client first,
+	// server flip last): the iOS replica (S4C) and the producer (S4B) have shipped behind
+	// this flag on this branch. Rollback = set false (or remove this call): every session
+	// returns to the frozen full-projection path, no data is touched, no legacy writer
+	// returns. Undeclared/flag-off peers are byte-identical to today by contract.
+	server.SetProjectionWindowEnabled(true)
 	serverDisplayName := "CordCode Link"
 	if mgmtSrv != nil {
 		serverDisplayName = mgmtSrv.DisplayName()
