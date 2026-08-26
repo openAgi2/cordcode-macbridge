@@ -92,6 +92,9 @@ type WebPushStore struct {
 
 	ledger      map[string]WebPushLedgerEntry // key = NotificationKeyHash
 	ledgerDirty bool
+
+	lastResetAt  int64  // 最近一次显式 Reset 的毫秒时间戳；0 = 从未重置
+	lastResetErr string // 最近一次 Reset 失败的原因（恢复成功后清空）
 }
 
 // LoadWebPushStore 读取/初始化 DataDir 下的 web push 状态。
@@ -356,12 +359,23 @@ func (s *WebPushStore) ResetWebPush() error {
 		// store 已清空但 key 重建失败：维持 misconfigured，不得假称恢复。
 		s.status = WebPushStoreMisconfigured
 		s.statusDetail = fmt.Sprintf("reset key regeneration failed: %v", err)
+		s.lastResetAt = time.Now().UTC().UnixMilli()
+		s.lastResetErr = err.Error()
 		return fmt.Errorf("regenerate vapid key: %w", err)
 	}
 	s.status = WebPushStoreHealthy
 	s.statusDetail = ""
+	s.lastResetAt = time.Now().UTC().UnixMilli()
+	s.lastResetErr = ""
 	slog.Info("web-push: explicit reset completed", "removedSubscriptions", removed)
 	return nil
+}
+
+// LastResetInfo 返回最近一次显式 Reset 的时间与失败原因（设置页诊断展示）。
+func (s *WebPushStore) LastResetInfo() (int64, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastResetAt, s.lastResetErr
 }
 
 // MarkSubscriptionExpired 删除过期 subscription（WP-RESP-2 样本门后的 404/410 路径）。

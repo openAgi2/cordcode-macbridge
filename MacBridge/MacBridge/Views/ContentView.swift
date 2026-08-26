@@ -240,6 +240,7 @@ struct ContentView: View {
         deviceStore.configure(apiClient: client)
         settingsViewModel.managementAPIClient = client
         settingsViewModel.loadDisplayName()
+        settingsViewModel.loadWebPushMaintenance()
         return true
     }
 

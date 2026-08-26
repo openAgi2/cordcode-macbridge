@@ -335,6 +335,18 @@ enum L10n {
     static var settingsCopyCommand: String { tr("settings_copy_command") }
     static var settingsSaveCredentialsRestart: String { tr("settings_save_credentials_restart") }
     static var settingsRegenerateConfirmTitle: String { tr("settings_regenerate_confirm_title") }
+    static var webPushSectionTitle: String { tr("webpush_section_title") }
+    static var webPushStatusHealthy: String { tr("webpush_status_healthy") }
+    static var webPushStatusMisconfigured: String { tr("webpush_status_misconfigured") }
+    static var webPushStatusUnconfigured: String { tr("webpush_status_unconfigured") }
+    static var webPushStatusUnknown: String { tr("webpush_status_unknown") }
+    static var webPushSubscriptionCount: String { tr("webpush_subscription_count") }
+    static var webPushKeyFingerprint: String { tr("webpush_key_fingerprint") }
+    static var webPushReset: String { tr("webpush_reset") }
+    static var webPushResetConfirmTitle: String { tr("webpush_reset_confirm_title") }
+    static var webPushResetConfirmMessage: String { tr("webpush_reset_confirm_message") }
+    static var webPushResetSucceeded: String { tr("webpush_reset_succeeded") }
+    static var webPushHint: String { tr("webpush_hint") }
     static var settingsRegenerateConfirmMessage: String { tr("settings_regenerate_confirm_message") }
     static var settingsSaving: String { tr("settings_saving") }
     static var settingsOpenCodeCommand: String { tr("settings_opencode_command") }
@@ -705,6 +717,18 @@ enum L10n {
             "settings_regenerate_confirm_message": "The old password becomes invalid only after you save and restart MacBridge.",
             "settings_saving": "Saving...",
             "settings_opencode_command": "OPENCODE_SERVER_PASSWORD='your-password' opencode serve --hostname 127.0.0.1 --port 64667",
+            "webpush_section_title": "Web Push Maintenance",
+            "webpush_status_healthy": "Healthy",
+            "webpush_status_misconfigured": "Needs reset (misconfigured)",
+            "webpush_status_unconfigured": "Not configured",
+            "webpush_status_unknown": "Unknown",
+            "webpush_subscription_count": "Registered devices",
+            "webpush_key_fingerprint": "VAPID key fingerprint",
+            "webpush_reset": "Reset Web Push",
+            "webpush_reset_confirm_title": "Reset Web Push?",
+            "webpush_reset_confirm_message": "All registered notification subscriptions will be deleted and a new push key will be generated. Remote web clients must re-enable notifications.",
+            "webpush_reset_succeeded": "Web Push reset complete.",
+            "webpush_hint": "Used by the remote web client's background notifications. Reset only when the status needs attention.",
             "settings_auto_restart_title": "Auto Restart",
             "settings_auto_restart_enable": "Enable auto restart",
             "settings_auto_restart_interval": "Restart interval",
@@ -1054,6 +1078,18 @@ enum L10n {
             "settings_regenerate_confirm_message": "重新生成后，旧密码将在保存并重启 MacBridge 后失效。",
             "settings_saving": "正在保存…",
             "settings_opencode_command": "OPENCODE_SERVER_PASSWORD='your-password' opencode serve --hostname 127.0.0.1 --port 64667",
+            "webpush_section_title": "Web Push 维护",
+            "webpush_status_healthy": "正常",
+            "webpush_status_misconfigured": "需要重置（配置异常）",
+            "webpush_status_unconfigured": "未配置",
+            "webpush_status_unknown": "未知",
+            "webpush_subscription_count": "已注册设备",
+            "webpush_key_fingerprint": "推送密钥指纹",
+            "webpush_reset": "重置 Web Push",
+            "webpush_reset_confirm_title": "重置 Web Push？",
+            "webpush_reset_confirm_message": "将删除全部已注册的通知订阅，并生成新的推送密钥。远程网页客户端需要重新开启通知。",
+            "webpush_reset_succeeded": "Web Push 重置完成。",
+            "webpush_hint": "供远程网页客户端的后台通知使用。仅在状态异常时重置。",
             "settings_auto_restart_title": "自动重启",
             "settings_auto_restart_enable": "启用自动重启",
             "settings_auto_restart_interval": "重启周期",

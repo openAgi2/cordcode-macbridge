@@ -318,6 +318,18 @@ class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIP
         return try JSONDecoder().decode(AgentInfo.self, from: data)
     }
 
+    // MARK: - Web Push 维护（设置页 misconfigured 状态 + 显式重置）
+
+    func getWebPushStatus() async throws -> WebPushMaintenanceStatus {
+        let data = try await performRequest("/internal/webpush/status")
+        return try JSONDecoder().decode(WebPushMaintenanceStatus.self, from: data)
+    }
+
+    func resetWebPush() async throws -> WebPushResetResult {
+        let data = try await performRequest("/internal/webpush/reset", method: "POST")
+        return try JSONDecoder().decode(WebPushResetResult.self, from: data)
+    }
+
     // MARK: - Topology Monitor
 
     func getTopologySnapshot() async throws -> TopologyMonitorStatus {
@@ -330,6 +342,35 @@ class ManagementAPIClient: OverviewAPIProviding, PairingAPIProviding, DeviceAPIP
         case invalidURL
     }
 }
+
+// MARK: - Web Push 维护（remote-web push 方案 §5.1/§12.3）
+
+/// GET /internal/webpush/status 响应。status 为 go-bridge WebPushStore 的健康状态；
+/// decode 失败/未知值一律按 unknown 处理（fail-closed，不得当 healthy）。
+struct WebPushMaintenanceStatus: Codable, Equatable {
+    let status: String
+    let detail: String?
+    let subscriptionCount: Int
+    let vapidKeyFingerprint: String?
+    let lastResetAtMillis: Int64?
+    let lastResetError: String?
+}
+
+/// POST /internal/webpush/reset 成功响应。
+struct WebPushResetResult: Codable, Equatable {
+    let reset: Bool
+    let removedSubscriptions: Int
+    let status: String
+    let vapidKeyFingerprint: String?
+}
+
+/// Web push 维护 API 抽象，供维护模型测试注入。
+protocol WebPushMaintenanceAPIProviding {
+    func getWebPushStatus() async throws -> WebPushMaintenanceStatus
+    func resetWebPush() async throws -> WebPushResetResult
+}
+
+extension ManagementAPIClient: WebPushMaintenanceAPIProviding {}
 
 // MARK: - Topology Monitor（README: implementation plan v2 §2.4/§6）
 
