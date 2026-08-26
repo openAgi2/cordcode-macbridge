@@ -299,36 +299,37 @@ func TestProjectionWindowSpecSectionFrozenRulesPresent(t *testing.T) {
 	}
 }
 
-// 5. R10 freeze gate: no production (non-test) Go code references the capability or RPC
-// yet. S4B's producer PR must update this allowlist consciously in the same commit that
-// adds the producer — silent production drift fails here.
-func TestProjectionWindowNotReferencedByProductionCode(t *testing.T) {
-	var offenders []string
-	err := filepath.WalkDir(".", func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() && (entry.Name() == "testdata" || entry.Name() == "vendor" || entry.Name() == ".git") {
-			return filepath.SkipDir
-		}
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
-			return nil
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if strings.Contains(string(raw), projectionWindowCapability) || strings.Contains(string(raw), projectionWindowRPC) {
-			offenders = append(offenders, path)
-		}
-		return nil
-	})
+// 5. R10 release gate (updated by PERF-S4B when the producer landed — the pre-S4B form
+// forbade any production reference). The producer exists behind a rollout flag; the
+// frozen release ordering (client first, server flip last) is enforced statically here:
+// the production default must stay off and nothing outside tests may enable it until
+// S4C/S4D pass the release gates.
+func TestProjectionWindowProductionRolloutStaysOff(t *testing.T) {
+	if projectionWindowProductionEnabled {
+		t.Fatal("projectionWindowProductionEnabled must remain false until S4C/S4D release gates pass (frozen release ordering)")
+	}
+	raw, err := os.ReadFile("main.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(offenders) > 0 {
-		t.Fatalf("R10 freeze violated: production files reference %s/%s before S4B: %v",
-			projectionWindowCapability, projectionWindowRPC, offenders)
+	if strings.Contains(string(raw), "SetProjectionWindowEnabled") {
+		t.Fatal("main.go must not enable the projection window rollout flag yet (client-first release ordering)")
+	}
+	// Direct + relay hello paths must both route through negotiateProjectionWindowV1 so a
+	// declared-but-not-echoed connection can never call the RPC.
+	serverRaw, err := os.ReadFile("server.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(serverRaw), "negotiateProjectionWindowV1"); got < 2 {
+		t.Fatalf("server.go must define and call negotiateProjectionWindowV1 (found %d occurrences)", got)
+	}
+	mainRaw, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(mainRaw), "negotiateProjectionWindowV1") {
+		t.Fatal("relay hello path (main.go) must mirror the projection_window_v1 negotiation")
 	}
 }
 

@@ -17,6 +17,7 @@ var dispatchedRPCMethods = []string{
 	"list_permission_modes", "set_permission_mode", "set_agent_preset",
 	"create_session", "send_message", "abort_generation",
 	"get_session", "get_session_messages", "get_session_projection",
+	"get_session_projection_window",
 	"delete_session", "resume_session", "switch_model", "resolve_permission",
 	"list_sessions", "list_projects", "fetch_todos",
 	"get_workspace_diff", "get_turn_diff", "get_full_thread_diff",

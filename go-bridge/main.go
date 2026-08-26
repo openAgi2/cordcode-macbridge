@@ -469,6 +469,11 @@ func Main() {
 			server.eventPublisher.SetConnSyncV2(conn, true)
 			server.eventPublisher.SetConnProjectionEpoch(conn, hello.LastBridgeEpoch)
 		}
+		// projection_window_v1 relay path mirrors the direct hello negotiation exactly.
+		if !server.negotiateProjectionWindowV1(ack, &hello, conn) {
+			conn.SendJSON(ack)
+			return
+		}
 		conn.SendJSON(ack)
 		if ack.Recovery != nil {
 			server.emitRecoveryFrames(conn, ack.Recovery, replay)

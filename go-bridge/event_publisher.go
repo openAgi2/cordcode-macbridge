@@ -180,7 +180,7 @@ func (s *eventOutboundSink) run() {
 }
 
 // tryEnqueue 尝试非阻塞入队。失败时返回可判定的唯一原因与当时队列占用
-//（queued = 已缓冲待写帧数），供「overflowed=1」三类原因（conn_closed /
+// （queued = 已缓冲待写帧数），供「overflowed=1」三类原因（conn_closed /
 // sink_stopped / queue_full）的定点取证。
 func (s *eventOutboundSink) tryEnqueue(frame eventOutboundFrame) (ok bool, failReason string, queued int) {
 	if closed, isClosable := s.conn.(interface{ isClosed() bool }); isClosable && closed.isClosed() {
@@ -233,6 +233,7 @@ type EventPublisher struct {
 	projectionEpochMismatch  map[Connection]bool
 	readFileV2               map[Connection]bool
 	catalogCursorEpochV2     map[Connection]bool
+	projectionWindowV1       map[Connection]bool
 	nextConnectionGeneration uint64
 	connectionGenerations    map[Connection]uint64
 	nextProjectionFenceID    uint64
@@ -278,6 +279,7 @@ func NewEventPublisher(bridgeEpoch string, broadcaster ...*Broadcaster) *EventPu
 		projectionEpochMismatch: make(map[Connection]bool),
 		readFileV2:              make(map[Connection]bool),
 		catalogCursorEpochV2:    make(map[Connection]bool),
+		projectionWindowV1:      make(map[Connection]bool),
 		connectionGenerations:   make(map[Connection]uint64),
 		projectionFences:        make(map[projectionFenceKey]*projectionSnapshotFence),
 		projectionSnapshotCuts:  make(map[projectionFenceKey]int),
@@ -440,6 +442,7 @@ func (p *EventPublisher) UnregisterConnection(conn Connection) {
 	delete(p.projectionEpochMismatch, conn)
 	delete(p.readFileV2, conn)
 	delete(p.catalogCursorEpochV2, conn)
+	delete(p.projectionWindowV1, conn)
 	delete(p.connectionGenerations, conn)
 	for key := range p.projectionFences {
 		if key.conn == conn {

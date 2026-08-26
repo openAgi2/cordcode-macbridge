@@ -178,3 +178,30 @@ func (p *EventPublisher) ConnCatalogCursorEpochV2(conn Connection) bool {
 	defer p.mu.Unlock()
 	return p.catalogCursorEpochV2[conn]
 }
+
+// SetConnProjectionWindowV1 records the authenticated hello negotiation for the frozen
+// projection_window_v1 capability (docs/protocol/bridge-v1.md §Projection Window). Only
+// connections marked here may call get_session_projection_window; the handler answers
+// everyone else with protocol.capability_required. Replacement connections must negotiate
+// again; UnregisterConnection clears the mark.
+func (p *EventPublisher) SetConnProjectionWindowV1(conn Connection, enabled bool) {
+	if p == nil || conn == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if enabled {
+		p.projectionWindowV1[conn] = true
+	} else {
+		delete(p.projectionWindowV1, conn)
+	}
+}
+
+func (p *EventPublisher) ConnProjectionWindowV1(conn Connection) bool {
+	if p == nil || conn == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.projectionWindowV1[conn]
+}

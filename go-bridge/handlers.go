@@ -1342,6 +1342,8 @@ func (h *Handlers) dispatchRPC(conn Connection, msg WireMessage, agent core.Agen
 		h.handleGetSessionMessages(conn, msg, agent)
 	case "get_session_projection":
 		h.handleGetSessionProjection(conn, msg, agent)
+	case "get_session_projection_window":
+		h.handleGetSessionProjectionWindow(conn, msg, agent)
 	case "delete_session":
 		h.handleDeleteSession(conn, msg, agent)
 	case "resume_session":

@@ -195,22 +195,23 @@ func (c *Conn) CloseWithControl(code int, reason string) error {
 
 // Server manages WebSocket connections.
 type Server struct {
-	authMiddleware       *AuthMiddleware
-	handlers             *Handlers
-	activeConns          *ActiveConnRegistry
-	bridgeID             string
-	displayName          string
-	runtimeVersion       string
-	localURL             string
-	remoteURL            string
-	remoteURLs           []string
-	localCandidateURLs   []string
-	connectionPolicy     ConnectionPolicy
-	detectionCfg         *AgentDetectionConfig
-	bridgeEpoch          string
-	eventPublisher       *EventPublisher
-	recoveryEnabled      bool
-	sessionSyncV2Enabled bool
+	authMiddleware          *AuthMiddleware
+	handlers                *Handlers
+	activeConns             *ActiveConnRegistry
+	bridgeID                string
+	displayName             string
+	runtimeVersion          string
+	localURL                string
+	remoteURL               string
+	remoteURLs              []string
+	localCandidateURLs      []string
+	connectionPolicy        ConnectionPolicy
+	detectionCfg            *AgentDetectionConfig
+	bridgeEpoch             string
+	eventPublisher          *EventPublisher
+	recoveryEnabled         bool
+	sessionSyncV2Enabled    bool
+	projectionWindowEnabled bool
 }
 
 // K3 enables the Codex-only shadow data plane. The client still owns UI with legacy history;
@@ -224,6 +225,54 @@ func (s *Server) SetRecoveryEnabled(enabled bool) { s.recoveryEnabled = enabled 
 // capabilities, hello_ack echoes capabilities["session_sync_v2"]=true. See
 // docs/protocol/bridge-v1.md「Session Projection Stream」.
 func (s *Server) SetSessionSyncV2Enabled(enabled bool) { s.sessionSyncV2Enabled = enabled }
+
+// projectionWindowProductionEnabled stays false until PERF-S4C/S4D ship the client replica
+// and the release gates pass (frozen release ordering: client first, server flip last).
+// Tests enable the producer through SetProjectionWindowEnabled; production must not.
+const projectionWindowProductionEnabled = false
+
+// SetProjectionWindowEnabled gates the projection_window_v1 capability advertisement
+// (docs/protocol/bridge-v1.md §Projection Window). When true and the client declares
+// projection_window_v1 (plus its session_sync_v2 prerequisite), hello_ack echoes
+// capabilities["projection_window_v1"]=true and the connection may call
+// get_session_projection_window.
+func (s *Server) SetProjectionWindowEnabled(enabled bool) { s.projectionWindowEnabled = enabled }
+
+// helloSupportsProjectionWindowV1 returns true when the client advertised
+// projection_window_v1 in hello.
+func helloSupportsProjectionWindowV1(hello *HelloMessage) bool {
+	for _, capability := range hello.Capabilities {
+		if capability == "projection_window_v1" {
+			return true
+		}
+	}
+	return false
+}
+
+// negotiateProjectionWindowV1 applies the frozen hello rules for projection_window_v1 on
+// both the direct and relay hello paths. Returns false when hello must fail: the
+// capability REQUIRES session_sync_v2 (windows are a projection-surface feature), and a
+// declaration without it is protocol.invalid_capabilities.
+func (s *Server) negotiateProjectionWindowV1(ack *HelloAckMessage, hello *HelloMessage, conn Connection) bool {
+	if !helloSupportsProjectionWindowV1(hello) {
+		return true
+	}
+	if !helloSupportsSessionSyncV2(hello) {
+		retryable := false
+		ack.Ok = false
+		ack.Error = &WireError{
+			Code:      "protocol.invalid_capabilities",
+			Message:   "projection_window_v1 requires session_sync_v2",
+			Retryable: &retryable,
+		}
+		return false
+	}
+	if s.projectionWindowEnabled && ack.Ok {
+		ack.Capabilities["projection_window_v1"] = true
+		s.eventPublisher.SetConnProjectionWindowV1(conn, true)
+	}
+	return true
+}
 
 // helloSupportsSessionSyncV2 returns true when the client advertised the
 // session_sync_v2 capability in hello (same shape as helloSupportsRecovery).
@@ -599,6 +648,12 @@ func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage
 		advertiseSessionSyncV2Backend(ack.Backends)
 		s.eventPublisher.SetConnSyncV2(connection, true)
 		s.eventPublisher.SetConnProjectionEpoch(connection, hello.LastBridgeEpoch)
+	}
+	// projection_window_v1 (frozen §Projection Window): prerequisite validation may fail
+	// hello; echo + per-conn mark only when the rollout flag is enabled.
+	if !s.negotiateProjectionWindowV1(ack, &hello, connection) {
+		conn.SendJSON(ack)
+		return
 	}
 	if ack.Ok && helloSupportsReadFileV2(&hello) {
 		ack.Capabilities["read_file_v2"] = true
