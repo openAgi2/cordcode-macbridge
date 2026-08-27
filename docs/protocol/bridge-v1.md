@@ -438,9 +438,11 @@ The v1 and v2 paths MUST NOT be mixed for the same interaction, and v2 MUST NOT 
 - `resolve_user_input` is the backend-neutral bridge RPC for answering/rejecting a v2
   interaction. Payload: `{ interactionId, clientActionId, action: "answer"|"reject",
   answers?: [{ questionId, values: [{ kind: "option"|"text", optionId?, text? }] }] }`. MacBridge
-  routes it to the backend-specific `UserInputResponder` (Codex app-server JSON-RPC
-  `resolveUserInput`/`interrupt`, or Claude `control_response` allow with `updatedInput.answers` /
-  deny). It returns `{ interactionId, outcome: "accepted"|"already_resolved"|"in_progress",
+  routes it to the backend-specific `UserInputResponder` (the retired legacy Codex backend used
+  app-server JSON-RPC `resolveUserInput`/`interrupt`; the current `codex-web` backend replies to
+  the original server request via `RespondServerRequest` with an `answers` payload — see its
+  backend section; Claude uses `control_response` allow with `updatedInput.answers` / deny). It
+  returns `{ interactionId, outcome: "accepted"|"already_resolved"|"in_progress",
   currentStatus, headRev }` or a
   `UserInputError{ code, message }` (`interaction_not_found`, `invalid_answer_shape`,
   `backend_response_failed`, `session_not_active`). `outcome/currentStatus` acknowledges the action
