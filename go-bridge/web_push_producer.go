@@ -113,7 +113,6 @@ func webPushCompletedTurnPreview(kernel *ProjectionKernel, backendID, sessionID,
 	return webPushPreviewFromText(builder.String())
 }
 
-
 // pushIntentForRelayTerminal 为 agent relay loop（ingest owner）派生 terminal/permission
 // 事件的 PushIntent。sessionTitle 来自 bridge 内 authoritative 标题缓存（设计 delta
 // §2.2；可为空）。返回 nil = 不发送（样本门未过 / identity 缺失 / 事件不在清单）。
@@ -138,7 +137,17 @@ func pushIntentForRelayTerminal(kernel *ProjectionKernel, backendID, sessionID, 
 			})
 			return nil
 		}
-		turnID := webPushActiveTurnID(kernel, backendID, sessionID)
+		// 终态事件自身的 turnId 优先：claude batch 事务在 flush 前已结算 turn，
+		// kernel active turn 清空（2026-08-27 19:38 生产取证：ActiveTurnID 返回
+		// 空 → fail-closed 丢通知）。事件未带 turnId 的 backend 回退 kernel
+		// active turn（位点 1 既有行为）。
+		turnID := ""
+		if m, ok := data.(map[string]interface{}); ok {
+			turnID, _ = m["turnId"].(string)
+		}
+		if turnID == "" {
+			turnID = webPushActiveTurnID(kernel, backendID, sessionID)
+		}
 		if turnID == "" {
 			return nil
 		}

@@ -212,14 +212,20 @@ func TestClaudeBatchEndTerminalCarriesFullPreview(t *testing.T) {
 	if turnText.preview() != "落霞与孤鹜齐飞，天水共长天一色" {
 		t.Fatalf("accumulator preview = %q", turnText.preview())
 	}
-	// 条件满足（预览齐备）→ flush，携带累积预览（镜像 relay loop 的条件 flush）
+	// 条件满足（预览齐备）→ flush，携带累积预览（镜像 relay loop flushHeldTerminals
+	// 的按 turn 去重：thinking 行与 text 行同 turn 只发布首个）
+	published := map[string]bool{}
 	for _, ht := range held {
+		if published[ht.turnID] {
+			continue
+		}
+		published[ht.turnID] = true
 		handlers.sendSessionEventWithPushIntentPreview(ht.sessionID, ht.backendID, "turn_completed", ht.data, turnText.preview())
 	}
 
 	got := pipeline.Drain()
 	if len(got) != 1 {
-		t.Fatalf("candidates = %d, want 1 (second terminal is no_change, deduped by kernel)", len(got))
+		t.Fatalf("candidates = %d, want 1 (per-turn dedup at flush)", len(got))
 	}
 	if got[0].ContentPreview != "落霞与孤鹜齐飞，天水共长天一色" {
 		t.Fatalf("preview = %q (terminal fired before text landed?)", got[0].ContentPreview)
@@ -314,5 +320,33 @@ func TestDispatcherPreviewReaderRefreshesEmptyIntentPreview(t *testing.T) {
 	}
 	if decoded.Notification.Body != "Mac 上的会话已完成，点击查看结果" {
 		t.Fatalf("fallback body = %q", decoded.Notification.Body)
+	}
+}
+
+// 2026-08-27 19:38 生产取证回归：claude batch 事务在 flush 前已结算 turn，kernel
+// active turn 清空（ActiveTurnID=""）。intent 必须从终态事件自身的 turnId 取
+// anchor/notificationKey，否则 fail-closed 丢通知。
+func TestPushIntentPrefersTerminalEventTurnIDAfterSettle(t *testing.T) {
+	enableKindGateForTest(t, WebPushKindCompletion)
+
+	intent := pushIntentForRelayTerminal(nil, "claude", "s-settled", "turn_completed",
+		map[string]interface{}{"turnId": "t-9", "done": true}, "会话标题", "正文预览")
+	if intent == nil {
+		t.Fatalf("intent must derive turnID from terminal event data after kernel settle, got nil")
+	}
+	if intent.NotificationKey != "claude|s-settled|t-9|completed" {
+		t.Fatalf("key = %q, want claude|s-settled|t-9|completed", intent.NotificationKey)
+	}
+	if intent.AnchorID != "t-9" {
+		t.Fatalf("anchor = %q, want t-9", intent.AnchorID)
+	}
+	if intent.ContentPreview != "正文预览" {
+		t.Fatalf("preview = %q, want 正文预览", intent.ContentPreview)
+	}
+
+	// 事件无 turnId 且 kernel 不可用 → fail-closed nil（不编造 anchor）。
+	if intent := pushIntentForRelayTerminal(nil, "claude", "s-settled", "turn_completed",
+		map[string]interface{}{"done": true}, "会话标题", ""); intent != nil {
+		t.Fatalf("no turnId anywhere must yield nil intent, got %+v", intent)
 	}
 }

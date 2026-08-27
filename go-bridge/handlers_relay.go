@@ -782,7 +782,14 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 	heldIdleTicks := 0        // 挂起期间无新增正文的 tick 数（text-less turn 的兜底收口）
 	lastHeldTextLen := 0
 	flushHeldTerminals := func() {
+		publishedTurns := make(map[string]bool)
 		for _, ht := range heldTerminals {
+			// 同一 turn 的多行终态（thinking 行与 text 行都带 end_turn）只发布首个：
+			// notificationKey 相同，后续发布只产生重复 intent 与重复广播。
+			if publishedTurns[ht.turnID] {
+				continue
+			}
+			publishedTurns[ht.turnID] = true
 			h.sendSessionEventWithPushIntentPreview(ht.sessionID, ht.backendID, "turn_completed", ht.data, turnText.preview())
 			h.broadcastIdleState(ht.sessionID, ht.backendID)
 			slog.Info("go-bridge: claudeSessionFileRelay turn completed, keeping watch while process live", "sessionID", ht.sessionID, "backendID", ht.backendID, "pid", ht.pid, "turnId", ht.turnID)
@@ -1157,6 +1164,21 @@ func (h *Handlers) applyClaudeLiveSourceRecord(
 	}
 	delivered := 0
 	if result.Status == ClaudeSourceBatchAcceptedProjection {
+		// turn_completed 与 hydrating 分支同构挂起：batch 事务已把 raw frames
+		// 双发（deliver-only），web push 意图由 tick 顶 flush 在正文预览齐备后
+		// 统一声明（位点 3 唯一终态生产者——位点 1 已对 claude 让位）。不挂起
+		// 则非 hydrate 窗口的 turn 完全无人声明 intent，通知丢失（2026-08-27
+		// 19:38 生产取证）。
+		for _, ev := range batch.Events {
+			if ev.Event != "turn_completed" {
+				continue
+			}
+			turnID, _ := ev.Data["turnId"].(string)
+			*held = append(*held, claudeHeldTerminalEvent{
+				sessionID: sessionID, backendID: backendID, turnID: turnID,
+				data: ev.Data, pid: cachedPID,
+			})
+		}
 		// Sole projection delivery: flush the authoritative patch the transaction just advanced and
 		// deliver it on the single projection stream. Never sendSessionEvent the content events —
 		// that would reduce them a second time and double-write the timeline (guardrail #3).
