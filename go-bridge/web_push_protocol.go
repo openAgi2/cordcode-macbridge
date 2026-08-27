@@ -88,19 +88,28 @@ type WebPushAnchorType struct {
 	ID   string `json:"id"`
 }
 
-// buildWebPushNotificationText 组合通知文案（设计 delta §2.1，监工指令 1 号）：
-// Title = 来源常量 + authoritative session 标题（清洗/截断后；缺失时诚实回退到
-// 类别文案，不编造标题）；Body 保持固定隐私文案，不读取任何 agent 文本。
-// 字段路径未由真实样本证明的 kind 不能启用。
-func buildWebPushNotificationText(kind WebPushNotificationKind, sessionTitle string) (title, body string) {
+// buildWebPushNotificationText 组合通知文案（设计 delta §2.1，监工指令 1 号；
+// owner 2026-08-27 更新）：Title = 来源常量 + authoritative session 标题（清洗/
+// 截断后；缺失时诚实回退到类别文案，不编造标题）；completion 的 Body 为该 turn
+// 的真实回复预览（authoritative kernel text parts，对齐 Antigravity 通知样式），
+// 无可预览文本时回退固定文案；其余 kind 保持固定文案。预览在显示边界再过一次
+// 控制字符清洗。字段路径未由真实样本证明的 kind 不能启用。
+func buildWebPushNotificationText(kind WebPushNotificationKind, sessionTitle, contentPreview string) (title, body string) {
 	const source = "CordCode"
 	cleaned := webPushSanitizeSessionTitle(sessionTitle)
+	completionFallback := "Mac 上的会话已完成，点击查看结果"
+	preview := webPushSanitizePreview(contentPreview)
 	switch kind {
 	case WebPushKindCompletion:
-		if cleaned != "" {
-			return source + " · " + cleaned, "Mac 上的会话已完成，点击查看结果"
+		if preview != "" {
+			body = preview
+		} else {
+			body = completionFallback
 		}
-		return source + " · 任务已完成", "Mac 上的会话已完成，点击查看结果"
+		if cleaned != "" {
+			return source + " · " + cleaned, body
+		}
+		return source + " · 任务已完成", body
 	case WebPushKindPermission:
 		if cleaned != "" {
 			return source + " · " + cleaned, "Mac 上的会话需要审批，点击处理"

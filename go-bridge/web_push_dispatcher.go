@@ -163,7 +163,7 @@ func (d *WebPushDispatcher) deliverCandidate(candidate WebPushCandidate) {
 }
 
 func (d *WebPushDispatcher) buildPayload(candidate WebPushCandidate) ([]byte, int, webpush.Urgency, error) {
-	title, body := buildWebPushNotificationText(candidate.Kind, candidate.SessionTitle)
+	title, body := buildWebPushNotificationText(candidate.Kind, candidate.SessionTitle, candidate.ContentPreview)
 	payload := WebPushPayloadV1{
 		SchemaVersion: WebPushSchemaVersion,
 		Notification: WebPushNotificationPayload{

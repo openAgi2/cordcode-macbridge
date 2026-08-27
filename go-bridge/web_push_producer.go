@@ -1,5 +1,10 @@
 package gobridge
 
+import (
+	"strings"
+	"unicode/utf8"
+)
+
 // web_push_producer.go — PushIntent producer 位点与样本门（web push 方案 §8.1）。
 //
 // 位点清单（唯一两处允许设置 PushIntent 的 producer）：
@@ -47,6 +52,58 @@ func webPushActiveTurnID(kernel *ProjectionKernel, backendID, sessionID string) 
 	return kernel.ActiveTurnID(backendID, sessionID)
 }
 
+// webPushPreviewMaxRunes 是完成通知正文预览的截断上限。iOS 通知横幅正文约显示
+// 两行；更长内容无收益（owner 2026-08-27 决策对齐 Antigravity：正文为真实回复
+// 内容首段预览）。
+const webPushPreviewMaxRunes = 100
+
+// webPushCompletedTurnPreview 从 authoritative kernel 读取已完成 turn 的助手文本
+// 预览，作为完成通知正文（owner 2026-08-27 决策：显示真实回复内容，对齐
+// Antigravity；此前为固定隐私文案）。只取 Type=="text" 的 parts——reasoning/
+// tool/file/subagent 一律不进通知；空白折叠为单空格，截断 webPushPreviewMaxRunes。
+// turn 未结算时 text parts 可能仍是 progress presentation，全文已在，直接使用。
+// kernel 未接线 / turn 不存在 / 无文本 → 空串，调用方回退固定文案，不编造内容。
+// 只读 reducer 快照，不改状态；结果只进加密 payload，不落日志。
+func webPushCompletedTurnPreview(kernel *ProjectionKernel, backendID, sessionID, turnID string) string {
+	if kernel == nil || turnID == "" {
+		return ""
+	}
+	projection, ok := kernel.reducer.Snapshot(backendID, sessionID)
+	if !ok {
+		return ""
+	}
+	var turn *TurnProjection
+	for i := range projection.Turns {
+		if projection.Turns[i].TurnID == turnID {
+			turn = &projection.Turns[i]
+			break
+		}
+	}
+	if turn == nil || turn.Assistant == nil {
+		return ""
+	}
+	var builder strings.Builder
+	for _, part := range turn.Assistant.Parts {
+		if part.Type != "text" || part.Text == "" {
+			continue
+		}
+		if builder.Len() > 0 {
+			builder.WriteByte(' ')
+		}
+		builder.WriteString(part.Text)
+		if builder.Len() > webPushPreviewMaxRunes*utf8.UTFMax {
+			break
+		}
+	}
+	preview := strings.Join(strings.Fields(builder.String()), " ")
+	runes := []rune(preview)
+	if len(runes) > webPushPreviewMaxRunes {
+		return string(runes[:webPushPreviewMaxRunes]) + "…"
+	}
+	return preview
+}
+
+
 // pushIntentForRelayTerminal 为 agent relay loop（ingest owner）派生 terminal/permission
 // 事件的 PushIntent。sessionTitle 来自 bridge 内 authoritative 标题缓存（设计 delta
 // §2.2；可为空）。返回 nil = 不发送（样本门未过 / identity 缺失 / 事件不在清单）。
@@ -77,6 +134,7 @@ func pushIntentForRelayTerminal(kernel *ProjectionKernel, backendID, sessionID, 
 			AnchorKind:      "turn",
 			AnchorID:        turnID,
 			SessionTitle:    title,
+			ContentPreview:  webPushCompletedTurnPreview(kernel, backendID, sessionID, turnID),
 		}
 	case "permission_request":
 		requestID := ""

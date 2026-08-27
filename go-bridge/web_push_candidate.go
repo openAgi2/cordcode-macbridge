@@ -28,11 +28,17 @@ type PushIntent struct {
 	AnchorKind      string
 	AnchorID        string
 	// SessionTitle 是清洗/截断后的 authoritative catalog 标题（设计 delta §2.2）；
-	// 空串 = 缓存未命中，通知按无标题回退。随 candidate 小拷贝流转，不含正文。
+	// 空串 = 缓存未命中，通知按无标题回退。
 	SessionTitle string
+	// ContentPreview 是完成通知正文用的真实回复预览（owner 2026-08-27 决策，对齐
+	// Antigravity）：authoritative kernel 该 turn 的 assistant text parts，空白折叠、
+	// 截断 ≤100 runes。空串 = 无可预览文本，正文回退固定文案。只进加密 payload，
+	// 不落日志。
+	ContentPreview string
 }
 
-// WebPushCandidate 是交给 dispatcher 的不可变小对象（不含正文/密钥材料）。
+// WebPushCandidate 是交给 dispatcher 的不可变小对象（不含密钥材料；正文仅含
+// ≤100 runes 的完成预览，见 PushIntent.ContentPreview）。
 type WebPushCandidate struct {
 	BridgeID        string
 	BackendID       string
@@ -43,6 +49,7 @@ type WebPushCandidate struct {
 	AnchorKind      string
 	AnchorID        string
 	SessionTitle    string
+	ContentPreview  string
 	ReceivedAt      int64
 }
 

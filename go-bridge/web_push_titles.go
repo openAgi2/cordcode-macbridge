@@ -86,3 +86,17 @@ func webPushSanitizeSessionTitle(s string) string {
 	}
 	return cleaned
 }
+
+// webPushSanitizePreview 剥控制字符 + TrimSpace，用于通知正文预览的显示边界清洗。
+// 不截断——长度上限在提取处（webPushPreviewMaxRunes）保证。清洗后为空 → ""
+// （视为缺失，调用方回退固定文案）。
+func webPushSanitizePreview(s string) string {
+	var builder strings.Builder
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			continue
+		}
+		builder.WriteRune(r)
+	}
+	return strings.TrimSpace(builder.String())
+}

@@ -89,15 +89,20 @@ func TestTitleCacheBounded(t *testing.T) {
 }
 
 // 设计 delta §2.1 —— 通知内容模型：authoritative 标题 + 无标题诚实回退。
+// owner 2026-08-27 更新：completion 正文优先真实回复预览，缺失回退固定文案。
 func TestBuildWebPushNotificationTextWithSessionTitle(t *testing.T) {
-	title, body := buildWebPushNotificationText(WebPushKindCompletion, "修复登录问题")
+	title, body := buildWebPushNotificationText(WebPushKindCompletion, "修复登录问题", "")
 	if title != "CordCode · 修复登录问题" {
 		t.Fatalf("completion title = %q", title)
 	}
 	if body != "Mac 上的会话已完成，点击查看结果" {
-		t.Fatalf("completion body = %q", body)
+		t.Fatalf("completion fallback body = %q", body)
 	}
-	title, body = buildWebPushNotificationText(WebPushKindPermission, "  ")
+	title, body = buildWebPushNotificationText(WebPushKindCompletion, "修复登录问题", "已完成登录修复，共改动 3 个文件")
+	if body != "已完成登录修复，共改动 3 个文件" {
+		t.Fatalf("completion preview body = %q", body)
+	}
+	title, body = buildWebPushNotificationText(WebPushKindPermission, "  ", "")
 	if title != "CordCode · 需要审批" {
 		t.Fatalf("permission fallback title = %q", title)
 	}
@@ -106,7 +111,7 @@ func TestBuildWebPushNotificationTextWithSessionTitle(t *testing.T) {
 	}
 	// 标题进入前先清洗截断——通知 Title 组装结果必须落在 SW 端 200 上限内。
 	long := strings.Repeat("标", 300)
-	title, _ = buildWebPushNotificationText(WebPushKindCompletion, long)
+	title, _ = buildWebPushNotificationText(WebPushKindCompletion, long, "")
 	if len([]rune(title)) > 200 {
 		t.Fatalf("composed title exceeds SW limit: %d runes", len([]rune(title)))
 	}
