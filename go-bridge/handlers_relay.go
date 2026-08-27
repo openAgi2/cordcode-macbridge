@@ -2757,7 +2757,19 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 				// web push §8.1 producer 位点 1：agent relay loop 是该 session 的
 				// ingest owner（与 passive 侧经 agentRelayRunning 互斥），terminal/
 				// permission 事件在此声明意图；样本门未过时恒为 nil。
-				PushIntent: pushIntentForRelayTerminal(h.projectionKernel, backendID, sessionID, eventName, data, h.webPushTitles.get(backendID, sessionID), ""),
+				// claude completion 例外（2026-08-27 19:32 生产取证）：claude file
+				// relay watcher 活跃时，它把终态挂起到正文预览齐备再经位点 3 发布；
+				// 此处抢先声明空 intent 会在 ledger 上占住 notificationKey，把带
+				// 预览的 flush 去重掉（通知正文退固定文案）。watcher 不活跃时位点 1
+				// 仍是唯一生产者，不让位。
+				PushIntent: func() *PushIntent {
+					if (backendID == "claude" || backendID == "claudecode") &&
+						eventName == "turn_completed" &&
+						h.relayKindIs(sessionID, relayKindClaudeFile) {
+						return nil
+					}
+					return pushIntentForRelayTerminal(h.projectionKernel, backendID, sessionID, eventName, data, h.webPushTitles.get(backendID, sessionID), "")
+				}(),
 			})
 
 			// 持续刷新 lastEventAt，防止 idle cleanup 在长 turn 期间误杀 session。
