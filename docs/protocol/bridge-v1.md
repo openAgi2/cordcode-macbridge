@@ -451,8 +451,12 @@ The v1 and v2 paths MUST NOT be mixed for the same interaction, and v2 MUST NOT 
   real Other/custom-result path; `multiSelect` maps to `single`/`multiple`; empty
   options are malformed (not normalized to text); each question is `required=true`, `isSecret=false`;
   duplicate question text within one interaction is `invalid_backend_request` (it cannot be an
-  unambiguous `answers` map key). Codex has no verified reject path (`canReject=false`); Claude has
-  a real deny `control_response` (`canReject=true`).
+  unambiguous `answers` map key). Reject capability is per-interaction projected state, not a
+  backend constant: the retired legacy Codex backend had no verified reject path
+  (`canReject=false`); Claude has a real deny `control_response` (`canReject=true`); the current
+  `codex-web` backend also projects `canReject=true` (see its backend section). Clients render
+  skip/reject strictly from the projected `canRespond`/`canReject` flags, never from backend-id
+  hardcodes.
 - Projection Kernel (design §10): one `user_input` part per `interactionId`, upserted in place
   (never a second "answered" card); `execution.phase=requires_action` while any active-turn
   `user_input` part is `pending`; resolved updates the part in place and reverts phase per active
@@ -689,8 +693,12 @@ Wire behavior:
   because the agent implements the session-level responder used for externally originated turns.
 - Official `item/tool/requestUserInput` batches project through `structured_user_input_v1`.
   Each question contains two or three official options; the official `isOther` option is the free
-  text path. Answers return as the official question-id-to-answer map. The backend has no verified
-  reject response, so `canReject=false` and reject attempts fail closed.
+  text path. Answers return as the official question-id-to-answer map. The official wire has no
+  separate reject verb: skip is answered upstream as an empty `answers` response
+  (`ToolRequestUserInputResponse{answers:{}}`; the official client-error fallback is also empty
+  answers — app-server `bespoke_event_handling.rs`). The adapter therefore projects
+  `canReject=true` and maps `resolve_user_input action:"reject"` onto that empty-answers skip
+  (2026-08-25 parity with the Mac panel skip action).
 - Models and supported reasoning efforts come from the official model catalog. Provider
   configuration is read-only unless an official write surface is separately proven; legacy Codex
   provider allowlists, default `xhigh`, rollout history, and permission-mode catalogs are not
@@ -1433,7 +1441,7 @@ Part fields (all lowerCamelCase, optional unless noted):
 | `status: string` | `pending` \| `answered` \| `rejected` \| `auto_resolved` \| `unavailable` \| `failed`. |
 | `questions` | Canonical question array (see Semantic Notes §Structured user input v2). Absent on `resolved`. |
 | `canRespond: boolean` | Whether the client may answer (`false` for `failed`/`unavailable`). |
-| `canReject: boolean` | Whether the client may reject (Claude `true`, Codex `false`). |
+| `canReject: boolean` | Whether the client may reject this interaction (projected per backend/interaction — e.g. Claude `true`; current `codex-web` `true` via empty-answers skip; retired legacy Codex `false`). |
 | `expiresAt?: number` | epoch-ms display hint; clients MUST NOT use a local timer to flip status. |
 | `resolvedAt?: number` | epoch-ms when the interaction reached a terminal status. |
 | `resolutionSource?: string` | `ios` \| `mac` \| `other_client` \| `backend`. |
