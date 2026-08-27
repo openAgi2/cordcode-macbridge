@@ -305,7 +305,9 @@ func (h *Handlers) grokLeaderSessionRelayLoop(sessionID, backendID string, sub c
 		} else if eventName == "turn_started" {
 			h.sessions.markRunning(sessionID)
 		}
-		h.sendSessionEvent(sessionID, backendID, eventName, data)
+		// web push §8.1 producer 位点 3：该 leader relay 是 ingest owner；非终态事件
+		// pushIntentForRelayTerminal 恒为 nil（fail closed），不影响普通事件。
+		h.sendSessionEventWithPushIntent(sessionID, backendID, eventName, data)
 	}
 }
 
@@ -394,7 +396,7 @@ func (h *Handlers) codexSessionFileRelayLoop(sessionID string, conn Connection, 
 	state, currentTurnID := h.detectCodexTranscriptTask(sessPath)
 	switch state {
 	case "idle":
-		h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"turnId": currentTurnID, "done": true, "reason": "task_complete"})
+		h.sendSessionEventWithPushIntent(sessionID, backendID, "turn_completed", map[string]interface{}{"turnId": currentTurnID, "done": true, "reason": "task_complete"})
 		h.broadcastIdleState(sessionID, backendID)
 		// Phase 0 修复：idle 不再 return。此前 return 导致 relay 连 watch loop 都不进，
 		// 下一轮 task_started 永远到不了客户端（只能等下次 get_session_messages 顺带看到）。
@@ -498,8 +500,8 @@ func (h *Handlers) codexSessionFileRelayLoop(sessionID string, conn Connection, 
 				if completedTurnID == "" {
 					completedTurnID = currentTurnID
 				}
-				slog.Info("go-bridge: codexSessionFileRelay EMIT turn_completed", "sessionID", sessionID)
-				h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"turnId": completedTurnID, "done": true, "reason": "task_complete"})
+			slog.Info("go-bridge: codexSessionFileRelay EMIT turn_completed", "sessionID", sessionID)
+			h.sendSessionEventWithPushIntent(sessionID, backendID, "turn_completed", map[string]interface{}{"turnId": completedTurnID, "done": true, "reason": "task_complete"})
 				h.broadcastIdleState(sessionID, backendID)
 				h.recordPendingNotification(sessionID, backendID, "completed", "task_complete")
 				currentTurnID = ""
@@ -746,7 +748,7 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 			h.broadcastIdleState(sessionID, backendID)
 			slog.Info("go-bridge: claudeSessionFileRelay initial idle but process live; watching", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
 		case initialEntry.entryType == "user" && initialEntry.interrupt:
-			h.sendSessionEvent(sessionID, backendID, "turn_completed", map[string]interface{}{"turnId": currentTurnID, "done": true, "reason": "user_interrupt"})
+			h.sendSessionEventWithPushIntent(sessionID, backendID, "turn_completed", map[string]interface{}{"turnId": currentTurnID, "done": true, "reason": "user_interrupt"})
 			h.broadcastIdleState(sessionID, backendID)
 			slog.Info("go-bridge: claudeSessionFileRelay initial interrupt marker with live process; watching", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
 		case initialEntry.entryType == "user":
@@ -1152,7 +1154,7 @@ func (h *Handlers) deliverClaudeLegacyRow(
 			h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "running"})
 			*runningObserved = true
 		case "turn_completed":
-			h.sendSessionEvent(sessionID, backendID, "turn_completed", ev.Data)
+			h.sendSessionEventWithPushIntent(sessionID, backendID, "turn_completed", ev.Data)
 			h.broadcastIdleState(sessionID, backendID)
 			*runningObserved = false
 			slog.Info("go-bridge: claudeSessionFileRelay turn completed, keeping watch while process live", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID, "turnId", *currentTurnID)

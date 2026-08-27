@@ -2892,6 +2892,29 @@ func (h *Handlers) sendSessionEvent(sessionID, backendID, eventName string, data
 	})
 }
 
+// sendSessionEventWithPushIntent 是 sendSessionEvent 的终态变体（web push §8.1 producer
+// 位点 3）：claude/codex 等 session file relay 的 turn_completed/turn_error 逐行终态投递
+// 是这些 session 的事实 ingest owner——agent relay loop（位点 1）没有消费同一终态
+// （claude web turn 的 turn_completed 不经 relayEvents），passive 泵（位点 2）经
+// passiveFeedAllowed 互斥不会补投。2026-08-27 生产取证：真实 claude web turn 完成后
+// 无任何 dispatch，正是因为该路径不声明 intent。样本门未过时
+// pushIntentForRelayTerminal 恒为 nil（fail closed）。
+func (h *Handlers) sendSessionEventWithPushIntent(sessionID, backendID, eventName string, data interface{}) {
+	h.mu.Lock()
+	dir := h.sessions.directoryForSession(sessionID)
+	h.mu.Unlock()
+	h.publishEvent(LogicalEvent{
+		SessionID: sessionID,
+		BackendID: backendID,
+		Event:     eventName,
+		Data:      data,
+		Directory: dir,
+		Broadcast: true,
+		Offline:   IsDurableMilestone(eventName),
+		PushIntent: pushIntentForRelayTerminal(h.projectionKernel, backendID, sessionID, eventName, data, h.webPushTitles.get(backendID, sessionID)),
+	})
+}
+
 // broadcastIdleState 向订阅者推送 session_state_changed: idle。
 func (h *Handlers) broadcastIdleState(sessionID, backendID string) {
 	h.mu.Lock()
