@@ -38,8 +38,10 @@ import (
 
 const (
 	// webPushDefaultSubscriber 是 VAPID JWT sub 的固定项目联系地址（可用
-	// -web-push-subscriber 覆盖）。永不写入日志。
-	webPushDefaultSubscriber = "mailto:noreply@byteseek.uk"
+	// -web-push-subscriber 覆盖）。注意：必须是裸地址——webpush-go 生成 JWT 时
+	// 自行加 "mailto:" 前缀；带上前缀会产生 mailto:mailto:… 并被 Apple 端点
+	// 按 RFC 8292 拒绝（2026-08-27 生产 403 取证）。永不写入日志。
+	webPushDefaultSubscriber = "noreply@byteseek.uk"
 
 	webPushDispatcherWorkers = 2
 
@@ -82,6 +84,11 @@ type WebPushDispatcher struct {
 func NewWebPushDispatcher(store *WebPushStore, pipeline *WebPushCandidatePipeline, cfg WebPushDispatcherConfig) *WebPushDispatcher {
 	if cfg.Subscriber == "" {
 		cfg.Subscriber = webPushDefaultSubscriber
+	} else {
+		// webpush-go 在拼 VAPID JWT 时自行加 "mailto:" 前缀（vapid.go:78）；这里必须
+		// 传裸地址。2026-08-27 生产取证：sub=mailto:mailto:… 时 Apple 端点严格按
+		// RFC 8292 拒绝 403，Google 宽容返回 201——外部传入值防御性去前缀。
+		cfg.Subscriber = strings.TrimPrefix(cfg.Subscriber, "mailto:")
 	}
 	if cfg.Workers <= 0 {
 		cfg.Workers = webPushDispatcherWorkers
