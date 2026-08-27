@@ -2900,6 +2900,12 @@ func (h *Handlers) sendSessionEvent(sessionID, backendID, eventName string, data
 // 无任何 dispatch，正是因为该路径不声明 intent。样本门未过时
 // pushIntentForRelayTerminal 恒为 nil（fail closed）。
 func (h *Handlers) sendSessionEventWithPushIntent(sessionID, backendID, eventName string, data interface{}) {
+	h.sendSessionEventWithPushIntentPreview(sessionID, backendID, eventName, data, "")
+}
+
+// sendSessionEventWithPushIntentPreview 在 sendSessionEventWithPushIntent 基础上携带
+// 完成正文预览覆盖（claude relay 循环累积器提供，见 pushIntentForRelayTerminal）。
+func (h *Handlers) sendSessionEventWithPushIntentPreview(sessionID, backendID, eventName string, data interface{}, previewOverride string) {
 	h.mu.Lock()
 	dir := h.sessions.directoryForSession(sessionID)
 	h.mu.Unlock()
@@ -2911,7 +2917,7 @@ func (h *Handlers) sendSessionEventWithPushIntent(sessionID, backendID, eventNam
 		Directory: dir,
 		Broadcast: true,
 		Offline:   IsDurableMilestone(eventName),
-		PushIntent: pushIntentForRelayTerminal(h.projectionKernel, backendID, sessionID, eventName, data, h.webPushTitles.get(backendID, sessionID)),
+		PushIntent: pushIntentForRelayTerminal(h.projectionKernel, backendID, sessionID, eventName, data, h.webPushTitles.get(backendID, sessionID), previewOverride),
 	})
 }
 

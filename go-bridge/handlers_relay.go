@@ -14,6 +14,7 @@ import (
 	"github.com/openAgi2/cordcode-macbridge/agent/claudecode"
 	"github.com/openAgi2/cordcode-macbridge/agent/codex"
 	"github.com/openAgi2/cordcode-macbridge/core"
+	"unicode/utf8"
 )
 
 const (
@@ -500,8 +501,8 @@ func (h *Handlers) codexSessionFileRelayLoop(sessionID string, conn Connection, 
 				if completedTurnID == "" {
 					completedTurnID = currentTurnID
 				}
-			slog.Info("go-bridge: codexSessionFileRelay EMIT turn_completed", "sessionID", sessionID)
-			h.sendSessionEventWithPushIntent(sessionID, backendID, "turn_completed", map[string]interface{}{"turnId": completedTurnID, "done": true, "reason": "task_complete"})
+				slog.Info("go-bridge: codexSessionFileRelay EMIT turn_completed", "sessionID", sessionID)
+				h.sendSessionEventWithPushIntent(sessionID, backendID, "turn_completed", map[string]interface{}{"turnId": completedTurnID, "done": true, "reason": "task_complete"})
 				h.broadcastIdleState(sessionID, backendID)
 				h.recordPendingNotification(sessionID, backendID, "completed", "task_complete")
 				currentTurnID = ""
@@ -768,9 +769,27 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 		}
 	}
 
+	// claudeHeldTerminalEvent / 累积器：终态挂起 + 完成通知正文预览（owner 2026-08-27
+	// 决策对齐 Antigravity）。同一 turn 内 thinking 行（stop_reason=end_turn）会先于
+	// text 行触发 mapper 终态，且 kernel committed 投影不物化流式正文（textAppends 以
+	// PartOps 发完即清，2026-08-27 生产取证）——立即发布会让通知正文退固定文案。
+	// 因此终态挂起，正文经同源 mapper 事件流累积；在「预览已齐备」或「claude 进程
+	// 已死（text-less turn 的权威收尾信号）」时 flush。跨 tick 存活，watcher 退出前
+	// 兜底 flush，避免丢通知。
+	var heldTerminals []claudeHeldTerminalEvent
+	var turnText claudeTurnTextAccumulator
+	flushHeldTerminals := func() {
+		for _, ht := range heldTerminals {
+			h.sendSessionEventWithPushIntentPreview(ht.sessionID, ht.backendID, "turn_completed", ht.data, turnText.preview())
+			h.broadcastIdleState(ht.sessionID, ht.backendID)
+			slog.Info("go-bridge: claudeSessionFileRelay turn completed, keeping watch while process live", "sessionID", ht.sessionID, "backendID", ht.backendID, "pid", ht.pid, "turnId", ht.turnID)
+		}
+		heldTerminals = nil
+	}
 	for range ticker.C {
 		if !h.relayKindIs(sessionID, relayKindClaudeFile) {
 			slog.Info("go-bridge: claudeSessionFileRelay superseded by agent relay", "sessionID", sessionID)
+			flushHeldTerminals()
 			return
 		}
 		if cachedPID == 0 {
@@ -803,6 +822,7 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 					h.broadcastIdleState(sessionID, backendID)
 					if !h.broadcaster.HasSessionSubscriber(backendID, sessionID) {
 						slog.Info("go-bridge: claudeSessionFileRelay process dead with no subscriber, exiting", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
+						flushHeldTerminals()
 						return
 					}
 					// Claude Desktop may end one worker and later append another turn to the
@@ -817,6 +837,11 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 			} else {
 				processDeathMisses = 0
 			}
+		}
+		// 挂起终态的条件 flush：预览已齐备（正文行已入扫描流）或进程已死
+		// （text-less turn 的权威收尾信号——cachedPID 被 death 分支清零或从未绑定）。
+		if len(heldTerminals) > 0 && (turnText.preview() != "" || cachedPID == 0) {
+			flushHeldTerminals()
 		}
 		info, err := os.Stat(sessPath)
 		if err != nil {
@@ -854,6 +879,7 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 					h.broadcastIdleState(sessionID, backendID)
 				}
 				slog.Info("go-bridge: claudeSessionFileRelay live-idle TTL elapsed, exiting", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
+				flushHeldTerminals()
 				return
 			}
 			continue
@@ -892,11 +918,6 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 		// Live growth reuses the same hydrate mapper so projection reducer receives
 		// identity-bearing user_message / text_delta / turn_completed frames (not bare
 		// turn_started turnId:"" or itemId-less deltas that reducer skips).
-		// claudeHeldTerminalEvent：终态挂起（见 deliverClaudeLegacyRow turn_completed case）。
-		// 同一扫描批内 thinking 行的 stop_reason=end_turn 先于 text 行触发终态；立即发布会
-		// 让 push intent 在正文入 kernel 前计算（2026-08-27 生产取证：预览为空、通知退固定
-		// 文案）。批尾统一发布时正文已全部入投影、turn 尚未结算，ActiveTurnID 与预览完整。
-		var heldTerminals []claudeHeldTerminalEvent
 		for _, scanned := range scan.Records {
 			e := scanned.Entry
 			if !scanned.Admitted {
@@ -930,7 +951,7 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 			// whose parent chain has no admitted owner (mapper degrades to file-order attribution,
 			// not content refereeing, guardrail #4).
 			if e.UUID != "" && e.Message != nil && (e.Type == "user" || e.Type == "assistant") {
-				h.applyClaudeLiveSourceRecord(scanned, backendID, sessionID, traceCorrelation, &currentTurnID, &runningObserved, cachedPID)
+				h.applyClaudeLiveSourceRecord(scanned, backendID, sessionID, traceCorrelation, &currentTurnID, &runningObserved, cachedPID, &heldTerminals, &turnText)
 				continue
 			}
 			// Admitted non-content rows (compaction-boundary system_message, etc.) keep legacy
@@ -938,13 +959,9 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 			// content, so not a dedup concern (guardrail #3). Acknowledge the byte range so the
 			// ledger cursor stays contiguous with the next admitted content row (guardrail #6).
 			h.acknowledgeClaudeSourceRow(backendID, sessionID, traceCorrelation, scanned.ByteEnd)
-			h.deliverClaudeLegacyRow(e, sessionID, backendID, &currentTurnID, &runningObserved, cachedPID, &heldTerminals)
+			h.deliverClaudeLegacyRow(e, sessionID, backendID, &currentTurnID, &runningObserved, cachedPID, &heldTerminals, &turnText)
 		}
-		for _, ht := range heldTerminals {
-			h.sendSessionEventWithPushIntent(ht.sessionID, ht.backendID, "turn_completed", ht.data)
-			h.broadcastIdleState(ht.sessionID, ht.backendID)
-			slog.Info("go-bridge: claudeSessionFileRelay turn completed, keeping watch while process live", "sessionID", ht.sessionID, "backendID", ht.backendID, "pid", ht.pid, "turnId", ht.turnID)
-		}
+		flushHeldTerminals()
 		if scan.Poison != nil {
 			quarantined = scan.Poison
 			quarantineSize = newSize
@@ -1043,6 +1060,8 @@ func (h *Handlers) applyClaudeLiveSourceRecord(
 	currentTurnID *string,
 	runningObserved *bool,
 	cachedPID int,
+	held *[]claudeHeldTerminalEvent,
+	accum *claudeTurnTextAccumulator,
 ) {
 	ingestDomain := "live"
 	hydrating := h.projectionKernel.Status(backendID, sessionID).Phase == ProjectionHydrateHydrating
@@ -1059,7 +1078,7 @@ func (h *Handlers) applyClaudeLiveSourceRecord(
 		// The mapper (claudeEntryToProjectionEvents) is identical to the batch path, so the
 		// queued events are the same authoritative projection events the live path would emit.
 		h.acknowledgeClaudeSourceRow(backendID, sessionID, correlation, scanned.ByteEnd)
-		h.deliverClaudeLegacyRow(scanned.Entry, sessionID, backendID, currentTurnID, runningObserved, cachedPID, nil)
+		h.deliverClaudeLegacyRow(scanned.Entry, sessionID, backendID, currentTurnID, runningObserved, cachedPID, held, accum)
 		emitClaudeSourceTrace(claudeSourceTraceRecord{
 			Phase: "live", IngestDomain: ingestDomain, BackendID: backendID, SessionID: sessionID,
 			Correlation: correlation, Record: scanned, FileOrderTurnID: *currentTurnID,
@@ -1103,6 +1122,7 @@ func (h *Handlers) applyClaudeLiveSourceRecord(
 	if resolved := batch.Record.GraphResolvedTurn; resolved != "" {
 		*currentTurnID = resolved
 	}
+	accum.observe(batch.Events)
 	result, err := h.projectionKernel.ApplyClaudeSourceRecordBatch(batch)
 	if err != nil {
 		// Ledger inconsistency (gap/generation/CAS): expose honestly rather than silently legacy
@@ -1150,13 +1170,81 @@ type claudeHeldTerminalEvent struct {
 	pid       int
 }
 
+// claudeTurnTextAccumulator 在 claude file relay 循环内累积当前 turn 的助手正文
+// （owner 2026-08-27 决策：完成通知正文为真实回复预览）。kernel 的 committed 投影
+// 不物化流式正文（textAppends 以 PartOps 发完即清，2026-08-27 生产取证 turn 终态
+// 时 Assistant 为 nil），因此预览直接取自与 kernel 同源的 mapper 事件流——不是
+// 第二真相源，不回写任何状态。user_message 重置（新 turn）；累积有硬上限，防止
+// 超长回答撑爆 watcher 内存。
+type claudeTurnTextAccumulator struct {
+	builder strings.Builder
+	capped  bool
+}
+
+// claudeTurnTextAccumulatorCapBytes 是累积上限（字节）。预览截断在 100 runes，
+// 4× 余量覆盖多字节字符与拼接碎片。
+const claudeTurnTextAccumulatorCapBytes = 512
+
+func (a *claudeTurnTextAccumulator) reset() {
+	a.builder.Reset()
+	a.capped = false
+}
+
+func (a *claudeTurnTextAccumulator) append(delta string) {
+	if a.capped || delta == "" {
+		return
+	}
+	remaining := claudeTurnTextAccumulatorCapBytes - a.builder.Len()
+	if remaining <= 0 {
+		a.capped = true
+		return
+	}
+	if len(delta) > remaining {
+		// 单个 delta 超限：按 rune 边界截断存入余量，再封顶（不得整段丢弃——
+		// 流式末段常是单个大 delta，丢弃会让预览意外为空）。
+		cut := remaining
+		for cut > 0 && !utf8.RuneStart(delta[cut]) {
+			cut--
+		}
+		delta = delta[:cut]
+		a.capped = true
+	}
+	a.builder.WriteString(delta)
+}
+
+// observe 消费一批 mapper 事件：user_message 开启新 turn（重置），text_delta 追加。
+func (a *claudeTurnTextAccumulator) observe(evs []projectionHydrateEvent) {
+	if a == nil {
+		return
+	}
+	for _, ev := range evs {
+		switch ev.Event {
+		case "user_message":
+			a.reset()
+		case "text_delta":
+			if d, ok := ev.Data["delta"].(string); ok {
+				a.append(d)
+			}
+		}
+	}
+}
+
+// preview 返回当前累积正文的预览形态（空白折叠 + 100 runes 截断）；空累积返回 ""。
+func (a *claudeTurnTextAccumulator) preview() string {
+	if a == nil {
+		return ""
+	}
+	return webPushPreviewFromText(a.builder.String())
+}
+
 // deliverClaudeLegacyRow is the pre-transaction per-event delivery (claudeEntryToProjectionEvents →
 // sendSessionEvent), used for admitted non-content rows (compaction boundary) and for content rows
 // that fall back when the source batch cannot be built. It reduces through the projection writer
 // (PublishLogical), so it is never a second writer (guardrail #3).
 //
-// held 非 nil 时（live 扫描批路径），turn_completed 不立即发布而是挂起，由调用方在整批
-// 内容行投递后统一发布——见 claudeSessionFileRelayLoop 内注释。nil = 立即发布（既有行为）。
+// held 非 nil 时（live 扫描批路径），turn_completed 不立即发布而是挂起，由调用方在
+// 累积正文齐备或进程死亡后统一发布——见 claudeSessionFileRelayLoop 内注释。
+// nil = 立即发布（既有行为）。accum 非 nil 时同步累积 mapper text_delta 供预览。
 func (h *Handlers) deliverClaudeLegacyRow(
 	e claudeTranscriptRelayEntry,
 	sessionID, backendID string,
@@ -1164,8 +1252,10 @@ func (h *Handlers) deliverClaudeLegacyRow(
 	runningObserved *bool,
 	cachedPID int,
 	held *[]claudeHeldTerminalEvent,
+	accum *claudeTurnTextAccumulator,
 ) {
 	evs := claudeEntryToProjectionEvents(e, currentTurnID, nil)
+	accum.observe(evs)
 	for _, ev := range evs {
 		switch ev.Event {
 		case "user_message":
@@ -2650,7 +2740,7 @@ func (h *Handlers) relayEvents(conn Connection, sess core.AgentSession, sessionI
 				// web push §8.1 producer 位点 1：agent relay loop 是该 session 的
 				// ingest owner（与 passive 侧经 agentRelayRunning 互斥），terminal/
 				// permission 事件在此声明意图；样本门未过时恒为 nil。
-				PushIntent: pushIntentForRelayTerminal(h.projectionKernel, backendID, sessionID, eventName, data, h.webPushTitles.get(backendID, sessionID)),
+				PushIntent: pushIntentForRelayTerminal(h.projectionKernel, backendID, sessionID, eventName, data, h.webPushTitles.get(backendID, sessionID), ""),
 			})
 
 			// 持续刷新 lastEventAt，防止 idle cleanup 在长 turn 期间误杀 session。

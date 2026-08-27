@@ -195,19 +195,26 @@ func TestClaudeBatchEndTerminalCarriesFullPreview(t *testing.T) {
 	currentTurn := ""
 	running := false
 	var held []claudeHeldTerminalEvent
+	var turnText claudeTurnTextAccumulator
 	// 扫描批顺序 = 文件顺序：user → thinking(end_turn) → text(end_turn)
-	handlers.deliverClaudeLegacyRow(userRow, "hold-1", "claude", &currentTurn, &running, 4242, &held)
-	handlers.deliverClaudeLegacyRow(thinkingRow, "hold-1", "claude", &currentTurn, &running, 4242, &held)
+	handlers.deliverClaudeLegacyRow(userRow, "hold-1", "claude", &currentTurn, &running, 4242, &held, &turnText)
+	handlers.deliverClaudeLegacyRow(thinkingRow, "hold-1", "claude", &currentTurn, &running, 4242, &held, &turnText)
 	if got := pipeline.Drain(); len(got) != 0 {
 		t.Fatalf("thinking-row terminal must be held, got %d early candidates", len(got))
 	}
-	handlers.deliverClaudeLegacyRow(textRow, "hold-1", "claude", &currentTurn, &running, 4242, &held)
+	if turnText.preview() != "" {
+		t.Fatalf("thinking row must not feed text accumulator, got %q", turnText.preview())
+	}
+	handlers.deliverClaudeLegacyRow(textRow, "hold-1", "claude", &currentTurn, &running, 4242, &held, &turnText)
 	if len(held) != 2 {
 		t.Fatalf("held terminals = %d, want 2 (both end_turn rows held)", len(held))
 	}
-	// 批尾统一发布（镜像 relay loop 的 flush）
+	if turnText.preview() != "落霞与孤鹜齐飞，天水共长天一色" {
+		t.Fatalf("accumulator preview = %q", turnText.preview())
+	}
+	// 条件满足（预览齐备）→ flush，携带累积预览（镜像 relay loop 的条件 flush）
 	for _, ht := range held {
-		handlers.sendSessionEventWithPushIntent(ht.sessionID, ht.backendID, "turn_completed", ht.data)
+		handlers.sendSessionEventWithPushIntentPreview(ht.sessionID, ht.backendID, "turn_completed", ht.data, turnText.preview())
 	}
 
 	got := pipeline.Drain()
@@ -219,6 +226,26 @@ func TestClaudeBatchEndTerminalCarriesFullPreview(t *testing.T) {
 	}
 	if got[0].AnchorID != "u-hold-1" {
 		t.Fatalf("anchor = %q, want u-hold-1", got[0].AnchorID)
+	}
+}
+
+// 累积器跨 turn 重置与截断：user_message 清空上一轮；超长正文截断到预览上限。
+func TestClaudeTurnTextAccumulatorResetAndCap(t *testing.T) {
+	var a claudeTurnTextAccumulator
+	a.observe([]projectionHydrateEvent{{Event: "text_delta", Data: map[string]interface{}{"delta": "旧回合"}}})
+	a.observe([]projectionHydrateEvent{{Event: "user_message", Data: map[string]interface{}{"text": "新回合"}}})
+	if a.preview() != "" {
+		t.Fatalf("user_message must reset accumulator, got %q", a.preview())
+	}
+	a.observe([]projectionHydrateEvent{{Event: "text_delta", Data: map[string]interface{}{"delta": strings.Repeat("字", 400)}}})
+	runes := []rune(a.preview())
+	if len(runes) != webPushPreviewMaxRunes+1 || !strings.HasSuffix(a.preview(), "…") {
+		t.Fatalf("preview = %d runes, want %d+ellipsis", len(runes), webPushPreviewMaxRunes)
+	}
+	// 累积硬上限：超限后停止累积
+	a.observe([]projectionHydrateEvent{{Event: "text_delta", Data: map[string]interface{}{"delta": "追加"}}})
+	if strings.Contains(a.preview(), "追加") {
+		t.Fatal("accumulator must cap growth past claudeTurnTextAccumulatorCapBytes")
 	}
 }
 

@@ -124,7 +124,7 @@ func TestBuildWebPushNotificationTextWithSessionTitle(t *testing.T) {
 func TestProducerCarriesSessionTitle(t *testing.T) {
 	enableKindGateForTest(t, WebPushKindCompletion)
 	kernel := producerKernelWithRunningTurn(t)
-	intent := pushIntentForRelayTerminal(kernel, "codex", "prod-1", "turn_completed", nil, "  带空格的标题  ")
+	intent := pushIntentForRelayTerminal(kernel, "codex", "prod-1", "turn_completed", nil, "  带空格的标题  ", "")
 	if intent == nil {
 		t.Fatal("intent expected")
 	}

@@ -57,13 +57,28 @@ func webPushActiveTurnID(kernel *ProjectionKernel, backendID, sessionID string) 
 // 内容首段预览）。
 const webPushPreviewMaxRunes = 100
 
+// webPushPreviewFromText 把原始助手文本成型为通知预览（空白折叠 + 截断）。
+// kernel 读取路径（webPushCompletedTurnPreview）与 claude relay 累积器
+// （claudeTurnTextAccumulator.preview）共用同一形态。
+func webPushPreviewFromText(text string) string {
+	preview := strings.Join(strings.Fields(text), " ")
+	runes := []rune(preview)
+	if len(runes) > webPushPreviewMaxRunes {
+		return string(runes[:webPushPreviewMaxRunes]) + "…"
+	}
+	return preview
+}
+
 // webPushCompletedTurnPreview 从 authoritative kernel 读取已完成 turn 的助手文本
 // 预览，作为完成通知正文（owner 2026-08-27 决策：显示真实回复内容，对齐
 // Antigravity；此前为固定隐私文案）。只取 Type=="text" 的 parts——reasoning/
 // tool/file/subagent 一律不进通知；空白折叠为单空格，截断 webPushPreviewMaxRunes。
 // turn 未结算时 text parts 可能仍是 progress presentation，全文已在，直接使用。
-// kernel 未接线 / turn 不存在 / 无文本 → 空串，调用方回退固定文案，不编造内容。
-// 只读 reducer 快照，不改状态；结果只进加密 payload，不落日志。
+// 注意：claude 流式正文的 textAppends 以 PartOps 发送后即清、committed 投影不物化
+// （2026-08-27 生产取证），该路径常返回空——claude 的预览由 relay 循环累积器提供
+// （pushIntentForRelayTerminalWithPreview）。kernel 未接线 / turn 不存在 / 无文本 →
+// 空串，调用方回退固定文案，不编造内容。只读 reducer 快照，不改状态；结果只进
+// 加密 payload，不落日志。
 func webPushCompletedTurnPreview(kernel *ProjectionKernel, backendID, sessionID, turnID string) string {
 	if kernel == nil || turnID == "" {
 		return ""
@@ -95,12 +110,7 @@ func webPushCompletedTurnPreview(kernel *ProjectionKernel, backendID, sessionID,
 			break
 		}
 	}
-	preview := strings.Join(strings.Fields(builder.String()), " ")
-	runes := []rune(preview)
-	if len(runes) > webPushPreviewMaxRunes {
-		return string(runes[:webPushPreviewMaxRunes]) + "…"
-	}
-	return preview
+	return webPushPreviewFromText(builder.String())
 }
 
 
@@ -110,7 +120,11 @@ func webPushCompletedTurnPreview(kernel *ProjectionKernel, backendID, sessionID,
 // 样本门拦下的真实事件会（在采集开关开启时）落脱敏 EVT 样本（设计 delta §3）。
 // anchor 只允许 turn|interaction（§7.3），无已验证样本时 input/error 的 intent 在
 // 样本门前也进不来——这里再加一道 kind 门，双保险。
-func pushIntentForRelayTerminal(kernel *ProjectionKernel, backendID, sessionID, eventName string, data interface{}, sessionTitle string) *PushIntent {
+//
+// previewOverride 非空时优先作为 completion 正文预览（claude file relay 循环的
+// 事件流累积器提供——kernel committed 投影不物化流式正文，见
+// webPushCompletedTurnPreview 注释）；空串回退 kernel 读取。
+func pushIntentForRelayTerminal(kernel *ProjectionKernel, backendID, sessionID, eventName string, data interface{}, sessionTitle, previewOverride string) *PushIntent {
 	title := webPushSanitizeSessionTitle(sessionTitle)
 	switch eventName {
 	case "turn_completed":
@@ -128,13 +142,17 @@ func pushIntentForRelayTerminal(kernel *ProjectionKernel, backendID, sessionID, 
 		if turnID == "" {
 			return nil
 		}
+		preview := webPushSanitizePreview(previewOverride)
+		if preview == "" {
+			preview = webPushCompletedTurnPreview(kernel, backendID, sessionID, turnID)
+		}
 		return &PushIntent{
 			Kind:            WebPushKindCompletion,
 			NotificationKey: backendID + "|" + sessionID + "|" + turnID + "|completed",
 			AnchorKind:      "turn",
 			AnchorID:        turnID,
 			SessionTitle:    title,
-			ContentPreview:  webPushCompletedTurnPreview(kernel, backendID, sessionID, turnID),
+			ContentPreview:  preview,
 		}
 	case "permission_request":
 		requestID := ""
@@ -177,5 +195,5 @@ func pushIntentForPassiveEvent(kernel *ProjectionKernel, backendID, sessionID, e
 	if eventName != "turn_completed" {
 		return nil
 	}
-	return pushIntentForRelayTerminal(kernel, backendID, sessionID, eventName, data, sessionTitle)
+	return pushIntentForRelayTerminal(kernel, backendID, sessionID, eventName, data, sessionTitle, "")
 }
