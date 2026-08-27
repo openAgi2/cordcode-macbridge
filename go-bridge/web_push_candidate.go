@@ -27,6 +27,9 @@ type PushIntent struct {
 	NotificationKey string
 	AnchorKind      string
 	AnchorID        string
+	// SessionTitle 是清洗/截断后的 authoritative catalog 标题（设计 delta §2.2）；
+	// 空串 = 缓存未命中，通知按无标题回退。随 candidate 小拷贝流转，不含正文。
+	SessionTitle string
 }
 
 // WebPushCandidate 是交给 dispatcher 的不可变小对象（不含正文/密钥材料）。
@@ -39,6 +42,7 @@ type WebPushCandidate struct {
 	NotificationKey string
 	AnchorKind      string
 	AnchorID        string
+	SessionTitle    string
 	ReceivedAt      int64
 }
 

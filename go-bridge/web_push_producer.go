@@ -47,13 +47,23 @@ func webPushActiveTurnID(kernel *ProjectionKernel, backendID, sessionID string) 
 }
 
 // pushIntentForRelayTerminal 为 agent relay loop（ingest owner）派生 terminal/permission
-// 事件的 PushIntent。返回 nil = 不发送（样本门未过 / identity 缺失 / 事件不在清单）。
+// 事件的 PushIntent。sessionTitle 来自 bridge 内 authoritative 标题缓存（设计 delta
+// §2.2；可为空）。返回 nil = 不发送（样本门未过 / identity 缺失 / 事件不在清单）。
+// 样本门拦下的真实事件会（在采集开关开启时）落脱敏 EVT 样本（设计 delta §3）。
 // anchor 只允许 turn|interaction（§7.3），无已验证样本时 input/error 的 intent 在
 // 样本门前也进不来——这里再加一道 kind 门，双保险。
-func pushIntentForRelayTerminal(kernel *ProjectionKernel, backendID, sessionID, eventName string, data interface{}) *PushIntent {
+func pushIntentForRelayTerminal(kernel *ProjectionKernel, backendID, sessionID, eventName string, data interface{}, sessionTitle string) *PushIntent {
+	title := webPushSanitizeSessionTitle(sessionTitle)
 	switch eventName {
 	case "turn_completed":
 		if !webPushKindEnabled(WebPushKindCompletion) {
+			captureWebPushSample("EVT-TURN-1", map[string]interface{}{
+				"backend":    backendID,
+				"event":      eventName,
+				"session":    webPushRedactID(sessionID),
+				"activeTurn": webPushRedactID(webPushActiveTurnID(kernel, backendID, sessionID)),
+				"rawShape":   webPushRedactShape(data, 0),
+			})
 			return nil
 		}
 		turnID := webPushActiveTurnID(kernel, backendID, sessionID)
@@ -65,17 +75,25 @@ func pushIntentForRelayTerminal(kernel *ProjectionKernel, backendID, sessionID, 
 			NotificationKey: backendID + "|" + sessionID + "|" + turnID + "|completed",
 			AnchorKind:      "turn",
 			AnchorID:        turnID,
+			SessionTitle:    title,
 		}
 	case "permission_request":
-		if !webPushKindEnabled(WebPushKindPermission) {
-			return nil
-		}
 		requestID := ""
 		if m, ok := data.(map[string]interface{}); ok {
 			requestID, _ = m["requestId"].(string)
 			if requestID == "" {
 				requestID, _ = m["itemId"].(string)
 			}
+		}
+		if !webPushKindEnabled(WebPushKindPermission) {
+			captureWebPushSample("EVT-PERM-1", map[string]interface{}{
+				"backend":   backendID,
+				"event":     eventName,
+				"session":   webPushRedactID(sessionID),
+				"requestId": webPushRedactID(requestID),
+				"rawShape":  webPushRedactShape(data, 0),
+			})
+			return nil
 		}
 		if requestID == "" {
 			return nil
@@ -85,6 +103,7 @@ func pushIntentForRelayTerminal(kernel *ProjectionKernel, backendID, sessionID, 
 			NotificationKey: backendID + "|" + sessionID + "|" + requestID + "|permission",
 			AnchorKind:      "interaction",
 			AnchorID:        requestID,
+			SessionTitle:    title,
 		}
 	default:
 		return nil
@@ -95,9 +114,9 @@ func pushIntentForRelayTerminal(kernel *ProjectionKernel, backendID, sessionID, 
 // 派生逻辑，但调用前提是 passiveFeedAllowed(...) == true（单一摄入所有者的被动侧
 // 表达：agent relay 在跑时永不为真）。terminal 补投只认 completion；permission
 // 属于交互等待，不属于被动 terminal 收口。
-func pushIntentForPassiveEvent(kernel *ProjectionKernel, backendID, sessionID, eventName string, data interface{}) *PushIntent {
+func pushIntentForPassiveEvent(kernel *ProjectionKernel, backendID, sessionID, eventName string, data interface{}, sessionTitle string) *PushIntent {
 	if eventName != "turn_completed" {
 		return nil
 	}
-	return pushIntentForRelayTerminal(kernel, backendID, sessionID, eventName, data)
+	return pushIntentForRelayTerminal(kernel, backendID, sessionID, eventName, data, sessionTitle)
 }

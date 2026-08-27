@@ -88,14 +88,24 @@ type WebPushAnchorType struct {
 	ID   string `json:"id"`
 }
 
-// buildWebPushNotificationText 返回固定低敏感文案。字段路径未由真实样本证明的
-// kind 不能启用；此函数不读取 agent 文本。
-func buildWebPushNotificationText(kind WebPushNotificationKind) (title, body string) {
+// buildWebPushNotificationText 组合通知文案（设计 delta §2.1，监工指令 1 号）：
+// Title = 来源常量 + authoritative session 标题（清洗/截断后；缺失时诚实回退到
+// 类别文案，不编造标题）；Body 保持固定隐私文案，不读取任何 agent 文本。
+// 字段路径未由真实样本证明的 kind 不能启用。
+func buildWebPushNotificationText(kind WebPushNotificationKind, sessionTitle string) (title, body string) {
+	const source = "CordCode"
+	cleaned := webPushSanitizeSessionTitle(sessionTitle)
 	switch kind {
 	case WebPushKindCompletion:
-		return "任务已完成", "点击打开 CordCode 查看结果"
+		if cleaned != "" {
+			return source + " · " + cleaned, "Mac 上的会话已完成，点击查看结果"
+		}
+		return source + " · 任务已完成", "Mac 上的会话已完成，点击查看结果"
 	case WebPushKindPermission:
-		return "需要操作审批", "点击打开 CordCode 处理请求"
+		if cleaned != "" {
+			return source + " · " + cleaned, "Mac 上的会话需要审批，点击处理"
+		}
+		return source + " · 需要审批", "Mac 上的会话需要审批，点击处理"
 	case WebPushKindInput:
 		return "Agent 正在等待回复", "点击打开 CordCode 回答"
 	case WebPushKindError:
@@ -132,6 +142,11 @@ func ApplyWebPushHelloProfile(ack *HelloAckMessage, hello *HelloMessage, store *
 		return
 	}
 	status, _ := store.Status()
+	captureWebPushSample("WP-SUB-2", map[string]interface{}{
+		"declaresCapability": true,
+		"profileStatus":      string(status),
+		"vapidFingerprint":   webPushRedactID(store.VapidPublicKey()),
+	})
 	switch status {
 	case WebPushStoreHealthy:
 		publicKey := store.VapidPublicKey()

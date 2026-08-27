@@ -895,6 +895,7 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 				NotificationKey: logical.PushIntent.NotificationKey,
 				AnchorKind:      logical.PushIntent.AnchorKind,
 				AnchorID:        logical.PushIntent.AnchorID,
+				SessionTitle:    logical.PushIntent.SessionTitle,
 				ReceivedAt:      msg.Timestamp,
 			}, kernelIngest)
 		} else {

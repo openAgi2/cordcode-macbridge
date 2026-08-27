@@ -131,6 +131,8 @@ func Main() {
 	handlers.SetRelayEnabled(*relayEnabled)
 	handlers.SetSessionListLimit(*sessionListLimit)
 	handlers.SetDataDir(*dataDirPath)
+	// 真实样本采集钩子（设计 delta §3）：CCCODE_WEB_PUSH_SAMPLE_CAPTURE=1 才启用，缺省零行为差异。
+	initWebPushSampleCapture(*dataDirPath)
 	var webPushPipeline *WebPushCandidatePipeline
 	if *dataDirPath != "" {
 		handlers.SetTranscriptIndexBaseDir(*dataDirPath + string(filepath.Separator) + "transcript-index")
@@ -889,7 +891,7 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 					// web push §8.1 producer 位点 2：被动泵仅在 passiveFeedAllowed
 					// 放行时补投（单一摄入所有者的被动侧表达——agent relay 在跑时
 					// 该分支不可达）。只认 terminal completion。
-					PushIntent: pushIntentForPassiveEvent(h.projectionKernel, backendID, ev.SessionID, eventName, data),
+					PushIntent: pushIntentForPassiveEvent(h.projectionKernel, backendID, ev.SessionID, eventName, data, h.webPushTitles.get(backendID, ev.SessionID)),
 				})
 			}
 		}

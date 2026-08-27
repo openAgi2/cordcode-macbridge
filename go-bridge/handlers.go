@@ -106,7 +106,10 @@ type Handlers struct {
 	webPush *WebPushStore
 	// webPushPipeline 是 PushIntent→candidate 管线（web_push_candidate.go）。
 	// nil = 未接线：一切通知意图 fail closed。
-	webPushPipeline         *WebPushCandidatePipeline
+	webPushPipeline *WebPushCandidatePipeline
+	// webPushTitles 是通知标题缓存（web_push_titles.go，设计 delta §2.2）。
+	// 唯一写入来源是真实 list_sessions 响应；nil 安全（读取返回空 → 无标题回退）。
+	webPushTitles           *webPushTitleCache
 	observation             *ObservationManager
 	relayOutbox             *OutboxManager
 	presentation            *PresentationManager
@@ -210,6 +213,7 @@ func newHandlersWithContext(ctx context.Context, bridgeEpoch string) *Handlers {
 		pendingClaudeRuntime:    make(map[string]claudeRuntimeSelection),
 		transcriptIndex:         transcriptindex.NewStore(defaultTranscriptIndexDir()),
 		capabilityPolicy:        NewCapabilityPolicy(),
+		webPushTitles:           newWebPushTitleCache(),
 		relayEnabled:            true,
 		sessionListLimit:        defaultSessionListLimit,
 		bridgeOwnedTurns:        make(map[string]struct{}),
@@ -1430,6 +1434,13 @@ func (h *Handlers) handleWebPushRPC(conn Connection, msg WireMessage) bool {
 			"subscriptionId", subscriptionID,
 			"endpointHostCategory", WebPushEndpointHostCategory(record.Endpoint),
 			"devicePrefix", safeID(device.DeviceID))
+		// WP-SUB-1/LOCAL-1 采样（设计 delta §3）：真实 register 的脱敏记录，供样本门归档。
+		captureWebPushSample("WP-SUB-1", map[string]interface{}{
+			"subscriptionId":       webPushRedactID(subscriptionID),
+			"endpointHostCategory": WebPushEndpointHostCategory(record.Endpoint),
+			"platform":             record.Platform,
+			"device":               webPushRedactID(device.DeviceID),
+		})
 		conn.SendResult(msg.RequestID, &RegisterPushSubscriptionResult{SubscriptionID: subscriptionID, RegisteredAtMillis: registeredAt}, nil)
 	case WebPushMethodUnregister:
 		if store == nil {
@@ -3360,6 +3371,8 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 			wireSessions = filterWireSessionsByDirectory(wireSessions, requestedDir)
 		}
 		result := paginateSessionList(wireSessions, extractStringParam(msg, "cursor"), limit)
+		// 通知标题缓存（设计 delta §2.2）：标题只能来自真实 catalog 响应。
+		h.webPushTitles.noteFromWire(agentBackendID(agent), result)
 		metrics.wireMapping += time.Since(mappingStarted)
 		if ws, ok := result["sessions"].([]map[string]interface{}); ok {
 			metrics.resultCount = len(ws)
@@ -3403,6 +3416,8 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 	if ws, ok := result["sessions"].([]map[string]interface{}); ok {
 		metrics.resultCount = len(ws)
 	}
+	// 通知标题缓存（设计 delta §2.2）：claude catalog 分支同源写入。
+	h.webPushTitles.noteFromWire("claudecode", result)
 
 	metrics.sendResult(conn, msg.RequestID, result, nil)
 }

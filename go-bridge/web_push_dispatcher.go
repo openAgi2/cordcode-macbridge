@@ -156,7 +156,7 @@ func (d *WebPushDispatcher) deliverCandidate(candidate WebPushCandidate) {
 }
 
 func (d *WebPushDispatcher) buildPayload(candidate WebPushCandidate) ([]byte, int, webpush.Urgency, error) {
-	title, body := buildWebPushNotificationText(candidate.Kind)
+	title, body := buildWebPushNotificationText(candidate.Kind, candidate.SessionTitle)
 	payload := WebPushPayloadV1{
 		SchemaVersion: WebPushSchemaVersion,
 		Notification: WebPushNotificationPayload{
@@ -209,6 +209,18 @@ func buildAnchor(candidate WebPushCandidate) *WebPushAnchorType {
 	}
 }
 
+// webPushCaptureResponse 在每个投递分类分支记录脱敏响应样本（WP-RESP-1/2/3，
+// 设计 delta §3；采集开关关闭时零开销）。
+func webPushCaptureResponse(classification string, status int, retryAfterPresent bool, candidate WebPushCandidate, sub PushSubscriptionRecord) {
+	captureWebPushSample("WP-RESP", map[string]interface{}{
+		"classification": classification,
+		"httpStatus":     status,
+		"retryAfter":     retryAfterPresent,
+		"kind":           string(candidate.Kind),
+		"subscription":   webPushRedactID(sub.SubscriptionID),
+	})
+}
+
 // deliverToSubscription 按 §8.4 状态机投递单个 subscription（含 TTL 内有界重试）。
 func (d *WebPushDispatcher) deliverToSubscription(
 	candidate WebPushCandidate,
@@ -250,6 +262,7 @@ func (d *WebPushDispatcher) deliverToSubscription(
 			status := resp.StatusCode
 			switch {
 			case status >= 200 && status < 300:
+				webPushCaptureResponse("accepted_2xx", status, false, candidate, sub)
 				d.store.LedgerRecord(keyHash, candidate.EventID, sub.SubscriptionID, "accepted")
 				return
 			case status == http.StatusNotFound || status == http.StatusGone:
@@ -299,6 +312,7 @@ func (d *WebPushDispatcher) deliverToSubscription(
 			default:
 				// 400/401/403 及其他 4xx：permanent failure。暴露脱敏 diagnostic，
 				// 不删 key、不伪造成功。
+				webPushCaptureResponse("permanent_4xx", status, false, candidate, sub)
 				d.store.LedgerRecord(keyHash, candidate.EventID, sub.SubscriptionID, "permanent_failed")
 				slog.Warn("web-push: permanent delivery failure",
 					"status", status,

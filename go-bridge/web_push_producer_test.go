@@ -44,13 +44,13 @@ func TestProducerSampleGatesDefaultOff(t *testing.T) {
 		}
 	}
 	kernel := producerKernelWithRunningTurn(t)
-	if intent := pushIntentForRelayTerminal(kernel, "codex", "prod-1", "turn_completed", map[string]interface{}{"done": true}); intent != nil {
+	if intent := pushIntentForRelayTerminal(kernel, "codex", "prod-1", "turn_completed", map[string]interface{}{"done": true}, ""); intent != nil {
 		t.Fatalf("completion intent produced with gate OFF: %+v", intent)
 	}
-	if intent := pushIntentForRelayTerminal(kernel, "codex", "prod-1", "permission_request", map[string]interface{}{"requestId": "r1"}); intent != nil {
+	if intent := pushIntentForRelayTerminal(kernel, "codex", "prod-1", "permission_request", map[string]interface{}{"requestId": "r1"}, ""); intent != nil {
 		t.Fatalf("permission intent produced with gate OFF: %+v", intent)
 	}
-	if intent := pushIntentForPassiveEvent(kernel, "codex", "prod-1", "turn_completed", nil); intent != nil {
+	if intent := pushIntentForPassiveEvent(kernel, "codex", "prod-1", "turn_completed", nil, ""); intent != nil {
 		t.Fatalf("passive intent produced with gate OFF: %+v", intent)
 	}
 }
@@ -59,7 +59,7 @@ func TestProducerCompletionIntentRequiresTurnIdentity(t *testing.T) {
 	enableKindGateForTest(t, WebPushKindCompletion)
 	kernel := producerKernelWithRunningTurn(t)
 
-	intent := pushIntentForRelayTerminal(kernel, "codex", "prod-1", "turn_completed", map[string]interface{}{"done": true})
+	intent := pushIntentForRelayTerminal(kernel, "codex", "prod-1", "turn_completed", map[string]interface{}{"done": true}, "")
 	if intent == nil {
 		t.Fatal("gate ON + active turn must produce completion intent")
 	}
@@ -75,10 +75,10 @@ func TestProducerCompletionIntentRequiresTurnIdentity(t *testing.T) {
 
 	// 无 kernel state（identity 缺失）→ 不发送，绝不退回 session-only key。
 	bare := NewProjectionKernel(NewProjectionReducer(), nil)
-	if intent := pushIntentForRelayTerminal(bare, "codex", "no-state", "turn_completed", nil); intent != nil {
+	if intent := pushIntentForRelayTerminal(bare, "codex", "no-state", "turn_completed", nil, ""); intent != nil {
 		t.Fatalf("identity-less completion must not produce intent: %+v", intent)
 	}
-	if intent := pushIntentForRelayTerminal(nil, "codex", "prod-1", "turn_completed", nil); intent != nil {
+	if intent := pushIntentForRelayTerminal(nil, "codex", "prod-1", "turn_completed", nil, ""); intent != nil {
 		t.Fatalf("nil kernel must not produce intent: %+v", intent)
 	}
 }
@@ -87,7 +87,7 @@ func TestProducerPermissionIntentRequiresRequestIdentity(t *testing.T) {
 	enableKindGateForTest(t, WebPushKindPermission)
 	kernel := producerKernelWithRunningTurn(t)
 
-	intent := pushIntentForRelayTerminal(kernel, "codex", "prod-1", "permission_request", map[string]interface{}{"requestId": "req-9"})
+	intent := pushIntentForRelayTerminal(kernel, "codex", "prod-1", "permission_request", map[string]interface{}{"requestId": "req-9"}, "")
 	if intent == nil {
 		t.Fatal("gate ON + requestId must produce permission intent")
 	}
@@ -99,15 +99,15 @@ func TestProducerPermissionIntentRequiresRequestIdentity(t *testing.T) {
 	}
 
 	// itemId 兜底（dsh-web mux 形状）。
-	if intent := pushIntentForRelayTerminal(kernel, "codex", "prod-1", "permission_request", map[string]interface{}{"itemId": "req-10"}); intent == nil {
+	if intent := pushIntentForRelayTerminal(kernel, "codex", "prod-1", "permission_request", map[string]interface{}{"itemId": "req-10"}, ""); intent == nil {
 		t.Fatal("itemId fallback must work")
 	}
 	// 无 identity → 不发送。
-	if intent := pushIntentForRelayTerminal(kernel, "codex", "prod-1", "permission_request", map[string]interface{}{}); intent != nil {
+	if intent := pushIntentForRelayTerminal(kernel, "codex", "prod-1", "permission_request", map[string]interface{}{}, ""); intent != nil {
 		t.Fatalf("identity-less permission must not produce intent: %+v", intent)
 	}
 	// permission 门没开时 input 门开了也不能借道。
-	if intent := pushIntentForRelayTerminal(kernel, "codex", "prod-1", "user_input_requested", map[string]interface{}{"interactionId": "i1"}); intent != nil {
+	if intent := pushIntentForRelayTerminal(kernel, "codex", "prod-1", "user_input_requested", map[string]interface{}{"interactionId": "i1"}, ""); intent != nil {
 		t.Fatalf("input events are not a producer event in v1: %+v", intent)
 	}
 }
@@ -121,10 +121,10 @@ func TestProducerNonWhitelistedEventsNeverProduceIntent(t *testing.T) {
 		"question_asked", "todos_updated", "turn_started", "turn_error",
 		"permission_resolved", "user_input_resolved", "session_state_changed",
 	} {
-		if intent := pushIntentForRelayTerminal(kernel, "codex", "prod-1", event, map[string]interface{}{"turnId": "t", "requestId": "r"}); intent != nil {
+		if intent := pushIntentForRelayTerminal(kernel, "codex", "prod-1", event, map[string]interface{}{"turnId": "t", "requestId": "r"}, ""); intent != nil {
 			t.Fatalf("event %q must never produce intent: %+v", event, intent)
 		}
-		if intent := pushIntentForPassiveEvent(kernel, "codex", "prod-1", event, map[string]interface{}{"turnId": "t"}); intent != nil {
+		if intent := pushIntentForPassiveEvent(kernel, "codex", "prod-1", event, map[string]interface{}{"turnId": "t"}, ""); intent != nil {
 			t.Fatalf("passive event %q must never produce intent: %+v", event, intent)
 		}
 	}
@@ -174,7 +174,7 @@ func TestProducerPassiveExternalTurnProducesCandidateEndToEnd(t *testing.T) {
 	if !allowed {
 		t.Fatal("setup: external terminal should be allowed")
 	}
-	intent := pushIntentForPassiveEvent(kernel, "codex", "ext-1", "turn_completed", map[string]interface{}{"done": true})
+	intent := pushIntentForPassiveEvent(kernel, "codex", "ext-1", "turn_completed", map[string]interface{}{"done": true}, "外部标题")
 	if intent == nil {
 		t.Fatal("external turn terminal must produce a push intent when the gate is on")
 	}
@@ -206,7 +206,7 @@ func TestProducerPassiveExternalTurnProducesCandidateEndToEnd(t *testing.T) {
 func TestProducerKeyLayoutMatchesLedgerContract(t *testing.T) {
 	enableKindGateForTest(t, WebPushKindCompletion)
 	kernel := producerKernelWithRunningTurn(t)
-	intent := pushIntentForRelayTerminal(kernel, "codex", "prod-1", "turn_completed", nil)
+	intent := pushIntentForRelayTerminal(kernel, "codex", "prod-1", "turn_completed", nil, "")
 	if intent == nil {
 		t.Fatal("setup")
 	}

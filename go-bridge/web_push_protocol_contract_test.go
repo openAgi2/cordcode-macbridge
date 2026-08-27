@@ -140,7 +140,7 @@ func TestWebPushContractPayloadSchema(t *testing.T) {
 	for _, kind := range []WebPushNotificationKind{
 		WebPushKindCompletion, WebPushKindPermission, WebPushKindInput, WebPushKindError,
 	} {
-		title, body := buildWebPushNotificationText(kind)
+		title, body := buildWebPushNotificationText(kind, "")
 		if title == "" || body == "" {
 			t.Fatalf("kind %q must have fixed title/body", kind)
 		}
