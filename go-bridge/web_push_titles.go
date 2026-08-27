@@ -28,6 +28,17 @@ func newWebPushTitleCache() *webPushTitleCache {
 	return &webPushTitleCache{titles: make(map[string]string)}
 }
 
+// webPushTitleCanonicalBackend 归一缓存键的 backend 名：catalog 侧 agent 名是
+// "claudecode"（agentBackendID），relay/session 事件流侧是 "claude"——同一后端的
+// 两个名字必须落到同一键，否则写入/读取互相看不见（2026-08-27 19:47 生产取证：
+// 通知标题退"任务已完成"回退文案）。
+func webPushTitleCanonicalBackend(backendID string) string {
+	if backendID == "claudecode" {
+		return "claude"
+	}
+	return backendID
+}
+
 // noteFromWire 从一条真实 list_sessions 响应提取 id→title。
 // 只接受清洗后非空的标题；空标题不覆盖已有值（诚实保留上次 authoritative 读取）。
 func (c *webPushTitleCache) noteFromWire(backendID string, result map[string]interface{}) {
@@ -38,6 +49,7 @@ func (c *webPushTitleCache) noteFromWire(backendID string, result map[string]int
 	if !ok {
 		return
 	}
+	backendID = webPushTitleCanonicalBackend(backendID)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, session := range sessions {
@@ -66,7 +78,7 @@ func (c *webPushTitleCache) get(backendID, sessionID string) string {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.titles[backendID+"|"+sessionID]
+	return c.titles[webPushTitleCanonicalBackend(backendID)+"|"+sessionID]
 }
 
 // webPushSanitizeSessionTitle 剥控制字符、TrimSpace、按 rune 截断到 48 + "…"。

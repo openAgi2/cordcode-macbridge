@@ -137,3 +137,20 @@ func TestProducerCarriesSessionTitle(t *testing.T) {
 		t.Fatalf("passive title carry failed: %+v", passive)
 	}
 }
+
+// 2026-08-27 19:47 生产取证回归：catalog 写入键是 agent 名 "claudecode"，relay
+// 事件流读取键是 "claude"——归一后必须命中同一缓存条目。
+func TestTitleCacheClaudeBackendNameNormalization(t *testing.T) {
+	c := newWebPushTitleCache()
+	c.noteFromWire("claudecode", map[string]interface{}{
+		"sessions": []map[string]interface{}{
+			{"id": "s-greet", "title": "Greeting"},
+		},
+	})
+	if got := c.get("claude", "s-greet"); got != "Greeting" {
+		t.Fatalf("get(claude) = %q, want Greeting (claudecode write must be readable as claude)", got)
+	}
+	if got := c.get("claudecode", "s-greet"); got != "Greeting" {
+		t.Fatalf("get(claudecode) = %q, want Greeting (canonical read-back)", got)
+	}
+}
