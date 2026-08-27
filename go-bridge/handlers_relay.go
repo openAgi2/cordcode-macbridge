@@ -892,6 +892,11 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 		// Live growth reuses the same hydrate mapper so projection reducer receives
 		// identity-bearing user_message / text_delta / turn_completed frames (not bare
 		// turn_started turnId:"" or itemId-less deltas that reducer skips).
+		// claudeHeldTerminalEvent：终态挂起（见 deliverClaudeLegacyRow turn_completed case）。
+		// 同一扫描批内 thinking 行的 stop_reason=end_turn 先于 text 行触发终态；立即发布会
+		// 让 push intent 在正文入 kernel 前计算（2026-08-27 生产取证：预览为空、通知退固定
+		// 文案）。批尾统一发布时正文已全部入投影、turn 尚未结算，ActiveTurnID 与预览完整。
+		var heldTerminals []claudeHeldTerminalEvent
 		for _, scanned := range scan.Records {
 			e := scanned.Entry
 			if !scanned.Admitted {
@@ -933,7 +938,12 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 			// content, so not a dedup concern (guardrail #3). Acknowledge the byte range so the
 			// ledger cursor stays contiguous with the next admitted content row (guardrail #6).
 			h.acknowledgeClaudeSourceRow(backendID, sessionID, traceCorrelation, scanned.ByteEnd)
-			h.deliverClaudeLegacyRow(e, sessionID, backendID, &currentTurnID, &runningObserved, cachedPID)
+			h.deliverClaudeLegacyRow(e, sessionID, backendID, &currentTurnID, &runningObserved, cachedPID, &heldTerminals)
+		}
+		for _, ht := range heldTerminals {
+			h.sendSessionEventWithPushIntent(ht.sessionID, ht.backendID, "turn_completed", ht.data)
+			h.broadcastIdleState(ht.sessionID, ht.backendID)
+			slog.Info("go-bridge: claudeSessionFileRelay turn completed, keeping watch while process live", "sessionID", ht.sessionID, "backendID", ht.backendID, "pid", ht.pid, "turnId", ht.turnID)
 		}
 		if scan.Poison != nil {
 			quarantined = scan.Poison
@@ -1049,7 +1059,7 @@ func (h *Handlers) applyClaudeLiveSourceRecord(
 		// The mapper (claudeEntryToProjectionEvents) is identical to the batch path, so the
 		// queued events are the same authoritative projection events the live path would emit.
 		h.acknowledgeClaudeSourceRow(backendID, sessionID, correlation, scanned.ByteEnd)
-		h.deliverClaudeLegacyRow(scanned.Entry, sessionID, backendID, currentTurnID, runningObserved, cachedPID)
+		h.deliverClaudeLegacyRow(scanned.Entry, sessionID, backendID, currentTurnID, runningObserved, cachedPID, nil)
 		emitClaudeSourceTrace(claudeSourceTraceRecord{
 			Phase: "live", IngestDomain: ingestDomain, BackendID: backendID, SessionID: sessionID,
 			Correlation: correlation, Record: scanned, FileOrderTurnID: *currentTurnID,
@@ -1131,16 +1141,29 @@ func (h *Handlers) applyClaudeLiveSourceRecord(
 	})
 }
 
+// claudeHeldTerminalEvent 是扫描批内挂起的终态发布（deliverClaudeLegacyRow → 批尾 flush）。
+type claudeHeldTerminalEvent struct {
+	sessionID string
+	backendID string
+	turnID    string
+	data      map[string]interface{}
+	pid       int
+}
+
 // deliverClaudeLegacyRow is the pre-transaction per-event delivery (claudeEntryToProjectionEvents →
 // sendSessionEvent), used for admitted non-content rows (compaction boundary) and for content rows
 // that fall back when the source batch cannot be built. It reduces through the projection writer
 // (PublishLogical), so it is never a second writer (guardrail #3).
+//
+// held 非 nil 时（live 扫描批路径），turn_completed 不立即发布而是挂起，由调用方在整批
+// 内容行投递后统一发布——见 claudeSessionFileRelayLoop 内注释。nil = 立即发布（既有行为）。
 func (h *Handlers) deliverClaudeLegacyRow(
 	e claudeTranscriptRelayEntry,
 	sessionID, backendID string,
 	currentTurnID *string,
 	runningObserved *bool,
 	cachedPID int,
+	held *[]claudeHeldTerminalEvent,
 ) {
 	evs := claudeEntryToProjectionEvents(e, currentTurnID, nil)
 	for _, ev := range evs {
@@ -1154,6 +1177,15 @@ func (h *Handlers) deliverClaudeLegacyRow(
 			h.sendSessionEvent(sessionID, backendID, "session_state_changed", map[string]interface{}{"state": "running"})
 			*runningObserved = true
 		case "turn_completed":
+			if held != nil {
+				turnID, _ := ev.Data["turnId"].(string)
+				*held = append(*held, claudeHeldTerminalEvent{
+					sessionID: sessionID, backendID: backendID, turnID: turnID,
+					data: ev.Data, pid: cachedPID,
+				})
+				*runningObserved = false
+				continue
+			}
 			h.sendSessionEventWithPushIntent(sessionID, backendID, "turn_completed", ev.Data)
 			h.broadcastIdleState(sessionID, backendID)
 			*runningObserved = false

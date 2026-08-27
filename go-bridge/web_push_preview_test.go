@@ -1,6 +1,7 @@
 package gobridge
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -151,5 +152,72 @@ func TestWebPushCompletedTurnPreviewFallsBackWhenNoText(t *testing.T) {
 	_, body := buildWebPushNotificationText(got[0].Kind, got[0].SessionTitle, got[0].ContentPreview)
 	if body != "Mac 上的会话已完成，点击查看结果" {
 		t.Fatalf("fallback body = %q", body)
+	}
+}
+
+// 生产时序回归（2026-08-27 18:40 取证）：同一扫描批内 thinking 行（stop_reason=end_turn）
+// 先触发终态、text 行后到。终态若立即发布会让 push intent 在正文入 kernel 前计算——
+// 通知正文退回固定文案。挂起到批尾统一发布后，intent 一次到位：turn 仍在 running
+// （ActiveTurnID 可解析）、正文已入投影（预览完整）。
+func TestClaudeBatchEndTerminalCarriesFullPreview(t *testing.T) {
+	enableKindGateForTest(t, WebPushKindCompletion)
+
+	store, err := LoadWebPushStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadWebPushStore: %v", err)
+	}
+	pipeline := NewWebPushCandidatePipeline(store)
+	pipeline.SetBridgeID("brg_hold")
+	publisher := NewEventPublisher("epoch-hold")
+	publisher.SetWebPushCandidateSink(pipeline)
+	handlers := NewHandlersWithContextAndEpoch(t.Context(), "epoch-hold")
+	handlers.installEventPublisher(publisher)
+
+	userRow := claudeTranscriptRelayEntry{Type: "user", UUID: "u-hold-1", Message: &struct {
+		ID         string          `json:"id"`
+		Role       string          `json:"role"`
+		StopReason string          `json:"stop_reason"`
+		Content    json.RawMessage `json:"content"`
+	}{ID: "u-hold-1", Role: "user", Content: json.RawMessage(`[{"type":"text","text":"hi"}]`)}}
+	thinkingRow := claudeTranscriptRelayEntry{Type: "assistant", UUID: "a-hold-think", Message: &struct {
+		ID         string          `json:"id"`
+		Role       string          `json:"role"`
+		StopReason string          `json:"stop_reason"`
+		Content    json.RawMessage `json:"content"`
+	}{ID: "a-hold-think", Role: "assistant", StopReason: "end_turn", Content: json.RawMessage(`[{"type":"thinking","thinking":"先想一下"}]`)}}
+	textRow := claudeTranscriptRelayEntry{Type: "assistant", UUID: "a-hold-text", Message: &struct {
+		ID         string          `json:"id"`
+		Role       string          `json:"role"`
+		StopReason string          `json:"stop_reason"`
+		Content    json.RawMessage `json:"content"`
+	}{ID: "a-hold-text", Role: "assistant", StopReason: "end_turn", Content: json.RawMessage(`[{"type":"text","text":"落霞与孤鹜齐飞，天水共长天一色"}]`)}}
+
+	currentTurn := ""
+	running := false
+	var held []claudeHeldTerminalEvent
+	// 扫描批顺序 = 文件顺序：user → thinking(end_turn) → text(end_turn)
+	handlers.deliverClaudeLegacyRow(userRow, "hold-1", "claude", &currentTurn, &running, 4242, &held)
+	handlers.deliverClaudeLegacyRow(thinkingRow, "hold-1", "claude", &currentTurn, &running, 4242, &held)
+	if got := pipeline.Drain(); len(got) != 0 {
+		t.Fatalf("thinking-row terminal must be held, got %d early candidates", len(got))
+	}
+	handlers.deliverClaudeLegacyRow(textRow, "hold-1", "claude", &currentTurn, &running, 4242, &held)
+	if len(held) != 2 {
+		t.Fatalf("held terminals = %d, want 2 (both end_turn rows held)", len(held))
+	}
+	// 批尾统一发布（镜像 relay loop 的 flush）
+	for _, ht := range held {
+		handlers.sendSessionEventWithPushIntent(ht.sessionID, ht.backendID, "turn_completed", ht.data)
+	}
+
+	got := pipeline.Drain()
+	if len(got) != 1 {
+		t.Fatalf("candidates = %d, want 1 (second terminal is no_change, deduped by kernel)", len(got))
+	}
+	if got[0].ContentPreview != "落霞与孤鹜齐飞，天水共长天一色" {
+		t.Fatalf("preview = %q (terminal fired before text landed?)", got[0].ContentPreview)
+	}
+	if got[0].AnchorID != "u-hold-1" {
+		t.Fatalf("anchor = %q, want u-hold-1", got[0].AnchorID)
 	}
 }
