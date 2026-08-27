@@ -35,11 +35,13 @@ var dispatchedRPCMethods = []string{
 // outOfSwitchRPCMethods 是 HandleRPC 里在 dispatchRPC 之前路由的方法（不走 dispatchRPC 的
 // switch，但同样经过 AuthorizeRPC 单一漏斗）。它们也必须在 rpcScopeTable 声明 scope。
 var outOfSwitchRPCMethods = []string{
-	"set_observation_scope",      // handlers.go:837
-	"get_delivery_prekey_status", // handleDeliveryRPC
-	"upload_delivery_prekeys",    // handleDeliveryRPC
-	"get_delivery_chain_head",    // handleDeliveryRPC
-	"enable_relay_pairing",       // handleRelayUpgradeRPC (relay_upgrade.go)
+	"set_observation_scope",        // handlers.go:837
+	"get_delivery_prekey_status",   // handleDeliveryRPC
+	"upload_delivery_prekeys",      // handleDeliveryRPC
+	"get_delivery_chain_head",      // handleDeliveryRPC
+	"enable_relay_pairing",         // handleRelayUpgradeRPC (relay_upgrade.go)
+	"register_push_subscription",   // handleWebPushRPC (handlers.go)
+	"unregister_push_subscription", // handleWebPushRPC (handlers.go)
 }
 
 func TestEveryDispatchedRPCHasScope(t *testing.T) {
@@ -70,12 +72,12 @@ func TestScopeTableCoversAllMethods(t *testing.T) {
 	}
 }
 
-func TestDefaultGrantedScopesHasAllSeven(t *testing.T) {
+func TestDefaultGrantedScopesHasAllEight(t *testing.T) {
 	got := DefaultGrantedScopes()
 	want := map[string]bool{
 		ScopeSessionRead: true, ScopeSessionWrite: true, ScopeConfigRead: true,
 		ScopeConfigWrite: true, ScopeWorkspaceRead: true, ScopeWorkspaceMutate: true,
-		ScopeDeliveryManage: true,
+		ScopeDeliveryManage: true, ScopeWebPushManage: true,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("DefaultGrantedScopes 应有 %d 个 scope，got %d (%v)", len(want), len(got), got)

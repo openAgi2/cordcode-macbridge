@@ -1,0 +1,208 @@
+package gobridge
+
+import (
+	"strings"
+	"unicode/utf8"
+)
+
+// web_push_producer.go — PushIntent producer 位点与样本门（web push 方案 §8.1）。
+//
+// 位点清单（唯一两处允许设置 PushIntent 的 producer）：
+//  1. agent relay loop（relayEvents）：该 loop 天然是 session 的 ingest owner——
+//     存在 relay 时 passiveFeedAllowed 恒 false（agentRelayRunning 互斥），无需重复检查；
+//  2. startPassiveSubscription 被动泵：仅对 passiveFeedAllowed(...) == true 放行的
+//     事件补投（覆盖 PWA 不在线时的外部 turn terminal）。
+// 其余路径（publishPreReducedTimeline、hydrate source、recovery replay、derived
+// question_asked、catalog/control）永不设置——EventPublisher 的 sink 位点对非 kernel
+// 路径的 intent 显式 fail closed（web_push_candidate.go）。
+//
+// 样本门：每个 kind 绑定实现计划 §3.2 的真实样本门 id。样本未归档前 Passed=false，
+// producer 不产生 intent；翻转必须由 owner 归档样本后显式修改本表，不得用 analogous
+// fixture、mock 或缓存样本替代。
+
+// webPushKindGate 声明一个通知类别的样本门状态。
+type webPushKindGate struct {
+	// GateID 是实现计划 §3.2 的真实样本门标识（证据归档编号）。
+	GateID string
+	// Passed 只能在对应真实样本归档并经 owner 审核后置 true。
+	Passed bool
+}
+
+// webPushKindGates 是全部通知类别的样本门表。completion 已于 2026-08-27 基于
+// 6 份真实生产 turn_completed 样本开启（双重提取 6/6 一致，证据归档
+// docs/protocol/samples/web-push/evt-turn-1/，监工指令 3 号 C.3）；permission/
+// input/error 仍待各自真实样本（EVT-PERM-1/EVT-INPUT-1/EVT-ERROR-1），保持关闭。
+var webPushKindGates = map[WebPushNotificationKind]webPushKindGate{
+	WebPushKindCompletion: {GateID: "EVT-TURN-1", Passed: true},
+	WebPushKindPermission: {GateID: "EVT-PERM-1", Passed: false},
+	WebPushKindInput:      {GateID: "EVT-INPUT-1", Passed: false},
+	WebPushKindError:      {GateID: "EVT-ERROR-1", Passed: false},
+}
+
+func webPushKindEnabled(kind WebPushNotificationKind) bool {
+	gate, ok := webPushKindGates[kind]
+	return ok && gate.Passed
+}
+
+// webPushActiveTurnID 从 authoritative kernel 读取该 session 当前 active turn
+// （turn_completed 的 notification key 需要 turnId；relay 数据本身不携带）。
+// kernel 未接线 / 无 state 时返回空——identity 缺失即不发送（§8.2，不得退回
+// session-only key）。
+func webPushActiveTurnID(kernel *ProjectionKernel, backendID, sessionID string) string {
+	return kernel.ActiveTurnID(backendID, sessionID)
+}
+
+// webPushPreviewMaxRunes 是完成通知正文预览的截断上限。iOS 通知横幅正文约显示
+// 两行；更长内容无收益（owner 2026-08-27 决策对齐 Antigravity：正文为真实回复
+// 内容首段预览）。
+const webPushPreviewMaxRunes = 100
+
+// webPushPreviewFromText 把原始助手文本成型为通知预览（空白折叠 + 截断）。
+// kernel 读取路径（webPushCompletedTurnPreview）与 claude relay 累积器
+// （claudeTurnTextAccumulator.preview）共用同一形态。
+func webPushPreviewFromText(text string) string {
+	preview := strings.Join(strings.Fields(text), " ")
+	runes := []rune(preview)
+	if len(runes) > webPushPreviewMaxRunes {
+		return string(runes[:webPushPreviewMaxRunes]) + "…"
+	}
+	return preview
+}
+
+// webPushCompletedTurnPreview 从 authoritative kernel 读取已完成 turn 的助手文本
+// 预览，作为完成通知正文（owner 2026-08-27 决策：显示真实回复内容，对齐
+// Antigravity；此前为固定隐私文案）。只取 Type=="text" 的 parts——reasoning/
+// tool/file/subagent 一律不进通知；空白折叠为单空格，截断 webPushPreviewMaxRunes。
+// turn 未结算时 text parts 可能仍是 progress presentation，全文已在，直接使用。
+// 注意：claude 流式正文的 textAppends 以 PartOps 发送后即清、committed 投影不物化
+// （2026-08-27 生产取证），该路径常返回空——claude 的预览由 relay 循环累积器提供
+// （pushIntentForRelayTerminalWithPreview）。kernel 未接线 / turn 不存在 / 无文本 →
+// 空串，调用方回退固定文案，不编造内容。只读 reducer 快照，不改状态；结果只进
+// 加密 payload，不落日志。
+func webPushCompletedTurnPreview(kernel *ProjectionKernel, backendID, sessionID, turnID string) string {
+	if kernel == nil || turnID == "" {
+		return ""
+	}
+	projection, ok := kernel.reducer.Snapshot(backendID, sessionID)
+	if !ok {
+		return ""
+	}
+	var turn *TurnProjection
+	for i := range projection.Turns {
+		if projection.Turns[i].TurnID == turnID {
+			turn = &projection.Turns[i]
+			break
+		}
+	}
+	if turn == nil || turn.Assistant == nil {
+		return ""
+	}
+	var builder strings.Builder
+	for _, part := range turn.Assistant.Parts {
+		if part.Type != "text" || part.Text == "" {
+			continue
+		}
+		if builder.Len() > 0 {
+			builder.WriteByte(' ')
+		}
+		builder.WriteString(part.Text)
+		if builder.Len() > webPushPreviewMaxRunes*utf8.UTFMax {
+			break
+		}
+	}
+	return webPushPreviewFromText(builder.String())
+}
+
+// pushIntentForRelayTerminal 为 agent relay loop（ingest owner）派生 terminal/permission
+// 事件的 PushIntent。sessionTitle 来自 bridge 内 authoritative 标题缓存（设计 delta
+// §2.2；可为空）。返回 nil = 不发送（样本门未过 / identity 缺失 / 事件不在清单）。
+// 样本门拦下的真实事件会（在采集开关开启时）落脱敏 EVT 样本（设计 delta §3）。
+// anchor 只允许 turn|interaction（§7.3），无已验证样本时 input/error 的 intent 在
+// 样本门前也进不来——这里再加一道 kind 门，双保险。
+//
+// previewOverride 非空时优先作为 completion 正文预览（claude file relay 循环的
+// 事件流累积器提供——kernel committed 投影不物化流式正文，见
+// webPushCompletedTurnPreview 注释）；空串回退 kernel 读取。
+func pushIntentForRelayTerminal(kernel *ProjectionKernel, backendID, sessionID, eventName string, data interface{}, sessionTitle, previewOverride string) *PushIntent {
+	title := webPushSanitizeSessionTitle(sessionTitle)
+	switch eventName {
+	case "turn_completed":
+		if !webPushKindEnabled(WebPushKindCompletion) {
+			captureWebPushSample("EVT-TURN-1", map[string]interface{}{
+				"backend":    backendID,
+				"event":      eventName,
+				"session":    webPushRedactID(sessionID),
+				"activeTurn": webPushRedactID(webPushActiveTurnID(kernel, backendID, sessionID)),
+				"rawShape":   webPushRedactShape(data, 0),
+			})
+			return nil
+		}
+		// 终态事件自身的 turnId 优先：claude batch 事务在 flush 前已结算 turn，
+		// kernel active turn 清空（2026-08-27 19:38 生产取证：ActiveTurnID 返回
+		// 空 → fail-closed 丢通知）。事件未带 turnId 的 backend 回退 kernel
+		// active turn（位点 1 既有行为）。
+		turnID := ""
+		if m, ok := data.(map[string]interface{}); ok {
+			turnID, _ = m["turnId"].(string)
+		}
+		if turnID == "" {
+			turnID = webPushActiveTurnID(kernel, backendID, sessionID)
+		}
+		if turnID == "" {
+			return nil
+		}
+		preview := webPushSanitizePreview(previewOverride)
+		if preview == "" {
+			preview = webPushCompletedTurnPreview(kernel, backendID, sessionID, turnID)
+		}
+		return &PushIntent{
+			Kind:            WebPushKindCompletion,
+			NotificationKey: backendID + "|" + sessionID + "|" + turnID + "|completed",
+			AnchorKind:      "turn",
+			AnchorID:        turnID,
+			SessionTitle:    title,
+			ContentPreview:  preview,
+		}
+	case "permission_request":
+		requestID := ""
+		if m, ok := data.(map[string]interface{}); ok {
+			requestID, _ = m["requestId"].(string)
+			if requestID == "" {
+				requestID, _ = m["itemId"].(string)
+			}
+		}
+		if !webPushKindEnabled(WebPushKindPermission) {
+			captureWebPushSample("EVT-PERM-1", map[string]interface{}{
+				"backend":   backendID,
+				"event":     eventName,
+				"session":   webPushRedactID(sessionID),
+				"requestId": webPushRedactID(requestID),
+				"rawShape":  webPushRedactShape(data, 0),
+			})
+			return nil
+		}
+		if requestID == "" {
+			return nil
+		}
+		return &PushIntent{
+			Kind:            WebPushKindPermission,
+			NotificationKey: backendID + "|" + sessionID + "|" + requestID + "|permission",
+			AnchorKind:      "interaction",
+			AnchorID:        requestID,
+			SessionTitle:    title,
+		}
+	default:
+		return nil
+	}
+}
+
+// pushIntentForPassiveEvent 为被动泵补投路径派生 PushIntent。与 relay 侧共享同一
+// 派生逻辑，但调用前提是 passiveFeedAllowed(...) == true（单一摄入所有者的被动侧
+// 表达：agent relay 在跑时永不为真）。terminal 补投只认 completion；permission
+// 属于交互等待，不属于被动 terminal 收口。
+func pushIntentForPassiveEvent(kernel *ProjectionKernel, backendID, sessionID, eventName string, data interface{}, sessionTitle string) *PushIntent {
+	if eventName != "turn_completed" {
+		return nil
+	}
+	return pushIntentForRelayTerminal(kernel, backendID, sessionID, eventName, data, sessionTitle, "")
+}

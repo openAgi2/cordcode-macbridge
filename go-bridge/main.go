@@ -131,8 +131,27 @@ func Main() {
 	handlers.SetRelayEnabled(*relayEnabled)
 	handlers.SetSessionListLimit(*sessionListLimit)
 	handlers.SetDataDir(*dataDirPath)
+	// 真实样本采集钩子（设计 delta §3）：CCCODE_WEB_PUSH_SAMPLE_CAPTURE=1 才启用，缺省零行为差异。
+	initWebPushSampleCapture(*dataDirPath)
+	var webPushPipeline *WebPushCandidatePipeline
 	if *dataDirPath != "" {
 		handlers.SetTranscriptIndexBaseDir(*dataDirPath + string(filepath.Separator) + "transcript-index")
+		// Web Push store：损坏按 misconfigured fail-closed（capability 关闭、RPC 拒绝 register，
+		// unregister/显式 Reset 仍可恢复）；仅真实 IO 错误才放弃接线（capability 保持关闭）。
+		webPushStore, webPushErr := LoadWebPushStore(*dataDirPath)
+		if webPushErr != nil {
+			slog.Error("go-bridge: web push store 加载失败（capability 保持关闭）", "error", webPushErr)
+		} else {
+			handlers.SetWebPushStore(webPushStore)
+			globalWebPushStore = webPushStore
+			// candidate 管线：ledger 去重 + 有界队列 + deferred 注册表（dispatcher 为 E1）。
+			pipeline := NewWebPushCandidatePipeline(webPushStore)
+			webPushPipeline = pipeline
+			handlers.SetWebPushPipeline(pipeline)
+			if status, detail := webPushStore.Status(); status == WebPushStoreMisconfigured {
+				slog.Warn("go-bridge: web push store misconfigured（register 关闭，设置页可重置）", "detail", detail)
+			}
+		}
 	}
 
 	// Process-wide session pin store (置顶). Lives under the bridge data dir so it shares
@@ -249,6 +268,19 @@ func Main() {
 		slog.Error("go-bridge: Bridge identity 读取失败", "error", err)
 		WriteErrorFrame(RuntimeErrorConfigInvalid, err.Error())
 		os.Exit(1)
+	}
+	if webPushPipeline != nil {
+		webPushPipeline.SetBridgeID(bridgeID)
+		// §8.4：固定 worker 数消费有界队列；发送全在锁外。
+		webPushDispatcher := NewWebPushDispatcher(globalWebPushStore, webPushPipeline, WebPushDispatcherConfig{})
+		// 完成通知正文预览懒刷新（owner 2026-08-27 决策对齐 Antigravity）：发送前重读
+		// authoritative kernel——intent 时刻正文可能尚未入投影（claude thinking 行终态
+		// 先于 text 行、hydrate 窗口内 committed reducer 还是旧基线）。
+		webPushDispatcher.SetPreviewReader(func(candidate WebPushCandidate) string {
+			return handlers.WebPushCompletedTurnPreview(candidate.BackendID, candidate.SessionID, candidate.AnchorID)
+		})
+		webPushDispatcher.Start()
+		defer webPushDispatcher.Stop()
 	}
 	advertisedLocalURL := BuildBridgeLocalURL(ResolveAdvertisedHost(), *port)
 	// advertisedLocalURLs:全部 LAN 直连候选(主候选 advertisedLocalURL 在前),用于 relay-first completion
@@ -431,6 +463,8 @@ func Main() {
 			ack.Bridge.ConnectionPolicy = &server.connectionPolicy
 		}
 		ack.BridgeEpoch = bridgeEpoch
+		// web_push_v1 协商（relay 路径；与 direct server.go handleHello 共用同一 helper）。
+		ApplyWebPushHelloProfile(ack, &hello, handlers.WebPushStoreRef())
 		if ack.Ok && negotiateRelayGzip(conn, hello.Capabilities) {
 			ack.Capabilities[relayGzipCapability] = true
 		}
@@ -860,6 +894,10 @@ func startPassiveSubscription(ctx context.Context, h *Handlers, backendID string
 					Data:      data,
 					Broadcast: true,
 					Offline:   IsDurableMilestone(eventName),
+					// web push §8.1 producer 位点 2：被动泵仅在 passiveFeedAllowed
+					// 放行时补投（单一摄入所有者的被动侧表达——agent relay 在跑时
+					// 该分支不可达）。只认 terminal completion。
+					PushIntent: pushIntentForPassiveEvent(h.projectionKernel, backendID, ev.SessionID, eventName, data, h.webPushTitles.get(backendID, ev.SessionID)),
 				})
 			}
 		}

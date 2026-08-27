@@ -1,0 +1,10 @@
+{
+  "type": "result",
+  "requestId": "req_fixture_0001",
+  "backendId": "codex",
+  "ok": true,
+  "data": {
+    "subscriptionId": "wps_fixture_a1b2c3d4e5f6",
+    "registeredAtMillis": 1767139200000
+  }
+}

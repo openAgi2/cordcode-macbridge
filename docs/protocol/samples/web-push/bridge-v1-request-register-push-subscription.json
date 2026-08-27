@@ -1,0 +1,19 @@
+{
+  "type": "request",
+  "requestId": "req_fixture_0001",
+  "backendId": "codex",
+  "method": "register_push_subscription",
+  "params": {
+    "schemaVersion": 1,
+    "platform": "ios-pwa",
+    "applicationServerKey": "BASE64URL_fixture_65byte_uncompressed_p256_public_key",
+    "subscription": {
+      "endpoint": "https://push.example.comfixture/A_LQ5d-1eBXg7vt5Y2q2B0O9pQZMRRLKZZ",
+      "expirationTime": null,
+      "keys": {
+        "p256dh": "BASE64URL_fixture_p256dh",
+        "auth": "BASE64URL_fixture_auth"
+      }
+    }
+  }
+}

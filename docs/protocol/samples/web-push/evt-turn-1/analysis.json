@@ -1,0 +1,112 @@
+{
+ "gate": "EVT-TURN-1",
+ "eventKind": "turn_completed",
+ "sampleCount": 6,
+ "captureSource": "go-bridge capture hook (CCCODE_WEB_PUSH_SAMPLE_CAPTURE=1), runtime redaction id=prefix8:len",
+ "extractionA_strictPath": [
+  [
+   "opencode-web",
+   "ses_fe2d:30",
+   "msg_9984:36"
+  ],
+  [
+   "opencode-web",
+   "ses_fe2d:30",
+   "msg_2c48:36"
+  ],
+  [
+   "opencode-web",
+   "ses_fe2d:30",
+   "msg_d289:36"
+  ],
+  [
+   "opencode-web",
+   "ses_fe2d:30",
+   "msg_153b:36"
+  ],
+  [
+   "opencode-web",
+   "ses_fe2d:30",
+   "msg_e71a:36"
+  ],
+  [
+   "opencode-web",
+   "ses_fe2d:30",
+   "msg_b3aa:36"
+  ]
+ ],
+ "extractionB_keyPresence": [
+  [
+   [
+    "$.activeTurn",
+    "msg_9984:36"
+   ],
+   [
+    "$.rawShape.turnId",
+    "msg_9984:36"
+   ]
+  ],
+  [
+   [
+    "$.activeTurn",
+    "msg_2c48:36"
+   ],
+   [
+    "$.rawShape.turnId",
+    "msg_2c48:36"
+   ]
+  ],
+  [
+   [
+    "$.activeTurn",
+    "msg_d289:36"
+   ],
+   [
+    "$.rawShape.turnId",
+    "msg_d289:36"
+   ]
+  ],
+  [
+   [
+    "$.activeTurn",
+    "msg_153b:36"
+   ],
+   [
+    "$.rawShape.turnId",
+    "msg_153b:36"
+   ]
+  ],
+  [
+   [
+    "$.activeTurn",
+    "msg_e71a:36"
+   ],
+   [
+    "$.rawShape.turnId",
+    "msg_e71a:36"
+   ]
+  ],
+  [
+   [
+    "$.activeTurn",
+    "msg_b3aa:36"
+   ],
+   [
+    "$.rawShape.turnId",
+    "msg_b3aa:36"
+   ]
+  ]
+ ],
+ "extractionAgreement": "A == B for all 6 samples: rawShape.turnId == kernel activeTurn; backend/session constant",
+ "identityStability": "6/6 distinct turnId, same backend (opencode-web), same session (ses_fe2d:30)",
+ "notificationKeys": [
+  "opencode-web|session(len 30)|turn msg_9984:36|completed",
+  "opencode-web|session(len 30)|turn msg_2c48:36|completed",
+  "opencode-web|session(len 30)|turn msg_d289:36|completed",
+  "opencode-web|session(len 30)|turn msg_153b:36|completed",
+  "opencode-web|session(len 30)|turn msg_e71a:36|completed",
+  "opencode-web|session(len 30)|turn msg_b3aa:36|completed"
+ ],
+ "eventIdSets": "empty for these events: gate was closed at capture time, no notification dispatched; dispatch-time eventId sets are recorded by the WebPushDispatcher ledger (keyHash, EventID) and WP-RESP captures",
+ "gateDecision": "completion producer enabled on this evidence (监工指令3号 C.3)"
+}

@@ -1,5 +1,50 @@
 # Claude Code 冷启动既有 session 首轮流式从头重播：跨仓排查结论
 
+## 2026-08-27 web push 完成通知正文预览：四个叠加缺陷与多生产者抢键教训
+
+owner 要求完成通知对齐 Antigravity（标题=会话名、正文=真实回复预览）。通知能到但正文
+恒为固定文案，连续四轮生产取证（evidence Chrome 真实 turn + `getNotifications()` +
+WP-RESP 账本时间戳）才挖全根因。**单轮日志完全正常、tag/锚点每轮都正确**——这类
+「通知到了但内容不对」的 bug 必须用 ledger 的 `firstAttemptMillis` 对时序，不能只看
+dispatch 是否发生。
+
+四层叠加（commit 6c9d053 → 26ec9c4 → 6603936 → b7d300e，逐层修完才通）：
+
+1. **flush 晚绑定误判**：`cachedPID==0` 在 watcher 先于 `claude -p` 启动的窗口恒真
+   （web 发送流必然如此），thinking 行终态被提前放行、预览恒空。进程死亡要用显式
+   `boundProcessDied` 标志，不能用「PID 为空」当死亡信号。
+2. **多生产者抢 notificationKey**：claude turn 完成有两个事实生产者——agent relay
+   （relayEvents，位点 1）和 file relay watcher（位点 3）。位点 1 在流式中段就声明空
+   预览 intent，ledger 按键去重把数秒后带预览的 flush 丢掉。**谁负责挂起等预览，谁独占
+   终态 intent**：位点 1 对 claude completion 在 `relayKindIs(claude_file)` 时让位。
+3. **非 hydrate 窗口整体丢通知**：batch 路径（`applyClaudeLiveSourceRecord` 非 hydrating
+   分支）终态从不挂起、无人声明 intent；且 batch 事务结算后 `ActiveTurnID` 返回空
+   （`Execution.ActiveTurnID` 清空 + 无 running turn），flush 时 fail-closed。intent 的
+   turnId 必须**优先取终态事件自身**（mapper turnId），kernel active turn 只做回退。
+4. **标题缓存键漂移**：catalog 写入用 agent 名 `claudecode`（`agentBackendID`），通知
+   读取用事件流 `claude`——同一后端两个名字必须归一（`webPushTitleCanonicalBackend`）。
+
+结构性事实（后续排障直接引用，勿重新调查）：
+
+- **kernel committed reducer 不物化 claude 流式正文**：`textAppends` 以 append_text
+  PartOps 发完即清，`turn.Assistant` 到下次 hydrate/checkpoint restore 才重建。所以完成
+  通知的正文预览只能来自**同源 mapper 事件流的累积器**（`claudeTurnTextAccumulator`，
+  512B cap、user_message 重置），不能读 kernel。batch 路径在隔离测试里能物化正文，
+  生产混合路由下到不了——别再沿这个方向挖。
+- 同一 claude turn 的 transcript 里 thinking 行与 text 行都带 `stop_reason=end_turn`，
+  mapper 各发一次终态；flush 必须按 turn 去重，不能依赖「首个发布结算后第二个
+  ActiveTurnID 为空」的偶然去重。
+- claude web turn 的完成事件**两条 relay 都会看到**（stdout agent relay + transcript
+  file relay 同时活跃，`relayKindClaudeFile` 提升后 agent relay 继续跑）——「某路径不经
+  relayEvents」的旧结论按当时代码成立，现在两者并存。
+
+验证方法：evidence Chrome（`/tmp/cccode-evidence-chrome`，CDP 9233）发真实 turn，读
+`navigator.serviceWorker.getRegistration().getNotifications()`；tag = `cc_` +
+sha256(`backend|session|turn|completed`)[:16] 可对 transcript turn uuid 精确核对锚点；
+`web-push-samples/WP-RESP.jsonl` + `web-push-delivery-ledger.json` 的
+`firstAttemptMillis` 判定哪个 intent 赢了抢键。终态验收：title=`CordCode · Greeting`、
+body=真实回复、tag 精确匹配（owner 真机 ✅）。
+
 ## 2026-08-24 codex-web 共享 daemon 拓扑：共享 server 与私有 stdio 之别
 
 ### 正确的拓扑（2026-08-24 之前文档写错过）

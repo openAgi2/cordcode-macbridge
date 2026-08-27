@@ -631,6 +631,8 @@ func (s *Server) handleHello(conn *Conn, connection Connection, msg *WireMessage
 		ack.Bridge.ConnectionPolicy = &s.connectionPolicy
 	}
 	ack.BridgeEpoch = s.bridgeEpoch
+	// web_push_v1 协商（direct 路径；与 relay 路径共用 ApplyWebPushHelloProfile，语义一致）。
+	ApplyWebPushHelloProfile(ack, &hello, s.handlers.WebPushStoreRef())
 	var replay []EventMessage
 	if s.recoveryEnabled && helloSupportsRecovery(&hello) && ack.Ok {
 		plan, events, err := s.prepareRecovery(connection, &hello)

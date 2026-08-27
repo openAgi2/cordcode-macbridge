@@ -35,6 +35,10 @@ class SettingsViewModel: ObservableObject {
     var onCredentialsChanged: (() -> Void)
     var managementAPIClient: ManagementAPIClient?
 
+    /// Web Push 维护模型（设置页高级 Tab）。仅在 management client 就绪后创建；
+    /// nil = runtime 未附着，UI 不渲染该区块。
+    @Published private(set) var webPushMaintenance: WebPushMaintenanceViewModel?
+
     var isCredentialsDirty: Bool {
         opencodeUser != savedOpenCodeUser
             || opencodePass != savedOpenCodePass
@@ -172,6 +176,14 @@ class SettingsViewModel: ObservableObject {
                 }
             }
         }
+    }
+
+    /// 幂等创建并加载 Web Push 维护状态。状态读取失败会在模型内 fail-closed 呈现。
+    func loadWebPushMaintenance() {
+        guard webPushMaintenance == nil, let client = managementAPIClient else { return }
+        let model = WebPushMaintenanceViewModel(api: client)
+        webPushMaintenance = model
+        Task { await model.loadStatus() }
     }
 
     func loadDisplayName() {

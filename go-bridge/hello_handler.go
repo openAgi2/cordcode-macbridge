@@ -50,6 +50,10 @@ type HelloAckMessage struct {
 	// GrantedScopes 是服务端授予该设备的 RPC scope 集合（§6.3，additive 可选字段）。
 	// 配对设备默认拥有全部 scope；客户端可据此做 UI gating。与 RequestedScopes 对应。
 	GrantedScopes []string `json:"grantedScopes,omitempty"`
+	// WebPush 是 additive web_push_v1 协商结果（ApplyWebPushHelloProfile 填充）。
+	// 仅当客户端声明 capability 且 store 接线/健康时下发；misconfigured 时只带
+	// schemaVersion+status，不带公钥。未声明 capability 的旧客户端收不到该字段。
+	WebPush *WebPushHelloProfile `json:"webPush,omitempty"`
 }
 
 type BridgeAffectedSession struct {

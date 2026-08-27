@@ -16,6 +16,7 @@ struct SettingsView: View {
     @State private var showManualAuthentication = false
     @State private var showPassword = false
     @State private var showRegenerateConfirmation = false
+    @State private var showWebPushResetConfirmation = false
     /// 渐进披露：默认说明 OpenCode 由 CordCode Link 自动托管；选择「使用自己的 OpenCode 服务」后才展开表单。
     @State private var useOwnOpenCode = false
 
@@ -73,6 +74,31 @@ struct SettingsView: View {
         } message: {
             Text(L10n.settingsRegenerateConfirmMessage)
         }
+        .confirmationDialog(
+            webPushResetConfirmTitle,
+            isPresented: $showWebPushResetConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(webPushResetConfirmButtonTitle, role: .destructive) {
+                guard let webPush = viewModel.webPushMaintenance else { return }
+                Task { await webPush.performResetAfterConfirmation() }
+            }
+            Button(L10n.cancel, role: .cancel) {}
+        } message: {
+            Text(webPushResetConfirmMessage)
+        }
+    }
+
+    /// 重置确认文案必须携带真实待删数量；状态未知时按钮不可用（不虚构数量）。
+    private var webPushResetConfirmTitle: String { L10n.webPushResetConfirmTitle }
+
+    private var webPushResetConfirmButtonTitle: String { L10n.webPushReset }
+
+    private var webPushResetConfirmMessage: String {
+        guard let webPush = viewModel.webPushMaintenance, let count = webPush.pendingRemovalCount else {
+            return L10n.webPushResetConfirmMessage
+        }
+        return "\(L10n.webPushResetConfirmMessage)（\(L10n.webPushSubscriptionCount): \(count)）"
     }
 
     // MARK: - 通用
@@ -193,11 +219,78 @@ struct SettingsView: View {
                 } else {
                     openCodeConfigurationGroup
                 }
+
+                Divider()
+
+                webPushMaintenanceGroup
             }
         }
         .onAppear {
             // 进入高级页时同步：若已是非托管态，自动展开表单。
             if isOpenCodeConfiguredAwayFromManaged { useOwnOpenCode = true }
+            viewModel.loadWebPushMaintenance()
+        }
+    }
+
+    // MARK: - Web Push 维护（misconfigured 状态 + 显式重置）
+
+    @ViewBuilder
+    private var webPushMaintenanceGroup: some View {
+        if let webPush = viewModel.webPushMaintenance, webPush.showsMaintenanceSection {
+            settingsGroup(L10n.webPushSectionTitle) {
+                HStack(spacing: 10) {
+                    switch webPush.health {
+                    case .healthy:
+                        InlineFeedback(style: .success, message: L10n.webPushStatusHealthy)
+                    case .misconfigured:
+                        InlineFeedback(style: .error, message: L10n.webPushStatusMisconfigured)
+                    case .unconfigured:
+                        InlineFeedback(style: .warning, message: L10n.webPushStatusUnconfigured)
+                    case .unknown:
+                        InlineFeedback(style: .warning, message: L10n.webPushStatusUnknown)
+                    }
+                }
+                switch webPush.phase {
+                case .loadingStatus:
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                    }
+                case .resetting:
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text(L10n.settingsSaving).font(.caption).foregroundStyle(.secondary)
+                    }
+                case .succeeded(let removed, _):
+                    InlineFeedback(style: .success, message: "\(L10n.webPushResetSucceeded)（\(removed)）")
+                case .failed(let message):
+                    InlineFeedback(style: .error, message: message)
+                case .idle, .ready:
+                    EmptyView()
+                }
+                settingRow(L10n.webPushSubscriptionCount) {
+                    Text("\(webPush.subscriptionCount)")
+                }
+                if !webPush.vapidKeyFingerprint.isEmpty {
+                    settingRow(L10n.webPushKeyFingerprint) {
+                        Text(webPush.vapidKeyFingerprint)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                }
+                HStack(spacing: 12) {
+                    Button(role: .destructive) {
+                        showWebPushResetConfirmation = true
+                    } label: {
+                        Text(L10n.webPushReset)
+                    }
+                    .disabled(!webPush.canTriggerReset)
+                }
+                .padding(.leading, labelWidth + 16)
+                Text(L10n.webPushHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, labelWidth + 16)
+            }
         }
     }
 

@@ -139,7 +139,15 @@ upload_delivery_prekeys
 get_delivery_chain_head
 set_observation_scope
 enable_relay_pairing
+register_push_subscription
+unregister_push_subscription
 ```
+
+`register_push_subscription` / `unregister_push_subscription` are **bridge-level** RPCs
+(`web_push_v1`, dedicated section below). They use the same canonical request envelope —
+`backendId` is required by the envelope, but the server dispatches them before agent routing
+and ignores its business semantics. There is deliberately **no** second, `backendId`-less
+request shape for these methods.
 
 `set_observation_scope` result `data` (schemaRevision `2026-08-23`) is additive:
 `{ok, sessions:[{sessionId, subscribed, attached, error?}]}`. `ok` requires Subscribe
@@ -148,7 +156,7 @@ See relay-v1 §9.2.
 
 ## RPC Scopes (§6.3)
 
-Every backend RPC is mapped to one of seven scope tokens. The scope table is the single
+Every backend RPC is mapped to one of eight scope tokens. The scope table is the single
 source of truth in `go-bridge/rpc_scopes.go` (`rpcScopeTable`); the method-name list above
 and this section are its human-readable mirror. The CI guards
 `TestEveryDispatchedRPCHasScope` / `TestScopeTableCoversAllMethods` keep the table and the
@@ -178,10 +186,11 @@ scope only to keep the CI guard satisfied.
 | `workspace.read` | `get_workspace_diff`, `read_file_v2`, `list_directory`, `get_git_context`, `fetch_content_chunk`, `check_pull_request_support` | ✅ |
 | `workspace.mutate` | `checkout_git_branch`, `create_git_branch`, `create_git_worktree`, `create_pull_request`, `commit_and_push`, `list_projects` | ✅ (recommend an owner per-action confirmation on top) |
 | `delivery.manage` | `get_delivery_prekey_status`, `upload_delivery_prekeys`, `get_delivery_chain_head`, `enable_relay_pairing` | ✅ (own device chain only) |
+| `web_push.manage` | `register_push_subscription`, `unregister_push_subscription` | ✅ (own device subscription only; unregister stays reachable in `misconfigured`) |
 | _(empty — unconditional)_ | `hello` (legacy dispatch placeholder) | ✅ (no scope required, else handshake deadlock) |
 
 **Backward compatibility.** A paired device with no `grantedScopes` recorded (every existing
-persisted record) is treated as holding all seven scopes, so this change does not alter the
+persisted record) is treated as holding all eight scopes, so this change does not alter the
 current authorization semantics. The value is structural: a future restricted pairing (e.g.
 read-only iPad), a hard gate forcing every new RPC through security review, and client-side
 UI gating off `hello_ack.grantedScopes`.
@@ -207,7 +216,7 @@ additive fields; old clients that do not send/parse them are unaffected.
 
 When the device record has explicit `grantedScopes`, `hello_ack.grantedScopes` echoes that
 restricted set; otherwise it echoes the full default set (`DefaultGrantedScopes`), so a normal
-paired client always observes all seven scopes today.
+paired client always observes all eight scopes today.
 
 ### Claude resume ownership preflight
 
@@ -1715,3 +1724,176 @@ the same session ID discovered under different projects / CODEX_HOME values does
 are computed by MacBridge, not iOS. Claude pin state lives in the existing `.cc-connect-session-meta`
 sidecar (delete cleanup is automatic); Codex/OpenCode pin state lives in a MacBridge-owned index and
 their `DeleteSession` paths clean the pin entry on delete.
+
+## Web Push (`web_push_v1`)
+
+**Status: contract committed, producers disabled until real-sample gates pass.**
+Remote Web PWA background notifications use standard Web Push (RFC 8030/8291/8292). The
+running MacBridge sends directly to the browser-provided `PushSubscription` endpoint; CordCode
+Relay never sees notification plaintext and never holds subscriptions. Full design rationale:
+`cordcode-ios/docs/2026-08-26-remote-web-push-notification-implementation-plan.md`.
+
+### Capability negotiation (hello / hello_ack, additive)
+
+The client declares `web_push_v1` in `hello.capabilities`. The server echoes
+`capabilities.web_push_v1 = true` and adds a `webPush` object **only** when the client
+declared the capability AND the server supports Web Push AND the local VAPID key store is
+healthy:
+
+```json
+{
+  "type": "hello_ack",
+  "ok": true,
+  "capabilities": { "web_push_v1": true },
+  "webPush": {
+    "schemaVersion": 1,
+    "vapidPublicKey": "<base64url-unpadded-65-byte-uncompressed-P256-point>"
+  }
+}
+```
+
+Rules:
+
+- `vapidPublicKey` is the per-bridge stable VAPID identity, 65-byte uncompressed P-256 point,
+  base64url without padding. The private key never leaves the MacBridge dataDir.
+- `misconfigured` (key file corrupt, or subscriptions exist but key file lost): the server
+  returns `capabilities.web_push_v1 = false` and MAY additively include
+  `"webPush": {"schemaVersion": 1, "status": "misconfigured"}` **without any public key**.
+  `register_push_subscription` is rejected; `unregister_push_subscription` stays reachable so
+  authenticated devices can remove their own records (it does not need the private key).
+- Clients that do not declare `web_push_v1` receive neither the capability echo nor `webPush`
+  (old clients ignore both — pure additive).
+- Direct `server.go` hello and Relay `main.go` relayHelloHandler use the same capability/
+  profile helper; both paths MUST return identical negotiation semantics.
+
+### RPC: `register_push_subscription`
+
+Canonical request envelope (`backendId` required by the envelope; server dispatches before
+agent routing and ignores its business semantics — no second envelope shape):
+
+```json
+{
+  "type": "request",
+  "requestId": "req_<unique>",
+  "backendId": "<current-backend-id>",
+  "method": "register_push_subscription",
+  "params": {
+    "schemaVersion": 1,
+    "platform": "ios-pwa",
+    "applicationServerKey": "<same-public-key-as-hello-ack>",
+    "subscription": {
+      "endpoint": "<opaque-https-url>",
+      "expirationTime": null,
+      "keys": { "p256dh": "<base64url>", "auth": "<base64url>" }
+    }
+  }
+}
+```
+
+Success result `data`:
+
+```json
+{ "subscriptionId": "wps_<sha256-prefix>", "registeredAtMillis": 0 }
+```
+
+The server never trusts `deviceId`/`bridgeId` from params — identity comes from the
+authenticated connection. Upsert key is the authenticated `deviceId`; a new subscription for
+the same device atomically replaces the old record. The client MUST send the same
+`applicationServerKey` it received in `hello_ack.webPush.vapidPublicKey`.
+
+Error codes:
+
+| code | condition | retryable |
+|---|---|---|
+| `web_push.unsupported` | capability not enabled (incl. `misconfigured`) | false |
+| `web_push.invalid_subscription` | endpoint/key/encoding/length invalid; non-`https` endpoint; byte limits exceeded | false |
+| `web_push.vapid_key_mismatch` | `applicationServerKey` differs from this bridge's key | false |
+| `web_push.storage_failed` | 0600 atomic store write failed | true |
+| `forbidden` | device lacks `web_push.manage` scope (existing scope policy error) | false |
+
+Limits: endpoint must be `https`; host is not hardcoded (browsers return opaque endpoints).
+Explicit byte limits apply to endpoint, keys and total params size; violations return
+`web_push.invalid_subscription`. Logs record only `subscriptionId` and endpoint host
+category — never endpoint path/query, keys, or `auth`.
+
+### RPC: `unregister_push_subscription`
+
+```json
+{
+  "type": "request",
+  "requestId": "req_<unique>",
+  "backendId": "<current-backend-id>",
+  "method": "unregister_push_subscription",
+  "params": { "schemaVersion": 1, "subscriptionId": "wps_<id>" }
+}
+```
+
+Result `data`: `{ "removed": true|false }` — idempotent; a missing record is still success
+with `removed:false`. It operates only on the authenticated device's own record. A
+`misconfigured` VAPID state MUST NOT block this recovery RPC.
+
+### Service Worker push payload (schema v1)
+
+The MacBridge-side plaintext (RFC 8291-encrypted before transport) is fixed-shape:
+
+```json
+{
+  "schemaVersion": 1,
+  "notification": {
+    "title": "任务已完成",
+    "body": "点击打开 CordCode 查看结果",
+    "tag": "cc_<stable-notification-key-hash>"
+  },
+  "target": {
+    "bridgeId": "brg_<id>",
+    "backendId": "codex",
+    "sessionId": "<id>",
+    "eventId": "<bridgeEpoch:seq>",
+    "anchor": null
+  }
+}
+```
+
+- `notification.title`/`body` come from a fixed local table keyed by notification kind; they
+  are never concatenated from agent text, session titles, tool names or error bodies.
+- `anchor` is only ever a verified `{"kind":"turn","id":"..."}` or
+  `{"kind":"interaction","id":"..."}`; without a validated sample it MUST be `null`.
+- The Service Worker MUST call `event.waitUntil(showNotification(...))` for every `push`
+  event; an invalid/oversized payload still shows a fixed error notification
+  (`CordCode 推送数据错误` / `打开 CordCode 查看连接状态`). There is no silent branch
+  (`userVisibleOnly` contract).
+- `tag` replaces same-key notifications; business-level dedup is the MacBridge delivery
+  ledger's job, not the tag.
+
+### `notificationclick` deep link (client-side)
+
+The Service Worker forwards the full target to the window:
+
+```json
+{
+  "type": "CORDCODE_PUSH_NAVIGATE_V1",
+  "target": {
+    "bridgeId": "...", "backendId": "...", "sessionId": "...", "eventId": "...", "anchor": null
+  }
+}
+```
+
+Existing controlled window → `postMessage` then `focus()`; no window →
+`openWindow("/web/?pushTarget=<base64url-json>")`. The click URL is always built from the
+local fixed `/web/` path — never read from the payload. The target never contains
+credentials, directories, message bodies, or endpoints.
+
+### Lifecycle & security invariants
+
+- One PWA install has exactly one active bridge owning its notification subscription at a
+  time; switching active bridge requires key check → unsubscribe old → subscribe new.
+- Revoking/deleting a trusted device deletes its subscription in the same transaction;
+  delivery to revoked devices stops.
+- The VAPID private key, subscription endpoint path/query, `p256dh`, `auth`, relay
+  credentials and device tokens never enter logs, analytics, notification bodies or test
+  snapshots.
+- Supported notification kinds (title/body fixed): `turn_completed` → 任务已完成/点击打开
+  CordCode 查看结果; `permission_request` → 需要操作审批/点击打开 CordCode 处理请求;
+  `user_input_requested` (sample-gated) → Agent 正在等待回复/点击打开 CordCode 回答;
+  `turn_error` (sample-gated) → 任务异常中断/点击打开 CordCode 查看详情. Kinds without
+  archived real samples stay disabled and MUST NOT be enabled via analogous fixtures.

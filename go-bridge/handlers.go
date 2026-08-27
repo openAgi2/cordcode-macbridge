@@ -101,6 +101,15 @@ type Handlers struct {
 	agentRelayGen           map[string]uint64
 	claudeSourceCorrelation *claudeSourceCorrelationTracker
 	deliveryPrekeys         *PrekeyStore
+	// webPush 是 per-bridge VAPID/subscription/ledger store（web_push_store.go）。
+	// nil = 未接线（无 dataDir 的 dev 模式 / 未注入的单元测试）→ capability 不 echo、RPC 关闭。
+	webPush *WebPushStore
+	// webPushPipeline 是 PushIntent→candidate 管线（web_push_candidate.go）。
+	// nil = 未接线：一切通知意图 fail closed。
+	webPushPipeline *WebPushCandidatePipeline
+	// webPushTitles 是通知标题缓存（web_push_titles.go，设计 delta §2.2）。
+	// 唯一写入来源是真实 list_sessions 响应；nil 安全（读取返回空 → 无标题回退）。
+	webPushTitles           *webPushTitleCache
 	observation             *ObservationManager
 	relayOutbox             *OutboxManager
 	presentation            *PresentationManager
@@ -204,6 +213,7 @@ func newHandlersWithContext(ctx context.Context, bridgeEpoch string) *Handlers {
 		pendingClaudeRuntime:    make(map[string]claudeRuntimeSelection),
 		transcriptIndex:         transcriptindex.NewStore(defaultTranscriptIndexDir()),
 		capabilityPolicy:        NewCapabilityPolicy(),
+		webPushTitles:           newWebPushTitleCache(),
 		relayEnabled:            true,
 		sessionListLimit:        defaultSessionListLimit,
 		bridgeOwnedTurns:        make(map[string]struct{}),
@@ -1013,6 +1023,9 @@ func (h *Handlers) HandleRPC(conn Connection, msg WireMessage) {
 	if h.handleRelayUpgradeRPC(conn, msg) {
 		return
 	}
+	if h.handleWebPushRPC(conn, msg) {
+		return
+	}
 	if msg.Method == "set_observation_scope" {
 		h.handleSetObservationScope(conn, msg)
 		return
@@ -1298,6 +1311,163 @@ func (h *Handlers) handleDeliveryRPC(conn Connection, msg WireMessage) bool {
 			head = &DeliveryChainHead{}
 		}
 		conn.SendResult(msg.RequestID, head, nil)
+	}
+	return true
+}
+
+// SetWebPushStore 注入 web push store（main.go 启动时从 dataDir 加载）。
+// nil 或未调用 = 未接线：hello 不 echo capability，两个 RPC 返回 web_push.unsupported。
+func (h *Handlers) SetWebPushStore(store *WebPushStore) {
+	h.mu.Lock()
+	h.webPush = store
+	h.mu.Unlock()
+}
+
+// SetWebPushPipeline 注入 candidate 管线（main.go 启动时；同时挂到 EventPublisher）。
+func (h *Handlers) SetWebPushPipeline(pipeline *WebPushCandidatePipeline) {
+	h.mu.Lock()
+	h.webPushPipeline = pipeline
+	h.mu.Unlock()
+	if h.eventPublisher != nil {
+		h.eventPublisher.SetWebPushCandidateSink(pipeline)
+	}
+}
+
+// markHydrateFailed 统一 MarkFailed 调用点：kernel 失败后把未提交的 deferred
+// web push candidate 显式丢弃（§8.1：不假发送，记脱敏诊断）。
+func (h *Handlers) markHydrateFailed(backendID, sessionID, code, message string, retryable bool) {
+	_, deferred := h.projectionKernel.MarkFailed(backendID, sessionID, code, message, retryable)
+	if len(deferred) > 0 {
+		h.mu.Lock()
+		pipeline := h.webPushPipeline
+		h.mu.Unlock()
+		if pipeline != nil {
+			pipeline.DiscardDeferred(deferred)
+		}
+	}
+}
+
+// releaseDeferredPushCandidates 在 hydrate commit 成功后（Kernel 锁外）释放被接受的
+// deferred candidate（§8.1：commit 后恰好入队一次，commit 前不入队）。
+func (h *Handlers) releaseDeferredPushCandidates(appliedEventIDs []string) {
+	if len(appliedEventIDs) == 0 {
+		return
+	}
+	h.mu.Lock()
+	pipeline := h.webPushPipeline
+	h.mu.Unlock()
+	if pipeline != nil {
+		pipeline.ReleaseDeferred(appliedEventIDs)
+	}
+}
+
+// WebPushStoreRef 返回当前接线的 web push store（hello 协商用；可能为 nil）。
+func (h *Handlers) WebPushStoreRef() *WebPushStore {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.webPush
+}
+
+// webPushWireError 把 webPushValidationError 映射为 wire error（retryable 语义与
+// canonical 错误码表一致）。
+func webPushWireError(err *webPushValidationError) *WireError {
+	retryable := err.retryable
+	return &WireError{Code: err.code, Message: err.message, Retryable: &retryable}
+}
+
+// handleWebPushRPC 处理认证 channel 内、与 backend 无关的 web push 管理请求。
+// 沿用 canonical request envelope（backendId 由 envelope 自身约束；本 handler 在
+// agent 路由前分发并忽略该字段的业务语义，不产生第二种 envelope 形状）。
+// 身份只取 authenticated connection 的 deviceID，绝不信任 params 内的 deviceId/bridgeId。
+func (h *Handlers) handleWebPushRPC(conn Connection, msg WireMessage) bool {
+	switch msg.Method {
+	case WebPushMethodRegister, WebPushMethodUnregister:
+	default:
+		return false
+	}
+
+	store := h.WebPushStoreRef()
+	device := conn.AuthedDevice()
+	if device == nil {
+		conn.SendResult(msg.RequestID, nil, &WireError{Code: "auth.required", Message: "web push RPC requires an authenticated device"})
+		return true
+	}
+
+	switch msg.Method {
+	case WebPushMethodRegister:
+		if store == nil {
+			conn.SendResult(msg.RequestID, nil, webPushWireError(&webPushValidationError{code: WebPushErrUnsupported, message: "web push is not configured on this bridge"}))
+			return true
+		}
+		if status, _ := store.Status(); status != WebPushStoreHealthy {
+			conn.SendResult(msg.RequestID, nil, webPushWireError(&webPushValidationError{code: WebPushErrUnsupported, message: "web push store is " + string(status)}))
+			return true
+		}
+		var params RegisterPushSubscriptionParams
+		if err := json.Unmarshal(msg.Params, &params); err != nil {
+			conn.SendResult(msg.RequestID, nil, webPushWireError(webPushInvalid("invalid register_push_subscription params")))
+			return true
+		}
+		record, verr := ValidateRegisterPushSubscriptionParams(&params, len(msg.Params), store.VapidPublicKey(), time.Now().UTC().UnixMilli())
+		if verr != nil {
+			conn.SendResult(msg.RequestID, nil, webPushWireError(verr))
+			return true
+		}
+		subscriptionID, err := store.Register(device.DeviceID, *record)
+		if err != nil {
+			if wpErr, ok := err.(*webPushValidationError); ok {
+				conn.SendResult(msg.RequestID, nil, webPushWireError(wpErr))
+				return true
+			}
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "internal_error", Message: err.Error()})
+			return true
+		}
+		var registeredAt int64
+		for _, r := range store.Subscriptions() {
+			if r.SubscriptionID == subscriptionID {
+				registeredAt = r.CreatedAt
+				break
+			}
+		}
+		// 日志只记 subscriptionId 与 endpoint host category——不记 endpoint path/query、keys、auth。
+		slog.Info("go-bridge: web push subscription registered",
+			"subscriptionId", subscriptionID,
+			"endpointHostCategory", WebPushEndpointHostCategory(record.Endpoint),
+			"devicePrefix", safeID(device.DeviceID))
+		// WP-SUB-1/LOCAL-1 采样（设计 delta §3）：真实 register 的脱敏记录，供样本门归档。
+		captureWebPushSample("WP-SUB-1", map[string]interface{}{
+			"subscriptionId":       webPushRedactID(subscriptionID),
+			"endpointHostCategory": WebPushEndpointHostCategory(record.Endpoint),
+			"platform":             record.Platform,
+			"device":               webPushRedactID(device.DeviceID),
+		})
+		conn.SendResult(msg.RequestID, &RegisterPushSubscriptionResult{SubscriptionID: subscriptionID, RegisteredAtMillis: registeredAt}, nil)
+	case WebPushMethodUnregister:
+		if store == nil {
+			conn.SendResult(msg.RequestID, nil, webPushWireError(&webPushValidationError{code: WebPushErrUnsupported, message: "web push is not configured on this bridge"}))
+			return true
+		}
+		var params UnregisterPushSubscriptionParams
+		if err := json.Unmarshal(msg.Params, &params); err != nil {
+			conn.SendResult(msg.RequestID, nil, webPushWireError(webPushInvalid("invalid unregister_push_subscription params")))
+			return true
+		}
+		subscriptionID, verr := ValidateUnregisterPushSubscriptionParams(&params, len(msg.Params))
+		if verr != nil {
+			conn.SendResult(msg.RequestID, nil, webPushWireError(verr))
+			return true
+		}
+		removed, err := store.Unregister(device.DeviceID, subscriptionID)
+		if err != nil {
+			if wpErr, ok := err.(*webPushValidationError); ok {
+				conn.SendResult(msg.RequestID, nil, webPushWireError(wpErr))
+				return true
+			}
+			conn.SendResult(msg.RequestID, nil, &WireError{Code: "internal_error", Message: err.Error()})
+			return true
+		}
+		slog.Info("go-bridge: web push subscription unregistered", "removed", removed, "devicePrefix", safeID(device.DeviceID))
+		conn.SendResult(msg.RequestID, &UnregisterPushSubscriptionResult{Removed: removed}, nil)
 	}
 	return true
 }
@@ -2722,6 +2892,43 @@ func (h *Handlers) sendSessionEvent(sessionID, backendID, eventName string, data
 	})
 }
 
+// sendSessionEventWithPushIntent 是 sendSessionEvent 的终态变体（web push §8.1 producer
+// 位点 3）：claude/codex 等 session file relay 的 turn_completed/turn_error 逐行终态投递
+// 是这些 session 的事实 ingest owner——agent relay loop（位点 1）没有消费同一终态
+// （claude web turn 的 turn_completed 不经 relayEvents），passive 泵（位点 2）经
+// passiveFeedAllowed 互斥不会补投。2026-08-27 生产取证：真实 claude web turn 完成后
+// 无任何 dispatch，正是因为该路径不声明 intent。样本门未过时
+// pushIntentForRelayTerminal 恒为 nil（fail closed）。
+func (h *Handlers) sendSessionEventWithPushIntent(sessionID, backendID, eventName string, data interface{}) {
+	h.sendSessionEventWithPushIntentPreview(sessionID, backendID, eventName, data, "")
+}
+
+// sendSessionEventWithPushIntentPreview 在 sendSessionEventWithPushIntent 基础上携带
+// 完成正文预览覆盖（claude relay 循环累积器提供，见 pushIntentForRelayTerminal）。
+func (h *Handlers) sendSessionEventWithPushIntentPreview(sessionID, backendID, eventName string, data interface{}, previewOverride string) {
+	h.mu.Lock()
+	dir := h.sessions.directoryForSession(sessionID)
+	h.mu.Unlock()
+	h.publishEvent(LogicalEvent{
+		SessionID: sessionID,
+		BackendID: backendID,
+		Event:     eventName,
+		Data:      data,
+		Directory: dir,
+		Broadcast: true,
+		Offline:   IsDurableMilestone(eventName),
+		PushIntent: pushIntentForRelayTerminal(h.projectionKernel, backendID, sessionID, eventName, data, h.webPushTitles.get(backendID, sessionID), previewOverride),
+	})
+}
+
+// WebPushCompletedTurnPreview 是 dispatcher 发送前预览懒刷新的注入点（owner
+// 2026-08-27 决策：完成通知正文为真实回复预览）。intent 计算时刻正文可能尚未入
+// authoritative kernel；发送发生在 worker 锁外、通常晚于投影提交，此时重读可拿到
+// 完整正文。见 WebPushDispatcher.SetPreviewReader。
+func (h *Handlers) WebPushCompletedTurnPreview(backendID, sessionID, turnID string) string {
+	return webPushCompletedTurnPreview(h.projectionKernel, backendID, sessionID, turnID)
+}
+
 // broadcastIdleState 向订阅者推送 session_state_changed: idle。
 func (h *Handlers) broadcastIdleState(sessionID, backendID string) {
 	h.mu.Lock()
@@ -3201,6 +3408,8 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 			wireSessions = filterWireSessionsByDirectory(wireSessions, requestedDir)
 		}
 		result := paginateSessionList(wireSessions, extractStringParam(msg, "cursor"), limit)
+		// 通知标题缓存（设计 delta §2.2）：标题只能来自真实 catalog 响应。
+		h.webPushTitles.noteFromWire(agentBackendID(agent), result)
 		metrics.wireMapping += time.Since(mappingStarted)
 		if ws, ok := result["sessions"].([]map[string]interface{}); ok {
 			metrics.resultCount = len(ws)
@@ -3244,6 +3453,8 @@ func (h *Handlers) handleListSessions(conn Connection, msg WireMessage, agent co
 	if ws, ok := result["sessions"].([]map[string]interface{}); ok {
 		metrics.resultCount = len(ws)
 	}
+	// 通知标题缓存（设计 delta §2.2）：claude catalog 分支同源写入。
+	h.webPushTitles.noteFromWire("claudecode", result)
 
 	metrics.sendResult(conn, msg.RequestID, result, nil)
 }

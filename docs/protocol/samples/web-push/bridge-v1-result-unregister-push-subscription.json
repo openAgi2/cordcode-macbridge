@@ -1,0 +1,7 @@
+{
+  "type": "result",
+  "requestId": "req_fixture_0002",
+  "backendId": "codex",
+  "ok": true,
+  "data": { "removed": true }
+}

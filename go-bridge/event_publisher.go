@@ -37,6 +37,9 @@ type LogicalEvent struct {
 	// CatalogGeneration is observation-only correlation for sessions_changed. It is never
 	// encoded into EventMessage and therefore cannot change the bridge protocol.
 	CatalogGeneration uint64
+	// PushIntent（web push §8.1）是不进 wire 的 producer 声明：该事件值得通知。
+	// 只有位点清单允许的 live producer 可设置；默认 nil = 不发送。
+	PushIntent *PushIntent
 }
 
 type eventOutboundFrame struct {
@@ -245,6 +248,16 @@ type EventPublisher struct {
 	// targets. Handlers rebinds broadcaster subscriptions from device registry +
 	// observation so mid-turn EMITs are not permanently dropped after path thrash.
 	rebindTargets func(backendID, sessionID string) int
+	// webPushSink（web push §8.1）接收 (EventMessage, PushIntent)。nil = 未接线，
+	// 一切通知意图静默不产生 candidate（fail closed，不冒充发送）。
+	webPushSink WebPushCandidateSink
+}
+
+// SetWebPushCandidateSink 注入 candidate sink（main.go 启动时；publisher 锁外调用）。
+func (p *EventPublisher) SetWebPushCandidateSink(sink WebPushCandidateSink) {
+	p.mu.Lock()
+	p.webPushSink = sink
+	p.mu.Unlock()
 }
 
 type RecoveryAdmission struct {
@@ -848,6 +861,8 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 	// SessionProjection under the publisher ordering lock. Projection revision advances only
 	// when the reducer commits a mutation; it is distinct from transport perSessionSeq.
 	projectionApplied := false
+	kernelIngest := ProjectionIngestNoChange
+	kernelIngested := false
 	if mode == publishControlPlaneEvent || mode == publishPreReducedTimelineEvent {
 		// Catalog control-plane events intentionally do not enter the timeline.
 		// Pre-reduced timeline events have already committed through the Kernel transaction.
@@ -855,11 +870,42 @@ func (p *EventPublisher) publish(logical LogicalEvent, mode eventPublishMode) (E
 		// Strictly one-way: canonical user_input -> legacy question presentation. The derived raw
 		// frame is never allowed to become a second projection writer.
 	} else if p.kernel != nil {
-		projectionApplied = p.kernel.IngestLive(msg)
+		// R2-O1 baseline: only ProjectionIngestApplied may trigger the live-path patch
+		// flush below. Deferred rows flush via the hydrate commit's own path; NoChange
+		// (duplicates/no-ops) never flushes (web push §8.1 tri-state).
+		kernelIngest = p.kernel.IngestLive(msg)
+		kernelIngested = true
+		projectionApplied = kernelIngest == ProjectionIngestApplied
 	} else if p.projection != nil {
 		before := p.projection.LastAppliedRev(logical.BackendID, logical.SessionID)
 		p.projection.Apply(msg)
 		projectionApplied = p.projection.LastAppliedRev(logical.BackendID, logical.SessionID) != before
+	}
+	// Web Push candidate（§8.1）：authoritative ingest 之后、transport 分支之前。锁内
+	// 只做小对象复制 + 非阻塞有界入队；零在线 target 不影响 candidate（后台通知正是
+	// 为不在线的 PWA 存在）。非 kernel 路径与 control-plane/pre-reduced/derived 路径
+	// 不允许携带 intent——出现即 producer 违约，fail closed 丢弃并计数。
+	if logical.PushIntent != nil && p.webPushSink != nil {
+		if kernelIngested {
+			p.webPushSink.Ingest(WebPushCandidate{
+				BackendID:       msg.BackendID,
+				SessionID:       msg.SessionID,
+				EventID:         msg.EventID,
+				Kind:            logical.PushIntent.Kind,
+				NotificationKey: logical.PushIntent.NotificationKey,
+				AnchorKind:      logical.PushIntent.AnchorKind,
+				AnchorID:        logical.PushIntent.AnchorID,
+				SessionTitle:    logical.PushIntent.SessionTitle,
+				ContentPreview:  logical.PushIntent.ContentPreview,
+				ReceivedAt:      msg.Timestamp,
+			}, kernelIngest)
+		} else {
+			slog.Warn("web-push: PushIntent present on non-kernel publish path (dropped)",
+				"backendID", msg.BackendID,
+				"sessionPrefix", projectionSessionLogPrefix(msg.SessionID),
+				"event", msg.Event,
+			)
+		}
 	}
 	p.buffer.Append(msg)
 

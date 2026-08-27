@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "notification": {
+    "title": "任务已完成",
+    "body": "点击打开 CordCode 查看结果",
+    "tag": "cc_fixture_notification_key_hash"
+  },
+  "target": {
+    "bridgeId": "brg_fixture",
+    "backendId": "codex",
+    "sessionId": "session_fixture",
+    "eventId": "fixture-epoch:42",
+    "anchor": null
+  }
+}

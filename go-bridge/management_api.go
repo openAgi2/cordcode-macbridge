@@ -288,6 +288,10 @@ func (s *ManagementServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleRelayDeliveryPrekeys(w, r)
 	case path == "/internal/topology/snapshot" && r.Method == http.MethodGet:
 		s.handleTopologySnapshot(w, r)
+	case path == "/internal/webpush/status" && r.Method == http.MethodGet:
+		s.handleWebPushStatus(w, r)
+	case path == "/internal/webpush/reset" && r.Method == http.MethodPost:
+		s.handleWebPushReset(w, r)
 	default:
 		writeMgmtJSON(w, http.StatusNotFound, map[string]interface{}{
 			"error":   "not_found",
@@ -646,6 +650,14 @@ func (s *ManagementServer) handleRevokeDevice(w http.ResponseWriter, r *http.Req
 
 	// 主动断开被撤销设备的所有 WebSocket 连接
 	globalDeviceConnRegistry.DisconnectDevice(deviceID)
+
+	// 撤销联动：同一撤销动作删除该 device 的 web push subscription（§10 生命周期不变量）。
+	// 失败只记日志不回滚撤销——授权已收回，残留订阅在下次 dispatcher 404/410 时也会被清除。
+	if globalWebPushStore != nil {
+		if err := globalWebPushStore.DeleteDevice(deviceID); err != nil {
+			slog.Warn("management: web push subscription cleanup after revoke failed", "devicePrefix", safeID(deviceID), "error", err)
+		}
+	}
 }
 
 // ── POST /internal/pairing/create ────────────────────────────────────────────
@@ -1245,3 +1257,66 @@ func readLastLines(data []byte, n int) []string {
 
 // ensure ManagementServer satisfies http.Handler
 var _ http.Handler = (*ManagementServer)(nil)
+
+// ── Web Push 维护（设置页 misconfigured 状态 + 显式重置，§5.1/§12.3）───────────
+
+// WebPushStatusResponse 是 GET /internal/webpush/status 的响应。
+// vapidKeyFingerprint 是公钥的短指纹（展示用；公钥本身会经 hello_ack 下发，
+// 指纹只用于设置页核对，不构成敏感泄露）。detail 为空串时省略。
+type WebPushStatusResponse struct {
+	Status              string `json:"status"`              // healthy | unconfigured | misconfigured
+	Detail              string `json:"detail,omitempty"`    // 仅诊断提示，不含密钥材料
+	SubscriptionCount   int    `json:"subscriptionCount"`   // 待删除数量（reset 确认用）
+	VapidKeyFingerprint string `json:"vapidKeyFingerprint"` // 前 16 hex；misconfigured 时为空
+	LastResetAtMillis   int64  `json:"lastResetAtMillis"`   // 0 = 从未重置
+	LastResetError      string `json:"lastResetError,omitempty"`
+}
+
+func (s *ManagementServer) handleWebPushStatus(w http.ResponseWriter, _ *http.Request) {
+	if globalWebPushStore == nil {
+		writeMgmtJSON(w, http.StatusOK, &WebPushStatusResponse{Status: "unconfigured", Detail: "web push store not loaded (no dataDir)"})
+		return
+	}
+	status, detail := globalWebPushStore.Status()
+	resp := &WebPushStatusResponse{
+		Status:            string(status),
+		Detail:            detail,
+		SubscriptionCount: globalWebPushStore.SubscriptionCount(),
+	}
+	if pub := globalWebPushStore.VapidPublicKey(); pub != "" {
+		resp.VapidKeyFingerprint = WebPushNotificationKeyHash(pub)[:16]
+	}
+	resp.LastResetAtMillis, resp.LastResetError = globalWebPushStore.LastResetInfo()
+	writeMgmtJSON(w, http.StatusOK, resp)
+}
+
+// handleWebPushReset 显式维护动作：清空 subscription store 与 ledger 后重建 key。
+// 不自动执行；失败如实返回 500 + 错误信息，绝不把清理失败显示为恢复成功。
+func (s *ManagementServer) handleWebPushReset(w http.ResponseWriter, _ *http.Request) {
+	if globalWebPushStore == nil {
+		writeMgmtJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"error":   "web_push_not_configured",
+			"message": "web push store not loaded (no dataDir)",
+		})
+		return
+	}
+	before := globalWebPushStore.SubscriptionCount()
+	if err := globalWebPushStore.ResetWebPush(); err != nil {
+		writeMgmtJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"error":                "web_push_reset_failed",
+			"message":              err.Error(),
+			"removedSubscriptions": before,
+		})
+		return
+	}
+	status, _ := globalWebPushStore.Status()
+	resp := map[string]interface{}{
+		"reset":                true,
+		"removedSubscriptions": before,
+		"status":               string(status),
+	}
+	if pub := globalWebPushStore.VapidPublicKey(); pub != "" {
+		resp["vapidKeyFingerprint"] = WebPushNotificationKeyHash(pub)[:16]
+	}
+	writeMgmtJSON(w, http.StatusOK, resp)
+}

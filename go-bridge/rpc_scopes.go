@@ -3,7 +3,7 @@ package gobridge
 // rpc_scopes.go — §6.3 RPC 按方法鉴权 scope 表。
 //
 // 每个 RPC 方法映射到一个 scope（空串 = 无条件放行，仅用于不能要求 scope 的控制面占位）。
-// 默认配对设备拥有全部 7 个 scope（见 DefaultGrantedScopes / deviceHasScope 的向后兼容语义），
+// 默认配对设备拥有全部 8 个 scope（见 DefaultGrantedScopes / deviceHasScope 的向后兼容语义），
 // 所以这张表当前不改变现有授权语义——它的价值是：
 //  1. 为新 RPC 提供硬门槛（CI guard TestEveryDispatchedRPCHasScope 强制每个 dispatchRPC
 //     case 都在此声明 scope）；
@@ -26,6 +26,7 @@ const (
 	ScopeWorkspaceRead   = "workspace.read"
 	ScopeWorkspaceMutate = "workspace.mutate"
 	ScopeDeliveryManage  = "delivery.manage"
+	ScopeWebPushManage   = "web_push.manage"
 )
 
 // rpcScopeTable 把每个 RPC 方法名映射到它所属的 scope。
@@ -105,6 +106,10 @@ var rpcScopeTable = map[string]string{
 	"upload_delivery_prekeys":    ScopeDeliveryManage,
 	"get_delivery_chain_head":    ScopeDeliveryManage,
 	"enable_relay_pairing":       ScopeDeliveryManage, // switch 外方法（relay_upgrade.go:67）
+
+	// web_push.manage（bridge 级，switch 外方法 handlers.go handleWebPushRPC）
+	"register_push_subscription":   ScopeWebPushManage,
+	"unregister_push_subscription": ScopeWebPushManage,
 }
 
 // DefaultGrantedScopes 是配对设备默认拥有的全部 scope。
@@ -119,6 +124,7 @@ func DefaultGrantedScopes() []string {
 		ScopeWorkspaceRead,
 		ScopeWorkspaceMutate,
 		ScopeDeliveryManage,
+		ScopeWebPushManage,
 	}
 }
 

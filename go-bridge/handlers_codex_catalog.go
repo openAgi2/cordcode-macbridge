@@ -132,6 +132,7 @@ func (h *Handlers) codexHandleListSessions(conn Connection, msg WireMessage, age
 			)
 		}
 		conn.SendResult(msg.RequestID, result, nil)
+		h.webPushTitles.noteFromWire(agentBackendID(agent), result)
 		return
 	}
 
@@ -166,6 +167,7 @@ func (h *Handlers) codexHandleListSessions(conn Connection, msg WireMessage, age
 		)
 	}
 	conn.SendResult(msg.RequestID, result, nil)
+	h.webPushTitles.noteFromWire(agentBackendID(agent), result)
 }
 
 // codexCatalogScopeLabel 把 dir 打成日志用 scope 标签：空 → "global"，非空 → basename。

@@ -1,0 +1,177 @@
+package gobridge
+
+// web_push_protocol.go — web_push_v1 wire constants and additive hello_ack/payload shapes.
+//
+// Canonical contract: docs/protocol/bridge-v1.md "Web Push (web_push_v1)" section. The
+// samples under docs/protocol/samples/web-push/ are internal shape fixtures; external
+// interoperability evidence lives behind the WP-SUB / WP-RESP / EVT-* real-sample gates
+// from the implementation plan §3.2. Until those gates pass, notification producers stay
+// disabled and no code path may treat these fixtures as proof of external compatibility.
+
+const (
+	// WebPushCapability 是 hello/hello_ack 中协商的 capability 字面量。
+	WebPushCapability = "web_push_v1"
+
+	// WebPushScope 是两个 web push RPC 的 scope（rpc_scopes.go 表项）。
+	WebPushScope = "web_push.manage"
+
+	// WebPushMethodRegister / WebPushMethodUnregister 是 bridge 级 RPC 方法名。
+	// 二者沿用标准 request envelope（backendId 必填，服务端在 agent 路由前分发并
+	// 忽略该字段的业务语义）；不存在无 backendId 的第二种 request 形状。
+	WebPushMethodRegister   = "register_push_subscription"
+	WebPushMethodUnregister = "unregister_push_subscription"
+
+	// WebPushSchemaVersion 是 register/unregister params 与 SW payload 的当前 schema 版本。
+	WebPushSchemaVersion = 1
+)
+
+// web_push 错误码（稳定契约；retryable 语义见 bridge-v1.md 错误码表）。
+const (
+	WebPushErrUnsupported         = "web_push.unsupported"
+	WebPushErrInvalidSubscription = "web_push.invalid_subscription"
+	WebPushErrVapidKeyMismatch    = "web_push.vapid_key_mismatch"
+	WebPushErrStorageFailed       = "web_push.storage_failed"
+)
+
+// WebPushStatus 是 hello_ack.webPush.status 的 additive 诊断值。
+const (
+	WebPushStatusMisconfigured = "misconfigured"
+)
+
+// WebPushHelloProfile 是 hello_ack 的 additive `webPush` 字段。
+// 仅当客户端声明 web_push_v1 且本机 VAPID store 健康时才下发 vapidPublicKey；
+// misconfigured 时 vapidPublicKey 必须为空（不得伪造公钥）。
+type WebPushHelloProfile struct {
+	SchemaVersion  int    `json:"schemaVersion"`
+	VapidPublicKey string `json:"vapidPublicKey,omitempty"`
+	Status         string `json:"status,omitempty"`
+}
+
+// WebPushNotificationKind 是首版固定文案的通知类别。文案由 MacBridge 本地固定表
+// 生成（buildWebPushNotificationText），不从 agent 文本拼接。input/error 两类在
+// 真实样本（EVT-INPUT-1 / EVT-ERROR-1）归档前保持 disabled。
+type WebPushNotificationKind string
+
+const (
+	WebPushKindCompletion WebPushNotificationKind = "completion"
+	WebPushKindPermission WebPushNotificationKind = "permission"
+	WebPushKindInput      WebPushNotificationKind = "input"
+	WebPushKindError      WebPushNotificationKind = "error"
+)
+
+// WebPushPayloadV1 是发送端明文 schema（RFC 8291 加密前）。Service Worker 侧的
+// 合法/非法分支都必须 showNotification——没有 silent branch（userVisibleOnly 契约）。
+type WebPushPayloadV1 struct {
+	SchemaVersion int                        `json:"schemaVersion"`
+	Notification  WebPushNotificationPayload `json:"notification"`
+	Target        WebPushTarget              `json:"target"`
+}
+
+type WebPushNotificationPayload struct {
+	Title string `json:"title"`
+	Body  string `json:"body"`
+	Tag   string `json:"tag"`
+}
+
+// WebPushTarget 唯一描述深链目标；anchor 只允许已验证的 turn/interaction id，
+// 无样本时必须为 null。
+type WebPushTarget struct {
+	BridgeID  string             `json:"bridgeId"`
+	BackendID string             `json:"backendId"`
+	SessionID string             `json:"sessionId"`
+	EventID   string             `json:"eventId"`
+	Anchor    *WebPushAnchorType `json:"anchor"`
+}
+
+type WebPushAnchorType struct {
+	Kind string `json:"kind"` // "turn" | "interaction"
+	ID   string `json:"id"`
+}
+
+// buildWebPushNotificationText 组合通知文案（设计 delta §2.1，监工指令 1 号；
+// owner 2026-08-27 更新）：Title = 来源常量 + authoritative session 标题（清洗/
+// 截断后；缺失时诚实回退到类别文案，不编造标题）；completion 的 Body 为该 turn
+// 的真实回复预览（authoritative kernel text parts，对齐 Antigravity 通知样式），
+// 无可预览文本时回退固定文案；其余 kind 保持固定文案。预览在显示边界再过一次
+// 控制字符清洗。字段路径未由真实样本证明的 kind 不能启用。
+func buildWebPushNotificationText(kind WebPushNotificationKind, sessionTitle, contentPreview string) (title, body string) {
+	const source = "CordCode"
+	cleaned := webPushSanitizeSessionTitle(sessionTitle)
+	completionFallback := "Mac 上的会话已完成，点击查看结果"
+	preview := webPushSanitizePreview(contentPreview)
+	switch kind {
+	case WebPushKindCompletion:
+		if preview != "" {
+			body = preview
+		} else {
+			body = completionFallback
+		}
+		if cleaned != "" {
+			return source + " · " + cleaned, body
+		}
+		return source + " · 任务已完成", body
+	case WebPushKindPermission:
+		if cleaned != "" {
+			return source + " · " + cleaned, "Mac 上的会话需要审批，点击处理"
+		}
+		return source + " · 需要审批", "Mac 上的会话需要审批，点击处理"
+	case WebPushKindInput:
+		return "Agent 正在等待回复", "点击打开 CordCode 回答"
+	case WebPushKindError:
+		return "任务异常中断", "点击打开 CordCode 查看详情"
+	default:
+		return "", ""
+	}
+}
+
+// helloDeclaresWebPush 判断客户端是否在 hello.capabilities 声明了 web_push_v1。
+func helloDeclaresWebPush(hello *HelloMessage) bool {
+	if hello == nil {
+		return false
+	}
+	for _, c := range hello.Capabilities {
+		if c == WebPushCapability {
+			return true
+		}
+	}
+	return false
+}
+
+// ApplyWebPushHelloProfile 是 direct（server.go handleHello）与 Relay（main.go
+// relayHelloHandler）共享的 web push 协商 helper，保证两条路径语义一致：
+//   - 未声明 capability / store 未接线（无 dataDir 的 dev 模式）→ 不 echo、不下发 webPush；
+//   - healthy → capabilities.web_push_v1=true + webPush{schemaVersion, vapidPublicKey}；
+//   - misconfigured → capabilities.web_push_v1=false + webPush{schemaVersion,
+//     status:"misconfigured"}，绝不携带公钥（fail-closed，不得伪造）。
+func ApplyWebPushHelloProfile(ack *HelloAckMessage, hello *HelloMessage, store *WebPushStore) {
+	if ack == nil || !helloDeclaresWebPush(hello) {
+		return
+	}
+	if store == nil {
+		return
+	}
+	status, _ := store.Status()
+	captureWebPushSample("WP-SUB-2", map[string]interface{}{
+		"declaresCapability": true,
+		"profileStatus":      string(status),
+		"vapidFingerprint":   webPushRedactID(store.VapidPublicKey()),
+	})
+	switch status {
+	case WebPushStoreHealthy:
+		publicKey := store.VapidPublicKey()
+		if publicKey == "" {
+			// healthy 但公钥为空属于 store 内部不一致：按 misconfigured 处理，不下发空 key。
+			ack.Capabilities[WebPushCapability] = false
+			ack.WebPush = &WebPushHelloProfile{SchemaVersion: WebPushSchemaVersion, Status: WebPushStatusMisconfigured}
+			return
+		}
+		ack.Capabilities[WebPushCapability] = true
+		ack.WebPush = &WebPushHelloProfile{SchemaVersion: WebPushSchemaVersion, VapidPublicKey: publicKey}
+	case WebPushStoreMisconfigured:
+		ack.Capabilities[WebPushCapability] = false
+		ack.WebPush = &WebPushHelloProfile{SchemaVersion: WebPushSchemaVersion, Status: WebPushStatusMisconfigured}
+	default:
+		// unconfigured 仅在 LoadWebPushStore 途中存在；到达 hello 时应已落 healthy/
+		// misconfigured。保守处理：不 echo、不下发 profile。
+	}
+}

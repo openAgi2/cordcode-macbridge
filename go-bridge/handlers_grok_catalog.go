@@ -158,6 +158,7 @@ func (h *Handlers) grokHandleListSessions(conn Connection, msg WireMessage, agen
 			)
 		}
 		conn.SendResult(msg.RequestID, result, nil)
+		h.webPushTitles.noteFromWire(agentBackendID(agent), result)
 		return
 	}
 	if dir != "" {
@@ -202,6 +203,7 @@ func (h *Handlers) grokHandleListSessions(conn Connection, msg WireMessage, agen
 			)
 		}
 		conn.SendResult(msg.RequestID, result, nil)
+		h.webPushTitles.noteFromWire(agentBackendID(agent), result)
 		return
 	}
 
@@ -239,6 +241,7 @@ func (h *Handlers) grokHandleListSessions(conn Connection, msg WireMessage, agen
 		)
 	}
 	conn.SendResult(msg.RequestID, result, nil)
+	h.webPushTitles.noteFromWire(agentBackendID(agent), result)
 }
 
 // filterWireSessionsByDirectory 保留 directory 匹配的 session（Grok / dsh-web
