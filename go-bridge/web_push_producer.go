@@ -23,11 +23,12 @@ type webPushKindGate struct {
 	Passed bool
 }
 
-// webPushKindGates 是全部通知类别的样本门表。首版交付时四类全部未通过
-// （EVT-TURN-1/EVT-PERM-1/EVT-INPUT-1/EVT-ERROR-1 均待 owner 真机采样）——
-// 这不是缺陷，是 D4 样本门的诚实状态（完成标准明文允许）。
+// webPushKindGates 是全部通知类别的样本门表。completion 已于 2026-08-27 基于
+// 6 份真实生产 turn_completed 样本开启（双重提取 6/6 一致，证据归档
+// docs/protocol/samples/web-push/evt-turn-1/，监工指令 3 号 C.3）；permission/
+// input/error 仍待各自真实样本（EVT-PERM-1/EVT-INPUT-1/EVT-ERROR-1），保持关闭。
 var webPushKindGates = map[WebPushNotificationKind]webPushKindGate{
-	WebPushKindCompletion: {GateID: "EVT-TURN-1", Passed: false},
+	WebPushKindCompletion: {GateID: "EVT-TURN-1", Passed: true},
 	WebPushKindPermission: {GateID: "EVT-PERM-1", Passed: false},
 	WebPushKindInput:      {GateID: "EVT-INPUT-1", Passed: false},
 	WebPushKindError:      {GateID: "EVT-ERROR-1", Passed: false},

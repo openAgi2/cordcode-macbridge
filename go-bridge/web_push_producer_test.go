@@ -34,8 +34,16 @@ func producerKernelWithRunningTurn(t *testing.T) *ProjectionKernel {
 	return kernel
 }
 
-func TestProducerSampleGatesDefaultOff(t *testing.T) {
+func TestProducerSampleGatesExceptCompletionDefaultOff(t *testing.T) {
+	// 2026-08-27: completion 已基于 docs/protocol/samples/web-push/evt-turn-1/ 的
+	// 6 份真实样本开启（监工指令 3 号 C.3）；其余三类仍必须默认关闭。
 	for kind, gate := range webPushKindGates {
+		if kind == WebPushKindCompletion {
+			if !gate.Passed {
+				t.Fatalf("completion gate must stay ON (EVT-TURN-1 archived)")
+			}
+			continue
+		}
 		if gate.Passed {
 			t.Fatalf("kind %s gate must default to OFF until its real sample is archived", kind)
 		}
@@ -44,14 +52,17 @@ func TestProducerSampleGatesDefaultOff(t *testing.T) {
 		}
 	}
 	kernel := producerKernelWithRunningTurn(t)
-	if intent := pushIntentForRelayTerminal(kernel, "codex", "prod-1", "turn_completed", map[string]interface{}{"done": true}, ""); intent != nil {
-		t.Fatalf("completion intent produced with gate OFF: %+v", intent)
+	// completion gate ON + identity present → intent IS produced now (archive-backed).
+	if intent := pushIntentForRelayTerminal(kernel, "codex", "prod-1", "turn_completed", map[string]interface{}{"done": true}, ""); intent == nil {
+		t.Fatalf("completion intent missing with gate ON and active turn present")
+	} else if intent.NotificationKey != "codex|prod-1|turn-42|completed" || intent.AnchorID != "turn-42" {
+		t.Fatalf("completion intent identity mismatch: %+v", intent)
 	}
 	if intent := pushIntentForRelayTerminal(kernel, "codex", "prod-1", "permission_request", map[string]interface{}{"requestId": "r1"}, ""); intent != nil {
 		t.Fatalf("permission intent produced with gate OFF: %+v", intent)
 	}
-	if intent := pushIntentForPassiveEvent(kernel, "codex", "prod-1", "turn_completed", nil, ""); intent != nil {
-		t.Fatalf("passive intent produced with gate OFF: %+v", intent)
+	if intent := pushIntentForPassiveEvent(kernel, "codex", "prod-1", "turn_completed", nil, ""); intent == nil {
+		t.Fatalf("passive completion intent missing with gate ON")
 	}
 }
 
