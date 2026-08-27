@@ -77,8 +77,14 @@ type WebPushDispatcher struct {
 	store    *WebPushStore
 	pipeline *WebPushCandidatePipeline
 	cfg      WebPushDispatcherConfig
-	stop     chan struct{}
-	wg       sync.WaitGroup
+	// previewReader 在发送前懒刷新完成通知正文预览（2026-08-27 owner 决策对齐
+	// Antigravity）：producer 计算 intent 时正文可能尚未入 authoritative kernel
+	// （如 claude thinking 行终态先于 text 行、hydrate 窗口内 committed reducer 还是
+	// 旧基线），而 dispatch 发生在 worker 锁外、通常晚于投影提交。返回空串 = 保持
+	// candidate 自带的 intent 时预览。nil = 不刷新（测试/未接线）。
+	previewReader func(candidate WebPushCandidate) string
+	stop          chan struct{}
+	wg            sync.WaitGroup
 }
 
 func NewWebPushDispatcher(store *WebPushStore, pipeline *WebPushCandidatePipeline, cfg WebPushDispatcherConfig) *WebPushDispatcher {
@@ -119,6 +125,11 @@ func (d *WebPushDispatcher) Start() {
 		d.wg.Add(1)
 		go d.worker()
 	}
+}
+
+// SetPreviewReader 注入发送前预览懒刷新（见 WebPushDispatcher.previewReader）。Start 前调用。
+func (d *WebPushDispatcher) SetPreviewReader(reader func(candidate WebPushCandidate) string) {
+	d.previewReader = reader
 }
 
 // Stop 停止全部 worker 并等待退出。
@@ -163,7 +174,13 @@ func (d *WebPushDispatcher) deliverCandidate(candidate WebPushCandidate) {
 }
 
 func (d *WebPushDispatcher) buildPayload(candidate WebPushCandidate) ([]byte, int, webpush.Urgency, error) {
-	title, body := buildWebPushNotificationText(candidate.Kind, candidate.SessionTitle, candidate.ContentPreview)
+	preview := candidate.ContentPreview
+	if d.previewReader != nil {
+		if fresh := d.previewReader(candidate); fresh != "" {
+			preview = fresh
+		}
+	}
+	title, body := buildWebPushNotificationText(candidate.Kind, candidate.SessionTitle, preview)
 	payload := WebPushPayloadV1{
 		SchemaVersion: WebPushSchemaVersion,
 		Notification: WebPushNotificationPayload{

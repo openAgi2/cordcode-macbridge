@@ -2915,6 +2915,14 @@ func (h *Handlers) sendSessionEventWithPushIntent(sessionID, backendID, eventNam
 	})
 }
 
+// WebPushCompletedTurnPreview 是 dispatcher 发送前预览懒刷新的注入点（owner
+// 2026-08-27 决策：完成通知正文为真实回复预览）。intent 计算时刻正文可能尚未入
+// authoritative kernel；发送发生在 worker 锁外、通常晚于投影提交，此时重读可拿到
+// 完整正文。见 WebPushDispatcher.SetPreviewReader。
+func (h *Handlers) WebPushCompletedTurnPreview(backendID, sessionID, turnID string) string {
+	return webPushCompletedTurnPreview(h.projectionKernel, backendID, sessionID, turnID)
+}
+
 // broadcastIdleState 向订阅者推送 session_state_changed: idle。
 func (h *Handlers) broadcastIdleState(sessionID, backendID string) {
 	h.mu.Lock()

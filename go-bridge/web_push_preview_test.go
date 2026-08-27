@@ -221,3 +221,71 @@ func TestClaudeBatchEndTerminalCarriesFullPreview(t *testing.T) {
 		t.Fatalf("anchor = %q, want u-hold-1", got[0].AnchorID)
 	}
 }
+
+// 懒刷新回归：intent 时刻预览为空（claude thinking 行终态先于 text 行 / hydrate
+// 窗口旧基线），dispatcher 发送前经 previewReader 重读 authoritative kernel 拿到完整
+// 正文；reader 返回空时保留 candidate 自带预览，不引入第二裁判。
+func TestDispatcherPreviewReaderRefreshesEmptyIntentPreview(t *testing.T) {
+	store, err := LoadWebPushStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadWebPushStore: %v", err)
+	}
+	pipeline := NewWebPushCandidatePipeline(store)
+	d := NewWebPushDispatcher(store, pipeline, WebPushDispatcherConfig{})
+	d.SetPreviewReader(func(c WebPushCandidate) string {
+		if c.AnchorID == "turn-lazy-1" {
+			return "发送前才落进投影的完整回复"
+		}
+		return ""
+	})
+
+	payload, _, _, err := d.buildPayload(WebPushCandidate{
+		Kind: WebPushKindCompletion, BackendID: "claude", SessionID: "lz-1",
+		AnchorID: "turn-lazy-1", NotificationKey: "claude|lz-1|turn-lazy-1|completed",
+		SessionTitle: "懒刷新会话", ContentPreview: "",
+	})
+	if err != nil {
+		t.Fatalf("buildPayload: %v", err)
+	}
+	var decoded WebPushPayloadV1
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if decoded.Notification.Body != "发送前才落进投影的完整回复" {
+		t.Fatalf("body = %q (lazy refresh missing)", decoded.Notification.Body)
+	}
+	if decoded.Notification.Title != "CordCode · 懒刷新会话" {
+		t.Fatalf("title = %q", decoded.Notification.Title)
+	}
+
+	// reader 返回空（kernel 仍无文本）：保留 candidate 自带预览。
+	payload, _, _, err = d.buildPayload(WebPushCandidate{
+		Kind: WebPushKindCompletion, BackendID: "claude", SessionID: "lz-2",
+		AnchorID: "turn-lazy-2", NotificationKey: "claude|lz-2|turn-lazy-2|completed",
+		SessionTitle: "懒刷新会话", ContentPreview: "intent 时已取到的预览",
+	})
+	if err != nil {
+		t.Fatalf("buildPayload: %v", err)
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if decoded.Notification.Body != "intent 时已取到的预览" {
+		t.Fatalf("body = %q (reader must not clobber non-empty intent preview)", decoded.Notification.Body)
+	}
+
+	// 两者皆空：回退固定文案（诚实回退，不编造）。
+	payload, _, _, err = d.buildPayload(WebPushCandidate{
+		Kind: WebPushKindCompletion, BackendID: "claude", SessionID: "lz-3",
+		AnchorID: "turn-lazy-3", NotificationKey: "claude|lz-3|turn-lazy-3|completed",
+	})
+	if err != nil {
+		t.Fatalf("buildPayload: %v", err)
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if decoded.Notification.Body != "Mac 上的会话已完成，点击查看结果" {
+		t.Fatalf("fallback body = %q", decoded.Notification.Body)
+	}
+}

@@ -273,6 +273,12 @@ func Main() {
 		webPushPipeline.SetBridgeID(bridgeID)
 		// §8.4：固定 worker 数消费有界队列；发送全在锁外。
 		webPushDispatcher := NewWebPushDispatcher(globalWebPushStore, webPushPipeline, WebPushDispatcherConfig{})
+		// 完成通知正文预览懒刷新（owner 2026-08-27 决策对齐 Antigravity）：发送前重读
+		// authoritative kernel——intent 时刻正文可能尚未入投影（claude thinking 行终态
+		// 先于 text 行、hydrate 窗口内 committed reducer 还是旧基线）。
+		webPushDispatcher.SetPreviewReader(func(candidate WebPushCandidate) string {
+			return handlers.WebPushCompletedTurnPreview(candidate.BackendID, candidate.SessionID, candidate.AnchorID)
+		})
 		webPushDispatcher.Start()
 		defer webPushDispatcher.Stop()
 	}
