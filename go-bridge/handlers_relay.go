@@ -778,6 +778,9 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 	// 兜底 flush，避免丢通知。
 	var heldTerminals []claudeHeldTerminalEvent
 	var turnText claudeTurnTextAccumulator
+	boundProcessDied := false // 绑定后观测到进程死亡（cachedPID==0 还涵盖晚绑定未绑定，不能用）
+	heldIdleTicks := 0        // 挂起期间无新增正文的 tick 数（text-less turn 的兜底收口）
+	lastHeldTextLen := 0
 	flushHeldTerminals := func() {
 		for _, ht := range heldTerminals {
 			h.sendSessionEventWithPushIntentPreview(ht.sessionID, ht.backendID, "turn_completed", ht.data, turnText.preview())
@@ -795,6 +798,7 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 		if cachedPID == 0 {
 			// Late bind: process may appear after open (owner opens idle B, then Mac starts turn).
 			if proc2, lister2, err2 := h.sessionLiveProcess(context.Background(), sessionID, backendID); err2 == nil && proc2.Live && proc2.PID > 0 {
+				boundProcessDied = false
 				// A process catalog can briefly retain a just-dead worker. Verify the PID before
 				// binding so a subscribed watcher does not churn dead→bind on every poll.
 				if lister2 == nil || lister2.IsProcessAlive(context.Background(), proc2.PID) {
@@ -819,6 +823,7 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 					// committed reducer afterwards.
 					h.synthesizeClaudeTurnAbortedIfNeeded(sessPath, sessionID, backendID, currentTurnID, &lastSynthesizedAbortTurnID)
 					runningObserved = false
+					boundProcessDied = true
 					h.broadcastIdleState(sessionID, backendID)
 					if !h.broadcaster.HasSessionSubscriber(backendID, sessionID) {
 						slog.Info("go-bridge: claudeSessionFileRelay process dead with no subscriber, exiting", "sessionID", sessionID, "backendID", backendID, "pid", cachedPID)
@@ -838,10 +843,23 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 				processDeathMisses = 0
 			}
 		}
-		// 挂起终态的条件 flush：预览已齐备（正文行已入扫描流）或进程已死
-		// （text-less turn 的权威收尾信号——cachedPID 被 death 分支清零或从未绑定）。
-		if len(heldTerminals) > 0 && (turnText.preview() != "" || cachedPID == 0) {
-			flushHeldTerminals()
+		// 挂起终态的统一条件 flush（tick 顶部，含无文件增长的 tick）：预览齐备 /
+		// 绑定后进程死亡 / 正文静默 3 tick（text-less turn 按固定文案收口）。
+		if len(heldTerminals) > 0 {
+			if turnText.preview() != "" || boundProcessDied {
+				flushHeldTerminals()
+				heldIdleTicks = 0
+			} else if turnText.builder.Len() != lastHeldTextLen {
+				// 正文仍在增长（多段流式）——继续等更完整的预览
+				lastHeldTextLen = turnText.builder.Len()
+				heldIdleTicks = 0
+			} else {
+				heldIdleTicks++
+				if heldIdleTicks >= 3 {
+					flushHeldTerminals()
+					heldIdleTicks = 0
+				}
+			}
 		}
 		info, err := os.Stat(sessPath)
 		if err != nil {
@@ -961,7 +979,6 @@ func (h *Handlers) claudeSessionFileRelayLoop(
 			h.acknowledgeClaudeSourceRow(backendID, sessionID, traceCorrelation, scanned.ByteEnd)
 			h.deliverClaudeLegacyRow(e, sessionID, backendID, &currentTurnID, &runningObserved, cachedPID, &heldTerminals, &turnText)
 		}
-		flushHeldTerminals()
 		if scan.Poison != nil {
 			quarantined = scan.Poison
 			quarantineSize = newSize
