@@ -33,6 +33,9 @@ jobs:
       # 分页测试(go-bridge TestPaginatedMessages*/TestListSessionsPagination*)
       # 通过 codex.New() 需要 codex CLI;缺失会 panic "codex CLI not found in PATH"。
       - run: npm install -g @openai/codex --force
+      # TestClaudeProjectionHydrate* 通过 claudecode.New() 需要 claude CLI;
+      # 缺失会报 "claude CLI not found in PATH"(2026-08-28 main CI 红)。
+      - run: npm install -g @anthropic-ai/claude-code --force
       - run: go build ./go-bridge
       - run: go test ./go-bridge/... -count=1
       - run: go test ./... -count=1
