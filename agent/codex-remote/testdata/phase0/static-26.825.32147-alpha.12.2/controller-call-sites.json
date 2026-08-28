@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "classification": "STATIC-CALLSITE-ONLY",
+  "gate_effect": "does-not-pass-phase0",
+  "target": {
+    "chatgpt_desktop_version": "26.825.32147",
+    "chatgpt_bundle_version": "7303",
+    "embedded_codex_version": "codex-cli 0.150.0-alpha.12.2",
+    "app_asar_sha256": "0462b03e878f0e78b223b849ee14cbba0de043f2c16acebee163cb95daa622ef"
+  },
+  "sources": [
+    {
+      "path": ".vite/build/main-BvHpyFqC.js",
+      "sha256": "cf1e5f9637b925a5a7454bd313176f64af930bfb837cf0e0a7ce7c59f81124ad",
+      "purpose": "controller REST, enrollment, device-key proof and environment call sites"
+    },
+    {
+      "path": ".vite/build/src-4lLVrYxe.js",
+      "sha256": "c1749327bc2ac13ea0a4c9d2dc24afb9012e2253d8be28997e836547a563eb91",
+      "purpose": "controller WebSocket headers, challenge, envelope and reconnect call sites"
+    },
+    {
+      "path": "webview/assets/app-initial-DJrCTPoN.js",
+      "sha256": "27618295c2da9ccf6959e93427e34b75a6d1b4ccd7d4a9f6a18a3974b61803e5",
+      "purpose": "ChatGPT product pairing, controller list, revoke and MFA call sites"
+    }
+  ],
+  "api_families": {
+    "codex_controller": {
+      "client_layer": "authenticated desktop fetch",
+      "production_base_callsite": "https://chatgpt.com/backend-api",
+      "base_resolution": "CODEX_API_BASE_URL override, localhost development base, otherwise desktop prodApiBaseUrl",
+      "paths": [
+        {"method": "POST", "path": "/codex/remote/control/client/enroll/start", "request_fields": []},
+        {"method": "POST", "path": "/codex/remote/control/client/enroll/finish", "request_fields": ["client_id", "step_up_token", "device_identity", "device_key_proof"]},
+        {"method": "POST", "path": "/codex/remote/control/client/refresh/start", "request_fields": ["client_id"]},
+        {"method": "POST", "path": "/codex/remote/control/client/refresh/finish", "request_fields": ["client_id", "device_key_proof"]},
+        {"method": "GET", "path": "/codex/remote/control/environments", "query_fields": ["limit", "cursor"]},
+        {"method": "GET", "path": "/codex/remote/control/clients/{client_id}/environments", "query_fields": ["limit", "cursor"]},
+        {"method": "GET", "path": "/codex/remote/control/environments/{env_id}"}
+      ],
+      "websocket_path": "/codex/remote/control/client",
+      "websocket_scheme": "https-to-wss"
+    },
+    "wham_product_control": {
+      "client_layer": "ChatGPT web API client",
+      "production_base_callsite": "https://chatgpt.com/backend-api",
+      "paths": [
+        {"method": "POST", "path": "/wham/remote/control/client/pair", "request_fields": ["client_id", "manual_pairing_code"]},
+        {"method": "GET", "path": "/wham/remote/control/clients", "query_fields": ["limit", "cursor"]},
+        {"method": "DELETE", "path": "/wham/remote/control/clients/{client_id}"},
+        {"method": "GET", "path": "/wham/remote/control/mfa_requirement"}
+      ]
+    }
+  },
+  "enrollment_contract": {
+    "step_up_oauth": {
+      "issuer": "https://auth.openai.com",
+      "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
+      "callback_paths": ["http://localhost:1455/auth/callback", "http://localhost:1457/auth/callback"],
+      "authorization_scope": "codex.remote_control.enroll",
+      "reauth": "remote_control",
+      "pkce_method": "S256",
+      "timeout_ms": 600000
+    },
+    "device_key_create_policy": "allow_os_protected_nonextractable",
+    "device_key_addon": {
+      "path": "/Applications/ChatGPT.app/Contents/Resources/native/remote-control-device-key.node",
+      "sha256": "0bc9878bad8635d8721accb1f4a4a47666c6e50f4a025b83cf0314750bb8f5a0",
+      "exports": ["createDeviceKey", "deleteDeviceKey", "getDeviceKeyPublic", "signDeviceKey"],
+      "signed_payload_domain": "codex-device-key-sign-payload/v1"
+    },
+    "device_identity_fields": ["key_id", "public_key_spki_der_base64", "algorithm", "protection_class"],
+    "device_key_proof_fields": ["challenge_token", "key_id", "signature_der_base64", "signed_payload_base64", "algorithm"],
+    "challenge_fields_used": ["purpose", "audience", "account_user_id", "client_id", "target_origin", "target_path", "device_identity_hash", "nonce", "challenge_id", "challenge_expires_at"],
+    "challenge_purpose": "remote_control_client_enrollment",
+    "challenge_audience": "remote_control_client_enrollment",
+    "step_up_scope": "codex.remote_control.enroll",
+    "step_up_freshness_seconds": 300,
+    "controller_scope": ["remote_control_controller_websocket"],
+    "refresh_requires_device_identity_hash": true
+  },
+  "websocket_contract": {
+    "protocol_version": 3,
+    "headers": ["x-codex-client-id", "x-codex-protocol-version", "x-codex-client-session-token", "x-codex-subscribe-cursor"],
+    "challenge": {
+      "type": "device_key_challenge",
+      "purpose": "remote_control_client_websocket",
+      "audience": "remote_control_client_websocket",
+      "fields": ["nonce", "sessionId", "targetOrigin", "targetPath", "accountUserId", "clientId", "tokenSha256Base64url", "tokenExpiresAt", "scopes"]
+    },
+    "challenge_response_type": "device_key_proof",
+    "server_envelope_types": ["ack", "server_message", "server_message_chunk", "pong"],
+    "client_envelope_types": ["client_message", "client_message_chunk", "ping", "client_closed"],
+    "routing_fields": ["client_id", "env_id", "stream_id", "seq_id"],
+    "server_cursor_types": ["server_message", "server_message_chunk", "pong"],
+    "reconnect_cursor_location": "x-codex-subscribe-cursor request header",
+    "environment_binding": "env_id is fixed per virtual stream and copied into every client envelope; inbound stream lookup keys env_id plus stream_id",
+    "stream_id_reset_trigger": "app-server initialize request",
+    "segment_target_bytes": 102400,
+    "wire_envelope_max_bytes": 153600,
+    "reassembled_message_max_bytes": 1073741824,
+    "stream_ping_interval_ms": 30000,
+    "stream_pong_timeout_ms": 600000,
+    "reconnect_delay_ms": 1000
+  },
+  "unverified_by_static_call_sites": [
+    "resolved production origin observed on the wire",
+    "actual REST response bodies and error bodies",
+    "actual WSS frames and ordering",
+    "relay transforms between controller and host envelope shapes",
+    "controller token refresh scheduling",
+    "environment selection and switching behavior against a live Desktop",
+    "HTTP 409, single-owner, kick-out, revoke and reconnect semantics",
+    "coexistence with ChatGPT iOS",
+    "Desktop private app-server identity"
+  ]
+}

@@ -12,3 +12,5 @@ Each validator must:
 - be replayable from the dedicated MacBridge worktree.
 
 `source-baseline.mjs` currently verifies only the static/source baseline and prints `gateEffect=does-not-pass-phase0` on success.
+
+`controller-fixtures.mjs` verifies the exact target ASAR call sites and the live-capture redaction contract. Its default mode is a static preflight only. `--require-live` deliberately fails while the repository lacks a real redacted observation set; that failure is the expected Phase 0 blocker, not a test defect.

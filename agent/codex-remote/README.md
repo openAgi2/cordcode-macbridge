@@ -23,7 +23,7 @@ Standalone app-server, fake relay, rollout/JSONL/SQLite/file tail, same-account 
 |---|---|---|
 | 1 | Freeze current Desktop/App/embedded Codex/upstream source and version drift | STATIC SOURCE BASELINE VERIFIED; binary behavior fixture still pending |
 | 2 | Index host/server and both `/codex` plus `/wham` controller call-site families | STATIC CALL SITES VERIFIED; resolved origins and live shapes pending |
-| 3 | Real redacted enroll/refresh, WSS challenge/envelope, environment binding and cursor fixtures | UNVERIFIED |
+| 3 | Real redacted enroll/refresh, WSS challenge/envelope, environment binding and cursor fixtures | EVIDENCE-ONLY: exact static contract/preflight pass; real fixture blocked on owner authorization |
 | 4 | Temporary device key and independently revocable controller enrollment | UNVERIFIED |
 | 5 | List paired environments and explicitly select the current Desktop | UNVERIFIED |
 | 6 | Prove a uniquely marked thread/turn belongs to that Desktop's private app-server | UNVERIFIED |
@@ -86,5 +86,9 @@ The delivery diff is also checked from the frozen start commit `224a632e032aea91
 - `testdata/phase0/meta/source-baseline.md`: human-readable source and binary freeze.
 - `testdata/phase0/meta/source-baseline.json`: machine-readable immutable metadata.
 - `validate/source-baseline.mjs`: replays the static/source checks against the installed target.
+- `testdata/phase0/static-26.825.32147-alpha.12.2/controller-call-sites.json`: exact target controller call-site contract; static only.
+- `testdata/phase0/live-fixture-contract.json`: fail-closed redaction and observation requirements for the missing real fixture.
+- `probe/preflight.mjs`: non-mutating target/auth-status/addon/callback-port readiness check.
+- `testdata/phase0/meta/controller-fixture-blocker.md`: current external authorization boundary.
 
 Static evidence never substitutes for a real relay/controller fixture or owner-required ChatGPT iOS interaction.

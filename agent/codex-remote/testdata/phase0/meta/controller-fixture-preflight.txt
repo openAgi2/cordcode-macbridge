@@ -1,0 +1,31 @@
+checked_at=2026-08-28T09:33:04Z
+classification=EVIDENCE-ONLY
+target_chatgpt=26.825.32147 (7303)
+target_codex=codex-cli 0.150.0-alpha.12.2
+app_asar_sha256=0462b03e878f0e78b223b849ee14cbba0de043f2c16acebee163cb95daa622ef
+device_key_addon_sha256=0bc9878bad8635d8721accb1f4a4a47666c6e50f4a025b83cf0314750bb8f5a0
+
+PASS node --check agent/codex-remote/probe/preflight.mjs
+PASS /Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node agent/codex-remote/probe/preflight.mjs
+  auth helper login status available=true; token requested=false
+  OAuth callback port 1455 available=true
+  OAuth callback port 1457 available=true
+  device-key addon exports=createDeviceKey,deleteDeviceKey,getDeviceKeyPublic,signDeviceKey
+  key create/sign/delete executed=false
+  network mutation executed=false
+PASS node agent/codex-remote/validate/controller-fixtures.mjs
+  mode=static-preflight
+  classification=STATIC-CALLSITE-ONLY
+  liveFixtureCount=0
+  gateEffect=does-not-pass-phase0
+EXPECTED-FAIL node agent/codex-remote/validate/controller-fixtures.mjs --require-live
+  first_failure=real redacted live fixture is missing
+PASS node agent/codex-remote/validate/phase0-boundary.mjs
+PASS node agent/codex-remote/validate/source-baseline.mjs
+PASS gitleaks dir --redact --config .gitleaks.toml .
+PASS git diff --check
+PASS git diff --exit-code -- agent/codex-web agent/codex
+PASS paired iOS branch codex/codex-remote-backend-ios remains clean
+
+gate_effect=does-not-pass-phase0
+blocker=owner authorization is required before the probe may request an in-memory ChatGPT bearer, open the step-up browser flow, create an OS-protected controller key, enroll/connect/revoke a controller, or collect ChatGPT iOS coexistence observations
