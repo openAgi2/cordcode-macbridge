@@ -716,6 +716,33 @@ func readSessionStubs(ctx context.Context, homeDir string) ([]claudeSessionStub,
 	return stubs, nil
 }
 
+// claudeStubExecuting reports whether a live session stub's transcript proves
+// an in-flight turn. Fail-open-idle: cwd/project-dir/transcript unresolvable
+// all default to false — same rule GetRunningSessionIDs has used since the
+// permanently-locked-sessions fix.
+func claudeStubExecuting(homeDir string, stub claudeSessionStub) bool {
+	if stub.Cwd == "" {
+		return false
+	}
+	projectDir := findProjectDir(homeDir, stub.Cwd)
+	if projectDir == "" {
+		slog.Warn("claudeStubExecuting: project dir not found for cwd, defaulting to idle",
+			"sessionID", stub.SessionID,
+			"cwd", stub.Cwd)
+		return false
+	}
+	sessionPath := filepath.Join(projectDir, stub.SessionID+".jsonl")
+	if _, err := os.Stat(sessionPath); err != nil {
+		slog.Info("claudeStubExecuting: transcript file not found, defaulting to idle",
+			"sessionID", stub.SessionID,
+			"projectDir", projectDir,
+			"sessionPath", sessionPath,
+			"statError", err)
+		return false
+	}
+	return isSessionExecutingCached(stub.SessionID, sessionPath)
+}
+
 func (a *Agent) LiveSessionProcess(ctx context.Context, sessionID string) (core.LiveSessionProcess, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -738,6 +765,7 @@ func (a *Agent) LiveSessionProcess(ctx context.Context, sessionID string) (core.
 				SessionID: stub.SessionID,
 				PID:       stub.PID,
 				Live:      true,
+				Executing: claudeStubExecuting(homeDir, stub),
 			}, nil
 		}
 	}
@@ -776,27 +804,7 @@ func (a *Agent) GetRunningSessionIDs(ctx context.Context) (map[string]bool, erro
 			// we cannot prove the session is still executing.  The old default of
 			// true caused sessions whose .jsonl was inaccessible (wrong project dir,
 			// missing file, etc.) to be permanently locked as "running".
-			isExecuting := false
-			if stub.Cwd != "" {
-				projectDir := findProjectDir(homeDir, stub.Cwd)
-				if projectDir != "" {
-					sessionPath := filepath.Join(projectDir, stub.SessionID+".jsonl")
-					if _, err := os.Stat(sessionPath); err == nil {
-						isExecuting = isSessionExecutingCached(stub.SessionID, sessionPath)
-					} else {
-						slog.Info("GetRunningSessionIDs: transcript file not found, defaulting to idle",
-							"sessionID", stub.SessionID,
-							"cwd", stub.Cwd,
-							"projectDir", projectDir,
-							"sessionPath", sessionPath,
-							"statError", err)
-					}
-				} else {
-					slog.Warn("GetRunningSessionIDs: project dir not found for cwd, defaulting to idle",
-						"sessionID", stub.SessionID,
-						"cwd", stub.Cwd)
-				}
-			}
+			isExecuting := claudeStubExecuting(homeDir, stub)
 			if isExecuting {
 				running[stub.SessionID] = true
 			}

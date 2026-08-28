@@ -69,6 +69,44 @@ final class ManagementV1CodecTests: XCTestCase {
         XCTAssertThrowsError(try ManagementStatusCodec.decode(exponent))
     }
 
+    // Owner 2026-08-28：claude 活跃 turn 不得禁用「重启共享 Codex 服务」——
+    // activity 新增可选 byBackend breakdown，codex 门控只数 codex/codex-web。
+    func testActivityByBackendScopesCodexRestartGate() throws {
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: fixture("v1-status-accepting.json")) as? [String: Any])
+        var activity = try XCTUnwrap(object["activity"] as? [String: Any])
+        activity["bridgeOwnedActiveTurnsByBackend"] = ["claude": 2, "codex-web": 1]
+        activity["pendingInteractionsByBackend"] = ["dsh": 3]
+        object["activity"] = activity
+
+        let status = try ManagementStatusCodec.decode(JSONSerialization.data(withJSONObject: object))
+        let decoded = try XCTUnwrap(status.v1?.activity)
+        XCTAssertEqual(decoded.bridgeOwnedActiveTurnsByBackend, ["claude": 2, "codex-web": 1])
+        XCTAssertEqual(decoded.pendingInteractionsByBackend, ["dsh": 3])
+        XCTAssertEqual(decoded.codexScopedActiveTurns, 1, "claude 的活跃 turn 不应计入 codex 门控")
+        XCTAssertEqual(decoded.codexScopedPendingInteractions, 0, "dsh 的 pending 交互不应计入 codex 门控")
+
+        activity["bridgeOwnedActiveTurnsByBackend"] = ["claude": 1, "codex": 2, "codex-web": 1]
+        object["activity"] = activity
+        let scoped = try XCTUnwrap(try ManagementStatusCodec.decode(JSONSerialization.data(withJSONObject: object)).v1?.activity)
+        XCTAssertEqual(scoped.codexScopedActiveTurns, 3)
+    }
+
+    func testActivityWithoutByBackendFallsBackToGlobalCount() throws {
+        // 当前 fixtures 已带 byBackend（真实 producer bytes）；剥掉这两个键模拟旧 runtime。
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: fixture("v1-status-accepting.json")) as? [String: Any])
+        var activity = try XCTUnwrap(object["activity"] as? [String: Any])
+        activity.removeValue(forKey: "bridgeOwnedActiveTurnsByBackend")
+        activity.removeValue(forKey: "pendingInteractionsByBackend")
+        object["activity"] = activity
+
+        let status = try ManagementStatusCodec.decode(JSONSerialization.data(withJSONObject: object))
+        let decoded = try XCTUnwrap(status.v1?.activity)
+        XCTAssertNil(decoded.bridgeOwnedActiveTurnsByBackend)
+        XCTAssertNil(decoded.pendingInteractionsByBackend)
+        XCTAssertEqual(decoded.codexScopedActiveTurns, decoded.bridgeOwnedActiveTurns, "旧 runtime 无 breakdown 时保持保守的全局计数")
+        XCTAssertEqual(decoded.codexScopedPendingInteractions, decoded.pendingInteractions)
+    }
+
     func testRequestEncodingUsesExactV1Keys() throws {
         let identity = ManagementRuntimeIdentity(pid: 12345, bridgeEpoch: 1)
         let request = ManagementQuiesceRequest(

@@ -314,10 +314,36 @@ func (h *Handlers) completeBridgeTurn(sessionID string) {
 	}
 }
 
-func (h *Handlers) pendingInteractionCount() uint32 {
-	identities := h.sessions.activityIdentities()
-	var count uint32
-	for _, identity := range identities {
+// bridgeOwnedActiveTurnsByBackend 返回 bridge-owned 活跃 turn 的 per-backend 计数。
+// admission 机器本身保持全局（quiesce 语义要求跨 backend 排空），这个 breakdown
+// 只进 management status 展示，让 Mac 端 backend 专属按钮（如「重启共享 Codex
+// 服务」）不被其它 backend（如 claude）的活跃 turn 误禁用（owner 2026-08-28）。
+// 先取 h.mu 拷贝 owned 集合、再进 registry 锁，两把锁不嵌套，避免与
+// onStateChange→completeBridgeTurn 的 registry→h.mu 顺序互逆。
+func (h *Handlers) bridgeOwnedActiveTurnsByBackend() map[string]uint32 {
+	h.mu.Lock()
+	owned := make(map[string]struct{}, len(h.bridgeOwnedTurns))
+	for sessionID := range h.bridgeOwnedTurns {
+		owned[sessionID] = struct{}{}
+	}
+	h.mu.Unlock()
+	out := make(map[string]uint32, len(owned))
+	if len(owned) == 0 {
+		return out
+	}
+	for _, identity := range h.sessions.activityIdentities() {
+		if _, ok := owned[identity.sessionID]; ok {
+			out[identity.backendID]++
+		}
+	}
+	return out
+}
+
+// pendingInteractionCountByBackend 同 pendingInteractionCount，但按 backend 分组，
+// 与 bridgeOwnedActiveTurnsByBackend 一起构成 status 的 per-backend activity 视图。
+func (h *Handlers) pendingInteractionCountByBackend() map[string]uint32 {
+	out := make(map[string]uint32)
+	for _, identity := range h.sessions.activityIdentities() {
 		projection, ok := h.projectionKernel.Snapshot(identity.backendID, identity.sessionID)
 		if !ok {
 			continue
@@ -327,11 +353,22 @@ func (h *Handlers) pendingInteractionCount() uint32 {
 				continue
 			}
 			for _, part := range turn.Assistant.Parts {
-				if part.Type == "user_input" && part.UserInputStatus == "pending" && count < ^uint32(0) {
-					count++
+				if part.Type == "user_input" && part.UserInputStatus == "pending" {
+					out[identity.backendID]++
 				}
 			}
 		}
+	}
+	return out
+}
+
+func (h *Handlers) pendingInteractionCount() uint32 {
+	var count uint32
+	for _, byBackend := range h.pendingInteractionCountByBackend() {
+		if count > ^uint32(0)-byBackend {
+			return ^uint32(0)
+		}
+		count += byBackend
 	}
 	return count
 }
@@ -2644,11 +2681,17 @@ func preflightClaudeResume(rootCtx context.Context, agent core.Agent, sessionID 
 			"无法确认会话进程归属，为避免冲突未发送，请稍后重试。",
 		)
 	}
-	if proc.Live {
+	if proc.Executing {
 		return retryableSessionError(
 			"session.held_by_external_worker",
-			"该会话记录的进程仍在运行。请在启动该会话的客户端中结束会话并退出对应进程，然后重试。",
+			"该会话正在另一个客户端中执行任务。请等任务结束（或在原客户端停止它）后重试。",
 		)
+	}
+	// Live-but-idle（如 Claude Desktop 打开着该会话但没有在跑任务）不再拦截：
+	// transcript 证明空闲时，从手机续聊只会串行追加新 turn，不会双写。
+	if proc.Live {
+		slog.Info("go-bridge: preflightClaudeResume live-but-idle external process, allowing resume",
+			"sessionID", sessionID, "pid", proc.PID)
 	}
 	return nil
 }

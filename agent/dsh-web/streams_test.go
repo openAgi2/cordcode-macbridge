@@ -134,6 +134,38 @@ func TestCodecTurnErrorPassesReasonVerbatim(t *testing.T) {
 	}
 }
 
+func TestCodecToolCallToolInputIsHumanReadable(t *testing.T) {
+	// ToolInput 契约是 "human-readable summary"（core/message.go）。owner 2026-08-28：
+	// 直传原始 JSON 会让 iOS ticker detail 变成 `{"command": ...}` 并被 sanitizer
+	// 打回通用「正在执行工具」。摘要规则必须与 history.go hydration 的
+	// toolStepTitle 同源（冷/热渲染一致）。
+	c := newSessionCodec("sess-toolsum")
+	events := collect(t, c, []sessionEventWire{
+		env("turn/start", 0, map[string]any{"turn": 1}),
+		env("step/start", 1, map[string]any{"turn": 1, "step": 1}),
+		env("tool/call", 2, map[string]any{"turn": 1, "step": 1, "callId": "c1", "name": "bash", "arguments": `{"command":"rg -n pattern src/","description":"search"}`}),
+		env("tool/call", 3, map[string]any{"turn": 1, "step": 1, "callId": "c2", "name": "bash", "arguments": `"{\"command\":\"git status\"}"`}),
+		env("tool/call", 4, map[string]any{"turn": 1, "step": 1, "callId": "c3", "name": "todo_write", "arguments": `{"todos":[{"id":"1"}]}`}),
+		env("step/end", 5, map[string]any{"turn": 1, "step": 1}),
+		env("turn/end", 6, map[string]any{"turn": 1, "reason": map[string]any{"kind": "completed"}}),
+	})
+	byID := map[string]core.Event{}
+	for _, ev := range events {
+		if ev.Type == core.EventToolUse {
+			byID[ev.RequestID] = ev
+		}
+	}
+	if got := byID["c1"].ToolInput; got != "rg -n pattern src/" {
+		t.Fatalf("bash ToolInput = %q, want command value", got)
+	}
+	if got := byID["c2"].ToolInput; got != "git status" {
+		t.Fatalf("string-wrapped arguments must unwrap to the command, got %q", got)
+	}
+	if got := byID["c3"].ToolInput; got != "" {
+		t.Fatalf("unrecognized shape must yield empty summary (hydration parity), got %q", got)
+	}
+}
+
 func TestCodecBaselineTolerantAndGapResets(t *testing.T) {
 	// Adaptation 1: first frame at seq 7 (mid-log join) is accepted.
 	c := newSessionCodec("sess-base")

@@ -874,8 +874,10 @@ class RuntimeManager: ObservableObject {
             latestManagementStatus = resp
             applyManagementStatus(resp.status)
             if let activity = resp.v1?.activity {
-                codexWebActiveTurns = activity.bridgeOwnedActiveTurns
-                codexWebPendingInteractions = activity.pendingInteractions
+                // per-backend scoped：claude 等 backend 的活跃 turn 不再禁用 codex
+                // 重启按钮（owner 2026-08-28）；旧 runtime 无 breakdown 时退回全局计数。
+                codexWebActiveTurns = activity.codexScopedActiveTurns
+                codexWebPendingInteractions = activity.codexScopedPendingInteractions
             }
             managementFailureCount = 0
             if resp.v1?.fileReadHealth.restartRecommended == true {
@@ -1162,14 +1164,16 @@ class RuntimeManager: ObservableObject {
 
     /// codex-web 页按钮动作：预检活跃 turn → 重启共享 daemon → 更新 config 基线。
     /// 预检避免打断进程内 loaded thread/writer；文件变更提示在重启成功后消除。
+    /// 预检只看 codex/codex-web 的活跃 turn 与 pending 交互——重启的是共享 Codex
+    /// daemon，其它 backend（如 claude）的任务不受影响（owner 2026-08-28）。
     func restartSharedCodexDaemon() async -> CodexSharedDaemonRestartOutcome {
         if let client = apiClient,
            let status = try? await client.getStatus(),
            let activity = status.v1?.activity,
-           activity.bridgeOwnedActiveTurns > 0 || activity.pendingInteractions > 0 {
+           activity.codexScopedActiveTurns > 0 || activity.codexScopedPendingInteractions > 0 {
             return .rejectedActiveTurns(
-                activeTurns: activity.bridgeOwnedActiveTurns,
-                pendingInteractions: activity.pendingInteractions
+                activeTurns: activity.codexScopedActiveTurns,
+                pendingInteractions: activity.codexScopedPendingInteractions
             )
         }
         let homeDirectory = FileManager.default.homeDirectoryForCurrentUser.path

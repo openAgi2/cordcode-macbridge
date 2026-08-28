@@ -666,12 +666,63 @@ func TestLiveSessionProcess_LiveButIdleIsNotRunning(t *testing.T) {
 	if proc.SessionID != "idle-live-ses" || proc.PID != 4242 || !proc.Live {
 		t.Fatalf("LiveSessionProcess = %#v, want live pid 4242", proc)
 	}
+	if proc.Executing {
+		t.Fatalf("LiveSessionProcess = %#v, want Executing=false for live-but-idle (owner 2026-08-28 preflight gate)", proc)
+	}
 	running, err := ag.GetRunningSessionIDs(context.Background())
 	if err != nil {
 		t.Fatalf("GetRunningSessionIDs: %v", err)
 	}
 	if running["idle-live-ses"] {
 		t.Fatalf("live-but-idle session reported executing; running=%v", running)
+	}
+}
+
+// TestLiveSessionProcess_LiveExecutingCarriesFlag proves the transcript-backed
+// Executing flag is populated through LiveSessionProcess (not only through
+// GetRunningSessionIDs) — preflightClaudeResume blocks on this field.
+func TestLiveSessionProcess_LiveExecutingCarriesFlag(t *testing.T) {
+	prev := procIdentityAlive
+	procIdentityAlive = func(_ context.Context, pid int, _ string) bool { return pid == 4243 }
+	t.Cleanup(func() { procIdentityAlive = prev })
+
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+	sessionsDir := filepath.Join(tempHome, ".claude", "sessions")
+	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
+		t.Fatalf("sessions dir: %v", err)
+	}
+	workDir := t.TempDir()
+	projectKey := encodeClaudeProjectKey(workDir)
+	projectsDir := filepath.Join(tempHome, ".claude", "projects", projectKey)
+	if err := os.MkdirAll(projectsDir, 0755); err != nil {
+		t.Fatalf("projects dir: %v", err)
+	}
+	// Last message is a user prompt with no assistant end_turn after → executing.
+	executingTranscript := `{"type":"user","message":{"role":"user","content":"hello"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(projectsDir, "exec-live-ses.jsonl"), []byte(executingTranscript), 0644); err != nil {
+		t.Fatalf("transcript: %v", err)
+	}
+	stub := []byte(fmt.Sprintf(`{"pid":4243,"sessionId":"exec-live-ses","cwd":%q}`, workDir))
+	if err := os.WriteFile(filepath.Join(sessionsDir, "4243.json"), stub, 0644); err != nil {
+		t.Fatalf("stub: %v", err)
+	}
+
+	a, err := New(map[string]any{"work_dir": "/tmp"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ag := a.(*Agent)
+
+	proc, err := ag.LiveSessionProcess(context.Background(), "exec-live-ses")
+	if err != nil {
+		t.Fatalf("LiveSessionProcess: %v", err)
+	}
+	if !proc.Live || proc.PID != 4243 {
+		t.Fatalf("LiveSessionProcess = %#v, want live pid 4243", proc)
+	}
+	if !proc.Executing {
+		t.Fatalf("LiveSessionProcess = %#v, want Executing=true for in-flight external turn", proc)
 	}
 }
 

@@ -25,6 +25,8 @@
     "stuckWorkers": "UInt32 protocol domain, bounded by A0 poolSize",
     "activeTurns": "UInt32 protocol domain, bounded by A0 maxBridgeOwnedActiveTurns",
     "pendingInteractions": "UInt32 protocol domain, bounded by A0 maxPendingInteractions",
+    "bridgeOwnedActiveTurnsByBackend": "additive 2026-08-28: optional object backendID -> UInt32 (sum == bridgeOwnedActiveTurns for registered backends; unresolvable sessions land in 'unknown'); empty object when no bridge-owned turns. Display-only breakdown; admission/quiesce semantics stay global. Mac strict decoder treats the key as optional so old-runtime statuses still decode (falls back to global counts).",
+    "pendingInteractionsByBackend": "additive 2026-08-28: optional object backendID -> UInt32, same rules as bridgeOwnedActiveTurnsByBackend. Purpose: Mac 'restart shared Codex service' gating must count only codex/codex-web, not other backends' activity (owner 2026-08-28).",
     "leaseMillis": "UInt32, > 0, bounded by A0 leaseMin/leaseMax",
     "leaseRemainingMillis": "UInt32, 0 <= leaseRemainingMillis <= leaseMillis",
     "retryAfterMillis": "UInt32, > 0",

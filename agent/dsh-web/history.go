@@ -374,8 +374,9 @@ func toolStepTitle(name string, arguments []byte) string {
 	for _, key := range []string{"command", "file_path", "path", "pattern", "query", "url"} {
 		if v, ok := args[key].(string); ok && strings.TrimSpace(v) != "" {
 			title := strings.TrimSpace(v)
-			if len(title) > 80 {
-				title = title[:80]
+			// rune 截断：字节截断会把 CJK 命令切成非法 UTF-8（live ticker 也走这里）。
+			if runes := []rune(title); len(runes) > 80 {
+				title = string(runes[:80])
 			}
 			return title
 		}
