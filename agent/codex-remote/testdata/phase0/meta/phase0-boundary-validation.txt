@@ -1,0 +1,11 @@
+command=node agent/codex-remote/validate/phase0-boundary.mjs
+checked_at=2026-08-28T08:47:00Z
+exit_code=0
+wall_time_seconds=1.213294084
+result=PASS
+phase=0
+product_backend_registered=false
+gate_p0_passed=false
+allowed_top_level=README.md,probe,testdata,validate
+frozen_backend_diff=clean
+paired_ios=frozen-clean

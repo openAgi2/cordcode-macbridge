@@ -35,7 +35,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-28T08:44:00Z",
+  "updated_at": "2026-08-28T08:46:00Z",
   "todos": [
     {
       "id": "phase0-source-baseline-impl",
@@ -121,7 +121,7 @@
       "id": "phase0-probe-scaffold-impl",
       "title": "Phase 0 isolated probe scaffold — impl",
       "description": "Create only agent/codex-remote/{README.md,probe/,testdata/phase0/,validate/}; document Phase-0-only status, timeouts, redaction and revoke cleanup; do not register a backend or import old lifecycle/ownership code.",
-      "status": "in_progress",
+      "status": "done",
       "phase": "phase0",
       "kind": "impl",
       "depends_on": [
@@ -131,20 +131,26 @@
       "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Created the Phase-0-only directory contract under agent/codex-remote with an explicit 14-row Gate ledger, non-product probe rules, redacted fixture policy, validator contract, timeout/revoke/redaction requirements and frozen legacy-directory boundary. No Go backend or runtime registration exists.",
+        "artifacts": [
+          "agent/codex-remote/README.md",
+          "agent/codex-remote/probe/README.md",
+          "agent/codex-remote/testdata/phase0/README.md",
+          "agent/codex-remote/validate/README.md",
+          "git:281103c75a6abf2efc6ac1e6bd6443c524803b47"
+        ],
+        "checked_at": "2026-08-28T08:45:12Z"
       }
     },
     {
       "id": "phase0-probe-scaffold-tests",
       "title": "Phase 0 isolated probe scaffold — tests",
       "description": "Run or create the targeted automated/static/replay checks that directly prove: Create only agent/codex-remote/{README.md,probe/,testdata/phase0/,validate/}; document Phase-0-only status, timeouts, redaction and revoke cleanup; do not register a backend or import old lifecycle/ownership code.",
-      "status": "pending",
+      "status": "in_progress",
       "phase": "phase0",
       "kind": "tests",
       "depends_on": [
