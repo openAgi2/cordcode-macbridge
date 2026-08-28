@@ -7,6 +7,12 @@ ListSessions/StartSession fail-closed（`not_configured`），capability 为空�
 Mac 默认 drivers，也未接 iOS。go-bridge `main.go` 已 blank-import。禁止 import
 退役 Codex / 共享 daemon 的 Codex Web backend。
 
+`phase1-transport-rpc` 与 `phase1-minimal-vertical` 的自动测试已过：envelope
+Transport、whitelist `rpc.go`、thread/list/resume、turn/start/interrupt、text
+delta。Live Desktop 集中在
+`agent/codex-remote/testdata/phase1/OWNER_MANUAL_CHECKLIST.md`，对应队列
+`phase1-gate-regression`。默认 Mac drivers / iOS 仍未接。
+
 下一单元：`phase1-transport-rpc`（controller WSS + app-server Transport + 最小
 rpc.go）。已知缺口仍 fail-closed：cursor 重连、interrupt、官方 iOS 共存。
 

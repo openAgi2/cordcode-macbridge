@@ -1,0 +1,1 @@
+ok  	github.com/openAgi2/cordcode-macbridge/agent/codex-remote	0.304s

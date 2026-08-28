@@ -35,7 +35,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-28T12:45:00Z",
+  "updated_at": "2026-08-28T13:10:05Z",
   "todos": [
     {
       "id": "phase0-source-baseline-impl",
@@ -749,184 +749,217 @@
       "id": "phase1-transport-rpc-impl",
       "title": "Minimal Remote Transport and JSON-RPC — impl",
       "description": "Implement controller WSS, validated envelope/ACK/cursor/chunk/backpressure/epoch semantics and one environment stream as app-server Transport; whitelist-migrate only minimal rpc.go with provenance and Remote parity evidence.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase1",
       "kind": "impl",
       "depends_on": [
         "phase1-identity-lifecycle-regression"
       ],
       "source": "Phase 1 tasks 3-4; §6",
-      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "notes": "Envelope stream Transport + whitelist rpc.go + Phase 1 text vertical on fake host. Live Desktop batched in OWNER_MANUAL_CHECKLIST.md.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Implemented controller envelope Stream as app-server Transport (seq, ACK, chunk, env/stream mismatch disconnect, fail-closed subscribe cursor). Whitelist-copied rpc.go from agent/codex-web@c6fa9b85 with Remote provenance.",
+        "artifacts": [
+          "agent/codex-remote/envelope.go",
+          "agent/codex-remote/stream.go",
+          "agent/codex-remote/rpc.go",
+          "agent/codex-remote/codec.go",
+          "agent/codex-remote/session.go",
+          "agent/codex-remote/loopback.go",
+          "agent/codex-remote/testdata/phase1/rpc-provenance.md"
+        ],
+        "checked_at": "2026-08-28T13:10:05Z"
       }
     },
     {
       "id": "phase1-transport-rpc-tests",
       "title": "Minimal Remote Transport and JSON-RPC — tests",
       "description": "Run or create the targeted automated/static/replay checks that directly prove: Implement controller WSS, validated envelope/ACK/cursor/chunk/backpressure/epoch semantics and one environment stream as app-server Transport; whitelist-migrate only minimal rpc.go with provenance and Remote parity evidence.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase1",
       "kind": "tests",
       "depends_on": [
         "phase1-transport-rpc-impl"
       ],
       "source": "Phase 1 tasks 3-4; §6",
-      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "notes": "Envelope stream Transport + whitelist rpc.go + Phase 1 text vertical on fake host. Live Desktop batched in OWNER_MANUAL_CHECKLIST.md.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Package tests cover wrap/unwrap, chunk reassembly, cursor fail-closed, RPC initialize/thread/list, turn/started notifications.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase1/transport-rpc-test.txt",
+          "cmd:go test ./agent/codex-remote -count=1 -timeout 15s => PASS"
+        ],
+        "checked_at": "2026-08-28T13:10:05Z"
       }
     },
     {
       "id": "phase1-transport-rpc-regression",
       "title": "Minimal Remote Transport and JSON-RPC — regression",
       "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase1",
       "kind": "regression",
       "depends_on": [
         "phase1-transport-rpc-tests"
       ],
       "source": "Phase 1 tasks 3-4; §6",
-      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "notes": "Envelope stream Transport + whitelist rpc.go + Phase 1 text vertical on fake host. Live Desktop batched in OWNER_MANUAL_CHECKLIST.md.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Frozen agent/codex-web and agent/codex unchanged. gitleaks PASS. Live controller WSS enroll is owner-batched.",
+        "artifacts": [
+          "cmd:git diff --exit-code -- agent/codex-web agent/codex",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => PASS",
+          "agent/codex-remote/testdata/phase1/OWNER_MANUAL_CHECKLIST.md"
+        ],
+        "checked_at": "2026-08-28T13:10:05Z"
       }
     },
     {
       "id": "phase1-minimal-vertical-impl",
       "title": "Minimal backend vertical slice — impl",
       "description": "Wire initialize, thread list/read/start/resume, turn start/interrupt and text delta through bridge-v1; prove a real Desktop bidirectional slice and codex-web behavior isolation.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase1",
       "kind": "impl",
       "depends_on": [
         "phase1-transport-rpc-regression"
       ],
       "source": "Phase 1 tasks 5-7",
-      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "notes": "Envelope stream Transport + whitelist rpc.go + Phase 1 text vertical on fake host. Live Desktop batched in OWNER_MANUAL_CHECKLIST.md.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Wired thread/list, thread/resume(excludeTurns), turn/start, turn/interrupt, and text delta/completion through BindClient + LiveCodec. Capabilities still unadvertised.",
+        "artifacts": [
+          "agent/codex-remote/session.go",
+          "agent/codex-remote/codec.go",
+          "agent/codex-remote/diagnostics.go"
+        ],
+        "checked_at": "2026-08-28T13:10:05Z"
       }
     },
     {
       "id": "phase1-minimal-vertical-tests",
       "title": "Minimal backend vertical slice — tests",
       "description": "Run or create the targeted automated/static/replay checks that directly prove: Wire initialize, thread list/read/start/resume, turn start/interrupt and text delta through bridge-v1; prove a real Desktop bidirectional slice and codex-web behavior isolation.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase1",
       "kind": "tests",
       "depends_on": [
         "phase1-minimal-vertical-impl"
       ],
       "source": "Phase 1 tasks 5-7",
-      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "notes": "Envelope stream Transport + whitelist rpc.go + Phase 1 text vertical on fake host. Live Desktop batched in OWNER_MANUAL_CHECKLIST.md.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Fake-host vertical test lists/resumes/sends, interrupts after turn/started, and observes text + result events. thread/status/changed is counted unknown, not treated as a turn.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase1/transport-rpc-test.txt",
+          "cmd:go test ./agent/codex-remote -count=1 -timeout 15s => PASS"
+        ],
+        "checked_at": "2026-08-28T13:10:05Z"
       }
     },
     {
       "id": "phase1-minimal-vertical-regression",
       "title": "Minimal backend vertical slice — regression",
       "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase1",
       "kind": "regression",
       "depends_on": [
         "phase1-minimal-vertical-tests"
       ],
       "source": "Phase 1 tasks 5-7",
-      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "notes": "Envelope stream Transport + whitelist rpc.go + Phase 1 text vertical on fake host. Live Desktop batched in OWNER_MANUAL_CHECKLIST.md.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "mixed",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Automated isolation via fake host. Real Desktop bidirectional cut is batched for the owner at testdata/phase1/OWNER_MANUAL_CHECKLIST.md; not claimed as live-proven.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase1/OWNER_MANUAL_CHECKLIST.md",
+          "cmd:git diff --exit-code -- agent/codex-web agent/codex",
+          "cmd:gitleaks dir --redact --config .gitleaks.toml agent/codex-remote => PASS"
+        ],
+        "checked_at": "2026-08-28T13:10:05Z"
       }
     },
     {
       "id": "phase1-gate-impl",
       "title": "Gate P1 adjudication — impl",
       "description": "Require MacBridge targeted automated evidence plus a real Desktop bidirectional minimal slice and the frozen-directory regression gate; do not connect the full iOS product surface.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase1",
       "kind": "impl",
       "depends_on": [
         "phase1-minimal-vertical-regression"
       ],
       "source": "Gate P1",
-      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "notes": "Envelope stream Transport + whitelist rpc.go + Phase 1 text vertical on fake host. Live Desktop batched in OWNER_MANUAL_CHECKLIST.md.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Gate P1 automated slice exists (transport+RPC+vertical tests). Full iOS product surface not connected. Manual Desktop remaining.",
+        "artifacts": [
+          "docs/2026-08-26-codex-remote-backend-implementation-plan.md",
+          "agent/codex-remote/testdata/phase1/OWNER_MANUAL_CHECKLIST.md"
+        ],
+        "checked_at": "2026-08-28T13:10:05Z"
       }
     },
     {
       "id": "phase1-gate-tests",
       "title": "Gate P1 adjudication — tests",
       "description": "Run or create the targeted automated/static/replay checks that directly prove: Require MacBridge targeted automated evidence plus a real Desktop bidirectional minimal slice and the frozen-directory regression gate; do not connect the full iOS product surface.",
-      "status": "pending",
+      "status": "done",
       "phase": "phase1",
       "kind": "tests",
       "depends_on": [
         "phase1-gate-impl"
       ],
       "source": "Gate P1",
-      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "notes": "Envelope stream Transport + whitelist rpc.go + Phase 1 text vertical on fake host. Live Desktop batched in OWNER_MANUAL_CHECKLIST.md.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "go test ./agent/codex-remote PASS; phase0-boundary reports phase 1 registered backend; frozen dirs clean.",
+        "artifacts": [
+          "agent/codex-remote/testdata/phase0/meta/phase1-boundary-validation.txt",
+          "agent/codex-remote/testdata/phase1/transport-rpc-test.txt",
+          "cmd:go test ./agent/codex-remote -count=1 -timeout 15s => PASS"
+        ],
+        "checked_at": "2026-08-28T13:10:05Z"
       }
     },
     {
@@ -940,7 +973,7 @@
         "phase1-gate-tests"
       ],
       "source": "Gate P1",
-      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "notes": "Owner-batched real Desktop checklist. Do not mark done until OWNER_MANUAL_CHECKLIST.md is executed.",
       "verification": {
         "required": true,
         "status": "missing",

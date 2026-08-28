@@ -1,6 +1,6 @@
 # codex-remote Phase 0 evidence probe
 
-Status: **Phase 1 in progress.** Live turn stream proven after `thread/resume` (attempt-008). Owner rewrote Gate P0 to accept first-connect live without cursor. **product backend registered** as `codex-remote`. Cursor reconnect, interrupt and official iOS controller coexistence remain known gaps and must fail closed. Original cursor-only **Gate P0 not passed**; the rewritten first-connect live gate is what unlocked Phase 1.
+Status: **Phase 1 automated slice landed.** Envelope Transport + JSON-RPC + list/resume/turn/text-delta tests pass on a fake host. **product backend registered** as `codex-remote` (not in default Mac drivers). Live Desktop cut is batched in `testdata/phase1/OWNER_MANUAL_CHECKLIST.md`. Cursor reconnect, official iOS coexistence remain known gaps. Original cursor-only **Gate P0 not passed**; rewritten first-connect live gate unlocked Phase 1.
 
 Stop / resume document: `docs/2026-08-28-codex-remote-phase0-fail-blocked.md`.
 
