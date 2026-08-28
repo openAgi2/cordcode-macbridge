@@ -57,6 +57,23 @@
 预期产品特性=Remote Control host enrollment、pairing、WSS、stream multiplex、ACK/cursor/reconnect、普通 app-server JSON-RPC connection 投影
 ```
 
+### 0.4 2026-08-28 成功先例补强修订来源
+
+```text
+仓库路径=/Users/jacklee/Projects/cordcode-macbridge
+分支=main
+提交=224a632e032aea913c78223b7d2231ffa78f39db
+未提交状态=修改 docs/2026-08-26-codex-remote-backend-implementation-plan.md（本轮方案补强）；修改前工作区干净
+任务预期分支=用户明确指定上述 MacBridge docs 文档；该绝对路径当前唯一对应 main 工作树
+配套仓库路径/分支/提交=/Users/jacklee/Projects/cordcode-ios / main / d0762cb9a05997b615ef4589f39afad8f4b4db04（仅核对元数据，工作区干净，本轮不读取或修改 iOS 产品源码）
+预期产品特性=补强 codex-remote 的宿主/controller Gate、空目录与来源隔离、source-first 修复顺序、controller ownership 和 iOS 接线防漏纪律；不改变既定产品拓扑
+```
+
+本轮借鉴输入为同一 MacBridge `main` 工作树内的
+`docs/2026-08-21-codex-web-backend-design.md` 与
+`docs/2026-08-18-opencode-web-backend-design.md`。本轮未重新核验 Codex 外部协议 shape；§3 与 §14 的
+既有外部协议结论仍归属于其各自记录的上游/App/binary 来源，新增内容只约束实施顺序与证据门。
+
 实施、评审、构建或安装前必须按双仓 P0 规则重新生成来源清单；本文记录不能替代未来复核。
 
 ## 1. 路线裁决
@@ -99,6 +116,104 @@ controller API，而不是 Thread/Turn/Item 翻译；在这条链未通过前完
 Phase 0 PASS 后允许从冻结提交复制 `codex-web` 的 transport-neutral 上层，形成独立 `codex-remote`
 首版。复制必须逐文件白名单、记录来源提交和差异理由。两条 backend 稳定后再抽公共核心，禁止为了
 提前“去重”同时重构已经工作的 `codex-web`。
+
+### 1.3 成功先例的正确迁移方式
+
+从 `dsh-web`、`opencode-web`、`codex-web` 迁移的第一原则不是 adapter 文件布局，而是：
+
+> **先证明目标 ChatGPT Desktop 私有 app-server 已通过官方 Remote Control 数据面接纳 MacBridge
+> 这个独立 controller，再把 CordCode 作为该 Remote stream 上的第二个产品客户端接入。**
+
+这项证明必须同时包含：
+
+1. **宿主身份**：收到的 stream 确实属于用户选中的 Desktop environment 和它当前持有的私有
+   app-server，而不是同账号历史、standalone app-server、fake relay 或另一个 Remote host；
+2. **实时同一性**：Desktop 创建的唯一测试 thread/turn 能被 MacBridge 实时收到，MacBridge 对该
+   active turn 的 `turn/interrupt` 能由同一个官方 app-server 仲裁并在 Desktop 收口；
+3. **controller 共存性**：MacBridge 的 enroll/pair/connect 不得静默挤掉、撤销或冒充 ChatGPT iOS
+   的 controller；若上游实际是 single-owner/HTTP 409 模型，必须在 Phase 0 暴露并重新裁决产品语义。
+
+只有这条宿主/controller 拓扑 PASS 后，才能借鉴模块分层、事件泵、session binding、SSV2、capability
+和 iOS 接线。不能先完成一个面向自有 app-server、fake relay 或历史轮询的完整 adapter，再把真实
+Desktop controller 接线留到产品末期；这种实现即使单测全绿，也只证明翻译器或替代宿主可用。
+
+### 1.4 代码来源隔离与空目录原则
+
+`agent/codex-remote/` 是本方案的唯一 backend 实施目录。Phase 0 探针与产品入口在同一目录内按子目录
+和注册状态隔离：Phase 0 可以从空目录创建 probe、脱敏 fixture 和验证工具，但不得注册产品 backend，
+也不得提前堆完整 adapter；进入 Phase 1 后才在该目录增加最小 controller Transport 竖切：
+
+> **禁止 `cp -R agent/codex-web agent/codex-remote` 后批量改名，也禁止 import、包装或 type alias
+> `agent/codex` / `agent/codex-web` 的 Agent、lifecycle、transport、session store 或 ownership 状态机。**
+
+§5.3 的“允许复制”是 Phase 0 PASS 后的逐文件白名单迁移，不是目录复制豁免。每个文件仍须先删除
+不成立的 daemon/UDS 假设，再用 Remote envelope 内的真实 app-server payload 重证。参考源的职责固定为：
+
+| 参考源 | 可以借鉴 | 不能用来证明 |
+|---|---|---|
+| ChatGPT App controller call site + 目标版本脱敏 fixture | enroll/refresh、device-key proof、environment 绑定、controller WSS 与错误语义 | bridge-v1、SSV2、iOS 产品行为 |
+| Codex 官方 host/server/protocol/reducer | app-server JSON-RPC、thread/turn/item、server request、host Remote transport | 闭源 controller wire 中尚未取样的字段、时序或多 controller 规则 |
+| `agent/codex-web/` | transport-neutral RPC/reducer、bridge 映射、SSV2/pathless、CordCode 接线骨架 | controller 认证、Remote envelope、environment 寻址、daemon 广播等价性 |
+| 旧 `agent/codex/` 与其他 backend | `core` interface、注册/descriptor/iOS 接线索引、历史故障清单 | Remote API shape、event ordering、session ownership 或 fallback 语义 |
+
+`codex-remote` 的定义是：
+
+> **OpenAI Remote Control controller client + app-server virtual Transport + bridge-v1 协议翻译器。**
+
+session、history、turn、interaction 和 live 状态以目标 Desktop app-server 经官方 Remote stream 提供的
+API/事件为唯一数据面。禁止用 rollout/JSONL/SQLite/file tail、同账号历史轮询或另起 standalone
+app-server 补造 Remote 实时事实。
+
+### 1.5 Source-first 证据与修复顺序
+
+每项能力固定按以下优先级建立；低优先级材料不能覆盖高优先级事实：
+
+1. 目标版本 ChatGPT App 的 controller 真实 call site；
+2. Codex 官方 host/server/protocol/reducer 与对应测试；
+3. 同版本 Desktop ↔ OpenAI relay ↔ controller 的真实脱敏时间线和 fixture；
+4. app-server payload → bridge-v1/SSV2 的显式映射与 replay test；
+5. `codex-web`/其他 backend 仅作 CordCode 架构和历史回归参考。
+
+完整证明元组为：
+
+```text
+controller call site
+  + host/server/protocol source
+  + 目标 binary 的真实脱敏 fixture
+  + 明确 bridge-v1/SSV2 映射
+  + 真实 Desktop 最小双向竖切
+  + 定向 replay/integration test
+```
+
+缺任一项只能标记 `unverified` 或 `EVIDENCE-ONLY`，不得靠复制 `codex-web`、增加历史 fallback 或扩大
+adapter 代码量继续放行。实施期发现 auth、pairing、stream、history、interaction 或重连问题时，先并排
+采集官方 controller 与 MacBridge 的同场景时间线，找到**第一处分歧**再修；一次修复未改变真实
+Desktop 现象，就停止叠补丁并回到官方调用链重新定位。
+
+### 1.6 实施目录与既有 backend 零修改边界
+
+Phase 0–Phase 4 默认必须满足：
+
+```text
+主要新增实现 = agent/codex-remote/**
+agent/codex-web/** = 零修改
+agent/codex/** = 零修改
+```
+
+产品接线确实需要改动 `go-bridge/`、Mac App、权威 protocol pack 和 iOS 时，只允许围绕新增
+`codex-remote` identity/capability 做可独立回滚的加法；不得借机重构、修补或改变 `codex-web`、旧
+`codex` 的生命周期、事件、缓存、session 或用户可见行为。
+
+§5.3 的白名单复制方向只能是“从冻结来源读取 → 新文件写入 `agent/codex-remote/`”。复制源文件保持
+不变，后续修复也不自动双写。每个 Phase 的回归门必须包含：
+
+```bash
+git diff --exit-code -- agent/codex-web agent/codex
+```
+
+若实施中发现真正属于既有 backend 的共享缺陷，保留证据并另立独立任务；不得把它夹带进
+`codex-remote` 交付。§5.5/Phase 5 的公共核心抽取不属于本计划默认执行范围，只有两个 backend 都有
+真实 E2E 和稳定观察窗、且 owner 明确另行授权后才可启动。
 
 ## 2. 目标拓扑与信任边界
 
@@ -246,14 +361,14 @@ fixture 各增加一行 `bedrock_access_keys: None`；生产实现无差异。�
 
 ### 5.1 Phase 0 探针
 
-建议建立：
+从空目录建立以下 Phase 0-only 结构；此时不注册 backend：
 
 ```text
-scripts/codex-remote-phase0/
-  README.md
-  probe/                  # 非产品入口；不注册 backend
-  dumps/                  # 只允许脱敏 fixture/meta
-  validate/               # envelope、顺序、秘密扫描与版本检查
+agent/codex-remote/
+  README.md                # 明示 Phase 0-only、Gate 状态与清理/revoke步骤
+  probe/                   # 非产品入口；不注册 backend
+  testdata/phase0/         # 只允许脱敏 fixture/meta
+  validate/                # envelope、顺序、秘密扫描与版本检查
 ```
 
 探针不得调用 iOS、修改 ChatGPT App、写 `config.toml`、替换系统代理或更改现有 daemon/LaunchAgent。
@@ -322,7 +437,8 @@ agent/codex-remote/
 
 ### 5.5 后续公共核心抽取门
 
-只有 `codex-web` 与 `codex-remote` 都完成真实 E2E 并稳定一个观察窗后，才允许另案抽取：
+本阶段不属于 `codex-remote` 默认实施范围。只有 `codex-web` 与 `codex-remote` 都完成真实 E2E、稳定
+一个观察窗，并由 owner 明确另行授权后，才允许另案抽取：
 
 ```text
 agent/codex-appserver/
@@ -448,17 +564,23 @@ not_configured
    controller 如何指定/切换目标 environment，并捕获重连时 cursor 的实际递交位置；
 4. 建立临时 controller device key 与可撤销 enrollment；
 5. 列出已配对 environment，选中当前 Desktop；
-6. WSS 建连，发送 app-server `initialize`/`initialized`；
-7. `thread/list`/`thread/read`；
-8. Desktop 发起长 turn，探针实时收到 `turn/started`、多帧 item delta、唯一 `turn/completed`；
-9. 探针对同一 active turn执行 `turn/interrupt`，Desktop 与探针看到一致终态；
-10. 主动断网/重连一次，验证 seq/ACK/cursor 与冷校准边界；
-11. revoke controller，证明旧 token/device连接失效且 Desktop 其他配对不受影响；
-12. 对 dumps 和日志执行 secret scan。
+6. 用 Desktop 创建带唯一标记的测试 thread/turn，证明 environment/stream 属于目标 Desktop 当前私有
+   app-server；同账号历史、standalone app-server 或 fake relay 不算宿主身份证明；
+7. 在 ChatGPT iOS controller 已配对并连接的状态下再连接 MacBridge，记录是否支持并发 controller、
+   是否返回 single-owner/HTTP 409、是否踢掉既有 controller，以及断线后的 ownership 恢复语义；
+8. WSS 建连，发送 app-server `initialize`/`initialized`；
+9. `thread/list`/`thread/read`；
+10. Desktop 发起长 turn，探针实时收到 `turn/started`、多帧 item delta、唯一 `turn/completed`；
+11. 探针对同一 active turn执行 `turn/interrupt`，Desktop 与探针看到一致终态；
+12. 主动断网/重连一次，验证 seq/ACK/cursor 与冷校准边界；
+13. revoke controller，证明旧 token/device连接失效且 Desktop 其他配对不受影响；
+14. 对 dumps 和日志执行 secret scan。
 
-Gate P0 PASS：上述 1–12 全部有真实证据。若只能 list/read、不能收到 live/interrupt，判
-`EVIDENCE-ONLY`，不得复制完整 backend或接 iOS。若必须读取并长期冒用 Desktop 原始 token、修改 App
-包或代理全部 ChatGPT 流量，判 `BLOCKED`，重新打开认证/宿主设计。
+Gate P0 PASS：上述 1–14 全部有真实证据。若只能 list/read、不能收到 live/interrupt，判
+`EVIDENCE-ONLY`，不得复制完整 backend或接 iOS。若 MacBridge 连接必须静默抢占 ChatGPT iOS 的
+controller，判 `EVIDENCE-ONLY` 并重新裁决产品语义，不得把“先断开官方手机端”藏成实现细节。若必须
+读取并长期冒用 Desktop 原始 token、修改 App 包或代理全部 ChatGPT 流量，判 `BLOCKED`，重新打开
+认证/宿主设计。
 
 ### Phase 1：codex-remote 骨架与最小 app-server Transport
 
@@ -497,6 +619,12 @@ Gate P1 PASS：MacBridge 自动测试 + 真实 Desktop 双向最小竖切；不�
 - capability 驱动的 session、history、turn、interaction UI；
 - 与 `codexWeb` 并列，不合并同 thread id 的缓存。
 
+实施时必须把 iOS 接线分成两类审计：编译器可发现的 `switch` 穷举，以及不会报编译错误的
+`if ==`、`guard`、字符串 kind、backend allowlist/denylist、cache scope、SSV2/hydrate/reconnect 名单。
+后者必须用 `rg` 全量扫描并逐处记录“加入 / 不加入及理由”；禁止机械追加
+`|| backend == .codexRemote`。每一处归组由 Remote 真实 capability 和 identity 决定，不能因为
+`codexWeb` UI 相似就继承其 daemon/目录/缓存语义。
+
 这是 D3 状态/协议改动：只跑直接相关测试组，交付前按来源门执行一次连接真机的增量构建、安装和启动；
 UI tests、snapshot tests、模拟器自动化和真机自动点击仍需 owner 明确授权。
 
@@ -515,7 +643,8 @@ Gate P3 PASS：owner 按一次性测试矩阵验证 Desktop ↔ iPhone 双向实
 ### Phase 5：公共核心收敛（独立后续）
 
 满足 §5.5 后审计真实重复，再抽 `codex-appserver` 公共包。该阶段不是 `codex-remote` 首次交付门，
-不得为了代码洁癖阻塞产品验证，也不得留下永久无主的双份 reducer。
+不得为了代码洁癖阻塞产品验证，也不得留下永久无主的双份 reducer。没有 owner 对该独立任务的明确
+授权时，不进入本阶段，`agent/codex-web/` 与 `agent/codex/` 继续保持零修改。
 
 ## 9. 测试与证据矩阵
 
@@ -531,7 +660,9 @@ Gate P3 PASS：owner 按一次性测试矩阵验证 Desktop ↔ iPhone 双向实
 | RPC | initialize、并发 response、notification、server request、错误原样保留 |
 | parity | 同一 app-server fixture 经 UDS 与 Remote 解包后的 codec/SSV2 输出一致；仅比较协议语义，不假装宿主相同 |
 | lifecycle | offline/sleep/app closed、remote disabled、revoked、incompatible、重新配对 |
+| controller ownership | ChatGPT iOS 已连接时 MacBridge enroll/connect；并发、409、踢出、重连与 revoke 语义均有真实证据，禁止静默抢占 |
 | coexistence | codex-web daemon故障不影响 codex-remote；Remote故障不停止/重启 daemon |
+| provenance | `agent/codex-remote` import 图不含旧 `agent/codex` 或 `agent/codex-web` ownership/lifecycle；首版审查证明不是目录 copy/rename；白名单复制逐文件含来源与 Remote parity test；Phase 0–4 的 `git diff --exit-code -- agent/codex-web agent/codex` 必须通过 |
 | security | secret scan、日志脱敏、Keychain ACL、token不进入 bridge/iOS/fixtures |
 
 禁止用 fake relay 证明外部 client API 形状；fake 只用于已由真实样本冻结后的本地错误分支和时序回归。
@@ -556,6 +687,7 @@ Gate P3 PASS：owner 按一次性测试矩阵验证 Desktop ↔ iPhone 双向实
 | 8 | codex-web daemon 同时运行 | 两 backend 分别发起独立测试 session | 互不停止、互不改配置、identity/cache不串扰 |
 | 9 | CordCode LAN | 执行 1–4 | 功能与状态完整 |
 | 10 | CordCode HPKE Relay | 执行 1–4 | 与 LAN 语义一致，无 token 泄漏 |
+| 11 | ChatGPT iOS 已连接同一 Desktop Remote environment | 连接/断开/revoke MacBridge controller，并分别从两端观察 | 官方 controller 不被静默踢出或撤销；若上游只允许 single-owner，产品明确阻断并呈现真实状态，不伪装并存成功 |
 
 ## 10. 安全与隐私验收
 
@@ -582,6 +714,7 @@ Gate P3 PASS：owner 按一次性测试矩阵验证 Desktop ↔ iPhone 双向实
 | 双 Relay 增加延迟和公网依赖 | LAN也需 OpenAI relay 才能进 Desktop | 指标拆分两段延迟；诚实显示 offline；不声称纯本地 |
 | Mac睡眠/Desktop退出 | Remote environment离线 | 复用官方 keep-awake/在线语义；不伪造后台可用 |
 | workspace policy/MFA | 部分账号不可用 | 显式 policy/step-up状态；不降级到账号绕过 |
+| controller single-owner/HTTP 409 | MacBridge 可能挤掉 ChatGPT iOS 或无法连接 | Phase 0 在官方手机端已连接时实测；禁止自动抢占；不能共存则重新裁决产品语义并 fail closed |
 | 两 backend thread 同名 | UI混淆或缓存串扰 | BackendID纳入所有 identity；显示宿主来源；不按 threadId跨 backend合并 |
 | 复制上层形成长期分叉 | bug fix漂移 | 来源标记、parity测试、观察窗后公共核心抽取门 |
 
@@ -589,6 +722,7 @@ Gate P3 PASS：owner 按一次性测试矩阵验证 Desktop ↔ iPhone 双向实
 
 - `codex-remote` 在独立 driver/feature flag 后启用；关闭它不得改变 `codex-web`、daemon、Desktop设置或
   iOS既有 session；
+- Phase 0–Phase 4 不修改 `agent/codex-web/` 与 `agent/codex/`；回滚不依赖还原这两个目录；
 - 回滚只移除 `codex-remote` driver/BackendKind产品入口并撤销 MacBridge自己的 controller enrollment；
 - 不删除用户 Desktop配对、Codex认证、daemon、session、SQLite或 rollout；
 - 未经 owner 明确授权，不退役 `codex-web`、不恢复旧 `codex`、不合并 backend identity；
@@ -608,7 +742,10 @@ Gate P3 PASS：owner 按一次性测试矩阵验证 Desktop ↔ iPhone 双向实
 7. CordCode LAN与HPKE Relay均通过同一验收语义，OpenAI凭据不离开 Mac；
 8. `codex-web` 行为和测试保持不变，两 backend可并存和独立回滚；
 9. Mac/iOS定向测试、真实 Desktop Gate、owner真机矩阵和secret scan全部有版本化证据；
-10. 文档、源码注释和产品文案不再把“Desktop必须接入共享daemon”宣称为唯一成立拓扑。
+10. MacBridge controller 不静默抢占、踢出或撤销 ChatGPT iOS controller；若上游明确只允许
+    single-owner，产品状态与使用限制已单独裁决并通过 owner 验收；
+11. Phase 0–Phase 4 的交付 diff 中 `agent/codex-web/` 与 `agent/codex/` 保持零修改；
+12. 文档、源码注释和产品文案不再把“Desktop必须接入共享daemon”宣称为唯一成立拓扑。
 
 在 Phase 0 认证与真实 live/interrupt Gate 通过之前，本计划只能标记“研究中”，不得用历史可读、
 fake relay、共享 store 或独立 standalone app-server冒充 Desktop Remote 接力已经实现。
@@ -646,3 +783,22 @@ fake relay、共享 store 或独立 standalone app-server冒充 Desktop Remote �
 
 第二轮没有不采纳项。alpha.8 与 HEAD 的生产源码一致仅消除当前 host 侧源码漂移风险，不取消
 binary fixture、controller wire、environment 绑定和闭源 relay 的 Phase 0 Gate。
+
+## 15. 成功先例借鉴与不迁移项
+
+本节记录从 `2026-08-21-codex-web-backend-design.md` 与
+`2026-08-18-opencode-web-backend-design.md` 借鉴的施工纪律，避免实施者只复制最终代码形状。
+
+| 先例中的原则 | 本计划处置 | 回写位置 | Remote 场景下的解释 |
+|---|---|---|---|
+| 先证明官方 GUI/宿主拓扑，再做完整 adapter | **采纳** | §1.3、Phase 0 | 改写为先证明目标 Desktop environment + 私有 app-server + MacBridge controller 的真实 live/interrupt 链路 |
+| 新 backend 从空目录开始，旧实现只作索引 | **采纳** | §1.4、§5.3–§5.4、§9.1 provenance | 禁止 bulk copy/import/wrapper；Phase 0 PASS 后仅允许带 provenance 与 Remote parity 的逐文件白名单迁移 |
+| 官方实现和同版本真实样本优先于旧 adapter | **采纳** | §1.5、§3、Phase 0 | controller 以目标 App call site/fixture 为准，host/app-server 以官方源码和 binary fixture 为准 |
+| 先最小双向竖切，再扩 catalog/history/interaction/SSV2 | **采纳** | §8 Phase 0–Phase 3 | list/read 不等于实时接力；live + interrupt + ownership Gate 失败即停线 |
+| iOS switch 与 `if ==`/allowlist 分开审计 | **采纳** | Phase 3 | 编译通过不能证明新 kind 已进入所有缓存、SSV2、重连和 UI 行为分支 |
+| 旧 backend 并存、独立 identity、可回滚 | **采纳** | §1.1、§7、Phase 4、§12–§13 | `codex-web` 与 `codex-remote` 不共享 lifecycle/cache，不因新路线成立自动退役旧路线 |
+| 新实现集中在独立目录，既有 backend 默认冻结 | **采纳并强化** | §1.4、§1.6、§5、§9、§12–§13 | Phase 0 探针和产品实现均落在 `agent/codex-remote/`；Phase 0–4 对 `agent/codex-web/`、`agent/codex/` 设零修改回归门 |
+| codex-web 的“同 daemon、同 socket、Desktop 无私有 app-server” | **不采纳** | §2、§5.4、§7 | 这是 local-daemon 路线的宿主不变量；Remote 的正常宿主正是 Desktop 私有 app-server + 官方 relay |
+| opencode-web 的“agent 只连接现成 URL、不负责认证/配对” | **不采纳** | §4、§6–§7 | Remote controller 必须拥有独立 device key、enrollment、pairing、refresh 和 revoke 生命周期 |
+| 完全禁止复制任何已验证上层文件 | **不采纳** | §5.3、§5.5 | `codex-web` 与 `codex-remote` 解包后共享同一官方 app-server JSON-RPC 语义；允许逐文件白名单复制能保留已验证 reducer，但必须重新做 Remote fixture/parity，禁止目录复制 |
+| 用 fake/沙盒服务完成现网成熟验收 | **不采纳** | §8–§9、§13 | fake 只允许在真实 fixture 冻结后测试本地错误分支；完成定义必须经过真实 Desktop、官方 relay 和 controller identity |
