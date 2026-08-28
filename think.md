@@ -1,5 +1,28 @@
 # Claude Code 冷启动既有 session 首轮流式从头重播：跨仓排查结论
 
+## 2026-08-28 Claude 后台任务完成通知泄漏为 iOS 用户气泡
+
+现象：Mac 端 Claude Code 在执行后台 Bash task 时，iOS 中途打开同一 session 后出现完整
+`<task-notification>` XML，包含 task id、tool-use id 和 `/private/tmp/.../tasks/*.output`。
+它不是 CordCode Web Push 正文，也不是 reasoning：截图中 XML 是 synthetic user bubble，下面的
+“思考中”才是独立 runtime status。
+
+真实 transcript 形状是两行控制输入：先有无 uuid/message 的顶层 `queue-operation enqueue`，随后
+Claude Code 写入 `type=user`、`origin.kind=task-notification` 的消息并用它触发后续 assistant。
+旧实现只把顶层 queue row 判为 inert；第二行满足普通 user/message 结构，冷 hydrate、live file
+relay 和 rich history 都会把 XML 投影成 `user_message`。
+
+修复纪律：
+
+1. 只认结构化 `origin.kind=task-notification`，禁止用 `<task-notification>` 字符串匹配；用户真的输入
+   同名 XML 时仍必须原样显示。
+2. live scanner 仍消费该物理行并推进 source byte cursor，但 `Admitted=false`，不进入 projection
+   transaction；后续 assistant 沿 file-order fallback 继续归属上一条可见用户 turn。
+3. 冷 hydrate、mapper 防御门、rich history 与 session metadata 使用同一 origin 语义；不能只在 iOS
+   renderer 隐藏，否则 legacy/history/其他客户端继续泄漏，且 cursor/turn ownership 无法统一。
+4. CordCode Web Push 的 `PushIntent`/ledger 是独立终态通知管线，不会写 Claude transcript；两者仅名称
+   都含 notification，排障时必须先查 transcript 的 `origin`，不要把通知 UI 与 agent 控制输入混为一谈。
+
 ## 2026-08-27 web push 完成通知正文预览：四个叠加缺陷与多生产者抢键教训
 
 owner 要求完成通知对齐 Antigravity（标题=会话名、正文=真实回复预览）。通知能到但正文

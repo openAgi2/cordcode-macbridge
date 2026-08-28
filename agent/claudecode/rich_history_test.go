@@ -494,6 +494,54 @@ func TestGetRichSessionHistory_HidesResumeMetaContinuation(t *testing.T) {
 	}
 }
 
+func TestGetRichSessionHistory_HidesTaskNotificationSyntheticUser(t *testing.T) {
+	homeDir := t.TempDir()
+	workDir := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(workDir): %v", err)
+	}
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
+
+	path := writeClaudeTranscriptFixture(t, homeDir, workDir, "ses-task-notification", []string{
+		`{"type":"user","uuid":"u-root","timestamp":"2026-08-28T06:55:00Z","message":{"role":"user","content":"watch CI"}}`,
+		`{"type":"assistant","uuid":"a-final","parentUuid":"u-root","timestamp":"2026-08-28T06:56:00Z","message":{"id":"a-final","role":"assistant","content":[{"type":"text","text":"watching"}],"stop_reason":"end_turn"}}`,
+		`{"type":"queue-operation","operation":"enqueue","timestamp":"2026-08-28T06:57:00Z","content":"<task-notification>queued</task-notification>"}`,
+		`{"type":"user","uuid":"u-task","parentUuid":"a-final","timestamp":"2026-08-28T06:57:01Z","origin":{"kind":"task-notification"},"message":{"role":"user","content":"<task-notification>\n<task-id>task-1</task-id>\n<status>completed</status>\n</task-notification>"}}`,
+		`{"type":"assistant","uuid":"a-followup","parentUuid":"u-task","timestamp":"2026-08-28T06:58:00Z","message":{"id":"a-followup","role":"assistant","content":[{"type":"text","text":"CI finished"}],"stop_reason":"end_turn"}}`,
+		`{"type":"user","uuid":"u-literal","parentUuid":"a-followup","timestamp":"2026-08-28T06:59:00Z","message":{"role":"user","content":"<task-notification>literal user text</task-notification>"}}`,
+	})
+
+	agent := &Agent{workDir: workDir}
+	entries, err := agent.GetRichSessionHistory(context.Background(), "ses-task-notification", 0)
+	if err != nil {
+		t.Fatalf("GetRichSessionHistory() error = %v", err)
+	}
+	if len(entries) != 4 {
+		t.Fatalf("entry count = %d, want two real users + two assistant messages: %#v", len(entries), entries)
+	}
+	userCount := 0
+	for _, entry := range entries {
+		if entry.Role == "user" {
+			userCount++
+		}
+		if strings.Contains(entry.Content, "task-1") {
+			t.Fatalf("task notification leaked into visible history: %#v", entry)
+		}
+	}
+	if userCount != 2 || entries[0].Content != "watch CI" || entries[2].Content != "CI finished" ||
+		entries[3].Content != "<task-notification>literal user text</task-notification>" {
+		t.Fatalf("visible history changed unexpectedly: %#v", entries)
+	}
+	meta, err := scanClaudeSessionMeta(path, filepath.Dir(path), "ses-task-notification")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.MessageCount != 4 || meta.Title != "watch CI" {
+		t.Fatalf("session metadata counted synthetic user: %+v", meta)
+	}
+}
+
 func TestGetRichSessionHistory_CompactionBoundaryReplacesInternalSummary(t *testing.T) {
 	homeDir := t.TempDir()
 	workDir := filepath.Join(t.TempDir(), "project")

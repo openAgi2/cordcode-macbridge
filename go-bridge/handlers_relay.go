@@ -1405,7 +1405,10 @@ type claudeTranscriptRelayEntry struct {
 	// shape only; answers are never copied into the projection event.
 	ToolUseResult           json.RawMessage `json:"toolUseResult"`
 	SourceToolAssistantUUID string          `json:"sourceToolAssistantUUID"`
-	Message                 *struct {
+	Origin                  *struct {
+		Kind string `json:"kind"`
+	} `json:"origin"`
+	Message *struct {
 		ID         string          `json:"id"`
 		Role       string          `json:"role"`
 		StopReason string          `json:"stop_reason"`
@@ -1424,6 +1427,11 @@ func isClaudeCompactionBoundaryRelayEntry(entry claudeTranscriptRelayEntry) bool
 
 func isClaudeInternalCompactRelayEntry(entry claudeTranscriptRelayEntry) bool {
 	return entry.IsCompactSummary || entry.IsVisibleInTranscriptOnly
+}
+
+func isClaudeTaskNotificationRelayEntry(entry claudeTranscriptRelayEntry) bool {
+	return entry.Type == "user" && entry.Origin != nil &&
+		claudecode.IsTaskNotificationOrigin(entry.Origin.Kind)
 }
 
 func claudeRelayCompactionSummary(metadata *claudeRelayCompactMetadata) string {
@@ -1553,6 +1561,9 @@ func scanClaudeRelayEntriesFromReader(r io.Reader) ([]claudeTranscriptRelayEntry
 		if isClaudeInternalCompactRelayEntry(entry) || entry.Message == nil {
 			continue
 		}
+		if isClaudeTaskNotificationRelayEntry(entry) {
+			continue
+		}
 		if isClaudeResumeMetaRelayEntry(entry) {
 			skipNextResumeNoResponse = true
 			continue
@@ -1651,6 +1662,9 @@ func scanCompleteClaudeRelayEntriesFromReader(
 			continue
 		}
 		if isClaudeInternalCompactRelayEntry(entry) || entry.Message == nil {
+			continue
+		}
+		if isClaudeTaskNotificationRelayEntry(entry) {
 			continue
 		}
 		if isClaudeResumeMetaRelayEntry(entry) {
@@ -1847,6 +1861,9 @@ func streamClaudeTranscriptProjectionEventsRangeSeed(
 		if e.Message == nil {
 			continue
 		}
+		if isClaudeTaskNotificationRelayEntry(e) {
+			continue
+		}
 		if isClaudeResumeMetaRelayEntry(e) {
 			skipNextResumeNoResponse = true
 			continue
@@ -1886,6 +1903,9 @@ func streamClaudeTranscriptProjectionEventsRangeSeed(
 // not need cross-entry correlation.
 func claudeEntryToProjectionEvents(e claudeTranscriptRelayEntry, currentTurnID *string, toolUseMeta map[string]claudeToolUseMeta) []projectionHydrateEvent {
 	if isClaudeInternalCompactRelayEntry(e) {
+		return nil
+	}
+	if isClaudeTaskNotificationRelayEntry(e) {
 		return nil
 	}
 	if isClaudeCompactionBoundaryRelayEntry(e) {
