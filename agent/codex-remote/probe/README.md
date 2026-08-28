@@ -1,6 +1,6 @@
 # Probe entry-point rules
 
-Status: **FAIL-BLOCKED (2026-08-28).** Official Remote Control accepted these probes as an independent controller, but never delivered `x-codex-subscribe-cursor`. Do not turn this directory into a product backend. Stop document: `docs/2026-08-28-codex-remote-phase0-fail-blocked.md`.
+Status: **attempt-008 proven live turn stream after `thread/resume`.** Cursor reconnect remains FAIL-BLOCKED. Do not turn this directory into a product backend unless the owner reopens Phase 1.
 
 This directory contains non-product Phase 0 controller probes only. It does not register a MacBridge backend.
 
@@ -34,6 +34,8 @@ A probe must stop before a network mutation unless all automatic preflight check
 - compiles and signs `device_key_helper.swift` in a temporary directory, using an independently named nonextractable login-Keychain P-256 key;
 - performs the official enroll start, fresh OAuth step-up and enroll finish flow;
 - if pairing is required, opens a one-time localhost form so the owner can enter a fresh Desktop manual pairing code without exposing it to chat, stdout or disk;
+- after `initialize` / `initialized` / `thread/list` / `thread/loaded/list`, resumes in-memory or recency-selected threads with `excludeTurns: true` and waits for a Desktop turn;
+- does not fail closed on missing envelope cursor; cursor reconnect is skipped unless a later owner-authorized run asks for it;
 - stops on any failed request, including HTTP 409, without deleting or disconnecting another controller;
 - revokes only the probe controller, deletes the probe key and removes the temporary helper in `finally`.
 

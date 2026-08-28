@@ -1,10 +1,10 @@
 # codex-remote Phase 0 evidence probe
 
-Status: **FAIL-BLOCKED (2026-08-28). Product backend must not be registered. Do not continue Phase 1.**
+Status: **Phase 0 only.** Live turn stream proven after `thread/resume` (attempt-008). Cursor reconnect still unproven. **product backend not registered.** Original cursor **Gate P0 not passed.** Do not continue Phase 1 until the owner explicitly reopens it.
 
-Stop document: `docs/2026-08-28-codex-remote-phase0-fail-blocked.md`.
+Stop / resume document: `docs/2026-08-28-codex-remote-phase0-fail-blocked.md`.
 
-This directory is the sole implementation location for the codex-remote plan. It currently contains only bounded evidence probes, redacted fixtures, metadata and validators. Official Remote Control accepted an independent controller, but never delivered a controller reconnect cursor. Future agents must not expose a bridge backend, copy `agent/codex-web`, modify ChatGPT Desktop, or connect the iOS product surface unless the owner rewrites Gate P0 or a new live run actually observes `x-codex-subscribe-cursor`.
+This directory is the sole implementation location for the codex-remote plan. It currently contains only bounded evidence probes, redacted fixtures, metadata and validators. Official Remote Control accepts an independent controller. After `thread/resume` on in-memory Desktop threads, a real Desktop turn delivered `turn/started` / item deltas / `turn/completed`. It still does not deliver a controller reconnect cursor. Future agents must not expose a bridge backend, copy `agent/codex-web`, modify ChatGPT Desktop, or connect the iOS product surface unless the owner explicitly starts Phase 1.
 
 ## Required real chain
 
@@ -25,20 +25,20 @@ Standalone app-server, fake relay, rollout/JSONL/SQLite/file tail, same-account 
 |---|---|---|
 | 1 | Freeze current Desktop/App/embedded Codex/upstream source and version drift | STATIC SOURCE BASELINE VERIFIED; binary behavior fixture still pending |
 | 2 | Index host/server and both `/codex` plus `/wham` controller call-site families | STATIC CALL SITES VERIFIED; resolved origins and live shapes pending |
-| 3 | Real redacted enroll/refresh, WSS challenge/envelope, environment binding and cursor fixtures | LIVE PARTIAL then FAIL-BLOCKED: enroll/refresh/WSS/env binding proven; reconnect cursor never delivered |
+| 3 | Real redacted enroll/refresh, WSS challenge/envelope, environment binding and cursor fixtures | LIVE PARTIAL: enroll/refresh/WSS/env binding proven; reconnect cursor still absent after resume live stream |
 | 4 | Temporary device key and independently revocable controller enrollment | LIVE: probe key create/sign/delete + enroll; self-revoke 204 |
 | 5 | List paired environments and explicitly select the current Desktop | LIVE: Computer-tab pair then select `CODEX_DESKTOP_APP` |
-| 6 | Prove a uniquely marked thread/turn belongs to that Desktop's private app-server | LIVE PARTIAL: Desktop turn while probe connected produced `thread/status/changed` on the selected env/stream; not a unique marked thread/turn identity proof |
+| 6 | Prove a uniquely marked thread/turn belongs to that Desktop's private app-server | LIVE PARTIAL: attempt-008 delivered a real turn/item stream on the selected env/stream after resuming 4 loaded threads; the probe did not stamp a unique marker |
 | 7 | Test coexistence with the official ChatGPT iOS controller, including 409/kick/recovery | UNVERIFIED; probe never auto-revoked the iOS controller |
 | 8 | WSS app-server `initialize` / `initialized` | LIVE: attempt-006/007 |
-| 9 | Real `thread/list` / `thread/read` | LIVE PARTIAL: `thread/list` 5 items; `thread/read` unverified |
-| 10 | Real live `turn/started` + multiple deltas + one completion | LIVE PARTIAL / FAIL: attempt-007 `thread/status/changed` ×8; `turn/started` / delta / `turn/completed` not observed |
+| 9 | Real `thread/list` / `thread/read` | LIVE PARTIAL: `thread/list` 5 items and `thread/loaded/list` 4 ids; `thread/resume(excludeTurns)` ×4; `thread/read` unverified |
+| 10 | Real live `turn/started` + multiple deltas + one completion | LIVE: attempt-008 `turn/started` ×1, `item/agentMessage/delta` ×36, `item/completed` ×2, `turn/completed` ×1 |
 | 11 | Interrupt the same active turn and observe one official terminal state | UNVERIFIED |
 | 12 | Network loss/reconnect with seq/ACK/cursor and cold reconciliation | FAIL-BLOCKED: no controller reconnect cursor on any observed envelope |
 | 13 | Revoke this controller; old identity fails and official pairings remain intact | LIVE PARTIAL: probe-only DELETE 204 then refresh/start 403; Desktop “Unknown computer” disappears after revoke as designed |
 | 14 | Secret scan all fixtures and logs | LIVE artifacts scanned; `gitleaks` PASS |
 
-Gate P0 is **FAIL-BLOCKED**. Do not treat remaining UNVERIFIED rows as a reason to start the product backend. The blocking hole is missing `x-codex-subscribe-cursor`, not missing enrollment.
+Owner-authorized resume-live-stream question is **PASS**. Original cursor-reconnect Gate remains **FAIL-BLOCKED**. Do not treat remaining UNVERIFIED rows, or this live stream, as a reason to start the product backend without an explicit Phase 1 go-ahead.
 
 The following requirements are `BLOCKED`:
 

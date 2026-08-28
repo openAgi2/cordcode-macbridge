@@ -6,7 +6,6 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import readline from "node:readline/promises";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
@@ -80,10 +79,21 @@ async function jsonRequest(token, accountID, method, pathname, body) {
   let parsed = null;
   try { parsed = text.length === 0 ? null : JSON.parse(text); } catch {}
   if (!response.ok) {
-    const error = new Error(`official request failed with HTTP ${response.status}`);
+    const error = new Error(`official request failed with HTTP ${response.status} on ${method} ${pathname}`);
     error.status = response.status;
+    error.pathname = pathname;
+    error.requestMethod = method;
     error.bodyBytes = Buffer.byteLength(text);
     error.bodySha256 = createHash("sha256").update(text).digest("hex");
+    if (parsed != null && typeof parsed === "object") {
+      error.bodyKeys = Object.keys(parsed).sort();
+      const detail = parsed.detail ?? parsed.error ?? parsed.code ?? parsed.message;
+      if (typeof detail === "string" && detail.length <= 80 && !/eyJ|Bearer |-----BEGIN/u.test(detail)) {
+        error.bodyDetail = detail;
+      } else if (detail != null && typeof detail === "object") {
+        error.bodyDetailKeys = Object.keys(detail).sort();
+      }
+    }
     throw error;
   }
   return { status: response.status, body: parsed, bodySha256: createHash("sha256").update(text).digest("hex") };
@@ -222,7 +232,7 @@ async function collectManualPairingCode() {
         const url = new URL(request.url ?? "/", `http://localhost:${port}`);
         if (request.method === "GET" && url.pathname === "/pair" && url.searchParams.get("state") === formToken) {
           response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" });
-          response.end(`<!doctype html><meta charset="utf-8"><title>Phase 0 controller pairing</title><meta name="referrer" content="no-referrer"><style>body{font:16px system-ui;max-width:42rem;margin:4rem auto;padding:0 1rem}input,button{font:inherit;padding:.7rem}input{width:24rem;max-width:90%}</style><h1>Phase 0 controller pairing</h1><p>在 ChatGPT Desktop 的“控制这台 Mac”授权页切换到“电脑”，刷新生成新配对码，仅在此本机页面输入。不要发送到聊天。</p><form method="post" action="/pair?state=${formToken}" autocomplete="off"><input type="password" name="code" required autofocus autocomplete="off" maxlength="256"><button type="submit">Pair</button></form>`);
+          response.end(`<!doctype html><meta charset="utf-8"><title>Phase 0 controller pairing</title><meta name="referrer" content="no-referrer"><style>body{font:16px system-ui;max-width:42rem;margin:4rem auto;padding:0 1rem}input,button{font:inherit;padding:.7rem}input{width:24rem;max-width:90%}</style><h1>Phase 0 controller pairing</h1><p>在 ChatGPT Desktop 的“控制这台 Mac”授权页切换到“电脑”，刷新生成新配对码，仅在此本机页面输入。不要发送到聊天。</p><p>配对完成后，等探针提示 <code>awaiting_desktop_turn</code>，再在 Desktop <strong>当前打开的线程</strong>发一条短测试消息。</p><form method="post" action="/pair?state=${formToken}" autocomplete="off"><input type="password" name="code" required autofocus autocomplete="off" maxlength="256"><button type="submit">Pair</button></form>`);
           return;
         }
         if (request.method === "POST" && url.pathname === "/pair" && url.searchParams.get("state") === formToken) {
@@ -293,48 +303,92 @@ async function revokeProbeController(token, accountID, clientID) {
   return response;
 }
 
-async function selectEnvironment(items) {
-  const safe = items.map((item, index) => ({ index: index + 1, display_name: item.display_name ?? item.name ?? "unnamed", host_name: item.host_name ?? null, online: item.online, busy: item.busy, os: item.os, client_type: item.client_type, app_server_version: item.app_server_version }));
-  console.log(JSON.stringify({ environments: safe }, null, 2));
-  const terminal = readline.createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    const answer = await terminal.question("Select the current ChatGPT Desktop environment number: ");
-    const index = Number(answer) - 1;
-    if (!Number.isInteger(index) || index < 0 || index >= items.length) fail("invalid environment selection");
-    return { environment: items[index], index };
-  } finally { terminal.close(); }
+function redactErrorMessage(message) {
+  if (typeof message !== "string") return null;
+  return message
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/giu, "<id>")
+    .replace(/\b[0-9a-f]{16,}\b/giu, "<id>");
 }
 
-function runControllerWSS({ token, accountID, controllerToken, controllerExpiresAt, clientID, key, helperBinary, environment, streamID, subscribeCursor = null, initialize }) {
+function threadStatusType(status) {
+  if (typeof status === "string") return status;
+  if (status != null && typeof status === "object") return typeof status.type === "string" ? status.type : null;
+  return null;
+}
+
+function isTurnStreamMethod(method) {
+  return method === "turn/started" || method === "turn/completed" || method === "turn/diff/updated" || (typeof method === "string" && method.startsWith("item/"));
+}
+
+function pickResumeIds(listData, loadedIds) {
+  const unique = (ids) => [...new Set(ids.filter((id) => typeof id === "string" && id.length > 0))];
+  if (loadedIds.length > 0) return unique(loadedIds).slice(0, 8);
+  const active = listData.filter((thread) => threadStatusType(thread.status) === "active").map((thread) => thread.id);
+  if (active.length > 0) return unique(active).slice(0, 8);
+  const first = listData.find((thread) => typeof thread.id === "string");
+  return first == null ? [] : [first.id];
+}
+
+function selectEnvironment(items) {
+  const onlineDesktop = items
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => item.online === true && item.client_type === "CODEX_DESKTOP_APP");
+  const chosen = onlineDesktop.length === 1 ? onlineDesktop[0] : (items.length === 1 ? { item: items[0], index: 0 } : null);
+  if (chosen == null) fail("cannot auto-select Desktop environment");
+  return { environment: chosen.item, index: chosen.index };
+}
+
+function runControllerWSS({ token, accountID, controllerToken, controllerExpiresAt, clientID, key, helperBinary, environment, streamID }) {
   return new Promise((resolve, reject) => {
     const requestHeaders = headers(token, accountID, {
       "x-codex-client-id": clientID,
       "x-codex-protocol-version": "3",
       "x-codex-client-session-token": `Bearer ${controllerToken}`,
-      ...(subscribeCursor == null ? {} : { "x-codex-subscribe-cursor": subscribeCursor }),
     });
     const ws = new WebSocket(websocketURL, { headers: requestHeaders, handshakeTimeout: 10_000, perMessageDeflate: false });
     let timeout = setTimeout(() => { ws.terminate(); reject(new Error("controller WSS timeout")); }, 60_000);
     let challengeComplete = false;
     let initializeResultFields = null;
-    let pingSent = false;
-    let nextClientSeq = initialize ? 1 : 5;
-    let cursorlessPongs = 0;
+    let nextClientSeq = 1;
+    let nextRpcId = 1;
     let settled = false;
-    let observedCursor = subscribeCursor;
+    let envelopeCursorPresent = false;
     let keepAlive = null;
     let turnWait = null;
+    let turnSettle = null;
+    let listDone = false;
+    let loadedDone = false;
+    let resumeStarted = false;
+    let waitingForDesktopTurn = false;
+    let loadedWait = null;
     const liveRpc = [];
+    const turnStreamMethods = [];
+    const listThreads = [];
+    const loadedIds = [];
+    const pendingResumeIds = new Set();
+    const resumeOutcomes = [];
     const finish = (result) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
       if (keepAlive != null) clearInterval(keepAlive);
       if (turnWait != null) clearTimeout(turnWait);
+      if (turnSettle != null) clearTimeout(turnSettle);
+      if (loadedWait != null) clearTimeout(loadedWait);
       ws.once("close", () => resolve(result));
       ws.close(1000);
       setTimeout(() => ws.terminate(), 2_000).unref();
     };
+    const snapshot = (extra = {}) => ({
+      streamID,
+      initializeResultFields,
+      liveRpc: [...new Set(liveRpc)],
+      turnStreamMethods: [...new Set(turnStreamMethods)],
+      resumeCount: resumeOutcomes.length,
+      resumeErrorCount: resumeOutcomes.filter((outcome) => outcome.error).length,
+      envelopeCursorPresent,
+      ...extra,
+    });
     const armTimeout = (ms) => {
       clearTimeout(timeout);
       timeout = setTimeout(() => { ws.terminate(); reject(new Error("controller WSS timeout")); }, ms);
@@ -350,17 +404,45 @@ function runControllerWSS({ token, accountID, controllerToken, controllerExpires
       const seqID = nextClientSeq;
       nextClientSeq += 1;
       ws.send(JSON.stringify({ type: "ping", client_id: clientID, env_id: environment.env_id, stream_id: streamID, seq_id: seqID, state: "foreground", skip_history: true }));
-      pingSent = true;
-      observe("ping", { env: "env_selected", stream: "stream_primary", seq_id: seqID, reconnect: !initialize });
+      observe("ping", { env: "env_selected", stream: "stream_primary", seq_id: seqID, reconnect: false });
     };
-    const takeEnvelopeCursor = (message) => {
-      if (message.cursor == null || settled) return false;
-      observedCursor = message.cursor;
-      observe("cursor_observed", { on: message.type ?? "unknown_wss", seq_id: message.seq_id ?? null, cursor_chars: String(message.cursor).length });
-      finish({ streamID, cursor: message.cursor, initializeResultFields, liveRpc: [...new Set(liveRpc)] });
-      return true;
+    const startDesktopTurnWait = () => {
+      if (waitingForDesktopTurn || settled) return;
+      waitingForDesktopTurn = true;
+      observe("awaiting_desktop_turn", {
+        timeout_ms: 180_000,
+        resume_ok: resumeOutcomes.filter((outcome) => !outcome.error).length,
+        resume_error: resumeOutcomes.filter((outcome) => outcome.error).length,
+        owner_action: "send_one_short_message_on_currently_open_desktop_thread",
+      });
+      keepAlive = setInterval(() => { if (!settled) sendPing(); }, 10_000);
+      turnWait = setTimeout(() => {
+        observe("desktop_turn_wait_elapsed", { live_rpc_methods: [...new Set(liveRpc)], turn_stream_methods: [...new Set(turnStreamMethods)] });
+        finish(snapshot({ waitElapsed: true }));
+      }, 180_000);
+      armTimeout(200_000);
     };
-    ws.on("open", () => observe(subscribeCursor == null ? "websocket_handshake" : "reconnect_handshake", { status: "open", protocol_version: 3, cursor_header_present: subscribeCursor != null }));
+    const maybeStartResume = () => {
+      if (resumeStarted || !listDone || !loadedDone || settled) return;
+      resumeStarted = true;
+      const ids = pickResumeIds(listThreads, loadedIds);
+      observe("thread_resume_plan", {
+        source: loadedIds.length > 0 ? "thread_loaded_list" : (ids.length > 0 ? "thread_list" : "none"),
+        resume_count: ids.length,
+        exclude_turns: true,
+      });
+      if (ids.length === 0) {
+        startDesktopTurnWait();
+        return;
+      }
+      for (const threadId of ids) {
+        const rpcId = nextRpcId;
+        nextRpcId += 1;
+        pendingResumeIds.add(rpcId);
+        sendClientMessage("thread/resume", { id: rpcId, method: "thread/resume", params: { threadId, excludeTurns: true } });
+      }
+    };
+    ws.on("open", () => observe("websocket_handshake", { status: "open", protocol_version: 3, cursor_header_present: false }));
     ws.on("error", (error) => { clearTimeout(timeout); reject(new Error(`controller WSS error: ${error.message}`)); });
     ws.on("message", (data) => {
       let message;
@@ -375,61 +457,100 @@ function runControllerWSS({ token, accountID, controllerToken, controllerExpires
         observe("device_key_proof", { algorithm: proof.algorithm, key: "probe_key", signature_encoding: "der_base64", signed_payload_encoding: "base64" });
         challengeComplete = true;
         observe("device_key_challenge", { fields: Object.keys(message).sort(), target_origin: message.targetOrigin, target_path: message.targetPath, scopes: message.scopes });
-        if (initialize) {
-          sendClientMessage("initialize", { id: 1, method: "initialize", params: { clientInfo: { name: "codex_remote_phase0_probe", title: "CordCode Phase 0 Probe", version: "0" }, capabilities: { experimentalApi: true } } });
-        } else {
-          sendPing();
-        }
+        sendClientMessage("initialize", { id: 1, method: "initialize", params: { clientInfo: { name: "codex_remote_phase0_probe", title: "CordCode Phase 0 Probe", version: "0" }, capabilities: { experimentalApi: true } } });
+        nextRpcId = 2;
         return;
       }
-      const safe = { type: message.type, fields: Object.keys(message).sort(), env_matches: message.env_id === environment.env_id, stream_matches: message.stream_id === streamID, seq_id: message.seq_id, has_cursor: message.cursor != null };
-      observe(message.type ?? "unknown_wss", safe);
-      if (takeEnvelopeCursor(message)) return;
-      if (initialize && message.type === "server_message" && message.message?.id === 1 && initializeResultFields == null) {
-        initializeResultFields = Object.keys(message.message.result ?? {}).sort();
-        sendClientMessage("initialized", { method: "initialized", params: {} });
-        sendClientMessage("thread/list", { id: 2, method: "thread/list", params: { limit: 5 } });
-        sendPing();
+      if (message.cursor != null) {
+        envelopeCursorPresent = true;
+        observe("cursor_observed", { on: message.type ?? "unknown_wss", seq_id: message.seq_id ?? null, cursor_chars: String(message.cursor).length });
       }
-      if (initialize && message.type === "server_message" && message.message?.id === 2) {
-        const result = message.message.result ?? {};
-        observe("thread_list", {
-          error: message.message.error != null,
-          result_fields: Object.keys(result).sort(),
-          data_count: Array.isArray(result.data) ? result.data.length : null,
-          pagination_cursor_present: result.cursor != null,
-        });
-      }
-      if (initialize && message.type === "server_message") {
-        const method = typeof message.message?.method === "string" ? message.message.method : null;
+      observe(message.type ?? "unknown_wss", { type: message.type, fields: Object.keys(message).sort(), env_matches: message.env_id === environment.env_id, stream_matches: message.stream_id === streamID, seq_id: message.seq_id, has_cursor: message.cursor != null });
+      if (message.type === "server_message") {
+        const rpc = message.message ?? {};
+        const rpcId = rpc.id;
+        const method = typeof rpc.method === "string" ? rpc.method : null;
+        if (rpcId === 1 && initializeResultFields == null) {
+          if (rpc.error != null) {
+            clearTimeout(timeout); ws.terminate(); reject(new Error(`initialize failed: ${redactErrorMessage(rpc.error.message) ?? "rpc error"}`)); return;
+          }
+          initializeResultFields = Object.keys(rpc.result ?? {}).sort();
+          sendClientMessage("initialized", { method: "initialized", params: {} });
+          sendClientMessage("thread/list", { id: 2, method: "thread/list", params: { limit: 5, sortKey: "recency_at", sortDirection: "desc" } });
+          sendClientMessage("thread/loaded/list", { id: 3, method: "thread/loaded/list", params: { limit: 20 } });
+          nextRpcId = 4;
+          sendPing();
+        } else if (rpcId === 2) {
+          const result = rpc.result ?? {};
+          const data = Array.isArray(result.data) ? result.data : [];
+          listThreads.push(...data);
+          observe("thread_list", {
+            error: rpc.error != null,
+            error_code: rpc.error?.code ?? null,
+            error_message: redactErrorMessage(rpc.error?.message),
+            result_fields: Object.keys(result).sort(),
+            data_count: data.length,
+            status_types: [...new Set(data.map((thread) => threadStatusType(thread.status)).filter(Boolean))],
+            pagination_cursor_present: result.cursor != null,
+          });
+          listDone = true;
+          if (loadedWait == null && !loadedDone) {
+            loadedWait = setTimeout(() => {
+              if (loadedDone || resumeStarted) return;
+              observe("thread_loaded_list", { error: false, timed_out: true, data_count: loadedIds.length });
+              loadedDone = true;
+              maybeStartResume();
+            }, 5_000);
+          }
+          maybeStartResume();
+        } else if (rpcId === 3) {
+          const result = rpc.result ?? {};
+          const data = Array.isArray(result.data) ? result.data : [];
+          loadedIds.push(...data);
+          observe("thread_loaded_list", {
+            error: rpc.error != null,
+            error_code: rpc.error?.code ?? null,
+            error_message: redactErrorMessage(rpc.error?.message),
+            result_fields: Object.keys(result).sort(),
+            data_count: data.length,
+          });
+          loadedDone = true;
+          maybeStartResume();
+        } else if (pendingResumeIds.has(rpcId)) {
+          pendingResumeIds.delete(rpcId);
+          const result = rpc.result ?? {};
+          const thread = result.thread ?? {};
+          const outcome = {
+            error: rpc.error != null,
+            error_code: rpc.error?.code ?? null,
+            error_message: redactErrorMessage(rpc.error?.message),
+            result_fields: Object.keys(result).sort(),
+            thread_fields: Object.keys(thread).sort(),
+            thread_status: threadStatusType(thread.status),
+            turns_present: Array.isArray(thread.turns),
+            turns_count: Array.isArray(thread.turns) ? thread.turns.length : null,
+          };
+          resumeOutcomes.push(outcome);
+          observe("thread_resume", outcome);
+          if (pendingResumeIds.size === 0) startDesktopTurnWait();
+        }
         if (method != null && method !== "initialize") {
           liveRpc.push(method);
-          observe("live_rpc", { method, has_params: message.message?.params != null, envelope_cursor: message.cursor != null });
+          observe("live_rpc", { method, has_params: rpc.params != null, envelope_cursor: message.cursor != null });
+          if (isTurnStreamMethod(method)) {
+            turnStreamMethods.push(method);
+            observe("turn_stream", { method });
+            if (method === "turn/completed") {
+              if (turnSettle != null) clearTimeout(turnSettle);
+              turnSettle = setTimeout(() => finish(snapshot({ observedCompleted: true })), 2_000);
+            } else if (turnSettle == null) {
+              turnSettle = setTimeout(() => finish(snapshot({ observedTurnStream: true })), 20_000);
+            }
+          }
         }
       }
-      if (message.type === "pong") {
-        if (message.status !== "active") {
-          clearTimeout(timeout); ws.terminate(); reject(new Error("pong status mismatch")); return;
-        }
-        if (initialize && observedCursor == null) {
-          cursorlessPongs += 1;
-          if (cursorlessPongs < 3) {
-            setTimeout(sendPing, 1_000);
-            return;
-          }
-          if (turnWait == null) {
-            observe("awaiting_desktop_turn", { timeout_ms: 180_000 });
-            keepAlive = setInterval(() => { if (!settled) sendPing(); }, 10_000);
-            turnWait = setTimeout(() => {
-              observe("desktop_turn_wait_elapsed", { live_rpc_methods: [...new Set(liveRpc)] });
-              finish({ streamID, cursor: observedCursor, initializeResultFields, liveRpc: [...new Set(liveRpc)] });
-            }, 180_000);
-            armTimeout(200_000);
-            return;
-          }
-          return;
-        }
-        finish({ streamID, cursor: observedCursor, initializeResultFields, liveRpc: [...new Set(liveRpc)] });
+      if (message.type === "pong" && message.status !== "active") {
+        clearTimeout(timeout); ws.terminate(); reject(new Error("pong status mismatch"));
       }
     });
   });
@@ -437,14 +558,22 @@ function runControllerWSS({ token, accountID, controllerToken, controllerExpires
 
 async function openControllerWSS(options) {
   const streamID = randomUUID();
-  const first = await runControllerWSS({ ...options, streamID, initialize: true });
+  const first = await runControllerWSS({ ...options, streamID });
   if (first.initializeResultFields == null) fail("initial controller stream proof incomplete");
-  if (first.cursor == null) {
-    observe("reconnect_blocked", { reason: "no_cursor_after_initialized_thread_list_pongs_and_desktop_turn_wait", cursor_header_present: false, live_rpc_methods: first.liveRpc ?? [] });
-    return { streamID, cursor: null, initializeResultFields: first.initializeResultFields, reconnectStatus: "blocked-no-cursor" };
-  }
-  const reconnected = await runControllerWSS({ ...options, streamID, subscribeCursor: first.cursor, initialize: false });
-  return { streamID, cursor: reconnected.cursor, initializeResultFields: first.initializeResultFields, reconnectStatus: "passed" };
+  observe("cursor_reconnect_skipped", {
+    reason: "owner_authorized_thread_resume_without_cursor",
+    envelope_cursor_present: first.envelopeCursorPresent === true,
+  });
+  return {
+    streamID,
+    initializeResultFields: first.initializeResultFields,
+    liveRpc: first.liveRpc ?? [],
+    turnStreamMethods: first.turnStreamMethods ?? [],
+    resumeCount: first.resumeCount ?? 0,
+    resumeErrorCount: first.resumeErrorCount ?? 0,
+    envelopeCursorPresent: first.envelopeCursorPresent === true,
+    reconnectStatus: "skipped-cursor-not-required",
+  };
 }
 
 const startedAt = Date.now();
@@ -494,10 +623,18 @@ try {
   const environments = await pairedEnvironments(token, accountID, clientID);
   const items = environments.body?.items;
   if (!Array.isArray(items) || items.length === 0) fail("no paired environments returned");
-  const selected = await selectEnvironment(items);
+  const selected = selectEnvironment(items);
   observe("environment_selected", { env: "env_selected", selected_index: selected.index + 1, online: selected.environment.online, client_type: selected.environment.client_type, os: selected.environment.os });
   const wssResult = await openControllerWSS({ token, accountID, controllerToken, controllerExpiresAt: expiresAt, clientID, key, helperBinary: helper.binary, environment: selected.environment });
-  observe("initialize_complete", { result_fields: wssResult.initializeResultFields, cursor_present: wssResult.cursor != null, reconnect_status: wssResult.reconnectStatus });
+  observe("initialize_complete", {
+    result_fields: wssResult.initializeResultFields,
+    cursor_present: wssResult.envelopeCursorPresent,
+    reconnect_status: wssResult.reconnectStatus,
+    resume_count: wssResult.resumeCount,
+    resume_error_count: wssResult.resumeErrorCount,
+    live_rpc_methods: wssResult.liveRpc,
+    turn_stream_methods: wssResult.turnStreamMethods,
+  });
   const revoke = await revokeProbeController(token, accountID, clientID);
   cleanupStatus = revoke.status;
   if (!revoke.ok) fail(`probe controller revoke failed with HTTP ${revoke.status}`);
@@ -511,9 +648,20 @@ try {
     observe("revoked_identity_rejected", { operation: "refresh_start", http_status: error.status, result: "rejected" });
   }
   console.log(`REDACTED_FIXTURE=${JSON.stringify({ schema_version: 1, classification: "LIVE-REDACTED-OBSERVATION", target: { chatgpt_desktop_version: "26.825.32147", embedded_codex_version: "codex-cli 0.150.0-alpha.12.2", controller_protocol_version: 3 }, timeline })}`);
-  if (wssResult.reconnectStatus !== "passed") fail("cursor reconnect evidence unavailable");
+  if (wssResult.resumeCount === 0 || wssResult.resumeErrorCount === wssResult.resumeCount) fail("thread/resume did not attach a Desktop thread");
+  if (wssResult.turnStreamMethods.length === 0) fail("thread/resume attached but no turn/item stream was observed");
 } catch (error) {
-  observe("probe_failed", { error: error.message, http_status: error.status ?? null, body_bytes: error.bodyBytes ?? null, body_sha256: error.bodySha256 ?? null });
+  observe("probe_failed", {
+    error: error.message,
+    http_status: error.status ?? null,
+    pathname: error.pathname ?? null,
+    request_method: error.requestMethod ?? null,
+    body_keys: error.bodyKeys ?? null,
+    body_detail: error.bodyDetail ?? null,
+    body_detail_keys: error.bodyDetailKeys ?? null,
+    body_bytes: error.bodyBytes ?? null,
+    body_sha256: error.bodySha256 ?? null,
+  });
   process.exitCode = 1;
 } finally {
   if (!controllerRevoked && clientID != null && token != null) {

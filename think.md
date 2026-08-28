@@ -1,26 +1,43 @@
 # Claude Code 冷启动既有 session 首轮流式从头重播：跨仓排查结论
 
+## 2026-08-28 Codex Remote：thread/resume 后 live turn 流通了
+
+Owner 授权「不要再等 cursor，对 Desktop 当前 thread 发 `thread/resume`」。attempt-008
+在冻结目标 ChatGPT Desktop `26.825.32147` / Codex `0.150.0-alpha.12.2` 上：
+
+- `thread/loaded/list` 返回 4 条内存 thread；`thread/resume(excludeTurns)` 4/4 成功
+- Desktop 当前线程一条真实 turn 推到独立 controller：`turn/started` ×1、
+  `item/agentMessage/delta` ×36、`item/completed` ×2、`turn/completed` ×1
+- WSS envelope reconnect cursor 仍然没有；探针自 revoke 204→403
+
+结论：官方另一台电脑能看 live，靠的是 JSON-RPC `thread/resume` 订阅，不是 cursor。
+cursor 仍只是 host 重连 OpenAI backend 用的。产品 backend / iOS 接线仍须 owner
+明确开始 Phase 1；不得把 JSONL 轮询冒充这条 live 流，也不得合入 `main`。
+
+结案/停工文档已补 attempt-008：`docs/2026-08-28-codex-remote-phase0-fail-blocked.md`。
+队列 resume 仍是 `none`，直到 owner 说开始 Phase 1。
+
 ## 2026-08-28 Codex Remote Phase 0 FAIL-BLOCKED：按原门禁此路不通
 
 后续 agent **禁止**把 `codex-remote` 当产品 backend 继续写，也禁止再从 ping/pong 重查
-「官方会不会给 cursor」。Owner 已确认停工，未授权合入 `main`。
+「官方会不会给 cursor」。Owner 已确认停工，未授权合入 `main`。attempt-008 只证明
+resume 后的 live turn 流，不恢复产品队列。
 
 结案文档：`docs/2026-08-28-codex-remote-phase0-fail-blocked.md`。
 队列：`.exec-plan/state/plan-bb4683ae3ec1.json` 的
 `phase0-controller-fixtures-impl` 保持 `blocked`；resume=`none`。
 
-已证明（attempt-001…007，目标 ChatGPT Desktop `26.825.32147` / Codex
+已证明（attempt-001…008，目标 ChatGPT Desktop `26.825.32147` / Codex
 `0.150.0-alpha.12.2`）：独立 controller enrollment、电脑标签配对、WSS challenge、
-`initialize`/`initialized`、`thread/list`、Desktop 发消息时的
-`thread/status/changed`、探针自 revoke 204→403。
+`initialize`/`initialized`、`thread/list`、`thread/loaded/list`、`thread/resume`、
+Desktop 发消息时的 `turn/started` / item delta / `turn/completed`、探针自 revoke
+204→403。
 
 未证明且不得伪造：WSS envelope 上的 reconnect `cursor` /
-`x-codex-subscribe-cursor`（initialize、thread/list、active pong、Desktop-turn
-live 帧全部没有）；也没有观察到独立的 `turn/started` / item delta /
-`turn/completed`。Host 开源 remote_control 是 Desktop 出站角色，不能当 controller
-客户端抄。
+`x-codex-subscribe-cursor`。Host 开源 remote_control 是 Desktop 出站角色，不能当
+controller 客户端抄。
 
-恢复条件只有两个：官方 target 真的给出 controller cursor，或 owner 明确改 Gate P0。
+产品恢复条件：owner 明确开始 Phase 1，或官方 target 真的给出 controller cursor。
 否则不得注册 backend、不得动 `agent/codex-web`/`agent/codex`、不得进 iOS Phase 3。
 
 ## 2026-08-28 Claude 后台任务完成通知泄漏为 iOS 用户气泡

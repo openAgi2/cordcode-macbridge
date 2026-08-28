@@ -1,0 +1,141 @@
+{
+  "schema_version": 1,
+  "classification": "LIVE-REDACTED-OBSERVATION",
+  "gate_effect": "evidence-only",
+  "target": {
+    "chatgpt_desktop_version": "26.825.32147",
+    "chatgpt_bundle_version": "7303",
+    "embedded_codex_version": "codex-cli 0.150.0-alpha.12.2",
+    "controller_protocol_version": 3
+  },
+  "metadata": {
+    "captured_at": "2026-08-28T12:20:00Z",
+    "capture_purpose": "Owner-authorized retry: after initialize, call thread/loaded/list and thread/resume(excludeTurns) on in-memory Desktop threads, then observe whether a real Desktop turn delivers turn/started, item deltas and turn/completed. Cursor reconnect was explicitly out of scope.",
+    "source_classification": "target binary plus official live service",
+    "operator_attestation": "Owner completed fresh step-up and Computer-tab pairing through the localhost form, then sent a test message from ChatGPT Desktop on the currently open thread after awaiting_desktop_turn.",
+    "redaction_procedure": "Removed credentials, pairing material, signatures, raw identifiers, host names, thread titles, user/assistant content and response bodies; retained method names, counts, field sets, routing comparisons and cleanup outcomes.",
+    "secret_scan_command": "gitleaks dir --redact --config .gitleaks.toml .",
+    "secret_scan_result": "PASS: no leaks found after fixture and probe write",
+    "cleanup_result": "The probe revoked only client_probe with HTTP 204, observed post-revoke refresh_start HTTP 403, deleted probe_key, and self-exited with code 0."
+  },
+  "observations": [
+    {
+      "kind": "enroll_finish",
+      "http_status": 200
+    },
+    {
+      "kind": "controller_pair",
+      "http_status": 200
+    },
+    {
+      "kind": "environment_selected",
+      "environment": "env_desktop",
+      "online": true,
+      "client_type": "CODEX_DESKTOP_APP"
+    },
+    {
+      "kind": "websocket_handshake",
+      "status": "open",
+      "protocol_version": 3,
+      "cursor_header_present": false
+    },
+    {
+      "kind": "client_message",
+      "methods": ["initialize", "initialized", "thread/list", "thread/loaded/list", "thread/resume"]
+    },
+    {
+      "kind": "thread_list",
+      "error": false,
+      "data_count": 5,
+      "status_types": ["idle", "notLoaded"],
+      "envelope_cursor_present": false
+    },
+    {
+      "kind": "thread_loaded_list",
+      "error": false,
+      "data_count": 4
+    },
+    {
+      "kind": "thread_resume",
+      "source": "thread_loaded_list",
+      "resume_count": 4,
+      "resume_error_count": 0,
+      "exclude_turns": true,
+      "thread_status": "idle",
+      "turns_count": 0
+    },
+    {
+      "kind": "live_rpc",
+      "methods": [
+        "remoteControl/status/changed",
+        "thread/goal/cleared",
+        "thread/status/changed",
+        "turn/started",
+        "hook/started",
+        "hook/completed",
+        "item/started",
+        "item/agentMessage/delta",
+        "item/completed",
+        "thread/tokenUsage/updated",
+        "account/rateLimits/updated",
+        "turn/completed"
+      ],
+      "counts": {
+        "turn/started": 1,
+        "item/started": 2,
+        "item/agentMessage/delta": 36,
+        "item/completed": 2,
+        "turn/completed": 1,
+        "thread/status/changed": 2
+      },
+      "envelope_cursor_present": false
+    },
+    {
+      "kind": "pong",
+      "status": "active",
+      "cursor_present": false
+    },
+    {
+      "kind": "cursor_reconnect_skipped",
+      "reason": "owner_authorized_thread_resume_without_cursor",
+      "cursor_header_present": false
+    },
+    {
+      "kind": "revoke",
+      "http_status": 204,
+      "controller": "client_probe"
+    },
+    {
+      "kind": "revoked_identity_rejected",
+      "operation": "refresh_start",
+      "http_status": 403,
+      "result": "rejected"
+    },
+    {
+      "kind": "cleanup",
+      "controller_revoked": true,
+      "device_key_deleted": true,
+      "probe_self_exited": true,
+      "exit_code": 0,
+      "official_mobile_controller_mutated": false
+    }
+  ],
+  "semantic_assertions": {
+    "all_rest_and_websocket_origins_are_official_allowlisted_origins": true,
+    "selected_environment_is_the_current_desktop": true,
+    "environment_binding_is_observed_not_inferred": true,
+    "cursor_delivery_location_is_observed_not_inferred": false,
+    "thread_resume_attaches_the_controller_to_loaded_desktop_threads": true,
+    "desktop_turn_item_stream_is_observed_not_inferred": true,
+    "controller_identity_is_independent_and_revocable": true,
+    "cleanup_targets_only_the_probe_controller": true,
+    "official_mobile_controller_is_never_automatically_disconnected_or_revoked": false
+  },
+  "adjudication": {
+    "result": "LIVE-TURN-STREAM-PROVEN",
+    "proven": "After thread/loaded/list and four successful thread/resume(excludeTurns) calls, a ChatGPT Desktop turn on the selected env/stream produced turn/started, item/started, 36 item/agentMessage/delta, item/completed and turn/completed. Envelope reconnect cursor remained absent.",
+    "still_unproven": "x-codex-subscribe-cursor / WSS envelope reconnect cursor, thread/read, interrupt of an active turn, official iOS controller coexistence, and uniquely marked thread identity.",
+    "forbidden_inference": "Live turn/item delivery does not prove reconnect-with-cursor, does not authorize a product backend, and must not be replaced by JSONL/history polling.",
+    "phase0_gate": "cursor-reconnect still FAIL-BLOCKED; owner-authorized resume-live-stream question PASS"
+  }
+}
