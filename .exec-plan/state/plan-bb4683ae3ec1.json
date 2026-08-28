@@ -35,7 +35,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-28T08:40:00Z",
+  "updated_at": "2026-08-28T08:43:00Z",
   "todos": [
     {
       "id": "phase0-source-baseline-impl",
@@ -66,7 +66,7 @@
       "id": "phase0-source-baseline-tests",
       "title": "Phase 0 source and binary provenance — tests",
       "description": "Run or create the targeted automated/static/replay checks that directly prove: Re-run and archive the dual-repository source manifest; freeze ChatGPT Desktop/App, embedded Codex, upstream tag/peeled commit/HEAD distance and target-version diff; index official host/server/protocol sources and both controller path families without asserting unsampled controller shapes.",
-      "status": "in_progress",
+      "status": "done",
       "phase": "phase0",
       "kind": "tests",
       "depends_on": [
@@ -76,20 +76,26 @@
       "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
       "verification": {
         "required": true,
-        "status": "missing",
+        "status": "present",
         "method": "automated",
-        "attestation": "self-attested",
+        "attestation": "re-verified",
         "na_reason": null,
-        "summary": "",
-        "artifacts": [],
-        "checked_at": null
+        "summary": "Re-ran the source-baseline validator against the live installed App hashes/version, embedded Codex, upstream tag/HEAD/diff, internal ASAR bundle hashes and controller call-site literals, plus host source constants. The first run exposed a dynamic-template assertion bug; the repaired validator then passed without weakening product evidence gates.",
+        "artifacts": [
+          "agent/codex-remote/validate/source-baseline.mjs",
+          "agent/codex-remote/testdata/phase0/meta/source-baseline-validation.txt",
+          "cmd:node --check agent/codex-remote/validate/source-baseline.mjs",
+          "cmd:node agent/codex-remote/validate/source-baseline.mjs => PASS",
+          "git:3e3854321e40a9d51c524f90509bdd850e08c6d4"
+        ],
+        "checked_at": "2026-08-28T08:42:11Z"
       }
     },
     {
       "id": "phase0-source-baseline-regression",
       "title": "Phase 0 source and binary provenance — regression",
       "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
-      "status": "pending",
+      "status": "in_progress",
       "phase": "phase0",
       "kind": "regression",
       "depends_on": [
