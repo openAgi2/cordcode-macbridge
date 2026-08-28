@@ -1,0 +1,83 @@
+{
+  "_comment": "Sanitized REAL dsh-web session transcript event chain (session.jsonl.zstd lines, live 2026-08-28, G4 sample-gate evidence for permission preset switching semantics). Field names/types/order verbatim. The chain documents the official permission transition: session header (agentPreset) → permission/preset + sandbox/mode + approval/policy triple, and the user-driven slash-channel switch command/run{name:'permission', args:' read-only'} → new preset/mode/policy triple (policy mapping observed: danger-full-access→never, read-only→ask). Sanitized: session id, cwd, commandId, timestamps. NOTE question batches (整批问答): a full read-only event-type census across all 24 live transcripts (11053 assistant/chunk, 684 assistant/message, 0 question-batch events) found NO batch ask shape — per the sample gate, batch Q&A stays UNIMPLEMENTED for dsh until an official shape is observed.",
+  "dshWebVersion": "0.0.1",
+  "source": "~/.dsh/sessions/<dir>/<session>/session.jsonl.zstd (sanitized)",
+  "events": [
+    {
+      "type": "session",
+      "version": 0,
+      "id": "session-00000000-0000-4000-8000-0000000004b2",
+      "createdAt": 1786000000000,
+      "cwd": "/Users/fixture/Projects/demo",
+      "delegationDepth": 0,
+      "agentPreset": "minimal"
+    },
+    {
+      "type": "permission/preset",
+      "seq": 0,
+      "time": 1786000000009,
+      "data": {
+        "preset": "danger-full-access"
+      }
+    },
+    {
+      "type": "sandbox/mode",
+      "seq": 1,
+      "time": 1786000000011,
+      "data": {
+        "mode": "danger-full-access"
+      }
+    },
+    {
+      "type": "approval/policy",
+      "seq": 2,
+      "time": 1786000000011,
+      "data": {
+        "policy": "never"
+      }
+    },
+    {
+      "type": "session/end-seed",
+      "seq": 3,
+      "time": 1786000800000,
+      "data": {}
+    },
+    {
+      "type": "command/run",
+      "seq": 4,
+      "time": 1786000900000,
+      "data": {
+        "commandId": "cmd-00000000-0000-4000-8000-000000000001",
+        "name": "permission",
+        "args": " read-only",
+        "source": {
+          "kind": "user"
+        }
+      }
+    },
+    {
+      "type": "permission/preset",
+      "seq": 5,
+      "time": 1786000900005,
+      "data": {
+        "preset": "read-only"
+      }
+    },
+    {
+      "type": "sandbox/mode",
+      "seq": 6,
+      "time": 1786000900006,
+      "data": {
+        "mode": "read-only"
+      }
+    },
+    {
+      "type": "approval/policy",
+      "seq": 7,
+      "time": 1786000900006,
+      "data": {
+        "policy": "ask"
+      }
+    }
+  ]
+}

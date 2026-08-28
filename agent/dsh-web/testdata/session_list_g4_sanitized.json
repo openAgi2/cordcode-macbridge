@@ -1,0 +1,360 @@
+{
+  "_comment": "Sanitized REAL dsh-web session.list capture (dsh web 0.0.1, live 2026-08-28, G4 sample-gate evidence). Field names/types/order verbatim from the live /api/session.list response. Compared with the 2026-08-18 capture (session_list_sanitized.json), this capture adds rows with NON-NULL contextBreakdown and permissions projections plus the observed zero-pressure anomaly. Only sensitive values are replaced: session ids, cwd, titles, lastPromptAt/updatedAt timestamps (numeric projections kept verbatim). Row 04b2 preserves the live zero-pressure anomaly (pressureTokens=0/projectedTokens=0 with a real contextBreakdown sum ~40558; 2 of 23 live rows) — upstream data state, not a decode gap. Row 04d4 is the fresh-session shape (contextPressure/contextBreakdown absent-or-null keys).",
+  "dshWebVersion": "0.0.1",
+  "request": {
+    "method": "session.list",
+    "payload": {}
+  },
+  "response": {
+    "result": {
+      "ok": true,
+      "value": {
+        "items": [
+          {
+            "sessionId": "session-00000000-0000-4000-8000-0000000004a1",
+            "updatedAt": 1786000000000,
+            "running": false,
+            "blank": false,
+            "cwd": "/Users/fixture/Projects/demo",
+            "agentPreset": "minimal",
+            "projections": {
+              "asOfSeq": 288,
+              "values": {
+                "sessionStats": {
+                  "turns": 3,
+                  "steps": 6,
+                  "llmMs": 77943,
+                  "toolMs": 55,
+                  "ttftMs": 65946,
+                  "ttftSteps": 6,
+                  "decodeMs": 11997,
+                  "decodeTokens": 2768
+                },
+                "title": "示例会话 A",
+                "goal": null,
+                "tokenUsage": {
+                  "uncachedInputTokens": 7261,
+                  "outputTokens": 2768,
+                  "cacheReadTokens": 21504,
+                  "cacheWriteTokens": 0
+                },
+                "contextPressure": {
+                  "pressureTokens": 7675,
+                  "projectedTokens": 7721,
+                  "contextWindow": 204800
+                },
+                "contextBreakdown": {
+                  "systemTokens": 16,
+                  "toolsTokens": 2870,
+                  "messageTokens": 2158
+                },
+                "subagentTiming": {
+                  "settledMs": 0
+                },
+                "subagent": null,
+                "permissions": {
+                  "options": [
+                    {
+                      "value": "read-only",
+                      "name": "read-only"
+                    },
+                    {
+                      "value": "workspace-write",
+                      "name": "workspace-write"
+                    },
+                    {
+                      "value": "danger-full-access",
+                      "name": "danger-full-access"
+                    }
+                  ],
+                  "currentValue": "workspace-write"
+                },
+                "sessionListMetadata": {
+                  "blank": false,
+                  "lastPromptAt": 1786000000000
+                },
+                "imageLimits": {
+                  "maxImageBytes": 20971520,
+                  "maxImagesPerMessage": 20,
+                  "maxMessageImageBytes": 209715200,
+                  "maxImagePixels": 64000000,
+                  "maxImageDimension": 8192,
+                  "mediaTypes": [
+                    "image/png",
+                    "image/jpeg",
+                    "image/webp",
+                    "image/gif"
+                  ]
+                },
+                "todos": null,
+                "plan": {
+                  "active": false,
+                  "pending": false
+                }
+              }
+            }
+          },
+          {
+            "sessionId": "session-00000000-0000-4000-8000-0000000004b2",
+            "updatedAt": 1786000001000,
+            "running": false,
+            "blank": false,
+            "cwd": "/Users/fixture/Projects/demo",
+            "agentPreset": "minimal",
+            "projections": {
+              "asOfSeq": 67865,
+              "values": {
+                "sessionStats": {
+                  "turns": 14,
+                  "steps": 38,
+                  "llmMs": 2332779,
+                  "toolMs": 1082563,
+                  "ttftMs": 252766,
+                  "ttftSteps": 36,
+                  "decodeMs": 2080013,
+                  "decodeTokens": 70223
+                },
+                "title": "示例会话 B",
+                "goal": null,
+                "tokenUsage": {
+                  "uncachedInputTokens": 221413,
+                  "outputTokens": 70223,
+                  "cacheReadTokens": 1240192,
+                  "cacheWriteTokens": 0
+                },
+                "contextPressure": {
+                  "pressureTokens": 0,
+                  "projectedTokens": 0,
+                  "contextWindow": 262144
+                },
+                "contextBreakdown": {
+                  "systemTokens": 16,
+                  "toolsTokens": 2870,
+                  "messageTokens": 37672
+                },
+                "subagentTiming": {
+                  "settledMs": 0
+                },
+                "subagent": null,
+                "permissions": {
+                  "options": [
+                    {
+                      "value": "read-only",
+                      "name": "read-only"
+                    },
+                    {
+                      "value": "workspace-write",
+                      "name": "workspace-write"
+                    },
+                    {
+                      "value": "danger-full-access",
+                      "name": "danger-full-access"
+                    }
+                  ],
+                  "currentValue": "read-only"
+                },
+                "sessionListMetadata": {
+                  "blank": false,
+                  "lastPromptAt": 1786000001000
+                },
+                "imageLimits": {
+                  "maxImageBytes": 20971520,
+                  "maxImagesPerMessage": 20,
+                  "maxMessageImageBytes": 209715200,
+                  "maxImagePixels": 64000000,
+                  "maxImageDimension": 8192,
+                  "mediaTypes": [
+                    "image/png",
+                    "image/jpeg",
+                    "image/webp",
+                    "image/gif"
+                  ]
+                },
+                "todos": null,
+                "plan": {
+                  "active": false,
+                  "pending": false
+                }
+              }
+            }
+          },
+          {
+            "sessionId": "session-00000000-0000-4000-8000-0000000004c3",
+            "updatedAt": 1786000002000,
+            "running": false,
+            "blank": false,
+            "cwd": "/Users/fixture/Projects/demo",
+            "agentPreset": "standard",
+            "projections": {
+              "asOfSeq": 213282,
+              "values": {
+                "sessionStats": {
+                  "turns": 10,
+                  "steps": 130,
+                  "llmMs": 6337538,
+                  "toolMs": 384110,
+                  "ttftMs": 762725,
+                  "ttftSteps": 130,
+                  "decodeMs": 5574813,
+                  "decodeTokens": 214488
+                },
+                "title": "示例会话 C",
+                "goal": {
+                  "goal": {
+                    "id": "goal-3965bcb9-3731-4279-9a0e-539652920aa6",
+                    "revision": 2,
+                    "objective": "按 round5 审计修订 DSH 设计文档至 v7：P0-1 active-turn 状态机（user/message 无 data.turn，靠 turn/start 维护 active turn）、P0-2 process nonce 替代内存 generation（跨重启不复用）、P1 sanitizer 双向 peer、P2 gofmt，不采纳标原因，commit。不写 driver 生产代码。",
+                    "phase": "complete",
+                    "maxGoalRounds": 3
+                  },
+                  "roundsStarted": 0,
+                  "createdAt": 1786636889802,
+                  "updatedAt": 1786636902021
+                },
+                "tokenUsage": {
+                  "uncachedInputTokens": 809289,
+                  "outputTokens": 214488,
+                  "cacheReadTokens": 26464640,
+                  "cacheWriteTokens": 0
+                },
+                "contextPressure": {
+                  "pressureTokens": 238927,
+                  "projectedTokens": 242582,
+                  "contextWindow": 1000000
+                },
+                "contextBreakdown": {
+                  "systemTokens": 1511,
+                  "toolsTokens": 8433,
+                  "messageTokens": 254206
+                },
+                "subagentTiming": {
+                  "settledMs": 0
+                },
+                "subagent": null,
+                "permissions": {
+                  "options": [
+                    {
+                      "value": "read-only",
+                      "name": "read-only"
+                    },
+                    {
+                      "value": "workspace-write",
+                      "name": "workspace-write"
+                    },
+                    {
+                      "value": "danger-full-access",
+                      "name": "danger-full-access"
+                    }
+                  ],
+                  "currentValue": "danger-full-access"
+                },
+                "sessionListMetadata": {
+                  "blank": false,
+                  "lastPromptAt": 1786000002000
+                },
+                "imageLimits": {
+                  "maxImageBytes": 20971520,
+                  "maxImagesPerMessage": 20,
+                  "maxMessageImageBytes": 209715200,
+                  "maxImagePixels": 64000000,
+                  "maxImageDimension": 8192,
+                  "mediaTypes": [
+                    "image/png",
+                    "image/jpeg",
+                    "image/webp",
+                    "image/gif"
+                  ]
+                },
+                "todos": null,
+                "plan": {
+                  "active": false,
+                  "pending": false
+                }
+              }
+            }
+          },
+          {
+            "sessionId": "session-00000000-0000-4000-8000-0000000004d4",
+            "updatedAt": 1786000003000,
+            "running": false,
+            "blank": true,
+            "cwd": "/Users/fixture/Projects/demo",
+            "agentPreset": "minimal",
+            "projections": {
+              "asOfSeq": 2,
+              "values": {
+                "sessionStats": {
+                  "turns": 0,
+                  "steps": 0,
+                  "llmMs": 0,
+                  "toolMs": 0,
+                  "ttftMs": 0,
+                  "ttftSteps": 0,
+                  "decodeMs": 0,
+                  "decodeTokens": 0
+                },
+                "title": "示例会话 D",
+                "goal": null,
+                "tokenUsage": {
+                  "uncachedInputTokens": 0,
+                  "outputTokens": 0,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                },
+                "contextPressure": {},
+                "contextBreakdown": {
+                  "systemTokens": 0,
+                  "toolsTokens": 0,
+                  "messageTokens": 0
+                },
+                "subagentTiming": {
+                  "settledMs": 0
+                },
+                "subagent": null,
+                "permissions": {
+                  "options": [
+                    {
+                      "value": "read-only",
+                      "name": "read-only"
+                    },
+                    {
+                      "value": "workspace-write",
+                      "name": "workspace-write"
+                    },
+                    {
+                      "value": "danger-full-access",
+                      "name": "danger-full-access"
+                    }
+                  ],
+                  "currentValue": "workspace-write"
+                },
+                "sessionListMetadata": {
+                  "blank": true,
+                  "lastPromptAt": 1786000003000
+                },
+                "imageLimits": {
+                  "maxImageBytes": 20971520,
+                  "maxImagesPerMessage": 20,
+                  "maxMessageImageBytes": 209715200,
+                  "maxImagePixels": 64000000,
+                  "maxImageDimension": 8192,
+                  "mediaTypes": [
+                    "image/png",
+                    "image/jpeg",
+                    "image/webp",
+                    "image/gif"
+                  ]
+                },
+                "todos": null,
+                "plan": {
+                  "active": false,
+                  "pending": false
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
