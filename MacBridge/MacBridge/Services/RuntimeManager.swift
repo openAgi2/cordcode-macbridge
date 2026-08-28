@@ -198,7 +198,7 @@ struct RuntimeConfig {
         // agent/opencode 代码保留未删，回滚只需把 "opencode" 加回此列表。
         // 老 codex backend 已退役（owner 2026-08-25：codex-web 通过 owner 矩阵验收，
         // app_server 驱动不再启动）。agent/codex 代码保留未删，回滚 = 加回 "codex"。
-        drivers: [String] = ["claude", "codex-web", "grokbuild", "dsh-web", "opencode-web"],
+        drivers: [String] = ["claude", "codex-web", "codex-remote", "grokbuild", "dsh-web", "opencode-web"],
         workDir: String = FileManager.default.homeDirectoryForCurrentUser.path,
         codexBackend: String = "app_server",
         codexAppServerURL: String = "",

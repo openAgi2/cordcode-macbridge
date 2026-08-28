@@ -162,7 +162,18 @@ final class MacBridgeBehaviorTests: XCTestCase {
     func testBackendStatusMappingUsesProductSemantics() {
         XCTAssertEqual(BackendStatusText.display("available"), L10n.statusReady)
         XCTAssertEqual(BackendStatusText.display("not_logged_in"), L10n.statusLoginRequired)
+        XCTAssertEqual(BackendStatusText.display("not_configured"), L10n.notConfigured)
         XCTAssertEqual(BackendStatusText.display("permission_denied"), L10n.statusPermissionDenied)
+    }
+
+    func testCodexRemotePairingStatusDecodesManagementSnapshot() throws {
+        let json = Data(#"{"phase":"awaiting_code","stepUpUrl":"https://example.invalid/auth","message":"enter computer code","online":true,"clientType":"CODEX_DESKTOP_APP"}"#.utf8)
+        let snap = try JSONDecoder().decode(CodexRemotePairingStatus.self, from: json)
+        XCTAssertEqual(snap.phase, "awaiting_code")
+        XCTAssertEqual(snap.stepUpUrl, "https://example.invalid/auth")
+        XCTAssertEqual(snap.message, "enter computer code")
+        XCTAssertEqual(snap.online, true)
+        XCTAssertEqual(snap.clientType, "CODEX_DESKTOP_APP")
     }
 
     @MainActor
@@ -266,6 +277,7 @@ final class MacBridgeBehaviorTests: XCTestCase {
         // app_server 驱动不再启动）。回滚 = 从列表加回并翻转此断言。
         XCTAssertFalse(drivers.contains("codex"), "legacy codex driver must stay retired (superseded by codex-web)")
         XCTAssertTrue(drivers.contains("codex-web"), "drivers must include the independent codex-web backend")
+        XCTAssertTrue(drivers.contains("codex-remote"), "drivers must include the independent Codex Desktop remote backend")
         // 老 opencode driver 已移除（owner 2026-08-19：与 opencode-web 双订阅同一
         // serve，双事件/双投影流互覆干扰测试）。回滚 = 从列表加回并翻转此断言。
         XCTAssertFalse(drivers.contains("opencode"), "legacy opencode driver must stay removed (dual-subscription interference)")

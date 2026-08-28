@@ -59,6 +59,7 @@
 		CFDB9CBD55CAF5664B16F62D /* PairingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A204996433530BDF7624A227 /* PairingView.swift */; };
 		D569470390299186BBFDE5C6 /* LayoutConstantsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F173AAE61BE3560D237E35B /* LayoutConstantsTests.swift */; };
 		D75F0766D4679AD85CC83AB9 /* OpenCodeLaunchAgentCredentials.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2D28621DF47FFFEA3F80696 /* OpenCodeLaunchAgentCredentials.swift */; };
+		DE732E55AF5BAD478447CDAB /* CodexDesktopPairingSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9636D58939952047C44B0937 /* CodexDesktopPairingSheet.swift */; };
 		E2D2328FD64A84D10BB2789D /* AccessibilityPolishTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9161FDEC7C3FB55BE3EB3CA6 /* AccessibilityPolishTests.swift */; };
 		E424D21FAF49BB0D3791AAF3 /* RemoteAccessNavCollapseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA203BE633607FF96ED2F9C /* RemoteAccessNavCollapseTests.swift */; };
 		E75CD0B17C760CD64FA50E8F /* ManagementV1ProducerFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07A6B4332BC9879A154F32C8 /* ManagementV1ProducerFixtureTests.swift */; };
@@ -111,6 +112,7 @@
 		907DBA7297AA1E62F927C199 /* OpenCodeManagedServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeManagedServer.swift; sourceTree = "<group>"; };
 		9161FDEC7C3FB55BE3EB3CA6 /* AccessibilityPolishTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityPolishTests.swift; sourceTree = "<group>"; };
 		925DD08E60CAB8D17159E176 /* AppDependenciesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDependenciesTests.swift; sourceTree = "<group>"; };
+		9636D58939952047C44B0937 /* CodexDesktopPairingSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexDesktopPairingSheet.swift; sourceTree = "<group>"; };
 		974E6D4F31954BBCE23287AF /* DeviceStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceStoreTests.swift; sourceTree = "<group>"; };
 		9895BBFDD35A0A701986612D /* TopologyMonitorStatusStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopologyMonitorStatusStoreTests.swift; sourceTree = "<group>"; };
 		9AC7151BF29E1FD3CAC3A1B4 /* MacBridgeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacBridgeApp.swift; sourceTree = "<group>"; };
@@ -231,6 +233,7 @@
 			children = (
 				4037A50A11C86B7ADD57AEC7 /* BackendManagementView.swift */,
 				B458091E2090B6530F3C0468 /* BridgeStatusView.swift */,
+				9636D58939952047C44B0937 /* CodexDesktopPairingSheet.swift */,
 				53BCC29BA17D8F56035A8068 /* ContentView.swift */,
 				188D1E5EB3FF10C4DA60F22F /* DiagnosticsSheet.swift */,
 				3C7D5EABF711F9D1698D2B8E /* MenuBarMenu.swift */,
@@ -429,6 +432,7 @@
 				8B6E4CF29205653096575DD6 /* BackendStatusViewModel.swift in Sources */,
 				71351CD15777887FD222B7D5 /* BridgeStatusView.swift in Sources */,
 				C156B2FA00015BBD640265B4 /* BridgeStatusViewModel.swift in Sources */,
+				DE732E55AF5BAD478447CDAB /* CodexDesktopPairingSheet.swift in Sources */,
 				A1813AFBDA386D0DE9E1B84C /* ContentView.swift in Sources */,
 				F5C384531F1D839395BC5B28 /* DeviceStore.swift in Sources */,
 				6C16208F195F6B5A3AFD9869 /* DiagnosticsSheet.swift in Sources */,

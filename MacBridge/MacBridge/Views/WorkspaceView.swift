@@ -30,6 +30,7 @@ struct WorkspaceView: View {
     @State private var generatingWebLinkId: String? = nil
     @State private var isRestartingCodexDaemon = false
     @State private var codexRestartMessage: String? = nil
+    @State private var showCodexDesktopPairing = false
 
     /// 活跃 turn / pending 交互（每 3s 轮询更新）；>0 时重启共享 daemon 会打断任务。
     private var hasActiveCodexTurns: Bool {
@@ -79,6 +80,9 @@ struct WorkspaceView: View {
             Button(L10n.cancel, role: .cancel) {}
         } message: {
             Text(L10n.overviewStopConfirmMessage)
+        }
+        .sheet(isPresented: $showCodexDesktopPairing) {
+            CodexDesktopPairingSheet(viewModel: backendViewModel)
         }
         .onChange(of: viewModel.status) { _, status in
             if status == .ready || status == .readyNoAgents || status == .crashed {
@@ -492,7 +496,11 @@ struct WorkspaceView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    @ViewBuilder
+    private func isCodexDesktop(_ agent: BackendAgentStatus) -> Bool {
+        let kind = agent.kind.lowercased()
+        return agent.id == "codex-remote" || kind == "codex-remote"
+    }
+
     private func agentRow(for agent: BackendAgentStatus) -> some View {
         HStack(spacing: 0) {
             AgentBrandMark(kind: agent.kind)
@@ -524,6 +532,15 @@ struct WorkspaceView: View {
             .frame(width: 200, alignment: .leading)
 
             Spacer()
+
+            if isCodexDesktop(agent), !agent.isAvailable {
+                Button(L10n.pairCodexDesktop) {
+                    showCodexDesktopPairing = true
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .frame(width: 72, height: 32)
+            }
 
             if agent.kind.lowercased() == "codex-web" {
                 Button {
@@ -718,7 +735,7 @@ private struct AgentBrandMark: View {
                     .resizable()
                     .scaledToFit()
                     .frame(width: 21, height: 21)
-            case "codex":
+            case "codex", "codex-web", "codex-remote":
                 Image("codex_logo")
                     .resizable()
                     .scaledToFit()
