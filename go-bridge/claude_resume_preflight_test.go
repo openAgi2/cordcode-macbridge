@@ -47,14 +47,26 @@ func (a *ownerCheckAgent) LiveSessionProcess(ctx context.Context, sessionID stri
 
 func (a *ownerCheckAgent) IsProcessAlive(context.Context, int) bool { return false }
 
-func TestPreflightClaudeResume_LiveFailsRetryable(t *testing.T) {
+func TestPreflightClaudeResume_ExecutingFailsRetryable(t *testing.T) {
 	agent := &ownerCheckAgent{
 		unsupportedMutationAgent: &unsupportedMutationAgent{name: "claudecode"},
-		proc:                     core.LiveSessionProcess{SessionID: "s1", PID: 42, Live: true},
+		proc:                     core.LiveSessionProcess{SessionID: "s1", PID: 42, Live: true, Executing: true},
 	}
 	got := preflightClaudeResume(context.Background(), agent, "s1")
 	if got == nil || got.Code != "session.held_by_external_worker" || got.Retryable == nil || !*got.Retryable {
 		t.Fatalf("preflight error = %#v", got)
+	}
+}
+
+// Owner 2026-08-28: Claude Desktop 打开着会话但空闲（live-but-idle）时不再拦截 —
+// 只有 transcript 证明在跑任务才阻塞。
+func TestPreflightClaudeResume_LiveButIdleAllowsResume(t *testing.T) {
+	agent := &ownerCheckAgent{
+		unsupportedMutationAgent: &unsupportedMutationAgent{name: "claudecode"},
+		proc:                     core.LiveSessionProcess{SessionID: "s1", PID: 42, Live: true},
+	}
+	if got := preflightClaudeResume(context.Background(), agent, "s1"); got != nil {
+		t.Fatalf("preflight error = %#v, want nil for live-but-idle", got)
 	}
 }
 
@@ -110,7 +122,7 @@ func TestHandleSendMessage_ClaudeResumePreflightBlocksStart(t *testing.T) {
 	agent := &fakeAgent{
 		name: "claudecode",
 		liveProcesses: map[string]core.LiveSessionProcess{
-			"owned-session": {SessionID: "owned-session", PID: 42, Live: true},
+			"owned-session": {SessionID: "owned-session", PID: 42, Live: true, Executing: true},
 		},
 	}
 	handlers := newTestHandlers(t)

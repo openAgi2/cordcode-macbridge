@@ -322,7 +322,9 @@ func (h *Handlers) sessionLiveProcess(ctx context.Context, sessionID, backendID 
 	// before the agent-lister loop so codex never falls through to the claudecode stub lookup.
 	if backendID == "codex" {
 		if !h.sessions.isIdle(sessionID) {
-			return core.LiveSessionProcess{SessionID: sessionID, Live: true}, nil, nil
+			// Registry "not idle" == a turn is in flight — Live carries that meaning
+			// for codex (no process stubs), so Executing mirrors it.
+			return core.LiveSessionProcess{SessionID: sessionID, Live: true, Executing: true}, nil, nil
 		}
 		return core.LiveSessionProcess{SessionID: sessionID}, nil, nil
 	}
