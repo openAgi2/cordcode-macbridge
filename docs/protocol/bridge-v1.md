@@ -756,9 +756,12 @@ Wire behavior:
   surface: clients gate on backend kind + non-empty catalog.
 - `list_permission_modes` / `set_permission_mode` are implemented via the official
   permission-preset surface (`read-only` / `workspace-write` / `danger-full-access`,
-  localized names included): `set_permission_mode` emits
-  `permission_mode_changed {mode, appliesTo}` — including switches made by another
-  client (official web UI / slash command) — so every connected UI can follow.
+  localized names included): `set_permission_mode` emits a broadcast
+  `permission_mode_changed {mode, appliesTo}` so every client watching the session —
+  including the ones that did not make the switch — can follow. Switches made INSIDE
+  the official dsh web UI (slash `/permission`) are transcript-only on the host stream
+  (command/run rows, no discrete host event) and therefore emit nothing; clients
+  re-sync those on the next `list_permission_modes` fetch.
   The `permission_mode` capability derives from the ModeSwitcher interface.
 - Not supported in phase 1 (existing generic `not_supported` paths; iOS hides the
   entries): `delete_session`, git surface (`get_git_context` / PR suite /

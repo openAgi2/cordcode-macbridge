@@ -4256,7 +4256,10 @@ func (h *Handlers) handleSetPermissionMode(conn Connection, msg WireMessage, age
 	}
 
 	current := switcher.GetMode()
-	h.publishEvent(LogicalEvent{SessionID: params.SessionID, BackendID: msg.BackendID, Event: "permission_mode_changed", Targets: []Connection{conn}, Data: map[string]interface{}{
+	// G4 multi-client sync: broadcast so every client watching the session follows the switch
+	// (web composer label / any future iOS consumer), not just the requester. dsh official-UI
+	// slash switches stay transcript-only (no host event) — reload re-syncs those.
+	h.publishEvent(LogicalEvent{SessionID: params.SessionID, BackendID: msg.BackendID, Event: "permission_mode_changed", Broadcast: true, Targets: []Connection{conn}, Data: map[string]interface{}{
 		"mode":      current,
 		"appliesTo": appliesTo,
 	}})
