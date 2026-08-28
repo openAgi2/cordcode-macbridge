@@ -304,6 +304,8 @@ function runControllerWSS({ token, accountID, controllerToken, controllerExpires
     let challengeComplete = false;
     let initializeResultFields = null;
     let pingSent = false;
+    let nextPingSeq = initialize ? 2 : 5;
+    let cursorlessPongs = 0;
     let settled = false;
     const finish = (result) => {
       if (settled) return;
@@ -312,6 +314,13 @@ function runControllerWSS({ token, accountID, controllerToken, controllerExpires
       ws.once("close", () => resolve(result));
       ws.close(1000);
       setTimeout(() => ws.terminate(), 2_000).unref();
+    };
+    const sendPing = () => {
+      const seqID = nextPingSeq;
+      nextPingSeq += 1;
+      ws.send(JSON.stringify({ type: "ping", client_id: clientID, env_id: environment.env_id, stream_id: streamID, seq_id: seqID, state: "foreground", skip_history: true }));
+      pingSent = true;
+      observe("ping", { env: "env_selected", stream: "stream_primary", seq_id: seqID, reconnect: !initialize });
     };
     ws.on("open", () => observe(subscribeCursor == null ? "websocket_handshake" : "reconnect_handshake", { status: "open", protocol_version: 3, cursor_header_present: subscribeCursor != null }));
     ws.on("error", (error) => { clearTimeout(timeout); reject(new Error(`controller WSS error: ${error.message}`)); });
@@ -332,9 +341,7 @@ function runControllerWSS({ token, accountID, controllerToken, controllerExpires
           ws.send(JSON.stringify({ type: "client_message", client_id: clientID, env_id: environment.env_id, stream_id: streamID, seq_id: 1, skip_history: false, message: { id: 1, method: "initialize", params: { clientInfo: { name: "codex_remote_phase0_probe", title: "CordCode Phase 0 Probe", version: "0" }, capabilities: { experimentalApi: true } } } }));
           observe("client_message", { method: "initialize", env: "env_selected", stream: "stream_primary", seq_id: 1 });
         } else {
-          ws.send(JSON.stringify({ type: "ping", client_id: clientID, env_id: environment.env_id, stream_id: streamID, seq_id: 3, state: "foreground", skip_history: true }));
-          pingSent = true;
-          observe("ping", { env: "env_selected", stream: "stream_primary", seq_id: 3, reconnect: true });
+          sendPing();
         }
         return;
       }
@@ -342,15 +349,20 @@ function runControllerWSS({ token, accountID, controllerToken, controllerExpires
       observe(message.type ?? "unknown_wss", safe);
       if (initialize && message.type === "server_message" && message.message?.id === 1 && !pingSent) {
         initializeResultFields = Object.keys(message.message.result ?? {}).sort();
-        ws.send(JSON.stringify({ type: "ping", client_id: clientID, env_id: environment.env_id, stream_id: streamID, seq_id: 2, state: "foreground", skip_history: true }));
-        pingSent = true;
-        observe("ping", { env: "env_selected", stream: "stream_primary", seq_id: 2, reconnect: false });
+        sendPing();
       }
       if (message.type === "pong") {
-        if (message.status !== "active" || message.cursor == null) {
-          clearTimeout(timeout); ws.terminate(); reject(new Error("pong status or cursor mismatch")); return;
+        if (message.status !== "active") {
+          clearTimeout(timeout); ws.terminate(); reject(new Error("pong status mismatch")); return;
         }
-        finish({ streamID, cursor: message.cursor, initializeResultFields });
+        if (initialize && message.cursor == null) {
+          cursorlessPongs += 1;
+          if (cursorlessPongs < 3) {
+            setTimeout(sendPing, 1_000);
+            return;
+          }
+        }
+        finish({ streamID, cursor: message.cursor ?? subscribeCursor, initializeResultFields });
       }
     });
   });
@@ -359,9 +371,13 @@ function runControllerWSS({ token, accountID, controllerToken, controllerExpires
 async function openControllerWSS(options) {
   const streamID = randomUUID();
   const first = await runControllerWSS({ ...options, streamID, initialize: true });
-  if (first.initializeResultFields == null || first.cursor == null) fail("initial controller stream proof incomplete");
+  if (first.initializeResultFields == null) fail("initial controller stream proof incomplete");
+  if (first.cursor == null) {
+    observe("reconnect_blocked", { reason: "no_cursor_after_three_active_pongs", cursor_header_present: false });
+    return { streamID, cursor: null, initializeResultFields: first.initializeResultFields, reconnectStatus: "blocked-no-cursor" };
+  }
   const reconnected = await runControllerWSS({ ...options, streamID, subscribeCursor: first.cursor, initialize: false });
-  return { streamID, cursor: reconnected.cursor, initializeResultFields: first.initializeResultFields };
+  return { streamID, cursor: reconnected.cursor, initializeResultFields: first.initializeResultFields, reconnectStatus: "passed" };
 }
 
 const startedAt = Date.now();
@@ -414,7 +430,7 @@ try {
   const selected = await selectEnvironment(items);
   observe("environment_selected", { env: "env_selected", selected_index: selected.index + 1, online: selected.environment.online, client_type: selected.environment.client_type, os: selected.environment.os });
   const wssResult = await openControllerWSS({ token, accountID, controllerToken, controllerExpiresAt: expiresAt, clientID, key, helperBinary: helper.binary, environment: selected.environment });
-  observe("initialize_complete", { result_fields: wssResult.initializeResultFields, cursor_present: wssResult.cursor != null });
+  observe("initialize_complete", { result_fields: wssResult.initializeResultFields, cursor_present: wssResult.cursor != null, reconnect_status: wssResult.reconnectStatus });
   const revoke = await revokeProbeController(token, accountID, clientID);
   cleanupStatus = revoke.status;
   if (!revoke.ok) fail(`probe controller revoke failed with HTTP ${revoke.status}`);
@@ -428,6 +444,7 @@ try {
     observe("revoked_identity_rejected", { operation: "refresh_start", http_status: error.status, result: "rejected" });
   }
   console.log(`REDACTED_FIXTURE=${JSON.stringify({ schema_version: 1, classification: "LIVE-REDACTED-OBSERVATION", target: { chatgpt_desktop_version: "26.825.32147", embedded_codex_version: "codex-cli 0.150.0-alpha.12.2", controller_protocol_version: 3 }, timeline })}`);
+  if (wssResult.reconnectStatus !== "passed") fail("cursor reconnect evidence unavailable");
 } catch (error) {
   observe("probe_failed", { error: error.message, http_status: error.status ?? null, body_bytes: error.bodyBytes ?? null, body_sha256: error.bodySha256 ?? null });
   process.exitCode = 1;

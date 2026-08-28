@@ -35,7 +35,7 @@
     "last_generated_at": null,
     "based_on_queue_hash": null
   },
-  "updated_at": "2026-08-28T09:59:19Z",
+  "updated_at": "2026-08-28T10:09:57Z",
   "todos": [
     {
       "id": "phase0-source-baseline-impl",
@@ -210,14 +210,14 @@
         "phase0-probe-scaffold-regression"
       ],
       "source": "Phase 0 tasks 2-3",
-      "notes": "Owner authorized the bounded real-account Phase 0 probe and attested ChatGPT iOS was connected before capture. Real enrollment, Computer-tab manual pairing, independent controller WSS challenge/proof, environment binding, ACK and ordinary app-server initialize now have redacted evidence. This todo remains in progress: refresh, pong, reconnect cursor placement and revoked-identity rejection are still missing; post-connect iOS coexistence is not yet attested. No full backend or iOS product wiring before Gate P0.",
+      "notes": "Owner authorized the bounded real-account Phase 0 probe and attested ChatGPT iOS was connected before capture. Real enrollment, Computer-tab pairing, refresh, independent controller WSS challenge/proof, environment binding, ACK, ordinary app-server initialize and active pong now have redacted evidence. The first live pong omitted its optional cursor, so cursor-header reconnect is blocked rather than inferred. Revoked-identity rejection and post-connect iOS coexistence are not yet proven. No full backend or iOS product wiring before Gate P0.",
       "verification": {
         "required": true,
         "status": "missing",
         "method": "implementation",
         "attestation": "self-attested",
         "na_reason": null,
-        "summary": "Partial real capture validates enrollment through paired Desktop app-server initialize and deterministic cleanup. The require-live validator honestly fails on refresh_start, refresh_finish, pong, reconnect_handshake and revoked_identity_rejected, so implementation proof is still missing.",
+        "summary": "Partial real capture validates enrollment, refresh, paired Desktop app-server initialize, active pong and deterministic cleanup. The real pong omitted cursor; reconnect and revoked-identity rejection remain missing, so implementation proof remains missing and Gate P0 fails incomplete.",
         "artifacts": [
           "agent/codex-remote/testdata/phase0/static-26.825.32147-alpha.12.2/controller-call-sites.json",
           "agent/codex-remote/testdata/phase0/live-fixture-contract.json",
@@ -228,9 +228,10 @@
           "agent/codex-remote/probe/device_key_helper.swift",
           "agent/codex-remote/probe/live_controller.mjs",
           "agent/codex-remote/testdata/phase0/live/attempt-001-controller-enrollment.json",
-          "agent/codex-remote/testdata/phase0/live/attempt-002-controller-pair-initialize.json"
+          "agent/codex-remote/testdata/phase0/live/attempt-002-controller-pair-initialize.json",
+          "agent/codex-remote/testdata/phase0/live/attempt-003-refresh-cursor-divergence.json"
         ],
-        "checked_at": "2026-08-28T09:59:19Z"
+        "checked_at": "2026-08-28T10:09:57Z"
       }
     },
     {
