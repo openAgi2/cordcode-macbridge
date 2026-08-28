@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "classification": "LIVE-REDACTED-OBSERVATION-BLOCKED",
+  "gate_effect": "evidence-only",
+  "target": {
+    "chatgpt_desktop_version": "26.825.32147",
+    "chatgpt_bundle_version": "7303",
+    "embedded_codex_version": "codex-cli 0.150.0-alpha.12.2",
+    "controller_protocol_version": 3
+  },
+  "metadata": {
+    "captured_at": "2026-08-28T10:13:10Z",
+    "capture_purpose": "Bound cursor acquisition to three active pongs, then prove explicit revoke and rejection of the revoked independent controller identity without mutating the official mobile controller.",
+    "source_classification": "target binary plus official live service",
+    "operator_attestation": "Owner completed fresh step-up and entered a fresh Computer-tab pairing code only through the localhost form. The selected environment was the current Mac ChatGPT Desktop host.",
+    "redaction_procedure": "Removed credentials, pairing material, QR data, signatures, raw identifiers, host names and response bodies; retained bounded counts, status codes, field sets, routing comparisons and cleanup outcomes.",
+    "secret_scan_command": "gitleaks dir --redact --config .gitleaks.toml .",
+    "secret_scan_result": "PASS: no leaks found after fixture and probe write",
+    "cleanup_result": "The probe explicitly revoked only client_probe with HTTP 204, observed post-revoke rejection, deleted probe_key and issued no official mobile-controller mutation."
+  },
+  "observations": [
+    {
+      "kind": "refresh_start",
+      "http_status": 200,
+      "device_identity_hash_present": true
+    },
+    {
+      "kind": "refresh_finish",
+      "http_status": 200,
+      "scopes": ["remote_control_controller_websocket"]
+    },
+    {
+      "kind": "environment_selected",
+      "environment": "env_desktop",
+      "online": true,
+      "client_type": "CODEX_DESKTOP_APP"
+    },
+    {
+      "kind": "websocket_handshake",
+      "status": "open",
+      "protocol_version": 3,
+      "cursor_header_present": false
+    },
+    {
+      "kind": "device_key_challenge",
+      "target_origin": "https://chatgpt.com",
+      "target_path": "/backend-api/codex/remote/control/client",
+      "scopes": ["remote_control_controller_websocket"]
+    },
+    {
+      "kind": "device_key_proof",
+      "algorithm": "ecdsa_p256_sha256",
+      "key": "probe_key"
+    },
+    {
+      "kind": "client_message",
+      "method": "initialize",
+      "environment": "env_desktop",
+      "stream": "stream_primary",
+      "seq_id": 1
+    },
+    {
+      "kind": "ack",
+      "client_seq_ids": [1, 2, 3, 4],
+      "environment_matches": true,
+      "stream_matches": true
+    },
+    {
+      "kind": "server_message",
+      "server_seq_ids": [1, 2],
+      "environment_matches": true,
+      "stream_matches": true,
+      "cursor_present": false
+    },
+    {
+      "kind": "pong",
+      "bounded_count": 3,
+      "statuses": ["active", "active", "active"],
+      "server_seq_ids": [3, 4, 5],
+      "environment_matches": true,
+      "stream_matches": true,
+      "cursor_present": false,
+      "fields": ["client_id", "env_id", "seq_id", "status", "stream_id", "type"]
+    },
+    {
+      "kind": "reconnect_blocked",
+      "reason": "No cursor was delivered by initialize server messages or three active pongs; x-codex-subscribe-cursor cannot be populated from real evidence.",
+      "cursor_header_present": false
+    },
+    {
+      "kind": "revoke",
+      "http_status": 204,
+      "controller": "client_probe"
+    },
+    {
+      "kind": "revoked_identity_rejected",
+      "operation": "refresh_start",
+      "http_status": 403,
+      "result": "rejected"
+    },
+    {
+      "kind": "cleanup",
+      "controller_revoked": true,
+      "device_key_deleted": true,
+      "official_mobile_controller_mutated": false
+    }
+  ],
+  "semantic_assertions": {
+    "all_rest_and_websocket_origins_are_official_allowlisted_origins": true,
+    "selected_environment_is_the_current_desktop": true,
+    "environment_binding_is_observed_not_inferred": true,
+    "cursor_delivery_location_is_observed_not_inferred": false,
+    "controller_identity_is_independent_and_revocable": true,
+    "cleanup_targets_only_the_probe_controller": true,
+    "official_mobile_controller_is_never_automatically_disconnected_or_revoked": false
+  },
+  "adjudication": {
+    "result": "BLOCKED",
+    "proven": "Enrollment, refresh, pairing, selected Desktop binding, signed WSS challenge, ordinary app-server initialize, active pong, explicit revoke and revoked-identity rejection are real and redacted.",
+    "blocking_condition": "The target host/service delivered no cursor in any initial server message or three bounded active pongs, so real cursor-header reconnect cannot be exercised.",
+    "forbidden_inference": "Static optional cursor schema and target call sites must not be promoted to live reconnect evidence.",
+    "phase0_gate": "FAIL-BLOCKED"
+  }
+}
