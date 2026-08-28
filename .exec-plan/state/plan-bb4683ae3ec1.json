@@ -1,0 +1,1833 @@
+{
+  "version": 6,
+  "project_root": "/Users/jacklee/Projects/cordcode-macbridge-codex-remote",
+  "plan_file": "docs/2026-08-26-codex-remote-backend-implementation-plan.md",
+  "state_store": {
+    "canonical_path": ".exec-plan/state/plan-bb4683ae3ec1.json",
+    "legacy_path": ".claude/exec-plans/plan-bb4683ae3ec1.json",
+    "origin": "new",
+    "migrated_from": null,
+    "migrated_at": null
+  },
+  "queue_policy": {
+    "todo_md_role": "informational-only",
+    "completion_gate": "proof-carrying-impl-tests-regression",
+    "phase_done_rule": "all-required-todos-done",
+    "audit_rule": "unsupported-done-must-downgrade",
+    "start_exit_rule": "internal-audit-before-success",
+    "audit_failure_policy": "light-repairable-heavy-external-blocker",
+    "light_failure_retry_rule": "bounded-self-repair-before-partial-exit",
+    "session_mirror_policy": "none-codex-json-sole-truth",
+    "invocation_policy": "slash-or-natural-language-equivalent",
+    "persistence_rule": "persist-on-every-status-transition",
+    "phase_gate_rule": "phase1-depends-on-real-phase0-gate-regression; phase3-depends-on-phase2-gate; phase5-requires-explicit-owner-authorization"
+  },
+  "report_policy": {
+    "auto_write_completion_report": true,
+    "report_directory": "docs",
+    "report_name_rule": "YYYY-MM-DD-<plan-stem>完成情况.md",
+    "write_when": "all-required-todos-proven-done",
+    "invalidate_when": "audit-downgrade-or-required-todo-not-proven-done"
+  },
+  "reports": {
+    "completion_report_path": "docs/2026-08-28-2026-08-26-codex-remote-backend-implementation-plan完成情况.md",
+    "completion_report_status": "missing",
+    "last_generated_at": null,
+    "based_on_queue_hash": null
+  },
+  "updated_at": "2026-08-28T08:35:00Z",
+  "todos": [
+    {
+      "id": "phase0-source-baseline-impl",
+      "title": "Phase 0 source and binary provenance — impl",
+      "description": "Re-run and archive the dual-repository source manifest; freeze ChatGPT Desktop/App, embedded Codex, upstream tag/peeled commit/HEAD distance and target-version diff; index official host/server/protocol sources and both controller path families without asserting unsampled controller shapes.",
+      "status": "in_progress",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [],
+      "source": "Phase 0 tasks 1-2",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase0-source-baseline-tests",
+      "title": "Phase 0 source and binary provenance — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Re-run and archive the dual-repository source manifest; freeze ChatGPT Desktop/App, embedded Codex, upstream tag/peeled commit/HEAD distance and target-version diff; index official host/server/protocol sources and both controller path families without asserting unsampled controller shapes.",
+      "status": "pending",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-source-baseline-impl"
+      ],
+      "source": "Phase 0 tasks 1-2",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase0-source-baseline-regression",
+      "title": "Phase 0 source and binary provenance — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-source-baseline-tests"
+      ],
+      "source": "Phase 0 tasks 1-2",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase0-probe-scaffold-impl",
+      "title": "Phase 0 isolated probe scaffold — impl",
+      "description": "Create only agent/codex-remote/{README.md,probe/,testdata/phase0/,validate/}; document Phase-0-only status, timeouts, redaction and revoke cleanup; do not register a backend or import old lifecycle/ownership code.",
+      "status": "pending",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-source-baseline-regression"
+      ],
+      "source": "§5.1; Phase 0",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase0-probe-scaffold-tests",
+      "title": "Phase 0 isolated probe scaffold — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Create only agent/codex-remote/{README.md,probe/,testdata/phase0/,validate/}; document Phase-0-only status, timeouts, redaction and revoke cleanup; do not register a backend or import old lifecycle/ownership code.",
+      "status": "pending",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-probe-scaffold-impl"
+      ],
+      "source": "§5.1; Phase 0",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase0-probe-scaffold-regression",
+      "title": "Phase 0 isolated probe scaffold — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-probe-scaffold-tests"
+      ],
+      "source": "§5.1; Phase 0",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase0-controller-fixtures-impl",
+      "title": "Controller call-site and wire fixtures — impl",
+      "description": "From target ChatGPT App call sites and real redacted observations, freeze enroll/refresh, WSS challenge, envelope, environment binding/switching and reconnect cursor placement; distinguish /codex and /wham bases and versions.",
+      "status": "pending",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-probe-scaffold-regression"
+      ],
+      "source": "Phase 0 tasks 2-3",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase0-controller-fixtures-tests",
+      "title": "Controller call-site and wire fixtures — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: From target ChatGPT App call sites and real redacted observations, freeze enroll/refresh, WSS challenge, envelope, environment binding/switching and reconnect cursor placement; distinguish /codex and /wham bases and versions.",
+      "status": "pending",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-controller-fixtures-impl"
+      ],
+      "source": "Phase 0 tasks 2-3",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase0-controller-fixtures-regression",
+      "title": "Controller call-site and wire fixtures — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-controller-fixtures-tests"
+      ],
+      "source": "Phase 0 tasks 2-3",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase0-controller-enrollment-impl",
+      "title": "Temporary independent controller enrollment — impl",
+      "description": "Implement the bounded Phase 0 probe path for a temporary device key and independently revocable controller enrollment; no long-lived Desktop/Codex raw token storage, App modification, proxy, injection or fake relay.",
+      "status": "pending",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-controller-fixtures-regression"
+      ],
+      "source": "Phase 0 tasks 4-5; §4",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase0-controller-enrollment-tests",
+      "title": "Temporary independent controller enrollment — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Implement the bounded Phase 0 probe path for a temporary device key and independently revocable controller enrollment; no long-lived Desktop/Codex raw token storage, App modification, proxy, injection or fake relay.",
+      "status": "pending",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-controller-enrollment-impl"
+      ],
+      "source": "Phase 0 tasks 4-5; §4",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase0-controller-enrollment-regression",
+      "title": "Temporary independent controller enrollment — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-controller-enrollment-tests"
+      ],
+      "source": "Phase 0 tasks 4-5; §4",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase0-host-live-interrupt-impl",
+      "title": "Desktop host identity live and interrupt proof — impl",
+      "description": "Select the paired Desktop environment, initialize its real app-server stream, list/read, observe a uniquely marked Desktop long turn live with deltas and one completion, then interrupt that same active turn through the official app-server.",
+      "status": "pending",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-controller-enrollment-regression"
+      ],
+      "source": "Phase 0 tasks 5-6,8-11",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase0-host-live-interrupt-tests",
+      "title": "Desktop host identity live and interrupt proof — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Select the paired Desktop environment, initialize its real app-server stream, list/read, observe a uniquely marked Desktop long turn live with deltas and one completion, then interrupt that same active turn through the official app-server.",
+      "status": "pending",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-host-live-interrupt-impl"
+      ],
+      "source": "Phase 0 tasks 5-6,8-11",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase0-host-live-interrupt-regression",
+      "title": "Desktop host identity live and interrupt proof — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-host-live-interrupt-tests"
+      ],
+      "source": "Phase 0 tasks 5-6,8-11",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase0-controller-ownership-impl",
+      "title": "Official iOS controller coexistence proof — impl",
+      "description": "With ChatGPT iOS already paired and connected, connect/disconnect the MacBridge controller and record concurrent-controller, HTTP 409/single-owner, kick-out, ownership recovery and no-silent-takeover semantics.",
+      "status": "pending",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-host-live-interrupt-regression"
+      ],
+      "source": "Phase 0 task 7; Gate P0",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase0-controller-ownership-tests",
+      "title": "Official iOS controller coexistence proof — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: With ChatGPT iOS already paired and connected, connect/disconnect the MacBridge controller and record concurrent-controller, HTTP 409/single-owner, kick-out, ownership recovery and no-silent-takeover semantics.",
+      "status": "pending",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-controller-ownership-impl"
+      ],
+      "source": "Phase 0 task 7; Gate P0",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase0-controller-ownership-regression",
+      "title": "Official iOS controller coexistence proof — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-controller-ownership-tests"
+      ],
+      "source": "Phase 0 task 7; Gate P0",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase0-reconnect-revoke-security-impl",
+      "title": "Reconnect revoke and secret-scan proof — impl",
+      "description": "Exercise controlled network loss/reconnect with seq/ACK/cursor and cold reconciliation, revoke the temporary controller, prove the old identity fails and official pairings remain intact, then secret-scan all fixtures and logs.",
+      "status": "pending",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-controller-ownership-regression"
+      ],
+      "source": "Phase 0 tasks 12-14",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase0-reconnect-revoke-security-tests",
+      "title": "Reconnect revoke and secret-scan proof — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Exercise controlled network loss/reconnect with seq/ACK/cursor and cold reconciliation, revoke the temporary controller, prove the old identity fails and official pairings remain intact, then secret-scan all fixtures and logs.",
+      "status": "pending",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-reconnect-revoke-security-impl"
+      ],
+      "source": "Phase 0 tasks 12-14",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase0-reconnect-revoke-security-regression",
+      "title": "Reconnect revoke and secret-scan proof — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-reconnect-revoke-security-tests"
+      ],
+      "source": "Phase 0 tasks 12-14",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase0-gate-impl",
+      "title": "Gate P0 adjudication — impl",
+      "description": "Audit all 14 real-evidence requirements as one non-dilutable gate. Classify only-list/read or ownership conflict as EVIDENCE-ONLY and forbidden credential/App/proxy requirements as BLOCKED. Do not unlock Phase 1 without real host/live/interrupt/coexistence proof.",
+      "status": "pending",
+      "phase": "phase0",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-reconnect-revoke-security-regression"
+      ],
+      "source": "Gate P0; §§8-13",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase0-gate-tests",
+      "title": "Gate P0 adjudication — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Audit all 14 real-evidence requirements as one non-dilutable gate. Classify only-list/read or ownership conflict as EVIDENCE-ONLY and forbidden credential/App/proxy requirements as BLOCKED. Do not unlock Phase 1 without real host/live/interrupt/coexistence proof.",
+      "status": "pending",
+      "phase": "phase0",
+      "kind": "tests",
+      "depends_on": [
+        "phase0-gate-impl"
+      ],
+      "source": "Gate P0; §§8-13",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase0-gate-regression",
+      "title": "Gate P0 adjudication — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase0",
+      "kind": "regression",
+      "depends_on": [
+        "phase0-gate-tests"
+      ],
+      "source": "Gate P0; §§8-13",
+      "notes": "EVIDENCE-FIRST: no full backend or iOS product wiring before Gate P0.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase1-identity-lifecycle-impl",
+      "title": "Independent codex-remote identity and lifecycle — impl",
+      "description": "After Gate P0 only, register a distinct codex-remote identity and implement auth/device-key/enrollment/environment lifecycle and truthful diagnostics, without sharing codex/codex-web ownership or lifecycle state.",
+      "status": "pending",
+      "phase": "phase1",
+      "kind": "impl",
+      "depends_on": [
+        "phase0-gate-regression"
+      ],
+      "source": "Phase 1 tasks 1-2,6",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase1-identity-lifecycle-tests",
+      "title": "Independent codex-remote identity and lifecycle — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: After Gate P0 only, register a distinct codex-remote identity and implement auth/device-key/enrollment/environment lifecycle and truthful diagnostics, without sharing codex/codex-web ownership or lifecycle state.",
+      "status": "pending",
+      "phase": "phase1",
+      "kind": "tests",
+      "depends_on": [
+        "phase1-identity-lifecycle-impl"
+      ],
+      "source": "Phase 1 tasks 1-2,6",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase1-identity-lifecycle-regression",
+      "title": "Independent codex-remote identity and lifecycle — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase1",
+      "kind": "regression",
+      "depends_on": [
+        "phase1-identity-lifecycle-tests"
+      ],
+      "source": "Phase 1 tasks 1-2,6",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase1-transport-rpc-impl",
+      "title": "Minimal Remote Transport and JSON-RPC — impl",
+      "description": "Implement controller WSS, validated envelope/ACK/cursor/chunk/backpressure/epoch semantics and one environment stream as app-server Transport; whitelist-migrate only minimal rpc.go with provenance and Remote parity evidence.",
+      "status": "pending",
+      "phase": "phase1",
+      "kind": "impl",
+      "depends_on": [
+        "phase1-identity-lifecycle-regression"
+      ],
+      "source": "Phase 1 tasks 3-4; §6",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase1-transport-rpc-tests",
+      "title": "Minimal Remote Transport and JSON-RPC — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Implement controller WSS, validated envelope/ACK/cursor/chunk/backpressure/epoch semantics and one environment stream as app-server Transport; whitelist-migrate only minimal rpc.go with provenance and Remote parity evidence.",
+      "status": "pending",
+      "phase": "phase1",
+      "kind": "tests",
+      "depends_on": [
+        "phase1-transport-rpc-impl"
+      ],
+      "source": "Phase 1 tasks 3-4; §6",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase1-transport-rpc-regression",
+      "title": "Minimal Remote Transport and JSON-RPC — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase1",
+      "kind": "regression",
+      "depends_on": [
+        "phase1-transport-rpc-tests"
+      ],
+      "source": "Phase 1 tasks 3-4; §6",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase1-minimal-vertical-impl",
+      "title": "Minimal backend vertical slice — impl",
+      "description": "Wire initialize, thread list/read/start/resume, turn start/interrupt and text delta through bridge-v1; prove a real Desktop bidirectional slice and codex-web behavior isolation.",
+      "status": "pending",
+      "phase": "phase1",
+      "kind": "impl",
+      "depends_on": [
+        "phase1-transport-rpc-regression"
+      ],
+      "source": "Phase 1 tasks 5-7",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase1-minimal-vertical-tests",
+      "title": "Minimal backend vertical slice — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Wire initialize, thread list/read/start/resume, turn start/interrupt and text delta through bridge-v1; prove a real Desktop bidirectional slice and codex-web behavior isolation.",
+      "status": "pending",
+      "phase": "phase1",
+      "kind": "tests",
+      "depends_on": [
+        "phase1-minimal-vertical-impl"
+      ],
+      "source": "Phase 1 tasks 5-7",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase1-minimal-vertical-regression",
+      "title": "Minimal backend vertical slice — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase1",
+      "kind": "regression",
+      "depends_on": [
+        "phase1-minimal-vertical-tests"
+      ],
+      "source": "Phase 1 tasks 5-7",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase1-gate-impl",
+      "title": "Gate P1 adjudication — impl",
+      "description": "Require MacBridge targeted automated evidence plus a real Desktop bidirectional minimal slice and the frozen-directory regression gate; do not connect the full iOS product surface.",
+      "status": "pending",
+      "phase": "phase1",
+      "kind": "impl",
+      "depends_on": [
+        "phase1-minimal-vertical-regression"
+      ],
+      "source": "Gate P1",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase1-gate-tests",
+      "title": "Gate P1 adjudication — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Require MacBridge targeted automated evidence plus a real Desktop bidirectional minimal slice and the frozen-directory regression gate; do not connect the full iOS product surface.",
+      "status": "pending",
+      "phase": "phase1",
+      "kind": "tests",
+      "depends_on": [
+        "phase1-gate-impl"
+      ],
+      "source": "Gate P1",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase1-gate-regression",
+      "title": "Gate P1 adjudication — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase1",
+      "kind": "regression",
+      "depends_on": [
+        "phase1-gate-tests"
+      ],
+      "source": "Gate P1",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase2-history-ssv2-impl",
+      "title": "Catalog history codec and SSV2 parity — impl",
+      "description": "Whitelist-migrate catalog/history/session/Thread-Turn-Item codec and SSV2/pathless behavior file by file, recording source commit/file/reason and proving official app-server payload plus Remote envelope plus bridge mapping parity.",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase1-gate-regression"
+      ],
+      "source": "Phase 2; §5.3",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase2-history-ssv2-tests",
+      "title": "Catalog history codec and SSV2 parity — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Whitelist-migrate catalog/history/session/Thread-Turn-Item codec and SSV2/pathless behavior file by file, recording source commit/file/reason and proving official app-server payload plus Remote envelope plus bridge mapping parity.",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "phase2-history-ssv2-impl"
+      ],
+      "source": "Phase 2; §5.3",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase2-history-ssv2-regression",
+      "title": "Catalog history codec and SSV2 parity — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "phase2-history-ssv2-tests"
+      ],
+      "source": "Phase 2; §5.3",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase2-live-interactions-impl",
+      "title": "Live lifecycle and interaction parity — impl",
+      "description": "Add steer/interrupt/reconnect plus approval, requestUserInput and MCP elicitation only where real Remote samples exist; preserve server-request identity and fail closed for unknown shapes.",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase2-history-ssv2-regression"
+      ],
+      "source": "Phase 2",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase2-live-interactions-tests",
+      "title": "Live lifecycle and interaction parity — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Add steer/interrupt/reconnect plus approval, requestUserInput and MCP elicitation only where real Remote samples exist; preserve server-request identity and fail closed for unknown shapes.",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "phase2-live-interactions-impl"
+      ],
+      "source": "Phase 2",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase2-live-interactions-regression",
+      "title": "Live lifecycle and interaction parity — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "phase2-live-interactions-tests"
+      ],
+      "source": "Phase 2",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase2-capabilities-impl",
+      "title": "Models config permissions and mutation capabilities — impl",
+      "description": "Add models/config/permission profiles and archive/rename/delete/fork capabilities individually from sampled official payloads; never inherit codex-web advertising wholesale.",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase2-live-interactions-regression"
+      ],
+      "source": "Phase 2",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase2-capabilities-tests",
+      "title": "Models config permissions and mutation capabilities — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Add models/config/permission profiles and archive/rename/delete/fork capabilities individually from sampled official payloads; never inherit codex-web advertising wholesale.",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "phase2-capabilities-impl"
+      ],
+      "source": "Phase 2",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase2-capabilities-regression",
+      "title": "Models config permissions and mutation capabilities — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "phase2-capabilities-tests"
+      ],
+      "source": "Phase 2",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase2-gate-impl",
+      "title": "Gate P2 adjudication — impl",
+      "description": "Audit every advertised capability for source call site, target fixture, Remote envelope, bridge/SSV2 mapping, targeted tests, provenance, and codex/codex-web zero-modification evidence.",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "impl",
+      "depends_on": [
+        "phase2-capabilities-regression"
+      ],
+      "source": "Phase 2 Gate; §9",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase2-gate-tests",
+      "title": "Gate P2 adjudication — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Audit every advertised capability for source call site, target fixture, Remote envelope, bridge/SSV2 mapping, targeted tests, provenance, and codex/codex-web zero-modification evidence.",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "tests",
+      "depends_on": [
+        "phase2-gate-impl"
+      ],
+      "source": "Phase 2 Gate; §9",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase2-gate-regression",
+      "title": "Gate P2 adjudication — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase2",
+      "kind": "regression",
+      "depends_on": [
+        "phase2-gate-tests"
+      ],
+      "source": "Phase 2 Gate; §9",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase3-ios-kind-audit-impl",
+      "title": "iOS codexRemote kind and exhaustive audit — impl",
+      "description": "Re-run the dual-worktree source gate, add BackendKind.codexRemote, and separately audit compiler-exhaustive switches versus if/guard/string-kind/allowlist/cache/SSV2/hydrate/reconnect paths with an include-or-exclude rationale for every match.",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "impl",
+      "depends_on": [
+        "phase2-gate-regression"
+      ],
+      "source": "Phase 3",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase3-ios-kind-audit-tests",
+      "title": "iOS codexRemote kind and exhaustive audit — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Re-run the dual-worktree source gate, add BackendKind.codexRemote, and separately audit compiler-exhaustive switches versus if/guard/string-kind/allowlist/cache/SSV2/hydrate/reconnect paths with an include-or-exclude rationale for every match.",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "tests",
+      "depends_on": [
+        "phase3-ios-kind-audit-impl"
+      ],
+      "source": "Phase 3",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase3-ios-kind-audit-regression",
+      "title": "iOS codexRemote kind and exhaustive audit — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "regression",
+      "depends_on": [
+        "phase3-ios-kind-audit-tests"
+      ],
+      "source": "Phase 3",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase3-ios-identity-state-impl",
+      "title": "iOS independent identity cache and states — impl",
+      "description": "Implement distinct wire/backend/cache/SSV2 identity and truthful authorization, pairing, environment-offline, revoked and protocol-incompatible states; never merge codexRemote and codexWeb thread IDs.",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "impl",
+      "depends_on": [
+        "phase3-ios-kind-audit-regression"
+      ],
+      "source": "Phase 3",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase3-ios-identity-state-tests",
+      "title": "iOS independent identity cache and states — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Implement distinct wire/backend/cache/SSV2 identity and truthful authorization, pairing, environment-offline, revoked and protocol-incompatible states; never merge codexRemote and codexWeb thread IDs.",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "tests",
+      "depends_on": [
+        "phase3-ios-identity-state-impl"
+      ],
+      "source": "Phase 3",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase3-ios-identity-state-regression",
+      "title": "iOS independent identity cache and states — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "regression",
+      "depends_on": [
+        "phase3-ios-identity-state-tests"
+      ],
+      "source": "Phase 3",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase3-ios-capability-ui-impl",
+      "title": "iOS capability-driven product wiring — impl",
+      "description": "Wire Codex Desktop display and capability-driven session/history/turn/interaction UI without daemon/path/cache semantic inheritance. Run targeted D3 tests and, when a physical iPhone is available, one final incremental build/install/launch only.",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "impl",
+      "depends_on": [
+        "phase3-ios-identity-state-regression"
+      ],
+      "source": "Phase 3",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase3-ios-capability-ui-tests",
+      "title": "iOS capability-driven product wiring — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Wire Codex Desktop display and capability-driven session/history/turn/interaction UI without daemon/path/cache semantic inheritance. Run targeted D3 tests and, when a physical iPhone is available, one final incremental build/install/launch only.",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "tests",
+      "depends_on": [
+        "phase3-ios-capability-ui-impl"
+      ],
+      "source": "Phase 3",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase3-ios-capability-ui-regression",
+      "title": "iOS capability-driven product wiring — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "regression",
+      "depends_on": [
+        "phase3-ios-capability-ui-tests"
+      ],
+      "source": "Phase 3",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase3-gate-impl",
+      "title": "Gate P3 owner matrix — impl",
+      "description": "Present and preserve the one-shot owner matrix for Desktop↔iPhone live relay, cancel, approval/question, LAN/Relay, reconnect, controller coexistence and backend isolation. UI tests, snapshots, simulator automation and device auto-click remain unauthorized.",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "impl",
+      "depends_on": [
+        "phase3-ios-capability-ui-regression"
+      ],
+      "source": "Gate P3; §9.2",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase3-gate-tests",
+      "title": "Gate P3 owner matrix — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Present and preserve the one-shot owner matrix for Desktop↔iPhone live relay, cancel, approval/question, LAN/Relay, reconnect, controller coexistence and backend isolation. UI tests, snapshots, simulator automation and device auto-click remain unauthorized.",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "tests",
+      "depends_on": [
+        "phase3-gate-impl"
+      ],
+      "source": "Gate P3; §9.2",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase3-gate-regression",
+      "title": "Gate P3 owner matrix — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase3",
+      "kind": "regression",
+      "depends_on": [
+        "phase3-gate-tests"
+      ],
+      "source": "Gate P3; §9.2",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase4-topology-health-impl",
+      "title": "Independent topology health monitoring — impl",
+      "description": "Represent codex-web local-daemon and codex-remote Desktop-environment health independently; private stdio plus Remote connected is healthy and split_present alone is not a product failure.",
+      "status": "pending",
+      "phase": "phase4",
+      "kind": "impl",
+      "depends_on": [
+        "phase3-gate-regression"
+      ],
+      "source": "Phase 4 tasks 1-4",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase4-topology-health-tests",
+      "title": "Independent topology health monitoring — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Represent codex-web local-daemon and codex-remote Desktop-environment health independently; private stdio plus Remote connected is healthy and split_present alone is not a product failure.",
+      "status": "pending",
+      "phase": "phase4",
+      "kind": "tests",
+      "depends_on": [
+        "phase4-topology-health-impl"
+      ],
+      "source": "Phase 4 tasks 1-4",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase4-topology-health-regression",
+      "title": "Independent topology health monitoring — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase4",
+      "kind": "regression",
+      "depends_on": [
+        "phase4-topology-health-tests"
+      ],
+      "source": "Phase 4 tasks 1-4",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase4-coexistence-migration-impl",
+      "title": "Coexistence observation and rollback — impl",
+      "description": "Keep backend/session identities separate when both paths are available; retain codex-web and rollback entry through the observation window; do not retire any backend without separate owner adjudication.",
+      "status": "pending",
+      "phase": "phase4",
+      "kind": "impl",
+      "depends_on": [
+        "phase4-topology-health-regression"
+      ],
+      "source": "Phase 4 tasks 5-6; §12",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase4-coexistence-migration-tests",
+      "title": "Coexistence observation and rollback — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Keep backend/session identities separate when both paths are available; retain codex-web and rollback entry through the observation window; do not retire any backend without separate owner adjudication.",
+      "status": "pending",
+      "phase": "phase4",
+      "kind": "tests",
+      "depends_on": [
+        "phase4-coexistence-migration-impl"
+      ],
+      "source": "Phase 4 tasks 5-6; §12",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase4-coexistence-migration-regression",
+      "title": "Coexistence observation and rollback — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase4",
+      "kind": "regression",
+      "depends_on": [
+        "phase4-coexistence-migration-tests"
+      ],
+      "source": "Phase 4 tasks 5-6; §12",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase4-gate-impl",
+      "title": "Gate P4 observation-window adjudication — impl",
+      "description": "Require versioned topology/coexistence/rollback evidence, targeted tests, real observation-window results, secret scan and frozen-directory regression before declaring first delivery complete.",
+      "status": "pending",
+      "phase": "phase4",
+      "kind": "impl",
+      "depends_on": [
+        "phase4-coexistence-migration-regression"
+      ],
+      "source": "Phase 4; Definition of Done",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase4-gate-tests",
+      "title": "Gate P4 observation-window adjudication — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Require versioned topology/coexistence/rollback evidence, targeted tests, real observation-window results, secret scan and frozen-directory regression before declaring first delivery complete.",
+      "status": "pending",
+      "phase": "phase4",
+      "kind": "tests",
+      "depends_on": [
+        "phase4-gate-impl"
+      ],
+      "source": "Phase 4; Definition of Done",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase4-gate-regression",
+      "title": "Gate P4 observation-window adjudication — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase4",
+      "kind": "regression",
+      "depends_on": [
+        "phase4-gate-tests"
+      ],
+      "source": "Phase 4; Definition of Done",
+      "notes": "Phase-gated; preserve agent/codex-web and agent/codex zero-modification requirement through Phase 4.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase5-authorization-audit-impl",
+      "title": "Phase 5 authorization and duplication audit — impl",
+      "description": "After both backends have real E2E and a stable observation window, obtain explicit owner authorization for the separate common-core task and audit only proven duplication. Without authorization, do not enter Phase 5.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl",
+      "depends_on": [
+        "phase4-gate-regression"
+      ],
+      "source": "Phase 5; §5.5",
+      "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase5-authorization-audit-tests",
+      "title": "Phase 5 authorization and duplication audit — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: After both backends have real E2E and a stable observation window, obtain explicit owner authorization for the separate common-core task and audit only proven duplication. Without authorization, do not enter Phase 5.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "tests",
+      "depends_on": [
+        "phase5-authorization-audit-impl"
+      ],
+      "source": "Phase 5; §5.5",
+      "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase5-authorization-audit-regression",
+      "title": "Phase 5 authorization and duplication audit — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "regression",
+      "depends_on": [
+        "phase5-authorization-audit-tests"
+      ],
+      "source": "Phase 5; §5.5",
+      "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase5-common-core-impl",
+      "title": "Transport-neutral common core extraction — impl",
+      "description": "Only after the authorization gate, extract proven transport-neutral rpc/codec/sessions/interactions/models while keeping identities, epochs, capabilities and diagnostics independent; do not fold lifecycle/auth/ownership together.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl",
+      "depends_on": [
+        "phase5-authorization-audit-regression"
+      ],
+      "source": "Phase 5; §5.5",
+      "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase5-common-core-tests",
+      "title": "Transport-neutral common core extraction — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Only after the authorization gate, extract proven transport-neutral rpc/codec/sessions/interactions/models while keeping identities, epochs, capabilities and diagnostics independent; do not fold lifecycle/auth/ownership together.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "tests",
+      "depends_on": [
+        "phase5-common-core-impl"
+      ],
+      "source": "Phase 5; §5.5",
+      "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase5-common-core-regression",
+      "title": "Transport-neutral common core extraction — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "regression",
+      "depends_on": [
+        "phase5-common-core-tests"
+      ],
+      "source": "Phase 5; §5.5",
+      "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase5-gate-impl",
+      "title": "Gate P5 adjudication — impl",
+      "description": "Prove both backends retain their real E2E semantics, independent rollback and frozen legacy behavior after the separately authorized extraction; otherwise leave Phase 5 incomplete.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "impl",
+      "depends_on": [
+        "phase5-common-core-regression"
+      ],
+      "source": "Phase 5",
+      "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "implementation",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase5-gate-tests",
+      "title": "Gate P5 adjudication — tests",
+      "description": "Run or create the targeted automated/static/replay checks that directly prove: Prove both backends retain their real E2E semantics, independent rollback and frozen legacy behavior after the separately authorized extraction; otherwise leave Phase 5 incomplete.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "tests",
+      "depends_on": [
+        "phase5-gate-impl"
+      ],
+      "source": "Phase 5",
+      "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "automated",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    },
+    {
+      "id": "phase5-gate-regression",
+      "title": "Gate P5 adjudication — regression",
+      "description": "Collect end-to-end, real-environment, security, provenance and frozen-directory regression evidence appropriate to this unit. Every Phase 0-4 unit must include git diff --exit-code -- agent/codex-web agent/codex; external/manual evidence must remain self-attested unless replayed.",
+      "status": "pending",
+      "phase": "phase5",
+      "kind": "regression",
+      "depends_on": [
+        "phase5-gate-tests"
+      ],
+      "source": "Phase 5",
+      "notes": "SEPARATE FOLLOW-UP: requires explicit owner authorization after observation window.",
+      "verification": {
+        "required": true,
+        "status": "missing",
+        "method": "mixed",
+        "attestation": "self-attested",
+        "na_reason": null,
+        "summary": "",
+        "artifacts": [],
+        "checked_at": null
+      }
+    }
+  ]
+}

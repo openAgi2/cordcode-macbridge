@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-08-28T08:45:00Z",
+  "classification": "STATIC-SOURCE-BASELINE-ONLY",
+  "gate_effect": "does-not-pass-phase0",
+  "plan": {
+    "path": "docs/2026-08-26-codex-remote-backend-implementation-plan.md",
+    "baseline_commit": "94000a9c480daa8cd74dc07873fbf3a49cefd78a"
+  },
+  "macbridge": {
+    "path": "/Users/jacklee/Projects/cordcode-macbridge-codex-remote",
+    "branch": "codex/codex-remote-backend",
+    "source_gate_commit": "94000a9c480daa8cd74dc07873fbf3a49cefd78a",
+    "source_gate_uncommitted": "clean before exec-plan state creation",
+    "expected_product": "independent codex-remote controller through the official Remote Control relay into the selected ChatGPT Desktop private app-server; codex-web remains independent"
+  },
+  "ios": {
+    "path": "/Users/jacklee/Projects/cordcode-ios-codex-remote",
+    "branch": "codex/codex-remote-backend-ios",
+    "commit": "d0762cb9a05997b615ef4589f39afad8f4b4db04",
+    "uncommitted": "clean",
+    "phase_boundary": "no product source changes before Phase 3",
+    "expected_product": "BackendKind.codexRemote with independent wire/cache/SSV2 identity and capability-driven UI"
+  },
+  "chatgpt_desktop": {
+    "bundle_path": "/Applications/ChatGPT.app",
+    "short_version": "26.825.32147",
+    "bundle_version": "7303",
+    "app_asar_sha256": "0462b03e878f0e78b223b849ee14cbba0de043f2c16acebee163cb95daa622ef",
+    "embedded_codex_version": "codex-cli 0.150.0-alpha.12.2",
+    "embedded_codex_sha256": "67ea03c98e7726eeebd161bc3bc92d8937f412f1899790a28e4ee9b80803c4d7"
+  },
+  "upstream_codex": {
+    "path": "/Users/jacklee/Projects/codex",
+    "branch": "main",
+    "head": "94311d447587411789533c47601fd8bc9d81eb48",
+    "status": "clean and aligned with origin/main",
+    "target_tag": "rust-v0.150.0-alpha.12.2",
+    "target_tag_object": "3a8123623648bbe638adcac805e332352a51d275",
+    "target_peeled_commit": "a9802304f60ab14c0b07e3ee0db9a9c105ab0cb3",
+    "head_ahead_count": 97,
+    "target_to_head_remote_scope_diff": "none"
+  },
+  "asar_callsite_bundles": [
+    {
+      "path": ".vite/build/main-BvHpyFqC.js",
+      "sha256": "cf1e5f9637b925a5a7454bd313176f64af930bfb837cf0e0a7ce7c59f81124ad"
+    },
+    {
+      "path": ".vite/build/src-4lLVrYxe.js",
+      "sha256": "c1749327bc2ac13ea0a4c9d2dc24afb9012e2253d8be28997e836547a563eb91"
+    },
+    {
+      "path": "webview/assets/app-initial-DJrCTPoN.js",
+      "sha256": "27618295c2da9ccf6959e93427e34b75a6d1b4ccd7d4a9f6a18a3974b61803e5"
+    }
+  ],
+  "static_controller_findings": {
+    "protocol_version": 3,
+    "websocket_path": "/codex/remote/control/client",
+    "rest_paths": [
+      "/codex/remote/control/client/enroll/start",
+      "/codex/remote/control/client/enroll/finish",
+      "/codex/remote/control/client/refresh/start",
+      "/codex/remote/control/client/refresh/finish",
+      "/codex/remote/control/environments",
+      "/codex/remote/control/clients/{client_id}/environments",
+      "/wham/remote/control/client/pair",
+      "/wham/remote/control/clients",
+      "/wham/remote/control/clients/{client_id}",
+      "/wham/remote/control/mfa_requirement"
+    ],
+    "websocket_headers": [
+      "x-codex-client-id",
+      "x-codex-protocol-version",
+      "x-codex-subscribe-cursor",
+      "x-codex-client-session-token"
+    ],
+    "environment_binding_static_observation": "controller envelopes include env_id together with client_id, stream_id and seq_id; this is a target-App static call-site finding, not yet a real relay fixture",
+    "controller_segment_target_bytes": 102400,
+    "controller_segment_max_bytes": 153600,
+    "controller_reassembled_max_bytes": 1073741824,
+    "controller_segment_count_formula": "ceil(reassembled_max_bytes / segment_target_bytes)",
+    "warning": "controller limits differ from the open-source host limits and require real target-version fixture/replay before implementation"
+  }
+}
