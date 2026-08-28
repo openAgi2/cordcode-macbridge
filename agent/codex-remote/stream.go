@@ -3,6 +3,7 @@ package codexremote
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
 )
 
@@ -134,6 +135,26 @@ func (s *Stream) Recv() ([]byte, error) {
 	}
 }
 
+func (s *Stream) Ping() error {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return fmt.Errorf("codex-remote: stream closed")
+	}
+	seq := s.nextSeqLocked()
+	env := Envelope{
+		Type:        typePing,
+		ClientID:    s.clientID,
+		EnvID:       s.envID,
+		StreamID:    s.streamID,
+		SeqID:       &seq,
+		State:       "foreground",
+		SkipHistory: true,
+	}
+	s.mu.Unlock()
+	return s.conn.Write(env)
+}
+
 func (s *Stream) Close() error {
 	s.mu.Lock()
 	if s.closed {
@@ -201,8 +222,7 @@ func (s *Stream) readLoop() {
 			continue
 		case typePong:
 			if env.Status != "" && env.Status != "active" {
-				s.fail(fmt.Errorf("codex-remote: pong status %q", env.Status))
-				return
+				slog.Warn("codex-remote pairing pong", "status", env.Status)
 			}
 			continue
 		case typeServerMessage:

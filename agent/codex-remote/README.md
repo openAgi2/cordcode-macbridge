@@ -1,6 +1,6 @@
 # codex-remote Phase 0 evidence probe
 
-Status: **Phase 1 automated slice landed.** Envelope Transport + JSON-RPC + list/resume/turn/text-delta tests pass on a fake host. **product backend registered** as `codex-remote` (not in default Mac drivers). Live Desktop cut is batched in `testdata/phase1/OWNER_MANUAL_CHECKLIST.md`. Cursor reconnect, official iOS coexistence remain known gaps. Original cursor-only **Gate P0 not passed**; rewritten first-connect live gate unlocked Phase 1.
+Status: **Phase 1 in progress.** Envelope Transport + JSON-RPC + list/resume/turn/text-delta tests pass on a fake host. **product backend registered** as `codex-remote` and listed in Mac AI tools as Codex Desktop, with a ChatGPT computer-code pairing sheet. Cursor reconnect, official iOS coexistence remain known gaps. Original cursor-only **Gate P0 not passed**; rewritten first-connect live gate unlocked Phase 1.
 
 Stop / resume document: `docs/2026-08-28-codex-remote-phase0-fail-blocked.md`.
 
@@ -38,7 +38,9 @@ Standalone app-server, fake relay, rollout/JSONL/SQLite/file tail, same-account 
 | 13 | Revoke this controller; old identity fails and official pairings remain intact | LIVE PARTIAL: probe-only DELETE 204 then refresh/start 403; Desktop “Unknown computer” disappears after revoke as designed |
 | 14 | Secret scan all fixtures and logs | LIVE artifacts scanned; `gitleaks` PASS |
 
-Owner-authorized resume-live-stream question is **PASS**. Original cursor-reconnect Gate remains a known gap. Owner started Phase 1 on 2026-08-28. Do not advertise interrupt, cursor reconnect, or official iOS controller coexistence. Do not merge to `main`.
+Owner-authorized resume-live-stream question is **PASS**. Original cursor-reconnect Gate remains a known gap. Owner started Phase 1 on 2026-08-28. Do not advertise cursor reconnect or official iOS controller coexistence. Paired controller identity is persisted under the Link data directory as `codex-remote-pairing.json` (0600). Restart restores via official `refresh/start` + `refresh/finish` and rebinds the Desktop stream. Desktop-offline restore keeps the file; only HTTP 401/403 on refresh forgets it.
+
+Do not merge to `main`.
 
 The following requirements are `BLOCKED`:
 

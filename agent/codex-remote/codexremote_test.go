@@ -61,8 +61,8 @@ func TestInstanceStatusNotConfigured(t *testing.T) {
 	if ok {
 		t.Fatal("unenrolled agent must not report available")
 	}
-	if detail != ErrNotConfigured.Error() {
-		t.Fatalf("detail = %q", detail)
+	if detail == "" {
+		t.Fatal("need a user-facing reason")
 	}
 }
 

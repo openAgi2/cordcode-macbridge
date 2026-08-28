@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
 )
@@ -40,28 +39,11 @@ func (s *remoteSession) Send(prompt string, _ []core.ImageAttachment, _ []core.F
 }
 
 func (s *remoteSession) interrupt() error {
-	s.agent.mu.Lock()
-	cl := s.agent.client
-	codec := s.agent.codec
-	s.agent.mu.Unlock()
-	if cl == nil {
-		return ErrNotConfigured
-	}
-	turnID := codec.ActiveTurn(s.threadID)
-	if turnID == "" {
-		return fmt.Errorf("codex-remote: no active turn to interrupt")
-	}
-	_, rpcErr, err := cl.Request("turn/interrupt", map[string]any{
-		"threadId": s.threadID,
-		"turnId":   turnID,
-	})
-	if err != nil {
-		return err
-	}
-	if rpcErr != nil {
-		return rpcErr
-	}
-	return nil
+	return s.CancelTurn(context.Background())
+}
+
+func (s *remoteSession) CancelTurn(ctx context.Context) error {
+	return s.agent.CancelTurnForThread(ctx, s.threadID)
 }
 
 func (s *remoteSession) RespondPermission(string, core.PermissionResult) error {
@@ -86,6 +68,7 @@ func (s *remoteSession) RejectQuestion(string) error            { return core.Er
 
 func (a *Agent) BindClient(cl *Client) {
 	a.mu.Lock()
+	old := a.client
 	a.client = cl
 	if a.codec == nil {
 		a.codec = NewLiveCodec()
@@ -94,6 +77,9 @@ func (a *Agent) BindClient(cl *Client) {
 		a.listeners = map[string]map[chan core.Event]struct{}{}
 	}
 	a.mu.Unlock()
+	if old != nil && old != cl {
+		_ = old.Close()
+	}
 	a.ensurePump()
 }
 
@@ -114,7 +100,9 @@ func (a *Agent) ensurePump() {
 			}
 		}
 		a.mu.Lock()
-		a.pumpRunning = false
+		if a.client == cl {
+			a.pumpRunning = false
+		}
 		a.mu.Unlock()
 	}()
 }
@@ -160,44 +148,35 @@ func (a *Agent) dropListener(threadID string, ch chan core.Event) {
 	}
 }
 
-func (a *Agent) ListSessions(ctx context.Context) ([]core.AgentSessionInfo, error) {
+func (a *Agent) CancelTurnForThread(ctx context.Context, threadID string) error {
 	a.mu.Lock()
 	cl := a.client
+	codec := a.codec
 	a.mu.Unlock()
 	if cl == nil {
-		return nil, ErrNotConfigured
+		return ErrNotConfigured
 	}
-	raw, rpcErr, err := cl.RequestContext(ctx, "thread/list", map[string]any{
-		"limit":         50,
-		"sortKey":       "recency_at",
-		"sortDirection": "desc",
+	turnID := ""
+	if codec != nil {
+		turnID = codec.ActiveTurn(threadID)
+	}
+	if turnID == "" {
+		turnID = a.inProgressTurn(ctx, threadID)
+	}
+	if turnID == "" {
+		return fmt.Errorf("codex-remote: no active turn to interrupt")
+	}
+	_, rpcErr, err := cl.RequestContext(ctx, "turn/interrupt", map[string]any{
+		"threadId": threadID,
+		"turnId":   turnID,
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if rpcErr != nil {
-		return nil, rpcErr
+		return rpcErr
 	}
-	var parsed struct {
-		Data []struct {
-			ID        string `json:"id"`
-			Name      string `json:"name"`
-			UpdatedAt int64  `json:"updatedAt"`
-			Cwd       string `json:"cwd"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return nil, err
-	}
-	out := make([]core.AgentSessionInfo, 0, len(parsed.Data))
-	for _, row := range parsed.Data {
-		info := core.AgentSessionInfo{ID: row.ID, Summary: row.Name, Directory: row.Cwd}
-		if row.UpdatedAt > 0 {
-			info.ModifiedAt = time.Unix(row.UpdatedAt, 0)
-		}
-		out = append(out, info)
-	}
-	return out, nil
+	return nil
 }
 
 func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentSession, error) {
@@ -240,3 +219,8 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	a.addListener(sessionID, ch)
 	return &remoteSession{agent: a, threadID: sessionID, events: ch, alive: true}, nil
 }
+
+var (
+	_ core.TurnCanceler       = (*remoteSession)(nil)
+	_ core.ThreadTurnCanceler = (*Agent)(nil)
+)

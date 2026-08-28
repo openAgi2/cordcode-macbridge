@@ -7,6 +7,7 @@ package codexremote
 
 import (
 	"encoding/json"
+	"strings"
 	"sync"
 
 	"github.com/openAgi2/cordcode-macbridge/core"
@@ -54,6 +55,8 @@ func (c *LiveCodec) Decode(n Notification) []core.Event {
 		c.turnByThread[p.ThreadID] = p.Turn.ID
 		c.mu.Unlock()
 		return []core.Event{{Type: core.EventTurnStarted, SessionID: p.ThreadID, ThreadID: p.ThreadID, TurnID: p.Turn.ID}}
+	case "item/started":
+		return decodeItemStarted(n)
 	case "item/agentMessage/delta":
 		var p struct {
 			ThreadID string `json:"threadId"`
@@ -100,4 +103,46 @@ func (c *LiveCodec) Decode(n Notification) []core.Event {
 		c.mu.Unlock()
 		return nil
 	}
+}
+
+type liveItemStarted struct {
+	ThreadID string `json:"threadId"`
+	TurnID   string `json:"turnId"`
+	Item     struct {
+		Type    string `json:"type"`
+		ID      string `json:"id"`
+		Text    string `json:"text"`
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	} `json:"item"`
+}
+
+func decodeItemStarted(n Notification) []core.Event {
+	var p liveItemStarted
+	if json.Unmarshal(n.Params, &p) != nil {
+		return nil
+	}
+	if p.Item.Type != "userMessage" || p.ThreadID == "" || p.TurnID == "" || p.Item.ID == "" {
+		return nil
+	}
+	text := p.Item.Text
+	if text == "" {
+		var parts []string
+		for _, c := range p.Item.Content {
+			if c.Type == "text" && c.Text != "" {
+				parts = append(parts, c.Text)
+			}
+		}
+		text = strings.Join(parts, "\n")
+	}
+	return []core.Event{{
+		Type:      core.EventUserMessage,
+		SessionID: p.ThreadID,
+		ThreadID:  p.ThreadID,
+		TurnID:    p.TurnID,
+		ItemID:    p.Item.ID,
+		Content:   text,
+	}}
 }

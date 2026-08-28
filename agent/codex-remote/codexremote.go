@@ -6,8 +6,8 @@
 // Isolation:
 //   - does not import the retired Codex backend or the shared-daemon Codex Web backend;
 //   - does not use JSONL / rollout / file-relay as a live substitute;
-//   - does not advertise interrupt, cursor reconnect, or official iOS
-//     controller coexistence until those have product-path evidence.
+//   - does not advertise cursor reconnect or official iOS controller
+//     coexistence until those have product-path evidence.
 package codexremote
 
 import "github.com/openAgi2/cordcode-macbridge/core"
